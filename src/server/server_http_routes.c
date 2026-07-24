@@ -2396,11 +2396,3 @@ int v1_route_dispatch(const char *method, const char *path, const char *body, in
    route_req_t rq = {method, path, body, body_len, id, e->op};
    return e->handler(&rq, resp, resp_cap);
 }
-
-/* Restored from feature/core-modularization during the testing merge: the route-availability
- * predicate used by server_http.c's dispatch and server_mcp_surface.c. Thin wrapper over the
- * local route_match table. */
-int v1_route_available(const char *method, const char *path)
-{
-   return method && path && route_match(method, path, NULL, 0) != NULL;
-}

@@ -17,10 +17,10 @@
 static const char *LENS[2] = {"security", "qa"};
 static const char *SEAT[2] = {"codex", "mimo"};
 
-static void add_item(aimee_panel_result_t *rt, const char *sev, const char *loc, const char *sum,
+static void add_item(roundtable_result_t *rt, const char *sev, const char *loc, const char *sum,
                      const char *sources)
 {
-   aimee_panel_review_item_t *it = &rt->items[rt->item_count++];
+   roundtable_review_item_t *it = &rt->items[rt->item_count++];
    memset(it, 0, sizeof *it);
    snprintf(it->severity, sizeof it->severity, "%s", sev);
    snprintf(it->location, sizeof it->location, "%s", loc);
@@ -55,7 +55,7 @@ int main(void)
       fclose(fp);
    }
 
-   aimee_panel_result_t *rt = calloc(1, sizeof *rt);
+   roundtable_result_t *rt = calloc(1, sizeof *rt);
    assert(rt);
 
    /* clean panel: everyone approves, hash stamped */
