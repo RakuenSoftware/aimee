@@ -224,6 +224,12 @@ bus_wire_result_t bus_wire_decode(const uint8_t *in, size_t insz, bus_frame_t *o
 bus_wire_result_t bus_wire_decode_checked(const uint8_t *in, size_t insz, uint32_t slot_size,
                                           uint64_t arena_size, bus_frame_t *out)
 {
+   /* Checked separately from bus_wire_decode's own guard: that call is handed a
+    * local, so it never sees the caller's pointer and cannot reject a null one
+    * on our behalf. Without this the commit below is a null dereference. */
+   if (!out)
+      return BUS_WIRE_ERR_SHORT;
+
    bus_frame_t f;
    bus_wire_result_t r = bus_wire_decode(in, insz, &f);
    if (r != BUS_WIRE_OK)

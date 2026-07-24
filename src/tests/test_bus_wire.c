@@ -630,7 +630,17 @@ static void test_decode_checked(void)
         "checked decode refuses it");
    must(memcmp(&before, &out, sizeof out) == 0, "checked decode leaves *out untouched on refusal");
 
-   printf("  checked decode: refuses an out-of-bounds frame the raw path accepts\n");
+   /* The checked path takes a different route to committing *out than the raw
+    * one — it hands bus_wire_decode a local, so that call's own null guard
+    * never sees the caller's pointer. Its guard has to be its own. */
+   must(bus_wire_decode_checked(buf, sizeof buf, slot, arena, NULL) != BUS_WIRE_OK,
+        "checked decode rejects a null output pointer");
+   must(bus_wire_decode_checked(NULL, sizeof buf, slot, arena, &out) != BUS_WIRE_OK,
+        "checked decode rejects a null input");
+   must(bus_wire_decode(buf, sizeof buf, NULL) != BUS_WIRE_OK,
+        "raw decode rejects a null output pointer");
+
+   printf("  checked decode: refuses out-of-bounds frames and null arguments\n");
 }
 
 /* ------------------------------------------------------------------ */

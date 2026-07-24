@@ -143,11 +143,26 @@ done < <(grep -rnE '#include[[:space:]]*[<"][^">]*bus_[a-z_]+\.h[">]|#include[[:
 #   - a binary exists but nm cannot read it               -> gate failure
 # Only "the binary was never built" is a legitimate skip, and even that is
 # reported rather than folded into a clean result.
-# Each variable is resolved on its own and required to be non-empty. Asking for
-# them in one echo would let a name that has drifted out of src/Makefile expand
-# to nothing while its neighbours still produce a plausible list — the gate
-# would go on inspecting five binaries and never mention the sixth it lost.
-shipping_var_names="BINARY SERVER WEBCHAT KB KB_RESOLVER GATEWAY FORWARDER"
+# The shipping set comes from the build's own `all:` target rather than a list
+# kept in this script. `all` is the build's authoritative statement of what
+# ships, so a renamed or newly added binary is covered the day it is added
+# instead of the day someone remembers to edit here.
+all_prereqs=$(sed -nE 's/^all:[[:space:]]*(.*)$/\1/p' src/Makefile | head -1)
+if [ -z "$all_prereqs" ]; then
+   note "FAIL: cannot find the 'all:' target in src/Makefile — the artefact layer"
+   note "      has no authoritative list of what ships and must not report clean."
+   exit 1
+fi
+
+# Keep only the $(VAR) prerequisites; phony helpers like retire-obsolete-binaries
+# are not artefacts.
+shipping_var_names=$(printf '%s\n' "$all_prereqs" | grep -oE '\$\([A-Z_]+\)' |
+   tr -d '$()' | sort -u)
+if [ -z "$shipping_var_names" ]; then
+   note "FAIL: the 'all:' target names no variables — the shipping set is unknown."
+   exit 1
+fi
+
 shipping_bins=""
 for v in $shipping_var_names; do
    if ! val=$(make -C src --no-print-directory \
@@ -156,19 +171,24 @@ for v in $shipping_var_names; do
       note "      and a gate that cannot run must not report clean."
       exit 1
    fi
-   val=$(printf '%s' "$val" | tr -d '[:space:]')
-   if [ -z "$val" ]; then
-      note "FAIL: src/Makefile variable \$$v resolved to nothing."
-      note "      The shipping-binary list in this gate has drifted from the build;"
-      note "      a binary it believes it is covering is invisible to it."
+   # Emptiness is tested without destroying the value: an earlier version
+   # squeezed out whitespace to check for empty, which silently welded a
+   # multi-path variable into one nonsense filename.
+   case "$val" in
+   *[![:space:]]*) ;;
+   *)
+      note "FAIL: src/Makefile variable \$$v resolved to nothing, but 'all:' names it."
+      note "      A binary this gate believes it covers is invisible to it."
       exit 1
-   fi
+      ;;
+   esac
    shipping_bins="$shipping_bins $val"
 done
 
 # shellcheck disable=SC2086
 set -- $shipping_bins
-if [ "$#" -eq 0 ]; then
+expected=$#
+if [ "$expected" -eq 0 ]; then
    note "FAIL: the shipping binary list is empty — the artefact layer is blind."
    exit 1
 fi
@@ -217,9 +237,13 @@ fi
 # Report what actually ran. A skipped layer must never read as coverage, so the
 # artefact count is stated rather than implied — but its absence is not itself a
 # failure, because a fresh checkout has no build and lint must still run there.
-if [ "$checked" -eq 0 ]; then
+# Strict means the artefact layer covered the whole shipping set. Partial
+# coverage is not coverage: the one binary that was not built is exactly where a
+# link edge the textual layers cannot see would hide.
+if [ "$missing" -gt 0 ]; then
    if [ "$allow_unbuilt" -eq 0 ]; then
-      note "FAIL: the artefact layer inspected no shipping binaries ($missing not built)."
+      note "FAIL: the artefact layer inspected $checked of $expected shipping binaries"
+      note "      ($missing not built)."
       note ""
       note "Layers 1-3 reason about the build text; only this one reasons about the"
       note "compiled result, and it is the only layer that can catch a link edge the"
@@ -227,12 +251,8 @@ if [ "$checked" -eq 0 ]; then
       note "Build first, or pass --allow-unbuilt for local iteration."
       exit 1
    fi
-   echo "check_bus_blast_radius: build graph clean; artefact layer SKIPPED ($missing not built, --allow-unbuilt)"
+   echo "check_bus_blast_radius: build graph clean; artefact layer PARTIAL ($checked of $expected inspected, --allow-unbuilt)"
    exit 0
 fi
 
-if [ "$missing" -gt 0 ]; then
-   echo "check_bus_blast_radius: ok — build graph clean; $checked binary(s) carry no bus symbol, $missing not built"
-else
-   echo "check_bus_blast_radius: ok — build graph clean; all $checked shipping binary(s) carry no bus symbol"
-fi
+echo "check_bus_blast_radius: ok — build graph clean; all $expected shipping binary(s) carry no bus symbol"
