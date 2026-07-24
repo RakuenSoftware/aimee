@@ -79,7 +79,7 @@
       "files": [
         {
           "path": "Dockerfile",
-          "sha256": "aa179de1f87e43aa74a4bdc866f959317e7d29c7253d2603bd6b5834431079a5"
+          "sha256": "870d186b59951ca249e8ffb1c003f0310155535dc6488eb0c43270b277be5a43"
         },
         {
           "path": "Dockerfile.aimee-llm",

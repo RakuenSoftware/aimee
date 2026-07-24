@@ -3473,7 +3473,7 @@ $(TESTPREFIX)/unit-test-vault-seal: $(OBJDIR)/tests/test_vault_seal.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o \
                               $(OBJDIR)/modules/vault/vault_kek_cache.o \
                               $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(KB_PKCS11_LDLIBS)
 
 # Default-build (no libtss2) stub contract for the tpm2 custody provider. The kb
 # policy seam pulls in kb_vault_policy.o which now references the tpm2 provider,
@@ -3486,7 +3486,7 @@ $(TESTPREFIX)/unit-test-vault-tpm2-stub: $(OBJDIR)/tests/test_vault_tpm2_stub.o 
                               $(OBJDIR)/modules/vault/vault_crypto.o \
                               $(OBJDIR)/modules/vault/vault_kek_cache.o \
                               $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(KB_PKCS11_LDLIBS)
 
 # P7-tpm2a swtpm integration harness. Built ON DEMAND ONLY (NOT in TEST_TARGETS,
 # so the default no-libtss2 build never touches it) by the CT gate:
