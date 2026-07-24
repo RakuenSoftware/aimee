@@ -112,4 +112,19 @@ if ! printf '%s\n' "$vault_out" | grep -q "test_bus_vault_audit: OK"; then
 fi
 echo "vault-access audit: ok (access -> bridge -> bus -> ledger; no secret leak)"
 
-echo "check_bus_perf_gate: ok — dispatch + audit within budget; audit durability holds; vault-access audit holds; memory rows pending"
+# 5. The sandbox degraded-isolation audit trail: a guarded exec that ran
+#    unsandboxed (or was refused) because the sandbox was unavailable flows
+#    through the REAL server bridge -> audit_bus -> ledger, fields mapped, no
+#    secret leaked. Same special-link reason as the vault test.
+echo "checking sandbox degraded-isolation audit trail..."
+sbx_out=$(make -C src --no-print-directory unit-test-bus-sandbox-audit 2>&1 || true)
+if ! printf '%s\n' "$sbx_out" | grep -q "test_bus_sandbox_audit: OK"; then
+   echo "" >&2
+   echo "FAIL: the sandbox-on-bus audit test did not pass — a degraded-isolation" >&2
+   echo "      exec is not being recorded correctly through the bridge, or a secret leaked." >&2
+   printf '%s\n' "$sbx_out" | tail -8 >&2
+   exit 1
+fi
+echo "sandbox audit: ok (degraded isolation -> bridge -> bus -> ledger; no secret leak)"
+
+echo "check_bus_perf_gate: ok — dispatch + audit within budget; audit durability holds; vault-access + sandbox audit hold; memory rows pending"

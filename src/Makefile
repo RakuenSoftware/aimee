@@ -457,6 +457,9 @@ SERVER_SRCS += modules/economizer/gateway_mutate_wire.c
 # The one object that links vault_service to the (D7-confined) audit bus, keeping
 # vault_service.o itself bus-free; server-only, co-linked with $(BUS_SHIP_OBJS).
 SERVER_SRCS += server/vault_audit_bridge.c
+# Likewise, the sole object linking sandbox.c to the audit bus (sandbox.o stays
+# bus-free). Server-only.
+SERVER_SRCS += server/sandbox_audit_bridge.c
 SERVER_OBJS = $(SERVER_SRCS:%.c=$(OBJDIR)/%.o)
 SERVER_DATA_SRCS = $(filter-out $(SERVER_SRCS) modules/guardrails/guardrails_orchestrator.c,$(DATA_SRCS))
 SERVER_DATA_OBJS = $(SERVER_DATA_SRCS:%.c=$(OBJDIR)/server/%.o) \

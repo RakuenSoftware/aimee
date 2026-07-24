@@ -34,9 +34,10 @@
 #include "headers/context_engine.h"
 #include "headers/server_cli_oauth.h"
 #include "vault_server_key.h"
-#include "vault_service.h"      /* VAULT_SERVER_PRINCIPAL (rotation target) */
-#include "vault_audit_bridge.h" /* route vault credential-access events onto the audit bus */
-#include "audit_replay.h"       /* --audit-replay: inspect a governed-action capture file */
+#include "vault_service.h"        /* VAULT_SERVER_PRINCIPAL (rotation target) */
+#include "vault_audit_bridge.h"   /* route vault credential-access events onto the audit bus */
+#include "sandbox_audit_bridge.h" /* route sandbox degraded-isolation events onto the audit bus */
+#include "audit_replay.h"         /* --audit-replay: inspect a governed-action capture file */
 #include <signal.h>
 #include <errno.h>
 #include <stdio.h>
@@ -163,8 +164,9 @@ static int run_server(const char *socket_path, log_level_t log_level)
    /* Initialize logging */
    log_init(log_level);
    audit_log_open();
-   audit_ensure_key();           /* provision the per-action audit key (best-effort) */
-   vault_audit_bridge_install(); /* route vault credential-access events onto the audit bus */
+   audit_ensure_key();             /* provision the per-action audit key (best-effort) */
+   vault_audit_bridge_install();   /* route vault credential-access events onto the audit bus */
+   sandbox_audit_bridge_install(); /* route sandbox degraded-isolation events onto the audit bus */
 
    /* Activate the GitHub App installation-token provider for the server's forge
     * identity. Inert unless AIMEE_FORGE_APP_* is set (see forge_app_token.c). */

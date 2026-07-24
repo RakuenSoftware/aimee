@@ -43,6 +43,82 @@
 #include <unistd.h>
 
 /* -------------------------------------------------------------------------
+ * Audit hook + test seam (see sandbox.h)
+ * ---------------------------------------------------------------------- */
+
+/* Installed once at startup by the server-only bridge; NULL = no audit. */
+static sandbox_audit_hook_fn g_sbx_audit_hook = NULL;
+void sandbox_set_audit_hook(sandbox_audit_hook_fn fn)
+{
+   g_sbx_audit_hook = fn;
+}
+
+/* Test-only availability override (NULL in production). */
+static int (*g_sbx_avail_override)(const char **) = NULL;
+void sandbox_set_available_override_for_test(int (*fn)(const char **reason))
+{
+   g_sbx_avail_override = fn;
+}
+
+void sandbox_command_program(const char *cmd, char *out, size_t out_len)
+{
+   if (!out || out_len == 0)
+      return;
+   out[0] = '\0';
+   if (!cmd)
+      return;
+   const char *p = cmd;
+   for (;;)
+   {
+      while (*p == ' ' || *p == '\t')
+         p++;
+      if (!*p)
+         return;
+      /* Skip a leading `NAME=value` environment assignment (its value may be a
+       * secret) and continue to the real program token. */
+      if ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || *p == '_')
+      {
+         const char *r = p;
+         while ((*r >= 'A' && *r <= 'Z') || (*r >= 'a' && *r <= 'z') || (*r >= '0' && *r <= '9') ||
+                *r == '_')
+            r++;
+         if (*r == '=')
+         {
+            while (*p && *p != ' ' && *p != '\t')
+               p++;
+            continue;
+         }
+      }
+      break;
+   }
+   const char *end = p;
+   while (*end && *end != ' ' && *end != '\t')
+      end++;
+   const char *base = p;
+   for (const char *s = p; s < end; s++)
+      if (*s == '/')
+         base = s + 1;
+   size_t blen = (size_t)(end - base);
+   if (blen >= out_len)
+      blen = out_len - 1;
+   memcpy(out, base, blen);
+   out[blen] = '\0';
+}
+
+/* Fire the audit hook (if installed) for a degraded-isolation outcome. Extracts
+ * the NON-SECRET program name; never passes the raw command line. */
+static void sbx_audit_degraded(const char *cmd, const sandbox_config_t *cfg, const char *verdict,
+                               const char *reason)
+{
+   sandbox_audit_hook_fn h = g_sbx_audit_hook;
+   if (!h)
+      return;
+   char prog[64];
+   sandbox_command_program(cmd, prog, sizeof prog);
+   h(prog, cfg->mode, cfg->network_isolated, verdict, reason ? reason : "");
+}
+
+/* -------------------------------------------------------------------------
  * Container detection
  * ---------------------------------------------------------------------- */
 
@@ -82,6 +158,8 @@ int sandbox_detect_container(void)
 
 int sandbox_available(const char **reason)
 {
+   if (g_sbx_avail_override)
+      return g_sbx_avail_override(reason);
 #ifndef __linux__
    if (reason)
       *reason = "Linux namespaces not available on this platform";
@@ -585,10 +663,12 @@ static pid_t sandbox_exec_internal(const sandbox_config_t *cfg, const char *cmd,
       {
          log_warn("sandbox: unavailable (%s) — refusing unsandboxed guarded execution",
                   unavail_reason ? unavail_reason : "unknown reason");
+         sbx_audit_degraded(cmd, cfg, "refused", unavail_reason);
          return -1;
       }
       log_warn("sandbox: unavailable (%s) — running unsandboxed",
                unavail_reason ? unavail_reason : "unknown reason");
+      sbx_audit_degraded(cmd, cfg, "unsandboxed_fallback", unavail_reason);
       pid_t pid = fork();
       if (pid == 0)
       {
