@@ -1,12 +1,13 @@
-# shape: interleaved loop with non-repeating connective tissue between iterations; expected: fire; expected_loop_start_offset: 186; expected_loop_span_bytes: 11; expected_repetitions: 4
+# shape: interleaved loop with non-repeating connective tissue between iterations; expected: fire; expected_loop_start_offset: 198; expected_loop_span_bytes: 11; expected_repetitions: 4
+connector-a
 item
 value
-connector-w
+connector-b
 item
 value
-connector-x
+connector-c
 item
 value
-connector-y
+connector-d
 item
 value

@@ -274,6 +274,57 @@ def _iter_fixtures():
     return out
 
 
+def _discover_legit_json_payloads():
+    """Discover every .json payload under collapse_legit/json/. This is
+    the single source of truth for "which JSON fixtures the corpus
+    contains": adding or losing a payload is reflected here, so the
+    per-shape validators cannot drift away from the on-disk state.
+
+    Returns sorted list of Path objects whose suffix is ".json" and
+    which are direct children of LEGIT_JSON. Sibling .meta files are
+    excluded (they are envelope metadata, not payloads)."""
+    if not LEGIT_JSON.exists():
+        return []
+    return sorted(
+        p for p in LEGIT_JSON.iterdir()
+        if p.is_file() and p.suffix == ".json"
+    )
+
+
+def _derive_iteration_span(body, off, reps):
+    """Discover the LARGEST verbatim period that starts at body
+    offset `off` and yields >= `reps` non-overlapping, walk-forward
+    iterations. The "complete iteration span" is the declared
+    expected_loop_span_bytes: the full byte length of one
+    iteration, not a sub-divisor of it.
+
+    This oracle derives the period purely from the body bytes: it
+    does NOT take a declared span as input. The fixture's declared
+    span is then compared against the discovered period to detect a
+    placeholder or copy-pasted offset (F4 regression guard).
+
+    Walks sp from the maximum possible value
+    ((len(body)-off)//reps) downward; the first sp for which
+    `reps` non-overlapping iterations fit is the complete
+    iteration span. Returns (sp, period_bytes, iterations) on
+    success or (None, None, None) if no period at `off` yields
+    `reps` iterations.
+    """
+    if reps < 1 or off < 0 or off >= len(body):
+        return None, None, None
+    max_sp = (len(body) - off) // reps
+    if max_sp < 1:
+        return None, None, None
+    for sp in range(max_sp, 0, -1):
+        period = body[off:off + sp]
+        if not period:
+            continue
+        iterations = _count_verbatim_iterations(body, off, period)
+        if len(iterations) >= reps:
+            return sp, period, iterations
+    return None, None, None
+
+
 class TestGrammarDoc(unittest.TestCase):
     def test_grammar_exists(self):
         self.assertTrue(GRAMMAR.exists(), f"missing {GRAMMAR}")
@@ -537,6 +588,15 @@ class TestCollapseCollapse(unittest.TestCase):
         p = COLLAPSE / "interleaved.txt"
         self._check_fire(p, shape_kind=self.SHAPE_INTERLEAVED)
 
+    def test_interleaved_loop(self):
+        # F2 regression guard: interleaved_loop.txt must be
+        # validated as the interleaved shape, not just listed in
+        # REQUIRED_FILES. Without this test the fixture could
+        # degenerate to a contiguous repeat of identical 43-byte
+        # blocks and no check would notice.
+        p = COLLAPSE / "interleaved_loop.txt"
+        self._check_fire(p, shape_kind=self.SHAPE_INTERLEAVED)
+
     def test_near_miss_fire(self):
         # FN-risk fixture: the outer period contains inner markers
         # (marker-a, marker-b) a naive detector might split on. The
@@ -689,6 +749,47 @@ class TestCollapseCollapse(unittest.TestCase):
                 f"actually exercised",
             )
 
+    def test_fire_declared_spans_match_derived_period(self):
+        # F4 regression guard: the declared
+        # expected_loop_span_bytes must equal the largest verbatim
+        # period the body yields when probed purely from the
+        # declared offset and expected_repetitions. The
+        # _derive_iteration_span oracle takes only (body, off,
+        # reps) - no declared span - so a regression where the
+        # declared span is a placeholder or copy-pasted across
+        # fixtures fails because the oracle discovers the actual
+        # iteration span from the body bytes alone and the declared
+        # span does not match. This check is what makes
+        # expected_loop_span_bytes a derived-from-bytes oracle
+        # rather than a header-only declaration.
+        for fn in self.REQUIRED_FILES:
+            p = COLLAPSE / fn
+            header, body, file_bytes = _strip_envelope(p)
+            fields = _parse_header_for(p)
+            header_len = _header_length(p, file_bytes)
+            off_body = fields["offset"] - header_len
+            sp_derived, period_derived, iterations_derived = (
+                _derive_iteration_span(body, off_body, fields["repetitions"])
+            )
+            self.assertIsNotNone(
+                sp_derived,
+                f"{p}: _derive_iteration_span could not find a "
+                f"period starting at body offset {off_body} that "
+                f"yields >= {fields['repetitions']} iterations; "
+                f"the body must genuinely repeat that many times",
+            )
+            self.assertEqual(
+                sp_derived, fields["span"],
+                f"{p}: declared expected_loop_span_bytes="
+                f"{fields['span']} does not match the iteration "
+                f"span the body bytes themselves expose at the "
+                f"declared offset (oracle discovered {sp_derived} "
+                f"bytes: {period_derived!r} at body offset "
+                f"{off_body} with {len(iterations_derived)} "
+                f"iterations); the declared span must equal the "
+                f"iteration span derived from the bytes alone",
+            )
+
     def test_fire_repetitions_match_independent_byte_oracle(self):
         # The declared expected_repetitions must equal the
         # independent walk-forward iteration count the oracle
@@ -735,7 +836,12 @@ class TestCollapseLegit(unittest.TestCase):
         "fp_risk_long_code.md",
     ]
 
-    REQUIRED_JSON = ["primitives.json", "nested.json", "objects.json", "fenced.md"]
+    # Drive JSON corpus validation from discovered payload files (F3 regression
+    # guard). Hard-coded filename lists let a fixture be added or removed
+    # without the no-fire header / JSON-corpus checks noticing; discovering
+    # every *.json file in LEGIT_JSON makes adding a payload force it
+    # through every per-shape check.
+    REQUIRED_JSON = [p.name for p in _discover_legit_json_payloads()]
 
     def test_non_json_files_present(self):
         for fn in self.REQUIRED_NON_JSON:
@@ -1041,12 +1147,18 @@ class TestCollapseLegit(unittest.TestCase):
         )
 
     def test_json_payloads_are_valid_json(self):
-        for fn in ["primitives.json", "nested.json",
-                   "nested_primitives.json", "objects.json"]:
-            with open(LEGIT_JSON / fn) as f:
+        payloads = _discover_legit_json_payloads()
+        self.assertTrue(
+            payloads,
+            "no JSON payloads discovered under LEGIT_JSON; corpus is empty",
+        )
+        for p in payloads:
+            with open(p) as f:
                 value = json.load(f)
-            self.assertIsInstance(value, list,
-                                 f"{fn}: top-level must be array per accepted grammar")
+            self.assertIsInstance(
+                value, list,
+                f"{p.name}: top-level must be array per accepted grammar",
+            )
 
     def test_nested_json_is_genuinely_nested(self):
         with open(LEGIT_JSON / "nested.json") as f:
@@ -1073,17 +1185,38 @@ class TestCollapseLegit(unittest.TestCase):
             )
 
     def test_json_payloads_have_sibling_meta(self):
-        for fn in ["primitives.json", "nested.json",
-                   "nested_primitives.json", "objects.json"]:
-            meta = LEGIT_JSON / (fn + ".meta")
-            self.assertTrue(meta.exists(), f"missing sibling meta for {fn}")
+        # F3 regression guard: every discovered .json payload must
+        # have a sibling .meta header. A payload without .meta
+        # fails the "every fixture has a header" acceptance
+        # criterion; discovering payloads (instead of trusting a
+        # hard-coded list) is what prevents this from drifting.
+        payloads = _discover_legit_json_payloads()
+        self.assertTrue(
+            payloads,
+            "no JSON payloads discovered under LEGIT_JSON; "
+            "add at least one .json fixture with a sibling .meta",
+        )
+        for p in payloads:
+            meta = LEGIT_JSON / (p.name + ".meta")
+            self.assertTrue(
+                meta.exists(),
+                f"missing sibling meta for {p.name}; "
+                f"every JSON payload must declare its shape via .meta",
+            )
 
     def test_json_payloads_contain_no_inline_slashslash(self):
-        for fn in ["primitives.json", "nested.json",
-                   "nested_primitives.json", "objects.json"]:
-            data = _read_bytes(LEGIT_JSON / fn)
-            self.assertNotIn(b"//", data,
-                             f"{fn}: contains // (excluded comment-bearing fragment)")
+        # F3 regression guard: drive from discovered payloads so
+        # every checked-in JSON fragment is checked. The "//"
+        # exclusion is the "comment-bearing fragment" exclusion
+        # from the grammar doc.
+        payloads = _discover_legit_json_payloads()
+        self.assertTrue(payloads, "no JSON payloads discovered")
+        for p in payloads:
+            data = _read_bytes(p)
+            self.assertNotIn(
+                b"//", data,
+                f"{p.name}: contains // (excluded comment-bearing fragment)",
+            )
 
     def test_fenced_md_uses_documented_envelope(self):
         p = LEGIT_JSON / "fenced.md"
@@ -1162,10 +1295,12 @@ class TestCollapseLegit(unittest.TestCase):
         """The grammar doc states the canonical header occupies one line
         terminated by LF; .meta files store the entire header as their
         content, so they too are LF-terminated for consistency with the
-        inline envelope form."""
-        for fn in ["primitives.json", "nested.json",
-                   "nested_primitives.json", "objects.json"]:
-            meta = LEGIT_JSON / (fn + ".meta")
+        inline envelope form. F3 regression guard: drive from discovered
+        payloads so every checked-in JSON fixture is covered."""
+        payloads = _discover_legit_json_payloads()
+        self.assertTrue(payloads, "no JSON payloads discovered")
+        for p in payloads:
+            meta = LEGIT_JSON / (p.name + ".meta")
             data = _read_bytes(meta)
             self.assertTrue(
                 data.endswith(b"\n"),
