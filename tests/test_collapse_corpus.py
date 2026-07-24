@@ -343,3 +343,62 @@ def test_required_json_shape_categories_present():
         f"required JSON shape categories missing from corpus: {sorted(missing)}; "
         f"declared: {sorted(declared)}"
     )
+
+
+MIN_MEANINGFUL_FIRE_PERIOD = 3
+N_REPETITIONS = 4
+
+
+def _period_is_trivial(period):
+    return all(c in (ord(" "), ord("\n"), ord("\t")) for c in period)
+
+
+def _mechanical_fire_periods(payload, n=N_REPETITIONS, min_span=MIN_MEANINGFUL_FIRE_PERIOD):
+    """Yield every contiguous verbatim period (span, start_offset) of length >= min_span
+    that is repeated >= n consecutive times in `payload` and is not pure whitespace.
+
+    The default thresholds mirror the grammar's N=4 repetition threshold and use a
+    minimum period of 3 bytes so trivial single- and two-byte coincidences (a run
+    of newlines, runs of indent spaces) do not produce false positives.
+    """
+    L = len(payload)
+    max_span = L // n
+    findings = []
+    for span in range(min_span, max_span + 1):
+        end = L - span * n + 1
+        for start in range(end):
+            period = payload[start:start + span]
+            if _period_is_trivial(period):
+                continue
+            if all(payload[start + i * span:start + (i + 1) * span] == period for i in range(n)):
+                findings.append((span, start, period))
+    return findings
+
+
+def test_no_fire_bodies_have_no_mechanical_fire_period():
+    """Negative invariant: every no-fire fixture's body must not contain a contiguous
+    verbatim period of length >= 3 bytes repeated >= N=4 times. This is the structural
+    condition that a future detector could fire on mechanically. A fixture whose header
+    declares no-fire but whose bytes meet the fire condition is malformed: the no-fire
+    label is a consequence of the structure, not a label-only assertion.
+
+    Whitespace-only periods (e.g. a run of newlines or indent spaces) are excluded
+    because they are not semantically meaningful repetitions.
+    """
+    for path in (ROOT / "collapse_legit").rglob("*"):
+        if not path.is_file() or path.suffix == ".meta":
+            continue
+        source = Path(f"{path}.meta") if path.suffix == ".json" else path
+        first_line = source.read_text(encoding="utf-8").splitlines()[0]
+        values = _parse_header_line(first_line)
+        if values.get("expected", "").strip() != "no-fire":
+            continue
+        payload = path.read_bytes()
+        periods = _mechanical_fire_periods(payload)
+        assert not periods, (
+            f"no-fire fixture body contains a mechanical fire period "
+            f"(span >= 3 bytes, repeated >= 4 times); the no-fire label is a "
+            f"consequence of structure, not a label-only assertion. Offending "
+            f"periods: {[(s, off, bytes(p)) for s, off, p in periods[:5]]}; "
+            f"fixture: {path}"
+        )

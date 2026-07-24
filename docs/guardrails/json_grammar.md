@@ -12,10 +12,17 @@ A fragment is a complete RFC 8259 JSON value. Markdown fencing is a wrapper: whe
 
 1. **top-level or nested arrays of primitives** — `string`, `number`, `boolean`, or `null` leaves in a flat array, or arrays of such arrays;
 2. **arrays of uniform-shape objects with a required string discriminator and primitive leaves** — every element shares the same key set, including a string-valued discriminator key whose value is distinct per element; remaining leaves are primitives;
-3. **objects with stable keys and compatible primitive leaf types repeated across array elements** — every element shares the same key set, leaves are primitives, and the set need not include a discriminator key; and
+3. **objects with stable keys and compatible primitive leaf types repeated across array elements** — every element in the array shares the same key set, leaves are primitives, and the set need not include a discriminator key. The no-fire guarantee covers the structural form regardless of whether leaf values happen to coincide or not: a single-element array of one object, an array of objects whose leaf values produce a verbatim period, and an array of objects whose leaf values do not all satisfy this shape and MUST NOT fire. The discriminator is structural, not value-derived: the no-fire label is a property of the (key set, leaf-type signature), not of byte equality of the records; and
 4. **JSON fenced inside markdown code blocks** — a ` ``` json ... ``` ` wrapper whose inner content independently satisfies one of shapes 1–3.
 
 For every uniform object array in shape 2, the discriminator is the lexicographically first key common to every element whose value is a string in every element **and whose value is distinct across every element**. If no such key exists, the shape is excluded from shape 2 (it may still satisfy shape 3 if the leaves are primitives).
+
+For shape 3, "compatible primitive leaf types" means the set of leaf types for each key is uniform across every record: a key that is `int` in one record MUST be `int` in every other record; mixed numeric and string leaves for the same key across records is not shape 3. Two worked examples:
+
+* `{"x":1,"y":2},{"x":3,"y":4}` — key set `{x, y}` is stable; both keys are `int` everywhere; no fire even if the records are byte-distinct.
+* `{"x":1,"y":"a"},{"x":2,"y":"b"}` — key set `{x, y}` is stable; `x` is `int` everywhere, `y` is `str` everywhere; no fire.
+
+Counter-example, out of shape 3: `{"x":1},{"x":"a"}` — `x` is `int` in one record and `str` in the other; not shape 3, and not in scope of the no-fire guarantee.
 
 Shape identity is `(container path, kind, sorted keys, discriminator key, primitive types)`. Key order is insignificant; equal shape does not require equal serialized text.
 
@@ -29,17 +36,20 @@ The required fields and spellings are:
 
 `shape:<description>; expected:<fire|no-fire>; expected_loop_start_offset:<integer>; expected_loop_span_bytes:<integer>; expected_repetitions:<integer>`
 
+**Values MUST NOT contain `;`.** If a value would naturally include `;` (e.g. a description like `ramp; then loop`), the author MUST rephrase (e.g. `ramp then loop`) or pick a different separator inside the description. The header parser splits on `;` and a stray `;` inside a value silently truncates the value at that point; the parser will reject such a header, but the rule is normative here so authors do not need to read the test code to learn it.
+
 For `fire`, the offset identifies the first iteration boundary and the span is the byte length of one complete verbatim iteration, including every line terminator (including the final trailing newline) that belongs to that period; `expected_repetitions` records the number of iterations. The loop period begins at that iteration boundary. **The iteration boundary is the byte offset of the first iteration of the repeating period — the first occurrence after any non-repeating ramp or prefix, not the first verbatim body occurrence anywhere in the file.** Detector threshold N has **default 4** repetitions. The long-span threshold M has default 60 bytes. Fire fixtures contain at least N verbatim iterations of a qualifying loop. A no-fire fixture uses `-1`, `-1`, and `0` for offset, span, and expected_repetitions respectively.
 
 ### Authoritative scope of the `no-fire` label
 
 The formal `no-fire` label is authoritative for every fixture in `tests/fixtures/collapse_legit/`, including:
 
-* JSON fragments that obey any of the accepted shapes 1–4 above;
-* non-JSON structural patterns explicitly enumerated in the request: markdown tables, enumerated/ordered lists, ASCII art boxes, repeated code boilerplate (e.g. import blocks, test stubs), fenced code blocks of non-JSON content, and repeated short lines; and
+* non-JSON structural patterns explicitly enumerated in the request: markdown tables, enumerated/ordered lists, ASCII art boxes, repeated code boilerplate (e.g. import blocks, test stubs), fenced code blocks of non-JSON content, and repeated short lines. **Shape membership in accepted JSON shapes 1–4 is necessary but not sufficient for the no-fire label: a fixture whose bytes form a contiguous verbatim period of length ≥ 3 bytes repeated ≥ N times (the mechanical fire condition) is not a no-fire fixture, even if it parses as one of the accepted shapes. The no-fire label additionally requires the bytes to not trigger the fire rule**; and
 * any further `tests/fixtures/collapse_legit/fp_risk/` sub-corpus entries.
 
-A detector MUST honour the no-fire label on every fixture in `tests/fixtures/collapse_legit/` (including the `fp_risk/` sub-corpus). The `fp_risk/` sub-corpus is a higher-priority regression set rather than an advisory escape hatch: a fire on these inputs is a precision regression and is reported as a FP.
+The `tests/fixtures/collapse_legit/fp_risk/` sub-corpus is a higher-priority regression set rather than an advisory escape hatch: a fire on these inputs is a precision regression and is reported as a FP. It pairs with the broader `tests/fixtures/collapse_legit/repeated_structural_patterns/` sub-corpus (markdown tables, ordered lists, ASCII art boxes, code boilerplate, fenced non-JSON code blocks, repeated short lines) that the detector MUST suppress structurally. The negative mechanical invariant — every no-fire fixture's body must not contain a contiguous verbatim period of length ≥ 3 bytes repeated ≥ N times — is enforced by `tests/test_collapse_corpus.py::test_no_fire_bodies_have_no_mechanical_fire_period`; a fixture that fails that invariant cannot be a no-fire fixture, even if its header says so.
+
+A detector MUST honour the no-fire label on every fixture in `tests/fixtures/collapse_legit/` (including the `fp_risk/` and `repeated_structural_patterns/` sub-corpora).
 
 ### Interleaved-loop fixtures (optional fields)
 
@@ -74,3 +84,5 @@ Report precision = **TP / (TP + FP)**, recall = **TP / (TP + FN)**, and specific
 ## Corpus coverage requirements
 
 The corpus under `tests/fixtures/collapse_legit/json/` must contain at least one fixture for each accepted JSON shape listed above (shapes 1–4). The accompanying oracle test (`tests/test_collapse_corpus.py::test_required_json_shape_categories_present`) parses each JSON payload (or fenced JSON body) and asserts the structural invariants of the category it claims before counting that fixture toward required coverage. A fixture whose payload does not satisfy the documented invariant for its category is not counted, and the test fails.
+
+The corpus under `tests/fixtures/collapse_legit/repeated_structural_patterns/` and `tests/fixtures/collapse_legit/fp_risk/` (when present) MUST NOT contain any fixture whose body mechanically satisfies the contiguous fire condition (length-≥-3-byte verbatim period repeated ≥ N times). This invariant is enforced by `tests/test_collapse_corpus.py::test_no_fire_bodies_have_no_mechanical_fire_period`; a fixture that violates it is malformed and the test fails. The intent is that the no-fire label is a consequence of the structure, not a label-only assertion that a future detector implementation could honour by accident.
