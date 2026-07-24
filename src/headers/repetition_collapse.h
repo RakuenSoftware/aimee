@@ -46,7 +46,8 @@ typedef struct
 typedef struct
 {
    rc_region_t regions[RC_MAX_REGIONS];
-   size_t      count;
+   size_t      count;        /* number of regions actually written */
+   size_t      truncated;    /* 0 normally; 1 if more regions existed than RC_MAX_REGIONS */
 } rc_region_set_t;
 
 /* A JSON-fragment match emitted by the in-module grammar. Heterogeneous
@@ -63,7 +64,8 @@ typedef struct
 typedef struct
 {
    rc_json_span_t spans[RC_MAX_JSON_SPANS];
-   size_t         count;
+   size_t         count;        /* number of spans actually written */
+   size_t         truncated;    /* 0 normally; 1 if more spans existed than RC_MAX_JSON_SPANS */
 } rc_json_span_set_t;
 
 /* Detector result.

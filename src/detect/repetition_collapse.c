@@ -215,7 +215,10 @@ static void emit_region(rc_region_set_t *out, rc_region_kind_t kind,
    if (start >= end)
       return;
    if (out->count >= RC_MAX_REGIONS)
+   {
+      out->truncated = 1; /* signal capacity overflow to callers */
       return;
+   }
    out->regions[out->count].kind  = kind;
    out->regions[out->count].start = start;
    out->regions[out->count].end   = end;
@@ -225,7 +228,10 @@ static void emit_region(rc_region_set_t *out, rc_region_kind_t kind,
 size_t rc_parse_regions(const char *buf, size_t len, rc_region_set_t *out)
 {
    if (out)
+   {
       out->count = 0;
+      out->truncated = 0;
+   }
    if (!buf || len == 0 || !out)
       return 0;
 
@@ -589,7 +595,10 @@ static int jp_try_one(jp_t *jp, size_t *end_out)
 size_t rc_parse_json_spans(const char *buf, size_t len, rc_json_span_set_t *out)
 {
    if (out)
+   {
       out->count = 0;
+      out->truncated = 0;
+   }
    if (!buf || len == 0 || !out)
       return 0;
    jp_t jp;
@@ -608,6 +617,10 @@ size_t rc_parse_json_spans(const char *buf, size_t len, rc_json_span_set_t *out)
             out->spans[out->count].start = old_pos;
             out->spans[out->count].end   = end_off;
             out->count++;
+         }
+         else
+         {
+            out->truncated = 1; /* signal capacity overflow to callers */
          }
          jp.pos = end_off;
          jp_skip_ws(&jp);
