@@ -7,7 +7,7 @@ lifecycles) see [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md). This document i
 the code-level companion: module map, server internals, the RPC and HTTP
 surfaces, the KB split, the build system, and testing.
 
-aimee's core services are written in C11 for performance and minimal footprint. The current tree is a large C codebase (hundreds of `.c` files, plus generated headers and split `*.inc` units), shipped with the standalone Go `aimee-webchat` service plus `aimee`, `aimee-server`, and `aimee-kb`. Runtime DB ownership is pinned: clients are DB-free, the local server owns DB1 (sqlite), and KB owns DB2 (postgres + pgvector), which can be local or shared by deployment. MCP support is built into `aimee mcp-serve`.
+aimee's core services are written in C11 for performance and minimal footprint. The current tree is a large C codebase (hundreds of `.c` files, plus generated headers and split `*.inc` units), shipped with the standalone Go `aimee-runtime-web` service plus `aimee`, `aimee-server`, and `aimee-kb`. Runtime DB ownership is pinned: clients are DB-free, the local server owns DB1 (sqlite), and KB owns DB2 (postgres + pgvector), which can be local or shared by deployment. MCP support is built into `aimee mcp-serve`.
 
 ## Architecture overview
 
@@ -75,7 +75,7 @@ flowchart LR
 ### Shared runtime (linked into owning binaries only)
 
 These modules are linked only where their ownership boundary allows them. The
-thin `aimee` and `aimee-webchat` targets do not link database,
+thin `aimee` and `aimee-runtime-web` targets do not link database,
 `kb_client`, command, data, or agent objects.
 
 | File | Responsibility |
@@ -475,7 +475,7 @@ DB2: memories, rules, KB metadata, tasks, decisions, code index metadata,
 graph TD
     subgraph Binaries
         Client["aimee<br/>thin CLI + MCP serve"]
-        Webchat["aimee-webchat<br/>DB-free browser client"]
+        Webchat["aimee-runtime-web<br/>DB-free browser client"]
         Server["aimee-server<br/>DB1 + compute pool"]
         KB["aimee-kb<br/>DB2 + pgvector<br/>local/shared KB"]
     end
@@ -635,10 +635,10 @@ Native Gemini and Mistral routes are routable without a CLI on `PATH`.
 
 ```bash
 cd src
-make                # Build DB-free clients (-> ../aimee, ../aimee-webchat)
+make                # Build DB-free clients (-> ../aimee, ../aimee-runtime-web)
 make server         # Build server and KB binaries (-> ../aimee-server, ../aimee-kb)
 make                # MCP serve is built into the aimee binary
-make install        # Install aimee, aimee-webchat, aimee-server, and aimee-kb
+make install        # Install aimee, aimee-runtime-web, aimee-server, and aimee-kb
 make lint           # Check clang-format
 make format         # Auto-fix formatting
 make unit-tests     # Build and run all tests
@@ -676,7 +676,7 @@ performance budget. (For getting started, see the
 [root README](../README.md#get-started) and the
 [Quickstart](../docs/QUICKSTART.md).)
 
-aimee ships four artifacts: `aimee`, `aimee-webchat`, `aimee-server`, and
+aimee ships four artifacts: `aimee`, `aimee-runtime-web`, `aimee-server`, and
 `aimee-kb`. The client and webchat talk only to the local `aimee-server`; runtime
 state stays in server-owned DB1, knowledge lives behind `aimee-kb` in DB2 (local or
 shared Postgres). The intended deployment runs the **services in Docker** and
@@ -802,7 +802,7 @@ off-loopback with a self-signed cert, which `remote set` pins automatically),
 and run `configure-hooks.ps1`.
 
 The C services (`aimee`, `aimee-server`, `aimee-kb`) need no Go. The browser UI
-(`aimee-webchat`) is the only Go artifact and is **optional**: `install.sh` builds
+(`aimee-runtime-web`) is the only Go artifact and is **optional**: `install.sh` builds
 it when a suitable Go toolchain is on `PATH` (see `webchat/go.mod` for the version)
 and otherwise skips it with a note.
 
@@ -819,7 +819,7 @@ Source-build prerequisites (only needed if installing dependencies by hand):
 | PAM (webchat) | `apt install libpam0g-dev` | built-in |
 | PostgreSQL + pgvector | `apt install postgresql postgresql-NN-pgvector` | `brew install postgresql pgvector` |
 | ripgrep, universal-ctags | `apt install ripgrep universal-ctags` | `brew install ripgrep universal-ctags` |
-| Go (optional, `aimee-webchat` only) | see `webchat/go.mod` | `brew install go` |
+| Go (optional, `aimee-runtime-web` only) | see `webchat/go.mod` | `brew install go` |
 
 **Local or remote knowledge base.** `install.sh` asks whether to run `aimee-kb`
 **locally** (default, backed by the local Postgres) or point at an existing
@@ -948,7 +948,7 @@ run a standalone embedder or curator LLM instead, use the
 [AIMEE_KB_SYNTH_TIERS.md](../docs/AIMEE_KB_SYNTH_TIERS.md).
 
 > **`docker compose ... up --build` needs no credentials.** The browser UI
-> (`aimee-webchat`) is built into every image and on by default. Its frontend
+> (`aimee-runtime-web`) is built into every image and on by default. Its frontend
 > dependency (`@rakuensoftware/smoothgui`) is vendored in-repo
 > (`frontend/vendor/`), so the build pulls nothing from a private registry and needs
 > no npm token. Build with `--build-arg WITH_RUNTIME_WEB=0` to ship server + kb only.
@@ -1305,7 +1305,7 @@ binary:
 | `aimee` | client + support + platform | `-lpthread` (no SQLite, no libpq) |
 | `aimee-server` | server + kb_client + agent + data + cmd-stubs + core + db1 + platform + mcp_git | `-lsqlite3 -lssl -lcrypto -lpam` (no libpq); built `-DAIMEE_DB2_DISABLED` |
 | `aimee-kb` | kb + kb-data + db2-pg + db2 + core + platform | `-lpq -lzstd -lssl -lcrypto` (no SQLite); built `-DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM` |
-| `aimee-webchat` | (Go) | `cd webchat && go build` |
+| `aimee-runtime-web` | (Go) | `cd webchat && go build` |
 | `aimee-gateway` | gateway + platform | `-lpthread -lssl -lcrypto` |
 
 Common flags: `-Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections
