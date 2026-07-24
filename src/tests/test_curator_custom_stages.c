@@ -8,7 +8,7 @@
 #include <string.h>
 
 #include "aimee.h"
-#include "kb/kb_curator_custom.h"
+#include "kb_curator_custom.h"
 
 /* ── mock registry: two vetted base ops, one per lane ─────────────────────── */
 static int run_idx(const kb_curator_extract_opts_t *o)

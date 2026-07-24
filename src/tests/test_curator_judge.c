@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../kb/kb_curator_judge.h"
+#include "kb_curator_judge.h"
 
 static void test_no_command(void)
 {

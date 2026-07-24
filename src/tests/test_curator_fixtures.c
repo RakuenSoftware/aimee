@@ -19,7 +19,7 @@
 #include <string.h>
 
 #include "cJSON.h"
-#include "kb/kb_curator_grounding.h"
+#include "kb_curator_grounding.h"
 
 #ifndef CURATOR_FIXTURE_DIR
 #define CURATOR_FIXTURE_DIR "../benchmarks/curator/fixtures"

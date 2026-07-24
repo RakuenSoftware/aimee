@@ -1054,14 +1054,14 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_service_artifacts.c
     ${AIMEE_SRC_DIR}/kb/kb_intel_payload.c
     ${AIMEE_SRC_DIR}/kb/kb_reflection.c
-    ${AIMEE_SRC_DIR}/kb/kb_curator_queue.c
-    ${AIMEE_SRC_DIR}/kb/kb_curator_extract.c
-    ${AIMEE_SRC_DIR}/kb/kb_curator_extract_code.c
-    ${AIMEE_SRC_DIR}/kb/kb_curator_custom.c
-    ${AIMEE_SRC_DIR}/kb/kb_curator_drain.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_queue.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_extract.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_extract_code.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_custom.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_drain.c
     ${AIMEE_SRC_DIR}/kb/memory_rewrite_llm.c
-    ${AIMEE_SRC_DIR}/kb/kb_curator_notify.c
-    ${AIMEE_SRC_DIR}/kb/kb_curator_version.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_notify.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_version.c
     ${AIMEE_SRC_DIR}/kb/kb_mining.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http.c
     ${AIMEE_SRC_DIR}/kb/http/kb_ingress.c
