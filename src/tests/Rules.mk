@@ -2912,6 +2912,32 @@ unit-test-bus-vault-audit: $(TESTPREFIX)/unit-test-bus-vault-audit
 # the standard unit-tests build does not assemble, so the bench gate
 # (check_bus_perf_gate.sh) force-builds + runs it via this .PHONY target instead.
 
+# Sandbox degraded-isolation audit, end-to-end through the REAL server bridge
+# (sandbox_audit_bridge.o) -> audit_bus -> ledger. Same bus link set as the audit
+# durability test, plus the bridge, posix/sandbox.o, and audit_action.o.
+$(TESTPREFIX)/unit-test-bus-sandbox-audit: $(OBJDIR)/tests/test_bus_sandbox_audit.o \
+                                           $(OBJDIR)/server/sandbox_audit_bridge.o \
+                                           $(OBJDIR)/posix/sandbox.o \
+                                           $(OBJDIR)/modules/audit/audit_bus.o \
+                                           $(OBJDIR)/modules/audit/audit_ledger.o \
+                                           $(OBJDIR)/modules/audit/audit_action.o \
+                                           $(OBJDIR)/modules/workflows/wfe_canonical.o \
+                                           $(OBJDIR)/aimee_home.o \
+                                           $(OBJDIR)/modules/bus/bus_client.o \
+                                           $(OBJDIR)/modules/bus/bus_host.o \
+                                           $(OBJDIR)/modules/bus/bus_route.o \
+                                           $(OBJDIR)/modules/bus/bus_region.o \
+                                           $(OBJDIR)/modules/bus/bus_ring.o \
+                                           $(OBJDIR)/modules/bus/bus_arena.o \
+                                           $(OBJDIR)/modules/bus/bus_wire.o \
+                                           $(OBJDIR)/modules/bus/bus_capture.o \
+                                           $(BUS_MEM_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+
+.PHONY: unit-test-bus-sandbox-audit
+unit-test-bus-sandbox-audit: $(TESTPREFIX)/unit-test-bus-sandbox-audit
+	$<
+
 # Shutdown race: concurrent producers vs audit_bus_stop() (regression test for the
 # in-flight-emit-vs-teardown UAF). Same link set as the guardrail durability test.
 $(OBJDIR)/tests/test_bus_shutdown_race.o: C_FLAGS += -Imodules/bus

@@ -58,6 +58,43 @@ int sandbox_detect_container(void);
 int sandbox_available(const char **reason);
 
 /*
+ * sandbox_command_program:
+ *   Extract the leading PROGRAM name of a /bin/sh -c command line into |out| — the
+ *   first token after any `VAR=value` environment-assignment prefixes, basename
+ *   only, never its arguments. This is a NON-SECRET label: a command line can
+ *   carry secrets in its arguments or env assignments (tokens, keys), so only the
+ *   program is ever surfaced (e.g. "TOKEN=sk-.. /usr/bin/npm install x" -> "npm").
+ *   |out| is always NUL-terminated; empty for a NULL/blank command.
+ */
+void sandbox_command_program(const char *cmd, char *out, size_t out_len);
+
+/*
+ * Audit hook: notified when a guarded execution's isolation DEGRADES — the
+ * sandbox was requested (mode != off) but was unavailable, so the command either
+ * ran UNSANDBOXED (verdict "unsandboxed_fallback") or was REFUSED (verdict
+ * "refused", for require-isolation callers). These rare, high-signal events are
+ * the sandbox activity worth an audit trail; a routine successful sandboxed exec
+ * is deliberately NOT recorded (high volume, low signal, would evict governance
+ * rows). Only NON-SECRET fields cross: the program name (never arguments), the
+ * mode, the network-isolation flag, the verdict, and the availability reason.
+ *
+ * Installed once at startup by a server-only bridge that forwards to the audit
+ * event bus; sandbox.c itself has NO event-bus dependency (stays linkable into
+ * every binary). NULL by default. Set once before serving.
+ */
+typedef void (*sandbox_audit_hook_fn)(const char *program, sandbox_mode_t mode,
+                                      int network_isolated, const char *verdict,
+                                      const char *reason);
+void sandbox_set_audit_hook(sandbox_audit_hook_fn fn);
+
+/*
+ * Test-only seam: override the availability probe so the degraded-isolation audit
+ * paths are deterministically reachable regardless of the host kernel/container.
+ * Pass NULL to restore the real probe.
+ */
+void sandbox_set_available_override_for_test(int (*fn)(const char **reason));
+
+/*
  * sandbox_exec:
  *   Execute |cmd| via /bin/sh -c inside the sandbox described by |cfg|.
  *   The child's stdout/stderr are written to |out_fd|/|err_fd|.
