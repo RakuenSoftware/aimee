@@ -263,6 +263,39 @@ forge/control/internal path denied) plus structural `has_*_privilege` catalog
 assertions, wired into `run-p1-rls-gate.sh` (which provisions the three-role split).
 Negative-controlled: revoking any needed grant fails the gate.
 
+## 4c. Hardened-tier bootstrap (found in the same self-review, fixed)
+
+Pushing on §4b surfaced a deeper, PRE-EXISTING gap that is not witness-specific but
+gated the release gate's production path: a hardened kb connects as a non-owner
+runtime role, yet `db2_init` unconditionally applied the full schema (owner-only
+DDL), so a hardened kb could not start at all (`permission denied for schema
+public`). No deployment currently sets `AIMEE_KB_HARDENED`, so it was dormant and
+untested — but the release gate's live-keys term only holds on the hardened tier, so
+without this the gate could never run in production.
+
+The design was decided with a roundtable and matches the existing owner/migrate role
+model (approach C: deploy-time migration + a hardened runtime presence-check):
+
+- `db2_init`, on `db2_hardening_enabled()`, runs `db2_verify_pre_provisioned()` — a
+  fully read-only check (embedding dim recorded + matching, `schema_version` recorded
+  + ≥ `AIMEE_DB2_SCHEMA_VERSION`, representative objects present via
+  `to_regclass`/`to_regprocedure`) INSTEAD of applying. It never issues DDL and fails
+  closed on any absence/mismatch/error. The dev/owner path is unchanged (still
+  auto-applies), gated strictly on the hardened flag.
+- `schema.sql` records `schema_embedding_dim` (DO NOTHING, keeping the C
+  record-or-check drift guard authoritative) and `schema_version` (DO UPDATE) at its
+  end, so a plain `psql -f schema.sql` migrate is self-sufficient. `AIMEE_DB2_SCHEMA_VERSION`
+  (`db2/db_schema.h`) is bumped in lockstep with the `schema.sql` literal on any
+  change a runtime kb depends on; out-of-sync fails closed.
+
+Validated end to end on real PG17 + TLS (`scripts/run-p7-hardened-boot-tls.sh`): a
+real `aimee-kb` with `AIMEE_KB_HARDENED=1`, connecting as a non-owner runtime login
+role over verify-full TLS against an owner-migrated schema, boots via the verify
+(no DDL) and the witness cadence produces checkpoints as the runtime role; and,
+fail-closed, a hardened kb against an UN-migrated schema refuses to start with an
+operator-actionable message and never connects db2. With this, the hardened tier —
+and thus the production release gate — is unblocked.
+
 ## 5. Deferred beyond this umbrella
 
 - Automated cross-consumer comparison; it remains an operator procedure.
