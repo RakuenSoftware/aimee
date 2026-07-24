@@ -51,4 +51,9 @@ void config_parse_roundtable_section(config_t *cfg, cJSON *root);
 
 void config_parse_kb_section2(config_t *cfg, cJSON *root);
 
+/* context.engine: name — selects the active context-compaction engine
+ * (context_engine_set_active in server_main). Re-homed from the deleted
+ * config_plugin.c, which was mis-filed under the plugin subsystem. */
+void config_parse_context_engine(config_t *cfg, cJSON *root);
+
 #endif /* DEC_CONFIG_SECTIONS_H */

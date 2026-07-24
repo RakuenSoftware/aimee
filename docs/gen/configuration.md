@@ -235,7 +235,7 @@ Internal dogfood/QA knobs; not part of the user surface.
 | `dogfood_inline_tagging` | bool | Inline-tag dogfood events during the session. |
 | `dogfood_log_dir` | string | Directory for dogfood logs. |
 
-## Config-file sections (53)
+## Config-file sections (54)
 
 Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the section parsers in `src/config*.c`; a key shown as a bare name that is itself a nested object is noted in the section description (see *Coverage & limitations*).
 
@@ -247,6 +247,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`compact`** — _Transcript compaction thresholds._ Keys: `coord_closet`, `enabled`, `head_bytes`, `per_tool`, `tail_bytes`, `threshold`
 - **`computer_use`** — _Computer-use (browser) tool settings._ Keys: `allowed_domains`, `default_navigation`, `enabled`, `redact_sensitive_screenshots`
 - **`concurrency`** — _Per-model / per-provider concurrency limits._ Keys: `default`, `maximum_total_concurrent_agent_sessions`, `per_model`, `per_provider`, `preempt`
+- **`context`** — _Context-engine selection._ Keys: `engine`
 - **`cost_reward`** — _Cost-aware reward shaping._ Keys: `enabled`, `lambda_pct`, `ref_usd_milli`
 - **`cron_jobs`** — _Scheduled job definitions (array of objects)._ Keys: `context_from`, `deliver`, `enabled`, `id`, `mode`, `pre_wake_gate`, `prompt`, `schedule`, `script`, `skills`, `when_context_contains`, `workdir`
 - **`cross_verify`** — _Cross-model output verification._ Keys: `enabled`, `prompt`, `role`, `verify_cmd`

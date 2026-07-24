@@ -157,39 +157,6 @@ jobs:
       - name: Thin-client remote exclusivity
         run: python3 scripts/test-thin-client-remote-exclusive.py ./aimee
 
-  plugin-loader-profiles:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          persist-credentials: false
-      - name: Install dependencies
-        run: |
-          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          sudo apt-get update -q
-          sudo apt-get install -y -q gcc make cmake \
-            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libpq-dev libp11-kit-dev
-      - name: Build Make profile without plugin-loader
-        run: make -C src -j$(nproc) AIMEE_WITH_PLUGIN_LOADER=0 all
-      - name: Verify disabled link closure
-      - name: Configure CMake profile without plugin-loader
-        run: cmake -S . -B build-cmake-no-loader -DAIMEE_THIN_CLIENT=ON -DAIMEE_WITH_PLUGIN_LOADER=OFF -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF
-      - name: Build CMake profile without plugin-loader
-        run: cmake --build build-cmake-no-loader --parallel 2 --target aimee
-      - name: Build and test opt-in Make profile
-        run: |
-          make -C src -j$(nproc) AIMEE_WITH_PLUGIN_LOADER=1 all \
-            build/obj/cmd_plugin.o \
-            build/obj/tests/unit-test-plugin build/obj/tests/unit-test-plugin-loader
-          ./src/build/obj/tests/unit-test-plugin
-          ./src/build/obj/tests/unit-test-plugin-loader
-          test -e src/build/obj/modules/plugin-loader/plugin.o
-          test -e src/build/obj/modules/plugin-loader/plugin_loader.o
-          test -e src/build/obj/cmd_plugin.o
-          test -e src/build/obj/server/server_plugin.o
-          strings ./aimee-server | grep -Eq '^[[:space:]]*/plugins:$'
-          strings ./aimee-server | grep -q 'plugin.list'
-
   roundtable-profiles:
     runs-on: ubuntu-latest
     steps:

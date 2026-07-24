@@ -2043,7 +2043,7 @@ int handle_identity_diff(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, report);
 }
 
-/* --- Extended dashboard handlers (traces, plans, logs, plugins, onboard, memory-stats) --- */
+/* --- Extended dashboard handlers (traces, plans, logs, onboard, memory-stats) --- */
 
 static cJSON *parse_or_array(char *json)
 {

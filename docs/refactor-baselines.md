@@ -46,7 +46,6 @@ CI never runs `freeze`; it only verifies committed intent.
 - Public headers and symbols: tracked global headers plus a separate aggregate digest of their
   complete normalized, declaration-bearing contents. This avoids a heuristic C parser silently
   omitting complex declarations.
-- Plugin ABI: public headers owned by `module-runtime` and `plugin-loader`.
 - Database schemas: DB1/DB2 schema SQL and repository migration SQL.
 - Packages and install surface: image definitions, install scripts, frontend/editor manifests, and
   the normalized `src/Makefile` `install` recipe.
@@ -56,9 +55,7 @@ The index contains no timestamp, absolute path, Git revision, compiler identity,
 state. Only Git-tracked files participate; unrelated untracked files do not cause drift. This keeps
 the result independent of the current directory, locale, and developer working-tree debris.
 
-The plugin ABI baseline covers its authoritative source declarations. It does not claim compiled
-structure size/alignment compatibility; that requires a separately specified, pinned integration
-probe. Database coverage hashes schema and migration inputs and never connects to or mutates a
+Database coverage hashes schema and migration inputs and never connects to or mutates a
 database. Recovery, compatibility aliases, and descriptor-v2 attestations remain separate proposal
 slices.
 

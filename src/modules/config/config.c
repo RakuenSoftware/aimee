@@ -1804,6 +1804,10 @@ int config_load_file(config_t *cfg)
 
    config_parse_computer_use(cfg, root);
 
+   /* context.engine: active context-compaction engine (re-homed from the
+    * removed config_plugin.c; read by context_engine_set_active in server_main) */
+   config_parse_context_engine(cfg, root);
+
    /* Neural-assisted semantic guardrails (guardrails.semantic.*) */
    {
       config_parse_guardrails_section(cfg, root);

@@ -1628,3 +1628,17 @@ void config_parse_kb_section2(config_t *cfg, cJSON *root)
       }
    }
 }
+
+/* context.engine: name — re-homed from the deleted config_plugin.c so that a
+ * single config_load() populates cfg->context_engine directly from the already
+ * parsed aimee.yaml root (the old code re-opened and re-parsed the file). The
+ * value drives context_engine_set_active() in server_main. */
+void config_parse_context_engine(config_t *cfg, cJSON *root)
+{
+   cJSON *ctx = cJSON_GetObjectItemCaseSensitive(root, "context");
+   if (!cJSON_IsObject(ctx))
+      return;
+   cJSON *eng = cJSON_GetObjectItemCaseSensitive(ctx, "engine");
+   if (cJSON_IsString(eng) && eng->valuestring && eng->valuestring[0])
+      snprintf(cfg->context_engine, sizeof(cfg->context_engine), "%s", eng->valuestring);
+}

@@ -26,7 +26,7 @@ evidence that core composition is absent.
 - `skills`: supplies selected user/project instructions that shape the response journey.
 
 Consumers are gateway/protocol serializers, agent and delegate runtimes, workflow delivery, CLI/TUI
-clients, and optional modules such as roundtable and plugin-loader that add inputs without owning the
+clients, and optional modules such as roundtable that add inputs without owning the
 final provider-neutral answer contract.
 
 ## Providers and readiness
