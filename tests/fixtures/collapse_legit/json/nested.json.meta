@@ -1,1 +1,1 @@
-shape: nested array of stable-key object arrays; expected: no-fire; expected_loop_start_offset: -1; expected_loop_span_bytes: -1; expected_repetitions: 0
+shape: nested array of uniform object arrays with required string discriminator and primitive leaves; category: uniform_object_array_with_discriminator; expected: no-fire; expected_loop_start_offset: -1; expected_loop_span_bytes: -1; expected_repetitions: 0

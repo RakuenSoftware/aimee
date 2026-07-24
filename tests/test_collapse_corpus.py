@@ -1,3 +1,4 @@
+import json
 import re
 from pathlib import Path
 
@@ -10,6 +11,14 @@ REQUIRED_FIELDS = (
     "expected_loop_span_bytes",
     "expected_repetitions",
 )
+VALID_CATEGORIES = {
+    "top_level_or_nested_arrays_of_primitives",
+    "uniform_object_array_with_discriminator",
+    "objects_with_stable_keys_and_compatible_primitive_leaves",
+    "json_fenced_inside_markdown",
+}
+
+PRIMITIVE_TYPES = (str, int, float, bool, type(None))
 
 
 def metadata(path):
@@ -101,40 +110,172 @@ def test_no_fire_oracles_use_sentinel_values():
         assert int(values["expected_repetitions"]) == 0
 
 
-REQUIRED_JSON_SHAPES = {
-    "top_level_or_nested_arrays_of_primitives",
-    "uniform_object_array_with_discriminator",
-    "objects_with_stable_keys_and_compatible_primitive_leaves",
-    "json_fenced_inside_markdown",
+def _is_primitive(value):
+    return isinstance(value, PRIMITIVE_TYPES)
+
+
+def _common_string_keys(records):
+    if not records:
+        return set()
+    candidates = None
+    for record in records:
+        string_keys = {k for k, v in record.items() if isinstance(v, str)}
+        candidates = string_keys if candidates is None else candidates & string_keys
+    return candidates or set()
+
+
+def _all_keys_common(records):
+    if not records:
+        return set()
+    candidates = None
+    for record in records:
+        common_keys = set(record.keys())
+        candidates = common_keys if candidates is None else candidates & common_keys
+    return candidates or set()
+
+
+def _discriminator_for_shape2(records):
+    """Lexicographically first key common to every record whose value is a string in every
+    record AND whose value is distinct across every record."""
+    candidates = _common_string_keys(records)
+    for key in sorted(candidates):
+        values = [record[key] for record in records]
+        if len(set(values)) == len(values):
+            return key
+    return None
+
+
+def _walk_arrays(payload):
+    """Yield every array node reachable from payload (including payload if it is a list)."""
+    if isinstance(payload, list):
+        yield payload
+        for head in payload:
+            yield from _walk_arrays(head)
+
+
+def _leaves_are_primitives(payload):
+    """True iff every leaf reachable through nested arrays is a primitive."""
+    queue = [payload]
+    while queue:
+        head = queue.pop(0)
+        if isinstance(head, list):
+            queue.extend(head)
+            continue
+        if not _is_primitive(head):
+            return False
+    return True
+
+
+def _validate_primitives_array(payload):
+    """Shape 1: top-level or nested arrays of primitives."""
+    if not isinstance(payload, list) or not payload:
+        return False
+    return _leaves_are_primitives(payload)
+
+
+def _validate_discriminator_array(payload):
+    """Shape 2: arrays (top-level or nested) of uniform-shape objects with required string
+    discriminator and primitive leaves. The discriminator key value must be distinct across
+    every record in the same array; the key must be common to all records."""
+    found_any = False
+    for array in _walk_arrays(payload):
+        if not array or not all(isinstance(el, dict) for el in array):
+            continue
+        common_keys = _all_keys_common(array)
+        if not common_keys:
+            return False
+        discriminator = _discriminator_for_shape2(array)
+        if not discriminator:
+            return False
+        for record in array:
+            if set(record.keys()) != common_keys:
+                return False
+            for key, value in record.items():
+                if key == discriminator:
+                    if not isinstance(value, str):
+                        return False
+                else:
+                    if not _is_primitive(value):
+                        return False
+        found_any = True
+    return found_any
+
+
+def _validate_stable_keys_array(payload):
+    """Shape 3: arrays (top-level or nested) of objects with stable keys + primitive leaves."""
+    found_any = False
+    for array in _walk_arrays(payload):
+        if not array or not all(isinstance(el, dict) for el in array):
+            continue
+        common_keys = _all_keys_common(array)
+        if not common_keys:
+            return False
+        for record in array:
+            if set(record.keys()) != common_keys:
+                return False
+            for value in record.values():
+                if not _is_primitive(value):
+                    return False
+        found_any = True
+    return found_any
+
+
+_FENCE_RE = re.compile(r"```json\s*\n(.*?)\n```", re.DOTALL)
+
+
+def _extract_fenced_json(md_text):
+    return [match.strip() for match in _FENCE_RE.findall(md_text)]
+
+
+_VALIDATORS = {
+    "top_level_or_nested_arrays_of_primitives": _validate_primitives_array,
+    "uniform_object_array_with_discriminator": _validate_discriminator_array,
+    "objects_with_stable_keys_and_compatible_primitive_leaves": _validate_stable_keys_array,
+    "json_fenced_inside_markdown": lambda payload: isinstance(payload, list) and bool(payload),
 }
 
 
-def _classify_json_shape(meta_text):
-    text = meta_text.lower()
-    if "fenced" in text and ("json" in text or "markdown" in text):
-        return "json_fenced_inside_markdown"
-    if "discriminator" in text:
-        return "uniform_object_array_with_discriminator"
-    if "stable keys" in text or "stable-key" in text or "stable key" in text:
-        return "objects_with_stable_keys_and_compatible_primitive_leaves"
-    if "primitive" in text:
-        return "top_level_or_nested_arrays_of_primitives"
-    return None
+def _json_payloads_for(path):
+    """Parse and return all JSON payloads (fenced markdown returns one per fence)."""
+    text = path.read_text(encoding="utf-8")
+    if path.suffix == ".json":
+        return [json.loads(text)]
+    if path.suffix == ".md":
+        return [json.loads(body) for body in _extract_fenced_json(text)]
+    return []
+
+
+def _category_from_meta(path):
+    """Read the declared `category:` field from a fixture header."""
+    source = Path(f"{path}.meta") if path.suffix == ".json" else path
+    first_line = source.read_text(encoding="utf-8").splitlines()[0]
+    match = re.search(r"category:\s*([a-z_]+)", first_line)
+    assert match, f"fixture under tests/fixtures/collapse_legit/json/ must declare category: {path}"
+    category = match.group(1)
+    assert category in VALID_CATEGORIES, (
+        f"unknown category {category!r}: {path}; valid: {sorted(VALID_CATEGORIES)}"
+    )
+    return category
 
 
 def test_required_json_shape_categories_present():
     json_dir = ROOT / "collapse_legit" / "json"
-    present = set()
+    declared = {}
     for path in sorted(json_dir.rglob("*")):
-        if not path.is_file():
+        if not path.is_file() or path.suffix == ".meta":
             continue
-        if path.suffix == ".meta":
-            present.add(_classify_json_shape(path.read_text(encoding="utf-8")))
-        elif path.suffix in {".json", ".md"}:
-            header = metadata(path)["shape"]
-            present.add(_classify_json_shape(header))
-    missing = REQUIRED_JSON_SHAPES - present
+        category = _category_from_meta(path)
+        payloads = _json_payloads_for(path)
+        assert payloads, f"no JSON payload found for fixture: {path}"
+        validator = _VALIDATORS[category]
+        for payload in payloads:
+            assert validator(payload), (
+                f"fixture payload does not satisfy structural invariant of declared "
+                f"category {category!r}: {path}; payload={payload!r}"
+            )
+        declared.setdefault(category, []).append(path)
+    missing = VALID_CATEGORIES - set(declared)
     assert not missing, (
         f"required JSON shape categories missing from corpus: {sorted(missing)}; "
-        f"present: {sorted(present)}"
+        f"declared: {sorted(declared)}"
     )
