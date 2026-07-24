@@ -58,6 +58,18 @@ typedef int (*cli_session_cancel_cb_t)(void *ud);
 void cli_session_set_cancel_check(cli_session_cancel_cb_t cb, void *ud);
 cli_session_cancel_cb_t cli_session_get_cancel_check(void **ud_out);
 
+/* Liveness heartbeat callback: cli_session_recv invokes it periodically (throttled
+ * to ~CLI_SESSION_HEARTBEAT_MS) while it waits for the CLI to finish a turn. A
+ * tmux-CLI delegate (e.g. claude) runs the model loop inside the CLI process, so
+ * aimee's HTTP progress heartbeat never fires and the stale-idle monitor would
+ * cancel a long-but-healthy turn. This proves the recv loop is alive; a genuinely
+ * wedged CLI is still bounded by recv's own idle timeout. Thread-local, saved and
+ * restored around a nested turn like the stream/cancel callbacks. */
+typedef void (*cli_session_heartbeat_cb_t)(void *ud);
+void cli_session_set_heartbeat_cb(cli_session_heartbeat_cb_t cb, void *ud);
+cli_session_heartbeat_cb_t cli_session_get_heartbeat_cb(void **ud_out);
+#define CLI_SESSION_HEARTBEAT_MS 15000
+
 /* Provider-error grace (thread-local, ms): how long recv tolerates the CLI
  * sitting in a provider error/retry state before giving up with -4. 0 disables
  * the bound (legacy: only the idle timeout applies). Save/restore around a nested

@@ -102,6 +102,24 @@ cli_session_cancel_cb_t cli_session_get_cancel_check(void **ud_out)
    return g_cancel_cb;
 }
 
+/* Per-thread liveness heartbeat (set by the delegate worker to bump the job's
+ * heartbeat_at). Thread-local so concurrent turns on the pool never cross. */
+static __thread cli_session_heartbeat_cb_t g_heartbeat_cb = NULL;
+static __thread void *g_heartbeat_ud = NULL;
+
+void cli_session_set_heartbeat_cb(cli_session_heartbeat_cb_t cb, void *ud)
+{
+   g_heartbeat_cb = cb;
+   g_heartbeat_ud = ud;
+}
+
+cli_session_heartbeat_cb_t cli_session_get_heartbeat_cb(void **ud_out)
+{
+   if (ud_out)
+      *ud_out = g_heartbeat_ud;
+   return g_heartbeat_cb;
+}
+
 /* Per-thread provider-error grace (ms); 0 = disabled. Thread-local so concurrent
  * turns on the pool each carry their own bound. */
 static __thread int g_error_grace_ms = 0;
@@ -1061,6 +1079,7 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
    long long err_start = 0; /* mono_ms when that state began (valid iff err_active) */
    int saw_answer = 0;
    int marker_cli = strstr(s->cli_kind, "claude") != NULL || strstr(s->cli_kind, "codex") != NULL;
+   long long last_hb = 0; /* mono_ms of the last liveness heartbeat (0 = never) */
    free(s->stream_emitted);
    s->stream_emitted = strdup("");
 
@@ -1070,6 +1089,21 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
       {
          out[0] = '\0';
          return -1;
+      }
+
+      /* Liveness heartbeat: this recv is actively driving the CLI turn, but a
+       * tmux-CLI delegate makes no aimee HTTP calls, so the HTTP progress
+       * heartbeat never fires and the stale-idle monitor would cancel a healthy
+       * long turn. Prove the loop is alive on a throttle well under that
+       * threshold; recv's own idle timeout still bounds a genuinely wedged CLI. */
+      if (g_heartbeat_cb)
+      {
+         long long now_hb = mono_ms();
+         if (last_hb == 0 || now_hb - last_hb >= CLI_SESSION_HEARTBEAT_MS)
+         {
+            g_heartbeat_cb(g_heartbeat_ud);
+            last_hb = now_hb;
+         }
       }
 
       /* Cancellation (steering/interrupt or session close): stop the CLI mid-
