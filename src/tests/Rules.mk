@@ -218,6 +218,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-bus-region \
                $(TESTPREFIX)/unit-test-bus-arena \
                $(TESTPREFIX)/unit-test-bus-host \
+               $(TESTPREFIX)/unit-test-bus-route \
                $(TESTPREFIX)/unit-test-guardrails-blast-radius \
                $(TESTPREFIX)/unit-test-code-collect \
                $(TESTPREFIX)/unit-test-server-compute \
@@ -2568,10 +2569,27 @@ $(TESTPREFIX)/unit-test-bus-arena: $(OBJDIR)/tests/test_bus_arena.o \
 $(OBJDIR)/tests/test_bus_host.o: C_FLAGS += -Imodules/bus
 $(TESTPREFIX)/unit-test-bus-host: $(OBJDIR)/tests/test_bus_host.o \
                                   $(OBJDIR)/modules/bus/bus_host.o \
+                                  $(OBJDIR)/modules/bus/bus_route.o \
                                   $(OBJDIR)/modules/bus/bus_region.o \
                                   $(OBJDIR)/modules/bus/bus_ring.o \
-                                  $(OBJDIR)/modules/bus/bus_arena.o
+                                  $(OBJDIR)/modules/bus/bus_arena.o \
+                                  $(OBJDIR)/modules/bus/bus_wire.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+
+# Event-bus routing + tap (feature tree slice 6).
+$(OBJDIR)/tests/test_bus_route.o: C_FLAGS += -Imodules/bus
+$(TESTPREFIX)/unit-test-bus-route: $(OBJDIR)/tests/test_bus_route.o \
+                                   $(OBJDIR)/modules/bus/bus_host.o \
+                                   $(OBJDIR)/modules/bus/bus_route.o \
+                                   $(OBJDIR)/modules/bus/bus_region.o \
+                                   $(OBJDIR)/modules/bus/bus_ring.o \
+                                   $(OBJDIR)/modules/bus/bus_arena.o \
+                                   $(OBJDIR)/modules/bus/bus_wire.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+
+.PHONY: unit-test-bus-route
+unit-test-bus-route: $(TESTPREFIX)/unit-test-bus-route
+	$<
 
 .PHONY: unit-test-bus-host
 unit-test-bus-host: $(TESTPREFIX)/unit-test-bus-host

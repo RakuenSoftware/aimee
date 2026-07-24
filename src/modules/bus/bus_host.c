@@ -127,11 +127,16 @@ long bus_fd_recv(int sock, void *payload, size_t len, int *fds, int max_fds, int
 /* ------------------------------------------------------------------ */
 /* lifecycle                                                           */
 
+/* Defined in bus_route.c: scrub a departing slot from the observer/server
+ * registry and drop any pending request it was party to. */
+void bus_route_forget_slot(bus_host_t *h, uint32_t slot);
+
 static void slot_release(bus_host_t *h, uint32_t idx)
 {
    bus_slot_t *s = &h->slots[idx];
    if (!s->in_use)
       return;
+   bus_route_forget_slot(h, idx);
    /* A departing client's arena leases must not strand the arena: drop the refs
     * it held as a producer and as a consumer. */
    bus_arena_reap_producer(&h->arena, idx);
