@@ -1,4 +1,4 @@
-# shape: non-repeating ramp followed by a repeated loop body; expected: fire; expected_loop_start_offset: 111; expected_loop_span_bytes: 48
+# shape: non-repeating ramp followed by a repeated loop body; expected: fire; expected_loop_start_offset: 111; expected_loop_span_bytes: 48; expected_repetitions: 4
 ramp: 1
 ramp: 2
 ramp: 3
