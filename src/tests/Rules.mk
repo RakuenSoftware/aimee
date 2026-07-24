@@ -215,6 +215,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-prompt-sanitizer \
                $(TESTPREFIX)/unit-test-bus-wire \
                $(TESTPREFIX)/unit-test-bus-ring \
+               $(TESTPREFIX)/unit-test-bus-region \
                $(TESTPREFIX)/unit-test-guardrails-blast-radius \
                $(TESTPREFIX)/unit-test-code-collect \
                $(TESTPREFIX)/unit-test-server-compute \
@@ -2544,6 +2545,18 @@ $(OBJDIR)/tests/test_bus_ring.o: C_FLAGS += -Imodules/bus
 $(TESTPREFIX)/unit-test-bus-ring: $(OBJDIR)/tests/test_bus_ring.o \
                                   $(OBJDIR)/modules/bus/bus_ring.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+
+# Event-bus region layout (feature tree slice 3). Uses memfd_create + mmap; no
+# DB. Links the ring (slice 2) since a queue-pair region contains two rings.
+$(OBJDIR)/tests/test_bus_region.o: C_FLAGS += -Imodules/bus
+$(TESTPREFIX)/unit-test-bus-region: $(OBJDIR)/tests/test_bus_region.o \
+                                    $(OBJDIR)/modules/bus/bus_region.o \
+                                    $(OBJDIR)/modules/bus/bus_ring.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+
+.PHONY: unit-test-bus-region
+unit-test-bus-region: $(TESTPREFIX)/unit-test-bus-region
+	$<
 
 .PHONY: unit-test-bus-ring
 unit-test-bus-ring: $(TESTPREFIX)/unit-test-bus-ring
