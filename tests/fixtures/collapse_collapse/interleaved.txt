@@ -1,4 +1,4 @@
-# shape: interleaved loop x3 with non-repeating connective; expected: fire; expected_loop_start_offset: 162; expected_loop_span_bytes: 11; expected_repetitions: 3
+# shape: xxxxxx; expected: fire; expected_loop_start_offset: 120; expected_loop_span_bytes: 11; expected_repetitions: 3
 item
 value
 connective-A

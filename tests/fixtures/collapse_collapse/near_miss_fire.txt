@@ -1,0 +1,16 @@
+# shape: xxxxxx; expected: fire; expected_loop_start_offset: 120; expected_loop_span_bytes: 45; expected_repetitions: 3
+outerStart
+marker-a
+middle
+marker-b
+outerEnd
+outerStart
+marker-a
+middle
+marker-b
+outerEnd
+outerStart
+marker-a
+middle
+marker-b
+outerEnd

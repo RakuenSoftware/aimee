@@ -137,6 +137,19 @@ def _read_fixture(p):
     return _strip_envelope(p)
 
 
+def _header_length(p, file_bytes):
+    """Return the byte length of the metadata envelope for fixture `p`.
+    The envelope covers the LF-terminated header line for inline
+    envelopes, and is zero for sibling `.meta` envelopes (where the
+    payload file is offset 0)."""
+    kind, _ = _envelope_kind(p)
+    if kind == "meta":
+        return 0
+    i = file_bytes.find(b"\n")
+    assert i >= 0, f"{p}: header missing newline"
+    return i + 1  # include the trailing LF
+
+
 def _count_verbatim_iterations(body, off, period):
     """Walk the body forward from `off` and return ordered iteration
     offsets. After accepting an iteration at offset p, the next
@@ -288,57 +301,96 @@ class TestCollapseCollapse(unittest.TestCase):
         "ramp_then_loop.txt",
         "nested_loop.txt",
         "interleaved.txt",
+        # near_miss_fire.txt exercises the FN category: a fire fixture
+        # whose period embeds smaller structural markers a naive
+        # detector could mistake for the unit of repetition and
+        # therefore miss the outer scale. The detector must fire on
+        # it; failing to do so counts as a false negative.
+        "near_miss_fire.txt",
     ]
 
     def test_required_files_present(self):
         for fn in self.REQUIRED_FILES:
             self.assertTrue((COLLAPSE / fn).exists(), f"missing {fn}")
 
-    def _check_fire(self, p, require_distinct_connectives=False,
-                    require_empty_connectives=False):
+    # Shape kinds decide the connective rule the validator enforces.
+    # The grammar doc defines two iteration-boundary styles:
+    #
+    #   contiguous  - the connective between consecutive iterations is
+    #                 empty; iterations advance by exactly `sp` bytes.
+    #                 Used by short_span, long_span, ramp_then_loop,
+    #                 and nested_loop.
+    #   interleaved - the connective is non-empty and typically varies
+    #                 between iterations. Used by the interleaved
+    #                 fixture.
+    #
+    # The validator scans the *body* (post-envelope bytes) so the
+    # iteration oracle is computed against the byte range the grammar
+    # doc defines. The metadata offset is translated from
+    # file-relative to body-relative by subtracting header_len.
+    SHAPE_CONTIGUOUS = "contiguous"
+    SHAPE_INTERLEAVED = "interleaved"
+
+    def _check_fire(self, p, shape_kind=SHAPE_CONTIGUOUS):
         header, body, file_bytes = _read_fixture(p)
         fields = _parse_header_for(p)
         self.assertEqual(fields["expected"], "fire", f"{p}: must be fire")
-        off = fields["offset"]
+        file_off = fields["offset"]
         sp = fields["span"]
         reps = fields["repetitions"]
-        self.assertGreaterEqual(off, 0,
-                                f"{p}: fire offset must be >= 0, got {off}")
+        header_len = _header_length(p, file_bytes)
+        off = file_off - header_len
+        self.assertGreaterEqual(
+            off, 0,
+            f"{p}: declared offset {file_off} is inside the header "
+            f"(header_len={header_len}); the period must live in the body",
+        )
         self.assertGreaterEqual(sp, 2, f"{p}: span {sp} too small")
-        self.assertLessEqual(off + sp, len(file_bytes),
-                             f"{p}: offset+span exceeds file length")
+        self.assertLessEqual(off + sp, len(body),
+                             f"{p}: offset+span exceeds body length "
+                             f"(body_len={len(body)}, off={off}, sp={sp})")
         self.assertGreaterEqual(
             reps, 2,
             f"{p}: expected_repetitions {reps} must be >= 2 for fire",
         )
-        period = file_bytes[off:off + sp]
-        # Substantive check: the period must contain at least one
-        # non-whitespace token; otherwise a degenerate period of pure
-        # newlines or spaces would pass silently.
+        period = body[off:off + sp]
         self.assertTrue(
             any(b not in (b"\n", b" ", b"\t", b"\r") for b in period),
             f"{p}: period slice is whitespace-only; "
             f"the corpus must declare substantive periods",
         )
-        iterations = _count_verbatim_iterations(file_bytes, off, period)
+        iterations = _count_verbatim_iterations(body, off, period)
         self.assertEqual(
             len(iterations), reps,
-            f"{p}: expected exactly {reps} iteration boundaries, "
-            f"found {len(iterations)} at {iterations}",
+            f"{p}: expected exactly {reps} iteration boundaries in body, "
+            f"found {len(iterations)} at body offsets {iterations}",
         )
-        self.assertEqual(iterations[0], off,
-                         f"{p}: first iteration must equal declared offset")
+        self.assertEqual(
+            iterations[0], off,
+            f"{p}: first iteration body offset {iterations[0]} must "
+            f"equal declared offset {off} (file offset {file_off}, "
+            f"header_len {header_len})",
+        )
         for a, b in zip(iterations, iterations[1:]):
             self.assertGreater(b, a, f"{p}: iterations not strictly increasing")
+        if shape_kind == self.SHAPE_CONTIGUOUS:
+            for a, b in zip(iterations, iterations[1:]):
+                self.assertEqual(
+                    a + sp, b,
+                    f"{p}: contiguous loop expected empty connective, "
+                    f"but iteration gap at body offsets {a}->{b} has "
+                    f"connective {body[a + sp:b]!r}; the grammar "
+                    f"defines contiguous loops as boundary-aligned",
+                )
         for k, (a, b) in enumerate(zip(iterations, iterations[1:])):
-            connective = file_bytes[a + sp:b]
+            connective = body[a + sp:b]
             self.assertNotIn(
                 period, connective,
                 f"{p}: connective {k} contains period substring "
                 f"(non-boundary-aligned match)",
             )
-        if require_distinct_connectives:
-            connectives = _connectives(file_bytes, iterations, sp)
+        if shape_kind == self.SHAPE_INTERLEAVED:
+            connectives = _connectives(body, iterations, sp)
             self.assertEqual(
                 len(connectives), len(set(connectives)),
                 f"{p}: connective slices must all be distinct, "
@@ -347,16 +399,13 @@ class TestCollapseCollapse(unittest.TestCase):
             for k, c in enumerate(connectives):
                 self.assertGreater(
                     len(c), 0,
-                    f"{p}: connective {k} must be non-empty for interleaved "
-                    f"shape; got {c!r}",
+                    f"{p}: connective {k} must be non-empty for "
+                    f"interleaved shape; got {c!r}",
                 )
-        if require_empty_connectives:
-            connectives = _connectives(file_bytes, iterations, sp)
-            for k, c in enumerate(connectives):
-                self.assertEqual(
-                    len(c), 0,
-                    f"{p}: contiguous loop: connective {k} must be empty, "
-                    f"got {c!r}",
+                self.assertTrue(
+                    any(b not in (b"\n", b" ", b"\t", b"\r") for b in c),
+                    f"{p}: interleaved connective {c!r} must contain "
+                    f"non-whitespace",
                 )
 
     def test_short_span(self):
@@ -369,29 +418,35 @@ class TestCollapseCollapse(unittest.TestCase):
         p = COLLAPSE / "ramp_then_loop.txt"
         header, body, file_bytes = _read_fixture(p)
         fields = _parse_header_for(p)
-        off = fields["offset"]
+        header_len = _header_length(p, file_bytes)
+        off_body = fields["offset"] - header_len
         sp = fields["span"]
-        self.assertEqual(file_bytes[off:off + sp], b"loop item\n",
-                         f"offset {off} does not point at the loop period")
-        self.assertEqual(file_bytes[off - 1:off], b"\n",
+        period = body[off_body:off_body + sp]
+        self.assertEqual(period, b"loop item\n",
+                         f"declared offset does not point at the loop "
+                         f"period; got {period!r}")
+        self.assertEqual(body[off_body - 1:off_body], b"\n",
                          "offset must start on a fresh line, not mid-ramp")
-        ramp_window = file_bytes[max(0, off - 64):off]
+        ramp_window = body[:off_body]
         self.assertIn(b"setup one\n", ramp_window)
         self.assertIn(b"setup two\n", ramp_window)
         self.assertIn(b"setup three\n", ramp_window)
-        self._check_fire(p, require_empty_connectives=True)
+        self._check_fire(p, shape_kind=self.SHAPE_CONTIGUOUS)
 
     def test_nested_loop(self):
         p = COLLAPSE / "nested_loop.txt"
         header, body, file_bytes = _read_fixture(p)
         fields = _parse_header_for(p)
-        off = fields["offset"]
+        header_len = _header_length(p, file_bytes)
+        off_body = fields["offset"] - header_len
         sp = fields["span"]
-        period = file_bytes[off:off + sp]
+        period = body[off_body:off_body + sp]
         self.assertTrue(period.startswith(b"outer-start\n"),
-                        f"period must begin with 'outer-start\\n', got {period[:20]!r}")
+                        f"period must begin with 'outer-start\\n', "
+                        f"got {period[:20]!r}")
         self.assertTrue(period.endswith(b"outer-end\n"),
-                        f"period must end with 'outer-end\\n', got {period[-20:]!r}")
+                        f"period must end with 'outer-end\\n', "
+                        f"got {period[-20:]!r}")
         inner = b"inner-a\ninner-b\n"
         i, count = 0, 0
         while True:
@@ -402,49 +457,39 @@ class TestCollapseCollapse(unittest.TestCase):
             i = j + len(inner)
         self.assertGreaterEqual(
             count, 2,
-            f"inner sub-block must repeat >=2 times in outer period, got {count}",
+            f"inner sub-block must repeat >=2 times in outer period, "
+            f"got {count}",
         )
-        n, pos = 0, off
-        while pos + sp <= len(file_bytes) and file_bytes[pos:pos + sp] == period:
-            n += 1
-            pos += sp
-        self.assertGreaterEqual(
-            n, 2,
-            f"outer block must repeat >=2 times contiguously, got {n}",
-        )
-        self._check_fire(p)
+        self._check_fire(p, shape_kind=self.SHAPE_CONTIGUOUS)
 
     def test_interleaved(self):
         p = COLLAPSE / "interleaved.txt"
+        self._check_fire(p, shape_kind=self.SHAPE_INTERLEAVED)
+
+    def test_near_miss_fire(self):
+        # FN-risk fixture: the outer period contains inner markers
+        # (marker-a, marker-b) a naive detector might split on. The
+        # detector must fire on the outer scale anyway. Period must
+        # be boundary-aligned, span includes the markers verbatim,
+        # and the connective rule is contiguous.
+        p = COLLAPSE / "near_miss_fire.txt"
         header, body, file_bytes = _read_fixture(p)
         fields = _parse_header_for(p)
-        off = fields["offset"]
+        header_len = _header_length(p, file_bytes)
+        off_body = fields["offset"] - header_len
         sp = fields["span"]
-        period = file_bytes[off:off + sp]
-        iterations = _count_verbatim_iterations(file_bytes, off, period)
-        self.assertGreaterEqual(
-            len(iterations), 2,
-            f"expected >= 2 ordered iteration boundaries, got {len(iterations)}",
+        period = body[off_body:off_body + sp]
+        # Outer period must contain the inner marker pair verbatim,
+        # confirming this fixture genuinely nests.
+        self.assertIn(
+            b"marker-a\n", period,
+            "near_miss_fire: outer period must include 'marker-a\n'",
         )
-        self.assertEqual(iterations[0], off,
-                         "first iteration must equal declared offset")
-        connectives = _connectives(file_bytes, iterations, sp)
-        for k, c in enumerate(connectives):
-            self.assertGreater(
-                len(c), 0,
-                f"interleaved connective {k} must be non-empty, got {c!r}",
-            )
-        unique = {c for c in connectives}
-        self.assertEqual(
-            len(unique), len(connectives),
-            f"connective tissue between iterations must all differ; got {connectives!r}",
+        self.assertIn(
+            b"marker-b\n", period,
+            "near_miss_fire: outer period must include 'marker-b\n'",
         )
-        for c in connectives:
-            self.assertTrue(
-                any(b not in (b"\n", b" ", b"\t", b"\r") for b in c),
-                f"interleaved connective {c!r} must contain non-whitespace",
-            )
-        self._check_fire(p, require_distinct_connectives=True)
+        self._check_fire(p, shape_kind=self.SHAPE_CONTIGUOUS)
 
 
 class TestCollapseLegit(unittest.TestCase):
@@ -455,6 +500,13 @@ class TestCollapseLegit(unittest.TestCase):
         "markdown_table.md",
         "ordered_list.md",
         "short_lines.txt",
+        # fp_risk_long_code.md exercises the FP category: a no-fire
+        # fixture whose structural repeat is unusually long (a
+        # full fenced python block, not a one-line marker), so a
+        # naive detector with a fixed threshold might mistakenly
+        # fire. The detector must suppress it; failing to do so
+        # counts as a false positive.
+        "fp_risk_long_code.md",
     ]
 
     REQUIRED_JSON = ["primitives.json", "nested.json", "objects.json", "fenced.md"]

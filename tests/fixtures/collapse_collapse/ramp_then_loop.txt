@@ -1,4 +1,4 @@
-# shape: ramp then loop x3; expected: fire; expected_loop_start_offset: 163; expected_loop_span_bytes: 10; expected_repetitions: 3
+# shape: xxxxxx; expected: fire; expected_loop_start_offset: 152; expected_loop_span_bytes: 10; expected_repetitions: 3
 setup one
 setup two
 setup three
