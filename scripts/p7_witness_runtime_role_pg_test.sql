@@ -155,4 +155,57 @@ BEGIN
 END $$;
 
 RESET ROLE;
+
+-- ============================ CATALOG: the grant model itself ================
+-- Assert the exact privileges structurally, so a REMOVED grant (or an ADDED write
+-- grant) is caught even without running the cadence — the failure mode that let the
+-- original bug ship. Uses has_*_privilege as the owner (RESET ROLE above).
+DO $$
+DECLARE
+  r TEXT := 'aimee_kb_runtime';
+  t TEXT;
+  fn TEXT;
+  needed_exec TEXT[] := ARRAY[
+    'org_vault_witness_control_fence()',
+    'org_vault_witness_checkpoint_leaves()',
+    'org_vault_witness_checkpoint_persist(bigint,bytea,boolean,bytea,bigint,bytea,bytea,bytea,smallint,integer,bytea,bigint)',
+    'org_vault_witness_emit_pending()',
+    'org_vault_witness_emit_batch(text,text,bigint,integer)',
+    'org_vault_witness_emit_checkpoints(bigint,integer)',
+    'org_vault_witness_emit_advance(smallint,text,text,bigint)'];
+  denied_exec TEXT[] := ARRAY[
+    'org_vault_witness_append(smallint,text,text,text,text,text,text,text,text,bytea,boolean,bytea)',
+    'org_vault_witness_verify_shard(text,text)'];
+BEGIN
+  -- Read-only on the four evidence tables: SELECT yes, write no.
+  FOREACH t IN ARRAY ARRAY['kb_vault_witness_shard','kb_vault_witness_log',
+                           'kb_vault_witness_checkpoint','kb_vault_witness_emit_cursor'] LOOP
+    IF NOT has_table_privilege(r, 'public.'||t, 'SELECT') THEN
+      RAISE EXCEPTION 'RUNTIME FAIL: % lacks SELECT on %', r, t;
+    END IF;
+    IF has_table_privilege(r, 'public.'||t, 'INSERT')
+       OR has_table_privilege(r, 'public.'||t, 'UPDATE')
+       OR has_table_privilege(r, 'public.'||t, 'DELETE') THEN
+      RAISE EXCEPTION 'RUNTIME FAIL: % has a WRITE privilege on % (forge risk)', r, t;
+    END IF;
+  END LOOP;
+  -- Cadence/boot/gate functions: EXECUTE granted.
+  FOREACH fn IN ARRAY needed_exec LOOP
+    IF NOT has_function_privilege(r, 'public.'||fn, 'EXECUTE') THEN
+      RAISE EXCEPTION 'RUNTIME FAIL: % lacks EXECUTE on %', r, fn;
+    END IF;
+  END LOOP;
+  -- Internal helpers + the control row: NOT reachable by runtime.
+  FOREACH fn IN ARRAY denied_exec LOOP
+    IF has_function_privilege(r, 'public.'||fn, 'EXECUTE') THEN
+      RAISE EXCEPTION 'RUNTIME FAIL: % should NOT have EXECUTE on %', r, fn;
+    END IF;
+  END LOOP;
+  IF has_table_privilege(r, 'public.kb_vault_control', 'SELECT') THEN
+    RAISE EXCEPTION 'RUNTIME FAIL: % can read kb_vault_control (must be owner-only)', r;
+  END IF;
+  RAISE NOTICE 'RUNTIME OK: grant catalog is exactly least-privilege (read evidence, execute '
+    'cadence funcs; no write, no control row, no internal helpers)';
+END $$;
+
 DO $$ BEGIN RAISE NOTICE 'p7_witness_runtime_role_pg_test: all checks passed'; END $$;
