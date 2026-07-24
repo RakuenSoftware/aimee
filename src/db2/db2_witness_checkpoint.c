@@ -179,12 +179,13 @@ db2_witness_checkpoint_result_t db2_witness_checkpoint_produce(int64_t *out_seq)
                               sizeof err) != 0)
       return DB2_WITNESS_CP_TRANSIENT;
 
-   /* 1. Fence to revalidate at persist time. */
+   /* 1. Fence to revalidate at persist time. Read via the definer accessor, not
+    * kb_vault_control directly: the control row is owner-only, and the runtime role
+    * the cadence connects as on the hardened tier has no access to it. */
    int64_t fence = -1;
    {
       aimee_pg_stmt_t *st =
-          aimee_pg_prepare(conn, "SELECT fencing_token FROM kb_vault_control WHERE singleton=1",
-                           err, sizeof err);
+          aimee_pg_prepare(conn, "SELECT org_vault_witness_control_fence()", err, sizeof err);
       if (st && aimee_pg_step(st, err, sizeof err) == AIMEE_PG_ROW)
          fence = aimee_pg_column_int64(st, 0);
       if (st)

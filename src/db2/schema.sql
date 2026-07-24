@@ -5603,6 +5603,22 @@ ALTER TABLE kb_vault_witness_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE kb_vault_witness_checkpoint ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE kb_vault_witness_shard, kb_vault_witness_log,
   kb_vault_witness_checkpoint FROM PUBLIC;
+-- Read policies: the witness cadence, boot check, and release gate run on the kb's
+-- RUNTIME connection (aimee_kb_runtime on the hardened tier) and read this evidence
+-- directly. The evidence is NON-SECRET — it is exported verbatim on the log/OTLP
+-- path — so read access is not a disclosure risk; the security property is that
+-- runtime cannot FORGE evidence, which is preserved by the WORM triggers
+-- (UPDATE/DELETE/TRUNCATE) and by never granting runtime INSERT. The evidence is
+-- service-global (not tenant-scoped), so the policy admits all rows; the table-level
+-- SELECT grant (schema_grants.sql) is what actually gates who may read. Without a
+-- policy, RLS denies even a granted SELECT, which is what silently broke the cadence
+-- on the hardened tier.
+DROP POLICY IF EXISTS kb_vault_witness_shard_read ON kb_vault_witness_shard;
+CREATE POLICY kb_vault_witness_shard_read ON kb_vault_witness_shard FOR SELECT USING (true);
+DROP POLICY IF EXISTS kb_vault_witness_log_read ON kb_vault_witness_log;
+CREATE POLICY kb_vault_witness_log_read ON kb_vault_witness_log FOR SELECT USING (true);
+DROP POLICY IF EXISTS kb_vault_witness_checkpoint_read ON kb_vault_witness_checkpoint;
+CREATE POLICY kb_vault_witness_checkpoint_read ON kb_vault_witness_checkpoint FOR SELECT USING (true);
 
 -- Genesis sentinel, matching vault_witness_genesis_sentinel on the C side.
 CREATE OR REPLACE FUNCTION org_vault_witness_genesis(p_tenant TEXT, p_provider TEXT)
@@ -5836,6 +5852,11 @@ CREATE TABLE IF NOT EXISTS kb_vault_witness_emit_cursor (
 );
 ALTER TABLE kb_vault_witness_emit_cursor ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE kb_vault_witness_emit_cursor FROM PUBLIC;
+-- The emitter reads the cursor via org_vault_witness_emit_pending() (definer), but a
+-- read policy keeps it consistent with the other witness tables and harmless (the
+-- cursor is a position, not evidence). Writes go only through the definer advance.
+DROP POLICY IF EXISTS kb_vault_witness_emit_cursor_read ON kb_vault_witness_emit_cursor;
+CREATE POLICY kb_vault_witness_emit_cursor_read ON kb_vault_witness_emit_cursor FOR SELECT USING (true);
 
 -- Backlog across every record shard plus the checkpoint stream. Numbers only; the
 -- caller turns these into the emission-backlog gauge. Shards with no cursor row yet
@@ -5932,6 +5953,18 @@ BEGIN
   RETURN v;
 END; $$;
 
+-- The checkpoint producer needs the control fence to pass to _persist, but
+-- kb_vault_control is owner-only (the maintenance barrier) and must never be granted
+-- to the runtime role. This definer exposes ONLY the fence — no seal/maintenance
+-- fields, no lock, no write — so the runtime cadence can read it without any other
+-- control-row access. A plain snapshot read matches how the producer used it.
+CREATE OR REPLACE FUNCTION org_vault_witness_control_fence()
+RETURNS BIGINT
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+  SELECT fencing_token FROM public.kb_vault_control WHERE singleton=1;
+$$;
+
+REVOKE ALL ON FUNCTION org_vault_witness_control_fence() FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_worm_block() FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_verify_shard(TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_checkpoint_leaves() FROM PUBLIC;
@@ -5944,28 +5977,47 @@ REVOKE ALL ON FUNCTION org_vault_witness_genesis(TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_record_digest(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA,BYTEA,BIGINT,BIGINT,BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_append(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA) FROM PUBLIC;
 
--- Runtime least-privilege: aimee_kb_runtime holds no direct DML on the witness
--- tables and no grant on the witness functions (E1 has no runtime caller; E2 adds
--- the exact grants it needs). The conditional keeps dev schemas re-applicable.
+-- Runtime privilege for the witness surface. The kb's cadence, boot check, and
+-- release gate run on the RUNTIME connection (aimee_kb_runtime on the hardened
+-- tier), so that role needs read on the evidence and EXECUTE on the cadence
+-- functions — but must never be able to FORGE evidence or touch the control row.
+-- E1 left the whole surface runtime-invisible (no runtime caller); E2 grants
+-- exactly what the cadence needs and nothing more. Self-consistent so a dev
+-- re-apply of schema.sql alone yields the correct posture; schema_grants.sql
+-- reasserts the same on the hardened tier.
 DO $$
 BEGIN
   IF EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname='aimee_kb_runtime') THEN
+    -- Read-only on the evidence tables: non-secret (exported as logs) and needed by
+    -- the producer/boot/gate reads. NO write is granted; forgery stays blocked by
+    -- the WORM triggers and by withholding INSERT.
     REVOKE ALL ON TABLE public.kb_vault_witness_shard,public.kb_vault_witness_log,
       public.kb_vault_witness_checkpoint,public.kb_vault_witness_emit_cursor
       FROM aimee_kb_runtime;
+    GRANT SELECT ON TABLE public.kb_vault_witness_shard,public.kb_vault_witness_log,
+      public.kb_vault_witness_checkpoint,public.kb_vault_witness_emit_cursor
+      TO aimee_kb_runtime;
+    -- The internal / definer-nested helpers stay invisible: append runs nested in
+    -- the source-ledger definers, verify_shard nested in the leaf scan, and
+    -- genesis/record_digest/worm_block are never called directly by the runtime.
     REVOKE ALL ON FUNCTION
-      public.org_vault_witness_emit_pending(),
-      public.org_vault_witness_emit_batch(TEXT,TEXT,BIGINT,INTEGER),
-      public.org_vault_witness_emit_checkpoints(BIGINT,INTEGER),
-      public.org_vault_witness_emit_advance(SMALLINT,TEXT,TEXT,BIGINT),
       public.org_vault_witness_worm_block(),
       public.org_vault_witness_genesis(TEXT,TEXT),
       public.org_vault_witness_record_digest(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA,BYTEA,BIGINT,BIGINT,BIGINT),
       public.org_vault_witness_append(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA),
-      public.org_vault_witness_verify_shard(TEXT,TEXT),
-      public.org_vault_witness_checkpoint_leaves(),
-      public.org_vault_witness_checkpoint_persist(BIGINT,BYTEA,BOOLEAN,BYTEA,BIGINT,BYTEA,BYTEA,BYTEA,SMALLINT,INTEGER,BYTEA,BIGINT)
+      public.org_vault_witness_verify_shard(TEXT,TEXT)
       FROM aimee_kb_runtime;
+    -- The cadence/boot/gate call these directly, so grant EXECUTE. control_fence
+    -- exposes only the fence, keeping the rest of kb_vault_control owner-only.
+    GRANT EXECUTE ON FUNCTION
+      public.org_vault_witness_control_fence(),
+      public.org_vault_witness_checkpoint_leaves(),
+      public.org_vault_witness_checkpoint_persist(BIGINT,BYTEA,BOOLEAN,BYTEA,BIGINT,BYTEA,BYTEA,BYTEA,SMALLINT,INTEGER,BYTEA,BIGINT),
+      public.org_vault_witness_emit_pending(),
+      public.org_vault_witness_emit_batch(TEXT,TEXT,BIGINT,INTEGER),
+      public.org_vault_witness_emit_checkpoints(BIGINT,INTEGER),
+      public.org_vault_witness_emit_advance(SMALLINT,TEXT,TEXT,BIGINT)
+      TO aimee_kb_runtime;
   END IF;
 END $$;
 -- ============================================================================
