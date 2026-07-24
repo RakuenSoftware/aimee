@@ -2249,19 +2249,6 @@ int handle_dashboard_logs(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
-#if AIMEE_WITH_PLUGIN_LOADER
-int handle_dashboard_plugins(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-   (void)req;
-   char *json = api_dashboard_plugins();
-   cJSON *resp = jo_ok();
-   cJSON_AddItemToObject(resp, "data", parse_or_object(json));
-   free(json);
-   return send_and_free(conn, resp);
-}
-#endif
-
 int handle_dashboard_onboard(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;

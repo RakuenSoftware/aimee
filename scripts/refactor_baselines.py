@@ -29,10 +29,6 @@ SURFACES = {
         "src/headers/*.h",
         "src/modules/*/include/**/*.h",
     ),
-    "plugin-abi": (
-        "src/modules/module-runtime/include/**/*.h",
-        "src/modules/plugin-loader/include/**/*.h",
-    ),
     "database-schemas": (
         "src/db1/*.sql",
         "src/db2/*.sql",

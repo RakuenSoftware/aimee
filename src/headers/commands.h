@@ -224,8 +224,6 @@ const subcmd_t *get_mcp_subcmds(void);
 void cmd_autopilot(app_ctx_t *ctx, int argc, char **argv);
 const subcmd_t *get_autopilot_subcmds(void);
 
-#if AIMEE_WITH_PLUGIN_LOADER
-#endif
 
 /* cmd_run.c */
 void cmd_run(app_ctx_t *ctx, int argc, char **argv);

@@ -24,9 +24,6 @@ char *api_traces(void);
 char *api_memory_stats(void);
 char *api_plans(void);
 char *api_logs(void);
-#if AIMEE_WITH_PLUGIN_LOADER
-char *api_dashboard_plugins(void);
-#endif
 char *api_dashboard_reminders(void);
 char *api_dashboard_recall(void);
 char *api_dashboard_directives(void);
