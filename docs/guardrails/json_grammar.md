@@ -1,6 +1,6 @@
 # Deterministic JSON fragment grammar
 
-This document defines the byte-stable fixture grammar and oracle for the repetition-collapse detector. Inputs are UTF-8 bytes; offsets are an absolute byte offset from generation start; offsets and spans are measured from byte zero of the generated fixture body.
+This document defines the byte-stable fixture grammar and oracle for the repetition-collapse detector. Inputs are UTF-8 bytes; offsets are an absolute byte offset from the start of the fixture file (byte zero of the file, including the header line). Offsets and spans are measured in UTF-8 bytes.
 
 ## Accepted JSON shapes
 
@@ -24,7 +24,15 @@ The canonical fields and spellings are:
 
 `shape:<description>; expected:<fire|no-fire>; expected_loop_start_offset:<integer>; expected_loop_span_bytes:<integer>; expected_repetitions:<integer>`
 
-For `fire`, the offset identifies the first iteration boundary and the span is the byte length of one verbatim iteration; `expected_repetitions` records the number of iterations. The loop period begins at that iteration boundary. The iteration boundary is derived from the first verbatim body occurrence and must be checked against the declared span. Detector threshold N has **default 4** repetitions. The long-span threshold M has default 60 bytes. Fire fixtures contain at least N verbatim iterations of a qualifying loop. A no-fire fixture uses `-1`, `-1`, and `0` for offset, span, and expected_repetitions respectively.
+For `fire`, the offset identifies the first iteration boundary and the span is the byte length of one verbatim iteration; `expected_repetitions` records the number of iterations. The loop period begins at that iteration boundary. **The iteration boundary is the byte offset of the first iteration of the repeating period — the first occurrence after any non-repeating ramp or prefix, not the first verbatim body occurrence anywhere in the file.** Detector threshold N has **default 4** repetitions. The long-span threshold M has default 60 bytes. Fire fixtures contain at least N verbatim iterations of a qualifying loop. A no-fire fixture uses `-1`, `-1`, and `0` for offset, span, and expected_repetitions respectively.
+
+### Consistency rule for `expected_repetitions`
+
+For `fire` fixtures, `expected_repetitions >= N` (default 4), and the body length from `expected_loop_start_offset` onward must be `>= expected_repetitions * expected_loop_span_bytes`. A fixture that violates either constraint is malformed.
+
+### Scope of the `no-fire` label
+
+The formal `no-fire` label applies to fragments that obey the accepted JSON shapes above (the JSON profile) and to the non-JSON structural patterns explicitly enumerated in the corpus: markdown tables, enumerated/ordered lists, ASCII art boxes, and JSON fenced inside markdown. Fixtures outside this scope — including free-form prose near-verbatim repeats and non-JSON fenced code blocks — are advisory **false-positive-risk** cases and live in a separate `tests/fixtures/collapse_legit/fp_risk/` sub-corpus. A detector is not required to honour the no-fire label on `fp_risk/` inputs; it is encouraged to use them as a regression set to surface unintended fires.
 
 ## Metrics
 
