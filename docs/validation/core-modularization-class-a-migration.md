@@ -2,20 +2,20 @@
 
 ## What this records
 
-Nineteen module descriptors carry `ownership_complete: true`. Seven do not. This document tracks
-those seven, whose module root contains nothing but `module.yaml` — no implementation has ever been
+Twenty module descriptors carry `ownership_complete: true`. Six do not. This document tracks
+those six, whose module root contains nothing but `module.yaml` — no implementation has ever been
 moved under `src/modules/<id>/`. It exists so that gap is recorded in one place rather than inferred
 by re-measuring the tree, and so `rule=ownership-empty-domain` has somewhere to point.
 
 The Class B descriptors that once had undeclared implementation files in their roots — governance,
 learning, workspace, vault, config, git, delegates, workflows, memory — have since been declared and
-latched, as has `benchmarks` (the first Class A code migration). These seven empty-root descriptors
+latched, as has `benchmarks` (the first Class A code migration). These six empty-root descriptors
 are the only remainder.
 
 ## Why an empty root cannot be latched
 
 `validate_complete_ownership` compares the declared source and private-header sets against every
-matching file under the module root. For these seven, both actual sets are empty, so set equality
+matching file under the module root. For these six, both actual sets are empty, so set equality
 holds vacuously and the latch would pass on the source and private-header rules. Until slice 39 the
 only thing preventing it was the separate `docs == ["docs/modules/<id>.md"]` requirement, which none
 of them satisfies — one field away from a descriptor asserting completeness for a module that has not
@@ -23,7 +23,7 @@ been migrated at all.
 
 `docs/modules/module-runtime.md` states that modules without the latch "remain migration debt and
 must not feed generated build profiles." Latching an empty root would silently clear that debt for
-the seven modules furthest from done, and would do it for the seven where the assertion is least
+the six modules furthest from done, and would do it for the six where the assertion is least
 true. Slice 39 therefore rejects `ownership_complete: true` whenever the module-local domain is
 empty, with `rule=ownership-empty-domain`.
 
@@ -36,13 +36,21 @@ design question stays open rather than being pre-answered by an opt-out.
 The failure message says the module is not migrated rather than broken. These descriptors are valid;
 they are early.
 
-## The remaining seven
+## The remaining six
 
 `benchmarks` has been migrated and latched: the cohesive eval framework in the former non-descriptor
 `src/modules/agent_eval/` directory (four sources + two headers) was relocated under
 `src/modules/benchmarks/` and the descriptor declares and latches it. The `agent_eval` directory name,
 forbidden by the canonical taxonomy, is gone; the `agent_eval_` symbol prefix is retained as the
-framework's API identity. Seven Class A modules remain.
+framework's API identity.
+
+`tools` has since been migrated (pilot #2): the posix `agent_tools*` family (three sources + the
+`agent_tools_internal.h` seam) and the `agent_tools.h` contract were relocated under
+`src/modules/tools/` and latched. `src/server/agent_tools.c`, which implements the
+turn/snapshot/toolset session-state slice declared in `agent_tools.h`, was deliberately left in the
+server as a not-module-local implementation of the contract — the same arrangement by which DB1/DB2
+implement `memory`'s contract — so the `agent_tools.c` name collision between the posix and server
+files never arises. Six Class A modules remain.
 
 Locations below are what each module's own canonical document names. They are a starting inventory
 for a future migration slice, not an ownership assignment: no audit has confirmed that these files
@@ -56,7 +64,6 @@ are the module's, exclusively or at all. A migration slice must establish that i
 | `response-composition` | `src/modules/ir/include/aimee/ir/aimee_ir.h` | Only an IR contract is named; no implementation site. |
 | `routing` | `src/server/agent_config.c`, `src/headers/agent_config.h`, `src/modules/delegates/delegate_routing.c` | Split across server config and the delegates module. |
 | `runtime-web` | nothing | As with `control-web`, the document specifies the surface and lifecycle key but no source location. |
-| `tools` | `src/posix/agent_tools_dispatch.c`, `src/modules/config/config_fields.c`, `src/modules/config/config_sections.c` | Dispatch is platform-sited under `src/posix`. |
 
 Two observations worth carrying forward:
 
@@ -65,16 +72,16 @@ Two observations worth carrying forward:
   there. A migration slice for either starts with locating the code, not moving it. (`workflows.md`
   is the only other module document naming neither, and `workflows` is not in this class: its module
   root holds 30 sources and 24 private headers that its descriptor does not yet declare.)
-- `execution-policy`, `routing` and `tools` are each named across two or more directories, and each is
-  declared as a dependency by several other descriptors — ten, six and five respectively. Their
-  migration is a decomposition question — which of the named files is the module and which is a
-  consumer — not a file move. `docs/validation/core-modularization-class-a-decomposition.md` performs
-  that establishment for all three from the source, with a recommended boundary and the specific
-  decision each migration still needs. In short: the `config_fields.c`/`config_sections.c` paths cited
-  for `tools` and `execution-policy` are `config` surface, not module-core; `tools` has the one clean
-  boundary (the `agent_tools*` family) and is blocked only on a dispatch-location decision and build
-  coupling; `routing` needs `agent_config.c` split; `execution-policy` needs `agent_policy.c` split
-  across three modules and is the highest-risk.
+- `execution-policy` and `routing` are each named across two or more directories, and each is declared
+  as a dependency by several other descriptors — ten and six respectively. Their migration is a
+  decomposition question — which of the named files is the module and which is a consumer — not a file
+  move. `docs/validation/core-modularization-class-a-decomposition.md` performs that establishment from
+  the source, with a recommended boundary and the specific decision each migration still needs. In
+  short: the `config_fields.c`/`config_sections.c` paths cited for `execution-policy` are `config`
+  surface, not module-core; `routing` needs `agent_config.c` split; `execution-policy` needs
+  `agent_policy.c` split across three modules and is the highest-risk. (`tools` was a similar
+  distributed case — posix implementations plus a server session-state slice, with an `agent_tools.c`
+  name collision — resolved in its migration by keeping the server slice in place.)
 
 ## What would change this document
 

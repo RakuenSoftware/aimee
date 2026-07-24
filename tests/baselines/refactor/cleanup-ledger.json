@@ -1725,6 +1725,38 @@
         "docs/validation/core-modularization-slice-58-benchmarks-migration.md",
         "docs/proposals/pending/memory-learning-and-inference-boundaries.md"
       ]
+    },
+    {
+      "slice": 59,
+      "state": "present_and_verified",
+      "disposition": "Migrated the required tools module (core capability #18, tool dispatch): relocated the posix agent_tools* implementation family and the agent_tools.h contract from src/posix and src/headers into src/modules/tools/, and latched. The server-side turn-session slice (server/agent_tools.c) was left in place as a not-module-local implementation of the same contract.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": [
+          "the three agent_tools* sources, the private seam, and the cross-platform agent_tools.h contract gained their canonical tools owner under src/modules/tools/"
+        ]
+      },
+      "fallbacks": [
+        "server/agent_tools.c stays in the server implementing the turn/snapshot/toolset session-state slice of agent_tools.h, not module-local, mirroring memory's DB1/DB2 storage split; the agent_tools_ symbol prefix and header filenames are retained"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "A path relocation plus descriptor declaration and latch; no code, symbols, or behaviour changed.",
+        "rejected_simpler_alternative": "Moving server/agent_tools.c into the module too was rejected: it would collide with the posix agent_tools.c filename and pull server-side session orchestration into the dispatch module.",
+        "revisit": "Five Class A modules remain (control-web, execution-policy, kb-synthesis, response-composition, routing, runtime-web); execution-policy and routing are distributed decompositions, the web modules have no located source."
+      },
+      "consumers": [
+        "the server, posix, delegates, Windows client, and tests that include agent_tools.h",
+        "Make and CMake build graphs",
+        "server/agent_tools.c (session-state slice)"
+      ],
+      "blast_radius": "The relocation plus the -Imodules/tools addition (global in Make, six CMake include lists); the 30 agent_tools.h include sites are unchanged, and server/agent_tools.c and every other consumer are untouched beyond include resolution.",
+      "independent_review": "Self-reviewed under explicit operator authorization for self-review-only; the roundtable was unavailable this cycle (kimi quota-exhausted, MiniMax unresponsive). Validated on the .253 aimee-test container (Make + CMake).",
+      "evidence": [
+        "docs/validation/core-modularization-slice-59-tools-migration.md",
+        "docs/modules/tools.md"
+      ]
     }
   ]
 }
