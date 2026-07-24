@@ -284,6 +284,8 @@ class DescriptorTests(unittest.TestCase):
             ("plugin-loader", "private_headers", "src/modules/plugin-loader/plugin_internal.h"),
             ("benchmarks", "sources", "src/modules/benchmarks/agent_eval.c"),
             ("benchmarks", "private_headers", "src/modules/benchmarks/agent_eval.h"),
+            ("tools", "sources", "src/modules/tools/agent_tools_dispatch.c"),
+            ("tools", "private_headers", "src/modules/tools/agent_tools.h"),
             ("gateway", "sources", "src/modules/gateway/gateway_delegate.c"),
             ("gateway", "sources", "src/modules/gateway/gateway_pipeline.c"),
             ("gateway", "sources", "src/modules/gateway/gateway_policy.c"),
@@ -322,7 +324,7 @@ class DescriptorTests(unittest.TestCase):
             finally:
                 tmp.cleanup()
 
-        for identifier in ("benchmarks", "roundtable", "protocols", "ir", "translation", "skills",
+        for identifier in ("benchmarks", "tools", "roundtable", "protocols", "ir", "translation", "skills",
                            "audit", "module-runtime", "plugin-loader", "gateway", "governance",
                            "learning", "workspace", "vault", "config", "git", "delegates",
                            "workflows", "memory"):
@@ -366,7 +368,7 @@ class DescriptorTests(unittest.TestCase):
         """An unmigrated module must not satisfy the latch vacuously."""
         empty = (
             "control-web", "execution-policy", "kb-synthesis",
-            "response-composition", "routing", "runtime-web", "tools",
+            "response-composition", "routing", "runtime-web",
         )
         for identifier in empty:
             tmp = self.production_repo()
@@ -427,7 +429,7 @@ class DescriptorTests(unittest.TestCase):
         self.assertTrue(latched, "no latched descriptor found; the guard would be untested")
 
     def test_complete_ownership_requires_canonical_doc(self) -> None:
-        for identifier in ("benchmarks", "roundtable", "ir", "translation", "skills", "audit",
+        for identifier in ("benchmarks", "tools", "roundtable", "ir", "translation", "skills", "audit",
                            "module-runtime", "plugin-loader", "gateway", "governance", "learning",
                            "workspace", "vault", "config", "git", "delegates", "workflows",
                            "memory"):

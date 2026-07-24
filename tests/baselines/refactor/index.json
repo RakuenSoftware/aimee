@@ -218,10 +218,6 @@
           "sha256": "be87fc2afb0ab65cded9e070c0fbeb2f21c68c3cb83fe977d21ec744c4066a36"
         },
         {
-          "path": "src/headers/agent_tools.h",
-          "sha256": "b2e3d642cbf301aa0d37223c2eb0ac8a2aab24629d3bbbf3021ea4c2599d8b87"
-        },
-        {
           "path": "src/headers/agent_tunnel.h",
           "sha256": "f65331da7d97d96b24df97fcb043058e970afbcc79ac5b32981113ee722f8f0e"
         },
@@ -1352,7 +1348,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "75853849c97cb9e5134c6626568c86ec598ab5f861a36033cb2b4e67082d4f91",
+      "sha256": "fab78f917abbe787f47d6908b3387428a9f2f7f3c3f2ce4444f038baef3829d8",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

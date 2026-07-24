@@ -518,6 +518,12 @@
       "test": "src/tests/test_skill_review.c"
     },
     {
+      "ctest": false,
+      "make": true,
+      "module": "tools",
+      "test": "src/tests/test_tool_output_cap.c"
+    },
+    {
       "ctest": true,
       "make": true,
       "module": "translation",

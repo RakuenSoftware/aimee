@@ -9,11 +9,19 @@ domain behavior of every capability it exposes.
 
 ## Public contracts
 
-The target `src/modules/tools` directory is descriptor-only. Current contracts are distributed across
-`agent_tools.h`, `agent_tools.c`, platform `agent_tools*`, `toolset.c`, DB2 `tool_registry`, argument/
-schema helpers, and MCP native dispatch. `build_tools_array*`, `tool_validate`, and
-`dispatch_tool_call_ctx` at `src/posix/agent_tools_dispatch.c:1884` are the principal
-discovery-validation-dispatch seam to consider for consolidation in a later source slice.
+The `src/modules/tools/` directory owns the tool dispatch and implementation surface: `agent_tools.c`
+(tool implementations), `agent_tools_dispatch.c` (the tool-call dispatcher — routes by name and applies
+the shared guardrails/snapshot/slop hooks), and `agent_tools_anchored.c` (Part III anchored/agent-shaped
+tools), behind two module-root headers: `agent_tools.h` (the tool contract, consumed by server, posix,
+delegates, tests, and the Windows client through `-Imodules/tools`) and `agent_tools_internal.h` (the
+private seam shared across the three sources). These were relocated from `src/posix/` (the
+implementations) and `src/headers/` (the contract).
+
+`agent_tools.h` also declares a turn/snapshot/toolset session-state slice (`agent_tools_begin_turn`,
+`agent_tools_set_snap_id`, `agent_tools_set_active_toolset`) implemented in `src/server/agent_tools.c` —
+server-side tool-execution session orchestration that is not module-local, the same arrangement by
+which `memory` owns its contract while DB1/DB2 implement storage. `toolset.c`, DB2 `tool_registry`,
+argument/schema helpers, and MCP native dispatch remain owned elsewhere and consume this module.
 
 ## Dependencies and consumers
 
