@@ -19,7 +19,7 @@
 #include "aimee_home.h"
 #include "log.h"
 #include "platform_random.h"
-#include "skill_curator.h"
+#include <aimee/skills/skill_curator.h>
 #include "trigger_scheduler.h"
 #include "util.h"
 #include "gw_orch_workflows.h" /* trigger workflow dispatch via the orchestration seam */
