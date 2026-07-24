@@ -139,7 +139,7 @@
       "files": [
         {
           "path": "src/modules/module-runtime/include/aimee/module-runtime/extension.h",
-          "sha256": "c421c6372e0469631fc37a1845815766e6bfa2acf23e94d41126ca14447ac8a0"
+          "sha256": "9b22c777c3e2996c312a98fdf1e5ee84f86642be34ca52a1bf77f5abe7070594"
         },
         {
           "path": "src/modules/module-runtime/include/aimee/module-runtime/pre_llm_hook.h",
@@ -147,11 +147,11 @@
         },
         {
           "path": "src/modules/plugin-loader/include/aimee/plugin-loader/plugin.h",
-          "sha256": "c7771d412be38388ccd229d0ff11567044f9137d6edee2dee01da02749c9b7a5"
+          "sha256": "7613924175497c26d15b4b7e5926b671b10a37c1ee0a67c9c2b8e1026a0c01e9"
         },
         {
           "path": "src/modules/plugin-loader/include/aimee/plugin-loader/plugin_loader.h",
-          "sha256": "238f07213725f2456053afff18af6c741e52b86cbc04c0a10de47466f059a1eb"
+          "sha256": "ab40b368ef01093dfa5d4e35cd9e1222afec09f643adc52de27c7e1c75596348"
         }
       ]
     },
@@ -1299,7 +1299,7 @@
         },
         {
           "path": "src/modules/module-runtime/include/aimee/module-runtime/extension.h",
-          "sha256": "c421c6372e0469631fc37a1845815766e6bfa2acf23e94d41126ca14447ac8a0"
+          "sha256": "9b22c777c3e2996c312a98fdf1e5ee84f86642be34ca52a1bf77f5abe7070594"
         },
         {
           "path": "src/modules/module-runtime/include/aimee/module-runtime/pre_llm_hook.h",
@@ -1307,11 +1307,11 @@
         },
         {
           "path": "src/modules/plugin-loader/include/aimee/plugin-loader/plugin.h",
-          "sha256": "c7771d412be38388ccd229d0ff11567044f9137d6edee2dee01da02749c9b7a5"
+          "sha256": "7613924175497c26d15b4b7e5926b671b10a37c1ee0a67c9c2b8e1026a0c01e9"
         },
         {
           "path": "src/modules/plugin-loader/include/aimee/plugin-loader/plugin_loader.h",
-          "sha256": "238f07213725f2456053afff18af6c741e52b86cbc04c0a10de47466f059a1eb"
+          "sha256": "ab40b368ef01093dfa5d4e35cd9e1222afec09f643adc52de27c7e1c75596348"
         },
         {
           "path": "src/modules/protocols/include/aimee/protocols/acp/acp_server.h",
@@ -1352,7 +1352,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "ca751342e05714e674e6c34b19aa495cc23dcc607be28cfbc047ad789171a7a8",
+      "sha256": "f83d40f26effb5c264dbae2df4386f468c6f9195f953ee426d851207ad6b6a2a",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

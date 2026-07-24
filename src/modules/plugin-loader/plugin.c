@@ -896,42 +896,15 @@ int plugin_load_and_register(const plugin_t *plugin, char *err_buf, size_t err_l
    }
 
    LOG_INFO("plugin",
-            "plugin %s registered successfully (kind=%s, backends=%d, adapters=%d, "
-            "context_engines=%d, providers=%d)",
+            "plugin %s registered successfully (kind=%s, backends=%d, adapters=%d)",
             plugin->name, plugin_kind_name(plugin->kind), plugin_delegate_backend_count,
-            plugin_platform_adapter_count, plugin_context_engine_count,
-            plugin_memory_provider_count);
+            plugin_platform_adapter_count);
 
    /* Don't destroy ctx — on_shutdown is called at process exit */
    /* Don't dlclose — library stays loaded for the lifetime of the process */
    (void)ctx;
    (void)dl;
    return 0;
-}
-
-/* --- Load all enabled plugins from the registry --- */
-
-int plugin_load_all_registered(char *err_buf, size_t err_len)
-{
-   plugin_t plugins[PLUGIN_MAX_PLUGINS];
-   int count = plugin_registry_load(plugins, PLUGIN_MAX_PLUGINS);
-
-   int failures = 0;
-   for (int i = 0; i < count; i++)
-   {
-      if (!plugins[i].enabled)
-         continue;
-      if (plugin_load_and_register(&plugins[i], err_buf, err_len) != 0)
-      {
-         LOG_WARN("plugin", "failed to load plugin '%s': %s", plugins[i].name,
-                  err_buf ? err_buf : "unknown error");
-         failures++;
-         if (err_buf)
-            err_buf[0] = '\0'; /* clear for next plugin */
-      }
-   }
-
-   return failures == 0 ? 0 : -1;
 }
 
 /* --- Discover local (project) plugins --- */
