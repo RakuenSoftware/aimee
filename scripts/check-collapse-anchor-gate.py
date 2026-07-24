@@ -156,6 +156,20 @@ def contract_present(cwd: Path) -> tuple[bool, list[str]]:
 def contract_present_at_base(cwd: Path) -> tuple[bool, list[str]]:
     """Verify the anchor contract at the configured ``BASE_SHA``.
 
+    Returns ``(True, [])`` early when no ``BASE_SHA`` is configured.
+    This early return is INTENTIONAL, not a bug:
+
+    * The caller in :func:`main` only invokes this function when
+      ``phase_one_touched(paths)`` is true, so the function is never
+      asked to "verify" in the no-Phase-1-changes case.
+    * When ``BASE_SHA`` is unset, the local-repo diff-discovery path
+      already uses the working tree as authoritative, so this
+      function correctly has nothing extra to add.
+    * ``test_gate_passes_when_no_phase_one_paths_change`` exercises
+      the no-Phase-1-touched path; do not turn the early return into
+      a failure without also updating that test, or CI will break on
+      PRs that touch only non-Phase-1 files.
+
     The ``BASE_SHA`` mode (CI pull_request events) is the only mode
     that exposes a target-branch / PR-head split, so it is the only
     mode that needs to verify the contract at the base ref.  In

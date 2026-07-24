@@ -2,6 +2,10 @@
 
 This merged Phase 0 packet gates Phase 1. It records six binding decisions with current-source citations.
 
+## Citation verification note
+
+Every `file:line` citation in this document and in `collapse_recon.md` / `sampling_capability_matrix.md` was verified against the **current source tree** (the working tree at the commit that lands this packet), not against a symbol index. The symbol index may lag behind the source; the source is the authority. Each named symbol was located with `grep -n` and the surrounding context was inspected to confirm the cited line is the definition site (or the cited call site, when the citation refers to a call), not a coincidental occurrence. Reviewers re-verifying a citation should reread the cited file at the cited line; if the file has moved, the citation must be updated as part of the change that moved the file.
+
 ## Decision 1 — Paths diverge
 
 Phase 2 must split per handler. Only the Anthropic compatibility relay traverses `openai_chunk_to_deltas` (`src/server/aimee_ir_stream.c:42`) and `anthropic_delta_emit` (`:539`); OpenAI Chat emits at `src/server/openai_chat.c:689` (`emit_chunk`, called from `chat_stream_handler` `src/server/openai_chat.c:720`), Responses through `sse_event_emit` at `src/server/server_http.c:1260` (handler `responses_stream_handler`, `src/server/openai_chat.c:1081`), webchat through `db1_webchat_live_set`/`db1_webchat_live_get` at `src/db1/webchat_live.c:10` and `:51`, delegate relay through `agent_execute` (`src/server/agent_runtime.c:1100`) and `agent_ir_parse_json_response` (`src/posix/agent_ir_parse.c:86`), and roundtable relay through `live_panel` (`src/modules/workflows/wfe_live_panel.c:125`) → `delegate_roundtable_run` (`src/modules/roundtable/delegate_ensemble.c:1906`) persisting via `rtp_pass_*` in `src/db1/roundtable_pipeline.c:300-403`.
@@ -24,6 +28,6 @@ Existing promotion is manual: `handle_optimize_promote` is at `src/server/server
 
 ## Decision 6 — Audit-store schema
 
-The existing record is the SQLite `audit_event` row declared at `src/modules/audit/audit_worm.c:29-49`. Its discriminator is `action`; the structured collapse payload goes in `detail`, alongside `actor_role`, `actor_principal`, `subject`, and `verdict`. The WORM API is `audit_worm_append` (`:135`), registration/opening is `audit_worm_init_at` (`:125`), checkpoint/sealing are `:233` and `:508`, and the query surface is `audit_worm_read_page` (`:587`). Decision: `collapse_event` is an `audit_event` structured action (`action = collapse_event`, JSON in `detail`), not a new physical record type. **Phase 2.3.0** defines and registers the action/detail schema before Phase 2 emits it.
+The existing record is the SQLite `audit_event` row declared at `src/modules/audit/audit_worm.c:29-49`. Its discriminator is `action`; the structured collapse payload goes in `detail`, alongside `actor_role`, `actor_principal`, `subject`, and `verdict`. The WORM API is `audit_worm_append` (`:135`), registration/opening is `audit_worm_init_at` (`:125`), checkpoint/sealing are `:233` and `:508`, and the query surface is `audit_worm_read_page` (`:587`). Decision: `collapse_event` is an `audit_event` structured action (`action = collapse_event`, JSON in `detail`), not a new physical record type. **Phase 2.3.0** defines and registers the action/detail schema before Phase 2.3 emits events.
 
 **Gate:** Phase 1 implementation starts only after this document is merged.
