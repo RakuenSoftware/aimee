@@ -1532,8 +1532,6 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"hosts.list", handle_hosts_list},
     {"primary.get", handle_primary_get},
     {"primary.clear", handle_primary_clear},
-    /* Work queue */
-    /* Attempt log */
     {"attempt.record", handle_attempt_record},
     {"attempt.list", handle_attempt_list},
     /* Dashboard */
