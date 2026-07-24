@@ -3943,6 +3943,24 @@ BEGIN
        w.detail<>COALESCE(p_detail,'') THEN
       RAISE EXCEPTION 'org_vault_rewrap_worm_append: replay mismatch' USING ERRCODE='23505';
     END IF;
+  ELSE
+    -- P7-witness-e2: witness this reseal event into the reserved ('!kb','!reseal')
+    -- shard, in THIS transaction, only when a new worm row was actually inserted
+    -- (a replay must not double-witness). source_hash binds the row's immutable
+    -- CONTENT, not event_id (which is only a hash of op/kind and would miss a
+    -- tamper of state/epoch/digests/detail).
+    PERFORM public.org_vault_witness_append(
+      1::smallint, p_op || '/' || p_kind, '!kb', '!reseal',
+      '', o.actor, '', p_op, public.pg_now_text(),
+      sha256(convert_to('aimee-vault-rewrap-worm-row-v1','UTF8') ||
+        public.org_vault_rewrap_pack_text(v_event) || public.org_vault_rewrap_pack_text(p_state) ||
+        int8send(o.seal_epoch) || int8send(o.fencing_token) ||
+        public.org_vault_rewrap_pack_bytes(COALESCE(o.receipt_digest,''::bytea)) ||
+        public.org_vault_rewrap_pack_bytes(COALESCE(o.inventory_digest,''::bytea)) ||
+        public.org_vault_rewrap_pack_bytes(COALESCE(o.stage_digest,''::bytea)) ||
+        public.org_vault_rewrap_pack_text(o.actor) ||
+        public.org_vault_rewrap_pack_text(COALESCE(p_detail,''))),
+      false, NULL);
   END IF;
 END; $$;
 
@@ -5240,6 +5258,12 @@ BEGIN
   VALUES(eid,'completed_opened',p_op,p_request,p_actor,p_fence,ne,nf,rh);
   PERFORM public.kb_audit_worm_append('operator',p_actor,'vault.rewrap.open.completed',
     eid,'allow',p_op);
+  -- P7-witness-e2: witness the open transition into the reserved ('!kb','!open')
+  -- shard, in this transaction. rh is the open row's content hash; the replay
+  -- branch above RETURNs early so this runs only on a genuinely new open event.
+  PERFORM public.org_vault_witness_append(
+    2::smallint, eid, '!kb', '!open', p_request, p_actor, '', p_op,
+    public.pg_now_text(), rh, false, NULL);
   RETURN QUERY SELECT ne,nf,eid,rh;
 END $$;
 REVOKE ALL ON FUNCTION
@@ -5310,6 +5334,11 @@ BEGIN
   VALUES(eid,'idle_opened',NULL,p_request,p_actor,NULL,ne,nf,rh);
   PERFORM public.kb_audit_worm_append('operator',p_actor,'vault.rewrap.open.idle',
     eid,'allow',p_request);
+  -- P7-witness-e2: witness the idle open into the reserved ('!kb','!open') shard.
+  -- An idle open has no operation_id, so the event id serves as the group handle.
+  PERFORM public.org_vault_witness_append(
+    2::smallint, eid, '!kb', '!open', p_request, p_actor, '', eid,
+    public.pg_now_text(), rh, false, NULL);
   RETURN QUERY SELECT ne,nf,eid,rh;
 END $$;
 REVOKE ALL ON FUNCTION
@@ -5480,6 +5509,518 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- P7-witness-e1 EVIDENCE STORE (tiered-llm-p7-witness). aimee-kb's tamper-evident
+-- witness of every source-ledger event, the system of record for external
+-- comparison. Three tables:
+--   kb_vault_witness_shard      mutable per-(tenant,provider) head + sequence
+--   kb_vault_witness_log        append-only per-shard evidence records
+--   kb_vault_witness_checkpoint append-only signed Merkle checkpoints
+-- The evidence log stores the LOGICAL fields plus a server-computed record digest;
+-- the encoded wire form is a deterministic function of those fields (the C encoder)
+-- reproduced at emission time, so the digest -- not a stored wire blob -- is the
+-- comparison anchor. The digest is byte-identical to the C vault_witness_record_digest;
+-- scripts/p7_witness_pg_test.sql pins the parity vector. E1 lands schema + append
+-- with NO production caller; E2 wires the append into admission/reseal/open.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS kb_vault_witness_shard (
+  tenant TEXT NOT NULL CHECK (octet_length(tenant) BETWEEN 1 AND 128),
+  provider TEXT NOT NULL CHECK (octet_length(provider) BETWEEN 1 AND 128),
+  seq BIGINT NOT NULL DEFAULT 0 CHECK (seq >= 0),
+  head_hash BYTEA NOT NULL CHECK (octet_length(head_hash)=32),
+  updated_at TEXT NOT NULL DEFAULT (pg_now_text()),
+  PRIMARY KEY (tenant, provider)
+);
+-- seq 0 is the empty-shard sentinel: head_hash is the genesis sentinel and no
+-- records exist yet. The first append advances to seq 1. Ensure-insert of the
+-- sentinel then SELECT ... FOR UPDATE serializes concurrent appends per shard
+-- without a first-touch race.
+
+CREATE TABLE IF NOT EXISTS kb_vault_witness_log (
+  tenant TEXT NOT NULL CHECK (octet_length(tenant) BETWEEN 1 AND 128),
+  provider TEXT NOT NULL CHECK (octet_length(provider) BETWEEN 1 AND 128),
+  shard_seq BIGINT NOT NULL CHECK (shard_seq > 0),
+  source_kind SMALLINT NOT NULL CHECK (source_kind IN (0,1,2)),
+  source_id TEXT NOT NULL CHECK (octet_length(source_id) BETWEEN 1 AND 256),
+  source_hash BYTEA NOT NULL CHECK (octet_length(source_hash)=32),
+  has_source_pred BOOLEAN NOT NULL,
+  source_pred_hash BYTEA NOT NULL CHECK (octet_length(source_pred_hash)=32),
+  witness_pred_hash BYTEA NOT NULL CHECK (octet_length(witness_pred_hash)=32),
+  record_hash BYTEA NOT NULL CHECK (octet_length(record_hash)=32),
+  request_id TEXT NOT NULL DEFAULT '' CHECK (octet_length(request_id) <= 200),
+  principal TEXT NOT NULL DEFAULT '' CHECK (octet_length(principal) <= 575),
+  provider_cred TEXT NOT NULL DEFAULT '' CHECK (octet_length(provider_cred) <= 256),
+  group_id TEXT NOT NULL DEFAULT '' CHECK (octet_length(group_id) <= 256),
+  event_ts TEXT NOT NULL CHECK (octet_length(event_ts) BETWEEN 1 AND 40),
+  seal_epoch BIGINT NOT NULL,
+  fencing_token BIGINT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (pg_now_text()),
+  CHECK (has_source_pred = false OR source_kind = 0),
+  CHECK (has_source_pred = true OR source_pred_hash = decode(repeat('00',32),'hex')),
+  PRIMARY KEY (tenant, provider, shard_seq)
+);
+
+CREATE TABLE IF NOT EXISTS kb_vault_witness_checkpoint (
+  seq BIGINT PRIMARY KEY CHECK (seq > 0),
+  root BYTEA NOT NULL CHECK (octet_length(root)=32),
+  has_predecessor BOOLEAN NOT NULL,
+  predecessor_digest BYTEA NOT NULL CHECK (octet_length(predecessor_digest)=32),
+  shard_count BIGINT NOT NULL CHECK (shard_count >= 0 AND shard_count <= 1048576),
+  leaf_snapshot BYTEA NOT NULL,
+  leaf_snapshot_digest BYTEA NOT NULL CHECK (octet_length(leaf_snapshot_digest)=32),
+  signer_key_id BYTEA NOT NULL CHECK (octet_length(signer_key_id)=16),
+  sig_alg SMALLINT NOT NULL CHECK (sig_alg = 1),
+  sig_version INTEGER NOT NULL,
+  signature BYTEA NOT NULL CHECK (octet_length(signature)=64),
+  created_at TEXT NOT NULL DEFAULT (pg_now_text()) CHECK (octet_length(created_at) BETWEEN 1 AND 40),
+  CHECK (has_predecessor = true OR predecessor_digest = decode(repeat('00',32),'hex'))
+);
+
+CREATE OR REPLACE FUNCTION org_vault_witness_worm_block() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog,public,pg_temp AS $$
+BEGIN RAISE EXCEPTION 'WORM: % is append-only', TG_TABLE_NAME; END; $$;
+DROP TRIGGER IF EXISTS kb_vault_witness_log_no_update ON kb_vault_witness_log;
+CREATE TRIGGER kb_vault_witness_log_no_update BEFORE UPDATE ON kb_vault_witness_log
+  FOR EACH ROW EXECUTE FUNCTION org_vault_witness_worm_block();
+DROP TRIGGER IF EXISTS kb_vault_witness_log_no_delete ON kb_vault_witness_log;
+CREATE TRIGGER kb_vault_witness_log_no_delete BEFORE DELETE ON kb_vault_witness_log
+  FOR EACH ROW EXECUTE FUNCTION org_vault_witness_worm_block();
+DROP TRIGGER IF EXISTS kb_vault_witness_log_no_truncate ON kb_vault_witness_log;
+CREATE TRIGGER kb_vault_witness_log_no_truncate BEFORE TRUNCATE ON kb_vault_witness_log
+  FOR EACH STATEMENT EXECUTE FUNCTION org_vault_witness_worm_block();
+DROP TRIGGER IF EXISTS kb_vault_witness_checkpoint_no_update ON kb_vault_witness_checkpoint;
+CREATE TRIGGER kb_vault_witness_checkpoint_no_update BEFORE UPDATE ON kb_vault_witness_checkpoint
+  FOR EACH ROW EXECUTE FUNCTION org_vault_witness_worm_block();
+DROP TRIGGER IF EXISTS kb_vault_witness_checkpoint_no_delete ON kb_vault_witness_checkpoint;
+CREATE TRIGGER kb_vault_witness_checkpoint_no_delete BEFORE DELETE ON kb_vault_witness_checkpoint
+  FOR EACH ROW EXECUTE FUNCTION org_vault_witness_worm_block();
+DROP TRIGGER IF EXISTS kb_vault_witness_checkpoint_no_truncate ON kb_vault_witness_checkpoint;
+CREATE TRIGGER kb_vault_witness_checkpoint_no_truncate BEFORE TRUNCATE ON kb_vault_witness_checkpoint
+  FOR EACH STATEMENT EXECUTE FUNCTION org_vault_witness_worm_block();
+
+ALTER TABLE kb_vault_witness_shard ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kb_vault_witness_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kb_vault_witness_checkpoint ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE kb_vault_witness_shard, kb_vault_witness_log,
+  kb_vault_witness_checkpoint FROM PUBLIC;
+-- Read policies: the witness cadence, boot check, and release gate run on the kb's
+-- RUNTIME connection (aimee_kb_runtime on the hardened tier) and read this evidence
+-- directly. The evidence is NON-SECRET — it is exported verbatim on the log/OTLP
+-- path — so read access is not a disclosure risk; the security property is that
+-- runtime cannot FORGE evidence, which is preserved by the WORM triggers
+-- (UPDATE/DELETE/TRUNCATE) and by never granting runtime INSERT. The evidence is
+-- service-global (not tenant-scoped), so the policy admits all rows; the table-level
+-- SELECT grant (schema_grants.sql) is what actually gates who may read. Without a
+-- policy, RLS denies even a granted SELECT, which is what silently broke the cadence
+-- on the hardened tier.
+DROP POLICY IF EXISTS kb_vault_witness_shard_read ON kb_vault_witness_shard;
+CREATE POLICY kb_vault_witness_shard_read ON kb_vault_witness_shard FOR SELECT USING (true);
+DROP POLICY IF EXISTS kb_vault_witness_log_read ON kb_vault_witness_log;
+CREATE POLICY kb_vault_witness_log_read ON kb_vault_witness_log FOR SELECT USING (true);
+DROP POLICY IF EXISTS kb_vault_witness_checkpoint_read ON kb_vault_witness_checkpoint;
+CREATE POLICY kb_vault_witness_checkpoint_read ON kb_vault_witness_checkpoint FOR SELECT USING (true);
+
+-- Genesis sentinel, matching vault_witness_genesis_sentinel on the C side.
+CREATE OR REPLACE FUNCTION org_vault_witness_genesis(p_tenant TEXT, p_provider TEXT)
+RETURNS BYTEA LANGUAGE sql IMMUTABLE SET search_path=pg_catalog,public,pg_temp AS $$
+  SELECT sha256(convert_to('aimee-vault-witness-genesis-v1','UTF8') ||
+                public.org_vault_rewrap_pack_text(p_tenant) ||
+                public.org_vault_rewrap_pack_text(p_provider));
+$$;
+
+-- Canonical record digest, byte-identical to vault_witness_record_digest: every
+-- text field length-prefixed (pack_text), a single byte for the source
+-- discriminator and the source-predecessor flag, raw 32-byte hashes, int8send
+-- (big-endian) for the three counters. Drift here breaks the pinned parity vector.
+CREATE OR REPLACE FUNCTION org_vault_witness_record_digest(
+  p_source SMALLINT, p_source_id TEXT, p_tenant TEXT, p_provider TEXT,
+  p_request_id TEXT, p_principal TEXT, p_provider_cred TEXT, p_group_id TEXT,
+  p_ts TEXT, p_source_hash BYTEA, p_has_source_pred BOOLEAN, p_source_pred_hash BYTEA,
+  p_witness_pred_hash BYTEA, p_seal_epoch BIGINT, p_fencing_token BIGINT, p_shard_seq BIGINT)
+RETURNS BYTEA LANGUAGE sql IMMUTABLE SET search_path=pg_catalog,public,pg_temp AS $$
+  SELECT sha256(
+    public.org_vault_rewrap_pack_text('aimee-vault-witness-v1') ||
+    set_byte('\x00'::bytea, 0, p_source::int) ||
+    public.org_vault_rewrap_pack_text(p_source_id) ||
+    public.org_vault_rewrap_pack_text(p_tenant) ||
+    public.org_vault_rewrap_pack_text(p_provider) ||
+    public.org_vault_rewrap_pack_text(p_request_id) ||
+    public.org_vault_rewrap_pack_text(p_principal) ||
+    public.org_vault_rewrap_pack_text(p_provider_cred) ||
+    public.org_vault_rewrap_pack_text(p_group_id) ||
+    public.org_vault_rewrap_pack_text(p_ts) ||
+    p_source_hash ||
+    set_byte('\x00'::bytea, 0, CASE WHEN p_has_source_pred THEN 1 ELSE 0 END) ||
+    p_source_pred_hash || p_witness_pred_hash ||
+    int8send(p_seal_epoch) || int8send(p_fencing_token) || int8send(p_shard_seq));
+$$;
+
+-- The atomic witness append: advances the per-shard head and inserts the evidence
+-- row in ONE transaction (the caller's). E2 calls this inside each source ledger's
+-- existing transaction so a crash cannot leave a source event without its witness
+-- row. seq/pred are assigned server-side, seal_epoch/fence are read (not supplied)
+-- so they cannot be spoofed. The caller owns the bounded SERIALIZABLE retry
+-- contract (witness_concurrency_exhausted). E1 defines it; no production path calls it.
+CREATE OR REPLACE FUNCTION org_vault_witness_append(
+  p_source SMALLINT, p_source_id TEXT, p_tenant TEXT, p_provider TEXT,
+  p_request_id TEXT, p_principal TEXT, p_provider_cred TEXT, p_group_id TEXT,
+  p_ts TEXT, p_source_hash BYTEA, p_has_source_pred BOOLEAN, p_source_pred_hash BYTEA)
+RETURNS TABLE(shard_seq BIGINT, record_hash BYTEA)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE v_seq BIGINT; v_head BYTEA; v_new_seq BIGINT; v_pred BYTEA; v_rhash BYTEA;
+  v_spred BYTEA; c public.kb_vault_control%ROWTYPE;
+BEGIN
+  v_spred := COALESCE(p_source_pred_hash, decode(repeat('00',32),'hex'));
+  IF p_source NOT IN (0,1,2) OR octet_length(COALESCE(p_tenant,'')) NOT BETWEEN 1 AND 128 OR
+     octet_length(COALESCE(p_provider,'')) NOT BETWEEN 1 AND 128 OR
+     octet_length(COALESCE(p_source_id,'')) NOT BETWEEN 1 AND 256 OR
+     octet_length(COALESCE(p_ts,'')) NOT BETWEEN 1 AND 40 OR
+     p_source_hash IS NULL OR octet_length(p_source_hash) <> 32 OR
+     octet_length(v_spred) <> 32 OR
+     (p_has_source_pred AND p_source <> 0) OR
+     (NOT p_has_source_pred AND v_spred IS DISTINCT FROM decode(repeat('00',32),'hex')) THEN
+    RAISE EXCEPTION 'org_vault_witness_append: invalid input' USING ERRCODE='22023';
+  END IF;
+
+  SELECT * INTO STRICT c FROM public.kb_vault_control WHERE singleton=1 FOR SHARE;
+
+  INSERT INTO public.kb_vault_witness_shard(tenant,provider,seq,head_hash)
+    VALUES(p_tenant,p_provider,0,public.org_vault_witness_genesis(p_tenant,p_provider))
+    ON CONFLICT (tenant,provider) DO NOTHING;
+  SELECT seq, head_hash INTO STRICT v_seq, v_head FROM public.kb_vault_witness_shard
+    WHERE tenant=p_tenant AND provider=p_provider FOR UPDATE;
+  v_new_seq := v_seq + 1;
+  v_pred := v_head;
+
+  v_rhash := public.org_vault_witness_record_digest(
+    p_source, p_source_id, p_tenant, p_provider, p_request_id, p_principal,
+    p_provider_cred, p_group_id, p_ts, p_source_hash, p_has_source_pred, v_spred,
+    v_pred, c.seal_epoch, c.fencing_token, v_new_seq);
+
+  INSERT INTO public.kb_vault_witness_log(tenant,provider,shard_seq,source_kind,source_id,
+    source_hash,has_source_pred,source_pred_hash,witness_pred_hash,record_hash,
+    request_id,principal,provider_cred,group_id,event_ts,seal_epoch,fencing_token)
+  VALUES(p_tenant,p_provider,v_new_seq,p_source,p_source_id,p_source_hash,p_has_source_pred,
+    v_spred,v_pred,v_rhash,COALESCE(p_request_id,''),COALESCE(p_principal,''),
+    COALESCE(p_provider_cred,''),COALESCE(p_group_id,''),p_ts,c.seal_epoch,c.fencing_token);
+
+  UPDATE public.kb_vault_witness_shard SET seq=v_new_seq, head_hash=v_rhash,
+    updated_at=pg_now_text() WHERE tenant=p_tenant AND provider=p_provider;
+
+  RETURN QUERY SELECT v_new_seq, v_rhash;
+END; $$;
+
+-- The checkpoint head-vs-log cross-check (E2). Walks a shard's evidence log from
+-- genesis, recomputing each row's digest from its stored fields and verifying the
+-- witness-predecessor linkage and contiguous sequence, then requires the mutable
+-- shard head to equal the log tail. This is what keeps the shard-head table honest:
+-- because INSERT into the log is not blocked (only UPDATE/DELETE/TRUNCATE are), an
+-- attacker could append rows and advance the head to match, but they cannot forge a
+-- coherent chain back to the deterministic genesis sentinel without rewriting every
+-- record_hash, which the per-row digest recompute catches. Raises P7W01
+-- (head_log_mismatch) on any inconsistency; returns the verified head (NULL for an
+-- empty shard). Walks from genesis for provable correctness; a later optimization
+-- may resume from the previous checkpoint's leaf snapshot.
+CREATE OR REPLACE FUNCTION org_vault_witness_verify_shard(p_tenant TEXT, p_provider TEXT)
+RETURNS BYTEA LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE r RECORD; v_pred BYTEA; v_seq BIGINT := 1; v_recomputed BYTEA;
+  v_last BYTEA; v_head BYTEA;
+BEGIN
+  v_pred := public.org_vault_witness_genesis(p_tenant, p_provider);
+  FOR r IN SELECT * FROM public.kb_vault_witness_log
+           WHERE tenant=p_tenant AND provider=p_provider ORDER BY shard_seq ASC
+  LOOP
+    IF r.shard_seq <> v_seq THEN
+      RAISE EXCEPTION 'head_log_mismatch: seq gap at % (expected %)', r.shard_seq, v_seq
+        USING ERRCODE='P7W01';
+    END IF;
+    IF r.witness_pred_hash <> v_pred THEN
+      RAISE EXCEPTION 'head_log_mismatch: broken link at seq %', r.shard_seq USING ERRCODE='P7W01';
+    END IF;
+    v_recomputed := public.org_vault_witness_record_digest(
+      r.source_kind, r.source_id, r.tenant, r.provider, r.request_id, r.principal,
+      r.provider_cred, r.group_id, r.event_ts, r.source_hash, r.has_source_pred,
+      r.source_pred_hash, r.witness_pred_hash, r.seal_epoch, r.fencing_token, r.shard_seq);
+    IF v_recomputed <> r.record_hash THEN
+      RAISE EXCEPTION 'head_log_mismatch: record digest mismatch at seq %', r.shard_seq
+        USING ERRCODE='P7W01';
+    END IF;
+    v_pred := r.record_hash; v_last := r.record_hash; v_seq := v_seq + 1;
+  END LOOP;
+  IF v_last IS NULL THEN
+    RETURN NULL;
+  END IF;
+  SELECT head_hash INTO v_head FROM public.kb_vault_witness_shard
+    WHERE tenant=p_tenant AND provider=p_provider;
+  IF v_head IS DISTINCT FROM v_last THEN
+    RAISE EXCEPTION 'head_log_mismatch: shard head does not match log tail' USING ERRCODE='P7W01';
+  END IF;
+  RETURN v_last;
+END; $$;
+
+-- Checkpoint leaf-set builder (E2). In one snapshot (the caller runs REPEATABLE
+-- READ), enforces the 2^20 shard ceiling, cross-checks EVERY shard's head against
+-- its log (org_vault_witness_verify_shard, which raises P7W01 head_log_mismatch),
+-- and returns the verified (tenant, provider, seq, head_hash) leaves for the C
+-- signer to compute leaf hashes, build the depth-64 SMT root, and sign. Empty
+-- shards (seq 0, no records) are skipped — they contribute no leaf. Raises P7W02
+-- checkpoint_shard_ceiling_exceeded above the ceiling; the caller maps it to a
+-- typed alert and does not sign.
+CREATE OR REPLACE FUNCTION org_vault_witness_checkpoint_leaves()
+RETURNS TABLE(tenant TEXT, provider TEXT, seq BIGINT, head_hash BYTEA)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE v_count BIGINT; s RECORD;
+BEGIN
+  SELECT count(*) INTO v_count FROM public.kb_vault_witness_shard sh WHERE sh.seq > 0;
+  IF v_count > 1048576 THEN
+    RAISE EXCEPTION 'checkpoint_shard_ceiling_exceeded: % shards', v_count USING ERRCODE='P7W02';
+  END IF;
+  FOR s IN SELECT sh.tenant, sh.provider, sh.seq, sh.head_hash
+           FROM public.kb_vault_witness_shard sh WHERE sh.seq > 0
+           ORDER BY sh.tenant, sh.provider
+  LOOP
+    PERFORM public.org_vault_witness_verify_shard(s.tenant, s.provider);
+    tenant := s.tenant; provider := s.provider; seq := s.seq; head_hash := s.head_hash;
+    RETURN NEXT;
+  END LOOP;
+END; $$;
+
+-- Persist an already-signed checkpoint (E2), fenced and monotonic. The C producer
+-- runs this inside the same REPEATABLE READ transaction as the leaf scan: it
+-- revalidates the control fence (FOR UPDATE on the fence row; a concurrent fence
+-- advance surfaces as a serialization failure under REPEATABLE READ, so the loser
+-- aborts before this commits), assigns the next checkpoint seq, enforces the
+-- first-checkpoint-has-no-predecessor rule, and inserts. This is persist-before-emit:
+-- the checkpoint is durably committed here; emission (E2) reads only committed rows.
+CREATE OR REPLACE FUNCTION org_vault_witness_checkpoint_persist(
+  p_seq BIGINT, p_root BYTEA, p_has_pred BOOLEAN, p_predecessor BYTEA, p_shard_count BIGINT,
+  p_leaf_snapshot BYTEA, p_leaf_digest BYTEA, p_signer_key_id BYTEA,
+  p_sig_alg SMALLINT, p_sig_version INTEGER, p_signature BYTEA, p_expected_fence BIGINT)
+RETURNS BIGINT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE c public.kb_vault_control%ROWTYPE; v_next BIGINT;
+BEGIN
+  IF p_root IS NULL OR octet_length(p_root)<>32 OR p_signer_key_id IS NULL OR
+     octet_length(p_signer_key_id)<>16 OR p_signature IS NULL OR octet_length(p_signature)<>64 OR
+     p_leaf_digest IS NULL OR octet_length(p_leaf_digest)<>32 OR p_shard_count IS NULL OR
+     p_shard_count<0 OR p_shard_count>1048576 OR p_expected_fence IS NULL OR p_seq IS NULL OR
+     p_seq<1 THEN
+    RAISE EXCEPTION 'checkpoint_persist: invalid input' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO STRICT c FROM public.kb_vault_control WHERE singleton=1 FOR UPDATE;
+  IF c.fencing_token <> p_expected_fence THEN
+    RAISE EXCEPTION 'checkpoint_fence_stale: control fence % <> expected %',
+      c.fencing_token, p_expected_fence USING ERRCODE='P7W03';
+  END IF;
+  -- The producer signs the body (which includes seq) BEFORE persist, so it passes
+  -- the seq it signed. It must be exactly the next monotonic value; a concurrent
+  -- committed checkpoint would make it stale and the unique PK/this check rejects it.
+  SELECT COALESCE(max(cp.seq),0)+1 INTO v_next FROM public.kb_vault_witness_checkpoint cp;
+  IF p_seq <> v_next THEN
+    RAISE EXCEPTION 'checkpoint_seq_stale: seq % <> expected %', p_seq, v_next USING ERRCODE='P7W05';
+  END IF;
+  IF (p_seq=1) <> (NOT p_has_pred) THEN
+    RAISE EXCEPTION 'checkpoint_predecessor_inconsistent: seq % has_pred %', p_seq, p_has_pred
+      USING ERRCODE='P7W04';
+  END IF;
+  INSERT INTO public.kb_vault_witness_checkpoint(seq,root,has_predecessor,predecessor_digest,
+    shard_count,leaf_snapshot,leaf_snapshot_digest,signer_key_id,sig_alg,sig_version,signature)
+  VALUES(p_seq,p_root,p_has_pred,COALESCE(p_predecessor,decode(repeat('00',32),'hex')),
+    p_shard_count,COALESCE(p_leaf_snapshot,''::bytea),p_leaf_digest,p_signer_key_id,
+    p_sig_alg,p_sig_version,p_signature);
+  RETURN p_seq;
+END; $$;
+
+-- ---------------------------------------------------------------------------
+-- E2 emission cursor. This is a POSITION, not evidence: it records how far the
+-- emitter has published, nothing more. It is deliberately NOT WORM and carries no
+-- integrity role. Losing or resetting it causes re-emission of already-published
+-- evidence, which is harmless — the offline verifier collapses byte-identical
+-- repeats at the same shard_seq and only treats two DIFFERENT records at one
+-- position as a fork. Emission never gates admission, so a stalled cursor can
+-- never block a source event; it only grows the backlog gauge.
+--   kind 0 = a per-shard record stream, keyed by (tenant, provider)
+--   kind 1 = the checkpoint stream, a single row with empty tenant/provider
+CREATE TABLE IF NOT EXISTS kb_vault_witness_emit_cursor (
+  kind SMALLINT NOT NULL CHECK (kind IN (0,1)),
+  tenant TEXT NOT NULL CHECK (octet_length(tenant) <= 128),
+  provider TEXT NOT NULL CHECK (octet_length(provider) <= 128),
+  last_emitted BIGINT NOT NULL DEFAULT 0 CHECK (last_emitted >= 0),
+  updated_at TEXT NOT NULL DEFAULT (pg_now_text()),
+  PRIMARY KEY (kind, tenant, provider),
+  CHECK (kind = 0 OR (tenant = '' AND provider = ''))
+);
+ALTER TABLE kb_vault_witness_emit_cursor ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE kb_vault_witness_emit_cursor FROM PUBLIC;
+-- The emitter reads the cursor via org_vault_witness_emit_pending() (definer), but a
+-- read policy keeps it consistent with the other witness tables and harmless (the
+-- cursor is a position, not evidence). Writes go only through the definer advance.
+DROP POLICY IF EXISTS kb_vault_witness_emit_cursor_read ON kb_vault_witness_emit_cursor;
+CREATE POLICY kb_vault_witness_emit_cursor_read ON kb_vault_witness_emit_cursor FOR SELECT USING (true);
+
+-- Backlog across every record shard plus the checkpoint stream. Numbers only; the
+-- caller turns these into the emission-backlog gauge. Shards with no cursor row yet
+-- report last_emitted 0, so a brand-new shard's whole chain is pending.
+CREATE OR REPLACE FUNCTION org_vault_witness_emit_pending()
+RETURNS TABLE(kind SMALLINT, tenant TEXT, provider TEXT, last_emitted BIGINT, head_seq BIGINT)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+  SELECT 0::smallint, sh.tenant, sh.provider,
+         COALESCE(c.last_emitted,0), sh.seq
+    FROM public.kb_vault_witness_shard sh
+    LEFT JOIN public.kb_vault_witness_emit_cursor c
+      ON c.kind=0 AND c.tenant=sh.tenant AND c.provider=sh.provider
+   WHERE sh.seq > 0
+  UNION ALL
+  SELECT 1::smallint, '', '',
+         COALESCE((SELECT c.last_emitted FROM public.kb_vault_witness_emit_cursor c
+                    WHERE c.kind=1 AND c.tenant='' AND c.provider=''),0),
+         COALESCE((SELECT max(cp.seq) FROM public.kb_vault_witness_checkpoint cp),0)
+  ORDER BY 1,2,3;
+$$;
+
+-- One shard's committed records after p_after, in chain order. Committed state
+-- only: the emitter runs outside the append transaction and never sees a record
+-- that has not durably landed.
+CREATE OR REPLACE FUNCTION org_vault_witness_emit_batch(
+  p_tenant TEXT, p_provider TEXT, p_after BIGINT, p_limit INTEGER)
+RETURNS TABLE(shard_seq BIGINT, source_kind SMALLINT, source_id TEXT, source_hash BYTEA,
+              has_source_pred BOOLEAN, source_pred_hash BYTEA, witness_pred_hash BYTEA,
+              record_hash BYTEA, request_id TEXT, principal TEXT, provider_cred TEXT,
+              group_id TEXT, event_ts TEXT, seal_epoch BIGINT, fencing_token BIGINT)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+  SELECT l.shard_seq, l.source_kind, l.source_id, l.source_hash,
+         l.has_source_pred, l.source_pred_hash, l.witness_pred_hash,
+         l.record_hash, l.request_id, l.principal, l.provider_cred,
+         l.group_id, l.event_ts, l.seal_epoch, l.fencing_token
+    FROM public.kb_vault_witness_log l
+   WHERE l.tenant = p_tenant AND l.provider = p_provider
+     AND l.shard_seq > COALESCE(p_after,0)
+   ORDER BY l.shard_seq
+   LIMIT LEAST(GREATEST(COALESCE(p_limit,0),0), 1000);
+$$;
+
+-- Committed checkpoints after p_after, in sequence order.
+CREATE OR REPLACE FUNCTION org_vault_witness_emit_checkpoints(p_after BIGINT, p_limit INTEGER)
+RETURNS TABLE(seq BIGINT, root BYTEA, has_predecessor BOOLEAN, predecessor_digest BYTEA,
+              shard_count BIGINT, leaf_snapshot_digest BYTEA, signer_key_id BYTEA,
+              sig_alg SMALLINT, sig_version INTEGER, signature BYTEA, created_at TEXT,
+              leaf_snapshot BYTEA)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+  SELECT cp.seq, cp.root, cp.has_predecessor, cp.predecessor_digest,
+         cp.shard_count, cp.leaf_snapshot_digest, cp.signer_key_id,
+         cp.sig_alg, cp.sig_version, cp.signature, cp.created_at, cp.leaf_snapshot
+    FROM public.kb_vault_witness_checkpoint cp
+   WHERE cp.seq > COALESCE(p_after,0)
+   ORDER BY cp.seq
+   LIMIT LEAST(GREATEST(COALESCE(p_limit,0),0), 1000);
+$$;
+
+-- Advance a cursor. Monotonic: a lower value is ignored rather than rejected, so a
+-- late or duplicated advance can never rewind the stream and cause a re-emission
+-- storm. Returns the cursor value in force after the call.
+CREATE OR REPLACE FUNCTION org_vault_witness_emit_advance(
+  p_kind SMALLINT, p_tenant TEXT, p_provider TEXT, p_seq BIGINT)
+RETURNS BIGINT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE v BIGINT; v_head BIGINT;
+BEGIN
+  IF p_kind IS NULL OR p_kind NOT IN (0,1) OR p_seq IS NULL OR p_seq < 0 OR
+     (p_kind = 1 AND (COALESCE(p_tenant,'') <> '' OR COALESCE(p_provider,'') <> '')) THEN
+    RAISE EXCEPTION 'witness_emit_advance: invalid input' USING ERRCODE='22023';
+  END IF;
+  -- The cursor may never point past the end of the stream it tracks. Monotonicity
+  -- alone does not prevent SUPPRESSION: an advance to a huge value would make
+  -- org_vault_witness_emit_pending() report head_seq <= last_emitted forever, and
+  -- the emitter would silently skip all existing and future evidence while every
+  -- gauge read as healthy. Bounding by the real head makes that impossible, so the
+  -- cursor cannot be used as an off-switch for emission.
+  IF p_kind = 0 THEN
+    SELECT COALESCE(sh.seq,0) INTO v_head FROM public.kb_vault_witness_shard sh
+      WHERE sh.tenant = COALESCE(p_tenant,'') AND sh.provider = COALESCE(p_provider,'');
+  ELSE
+    SELECT COALESCE(max(cp.seq),0) INTO v_head FROM public.kb_vault_witness_checkpoint cp;
+  END IF;
+  IF p_seq > COALESCE(v_head,0) THEN
+    RAISE EXCEPTION 'witness_emit_advance: seq % past stream head %', p_seq, COALESCE(v_head,0)
+      USING ERRCODE='P7W06';
+  END IF;
+  INSERT INTO public.kb_vault_witness_emit_cursor(kind,tenant,provider,last_emitted,updated_at)
+  VALUES(p_kind,COALESCE(p_tenant,''),COALESCE(p_provider,''),p_seq,pg_now_text())
+  ON CONFLICT (kind,tenant,provider) DO UPDATE
+    SET last_emitted = GREATEST(public.kb_vault_witness_emit_cursor.last_emitted, EXCLUDED.last_emitted),
+        updated_at = EXCLUDED.updated_at
+  RETURNING last_emitted INTO v;
+  RETURN v;
+END; $$;
+
+-- The checkpoint producer needs the control fence to pass to _persist, but
+-- kb_vault_control is owner-only (the maintenance barrier) and must never be granted
+-- to the runtime role. This definer exposes ONLY the fence — no seal/maintenance
+-- fields, no lock, no write — so the runtime cadence can read it without any other
+-- control-row access. A plain snapshot read matches how the producer used it.
+CREATE OR REPLACE FUNCTION org_vault_witness_control_fence()
+RETURNS BIGINT
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+  SELECT fencing_token FROM public.kb_vault_control WHERE singleton=1;
+$$;
+
+REVOKE ALL ON FUNCTION org_vault_witness_control_fence() FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_witness_worm_block() FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_witness_verify_shard(TEXT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_witness_checkpoint_leaves() FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_witness_checkpoint_persist(BIGINT,BYTEA,BOOLEAN,BYTEA,BIGINT,BYTEA,BYTEA,BYTEA,SMALLINT,INTEGER,BYTEA,BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_witness_emit_pending() FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_witness_emit_batch(TEXT,TEXT,BIGINT,INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_witness_emit_checkpoints(BIGINT,INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_witness_emit_advance(SMALLINT,TEXT,TEXT,BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_witness_genesis(TEXT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_witness_record_digest(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA,BYTEA,BIGINT,BIGINT,BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_witness_append(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA) FROM PUBLIC;
+
+-- Runtime privilege for the witness surface. The kb's cadence, boot check, and
+-- release gate run on the RUNTIME connection (aimee_kb_runtime on the hardened
+-- tier), so that role needs read on the evidence and EXECUTE on the cadence
+-- functions — but must never be able to FORGE evidence or touch the control row.
+-- E1 left the whole surface runtime-invisible (no runtime caller); E2 grants
+-- exactly what the cadence needs and nothing more. Self-consistent so a dev
+-- re-apply of schema.sql alone yields the correct posture; schema_grants.sql
+-- reasserts the same on the hardened tier.
+DO $$
+BEGIN
+  IF EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname='aimee_kb_runtime') THEN
+    -- Read-only on the evidence tables: non-secret (exported as logs) and needed by
+    -- the producer/boot/gate reads. NO write is granted; forgery stays blocked by
+    -- the WORM triggers and by withholding INSERT.
+    REVOKE ALL ON TABLE public.kb_vault_witness_shard,public.kb_vault_witness_log,
+      public.kb_vault_witness_checkpoint,public.kb_vault_witness_emit_cursor
+      FROM aimee_kb_runtime;
+    GRANT SELECT ON TABLE public.kb_vault_witness_shard,public.kb_vault_witness_log,
+      public.kb_vault_witness_checkpoint,public.kb_vault_witness_emit_cursor
+      TO aimee_kb_runtime;
+    -- The internal / definer-nested helpers stay invisible: append runs nested in
+    -- the source-ledger definers, verify_shard nested in the leaf scan, and
+    -- genesis/record_digest/worm_block are never called directly by the runtime.
+    REVOKE ALL ON FUNCTION
+      public.org_vault_witness_worm_block(),
+      public.org_vault_witness_genesis(TEXT,TEXT),
+      public.org_vault_witness_record_digest(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA,BYTEA,BIGINT,BIGINT,BIGINT),
+      public.org_vault_witness_append(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA),
+      public.org_vault_witness_verify_shard(TEXT,TEXT)
+      FROM aimee_kb_runtime;
+    -- The cadence/boot/gate call these directly, so grant EXECUTE. control_fence
+    -- exposes only the fence, keeping the rest of kb_vault_control owner-only.
+    GRANT EXECUTE ON FUNCTION
+      public.org_vault_witness_control_fence(),
+      public.org_vault_witness_checkpoint_leaves(),
+      public.org_vault_witness_checkpoint_persist(BIGINT,BYTEA,BOOLEAN,BYTEA,BIGINT,BYTEA,BYTEA,BYTEA,SMALLINT,INTEGER,BYTEA,BIGINT),
+      public.org_vault_witness_emit_pending(),
+      public.org_vault_witness_emit_batch(TEXT,TEXT,BIGINT,INTEGER),
+      public.org_vault_witness_emit_checkpoints(BIGINT,INTEGER),
+      public.org_vault_witness_emit_advance(SMALLINT,TEXT,TEXT,BIGINT)
+      TO aimee_kb_runtime;
+  END IF;
+END $$;
+-- ============================================================================
 -- P2a ORG MODEL CATALOG + ENTITLEMENT (tiered-llm-p2a, catalog-only). The org's
 -- model OFFERING (catalog) + which teams may use each model (entitlement). Holds
 -- NO keys, no egress, no vault — P2b routes egress and derives the vault slot from
@@ -5560,6 +6101,17 @@ BEGIN
   INSERT INTO kb_audit_event(seq, ts, actor_role, actor_principal, action, subject,
       verdict, detail, key_id, prev_hash, row_hash)
     VALUES (v_seq, pg_now_text(), r, a, ac, s, vd, d, '', v_prev, v_hash);
+  -- P7-witness-e2: witness this audit-chain row into the reserved ('!kb','!audit')
+  -- shard, in this same transaction (fail-closed: if the witness append fails the
+  -- audit append rolls back too). This is the ledger that carries 'vault.key_use',
+  -- so witnessing it here covers the key-attachment gate. source_hash is the audit
+  -- row's own content hash; has_source_pred is true because the audit chain has a
+  -- real predecessor (its prev_hash, all-zero for the genesis row). group_id is the
+  -- action so the emitted stream can be filtered by it. The advisory lock above
+  -- already serializes appenders, so the witness shard lock is never contended.
+  PERFORM public.org_vault_witness_append(
+    0::smallint, v_seq::text, '!kb', '!audit', '', a, '', ac, pg_now_text(),
+    decode(v_hash, 'hex'), true, decode(v_prev, 'hex'));
 END; $$;
 
 -- Atomic certificate renewal lineage. The caller supplies metadata extracted
@@ -7109,6 +7661,38 @@ BEGIN
     UNION ALL
       SELECT 'aimee_org_teams'::text, NULL::bigint, NULL::text, NULL::text,
              COUNT(*)::numeric FROM kb_team
+    -- P7-witness-e2: NUMBERS ONLY on the metrics surface (never evidence bytes,
+    -- roots or signatures — those ride the log path). These are the locally
+    -- measurable health signals: how much evidence exists, how many shards, the
+    -- latest signed checkpoint and how stale it is. A growing checkpoint age is
+    -- the operator's cue that new signed roots have stopped.
+    UNION ALL
+      SELECT 'aimee_org_witness_evidence_records'::text, NULL::bigint, NULL::text, NULL::text,
+             COUNT(*)::numeric FROM kb_vault_witness_log
+    UNION ALL
+      SELECT 'aimee_org_witness_shards'::text, NULL::bigint, NULL::text, NULL::text,
+             COUNT(*)::numeric FROM kb_vault_witness_shard WHERE seq > 0
+    UNION ALL
+      SELECT 'aimee_org_witness_checkpoint_seq'::text, NULL::bigint, NULL::text, NULL::text,
+             COALESCE(MAX(cp.seq),0)::numeric FROM kb_vault_witness_checkpoint cp
+    UNION ALL
+      SELECT 'aimee_org_witness_checkpoint_age_seconds'::text, NULL::bigint, NULL::text, NULL::text,
+             COALESCE(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - MAX(cp.created_at)::timestamp)),0)::numeric
+        FROM kb_vault_witness_checkpoint cp
+    -- Emission backlog: evidence that exists durably but has not yet been published
+    -- outward. Numbers only, never bytes. A backlog that grows without bound means
+    -- copies are not reaching any retaining consumer, which is exactly the state in
+    -- which a later coherent-rewrite attack would go undetected — so it is an alert,
+    -- not a curiosity. aimee cannot tell "collector down" from "none configured", so
+    -- this measures only what is locally true: how far behind the cursor is.
+    UNION ALL
+      SELECT 'aimee_org_witness_emit_backlog_records'::text, NULL::bigint, NULL::text, NULL::text,
+             COALESCE(SUM(GREATEST(p.head_seq - p.last_emitted, 0)),0)::numeric
+        FROM org_vault_witness_emit_pending() p WHERE p.kind = 0
+    UNION ALL
+      SELECT 'aimee_org_witness_emit_backlog_checkpoints'::text, NULL::bigint, NULL::text, NULL::text,
+             COALESCE(SUM(GREATEST(p.head_seq - p.last_emitted, 0)),0)::numeric
+        FROM org_vault_witness_emit_pending() p WHERE p.kind = 1
     ORDER BY 1, 2 NULLS FIRST, 3 NULLS FIRST;
 END; $$;
 
@@ -12034,3 +12618,23 @@ REVOKE ALL ON FUNCTION kb_management_token_key_use_worm_guard(),
   kb_management_token_authority_use(TEXT,TEXT),
   kb_management_token_authority_readback(TEXT,TEXT),
   kb_management_token_authority_finalize(TEXT,TEXT) FROM PUBLIC;
+
+-- ============================================================================
+-- Schema build metadata (recorded LAST, after every object above, so its presence
+-- at the current values proves a complete, current migration). A HARDENED-tier
+-- runtime kb connects as a non-owner role that CANNOT apply DDL; it reads these to
+-- verify (read-only, db2_verify_pre_provisioned) that the schema it is serving
+-- against was fully migrated at a compatible embedding dimension and is not stale,
+-- and fails closed otherwise. Recorded here (not in C) so a plain
+-- `psql -f schema.sql` migrate records them too.
+--
+-- schema_embedding_dim: DO NOTHING keeps the authoritative C record-or-check drift
+-- guard in charge on the dev auto-apply path (it refuses a re-apply at a different
+-- dim); on a one-shot migrate this is simply the recorded build dim.
+INSERT INTO kb_meta (key, value) VALUES ('schema_embedding_dim', '__EMBED_DIM__')
+  ON CONFLICT (key) DO NOTHING;
+-- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
+-- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
+-- kb started against an older schema fails closed.
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '1')
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
