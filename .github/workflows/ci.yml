@@ -97,6 +97,8 @@ jobs:
         run: cd src && make lint
       - name: Check 3db tier dependencies
         run: ./scripts/check_tier_deps.sh
+      - name: Test guardrail-collapse Phase 0 anchor contract
+        run: python3 -m pytest tests/test_check_collapse_anchor_gate.py
       - name: Enforce guardrail-collapse Phase 0 anchor contract
         shell: bash
         env:

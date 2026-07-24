@@ -4,7 +4,7 @@ This merged Phase 0 packet gates Phase 1. It records six binding decisions with 
 
 ## Citation verification note
 
-Every `file:line` citation in this document and in `collapse_recon.md` / `sampling_capability_matrix.md` was verified against the **current source tree** (the working tree at the commit that lands this packet), not against a symbol index. The symbol index may lag behind the source; the source is the authority. Each named symbol was located with `grep -n` and the surrounding context was inspected to confirm the cited line is the definition site (or the cited call site, when the citation refers to a call), not a coincidental occurrence. Reviewers re-verifying a citation should reread the cited file at the cited line; if the file has moved, the citation must be updated as part of the change that moved the file.
+Every `file:line` citation in this document and in `collapse_recon.md` / `sampling_capability_matrix.md` was verified against the source tree at commit `d45ccc41` (2026-07-24), not against a symbol index. The symbol index may lag behind the source; the source is the authority. Each named symbol was located with `grep -n` and the surrounding context was inspected to confirm the cited line is the definition site (or the cited call site, when the citation refers to a call), not a coincidental occurrence. Reviewers re-verifying a citation should reread the cited file at the cited line; if the file has moved, the citation must be updated as part of the change that moved the file.
 
 ## Decision 1 -- Paths diverge
 
