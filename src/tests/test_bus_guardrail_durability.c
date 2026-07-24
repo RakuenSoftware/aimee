@@ -14,7 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "audit_bus.h" /* audit_bus_*, guardrail_event_t, db1_guardrail_event_* */
+#include "obs_bus.h" /* obs_bus_*, guardrail_event_t, db1_guardrail_event_* */
 #include "db1/db1.h"
 
 #define N 2000
@@ -39,7 +39,7 @@ int main(void)
    /* Each event carries a UNIQUE identity (session_id "s<i>") and per-i field
     * values, so the read-back can prove exactly-once (a loss+dup that nets to N
     * would fail the seen[] check) AND that every field round-tripped the wire. */
-   assert(audit_bus_start() == 0);
+   assert(obs_bus_start() == 0);
    for (int i = 0; i < N; i++)
    {
       guardrail_event_t e;
@@ -56,12 +56,12 @@ int main(void)
       snprintf(e.final_action, sizeof e.final_action, (i % 2) ? "block" : "allow");
       snprintf(e.explanation, sizeof e.explanation, "expl %d", i);
       e.dry_run = i % 2;
-      audit_bus_emit_guardrail(&e);
+      obs_bus_emit_guardrail(&e);
    }
-   audit_bus_stop(); /* drains every in-flight event to db1 */
+   obs_bus_stop(); /* drains every in-flight event to db1 */
 
-   uint64_t dropped = audit_bus_dropped();
-   uint64_t written = audit_bus_written();
+   uint64_t dropped = obs_bus_dropped();
+   uint64_t written = obs_bus_written();
    printf("  emitted %d, written %llu, dropped %llu\n", N, (unsigned long long)written,
           (unsigned long long)dropped);
    if (dropped != 0 || written != (uint64_t)N)

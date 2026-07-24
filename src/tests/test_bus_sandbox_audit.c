@@ -18,7 +18,7 @@
 #include <unistd.h>
 
 #include "audit_action.h" /* audit_ensure_key */
-#include "audit_bus.h"
+#include "obs_bus.h"
 #include "audit_ledger.h"
 #include "cJSON.h"
 #include "log.h" /* audit_log_open */
@@ -101,7 +101,7 @@ int main(void)
    pid_t rc = sandbox_exec_with_readonly(&cfg, "npm publish", devnull, devnull, NULL, NULL, NULL);
    assert(rc == -1);
 
-   audit_bus_stop(); /* drain to the ledger */
+   obs_bus_stop(); /* drain to the ledger */
 
    cJSON *rows = audit_ledger_read(NULL, NULL);
    assert(rows);

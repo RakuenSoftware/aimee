@@ -384,16 +384,16 @@ DATA_OBJS = $(DATA_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Event bus, linked ONLY into aimee-server via the audit migration ---
 # The per-action audit row (guardrails_action_audit.c, in DATA_SRCS above) is
-# emitted over the event bus (delivery step 3): audit_bus.c publishes it and a
-# consumer thread performs the ledger append. audit_bus.c and the bus it uses are
+# emitted over the event bus (delivery step 3): obs_bus.c publishes it and a
+# consumer thread performs the ledger append. obs_bus.c and the bus it uses are
 # the ONLY bus code in any shipping binary, and aimee-server is the ONLY shipping
 # binary that links it (the sole shipping consumer of guardrails_action_audit).
 # The D7 blast-radius gate enforces exactly this: bus symbols may appear in
 # aimee-server and nowhere else. See docs/dev/EVENT_BUS_DECISIONS.md (D7).
-BUS_SHIP_SRCS = modules/bus/bus_wire.c modules/bus/bus_ring.c modules/bus/bus_region.c modules/bus/bus_arena.c modules/bus/bus_route.c modules/bus/bus_host.c modules/bus/bus_client.c modules/bus/bus_capture.c modules/audit/audit_bus.c modules/audit/audit_replay.c
+BUS_SHIP_SRCS = modules/bus/bus_wire.c modules/bus/bus_ring.c modules/bus/bus_region.c modules/bus/bus_arena.c modules/bus/bus_route.c modules/bus/bus_host.c modules/bus/bus_client.c modules/bus/bus_capture.c modules/audit/obs_bus.c modules/audit/audit_replay.c
 BUS_SHIP_OBJS = $(BUS_SHIP_SRCS:%.c=$(OBJDIR)/%.o)
 $(OBJDIR)/modules/bus/%.o: C_FLAGS += -Imodules/bus
-$(OBJDIR)/modules/audit/audit_bus.o: C_FLAGS += -Imodules/bus
+$(OBJDIR)/modules/audit/obs_bus.o: C_FLAGS += -Imodules/bus
 $(OBJDIR)/modules/audit/audit_replay.o: C_FLAGS += -Imodules/bus
 
 # --- Layer 2: Agent execution (agent loop, tools, HTTP, policy) ---

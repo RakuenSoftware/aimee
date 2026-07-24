@@ -9,7 +9,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "audit_bus.h" /* gsem_record now records via the bus; drain it before asserting */
+#include "obs_bus.h" /* gsem_record now records via the bus; drain it before asserting */
 #include "db1.h"
 #include "guardrail_events.h"
 #include "guardrails_semantic.h"
@@ -276,7 +276,7 @@ static void test_gsem_record(const char *path)
 
    /* The insert is now asynchronous (bus consumer). Drain before asserting: stop
     * flushes every in-flight event to db1 before it returns. */
-   audit_bus_stop();
+   obs_bus_stop();
 
    guardrail_event_counts_t counts;
    assert(db1_guardrail_event_counts_7d(&counts) == 0);

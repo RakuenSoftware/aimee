@@ -21,7 +21,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "audit_bus.h"
+#include "obs_bus.h"
 #include "audit_ledger.h"
 #include "cJSON.h"
 #include "log.h"
@@ -59,9 +59,9 @@ int main(void)
    setenv("AIMEE_HOME", home, 1);
    audit_log_open(); /* opens audit.log under AIMEE_HOME so the consumer can append */
 
-   if (audit_bus_start() != 0)
+   if (obs_bus_start() != 0)
    {
-      fprintf(stderr, "FAIL: audit_bus_start\n");
+      fprintf(stderr, "FAIL: obs_bus_start\n");
       return 1;
    }
 
@@ -75,15 +75,15 @@ int main(void)
       snprintf(tool, sizeof tool, "Tool_%d", i % 7);
       snprintf(hash, sizeof hash, "v1-%d", i);
       uint64_t s = now_ns();
-      audit_bus_emit("primary", tool, hash, "cd ; rm", "approve", "read_before_write", "block", i);
+      obs_bus_emit("primary", tool, hash, "cd ; rm", "approve", "read_before_write", "block", i);
       emit_ns[i] = now_ns() - s;
    }
 
    /* Stop drains every in-flight row before returning. */
-   audit_bus_stop();
+   obs_bus_stop();
 
-   uint64_t dropped = audit_bus_dropped();
-   uint64_t written = audit_bus_written();
+   uint64_t dropped = obs_bus_dropped();
+   uint64_t written = obs_bus_written();
    printf("  emitted %d, written %llu, dropped %llu\n", N, (unsigned long long)written,
           (unsigned long long)dropped);
    if (dropped != 0)

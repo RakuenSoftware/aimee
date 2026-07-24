@@ -7,7 +7,7 @@
 #include <stdio.h>
 
 #include "audit_action.h"  /* audit_args_hash, AUDIT_ARGS_HASH_LEN */
-#include "audit_bus.h"     /* audit_bus_emit */
+#include "obs_bus.h"       /* obs_bus_emit */
 #include "vault_service.h" /* vault_audit_hook_fn, vault_status_t/_str, attested_transport_t */
 
 /* Short, stable label for the attestation behind the access (the audit row's
@@ -72,8 +72,8 @@ static void on_vault_access(const char *op, const char *principal, const char *a
    snprintf(args_hash, sizeof args_hash, "v1-");
    audit_args_hash(op, NULL, args_hash, sizeof args_hash);
 
-   audit_bus_emit(principal, op, args_hash, command, transport_label(transport),
-                  vault_status_str(st), verdict_of(st), /*task_id=*/0);
+   obs_bus_emit(principal, op, args_hash, command, transport_label(transport), vault_status_str(st),
+                verdict_of(st), /*task_id=*/0);
 }
 
 void vault_audit_bridge_install(void)

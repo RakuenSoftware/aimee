@@ -3,7 +3,7 @@
  *
  * The bus-level replay is proven elsewhere (test_bus_audit_replay); this covers
  * the OPERATOR path: run a real audit session, then feed its capture file to
- * audit_bus_replay_print and require the rendered output to name every recorded
+ * obs_bus_replay_print and require the rendered output to name every recorded
  * governed-action row and report the stream status.
  */
 #include <assert.h>
@@ -13,7 +13,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#include "audit_bus.h"
+#include "obs_bus.h"
 #include "audit_replay.h"
 #include "cJSON.h"
 #include "log.h"
@@ -33,15 +33,15 @@ int main(void)
    setenv("AIMEE_HOME", home, 1);
    audit_log_open();
 
-   assert(audit_bus_start() == 0);
+   assert(obs_bus_start() == 0);
    for (int i = 0; i < ROWS; i++)
    {
       char tool[32];
       snprintf(tool, sizeof tool, "Tool_%d", i % 7);
-      audit_bus_emit("primary", tool, "v1-x", "cd ; rm", "approve", "read_before_write",
-                     (i % 2) ? "block" : "allow", i);
+      obs_bus_emit("primary", tool, "v1-x", "cd ; rm", "approve", "read_before_write",
+                   (i % 2) ? "block" : "allow", i);
    }
-   audit_bus_stop();
+   obs_bus_stop();
 
    /* Locate the session capture file. */
    char path[4096];
@@ -63,12 +63,12 @@ int main(void)
    size_t osz = 0;
    FILE *m = open_memstream(&obuf, &osz);
    assert(m);
-   int rc = audit_bus_replay_print(path, m);
+   int rc = obs_bus_replay_print(path, m);
    fclose(m);
 
    if (rc != 0)
    {
-      fprintf(stderr, "FAIL: audit_bus_replay_print returned %d for a valid stream\n", rc);
+      fprintf(stderr, "FAIL: obs_bus_replay_print returned %d for a valid stream\n", rc);
       return 1;
    }
    char needle[64];
@@ -92,14 +92,14 @@ int main(void)
    free(obuf);
 
    /* NULL out: classify without printing, still valid. */
-   if (audit_bus_replay_print(path, NULL) != 0)
+   if (obs_bus_replay_print(path, NULL) != 0)
    {
       fprintf(stderr, "FAIL: classify-only pass rejected a valid stream\n");
       return 1;
    }
 
    /* A missing file is a clean error, not a crash. */
-   if (audit_bus_replay_print("/no/such/capture.aimeecap", NULL) != -1)
+   if (obs_bus_replay_print("/no/such/capture.aimeecap", NULL) != -1)
    {
       fprintf(stderr, "FAIL: a missing capture file should return -1\n");
       return 1;
@@ -139,16 +139,16 @@ int main(void)
 
    /* Byte budget (regression for the /v1 256 KB overflow): a large capture must
     * be PAGED even with a big row limit, never materialized past the budget. */
-   const int BIG = 2500;           /* ~150 B/row >> the 200 KB budget */
-   assert(audit_bus_start() == 0); /* fresh session (clears the terminated guard) */
+   const int BIG = 2500;         /* ~150 B/row >> the 200 KB budget */
+   assert(obs_bus_start() == 0); /* fresh session (clears the terminated guard) */
    for (int i = 0; i < BIG; i++)
    {
       char t[32], h[32];
       snprintf(t, sizeof t, "Tool_%d", i % 7);
       snprintf(h, sizeof h, "v1-%d", i);
-      audit_bus_emit("primary", t, h, "cd ; rm", "approve", "read_before_write", "block", i);
+      obs_bus_emit("primary", t, h, "cd ; rm", "approve", "read_before_write", "block", i);
    }
-   audit_bus_stop();
+   obs_bus_stop();
    /* Pick the largest capture file (the BIG session's). */
    char big[4096];
    big[0] = '\0';

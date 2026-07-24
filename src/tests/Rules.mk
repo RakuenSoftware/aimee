@@ -26,7 +26,7 @@ unit-test-server-management-listener-live: $(TESTPREFIX)/unit-test-server-manage
 	$<
 
 P5B3C_LIVE_SERVER_OBJS = $(filter-out $(OBJDIR)/server/server_main.o,$(SERVER_OBJS)) \
-    $(OBJDIR)/modules/audit/audit_bus.o $(OBJDIR)/modules/audit/audit_replay.o \
+    $(OBJDIR)/modules/audit/obs_bus.o $(OBJDIR)/modules/audit/audit_replay.o \
     $(OBJDIR)/modules/bus/bus_client.o $(OBJDIR)/modules/bus/bus_host.o \
     $(OBJDIR)/modules/bus/bus_route.o $(OBJDIR)/modules/bus/bus_region.o \
     $(OBJDIR)/modules/bus/bus_ring.o $(OBJDIR)/modules/bus/bus_arena.o \
@@ -79,12 +79,12 @@ TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/mo
                              $(PLATFORM_AGENT_OBJS)
 
 # This bundle carries guardrails_action_audit.o and guardrails_semantic.o, which
-# now reference audit_bus_emit / audit_bus_emit_guardrail — so every test linking
+# now reference obs_bus_emit / obs_bus_emit_guardrail — so every test linking
 # it also needs the bus objects. Listed individually (NOT $(BUS_SHIP_OBJS)) so the
 # D7 "only aimee-server links BUS_SHIP_OBJS" invariant is untouched; these are
 # TEST binaries, which are allowed to link the bus. guardrail_events.o /
 # aimee_home.o / log.o are already in TEST_DATA_OBJS.
-BUS_TEST_OBJS = $(OBJDIR)/modules/audit/audit_bus.o \
+BUS_TEST_OBJS = $(OBJDIR)/modules/audit/obs_bus.o \
                 $(OBJDIR)/modules/bus/bus_client.o $(OBJDIR)/modules/bus/bus_host.o \
                 $(OBJDIR)/modules/bus/bus_route.o $(OBJDIR)/modules/bus/bus_region.o \
                 $(OBJDIR)/modules/bus/bus_ring.o $(OBJDIR)/modules/bus/bus_arena.o \
@@ -2759,13 +2759,13 @@ unit-test-bus-config-autonomy: $(TESTPREFIX)/unit-test-bus-config-autonomy
 	$<
 
 # The audit-on-bus DURABILITY test: the first module whose real path is being
-# migrated onto the bus. Emits N rows through the real audit_bus producer/consumer
+# migrated onto the bus. Emits N rows through the real obs_bus producer/consumer
 # and requires the real ledger to hold exactly N, each once, zero drops. Links
-# audit_bus + audit_ledger + the bus + the shared support objects. Test binary only.
-$(OBJDIR)/modules/audit/audit_bus.o: C_FLAGS += -Imodules/bus
+# obs_bus + audit_ledger + the bus + the shared support objects. Test binary only.
+$(OBJDIR)/modules/audit/obs_bus.o: C_FLAGS += -Imodules/bus
 $(OBJDIR)/tests/test_bus_audit_durability.o: C_FLAGS += -Imodules/bus
 $(TESTPREFIX)/unit-test-bus-audit-durability: $(OBJDIR)/tests/test_bus_audit_durability.o \
-                                              $(OBJDIR)/modules/audit/audit_bus.o \
+                                              $(OBJDIR)/modules/audit/obs_bus.o \
                                               $(OBJDIR)/modules/audit/audit_ledger.o \
                                               $(OBJDIR)/aimee_home.o \
                                               $(OBJDIR)/modules/bus/bus_client.o \
@@ -2789,7 +2789,7 @@ unit-test-bus-audit-durability: $(TESTPREFIX)/unit-test-bus-audit-durability
 # link set as durability plus bus_capture.o. Test binary only.
 $(OBJDIR)/tests/test_bus_audit_replay.o: C_FLAGS += -Imodules/bus
 $(TESTPREFIX)/unit-test-bus-audit-replay: $(OBJDIR)/tests/test_bus_audit_replay.o \
-                                          $(OBJDIR)/modules/audit/audit_bus.o \
+                                          $(OBJDIR)/modules/audit/obs_bus.o \
                                           $(OBJDIR)/modules/audit/audit_ledger.o \
                                           $(OBJDIR)/aimee_home.o \
                                           $(OBJDIR)/modules/bus/bus_client.o \
@@ -2811,7 +2811,7 @@ unit-test-bus-audit-replay: $(TESTPREFIX)/unit-test-bus-audit-replay
 # but the files stay bounded. Same link set as replay/durability.
 $(OBJDIR)/tests/test_bus_audit_retention.o: C_FLAGS += -Imodules/bus
 $(TESTPREFIX)/unit-test-bus-audit-retention: $(OBJDIR)/tests/test_bus_audit_retention.o \
-                                             $(OBJDIR)/modules/audit/audit_bus.o \
+                                             $(OBJDIR)/modules/audit/obs_bus.o \
                                              $(OBJDIR)/modules/audit/audit_ledger.o \
                                              $(OBJDIR)/aimee_home.o \
                                              $(OBJDIR)/modules/bus/bus_client.o \
@@ -2834,7 +2834,7 @@ unit-test-bus-audit-retention: $(TESTPREFIX)/unit-test-bus-audit-retention
 $(OBJDIR)/modules/audit/audit_replay.o: C_FLAGS += -Imodules/bus
 $(OBJDIR)/tests/test_bus_audit_replay_tool.o: C_FLAGS += -Imodules/bus
 $(TESTPREFIX)/unit-test-bus-audit-replay-tool: $(OBJDIR)/tests/test_bus_audit_replay_tool.o \
-                                               $(OBJDIR)/modules/audit/audit_bus.o \
+                                               $(OBJDIR)/modules/audit/obs_bus.o \
                                                $(OBJDIR)/modules/audit/audit_replay.o \
                                                $(OBJDIR)/modules/audit/audit_ledger.o \
                                                $(OBJDIR)/aimee_home.o \
@@ -2855,10 +2855,10 @@ unit-test-bus-audit-replay-tool: $(TESTPREFIX)/unit-test-bus-audit-replay-tool
 
 # Second module on the bus: the guardrail-semantic event. Emits N over the bus and
 # requires the real db1 guardrail_events table to hold exactly N. guardrail_events.o
-# is in BUS_MEM_OBJS; audit_bus dispatches this kind to db1.
+# is in BUS_MEM_OBJS; obs_bus dispatches this kind to db1.
 $(OBJDIR)/tests/test_bus_guardrail_durability.o: C_FLAGS += -Imodules/bus
 $(TESTPREFIX)/unit-test-bus-guardrail-durability: $(OBJDIR)/tests/test_bus_guardrail_durability.o \
-                                                  $(OBJDIR)/modules/audit/audit_bus.o \
+                                                  $(OBJDIR)/modules/audit/obs_bus.o \
                                                   $(OBJDIR)/modules/audit/audit_ledger.o \
                                                   $(OBJDIR)/aimee_home.o \
                                                   $(OBJDIR)/modules/bus/bus_client.o \
@@ -2877,12 +2877,12 @@ unit-test-bus-guardrail-durability: $(TESTPREFIX)/unit-test-bus-guardrail-durabi
 	$<
 
 # Vault credential-access audit, end-to-end through the REAL server bridge
-# (vault_audit_bridge.o) -> audit_bus -> ledger. Same bus link set as the audit
+# (vault_audit_bridge.o) -> obs_bus -> ledger. Same bus link set as the audit
 # durability test, plus the bridge, the vault service + its crypto/store/cache
 # deps, and audit_action.o (audit_args_hash + audit_ensure_key).
 $(TESTPREFIX)/unit-test-bus-vault-audit: $(OBJDIR)/tests/test_bus_vault_audit.o \
                                          $(OBJDIR)/server/vault_audit_bridge.o \
-                                         $(OBJDIR)/modules/audit/audit_bus.o \
+                                         $(OBJDIR)/modules/audit/obs_bus.o \
                                          $(OBJDIR)/modules/audit/audit_ledger.o \
                                          $(OBJDIR)/modules/audit/audit_action.o \
                                          $(OBJDIR)/modules/workflows/wfe_canonical.o \
@@ -2913,12 +2913,12 @@ unit-test-bus-vault-audit: $(TESTPREFIX)/unit-test-bus-vault-audit
 # (check_bus_perf_gate.sh) force-builds + runs it via this .PHONY target instead.
 
 # Sandbox degraded-isolation audit, end-to-end through the REAL server bridge
-# (sandbox_audit_bridge.o) -> audit_bus -> ledger. Same bus link set as the audit
+# (sandbox_audit_bridge.o) -> obs_bus -> ledger. Same bus link set as the audit
 # durability test, plus the bridge, posix/sandbox.o, and audit_action.o.
 $(TESTPREFIX)/unit-test-bus-sandbox-audit: $(OBJDIR)/tests/test_bus_sandbox_audit.o \
                                            $(OBJDIR)/server/sandbox_audit_bridge.o \
                                            $(OBJDIR)/posix/sandbox.o \
-                                           $(OBJDIR)/modules/audit/audit_bus.o \
+                                           $(OBJDIR)/modules/audit/obs_bus.o \
                                            $(OBJDIR)/modules/audit/audit_ledger.o \
                                            $(OBJDIR)/modules/audit/audit_action.o \
                                            $(OBJDIR)/modules/workflows/wfe_canonical.o \
@@ -2938,11 +2938,11 @@ $(TESTPREFIX)/unit-test-bus-sandbox-audit: $(OBJDIR)/tests/test_bus_sandbox_audi
 unit-test-bus-sandbox-audit: $(TESTPREFIX)/unit-test-bus-sandbox-audit
 	$<
 
-# Shutdown race: concurrent producers vs audit_bus_stop() (regression test for the
+# Shutdown race: concurrent producers vs obs_bus_stop() (regression test for the
 # in-flight-emit-vs-teardown UAF). Same link set as the guardrail durability test.
 $(OBJDIR)/tests/test_bus_shutdown_race.o: C_FLAGS += -Imodules/bus
 $(TESTPREFIX)/unit-test-bus-shutdown-race: $(OBJDIR)/tests/test_bus_shutdown_race.o \
-                                           $(OBJDIR)/modules/audit/audit_bus.o \
+                                           $(OBJDIR)/modules/audit/obs_bus.o \
                                            $(OBJDIR)/modules/audit/audit_ledger.o \
                                            $(OBJDIR)/aimee_home.o \
                                            $(OBJDIR)/modules/bus/bus_client.o \
@@ -5756,13 +5756,13 @@ $(TESTPREFIX)/unit-test-kb-mdl: $(OBJDIR)/tests/test_kb_mdl.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
-# guardrails_semantic.o -> audit_bus_emit_guardrail, so this test now links the
+# guardrails_semantic.o -> obs_bus_emit_guardrail, so this test now links the
 # bus (gsem_record records over it) plus the bus's own deps.
 $(OBJDIR)/tests/test_guardrails_semantic.o: C_FLAGS += -Imodules/bus
 $(TESTPREFIX)/unit-test-guardrails-semantic: $(OBJDIR)/tests/test_guardrails_semantic.o \
                      $(OBJDIR)/modules/guardrails/guardrails_semantic.o \
                      $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/guardrail_events.o \
-                     $(OBJDIR)/modules/audit/audit_bus.o $(OBJDIR)/modules/audit/audit_ledger.o \
+                     $(OBJDIR)/modules/audit/obs_bus.o $(OBJDIR)/modules/audit/audit_ledger.o \
                      $(OBJDIR)/aimee_home.o \
                      $(OBJDIR)/modules/bus/bus_client.o $(OBJDIR)/modules/bus/bus_host.o \
                      $(OBJDIR)/modules/bus/bus_route.o $(OBJDIR)/modules/bus/bus_region.o \

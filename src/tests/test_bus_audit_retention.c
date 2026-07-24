@@ -18,10 +18,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "audit_bus.h"
+#include "obs_bus.h"
 #include "log.h"
 
-#define KEEP 16 /* must match AB_CAP_KEEP in audit_bus.c */
+#define KEEP 16 /* must match AB_CAP_KEEP in obs_bus.c */
 
 static int count_capture_files(const char *dir)
 {
@@ -88,14 +88,14 @@ int main(void)
    printf("  seeded %d old capture files (retention bound %d)\n", seeded, KEEP);
 
    /* Run a real audit session: it creates one live file and prunes to KEEP. */
-   if (audit_bus_start() != 0)
+   if (obs_bus_start() != 0)
    {
-      fprintf(stderr, "FAIL: audit_bus_start\n");
+      fprintf(stderr, "FAIL: obs_bus_start\n");
       return 1;
    }
    for (int i = 0; i < 200; i++)
-      audit_bus_emit("primary", "Write", "v1-x", "cd ; rm", "approve", "reason", "block", i);
-   audit_bus_stop();
+      obs_bus_emit("primary", "Write", "v1-x", "cd ; rm", "approve", "reason", "block", i);
+   obs_bus_stop();
 
    int remaining = count_capture_files(home);
    printf("  after a session + prune: %d capture files remain\n", remaining);

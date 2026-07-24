@@ -1,7 +1,7 @@
 /* audit_replay.h: read an audit-on-bus capture file and re-present the
  * governed-action rows it recorded.
  *
- * The event bus exists for auditability and record+replay; audit_bus.c records
+ * The event bus exists for auditability and record+replay; obs_bus.c records
  * every governed-action row to a per-session capture file. This is the operator
  * side: given such a file, replay it — observationally, nothing re-executed — and
  * print each row in the order it happened, with the stream's terminal
@@ -32,7 +32,7 @@ extern "C"
     * Returns 0 if the stream parsed as a valid capture (COMPLETE or OPEN), -1 if
     * the file could not be read, and -2 if the stream is TRUNCATED or CORRUPT
     * (still prints what was recoverable before the break). */
-   int audit_bus_replay_print(const char *path, FILE *out);
+   int obs_bus_replay_print(const char *path, FILE *out);
 
    /* JSON forms for the /v1/audit endpoints (both return caller-owned cJSON).
     * audit_replay_to_json returns {status, total, count, offset, rows:[{seq,
