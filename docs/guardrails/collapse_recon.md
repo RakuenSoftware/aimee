@@ -2,7 +2,7 @@
 
 Phase 0 inventory, verified against the current source. Line numbers are anchors for this checkout.
 
-> Citation verification (F001 reconciliation): every `file:line` below matches the current source tree, verified via `grep -n` and surrounding-context inspection. The symbol index (`find_symbol`) was observed to lag behind the source on six locations during the F001 review -- the documents' citations are the source-of-truth and the index entries should be re-indexed separately. See `docs/guardrails/collapse_anchors.md` "F001 reconciliation (architect review)" for the table that records both the index line and the source line for every conflicting citation.
+> Citation verification (F001 reconciliation): every `file:line` below matches the current source tree, verified via `grep -n` and surrounding-context inspection. The symbol index (`find_symbol`) was observed to lag behind the source on six locations during the F001 review -- the documents' citations are the source-of-truth and the index entries should be re-indexed separately. See `docs/guardrails/collapse_anchor_review_closure.md` "F001 reconciliation (architect review)" for the table that records both the index line and the source line for every conflicting citation.
 
 ## Binding path decision
 

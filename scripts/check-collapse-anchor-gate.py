@@ -234,9 +234,10 @@ def _ci_mode() -> bool:
 
 def _diff_names(*args: str, cwd: Path) -> list[str]:
     """Run ``git diff --name-only`` with the given arguments and
-    return the nonempty paths it reports.  Returns an empty list on
-    a non-zero exit (used for the combined local-mode diff)."""
-    out = _git_text_ok("diff", "--name-only", *args, cwd=cwd)
+    return the nonempty paths it reports.  Git failures are
+    propagated as :class:`GateError` so the gate fails closed
+    instead of silently treating a failed diff as empty (F002)."""
+    out = _git_text("diff", "--name-only", *args, cwd=cwd)
     return [line for line in out.splitlines() if line]
 
 
@@ -247,13 +248,12 @@ def _working_tree_names(cwd: Path) -> list[str]:
 
     Combines ``git diff --name-only HEAD`` (tracked edits + staged
     additions) with ``git ls-files --others --modified --exclude-standard``
-    (untracked files outside standard ignore lists).  ``git add -N``
-    would also fold untracked files into the diff output, but the
-    ``ls-files`` source is sufficient on its own and avoids mutating
-    the index.
+    (untracked files outside standard ignore lists).  Git failures are
+    propagated as :class:`GateError` so the gate fails closed rather
+    than silently treating a failed query as an empty diff (F002).
     """
-    diff_out = _git_text_ok("diff", "--name-only", "HEAD", cwd=cwd)
-    ls_out = _git_text_ok(
+    diff_out = _git_text("diff", "--name-only", "HEAD", cwd=cwd)
+    ls_out = _git_text(
         "ls-files", "--others", "--modified", "--exclude-standard", cwd=cwd,
     )
     names: list[str] = []
@@ -272,12 +272,11 @@ def _head_tree_names(cwd: Path) -> list[str]:
     Used as the initial-commit fallback: when ``HEAD~1`` is unavailable
     there is no prior commit to diff against, but a Phase 1+ path
     present in the initial commit itself is exactly the scenario the
-    contract forbids.  ``git ls-tree -r HEAD`` is best-effort: on a
-    corrupt tree it returns the empty string, and the caller treats the
-    result as an empty Phase 1+ list (which is no worse than the
-    pre-existing behaviour).
+    contract forbids.  Git failures are propagated as :class:`GateError`
+    so the gate fails closed rather than silently treating a failed
+    tree query as an empty diff (F002).
     """
-    out = _git_text_ok("ls-tree", "-r", "--name-only", "HEAD", cwd=cwd)
+    out = _git_text("ls-tree", "-r", "--name-only", "HEAD", cwd=cwd)
     return [line for line in out.splitlines() if line]
 
 
@@ -464,13 +463,15 @@ def contract_present(cwd: Path) -> tuple[bool, list[str]]:
 
 
 def contract_present_at_base(cwd: Path) -> tuple[bool, list[str]]:
-    """Verify the anchor contract at the configured ``BASE_SHA``.
+    """Verify the anchor contract at the base revision.
 
-    Returns ``(True, [])`` early when no ``BASE_SHA`` is configured
-    AND we are not in CI mode.  When ``BASE_SHA`` is set OR the
-    surrounding environment is a CI runner, the base-reference
-    contract is mandatory (F001) and the function only returns
-    ``(True, [])`` when the file at ``BASE_SHA`` has every decision.
+    In CI mode the base revision is ``BASE_SHA`` (the target branch
+    head).  In local mode with a usable ``HEAD~1`` the base is
+    ``HEAD~1``.  In local mode without ``HEAD~1`` (initial commit or
+    shallow clone) the base is ``HEAD`` (F001 closure).  In all three
+    cases the base-reference contract is mandatory when a Phase 1+
+    path is present; the function only returns ``(True, [])`` when the
+    anchor file at the resolved base has every decision.
 
     The caller in :func:`main` only invokes this function when
     ``phase_one_touched(paths)`` is true, so the function is never
@@ -488,13 +489,20 @@ def contract_present_at_base(cwd: Path) -> tuple[bool, list[str]]:
         # is the last commit before HEAD, so verifying the anchors
         # are merged there is what "anchors are merged on the target
         # branch before Phase 1+ starts" reduces to in a single-
-        # clone local workflow.  When ``HEAD~1`` is unavailable
-        # (initial commit), the gate defers to the working-tree
-        # contract check only.
+        # clone local workflow.
+        #
+        # F001 closure: when ``HEAD~1`` is unavailable (initial commit
+        # or shallow clone), the only available base reference is
+        # ``HEAD``.  The gate is only asked to verify the base contract
+        # when a Phase 1+ path is present, so deferring to the working
+        # tree alone would let an initial commit that introduces a
+        # Phase 1+ path without anchors pass silently.  Verify the
+        # anchors at ``HEAD`` instead; if they are missing, fail closed.
         local_base = _local_base_ref(cwd)
         if local_base is None:
-            return True, []
-        base_sha = local_base
+            base_sha = "HEAD"
+        else:
+            base_sha = local_base
 
     if not _anchor_path_exists_at(base_sha, cwd):
         return False, [str(n) for n in range(1, 7)]
