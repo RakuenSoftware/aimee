@@ -37,8 +37,9 @@ typedef enum
 const char *vault_status_str(vault_status_t s);
 
 /* Audit hook: a sink notified after each credential-access op with NON-SECRET
- * fields only — the operation ("vault.get" / "vault.set" / "vault.delete" /
- * "vault.unlock"), the principal (WHO), the (agent, cred) identity (WHICH
+ * fields only — the operation ("vault.get" / "vault.get_server" / "vault.set" /
+ * "vault.delete" / "vault.unlock"), the principal (WHO — VAULT_SERVER_PRINCIPAL
+ * for the server's own autonomous reads), the (agent, cred) identity (WHICH
  * credential — never its value), the transport, and the outcome status. The
  * secret plaintext is NEVER passed. This is the security audit trail for "who
  * read/mutated which credential, over what channel, with what outcome" — the

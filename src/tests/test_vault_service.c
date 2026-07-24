@@ -424,6 +424,56 @@ static void test_audit_hook(void)
    printf("  PASS: test_audit_hook\n");
 }
 
+/* Audit coverage for the webuser password-unlock instrumentation and, most
+ * importantly, the server's OWN autonomous reads (vault.get_server:
+ * get_server_principal / get_server_wrap) — the runtime path that fetches
+ * delegate/agent credentials with no client unlock. Those reads must leave a
+ * trail too, attributed to the server principal, and must not leak the secret. */
+static void test_audit_hook_server_and_password(void)
+{
+   const char *wp = "webuser:bob";
+   const uint8_t pw[] = "bobs-login-password";
+   const char *secret = "sk-server-owned-DO-NOT-LOG-7c1e";
+   char out[128];
+
+   vault_kek_cache_clear();
+   g_nrecs = 0;
+   vault_service_set_audit_hook(capture_hook);
+
+   /* unlock_password over a disallowed transport is a recorded denial — this pins
+    * that unlock_password is instrumented (its success path shares the same final
+    * vaudit as the uds unlock already covered in test_audit_hook). */
+   assert(vault_service_unlock_password(wp, ATTEST_TCP_BEARER, pw, sizeof(pw) - 1, T0) ==
+          VAULT_ERR_TRANSPORT);
+
+   /* Server autonomous read of a credential that does not exist -> a "miss" row,
+    * attributed to the server principal (no external actor / transport). */
+   assert(vault_service_get_server_principal("no-such-agent", "api_key", out, sizeof(out)) ==
+          VAULT_NO_ENTRY);
+
+   /* Store a server-owned credential (set_server is not audited — it is actorless
+    * internal plumbing) then read it back autonomously: the READ is the audited
+    * access event, the primary runtime credential-fetch path. */
+   assert(vault_service_set_server("delegate", "api_key", secret) == VAULT_OK);
+   assert(vault_service_get_server_principal("delegate", "api_key", out, sizeof(out)) == VAULT_OK);
+   assert(strcmp(out, secret) == 0); /* the server really got the plaintext... */
+
+   int i = 0;
+   expect_rec(i++, "vault.unlock", wp, "", "", ATTEST_TCP_BEARER, VAULT_ERR_TRANSPORT);
+   expect_rec(i++, "vault.get_server", VAULT_SERVER_PRINCIPAL, "no-such-agent", "api_key",
+              ATTEST_NONE, VAULT_NO_ENTRY);
+   expect_rec(i++, "vault.get_server", VAULT_SERVER_PRINCIPAL, "delegate", "api_key", ATTEST_NONE,
+              VAULT_OK);
+   assert(g_nrecs == i); /* set_server produced no row; the read did */
+
+   /* ...and the server-owned secret never reached the audit trail. */
+   assert_no_secret_leak(secret);
+
+   vault_service_set_audit_hook(NULL);
+   vault_kek_cache_clear();
+   printf("  PASS: test_audit_hook_server_and_password\n");
+}
+
 int main(void)
 {
    snprintf(g_home, sizeof(g_home), "/tmp/aimee-vaultsvc-test-%d", (int)getpid());
@@ -445,6 +495,7 @@ int main(void)
    test_server_inject_after_restart();
    test_server_principal_vault();
    test_audit_hook();
+   test_audit_hook_server_and_password();
 
    vault_kek_cache_clear();
    char rm[320];

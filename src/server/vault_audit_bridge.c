@@ -48,23 +48,29 @@ static const char *verdict_of(vault_status_t st)
 
 /* vault_audit_hook_fn: publish one credential-access audit row over the bus
  * (KIND_AUDIT_ACTION -> the audit ledger + capture/replay). NON-SECRET only:
- * principal (actor), op (tool), the (agent, cred) identity (command + a
- * correlation hash), the transport (mode), and the outcome (verdict + the precise
- * status as reason). No task association -> task_id 0 (the "no task" sentinel). */
+ * principal (actor), op (tool), the (agent, cred) identity (command), the
+ * transport (mode), and the outcome (verdict + the precise status as reason). No
+ * task association -> task_id 0 (the "no task" sentinel). */
 static void on_vault_access(const char *op, const char *principal, const char *agent,
                             const char *cred, attested_transport_t transport, vault_status_t st)
 {
+   /* The (agent, cred) identity is non-secret and rides HUMAN-READABLE in the
+    * command field — this is the correlation key for vault-access rows (query the
+    * ledger by actor+tool+command). It is never the secret value. */
    char command[256];
    if (agent[0] || cred[0])
       snprintf(command, sizeof command, "%s/%s", agent, cred);
    else
       command[0] = '\0'; /* whole-vault op (unlock): no per-credential identity */
 
-   /* Fingerprint the (agent, cred) identity for correlation without re-storing it
-    * (a whole-vault op hashes just the op name). Non-secret either way. */
+   /* args_hash is the standard keyed per-op fingerprint. NOTE it does NOT fold in
+    * the (agent, cred) identity: audit_args_hash only projects allowlisted tool
+    * fields and these vault ops are not allowlisted, so it is tool-name-only. That
+    * is fine — the identity is already carried, queryable, in `command` above; the
+    * hash just keeps the row schema uniform with the governed-action rows. */
    char args_hash[AUDIT_ARGS_HASH_LEN];
    snprintf(args_hash, sizeof args_hash, "v1-");
-   audit_args_hash(op, command, args_hash, sizeof args_hash);
+   audit_args_hash(op, NULL, args_hash, sizeof args_hash);
 
    audit_bus_emit(principal, op, args_hash, command, transport_label(transport),
                   vault_status_str(st), verdict_of(st), /*task_id=*/0);

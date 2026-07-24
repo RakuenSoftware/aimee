@@ -91,14 +91,15 @@ vault_status_t vault_service_get_server_wrap(const char *principal, const char *
       return VAULT_ERR_BADARG;
    uint8_t server_kek[VAULT_KEK_LEN];
    if (vault_server_kek(server_kek) != 0)
-      return VAULT_ERR_CRYPTO;
+      return vaudit("vault.get_server", principal, agent, cred, ATTEST_NONE, VAULT_ERR_CRYPTO);
    int rc = vault_store_get_server(principal, server_kek, agent, cred, out, out_len);
    OPENSSL_cleanse(server_kek, sizeof(server_kek));
    if (rc == 0)
-      return VAULT_OK;
+      return vaudit("vault.get_server", principal, agent, cred, ATTEST_NONE, VAULT_OK);
    if (rc == VAULT_STORE_NO_ENTRY)
-      return VAULT_NO_ENTRY;
-   return VAULT_ERR_CRYPTO; /* decrypt/tamper — fail closed */
+      return vaudit("vault.get_server", principal, agent, cred, ATTEST_NONE, VAULT_NO_ENTRY);
+   return vaudit("vault.get_server", principal, agent, cred, ATTEST_NONE,
+                 VAULT_ERR_CRYPTO); /* decrypt/tamper — fail closed */
 }
 
 /* Read (agent, cred) from the SERVER principal's vault under the server master KEK
@@ -113,14 +114,17 @@ vault_status_t vault_service_get_server_principal(const char *agent, const char 
       return VAULT_ERR_BADARG;
    uint8_t kek[VAULT_KEK_LEN];
    if (vault_server_kek(kek) != 0)
-      return VAULT_ERR_CRYPTO;
+      return vaudit("vault.get_server", VAULT_SERVER_PRINCIPAL, agent, cred, ATTEST_NONE,
+                    VAULT_ERR_CRYPTO);
    int rc = vault_store_get(VAULT_SERVER_PRINCIPAL, kek, agent, cred, out, out_len);
    OPENSSL_cleanse(kek, sizeof(kek));
    if (rc == 0)
-      return VAULT_OK;
+      return vaudit("vault.get_server", VAULT_SERVER_PRINCIPAL, agent, cred, ATTEST_NONE, VAULT_OK);
    if (rc == VAULT_STORE_NO_ENTRY)
-      return VAULT_NO_ENTRY;
-   return VAULT_ERR_CRYPTO; /* decrypt/tamper — fail closed */
+      return vaudit("vault.get_server", VAULT_SERVER_PRINCIPAL, agent, cred, ATTEST_NONE,
+                    VAULT_NO_ENTRY);
+   return vaudit("vault.get_server", VAULT_SERVER_PRINCIPAL, agent, cred, ATTEST_NONE,
+                 VAULT_ERR_CRYPTO); /* decrypt/tamper — fail closed */
 }
 
 vault_status_t vault_service_set_server(const char *agent, const char *cred, const char *secret)

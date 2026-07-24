@@ -2876,6 +2876,42 @@ $(TESTPREFIX)/unit-test-bus-guardrail-durability: $(OBJDIR)/tests/test_bus_guard
 unit-test-bus-guardrail-durability: $(TESTPREFIX)/unit-test-bus-guardrail-durability
 	$<
 
+# Vault credential-access audit, end-to-end through the REAL server bridge
+# (vault_audit_bridge.o) -> audit_bus -> ledger. Same bus link set as the audit
+# durability test, plus the bridge, the vault service + its crypto/store/cache
+# deps, and audit_action.o (audit_args_hash + audit_ensure_key).
+$(TESTPREFIX)/unit-test-bus-vault-audit: $(OBJDIR)/tests/test_bus_vault_audit.o \
+                                         $(OBJDIR)/server/vault_audit_bridge.o \
+                                         $(OBJDIR)/modules/audit/audit_bus.o \
+                                         $(OBJDIR)/modules/audit/audit_ledger.o \
+                                         $(OBJDIR)/modules/audit/audit_action.o \
+                                         $(OBJDIR)/modules/workflows/wfe_canonical.o \
+                                         $(OBJDIR)/modules/vault/vault_service.o \
+                                         $(OBJDIR)/modules/vault/vault_store.o \
+                                         $(OBJDIR)/modules/vault/vault_kek_check.o \
+                                         $(OBJDIR)/modules/vault/vault_crypto.o \
+                                         $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                                         $(OBJDIR)/modules/vault/vault_server_key.o \
+                                         $(OBJDIR)/aimee_home.o \
+                                         $(OBJDIR)/modules/bus/bus_client.o \
+                                         $(OBJDIR)/modules/bus/bus_host.o \
+                                         $(OBJDIR)/modules/bus/bus_route.o \
+                                         $(OBJDIR)/modules/bus/bus_region.o \
+                                         $(OBJDIR)/modules/bus/bus_ring.o \
+                                         $(OBJDIR)/modules/bus/bus_arena.o \
+                                         $(OBJDIR)/modules/bus/bus_wire.o \
+                                         $(OBJDIR)/modules/bus/bus_capture.o \
+                                         $(BUS_MEM_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+
+.PHONY: unit-test-bus-vault-audit
+unit-test-bus-vault-audit: $(TESTPREFIX)/unit-test-bus-vault-audit
+	$<
+
+# Run in the standard unit-tests sweep (a fast functional test, unlike the
+# perf/durability-gated bus tests that the bench gate drives).
+TEST_TARGETS += $(TESTPREFIX)/unit-test-bus-vault-audit
+
 # Shutdown race: concurrent producers vs audit_bus_stop() (regression test for the
 # in-flight-emit-vs-teardown UAF). Same link set as the guardrail durability test.
 $(OBJDIR)/tests/test_bus_shutdown_race.o: C_FLAGS += -Imodules/bus
