@@ -1,15 +1,29 @@
-/* bus_route.c: the host's routing and governance tap. See bus_host.h.
+/* bus_route.c: the host's routing, governance tap, and flow control (D5/D6).
  *
- * The host drains each admitted client's outbound ring, and for every event:
+ * The host drains each admitted client's outbound ring. For every event it
  * stamps a monotonic seq, offers it to the tap (the single full-stream observer,
- * before any routing decision — D6), then delivers it by pattern. All of this
- * runs in one thread, so seq order is the tap order and the capture order.
+ * before any routing decision — D6), then delivers by pattern under a
+ * credit-based flow-control discipline:
  *
- * This slice routes inline-payload events. An event whose payload lives in the
- * arena needs the host to publish that lease (slice 4) to the resolved observer
- * set before forwarding the reference; that composition is a named follow-up and
- * arena-flagged frames are dropped-with-count here rather than delivered to a
- * consumer that could not read them.
+ *   - The drain loop never blocks on a destination. A full destination is
+ *     resolved by that kind's policy immediately, and the loop moves on.
+ *   - BLOCK (the default): the event is left at the producer's ring head,
+ *     uncommitted, and retried next pump. The host holds at most this one
+ *     in-flight event per producer, so backpressure propagates to the producer
+ *     (its outbound stops draining) without an unbounded host queue. It is
+ *     seq-stamped and tapped once; retries deliver only to the observers that
+ *     have not yet received it.
+ *   - SHED (opt-in per kind): a full destination is sent a typed overflow event
+ *     naming the lost seq/kind — never a silent drop.
+ *
+ * Control-class events (overflow, producer_reaped, capability_absent) draw on a
+ * reserve carved from the tail of each inbound ring, so a data-saturated client
+ * still has room to be told what it lost. If even the reserve is full, a sticky
+ * control_lost flag is set — the degenerate-case backstop that keeps "never
+ * silently" true.
+ *
+ * This slice routes inline-payload events; arena-payload delivery is a separate
+ * slice-4/6 integration and arena-flagged frames are dropped-with-count here.
  */
 #include <string.h>
 
@@ -19,7 +33,7 @@
 
 #define KIND_SERVER_NONE (-1)
 
-/* ---- slot bitmap over observers ---- */
+/* ---- slot bitmaps ---- */
 
 static void obs_set(uint64_t *bits, uint32_t slot)
 {
@@ -53,14 +67,15 @@ static bus_kind_t *kind_intern(bus_host_t *h, uint32_t kind)
    {
       if (!h->kinds[i].in_use)
       {
+         memset(&h->kinds[i], 0, sizeof h->kinds[i]);
          h->kinds[i].in_use = 1;
          h->kinds[i].kind = kind;
-         memset(h->kinds[i].observers, 0, sizeof h->kinds[i].observers);
          h->kinds[i].server = KIND_SERVER_NONE;
+         h->kinds[i].policy = BUS_KIND_BLOCK;
          return &h->kinds[i];
       }
    }
-   return NULL; /* registry full */
+   return NULL;
 }
 
 void bus_host_set_tap(bus_host_t *h, bus_tap_fn fn, void *ctx)
@@ -90,15 +105,106 @@ bus_host_result_t bus_host_serve_kind(bus_host_t *h, uint32_t slot, uint32_t eve
    if (!k)
       return BUS_HOST_ERR_ARG;
    if (k->server != KIND_SERVER_NONE && k->server != (int32_t)slot)
-      return BUS_HOST_ERR_ARG; /* one server per kind */
+      return BUS_HOST_ERR_ARG;
    k->server = (int32_t)slot;
    return BUS_HOST_OK;
 }
 
-/* When a slot departs (reap/detach), scrub it from every registry role and drop
- * any pending request it was party to. Called from slot_release in bus_host.c. */
+bus_host_result_t bus_host_set_kind_policy(bus_host_t *h, uint32_t event_kind,
+                                           bus_kind_policy_t policy)
+{
+   if (!h || (policy != BUS_KIND_BLOCK && policy != BUS_KIND_SHED))
+      return BUS_HOST_ERR_ARG;
+   bus_kind_t *k = kind_intern(h, event_kind);
+   if (!k)
+      return BUS_HOST_ERR_ARG;
+   k->policy = policy;
+   return BUS_HOST_OK;
+}
+
+/* ---- delivery primitives ---- */
+
+/* Free inbound slots available to a class of traffic. Data may use all but the
+ * control reserve; control may use everything. bus_ring_count is the host's own
+ * view of a ring only it produces into, so it never over-fills; a stale count
+ * (the client just freed a slot) only defers a data event, which is safe. */
+static int has_room(const bus_slot_t *d, int is_control)
+{
+   uint32_t cap = bus_ring_capacity(&d->qpair.inbound);
+   uint32_t reserve = atomic_load_explicit(&d->qpair.hdr->control_credits, memory_order_relaxed);
+   uint64_t used = bus_ring_count(&d->qpair.inbound);
+   uint32_t limit = is_control ? cap : (reserve < cap ? cap - reserve : 0);
+   return used < limit;
+}
+
+/* Encode a (seq/dst-stamped) frame and any inline payload into a destination
+ * inbound slot. Assumes has_room already said yes. Returns 1 on success. */
+static int put(bus_host_t *h, bus_slot_t *d, const bus_frame_t *f, const uint8_t *inline_src)
+{
+   uint8_t *slot = bus_ring_produce_begin(&d->qpair.inbound);
+   if (!slot)
+      return 0;
+   bus_frame_t out = *f;
+   if (bus_wire_encode(&out, slot, h->cfg.slot_size) != BUS_WIRE_HDR_LEN)
+      return 0;
+   if ((out.hdr_flags & BUS_F_INLINE) && out.payload_len > 0)
+   {
+      if ((uint64_t)out.payload_ref + out.payload_len > h->cfg.slot_size)
+         return 0;
+      memcpy(slot + out.payload_ref, inline_src, out.payload_len);
+   }
+   bus_ring_produce_commit(&d->qpair.inbound);
+   return 1;
+}
+
+/* Emit a host-generated control-class event (overflow, producer_reaped,
+ * capability_absent): stamp seq, tap, deliver from the reserve. If even the
+ * reserve is full, set the destination's sticky control_lost. dst < 0 means
+ * tap-only (producer_reaped names a client that no longer exists). */
+static void emit_control(bus_host_t *h, int dst, uint32_t kind, uint64_t corr,
+                         const void *payload, uint32_t plen)
+{
+   bus_frame_t f;
+   memset(&f, 0, sizeof f);
+   f.wire_version = BUS_WIRE_VERSION;
+   f.event_kind = kind;
+   f.correlation_id = corr;
+   f.hdr_flags = (corr ? BUS_F_REPLY : BUS_F_NOTIFICATION) | BUS_F_CONTROL;
+   if (plen)
+   {
+      f.hdr_flags |= BUS_F_INLINE;
+      f.payload_len = plen;
+      f.payload_ref = BUS_WIRE_HDR_LEN;
+   }
+   f.seq = ++h->seq;
+   f.dst_handle = dst < 0 ? 0 : (uint32_t)dst;
+   if (h->tap)
+      h->tap(h->tap_ctx, &f);
+   if (dst < 0)
+      return; /* tap-only */
+   bus_slot_t *d = &h->slots[dst];
+   if (has_room(d, 1) && put(h, d, &f, payload))
+      return;
+   atomic_store_explicit(&d->qpair.hdr->control_lost, 1, memory_order_release);
+}
+
+/* Shed one data event to a full destination: tell it, via an overflow event,
+ * exactly which seq/kind it lost. */
+static void shed(bus_host_t *h, uint32_t dst, const bus_frame_t *shed_f)
+{
+   bus_overflow_t ov = {.shed_seq = shed_f->seq, .shed_kind = shed_f->event_kind, .dst_slot = dst};
+   emit_control(h, (int)dst, BUS_KIND_OVERFLOW, 0, &ov, (uint32_t)sizeof ov);
+}
+
+/* ---- forget a departing slot ---- */
+
 void bus_route_forget_slot(bus_host_t *h, uint32_t slot)
 {
+   /* If the slot had a block-held event in flight, it is discarded now: name its
+    * seq to the tap as producer_reaped so the loss is recorded, not silent. */
+   if (h->slots[slot].blocked)
+      emit_control(h, -1, BUS_KIND_PRODUCER_REAPED, 0, NULL, 0);
+
    for (uint32_t i = 0; i < BUS_HOST_MAX_KINDS; i++)
    {
       if (!h->kinds[i].in_use)
@@ -140,134 +246,116 @@ static bus_pending_t *pending_find(bus_host_t *h, uint64_t corr)
    return NULL;
 }
 
-/* ---- delivery ---- */
+/* ---- routing ---- */
 
-/* Write a (seq/dst-stamped) frame and its inline payload into a destination
- * slot's inbound ring. Returns 1 on delivery, 0 if the ring was full. The full
- * case is counted, not silent — slice 7 replaces the drop with credit-based
- * backpressure and a typed overflow event. */
-static int deliver(bus_host_t *h, uint32_t dst_slot, const bus_frame_t *f,
-                   const uint8_t *inline_src)
+/* Route a notification to observers. Returns 1 if fully resolved (may commit the
+ * source), 0 if a BLOCK-policy destination was full and the event must stay at
+ * the producer's ring head. `delivered` tracks observers already served across
+ * retries. */
+static int route_notification(bus_host_t *h, uint32_t src, bus_frame_t *f,
+                              const uint8_t *inl, bus_kind_t *k, uint64_t *delivered)
 {
-   bus_slot_t *d = &h->slots[dst_slot];
-   uint8_t *slot = bus_ring_produce_begin(&d->qpair.inbound);
-   if (!slot)
+   int all_done = 1;
+   for (uint32_t s = 0; s < h->cfg.max_slots; s++)
    {
-      d->dropped++;
-      return 0;
-   }
-
-   bus_frame_t out = *f;
-   out.dst_handle = dst_slot;
-   if (bus_wire_encode(&out, slot, h->cfg.slot_size) != BUS_WIRE_HDR_LEN)
-   {
-      d->dropped++;
-      return 0;
-   }
-   if ((out.hdr_flags & BUS_F_INLINE) && out.payload_len > 0)
-   {
-      /* Inline payloads sit just past the header, inside the slot. */
-      if ((uint64_t)out.payload_ref + out.payload_len > h->cfg.slot_size)
+      if (!h->slots[s].in_use || !obs_test(k->observers, s))
+         continue;
+      if (obs_test(delivered, s))
+         continue; /* already delivered on a prior retry */
+      bus_slot_t *d = &h->slots[s];
+      if (has_room(d, 0) && put(h, d, f, inl))
       {
-         d->dropped++;
-         return 0;
+         obs_set(delivered, s);
+         continue;
       }
-      memcpy(slot + out.payload_ref, inline_src, out.payload_len);
+      /* Full destination. */
+      if (k->policy == BUS_KIND_SHED)
+      {
+         shed(h, s, f);
+         obs_set(delivered, s); /* shed is resolution: never retried */
+      }
+      else
+      {
+         all_done = 0; /* BLOCK: leave the event in flight for this destination */
+      }
    }
-   bus_ring_produce_commit(&d->qpair.inbound);
-   return 1;
+   return all_done;
 }
 
-/* Synthesize a capability_absent reply to a requester whose target kind has no
- * ready server. */
-static void deliver_capability_absent(bus_host_t *h, uint32_t requester, uint64_t corr)
+/* Route a fresh event (first time it is seen). Returns 1 if fully resolved. On a
+ * BLOCK stall it returns 0 and sets *blocked_delivered so retries resume. */
+static int route_fresh(bus_host_t *h, uint32_t src, bus_frame_t *f, const uint8_t *inl,
+                       uint64_t *delivered)
 {
-   bus_frame_t r;
-   memset(&r, 0, sizeof r);
-   r.hdr_flags = BUS_F_REPLY;
-   r.wire_version = BUS_WIRE_VERSION;
-   r.event_kind = BUS_KIND_CAPABILITY_ABSENT;
-   r.correlation_id = corr;
-   r.seq = ++h->seq;
-   if (h->tap)
-      h->tap(h->tap_ctx, &r);
-   deliver(h, requester, &r, NULL);
-}
-
-/* Route one decoded event from `src_slot`. `inline_src` points at the inline
- * payload within the source ring slot (valid until the source is consumed). */
-static void route_one(bus_host_t *h, uint32_t src_slot, bus_frame_t *f, const uint8_t *inline_src)
-{
-   f->seq = ++h->seq;
-   f->src_handle = src_slot;
-
-   /* The tap sees every seq-stamped event, before any routing decision. */
-   if (h->tap)
-      h->tap(h->tap_ctx, f);
-
-   /* Arena-payload delivery is a separate integration; do not hand a consumer a
-    * reference it cannot read. Counted against the source so it is not silent. */
    if (f->hdr_flags & BUS_F_ARENA)
    {
-      h->slots[src_slot].dropped++;
-      return;
+      h->slots[src].dropped++;
+      return 1; /* out of scope this slice; resolved (dropped, counted) */
    }
 
    bus_kind_t *k = kind_find(h, f->event_kind);
 
    if (f->hdr_flags & BUS_F_NOTIFICATION)
-   {
-      if (!k)
-         return; /* nobody observes this kind */
-      for (uint32_t s = 0; s < h->cfg.max_slots; s++)
-         if (h->slots[s].in_use && obs_test(k->observers, s))
-            deliver(h, s, f, inline_src);
-      return;
-   }
+      return k ? route_notification(h, src, f, inl, k, delivered) : 1;
 
    if (f->hdr_flags & BUS_F_REQUEST)
    {
       if (!k || k->server == KIND_SERVER_NONE || !h->slots[k->server].in_use)
       {
-         deliver_capability_absent(h, src_slot, f->correlation_id);
-         return;
+         emit_control(h, (int)src, BUS_KIND_CAPABILITY_ABSENT, f->correlation_id, NULL, 0);
+         return 1;
       }
-      /* Point-to-point to the server, and remember the correlation so the reply
-       * routes back to this requester only. */
-      if (!pending_add(h, f->correlation_id, src_slot, (uint32_t)k->server))
+      bus_slot_t *d = &h->slots[k->server];
+      /* A request is point-to-point; block if the server is full. */
+      if (!has_room(d, 0))
       {
-         deliver_capability_absent(h, src_slot, f->correlation_id);
-         return;
+         if (k->policy == BUS_KIND_SHED)
+         {
+            shed(h, (uint32_t)k->server, f);
+            return 1;
+         }
+         return 0; /* block: retry next pump */
       }
-      deliver(h, (uint32_t)k->server, f, inline_src);
-      return;
+      if (!pending_add(h, f->correlation_id, src, (uint32_t)k->server))
+      {
+         emit_control(h, (int)src, BUS_KIND_CAPABILITY_ABSENT, f->correlation_id, NULL, 0);
+         return 1;
+      }
+      put(h, d, f, inl);
+      return 1;
    }
 
    if (f->hdr_flags & BUS_F_REPLY)
    {
       bus_pending_t *p = pending_find(h, f->correlation_id);
-      if (!p)
-         return; /* no such outstanding request; drop */
-      /* Only the server the request was routed to may answer it. Without this a
-       * client could forge a reply for another client's correlation and have it
-       * delivered to the requester. */
-      if (p->server != src_slot)
-         return;
+      if (!p || p->server != src)
+         return 1; /* no matching request, or a forged reply; drop */
       uint32_t requester = p->requester;
+      if (!h->slots[requester].in_use)
+      {
+         p->in_use = 0;
+         return 1;
+      }
+      bus_slot_t *d = &h->slots[requester];
+      if (!has_room(d, 0))
+         return 0; /* block until the requester has room; keep the pending entry */
       p->in_use = 0;
-      if (h->slots[requester].in_use)
-         deliver(h, requester, f, inline_src);
-      return;
+      put(h, d, f, inl);
+      return 1;
    }
 
    if (f->hdr_flags & BUS_F_CANCEL)
    {
       bus_pending_t *p = pending_find(h, f->correlation_id);
-      /* Only the original requester may cancel its own request. */
-      if (p && p->requester == src_slot && h->slots[p->server].in_use)
-         deliver(h, p->server, f, inline_src); /* best-effort */
-      return;
+      if (p && p->requester == src && h->slots[p->server].in_use)
+      {
+         bus_slot_t *d = &h->slots[p->server];
+         if (has_room(d, 0))
+            put(h, d, f, inl); /* best-effort */
+      }
+      return 1;
    }
+   return 1;
 }
 
 uint32_t bus_host_pump(bus_host_t *h)
@@ -289,22 +377,51 @@ uint32_t bus_host_pump(bus_host_t *h)
             break;
 
          bus_frame_t f;
-         if (bus_wire_decode(ring_slot, h->cfg.slot_size, &f) == BUS_WIRE_OK)
+         if (bus_wire_decode(ring_slot, h->cfg.slot_size, &f) != BUS_WIRE_OK)
          {
-            const uint8_t *inl = NULL;
-            if ((f.hdr_flags & BUS_F_INLINE) && f.payload_len > 0 &&
-                (uint64_t)f.payload_ref + f.payload_len <= h->cfg.slot_size)
-               inl = ring_slot + f.payload_ref;
-            route_one(h, s, &f, inl);
-            routed++;
+            slot->dropped++;
+            bus_ring_consume_commit(&slot->qpair.outbound);
+            continue;
+         }
+
+         const uint8_t *inl = NULL;
+         if ((f.hdr_flags & BUS_F_INLINE) && f.payload_len > 0 &&
+             (uint64_t)f.payload_ref + f.payload_len <= h->cfg.slot_size)
+            inl = ring_slot + f.payload_ref;
+
+         int done;
+         if (slot->blocked)
+         {
+            /* Same head event as last pump: reuse its seq, do not re-tap. */
+            f.seq = slot->blocked_seq;
+            f.src_handle = s;
+            done = route_fresh(h, s, &f, inl, slot->blocked_delivered);
          }
          else
          {
-            /* A malformed frame from a client is dropped, counted, and does not
-             * stall the drain. */
-            slot->dropped++;
+            f.seq = ++h->seq;
+            f.src_handle = s;
+            if (h->tap)
+               h->tap(h->tap_ctx, &f); /* seq-stamped, pre-routing, once */
+            memset(slot->blocked_delivered, 0, sizeof slot->blocked_delivered);
+            done = route_fresh(h, s, &f, inl, slot->blocked_delivered);
+            routed++; /* count each accepted event once, at first sight */
          }
-         bus_ring_consume_commit(&slot->qpair.outbound);
+
+         if (done)
+         {
+            slot->blocked = 0;
+            bus_ring_consume_commit(&slot->qpair.outbound);
+         }
+         else
+         {
+            /* BLOCK: leave the event at the ring head, stop draining this
+             * producer this round. Its outbound stops moving, which is the
+             * backpressure. */
+            slot->blocked = 1;
+            slot->blocked_seq = f.seq;
+            break;
+         }
       }
    }
    return routed;
