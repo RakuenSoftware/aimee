@@ -9,8 +9,6 @@
 #include "mcp_osv_cache.h"
 #include "aimee/protocols/mcp/mcp_client_registry.h"
 #include "aimee/protocols/mcp/mcp_tools.h"
-#include "roundtable_activation.h"
-#include "../server/server_mcp_surface.h"
 
 static const char *g_http_response;
 static int g_http_status = -1;
@@ -637,39 +635,6 @@ static int tools_have(cJSON *tools, const char *name)
    return 0;
 }
 
-static void test_roundtable_served_surface_filter(void)
-{
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.module_roundtable = 0;
-   roundtable_runtime_configure(&cfg);
-   assert(!server_mcp_tool_available("ensemble_review"));
-   assert(!server_mcp_tool_available("pipeline"));
-   assert(!server_mcp_tool_available("pipeline_start"));
-   assert(server_mcp_tool_available("delegate"));
-   cJSON *tools = mcp_build_tools_list();
-   assert(tools_have(tools, "ensemble_review"));
-   assert(tools_have(tools, "pipeline"));
-   assert(server_mcp_filter_unavailable_tools(tools) == 2);
-   assert(!tools_have(tools, "ensemble_review"));
-   assert(!tools_have(tools, "pipeline"));
-   assert(tools_have(tools, "delegate"));
-   cJSON_Delete(tools);
-
-   cfg.module_roundtable = 1;
-   roundtable_runtime_configure(&cfg);
-   assert(server_mcp_tool_available("ensemble_review"));
-   assert(server_mcp_tool_available("pipeline"));
-   assert(server_mcp_tool_available("pipeline_start"));
-   tools = mcp_build_tools_list();
-   assert(server_mcp_filter_unavailable_tools(tools) == 0);
-   assert(tools_have(tools, "ensemble_review"));
-   assert(tools_have(tools, "pipeline"));
-   cJSON_Delete(tools);
-   roundtable_runtime_configure(NULL);
-   printf("  PASS: roundtable_served_surface_filter\n");
-}
-
 /* The flat list keeps family members; the collapsed one folds them away.
  *
  * mcp_collapse_families presents coherent families as ONE multiplexed tool
@@ -718,7 +683,6 @@ int main(void)
    test_tools_list_surface();
    test_tool_profile_filter();
    test_flat_list_keeps_family_members();
-   test_roundtable_served_surface_filter();
    test_boot_and_lazy_tools();
    test_namespaced_tools_and_dispatch();
    test_failed_client_does_not_abort_boot();

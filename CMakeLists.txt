@@ -71,6 +71,20 @@ set(AIMEE_DELEGATES_INCLUDE_DIR
 set(AIMEE_PROTOCOLS_INCLUDE_DIR
     "${AIMEE_SRC_DIR}/modules/protocols/include")
 
+# The core-modularization layout keeps each module's public headers under
+# modules/<m>/include/aimee/<m>/. The Makefile adds these as -Imodules/<m>/include;
+# mirror that globally for every CMake target (they were defined above but never
+# wired into any target, so <aimee/protocols/acp/acp_server.h> etc. did not resolve).
+include_directories(
+    ${AIMEE_MODULE_RUNTIME_INCLUDE_DIR}
+    ${AIMEE_AUDIT_INCLUDE_DIR}
+    ${AIMEE_GATEWAY_INCLUDE_DIR}
+    ${AIMEE_IR_INCLUDE_DIR}
+    ${AIMEE_TRANSLATION_INCLUDE_DIR}
+    ${AIMEE_DELEGATES_INCLUDE_DIR}
+    ${AIMEE_PROTOCOLS_INCLUDE_DIR}
+    "${AIMEE_SRC_DIR}/modules/skills/include")
+
 # LTO / IPO: must be set BEFORE any target is declared so the setting takes
 # effect uniformly across aimee-core/data/agent/cmd and every test binary.
 # Previously this block lived further down the file, which meant the static
