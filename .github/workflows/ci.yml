@@ -97,6 +97,15 @@ jobs:
         run: cd src && make lint
       - name: Check 3db tier dependencies
         run: ./scripts/check_tier_deps.sh
+      - name: Test guardrail-collapse Phase 0 anchor contract
+        run: python3 -m pytest tests/test_check_collapse_anchor_gate.py
+      - name: Enforce guardrail-collapse Phase 0 anchor contract
+        # Diff-aware gate: see scripts/check-collapse-anchor-gate.py module docstring for rationale.
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 scripts/check-collapse-anchor-gate.py
 
   build:
     runs-on: ubuntu-latest
