@@ -508,6 +508,12 @@
     {
       "ctest": false,
       "make": true,
+      "module": "routing",
+      "test": "src/tests/test_agent_caps.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
       "module": "skills",
       "test": "src/tests/test_skill.c"
     },

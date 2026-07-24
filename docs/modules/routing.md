@@ -9,12 +9,18 @@ execution loop; similarly named local routers remain with those owning modules.
 
 ## Public contracts
 
-Current core contracts include `agent_route`, `agent_route_at_tier`, `agent_route_with_caps`, and route
-filters in `src/headers/agent_config.h`, with implementation in `src/server/agent_config.c`.
-Delegate-specific overrides and preflight live in `src/modules/delegates/delegate_routing.c`. The
-descriptor-only `src/modules/routing` path is a target boundary, so agent/provider selection in those
-distributed paths is relocation/consolidation evidence. Advisory `router_advise.c` remains workflow-owned
-and is explicitly outside this module despite its filename.
+`src/modules/routing/routing.c` owns the agent routing surface: role dispatch (`agent_route`,
+`agent_route_at_tier`, `agent_route_with_caps`), capability/tier selection, delegate pick
+(`delegate_pick_for_role`), availability (`agent_is_available_for_routing`), route-block reasons
+(`agent_routing_block_reason`), and the route health/policy filters. This was extracted from
+`src/server/agent_config.c`; the routing contract is declared in the shared `src/headers/agent_config.h`,
+which this module implements while the config/auth half of `agent_config.c` stays in the server and is
+reached through the same header (the arrangement by which `memory` owns its contract while DB1/DB2
+implement storage). The routing block is self-contained — its statics are module-local and no config
+function calls the routing functions — so `routing.c` has no module-private header. Delegate-specific
+route overrides and preflight remain in `src/modules/delegates/delegate_routing.c` (the delegates
+module, a routing sibling, calls the same `agent_config.h` role predicates). Advisory
+`router_advise.c` remains workflow-owned and is outside this module despite its filename.
 
 ## Dependencies and consumers
 

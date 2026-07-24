@@ -286,6 +286,7 @@ class DescriptorTests(unittest.TestCase):
             ("benchmarks", "private_headers", "src/modules/benchmarks/agent_eval.h"),
             ("tools", "sources", "src/modules/tools/agent_tools_dispatch.c"),
             ("tools", "private_headers", "src/modules/tools/agent_tools.h"),
+            ("routing", "sources", "src/modules/routing/routing.c"),
             ("gateway", "sources", "src/modules/gateway/gateway_delegate.c"),
             ("gateway", "sources", "src/modules/gateway/gateway_pipeline.c"),
             ("gateway", "sources", "src/modules/gateway/gateway_policy.c"),
@@ -324,7 +325,7 @@ class DescriptorTests(unittest.TestCase):
             finally:
                 tmp.cleanup()
 
-        for identifier in ("benchmarks", "tools", "roundtable", "protocols", "ir", "translation", "skills",
+        for identifier in ("benchmarks", "tools", "routing", "roundtable", "protocols", "ir", "translation", "skills",
                            "audit", "module-runtime", "plugin-loader", "gateway", "governance",
                            "learning", "workspace", "vault", "config", "git", "delegates",
                            "workflows", "memory"):
@@ -368,7 +369,7 @@ class DescriptorTests(unittest.TestCase):
         """An unmigrated module must not satisfy the latch vacuously."""
         empty = (
             "control-web", "execution-policy", "kb-synthesis",
-            "response-composition", "routing", "runtime-web",
+            "response-composition", "runtime-web",
         )
         for identifier in empty:
             tmp = self.production_repo()
@@ -396,17 +397,17 @@ class DescriptorTests(unittest.TestCase):
         tmp = self.production_repo()
         try:
             repo = Path(tmp.name)
-            source = repo / "src/modules/routing/routing_stub.c"
+            source = repo / "src/modules/control-web/control_web_stub.c"
             source.parent.mkdir(parents=True, exist_ok=True)
             source.write_text("/* planted */\n", encoding="utf-8")
-            document = "docs/modules/routing.md"
+            document = "docs/modules/control-web.md"
             self.mutate_descriptor(
-                repo, "routing",
+                repo, "control-web",
                 lambda value: value.update(
                     {
                         "ownership_complete": True,
                         "docs": [document],
-                        "sources": ["src/modules/routing/routing_stub.c"],
+                        "sources": ["src/modules/control-web/control_web_stub.c"],
                     }
                 ),
             )
@@ -429,7 +430,7 @@ class DescriptorTests(unittest.TestCase):
         self.assertTrue(latched, "no latched descriptor found; the guard would be untested")
 
     def test_complete_ownership_requires_canonical_doc(self) -> None:
-        for identifier in ("benchmarks", "tools", "roundtable", "ir", "translation", "skills", "audit",
+        for identifier in ("benchmarks", "tools", "routing", "roundtable", "ir", "translation", "skills", "audit",
                            "module-runtime", "plugin-loader", "gateway", "governance", "learning",
                            "workspace", "vault", "config", "git", "delegates", "workflows",
                            "memory"):

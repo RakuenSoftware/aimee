@@ -1757,6 +1757,38 @@
         "docs/validation/core-modularization-slice-59-tools-migration.md",
         "docs/modules/tools.md"
       ]
+    },
+    {
+      "slice": 60,
+      "state": "present_and_verified",
+      "disposition": "Migrated the required routing module (Class A #3): extracted the self-contained routing block (role dispatch, capability/tier selection, delegate pick, availability, route-block reasons, route filters; ~503 lines) from src/server/agent_config.c into src/modules/routing/routing.c and latched. The config/auth half of agent_config.c stays in the server.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": [
+          "the routing surface gained its canonical routing owner under src/modules/routing/routing.c; agent_config.c is reduced to config/auth"
+        ]
+      },
+      "fallbacks": [
+        "the routing contract stays in the shared src/headers/agent_config.h; routing.c implements it while the server implements the config/auth half, reached through the same header (memory/DB2 pattern); delegate_routing.c stays in the delegates module; routing has no module-private header"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "A code relocation (function block move) plus descriptor declaration and latch; no code, symbols, or behaviour changed. The linker enforces the partition.",
+        "rejected_simpler_alternative": "Splitting agent_config.h into a routing header was rejected as unnecessary churn across ~30 consumers; the shared contract with cross-module implementation is the established pattern.",
+        "revisit": "Four Class A modules remain plus execution-policy (highest-risk, agent_policy.c distributed across three modules); the web/IR modules have no located source."
+      },
+      "consumers": [
+        "every agent_route*/delegate_pick consumer (server, delegates, tests) via agent_config.h",
+        "Make and CMake build graphs",
+        "the config/auth half of agent_config.c"
+      ],
+      "blast_radius": "The routing block move plus adding routing.o next to agent_config.o in the source/object/test-link lists; the shared agent_config.h and its ~30 consumers are unchanged, and the config/auth code is untouched beyond the removed block.",
+      "independent_review": "Self-reviewed under explicit operator authorization for self-review-only; the roundtable was unavailable this cycle. Validated on the .253 aimee-test container (Make + CMake + routing test); the linker enforces partition correctness.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-60-routing-migration.md",
+        "docs/modules/routing.md"
+      ]
     }
   ]
 }
