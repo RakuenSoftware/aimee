@@ -1,4 +1,4 @@
-# shape: xxxxxxx; expected: fire; expected_loop_start_offset: 120; expected_loop_span_bytes: 6; expected_repetitions: 4
+# shape: short contiguous verbatim repeat of single token; expected: fire; expected_loop_start_offset: 161; expected_loop_span_bytes: 6; expected_repetitions: 4
 alpha
 alpha
 alpha

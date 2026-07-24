@@ -1,7 +1,7 @@
-# shape: xxxxxx; expected: fire; expected_loop_start_offset: 152; expected_loop_span_bytes: 10; expected_repetitions: 3
-setup one
-setup two
-setup three
-loop item
-loop item
-loop item
+# shape: ramp-up followed by contiguous verbatim loop; expected: fire; expected_loop_start_offset: 187; expected_loop_span_bytes: 12; expected_repetitions: 3
+ramp one
+ramp two
+ramp three
+  loop item
+  loop item
+  loop item

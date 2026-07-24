@@ -1,4 +1,4 @@
-# shape: xxxxxx; expected: fire; expected_loop_start_offset: 120; expected_loop_span_bytes: 54; expected_repetitions: 3
+# shape: contiguous outer loop containing inner sub-repeats; expected: fire; expected_loop_start_offset: 164; expected_loop_span_bytes: 54; expected_repetitions: 3
 outer-start
 inner-a
 inner-b

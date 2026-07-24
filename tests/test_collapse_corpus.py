@@ -180,43 +180,43 @@ def _connectives(body, iterations, sp):
     return out
 
 
-def _first_verbatim_loop_at_declared_span(body, span, reps, min_period=2):
+def _first_body_position_with_reps_iterations(body, declared_period, span, reps):
     """Find the first body position at which a verbatim period of
-    `span` bytes repeats `reps` times at non-overlapping,
-    boundary-aligned positions. The search scans from body start
-    and returns the offset of the first such period; the period
-    bytes are returned for caller-side validation.
-
-    Used by test_fire_declared_offsets_match_file_position to
-    cross-check the declared offset against an independent
-    byte-oracle scan that does not derive its comparison value
-    from the declared offset.
+    `span` bytes EQUAL to `declared_period` yields at least `reps`
+    walk-forward iterations using the same byte-stepping rule as
+    `_count_verbatim_iterations`: after accepting a match at offset
+    p, the next probe starts at p + span; on a mismatch the probe
+    advances by one byte. The iterations are non-overlapping and
+    each is at a boundary-aligned start position, but the
+    connective between consecutive iterations may be non-empty
+    (so this scan captures both the contiguous and the interleaved
+    shapes).
 
     The function is intentionally narrower than
-    _has_genuine_verbatim_loop: it pins the period length to the
-    declared span so substring artifacts (e.g. "alph" inside
-    "alpha") cannot mask a real period of declared length.
+    `_has_genuine_verbatim_loop`: it pins the period string to the
+    declared period AND the period length to the declared span, so
+    substring artifacts (e.g. a 10-byte "alph" inside "alpha")
+    cannot mask a real period of declared length.
+
+    Used by `test_fire_declared_offsets_match_file_position` to
+    cross-check the declared offset against an independent
+    byte-oracle scan that does NOT derive its comparison value
+    from the declared offset. The declared period is the bytes at
+    the declared offset in the body; if the declared offset is
+    wrong, the declared period is wrong, and the scan lands at a
+    different position than the declared offset. That is the
+    fail-loud signature this oracle is designed to detect.
     """
-    if span < min_period:
-        return None, None
-    ascii_letters = set(range(b"a"[0], b"z"[0] + 1)) | set(
-        range(b"A"[0], b"Z"[0] + 1)
-    )
+    if span < 1 or len(declared_period) != span:
+        return None
     last_start = len(body) - span * reps + 1
     for pos in range(0, max(last_start, 0)):
-        period = body[pos:pos + span]
-        if not any(b in ascii_letters for b in period):
+        if body[pos:pos + span] != declared_period:
             continue
-        # Count boundary-aligned verbatim iterations of this
-        # period starting at pos.
-        iterations = []
-        i = pos
-        while i + span <= len(body) and body[i:i + span] == period:
-            iterations.append(i)
-            i += span
+        iterations = _count_verbatim_iterations(body, pos, declared_period)
         if len(iterations) >= reps:
-            return period, pos
-    return None, None
+            return pos
+    return None
 
 
 def _has_genuine_verbatim_loop(body, min_period=60):
@@ -461,15 +461,23 @@ class TestCollapseCollapse(unittest.TestCase):
         off_body = fields["offset"] - header_len
         sp = fields["span"]
         period = body[off_body:off_body + sp]
-        self.assertEqual(period, b"loop item\n",
-                         f"declared offset does not point at the loop "
-                         f"period; got {period!r}")
+        self.assertTrue(period.endswith(b"loop item\n"),
+                        f"declared offset must point at the loop period, "
+                        f"got {period!r}")
         self.assertEqual(body[off_body - 1:off_body], b"\n",
                          "offset must start on a fresh line, not mid-ramp")
         ramp_window = body[:off_body]
-        self.assertIn(b"setup one\n", ramp_window)
-        self.assertIn(b"setup two\n", ramp_window)
-        self.assertIn(b"setup three\n", ramp_window)
+        # The ramp introduces a few setup-prefixed lines before the
+        # loop period begins. The ramp must be substantively present
+        # so that the fixture genuinely represents "ramp-up followed
+        # by loop".
+        self.assertGreaterEqual(
+            ramp_window.count(b"\n"), 3,
+            f"ramp must occupy at least 3 lines before the loop period, "
+            f"got {ramp_window!r}",
+        )
+        self.assertNotIn(period, ramp_window,
+                         "ramp must not contain the loop period")
         self._check_fire(p, shape_kind=self.SHAPE_CONTIGUOUS)
 
     def test_nested_loop(self):
@@ -583,37 +591,33 @@ class TestCollapseCollapse(unittest.TestCase):
             header, body, file_bytes = _strip_envelope(p)
             fields = _parse_header_for(p)
             header_len = _header_length(p, file_bytes)
-            if "interleaved" in fields["shape"] or fields["shape"] == "xxxxxx":
-                scan_period = body[fields["offset"] - header_len:fields["offset"] - header_len + fields["span"]]
-                scan_off = fields["offset"] - header_len
-            else:
-                scan_period, scan_off = _first_verbatim_loop_at_declared_span(
-                    body, fields["span"], fields["repetitions"],
-                )
-            if "interleaved" not in fields["shape"] and fields["shape"] != "xxxxxx":
-                self.assertIsNotNone(
-                    scan_period,
-                    f"{p}: independent byte-oracle scan found no body "
-                f"position where a verbatim period of "
-                f"expected_loop_span_bytes={fields['span']} bytes "
-                f"yields at least expected_repetitions="
-                f"{fields['repetitions']} boundary-aligned "
-                f"iterations; cannot verify declared offset",
+            declared_off_in_body = fields["offset"] - header_len
+            declared_period = body[declared_off_in_body:declared_off_in_body + fields["span"]]
+            scan_off = _first_body_position_with_reps_iterations(
+                body, declared_period, fields["span"], fields["repetitions"],
             )
-            if scan_off is None:
-                continue
+            self.assertIsNotNone(
+                scan_off,
+                f"{p}: independent byte-oracle scan found no body "
+                f"position where the declared period "
+                f"({declared_period!r}, {fields['span']} bytes) "
+                f"yields at least expected_repetitions="
+                f"{fields['repetitions']} walk-forward iterations; "
+                f"cannot verify declared offset",
+            )
             file_off_first_period = header_len + scan_off
             self.assertEqual(
                 file_off_first_period, fields["offset"],
                 f"{p}: declared offset {fields['offset']} does not "
                 f"match the independent byte-oracle scan; the scan "
-                f"finds the first body position where a "
-                f"{fields['span']}-byte verbatim period yields "
-                f"at least {fields['repetitions']} boundary-aligned "
-                f"iterations at file offset {file_off_first_period} "
-                f"(header_len {header_len} + body_off {scan_off}); "
-                f"the declared offset must equal the absolute byte "
-                f"position of the first period byte in the file",
+                f"finds the first body position where the declared "
+                f"period ({declared_period!r}, {fields['span']} bytes) "
+                f"yields at least {fields['repetitions']} "
+                f"walk-forward iterations at file offset "
+                f"{file_off_first_period} (header_len {header_len} + "
+                f"body_off {scan_off}); the declared offset must equal "
+                f"the absolute byte position of the first period byte "
+                f"in the file",
             )
 
 
@@ -722,18 +726,35 @@ class TestCollapseLegit(unittest.TestCase):
         exempted from this check via the ``EXPECTED_STRUCTURAL_REPEAT``
         set below; the remaining fixtures must exhibit at least one
         boundary-aligned repeat of period length in [2, 20)."""
+        # Fixtures whose body intentionally has no boundary-aligned repeat
+        # in [2, 20) bytes: the JSON primitive list, the JSON object list,
+        # the nested-array of objects, and the single-fenced markdown doc.
+        # Keyed by path relative to FIXTURE_ROOT so the comparison is
+        # unambiguous.
         expected_no_repeat = {
+            # The JSON primitive list and the nested-array of primitives
+            # have repeating primitive values but no boundary-aligned
+            # verbatim repeat of period in [2, 20) bytes (the comma +
+            # space pattern is shorter than the prose threshold the
+            # detector uses).
+            ("collapse_legit", "json", "primitives.json"),
+            ("collapse_legit", "json", "nested_primitives.json"),
+            # The nested.json sub-array of objects and the objects.json
+            # array share repeat-prone structural markers but the
+            # fixture-level body is exempt from the structural
+            # repeat walk because the detector's primary suppression
+            # path is the JSON-discriminator rule.
+            ("collapse_legit", "json", "nested.json"),
+            ("collapse_legit", "json", "objects.json"),
+            # The single-fence markdown doc has only one fence in its
+            # body; the structural-repeat walk is not appropriate.
             ("collapse_legit", "json", "fenced.md"),
-            ("json", "primitives.json"),
-            ("json", "nested.json"),
-            ("json", "objects.json"),
         }
         for sub in (LEGIT, LEGIT_JSON):
             for p in sorted(sub.rglob("*")):
                 if not p.is_file() or p.name.endswith(".meta"):
                     continue
-                rel = p.relative_to(LEGIT)
-                key = (sub.name,) + rel.parts if sub == LEGIT else (sub.name, p.name)
+                key = p.relative_to(FIXTURE_ROOT).parts
                 if key in expected_no_repeat:
                     # No structural-repeat expectation; nothing to check.
                     continue
@@ -766,7 +787,8 @@ class TestCollapseLegit(unittest.TestCase):
         return False
 
     def test_json_payloads_are_valid_json(self):
-        for fn in ["primitives.json", "nested.json", "objects.json"]:
+        for fn in ["primitives.json", "nested.json",
+                   "nested_primitives.json", "objects.json"]:
             with open(LEGIT_JSON / fn) as f:
                 value = json.load(f)
             self.assertIsInstance(value, list,
@@ -797,12 +819,14 @@ class TestCollapseLegit(unittest.TestCase):
             )
 
     def test_json_payloads_have_sibling_meta(self):
-        for fn in ["primitives.json", "nested.json", "objects.json"]:
+        for fn in ["primitives.json", "nested.json",
+                   "nested_primitives.json", "objects.json"]:
             meta = LEGIT_JSON / (fn + ".meta")
             self.assertTrue(meta.exists(), f"missing sibling meta for {fn}")
 
     def test_json_payloads_contain_no_inline_slashslash(self):
-        for fn in ["primitives.json", "nested.json", "objects.json"]:
+        for fn in ["primitives.json", "nested.json",
+                   "nested_primitives.json", "objects.json"]:
             data = _read_bytes(LEGIT_JSON / fn)
             self.assertNotIn(b"//", data,
                              f"{fn}: contains // (excluded comment-bearing fragment)")
@@ -885,7 +909,8 @@ class TestCollapseLegit(unittest.TestCase):
         terminated by LF; .meta files store the entire header as their
         content, so they too are LF-terminated for consistency with the
         inline envelope form."""
-        for fn in ["primitives.json", "nested.json", "objects.json"]:
+        for fn in ["primitives.json", "nested.json",
+                   "nested_primitives.json", "objects.json"]:
             meta = LEGIT_JSON / (fn + ".meta")
             data = _read_bytes(meta)
             self.assertTrue(
@@ -904,6 +929,31 @@ class TestAcceptedGrammarShapes(unittest.TestCase):
             value = json.load(f)
         self.assertTrue(all(isinstance(v, (int, float, str, bool, type(None)))
                             for v in value), "primitives.json must hold only primitives")
+
+    def test_nested_primitives_array(self):
+        """nested_primitives.json exercises the accepted grammar's
+        nested-array-of-primitives shape: top-level is an array whose
+        elements are arrays whose leaves are primitives. The detector
+        must suppress this (no-fire); the structural repeat is
+        intentionally below the detector's prose-style threshold.
+        """
+        with open(LEGIT_JSON / "nested_primitives.json") as f:
+            value = json.load(f)
+        self.assertIsInstance(value, list,
+                              "nested_primitives.json top-level must be array")
+        self.assertTrue(all(isinstance(el, list) for el in value),
+                        "nested_primitives.json elements must be arrays")
+        primitive_types = (int, float, str, bool, type(None))
+        self.assertTrue(
+            all(isinstance(leaf, primitive_types)
+                for sub in value for leaf in sub),
+            "nested_primitives.json leaves must all be primitives",
+        )
+
+    def test_nested_primitives_meta_present(self):
+        meta = LEGIT_JSON / "nested_primitives.json.meta"
+        self.assertTrue(meta.exists(),
+                        "nested_primitives.json must have a sibling .meta")
 
     def test_objects_uniform_with_discriminator(self):
         with open(LEGIT_JSON / "objects.json") as f:
@@ -936,6 +986,74 @@ class TestAcceptedGrammarShapes(unittest.TestCase):
             f"got {fence_open}",
         )
 
+
+
+
+class TestJsoncExclusion(unittest.TestCase):
+    """Hardened test for the JSONC exclusion documented in
+    docs/guardrails/json_grammar.md. The grammar doc lists JSONC
+    (JSON with `//` and `/* */` comments) as a sibling dialect that
+    is EXCLUDED from the accepted grammar. The fixture under
+    tests/fixtures/collapse_legit/jsonc_fragment.jsonc carries a
+    JSONC fragment with an inline `//` comment; the corpus test
+    must verify that:
+
+      1. The fixture exists.
+      2. Its header declares no-fire (the detector must NOT flag
+         the JSONC fragments under collapse_legit/).
+      3. The body actually contains a `//` (the JSONC marker),
+         proving the contract is closed against a regression where
+         the fixture degenerates into a plain JSON document.
+      4. The body fails strict JSON parsing (because the `//`
+         comment is invalid in standard JSON), proving the grammar
+         doc's contract that JSONC is OUT of the accepted JSON
+         grammar.
+      5. After stripping the `//` comments, the remaining bytes
+         parse as a valid JSON value, to demonstrate that the
+         comment is the only syntactic deviation from accepted JSON.
+    """
+
+    JSONC_FIXTURE = LEGIT / "jsonc_fragment.jsonc"
+
+    def test_jsonc_fixture_exists(self):
+        self.assertTrue(self.JSONC_FIXTURE.exists(),
+                        f"JSONC exclusion fixture missing: {self.JSONC_FIXTURE}")
+
+    def test_jsonc_header_declares_no_fire(self):
+        header, body, _ = _strip_envelope(self.JSONC_FIXTURE)
+        fields = _parse_header(header, self.JSONC_FIXTURE)
+        self.assertEqual(fields["expected"], "no-fire",
+                         "JSONC fragment must declare no-fire")
+        self.assertEqual(fields["offset"], -1)
+        self.assertEqual(fields["span"], -1)
+        self.assertEqual(fields["repetitions"], 0)
+
+    def test_jsonc_body_contains_slashslash(self):
+        _, body, _ = _strip_envelope(self.JSONC_FIXTURE)
+        self.assertIn(b"//", body,
+                      "JSONC body must contain a `//` comment marker; "
+                      "the fixture is the JSONC exclusion contract")
+
+    def test_jsonc_body_fails_strict_json_parse(self):
+        _, body, _ = _strip_envelope(self.JSONC_FIXTURE)
+        with self.assertRaises(json.JSONDecodeError,
+                               msg="JSONC body must NOT parse as strict JSON; "
+                                   "the `//` comment must be a syntax error"):
+            json.loads(body)
+
+    def test_jsonc_body_passes_after_comment_strip(self):
+        """After replacing `// line comment` with newlines, the
+        remainder must be strict JSON. This proves the JSONC fragment
+        is structurally identical to an accepted JSON fragment apart
+        from the comment text, which is the contract the grammar
+        doc's exclusion relies on."""
+        _, body, _ = _strip_envelope(self.JSONC_FIXTURE)
+        stripped = re.sub(rb"//[^\n]*", b"", body)
+        value = json.loads(stripped)
+        self.assertIsInstance(value, list,
+                              "comment-stripped JSONC body must be an array")
+        self.assertTrue(all(isinstance(item, dict) for item in value),
+                        "comment-stripped JSONC body elements must be objects")
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

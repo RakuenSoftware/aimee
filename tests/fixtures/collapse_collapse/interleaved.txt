@@ -1,10 +1,10 @@
-# shape: xxxxxx; expected: fire; expected_loop_start_offset: 120; expected_loop_span_bytes: 11; expected_repetitions: 3
+# shape: interleaved verbatim loops with distinct connective markers; expected: fire; expected_loop_start_offset: 173; expected_loop_span_bytes: 11; expected_repetitions: 3
 item
 value
-connective-A
+connector-x
 item
 value
-connective-B
+connector-y
 item
 value
-connective-C
+connector-z
