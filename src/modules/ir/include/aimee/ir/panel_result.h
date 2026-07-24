@@ -42,6 +42,7 @@ typedef struct
    char identity_key[128];
    char sources[256];
    int count;
+   int tool_grounded;
    aimee_review_evidence_t evidence;
 } aimee_panel_review_item_t;
 
@@ -81,6 +82,9 @@ typedef struct
    int verified_count;
    int degraded_count;
    int capped_count;
+   char original_request_alignment[16];
+   char original_request_alignment_summary[512];
+   char original_request_alignment_sources[256];
 } aimee_panel_result_t;
 
 #endif /* AIMEE_IR_PANEL_RESULT_H */

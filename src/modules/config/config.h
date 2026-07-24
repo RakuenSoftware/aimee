@@ -1923,6 +1923,8 @@ typedef struct config
    int skills_stale_after_days;
    int skills_archive_after_days;
    int skills_dispatch_enabled;
+   int skills_curator_enabled;
+   int skills_curator_interval_hours;
    int skills_dispatch_max_index;
    int skills_dispatch_advisory;
    int skills_capability_autostub;

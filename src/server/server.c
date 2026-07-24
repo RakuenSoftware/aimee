@@ -25,16 +25,16 @@
 #include "server_mgmt_jwks_cache.h"
 #include "kb_client_mtls.h"
 #include "config.h" /* config_t / config_load for api.status, api.enable */
-#include "delegate_backend_docker.h"
+#include <aimee/delegates/delegate_backend_docker.h>
 #include "workspace_provider.h" /* the shared provider: probe docker for the sandbox posture */
 #include "workspace_turn.h"     /* the ONE workspace bound, shared with the delegate turn */
-#include "delegate_backend_local.h"
-#include "delegate_backend_ssh.h"
+#include <aimee/delegates/delegate_backend_local.h>
+#include <aimee/delegates/delegate_backend_ssh.h>
 #include "server_delegate_monitor.h"
 #include "server_coord_dispatcher.h"
 #include "server_skill.h"
 #include "server_compute_impl.h"
-#include "skill_review.h"
+#include <aimee/skills/skill_review.h>
 #include "trigger_scheduler.h"
 #include "server_trigger.h"
 #include "server_cron.h"
@@ -45,8 +45,8 @@
 #include "webuser_editor.h" /* webuser_editor_shutdown — reap editors at shutdown (WP-I) */
 #include "agent_config.h"
 #include "provider_catalog.h"
-#include "delegate_credentials.h"
-#include "delegate_sandbox_image.h"
+#include <aimee/delegates/delegate_credentials.h>
+#include <aimee/delegates/delegate_sandbox_image.h>
 #include "model_registry.h"
 #include "model_provider.h"
 #include "model_registry.h"
