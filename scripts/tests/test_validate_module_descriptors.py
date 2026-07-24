@@ -797,8 +797,8 @@ class DescriptorTests(unittest.TestCase):
             path = repo / validator.INVENTORY_PATH
             value = json.loads(path.read_text(encoding="utf-8"))
             value["required"].remove("config")
-            value["required"].append("benchmarks")
-            value["optional"].remove("benchmarks")
+            value["required"].append("governance")
+            value["optional"].remove("governance")
             value["optional"].append("config")
             path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
             with self.assertRaisesRegex(
