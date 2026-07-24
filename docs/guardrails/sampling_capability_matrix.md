@@ -5,7 +5,7 @@
 *production* delegate honours, cross-referenced against the canonical IR's
 typed-sampling surface. The matrix constrains Phase 4 scope and surfaces any
 missing plumbing as Phase 4.0 prerequisites.
-**Status:** PENDING — informs Phase 4 gating.
+**Status:** REVIEW-CORRECTED — unsupported request fields are explicitly marked unsupported; informs Phase 4 gating.
 
 ---
 
@@ -43,9 +43,9 @@ the wire OR (b) explicitly drops it after a typed read (deliberate rejection).
 
 | Knob | Anthropic Messages client → Anthropic provider | Anthropic client → OpenAI Chat provider | OpenAI Chat client → OpenAI Chat | OpenAI Chat client → Codex (Responses) | OpenAI Responses client → OpenAI Chat | Bedrock ConverseStream |
 | --- | --- | --- | --- | --- | --- | --- |
-| `temperature` | ✅ verbatim (Anthropic-native) | ✅ via IR `temperature` + `aimee_ir_build_provider_body` (`src/server/aimee_ir_serve.c:68`) | ✅ `OPENAI_CHAT_TEMPERATURE` default + per-caller; `src/server/openai_chat.c:760` (`openai_request_double`) | ✅ same IR build path | ✅ IR build via `aimee_ir_responses_to_chat` (`src/server/openai_chat.c:1098`) | ✅ `bedrock_converse_stream_to_deltas` reads stop reason only (`src/server/aimee_ir_stream.c:181`); temperature honoured via the typed `aimee_request_t.temperature` re-emit in the build |
+| `temperature` | ✅ provider request path | ✅ request build path (`src/server/aimee_ir_serve.c:68`) | ✅ request field (`src/server/openai_chat.c:760`) | ✅ via request build path | ✅ via `aimee_ir_responses_to_chat` (`src/server/openai_chat.c:1098`) | ⚠ decoder cited at `src/server/aimee_ir_stream.c:220` only consumes stream output; request emission requires separate provider-builder citation |
 | `top_p` | ✅ | ✅ IR typed `top_p` (`src/headers/aimee_ir.h:127`) | ✅ via `add_number_if_missing` in `model_sampling_apply_openai` (`src/server/model_sampling.c:85`) | ✅ via IR path | ✅ | ✅ |
-| `top_k` | ✅ Anthropic-native field | ✅ IR typed `top_k` (`src/headers/aimee_ir.h:129`) | ✅ `model_sampling_apply_openai` (`:86`); NOT honored on OpenAI Chat wire (table applies to `req` which is OpenAI chat JSON — but OpenAI chat protocol does not accept `top_k`, so this is a per-backend opt-in via `model_sampling_row_t`) | ⚠ tied to delegate; OpenAI Chat wire does not natively accept `top_k` | ✅ | ✅ (typing in `aimee_request_t`) |
+| `top_k` | ✅ provider-specific | ❌ unsupported on OpenAI Chat request wire; no emission verified | ❌ unsupported on OpenAI Chat request wire; no emission verified | ❌ unsupported on Responses request wire; no emission verified | ❌ unsupported on OpenAI Chat request wire | ❌ no request field emission verified; decoder only consumes stream output (`src/server/aimee_ir_stream.c:220`) |
 | `max_tokens` | ✅ Anthropic-native (always present); renamed to `max_completion_tokens` on Codex-side | ✅ IR typed `max_tokens` (`src/headers/aimee_ir.h:116`); IR build sets `max_tokens_override` for the agent shaping | ✅ `OPENAI_CHAT_MAX_TOKENS` 32768; `src/server/openai_chat.c:761` (`openai_request_int`) | ✅ via IR | ✅ | ✅ (typed) |
 | `stop` / `stop_sequences` | ✅ verbatim (Anthropic-native `stop_sequences` array) | ✅ IR typed `stop_sequences[]` (`src/headers/aimee_ir.h:131`) | ✅ OpenAI `stop` (string-or-array) is forwarded but IR has typed `stop_sequences` only — Phase 4 must mirror | ✅ via IR | ✅ | ⚠ ConverseStream `stop_reason` mapped to canonical stop enum (`:181`): STOP_SEQUENCE honored for stop_reason emission, stop-list itself is the agent's `stop_sequences` re-emitted via IR build |
 | `repetition_penalty` | n/a (Anthropic has no `repetition_penalty`) | n/a | ⚠ delegate-only via `model_sampling_apply_openai` (`src/server/model_sampling.c:88`) — added when `add_number_if_missing(req, "repeat_penalty", row.repeat_penalty)`; gated by `model_sampling_row_t.repeat_penalty` per-delegate preset | ⚠ delegate-only | n/a | n/a |
@@ -60,7 +60,7 @@ the wire OR (b) explicitly drops it after a typed read (deliberate rejection).
 
 ## 2. Reading the matrix
 
-✅ = honored by a verified file:line today (no Phase 4 plumbing needed).
+✅ = honored by a verified request-building file:line today (no Phase 4 plumbing needed).
 ⚠ = honored on a subset of paths, or via a delegate-only opt-in, or has a partial plumbing (Phase 4 must extend).
 ❌ = **no plumbing** today — Phase 4.0 prerequisite needed.
 
@@ -88,8 +88,7 @@ acceptance criterion ("any missing plumbing as Phase 4.0 prerequisites"):
    Phase 4 dependencies list because it decides what thread-history the
    guardrail-collapse work sees.
 
-The ⚠ rows (`top_k` on OpenAI Chat wire, `repetition_penalty`,
-`min_p`, the cache-control counters) are **already wired** for the
+The ⚠ rows (`temperature` on Bedrock, delegate-only `repetition_penalty`/`min_p`, and cache-control counters) are **partial or provider-specific** for the
 *observed* delegates; Phase 4 does NOT need to add them globally. They are
 listed here as observed-by-preset only — no Phase 4.0 prerequisite.
 

@@ -5,8 +5,8 @@
 guardrail-collapse work must tap. No speculative identifiers. Every file,
 function, enum value, and struct member named below is reachable from the
 indexed repository at the file:line shown.
-**Status:** PENDING — gates Phase 1 implementation per
-`docs/guardrails/collapse_anchors.md`.
+**Status:** REVIEW-CORRECTED — Phase 1 is blocked until
+`docs/guardrails/collapse_anchors.md` is merged and its workflow gate is marked satisfied.
 
 ---
 
@@ -36,7 +36,9 @@ contract), the header docstring itself is the second citation.
 
 ### 1.2 Binding decision
 
-> **Paths converge on the single verified typed relay symbol
+> **Binding decision: paths diverge. The verified typed relay is not reachable from every inventoried path; Phase 2 must split per handler until missing chains are implemented and verified. The following convergence claim applies only to the IR-enabled Messages branch.**
+
+> The verified typed relay symbol
 > `aimee_delta_t` (struct, `src/headers/aimee_ir.h:177`) with discriminant
 > `aimee_delta_type_t` (enum, `src/headers/aimee_ir.h:167`).** Phase 2 taps
 > this single type for **every** path inventoried in §2 below.
@@ -83,6 +85,8 @@ the collapse work can use as precedent.
 
 ### 2.2 `/v1/responses` (OpenAI Responses API, client ingress — Codex)
 
+**Verdict: DIVERGENT.** The handler is compute-then-chunk and no incremental Responses decoder or typed relay is present. Phase 2.0 must add and verify both decoder and renderer before tapping this path.
+
 | | |
 | --- | --- |
 | Route table entry | `src/server/server_http_routes.c:2076` — `{"POST", "/v1/responses", NULL, RM_EXACT, "chat.send_stream", 0, rh_responses}` |
@@ -105,6 +109,8 @@ the collapse work can use as precedent.
 
 ### 2.4 Webchat ingest (`/v1/chat/live` / `webchat_live` mirror)
 
+**Verdict: DIVERGENT.** The claimed `rh_chat_live` route-handler and reachable producer/consumer chain are not verified in this worktree; Phase 2.1 must locate or implement that chain before adding a tap.
+
 | | |
 | --- | --- |
 | Route table entry | The `POST /v1/chat/live` row in `src/server/server_http_routes.c` (table section for the browser poll surface — "the browser's fixed-timer poll for the live turn (db1 webchat_live mirror), replacing client-side SSE reconciliation"). |
@@ -116,6 +122,8 @@ the collapse work can use as precedent.
 
 ### 2.5 Delegate relay (Live delegate)
 
+**Verdict: DIVERGENT.** The cited driver does not establish a reachable model-call-to-`aimee_delta_t` chain; Phase 2.2 must trace and tap it separately.
+
 | | |
 | --- | --- |
 | Primary source | The `src/server/wfe_live_delegate.c` driver (file in the `src/server/` flat list). |
@@ -125,6 +133,8 @@ the collapse work can use as precedent.
 | Existing scanner-style call site | Re-uses `gw_stage_memory` (`src/modules/memory/gw_stage_memory.h:43`) and `gw_stage_router` (referenced at `src/posix/server_compute.c:1245`). |
 
 ### 2.6 Roundtable relay
+
+**Verdict: DIVERGENT.** This is a non-streaming panel-verdict proxy with no verified typed-stream producer/consumer; Phase 2.3 must use its own observation seam.
 
 | | |
 | --- | --- |
@@ -136,7 +146,7 @@ the collapse work can use as precedent.
 
 ### 2.7 Summary of the binding decision
 
-All six paths (§2.1–§2.6) converge on the **same** typed relay surface
+The six paths do **not** all converge today. Only the IR-enabled Messages branch reaches the typed relay surface; the divergent paths in §2 require separate Phase 2 slices. The typed relay surface is
 defined at `src/headers/aimee_ir.h:167-178`: one enum (`aimee_delta_type_t`),
 one struct (`aimee_delta_t`). The choice of frontend-side render function
 varies by client wire (Anthropic SSE for §2.1; Responses SSE for §2.2; OpenAI
@@ -144,7 +154,7 @@ chat SSE for §2.3), but the relay surface is identical. Phase 2 collapses
 onto `aimee_delta_t`; Phase 4 re-implements the frontend-side renderers as
 needed against the same struct.
 
-The alternative ("paths diverge — Phase 2 splits per handler") is rejected
+The alternative ("paths diverge — Phase 2 splits per handler") is selected
 because §1.2 is already the live architecture in this worktree: the
 `aimee_ir_stream.h` / `aimee_ir_stream.c` files are committed (see
 `src/headers/aimee_ir_stream.h:90` for `anthropic_delta_emit` and

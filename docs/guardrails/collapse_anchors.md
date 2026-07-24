@@ -5,8 +5,9 @@
 Each decision is backed by a file:line citation from the worktree's indexed
 repository and (where applicable) is paired with the prerequisite phase that
 introduces any missing substrate.
-**Status:** PENDING MERGE. Phase 1 implementation **does not start** until this
-document is merged.
+**Status:** REVIEW-CORRECTED / VALIDATION-PENDING MERGE. Phase 1 implementation
+**must not start** until this document is merged; repository workflow metadata must
+record that merge before Phase 1 is considered accepted.
 
 This document is the contract — companion to `collapse_recon.md` (path-by-path
 dispatch recon) and `sampling_capability_matrix.md` (per-backend sampling
@@ -16,27 +17,16 @@ matrix). It is the only file that Phase 1+ is allowed to read first.
 
 ## Decision 1 — Path-divergence verdict (relay convergence)
 
-> **PATHS CONVERGE.** All six production paths in `collapse_recon.md` §2
-> (Anthropic `/v1/messages`, OpenAI Chat `/v1/chat/completions`, OpenAI
-> Responses `/v1/responses`, webchat ingest, delegate relay, roundtable
-> relay) collapse onto the single verified typed relay surface:
->
-> - enum `aimee_delta_type_t` — `src/headers/aimee_ir.h:167`
-> - struct `aimee_delta_t` — `src/headers/aimee_ir.h:177`
-> - module seam `src/headers/aimee_ir_stream.h` (frontend render sink type
->   `aimee_sse_emit_fn` at `:85`; backend decoders `openai_chunk_to_deltas`
->   at `:30` and `bedrock_converse_stream_to_deltas` at `:54`)
->
-> Phase 2 taps the SINGLE type above. Phase 2 does NOT split per handler —
-> that would reinvent `aimee_ir_stream.c`'s committed dispatcher at
-> `src/server/aimee_ir_stream.c:42` (OpenAI-Chat backend) and `:220`
-> (Bedrock backend) and the shared Anthropic SSE emitter at `:539`.
+> **PATHS DIVERGE.** `collapse_recon.md` verifies the typed relay only for the
+> IR-enabled `/v1/messages` branch. Responses and Chat are direct
+> compute-then-chunk emitters, webchat has no verified ingest chain, delegate
+> reachability is unproved, and roundtable is non-streaming. Phase 2 is split
+> per handler/relay. Missing decoder/renderers and missing route traces are
+> Phase 2.0, 2.1, 2.2, and 2.3 prerequisites respectively.
 
-**Constraint:** Phase 2 must produce a frontend renderer for the Responses
-wire (parallel to `anthropic_delta_emit`). The work is purely additive — the
-struct is the contract, the renderer varies.
-
----
+The verified type remains `aimee_delta_t` at `src/headers/aimee_ir.h:177`,
+with `aimee_delta_type_t` at `:167`; it is not treated as evidence of
+reachability on divergent paths.
 
 ## Decision 2 — Config source of truth and namespace
 
@@ -157,38 +147,14 @@ after `:539`).
 
 ## Decision 5 — Promotion-gate substrate
 
-> **SUBSTRATE EXISTS. Phase 5 wires into existing bucketing.**
->
-> The promotion gate is the calibration-sidecar shape, run by
-> `scripts/calibration-sidecar.py`. Verified file:line anchors:
->
-> - Sidecar script: `scripts/calibration-sidecar.py:5` describes
->   "Beta-binomial posterior per confidence bucket, computes a
->   distribution-free conformal abstention floor". Buckets fit at
->   `:160` (`fitted_buckets.append(...)`); the output envelope at
->   `:188` carries "buckets".
-> - Bucketing is DEFAULT-10 from `config.buckets = 10`
->   (`scripts/calibration-sidecar.py:30`); prior `alpha0=2.0, beta0=1.0`
->   at `:31-32`.
-> - Config keys on the `config_t` struct:
->   `calibration_profile_flag`, `calibration_prompt_version`,
->   `calibration_model_version` (per indexed search of
->   `src/modules/config/config.h`).
-> - The runway is "shadow → canary → default" — the shadow path is the
->   existing `aimee_ir_shadow_*` family at `src/headers/aimee_ir_shadow.h`
->   (called from `src/server/anthropic_http.c:1075`). Canary ramp is
->   `AIMEE_IR_STREAM_RELAY` (see Decision 3) and `AIMEE_IR_PATH` at
->   `src/server/aimee_ir_serve.c:18`.
-> - The proposal that introduced this substrate is
->   `docs/proposals/done/bayesian-promotion-threshold-calibration.md`
->   (referenced from the docstring of `calibration-sidecar.py:1-58`).
+> **MISSING SUBSTRATE. Phase 5.0 introduces bucketing and promotion control.**
 
-**Pairing:** Phase 5 introduces a new `target_surface: "guardrails.collapse"`
-calibration profile but does NOT introduce a new substrate — it consumes
-`calibration-sidecar.py` and writes one `fitted_buckets[]` entry per
-`feature_set_version`. Substrate exists; no Phase 5.0 prerequisite.
-
----
+`scripts/calibration-sidecar.py:5,160,188` proves calibration buckets and
+`scripts/calibration-sidecar.py:30-32` proves defaults, but no verified
+shadow→canary→default transition controller or collapse calibration consumer
+is present. Environment gates are not a promotion controller. Phase 5.0 must
+add bucket assignment, persisted calibration consumption, and explicit
+shadow→canary→default transition state before Phase 5 wires collapse into it.
 
 ## Decision 6 — Audit-store schema and new-record decision
 
@@ -243,6 +209,7 @@ calibration profile but does NOT introduce a new substrate — it consumes
 
 **Pairing (Prerequisites):**
 - ✅ Schema — no prerequisite.
+- ❌ Phase 2.3.0 must implement the writer and registration/sealing path: construct the versioned `audit_worm_append` record, register the action kind, call `audit_worm_checkpoint` and `audit_worm_seal` at the existing lifecycle boundary, and expose it through `audit_worm_read_page`. This is implementation work, not a doc-only convention.
 - ❌ Writer convention: `audit_worm_append(...)` with
   `actor_role = "guardrail.collapse"`, `action = "guardrail.collapse.v1.observe"|"…enforce"|"…escalate"|"…shadow.mismatch"|"…demote"`,
   `subject = "<routing_key>"`, `verdict = "<verdict_enum_name>"`,
