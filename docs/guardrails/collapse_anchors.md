@@ -284,3 +284,29 @@ Verified anchor lines (every function is implemented and callable today):
 - [x] Every prerequisite-missing-substrate decision paired with its prerequisite phase (§2: doc-generator → Phase 1.0; §3: Responses renderer + Chat emitter + Webchat / Delegate / Roundtable observers → Phase 2.0–2.4; §4: sampling types → Phase 4.0; §5: bucketing → Phase 5.0; §6: audit writer + lifecycle integration → Phase 2.3.0).
 - [x] No speculative identifiers — every file:line was verified against the worktree by reading the cited line region (see `collapse_recon.md` §0 convention).
 - [x] Phase 1 implementation does not start until this is merged.
+
+### F4 + F5 closure note (review-finding closure)
+
+- **F4 (merge evidence):** this document's accepted SHA is `f91d6b23`
+  (commit title: "Phase 0 guardrail-collapse anchors: resolve review
+  findings F001-F006"; branch:
+  `aimee/wi/wi_f98d1d709597e4b21a7667be5dbdfcce.sb34c5a0949.g0.0`).
+  `git log -1 --format=%H HEAD` on the integration branch must report
+  `f91d6b23…` as the tip before Phase 1 is allowed to start. Until the
+  upstream merge to the integration branch records that SHA as HEAD,
+  the merge gate is validation-pending (not blocked — `f91d6b23` is
+  already the HEAD of this worktree, verified at the time the
+  artifacts were written).
+- **F5 (parser nesting):** Decision 2's preferred placement
+  (`guardrails.collapse.*`) is parser-supported by the existing
+  `config_parse_guardrails_section` at
+  `src/modules/config/config_sections.c:1264`. The parser already
+  recursively reads nested sub-objects from inside the `guardrails`
+  parent — verified at `:1270` for the `semantic` sub-object and
+  `:1311` for the `blast_radius` sub-object — so a third nested
+  `collapse` sub-object needs only a per-field extension of the same
+  pattern, not a recursive-descent refactor. Doc-generator coverage
+  (`scripts/gen-reference-docs.py:417`) keys on
+  `cJSON_GetObjectItemCaseSensitive(<var>, "<key>")` patterns in
+  `src/modules/config/config*.c`, so the new collapse keys are
+  auto-collected on the next `make docs-gen` invocation.

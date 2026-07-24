@@ -147,36 +147,55 @@ reason this path does not reach the typed relay today.
 | | |
 | --- | --- |
 | Route table entry | `src/server/server_http_routes.c:2098` — `{"POST", "/v1/chat/live", NULL, RM_EXACT, NULL, CAP_SESSION_READ, rh_chat_live}` |
-| Buffered request handler | `rh_chat_live` at `src/server/server_http_routes.c:1626` (verified); polls the db1 row via `db1_webchat_live_get(sid, since, &turn_id, &text, &status, &rev)` at `:1645` |
-| Streaming request handler | **None** — this endpoint is a fixed-timer POLL surface. Returns the latest turn (`{changed, rev, turn_id, text, status}` at `:1649-1656`) when the monotonic `rev` has advanced past `since_rev`. Comment at `:1616-1625` describes it as "the browser's fixed-timer poll for the live turn (db1 webchat_live mirror), replacing client-side SSE reconciliation" |
-| SSE / delta emitter | N/A on this surface. The webchat SSE channel is a SEPARATE browser-`/events` stream, not `/v1/chat/live`. |
-| Reaches typed relay? | **NO.** This is a downstream consumer of the persisted turn produced by the upstream SSE relay on `/v1/messages` (or `/v1/chat/completions`); the SSE producer is the upstream handler, not this handler. |
-| Existing scanner-style call site | The same `aimee_ir_shadow_observe_request` precedent at `src/server/anthropic_http.c:1075` is the model — observe via a parallel no-op seam that toggles on the same config gate (see config namespace decision in `collapse_anchors.md`). |
+| **Verified upstream producer (the actual text_delta source)** | `live_mirror_locked(compute_ctx_t *cctx, const char *event, const char *value)` at `src/posix/server_compute.c:158` — receives `("text", delta)` events from every primary chat worker and upserts the accumulated `cctx->live_text` into the db1 `webchat_live` row via `db1_webchat_live_set(...)` (call at `:168` turn_start, `:192` text growth, `:198` turn_end, `:203` error). The producer is **shared** with every chat worker — not divergent. |
+| Verified upstream callers of `live_mirror_locked` | `stream_event(compute_ctx_t *cctx, ...)` at `src/posix/server_compute.c:214` (the unified stream sink, with `live_mirror_locked(cctx, event, value)` called at `:219`); `stream_event` is itself driven by: `codex_stream_event_cb` (`:391`), `chat_cli_stream_cb` (`:735`), the synchronous text branches (`:829` post-drift notice, `:921` buffered-completion, `:1037` compact-prompt, `:1117` compact-confirmation, `:1190` retry message), and tool-event hook `chat_tool_event_cb` (`:719`) |
+| **Browser-facing surface** | `rh_chat_live` at `src/server/server_http_routes.c:1626` — verified POLL handler; calls `db1_webchat_live_get(sid, since, &turn_id, &text, &status, &rev)` at `:1645` and returns `{changed, rev, turn_id, text, status}` at `:1649-1656` when `rev > since_rev`. The matching `/v1/chat/live` route table entry is at `src/server/server_http_routes.c:2098`. |
+| Streaming request handler | **None on `/v1/chat/live`** — this endpoint is a fixed-timer POLL surface. Comment at `:1616-1625` describes it as "the browser's fixed-timer poll for the live turn (db1 webchat_live mirror), replacing client-side SSE reconciliation". The browser SSE channel is a SEPARATE `/events` stream, not `/v1/chat/live`. |
+| SSE / delta emitter | N/A on `/v1/chat/live`. The text-delta emitter for webchat is the upstream `live_mirror_locked` at `src/posix/server_compute.c:158` (mirroring accumulated text into db1). Browser-side SSE is delivered out-of-band via the presence-event ring (`presence_emit_turn_delta`) published from `ring_publish_event_locked` at `src/posix/server_compute.c:144` (per `src/posix/server_compute.c:204-208`). |
+| Persisted-turn table | `webchat_live(session_id, turn_id, rev, text, status, updated_at)` — schema at `src/db1/schema.sql:34`; writer `db1_webchat_live_set` at `src/db1/webchat_live.c:10`; reader `db1_webchat_live_get` at `src/db1/webchat_live.c:51`. One row per session; `rev` increments on every write so the poller can tell the row advanced without diffing the text (`src/db1/webchat_live.c:18-20`). |
+| Reaches typed relay? | **NO** on `/v1/chat/live` (it is a downstream consumer). The shared upstream producer (`stream_event` at `src/posix/server_compute.c:214` → `live_mirror_locked` at `:158`) does NOT cross `aimee_delta_t` either: it operates on `(event, key, value)` string tuples, not the typed delta struct. |
+| Existing scanner-style call site | The same `aimee_ir_shadow_observe_request` precedent at `src/server/anthropic_http.c:1075` is the model — observe via a parallel no-op seam that toggles on the same config gate (see config namespace decision in `collapse_anchors.md`). The structural precedent for a "tap, don't mutate" mirror is `live_mirror_locked` itself at `src/posix/server_compute.c:158` (writes to db1 on growth, never affects the served request). |
 
-**Verdict — DIVERGES; Phase 2.2 prerequisite.** Webchat does not produce
-text deltas; it polls the persisted turn. The collapse tap must be placed
-**upstream** of the webchat mirror (at the SSE emission point named in
-§2.1 / §2.2 / §2.3), not at `/v1/chat/live`. No tap is required on this
-path itself.
+**Verdict — DIVERGES; Phase 2.2 prerequisite.** Webchat `/v1/chat/live`
+is a downstream POLL consumer, not a producer. The verified producer is
+the shared `stream_event` → `live_mirror_locked` chain at
+`src/posix/server_compute.c:214/158`, which feeds the db1 row read by
+`rh_chat_live`. The collapse scanner must tap `stream_event`
+(`src/posix/server_compute.c:214`) — that one tap covers every primary
+chat worker AND every delegate (because `delegate_worker` drives
+`chat_stream_worker_agent`, which calls `stream_event`). No tap is
+required on `/v1/chat/live` itself. The producer is **shared**, not
+divergent — divergence with the `/v1/messages` path is only in the
+non-existence of an IR-delta adapter on top of `stream_event` today.
 
 ### 2.5 Delegate relay (Live delegate)
 
 | | |
 | --- | --- |
-| Primary file | `src/server/wfe_live_delegate.c` (the `wfe_live_delegate_run` driver at `:103`) |
-| Streaming request handler | **None on this file.** This driver does NOT introduce a new HTTP route. It runs through the WFE block engine via `wfe_set_delegate_provider` (declared at `src/modules/workflows/wfe_blocks.h:95`, called from `src/modules/workflows/wfe_blocks.c:448`). The block engine enqueues a coord job via `db1_coord_job_create(WFE_COORD_PLAN_ID, 1)` at `src/server/wfe_live_delegate.c:131` and waits for the delegate to complete. The actual model call is `agent_dispatch_one` invoked from elsewhere in the delegate system. |
-| SSE / delta emitter | The delegate system reaches the model via `agent_dispatch_one` (`src/server/openai_chat.c:755` for chat, `:644` for buffered responses). The chat-shape path is the one used; delegate responses arrive as synchronous text, not as SSE deltas. |
-| Reaches typed relay? | **UNRESOLVED.** The delegate-system → `agent_dispatch_one` chain does not reach `aimee_delta_t` today. The delegate result is read by the WFE block engine as a final string, not as a `aimee_delta_t[]` stream. |
-| Existing scanner-style call site | Re-uses `gw_stage_memory` (`src/modules/memory/gw_stage_memory.h:43`) for memory pre-injection on Anthropic-shaped requests; `gw_stage_router` (referenced at `src/posix/server_compute.c:1245`) for the request-routing stage. |
+| WFE block driver | `wfe_live_delegate_run(const char *workdir, const char *role, const char *prompt, const char *artifact_path, char out_commit_sha[64], char *err, size_t errlen)` at `src/server/wfe_live_delegate.c:103`. Registered as the live delegate via `wfe_set_delegate_provider(&WFE_LIVE_DELEGATE)` at `src/server/wfe_live_delegate.c:502` (the static `WFE_LIVE_DELEGATE` struct is at `:227`). |
+| Block-engine seam | `wfe_set_delegate_provider(const wfe_delegate_provider_t *p)` declared at `src/modules/workflows/wfe_blocks.h:95`; static state at `src/modules/workflows/wfe_blocks.c:446` (`g_delegate`); setter at `src/modules/workflows/wfe_blocks.c:448`. |
+| Coord enqueue (WFE → dispatch) | `db1_coord_job_create(WFE_COORD_PLAN_ID, 1)` at `src/server/wfe_live_delegate.c:131`; `db1_coord_job_add_task(job_id, 0, "[]", delegate_role, prompt, workdir, persona)` at `:137`; the live delegate waits for completion via `wfe_coord_task_wait` (see the loop at `:63-86`, returning the final result into `result` at `:146-148`). |
+| Streaming request handler | **None — delegate relay is not an HTTP route.** The async dispatcher (`server_coord_dispatcher.c`) claims tasks and submits them via `server_compute_dispatch_coord_task` at `src/server/server_coord_dispatcher.c:122` (calls `gw_orch_delegates_run` at `:137`); `coord_spawn_delegate` (`src/server/server_coord_dispatcher.c:60-100`) builds a `compute_ctx_t` and calls `delegate_spawn_ondemand(cctx)` at `:99`, which spawns a detached thread that runs `delegate_worker(cctx)` (`src/server/server_delegate_ondemand.c:79`). |
+| **Verified delegate worker → primary chat stream sink** | `delegate_worker(cctx)` at `src/server/server_compute.c:668` resolves the request body, picks a provider, and (for non-primary-session providers) ends up at `chat_stream_worker_agent(cctx, message, cwd, aimee_sid, provider, model_override, &cfg)` at `src/posix/server_compute.c:1293`. That worker invokes `stream_event(cctx, "text", "content", ...)` at `src/posix/server_compute.c:738` (the tmux CLI incremental path `chat_cli_stream_cb` → `stream_event(c->cctx, "text", "content", delta)` at `:738`), plus the synchronous full-text emit at `:921/1037/1117/1190`, plus tool events at `:719`. All of those calls converge on `stream_event(cctx, event, key, value)` at `src/posix/server_compute.c:214`. |
+| SSE / delta emitter | The delegate's text-delta path is the **same** `stream_event` → `live_mirror_locked` chain that webchat uses (`src/posix/server_compute.c:214` → `:158`). The delegate worker also publishes its final result back to db1 via `db1_coord_task_set_result` (consumer side: `wfe_coord_task_wait` at `src/server/wfe_live_delegate.c:147`), which is **non-streaming text**. |
+| Reaches typed relay? | **NO** — and the lack-of-convergence is now fully resolved. The delegate relay's incremental text reaches `stream_event` (a string-tuple sink), then `live_mirror_locked` (db1 mirror), then `presence_emit_turn_delta` (ring). It does NOT cross `aimee_delta_t`. The final answer is delivered to WFE as a string via `db1_coord_task_set_result`, not as an `aimee_delta_t[]` stream. (There is no `openai_responses_chunk_to_deltas`-style decoder wired on the `agent_dispatch_one` → `chat_stream_worker_agent` → `stream_event` path, and no `aimee_sse_emit_fn` sink is registered on the on-demand delegate thread.) |
+| Existing scanner-style call site | The structural precedent is `aimee_ir_shadow_observe_request` (`src/server/aimee_ir_shadow.c:208`, called at `src/server/anthropic_http.c:1075` — gated by `AIMEE_IR_SHADOW`, default-OFF). The behavioral precedent is `live_mirror_locked` itself at `src/posix/server_compute.c:158` (writes to db1 on growth, never affects the served request, toggled by `presence_session[0]`). `gw_stage_memory` (`src/modules/memory/gw_stage_memory.h:43`) and `gw_stage_router` (`src/posix/server_compute.c:1245`) sit upstream on the request pipeline, not the delta stream. |
 
-**Verdict — DIVERGES; Phase 2.3 prerequisite.** The delegate path reaches
-the model via `agent_dispatch_one` (the same seam Chat uses), but the
-**output is consumed as a final string**, not as an `aimee_delta_t[]`
-stream. A collapse tap on `/v1/chat/completions` does NOT cover delegates
-because the consumption shape is different (the WFE block engine reads the
-final reply, not the SSE chunks). Phase 2.3 must decide whether to tap
-inside `agent_dispatch_one` (preferred) or accept that the delegate path
-is out-of-scope for the collapse scanner.
+**Verdict — DIVERGES; Phase 2.3 prerequisite.** The delegate relay's
+**incremental stream path converges with webchat on
+`stream_event`** (`src/posix/server_compute.c:214`), so a single collapse
+tap at `stream_event` covers primary chat workers, the tmux CLI stream,
+and every on-demand delegate (because every delegate funnels through
+`delegate_worker` → `chat_stream_worker_agent` → `stream_event`).
+Convergence stops at `stream_event`'s string-tuple surface; the
+downstream `live_mirror_locked` mirror writes to db1 (not
+`aimee_delta_t`), and the final delegate result is a string handed back
+to WFE via `wfe_coord_task_wait` at `src/server/wfe_live_delegate.c:147`.
+Phase 2.3 must therefore wire an IR-delta adapter on top of
+`stream_event` (parallel to `openai_chunk_to_deltas` in
+`src/server/aimee_ir_stream.c:42`) if the collapse scanner is to see
+typed deltas on the delegate path; otherwise the scanner records its
+counters from `stream_event` directly.
 
 ### 2.6 Roundtable relay
 
@@ -247,9 +266,35 @@ counters, and never affects the served request.
 - [x] `/v1/messages`: handler + SSE/delta emitter + verdict + enums + scanner cited.
 - [x] `/v1/responses`: same fields cited. (Caveat: Responses decoder + renderer do not yet exist for the IR-delta surface — flagged in §2.2.)
 - [x] `/v1/chat/completions`: same fields cited. (Caveat: compute-then-chunk + no OpenAI-Chat-shape emitter — flagged in §2.3.)
-- [x] Webchat ingest: route + handler + poll contract + reason-no-tap cited. (No SSE relay on this surface — flagged in §2.4.)
-- [x] Delegate relay: traced to WFE block engine → `agent_dispatch_one`; reachability to `aimee_delta_t` UNRESOLVED — flagged in §2.5.
+- [x] Webchat ingest: route + handler + poll contract + reason-no-tap cited, AND the verified upstream producer `live_mirror_locked` at `src/posix/server_compute.c:158` (driven by `stream_event` at `:214`) — flagged in §2.4.
+- [x] Delegate relay: traced through WFE block engine → coord-job enqueue → `delegate_worker` (`src/server/server_compute.c:668`) → `chat_stream_worker_agent` (`src/posix/server_compute.c:752/1293`) → `stream_event` (`:214`); reachability to `aimee_delta_t` resolved as **NO** (string-tuple sink only) — flagged in §2.5.
 - [x] Roundtable relay: proxy entry + non-streaming verdict + reason-no-tap cited — flagged in §2.6.
 - [x] Single binding decision: PATHS DIVERGE; Phase 2 splits per handler (§1).
 - [x] Speculative identifiers explicitly resolved: `AIMEE_DELTA_BLOCK_DELTA` and `aimee_delta_t` are confirmed real at the cited lines; they are NOT assumed to be reachable on every path.
 - [x] Existing scanner precedent: §4 lists 5 verified call sites.
+
+### F1 + F2 verification (review-finding closure)
+
+- **F1 (delegate reachability):** the prior draft marked reachability
+  "UNRESOLVED". Verified chain in §2.5 now names every link with file:line:
+  `wfe_live_delegate_run` (`src/server/wfe_live_delegate.c:103`) →
+  `wfe_set_delegate_provider` (`src/modules/workflows/wfe_blocks.h:95`,
+  state at `src/modules/workflows/wfe_blocks.c:446-448`) →
+  `db1_coord_job_create` + `db1_coord_job_add_task`
+  (`src/server/wfe_live_delegate.c:131/137`) →
+  `server_compute_dispatch_coord_task` (`src/server/server_coord_dispatcher.c:122`)
+  → `coord_spawn_delegate` (`src/server/server_coord_dispatcher.c:60`) →
+  `delegate_spawn_ondemand` (`src/server/server_delegate_ondemand.c:84`,
+  thread runs `delegate_worker`) → `delegate_worker`
+  (`src/server/server_compute.c:668`) → `chat_stream_worker_agent`
+  (`src/posix/server_compute.c:752`, dispatched at `:1293`) →
+  `stream_event` (`src/posix/server_compute.c:214`, called at `:738` for
+  tmux CLI streaming and `:921/1037/1117/1190` for synchronous text).
+  Reachability verdict: **NO** (the chain terminates at `stream_event`,
+  which is a string-tuple sink; `aimee_delta_t` is NOT crossed).
+- **F2 (webchat upstream producer):** the prior draft did not name the
+  upstream producer. §2.4 now names `live_mirror_locked`
+  (`src/posix/server_compute.c:158`), driven by `stream_event` at
+  `src/posix/server_compute.c:214`, and the db1 row read by `rh_chat_live`
+  (`src/db1/webchat_live.c:51`, polled at `src/server/server_http_routes.c:1645`).
+  The producer is **shared** with every chat worker, not divergent.

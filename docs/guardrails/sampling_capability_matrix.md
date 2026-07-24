@@ -1,5 +1,47 @@
 # Sampling-Parameter Capability Matrix (per backend)
 
+---
+
+## 0a. F3 closure note (review-finding closure)
+
+The prior matrix asserted that `top_k` was **NOT** emitted on every backend
+but **WAS** emitted on Anthropic — an internally contradictory pair where
+the same verified function `model_sampling_apply_anthropic` was claimed to
+emit `top_k` (col 1, line `src/server/model_sampling.c:107`) and the
+verified sibling `model_sampling_apply_openai` was simultaneously claimed
+NOT to emit `top_k` (col 2, "no `add_int_if_missing` call") even though
+both functions are three lines of symmetric code.
+
+Verified live source (`src/server/model_sampling.c`):
+
+- `model_sampling_apply_openai` at `:71-89` — line 86:
+  `add_int_if_missing(req, "top_k", row.top_k);`
+- `model_sampling_apply_anthropic` at `:91-108` — line 107:
+  `add_int_if_missing(req, "top_k", row.top_k);`
+
+Both calls are **delegate-row-gated**: `sampling_for_agent(agent, &row)`
+at `:64-69` returns the per-delegate preset at `g_sampling_rows[]`
+(`src/server/model_sampling.c:9-22`) and the `add_int_if_missing` is
+called only when `has_row` is true (lines `:83/104`). On rows where
+`top_k` is `-1` (the "do not emit" sentinel), the helper short-circuits
+at `:57-62`. The wire-level shape depends on the downstream backend:
+
+- **Anthropic cloud** wire accepts `top_k` natively — re-emitted.
+- **Bedrock Converse** wire is Anthropic-shaped — re-emitted (verified
+  by the same `model_sampling_apply_anthropic` call).
+- **OpenAI Chat wire (cloud)** has no `top_k` field — providers may drop
+  it. Local OpenAI-compatible providers (ollama / llama.cpp) accept it
+  (per the index comment at `src/server/aimee_backend_openai.c`).
+- **OpenAI Responses wire** is reached via `aimee_ir_responses_to_chat`
+  (`src/server/openai_chat.c:1098`), which routes through the same
+  OpenAI Chat builder; same wire-drop caveat.
+
+Phase 4.0's `top_k`-emission prerequisite is therefore removed.
+
+---
+
+
+
 **Phase:** 0 — reconnaissance packet companion to `collapse_recon.md`.
 **Scope:** explicit per-backend list of which top-level sampling knobs each
 *production* delegate honours, cross-referenced against the canonical IR's
@@ -9,7 +51,12 @@ missing plumbing as Phase 4.0 prerequisites.
 request-parser or backend-builder file:line citation. `n/a` means the wire
 protocol does not have that field by design (e.g. Anthropic has no
 `repetition_penalty` field).
-**Status:** REVIEW-CORRECTED — unsupported request fields are explicitly marked unsupported; informs Phase 4 gating.
+**Status:** REVIEW-CORRECTED (F3 closed) — the prior `top_k` claims
+contradicted the live backend builders (`src/server/model_sampling.c:86/107`
+both emit `top_k` via `add_int_if_missing(req, "top_k", row.top_k)`); matrix
+now reflects the verified plumbing. Phase 4.0 prerequisite list updated to
+remove the phantom `top_k`-emission item. Other Phase 4.0 prerequisites
+still listed.
 
 ---
 
@@ -49,7 +96,7 @@ the wire OR (b) explicitly drops it after a typed read (deliberate rejection).
 | --- | --- | --- | --- | --- | --- | --- |
 | `temperature` | ✅ re-emitted on Anthropic request via `model_sampling_apply_anthropic` (`src/server/model_sampling.c:93`) — `add_number_if_missing(req, "temperature", caller_temperature)` at `:99`, row fallback at `:102` | ✅ re-emitted on OpenAI request via `model_sampling_apply_openai` (`src/server/model_sampling.c:71`) — `add_number_if_missing(req, "temperature", caller_temperature)` at `:77`, row fallback at `:79` | ✅ `openai_request_int` style; `chat_stream_handler` reads `OPENAI_CHAT_MAX_TOKENS` (`:748`) and threads temperature through `agent_dispatch_one` (`:755`) | ✅ via `aimee_ir_responses_to_chat` (`src/server/openai_chat.c:1098`) → `chat_stream_handler` path | ✅ via `aimee_ir_responses_to_chat` (`src/server/openai_chat.c:1098`) — same Chat path as col 3 | ✅ request emission via `model_sampling_apply_anthropic` (Bedrock uses Anthropic-shape request) at `src/server/model_sampling.c:93`; stream consumption via `bedrock_converse_stream_to_deltas` (`src/server/aimee_ir_stream.c:220`) |
 | `top_p` | ✅ `add_number_if_missing(req, "top_p", row.top_p)` at `src/server/model_sampling.c:106` | ✅ `add_number_if_missing(req, "top_p", row.top_p)` at `src/server/model_sampling.c:85` | ✅ same line `:85`; IR typed `top_p` at `src/headers/aimee_ir.h:127` | ✅ via IR path through `aimee_ir_responses_to_chat` (`src/server/openai_chat.c:1098`) | ✅ same as col 3 | ✅ via `model_sampling_apply_anthropic` `top_p` at `src/server/model_sampling.c:106` |
-| `top_k` | ✅ `add_int_if_missing(req, "top_k", row.top_k)` at `src/server/model_sampling.c:107` (Anthropic-only) | ❌ NOT emitted on OpenAI Chat request — `model_sampling_apply_openai` does not call `add_int_if_missing(req, "top_k", ...)` (verified at `src/server/model_sampling.c:84-89`) | ❌ same — no `top_k` plumbing on the Chat request wire; OpenAI Chat has no `top_k` field | ❌ NOT emitted on Responses request — `chat_stream_handler` (`:720`) and `responses_stream_handler` (`:1081`) do not call `add_int_if_missing`'s `top_k` entry, and Responses wire has no `top_k` field | ❌ same — no `top_k` plumbing on Chat request wire | ❌ NOT emitted on Bedrock request — `model_sampling_apply_anthropic` does not call `add_int_if_missing(req, "top_k", ...)` on the Bedrock-shaped request (verified at `src/server/model_sampling.c:106-107`); stream-side decoder at `src/server/aimee_ir_stream.c:220` only consumes stream output |
+| `top_k` | ✅ emitted on Anthropic-shape request via `add_int_if_missing(req, "top_k", row.top_k)` at `src/server/model_sampling.c:107` (delegate-row-gated; only when `model_sampling_get(agent->model, &row)` matches a row at `src/server/model_sampling.c:9-22`) | ✅ emitted on OpenAI-shape request via `add_int_if_missing(req, "top_k", row.top_k)` at `src/server/model_sampling.c:86` (delegate-row-gated). The OpenAI Chat **wire** has no `top_k` field, but the OpenAI-compatible local providers (ollama/llama.cpp) accept it — this is the exact shape `aimee_backend_openai.c` re-emits (comment at `src/server/aimee_backend_openai.c`). The standard OpenAI Chat cloud API silently drops it | ✅ same — `model_sampling_apply_openai` runs unconditionally on the chat path; same Caveat: wire-drop on standard cloud OpenAI | ✅ via IR path through `aimee_ir_responses_to_chat` (`src/server/openai_chat.c:1098`) → `chat_stream_handler` path; same wire-drop caveat applies to the standard Responses wire | ✅ same — wire-drop on standard OpenAI Chat | ✅ emitted on Bedrock-shaped request via `add_int_if_missing(req, "top_k", row.top_k)` at `src/server/model_sampling.c:107` (Bedrock uses `model_sampling_apply_anthropic`). Stream-side `bedrock_converse_stream_to_deltas` at `src/server/aimee_ir_stream.c:220` only consumes stream output, not request fields |
 | `max_tokens` | ✅ Anthropic-native field on the request; `model_sampling_apply_anthropic` preserves caller-sent value (no override) per `src/server/model_sampling.c:93-105` | ✅ IR typed `max_tokens` at `src/headers/aimee_ir.h:116`; IR build sets `max_tokens_override` for the agent shaping; `model_sampling_apply_openai` does not override caller value (`:71-89`) | ✅ read via `openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768)` at `src/server/openai_chat.c:748` | ✅ via IR path through `aimee_ir_responses_to_chat` (`src/server/openai_chat.c:1098`) and `openai_request_int` at `src/server/openai_chat.c:1133` | ✅ same as col 3 | ✅ Anthropic-shape request carries `max_tokens`; IR-typed at `src/headers/aimee_ir.h:116` |
 | `stop` / `stop_sequences` | ✅ verbatim (Anthropic-native `stop_sequences` array is re-emitted) via `model_sampling_apply_anthropic` (no override; `src/server/model_sampling.c:93-105`) | ✅ IR typed `stop_sequences[]` at `src/headers/aimee_ir.h:131`; IR-typed pass-through to OpenAI request build | ⚠ OpenAI `stop` (string-or-array) is forwarded by `agent_dispatch_one`-side request build, but the IR has typed `stop_sequences` only — a single-string `stop: "."` is dropped during IR parse (see Phase 4.0 prereq §3) | ✅ via IR path | ⚠ same gap as col 3 (string-or-array normalization) | ✅ via Anthropic-shape request build (`model_sampling_apply_anthropic` carries `stop_sequences` from `aimee_request_t.stop_sequences[]` at `:131`); stream-side `bedrock_converse_stream_to_deltas` maps `stop_reason` to canonical stop enum at `src/server/aimee_ir_stream.c:343` |
 | `repetition_penalty` | n/a (Anthropic has no `repetition_penalty`) | n/a | ⚠ delegate-only via `model_sampling_apply_openai` (`src/server/model_sampling.c:71`) — `add_number_if_missing(req, "repeat_penalty", row.repeat_penalty)` at `:88`; gated by `model_sampling_row_t.repeat_penalty` per-delegate preset (the `g_sampling_rows` table at `src/server/model_sampling.c:9` lists `repeat_penalty` per row) | ⚠ delegate-only — same `add_number_if_missing` at `:88` | n/a (OpenAI Chat has no `repetition_penalty`) | n/a (Bedrock/Anthropic-shape has no `repetition_penalty`) |
@@ -90,13 +137,17 @@ acceptance criterion ("any missing plumbing as Phase 4.0 prerequisites"):
    OpenAI client can send a single string `stop: "."` which currently gets
    dropped during IR parse. Phase 4.0 normalizes to array inside
    `aimee_frontend_openai.c` (the IR-side request builder).
-3. **`top_k` on Responses and Bedrock request emission.** The IR has
-   `top_k`/`has_top_k` (`src/headers/aimee_ir.h:129-130`) but `model_sampling_apply_anthropic`
-   (`src/server/model_sampling.c:93`) does not call `add_int_if_missing(req, "top_k", ...)`
-   even though it does for `add_int_if_missing(req, "top_k", row.top_k)` at
-   `:107` (verify against the live source — if it IS already emitted, Phase
-   4.0 has no work here). Phase 4.0 confirms the line and adds the Responses
-   wire emission if missing.
+3. ~~`top_k` on Responses and Bedrock request emission.~~ **REMOVED —
+   observation was wrong.** Both `model_sampling_apply_openai`
+   (`src/server/model_sampling.c:86`) and `model_sampling_apply_anthropic`
+   (`src/server/model_sampling.c:107`) already emit `top_k` via the SAME
+   `add_int_if_missing(req, "top_k", row.top_k)` call. The Anthropic wire
+   carries it forward verbatim; the Bedrock wire carries it forward
+   verbatim (Bedrock's request envelope is Anthropic-shaped); Responses
+   requests carry it through `aimee_ir_responses_to_chat`. Where the
+   standard cloud OpenAI Chat / Responses wire drops the field, that is a
+   wire-protocol behavior, not a missing-plumbing problem. **Phase 4.0 has
+   no top_k-emit work to do.**
 4. **`previous_response_id` thread key for Responses continuations.** The
    storage substrate already exists (`src/server/openai_responses_store.c`
    per the flat `src/server/` listing); what is missing is the IR-side
