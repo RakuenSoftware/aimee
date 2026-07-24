@@ -29,6 +29,7 @@
 #include "bus_region.h" /* bus_control_epoch */
 #include "config.h"     /* config_default_dir */
 #include "log.h"
+#include "wfe_def.h" /* wfe_sha256_raw — obs_bus_key_fingerprint */
 
 #define KIND_AUDIT_ACTION    OBS_BUS_KIND_ACTION
 #define KIND_GUARDRAIL_EVENT OBS_BUS_KIND_GUARDRAIL
@@ -698,4 +699,32 @@ uint64_t obs_bus_dropped(void)
 uint64_t obs_bus_written(void)
 {
    return atomic_load_explicit(&g.written, memory_order_relaxed);
+}
+
+void obs_bus_key_fingerprint(const char *kind, const char *key, char *out, size_t out_len)
+{
+   if (!out || out_len == 0)
+      return;
+   out[0] = '\0';
+   if (out_len < 16)
+      return;
+   char buf[1200];
+   int n = snprintf(buf, sizeof buf, "%s\x1f%s", kind ? kind : "", key ? key : "");
+   size_t len = (n < 0) ? 0 : ((size_t)n < sizeof buf ? (size_t)n : sizeof buf);
+   unsigned char dig[32];
+   if (wfe_sha256_raw(buf, len, dig) != 0)
+   {
+      snprintf(out, out_len, "mk:?");
+      return;
+   }
+   static const char hx[] = "0123456789abcdef";
+   out[0] = 'm';
+   out[1] = 'k';
+   out[2] = ':';
+   for (int i = 0; i < 6; i++)
+   {
+      out[3 + i * 2] = hx[(dig[i] >> 4) & 0xf];
+      out[3 + i * 2 + 1] = hx[dig[i] & 0xf];
+   }
+   out[15] = '\0';
 }

@@ -43,7 +43,9 @@
 #include "kb_vault_tpm_runtime_lock.h"
 #include "db2/kb_audit_worm.h"
 #include "db2/vault_operator_status_runtime.h"
-#include "vault_server_key.h" /* startup durable seal-epoch synchronization */
+#include "vault_server_key.h"       /* startup durable seal-epoch synchronization */
+#include "kb_memory_audit_bridge.h" /* record memory mutations on aimee-kb's own obs bus */
+#include "log.h"                    /* audit_log_open — KB memory-audit ledger */
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -1540,6 +1542,12 @@ int main(int argc, char **argv)
 
    config_t kb_cfg;
    config_load(&kb_cfg);
+
+   /* aimee-kb records the AUTHORITATIVE memory-mutation events on its own
+    * observability bus at the store (every caller). Open the KB audit ledger so
+    * the bus consumer can persist the rows, then install the store-side hook. */
+   audit_log_open();
+   kb_memory_audit_bridge_install();
 
    /* P7-D3a is an all-or-none service-manager contract. The listener fd and
     * pathname are fixed in the wire module; only activation and the dedicated

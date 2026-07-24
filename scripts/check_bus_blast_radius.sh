@@ -113,9 +113,9 @@ if [ -n "$hits" ]; then
    fail=1
 fi
 hits=$({ grep -nE 'BUS_SHIP_OBJS' src/Makefile 2>/dev/null || true; } | strip_comments |
-   { grep -vE '^[0-9]+:BUS_SHIP_OBJS[[:space:]]*[+:]?=|\$\(SERVER\):' || true; })
+   { grep -vE '^[0-9]+:BUS_SHIP_OBJS[[:space:]]*[+:]?=|\$\(SERVER\):|\$\(KB\):' || true; })
 if [ -n "$hits" ]; then
-   note "FAIL: BUS_SHIP_OBJS is linked by a target other than aimee-server (\$(SERVER))"
+   note "FAIL: BUS_SHIP_OBJS is linked by a target other than the trusted daemons \$(SERVER)/\$(KB)"
    printf '%s\n' "$hits" >&2
    fail=1
 fi
@@ -266,13 +266,16 @@ for bin in "$@"; do
       missing=$((missing + 1))
       continue
     fi
-   # aimee-server carries the bus on purpose (D7 step 3: the audit migration).
-   # It is EXPECTED to reference bus symbols; layers 1-3 and the src/Makefile
-   # confinement above prove no other target links them, and nm cannot see static
-   # bus symbols in this stripped binary in any case. Exempt it explicitly rather
-   # than leaning on that blindness.
+   # The TRUSTED SERVER DAEMONS carry the bus on purpose: aimee-server (the audit,
+   # guardrail, vault, sandbox, and server-side memory events) and aimee-kb (its
+   # own bus, recording the authoritative memory-mutation events at the store).
+   # Both are EXPECTED to reference bus symbols; layers 1-3 and the src/Makefile
+   # confinement above prove no OTHER target links them (the bus stays out of the
+   # thin-client / CLI binaries), and nm cannot see static bus symbols in these
+   # stripped binaries in any case. Exempt them explicitly rather than leaning on
+   # that blindness.
    case "$(basename "$path")" in
-   aimee-server | aimee-server.exe)
+   aimee-server | aimee-server.exe | aimee-kb | aimee-kb.exe)
       checked=$((checked + 1))
       continue
       ;;
@@ -301,10 +304,10 @@ done
 
 if [ "$fail" -ne 0 ]; then
    note ""
-   note "The event bus may be linked only into aimee-server, and only to carry the"
-   note "audit migration (D7 step 3). A bus symbol in any other shipping binary, or"
-   note "a bus reference outside modules/bus + obs_bus, is a blast-radius"
-   note "regression. See docs/dev/EVENT_BUS_DECISIONS.md."
+   note "The event bus may be linked only into the trusted server daemons"
+   note "(aimee-server and aimee-kb), never a thin-client/CLI binary. A bus symbol"
+   note "in any other shipping binary, or a bus reference outside modules/bus +"
+   note "obs_bus, is a blast-radius regression. See docs/dev/EVENT_BUS_DECISIONS.md."
    exit 1
 fi
 
