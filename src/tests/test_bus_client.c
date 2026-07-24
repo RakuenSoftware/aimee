@@ -95,8 +95,7 @@ static void test_publish_and_poll(void)
    must(bus_host_subscribe(&h, sub.reply.handle_id, KIND_A) == BUS_HOST_OK, "subscribe");
 
    const char *msg = "hello-bus";
-   must_rc(bus_client_publish(&pub, KIND_A, msg, (uint32_t)strlen(msg)), BUS_CLIENT_OK,
-           "publish");
+   must_rc(bus_client_publish(&pub, KIND_A, msg, (uint32_t)strlen(msg)), BUS_CLIENT_OK, "publish");
 
    /* Nothing arrives until the host routes. */
    bus_event_t ev;
@@ -229,7 +228,8 @@ static void test_heartbeat_and_epoch(void)
    bus_host_bump_epoch(&h);
    must(bus_client_epoch_changed(&c), "client observes the host restart");
    /* And a publish after a restart refuses rather than writing a stale mapping. */
-   must_rc(bus_client_publish(&c, KIND_A, "x", 1), BUS_CLIENT_EPOCH, "publish refused after restart");
+   must_rc(bus_client_publish(&c, KIND_A, "x", 1), BUS_CLIENT_EPOCH,
+           "publish refused after restart");
    bus_event_t ev;
    must_rc(bus_client_poll(&c, &ev), BUS_CLIENT_EPOCH, "poll refused after restart");
 

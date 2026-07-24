@@ -68,8 +68,7 @@ static void test_control_roundtrip(void)
 
    /* A client maps the same fd read-only and reads the parameters back. */
    bus_region_t client;
-   must_result(bus_region_map(create.fd, create.size, 0, &client), BUS_REGION_OK,
-               "client map ro");
+   must_result(bus_region_map(create.fd, create.size, 0, &client), BUS_REGION_OK, "client map ro");
    bus_control_t *c = NULL;
    must_result(bus_control_attach(&client, &c), BUS_REGION_OK, "control attach");
    must(atomic_load_explicit(&c->slot_size, memory_order_relaxed) == slot, "slot_size read back");
@@ -113,8 +112,7 @@ static void ro_fault_handler(int sig)
 static void test_control_readonly_faults(void)
 {
    bus_region_t create;
-   must_result(bus_region_create("ctl-ro", bus_control_bytes(), &create), BUS_REGION_OK,
-               "create");
+   must_result(bus_region_create("ctl-ro", bus_control_bytes(), &create), BUS_REGION_OK, "create");
    bus_region_t host;
    must_result(bus_region_map(create.fd, create.size, 1, &host), BUS_REGION_OK, "host map");
    must_result(bus_control_init(&host, 256, 192, 16, 4096), BUS_REGION_OK, "init");
@@ -162,8 +160,7 @@ static void test_control_readonly_faults(void)
 static void test_control_corruption_refused(void)
 {
    bus_region_t create;
-   must_result(bus_region_create("ctl-bad", bus_control_bytes(), &create), BUS_REGION_OK,
-               "create");
+   must_result(bus_region_create("ctl-bad", bus_control_bytes(), &create), BUS_REGION_OK, "create");
    bus_region_t host;
    must_result(bus_region_map(create.fd, create.size, 1, &host), BUS_REGION_OK, "map");
    must_result(bus_control_init(&host, 256, 192, 16, 4096), BUS_REGION_OK, "init");
@@ -279,7 +276,7 @@ static void test_qpair_roundtrip(void)
    must(bus_ring_capacity(&qp.inbound) == cap, "inbound capacity");
    must(bus_ring_capacity(&qp.outbound) == cap, "outbound capacity");
    must(atomic_load_explicit(&qp.hdr->control_credits, memory_order_relaxed) ==
-           BUS_CONTROL_CREDITS_DEFAULT,
+            BUS_CONTROL_CREDITS_DEFAULT,
         "control-class reserve initialised");
 
    /* Both rings, driven independently with distinct payloads, so a defect in
@@ -316,14 +313,13 @@ static void test_qpair_roundtrip(void)
       uint32_t bad;
       bus_region_result_t want;
    } lies[] = {
-      {"bad magic", &qp.hdr->magic, 0, BUS_REGION_ERR_MAGIC},
-      {"bad slot_size", &qp.hdr->slot_size, 0, BUS_REGION_ERR_GEOMETRY},
-      {"bad capacity", &qp.hdr->capacity, 15, BUS_REGION_ERR_GEOMETRY},
-      {"moved inbound offset", &qp.hdr->inbound_off, 8, BUS_REGION_ERR_GEOMETRY},
-      {"moved outbound offset",
-       &qp.hdr->outbound_off,
-       atomic_load_explicit(&qp.hdr->outbound_off, memory_order_relaxed) + 64,
-       BUS_REGION_ERR_GEOMETRY},
+       {"bad magic", &qp.hdr->magic, 0, BUS_REGION_ERR_MAGIC},
+       {"bad slot_size", &qp.hdr->slot_size, 0, BUS_REGION_ERR_GEOMETRY},
+       {"bad capacity", &qp.hdr->capacity, 15, BUS_REGION_ERR_GEOMETRY},
+       {"moved inbound offset", &qp.hdr->inbound_off, 8, BUS_REGION_ERR_GEOMETRY},
+       {"moved outbound offset", &qp.hdr->outbound_off,
+        atomic_load_explicit(&qp.hdr->outbound_off, memory_order_relaxed) + 64,
+        BUS_REGION_ERR_GEOMETRY},
    };
    for (size_t i = 0; i < sizeof lies / sizeof lies[0]; i++)
    {

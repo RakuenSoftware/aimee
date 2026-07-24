@@ -60,7 +60,7 @@ static void attach(bus_host_t *h, uint32_t principal, client_t *c)
         "recv reply");
    must(bus_region_map(fds[0], bus_control_bytes(), 0, &c->control) == BUS_REGION_OK, "map ctl");
    must(bus_region_map(fds[1], bus_arena_region_bytes(c->reply.arena_size), 1, &c->arena) ==
-           BUS_REGION_OK,
+            BUS_REGION_OK,
         "map arena");
    must(bus_region_map(fds[2], bus_qpair_bytes(c->reply.slot_size, c->reply.queue_capacity), 1,
                        &c->qpair) == BUS_REGION_OK,
@@ -130,7 +130,8 @@ static uint32_t g_kind[512];
 static uint32_t g_n;
 static void tap(void *ctx, const bus_frame_t *f, const uint8_t *pl, uint32_t pn)
 {
-   (void)pl; (void)pn;
+   (void)pl;
+   (void)pn;
    (void)ctx;
    must(g_n < 512, "tap buffer");
    g_seq[g_n] = f->seq;
@@ -151,8 +152,7 @@ static uint32_t tap_count_kind(uint32_t kind)
 /* The inbound data limit is capacity - control_reserve. */
 static uint32_t data_limit(const client_t *c)
 {
-   uint32_t reserve =
-      atomic_load_explicit(&c->qp.hdr->control_credits, memory_order_relaxed);
+   uint32_t reserve = atomic_load_explicit(&c->qp.hdr->control_credits, memory_order_relaxed);
    return c->reply.queue_capacity - reserve;
 }
 

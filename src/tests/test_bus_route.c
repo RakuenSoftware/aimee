@@ -60,7 +60,7 @@ static void attach(bus_host_t *h, uint32_t principal, client_t *c)
    must(nfd == 3, "three fds");
    must(bus_region_map(fds[0], bus_control_bytes(), 0, &c->control) == BUS_REGION_OK, "map ctl");
    must(bus_region_map(fds[1], bus_arena_region_bytes(c->reply.arena_size), 1, &c->arena) ==
-           BUS_REGION_OK,
+            BUS_REGION_OK,
         "map arena");
    must(bus_region_map(fds[2], bus_qpair_bytes(c->reply.slot_size, c->reply.queue_capacity), 1,
                        &c->qpair) == BUS_REGION_OK,
@@ -135,7 +135,8 @@ static uint32_t g_tap_n;
 
 static void recording_tap(void *ctx, const bus_frame_t *f, const uint8_t *pl, uint32_t pn)
 {
-   (void)pl; (void)pn;
+   (void)pl;
+   (void)pn;
    (void)ctx;
    must(g_tap_n < 256, "tap buffer");
    g_tap_seq[g_tap_n] = f->seq;
@@ -214,7 +215,7 @@ static void test_request_reply(void)
    bus_frame_t f;
    uint8_t buf[8];
    must(recv_event(&server, &f, buf, sizeof buf) == 1 && f.correlation_id == corr &&
-           (f.hdr_flags & BUS_F_REQUEST),
+            (f.hdr_flags & BUS_F_REQUEST),
         "server got the request");
    must(recv_event(&bystander, &f, buf, sizeof buf) == 0, "bystander got nothing");
    must(recv_event(&req, &f, buf, sizeof buf) == 0, "requester got nothing yet");
@@ -223,7 +224,7 @@ static void test_request_reply(void)
    emit(&server, BUS_F_REPLY, KIND_A, corr, 4, 0x22);
    must(bus_host_pump(&h) == 1, "reply routed");
    must(recv_event(&req, &f, buf, sizeof buf) == 1 && f.correlation_id == corr &&
-           (f.hdr_flags & BUS_F_REPLY) && buf[0] == 0x22,
+            (f.hdr_flags & BUS_F_REPLY) && buf[0] == 0x22,
         "requester got the reply");
    must(recv_event(&server, &f, buf, sizeof buf) == 0, "server got nothing back");
    must(recv_event(&bystander, &f, buf, sizeof buf) == 0, "bystander still got nothing");
@@ -295,7 +296,7 @@ static void test_capability_absent(void)
 
    bus_frame_t f;
    must(recv_event(&req, &f, NULL, 0) == 1 && f.event_kind == BUS_KIND_CAPABILITY_ABSENT &&
-           f.correlation_id == corr && (f.hdr_flags & BUS_F_REPLY),
+            f.correlation_id == corr && (f.hdr_flags & BUS_F_REPLY),
         "requester got a synthesized capability_absent");
 
    detach(&req);
@@ -323,7 +324,7 @@ static void test_cancel(void)
    emit(&req, BUS_F_CANCEL, KIND_A, corr, 0, 0);
    must(bus_host_pump(&h) == 1, "cancel routed");
    must(recv_event(&server, &f, NULL, 0) == 1 && (f.hdr_flags & BUS_F_CANCEL) &&
-           f.correlation_id == corr,
+            f.correlation_id == corr,
         "server got the cancel");
 
    detach(&req);

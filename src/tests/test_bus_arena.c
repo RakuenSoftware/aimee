@@ -76,8 +76,7 @@ static void test_lifecycle(void)
    must(bus_arena_refcount(a, id) == 2, "publish transfers producer ref to 2 consumers");
 
    /* The producer's fill pointer is no longer valid after publish. */
-   must_result(bus_arena_fill_ptr(a, id, &w), BUS_ARENA_ERR_STATE,
-               "fill refused after publish");
+   must_result(bus_arena_fill_ptr(a, id, &w), BUS_ARENA_ERR_STATE, "fill refused after publish");
 
    /* Each consumer reads in place, gated on the generation. */
    const uint8_t *r2, *r3;

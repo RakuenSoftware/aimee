@@ -2424,6 +2424,15 @@ paths:
     post:
       summary: Append a hash-chained metric.snapshot row
       responses: { "200": { description: Snapshot result, content: { application/json: { schema: { type: object } } } } }
+  /audit/captures:
+    get:
+      summary: List the audit-on-bus capture files (recorded governed-action event streams) available for replay
+      responses: { "200": { description: Capture file list, content: { application/json: { schema: { type: object } } } } }
+  /audit/replay:
+    post:
+      summary: Replay one audit-on-bus capture file's governed-action rows as JSON (paged; observational)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Replay page, content: { application/json: { schema: { type: object } } } } }
   /agent/local:
     get:
       summary: List local agents

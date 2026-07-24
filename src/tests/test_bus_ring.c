@@ -67,15 +67,13 @@ static void test_geometry(void)
    /* Asserted by offset. The old form — total size divisible by the cache line
     * — was satisfiable with head at offset 32, so the false-sharing guarantee
     * it claimed to check was never actually checked. */
-   must(offsetof(bus_ring_shared_t, head) % BUS_RING_CACHELINE == 0,
-        "head begins a cache line");
+   must(offsetof(bus_ring_shared_t, head) % BUS_RING_CACHELINE == 0, "head begins a cache line");
    must(offsetof(bus_ring_shared_t, head) >= BUS_RING_CACHELINE,
         "head does not share the metadata line");
-   must(offsetof(bus_ring_shared_t, tail) >=
-           offsetof(bus_ring_shared_t, head) + BUS_RING_CACHELINE,
+   must(offsetof(bus_ring_shared_t, tail) >= offsetof(bus_ring_shared_t, head) + BUS_RING_CACHELINE,
         "tail does not share head's line");
    must(offsetof(bus_ring_shared_t, slots) >=
-           offsetof(bus_ring_shared_t, tail) + BUS_RING_CACHELINE,
+            offsetof(bus_ring_shared_t, tail) + BUS_RING_CACHELINE,
         "slots do not share tail's line");
 
    size_t need = bus_ring_bytes(64, 8);
@@ -115,14 +113,14 @@ static void test_attach_validation(void)
       _Atomic uint32_t *field;
       uint32_t bad;
    } lies[] = {
-      {"no magic", &s->magic, 0},
-      {"capacity not a power of two", &s->capacity, 7},
-      {"capacity above the maximum", &s->capacity, 1u << 21},
-      {"capacity outgrows the mapping", &s->capacity, 1024},
-      {"slot size zero", &s->slot_size, 0},
-      {"slot size above the maximum", &s->slot_size, 1u << 25},
-      {"mask disagrees with capacity", &s->mask, 0xffff},
-      {"slots offset moved", &s->slots_off, 8},
+       {"no magic", &s->magic, 0},
+       {"capacity not a power of two", &s->capacity, 7},
+       {"capacity above the maximum", &s->capacity, 1u << 21},
+       {"capacity outgrows the mapping", &s->capacity, 1024},
+       {"slot size zero", &s->slot_size, 0},
+       {"slot size above the maximum", &s->slot_size, 1u << 25},
+       {"mask disagrees with capacity", &s->mask, 0xffff},
+       {"slots offset moved", &s->slots_off, 8},
    };
 
    for (size_t i = 0; i < sizeof lies / sizeof lies[0]; i++)
@@ -150,8 +148,8 @@ static void test_attach_validation(void)
    must_result(bus_ring_attach(mem, need, &got), BUS_RING_OK, "attach to an exactly-full ring");
    atomic_store_explicit(&s->head, 0, memory_order_relaxed);
 
-   must_result(bus_ring_attach(mem, offsetof(bus_ring_shared_t, slots) - 1, &got),
-               BUS_RING_ERR_MEM, "attach to a buffer smaller than the header");
+   must_result(bus_ring_attach(mem, offsetof(bus_ring_shared_t, slots) - 1, &got), BUS_RING_ERR_MEM,
+               "attach to a buffer smaller than the header");
 
    free(mem);
    printf("  attach: rejects %zu ways a header can lie, accepts exactly-full\n",

@@ -92,13 +92,22 @@ static void must(int cond, const char *what)
  * something that was never actually checked. */
 typedef enum
 {
-   FLD_FLAGS, FLD_VER, FLD_KIND, FLD_PRINCIPAL, FLD_CORR, FLD_SEQ,
-   FLD_LTS, FLD_PREF, FLD_PLEN, FLD_SRC, FLD_DST, FLD_COUNT
+   FLD_FLAGS,
+   FLD_VER,
+   FLD_KIND,
+   FLD_PRINCIPAL,
+   FLD_CORR,
+   FLD_SEQ,
+   FLD_LTS,
+   FLD_PREF,
+   FLD_PLEN,
+   FLD_SRC,
+   FLD_DST,
+   FLD_COUNT
 } field_id_t;
 
 static const char *const FIELD_NAMES[FLD_COUNT] = {
-   "flags", "ver", "kind", "principal", "corr", "seq", "lts", "pref", "plen", "src", "dst"
-};
+    "flags", "ver", "kind", "principal", "corr", "seq", "lts", "pref", "plen", "src", "dst"};
 
 static unsigned long long parse_u(const char *name, const char *key, const char *text,
                                   unsigned long long limit)
@@ -227,14 +236,14 @@ typedef struct
 } required_shape_t;
 
 static const required_shape_t REQUIRED_SHAPES[] = {
-   {"notification, no payload", BUS_F_NOTIFICATION},
-   {"notification, inline", BUS_F_NOTIFICATION | BUS_F_INLINE},
-   {"notification, arena", BUS_F_NOTIFICATION | BUS_F_ARENA},
-   {"request", BUS_F_REQUEST | BUS_F_ARENA},
-   {"reply", BUS_F_REPLY | BUS_F_INLINE},
-   {"reply, no payload", BUS_F_REPLY},
-   {"cancel", BUS_F_CANCEL},
-   {"control class", BUS_F_NOTIFICATION | BUS_F_CONTROL | BUS_F_INLINE},
+    {"notification, no payload", BUS_F_NOTIFICATION},
+    {"notification, inline", BUS_F_NOTIFICATION | BUS_F_INLINE},
+    {"notification, arena", BUS_F_NOTIFICATION | BUS_F_ARENA},
+    {"request", BUS_F_REQUEST | BUS_F_ARENA},
+    {"reply", BUS_F_REPLY | BUS_F_INLINE},
+    {"reply, no payload", BUS_F_REPLY},
+    {"cancel", BUS_F_CANCEL},
+    {"control class", BUS_F_NOTIFICATION | BUS_F_CONTROL | BUS_F_INLINE},
 };
 #define REQUIRED_SHAPE_COUNT (sizeof REQUIRED_SHAPES / sizeof REQUIRED_SHAPES[0])
 
@@ -323,8 +332,8 @@ static size_t verify_vectors(void)
          hex_encode(enc, sizeof enc, enc_hex);
          if (strcmp(enc_hex, hex) != 0)
          {
-            fprintf(stderr, "vector '%s' drifted:\n  committed %s\n  encoded   %s\n", name,
-                    hex, enc_hex);
+            fprintf(stderr, "vector '%s' drifted:\n  committed %s\n  encoded   %s\n", name, hex,
+                    enc_hex);
             exit(1);
          }
 
@@ -346,8 +355,7 @@ static size_t verify_vectors(void)
          bus_frame_t chk;
          if (bus_wire_decode_checked(raw, rawn, roomy_slot, roomy_arena, &chk) != BUS_WIRE_OK)
          {
-            fprintf(stderr, "vector '%s': checked decode refused it under ample geometry\n",
-                    name);
+            fprintf(stderr, "vector '%s': checked decode refused it under ample geometry\n", name);
             exit(1);
          }
 
@@ -449,8 +457,7 @@ static void test_pattern_matrix(void)
          for (int control = 0; control <= 1; control++)
          {
             bus_frame_t f = base_frame();
-            f.hdr_flags = (uint16_t)(patterns[p] | placements[q] |
-                                     (control ? BUS_F_CONTROL : 0));
+            f.hdr_flags = (uint16_t)(patterns[p] | placements[q] | (control ? BUS_F_CONTROL : 0));
             if (patterns[p] != BUS_F_NOTIFICATION)
                f.correlation_id = 0xdeadbeefcafef00dull;
             if (placements[q] != 0)
@@ -491,8 +498,8 @@ static void test_pattern_matrix(void)
  * length rules "covered" while never testing them. */
 static void test_combination_matrix(void)
 {
-   const uint16_t patterns[] = {0, BUS_F_NOTIFICATION, BUS_F_REQUEST, BUS_F_REPLY, BUS_F_CANCEL,
-                                BUS_F_REQUEST | BUS_F_REPLY};
+   const uint16_t patterns[] = {0,           BUS_F_NOTIFICATION, BUS_F_REQUEST,
+                                BUS_F_REPLY, BUS_F_CANCEL,       BUS_F_REQUEST | BUS_F_REPLY};
    const uint16_t placements[] = {0, BUS_F_INLINE, BUS_F_ARENA, BUS_F_INLINE | BUS_F_ARENA};
    const uint32_t lens[] = {0, 64, BUS_WIRE_MAX_PAYLOAD, BUS_WIRE_MAX_PAYLOAD + 1};
    const uint64_t refs[] = {0, 0x40000};
@@ -507,8 +514,8 @@ static void test_combination_matrix(void)
                   for (int control = 0; control <= 1; control++)
                   {
                      bus_frame_t f = base_frame();
-                     f.hdr_flags = (uint16_t)(patterns[p] | placements[q] |
-                                              (control ? BUS_F_CONTROL : 0));
+                     f.hdr_flags =
+                         (uint16_t)(patterns[p] | placements[q] | (control ? BUS_F_CONTROL : 0));
                      f.payload_len = lens[l];
                      f.payload_ref = refs[rr];
                      f.correlation_id = corrs[c];
@@ -516,10 +523,10 @@ static void test_combination_matrix(void)
                      /* The contract, restated here rather than read back from
                       * the implementation. */
                      int one_pattern =
-                        (patterns[p] == BUS_F_NOTIFICATION || patterns[p] == BUS_F_REQUEST ||
-                         patterns[p] == BUS_F_REPLY || patterns[p] == BUS_F_CANCEL);
+                         (patterns[p] == BUS_F_NOTIFICATION || patterns[p] == BUS_F_REQUEST ||
+                          patterns[p] == BUS_F_REPLY || patterns[p] == BUS_F_CANCEL);
                      int one_placement =
-                        (placements[q] == BUS_F_INLINE || placements[q] == BUS_F_ARENA);
+                         (placements[q] == BUS_F_INLINE || placements[q] == BUS_F_ARENA);
 
                      int placement_ok, length_ok, ref_ok;
                      if (lens[l] > 0)
@@ -551,10 +558,8 @@ static void test_combination_matrix(void)
                         fprintf(stderr,
                                 "FAIL: flags=0x%04x plen=%u ref=0x%llx corr=0x%llx should be "
                                 "accepted, got %s\n",
-                                f.hdr_flags, f.payload_len,
-                                (unsigned long long)f.payload_ref,
-                                (unsigned long long)f.correlation_id,
-                                bus_wire_result_name(got));
+                                f.hdr_flags, f.payload_len, (unsigned long long)f.payload_ref,
+                                (unsigned long long)f.correlation_id, bus_wire_result_name(got));
                         abort();
                      }
                      if (!want_ok && got == BUS_WIRE_OK)
@@ -562,8 +567,7 @@ static void test_combination_matrix(void)
                         fprintf(stderr,
                                 "FAIL: flags=0x%04x plen=%u ref=0x%llx corr=0x%llx should be "
                                 "refused\n",
-                                f.hdr_flags, f.payload_len,
-                                (unsigned long long)f.payload_ref,
+                                f.hdr_flags, f.payload_len, (unsigned long long)f.payload_ref,
                                 (unsigned long long)f.correlation_id);
                         abort();
                      }
@@ -666,8 +670,7 @@ static void encode_unchecked(const bus_frame_t *f, uint8_t *out)
       out[48 + i] = (uint8_t)((f->payload_len >> (8 * i)) & 0xff);
 }
 
-static void expect_reject(const char *what, const uint8_t *buf, size_t n,
-                          bus_wire_result_t want)
+static void expect_reject(const char *what, const uint8_t *buf, size_t n, bus_wire_result_t want)
 {
    bus_frame_t out;
    memset(&out, 0xa5, sizeof out);
@@ -714,36 +717,33 @@ static void test_rejections(void)
       uint32_t plen;
       bus_wire_result_t want;
    } cases[] = {
-      /* Both sides of the supported version, and zero. A one-sided test would
-       * still pass if the validator were loosened to `>= BUS_WIRE_VERSION`. */
-      {"version above", BUS_F_NOTIFICATION, BUS_WIRE_VERSION + 1, 0, 0, 0,
-       BUS_WIRE_ERR_VERSION},
-      {"version below", BUS_F_NOTIFICATION, BUS_WIRE_VERSION - 1, 0, 0, 0,
-       BUS_WIRE_ERR_VERSION},
-      {"version zero", BUS_F_NOTIFICATION, 0, 0, 0, 0, BUS_WIRE_ERR_VERSION},
-      {"unknown flag bit", BUS_F_NOTIFICATION | 0x8000u, BUS_WIRE_VERSION, 0, 0, 0,
-       BUS_WIRE_ERR_FLAGS},
-      {"no pattern", 0, BUS_WIRE_VERSION, 0, 0, 0, BUS_WIRE_ERR_FLAGS},
-      {"two patterns", BUS_F_REQUEST | BUS_F_REPLY, BUS_WIRE_VERSION, 1, 0, 0,
-       BUS_WIRE_ERR_FLAGS},
-      {"payload without placement", BUS_F_NOTIFICATION, BUS_WIRE_VERSION, 0, 0, 32,
-       BUS_WIRE_ERR_FLAGS},
-      {"both placements", BUS_F_NOTIFICATION | BUS_F_INLINE | BUS_F_ARENA, BUS_WIRE_VERSION,
-       0, 0, 32, BUS_WIRE_ERR_FLAGS},
-      {"placement without payload", BUS_F_NOTIFICATION | BUS_F_INLINE, BUS_WIRE_VERSION, 0, 0,
-       0, BUS_WIRE_ERR_FLAGS},
-      {"ref without payload", BUS_F_NOTIFICATION, BUS_WIRE_VERSION, 0, 4096, 0,
-       BUS_WIRE_ERR_PAYLOAD_LEN},
-      {"oversize payload", BUS_F_NOTIFICATION | BUS_F_ARENA, BUS_WIRE_VERSION, 0, 0x40000,
-       BUS_WIRE_MAX_PAYLOAD + 1, BUS_WIRE_ERR_PAYLOAD_LEN},
-      {"notification with correlation", BUS_F_NOTIFICATION, BUS_WIRE_VERSION, 5, 0, 0,
-       BUS_WIRE_ERR_CORRELATION},
-      {"request without correlation", BUS_F_REQUEST, BUS_WIRE_VERSION, 0, 0, 0,
-       BUS_WIRE_ERR_CORRELATION},
-      {"reply without correlation", BUS_F_REPLY, BUS_WIRE_VERSION, 0, 0, 0,
-       BUS_WIRE_ERR_CORRELATION},
-      {"cancel without correlation", BUS_F_CANCEL, BUS_WIRE_VERSION, 0, 0, 0,
-       BUS_WIRE_ERR_CORRELATION},
+       /* Both sides of the supported version, and zero. A one-sided test would
+        * still pass if the validator were loosened to `>= BUS_WIRE_VERSION`. */
+       {"version above", BUS_F_NOTIFICATION, BUS_WIRE_VERSION + 1, 0, 0, 0, BUS_WIRE_ERR_VERSION},
+       {"version below", BUS_F_NOTIFICATION, BUS_WIRE_VERSION - 1, 0, 0, 0, BUS_WIRE_ERR_VERSION},
+       {"version zero", BUS_F_NOTIFICATION, 0, 0, 0, 0, BUS_WIRE_ERR_VERSION},
+       {"unknown flag bit", BUS_F_NOTIFICATION | 0x8000u, BUS_WIRE_VERSION, 0, 0, 0,
+        BUS_WIRE_ERR_FLAGS},
+       {"no pattern", 0, BUS_WIRE_VERSION, 0, 0, 0, BUS_WIRE_ERR_FLAGS},
+       {"two patterns", BUS_F_REQUEST | BUS_F_REPLY, BUS_WIRE_VERSION, 1, 0, 0, BUS_WIRE_ERR_FLAGS},
+       {"payload without placement", BUS_F_NOTIFICATION, BUS_WIRE_VERSION, 0, 0, 32,
+        BUS_WIRE_ERR_FLAGS},
+       {"both placements", BUS_F_NOTIFICATION | BUS_F_INLINE | BUS_F_ARENA, BUS_WIRE_VERSION, 0, 0,
+        32, BUS_WIRE_ERR_FLAGS},
+       {"placement without payload", BUS_F_NOTIFICATION | BUS_F_INLINE, BUS_WIRE_VERSION, 0, 0, 0,
+        BUS_WIRE_ERR_FLAGS},
+       {"ref without payload", BUS_F_NOTIFICATION, BUS_WIRE_VERSION, 0, 4096, 0,
+        BUS_WIRE_ERR_PAYLOAD_LEN},
+       {"oversize payload", BUS_F_NOTIFICATION | BUS_F_ARENA, BUS_WIRE_VERSION, 0, 0x40000,
+        BUS_WIRE_MAX_PAYLOAD + 1, BUS_WIRE_ERR_PAYLOAD_LEN},
+       {"notification with correlation", BUS_F_NOTIFICATION, BUS_WIRE_VERSION, 5, 0, 0,
+        BUS_WIRE_ERR_CORRELATION},
+       {"request without correlation", BUS_F_REQUEST, BUS_WIRE_VERSION, 0, 0, 0,
+        BUS_WIRE_ERR_CORRELATION},
+       {"reply without correlation", BUS_F_REPLY, BUS_WIRE_VERSION, 0, 0, 0,
+        BUS_WIRE_ERR_CORRELATION},
+       {"cancel without correlation", BUS_F_CANCEL, BUS_WIRE_VERSION, 0, 0, 0,
+        BUS_WIRE_ERR_CORRELATION},
    };
 
    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++)
