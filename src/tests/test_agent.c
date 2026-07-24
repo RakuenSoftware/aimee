@@ -72,6 +72,16 @@ void test_ir_parse_responses_text_only(void);
 void test_responses_parser_uses_output_text_done(void);
 void test_responses_parser_separates_message_items(void);
 
+/* Strong override of the weak delegation_active_id() (agent_tools_dispatch.c) so a
+ * test can simulate running inside a delegation. NULL => the trusted primary
+ * session. server_compute_mailbox.o (the real strong definition) is not linked
+ * into unit-test-agent, so this override is unambiguous. */
+static const char *g_test_delegation_id;
+const char *delegation_active_id(void)
+{
+   return g_test_delegation_id;
+}
+
 /* --- Expose tool functions for testing via redeclaration --- */
 char *tool_bash(const char *command, int timeout_ms);
 char *tool_read_file(const char *path, int offset, int limit, int raw);
@@ -1234,6 +1244,29 @@ static void test_tool_bash(void)
 
    result = tool_bash("yes x | head -c 65536", 5000);
    assert(result && strstr(result, "\"exit_code\":0") != NULL);
+   free(result);
+}
+
+/* Containment: a DELEGATE (untrusted model) must never run a shell UNSANDBOXED on
+ * the aimee-server host — that host is uid 0 with the docker socket mounted, so an
+ * unsandboxed command is a host-root escalation. The test config's sandbox mode is
+ * OFF (default), so tool_bash would otherwise fork on the host; with a delegation
+ * active it must refuse instead. The primary session (no delegation) still runs. */
+static void test_tool_bash_delegate_unsandboxed_refused(void)
+{
+   g_test_delegation_id = "test-deleg";
+   char *result = tool_bash("echo escalated", 5000);
+   assert(result != NULL);
+   assert(strstr(result, "refused") != NULL);       /* fail-closed */
+   assert(strstr(result, "escalated") == NULL);      /* the command did NOT run */
+   assert(strstr(result, "\"exit_code\":-1") != NULL);
+   free(result);
+
+   /* The trusted primary (operator) session still runs on the host. */
+   g_test_delegation_id = NULL;
+   result = tool_bash("echo primary-ok", 5000);
+   assert(result != NULL);
+   assert(strstr(result, "primary-ok") != NULL);
    free(result);
 }
 
@@ -3281,6 +3314,7 @@ int main(void)
    test_responses_parser_separates_message_items();
    test_agent_is_exec_role();
    test_tool_bash();
+   test_tool_bash_delegate_unsandboxed_refused();
    test_detached_skips_worktree_rewrite();
    test_tool_read_file();
    test_tool_write_file();
