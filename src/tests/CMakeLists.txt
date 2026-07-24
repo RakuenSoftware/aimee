@@ -145,6 +145,9 @@ aimee_add_test(test_bus_region test_bus_region.c ../modules/bus/bus_region.c ../
 target_include_directories(test_bus_region PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
 aimee_add_test(test_bus_arena test_bus_arena.c ../modules/bus/bus_arena.c)
 target_include_directories(test_bus_arena PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+aimee_add_test(test_bus_host test_bus_host.c ../modules/bus/bus_host.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c)
+target_include_directories(test_bus_host PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+
 
 
 
