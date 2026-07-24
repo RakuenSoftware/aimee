@@ -136,6 +136,25 @@ static size_t dump_witness_tables(void *conn, uint8_t *out, size_t cap)
    return n;
 }
 
+/* Run a scalar count query with one text parameter bound at ?1. Returns the count,
+ * or -1 on error. */
+static int64_t count_query(void *conn, const char *sql, const char *arg)
+{
+   char err[256];
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof err);
+   if (!st || (arg && aimee_pg_bind_text(st, "?1", arg) != 0))
+   {
+      if (st)
+         aimee_pg_finalize(st);
+      return -1;
+   }
+   int64_t v = -1;
+   if (aimee_pg_step(st, err, sizeof err) == AIMEE_PG_ROW)
+      v = aimee_pg_column_int64(st, 0);
+   aimee_pg_finalize(st);
+   return v;
+}
+
 int main(void)
 {
    const char *url = getenv("AIMEE_TEST_PG_URL");
@@ -213,6 +232,12 @@ int main(void)
    static uint8_t dump[1 << 20];
    size_t dn = dump_witness_tables(conn, dump, sizeof dump);
    MUST(dn > 0, "witness table dump was empty");
+   /* A truncated dump would let a secret hide past the cutoff and pass vacuously.
+    * The canary works at small scale by design; if the dump ever fills the buffer,
+    * fail loudly rather than scanning only a prefix. */
+   MUST(dn < sizeof dump, "witness table dump was truncated at %zu bytes; the secret scan would "
+                          "only cover a prefix",
+        sizeof dump);
    char kek_hex[VAULT_KEK_LEN * 2 + 1], seed_hex[32 * 2 + 1];
    for (int i = 0; i < VAULT_KEK_LEN; i++)
       snprintf(kek_hex + i * 2, 3, "%02x", kek[i]);
@@ -226,15 +251,30 @@ int main(void)
         "the witness signing seed appears (hex) in a witness table");
    MUST(!contains(dump, dn, seed, 32), "the witness signing seed appears (raw) in a witness table");
 
-   /* 3. provider_cred is a passed-through stable identifier: the sentinel must
-    *    survive verbatim in the emitted record. If it were replaced by a credential
-    *    handle or a wrapped-key reference, it would not appear. */
+   /* 3. provider_cred is a passed-through stable identifier. The sentinel must
+    *    appear in the emitted record (proving it is emitted at all)... */
    MUST(contains(g_stream, g_len, (const uint8_t *)SENTINEL_CRED, strlen(SENTINEL_CRED)),
         "provider_cred sentinel did not survive round-trip in the emitted stream");
-   /* And in storage: a storage-side transformation (hash/encrypt/handle) would not
-    * be caught by the emit-path check alone if emission re-encoded from elsewhere. */
-   MUST(contains(dump, dn, (const uint8_t *)SENTINEL_CRED, strlen(SENTINEL_CRED)),
-        "provider_cred sentinel is not stored verbatim; storage is not a stable identifier");
+   /* ...and, in storage, it must be EXACTLY equal, not merely a substring. A
+    * substring match would still pass if the producer wrapped the value
+    * ("vault:<sentinel>") or stored a digest that happened to contain it. Exact SQL
+    * equality proves no prefix/suffix/transform: all five canary rows equal the
+    * sentinel, and none merely contains it. */
+   int64_t exact = count_query(conn,
+                               "SELECT count(*) FROM kb_vault_witness_log WHERE tenant='!kb' AND "
+                               "provider='!audit' AND source_id LIKE 'canary-%' AND provider_cred=?1",
+                               SENTINEL_CRED);
+   int64_t wrapped =
+       count_query(conn,
+                   "SELECT count(*) FROM kb_vault_witness_log WHERE tenant='!kb' AND "
+                   "provider='!audit' AND source_id LIKE 'canary-%' AND provider_cred<>?1 AND "
+                   "position(?1 in provider_cred) > 0",
+                   SENTINEL_CRED);
+   MUST(exact == 5, "provider_cred is not stored verbatim: %lld of 5 canary rows equal the sentinel",
+        (long long)exact);
+   MUST(wrapped == 0, "provider_cred was wrapped/transformed (contains but does not equal the "
+                      "sentinel) in %lld rows",
+        (long long)wrapped);
 
    OPENSSL_cleanse(kek, sizeof kek);
    OPENSSL_cleanse(seed, sizeof seed);

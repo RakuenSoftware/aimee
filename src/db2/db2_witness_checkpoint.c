@@ -125,12 +125,16 @@ static int previous_digest(void *conn, int *has_pred, uint8_t pred[32])
    /* aimee_pg_column_blob caches ONE blob per statement and frees the previous on
     * the next call, so every bytea must be copied out BEFORE reading the next one. */
    int ok = 1;
+   /* aimee_pg_column_text also returns per-statement storage; copy the boolean out
+    * into a local immediately so a future column-read reordering cannot invalidate
+    * the pointer before we consume it. */
+   const char *hp = aimee_pg_column_text(st, 1);
+   int hp_present = (hp != NULL);
+   prev.has_predecessor = (hp && hp[0] == 't');
    const void *b = aimee_pg_column_blob(st, 0);
    ok = ok && b && aimee_pg_column_bytes(st, 0) == 32;
    if (ok)
       memcpy(prev.root, b, 32);
-   const char *hp = aimee_pg_column_text(st, 1);
-   prev.has_predecessor = (hp && hp[0] == 't');
    b = aimee_pg_column_blob(st, 2);
    ok = ok && b && aimee_pg_column_bytes(st, 2) == 32;
    if (ok)
@@ -147,7 +151,7 @@ static int previous_digest(void *conn, int *has_pred, uint8_t pred[32])
    prev.sig_alg = (uint16_t)aimee_pg_column_int64(st, 6);
    prev.sig_version = (uint16_t)aimee_pg_column_int64(st, 7);
    const char *ca = aimee_pg_column_text(st, 8);
-   ok = ok && hp && ca;
+   ok = ok && hp_present && ca;
    if (ok)
       snprintf(prev.created_at, sizeof prev.created_at, "%s", ca);
    prev.seq = (uint64_t)aimee_pg_column_int64(st, 9); /* seq, from the same row */

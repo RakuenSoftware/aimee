@@ -285,6 +285,11 @@ int main(void)
    vault_witness_offline_report_t rep2;
    MUST(vault_witness_offline_verify(g_stream, g_len, &anchor, 1, &rep2) == 0,
         "offline verification did not run after boundary 10");
+   /* The collapse-vs-fork dedup contract this relies on is itself unit-tested with
+    * negative controls in test_vault_witness_offline.c (test_duplicate_checkpoint_
+    * tolerated / test_conflicting_checkpoint_is_fork): byte-identical same-seq ->
+    * duplicate, different same-seq -> conflict. Here we assert the recovered stream
+    * exercises the duplicate side, not the conflict side. */
    MUST(rep2.checkpoints_conflict == 0,
         "the re-emitted checkpoint was mistaken for a fork (conflict=%zu)",
         rep2.checkpoints_conflict);

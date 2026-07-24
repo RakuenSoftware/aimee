@@ -151,18 +151,28 @@ END $$;
 --    conflict (23505) on (tenant, provider, shard_seq).
 -- ---------------------------------------------------------------------------
 
--- Step 1: the pre-plant must SUCCEED silently. If it raised, the rest of the test
--- would be meaningless, so its success is asserted separately (in its own committed
--- statement, so it survives the append's rollback below).
+-- The whole of §D runs inside a transaction that is ROLLED BACK, so the
+-- deliberately non-canonical pre-planted row NEVER persists. The witness log is
+-- append-only (no DELETE), so a rollback is the only way to leave the shard exactly
+-- as §C left it — verified below. The pre-plant is visible to the append within the
+-- transaction (that is what makes them collide); plpgsql's caught-exception
+-- savepoint unwinds only the append's own partial work, leaving the pre-plant in
+-- place for the assertions, and the final ROLLBACK then removes everything.
+BEGIN;
 DO $$
 DECLARE v_head BIGINT; v_next BIGINT; v_pred BYTEA;
+        v_before BIGINT; v_failed BOOLEAN := false; v_msg TEXT := ''; v_state TEXT := '';
 BEGIN
   SELECT seq, head_hash INTO v_head, v_pred FROM public.kb_vault_witness_shard
     WHERE tenant='!kb' AND provider='!audit';
-  IF v_head IS NULL THEN
-    RAISE EXCEPTION 'ATOMICITY FAIL: no !kb/!audit shard to target (section C must run first)';
+  IF v_head IS NULL OR v_head < 1 THEN
+    RAISE EXCEPTION 'ATOMICITY FAIL: expected a non-empty !kb/!audit shard (section C must run first), head=%', v_head;
   END IF;
   v_next := v_head + 1;
+
+  -- Pre-plant a row at the exact shard_seq the next append will target. The log is
+  -- append-only but a plain INSERT is allowed. record_hash is a deliberate
+  -- placeholder; it does not need to be canonical because this row is rolled back.
   INSERT INTO public.kb_vault_witness_log(tenant,provider,shard_seq,source_kind,source_id,
     source_hash,has_source_pred,source_pred_hash,witness_pred_hash,record_hash,event_ts,
     seal_epoch,fencing_token)
@@ -170,12 +180,8 @@ BEGIN
     decode(repeat('00',32),'hex'),v_pred,decode(repeat('ce',32),'hex'),
     '2026-07-23T00:00:00Z',1,1);
   RAISE NOTICE 'ATOMICITY setup: pre-planted a conflicting witness row at shard_seq %', v_next;
-END $$;
 
--- Step 2: the append is genuinely reached and fails ONLY on its own witness INSERT.
-DO $$
-DECLARE v_before BIGINT; v_failed BOOLEAN := false; v_msg TEXT := ''; v_state TEXT := '';
-BEGIN
+  -- The append is genuinely reached and must fail ONLY on its own witness INSERT.
   SELECT count(*) INTO v_before FROM public.kb_audit_event;
   BEGIN
     PERFORM public.kb_audit_worm_append('kb','uid:0','vault.key_use','anthropic:s3','allow','');
@@ -185,7 +191,7 @@ BEGIN
     v_state := SQLSTATE;
   END;
   -- The load-bearing assertion: the append FAILED rather than committing an audit
-  -- event with no evidence. If the witness call were ever unwired from this path,
+  -- event with no evidence. If the witness INSERT were ever unwired from this path,
   -- the pre-planted conflict would be irrelevant and the append would succeed.
   IF NOT v_failed THEN
     RAISE EXCEPTION 'ATOMICITY FAIL: the append succeeded despite a pre-planted witness conflict — '
@@ -202,6 +208,19 @@ BEGIN
     RAISE EXCEPTION 'ATOMICITY FAIL: audit event committed even though its witness append failed';
   END IF;
   RAISE NOTICE 'ATOMICITY OK: a failed witness append (PK conflict) aborts its source event';
+END $$;
+ROLLBACK;
+
+-- Prove the rollback left the shard exactly as it was: it must still verify, and
+-- the pre-planted row must be gone (no self-poisoning of the DB for later callers).
+DO $$
+BEGIN
+  PERFORM public.org_vault_witness_verify_shard('!kb','!audit');
+  IF EXISTS(SELECT 1 FROM public.kb_vault_witness_log
+              WHERE tenant='!kb' AND provider='!audit' AND source_id='preplant') THEN
+    RAISE EXCEPTION 'ATOMICITY FAIL: the pre-planted row persisted; §D poisoned the shard';
+  END IF;
+  RAISE NOTICE 'ATOMICITY OK: §D left the shard clean and verifying';
 END $$;
 
 DO $$ BEGIN RAISE NOTICE 'p7_witness_atomicity_pg_test: all checks passed'; END $$;

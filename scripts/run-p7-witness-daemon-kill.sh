@@ -82,17 +82,22 @@ echo "run 1: cadence produced a checkpoint and emitted $n1 evidence frames, then
 
 echo "== run 2: restart after the hard kill =="
 launch "$WORK/run2.err" "$WORK/run2.out"
-sleep 3
-grep -q "HARNESS STOPPED" "$WORK/run2.err" 2>/dev/null && true
+# Poll for the restart to actually emit — do NOT rely on a fixed sleep being longer
+# than the cadence period. The restart must RECOVER and emit, not merely come up:
+# after a hard kill the cursor may be behind (re-emission) and the still-running
+# cadence produces new checkpoints, so a healthy restart emits at least one frame.
+# Zero would mean the post-kill cadence produced but the sink never delivered — a
+# silent failure the clean-startup check alone would miss.
+recovered=""
+for _ in $(seq 1 60); do
+  if grep -q "kb.witness.evidence" "$WORK/run2.err" 2>/dev/null; then recovered=1; break; fi
+  kill -0 "$PID" 2>/dev/null || break
+  sleep 0.25
+done
 kill -TERM "$PID"; wait "$PID" 2>/dev/null || true; PID=""
 grep -q "HARNESS STOPPED" "$WORK/run2.out" || { echo "FAIL: restart did not come up and stop cleanly"; sed -n '1,20p' "$WORK/run2.err"; exit 1; }
 n2=$(grep -c "kb.witness.evidence" "$WORK/run2.err" || true)
-# The restart must actually RECOVER and emit, not merely come up: after a hard kill
-# the cursor may be behind (re-emission) and the still-running cadence produces new
-# checkpoints, so a healthy restart emits at least one frame. Zero here would mean
-# the post-kill cadence produced but the sink never delivered — a silent failure the
-# clean-startup check alone would miss.
-[ "${n2:-0}" -ge 1 ] || { echo "FAIL: restart came up but emitted no evidence (silent recovery failure)"; exit 1; }
+[ -n "$recovered" ] && [ "${n2:-0}" -ge 1 ] || { echo "FAIL: restart came up but emitted no evidence (silent recovery failure)"; exit 1; }
 echo "run 2: restarted and recovered, emitted $n2 evidence frames"
 
 echo "== rebuild the retained stream from the REAL emitted log lines =="
