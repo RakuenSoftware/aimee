@@ -1,0 +1,23 @@
+{
+  "description": "Event-bus performance budget baseline (D4 / shared invariant 15). The dispatch-overhead ceiling is a merge gate: a slice may not land while scripts/check_bus_perf_gate.sh is red. Changing the ceiling is a reviewed change to this file, so 'within budget' always names a real, checkable number. The memory round-trip rows are deliberately pending: they can only be measured against a pre-migration baseline in the memory-migration slice (delivery step 3) and must not be fabricated here.",
+  "metrics": {
+    "dispatch_overhead_ns": {
+      "description": "Per-event bus dispatch: host enqueue (a producer writing its outbound ring) through client dequeue (a subscriber reading its inbound ring), excluding module work on the payload. Median over batched samples from src/tests/bus_bench.c.",
+      "ceiling_ns": 2000,
+      "observed_ns": 134,
+      "observed_note": "reference dev box, 16-byte inline payload; the ceiling carries ~15x headroom so CI variance does not flake the gate while a gross regression (e.g. a per-event syscall) still trips it."
+    },
+    "memory_roundtrip_p50_ns": {
+      "status": "pending",
+      "reason": "the module->memory round trip can only be measured against a pre-migration baseline, which exists only in the memory-migration slice (delivery step 3). Recording a number here would be fabricating one."
+    },
+    "memory_roundtrip_p99_ns": {
+      "status": "pending",
+      "reason": "see memory_roundtrip_p50_ns."
+    },
+    "max_regression_factor": {
+      "value": 2.0,
+      "description": "the maximum factor the memory round trip may regress against its pre-migration baseline once that baseline exists. Enforced by the memory-migration slice, not this one."
+    }
+  }
+}
