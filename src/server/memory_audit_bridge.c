@@ -8,7 +8,7 @@
 #include <stdio.h>
 
 #include <aimee/audit/audit_action.h> /* audit_args_hash, AUDIT_ARGS_HASH_LEN */
-#include "kb_client.h"    /* kb_client_set_memory_audit_hook */
+#include "kb_client.h"                /* kb_client_set_memory_audit_hook */
 #include <aimee/audit/obs_bus.h>      /* obs_bus_emit, obs_bus_key_fingerprint */
 
 /* kb_client_memory_audit_hook_fn: publish one memory-mutation audit row over the

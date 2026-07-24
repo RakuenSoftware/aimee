@@ -6,8 +6,8 @@
 
 #include <stdio.h>
 
-#include <aimee/audit/audit_action.h>  /* audit_args_hash, AUDIT_ARGS_HASH_LEN */
-#include <aimee/audit/obs_bus.h>       /* obs_bus_emit */
+#include <aimee/audit/audit_action.h> /* audit_args_hash, AUDIT_ARGS_HASH_LEN */
+#include <aimee/audit/obs_bus.h>      /* obs_bus_emit */
 #include "vault_service.h" /* vault_audit_hook_fn, vault_status_t/_str, attested_transport_t */
 
 /* Short, stable label for the attestation behind the access (the audit row's

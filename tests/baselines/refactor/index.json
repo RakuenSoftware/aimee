@@ -15,11 +15,11 @@
         },
         {
           "path": "src/kb/kb_main.c",
-          "sha256": "8ca4153810554769178791c2069d98c1250d9b144b11bee92921374c2a08bfd6"
+          "sha256": "dc5cdc9712d8e0c416fa6f454d4152fd47e49ba6eb66581f8bc172fa63a97742"
         },
         {
           "path": "src/server/server_main.c",
-          "sha256": "5e9d994dec619c7e551df737a1b40a3d3079550c37cb9a9ee582f2287a24a4af"
+          "sha256": "fa9f8346f4d6a4221720aa3e7c36d460213c598e2a56bd6cc5d8e98d5b89b017"
         }
       ]
     },
@@ -103,7 +103,7 @@
         },
         {
           "path": "Dockerfile.server",
-          "sha256": "b5b2727b838c7917b3778893ac5d4c563fa53c75ef623928a60a4816cc841ad4"
+          "sha256": "060491b37eb95b6d9e90cdc67a421d842fd137a9568c7c218ed156ec1b161b65"
         },
         {
           "path": "Dockerfile.status-authority",
@@ -327,7 +327,7 @@
         },
         {
           "path": "src/headers/cli_session.h",
-          "sha256": "a79f87102430e8a00870fb30bace2101eb0535ffd1a5bd39373f9ef5ed918c4e"
+          "sha256": "d27834e50a6b6dd64dfb014aa7b37cb76d72a14eaeb76dcd7449f47d1d2533b7"
         },
         {
           "path": "src/headers/cli_session_pty.h",
@@ -827,7 +827,7 @@
         },
         {
           "path": "src/headers/memory.h",
-          "sha256": "8d333933fbb5b0adec87211ea63af2fa008e4db6ee430cfcff47d207dfc25eb9"
+          "sha256": "a5589547a933cc7a38ffb5dbfd6eb99998f963089655c7e3a878438a5397a2b9"
         },
         {
           "path": "src/headers/middleware.h",
@@ -999,7 +999,7 @@
         },
         {
           "path": "src/headers/sandbox.h",
-          "sha256": "5b34310264a0851f757604ea8e40fa230198a7645a153d460ff2a7608fb8c318"
+          "sha256": "3b67469ed83d214c253cb13a53079458e5fff8ea0ac77dc5762b016071ad5d8d"
         },
         {
           "path": "src/headers/script_rpc.h",
@@ -1246,16 +1246,12 @@
           "sha256": "68eb43eb9f0205d579368382bdf9289918f137e5e9e75034fd3a26880c9c5d72"
         },
         {
-          "path": "src/modules/audit/include/aimee/audit/audit_bus.h",
-          "sha256": "fe07ab908f5b787f895e71c28d1701ff274834bf3cd37503ac7a233046670a4a"
-        },
-        {
           "path": "src/modules/audit/include/aimee/audit/audit_ledger.h",
           "sha256": "68ecfb181bd20715a3cea34f2b773c9bac15198a6439228e16c71776dc4cd513"
         },
         {
           "path": "src/modules/audit/include/aimee/audit/audit_replay.h",
-          "sha256": "c0b023eb00beecbc36120e08195398dff2520f427988a7dad5f7cfb0e5066ef2"
+          "sha256": "91996c073a3f2cfafd4d5e8823086426a21d7103b5c04c925860c22867ca79f4"
         },
         {
           "path": "src/modules/audit/include/aimee/audit/audit_worm.h",
@@ -1264,6 +1260,10 @@
         {
           "path": "src/modules/audit/include/aimee/audit/audit_worm_chain.h",
           "sha256": "b77147e58a921764cb924a2393290d1ba49afe29d5f871791036599327b8fdf2"
+        },
+        {
+          "path": "src/modules/audit/include/aimee/audit/obs_bus.h",
+          "sha256": "24e9295885cc6961dbc69eb7eaa5eb2c54234ef23772f3d70289a59cdf7d9738"
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/aimee_ir_rescue.h",
@@ -1420,7 +1420,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "e48d0715b9affbaaa3337e10945be7f559e5f0f7dfe1b2237245b9924b174ec5",
+      "sha256": "23a8ac033ba0a05abfcce2b9af2bb744d3946ffcad4c790d800cd7d4ecbe24d9",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

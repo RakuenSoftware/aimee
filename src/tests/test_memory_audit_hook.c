@@ -14,7 +14,7 @@
 #include "kb/kb_memory_audit_bridge.h"
 #include "log.h" /* audit_log_open */
 #include "memory.h"
-#include "modules/audit/obs_bus.h"
+#include <aimee/audit/obs_bus.h>
 
 extern struct cJSON *audit_ledger_read(const char *from_ts, const char *to_ts);
 
