@@ -2709,6 +2709,25 @@ $(TESTPREFIX)/unit-test-bus-memory-upsert: $(OBJDIR)/tests/test_bus_memory_upser
 unit-test-bus-memory-upsert: $(TESTPREFIX)/unit-test-bus-memory-upsert
 	$<
 
+# A second, distinct module over the bus: the real config_autonomy_lookup served
+# as a request/reply and checked against a direct call (proves the RPC pattern is
+# not memory-specific). Reuses BUS_MEM_OBJS for config + its deps. Test binary only.
+$(OBJDIR)/tests/test_bus_config_autonomy.o: C_FLAGS += -Imodules/bus
+$(TESTPREFIX)/unit-test-bus-config-autonomy: $(OBJDIR)/tests/test_bus_config_autonomy.o \
+                                             $(OBJDIR)/modules/bus/bus_client.o \
+                                             $(OBJDIR)/modules/bus/bus_host.o \
+                                             $(OBJDIR)/modules/bus/bus_route.o \
+                                             $(OBJDIR)/modules/bus/bus_region.o \
+                                             $(OBJDIR)/modules/bus/bus_ring.o \
+                                             $(OBJDIR)/modules/bus/bus_arena.o \
+                                             $(OBJDIR)/modules/bus/bus_wire.o \
+                                             $(BUS_MEM_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+
+.PHONY: unit-test-bus-config-autonomy
+unit-test-bus-config-autonomy: $(TESTPREFIX)/unit-test-bus-config-autonomy
+	$<
+
 .PHONY: unit-test-bus-capture
 unit-test-bus-capture: $(TESTPREFIX)/unit-test-bus-capture
 	$<

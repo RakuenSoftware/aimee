@@ -177,6 +177,12 @@ aimee_add_test(test_bus_memory_upsert test_bus_memory_upsert.c ../modules/bus/bu
 target_include_directories(test_bus_memory_upsert PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
 target_link_libraries(test_bus_memory_upsert PRIVATE Threads::Threads)
 
+# A second, distinct module over the bus: real config_autonomy_lookup vs a direct
+# call, incl. a live env-override case. Config deps come from aimee-core. D7-clean.
+aimee_add_test(test_bus_config_autonomy test_bus_config_autonomy.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c)
+target_include_directories(test_bus_config_autonomy PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+target_link_libraries(test_bus_config_autonomy PRIVATE Threads::Threads)
+
 
 
 
