@@ -46,8 +46,8 @@ static void attach(bus_host_t *h, uint32_t principal, client_t *c)
    bus_attach_request_t req;
    memset(&req, 0, sizeof req);
    req.magic = BUS_ATTACH_REQ_MAGIC;
-   req.wire_version_min = 1;
-   req.wire_version_max = 1;
+   req.wire_version_min = BUS_WIRE_VERSION;
+   req.wire_version_max = BUS_WIRE_VERSION;
    req.principal_ref = principal;
    must(bus_fd_send(sv[0], &req, sizeof req, NULL, 0) == 0, "send request");
    must(bus_host_serve_attach(h, sv[1]) == BUS_HOST_OK, "admitted");

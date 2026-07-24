@@ -27,8 +27,15 @@
 
 /* Encoding version, negotiated at attach. Distinct from the region
  * layout_version (D4): this answers "can I decode this frame", not "can I map
- * this region". */
-#define BUS_WIRE_VERSION 1
+ * this region".
+ *
+ * v2 (arena-payload routing): claims the formerly-reserved trailing 4 bytes as an
+ * explicit `generation` field, and defines an ARENA frame's `payload_ref` to be
+ * the lease id (not an arena offset — the offset is the lease table's business,
+ * retrieved via bus_arena_read_ptr(lease_id, generation)). HDR_LEN is unchanged;
+ * a NON-arena v2 frame is byte-identical to v1 (generation is 0, the reserved
+ * bytes were already 0), so only arena-frame vectors change. */
+#define BUS_WIRE_VERSION 2
 
 /* Frozen by the vectors. Every frame is exactly this many bytes. */
 #define BUS_WIRE_HDR_LEN 64
@@ -40,7 +47,7 @@
 
 /* hdr_flags. Placement and pattern are separate axes; both are validated. */
 #define BUS_F_INLINE       0x0001u /* payload_ref is an in-slot offset */
-#define BUS_F_ARENA        0x0002u /* payload_ref is an arena offset */
+#define BUS_F_ARENA        0x0002u /* payload_ref is the arena lease id (v2); generation gates it */
 #define BUS_F_NOTIFICATION 0x0004u /* one-way; correlation_id is 0 */
 #define BUS_F_REQUEST      0x0008u /* correlated; expects a reply */
 #define BUS_F_REPLY        0x0010u /* correlated; answers a request */
@@ -48,22 +55,21 @@
 #define BUS_F_CONTROL      0x0040u /* control-class (D6): never shed, reserved credit */
 
 #define BUS_F_PLACEMENT_MASK (BUS_F_INLINE | BUS_F_ARENA)
-#define BUS_F_PATTERN_MASK                                                                         \
-   (BUS_F_NOTIFICATION | BUS_F_REQUEST | BUS_F_REPLY | BUS_F_CANCEL)
-#define BUS_F_KNOWN_MASK (BUS_F_PLACEMENT_MASK | BUS_F_PATTERN_MASK | BUS_F_CONTROL)
+#define BUS_F_PATTERN_MASK   (BUS_F_NOTIFICATION | BUS_F_REQUEST | BUS_F_REPLY | BUS_F_CANCEL)
+#define BUS_F_KNOWN_MASK     (BUS_F_PLACEMENT_MASK | BUS_F_PATTERN_MASK | BUS_F_CONTROL)
 
 /* Reserved event kinds. Kinds below BUS_KIND_MODULE_BASE are the bus's own;
  * the event-contract schema allocates everything at or above it. Keeping the
  * bus's own traffic in the same frame shape is deliberate: an overflow notice
  * is an ordinary seq-stamped event (D6), not a side channel. */
-#define BUS_KIND_ATTACH_REQUEST   1u
-#define BUS_KIND_ATTACH_REPLY     2u
-#define BUS_KIND_ERROR            3u
+#define BUS_KIND_ATTACH_REQUEST    1u
+#define BUS_KIND_ATTACH_REPLY      2u
+#define BUS_KIND_ERROR             3u
 #define BUS_KIND_CAPABILITY_ABSENT 4u
-#define BUS_KIND_OVERFLOW         5u
-#define BUS_KIND_PRODUCER_REAPED  6u
-#define BUS_KIND_EPOCH_CHANGE     7u
-#define BUS_KIND_MODULE_BASE      256u
+#define BUS_KIND_OVERFLOW          5u
+#define BUS_KIND_PRODUCER_REAPED   6u
+#define BUS_KIND_EPOCH_CHANGE      7u
+#define BUS_KIND_MODULE_BASE       256u
 
 /* Decoded frame. Field order here follows the wire layout so the two read
  * together; the encoder writes explicit little-endian bytes, so this struct's
@@ -77,10 +83,11 @@ typedef struct
    uint64_t correlation_id;
    uint64_t seq;         /* host-assigned; 0 until the host stamps it */
    uint64_t logical_ts;  /* ordering across sources without wall-clock trust */
-   uint64_t payload_ref; /* in-slot or arena offset, per the placement flag */
+   uint64_t payload_ref; /* INLINE: in-slot offset. ARENA (v2): the lease id. */
    uint32_t payload_len;
    uint32_t src_handle; /* set by the client */
    uint32_t dst_handle; /* set by the host on routing */
+   uint32_t generation; /* v2: ARENA lease generation (0 otherwise) — gates read/release */
 } bus_frame_t;
 
 typedef enum
