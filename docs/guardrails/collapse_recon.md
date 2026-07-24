@@ -17,13 +17,24 @@ line region. Where the README header in a file already narrates the seam
 (the canonical-IR headers each open with the protocol-neutral pivot
 contract), the header docstring itself is the second citation.
 
-## 1. The single typed relay surface (one binding decision)
+---
 
-### 1.1 Verified types (file:line)
+## 1. The binding relay decision (single, unambiguous)
+
+> **BINDING DECISION — PATHS DIVERGE. Phase 2 is split per handler/relay.**
+>
+> The verified typed relay (`aimee_delta_t` at `src/headers/aimee_ir.h:177`)
+> is reachable **only** from the IR-enabled `/v1/messages` branch today.
+> Responses, Chat, Webchat, Delegate, and Roundtable paths do NOT converge
+> on that single typed relay. They will not converge until each missing
+> decoder / renderer / route trace is implemented and verified. Phase 2 must
+> therefore be split per handler. There is no third option.
+
+### 1.1 Verified types (file:line) — the typed relay exists, but only one path reaches it
 
 | Artifact | Verified at |
 | --- | --- |
-| `aimee_delta_t` (struct) | `src/headers/aimee_ir.h:177` (preceding comment block at :172, definition at :177) |
+| `aimee_delta_t` (struct) | `src/headers/aimee_ir.h:177` (definition; preceding comment at :172) |
 | `aimee_delta_type_t` (enum) | `src/headers/aimee_ir.h:167` |
 | Enum members actually present | `src/headers/aimee_ir.h:168-174`: `AIMEE_DELTA_TURN_START`, `AIMEE_DELTA_BLOCK_START`, `AIMEE_DELTA_BLOCK_DELTA`, `AIMEE_DELTA_BLOCK_STOP`, `AIMEE_DELTA_TURN_STOP`, `AIMEE_DELTA_ERROR` |
 | `aimee_block_type_t` (enum) | `src/headers/aimee_ir.h:48`; members `AIMEE_BLK_TEXT`, `AIMEE_BLK_TOOL_USE`, `AIMEE_BLK_TOOL_RESULT`, `AIMEE_BLK_IMAGE`, `AIMEE_BLK_DOCUMENT`, `AIMEE_BLK_THINKING`, `AIMEE_BLK_UNKNOWN` (:50-57) |
@@ -34,33 +45,41 @@ contract), the header docstring itself is the second citation.
 | Frontend ← IR-delta: Anthropic SSE emit | `anthropic_delta_emit` — `src/server/aimee_ir_stream.c:539` (state type at `src/headers/aimee_ir_stream.h:75`); framing helper `delta_build_events` at `src/server/aimee_ir_stream.c:402` |
 | Shared event-framing builder | `delta_build_events` — `src/server/aimee_ir_stream.c:402`; comment at :401 declares it "Shared by anthropic_delta_render (frames) and anthropic_delta_emit (callback) so the two never drift" |
 
-### 1.2 Binding decision
+### 1.2 Why the decision is "diverge, not converge"
 
-> **Binding decision: paths diverge. The verified typed relay is not reachable from every inventoried path; Phase 2 must split per handler until missing chains are implemented and verified. The following convergence claim applies only to the IR-enabled Messages branch.**
+The IR-enabled Messages branch is the only path that reaches the typed relay
+today. The other paths have one of three obstacles:
 
-> The verified typed relay symbol
-> `aimee_delta_t` (struct, `src/headers/aimee_ir.h:177`) with discriminant
-> `aimee_delta_type_t` (enum, `src/headers/aimee_ir.h:167`).** Phase 2 taps
-> this single type for **every** path inventoried in §2 below.
+- **No decoder on the wire-shape.** OpenAI Responses uses
+  `response.output_text.delta` (`src/server/openai_chat.c:1261`); there is no
+  `openai_responses_chunk_to_deltas` mirror of `openai_chunk_to_deltas` in
+  `src/server/aimee_ir_stream.c`.
+- **Compute-then-chunk, not SSE relay.** OpenAI Chat Completions
+  (`src/server/openai_chat.c:720`, comment at :697 declares "compute-then-chunk")
+  and OpenAI Responses (`src/server/openai_chat.c:1081`, comment at :1070
+  declares "Compute-then-chunk") build the response synchronously, then slice
+  the output into chunks for SSE. The text never crosses an SSE feed, so no
+  backend decoder is wired.
+- **No SSE at all.** Webchat (`/v1/chat/live` — `src/server/server_http_routes.c:2098`,
+  verified POLL handler `rh_chat_live` at `:1626`) is a fixed-timer poll that
+  mirrors the persisted turn; Roundtable (`src/server/wfe_roundtable_proxy.c:22`,
+  `handle_roundtable_review_proxy` at `:15`) is a non-streaming panel-verdict
+  proxy; Delegate (`wfe_live_delegate_run` at `src/server/wfe_live_delegate.c:103`)
+  runs through the WFE block engine (`wfe_set_delegate_provider` at
+  `src/modules/workflows/wfe_blocks.h:95`) and reaches the model via
+  `agent_dispatch_one`, not through the request pipeline.
 
-The four production-shaped paths all collapse onto the same delta stream:
-- backend-side SSE chunk → `openai_chunk_to_deltas` / `bedrock_converse_stream_to_deltas` → producer builds `aimee_delta_t[]`;
-- frontend-side SSE render → `anthropic_delta_emit` consumes `aimee_delta_t` and emits typed SSE.
-
-There is no third option. Path split per handler would reinvent the typed
-relay that is already the convergence point (and is wired-in today: see
-`src/server/aimee_ir_serve.c:30` and the live streaming branch at
-`src/server/anthropic_http.c:1063`).
+Phase 2 therefore must implement each missing chain and verify it before
+tapping it. The Relay choke point (Decision 3 in `collapse_anchors.md`) target
+is `aimee_delta_t` — but only the `/v1/messages` branch can reach it today.
 
 ### 1.3 Speculative identifiers — explicitly resolved
 
 `AIMEE_DELTA_BLOCK_DELTA` and `aimee_delta_t` were flagged as candidates in
 the prior reconnaissance question. Both **do exist** at the verified
-locations above, so they are adopted **as the verified identifiers** — the
-prior risk was naming them without verifying they exist anywhere else. They
-exist in exactly one place: `src/headers/aimee_ir.h:167` (enum) and :177
-(struct). Phase 2 taps `aimee_delta_t` and its enum members at those lines
-only.
+locations above, so they are adopted **as the verified identifiers** — but
+**only one path reaches them today**. They are not assumed to be reachable
+on every path; §2 below proves which paths reach them and which do not.
 
 ---
 
@@ -76,91 +95,117 @@ the collapse work can use as precedent.
 | | |
 | --- | --- |
 | Route table entry | `src/server/server_http_routes.c:2081` — `{"POST", "/v1/messages", NULL, RM_EXACT, "chat.send_stream", 0, rh_messages}` |
-| Buffered request handler | `rh_messages` at `src/server/server_http_routes.c:834`; producer driver `messages_buffered` at `src/server/anthropic_http.c:434` |
-| Streaming request handler (SSE entry from `handle_conn`) | `handle_messages_stream` at `src/server/server_http.c:1286` (one-line wrapper); registered via `server_http_set_messages_stream_handler` at `src/server/server_http.c:850`; called from `messages_stream` at `src/server/anthropic_http.c:1071` |
-| SSE / delta emitter (legacy translator — text_delta production) | `xlate_emit_text_delta` at `src/server/anthropic_ingress.c:557` → emits `content_block_delta { delta.type = "text_delta", delta.text = … }`. Called from `anthropic_stream_feed_openai` at `src/server/anthropic_ingress.c:653` |
-| SSE / delta emitter (IR-delta replacement, default-OFF today) | `messages_stream_ir_relay` at `src/server/anthropic_http.c:973` (dispatcher) → routes through `openai_chunk_to_deltas` (`src/server/aimee_ir_stream.c:42`) → `anthropic_delta_emit` (`src/server/aimee_ir_stream.c:539`). Wire-up gate at `src/server/anthropic_http.c:1063` (`aimee_ir_stream_relay_enabled()`). |
-| Convergent typed-relay symbol | `aimee_delta_t` (`src/headers/aimee_ir.h:177`); enum members observed: `AIMEE_DELTA_TURN_START`, `AIMEE_DELTA_BLOCK_START`, `AIMEE_DELTA_BLOCK_DELTA` (text), `AIMEE_DELTA_BLOCK_STOP`, `AIMEE_DELTA_TURN_STOP` |
+| Buffered request handler | `rh_messages` at `src/server/server_http_routes.c:832`; producer driver `messages_buffered` at `src/server/anthropic_http.c:434` |
+| Streaming request handler (SSE entry from `handle_conn`) | `handle_messages_stream` at `src/server/server_http.c:1290` (one-line wrapper); `g_messages_stream_handler` registered via `server_http_set_messages_stream_handler` at `src/server/server_http.c:817`; called from `messages_stream` at `src/server/anthropic_http.c:1071`. `handle_conn` dispatches at `src/server/server_http.c:2103`. |
+| SSE / delta emitter (legacy translator — text_delta production) | `xlate_emit_text_delta` at `src/server/anthropic_ingress.c:557` → emits `content_block_delta { delta.type = "text_delta", delta.text = … }`. Called from `anthropic_stream_feed_openai` at `src/server/anthropic_ingress.c:703` (the path that walks `cJSON_GetObjectItemCaseSensitive(delta, "content")` and forwards the string into `xlate_emit_text_delta`). |
+| SSE / delta emitter (IR-delta path, default-OFF today) | `messages_stream_ir_relay` at `src/server/anthropic_http.c:973` (dispatcher) → routes through `openai_chunk_to_deltas` (`src/server/aimee_ir_stream.c:42`) → `anthropic_delta_emit` (`src/server/aimee_ir_stream.c:539`). Wire-up gate at `src/server/anthropic_http.c:1251` (`aimee_ir_stream_relay_enabled()`). |
+| Convergent typed-relay symbol | `aimee_delta_t` (`src/headers/aimee_ir.h:177`); enum members observed on this path: `AIMEE_DELTA_TURN_START`, `AIMEE_DELTA_BLOCK_START`, `AIMEE_DELTA_BLOCK_DELTA` (text), `AIMEE_DELTA_BLOCK_STOP`, `AIMEE_DELTA_TURN_STOP` |
 | Existing scanner-style call site usable as precedent | `aimee_ir_shadow_observe_request` invoked at `src/server/anthropic_http.c:1075` (gated no-op by `AIMEE_IR_SHADOW`); `gw_stage_memory` (`src/modules/memory/gw_stage_memory.h:43`) — universal stage seam registered in the same request pipeline that owns `messages_stream` |
 
-### 2.2 `/v1/responses` (OpenAI Responses API, client ingress — Codex)
+**Verdict — REACHES typed relay.** This is the only path with a verified
+IR-delta consumer today; the gate at `src/server/anthropic_http.c:1251`
+(`aimee_ir_stream_relay_enabled()`) toggles the relay on or off.
 
-**Verdict: DIVERGENT.** The handler is compute-then-chunk and no incremental Responses decoder or typed relay is present. Phase 2.0 must add and verify both decoder and renderer before tapping this path.
+### 2.2 `/v1/responses` (OpenAI Responses API, client ingress — Codex)
 
 | | |
 | --- | --- |
 | Route table entry | `src/server/server_http_routes.c:2076` — `{"POST", "/v1/responses", NULL, RM_EXACT, "chat.send_stream", 0, rh_responses}` |
-| Buffered request handler | `rh_responses` at `src/server/server_http_routes.c:858` → `g_responses_handler` registered at `src/server/server_http.c:809` (set at `src/server/openai_chat.c:1585`) → `responses_handler` at `src/server/openai_chat.c:568` (compute-then-chunk) |
-| Streaming request handler (SSE entry) | `handle_responses_stream` at `src/server/server_http.c:1268`; called from `handle_conn` at `src/server/server_http.c:2098`; producer `responses_stream_handler` at `src/server/openai_chat.c:1081` (compute-then-chunk; comment at :1070 declares "Compute-then-chunk") |
-| SSE / delta emitter | The handler emits typed OpenAI Responses events directly via `openai_format_responses_delta` (`src/server/openai_chat.c:1262`) and `emit(..., "response.output_text.delta", dframe)` at the same line. **No incremental provider-SSE → client-SSE translator is wired on this path** — the comment at `src/server/openai_chat.c:1070` is explicit: compute-then-chunk, no relay. |
-| Convergent typed-relay symbol | Same as §2.1: `aimee_delta_t`. **Caveat for Phase 2**: Phase 2 will need to add an `openai_responses_chunk_to_deltas` backend decoder (mirror of `openai_chunk_to_deltas`) AND a frontend renderer paired to the Responses wire (the Responses wire emits `response.output_text.delta`, not Anthropic SSE), OR — preferred — pivot back through the IR and re-emit on `AIMEE_WIRE_RESPONSES`. The convergence point (`aimee_delta_t`) is shared, not the wire-side render function. |
-| Existing scanner-style call site | `aimee_ir_responses_to_chat` invoked at `src/server/openai_chat.c:1098` (gated by `aimee_ir_path_enabled()`); fallback legacy translator `openai_parse_responses_to_chat` at the same site. Both feed the same `agent_dispatch_one` seam that `chat_stream_handler` (:720) feeds — that is the convergent emission seam for this path. |
+| Buffered request handler | `rh_responses` at `src/server/server_http_routes.c:826` → `g_responses_handler` registered at `src/server/server_http.c:769` (set at `src/server/openai_chat.c:1587`) → `responses_handler` at `src/server/openai_chat.c:568` (compute-then-chunk) |
+| Streaming request handler (SSE entry) | `handle_responses_stream` at `src/server/server_http.c:1280`; called from `handle_conn` at `src/server/server_http.c:2096`; producer `responses_stream_handler` at `src/server/openai_chat.c:1081` (compute-then-chunk; comment at :1070 declares "Compute-then-chunk") |
+| SSE / delta emitter | `openai_format_responses_delta` at `src/server/openai_chat.c:1261`; emitted at the same line via `emit(ctx, "response.output_text.delta", dframe)`. The text is produced synchronously by `agent_dispatch_one` (call at `src/server/openai_chat.c:755`), then sliced into 80-char segments (loop at `src/server/openai_chat.c:1254-1262`). **No incremental provider-SSE → client-SSE translator is wired on this path** — the comment at `src/server/openai_chat.c:1070` is explicit: compute-then-chunk, no relay. |
+| Reaches typed relay? | **NO.** There is no `openai_responses_chunk_to_deltas` decoder in `src/server/aimee_ir_stream.c` (only `openai_chunk_to_deltas` at `:42` and `bedrock_converse_stream_to_deltas` at `:220`). There is no Responses-shape frontend emitter parallel to `anthropic_delta_emit`. The path produces `response.output_text.delta` directly via `openai_format_responses_delta` and never crosses an `aimee_delta_t` boundary. |
+| Existing scanner-style call site | `aimee_ir_responses_to_chat` invoked at `src/server/openai_chat.c:1098` (gated by `aimee_ir_path_enabled()` — `:c:1097`); fallback legacy translator `openai_parse_responses_to_chat` at the same site. Both feed the same `agent_dispatch_one` seam that `chat_stream_handler` (`src/server/openai_chat.c:755`) feeds. **This is a request-side IR bridge, not a delta-stream bridge.** |
+
+**Verdict — DIVERGES; Phase 2.0 prerequisite.** Phase 2.0 must add an
+`openai_responses_chunk_to_deltas` backend decoder (in
+`src/server/aimee_ir_stream.c`) AND a Responses-shape frontend renderer
+paired to the Responses wire (the wire emits `response.output_text.delta`,
+not Anthropic SSE). The convergence point (`aimee_delta_t`) is the target
+but not the current state.
 
 ### 2.3 `/v1/chat/completions` (OpenAI Chat Completions, delegate / external ingress)
 
 | | |
 | --- | --- |
 | Route table entry | `src/server/server_http_routes.c:2074` — `{"POST", "/v1/chat/completions", NULL, RM_EXACT, "chat.send_stream", 0, rh_chat}` |
-| Buffered request handler | `rh_chat` at `src/server/server_http_routes.c:840` → `g_chat_handler` registered at `src/server/openai_chat.c:1579` → `chat_completions_handler` at `src/server/openai_chat.c:300` |
-| Streaming request handler (SSE entry) | `handle_conn` dispatch at `src/server/server_http.c:2083` (`chat_stream_handler` registered at `src/server/server_http.c:784`); producer `chat_stream_handler` at `src/server/openai_chat.c:720`. Comment at `src/server/openai_chat.c:697` declares "compute-then-chunk", so **no incremental SSE relay is wired on this path either.** |
-| SSE / delta emitter | `emit_chunk` / `emit_text_chunk` at `src/server/openai_chat.c:709` / :698; chunks emitted via `openai_format_chat_chunk` / `openai_format_text_chunk` (called at :702, :707). The chunked emission iterates `result.response` in 80-char slices — see `OPENAI_STREAM_CHUNK` constant at `src/server/openai_chat.c:695` and the slicing loop at :775-783. |
-| Convergent typed-relay symbol | `aimee_delta_t`. Same caveat as §2.2: this path's compute-then-chunk surface does not exercise the backend `openai_chunk_to_deltas` / frontend `anthropic_delta_emit` pair today — the path converges on the IR delta struct as soon as Phase 2 wires an OpenAI-shape frontend emitter (parallel to `anthropic_delta_emit` for the Anthropic shape). |
-| Existing scanner-style call site | `chat_stream_handler` invokes `agent_dispatch_one` (:761) which is the IR-transform seam when `aimee_ir_path_enabled()` is on (call into `aimee_ir_build_from_chat` — see `src/server/aimee_ir_serve.c:68`). |
+| Buffered request handler | `rh_chat` at `src/server/server_http_routes.c:814` → `g_chat_handler` registered at `src/server/server_http.c:766` (set at `src/server/openai_chat.c:1580`) → `chat_completions_handler` at `src/server/openai_chat.c:300` |
+| Streaming request handler (SSE entry) | `handle_stream` dispatch at `src/server/server_http.c:2082` (`g_chat_stream_handler` registered at `src/server/server_http.c:784`); producer `chat_stream_handler` at `src/server/openai_chat.c:720`. Comment at `src/server/openai_chat.c:697` declares "compute-then-chunk". |
+| SSE / delta emitter | `emit_chunk` at `src/server/openai_chat.c:693`; called inside `chat_stream_handler` at `:761` and fed chunks via `openai_format_chat_chunk` (called at `:707`). The chunked emission iterates `result.response` in 80-char slices — see `OPENAI_STREAM_CHUNK` constant at `src/server/openai_chat.c:687` and the slicing loop at `:775-783`. Chat wire field is `choices[0].delta.content` (assigned at `:701`). |
+| Reaches typed relay? | **NO.** The path is compute-then-chunk per the comment at `:697`; the text never crosses an SSE feed. `openai_chunk_to_deltas` (`src/server/aimee_ir_stream.c:42`) consumes `chunk` SSE events arriving on the wire, but the chat-completions handler does not feed it — `chat_stream_handler` produces chunks via `agent_dispatch_one` (call at `:755`) and slices the resulting text into `openai_format_chat_chunk` frames. **No OpenAI-Chat-shape frontend emitter (parallel to `anthropic_delta_emit`) is wired either.** |
+| Existing scanner-style call site | `chat_stream_handler` invokes `agent_dispatch_one` (`src/server/openai_chat.c:755`) which is the IR-transform seam when `aimee_ir_path_enabled()` is on (call into `agent_dispatch_one`'s IR branch at `src/server/aimee_ir_serve.c:18`). **Again, request-side, not delta-side.** |
 
-### 2.4 Webchat ingest (`/v1/chat/live` / `webchat_live` mirror)
+**Verdict — DIVERGES; Phase 2.1 prerequisite.** Phase 2.1 must add an
+OpenAI-Chat-shape frontend emitter (parallel to `anthropic_delta_emit`) and
+either (a) feed the existing `openai_chunk_to_deltas` from a chunked
+upstream or (b) wire a compute-then-chunk producer that emits
+`aimee_delta_t[]` directly. The compute-then-chunk architecture is the
+reason this path does not reach the typed relay today.
 
-**Verdict: DIVERGENT.** The claimed `rh_chat_live` route-handler and reachable producer/consumer chain are not verified in this worktree; Phase 2.1 must locate or implement that chain before adding a tap.
+### 2.4 Webchat ingest (`/v1/chat/live`)
 
 | | |
 | --- | --- |
-| Route table entry | The `POST /v1/chat/live` row in `src/server/server_http_routes.c` (table section for the browser poll surface — "the browser's fixed-timer poll for the live turn (db1 webchat_live mirror), replacing client-side SSE reconciliation"). |
-| Buffered request handler | `rh_chat_live` (route handler) — pulls the latest turn from `webchat_live`. |
-| Streaming request handler | **None** — this endpoint is a fixed-timer POLL surface, not an SSE relay. Text deltas are NOT emitted per request: the browser polls and re-receives the last persisted turn. |
-| SSE / delta emitter | N/A on this surface. (The webchat SSE channel uses a SEPARATE browser-EVENT stream — the `/events` stream — not `/v1/chat/live`.) |
-| Convergent typed-relay symbol | `aimee_delta_t`. The persistence side — the IR delta stream the upstream SSE relay produced — is what gets mirrored into `webchat_live`. **Phase 2's collapse tap is upstream of this mirror**, at the SSE emission point named in §2.1 / §2.2 / §2.3 above. The mirror itself is a downstream consumer and does not need its own tap. |
+| Route table entry | `src/server/server_http_routes.c:2098` — `{"POST", "/v1/chat/live", NULL, RM_EXACT, NULL, CAP_SESSION_READ, rh_chat_live}` |
+| Buffered request handler | `rh_chat_live` at `src/server/server_http_routes.c:1626` (verified); polls the db1 row via `db1_webchat_live_get(sid, since, &turn_id, &text, &status, &rev)` at `:1645` |
+| Streaming request handler | **None** — this endpoint is a fixed-timer POLL surface. Returns the latest turn (`{changed, rev, turn_id, text, status}` at `:1649-1656`) when the monotonic `rev` has advanced past `since_rev`. Comment at `:1616-1625` describes it as "the browser's fixed-timer poll for the live turn (db1 webchat_live mirror), replacing client-side SSE reconciliation" |
+| SSE / delta emitter | N/A on this surface. The webchat SSE channel is a SEPARATE browser-`/events` stream, not `/v1/chat/live`. |
+| Reaches typed relay? | **NO.** This is a downstream consumer of the persisted turn produced by the upstream SSE relay on `/v1/messages` (or `/v1/chat/completions`); the SSE producer is the upstream handler, not this handler. |
 | Existing scanner-style call site | The same `aimee_ir_shadow_observe_request` precedent at `src/server/anthropic_http.c:1075` is the model — observe via a parallel no-op seam that toggles on the same config gate (see config namespace decision in `collapse_anchors.md`). |
+
+**Verdict — DIVERGES; Phase 2.2 prerequisite.** Webchat does not produce
+text deltas; it polls the persisted turn. The collapse tap must be placed
+**upstream** of the webchat mirror (at the SSE emission point named in
+§2.1 / §2.2 / §2.3), not at `/v1/chat/live`. No tap is required on this
+path itself.
 
 ### 2.5 Delegate relay (Live delegate)
 
-**Verdict: DIVERGENT.** The cited driver does not establish a reachable model-call-to-`aimee_delta_t` chain; Phase 2.2 must trace and tap it separately.
-
 | | |
 | --- | --- |
-| Primary source | The `src/server/wfe_live_delegate.c` driver (file in the `src/server/` flat list). |
-| Streaming request handler | This driver does not introduce a new HTTP route — it consumes the chat-completions path of §2.3 on the SAME relay it routes through. The "delegates via /v1/chat/completions" relationship is documented at `src/server/router_advise.c:152`. |
-| SSE / delta emitter | Re-uses `chat_stream_handler` from §2.3 — there is no separate delta-emit seam on this path. |
-| Convergent typed-relay symbol | `aimee_delta_t`. The collapse tap on `/v1/chat/completions` covers delegates transitively. |
-| Existing scanner-style call site | Re-uses `gw_stage_memory` (`src/modules/memory/gw_stage_memory.h:43`) and `gw_stage_router` (referenced at `src/posix/server_compute.c:1245`). |
+| Primary file | `src/server/wfe_live_delegate.c` (the `wfe_live_delegate_run` driver at `:103`) |
+| Streaming request handler | **None on this file.** This driver does NOT introduce a new HTTP route. It runs through the WFE block engine via `wfe_set_delegate_provider` (declared at `src/modules/workflows/wfe_blocks.h:95`, called from `src/modules/workflows/wfe_blocks.c:448`). The block engine enqueues a coord job via `db1_coord_job_create(WFE_COORD_PLAN_ID, 1)` at `src/server/wfe_live_delegate.c:131` and waits for the delegate to complete. The actual model call is `agent_dispatch_one` invoked from elsewhere in the delegate system. |
+| SSE / delta emitter | The delegate system reaches the model via `agent_dispatch_one` (`src/server/openai_chat.c:755` for chat, `:644` for buffered responses). The chat-shape path is the one used; delegate responses arrive as synchronous text, not as SSE deltas. |
+| Reaches typed relay? | **UNRESOLVED.** The delegate-system → `agent_dispatch_one` chain does not reach `aimee_delta_t` today. The delegate result is read by the WFE block engine as a final string, not as a `aimee_delta_t[]` stream. |
+| Existing scanner-style call site | Re-uses `gw_stage_memory` (`src/modules/memory/gw_stage_memory.h:43`) for memory pre-injection on Anthropic-shaped requests; `gw_stage_router` (referenced at `src/posix/server_compute.c:1245`) for the request-routing stage. |
+
+**Verdict — DIVERGES; Phase 2.3 prerequisite.** The delegate path reaches
+the model via `agent_dispatch_one` (the same seam Chat uses), but the
+**output is consumed as a final string**, not as an `aimee_delta_t[]`
+stream. A collapse tap on `/v1/chat/completions` does NOT cover delegates
+because the consumption shape is different (the WFE block engine reads the
+final reply, not the SSE chunks). Phase 2.3 must decide whether to tap
+inside `agent_dispatch_one` (preferred) or accept that the delegate path
+is out-of-scope for the collapse scanner.
 
 ### 2.6 Roundtable relay
 
-**Verdict: DIVERGENT.** This is a non-streaming panel-verdict proxy with no verified typed-stream producer/consumer; Phase 2.3 must use its own observation seam.
-
 | | |
 | --- | --- |
-| Proxy entry | `src/server/server_compute_roundtable.c:212` (consumes `roundtable_review_item_t`); MCP entry `handle_mcp_roundtable_review` at `src/server/server_mcp.c:107`; core dispatcher `wfe_roundtable_proxy` at `src/server/wfe_roundtable_proxy.c:22` and :223 |
-| Streaming request handler | `roundtable_review` (`server_mcp.c:165`) and `roundtable.review` (`server.c:1583` — `handle_roundtable_review_proxy` → `wfe_roundtable_proxy`). Both routes are compute-then-respond: they aggregate review items and return a non-streaming JSON envelope. There is no incremental SSE on this surface today. |
-| SSE / delta emitter | N/A. Roundtable relay emits discrete JSON panel verdicts (`wfe_panel_verdict` rows) — see `src/server/wfe_panel_verdict.c` and the roundtabled `src/workflow/wfe_panel_verdict.c`. |
-| Convergent typed-relay symbol | `aimee_delta_t`. The collapse work does NOT introduce an SSE relay on roundtable; the convergence point is the same IR delta struct, but the consumption is via the panel-verdict emission path (`src/server/wfe_panel_verdict.c`), not `anthropic_delta_emit`. **No new collapse tap is needed on this path** — Phase 2's tap on §2.1 / §2.2 / §2.3 covers the model-call traffic the roundtable drives. |
-| Existing scanner-style call site | The roundtable-side "scanner" is the per-panel verdict-stage registry (workflow layer). The same stage-registry pattern (`aimee_ir_transform_fn` registry — see `src/headers/aimee_ir.h:295` and the docstring at :286-298) is the precedent for collapsing rule-side modules without touching the model-call surface. |
+| Proxy entry | `handle_roundtable_review_proxy` at `src/server/wfe_roundtable_proxy.c:15`; `wfe_roundtable_proxy` dispatcher at `src/server/wfe_roundtable_proxy.c:22` (and again at `:223`); HTTP route entry at `src/server/server_http_routes.c:2070` — `{"POST", "/v1/roundtable/review", NULL, RM_EXACT, "roundtable.review", 0, rh_dispatch_op_async}` |
+| Streaming request handler | `roundtable.review` is dispatched via `rh_dispatch_op_async` (`src/server/server_http_routes.c:2070`); it gathers panel verdicts and returns a non-streaming JSON envelope. There is no incremental SSE on this surface today. |
+| SSE / delta emitter | N/A. The roundtable returns discrete JSON panel verdicts. |
+| Reaches typed relay? | **NO, and the surface is non-streaming.** The IR-delta struct is not a target for this path. |
+| Existing scanner-style call site | The roundtable-side "scanner" is the per-panel verdict-stage registry (workflow layer). The stage-registry pattern (`aimee_ir_transform_fn` registry — see `src/headers/aimee_ir.h:295` and the docstring at :286-298) is the precedent for collapsing rule-side modules without touching the model-call surface. |
+
+**Verdict — DIVERGES; Phase 2.4 prerequisite.** Roundtable is a
+non-streaming panel-verdict proxy. Phase 2.4 must use its own observation
+seam (likely a per-panel verdict hook) and does not converge on the typed
+relay. The conversational model calls that drive the roundtable are
+covered by the §2.1 / §2.2 / §2.3 taps, but the panel-verdict aggregation
+is a separate concern.
 
 ### 2.7 Summary of the binding decision
 
-The six paths do **not** all converge today. Only the IR-enabled Messages branch reaches the typed relay surface; the divergent paths in §2 require separate Phase 2 slices. The typed relay surface is
-defined at `src/headers/aimee_ir.h:167-178`: one enum (`aimee_delta_type_t`),
-one struct (`aimee_delta_t`). The choice of frontend-side render function
-varies by client wire (Anthropic SSE for §2.1; Responses SSE for §2.2; OpenAI
-chat SSE for §2.3), but the relay surface is identical. Phase 2 collapses
-onto `aimee_delta_t`; Phase 4 re-implements the frontend-side renderers as
-needed against the same struct.
+The six paths do **not** all converge today. Only the IR-enabled Messages
+branch reaches the typed relay surface; the divergent paths in §2.2–§2.6
+require separate Phase 2 slices. The typed relay surface is defined at
+`src/headers/aimee_ir.h:167-178`: one enum (`aimee_delta_type_t`), one
+struct (`aimee_delta_t`). Phase 2 collapses onto `aimee_delta_t` on each
+path — but each path requires its own implementation and verification
+slice.
 
-The alternative ("paths diverge — Phase 2 splits per handler") is selected
-because §1.2 is already the live architecture in this worktree: the
-`aimee_ir_stream.h` / `aimee_ir_stream.c` files are committed (see
-`src/headers/aimee_ir_stream.h:90` for `anthropic_delta_emit` and
-`src/server/aimee_ir_stream.c:539` for the implementation), so the
-convergence point is not a future design — it is a verified,
-file-line-backed fact.
+---
 
 ## 3. Verified delta-emission lines (for the actual text_delta production/consumption chain)
 
@@ -169,11 +214,13 @@ The collapse work must tap **producer** and **consumer** sites for
 
 | Role | Path | File:Function:Line |
 | --- | --- | --- |
-| Producer (legacy translator, OpenAI chat chunk → Anthropic SSE `text_delta`) | `/v1/messages` | `src/server/anthropic_ingress.c:557` — `xlate_emit_text_delta` (type=`text_delta`, attaches to `delta.text`); called from `anthropic_stream_feed_openai` at `src/server/anthropic_ingress.c:653` |
+| Producer (legacy translator, OpenAI chat chunk → Anthropic SSE `text_delta`) | `/v1/messages` | `src/server/anthropic_ingress.c:557` — `xlate_emit_text_delta` (type=`text_delta`, attaches to `delta.text`); called from `anthropic_stream_feed_openai` at `src/server/anthropic_ingress.c:703` |
 | Producer (IR path: `BLOCK_DELTA` for kind=TEXT / THINKING) | `/v1/messages` | `src/server/aimee_ir_stream.c:445` — `delta_build_events` case `AIMEE_DELTA_BLOCK_DELTA` (writes `delta.type = "text_delta"`, `delta.text = d->text_delta`) |
 | Consumer (the `aimee_delta_t.text_delta` field carries the payload) | `/v1/messages` | `src/headers/aimee_ir.h:184` — member declaration `const char *text_delta;  /* BLOCK_DELTA for text/thinking */` (field carries the bytes; lifetime comment at `src/headers/aimee_ir_stream.h:29` says "BORROW into the parsed chunk (transient)") |
-| Compute-then-chunk producer (OpenAI chat completions — `text_delta` analogue) | `/v1/chat/completions` | `src/server/openai_chat.c:775-783` — slicing loop emits `openai_format_chat_chunk` frames; chat wire field is `choices[0].delta.content` (verified at :701) |
-| Compute-then-chunk producer (Responses wire) | `/v1/responses` | `src/server/openai_chat.c:1262` — `openai_format_responses_delta(item_id, seg, dframe, sizeof(dframe))`; emitted at the same line via `emit(ctx, "response.output_text.delta", dframe)` |
+| Compute-then-chunk producer (OpenAI chat completions — `text_delta` analogue) | `/v1/chat/completions` | `src/server/openai_chat.c:775-783` — slicing loop emits `openai_format_chat_chunk` frames; chat wire field is `choices[0].delta.content` (assigned at `:701`) |
+| Compute-then-chunk producer (Responses wire) | `/v1/responses` | `src/server/openai_chat.c:1261` — `openai_format_responses_delta(item_id, seg, dframe, sizeof(dframe))`; emitted at the same line via `emit(ctx, "response.output_text.delta", dframe)` |
+
+---
 
 ## 4. Verified scanner precedents (collapse-style observation seam)
 
@@ -183,24 +230,26 @@ precedents are:
 
 | Scanner | Where | What it does |
 | --- | --- | --- |
-| `aimee_ir_shadow_observe_request` | declared at `src/server/aimee_ir_shadow.h:12`; called at `src/server/anthropic_http.c:1075` (SSE stream entry) — gated by `AIMEE_IR_SHADOW` (default-OFF) | Parses the inbound request into the IR, rebuilds it, compares bytes; never affects the turn |
-| `aimee_ir_shadow_compare_bodies` | `src/server/aimee_ir_shadow.h:33` | Compares the legacy-translated provider body to the IR-built body for the SAME inbound request; counts mismatches |
-| `aimee_ir_shadow_compare_response` | `src/server/aimee_ir_shadow.h:55` | Compares IR-parsed provider response to legacy-parsed; same no-op contract |
-| `ingress_preinject_query_from_messages` | `src/server/ingress_preinject.c:409`; called from the route handlers in §2.1 | Walks inbound Anthropic `messages[]` and extracts the LAST user-role content; precedent for a per-request shape-agnostic query extractor (the IR-equivalent `aimee_ir_last_user_text` lives in `src/headers/aimee_ir.h:209`) |
+| `aimee_ir_shadow_observe_request` | declared at `src/headers/aimee_ir_shadow.h:12`; called at `src/server/anthropic_http.c:1075` (SSE stream entry) — gated by `AIMEE_IR_SHADOW` (default-OFF) | Parses the inbound request into the IR, rebuilds it, compares bytes; never affects the turn |
+| `aimee_ir_shadow_compare_bodies` | `src/headers/aimee_ir_shadow.h:33` | Compares the legacy-translated provider body to the IR-built body for the SAME inbound request; counts mismatches |
+| `aimee_ir_shadow_compare_response` | `src/headers/aimee_ir_shadow.h:55` | Compares IR-parsed provider response to legacy-parsed; same no-op contract |
+| `ingress_preinject_query_from_messages` | `src/server/ingress_preinject.c:409`; called from the route handlers in §2.1 | Walks inbound Anthropic `messages[]` and extracts the LAST user-role content; precedent for a per-request shape-agnostic query extractor (the IR-equivalent `aimee_ir_last_user_text` lives in `src/headers/aimee_ir.h:230`) |
 | `gw_stage_memory` | `src/modules/memory/gw_stage_memory.h:43`; called per `/v1/messages` and `/v1/chat/completions` via `gw_request_t` registry | The shape-agnostic stage seam that scans/mutates the inbound request before build |
 
 These five call sites are **the precedents** for the Phase 1+ collapse
 scanner: a no-op observer that runs alongside the live relay, records
 counters, and never affects the served request.
 
+---
+
 ## 5. Acceptance check
 
 - [x] `/v1/messages`: handler + SSE/delta emitter + verdict + enums + scanner cited.
-- [x] `/v1/responses`: same fields cited. (Caveat: Responses renderer does not yet exist for the IR-delta surface — flagged in §2.2.)
-- [x] `/v1/chat/completions`: same fields cited.
-- [x] Webchat ingest: route + mirroring model + IR-delta naming + scanner cited. (No SSE relay on this surface — flagged.)
-- [x] Delegate relay: shares §2.3 cite.
-- [x] Roundtable relay: shares IR delta struct but emits via panel-verdict path (no incremental SSE today) — flagged.
-- [x] Single binding decision: convergence on `aimee_delta_t` (file:line).
-- [x] Speculative identifiers explicitly resolved: flagged candidates both verify to the cited locations and are kept as cited identifiers.
+- [x] `/v1/responses`: same fields cited. (Caveat: Responses decoder + renderer do not yet exist for the IR-delta surface — flagged in §2.2.)
+- [x] `/v1/chat/completions`: same fields cited. (Caveat: compute-then-chunk + no OpenAI-Chat-shape emitter — flagged in §2.3.)
+- [x] Webchat ingest: route + handler + poll contract + reason-no-tap cited. (No SSE relay on this surface — flagged in §2.4.)
+- [x] Delegate relay: traced to WFE block engine → `agent_dispatch_one`; reachability to `aimee_delta_t` UNRESOLVED — flagged in §2.5.
+- [x] Roundtable relay: proxy entry + non-streaming verdict + reason-no-tap cited — flagged in §2.6.
+- [x] Single binding decision: PATHS DIVERGE; Phase 2 splits per handler (§1).
+- [x] Speculative identifiers explicitly resolved: `AIMEE_DELTA_BLOCK_DELTA` and `aimee_delta_t` are confirmed real at the cited lines; they are NOT assumed to be reachable on every path.
 - [x] Existing scanner precedent: §4 lists 5 verified call sites.
