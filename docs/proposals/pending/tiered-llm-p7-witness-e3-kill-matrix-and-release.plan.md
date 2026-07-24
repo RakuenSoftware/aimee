@@ -182,23 +182,47 @@ procedure, deferred beyond this umbrella.
 
 ## 4. The release gate
 
-Only after §1–§3 pass does `kb_egress_release_allowed()`
-(`src/kb/kb_vault_policy.c`) return a real answer instead of an unconditional 0.
+**Status: IMPLEMENTED and validated end-to-end under a real swtpm TPM2 anchor.**
+§1–§3 all pass, so `kb_egress_release_allowed()` (`src/kb/kb_vault_policy.c`) now
+returns the real conjunctive answer instead of an unconditional 0.
 
-The real answer is conjunctive, and every term is required:
+The real answer is conjunctive, and every term is required (each fail-closed — a
+query that cannot run closes the gate):
 
 - live keys are allowed under the selected custody anchor
   (`kb_vault_live_keys_allowed()`, which already excludes `file` and `mock`);
-- witnessing is active and chain verification is on — non-disableable on a
-  key-holding kb, per the umbrella;
-- the trust anchor set is present, well-formed, and covers every retained
-  checkpoint's `signer_key_id`, with no revoked key accepted;
-- the latest signed checkpoint is not older than its configured bound;
-- continuous verification's last result was clean.
+- witnessing is functional — the signing identity is derivable (on a key-holding kb
+  witnessing is non-disableable, so this is the observable "active" signal);
+- the anchor set covers every retained checkpoint's `signer_key_id`, none signed by
+  a key this kb cannot derive (`db2_witness_checkpoint_anchor_coverage`);
+- the latest signed checkpoint is not older than `KB_WITNESS_CHECKPOINT_MAX_AGE_S`
+  (900s, well above the 60s cadence) — `db2_witness_checkpoint_freshness`;
+- continuous verification's last result was clean
+  (`kb_witness_verification_last_clean`; not-run and UNPROVEN both read as
+  not-clean).
 
 Any term failing means egress stays closed. The conspicuous
-`AIMEE_P2B_INTEGRATION_TEST_OVERRIDE` build path remains the only bypass, and
-remains conspicuous.
+`AIMEE_P2B_INTEGRATION_TEST_OVERRIDE` build path is unchanged and remains the only
+bypass.
+
+**Validated** (`run-p7-witness-boot-tpm.sh` + `aimee-witness-boot-tpm-harness`,
+`WITH_TPM2=1`, on CT260 swtpm + PG17): gate closed while sealed (term 1); closed
+before the first verification (term 5 fail-closed); OPEN on a fully healthy live-key
+kb; closed on a stale chain and re-opens when made fresh (term 4); closed, and the
+boot check refuses, on an underivable-key checkpoint (term 3).
+
+**Scope of the gate.** It is a health/liveness gate on top of the primary defenses
+(evidence commits atomically before key use; tampering is caught by external
+comparison). On a kb with zero checkpoints terms 3–5 hold vacuously, so a fresh kb
+is governed only by term 1 — deliberate, so the first egress is not deadlocked
+before any evidence exists. It does not attempt to catch a fully-compromised single
+machine, which is the external comparison's job and outside the single-machine
+threat model.
+
+**Revocation** is subsumed by coverage for now: with a single KEK-derived signing
+key and no rotation, "revoked" and "foreign" are the same condition (a
+`signer_key_id` not equal to the current derivable one), which coverage already
+catches. A real revocation list arrives with KEK rotation and widens term 3 then.
 
 **What flipping this gate does and does not claim.** It claims evidence is
 durably committed before key use, is continuously emitted, and that tampering is
