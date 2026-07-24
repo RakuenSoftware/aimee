@@ -341,3 +341,156 @@ def test_gate_rejects_phase_one_change_when_base_branch_decisions_incomplete(
     )
     assert "missing on the target branch" in result.stderr
     assert "6" in result.stderr
+
+
+def _run_gate_with_env(
+    repo: Path, env_overrides: dict[str, str],
+) -> subprocess.CompletedProcess:
+    """Run the gate with ``env_overrides`` honoring the conventional
+    HOME setup.  BASE_SHA is cleared unless explicitly set so the
+    caller can drive the local-vs-CI branching deliberately."""
+    env = os.environ.copy()
+    env["HOME"] = "/tmp"
+    env["GIT_AUTHOR_NAME"] = "test"
+    env["GIT_AUTHOR_EMAIL"] = "test@test"
+    env["GIT_COMMITTER_NAME"] = "test"
+    env["GIT_COMMITTER_EMAIL"] = "test@test"
+    # Clear every key the override targets so env_overrides wins.
+    for key in env_overrides:
+        env.pop(key, None)
+    env.update(env_overrides)
+    return subprocess.run(
+        [str(repo / "scripts" / "check-collapse-anchor-gate.py")],
+        cwd=repo, env=env, capture_output=True, text=True,
+    )
+
+
+def _stage(repo: Path, rel: str, content: str) -> None:
+    """Write ``content`` to ``rel`` and stage it (no commit)."""
+    target = repo / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content)
+    _git(repo, "add", "--", rel)
+
+
+def _write_unstaged(repo: Path, rel: str, content: str) -> None:
+    """Write ``content`` to ``rel`` without staging."""
+    target = repo / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content)
+
+
+def test_gate_rejects_phase_one_change_when_uncommitted_in_local_mode(
+    fake_worktree: Path,
+) -> None:
+    """F002 closure: in local mode (no BASE_SHA, no CI env), a Phase 1+
+    file that exists in the working tree but has not been committed
+    must still trip the gate.  ``HEAD~1..HEAD`` would miss it; the
+    combined working-tree diff must catch it."""
+    _write_anchors(fake_worktree, list(range(1, 7)))
+    _commit(fake_worktree, "Phase 0", {})
+
+    # Phase 1+ file modified in the working tree but NOT committed.
+    _write_unstaged(fake_worktree, "src/server/foo.c", "void foo(void) {}\n")
+
+    result = _run_gate(fake_worktree)
+    assert result.returncode == 1, (
+        f"gate must catch uncommitted Phase 1+ changes in local mode; "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+
+
+def test_gate_rejects_phase_one_change_when_staged_in_local_mode(
+    fake_worktree: Path,
+) -> None:
+    """F002 closure: a Phase 1+ file staged (added to the index) but
+    not committed must still trip the gate in local mode."""
+    _write_anchors(fake_worktree, list(range(1, 7)))
+    _commit(fake_worktree, "Phase 0", {})
+
+    _stage(fake_worktree, "src/server/foo.c", "void foo(void) {}\n")
+
+    result = _run_gate(fake_worktree)
+    assert result.returncode == 1, (
+        f"gate must catch staged Phase 1+ changes in local mode; "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+
+
+def test_gate_combines_committed_and_working_tree_changes_in_local_mode(
+    fake_worktree: Path,
+) -> None:
+    """F002 closure: a Phase 1+ change spread across the last commit
+    AND the working tree must still trip the gate; the union of both
+    diffs is required for the contract to hold."""
+    _write_anchors(fake_worktree, list(range(1, 7)))
+    _commit(fake_worktree, "Phase 0", {})
+    # Last commit: a non-Phase 1+ file only.
+    _commit(fake_worktree, "docs", {"README.md": "x\n"})
+    # Working tree: a Phase 1+ file as an unstaged edit.
+    _write_unstaged(fake_worktree, "src/server/foo.c", "void foo(void) {}\n")
+
+    result = _run_gate(fake_worktree)
+    assert result.returncode == 1, (
+        f"gate must catch Phase 1+ changes that only appear in the "
+        f"working tree; stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+
+
+def test_gate_fails_closed_in_ci_mode_without_base_sha(
+    fake_worktree: Path,
+) -> None:
+    """F001 closure: when the surrounding environment is a CI runner
+    (``GITHUB_ACTIONS=true``) but ``BASE_SHA`` is unset, the gate
+    must fail closed.  Silently passing would let a PR whose target
+    branch does not yet carry the anchors pass, which is exactly the
+    scenario the Phase 0 contract forbids."""
+    _write_anchors(fake_worktree, list(range(1, 7)))
+    _commit(fake_worktree, "Phase 0", {})
+    _commit(fake_worktree, "Phase 1", {"src/server/foo.c": "x\n"})
+
+    result = _run_gate_with_env(
+        fake_worktree,
+        {"GITHUB_ACTIONS": "true"},
+    )
+    assert result.returncode != 0, (
+        f"gate must fail closed under CI mode without BASE_SHA; "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "BASE_SHA" in result.stderr
+
+
+def test_gate_fails_closed_in_ci_mode_via_ci_env_var(
+    fake_worktree: Path,
+) -> None:
+    """F001 closure: the generic ``CI`` env var is also a CI signal,
+    not only ``GITHUB_ACTIONS``.  This mirrors the matrix the
+    workflow needs to cover."""
+    _write_anchors(fake_worktree, list(range(1, 7)))
+    _commit(fake_worktree, "Phase 0", {})
+    _commit(fake_worktree, "Phase 1", {"src/server/foo.c": "x\n"})
+
+    result = _run_gate_with_env(fake_worktree, {"CI": "true"})
+    assert result.returncode != 0, (
+        f"gate must fail closed under CI=true without BASE_SHA; "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "BASE_SHA" in result.stderr
+
+
+def test_gate_passes_in_local_mode_without_ci_when_no_phase_one_change(
+    fake_worktree: Path,
+) -> None:
+    """F001 closure: the no-CI / no-BASE_SHA local path is preserved
+    when no Phase 1+ path is touched (so the gate still passes on
+    ordinary docs-only changes)."""
+    _write_anchors(fake_worktree, list(range(1, 7)))
+    _commit(fake_worktree, "Phase 0", {})
+    _commit(fake_worktree, "docs", {"README.md": "x\n"})
+
+    result = _run_gate(fake_worktree)
+    assert result.returncode == 0, (
+        f"gate must pass in local mode when no Phase 1+ change; "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "no Phase 1+ paths changed" in result.stdout

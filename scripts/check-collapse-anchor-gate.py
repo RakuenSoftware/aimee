@@ -21,14 +21,22 @@ Resolution of the contract:
    ``BASE_SHA..HEAD`` and the anchor MUST be present at ``BASE_SHA``
    (the target branch head).  This is the explicit PR-base/PR-head
    semantics required by F001.
-2. Local repository with a usable ``HEAD~1`` -> diff is ``HEAD~1..HEAD``
-   and the anchor MUST be present in the working tree (last-commit
-   form).  This is the pre-PR dev workflow.
+2. Local repository with a usable ``HEAD~1`` -> diff is the union of
+   ``HEAD~1..HEAD`` (committed) and ``HEAD`` vs working tree
+   (staged + unstaged + untracked-eligible), so pending edits are
+   covered even before the developer commits.  This is the pre-PR
+   dev workflow.
 3. Local repository without ``HEAD~1`` (initial commit or shallow
-   clone) -> diff is the working tree against ``HEAD`` and the anchor
-   MUST be present in the working tree.
+   clone) -> diff is the working tree against ``HEAD``, so staged
+   + unstaged edits are still validated.
 4. Otherwise the gate fails closed -- silently passing would defeat the
    enforcement contract.
+
+CI mode (the ``GITHUB_ACTIONS`` or ``CI`` env var is set) requires a
+non-empty ``BASE_SHA``; an unset ``BASE_SHA`` in CI mode is a
+configuration failure and the gate fails closed.  This is the F001
+fix: the base-reference contract is mandatory whenever the runner
+signals it is operating in CI mode.
 
 Phase 1+ surfaces are listed in ``PHASE_ONE_PREFIXES``.  When at least
 one of those paths is present in the diff being validated AND the
@@ -74,6 +82,42 @@ def _git_text(*args: str, cwd: Path) -> str:
         raise GateError(f"could not invoke git: {exc}") from exc
 
 
+def _git_text_ok(*args: str, cwd: Path) -> str:
+    """Like ``_git_text`` but returns the empty string on non-zero
+    exit rather than raising.  Used for best-effort diff queries that
+    combine multiple sources."""
+    try:
+        return subprocess.check_output(
+            ["git", *args], cwd=cwd, text=True,
+        )
+    except subprocess.CalledProcessError:
+        return ""
+    except OSError as exc:
+        raise GateError(f"could not invoke git: {exc}") from exc
+
+
+def _ci_mode() -> bool:
+    """True iff the surrounding environment looks like a CI runner.
+
+    The gate must validate the base-reference contract whenever the
+    runner signals CI mode, because that is the only mode in which a
+    target-branch / PR-head split exists.  An unset ``BASE_SHA`` under
+    CI mode is treated as a configuration failure (F001).
+    """
+    return bool(
+        os.environ.get("GITHUB_ACTIONS", "").strip()
+        or os.environ.get("CI", "").strip()
+    )
+
+
+def _diff_names(*args: str, cwd: Path) -> list[str]:
+    """Run ``git diff --name-only`` with the given arguments and
+    return the nonempty paths it reports.  Returns an empty list on
+    a non-zero exit (used for the combined local-mode diff)."""
+    out = _git_text_ok("diff", "--name-only", *args, cwd=cwd)
+    return [line for line in out.splitlines() if line]
+
+
 def diff_against_base(cwd: Path) -> list[str]:
     """Return the list of files changed in the diff being validated.
 
@@ -81,9 +125,12 @@ def diff_against_base(cwd: Path) -> list[str]:
 
     1. ``BASE_SHA`` env var (set by CI for ``pull_request`` events) ->
        diff from ``BASE_SHA`` to ``HEAD`` (the explicit PR-base/PR-head
-       semantics required by F001).
-    2. Local repository with a usable ``HEAD~1`` -> diff from
-       ``HEAD~1`` to ``HEAD`` (last-commit form).
+       semantics required by F001).  Failure to resolve ``BASE_SHA``
+       raises :class:`GateError` so the gate fails closed.
+    2. Local repository with a usable ``HEAD~1`` -> combined diff of
+       ``HEAD~1..HEAD`` (committed) and ``HEAD`` vs the working tree
+       (staged + unstaged).  The union is required by F002: a Phase 1+
+       change staged but not committed must still trip the gate.
     3. Local repository without ``HEAD~1`` (initial commit or shallow
        clone) -> diff from the working tree against ``HEAD``, so staged
        + unstaged edits are still validated.
@@ -92,8 +139,23 @@ def diff_against_base(cwd: Path) -> list[str]:
     """
     base_sha = os.environ.get("BASE_SHA", "").strip()
     if base_sha:
+        # Use _git_text (not _git_text_ok) so an invalid BASE_SHA
+        # fails closed with a GateError instead of silently producing
+        # an empty diff.
         out = _git_text("diff", "--name-only", base_sha, "HEAD", cwd=cwd)
         return [line for line in out.splitlines() if line]
+
+    # F001: in CI mode BASE_SHA is mandatory.  Without it the gate
+    # cannot know what target branch the PR is being proposed against,
+    # so silently passing would defeat the merge-first contract.
+    if _ci_mode():
+        raise GateError(
+            "BASE_SHA is unset in CI mode; refusing to validate. "
+            "Set BASE_SHA to the target branch head (e.g. "
+            "github.event.pull_request.base.sha) so the gate can "
+            "verify that the anchor document is already merged on "
+            "the target branch."
+        )
 
     try:
         has_parent = subprocess.run(
@@ -103,11 +165,20 @@ def diff_against_base(cwd: Path) -> list[str]:
     except OSError as exc:
         raise GateError(f"could not invoke git: {exc}") from exc
     if has_parent:
-        out = _git_text("diff", "--name-only", "HEAD~1", "HEAD", cwd=cwd)
-        return [line for line in out.splitlines() if line]
+        # F002: combine committed diff with working-tree diff so
+        # staged/unstaged Phase 1+ edits are caught before commit.
+        committed = _diff_names("HEAD~1", "HEAD", cwd=cwd)
+        working_tree = _diff_names("HEAD", cwd=cwd)
+        # Stable order, dedup.
+        seen: set[str] = set()
+        combined: list[str] = []
+        for path in [*committed, *working_tree]:
+            if path not in seen:
+                seen.add(path)
+                combined.append(path)
+        return combined
 
-    out = _git_text("diff", "--name-only", "HEAD", cwd=cwd)
-    return [line for line in out.splitlines() if line]
+    return _diff_names("HEAD", cwd=cwd)
 
 
 def phase_one_touched(paths: list[str]) -> bool:
@@ -156,27 +227,23 @@ def contract_present(cwd: Path) -> tuple[bool, list[str]]:
 def contract_present_at_base(cwd: Path) -> tuple[bool, list[str]]:
     """Verify the anchor contract at the configured ``BASE_SHA``.
 
-    Returns ``(True, [])`` early when no ``BASE_SHA`` is configured.
-    This early return is INTENTIONAL, not a bug:
+    Returns ``(True, [])`` early when no ``BASE_SHA`` is configured
+    AND we are not in CI mode.  When ``BASE_SHA`` is set OR the
+    surrounding environment is a CI runner, the base-reference
+    contract is mandatory (F001) and the function only returns
+    ``(True, [])`` when the file at ``BASE_SHA`` has every decision.
 
-    * The caller in :func:`main` only invokes this function when
-      ``phase_one_touched(paths)`` is true, so the function is never
-      asked to "verify" in the no-Phase-1-changes case.
-    * When ``BASE_SHA`` is unset, the local-repo diff-discovery path
-      already uses the working tree as authoritative, so this
-      function correctly has nothing extra to add.
-    * ``test_gate_passes_when_no_phase_one_paths_change`` exercises
-      the no-Phase-1-touched path; do not turn the early return into
-      a failure without also updating that test, or CI will break on
-      PRs that touch only non-Phase-1 files.
-
-    The ``BASE_SHA`` mode (CI pull_request events) is the only mode
-    that exposes a target-branch / PR-head split, so it is the only
-    mode that needs to verify the contract at the base ref.  In
-    every other mode the working tree is authoritative.
+    The caller in :func:`main` only invokes this function when
+    ``phase_one_touched(paths)`` is true, so the function is never
+    asked to "verify" in the no-Phase-1-changes case.
     """
     base_sha = os.environ.get("BASE_SHA", "").strip()
     if not base_sha:
+        # F001: in CI mode the base-reference contract is mandatory;
+        # an unset BASE_SHA is a configuration failure rather than a
+        # satisfied contract.
+        if _ci_mode():
+            return False, [str(n) for n in range(1, 7)]
         return True, []
 
     if not _anchor_path_exists_at(base_sha, cwd):
@@ -209,15 +276,27 @@ def main() -> int:
 
     if not base_ok:
         if base_missing and len(base_missing) == 6:
-            print(
-                "error: Phase 1+ paths changed against a target branch "
-                f"({os.environ.get('BASE_SHA', '')}) that does not yet "
-                "contain the merged anchor document "
-                f"({ANCHORS}). The Phase 0 anchor contract requires "
-                "collapse_anchors.md to be merged on the target branch "
-                "before Phase 1+ implementation begins.",
-                file=sys.stderr,
-            )
+            base_sha = os.environ.get("BASE_SHA", "").strip()
+            if _ci_mode() and not base_sha:
+                print(
+                    "error: BASE_SHA is unset in CI mode; refusing to "
+                    "validate. The Phase 0 anchor contract requires the "
+                    "target branch head to be supplied so the gate can "
+                    "verify that collapse_anchors.md is already merged "
+                    "on the target branch before Phase 1+ implementation "
+                    "begins.",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    "error: Phase 1+ paths changed against a target branch "
+                    f"({base_sha}) that does not yet contain the merged "
+                    f"anchor document ({ANCHORS}). The Phase 0 anchor "
+                    "contract requires collapse_anchors.md to be merged "
+                    "on the target branch before Phase 1+ implementation "
+                    "begins.",
+                    file=sys.stderr,
+                )
         else:
             print(
                 "error: collapse anchor decisions missing on the target "
