@@ -7,7 +7,9 @@ truth.
 
 ## Byte semantics
 
-* All offsets are absolute byte offsets from the start of the
+* "From the start of generation" is interpreted as from byte 0 of the
+  canonical checked-in fixture file because this corpus is generated offline.
+  All offsets are therefore absolute byte offsets from the start of that
   fixture file. For inline envelopes the header occupies the first
   `lf_offset + 1` bytes (one line terminated by LF), and the loop
   period is found below that. For sibling `.meta` files the payload

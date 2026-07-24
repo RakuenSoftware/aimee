@@ -50,6 +50,8 @@ def _envelope_kind(p):
             return "meta", meta
     if p.suffix == ".md":
         return "md", p
+    if p.suffix == ".jsonc":
+        return "inline_hash", p
     return "inline_hash", p
 
 
