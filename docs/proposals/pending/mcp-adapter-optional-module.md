@@ -153,12 +153,32 @@ plugin (a python echo server), exercised over the live `/v1/actions/*` channel:
   — the handler dispatched to the registry, which round-tripped to the real plugin
   subprocess. This is the exact endpoint `kb_client_mcp_call` wraps.
 
-**Not yet exercised through a live server session** (honest gap): the server-side
-consumption — `append_federated_kb_tools` merging the snapshot into `tools/list`
-and dispatch routing a call to `kb_client_mcp_call` — is code-reviewed and rests on
-the two endpoints verified above, but a full server↔kb agent-turn e2e (needs mTLS
-enrollment + a model backend) has not been run. Also pending: the kb-side outcome
-**audit** row (reuses the #1955 completion hook/bridge once merged).
+**Server side — verified end to end** (added 2026-07-25): against the same live
+kb, the real server functions run through their paths via two gated integration
+cases in `unit-test-mcp-native-dispatch` (`AIMEE_KB_API_URL` set):
+- **Advertise:** `build_tools_array()` (the LLM-facing tool array) contains
+  `echo:echo` — `append_federated_kb_tools` fetched the kb snapshot and merged the
+  federated def. PASS.
+- **Dispatch:** `dispatch_tool_call("echo:echo", {"text":"kb-routed"})` returned
+  `{"content":[{"type":"text","text":"echo: kb-routed"}]}` — the server resolved
+  the client as non-local and routed to `kb_client_mcp_call` → kb → plugin. PASS.
+- **Scope isolation:** with a config declaring `echo` (install:kb) + `locecho`
+  (install:server), the kb's federated `mcp_tools` is exactly `["echo:echo"]` — the
+  server-installed plugin is never federated; only the install:kb plugin runs on
+  the kb. Matches `test_install_target_filtering`.
+- **Regression:** the full `make unit-tests` suite passes on the CT (real
+  Postgres), SUITE_EXIT=0.
+
+Remaining: the kb-side outcome **audit** row (reuses the #1955 completion
+hook/bridge once merged), and a true agent-turn through a live model backend (the
+LLM-facing array + dispatch are both verified above, so this is the LLM emitting
+the call rather than the harness).
+
+> Harness note: mcp_client config command lists must use **block-style** YAML
+> (`command:\n  - python3\n  - script.py`); the flow-style inline form
+> (`command: [python3, script.py]`) is not parsed into an array by the config
+> reader, so the client is silently skipped. Worth a follow-up hardening in the
+> YAML/flow-list parsing, independent of this feature.
 
 ## What the review corrected (for the record)
 
