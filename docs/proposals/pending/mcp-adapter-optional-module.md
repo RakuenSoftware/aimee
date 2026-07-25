@@ -134,6 +134,32 @@ it is not free and is not required for the feature above:
 - Phase 1 keeps `check_bus_blast_radius.sh` green (no bus header in the adapter).
   Phase 2, if pursued, ships the D7 amendment + updated gate.
 
+## Phase 1 verification (observed 2026-07-25, CT 132 @ .253)
+
+Real `aimee-kb` daemon (fresh DB2, dim pinned) hosting an `install: kb` stdio MCP
+plugin (a python echo server), exercised over the live `/v1/actions/*` channel:
+
+- **Boot filtering + hosting** (increments 1–2): the kb booted **only** the
+  `install: kb` plugin; its OSV startup scan ran and did not block. Unit test
+  `test_install_target_filtering` + the registry's real-subprocess
+  `call_tool`/`build_namespaced_tools` cases pass on the CT.
+- **Federation advertise** (increment 4, kb side): `POST
+  /v1/actions/tool_registry.snapshot` → HTTP 200 with
+  `mcp_tools:[{"name":"echo:echo","description":…,"inputSchema":…}]` — the exact
+  bytes the server's `append_federated_kb_tools` consumes.
+- **Invocation** (increment 3): `POST /v1/actions/mcp.call`
+  `{"name":"echo:echo","arguments":{"text":"federation-works"}}` → HTTP 200
+  `{"status":"ok","result":{"content":[{"type":"text","text":"echo: federation-works"}]}}`
+  — the handler dispatched to the registry, which round-tripped to the real plugin
+  subprocess. This is the exact endpoint `kb_client_mcp_call` wraps.
+
+**Not yet exercised through a live server session** (honest gap): the server-side
+consumption — `append_federated_kb_tools` merging the snapshot into `tools/list`
+and dispatch routing a call to `kb_client_mcp_call` — is code-reviewed and rests on
+the two endpoints verified above, but a full server↔kb agent-turn e2e (needs mTLS
+enrollment + a model backend) has not been run. Also pending: the kb-side outcome
+**audit** row (reuses the #1955 completion hook/bridge once merged).
+
 ## What the review corrected (for the record)
 
 - **The bus is not a cross-daemon transport.** Rewrote every "server publishes onto
