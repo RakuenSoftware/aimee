@@ -1,135 +1,144 @@
-# Proposal: MCP adapter as an optional module — install into aimee-server or aimee-kb
+# Proposal: an event-bus MCP-plugin adapter — optional, install into aimee-server or aimee-kb
 
-## Context
+## The idea
 
-The MCP client adapter (`modules/protocols/mcp/`) connects out to external MCP
-servers and exposes their tools to aimee as namespaced `server:tool` names. Today
-it is **server-only**: `mcp_client_registry_boot()` is called once from
-`server_main.c:291`, the sessions belong to that one aimee-server process, and the
-tools are merged into that server's per-session tool list
-(`agent_tools.c` → `mcp_client_registry_build_namespaced_tools`). `aimee-kb` boots
-no MCP registry and exposes no external MCP tools.
+An **adapter into the event bus that runs MCP plugins.** An MCP plugin (an external
+MCP server — GitHub, filesystem, a company tool server) is run by an adapter that
+is a participant on the event bus: a plugin tool-call travels the bus as a
+**request event**, the adapter serves it against the plugin's live MCP session and
+publishes the **reply event**, and the **thin-client advertises those plugin tools
+over MCP/CLI exactly as it advertises modules today**. The adapter is an *optional
+module* either trusted daemon can install, and the install target sets the scope:
 
-Two facts make a different topology cheap:
+- **Installed in aimee-server** — the adapter runs on the server's bus, so its
+  MCP-plugin tools are exposed only to **that server's sessions**.
+- **Installed in aimee-kb** — the adapter runs on the kb's bus, so its tools are
+  exposed to **everything hooked up to that kb**: every aimee-server and every thin
+  client on that kb sees the same shared plugin surface, backed by one set of
+  plugin connections the kb owns.
 
-1. The adapter is already a self-contained module with a clean boot/shutdown/
-   call/list surface (`mcp_client_registry.h`) — nothing about it is intrinsically
-   server-bound.
-2. A **kb → server tool-registry federation already exists**:
-   `kb_client_tool_registry_snapshot_json()` / `kb_client_tool_registry_lookup()`
-   let a server pull a tool surface *from* its kb. That is precisely the channel a
-   kb-hosted MCP surface would ride.
+This is the "MCP interface for MCP plugins over the event bus" that opened this
+work, now buildable because the substrate exists: the bus carries correlated
+request/reply (host routing), large tool arguments/results ride the arena
+(payload-by-reference), and every call is audited content-free (the tool-call
+outcome audit). The MCP-plugin adapter is the **first real producer** of the arena
+payload path.
 
-## The requirement
+## Why the bus is the right substrate here
 
-Make the MCP adapter an **optional module that either aimee-server or aimee-kb can
-install**, with the install target deciding the exposure scope:
+A plugin tool-call is a natural bus request/reply, and routing it over the bus buys
+exactly the properties an in-process plugin loader could not give:
 
-- **Installed in aimee-server** — the external MCP tools are exposed **only to the
-  sessions of that aimee-server** (today's behavior).
-- **Installed in aimee-kb** — the external MCP tools are exposed to **everything
-  hooked up to that aimee-kb**: every aimee-server (and every thin client) that
-  connects to the kb sees the same shared MCP tool surface, backed by one set of
-  connections the kb owns.
+- **Scope by construction.** The bus a call rides *is* its blast radius. Put the
+  adapter on the server bus and its tools are that server's; put it on the kb bus
+  and they are the whole deployment's. Exposure is not a separate ACL layer — it is
+  which bus the adapter subscribed to.
+- **Isolation + backpressure.** The plugin's connection lives behind the adapter,
+  not in every caller. A slow or dead plugin is BLOCK/SHED-managed by the host,
+  never a caller hang; a plugin crash never takes a session with it.
+- **Large payloads, safely.** MCP arguments and results routinely exceed the inline
+  budget (file contents, diffs, tool output). They ride the arena by reference — no
+  copy through the host, refcounted, generation-gated — which is what the arena work
+  was for.
+- **Audited for free.** The request and reply are governed bus events, so the
+  tool-call outcome audit records identity + outcome (content-free) on whichever
+  daemon's bus the adapter runs — server-installed audits on the server, kb-installed
+  on the kb, mirroring the memory-kb bridge.
 
-The kb case is the valuable new one: a single operator-configured MCP server (a
-GitHub server, a filesystem server, a company-internal tool server) becomes a
-shared capability of the whole deployment, configured and connected once, rather
-than re-declared and re-connected in every aimee-server.
+(This does not turn the bus into a general RPC fabric: it carries *governed
+tool-calls as events*, the same shape as every other bus event, not arbitrary
+transport.)
 
 ## Decision
 
-Make `modules/protocols/mcp` a module both binaries may link and boot, gated by an
-**install target** in config; add a kb-side tool surface + a forwarding call path
-so a kb-hosted MCP tool executes **at the kb** (one shared connection) while being
-*callable from* any server.
+Make `modules/protocols/mcp` (plus a thin bus-adapter layer) an optional module
+both binaries may link and boot, driven by an **install target** in config, with a
+bus request/reply contract for plugin calls and thin-client advertisement of the
+resulting tools.
 
-### Install target (config)
+### 1. Install target (config)
 
-Add an install scope to the MCP client config — the simplest form is a per-client
-`install: server | kb` (default `server`, preserving today's behavior), or a
-single top-level `mcp.install` when the whole set moves together. `config_mcp_client_t`
-(`config.h`) gains the field; both `server_main.c` and `kb_main.c` read their own
-subset.
+`config_mcp_client_t` (`config.h`) gains an `install: server | kb` field
+(default `server`, so nothing changes without opt-in). Each daemon boots the
+adapter for **its own** clients only, so a plugin is owned by exactly one host and
+a tool name resolves unambiguously.
 
-- aimee-server boots `mcp_client_registry` for its `install: server` clients only.
-- aimee-kb boots `mcp_client_registry` for its `install: kb` clients only.
+### 2. The adapter as a bus participant
 
-A client is served by exactly one host — never both — so a tool name resolves
-unambiguously.
+Per hosting daemon, the adapter:
+- opens/owns the MCP plugin sessions (stdio/sse), as `mcp_client_registry` does now;
+- **subscribes** to a plugin-tool-call request kind on that daemon's bus and, on a
+  request, runs `tools/call` against the plugin session and publishes the reply
+  (result inline, or arena for a large payload); errors/timeouts become typed reply
+  outcomes, never a caller hang;
+- a caller (a session's tool dispatch) that targets a plugin tool **publishes the
+  request** to that bus and awaits the correlated reply. A server-hosted plugin's
+  request/reply stays on the server bus; a kb-hosted plugin's rides the kb bus
+  (reached from a server over the existing kb_client transport).
 
-### Where a kb-installed tool executes (the crux)
+The correlated-arena routing already delivers request→server and reply→requester by
+reference with correct refcounting; this is its first non-test consumer.
 
-"Shared to everything on the kb" means the external connection is **owned by the
-kb**, not re-opened per server. So a kb-installed tool call must run at the kb:
+### 3. Thin-client advertisement (as for modules)
 
-- **Tool surface federation.** The kb publishes its namespaced MCP tools through
-  the existing tool-registry snapshot (`kb_client_tool_registry_snapshot_json`);
-  each connected server merges them into its session tool list alongside its own
-  `install: server` MCP tools and native tools. Namespacing (`server:tool`) keeps
-  the two sources collision-free; a name collision between a server-local and a
-  kb-shared client is a config error, surfaced at boot.
-- **Forwarding dispatch.** When a session calls a kb-hosted tool, the server's
-  dispatcher (the `strchr(name,':')` branch in `agent_tools_dispatch.c`) resolves
-  the name to a *kb-hosted* client and forwards the call over `kb_client` to a new
-  kb method (`kb.mcp.call` / `mcp_client_registry_call_tool` on the kb side),
-  rather than calling `mcp_client_registry_call_tool` locally. The kb runs the
-  actual `tools/call` on its shared session and returns the result.
-- A server-installed tool keeps executing locally, exactly as today.
+The plugin tools must surface to a thin client the same way module tools do today:
+the tool catalog the CLI serves over MCP (`cli_mcp_serve.c` forwarding `tools/list`,
+and the CLI's own tool listing) includes the adapter's namespaced plugin tools
+(`plugin:tool`) alongside module and native tools. A kb-hosted plugin's tools reach
+a server's catalog through the existing kb→server tool-registry federation
+(`kb_client_tool_registry_snapshot_json`); a server-hosted plugin's are local. Either
+way the thin client advertises them with no new advertisement mechanism — it is the
+same `tools/list` surface, one more source feeding it.
 
-### Audit follows the install target (composes with #1955)
+### 4. Audit follows the install target
 
-The tool-call outcome audit (#1955) and the governed-action identity audit are
-per-process on `obs_bus`. This proposal keeps that invariant:
-
-- A **server-installed** MCP call is dispatched and audited on the **server's**
-  `obs_bus` (mode `outbound:stdio|sse`), exactly as it is now.
-- A **kb-installed** MCP call executes at the kb, so the kb records the outbound
-  completion on the **kb's** `obs_bus` (the same NULL-default hook + server-only
-  bridge pattern, installed in `kb_main.c` — mirroring the memory-kb bridge). The
-  forwarding server still records that the *session* invoked a remote tool
-  (identity), and the kb records the *execution outcome*. No content crosses in
-  either row (fingerprint + enums only, per #1955).
-
-This means the completion-audit bridge and its hook become linkable into kb as
-well — which is why this proposal lands *after* #1955, not inside it.
+Composes with the tool-call outcome audit: a server-installed plugin call is
+dispatched and audited on the **server's** obs_bus (mode `outbound:stdio|sse`); a
+kb-installed call runs at the kb and records its outcome on the **kb's** obs_bus
+(the same NULL-default completion hook + server-only bridge, installed in
+`kb_main.c`, mirroring the memory-kb bridge). Content-free either way — fingerprint
++ enums, never the plugin's arguments or results, even when those ride the arena.
+This reuse of the completion hook + bridge on the kb side is why this lands *after*
+that audit PR.
 
 ## Non-goals
 
-- **No new external egress surface.** The kb already makes outbound connections
-  (embedder, forge); a kb-hosted MCP client is another operator-configured
-  outbound, gated by the same config trust boundary. It does not expose the kb's
-  own API to the MCP server.
-- **No per-session MCP servers.** Install scope is deployment config (server or
-  kb), not a per-session or per-principal dynamic — dynamic/tenant-scoped MCP is a
-  separate concern.
-- **Not a change to the MCP wire or the tool schema.** Tools stay namespaced
-  `server:tool`; only *where the registry lives and who sees it* changes.
-- **D7 unchanged.** The bus stays confined to the two trusted daemons; a
-  kb-hosted MCP client audits on the kb's bus, still never a thin client.
+- **No new external egress surface.** The kb already makes operator-configured
+  outbound connections (embedder, forge); a kb-hosted MCP plugin is another, gated
+  by the same config trust boundary. It does not expose the kb's own API to the
+  plugin.
+- **No per-session / per-tenant plugins.** Install scope is deployment config
+  (server or kb), not a dynamic per-principal surface.
+- **No general-purpose RPC over the bus.** The bus carries governed tool-calls as
+  events, not arbitrary transport; a plugin call is the same event shape as the
+  rest of the arc.
+- **No revival of the removed in-process plugin loader.** MCP *is* the plugin
+  interface; the bus adapter is how a plugin runs and is scoped. Nothing is
+  dynamically `dlopen`'d.
+- **D7 unchanged.** The bus stays confined to the two trusted daemons; a kb-hosted
+  plugin audits on the kb's bus, never a thin client.
 
 ## Binding checks
 
-- A kb-installed client's tool appears in a connected server's session tool list
-  (via the registry snapshot) and is absent when installed server-side on a
-  *different* server — proving the scope boundary.
-- A forwarded kb-hosted tool call returns the same result as a direct one, and its
-  **completion row lands on the KB ledger** (mode `outbound:*`), while a
-  server-installed call's row lands on the **server ledger** — proving audit
-  follows the install target, still content-free.
-- A name collision between a `server` and a `kb` client is refused at boot, not
-  silently shadowed.
-- `check_bus_blast_radius.sh` stays green with the MCP registry linked into kb.
+- A kb-installed plugin's tool appears in a connected server's `tools/list` (via the
+  registry federation) and in the thin client's advertised catalog; a
+  server-installed plugin's tool is absent from a *different* server — proving scope.
+- A plugin call round-trips as a bus request/reply, with a large argument/result
+  carried by arena reference (refcount drains to zero); the completion row lands on
+  the **hosting daemon's** ledger (server vs kb), content-free.
+- A slow/dead plugin BLOCK/SHED-resolves at the host without hanging the caller,
+  and a plugin crash does not fault a session.
+- A name collision between a `server` and a `kb` plugin is refused at boot.
+- `check_bus_blast_radius.sh` stays green with the adapter linked into kb.
 
 ## Rollout
 
-1. Add the `install` config field + validation; keep default `server` so nothing
-   changes without opt-in.
-2. Boot the registry conditionally in `kb_main.c`; publish its tools through the
-   kb tool-registry snapshot.
-3. Add the `kb.mcp.call` forwarding method + the server-side dispatcher routing to
-   it for kb-hosted names.
-4. Install the completion-audit bridge in kb (the hook/TU from #1955 already link
-   cleanly); wire the outbound-completion emit at the kb call site.
-5. Multi-agent convergence review (scope boundary + the forwarding/audit split),
-   then merge.
+1. `install` config field + validation (default `server`; today's behavior).
+2. The bus request/reply contract for a plugin call (kind + correlated reply +
+   arena for large payloads), served by the adapter; caller-side publish/await in
+   the dispatcher's `plugin:tool` branch.
+3. Boot the adapter conditionally in `kb_main.c`; federate its tool catalog to
+   servers and the thin-client `tools/list`.
+4. Install the completion-audit bridge in kb for the kb-hosted call outcome.
+5. Multi-agent convergence review (scope boundary, the request/reply + arena
+   refcount lifecycle, the audit split), then merge.
