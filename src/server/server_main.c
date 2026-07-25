@@ -37,6 +37,7 @@
 #include "vault_audit_bridge.h"   /* route vault credential-access events onto the audit bus */
 #include "sandbox_audit_bridge.h" /* route sandbox degraded-isolation events onto the audit bus */
 #include "memory_audit_bridge.h"  /* route server-side memory mutations onto the audit bus */
+#include "tool_completion_audit_bridge.h" /* route tool-dispatch outcomes onto the audit bus */
 #include <aimee/audit/audit_replay.h> /* --audit-replay: inspect a governed-action capture file */
 #include <signal.h>
 #include <errno.h>
@@ -168,6 +169,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
    vault_audit_bridge_install();   /* route vault credential-access events onto the audit bus */
    sandbox_audit_bridge_install(); /* route sandbox degraded-isolation events onto the audit bus */
    memory_audit_bridge_install();  /* route server-side memory mutations onto the audit bus */
+   tool_completion_audit_bridge_install(); /* route tool-dispatch outcomes onto the audit bus */
 
    /* Activate the GitHub App installation-token provider for the server's forge
     * identity. Inert unless AIMEE_FORGE_APP_* is set (see forge_app_token.c). */

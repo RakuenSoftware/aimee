@@ -51,6 +51,75 @@ static void agent_tools_emit_tool_event(const char *phase, const char *name)
       g_tool_event_cb(phase, name ? name : "", g_tool_event_ud);
 }
 
+/* The completion hook's storage + emit live in agent_tools_completion.c (a light,
+ * dependency-free TU), so a test or a thin client can link the hook mechanism
+ * without the whole dispatcher. This file only classifies the outcome and calls
+ * agent_tools_emit_tool_completion(). */
+
+/* Per-dispatch outcome, thread-local so concurrent dispatches do not clobber each
+ * other. dispatch_tool_call_ctx_inner sets it at the return paths whose verdict is
+ * not derivable from the result string (the refusals, and the outbound mode); the
+ * wrapper classifies the remaining ok/error/timeout from the execution result
+ * WITHOUT ever storing that string. The hook only ever sees these classified
+ * enums, so no argument/result/error content can cross. */
+static __thread const char *g_td_verdict = "ok";
+static __thread const char *g_td_reason = "";
+static __thread const char *g_td_mode = "internal";
+static __thread int g_td_explicit = 0; /* 1 once _inner set a definitive verdict */
+
+/* INVARIANT: no handler reachable from dispatch_tool_call_ctx may synchronously
+ * re-enter dispatch_tool_call_ctx on the same thread. These carriers are reset at
+ * entry with no save/restore, so a nested call would overwrite the outer frame's
+ * outcome. Today every caller is a top-level per-thread entry (agent turn loop,
+ * server_compute, script_rpc) and the MCP-derived provider calls the tool fn
+ * directly, so nesting cannot occur; if an in-process tool-of-tools is ever added,
+ * snapshot/restore these four values around the emit. The same holds for g_served_*
+ * in handle_mcp_call. */
+static void td_outcome_reset(void)
+{
+   g_td_verdict = "ok";
+   g_td_reason = "";
+   g_td_mode = "internal";
+   g_td_explicit = 0;
+}
+/* Record a definitive verdict at a return path (refusal, or a known error). */
+static void td_outcome_set(const char *verdict, const char *reason)
+{
+   g_td_verdict = verdict;
+   g_td_reason = reason;
+   g_td_explicit = 1;
+}
+
+/* The exec family returns a SUCCESS-shaped JSON envelope even on failure
+ * ({stdout,stderr,exit_code} or {status}), so the "error:" prefix heuristic would
+ * mislabel a non-zero exit — the highest-traffic tools — as ok. Classify from the
+ * real signal instead: a non-zero exit_code or status="failed" is an error, a
+ * stderr beginning "refused:" is the fail-closed sandbox refusal. Only the numeric
+ * exit_code, the status string, and a stderr PREFIX are read — no content is
+ * stored; the parsed tree is freed. */
+static int is_exec_tool(const char *name)
+{
+   return strcmp(name, "bash") == 0 || strcmp(name, "execute_script") == 0 ||
+          strcmp(name, "test") == 0 || strcmp(name, "run_tests") == 0;
+}
+
+static void td_classify_exec_result(const char *result)
+{
+   cJSON *r = cJSON_Parse(result);
+   if (!r)
+      return; /* not the JSON envelope; the prefix fallback will run */
+   cJSON *stderr_j = cJSON_GetObjectItem(r, "stderr");
+   cJSON *exit_j = cJSON_GetObjectItem(r, "exit_code");
+   cJSON *status_j = cJSON_GetObjectItem(r, "status");
+   if (cJSON_IsString(stderr_j) && strncmp(stderr_j->valuestring, "refused:", 8) == 0)
+      td_outcome_set("refused", "policy");
+   else if (cJSON_IsNumber(exit_j) && exit_j->valuedouble != 0)
+      td_outcome_set("error", "tool_error");
+   else if (cJSON_IsString(status_j) && strcmp(status_j->valuestring, "failed") == 0)
+      td_outcome_set("error", "tool_error");
+   cJSON_Delete(r);
+}
+
 /* db1_session_write_path_record from db1/session_paths.h — declared
  * locally so the dispatch path doesn't pull the full db1 umbrella. */
 int db1_session_write_path_record(const char *session_id, const char *path);
@@ -1889,8 +1958,32 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
 char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int timeout_ms)
 {
    agent_tools_emit_tool_event("started", name);
+   td_outcome_reset();
    char *result = dispatch_tool_call_ctx_inner(name, arguments_json, timeout_ms);
    agent_tools_emit_tool_event("completed", name);
+
+   /* Completion audit (a no-op unless the server installed a bridge). Fires once
+    * for every return path of _inner. If _inner did not set a definitive verdict:
+    * the exec family carries its outcome in a JSON envelope (classified above from
+    * exit_code/status, not a prefix); every other tool signals failure with a
+    * leading "error:" marker — read only that marker, never the rest of the
+    * string, so no tool output can reach the hook. */
+   if (!g_td_explicit && result && is_exec_tool(name ? name : ""))
+      td_classify_exec_result(result);
+   if (!g_td_explicit && result && strncmp(result, "error: timeout", 14) == 0)
+      td_outcome_set("timeout", "timeout");
+   else if (!g_td_explicit && result && strncmp(result, "error: timed out", 16) == 0)
+      td_outcome_set("timeout", "timeout");
+   else if (!g_td_explicit && result && strncmp(result, "error:", 6) == 0)
+      td_outcome_set("error", "tool_error");
+   {
+      const char *who = session_id();
+      agent_tool_completion_t o = {.actor = (who && who[0]) ? who : "tool",
+                                   .verdict = g_td_verdict,
+                                   .reason_code = g_td_reason,
+                                   .mode = g_td_mode};
+      agent_tools_emit_tool_completion(name ? name : "", &o);
+   }
    return result;
 }
 
@@ -1899,12 +1992,16 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
 {
    cJSON *args = cJSON_Parse(arguments_json);
    if (!args)
+   {
+      td_outcome_set("error", "bad_args");
       return safe_strdup("error: invalid arguments JSON");
+   }
 
    char cancel_msg[128];
    if (tool_dispatch_cancelled(cancel_msg, sizeof(cancel_msg)))
    {
       cJSON_Delete(args);
+      td_outcome_set("refused", "cancelled");
       return safe_strdup(cancel_msg);
    }
 
@@ -1963,6 +2060,7 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
    if (!agent_tools_tool_allowed_for_role(active_role, name))
    {
       cJSON_Delete(args);
+      td_outcome_set("refused", "role");
       return current_code_role_policy_error(
           active_role, "indexed, memory, docs, notes, and remote MCP tools are "
                        "disabled for this role");
@@ -1985,6 +2083,7 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       if (command_uses_aimee_stale_context(command))
       {
          cJSON_Delete(args);
+         td_outcome_set("refused", "role");
          return current_code_role_policy_error(
              active_role, "mutating or broad aimee context commands are disabled for this role");
       }
@@ -2037,6 +2136,7 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       if (shell_cmd && gate && gate(shell_cmd, dispatch_cwd))
       {
          cJSON_Delete(args);
+         td_outcome_set("refused", "policy");
          return safe_strdup(
              "error: run git through aimee, not a shell — use git_status, git_log, "
              "git_diff, git_branch, git_commit, git_push or git_pr. They execute on "
@@ -2085,6 +2185,7 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       {
          /* Tool blocked by guardrails */
          cJSON_Delete(args);
+         td_outcome_set("refused", "guardrail");
          char err[1200];
          snprintf(err, sizeof(err), "error: guardrail blocked: %s", msg);
          return safe_strdup(err);
@@ -2180,6 +2281,21 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       result = td_search_docs(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strchr(name, ':') != NULL)
    {
+      /* Namespaced tool: routed out to an external MCP server. Record the
+       * transport in the mode so the audit distinguishes a local stdio server
+       * from a remote SSE one. */
+      switch (mcp_client_registry_transport_kind(name))
+      {
+      case MCP_TRANSPORT_STDIO:
+         g_td_mode = "outbound:stdio";
+         break;
+      case MCP_TRANSPORT_SSE:
+         g_td_mode = "outbound:sse";
+         break;
+      default:
+         g_td_mode = "outbound";
+         break;
+      }
       cJSON *remote_result = NULL;
       char err_buf[256] = "";
       /* Namespaced "<client>:<tool>". A plugin this server HOSTS (config
@@ -2203,6 +2319,9 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
                                           &remote_result, err_buf, sizeof(err_buf));
       if (rc != 0)
       {
+         /* err_buf is the MCP server's own error text and may echo argument
+          * values; classify to an enum, never let it near the audit fields. */
+         td_outcome_set("error", "tool_error");
          char err[384];
          snprintf(err, sizeof(err), "error: %s mcp tool failed: %s", local ? "remote" : "kb-hosted",
                   err_buf[0] ? err_buf : "unknown error");
@@ -2222,6 +2341,7 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       result = td_mcp_tool(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else
    {
+      td_outcome_set("error", "unknown_tool");
       char err[256];
       const char *suggestion = tool_suggest(name);
       if (suggestion)
