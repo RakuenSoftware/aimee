@@ -127,6 +127,13 @@ BEGIN
   -- as kb_admin_grant: runtime holds DML, RLS constrains it.
   GRANT SELECT, INSERT, UPDATE, DELETE ON kb_team_lead TO aimee_kb_runtime;
 
+  -- kb_write_tier_grant authorizes per-user /v1 writes: same posture again —
+  -- runtime holds DML, RLS constrains who may read and who may change a grant.
+  -- DELETE is deliberately withheld: a grant is revoked (revoked_at set), never
+  -- erased, so the record of who could write and when survives the revocation.
+  GRANT SELECT, INSERT, UPDATE ON kb_write_tier_grant TO aimee_kb_runtime;
+  REVOKE DELETE, TRUNCATE ON kb_write_tier_grant FROM aimee_kb_runtime;
+
   -- The metering functions are the ONLY write path; EXECUTE to runtime, never PUBLIC.
   REVOKE ALL ON FUNCTION org_pricing_add_version(TEXT,TEXT,NUMERIC,NUMERIC,NUMERIC,NUMERIC) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_pricing_current_version(TEXT) FROM PUBLIC;
