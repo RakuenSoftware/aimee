@@ -171,8 +171,7 @@ static void test_kb_federated_tool_dispatches_to_kb(void)
    }
    char *out = dispatch_tool_call("echo:echo", "{\"text\":\"kb-routed\"}", 8000);
    assert(out != NULL);
-   printf("  kb dispatch result: %s\n", out);
-   assert(strstr(out, "echo: kb-routed") != NULL); /* plugin echoed, via server->kb */
+   assert(strstr(out, "echo: kb-routed") != NULL); /* plugin echoed, routed server->kb */
    free(out);
    printf("  PASS: kb_federated_tool_dispatches_to_kb\n");
 }
