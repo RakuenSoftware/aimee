@@ -758,6 +758,9 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 		cost        float64
 		costUnknown bool
 		err         error
+		// transport records that the seat never produced a response at all, so a
+		// dropped seat can say whether the delegate failed or answered unusably.
+		transport bool
 	}
 	requests := make([]DelegateRequest, len(seats))
 	for i, seat := range seats {
@@ -773,8 +776,11 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 		parsed, err := parsePanelResponse(call.Response, call.Err)
 		seat := seats[i]
 		seat.participant = call.Participant
-		outcomes[i] = outcome{seat: seat, result: parsed, raw: call.Response, cost: call.CostUSD, costUnknown: call.CostUnknown, err: err}
-		if err != nil && call.Err == nil && strings.TrimSpace(call.Participant) != "" {
+		outcomes[i] = outcome{seat: seat, result: parsed, raw: call.Response, cost: call.CostUSD, costUnknown: call.CostUnknown, err: err, transport: call.Err != nil}
+		// A verdict that contradicts its own findings carries no more reviewable
+		// signal than unparseable text, so it earns the same one repair attempt.
+		// Without this it was charged against the artifact having never been retried.
+		if call.Err == nil && strings.TrimSpace(call.Participant) != "" && (err != nil || panelVerdictError(parsed) != nil) {
 			repairIndexes = append(repairIndexes, i)
 		}
 	}
@@ -829,18 +835,33 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 		cost += o.cost
 		costUnknown = costUnknown || o.costUnknown
 		if o.err != nil {
-			seatFailures = append(seatFailures, o.seat.persona+": "+o.err.Error())
+			reason := "malformed_after_repair"
+			if o.transport {
+				reason = "delegate_error"
+			}
+			seatFailures = append(seatFailures, o.seat.persona+": "+reason+": "+o.err.Error())
 			voters--
 			continue
 		}
 		if o.result.RunID != req.WorkItem.ID || o.result.ArtifactHash != artifactHash {
-			seatFailures = append(seatFailures, o.seat.persona+": roundtable response identity mismatch")
+			seatFailures = append(seatFailures, o.seat.persona+": identity_mismatch: roundtable response identity mismatch")
 			voters--
 			continue
 		}
 		echoStage, echoOK := normalizeRoundtableStage(o.result.ArtifactStage)
 		if !echoOK || echoStage != artifactStage {
 			feedback.Findings = append(feedback.Findings, wfe.Finding{ID: o.seat.persona + "-artifact-stage", Persona: o.seat.persona, Severity: "blocking", Summary: "reviewer did not evaluate the declared artifact stage", Recommendation: "review the artifact at stage " + artifactStage + " and echo that exact artifact_stage"})
+			continue
+		}
+		// The stage echo is checked above and supersedes this: a seat that reviewed
+		// the wrong stage is a blocking anti-injection failure, never an abstention.
+		// Past that, a verdict still unusable after its repair attempt is absence of
+		// evidence, not evidence of a defect, so the seat abstains exactly like an
+		// unreachable one and min_successful decides. Charging it against the
+		// artifact let one garbled response veto a panel no revision could satisfy.
+		if verdictErr := panelVerdictError(o.result); verdictErr != nil {
+			seatFailures = append(seatFailures, o.seat.persona+": malformed_after_repair: "+verdictErr.Error())
+			voters--
 			continue
 		}
 		reports = append(reports, panelSeatReport{Seat: o.seat, Response: o.result})
@@ -862,16 +883,12 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 				Recommendation: "revise the direction so it directly serves the original request, then rerun the panel",
 			})
 		}
-		if o.result.Verdict == "approve" && len(o.result.Findings) == 0 {
+		if panelVerdict(o.result) == "approve" {
 			// The feedback finding already prevents advancement; also exclude this
 			// vote from quorum so the fail-closed invariant is local and explicit.
 			if alignmentOK {
 				approvals++
 			}
-			continue
-		}
-		if o.result.Verdict != "changes" || len(o.result.Findings) == 0 {
-			feedback.Findings = append(feedback.Findings, wfe.Finding{ID: o.seat.persona + "-malformed", Persona: o.seat.persona, Severity: "blocking", Summary: "reviewer returned a contradictory or incomplete verdict", Recommendation: "return approve with no findings, or changes with actionable findings"})
 			continue
 		}
 		for i, f := range o.result.Findings {
@@ -905,6 +922,33 @@ func remainingCostLimit(limit, spent float64) float64 {
 		return 0
 	}
 	return remaining
+}
+
+// panelVerdictError reports why a parsed seat response is not a usable verdict.
+// Approve carries no findings and changes carries at least one; anything else is
+// a reviewer that contradicted itself, which says nothing about the artifact.
+// panelVerdict is the one normalization of a seat or chairman verdict. Both
+// paths must read the same value: validating one form and branching on another
+// silently turns a usable verdict into a non-vote.
+func panelVerdict(parsed panelResponse) string {
+	return strings.ToLower(strings.TrimSpace(parsed.Verdict))
+}
+
+func panelVerdictError(parsed panelResponse) error {
+	switch panelVerdict(parsed) {
+	case "approve":
+		if len(parsed.Findings) != 0 {
+			return errors.New("approve verdict returned with findings")
+		}
+		return nil
+	case "changes":
+		if len(parsed.Findings) == 0 {
+			return errors.New("changes verdict returned without findings")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unusable verdict %q", parsed.Verdict)
+	}
 }
 
 func parsePanelResponse(response string, delegateErr error) (panelResponse, error) {
