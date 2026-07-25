@@ -21,6 +21,21 @@
 #include <time.h>
 #include <unistd.h>
 
+/* OAuth-credential materialize seam. cli_session avoids a hard link dependency on
+ * the vault (which every test binary linking this TU would otherwise have to pull
+ * in): the REAL implementation lives in server_cli_oauth.c and reads the
+ * (agent, "oauth") secret from the vault. This weak default returns non-zero (no
+ * vaulted token) so binaries that do not link the vault fall back to the legacy
+ * on-disk credential. Returns 0 and fills out on success, non-zero otherwise. */
+__attribute__((weak)) int cli_oauth_vault_materialize_get(const char *agent, char *out,
+                                                          size_t out_len)
+{
+   (void)agent;
+   if (out && out_len)
+      out[0] = '\0';
+   return 1;
+}
+
 /* Run a tmux shell command for the session. On a detached (thin-client)
  * workspace the standard `claude` CLI, tmux, and the working tree live on the
  * CLIENT, so marshal the command over the reverse channel to run there; a
@@ -469,19 +484,35 @@ int cli_session_isolated_claude_home(const char *work_dir, char *home_out, size_
    if (mkdir(cdir, 0700) != 0 && errno != EEXIST)
       return -1;
 
-   /* Share the OAuth token (required to authenticate) and settings.json (MCP
-    * servers + hooks + the auto-updater disable) by symlink. The credential is
-    * mandatory: without it claude cannot auth, so a failed link falls back to the
-    * shared HOME rather than launching an unauthenticated seat. */
+   /* Materialize the OAuth token from the VAULT (single source of truth, written by
+    * the login flow, server-KEK wrapped) into this per-session home. Reading it
+    * from the vault means a re-auth is reflected everywhere without depending on a
+    * HOME-resolved plaintext file (the old symlink diverged when the login wrote
+    * $AIMEE_HOME but the delegate read $HOME). The credential is mandatory: without
+    * it claude cannot auth, so any failure falls back to the shared HOME. Written
+    * 0600 under the already-0700 .claude dir. */
    char src[PATH_MAX], dst[PATH_MAX];
-   if ((size_t)snprintf(src, sizeof(src), "%s/.claude/.credentials.json", shared) >= sizeof(src) ||
-       (size_t)snprintf(dst, sizeof(dst), "%s/.credentials.json", cdir) >= sizeof(dst))
+   if ((size_t)snprintf(dst, sizeof(dst), "%s/.credentials.json", cdir) >= sizeof(dst))
       return -1;
-   /* symlink() happily links to a missing target, so verify the shared token
-    * actually exists — a dangling credential link would launch an unauthenticated
-    * seat. No token -> fall back to the shared HOME. */
-   if (access(src, R_OK) != 0 || symlink(src, dst) != 0)
-      return -1;
+   char cred[8192];
+   if (cli_oauth_vault_materialize_get("claude", cred, sizeof(cred)) == 0 && cred[0])
+   {
+      int wrote = cli_write_file_atomic(dst, cred) == 0;
+      memset(cred, 0, sizeof(cred));
+      if (!wrote)
+         return -1;
+      (void)chmod(dst, 0600);
+   }
+   else
+   {
+      /* Legacy fallback: no vaulted token yet (pre-migration) — symlink the shared
+       * plaintext token. symlink() happily links to a missing target, so verify it
+       * exists first; a dangling link would launch an unauthenticated seat. */
+      if ((size_t)snprintf(src, sizeof(src), "%s/.claude/.credentials.json", shared) >= sizeof(src))
+         return -1;
+      if (access(src, R_OK) != 0 || symlink(src, dst) != 0)
+         return -1;
+   }
    if ((size_t)snprintf(src, sizeof(src), "%s/.claude/settings.json", shared) < sizeof(src) &&
        (size_t)snprintf(dst, sizeof(dst), "%s/settings.json", cdir) < sizeof(dst))
       (void)symlink(src, dst); /* helpful, not fatal */
@@ -524,6 +555,35 @@ int cli_session_isolated_claude_home(const char *work_dir, char *home_out, size_
       return -1;
 
    snprintf(home_out, home_out_sz, "%s", home);
+   return 0;
+}
+
+/* Materialize the codex OAuth token from the VAULT into the shared codex home
+ * (<home>/.codex/auth.json) before a codex delegate launches. codex delegates are
+ * not per-session isolated (unlike claude), so they read the shared file; refresh
+ * it from the vault (single source of truth) each launch so a re-auth takes effect
+ * without a stale plaintext file. Best-effort: returns 0 on success or when the
+ * vault has no codex token yet (legacy: the existing file, if any, is left as-is),
+ * -1 only on a write failure. Written 0600 under a 0700 .codex dir. */
+int cli_session_materialize_codex_oauth(void)
+{
+   char cred[8192];
+   if (cli_oauth_vault_materialize_get("codex", cred, sizeof(cred)) != 0 || !cred[0])
+      return 0; /* no vaulted codex token — leave any legacy file untouched */
+   const char *home = cli_claude_home(); /* process HOME (vendor-agnostic) */
+   char dir[PATH_MAX], dst[PATH_MAX];
+   if ((size_t)snprintf(dir, sizeof(dir), "%s/.codex", home) >= sizeof(dir) ||
+       (size_t)snprintf(dst, sizeof(dst), "%s/auth.json", dir) >= sizeof(dst))
+   {
+      memset(cred, 0, sizeof(cred));
+      return -1;
+   }
+   mkdir(dir, 0700); /* ignore EEXIST */
+   int wrote = cli_write_file_atomic(dst, cred) == 0;
+   memset(cred, 0, sizeof(cred));
+   if (!wrote)
+      return -1;
+   (void)chmod(dst, 0600);
    return 0;
 }
 

@@ -129,6 +129,18 @@ void cli_session_prepare_claude(const char *work_dir, int autonomous);
  * Reaps per-session homes older than an hour on each call. */
 int cli_session_isolated_claude_home(const char *work_dir, char *home_out, size_t home_out_sz);
 
+/* Refresh the shared codex OAuth token file (<home>/.codex/auth.json) from the
+ * vault before a codex delegate launches, so the vault stays the single source of
+ * truth. Best-effort: 0 on success or when no codex token is vaulted (legacy file
+ * left as-is), -1 only on a write failure. */
+int cli_session_materialize_codex_oauth(void);
+
+/* Materialize seam: read the vaulted (agent, "oauth") token into `out`. The strong
+ * implementation (server_cli_oauth.c) reads the vault; a weak default in
+ * cli_session.c returns non-zero so binaries without the vault fall back to the
+ * legacy on-disk credential. Returns 0 (token written) or non-zero (no entry). */
+int cli_oauth_vault_materialize_get(const char *agent, char *out, size_t out_len);
+
 /* Hand a minted isolated HOME (from cli_session_isolated_claude_home) to the
  * session so cli_session_destroy reclaims it on exit. Copies `home`; pass NULL to
  * clear. Call after a successful cli_session_create so every teardown path (error
