@@ -78,6 +78,7 @@ static int cli_session_execute_inner(const agent_t *agent, const agent_network_t
     * substring match: this gates --dangerously-skip-permissions and the config
     * seeding, so it must not fire for an unrelated agent named e.g. "claudette". */
    int is_claude = strcmp(kind, "claude") == 0 || strncmp(kind, "claude-", 7) == 0;
+   int is_codex = strcmp(kind, "codex") == 0 || strncmp(kind, "codex-", 6) == 0;
    char cli_cmd_buf[CLI_SESSION_CMD_MAX];
    const char *cli_cmd = base_cmd;
    int need_model = agent->model[0] && !strstr(base_cmd, "--model") && !strstr(base_cmd, " -m ");
@@ -141,6 +142,10 @@ static int cli_session_execute_inner(const agent_t *agent, const agent_network_t
             cli_cmd = cli_cmd_home;
       }
    }
+   /* codex is not per-session isolated; refresh its shared token file from the
+    * vault (single source of truth) so a re-auth takes effect before this launch. */
+   if (is_codex && deleg)
+      (void)cli_session_materialize_codex_oauth();
 
    /* Prefix the launched CLI command with a per-session AIMEE_SESSION_ID assignment
     * (`AIMEE_SESSION_ID=<sid> <cli_cmd>` run by `/bin/sh -c`) so the PreToolUse hook
