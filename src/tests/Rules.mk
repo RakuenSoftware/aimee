@@ -4088,6 +4088,7 @@ $(TESTPREFIX)/unit-test-db1-agent-job-heartbeat: \
 $(TESTPREFIX)/unit-test-server-delegate-monitor: \
                                        $(OBJDIR)/tests/test_server_delegate_monitor.o \
                                        $(OBJDIR)/server/server_delegate_monitor.o \
+                                       $(OBJDIR)/server/agent_admission.o \
                                        $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                        $(OBJDIR)/db1/agent_jobs.o $(OBJDIR)/log.o \
                                        $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
