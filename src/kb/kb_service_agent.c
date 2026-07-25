@@ -57,6 +57,18 @@ int kb_handle_tool_registry_snapshot(int fd, cJSON *req)
 {
    (void)req;
    cJSON *resp = db2_kb_service_tool_registry_snapshot_json();
+   if (resp)
+   {
+      /* Federate the tool DEFS of MCP plugins THIS kb hosts (config install: kb)
+       * alongside the tool prompts, so servers can merge them into tools/list and
+       * route calls back here (kb_client_mcp_call). Absent/empty when this kb
+       * hosts no plugins. */
+      cJSON *mcp_tools = mcp_client_registry_build_namespaced_tools(1000);
+      if (cJSON_IsArray(mcp_tools) && cJSON_GetArraySize(mcp_tools) > 0)
+         cJSON_AddItemToObject(resp, "mcp_tools", mcp_tools);
+      else
+         cJSON_Delete(mcp_tools);
+   }
    return kb_reply_or_error(fd, resp, "tool_registry snapshot failed");
 }
 
