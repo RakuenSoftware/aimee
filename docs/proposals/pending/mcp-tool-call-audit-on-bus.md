@@ -158,13 +158,48 @@ absolute:
   NULL-default hook (no bus symbols); only the new bridge object, linked into
   aimee-server, references the bus.
 
-## Rollout
+## Implementation status — LANDED (this PR)
 
-1. Land the tools-dispatch completion hook + fire site(s), NULL-default — no
-   behavior change, no bridge yet. Resolve the served-path question first.
-2. Land the bridge + install in `server_main.c` + the tests above.
+The dispatch-layer completion audit is implemented:
+
+- **Hook.** A process-global, NULL-default completion hook lives in a new
+  dependency-free TU `modules/tools/agent_tools_completion.c` (so the dispatcher's
+  many callers — and a thin client — link the hook mechanism without the bus, and
+  the tools module stays bus-free for D7). `dispatch_tool_call_ctx` resets a
+  thread-local outcome, runs the call, and fires the hook once on the way out.
+- **Verdict/reason.** Set at every refusal/error return path of the dispatcher as
+  fixed enums (`cancelled` / `role` / `policy` / `guardrail` / `bad_args` /
+  `unknown_tool` / `tool_error`); the ok/error/timeout of a normal execution is
+  classified from the result string's leading marker only — the string itself is
+  never stored or passed on, so `err_buf` (and all content) stays out of the audit
+  fields.
+- **Bridge.** `server/tool_completion_audit_bridge.c`, installed in
+  `server_main.c` next to vault/sandbox/memory, maps the outcome onto
+  `obs_bus_emit` (name-only `args_hash`, empty `command`, no content).
+- **Test.** `test_bus_tool_completion` drives the real bridge → obs_bus → ledger
+  and asserts verdict/mode/reason_code, identity-only rows, a sentinel absent
+  everywhere, and that every `reason_code` is a fixed enum value. Wired into
+  `check_bus_perf_gate.sh`. D7 gate green.
+
+**Two deliberate follow-ons (documented, not in this PR):**
+
+- **`mode` is `internal` / `outbound` / `served`, not `outbound:stdio|sse` yet.**
+  The precise transport lives on the MCP session; reporting it means adding an
+  out-param to `mcp_client_registry_call_tool` / `mcp_client_call_tool`. Deferred
+  to keep this PR to the dispatch layer; the audit contract (`mode` string) is
+  forward-compatible with the finer value.
+- **Served-call OUTCOME.** External clients invoking aimee's tools over the gateway
+  (`handle_mcp_call`) already get an *identity* audit row via `pre_tool_check`
+  (`server.c:1030`), so the served surface is not unaudited. Recording the served
+  *outcome* (a second completion emit at `handle_mcp_call`) is the remaining
+  increment.
+
+## Original rollout (for reference)
+
+1. Land the tools-dispatch completion hook + fire site(s), NULL-default. *(done)*
+2. Land the bridge + install in `server_main.c` + the tests above. *(done)*
 3. Multi-agent convergence review focused on the err_buf/reason_code fence and the
-   refused-path coverage, then merge.
+   refused-path coverage, then merge. *(review welcome on this PR)*
 
 ## What the review corrected (for the record)
 

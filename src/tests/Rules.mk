@@ -2938,6 +2938,33 @@ $(TESTPREFIX)/unit-test-bus-sandbox-audit: $(OBJDIR)/tests/test_bus_sandbox_audi
 unit-test-bus-sandbox-audit: $(TESTPREFIX)/unit-test-bus-sandbox-audit
 	$<
 
+# Tool-call completion audit, through the REAL server bridge
+# (tool_completion_audit_bridge.o) -> obs_bus -> ledger. Links the dep-free hook
+# TU (agent_tools_completion.o) — NOT the whole tool dispatcher — and drives it
+# via that TU's test seam.
+$(TESTPREFIX)/unit-test-bus-tool-completion: $(OBJDIR)/tests/test_bus_tool_completion.o \
+                                             $(OBJDIR)/server/tool_completion_audit_bridge.o \
+                                             $(OBJDIR)/modules/tools/agent_tools_completion.o \
+                                             $(OBJDIR)/modules/audit/obs_bus.o \
+                                             $(OBJDIR)/modules/audit/audit_ledger.o \
+                                             $(OBJDIR)/modules/audit/audit_action.o \
+                                             $(OBJDIR)/modules/workflows/wfe_canonical.o \
+                                             $(OBJDIR)/aimee_home.o \
+                                             $(OBJDIR)/modules/bus/bus_client.o \
+                                             $(OBJDIR)/modules/bus/bus_host.o \
+                                             $(OBJDIR)/modules/bus/bus_route.o \
+                                             $(OBJDIR)/modules/bus/bus_region.o \
+                                             $(OBJDIR)/modules/bus/bus_ring.o \
+                                             $(OBJDIR)/modules/bus/bus_arena.o \
+                                             $(OBJDIR)/modules/bus/bus_wire.o \
+                                             $(OBJDIR)/modules/bus/bus_capture.o \
+                                             $(BUS_MEM_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+
+.PHONY: unit-test-bus-tool-completion
+unit-test-bus-tool-completion: $(TESTPREFIX)/unit-test-bus-tool-completion
+	$<
+
 # Server-side memory-mutation audit, end-to-end through the REAL bridge
 # (memory_audit_bridge.o) -> obs_bus -> ledger. Links the dep-free hook TU
 # (kb_client_memory_audit.o) — NOT the whole kb_client RPC stack.
@@ -4959,6 +4986,7 @@ $(TESTPREFIX)/unit-test-agent-http: $(OBJDIR)/tests/test_agent_http.o \
 $(TESTPREFIX)/unit-test-mcp-native-dispatch: \
                                        $(OBJDIR)/tests/test_mcp_native_dispatch.o \
                                        $(OBJDIR)/modules/tools/agent_tools_dispatch.o \
+                                       $(OBJDIR)/modules/tools/agent_tools_completion.o \
                                        $(OBJDIR)/server/agent_tools.o \
                                        $(OBJDIR)/toolset.o \
                                        $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)

@@ -141,6 +141,20 @@ if ! printf '%s\n' "$mem_out" | grep -q "test_bus_memory_audit: OK"; then
 fi
 echo "memory audit: ok (mutation -> bridge -> bus -> ledger; no content)"
 
+# 6b. The tool-call completion audit trail: every completed tool dispatch's OUTCOME
+#     (verdict / mode / reason_code) flows through the REAL bridge -> obs_bus ->
+#     ledger as identity-only, with no argument/result/error content on any field.
+echo "checking tool-call completion audit trail..."
+tc_out=$(make -C src --no-print-directory unit-test-bus-tool-completion 2>&1 || true)
+if ! printf '%s\n' "$tc_out" | grep -q "test_bus_tool_completion: OK"; then
+   echo "" >&2
+   echo "FAIL: the tool-completion-on-bus audit test did not pass — a tool outcome is" >&2
+   echo "      not being recorded correctly through the bridge, or content leaked." >&2
+   printf '%s\n' "$tc_out" | tail -8 >&2
+   exit 1
+fi
+echo "tool-completion audit: ok (dispatch outcome -> bridge -> bus -> ledger; no content)"
+
 # 7. The KB store-side memory audit: memory_core_crud fires the hook on every
 #    mutation (insert / merge / update / reject / delete) and, end-to-end, the REAL
 #    aimee-kb bridge lands a fingerprinted, content-free row in the KB ledger.
