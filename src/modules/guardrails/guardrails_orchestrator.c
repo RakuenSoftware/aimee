@@ -17,7 +17,7 @@
 #include "workspace_turn.h" /* workspace_turn_container_bound — relax file guards for a container delegate */
 #include "config.h"
 #include "git_verify.h"
-#include "skill.h"
+#include <aimee/skills/skill.h>
 #include "kb_client.h"
 #if !defined(AIMEE_DB2_DISABLED)
 #include "kb_reasoning.h"

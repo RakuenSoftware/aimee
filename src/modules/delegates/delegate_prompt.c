@@ -3,7 +3,7 @@
 #include "agent_config.h"
 #include "agent_coord.h"
 #include "config.h"
-#include "delegate_role.h"
+#include <aimee/delegates/delegate_role.h>
 #include "kb_client.h"
 #include "log.h"
 #include "persona.h"

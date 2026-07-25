@@ -1,7 +1,7 @@
 /* test_kb_curator_llm.c: curator stage->LLM dispatch (curator-llm-backend §2b).
  * Provider path is driven through the mocked agent_http_post; the sidecar
  * fallback path is the unchanged kb_curator_sidecar_run and not re-tested here. */
-#include "kb/kb_curator_llm.h"
+#include "kb_curator_llm.h"
 
 #include "config.h"
 #include "support/mock_agent_http.h"

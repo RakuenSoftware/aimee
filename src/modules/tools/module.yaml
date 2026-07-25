@@ -1,0 +1,32 @@
+{
+  "descriptor_version": 1,
+  "id": "tools",
+  "dependencies": [
+    "audit",
+    "config",
+    "execution-policy",
+    "ir",
+    "module-runtime",
+    "vault",
+    "workspace"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  },
+  "ownership_complete": true,
+  "sources": [
+    "src/modules/tools/agent_tools.c",
+    "src/modules/tools/agent_tools_anchored.c",
+    "src/modules/tools/agent_tools_dispatch.c"
+  ],
+  "private_headers": [
+    "src/modules/tools/agent_tools.h",
+    "src/modules/tools/agent_tools_internal.h"
+  ],
+  "tests": [
+    "src/tests/test_tool_output_cap.c"
+  ],
+  "docs": [
+    "docs/modules/tools.md"
+  ]
+}

@@ -9,8 +9,8 @@
 #include "server_coord_dispatcher.h"
 #include "server.h"
 #include "server_compute_impl.h"
-#include "gw_orch_delegates.h"
-#include "delegate_role.h" /* delegate_role_is_write — force tools for coord write tasks */
+#include <aimee/delegates/gw_orch_delegates.h>
+#include <aimee/delegates/delegate_role.h> /* delegate_role_is_write — force tools for coord write tasks */
 #include "config.h"
 #include "db1.h"
 #include "log.h"

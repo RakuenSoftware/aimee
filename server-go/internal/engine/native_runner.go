@@ -318,6 +318,23 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	if err != nil {
 		return StepResult{}, err
 	}
+	// A slice worktree is cut off aimee/feat/<parent> once, at creation. Sibling
+	// slices merge into that feature branch afterwards, but the reused worktree is
+	// never re-synced — so a dependent slice runs against a base missing its
+	// prerequisites, produces no diff, and parks convergence_no_progress. Integrate
+	// the feature branch here, at code-mutating entry (implement/document + its TDD
+	// pre-step below), so this attempt sees siblings that have merged since. Not done
+	// at freeze/pr/ci/merge — those must observe a stable diff.
+	if req.WorkItem.ParentID != "" {
+		parkReason, integErr := integrateFeatureBase(ctx, workdir, req.WorkItem.ParentID)
+		if integErr != nil {
+			return StepResult{}, integErr
+		}
+		if parkReason != "" {
+			return StepResult{Status: StepPending, PauseReason: parkReason,
+				Detail: "conflict merging aimee/feat/" + req.WorkItem.ParentID + " into slice"}, nil
+		}
+	}
 	prompt := "Implement the complete approved task in this worktree, run the repository verification, fix failures, and leave the accepted changes in the worktree."
 	if docs {
 		prompt = "Document the complete implemented change in this worktree. Update the appropriate user and developer documentation and inline comments; leave the accepted changes in the worktree."
@@ -459,6 +476,43 @@ func commitChanges(ctx context.Context, workdir, stage string) error {
 	return err
 }
 
+// integrateFeatureBase merges the parent feature branch (aimee/feat/<parentID>)
+// into a slice worktree so a dependent slice picks up siblings that merged after
+// its worktree was cut. aimee/feat/<parent> is a LOCAL ref that sibling merge
+// steps advance in the shared ref store, so this is a pure-local merge — no fetch,
+// which also keeps this off the fleet-wide credential rate limiter. It merges
+// (never rebases) to preserve SHAs the downstream merge-into-feature and PR diff
+// depend on.
+//
+// Returns ("", nil) when there is nothing to integrate (base absent, or already an
+// ancestor of HEAD) or the merge succeeds. On a conflicting/failed merge it never
+// leaves a half-merged tree: it aborts, hard-resets as a last resort to guarantee a
+// clean worktree, and returns the park reason "base_integration_conflict" so the
+// slice surfaces distinctly instead of masquerading as convergence_no_progress or
+// poisoning the reused worktree.
+func integrateFeatureBase(ctx context.Context, workdir, parentID string) (string, error) {
+	base := "aimee/feat/" + parentID
+	// The feature branch may not exist yet (first generation, before any slice has
+	// merged into it) — nothing to integrate.
+	if _, err := gitText(ctx, workdir, "rev-parse", "--verify", "--quiet", base+"^{commit}"); err != nil {
+		return "", nil
+	}
+	// Already contains the base tip: merge would be a no-op.
+	if _, err := gitText(ctx, workdir, "merge-base", "--is-ancestor", base, "HEAD"); err == nil {
+		return "", nil
+	}
+	if _, err := gitText(ctx, workdir, "-c", "user.name=aimee-wfe", "-c", "user.email=wfe@aimee.local",
+		"merge", "--no-edit", base); err == nil {
+		return "", nil
+	}
+	// Merge failed (conflict or otherwise): restore a clean worktree before parking.
+	_, _ = gitText(ctx, workdir, "merge", "--abort")
+	if status, _ := gitText(ctx, workdir, "status", "--porcelain"); status != "" {
+		_, _ = gitText(ctx, workdir, "reset", "--hard", "HEAD")
+	}
+	return "base_integration_conflict", nil
+}
+
 func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult, error) {
 	item, err := r.db.WorkItem(ctx, req.WorkItem.ID)
 	if err != nil {
@@ -481,6 +535,14 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 	diff, err := gitText(ctx, workdir, "--no-pager", "diff", base+"...HEAD")
 	if err != nil {
 		return StepResult{}, err
+	}
+	if strings.TrimSpace(diff) == "" {
+		// The slice produced no net change vs its base — its work is already present
+		// (e.g. a sibling merged it and base-integration pulled it in) or the task was
+		// a no-op. Freezing an empty diff sends an empty artifact through review, which
+		// rejects it, looping the slice to convergence_no_progress. There is nothing to
+		// review, PR, or merge, so complete the slice as an accepted no-op.
+		return StepResult{Status: StepAccepted, Detail: "no-op: empty diff vs base"}, nil
 	}
 	return StepResult{Status: StepAdvanced, ArtifactType: "frozen_diff", Artifact: diff, ContentHash: wfe.Hash([]byte(diff))}, nil
 }

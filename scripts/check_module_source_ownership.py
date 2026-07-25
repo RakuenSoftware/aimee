@@ -1,0 +1,547 @@
+#!/usr/bin/env python3
+"""Enforce canonical source ownership for landed modularization slices."""
+
+from __future__ import annotations
+
+import argparse
+from dataclasses import dataclass
+import json
+from pathlib import Path
+import re
+import sys
+
+
+@dataclass(frozen=True)
+class Contract:
+    module: str
+    legacy_source: str
+    legacy_header: str
+    canonical_source: str
+    canonical_header: str
+    canonical_include: str
+    make_source: str
+    cmake_source: str | None
+    legacy_cmake_source: str | None
+    test_object: str
+    legacy_test_object: str
+    consumers: tuple[str, ...]
+    document: str
+    document_markers: tuple[str, ...]
+    test_cmake_source: str | None = None
+    legacy_test_cmake_source: str | None = None
+
+
+CONTRACTS = (
+    Contract(
+        module="module-runtime-pre-llm-hook",
+        legacy_source="src/plugin_c_hook.c",
+        legacy_header="src/headers/plugin_c_hook.h",
+        canonical_source="src/modules/module-runtime/pre_llm_hook.c",
+        canonical_header="src/modules/module-runtime/include/aimee/module-runtime/pre_llm_hook.h",
+        canonical_include="aimee/module-runtime/pre_llm_hook.h",
+        make_source="modules/module-runtime/pre_llm_hook.c",
+        cmake_source="${AIMEE_SRC_DIR}/modules/module-runtime/pre_llm_hook.c",
+        legacy_cmake_source="${AIMEE_SRC_DIR}/plugin_c_hook.c",
+        test_object="$(OBJDIR)/modules/module-runtime/pre_llm_hook.o",
+        legacy_test_object="$(OBJDIR)/plugin_c_hook.o",
+        consumers=(
+            "src/modules/module-runtime/pre_llm_hook.c",
+            "src/server/agent_runtime.c",
+            "src/tests/test_plugin_c_hook.c",
+        ),
+        document="docs/modules/module-runtime.md",
+        document_markers=("system prompt", "plugin_chook_apply_pre_llm"),
+    ),
+    Contract(
+        module="gateway-pipeline",
+        legacy_source="src/gateway_pipeline.c",
+        legacy_header="src/headers/gateway_pipeline.h",
+        canonical_source="src/modules/gateway/gateway_pipeline.c",
+        canonical_header="src/modules/gateway/include/aimee/gateway/gateway_pipeline.h",
+        canonical_include="aimee/gateway/gateway_pipeline.h",
+        make_source="modules/gateway/gateway_pipeline.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/gateway/gateway_pipeline.o",
+        legacy_test_object="$(OBJDIR)/gateway_pipeline.o",
+        consumers=(
+            "src/modules/gateway/gateway_pipeline.c",
+            "src/tests/test_gateway_pipeline.c",
+        ),
+        document="docs/modules/gateway.md",
+        document_markers=("gw_pipeline_run_request", "canonical include namespace"),
+    ),
+    Contract(
+        module="gateway-policy",
+        legacy_source="src/gateway_policy.c",
+        legacy_header="src/headers/gateway_policy.h",
+        canonical_source="src/modules/gateway/gateway_policy.c",
+        canonical_header="src/modules/gateway/include/aimee/gateway/gateway_policy.h",
+        canonical_include="aimee/gateway/gateway_policy.h",
+        make_source="modules/gateway/gateway_policy.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/gateway/gateway_policy.o",
+        legacy_test_object="$(OBJDIR)/gateway_policy.o",
+        consumers=(
+            "src/modules/gateway/gateway_policy.c",
+            "src/tests/test_gateway_policy.c",
+        ),
+        document="docs/modules/gateway.md",
+        document_markers=("gateway_policy_apply_request", "canonical include namespace"),
+    ),
+    Contract(
+        module="gateway-delegate",
+        legacy_source="src/gateway_delegate.c",
+        legacy_header="src/headers/gateway_delegate.h",
+        canonical_source="src/modules/gateway/gateway_delegate.c",
+        canonical_header="src/modules/gateway/include/aimee/gateway/gateway_delegate.h",
+        canonical_include="aimee/gateway/gateway_delegate.h",
+        make_source="modules/gateway/gateway_delegate.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/gateway/gateway_delegate.o",
+        legacy_test_object="$(OBJDIR)/gateway_delegate.o",
+        consumers=(
+            "src/modules/gateway/gateway_delegate.c",
+            "src/tests/test_gateway_p4_delegate.c",
+        ),
+        document="docs/modules/gateway.md",
+        document_markers=("gateway_delegate_run_request_pipeline", "canonical include namespace"),
+    ),
+    Contract(
+        module="ir-messaging",
+        legacy_source="src/server/aimee_ir.c",
+        legacy_header="src/headers/aimee_ir.h",
+        canonical_source="src/modules/ir/aimee_ir.c",
+        canonical_header="src/modules/ir/include/aimee/ir/aimee_ir.h",
+        canonical_include="aimee/ir/aimee_ir.h",
+        make_source="modules/ir/aimee_ir.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/ir/aimee_ir.o",
+        legacy_test_object="$(OBJDIR)/server/aimee_ir.o",
+        consumers=(
+            "src/modules/ir/aimee_ir.c",
+            "src/tests/test_aimee_ir.c",
+        ),
+        document="docs/modules/ir.md",
+        document_markers=("provider-neutral message model", "canonical include namespace"),
+        test_cmake_source="../modules/ir/aimee_ir.c",
+        legacy_test_cmake_source="../server/aimee_ir.c",
+    ),
+    Contract(
+        module="ir-metrics",
+        legacy_source="src/server/aimee_ir_metrics.c",
+        legacy_header="src/headers/aimee_ir_metrics.h",
+        canonical_source="src/modules/ir/aimee_ir_metrics.c",
+        canonical_header="src/modules/ir/include/aimee/ir/aimee_ir_metrics.h",
+        canonical_include="aimee/ir/aimee_ir_metrics.h",
+        make_source="modules/ir/aimee_ir_metrics.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/ir/aimee_ir_metrics.o",
+        legacy_test_object="$(OBJDIR)/server/aimee_ir_metrics.o",
+        consumers=(
+            "src/modules/ir/aimee_ir_metrics.c",
+            "src/tests/test_aimee_ir_metrics.c",
+        ),
+        document="docs/modules/ir.md",
+        document_markers=("IR-local metrics", "canonical include namespace"),
+        test_cmake_source="../modules/ir/aimee_ir_metrics.c",
+        legacy_test_cmake_source="../server/aimee_ir_metrics.c",
+    ),
+    Contract(
+        module="translation-frontend-anthropic",
+        legacy_source="src/server/aimee_frontend_anthropic.c",
+        legacy_header="src/headers/aimee_frontend.h",
+        canonical_source="src/modules/translation/aimee_frontend_anthropic.c",
+        canonical_header="src/modules/translation/include/aimee/translation/aimee_frontend.h",
+        canonical_include="aimee/translation/aimee_frontend.h",
+        make_source="modules/translation/aimee_frontend_anthropic.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/translation/aimee_frontend_anthropic.o",
+        legacy_test_object="$(OBJDIR)/server/aimee_frontend_anthropic.o",
+        consumers=(
+            "src/modules/translation/aimee_frontend_anthropic.c",
+            "src/tests/test_aimee_frontend.c",
+        ),
+        document="docs/modules/translation.md",
+        document_markers=("parse-to-canonical", "canonical ingress adapters"),
+        test_cmake_source="../modules/translation/aimee_frontend_anthropic.c",
+        legacy_test_cmake_source="../server/aimee_frontend_anthropic.c",
+    ),
+    Contract(
+        module="translation-frontend-openai",
+        legacy_source="src/server/aimee_frontend_openai.c",
+        legacy_header="src/headers/aimee_frontend.h",
+        canonical_source="src/modules/translation/aimee_frontend_openai.c",
+        canonical_header="src/modules/translation/include/aimee/translation/aimee_frontend.h",
+        canonical_include="aimee/translation/aimee_frontend.h",
+        make_source="modules/translation/aimee_frontend_openai.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/translation/aimee_frontend_openai.o",
+        legacy_test_object="$(OBJDIR)/server/aimee_frontend_openai.o",
+        consumers=(
+            "src/modules/translation/aimee_frontend_openai.c",
+            "src/tests/test_aimee_frontend.c",
+        ),
+        document="docs/modules/translation.md",
+        document_markers=("parse-to-canonical", "canonical ingress adapters"),
+        test_cmake_source="../modules/translation/aimee_frontend_openai.c",
+        legacy_test_cmake_source="../server/aimee_frontend_openai.c",
+    ),
+    Contract(
+        module="translation-frontend-responses",
+        legacy_source="src/server/aimee_frontend_responses.c",
+        legacy_header="src/headers/aimee_frontend.h",
+        canonical_source="src/modules/translation/aimee_frontend_responses.c",
+        canonical_header="src/modules/translation/include/aimee/translation/aimee_frontend.h",
+        canonical_include="aimee/translation/aimee_frontend.h",
+        make_source="modules/translation/aimee_frontend_responses.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/translation/aimee_frontend_responses.o",
+        legacy_test_object="$(OBJDIR)/server/aimee_frontend_responses.o",
+        consumers=(
+            "src/modules/translation/aimee_frontend_responses.c",
+            "src/tests/test_aimee_frontend.c",
+        ),
+        document="docs/modules/translation.md",
+        document_markers=("parse-to-canonical", "canonical ingress adapters"),
+        test_cmake_source="../modules/translation/aimee_frontend_responses.c",
+        legacy_test_cmake_source="../server/aimee_frontend_responses.c",
+    ),
+    Contract(
+        module="translation-backend-anthropic",
+        legacy_source="src/server/aimee_backend_anthropic.c",
+        legacy_header="src/headers/aimee_backend.h",
+        canonical_source="src/modules/translation/aimee_backend_anthropic.c",
+        canonical_header="src/modules/translation/include/aimee/translation/aimee_backend.h",
+        canonical_include="aimee/translation/aimee_backend.h",
+        make_source="modules/translation/aimee_backend_anthropic.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/translation/aimee_backend_anthropic.o",
+        legacy_test_object="$(OBJDIR)/server/aimee_backend_anthropic.o",
+        consumers=(
+            "src/modules/translation/aimee_backend_anthropic.c",
+            "src/tests/test_aimee_backend.c",
+        ),
+        document="docs/modules/translation.md",
+        document_markers=("canonical egress", "wire-to-canonical"),
+        test_cmake_source="../modules/translation/aimee_backend_anthropic.c",
+        legacy_test_cmake_source="../server/aimee_backend_anthropic.c",
+    ),
+    Contract(
+        module="translation-backend-openai",
+        legacy_source="src/server/aimee_backend_openai.c",
+        legacy_header="src/headers/aimee_backend.h",
+        canonical_source="src/modules/translation/aimee_backend_openai.c",
+        canonical_header="src/modules/translation/include/aimee/translation/aimee_backend.h",
+        canonical_include="aimee/translation/aimee_backend.h",
+        make_source="modules/translation/aimee_backend_openai.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/translation/aimee_backend_openai.o",
+        legacy_test_object="$(OBJDIR)/server/aimee_backend_openai.o",
+        consumers=(
+            "src/modules/translation/aimee_backend_openai.c",
+            "src/tests/test_aimee_backend.c",
+        ),
+        document="docs/modules/translation.md",
+        document_markers=("canonical egress", "wire-to-canonical"),
+        test_cmake_source="../modules/translation/aimee_backend_openai.c",
+        legacy_test_cmake_source="../server/aimee_backend_openai.c",
+    ),
+    Contract(
+        module="translation-backend-responses",
+        legacy_source="src/server/aimee_backend_responses.c",
+        legacy_header="src/headers/aimee_backend.h",
+        canonical_source="src/modules/translation/aimee_backend_responses.c",
+        canonical_header="src/modules/translation/include/aimee/translation/aimee_backend.h",
+        canonical_include="aimee/translation/aimee_backend.h",
+        make_source="modules/translation/aimee_backend_responses.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/translation/aimee_backend_responses.o",
+        legacy_test_object="$(OBJDIR)/server/aimee_backend_responses.o",
+        consumers=(
+            "src/modules/translation/aimee_backend_responses.c",
+            "src/tests/test_aimee_backend.c",
+        ),
+        document="docs/modules/translation.md",
+        document_markers=("canonical egress", "wire-to-canonical"),
+        test_cmake_source="../modules/translation/aimee_backend_responses.c",
+        legacy_test_cmake_source="../server/aimee_backend_responses.c",
+    ),
+    Contract(
+        module="translation-backend-bedrock",
+        legacy_source="src/server/aimee_backend_bedrock.c",
+        legacy_header="src/headers/aimee_backend.h",
+        canonical_source="src/modules/translation/aimee_backend_bedrock.c",
+        canonical_header="src/modules/translation/include/aimee/translation/aimee_backend.h",
+        canonical_include="aimee/translation/aimee_backend.h",
+        make_source="modules/translation/aimee_backend_bedrock.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/translation/aimee_backend_bedrock.o",
+        legacy_test_object="$(OBJDIR)/server/aimee_backend_bedrock.o",
+        consumers=(
+            "src/modules/translation/aimee_backend_bedrock.c",
+            "src/tests/test_aimee_backend_bedrock.c",
+        ),
+        document="docs/modules/translation.md",
+        document_markers=("canonical egress", "wire-to-canonical"),
+        test_cmake_source=None,
+        legacy_test_cmake_source=None,
+    ),
+    Contract(
+        module="translation-streaming",
+        legacy_source="src/server/aimee_ir_stream.c",
+        legacy_header="src/headers/aimee_ir_stream.h",
+        canonical_source="src/modules/translation/aimee_ir_stream.c",
+        canonical_header="src/modules/translation/include/aimee/translation/aimee_ir_stream.h",
+        canonical_include="aimee/translation/aimee_ir_stream.h",
+        make_source="modules/translation/aimee_ir_stream.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/translation/aimee_ir_stream.o",
+        legacy_test_object="$(OBJDIR)/server/aimee_ir_stream.o",
+        consumers=(
+            "src/modules/translation/aimee_ir_stream.c",
+            "src/tests/test_aimee_ir_stream.c",
+            "src/tests/test_aimee_converse_stream.c",
+        ),
+        document="docs/modules/translation.md",
+        document_markers=("Canonical streaming conversion", "bounded state"),
+        test_cmake_source="../modules/translation/aimee_ir_stream.c",
+        legacy_test_cmake_source="../server/aimee_ir_stream.c",
+    ),
+    Contract(
+        module="delegates-ir-rescue",
+        legacy_source="src/server/aimee_ir_rescue.c",
+        legacy_header="src/headers/aimee_ir_rescue.h",
+        canonical_source="src/modules/delegates/aimee_ir_rescue.c",
+        canonical_header=(
+            "src/modules/delegates/include/aimee/delegates/aimee_ir_rescue.h"
+        ),
+        canonical_include="aimee/delegates/aimee_ir_rescue.h",
+        make_source="modules/delegates/aimee_ir_rescue.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/delegates/aimee_ir_rescue.o",
+        legacy_test_object="$(OBJDIR)/server/aimee_ir_rescue.o",
+        consumers=(
+            "src/modules/delegates/aimee_ir_rescue.c",
+            "src/posix/agent_ir_parse.c",
+            "src/tests/test_aimee_ir_rescue.c",
+        ),
+        document="docs/modules/delegates.md",
+        document_markers=("IR-side prose tool-call rescue", "aimee_ir_rescue_tool_calls"),
+        test_cmake_source=None,
+        legacy_test_cmake_source=None,
+    ),
+)
+
+LEGACY_MODULE_ROOTS = (
+    (
+        "skills",
+        "src/modules/skill",
+        ("CMakeLists.txt", "src/Makefile", "src/tests/Rules.mk"),
+    ),
+)
+
+
+class CheckError(ValueError):
+    pass
+
+
+def require(condition: bool, rule: str, detail: str) -> None:
+    if not condition:
+        raise CheckError(f"rule={rule}: {detail}")
+
+
+def read(root: Path, relative: str) -> str:
+    try:
+        return (root / relative).read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise CheckError(f"rule=input: cannot read {relative}: {exc}") from exc
+
+
+def source_files(root: Path):
+    for path in (root / "src").rglob("*"):
+        if path.is_file() and path.suffix in {".c", ".h"}:
+            yield path.relative_to(root).as_posix()
+
+
+def validate_legacy_module_root(
+    root: Path,
+    module: str,
+    legacy_root: str,
+    build_files: tuple[str, ...],
+) -> None:
+    """Reject a retired module directory and its exact build-path spelling."""
+    legacy_path = Path(legacy_root)
+    require(
+        not legacy_path.is_absolute()
+        and len(legacy_path.parts) > 1
+        and legacy_path.parts[0] == "src"
+        and ".." not in legacy_path.parts,
+        "legacy-root-format",
+        f"{module}: expected a normalized path beneath src/: {legacy_root}",
+    )
+    require(not (root / legacy_root).exists(), "legacy-module-root",
+            f"{module}: {legacy_root}")
+    build_root = Path(*legacy_path.parts[1:]).as_posix().rstrip("/") + "/"
+    for relative in build_files:
+        require(build_root not in read(root, relative), "legacy-build-root",
+                f"{module}: {build_root} in {relative}")
+
+
+def validate_contract(
+    root: Path,
+    contract: Contract,
+    makefile: str,
+    cmake: str,
+    test_cmake: str,
+    rules: str,
+) -> None:
+    for relative in (contract.legacy_source, contract.legacy_header):
+        require(not (root / relative).exists(), "legacy-path-removed",
+                f"{contract.module}: {relative}")
+    for relative in (contract.canonical_source, contract.canonical_header):
+        require((root / relative).is_file(), "canonical-path-present",
+                f"{contract.module}: {relative}")
+
+    make_tokens = makefile.replace("\\", " ").split()
+    require(make_tokens.count(contract.make_source) == 1, "core-source-unique",
+            f"{contract.module}: Make canonical source")
+    require(Path(contract.legacy_source).name not in make_tokens, "core-source-unique",
+            f"{contract.module}: Make legacy source")
+    if contract.cmake_source is not None:
+        cmake_pattern = re.compile(rf"^\s*{re.escape(contract.cmake_source)}\s*$", re.MULTILINE)
+        require(len(cmake_pattern.findall(cmake)) == 1, "core-source-unique",
+                f"{contract.module}: CMake canonical source")
+    else:
+        require(Path(contract.canonical_source).name not in cmake, "core-source-unique",
+                f"{contract.module}: CMake source must remain absent")
+    if contract.legacy_cmake_source is not None:
+        require(contract.legacy_cmake_source not in cmake, "core-source-unique",
+                f"{contract.module}: CMake legacy source")
+    if contract.test_cmake_source is not None:
+        require(contract.test_cmake_source in test_cmake, "focused-test-source",
+                f"{contract.module}: test CMake canonical source")
+    if contract.legacy_test_cmake_source is not None:
+        require(contract.legacy_test_cmake_source not in test_cmake, "focused-test-source",
+                f"{contract.module}: test CMake legacy source")
+
+    # One canonical object can appear in several independently linked test targets.
+    require(rules.count(contract.test_object) >= 1, "focused-test-object",
+            f"{contract.module}: canonical object")
+    require(contract.legacy_test_object not in rules, "focused-test-object",
+            f"{contract.module}: legacy object")
+
+    include = re.compile(
+        rf'^\s*#\s*include\s*[<"]{re.escape(contract.canonical_include)}[>"]\s*$',
+        re.MULTILINE,
+    )
+    for relative in contract.consumers:
+        count = len(include.findall(read(root, relative)))
+        require(count >= 1, "canonical-include-missing", f"{contract.module}: {relative}")
+        require(count == 1, "canonical-include-duplicated", f"{contract.module}: {relative}")
+
+    basename = re.escape(Path(contract.canonical_header).name)
+    include_line = re.compile(rf'^\s*#\s*include\s*[<"]([^>"]*{basename})[>"]\s*$', re.MULTILINE)
+    for relative in source_files(root):
+        for match in include_line.finditer(read(root, relative)):
+            require(match.group(1) == contract.canonical_include,
+                    "non-canonical-module-include",
+                    f"{contract.module}: {relative}: {match.group(1)}")
+
+    document = read(root, contract.document)
+    for marker in (contract.canonical_source, contract.canonical_header, *contract.consumers,
+                   *contract.document_markers):
+        require(marker in document, "module-document", f"{contract.module}: {marker}")
+
+
+def validate(root: Path) -> None:
+    require((root / ".git").exists() or (root / ".git").is_file(), "config-root", str(root))
+    makefile = read(root, "src/Makefile")
+    cmake = read(root, "CMakeLists.txt")
+    test_cmake = read(root, "src/tests/CMakeLists.txt")
+    rules = read(root, "src/tests/Rules.mk")
+    for contract in CONTRACTS:
+        validate_contract(root, contract, makefile, cmake, test_cmake, rules)
+
+    for module, legacy_root, build_files in LEGACY_MODULE_ROOTS:
+        validate_legacy_module_root(root, module, legacy_root, build_files)
+
+    source = "\n".join(read(root, relative) for relative in source_files(root))
+    for symbol in (
+        "plugin_ctx_create_ex",
+        "plugin_ctx_destroy_ex",
+        "plugin_ctx_name",
+        "plugin_ctx_source_path",
+        "plugin_ctx_kind",
+        "plugin_ctx_set_source_path",
+        "plugin_ctx_set_kind",
+        "plugin_ctx_register_tool",
+        "plugin_ctx_register_hook",
+        "plugin_ctx_register_slash_command",
+        "plugin_ctx_register_cli_subcommand",
+        "plugin_ctx_register_memory_provider",
+        "plugin_ctx_register_context_engine",
+    ):
+        require(not re.search(rf"\b{symbol}\b", source), "dead-wrapper-removed", symbol)
+
+    runtime_root = root / "src/modules/module-runtime"
+    for path in runtime_root.rglob("*"):
+        if path.is_file() and path.suffix in {".c", ".h"}:
+            require("aimee/plugin-loader/" not in path.read_text(encoding="utf-8"),
+                    "core-to-optional-edge", path.relative_to(root).as_posix())
+
+    for relative in source_files(root):
+        content = read(root, relative)
+        require('#include "headers/plugin.h"' not in content,
+                "legacy-include-removed", relative)
+        require('#include "headers/plugin_ctx.h"' not in content,
+                "legacy-include-removed", relative)
+
+    require(makefile.count("-Imodules/module-runtime/include") == 1,
+            "module-include-root", "Make module-runtime include root")
+    require(makefile.count("-Imodules/ir/include") == 1,
+            "module-include-root", "Make IR include root")
+    require(makefile.count("-Imodules/translation/include") == 1,
+            "module-include-root", "Make translation include root")
+    require(cmake.count("set(AIMEE_MODULE_RUNTIME_INCLUDE_DIR") == 1,
+            "module-include-root", "CMake module-runtime include root")
+    require(cmake.count("set(AIMEE_IR_INCLUDE_DIR") == 1,
+            "module-include-root", "CMake IR include root")
+    require(cmake.count("set(AIMEE_TRANSLATION_INCLUDE_DIR") == 1,
+            "module-include-root", "CMake translation include root")
+
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config-root", type=Path, default=Path(__file__).resolve().parents[1])
+    args = parser.parse_args()
+    try:
+        validate(args.config_root.resolve())
+    except CheckError as exc:
+        print(f"module-source-ownership: ERROR {exc}", file=sys.stderr)
+        return 1
+    legacy_count = len(LEGACY_MODULE_ROOTS)
+    legacy_label = "root" if legacy_count == 1 else "roots"
+    print(
+        "module-source-ownership: ok "
+        f"({len(CONTRACTS)} contracts, {legacy_count} legacy {legacy_label})"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

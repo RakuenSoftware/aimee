@@ -1,0 +1,21 @@
+{
+  "descriptor_version": 1,
+  "id": "execution-policy",
+  "dependencies": [
+    "config",
+    "ir",
+    "module-runtime"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  },
+  "ownership_complete": true,
+  "sources": [
+    "src/modules/execution-policy/execution_policy.c"
+  ],
+  "private_headers": [],
+  "tests": [],
+  "docs": [
+    "docs/modules/execution-policy.md"
+  ]
+}

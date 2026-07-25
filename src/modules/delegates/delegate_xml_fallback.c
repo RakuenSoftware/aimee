@@ -10,7 +10,7 @@
  * This module parses such responses and fills a parsed_response_t.
  */
 #include "aimee.h"
-#include "delegate_xml_fallback.h"
+#include <aimee/delegates/delegate_xml_fallback.h>
 #include "agent_tools.h"
 #include "cJSON.h"
 #include <string.h>

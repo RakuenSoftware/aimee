@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "run_id": "oprun_g6a5e97653a8b0afb_1784587926_15",
+  "decision": "approve",
+  "decided_at": "2026-07-20T22:54:30Z",
+  "reviewed_contract_sha256": "551fdfb29f68bf4235c0a8b8baf6d5a154697bdc0d7e5c6ce622028732f46470",
+  "findings": [],
+  "overall": "No issues found by the panel."
+}

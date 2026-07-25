@@ -10,13 +10,16 @@ Every aimee-server already depends on aimee-kb for org egress (P2), so kb is the
 
 ## Goal
 
-1. aimee-kb (and kb-console) connect to the org IdP via OIDC (operator SSO).
+1. aimee-kb (and kb-console) connect to a user-configured OIDC issuer (operator SSO).
 2. aimee-servers enroll into a kb **server registry**; kb can list them and read their status and health.
 3. From the OIDC-authenticated console, an operator reaches a server's existing admin API (agents, config, health) through kb, with the OIDC identity carried to the server — not collapsed to a shared bearer.
 
 ## §0 What already exists (and the gap)
 
-- **OIDC verifier + console SSO** — `src/kb/auth_oidc.c`, `kb-console/auth.go` (RS256/JWKS, break-glass path). "Connect kb to OIDC" is largely built for humans already.
+- **OIDC verifier + console SSO** — `src/kb/auth_oidc.c` and `kb-console/auth.go` currently provide
+  RS256/JWKS and break-glass foundations. They are implementation evidence, not the target provider
+  contract. Migration replaces implicit provider assumptions with named, standards-based issuer
+  profiles owned by optional `governance` and managed by Control.
 - **PKI + enrollment** — `src/kb/enroll.c`, `src/kb/pki.c`: single-use `aimee://` tokens, CSR→CA-signed `cert:CN`. Enrollment today flows **client→KB**; P5 reuses this machinery to enroll **servers into a registry**.
 - **Server admin API, per-server** — `src/server/server_http_routes.c:1770+`: `/v1/agents`, `/v1/agent/{add,remove,enable,disable,set,…}`, `/v1/config/{get,set}`, health, delegate, cron — gated by bearer/scope/`remote_writes`.
 - **Three real gaps** (from the control-plane survey):
@@ -24,9 +27,37 @@ Every aimee-server already depends on aimee-kb for org egress (P2), so kb is the
   2. **OIDC identity terminates at the console** — `kb-console/proxy.go` forwards only the shared `console-admin` bearer ("the browser's own token is never forwarded"); it never reaches a server.
   3. **kb-console's allowlist is KB-only, deny-by-default** (`kb-console/acl.go` + `src/kb/http/kb_route_acl.c`) — it cannot address a server route.
 
+## §0.1 Provider-neutral issuer configuration
+
+OIDC is configured as named issuer profiles, not a provider enum. The canonical profile supports
+OpenID Provider discovery from an HTTPS issuer and, for issuers that require it, an explicit
+standards-based endpoint set. It contains issuer and endpoint URLs, client ID, a `vault` secret
+reference, redirect URI set, scopes, response mode, PKCE and nonce requirements, accepted JWS
+algorithms, clock-skew and token-age bounds, logout behavior, and namespaced claim mappings. Tenant
+bindings select an enabled profile and map composite `(iss, sub)` identities plus configured group
+claims into Aimee principals and roles. A bare `sub`, email address, or provider-specific username is
+never globally authoritative.
+
+The verifier requires exact issuer equality, audience and authorized-party checks, state, nonce,
+PKCE, signature, expiry, issued-at, and maximum-token-age validation. Discovery, JWKS, and user-info
+fetches use the governance egress policy, reject redirects or resolved addresses outside the
+configured allow policy, and use bounded refresh with unknown-`kid` retry and fail-closed stale-key
+behavior. Claim mappings are explicit and namespaced; unknown claims grant no role. Issuer-specific
+differences are expressed as validated profile data and may not introduce executable provider
+branches or widen the canonical verifier.
+
+Profiles are created, tested, enabled, disabled, rotated, and removed through the Aimee Control
+Plane governance interface, including the `control-web` UI when that optional module is active.
+The same operations and effective-field catalog exist through CLI, environment/configuration, and
+non-web APIs. Secret values enter `vault` through write-only inputs and are returned only as secret
+references. The GUI is generated from effective config metadata, so it exposes OIDC only while
+`governance` is selected and never invents provider-specific fields. GitHub is a valid configured
+issuer when its standards behavior and user-supplied profile satisfy this contract; it receives no
+hardcoded path or special authority.
+
 ## §1 Server registry (kb-side)
 
-A `server` registry table in DB2: `{server_id, cert_cn, mgmt_cert_cn, owner (OIDC sub, nullable), team_id, last_seen, health, version, endpoint}`. **Every aimee-server has its own individual, role-scoped mTLS credentials** — issued from kb's CA via the existing `aimee://` flow (`kb_enroll_mint` / `kb_enroll_redeem_csr`), each with a unique `cert:CN` and independently revocable (`cert.revoke`). Because the fleet uses TLS in *both* directions with distinct EKU profiles (`clientAuth` vs `serverAuth` — see P8 §0), the roles do **not** share one certificate: a server holds a **`clientAuth` leaf** for its server→kb egress/heartbeat calls (`cert_cn`, the registry key) and a **`serverAuth` leaf** for the management listener kb dials (`mgmt_cert_cn`, §2); kb in turn holds its own **`clientAuth` leaf** for calling servers. Each role cert is issued through the enrollment CA with its **own CSR + proof-of-possession** (the server proves control of the corresponding private key): the `clientAuth` leaf via the existing `aimee://`→CSR flow, and the `serverAuth` management-listener leaf via a parallel CSR carrying a `serverAuth` EKU request — distinct key material and distinct PoP, so neither role's key can stand in for the other. The redeemed `clientAuth` `cert:CN` is the server's identity and the registry key; redemption inserts the registry row and records both role CNs. No shared/fleet cert and no dual-purpose cert spanning both TLS roles — revoking or rotating one server (or one role) never touches another. Servers heartbeat over mTLS, reusing the existing server→kb `/v1/health` client in `kb_client.c`, to keep `last_seen`/`health`/`version` fresh. The `owner` (OIDC sub) is recorded when OIDC is configured and left null otherwise — the registry does not depend on OIDC. The registry is a Postgres/DB2 table (invariant #9): any of the N stateless kb instances serves registry reads and accepts heartbeats, and Postgres is the single authoritative view of the fleet — no instance holds registry state locally. It is a **tenant table under invariant #10**: RLS / team-scoped predicates apply to registry CRUD **and** fleet-management reads — an org-admin sees the whole fleet, a team-lead sees and manages only its own team's servers, and a cross-team registry read/write is denied at the DB layer. Heartbeat writes and **authorization-sensitive registry reads** go to the **primary**. kb selects a server's `endpoint`, its `mgmt_cert_cn`, **and** its revocation status in a **single consistent primary read** (one snapshot) — no TOCTOU between choosing the target and validating it, so it cannot dial a decommissioned endpoint with a stale pin. And there is **no trust-on-first-use**: the `mgmt_cert_cn` is fixed at **enrollment** (the serverAuth CSR + proof-of-possession, above), so kb pins the enrolled cert, never whatever answers the first handshake; the endpoint also passes address-policy validation and the revocation check **before kb's first dial**. Only non-authorization fleet dashboards may read replicas. The registry `owner` field is descriptive metadata only — egress and every authorization decision resolve identity via P1's composite contract, never the registry `owner`. The "single consistent read" is a `REPEATABLE READ`/`SERIALIZABLE` transaction (or one row-returning query) so `endpoint`/`mgmt_cert_cn`/revocation cannot skew. The registry is `FORCE ROW LEVEL SECURITY` under the non-owner runtime role (P1 §1). Enrollment is **idempotent, not falsely atomic** (a DB transaction cannot make external CA signing + two-cert issuance atomic): a `pending` registry row is inserted first under a uniqueness constraint on `(server_id)` and the redeemed CSRs' `(cert_issuer, cert_serial)`, the two role certs are signed (retryable by the same single-use token), and the row is finalized — a partial failure leaves a `pending` row that a retry completes or a sweep expires, never a half-built ambiguous active row. The single-use enrollment token also **binds the team/owner grant at mint time** (an org-admin mints it for a specific team), so a redeemer cannot choose another team's assignment. Each kb **instance** obtains its own per-instance management `clientAuth` leaf by **auto-enrolling at boot via its platform workload identity** (the same identity that unseals the vault) — no shared fleet key, no manual per-instance step; the leaf is individually revocable.
+A `server` registry table in DB2: `{server_id, cert_cn, mgmt_cert_cn, owner_identity (composite OIDC (iss, sub), nullable), team_id, last_seen, health, version, endpoint}`. **Every aimee-server has its own individual, role-scoped mTLS credentials** — issued from kb's CA via the existing `aimee://` flow (`kb_enroll_mint` / `kb_enroll_redeem_csr`), each with a unique `cert:CN` and independently revocable (`cert.revoke`). Because the fleet uses TLS in *both* directions with distinct EKU profiles (`clientAuth` vs `serverAuth` — see P8 §0), the roles do **not** share one certificate: a server holds a **`clientAuth` leaf** for its server→kb egress/heartbeat calls (`cert_cn`, the registry key) and a **`serverAuth` leaf** for the management listener kb dials (`mgmt_cert_cn`, §2); kb in turn holds its own **`clientAuth` leaf** for calling servers. Each role cert is issued through the enrollment CA with its **own CSR + proof-of-possession** (the server proves control of the corresponding private key): the `clientAuth` leaf via the existing `aimee://`→CSR flow, and the `serverAuth` management-listener leaf via a parallel CSR carrying a `serverAuth` EKU request — distinct key material and distinct PoP, so neither role's key can stand in for the other. The redeemed `clientAuth` `cert:CN` is the server's identity and the registry key; redemption inserts the registry row and records both role CNs. No shared/fleet cert and no dual-purpose cert spanning both TLS roles — revoking or rotating one server (or one role) never touches another. Servers heartbeat over mTLS, reusing the existing server→kb `/v1/health` client in `kb_client.c`, to keep `last_seen`/`health`/`version` fresh. The `owner_identity` composite `(iss, sub)` is recorded when product OIDC is configured and left null otherwise — the registry does not depend on OIDC. The registry is a Postgres/DB2 table (invariant #9): any of the N stateless kb instances serves registry reads and accepts heartbeats, and Postgres is the single authoritative view of the fleet — no instance holds registry state locally. It is a **tenant table under invariant #10**: RLS / team-scoped predicates apply to registry CRUD **and** fleet-management reads — an org-admin sees the whole fleet, a team-lead sees and manages only its own team's servers, and a cross-team registry read/write is denied at the DB layer. Heartbeat writes and **authorization-sensitive registry reads** go to the **primary**. kb selects a server's `endpoint`, its `mgmt_cert_cn`, **and** its revocation status in a **single consistent primary read** (one snapshot) — no TOCTOU between choosing the target and validating it, so it cannot dial a decommissioned endpoint with a stale pin. And there is **no trust-on-first-use**: the `mgmt_cert_cn` is fixed at **enrollment** (the serverAuth CSR + proof-of-possession, above), so kb pins the enrolled cert, never whatever answers the first handshake; the endpoint also passes address-policy validation and the revocation check **before kb's first dial**. Only non-authorization fleet dashboards may read replicas. The registry `owner_identity` field is descriptive metadata only — egress and every authorization decision resolve identity via P1's composite contract, never the registry `owner_identity`. The "single consistent read" is a `REPEATABLE READ`/`SERIALIZABLE` transaction (or one row-returning query) so `endpoint`/`mgmt_cert_cn`/revocation cannot skew. The registry is `FORCE ROW LEVEL SECURITY` under the non-owner runtime role (P1 §1). Enrollment is **idempotent, not falsely atomic** (a DB transaction cannot make external CA signing + two-cert issuance atomic): a `pending` registry row is inserted first under a uniqueness constraint on `(server_id)` and the redeemed CSRs' `(cert_issuer, cert_serial)`, the two role certs are signed (retryable by the same single-use token), and the row is finalized — a partial failure leaves a `pending` row that a retry completes or a sweep expires, never a half-built ambiguous active row. The single-use enrollment token also **binds the team/owner grant at mint time** (an org-admin mints it for a specific team), so a redeemer cannot choose another team's assignment. Each kb **instance** obtains its own per-instance management `clientAuth` leaf by **auto-enrolling at boot via its platform workload identity** (the same identity that unseals the vault) — no shared fleet key, no manual per-instance step; the leaf is individually revocable.
 
 ## §2 kb→server management channel
 
@@ -42,9 +73,16 @@ Extend the console allowlist (`acl.go` + `kb_route_acl.c`) with a **server-scope
 
 ## Acceptance criteria
 
-- A server enrolls and appears in the registry with its `cert:CN`, owner, team, version, and a fresh heartbeat.
+- A server enrolls and appears in the registry with its `cert:CN`, composite owner identity, team,
+  version, and a fresh heartbeat.
 - A server presents a `clientAuth` cert to kb (server→kb) and a distinct `serverAuth` cert on its management listener (kb→server); neither certificate is accepted in the other TLS role.
 - An OIDC-authenticated operator lists the fleet and reads a server's agents/health through kb.
+- Two different conforming OIDC issuers pass the same profile, login, claim-mapping, and supported
+  session-lifecycle contract without provider-specific server or UI branches. GitHub may be used as
+  either profile when the user's configured issuer satisfies that contract; it is not mandatory.
+- With `governance` omitted, OIDC profile fields and operations are absent from GUI, CLI, advertised
+  environment/configuration, and API catalogs. With `control-web` omitted, the same profile
+  lifecycle remains fully operable through headless surfaces.
 - A management action reaches the server as the operator's propagated identity and is recorded as that actor in the server audit log — not as `console-admin`.
 - A server with `remote_writes: off` refuses a management write even from kb (server stays authoritative over its own policy).
 - Break-glass console login still works if OIDC is down (existing path preserved).

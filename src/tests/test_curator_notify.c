@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../kb/kb_curator_notify.h"
+#include "kb_curator_notify.h"
 #include "kb_http_ws.h"
 
 /* Recording stand-in for the real /v1/events publisher (defined in

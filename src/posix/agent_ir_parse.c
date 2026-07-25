@@ -8,9 +8,9 @@
 #include "aimee.h"
 
 #include "agent_protocol.h"
-#include "aimee_backend.h"
-#include "aimee_ir.h"
-#include "aimee_ir_rescue.h"
+#include <aimee/translation/aimee_backend.h>
+#include <aimee/ir/aimee_ir.h>
+#include <aimee/delegates/aimee_ir_rescue.h>
 #include "tool_call_args.h"
 #include "cJSON.h"
 

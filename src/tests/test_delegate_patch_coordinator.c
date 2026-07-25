@@ -1,5 +1,5 @@
 /* test_delegate_patch_coordinator.c: read-only delegate patch-state report tests. */
-#include "delegate_patch_coordinator.h"
+#include <aimee/delegates/delegate_patch_coordinator.h>
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

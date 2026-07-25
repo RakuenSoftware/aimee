@@ -1,7 +1,7 @@
 #include "kb_vault_rewrap.h"
 #include "kb_vault_policy.h"
 #include "vault_store.h"
-#include "audit_worm.h"
+#include <aimee/audit/audit_worm.h>
 #include <stdio.h>
 #include <string.h>
 int kb_vault_rewrap_principal(const char *actor, const char *principal, const uint8_t old_kek[32],

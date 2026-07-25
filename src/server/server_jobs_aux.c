@@ -2,7 +2,7 @@
 #include "aimee.h"
 #include "aux_router.h"
 #include "db1.h"
-#include "delegate_role.h"
+#include <aimee/delegates/delegate_role.h>
 #include "server.h"
 #include "json_fluent.h" /* jo_ok */
 #include "cJSON.h"

@@ -4,8 +4,8 @@
  * (db2/kb_service_backend_agent.c → db2_kb_service_dashboard_*) call
  * directly when the daemon proxies "dashboard.*" RPCs through to kb.
  * They live here, not in dashboard.c, so the $(KB) link rule can pull
- * them in without dragging the rest of dashboard.c (api_dashboard_plugins,
- * api_doctor, cors_*, etc.) — that file stays in CMD_OBJS and links
+ * them in without dragging the rest of dashboard.c (api_doctor, cors_*,
+ * etc.) — that file stays in CMD_OBJS and links
  * into the daemon-adjacent binaries.
  *
  * Note on api_logs: the kb-side version intentionally omits the DB1

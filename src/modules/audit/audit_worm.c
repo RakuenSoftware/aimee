@@ -13,8 +13,8 @@
 #include <unistd.h>
 
 #include "aimee_home.h"
-#include "audit_worm.h"
-#include "audit_worm_chain.h"
+#include <aimee/audit/audit_worm.h>
+#include <aimee/audit/audit_worm_chain.h>
 #include "cJSON.h"
 #include "dstr.h"
 #include "log.h"

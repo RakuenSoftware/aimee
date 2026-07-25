@@ -6,7 +6,7 @@
 #include "commands.h"
 #include "config.h"
 #include "db1.h"
-#include "delegate_credentials.h"
+#include <aimee/delegates/delegate_credentials.h>
 #include "cJSON.h"
 #include <stdio.h>
 #include <stdlib.h>

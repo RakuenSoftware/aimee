@@ -6,7 +6,7 @@
 #include "config.h"
 #include "config_database.h"
 #include "db1.h"
-#include "delegate_credentials.h"
+#include <aimee/delegates/delegate_credentials.h>
 #include "db2/lifecycle.h"
 #include "kb_client.h"
 #include "workspace.h"

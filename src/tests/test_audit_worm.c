@@ -8,7 +8,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "audit_worm.h"
+#include <aimee/audit/audit_worm.h>
 #include "cJSON.h"
 
 static char g_dir[256];

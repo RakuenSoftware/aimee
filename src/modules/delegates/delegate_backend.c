@@ -3,7 +3,7 @@
  * Process-global registry. Populated at server start; lookups are
  * lock-free reads of a fixed-size array. */
 
-#include "delegate_backend.h"
+#include <aimee/delegates/delegate_backend.h>
 
 #include <stdio.h>
 #include <stdlib.h>

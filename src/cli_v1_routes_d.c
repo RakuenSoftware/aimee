@@ -619,7 +619,6 @@ static const struct
     {"dashboard.metrics", "GET", "/v1/dashboard/metrics"},
     {"dashboard.onboard", "GET", "/v1/dashboard/onboard"},
     {"dashboard.plans", "GET", "/v1/dashboard/plans"},
-    {"dashboard.plugins", "GET", "/v1/dashboard/plugins"},
     {"dashboard.traces", "GET", "/v1/dashboard/traces"},
     {"delegate", "POST", "/v1/delegate/run"},
     {"delegate.backend_exec", "POST", "/v1/delegate/backend_exec"},
@@ -684,9 +683,6 @@ static const struct
     {"optimize.export", "GET", "/v1/optimize/export"},
     {"optimize.promote", "POST", "/v1/optimize/promote"},
     {"optimize.replay_record", "POST", "/v1/optimize/replay-record"},
-    {"plugin.disable", "POST", "/v1/plugins/disable"},
-    {"plugin.enable", "POST", "/v1/plugins/enable"},
-    {"plugin.list", "GET", "/v1/plugins"},
     {"provider.get", "POST", "/v1/provider/get"},
     {"provider.list", "GET", "/v1/provider/list"},
     {"provider.models", "GET", "/v1/provider/models"},
@@ -753,7 +749,9 @@ static const struct
    const char *path;
 } CLI_V1_ASYNC_ROUTES[] = {
     {"curator.synthesize", "POST", "/v1/curator/synthesize"},
+#if AIMEE_WITH_ROUNDTABLE
     {"delegate.aggregate", "POST", "/v1/delegate/aggregate"},
+#endif
     {"dev.sweep", "POST", "/v1/dev/sweep"},
     {"eval.run", "POST", "/v1/eval/run"},
     {"graph.sync_code", "POST", "/v1/graph/sync_code"},

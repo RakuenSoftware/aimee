@@ -13,8 +13,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "aimee_backend.h"
-#include "aimee_ir.h"
+#include <aimee/translation/aimee_backend.h>
+#include <aimee/ir/aimee_ir.h>
 #include "cJSON.h"
 
 static cJSON *obj(const cJSON *o, const char *k)

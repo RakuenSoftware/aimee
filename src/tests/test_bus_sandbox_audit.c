@@ -17,9 +17,9 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "audit_action.h" /* audit_ensure_key */
-#include "obs_bus.h"
-#include "audit_ledger.h"
+#include <aimee/audit/audit_action.h> /* audit_ensure_key */
+#include <aimee/audit/obs_bus.h>
+#include <aimee/audit/audit_ledger.h>
 #include "cJSON.h"
 #include "log.h" /* audit_log_open */
 #include "sandbox.h"

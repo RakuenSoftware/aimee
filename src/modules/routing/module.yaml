@@ -1,0 +1,25 @@
+{
+  "descriptor_version": 1,
+  "id": "routing",
+  "dependencies": [
+    "config",
+    "ir",
+    "learning",
+    "memory",
+    "module-runtime"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  },
+  "ownership_complete": true,
+  "sources": [
+    "src/modules/routing/routing.c"
+  ],
+  "private_headers": [],
+  "tests": [
+    "src/tests/test_agent_caps.c"
+  ],
+  "docs": [
+    "docs/modules/routing.md"
+  ]
+}

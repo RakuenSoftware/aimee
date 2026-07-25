@@ -7,8 +7,8 @@
 #include "cJSON.h"
 #include "config.h"
 #include "mcp_osv_cache.h"
-#include "mcp_client_registry.h"
-#include "mcp_tools.h"
+#include "aimee/protocols/mcp/mcp_client_registry.h"
+#include "aimee/protocols/mcp/mcp_tools.h"
 
 static const char *g_http_response;
 static int g_http_status = -1;

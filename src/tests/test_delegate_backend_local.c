@@ -11,7 +11,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "delegate_backend_local.h"
+#include <aimee/delegates/delegate_backend_local.h>
 
 static char g_tmp_root[256];
 

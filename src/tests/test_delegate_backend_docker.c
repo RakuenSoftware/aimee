@@ -9,7 +9,7 @@
 #include <unistd.h>
 
 #include "aimee_home.h"
-#include "delegate_backend_docker.h"
+#include <aimee/delegates/delegate_backend_docker.h>
 
 /* Forward decls — definitions live further down with the rest of the
  * fixture-using cases; forward refs let us call them from earlier

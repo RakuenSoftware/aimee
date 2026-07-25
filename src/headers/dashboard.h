@@ -1,6 +1,7 @@
 #ifndef DEC_DASHBOARD_H
 #define DEC_DASHBOARD_H 1
 
+#include "aimee_features.h"
 #include <stddef.h>
 
 #define CORS_ORIGIN_LEN  256
@@ -23,7 +24,6 @@ char *api_traces(void);
 char *api_memory_stats(void);
 char *api_plans(void);
 char *api_logs(void);
-char *api_dashboard_plugins(void);
 char *api_dashboard_reminders(void);
 char *api_dashboard_recall(void);
 char *api_dashboard_directives(void);

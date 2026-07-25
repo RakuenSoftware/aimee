@@ -19,20 +19,24 @@
 #include <limits.h>
 #include <time.h>
 #include "persona.h"
+#if AIMEE_WITH_ROUNDTABLE
 #include "roundtable_preset.h"
+#endif
 #include "role_templates.h"
 #include "util.h" /* safe_strdup, aimee_base64_* */
 #include "cli_session_pty.h"
 #include "config.h"
 #include "prompts.h"
-#include "delegate_role.h"
+#include <aimee/delegates/delegate_role.h>
 #include "log.h"
 #include "aimee_version.h"
 #include "openai_shape.h"
 #include "ingress_preinject.h"
 #include "openapi_server_data.h" /* AIMEE_OPENAPI_SERVER_YAML_STR (generated from api/openapi-server-v1.yaml) */
 #include "openai_runs_store.h"
+#if AIMEE_WITH_ROUNDTABLE
 #include "roundtable_pipeline_capture.h" /* pipeline op-run capture seam (#18/#20) */
+#endif
 #include "presence.h"
 #include "request_context.h"
 #include "server_http_identity.h" /* WP-C.0 attested-identity capture/threading */
@@ -294,6 +298,7 @@ int route_role_template_remove(const char *name, char *resp, int cap)
    return emit(resp, cap, o);
 }
 
+#if AIMEE_WITH_ROUNDTABLE
 /* ── named roundtable presets (the roundtable analog of personas) ─────────────
  * Presets are stored one-per-file as JSON (roundtable_preset.{c,h}); the active
  * one is named by config.roundtable_default and its values are mirrored into the
@@ -459,6 +464,7 @@ int route_roundtable_set_active(const char *body, char *resp, int cap)
    cJSON_AddBoolToObject(o, "active", 1);
    return emit(resp, cap, o);
 }
+#endif
 
 /* ── query-param helpers + Workflow Actions route adapters ───────────────────
  * Relocated here from server_http_routes.c (referenced by that TU's route table

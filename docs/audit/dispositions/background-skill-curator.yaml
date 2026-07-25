@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "feature": "background-skill-curator",
+  "owner": "skills",
+  "decision": "remove",
+  "source_proposal": "docs/proposals/pending/feature-liveness-and-background-curator-removal.md",
+  "reason": "The scheduler, configuration, implementation, and tests formed a self-contained feature island. No independent product path consumed its consolidation plans or metrics.",
+  "removed_files": [
+    "src/modules/skill/skill_curator.c",
+    "src/modules/skill/skill_curator.h"
+  ],
+  "removed_symbols": [
+    "skill_curator_maybe",
+    "skill_curator_metrics",
+    "server_compute_skill_curator_async",
+    "skills_curator_enabled",
+    "skills_curator_interval_hours"
+  ],
+  "removed_config_keys": [
+    "skills.curator.enabled",
+    "skills.curator_interval_hours"
+  ],
+  "compatibility": {
+    "legacy_config": "accepted-and-scrubbed-on-save",
+    "database": "leave-existing-maintenance_state-key-skill_curator-inert",
+    "schema_or_data_migration": false
+  },
+  "preserved": {
+    "generic_memory_maintenance": "src/modules/memory/memory_maintenance.c",
+    "generic_maintenance_state": "src/db1/maintenance.c",
+    "kb_synthesis_curator": "src/modules/kb-synthesis/kb_curator_pipeline.c",
+    "kb_curator_config": "src/modules/config/config_kb_curator.c"
+  },
+  "roundtable": {
+    "run_id": "oprun_g6a5f2d161a3aecef_1784623013_6",
+    "decision": "approve",
+    "artifact": "No issues found by the panel."
+  }
+}

@@ -9,7 +9,7 @@
  * trailing "\n\n" and silently change the provider request bytes. */
 #include "gw_stage_memory.h"
 #include "ingress_preinject.h"
-#include "aimee_ir.h"
+#include <aimee/ir/aimee_ir.h>
 #include "cJSON.h"
 #include <assert.h>
 #include <stdlib.h>

@@ -1,7 +1,7 @@
 #ifndef WORKSPACE_PROVIDER_CONTAINER_H
 #define WORKSPACE_PROVIDER_CONTAINER_H 1
 
-#include "delegate_backend.h"
+#include <aimee/delegates/delegate_backend.h>
 #include "workspace_provider.h"
 
 /* Container workspace provider: file/exec for a delegate that runs inside its own

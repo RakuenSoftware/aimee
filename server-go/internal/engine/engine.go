@@ -23,6 +23,12 @@ const (
 	StepChanges  StepStatus = "changes"
 	StepPending  StepStatus = "pending"
 	StepFailed   StepStatus = "failed"
+	// StepAccepted completes the work item as a no-op success now, skipping any
+	// remaining stages. Used when a step determines there is nothing left to do
+	// (e.g. freeze finds an empty diff because the slice's work is already present
+	// in the base) — proceeding would only freeze/review/PR an empty artifact and
+	// loop to convergence_no_progress.
+	StepAccepted StepStatus = "accepted"
 )
 
 type StepRequest struct {
@@ -375,6 +381,16 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 			return out, err
 		}
 		out.NextStage = next
+		return out, nil
+
+	case StepAccepted:
+		// Nothing left to do — complete the item as an accepted no-op, skipping any
+		// remaining stages (no empty artifact to review, PR, or merge).
+		if err := e.db.Finish(ctx, item.ID, node.ID, "accepted", step.Detail,
+			step.ContentHash, step.CostUSD); err != nil {
+			return out, err
+		}
+		out.Terminal, out.State = true, "accepted"
 		return out, nil
 
 	case StepChanges:

@@ -753,7 +753,7 @@ void config_parse_modules_section(config_t *cfg, cJSON *root)
    } toggles[] = {
        {"memory", &cfg->module_memory},         {"governance", &cfg->module_governance},
        {"delegates", &cfg->module_delegates},   {"workflows", &cfg->module_workflows},
-       {"economizer", &cfg->module_economizer},
+       {"roundtable", &cfg->module_roundtable}, {"economizer", &cfg->module_economizer},
    };
    for (size_t i = 0; i < sizeof(toggles) / sizeof(toggles[0]); i++)
    {
@@ -1627,4 +1627,18 @@ void config_parse_kb_section2(config_t *cfg, cJSON *root)
             cfg->code_hybrid_rrf_k = item->valuedouble;
       }
    }
+}
+
+/* context.engine: name — re-homed from the deleted config_plugin.c so that a
+ * single config_load() populates cfg->context_engine directly from the already
+ * parsed aimee.yaml root (the old code re-opened and re-parsed the file). The
+ * value drives context_engine_set_active() in server_main. */
+void config_parse_context_engine(config_t *cfg, cJSON *root)
+{
+   cJSON *ctx = cJSON_GetObjectItemCaseSensitive(root, "context");
+   if (!cJSON_IsObject(ctx))
+      return;
+   cJSON *eng = cJSON_GetObjectItemCaseSensitive(ctx, "engine");
+   if (cJSON_IsString(eng) && eng->valuestring && eng->valuestring[0])
+      snprintf(cfg->context_engine, sizeof(cfg->context_engine), "%s", eng->valuestring);
 }

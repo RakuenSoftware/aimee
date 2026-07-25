@@ -1,6 +1,7 @@
 #ifndef DEC_SERVER_H
 #define DEC_SERVER_H 1
 
+#include "aimee_features.h"
 #include <stdint.h>
 #include <pthread.h>
 #include <sys/types.h>
@@ -354,10 +355,6 @@ int handle_dashboard_delegations(server_ctx_t *ctx, server_conn_t *conn, cJSON *
 int handle_dashboard_traces(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_plans(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_logs(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_dashboard_plugins(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_plugin_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_plugin_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_plugin_disable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_onboard(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_lsp_diagnostics_summary(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

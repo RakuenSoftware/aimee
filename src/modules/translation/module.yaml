@@ -1,0 +1,37 @@
+{
+  "descriptor_version": 1,
+  "id": "translation",
+  "dependencies": [
+    "ir",
+    "module-runtime"
+  ],
+  "ownership_complete": true,
+  "runtime_toggle": {
+    "supported": false
+  },
+  "sources": [
+    "src/modules/translation/aimee_backend_anthropic.c",
+    "src/modules/translation/aimee_backend_bedrock.c",
+    "src/modules/translation/aimee_backend_openai.c",
+    "src/modules/translation/aimee_backend_responses.c",
+    "src/modules/translation/aimee_frontend_anthropic.c",
+    "src/modules/translation/aimee_frontend_openai.c",
+    "src/modules/translation/aimee_frontend_responses.c",
+    "src/modules/translation/aimee_ir_stream.c"
+  ],
+  "public_headers": [
+    "src/modules/translation/include/aimee/translation/aimee_backend.h",
+    "src/modules/translation/include/aimee/translation/aimee_frontend.h",
+    "src/modules/translation/include/aimee/translation/aimee_ir_stream.h"
+  ],
+  "tests": [
+    "src/tests/test_aimee_backend.c",
+    "src/tests/test_aimee_backend_bedrock.c",
+    "src/tests/test_aimee_converse_stream.c",
+    "src/tests/test_aimee_frontend.c",
+    "src/tests/test_aimee_ir_stream.c"
+  ],
+  "docs": [
+    "docs/modules/translation.md"
+  ]
+}

@@ -24,7 +24,7 @@
 #include "cli_session_pty.h"
 #include "config.h"
 #include "prompts.h"
-#include "delegate_role.h"
+#include <aimee/delegates/delegate_role.h>
 #include "log.h"
 #include "aimee_version.h"
 #include "openai_shape.h"

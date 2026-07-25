@@ -507,7 +507,7 @@ func (s *server) handlePluginsList(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.socketCallForRequest(r, map[string]any{"method": "plugin.list"})
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil || resp == nil {
-		fmt.Fprintf(w, "[]")
+		writeJSONError(w, http.StatusNotFound, "plugin loader is not available")
 		return
 	}
 	if data, ok := resp["data"]; ok {

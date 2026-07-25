@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "gw_orch_delegates.h"
+#include <aimee/delegates/gw_orch_delegates.h>
 
 static int g_spawns;
 static char g_last_role[32];

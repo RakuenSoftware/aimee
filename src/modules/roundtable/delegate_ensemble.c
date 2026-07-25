@@ -11,7 +11,7 @@
 #include "agent_exec.h"
 #include "agent_config.h"
 #include "config.h"
-#include "delegate_credentials.h"
+#include <aimee/delegates/delegate_credentials.h>
 #include "cost_fold.h"
 #include "log.h"
 #include "persona.h"

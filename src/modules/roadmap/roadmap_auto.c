@@ -17,7 +17,7 @@
 #include "roadmap_report.h"
 #include "db1/roadmap_runtime.h"
 #include "roadmap.h"
-#include "delegate_launch.h"
+#include <aimee/delegates/delegate_launch.h>
 #include "headers/dstr.h"
 #include "headers/util.h"
 #include "headers/agent_config.h"
