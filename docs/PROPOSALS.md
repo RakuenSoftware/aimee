@@ -131,6 +131,15 @@ The genuinely open work — twenty-three proposals (all but one not yet implemen
   training view reading it) is implemented with zero `kb.c` hot-path change; B2 (a
   production outcome source for code-search) is the remaining open work. Follow-up
   to the done LTR fitter. **Calibrate / Evaluate-Optimize / Gate-Promote.**
+- [One Gemma-4 base for embedding, reranking, and Tier-A synth](proposals/pending/gemma4-unified-embed-rerank-synth-base.md)
+  — replaces the separate embedder + Ettin reranker + E4B Tier-A synth model with a single
+  MatFormer-nested Gemma-4 base (proposed E2B) carrying three LoRA-adapter roles: Tier-A synth
+  distilled from E4B, an MRL embedding head, and a native-`/rerank` reranker that deletes the
+  gateway Dense-head hack. Comes out lighter than today's synth model alone. Requires a bounded
+  llama.cpp PLE forward-graph port (step zero); every role swap gated on its existing benchmark
+  (embedder-sweep, curator-synth, rerank latency). Specific realization of the Tier-A extraction
+  proposal's Option B, extended to Recall + Rerank. **Recall / Rerank / Synthesize / Extract /
+  Evaluate-Optimize / Gate-Promote.**
 - [Agentic supervised SWE-bench](proposals/pending/agentic-supervised-swebench.md)
   — a true tool-using, iterating agentic SWE-bench harness so the "beats Reddit's
   −75.5% supervisor-token reduction at no wall-clock penalty" claim is
