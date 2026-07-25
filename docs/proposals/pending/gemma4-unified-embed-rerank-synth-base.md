@@ -321,39 +321,39 @@ quality per parameter** (it starts from E4B's good weights) but yields a **bespo
 serving shape**; **distilling up a fixed slice keeps a known shape** but is
 **capacity-bounded** — quality-per-param vs serving simplicity, decided empirically.
 
-## §11 Training hardware & throughput (Vulkan, not ROCm)
+## §11 Training hardware & throughput (train on CUDA)
 
-Target training rig: one **24 GB Radeon RX 7900 XTX** (RDNA3) with ~157 GB system RAM,
-available 24/7 (the `.254` box in
-[`P2-serving-validation`](../../../benchmarks/results/unified-llm/P2-serving-validation.md)).
-**Training uses the Vulkan backend, not ROCm** — keeping the whole program on the same
-vendor-agnostic ggml/Vulkan stack aimee already vendors for serving (no ROCm, no CUDA
-lock-in, one toolchain for train and serve). Two things make 24 GB sufficient:
+One card is dedicated to training (not both). **Recommended: the RTX 5080 (16 GB,
+CUDA).** Serving stays Vulkan/vendor-agnostic and is unaffected — the training card never
+touches production, and dedicating the 5080 keeps the 7900 XTX free to serve.
 
-- **Student side is LoRA on a frozen, quantized base** — the memory-light case; adapters
-  + MRL head + optimizer states are small, and this maps onto ggml/llama.cpp's **Vulkan
-  LoRA-finetune** path (actively maturing through 2026), so student training stays
-  in-ecosystem.
-- **Teacher targets are cached offline** via Vulkan *inference* (its strong suit),
-  decoupling teacher size from training VRAM: run the larger teacher in inference passes
-  — quantized on-card, or CPU-offloaded into the 157 GB system RAM — over the corpus
-  *once* to cache embeddings / soft labels, then train students against the cache. A
-  24–32 B teacher runs on-card quantized; up to ~70 B via CPU offload, slowly. Teacher
-  and training never co-reside.
+Why the 5080 despite less VRAM: the program is **LoRA on a frozen, quantized 2–5 B base**
+plus **offline-cached teacher targets** — a memory-light, tensor-core-friendly workload
+where CUDA's maturity (PyTorch / peft / QLoRA / flash-attention) and tensor-core speed
+outweigh the 8 GB gap, and where choosing CUDA **eliminates the ggml-Vulkan training-op
+risk entirely**. QLoRA of a 5–7 B model fits well under 16 GB, so student training is
+comfortable.
 
-Binding constraint is **wall-clock, not memory**: one GPU, a sequential multi-model race
-(E2B-slice, E2B-distill, E4B-distill, pruned-E4B), weeks-scale — which is what 24/7 is for.
-Two Vulkan realities, neither a blocker, both scheduled-around: Vulkan runs at ~60–80% of
-ROCm/HIP throughput and the 7900 XTX has **no tensor cores**, so training is slow per step
-— acceptable precisely because we are wall-clock-bound with 24/7 headroom.
+Managing 16 GB (both pinches are minor or optional):
+- **Teacher caching** runs on the same card *before* training (not concurrent). Keep the
+  teacher ≤ ~14 B to cache on-card — the Qwen3-8B-class embed teacher and a 12 B synth
+  teacher both fit; a larger dense teacher (24–32 B) CPU-offloads for the one-time cache
+  pass, off the training critical path.
+- **§9 Tier-3** (full-FT / Minitron prune-heal) is the only genuine 16 GB pinch — real
+  gradients + optimizer states, not just adapters. Fits a 2–4 B student with an 8-bit
+  optimizer + gradient checkpointing; spill to cloud if a specific prune-heal overruns.
+  The base LoRA pipeline never hits this.
 
-**Smoke-tests before scheduling the full program:**
-1. **Vulkan training-op coverage** — the ggml Vulkan *backward* path (MUL_MAT / OUT_PROD
-   for LoRA) is newer than its inference path; confirm the LoRA-finetune ops we need run
-   correctly on RADV/RDNA3.
-2. **Tier-3 feasibility on Vulkan** — LoRA-adapter roles map cleanly onto ggml-Vulkan, but
-   **full-FT / Minitron prune-and-heal (§9 Tier 3) is less certain** in ggml; it may need a
-   different route or deferral. Validate before counting on it.
+Binding constraint stays **wall-clock, not memory**: one training GPU, a sequential
+multi-model race (E2B-slice, E2B-distill, E4B-distill, pruned-E4B) — faster per step on
+CUDA/tensor-cores than the Vulkan path would be.
+
+**Alternative — 7900 XTX (24 GB, Vulkan):** more VRAM (bigger on-card teacher, roomier
+Tier-3) and single-stack consistency with serving, but training rides the *immature*
+ggml-Vulkan finetune path (backward-op smoke test, Tier-3 full-FT uncertain in ggml) at
+~60–80% throughput with no tensor cores. Prefer it only if the program pivots to
+full-FT / large-dense-teacher-on-card as the primary method — which the LoRA-first design
+does not.
 
 ## Risks / honest tradeoffs
 
