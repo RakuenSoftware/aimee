@@ -108,6 +108,111 @@ func TestSchedulerFillsFreedSlotImmediately(t *testing.T) {
 	runner.release <- struct{}{}
 }
 
+// seedPerWorkflowItems writes a one-node "author.proposal" workflow and creates a
+// work item per id, returning a store + a blocking runner + a started scheduler.
+// Items whose ids share a prefix before the first "." belong to the same root
+// workflow run, which is exactly what the per-workflow cap groups on.
+func seedPerWorkflowItems(t *testing.T, ids []string, global int) (*Scheduler, *blockingRunner) {
+	t.Helper()
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte("name: one\nstart: work\nnodes:\n  - id: work\n    block: author.proposal\n")
+	if err := os.WriteFile(filepath.Join(workflowDir, "one.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := wfe.ParseDefinition(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range ids {
+		if err := artifacts.PutProposal(id, []byte(id)); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{
+			ID: id, Repo: "repo", ProposalPath: id, WorkflowName: "one",
+			WorkflowVersion: def.Version, StartStage: "work", Mode: "autonomous",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runner := &blockingRunner{started: make(chan string, len(ids)), release: make(chan struct{}, len(ids))}
+	workflowEngine, err := New(store, artifacts, workflowDir, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduler := NewScheduler(store, workflowEngine, global, nil)
+	scheduler.pollEvery = time.Hour // dispatch is driven by slot-release notify.
+	return scheduler, runner
+}
+
+// With ample global budget, the default per-workflow cap of 1 must still stop a
+// single root workflow from occupying more than one slot at a time; an unrelated
+// root runs concurrently because it is a different workflow.
+func TestSchedulerPerWorkflowCapDefaultsToOnePerRoot(t *testing.T) {
+	scheduler, runner := seedPerWorkflowItems(t,
+		[]string{"wi_grp.s0.g0.0", "wi_grp.s0.g0.1", "wi_grp.s0.g0.2", "wi_solo"}, 5)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go scheduler.Run(ctx)
+
+	// Exactly two start at once: one wi_grp.* child plus the unrelated wi_solo.
+	first := waitStarted(t, runner.started)
+	second := waitStarted(t, runner.started)
+	if rootWorkflowID(first) == rootWorkflowID(second) {
+		t.Fatalf("two items of the same root ran concurrently under a cap of 1: %s, %s", first, second)
+	}
+	select {
+	case third := <-runner.started:
+		t.Fatalf("per-workflow cap exceeded; a third item started concurrently: %s (already %s, %s)", third, first, second)
+	case <-time.After(50 * time.Millisecond):
+	}
+	// Freeing a slot lets the next wi_grp.* child in — the cap gates concurrency,
+	// it does not drop the queued work.
+	runner.release <- struct{}{}
+	runner.release <- struct{}{}
+	waitStarted(t, runner.started)
+	runner.release <- struct{}{}
+	runner.release <- struct{}{}
+}
+
+// The per-workflow cap is configurable: raising it to 2 lets two children of the
+// same root run at once, while a third still waits.
+func TestSchedulerPerWorkflowCapIsConfigurable(t *testing.T) {
+	scheduler, runner := seedPerWorkflowItems(t,
+		[]string{"wi_grp.s0.g0.0", "wi_grp.s0.g0.1", "wi_grp.s0.g0.2"}, 5)
+	scheduler.SetPerWorkflowSource(func() int { return 2 })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go scheduler.Run(ctx)
+
+	first := waitStarted(t, runner.started)
+	second := waitStarted(t, runner.started)
+	if rootWorkflowID(first) != "wi_grp" || rootWorkflowID(second) != "wi_grp" {
+		t.Fatalf("expected both concurrent items under root wi_grp, got %s, %s", first, second)
+	}
+	select {
+	case third := <-runner.started:
+		t.Fatalf("per-workflow cap of 2 exceeded; a third child started: %s", third)
+	case <-time.After(50 * time.Millisecond):
+	}
+	runner.release <- struct{}{}
+	waitStarted(t, runner.started) // slot freed → the third child runs
+	runner.release <- struct{}{}
+	runner.release <- struct{}{}
+}
+
 func waitStarted(t *testing.T, started <-chan string) string {
 	t.Helper()
 	select {

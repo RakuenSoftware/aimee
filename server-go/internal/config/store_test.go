@@ -47,8 +47,11 @@ func TestPolicyProjectionIncludesRuntimeConcurrencyDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := values["autonomy.concurrency"]; got != 2 {
-		t.Fatalf("autonomy.concurrency default=%v, want 2", got)
+	if got := values["autonomy.concurrency"]; got != 5 {
+		t.Fatalf("autonomy.concurrency default=%v, want 5", got)
+	}
+	if got := values["autonomy.per_workflow_concurrency"]; got != 1 {
+		t.Fatalf("autonomy.per_workflow_concurrency default=%v, want 1", got)
 	}
 	if got := values["autonomy.delegate_pending_secs"]; got != 120 {
 		t.Fatalf("autonomy.delegate_pending_secs default=%v, want 120", got)
