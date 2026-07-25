@@ -22,6 +22,7 @@
 #include "project.h"
 #include "kb_enroll.h"
 #include "kb_http.h"
+#include "aimee/protocols/mcp/mcp_client_registry.h" /* host install:kb MCP plugins */
 #include "kb_tls.h"
 #include "kb_paths.h"
 #include "kb_service.h"
@@ -2062,6 +2063,13 @@ int main(int argc, char **argv)
       return 0;
    }
 
+   /* Now that this instance owns the port, boot the MCP plugins this kb HOSTS
+    * (config install: kb) so their tools are live for the first federated
+    * tools/list. Boot filters by install target — a no-op when none are
+    * configured. Each plugin is OSV-scanned at startup (same gate as the server
+    * path; see kb_mcp_osv_stub.c). Torn down after kb_http_stop() below. */
+   (void)mcp_client_registry_boot(&kb_cfg, CONFIG_MCP_INSTALL_KB);
+
    /* Optional distributed-mode mTLS listener (every request presents a CA-issued
     * client cert; scope comes from the cert). Enabled by AIMEE_KB_MTLS_PORT. */
    {
@@ -2121,6 +2129,7 @@ int main(int argc, char **argv)
    int rc = 0;
    kb_mtls_stop();
    kb_http_stop();
+   mcp_client_registry_shutdown(); /* stop kb-hosted MCP plugins (install: kb) */
    kb_management_runtime_stop();
    kb_service_shutdown(&g_ctx);
    kb_vault_operator_service_stop(vault_operator_service);
