@@ -1231,3 +1231,108 @@ func TestRoundtableSkipsReviewWhenArtifactIsUnchanged(t *testing.T) {
 		t.Fatalf("prior findings not re-served: %+v", result.Feedback)
 	}
 }
+
+// A refinement loop regenerates byte-identical packets. The fanout generation
+// in the child id makes those children distinct rows, so the packet identity
+// recorded alongside them must be generation-scoped too. Keying it on the
+// packet hash alone violated UNIQUE(repo, proposal_path) against the previous
+// generation, which surfaced as a permanent runner_unavailable park.
+func TestForeachRespawnsIdenticalPacketsInALaterGeneration(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	child := []byte("name: slice\nstart: impl\nnodes:\n  - id: impl\n    block: author.proposal\n")
+	if err := os.WriteFile(filepath.Join(workflowDir, "slice.yaml"), child, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := wfe.NewRegistry(workflowDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const parentID = "wi_parent"
+	if err := artifacts.PutProposal(parentID, []byte("build the feature")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{
+		ID: parentID, Repo: "repo", ProposalPath: "proposal.md", WorkflowName: "build-e2e",
+		StartStage: "slices", Mode: "autonomous",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
+	packets := wfe.Artifact{Type: "packets", Content: []byte(
+		`{"packets":[{"packet_id":"p1","summary":"implement","target_blocks":["implement"]}]}`)}
+	packets.Hash = wfe.Hash(packets.Content)
+	parent, err := store.WorkItem(t.Context(), parentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := StepRequest{
+		WorkItem: parent,
+		Node:     wfe.Node{ID: "slices", Block: "foreach.workflow", Params: map[string]any{"workflow": "slice"}},
+		Inputs:   map[string]wfe.Artifact{"packets": packets},
+	}
+
+	result, err := runner.foreach(t.Context(), request)
+	if err != nil {
+		t.Fatalf("first fanout: %v", err)
+	}
+	if result.Status != StepPending || result.PauseReason != "slices_running" {
+		t.Fatalf("first fanout status=%q reason=%q, want pending/slices_running", result.Status, result.PauseReason)
+	}
+	firstGeneration := childIDs(t, store, parentID)
+	if len(firstGeneration) != 1 {
+		t.Fatalf("first fanout spawned %d children, want 1", len(firstGeneration))
+	}
+
+	// Same generation, identical packets: the id dedup must hold, with no
+	// second row and no constraint failure.
+	if _, err := runner.foreach(t.Context(), request); err != nil {
+		t.Fatalf("same-generation retry: %v", err)
+	}
+	if ids := childIDs(t, store, parentID); len(ids) != 1 {
+		t.Fatalf("same-generation retry spawned duplicates: %v", ids)
+	}
+
+	// A gate loop advances the fanout generation; the packets are unchanged.
+	if err := store.Move(t.Context(), parentID, "slices", "slices", "loop", "requested_changes", "", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.foreach(t.Context(), request); err != nil {
+		t.Fatalf("identical packets in a later generation must respawn, got: %v", err)
+	}
+	secondGeneration := childIDs(t, store, parentID)
+	if len(secondGeneration) != 2 {
+		t.Fatalf("later generation produced %d children total, want 2: %v", len(secondGeneration), secondGeneration)
+	}
+	if secondGeneration[0] == secondGeneration[1] {
+		t.Fatalf("generations collided on one id: %v", secondGeneration)
+	}
+	if !strings.Contains(secondGeneration[0], ".g0.") || !strings.Contains(secondGeneration[1], ".g1.") {
+		t.Fatalf("children are not generation-scoped: %v", secondGeneration)
+	}
+}
+
+func childIDs(t *testing.T, store *db1.Store, parentID string) []string {
+	t.Helper()
+	children, err := store.Children(t.Context(), parentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, len(children))
+	for _, c := range children {
+		ids = append(ids, c.ID)
+	}
+	return ids
+}

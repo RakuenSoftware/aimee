@@ -1004,7 +1004,14 @@ func (r *NativeRunner) foreach(ctx context.Context, req StepRequest) (StepResult
 			r.rollbackChildren(ctx, created)
 			return StepResult{}, err
 		}
-		if err := r.db.CreateWorkItem(ctx, db1.CreateWorkItem{ID: id, Repo: req.WorkItem.Repo, ProposalPath: "packet:" + wfe.Hash(packet), WorkflowName: childName, WorkflowVersion: definition.Version, StartStage: start, Mode: "autonomous", ParentID: req.WorkItem.ID}); err != nil {
+		// The child id already carries the fanout generation and is unique, so
+		// deriving the identity from it keeps UNIQUE(repo, proposal_path)
+		// satisfied when refinement regenerates byte-identical packet content.
+		// Keying on the packet hash alone collided with the prior generation's
+		// row and wedged the parent in slices. The content hash stays appended
+		// for operator diagnosis. Same-generation retries still deduplicate on
+		// the id above, before this insert is reached.
+		if err := r.db.CreateWorkItem(ctx, db1.CreateWorkItem{ID: id, Repo: req.WorkItem.Repo, ProposalPath: "packet:" + id + ":" + wfe.Hash(packet), WorkflowName: childName, WorkflowVersion: definition.Version, StartStage: start, Mode: "autonomous", ParentID: req.WorkItem.ID}); err != nil {
 			r.rollbackChildren(ctx, created)
 			return StepResult{}, err
 		}
