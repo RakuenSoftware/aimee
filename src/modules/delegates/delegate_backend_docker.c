@@ -265,6 +265,80 @@ int delegate_backend_docker_remove_orphans(void)
    return removed;
 }
 
+/* Days-from-civil (Hinnant) → UTC epoch seconds for a naive Y-M-D H:M:S.
+ * Avoids the non-portable timegm(); the caller applies the TZ offset. */
+static time_t docker_utc_epoch(int y, int mo, int d, int h, int mi, int s)
+{
+   y -= mo <= 2;
+   int era = (y >= 0 ? y : y - 399) / 400;
+   unsigned yoe = (unsigned)(y - era * 400);
+   unsigned doy = (153u * (unsigned)(mo + (mo > 2 ? -3 : 9)) + 2u) / 5u + (unsigned)d - 1u;
+   unsigned doe = yoe * 365u + yoe / 4u - yoe / 100u + doy;
+   long days = (long)era * 146097L + (long)doe - 719468L;
+   return (time_t)days * 86400 + h * 3600 + mi * 60 + s;
+}
+
+/* Periodic runtime reap of aged delegate containers.
+ *
+ * remove_orphans() only runs at startup, and docker_release() only removes the
+ * container on the NORMAL turn-completion path. When the heartbeat monitor
+ * stale-cancels a delegate job (or the delegate crashes/fails) its running
+ * container is left behind — leaking one container per stale/failed turn until the
+ * next restart. Over a long uptime these accumulate and fill the image volume.
+ *
+ * Reap any aimee-delegate-* container older than max_age_secs, chosen ABOVE the
+ * in-tool job cap (DEFAULT_IN_TOOL_THRESHOLD_SECS, 1200s) so a live long-running
+ * turn is never removed. Returns the count removed, or -1 on a docker error. */
+int delegate_backend_docker_reap_aged(int max_age_secs)
+{
+   const char *list_argv[] = {
+       resolve_docker_bin(),     "ps", "--filter", "name=^aimee-delegate-", "--format",
+       "{{.ID}} {{.CreatedAt}}", NULL};
+   char *out = NULL;
+   if (safe_exec_capture_cwd_env_timeout(list_argv, NULL, NULL, &out, 1 << 20,
+                                         DOCKER_PROBE_TIMEOUT_MS) != 0)
+   {
+      free(out);
+      return -1;
+   }
+   time_t now = time(NULL);
+   int removed = 0;
+   char *save = NULL;
+   for (char *line = strtok_r(out, "\r\n", &save); line; line = strtok_r(NULL, "\r\n", &save))
+   {
+      /* Line is Go's default CreatedAt format: "<id> 2006-01-02 15:04:05 -0700 MST". */
+      char id[80];
+      int yy, mo, dd, hh, mi, ss;
+      char off[8] = "+0000";
+      if (sscanf(line, "%79s %d-%d-%d %d:%d:%d %7s", id, &yy, &mo, &dd, &hh, &mi, &ss, off) < 7)
+         continue;
+      /* Only accept a bare container id (hex), same guard as remove_orphans. */
+      size_t len = strlen(id);
+      int valid = len >= 12 && len <= 64;
+      for (size_t i = 0; valid && i < len; i++)
+         valid = isxdigit((unsigned char)id[i]) != 0;
+      if (!valid)
+         continue;
+      long off_secs = 0;
+      if ((off[0] == '+' || off[0] == '-') && strlen(off) >= 5 && isdigit((unsigned char)off[1]))
+      {
+         int oh = (off[1] - '0') * 10 + (off[2] - '0');
+         int om = (off[3] - '0') * 10 + (off[4] - '0');
+         off_secs = (long)(oh * 3600 + om * 60) * (off[0] == '-' ? -1 : 1);
+      }
+      time_t created = docker_utc_epoch(yy, mo, dd, hh, mi, ss) - off_secs;
+      if (created <= 0 || (long)(now - created) < max_age_secs)
+         continue;
+      const char *rm_argv[] = {resolve_docker_bin(), "rm", "-f", id, NULL};
+      if (run_docker(rm_argv) == 0)
+         removed++;
+      else
+         LOG_WARN("delegate-sandbox", "failed to reap aged delegate container %s", id);
+   }
+   free(out);
+   return removed;
+}
+
 /* Determine whether the running sandbox `container` was actually isolated by the
  * runtime, i.e. whether `--network none` was honoured. Asks the HOST daemon (not a
  * binary inside the untrusted image, so distroless/scratch images are fine) for the
