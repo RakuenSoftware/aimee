@@ -321,32 +321,39 @@ quality per parameter** (it starts from E4B's good weights) but yields a **bespo
 serving shape**; **distilling up a fixed slice keeps a known shape** but is
 **capacity-bounded** — quality-per-param vs serving simplicity, decided empirically.
 
-## §11 Training hardware & throughput
+## §11 Training hardware & throughput (Vulkan, not ROCm)
 
 Target training rig: one **24 GB Radeon RX 7900 XTX** (RDNA3) with ~157 GB system RAM,
 available 24/7 (the `.254` box in
 [`P2-serving-validation`](../../../benchmarks/results/unified-llm/P2-serving-validation.md)).
-Sufficient, because two things decouple from the 24 GB VRAM:
+**Training uses the Vulkan backend, not ROCm** — keeping the whole program on the same
+vendor-agnostic ggml/Vulkan stack aimee already vendors for serving (no ROCm, no CUDA
+lock-in, one toolchain for train and serve). Two things make 24 GB sufficient:
 
-- **Student side is LoRA/QLoRA on a frozen, quantized base** — the memory-light case
-  (QLoRA fit 33B on 24 GB); adapters + MRL head + optimizer states are small. A
-  Minitron prune-heal of a ~2–4 B student also fits with gradient checkpointing + an
-  8-bit optimizer.
-- **Teacher targets are cached offline**, decoupling teacher size from training VRAM:
-  run the (larger) teacher in inference passes — quantized on-card, or CPU-offloaded
-  into the 157 GB system RAM — over the corpus *once* to cache embeddings / soft labels,
-  then train students against the cache. A 24–32 B teacher runs on-card quantized; up to
-  ~70 B is reachable via CPU offload, slowly. The teacher and the training never
-  co-reside.
+- **Student side is LoRA on a frozen, quantized base** — the memory-light case; adapters
+  + MRL head + optimizer states are small, and this maps onto ggml/llama.cpp's **Vulkan
+  LoRA-finetune** path (actively maturing through 2026), so student training stays
+  in-ecosystem.
+- **Teacher targets are cached offline** via Vulkan *inference* (its strong suit),
+  decoupling teacher size from training VRAM: run the larger teacher in inference passes
+  — quantized on-card, or CPU-offloaded into the 157 GB system RAM — over the corpus
+  *once* to cache embeddings / soft labels, then train students against the cache. A
+  24–32 B teacher runs on-card quantized; up to ~70 B via CPU offload, slowly. Teacher
+  and training never co-reside.
 
-The binding constraint is therefore **wall-clock, not memory**: one GPU running the
-multi-model race (E2B-slice, E2B-distill, E4B-distill, pruned-E4B) sequentially is a
-weeks-scale program — which is what 24/7 availability is for.
+Binding constraint is **wall-clock, not memory**: one GPU, a sequential multi-model race
+(E2B-slice, E2B-distill, E4B-distill, pruned-E4B), weeks-scale — which is what 24/7 is for.
+Two Vulkan realities, neither a blocker, both scheduled-around: Vulkan runs at ~60–80% of
+ROCm/HIP throughput and the 7900 XTX has **no tensor cores**, so training is slow per step
+— acceptable precisely because we are wall-clock-bound with 24/7 headroom.
 
-**Caveat to validate early:** the AMD/ROCm training path on RDNA3 (PyTorch-ROCm plus a
-working 4-bit/LoRA stack — bitsandbytes / flash-attention are less turnkey than on CUDA).
-The memory budget fits; the toolchain needs a smoke test before the full program is
-scheduled on this card.
+**Smoke-tests before scheduling the full program:**
+1. **Vulkan training-op coverage** — the ggml Vulkan *backward* path (MUL_MAT / OUT_PROD
+   for LoRA) is newer than its inference path; confirm the LoRA-finetune ops we need run
+   correctly on RADV/RDNA3.
+2. **Tier-3 feasibility on Vulkan** — LoRA-adapter roles map cleanly onto ggml-Vulkan, but
+   **full-FT / Minitron prune-and-heal (§9 Tier 3) is less certain** in ggml; it may need a
+   different route or deferral. Validate before counting on it.
 
 ## Risks / honest tradeoffs
 
