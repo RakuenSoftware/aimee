@@ -52,12 +52,15 @@ bus. Nothing new is required here beyond honoring the install target.
 
 ### KB-install — the kb owns the plugins, servers call over HTTP
 
-- **Invocation:** a session that targets a kb-hosted `plugin:tool` reaches it over a
-  **new `kb_client` HTTP action** (e.g. `POST /v1/mcp/call`), mirroring how the
-  server already calls the kb for memory. The kb's handler runs `tools/call` against
-  its live plugin session and returns JSON. Args/results copy across the HTTP body.
-  The endpoint carries its own timeout / backpressure / auth (same mTLS bearer path
-  as other kb actions).
+- **Invocation:** a session that targets a kb-hosted `plugin:tool` reaches it over the
+  **existing mTLS action-RPC family** — a new `mcp.call` method on `POST
+  /v1/actions/<method>`, dispatched by the same kb service table as
+  `tool_registry.snapshot`/`lookup`. (The design review found this cleaner than a
+  bespoke `/v1/mcp/call` REST endpoint: it reuses the action channel's auth, framing,
+  and timeout — strictly less new surface, same security envelope as every other kb
+  RPC.) `kb_client_mcp_call` builds `{name, arguments?, timeout_ms?}`; the kb handler
+  runs `tools/call` against its live plugin session (timeout clamped ≤120s) and
+  returns `{status:"ok", result}`. Args/results copy across the request/response body.
 - **Advertisement:** the kb-hosted tool **definitions** reach a server through an
   **extended tool-registry snapshot RPC**. (Today's `kb_client_tool_registry_snapshot_json`
   carries *prompt* strings, not tool defs, and feeds the system prompt — it does
@@ -123,7 +126,7 @@ it is not free and is not required for the feature above:
 - A kb-installed plugin's tool appears in a connected server's `tools/list` (via the
   extended snapshot RPC + merge) and in the thin client's advertised catalog; a
   server-installed plugin's tool is absent from a *different* server — proving scope.
-- A kb-hosted `plugin:tool` call round-trips over `POST /v1/mcp/call` and returns the
+- A kb-hosted `plugin:tool` call round-trips over the `mcp.call` action and returns the
   same result as a direct call; its completion row lands on the **kb** ledger,
   content-free; a server-installed call's row lands on the **server** ledger.
 - A local↔kb tool-name collision is resolved at the runtime merge by the stated
@@ -134,8 +137,12 @@ it is not free and is not required for the feature above:
 ## What the review corrected (for the record)
 
 - **The bus is not a cross-daemon transport.** Rewrote every "server publishes onto
-  the kb's bus" to the real path: `kb_client` HTTP to a new `/v1/mcp/call`, kb-local
-  bus at most the last hop.
+  the kb's bus" to the real path: `kb_client` mTLS to a new `mcp.call` action method,
+  kb-local bus at most the last hop.
+- **No bespoke REST endpoint.** Implementation review of the seams showed invocation
+  belongs in the existing `/v1/actions/<method>` RPC family (an `mcp.call` method),
+  not a hand-rolled `/v1/mcp/call` — reusing the action channel's auth/framing/timeout
+  rather than duplicating them.
 - **No general bus host exists** — Phase 2 makes it an explicit prerequisite.
 - **The tool federation carries prompts, not tool defs** — the snapshot RPC
   extension is new work, not existing federation.
