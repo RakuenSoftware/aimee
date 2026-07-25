@@ -539,3 +539,83 @@ int config_field_set_value(config_t *cfg, const config_field_t *f, const char *v
       snprintf(base, f->size, "%s", value);
    return 0;
 }
+
+/* Flat-field defaults (Proposal A, step 1). Single home for the default value of
+ * every FLAT config field (see test_config_field_eligibility.c). config_set_defaults
+ * applies these table-driven instead of hand-assigning each — so a default lives in
+ * exactly one place (here), keyed by the same name as its config_fields[] descriptor.
+ * Values are in config_field_set_value's string form (bool: "true"/"false"; int: a
+ * decimal; string: the literal). Non-flat fields keep their bespoke defaults in
+ * config_set_defaults (side effects, env derivation, or computed values). */
+static const struct
+{
+   const char *key;
+   const char *value;
+} config_flat_defaults[] = {
+    {"db2_url", ""},
+    {"provider", "claude"},
+    {"default_persona", "engineer"},
+    {"claude_model", ""},
+    {"openai_endpoint", "https://api.openai.com/v1"},
+    {"openai_model", "gpt-4o"},
+    {"openai_key_cmd", ""},
+    {"guardrail_mode", "approve"},
+    {"embedding_command", ""},
+    {"embedding_model", ""},
+    {"embedding_endpoint", ""},
+    {"kb_client_url", ""},
+    {"kb_client_bearer_token", ""},
+    {"memory_rerank_mode", ""},
+    {"ingress_preinject_enabled", "true"},
+    {"ingress_preinject_anthropic_enabled", "false"},
+    {"ingress_compress_enabled", "true"},
+    {"gateway_prevent_subagents", "false"},
+    {"gateway_pin_model", "false"},
+    {"require_session_worktree", "true"},
+    {"require_aimee_memory", "true"},
+    {"require_aimee_git", "true"},
+    {"subagent_ban_enabled", "true"},
+    {"delegate_sandbox_require_isolation", "false"},
+    {"delegate_sandbox_learn_packages", "true"},
+    {"typed_facts_enabled", "true"},
+    {"kb_pdf_ingest_enabled", "false"},
+    {"kb_pdf_vector_enabled", "false"},
+    {"kb_pdf_tsr_enabled", "false"},
+    {"tsr_command", ""},
+    {"kb_pdf_assets_enabled", "false"},
+    {"kb_pdf_blob_dir", ""},
+    {"kb_pdf_blob_recon_secs", "3600"},
+    {"kb_pdf_blob_orphan_alarm_mb", "1024"},
+    {"kb_pdf_ocr_enabled", "false"},
+    {"ocr_command", ""},
+    {"css_style_graph_enabled", "true"},
+    {"code_cochange_git_enabled", "true"},
+    {"wfe_live_forge_enabled", "false"},
+    {"wfe_proposals_autoscan_enabled", "false"},
+    {"client_integrations_enabled", "true"},
+    {"audit_action_enabled", "true"},
+    {"audit_worm_enabled", "false"},
+    {"css_render_command",
+     "curl -s --max-time 30 --data-binary @- http://aimee-css-render:8780/render"},
+    {"kb_evidence_emit_enabled", "false"},
+    {"fidelity_check_enabled", "false"},
+    {"autonomous", "false"},
+    {"cross_verify", "false"},
+    {"max_iterations", "0"},
+    {"max_iterations_delegate", "0"},
+    {"verify_enabled", "false"},
+    {"delegate_graph_context_enabled", "false"},
+    {"verify_cross_project", "false"},
+};
+
+void config_apply_flat_defaults(config_t *cfg)
+{
+   if (!cfg)
+      return;
+   for (int i = 0; config_flat_defaults[i].key; i++)
+   {
+      const config_field_t *f = config_field_lookup(config_flat_defaults[i].key);
+      if (f)
+         (void)config_field_set_value(cfg, f, config_flat_defaults[i].value);
+   }
+}

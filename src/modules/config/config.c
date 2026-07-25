@@ -13,6 +13,7 @@
 #include "json_fluent.h"
 #include "aimee_home.h"
 #include "config_database.h"
+#include "config_fields.h"
 #include "config_internal.h"
 #include "config_sections.h"
 #include "config_learning.h"
@@ -589,15 +590,15 @@ static void config_set_defaults(config_t *cfg)
 {
    memset(cfg, 0, sizeof(*cfg));
 
+   /* Flat-field defaults are table-driven (config_flat_defaults[] in config_fields.c),
+    * so each lives in exactly one place. Non-flat defaults (side effects, env-derived,
+    * or computed) are set explicitly below. */
+   config_apply_flat_defaults(cfg);
+
    /* Defaults */
    snprintf(cfg->db1_path, sizeof(cfg->db1_path), "%s", config_default_db1_path());
-   snprintf(cfg->guardrail_mode, sizeof(cfg->guardrail_mode), "%s", MODE_APPROVE);
    snprintf(cfg->delegate_sandbox_package_access, sizeof(cfg->delegate_sandbox_package_access),
             "proxy");
-   cfg->delegate_sandbox_require_isolation =
-       0;                                    /* default OFF: breach degrades loudly, not fatally */
-   cfg->delegate_sandbox_learn_packages = 1; /* default ON: learn + pre-bake the toolchain */
-   snprintf(cfg->provider, sizeof(cfg->provider), "claude");
    cfg->compact_enabled = 1; /* default on; set before no-config early returns */
    cfg->coord_closet_enabled =
        1; /* fold §2: default-ON — conserves identifiers elided by the
@@ -660,8 +661,6 @@ static void config_set_defaults(config_t *cfg)
    /* structured-pdf Phase C blob reconciliation: default hourly sweep, alarm at 1 GiB of
     * reclaimable orphan bytes (config_t is memset-0 above, so these explicit values are the
     * defaults). The sweep is still a no-op until kb_pdf_assets_enabled is on. */
-   cfg->kb_pdf_blob_recon_secs = 3600;
-   cfg->kb_pdf_blob_orphan_alarm_mb = 1024;
    /* Embedding dimension. 0 = UNSET (the operator did not pin a dim): readers fall
     * back to 1024 (db2_embedding_dim(), kb_main, kb_ingest_workers), and — crucially
     * — config_embedding_dim_is_pinned() reports NOT-pinned, so §2a's recorded-dim
@@ -695,7 +694,6 @@ static void config_set_defaults(config_t *cfg)
     * defaults OFF here and config_apply_inference_backend_defaults() flips it ON only
     * for an accelerated backend. An explicit config value always wins. HyDE mode
     * defaults on so the rewrite, once enabled, generates a hypothetical answer. */
-   cfg->typed_facts_enabled = 1;
    /* structured-PDF pipeline defaults OFF (plain pdftotext); the tier drives the 5
     * stage gates. See kb_pdf_apply_tier. */
    snprintf(cfg->kb_pdf_tier, sizeof(cfg->kb_pdf_tier), "off");
@@ -758,8 +756,6 @@ static void config_set_defaults(config_t *cfg)
     * (ingress_preinject_build returns early when neither preinject nor typed-facts
     * is on, before the compress flag is read — so compress alone is a safe no-op).
     * Anthropic injection + failure-mining stay opt-in (separate gates). */
-   cfg->ingress_preinject_enabled = 1;
-   cfg->ingress_compress_enabled = 1;
    cfg->ingress_cache_placement_enabled = 1;
    cfg->ingress_preinject_assembly_budget = 6144;
    cfg->ingress_max_raw_scans = 0;
@@ -772,21 +768,17 @@ static void config_set_defaults(config_t *cfg)
     * (.aimee/worktrees/...), never the shared primary checkout. Concurrent aimee
     * sessions sharing one checkout collide on a single git HEAD. Explicit
     * `require_session_worktree: false` bypasses (see cli_attention_guard.c). */
-   cfg->require_session_worktree = 1;
    /* Default ON: agent-authored durable memories go through aimee's memory
     * system, not external per-harness memory files. Explicit
     * `require_aimee_memory: false` bypasses (see cli_attention_guard.c). */
-   cfg->require_aimee_memory = 1;
    /* Default ON: a delegate never runs `git`/`gh` in a shell — git and forge
     * actions go through aimee's git_* tools and execute on aimee-server, where
     * the forge credential stays in-process. Explicit `require_aimee_git: false`
     * bypasses (see wfe_native_gate.c). */
-   cfg->require_aimee_git = 1;
    /* Default-on: the primary agent must not spawn its OWN sub-agents (Task/Agent/
     * spawn_agent/RemoteTrigger); delegation goes through `aimee delegate` so the
     * child inherits this session's guardrails. Enforced only when usable delegates
     * are configured; `subagent_ban_enabled: false` opts out. */
-   cfg->subagent_ban_enabled = 1;
    /* Default-on as of the virtual-context rollout: the long-session benchmark
     * gate (make virtual-context-eval-check) passes on synthetic and real
     * tool-heavy session fixtures. Rollback: set session.virtual_context.enabled
@@ -876,35 +868,6 @@ static void config_set_defaults(config_t *cfg)
    cfg->skills_capability_autostub = 0;
    cfg->skills_eval_gate_enabled = 0;
    cfg->skills_eval_threshold = 0.01;
-   cfg->css_style_graph_enabled = 1;        /* default-on: the indexer builds the CSS style
-                                               graph so the read-only css signals/report work
-                                               out of the box (set false to opt out) */
-   cfg->code_cochange_git_enabled = 1;      /* default-on: index scan mines git history into
-                                               co_edited edges that blast radius already reads
-                                               (incremental/idempotent; set false to opt out) */
-   cfg->wfe_live_forge_enabled = 0;         /* default-OFF (2026-07-17): the live forge does
-                                               REAL git push + PR + merge, so it stays opt-in
-                                               while the autonomous pipeline is under test.
-                                               When OFF the forge provider is not registered
-                                               and every forge op fails closed (an autonomous
-                                               run parks, never opens/merges a real PR). Set
-                                               true to opt in; the merge-target rail still
-                                               bounds every op even when enabled. */
-   cfg->wfe_proposals_autoscan_enabled = 0; /* default-OFF: no automatic every-tick
-                                               proposal filing; file one at a time
-                                               manually via trigger.fire. */
-   cfg->client_integrations_enabled = 1;    /* default-ON: aimee auto-registers into
-                                               detected AI-tool user configs. Set false
-                                               (or export AIMEE_NO_CLIENT_INTEGRATIONS)
-                                               to keep aimee out of global tool configs
-                                               and wire a single project by hand. */
-   cfg->audit_action_enabled = 1;           /* default-ON: the trajectory_export reader (S3)
-                                               shipped, so the passive per-action audit row
-                                               is on by default; set false to opt out */
-   snprintf(cfg->css_render_command, sizeof(cfg->css_render_command), "%s",
-            CONFIG_DEFAULT_CSS_RENDER_COMMAND); /* default-on render backend (inert
-                                                   until the sidecar is up); set empty
-                                                   to disable */
    snprintf(cfg->vault_custody, sizeof(cfg->vault_custody), "file"); /* default custody
                                                                         (self-unsealing) */
    cfg->vault_tpm2_blob_path[0] = '\0'; /* empty -> <config>/vault/tpm2-kek.blob at use */
@@ -928,7 +891,6 @@ static void config_set_defaults(config_t *cfg)
    cfg->db2_vector_corpus_diskann_threshold = 1000000;
    cfg->ensemble_min_successful = 2;
    cfg->ensemble_max_cost_usd = 0.0; /* 0 = no cost cap (unlimited) by default */
-   snprintf(cfg->default_persona, sizeof(cfg->default_persona), "engineer");
    cfg->roundtable_max_rounds = 1;
    cfg->roundtable_converge_threshold = 10;
    /* Ten-minute default safety bound for a complete roundtable. It remains
@@ -962,9 +924,6 @@ static void config_set_defaults(config_t *cfg)
    cfg->identity_working_profile_injection_fields_count = 0;
    cfg->memory_recall_lanes_floor_summary = 4;
    cfg->memory_recall_lanes_floor_fact = 4;
-   snprintf(cfg->openai_endpoint, sizeof(cfg->openai_endpoint), "https://api.openai.com/v1");
-   snprintf(cfg->openai_model, sizeof(cfg->openai_model), "gpt-4o");
-   cfg->openai_key_cmd[0] = '\0';
    cfg->workspace_count = 0;
    config_parse_database(cfg, NULL);
 }
