@@ -217,6 +217,13 @@ The genuinely open work — twenty-three proposals (all but one not yet implemen
   and deeper per-directory convention discovery (the walk is already correct and
   tested; `AGENTS.md` is a foreign convention classed untrusted advisory).
   **Evaluate-Optimize / Calibrate.**
+- [Per-user `remote_writes` authorization](proposals/pending/per-user-remote-writes-authz.md)
+  — make the `/v1` write tier a function of the authenticated individual KB user (OIDC subject when
+  OIDC is enabled, otherwise a per-user bearer) instead of one global `aimee.api.remote_writes`
+  switch. Reuses the already-parameterized write gate, the existing OIDC verifier, the `enroll.c`
+  credential primitives, and the per-(server, team) management config projection (extended to
+  per-user); mTLS stays transport-only; unmatched identities fail closed. **Enforce / Constrain-Verify
+  / Gate-Promote.**
 
 ## Done (66)
 
