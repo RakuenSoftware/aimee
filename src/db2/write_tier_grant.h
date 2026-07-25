@@ -40,24 +40,27 @@ extern "C"
       char updated_at[32];
    } db2_write_tier_grant_row_t;
 
-   typedef enum
+   enum
    {
       /* A live grant exists; *out holds its tier. */
       DB2_WRITE_TIER_GRANT_FOUND = 1,
       /* No live grant for this (server, team, subject). The caller MUST deny.
        * This is the post-migration default for every subject. */
-      DB2_WRITE_TIER_GRANT_NONE = 0,
-      /* Lookup failed. Indistinguishable from NONE for authorization purposes —
-       * both deny — but kept separate so an outage is never logged as a policy
-       * decision. */
-      DB2_WRITE_TIER_GRANT_ERROR = -1
-   } db2_write_tier_grant_result_t;
+      DB2_WRITE_TIER_GRANT_NONE = 0
+   };
 
    /* Resolve the live tier granted to `subject` within (server_id, team_id).
-    * Writes *out only on FOUND; zeroes it otherwise. */
-   db2_write_tier_grant_result_t db2_write_tier_grant_lookup(const char *server_id, int64_t team_id,
-                                                             const char *subject,
-                                                             kb_identity_tier_t *out);
+    * Writes *out only on FOUND; zeroes it otherwise.
+    *
+    * Returns DB2_WRITE_TIER_GRANT_FOUND, DB2_WRITE_TIER_GRANT_NONE, or a
+    * NEGATIVE error — a negative tenancy code (so the blanket shim guard in
+    * test_kb_tenancy_shim_guard.c sees the same DB2_ERR_TENANT_REQUIRES_PG as
+    * every other tenant-scoped entrypoint), or -1.
+    *
+    * All three deny. They stay distinguishable so an outage is never recorded
+    * as a policy decision, and so "granted off" never reads as "not granted". */
+   int db2_write_tier_grant_lookup(const char *server_id, int64_t team_id, const char *subject,
+                                   kb_identity_tier_t *out);
 
    /* Insert or update the grant. Idempotent on (server_id, team_id, subject): a
     * re-grant refreshes tier/granted_by and clears revoked_at. Returns 0, a

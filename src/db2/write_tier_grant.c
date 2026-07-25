@@ -52,17 +52,21 @@ static int grant_args_valid(const char *server_id, int64_t team_id, const char *
    return server_id && server_id[0] && subject && subject[0] && team_id > 0;
 }
 
-db2_write_tier_grant_result_t db2_write_tier_grant_lookup(const char *server_id, int64_t team_id,
-                                                          const char *subject,
-                                                          kb_identity_tier_t *out)
+int db2_write_tier_grant_lookup(const char *server_id, int64_t team_id, const char *subject,
+                                kb_identity_tier_t *out)
 {
    if (out)
       memset(out, 0, sizeof(*out));
-   if (db2_tenant_require_pg() || !out || !grant_args_valid(server_id, team_id, subject))
-      return DB2_WRITE_TIER_GRANT_ERROR;
+   /* Pass the tenancy code through unchanged: the shim guard asserts every
+    * tenant-scoped entrypoint reports the same typed refusal. */
+   int __g = db2_tenant_require_pg();
+   if (__g)
+      return __g;
+   if (!out || !grant_args_valid(server_id, team_id, subject))
+      return -1;
    void *conn = db2_conn();
    if (!conn)
-      return DB2_WRITE_TIER_GRANT_ERROR;
+      return -1;
    char err[256] = "";
    aimee_pg_stmt_t *st =
        aimee_pg_prepare(conn,
@@ -70,18 +74,18 @@ db2_write_tier_grant_result_t db2_write_tier_grant_lookup(const char *server_id,
                         "AND subject=?3 AND revoked_at IS NULL LIMIT 1",
                         err, sizeof(err));
    if (!st)
-      return DB2_WRITE_TIER_GRANT_ERROR;
+      return -1;
    aimee_pg_bind_text(st, "?1", server_id);
    aimee_pg_bind_int64(st, "?2", team_id);
    aimee_pg_bind_text(st, "?3", subject);
    aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
-   db2_write_tier_grant_result_t result = DB2_WRITE_TIER_GRANT_ERROR;
+   int result = -1;
    if (step == AIMEE_PG_ROW)
    {
       /* A row whose tier the mapping does not recognize is a corrupt grant.
-       * Report ERROR, not NONE: both deny, but only one is a policy decision. */
-      result = tier_from_text(aimee_pg_column_text(st, 0), out) ? DB2_WRITE_TIER_GRANT_FOUND
-                                                                : DB2_WRITE_TIER_GRANT_ERROR;
+       * Report an error, not NONE: both deny, but only one is a policy
+       * decision. */
+      result = tier_from_text(aimee_pg_column_text(st, 0), out) ? DB2_WRITE_TIER_GRANT_FOUND : -1;
    }
    else if (step == AIMEE_PG_DONE)
       result = DB2_WRITE_TIER_GRANT_NONE;

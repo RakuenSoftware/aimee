@@ -5525,7 +5525,8 @@ $(TESTPREFIX)/unit-test-db2-hardening: $(OBJDIR)/tests/test_db2_hardening.o \
 
 $(TESTPREFIX)/unit-test-kb-tenancy-shim-guard: $(OBJDIR)/tests/test_kb_tenancy_shim_guard.o \
                      $(OBJDIR)/db2/team.o $(OBJDIR)/db2/project.o $(OBJDIR)/db2/membership.o \
-                     $(OBJDIR)/db2/admin_grant.o $(OBJDIR)/db2/oidc_jwks.o \
+                     $(OBJDIR)/db2/admin_grant.o $(OBJDIR)/db2/write_tier_grant.o \
+                     $(OBJDIR)/db2/oidc_jwks.o \
                      $(OBJDIR)/db2/db2_tenant.o $(OBJDIR)/kb/kb_identity.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
