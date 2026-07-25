@@ -219,11 +219,21 @@ static int wsc_list(const workspace_provider_t *p, const char *dir, const char *
       *count = 0;
    ws_container_provider_t *self = wsc_self(p);
    if (!self->backend || !self->backend->list_dir || !dir || !out || !count)
+   {
+      LOG_WARN("ws-container", "wsc_list guard fail: backend=%p list_dir=%p dir=%s",
+               (void *)(self ? self->backend : NULL),
+               (void *)(self && self->backend ? (void *)self->backend->list_dir : NULL),
+               dir ? dir : "(null)");
       return -1;
+   }
 
    char **entries = NULL;
-   if (self->backend->list_dir(self->backend, self->state, dir, &entries) != 0)
+   int lrc = self->backend->list_dir(self->backend, self->state, dir, &entries);
+   if (lrc != 0)
+   {
+      LOG_WARN("ws-container", "wsc_list: backend list_dir('%s') rc=%d", dir, lrc);
       return -1;
+   }
    if (!entries)
    {
       *count = 0;
