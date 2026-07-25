@@ -979,18 +979,17 @@ int config_save(const config_t *cfg)
    if (cfg->fidelity_check_enabled)
       cJSON_AddBoolToObject(root, "fidelity_check_enabled", 1);
 
-   /* Cross-verification */
-   if (cfg->cross_verify || cfg->verify_cmd[0] || cfg->verify_role[0])
-   {
-      cJSON *cv = cJSON_AddObjectToObject(root, "cross_verify");
-      cJSON_AddBoolToObject(cv, "enabled", cfg->cross_verify);
-      if (cfg->verify_cmd[0])
-         cJSON_AddStringToObject(cv, "verify_cmd", cfg->verify_cmd);
-      if (cfg->verify_role[0])
-         cJSON_AddStringToObject(cv, "role", cfg->verify_role);
-      if (cfg->verify_prompt[0])
-         cJSON_AddStringToObject(cv, "prompt", cfg->verify_prompt);
-   }
+   /* Cross-verification — flat top-level keys (was the cross_verify:{enabled,...}
+    * object; config_parse_cross_verify_section still reads the old object form for
+    * back-compat). */
+   if (cfg->cross_verify)
+      cJSON_AddBoolToObject(root, "cross_verify", 1);
+   if (cfg->verify_cmd[0])
+      cJSON_AddStringToObject(root, "verify_cmd", cfg->verify_cmd);
+   if (cfg->verify_role[0])
+      cJSON_AddStringToObject(root, "verify_role", cfg->verify_role);
+   if (cfg->verify_prompt[0])
+      cJSON_AddStringToObject(root, "verify_prompt", cfg->verify_prompt);
 
    /* Agent iteration limits (only save if non-default) */
    if (cfg->max_iterations)

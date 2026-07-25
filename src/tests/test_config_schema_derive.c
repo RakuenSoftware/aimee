@@ -3,7 +3,7 @@
  * duplicate config_schema[] row. Behavioral: load a yaml exercising
  *   - a flat scalar removed from config_schema[] (provider/autonomous/max_iterations),
  *   - a flat scalar that was never in config_schema[] (kb_evidence_emit_enabled),
- *   - the dual-form nested key cross_verify (must still validate as an object),
+ *   - cross_verify as a flat bool (flattened from the old object form),
  *   - a genuinely unknown key,
  * capture config_validate's stderr, and assert only the genuinely-unknown key is
  * reported. This catches a regression where removing a schema row makes a valid
@@ -23,8 +23,7 @@ static const char *YAML = "provider: openai\n"
                           "autonomous: true\n"
                           "max_iterations: 7\n"
                           "kb_evidence_emit_enabled: true\n"
-                          "cross_verify:\n"
-                          "  enabled: true\n"
+                          "cross_verify: true\n"
                           "zzz_not_a_real_key: 1\n";
 
 int main(void)
@@ -77,8 +76,10 @@ int main(void)
    assert(!strstr(buf, "unknown key \"max_iterations\""));
    assert(!strstr(buf, "unknown key \"kb_evidence_emit_enabled\""));
    /* Dual-form nested key stays schema-validated as an object. */
-   assert(!strstr(buf, "unknown key \"cross_verify\"") && "cross_verify stays SCHEMA_OBJECT");
-   assert(!strstr(buf, "\"cross_verify\" expected") && "cross_verify object must still type-check");
+   /* cross_verify is now a flat bool (flattened from the old {enabled:} object);
+    * it validates via the config_fields[] fallback with no unknown/type warning. */
+   assert(!strstr(buf, "unknown key \"cross_verify\""));
+   assert(!strstr(buf, "\"cross_verify\" expected"));
    /* A genuinely unknown key is still caught. */
    assert(strstr(buf, "unknown key \"zzz_not_a_real_key\"") &&
           "genuinely unknown keys must still be reported");

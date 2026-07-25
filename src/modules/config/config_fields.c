@@ -183,6 +183,12 @@ const config_field_t config_fields[] = {
      CFG_FLOAT, RELOAD_HOT, FGROUP_ADVANCED},
     {"autonomous", offsetof(config_t, autonomous), sizeof(int), 1, CFG_BOOL},
     {"cross_verify", offsetof(config_t, cross_verify), sizeof(int), 1, CFG_BOOL},
+    {"verify_cmd", offsetof(config_t, verify_cmd), sizeof(((config_t *)0)->verify_cmd), 0,
+     CFG_STRING},
+    {"verify_role", offsetof(config_t, verify_role), sizeof(((config_t *)0)->verify_role), 0,
+     CFG_STRING},
+    {"verify_prompt", offsetof(config_t, verify_prompt), sizeof(((config_t *)0)->verify_prompt), 0,
+     CFG_STRING},
     {"max_iterations", offsetof(config_t, max_iterations), sizeof(int), 0, CFG_INT},
     {"max_iterations_delegate", offsetof(config_t, max_iterations_delegate), sizeof(int), 0,
      CFG_INT},
@@ -605,6 +611,10 @@ static const struct
     {"verify_enabled", "false"},
     {"delegate_graph_context_enabled", "false"},
     {"verify_cross_project", "false"},
+    {"cross_verify", "false"},
+    {"verify_cmd", ""},
+    {"verify_role", ""},
+    {"verify_prompt", ""},
     {NULL, NULL}, /* sentinel — config_apply_flat_defaults iterates until .key is NULL */
 };
 

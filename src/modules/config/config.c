@@ -319,7 +319,6 @@ static const config_schema_entry_t config_schema[] = {
     {"memory_maintenance", SCHEMA_OBJECT, 0},
     {"memory", SCHEMA_OBJECT, 0},
     {"workspaces", SCHEMA_ARRAY, 0},
-    {"cross_verify", SCHEMA_OBJECT, 0},
     {"retry", SCHEMA_OBJECT, 0},
     {"max_delegation_depth", SCHEMA_INT, 0},
     {"max_delegation_spawns", SCHEMA_INT, 0},
