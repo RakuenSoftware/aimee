@@ -134,6 +134,25 @@ it is not free and is not required for the feature above:
 - Phase 1 keeps `check_bus_blast_radius.sh` green (no bus header in the adapter).
   Phase 2, if pursued, ships the D7 amendment + updated gate.
 
+## Failure-mode & precedence e2e (observed 2026-07-25, CT 132 @ .253)
+
+Against a live kb hosting a multi-tool plugin (ok / error / slow tools):
+- **Error path:** a plugin that returns a JSON-RPC error → kb reply is an error and
+  the audit row is `verdict:"error", reason_code:"tool_error"`.
+- **Timeout path:** a tool that sleeps 3s called with `timeout_ms:1000` → the kb
+  aborts and records `verdict:"error", reason_code:"tool_error"` (the clamp/timeout
+  is enforced, not ignored).
+- **Concurrency:** 12 parallel `mcp.call`s to one stdio plugin all succeed
+  (`verdict:"ok"`) and each is audited — the per-client stdio pipe is serialized
+  safely.
+- **Local precedence (collision), LIVE:** with the SAME tool name `echo` hosted on
+  BOTH the server (install:server → a "LOCAL-echo" plugin) and the kb (install:kb),
+  a real model turn calling `echo:echo` returned `LOCAL-echo: LIVE-TURN` and the kb
+  logged ZERO `mcp.call`s — the server's local plugin wins and the kb is never
+  contacted. This also exercises the install:server invocation (local dispatch
+  branch) end to end. The selection primitive (`mcp_client_registry_get`) is
+  additionally unit-tested for hosted/not-hosted both ways.
+
 ## Phase 1 verification (observed 2026-07-25, CT 132 @ .253)
 
 Real `aimee-kb` daemon (fresh DB2, dim pinned) hosting an `install: kb` stdio MCP
