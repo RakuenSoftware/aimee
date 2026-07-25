@@ -218,6 +218,37 @@ embed on both sizes.
    conditioned").
 5. **Quantization-aware finish**; PLE tables pinned Q8_0 (§4).
 
+## §5b Maximizing E2B capability at fixed size (16 GB training)
+
+Where a deployment commits to E2B (the lighter option; E4B still serves bigger boxes), the
+lossless text-only strip (§2b) doesn't shrink it meaningfully — so the lever is not *smaller*
+but *more capable at the same size*. Given 24/7 on one 16 GB card, in rough order of
+return-for-effort:
+
+- **Overtrain — the biggest free lever.** Small models keep improving well past the
+  compute-optimal token count (train small, train long); 24/7 availability is exactly the
+  resource this consumes. Cost: wall-clock only.
+- **Domain-adaptive continued pre-training (DAPT).** Continue-pretrain E2B on aimee's own
+  corpus (code + documents + memory text) before task distillation, raising on-domain base
+  capability. Fits 16 GB.
+- **Climb the LoRA → full-FT ladder as far as 16 GB allows.** LoRA caps how much the model can
+  change; for capability prefer the most-trainable config that fits — fp16-base LoRA → high-rank
+  LoRA → partial full-FT → **full fine-tune with an 8-bit optimizer + gradient checkpointing +
+  frozen PLE tables** (only the ~2.3B transformer trains, so E2B full-FT is feasible on 16 GB).
+  **Caveat:** deeper FT for one role can degrade the other (embed↔synth alignment tax) — keep
+  the synth-distill → freeze → embed-adapter sequencing and re-verify *both* §8 gates after any
+  deeper training.
+- **Deeper distillation signal.** Match teacher *features* (hidden states / attention), not just
+  outputs; teacher features are cached offline (§11), so this costs disk, not training VRAM.
+- **A stronger teacher.** Teacher size is decoupled from the 16 GB card (offline cache), so a
+  larger/better teacher than E4B raises the student ceiling (§12 escalation).
+- **Concentrate capacity via narrowness.** The narrow aimee distribution means E2B's *effective*
+  capability on your tasks exceeds what its size suggests — keep the training distribution
+  tightly aimee's.
+
+Each capability gain is bench-verified (§8), not assumed; the deeper-training levers are
+constrained by role preservation, not just by 16 GB.
+
 ## §6 Dimensions via MRL — scoped precisely
 
 - **One MRL ladder** (proposed `[256, 512, 1024, 2048, 2560, 4000]`; 4000 = `halfvec` index
