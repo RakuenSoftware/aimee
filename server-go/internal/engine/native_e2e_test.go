@@ -148,7 +148,7 @@ nodes:
   - id: plan_gate
     block: gate.roundtable
     in: {src: plan.out}
-    params: {panel: {required: [architect]}, quorum: 1}
+    params: {roundtable: default, panel: {required: [architect]}, quorum: 1}
     on_pass: split
     on_fail: plan
   - id: split
@@ -168,7 +168,7 @@ nodes:
   - id: gate
     block: gate.roundtable
     in: {src: freeze.out}
-    params: {panel: {required: [qa]}, quorum: 1}
+    params: {roundtable: default, panel: {required: [qa]}, quorum: 1}
     on_pass: document
     on_fail: split
   - id: document
@@ -207,7 +207,7 @@ nodes:
   - id: gate
     block: gate.roundtable
     in: {src: freeze.out}
-    params: {panel: {required: [qa]}, quorum: 1}
+    params: {roundtable: default, panel: {required: [qa]}, quorum: 1}
     on_pass: pr
     on_fail: impl
   - id: pr
@@ -269,6 +269,9 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Every gate in this workflow names "default", and a named roundtable must
+	// resolve to a saved preset, so the end-to-end run needs a real one.
+	runner.SetRoundtableStore(unpinnedTestRoundtable(t, "architect"))
 	recoveringRunner := &transientGateRunner{next: runner, failures: []string{"roundtable_discussion", "roundtable_chairman"}}
 	eng, err := New(store, artifacts, workflowDir, recoveringRunner)
 	if err != nil {

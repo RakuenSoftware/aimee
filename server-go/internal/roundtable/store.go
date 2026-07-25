@@ -9,7 +9,6 @@ import (
 	"strings"
 )
 
-const DirectMaxSeats = 2
 const DefaultDeadlineMS = 600000
 
 type Seat struct {
@@ -43,47 +42,35 @@ type preset struct {
 	ChairmanEnabled bool         `json:"chairman_enabled"`
 }
 
-type DefaultSource func() (string, error)
-
 type Store struct {
-	dir         string
-	defaultName DefaultSource
+	dir string
 }
 
-func NewStore(dir string, defaultName DefaultSource) (*Store, error) {
-	if dir == "" || defaultName == nil {
-		return nil, errors.New("roundtable directory and default source are required")
+func NewStore(dir string) (*Store, error) {
+	if dir == "" {
+		return nil, errors.New("roundtable directory is required")
 	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
 	}
-	return &Store{dir: abs, defaultName: defaultName}, nil
+	return &Store{dir: abs}, nil
 }
 
-// Resolve is the only seat-specification path. A named/default saved
-// roundtable is exact. Only the no-preset direct fallback is capped at two
-// seats. Generic delegation owns agent routing for every unpinned seat.
+// Resolve is the only seat-specification path, and it fails closed. A panel is
+// review authority: convening one the operator never configured is worse than
+// not reviewing at all, because the unconfigured shape is invisible in the
+// result. The caller must name a saved roundtable; an unnamed or unloadable one
+// is an error, never an implicit panel. Generic delegation owns agent routing
+// for every unpinned seat.
 func (s *Store) Resolve(requested string, lenses []string, pins map[string]string) (Panel, error) {
-	configuredDefault, err := s.defaultName()
-	if err != nil {
-		return Panel{}, fmt.Errorf("load roundtable.default: %w", err)
-	}
 	name := strings.TrimSpace(requested)
-	explicit := name != ""
-	configured := !explicit && strings.TrimSpace(configuredDefault) != ""
-	if !explicit {
-		name = strings.TrimSpace(configuredDefault)
-	}
 	if name == "" {
-		name = "default"
+		return Panel{}, errors.New("no roundtable named: a roundtable review must name a saved roundtable")
 	}
 	p, err := s.load(name)
 	if err != nil {
-		if explicit || configured || !errors.Is(err, os.ErrNotExist) {
-			return Panel{}, err
-		}
-		return directPanel(lenses, pins)
+		return Panel{}, err
 	}
 	return resolvePreset(p, lenses, pins)
 }
@@ -140,22 +127,6 @@ func resolvePreset(p preset, lenses []string, pins map[string]string) (Panel, er
 		}
 	}
 	return Panel{Name: p.Name, Seats: seats, MinSuccessful: minimum, Discussion: p.Discussion, DeadlineMS: deadline, Chairman: chairman, ChairmanEnabled: p.ChairmanEnabled, Acquired: true}, nil
-}
-
-func directPanel(lenses []string, pins map[string]string) (Panel, error) {
-	seats := make([]Seat, 0, DirectMaxSeats)
-	for i := 0; i < DirectMaxSeats; i++ {
-		persona := lensAt(lenses, i)
-		name := strings.TrimSpace(pins[persona])
-		seats = append(seats, Seat{Persona: persona, Selector: name})
-	}
-	return Panel{Seats: seats, MinSuccessful: len(seats), DeadlineMS: DefaultDeadlineMS}, nil
-}
-
-// ResolveDirect is the explicit no-roundtable path used by compatibility
-// callers. Its two-seat maximum cannot be overridden by the caller.
-func ResolveDirect(lenses []string, pins map[string]string) (Panel, error) {
-	return directPanel(lenses, pins)
 }
 
 func lensAt(lenses []string, i int) string {

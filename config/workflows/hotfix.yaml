@@ -43,6 +43,7 @@ nodes:
     in:
       src: freeze.out
     params:
+      roundtable: implementation
       panel:
         required:
           - security

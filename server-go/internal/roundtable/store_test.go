@@ -25,8 +25,8 @@ func TestConfiguredRoundtablePreservesExactSeatSpecifications(t *testing.T) {
 		{Selector: "codex", Persona: "qa"},
 		{Selector: "$random", Persona: "architect"},
 	}})
-	store, _ := NewStore(dir, func() (string, error) { return "large", nil })
-	panel, err := store.Resolve("", []string{"reviewer"}, nil)
+	store, _ := NewStore(dir)
+	panel, err := store.Resolve("large", []string{"reviewer"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,8 +41,8 @@ func TestConfiguredRoundtablePreservesExactSeatSpecifications(t *testing.T) {
 func TestEnabledChairmanRequiresSpecification(t *testing.T) {
 	dir := t.TempDir()
 	writePreset(t, dir, preset{Name: "missing", ChairmanEnabled: true, Seats: []presetSeat{{Selector: "$random"}}})
-	store, _ := NewStore(dir, func() (string, error) { return "missing", nil })
-	if _, err := store.Resolve("", nil, nil); err == nil {
+	store, _ := NewStore(dir)
+	if _, err := store.Resolve("missing", nil, nil); err == nil {
 		t.Fatal("enabled chairman silently accepted without a delegate specification")
 	}
 }
@@ -52,8 +52,8 @@ func TestConfiguredRoundtableAlwaysRequestsEverySeat(t *testing.T) {
 	writePreset(t, dir, preset{Name: "five", Seats: []presetSeat{
 		{Selector: "$random"}, {Selector: "$random"}, {Selector: "$random"}, {Selector: "$random"}, {Selector: "$random"},
 	}})
-	store, _ := NewStore(dir, func() (string, error) { return "five", nil })
-	panel, err := store.Resolve("", nil, nil)
+	store, _ := NewStore(dir)
+	panel, err := store.Resolve("five", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,22 +62,25 @@ func TestConfiguredRoundtableAlwaysRequestsEverySeat(t *testing.T) {
 	}
 }
 
-func TestDirectFallbackHardCapsTwoAndLeavesRoutingToDelegate(t *testing.T) {
-	store, _ := NewStore(t.TempDir(), func() (string, error) { return "", nil })
-	panel, err := store.Resolve("", []string{"security", "qa", "architect"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if panel.Acquired || len(panel.Seats) != 2 || panel.Seats[0].Selector != "" || panel.Seats[1].Selector != "" || panel.DeadlineMS != 600000 {
-		t.Fatalf("panel=%+v", panel)
+// An unnamed roundtable used to fall back to an implicit two-seat panel that no
+// operator had configured — unanimous, chairman-less, and invisible in the
+// result. Convening review authority nobody specified must be an error.
+func TestUnnamedRoundtableFailsClosedInsteadOfImprovisingAPanel(t *testing.T) {
+	dir := t.TempDir()
+	writePreset(t, dir, preset{Name: "default", Seats: []presetSeat{{Selector: "$random"}}})
+	store, _ := NewStore(dir)
+	for _, requested := range []string{"", "   "} {
+		if _, err := store.Resolve(requested, []string{"security", "qa", "architect"}, nil); err == nil {
+			t.Fatalf("unnamed roundtable %q improvised a panel instead of failing closed", requested)
+		}
 	}
 }
 
 func TestConfiguredRoundtableDefaultsToTenMinuteSafetyBound(t *testing.T) {
 	dir := t.TempDir()
 	writePreset(t, dir, preset{Name: "default", Seats: []presetSeat{{Selector: "$random"}}})
-	store, _ := NewStore(dir, func() (string, error) { return "default", nil })
-	panel, err := store.Resolve("", nil, nil)
+	store, _ := NewStore(dir)
+	panel, err := store.Resolve("default", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,9 +89,9 @@ func TestConfiguredRoundtableDefaultsToTenMinuteSafetyBound(t *testing.T) {
 	}
 }
 
-func TestMissingConfiguredDefaultFailsClosed(t *testing.T) {
-	store, _ := NewStore(t.TempDir(), func() (string, error) { return "missing", nil })
-	if _, err := store.Resolve("", nil, nil); err == nil {
-		t.Fatal("missing configured default silently fell back")
+func TestNamedButAbsentRoundtableFailsClosed(t *testing.T) {
+	store, _ := NewStore(t.TempDir())
+	if _, err := store.Resolve("missing", nil, nil); err == nil {
+		t.Fatal("named roundtable that does not exist silently fell back")
 	}
 }

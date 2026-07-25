@@ -25,6 +25,7 @@ func TestSharedRoundtableReviewUsesGoEngine(t *testing.T) {
 	runner := &NativeRunner{agents: agents, roundtables: configuredTestRoundtable(t)}
 	result, err := runner.Review(context.Background(), roundtablecfg.ReviewRequest{
 		Artifact: "a complete implementation artifact for review", OriginalRequest: "implement the requested behavior",
+		Roundtable: "default",
 	})
 	if err != nil {
 		t.Fatal(err)

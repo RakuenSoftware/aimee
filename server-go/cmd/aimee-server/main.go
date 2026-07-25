@@ -134,10 +134,10 @@ func main() {
 		if runnerErr != nil {
 			log.Fatal(runnerErr)
 		}
-		roundtables, roundtableErr := roundtable.NewStore(filepath.Join(*home, "roundtables"), func() (string, error) {
-			name, _, err := configStore.StringValue("roundtable.default")
-			return name, err
-		})
+		// No configured-default source: a roundtable review names its roundtable
+		// in the workflow, which validation requires. roundtable.default no longer
+		// selects a panel for the Go control plane.
+		roundtables, roundtableErr := roundtable.NewStore(filepath.Join(*home, "roundtables"))
 		if roundtableErr != nil {
 			log.Fatal(roundtableErr)
 		}

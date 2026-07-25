@@ -155,39 +155,40 @@ attested `webuser:admin` appliance administrator. Generic API capabilities,
 other authenticated web users, and local Unix-socket access do not authorize
 those mutations.
 
-**Which models review the artifact** comes from the acquired roundtable preset.
-The preset the GUI edits and `roundtable.default` selects is used unless the gate
-names another preset. Its exact seats are the complete panel; required personas
-are review/verdict dimensions and do not create additional seats:
+**Which models review the artifact** comes from the roundtable preset the gate
+names. Its exact seats are the complete panel; required personas are
+review/verdict dimensions and do not create additional seats:
 
 - a **specific pinned model** is dispatched to that **exact** agent. If that model
   is not enabled/routable for the `review` role — or its dispatch fails — the run
   **fails** (a pinned model is a hard requirement, never silently swapped);
 - a **`$random`** seat picks an available review-capable agent;
-- when no saved preset can be acquired, the fallback panel contains at most two
-  review-capable agents, selected across providers where possible.
+- when the named preset cannot be loaded, the gate parks `panel_unreachable`.
+  There is no fallback panel: a review nobody configured is not a review.
 
 Set a seat to a specific model or to *Random* in the Roundtable page of the GUI.
 An agent is "review-capable" unless its `exec_roles` explicitly omit `review`
 (e.g. a specialized `gpu-mid` is never seated). If no panel of reviewers can be
 composed at all the gate parks `panel_degraded` for a human.
 
-A gate convenes the configured default roundtable (`roundtable.default`) unless
-the node names a specific preset with `params.roundtable` — so different gates in
-one workflow can use different panels:
+A `gate.roundtable` node **must** name its preset with `params.roundtable`; a
+workflow that omits it fails validation. Different gates in one workflow name
+different panels, and the shipped workflows do exactly that (`plan`,
+`implementation`, `acceptance`, `documentation`, seeded from
+`config/roundtables/`):
 
 ```yaml
 - id: plan_gate
   block: gate.roundtable
   params:
-    roundtable: security-review     # convene this preset's seats (else the default)
+    roundtable: security-review     # required: convene this preset's seats
     panel:
       required: [security, architect, qa, reviewer]
     quorum: 4
 ```
 
-If an explicitly named or configured-default preset does not exist, the gate
-parks with a configuration error; it never silently substitutes another panel.
+If the named preset does not exist, the gate parks with a configuration error;
+it never silently substitutes another panel.
 
 There is **no engine privilege** over a user-authored workflow: `build` is just
 one composition of the same catalog you compose from. Clone it and edit freely.

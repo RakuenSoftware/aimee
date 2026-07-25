@@ -837,6 +837,7 @@ nodes:
   - id: accept_gate
     block: gate.roundtable
     in: {src: freeze.out}
+    params: {roundtable: default}
     on_pass: done
     on_fail: impl
   - id: done
@@ -908,7 +909,7 @@ nodes:
   - id: plan_gate
     block: gate.roundtable
     in: {src: plan.out}
-    params: {max_iters: 24}
+    params: {roundtable: default, max_iters: 24}
     on_pass: done
     on_fail: plan
   - id: done
