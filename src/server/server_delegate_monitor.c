@@ -1,7 +1,8 @@
 /* server_delegate_monitor.c: see server_delegate_monitor.h */
 
 #include "server_delegate_monitor.h"
-#include "http_retry.h"  /* http_set_progress_cb */
+#include <aimee/delegates/delegate_backend_docker.h> /* delegate_backend_docker_reap_aged (leaked-container reap) */
+#include "http_retry.h"                              /* http_set_progress_cb */
 #include "cli_session.h" /* cli_session_set_heartbeat_cb (tmux-CLI delegates) */
 #include "log.h"
 
@@ -91,13 +92,30 @@ int server_delegate_monitor_sweep(int idle_threshold_secs, int in_tool_threshold
    return cancelled;
 }
 
+/* Reap aged delegate containers this many sweeps apart (~5 min at 30 s/sweep).
+ * The sweep above stale-cancels the JOB but never removes its container; only the
+ * normal completion path does. Without this, a stale/crashed delegate leaks its
+ * container until the next restart, accumulating until the image volume fills. */
+#define CONTAINER_REAP_EVERY_N_SWEEPS 10
+/* Age threshold for the container reap. Above DEFAULT_IN_TOOL_THRESHOLD_SECS so a
+ * live long-running turn is never removed. */
+#define CONTAINER_REAP_AGE_SECS 1800
+
 static void *monitor_thread(void *arg)
 {
    (void)arg;
+   int sweeps = 0;
    while (!g_monitor_stop)
    {
       (void)server_delegate_monitor_sweep(DEFAULT_IDLE_THRESHOLD_SECS,
                                           DEFAULT_IN_TOOL_THRESHOLD_SECS);
+
+      if (++sweeps % CONTAINER_REAP_EVERY_N_SWEEPS == 0)
+      {
+         int reaped = delegate_backend_docker_reap_aged(CONTAINER_REAP_AGE_SECS);
+         if (reaped > 0)
+            LOG_INFO("server.delegate_monitor", "reaped %d aged delegate container(s)", reaped);
+      }
 
       /* Sleep in 1 s chunks so shutdown is responsive. */
       for (int slept = 0; slept < DEFAULT_POLL_INTERVAL_SECS && !g_monitor_stop; slept++)

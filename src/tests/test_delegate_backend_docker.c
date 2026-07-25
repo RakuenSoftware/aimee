@@ -826,9 +826,56 @@ static void test_docker_workspace_validation_refusals(void)
    printf("  PASS: docker_workspace_validation_refusals\n");
 }
 
+/* reap_aged removes delegate containers older than the threshold and keeps recent
+ * ones. Uses a self-contained fake docker: `ps` emits one ancient and one current
+ * container line in Go's CreatedAt format; `rm` logs the id it was asked to drop. */
+static void test_reap_aged_removes_only_old(void)
+{
+   char script[256], rmlog[256];
+   snprintf(script, sizeof(script), "/tmp/aimee-reap-docker-%d.sh", (int)getpid());
+   snprintf(rmlog, sizeof(rmlog), "/tmp/aimee-reap-rmlog-%d", (int)getpid());
+   unlink(rmlog);
+   FILE *f = fopen(script, "w");
+   assert(f != NULL);
+   fprintf(f,
+           "#!/bin/bash\n"
+           "case \"$1\" in\n"
+           "  ps)\n"
+           "    echo \"aaaaaaaaaaaa 2000-01-01 00:00:00 +0000 UTC\"\n"
+           "    echo \"bbbbbbbbbbbb $(date -u +'%%Y-%%m-%%d %%H:%%M:%%S') +0000 UTC\"\n"
+           "    ;;\n"
+           "  rm)\n"
+           "    shift 2\n"
+           "    echo \"$1\" >> %s\n"
+           "    ;;\n"
+           "esac\n"
+           "exit 0\n",
+           rmlog);
+   fclose(f);
+   assert(chmod(script, 0755) == 0);
+   setenv("AIMEE_DOCKER_BIN", script, 1);
+
+   assert(delegate_backend_docker_reap_aged(1800) == 1);
+
+   char buf[256] = {0};
+   f = fopen(rmlog, "r");
+   assert(f != NULL);
+   size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+   buf[n] = '\0';
+   fclose(f);
+   assert(strstr(buf, "aaaaaaaaaaaa") != NULL); /* ancient -> reaped */
+   assert(strstr(buf, "bbbbbbbbbbbb") == NULL); /* current -> kept */
+
+   unsetenv("AIMEE_DOCKER_BIN");
+   unlink(script);
+   unlink(rmlog);
+   printf("  PASS: test_reap_aged_removes_only_old\n");
+}
+
 int main(void)
 {
    test_remove_orphans_accepts_only_container_ids();
+   test_reap_aged_removes_only_old();
    printf("delegate_backend_docker:\n");
    test_register_puts_docker_in_registry();
    test_file_ops_reject_null_state();
