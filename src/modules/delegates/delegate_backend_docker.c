@@ -1203,8 +1203,8 @@ static int docker_resolve_in_workspace(const docker_state_t *st, const char *rel
 {
    if (!st || !rel || !out || outsz == 0)
       return -1;
-   if (rel[0] == '/')
-      return -1;
+   /* Reject any parent-traversal segment outright — it could escape the workspace
+    * whether the input is relative or absolute. */
    const char *p = rel;
    while (*p)
    {
@@ -1217,8 +1217,28 @@ static int docker_resolve_in_workspace(const docker_state_t *st, const char *rel
       if (*p == '/')
          p++;
    }
-   if (snprintf(out, outsz, "%s/%s", st->workdir[0] ? st->workdir : resolve_docker_workdir(),
-                rel) >= (int)outsz)
+   const char *workdir = st->workdir[0] ? st->workdir : resolve_docker_workdir();
+   if (rel[0] == '/')
+   {
+      /* Accept an ABSOLUTE path only when it is within the workspace root. The slice
+       * worktree is bind-mounted path-identically, so such a path is already the valid
+       * in-container path. The native file tools (tool_read_file/tool_write_file) resolve
+       * to an absolute path via the thread cwd BEFORE calling the provider, so without
+       * this branch every in-workspace read/write is wrongly rejected (bash still works
+       * because it runs a raw `cd && ...` command that never reaches this resolver) — the
+       * live symptom was container delegates hitting "cannot open"/"cannot write" on their
+       * own worktree. A path OUTSIDE the workspace stays refused: the container must not
+       * reach the host tree. */
+      size_t wlen = strlen(workdir);
+      if (strncmp(rel, workdir, wlen) == 0 && (rel[wlen] == '/' || rel[wlen] == '\0'))
+      {
+         if (snprintf(out, outsz, "%s", rel) >= (int)outsz)
+            return -1;
+         return 0;
+      }
+      return -1;
+   }
+   if (snprintf(out, outsz, "%s/%s", workdir, rel) >= (int)outsz)
       return -1;
    return 0;
 }
