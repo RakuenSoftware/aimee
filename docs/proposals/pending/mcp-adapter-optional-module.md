@@ -181,14 +181,24 @@ Only a name-only fingerprint + classified enums cross (no argument/result conten
 The caller's dispatch role is threaded over the mcp.call request as the audit actor
 (default `"mcp"`). Blast-radius gate: all six C shipping binaries inspect clean.
 
-**Live-model agent turn — not separately run, by analysis** rather than omission:
-a chat turn exercises the server's GENERIC loop (send `build_tools_array` to the
-model → dispatch the model's `tool_calls`), which this feature does not modify and
-which is already covered for every tool. The feature's two touchpoints in that path
-are both verified above — the federated tool is in `build_tools_array` (what the
-model receives) and `dispatch_tool_call` routes it to the kb (what runs when the
-model calls it) — so a live turn would test unchanged orchestration, not new code.
-The model emitting the call is the model's behavior, not aimee's.
+**Live-model agent turn — run and verified** (added 2026-07-25): a real agent turn
+was driven through `aimee-server`'s agentic loop against a stub OpenAI-compatible
+model (aimed at via the `openai` provider's configurable `openai_endpoint`, no key
+needed). The stub emitted an `echo:echo` tool_call; the full loop closed:
+- delegate job → `status: done, turns: 1`, model final answer
+  `TOOL_RESULT_SEEN: {"content":[{"type":"text","text":"echo: LIVE-TURN"}]}` — the
+  string is the KB-hosted plugin's own output, so the model's call reached the kb.
+- the kb logged `POST /v1/actions/mcp.call status=200` for that turn.
+- the kb audit ledger recorded the model-driven call end to end: a server-side
+  authorization row `{"actor":"delegate","tool":"echo:echo","verdict":"allow"}` and
+  the kb-side outcome row `{"actor":"mcp","tool":"echo:echo","mode":"outbound","verdict":"ok"}`.
+
+So the complete chain is exercised by a real model: model emits `echo:echo` →
+server authorizes + dispatches → kb executes the plugin → kb audits the outcome →
+result returns to the model. (In this delegate harness the tool array the stub
+received was empty — a delegate role-toolset filtering artifact, orthogonal to the
+adapter; the federation of `echo:echo` into `build_tools_array` is separately
+verified by the integration test above.)
 
 > Harness note: mcp_client config command lists must use **block-style** YAML
 > (`command:\n  - python3\n  - script.py`); the flow-style inline form
