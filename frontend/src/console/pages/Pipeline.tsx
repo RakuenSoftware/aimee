@@ -1,16 +1,22 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button, InlineStatus, Switch } from "@rakuensoftware/smoothgui";
-import { FIELD_HELP } from "./settingsHelp";
+import { apiGet, apiSend } from "../api";
+// Shared help text for the stage config keys. Data-only module (no components,
+// no webchat imports), so the console reads the same descriptions the aimee
+// Settings page shows rather than keeping a second copy in sync.
+import { FIELD_HELP } from "../../pages/settingsHelp";
 
 /* Pipeline page: the curator pipeline as an ordered, resource-lane-grouped view.
+ * Lives in the kb console because the kb owns the curator — GET
+ * /v1/console/pipeline serves the stage registry, the presets, and the current
+ * config in one call, straight out of the kb process.
  *
  * Option B (single source of truth): the stage list, order, lanes, config key, and
- * dependency `requires` come LIVE from the backend registry via POST
- * /api/curator/stages (curator.stages -> CURATOR_STAGES + the projection sweeps in
- * src/kb/kb_curator_drain.c). Enable state comes from GET /api/config; toggles and
- * the stage order persist via POST /api/config/set (aimee.yaml; the KB picks it up
- * on next load). A null config_key = embedder-gated (read-only). Descriptions come
- * from the shared FIELD_HELP.
+ * dependency `requires` come LIVE from the backend registry (CURATOR_STAGES + the
+ * projection sweeps in src/kb/kb_curator_drain.c). Toggles and the stage order
+ * persist via POST /v1/console/pipeline/config, which allowlists the pipeline's
+ * own keys and writes aimee.yaml (the curator picks it up on next config load).
+ * A null config_key = embedder-gated (read-only).
  *
  * Reorder: ▲▼ moves a stage within its lane (cross-lane order is meaningless — the
  * lanes run concurrently). A move that would place a stage before a same-lane
@@ -42,17 +48,15 @@ type Preset = { name: string; description: string; enabled: string[]; builtin?: 
 // One entry in the kb_curator_custom_stages JSON array (what the GUI writes).
 type CustomStageCfg = { name: string; base_op: string; budget?: number; enabled?: boolean };
 
-const csrf = () => ({ "X-CSRF-Token": window._csrf || "" });
-
-async function postJSON(url: string, body: unknown): Promise<{ status: number; error?: string }> {
-  const r = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...csrf() },
-    body: JSON.stringify(body),
-  });
-  let d: { error?: string } = {};
-  try { d = await r.json(); } catch { /* empty */ }
-  return { status: r.status, error: d.error };
+// Set one pipeline config key. Returns an error string, or "" on success — the
+// callers below all report failure inline rather than throwing to the boundary.
+async function setKey(key: string, value: Val): Promise<string> {
+  try {
+    await apiSend("POST", "/v1/console/pipeline/config", { key, value });
+    return "";
+  } catch (e) {
+    return String(e);
+  }
 }
 
 const LANE_META: Record<Lane, { title: string; hint: string; color: string }> = {
@@ -88,45 +92,42 @@ export default function Pipeline() {
   const [status, setStatus] = useState<{ kind: "ok" | "err"; msg: string } | null>(null);
 
   const refresh = useCallback(() => {
-    Promise.all([
-      fetch("/api/curator/stages", { method: "POST", headers: { "Content-Type": "application/json", ...csrf() }, body: "{}" })
-        .then((r) => r.json())
-        .then((d: { stages?: Stage[]; presets?: Preset[] }) => ({ stages: d.stages || [], presets: d.presets || [] }))
-        .catch(() => ({ stages: [] as Stage[], presets: [] as Preset[] })),
-      fetch("/api/config", { headers: csrf() })
-        .then((r) => r.json())
-        .then((d: { config?: Record<string, Val> }) => d.config || {})
-        .catch(() => ({} as Record<string, Val>)),
-    ]).then(([sp, c]) => {
-      const orderStr = typeof c.kb_curator_stage_order === "string" ? c.kb_curator_stage_order : "";
-      setStages(applyOrder(sp.stages, orderStr));
-      setPresets(sp.presets);
-      setCfg(c);
-      setLoaded(true);
-    });
+    apiGet<{ stages?: Stage[]; presets?: Preset[]; config?: Record<string, Val> }>("/v1/console/pipeline")
+      .then((d) => {
+        const c = d.config || {};
+        const orderStr = typeof c.kb_curator_stage_order === "string" ? c.kb_curator_stage_order : "";
+        setStages(applyOrder(d.stages || [], orderStr));
+        setPresets(d.presets || []);
+        setCfg(c);
+        setLoaded(true);
+      })
+      .catch((e) => {
+        setStatus({ kind: "err", msg: `Failed to load the pipeline: ${e}` });
+        setLoaded(true);
+      });
   }, []);
   useEffect(() => { refresh(); }, [refresh]);
 
   const toggle = useCallback(async (key: string, next: boolean) => {
     setBusy(key);
-    const { status: st, error } = await postJSON("/api/config/set", { key, value: next });
+    const err = await setKey(key, next);
     setBusy("");
-    if (st >= 200 && st < 300 && !error) {
-      setCfg((p) => ({ ...p, [key]: next }));
-      setStatus({ kind: "ok", msg: `${key} ${next ? "enabled" : "disabled"}` });
-    } else {
-      setStatus({ kind: "err", msg: error || `save failed (${st})` });
+    if (err) {
+      setStatus({ kind: "err", msg: err });
+      return;
     }
+    setCfg((p) => ({ ...p, [key]: next }));
+    setStatus({ kind: "ok", msg: `${key} ${next ? "enabled" : "disabled"}` });
   }, []);
 
   // Apply a preset: enable its listed config keys, disable every other toggleable
-  // stage. One config.set per stage, in parallel; embedder-gated stages untouched.
+  // stage. One set per stage, in parallel; embedder-gated stages untouched.
   const applyPreset = useCallback(async (p: Preset) => {
     setBusy(`preset:${p.name}`);
     const on = new Set(p.enabled);
     const targets = stages.filter((s) => s.config_key);
-    const results = await Promise.all(
-      targets.map((s) => postJSON("/api/config/set", { key: s.config_key, value: on.has(s.config_key as string) })),
+    const errs = await Promise.all(
+      targets.map((s) => setKey(s.config_key as string, on.has(s.config_key as string))),
     );
     setBusy("");
     setCfg((prev) => {
@@ -134,7 +135,7 @@ export default function Pipeline() {
       for (const s of targets) next[s.config_key as string] = on.has(s.config_key as string);
       return next;
     });
-    const failed = results.filter((r) => r.error || r.status < 200 || r.status >= 300).length;
+    const failed = errs.filter(Boolean).length;
     setStatus(
       failed
         ? { kind: "err", msg: `preset "${p.name}" applied with ${failed} error(s)` }
@@ -143,7 +144,7 @@ export default function Pipeline() {
   }, [stages]);
 
   // User presets are stored as a JSON array in the kb_curator_user_presets config
-  // string; the GUI reads/edits it and persists via config.set (no bespoke op).
+  // string; the GUI reads/edits it and persists it back (no bespoke op).
   const readUserPresets = useCallback((): Preset[] => {
     const raw = cfg.kb_curator_user_presets;
     if (typeof raw !== "string" || !raw) return [];
@@ -157,17 +158,14 @@ export default function Pipeline() {
 
   const writeUserPresets = useCallback(async (list: Preset[], okMsg: string) => {
     setBusy("user-presets");
-    const { status: st, error } = await postJSON("/api/config/set", {
-      key: "kb_curator_user_presets",
-      value: JSON.stringify(list),
-    });
+    const err = await setKey("kb_curator_user_presets", JSON.stringify(list));
     setBusy("");
-    if (st >= 200 && st < 300 && !error) {
-      setStatus({ kind: "ok", msg: okMsg });
-      refresh();
-    } else {
-      setStatus({ kind: "err", msg: error || `save failed (${st})` });
+    if (err) {
+      setStatus({ kind: "err", msg: err });
+      return;
     }
+    setStatus({ kind: "ok", msg: okMsg });
+    refresh();
   }, [refresh]);
 
   const saveCurrentAsPreset = useCallback(async () => {
@@ -188,9 +186,9 @@ export default function Pipeline() {
 
   // Composed custom stages (Phase D) live as a JSON array in the
   // kb_curator_custom_stages config string; like user presets, the GUI reads/edits
-  // it and persists via config.set (no bespoke op). The backend validates each
-  // entry (base_op must be a built-in run() stage; runs on that op's lane) and
-  // surfaces the accepted ones on /api/curator/stages with custom:true.
+  // it and persists it back. The backend validates each entry (base_op must be a
+  // built-in run() stage; runs on that op's lane) and surfaces the accepted ones
+  // on /v1/console/pipeline with custom:true.
   const readCustomStages = useCallback((): CustomStageCfg[] => {
     const raw = cfg.kb_curator_custom_stages;
     if (typeof raw !== "string" || !raw) return [];
@@ -204,17 +202,14 @@ export default function Pipeline() {
 
   const writeCustomStages = useCallback(async (list: CustomStageCfg[], okMsg: string) => {
     setBusy("custom-stages");
-    const { status: st, error } = await postJSON("/api/config/set", {
-      key: "kb_curator_custom_stages",
-      value: JSON.stringify(list),
-    });
+    const err = await setKey("kb_curator_custom_stages", JSON.stringify(list));
     setBusy("");
-    if (st >= 200 && st < 300 && !error) {
-      setStatus({ kind: "ok", msg: okMsg });
-      refresh();
-    } else {
-      setStatus({ kind: "err", msg: error || `save failed (${st})` });
+    if (err) {
+      setStatus({ kind: "err", msg: err });
+      return;
     }
+    setStatus({ kind: "ok", msg: okMsg });
+    refresh();
   }, [refresh]);
 
   const addCustomStage = useCallback(async () => {
@@ -265,14 +260,14 @@ export default function Pipeline() {
     // Only built-ins participate in stage_order; custom stages append after them.
     const order = arr.filter((s) => !s.custom).map((s) => s.name).join(",");
     setBusy("order");
-    const { status: st, error } = await postJSON("/api/config/set", { key: "kb_curator_stage_order", value: order });
+    const err = await setKey("kb_curator_stage_order", order);
     setBusy("");
-    if (st >= 200 && st < 300 && !error) {
-      setCfg((p) => ({ ...p, kb_curator_stage_order: order }));
-      setStatus({ kind: "ok", msg: "stage order saved" });
-    } else {
-      setStatus({ kind: "err", msg: error || `save failed (${st})` });
+    if (err) {
+      setStatus({ kind: "err", msg: err });
+      return;
     }
+    setCfg((p) => ({ ...p, kb_curator_stage_order: order }));
+    setStatus({ kind: "ok", msg: "stage order saved" });
   }, []);
 
   // Move a stage one slot within its lane. Refused if it would cross a same-lane
@@ -303,6 +298,26 @@ export default function Pipeline() {
   }, [stages, persistOrder]);
 
   const isOn = (k: string) => cfg[k] === true || cfg[k] === 1;
+
+  /* Curator runtime knobs, migrated off the aimee Settings page. The tier is a
+   * preset over the stage toggles (the backend's kb_curator_apply_tier rewrites
+   * every stage enable flag from it), so a change here refetches the whole page
+   * rather than patching one row. The worker counts are the extract stages'
+   * concurrency. */
+  const setRuntimeKey = useCallback(async (key: string, value: Val, msg: string) => {
+    setBusy(key);
+    const err = await setKey(key, value);
+    setBusy("");
+    if (err) {
+      setStatus({ kind: "err", msg: err });
+      return;
+    }
+    setStatus({ kind: "ok", msg });
+    refresh();
+  }, [refresh]);
+
+  const tier = typeof cfg.kb_curator_tier === "string" ? cfg.kb_curator_tier : "full";
+  const workerCount = (k: string) => (typeof cfg[k] === "number" ? (cfg[k] as number) : 1);
 
   const arrowBtn = (enabled: boolean, glyph: string, title: string, onClick: () => void) => (
     <button
@@ -413,6 +428,44 @@ export default function Pipeline() {
         </button>
         <span style={{ fontSize: 12, color: "#999" }}>apply a profile, save your own, then fine-tune below</span>
       </div>
+      <div style={{
+        display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginBottom: 18,
+        padding: "10px 12px", border: "1px solid #e2e2e2", borderRadius: 8, background: "#fafafa",
+      }}>
+        <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}
+          title="Stage preset: 'full' runs every stage, 'lite' only the core extract/index stages, 'off' none. Selecting one rewrites every stage toggle below.">
+          <span style={{ fontWeight: 600, color: "#555" }}>Tier</span>
+          <select
+            value={tier}
+            disabled={busy === "kb_curator_tier"}
+            onChange={(e) => setRuntimeKey("kb_curator_tier", e.target.value, `tier set to ${e.target.value}`)}
+            style={{ fontSize: 13, padding: "3px 6px", borderRadius: 6, border: "1px solid #ccc" }}
+          >
+            {["full", "lite", "off"].map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </label>
+        <span style={{ fontSize: 12, color: "#999" }}>rewrites every stage toggle below</span>
+        {[
+          { key: "kb_curator_extract_docs_workers", label: "Doc extract workers" },
+          { key: "kb_curator_extract_code_workers", label: "Code extract workers" },
+        ].map((w) => (
+          <label key={w.key} style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}
+            title="Concurrent workers the drain runs for this extract stage. 1 = no extra workers.">
+            <span style={{ fontWeight: 600, color: "#555" }}>{w.label}</span>
+            <input
+              type="number"
+              min={1}
+              value={workerCount(w.key)}
+              disabled={busy === w.key}
+              onChange={(e) => {
+                const n = Math.max(1, Math.floor(Number(e.target.value) || 1));
+                setRuntimeKey(w.key, n, `${w.label.toLowerCase()} set to ${n}`);
+              }}
+              style={{ width: 64, fontSize: 13, padding: "3px 6px", borderRadius: 6, border: "1px solid #ccc" }}
+            />
+          </label>
+        ))}
+      </div>
       {(["llm", "index"] as Lane[]).map((lane) => {
         const meta = LANE_META[lane];
         // Built-in stages only — custom stages append after the built-ins and are
@@ -497,7 +550,7 @@ export default function Pipeline() {
         );
       })()}
       {!stages.length && (
-        <div style={{ color: "#888" }}>No stages reported (aimee-server unreachable, or the KB has no curator registry).</div>
+        <div style={{ color: "#888" }}>No stages reported (the kb has no curator registry, or the request failed).</div>
       )}
       {status && (
         <div style={{ marginTop: 8 }}>

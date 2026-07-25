@@ -13,6 +13,7 @@
 #include "kb/kb_surprising_judge.h" /* §4 judge stub seam (kb_surprising_verdict_t) */
 #include "db2/lifecycle.h"          /* §2c: db2_reembed_* / db2_dim_change_reset stub types */
 #include "rel_types.h"              /* REL_TYPE_NAME_MAX for the db2_ontology_* stubs below */
+#include "config_fields.h"          /* config_field_t for the pipeline-console stubs below */
 #include "kb_service.h"
 #include "kb_bandit.h"
 #include "kb_service_backend.h"
@@ -503,6 +504,61 @@ int config_save(const config_t *cfg)
 {
    (void)cfg;
    return 0;
+}
+
+/* Pipeline-console stubs: the console's /v1/console/pipeline routes pull in the
+ * curator registry and the typed config-field accessors. The real defs drag in
+ * the whole curator + config stack, so stub them here — this test exercises
+ * routing and the route's own key allowlist, not the curator itself. Two stage
+ * shapes are enough for that: one toggleable, one embedder-gated (null key). */
+cJSON *kb_curator_stages_json(void)
+{
+   cJSON *arr = cJSON_CreateArray();
+   cJSON *a = cJSON_CreateObject();
+   cJSON_AddStringToObject(a, "name", "extract_docs");
+   cJSON_AddStringToObject(a, "config_key", "kb_curator_extract_docs_enabled");
+   cJSON_AddItemToArray(arr, a);
+   cJSON *b = cJSON_CreateObject();
+   cJSON_AddStringToObject(b, "name", "embed_code");
+   cJSON_AddNullToObject(b, "config_key");
+   cJSON_AddItemToArray(arr, b);
+   return arr;
+}
+cJSON *kb_curator_presets_json(void)
+{
+   return cJSON_CreateArray();
+}
+static const config_field_t g_stub_field = {"stub", 0, 0, 0, CFG_BOOL, RELOAD_HOT, FGROUP_RUNTIME};
+const config_field_t *config_field_lookup(const char *key)
+{
+   /* Only the keys the pipeline route may touch resolve; anything else is
+    * "unknown" so the route's own allowlist is what is under test. */
+   if (!key)
+      return NULL;
+   if (strncmp(key, "kb_curator_", 11) == 0 || strcmp(key, "kb_evidence_embed_enabled") == 0)
+      return &g_stub_field;
+   /* The KB-owned settings surface (KB_SETTINGS) plus the server-owned keys the
+    * 403 cases probe — all real config keys, so the route's OWN allowlist is
+    * what those assertions exercise, not a lookup miss. */
+   if (strncmp(key, "embedding_", 10) == 0 || strncmp(key, "llm_", 4) == 0 ||
+       strncmp(key, "kb_", 3) == 0 || strncmp(key, "css_", 4) == 0 ||
+       strcmp(key, "typed_facts_enabled") == 0 || strcmp(key, "ocr_command") == 0 ||
+       strcmp(key, "tsr_command") == 0 || strcmp(key, "db2_url") == 0)
+      return &g_stub_field;
+   return NULL;
+}
+cJSON *config_field_value_json(const config_t *cfg, const config_field_t *f)
+{
+   (void)cfg;
+   (void)f;
+   return cJSON_CreateBool(0);
+}
+int config_field_set_value(config_t *cfg, const config_field_t *f, const char *value)
+{
+   (void)cfg;
+   (void)f;
+   /* Mirror the real parser's contract: bools accept only true/false text. */
+   return (value && (strcmp(value, "true") == 0 || strcmp(value, "false") == 0)) ? 0 : -1;
 }
 
 int index_find(const char *id, void *out, int max)
@@ -1948,6 +2004,102 @@ static void test_console_overview(void)
    int s2 =
        kb_http_route_ex("POST", "/v1/console/overview", NULL, NULL, NULL, NULL, 0, b2, sizeof(b2));
    assert(s2 == 405);
+}
+
+static void test_console_pipeline(void)
+{
+   /* GET returns the registry + presets + current config in one envelope. */
+   char buf[65536];
+   int status =
+       kb_http_route_ex("GET", "/v1/console/pipeline", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(status == 200);
+   assert(strstr(buf, "\"stages\"") != NULL);
+   assert(strstr(buf, "\"presets\"") != NULL);
+   assert(strstr(buf, "\"config\"") != NULL);
+   /* Every togglable stage key is reported; the embedder-gated stage has no key
+    * to report, so it must not appear as one. */
+   assert(strstr(buf, "\"kb_curator_extract_docs_enabled\"") != NULL);
+   assert(strstr(buf, "\"kb_curator_stage_order\"") != NULL);
+   assert(strstr(buf, "\"embed_code\":") == NULL);
+
+   char b2[1024];
+   /* Wrong method on each half of the pair. */
+   assert(kb_http_route_ex("POST", "/v1/console/pipeline", NULL, NULL, NULL, "{}", 2, b2,
+                           sizeof(b2)) == 405);
+   assert(kb_http_route_ex("GET", "/v1/console/pipeline/config", NULL, NULL, NULL, NULL, 0, b2,
+                           sizeof(b2)) == 405);
+
+   /* A stage key the live registry advertises is accepted. */
+   const char *ok_body = "{\"key\":\"kb_curator_extract_docs_enabled\",\"value\":true}";
+   assert(kb_http_route_ex("POST", "/v1/console/pipeline/config", NULL, NULL, NULL, ok_body,
+                           (int)strlen(ok_body), b2, sizeof(b2)) == 200);
+   /* So is the pipeline's own stage-order key. */
+   const char *order_body = "{\"key\":\"kb_curator_stage_order\",\"value\":\"extract_docs\"}";
+   int order_status = kb_http_route_ex("POST", "/v1/console/pipeline/config", NULL, NULL, NULL,
+                                       order_body, (int)strlen(order_body), b2, sizeof(b2));
+   assert(order_status == 200 || order_status == 400); /* stub set_value only takes bool text */
+
+   /* A config key OUTSIDE the pipeline is refused before any config write — this
+    * route must not be a general config.set. */
+   const char *evil = "{\"key\":\"db2_url\",\"value\":\"postgres://evil\"}";
+   assert(kb_http_route_ex("POST", "/v1/console/pipeline/config", NULL, NULL, NULL, evil,
+                           (int)strlen(evil), b2, sizeof(b2)) == 403);
+   /* An embedder-gated stage has no config key, so its name is not settable. */
+   const char *gated = "{\"key\":\"embed_code\",\"value\":true}";
+   assert(kb_http_route_ex("POST", "/v1/console/pipeline/config", NULL, NULL, NULL, gated,
+                           (int)strlen(gated), b2, sizeof(b2)) == 403);
+   /* Missing key/value is a 400. */
+   const char *empty = "{}";
+   assert(kb_http_route_ex("POST", "/v1/console/pipeline/config", NULL, NULL, NULL, empty, 2, b2,
+                           sizeof(b2)) == 400);
+   printf("  PASS: console pipeline (registry + key allowlist)\n");
+}
+
+static void test_console_settings(void)
+{
+   /* GET reports the KB-owned fields, each with a section and a restart flag. */
+   char buf[65536];
+   int status =
+       kb_http_route_ex("GET", "/v1/console/settings", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(status == 200);
+   assert(strstr(buf, "\"fields\"") != NULL);
+   assert(strstr(buf, "\"embedding_model\"") != NULL);
+   assert(strstr(buf, "\"llm_rerank_backend\"") != NULL);
+   assert(strstr(buf, "\"Embedder\"") != NULL);
+   /* Owned by the Typed Facts page, so it must not appear on this surface. */
+   assert(strstr(buf, "\"typed_facts_enabled\"") == NULL);
+   /* aimee-server's own keys must NOT appear on the kb's settings surface. */
+   assert(strstr(buf, "\"kb_client_url\"") == NULL);
+   assert(strstr(buf, "\"provider\"") == NULL);
+
+   char b2[1024];
+   assert(kb_http_route_ex("POST", "/v1/console/settings", NULL, NULL, NULL, "{}", 2, b2,
+                           sizeof(b2)) == 405);
+   assert(kb_http_route_ex("GET", "/v1/console/settings/config", NULL, NULL, NULL, NULL, 0, b2,
+                           sizeof(b2)) == 405);
+
+   /* typed_facts_enabled is KB-owned but belongs to the Typed Facts page, not
+    * this surface — so the settings route refuses it like any other key it does
+    * not own. */
+   const char *tf = "{\"key\":\"typed_facts_enabled\",\"value\":true}";
+   assert(kb_http_route_ex("POST", "/v1/console/settings/config", NULL, NULL, NULL, tf,
+                           (int)strlen(tf), b2, sizeof(b2)) == 403);
+
+   /* A KB-owned key is accepted. */
+   const char *ok_body = "{\"key\":\"kb_mining_enabled\",\"value\":true}";
+   assert(kb_http_route_ex("POST", "/v1/console/settings/config", NULL, NULL, NULL, ok_body,
+                           (int)strlen(ok_body), b2, sizeof(b2)) == 200);
+   /* A key the SERVER owns is refused here, even though it is a real config key
+    * and starts with kb_ — the split is by which binary reads it. */
+   const char *server_key = "{\"key\":\"kb_client_url\",\"value\":\"https://kb.example\"}";
+   assert(kb_http_route_ex("POST", "/v1/console/settings/config", NULL, NULL, NULL, server_key,
+                           (int)strlen(server_key), b2, sizeof(b2)) == 403);
+   const char *evil = "{\"key\":\"db2_url\",\"value\":\"postgres://evil\"}";
+   assert(kb_http_route_ex("POST", "/v1/console/settings/config", NULL, NULL, NULL, evil,
+                           (int)strlen(evil), b2, sizeof(b2)) == 403);
+   assert(kb_http_route_ex("POST", "/v1/console/settings/config", NULL, NULL, NULL, "{}", 2, b2,
+                           sizeof(b2)) == 400);
+   printf("  PASS: console settings (kb-owned key allowlist)\n");
 }
 
 static void test_intelligence_calibration_readiness(void)
@@ -4760,6 +4912,8 @@ int main(void)
    test_version();
    test_capabilities();
    test_console_overview();
+   test_console_pipeline();
+   test_console_settings();
    test_accounts_routes();
    test_mint_scope_restriction();
    test_team_routes();

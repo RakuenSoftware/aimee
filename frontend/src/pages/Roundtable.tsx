@@ -111,6 +111,27 @@ function normalize(p: Partial<Preset> & { name: string }): Preset {
   };
 }
 
+/* Roundtable-wide flags (not preset fields — see the `globals` state below).
+ * Help text is grounded in their readers in src/modules/roundtable/
+ * delegate_ensemble.c and src/modules/workflows/wfe_live_panel.c. */
+const GLOBAL_FLAGS: { key: string; label: string; help: string }[] = [
+  {
+    key: "roundtable.require_evidence",
+    label: "Require evidence",
+    help: "Panelists must cite evidence for their findings; unevidenced items are dropped when the panel is verified.",
+  },
+  {
+    key: "roundtable.replay_verify_enabled",
+    label: "Replay-verify findings",
+    help: "After a panel completes, replay its findings to verify them before they are reported.",
+  },
+  {
+    key: "roundtable.chair_synthesis",
+    label: "Chair synthesis",
+    help: "The chair writes a synthesis pass over the panel's output instead of returning the raw per-seat results.",
+  },
+];
+
 const numField = (v: number, set: (n: number) => void, min = 0): React.ReactNode => (
   <input
     type="number"
@@ -134,6 +155,13 @@ export default function Roundtable() {
   const [models, setModels] = useState<string[]>([]);
   const [personas, setPersonas] = useState<string[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  /* Global roundtable behaviour, migrated off the Settings page. These three are
+   * the roundtable config keys that are NOT preset fields (preset_overlay_config
+   * in src/modules/roundtable/roundtable_preset.c never writes them), so they
+   * apply to every panel regardless of which preset is active — but they had no
+   * owner in the GUI. They live here, next to the presets they govern. */
+  const [globals, setGlobals] = useState<Record<string, boolean>>({});
+  const [globalsBusy, setGlobalsBusy] = useState("");
 
   const refresh = useCallback(() => {
     getJSON<{ roundtables?: PresetSummary[]; active?: string }>("/api/roundtables")
@@ -160,7 +188,29 @@ export default function Roundtable() {
     getJSON<{ personas?: { name: string }[] }>("/api/chat/personas")
       .then((d) => setPersonas((d.personas || []).map((p) => p.name).filter(Boolean).sort()))
       .catch(() => setPersonas([]));
+    getJSON<{ config?: Record<string, unknown> }>("/api/config")
+      .then((d) => {
+        const c = d.config || {};
+        const out: Record<string, boolean> = {};
+        for (const k of GLOBAL_FLAGS.map((f) => f.key)) out[k] = c[k] === true || c[k] === 1;
+        setGlobals(out);
+      })
+      .catch(() => setGlobals({}));
   }, [refresh]);
+
+  const setGlobal = async (key: string, next: boolean) => {
+    setGlobalsBusy(key);
+    const prev = globals[key];
+    setGlobals((g) => ({ ...g, [key]: next })); // optimistic
+    const { status: st } = await sendJSON("POST", "/api/config/set", { key, value: next });
+    setGlobalsBusy("");
+    if (st >= 200 && st < 300) {
+      setStatus({ kind: "ok", msg: `${key} ${next ? "enabled" : "disabled"}` });
+    } else {
+      setGlobals((g) => ({ ...g, [key]: prev }));
+      setStatus({ kind: "err", msg: `save failed (${st})` });
+    }
+  };
 
   const patch = (p: Partial<Preset>) => setForm((f) => (f ? { ...f, ...p } : f));
   const patchPipeline = (p: Partial<Pipeline>) =>
@@ -253,6 +303,30 @@ export default function Roundtable() {
       </div>
 
       <div style={{ maxWidth: 760 }}>
+        <Panel title="Roundtable behaviour">
+          <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
+            These apply to every panel, whichever preset is active. (Seats, limits, and the pipeline
+            caps are per preset — set those below.)
+          </p>
+          <div style={{ display: "grid", gap: 8 }}>
+            {GLOBAL_FLAGS.map((f) => (
+              <label key={f.key} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13 }}>
+                <input
+                  type="checkbox"
+                  checked={!!globals[f.key]}
+                  disabled={globalsBusy === f.key}
+                  onChange={(e) => setGlobal(f.key, e.target.checked)}
+                  style={{ marginTop: 2 }}
+                />
+                <span>
+                  {f.label} <code style={{ color: "#aaa", fontSize: 11 }}>{f.key}</code>
+                  <div style={{ fontSize: 12, color: "#777", lineHeight: 1.4 }}>{f.help}</div>
+                </span>
+              </label>
+            ))}
+          </div>
+        </Panel>
+
         <Panel title="Presets" count={presets.length}>
           <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
             A roundtable is a panel of models, each playing a persona, that review or draft together. Configure

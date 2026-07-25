@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Badge, Button, Panel } from '@rakuensoftware/smoothgui';
 import { useSessions } from '../SessionContext';
+import ProjectPicker from '../components/ProjectPicker';
 
 /* §8 code-graph visualization. A read-only, navigable view of the code projection
  * graph for the active session's project, backed by /api/graph/* (which forward
@@ -21,7 +22,7 @@ const dirVariant = (d: string): 'success' | 'info' | 'neutral' =>
   d === 'out' ? 'info' : d === 'in' ? 'success' : 'neutral';
 
 export default function Graph() {
-  const { active } = useSessions();
+  const { active, patchSession } = useSessions();
   const project = active?.projectName || '';
 
   const [hubs, setHubs] = useState<Hub[]>([]);
@@ -69,12 +70,34 @@ export default function Graph() {
 
   useEffect(() => { loadHubs(); setLinks([]); }, [loadHubs]);
 
+  /* The picker binds the project to the ACTIVE SESSION — the same binding (and
+   * the same storage key) Chat / Editor / Edit Workflows use, so choosing a
+   * project here selects it everywhere for this session rather than giving the
+   * graph its own private selection. Rendered above the empty state too: this
+   * page used to dead-end on "bind this session to a project" with no control to
+   * do it with. */
+  const picker = (
+    <ProjectPicker
+      storageKey={`aimee_session_project_${active?.id ?? ''}`}
+      onChange={sel => {
+        if (active) patchSession(active.id, { projectRoot: sel?.root ?? '', projectName: sel?.project ?? '' });
+      }}
+    />
+  );
+
   if (!project) {
-    return <div style={{ padding: 24, color: '#666' }}>Bind this session to a project to explore its code graph.</div>;
+    return (
+      <div>
+        {picker}
+        <div style={{ padding: 24, color: '#666' }}>Select a project above to explore its code graph.</div>
+      </div>
+    );
   }
 
   return (
-    <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      {picker}
+      <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <strong>Code graph — {project}</strong>
         {edgeCount != null && <Badge label={`${edgeCount} edges`} variant="neutral" />}
@@ -133,6 +156,7 @@ export default function Graph() {
           ))}
         </div>
       </Panel>
+      </div>
     </div>
   );
 }
