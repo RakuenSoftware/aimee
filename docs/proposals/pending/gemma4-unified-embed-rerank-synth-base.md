@@ -225,6 +225,39 @@ Each role A/Bs against its incumbent; none flips silently (charter Gate-Promote)
 4. **Rerank: unified LoRA vs. dedicated encoder** — resolved by the §7 latency gate,
    not up front.
 
+## §9 Model extraction & size reduction (validation phase)
+
+The narrow use case — multilingual document + code ingestion (embed, rerank, Tier-A
+extract), no image/audio, no general chat — permits cutting E2B down to only what
+serves ingestion. This is **not required for fit** (E2B is already lighter than the
+deployed E4B); it is a **latency / throughput headroom** lever, run as a **gated
+experiment *after* the base pipeline is proven** — not a front-loaded decision.
+
+**Sequencing.** Prove the base unified pipeline first — PLE port (§4) → E4B→E2B synth
+distill + embed/rerank adapters (§5) → all §7 gates green on stock (text-only) E2B.
+*Only then* run the size-reduction tiers, each validated against the same three gates
+(embedder-sweep, curator-synth, rerank latency); keep the smallest tier that holds.
+
+- **Tier 1 — drop the modality towers (applied during the base build; lossless).**
+  Convert text-only: the vision (SigLIP-class — this is the "OCR" path) and audio
+  (USM-class) encoders are never instantiated. Hundreds of MB–~1 GB off, zero
+  text-quality cost, standard Gemma-text serving. The baseline cut, re-confirmed in
+  validation.
+- **Tier 2 — extract a smaller MatFormer slice (low risk).** Pull the smallest nested
+  submodel that still passes the gates. It is a Google-trained coherent submodel and
+  stays a known Gemma shape, so no extra serving burden.
+- **Tier 3 — prune-and-distill to a custom size (Minitron-style; highest payoff,
+  highest serving cost).** Structured-prune depth / FFN-width / heads (and vocab only
+  for scripts never ingested — multilingual caps this; PLE tables shrink with any
+  vocab cut), then heal by distilling E4B → pruned student on aimee's distribution.
+  The narrow heal distribution is precisely what permits aggressive pruning. Cost: a
+  bespoke architecture the vendored llama.cpp must carry, compounding the §4 PLE work
+  — so pursue only if Tier 2 leaves headroom the benches confirm is worth the serving
+  complexity.
+
+Every cut is a search for the smallest model that still passes §7, not a fixed
+target; none flips a default (charter Gate-Promote).
+
 ## Risks / honest tradeoffs
 
 - **Synth-quality parity is the real risk, not resources.** E2B is *less*
@@ -252,6 +285,9 @@ Each role A/Bs against its incumbent; none flips silently (charter Gate-Promote)
   out shadow → canary → default and operator-pinnable.
 - The gateway Dense-head hack and its CI bake are removed once rerank serves natively
   (unified or dedicated-with-`num_labels=1`).
+- The size-reduction validation phase (§9) runs only *after* the base pipeline passes
+  §7: Tier 1 (tower-drop) applied during the build, Tiers 2–3 adopted only where the
+  benches hold.
 - No change to Tier-B routing or to how facts are gated/promoted once extracted.
 
 ## Explicitly out of scope / does not re-propose
