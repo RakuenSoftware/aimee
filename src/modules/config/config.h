@@ -2217,6 +2217,12 @@ int config_persist_mode(const char *mode);
 /* Save config to default path (atomic write via rename). */
 int config_save(const config_t *cfg);
 
+/* config_set: the single, surgical config write path (Proposal B). Validates and sets
+ * one key in the config YAML document (preserving all other keys), persists, and
+ * republishes the snapshot. Returns 0, or -1 on unknown key / invalid value / IO error.
+ * Never serialises config_t — no whole-file rebuild, no parse/save drift. */
+int config_set(const char *key, const char *value);
+
 /* Default config directory: ~/.config/aimee/ */
 const char *config_default_dir(void);
 

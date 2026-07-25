@@ -514,45 +514,17 @@ static void cmd_config_set(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
 
-   config_t cfg;
-   if (config_load(&cfg) < 0)
+   /* Surgical write: config_set edits the config YAML document in place (sets this
+    * one key, preserves every other), persists, and republishes — no whole-file
+    * rebuild from config_t. */
+   if (config_set(key, value) < 0)
    {
-      fprintf(stderr, "Failed to load config\n");
-      return;
-   }
-
-   if (f->is_bool || f->type == CFG_BOOL)
-   {
-      int *ptr = (int *)((char *)&cfg + f->offset);
-      if (strcmp(value, "true") == 0 || strcmp(value, "1") == 0)
-         *ptr = 1;
-      else if (strcmp(value, "false") == 0 || strcmp(value, "0") == 0)
-         *ptr = 0;
-      else
-      {
+      if ((f->is_bool || f->type == CFG_BOOL))
          fprintf(stderr, "Invalid boolean value: %s (use true/false)\n", value);
-         return;
-      }
-   }
-   else if (f->type == CFG_INT)
-   {
-      int *ptr = (int *)((char *)&cfg + f->offset);
-      *ptr = atoi(value);
-   }
-   else if (f->type == CFG_FLOAT)
-   {
-      double *ptr = (double *)((char *)&cfg + f->offset);
-      *ptr = atof(value);
-   }
-   else
-   {
-      char *ptr = (char *)&cfg + f->offset;
-      snprintf(ptr, f->size, "%s", value);
-   }
-
-   if (config_save(&cfg) < 0)
-   {
-      fprintf(stderr, "Failed to save config\n");
+      else if (f->type == CFG_ECON_MODE)
+         fprintf(stderr, "Invalid value: %s (use off|safe|aggressive)\n", value);
+      else
+         fprintf(stderr, "Failed to set config\n");
       return;
    }
    fprintf(stderr, "%s = %s\n", key, value);
