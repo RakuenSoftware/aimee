@@ -1,9 +1,9 @@
 # Settings (web page)
 
 The **Settings** page (aimee web UI, left nav → ⚙️ Settings, route `/settings`) is a typed
-editor over the server's runtime configuration. It exposes **every allowlisted config
-field** (the same `config.show` / `config.set` surface the `aimee config` CLI uses) as a
-grouped, filterable form with per-field **Save** and **Reset**.
+editor over the server's runtime configuration. It exposes the allowlisted config fields
+**that no other tab owns** (the same `config.show` / `config.set` surface the `aimee config`
+CLI uses) as a grouped, filterable form with per-field **Save** and **Reset**.
 
 It is a thin surface over machinery that already exists: each control maps 1:1 to a
 `config_t` field in [`src/config_fields.c`](../src/config_fields.c). Adding a field to that
@@ -20,9 +20,21 @@ request), unless noted otherwise below.
 - **Control inference:** the control type is inferred from the value's JSON type: a
   **boolean → toggle**, a **number → number field**, a **string → text field**. Grouping is
   by the dotted key prefix (e.g. everything under `reduce.` forms one section).
-- **Quick panel:** a smaller gear dropdown in the top bar (`SettingsPanel`) surfaces the
-  five most-used toggles (autonomous mode, cross-verify, eco mode, reasoning cap, max
-  iterations). The full page is the comprehensive home for everything else.
+- **One owner per option.** An option that another tab configures is **not listed here** —
+  a second editable copy silently loses edits (the Roundtable keys are the clearest case:
+  activating a preset runs `preset_overlay_config`, which overwrites them). The map lives in
+  `frontend/src/pages/settingsHelp.ts` (`OWNED_ELSEWHERE`) with the grounding for each key,
+  and the page names the owning tab. The keys stay fully settable from `aimee.yaml` and the
+  CLI. Current owners: the **Roundtable** tab (`roundtable.*`), the kb console's **Pipeline**
+  page (`kb_curator_*`, `kb_evidence_embed_enabled`), the kb console's **Settings** page
+  (the embedder, reranker and synth tiers — `embedding_*`, `llm_embed_*`, `llm_rerank_*`,
+  `llm_synth_*` — plus the knowledge base's own `kb_*`/`typed_facts_enabled`/ingest-sidecar
+  keys), the **Agents** tab (`provider`, `claude_model`, `openai_*`), and
+  **Chat**/**Personas** (`default_persona`). The kb split is by which binary READS the
+  key: `kb_mode`, `kb_client_url`, `kb_client_bearer_token` and `kb_evidence_emit_enabled`
+  stay here, because aimee-server reads them to reach a kb.
+- **No gear menu.** The top-bar quick-settings dropdown has been removed; the Settings page
+  and the owning tabs are the only places runtime options are edited.
 
 > **Allowlist, not raw config.** The page can only read/write keys in `config_fields`.
 > Sensitive values (endpoints, `*_key_cmd`, `db2_url`, and **secrets**) are deliberately

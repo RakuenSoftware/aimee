@@ -474,6 +474,13 @@ int handle_agent_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    for (int i = 0; i < cfg.agent_count; i++)
       cJSON_AddItemToArray(arr, server_agent_to_json(&cfg.agents[i]));
    cJSON_AddItemToObject(resp, "agents", arr);
+   /* The agent a request that names no provider actually lands on, resolved the
+    * same way the runtime resolves it (agent_default_primary: the configured
+    * default when it is enabled, else the first enabled seat). Callers had no
+    * way to show "which agent am I talking to by default" without duplicating
+    * that fallback — the webchat agent selector defaults its selection to this. */
+   const agent_t *primary = agent_default_primary(&cfg);
+   cJSON_AddStringToObject(resp, "default_agent", primary ? primary->name : "");
    /* Whether at least one configured agent is enabled AND routable as a delegate
     * right now. Lets a caller (e.g. the client-setup sub-agent-ban gate) decide
     * with ONE round-trip whether redirecting sub-agents to `aimee delegate` is

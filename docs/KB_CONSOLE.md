@@ -9,16 +9,24 @@ enforces server-side.
 
 Surfaces: **Dashboard** (kb health/throughput), **Accounts** (client enrollment,
 certificate revocation, scopes, OIDC config), **Governance** (decision records,
-the policy-verdict action audit). This document is the trust model + operations
-guide (see `docs/proposals/done/kb-web-console.md` and its `.plan.md` for the design).
+the policy-verdict action audit), **Pipeline** (the curator stage registry — per-stage
+toggles, lane ordering, presets, composed custom stages), **Settings** (the config the
+kb owns: the embedder, the reranker, the synth tier, and the knowledge base itself).
+This document is the trust model + operations guide (see `docs/proposals/done/kb-web-console.md` and its `.plan.md` for the design).
 
 ## Status
 
 **Shipped, default-off.** The console is a separate opt-in service (its own
 `Dockerfile.kb-console` + the compose `console` profile) that only runs when
 launched with a console-admin credential file, bound to `127.0.0.1` by default.
-The Dashboard, Accounts (enroll / revoke / scopes / OIDC config), and Governance
-(decisions / action audit) surfaces are all live. The curator review queue is the
+The Dashboard, Accounts (enroll / revoke / scopes / OIDC config), Governance
+(decisions / action audit), Pipeline (curator stages), and Settings (kb-owned config)
+surfaces are all live. Pipeline and Settings live here rather than in the aimee webchat
+GUI because the kb owns what they configure — the curator, and the embedder/reranker/
+synth tiers — and both are served in-process from `/v1/console/*`. The ownership split
+is by which BINARY reads a key, not by key prefix: `kb_mode`, `kb_client_url`,
+`kb_client_bearer_token` and `kb_evidence_emit_enabled` stay on aimee-server's Settings
+page because aimee-server reads them to reach a kb. The curator review queue is the
 one deferred surface (it needs a separate curator-scoped credential).
 
 ## Trust model

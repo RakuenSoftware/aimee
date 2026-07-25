@@ -4,11 +4,15 @@ import { loadSession, login, type SessionInfo } from './api';
 import ConsoleDashboard from './pages/ConsoleDashboard';
 import Accounts from './pages/Accounts';
 import Governance from './pages/Governance';
+import Pipeline from './pages/Pipeline';
+import Settings from './pages/Settings';
 
 // ConsoleApp is the shell for the aimee-kb web console: a session gate wrapping a
-// nav + the Dashboard / Accounts / Governance surfaces. S0 ships the shell and
-// the session/login flow; the pages are filled in S1 (dashboard), S3 (accounts),
-// and S5 (governance).
+// nav + the Dashboard / Accounts / Governance / Pipeline / Settings surfaces. S0 ships the
+// shell and the session/login flow; the pages are filled in S1 (dashboard), S3
+// (accounts), and S5 (governance). Pipeline and Settings live here rather than in
+// the aimee webchat GUI because the kb owns what they configure — the curator,
+// and the embedder/reranker/synth tiers.
 export default function ConsoleApp() {
   const [session, setSession] = useState<SessionInfo | null | undefined>(undefined);
 
@@ -27,12 +31,16 @@ export default function ConsoleApp() {
         <NavLink to="/dashboard">Dashboard</NavLink>
         <NavLink to="/accounts">Accounts</NavLink>
         <NavLink to="/governance">Governance</NavLink>
+        <NavLink to="/pipeline">Pipeline</NavLink>
+        <NavLink to="/settings">Settings</NavLink>
       </nav>
       <main className="kbc-main">
         <Routes>
           <Route path="/dashboard" element={<ConsoleDashboard />} />
           <Route path="/accounts" element={<Accounts />} />
           <Route path="/governance" element={<Governance />} />
+          <Route path="/pipeline" element={<Pipeline />} />
+          <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </main>
