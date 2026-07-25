@@ -2,6 +2,7 @@
  * dirs). Load and schema validation stay in config.c. */
 #include "aimee.h"
 #include "config_internal.h"
+#include "config_fields.h"
 #include "db1_optional.h"
 #include "maintenance.h"
 #include "platform_process.h"
@@ -1481,4 +1482,133 @@ int config_conversation_dirs(const config_t *cfg, char dirs[][MAX_PATH_LEN], int
    }
 
    return count;
+}
+
+/* ---- Surgical, key-addressed config write (Proposal B write side) ----------
+ * config_set is the single save path. It edits the config YAML as a *document*
+ * — load, set one key, write back, republish — never re-serialising config_t.
+ * There is no whole-file rebuild, so parse and save cannot drift, and a write
+ * preserves every other key already in the file. */
+
+static cJSON *config_set_value_node(const config_field_t *f, const char *value)
+{
+   if (f->is_bool || f->type == CFG_BOOL)
+   {
+      if (strcmp(value, "true") == 0 || strcmp(value, "1") == 0)
+         return cJSON_CreateBool(1);
+      if (strcmp(value, "false") == 0 || strcmp(value, "0") == 0)
+         return cJSON_CreateBool(0);
+      return NULL; /* not a boolean */
+   }
+   if (f->type == CFG_INT)
+      return cJSON_CreateNumber(atoi(value));
+   if (f->type == CFG_FLOAT)
+      return cJSON_CreateNumber(atof(value));
+   if (f->type == CFG_ECON_MODE)
+   {
+      if (econ_mode_parse(value) < 0)
+         return NULL; /* not off|safe|aggressive */
+      return cJSON_CreateString(value);
+   }
+   return cJSON_CreateString(value);
+}
+
+/* Set a possibly-dotted key (a.b.c) in the doc to node (takes ownership). */
+static void config_doc_set(cJSON *root, const char *key, cJSON *node)
+{
+   const char *dot = strchr(key, '.');
+   if (!dot)
+   {
+      cJSON_DeleteItemFromObjectCaseSensitive(root, key);
+      cJSON_AddItemToObject(root, key, node);
+      return;
+   }
+   char head[128];
+   size_t n = (size_t)(dot - key);
+   if (n >= sizeof(head))
+      n = sizeof(head) - 1;
+   memcpy(head, key, n);
+   head[n] = '\0';
+   cJSON *sub = cJSON_GetObjectItemCaseSensitive(root, head);
+   if (!cJSON_IsObject(sub))
+   {
+      cJSON_DeleteItemFromObjectCaseSensitive(root, head);
+      sub = cJSON_CreateObject();
+      cJSON_AddItemToObject(root, head, sub);
+   }
+   config_doc_set(sub, dot + 1, node);
+}
+
+static cJSON *config_load_doc(void)
+{
+   const char *path = config_default_path();
+   FILE *fp = fopen(path, "r");
+   if (!fp)
+      return cJSON_CreateObject();
+   fseek(fp, 0, SEEK_END);
+   long len = ftell(fp);
+   fseek(fp, 0, SEEK_SET);
+   if (len <= 0 || len > 4 * 1024 * 1024)
+   {
+      fclose(fp);
+      return cJSON_CreateObject();
+   }
+   char *buf = malloc((size_t)len + 1);
+   if (!buf)
+   {
+      fclose(fp);
+      return cJSON_CreateObject();
+   }
+   size_t rd = fread(buf, 1, (size_t)len, fp);
+   fclose(fp);
+   buf[rd] = '\0';
+   cJSON *root = yaml_parse(buf);
+   free(buf);
+   return root ? root : cJSON_CreateObject();
+}
+
+static int config_write_doc(cJSON *root)
+{
+   char *yaml_str = yaml_emit(root);
+   if (!yaml_str)
+      return -1;
+   const char *path = config_default_path();
+   char tmp[MAX_PATH_LEN];
+   snprintf(tmp, sizeof(tmp), "%s.tmp.%d", path, (int)getpid());
+   FILE *fp = fopen(tmp, "w");
+   if (!fp)
+   {
+      free(yaml_str);
+      return -1;
+   }
+   fputs(yaml_str, fp);
+   fclose(fp);
+   free(yaml_str);
+   chmod(tmp, 0600);
+   if (rename(tmp, path) != 0)
+   {
+      unlink(tmp);
+      return -1;
+   }
+   return 0;
+}
+
+int config_set(const char *key, const char *value)
+{
+   if (!key || !value)
+      return -1;
+   const config_field_t *f = config_field_lookup(key);
+   if (!f)
+      return -1; /* unknown key */
+   cJSON *node = config_set_value_node(f, value);
+   if (!node)
+      return -1; /* invalid value for the field's type */
+   ensure_config_dir();
+   cJSON *root = config_load_doc();
+   config_doc_set(root, key, node);
+   int rc = config_write_doc(root);
+   cJSON_Delete(root);
+   if (rc == 0)
+      (void)config_reload(); /* republish the snapshot so live readers see it */
+   return rc;
 }
