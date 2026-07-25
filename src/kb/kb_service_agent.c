@@ -15,6 +15,7 @@
 #include "kb_service_agent.h"
 #include "learning_evidence.h"
 #include "aimee/protocols/mcp/mcp_client_registry.h" /* invoke kb-hosted MCP plugin tools */
+#include "kb_mcp_audit_bridge.h" /* record kb-hosted tool-call outcomes on the kb bus */
 
 #include <stdlib.h>
 #include <stdint.h>
@@ -98,11 +99,20 @@ int kb_handle_mcp_call(int fd, cJSON *req)
    if (timeout_ms <= 0 || timeout_ms > 120000)
       timeout_ms = 30000; /* clamp to a sane bound regardless of caller input */
 
+   /* The calling server's dispatch role, threaded over the request for the audit
+    * actor (the plugin is shared to everything on the kb, so who called matters). */
+   cJSON *actor_j = cJSON_GetObjectItemCaseSensitive(req, "actor");
+   const char *actor = cJSON_IsString(actor_j) ? actor_j->valuestring : NULL;
+
    cJSON *result = NULL;
    char err[256];
    err[0] = '\0';
    int rc =
        mcp_client_registry_call_tool(name->valuestring, args, timeout_ms, &result, err, sizeof err);
+   /* Record the OUTCOME on the kb's own audit bus (content-free) — the kb-hosted
+    * mirror of the server-side tool-call audit. Fires on every path. */
+   kb_mcp_audit_record(actor, name->valuestring, "outbound", rc != 0 ? "tool_error" : "",
+                       rc != 0 ? "error" : "ok");
    if (rc != 0)
    {
       cJSON_Delete(result);

@@ -2199,8 +2199,8 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       }
       int rc = local ? mcp_client_registry_call_tool(name, args, timeout_ms, &remote_result,
                                                      err_buf, sizeof(err_buf))
-                     : kb_client_mcp_call(name, args, timeout_ms, &remote_result, err_buf,
-                                          sizeof(err_buf));
+                     : kb_client_mcp_call(name, args, timeout_ms, agent_tools_dispatch_role(),
+                                          &remote_result, err_buf, sizeof(err_buf));
       if (rc != 0)
       {
          char err[384];

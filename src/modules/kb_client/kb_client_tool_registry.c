@@ -137,7 +137,7 @@ char *kb_client_tool_registry_snapshot_json(void)
  * (the plugin's tools/call result). On failure returns -1 with a message in
  * err_buf. |args| is borrowed (deep-copied into the request). */
 int kb_client_mcp_call(const char *qualified_name, const cJSON *args, int timeout_ms,
-                       cJSON **out_result, char *err_buf, size_t err_buf_len)
+                       const char *actor, cJSON **out_result, char *err_buf, size_t err_buf_len)
 {
    if (out_result)
       *out_result = NULL;
@@ -162,6 +162,8 @@ int kb_client_mcp_call(const char *qualified_name, const cJSON *args, int timeou
    }
    if (timeout_ms > 0)
       cJSON_AddNumberToObject(req, "timeout_ms", timeout_ms);
+   if (actor && actor[0])
+      cJSON_AddStringToObject(req, "actor", actor); /* kb records it as the audit actor */
 
    char *json = kb_v1_action_request("mcp.call", req); /* consumes req */
    if (!json)
