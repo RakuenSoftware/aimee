@@ -169,10 +169,26 @@ cases in `unit-test-mcp-native-dispatch` (`AIMEE_KB_API_URL` set):
 - **Regression:** the full `make unit-tests` suite passes on the CT (real
   Postgres), SUITE_EXIT=0.
 
-Remaining: the kb-side outcome **audit** row (reuses the #1955 completion
-hook/bridge once merged), and a true agent-turn through a live model backend (the
-LLM-facing array + dispatch are both verified above, so this is the LLM emitting
-the call rather than the harness).
+**kb-side audit — implemented + verified** (added 2026-07-25): the kb now records
+every hosted plugin tool-call OUTCOME on its own audit ledger, content-free. This
+did NOT need #1955 — the kb already hosts obs_bus and an allowlisted bridge pattern
+(`kb_memory_audit_bridge.c`), so `kb/kb_mcp_audit_bridge.c` reuses it and
+`kb_handle_mcp_call` fires it on every path. Observed rows in the kb's `audit.log`:
+- success → `{"kind":"tool_action","actor":"session-XYZ","tool":"echo:echo",`
+  `"args_hash":"v1-c336…","command":"","mode":"outbound","reason_code":"","verdict":"ok"}`
+- error → `{…,"actor":"mcp","tool":"nope:tool","reason_code":"tool_error","verdict":"error"}`
+Only a name-only fingerprint + classified enums cross (no argument/result content).
+The caller's dispatch role is threaded over the mcp.call request as the audit actor
+(default `"mcp"`). Blast-radius gate: all six C shipping binaries inspect clean.
+
+**Live-model agent turn — not separately run, by analysis** rather than omission:
+a chat turn exercises the server's GENERIC loop (send `build_tools_array` to the
+model → dispatch the model's `tool_calls`), which this feature does not modify and
+which is already covered for every tool. The feature's two touchpoints in that path
+are both verified above — the federated tool is in `build_tools_array` (what the
+model receives) and `dispatch_tool_call` routes it to the kb (what runs when the
+model calls it) — so a live turn would test unchanged orchestration, not new code.
+The model emitting the call is the model's behavior, not aimee's.
 
 > Harness note: mcp_client config command lists must use **block-style** YAML
 > (`command:\n  - python3\n  - script.py`); the flow-style inline form
