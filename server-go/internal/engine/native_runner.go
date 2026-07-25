@@ -1039,8 +1039,17 @@ func (r *NativeRunner) foreach(ctx context.Context, req StepRequest) (StepResult
 	if err != nil {
 		return StepResult{}, err
 	}
-	_, _ = gitText(ctx, workdir, "fetch", "origin", branch)
-	if _, err := gitText(ctx, workdir, "merge", "--ff-only", "origin/"+branch); err != nil {
+	// Fetch the feature branch and ff-merge what the fetch retrieved. `git fetch
+	// origin <branch>` with an explicit refspec updates ONLY FETCH_HEAD, not the
+	// refs/remotes/origin/<branch> tracking ref — so merging "origin/<branch>" fails
+	// with "not something we can merge" the first time this branch is fetched here
+	// (the tracking ref never existed). Merge FETCH_HEAD, which the fetch just set to
+	// the remote tip. This step is only reached once every slice has merged its sub-PR
+	// into the feature branch, so FETCH_HEAD is exactly the assembled feature tip.
+	if _, err := gitText(ctx, workdir, "fetch", "origin", branch); err != nil {
+		return StepResult{}, err
+	}
+	if _, err := gitText(ctx, workdir, "merge", "--ff-only", "FETCH_HEAD"); err != nil {
 		return StepResult{}, err
 	}
 	return StepResult{Status: StepAdvanced, ArtifactType: "branch", Artifact: branch, ContentHash: wfe.Hash([]byte(branch))}, nil
