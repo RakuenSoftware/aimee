@@ -536,6 +536,8 @@ TOKEN_AUTHORITY_OBJS = $(OBJDIR)/kb/kb_mgmt_token_authority_main.o \
                        $(OBJDIR)/kb/kb_mgmt_token_authority.o \
                        $(OBJDIR)/kb/kb_vault_protected_use.o \
                        $(OBJDIR)/kb/kb_mgmt_token.o \
+                       $(OBJDIR)/kb/kb_identity_token.o \
+                       $(OBJDIR)/server/oauth_pkce.o \
                        $(OBJDIR)/kb/kb_mgmt_token_public.o \
                        $(OBJDIR)/db2/management_token_authority.o \
                        $(OBJDIR)/db2/db_postgres.o

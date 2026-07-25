@@ -167,6 +167,54 @@ int kb_mgmt_token_authority_record_valid(const kb_mgmt_token_authority_record_t 
                              r->hwm_attestation_digest);
 }
 
+/* The data-plane subject grammar. It is the management actor grammar plus the
+ * one extra bound the server's identity verifier applies (server_mgmt_token.c
+ * identity_key -> lower_hex(..., 79)): a cert serial of at most 79 hex digits.
+ * Minting a subject the verifier would reject is a silent outage, so the
+ * authority holds itself to the stricter of the two. */
+static int canonical_subject(const char *s)
+{
+   if (!canonical_actor(s))
+      return 0;
+   if (strncmp(s, "cert:", 5))
+      return 1;
+   const char *serial = strchr(s + 5, ':');
+   return serial && strlen(serial + 1) <= 79;
+}
+
+int kb_identity_token_authority_record_valid(const kb_identity_token_authority_record_t *r)
+{
+   if (!r || (r->newly_admitted != 0 && r->newly_admitted != 1) ||
+       !exact_hex(r->correlation_id, sizeof(r->correlation_id), 64) ||
+       !fixed_text(r->jti, sizeof(r->jti), 8, 128, 1) || r->team_id < 1 ||
+       !canonical_subject(r->subject) || !kb_identity_tier_str(r->tier) ||
+       !fixed_text(r->token_issuer, sizeof(r->token_issuer), 1, 255, 0) ||
+       !fixed_text(r->audience, sizeof(r->audience), 1, 127, 1) ||
+       !fixed_text(r->kid, sizeof(r->kid), 1, 64, 1) || r->issued_at < 0 ||
+       r->expires_at <= r->issued_at ||
+       r->expires_at - r->issued_at > KB_IDENTITY_TOKEN_AUTHORITY_MAX_LIFETIME ||
+       !exact_hex(r->installation_id, sizeof(r->installation_id), 32) ||
+       r->installation_generation < 1 || r->installation_enrollment_id < 1 ||
+       r->target_enrollment_id < 1 || r->revocation_generation < 1 ||
+       r->publication_generation != 1 ||
+       !fixed_text(r->publication_candidate_id, sizeof(r->publication_candidate_id), 1,
+                   KB_MGMT_TOKEN_AUTHORITY_CANDIDATE_MAX, 1) ||
+       !fixed_text(r->token_custody_key_id, sizeof(r->token_custody_key_id), 1,
+                   KB_MGMT_ROOT_CUSTODY_ID_MAX, 0) ||
+       r->token_version != 2 || r->token_public_exponent[0] != 1 ||
+       r->token_public_exponent[1] != 0 || r->token_public_exponent[2] != 1 ||
+       r->vault_seal_epoch < 1 || !r->hwm_attestation_len ||
+       r->hwm_attestation_len > sizeof(r->hwm_attestation) ||
+       r->envelope.seal_epoch != r->vault_seal_epoch || r->envelope.version != 2 ||
+       !r->envelope.ciphertext_len || r->envelope.ciphertext_len > sizeof(r->envelope.ciphertext) ||
+       r->key_use_created_at_epoch < 0)
+      return 0;
+
+   return key_bindings_valid(r->token_public_key, r->token_public_digest, r->token_jwk_digest,
+                             r->kid, r->hwm_attestation, r->hwm_attestation_len,
+                             r->hwm_attestation_digest);
+}
+
 static int sign_rs256(void *opaque, const unsigned char *input, size_t input_len,
                       unsigned char *signature, size_t signature_cap, size_t *signature_len)
 {
@@ -335,6 +383,63 @@ kb_mgmt_token_authority_sign_pkcs8(const kb_mgmt_token_authority_record_t *r,
       if (minted == KB_MGMT_TOKEN_OUTPUT_TOO_SMALL)
          result = KB_MGMT_TOKEN_AUTHORITY_OUTPUT_TOO_SMALL;
       else if (minted != KB_MGMT_TOKEN_OK)
+         result = KB_MGMT_TOKEN_AUTHORITY_CRYPTO_UNAVAILABLE;
+      else if (!verify_exact(key, jwt_out, *jwt_len))
+      {
+         OPENSSL_cleanse(jwt_out, jwt_cap);
+         *jwt_len = 0;
+         result = KB_MGMT_TOKEN_AUTHORITY_CRYPTO_UNAVAILABLE;
+      }
+      else
+         result = KB_MGMT_TOKEN_AUTHORITY_OK;
+   }
+
+   OPENSSL_cleanse(&claims, sizeof(claims));
+   EVP_PKEY_free(key);
+   if (result != KB_MGMT_TOKEN_AUTHORITY_OK)
+   {
+      OPENSSL_cleanse(jwt_out, jwt_cap);
+      *jwt_len = 0;
+   }
+   return result;
+}
+
+kb_mgmt_token_authority_result_t
+kb_identity_token_authority_sign_pkcs8(const kb_identity_token_authority_record_t *r,
+                                       const unsigned char *der, size_t der_len, char *jwt_out,
+                                       size_t jwt_cap, size_t *jwt_len)
+{
+   if (jwt_len)
+      *jwt_len = 0;
+   if (jwt_out && jwt_cap)
+      jwt_out[0] = 0;
+   if (!jwt_out || !jwt_len || !der || !der_len || der_len > KB_MGMT_ROOT_SECRET_MAX ||
+       !kb_identity_token_authority_record_valid(r))
+      return KB_MGMT_TOKEN_AUTHORITY_INVALID;
+
+   EVP_PKEY *key = authority_signing_key(der, der_len, r->token_public_key);
+
+   kb_mgmt_token_authority_result_t result = KB_MGMT_TOKEN_AUTHORITY_KEY_MISMATCH;
+   kb_identity_token_claims_t claims;
+   memset(&claims, 0, sizeof(claims));
+   if (key)
+   {
+      memcpy(claims.issuer, r->token_issuer, sizeof(claims.issuer));
+      memcpy(claims.audience, r->audience, sizeof(claims.audience));
+      memcpy(claims.subject, r->subject, sizeof(claims.subject));
+      claims.team_id = r->team_id;
+      claims.tier = r->tier;
+      memcpy(claims.jti, r->jti, sizeof(claims.jti));
+      memcpy(claims.kid, r->kid, sizeof(claims.kid));
+      claims.issued_at = r->issued_at;
+      claims.expires_at = r->expires_at;
+
+      authority_signer_t signer = {key};
+      kb_identity_token_result_t minted =
+          kb_identity_token_build(&claims, sign_rs256, &signer, jwt_out, jwt_cap, jwt_len);
+      if (minted == KB_IDENTITY_TOKEN_OUTPUT_TOO_SMALL)
+         result = KB_MGMT_TOKEN_AUTHORITY_OUTPUT_TOO_SMALL;
+      else if (minted != KB_IDENTITY_TOKEN_OK)
          result = KB_MGMT_TOKEN_AUTHORITY_CRYPTO_UNAVAILABLE;
       else if (!verify_exact(key, jwt_out, *jwt_len))
       {

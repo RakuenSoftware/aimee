@@ -642,6 +642,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-management-action-journal
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-management-cert-lifecycle
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-token-roots-provision
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-token-authority
+TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-identity-token-authority
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-token-authority-ipc
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-jwks-publication
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-mgmt-jwks-cache
@@ -2092,6 +2093,14 @@ $(TESTPREFIX)/unit-test-kb-mgmt-token-authority: \
     $(OBJDIR)/kb/kb_mgmt_token_authority.o $(OBJDIR)/kb/kb_mgmt_token.o \
     $(OBJDIR)/kb/kb_mgmt_token_public.o \
     $(OBJDIR)/modules/vault/vault_crypto.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-kb-identity-token-authority: \
+    $(OBJDIR)/tests/test_kb_identity_token_authority.o \
+    $(OBJDIR)/kb/kb_mgmt_token_authority.o $(OBJDIR)/kb/kb_mgmt_token.o \
+    $(OBJDIR)/kb/kb_identity_token.o $(OBJDIR)/kb/kb_mgmt_token_public.o \
+    $(OBJDIR)/server/server_mgmt_token.o $(OBJDIR)/server/oauth_pkce.o \
+    $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-kb-mgmt-token-authority-ipc: \
