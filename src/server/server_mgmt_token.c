@@ -1,5 +1,7 @@
 #include "server_mgmt_token.h"
 
+#include "server_identity_token.h"
+
 #include "cJSON.h"
 
 #include <limits.h>
@@ -657,4 +659,146 @@ int server_mgmt_token_verify(const char *jwt, size_t jwt_len, const char *jwks_j
    return server_mgmt_token_verify_ex(jwt, jwt_len, jwks_json, expected_issuer, expected_audience,
                                       peer_issuer, peer_serial, peer_fingerprint, request_sha256,
                                       now, out) == SERVER_MGMT_TOKEN_OK;
+}
+
+/* ---------------------------------------------------------------------------
+ * Data-plane identity token (per-user remote_writes, proposal §4). A strictly
+ * separate token type from the management JWT above: it requires the
+ * `aimee-id+jwt` header `typ`, carries a three-level `tier` instead of a
+ * capability, and has NO peer-cert binding or request digest. It reuses this
+ * file's vetted JWS/JWKS primitives (decode_segment, b64_decode, b64_canonical,
+ * parse_json, select_key, verify_signature). See server_identity_token.h.
+ * ------------------------------------------------------------------------- */
+
+/* Header schema for the identity token: alg=RS256, typ=aimee-id+jwt, kid. The
+ * distinct `typ` is what makes a management token unverifiable here (and an
+ * identity token unverifiable by parse_header), independent of the audience. */
+static int parse_identity_header(cJSON *header, char kid[65])
+{
+   static const char *const names[] = {"alg", "typ", "kid"};
+   const cJSON *v[3];
+   return no_duplicate_members(header) && exact_object(header, names, 3, v) &&
+          cJSON_IsString(v[0]) && strcmp(v[0]->valuestring, "RS256") == 0 && cJSON_IsString(v[1]) &&
+          strcmp(v[1]->valuestring, "aimee-id+jwt") == 0 && cJSON_IsString(v[2]) &&
+          ascii_token(v[2]->valuestring, 1, 64) && copy_string(v[2], kid, 65);
+}
+
+static int identity_tier_from_str(const char *s, kb_identity_tier_t *out)
+{
+   if (strcmp(s, "off") == 0)
+      *out = KB_IDENTITY_TIER_OFF;
+   else if (strcmp(s, "data") == 0)
+      *out = KB_IDENTITY_TIER_DATA;
+   else if (strcmp(s, "full") == 0)
+      *out = KB_IDENTITY_TIER_FULL;
+   else
+      return 0;
+   return 1;
+}
+
+static int parse_identity_payload(cJSON *payload, const unsigned char *raw, size_t raw_n,
+                                  const char *issuer, const char *audience, int64_t now,
+                                  server_identity_token_claims_t *out)
+{
+   static const char *const names[] = {"v",    "iss", "aud", "sub", "team_id",
+                                       "tier", "jti", "iat", "exp"};
+   const cJSON *v[9];
+   int64_t version = 0, team = 0, issued = 0, expires = 0;
+   if (!no_duplicate_members(payload) || !exact_object(payload, names, 9, v) ||
+       !raw_uint(raw, raw_n, "v", &version) || !raw_uint(raw, raw_n, "team_id", &team) ||
+       !raw_uint(raw, raw_n, "iat", &issued) || !raw_uint(raw, raw_n, "exp", &expires) ||
+       version != 1 || team <= 0 || now < 0 || issued > now || expires <= now ||
+       expires <= issued || expires - issued > SERVER_IDENTITY_TOKEN_MAX_LIFETIME)
+      return 0;
+   /* Types: v/team_id/iat/exp are numbers, the rest strings. */
+   for (size_t i = 0; i < 9; ++i)
+      if ((i == 0 || i == 4 || i == 7 || i == 8) ? !cJSON_IsNumber(v[i]) : !cJSON_IsString(v[i]))
+         return 0;
+   kb_identity_tier_t tier;
+   if (strcmp(v[1]->valuestring, issuer) != 0 || strcmp(v[2]->valuestring, audience) != 0 ||
+       !identity_key(v[3]->valuestring) || !identity_tier_from_str(v[5]->valuestring, &tier) ||
+       !ascii_token(v[6]->valuestring, 8, 128))
+      return 0;
+   out->team_id = team;
+   out->tier = tier;
+   out->issued_at = issued;
+   out->expires_at = expires;
+   if (!copy_string(v[1], out->issuer, sizeof(out->issuer)) ||
+       !copy_string(v[2], out->audience, sizeof(out->audience)) ||
+       !copy_string(v[3], out->subject, sizeof(out->subject)) ||
+       !copy_string(v[6], out->jti, sizeof(out->jti)))
+      return 0;
+   return 1;
+}
+
+server_identity_token_result_t
+server_identity_token_verify(const char *jwt, size_t jwt_len, const char *jwks_json,
+                             const char *expected_issuer, const char *expected_audience,
+                             int64_t now, server_identity_token_claims_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   if (!jwt || !jwks_json || !out || !control_free(expected_issuer, 1, 255) ||
+       !ascii_token(expected_audience, 1, 127) || now < 0)
+      return SERVER_IDENTITY_TOKEN_INVALID;
+   size_t wire_n = jwt_len;
+   size_t jwks_n = strnlen(jwks_json, JWKS_MAX + 1);
+   if (!wire_n || wire_n > TOKEN_WIRE_MAX || memchr(jwt, '\0', wire_n) || !jwks_n ||
+       jwks_n > JWKS_MAX)
+      return SERVER_IDENTITY_TOKEN_INVALID;
+   const char *dot1 = memchr(jwt, '.', wire_n);
+   size_t after_dot1 = dot1 ? wire_n - (size_t)(dot1 + 1 - jwt) : 0;
+   const char *dot2 = dot1 ? memchr(dot1 + 1, '.', after_dot1) : NULL;
+   size_t after_dot2 = dot2 ? wire_n - (size_t)(dot2 + 1 - jwt) : 0;
+   if (!dot1 || !dot2 || dot1 == jwt || dot2 == dot1 + 1 || !after_dot2 ||
+       memchr(dot2 + 1, '.', after_dot2))
+      return SERVER_IDENTITY_TOKEN_INVALID;
+   size_t henc_n = (size_t)(dot1 - jwt), penc_n = (size_t)(dot2 - dot1 - 1);
+   size_t senc_n = wire_n - (size_t)(dot2 + 1 - jwt);
+   unsigned char header_raw[TOKEN_HEADER_MAX + 1], payload_raw[TOKEN_PAYLOAD_MAX + 1];
+   unsigned char signature[TOKEN_SIG_MAX];
+   size_t header_n = 0, payload_n = 0, signature_n = 0;
+   cJSON *header = NULL, *payload = NULL;
+   EVP_PKEY *key = NULL;
+   server_identity_token_claims_t candidate;
+   memset(&candidate, 0, sizeof(candidate));
+   server_identity_token_result_t result = SERVER_IDENTITY_TOKEN_INVALID;
+   int ok = decode_segment(jwt, henc_n, header_raw, TOKEN_HEADER_MAX, &header_n) &&
+            decode_segment(dot1 + 1, penc_n, payload_raw, TOKEN_PAYLOAD_MAX, &payload_n) &&
+            b64_decode(dot2 + 1, senc_n, signature, TOKEN_SIG_MAX, &signature_n) &&
+            b64_canonical(dot2 + 1, senc_n, signature, signature_n) && signature_n > 0;
+   if (!ok)
+      goto done;
+   ok = 0;
+   header_raw[header_n] = '\0';
+   payload_raw[payload_n] = '\0';
+   header = parse_json(header_raw, header_n);
+   payload = parse_json(payload_raw, payload_n);
+   if (!header || !payload || !parse_identity_header(header, candidate.kid))
+      goto done;
+   key_select_result_t selected = select_key(jwks_json, jwks_n, candidate.kid, &key);
+   if (selected == KEY_SELECT_UNKNOWN)
+   {
+      result = SERVER_IDENTITY_TOKEN_UNKNOWN_KID;
+      goto done;
+   }
+   if (selected != KEY_SELECT_OK || !key ||
+       !verify_signature(key, jwt, (size_t)(dot2 - jwt), signature, signature_n) ||
+       !parse_identity_payload(payload, payload_raw, payload_n, expected_issuer, expected_audience,
+                               now, &candidate))
+      goto done;
+   *out = candidate;
+   ok = 1;
+   result = SERVER_IDENTITY_TOKEN_OK;
+done:
+   if (!ok)
+      memset(out, 0, sizeof(*out));
+   EVP_PKEY_free(key);
+   json_delete(header);
+   json_delete(payload);
+   OPENSSL_cleanse(&candidate, sizeof(candidate));
+   OPENSSL_cleanse(header_raw, sizeof(header_raw));
+   OPENSSL_cleanse(payload_raw, sizeof(payload_raw));
+   OPENSSL_cleanse(signature, sizeof(signature));
+   return result;
 }
