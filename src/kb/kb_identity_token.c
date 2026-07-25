@@ -18,7 +18,7 @@
 #include "oauth_pkce.h" /* oauth_pkce_base64url_encode */
 
 /* RSA-4096 signatures are 512 bytes; 2048 -> 256. Size for the larger. */
-#define SIG_MAX 512u
+#define SIG_MAX  512u
 #define JSON_MAX 2048u
 
 const char *kb_identity_tier_str(kb_identity_tier_t tier)
@@ -165,9 +165,8 @@ kb_identity_token_result_t kb_identity_token_build(const kb_identity_token_claim
    unsigned char signature[SIG_MAX];
    memset(signature, 0, sizeof(signature));
    size_t sig_n = 0;
-   int signed_ok =
-       signer(signer_ctx, (const unsigned char *)signing, input_n, signature, sizeof(signature),
-              &sig_n);
+   int signed_ok = signer(signer_ctx, (const unsigned char *)signing, input_n, signature,
+                          sizeof(signature), &sig_n);
    if (!signed_ok || sig_n < 256 || sig_n > sizeof(signature))
    {
       OPENSSL_cleanse(signature, sizeof(signature));

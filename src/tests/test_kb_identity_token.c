@@ -22,8 +22,8 @@ typedef struct
    size_t force_len; /* if >0, emit this many bytes instead of a real signature */
 } signer_t;
 
-static int sign_rs256(void *opaque, const unsigned char *input, size_t input_n,
-                      unsigned char *sig, size_t cap, size_t *sig_n)
+static int sign_rs256(void *opaque, const unsigned char *input, size_t input_n, unsigned char *sig,
+                      size_t cap, size_t *sig_n)
 {
    signer_t *s = opaque;
    if (s->force_fail)
