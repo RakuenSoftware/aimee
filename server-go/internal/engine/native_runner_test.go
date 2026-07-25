@@ -1026,9 +1026,15 @@ func TestMalformedCapacityDuplicateCannotSatisfyRequiredPersona(t *testing.T) {
 		{persona: "security", selector: "codex", ordinal: 0},
 		{persona: "security", selector: "minimax", ordinal: 1},
 	}
-	_, _, voters, _, unreachable := runner.runPanelRound(context.Background(), req, seats, "review", "hash", "plan", 1)
-	if unreachable == "" || voters != 1 {
-		t.Fatalf("malformed duplicate satisfied required persona: voters=%d unreachable=%q", voters, unreachable)
+	// The duplicate contradicts itself (approve carrying a finding). It abstains
+	// rather than voting, so it can neither satisfy the required persona nor mask
+	// the seat that failed: both seats drop out and nothing is approved.
+	_, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), req, seats, "review", "hash", "plan", 1)
+	if unreachable == "" || voters != 0 || approvals != 0 {
+		t.Fatalf("malformed duplicate satisfied required persona: approvals=%d voters=%d unreachable=%q", approvals, voters, unreachable)
+	}
+	if !strings.Contains(unreachable, "malformed_after_repair") || !strings.Contains(unreachable, "delegate_error") {
+		t.Fatalf("dropped seats are not self-describing: %q", unreachable)
 	}
 }
 
@@ -1405,4 +1411,193 @@ func TestRoundtableNamingAnAbsentPresetParks(t *testing.T) {
 	if len(agents.requests) != 0 {
 		t.Fatalf("absent preset dispatched %d seats", len(agents.requests))
 	}
+}
+
+// contradictingSeatAgents answers every seat with a well-formed approval except
+// the named persona, which contradicts itself (approve carrying a finding) on
+// both its first attempt and its repair. The JSON parses, so the syntactic
+// repair path alone never sees it.
+type contradictingSeatAgents struct {
+	mu       sync.Mutex
+	persona  string
+	attempts int
+}
+
+func (a *contradictingSeatAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
+	return DelegateResult{}, errors.New("unexpected direct delegation")
+}
+
+func (a *contradictingSeatAgents) DelegateGroup(_ context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]DelegateGroupResult, len(requests))
+	for i, request := range requests {
+		body := `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`
+		if request.Persona == a.persona {
+			a.attempts++
+			body = `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[{"id":"contradiction","severity":"blocking","summary":"approve carrying a finding"}]}`
+		}
+		out[i] = DelegateGroupResult{Participant: "seat-" + request.Persona, Response: withTestRoundtableIdentity(body, request)}
+	}
+	return out
+}
+
+// A seat whose verdict is still unusable after its repair attempt is absence of
+// evidence, not evidence of a defect. It abstains like an unreachable seat and
+// min_successful decides, instead of vetoing a panel that no revision could
+// satisfy. The repair must still be attempted first.
+func TestContradictorySeatAbstainsAfterRepairInsteadOfVetoingThePanel(t *testing.T) {
+	agents := &contradictingSeatAgents{persona: "architect"}
+	runner := &NativeRunner{agents: agents, roundtables: unpinnedTestRoundtable(t, "architect", "qa", "reviewer")}
+	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
+	reviewed.Hash = wfe.Hash(reviewed.Content)
+	result, err := runner.roundtable(t.Context(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
+		Proposal: "review the plan", Inputs: map[string]wfe.Artifact{"src": reviewed},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// min_successful is 3 here (one seat per persona), so losing a seat drops the
+	// usable reports below the configured floor and the panel must NOT advance.
+	if result.Status == StepAdvanced {
+		t.Fatalf("panel advanced below its configured minimum: %+v", result)
+	}
+	if a := agents.attempts; a != 2 {
+		t.Fatalf("contradictory seat attempts=%d, want 2 (first + one repair)", a)
+	}
+	if result.Roundtable == nil || !result.Roundtable.Degraded || result.Roundtable.ParticipantsUsed != 2 {
+		t.Fatalf("dropped seat is not visible in the record: %+v", result.Roundtable)
+	}
+	for _, finding := range result.Roundtable.Items {
+		if strings.Contains(finding.ID, "malformed") {
+			t.Fatalf("contradictory seat was charged against the artifact: %+v", finding)
+		}
+	}
+}
+
+// The same panel, sized so the remaining seats still meet min_successful, must
+// advance: the abstention costs a voter but does not lower the configured bar.
+func TestPanelAdvancesWhenAbstentionStillLeavesTheConfiguredMinimum(t *testing.T) {
+	agents := &contradictingSeatAgents{persona: "architect"}
+	dir := t.TempDir()
+	body := `{"name":"default","seats":[{"model":"","persona":"architect"},{"model":"","persona":"qa"},{"model":"","persona":"reviewer"}],"min_successful":2}`
+	if err := os.WriteFile(filepath.Join(dir, "default.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := roundtablecfg.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &NativeRunner{agents: agents, roundtables: store}
+	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
+	reviewed.Hash = wfe.Hash(reviewed.Content)
+	result, err := runner.roundtable(t.Context(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
+		Proposal: "review the plan", Inputs: map[string]wfe.Artifact{"src": reviewed},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StepAdvanced {
+		t.Fatalf("two clean approvals against min_successful 2 did not advance: %+v", result)
+	}
+	if result.Roundtable == nil || !result.Roundtable.Degraded {
+		t.Fatalf("advancing on a short panel must still report degraded: %+v", result.Roundtable)
+	}
+}
+
+// proseChairmanAgents answers seats cleanly and makes the chairman return prose
+// on its first turn. `replyAfterRepair` is what the chairman says when re-asked.
+type proseChairmanAgents struct {
+	mu               sync.Mutex
+	chairmanCalls    int
+	replyAfterRepair string
+}
+
+func (a *proseChairmanAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
+	if request.Persona == "chairman" {
+		a.mu.Lock()
+		a.chairmanCalls++
+		call := a.chairmanCalls
+		a.mu.Unlock()
+		if call == 1 {
+			return DelegateResult{Response: "Certainly! Here is my assessment of the plan:\n\nThe plan looks reasonable overall."}, nil
+		}
+		if a.replyAfterRepair == "repeat-prose" {
+			return DelegateResult{Response: "Still prose, still no JSON object anywhere."}, nil
+		}
+		return DelegateResult{Response: chairmanApprovalFor(request)}, nil
+	}
+	return DelegateResult{Response: withTestRoundtableIdentity(`{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`, request)}, nil
+}
+
+func (a *proseChairmanAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	return testDelegateGroup(ctx, requests, a.Delegate)
+}
+
+// An analysis seat gets one repair attempt; the chairman had none, so a single
+// prose reply discarded a completed panel and parked the gate, and the resume
+// re-ran every seat at full cost. It gets the same one attempt now.
+func TestChairmanRepairsItsFirstUnstructuredReply(t *testing.T) {
+	agents := &proseChairmanAgents{}
+	runner := &NativeRunner{agents: agents, roundtables: chairmanTestRoundtable(t)}
+	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
+	reviewed.Hash = wfe.Hash(reviewed.Content)
+	result, err := runner.roundtable(t.Context(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
+		Proposal: "review the plan", Inputs: map[string]wfe.Artifact{"src": reviewed},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StepAdvanced {
+		t.Fatalf("chairman prose was not repaired: %+v", result)
+	}
+	if agents.chairmanCalls != 2 {
+		t.Fatalf("chairman calls=%d, want 2 (first + one repair)", agents.chairmanCalls)
+	}
+}
+
+// When the repair also fails, the park detail must carry what the chairman
+// actually returned. Without it an operator cannot tell prose from a truncated
+// verdict from an empty reply, and the three have different fixes.
+func TestChairmanParkDetailCarriesTheUnusableResponse(t *testing.T) {
+	agents := &proseChairmanAgents{replyAfterRepair: "repeat-prose"}
+	runner := &NativeRunner{agents: agents, roundtables: chairmanTestRoundtable(t)}
+	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
+	reviewed.Hash = wfe.Hash(reviewed.Content)
+	result, err := runner.roundtable(t.Context(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
+		Proposal: "review the plan", Inputs: map[string]wfe.Artifact{"src": reviewed},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StepPending || result.PauseReason != "roundtable_chairman" {
+		t.Fatalf("unusable chairman did not park: %+v", result)
+	}
+	if !strings.Contains(result.Detail, "bytes, begins") || !strings.Contains(result.Detail, "Still prose") {
+		t.Fatalf("park detail discards the chairman response: %q", result.Detail)
+	}
+}
+
+// chairmanTestRoundtable saves a two-seat preset with an enabled chairman.
+func chairmanTestRoundtable(t *testing.T) *roundtablecfg.Store {
+	t.Helper()
+	dir := t.TempDir()
+	body := `{"name":"default","seats":[{"model":"","persona":"qa"},{"model":"","persona":"reviewer"}],` +
+		`"min_successful":2,"chairman":"$random","chairman_enabled":true}`
+	if err := os.WriteFile(filepath.Join(dir, "default.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := roundtablecfg.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store
 }
