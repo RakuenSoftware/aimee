@@ -273,7 +273,7 @@ static int registry_start_client(const config_t *cfg, const config_mcp_client_t 
    return 0;
 }
 
-int mcp_client_registry_boot(const config_t *cfg)
+int mcp_client_registry_boot(const config_t *cfg, config_mcp_install_t host)
 {
    if (!cfg)
       return 0;
@@ -292,8 +292,12 @@ int mcp_client_registry_boot(const config_t *cfg)
       g_registry_atexit_registered = 1;
    }
 
+   /* Boot only the clients this daemon hosts: aimee-server starts install:server
+    * plugins, aimee-kb starts install:kb plugins. A plugin is owned by exactly one
+    * daemon, so its tools resolve unambiguously. */
    for (int i = 0; i < cfg->mcp_client_count; i++)
-      (void)registry_start_client(cfg, &cfg->mcp_clients[i]);
+      if (cfg->mcp_clients[i].install == host)
+         (void)registry_start_client(cfg, &cfg->mcp_clients[i]);
 
    g_registry_booted = 1;
    int count = g_registry_count;

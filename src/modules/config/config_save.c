@@ -1247,6 +1247,8 @@ int config_save(const config_t *cfg)
             cJSON_AddStringToObject(entry, "url", client->url);
          if (client->bearer_token_env[0])
             cJSON_AddStringToObject(entry, "bearer_token_env", client->bearer_token_env);
+         if (client->install == CONFIG_MCP_INSTALL_KB)
+            cJSON_AddStringToObject(entry, "install", "kb"); /* omit "server" (the default) */
 
          cJSON_AddItemToArray(mcp_arr, entry);
       }

@@ -1049,6 +1049,12 @@ void config_parse_mcp_clients_section(config_t *cfg, cJSON *root)
             snprintf(client->bearer_token_env, sizeof(client->bearer_token_env), "%s",
                      bearer->valuestring);
 
+         /* install: "server" (default) exposes the plugin only to this server's
+          * sessions; "kb" runs it on aimee-kb, shared to everything on that kb. */
+         cJSON *install = cJSON_GetObjectItemCaseSensitive(mcp_entry, "install");
+         if (cJSON_IsString(install) && strcasecmp(install->valuestring, "kb") == 0)
+            client->install = CONFIG_MCP_INSTALL_KB;
+
          if (client->transport == CONFIG_MCP_TRANSPORT_STDIO && client->command_count == 0)
             continue;
          if (client->transport == CONFIG_MCP_TRANSPORT_SSE && client->url[0] == '\0')
