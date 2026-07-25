@@ -1,6 +1,8 @@
 #ifndef AGENT_ADMISSION_H
 #define AGENT_ADMISSION_H
 
+#include <time.h>
+
 /* agent_admission: the SINGLE admission controller every aimee-run agent turn passes
  * through, whatever the producer (chat front-end, delegate, WFE panel, ensemble, aux,
  * cron/trigger, fallback peer). It is the one place concurrency is bounded, and it is
@@ -80,8 +82,25 @@ agent_slot_t *agent_admission_acquire(const agent_admit_req_t *req, agent_admit_
  * holder releases. */
 void agent_admission_release(agent_slot_t *slot);
 
+/* Mark a context as still alive so the idle reaper won't reclaim it. Drive it from the
+ * same progress heartbeat that proves the turn is advancing (see server_delegate_monitor):
+ * a tmux-CLI delegate runs its whole turn inside one acquire, so without this a long-but-
+ * healthy turn would look idle. No-op for an unknown/empty handle. */
+void agent_admission_touch(const char *ctx_handle);
+
+/* Reclaim every context idle for >= max_idle_secs — i.e. whose holder thread wedged or
+ * died without releasing, so its global/per-agent/per-model capacity would stay pinned
+ * until process restart. Live turns are safe: they touch their context on acquire, on
+ * each nested turn, and on every heartbeat, all far inside the TTL. Returns the count
+ * reclaimed; <=0 is a no-op. A late real release from a reaped holder is a safe no-op
+ * (context generation guard). */
+int agent_admission_reap_idle(int max_idle_secs);
+
 /* Test/inspection helpers (also used by assertions). Return -1 if unconfigured. */
 int agent_admission_global_active(void);
 int agent_admission_agent_active(const char *agent);
+
+/* Test seam: override the reaper/acquire clock (NULL restores wall-clock time). */
+void agent_admission_set_now_hook_for_test(time_t (*fn)(void));
 
 #endif /* AGENT_ADMISSION_H */

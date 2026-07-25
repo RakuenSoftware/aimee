@@ -39,6 +39,11 @@ typedef struct
    int refcount;        /* live holders of this context */
    unsigned generation; /* bumped on free; guards stale slot handles */
    int in_use;
+   /* admit_now() stamped at acquire, each reentrant turn, and every progress
+    * heartbeat (agent_admission_touch). agent_admission_reap_idle reclaims a
+    * context whose holder thread wedged or died without releasing — its capacity
+    * would otherwise be pinned until process restart. */
+   time_t last_activity;
 } admission_ctx_t;
 
 typedef struct
@@ -78,6 +83,18 @@ static struct
    int next_ticket;
    waiter_t waiters[ADMIT_MAX_WAITERS];
 } g = {.lock = PTHREAD_MUTEX_INITIALIZER, .cond = PTHREAD_COND_INITIALIZER};
+
+/* Clock seam: wall-clock seconds by default; tests override it to drive the idle
+ * reaper deterministically without sleeping. */
+static time_t (*s_now_hook)(void);
+static time_t admit_now(void)
+{
+   return s_now_hook ? s_now_hook() : time(NULL);
+}
+void agent_admission_set_now_hook_for_test(time_t (*fn)(void))
+{
+   s_now_hook = fn;
+}
 
 /* ---- small flat-table helpers (call with g.lock held) ---------------------- */
 
@@ -233,6 +250,7 @@ static agent_slot_t *admit_new_context_locked(const agent_admit_req_t *req)
    admission_ctx_t *c = &g.ctxs[idx];
    c->in_use = 1;
    c->refcount = 1;
+   c->last_activity = admit_now();
    snprintf(c->ctx, sizeof(c->ctx), "%s", req->ctx_handle);
    snprintf(c->agent, sizeof(c->agent), "%s", req->agent);
    snprintf(c->model, sizeof(c->model), "%s", req->model);
@@ -272,6 +290,7 @@ agent_slot_t *agent_admission_acquire(const agent_admit_req_t *req, agent_admit_
    if (existing)
    {
       existing->refcount++;
+      existing->last_activity = admit_now();
       agent_slot_t *h = make_handle((int)(existing - g.ctxs));
       pthread_mutex_unlock(&g.lock);
       set_status(status, h ? AGENT_ADMIT_OK : AGENT_ADMIT_INVALID);
@@ -371,6 +390,54 @@ void agent_admission_release(agent_slot_t *slot)
    }
    pthread_mutex_unlock(&g.lock);
    free(slot);
+}
+
+void agent_admission_touch(const char *ctx_handle)
+{
+   if (!ctx_handle || !ctx_handle[0])
+      return;
+   pthread_mutex_lock(&g.lock);
+   admission_ctx_t *c = ctx_find_locked(ctx_handle);
+   if (c)
+      c->last_activity = admit_now();
+   pthread_mutex_unlock(&g.lock);
+}
+
+int agent_admission_reap_idle(int max_idle_secs)
+{
+   if (max_idle_secs <= 0)
+      return 0;
+   time_t now = admit_now();
+   int reaped = 0;
+   pthread_mutex_lock(&g.lock);
+   for (int i = 0; i < ADMIT_MAX_CONTEXTS; i++)
+   {
+      admission_ctx_t *c = &g.ctxs[i];
+      if (!c->in_use || (now - c->last_activity) < max_idle_secs)
+         continue;
+      /* The holder(s) wedged or died without releasing. Return the per-context caps
+       * exactly as the last release would (counts are per-context, not per-refcount,
+       * so decrement once regardless of refcount), then bump the generation so any
+       * outstanding handle's eventual real release is a safe no-op via the guard in
+       * agent_admission_release. */
+      counter_t *ac = counter_find(g.agents, g.agent_count, c->agent);
+      counter_t *mc = counter_find(g.models, g.model_count, c->model);
+      if (g.global_active > 0)
+         g.global_active--;
+      if (ac && ac->active > 0)
+         ac->active--;
+      if (mc && mc->active > 0)
+         mc->active--;
+      c->refcount = 0;
+      c->in_use = 0;
+      c->generation++;
+      c->ctx[0] = c->agent[0] = c->model[0] = '\0';
+      reaped++;
+   }
+   if (reaped)
+      pthread_cond_broadcast(&g.cond); /* freed capacity: wake any waiters */
+   pthread_mutex_unlock(&g.lock);
+   return reaped;
 }
 
 /* ---- inspection ---------------------------------------------------------- */

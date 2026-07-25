@@ -8,6 +8,10 @@
 #include <string.h>
 #include <unistd.h>
 
+/* Idle-reaper TTL the tests drive against (seconds); matches the monitor's operating
+ * threshold in spirit — the exact value is irrelevant since the clock is injected. */
+#define ADMIT_TEST_TTL 240
+
 static agent_admit_req_t req(const char *ctx, const char *agent, const char *model, int max)
 {
    agent_admit_req_t r;
@@ -146,6 +150,81 @@ static void test_release_null_and_stale(void)
    printf("  PASS: release_null_and_stale\n");
 }
 
+/* ---- idle reaper: reclaim a slot whose holder wedged/died without releasing ---- */
+
+static time_t s_fake_now;
+static time_t fake_now(void)
+{
+   return s_fake_now;
+}
+
+static void test_reap_idle_reclaims_wedged_slot(void)
+{
+   agent_admission_set_now_hook_for_test(fake_now);
+   s_fake_now = 1000;
+   configure(10, 10);
+   agent_admit_status_t st;
+
+   /* claude at max_parallel=1: one holder saturates it. */
+   agent_admit_req_t r = req("deleg-A", "claude", "sonnet", 1);
+   agent_slot_t *wedged = agent_admission_acquire(&r, &st);
+   assert(wedged && st == AGENT_ADMIT_OK);
+   assert(agent_admission_agent_active("claude") == 1);
+
+   /* The leak symptom: a new claude turn is rejected while the holder pins the slot. */
+   agent_admit_req_t r2 = req("deleg-B", "claude", "sonnet", 1);
+   assert(agent_admission_acquire(&r2, &st) == NULL && st == AGENT_ADMIT_AT_LIMIT);
+
+   /* Holder never releases (its thread wedged). Below the TTL nothing is reclaimed... */
+   s_fake_now += ADMIT_TEST_TTL - 1;
+   assert(agent_admission_reap_idle(ADMIT_TEST_TTL) == 0);
+   assert(agent_admission_agent_active("claude") == 1);
+
+   /* ...at/after the TTL the wedged slot is reclaimed. */
+   s_fake_now += 2;
+   assert(agent_admission_reap_idle(ADMIT_TEST_TTL) == 1);
+   assert(agent_admission_agent_active("claude") == 0);
+
+   /* Capacity is back: a fresh claude turn is admitted. */
+   agent_slot_t *fresh = agent_admission_acquire(&r2, &st);
+   assert(fresh && st == AGENT_ADMIT_OK);
+   assert(agent_admission_agent_active("claude") == 1);
+
+   /* The wedged holder's late real release is a safe no-op (generation guard): it must
+    * not double-decrement and drop the fresh holder's count. */
+   agent_admission_release(wedged);
+   assert(agent_admission_agent_active("claude") == 1);
+
+   agent_admission_release(fresh);
+   assert(agent_admission_agent_active("claude") == 0);
+   agent_admission_set_now_hook_for_test(NULL);
+   printf("  PASS: reap_idle_reclaims_wedged_slot\n");
+}
+
+static void test_touch_protects_live_slot(void)
+{
+   agent_admission_set_now_hook_for_test(fake_now);
+   s_fake_now = 5000;
+   configure(10, 10);
+   agent_admit_status_t st;
+   agent_admit_req_t r = req("deleg-live", "agentY", "m", 1);
+   agent_slot_t *s = agent_admission_acquire(&r, &st);
+   assert(s && st == AGENT_ADMIT_OK);
+
+   /* Wall time marches well past the TTL, but the turn keeps heartbeating within it, so
+    * the reaper never touches it. */
+   for (int i = 0; i < 6; i++)
+   {
+      s_fake_now += ADMIT_TEST_TTL - 1;
+      agent_admission_touch("deleg-live");
+      assert(agent_admission_reap_idle(ADMIT_TEST_TTL) == 0);
+      assert(agent_admission_agent_active("agentY") == 1);
+   }
+   agent_admission_release(s);
+   agent_admission_set_now_hook_for_test(NULL);
+   printf("  PASS: touch_protects_live_slot\n");
+}
+
 /* ---- concurrency stress: peak in-flight must never exceed the global cap ---- */
 
 #define STRESS_THREADS 40
@@ -206,6 +285,8 @@ int main(void)
    test_per_model_cap();
    test_context_reuse();
    test_release_null_and_stale();
+   test_reap_idle_reclaims_wedged_slot();
+   test_touch_protects_live_slot();
    test_stress_peak_never_exceeds_cap();
    printf("agent_admission: all tests passed\n");
    return 0;
