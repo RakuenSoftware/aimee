@@ -602,13 +602,14 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	for _, lens := range lenses {
 		lensNames = append(lensNames, lens.persona)
 	}
-	var panel roundtablecfg.Panel
-	var err error
-	if r.roundtables != nil {
-		panel, err = r.roundtables.Resolve(paramString(req.Node, "roundtable", ""), lensNames, panelPins(req.Node))
-	} else {
-		panel, err = roundtablecfg.ResolveDirect(lensNames, panelPins(req.Node))
+	// Without a roundtable store there is nothing to resolve a name against, so
+	// there is no panel to convene. Park instead of substituting an implicit one:
+	// a review that never had a configured panel must be visible as a park, not
+	// pass through as a verdict.
+	if r.roundtables == nil {
+		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: "no roundtable store configured; a roundtable review requires a saved roundtable"}, nil
 	}
+	panel, err := r.roundtables.Resolve(paramString(req.Node, "roundtable", ""), lensNames, panelPins(req.Node))
 	if err != nil {
 		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: err.Error()}, nil
 	}

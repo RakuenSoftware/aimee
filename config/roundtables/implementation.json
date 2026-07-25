@@ -1,0 +1,13 @@
+{
+  "name": "implementation",
+  "seats": [
+    {"model": "$random", "persona": "security"},
+    {"model": "$random", "persona": "qa"},
+    {"model": "$random", "persona": "reviewer"}
+  ],
+  "chairman": "$random",
+  "chairman_enabled": true,
+  "min_successful": 2,
+  "deadline_ms": 600000,
+  "discussion": false
+}

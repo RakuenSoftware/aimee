@@ -65,25 +65,30 @@ fi
 # seed hash) is refreshed when the image ships a newer one. An operator-edited
 # default (hash diverged) or one of unknown provenance (no seed record and not
 # already equal to the shipped default) is never clobbered.
-if [ -d /opt/aimee/defaults/workflows ]; then
-    mkdir -p "$AIMEE_HOME/workflows/.seeded"
-    for wf in /opt/aimee/defaults/workflows/*.yaml; do
-        [ -e "$wf" ] || continue
-        base=$(basename "$wf")
-        dst="$AIMEE_HOME/workflows/$base"
-        rec="$AIMEE_HOME/workflows/.seeded/$base"
+# seed_managed_defaults <source-dir> <glob-suffix> <dest-dir>
+seed_managed_defaults() {
+    seed_src="$1"
+    seed_ext="$2"
+    seed_dst="$3"
+    [ -d "$seed_src" ] || return 0
+    mkdir -p "$seed_dst/.seeded"
+    for shipped_file in "$seed_src"/*"$seed_ext"; do
+        [ -e "$shipped_file" ] || continue
+        base=$(basename "$shipped_file")
+        dst="$seed_dst/$base"
+        rec="$seed_dst/.seeded/$base"
         if ! command -v sha256sum >/dev/null 2>&1; then
             # No hasher available: fall back to conservative never-clobber seed.
-            [ -f "$dst" ] || cp "$wf" "$dst"
+            [ -f "$dst" ] || cp "$shipped_file" "$dst"
             continue
         fi
-        shipped=$(sha256sum "$wf" | cut -d' ' -f1)
+        shipped=$(sha256sum "$shipped_file" | cut -d' ' -f1)
         if [ ! -f "$dst" ]; then
-            cp "$wf" "$dst" && printf '%s\n' "$shipped" > "$rec"
+            cp "$shipped_file" "$dst" && printf '%s\n' "$shipped" > "$rec"
         elif [ -f "$rec" ]; then
             disk=$(sha256sum "$dst" | cut -d' ' -f1)
             if [ "$disk" = "$(cat "$rec")" ] && [ "$disk" != "$shipped" ]; then
-                cp "$wf" "$dst" && printf '%s\n' "$shipped" > "$rec"
+                cp "$shipped_file" "$dst" && printf '%s\n' "$shipped" > "$rec"
             fi
         elif [ "$(sha256sum "$dst" | cut -d' ' -f1)" = "$shipped" ]; then
             # No record yet, but already identical to the shipped default: adopt
@@ -91,10 +96,16 @@ if [ -d /opt/aimee/defaults/workflows ]; then
             printf '%s\n' "$shipped" > "$rec"
         fi
     done
-fi
+}
+seed_managed_defaults /opt/aimee/defaults/workflows .yaml "$AIMEE_HOME/workflows"
+# The roundtable presets those workflows name. Seeded on the same terms: a gate
+# cannot resolve a panel until its preset exists on disk.
+seed_managed_defaults /opt/aimee/defaults/roundtables .json "$AIMEE_HOME/roundtables"
 chown aimee:aimee "$AIMEE_HOME" "${AIMEE_WORKSPACES_DIR:-/var/lib/aimee-workspaces}" 2>/dev/null || true
 [ -f "$AIMEE_HOME/aimee.yaml" ] && chown aimee:aimee "$AIMEE_HOME/aimee.yaml" 2>/dev/null || true
 [ -f "$AIMEE_HOME/agents.json" ] && chown aimee:aimee "$AIMEE_HOME/agents.json" 2>/dev/null || true
+# Seeded as root; the server and its preset-editing API run as aimee.
+[ -d "$AIMEE_HOME/roundtables" ] && chown -R aimee:aimee "$AIMEE_HOME/roundtables" 2>/dev/null || true
 
 # The server-hosted OAuth CLIs (claude/codex) and their npm prefix live under the
 # aimee home and MUST be writable by the unprivileged 'aimee' user that runs the

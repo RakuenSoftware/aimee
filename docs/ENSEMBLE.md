@@ -36,14 +36,12 @@ aimee delegate aggregate "Design a migration plan for the auth schema"
 
 Configured by `ensemble.*` (see [Settings](SETTINGS.md)):
 
-- Saved roundtable seats are the complete panel. An omitted roundtable name
-  resolves through `roundtable.default`, then the saved preset named `default`.
-  A named/default preset may contain any supported number of seats; its exact
+- Saved roundtable seats are the complete panel. The roundtable name is
+  required: an omitted name resolves nothing and is an error, never an implicit
+  panel. A named preset may contain any supported number of seats; its exact
   count is authoritative and is never expanded from the eligible roster.
-- When no saved roundtable is acquired, a direct aggregate/roundtable may use at
-  most two available review agents, preferring different providers.
 - `ensemble.reference_models` is retained as the preset's applied compatibility
-  representation; it does not authorize an unconfigured panel larger than two.
+  representation; it does not authorize an unconfigured panel.
 - `ensemble.reference_personas` — optional per-reference persona overrides.
 - `ensemble.aggregator` — the agent that synthesizes the final answer.
 - `ensemble.min_successful` — min references that must succeed before degrading (default 2).
