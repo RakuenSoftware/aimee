@@ -31,7 +31,10 @@ int handle_mcp_delegate_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *args
 {
    uint32_t required = server_capability_for_method("delegate");
    if (required && conn && (conn->capabilities & required) == 0)
+   {
+      server_mcp_served_outcome("refused", "role");
       return server_send_error(conn, "forbidden: insufficient capabilities", NULL);
+   }
 
    cJSON *dreq = cJSON_CreateObject();
    cJSON_AddStringToObject(dreq, "method", "delegate");
@@ -44,6 +47,7 @@ int handle_mcp_delegate_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *args
     * and principles). */
    if (!cJSON_IsString(jpersona) || !jpersona->valuestring[0])
    {
+      server_mcp_served_outcome("error", "bad_args");
       cJSON_Delete(dreq);
       return server_send_error(
           conn, "delegate requires a 'persona' (e.g. engineer, qa, security, reviewer, architect)",

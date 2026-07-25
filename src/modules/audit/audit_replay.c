@@ -119,6 +119,25 @@ static void on_record_text(void *ctx, const bus_capture_event_t *ev)
       s->malformed++;
       return;
    }
+   /* Defense in depth: the emit-side serializer (obs_bus.c put_str) already scrubs
+    * control bytes, but a legacy or hand-crafted capture could still carry a raw
+    * newline / ANSI escape in an identity field. Scrub before printing so a dump
+    * to a terminal cannot be made to inject escapes or forge a row. */
+   for (char *p = actor; *p; p++)
+      if ((unsigned char)*p < 0x20 || (unsigned char)*p == 0x7f)
+         *p = '?';
+   for (char *p = tool; *p; p++)
+      if ((unsigned char)*p < 0x20 || (unsigned char)*p == 0x7f)
+         *p = '?';
+   for (char *p = mode; *p; p++)
+      if ((unsigned char)*p < 0x20 || (unsigned char)*p == 0x7f)
+         *p = '?';
+   for (char *p = reason; *p; p++)
+      if ((unsigned char)*p < 0x20 || (unsigned char)*p == 0x7f)
+         *p = '?';
+   for (char *p = command; *p; p++)
+      if ((unsigned char)*p < 0x20 || (unsigned char)*p == 0x7f)
+         *p = '?';
    if (s->out)
       fprintf(s->out,
               "seq=%llu verdict=%-8s actor=%-8s tool=%s mode=%s reason=%s task_id=%lld "

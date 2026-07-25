@@ -214,7 +214,8 @@ typedef struct
    const char *verdict;     /* "ok" | "error" | "timeout" | "refused" */
    const char *reason_code; /* "" | "guardrail" | "role" | "cancelled" | "tool_error" | */
                             /* "timeout" | "unknown_tool" | "bad_args" | "policy"          */
-   const char *mode;        /* "internal" | "outbound" | "served" */
+   const char *mode;        /* "internal" | "outbound" | "outbound:stdio" | */
+                            /* "outbound:sse" | "served"                    */
 } agent_tool_completion_t;
 typedef void (*agent_tool_completion_cb_t)(const char *tool, const agent_tool_completion_t *outcome,
                                            void *ud);

@@ -37,9 +37,9 @@ static void on_tool_completion(const char *tool, const agent_tool_completion_t *
 
    /* Name-only fingerprint, uniform with the other audit rows; args_json is NULL
     * so no argument content is serialized or hashed (audit_args_hash would ignore
-    * it for a non-allowlisted MCP tool anyway). */
+    * it for a non-allowlisted MCP tool anyway). audit_args_hash fully initializes
+    * the buffer (including its own "v1-" prefix). */
    char args_hash[AUDIT_ARGS_HASH_LEN];
-   snprintf(args_hash, sizeof args_hash, "v1-");
    audit_args_hash(tool, NULL, args_hash, sizeof args_hash);
 
    obs_bus_emit(o->actor && o->actor[0] ? o->actor : "tool", tool, args_hash, /*command=*/"",

@@ -9,6 +9,11 @@
 #include "config.h" /* MAX_PATH_LEN, transitively needed by agent_types.h (header-only) */
 #include "agent_tools.h"
 
+/* Installation MUST complete-before any worker thread starts (the server installs
+ * the bridge in run_server, before the accept loop — the same happens-before the
+ * vault/sandbox/memory bridges rely on). Runtime re-installation is unsupported:
+ * the {cb,ud} pair is written/read non-atomically, so a concurrent reader could
+ * see a torn pair. The shipping bridge passes ud=NULL, so even a tear is harmless. */
 static agent_tool_completion_cb_t g_completion_cb = NULL;
 static void *g_completion_ud = NULL;
 

@@ -102,10 +102,14 @@ int main(void)
        .actor = "sess-B", .verdict = "ok", .reason_code = "", .mode = "outbound:stdio"};
    agent_tools_fire_tool_completion_for_test("localfs:read", &stdio);
 
-   /* A sentinel that stands in for argument / result / error content. It is NEVER
-    * passed into any hook field — the completion outcome has no content field — so
-    * it must be absent from the entire trail. */
-   const char *SENTINEL = "SEKRIT-content-do-not-log-4b2a9c";
+   /* A served tool name is attacker-influenceable identity. Feed one carrying raw
+    * control bytes (a newline that could forge a row, an ANSI escape that could
+    * injection a terminal on --audit-replay) around a printable marker; the emit
+    * serializer must scrub the control bytes to '?' while keeping the marker. */
+   const char *CTRL_TOOL = "evil\ntool\x1b[31mMARKER42";
+   agent_tool_completion_t evil = {
+       .actor = "client-x", .verdict = "ok", .reason_code = "", .mode = "served"};
+   agent_tools_fire_tool_completion_for_test(CTRL_TOOL, &evil);
 
    obs_bus_stop(); /* drain the async bus to the ledger */
 
@@ -141,14 +145,19 @@ int main(void)
    assert(r_std);
    assert(strcmp(sval(r_std, "mode"), "outbound:stdio") == 0);
 
-   /* No content leak: the sentinel appears nowhere, and every reason_code is a
-    * fixed enum value (never free text / an MCP server's err_buf). */
-   char *dump = cJSON_PrintUnformatted(rows);
-   assert(dump);
-   assert(strstr(dump, SENTINEL) == NULL);
-   cJSON *r = NULL;
+   /* Control bytes in the attacker-influenced tool name are scrubbed to '?': the
+    * printable marker survives, but no raw newline / ESC reaches the ledger (which
+    * feeds the same bytes to the capture file + --audit-replay). */
+   cJSON *r_evil = NULL, *r = NULL;
+   cJSON_ArrayForEach(r, rows) if (strstr(sval(r, "tool"), "MARKER42")) r_evil = r;
+   assert(r_evil);
+   const char *et = sval(r_evil, "tool");
+   for (const char *p = et; *p; p++)
+      assert((unsigned char)*p >= 0x20 && (unsigned char)*p != 0x7f); /* no control bytes */
+   assert(strchr(et, '\n') == NULL && strchr(et, '\x1b') == NULL);
+
+   /* Every recorded reason_code is a fixed enum value (never free text / err_buf). */
    cJSON_ArrayForEach(r, rows) assert(reason_is_known(sval(r, "reason_code")));
-   free(dump);
 
    printf("  completion rows: verdict/mode/reason recorded; identity-only; no content leak\n");
    cJSON_Delete(rows);

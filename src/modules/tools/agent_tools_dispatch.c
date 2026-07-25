@@ -67,6 +67,14 @@ static __thread const char *g_td_reason = "";
 static __thread const char *g_td_mode = "internal";
 static __thread int g_td_explicit = 0; /* 1 once _inner set a definitive verdict */
 
+/* INVARIANT: no handler reachable from dispatch_tool_call_ctx may synchronously
+ * re-enter dispatch_tool_call_ctx on the same thread. These carriers are reset at
+ * entry with no save/restore, so a nested call would overwrite the outer frame's
+ * outcome. Today every caller is a top-level per-thread entry (agent turn loop,
+ * server_compute, script_rpc) and the MCP-derived provider calls the tool fn
+ * directly, so nesting cannot occur; if an in-process tool-of-tools is ever added,
+ * snapshot/restore these four values around the emit. The same holds for g_served_*
+ * in handle_mcp_call. */
 static void td_outcome_reset(void)
 {
    g_td_verdict = "ok";
@@ -80,6 +88,36 @@ static void td_outcome_set(const char *verdict, const char *reason)
    g_td_verdict = verdict;
    g_td_reason = reason;
    g_td_explicit = 1;
+}
+
+/* The exec family returns a SUCCESS-shaped JSON envelope even on failure
+ * ({stdout,stderr,exit_code} or {status}), so the "error:" prefix heuristic would
+ * mislabel a non-zero exit — the highest-traffic tools — as ok. Classify from the
+ * real signal instead: a non-zero exit_code or status="failed" is an error, a
+ * stderr beginning "refused:" is the fail-closed sandbox refusal. Only the numeric
+ * exit_code, the status string, and a stderr PREFIX are read — no content is
+ * stored; the parsed tree is freed. */
+static int is_exec_tool(const char *name)
+{
+   return strcmp(name, "bash") == 0 || strcmp(name, "execute_script") == 0 ||
+          strcmp(name, "test") == 0 || strcmp(name, "run_tests") == 0;
+}
+
+static void td_classify_exec_result(const char *result)
+{
+   cJSON *r = cJSON_Parse(result);
+   if (!r)
+      return; /* not the JSON envelope; the prefix fallback will run */
+   cJSON *stderr_j = cJSON_GetObjectItem(r, "stderr");
+   cJSON *exit_j = cJSON_GetObjectItem(r, "exit_code");
+   cJSON *status_j = cJSON_GetObjectItem(r, "status");
+   if (cJSON_IsString(stderr_j) && strncmp(stderr_j->valuestring, "refused:", 8) == 0)
+      td_outcome_set("refused", "policy");
+   else if (cJSON_IsNumber(exit_j) && exit_j->valuedouble != 0)
+      td_outcome_set("error", "tool_error");
+   else if (cJSON_IsString(status_j) && strcmp(status_j->valuestring, "failed") == 0)
+      td_outcome_set("error", "tool_error");
+   cJSON_Delete(r);
 }
 
 /* db1_session_write_path_record from db1/session_paths.h — declared
@@ -1925,23 +1963,19 @@ char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int t
    agent_tools_emit_tool_event("completed", name);
 
    /* Completion audit (a no-op unless the server installed a bridge). Fires once
-    * for every return path of _inner. If _inner did not set a definitive verdict
-    * (a normal execution path), classify ok/error/timeout from the result string's
-    * LEADING marker only — the string itself is never stored or passed on, so no
-    * tool output or MCP-server error text can reach the hook. */
-   if (!g_td_explicit && result && strncmp(result, "error:", 6) == 0)
-   {
-      if (strstr(result, "timeout") || strstr(result, "timed out"))
-      {
-         g_td_verdict = "timeout";
-         g_td_reason = "timeout";
-      }
-      else
-      {
-         g_td_verdict = "error";
-         g_td_reason = "tool_error";
-      }
-   }
+    * for every return path of _inner. If _inner did not set a definitive verdict:
+    * the exec family carries its outcome in a JSON envelope (classified above from
+    * exit_code/status, not a prefix); every other tool signals failure with a
+    * leading "error:" marker — read only that marker, never the rest of the
+    * string, so no tool output can reach the hook. */
+   if (!g_td_explicit && result && is_exec_tool(name ? name : ""))
+      td_classify_exec_result(result);
+   if (!g_td_explicit && result && strncmp(result, "error: timeout", 14) == 0)
+      td_outcome_set("timeout", "timeout");
+   else if (!g_td_explicit && result && strncmp(result, "error: timed out", 16) == 0)
+      td_outcome_set("timeout", "timeout");
+   else if (!g_td_explicit && result && strncmp(result, "error:", 6) == 0)
+      td_outcome_set("error", "tool_error");
    {
       const char *who = session_id();
       agent_tool_completion_t o = {.actor = (who && who[0]) ? who : "tool",

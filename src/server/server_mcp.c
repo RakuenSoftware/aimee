@@ -1644,6 +1644,16 @@ static void served_outcome(const char *verdict, const char *reason)
    g_served_reason = reason;
 }
 
+/* Public setter so a sub-handler in another TU (delegate / roundtable / pipeline)
+ * that admission-refuses or bad-args-rejects a served call — and sends its own
+ * response, then returns to handle_mcp_call — can record the true verdict rather
+ * than letting the wrapper default to ok=dispatched. It runs on the same thread as
+ * handle_mcp_call, so it writes the same thread-local outcome. */
+void server_mcp_served_outcome(const char *verdict, const char *reason)
+{
+   served_outcome(verdict, reason);
+}
+
 static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 
 int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -1689,7 +1699,10 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    {
       jargs = cJSON_CreateObject();
       if (!jargs)
+      {
+         served_outcome("error", "internal");
          return server_send_error(conn, "out of memory", NULL);
+      }
       owns_jargs = 1;
    }
    if (cJSON_IsString(jcwd) && jcwd->valuestring[0] && cJSON_IsObject(jargs) &&
@@ -1846,6 +1859,7 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
       int rc = server_mcp_handle_ensemble_tool(conn, tool, jargs, &content, &structured);
       if (rc != 0)
       {
+         served_outcome("error", "tool_error");
          if (owns_jargs)
             cJSON_Delete(jargs);
          return rc;
