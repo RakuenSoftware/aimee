@@ -107,11 +107,10 @@ int db2_write_tier_grant_set(const char *server_id, int64_t team_id, const char 
    void *conn = db2_conn();
    if (!conn)
       return -1;
-   const char *sql =
-       "INSERT INTO kb_write_tier_grant (server_id, team_id, subject, tier, granted_by) "
-       "VALUES (?1, ?2, ?3, ?4, ?5) "
-       "ON CONFLICT (server_id, team_id, subject) DO UPDATE SET tier=EXCLUDED.tier, "
-       "granted_by=EXCLUDED.granted_by, updated_at=now(), revoked_at=NULL";
+   /* The definer function is the only write path: it re-checks admin/team-lead
+    * authority (SECURITY DEFINER bypasses RLS) and emits the WORM audit row in
+    * the same transaction, which runtime cannot do itself. */
+   const char *sql = "SELECT kb_write_tier_grant_set(?1, ?2, ?3, ?4, ?5)";
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -137,11 +136,9 @@ int db2_write_tier_grant_revoke(const char *server_id, int64_t team_id, const ch
    if (!conn)
       return -1;
    char err[256] = "";
+   /* Definer write path — see db2_write_tier_grant_set. */
    aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn,
-                        "UPDATE kb_write_tier_grant SET revoked_at=now(), updated_at=now() "
-                        "WHERE server_id=?1 AND team_id=?2 AND subject=?3 AND revoked_at IS NULL",
-                        err, sizeof(err));
+       aimee_pg_prepare(conn, "SELECT kb_write_tier_grant_revoke(?1, ?2, ?3)", err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", server_id);

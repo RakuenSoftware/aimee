@@ -7844,6 +7844,68 @@ CREATE POLICY p_write_tier_grant_admin_write ON kb_write_tier_grant FOR ALL
             WHERE identity_key = current_setting('aimee.principal', true)
               AND revoked_at = ''));
 
+-- These two definer functions are the ONLY write path to kb_write_tier_grant;
+-- runtime holds SELECT but not INSERT/UPDATE (schema_grants.sql).  The reason is
+-- accountability, not access control: RLS gates WHO may change a grant, but a
+-- grant change also has to be tamper-evident, and kb_audit_worm_append is
+-- deliberately NOT granted to runtime so runtime cannot forge audit rows. Doing
+-- the mutation and the WORM append together inside a definer makes the audit
+-- record inseparable from the change — there is no ordering in which a grant
+-- moves without a matching audit row, even if the caller crashes.
+--
+-- SECURITY DEFINER bypasses RLS, so the authorization check below is
+-- load-bearing rather than belt-and-suspenders: it restates the policy the
+-- p_write_tier_grant_admin_write policy expresses.  Same shape as
+-- org_catalog_upsert.
+CREATE OR REPLACE FUNCTION kb_write_tier_grant_set(
+  p_server_id TEXT, p_team_id BIGINT, p_subject TEXT, p_tier TEXT, p_granted_by TEXT
+) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_actor TEXT := COALESCE(current_setting('aimee.principal', true), '');
+BEGIN
+  IF NOT (kb_principal_is_admin() OR EXISTS(
+        SELECT 1 FROM kb_team_lead x WHERE x.identity_key = v_actor
+          AND x.team = p_team_id AND x.revoked_at = '')) THEN
+    RAISE EXCEPTION 'kb_write_tier_grant_set: admin or team lead only' USING ERRCODE = '42501';
+  END IF;
+  IF p_tier IS NULL OR p_tier NOT IN ('off','data','full') THEN
+    RAISE EXCEPTION 'kb_write_tier_grant_set: invalid tier' USING ERRCODE = '22023';
+  END IF;
+  INSERT INTO kb_write_tier_grant(server_id, team_id, subject, tier, granted_by)
+    VALUES (p_server_id, p_team_id, p_subject, p_tier, p_granted_by)
+    ON CONFLICT (server_id, team_id, subject) DO UPDATE
+      SET tier = EXCLUDED.tier, granted_by = EXCLUDED.granted_by,
+          updated_at = now(), revoked_at = NULL;
+  PERFORM kb_audit_worm_append('kb', v_actor, 'authz.write_tier.set',
+    p_server_id || '/' || p_team_id::TEXT || '/' || p_subject, 'allow',
+    json_build_object('server_id', p_server_id, 'team_id', p_team_id,
+      'subject', p_subject, 'tier', p_tier, 'granted_by', p_granted_by)::TEXT);
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_write_tier_grant_revoke(
+  p_server_id TEXT, p_team_id BIGINT, p_subject TEXT
+) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_actor TEXT := COALESCE(current_setting('aimee.principal', true), '');
+BEGIN
+  IF NOT (kb_principal_is_admin() OR EXISTS(
+        SELECT 1 FROM kb_team_lead x WHERE x.identity_key = v_actor
+          AND x.team = p_team_id AND x.revoked_at = '')) THEN
+    RAISE EXCEPTION 'kb_write_tier_grant_revoke: admin or team lead only' USING ERRCODE = '42501';
+  END IF;
+  UPDATE kb_write_tier_grant SET revoked_at = now(), updated_at = now()
+    WHERE server_id = p_server_id AND team_id = p_team_id AND subject = p_subject
+      AND revoked_at IS NULL;
+  -- Audited unconditionally: an attempt to revoke a grant that is absent or
+  -- already revoked is still an operator action worth reconstructing later.
+  PERFORM kb_audit_worm_append('kb', v_actor, 'authz.write_tier.revoke',
+    p_server_id || '/' || p_team_id::TEXT || '/' || p_subject, 'allow',
+    json_build_object('server_id', p_server_id, 'team_id', p_team_id,
+      'subject', p_subject)::TEXT);
+END $$;
+REVOKE ALL ON FUNCTION kb_write_tier_grant_set(TEXT,BIGINT,TEXT,TEXT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_write_tier_grant_revoke(TEXT,BIGINT,TEXT) FROM PUBLIC;
+
 -- Registry reads are tenant-scoped even when the HTTP caller supplies a team
 -- selector.  The selector narrows the result; it never grants membership.  The
 -- authenticated principal is installed by db2_tenant_scope_begin and the
@@ -11400,6 +11462,102 @@ CREATE TRIGGER kb_management_read_delete_guard BEFORE DELETE OR TRUNCATE ON kb_m
 DROP TRIGGER IF EXISTS kb_management_read_key_use_worm ON kb_management_read_key_use;
 CREATE TRIGGER kb_management_read_key_use_worm BEFORE UPDATE OR DELETE OR TRUNCATE
   ON kb_management_read_key_use FOR EACH STATEMENT EXECUTE FUNCTION kb_management_read_worm_guard();
+
+-- Data-plane identity intent (proposal per-user-remote-writes-authz.md §4): the
+-- pre-mint record for a kb-signed identity token carried by a user on /v1.
+--
+-- `jti` is the namespace handle shared with the action/read intents and keeps
+-- their 64-hex shape; `token_jti` is the identifier that actually appears in the
+-- minted token's `jti` claim, which the server's verifier accepts as an 8..128
+-- character token. The two are deliberately separate so the hardened IPC seam
+-- (correlation_id, jti) is unchanged by this feature.
+--
+-- There is NO tier column, and that is the point. The tier is resolved at mint
+-- time from the live kb_write_tier_grant row, exactly as the management
+-- snapshot re-derives actor authorization rather than trusting the intent. A
+-- tier stored here would be a caller-chosen claim, and a grant revoked between
+-- intent and mint would still mint. No live grant means the mint raises.
+--
+-- No peer-cert binding and no request digest: the bearer is a browser or thin
+-- client, not an enrolled server.
+CREATE TABLE IF NOT EXISTS kb_management_identity_intent (
+  correlation_id TEXT PRIMARY KEY CHECK (correlation_id ~ '^[0-9a-f]{64}$'),
+  jti TEXT NOT NULL UNIQUE CHECK (jti ~ '^[0-9a-f]{64}$'),
+  kind TEXT NOT NULL CHECK (kind='identity'),
+  token_jti TEXT NOT NULL UNIQUE CHECK (token_jti ~ '^[A-Za-z0-9._-]{8,128}$'),
+  team_id BIGINT NOT NULL REFERENCES kb_team(id),
+  subject TEXT NOT NULL CHECK (char_length(subject) BETWEEN 1 AND 576 AND
+    subject ~ '^(owner|(oidc|cert):[^:[:cntrl:]]+:[^:[:cntrl:]]+)$'),
+  auth_mode TEXT NOT NULL CHECK (auth_mode IN ('oidc','pam')),
+  target_server_id TEXT NOT NULL CHECK (target_server_id ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$'),
+  token_issuer TEXT NOT NULL CHECK (char_length(token_issuer) BETWEEN 1 AND 255),
+  audience TEXT NOT NULL CHECK (audience=target_server_id),
+  kid TEXT NOT NULL CHECK (kid ~ '^[A-Za-z0-9._-]{1,64}$'),
+  issued_at BIGINT NOT NULL CHECK (issued_at BETWEEN 0 AND 9007199254740991),
+  -- The server rejects anything longer than SERVER_IDENTITY_TOKEN_MAX_LIFETIME,
+  -- so the schema refuses to record an intent that could only mint a token the
+  -- verifier would throw away.
+  expires_at BIGINT NOT NULL CHECK (expires_at>issued_at AND
+                                    expires_at-issued_at BETWEEN 1 AND 3600
+                                    AND expires_at<=9007199254740991),
+  installation_id TEXT NOT NULL CHECK (installation_id ~ '^[0-9a-f]{32}$'),
+  installation_generation BIGINT NOT NULL CHECK (installation_generation>=1),
+  installation_enrollment_id BIGINT NOT NULL REFERENCES kb_enrollments(id),
+  target_enrollment_id BIGINT NOT NULL REFERENCES kb_enrollments(id),
+  revocation_generation BIGINT NOT NULL CHECK (revocation_generation>=1),
+  state TEXT NOT NULL CHECK (state IN ('pending','signing','issued','expired')),
+  lease_owner TEXT CHECK (lease_owner IS NULL OR lease_owner ~ '^[0-9a-f]{64}$'),
+  lease_until TIMESTAMPTZ,
+  jwt TEXT CHECK (jwt IS NULL OR octet_length(jwt) BETWEEN 1 AND 8192),
+  jwt_sha256 BYTEA CHECK (jwt_sha256 IS NULL OR octet_length(jwt_sha256)=32),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+  UNIQUE(correlation_id,jti),
+  UNIQUE(correlation_id,jti,kind),
+  FOREIGN KEY(correlation_id,jti,kind)
+    REFERENCES kb_management_token_intent_namespace(correlation_id,jti,kind),
+  CHECK ((state='pending' AND lease_owner IS NULL AND lease_until IS NULL AND
+          jwt IS NULL AND jwt_sha256 IS NULL) OR
+         (state='signing' AND lease_owner IS NOT NULL AND lease_until IS NOT NULL) OR
+         (state='issued' AND jwt IS NOT NULL AND jwt_sha256 IS NOT NULL) OR
+         (state='expired' AND jwt IS NULL AND jwt_sha256 IS NULL))
+);
+ALTER TABLE kb_management_identity_intent ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kb_management_identity_intent FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS kb_management_identity_intent_authority_only
+  ON kb_management_identity_intent;
+CREATE POLICY kb_management_identity_intent_authority_only ON kb_management_identity_intent
+  USING (current_user IN ('aimee_kb_owner','aimee_kb_token_authority_definer'))
+  WITH CHECK (current_user IN ('aimee_kb_owner','aimee_kb_token_authority_definer'));
+
+CREATE OR REPLACE FUNCTION kb_management_identity_transition_guard() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog,pg_temp AS $$
+DECLARE immutable_old JSONB; immutable_new JSONB;
+BEGIN
+  IF current_user<>'aimee_kb_token_authority_definer' THEN
+    RAISE EXCEPTION 'management identity state is authority-owned' USING ERRCODE='42501';
+  END IF;
+  immutable_old:=to_jsonb(OLD)-ARRAY['state','lease_owner','lease_until','jwt','jwt_sha256','updated_at'];
+  immutable_new:=to_jsonb(NEW)-ARRAY['state','lease_owner','lease_until','jwt','jwt_sha256','updated_at'];
+  IF immutable_old IS DISTINCT FROM immutable_new OR NEW.updated_at<=OLD.updated_at OR NOT (
+       (OLD.state='pending' AND NEW.state IN ('signing','expired')) OR
+       (OLD.state='signing' AND NEW.state IN ('signing','issued','expired'))) THEN
+    RAISE EXCEPTION 'invalid management identity transition' USING ERRCODE='55000';
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS kb_management_identity_transition ON kb_management_identity_intent;
+CREATE TRIGGER kb_management_identity_transition BEFORE UPDATE ON kb_management_identity_intent
+  FOR EACH ROW EXECUTE FUNCTION kb_management_identity_transition_guard();
+CREATE OR REPLACE FUNCTION kb_management_identity_worm_guard() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+  RAISE EXCEPTION 'management identity intent cannot be removed' USING ERRCODE='55000';
+END $$;
+DROP TRIGGER IF EXISTS kb_management_identity_delete_guard ON kb_management_identity_intent;
+CREATE TRIGGER kb_management_identity_delete_guard
+  BEFORE DELETE OR TRUNCATE ON kb_management_identity_intent
+  FOR EACH STATEMENT EXECUTE FUNCTION kb_management_identity_worm_guard();
 
 CREATE TABLE IF NOT EXISTS kb_management_action_intent (
   correlation_id TEXT PRIMARY KEY CHECK (correlation_id ~ '^[0-9a-f]{64}$'),

@@ -44,10 +44,25 @@ BEGIN
   IF has_table_privilege('aimee_kb_runtime','public.kb_write_tier_grant','DELETE') THEN
     RAISE EXCEPTION 'FAIL: runtime can DELETE a write-tier grant (must revoke, not erase)';
   END IF;
-  IF NOT has_table_privilege('aimee_kb_runtime','public.kb_write_tier_grant','SELECT') OR
-     NOT has_table_privilege('aimee_kb_runtime','public.kb_write_tier_grant','INSERT') OR
-     NOT has_table_privilege('aimee_kb_runtime','public.kb_write_tier_grant','UPDATE') THEN
-    RAISE EXCEPTION 'FAIL: runtime lacks the DML it needs on kb_write_tier_grant';
+  -- The definer functions are the only write path, so that a grant change can
+  -- never happen without its WORM audit row. Direct DML must be unavailable.
+  IF has_table_privilege('aimee_kb_runtime','public.kb_write_tier_grant','INSERT') OR
+     has_table_privilege('aimee_kb_runtime','public.kb_write_tier_grant','UPDATE') THEN
+    RAISE EXCEPTION 'FAIL: runtime holds direct DML on kb_write_tier_grant (bypasses the audit)';
+  END IF;
+  IF NOT has_table_privilege('aimee_kb_runtime','public.kb_write_tier_grant','SELECT') THEN
+    RAISE EXCEPTION 'FAIL: runtime cannot read kb_write_tier_grant';
+  END IF;
+  -- Runtime must NOT be able to forge audit rows directly.
+  IF has_function_privilege('aimee_kb_runtime',
+       'public.kb_audit_worm_append(text,text,text,text,text,text)','EXECUTE') THEN
+    RAISE EXCEPTION 'FAIL: runtime can call kb_audit_worm_append directly';
+  END IF;
+  IF NOT has_function_privilege('aimee_kb_runtime',
+       'public.kb_write_tier_grant_set(text,bigint,text,text,text)','EXECUTE') OR
+     NOT has_function_privilege('aimee_kb_runtime',
+       'public.kb_write_tier_grant_revoke(text,bigint,text)','EXECUTE') THEN
+    RAISE EXCEPTION 'FAIL: runtime cannot call the write-tier definer functions';
   END IF;
 END $$;
 
@@ -89,11 +104,11 @@ END $$;
 DO $$
 BEGIN
   BEGIN
-    INSERT INTO kb_write_tier_grant(server_id, team_id, subject, tier, granted_by)
-      VALUES ('wt-srv-alpha', 910001, 'oidc:test:mallory', 'full', 'oidc:test:alice');
+    PERFORM kb_write_tier_grant_set('wt-srv-alpha', 910001, 'oidc:test:mallory', 'full',
+                                    'oidc:test:alice');
     RAISE EXCEPTION 'FAIL: a plain team member minted a write-tier grant';
   EXCEPTION WHEN insufficient_privilege THEN
-    NULL; -- expected: the admin/lead WITH CHECK policy refused
+    NULL; -- expected: the definer's admin/lead check refused
   END;
 END $$;
 RESET ROLE;
@@ -102,33 +117,43 @@ RESET ROLE;
 SET ROLE aimee_kb_runtime;
 SELECT set_tenant_context('oidc:test:alice', 910001);
 DO $$
-DECLARE n INT;
 BEGIN
-  UPDATE kb_write_tier_grant SET tier='full' WHERE subject='oidc:test:alice';
-  GET DIAGNOSTICS n = ROW_COUNT;
-  IF n <> 0 THEN
+  BEGIN
+    PERFORM kb_write_tier_grant_set('wt-srv-alpha', 910001, 'oidc:test:alice', 'full', 'self');
     RAISE EXCEPTION 'FAIL: a plain team member escalated their own tier';
-  END IF;
+  EXCEPTION WHEN insufficient_privilege THEN
+    NULL;
+  END;
 END $$;
 RESET ROLE;
 
--- The team lead may administer grants within their own team.
+-- The team lead may administer grants within their own team, and every change
+-- lands a WORM audit row in the same transaction.
 SET ROLE aimee_kb_runtime;
 SELECT set_tenant_context('oidc:test:carol', 910001);
 DO $$
-DECLARE t TEXT;
+DECLARE t TEXT; before_n INT; after_n INT;
 BEGIN
-  INSERT INTO kb_write_tier_grant(server_id, team_id, subject, tier, granted_by)
-    VALUES ('wt-srv-alpha', 910001, 'oidc:test:dave', 'data', 'oidc:test:carol');
+  SELECT count(*) INTO before_n FROM kb_audit_event WHERE action='authz.write_tier.set';
+  PERFORM kb_write_tier_grant_set('wt-srv-alpha', 910001, 'oidc:test:dave', 'data',
+                                  'oidc:test:carol');
   SELECT tier INTO t FROM kb_write_tier_grant WHERE subject='oidc:test:dave';
   IF t <> 'data' THEN
     RAISE EXCEPTION 'FAIL: team lead grant did not land (tier=%)', t;
   END IF;
-  -- Revocation is the removal path, and it preserves the row.
-  UPDATE kb_write_tier_grant SET revoked_at=now() WHERE subject='oidc:test:dave';
+  SELECT count(*) INTO after_n FROM kb_audit_event WHERE action='authz.write_tier.set';
+  IF after_n <> before_n + 1 THEN
+    RAISE EXCEPTION 'FAIL: granting a write tier left no WORM audit row';
+  END IF;
+
+  -- Revocation is the removal path, it preserves the row, and it audits.
+  PERFORM kb_write_tier_grant_revoke('wt-srv-alpha', 910001, 'oidc:test:dave');
   IF NOT EXISTS(SELECT 1 FROM kb_write_tier_grant
                  WHERE subject='oidc:test:dave' AND revoked_at IS NOT NULL) THEN
     RAISE EXCEPTION 'FAIL: revocation did not retain the grant row';
+  END IF;
+  IF NOT EXISTS(SELECT 1 FROM kb_audit_event WHERE action='authz.write_tier.revoke') THEN
+    RAISE EXCEPTION 'FAIL: revoking a write tier left no WORM audit row';
   END IF;
 END $$;
 RESET ROLE;
@@ -139,11 +164,11 @@ SELECT set_tenant_context('oidc:test:carol', 910001);
 DO $$
 BEGIN
   BEGIN
-    INSERT INTO kb_write_tier_grant(server_id, team_id, subject, tier, granted_by)
-      VALUES ('wt-srv-beta', 910002, 'oidc:test:mallory', 'full', 'oidc:test:carol');
+    PERFORM kb_write_tier_grant_set('wt-srv-beta', 910002, 'oidc:test:mallory', 'full',
+                                    'oidc:test:carol');
     RAISE EXCEPTION 'FAIL: alpha''s team lead wrote a grant scoped to beta';
   EXCEPTION WHEN insufficient_privilege THEN
-    NULL; -- expected: the WITH CHECK policy is evaluated on the NEW row's team
+    NULL; -- expected: the definer checks lead-ship against the TARGET team
   END;
 END $$;
 RESET ROLE;
