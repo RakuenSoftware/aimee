@@ -1200,33 +1200,9 @@ int config_load_file(config_t *cfg)
 
    config_parse_database(cfg, root);
 
-   item = cJSON_GetObjectItemCaseSensitive(root, "guardrail_mode");
-   if (cJSON_IsString(item) && item->valuestring[0])
-      snprintf(cfg->guardrail_mode, sizeof(cfg->guardrail_mode), "%s", item->valuestring);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "provider");
-   if (cJSON_IsString(item) && item->valuestring[0])
-      snprintf(cfg->provider, sizeof(cfg->provider), "%s", item->valuestring);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "default_persona");
-   if (cJSON_IsString(item) && item->valuestring[0])
-      snprintf(cfg->default_persona, sizeof(cfg->default_persona), "%s", item->valuestring);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "openai_endpoint");
-   if (cJSON_IsString(item) && item->valuestring[0])
-      snprintf(cfg->openai_endpoint, sizeof(cfg->openai_endpoint), "%s", item->valuestring);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "openai_model");
-   if (cJSON_IsString(item) && item->valuestring[0])
-      snprintf(cfg->openai_model, sizeof(cfg->openai_model), "%s", item->valuestring);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "openai_key_cmd");
-   if (cJSON_IsString(item) && item->valuestring[0])
-      snprintf(cfg->openai_key_cmd, sizeof(cfg->openai_key_cmd), "%s", item->valuestring);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "claude_model");
-   if (cJSON_IsString(item) && item->valuestring[0])
-      snprintf(cfg->claude_model, sizeof(cfg->claude_model), "%s", item->valuestring);
+   /* Flat scalar fields are parsed table-driven from config_fields[] (Proposal A,
+    * step 3): one loop replaces the per-field inline blocks below. */
+   config_parse_flat_fields(cfg, root);
 
    item = cJSON_GetObjectItemCaseSensitive(root, "codex_model");
    if (cJSON_IsString(item) && item->valuestring[0])
@@ -1237,34 +1213,6 @@ int config_load_file(config_t *cfg)
       snprintf(cfg->model_reasoning_effort, sizeof(cfg->model_reasoning_effort), "%s",
                item->valuestring);
 
-   item = cJSON_GetObjectItemCaseSensitive(root, "autonomous");
-   if (cJSON_IsBool(item))
-      cfg->autonomous = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "verify_enabled");
-   if (cJSON_IsBool(item))
-      cfg->verify_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "delegate_graph_context_enabled");
-   if (cJSON_IsBool(item))
-      cfg->delegate_graph_context_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "verify_cross_project");
-   if (cJSON_IsBool(item))
-      cfg->verify_cross_project = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "ingress_preinject_enabled");
-   if (cJSON_IsBool(item))
-      cfg->ingress_preinject_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "ingress_preinject_anthropic_enabled");
-   if (cJSON_IsBool(item))
-      cfg->ingress_preinject_anthropic_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "ingress_compress_enabled");
-   if (cJSON_IsBool(item))
-      cfg->ingress_compress_enabled = cJSON_IsTrue(item);
-
    item = cJSON_GetObjectItemCaseSensitive(root, "ingress_cache_placement_enabled");
    if (cJSON_IsBool(item))
       cfg->ingress_cache_placement_enabled = cJSON_IsTrue(item);
@@ -1273,44 +1221,9 @@ int config_load_file(config_t *cfg)
    if (cJSON_IsNumber(item) && item->valuedouble > 0)
       cfg->ingress_compress_min_chars = (int)item->valuedouble;
 
-   item = cJSON_GetObjectItemCaseSensitive(root, "gateway_prevent_subagents");
-   if (cJSON_IsBool(item))
-      cfg->gateway_prevent_subagents = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "gateway_pin_model");
-   if (cJSON_IsBool(item))
-      cfg->gateway_pin_model = cJSON_IsTrue(item);
-
    /* CSS migration assistant style-graph write path (WP-C). The field +
     * descriptor + save existed, but the YAML load parse was missing, so the
     * flag never took effect during indexing. */
-   item = cJSON_GetObjectItemCaseSensitive(root, "css_style_graph_enabled");
-   if (cJSON_IsBool(item))
-      cfg->css_style_graph_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "code_cochange_git_enabled");
-   if (cJSON_IsBool(item))
-      cfg->code_cochange_git_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "wfe_live_forge_enabled");
-   if (cJSON_IsBool(item))
-      cfg->wfe_live_forge_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "wfe_proposals_autoscan_enabled");
-   if (cJSON_IsBool(item))
-      cfg->wfe_proposals_autoscan_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "client_integrations_enabled");
-   if (cJSON_IsBool(item))
-      cfg->client_integrations_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "audit_action_enabled");
-   if (cJSON_IsBool(item))
-      cfg->audit_action_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "audit_worm_enabled");
-   if (cJSON_IsBool(item))
-      cfg->audit_worm_enabled = cJSON_IsTrue(item);
 
    item = cJSON_GetObjectItemCaseSensitive(root, "css_render_command");
    if (cJSON_IsString(item) && item->valuestring)
@@ -1332,28 +1245,14 @@ int config_load_file(config_t *cfg)
    if (cJSON_IsNumber(item) && item->valuedouble >= 0)
       cfg->tool_output_max_bytes = (int)item->valuedouble;
 
-   item = cJSON_GetObjectItemCaseSensitive(root, "require_session_worktree");
-   if (cJSON_IsBool(item))
-      cfg->require_session_worktree = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "require_aimee_memory");
-   if (cJSON_IsBool(item))
-      cfg->require_aimee_memory = cJSON_IsTrue(item);
-
    /* require_aimee_git had a config_fields[] row, a schema row, a default, a
     * config_save writer and NO parse — so `require_aimee_git: false` in aimee.yaml
     * never loaded, and `aimee config set require_aimee_git false` persisted a value
     * that silently reverted to ON at the next restart. The operator escape hatch
     * cmd_hooks.c offers ("Operator: require_aimee_git: false ...") could not work.
     * Exactly the failure the comment below this block already warns about. */
-   item = cJSON_GetObjectItemCaseSensitive(root, "require_aimee_git");
-   if (cJSON_IsBool(item))
-      cfg->require_aimee_git = cJSON_IsTrue(item);
 
    /* Default-on; parse the explicit opt-out so `subagent_ban_enabled: false` loads. */
-   item = cJSON_GetObjectItemCaseSensitive(root, "subagent_ban_enabled");
-   if (cJSON_IsBool(item))
-      cfg->subagent_ban_enabled = cJSON_IsTrue(item);
 
    /* Delegate sandbox: default 0 (off) from the zeroed config_t, so only an
     * explicit `delegate_sandbox: true` turns it on. A deploy that cannot easily
@@ -1381,18 +1280,6 @@ int config_load_file(config_t *cfg)
               "keeping default \"proxy\" (valid: proxy, off, gated, governance)\n",
               item->valuestring);
 
-   item = cJSON_GetObjectItemCaseSensitive(root, "delegate_sandbox_require_isolation");
-   if (cJSON_IsBool(item))
-      cfg->delegate_sandbox_require_isolation = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "delegate_sandbox_learn_packages");
-   if (cJSON_IsBool(item))
-      cfg->delegate_sandbox_learn_packages = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "typed_facts_enabled");
-   if (cJSON_IsBool(item))
-      cfg->typed_facts_enabled = cJSON_IsTrue(item);
-
    /* structured-PDF gates. These have config_fields[] rows (CLI/server-settable) but
     * historically lacked a file parse, so a value set in aimee.yaml never loaded back on a
     * fresh process. Parse them here as top-level bools so both the Phase-1/2 ingest gate
@@ -1405,62 +1292,6 @@ int config_load_file(config_t *cfg)
       snprintf(cfg->kb_pdf_tier, sizeof(cfg->kb_pdf_tier), "%s", item->valuestring);
       kb_pdf_apply_tier(cfg, cfg->kb_pdf_tier);
    }
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_ingest_enabled");
-   if (cJSON_IsBool(item))
-      cfg->kb_pdf_ingest_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_vector_enabled");
-   if (cJSON_IsBool(item))
-      cfg->kb_pdf_vector_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_tsr_enabled");
-   if (cJSON_IsBool(item))
-      cfg->kb_pdf_tsr_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "tsr_command");
-   if (cJSON_IsString(item) && item->valuestring)
-      snprintf(cfg->tsr_command, sizeof(cfg->tsr_command), "%s", item->valuestring);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_assets_enabled");
-   if (cJSON_IsBool(item))
-      cfg->kb_pdf_assets_enabled = cJSON_IsTrue(item);
-   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_blob_dir");
-   if (cJSON_IsString(item) && item->valuestring)
-      snprintf(cfg->kb_pdf_blob_dir, sizeof(cfg->kb_pdf_blob_dir), "%s", item->valuestring);
-   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_blob_recon_secs");
-   if (cJSON_IsNumber(item))
-      cfg->kb_pdf_blob_recon_secs = (int)item->valuedouble;
-   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_blob_orphan_alarm_mb");
-   if (cJSON_IsNumber(item))
-      cfg->kb_pdf_blob_orphan_alarm_mb = (int)item->valuedouble;
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_ocr_enabled");
-   if (cJSON_IsBool(item))
-      cfg->kb_pdf_ocr_enabled = cJSON_IsTrue(item);
-   item = cJSON_GetObjectItemCaseSensitive(root, "ocr_command");
-   if (cJSON_IsString(item) && item->valuestring)
-      snprintf(cfg->ocr_command, sizeof(cfg->ocr_command), "%s", item->valuestring);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "kb_evidence_emit_enabled");
-   if (cJSON_IsBool(item))
-      cfg->kb_evidence_emit_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "fidelity_check_enabled");
-   if (cJSON_IsBool(item))
-      cfg->fidelity_check_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "embedding_command");
-   if (cJSON_IsString(item) && item->valuestring[0])
-      snprintf(cfg->embedding_command, sizeof(cfg->embedding_command), "%s", item->valuestring);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "embedding_model");
-   if (cJSON_IsString(item) && item->valuestring[0])
-      snprintf(cfg->embedding_model, sizeof(cfg->embedding_model), "%s", item->valuestring);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "embedding_endpoint");
-   if (cJSON_IsString(item) && item->valuestring[0])
-      snprintf(cfg->embedding_endpoint, sizeof(cfg->embedding_endpoint), "%s", item->valuestring);
 
    item = cJSON_GetObjectItemCaseSensitive(root, "embedding_dim");
    if (cJSON_IsNumber(item) && item->valuedouble > 0)
@@ -1519,10 +1350,6 @@ int config_load_file(config_t *cfg)
    if (cJSON_IsString(item) && item->valuestring[0])
       snprintf(cfg->memory_weight_profile, sizeof(cfg->memory_weight_profile), "%s",
                item->valuestring);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "memory_rerank_mode");
-   if (cJSON_IsString(item) && item->valuestring[0])
-      snprintf(cfg->memory_rerank_mode, sizeof(cfg->memory_rerank_mode), "%s", item->valuestring);
 
    config_parse_memory_rewrite_section(cfg, root);
 
@@ -1656,13 +1483,6 @@ int config_load_file(config_t *cfg)
    config_parse_retry_section(cfg, root);
 
    /* Agent iteration limits */
-   item = cJSON_GetObjectItemCaseSensitive(root, "max_iterations");
-   if (cJSON_IsNumber(item))
-      cfg->max_iterations = (int)item->valuedouble;
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "max_iterations_delegate");
-   if (cJSON_IsNumber(item))
-      cfg->max_iterations_delegate = (int)item->valuedouble;
 
    /* Delegation depth/spawn limits */
    item = cJSON_GetObjectItemCaseSensitive(root, "max_delegation_depth");

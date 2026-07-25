@@ -619,3 +619,57 @@ void config_apply_flat_defaults(config_t *cfg)
          (void)config_field_set_value(cfg, f, config_flat_defaults[i].value);
    }
 }
+
+/* Assign a flat field from its parsed JSON node, matching the inline config_load
+ * parse exactly: a present, correctly-typed value is assigned; anything else
+ * leaves the field at its default. Strings use the non-empty guard (an explicit
+ * "" leaves the default) — the form 45 of the 51 genericised string fields already
+ * used, and behaviour-identical for the rest because their default is "". */
+static void config_field_set_from_json(config_t *cfg, const config_field_t *f, const cJSON *item)
+{
+   char *base = (char *)cfg + f->offset;
+   switch (f->type)
+   {
+   case CFG_BOOL:
+      if (cJSON_IsBool(item))
+         *(int *)base = cJSON_IsTrue(item);
+      break;
+   case CFG_INT:
+      if (cJSON_IsNumber(item))
+         *(int *)base = (int)item->valuedouble;
+      break;
+   case CFG_FLOAT:
+      if (cJSON_IsNumber(item))
+         *(double *)base = item->valuedouble;
+      break;
+   case CFG_STRING:
+      if (cJSON_IsString(item) && item->valuestring[0])
+         snprintf(base, f->size, "%s", item->valuestring);
+      break;
+   case CFG_ECON_MODE:
+      break; /* not a flat field; parsed by its bespoke handler */
+   }
+}
+
+/* Table-driven parse of the flat scalar fields (Proposal A, step 3): replaces the
+ * per-field inline `item = GetObjectItem(root, key); if (typed) cfg->x = ...` blocks
+ * in config_load with one loop over the flat set. css_render_command is the sole
+ * exception — its default is non-empty AND its inline guard admits an explicit ""
+ * (to disable rendering), so it keeps its bespoke block to preserve that behaviour. */
+void config_parse_flat_fields(config_t *cfg, const cJSON *root)
+{
+   if (!cfg || !root)
+      return;
+   for (int i = 0; config_flat_defaults[i].key; i++)
+   {
+      const char *key = config_flat_defaults[i].key;
+      if (strcmp(key, "css_render_command") == 0)
+         continue; /* kept inline: non-empty default + empty-string is meaningful */
+      const cJSON *item = cJSON_GetObjectItemCaseSensitive((cJSON *)root, key);
+      if (!item)
+         continue;
+      const config_field_t *f = config_field_lookup(key);
+      if (f)
+         config_field_set_from_json(cfg, f, item);
+   }
+}
