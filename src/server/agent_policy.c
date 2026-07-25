@@ -264,7 +264,13 @@ int tool_validate(const char *tool_name, const char *args_json, char *err_out, s
          cJSON_Delete(remote_tool);
          return rc;
       }
-      return -1;
+      /* Not a plugin THIS server hosts: it may be federated from aimee-kb (config
+       * install: kb), whose schema we do not hold locally. Defer validation to the
+       * kb, which owns the plugin and validates on tools/call; dispatch routes the
+       * call there (agent_tools_dispatch.c) and surfaces any error. */
+      if (err_out && err_len)
+         err_out[0] = '\0';
+      return 0;
    }
 
    tool_registry_entry_t entry;
