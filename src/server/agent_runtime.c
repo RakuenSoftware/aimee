@@ -286,6 +286,18 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
    {
       const char *ec = agent_error_is_retryable(out->error) ? "retryable" : "error";
       provider_catalog_record_failure(ag->name, ec);
+      /* Surface WHY a delegate attempt failed. Without this the only trace of a failed
+       * turn is the downstream "fallback: trying same-tier agent" line, which hides the
+       * reason — so a delegate that loops/falls-back to no diff is undiagnosable from the
+       * log. The tool-progress counters distinguish "model produced no/no-usable tool
+       * call" (tool_calls low or successful_tool_calls==0) from a provider/transport
+       * error, and stop_reason shows how the provider ended the turn. */
+      aimee_log(LOG_WARN, "agent",
+                "delegate '%s' attempt failed (rc=%d, class=%s, turns=%d, tool_calls=%d, "
+                "successful=%d, stop=%s): %s",
+                ag->name, rc, ec, out->turns, out->tool_calls, out->successful_tool_calls,
+                out->stop_reason[0] ? out->stop_reason : "-",
+                out->error[0] ? out->error : "(no error text)");
    }
    return rc;
 }
