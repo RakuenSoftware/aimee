@@ -216,3 +216,59 @@ func (s *server) handleChatPersona(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 	}
 }
+
+// handleChatPrimary reads or sets the ACTIVE PRIMARY AGENT for a browser
+// session — the agent that serves this tab's turns:
+//
+//	GET  /api/chat/primary?sid=<id>    → {"agent":"<name>"} ("" = not pinned, so
+//	                                      the turn falls back to the configured
+//	                                      default; /api/agents reports which)
+//	POST /api/chat/primary {sid,agent} → pin it for this session
+//
+// This is the agent analog of handleChatPersona and uses the same server-side
+// per-session store (POST /v1/sessions/<id>/primary), which chat_stream_worker
+// consults before cfg.provider — so switching the agent takes effect on the next
+// turn without touching durable config or affecting other tabs.
+func (s *server) handleChatPrimary(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
+	defer cancel()
+
+	switch r.Method {
+	case http.MethodGet:
+		sid := r.URL.Query().Get("sid")
+		if sid == "" {
+			// No session yet (a fresh tab): nothing is pinned by definition.
+			fmt.Fprintf(w, `{"agent":""}`)
+			return
+		}
+		st, data, err := s.v1Request(ctx, http.MethodGet, "/v1/sessions/"+sid+"/primary", nil)
+		if err != nil || st != http.StatusOK {
+			fmt.Fprintf(w, `{"agent":""}`)
+			return
+		}
+		w.Write(data)
+	case http.MethodPost:
+		var req struct {
+			Sid   string `json:"sid"`
+			Agent string `json:"agent"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Sid == "" || req.Agent == "" {
+			writeJSONError(w, http.StatusBadRequest, "sid and agent required")
+			return
+		}
+		body, _ := json.Marshal(map[string]string{"agent": req.Agent})
+		st, data, err := s.v1Request(ctx, http.MethodPost, "/v1/sessions/"+req.Sid+"/primary", body)
+		if err != nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "aimee-server unavailable")
+			return
+		}
+		if st != http.StatusOK {
+			writeJSONError(w, http.StatusBadGateway, "failed to set the primary agent")
+			return
+		}
+		w.Write(data)
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}

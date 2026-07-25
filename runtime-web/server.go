@@ -157,6 +157,7 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/chat/personas", s.requireAuth(s.handleChatPersonas))
 	mux.HandleFunc("/api/chat/personas/", s.requireAuth(s.handleChatPersonaItem))
 	mux.HandleFunc("/api/chat/persona", s.requireAuth(s.handleChatPersona))
+	mux.HandleFunc("/api/chat/primary", s.requireAuth(s.handleChatPrimary))
 	mux.HandleFunc("/api/settings", s.requireAuth(s.handleSettings))
 	// Full typed config surface for the Settings page.
 	mux.HandleFunc("/api/config", s.requireAuth(s.handleConfigAll))
