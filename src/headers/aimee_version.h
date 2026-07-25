@@ -3,7 +3,7 @@
 
 /* Version -- can be overridden at compile time via -DAIMEE_VERSION='"..."' */
 #ifndef AIMEE_VERSION
-#define AIMEE_VERSION "0.2.0"
+#define AIMEE_VERSION "0.3.0"
 #endif
 
 /* HEAD commit timestamp -- embedded at build time for stale-binary detection.

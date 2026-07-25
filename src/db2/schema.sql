@@ -11212,12 +11212,20 @@ REVOKE ALL ON FUNCTION org_egress_recover(INT) FROM PUBLIC;
 CREATE TABLE IF NOT EXISTS kb_management_token_intent_namespace (
   correlation_id TEXT NOT NULL CHECK (correlation_id ~ '^[0-9a-f]{64}$'),
   jti TEXT NOT NULL CHECK (jti ~ '^[0-9a-f]{64}$'),
-  kind TEXT NOT NULL CHECK (kind IN ('action','read')),
+  kind TEXT NOT NULL CHECK (kind IN ('action','read','identity')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(correlation_id),
   UNIQUE(jti),
   UNIQUE(correlation_id,jti,kind)
 );
+-- Idempotent widening for databases created before the data-plane identity
+-- token existed.  CREATE TABLE IF NOT EXISTS above is a no-op on those, so the
+-- kind CHECK must be replaced explicitly or 'identity' intents cannot be filed.
+ALTER TABLE kb_management_token_intent_namespace
+  DROP CONSTRAINT IF EXISTS kb_management_token_intent_namespace_kind_check;
+ALTER TABLE kb_management_token_intent_namespace
+  ADD CONSTRAINT kb_management_token_intent_namespace_kind_check
+  CHECK (kind IN ('action','read','identity'));
 
 -- P5-D2a: read tokens retain their exact authority state and signed bytes.
 -- The ordinary runtime can create/read through fixed functions only; every
