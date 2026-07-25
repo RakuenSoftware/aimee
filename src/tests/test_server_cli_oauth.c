@@ -6,7 +6,9 @@
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* --- stubs for the linked-but-unexercised deps of server_cli_oauth.o --- */
 int safe_exec_capture_cwd_env_timeout(const char *const argv[], const char *cwd, char *const envp[],
@@ -103,6 +105,45 @@ static void test_code_is_safe(void)
    printf("  test_code_is_safe: ok\n");
 }
 
+static void write_file(const char *path, const char *body)
+{
+   FILE *f = fopen(path, "w");
+   assert(f);
+   fputs(body, f);
+   fclose(f);
+}
+
+static void test_claude_token_is_fresh(void)
+{
+   const char *path = "test_claude_creds.tmp";
+   char body[256];
+   long long now_ms = (long long)time(NULL) * 1000LL;
+
+   /* Absent file -> not fresh. */
+   remove(path);
+   assert(cli_oauth_claude_token_is_fresh(path) == 0);
+
+   /* Expired token (the real-world stale-file case) -> NOT fresh: a bare existence
+    * check would have wrongly reported success here. */
+   snprintf(body, sizeof(body), "{\"claudeAiOauth\":{\"accessToken\":\"x\",\"expiresAt\":%lld}}",
+            now_ms - 3600000LL);
+   write_file(path, body);
+   assert(cli_oauth_claude_token_is_fresh(path) == 0);
+
+   /* Fresh token with a future expiry -> fresh. */
+   snprintf(body, sizeof(body), "{\"claudeAiOauth\":{\"accessToken\":\"x\",\"expiresAt\":%lld}}",
+            now_ms + 3600000LL);
+   write_file(path, body);
+   assert(cli_oauth_claude_token_is_fresh(path) == 1);
+
+   /* Present file but no expiresAt -> fail closed (not fresh). */
+   write_file(path, "{\"claudeAiOauth\":{\"accessToken\":\"x\"}}");
+   assert(cli_oauth_claude_token_is_fresh(path) == 0);
+
+   remove(path);
+   printf("  test_claude_token_is_fresh: ok\n");
+}
+
 int main(void)
 {
    printf("server_cli_oauth tests\n");
@@ -110,6 +151,7 @@ int main(void)
    test_scrape_url();
    test_scrape_codex_code();
    test_code_is_safe();
+   test_claude_token_is_fresh();
    printf("all tests passed\n");
    return 0;
 }

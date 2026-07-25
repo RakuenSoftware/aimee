@@ -21,6 +21,7 @@
 #include <string.h>
 #include <sys/file.h> /* flock */
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 /* Wall-clock ceilings for every spawned process. None of these may run unbounded:
@@ -129,6 +130,35 @@ static char *oauth_read_secret_file(const char *path)
    }
    buf[used] = '\0';
    return buf;
+}
+
+/* claude's ~/.claude/.credentials.json records the token's absolute expiry as
+ * "expiresAt":<epoch-ms>. A re-auth is only genuinely complete once a token with a
+ * FUTURE expiry has been written: a pre-existing EXPIRED file left from an earlier
+ * sign-in must NOT count as success, or the poll reports authenticated instantly against
+ * the dead token — storing it to the vault and tearing the login session down before the
+ * user ever finishes the browser flow. Returns 1 only for a present, parseable,
+ * not-yet-expired token; 0 otherwise (absent / unreadable / no expiresAt / expired). */
+int cli_oauth_claude_token_is_fresh(const char *path)
+{
+   char *buf = oauth_read_secret_file(path);
+   if (!buf)
+      return 0;
+   int fresh = 0;
+   const char *p = strstr(buf, "\"expiresAt\"");
+   if (p)
+   {
+      p += strlen("\"expiresAt\"");
+      while (*p == ':' || *p == ' ' || *p == '\t')
+         p++;
+      long long expires_ms = strtoll(p, NULL, 10);
+      long long now_ms = (long long)time(NULL) * 1000LL;
+      if (expires_ms > now_ms)
+         fresh = 1;
+   }
+   memset(buf, 0, strlen(buf));
+   free(buf);
+   return fresh;
 }
 
 /* Persist the vendor's freshly-written OAuth token into the vault as the single
@@ -646,11 +676,13 @@ int cli_oauth_poll(cli_oauth_vendor_t v, const char *session, cli_oauth_state_t 
        * completes. Check ONLY that file — `.claude.json` is unconditional app
        * state created on first launch, so treating it as proof of auth was a false
        * positive that reported success (and tore the session down) before the real
-       * credentials were written, leaving the CLI unauthenticated. */
+       * credentials were written, leaving the CLI unauthenticated. And require the
+       * token to be UNEXPIRED: an old expired .credentials.json from a prior sign-in
+       * is present from the first byte, so a bare existence check reports success
+       * instantly against the dead token and never captures the fresh one. */
       char tok[600];
       snprintf(tok, sizeof(tok), "%s/.claude/.credentials.json", home_dir());
-      struct stat sb;
-      authed = (stat(tok, &sb) == 0 && sb.st_size > 0);
+      authed = cli_oauth_claude_token_is_fresh(tok);
    }
    if (authed)
    {
