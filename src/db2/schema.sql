@@ -12709,6 +12709,199 @@ BEGIN
     extract(epoch FROM u.created_at)::BIGINT;
 END $$;
 
+-- ============================================================================
+-- Data-plane identity token authority (proposal per-user-remote-writes-authz.md
+-- §4).  The identity counterpart of kb_management_token_authority_snapshot.
+--
+-- The one structural difference that matters: `tier` is NOT read from the
+-- intent, it is resolved here from the live kb_write_tier_grant row.  The
+-- management snapshot re-derives actor authorization the same way rather than
+-- trusting the intent, and for a data-plane token the grant IS the
+-- authorization.  A grant revoked between intent and mint therefore refuses to
+-- mint rather than minting a stale tier, and no caller can choose its own tier.
+--
+-- No peer-cert binding and no request digest: the bearer is a browser or thin
+-- client, not an enrolled server.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS kb_management_identity_key_use_intent (
+  correlation_id TEXT PRIMARY KEY CHECK (correlation_id ~ '^[0-9a-f]{64}$'),
+  jti TEXT NOT NULL UNIQUE CHECK (jti ~ '^[0-9a-f]{64}$'),
+  token_jti TEXT NOT NULL UNIQUE CHECK (token_jti ~ '^[A-Za-z0-9._-]{8,128}$'),
+  team_id BIGINT NOT NULL REFERENCES kb_team(id),
+  subject TEXT NOT NULL CHECK (char_length(subject) BETWEEN 1 AND 576),
+  tier TEXT NOT NULL CHECK (tier IN ('off','data','full')),
+  audience TEXT NOT NULL CHECK (audience ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$'),
+  kid TEXT NOT NULL CHECK (kid ~ '^[A-Za-z0-9._-]{1,64}$'),
+  token_custody_key_id TEXT NOT NULL CHECK (char_length(token_custody_key_id) BETWEEN 1 AND 600),
+  token_version BIGINT NOT NULL CHECK (token_version=2),
+  publication_generation SMALLINT NOT NULL CHECK (publication_generation=1),
+  publication_candidate_id TEXT NOT NULL CHECK (publication_candidate_id ~ '^[0-9a-f]{64}$'),
+  publication_manifest_sha256 BYTEA NOT NULL CHECK (octet_length(publication_manifest_sha256)=32),
+  publication_envelope_sha256 BYTEA NOT NULL CHECK (octet_length(publication_envelope_sha256)=32),
+  vault_seal_epoch BIGINT NOT NULL CHECK (vault_seal_epoch>0),
+  hwm_attestation_digest BYTEA NOT NULL CHECK (octet_length(hwm_attestation_digest)=32),
+  purpose TEXT NOT NULL CHECK (purpose='identity.token.sign.v1'),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
+ALTER TABLE kb_management_identity_key_use_intent ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kb_management_identity_key_use_intent FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS kb_management_identity_key_use_authority_only
+  ON kb_management_identity_key_use_intent;
+CREATE POLICY kb_management_identity_key_use_authority_only
+  ON kb_management_identity_key_use_intent
+  USING (current_user='aimee_kb_token_authority_definer')
+  WITH CHECK (current_user='aimee_kb_token_authority_definer');
+DROP TRIGGER IF EXISTS kb_management_identity_key_use_update_guard
+  ON kb_management_identity_key_use_intent;
+CREATE TRIGGER kb_management_identity_key_use_update_guard
+  BEFORE UPDATE OR DELETE ON kb_management_identity_key_use_intent
+  FOR EACH ROW EXECUTE FUNCTION kb_management_token_key_use_worm_guard();
+DROP TRIGGER IF EXISTS kb_management_identity_key_use_truncate_guard
+  ON kb_management_identity_key_use_intent;
+CREATE TRIGGER kb_management_identity_key_use_truncate_guard
+  BEFORE TRUNCATE ON kb_management_identity_key_use_intent
+  FOR EACH STATEMENT EXECUTE FUNCTION kb_management_token_key_use_worm_guard();
+
+CREATE OR REPLACE FUNCTION kb_management_identity_authority_snapshot(
+  p_correlation_id TEXT,p_jti TEXT)
+RETURNS TABLE(correlation_id TEXT,jti TEXT,token_jti TEXT,team_id BIGINT,subject TEXT,
+  tier TEXT,token_issuer TEXT,audience TEXT,kid TEXT,issued_at BIGINT,expires_at BIGINT,
+  installation_id TEXT,installation_generation BIGINT,installation_enrollment_id BIGINT,
+  target_enrollment_id BIGINT,revocation_generation BIGINT,
+  publication_generation SMALLINT,publication_candidate_id TEXT,
+  publication_manifest_sha256 BYTEA,publication_envelope_sha256 BYTEA,
+  token_custody_key_id TEXT,token_version BIGINT,token_public_key BYTEA,
+  token_public_exponent BYTEA,token_public_digest BYTEA,token_jwk_digest BYTEA,
+  vault_seal_epoch BIGINT,hwm_attestation BYTEA,hwm_attestation_digest BYTEA,
+  wrapped_dek BYTEA,nonce BYTEA,ciphertext BYTEA,tag BYTEA)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path=pg_catalog,pg_temp SET TimeZone='UTC' AS $$
+DECLARE
+  ns public.kb_management_token_intent_namespace%ROWTYPE;
+  i public.kb_management_identity_intent%ROWTYPE;
+  g public.kb_write_tier_grant%ROWTYPE;
+  r public.kb_server_registry%ROWTYPE;
+  te public.kb_enrollments%ROWTYPE;
+  mi public.kb_management_instance%ROWTYPE;
+  le public.kb_enrollments%ROWTYPE;
+  vr BIGINT;
+  pr public.kb_management_jwks_publication_registry%ROWTYPE;
+  pg public.kb_management_jwks_publication_generation%ROWTYPE;
+  pc public.kb_management_jwks_publication_candidate%ROWTYPE;
+  tr public.kb_management_token_root%ROWTYPE;
+  vc public.org_vault_current%ROWTYPE;
+  vs public.org_vault_secret%ROWTYPE;
+  rot public.org_vault_rotation%ROWTYPE;
+  ctl public.kb_vault_control%ROWTYPE;
+  t BIGINT;
+BEGIN
+  IF p_correlation_id IS NULL OR p_jti IS NULL OR
+     p_correlation_id !~ '^[0-9a-f]{64}$' OR p_jti !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'identity token authority: invalid input' USING ERRCODE='22023';
+  END IF;
+  IF pg_catalog.pg_is_in_recovery() OR
+     pg_catalog.current_setting('transaction_read_only')<>'off' THEN
+    RAISE EXCEPTION 'identity token authority: primary required' USING ERRCODE='25006';
+  END IF;
+
+  SELECT x.* INTO ns FROM public.kb_management_token_intent_namespace x
+   WHERE x.correlation_id=p_correlation_id AND x.jti=p_jti AND x.kind='identity' FOR SHARE;
+  SELECT x.* INTO i FROM public.kb_management_identity_intent x
+   WHERE x.correlation_id=p_correlation_id AND x.jti=p_jti FOR SHARE;
+  IF ns.correlation_id IS NULL OR i.correlation_id IS NULL OR i.kind<>'identity' OR
+     ROW(i.correlation_id,i.jti,i.kind) IS DISTINCT FROM
+       ROW(ns.correlation_id,ns.jti,ns.kind) THEN
+    RAISE EXCEPTION 'identity token authority: intent unavailable' USING ERRCODE='P0002';
+  END IF;
+
+  -- The live grant is the authorization.  Absent or revoked => no token.
+  SELECT x.* INTO g FROM public.kb_write_tier_grant x
+   WHERE x.server_id=i.target_server_id AND x.team_id=i.team_id AND x.subject=i.subject
+     AND x.revoked_at IS NULL FOR SHARE;
+  IF g.subject IS NULL THEN
+    RAISE EXCEPTION 'identity token authority: subject no longer granted' USING ERRCODE='42501';
+  END IF;
+
+  SELECT x.* INTO r FROM public.kb_server_registry x
+   WHERE x.server_id=i.target_server_id FOR SHARE;
+  SELECT x.* INTO te FROM public.kb_enrollments x WHERE x.id=i.target_enrollment_id FOR SHARE;
+  SELECT x.* INTO mi FROM public.kb_management_instance x
+   WHERE x.installation_id=i.installation_id FOR SHARE;
+  SELECT x.* INTO le FROM public.kb_enrollments x
+   WHERE x.id=i.installation_enrollment_id FOR SHARE;
+  SELECT x.generation INTO vr FROM public.kb_cert_revocation_generation x
+   WHERE x.singleton=1 FOR SHARE;
+  SELECT x.* INTO pr FROM public.kb_management_jwks_publication_registry x
+   WHERE x.singleton=1 FOR SHARE;
+  SELECT x.* INTO pg FROM public.kb_management_jwks_publication_generation x
+   WHERE x.generation=pr.current_generation FOR SHARE;
+  SELECT x.* INTO pc FROM public.kb_management_jwks_publication_candidate x
+   WHERE x.generation=pr.current_generation FOR SHARE;
+  SELECT x.* INTO tr FROM public.kb_management_token_root x WHERE x.root_kind='token' FOR SHARE;
+  SELECT x.* INTO vc FROM public.org_vault_current x
+   WHERE x.principal='org:p5-token' AND x.agent='management' AND x.cred='rs256' FOR SHARE;
+  SELECT x.* INTO vs FROM public.org_vault_secret x
+   WHERE x.principal='org:p5-token' AND x.team_id IS NULL
+     AND x.agent='management' AND x.cred='rs256' AND x.version=vc.version FOR SHARE;
+  SELECT x.* INTO rot FROM public.org_vault_rotation x
+   WHERE x.key_id=tr.custody_key_id AND x.principal='org:p5-token' AND x.team_id IS NULL
+     AND x.agent='management' AND x.cred='rs256' AND x.from_version=1 AND x.to_version=2 FOR SHARE;
+  PERFORM pg_catalog.pg_advisory_xact_lock_shared(-7046029254386353131::BIGINT);
+  SELECT x.* INTO ctl FROM public.kb_vault_control x WHERE x.singleton=1 FOR SHARE;
+  t:=pg_catalog.floor(extract(epoch FROM pg_catalog.clock_timestamp()))::BIGINT;
+
+  IF i.audience<>i.target_server_id OR i.issued_at>t OR t>=i.expires_at THEN
+    RAISE EXCEPTION 'identity token authority: intent expired' USING ERRCODE='22023';
+  END IF;
+  IF r.server_id IS NULL OR r.team_id<>i.team_id OR r.status<>'active' OR
+     te.id IS NULL OR te.id<>i.target_enrollment_id OR
+     te.scope<>'p5-server-management' OR te.state<>'active' OR te.revoked_at<>'' OR
+     te.expires_at='' OR te.expires_at::TIMESTAMPTZ<=pg_catalog.to_timestamp(t) THEN
+    RAISE EXCEPTION 'identity token authority: target authority changed' USING ERRCODE='28000';
+  END IF;
+  IF mi.installation_id IS NULL OR mi.team_id<>i.team_id OR mi.state<>'active' OR
+     mi.current_generation<>i.installation_generation OR
+     mi.current_enrollment_id<>i.installation_enrollment_id OR mi.revoked_at IS NOT NULL OR
+     le.id IS NULL OR le.scope<>'p5-kb-management' OR le.authority_id<>mi.authority_id OR
+     le.state<>'active' OR le.revoked_at<>'' OR
+     le.expires_at='' OR le.expires_at::TIMESTAMPTZ<=pg_catalog.to_timestamp(t) THEN
+    RAISE EXCEPTION 'identity token authority: local authority changed' USING ERRCODE='28000';
+  END IF;
+  IF vr IS NULL OR vr<>i.revocation_generation THEN
+    RAISE EXCEPTION 'identity token authority: revocation generation changed' USING ERRCODE='40001';
+  END IF;
+  IF pr.singleton IS NULL OR pg.generation IS NULL OR pc.generation IS NULL OR
+     pr.current_generation<>1 OR pg.generation<>1 OR pc.generation<>1 OR pc.phase<>'final' OR
+     pr.candidate_id<>pg.candidate_id OR pg.candidate_id<>pc.candidate_id OR
+     pg.token_wire_id<>i.kid OR pc.token_wire_id<>i.kid OR
+     pg.valid_from>t OR t>=pg.valid_until THEN
+    RAISE EXCEPTION 'identity token authority: publication unavailable' USING ERRCODE='40001';
+  END IF;
+  IF tr.root_kind IS NULL OR NOT tr.enabled OR tr.current_version<>2 OR
+     tr.wire_id<>i.kid OR tr.public_digest<>pg.token_public_digest OR
+     tr.jwk_digest<>pg.token_jwk_digest OR
+     vc.principal IS NULL OR vc.version<>2 OR vs.id IS NULL OR vs.team_id IS NOT NULL OR
+     vs.version<>2 OR rot.id IS NULL OR rot.state<>'activated' OR
+     rot.to_version<>2 OR rot.hwm_attestation IS DISTINCT FROM vs.hwm_attestation OR
+     tr.hwm2_attestation_digest<>pg_catalog.sha256(vs.hwm_attestation) THEN
+    RAISE EXCEPTION 'identity token authority: token root binding changed' USING ERRCODE='40001';
+  END IF;
+  IF ctl.singleton IS NULL OR ctl.sealed OR ctl.maintenance_kind<>'' OR ctl.maintenance_id<>'' OR
+     ctl.seal_epoch<>pg.seal_epoch OR pc.seal_epoch<>pg.seal_epoch THEN
+    RAISE EXCEPTION 'identity token authority: vault sealed or epoch changed' USING ERRCODE='55000';
+  END IF;
+
+  RETURN QUERY SELECT i.correlation_id,i.jti,i.token_jti,i.team_id,i.subject,g.tier,
+    i.token_issuer,i.audience,i.kid,i.issued_at,i.expires_at,
+    i.installation_id,i.installation_generation,i.installation_enrollment_id,
+    i.target_enrollment_id,i.revocation_generation,pg.generation,pg.candidate_id,
+    pg.manifest_sha256,pg.envelope_sha256,tr.custody_key_id,tr.current_version,
+    tr.public_key,tr.public_exponent,tr.public_digest,tr.jwk_digest,ctl.seal_epoch,
+    vs.hwm_attestation,pg_catalog.sha256(vs.hwm_attestation),vs.wrapped_dek,vs.nonce,
+    vs.ciphertext,vs.tag;
+END $$;
+
 CREATE OR REPLACE FUNCTION kb_management_token_authority_use(
   p_correlation_id TEXT,p_jti TEXT)
 RETURNS TABLE(newly_admitted BOOLEAN,correlation_id TEXT,jti TEXT,team_id BIGINT,
