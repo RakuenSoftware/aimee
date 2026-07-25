@@ -21,6 +21,10 @@ static void test_allowed_routes(void)
    assert(kb_route_acl_console_admin_allows("POST", "/v1/decisions"));
    assert(kb_route_acl_console_admin_allows("POST", "/v1/decisions/42/supersede"));
    assert(kb_route_acl_console_admin_allows("GET", "/v1/audit/actions"));
+   assert(kb_route_acl_console_admin_allows("GET", "/v1/console/pipeline"));
+   assert(kb_route_acl_console_admin_allows("POST", "/v1/console/pipeline/config"));
+   assert(kb_route_acl_console_admin_allows("GET", "/v1/console/settings"));
+   assert(kb_route_acl_console_admin_allows("POST", "/v1/console/settings/config"));
    printf("  allowed_routes: ok\n");
 }
 
@@ -37,6 +41,11 @@ static void test_wrong_method_denied(void)
    assert(!kb_route_acl_console_admin_allows("POST", "/v1/console/overview"));
    assert(!kb_route_acl_console_admin_allows("GET", "/v1/decisions/42/supersede"));
    assert(!kb_route_acl_console_admin_allows("get", "/v1/enrollments")); /* case-sensitive */
+   /* The pipeline pair is read-GET / write-POST; neither method crosses over. */
+   assert(!kb_route_acl_console_admin_allows("POST", "/v1/console/pipeline"));
+   assert(!kb_route_acl_console_admin_allows("GET", "/v1/console/pipeline/config"));
+   assert(!kb_route_acl_console_admin_allows("POST", "/v1/console/settings"));
+   assert(!kb_route_acl_console_admin_allows("GET", "/v1/console/settings/config"));
    printf("  wrong_method: ok\n");
 }
 

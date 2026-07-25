@@ -11,13 +11,11 @@ import Agents from './pages/Agents';
 import Personas from './pages/Personas';
 import Roles from './pages/Roles';
 import Roundtable from './pages/Roundtable';
-import Pipeline from './pages/Pipeline';
 import Settings from './pages/Settings';
 import Projects from './pages/Projects';
 import Graph from './pages/Graph';
 import Editor from './pages/Editor';
 import { SessionProvider, useSessions } from './SessionContext';
-import SettingsPanel from './components/SettingsPanel';
 import TabTutorial from './components/TabTutorial';
 import SetupChip from './components/SetupChip';
 import SetupWizard from './components/SetupWizard';
@@ -207,7 +205,8 @@ export default function App() {
   return (
     <SessionProvider>
       <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-        {/* Top bar: brand + session tabs + logout. */}
+        {/* Top bar: brand + session tabs + logout. Runtime options live on the
+            Settings page and the tabs that own them — there is no gear menu. */}
         <header
           style={{
             display: 'flex', alignItems: 'center', height: '46px', flexShrink: 0, gap: 14,
@@ -217,7 +216,6 @@ export default function App() {
           <span style={{ color: '#8cf', fontWeight: 700, fontSize: 18 }}>aimee</span>
           <SessionTabBar />
           <SilentBoundary><SetupChip /></SilentBoundary>
-          <SettingsPanel />
           <LogoutButton />
         </header>
         {/* Body: vertical tool nav (left) + content. */}
@@ -261,7 +259,6 @@ export default function App() {
                 <Route path="/personas" element={<Personas />} />
                 <Route path="/roles" element={<Roles />} />
                 <Route path="/roundtable" element={<Roundtable />} />
-                <Route path="/pipeline" element={<Pipeline />} />
                 <Route path="/projects" element={<Projects />} />
                 <Route path="/graph" element={<Graph />} />
                 <Route path="/editor" element={<Editor />} />

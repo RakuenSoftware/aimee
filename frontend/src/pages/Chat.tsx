@@ -1375,6 +1375,13 @@ export default function Chat() {
   const [activeSkill, setActiveSkill] = useState<string>('');
   const [availablePersonas, setAvailablePersonas] = useState<PersonaInfo[]>([]);
   const [activePersona, setActivePersona] = useState<string>('');
+  /* The agent serving this tab's turns. `activeAgent` is the SESSION PIN (empty
+   * = not pinned); `defaultAgent` is what an unpinned turn actually lands on,
+   * reported by /api/agents (server-side agent_default_primary). The selector
+   * shows the pin when there is one, else the default, so it always names the
+   * agent you are really talking to. */
+  const [activeAgent, setActiveAgent] = useState<string>('');
+  const [defaultAgent, setDefaultAgent] = useState<string>('');
   const [lspDiag, setLspDiag] = useState<{ errors: number; warnings: number; active_servers: number } | null>(null);
   const [workflowInfo, setWorkflowInfo] = useState<WorkflowSessionInfo | null>(null);
   const [workflowLoading, setWorkflowLoading] = useState(false);
@@ -1802,10 +1809,15 @@ export default function Chat() {
       .catch(() => {});
   }, []);
 
-  /* Reflect the active tab's current persona (per-session, else durable default) */
+  /* Reflect the active tab's current persona (per-session, else durable default).
+     A tab that has not sent its first message yet has NO aimee session id — it
+     used to be left blank here, so the <select> fell back to whatever option
+     happened to be first rather than the persona the turn would actually use.
+     Ask without a sid in that case: the server answers with the durable default,
+     which is engineer unless the operator changed it. */
   useEffect(() => {
-    if (!activePersonaSid) return;
-    fetch(`/api/chat/persona?sid=${encodeURIComponent(activePersonaSid)}`)
+    const q = activePersonaSid ? `?sid=${encodeURIComponent(activePersonaSid)}` : '';
+    fetch(`/api/chat/persona${q}`)
       .then(r => r.json())
       .then((d: { name?: string }) => setActivePersona(d.name ?? ''))
       .catch(() => {});
@@ -1853,9 +1865,21 @@ export default function Chat() {
   useEffect(() => {
     fetch('/api/agents')
       .then(r => r.json())
-      .then((d: { agents?: AgentInfo[] }) => setAgents(d.agents ?? []))
+      .then((d: { agents?: AgentInfo[]; default_agent?: string }) => {
+        setAgents(d.agents ?? []);
+        setDefaultAgent(d.default_agent ?? '');
+      })
       .catch(() => {});
   }, []);
+
+  /* Reflect this tab's pinned agent (empty = following the configured default) */
+  useEffect(() => {
+    if (!activePersonaSid) { setActiveAgent(''); return; }
+    fetch(`/api/chat/primary?sid=${encodeURIComponent(activePersonaSid)}`)
+      .then(r => r.json())
+      .then((d: { agent?: string }) => setActiveAgent(d.agent ?? ''))
+      .catch(() => {});
+  }, [activePersonaSid]);
 
   useEffect(() => {
     fetch('/api/metrics')
@@ -1977,6 +2001,24 @@ export default function Chat() {
       });
       if (!resp.ok) setActivePersona(prev);
     } catch { setActivePersona(prev); }
+  }
+
+  /* Pin the agent that serves this tab's turns. Per session (like the persona),
+     so other tabs and the durable config are untouched; it takes effect on the
+     next turn (chat_stream_worker reads the pin before cfg.provider). */
+  async function changeAgent(name: string) {
+    const sid = tabsRef.current[activeIdxRef.current]?.aimeeSid;
+    if (!sid || !name) return;
+    const prev = activeAgent;
+    setActiveAgent(name);
+    try {
+      const resp = await fetch('/api/chat/primary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
+        body: JSON.stringify({ sid, agent: name }),
+      });
+      if (!resp.ok) setActiveAgent(prev);
+    } catch { setActiveAgent(prev); }
   }
 
   async function togglePlugin(name: string) {
@@ -3055,6 +3097,37 @@ export default function Chat() {
               <option value="">None</option>
               {availableSkills.map(s => (
                 <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </>
+        )}
+        {agents.length > 0 && (
+          <>
+            <span style={{ fontSize: '11px', color: tokens.borderLight, fontFamily: 'system-ui', marginLeft: '4px' }}>|</span>
+            <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}>
+              Agent:
+            </span>
+            <select
+              value={activeAgent || defaultAgent}
+              onChange={e => changeAgent(e.target.value)}
+              title={activeAgent
+                ? 'The agent serving this tab (pinned for this session)'
+                : `Following the configured primary${defaultAgent ? ` (${defaultAgent})` : ''} — pick one to pin it for this session`}
+              style={{
+                fontSize: '11px', fontFamily: 'system-ui',
+                // Unpinned (following the default) reads as the muted state, the
+                // same way an unset persona does.
+                background: activeAgent ? tokens.primary : tokens.surface,
+                color: activeAgent ? tokens.surface : tokens.textFaint,
+                border: `1px solid ${activeAgent ? tokens.primary : tokens.borderLight}`,
+                borderRadius: '10px', cursor: 'pointer', padding: '2px 6px',
+                outline: 'none',
+              }}
+            >
+              {agents.map(a => (
+                <option key={a.name} value={a.name}>
+                  {a.name}{a.name === defaultAgent ? ' (primary)' : ''}
+                </option>
               ))}
             </select>
           </>

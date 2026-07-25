@@ -2,7 +2,7 @@
 
 > Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. Do not edit by hand; run `make docs-gen` to regenerate.
 
-Total endpoints: 84
+Total endpoints: 88
 
 ## Endpoints
 
@@ -336,6 +336,77 @@ Responses:
 - `200` — Overview envelope
 - `401` — Unauthorized
 - `403` — Forbidden (credential not permitted for this route)
+
+### `GET /v1/console/pipeline`
+
+Curator pipeline registry, presets, and current config (console)
+
+The curator pipeline as data for the web console's Pipeline page: the live
+stage registry (name, label, lane, budget, order, config_key, requires),
+the built-in presets, and the current value of every config key the page
+toggles. The kb owns the curator, so this is served in-process.
+Requires a console-admin credential.
+
+Responses:
+
+- `200` — Pipeline envelope
+- `401` — Unauthorized
+- `403` — Forbidden (credential not permitted for this route)
+
+### `POST /v1/console/pipeline/config`
+
+Set one curator-pipeline config key (console)
+
+Sets a single pipeline config key and persists it to aimee.yaml; the
+curator picks it up on its next config load. The key must be a stage
+enable flag advertised by the live registry, or one of the pipeline's own
+keys (stage order, user presets, custom stages) — anything else is 403, so
+this route cannot reach arbitrary config. Requires a console-admin
+credential.
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Saved; echoes the stored value
+- `400` — Missing/invalid key or value
+- `401` — Unauthorized
+- `403` — Not a pipeline config key, or credential not permitted
+
+### `GET /v1/console/settings`
+
+KB-owned configuration (console)
+
+Every config option aimee-kb owns — the embedder, the reranker, the synth
+tier, and the knowledge base itself — with its current value, section, and
+whether it needs a kb restart. The split from aimee-server's own settings
+is by which binary reads the option (KB_SETTINGS in
+src/kb/http/kb_http_console.c). Requires a console-admin credential.
+
+Responses:
+
+- `200` — KB-owned settings
+- `401` — Unauthorized
+- `403` — Forbidden (credential not permitted for this route)
+
+### `POST /v1/console/settings/config`
+
+Set one KB-owned config option (console)
+
+Sets a single KB-owned option and persists it to aimee.yaml. The key must
+be one the kb owns — anything else (aimee-server's keys, db2_url, the
+agent roster) is 403, so this route cannot reach arbitrary config. Options
+flagged `restart` take effect when aimee-kb next starts. Requires a
+console-admin credential.
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Saved; echoes the stored value
+- `400` — Missing/invalid key or value
+- `401` — Unauthorized
+- `403` — Not a KB-owned setting, or credential not permitted
 
 ### `GET /v1/decisions`
 
