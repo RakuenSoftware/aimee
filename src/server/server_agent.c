@@ -332,7 +332,7 @@ static int server_agent_set_model_concurrency(const char *model, int limit)
       if (strcmp(cfg.concurrency_per_model[i].key, model) == 0)
       {
          cfg.concurrency_per_model[i].limit = limit;
-         return config_save(&cfg);
+         return config_set_concurrency(&cfg);
       }
    }
    if (cfg.concurrency_per_model_count >= CONFIG_CONCURRENCY_MAX_ENTRIES)
@@ -341,7 +341,7 @@ static int server_agent_set_model_concurrency(const char *model, int limit)
        &cfg.concurrency_per_model[cfg.concurrency_per_model_count++];
    snprintf(entry->key, sizeof(entry->key), "%s", model);
    entry->limit = limit;
-   return config_save(&cfg);
+   return config_set_concurrency(&cfg);
 }
 
 static int server_agent_model_still_configured(const agent_config_t *cfg, const char *model)
@@ -371,7 +371,7 @@ static int server_agent_clear_model_concurrency_if_unused(const agent_config_t *
               (size_t)(cfg.concurrency_per_model_count - i - 1) *
                   sizeof(cfg.concurrency_per_model[0]));
       cfg.concurrency_per_model_count--;
-      return config_save(&cfg);
+      return config_set_concurrency(&cfg);
    }
    return 0;
 }

@@ -320,6 +320,50 @@ static const char *config_save_default_db1_path(void)
    return path;
 }
 
+static void config_save_concurrency(const config_t *cfg, cJSON *root)
+{
+   int save_preempt_requeue =
+       cfg->concurrency_preempt_requeue_max != CONFIG_DEFAULT_CONCURRENCY_PREEMPT_REQUEUE_MAX;
+
+   /* Concurrency limits (only save if configured) */
+   if (cfg->concurrency_default || cfg->maximum_total_concurrent_agent_sessions ||
+       cfg->concurrency_per_model_count || cfg->concurrency_per_provider_count ||
+       cfg->concurrency_preempt_enabled || !cfg->concurrency_preempt_single_slot_only ||
+       (cfg->concurrency_preempt_enabled && save_preempt_requeue))
+   {
+      cJSON *conc = cJSON_AddObjectToObject(root, "concurrency");
+      if (cfg->concurrency_default)
+         cJSON_AddNumberToObject(conc, "default", cfg->concurrency_default);
+      if (cfg->maximum_total_concurrent_agent_sessions)
+         cJSON_AddNumberToObject(conc, "maximum_total_concurrent_agent_sessions",
+                                 cfg->maximum_total_concurrent_agent_sessions);
+      if (cfg->concurrency_per_model_count > 0)
+      {
+         cJSON *pm = cJSON_AddObjectToObject(conc, "per_model");
+         for (int i = 0; i < cfg->concurrency_per_model_count; i++)
+            cJSON_AddNumberToObject(pm, cfg->concurrency_per_model[i].key,
+                                    cfg->concurrency_per_model[i].limit);
+      }
+      if (cfg->concurrency_per_provider_count > 0)
+      {
+         cJSON *pp = cJSON_AddObjectToObject(conc, "per_provider");
+         for (int i = 0; i < cfg->concurrency_per_provider_count; i++)
+            cJSON_AddNumberToObject(pp, cfg->concurrency_per_provider[i].key,
+                                    cfg->concurrency_per_provider[i].limit);
+      }
+      if (cfg->concurrency_preempt_enabled || !cfg->concurrency_preempt_single_slot_only ||
+          (cfg->concurrency_preempt_enabled && save_preempt_requeue))
+      {
+         cJSON *preempt = cJSON_AddObjectToObject(conc, "preempt");
+         cJSON_AddBoolToObject(preempt, "enabled", cfg->concurrency_preempt_enabled);
+         if (!cfg->concurrency_preempt_single_slot_only)
+            cJSON_AddBoolToObject(preempt, "single_slot_only", 0);
+         if (cfg->concurrency_preempt_enabled && save_preempt_requeue)
+            cJSON_AddNumberToObject(preempt, "requeue_max", cfg->concurrency_preempt_requeue_max);
+      }
+   }
+}
+
 int config_save(const config_t *cfg)
 {
    ensure_config_dir();
@@ -1021,46 +1065,7 @@ int config_save(const config_t *cfg)
          cJSON_AddNumberToObject(retry, "max_ms", cfg->retry_max_ms);
    }
 
-   int save_preempt_requeue =
-       cfg->concurrency_preempt_requeue_max != CONFIG_DEFAULT_CONCURRENCY_PREEMPT_REQUEUE_MAX;
-
-   /* Concurrency limits (only save if configured) */
-   if (cfg->concurrency_default || cfg->maximum_total_concurrent_agent_sessions ||
-       cfg->concurrency_per_model_count || cfg->concurrency_per_provider_count ||
-       cfg->concurrency_preempt_enabled || !cfg->concurrency_preempt_single_slot_only ||
-       (cfg->concurrency_preempt_enabled && save_preempt_requeue))
-   {
-      cJSON *conc = cJSON_AddObjectToObject(root, "concurrency");
-      if (cfg->concurrency_default)
-         cJSON_AddNumberToObject(conc, "default", cfg->concurrency_default);
-      if (cfg->maximum_total_concurrent_agent_sessions)
-         cJSON_AddNumberToObject(conc, "maximum_total_concurrent_agent_sessions",
-                                 cfg->maximum_total_concurrent_agent_sessions);
-      if (cfg->concurrency_per_model_count > 0)
-      {
-         cJSON *pm = cJSON_AddObjectToObject(conc, "per_model");
-         for (int i = 0; i < cfg->concurrency_per_model_count; i++)
-            cJSON_AddNumberToObject(pm, cfg->concurrency_per_model[i].key,
-                                    cfg->concurrency_per_model[i].limit);
-      }
-      if (cfg->concurrency_per_provider_count > 0)
-      {
-         cJSON *pp = cJSON_AddObjectToObject(conc, "per_provider");
-         for (int i = 0; i < cfg->concurrency_per_provider_count; i++)
-            cJSON_AddNumberToObject(pp, cfg->concurrency_per_provider[i].key,
-                                    cfg->concurrency_per_provider[i].limit);
-      }
-      if (cfg->concurrency_preempt_enabled || !cfg->concurrency_preempt_single_slot_only ||
-          (cfg->concurrency_preempt_enabled && save_preempt_requeue))
-      {
-         cJSON *preempt = cJSON_AddObjectToObject(conc, "preempt");
-         cJSON_AddBoolToObject(preempt, "enabled", cfg->concurrency_preempt_enabled);
-         if (!cfg->concurrency_preempt_single_slot_only)
-            cJSON_AddBoolToObject(preempt, "single_slot_only", 0);
-         if (cfg->concurrency_preempt_enabled && save_preempt_requeue)
-            cJSON_AddNumberToObject(preempt, "requeue_max", cfg->concurrency_preempt_requeue_max);
-      }
-   }
+   config_save_concurrency(cfg, root);
 
    /* Tool result compaction (only save non-default values) */
    if (!cfg->compact_enabled || cfg->compact_threshold || cfg->compact_head_bytes ||
@@ -1610,4 +1615,29 @@ int config_set(const char *key, const char *value)
    if (rc == 0)
       (void)config_reload(); /* republish the snapshot so live readers see it */
    return rc;
+}
+
+/* Surgical write of a whole config *section*: rebuild just that section's subtree
+ * in the document from cfg (via its serializer), preserving every other key.
+ * The structured counterpart to config_set — for arrays / nested objects (concurrency,
+ * workspaces, ...) that a flat scalar config_set cannot express. No whole-file rebuild. */
+static int config_set_section(const char *key, void (*emit)(const config_t *, cJSON *),
+                              const config_t *cfg)
+{
+   if (!key || !emit || !cfg)
+      return -1;
+   ensure_config_dir();
+   cJSON *root = config_load_doc();
+   cJSON_DeleteItemFromObjectCaseSensitive(root, key);
+   emit(cfg, root);
+   int rc = config_write_doc(root);
+   cJSON_Delete(root);
+   if (rc == 0)
+      (void)config_reload();
+   return rc;
+}
+
+int config_set_concurrency(const config_t *cfg)
+{
+   return config_set_section("concurrency", config_save_concurrency, cfg);
 }

@@ -2223,6 +2223,11 @@ int config_save(const config_t *cfg);
  * Never serialises config_t — no whole-file rebuild, no parse/save drift. */
 int config_set(const char *key, const char *value);
 
+/* config_set_concurrency: surgically rewrite the `concurrency:` section of the config
+ * YAML from cfg (preserving all other keys) and republish. The structured-write partner
+ * to config_set, for the concurrency limits (nested object + per-model/provider arrays). */
+int config_set_concurrency(const config_t *cfg);
+
 /* Default config directory: ~/.config/aimee/ */
 const char *config_default_dir(void);
 
