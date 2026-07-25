@@ -57,15 +57,18 @@ redirect_uri}`, `oauth_pkce.c`). (The wizard UI is new; it does not reuse a pre-
 **kb declares its auth mode**, and the flow forks:
 
 - **OIDC** — server-initiated redirect **delegates the auth-code exchange to kb** (kb is the relying
-  party: issuer profile, client secret in vault, JWKS; `kb-console` already performs this). kb
-  authenticates, resolves `{subject, team, tier}`, and mints the kb-signed token (§4) via the merged
-  token authority.
+  party: it holds the issuer profile, the client secret in vault, and the issuer JWKS — grounded by the
+  `AIMEE_KB_OIDC_AUDIENCE`/JWKS configuration and the merged token authority; the auth-code exchange
+  runs at kb's web/OIDC tier). kb authenticates, resolves `{subject, team, tier}`, and mints the
+  kb-signed token (§4) via the merged token authority.
 - **Local PAM** — the wizard shows a login form; kb verifies `username`+secret against the host PAM
   stack and mints the same token. Concrete, testable PAM shape:
   - **Mediator:** `pam_authenticate` through a **dedicated `/etc/pam.d/aimee-kb` service** invoked via a
     **`pam_exec`/helper** path; kb does **not** read `/etc/shadow` itself and does **not** run as root.
-    kb runs as a dedicated non-root user; where `pam_unix` needs shadow, the standard setuid
-    `unix_chkpwd` helper performs the check — kb never gains shadow read itself.
+    kb runs as a **dedicated non-root system account created by the kb package** (per the P5 hardening
+    pattern, PR #1729 / #1808); the package ships `/etc/pam.d/aimee-kb` permitting that account to
+    invoke the service. Where `pam_unix` needs shadow, the standard setuid `unix_chkpwd` helper performs
+    the check — kb never holds shadow read or root itself.
   - **Service file:** shipped by the kb package at `/etc/pam.d/aimee-kb`, `root:root 0644`.
   - **No local hash handling:** kb never caches, compares, or persists password hashes; the credential
     lives only for the duration of the PAM call.
@@ -88,10 +91,11 @@ The token minted by `kb_mgmt_token_authority_sign_pkcs8` carries a **pinned clai
 
 ## 5. Enforcement seam (small, contained)
 
-`server_http_effective_conn_caps()` / `server_http_route_allowed_caps()` already take `remote_writes`
-as a parameter. At the request seam (`src/server/server_http.c`, ~L1687) the code passes the
-process-global `g_remote_writes`. The behavior change is to pass the **per-request tier** from the
-verified token instead. The gate's decision logic — which ops are data-writes, which need `full` — does
+`server_http_effective_conn_caps()` (def. ~L319) / `server_http_route_allowed_caps()` (def. ~L358)
+already take `remote_writes` as a parameter. At the request-handling seam in `src/server/server_http.c`
+the code passes the process-global `g_remote_writes` into those functions (the exact call-site line is
+re-pinned during implementation planning — nit). The behavior change is to pass the **per-request tier**
+from the verified token instead. The gate's decision logic — which ops are data-writes, which need `full` — does
 not change.
 
 ## 6. Tier storage, administration & migration
@@ -117,8 +121,12 @@ admin bootstraps via the one-time bootstrap bearer / enrollment token (§2 carve
 
 ## 8. Legacy-caller cutover (F2 — hard cutover + migration guide)
 
-Per decision: on rollout the legacy shared bearer / `AIMEE_API_BEARER` path **stops authorizing writes**
-(fail-closed); reads unaffected where already permitted. The deliverable includes a **migration guide**
+Per decision: on rollout the legacy **standing** shared bearer / `AIMEE_API_BEARER` path (the rotated
+per-deployment bearer, which does authorize reads and writes today) **stops authorizing writes**
+(fail-closed); the reads it permits today are unaffected. Note this is distinct from the *one-time
+bootstrap* bearer, which has always been **rotate-only** (`handle_api_rotate_bearer` refuses every other
+TCP route until rotated), so no read path ever relied on it and it is untouched here. The deliverable
+includes a **migration guide**
 enumerating every affected `/v1` caller and its replacement:
 - **Interactive** (thin clients, webchat) → obtain a kb-issued token via the wizard login (§3).
 - **Non-interactive** (audit, cron, service integrations) → **kb-minted service-account tokens**
@@ -134,8 +142,9 @@ enumerating every affected `/v1` caller and its replacement:
 - **mTLS transport unchanged** — it establishes the connection; it is not the authorization identity.
 - **Replay:** short `exp` + server-local **bounded `jti` cache** (LRU/TTL sized to the token TTL); a
   replayed token after first use is rejected. **Revocation lag:** revoking a subject's grant takes
-  effect at the next token `exp` (or immediately once the kb JWKS signed-generation advances for a
-  key-level revocation) — documented, bounded, and tested.
+  effect at the next token `exp`; a key-level revocation takes effect once the kb JWKS
+  signed-generation advances. The lag is therefore bounded to **one token TTL or one JWKS-generation
+  advance, whichever is shorter**, and is tested.
 - **PAM least-privilege** as pinned in §3 — no kb shadow-read, no root, no credential persistence,
   `explicit_bzero`, never logged.
 - **No new identity store** — the IdP / OS-PAM stays authoritative, so disabling a user there disables
