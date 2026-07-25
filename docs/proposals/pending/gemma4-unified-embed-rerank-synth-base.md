@@ -93,6 +93,27 @@ still lighter than the deployed E4B (5B total vs 8B total), so the direction hol
 - The "2-core / 4 GB" figure is a *stated target*, not a measured fit; reconcile it against
   the real serving box (the current cpu-tier download alone is ~6.5 GB per `KB_LLM_BACKENDS`).
 
+## §2b Stripping the base to text-only (part of the build, lossless)
+
+aimee's use is text-only (embed + Tier-A synth over documents + code), and the Gemma-4
+E-series is natively multimodal, so the build **drops the modality components**:
+
+- The **vision encoder** (~150M ViT — the image / OCR path) and the **audio encoder**
+  (USM-class), plus their projectors into the language space, are **not instantiated**.
+- The **language backbone** (PLE/AltUp/LAuReL) and the text tokenizer are kept — that is what
+  the §4 PLE port serves.
+
+This is the standard Gemma-text conversion path (`convert_hf_to_gguf.py` text-only ignores the
+towers), **lossless for text**, and **orthogonal to the PLE port** (the towers are separate
+from the per-layer residual machinery). Savings are **modest** — a few hundred MB of encoders —
+not a headline footprint reduction.
+
+**Meaningful size reduction (getting E2B smaller) is the deferred, gated work in §12**, and it
+rests on tooling that is not established: MatFormer slicing to custom sizes, Minitron
+prune-and-heal (full-FT that does not fit the 16 GB training card), and vocab pruning (capped by
+the multilingual requirement). Those run only after the base pipeline passes §8 — they are *not*
+part of this build.
+
 ## §3 The synth role (Tier-A)
 
 **Serving.** One base GGUF; the synth backend (8083) runs it in generation mode with
@@ -307,8 +328,9 @@ decidable core, and several rest on unproven tooling:
   embed adapter/teacher, so synth-teacher sharing does **not** align it. Genuine cross-tier
   space needs the embed heads of *both* tiers trained against one frozen teacher space, with
   its own gate (E2B-embedded docs retrieved by E4B queries). Unvalidated — a hypothesis.
-- **Extraction Tiers 2-3** (MatFormer slice / prune the base for headroom) — only after the
-  base pipeline passes §8.
+- **Further size reduction** (beyond the lossless text-only strip in §2b) — MatFormer slicing
+  to custom sizes, Minitron prune-and-heal, and vocab pruning — only after the base pipeline
+  passes §8, and each gated head-to-head against the model it would replace.
 
 ## Acceptance criteria
 
