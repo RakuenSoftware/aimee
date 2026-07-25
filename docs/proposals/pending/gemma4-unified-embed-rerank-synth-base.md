@@ -112,11 +112,17 @@ work: it is the same lineage as the E4B synth model (so "match E4B synth" is a
 distill-within-the-family), it is now Apache-2.0, and its MatFormer nesting composes
 with MRL — elastic **model size** × elastic **embedding dim** from one artifact.
 
-E2B is also the heaviest option (2.3B effective / 5B total; PLE tables must stay
-Q8_0, so the footprint is above a naive Q4 estimate). Whether it clears "usable on
-CPU" is **the open gate** (§8): if E2B misses the latency/RAM budget on the target
-box, the fallback is Qwen3-0.6B-Base (decoder, unifies embed+synth, drops the
-MatFormer elasticity) with rerank as a dedicated small encoder.
+**Resource fit is not a concern:** the CPU tier already deploys the *larger* E4B
+for Tier-A synth, so E2B — roughly half the active compute (2.3B effective vs. E4B's
+~4B) — is a strict **reduction**. PLE keeps resident memory near the *effective*
+size (its whole reason for existing, and why the E-series runs on edge hardware), so
+sizing from the 5B *total* overstates it; the deployed E4B is the existence proof
+that E2B fits the target 2-core / 4 GB box with headroom. The single-forward embed
+and rerank passes are lighter still than the E4B *generation* already run there. The
+open risk is not fit but **synth-quality parity** (§7) — recovering the E4B→E2B
+nested-submodel gap; if that gap proves unrecoverable on the mechanical tier, the
+fallback is a dedicated small embedder + encoder reranker with Tier-A staying on a
+capable node.
 
 ## §3 Three roles off one base
 
@@ -209,9 +215,10 @@ Each role A/Bs against its incumbent; none flips silently (charter Gate-Promote)
 
 ## §8 Open decisions (explicitly unsettled)
 
-1. **CPU budget + target hardware** — the embed-ms / rerank-ms / RAM ceiling on the
-   real box. Gates E2B-vs-fallback (§2) and unified-vs-dedicated rerank (§3). This is
-   the single most load-bearing open number.
+1. **CPU budget** — target 2-core / 4 GB. **Resolved for the base:** the tier already
+   runs the larger E4B, so E2B (less resource-intensive) is within budget by
+   construction; the base is confirmed E2B. The residual CPU question is only
+   unified-vs-dedicated rerank latency (§3), not whether the base fits.
 2. **Language breadth** — E2B's 140+ langs vs. a narrower set; decides whether the
    encoder fallbacks (EuroBERT ~15 langs) are even viable alternates.
 3. **Teacher(s)** for the embed distill (§5) — clean-licensed single vs. ensemble.
@@ -220,10 +227,11 @@ Each role A/Bs against its incumbent; none flips silently (charter Gate-Promote)
 
 ## Risks / honest tradeoffs
 
-- **E2B may miss the CPU budget.** It is the heaviest base; PLE tables are Q8-only.
-  If it does, the whole three-role-on-E2B shape gives way to the Qwen3-0.6B fallback
-  and the PLE work is wasted — so §8.1 should be answered *before* the PLE port
-  starts.
+- **Synth-quality parity is the real risk, not resources.** E2B is *less*
+  resource-intensive than the E4B the tier already runs, so fit is settled. The open
+  risk is recovering the E4B→E2B nested-submodel quality gap on the Tier-A mechanical
+  tasks (§7 gate); if it proves unrecoverable, keep Tier-A on a capable node and ship
+  the embed/rerank roles as dedicated small models.
 - **Frozen-causal base caps embedding quality** vs. a dedicated bidirectional
   embedder. Accepted to keep synth intact; §7 bounds the gap.
 - **Decoder reranking is heavier per pair** than a small encoder. Mitigated by
