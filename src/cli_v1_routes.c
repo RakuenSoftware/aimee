@@ -742,11 +742,20 @@ cJSON *marshal_index_structure(int argc, char **argv)
 
 cJSON *marshal_index_find_callers(int argc, char **argv)
 {
+   /* `project` is an OPTIONAL second positional, so an output-mode flag like
+    * `--json` must not be mistaken for it: `aimee index callers <symbol> --json`
+    * would otherwise send project="--json", which matches no project and returns
+    * an empty result. Parse flags out (rpc_parse drops `--json` as a valueless
+    * bool) and read only the true positionals. */
+   static const char *bools[] = {"json", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bools, &opts);
+
    cJSON *req = marshal_no_args("index.find_callers");
-   if (argc > 0)
-      cJSON_AddStringToObject(req, "symbol", argv[0]);
-   if (argc > 1)
-      cJSON_AddStringToObject(req, "project", argv[1]);
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "symbol", opts.positional[0]);
+   if (opts.pos_count > 1)
+      cJSON_AddStringToObject(req, "project", opts.positional[1]);
    return req;
 }
 

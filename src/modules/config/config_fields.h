@@ -80,4 +80,9 @@ cJSON *config_field_value_json(const config_t *cfg, const config_field_t *f);
  * invalid value (e.g. non-boolean text for a bool field). */
 int config_field_set_value(config_t *cfg, const config_field_t *f, const char *value);
 
+/* Apply the table-driven defaults for every FLAT config field into cfg. Called by
+ * config_set_defaults so a flat field's default lives only in config_flat_defaults[].
+ * Non-flat defaults remain in config_set_defaults. */
+void config_apply_flat_defaults(config_t *cfg);
+
 #endif /* CONFIG_FIELDS_H */

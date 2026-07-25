@@ -746,6 +746,33 @@ static void test_subcommand_json_flag_is_output_mode(void)
    printf("  PASS: test_subcommand_json_flag_is_output_mode\n");
 }
 
+/* Regression: `aimee index callers <symbol> --json` must not treat the output-mode
+ * `--json` flag as the OPTIONAL `project` positional. Before the fix the marshaler
+ * read raw argv[1], sending project="--json" — which matches no project, so the
+ * server returned an empty caller set for every symbol whenever --json was used
+ * without an explicit project. */
+static void test_index_find_callers_json_flag_not_project(void)
+{
+   char *argv[] = {"helper_double", "--json"};
+   cJSON *req = marshal_index_find_callers(2, argv);
+   assert(req != NULL);
+   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "index.find_callers") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "symbol")->valuestring, "helper_double") == 0);
+   /* No project was given, so the key must be absent (never "--json"). */
+   assert(cJSON_GetObjectItem(req, "project") == NULL);
+   cJSON_Delete(req);
+
+   /* An explicit project is still forwarded, with --json (trailing) ignored. */
+   char *argv2[] = {"helper_double", "myproj", "--json"};
+   cJSON *req2 = marshal_index_find_callers(3, argv2);
+   assert(req2 != NULL);
+   assert(strcmp(cJSON_GetObjectItem(req2, "symbol")->valuestring, "helper_double") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req2, "project")->valuestring, "myproj") == 0);
+   cJSON_Delete(req2);
+
+   printf("  PASS: test_index_find_callers_json_flag_not_project\n");
+}
+
 static void test_trigger_routes_lookup(void)
 {
    cli_v1_route_t route;
@@ -1450,6 +1477,7 @@ int main(void)
    test_git_verify_marshaled_with_session_id();
    test_get_help_route_marshaled();
    test_subcommand_json_flag_is_output_mode();
+   test_index_find_callers_json_flag_not_project();
    test_trigger_routes_lookup();
    test_dogfood_routes_and_marshaling();
    test_eval_routes_and_marshaling();

@@ -1243,6 +1243,15 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
    const char *effective_cwd = tool_effective_cwd(root, cwd);
    int command_targets_worktree = shell_command_targets_worktree(tool_name, cmd, effective_cwd);
    int target_is_worktree = path_tool_targets_worktree(tool_name, fp, effective_cwd);
+   /* A delegate bound to its OWN sandbox container writes into the container's
+    * bind-mounted worktree — that mount IS the isolation boundary. The host-oriented
+    * worktree-location guards below (and the on-disk-state guards further down) are then
+    * irrelevant and actively wrong: they run in the server process against the HOST view
+    * and cannot see the container's cwd as a worktree, so they block every write the
+    * delegate makes ("write blocked because this session is not running in a worktree"),
+    * stalling it to a zero-diff turn. The predicate is only true on that delegate's turn
+    * thread, so interactive/host turns keep every guard. */
+   const int container_delegate = workspace_turn_container_bound();
    if (is_shell_tool(tool_name) && cmd && cJSON_IsString(cmd) &&
        (bash_has_git_push_requiring_gate(cmd->valuestring) ||
         bash_has_gh_pr_create(cmd->valuestring)))
@@ -1280,9 +1289,10 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
       }
    }
 
-   if ((script_tool || is_write_intent(tool_name, root)) && !cwd_is_git_checkout(effective_cwd) &&
-       !session_cwd_is_worktree(effective_cwd) && !command_targets_worktree &&
-       !target_is_worktree && !cwd_is_detached_workspace(effective_cwd))
+   if (!container_delegate && (script_tool || is_write_intent(tool_name, root)) &&
+       !cwd_is_git_checkout(effective_cwd) && !session_cwd_is_worktree(effective_cwd) &&
+       !command_targets_worktree && !target_is_worktree &&
+       !cwd_is_detached_workspace(effective_cwd))
    {
       snprintf(msg_buf, msg_len,
                "BLOCKED: write blocked because this session is not running in a worktree. "
@@ -1519,7 +1529,7 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
    /* Hard block for write intents the redirect above cannot handle (e.g.
     * script tools) when the session is not running in any worktree. A detached
     * workspace is exempt: its tree lives on the serving client, not here. */
-   if ((script_tool || is_write_intent(tool_name, root)) &&
+   if (!container_delegate && (script_tool || is_write_intent(tool_name, root)) &&
        !session_cwd_is_worktree(effective_cwd) && !command_targets_worktree &&
        !target_is_worktree && !cwd_is_detached_workspace(effective_cwd))
    {
@@ -1772,16 +1782,12 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
       }
    }
 
-   /* A delegate bound to its OWN container has no host-oriented file limitations:
-    * its writes land in the container's mounted worktree (its private sandbox), and
-    * the operator directive is that a container delegate may do whatever it needs to
-    * that tree. The on-disk-state write/edit guards below (read-before-write,
-    * truncating-rewrite, stale-edit) are host-safety heuristics that otherwise stall
-    * an autonomous delegate mid-task — e.g. a delegate creating a proof file a prior
-    * retry already left on disk is blocked as a "blind overwrite". Skip them for a
-    * container-bound turn; the predicate is only true on that delegate's turn thread,
-    * so interactive/host turns keep every guard. */
-   const int container_delegate = workspace_turn_container_bound();
+   /* container_delegate (computed above) also exempts the on-disk-state write/edit guards
+    * below (read-before-write, truncating-rewrite, stale-edit): those are host-safety
+    * heuristics that otherwise stall an autonomous delegate mid-task — e.g. a delegate
+    * creating a proof file a prior retry already left on disk is blocked as a "blind
+    * overwrite". A container-bound delegate owns its mounted worktree and may do whatever
+    * it needs to that tree. */
 
    /* Read-before-write guard: block Write to an existing file that has not been
     * read in this session. Agents must read a file before overwriting it so they
