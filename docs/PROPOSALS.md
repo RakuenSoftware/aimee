@@ -131,6 +131,16 @@ The genuinely open work — twenty-three proposals (all but one not yet implemen
   training view reading it) is implemented with zero `kb.c` hot-path change; B2 (a
   production outcome source for code-search) is the remaining open work. Follow-up
   to the done LTR fitter. **Calibrate / Evaluate-Optimize / Gate-Promote.**
+- [Unify embedding + Tier-A synth on one Gemma-4 base; a dedicated EuroBERT reranker](proposals/pending/gemma4-unified-embed-rerank-synth-base.md)
+  — collapses the separate embedder + Ettin reranker + E4B Tier-A synth (three models) into two:
+  a Gemma-4 base (E2B edge / E4B bigger) carrying **embed (LoRA + MRL head) + Tier-A synth**, and a
+  **dedicated EuroBERT `num_labels=1` reranker** on native `/rerank` that deletes the gateway
+  Dense-head hack. Requires a multi-week llama.cpp PLE forward-graph port (entangled with
+  AltUp/LAuReL). Every role gated on its bench (embed ≥ incumbent, synth ≥ 98% E4B, rerank on a
+  measured latency/depth/native-serving ladder). Revised down from an over-scoped "one base, three
+  roles" draft after adversarial review; build-both / slicing / pruning moved to future.
+  Extends (not supersedes) the Tier-A extraction proposal. **Recall / Rerank / Synthesize /
+  Extract / Evaluate-Optimize / Gate-Promote.**
 - [Agentic supervised SWE-bench](proposals/pending/agentic-supervised-swebench.md)
   — a true tool-using, iterating agentic SWE-bench harness so the "beats Reddit's
   −75.5% supervisor-token reduction at no wall-clock penalty" claim is
