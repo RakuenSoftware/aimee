@@ -12902,6 +12902,76 @@ BEGIN
     vs.ciphertext,vs.tag;
 END $$;
 
+-- Admission commits before any private-key use.  A replay returns
+-- newly_admitted=false and must NOT proceed to signing.  Mirrors
+-- kb_management_token_authority_admit; the immutable tuple recorded here is a
+-- pre-private-use admission, not a claim that signing completed.
+CREATE OR REPLACE FUNCTION kb_management_identity_authority_admit(
+  p_correlation_id TEXT,p_jti TEXT)
+RETURNS TABLE(newly_admitted BOOLEAN,correlation_id TEXT,jti TEXT,token_jti TEXT,
+  team_id BIGINT,subject TEXT,tier TEXT,token_issuer TEXT,audience TEXT,kid TEXT,
+  issued_at BIGINT,expires_at BIGINT,installation_id TEXT,installation_generation BIGINT,
+  installation_enrollment_id BIGINT,target_enrollment_id BIGINT,revocation_generation BIGINT,
+  publication_generation SMALLINT,publication_candidate_id TEXT,
+  publication_manifest_sha256 BYTEA,publication_envelope_sha256 BYTEA,
+  token_custody_key_id TEXT,token_version BIGINT,token_public_key BYTEA,
+  token_public_exponent BYTEA,token_public_digest BYTEA,token_jwk_digest BYTEA,
+  vault_seal_epoch BIGINT,hwm_attestation BYTEA,hwm_attestation_digest BYTEA,
+  wrapped_dek BYTEA,nonce BYTEA,ciphertext BYTEA,tag BYTEA,
+  key_use_created_at_epoch BIGINT)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE s RECORD; u public.kb_management_identity_key_use_intent%ROWTYPE; v_new BOOLEAN:=false;
+BEGIN
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_correlation_id,1345462861));
+  SELECT * INTO s FROM public.kb_management_identity_authority_snapshot(p_correlation_id,p_jti);
+  SELECT x.* INTO u FROM public.kb_management_identity_key_use_intent x
+   WHERE x.correlation_id=p_correlation_id FOR SHARE;
+  IF u.correlation_id IS NULL THEN
+    INSERT INTO public.kb_management_identity_key_use_intent(
+      correlation_id,jti,token_jti,team_id,subject,tier,audience,kid,
+      token_custody_key_id,token_version,publication_generation,publication_candidate_id,
+      publication_manifest_sha256,publication_envelope_sha256,vault_seal_epoch,
+      hwm_attestation_digest,purpose)
+    VALUES(s.correlation_id,s.jti,s.token_jti,s.team_id,s.subject,s.tier,s.audience,s.kid,
+      s.token_custody_key_id,s.token_version,s.publication_generation,
+      s.publication_candidate_id,s.publication_manifest_sha256,
+      s.publication_envelope_sha256,s.vault_seal_epoch,s.hwm_attestation_digest,
+      'identity.token.sign.v1') RETURNING * INTO u;
+    PERFORM public.kb_audit_worm_append('kb','identity-token-authority',
+      'vault.key_use',u.token_custody_key_id,'allow',
+      pg_catalog.json_build_object('purpose',u.purpose,'correlation_id',u.correlation_id,
+        'jti',u.jti,'token_jti',u.token_jti,'team_id',u.team_id,'subject',u.subject,
+        'tier',u.tier,'kid',u.kid,'version',u.token_version,
+        'publication_generation',u.publication_generation,
+        'publication_candidate_id',u.publication_candidate_id,
+        'vault_seal_epoch',u.vault_seal_epoch,
+        'hwm_attestation_digest',pg_catalog.encode(u.hwm_attestation_digest,'hex'))::TEXT);
+    v_new:=true;
+  ELSIF ROW(u.jti,u.token_jti,u.team_id,u.subject,u.tier,u.audience,u.kid,
+      u.token_custody_key_id,u.token_version,u.publication_generation,
+      u.publication_candidate_id,u.publication_manifest_sha256,
+      u.publication_envelope_sha256,u.vault_seal_epoch,u.hwm_attestation_digest)
+    IS DISTINCT FROM ROW(s.jti,s.token_jti,s.team_id,s.subject,s.tier,s.audience,s.kid,
+      s.token_custody_key_id,s.token_version,s.publication_generation,
+      s.publication_candidate_id,s.publication_manifest_sha256,
+      s.publication_envelope_sha256,s.vault_seal_epoch,s.hwm_attestation_digest) THEN
+    -- Includes the case where the live grant moved the tier between admissions:
+    -- the recorded admission and the current authorization disagree, so refuse
+    -- rather than sign under either.
+    RAISE EXCEPTION 'identity token authority: admission replay conflict' USING ERRCODE='23505';
+  END IF;
+  RETURN QUERY SELECT v_new,s.correlation_id,s.jti,s.token_jti,s.team_id,s.subject,s.tier,
+    s.token_issuer,s.audience,s.kid,s.issued_at,s.expires_at,
+    s.installation_id,s.installation_generation,s.installation_enrollment_id,
+    s.target_enrollment_id,s.revocation_generation,s.publication_generation,
+    s.publication_candidate_id,s.publication_manifest_sha256,s.publication_envelope_sha256,
+    s.token_custody_key_id,s.token_version,s.token_public_key,s.token_public_exponent,
+    s.token_public_digest,s.token_jwk_digest,s.vault_seal_epoch,s.hwm_attestation,
+    s.hwm_attestation_digest,s.wrapped_dek,s.nonce,s.ciphertext,s.tag,
+    extract(epoch FROM u.created_at)::BIGINT;
+END $$;
+
 CREATE OR REPLACE FUNCTION kb_management_token_authority_use(
   p_correlation_id TEXT,p_jti TEXT)
 RETURNS TABLE(newly_admitted BOOLEAN,correlation_id TEXT,jti TEXT,team_id BIGINT,

@@ -135,6 +135,14 @@ BEGIN
   -- DELETE stays withheld too: a grant is revoked, never erased.
   GRANT SELECT ON kb_write_tier_grant TO aimee_kb_runtime;
   REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON kb_write_tier_grant FROM aimee_kb_runtime;
+
+  -- Identity-token authority state is authority-owned, exactly like the
+  -- management and read intents it sits beside: ordinary runtime must not be
+  -- able to read a pending mint or the immutable key-use record, even though RLS
+  -- would already return no rows. The blanket "GRANT ... ON ALL TABLES" above
+  -- reaches these tables, so the grant has to be taken back explicitly.
+  REVOKE ALL ON kb_management_identity_intent,
+    kb_management_identity_key_use_intent FROM aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION
     kb_write_tier_grant_set(TEXT,BIGINT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION
