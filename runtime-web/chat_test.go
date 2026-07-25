@@ -903,3 +903,78 @@ func TestHandleChatSessionEventsRequiresSid(t *testing.T) {
 		t.Fatalf("missing sid: code=%d", rr.Code)
 	}
 }
+
+func TestHandleChatPrimaryGetProxiesV1(t *testing.T) {
+	var gotMethod, gotPath string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/sessions/web1/primary", func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		fmt.Fprint(w, `{"agent":"gpu-mid"}`)
+	})
+	s := &server{cfg: startFakeV1(t, mux)}
+
+	rr := httptest.NewRecorder()
+	s.handleChatPrimary(rr, httptest.NewRequest(http.MethodGet, "/api/chat/primary?sid=web1", nil))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"gpu-mid"`) {
+		t.Fatalf("get: code=%d body=%q", rr.Code, rr.Body.String())
+	}
+	if gotMethod != http.MethodGet || gotPath != "/v1/sessions/web1/primary" {
+		t.Fatalf("proxied %s %s", gotMethod, gotPath)
+	}
+}
+
+func TestHandleChatPrimarySetProxiesV1(t *testing.T) {
+	var gotMethod, gotPath, gotBody string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/sessions/web1/primary", func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		fmt.Fprint(w, `{"agent":"gpu-mid"}`)
+	})
+	s := &server{cfg: startFakeV1(t, mux)}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/primary", strings.NewReader(`{"sid":"web1","agent":"gpu-mid"}`))
+	s.handleChatPrimary(rr, req)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"gpu-mid"`) {
+		t.Fatalf("set: code=%d body=%q", rr.Code, rr.Body.String())
+	}
+	if gotMethod != http.MethodPost || gotPath != "/v1/sessions/web1/primary" {
+		t.Fatalf("proxied %s %s", gotMethod, gotPath)
+	}
+	var sent map[string]string
+	if json.Unmarshal([]byte(gotBody), &sent); sent["agent"] != "gpu-mid" {
+		t.Fatalf("forwarded body = %q", gotBody)
+	}
+}
+
+// A tab that has not sent its first message has no session id yet. The handler
+// must answer "nothing pinned" locally rather than proxying /v1/sessions//primary,
+// so the selector falls back to the configured default instead of erroring.
+func TestHandleChatPrimaryWithoutSidReportsUnpinned(t *testing.T) {
+	proxied := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { proxied = true })
+	s := &server{cfg: startFakeV1(t, mux)}
+
+	rr := httptest.NewRecorder()
+	s.handleChatPrimary(rr, httptest.NewRequest(http.MethodGet, "/api/chat/primary", nil))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"agent":""`) {
+		t.Fatalf("no-sid: code=%d body=%q", rr.Code, rr.Body.String())
+	}
+	if proxied {
+		t.Fatal("must not proxy upstream without a session id")
+	}
+}
+
+// Setting requires both fields; a missing agent is a 400, never a write.
+func TestHandleChatPrimarySetRejectsMissingFields(t *testing.T) {
+	s := &server{cfg: &config{socketPath: filepath.Join(t.TempDir(), "aimee.sock")}}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/primary", strings.NewReader(`{"sid":"web1"}`))
+	s.handleChatPrimary(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%q", rr.Code, rr.Body.String())
+	}
+}

@@ -118,15 +118,6 @@ export const TAB_TUTORIALS: Record<string, Tutorial> = {
     ],
     seeAlso: '/editor',
   },
-  '/pipeline': {
-    title: 'Pipeline',
-    body: [
-      'The curator pipeline: its stages grouped by resource lane (LLM vs INDEX), in run order.',
-      'Toggle a stage’s enable flag — writes through config; the KB picks it up on next load.',
-      'Lane/order/labels mirror the C stage registry; the enable state is live from config.',
-    ],
-    seeAlso: '/dashboard',
-  },
   '/editor': {
     title: 'Editor',
     body: [

@@ -21,7 +21,6 @@ export const NAV_ITEMS: Tab[] = [
   { label: 'Roundtable', icon: '⚖️', route: '/roundtable', hint: 'Configure the multi-model review panels — seats, aggregator, and loop knobs.' },
   { label: 'Projects', icon: '📁', route: '/projects', hint: 'Connect the git repositories Aimee works on and store sealed per-host credentials.' },
   { label: 'Graph', icon: '🕸️', route: '/graph', hint: 'Read-only explorer of the code-projection graph for the session’s project.' },
-  { label: 'Pipeline', icon: '🧩', route: '/pipeline', hint: 'The curator pipeline — toggle each stage’s enable flag by resource lane.' },
   { label: 'Editor', icon: '🖥️', route: '/editor', hint: 'In-app VS Code bound to the session’s isolated worktree — the same tree the agent edits.' },
   { label: 'Settings', icon: '⚙️', route: '/settings', hint: 'Every typed config option with plain-English help; restart-sensitive keys are badged.' },
 ];
