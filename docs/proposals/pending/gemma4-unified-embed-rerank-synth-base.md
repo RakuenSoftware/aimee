@@ -1,399 +1,342 @@
-# Proposal: one Gemma-4 base for embedding, reranking, and Tier-A synth
+# Proposal: unify embedding + Tier-A synth on one Gemma-4 base; a dedicated EuroBERT reranker
 
-- **State:** PENDING — design/idea only, no code in this PR. Consolidates a long
-  design thread on replacing aimee's embedder + reranker + Tier-A synth model with
-  a **single Gemma-4 backbone** carrying three task roles. Decisions below are
-  *proposed*, not settled; the open forks are called out in §8 and every model swap
-  is gated by a benchmark in §7. Nothing here flips a flag on merge — it is the
-  artifact to decide against.
+- **State:** PENDING — design/idea only, no code in this PR. This is a **revised**
+  version: an earlier draft over-claimed a "one base, three roles" unification (rerank
+  included) and asserted CPU fit "by construction"; an adversarial review found those
+  claims wrong or overstated. This revision narrows to the defensible core — **embed +
+  Tier-A synth on one Gemma-4 base, rerank as a *separate* dedicated encoder** — fixes the
+  technical claims, and moves the speculative ladder/pruning/race material to §12 (future).
+  Nothing here flips a flag on merge.
 - **Author:** JBailes
 - **Date:** 2026-07-25
-- **Charter roles:** Recall (dense embedding for retrieval), Rerank (cross-encoder
-  relevance scoring), Synthesize / Extract (Tier-A mechanical passes),
-  Evaluate-Optimize (A/B each role against its incumbent on a fixed set),
-  Gate-Promote (never a silent model swap; shadow → canary → default). Lives inside
-  the existing `aimee-llm` per-role serving split and the Tier-A/Tier-B curator
-  split.
+- **Charter roles:** Recall (dense embedding), Rerank (cross-encoder scoring),
+  Synthesize / Extract (Tier-A mechanical passes), Evaluate-Optimize (A/B each role vs its
+  incumbent), Gate-Promote (never a silent swap; shadow → canary → default).
 
 ## Thesis
 
-The `aimee-llm` container already serves embedding, reranking, and synthesis from
-one image (see [`unified-llm-container`](../done/unified-llm-container.md),
-[`KB_LLM_BACKENDS.md`](../../KB_LLM_BACKENDS.md)) — but as **three separate models**:
-a Qwen3/pplx embedder, an Ettin cross-encoder reranker, and a Gemma-4 synth model
-(E4B on the CPU/Tier-A tier). That split carries three costs we keep paying:
+The `aimee-llm` container serves embedding, reranking, and synthesis from one image
+([`unified-llm-container`](../done/unified-llm-container.md)), but as **three separate
+models**: a Qwen3-Embedding-0.6B embedder, an Ettin cross-encoder reranker (served via a
+**gateway-side Dense head** because its sentence-transformers score head does not survive
+GGUF conversion — see
+[`P2-serving-validation.md`](../../../benchmarks/results/unified-llm/P2-serving-validation.md)),
+and a Gemma-4 synth model (E4B on the CPU/Tier-A tier).
 
-1. **Three models resident** — three cold-fetches, three caches, three things to
-   version, and on the CPU tier three sets of weights in RAM at once.
-2. **The reranker is a conversion hack.** The Ettin ST score head does not survive
-   GGUF conversion, so we serve the encoder headless and re-apply a Dense head in
-   the gateway (`aimee_llm_rerank_head.py`), plus a CI job to pre-bake it
-   ([`P2-serving-validation.md`](../../../benchmarks/results/unified-llm/P2-serving-validation.md)).
-   It is the one non-llama.cpp compute in the stack and the part we like least.
-3. **No shared capacity.** Embedding, reranking, and synth cannot share weights, so
-   a box that runs all three pays for all three independently.
+Two coherent moves:
 
-Gemma-4's architecture makes a different shape possible: **one backbone, three
-roles.** E2B is a MatFormer-nested submodel of E4B, so an E2B *is* the elastic
-compression of the synth model we already run; a frozen backbone plus small
-task-specific LoRA adapters (the Jina-v5 pattern) lets that same backbone serve
-embedding and reranking too. The result replaces all three models with **one base +
-a few MB of adapters** — and, because E2B is smaller than E4B, comes out *lighter
-than today's synth model alone* while absorbing the embedder and reranker into it.
+1. **Unify *embedding + Tier-A synth* onto one Gemma-4 base.** The CPU tier already runs
+   E4B for synth; adding an embedding LoRA + MRL head to that same base collapses the
+   embedder into the synth model. Instantiated per tier: **E2B (edge)** and **E4B (bigger
+   boxes)** — same lineage, MatFormer-nested.
+2. **Replace the reranker with a *dedicated* encoder that serves native `/rerank`.** The
+   reranker stays a separate model (a cross-encoder is the right, fast tool), but a
+   `num_labels=1` encoder head deletes the gateway Dense-head hack. This is *not* unified
+   onto the Gemma base — an earlier draft claimed a "decoder yes-token" reranker could serve
+   native `/rerank`; that is a category error (§7).
 
-This proposal is the specific realization of Option B in
-[`dedicated-extraction-model-curator-tier-a`](./dedicated-extraction-model-curator-tier-a.md)
-("a fine-tuned Tier-A model distilled from the incumbent"), extended so the same
-fine-tuned base also carries Recall and Rerank.
+Net: three models become **two** (one unified embed+synth base + one reranker), the gateway
+rerank hack dies, and embedding gains MRL-configurable dims.
 
 ## Goal
 
-1. **One shipped model artifact** — a Gemma-4 base (proposed: E2B) plus task
-   adapters — serving Recall, Rerank, and Tier-A Synthesize through the existing
-   `aimee-llm` per-role backends.
-2. **Tier-A synth on par with stock E4B** on the *mechanical* tier we actually run
-   on CPU — verified on the curator-synth benchmark, not assumed.
-3. **Embedding that matches a 4B/8B teacher on aimee's own retrieval** (the
-   `embedder-sweep` LoCoMo + LongMemEval gate), CPU-usable, MRL-configurable dims.
-4. **Native reranking** — delete the gateway Dense-head hack; rerank serves through
-   llama.cpp with no bespoke gateway compute.
-5. **A net resource win** — fewer models to fetch/cache/hold; a footprint no larger
-   (target: smaller) than today's CPU tier.
-6. **Never a silent swap** — each role graduates shadow → canary → default through
-   the shipped calibration/bandit substrate; an operator can pin the incumbent.
+1. **Embed + Tier-A synth from one Gemma-4 base** (E2B edge / E4B bigger), via the existing
+   per-role backends.
+2. **Tier-A synth quality preserved** — E4B tier serves *actual* E4B (no change); the E2B
+   tier must recover ≥ 98% of E4B's Tier-A precision/recall on the curator-synth bench.
+3. **Embedding ≥ the incumbent Qwen3 embedder** on aimee's retrieval (LoCoMo +
+   LongMemEval), CPU-usable, MRL-configurable dims.
+4. **A dedicated reranker on native `/rerank`** — delete the gateway Dense-head hack.
+5. **Never a silent swap** — each role graduates shadow → canary → default via the shipped
+   calibration/bandit substrate.
 
 ## §0 What already exists (so we don't rebuild it)
 
-- **Per-role serving.** `aimee-llm-supervisor.sh` already runs distinct embed
-  (8081), rerank (8082), and synth (8083) backends behind the gateway
-  (`aimee_llm_gateway.py`), each an OpenAI-compatible llama.cpp endpoint. Pointing
-  all three at one base GGUF + per-role LoRA is a supervisor/config change, not new
-  plumbing.
-- **Tier-A/Tier-B split + `disable_thinking`.** `kb_curator_provider_for_stage`
-  resolves Tier-A independently of Tier-B with no weak fallback; the shipped
-  `disable_thinking` fix already makes mechanical extraction correct and cheap. A
+- **Per-role serving.** `aimee-llm-supervisor.sh` runs embed (8081), rerank (8082), synth
+  (8083) behind the gateway. Embed/rerank are `--embeddings`/`--reranking` servers; synth is
+  the OpenAI `/v1/chat` server.
+- **Tier-A/Tier-B split + `disable_thinking`** in `kb_curator_provider_for_stage`; a
   distilled E2B is a *model* change on the Tier-A route.
-- **Benchmarks.** `benchmarks/embedder-sweep.sh` (Recall\@K / MRR on LoCoMo +
-  LongMemEval), the curator-synth bench (`benchmarks/results/synth/`), and the
-  reranker latency harness (`benchmarks/results/reranker/LATENCY.md`) are the three
-  gates §7 reuses. The P2 serving-validation doc already recorded the Gemma/Vulkan
-  serving flags and the Ettin conversion finding.
-- **Calibration + bandit.** `kb_calibrate` / `kb_bandit` drive shadow → canary →
-  default rollouts — the vehicle for every §7 A/B.
-- **Grammar-constrained output.** `provider_client_build_openai` emits
-  `response_format: json_schema`; a `--jinja` llama.cpp endpoint returns
-  schema-valid JSON, so the synth role needs no prompt babysitting.
-- **pgvector + MRL substrate.** DB2 holds vectors as `halfvec` (indexable to 4000
-  dims); the versioned-index cutover path for a dim change already exists
-  (`embedder-sweep.md`). MRL turns most future dim moves into truncate-and-reindex
-  rather than re-embed.
+- **Benchmarks.** `benchmarks/embedder-sweep.sh` (Recall@K/MRR), the curator-synth bench
+  (`benchmarks/results/synth/`), and the reranker latency harness
+  (`benchmarks/results/reranker/LATENCY.md`) are the three gates §8 reuses.
+- **Calibration + bandit** (`kb_calibrate` / `kb_bandit`) drive shadow → canary → default.
+- **pgvector + versioned-index cutover** (`halfvec`, indexable to 4000 dims;
+  `embedder-sweep.md` / `unified-llm-cutover.md`).
 
 ## §1 The unification, quantified
 
 | | today (CPU tier) | proposed |
 |---|---|---|
-| Synth (Tier-A) | Gemma-4 **E4B** (dense) | Gemma-4 **E2B**, distilled from E4B on Tier-A traffic |
-| Embedding | separate Qwen3/pplx embedder | E2B base **+ embed LoRA + MRL head** |
-| Reranking | Ettin encoder **+ gateway Dense head + CI bake** | E2B base **+ rerank LoRA**, native llama.cpp `/rerank` |
-| Resident weights | 3 models | 1 base + ~few MB adapters |
+| Synth (Tier-A) | Gemma-4 **E4B** (`gemma-4-E4B-it-Q4_K_M`) | same base; **E2B** on edge, E4B on bigger tiers |
+| Embedding | separate Qwen3-Embedding-0.6B | **same base + embed LoRA + MRL head** |
+| Reranking | Ettin encoder + **gateway Dense head + CI bake** | **dedicated encoder, `num_labels=1`, native `/rerank`** |
+| Resident models | 3 | **2** (unified embed+synth base; reranker) |
 | Reranker gateway compute | ~4 MB numpy Dense head | none |
-| Footprint vs. today's synth alone | baseline | **≤ baseline** (E2B < E4B) |
 
-The claim in the last row is the headline and the thing §7 must prove: absorbing
-two models while getting *smaller* than the one synth model we run now.
+## §2 The base (Gemma-4 E2B edge / E4B bigger)
 
-## §2 The base (proposed: Gemma-4 E2B — gated on the CPU budget)
+Gemma-4 (Apache 2.0), MatFormer-nested E-series: **E2B** (2.3B effective / 5B total) is a
+nested submodel of **E4B** (4.5B effective / 8B total). Chosen because it is the *same
+lineage as the E4B synth model already deployed*, so "E2B matches E4B synth" is a
+distill-within-the-family, and because MatFormer + MRL compose (elastic size × elastic dim).
 
-A prior base-selection pass compared EuroBERT (encoder, Apache-2.0, CPU-optimal,
-~15 langs), ModernBERT (encoder, English+code only), Qwen3-0.6B-Base (decoder,
-Apache-2.0, the proven Jina-v5 base), EmbeddingGemma-300M, and Gemma-4 E2B. **E2B is
-proposed** for the unified artifact because only it makes the *three-role* story
-work: it is the same lineage as the E4B synth model (so "match E4B synth" is a
-distill-within-the-family), it is now Apache-2.0, and its MatFormer nesting composes
-with MRL — elastic **model size** × elastic **embedding dim** from one artifact.
+**Resource sizing — corrected.** An earlier draft argued "resident ≈ effective, so fit is
+settled by construction." That is **wrong for a CPU tier**: PLE (Per-Layer Embeddings) saves
+*accelerator* VRAM by holding per-layer tables in host memory — but on a CPU-only box host
+RAM *is* the resident tier, so **resident ≈ total (~5B), not effective (~2.3B)**. E2B is
+still lighter than the deployed E4B (5B total vs 8B total), so the direction holds — but:
+- **not "half," and not "by construction"** — size from *total* params + KV + the Q8-pinned
+  PLE tables (§4), and **measure RSS of a real E2B GGUF on the target box** before calling
+  fit resolved. The supervisor already caps `--cache-ram` to avoid host OOM on a 16 GB box
+  (`aimee-llm-supervisor.sh`), so RAM is contended even well above the stated edge target.
+- The "2-core / 4 GB" figure is a *stated target*, not a measured fit; reconcile it against
+  the real serving box (the current cpu-tier download alone is ~6.5 GB per `KB_LLM_BACKENDS`).
 
-**Resource fit is not a concern:** the CPU tier already deploys the *larger* E4B
-for Tier-A synth, so E2B — roughly half the active compute (2.3B effective vs. E4B's
-~4B) — is a strict **reduction**. PLE keeps resident memory near the *effective*
-size (its whole reason for existing, and why the E-series runs on edge hardware), so
-sizing from the 5B *total* overstates it; the deployed E4B is the existence proof
-that E2B fits the target 2-core / 4 GB box with headroom. The single-forward embed
-and rerank passes are lighter still than the E4B *generation* already run there. The
-open risk is not fit but **synth-quality parity** (§7) — recovering the E4B→E2B
-nested-submodel gap; if that gap proves unrecoverable on the mechanical tier, the
-fallback is a dedicated small embedder + encoder reranker with Tier-A staying on a
-capable node.
+## §3 The synth role (Tier-A)
 
-## §3 Three roles off one base
+**Serving.** One base GGUF; the synth backend (8083) runs it in generation mode with
+`response_format: json_schema` for the grammar-constrained extract/index passes (no prompt
+babysitting — `provider_client_build_openai` already emits the schema). `disable_thinking`
+stays set.
 
-- **Synthesize (Tier-A).** Distill **E4B → E2B** on real + synthetic Tier-A traffic
-  (the mechanical extract/index passes — *not* Tier-B reasoning, which the CPU tier
-  never runs). Because the task is mechanical and E2B is already E4B's nested
-  submodel, closing the residual quality gap on *this* distribution is tractable.
-  Synth is served by the (distilled) base directly.
-- **Recall (embedding).** An **embed LoRA + last-token pooling + MRL projection
-  head** on the frozen distilled base. Last-token pooling (not a bidirectional
-  conversion) is deliberate: it keeps the base a working generator so synth is
-  preserved. Honest ceiling: this sits a notch below a dedicated bidirectional
-  embedder (EmbeddingGemma went bidirectional and thereby stopped being a
-  generator) — LoRA is the balance point, and §7 measures the gap.
-- **Rerank.** A **rerank LoRA** (LLM-as-reranker, yes-token scoring) on the same
-  base — **native llama.cpp `/rerank`, no gateway head.** The honest catch: this is
-  a *decoder* cross-encoder, the efficiency profile we disliked at Qwen3-4B/8B.
-  Reranking is the CPU-dominant per-query cost (top-K forward passes), so §7 must
-  confirm it fits the latency budget. Mitigations: the base is already resident (no
-  extra load), tight top-K + score-based early-exit, and — the MatFormer payoff —
-  rerank on a **thinner nested slice** of the base than synth uses. **Fallback:** if
-  unified rerank misses budget, rerank stays a dedicated small encoder, but with a
-  `num_labels=1` head that serves through native `/rerank` (killing the gateway hack
-  regardless). Either outcome beats today.
+**The E4B tier is free.** A box that affords E4B runs *actual* E4B for synth — byte-identical
+to today — and unification there means *only* adding the embed adapter (§3-embed). **No synth
+training, no parity risk** on that tier. The synth work below is entirely about the **E2B**
+edge tier.
 
-## §4 Prerequisite work item — PLE in llama.cpp
+**E2B synth = distill E4B → E2B on the Tier-A distribution.**
+- *Signal:* sequence-level KD (SFT on the teacher's outputs) is the floor; add token-level KL
+  where E4B logits are available. The task is **grammar-bounded JSON**, which is the regime a
+  small student closes most easily — favorable.
+- *Data:* replay real Tier-A traffic (the `memory_facts` drain + doc/code extract stages) as
+  the primary corpus, plus synthetic edge cases (first/third person, negation, multi-fact,
+  ambiguous). This is exactly the **distillation bootstrap** the Tier-A extraction proposal
+  defines: run the incumbent E4B (thinking-off, unbudgeted) over the corpus, keep
+  high-confidence outputs that survive the `rel_types` gate as **silver labels**, plus a
+  small human-audited **gold** set for eval.
+- *Gate (§8):* E2B Tier-A precision/recall **≥ 98% of stock E4B** on the curator-synth bench.
+  Fallback is **per-Tier-A-stage**, not all-or-nothing: if one stage (e.g. a nuanced
+  relation extract) regresses past the bar, route *that stage* to E4B and keep E2B for the
+  rest. The `kb_curator_provider_for_stage` seam already supports per-stage routing.
+- *Optional lift (§12 teacher escalation):* if E4B→E2B leaves a gap, distil E2B from a
+  **larger** teacher (12B / 26B-A4B) instead of E4B — the student can then exceed what
+  E4B-as-teacher alone yields on the hardest Tier-A stages.
 
-E2B/E4B rely on Per-Layer Embeddings; llama.cpp loads the PLE metadata but the
-forward graph never injects the per-layer residual
-([ggml-org/llama.cpp#22243](https://github.com/ggml-org/llama.cpp/issues/22243) —
-proposal stage, no PR/branch/assignee). So the models "run" but embeddings are
-silently degraded — disqualifying for an embedder until fixed. We vendor a pinned
-llama.cpp (`LLAMA_TAG` in `Dockerfile.aimee-llm`), so *shipping* a patch is routine;
-the cost is *implementing* it: port `get_per_layer_inputs` / `project_per_layer_inputs`
-from the HF Transformers reference (the PR cited in #22243) into the ggml graph, verify
-**embedding parity** against the HF reference using the P2/`embedder-sweep`
-harness, and upstream it to shed the rebase burden. Localized, reference-guided,
-bounded — but real ggml work, and **step zero**: it is paid once and amortized
-across all three roles and both sizes.
+## §3b The embed role (Recall)
 
-## §5 Training sequence
+**Serving.** Same base GGUF, the embed backend (8081) in `--embeddings` mode with **last-token
+pooling** + the MRL head; a shared read-only mmap of the base with the synth instance, so the
+weights are resident once.
 
-1. **Synth distill:** distill Tier-A synth into *both* E4B and E2B from a **shared,
-   larger teacher** (e.g. the 12B / 26B-A4B already run on the bigger tiers, or a
-   larger external model) — not only E4B→E2B — so both students are pulled toward one
-   target, which also aligns their output geometry for the cross-tier shared space
-   (§10). Silver labels are the teacher's high-confidence outputs (the Tier-A
-   extraction proposal's distillation bootstrap) plus a human-audited gold eval set.
-   Plain E4B→E2B remains a valid cheaper fallback.
-2. **Freeze** the distilled base.
-3. **Embed adapter:** task-targeted embedding distillation (the Jina-v5 /
-   EmbeddingGemma recipe) — embedding-space distillation from a clean-licensed 4B/8B
-   teacher (Apache/MIT only; **no CC-BY-NC teacher** — the NC restriction propagates
-   to the student), InfoNCE on aimee-mined hard negatives, a uniformity/GOR term for
-   quantization robustness, and a **Matryoshka** loss over the dim ladder (§6).
-4. **Rerank adapter:** yes-token relevance scoring on labeled (query, doc) pairs.
-5. **Quantization-aware** finish so the shipped Q-level holds recall (PLE tables
-   pinned Q8_0 per §4).
-
-Teacher choice is an open fork (§8): Qwen3-Embedding-8B (Apache-2.0) is the safe
-clean teacher; Harrier-OSS-v1 (MIT, if confirmed) and API teachers (Voyage-4 for
-code, Gemini-2) are candidates — multi-teacher ensembles are permitted since
-embedding-space distillation does not require the teacher's dim to match the
-student's.
-
-## §6 Dimensions, configurable via MRL
-
-- **One MRL ladder**, proposed `[256, 512, 1024, 2048, 2560, 4000]` — 4000 caps at
-  the `halfvec` index ceiling; the vector is front-loaded so every slice earns its
-  recall (measured per-slice on the sweep).
-- **Operator picks the dim** via `AIMEE_EMBEDDING_DIM`; the same GGUF serves 1024 on
-  a CPU box and a wider slice on a GPU box.
-- **Tier moves stop being re-embeds.** Because the smaller dims are truncated
-  prefixes of the larger, embed-once-at-max and dropping to a smaller tier is a
-  **truncate-and-reindex** (slice stored vectors, re-normalize, rebuild the
-  `halfvec(k)` index), not a re-run of the model over the corpus — collapsing the
-  re-embed runbook in `KB_LLM_BACKENDS.md` into an index rebuild.
-- **Not chasing width for quality.** Jina hit 8B-parity at 1024 dims; the sweep
-  decides how much of the ladder earns its storage on aimee's corpus.
-
-## §7 Evaluation & rollout (gates every role swap)
-
-Each role A/Bs against its incumbent; none flips silently (charter Gate-Promote):
-
-- **Synth:** curator-synth bench — E2B Tier-A precision/recall ≥ stock-E4B on the
-  mechanical tasks, with a latency/footprint win. Fall back to E4B per Tier-A task
-  that resists.
-- **Embed:** `embedder-sweep` — Recall\@5 / MRR ≥ the 4B/8B teacher on LoCoMo +
-  LongMemEval at the shipped dim and Q-level; per-slice curve committed.
-- **Rerank:** latency harness — top-K rerank within the CPU budget *and* ranking
-  quality ≥ the Ettin incumbent; otherwise take the §3 dedicated-encoder fallback.
-- **Rollout:** shadow (log, commit neither) → canary → default via `kb_bandit`;
-  operator-pinnable per role from the KB console.
-
-## §8 Open decisions (explicitly unsettled)
-
-1. **CPU budget** — target 2-core / 4 GB. **Resolved for the base:** the tier already
-   runs the larger E4B, so E2B (less resource-intensive) is within budget by
-   construction; the base is confirmed E2B. The residual CPU question is only
-   unified-vs-dedicated rerank latency (§3), not whether the base fits.
-2. **Language breadth** — E2B's 140+ langs vs. a narrower set; decides whether the
-   encoder fallbacks (EuroBERT ~15 langs) are even viable alternates.
-3. **Teacher(s)** for the embed distill (§5) — clean-licensed single vs. ensemble.
-4. **Rerank: unified LoRA vs. dedicated encoder** — resolved by the §7 latency gate,
-   not up front.
-
-## §9 Model extraction & size reduction (validation phase)
-
-The narrow use case — multilingual document + code ingestion (embed, rerank, Tier-A
-extract), no image/audio, no general chat — permits cutting E2B down to only what
-serves ingestion. This is **not required for fit** (E2B is already lighter than the
-deployed E4B); it is a **latency / throughput headroom** lever, run as a **gated
-experiment *after* the base pipeline is proven** — not a front-loaded decision.
-
-**Sequencing — an incremental, gated ladder, tested between each step.** Prove the
-base unified pipeline first (PLE port §4 → E4B→E2B synth distill + embed/rerank
-adapters §5 → all §7 gates green on stock text-only E2B). Then apply the tiers in
-order, re-running the three gates (embedder-sweep, curator-synth, rerank latency)
-*after each* so every cut has its own pass/fail checkpoint before the next begins.
-Tiers 1→2 are the incremental path (each well-defined, each independently validated).
-Tier 3, *if feasible at all*, is not judged against the raw gates but **head-to-head
-against the surviving Tier-2 model** — adopted only if it is materially smaller/faster
-at equal gate quality, enough to pay for its bespoke-serving cost.
-
-- **Tier 1 — drop the modality towers (applied during the base build; lossless).**
-  Convert text-only: the vision (SigLIP-class — this is the "OCR" path) and audio
-  (USM-class) encoders are never instantiated. Hundreds of MB–~1 GB off, zero
-  text-quality cost, standard Gemma-text serving. The baseline cut, re-confirmed in
-  validation.
-- **Tier 2 — extract a smaller MatFormer slice (low risk).** Pull the smallest nested
-  submodel that still passes the gates. It is a Google-trained coherent submodel and
-  stays a known Gemma shape, so no extra serving burden.
-- **Tier 3 — prune-and-distill to a custom size (Minitron-style; highest payoff,
-  highest serving cost).** Structured-prune depth / FFN-width / heads (and vocab only
-  for scripts never ingested — multilingual caps this; PLE tables shrink with any
-  vocab cut), then heal by distilling E4B → pruned student on aimee's distribution.
-  The narrow heal distribution is precisely what permits aggressive pruning. Cost: a
-  bespoke architecture the vendored llama.cpp must carry, compounding the §4 PLE work
-  — evaluated head-to-head against the Tier-2 slice (not just against the raw gates):
-  it wins only if it is materially smaller/faster at equal quality; otherwise Tier 2
-  stands and Tier 3 is parked.
-
-Every cut is a search for the smallest model that still passes §7, not a fixed
-target; none flips a default (charter Gate-Promote).
-
-## §10 Generalization across the tier ladder (E4B and beyond)
-
-The design is **backbone-agnostic** — it is "a Gemma-4 MatFormer base + synth +
-embed/rerank adapters + MRL," not anything specific to E2B. Since E2B is a MatFormer
-submodel *inside* E4B, the same pattern applies up the ladder as **one program**, not
-a per-tier rebuild:
-
-- **Train against E4B, slice down.** With nested / MatFormer-aware objectives, training
-  the unified stack on E4B can yield the E2B tier by *slicing* — E4B for larger boxes,
-  E2B-slice for the edge, from one effort.
-- **The E4B tier carries no synth-parity risk.** The §7 open risk (recovering the
-  E4B→E2B nested-submodel gap) is specific to the *shrunk* tier. An E4B-unified base
-  runs *actual* E4B for synth and only adds adapters — so E4B is the **lower-risk**
-  instantiation and the natural place to **prove the three-role mechanics** (adapters,
-  MRL head, native `/rerank`, the §4 PLE port) *before* attempting the E2B compression.
-- **Cross-tier shared embedding space (the prize, if trained for).** If the MRL heads
-  across slices are aligned to one teacher space, tiers share an embedding space — a KB
-  embeds on the edge (E2B) and queries/reranks on a larger tier *without re-embedding*
-  (the "index big, query cheap" property). This is a deliberate space-alignment
-  objective, not automatic.
-
-Caveats: **slice-after-training is not free** — preserving nestedness requires
-MatFormer-aware nested training *or* a frozen backbone with per-slice adapters (naive
-full fine-tune breaks the nesting); **role heads likely need per-tier validation** (the
-backbone nests, the heads may not transfer for free); and the pattern is **cleanest
-within the MatFormer E-series (E2B↔E4B)** — the dense-12B / MoE-26B synth models that
-serve Tier-B reasoning have no MatFormer nesting and are a separate unification question,
-out of scope here.
-
-**Build both and race them.** The comparison is *not* "pick a champion" — E4B and E2B
-have different quality-per-resource profiles, so they most likely each win a *different*
-tier. The evaluation output is a **tier → model Pareto map**: on the 2-core / 4 GB edge,
-E2B may win by *fitting interactively at all*; on a box that affords it, E4B's higher
-embed/synth quality may be worth the cost. The marginal cost of building both is low —
-the expensive machinery (PLE port, teacher, distillation data, bench harness, adapter
-recipe) is paid once, so the second backbone is a re-run, not a rebuild. The sharpest form
-fixes a **cost target** (the edge tier's latency/RAM) and races contestants that
-approach it *from both directions*:
-
-- **Distill up from below** — E2B (a MatFormer slice or a dedicated E4B→E2B distill),
-  or a further-downsized sub-E2B trained toward E4B quality on aimee's narrow
+**Training — the two-stage task-targeted recipe** (Jina-v5 / EmbeddingGemma shaped):
+1. *General embedding distillation* to build the space: **embedding-space** distillation —
+   project the student's pooled vector into the teacher's space via a learned linear ψ and
+   minimize cosine distance (Jina's ablation: this beats score/similarity-matrix distillation,
+   which plateaus). Teacher per §5's licensing gate (default Qwen3-Embedding-8B).
+2. *Retrieval adapter* with a hybrid loss: **InfoNCE** over aimee-mined hard negatives +
+   a **distillation-preservation** term + a **uniformity/GOR** term (cheap at full precision,
+   decisive for truncation/quantization robustness) + the **MRL nested loss** over the ladder
+   (§6). Adopt asymmetric **instruction prefixes** (query/doc), the Qwen3-Embedding/EmbeddingGemma
+   convention.
+- *Hard negatives* are mined from aimee's **real retrieval logs** (the ranker-outcome / kb_hybrid
+  data) — the domain last mile that lets a small student beat a general teacher on aimee's
   distribution.
-- **Trim down from above** — E4B structurally pruned to ~E2B size and speed
-  (Minitron-style, §9 Tier 3), healed by distillation.
 
-E4B itself is the quality-ceiling reference. The winner is simply the best quality that
-still holds at the cost target on the §7 benches — which settles §9's Tier-2 (slice vs
-distill) *and* Tier-3 (is a trimmed-E4B better than any E2B?) inside one head-to-head.
-The honest asymmetry the race resolves: **trimming from above tends to retain more
-quality per parameter** (it starts from E4B's good weights) but yields a **bespoke
-serving shape**; **distilling up a fixed slice keeps a known shape** but is
-**capacity-bounded** — quality-per-param vs serving simplicity, decided empirically.
+**Two honest ceilings.**
+1. **Causal ≪ bidirectional for embeddings.** Last-token pooling on a frozen *causal* decoder
+   is *materially* (not "a notch") weaker than a bidirectional encoder across the task range —
+   which is why EmbeddingGemma/LLM2Vec convert to bidirectional. We do **not** (it would
+   destroy the generator and forfeit the whole unification), so the embed role has a real
+   ceiling. Consequences: the gate is **"≥ the incumbent Qwen3 embedder," not "≥ the teacher"**
+   (a distilled student rarely exceeds its teacher). If teacher-parity is ever *required*, that
+   forces a bidirectional, embed-only base — a **separate** model, which reopens "one base" and
+   belongs in §12, not here.
+2. **The MRL head is a new tensor, not a LoRA delta — prototype conversion FIRST.** LoRA adapts
+   existing weights; it cannot add an output projection. The MRL projection head must be trained
+   *and emitted by `convert_hf_to_gguf.py`* for the Gemma arch — the **same failure mode** as
+   the ettin Dense head (P2), one role over. So the "few-MB adapters" framing is wrong for embed.
+   **Gating pre-step:** before any embed training, prove `convert_hf_to_gguf.py` emits an MRL/pooling
+   head and llama.cpp applies it on a stock head. If it doesn't round-trip, the honest options are
+   converter arch work (net-new) or a small numpy projection in the gateway (the hack survives for
+   embed even as it dies for rerank). This is on the critical path, so it runs before §5.3.
 
-## §11 Training hardware & throughput (train on CUDA)
+The reranker is deliberately **not** a role on this base — see §7.
 
-One card is dedicated to training (not both). **Recommended: the RTX 5080 (16 GB,
-CUDA).** Serving stays Vulkan/vendor-agnostic and is unaffected — the training card never
-touches production, and dedicating the 5080 keeps the 7900 XTX free to serve.
+## §4 Prerequisite work item — PLE in llama.cpp (re-scoped: harder than "two functions")
 
-Why the 5080 despite less VRAM: the program is **LoRA on a frozen, quantized 2–5 B base**
-plus **offline-cached teacher targets** — a memory-light, tensor-core-friendly workload
-where CUDA's maturity (PyTorch / peft / QLoRA / flash-attention) and tensor-core speed
-outweigh the 8 GB gap, and where choosing CUDA **eliminates the ggml-Vulkan training-op
-risk entirely**. QLoRA of a 5–7 B model fits well under 16 GB, so student training is
-comfortable.
+E2B/E4B rely on Per-Layer Embeddings, and llama.cpp does not inject the per-layer residual
+in its forward graph ([#22243](https://github.com/ggml-org/llama.cpp/issues/22243) — confirm
+current status; last seen unimplemented). Re-scoped honestly: in the Gemma-3n lineage PLE is
+**entangled with AltUp (alternating updates) and LAuReL (learned augmented residual)** — it
+is not a standalone residual add. Porting it means reproducing the interaction of three
+interlocking mechanisms across ~30-35 layers (and again for the E2B slice), then holding
+**embedding parity** (not just plausible generation — a subtly wrong residual silently tanks
+Recall@K). This is a **multi-week ggml effort with a numeric parity gate** (cosine vs the HF
+reference on a fixed corpus), vendored in the pinned `LLAMA_TAG` and decoupled from any
+upstream-merge timeline. It is step zero for the E2B path and is amortized across synth +
+embed on both sizes.
 
-Managing 16 GB (both pinches are minor or optional):
-- **Teacher caching** runs on the same card *before* training (not concurrent). Keep the
-  teacher ≤ ~14 B to cache on-card — the Qwen3-8B-class embed teacher and a 12 B synth
-  teacher both fit; a larger dense teacher (24–32 B) CPU-offloads for the one-time cache
-  pass, off the training critical path.
-- **§9 Tier-3** (full-FT / Minitron prune-heal) is the only genuine 16 GB pinch — real
-  gradients + optimizer states, not just adapters. Fits a 2–4 B student with an 8-bit
-  optimizer + gradient checkpointing; spill to cloud if a specific prune-heal overruns.
-  The base LoRA pipeline never hits this.
+## §5 Training sequence (embed + synth)
 
-Binding constraint stays **wall-clock, not memory**: one training GPU, a sequential
-multi-model race (E2B-slice, E2B-distill, E4B-distill, pruned-E4B) — faster per step on
-CUDA/tensor-cores than the Vulkan path would be.
+1. **Synth distill (E2B tier only):** E4B (teacher) → E2B (student) on Tier-A traffic; silver
+   labels are the incumbent's high-confidence outputs (per the Tier-A extraction proposal's
+   bootstrap) + a human-audited gold eval set. Optionally distil both E2B and E4B from a
+   **shared larger teacher** (12B/26B-A4B) to lift both — see §12.
+2. **Freeze** the base.
+3. **Embed adapter:** task-targeted embedding distillation — embedding-space distillation
+   from a **clean-licensed** teacher, InfoNCE on aimee-mined hard negatives, a uniformity/GOR
+   term, and an MRL loss over the dim ladder (§6). **Teacher licensing is a gate, not a
+   footnote:** no CC-BY-NC teacher (NC propagates to the student); and any **API teacher
+   (Voyage/Gemini) ToS typically forbids training a competing model** regardless of license —
+   a legal sign-off item, and ensembles inherit the *most* restrictive terms. Default safe
+   teacher: **Qwen3-Embedding-8B (Apache 2.0)**.
+4. **InfoNCE is negatives-hungry.** Its quality depends on the effective batch of in-batch
+   negatives, which a 16 GB card constrains — plan **GradCache / cross-batch memory** so the
+   contrastive objective isn't hardware-bound ("the weights fit" ≠ "the objective is well
+   conditioned").
+5. **Quantization-aware finish**; PLE tables pinned Q8_0 (§4).
 
-**Alternative — 7900 XTX (24 GB, Vulkan):** more VRAM (bigger on-card teacher, roomier
-Tier-3) and single-stack consistency with serving, but training rides the *immature*
-ggml-Vulkan finetune path (backward-op smoke test, Tier-3 full-FT uncertain in ggml) at
-~60–80% throughput with no tensor cores. Prefer it only if the program pivots to
-full-FT / large-dense-teacher-on-card as the primary method — which the LoRA-first design
-does not.
+## §6 Dimensions via MRL — scoped precisely
 
-## Risks / honest tradeoffs
+- **One MRL ladder** (proposed `[256, 512, 1024, 2048, 2560, 4000]`; 4000 = `halfvec` index
+  cap), front-loaded so each slice earns its recall (measured per-slice on the sweep).
+- **Operator picks the dim** via `AIMEE_EMBEDDING_DIM`.
+- **Re-embed-free tier moves are *narrower-only, given max-dim storage*.** Storing the full
+  4000-dim vector and truncating + **renormalizing** + rebuilding the `halfvec(k)` index is
+  legitimately re-embed-free — but it forfeits MRL's at-rest storage saving (you pay 4000-dim
+  storage forever) and the "reindex" is an hours-scale HNSW rebuild on a large corpus, not
+  free. Going *wider* than stored **is** a re-embed. State the claim as "narrower-tier moves
+  only, if you stored max-dim."
+- **Not chasing width for quality** — Jina reached its headline quality at 1024 dims
+  (distilling a 4B teacher); the sweep decides how much of the ladder earns its storage.
 
-- **Synth-quality parity is the real risk, not resources.** E2B is *less*
-  resource-intensive than the E4B the tier already runs, so fit is settled. The open
-  risk is recovering the E4B→E2B nested-submodel quality gap on the Tier-A mechanical
-  tasks (§7 gate); if it proves unrecoverable, keep Tier-A on a capable node and ship
-  the embed/rerank roles as dedicated small models.
-- **Frozen-causal base caps embedding quality** vs. a dedicated bidirectional
-  embedder. Accepted to keep synth intact; §7 bounds the gap.
-- **Decoder reranking is heavier per pair** than a small encoder. Mitigated by
-  MatFormer slicing + top-K + early-exit; fenced by the §7 latency gate.
-- **"Match E4B synth" is a claim, not a given.** MatFormer left an E2B↔E4B gap; the
-  Tier-A distill closes it only on mechanical tasks, and only the bench proves it.
-- **PLE depends on an unmerged llama.cpp feature we must implement.** Bounded and
-  reference-guided, but it is net-new ggml work and a maintenance item until
-  upstreamed.
+## §7 The reranker (dedicated encoder, tier-aware, gated)
+
+The reranker stays a **separate cross-encoder** — the right, fast tool — served through
+**native llama.cpp `/rerank`** (`--reranking --pooling rank` + a single-linear
+`cls.output.weight` head). This is the encoder-cross-encoder shape; a *decoder yes-token*
+reranker does **not** serve through `/rerank` (that path is a classifier head, not an LM
+logit — the earlier "unified decoder rerank" claim was a category error, and it's the exact
+failure that produces near-zero scores for Qwen3-Reranker GGUFs).
+
+**Recommended: the EuroBERT family** — Apache 2.0, genuinely multilingual (15 languages: 8
+European + Chinese, Russian, Japanese, Vietnamese, Arabic, Turkish, Hindi), GQA/RoPE/RMSNorm,
+8k context, beats ModernBERT on code + math, and a **210m / 610m / 2.1B** ladder that spans
+tiers. Tier assignment from the measured latency wall (`reranker/LATENCY.md`: rerank cost is
+K forward passes; CPU ms/cand scales ~with params):
+
+- **CPU/edge tier → EuroBERT-210m** (candidate). Extrapolated ~185 ms/cand fits sub-1s only
+  at ~top-5 (vs ettin-68m: 60 ms/cand, top-10 in 0.60s). **Gated on three checks, in order:**
+  1. a **measured** ettin-68m vs EuroBERT-210m latency bake-off on the target box (GQA may
+     beat the linear extrapolation — do not trust the projected number);
+  2. a **top-K-depth quality check** — does 210m over a shallow top-K beat ettin-68m over a
+     deep top-K on LoCoMo/LongMemEval? (a stronger reranker over fewer candidates often wins,
+     but must be verified);
+  3. the **native-`/rerank` smoke test** — EuroBERT's Llama-style encoder arch must convert
+     and score correctly through `--pooling rank` (unverified; possibly net-new converter
+     arch work; llama.cpp `/rerank` is finicky per-model, #16407).
+- **GPU tiers → EuroBERT-610m** (speed is not the constraint there).
+- **Fallbacks:** if the EuroBERT native-serving or CPU-latency gate fails — **re-headed
+  ettin-68m** (`num_labels=1`, English-primary, fast, kills the hack) for CPU;
+  **bge-reranker-v2-m3** (proven native, multilingual, 568M) for GPU.
+
+All reranker roles are **domain-distillable** on the same pipeline (distill a strong reranker
+teacher onto the chosen encoder on aimee's hard negatives).
+
+## §8 Evaluation & rollout (gates every role swap)
+
+- **Synth:** curator-synth bench — E2B Tier-A precision/recall **≥ 98% of stock E4B** on the
+  mechanical tasks, latency/footprint win; per-task E4B fallback. (E4B tier: no gate needed.)
+- **Embed:** `embedder-sweep` — Recall@5 / MRR **≥ the incumbent Qwen3 embedder** at the
+  shipped dim and Q-level; per-slice curve committed. (**Not** "≥ teacher.")
+- **Rerank:** the §7 three-gate ladder (measured latency, top-K-depth quality, native-serving)
+  vs the ettin incumbent.
+- **Rollout:** shadow → canary → default via `kb_bandit`; operator-pinnable per role.
+
+## §9 Open decisions
+
+1. **Language breadth** — EuroBERT's 15 vs a broader set (decides reranker fallback viability;
+   also bears on the embed distribution).
+2. **Embed teacher** — Qwen3-Embedding-8B (safe/clean) vs an ensemble (subject to §5 ToS/NC
+   gate).
+3. **MRL at-rest policy** — store max-dim (re-embed-free narrower moves, higher storage) vs
+   store-at-tier-dim (cheaper storage, re-embed to change).
+4. **Embed head placement** — converter-emitted MRL tensor vs a small gateway projection
+   (decided by the §3 convert prototype).
+
+## §10 Risks / honest tradeoffs
+
+- **E2B synth-parity is the real risk** (not resources) — recover the E4B→E2B gap on
+  mechanical tasks; §8-gated with E4B fallback.
+- **Causal-decoder embeddings have a real ceiling** vs bidirectional; the gate is "≥
+  incumbent," and the embed role may cap below a dedicated encoder embedder.
+- **The MRL head and native `/rerank` both depend on GGUF-conversion paths that may need
+  arch work** — the ettin-hack risk, relocated. Prototype conversion before training.
+- **PLE port is multi-week ggml work** (AltUp/LAuReL entangled), with embedding parity as the
+  hard part; the whole E2B path waits on it.
+- **CPU fit is not "settled"** — measure RSS; the Q8-PLE pin narrows the margin vs the
+  incumbent E4B-Q4.
+- **EuroBERT native serving is unverified** — the reranker's clean-serving premise is a smoke
+  test, not a given.
+
+## §11 Training hardware & throughput (train on CUDA, serve on Vulkan)
+
+One dedicated training card. **Recommended: RTX 5080 (16 GB, CUDA).** Serving stays
+Vulkan/vendor-agnostic (the training card never touches production; dedicating the 5080 keeps
+the 7900 XTX free to serve). 16 GB suffices for **LoRA on a frozen quantized 2–5B base**
+(QLoRA fits 5–7B well under 16 GB) with CUDA's mature stack — and CUDA eliminates the
+immature ggml-Vulkan-training risk. Manage 16 GB: keep the embed teacher ≤ ~14B to cache
+on-card (bigger CPU-offloads, one-time); use GradCache for InfoNCE negatives (§5.4); Tier-3
+full-FT (§12) is the one real pinch — spill to the 24 GB 7900 XTX or cloud. Binding constraint
+is wall-clock. *(EuroBERT/ettin reranker training is small and fits trivially.)*
+
+## §12 Future directions (explicitly out of scope for this proposal)
+
+These were over-scoped into the earlier draft; they are real ideas but **not** part of the
+decidable core, and several rest on unproven tooling:
+
+- **Build-both-and-race / Pareto map** across E4B, E2B-distill, E2B-slice, pruned-E4B — a
+  research program on one serialized card, not a "re-run."
+- **Arbitrary MatFormer slicing** to custom sizes — needs bespoke MatFormer tooling, not a
+  stock `transformers` op; "slice to any tier from one training run" is unproven.
+- **Minitron-style prune-and-distill (trim E4B from above)** — full-parameter training, not
+  the frozen-LoRA premise; the 16 GB card can't host it.
+- **Cross-tier shared embedding space** ("index big, query cheap") — the earlier draft cited
+  the *shared synth teacher* as the mechanism, but the embed space is produced by a *separate*
+  embed adapter/teacher, so synth-teacher sharing does **not** align it. Genuine cross-tier
+  space needs the embed heads of *both* tiers trained against one frozen teacher space, with
+  its own gate (E2B-embedded docs retrieved by E4B queries). Unvalidated — a hypothesis.
+- **Extraction Tiers 2-3** (MatFormer slice / prune the base for headroom) — only after the
+  base pipeline passes §8.
 
 ## Acceptance criteria
 
-- A decision recorded on §8.1 (CPU budget/hardware) and, from it, E2B confirmed or
-  the Qwen3-0.6B fallback chosen.
-- If E2B: the PLE port lands (parity-verified, upstream PR opened); the base serves
-  all three roles off one GGUF through the existing per-role backends.
-- Each role passes its §7 gate at ≥ incumbent quality with the resource win, rolled
-  out shadow → canary → default and operator-pinnable.
-- The gateway Dense-head hack and its CI bake are removed once rerank serves natively
-  (unified or dedicated-with-`num_labels=1`).
-- The size-reduction validation phase (§9) runs only *after* the base pipeline passes
-  §7: Tier 1 (tower-drop) applied during the build, Tiers 2–3 adopted only where the
-  benches hold.
+- Embed + Tier-A synth serve from one Gemma-4 base (E2B edge / E4B bigger) through the
+  existing per-role backends; the PLE port lands parity-verified.
+- Each role passes its §8 gate at ≥ its incumbent (synth ≥ 98% E4B; embed ≥ Qwen3 embedder;
+  rerank ≥ ettin on the three-gate ladder), rolled out shadow → canary → default.
+- The dedicated reranker serves through native `/rerank`; the gateway Dense-head hack and its
+  CI bake are removed.
+- The MRL head's conversion path is proven (converter-emitted or a defined gateway
+  projection) before embed training is scheduled.
+- CPU fit is **measured** (RSS on the target box), not asserted.
 - No change to Tier-B routing or to how facts are gated/promoted once extracted.
+
+## Relationship to `dedicated-extraction-model-curator-tier-a` (both PENDING)
+
+That proposal asks whether Tier-A should run a dedicated small model; its Option B is a
+*note→triples relation extractor*. This proposal is broader (all Tier-A mechanical synth on a
+Gemma base) and assumes a **different current Tier-A baseline** (CPU-tier E4B, not the
+gpu-mid reasoning model that proposal describes). This **extends, does not supersede** it: if
+this ships, the extraction proposal's Option B becomes a special case. Per the pending
+supersession-hygiene norm, both should cross-link and reconcile their Tier-A baseline.
 
 ## Explicitly out of scope / does not re-propose
 
-- The `aimee-llm` container, the per-role serving split, the Tier-A/Tier-B curator
-  split, calibration, the bandit, the KB console — all shipped; this chooses the
-  *models* and unifies their backbone.
-- The `disable_thinking` fix (merged) — the synth role builds on it.
-- The pgvector storage tier and the versioned-index cutover mechanism — reused, not
-  changed.
-- General-benchmark (MTEB/MMTEB) parity as an acceptance target — the gate is
-  aimee's own retrieval on aimee's corpus, not a public leaderboard.
+- The `aimee-llm` container, per-role serving, the Tier-A/Tier-B split, calibration, the
+  bandit, the console — shipped; this chooses *models*.
+- The `disable_thinking` fix (merged).
+- The pgvector storage tier and versioned-index cutover — reused, not changed.
+- General-benchmark (MTEB/MMTEB) parity as an acceptance target — the gate is aimee's own
+  retrieval on aimee's corpus.
