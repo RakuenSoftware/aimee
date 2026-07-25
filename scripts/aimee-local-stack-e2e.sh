@@ -89,6 +89,27 @@ sed "s/8740/${SERVER_PORT}/; s/aimee-local-dev/${BEARER}/; s/remote_writes: \"of
 # scripts/ so the kb can actually popen embed-remote.py etc.
 sed "s#/opt/aimee/scripts/#${REPO}/scripts/#g" \
     deploy/container/aimee.yaml > "$AIMEE_HOME/.config/aimee/aimee.yaml"
+# Optional: point memory embedding at a REAL small embedder so the semantic
+# vector path is actually exercised (see scripts/test-embedder-qwen.sh, which
+# serves Qwen3-Embedding-0.6B at 1024-d). Without this the kb falls back to the
+# builtin hash and the embedder-fidelity gate below reports DEGRADED. An http(s)
+# URL is used directly (aimee POSTs raw text to {url}/embed).
+if [[ -n "${AIMEE_E2E_EMBEDDER_URL:-}" ]]; then
+  bold "==> Using real embedder for memory: ${AIMEE_E2E_EMBEDDER_URL} (dim=${AIMEE_EMBEDDING_DIM:-unset})"
+  # The SERVER forwards its own embedding_command to the kb on memory.store /
+  # memory search (server/server_api.c); the kb also reads its own for direct
+  # embedding. Set it in BOTH configs (replace an existing line, else append).
+  set_embed_cmd() {  # $1 = config file
+    if grep -qE '^embedding_command:' "$1"; then
+      sed -i "s#^embedding_command:.*#embedding_command: \"${AIMEE_E2E_EMBEDDER_URL}\"#" "$1"
+    else
+      printf '\nembedding_command: "%s"\n' "${AIMEE_E2E_EMBEDDER_URL}" >> "$1"
+    fi
+  }
+  set_embed_cmd "$AIMEE_HOME/aimee.yaml"                     # server config
+  set_embed_cmd "$AIMEE_HOME/.config/aimee/aimee.yaml"      # kb config
+  [[ -n "${AIMEE_EMBEDDING_DIM:-}" ]] && export AIMEE_EMBEDDING_DIM
+fi
 export AIMEE_SERVER_HTTP_BIND=1
 export AIMEE_DB1_URL="sqlite://${AIMEE_HOME}/aimee.db"
 
