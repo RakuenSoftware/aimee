@@ -198,6 +198,40 @@ agent_shell_git_gate_fn agent_tools_shell_git_gate(void);
 typedef void (*agent_tool_event_cb_t)(const char *phase, const char *tool_name, void *ud);
 void agent_tools_set_tool_event_cb(agent_tool_event_cb_t cb, void *ud);
 
+/* Tool-call COMPLETION audit hook. Distinct from the streaming tool-event hook
+ * above: this is a PROCESS-GLOBAL, NULL-by-default hook (like the vault/sandbox
+ * audit hooks) that the server installs ONCE at startup so a bridge can record
+ * every completed tool dispatch's OUTCOME on the audit bus. It fires exactly once
+ * per dispatch_tool_call_ctx, after execution, on every return path (success,
+ * error, timeout, refused). It carries ONLY classified enums + the principal —
+ * never argument or result content, and never the raw error text an MCP server
+ * returned. A thin client that links the tools module but not the bus leaves the
+ * hook NULL and is unaffected (D7). The pre-tool-check governed-action row already
+ * records identity; this records the outcome the pre-check row cannot see. */
+typedef struct
+{
+   const char *actor;       /* principal (session id / role), captured on the dispatch thread */
+   const char *verdict;     /* "ok" | "error" | "timeout" | "refused" */
+   const char *reason_code; /* "" | "guardrail" | "role" | "cancelled" | "tool_error" | */
+                            /* "timeout" | "unknown_tool" | "bad_args" | "policy"          */
+   const char *mode;        /* "internal" | "outbound" | "outbound:stdio" | */
+                            /* "outbound:sse" | "served"                    */
+} agent_tool_completion_t;
+typedef void (*agent_tool_completion_cb_t)(const char *tool, const agent_tool_completion_t *outcome,
+                                           void *ud);
+void agent_tools_set_tool_completion_cb(agent_tool_completion_cb_t cb, void *ud);
+
+/* Fire the completion hook (a no-op unless one is installed). Called by the
+ * dispatcher at the end of every tool call; lives in the light
+ * agent_tools_completion.c TU so the dispatcher's callers need not link the bus. */
+void agent_tools_emit_tool_completion(const char *tool, const agent_tool_completion_t *outcome);
+
+/* Test seam: fire the installed completion hook with a given outcome, so the
+ * bridge's field mapping and the bus->ledger path can be exercised without
+ * linking the whole dispatcher. No-op if no hook is installed. */
+void agent_tools_fire_tool_completion_for_test(const char *tool,
+                                               const agent_tool_completion_t *outcome);
+
 /* Auto-snapshot turn context: call before each tool-call round so that all
  * write_file / edit_file calls in the round share one fsnap snapshot. */
 void agent_tools_begin_turn(int turn);

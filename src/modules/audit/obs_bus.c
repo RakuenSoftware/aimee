@@ -88,8 +88,18 @@ static uint32_t put_str(uint8_t *buf, uint32_t off, uint32_t cap, const char *s,
       return 0; /* would overflow the slot; caller treats 0 as "does not fit" */
    memcpy(buf + off, &l, 4);
    off += 4;
-   if (l)
-      memcpy(buf + off, s, l);
+   /* Sanitize control bytes as we copy. Some fields (a served MCP tool name, a
+    * caller-supplied session id) are attacker-influenceable identity; a raw
+    * newline or ANSI escape would let a hostile value forge an extra row in the
+    * capture stream or inject terminal escapes into an --audit-replay dump. Every
+    * legitimate field is printable, so mapping bytes < 0x20 and 0x7f to '?' is a
+    * no-op for real data and closes the injection at the one serializer feeding
+    * both the ledger and the capture tap. */
+   for (uint32_t i = 0; i < l; i++)
+   {
+      unsigned char c = (unsigned char)s[i];
+      buf[off + i] = (c < 0x20 || c == 0x7f) ? '?' : c;
+   }
    return off + l;
 }
 

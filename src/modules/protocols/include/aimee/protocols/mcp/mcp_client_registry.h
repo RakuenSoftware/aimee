@@ -45,4 +45,8 @@ int mcp_client_registry_get_tool_schema(const char *qualified_name, int timeout_
 int mcp_client_registry_call_tool(const char *qualified_name, const cJSON *args, int timeout_ms,
                                   cJSON **out_result, char *err_buf, size_t err_buf_len);
 
+/* The transport kind (MCP_TRANSPORT_STDIO / _SSE) serving a namespaced tool, for
+ * the audit `mode` field; 0 if not namespaced or the client is not live. */
+mcp_transport_kind_t mcp_client_registry_transport_kind(const char *qualified_name);
+
 #endif /* DEC_MCP_CLIENT_REGISTRY_H */
