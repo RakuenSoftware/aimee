@@ -87,15 +87,16 @@ func NewStore(path string) (*Store, error) {
 }
 
 var policyDefaults = map[string]any{
-	"trigger.max_concurrent":         2,
-	"trigger.scan_interval_secs":     5,
-	"autonomy.auto_resume_cap_parks": true,
-	"autonomy.max_wall_secs":         1800,
-	"autonomy.max_turns":             300,
-	"autonomy.max_resumes":           50,
-	"autonomy.stale_abandon_secs":    3600,
-	"autonomy.concurrency":           2,
-	"autonomy.delegate_pending_secs": 120,
+	"trigger.max_concurrent":            2,
+	"trigger.scan_interval_secs":        5,
+	"autonomy.auto_resume_cap_parks":    true,
+	"autonomy.max_wall_secs":            1800,
+	"autonomy.max_turns":                300,
+	"autonomy.max_resumes":              50,
+	"autonomy.stale_abandon_secs":       3600,
+	"autonomy.concurrency":              5,
+	"autonomy.per_workflow_concurrency": 1,
+	"autonomy.delegate_pending_secs":    120,
 }
 
 var configurableTypes = map[string]string{
@@ -103,8 +104,9 @@ var configurableTypes = map[string]string{
 	"trigger.scan_interval_secs": "int",
 	"autonomy.max_wall_secs":     "int", "autonomy.max_turns": "int",
 	"autonomy.max_resumes": "int", "autonomy.stale_abandon_secs": "int",
-	"autonomy.concurrency":           "int",
-	"autonomy.delegate_pending_secs": "int",
+	"autonomy.concurrency":              "int",
+	"autonomy.per_workflow_concurrency": "int",
+	"autonomy.delegate_pending_secs":    "int",
 }
 
 type intBounds struct{ min, max int64 }

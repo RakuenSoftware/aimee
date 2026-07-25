@@ -48,8 +48,8 @@ func main() {
 		"optional bearer for the agent resource plane")
 	workflowDir := flag.String("workflow-dir", "", "workflow definition directory")
 	configPath := flag.String("config", "", "aimee.yaml path")
-	concurrency := flag.Int("workflow-concurrency", envInt("AIMEE_AUTONOMY_CONCURRENCY", 2),
-		"maximum concurrent workflows")
+	concurrency := flag.Int("workflow-concurrency", envInt("AIMEE_AUTONOMY_CONCURRENCY", 5),
+		"maximum concurrent work items across the whole WFE (total agent budget)")
 	bearerToken := flag.String("bearer-token", os.Getenv("AIMEE_API_BEARER_TOKEN"),
 		"bearer required by TCP and optional on Unix sockets")
 	flag.Parse()
@@ -173,6 +173,13 @@ func main() {
 			defer liveMu.Unlock()
 			lastConcurrency = readInt("autonomy.concurrency", lastConcurrency)
 			return lastConcurrency
+		})
+		lastPerWorkflow := 1
+		scheduler.SetPerWorkflowSource(func() int {
+			liveMu.Lock()
+			defer liveMu.Unlock()
+			lastPerWorkflow = readInt("autonomy.per_workflow_concurrency", lastPerWorkflow)
+			return lastPerWorkflow
 		})
 		scheduler.SetPolicySource(func() engine.RunPolicy {
 			liveMu.Lock()
