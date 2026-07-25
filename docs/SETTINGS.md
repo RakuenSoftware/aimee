@@ -28,8 +28,8 @@ request), unless noted otherwise below.
   CLI. Current owners: the **Roundtable** tab (`roundtable.*`), the kb console's **Pipeline**
   page (`kb_curator_*`, `kb_evidence_embed_enabled`), the kb console's **Settings** page
   (the embedder, reranker and synth tiers — `embedding_*`, `llm_embed_*`, `llm_rerank_*`,
-  `llm_synth_*` — plus the knowledge base's own `kb_*`/`typed_facts_enabled`/ingest-sidecar
-  keys), the **Agents** tab (`provider`, `claude_model`, `openai_*`), and
+  `llm_synth_*` — plus the knowledge base's own `kb_*` and ingest-sidecar keys; `typed_facts_enabled`
+  belongs to that console's **Typed facts** page), the **Agents** tab (`provider`, `claude_model`, `openai_*`), and
   **Chat**/**Personas** (`default_persona`). The kb split is by which binary READS the
   key: `kb_mode`, `kb_client_url`, `kb_client_bearer_token` and `kb_evidence_emit_enabled`
   stay here, because aimee-server reads them to reach a kb.

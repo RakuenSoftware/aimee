@@ -110,7 +110,9 @@ export const OWNED_ELSEWHERE: Record<string, string> = {
   llm_synth_model: KB_CONSOLE_SETTINGS,
   kb_search_max_results: KB_CONSOLE_SETTINGS,
   kb_fusion_mode: KB_CONSOLE_SETTINGS,
-  typed_facts_enabled: KB_CONSOLE_SETTINGS,
+  // The kb console's Typed Facts page owns the master switch, beside the
+  // promotion queue it gates.
+  typed_facts_enabled: "Typed Facts page (kb console)",
   kb_mining_enabled: KB_CONSOLE_SETTINGS,
   kb_api_http_port: KB_CONSOLE_SETTINGS,
   kb_api_bearer_token: KB_CONSOLE_SETTINGS,

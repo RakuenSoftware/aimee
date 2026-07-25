@@ -597,8 +597,11 @@ static const kb_setting_t KB_SETTINGS[] = {
     /* Knowledge base proper (all read inside the kb binary). */
     {"kb_search_max_results", "Knowledge base", 0},
     {"kb_fusion_mode", "Knowledge base", 0},
-    {"typed_facts_enabled", "Knowledge base", 0},
     {"kb_mining_enabled", "Knowledge base", 0},
+    /* typed_facts_enabled is deliberately absent: the console's Typed Facts page
+     * owns it, next to the promotion queue it gates and the two knobs
+     * (auto-promote, threshold) that are not in config_fields at all and can only
+     * be set through /v1/console/typed_facts/config. One owner per option. */
     {"kb_api_http_port", "Knowledge base", 1},
     {"kb_api_bearer_token", "Knowledge base", 1},
     /* Document ingest sidecars. */

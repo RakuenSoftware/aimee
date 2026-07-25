@@ -2066,6 +2066,8 @@ static void test_console_settings(void)
    assert(strstr(buf, "\"embedding_model\"") != NULL);
    assert(strstr(buf, "\"llm_rerank_backend\"") != NULL);
    assert(strstr(buf, "\"Embedder\"") != NULL);
+   /* Owned by the Typed Facts page, so it must not appear on this surface. */
+   assert(strstr(buf, "\"typed_facts_enabled\"") == NULL);
    /* aimee-server's own keys must NOT appear on the kb's settings surface. */
    assert(strstr(buf, "\"kb_client_url\"") == NULL);
    assert(strstr(buf, "\"provider\"") == NULL);
@@ -2076,8 +2078,15 @@ static void test_console_settings(void)
    assert(kb_http_route_ex("GET", "/v1/console/settings/config", NULL, NULL, NULL, NULL, 0, b2,
                            sizeof(b2)) == 405);
 
+   /* typed_facts_enabled is KB-owned but belongs to the Typed Facts page, not
+    * this surface — so the settings route refuses it like any other key it does
+    * not own. */
+   const char *tf = "{\"key\":\"typed_facts_enabled\",\"value\":true}";
+   assert(kb_http_route_ex("POST", "/v1/console/settings/config", NULL, NULL, NULL, tf,
+                           (int)strlen(tf), b2, sizeof(b2)) == 403);
+
    /* A KB-owned key is accepted. */
-   const char *ok_body = "{\"key\":\"typed_facts_enabled\",\"value\":true}";
+   const char *ok_body = "{\"key\":\"kb_mining_enabled\",\"value\":true}";
    assert(kb_http_route_ex("POST", "/v1/console/settings/config", NULL, NULL, NULL, ok_body,
                            (int)strlen(ok_body), b2, sizeof(b2)) == 200);
    /* A key the SERVER owns is refused here, even though it is a real config key
