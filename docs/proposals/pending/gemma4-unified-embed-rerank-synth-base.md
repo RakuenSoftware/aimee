@@ -264,6 +264,35 @@ at equal gate quality, enough to pay for its bespoke-serving cost.
 Every cut is a search for the smallest model that still passes §7, not a fixed
 target; none flips a default (charter Gate-Promote).
 
+## §10 Generalization across the tier ladder (E4B and beyond)
+
+The design is **backbone-agnostic** — it is "a Gemma-4 MatFormer base + synth +
+embed/rerank adapters + MRL," not anything specific to E2B. Since E2B is a MatFormer
+submodel *inside* E4B, the same pattern applies up the ladder as **one program**, not
+a per-tier rebuild:
+
+- **Train against E4B, slice down.** With nested / MatFormer-aware objectives, training
+  the unified stack on E4B can yield the E2B tier by *slicing* — E4B for larger boxes,
+  E2B-slice for the edge, from one effort.
+- **The E4B tier carries no synth-parity risk.** The §7 open risk (recovering the
+  E4B→E2B nested-submodel gap) is specific to the *shrunk* tier. An E4B-unified base
+  runs *actual* E4B for synth and only adds adapters — so E4B is the **lower-risk**
+  instantiation and the natural place to **prove the three-role mechanics** (adapters,
+  MRL head, native `/rerank`, the §4 PLE port) *before* attempting the E2B compression.
+- **Cross-tier shared embedding space (the prize, if trained for).** If the MRL heads
+  across slices are aligned to one teacher space, tiers share an embedding space — a KB
+  embeds on the edge (E2B) and queries/reranks on a larger tier *without re-embedding*
+  (the "index big, query cheap" property). This is a deliberate space-alignment
+  objective, not automatic.
+
+Caveats: **slice-after-training is not free** — preserving nestedness requires
+MatFormer-aware nested training *or* a frozen backbone with per-slice adapters (naive
+full fine-tune breaks the nesting); **role heads likely need per-tier validation** (the
+backbone nests, the heads may not transfer for free); and the pattern is **cleanest
+within the MatFormer E-series (E2B↔E4B)** — the dense-12B / MoE-26B synth models that
+serve Tier-B reasoning have no MatFormer nesting and are a separate unification question,
+out of scope here.
+
 ## Risks / honest tradeoffs
 
 - **Synth-quality parity is the real risk, not resources.** E2B is *less*
