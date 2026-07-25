@@ -7786,6 +7786,64 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_kbsrv_client_fp ON kb_server_registry(clie
 CREATE UNIQUE INDEX IF NOT EXISTS idx_kbsrv_mgmt_fp ON kb_server_registry(mgmt_fingerprint)
   WHERE mgmt_fingerprint <> '';
 
+-- Per-user /v1 write authorization (proposal per-user-remote-writes-authz.md §6).
+-- The authoritative {subject -> tier} map within a (server, team).  A subject
+-- with no live row here has NO grant, and no grant is DENY.  Migration is
+-- deliberately empty: existing (server, team) pairs gain no rows, and the old
+-- global aimee.api.remote_writes is NOT mapped to a wildcard grant, because a
+-- wildcard would re-introduce exactly the global authorizer this replaces (§8).
+-- Operators populate grants post-upgrade via the documented procedure.
+--
+-- The composite subject grammar is enforced in C by the token authority and the
+-- server verifier; the CHECK here is the coarse shape only, so a malformed
+-- subject cannot be stored and later fail closed at mint time instead.
+CREATE TABLE IF NOT EXISTS kb_write_tier_grant (
+  server_id TEXT NOT NULL,
+  team_id BIGINT NOT NULL REFERENCES kb_team(id),
+  subject TEXT NOT NULL CHECK (char_length(subject) BETWEEN 1 AND 576 AND
+    subject ~ '^(owner|(oidc|cert):[^:[:cntrl:]]+:[^:[:cntrl:]]+)$'),
+  tier TEXT NOT NULL CHECK (tier IN ('off','data','full')),
+  granted_by TEXT NOT NULL CHECK (char_length(granted_by) BETWEEN 1 AND 576),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  revoked_at TIMESTAMPTZ,
+  PRIMARY KEY (server_id,team_id,subject)
+);
+-- A grant is scoped to a (server, team) pair that actually exists: the §4
+-- requirement that the grant lookup and the enforced `team` claim agree is a
+-- schema invariant, not a convention.  A subject granted at team X therefore
+-- cannot be replayed against team Y even if the row were forged.
+ALTER TABLE kb_server_registry DROP CONSTRAINT IF EXISTS kb_server_registry_server_team_key;
+ALTER TABLE kb_server_registry ADD CONSTRAINT kb_server_registry_server_team_key
+  UNIQUE (server_id,team_id);
+ALTER TABLE kb_write_tier_grant DROP CONSTRAINT IF EXISTS kb_write_tier_grant_server_team_fk;
+ALTER TABLE kb_write_tier_grant ADD CONSTRAINT kb_write_tier_grant_server_team_fk
+  FOREIGN KEY (server_id,team_id) REFERENCES kb_server_registry(server_id,team_id);
+ALTER TABLE kb_write_tier_grant ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kb_write_tier_grant FORCE ROW LEVEL SECURITY;
+-- Live grants only; a revoked row is retained for audit but never authorizes.
+CREATE INDEX IF NOT EXISTS idx_kb_write_tier_grant_live
+  ON kb_write_tier_grant(server_id,team_id,subject) WHERE revoked_at IS NULL;
+
+-- Grants are tenant-scoped on read and admin-only on write: a team member may
+-- see the grants that bind them, but only an admin or the team lead may change
+-- who can write.  Mirrors the registry policies above.
+DROP POLICY IF EXISTS p_write_tier_grant_team_read ON kb_write_tier_grant;
+CREATE POLICY p_write_tier_grant_team_read ON kb_write_tier_grant FOR SELECT
+  USING (kb_principal_is_admin() OR team_id IN
+         (SELECT team FROM kb_team_membership
+            WHERE identity_key = current_setting('aimee.principal', true)));
+DROP POLICY IF EXISTS p_write_tier_grant_admin_write ON kb_write_tier_grant;
+CREATE POLICY p_write_tier_grant_admin_write ON kb_write_tier_grant FOR ALL
+  USING (kb_principal_is_admin() OR team_id IN
+         (SELECT team FROM kb_team_lead
+            WHERE identity_key = current_setting('aimee.principal', true)
+              AND revoked_at = ''))
+  WITH CHECK (kb_principal_is_admin() OR team_id IN
+         (SELECT team FROM kb_team_lead
+            WHERE identity_key = current_setting('aimee.principal', true)
+              AND revoked_at = ''));
+
 -- Registry reads are tenant-scoped even when the HTTP caller supplies a team
 -- selector.  The selector narrows the result; it never grants membership.  The
 -- authenticated principal is installed by db2_tenant_scope_begin and the
