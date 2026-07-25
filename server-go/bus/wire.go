@@ -19,7 +19,7 @@ const (
 	// WireMagic is "BUS0" little-endian.
 	WireMagic uint32 = 0x30535542
 	// WireVersion is the encoding version this build speaks.
-	WireVersion uint16 = 1
+	WireVersion uint16 = 2
 	// HdrLen is the fixed frame header size, frozen by the vectors.
 	HdrLen = 64
 	// MaxPayload bounds a single event's payload.
@@ -66,6 +66,7 @@ type Frame struct {
 	PayloadLen    uint32
 	SrcHandle     uint32
 	DstHandle     uint32
+	Generation    uint32 // v2: ARENA lease generation (0 otherwise)
 }
 
 // Result mirrors bus_wire_result_t. The string form is part of the
@@ -135,6 +136,10 @@ func (f *Frame) Validate() Result {
 			return ErrPayloadLen
 		}
 	}
+	// generation is an ARENA-only field (v2); non-arena frames must carry 0.
+	if f.HdrFlags&FArena == 0 && f.Generation != 0 {
+		return ErrFlags
+	}
 	if f.HdrFlags&FNotification != 0 {
 		if f.CorrelationID != 0 {
 			return ErrCorrelation
@@ -172,7 +177,7 @@ func (f *Frame) Encode(out []byte) int {
 	binary.LittleEndian.PutUint32(b[48:], f.PayloadLen)
 	binary.LittleEndian.PutUint32(b[52:], f.SrcHandle)
 	binary.LittleEndian.PutUint32(b[56:], f.DstHandle)
-	// [60:64] reserved stays zero.
+	binary.LittleEndian.PutUint32(b[60:], f.Generation) // v2: 0 for non-arena
 	return HdrLen
 }
 
@@ -184,9 +189,6 @@ func Decode(in []byte, out *Frame) Result {
 	}
 	if binary.LittleEndian.Uint32(in[0:]) != WireMagic {
 		return ErrMagic
-	}
-	if binary.LittleEndian.Uint32(in[60:]) != 0 {
-		return ErrReserved
 	}
 	var f Frame
 	f.HdrFlags = binary.LittleEndian.Uint16(in[4:])
@@ -200,6 +202,7 @@ func Decode(in []byte, out *Frame) Result {
 	f.PayloadLen = binary.LittleEndian.Uint32(in[48:])
 	f.SrcHandle = binary.LittleEndian.Uint32(in[52:])
 	f.DstHandle = binary.LittleEndian.Uint32(in[56:])
+	f.Generation = binary.LittleEndian.Uint32(in[60:])
 	if r := f.Validate(); r != OK {
 		return r
 	}
@@ -217,16 +220,20 @@ func (f *Frame) CheckPlacement(slotSize uint32, arenaSize uint64) Result {
 	if f.PayloadLen == 0 {
 		return OK
 	}
-	end := f.PayloadRef + uint64(f.PayloadLen)
-	if end < f.PayloadRef {
-		return ErrPayloadLen
-	}
 	if f.HdrFlags&FInline != 0 {
+		end := f.PayloadRef + uint64(f.PayloadLen)
+		if end < f.PayloadRef {
+			return ErrPayloadLen
+		}
 		if f.PayloadRef < HdrLen || end > uint64(slotSize) {
 			return ErrPayloadLen
 		}
-	} else if end > arenaSize {
-		return ErrPayloadLen
+	} else {
+		// ARENA (v2): PayloadRef is a lease id; the offset/span bounds are the
+		// lease table's business. Only bound the length against the whole arena.
+		if uint64(f.PayloadLen) > arenaSize {
+			return ErrPayloadLen
+		}
 	}
 	return OK
 }

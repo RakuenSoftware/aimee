@@ -15,7 +15,9 @@
 #include "bus_host.h"
 #include "bus_ring.h"
 
-#define BUS_HOST_WIRE_VERSION 1
+/* The wire version this host speaks; tracks BUS_WIRE_VERSION (v2 added the arena
+ * lease reference — generation + payload_ref-as-lease-id — for arena routing). */
+#define BUS_HOST_WIRE_VERSION 2
 
 /* ------------------------------------------------------------------ */
 /* fd passing                                                          */
@@ -170,8 +172,8 @@ bus_host_result_t bus_host_create(bus_host_t *h, const bus_host_config_t *cfg, b
    if (bus_region_map(h->control_fd, h->control_region.size, 1, &h->control_region) !=
        BUS_REGION_OK)
       goto fail;
-   if (bus_control_init(&h->control_region, cfg->slot_size, cfg->inline_budget,
-                        cfg->queue_capacity, cfg->arena_size) != BUS_REGION_OK)
+   if (bus_control_init(&h->control_region, cfg->slot_size, cfg->inline_budget, cfg->queue_capacity,
+                        cfg->arena_size) != BUS_REGION_OK)
       goto fail;
    if (bus_control_attach(&h->control_region, &h->control) != BUS_REGION_OK)
       goto fail;
@@ -193,8 +195,7 @@ bus_host_result_t bus_host_create(bus_host_t *h, const bus_host_config_t *cfg, b
       goto fail;
    /* Per-client lease cap: capacity's worth per client is a sane provisional
     * bound, re-tuned in slice 12 with the other parameters. */
-   if (bus_arena_init(&h->arena, abase, asize, cfg->max_slots, cfg->queue_capacity) !=
-       BUS_ARENA_OK)
+   if (bus_arena_init(&h->arena, abase, asize, cfg->max_slots, cfg->queue_capacity) != BUS_ARENA_OK)
       goto fail;
 
    h->slots = calloc(cfg->max_slots, sizeof(bus_slot_t));
@@ -221,6 +222,7 @@ void bus_host_destroy(bus_host_t *h)
       free(h->slots);
       h->slots = NULL;
    }
+   bus_arena_fini(&h->arena);
    bus_region_unmap(&h->arena_region);
    if (h->arena_fd >= 0)
       close(h->arena_fd);
@@ -268,8 +270,7 @@ bus_host_result_t bus_host_serve_attach(bus_host_t *h, int conn_fd)
       return deny(conn_fd, BUS_ATTACH_PROTOCOL);
 
    /* Version negotiation: highest common, or deny. */
-   if (req.wire_version_min > BUS_HOST_WIRE_VERSION ||
-       req.wire_version_max < BUS_HOST_WIRE_VERSION)
+   if (req.wire_version_min > BUS_HOST_WIRE_VERSION || req.wire_version_max < BUS_HOST_WIRE_VERSION)
       return deny(conn_fd, BUS_ATTACH_DENIED_VERSION);
 
    /* Admission decision — identity/policy only. Default-admit when no seam is
@@ -301,8 +302,7 @@ bus_host_result_t bus_host_serve_attach(bus_host_t *h, int conn_fd)
    }
    s->qpair_fd = s->qpair_region.fd;
    if (bus_region_map(s->qpair_fd, s->qpair_region.size, 1, &s->qpair_region) != BUS_REGION_OK ||
-       bus_qpair_init(&s->qpair_region, h->cfg.slot_size, h->cfg.queue_capacity) !=
-          BUS_REGION_OK ||
+       bus_qpair_init(&s->qpair_region, h->cfg.slot_size, h->cfg.queue_capacity) != BUS_REGION_OK ||
        bus_qpair_attach(&s->qpair_region, &s->qpair) != BUS_REGION_OK)
    {
       slot_release(h, idx);
@@ -372,8 +372,7 @@ uint32_t bus_host_reap(bus_host_t *h, uint64_t now, uint64_t stale_ns)
       if (!s->in_use)
          continue;
 
-      uint64_t hb =
-         atomic_load_explicit(&s->qpair.hdr->client_heartbeat, memory_order_acquire);
+      uint64_t hb = atomic_load_explicit(&s->qpair.hdr->client_heartbeat, memory_order_acquire);
       if (hb != s->last_heartbeat)
       {
          /* The client is alive; note the advance. */

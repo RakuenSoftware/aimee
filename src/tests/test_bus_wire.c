@@ -103,11 +103,12 @@ typedef enum
    FLD_PLEN,
    FLD_SRC,
    FLD_DST,
+   FLD_GEN,
    FLD_COUNT
 } field_id_t;
 
 static const char *const FIELD_NAMES[FLD_COUNT] = {
-    "flags", "ver", "kind", "principal", "corr", "seq", "lts", "pref", "plen", "src", "dst"};
+    "flags", "ver", "kind", "principal", "corr", "seq", "lts", "pref", "plen", "src", "dst", "gen"};
 
 static unsigned long long parse_u(const char *name, const char *key, const char *text,
                                   unsigned long long limit)
@@ -209,6 +210,9 @@ static void parse_fields(const char *name, const char *spec, bus_frame_t *f)
          break;
       case FLD_DST:
          f->dst_handle = (uint32_t)parse_u(name, k, text, UINT32_MAX);
+         break;
+      case FLD_GEN:
+         f->generation = (uint32_t)parse_u(name, k, text, UINT32_MAX);
          break;
       case FLD_COUNT:
          break;
@@ -348,9 +352,27 @@ static size_t verify_vectors(void)
        * future client is held to — saying nothing about geometry at all. */
       if (!negative && r == BUS_WIRE_OK && got.payload_len > 0)
       {
-         uint64_t end = got.payload_ref + got.payload_len;
-         uint32_t roomy_slot = (uint32_t)(end + 64);
-         uint64_t roomy_arena = end + 64;
+         /* The bounded quantity depends on placement: an INLINE payload lives in
+          * the ring slot at [payload_ref, payload_ref+len), so the slot must
+          * contain it; an ARENA frame's payload_ref is a lease id (v2), so the
+          * only wire-level bound is that payload_len not exceed the whole arena
+          * (the offset/span is the lease table's business). Exercise each against
+          * ample geometry and against geometry deliberately one byte too small. */
+         uint32_t roomy_slot;
+         uint64_t roomy_arena, tight_bound;
+         if (got.hdr_flags & BUS_F_INLINE)
+         {
+            uint64_t end = got.payload_ref + got.payload_len;
+            roomy_slot = (uint32_t)(end + 64);
+            roomy_arena = end + 64;
+            tight_bound = end - 1; /* slot one byte too small */
+         }
+         else /* ARENA: bound is arena_size vs payload_len */
+         {
+            roomy_slot = (uint32_t)(BUS_WIRE_HDR_LEN + got.payload_len + 64);
+            roomy_arena = (uint64_t)got.payload_len + 64;
+            tight_bound = (uint64_t)got.payload_len - 1; /* arena one byte too small */
+         }
 
          bus_frame_t chk;
          if (bus_wire_decode_checked(raw, rawn, roomy_slot, roomy_arena, &chk) != BUS_WIRE_OK)
@@ -359,8 +381,8 @@ static size_t verify_vectors(void)
             exit(1);
          }
 
-         uint32_t tight_slot = (uint32_t)(end - 1);
-         uint64_t tight_arena = end - 1;
+         uint32_t tight_slot = (got.hdr_flags & BUS_F_INLINE) ? (uint32_t)tight_bound : roomy_slot;
+         uint64_t tight_arena = (got.hdr_flags & BUS_F_INLINE) ? roomy_arena : tight_bound;
          if (bus_wire_decode_checked(raw, rawn, tight_slot, tight_arena, &chk) !=
              BUS_WIRE_ERR_PAYLOAD_LEN)
          {
@@ -606,12 +628,15 @@ static void test_intentionally_unconstrained_fields(void)
 static void test_decode_checked(void)
 {
    const uint32_t slot = 256;
-   const uint64_t arena = 1u << 20;
+   const uint64_t arena = 256; /* small, so the arena bound is distinct from MAX_PAYLOAD */
 
+   /* v2: an ARENA frame's payload_ref is a lease id (not an offset); the only
+    * wire-level arena bound is that payload_len not exceed the whole arena. */
    bus_frame_t good = base_frame();
    good.hdr_flags = BUS_F_NOTIFICATION | BUS_F_ARENA;
    good.payload_len = 128;
-   good.payload_ref = 0x1000;
+   good.payload_ref = 3; /* lease id */
+   good.generation = 7;
 
    uint8_t buf[BUS_WIRE_HDR_LEN];
    must(bus_wire_encode(&good, buf, sizeof buf) == BUS_WIRE_HDR_LEN, "encode in-bounds frame");
@@ -620,9 +645,9 @@ static void test_decode_checked(void)
    must(bus_wire_decode_checked(buf, sizeof buf, slot, arena, &out) == BUS_WIRE_OK,
         "checked decode accepts an in-bounds frame");
 
-   /* Out of bounds for the arena, but structurally perfect. */
+   /* A payload longer than the whole arena, but structurally perfect. */
    bus_frame_t bad = good;
-   bad.payload_ref = arena - 8;
+   bad.payload_len = (uint32_t)arena + 44;
    must(bus_wire_encode(&bad, buf, sizeof buf) == BUS_WIRE_HDR_LEN, "encode out-of-bounds frame");
 
    memset(&out, 0xa5, sizeof out);
@@ -703,9 +728,11 @@ static void test_rejections(void)
    bad[0] ^= 0xff;
    expect_reject("magic", bad, sizeof bad, BUS_WIRE_ERR_MAGIC);
 
+   /* v2: byte 60 is the arena `generation` field. A non-zero generation on a
+    * non-arena frame (buf here is a notification) is a flags violation. */
    memcpy(bad, buf, sizeof bad);
    bad[60] = 1;
-   expect_reject("reserved", bad, sizeof bad, BUS_WIRE_ERR_RESERVED);
+   expect_reject("generation_on_non_arena", bad, sizeof bad, BUS_WIRE_ERR_FLAGS);
 
    struct
    {
@@ -794,27 +821,27 @@ static void test_placement_bounds(void)
    must(bus_wire_check_placement(&f, slot, arena) == BUS_WIRE_ERR_PAYLOAD_LEN,
         "inline overlapping the header");
 
-   /* Arena: must lie inside the arena. */
+   /* Arena (v2): payload_ref is a lease id, not an offset; the only wire-level
+    * bound is that payload_len not exceed the whole arena (the span's offset is
+    * the lease table's business, checked at bus_arena_read_ptr). A small arena,
+    * distinct from the MAX_PAYLOAD cap, isolates this bound. */
+   const uint64_t small_arena = 4096;
    f.hdr_flags = BUS_F_NOTIFICATION | BUS_F_ARENA;
-   f.payload_ref = arena - 128;
-   f.payload_len = 128;
-   must(bus_wire_check_placement(&f, slot, arena) == BUS_WIRE_OK, "arena exactly reaches end");
+   f.payload_ref = 5; /* a lease id */
+   f.generation = 1;
+   f.payload_len = (uint32_t)small_arena;
+   must(bus_wire_check_placement(&f, slot, small_arena) == BUS_WIRE_OK,
+        "arena length exactly fills the arena");
 
-   f.payload_len = 129;
-   must(bus_wire_check_placement(&f, slot, arena) == BUS_WIRE_ERR_PAYLOAD_LEN,
-        "arena one byte past the end");
-
-   /* A reference chosen to wrap the 64-bit sum must be caught by the overflow
-    * guard rather than by the comparison it would otherwise defeat. */
-   f.payload_ref = UINT64_MAX - 4;
-   f.payload_len = 64;
-   must(bus_wire_check_placement(&f, slot, arena) == BUS_WIRE_ERR_PAYLOAD_LEN,
-        "arena reference that wraps");
+   f.payload_len = (uint32_t)small_arena + 1;
+   must(bus_wire_check_placement(&f, slot, small_arena) == BUS_WIRE_ERR_PAYLOAD_LEN,
+        "arena length one byte past the arena");
 
    /* An empty payload needs no geometry at all. */
    f.hdr_flags = BUS_F_NOTIFICATION;
    f.payload_ref = 0;
    f.payload_len = 0;
+   f.generation = 0; /* generation is arena-only; clear the reused frame's value */
    must(bus_wire_check_placement(&f, slot, arena) == BUS_WIRE_OK, "empty payload");
 
    printf("  placement bounds: slot, arena, header overlap, and 64-bit wrap\n");

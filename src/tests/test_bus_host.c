@@ -159,7 +159,7 @@ static void test_admit_and_traffic(void)
    must(bus_host_create(&h, &cfg, admit_deny_666, NULL) == BUS_HOST_OK, "host create");
 
    client_t c;
-   must(attach(&h, 1, 1, 1, &c) == BUS_ATTACH_OK, "client admitted");
+   must(attach(&h, BUS_WIRE_VERSION, BUS_WIRE_VERSION, 1, &c) == BUS_ATTACH_OK, "client admitted");
    must(bus_host_admitted(&h) == 1, "one admitted");
    must(c.reply.slot_size == cfg.slot_size, "reply carries slot_size");
    must(c.reply.host_epoch == bus_control_epoch(h.control), "reply carries the epoch");
@@ -200,8 +200,8 @@ static void test_two_clients_isolated(void)
    must(bus_host_create(&h, &cfg, NULL, NULL) == BUS_HOST_OK, "host create");
 
    client_t a, b;
-   must(attach(&h, 1, 1, 10, &a) == BUS_ATTACH_OK, "A admitted");
-   must(attach(&h, 1, 1, 20, &b) == BUS_ATTACH_OK, "B admitted");
+   must(attach(&h, BUS_WIRE_VERSION, BUS_WIRE_VERSION, 10, &a) == BUS_ATTACH_OK, "A admitted");
+   must(attach(&h, BUS_WIRE_VERSION, BUS_WIRE_VERSION, 20, &b) == BUS_ATTACH_OK, "B admitted");
    must(a.reply.handle_id != b.reply.handle_id, "distinct handles");
    must(bus_host_admitted(&h) == 2, "two admitted");
 
@@ -241,7 +241,8 @@ static void test_denials(void)
    must(bus_host_create(&h, &cfg, admit_deny_666, NULL) == BUS_HOST_OK, "host create");
 
    client_t c;
-   must(attach(&h, 1, 1, 666, &c) == BUS_ATTACH_DENIED_POLICY, "policy denial");
+   must(attach(&h, BUS_WIRE_VERSION, BUS_WIRE_VERSION, 666, &c) == BUS_ATTACH_DENIED_POLICY,
+        "policy denial");
    must(bus_host_admitted(&h) == 0, "denied client not admitted");
 
    /* A version with no overlap is denied, with no descriptors. */
@@ -260,9 +261,12 @@ static void test_full_host(void)
    must(bus_host_create(&h, &cfg, NULL, NULL) == BUS_HOST_OK, "host create");
 
    client_t c[3];
-   must(attach(&h, 1, 1, 1, &c[0]) == BUS_ATTACH_OK, "first admitted");
-   must(attach(&h, 1, 1, 2, &c[1]) == BUS_ATTACH_OK, "second admitted");
-   must(attach(&h, 1, 1, 3, &c[2]) == BUS_ATTACH_DENIED_NOSLOT, "third refused, host full");
+   must(attach(&h, BUS_WIRE_VERSION, BUS_WIRE_VERSION, 1, &c[0]) == BUS_ATTACH_OK,
+        "first admitted");
+   must(attach(&h, BUS_WIRE_VERSION, BUS_WIRE_VERSION, 2, &c[1]) == BUS_ATTACH_OK,
+        "second admitted");
+   must(attach(&h, BUS_WIRE_VERSION, BUS_WIRE_VERSION, 3, &c[2]) == BUS_ATTACH_DENIED_NOSLOT,
+        "third refused, host full");
 
    client_unmap(&c[0]);
    client_unmap(&c[1]);
@@ -277,8 +281,8 @@ static void test_reaping(void)
    must(bus_host_create(&h, &cfg, NULL, NULL) == BUS_HOST_OK, "host create");
 
    client_t a, b;
-   must(attach(&h, 1, 1, 1, &a) == BUS_ATTACH_OK, "A admitted");
-   must(attach(&h, 1, 1, 2, &b) == BUS_ATTACH_OK, "B admitted");
+   must(attach(&h, BUS_WIRE_VERSION, BUS_WIRE_VERSION, 1, &a) == BUS_ATTACH_OK, "A admitted");
+   must(attach(&h, BUS_WIRE_VERSION, BUS_WIRE_VERSION, 2, &b) == BUS_ATTACH_OK, "B admitted");
 
    /* Both clients beat once at t=100 so the host has a baseline. */
    atomic_store_explicit(&a.qp.hdr->client_heartbeat, 1, memory_order_release);
@@ -317,7 +321,7 @@ static void test_epoch(void)
    bus_host_t h;
    must(bus_host_create(&h, &cfg, NULL, NULL) == BUS_HOST_OK, "host create");
    client_t c;
-   must(attach(&h, 1, 1, 1, &c) == BUS_ATTACH_OK, "admitted");
+   must(attach(&h, BUS_WIRE_VERSION, BUS_WIRE_VERSION, 1, &c) == BUS_ATTACH_OK, "admitted");
 
    uint64_t at = bus_control_epoch(c.ctl);
    must(!bus_control_epoch_changed(c.ctl, at), "no change yet");

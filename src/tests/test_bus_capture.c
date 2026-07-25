@@ -277,12 +277,97 @@ static void test_terminal_states(void)
    printf("  terminal states: open/complete/truncated/corrupt decided from bytes\n");
 }
 
+/* An arena event is captured too. The host resolves the producer-held span
+ * pre-routing and hands the bytes to the tap, so the record materializes them and
+ * replay reproduces them from the record blob — never the long-gone lease. */
+static uint8_t g_arena_seen[4096];
+static uint32_t g_arena_seen_len;
+static int g_arena_materialized;
+static void arena_collect(void *ctx, const bus_capture_event_t *ev)
+{
+   (void)ctx;
+   if (!(ev->frame.hdr_flags & BUS_F_ARENA))
+      return;
+   g_arena_materialized = ev->payload_len > 0 && ev->payload != NULL;
+   g_arena_seen_len = ev->payload_len;
+   if (ev->payload && ev->payload_len <= sizeof g_arena_seen)
+      memcpy(g_arena_seen, ev->payload, ev->payload_len);
+}
+
+static void test_arena_captured_and_replayed(void)
+{
+   bus_host_config_t cfg;
+   memset(&cfg, 0, sizeof cfg);
+   cfg.max_slots = 4;
+   cfg.slot_size = 256;
+   cfg.inline_budget = 192;
+   cfg.queue_capacity = 16;
+   cfg.arena_size = 128 * 1024;
+
+   bus_host_t h;
+   must(bus_host_create(&h, &cfg, NULL, NULL) == BUS_HOST_OK, "host");
+   bus_capture_t cap;
+   bus_capture_init(&cap, 1, 1, bus_control_epoch(h.control));
+   bus_host_set_tap(&h, bus_capture_tap, &cap);
+
+   bus_client_t pub, sub;
+   attach_client(&h, &pub);
+   attach_client(&h, &sub);
+   must(bus_host_subscribe(&h, sub.reply.handle_id, 700) == BUS_HOST_OK, "subscribe");
+
+   /* An arena-sized payload (> inline budget) with a known per-byte pattern. */
+   const uint32_t len = 1000;
+   uint32_t lease = 0;
+   must(bus_arena_alloc(&h.arena, pub.reply.handle_id, len, &lease) == BUS_ARENA_OK, "alloc");
+   uint8_t *fp = NULL;
+   must(bus_arena_fill_ptr(&h.arena, lease, &fp) == BUS_ARENA_OK, "fill");
+   for (uint32_t i = 0; i < len; i++)
+      fp[i] = (uint8_t)(i * 7 + 1);
+   bus_arena_ref_t ref;
+   must(bus_arena_ref(&h.arena, lease, &ref) == BUS_ARENA_OK, "ref");
+   must(bus_client_publish_arena(&pub, 700, lease, ref.generation, len) == BUS_CLIENT_OK,
+        "publish");
+   must(bus_host_pump(&h) == 1, "host routes the arena event");
+
+   /* Routing still works alongside capture: the subscriber reads and releases. */
+   bus_event_t ev;
+   must(bus_client_poll(&sub, &ev) == BUS_CLIENT_OK && (ev.frame.hdr_flags & BUS_F_ARENA),
+        "arena event delivered");
+   const uint8_t *rp = NULL;
+   must(bus_arena_read_ptr(&h.arena, lease, ev.frame.generation, sub.reply.handle_id, &rp) ==
+            BUS_ARENA_OK,
+        "consumer reads in place");
+   must(bus_arena_release(&h.arena, lease, ev.frame.generation, sub.reply.handle_id) ==
+            BUS_ARENA_OK,
+        "consumer releases");
+
+   /* The capture materialized the arena bytes; replay returns them byte-exact. */
+   g_arena_materialized = 0;
+   g_arena_seen_len = 0;
+   bus_capture_report_t rep = bus_capture_read(cap.buf, cap.len, arena_collect, NULL);
+   must(rep.status == BUS_CAPTURE_OPEN && rep.records == 1, "arena event captured");
+   must(g_arena_materialized && g_arena_seen_len == len,
+        "arena payload materialized in the record");
+   int ok = 1;
+   for (uint32_t i = 0; i < len; i++)
+      if (g_arena_seen[i] != (uint8_t)(i * 7 + 1))
+         ok = 0;
+   must(ok, "replayed arena bytes match what the producer filled");
+
+   bus_client_detach(&pub);
+   bus_client_detach(&sub);
+   bus_capture_free(&cap);
+   bus_host_destroy(&h);
+   printf("  arena capture: an arena payload is materialized and replayed byte-exact\n");
+}
+
 int main(void)
 {
    printf("test_bus_capture:\n");
    test_roundtrip_and_replay();
    test_materialized_payload();
    test_end_to_end_host();
+   test_arena_captured_and_replayed();
    test_terminal_states();
    printf("test_bus_capture: OK\n");
    return 0;

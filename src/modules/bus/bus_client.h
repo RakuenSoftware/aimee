@@ -70,6 +70,17 @@ void bus_client_detach(bus_client_t *c);
 bus_client_result_t bus_client_publish(bus_client_t *c, uint32_t kind, const void *payload,
                                        uint32_t len);
 
+/* Publish a one-way notification whose payload lives in the arena (D3), for a
+ * payload too large for the inline budget. The caller must already hold the
+ * lease: allocate it on the host arena (bus_arena_alloc), fill it
+ * (bus_arena_fill_ptr), read its generation (bus_arena_ref), then call this to
+ * emit the reference frame — no bytes are copied here. The host publishes the
+ * lease to the kind's observers and forwards the reference; a co-located consumer
+ * reads it in place via bus_arena_read_ptr and releases it. Once sent, the lease
+ * belongs to the host: the producer must not touch it again. */
+bus_client_result_t bus_client_publish_arena(bus_client_t *c, uint32_t kind, uint32_t lease_id,
+                                             uint32_t generation, uint32_t len);
+
 /* Send a correlated request. The reply arrives later as an inbound event with
  * the same correlation; poll for it. */
 bus_client_result_t bus_client_request(bus_client_t *c, uint32_t kind, uint64_t correlation,

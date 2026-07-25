@@ -550,7 +550,17 @@ static void leave_emit(void)
    atomic_fetch_sub(&g.publishers, 1);
 }
 
-/* Publish one already-serialized event of `kind` on the producer ring, under the
+/* Every event this module emits is INLINE, deliberately. An audit row and a
+ * guardrail event are both fixed-schema: each field is bounded by its own cap
+ * (serialize_row/serialize_guardrail via put_str's strnlen), so a serialized
+ * event is at most ~1.3 KB — always inside the inline budget (1900). There is no
+ * arena fallback here because there is no payload that could need one; adding one
+ * would be unreachable code. A future producer whose payload can genuinely exceed
+ * the budget (e.g. MCP tool-call args/results — see the feature tree) uses
+ * bus_client_publish_arena over the now-thread-safe arena instead; this module is
+ * simply not that producer.
+ *
+ * Publish one already-serialized event of `kind` on the producer ring, under the
  * producer lock (single logical writer). Backpressure (WOULD_BLOCK) is transient:
  * the consumer drains aggressively, so a short backoff sleep lets it free the ring
  * and the retry lands. The migration is lossless, so we retry WOULD_BLOCK until it

@@ -36,8 +36,8 @@ static uint32_t crc32c(const uint8_t *p, size_t n)
  *   ...  payload_len      materialized payload
  *   end-4  4  crc32c over every preceding byte
  */
-#define REC_PREFIX  8u
-#define REC_MIN     (REC_PREFIX + BUS_WIRE_HDR_LEN + 4u)
+#define REC_PREFIX 8u
+#define REC_MIN    (REC_PREFIX + BUS_WIRE_HDR_LEN + 4u)
 
 static void put_u16(uint8_t *p, uint16_t v)
 {
@@ -149,9 +149,12 @@ void bus_capture_tap(void *ctx, const bus_frame_t *frame, const uint8_t *payload
    if (!c->header_written)
       write_header(c);
 
-   /* A materialized payload is only what the tap was handed; an arena reference
-    * carries no bytes here (arena routing is deferred), so it records as an
-    * event with payload_len 0 and the flag clear. */
+   /* Whatever the tap was handed is materialized into the record: an inline
+    * payload, or the arena span the host resolved for us pre-routing (bus_route's
+    * pump reads a producer-held lease once and passes the bytes here). Either way
+    * the record carries the payload verbatim, so replay reads it from the record
+    * blob and never needs the (long-gone) lease. An event handed no bytes records
+    * with payload_len 0 and the flag clear. */
    uint32_t plen = (payload && payload_len > 0) ? payload_len : 0;
    uint32_t record_len = REC_PREFIX + BUS_WIRE_HDR_LEN + plen + 4;
    if (!reserve(c, record_len))
@@ -200,8 +203,8 @@ const char *bus_capture_status_name(bus_capture_status_t s)
 static bus_capture_report_t done(bus_capture_status_t st, uint64_t recs, uint64_t last, size_t off,
                                  int rule)
 {
-   bus_capture_report_t r = {.status = st, .records = recs, .last_good_seq = last,
-                             .offending_off = off, .rule = rule};
+   bus_capture_report_t r = {
+       .status = st, .records = recs, .last_good_seq = last, .offending_off = off, .rule = rule};
    return r;
 }
 
@@ -244,8 +247,8 @@ bus_capture_report_t bus_capture_read(const uint8_t *buf, size_t len, bus_captur
       uint32_t stored_crc = get_u32(buf + p + record_len - 4);
       if (crc32c(buf + p, record_len - 4) != stored_crc)
          /* Rule 5: a bad CRC at EOF is a torn final write; anywhere else is damage. */
-         return done(remaining == record_len ? BUS_CAPTURE_TRUNCATED : BUS_CAPTURE_CORRUPT,
-                     records, last_seq, p, 5);
+         return done(remaining == record_len ? BUS_CAPTURE_TRUNCATED : BUS_CAPTURE_CORRUPT, records,
+                     last_seq, p, 5);
 
       /* Rule 6: structural contradictions no interrupted write can produce. */
       uint16_t rtype = get_u16(buf + p + 4);

@@ -86,12 +86,12 @@ static bus_client_result_t emit(bus_client_t *c, uint16_t flags, uint32_t kind, 
 {
    if (!c || c->ctl == NULL)
       return BUS_CLIENT_ERR_ARG;
-   /* Inline payloads only in this slice (arena is a later integration), and the
-    * payload sits after the 64-byte header, so it must fit the inline budget AND
-    * leave the header room in the slot — a config with inline_budget == slot_size
-    * would otherwise let this overrun the ring slot. */
-   if (len > 0 && (len > c->reply.inline_budget ||
-                   (uint64_t)BUS_WIRE_HDR_LEN + len > c->reply.slot_size))
+   /* This is the inline path (a large payload goes via bus_client_publish_arena).
+    * An inline payload sits after the 64-byte header, so it must fit the inline
+    * budget AND leave the header room in the slot — a config with inline_budget ==
+    * slot_size would otherwise let this overrun the ring slot. */
+   if (len > 0 &&
+       (len > c->reply.inline_budget || (uint64_t)BUS_WIRE_HDR_LEN + len > c->reply.slot_size))
       return BUS_CLIENT_ERR_PAYLOAD;
    if (len > 0 && !payload)
       return BUS_CLIENT_ERR_ARG;
@@ -129,6 +129,38 @@ bus_client_result_t bus_client_publish(bus_client_t *c, uint32_t kind, const voi
                                        uint32_t len)
 {
    return emit(c, BUS_F_NOTIFICATION, kind, 0, payload, len);
+}
+
+bus_client_result_t bus_client_publish_arena(bus_client_t *c, uint32_t kind, uint32_t lease_id,
+                                             uint32_t generation, uint32_t len)
+{
+   if (!c || c->ctl == NULL)
+      return BUS_CLIENT_ERR_ARG;
+   /* A zero-length arena payload is a contradiction — there is nothing to lease.
+    * len is bounded by the arena, not the inline budget; the lease table already
+    * refused an over-large allocation, so no size check is duplicated here. */
+   if (len == 0)
+      return BUS_CLIENT_ERR_PAYLOAD;
+   if (bus_client_epoch_changed(c))
+      return BUS_CLIENT_EPOCH;
+
+   uint8_t *slot = bus_ring_produce_begin(&c->qp.outbound);
+   if (!slot)
+      return BUS_CLIENT_WOULD_BLOCK;
+
+   bus_frame_t f;
+   memset(&f, 0, sizeof f);
+   f.hdr_flags = BUS_F_NOTIFICATION | BUS_F_ARENA;
+   f.wire_version = BUS_WIRE_VERSION;
+   f.event_kind = kind;
+   f.src_handle = c->reply.handle_id;
+   f.payload_ref = lease_id; /* ARENA (v2): payload_ref carries the lease id */
+   f.generation = generation;
+   f.payload_len = len;
+   if (bus_wire_encode(&f, slot, c->reply.slot_size) != BUS_WIRE_HDR_LEN)
+      return BUS_CLIENT_ERR_ARG;
+   bus_ring_produce_commit(&c->qp.outbound);
+   return BUS_CLIENT_OK;
 }
 
 bus_client_result_t bus_client_request(bus_client_t *c, uint32_t kind, uint64_t correlation,
