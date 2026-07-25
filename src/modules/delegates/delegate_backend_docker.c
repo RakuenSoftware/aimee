@@ -901,6 +901,20 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
             create_argv[n++] = "NO_PROXY=localhost,127.0.0.1";
          }
       }
+      /* Trust every tree inside the container for git. Even running as the tree's
+       * owner (userflag above), a disjoint linked worktree resolves its .git to a
+       * SEPARATELY-mounted gitdir whose ownership git checks independently, so a plain
+       * `git status` from the delegate still trips "detected dubious ownership" and
+       * refuses — breaking the model's git-based inspection of its own worktree. The
+       * container is a single-purpose sandbox with only the mounted trees, so trusting
+       * all of them is safe. GIT_CONFIG_* is inherited by every `docker exec`, so it
+       * applies to plain `git` invocations without the caller adding -c safe.directory. */
+      create_argv[n++] = "-e";
+      create_argv[n++] = "GIT_CONFIG_COUNT=1";
+      create_argv[n++] = "-e";
+      create_argv[n++] = "GIT_CONFIG_KEY_0=safe.directory";
+      create_argv[n++] = "-e";
+      create_argv[n++] = "GIT_CONFIG_VALUE_0=*";
       if (userflag[0])
       {
          create_argv[n++] = "--user";
@@ -1345,15 +1359,27 @@ static int docker_list_dir(delegate_backend_t *self, void *state, const char *p,
    docker_state_t *st = state;
    char abs[MAX_PATH_LEN];
    if (docker_resolve_in_workspace(st, p, abs, sizeof(abs)) != 0)
+   {
+      /* The tool surfaces only "glob failed"; log why so a list_files that keeps failing
+       * on a delegate's own worktree is diagnosable (path outside workdir, or ".."). */
+      LOG_WARN("delegate-backend-docker", "list_dir: path '%s' did not resolve in workspace '%s'",
+               p, st->workdir[0] ? st->workdir : resolve_docker_workdir());
       return -1;
+   }
 
    char buf[64 * 1024] = {0};
    char err[4096] = {0};
    delegate_exec_result_t r = {0, 0, buf, sizeof(buf), err, sizeof(err)};
    char cmd[MAX_PATH_LEN + 16];
    snprintf(cmd, sizeof(cmd), "ls -1A %s", abs);
-   if (docker_exec(self, state, cmd, 30000, &r) != 0 || r.exit_code != 0)
+   int xrc = docker_exec(self, state, cmd, 30000, &r);
+   if (xrc != 0 || r.exit_code != 0)
+   {
+      LOG_WARN("delegate-backend-docker",
+               "list_dir: 'ls -1A %s' failed (exec_rc=%d exit=%d): %.200s", abs, xrc, r.exit_code,
+               err[0] ? err : "(no stderr)");
       return -1;
+   }
 
    int n = 0;
    for (const char *q = buf; *q; q++)
