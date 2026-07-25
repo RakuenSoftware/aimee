@@ -1997,16 +1997,14 @@ void cmd_verify(app_ctx_t *ctx, int argc, char **argv)
 
    if (argc >= 1 && strcmp(argv[0], "enable") == 0)
    {
-      cfg.cross_verify = 1;
-      config_save(&cfg);
+      config_set("cross_verify", "true");
       printf("cross-verification enabled\n");
       return;
    }
 
    if (argc >= 1 && strcmp(argv[0], "disable") == 0)
    {
-      cfg.cross_verify = 0;
-      config_save(&cfg);
+      config_set("cross_verify", "false");
       printf("cross-verification disabled\n");
       return;
    }
@@ -2025,13 +2023,12 @@ void cmd_verify(app_ctx_t *ctx, int argc, char **argv)
       for (int i = 1; i < argc; i++)
       {
          if (strcmp(argv[i], "--verify-cmd") == 0 && i + 1 < argc)
-            snprintf(cfg.verify_cmd, sizeof(cfg.verify_cmd), "%s", argv[++i]);
+            config_set("verify_cmd", argv[++i]);
          else if (strcmp(argv[i], "--role") == 0 && i + 1 < argc)
-            snprintf(cfg.verify_role, sizeof(cfg.verify_role), "%s", argv[++i]);
+            config_set("verify_role", argv[++i]);
          else if (strcmp(argv[i], "--prompt") == 0 && i + 1 < argc)
-            snprintf(cfg.verify_prompt, sizeof(cfg.verify_prompt), "%s", argv[++i]);
+            config_set("verify_prompt", argv[++i]);
       }
-      config_save(&cfg);
       printf("cross-verify config updated\n");
       return;
    }
