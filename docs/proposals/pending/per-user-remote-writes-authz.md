@@ -1,18 +1,26 @@
 # Proposal: Per-user `remote_writes` authorization
 
-- **State:** DRAFT — 2026-07-25; awaiting roundtable review. No implementation has started.
+- **State:** DRAFT — 2026-07-25; revised after roundtable (requested-changes) review. No implementation
+  has started.
 - **Charter roles:** Enforce / Constrain-Verify / Gate-Promote.
-- **Depends on:** **P5** (OIDC control plane — issuer profiles, the kb-signed identity token, and JWKS
-  fetched over the server→kb channel) and **P1** (identity / teams / RLS). Shares the OIDC verifier and
-  the kb-signed-token mechanism with P5 rather than inventing new ones.
-- **Thesis:** The `/v1` write gate is already parameterized on a `remote_writes` tier; today that tier is
-  one process-global value applied to every TCP caller behind a single shared bearer. Make the tier a
-  function of the **authenticated individual user**. aimee does **not** build its own login or identity
-  store — it reuses standard identity: **OIDC when enabled, otherwise the host's PAM stack via
-  aimee-kb**. Authentication always terminates at **aimee-kb**; aimee-server only **enforces** the tier
-  kb authenticated. Reuse the existing gate, the existing adoption/enrollment flow, the existing
-  browser-redirect machinery, the OIDC verifier + JWKS fleet, and the per-(server, team) management
-  config projection. Add no new policy object, no bespoke password store, no new audit family.
+- **Depends on (DONE, merged):** the P5 JWKS + token-authority substrate — **P5-C2b** signed JWKS
+  publication (`src/kb/kb_mgmt_jwks_publication.c`), **P5-C2c** authenticated server→kb JWKS fetch +
+  durable cache (`src/server/server_mgmt_jwks_cache.c`; wired at `src/server/server.c:2201` via
+  `kb_client_mtls_management_jwks_fetch`), and **P5-C2d** the kb token authority
+  (`kb_mgmt_token_authority_sign_pkcs8`, `src/kb/kb_mgmt_token_authority.c:245`). **Also depends on**
+  P1 (identity / teams / RLS).
+- **Does NOT depend on** the *deferred* part of P5 — the kb→server management channel / server registry
+  (P5 §1–§2). The kb-signed identity token here is carried to the server **by the user** (browser /
+  thin client) on `/v1`, not pushed by kb, so no kb→server dial is required.
+- **Thesis:** The `/v1` write gate is already parameterized on a `remote_writes` tier; today that tier
+  is one process-global value applied to every TCP caller behind a single shared bearer. Make the tier
+  a function of the **authenticated individual user**. aimee does **not** build its own login or
+  identity store — it reuses standard identity: **OIDC when enabled, otherwise the host's PAM stack via
+  aimee-kb**. Authentication of interactive per-user write flows always terminates at **aimee-kb**;
+  aimee-server only **enforces** the tier kb authenticated, verified from a kb-signed token over the
+  already-merged server→kb JWKS path. Reuse the existing gate, the token authority, the JWKS
+  publish/fetch, and the per-(server, team) management config projection. Add no new policy object, no
+  bespoke password store, no new audit family.
 
 ## 1. Problem
 
@@ -20,114 +28,158 @@
 `server_http_route_allowed_caps` (`src/server/server_http.c`): data-plane writes (`g_v1_write_ops`)
 open at `data`, privileged/exec routes need `full`, all behind **one shared bearer** (plus `scope:`
 bearers, read-only). Two callers with the same bearer are indistinguishable, so a deployment cannot
-grant "user A may write, user B may only read" without a second server. The tier is a per-appliance
-switch, not a per-principal grant — and there is no per-user login into the `/v1` data plane at all
-today (the only OIDC SSO is kb-console, operator-facing).
+grant "user A may write, user B may only read" without a second server. There is no per-user login into
+the `/v1` data plane today.
 
-## 2. Principle: reuse standard identity, never reimplement it
+## 2. Principle & the scope of "kb is the authenticator"
 
-- **aimee-kb is the sole authenticator.** aimee-server never verifies OIDC and never handles passwords.
+- **aimee-kb authenticates interactive per-user write flows.** aimee-server never verifies OIDC and
+  never handles passwords for those flows.
 - **Two mutually-exclusive modes per kb:** **OIDC** (when an issuer is configured) *or* **local PAM**.
-- **aimee owns only the grant** — the `{subject → team, remote_writes tier}` mapping. Credentials are
-  owned by the IdP (OIDC) or the host/enterprise PAM stack. No aimee password hashing, rotation,
-  lockout, or user directory.
+- **aimee owns only the grant** — `{subject → team, remote_writes tier}`. Credentials belong to the IdP
+  (OIDC) or the host/enterprise PAM stack.
+- **Explicitly carved-out non-interactive authenticators (F1):** the "kb is sole authenticator" clause
+  is scoped to *interactive per-user write authorization*. It does **not** cover (a) the **local UDS
+  operator** — `is_tcp==0 → CAPS_ALL`, OS-attested `peercred`, which continues to bypass per-user tiers
+  entirely (§7); (b) the **one-time bootstrap bearer** (`handle_api_rotate_bearer`, rotate-only,
+  single-use-in-effect, audited) and **single-use enrollment tokens**, which bootstrap the *first
+  admin* who then configures kb. These are aimee-owned bootstrap credentials by design; they establish
+  administrative identity, not standing per-user data writes, and keep their existing lifecycle
+  guarantees (rotate-only / single-use / audited). Their carve-out is stated, not hidden.
 
 ## 3. Login & identity flow
 
-Entry is the aimee-server **web-GUI adoption wizard** (the existing TOFU adoption flow,
-`aimee-thinclient-adoption`). The user provides the aimee-kb endpoint; **kb declares its auth mode**,
-and the flow forks:
+Entry is a **new** aimee-server web-GUI login surface built on existing primitives — the TOFU rotate/
+enrollment handlers (`handle_api_rotate_bearer`, `server_api_status.c:195`) and the server's existing
+browser authorization-code redirect machinery (`git_oauth_github_web_start` → `{authorize_url,
+redirect_uri}`, `oauth_pkce.c`). (The wizard UI is new; it does not reuse a pre-existing
+`aimee-thinclient-adoption` symbol — that name was a mislabel.) The user provides the aimee-kb endpoint;
+**kb declares its auth mode**, and the flow forks:
 
 - **OIDC** — server-initiated redirect **delegates the auth-code exchange to kb** (kb is the relying
-  party: it owns the issuer profile, client secret in vault, and JWKS — P5 §0.1; `kb-console` already
-  performs this exchange). The server reuses its existing browser-redirect machinery
-  (`git_oauth_github_web_start` → `{authorize_url, redirect_uri}`, `oauth_pkce.c`). kb authenticates,
-  resolves `{subject, team, tier}`, and mints a short-lived **kb-signed token** (P5 §3: `iss=kb`,
-  `aud=this server`, `sub`, tier, `jti`, short expiry).
-- **Local PAM** — the wizard shows a **login form**; kb verifies `username`+secret via
-  `pam_authenticate` against an `aimee-kb` PAM service (the host's battle-tested stack: `pam_unix`,
-  LDAP-via-PAM, etc.). On success the subject is the PAM username; kb resolves `{subject, team, tier}`
-  and mints the **same** kb-signed token.
+  party: issuer profile, client secret in vault, JWKS; `kb-console` already performs this). kb
+  authenticates, resolves `{subject, team, tier}`, and mints the kb-signed token (§4) via the merged
+  token authority.
+- **Local PAM** — the wizard shows a login form; kb verifies `username`+secret against the host PAM
+  stack and mints the same token. Concrete, testable PAM shape:
+  - **Mediator:** `pam_authenticate` through a **dedicated `/etc/pam.d/aimee-kb` service** invoked via a
+    **`pam_exec`/helper** path; kb does **not** read `/etc/shadow` itself and does **not** run as root.
+    kb runs as a dedicated non-root user; where `pam_unix` needs shadow, the standard setuid
+    `unix_chkpwd` helper performs the check — kb never gains shadow read itself.
+  - **Service file:** shipped by the kb package at `/etc/pam.d/aimee-kb`, `root:root 0644`.
+  - **No local hash handling:** kb never caches, compares, or persists password hashes; the credential
+    lives only for the duration of the PAM call.
+  - **Credential transport:** the wizard POSTs `username`+secret to a **loopback/HTTPS**, **rate-limited**,
+    **CSRF-protected** kb endpoint; the secret is `explicit_bzero`'d after the PAM call and **never
+    logged**.
 
-Either way, aimee-server verifies kb's token signature by fetching kb's JWKS over the **server→kb
-channel it already trusts** (its own `clientAuth` cert, HTTPS pinned to kb's CA — P5 §3 routes JWKS
-this way, never over the kb→server mgmt channel, to avoid circularity), reads `sub` + tier, and feeds
-the tier into the `/v1` write gate. The server never talks to the IdP and never sees a password.
+Either way, aimee-server verifies the token over the **already-merged** server→kb JWKS path
+(`server_mgmt_jwks_cache`, HTTPS pinned to kb's CA — §Depends), reads the claims, and feeds the tier
+into the `/v1` write gate. The server never talks to the IdP and never sees a password.
 
-## 4. The enforcement seam (small, contained)
+## 4. kb-signed token contract (F4)
+
+The token minted by `kb_mgmt_token_authority_sign_pkcs8` carries a **pinned claim set**:
+`iss=kb`, `aud=<this server_id>`, `sub`, **`team`**, `tier ∈ {off,data,full}`, `jti`, `iat`, short
+`exp`. The server verifies, **per request**: signature against the cached kb JWKS (by `kid`); `iss==kb`;
+`aud==this server_id`; **`team` ∈ this server's enrolled teams**; `exp` not passed; and `jti` not seen
+(§9 replay). A subject granted at team X therefore cannot be replayed against team Y — the grant lookup
+(§6) and the enforced `team` claim must agree. Any failed check → **deny all writes** (fail closed).
+
+## 5. Enforcement seam (small, contained)
 
 `server_http_effective_conn_caps()` / `server_http_route_allowed_caps()` already take `remote_writes`
 as a parameter. At the request seam (`src/server/server_http.c`, ~L1687) the code passes the
-process-global `g_remote_writes`. The whole behavior change on the server is to pass the **per-request,
-per-user** tier (from the verified kb-signed token) there instead. The gate's decision logic — which
-ops are data-writes, which need `full` — does not change.
+process-global `g_remote_writes`. The behavior change is to pass the **per-request tier** from the
+verified token instead. The gate's decision logic — which ops are data-writes, which need `full` — does
+not change.
 
-## 5. Tier storage & administration
+## 6. Tier storage, administration & migration
 
-Extend the existing per-(server, team) management config (`server_mgmt_read_project_config` /
-`read_config_projection_valid`, backed by the db2 management schema) to carry **subject-keyed**
-`remote_writes` grants within a `(server, team)`. A grant is `{subject → tier}`; administered through
-the existing management API — no new policy surface. kb resolves `(server_id, team, subject) → tier`
-when it mints the token.
+Extend the per-(server, team) management config (`server_mgmt_read_project_config` /
+`read_config_projection_valid`, backed by the db2 management schema) to carry **subject-keyed** grants
+`{subject → tier}` within a `(server, team)`. **Migration:** existing `(server, team)` rows have **no
+`subjects` map**; the new path treats "no grant" as **deny** (already fail-closed), so no appliance
+silently *widens*. Operators populate grants post-upgrade (documented procedure); we do **not** auto-map
+the old global into a wildcard grant (that would re-introduce a global authorizer — see §8). This is the
+same fail-closed posture as F2, applied at the data layer.
 
-## 6. Bootstrap & root of trust (the first admin)
+## 7. Bootstrap & root of trust; UDS precedence
 
-The irreducible root of trust already exists and needs no default credential: the **local UDS
-operator** — `server_http_conn_caps` returns `CAPS_ALL` for `is_tcp==0` ("same-user,
-filesystem-attested"; `server_auth.c` builds a `uid:<N>` principal from `peer_uid` via
-`ATTEST_UDS_PEERCRED`) — and it **bypasses `remote_writes` entirely**, so the local operator is
-un-lockout-able. That operator configures kb: enables the OIDC issuer profile, **or** relies on host
-PAM and sets the `{subject → team, tier}` grants. Credentials themselves are owned by the IdP / OS-PAM.
-A first *remote* admin (no local shell) bootstraps via the existing one-time bootstrap bearer
-(rotate-only) or a single-use enrollment token.
+The irreducible root of trust needs no default credential: the **local UDS operator** —
+`server_http_conn_caps` returns `CAPS_ALL` for `is_tcp==0` (`server_auth.c` builds `uid:<N>` from
+`peer_uid` via `ATTEST_UDS_PEERCRED`) — **bypasses `remote_writes` entirely** and is un-lockout-able.
+**Precedence is explicit and testable:** for `ATTEST_UDS_PEERCRED` the `is_tcp==0` path returns
+`CAPS_ALL` unchanged and the per-user tier is **not** consulted, even if that uid's name matches a
+PAM/OIDC grant; for all TCP transports the per-user tier from the verified token governs. That operator
+configures kb (OIDC issuer profile *or* PAM + the `{subject → team, tier}` grants). A first *remote*
+admin bootstraps via the one-time bootstrap bearer / enrollment token (§2 carve-out).
 
-## 7. Enforcement & the global setting
+## 8. Legacy-caller cutover (F2 — hard cutover + migration guide)
 
-- The verified per-user tier is passed into the gate in place of `g_remote_writes`.
-- **Per-user fully replaces the global.** `aimee.api.remote_writes` no longer authorizes requests
-  (retained initially as parsed-but-non-authorizing for telemetry/back-compat; deletion is a later
-  cleanup). `server_mgmt_read_source.c` and the startup status line are updated.
-- **Fail closed:** an unmatched/anonymous identity resolves to `off` (writes denied).
-
-## 8. Phased implementation (one PR per slice, off `testing`, CI-green, never pushed to `testing`)
-
-1. This proposal (review gate).
-2. **kb authentication + kb-signed session token** — auth-mode declaration; OIDC relying-party
-   delegation *and* PAM local-account auth (`libpam`, `aimee-kb` PAM service, least-privilege helper);
-   mint the short-lived kb-signed token for both modes. Unit tests.
-3. **Per-(server, team, subject) tier storage + admin grant surface** — extend the mgmt config
-   projection + db2 schema; grant set/get; migration. Tests.
-4. **Server: wizard login entry + verify token + gate rewire** — redirect (OIDC) / login form (PAM)
-   entry; verify the kb-signed token via server→kb JWKS; feed the tier into the gate; retire the global
-   as authz source; fail-closed default. Tests.
-5. **e2e + governance + docs** — the local-stack config-mode matrix asserts per-user tiers on **both**
-   the OIDC and PAM paths (user A=`data`→`store` 2xx, user B=`off`→`store` 403; both reads 2xx;
-   unmatched→denied); docs; `make lint` (incl. D7) + `make docs-gen`.
+Per decision: on rollout the legacy shared bearer / `AIMEE_API_BEARER` path **stops authorizing writes**
+(fail-closed); reads unaffected where already permitted. The deliverable includes a **migration guide**
+enumerating every affected `/v1` caller and its replacement:
+- **Interactive** (thin clients, webchat) → obtain a kb-issued token via the wizard login (§3).
+- **Non-interactive** (audit, cron, service integrations) → **kb-minted service-account tokens**
+  (same token authority + claim set, longer `exp`, a service `sub`, a fixed tier).
+- The now-non-authorizing global `aimee.api.remote_writes` emits a **startup warning** and increments a
+  **`remote_writes.global_ignored`** metric while it remains parsed, so an on-call operator is never
+  misled into thinking it still gates (suggestion). Flipping it changes no `/v1` write outcome
+  (acceptance §12).
 
 ## 9. Security considerations
 
-- **Fail closed** on every unresolved identity; never widen on ambiguity.
+- **Fail closed** on every unresolved identity / failed claim check; never widen on ambiguity.
 - **mTLS transport unchanged** — it establishes the connection; it is not the authorization identity.
-- **kb-signed token** is short-lived and carries a `jti` for server-local replay rejection (P5 §3);
-  the server verifies `iss`/`aud`/`exp`/signature and pins the JWKS to kb's CA.
-- **PAM least-privilege** — aimee-kb authenticates via a helper (e.g. `unix_chkpwd`) or a dedicated PAM
-  service; it does not run as root to read shadow, and it never stores or logs credential material.
-- **No new identity store** — no aimee-owned passwords; the IdP / OS-PAM remains authoritative, so
-  disabling a user there disables aimee access.
-- **Audit** — write decisions remain observable through the existing governed-action audit bus; no new
-  audit vocabulary.
+- **Replay:** short `exp` + server-local **bounded `jti` cache** (LRU/TTL sized to the token TTL); a
+  replayed token after first use is rejected. **Revocation lag:** revoking a subject's grant takes
+  effect at the next token `exp` (or immediately once the kb JWKS signed-generation advances for a
+  key-level revocation) — documented, bounded, and tested.
+- **PAM least-privilege** as pinned in §3 — no kb shadow-read, no root, no credential persistence,
+  `explicit_bzero`, never logged.
+- **No new identity store** — the IdP / OS-PAM stays authoritative, so disabling a user there disables
+  aimee access.
+- **Audit** — write decisions remain on the existing governed-action audit bus; no new vocabulary.
 
-## 10. Acceptance criteria
+## 10. Phased implementation (one PR per slice, off `testing`, CI-green, never pushed to `testing`)
 
-- OIDC mode: two subjects with tiers `data` and `off` produce `memory.store` → `2xx` and `403`; both
-  reads succeed. PAM mode: the same via two PAM accounts.
-- An unmatched credential is denied all writes (fail closed); `aimee.api.remote_writes` no longer
-  affects the decision.
-- The local UDS operator retains full access regardless of grants (bootstrap is never locked out).
-- `make lint` (incl. D7 + governance) and `make docs-gen-check` stay green.
+1. This proposal (review gate — re-review after this revision).
+2. **kb authentication + token minting** — auth-mode declaration; OIDC relying-party delegation *and*
+   PAM local-account auth (dedicated `aimee-kb` PAM service + helper, §3); mint the §4 token via the
+   merged token authority. Unit tests.
+3. **Per-(server, team, subject) grant storage + admin surface** — extend the projection + db2 schema;
+   grant set/get; empty-map migration (§6). Tests.
+4. **Server: wizard login + token verification + gate rewire + legacy cutover** — redirect (OIDC) /
+   login form (PAM); verify the §4 claim set via server→kb JWKS; feed the tier into the gate; retire the
+   global authorizer with warning+metric; hard-cutover the legacy bearer (§8). Tests.
+5. **e2e + governance + docs** — config-mode matrix asserts per-user tiers on **both** OIDC and PAM
+   paths **and** the unhappy paths in §12. **PAM e2e fixture:** the local-stack container must ship a
+   working `pam_unix`-backed `/etc/pam.d/aimee-kb` and two known test users (flagged to the implementer;
+   `scripts/aimee-local-stack-e2e.sh` already runs in a fixed-root env, so this is feasible). Migration
+   guide; `make lint` (incl. D7) + `make docs-gen`.
 
-## 11. Out of scope
+## 11. Acceptance criteria (closed checklist)
+
+**Happy path.** OIDC: subjects with tiers `data`/`off` → `memory.store` `2xx`/`403`, both reads `2xx`.
+PAM: same via two PAM accounts.
+**Token/claims.** Token with wrong `aud` → deny; `team` not enrolled on this server → deny; expired
+token → `401`; token signed by a rotated-away `kid` → server re-fetches JWKS once then denies; an
+**IdP-signed (not kb-signed) token** → deny; kb JWKS endpoint unreachable → **fail closed** (deny).
+**Replay/revocation.** Replay after first successful use → `401`; `jti` store is bounded (tested); after
+kb revokes a subject's grant, the next call past the documented lag → deny.
+**Legacy cutover.** A legacy shared-bearer / `AIMEE_API_BEARER` write after rollout → denied; a
+kb-minted service-account token performs the same write → `2xx`.
+**Global retired.** Flipping `aimee.api.remote_writes` changes **no** `/v1` write outcome; the startup
+warning + `global_ignored` metric fire when it is non-default.
+**Bootstrap.** The local UDS operator retains full access regardless of grants; a UDS uid whose
+`pam_user` matches a `data`-tier grant still uses the `CAPS_ALL` bypass (precedence §7).
+**PAM login hardening.** CSRF-forged PAM login POST → rejected; brute-force is rate-limited.
+`make lint` (incl. D7 + governance) and `make docs-gen-check` stay green.
+
+## 12. Out of scope
 
 Read-tier partitioning, per-route custom grants beyond `off`/`data`/`full`, changes to mTLS transport
-policy, a self-service user directory or password lifecycle (owned by the IdP / OS-PAM), and the KB's
-own internal tenancy enforcement. These remain with their current owners.
+policy, a self-service user directory or password lifecycle (owned by the IdP / OS-PAM), the deferred
+P5 kb→server management channel / server registry, and the KB's own internal tenancy enforcement. These
+remain with their current owners.
