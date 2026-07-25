@@ -2247,8 +2247,21 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       result = td_search_docs(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strchr(name, ':') != NULL)
    {
-      /* Namespaced tool: routed out to an external MCP server. */
-      g_td_mode = "outbound";
+      /* Namespaced tool: routed out to an external MCP server. Record the
+       * transport in the mode so the audit distinguishes a local stdio server
+       * from a remote SSE one. */
+      switch (mcp_client_registry_transport_kind(name))
+      {
+      case MCP_TRANSPORT_STDIO:
+         g_td_mode = "outbound:stdio";
+         break;
+      case MCP_TRANSPORT_SSE:
+         g_td_mode = "outbound:sse";
+         break;
+      default:
+         g_td_mode = "outbound";
+         break;
+      }
       cJSON *remote_result = NULL;
       char err_buf[256] = "";
       if (mcp_client_registry_call_tool(name, args, timeout_ms, &remote_result, err_buf,

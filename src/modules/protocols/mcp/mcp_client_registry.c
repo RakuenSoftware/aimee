@@ -508,3 +508,23 @@ int mcp_client_registry_call_tool(const char *qualified_name, const cJSON *args,
    REGISTRY_UNLOCK();
    return rc;
 }
+
+/* The transport kind serving a namespaced tool, for the audit `mode` field. Zero
+ * if the tool is not namespaced or its client is not live. Read under the registry
+ * lock so it does not race a concurrent shutdown. */
+mcp_transport_kind_t mcp_client_registry_transport_kind(const char *qualified_name)
+{
+   char client_name[64];
+   char tool_name[128];
+   if (split_namespaced_tool(qualified_name, client_name, sizeof(client_name), tool_name,
+                             sizeof(tool_name)) != 0)
+      return (mcp_transport_kind_t)0;
+
+   REGISTRY_LOCK();
+   int idx = registry_find_locked(client_name);
+   mcp_transport_kind_t kind = (idx >= 0 && g_registry[idx].session.transport)
+                                   ? g_registry[idx].session.transport->kind
+                                   : (mcp_transport_kind_t)0;
+   REGISTRY_UNLOCK();
+   return kind;
+}

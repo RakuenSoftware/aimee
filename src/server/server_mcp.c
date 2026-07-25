@@ -14,6 +14,7 @@
 #include "kb_client.h"
 #include "dashboard.h"
 #include <aimee/protocols/mcp/mcp_tools.h>
+#include "agent_tools.h" /* agent_tools_emit_tool_completion — served tool-call outcome audit */
 #include "mcp_git.h"
 #include "git_verify.h"
 #include "workspace_turn.h"
@@ -1628,7 +1629,45 @@ void mcp_session_register(server_conn_t *conn, const char *sid)
    (void)db1_server_session_create(sid, "mcp", principal);
 }
 
+/* Served tool-call outcome, thread-local so concurrent served calls do not clobber
+ * each other. handle_mcp_call_inner sets the resolved tool and, at its
+ * refusal/error return paths, a fixed verdict/reason enum; the wrapper emits one
+ * "served" completion row. It is the SERVED-DISPATCH outcome (refused / bad tool /
+ * dispatched) — a delegate's own deeper success/failure is audited where it runs. */
+static __thread const char *g_served_verdict = "ok";
+static __thread const char *g_served_reason = "";
+static __thread char g_served_tool[96] = "";
+
+static void served_outcome(const char *verdict, const char *reason)
+{
+   g_served_verdict = verdict;
+   g_served_reason = reason;
+}
+
+static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+
 int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   g_served_verdict = "ok";
+   g_served_reason = "";
+   g_served_tool[0] = '\0';
+
+   int rc = handle_mcp_call_inner(ctx, conn, req);
+
+   /* One served completion row per call: mode=served, the resolved tool, the
+    * caller's session id, and the classified verdict/reason. Identity + enums
+    * only — no argument or result content, never the raw error text. */
+   cJSON *jsid = cJSON_GetObjectItemCaseSensitive(req, "session_id");
+   const char *sid = (jsid && cJSON_IsString(jsid)) ? jsid->valuestring : NULL;
+   agent_tool_completion_t o = {.actor = (sid && sid[0]) ? sid : "mcp-client",
+                                .verdict = g_served_verdict,
+                                .reason_code = g_served_reason,
+                                .mode = "served"};
+   agent_tools_emit_tool_completion(g_served_tool[0] ? g_served_tool : "?", &o);
+   return rc;
+}
+
+static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    cJSON *jtool = cJSON_GetObjectItemCaseSensitive(req, "tool");
    cJSON *jargs = cJSON_GetObjectItemCaseSensitive(req, "arguments");
@@ -1640,7 +1679,10 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    mcp_session_register(conn, sid);
 
    if (!cJSON_IsString(jtool))
+   {
+      served_outcome("error", "bad_args");
       return server_send_error(conn, "missing 'tool' parameter", NULL);
+   }
 
    int owns_jargs = 0;
    if (!jargs)
@@ -1655,6 +1697,7 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cJSON_AddStringToObject(jargs, "cwd", jcwd->valuestring);
 
    const char *tool = jtool->valuestring;
+   snprintf(g_served_tool, sizeof g_served_tool, "%s", tool); /* served audit identity */
    cJSON *content = NULL;
    cJSON *structured = NULL;
 
@@ -1668,12 +1711,16 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       {
          char emsg[160];
          snprintf(emsg, sizeof(emsg), "%s requires a valid 'command' (see describe_tool)", tool);
+         served_outcome("error", "bad_args");
          if (owns_jargs)
             cJSON_Delete(jargs);
          return server_send_error(conn, emsg, NULL);
       }
       if (fd == 1)
+      {
          tool = fam_tool;
+         snprintf(g_served_tool, sizeof g_served_tool, "%s", tool); /* expanded family name */
+      }
    }
 
    /* S2 sub-slice 4: pre-delivery externalization guard at the tool-DISPATCH seam.
@@ -1688,6 +1735,7 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       char deny_msg[256] = "";
       if (wfe_mcp_toolcall_action(sid, tool, deny_msg, sizeof deny_msg) == WFE_TC_DENY)
       {
+         served_outcome("refused", "policy");
          if (owns_jargs)
             cJSON_Delete(jargs);
          return server_send_error(conn,
@@ -1768,6 +1816,7 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          uint32_t required = server_capability_for_method(pipeline_tools[i].method);
          if (required && conn && (conn->capabilities & required) == 0)
          {
+            served_outcome("refused", "role");
             if (owns_jargs)
                cJSON_Delete(jargs);
             return server_send_error(conn, "forbidden: insufficient capabilities", NULL);
@@ -1813,6 +1862,7 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cJSON *jc = cJSON_GetObjectItemCaseSensitive(jargs, "command");
       if (!cJSON_IsString(jc) || !jc->valuestring[0])
       {
+         served_outcome("error", "bad_args");
          if (owns_jargs)
             cJSON_Delete(jargs);
          return server_send_error(conn, "git requires a 'command' (status, commit, branch, pr, …)",
@@ -1828,6 +1878,7 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       content = server_mcp_process_tool(tool, jargs);
    if (!content)
    {
+      served_outcome("error", "unknown_tool");
       char errmsg[256];
       snprintf(errmsg, sizeof(errmsg), "unknown MCP tool: %s", tool);
       if (owns_jargs)

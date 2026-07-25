@@ -89,8 +89,18 @@ int main(void)
    agent_tools_fire_tool_completion_for_test("bash", &refused);
 
    agent_tool_completion_t mcperr = {
-       .actor = "sess-B", .verdict = "error", .reason_code = "tool_error", .mode = "outbound"};
+       .actor = "sess-B", .verdict = "error", .reason_code = "tool_error", .mode = "outbound:sse"};
    agent_tools_fire_tool_completion_for_test("github:create_issue", &mcperr);
+
+   /* A served call (external client -> aimee's tool) refused at the gate, and a
+    * local stdio MCP server call: the mode carries the transport / direction. */
+   agent_tool_completion_t served = {
+       .actor = "client-1", .verdict = "refused", .reason_code = "policy", .mode = "served"};
+   agent_tools_fire_tool_completion_for_test("git", &served);
+
+   agent_tool_completion_t stdio = {
+       .actor = "sess-B", .verdict = "ok", .reason_code = "", .mode = "outbound:stdio"};
+   agent_tools_fire_tool_completion_for_test("localfs:read", &stdio);
 
    /* A sentinel that stands in for argument / result / error content. It is NEVER
     * passed into any hook field — the completion outcome has no content field — so
@@ -120,7 +130,16 @@ int main(void)
    assert(r_mcp);
    assert(strcmp(sval(r_mcp, "verdict"), "error") == 0);
    assert(strcmp(sval(r_mcp, "reason_code"), "tool_error") == 0);
-   assert(strcmp(sval(r_mcp, "mode"), "outbound") == 0);
+   assert(strcmp(sval(r_mcp, "mode"), "outbound:sse") == 0);
+
+   cJSON *r_srv = find_row(rows, "git");
+   assert(r_srv);
+   assert(strcmp(sval(r_srv, "mode"), "served") == 0);
+   assert(strcmp(sval(r_srv, "verdict"), "refused") == 0);
+
+   cJSON *r_std = find_row(rows, "localfs:read");
+   assert(r_std);
+   assert(strcmp(sval(r_std, "mode"), "outbound:stdio") == 0);
 
    /* No content leak: the sentinel appears nowhere, and every reason_code is a
     * fixed enum value (never free text / an MCP server's err_buf). */

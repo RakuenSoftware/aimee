@@ -181,18 +181,21 @@ The dispatch-layer completion audit is implemented:
   everywhere, and that every `reason_code` is a fixed enum value. Wired into
   `check_bus_perf_gate.sh`. D7 gate green.
 
-**Two deliberate follow-ons (documented, not in this PR):**
+**The two follow-ons are now also landed:**
 
-- **`mode` is `internal` / `outbound` / `served`, not `outbound:stdio|sse` yet.**
-  The precise transport lives on the MCP session; reporting it means adding an
-  out-param to `mcp_client_registry_call_tool` / `mcp_client_call_tool`. Deferred
-  to keep this PR to the dispatch layer; the audit contract (`mode` string) is
-  forward-compatible with the finer value.
-- **Served-call OUTCOME.** External clients invoking aimee's tools over the gateway
-  (`handle_mcp_call`) already get an *identity* audit row via `pre_tool_check`
-  (`server.c:1030`), so the served surface is not unaudited. Recording the served
-  *outcome* (a second completion emit at `handle_mcp_call`) is the remaining
-  increment.
+- **Transport specificity.** An outbound call records `outbound:stdio` /
+  `outbound:sse` (not generic `outbound`), via a new locked registry accessor
+  `mcp_client_registry_transport_kind(qualified_name)` that reads the serving
+  session's `transport->kind` — no change to the `call_tool` signatures.
+- **Served-call OUTCOME.** `handle_mcp_call` (the `mcp.call` socket method — an
+  external client invoking aimee's tools) was in fact **unaudited** (it does not go
+  through `pre_tool_check`; the `server.c:1030` identity row is the separate HTTP
+  PreToolUse path). It is now wrapped: one `mode=served` completion row per call,
+  with the resolved tool, the caller's session id, and a classified verdict
+  (`refused` on the WFE-externalization/capability gate, `error`/`bad_args` on a
+  bad tool/args, `ok` when dispatched). This is the served-DISPATCH outcome; a
+  delegate's own deeper success/failure is audited where it runs. The row is
+  identity + enums only — no argument, result, or error content.
 
 ## Original rollout (for reference)
 
