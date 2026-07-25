@@ -732,6 +732,14 @@ int kb_client_tool_registry_lookup(const char *name, char *out_input_schema, siz
  * cache so per-tool-call validation does not RPC every turn. */
 char *kb_client_tool_registry_snapshot_json(void);
 
+/* Invoke a tool on an MCP plugin the KB HOSTS (config install: kb) over the mTLS
+ * /v1/actions/mcp.call channel.  |qualified_name| is "<client>:<tool>".  On
+ * success returns 0 and, when out_result is non-NULL, sets it to an owned cJSON
+ * (the plugin's result); on failure returns -1 with a message in err_buf.
+ * |args| is borrowed. */
+int kb_client_mcp_call(const char *qualified_name, const cJSON *args, int timeout_ms,
+                       cJSON **out_result, char *err_buf, size_t err_buf_len);
+
 /* List the memory_relation_schema rows owned by aimee-kb.  Writes up
  * to |max| rows into |out| and returns the number written. */
 int kb_client_relations_schema_list(db2_relation_schema_row_t *out, int max);
