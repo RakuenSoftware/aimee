@@ -280,10 +280,7 @@ static const config_schema_entry_t config_schema[] = {
      * config_schema[] initializer in config.c. Extracted so config.c stays under
      * the 2000-line cap and new keys have a low-churn home (one line each here). */
     {"db1_path", SCHEMA_STRING, 0},
-    {"db2_url", SCHEMA_STRING, 0},
     {"db2_pool_size", SCHEMA_INT, 0},
-    {"kb_client_url", SCHEMA_STRING, 0},
-    {"kb_client_bearer_token", SCHEMA_STRING, 0},
     {"kb_mode", SCHEMA_STRING, 0},
     {"llm_embed_backend", SCHEMA_STRING, 0},
     {"llm_embed_host", SCHEMA_STRING, 0},
@@ -300,76 +297,30 @@ static const config_schema_entry_t config_schema[] = {
     {"llm_synth_tier", SCHEMA_STRING, 0},
     {"llm_synth_endpoint", SCHEMA_STRING, 0},
     {"llm_synth_model", SCHEMA_STRING, 0},
-    {"guardrail_mode", SCHEMA_STRING, 0},
-    {"ingress_preinject_enabled", SCHEMA_BOOL, 0},
-    {"ingress_preinject_anthropic_enabled", SCHEMA_BOOL, 0},
-    {"ingress_compress_enabled", SCHEMA_BOOL, 0},
     {"ingress_cache_placement_enabled", SCHEMA_BOOL, 0},
     {"ingress_compress_min_chars", SCHEMA_INT, 0},
-    {"gateway_prevent_subagents", SCHEMA_BOOL, 0},
-    {"gateway_pin_model", SCHEMA_BOOL, 0},
-    {"css_style_graph_enabled", SCHEMA_BOOL, 0},
-    {"code_cochange_git_enabled", SCHEMA_BOOL, 0},
-    {"wfe_live_forge_enabled", SCHEMA_BOOL, 0},
-    {"wfe_proposals_autoscan_enabled", SCHEMA_BOOL, 0},
-    {"client_integrations_enabled", SCHEMA_BOOL, 0},
-    {"audit_action_enabled", SCHEMA_BOOL, 0},
-    {"audit_worm_enabled", SCHEMA_BOOL, 0},
-    {"css_render_command", SCHEMA_STRING, 0},
-    {"typed_facts_enabled", SCHEMA_BOOL, 0},
-    {"kb_pdf_ingest_enabled", SCHEMA_BOOL, 0},
-    {"kb_pdf_vector_enabled", SCHEMA_BOOL, 0},
-    {"kb_pdf_tsr_enabled", SCHEMA_BOOL, 0},
-    {"tsr_command", SCHEMA_STRING, 0},
-    {"kb_pdf_assets_enabled", SCHEMA_BOOL, 0},
-    {"kb_pdf_blob_dir", SCHEMA_STRING, 0},
-    {"kb_pdf_blob_recon_secs", SCHEMA_INT, 0},
-    {"kb_pdf_blob_orphan_alarm_mb", SCHEMA_INT, 0},
-    {"kb_pdf_ocr_enabled", SCHEMA_BOOL, 0},
-    {"ocr_command", SCHEMA_STRING, 0},
     {"ingress_preinject_assembly_budget", SCHEMA_INT, 0},
     {"ingress_max_raw_scans", SCHEMA_INT, 0},
     {"code_span_max_lines", SCHEMA_INT, 0},
-    {"require_session_worktree", SCHEMA_BOOL, 0},
-    {"require_aimee_memory", SCHEMA_BOOL, 0},
-    {"require_aimee_git", SCHEMA_BOOL, 0},
-    {"subagent_ban_enabled", SCHEMA_BOOL, 0},
     {"delegate_sandbox", SCHEMA_BOOL, 0},
     {"delegate_sandbox_image", SCHEMA_STRING, 0},
     {"delegate_sandbox_package_access", SCHEMA_STRING, 0}, /* valid: proxy|off|gated|governance */
-    {"delegate_sandbox_require_isolation", SCHEMA_BOOL, 0},
-    {"delegate_sandbox_learn_packages", SCHEMA_BOOL, 0},
     {"guardrails", SCHEMA_OBJECT, 0},
     {"toolsets", SCHEMA_OBJECT, 0},
     {"script", SCHEMA_OBJECT, 0},
-    {"provider", SCHEMA_STRING, 0},
-    {"default_persona", SCHEMA_STRING, 0},
     {"use_builtin_cli", SCHEMA_BOOL, 0},
-    {"claude_model", SCHEMA_STRING, 0},
     {"codex_model", SCHEMA_STRING, 0},
     {"model_reasoning_effort", SCHEMA_STRING, 0},
-    {"openai_endpoint", SCHEMA_STRING, 0},
-    {"openai_model", SCHEMA_STRING, 0},
-    {"openai_key_cmd", SCHEMA_STRING, 0},
-    {"embedding_command", SCHEMA_STRING, 0},
-    {"embedding_model", SCHEMA_STRING, 0},
-    {"embedding_endpoint", SCHEMA_STRING, 0},
     {"embedding_dim", SCHEMA_INT, 0},
     {"memory_weight_profile", SCHEMA_STRING, 0},
-    {"memory_rerank_mode", SCHEMA_STRING, 0},
     {"memory_rerank", SCHEMA_OBJECT, 0},
     {"memory_query_expansion", SCHEMA_OBJECT, 0},
     {"memory_recall_lanes", SCHEMA_OBJECT, 0},
     {"memory_maintenance", SCHEMA_OBJECT, 0},
     {"memory", SCHEMA_OBJECT, 0},
     {"workspaces", SCHEMA_ARRAY, 0},
-    {"autonomous", SCHEMA_BOOL, 0},
-    {"verify_enabled", SCHEMA_BOOL, 0},
-    {"verify_cross_project", SCHEMA_BOOL, 0},
     {"cross_verify", SCHEMA_OBJECT, 0},
     {"retry", SCHEMA_OBJECT, 0},
-    {"max_iterations", SCHEMA_INT, 0},
-    {"max_iterations_delegate", SCHEMA_INT, 0},
     {"max_delegation_depth", SCHEMA_INT, 0},
     {"max_delegation_spawns", SCHEMA_INT, 0},
     {"max_background_processes", SCHEMA_INT, 0},
@@ -484,6 +435,31 @@ static int schema_type_matches(schema_type_t expected, const cJSON *item)
    return 0;
 }
 
+/* Map a config_fields[] descriptor type to the schema validation type, so a flat
+ * scalar can be validated against config_fields[] without a duplicate config_schema[]
+ * row (Proposal A, step 2). Returns 0 for types that are not a plain top-level
+ * scalar (none such reach here — flat fields are STRING/BOOL/INT). */
+static int config_field_schema_type(config_field_type_t t, schema_type_t *out)
+{
+   switch (t)
+   {
+   case CFG_STRING:
+      *out = SCHEMA_STRING;
+      return 1;
+   case CFG_BOOL:
+      *out = SCHEMA_BOOL;
+      return 1;
+   case CFG_INT:
+   case CFG_FLOAT: /* schema has no float type; a number validates as SCHEMA_INT */
+      *out = SCHEMA_INT;
+      return 1;
+   case CFG_ECON_MODE: /* stored int enum, written as an "off|safe|aggressive" string */
+      *out = SCHEMA_STRING;
+      return 1;
+   }
+   return 0;
+}
+
 static int config_validate(const cJSON *root)
 {
    int issues = 0;
@@ -505,6 +481,24 @@ static int config_validate(const cJSON *root)
 
       if (!found)
       {
+         /* Flat scalar keys are not hand-listed in config_schema[] — they are
+          * derived from config_fields[] (Proposal A, step 2), the single source
+          * of truth for every get/set-able top-level scalar. A key the schema
+          * does not name but config_fields[] does is a known flat scalar; validate
+          * its JSON type against the descriptor's type. Only genuinely unknown
+          * keys (in neither table) are reported. */
+         schema_type_t derived;
+         const config_field_t *ff = config_field_lookup(item->string);
+         if (ff && config_field_schema_type(ff->type, &derived))
+         {
+            if (!schema_type_matches(derived, item))
+            {
+               fprintf(stderr, "aimee: config %s: \"%s\" expected %s, got %s\n", level,
+                       item->string, schema_type_name(derived), jo_type_name(item));
+               issues++;
+            }
+            continue;
+         }
          fprintf(stderr, "aimee: config %s: unknown key \"%s\"\n", level, item->string);
          issues++;
          continue;

@@ -67,7 +67,6 @@ static const golden_t g_golden[] = {
     {"kb_evidence_emit_enabled", "false"},
     {"fidelity_check_enabled", "false"},
     {"autonomous", "false"},
-    {"cross_verify", "false"},
     {"max_iterations", "0"},
     {"max_iterations_delegate", "0"},
     {"verify_enabled", "false"},

@@ -116,7 +116,7 @@ static const elig_row_t g_eligibility[] = {
     {"kb_fusion_mode", 0},
     {"kb_fusion_static_alpha", 0},
     {"autonomous", 1},
-    {"cross_verify", 1},
+    {"cross_verify", 0},
     {"max_iterations", 1},
     {"max_iterations_delegate", 1},
     {"memory_maintenance_trigger_inserts", 0},

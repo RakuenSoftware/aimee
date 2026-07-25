@@ -600,12 +600,12 @@ static const struct
     {"kb_evidence_emit_enabled", "false"},
     {"fidelity_check_enabled", "false"},
     {"autonomous", "false"},
-    {"cross_verify", "false"},
     {"max_iterations", "0"},
     {"max_iterations_delegate", "0"},
     {"verify_enabled", "false"},
     {"delegate_graph_context_enabled", "false"},
     {"verify_cross_project", "false"},
+    {NULL, NULL}, /* sentinel — config_apply_flat_defaults iterates until .key is NULL */
 };
 
 void config_apply_flat_defaults(config_t *cfg)
