@@ -584,6 +584,16 @@ JWKS_PUBLISHER_OBJS = $(OBJDIR)/kb/kb_mgmt_jwks_publish_main.o \
                       $(OBJDIR)/db2/db_postgres.o
 JWKS_PUBLISHER_VAULT_OBJS = $(TOKEN_ROOTS_PROVISIONER_VAULT_OBJS)
 KB_OBJS = $(KB_SRCS:%.c=$(OBJDIR)/%.o)
+# MCP-plugin adapter hosted on aimee-kb (config install: kb). Reuses the shared
+# mcp_client + registry objects (same TUs the server links) plus the OSV scanner;
+# kb_mcp_osv_stub satisfies osv_check_cached's DB1 cache/audit symbols without
+# pulling DB1 into aimee-kb (see kb/kb_mcp_osv_stub.c).
+KB_MCP_OBJS = $(OBJDIR)/modules/protocols/mcp/mcp_client.o \
+              $(OBJDIR)/modules/protocols/mcp/mcp_client_registry.o \
+              $(OBJDIR)/server/osv_check.o \
+              $(OBJDIR)/server/http_retry.o \
+              $(OBJDIR)/server/failover.o \
+              $(OBJDIR)/kb/kb_mcp_osv_stub.o
 KB_SYNTHESIS_SRCS = modules/kb-synthesis/kb_curator_contradictions.c modules/kb-synthesis/kb_curator_custom.c modules/kb-synthesis/kb_curator_drain.c modules/kb-synthesis/kb_curator_extract.c modules/kb-synthesis/kb_curator_extract_code.c modules/kb-synthesis/kb_curator_grounding.c modules/kb-synthesis/kb_curator_index_claims.c modules/kb-synthesis/kb_curator_index_code_unit.c modules/kb-synthesis/kb_curator_index_narrative.c modules/kb-synthesis/kb_curator_judge.c modules/kb-synthesis/kb_curator_link_artifacts.c modules/kb-synthesis/kb_curator_llm.c modules/kb-synthesis/kb_curator_notify.c modules/kb-synthesis/kb_curator_pipeline.c modules/kb-synthesis/kb_curator_promote.c modules/kb-synthesis/kb_curator_queue.c modules/kb-synthesis/kb_curator_resolve_entities.c modules/kb-synthesis/kb_curator_serve.c modules/kb-synthesis/kb_curator_sidecar.c modules/kb-synthesis/kb_curator_synthesize.c modules/kb-synthesis/kb_curator_version.c
 KB_SYNTHESIS_OBJS = $(KB_SYNTHESIS_SRCS:%.c=$(OBJDIR)/kb/%.o)
 $(OBJDIR)/kb/modules/kb-synthesis/%.o: modules/kb-synthesis/%.c
@@ -1153,7 +1163,7 @@ $(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_O
 # oauth_pkce.o provides the base64url encoder kb/enroll.c uses to mint
 # enrollment tokens (now reachable from `aimee-kb enroll`). It is a leaf crypto
 # util (openssl + platform_random only), so the kb sidecar links it directly.
-$(KB): $(KB_OBJS) $(KB_SYNTHESIS_OBJS) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o $(KB_BEDROCK_IR_OBJS) $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS) $(BUS_SHIP_OBJS) $(OBJDIR)/kb/kb_obs_bus_stub.o $(OBJDIR)/kb/kb_memory_audit_bridge.o | $(KB_RESOLVER)
+$(KB): $(KB_OBJS) $(KB_SYNTHESIS_OBJS) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o $(KB_BEDROCK_IR_OBJS) $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(KB_MCP_OBJS) $(TS_VENDOR_OBJS) $(BUS_SHIP_OBJS) $(OBJDIR)/kb/kb_obs_bus_stub.o $(OBJDIR)/kb/kb_memory_audit_bridge.o $(OBJDIR)/kb/kb_mcp_audit_bridge.o | $(KB_RESOLVER)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_KB) $(KB_TPM2_LDLIBS) $(KB_PKCS11_LDLIBS)
 

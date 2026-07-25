@@ -19,6 +19,7 @@
 #include "dstr.h"
 #include "guardrails.h"
 #include "aimee/protocols/mcp/mcp_client_registry.h"
+#include "kb_client.h" /* federate aimee-kb-hosted plugin defs into tools/list */
 #include "log.h"
 #include "toolset.h"
 #include "tool_schema_sanitizer.h"
@@ -237,6 +238,93 @@ static int tools_array_has_name(cJSON *tools, const char *name, int openai_forma
    return 0;
 }
 
+/* Emit one MCP tool DEF into |tools| in the caller's wire format. |fullname| is
+ * the namespaced "<client>:<tool>". |schema_src| is borrowed (deep-copied); a
+ * missing schema becomes an empty object schema. */
+static void emit_remote_tool_def(cJSON *tools, const char *fullname, const cJSON *desc,
+                                 const cJSON *schema_src, int openai_format)
+{
+   cJSON *schema;
+   if (!schema_src)
+   {
+      schema = cJSON_CreateObject();
+      if (schema)
+      {
+         cJSON_AddStringToObject(schema, "type", "object");
+         cJSON_AddObjectToObject(schema, "properties");
+      }
+   }
+   else
+   {
+      schema = cJSON_Duplicate(schema_src, 1);
+   }
+   if (!schema)
+      return;
+
+   const char *desc_str = cJSON_IsString((cJSON *)desc) ? desc->valuestring : "";
+   cJSON *tool = cJSON_CreateObject();
+   if (!tool)
+   {
+      cJSON_Delete(schema);
+      return;
+   }
+   if (openai_format)
+   {
+      cJSON *fn = cJSON_CreateObject();
+      cJSON_AddStringToObject(tool, "type", "function");
+      cJSON_AddStringToObject(fn, "name", fullname);
+      cJSON_AddStringToObject(fn, "description", desc_str);
+      cJSON_AddItemToObject(fn, "parameters", schema);
+      cJSON_AddItemToObject(tool, "function", fn);
+   }
+   else
+   {
+      cJSON_AddStringToObject(tool, "type", "function");
+      cJSON_AddStringToObject(tool, "name", fullname);
+      cJSON_AddStringToObject(tool, "description", desc_str);
+      cJSON_AddItemToObject(tool, "parameters", schema);
+   }
+   cJSON_AddItemToArray(tools, tool);
+}
+
+/* Federate the tool DEFS of MCP plugins aimee-kb HOSTS (config install: kb) into
+ * this server's tools/list, so a session reaches them exactly like a locally
+ * hosted plugin. Defs ride the tool_registry.snapshot RPC ("mcp_tools" array).
+ * Server-hosted plugins already added to |tools| take precedence: a kb def whose
+ * namespaced name is already present is skipped. Invocation of these names routes
+ * back to the kb (agent_tools_dispatch.c). Best-effort — kb unreachable => no
+ * federated tools, never an error. */
+static void append_federated_kb_tools(cJSON *tools, int openai_format,
+                                      const computer_use_policy_t *cu_policy)
+{
+   char *envelope = kb_client_tool_registry_snapshot_json();
+   if (!envelope)
+      return;
+   cJSON *resp = cJSON_Parse(envelope);
+   free(envelope);
+   if (!resp)
+      return;
+
+   cJSON *mcp_tools = cJSON_GetObjectItemCaseSensitive(resp, "mcp_tools");
+   cJSON *entry = NULL;
+   cJSON_ArrayForEach(entry, mcp_tools)
+   {
+      cJSON *name = cJSON_GetObjectItemCaseSensitive(entry, "name");
+      if (!cJSON_IsString(name) || !name->valuestring[0])
+         continue;
+      if (computer_use_is_tool_name(name->valuestring) && !cu_policy->enabled)
+         continue;
+      /* Local (server-hosted) precedence: skip a kb def that collides. */
+      if (tools_array_has_name(tools, name->valuestring, openai_format))
+         continue;
+      cJSON *desc = cJSON_GetObjectItemCaseSensitive(entry, "description");
+      cJSON *schema = cJSON_GetObjectItemCaseSensitive(entry, "inputSchema");
+      emit_remote_tool_def(tools, name->valuestring, desc, schema, openai_format);
+   }
+
+   cJSON_Delete(resp);
+}
+
 static void append_remote_tools(cJSON *tools, int openai_format)
 {
    config_t cfg;
@@ -245,65 +333,31 @@ static void append_remote_tools(cJSON *tools, int openai_format)
    computer_use_policy_from_config(&cfg, &cu_policy);
 
    cJSON *remote_tools = mcp_client_registry_build_namespaced_tools(1000);
-   if (!cJSON_IsArray(remote_tools))
+   if (cJSON_IsArray(remote_tools))
    {
-      cJSON_Delete(remote_tools);
-      return;
-   }
-
-   cJSON *remote_tool = NULL;
-   cJSON_ArrayForEach(remote_tool, remote_tools)
-   {
-      cJSON *name = cJSON_GetObjectItemCaseSensitive(remote_tool, "name");
-      if (!cJSON_IsString(name) || !name->valuestring[0])
-         continue;
-      if (computer_use_is_tool_name(name->valuestring) && !cu_policy.enabled)
-         continue;
-
-      const char *raw_name = strchr(name->valuestring, ':');
-      if (raw_name && raw_name[1] && tools_array_has_name(tools, raw_name + 1, openai_format))
-         LOG_WARN("mcp-tools", "remote tool name collides with builtin, namespaced as %s",
-                  name->valuestring);
-
-      cJSON *desc = cJSON_GetObjectItemCaseSensitive(remote_tool, "description");
-      cJSON *schema = cJSON_GetObjectItemCaseSensitive(remote_tool, "inputSchema");
-      if (!schema)
+      cJSON *remote_tool = NULL;
+      cJSON_ArrayForEach(remote_tool, remote_tools)
       {
-         schema = cJSON_CreateObject();
-         cJSON_AddStringToObject(schema, "type", "object");
-         cJSON_AddObjectToObject(schema, "properties");
-      }
-      else
-      {
-         schema = cJSON_Duplicate(schema, 1);
-      }
-      if (!schema)
-         continue;
+         cJSON *name = cJSON_GetObjectItemCaseSensitive(remote_tool, "name");
+         if (!cJSON_IsString(name) || !name->valuestring[0])
+            continue;
+         if (computer_use_is_tool_name(name->valuestring) && !cu_policy.enabled)
+            continue;
 
-      if (openai_format)
-      {
-         cJSON *tool = cJSON_CreateObject();
-         cJSON *fn = cJSON_CreateObject();
-         cJSON_AddStringToObject(tool, "type", "function");
-         cJSON_AddStringToObject(fn, "name", name->valuestring);
-         cJSON_AddStringToObject(fn, "description", cJSON_IsString(desc) ? desc->valuestring : "");
-         cJSON_AddItemToObject(fn, "parameters", schema);
-         cJSON_AddItemToObject(tool, "function", fn);
-         cJSON_AddItemToArray(tools, tool);
-      }
-      else
-      {
-         cJSON *tool = cJSON_CreateObject();
-         cJSON_AddStringToObject(tool, "type", "function");
-         cJSON_AddStringToObject(tool, "name", name->valuestring);
-         cJSON_AddStringToObject(tool, "description",
-                                 cJSON_IsString(desc) ? desc->valuestring : "");
-         cJSON_AddItemToObject(tool, "parameters", schema);
-         cJSON_AddItemToArray(tools, tool);
+         const char *raw_name = strchr(name->valuestring, ':');
+         if (raw_name && raw_name[1] && tools_array_has_name(tools, raw_name + 1, openai_format))
+            LOG_WARN("mcp-tools", "remote tool name collides with builtin, namespaced as %s",
+                     name->valuestring);
+
+         cJSON *desc = cJSON_GetObjectItemCaseSensitive(remote_tool, "description");
+         cJSON *schema = cJSON_GetObjectItemCaseSensitive(remote_tool, "inputSchema");
+         emit_remote_tool_def(tools, name->valuestring, desc, schema, openai_format);
       }
    }
-
    cJSON_Delete(remote_tools);
+
+   /* After local (server-hosted) plugins, federate aimee-kb-hosted plugin defs. */
+   append_federated_kb_tools(tools, openai_format, &cu_policy);
 }
 
 cJSON *delegate_respond_spec(void)

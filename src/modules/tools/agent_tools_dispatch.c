@@ -2298,14 +2298,32 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       }
       cJSON *remote_result = NULL;
       char err_buf[256] = "";
-      if (mcp_client_registry_call_tool(name, args, timeout_ms, &remote_result, err_buf,
-                                        sizeof(err_buf)) != 0)
+      /* Namespaced "<client>:<tool>". A plugin this server HOSTS (config
+       * install: server) takes precedence and runs in-process against the local
+       * registry. A name whose client this server does NOT host is federated
+       * from aimee-kb (config install: kb) and routed there over the mTLS
+       * mcp.call action, so the plugin runs in exactly the daemon that hosts it. */
+      char client[128];
+      const char *colon = strchr(name, ':');
+      size_t clen = (size_t)(colon - name);
+      int local = 0;
+      if (clen > 0 && clen < sizeof(client))
+      {
+         memcpy(client, name, clen);
+         client[clen] = '\0';
+         local = (mcp_client_registry_get(client) != NULL);
+      }
+      int rc = local ? mcp_client_registry_call_tool(name, args, timeout_ms, &remote_result,
+                                                     err_buf, sizeof(err_buf))
+                     : kb_client_mcp_call(name, args, timeout_ms, agent_tools_dispatch_role(),
+                                          &remote_result, err_buf, sizeof(err_buf));
+      if (rc != 0)
       {
          /* err_buf is the MCP server's own error text and may echo argument
           * values; classify to an enum, never let it near the audit fields. */
          td_outcome_set("error", "tool_error");
          char err[384];
-         snprintf(err, sizeof(err), "error: remote mcp tool failed: %s",
+         snprintf(err, sizeof(err), "error: %s mcp tool failed: %s", local ? "remote" : "kb-hosted",
                   err_buf[0] ? err_buf : "unknown error");
          result = safe_strdup(err);
       }

@@ -7,7 +7,10 @@
 /* Boot the process-wide MCP client registry from config.
  * Returns the number of live sessions after startup. Never fails hard; entries
  * that cannot start are skipped and should be surfaced through stderr/logs. */
-int mcp_client_registry_boot(const config_t *cfg);
+/* Boot the plugins this daemon HOSTS: pass CONFIG_MCP_INSTALL_SERVER from
+ * aimee-server, CONFIG_MCP_INSTALL_KB from aimee-kb. Only clients whose config
+ * install target matches are started, so each plugin runs in exactly one daemon. */
+int mcp_client_registry_boot(const config_t *cfg, config_mcp_install_t host);
 
 /* Close all live sessions and clear the registry. Safe to call repeatedly. */
 void mcp_client_registry_shutdown(void);

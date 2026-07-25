@@ -45,6 +45,13 @@ extern "C"
     * container is necessarily orphaned. Returns removed count or -1. */
    int delegate_backend_docker_remove_orphans(void);
 
+   /* Periodic runtime reap of aged delegate containers (older than max_age_secs).
+    * Unlike remove_orphans (startup-only), this runs while the server is live to
+    * reclaim containers leaked when a delegate is stale-cancelled/crashes and its
+    * release() never fires. max_age_secs must exceed the in-tool job cap so a live
+    * turn is never removed. Returns removed count or -1. */
+   int delegate_backend_docker_reap_aged(int max_age_secs);
+
    /* Build the docker exec command-string used by exec(). Pure
     * string assembly. Shape:
     *   docker exec -i <container_name> bash -c '<base64-encoded-script>'

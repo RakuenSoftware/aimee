@@ -12,6 +12,7 @@
 #include "util.h" /* safe_exec_capture_env */
 #include "log.h"
 #include "platform_path.h" /* platform_mkdir_p */
+#include "vault_service.h" /* vault_service_set_server — OAuth token single source of truth */
 
 #include <ctype.h>
 #include <fcntl.h>
@@ -20,6 +21,7 @@
 #include <string.h>
 #include <sys/file.h> /* flock */
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 /* Wall-clock ceilings for every spawned process. None of these may run unbounded:
@@ -89,6 +91,112 @@ static const char *home_dir(void)
 {
    const char *h = getenv("AIMEE_HOME");
    return (h && h[0]) ? h : "/var/lib/aimee";
+}
+
+/* The vendor CLI's on-disk OAuth token file, relative to the vendor HOME. */
+static const char *oauth_token_relpath(cli_oauth_vendor_t v)
+{
+   return v == CLI_OAUTH_CODEX ? ".codex/auth.json" : ".claude/.credentials.json";
+}
+
+/* Read up to cap bytes of a small credential file into a fresh NUL-terminated
+ * buffer (caller frees + scrubs), or NULL. The OAuth token files are tiny. */
+static char *oauth_read_secret_file(const char *path)
+{
+   int fd = open(path, O_RDONLY | O_CLOEXEC);
+   if (fd < 0)
+      return NULL;
+   enum
+   {
+      OAUTH_SECRET_CAP = 64 * 1024
+   };
+   char *buf = malloc(OAUTH_SECRET_CAP);
+   if (!buf)
+   {
+      close(fd);
+      return NULL;
+   }
+   size_t used = 0;
+   ssize_t n;
+   while (used < OAUTH_SECRET_CAP - 1 &&
+          (n = read(fd, buf + used, OAUTH_SECRET_CAP - 1 - used)) > 0)
+      used += (size_t)n;
+   close(fd);
+   if (n < 0 || used == 0)
+   {
+      memset(buf, 0, OAUTH_SECRET_CAP);
+      free(buf);
+      return NULL;
+   }
+   buf[used] = '\0';
+   return buf;
+}
+
+/* claude's ~/.claude/.credentials.json records the token's absolute expiry as
+ * "expiresAt":<epoch-ms>. A re-auth is only genuinely complete once a token with a
+ * FUTURE expiry has been written: a pre-existing EXPIRED file left from an earlier
+ * sign-in must NOT count as success, or the poll reports authenticated instantly against
+ * the dead token — storing it to the vault and tearing the login session down before the
+ * user ever finishes the browser flow. Returns 1 only for a present, parseable,
+ * not-yet-expired token; 0 otherwise (absent / unreadable / no expiresAt / expired). */
+int cli_oauth_claude_token_is_fresh(const char *path)
+{
+   char *buf = oauth_read_secret_file(path);
+   if (!buf)
+      return 0;
+   int fresh = 0;
+   const char *p = strstr(buf, "\"expiresAt\"");
+   if (p)
+   {
+      p += strlen("\"expiresAt\"");
+      while (*p == ':' || *p == ' ' || *p == '\t')
+         p++;
+      long long expires_ms = strtoll(p, NULL, 10);
+      long long now_ms = (long long)time(NULL) * 1000LL;
+      if (expires_ms > now_ms)
+         fresh = 1;
+   }
+   memset(buf, 0, strlen(buf));
+   free(buf);
+   return fresh;
+}
+
+/* Persist the vendor's freshly-written OAuth token into the vault as the single
+ * source of truth, keyed (agent=<vendor>, cred="oauth") under the server principal
+ * (server-KEK wrapped, no unlock). Delegate launches materialize it from here, so a
+ * re-auth is reflected everywhere without depending on a HOME-resolved plaintext
+ * file. Best-effort: on failure the login still succeeds and the plaintext file
+ * remains as a fallback, but we log loudly since the vault is the intended store. */
+static void oauth_store_token_in_vault(cli_oauth_vendor_t v)
+{
+   char path[600];
+   snprintf(path, sizeof(path), "%s/%s", home_dir(), oauth_token_relpath(v));
+   char *secret = oauth_read_secret_file(path);
+   if (!secret)
+   {
+      aimee_log(LOG_WARN, "cli.oauth", "%s: could not read token file to vault it: %s",
+                g_vendors[v].name, path);
+      return;
+   }
+   if (vault_service_set_server(g_vendors[v].name, "oauth", secret) == VAULT_OK)
+      aimee_log(LOG_INFO, "cli.oauth", "%s OAuth token stored in vault (single source of truth)",
+                g_vendors[v].name);
+   else
+      aimee_log(LOG_WARN, "cli.oauth",
+                "%s OAuth token vault store FAILED — falling back to plaintext file",
+                g_vendors[v].name);
+   memset(secret, 0, strlen(secret));
+   free(secret);
+}
+
+/* Strong override of cli_session.c's weak materialize seam: read the vaulted
+ * (agent, "oauth") token so a delegate launch can write it into its ephemeral HOME
+ * (the single-source-of-truth read side). This TU already links the vault; keeping
+ * the seam out of cli_session.c means test binaries linking cli_session.o need no
+ * vault objects. Returns 0 (token written to out) or non-zero (no entry / error). */
+int cli_oauth_vault_materialize_get(const char *agent, char *out, size_t out_len)
+{
+   return vault_service_get_server_principal(agent, "oauth", out, out_len) == VAULT_OK ? 0 : 1;
 }
 
 /* Build the explicit child environment for a vendor command: HOME + per-vendor
@@ -568,14 +676,19 @@ int cli_oauth_poll(cli_oauth_vendor_t v, const char *session, cli_oauth_state_t 
        * completes. Check ONLY that file — `.claude.json` is unconditional app
        * state created on first launch, so treating it as proof of auth was a false
        * positive that reported success (and tore the session down) before the real
-       * credentials were written, leaving the CLI unauthenticated. */
+       * credentials were written, leaving the CLI unauthenticated. And require the
+       * token to be UNEXPIRED: an old expired .credentials.json from a prior sign-in
+       * is present from the first byte, so a bare existence check reports success
+       * instantly against the dead token and never captures the fresh one. */
       char tok[600];
       snprintf(tok, sizeof(tok), "%s/.claude/.credentials.json", home_dir());
-      struct stat sb;
-      authed = (stat(tok, &sb) == 0 && sb.st_size > 0);
+      authed = cli_oauth_claude_token_is_fresh(tok);
    }
    if (authed)
    {
+      /* Persist the token into the vault (single source of truth) before locking
+       * down / tearing down: the delegate launch materializes it from the vault. */
+      oauth_store_token_in_vault(v);
       /* Lock down the token files, then tear the session down. */
       char tokdir[600];
       snprintf(tokdir, sizeof(tokdir), "%s/%s", home_dir(),

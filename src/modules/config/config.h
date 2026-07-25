@@ -153,10 +153,23 @@ typedef enum
    CONFIG_MCP_TRANSPORT_SSE = 2
 } config_mcp_transport_t;
 
+/* Which daemon hosts (runs) this MCP plugin, deciding its exposure scope:
+ *   SERVER — booted by aimee-server; the plugin's tools are exposed only to that
+ *            server's own sessions (the historical, default behavior).
+ *   KB     — booted by aimee-kb; the plugin's tools are exposed to everything
+ *            hooked up to that kb (every server + thin client), reached from a
+ *            server over kb_client HTTP. */
+typedef enum
+{
+   CONFIG_MCP_INSTALL_SERVER = 0,
+   CONFIG_MCP_INSTALL_KB = 1
+} config_mcp_install_t;
+
 typedef struct
 {
    char name[64];
    config_mcp_transport_t transport;
+   config_mcp_install_t install; /* which daemon runs it (scope); default SERVER */
    char command[CONFIG_MCP_MAX_COMMAND_ARGS][256];
    int command_count;
    char cwd[CONFIG_MCP_MAX_CWD];

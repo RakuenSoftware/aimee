@@ -288,7 +288,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
       return 1;
    }
 
-   mcp_client_registry_boot(&cfg);
+   mcp_client_registry_boot(&cfg, CONFIG_MCP_INSTALL_SERVER); /* server-hosted plugins only */
    agent_http_init();
    presence_init(); /* unified-presence registry (attachments, turn locks, event ring) */
    presence_set_delivery_fn(presence_deliver_via_notify, NULL); /* outbound: ntfy/local */

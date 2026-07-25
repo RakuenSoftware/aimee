@@ -1062,6 +1062,7 @@ static const struct
     {"rules.insert", kb_handle_rules_insert},
     {"tool_registry.snapshot", kb_handle_tool_registry_snapshot},
     {"tool_registry.lookup", kb_handle_tool_registry_lookup},
+    {"mcp.call", kb_handle_mcp_call},
     {"relations.schema_list", kb_handle_relations_schema_list},
     {"memory.find_facts_visible", kb_handle_memory_find_facts_visible},
     {"memory.find_facts_scoped", kb_handle_memory_find_facts_scoped},
