@@ -101,6 +101,50 @@ static void test_docker_write_then_read_roundtrip(void)
    printf("  PASS: test_docker_write_then_read_roundtrip\n");
 }
 
+/* The native file tools (tool_read_file/tool_write_file) resolve to an ABSOLUTE
+ * in-workspace path via the thread cwd before calling the provider. The worktree is
+ * bind-mounted path-identically, so that path is valid in-container and MUST be accepted
+ * — previously it was rejected outright ("cannot open"/"cannot write" on a container
+ * delegate's own worktree), while a path OUTSIDE the workspace must still be refused. */
+static void test_docker_absolute_in_workspace_path_accepted(void)
+{
+   delegate_backend_reset_for_test();
+   delegate_backend_register_docker();
+   delegate_backend_t *b = delegate_backend_docker_get();
+   void *state = NULL;
+   setup_docker_fileio_state(b, "task-abs-1", &state);
+
+   char workdir[256];
+   snprintf(workdir, sizeof(workdir), "/tmp/aimee-docker-workdir-%d", (int)getpid());
+   char abs[512];
+
+   /* Read back a relative-written file via its ABSOLUTE in-workspace path. */
+   assert(b->write_file(b, state, "note.txt", "abs read\n") == 0);
+   snprintf(abs, sizeof(abs), "%s/note.txt", workdir);
+   char *content = NULL;
+   assert(b->read_file(b, state, abs, 0, 0, &content) == 0);
+   assert(content != NULL && strcmp(content, "abs read\n") == 0);
+   free(content);
+
+   /* Write via an ABSOLUTE in-workspace path, then read it back relatively. */
+   snprintf(abs, sizeof(abs), "%s/note2.txt", workdir);
+   assert(b->write_file(b, state, abs, "abs write\n") == 0);
+   content = NULL;
+   assert(b->read_file(b, state, "note2.txt", 0, 0, &content) == 0);
+   assert(content != NULL && strcmp(content, "abs write\n") == 0);
+   free(content);
+
+   /* An absolute path OUTSIDE the workspace root is still refused (no host escape),
+    * including a sibling that merely shares the workdir prefix. */
+   assert(b->write_file(b, state, "/tmp/outside-escape.txt", "x") == -1);
+   char sibling[320];
+   snprintf(sibling, sizeof(sibling), "%s-evil/x.txt", workdir);
+   assert(b->write_file(b, state, sibling, "x") == -1);
+
+   teardown_docker_fileio_state(b, state);
+   printf("  PASS: test_docker_absolute_in_workspace_path_accepted\n");
+}
+
 static void test_docker_path_validation_rejects_escapes(void)
 {
    delegate_backend_reset_for_test();
@@ -892,6 +936,7 @@ int main(void)
    test_docker_exec_set_cwd_prefixes_subsequent_calls();
    test_acquire_rejects_invalid_args();
    test_docker_write_then_read_roundtrip();
+   test_docker_absolute_in_workspace_path_accepted();
    test_docker_path_validation_rejects_escapes();
    test_docker_list_dir_returns_entries();
    test_docker_mounts_caller_workspace();
