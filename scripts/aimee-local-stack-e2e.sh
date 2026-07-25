@@ -128,16 +128,34 @@ bold "==> Starting aimee-server"
 "$REPO/aimee-server" --socket="$AIMEE_HOME/aimee-server.sock" &
 server_pid=$!
 
-bold "==> Waiting up to ${WAIT_SECONDS}s for server /v1/health"
+# The listener binds with the seeded bootstrap bearer (aimee-local-dev), which by
+# design authorizes ONLY POST /v1/api/rotate_bearer until it is rotated to a strong
+# per-deployment token (see AIMEE_BOOTSTRAP_BEARER in src/modules/config/config.h) —
+# so a plain /v1/health poll with the bootstrap bearer 401s forever. Enroll exactly
+# as the thin client does: poll rotate_bearer (which also confirms the server is
+# serving), then use the minted bearer for every subsequent request.
+bold "==> Enrolling: rotate bootstrap bearer (waits up to ${WAIT_SECONDS}s for server)"
 deadline=$((SECONDS + WAIT_SECONDS))
+rotated=""
 while true; do
-  if curl -fsS --max-time 3 "${AUTH[@]}" "${SERVER_URL}/v1/health" >/dev/null 2>&1; then
-    green "    server is up"; break
+  resp="$(curl -fsS --max-time 3 "${AUTH[@]}" -X POST "${SERVER_URL}/v1/api/rotate_bearer" 2>/dev/null || true)"
+  if [[ "$resp" == *'"bearer_token"'* ]]; then
+    rotated="$(sed -n 's/.*"bearer_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' <<<"$resp")"
+    [[ -n "$rotated" ]] && { green "    enrolled: rotated to a per-deployment bearer"; break; }
   fi
   if ! kill -0 "$server_pid" 2>/dev/null; then red "    aimee-server exited during startup"; exit 1; fi
-  if (( SECONDS >= deadline )); then red "    server did not come up within ${WAIT_SECONDS}s"; exit 1; fi
+  if (( SECONDS >= deadline )); then red "    server did not come up / rotate within ${WAIT_SECONDS}s"; exit 1; fi
   sleep 2
 done
+BEARER="$rotated"
+AUTH=(-H "Authorization: Bearer ${BEARER}")
+
+bold "==> Waiting for /v1/health"
+if curl -fsS --max-time 5 "${AUTH[@]}" "${SERVER_URL}/v1/health" >/dev/null 2>&1; then
+  green "    server is up"
+else
+  red "    server up but /v1/health failed with rotated bearer"; exit 1
+fi
 
 bold "==> Core contract"
 check "GET /v1/health"  '"service":"aimee-server"' "${SERVER_URL}/v1/health"
