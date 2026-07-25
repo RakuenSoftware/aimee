@@ -18,6 +18,9 @@ type aclEntry struct {
 
 var consoleAdminACL = []aclEntry{
 	{"GET", "/v1/console/overview"},
+	{"GET", "/v1/console/typed_facts"},
+	{"POST", "/v1/console/typed_facts/config"},
+	{"POST", "/v1/console/typed_facts/relation"},
 	{"GET", "/v1/console/pipeline"},
 	{"GET", "/v1/console/settings"},
 	{"POST", "/v1/console/settings/config"},
