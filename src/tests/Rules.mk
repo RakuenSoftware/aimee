@@ -680,7 +680,7 @@ $(TESTPREFIX)/unit-test-util: $(OBJDIR)/tests/test_util.o $(OBJDIR)/util.o $(OBJ
                      $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-db: $(OBJDIR)/tests/test_db.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db1_write.o $(OBJDIR)/db1/db1_trigger.o $(OBJDIR)/db1/db1_cron_jobs.o $(OBJDIR)/db1/model_catalog.o $(OBJDIR)/db1/maintenance.o $(OBJDIR)/db1/eval.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o \
+$(TESTPREFIX)/unit-test-db: $(OBJDIR)/tests/test_db.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db1_write.o $(OBJDIR)/db1/db1_trigger.o $(OBJDIR)/db1/db1_cron_jobs.o $(OBJDIR)/db1/model_catalog.o $(OBJDIR)/db1/maintenance.o $(OBJDIR)/db1/eval.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o \
                     $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o \
                     $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/platform_random.o \
                     $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/cJSON.o
@@ -701,13 +701,13 @@ $(TESTPREFIX)/unit-test-harness-memory-scope: $(OBJDIR)/tests/test_harness_memor
 $(TESTPREFIX)/unit-test-memory-redirect: $(OBJDIR)/tests/test_memory_redirect.o $(OBJDIR)/modules/memory/memory_redirect.o $(OBJDIR)/harness_memory_scope.o $(OBJDIR)/aimee_home.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-harness-memory: $(OBJDIR)/tests/test_harness_memory.o $(OBJDIR)/db1/user_memory.o $(OBJDIR)/harness_memory_common.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db1_write.o $(OBJDIR)/db1/db1_trigger.o $(OBJDIR)/db1/db1_cron_jobs.o $(OBJDIR)/db1/model_catalog.o $(OBJDIR)/db1/maintenance.o $(OBJDIR)/db1/eval.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o \
+$(TESTPREFIX)/unit-test-harness-memory: $(OBJDIR)/tests/test_harness_memory.o $(OBJDIR)/db1/user_memory.o $(OBJDIR)/harness_memory_common.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db1_write.o $(OBJDIR)/db1/db1_trigger.o $(OBJDIR)/db1/db1_cron_jobs.o $(OBJDIR)/db1/model_catalog.o $(OBJDIR)/db1/maintenance.o $(OBJDIR)/db1/eval.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o \
                     $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o \
                     $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/platform_random.o \
                     $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-webchat-claude-sessions: $(OBJDIR)/tests/test_webchat_claude_sessions.o $(OBJDIR)/db1/webchat_claude_sessions.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db1_write.o $(OBJDIR)/db1/db1_trigger.o $(OBJDIR)/db1/db1_cron_jobs.o $(OBJDIR)/db1/model_catalog.o $(OBJDIR)/db1/maintenance.o $(OBJDIR)/db1/eval.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o \
+$(TESTPREFIX)/unit-test-webchat-claude-sessions: $(OBJDIR)/tests/test_webchat_claude_sessions.o $(OBJDIR)/db1/webchat_claude_sessions.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db1_write.o $(OBJDIR)/db1/db1_trigger.o $(OBJDIR)/db1/db1_cron_jobs.o $(OBJDIR)/db1/model_catalog.o $(OBJDIR)/db1/maintenance.o $(OBJDIR)/db1/eval.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o \
                     $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o \
                     $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/platform_random.o \
                     $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/cJSON.o
@@ -1037,7 +1037,7 @@ $(TESTPREFIX)/unit-test-rules: $(OBJDIR)/tests/test_rules.o $(DB1_OBJS) $(OBJDIR
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-context-discover: $(OBJDIR)/tests/test_context_discover.o $(OBJDIR)/context_discover.o \
-                       $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o $(OBJDIR)/modules/config/config_mode.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o \
+                       $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o $(OBJDIR)/modules/config/config_mode.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o \
                        $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/platform_random.o $(OBJDIR)/log.o \
                        $(PLATFORM_BASIC_OBJS) $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -1073,7 +1073,7 @@ $(TESTPREFIX)/unit-test-memory: $(OBJDIR)/tests/test_memory.o $(OBJDIR)/kb/kb_ba
                         $(OBJDIR)/tests/support/memory_embed_stub.o $(OBJDIR)/tests/support/kb_client_test_stub.o \
                         $(OBJDIR)/posix/memory.o \
                         $(OBJDIR)/modules/memory/memory_logic.o $(OBJDIR)/modules/memory/memory_health.o $(OBJDIR)/modules/memory/memory_conflict.o $(OBJDIR)/modules/memory/memory_context.o $(OBJDIR)/modules/memory/memory_assemble.o \
-                        $(OBJDIR)/modules/memory/memory_advanced.o $(OBJDIR)/modules/memory/memory_prospective.o $(OBJDIR)/modules/memory/memory_lifecycle.o $(OBJDIR)/modules/memory/memory_directives.o $(OBJDIR)/modules/memory/memory_maintenance.o $(OBJDIR)/modules/memory/memory_graph.o $(OBJDIR)/modules/memory/memory_graph_fusion.o $(OBJDIR)/modules/memory/memory_scan.o $(OBJDIR)/modules/memory/memory_improve.o $(OBJDIR)/modules/memory/memory_episodes.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o \
+                        $(OBJDIR)/modules/memory/memory_advanced.o $(OBJDIR)/modules/memory/memory_prospective.o $(OBJDIR)/modules/memory/memory_lifecycle.o $(OBJDIR)/modules/memory/memory_directives.o $(OBJDIR)/modules/memory/memory_maintenance.o $(OBJDIR)/modules/memory/memory_graph.o $(OBJDIR)/modules/memory/memory_graph_fusion.o $(OBJDIR)/modules/memory/memory_scan.o $(OBJDIR)/modules/memory/memory_improve.o $(OBJDIR)/modules/memory/memory_episodes.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o \
                         $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o \
                         $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/platform_random.o \
                         $(OBJDIR)/aimee_home.o \
@@ -1519,7 +1519,7 @@ $(TESTPREFIX)/unit-test-dashboard: $(OBJDIR)/tests/test_dashboard.o \
                           $(OBJDIR)/dashboard.o $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/dashboard_server.o $(OBJDIR)/modules/kb_client/kb_client.o $(OBJDIR)/modules/kb_client/kb_client_cache.o $(OBJDIR)/modules/kb_client/kb_client_index.o $(OBJDIR)/code_collect.o $(OBJDIR)/modules/kb_client/kb_client_memory.o $(OBJDIR)/modules/kb_client/kb_client_memory_audit.o $(OBJDIR)/modules/kb_client/kb_client_memory_mutations.o $(OBJDIR)/modules/kb_client/kb_client_agent.o $(OBJDIR)/modules/kb_client/kb_client_dashboard.o $(OBJDIR)/modules/kb_client/kb_client_tasks.o $(OBJDIR)/modules/kb_client/kb_client_data.o \
                           $(OBJDIR)/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/posix/cli_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(DB1_OBJS) \
                           $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/decision_log.o $(OBJDIR)/db2/kb_audit_worm.o \
-                          $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o \
+                          $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o \
                           $(OBJDIR)/yaml.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o \
                           $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/dstr.o \
                           $(OBJDIR)/tests/support/mock_agent_http.o \
@@ -2491,14 +2491,14 @@ $(TESTPREFIX)/unit-test-trajectory: $(OBJDIR)/tests/test_trajectory.o \
                                $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                $(OBJDIR)/db1/maintenance.o $(OBJDIR)/db1/interaction_events.o \
                                $(OBJDIR)/posix/memory.o \
-                               $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o $(OBJDIR)/aimee_home.o \
+                               $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o $(OBJDIR)/aimee_home.o \
                                $(OBJDIR)/log.o $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/cJSON.o \
                                $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-trajectory-batch: $(OBJDIR)/tests/test_trajectory_batch.o \
                                $(OBJDIR)/trajectory_batch.o $(OBJDIR)/trajectory_export.o $(OBJDIR)/modules/audit/audit_ledger.o \
-                               $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o \
+                               $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o \
                                $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                $(OBJDIR)/db1/maintenance.o $(OBJDIR)/db1/interaction_events.o \
                                $(OBJDIR)/posix/memory.o \
@@ -3281,7 +3281,7 @@ $(TESTPREFIX)/unit-test-edit-anchored: $(OBJDIR)/tests/test_edit_anchored.o \
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-tool-condense: $(OBJDIR)/tests/test_tool_condense.o $(OBJDIR)/modules/economizer/tool_condense.o \
-                      $(OBJDIR)/modules/config/config.o $(OBJDIR)/cJSON.o $(OBJDIR)/platform_random.o
+                      $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/cJSON.o $(OBJDIR)/platform_random.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-workspace-provider: $(OBJDIR)/tests/test_workspace_provider.o \
@@ -3532,7 +3532,7 @@ $(TESTPREFIX)/unit-test-hud: $(OBJDIR)/tests/test_hud.o $(OBJDIR)/hud.o \
 
 $(TESTPREFIX)/unit-test-history: $(OBJDIR)/tests/test_history.o $(OBJDIR)/history.o $(OBJDIR)/cJSON.o \
                          $(OBJDIR)/util.o $(OBJDIR)/text.o \
-                         $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o \
+                         $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o \
                          $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/platform_random.o \
                          $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -4242,7 +4242,7 @@ $(TESTPREFIX)/unit-test-lsp: $(OBJDIR)/tests/test_lsp.o \
                               $(OBJDIR)/modules/lsp/lsp_client.o \
                               $(OBJDIR)/modules/lsp/lsp_manager.o \
                               $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/maintenance.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o \
-                              $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o $(OBJDIR)/modules/config/config_mode.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o \
+                              $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o $(OBJDIR)/modules/config/config_mode.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o \
                               $(OBJDIR)/aimee_home.o \
                               $(OBJDIR)/util.o $(OBJDIR)/text.o \
                               $(OBJDIR)/platform_random.o $(OBJDIR)/log.o \
@@ -4613,7 +4613,7 @@ $(TESTPREFIX)/unit-test-witness-tamper-pg: $(OBJDIR)/tests/test_witness_tamper_p
 $(TESTPREFIX)/unit-test-git-ops: $(OBJDIR)/tests/test_git_ops.o \
                               $(OBJDIR)/modules/git/git_ops.o $(OBJDIR)/tests/support/git_pr_api_stub.o $(OBJDIR)/modules/git/git_cred_inject.o $(OBJDIR)/modules/git/git_ssh_agent.o $(OBJDIR)/modules/webuser/webuser_runtime.o \
                               $(OBJDIR)/modules/git/git_forge_vault.o $(OBJDIR)/modules/git/git_host_cred.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/workspace/workspace_scope.o \
-                              $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/aimee_home.o $(OBJDIR)/util_url.o \
+                              $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/aimee_home.o $(OBJDIR)/util_url.o \
                               $(OBJDIR)/posix/util.o $(OBJDIR)/util.o \
                               $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
@@ -4625,7 +4625,7 @@ $(TESTPREFIX)/unit-test-git-project: $(OBJDIR)/tests/test_git_project.o \
                               $(OBJDIR)/tests/support/kb_purge_stub.o \
                               $(OBJDIR)/modules/git/git_project.o $(OBJDIR)/server/ws_registry.o $(OBJDIR)/modules/git/git_cred_inject.o $(OBJDIR)/modules/git/git_ssh_agent.o $(OBJDIR)/modules/webuser/webuser_runtime.o \
                               $(OBJDIR)/modules/git/git_forge_vault.o $(OBJDIR)/modules/git/git_host_cred.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/workspace/workspace_scope.o \
-                              $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/util_url.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/aimee_home.o \
+                              $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/util_url.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/aimee_home.o \
                               $(OBJDIR)/posix/util.o $(OBJDIR)/util.o \
                               $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
@@ -4636,7 +4636,7 @@ $(TESTPREFIX)/unit-test-git-project: $(OBJDIR)/tests/test_git_project.o \
 $(TESTPREFIX)/unit-test-webchat-git-leak: $(OBJDIR)/tests/test_webchat_git_leak.o \
                               $(OBJDIR)/modules/git/git_cred_inject.o $(OBJDIR)/modules/git/git_ssh_agent.o $(OBJDIR)/modules/webuser/webuser_runtime.o $(OBJDIR)/modules/workspace/workspace_scope.o $(OBJDIR)/modules/git/git_forge_vault.o \
                               $(OBJDIR)/modules/git/git_host_cred.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/util_url.o $(OBJDIR)/posix/util.o $(OBJDIR)/util.o \
-                              $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/aimee_home.o \
+                              $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/aimee_home.o \
                               $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
                               $(OBJDIR)/modules/vault/vault_server_key.o \
@@ -4646,7 +4646,7 @@ $(TESTPREFIX)/unit-test-webchat-git-leak: $(OBJDIR)/tests/test_webchat_git_leak.
 $(TESTPREFIX)/unit-test-git-ssh-agent: $(OBJDIR)/tests/test_git_ssh_agent.o \
                               $(OBJDIR)/modules/git/git_ssh_agent.o $(OBJDIR)/modules/git/git_forge_vault.o \
                               $(OBJDIR)/modules/webuser/webuser_runtime.o $(OBJDIR)/modules/workspace/workspace_scope.o \
-                              $(OBJDIR)/modules/config/config.o $(OBJDIR)/aimee_home.o \
+                              $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/aimee_home.o \
                               $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
                               $(OBJDIR)/modules/vault/vault_server_key.o \
@@ -4656,7 +4656,7 @@ $(TESTPREFIX)/unit-test-git-ssh-agent: $(OBJDIR)/tests/test_git_ssh_agent.o \
 $(TESTPREFIX)/unit-test-git-cred-inject: $(OBJDIR)/tests/test_git_cred_inject.o \
                               $(OBJDIR)/modules/git/git_cred_inject.o $(OBJDIR)/modules/git/git_ssh_agent.o $(OBJDIR)/modules/webuser/webuser_runtime.o $(OBJDIR)/modules/workspace/workspace_scope.o $(OBJDIR)/modules/git/git_forge_vault.o \
                               $(OBJDIR)/modules/git/git_host_cred.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/util_url.o $(OBJDIR)/posix/util.o $(OBJDIR)/util.o \
-                              $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/aimee_home.o \
+                              $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/aimee_home.o \
                               $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
                               $(OBJDIR)/modules/vault/vault_server_key.o \
@@ -4668,7 +4668,7 @@ $(TESTPREFIX)/unit-test-webuser-editor: $(OBJDIR)/tests/test_webuser_editor.o \
                               $(OBJDIR)/modules/git/git_ssh_agent.o $(OBJDIR)/modules/webuser/webuser_runtime.o \
                               $(OBJDIR)/modules/workspace/workspace_scope.o $(OBJDIR)/modules/git/git_forge_vault.o \
                               $(OBJDIR)/modules/git/git_host_cred.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/util_url.o $(OBJDIR)/posix/util.o $(OBJDIR)/util.o \
-                              $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/aimee_home.o \
+                              $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/aimee_home.o \
                               $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
                               $(OBJDIR)/modules/vault/vault_server_key.o \
@@ -5121,7 +5121,7 @@ $(TESTPREFIX)/unit-test-memory-retrieval-eval: $(OBJDIR)/kb/kb_bandit.o $(OBJDIR
 
 $(TESTPREFIX)/unit-test-ensemble: $(OBJDIR)/tests/test_ensemble.o \
                      $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/ensemble.o \
-                     $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o \
+                     $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o \
                      $(OBJDIR)/aimee_home.o \
                      $(OBJDIR)/yaml.o \
                      $(OBJDIR)/dstr.o \
@@ -5836,7 +5836,7 @@ $(TESTPREFIX)/unit-test-mcp-osv-cache: $(OBJDIR)/tests/test_mcp_osv_cache.o \
 $(TESTPREFIX)/unit-test-mcp-client-registry: $(OBJDIR)/tests/test_mcp_client_registry.o \
                      $(OBJDIR)/modules/protocols/mcp/mcp_tools.o $(OBJDIR)/modules/protocols/mcp/mcp_tool_profile.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_extended.o $(OBJDIR)/modules/protocols/mcp/mcp_skill_tools.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_gateway.o \
                      $(OBJDIR)/server/session_search_tool.o \
-                     $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/platform_random.o $(OBJDIR)/modules/config/config_save.o \
+                     $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/platform_random.o $(OBJDIR)/modules/config/config_save.o \
                      $(OBJDIR)/yaml.o \
                      $(OBJDIR)/db1/db.o \
                      $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/maintenance.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o \
