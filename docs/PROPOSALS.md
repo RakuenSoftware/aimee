@@ -217,6 +217,15 @@ The genuinely open work — twenty-three proposals (all but one not yet implemen
   and deeper per-directory convention discovery (the walk is already correct and
   tested; `AGENTS.md` is a foreign convention classed untrusted advisory).
   **Evaluate-Optimize / Calibrate.**
+- [Per-user `remote_writes` authorization](proposals/pending/per-user-remote-writes-authz.md)
+  — make the `/v1` write tier a function of the authenticated individual user instead of one global
+  `aimee.api.remote_writes` switch. aimee reuses standard identity rather than building its own:
+  **OIDC when enabled, otherwise the host's PAM stack via aimee-kb**. Authentication always terminates
+  at aimee-kb (entered from the server web-GUI adoption wizard: OIDC redirect delegated to kb, or a PAM
+  login form); kb mints a short-lived kb-signed token carrying `{subject, tier}` (P5 §3) that the
+  server verifies over the server→kb JWKS channel and feeds into the already-parameterized write gate.
+  Depends on P5/P1; mTLS stays transport-only; the local UDS operator is un-lockout-able; unmatched
+  identities fail closed. **Enforce / Constrain-Verify / Gate-Promote.**
 
 ## Done (66)
 
