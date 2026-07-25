@@ -233,10 +233,15 @@ serves ingestion. This is **not required for fit** (E2B is already lighter than 
 deployed E4B); it is a **latency / throughput headroom** lever, run as a **gated
 experiment *after* the base pipeline is proven** — not a front-loaded decision.
 
-**Sequencing.** Prove the base unified pipeline first — PLE port (§4) → E4B→E2B synth
-distill + embed/rerank adapters (§5) → all §7 gates green on stock (text-only) E2B.
-*Only then* run the size-reduction tiers, each validated against the same three gates
-(embedder-sweep, curator-synth, rerank latency); keep the smallest tier that holds.
+**Sequencing — an incremental, gated ladder, tested between each step.** Prove the
+base unified pipeline first (PLE port §4 → E4B→E2B synth distill + embed/rerank
+adapters §5 → all §7 gates green on stock text-only E2B). Then apply the tiers in
+order, re-running the three gates (embedder-sweep, curator-synth, rerank latency)
+*after each* so every cut has its own pass/fail checkpoint before the next begins.
+Tiers 1→2 are the incremental path (each well-defined, each independently validated).
+Tier 3, *if feasible at all*, is not judged against the raw gates but **head-to-head
+against the surviving Tier-2 model** — adopted only if it is materially smaller/faster
+at equal gate quality, enough to pay for its bespoke-serving cost.
 
 - **Tier 1 — drop the modality towers (applied during the base build; lossless).**
   Convert text-only: the vision (SigLIP-class — this is the "OCR" path) and audio
@@ -252,8 +257,9 @@ distill + embed/rerank adapters (§5) → all §7 gates green on stock (text-onl
   vocab cut), then heal by distilling E4B → pruned student on aimee's distribution.
   The narrow heal distribution is precisely what permits aggressive pruning. Cost: a
   bespoke architecture the vendored llama.cpp must carry, compounding the §4 PLE work
-  — so pursue only if Tier 2 leaves headroom the benches confirm is worth the serving
-  complexity.
+  — evaluated head-to-head against the Tier-2 slice (not just against the raw gates):
+  it wins only if it is materially smaller/faster at equal quality; otherwise Tier 2
+  stands and Tier 3 is parked.
 
 Every cut is a search for the smallest model that still passes §7, not a fixed
 target; none flips a default (charter Gate-Promote).
