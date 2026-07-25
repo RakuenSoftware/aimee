@@ -41,6 +41,7 @@
 #ifndef AIMEE_BUS_ARENA_H
 #define AIMEE_BUS_ARENA_H 1
 
+#include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -76,11 +77,11 @@ typedef struct
 typedef struct
 {
    uint8_t active;
-   uint8_t producer_ref;               /* 0 or 1 */
-   uint8_t owner_slot;                  /* the producer that allocated it */
-   uint32_t generation;                /* bumped on each reuse of this table slot */
-   uint64_t offset;                    /* span start in the arena */
-   uint32_t len;                       /* span length */
+   uint8_t producer_ref;                         /* 0 or 1 */
+   uint8_t owner_slot;                           /* the producer that allocated it */
+   uint32_t generation;                          /* bumped on each reuse of this table slot */
+   uint64_t offset;                              /* span start in the arena */
+   uint32_t len;                                 /* span length */
    uint64_t consumer_bits[BUS_ARENA_SLOT_WORDS]; /* which slots hold a consumer ref */
 } bus_lease_t;
 
@@ -107,12 +108,27 @@ typedef struct
 
    uint32_t live_per_slot[BUS_ARENA_MAX_SLOTS];
    uint64_t bytes_in_use;
+
+   /* The lease table is host-private and small, but it is NOT single-threaded:
+    * co-located producers (D7) allocate and fill from their own threads while the
+    * host's pump thread publishes, releases, and reaps. This in-process mutex
+    * guards every table transition. It never covers a payload-byte copy — a
+    * producer fills, and a consumer reads, the leased span OUTSIDE the lock, safe
+    * because a live ref keeps the span from being reclaimed. Contention is
+    * negligible: arena is the rare oversized-payload path and each critical
+    * section is bookkeeping only. */
+   pthread_mutex_t lock;
 } bus_arena_t;
 
 /* Initialise over an arena region's usable bytes (from bus_arena_region_attach).
  * per_client_cap bounds live leases per slot; max_slots bounds valid slot ids. */
-bus_arena_result_t bus_arena_init(bus_arena_t *a, uint8_t *base, uint64_t size,
-                                  uint32_t max_slots, uint32_t per_client_cap);
+bus_arena_result_t bus_arena_init(bus_arena_t *a, uint8_t *base, uint64_t size, uint32_t max_slots,
+                                  uint32_t per_client_cap);
+
+/* Release the resources bus_arena_init acquired (the table lock). Call once when
+ * the host tears the arena down; the arena must be quiescent (no thread inside a
+ * lease call). Safe on a zeroed-but-never-initialised arena. */
+void bus_arena_fini(bus_arena_t *a);
 
 /* Allocate a span for `owner_slot`. On success *lease_id names the lease and the
  * refcount is 1 (the producer's). Refuses synchronously with ERR_CAP if the
@@ -137,9 +153,18 @@ bus_arena_result_t bus_arena_publish(bus_arena_t *a, uint32_t lease_id,
 /* A consumer's read pointer, gated on the generation and on the slot actually
  * holding a ref. ERR_STALE if the lease was reused; ERR_NOTHOLDER if the slot
  * does not hold a ref. */
-bus_arena_result_t bus_arena_read_ptr(const bus_arena_t *a, uint32_t lease_id,
-                                      uint32_t generation, uint32_t consumer_slot,
-                                      const uint8_t **ptr);
+bus_arena_result_t bus_arena_read_ptr(const bus_arena_t *a, uint32_t lease_id, uint32_t generation,
+                                      uint32_t consumer_slot, const uint8_t **ptr);
+
+/* Read pointer + length of a still-producer-held lease's span, for the HOST's own
+ * governance tap (capture/replay) to record the payload before routing publishes
+ * the lease. This is the one place the host reads arena bytes it did not write;
+ * it is not consumer-ref-gated because there is no consumer yet — the producer
+ * has filled the span and relinquished it by sending the frame, and the pump has
+ * not published it. ERR_STATE once the lease is published (use bus_arena_read_ptr
+ * then). *len is the span length; a caller records min(frame.payload_len, *len). */
+bus_arena_result_t bus_arena_producer_bytes(const bus_arena_t *a, uint32_t lease_id,
+                                            const uint8_t **ptr, uint32_t *len);
 
 /* A consumer releases its ref. Generation-checked. Reclaims at refcount zero. */
 bus_arena_result_t bus_arena_release(bus_arena_t *a, uint32_t lease_id, uint32_t generation,

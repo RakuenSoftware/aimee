@@ -25,7 +25,7 @@ import sys
 
 HDR_LEN = 64
 MAGIC = 0x30535542  # "BUS0" little-endian
-WIRE_VERSION = 1
+WIRE_VERSION = 2
 
 # hdr_flags
 F_INLINE = 0x0001
@@ -58,7 +58,7 @@ def encode(f):
         I   8  event_kind     I 12  principal_ref
         Q  16  correlation_id Q 24  seq           Q 32  logical_ts
         Q  40  payload_ref    I 48  payload_len
-        I  52  src_handle     I 56  dst_handle    I 60  reserved
+        I  52  src_handle     I 56  dst_handle    I 60  generation
     """
     blob = struct.pack(
         "<IHHIIQQQQIIII",
@@ -66,7 +66,7 @@ def encode(f):
         f["flags"], f["ver"],
         f["kind"], f["principal"],
         f["corr"], f["seq"], f["lts"], f["pref"],
-        f["plen"], f["src"], f["dst"], 0,
+        f["plen"], f["src"], f["dst"], f["gen"],
     )
     if len(blob) != HDR_LEN:
         # Not an assert: `python -O` strips those, and a generator whose own
@@ -80,6 +80,7 @@ def frame(**kw):
         "flags": 0, "ver": WIRE_VERSION, "kind": K_MODULE_BASE,
         "principal": 0x11223344, "corr": 0, "seq": 0,
         "lts": 0x0102030405060708, "pref": 0, "plen": 0, "src": 7, "dst": 0,
+        "gen": 0,
     }
     f.update(kw)
     return f
@@ -95,9 +96,9 @@ VECTORS = [
     ("notification.inline.32",
      frame(flags=F_NOTIFICATION | F_INLINE, plen=32, pref=INLINE_AT)),
     ("notification.arena.65536",
-     frame(flags=F_NOTIFICATION | F_ARENA, plen=65536, pref=0x40000)),
+     frame(flags=F_NOTIFICATION | F_ARENA, plen=65536, pref=3, gen=5)),
     ("request.arena",
-     frame(flags=F_REQUEST | F_ARENA, corr=CORR, plen=4096, pref=0x80000)),
+     frame(flags=F_REQUEST | F_ARENA, corr=CORR, plen=4096, pref=9, gen=2)),
     ("reply.inline",
      frame(flags=F_REPLY | F_INLINE, corr=CORR, plen=16, pref=INLINE_AT,
            seq=4242, dst=7)),
@@ -118,7 +119,7 @@ VECTORS = [
     ("budget.inline.192",
      frame(flags=F_NOTIFICATION | F_INLINE, plen=192, pref=INLINE_AT)),
     ("budget.arena.192",
-     frame(flags=F_NOTIFICATION | F_ARENA, plen=192, pref=0x40000)),
+     frame(flags=F_NOTIFICATION | F_ARENA, plen=192, pref=1, gen=1)),
 ]
 
 
@@ -142,8 +143,8 @@ def negatives():
     b = bytearray(good); b[0] ^= 0xFF
     out.append(("neg.bad_magic", "ERR_MAGIC", b))
 
-    b = bytearray(good); b[60] = 1
-    out.append(("neg.reserved_nonzero", "ERR_RESERVED", b))
+    b = bytearray(good); b[60] = 1  # generation!=0 on a non-arena (notification) frame
+    out.append(("neg.generation_on_non_arena", "ERR_FLAGS", b))
 
     mut("neg.version_above", "ERR_VERSION", [(6, "<H", WIRE_VERSION + 1)])
     mut("neg.version_zero", "ERR_VERSION", [(6, "<H", 0)])
@@ -162,9 +163,9 @@ def negatives():
 
 def fields_str(f):
     return ("flags=0x%04x;ver=%u;kind=%u;principal=%u;corr=0x%016x;seq=%u;"
-            "lts=0x%016x;pref=0x%016x;plen=%u;src=%u;dst=%u") % (
+            "lts=0x%016x;pref=0x%016x;plen=%u;src=%u;dst=%u;gen=%u") % (
         f["flags"], f["ver"], f["kind"], f["principal"], f["corr"],
-        f["seq"], f["lts"], f["pref"], f["plen"], f["src"], f["dst"])
+        f["seq"], f["lts"], f["pref"], f["plen"], f["src"], f["dst"], f["gen"])
 
 
 def main():

@@ -74,13 +74,13 @@ typedef bus_attach_status_t (*bus_admit_fn)(void *ctx, const bus_attach_request_
 
 /* A directory slot — host-private. A client never sees this or any other slot. */
 #define BUS_HOST_MAX_KINDS   256
-#define BUS_HOST_MAX_PENDING  1024
+#define BUS_HOST_MAX_PENDING 1024
 
 /* The governance/audit tap: invoked once per event, after seq stamping and
  * before any routing decision (D6). It is the single full-stream observer; a
  * would_block that the host never accepted is not an event and is not tapped. */
-typedef void (*bus_tap_fn)(void *ctx, const bus_frame_t *frame,
-                           const uint8_t *payload, uint32_t payload_len);
+typedef void (*bus_tap_fn)(void *ctx, const bus_frame_t *frame, const uint8_t *payload,
+                           uint32_t payload_len);
 
 typedef struct
 {
@@ -101,6 +101,12 @@ typedef struct
    int blocked;
    uint64_t blocked_seq;
    uint64_t blocked_delivered[BUS_ARENA_SLOT_WORDS];
+
+   /* Arena-notification fan-out: the observer set is snapshotted here when the
+    * lease is published (once, at first sight) so retries deliver the reference
+    * to exactly the set that was given a consumer ref — a subscriber that arrives
+    * mid-retry holds no ref and must not receive an unreadable reference. */
+   uint64_t arena_targets[BUS_ARENA_SLOT_WORDS];
 } bus_slot_t;
 
 /* Per-kind overflow policy (D5). Block is the safe default: a full destination

@@ -155,6 +155,27 @@ heartbeat-driven and therefore lagging; enforcing the cap only at reap would lea
 window in which a misbehaving client keeps allocating. The cap is the synchronous gate; reap is the
 eventual cleanup. *(Added in revision 3.)*
 
+**The lease table is thread-safe (revision 5).** D3 originally read as host-private-and-single-threaded,
+which held while the only table writers were the pump thread's publish/release/reap. Arena payload
+routing makes the model concrete: a co-located producer (D7) allocates and fills a lease from its OWN
+thread while the pump thread publishes and reaps and a consumer thread reads and releases. An
+in-process mutex now guards every table transition (`bus_arena.c`). It covers only the bookkeeping —
+the producer's fill and the consumer's read of the payload span happen outside the lock, kept safe by
+the refcount (a live reference cannot be reclaimed mid-read). A ThreadSanitizer lane
+(`scripts/run-bus-arena-tsan.sh`) runs producer/pump/consumer concurrently and is clean with the lock,
+a verified race without it. *(The arena is only writable by co-located, trusted producers in the same
+process as the host — a thin cross-process client has no access to the host-private lease table, so
+arena production is a co-located side channel, consistent with D7.)*
+
+**Routing an arena payload (revision 5).** The host forwards a lease by reference, never copying bytes.
+On an arena notification it snapshots the kind's observers and publishes the lease to exactly them
+(refcount = the set that will read); a shed observer's reference is released so the lease still drains;
+zero observers reclaims immediately. Requests/replies route point-to-point (server / requester) with
+the same publish-once, refcount-correct discipline. The host validates every arena frame against the
+authoritative lease (generation match, `payload_len ≤ span`) before routing, which is what lets a
+consumer trust `payload_len` as an in-bounds read length. The host never dereferences an arena offset
+to route — only the lease table's id/generation bookkeeping — with one exception, the capture tap (D10).
+
 ---
 
 ## D4 — Slot size and inline budget: control-region parameters, not wire fields
@@ -465,7 +486,11 @@ extent.
   **byte-identical**, including its original `payload_ref`, and the *resolved* payload bytes follow
   inline with `payload_materialized` set. A reader **must** use the materialized bytes and **must
   never** dereference `payload_ref` at replay time — that offset names an arena that no longer
-  exists. The preserved ref is forensic detail only.
+  exists. The preserved ref is forensic detail only. *(Realized for arena in revision 5: the pump
+  resolves a producer-held lease once, pre-routing, via `bus_arena_producer_bytes` and hands the span
+  to the tap, which materializes it exactly like an inline payload. This is the single exception to
+  "the host never dereferences an arena offset" — bounded by the span, for the capture tap only, before
+  the lease is published.)*
 - **`seq` is contiguous within a stream, and that is provable, not aspirational.** A `seq` is assigned
   only at stamping, and D6 requires every stamped event to be tapped, so the tapped set *is* the
   complete set of assigned `seq` values. Within one stream, `seq` therefore runs contiguously upward

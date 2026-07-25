@@ -60,12 +60,14 @@ func parseFields(t *testing.T, name, spec string) Frame {
 			f.SrcHandle = uint32(u)
 		case "dst":
 			f.DstHandle = uint32(u)
+		case "gen":
+			f.Generation = uint32(u)
 		default:
 			t.Fatalf("vector %q: unknown field %q", name, k)
 		}
 	}
-	if len(seen) != 11 {
-		t.Fatalf("vector %q: expected 11 fields, got %d", name, len(seen))
+	if len(seen) != 12 {
+		t.Fatalf("vector %q: expected 12 fields, got %d", name, len(seen))
 	}
 	return f
 }
@@ -73,9 +75,9 @@ func parseFields(t *testing.T, name, spec string) Frame {
 func fieldsString(f *Frame) string {
 	return fmt.Sprintf(
 		"flags=0x%04x;ver=%d;kind=%d;principal=%d;corr=0x%016x;seq=%d;"+
-			"lts=0x%016x;pref=0x%016x;plen=%d;src=%d;dst=%d",
+			"lts=0x%016x;pref=0x%016x;plen=%d;src=%d;dst=%d;gen=%d",
 		f.HdrFlags, f.WireVersion, f.EventKind, f.PrincipalRef, f.CorrelationID,
-		f.Seq, f.LogicalTS, f.PayloadRef, f.PayloadLen, f.SrcHandle, f.DstHandle)
+		f.Seq, f.LogicalTS, f.PayloadRef, f.PayloadLen, f.SrcHandle, f.DstHandle, f.Generation)
 }
 
 func TestWireVectors(t *testing.T) {

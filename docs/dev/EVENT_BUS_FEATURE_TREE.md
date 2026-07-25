@@ -183,9 +183,33 @@ a no-op D7 gate among them.
 
 ## What is deliberately deferred (later trees, not this one)
 
-- **Arena-payload routing.** The host publishes an arena lease (slice 4) to the resolved observer set
-  before forwarding the reference; slices 6/7 route inline payloads and drop arena-flagged frames
-  with a count. This is a focused slice-4/6 composition.
+- **Arena-payload routing — DONE for notifications** (wire v2 + slice-4/6 composition). The host
+  publishes an arena lease (slice 4) to a snapshot of the kind's observers, drops the producer ref, and
+  forwards the reference frame under the same BLOCK/SHED discipline as an inline fan-out (a shed
+  observer's ref is released so the lease still drains; no observers reclaims immediately). The host
+  never dereferences an arena offset; a co-located consumer reads in place via the lease table
+  (generation + holder gated) and releases. `bus_client_publish_arena` is the producer emit. Two narrow
+  pieces remain deliberately deferred, each awaiting a real consumer to validate against rather than
+  built speculatively:
+    - *Correlated arena patterns — DONE.* An arena request is published to the kind's server and
+      delivered by reference (no server → reclaim + capability_absent); the server's arena reply is
+      published back to the original requester and the correlation retired on delivery. Only the server
+      may answer (a forged reply is dropped + reclaimed); a shed request retires its correlation; a
+      departed peer's ref is dropped by reap. An arena cancel carries no meaningful payload, so its
+      lease is reclaimed and it is dropped. The remaining gap is a real large-payload request/reply
+      *consumer* (the memory recall round-trip), which is a separate memory-migration slice.
+    - *Cross-thread producer allocation — DONE.* The host-private lease table is now guarded by an
+      in-process mutex (bus_arena.c), so a co-located producer may allocate and fill a lease from its
+      own thread while the pump thread publishes/releases/reaps and a consumer thread reads/releases in
+      place. The lock covers only the table transitions; the payload byte-copy stays outside it, kept
+      safe by the refcount. Proven by a ThreadSanitizer lane (scripts/run-bus-arena-tsan.sh) that runs
+      all three roles concurrently over a small (recycling) arena — clean with the lock, and a verified
+      data race the moment it is removed.
+    - *Arena bytes in the capture stream (D10) — DONE.* The pump resolves a producer-held lease once,
+      pre-routing (bus_arena_producer_bytes), and hands the span to the capture tap, which materializes
+      it into the record exactly like an inline payload. Replay reads the bytes from the record blob, so
+      a captured arena event replays byte-exact without the (long-gone) lease. This is the single place
+      the host reads arena bytes it did not write — bounded by the span, for the governance tap only.
 - **Module replay.** Slice 11 delivers observational replay; re-driving a module against recorded
   inbound events is a later tree (D10).
 - **`shm_open` portability fallback.** v0 is Linux-only by D1; a fallback carries its own threat-model
@@ -200,3 +224,5 @@ a no-op D7 gate among them.
 - `scripts/check_bus_d1_gate.sh` — the D1 amendment status (now ACCEPTED).
 - `scripts/test_bus_conformance.sh` — C vectors, Go vectors, cross-language interop, single-host (D8).
 - `scripts/check_bus_perf_gate.sh` (D4 / invariant 15) — dispatch-overhead ceiling; memory rows pending.
+- `scripts/run-bus-arena-tsan.sh` — ThreadSanitizer lane for the arena lease table: producer/pump/
+  consumer threads race the table through the arena API; a data race aborts non-zero.

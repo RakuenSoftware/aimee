@@ -4,10 +4,29 @@
  * free is what keeps churn from stranding the arena: two frees that touch merge,
  * so after everything is released the arena is one span again. All of this
  * bookkeeping is host-private — the shared arena holds only payload bytes.
+ *
+ * Concurrency: the table is guarded by a->lock (see bus_arena.h). Each public
+ * entry point takes the lock, runs a `_locked` core that assumes it is held, and
+ * drops it. The static helpers below (free list, lease helpers) are only ever
+ * called from a `_locked` core, so they never touch the lock themselves. A
+ * pointer handed back by fill_ptr/read_ptr is dereferenced by the caller AFTER
+ * the lock is dropped — that is safe because a live ref keeps the span alive, and
+ * the lock only ever protected the table, never the payload bytes.
  */
 #include <string.h>
 
 #include "bus_arena.h"
+
+static void arena_lock(const bus_arena_t *a)
+{
+   /* Logically const: the lock is bookkeeping, not part of the observed value.
+    * The observers take a const arena but must still serialise against writers. */
+   pthread_mutex_lock(&((bus_arena_t *)a)->lock);
+}
+static void arena_unlock(const bus_arena_t *a)
+{
+   pthread_mutex_unlock(&((bus_arena_t *)a)->lock);
+}
 
 /* Alignment so consecutive leases do not share a machine word, and lengths are
  * rounded up predictably. */
@@ -114,8 +133,8 @@ static int free_take(bus_arena_t *a, uint64_t len, uint64_t *off)
 
 /* ---- init ---- */
 
-bus_arena_result_t bus_arena_init(bus_arena_t *a, uint8_t *base, uint64_t size,
-                                  uint32_t max_slots, uint32_t per_client_cap)
+bus_arena_result_t bus_arena_init(bus_arena_t *a, uint8_t *base, uint64_t size, uint32_t max_slots,
+                                  uint32_t per_client_cap)
 {
    if (!a || !base || size == 0 || max_slots == 0 || max_slots > BUS_ARENA_MAX_SLOTS ||
        per_client_cap == 0)
@@ -129,10 +148,19 @@ bus_arena_result_t bus_arena_init(bus_arena_t *a, uint8_t *base, uint64_t size,
    a->freelist[0].offset = 0;
    a->freelist[0].len = size;
    a->free_count = 1;
+   pthread_mutex_init(&a->lock, NULL);
    return BUS_ARENA_OK;
 }
 
-/* ---- lease helpers ---- */
+void bus_arena_fini(bus_arena_t *a)
+{
+   if (!a || !a->base)
+      return; /* never initialised (or already torn down): nothing to destroy */
+   pthread_mutex_destroy(&a->lock);
+   a->base = NULL;
+}
+
+/* ---- lease helpers (all assume a->lock held) ---- */
 
 static bus_lease_t *lease_at(bus_arena_t *a, uint32_t id)
 {
@@ -167,8 +195,8 @@ static void lease_drop_if_zero(bus_arena_t *a, bus_lease_t *l)
 
 /* ---- alloc ---- */
 
-bus_arena_result_t bus_arena_alloc(bus_arena_t *a, uint32_t owner_slot, uint32_t len,
-                                   uint32_t *lease_id)
+static bus_arena_result_t bus_arena_alloc_locked(bus_arena_t *a, uint32_t owner_slot, uint32_t len,
+                                                 uint32_t *lease_id)
 {
    if (!a || !lease_id || owner_slot >= a->max_slots || len == 0)
       return BUS_ARENA_ERR_ARG;
@@ -220,7 +248,19 @@ bus_arena_result_t bus_arena_alloc(bus_arena_t *a, uint32_t owner_slot, uint32_t
    return BUS_ARENA_OK;
 }
 
-bus_arena_result_t bus_arena_fill_ptr(bus_arena_t *a, uint32_t lease_id, uint8_t **ptr)
+bus_arena_result_t bus_arena_alloc(bus_arena_t *a, uint32_t owner_slot, uint32_t len,
+                                   uint32_t *lease_id)
+{
+   if (!a)
+      return BUS_ARENA_ERR_ARG;
+   arena_lock(a);
+   bus_arena_result_t r = bus_arena_alloc_locked(a, owner_slot, len, lease_id);
+   arena_unlock(a);
+   return r;
+}
+
+static bus_arena_result_t bus_arena_fill_ptr_locked(bus_arena_t *a, uint32_t lease_id,
+                                                    uint8_t **ptr)
 {
    if (!a || !ptr)
       return BUS_ARENA_ERR_ARG;
@@ -233,13 +273,23 @@ bus_arena_result_t bus_arena_fill_ptr(bus_arena_t *a, uint32_t lease_id, uint8_t
    return BUS_ARENA_OK;
 }
 
-bus_arena_result_t bus_arena_ref(const bus_arena_t *a, uint32_t lease_id, bus_arena_ref_t *ref)
+bus_arena_result_t bus_arena_fill_ptr(bus_arena_t *a, uint32_t lease_id, uint8_t **ptr)
+{
+   if (!a)
+      return BUS_ARENA_ERR_ARG;
+   arena_lock(a);
+   bus_arena_result_t r = bus_arena_fill_ptr_locked(a, lease_id, ptr);
+   arena_unlock(a);
+   return r;
+}
+
+static bus_arena_result_t bus_arena_ref_locked(const bus_arena_t *a, uint32_t lease_id,
+                                               bus_arena_ref_t *ref)
 {
    if (!a || !ref)
       return BUS_ARENA_ERR_ARG;
-   const bus_lease_t *l = (lease_id < a->lease_count && a->leases[lease_id].active)
-                             ? &a->leases[lease_id]
-                             : NULL;
+   const bus_lease_t *l =
+       (lease_id < a->lease_count && a->leases[lease_id].active) ? &a->leases[lease_id] : NULL;
    if (!l)
       return BUS_ARENA_ERR_ARG;
    ref->offset = l->offset;
@@ -248,10 +298,20 @@ bus_arena_result_t bus_arena_ref(const bus_arena_t *a, uint32_t lease_id, bus_ar
    return BUS_ARENA_OK;
 }
 
+bus_arena_result_t bus_arena_ref(const bus_arena_t *a, uint32_t lease_id, bus_arena_ref_t *ref)
+{
+   if (!a)
+      return BUS_ARENA_ERR_ARG;
+   arena_lock(a);
+   bus_arena_result_t r = bus_arena_ref_locked(a, lease_id, ref);
+   arena_unlock(a);
+   return r;
+}
+
 /* ---- publish ---- */
 
-bus_arena_result_t bus_arena_publish(bus_arena_t *a, uint32_t lease_id,
-                                     const uint8_t *observer_slots, uint32_t k)
+static bus_arena_result_t bus_arena_publish_locked(bus_arena_t *a, uint32_t lease_id,
+                                                   const uint8_t *observer_slots, uint32_t k)
 {
    if (!a || (k > 0 && !observer_slots))
       return BUS_ARENA_ERR_ARG;
@@ -286,11 +346,22 @@ bus_arena_result_t bus_arena_publish(bus_arena_t *a, uint32_t lease_id,
    return BUS_ARENA_OK;
 }
 
+bus_arena_result_t bus_arena_publish(bus_arena_t *a, uint32_t lease_id,
+                                     const uint8_t *observer_slots, uint32_t k)
+{
+   if (!a)
+      return BUS_ARENA_ERR_ARG;
+   arena_lock(a);
+   bus_arena_result_t r = bus_arena_publish_locked(a, lease_id, observer_slots, k);
+   arena_unlock(a);
+   return r;
+}
+
 /* ---- consumer read / release ---- */
 
-bus_arena_result_t bus_arena_read_ptr(const bus_arena_t *a, uint32_t lease_id,
-                                      uint32_t generation, uint32_t consumer_slot,
-                                      const uint8_t **ptr)
+static bus_arena_result_t bus_arena_read_ptr_locked(const bus_arena_t *a, uint32_t lease_id,
+                                                    uint32_t generation, uint32_t consumer_slot,
+                                                    const uint8_t **ptr)
 {
    if (!a || !ptr || consumer_slot >= a->max_slots)
       return BUS_ARENA_ERR_ARG;
@@ -305,8 +376,46 @@ bus_arena_result_t bus_arena_read_ptr(const bus_arena_t *a, uint32_t lease_id,
    return BUS_ARENA_OK;
 }
 
-bus_arena_result_t bus_arena_release(bus_arena_t *a, uint32_t lease_id, uint32_t generation,
-                                     uint32_t consumer_slot)
+bus_arena_result_t bus_arena_read_ptr(const bus_arena_t *a, uint32_t lease_id, uint32_t generation,
+                                      uint32_t consumer_slot, const uint8_t **ptr)
+{
+   if (!a)
+      return BUS_ARENA_ERR_ARG;
+   arena_lock(a);
+   bus_arena_result_t r = bus_arena_read_ptr_locked(a, lease_id, generation, consumer_slot, ptr);
+   arena_unlock(a);
+   return r;
+}
+
+static bus_arena_result_t bus_arena_producer_bytes_locked(const bus_arena_t *a, uint32_t lease_id,
+                                                          const uint8_t **ptr, uint32_t *len)
+{
+   if (!a || !ptr || !len)
+      return BUS_ARENA_ERR_ARG;
+   const bus_lease_t *l =
+       (lease_id < a->lease_count && a->leases[lease_id].active) ? &a->leases[lease_id] : NULL;
+   if (!l)
+      return BUS_ARENA_ERR_ARG;
+   if (!l->producer_ref)
+      return BUS_ARENA_ERR_STATE; /* published already: the tap ran before routing */
+   *ptr = a->base + l->offset;
+   *len = l->len;
+   return BUS_ARENA_OK;
+}
+
+bus_arena_result_t bus_arena_producer_bytes(const bus_arena_t *a, uint32_t lease_id,
+                                            const uint8_t **ptr, uint32_t *len)
+{
+   if (!a)
+      return BUS_ARENA_ERR_ARG;
+   arena_lock(a);
+   bus_arena_result_t r = bus_arena_producer_bytes_locked(a, lease_id, ptr, len);
+   arena_unlock(a);
+   return r;
+}
+
+static bus_arena_result_t bus_arena_release_locked(bus_arena_t *a, uint32_t lease_id,
+                                                   uint32_t generation, uint32_t consumer_slot)
 {
    if (!a || consumer_slot >= a->max_slots)
       return BUS_ARENA_ERR_ARG;
@@ -323,7 +432,18 @@ bus_arena_result_t bus_arena_release(bus_arena_t *a, uint32_t lease_id, uint32_t
    return BUS_ARENA_OK;
 }
 
-bus_arena_result_t bus_arena_cancel(bus_arena_t *a, uint32_t lease_id)
+bus_arena_result_t bus_arena_release(bus_arena_t *a, uint32_t lease_id, uint32_t generation,
+                                     uint32_t consumer_slot)
+{
+   if (!a)
+      return BUS_ARENA_ERR_ARG;
+   arena_lock(a);
+   bus_arena_result_t r = bus_arena_release_locked(a, lease_id, generation, consumer_slot);
+   arena_unlock(a);
+   return r;
+}
+
+static bus_arena_result_t bus_arena_cancel_locked(bus_arena_t *a, uint32_t lease_id)
 {
    if (!a)
       return BUS_ARENA_ERR_ARG;
@@ -337,9 +457,19 @@ bus_arena_result_t bus_arena_cancel(bus_arena_t *a, uint32_t lease_id)
    return BUS_ARENA_OK;
 }
 
+bus_arena_result_t bus_arena_cancel(bus_arena_t *a, uint32_t lease_id)
+{
+   if (!a)
+      return BUS_ARENA_ERR_ARG;
+   arena_lock(a);
+   bus_arena_result_t r = bus_arena_cancel_locked(a, lease_id);
+   arena_unlock(a);
+   return r;
+}
+
 /* ---- reap ---- */
 
-void bus_arena_reap_producer(bus_arena_t *a, uint32_t slot)
+static void bus_arena_reap_producer_locked(bus_arena_t *a, uint32_t slot)
 {
    if (!a || slot >= a->max_slots)
       return;
@@ -354,7 +484,16 @@ void bus_arena_reap_producer(bus_arena_t *a, uint32_t slot)
    }
 }
 
-void bus_arena_reap_consumer(bus_arena_t *a, uint32_t slot)
+void bus_arena_reap_producer(bus_arena_t *a, uint32_t slot)
+{
+   if (!a)
+      return;
+   arena_lock(a);
+   bus_arena_reap_producer_locked(a, slot);
+   arena_unlock(a);
+}
+
+static void bus_arena_reap_consumer_locked(bus_arena_t *a, uint32_t slot)
 {
    if (!a || slot >= a->max_slots)
       return;
@@ -369,25 +508,47 @@ void bus_arena_reap_consumer(bus_arena_t *a, uint32_t slot)
    }
 }
 
+void bus_arena_reap_consumer(bus_arena_t *a, uint32_t slot)
+{
+   if (!a)
+      return;
+   arena_lock(a);
+   bus_arena_reap_consumer_locked(a, slot);
+   arena_unlock(a);
+}
+
 /* ---- observers ---- */
 
 uint32_t bus_arena_live_leases(const bus_arena_t *a, uint32_t slot)
 {
    if (!a || slot >= a->max_slots)
       return 0;
-   return a->live_per_slot[slot];
+   arena_lock(a);
+   uint32_t n = a->live_per_slot[slot];
+   arena_unlock(a);
+   return n;
 }
 
 uint64_t bus_arena_bytes_in_use(const bus_arena_t *a)
 {
-   return a ? a->bytes_in_use : 0;
+   if (!a)
+      return 0;
+   arena_lock(a);
+   uint64_t n = a->bytes_in_use;
+   arena_unlock(a);
+   return n;
 }
 
 uint32_t bus_arena_refcount(const bus_arena_t *a, uint32_t lease_id)
 {
-   if (!a || lease_id >= a->lease_count || !a->leases[lease_id].active)
+   if (!a)
       return 0;
-   return lease_refcount(&a->leases[lease_id]);
+   arena_lock(a);
+   uint32_t n = (lease_id < a->lease_count && a->leases[lease_id].active)
+                    ? lease_refcount(&a->leases[lease_id])
+                    : 0;
+   arena_unlock(a);
+   return n;
 }
 
 const char *bus_arena_result_name(bus_arena_result_t r)
