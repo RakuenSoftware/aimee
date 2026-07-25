@@ -165,9 +165,13 @@ across all three roles and both sizes.
 
 ## §5 Training sequence
 
-1. **Synth distill:** E4B (teacher) → E2B (student) on Tier-A traffic; silver labels
-   are the incumbent's high-confidence outputs (per the Tier-A extraction proposal's
-   distillation bootstrap), plus a human-audited gold eval set.
+1. **Synth distill:** distill Tier-A synth into *both* E4B and E2B from a **shared,
+   larger teacher** (e.g. the 12B / 26B-A4B already run on the bigger tiers, or a
+   larger external model) — not only E4B→E2B — so both students are pulled toward one
+   target, which also aligns their output geometry for the cross-tier shared space
+   (§10). Silver labels are the teacher's high-confidence outputs (the Tier-A
+   extraction proposal's distillation bootstrap) plus a human-audited gold eval set.
+   Plain E4B→E2B remains a valid cheaper fallback.
 2. **Freeze** the distilled base.
 3. **Embed adapter:** task-targeted embedding distillation (the Jina-v5 /
    EmbeddingGemma recipe) — embedding-space distillation from a clean-licensed 4B/8B
@@ -292,6 +296,57 @@ backbone nests, the heads may not transfer for free); and the pattern is **clean
 within the MatFormer E-series (E2B↔E4B)** — the dense-12B / MoE-26B synth models that
 serve Tier-B reasoning have no MatFormer nesting and are a separate unification question,
 out of scope here.
+
+**Build both and race them.** The comparison is *not* "pick a champion" — E4B and E2B
+have different quality-per-resource profiles, so they most likely each win a *different*
+tier. The evaluation output is a **tier → model Pareto map**: on the 2-core / 4 GB edge,
+E2B may win by *fitting interactively at all*; on a box that affords it, E4B's higher
+embed/synth quality may be worth the cost. The marginal cost of building both is low —
+the expensive machinery (PLE port, teacher, distillation data, bench harness, adapter
+recipe) is paid once, so the second backbone is a re-run, not a rebuild. The sharpest form
+fixes a **cost target** (the edge tier's latency/RAM) and races contestants that
+approach it *from both directions*:
+
+- **Distill up from below** — E2B (a MatFormer slice or a dedicated E4B→E2B distill),
+  or a further-downsized sub-E2B trained toward E4B quality on aimee's narrow
+  distribution.
+- **Trim down from above** — E4B structurally pruned to ~E2B size and speed
+  (Minitron-style, §9 Tier 3), healed by distillation.
+
+E4B itself is the quality-ceiling reference. The winner is simply the best quality that
+still holds at the cost target on the §7 benches — which settles §9's Tier-2 (slice vs
+distill) *and* Tier-3 (is a trimmed-E4B better than any E2B?) inside one head-to-head.
+The honest asymmetry the race resolves: **trimming from above tends to retain more
+quality per parameter** (it starts from E4B's good weights) but yields a **bespoke
+serving shape**; **distilling up a fixed slice keeps a known shape** but is
+**capacity-bounded** — quality-per-param vs serving simplicity, decided empirically.
+
+## §11 Training hardware & throughput
+
+Target training rig: one **24 GB Radeon RX 7900 XTX** (RDNA3) with ~157 GB system RAM,
+available 24/7 (the `.254` box in
+[`P2-serving-validation`](../../../benchmarks/results/unified-llm/P2-serving-validation.md)).
+Sufficient, because two things decouple from the 24 GB VRAM:
+
+- **Student side is LoRA/QLoRA on a frozen, quantized base** — the memory-light case
+  (QLoRA fit 33B on 24 GB); adapters + MRL head + optimizer states are small. A
+  Minitron prune-heal of a ~2–4 B student also fits with gradient checkpointing + an
+  8-bit optimizer.
+- **Teacher targets are cached offline**, decoupling teacher size from training VRAM:
+  run the (larger) teacher in inference passes — quantized on-card, or CPU-offloaded
+  into the 157 GB system RAM — over the corpus *once* to cache embeddings / soft labels,
+  then train students against the cache. A 24–32 B teacher runs on-card quantized; up to
+  ~70 B is reachable via CPU offload, slowly. The teacher and the training never
+  co-reside.
+
+The binding constraint is therefore **wall-clock, not memory**: one GPU running the
+multi-model race (E2B-slice, E2B-distill, E4B-distill, pruned-E4B) sequentially is a
+weeks-scale program — which is what 24/7 availability is for.
+
+**Caveat to validate early:** the AMD/ROCm training path on RDNA3 (PyTorch-ROCm plus a
+working 4-bit/LoRA stack — bitsandbytes / flash-attention are less turnkey than on CUDA).
+The memory budget fits; the toolchain needs a smoke test before the full program is
+scheduled on this card.
 
 ## Risks / honest tradeoffs
 
