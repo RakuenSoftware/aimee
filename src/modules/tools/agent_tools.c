@@ -1444,7 +1444,15 @@ char *tool_list_files(const char *path, const char *pattern)
    char **entries = NULL;
    int n = 0;
    if (ws->list(ws, actual_path, pattern, &entries, &n) != 0)
+   {
+      /* "glob failed" is opaque and list_files fails for container delegates while bash
+       * ls works — log which provider (0=shared 1=detached 2=mirror 3=container) and the
+       * exact path/pattern so the failing route is pinpointed, not guessed. */
+      LOG_WARN("agent-tools",
+               "list_files: provider list failed (ws_kind=%d path='%s' pattern='%s')",
+               (int)ws->kind, actual_path ? actual_path : "(null)", pattern ? pattern : "");
       return safe_strdup("error: glob failed");
+   }
    if (n == 0 && pattern && strncmp(pattern, "**/", 3) == 0)
    {
       ws_provider_free_list(entries, n);
