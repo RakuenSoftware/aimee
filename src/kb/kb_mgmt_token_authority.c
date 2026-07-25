@@ -88,6 +88,36 @@ static int canonical_actor(const char *s)
    return 1;
 }
 
+/* Recompute every published binding from the record's own bytes: the modulus
+ * digest, the JWK digest, the kid derived from the modulus, and the HWM
+ * attestation digest. A record that disagrees with itself never reaches a key. */
+static int key_bindings_valid(const uint8_t modulus[KB_MGMT_TOKEN_MODULUS_LEN],
+                              const uint8_t expected_public_digest[32],
+                              const uint8_t expected_jwk_digest[32], const char *expected_kid,
+                              const uint8_t *attestation, size_t attestation_len,
+                              const uint8_t expected_attestation_digest[32])
+{
+   uint8_t public_digest[32] = {0}, jwk_digest[32] = {0}, attestation_digest[32] = {0};
+   char kid[KB_MGMT_TOKEN_KID_MAX + 1] = {0};
+   char jwk[KB_MGMT_TOKEN_JWK_MAX] = {0};
+   size_t jwk_len = 0;
+   int ok = !digest(modulus, KB_MGMT_TOKEN_MODULUS_LEN, public_digest) &&
+            !kb_mgmt_token_kid(modulus, KB_MGMT_TOKEN_MODULUS_LEN, kid, sizeof(kid)) &&
+            !kb_mgmt_token_jwk(modulus, KB_MGMT_TOKEN_MODULUS_LEN, jwk, sizeof(jwk), &jwk_len) &&
+            !digest(jwk, jwk_len, jwk_digest) &&
+            !digest(attestation, attestation_len, attestation_digest) &&
+            !CRYPTO_memcmp(public_digest, expected_public_digest, 32) &&
+            !CRYPTO_memcmp(jwk_digest, expected_jwk_digest, 32) &&
+            !CRYPTO_memcmp(attestation_digest, expected_attestation_digest, 32) &&
+            strlen(kid) == strlen(expected_kid) && !CRYPTO_memcmp(kid, expected_kid, strlen(kid));
+   OPENSSL_cleanse(public_digest, sizeof(public_digest));
+   OPENSSL_cleanse(jwk_digest, sizeof(jwk_digest));
+   OPENSSL_cleanse(attestation_digest, sizeof(attestation_digest));
+   OPENSSL_cleanse(kid, sizeof(kid));
+   OPENSSL_cleanse(jwk, sizeof(jwk));
+   return ok;
+}
+
 int kb_mgmt_token_authority_record_valid(const kb_mgmt_token_authority_record_t *r)
 {
    if (!r || (r->newly_admitted != 0 && r->newly_admitted != 1) ||
@@ -132,27 +162,9 @@ int kb_mgmt_token_authority_record_valid(const kb_mgmt_token_authority_record_t 
    if (!local_serial || local_serial > 79 || !target_serial || target_serial > 79)
       return 0;
 
-   uint8_t public_digest[32] = {0}, jwk_digest[32] = {0}, attestation_digest[32] = {0};
-   char kid[KB_MGMT_TOKEN_KID_MAX + 1] = {0};
-   char jwk[KB_MGMT_TOKEN_JWK_MAX] = {0};
-   size_t jwk_len = 0;
-   int ok =
-       !digest(r->token_public_key, sizeof(r->token_public_key), public_digest) &&
-       !kb_mgmt_token_kid(r->token_public_key, sizeof(r->token_public_key), kid, sizeof(kid)) &&
-       !kb_mgmt_token_jwk(r->token_public_key, sizeof(r->token_public_key), jwk, sizeof(jwk),
-                          &jwk_len) &&
-       !digest(jwk, jwk_len, jwk_digest) &&
-       !digest(r->hwm_attestation, r->hwm_attestation_len, attestation_digest) &&
-       !CRYPTO_memcmp(public_digest, r->token_public_digest, 32) &&
-       !CRYPTO_memcmp(jwk_digest, r->token_jwk_digest, 32) &&
-       !CRYPTO_memcmp(attestation_digest, r->hwm_attestation_digest, 32) &&
-       strlen(kid) == strlen(r->kid) && !CRYPTO_memcmp(kid, r->kid, strlen(kid));
-   OPENSSL_cleanse(public_digest, sizeof(public_digest));
-   OPENSSL_cleanse(jwk_digest, sizeof(jwk_digest));
-   OPENSSL_cleanse(attestation_digest, sizeof(attestation_digest));
-   OPENSSL_cleanse(kid, sizeof(kid));
-   OPENSSL_cleanse(jwk, sizeof(jwk));
-   return ok;
+   return key_bindings_valid(r->token_public_key, r->token_public_digest, r->token_jwk_digest,
+                             r->kid, r->hwm_attestation, r->hwm_attestation_len,
+                             r->hwm_attestation_digest);
 }
 
 static int sign_rs256(void *opaque, const unsigned char *input, size_t input_len,
