@@ -241,19 +241,13 @@ static int verify_exact(EVP_PKEY *key, const char *jwt, size_t jwt_len)
    return ok;
 }
 
-kb_mgmt_token_authority_result_t
-kb_mgmt_token_authority_sign_pkcs8(const kb_mgmt_token_authority_record_t *r,
-                                   const unsigned char *der, size_t der_len, char *jwt_out,
-                                   size_t jwt_cap, size_t *jwt_len)
+/* Decode the custody-released PKCS#8 blob and bind it to the modulus the record
+ * publishes: exactly one RSA-3072/e=65537 private key whose modulus is the one
+ * the JWKS already advertises. Returns the key (caller frees) or NULL — a NULL
+ * return is always a key/record mismatch, never a claim problem. */
+static EVP_PKEY *authority_signing_key(const unsigned char *der, size_t der_len,
+                                       const uint8_t expected_modulus[KB_MGMT_TOKEN_MODULUS_LEN])
 {
-   if (jwt_len)
-      *jwt_len = 0;
-   if (jwt_out && jwt_cap)
-      jwt_out[0] = 0;
-   if (!jwt_out || !jwt_len || !der || !der_len || der_len > KB_MGMT_ROOT_SECRET_MAX ||
-       !kb_mgmt_token_authority_record_valid(r))
-      return KB_MGMT_TOKEN_AUTHORITY_INVALID;
-
    const unsigned char *p = der;
    PKCS8_PRIV_KEY_INFO *p8 = d2i_PKCS8_PRIV_KEY_INFO(NULL, &p, (long)der_len);
    EVP_PKEY *key = p8 && p == der + der_len ? EVP_PKCS82PKEY(p8) : NULL;
@@ -270,12 +264,43 @@ kb_mgmt_token_authority_sign_pkcs8(const kb_mgmt_token_authority_record_t *r,
                 EVP_PKEY_get_bn_param(key, OSSL_PKEY_PARAM_RSA_FACTOR3, &f3) != 1 &&
                 BN_num_bytes(n) == (int)sizeof(modulus) &&
                 BN_bn2binpad(n, modulus, sizeof(modulus)) == (int)sizeof(modulus) && modulus[0] &&
-                !CRYPTO_memcmp(modulus, r->token_public_key, sizeof(modulus));
+                !CRYPTO_memcmp(modulus, expected_modulus, sizeof(modulus));
+
+   OPENSSL_cleanse(modulus, sizeof(modulus));
+   BN_free(n);
+   BN_free(e);
+   BN_clear_free(f1);
+   BN_clear_free(f2);
+   BN_clear_free(f3);
+   EVP_PKEY_CTX_free(check);
+   PKCS8_PRIV_KEY_INFO_free(p8);
+   if (!key_ok)
+   {
+      EVP_PKEY_free(key);
+      return NULL;
+   }
+   return key;
+}
+
+kb_mgmt_token_authority_result_t
+kb_mgmt_token_authority_sign_pkcs8(const kb_mgmt_token_authority_record_t *r,
+                                   const unsigned char *der, size_t der_len, char *jwt_out,
+                                   size_t jwt_cap, size_t *jwt_len)
+{
+   if (jwt_len)
+      *jwt_len = 0;
+   if (jwt_out && jwt_cap)
+      jwt_out[0] = 0;
+   if (!jwt_out || !jwt_len || !der || !der_len || der_len > KB_MGMT_ROOT_SECRET_MAX ||
+       !kb_mgmt_token_authority_record_valid(r))
+      return KB_MGMT_TOKEN_AUTHORITY_INVALID;
+
+   EVP_PKEY *key = authority_signing_key(der, der_len, r->token_public_key);
 
    kb_mgmt_token_authority_result_t result = KB_MGMT_TOKEN_AUTHORITY_KEY_MISMATCH;
    kb_mgmt_token_claims_t claims;
    memset(&claims, 0, sizeof(claims));
-   if (key_ok)
+   if (key)
    {
       memcpy(claims.issuer, r->token_issuer, sizeof(claims.issuer));
       memcpy(claims.audience, r->audience, sizeof(claims.audience));
@@ -310,15 +335,7 @@ kb_mgmt_token_authority_sign_pkcs8(const kb_mgmt_token_authority_record_t *r,
    }
 
    OPENSSL_cleanse(&claims, sizeof(claims));
-   OPENSSL_cleanse(modulus, sizeof(modulus));
-   BN_free(n);
-   BN_free(e);
-   BN_clear_free(f1);
-   BN_clear_free(f2);
-   BN_clear_free(f3);
-   EVP_PKEY_CTX_free(check);
    EVP_PKEY_free(key);
-   PKCS8_PRIV_KEY_INFO_free(p8);
    if (result != KB_MGMT_TOKEN_AUTHORITY_OK)
    {
       OPENSSL_cleanse(jwt_out, jwt_cap);
