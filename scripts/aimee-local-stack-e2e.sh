@@ -49,9 +49,10 @@ done
 cd "$(dirname "$0")/.."
 REPO="$(pwd)"
 
-red()   { printf '\033[31m%s\033[0m\n' "$*"; }
-green() { printf '\033[32m%s\033[0m\n' "$*"; }
-bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
+red()    { printf '\033[31m%s\033[0m\n' "$*"; }
+green()  { printf '\033[32m%s\033[0m\n' "$*"; }
+yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
+bold()   { printf '\033[1m%s\033[0m\n' "$*"; }
 
 SERVER_URL="http://127.0.0.1:${SERVER_PORT}"
 AUTH=(-H "Authorization: Bearer ${BEARER}")
@@ -108,7 +109,9 @@ if [[ "$MODE" == "full" ]]; then
   [[ -n "${AIMEE_EMBEDDER_URL:-}" ]] && export AIMEE_EMBEDDER_URL
   export AIMEE_KB_HTTP_BIND=1
   echo "    DB2: ${AIMEE_DB2_URL}"
-  "$REPO/aimee-kb" --http-port=8741 &
+  # Capture kb output so the embedder-fidelity gate below can see whether pgvec
+  # accepted the memory vectors or refused them on a dim mismatch.
+  "$REPO/aimee-kb" --http-port=8741 >"$AIMEE_HOME/kb.log" 2>&1 &
   kb_pid=$!
   export AIMEE_KB_API_URL="http://127.0.0.1:8741"
 elif [[ "$MODE" == "hybrid" ]]; then
@@ -172,6 +175,28 @@ if SERVER_URL="$SERVER_URL" BEARER="$BEARER" "$REPO/scripts/aimee-write-read-e2e
   green "  PASS  write→read round-trip"; PASS=$((PASS + 1))
 else
   red   "  FAIL  write→read round-trip"; FAIL=$((FAIL + 1))
+fi
+
+# Embedder fidelity: the round-trip above passes on list + KEYWORD retrieval even
+# when no real embedder is wired — the memory embedding silently falls back to the
+# builtin hash (a vestigial 384-d stand-in) whose vectors pgvec then REFUSES on a
+# dim mismatch against a corpus built by the real embedder (Qwen3-Embedding: 1024-d
+# CPU / 2560-d GPU). That makes the semantic/vector path a no-op while the run still
+# reports green. Surface it: if kb refused the memory vector, the semantic path was
+# NOT exercised — announce it loudly, and hard-fail under AIMEE_E2E_REQUIRE_REAL_EMBEDDER=1.
+bold "==> Embedder fidelity (semantic vector path)"
+mm="$(grep -aoE 'memory embedding dim mismatch: got [0-9]+, expected [0-9]+' "$AIMEE_HOME/kb.log" 2>/dev/null | tail -1 || true)"
+if [[ -n "$mm" ]]; then
+  yellow "  DEGRADED  ${mm}; vectors refused — semantic search NOT exercised (list/keyword only)."
+  yellow "            Wire a real embedder: point AIMEE_EMBEDDER_URL / AIMEE_LLM_URL at a"
+  yellow "            Qwen3-Embedding endpoint whose dim matches the corpus (1024 CPU / 2560 GPU)."
+  if [[ "${AIMEE_E2E_REQUIRE_REAL_EMBEDDER:-0}" == "1" ]]; then
+    red "  FAIL  real embedder required (AIMEE_E2E_REQUIRE_REAL_EMBEDDER=1) but the run degraded to the builtin embedder"
+    FAIL=$((FAIL + 1))
+  fi
+else
+  green "  PASS  memory vectors accepted (no dim mismatch) — real semantic path exercised"
+  PASS=$((PASS + 1))
 fi
 
 echo
