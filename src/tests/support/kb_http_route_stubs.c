@@ -7,6 +7,7 @@
 #include "kb_http_telemetry.h"
 #include "db2/server_registry.h"
 #include "db2/management_identity_journal.h"
+#include "db2/write_tier_grant.h"
 #include "kb_oidc_token_exchange.h"
 #include "vault_service.h"
 #include <stdio.h>
@@ -215,4 +216,44 @@ db2_management_action_result_t db2_identity_intent_start(const kb_principal_t *p
    if (out)
       memset(out, 0, sizeof(*out));
    return DB2_MANAGEMENT_ACTION_UNAVAILABLE;
+}
+
+/* The write-tier grant seam. Refusing stubs, like the others above: this test's focus is
+ * routing, it never administers a grant, and a refusing default means an accidental path
+ * through those routes fails closed rather than proceeding against a fabricated table.
+ * The real behaviour is covered by test_kb_http_grants.c (routing and validation) and the
+ * P1 RLS gate (the SQL and its authorization). */
+int db2_write_tier_grant_set_reporting(const char *server_id, int64_t team_id, const char *subject,
+                                       kb_identity_tier_t tier, const char *granted_by,
+                                       db2_write_tier_grant_report_t *out)
+{
+   (void)server_id;
+   (void)team_id;
+   (void)subject;
+   (void)tier;
+   (void)granted_by;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+int db2_write_tier_grant_revoke(const char *server_id, int64_t team_id, const char *subject)
+{
+   (void)server_id;
+   (void)team_id;
+   (void)subject;
+   return -1;
+}
+
+int db2_write_tier_grant_list_ex(const char *server_id, int64_t team_id, int include_revoked,
+                                 db2_write_tier_grant_row_t *out, size_t cap, size_t *count)
+{
+   (void)server_id;
+   (void)team_id;
+   (void)include_revoked;
+   (void)out;
+   (void)cap;
+   if (count)
+      *count = 0;
+   return -1;
 }

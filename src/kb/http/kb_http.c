@@ -41,6 +41,7 @@
 #include "kb_identity.h"
 #include "kb_reqctx.h"
 #include "kb_http_models.h"
+#include "kb_http_grants.h"
 #include "kb_http_team.h"
 #include "kb/http/openapi_data.h"
 #include "db2/lifecycle.h"
@@ -786,6 +787,12 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          return tr;
       tr = kb_http_servers_route_ex(method, path, query_string, body,
                                     body_len > 0 ? (size_t)body_len : 0, out_buf, out_cap);
+      if (tr >= 0)
+         return tr;
+      /* Write-tier grant administration (increment 5). Authorization is the DB layer's
+       * admin-or-team-lead check plus the server's UDS-only /v1 route; nothing is
+       * enforced here. See kb_http_grants.h. */
+      tr = kb_http_grants_route(method, path, query_string, body, out_buf, out_cap);
       if (tr >= 0)
          return tr;
    }

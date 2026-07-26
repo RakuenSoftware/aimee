@@ -1,0 +1,353 @@
+/* kb_http_grants.c — see kb_http_grants.h. */
+
+#include "kb_http_grants.h"
+
+#include "cJSON.h"
+#include "db2/management_intent_fields.h" /* db2_intent_canonical_actor (header-only) */
+#include "db2/write_tier_grant.h"
+#include "kb_identity_token.h"
+#include "log.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* A grant listing is bounded so a single request cannot be made to marshal an unbounded
+ * number of rows. Generous for one (server, team): a deployment with more subjects than
+ * this on one server has a bigger problem than pagination. */
+#define GRANTS_LIST_MAX 512
+
+static int json_error(char *out_buf, int out_cap, int status, const char *message)
+{
+   cJSON *o = cJSON_CreateObject();
+   cJSON_AddStringToObject(o, "error", message);
+   char *text = o ? cJSON_PrintUnformatted(o) : NULL;
+   snprintf(out_buf, (size_t)out_cap, "%s", text ? text : "{\"error\":\"internal error\"}");
+   free(text);
+   cJSON_Delete(o);
+   return status;
+}
+
+static int json_body(char *out_buf, int out_cap, int status, cJSON *o)
+{
+   char *text = o ? cJSON_PrintUnformatted(o) : NULL;
+   if (!text || (int)strlen(text) >= out_cap)
+   {
+      free(text);
+      cJSON_Delete(o);
+      return json_error(out_buf, out_cap, 500, "response too large");
+   }
+   snprintf(out_buf, (size_t)out_cap, "%s", text);
+   free(text);
+   cJSON_Delete(o);
+   return status;
+}
+
+/* db2 returns a negative tenancy code for "this needs Postgres" and -1 for everything
+ * else. They must not collapse: the first is a deployment running the SQLite shim, the
+ * second may be a refusal from the definer function (no admin/lead authority) or a
+ * malformed argument the DB rejected. Reporting them alike would have an operator
+ * debugging their credentials when the backend is simply wrong. */
+static int map_db_failure(int rc, char *out_buf, int out_cap)
+{
+   if (rc < -1)
+      return json_error(out_buf, out_cap, 503,
+                        "grant administration requires the postgres backend");
+   return json_error(out_buf, out_cap, 403,
+                     "refused: grant administration requires admin or team-lead authority, "
+                     "and the (server, team) pair must be registered");
+}
+
+/* A team id from JSON. cJSON stores every number as a double, so a bare range check
+ * accepts 910001.9 and the cast silently makes it 910001 — and team_id is the
+ * authorization scope, so a truncation authorizes against a team the caller did not
+ * name. Anything not exactly an integer is refused rather than rounded. */
+static int json_team_id(const cJSON *v, int64_t *out)
+{
+   *out = 0;
+   if (!cJSON_IsNumber(v))
+      return -1;
+   double d = v->valuedouble;
+   if (!(d >= 1.0) || d >= 9007199254740992.0)
+      return -1;
+   int64_t n = (int64_t)d;
+   if ((double)n != d)
+      return -1;
+   *out = n;
+   return 0;
+}
+
+/* Same rule for the query-string form, which is where the read route gets it. */
+static int query_team_id(const char *qs, int64_t *out);
+
+static int tier_from_wire(const char *s, kb_identity_tier_t *out)
+{
+   if (!s)
+      return -1;
+   if (!strcmp(s, "off"))
+      *out = KB_IDENTITY_TIER_OFF;
+   else if (!strcmp(s, "data"))
+      *out = KB_IDENTITY_TIER_DATA;
+   else if (!strcmp(s, "full"))
+      *out = KB_IDENTITY_TIER_FULL;
+   else
+      return -1;
+   return 0;
+}
+
+/* Read one query parameter at a KEY BOUNDARY. The generic helper elsewhere in this layer
+ * does strstr(qs, "key="), which matches inside "?my_team_id=" — untidy for a filter and
+ * wrong for anything that selects an authorization scope, which team_id does. */
+static int query_param(const char *qs, const char *key, char *out, size_t cap)
+{
+   if (cap)
+      out[0] = '\0';
+   if (!qs || !key || !cap)
+      return 0;
+   size_t keylen = strlen(key);
+   for (const char *p = qs; *p;)
+   {
+      const char *amp = strchr(p, '&');
+      const char *end = amp ? amp : p + strlen(p);
+      const char *eq = memchr(p, '=', (size_t)(end - p));
+      if (eq && (size_t)(eq - p) == keylen && !memcmp(p, key, keylen))
+      {
+         size_t n = (size_t)(end - eq - 1);
+         if (n >= cap)
+            return -1; /* refused, not truncated */
+         memcpy(out, eq + 1, n);
+         out[n] = '\0';
+         return 1;
+      }
+      if (!amp)
+         break;
+      p = amp + 1;
+   }
+   return 0;
+}
+
+static int query_team_id(const char *qs, int64_t *out)
+{
+   *out = 0;
+   char raw[32] = "";
+   if (query_param(qs, "team_id", raw, sizeof(raw)) != 1 || !raw[0])
+      return -1;
+   char *tail = NULL;
+   long long v = strtoll(raw, &tail, 10);
+   /* Only digits, and nothing after them: "910001abc" and "910001.9" are refused rather
+    * than silently becoming 910001. */
+   if (!tail || *tail || v < 1 || v > 9007199254740991LL)
+      return -1;
+   *out = (int64_t)v;
+   return 0;
+}
+
+/* The subject grammar the grant table CHECKs, validated before the round trip so a
+ * malformed subject is a clean 400 rather than a constraint violation surfaced as a
+ * generic refusal.
+ *
+ * db2_intent_canonical_actor takes a FIXED-SIZE ZERO-PADDED RECORD, not an arbitrary
+ * pointer — it verifies the unused tail is zero, so handing it a bare string reads past
+ * the end of that string. Hence the copy. Getting this wrong reads out of bounds and
+ * yields a confident "invalid" for a perfectly good subject. */
+static int subject_valid(const char *s)
+{
+   char record[DB2_INTENT_ACTOR_MAX + 1];
+   if (!s || !s[0] || strlen(s) > DB2_INTENT_ACTOR_MAX)
+      return 0;
+   memset(record, 0, sizeof(record));
+   memcpy(record, s, strlen(s));
+   return db2_intent_canonical_actor(record, sizeof(record));
+}
+
+static int server_id_valid(const char *s)
+{
+   if (!s || !s[0] || strlen(s) > 127)
+      return 0;
+   for (size_t i = 0; s[i]; ++i)
+   {
+      unsigned char c = (unsigned char)s[i];
+      int alnum = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+      if (i == 0 ? !alnum : !(alnum || c == '.' || c == '_' || c == '-'))
+         return 0;
+   }
+   return 1;
+}
+
+/* POST /v1/write-tier-grants/set */
+static int post_set(const char *body, char *out_buf, int out_cap)
+{
+   cJSON *req = body && body[0] ? cJSON_Parse(body) : NULL;
+   const cJSON *jsrv = req ? cJSON_GetObjectItemCaseSensitive(req, "server_id") : NULL;
+   const cJSON *jteam = req ? cJSON_GetObjectItemCaseSensitive(req, "team_id") : NULL;
+   const cJSON *jsub = req ? cJSON_GetObjectItemCaseSensitive(req, "subject") : NULL;
+   const cJSON *jtier = req ? cJSON_GetObjectItemCaseSensitive(req, "tier") : NULL;
+   const cJSON *jby = req ? cJSON_GetObjectItemCaseSensitive(req, "granted_by") : NULL;
+
+   int64_t team_id = 0;
+   kb_identity_tier_t tier = KB_IDENTITY_TIER_OFF;
+   char server_id[128] = "", subject[578] = "", granted_by[578] = "";
+   int ok = cJSON_IsString(jsrv) && server_id_valid(jsrv->valuestring) &&
+            json_team_id(jteam, &team_id) == 0 && cJSON_IsString(jsub) &&
+            subject_valid(jsub->valuestring) && cJSON_IsString(jtier) &&
+            tier_from_wire(jtier->valuestring, &tier) == 0 && cJSON_IsString(jby) &&
+            jby->valuestring && jby->valuestring[0] &&
+            strlen(jby->valuestring) < sizeof(granted_by);
+   if (ok)
+   {
+      snprintf(server_id, sizeof(server_id), "%s", jsrv->valuestring);
+      snprintf(subject, sizeof(subject), "%s", jsub->valuestring);
+      snprintf(granted_by, sizeof(granted_by), "%s", jby->valuestring);
+   }
+   cJSON_Delete(req);
+   if (!ok)
+      return json_error(out_buf, out_cap, 400,
+                        "server_id, an integer team_id, a canonical subject, "
+                        "tier (off|data|full) and granted_by are required");
+
+   /* The REPORTING variant, not the plain setter: `changed` tells an operator script that
+    * somebody's access just grew, and it can only be trusted when the prior state was
+    * observed under the same lock as the write. */
+   db2_write_tier_grant_report_t report;
+   int rc =
+       db2_write_tier_grant_set_reporting(server_id, team_id, subject, tier, granted_by, &report);
+   if (rc != 0)
+   {
+      LOG_WARN("kb.grants", "write-tier grant set refused for %s on %s (rc=%d)", subject, server_id,
+               rc);
+      return map_db_failure(rc, out_buf, out_cap);
+   }
+
+   LOG_INFO("kb.grants", "write-tier grant %s for %s on %s team %lld -> %s",
+            report.changed ? "changed" : "unchanged", subject, server_id, (long long)team_id,
+            kb_identity_tier_str(tier));
+   cJSON *o = cJSON_CreateObject();
+   cJSON_AddBoolToObject(o, "changed", report.changed);
+   cJSON_AddBoolToObject(o, "was_revoked", report.was_revoked);
+   /* Absent rather than null-or-empty when the grant did not exist: "created" and
+    * "changed from off" are different facts and must not render alike. */
+   if (report.had_previous)
+      cJSON_AddStringToObject(o, "previous_tier", kb_identity_tier_str(report.previous_tier));
+   cJSON_AddBoolToObject(o, "is_member", report.is_member);
+   return json_body(out_buf, out_cap, 200, o);
+}
+
+/* POST /v1/write-tier-grants/revoke */
+static int post_revoke(const char *body, char *out_buf, int out_cap)
+{
+   cJSON *req = body && body[0] ? cJSON_Parse(body) : NULL;
+   const cJSON *jsrv = req ? cJSON_GetObjectItemCaseSensitive(req, "server_id") : NULL;
+   const cJSON *jteam = req ? cJSON_GetObjectItemCaseSensitive(req, "team_id") : NULL;
+   const cJSON *jsub = req ? cJSON_GetObjectItemCaseSensitive(req, "subject") : NULL;
+   int64_t team_id = 0;
+   char server_id[128] = "", subject[578] = "";
+   int ok = cJSON_IsString(jsrv) && server_id_valid(jsrv->valuestring) &&
+            json_team_id(jteam, &team_id) == 0 && cJSON_IsString(jsub) &&
+            subject_valid(jsub->valuestring);
+   if (ok)
+   {
+      snprintf(server_id, sizeof(server_id), "%s", jsrv->valuestring);
+      snprintf(subject, sizeof(subject), "%s", jsub->valuestring);
+   }
+   cJSON_Delete(req);
+   if (!ok)
+      return json_error(out_buf, out_cap, 400,
+                        "server_id, an integer team_id and a canonical subject are required");
+
+   /* Whether a live grant existed is read BEFORE the revoke, so the caller can be told
+    * "there was nothing to revoke" — which is a likely typo'd subject — apart from "it
+    * was already revoked", where the operator's intent is already satisfied. The revoke
+    * itself is idempotent, so a race here costs at worst a misreported `found`, never a
+    * wrong outcome; that is why this one does not need an atomic reporting variant. */
+   db2_write_tier_grant_row_t rows[GRANTS_LIST_MAX];
+   size_t count = 0;
+   int found = 0;
+   if (db2_write_tier_grant_list_ex(server_id, team_id, 1, rows, GRANTS_LIST_MAX, &count) == 0)
+      for (size_t i = 0; i < count; ++i)
+         if (!strcmp(rows[i].subject, subject))
+            found = 1;
+
+   int rc = db2_write_tier_grant_revoke(server_id, team_id, subject);
+   if (rc != 0)
+   {
+      LOG_WARN("kb.grants", "write-tier grant revoke refused for %s on %s (rc=%d)", subject,
+               server_id, rc);
+      return map_db_failure(rc, out_buf, out_cap);
+   }
+   LOG_INFO("kb.grants", "write-tier grant revoked for %s on %s team %lld (existed=%d)", subject,
+            server_id, (long long)team_id, found);
+   cJSON *o = cJSON_CreateObject();
+   cJSON_AddBoolToObject(o, "found", found);
+   return json_body(out_buf, out_cap, 200, o);
+}
+
+/* GET /v1/write-tier-grants?server_id&team_id[&include_revoked=1][&subject] */
+static int get_list(const char *query_string, char *out_buf, int out_cap)
+{
+   char server_id[128] = "", subject[578] = "", flag[8] = "";
+   int64_t team_id = 0;
+   if (query_param(query_string, "server_id", server_id, sizeof(server_id)) != 1 ||
+       !server_id_valid(server_id) || query_team_id(query_string, &team_id) != 0)
+      return json_error(out_buf, out_cap, 400, "server_id and an integer team_id are required");
+   int have_subject = query_param(query_string, "subject", subject, sizeof(subject)) == 1;
+   if (have_subject && !subject_valid(subject))
+      return json_error(out_buf, out_cap, 400, "subject is not a canonical identity");
+   /* Anything other than an explicit 1/true widens nothing — an unrecognised value must
+    * not be read as "yes" on a parameter that reveals revoked history. */
+   int include_revoked = 0;
+   if (query_param(query_string, "include_revoked", flag, sizeof(flag)) == 1)
+      include_revoked = (!strcmp(flag, "1") || !strcmp(flag, "true"));
+
+   db2_write_tier_grant_row_t rows[GRANTS_LIST_MAX];
+   size_t count = 0;
+   int rc = db2_write_tier_grant_list_ex(server_id, team_id, include_revoked, rows, GRANTS_LIST_MAX,
+                                         &count);
+   if (rc != 0)
+      return map_db_failure(rc, out_buf, out_cap);
+
+   cJSON *o = cJSON_CreateObject();
+   cJSON *arr = cJSON_AddArrayToObject(o, "grants");
+   if (!arr)
+   {
+      cJSON_Delete(o);
+      return json_error(out_buf, out_cap, 500, "internal error");
+   }
+   for (size_t i = 0; i < count; ++i)
+   {
+      /* `show` is this listing filtered to one subject, done here rather than as its own
+       * route so the row shape has exactly one definition. */
+      if (have_subject && strcmp(rows[i].subject, subject))
+         continue;
+      cJSON *g = cJSON_CreateObject();
+      cJSON_AddStringToObject(g, "subject", rows[i].subject);
+      cJSON_AddStringToObject(g, "tier", kb_identity_tier_str(rows[i].tier));
+      cJSON_AddStringToObject(g, "granted_by", rows[i].granted_by);
+      cJSON_AddStringToObject(g, "created_at", rows[i].created_at);
+      cJSON_AddStringToObject(g, "updated_at", rows[i].updated_at);
+      /* Present only when actually revoked, so a live grant carries no misleading key. */
+      if (rows[i].revoked_at[0])
+         cJSON_AddStringToObject(g, "revoked_at", rows[i].revoked_at);
+      cJSON_AddItemToArray(arr, g);
+   }
+   /* Reported so a caller can tell a full page from a complete answer rather than
+    * inferring it from the array length. */
+   cJSON_AddBoolToObject(o, "truncated", count == GRANTS_LIST_MAX);
+   return json_body(out_buf, out_cap, 200, o);
+}
+
+int kb_http_grants_route(const char *method, const char *path, const char *query_string,
+                         const char *body, char *out_buf, int out_cap)
+{
+   if (!method || !path || !out_buf || out_cap <= 0)
+      return -1;
+   if (!strcmp(path, "/v1/write-tier-grants/set"))
+      return strcmp(method, "POST") ? json_error(out_buf, out_cap, 405, "method not allowed")
+                                    : post_set(body, out_buf, out_cap);
+   if (!strcmp(path, "/v1/write-tier-grants/revoke"))
+      return strcmp(method, "POST") ? json_error(out_buf, out_cap, 405, "method not allowed")
+                                    : post_revoke(body, out_buf, out_cap);
+   if (!strcmp(path, "/v1/write-tier-grants"))
+      return strcmp(method, "GET") ? json_error(out_buf, out_cap, 405, "method not allowed")
+                                   : get_list(query_string, out_buf, out_cap);
+   return -1;
+}
