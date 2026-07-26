@@ -302,6 +302,63 @@ static void test_every_form_parses_as_libpq_intends(void)
    printf("  PASS: libpq parses every form with the bounds as real options\n");
 }
 
+/* libpq separates options on general whitespace, not just spaces and tabs. A
+ * scanner that stops at ' ' and '\t' swallows "\nkeepalives=0" into the host
+ * VALUE, misses the caller's explicit disable, and appends keepalives=1 — and
+ * because the later setting wins, the appended default then OVERRIDES the
+ * caller. Silently doing the opposite of what the conninfo asked for is worse
+ * than not adding the bound at all, so this is asserted through libpq. */
+static void test_newline_separated_options_are_seen(void)
+{
+   char out[2048];
+   db2_pg_conninfo_with_bounds("host=db\nkeepalives=0", out, sizeof out);
+   char *err = NULL;
+   PQconninfoOption *opts = PQconninfoParse(out, &err);
+   must(opts != NULL, "libpq parses the generated conninfo");
+   must(strcmp(opt_value(opts, "host"), "db") == 0, "the host is not swallowed");
+   must(strcmp(opt_value(opts, "keepalives"), "0") == 0,
+        "the caller's explicit disable is not overridden");
+   PQconninfoFree(opts);
+   if (err)
+      PQfreemem(err);
+
+   /* A newline-separated conninfo that sets nothing still gains the bounds. */
+   db2_pg_conninfo_with_bounds("host=db\ndbname=aimee_shared", out, sizeof out);
+   opts = PQconninfoParse(out, &err);
+   must(opts != NULL, "libpq parses it");
+   must(strcmp(opt_value(opts, "connect_timeout"), "10") == 0, "bounds are still added");
+   must(strcmp(opt_value(opts, "dbname"), "aimee_shared") == 0, "the dbname survives");
+   PQconninfoFree(opts);
+   if (err)
+      PQfreemem(err);
+   printf("  PASS: newline-separated options are seen, not swallowed into a value\n");
+}
+
+/* libpq percent-decodes URI query keys: connect%5Ftimeout=3 IS connect_timeout.
+ * A raw byte compare misses it, appends the bound a second time, and the later
+ * value wins — overriding the caller. */
+static void test_percent_encoded_uri_keys_are_recognised(void)
+{
+   char out[2048];
+   char *err = NULL;
+   db2_pg_conninfo_with_bounds("postgresql://h/db?connect%5Ftimeout=3", out, sizeof out);
+   PQconninfoOption *opts = PQconninfoParse(out, &err);
+   must(opts != NULL, "libpq parses the generated conninfo");
+   must(strcmp(opt_value(opts, "connect_timeout"), "3") == 0, "the caller's encoded value wins");
+   PQconninfoFree(opts);
+   if (err)
+      PQfreemem(err);
+
+   db2_pg_conninfo_with_bounds("postgresql://h/db?keepalives%5Fidle=60", out, sizeof out);
+   opts = PQconninfoParse(out, &err);
+   must(opts != NULL, "libpq parses it");
+   must(strcmp(opt_value(opts, "keepalives_idle"), "60") == 0, "an encoded tuning key wins too");
+   PQconninfoFree(opts);
+   if (err)
+      PQfreemem(err);
+   printf("  PASS: percent-encoded URI query keys are recognised as the options they are\n");
+}
+
 int main(void)
 {
    printf("test_db2_conn_bounds:\n");
@@ -319,6 +376,8 @@ int main(void)
    test_option_detection_matches_whole_keys();
    test_quoted_values_cannot_suppress_the_bounds();
    test_every_form_parses_as_libpq_intends();
+   test_newline_separated_options_are_seen();
+   test_percent_encoded_uri_keys_are_recognised();
    printf("All tests passed.\n");
    return 0;
 }

@@ -923,6 +923,41 @@ static int conninfo_is_uri(const char *s)
  * appears set, so the bound is not added. So the scan tracks where values begin
  * and end, honouring single quotes and backslash escapes for the keyword/value
  * form, and looks only at the query component of a URI. */
+static int hexval(int c)
+{
+   if (c >= '0' && c <= '9')
+      return c - '0';
+   if (c >= 'a' && c <= 'f')
+      return c - 'a' + 10;
+   if (c >= 'A' && c <= 'F')
+      return c - 'A' + 10;
+   return -1;
+}
+
+/* Compare one URI query key against `key`, decoding percent-escapes as libpq
+ * does. A raw byte compare misses connect%5Ftimeout=3 — which libpq reads as
+ * connect_timeout=3 — so the bound gets appended a second time and, since the
+ * later value wins, silently overrides what the caller asked for. */
+static int uri_key_equals(const char *p, const char *key)
+{
+   size_t i = 0;
+   while (*p && *p != '=' && *p != '&')
+   {
+      int c = (unsigned char)*p;
+      if (c == '%' && hexval((unsigned char)p[1]) >= 0 && hexval((unsigned char)p[2]) >= 0)
+      {
+         c = hexval((unsigned char)p[1]) * 16 + hexval((unsigned char)p[2]);
+         p += 3;
+      }
+      else
+         p++;
+      if (key[i] == '\0' || (unsigned char)key[i] != (unsigned char)c)
+         return 0;
+      i++;
+   }
+   return key[i] == '\0' && *p == '=';
+}
+
 static int conninfo_has_key(const char *base, const char *key)
 {
    size_t klen = strlen(key);
@@ -936,7 +971,7 @@ static int conninfo_has_key(const char *base, const char *key)
          return 0;
       for (p++; *p;)
       {
-         if (strncmp(p, key, klen) == 0 && p[klen] == '=')
+         if (uri_key_equals(p, key))
             return 1;
          const char *amp = strchr(p, '&');
          if (!amp)
@@ -948,15 +983,15 @@ static int conninfo_has_key(const char *base, const char *key)
 
    for (const char *p = base; *p;)
    {
-      while (*p == ' ' || *p == '\t')
+      while (isspace((unsigned char)*p))
          p++;
       if (!*p)
          break;
       const char *kstart = p;
-      while (*p && *p != '=' && *p != ' ' && *p != '\t')
+      while (*p && *p != '=' && !isspace((unsigned char)*p))
          p++;
       size_t this_len = (size_t)(p - kstart);
-      while (*p == ' ' || *p == '\t')
+      while (isspace((unsigned char)*p))
          p++;
       if (*p != '=')
       {
@@ -967,7 +1002,7 @@ static int conninfo_has_key(const char *base, const char *key)
          continue;
       }
       p++;
-      while (*p == ' ' || *p == '\t')
+      while (isspace((unsigned char)*p))
          p++;
       int match = (this_len == klen && strncmp(kstart, key, klen) == 0);
       if (*p == '\'')
@@ -980,7 +1015,7 @@ static int conninfo_has_key(const char *base, const char *key)
       }
       else
       {
-         for (; *p && *p != ' ' && *p != '\t'; p++)
+         for (; *p && !isspace((unsigned char)*p); p++)
             if (*p == '\\' && p[1])
                p++;
       }
