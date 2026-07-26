@@ -1347,3 +1347,76 @@ func TestMaxRoundsIsTheNodeRepeatBudget(t *testing.T) {
 		})
 	}
 }
+
+// The runner's context carries the step deadline. A park happens AFTER the
+// delegate ran and its spend was reconciled, so inheriting that cancellation
+// loses the transition and strands the reservation in 'actual' — the exact
+// state the next replay can only park as replay_unrecoverable, which no
+// operator can resume. Observed in wi_ee32a2e3: "begin park transition:
+// context deadline exceeded", then an unrecoverable park one round later.
+func TestParkSurvivesACancelledStepContext(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte("name: one\nstart: draft\nnodes:\n  - id: draft\n    block: author.proposal\n    next: plan\n  - id: plan\n    block: author.plan\n    in:\n      proposal: draft.out\n")
+	if err := os.WriteFile(filepath.Join(workflowDir, "one.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := wfe.ParseDefinition(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := db1.CreateWorkItem{ID: "wi_park_cancelled", Repo: "repo", ProposalPath: "p",
+		WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "draft", MaxCostUSD: 1}
+	if err := store.CreateWorkItem(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.PutProposal(item.ID, []byte("proposal")); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	eng, err := New(store, artifacts, workflowDir, cancelBeforeParkRunner{cancel: cancel})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Advance(ctx, "wi_park_cancelled"); err != nil {
+		t.Fatalf("advance draft: %v", err)
+	}
+	if _, err := eng.Advance(ctx, "wi_park_cancelled"); err != nil {
+		t.Fatalf("advance plan: %v", err)
+	}
+	got, err := store.WorkItem(t.Context(), "wi_park_cancelled")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PauseReason != "plan_missing" {
+		t.Fatalf("park lost to the cancelled step context: pause_reason=%q", got.PauseReason)
+	}
+	if got.ReservationState != "" || got.ReservedCostUSD != 0 {
+		t.Fatalf("reservation stranded by a lost park: state=%q reserved=%v",
+			got.ReservationState, got.ReservedCostUSD)
+	}
+}
+
+// Cancels the step context the way an expiring deadline would, then returns a
+// result that forces the engine down its park-after-spend path.
+type cancelBeforeParkRunner struct{ cancel context.CancelFunc }
+
+func (r cancelBeforeParkRunner) Run(_ context.Context, req StepRequest) (StepResult, error) {
+	if req.Node.Block != "author.plan" {
+		return StepResult{Status: StepAdvanced, Artifact: "a proposal"}, nil
+	}
+	r.cancel()
+	return StepResult{Status: StepAdvanced, CostUSD: 0.2}, nil
+}
