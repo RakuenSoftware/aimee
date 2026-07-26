@@ -986,7 +986,7 @@ def render_workflow(catalog, consts):
         "### Run-level controls (not in the definition)",
         "",
         f"- **Per-stage loop cap** — a node that loops back via `on_fail` is retried at "
-        f"most `max_iters` times (per-node param, default `{max_att}`); on the cap its "
+        f"most `max_rounds` times (per-node param, default `{max_att}`); on the cap its "
         f"`on_max` policy resolves the loop: `human` parks (default), `fail` is a "
         f"terminal reject, `pass` forces the flow forward via `on_pass`/`next`.",
         f"- **Gate-override cap** — a parked human gate may be overridden at most "

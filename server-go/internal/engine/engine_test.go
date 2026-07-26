@@ -909,7 +909,7 @@ nodes:
   - id: plan_gate
     block: gate.roundtable
     in: {src: plan.out}
-    params: {roundtable: default, max_iters: 24}
+    params: {roundtable: default, max_rounds: 24}
     on_pass: done
     on_fail: plan
   - id: done
@@ -1322,5 +1322,28 @@ func TestDelegateFailedIsOperatorResumable(t *testing.T) {
 	got, err := store.WorkItem(t.Context(), item.ID)
 	if err != nil || got.PauseReason != "" {
 		t.Fatalf("item still paused: %+v err=%v", got, err)
+	}
+}
+
+// max_rounds is the per-node repeat budget. It replaced max_iters, which named
+// the same thing less clearly; a node declaring only max_rounds used to fall
+// through to the default and loop far past its declared cap.
+func TestMaxRoundsIsTheNodeRepeatBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		params map[string]any
+		want   int
+	}{
+		{"declared", map[string]any{"max_rounds": 6}, 6},
+		{"absent falls back to the default", map[string]any{}, 20},
+		{"zero is not a budget", map[string]any{"max_rounds": 0}, 20},
+		{"negative is not a budget", map[string]any{"max_rounds": -3}, 20},
+		{"retired max_iters no longer caps", map[string]any{"max_iters": 3}, 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := maxIterations(wfe.Node{ID: "gate", Params: tc.params}); got != tc.want {
+				t.Fatalf("maxIterations=%d, want %d", got, tc.want)
+			}
+		})
 	}
 }
