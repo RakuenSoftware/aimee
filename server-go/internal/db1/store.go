@@ -1118,13 +1118,16 @@ VALUES (?, ?, ?, 'go-wfe', ?, ?, ?)`, workItemID, fromStage, kind, detail, conte
 		return fmt.Errorf("record stage transition: %w", err)
 	}
 	if kind != "loop" {
+		// Clearing the stage we just LEFT is the point: it completed, so a later
+		// revisit starts with a fresh budget. Clearing the stage we are entering
+		// is not — it reset the counter that bounds a refinement loop. A gate that
+		// loops to its author (gate --loop--> plan) is re-entered by the author's
+		// own advance (plan --advance--> gate), and that advance was wiping the
+		// gate's accumulated attempts, so its cap could never be reached and the
+		// pair looped without bound. Observed: a plan gate at 63 loops against a
+		// cap of 20, burning five hours before it happened to converge.
 		if _, err := tx.ExecContext(ctx, `DELETE FROM lifecycle_stage_attempt WHERE work_item_id=? AND stage=?`, workItemID, fromStage); err != nil {
 			return fmt.Errorf("clear completed stage attempts: %w", err)
-		}
-		if fromStage != toStage {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM lifecycle_stage_attempt WHERE work_item_id=? AND stage=?`, workItemID, toStage); err != nil {
-				return err
-			}
 		}
 	}
 	if err := tx.Commit(); err != nil {

@@ -1110,3 +1110,35 @@ func TestRecoverLostReplayReleasesUnresolvedAndParksActual(t *testing.T) {
 		}
 	})
 }
+
+// The production refinement cycle is gate --loop--> author, then
+// author --advance--> gate. That re-entering advance was clearing the gate's own
+// attempt counter, so the cap never accumulated and the pair looped without
+// bound: a live plan gate reached 63 loops against a cap of 20. Entering a stage
+// must not reset the budget that bounds it; only completing one may.
+func TestGateIterationCapSurvivesTheAuthorsReentry(t *testing.T) {
+	store := newTestStore(t)
+	createTestItem(t, store, "wi_loop")
+	ctx := context.Background()
+
+	parkedAt := -1
+	for i := 0; i < 10; i++ {
+		out, err := store.RecordRequestedChanges(ctx, "wi_loop", "plan_gate", "plan",
+			fmt.Sprintf("plan-%d", i), fmt.Sprintf("feedback-%d", i), 3, 99, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out.Parked {
+			parkedAt = i
+			break
+		}
+		// The author re-authors and advances back into the gate.
+		if err := store.Move(ctx, "wi_loop", "plan", "plan_gate", "advance", "",
+			fmt.Sprintf("plan-%d", i), 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if parkedAt != 2 {
+		t.Fatalf("gate parked at loop %d, want 2 (cap of 3); the author's re-entry reset the counter", parkedAt)
+	}
+}
