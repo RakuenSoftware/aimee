@@ -145,6 +145,10 @@ BEGIN
     kb_management_identity_key_use_intent FROM aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION
     kb_write_tier_grant_set(TEXT,BIGINT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
+  -- The reporting wrapper delegates to the function above for every decision, so it
+  -- needs no privilege the runtime does not already hold.
+  GRANT EXECUTE ON FUNCTION
+    kb_write_tier_grant_set_reporting(TEXT,BIGINT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION
     kb_write_tier_grant_revoke(TEXT,BIGINT,TEXT) TO aimee_kb_runtime;
 

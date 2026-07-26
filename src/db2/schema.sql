@@ -7920,6 +7920,52 @@ BEGIN
     json_build_object('server_id', p_server_id, 'team_id', p_team_id,
       'subject', p_subject)::TEXT);
 END $$;
+-- The same mutation, plus the prior state it overwrote — for the operator CLI, which
+-- reports `changed` so a script can tell "already correct" from "just widened somebody's
+-- access". A CLI cannot get that by reading before calling _set: two concurrent local
+-- commands interleave between the read and the write, so a command that SUCCEEDS could
+-- report a stale previous tier. Observing it here, under the same lock and in the same
+-- transaction as the write, is the only way the field can be trusted.
+--
+-- IT DELEGATES. Authorization (admin or team lead), tier validation, the upsert and the
+-- WORM audit row all stay in kb_write_tier_grant_set and are not restated here — this
+-- function only adds observation. Duplicating the policy would create a second place for
+-- it to drift, and a stricter copy of an authorization rule is how a regression enters.
+DROP FUNCTION IF EXISTS kb_write_tier_grant_set_reporting(TEXT,BIGINT,TEXT,TEXT,TEXT);
+CREATE FUNCTION kb_write_tier_grant_set_reporting(
+  p_server_id TEXT, p_team_id BIGINT, p_subject TEXT, p_tier TEXT, p_granted_by TEXT
+) RETURNS TABLE(changed BOOLEAN, was_revoked BOOLEAN, previous_tier TEXT, is_member BOOLEAN)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  g kb_write_tier_grant%ROWTYPE;
+  v_member BOOLEAN;
+BEGIN
+  -- Serialize on the triple before reading, so the pre-image cannot be overwritten
+  -- between this SELECT and the delegated write below.
+  PERFORM pg_advisory_xact_lock(
+    hashtextextended(p_server_id || '/' || p_team_id::TEXT || '/' || p_subject, 918273645));
+  SELECT x.* INTO g FROM kb_write_tier_grant x
+    WHERE x.server_id = p_server_id AND x.team_id = p_team_id AND x.subject = p_subject
+    FOR UPDATE;
+
+  -- Everything that decides whether this is allowed, and everything that records it.
+  PERFORM kb_write_tier_grant_set(p_server_id, p_team_id, p_subject, p_tier, p_granted_by);
+
+  -- Reported so an operator learns immediately that a grant is inert rather than
+  -- discovering it when the subject still cannot write. Not a refusal: memberships and
+  -- grants are provisioned in either order.
+  SELECT EXISTS(SELECT 1 FROM kb_team_membership m
+                 WHERE m.identity_key = p_subject AND m.team = p_team_id) INTO v_member;
+
+  RETURN QUERY SELECT
+    (g.subject IS NULL OR g.tier <> p_tier OR g.revoked_at IS NOT NULL),
+    (g.subject IS NOT NULL AND g.revoked_at IS NOT NULL),
+    g.tier,   -- NULL when the grant did not exist, which is how a caller tells them apart
+    v_member;
+END $$;
+REVOKE ALL ON FUNCTION
+  kb_write_tier_grant_set_reporting(TEXT,BIGINT,TEXT,TEXT,TEXT) FROM PUBLIC;
+
 REVOKE ALL ON FUNCTION kb_write_tier_grant_set(TEXT,BIGINT,TEXT,TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_write_tier_grant_revoke(TEXT,BIGINT,TEXT) FROM PUBLIC;
 
