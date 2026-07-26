@@ -4,35 +4,62 @@ Increment 5 of [per-user-remote-writes-authz](per-user-remote-writes-authz.md).
 Written for review **before** implementation, because the previous roundtable
 blocked this increment on the absence of exactly this document.
 
+## CORRECTION (round 4)
+
+The first three revisions of this document opened by asserting that a grant "can only
+be created with hand-written SQL against `kb_write_tier_grant`". **That is false, and I
+found it by trying to implement the spec.**
+
+Already present and tested:
+
+| layer | what exists |
+| --- | --- |
+| SQL | `kb_write_tier_grant_set(server,team,subject,tier,granted_by)` and `kb_write_tier_grant_revoke(server,team,subject)` — SECURITY DEFINER, admin-or-team-lead authorization, WORM audit via `kb_audit_worm_append`, tier validation, and an idempotent upsert that already clears `revoked_at` |
+| C | `db2_write_tier_grant_set` / `_revoke` / `_lookup` / `_list` (`src/db2/write_tier_grant.c`) |
+| tests | `scripts/per-user-write-tier-rls-test.sql`, exercising admin and lead authority, the team boundary, revocation retaining the row, and the audit rows |
+
+I discovered this the worst possible way: I wrote a fresh
+`kb_write_tier_grant_revoke(TEXT,BIGINT,TEXT)` with `DROP FUNCTION IF EXISTS` and the
+**same signature**, which silently replaced the tested one and swapped its
+authorization from admin-or-lead to owner-only. The P1 RLS gate caught it —
+`per-user-write-tier-rls-test.sql:199: ERROR: grant administration denied` — and that
+gate is the only reason this is a corrected document rather than a regression. All of
+my duplicate SQL has been reverted.
+
+So increment 5 is **narrower than three rounds of review believed**: the data and C
+layers are done. What is missing is only the operator-facing surface — four CLI
+commands over the existing `db2_write_tier_grant_*` seam, and nothing below it.
+
+### What this changes in the sections below
+
+1. **No new SQL, and no changes to the existing functions.** The spec composes what
+   exists.
+2. **`changed` / `was_revoked` / `previous_tier` are computed at the CLI layer** with a
+   `db2_write_tier_grant_lookup` before the mutation. The existing `_set` returns
+   `VOID`, and altering a tested function's signature to report what a caller can
+   observe for itself would be gratuitous.
+3. **`set` after `revoke` already clears `revoked_at` in place**, in the existing
+   upsert. The long deliberation earlier in this document reached the same answer the
+   shipped code had already made; it now cites that code instead of presenting it as a
+   new decision.
+4. **The authorization sections are the one place the CLI is deliberately STRICTER than
+   the layer beneath it.** See below — that is a real decision, not an oversight, and it
+   does not alter the DB rule.
+
 ## Why this exists
 
-§7 of the proposal makes the local UDS operator the irreducible root of trust and
-says that operator "configures kb (OIDC issuer profile *or* PAM + the
-`{subject → team, tier}` grants)". §6 adds that after upgrading, "operators
-populate grants post-upgrade (documented procedure); we do **not** auto-map the old
-global into a wildcard grant".
+§7 of the proposal makes the local UDS operator the root of trust and says that
+operator "configures kb (OIDC issuer profile *or* PAM + the `{subject → team, tier}`
+grants)". §6 adds that after upgrading, "operators populate grants post-upgrade
+(documented procedure); we do **not** auto-map the old global into a wildcard grant".
 
-Both sentences describe work with no tool to do it. Today a grant can only be
-created with hand-written SQL against `kb_write_tier_grant` as a role with INSERT
-on it. That is the gap: **the upgrade is fail-closed, so every deployment that
-takes this change has zero grants and every remote write is denied until somebody
-writes SQL.**
+The primitives for that exist. What does not exist is any way for an operator to invoke
+them: there is no `aimee` command, so the documented procedure has no tool. A deployment
+taking this change lands fail-closed with zero grants, and the only route to a first
+grant is a C caller nobody has written or `psql` as a role holding EXECUTE.
 
-## Scope
-
-In scope: create, revoke, list and inspect per-user write-tier grants.
-
-**Explicitly NOT in scope**, so the boundary is a decision rather than an
-oversight:
-
-| excluded | why |
-| --- | --- |
-| Creating teams or memberships | `kb_team` / `kb_team_membership` are existing surfaces with their own lifecycle. A grant references them; managing them is not this command's job. |
-| Registering servers | `kb_server_registry` rows come from enrollment, which is a certificate flow. A grant against an unregistered server is refused by the intent writer, which is the correct place. |
-| Minting tokens | That is the login routes plus the token authority. An operator granting a tier must not be able to obtain somebody else's token as a side effect. |
-| Editing a grant in place | There is no `grant edit`. Changing a tier is `set` (idempotent upsert); removing authority is `revoke`. A partial edit would need its own audit semantics for no benefit. |
-| Bulk import from the old global flag | Deliberate, per §6. Auto-mapping `aimee.api.remote_writes: full` to a wildcard grant would re-introduce a global authorizer. The operator decides who gets what. |
-| A dedicated un-revoke verb | There is no `grant unrevoke`. Restoring access is `set`, whose behaviour against a revoked row is defined below. A separate verb would be a second way to reach one state, with its own audit shape. |
+That is the gap, and it is a thin one. It is worth closing precisely because it is thin:
+the alternative is an operator writing SQL against a security-critical table.
 
 ## Commands
 
@@ -78,6 +105,12 @@ upsert on the unique `(server_id, team_id, subject)` key. Both cannot hold.
 
 **`set` clears `revoked_at` in place and answers `200` with
 `changed: true, was_revoked: true`.** There is exactly one row per triple, ever.
+
+This is not a new decision: the shipped `kb_write_tier_grant_set` already does it, via
+`ON CONFLICT ... DO UPDATE SET ..., revoked_at = NULL`. The reasoning below is why that
+existing behaviour is the right one to build on, not a proposal to change it. The
+`changed` / `was_revoked` / `previous_tier` fields are computed by the CLI from a
+`db2_write_tier_grant_lookup` taken before the mutation.
 
 Why in place rather than a second row:
 
@@ -186,24 +219,37 @@ during an incident, and grepping a table is a worse answer.
 
 ## Authorization
 
-**The local UDS operator only.** These commands mutate who may write to a remote
-server; that authority belongs to the root of trust §7 already defines as
-un-lockout-able, and to nothing reachable over TCP. Concretely: the route requires
-`is_tcp == 0`, the same condition `server_http_conn_caps` uses to return
-`CAPS_ALL`.
+**The CLI surface is local UDS operator only.** The route requires `is_tcp == 0`, the
+same condition `server_http_conn_caps` uses to return `CAPS_ALL`.
 
-This is a deliberate refusal to add a remote grant-management API. A remote
-operator with a `full` tier could otherwise grant themselves — or anyone —
-`full` on any server in their team, which makes the tier system decorative. If
-remote administration is ever wanted it needs its own design with its own
-delegation model, not a flag on this command.
+**This is STRICTER than the SQL beneath it, deliberately.** The existing
+`kb_write_tier_grant_set` accepts an admin *or* a team lead, and that rule is not
+changed — it is tested, other callers may rely on it, and tightening a shipped
+authorization check as a side effect of adding a CLI would be exactly the kind of quiet
+regression the correction above describes.
+
+The asymmetry is justified rather than accidental. A remote caller reaching this CLI
+would already hold a write tier on some server; if that were enough to administer
+grants, anyone with `full` could widen their own access and the tier system would be
+decorative. Restricting the *new* surface costs nothing, because the surface has no
+existing users. If remote grant administration is wanted later it needs its own
+delegation design — and it should be argued for on its own terms, not inherited by
+default from a command that happened to be added.
+
+Concretely: two independent checks must both pass. The route establishes that the
+connection is local; the SQL establishes that the actor is an admin or the team's lead.
+Neither is the whole rule.
 
 ## Audit
 
-Every mutation writes a `kb_audit_event` through the existing
-`kb_audit_worm_append`, with the actor being the resolved UDS operator identity.
-`list` and `show` do not — they are reads, and auditing them would bury the
-mutations.
+Nothing to add: the existing SQL functions already append to `kb_audit_event` through
+`kb_audit_worm_append` on every mutation, with `aimee.principal` as the actor, and
+`kb_write_tier_grant_revoke` audits unconditionally — an attempt to revoke a grant that
+is absent or already revoked is still an operator action worth reconstructing.
+
+`list` and `show` add no audit rows, because they are reads and auditing them would bury
+the mutations. The acceptance criteria below verify the existing behaviour rather than
+requiring new behaviour.
 
 ## Acceptance criteria
 
