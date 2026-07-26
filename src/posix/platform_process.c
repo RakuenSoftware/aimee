@@ -2,6 +2,7 @@
 #include "platform_process.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -223,13 +224,96 @@ int platform_exec_capture(const char *cmd, char **out, size_t *out_len, int time
    return platform_exec_capture_cancellable(cmd, out, out_len, timeout_ms, NULL, NULL);
 }
 
-int platform_exec_pipe(const char *cmd, const char *input, size_t input_len, char **out,
-                       size_t *out_len)
+/* Bounded subprocess execution. See platform_process.h for the contract.
+ *
+ * The previous implementation had three independent live defects, all reachable
+ * from request-serving paths:
+ *
+ *  1. DEADLOCK. It wrote ALL input, closed stdin, and only then read stdout. When
+ *     both directions exceed pipe capacity (~64 KiB) the child blocks writing to
+ *     a full stdout pipe while the parent blocks writing to a full stdin pipe.
+ *     Reproduced: 1 MiB in, child emitting 1 MiB first, no return. This is fixed
+ *     by servicing both pipes concurrently under poll(), never write-all-then-read.
+ *  2. NO BOUND. waitpid(pid, NULL, 0) with no timeout: a child that never exits
+ *     hung the caller forever. On the serial kb_http accept loop that stops the
+ *     whole listener.
+ *  3. UNBOUNDED OUTPUT. The reader doubled its buffer with no ceiling, so a fast
+ *     emitting child grew the parent's heap until the OOM killer intervened.
+ *
+ * One monotonic deadline spans write, read and wait, so the total is bounded
+ * rather than each step being bounded separately. The child gets its own process
+ * group (setsid) so termination reaches grandchildren that would otherwise keep
+ * the pipe open; termination escalates SIGTERM -> grace -> SIGKILL to the group.
+ */
+
+static long long mono_ms(void)
 {
-   int stdin_pipe[2];
-   int stdout_pipe[2];
-   if (pipe(stdin_pipe) < 0 || pipe(stdout_pipe) < 0)
-      return -1;
+   struct timespec ts;
+   clock_gettime(CLOCK_MONOTONIC, &ts);
+   return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static void reap_bounded(pid_t pid, int grace_ms, int *status_out)
+{
+   /* Escalate to the process GROUP: killing only the child leaves grandchildren
+    * holding the pipe. -pid addresses the group the child created with setsid. */
+   kill(-pid, SIGTERM);
+   long long deadline = mono_ms() + grace_ms;
+   for (;;)
+   {
+      int st = 0;
+      pid_t r = waitpid(pid, &st, WNOHANG);
+      if (r == pid)
+      {
+         if (status_out)
+            *status_out = st;
+         return;
+      }
+      if (r < 0 && errno == EINTR)
+         continue;
+      if (r < 0)
+         return; /* already reaped or gone */
+      if (mono_ms() >= deadline)
+         break;
+      struct timespec nap = {0, 5 * 1000000};
+      nanosleep(&nap, NULL);
+   }
+   kill(-pid, SIGKILL);
+   for (;;)
+   {
+      int st = 0;
+      pid_t r = waitpid(pid, &st, 0);
+      if (r == pid)
+      {
+         if (status_out)
+            *status_out = st;
+         return;
+      }
+      if (r < 0 && errno == EINTR)
+         continue;
+      return;
+   }
+}
+
+int platform_exec_pipe_bounded(const char *cmd, const char *input, size_t input_len, char **out,
+                               size_t *out_len, int timeout_ms, size_t max_output)
+{
+   if (out)
+      *out = NULL;
+   if (out_len)
+      *out_len = 0;
+   if (!cmd || timeout_ms <= 0 || max_output == 0)
+      return PLATFORM_EXEC_ERR_SPAWN;
+
+   int stdin_pipe[2], stdout_pipe[2];
+   if (pipe(stdin_pipe) < 0)
+      return PLATFORM_EXEC_ERR_SPAWN;
+   if (pipe(stdout_pipe) < 0)
+   {
+      close(stdin_pipe[0]);
+      close(stdin_pipe[1]);
+      return PLATFORM_EXEC_ERR_SPAWN;
+   }
 
    pid_t pid = fork();
    if (pid < 0)
@@ -238,11 +322,13 @@ int platform_exec_pipe(const char *cmd, const char *input, size_t input_len, cha
       close(stdin_pipe[1]);
       close(stdout_pipe[0]);
       close(stdout_pipe[1]);
-      return -1;
+      return PLATFORM_EXEC_ERR_SPAWN;
    }
 
    if (pid == 0)
    {
+      /* Own process group so termination reaches descendants, not just us. */
+      setsid();
       close(stdin_pipe[1]);
       close(stdout_pipe[0]);
       dup2(stdin_pipe[0], STDIN_FILENO);
@@ -257,70 +343,213 @@ int platform_exec_pipe(const char *cmd, const char *input, size_t input_len, cha
    close(stdin_pipe[0]);
    close(stdout_pipe[1]);
 
-   /* A child that exits before draining its stdin (e.g. a rerank command that
-    * fails fast with a non-zero status) closes the read end, so our write() to it
-    * raises SIGPIPE. With the default disposition that terminates THIS process --
-    * turning a handled subprocess failure into a hard crash of the caller (seen as
-    * a flaky SIGPIPE kill of unit-test-memory under load, and a latent server
-    * crash in production). Ignore SIGPIPE across the write so the failed write
-    * surfaces as EPIPE and the loop breaks cleanly; restore the prior disposition
-    * after. Save/restore matches workspace_provider.c. */
+   /* Non-blocking both ways: a blocking write is exactly how the deadlock arose. */
+   fcntl(stdin_pipe[1], F_SETFL, fcntl(stdin_pipe[1], F_GETFL, 0) | O_NONBLOCK);
+   fcntl(stdout_pipe[0], F_SETFL, fcntl(stdout_pipe[0], F_GETFL, 0) | O_NONBLOCK);
+
+   /* A child that exits without draining stdin makes our write raise SIGPIPE;
+    * with the default disposition that kills THIS process. Ignore across the
+    * exchange and surface EPIPE instead. */
    struct sigaction old_pipe, ignore_pipe;
-   memset(&ignore_pipe, 0, sizeof(ignore_pipe));
+   memset(&ignore_pipe, 0, sizeof ignore_pipe);
    ignore_pipe.sa_handler = SIG_IGN;
    sigemptyset(&ignore_pipe.sa_mask);
    int restore_pipe = sigaction(SIGPIPE, &ignore_pipe, &old_pipe) == 0;
 
-   if (input && input_len > 0)
+   size_t cap = 4096, len = 0, off = 0;
+   char *buf = malloc(cap);
+   int rc = PLATFORM_EXEC_ERR_SPAWN;
+   int limit_hit = 0, timed_out = 0;
+   const long long deadline = mono_ms() + timeout_ms;
+
+   if (!buf)
    {
-      size_t off = 0;
-      while (off < input_len)
+      close(stdin_pipe[1]);
+      close(stdout_pipe[0]);
+      if (restore_pipe)
+         sigaction(SIGPIPE, &old_pipe, NULL);
+      reap_bounded(pid, 200, NULL);
+      return PLATFORM_EXEC_ERR_SPAWN;
+   }
+
+   int in_open = 1, out_open = 1;
+   if (!input || input_len == 0)
+   {
+      close(stdin_pipe[1]);
+      in_open = 0;
+   }
+
+   while (out_open)
+   {
+      long long remaining = deadline - mono_ms();
+      if (remaining <= 0)
       {
-         ssize_t n = write(stdin_pipe[1], input + off, input_len - off);
-         if (n <= 0)
+         timed_out = 1;
+         break;
+      }
+
+      struct pollfd pfd[2];
+      int n = 0;
+      int in_idx = -1, out_idx = -1;
+      if (in_open)
+      {
+         pfd[n].fd = stdin_pipe[1];
+         pfd[n].events = POLLOUT;
+         pfd[n].revents = 0;
+         in_idx = n++;
+      }
+      if (out_open)
+      {
+         pfd[n].fd = stdout_pipe[0];
+         pfd[n].events = POLLIN;
+         pfd[n].revents = 0;
+         out_idx = n++;
+      }
+
+      int pr = poll(pfd, (nfds_t)n, remaining > 1000 ? 1000 : (int)remaining);
+      if (pr < 0)
+      {
+         if (errno == EINTR)
+            continue;
+         break;
+      }
+
+      if (in_idx >= 0 && (pfd[in_idx].revents & (POLLOUT | POLLERR | POLLHUP)))
+      {
+         if (pfd[in_idx].revents & (POLLERR | POLLHUP))
+         {
+            close(stdin_pipe[1]);
+            in_open = 0;
+         }
+         else
+         {
+            ssize_t w = write(stdin_pipe[1], input + off, input_len - off);
+            if (w > 0)
+            {
+               off += (size_t)w;
+               if (off >= input_len)
+               {
+                  close(stdin_pipe[1]);
+                  in_open = 0;
+               }
+            }
+            else if (w < 0 && errno != EAGAIN && errno != EINTR)
+            {
+               close(stdin_pipe[1]);
+               in_open = 0;
+            }
+         }
+      }
+
+      if (out_idx >= 0 && (pfd[out_idx].revents & (POLLIN | POLLERR | POLLHUP)))
+      {
+         for (;;)
+         {
+            if (len + 1024 > cap)
+            {
+               size_t ncap = cap * 2;
+               if (ncap > max_output + 1)
+                  ncap = max_output + 1;
+               if (ncap <= cap)
+               {
+                  limit_hit = 1;
+                  break;
+               }
+               char *tmp = realloc(buf, ncap);
+               if (!tmp)
+               {
+                  limit_hit = 1;
+                  break;
+               }
+               buf = tmp;
+               cap = ncap;
+            }
+            ssize_t r = read(stdout_pipe[0], buf + len, cap - len - 1);
+            if (r > 0)
+            {
+               len += (size_t)r;
+               if (len >= max_output)
+               {
+                  limit_hit = 1;
+                  break;
+               }
+               continue;
+            }
+            if (r == 0)
+            {
+               out_open = 0;
+               break;
+            }
+            if (errno == EINTR)
+               continue;
+            if (errno == EAGAIN)
+               break;
+            out_open = 0;
             break;
-         off += (size_t)n;
+         }
+         if (limit_hit)
+            break;
       }
    }
-   close(stdin_pipe[1]);
 
+   if (in_open)
+      close(stdin_pipe[1]);
+   close(stdout_pipe[0]);
    if (restore_pipe)
       sigaction(SIGPIPE, &old_pipe, NULL);
 
-   size_t cap = 4096;
-   size_t len = 0;
-   char *buf = malloc(cap);
-   if (!buf)
+   int status = 0;
+   if (timed_out || limit_hit)
    {
-      close(stdout_pipe[0]);
-      kill(pid, SIGKILL);
-      waitpid(pid, NULL, 0);
-      return -1;
+      reap_bounded(pid, 200, &status);
+      rc = timed_out ? PLATFORM_EXEC_ERR_TIMEOUT : PLATFORM_EXEC_ERR_OUTPUT_LIMIT;
    }
-
-   ssize_t n;
-   while ((n = read(stdout_pipe[0], buf + len, cap - len - 1)) > 0)
+   else
    {
-      len += (size_t)n;
-      if (len + 1024 > cap)
+      /* Normal exit still gets a bounded wait: the child may have closed stdout
+       * and then hung. Race-safe against a natural exit, and EINTR-retried. */
+      long long remaining = deadline - mono_ms();
+      int reaped = 0;
+      while (remaining > 0)
       {
-         cap *= 2;
-         char *tmp = realloc(buf, cap);
-         if (!tmp)
+         pid_t r = waitpid(pid, &status, WNOHANG);
+         if (r == pid)
+         {
+            reaped = 1;
             break;
-         buf = tmp;
+         }
+         if (r < 0 && errno == EINTR)
+            continue;
+         if (r < 0)
+            break;
+         struct timespec nap = {0, 5 * 1000000};
+         nanosleep(&nap, NULL);
+         remaining = deadline - mono_ms();
+      }
+      if (!reaped)
+      {
+         reap_bounded(pid, 200, &status);
+         timed_out = 1;
+         rc = PLATFORM_EXEC_ERR_TIMEOUT;
+      }
+      else
+      {
+         rc = WIFEXITED(status) ? WEXITSTATUS(status) : PLATFORM_EXEC_ERR_SPAWN;
       }
    }
-   close(stdout_pipe[0]);
+
    buf[len] = '\0';
-
-   int status;
-   waitpid(pid, &status, 0);
-
-   *out = buf;
-   if (out_len)
-      *out_len = len;
-   return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+   if (out && rc >= 0)
+   {
+      *out = buf;
+      if (out_len)
+         *out_len = len;
+   }
+   else
+   {
+      free(buf);
+   }
+   return rc;
 }
 
 int platform_setenv(const char *name, const char *value)
@@ -348,4 +577,12 @@ void platform_signal_int(platform_signal_handler_t handler)
 int platform_signal_send_term(int pid)
 {
    return kill(pid, SIGTERM);
+}
+
+int platform_exec_pipe(const char *cmd, const char *input, size_t input_len, char **out,
+                       size_t *out_len)
+{
+   return platform_exec_pipe_bounded(cmd, input, input_len, out, out_len,
+                                     PLATFORM_EXEC_DEFAULT_TIMEOUT_MS,
+                                     PLATFORM_EXEC_DEFAULT_MAX_OUTPUT);
 }

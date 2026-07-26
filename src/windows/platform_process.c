@@ -334,42 +334,76 @@ int platform_exec_capture(const char *cmd, char **out, size_t *out_len, int time
    return platform_exec_capture_cancellable(cmd, out, out_len, timeout_ms, NULL, NULL);
 }
 
-int platform_exec_pipe(const char *cmd, const char *input, size_t input_len, char **out,
-                       size_t *out_len)
+/* Bounded subprocess execution (Windows). Mirrors the POSIX contract in
+ * platform_process.h: one monotonic deadline across write/read/wait, a cap on
+ * captured output, descendant containment, and no orphaned processes.
+ *
+ * The three defects fixed here are the same ones the POSIX side had: writing all
+ * input before reading any output (deadlocks once both directions exceed pipe
+ * capacity), an unbounded wait, and a buffer doubled with no ceiling.
+ *
+ * Containment uses a Job Object with KILL_ON_JOB_CLOSE, which is the Windows
+ * equivalent of the POSIX process group: closing the job kills the child AND its
+ * descendants, so a grandchild cannot survive holding the pipe.
+ *
+ * NOT VERIFIED ON WINDOWS. The author had no Windows host; this is written to the
+ * documented API contracts and reviewed by reading, and the POSIX side is the one
+ * covered by unit-test-exec-pipe-bounds. Treat it as unproven until exercised on
+ * a Windows runner.
+ */
+int platform_exec_pipe_bounded(const char *cmd, const char *input, size_t input_len, char **out,
+                               size_t *out_len, int timeout_ms, size_t max_output)
 {
-   if (!cmd || !out)
-      return -1;
-   *out = NULL;
+   if (out)
+      *out = NULL;
    if (out_len)
       *out_len = 0;
+   if (!cmd || !out || timeout_ms <= 0 || max_output == 0)
+      return PLATFORM_EXEC_ERR_SPAWN;
 
    SECURITY_ATTRIBUTES sa;
    ZeroMemory(&sa, sizeof(sa));
    sa.nLength = sizeof(sa);
    sa.bInheritHandle = TRUE;
 
-   HANDLE stdin_rd = NULL, stdin_wr = NULL;
-   HANDLE stdout_rd = NULL, stdout_wr = NULL;
+   HANDLE stdin_rd = NULL, stdin_wr = NULL, stdout_rd = NULL, stdout_wr = NULL;
    if (!CreatePipe(&stdin_rd, &stdin_wr, &sa, 0))
-      return -1;
+      return PLATFORM_EXEC_ERR_SPAWN;
    if (!CreatePipe(&stdout_rd, &stdout_wr, &sa, 0))
    {
       CloseHandle(stdin_rd);
       CloseHandle(stdin_wr);
-      return -1;
+      return PLATFORM_EXEC_ERR_SPAWN;
    }
    SetHandleInformation(stdin_wr, HANDLE_FLAG_INHERIT, 0);
    SetHandleInformation(stdout_rd, HANDLE_FLAG_INHERIT, 0);
+
+   /* Non-blocking on our ends: a blocking WriteFile to a full stdin pipe while the
+    * child blocks on a full stdout pipe is exactly the deadlock. */
+   DWORD nowait = PIPE_NOWAIT;
+   SetNamedPipeHandleState(stdin_wr, &nowait, NULL, NULL);
+   SetNamedPipeHandleState(stdout_rd, &nowait, NULL, NULL);
+
+   HANDLE job = CreateJobObjectA(NULL, NULL);
+   if (job)
+   {
+      JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli;
+      ZeroMemory(&jeli, sizeof(jeli));
+      jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+      SetInformationJobObject(job, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli));
+   }
 
    size_t full_len = strlen(cmd) + 16;
    char *cmdline = malloc(full_len);
    if (!cmdline)
    {
+      if (job)
+         CloseHandle(job);
       CloseHandle(stdin_rd);
       CloseHandle(stdin_wr);
       CloseHandle(stdout_rd);
       CloseHandle(stdout_wr);
-      return -1;
+      return PLATFORM_EXEC_ERR_SPAWN;
    }
    snprintf(cmdline, full_len, "cmd.exe /c %s", cmd);
 
@@ -383,83 +417,176 @@ int platform_exec_pipe(const char *cmd, const char *input, size_t input_len, cha
    si.hStdOutput = stdout_wr;
    si.hStdError = stdout_wr;
 
-   BOOL ok =
-       CreateProcessA(NULL, cmdline, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+   BOOL ok = CreateProcessA(NULL, cmdline, NULL, NULL, TRUE, CREATE_NO_WINDOW | CREATE_SUSPENDED,
+                            NULL, NULL, &si, &pi);
    free(cmdline);
    CloseHandle(stdin_rd);
    CloseHandle(stdout_wr);
    if (!ok)
    {
+      if (job)
+         CloseHandle(job);
       CloseHandle(stdin_wr);
       CloseHandle(stdout_rd);
-      return -1;
+      return PLATFORM_EXEC_ERR_SPAWN;
    }
+   /* Assign before resuming so descendants are captured from the first instruction. */
+   if (job)
+      AssignProcessToJobObject(job, pi.hProcess);
+   ResumeThread(pi.hThread);
 
-   if (input && input_len > 0)
-   {
-      DWORD written = 0;
-      WriteFile(stdin_wr, input, (DWORD)input_len, &written, NULL);
-   }
-   CloseHandle(stdin_wr);
-
-   size_t cap = 4096;
-   size_t len = 0;
+   size_t cap = 4096, len = 0, off = 0;
    char *buf = malloc(cap);
    if (!buf)
    {
-      TerminateProcess(pi.hProcess, 1);
+      if (job)
+         CloseHandle(job); /* KILL_ON_JOB_CLOSE takes the tree down */
+      else
+         TerminateProcess(pi.hProcess, 1);
       CloseHandle(pi.hThread);
       CloseHandle(pi.hProcess);
+      CloseHandle(stdin_wr);
       CloseHandle(stdout_rd);
-      return -1;
+      return PLATFORM_EXEC_ERR_SPAWN;
+   }
+
+   const ULONGLONG deadline = GetTickCount64() + (ULONGLONG)timeout_ms;
+   int in_open = 1, timed_out = 0, limit_hit = 0, child_done = 0;
+   if (!input || input_len == 0)
+   {
+      CloseHandle(stdin_wr);
+      in_open = 0;
    }
 
    for (;;)
    {
-      DWORD nread = 0;
-      if (!ReadFile(stdout_rd, buf + len, (DWORD)(cap - len - 1), &nread, NULL))
+      if (GetTickCount64() >= deadline)
       {
-         DWORD err = GetLastError();
-         if (err == ERROR_BROKEN_PIPE)
-            break;
-         free(buf);
-         CloseHandle(pi.hThread);
-         CloseHandle(pi.hProcess);
-         CloseHandle(stdout_rd);
-         return -1;
-      }
-      if (nread == 0)
+         timed_out = 1;
          break;
-      len += (size_t)nread;
-      if (len + 1024 > cap)
-      {
-         cap *= 2;
-         char *tmp = realloc(buf, cap);
-         if (!tmp)
-         {
-            free(buf);
-            CloseHandle(pi.hThread);
-            CloseHandle(pi.hProcess);
-            CloseHandle(stdout_rd);
-            return -1;
-         }
-         buf = tmp;
       }
+
+      if (in_open)
+      {
+         DWORD written = 0;
+         if (WriteFile(stdin_wr, input + off, (DWORD)(input_len - off), &written, NULL))
+         {
+            off += written;
+            if (off >= input_len)
+            {
+               CloseHandle(stdin_wr);
+               in_open = 0;
+            }
+         }
+         else if (GetLastError() != ERROR_NO_DATA)
+         {
+            CloseHandle(stdin_wr);
+            in_open = 0;
+         }
+      }
+
+      DWORD avail = 0;
+      if (PeekNamedPipe(stdout_rd, NULL, 0, NULL, &avail, NULL) && avail > 0)
+      {
+         if (len + 1024 > cap)
+         {
+            size_t ncap = cap * 2;
+            if (ncap > max_output + 1)
+               ncap = max_output + 1;
+            if (ncap <= cap)
+            {
+               limit_hit = 1;
+               break;
+            }
+            char *tmp = realloc(buf, ncap);
+            if (!tmp)
+            {
+               limit_hit = 1;
+               break;
+            }
+            buf = tmp;
+            cap = ncap;
+         }
+         DWORD nread = 0;
+         if (ReadFile(stdout_rd, buf + len, (DWORD)(cap - len - 1), &nread, NULL) && nread > 0)
+         {
+            len += nread;
+            if (len >= max_output)
+            {
+               limit_hit = 1;
+               break;
+            }
+            continue;
+         }
+      }
+
+      if (child_done)
+         break; /* drained after exit */
+      DWORD w = WaitForSingleObject(pi.hProcess, 5);
+      if (w == WAIT_OBJECT_0)
+         child_done = 1; /* one more pass to drain the pipe */
    }
 
-   buf[len] = '\0';
-   DWORD exit_code = 0;
-   WaitForSingleObject(pi.hProcess, INFINITE);
-   GetExitCodeProcess(pi.hProcess, &exit_code);
+   if (in_open)
+      CloseHandle(stdin_wr);
 
-   *out = buf;
-   if (out_len)
-      *out_len = len;
+   DWORD code = 0;
+   int rc;
+   if (timed_out || limit_hit)
+   {
+      if (job)
+         CloseHandle(job); /* kills the whole tree */
+      else
+         TerminateProcess(pi.hProcess, 1);
+      WaitForSingleObject(pi.hProcess, 2000);
+      rc = timed_out ? PLATFORM_EXEC_ERR_TIMEOUT : PLATFORM_EXEC_ERR_OUTPUT_LIMIT;
+   }
+   else
+   {
+      ULONGLONG now = GetTickCount64();
+      DWORD remaining = now >= deadline ? 0 : (DWORD)(deadline - now);
+      if (WaitForSingleObject(pi.hProcess, remaining) != WAIT_OBJECT_0)
+      {
+         if (job)
+            CloseHandle(job);
+         else
+            TerminateProcess(pi.hProcess, 1);
+         WaitForSingleObject(pi.hProcess, 2000);
+         rc = PLATFORM_EXEC_ERR_TIMEOUT;
+      }
+      else
+      {
+         GetExitCodeProcess(pi.hProcess, &code);
+         rc = (int)code;
+         if (job)
+            CloseHandle(job);
+      }
+   }
 
    CloseHandle(pi.hThread);
    CloseHandle(pi.hProcess);
    CloseHandle(stdout_rd);
-   return (int)exit_code;
+
+   buf[len] = '\0';
+   if (rc >= 0)
+   {
+      *out = buf;
+      if (out_len)
+         *out_len = len;
+   }
+   else
+   {
+      free(buf);
+   }
+   return rc;
+}
+
+int platform_exec_pipe(const char *cmd, const char *input, size_t input_len, char **out,
+                       size_t *out_len)
+{
+   return platform_exec_pipe_bounded(cmd, input, input_len, out, out_len,
+                                     PLATFORM_EXEC_DEFAULT_TIMEOUT_MS,
+                                     PLATFORM_EXEC_DEFAULT_MAX_OUTPUT);
 }
 
 int platform_get_exe_path(char *buf, size_t size)
