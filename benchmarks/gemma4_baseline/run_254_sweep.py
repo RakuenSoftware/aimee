@@ -30,7 +30,7 @@ ETTIN_LOAD_PROFILE = {
     "pairs_per_request": 4,
     "parallel_slots": 32,
     "context_tokens": 65536,
-    "logical_batch_tokens": 8192,
+    "logical_batch_tokens": 2048,
     "physical_batch_tokens": 2048,
 }
 
