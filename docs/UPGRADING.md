@@ -135,6 +135,48 @@ cannot be replayed, and the server refuses if its replay store cannot confirm
 freshness. Clients are expected to obtain tokens as needed rather than caching
 one.
 
+**Provisioning the token authority needs a raised `RLIMIT_MEMLOCK`.** Tokens are
+signed under vault custody, so the authority has to be provisioned before any
+user can be issued one. The two tools that do it —
+`aimee-kb-token-roots-provision` and `aimee-kb-jwks-publish` — `mlockall()` at
+startup so signing key material can never reach swap, and that call fails with
+`ENOMEM` whenever `RLIMIT_MEMLOCK` is below the process size. A libpq + OpenSSL
+binary needs more than the common 8MB default, so on a stock container both tools
+exit immediately.
+
+Raise it on whatever host runs them:
+
+| Host | What to do |
+|---|---|
+| bare metal / VM | `ulimit -l unlimited` in the unit or shell that invokes them (systemd: `LimitMEMLOCK=infinity`) |
+| LXC / Proxmox container | add `lxc.prlimit.memlock: unlimited` to `/etc/pve/lxc/<ctid>.conf` and restart the container — the limit cannot be raised from inside |
+| Docker | `--ulimit memlock=-1:-1` |
+
+They report `hardening (mlockall; raise RLIMIT_MEMLOCK)` when this is the cause,
+so you do not have to guess which of the startup locks failed.
+
+Three more requirements of those tools, none of them obvious from a usage line
+and all of them deliberate:
+
+- **The KMS helper and its HWM public key must be root-owned files on a path
+  whose every parent directory is root-owned and not group- or other-writable.**
+  That rules out `/tmp` (mode `1777`). It stops an unprivileged user substituting
+  the helper under a path root is about to execute.
+- **The helper's own configuration must be baked into the file**, not passed in
+  the environment: both tools `clearenv()` down to the four `AIMEE_VAULT_KMS_*`
+  variables before forking it. That is why the setting names a *file* rather than
+  a command line.
+- **They connect as a login role that is a member of `aimee_kb_migrate`**, then
+  `SET ROLE` to their own provisioning role. `aimee_kb_migrate` is itself
+  `NOLOGIN` — DDL authority is deliberately not something you can log in as — and
+  the schema creates no login role for you, because naming it is your choice.
+
+`scripts/run-identity-mint-e2e.sh` is a worked example of all of the above,
+including a signed-HWM helper standing in for a hardware signer. Note that each
+custody key needs its **own** monotonic HWM counter: the tools provision three
+roots, and a shared counter makes the second root observe the first one's advance
+and fail verification.
+
 **Set `AIMEE_SERVER_TEAM_ID`.** This release adds one required variable: the id
 of the team this server serves, the same registry row `AIMEE_SERVER_ID` comes
 from. Set them together.
