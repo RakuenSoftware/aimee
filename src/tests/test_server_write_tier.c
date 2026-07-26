@@ -215,8 +215,11 @@ int main(void)
    empty.enrolled_team_count = 0;
    n = mint("kid-a", "server-1", 7, KB_IDENTITY_TIER_FULL, "jti-00000009", 1000, 1300, tok,
             sizeof(tok));
-   check(tok, n, &empty, 1100, SERVER_REMOTE_WRITES_OFF, SERVER_WRITE_TIER_WRONG_TEAM,
-         "a server enrolled for nothing authorizes nothing");
+   /* A server with no team configured reports its OWN misconfiguration rather
+    * than blaming the token: an operator seeing "wrong_team" across every
+    * request would hunt for bad tokens instead of an unset variable. */
+   check(tok, n, &empty, 1100, SERVER_REMOTE_WRITES_OFF, SERVER_WRITE_TIER_NO_TEAM_CONFIGURED,
+         "a server with no team configured says so, rather than blaming the token");
 
    /* Replay, and an unavailable replay store. */
    g_replay_answer = 1;

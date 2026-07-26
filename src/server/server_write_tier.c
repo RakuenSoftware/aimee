@@ -26,6 +26,8 @@ const char *server_write_tier_outcome_str(server_write_tier_outcome_t outcome)
       return "replay";
    case SERVER_WRITE_TIER_REPLAY_UNAVAILABLE:
       return "replay_unavailable";
+   case SERVER_WRITE_TIER_NO_TEAM_CONFIGURED:
+      return "no_team_configured";
    }
    /* An out-of-range outcome is a bug, and a bug must not read as "ok". */
    return "invalid";
@@ -33,12 +35,17 @@ const char *server_write_tier_outcome_str(server_write_tier_outcome_t outcome)
 
 static int team_is_enrolled(const server_write_tier_config_t *config, int64_t team_id)
 {
-   if (!config->enrolled_teams || config->enrolled_team_count == 0)
-      return 0; /* a server enrolled for nothing authorizes nothing */
    for (size_t i = 0; i < config->enrolled_team_count; ++i)
       if (config->enrolled_teams[i] == team_id)
          return 1;
    return 0;
+}
+
+/* A server with no configured team authorizes nobody. That is a deployment
+ * error, not a token error, and the two must not report identically. */
+static int server_has_no_team(const server_write_tier_config_t *config)
+{
+   return !config->enrolled_teams || config->enrolled_team_count == 0;
 }
 
 static int tier_from_claims(kb_identity_tier_t tier)
@@ -98,9 +105,10 @@ int server_write_tier_resolve(const char *token, size_t token_len,
     * granted at team X must not be replayable against a server serving team Y,
     * so the team is checked against THIS server's enrollment before the token is
     * consumed — a token for a foreign team must not burn a replay slot here. */
-   if (!team_is_enrolled(config, claims.team_id))
+   if (server_has_no_team(config) || !team_is_enrolled(config, claims.team_id))
    {
-      *outcome = SERVER_WRITE_TIER_WRONG_TEAM;
+      *outcome = server_has_no_team(config) ? SERVER_WRITE_TIER_NO_TEAM_CONFIGURED
+                                            : SERVER_WRITE_TIER_WRONG_TEAM;
       OPENSSL_cleanse(&claims, sizeof(claims));
       return SERVER_REMOTE_WRITES_OFF;
    }

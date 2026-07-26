@@ -42,6 +42,12 @@ extern "C"
       /* Verified, but the token's team is not one this server is enrolled for.
        * This is the §4 cross-team replay defence. */
       SERVER_WRITE_TIER_WRONG_TEAM = 4,
+      /* This server has NO team configured at all, so it can authorize nobody.
+       * Deliberately distinct from WRONG_TEAM: that is a token problem an
+       * operator cannot fix, this is a server misconfiguration they can fix in
+       * seconds — and reporting the two identically is what makes a misconfigured
+       * appliance look like a fleet of bad tokens. */
+      SERVER_WRITE_TIER_NO_TEAM_CONFIGURED = 7,
       /* Verified, but this jti has already been consumed. */
       SERVER_WRITE_TIER_REPLAY = 5,
       /* The replay store could not answer. Denied: an unavailable replay check
