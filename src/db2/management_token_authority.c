@@ -23,6 +23,8 @@ static const char SQL_READ_FINALIZE[] =
     "SELECT public.kb_management_read_authority_finalize(?1,?2,?3,?4)";
 static const char SQL_READ_READBACK[] =
     "SELECT * FROM public.kb_management_read_authority_readback(?1,?2)";
+static const char SQL_IDENTITY_ADMIT[] =
+    "SELECT * FROM public.kb_management_identity_authority_admit(?1,?2)";
 
 static int exact_hex_input(const char *s, size_t n)
 {
@@ -175,6 +177,76 @@ static int decode_record(aimee_pg_stmt_t *st, kb_mgmt_token_authority_record_t *
    return 0;
 invalid:
    OPENSSL_cleanse(r, sizeof(*r));
+   return -1;
+}
+
+/* Decode the identity admit row. `namespace_jti` is the 64-hex handle the caller
+ * asked for; it is verified here but NOT stored, because the record carries the
+ * token's own jti claim (8..128 chars) instead. Conflating the two would let a
+ * token be minted under an identifier the server never replay-checks. */
+static int decode_identity_record(aimee_pg_stmt_t *st, const char *namespace_jti,
+                                  kb_identity_token_authority_record_t *r)
+{
+   memset(r, 0, sizeof(*r));
+   char ns[65] = "";
+   const char *tier = NULL;
+   if (aimee_pg_column_count(st) != 35 || boolean(st, 0, &r->newly_admitted) ||
+       text_col(st, 1, r->correlation_id, sizeof(r->correlation_id)) ||
+       text_col(st, 2, ns, sizeof(ns)) || strcmp(ns, namespace_jti) ||
+       text_col(st, 3, r->jti, sizeof(r->jti)) || integer64(st, 4, &r->team_id) ||
+       text_col(st, 5, r->subject, sizeof(r->subject)) || !(tier = aimee_pg_column_text(st, 6)) ||
+       text_col(st, 7, r->token_issuer, sizeof(r->token_issuer)) ||
+       text_col(st, 8, r->audience, sizeof(r->audience)) ||
+       text_col(st, 9, r->kid, sizeof(r->kid)) || integer64(st, 10, &r->issued_at) ||
+       integer64(st, 11, &r->expires_at) ||
+       text_col(st, 12, r->installation_id, sizeof(r->installation_id)) ||
+       integer64(st, 13, &r->installation_generation) ||
+       integer64(st, 14, &r->installation_enrollment_id) ||
+       integer64(st, 15, &r->target_enrollment_id) ||
+       integer64(st, 16, &r->revocation_generation) ||
+       integer64(st, 17, &r->publication_generation) ||
+       text_col(st, 18, r->publication_candidate_id, sizeof(r->publication_candidate_id)) ||
+       blob_col(st, 19, r->publication_manifest_sha256, 32, NULL, 32) ||
+       blob_col(st, 20, r->publication_envelope_sha256, 32, NULL, 32) ||
+       text_col(st, 21, r->token_custody_key_id, sizeof(r->token_custody_key_id)) ||
+       integer64(st, 22, &r->token_version) ||
+       blob_col(st, 23, r->token_public_key, sizeof(r->token_public_key), NULL,
+                sizeof(r->token_public_key)) ||
+       blob_col(st, 24, r->token_public_exponent, sizeof(r->token_public_exponent), NULL,
+                sizeof(r->token_public_exponent)) ||
+       blob_col(st, 25, r->token_public_digest, 32, NULL, 32) ||
+       blob_col(st, 26, r->token_jwk_digest, 32, NULL, 32) ||
+       integer64(st, 27, &r->vault_seal_epoch) ||
+       blob_col(st, 28, r->hwm_attestation, sizeof(r->hwm_attestation), &r->hwm_attestation_len,
+                0) ||
+       blob_col(st, 29, r->hwm_attestation_digest, 32, NULL, 32) ||
+       blob_col(st, 30, r->envelope.wrapped_dek, sizeof(r->envelope.wrapped_dek), NULL,
+                sizeof(r->envelope.wrapped_dek)) ||
+       blob_col(st, 31, r->envelope.nonce, sizeof(r->envelope.nonce), NULL,
+                sizeof(r->envelope.nonce)) ||
+       blob_col(st, 32, r->envelope.ciphertext, sizeof(r->envelope.ciphertext),
+                &r->envelope.ciphertext_len, 0) ||
+       blob_col(st, 33, r->envelope.tag, sizeof(r->envelope.tag), NULL, sizeof(r->envelope.tag)) ||
+       integer64(st, 34, &r->key_use_created_at_epoch))
+      goto invalid;
+   if (!strcmp(tier, "off"))
+      r->tier = KB_IDENTITY_TIER_OFF;
+   else if (!strcmp(tier, "data"))
+      r->tier = KB_IDENTITY_TIER_DATA;
+   else if (!strcmp(tier, "full"))
+      r->tier = KB_IDENTITY_TIER_FULL;
+   else
+      goto invalid; /* an unrecognized tier is a corrupt row, never a default */
+   r->envelope.seal_epoch = r->vault_seal_epoch;
+   r->envelope.version = r->token_version;
+   memcpy(r->envelope.hwm_attestation, r->hwm_attestation, r->hwm_attestation_len);
+   r->envelope.hwm_attestation_len = r->hwm_attestation_len;
+   if (!kb_identity_token_authority_record_valid(r))
+      goto invalid;
+   return 0;
+invalid:
+   OPENSSL_cleanse(r, sizeof(*r));
+   OPENSSL_cleanse(ns, sizeof(ns));
    return -1;
 }
 
@@ -344,6 +416,76 @@ db2_management_token_authority_readback(db2_management_token_authority_ctx_t *ct
                          correlation_id, jti, DB2_MANAGEMENT_TOKEN_AUTHORITY_ABSENT, out);
 }
 
+/* Identity admission. Mirrors committed_call's transaction handling — including
+ * treating a lost COMMIT acknowledgement as terminal rather than retrying, since
+ * a retry could duplicate a private-key use — but decodes the identity record,
+ * which is a different shape (no peer-cert binding, no request digest, a tier
+ * instead of a capability, and a token jti distinct from the namespace jti). */
+db2_management_token_authority_result_t
+db2_management_identity_authority_admit(db2_management_token_authority_ctx_t *ctx,
+                                        const char correlation_id[65], const char jti[65],
+                                        kb_identity_token_authority_record_t *out)
+{
+   if (out)
+      OPENSSL_cleanse(out, sizeof(*out));
+   if (!ctx || !ctx->connection || ctx->use_transaction_open || !out ||
+       !exact_hex_input(correlation_id, 64) || !exact_hex_input(jti, 64))
+      return DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;
+   char error[AUTHORITY_ERROR_MAX] = "";
+   if (aimee_pg_exec(ctx->connection, "BEGIN ISOLATION LEVEL REPEATABLE READ READ WRITE", error,
+                     sizeof(error)))
+      return classify(NULL, error);
+
+   kb_identity_token_authority_record_t candidate;
+   memset(&candidate, 0, sizeof(candidate));
+   db2_management_token_authority_result_t rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_UNAVAILABLE;
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(ctx->connection, SQL_IDENTITY_ADMIT, error, sizeof(error));
+   if (!st)
+      rc = classify(NULL, error);
+   else
+   {
+      int bound = aimee_pg_bind_text(st, "?1", correlation_id) || aimee_pg_bind_text(st, "?2", jti);
+      aimee_pg_step_t step = bound ? AIMEE_PG_ERR : aimee_pg_step(st, error, sizeof(error));
+      if (!bound && step == AIMEE_PG_ROW && decode_identity_record(st, jti, &candidate) == 0)
+      {
+         step = aimee_pg_step(st, error, sizeof(error));
+         rc = step == AIMEE_PG_DONE
+                  ? DB2_MANAGEMENT_TOKEN_AUTHORITY_OK
+                  : (step == AIMEE_PG_ERR ? classify(aimee_pg_sqlstate(st), error)
+                                          : DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY);
+      }
+      else if (!bound && step == AIMEE_PG_ERR)
+         rc = classify(aimee_pg_sqlstate(st), error);
+      else if (!bound)
+         rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;
+      aimee_pg_finalize(st);
+   }
+   /* The row must be the one that was asked for. */
+   if (rc == DB2_MANAGEMENT_TOKEN_AUTHORITY_OK && strcmp(candidate.correlation_id, correlation_id))
+      rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;
+
+   if (rc != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+   {
+      (void)aimee_pg_exec(ctx->connection, "ROLLBACK", error, sizeof(error));
+      OPENSSL_cleanse(&candidate, sizeof(candidate));
+      OPENSSL_cleanse(error, sizeof(error));
+      return rc;
+   }
+   if (aimee_pg_exec(ctx->connection, "COMMIT", error, sizeof(error)))
+   {
+      aimee_pg_close(ctx->connection);
+      ctx->connection = NULL;
+      OPENSSL_cleanse(&candidate, sizeof(candidate));
+      OPENSSL_cleanse(error, sizeof(error));
+      return DB2_MANAGEMENT_TOKEN_AUTHORITY_COMMIT_AMBIGUOUS;
+   }
+   *out = candidate;
+   OPENSSL_cleanse(&candidate, sizeof(candidate));
+   OPENSSL_cleanse(error, sizeof(error));
+   return DB2_MANAGEMENT_TOKEN_AUTHORITY_OK;
+}
+
 db2_management_token_authority_result_t
 db2_management_token_authority_use_begin(db2_management_token_authority_ctx_t *ctx,
                                          const char correlation_id[65], const char jti[65],
@@ -444,9 +586,10 @@ db2_management_token_authority_kind(db2_management_token_authority_ctx_t *ctx,
    if (!bound && step == AIMEE_PG_ROW && !aimee_pg_column_is_null(st, 0))
    {
       const char *value = aimee_pg_column_text(st, 0);
-      *kind = value && !strcmp(value, "action") ? DB2_MANAGEMENT_TOKEN_INTENT_ACTION
-              : value && !strcmp(value, "read") ? DB2_MANAGEMENT_TOKEN_INTENT_READ
-                                                : 0;
+      *kind = value && !strcmp(value, "action")     ? DB2_MANAGEMENT_TOKEN_INTENT_ACTION
+              : value && !strcmp(value, "read")     ? DB2_MANAGEMENT_TOKEN_INTENT_READ
+              : value && !strcmp(value, "identity") ? DB2_MANAGEMENT_TOKEN_INTENT_IDENTITY
+                                                    : 0;
       step = aimee_pg_step(st, error, sizeof(error));
       rc = *kind && step == AIMEE_PG_DONE ? DB2_MANAGEMENT_TOKEN_AUTHORITY_OK
                                           : DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;

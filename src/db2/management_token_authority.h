@@ -31,7 +31,11 @@ typedef struct
 typedef enum
 {
    DB2_MANAGEMENT_TOKEN_INTENT_ACTION = 1,
-   DB2_MANAGEMENT_TOKEN_INTENT_READ = 2
+   DB2_MANAGEMENT_TOKEN_INTENT_READ = 2,
+   /* Data-plane identity token (per-user remote_writes §4). Resolved from the
+    * same (correlation_id, jti) namespace as the other two, so the hardened IPC
+    * seam carries no new request type. */
+   DB2_MANAGEMENT_TOKEN_INTENT_IDENTITY = 3
 } db2_management_token_intent_kind_t;
 
 #ifdef __cplusplus
@@ -49,6 +53,16 @@ extern "C"
    db2_management_token_authority_admit(db2_management_token_authority_ctx_t *ctx,
                                         const char correlation_id[65], const char jti[65],
                                         kb_mgmt_token_authority_record_t *out);
+
+   /* Identity-token admission (per-user remote_writes §4). Same contract as the
+    * management admit: it commits before returning, a replay comes back OK with
+    * newly_admitted=0 and must not proceed to private-key use, and a lost COMMIT
+    * acknowledgement is terminal rather than retried. `jti` is the 64-hex
+    * namespace handle; the record carries the token's own jti claim. */
+   db2_management_token_authority_result_t
+   db2_management_identity_authority_admit(db2_management_token_authority_ctx_t *ctx,
+                                           const char correlation_id[65], const char jti[65],
+                                           kb_identity_token_authority_record_t *out);
 
    /* Resolve a lost admission COMMIT acknowledgement without private use. */
    db2_management_token_authority_result_t
