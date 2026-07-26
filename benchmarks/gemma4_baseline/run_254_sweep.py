@@ -36,23 +36,23 @@ ETTIN_LOAD_PROFILE = {
 MODEL_LOAD_PROFILES = {
     "gemma4_e2b": {
         "synthesis": {"workers": 16, "parallel_slots": 16, "context_tokens": 65536, "physical_batch_tokens": 2048},
-        "embedding": {"parallel_slots": 1, "context_tokens": 8192, "physical_batch_tokens": 8192, "batch_size": 16},
+        "embedding": {"parallel_slots": 16, "context_tokens": 131072, "physical_batch_tokens": 8192, "batch_size": 16},
     },
     "gemma4_e4b": {
         "synthesis": {"workers": 12, "parallel_slots": 12, "context_tokens": 49152, "physical_batch_tokens": 2048},
-        "embedding": {"parallel_slots": 1, "context_tokens": 8192, "physical_batch_tokens": 8192, "batch_size": 16},
+        "embedding": {"parallel_slots": 12, "context_tokens": 98304, "physical_batch_tokens": 8192, "batch_size": 16},
     },
     "gemma4_12b": {
         "synthesis": {"workers": 8, "parallel_slots": 8, "context_tokens": 32768, "physical_batch_tokens": 2048},
-        "embedding": {"parallel_slots": 1, "context_tokens": 8192, "physical_batch_tokens": 8192, "batch_size": 16},
+        "embedding": {"parallel_slots": 8, "context_tokens": 65536, "physical_batch_tokens": 8192, "batch_size": 16},
     },
     "gemma4_26b_a4b": {
         "synthesis": {"workers": 4, "parallel_slots": 4, "context_tokens": 16384, "physical_batch_tokens": 2048},
-        "embedding": {"parallel_slots": 1, "context_tokens": 8192, "physical_batch_tokens": 8192, "batch_size": 16},
+        "embedding": {"parallel_slots": 4, "context_tokens": 32768, "physical_batch_tokens": 8192, "batch_size": 16},
     },
     "gemma4_31b": {
         "synthesis": {"workers": 2, "parallel_slots": 2, "context_tokens": 8192, "physical_batch_tokens": 2048},
-        "embedding": {"parallel_slots": 1, "context_tokens": 8192, "physical_batch_tokens": 8192, "batch_size": 16},
+        "embedding": {"parallel_slots": 2, "context_tokens": 16384, "physical_batch_tokens": 8192, "batch_size": 16},
     },
     "qwen36_35b_a3b": {
         "synthesis": {"workers": 1, "parallel_slots": 1, "context_tokens": 4096, "physical_batch_tokens": 2048},

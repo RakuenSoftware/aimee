@@ -157,7 +157,9 @@ Synthesis concurrency is an explicit per-model load profile rather than a fixed
 two-request cap. E2B uses 16 client workers and 16 server slots with a 65,536-token
 aggregate context (4,096 tokens per slot). Progress state and hardware artifacts
 record the selected profile. Larger models use progressively smaller profiles to
-leave room for their weights on the 24 GiB card.
+leave room for their weights on the 24 GiB card. E2B embedding batches contain 16
+inputs and run against 16 server slots with 8,192 context tokens available to
+each input instead of being serialized through one slot.
 
 ```sh
 python3 benchmarks/gemma4_baseline/run_254_sweep.py
