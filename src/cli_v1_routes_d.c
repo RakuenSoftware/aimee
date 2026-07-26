@@ -32,6 +32,13 @@ static const struct
     {"audit.snapshot", pt_print_audit},
     {"init.run", pt_print_init_run},
     {"rules.generate", pt_print_rules_generate},
+    {"kb.grant.set", pt_print_grant_set},
+    {"kb.grant.revoke", pt_print_grant_revoke},
+    /* show is list filtered to one subject and shares its row shape, so it shares
+     * the printer too; they are distinct methods only so the marshaller can require
+     * show's --subject. */
+    {"kb.grant.list", pt_print_grant_list},
+    {"kb.grant.show", pt_print_grant_list},
     {"skill.list", pt_print_skill_list},
     {"skill.show", pt_print_skill_show},
     {"git.verify", pt_print_git_verify},
