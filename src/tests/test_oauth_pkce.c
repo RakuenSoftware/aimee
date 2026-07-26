@@ -218,6 +218,34 @@ static void test_build_auth_url_buffer_too_small(void)
    assert(oauth_pkce_build_auth_url(&req, tiny, sizeof(tiny)) == -1);
 }
 
+static void test_build_auth_url_with_nonce(void)
+{
+   /* An OIDC relying party must send a nonce; it is echoed in the id_token and
+    * binds that token to this authorization request. It is percent-encoded like
+    * every other value, and omitted entirely when absent so a plain OAuth 2.0
+    * caller's URL is unchanged. */
+   oauth_pkce_auth_request_t req = {
+       .authorize_url = "https://idp.example/authorize",
+       .client_id = "aimee-kb",
+       .redirect_uri = "https://kb/callback",
+       .state = "st1",
+       .code_challenge = "ABC_-xyz",
+       .nonce = "n once/1",
+   };
+   char out[512];
+   assert(oauth_pkce_build_auth_url(&req, out, sizeof(out)) > 0);
+   assert(strstr(out, "&nonce=n%20once%2F1"));
+   /* Ordering is stable: state before nonce, both after the PKCE parameters. */
+   assert(strstr(out, "&state=st1") < strstr(out, "&nonce="));
+
+   req.nonce = NULL;
+   assert(oauth_pkce_build_auth_url(&req, out, sizeof(out)) > 0);
+   assert(!strstr(out, "nonce"));
+   req.nonce = "";
+   assert(oauth_pkce_build_auth_url(&req, out, sizeof(out)) > 0);
+   assert(!strstr(out, "nonce"));
+}
+
 int main(void)
 {
    char tmp_template[] = "/tmp/aimee-oauth-pkce-XXXXXX";
@@ -237,6 +265,7 @@ int main(void)
    test_build_auth_url_with_scope_state_and_existing_query();
    test_build_auth_url_rejects_missing_fields();
    test_build_auth_url_buffer_too_small();
+   test_build_auth_url_with_nonce();
 
    /* --- oauth_token_parse_response: happy path --- */
    {
