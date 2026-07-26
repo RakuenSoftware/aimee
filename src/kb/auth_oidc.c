@@ -373,8 +373,7 @@ int kb_oidc_id_token_nonce(const char *jwt, char *out, size_t cap)
    {
       cJSON *pl = cJSON_Parse(pl_json);
       cJSON *n = pl ? cJSON_GetObjectItemCaseSensitive(pl, "nonce") : NULL;
-      if (cJSON_IsString(n) && n->valuestring && n->valuestring[0] &&
-          strlen(n->valuestring) < cap)
+      if (cJSON_IsString(n) && n->valuestring && n->valuestring[0] && strlen(n->valuestring) < cap)
       {
          snprintf(out, cap, "%s", n->valuestring);
          rc = 0;

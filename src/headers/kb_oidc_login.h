@@ -49,11 +49,11 @@ extern "C"
     * code-exchange step, so nothing in this unit can leak it. */
    typedef struct
    {
-      char issuer[256];       /* expected id_token "iss"; required */
-      char client_id[256];    /* required */
-      char authorize_url[512];/* IdP authorization endpoint; required */
-      char redirect_uri[512]; /* this kb's callback; required */
-      char scope[256];        /* "" -> "openid" */
+      char issuer[256];        /* expected id_token "iss"; required */
+      char client_id[256];     /* required */
+      char authorize_url[512]; /* IdP authorization endpoint; required */
+      char redirect_uri[512];  /* this kb's callback; required */
+      char scope[256];         /* "" -> "openid" */
    } kb_oidc_login_config_t;
 
    /* A login kb has started and not yet completed. Holds secrets: zero it with
@@ -70,8 +70,8 @@ extern "C"
    typedef enum
    {
       KB_OIDC_LOGIN_OK = 0,
-      KB_OIDC_LOGIN_INVALID,      /* missing/malformed configuration or argument */
-      KB_OIDC_LOGIN_UNAVAILABLE,  /* CSPRNG failed, or the URL did not fit */
+      KB_OIDC_LOGIN_INVALID,     /* missing/malformed configuration or argument */
+      KB_OIDC_LOGIN_UNAVAILABLE, /* CSPRNG failed, or the URL did not fit */
       KB_OIDC_LOGIN_STATE_MISMATCH,
       KB_OIDC_LOGIN_NONCE_MISMATCH
    } kb_oidc_login_result_t;

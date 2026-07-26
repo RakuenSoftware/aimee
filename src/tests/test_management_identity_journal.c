@@ -271,10 +271,10 @@ static void test_operation_init(void)
                                              300, "0123456789abcdef0123456789abcdef",
                                              &bad) == DB2_MANAGEMENT_ACTION_INVALID);
    /* A TTL the server's verifier would throw away. */
-   assert(db2_identity_intent_operation_init(
-              7, "server-a", DB2_IDENTITY_AUTH_MODE_OIDC, "kb", "k",
-              DB2_IDENTITY_TTL_MAX_SECONDS + 1, "0123456789abcdef0123456789abcdef",
-              &bad) == DB2_MANAGEMENT_ACTION_INVALID);
+   assert(db2_identity_intent_operation_init(7, "server-a", DB2_IDENTITY_AUTH_MODE_OIDC, "kb", "k",
+                                             DB2_IDENTITY_TTL_MAX_SECONDS + 1,
+                                             "0123456789abcdef0123456789abcdef",
+                                             &bad) == DB2_MANAGEMENT_ACTION_INVALID);
    assert(db2_identity_intent_operation_init(7, "server-a", DB2_IDENTITY_AUTH_MODE_OIDC, "kb", "k",
                                              0, "0123456789abcdef0123456789abcdef",
                                              &bad) == DB2_MANAGEMENT_ACTION_INVALID);
@@ -460,7 +460,8 @@ static void test_start_commit_ambiguous(void)
    db2_identity_intent_t out;
    mock_commit_failure = 1;
    memset(&out, 0xff, sizeof(out));
-   assert(db2_identity_intent_start(&principal, &op, &out) == DB2_MANAGEMENT_ACTION_COMMIT_AMBIGUOUS);
+   assert(db2_identity_intent_start(&principal, &op, &out) ==
+          DB2_MANAGEMENT_ACTION_COMMIT_AMBIGUOUS);
    /* Outputs are unusable, but the caller's operation is untouched so the retry
     * reuses the same identifiers instead of filing a second intent. */
    db2_identity_intent_operation_t again = make_operation();

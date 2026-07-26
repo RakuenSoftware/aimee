@@ -30,7 +30,8 @@ static int operation_valid(const db2_identity_intent_operation_t *o)
           /* The token jti is a token-charset string of at least 8 chars, matching
            * the intent CHECK. We always generate 64 hex, but a record that came
            * from elsewhere still has to satisfy the schema. */
-          db2_intent_fixed_text(o->token_jti, sizeof(o->token_jti), DB2_IDENTITY_TOKEN_JTI_MAX, 1) &&
+          db2_intent_fixed_text(o->token_jti, sizeof(o->token_jti), DB2_IDENTITY_TOKEN_JTI_MAX,
+                                1) &&
           strnlen(o->token_jti, sizeof(o->token_jti)) >= 8 && o->team_id > 0 &&
           db2_identity_auth_mode_str(o->auth_mode) &&
           db2_intent_fixed_text(o->target_server_id, sizeof(o->target_server_id),
@@ -119,10 +120,11 @@ static db2_management_action_result_t finish_row(aimee_pg_stmt_t *st, int valid)
    return rc;
 }
 
-db2_management_action_result_t db2_identity_intent_operation_init(
-    int64_t team_id, const char *target_server_id, db2_identity_auth_mode_t auth_mode,
-    const char *token_issuer, const char *kid, int ttl_seconds, const char *installation_id,
-    db2_identity_intent_operation_t *out)
+db2_management_action_result_t
+db2_identity_intent_operation_init(int64_t team_id, const char *target_server_id,
+                                   db2_identity_auth_mode_t auth_mode, const char *token_issuer,
+                                   const char *kid, int ttl_seconds, const char *installation_id,
+                                   db2_identity_intent_operation_t *out)
 {
    if (!out)
       return DB2_MANAGEMENT_ACTION_INVALID;
@@ -148,8 +150,8 @@ db2_management_action_result_t db2_identity_intent_operation_init(
     * private-key use, and the token's own jti, which is what the server spends
     * on replay. Deriving one from another would let a caller who saw a token
     * predict the handle that minted it. */
-   if (db2_intent_generate_id(candidate.correlation_id) ||
-       db2_intent_generate_id(candidate.jti) || db2_intent_generate_id(candidate.token_jti))
+   if (db2_intent_generate_id(candidate.correlation_id) || db2_intent_generate_id(candidate.jti) ||
+       db2_intent_generate_id(candidate.token_jti))
    {
       memset(&candidate, 0, sizeof(candidate));
       return DB2_MANAGEMENT_ACTION_UNAVAILABLE;
@@ -158,9 +160,9 @@ db2_management_action_result_t db2_identity_intent_operation_init(
    return DB2_MANAGEMENT_ACTION_OK;
 }
 
-db2_management_action_result_t
-db2_identity_intent_start(const kb_principal_t *principal,
-                          const db2_identity_intent_operation_t *op, db2_identity_intent_t *out)
+db2_management_action_result_t db2_identity_intent_start(const kb_principal_t *principal,
+                                                         const db2_identity_intent_operation_t *op,
+                                                         db2_identity_intent_t *out)
 {
    if (out)
       memset(out, 0, sizeof(*out));
@@ -186,16 +188,14 @@ db2_identity_intent_start(const kb_principal_t *principal,
       db2_tenant_scope_rollback();
       return DB2_MANAGEMENT_ACTION_UNAVAILABLE;
    }
-   int bound = aimee_pg_bind_text(st, "?1", op->correlation_id) ||
-               aimee_pg_bind_text(st, "?2", op->jti) ||
-               aimee_pg_bind_text(st, "?3", op->token_jti) ||
-               aimee_pg_bind_int64(st, "?4", op->team_id) ||
-               aimee_pg_bind_text(st, "?5", op->target_server_id) ||
-               aimee_pg_bind_text(st, "?6", db2_identity_auth_mode_str(op->auth_mode)) ||
-               aimee_pg_bind_text(st, "?7", op->token_issuer) ||
-               aimee_pg_bind_text(st, "?8", op->kid) ||
-               aimee_pg_bind_int(st, "?9", op->ttl_seconds) ||
-               aimee_pg_bind_text(st, "?10", op->installation_id);
+   int bound =
+       aimee_pg_bind_text(st, "?1", op->correlation_id) || aimee_pg_bind_text(st, "?2", op->jti) ||
+       aimee_pg_bind_text(st, "?3", op->token_jti) || aimee_pg_bind_int64(st, "?4", op->team_id) ||
+       aimee_pg_bind_text(st, "?5", op->target_server_id) ||
+       aimee_pg_bind_text(st, "?6", db2_identity_auth_mode_str(op->auth_mode)) ||
+       aimee_pg_bind_text(st, "?7", op->token_issuer) || aimee_pg_bind_text(st, "?8", op->kid) ||
+       aimee_pg_bind_int(st, "?9", op->ttl_seconds) ||
+       aimee_pg_bind_text(st, "?10", op->installation_id);
    db2_identity_intent_t candidate;
    memset(&candidate, 0, sizeof(candidate));
    db2_management_action_result_t rc = bound ? DB2_MANAGEMENT_ACTION_UNAVAILABLE : first_row(st);
@@ -205,17 +205,16 @@ db2_identity_intent_start(const kb_principal_t *principal,
       /* Every field the caller asked for is compared against what came back, so
        * a replay that returns someone else's row is an INTEGRITY failure rather
        * than a token minted under the wrong claims. */
-      rc = finish_row(st, decode_intent(st, &candidate) == 0 &&
-                              !strcmp(candidate.correlation_id, op->correlation_id) &&
-                              !strcmp(candidate.jti, op->jti) &&
-                              !strcmp(candidate.token_jti, op->token_jti) &&
-                              candidate.team_id == op->team_id &&
-                              candidate.auth_mode == op->auth_mode &&
-                              !strcmp(candidate.target_server_id, op->target_server_id) &&
-                              !strcmp(candidate.token_issuer, op->token_issuer) &&
-                              !strcmp(candidate.kid, op->kid) &&
-                              candidate.expires_at - candidate.issued_at == op->ttl_seconds &&
-                              !strcmp(candidate.installation_id, op->installation_id));
+      rc = finish_row(
+          st, decode_intent(st, &candidate) == 0 &&
+                  !strcmp(candidate.correlation_id, op->correlation_id) &&
+                  !strcmp(candidate.jti, op->jti) && !strcmp(candidate.token_jti, op->token_jti) &&
+                  candidate.team_id == op->team_id && candidate.auth_mode == op->auth_mode &&
+                  !strcmp(candidate.target_server_id, op->target_server_id) &&
+                  !strcmp(candidate.token_issuer, op->token_issuer) &&
+                  !strcmp(candidate.kid, op->kid) &&
+                  candidate.expires_at - candidate.issued_at == op->ttl_seconds &&
+                  !strcmp(candidate.installation_id, op->installation_id));
    else
       aimee_pg_finalize(st);
    if (rc != DB2_MANAGEMENT_ACTION_OK)

@@ -62,7 +62,7 @@ typedef enum
 typedef struct
 {
    char correlation_id[DB2_IDENTITY_ID_HEX + 1];
-   char jti[DB2_IDENTITY_ID_HEX + 1]; /* namespace handle, not the token claim */
+   char jti[DB2_IDENTITY_ID_HEX + 1];              /* namespace handle, not the token claim */
    char token_jti[DB2_IDENTITY_TOKEN_JTI_MAX + 1]; /* the token's own jti claim */
    int64_t team_id;
    char target_server_id[DB2_IDENTITY_SERVER_MAX + 1];
@@ -103,10 +103,11 @@ extern "C"
     * exactly once per login: on an ambiguous start, retry with the same `out`.
     * Returns DB2_MANAGEMENT_ACTION_UNAVAILABLE if the platform CSPRNG failed —
     * never a weaker identifier. */
-   db2_management_action_result_t db2_identity_intent_operation_init(
-       int64_t team_id, const char *target_server_id, db2_identity_auth_mode_t auth_mode,
-       const char *token_issuer, const char *kid, int ttl_seconds, const char *installation_id,
-       db2_identity_intent_operation_t *out);
+   db2_management_action_result_t
+   db2_identity_intent_operation_init(int64_t team_id, const char *target_server_id,
+                                      db2_identity_auth_mode_t auth_mode, const char *token_issuer,
+                                      const char *kid, int ttl_seconds, const char *installation_id,
+                                      db2_identity_intent_operation_t *out);
 
    /* File the intent for `principal` (which must be authenticated — the tenant
     * scope refuses otherwise). DENIED covers both "no live grant" and "not a

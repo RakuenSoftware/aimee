@@ -28,13 +28,13 @@
 #include <string.h>
 
 /* Bounds every management intent shares with the schema. */
-#define DB2_INTENT_ID_HEX          64U
-#define DB2_INTENT_SERVER_MAX      127U
+#define DB2_INTENT_ID_HEX           64U
+#define DB2_INTENT_SERVER_MAX       127U
 #define DB2_INTENT_TOKEN_ISSUER_MAX 255U
-#define DB2_INTENT_ACTOR_MAX       576U
-#define DB2_INTENT_KID_MAX         64U
-#define DB2_INTENT_INSTALL_ID_HEX  32U
-#define DB2_INTENT_SERIAL_MAX      79U
+#define DB2_INTENT_ACTOR_MAX        576U
+#define DB2_INTENT_KID_MAX          64U
+#define DB2_INTENT_INSTALL_ID_HEX   32U
+#define DB2_INTENT_SERIAL_MAX       79U
 
 static inline int db2_intent_fixed_text(const char *s, size_t cap, size_t max, int token)
 {

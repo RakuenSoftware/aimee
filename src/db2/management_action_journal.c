@@ -13,14 +13,6 @@
 
 #define MANAGEMENT_ACTION_JSON_INT_MAX INT64_C(9007199254740991)
 
-
-
-
-
-
-
-
-
 db2_management_action_result_t db2_management_action_classify_sqlstate(const char *s)
 {
    if (!s || strlen(s) != 5)
@@ -53,8 +45,8 @@ operation_init_common(int64_t team_id, const char *target,
        ttl > 90 || !target || !issuer || !kid || !installation || !digest ||
        !db2_intent_input_text(target, DB2_MANAGEMENT_ACTION_SERVER_MAX, 1) ||
        !db2_intent_input_text(issuer, DB2_MANAGEMENT_ACTION_TOKEN_ISSUER_MAX, 0) ||
-       !db2_intent_input_text(kid, DB2_MANAGEMENT_ACTION_KID_MAX, 1) || !db2_intent_input_hex(digest, 64) ||
-       !db2_intent_input_hex(installation, 32))
+       !db2_intent_input_text(kid, DB2_MANAGEMENT_ACTION_KID_MAX, 1) ||
+       !db2_intent_input_hex(digest, 64) || !db2_intent_input_hex(installation, 32))
       return DB2_MANAGEMENT_ACTION_INVALID;
 
    db2_management_action_operation_t candidate;
@@ -109,11 +101,6 @@ static int operation_valid(const db2_management_action_operation_t *o)
           o->ttl_seconds <= 90 &&
           db2_intent_fixed_hex(o->installation_id, sizeof(o->installation_id), 32);
 }
-
-
-
-
-
 
 static int parse_cap(const char *s, db2_management_action_capability_t *out)
 {
@@ -236,8 +223,9 @@ static db2_management_action_result_t finish_row(aimee_pg_stmt_t *st, int valid)
 static int decode_intent(aimee_pg_stmt_t *st, db2_management_action_intent_t *o)
 {
    if (aimee_pg_column_count(st) != 25 || db2_intent_col_bool(st, 0, &o->replayed) ||
-       db2_intent_copy_hex_col(st, 1, o->correlation_id, 64) || db2_intent_copy_hex_col(st, 2, o->jti, 64) ||
-       db2_intent_col_i64(st, 3, &o->team_id) || o->team_id < 1 ||
+       db2_intent_copy_hex_col(st, 1, o->correlation_id, 64) ||
+       db2_intent_copy_hex_col(st, 2, o->jti, 64) || db2_intent_col_i64(st, 3, &o->team_id) ||
+       o->team_id < 1 ||
        db2_intent_copy_col(st, 4, o->actor_identity, sizeof(o->actor_identity), 576, 0) ||
        !db2_intent_canonical_actor(o->actor_identity, sizeof(o->actor_identity)) ||
        parse_cap(aimee_pg_column_text(st, 5), &o->capability) ||
@@ -245,23 +233,27 @@ static int decode_intent(aimee_pg_stmt_t *st, db2_management_action_intent_t *o)
        db2_intent_copy_hex_col(st, 7, o->request_sha256, 64) ||
        db2_intent_copy_col(st, 8, o->token_issuer, sizeof(o->token_issuer), 255, 0) ||
        db2_intent_copy_col(st, 9, o->audience, sizeof(o->audience), 127, 1) ||
-       db2_intent_copy_col(st, 10, o->kid, sizeof(o->kid), 64, 1) || db2_intent_col_i64(st, 11, &o->issued_at) ||
-       db2_intent_col_i64(st, 12, &o->expires_at) || o->issued_at < 1 ||
-       o->issued_at > MANAGEMENT_ACTION_JSON_INT_MAX || o->expires_at <= o->issued_at ||
-       o->expires_at > MANAGEMENT_ACTION_JSON_INT_MAX || o->expires_at - o->issued_at > 90 ||
+       db2_intent_copy_col(st, 10, o->kid, sizeof(o->kid), 64, 1) ||
+       db2_intent_col_i64(st, 11, &o->issued_at) || db2_intent_col_i64(st, 12, &o->expires_at) ||
+       o->issued_at < 1 || o->issued_at > MANAGEMENT_ACTION_JSON_INT_MAX ||
+       o->expires_at <= o->issued_at || o->expires_at > MANAGEMENT_ACTION_JSON_INT_MAX ||
+       o->expires_at - o->issued_at > 90 ||
        db2_intent_copy_hex_col(st, 13, o->installation_id, 32) ||
        db2_intent_col_i64(st, 14, &o->installation_generation) || o->installation_generation < 1 ||
-       db2_intent_col_i64(st, 15, &o->installation_enrollment_id) || o->installation_enrollment_id < 1 ||
+       db2_intent_col_i64(st, 15, &o->installation_enrollment_id) ||
+       o->installation_enrollment_id < 1 ||
        db2_intent_copy_col(st, 16, o->local_cert_issuer, sizeof(o->local_cert_issuer), 511, 0) ||
-       db2_intent_copy_col(st, 17, o->local_cert_serial_norm, sizeof(o->local_cert_serial_norm), 79, 1) ||
+       db2_intent_copy_col(st, 17, o->local_cert_serial_norm, sizeof(o->local_cert_serial_norm), 79,
+                           1) ||
        !db2_intent_fixed_hex(o->local_cert_serial_norm, strlen(o->local_cert_serial_norm) + 1,
-                         strlen(o->local_cert_serial_norm)) ||
+                             strlen(o->local_cert_serial_norm)) ||
        db2_intent_copy_hex_col(st, 18, o->local_cert_fingerprint, 64) ||
        db2_intent_col_i64(st, 19, &o->target_enrollment_id) || o->target_enrollment_id < 1 ||
        db2_intent_copy_col(st, 20, o->target_mgmt_issuer, sizeof(o->target_mgmt_issuer), 511, 0) ||
-       db2_intent_copy_col(st, 21, o->target_mgmt_serial_norm, sizeof(o->target_mgmt_serial_norm), 79, 1) ||
+       db2_intent_copy_col(st, 21, o->target_mgmt_serial_norm, sizeof(o->target_mgmt_serial_norm),
+                           79, 1) ||
        !db2_intent_fixed_hex(o->target_mgmt_serial_norm, strlen(o->target_mgmt_serial_norm) + 1,
-                         strlen(o->target_mgmt_serial_norm)) ||
+                             strlen(o->target_mgmt_serial_norm)) ||
        db2_intent_copy_hex_col(st, 22, o->target_mgmt_fingerprint, 64) ||
        db2_intent_col_i64(st, 23, &o->revocation_generation) || o->revocation_generation < 1 ||
        db2_intent_col_i64(st, 24, &o->created_at_epoch) || o->created_at_epoch < 1)
@@ -275,14 +267,16 @@ static int decode_intent(aimee_pg_stmt_t *st, db2_management_action_intent_t *o)
 static int decode_outcome(aimee_pg_stmt_t *st, db2_management_action_outcome_t *o)
 {
    if (aimee_pg_column_count(st) != 8 || db2_intent_col_bool(st, 0, &o->replayed) ||
-       db2_intent_copy_hex_col(st, 1, o->correlation_id, 64) || db2_intent_col_i64(st, 2, &o->team_id) ||
-       o->team_id < 1 || parse_result(aimee_pg_column_text(st, 3), &o->result) ||
+       db2_intent_copy_hex_col(st, 1, o->correlation_id, 64) ||
+       db2_intent_col_i64(st, 2, &o->team_id) || o->team_id < 1 ||
+       parse_result(aimee_pg_column_text(st, 3), &o->result) ||
        parse_class(aimee_pg_column_text(st, 4), &o->result_class) ||
        !result_class_valid(o->result, o->result_class))
       return -1;
    if (aimee_pg_column_is_null(st, 5))
       o->has_status_code = 0;
-   else if (db2_intent_col_int(st, 5, &o->status_code) || o->status_code < 100 || o->status_code > 599)
+   else if (db2_intent_col_int(st, 5, &o->status_code) || o->status_code < 100 ||
+            o->status_code > 599)
       return -1;
    else
       o->has_status_code = 1;
@@ -368,8 +362,9 @@ db2_management_action_outcome_append(const kb_principal_t *principal,
    const char *result = op ? result_text(op->result) : NULL;
    const char *class_name = op ? class_text(op->result_class) : NULL;
    if (!out || !principal || !op ||
-       !db2_intent_fixed_hex(op->correlation_id, sizeof(op->correlation_id), 64) || op->team_id < 1 ||
-       !result || !class_name || !result_class_valid(op->result, op->result_class) ||
+       !db2_intent_fixed_hex(op->correlation_id, sizeof(op->correlation_id), 64) ||
+       op->team_id < 1 || !result || !class_name ||
+       !result_class_valid(op->result, op->result_class) ||
        (op->has_status_code != 0 && op->has_status_code != 1) ||
        (op->has_status_code && (op->status_code < 100 || op->status_code > 599)) ||
        (!op->has_status_code && op->status_code != 0) ||
