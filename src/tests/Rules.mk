@@ -619,6 +619,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-mgmt-token \
                $(TESTPREFIX)/unit-test-kb-identity-token \
                $(TESTPREFIX)/unit-test-server-identity-token \
+               $(TESTPREFIX)/unit-test-server-identity-jti \
                $(TESTPREFIX)/unit-test-server-management-jti \
                $(TESTPREFIX)/unit-test-server-management-tls \
                $(TESTPREFIX)/unit-test-kb-mgmt-status-authority \
@@ -2025,6 +2026,12 @@ $(TESTPREFIX)/unit-test-server-identity-token: $(OBJDIR)/tests/test_server_ident
                                                $(OBJDIR)/kb/kb_identity_token.o \
                                                $(OBJDIR)/server/oauth_pkce.o \
                                                $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-server-identity-jti: \
+    $(OBJDIR)/tests/test_server_identity_jti.o \
+    $(OBJDIR)/db1/server_identity_jti.o $(OBJDIR)/db1/db1_init.o \
+    $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-management-jti: \
