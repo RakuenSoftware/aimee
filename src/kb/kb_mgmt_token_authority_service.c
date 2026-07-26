@@ -245,9 +245,17 @@ static kb_mgmt_token_authority_ipc_result_t read_issue(kb_mgmt_token_authority_s
       result = KB_MGMT_TOKEN_AUTHORITY_IPC_INTEGRITY;
       goto done;
    }
-   result = map_protected(kb_vault_protected_use_with_aad(live_epoch, &use.envelope, token_aad,
-                                                          token_aad_len, protected_sign, &issue),
-                          issue.result);
+   /* SEQUENCED DELIBERATELY. map_protected() takes the protected-use status AND
+    * issue.result, but issue.result is written by the sign CALLBACK during that
+    * same call — and C leaves argument evaluation order unspecified, so passing
+    * both as arguments to one call can read issue.result BEFORE the call that sets
+    * it. When that happened the mapper saw (OK, CRYPTO_UNAVAILABLE) — its initial
+    * value — and fell through to UNAVAILABLE, so a mint that had signed correctly
+    * was reported as a failure. Bind the status to a local first; the sequence
+    * point is the fix, not a style preference. */
+   kb_vault_key_use_status_t mgmt_use_status = kb_vault_protected_use_with_aad(
+       live_epoch, &use.envelope, token_aad, token_aad_len, protected_sign, &issue);
+   result = map_protected(mgmt_use_status, issue.result);
    if (result != KB_MGMT_TOKEN_AUTHORITY_IPC_OK)
       goto done;
 
@@ -408,10 +416,17 @@ identity_issue(kb_mgmt_token_authority_service_t *service, const char *correlati
       result = KB_MGMT_TOKEN_AUTHORITY_IPC_INTEGRITY;
       goto abort;
    }
-   result = map_protected(kb_vault_protected_use_with_aad(live_epoch, &use.envelope, token_aad,
-                                                          token_aad_len, protected_identity_sign,
-                                                          &issue),
-                          issue.result);
+   /* SEQUENCED DELIBERATELY. map_protected() takes the protected-use status AND
+    * issue.result, but issue.result is written by the sign CALLBACK during that
+    * same call — and C leaves argument evaluation order unspecified, so passing
+    * both as arguments to one call can read issue.result BEFORE the call that sets
+    * it. When that happened the mapper saw (OK, CRYPTO_UNAVAILABLE) — its initial
+    * value — and fell through to UNAVAILABLE, so a mint that had signed correctly
+    * was reported as a failure. Bind the status to a local first; the sequence
+    * point is the fix, not a style preference. */
+   kb_vault_key_use_status_t identity_use_status = kb_vault_protected_use_with_aad(
+       live_epoch, &use.envelope, token_aad, token_aad_len, protected_identity_sign, &issue);
+   result = map_protected(identity_use_status, issue.result);
    if (result != KB_MGMT_TOKEN_AUTHORITY_IPC_OK)
       goto abort;
 

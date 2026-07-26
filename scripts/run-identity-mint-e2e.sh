@@ -377,11 +377,17 @@ sed -n '1,2p' "$work/replay.err"
 echo "  correct: the second attempt is refused"
 
 step "What the mint recorded"
-psqlt -c "SELECT 'intent state='||state||' jwt_present='||(jwt IS NOT NULL)::text||
-                 ' jwt_sha256_present='||(jwt_sha256 IS NOT NULL)::text
+# The token is NOT stored: kb_management_identity_authority_finalize re-verifies the
+# whole snapshot and returns, without writing the jwt back. That is deliberate — a
+# minted token is a live bearer credential, and keeping one at rest would be a
+# liability, so the intent's jwt/jwt_sha256 columns stay NULL on this path even
+# though the table shape carries them. Single use is enforced by the key-use row
+# below (unique on jti), which is what makes the replay above ALREADY_USED.
+psqlt -c "SELECT 'intent state='||state||' jwt stored='||(jwt IS NOT NULL)::text||
+                 '  (NULL is correct: a live token is never persisted)'
             FROM kb_management_identity_intent WHERE correlation_id='$corr';"
-psqlt -c "SELECT 'key_use rows='||count(*)::text FROM kb_management_identity_key_use_intent
-            WHERE correlation_id='$corr';"
+psqlt -c "SELECT 'key_use rows='||count(*)::text||'  (this row is what spends the jti)'
+            FROM kb_management_identity_key_use_intent WHERE correlation_id='$corr';"
 
 step "State summary"
 psqlt <<'SQL'
