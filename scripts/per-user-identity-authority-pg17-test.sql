@@ -113,5 +113,68 @@ BEGIN
   END IF;
 END $$;
 
+-- NO GRANT MEANS DENY, asserted where it is actually enforced.
+--
+-- This is the load-bearing claim of the whole feature: after the hard cutover a
+-- subject with no live kb_write_tier_grant row must not be able to obtain a
+-- token. Everything above only proves the fail-closed paths for a MISSING
+-- intent; this builds a real, well-formed identity intent and shows the mint
+-- still refuses, for the specific reason that the subject is not granted.
+INSERT INTO kb_team(id, name) VALUES (930001, 'idauth_team');
+INSERT INTO kb_enrollments(id, scope, fingerprint, state, authority_id)
+  VALUES (930101, 'p5-kb-management', repeat('c',64), 'active', repeat('1',32)),
+         (930102, 'p5-server-management', repeat('d',64), 'active', repeat('2',32));
+INSERT INTO kb_server_registry(server_id, cert_cn, mgmt_cert_cn, team_id, endpoint, status)
+  VALUES ('idsrv', 'idauth-cn', 'idauth-mgmt-cn', 930001, 'https://idsrv', 'active');
+INSERT INTO kb_management_token_intent_namespace(correlation_id, jti, kind)
+  VALUES (repeat('e',64), repeat('f',64), 'identity');
+INSERT INTO kb_management_identity_intent(
+  correlation_id, jti, kind, token_jti, team_id, subject, auth_mode, target_server_id,
+  token_issuer, audience, kid, issued_at, expires_at, installation_id,
+  installation_generation, installation_enrollment_id, target_enrollment_id,
+  revocation_generation, state)
+VALUES (repeat('e',64), repeat('f',64), 'identity', 'id-jti-00000042', 930001,
+        'oidc:idp.test:ungranted', 'oidc', 'idsrv', 'kb', 'idsrv', 'kid-test',
+        1000, 1300, repeat('a',32), 1, 930101, 930102, 1, 'pending');
+
+DO $$
+DECLARE ok BOOLEAN := false; msg TEXT;
+BEGIN
+  BEGIN
+    PERFORM * FROM kb_management_identity_authority_snapshot(repeat('e',64), repeat('f',64));
+    RAISE EXCEPTION 'FAIL: the mint accepted a subject with no write-tier grant';
+  EXCEPTION
+    WHEN sqlstate '42501' THEN
+      ok := true;  -- expected: "subject no longer granted"
+    WHEN OTHERS THEN
+      GET STACKED DIAGNOSTICS msg = MESSAGE_TEXT;
+      -- Any other refusal would mean the snapshot stopped for an unrelated
+      -- reason and this assertion proved nothing about grants.
+      RAISE EXCEPTION 'FAIL: expected a grant refusal (42501), got: %', msg;
+  END;
+  IF NOT ok THEN
+    RAISE EXCEPTION 'FAIL: no-grant refusal did not fire';
+  END IF;
+END $$;
+
+-- With a live grant the snapshot gets PAST the grant check. It still refuses
+-- (this fixture has no JWKS publication or token root), but the refusal must no
+-- longer be the grant one — otherwise the check above would pass even if the
+-- grant lookup were broken and always denied.
+INSERT INTO kb_write_tier_grant(server_id, team_id, subject, tier, granted_by)
+  VALUES ('idsrv', 930001, 'oidc:idp.test:ungranted', 'data', 'owner');
+DO $$
+DECLARE msg TEXT;
+BEGIN
+  BEGIN
+    PERFORM * FROM kb_management_identity_authority_snapshot(repeat('e',64), repeat('f',64));
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS msg = MESSAGE_TEXT;
+    IF msg LIKE '%no longer granted%' THEN
+      RAISE EXCEPTION 'FAIL: a live grant still refused as ungranted (grant lookup is broken)';
+    END IF;
+  END;
+END $$;
+
 \echo '== per-user identity token authority assertions PASSED =='
 ROLLBACK;

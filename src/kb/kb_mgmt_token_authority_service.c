@@ -71,20 +71,59 @@ static kb_mgmt_token_authority_ipc_result_t map_db(db2_management_token_authorit
    return KB_MGMT_TOKEN_AUTHORITY_IPC_UNAVAILABLE;
 }
 
-static kb_mgmt_token_authority_ipc_result_t map_protected(kb_vault_key_use_status_t result,
-                                                          protected_issue_t *issue)
+/* Takes the signer's result by value rather than the issue struct, so the
+ * management and identity paths - which carry different record types - share one
+ * mapping instead of drifting apart. */
+static kb_mgmt_token_authority_ipc_result_t
+map_protected(kb_vault_key_use_status_t result, kb_mgmt_token_authority_result_t issue_result)
 {
-   if (result == KB_VAULT_KEY_USE_OK && issue->result == KB_MGMT_TOKEN_AUTHORITY_OK)
+   if (result == KB_VAULT_KEY_USE_OK && issue_result == KB_MGMT_TOKEN_AUTHORITY_OK)
       return KB_MGMT_TOKEN_AUTHORITY_IPC_OK;
    if (result == KB_VAULT_KEY_USE_SEALED)
       return KB_MGMT_TOKEN_AUTHORITY_IPC_SEALED;
    if (result == KB_VAULT_KEY_USE_INTEGRITY || result == KB_VAULT_KEY_USE_UNATTESTED ||
        result == KB_VAULT_KEY_USE_REPLAY ||
        (result == KB_VAULT_KEY_USE_CALLBACK_FAILED &&
-        (issue->result == KB_MGMT_TOKEN_AUTHORITY_INVALID ||
-         issue->result == KB_MGMT_TOKEN_AUTHORITY_KEY_MISMATCH)))
+        (issue_result == KB_MGMT_TOKEN_AUTHORITY_INVALID ||
+         issue_result == KB_MGMT_TOKEN_AUTHORITY_KEY_MISMATCH)))
       return KB_MGMT_TOKEN_AUTHORITY_IPC_INTEGRITY;
    return KB_MGMT_TOKEN_AUTHORITY_IPC_UNAVAILABLE;
+}
+
+/* The identity counterpart of protected_issue_t. Separate struct because the
+ * record type differs; the signer contract is otherwise identical. */
+typedef struct
+{
+   const kb_identity_token_authority_record_t *record;
+   kb_mgmt_token_authority_output_t output;
+   kb_mgmt_token_authority_result_t result;
+} protected_identity_issue_t;
+
+static int protected_identity_sign(const unsigned char *plaintext, size_t plaintext_len,
+                                   void *opaque)
+{
+   protected_identity_issue_t *issue = opaque;
+   if (!issue || !issue->record)
+      return -1;
+   /* The output buffer is management-sized (8192) and therefore larger than an
+    * identity token needs; kb_identity_token_build enforces its own 4096 wire
+    * ceiling regardless of the cap it is handed. */
+   issue->result = kb_identity_token_authority_sign_pkcs8(
+       issue->record, plaintext, plaintext_len, issue->output.jwt, sizeof(issue->output.jwt),
+       &issue->output.jwt_len);
+   return issue->result == KB_MGMT_TOKEN_AUTHORITY_OK ? 0 : -1;
+}
+
+static int same_identity_admission(const kb_identity_token_authority_record_t *a,
+                                   const kb_identity_token_authority_record_t *b)
+{
+   kb_identity_token_authority_record_t left = *a, right = *b;
+   left.newly_admitted = 0;
+   right.newly_admitted = 0;
+   int same = CRYPTO_memcmp(&left, &right, sizeof(left)) == 0;
+   OPENSSL_cleanse(&left, sizeof(left));
+   OPENSSL_cleanse(&right, sizeof(right));
+   return same;
 }
 
 static int protected_sign(const unsigned char *plaintext, size_t plaintext_len, void *opaque)
@@ -208,7 +247,7 @@ static kb_mgmt_token_authority_ipc_result_t read_issue(kb_mgmt_token_authority_s
    }
    result = map_protected(kb_vault_protected_use_with_aad(live_epoch, &use.envelope, token_aad,
                                                           token_aad_len, protected_sign, &issue),
-                          &issue);
+                          issue.result);
    if (result != KB_MGMT_TOKEN_AUTHORITY_IPC_OK)
       goto done;
 
@@ -249,6 +288,158 @@ done:
    return result;
 }
 
+/* The data-plane identity mint (proposal per-user-remote-writes-authz.md §4).
+ * Structurally the same as the action path above - admit, re-verify the HWM and
+ * seal epoch, sign under vault custody, finalize - but over the identity record.
+ *
+ * The authorization it enforces is NOT carried by the request: the SQL snapshot
+ * behind admit/use/finalize re-reads the live write-tier grant every time, so a
+ * grant revoked mid-flight makes finalize refuse rather than release a token. */
+static kb_mgmt_token_authority_ipc_result_t
+identity_issue(kb_mgmt_token_authority_service_t *service, const char *correlation_id,
+               const char *jti, kb_mgmt_token_authority_output_t *out)
+{
+   kb_mgmt_token_authority_ipc_result_t result = KB_MGMT_TOKEN_AUTHORITY_IPC_UNAVAILABLE;
+   kb_identity_token_authority_record_t admitted, use;
+   protected_identity_issue_t issue;
+   uint8_t fresh_attestation[KB_MGMT_ROOT_ATTEST_MAX];
+   uint8_t token_aad[KB_MGMT_TOKEN_ROOT_AAD_MAX];
+   memset(&admitted, 0, sizeof(admitted));
+   memset(&use, 0, sizeof(use));
+   memset(&issue, 0, sizeof(issue));
+   memset(fresh_attestation, 0, sizeof(fresh_attestation));
+   memset(token_aad, 0, sizeof(token_aad));
+
+   db2_management_token_authority_result_t db_result =
+       db2_management_identity_authority_admit(service->db, correlation_id, jti, &admitted);
+   if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_COMMIT_AMBIGUOUS)
+   {
+      /* Same reasoning as the action path: only an independently reopened exact
+       * readback can prove this invocation admitted the tuple. Absence means the
+       * COMMIT did not land and retrying the same identifiers is safe; presence
+       * cannot distinguish "we inserted it" from "we replayed someone else's",
+       * so prefer terminal availability loss over a possible duplicate key use. */
+      if (!reopen(service))
+      {
+         result = KB_MGMT_TOKEN_AUTHORITY_IPC_COMMIT_AMBIGUOUS;
+         goto done;
+      }
+      db_result =
+          db2_management_identity_authority_readback(service->db, correlation_id, jti, &admitted);
+      if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_ABSENT)
+      {
+         db_result =
+             db2_management_identity_authority_admit(service->db, correlation_id, jti, &admitted);
+         if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_OK && !admitted.newly_admitted)
+         {
+            result = KB_MGMT_TOKEN_AUTHORITY_IPC_ALREADY_USED;
+            goto done;
+         }
+      }
+      else if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+      {
+         result = KB_MGMT_TOKEN_AUTHORITY_IPC_COMMIT_AMBIGUOUS;
+         goto done;
+      }
+      if (db_result != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+      {
+         result = KB_MGMT_TOKEN_AUTHORITY_IPC_COMMIT_AMBIGUOUS;
+         goto done;
+      }
+   }
+   else if (db_result != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+   {
+      result = map_db(db_result);
+      goto done;
+   }
+   else if (!admitted.newly_admitted)
+   {
+      result = KB_MGMT_TOKEN_AUTHORITY_IPC_ALREADY_USED;
+      goto done;
+   }
+
+   db_result = db2_management_identity_authority_use_begin(service->db, correlation_id, jti, &use);
+   if (db_result != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+   {
+      result = map_db(db_result);
+      goto done;
+   }
+   if (!same_identity_admission(&admitted, &use))
+   {
+      result = KB_MGMT_TOKEN_AUTHORITY_IPC_INTEGRITY;
+      goto abort;
+   }
+
+   uint64_t hwm_version = 0;
+   size_t fresh_attestation_len = 0;
+   if (vault_hwm_read(use.token_custody_key_id, &hwm_version, fresh_attestation,
+                      sizeof(fresh_attestation), &fresh_attestation_len) != 0)
+   {
+      result = KB_MGMT_TOKEN_AUTHORITY_IPC_UNAVAILABLE;
+      goto abort;
+   }
+   if (hwm_version == 0 || hwm_version > INT64_MAX || hwm_version != (uint64_t)use.token_version ||
+       !fresh_attestation_len || fresh_attestation_len != use.hwm_attestation_len ||
+       CRYPTO_memcmp(fresh_attestation, use.hwm_attestation, fresh_attestation_len) != 0 ||
+       vault_hwm_verify(use.token_custody_key_id, hwm_version, fresh_attestation,
+                        fresh_attestation_len) != 0 ||
+       vault_hwm_verify(use.token_custody_key_id, hwm_version, use.hwm_attestation,
+                        use.hwm_attestation_len) != 0)
+   {
+      result = KB_MGMT_TOKEN_AUTHORITY_IPC_INTEGRITY;
+      goto abort;
+   }
+   if (vault_primary_epoch_initialize((uint64_t)use.vault_seal_epoch) != VAULT_MAINTENANCE_OK)
+   {
+      result = KB_MGMT_TOKEN_AUTHORITY_IPC_INTEGRITY;
+      goto abort;
+   }
+   uint64_t live_epoch = vault_use_epoch_snapshot();
+   if (!live_epoch)
+   {
+      result = KB_MGMT_TOKEN_AUTHORITY_IPC_SEALED;
+      goto abort;
+   }
+   issue.record = &use;
+   issue.result = KB_MGMT_TOKEN_AUTHORITY_CRYPTO_UNAVAILABLE;
+   size_t token_aad_len = 0;
+   if (kb_mgmt_token_root_aad(use.envelope.version, token_aad, sizeof(token_aad), &token_aad_len))
+   {
+      result = KB_MGMT_TOKEN_AUTHORITY_IPC_INTEGRITY;
+      goto abort;
+   }
+   result = map_protected(kb_vault_protected_use_with_aad(live_epoch, &use.envelope, token_aad,
+                                                          token_aad_len, protected_identity_sign,
+                                                          &issue),
+                          issue.result);
+   if (result != KB_MGMT_TOKEN_AUTHORITY_IPC_OK)
+      goto abort;
+
+   db_result = db2_management_identity_authority_finalize(service->db);
+   if (db_result != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+   {
+      result = map_db(db_result);
+      goto done;
+   }
+
+   memcpy(out->jwt, issue.output.jwt, issue.output.jwt_len + 1);
+   out->jwt_len = issue.output.jwt_len;
+   result = KB_MGMT_TOKEN_AUTHORITY_IPC_OK;
+   goto done;
+
+abort:
+   db2_management_token_authority_abort(service->db);
+done:
+   if (result != KB_MGMT_TOKEN_AUTHORITY_IPC_OK)
+      OPENSSL_cleanse(out, sizeof(*out));
+   OPENSSL_cleanse(&issue, sizeof(issue));
+   OPENSSL_cleanse(&use, sizeof(use));
+   OPENSSL_cleanse(&admitted, sizeof(admitted));
+   OPENSSL_cleanse(fresh_attestation, sizeof(fresh_attestation));
+   OPENSSL_cleanse(token_aad, sizeof(token_aad));
+   return result;
+}
+
 kb_mgmt_token_authority_ipc_result_t
 kb_mgmt_token_authority_service_issue(const char *correlation_id, const char *jti,
                                       kb_mgmt_token_authority_output_t *out, void *opaque)
@@ -280,6 +471,13 @@ kb_mgmt_token_authority_service_issue(const char *correlation_id, const char *jt
           read_issue(service, correlation_id, jti, out);
       (void)pthread_setcancelstate(old_cancel_state, NULL);
       return read_result;
+   }
+   if (kind == DB2_MANAGEMENT_TOKEN_INTENT_IDENTITY)
+   {
+      kb_mgmt_token_authority_ipc_result_t identity_result =
+          identity_issue(service, correlation_id, jti, out);
+      (void)pthread_setcancelstate(old_cancel_state, NULL);
+      return identity_result;
    }
    if (kind != DB2_MANAGEMENT_TOKEN_INTENT_ACTION)
    {
@@ -403,7 +601,7 @@ kb_mgmt_token_authority_service_issue(const char *correlation_id, const char *jt
    }
    kb_vault_key_use_status_t protected_result = kb_vault_protected_use_with_aad(
        live_epoch, &use.envelope, token_aad, token_aad_len, protected_sign, &issue);
-   result = map_protected(protected_result, &issue);
+   result = map_protected(protected_result, issue.result);
    if (result != KB_MGMT_TOKEN_AUTHORITY_IPC_OK)
       goto abort;
 
