@@ -565,6 +565,14 @@ static void test_callback(EVP_PKEY *key, const char *jwks)
    assert(strstr(out, "invalid callback"));
    assert(stub_intent_calls == 0);
    assert(kb_oidc_login_store_count(NOW) == 1);
+   /* THE MIRROR IMAGE: a well-formed error with a DUPLICATED code. Round 3 found
+    * this honoured as a refusal, consuming the login. Both directions must be
+    * refused, and the login must survive both. */
+   snprintf(query, sizeof(query), "error=access_denied&code=x&code=y&state=%s", state);
+   assert(callback(query, out, sizeof(out)) == 400);
+   assert(strstr(out, "invalid callback"));
+   assert(!strstr(out, "identity provider"));
+   assert(kb_oidc_login_store_count(NOW) == 1);
    /* And the well-formed error for that same login still works afterwards. */
    snprintf(query, sizeof(query), "error=access_denied&state=%s", state);
    assert(callback(query, out, sizeof(out)) == 401);

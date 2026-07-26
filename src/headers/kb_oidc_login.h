@@ -215,6 +215,12 @@ extern "C"
     * did not come from a login this kb started. Returning it to the caller on the
     * error path is what allows the pending login to be consumed there too.
     *
+    * EVERY field's cardinality is established BEFORE any branch is taken, so a
+    * duplicated or undecodable `code` invalidates an otherwise-valid error callback
+    * and vice versa. Three successive reviews each found a variant of the opposite
+    * arrangement — a branch returning while another parameter was still unexamined —
+    * so the up-front parse is deliberate structure, not style.
+    *
     * The state's shape is checked HERE so a malformed one never reaches the
     * store's constant-time scan; a wrong-but-well-formed state still does, and
     * only kb_oidc_login_check_state may judge it. On any non-_OK result the code

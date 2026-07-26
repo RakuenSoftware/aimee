@@ -259,37 +259,36 @@ jobs:
   # is unset, and no workflow has ever invoked it. A gate that skips by default is
   # a gate that is off.
   #
-  # BLOCKING. The harness has been run end to end against all three Postgres
-  # shapes it can meet — local peer auth, a local superuser over TCP, and the
-  # pgvector CONTAINER this job uses reached over TCP — and mints a real
-  # RSA-3072-signed token under vault custody in each, with the replay refused
-  # ALREADY_USED. It was briefly continue-on-error while unproven; that came off
-  # once it was proven, because a gate that cannot fail is the always-skipping
-  # gate above wearing a different hat.
+  # BLOCKING. The data-plane identity mint, end to end, against a live Postgres and
+  # a live signed-HWM KMS helper.
   #
-  # The whole job has additionally been replicated in a clean ubuntu:24.04 container
-  # — root, the pgvector container over TCP, no peer socket — where it completes and
-  # mints. That replication is what surfaced the two missing apt packages below.
+  # WHY THIS JOB EXISTS. The mint's one genuine failure so far was an unspecified
+  # ARGUMENT EVALUATION ORDER bug that no unit test could have caught: envelope
+  # decrypt under custody, RSA-3072 parse, sign and self-verify all SUCCEEDED, and
+  # only the result mapping was wrong. Nothing short of running the real mint and
+  # looking at the returned token distinguishes that from a crypto fault.
   #
-  # The ONE thing not reproducible outside a real runner is whether root there can
-  # raise RLIMIT_MEMLOCK for mlockall: Docker caps the hard limit at 8MB regardless
-  # of the user, whereas a runner is a VM where root normally has no such cap. Both
-  # outcomes were therefore exercised deliberately:
-  #   - raised (--ulimit memlock=-1): the job completes and mints.
-  #   - capped at 8MB: the harness refuses with exit 2 and its own message naming the
-  #     limit and how to raise it, so the job goes red LEGIBLY rather than failing
-  #     somewhere deep with an ENOMEM from a syscall.
-  # The failure mode is decorous, which is what makes shipping this blocking safe
-  # even though the runner's own limit is unverified.
+  # WHY THE MINT RUNS INSIDE A CONTAINER. The provisioners mlockall so signing key
+  # material can never reach swap, which needs RLIMIT_MEMLOCK raised. Requiring the
+  # RUNNER to allow that would make this job depend on a host capability nothing in
+  # this repo controls and which changes with the runner image — a review rightly
+  # objected to it. `docker run --ulimit memlock=-1` sets the limit for the container
+  # regardless of the host, so the requirement is met by configuration rather than by
+  # hope. It is also exactly the shape this job was verified in (ubuntu:24.04, root,
+  # the pgvector container over TCP, no peer socket), so CI now runs the thing that
+  # was proven rather than an untested variation on it.
+  #
+  # --network host so the harness reaches Postgres on 127.0.0.1:5432 the same way it
+  # does locally, keeping one code path for both.
   identity-mint-e2e:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Start Postgres (pgvector) with pull retry
-        # Same image and retry rationale as unit-tests: the schema needs the
-        # vector and pg_trgm extensions, which the runner's preinstalled Postgres
-        # does not ship. A container has no postgres OS account and no peer
-        # socket, which is why the harness takes AIMEE_TEST_PG_SUPERUSER_URL.
+        # Same image and retry rationale as unit-tests: the schema needs the vector
+        # and pg_trgm extensions, which the runner's preinstalled Postgres does not
+        # ship. A container has no postgres OS account and no peer socket, which is
+        # why the harness takes AIMEE_TEST_PG_SUPERUSER_URL.
         run: |
           img=pgvector/pgvector:pg18
           for attempt in 1 2 3 4 5; do
@@ -297,60 +296,54 @@ jobs:
             echo "docker pull $img failed (attempt $attempt/5); backing off"
             sleep $((attempt * 10))
           done
-          docker run -d --name aimee-mint-pg \
+          docker run -d --name aimee-mint-pg --network host \
             -e POSTGRES_USER=aimee -e POSTGRES_PASSWORD=aimee -e POSTGRES_DB=aimee_mint_ci \
-            -p 5432:5432 \
-            --health-cmd pg_isready --health-interval 5s --health-timeout 3s --health-retries 10 \
             "$img"
-      - name: Install dependencies
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 40); do
+            docker exec aimee-mint-pg pg_isready -U aimee >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become ready in time"; docker logs aimee-mint-pg || true; exit 1
+      - name: Build and mint inside a memlock-capable container
+        # One step, because the build and the mint have to share the container that
+        # holds the raised limit.
+        #
         # pkg-config, libzstd-dev and zlib1g-dev are listed EXPLICITLY and the other
         # jobs in this file do not list them. They are not optional:
         #   - PQ_CFLAGS comes from `pkg-config --cflags libpq`, so without pkg-config
         #     there is no -I/usr/include/postgresql and db2/db_postgres.c fails with
         #     "libpq-fe.h: No such file or directory" despite libpq-dev being present.
-        #   - L_CORE/L_KB link -lzstd -lz, so without those two the provisioners fail
-        #     at link with "cannot find -lzstd".
-        # The existing jobs survive without them only because GitHub's runner images
-        # happen to preinstall them — an undeclared dependency that works until the
-        # image changes. Found by replicating this job in a clean ubuntu:24.04
-        # container, where both failures are immediate.
+        #   - L_CORE/L_KB link -lzstd -lz, so without those the provisioners fail at
+        #     link with "cannot find -lzstd".
+        # The other jobs survive without them only because GitHub's runner images
+        # happen to preinstall them — an undeclared dependency that holds until the
+        # image changes. Both failures are immediate in a clean container, which is how
+        # they were found.
         run: |
-          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make pkg-config \
+          cat > /tmp/mint-job.sh <<'JOB'
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive LC_ALL=C
+          echo "memlock soft=$(ulimit -l) hard=$(ulimit -H -l)"
+          apt-get update -q
+          apt-get install -y -q gcc make pkg-config \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-            libpq-dev postgresql-client libzstd-dev zlib1g-dev
-      - name: Wait for Postgres
-        run: |
-          for i in $(seq 1 30); do
-            pg_isready -h localhost -p 5432 -U aimee && exit 0
-            sleep 2
-          done
-          echo "Postgres did not become ready in time"; docker logs aimee-mint-pg || true; exit 1
-      - name: Build the provisioners and the mint driver
-        # The provisioner targets are ../-prefixed PATHS (KB_TOKEN_ROOTS_PROVISIONER
-        # = ../aimee-kb-token-roots-provision), not bare names — building by bare
-        # name fails with "No rule to make target". identity-mint-live has a
-        # convenience alias because it is out of `all` on purpose: it is a driver,
-        # not a shipped binary.
-        run: cd src && make -j$(nproc) ../aimee-kb-token-roots-provision ../aimee-kb-jwks-publish identity-mint-live
-      - name: Report the memlock limit
-        # The provisioners mlockall so signing key material never swaps, and fail
-        # with ENOMEM below roughly their own size. Printed separately so a
-        # limit-related failure is obvious at a glance rather than surfacing three
-        # steps in as a syscall error.
-        run: |
-          echo "runner soft=$(ulimit -l) hard=$(ulimit -H -l)"
-          sudo bash -c 'ulimit -l unlimited && echo "root can raise memlock: yes ($(ulimit -l))"' \
-            || echo "root CANNOT raise memlock — the harness will refuse with its own message"
-      - name: Identity mint end to end
-        run: |
-          sudo bash -c '
-            set -euo pipefail
-            ulimit -l unlimited
-            export AIMEE_TEST_PG_SUPERUSER_URL="postgres://aimee:aimee@127.0.0.1:5432/aimee_mint_ci"
-            exec scripts/run-identity-mint-e2e.sh
-          '
+            libpq-dev postgresql-client libzstd-dev zlib1g-dev python3
+          cd /src/src
+          # The provisioner targets are ../-prefixed PATHS, not bare names; building by
+          # bare name fails with "No rule to make target". identity-mint-live has a
+          # convenience alias because it is out of `all` on purpose — a driver, not a
+          # shipped binary.
+          make -j"$(nproc)" ../aimee-kb-token-roots-provision ../aimee-kb-jwks-publish \
+                            identity-mint-live
+          cd /src
+          exec scripts/run-identity-mint-e2e.sh
+          JOB
+          docker run --rm --network host --ulimit memlock=-1 \
+            -e AIMEE_TEST_PG_SUPERUSER_URL=postgres://aimee:aimee@127.0.0.1:5432/aimee_mint_ci \
+            -v "$PWD:/src" -v /tmp/mint-job.sh:/tmp/mint-job.sh:ro \
+            ubuntu:24.04 bash /tmp/mint-job.sh
 
   init-migrate-service-test:
     runs-on: ubuntu-latest

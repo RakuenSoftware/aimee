@@ -95,8 +95,10 @@ Why in place rather than a second row:
 
 `show` reports `was_revoked` when a prior revocation was cleared, so an operator can
 see the authority was withdrawn and restored rather than held continuously.
-`list --include-revoked` shows only rows whose `revoked_at` is currently set, and
-ordering is unaffected because the row count never changes.
+`list --include-revoked` widens the listing to include revoked rows **alongside**
+live ones — it is not a filter that shows revoked rows only. (An earlier draft said
+both in different places; this is the definition.) Ordering is unaffected because
+clearing a revocation changes a column, never the row count.
 
 Refusals:
 
@@ -159,9 +161,13 @@ aimee kb grant list [--server <id>] [--team <id>] [--subject <s>]
                     [--include-revoked] [--json]
 ```
 
-Every filter is optional and they AND together. Default hides revoked rows;
-`--include-revoked` shows them with their `revoked_at`. Output is sorted by
-`(server_id, team_id, subject)` so a diff between two runs is meaningful.
+Every filter is optional and they AND together. By default the listing contains only
+live grants; `--include-revoked` WIDENS it to contain revoked ones as well, each with
+its `revoked_at` populated. It is not "revoked only" — there is deliberately no way
+to list revoked grants in isolation, because the question an operator asks is "who
+can write to this server", and an answer that omitted the live rows would invite
+misreading. Output is sorted by `(server_id, team_id, subject)` so a diff between two
+runs is meaningful.
 
 Table output, and `--json` yielding `{"grants":[...]}` — matching the
 `"grants"` array-key convention the CLI route table already uses for
@@ -201,37 +207,40 @@ mutations.
 
 ## Acceptance criteria
 
-Each of these is a test, not a description:
+Each of these is a test, not a description.
 
 1. `set` then `show` returns the tier that was set.
 2. `set` twice with the same tier: both `200`, second reports `changed: false`.
 3. `set` with a different tier: reports `changed: true` and the previous tier.
 4. `set --tier off` creates a row that `list` shows, distinct from no row at all.
-5. Every subject form in `tests/subject_corpus.h` that the schema accepts is
-   accepted by `set`; every form it rejects is refused `400` **client-side**,
-   without a round trip.
-6. `revoke` on a live grant: `200`, `changed: true`, and a subsequent write
-   attempt by that subject is denied.
-7. `revoke` twice: second is `200 changed: false`.
+5. Every subject form in `tests/subject_corpus.h` that the schema accepts is accepted
+   by `set`; every form it rejects is refused `400` **client-side**, without a round
+   trip.
+6. `revoke` on a live grant: `200`, `changed: true`, and a subsequent write attempt by
+   that subject is denied.
+7. `revoke` twice: second is `200`, `changed: false`.
 8. `revoke` on a nonexistent grant: `404`.
-9. `set` after `revoke`: `200`, `changed: true`, `was_revoked: true`, and the
-   subject can write again.
-10. After (9) there is exactly ONE row for that triple — asserted against the
-    table, not inferred from the CLI.
-11. After (9), `show` reports `was_revoked`, and `list --include-revoked` no longer
-    lists the row as revoked.
-12. The `kb_audit_event` sequence for grant → revoke → grant is three events in
-    order, each with its actor: continuity lives there, not in the row.
-13. `set` after `revoke` with a DIFFERENT tier applies the new tier.
-9. `revoke` output states that already-minted tokens survive.
-10. `list` filters AND together; default hides revoked; `--include-revoked` shows
-    them.
-11. `list` ordering is stable across runs.
-12. Over TCP, every one of the four commands is refused `403` — including the two
-    read-only ones, since a remote caller learning the full grant table is itself
-    a disclosure.
-13. Each mutation appends exactly one audit event; each read appends none.
-14. `make cli-v1-routes-check`, `v1-method-coverage-check` and
+9. `revoke` output states that one already-minted token may still be usable.
+10. `set` after `revoke`: `200`, `changed: true`, `was_revoked: true`, and the subject
+    can write again.
+11. After (10) there is exactly ONE row for that `(server, team, subject)` — asserted
+    against the table, not inferred from the CLI.
+12. After (10), `show` reports `was_revoked`, and the row no longer appears as revoked
+    in `list --include-revoked`.
+13. The `kb_audit_event` sequence for grant → revoke → grant is three events in order,
+    each with its actor: continuity lives there, not in the row.
+14. `set` after `revoke` with a DIFFERENT tier applies the new tier.
+15. `list` filters AND together. Default contains only live grants;
+    `--include-revoked` contains live AND revoked ones.
+16. `list` ordering is stable across runs.
+17. Over TCP, every one of the four commands is refused `403` — including the two
+    read-only ones, since a remote caller learning the grant table is itself a
+    disclosure.
+18. Each mutation appends exactly one audit event; each read appends none.
+19. `set` for a subject who is not a member of the team succeeds, prints the
+    non-member warning, and the grant is inert until membership exists — at which
+    point it takes effect with no further `set`.
+20. `make cli-v1-routes-check`, `v1-method-coverage-check` and
     `cli-help-coverage-check` all pass, i.e. the commands are routed, covered and
     documented.
 
@@ -255,6 +264,5 @@ impossible to miss. Flagging it because it is the one remaining judgement call i
 this spec rather than a consequence of the proposal.
 
 Round 2 of review treated this as reducible to a follow-up once the grant-lifecycle
-question was settled, and did not overrule the recommendation. It stands, and gains
-an acceptance criterion: `set` for a non-member succeeds with the warning, the grant
-is inert, and it takes effect when membership appears with no further `set`.
+question was settled, and did not overrule the recommendation. It stands, and is
+acceptance criterion 19.

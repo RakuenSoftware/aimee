@@ -838,6 +838,32 @@ static void test_callback_parse(void)
    snprintf(qs, sizeof(qs), "error=x&error=y&code=abc&state=%s", st);
    assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
    assert(cb.code[0] == '\0' && cb.state[0] == '\0' && cb.idp_error[0] == '\0');
+   /* A DUPLICATED code ALONGSIDE A WELL-FORMED error. Round 3 of review found this:
+    * the error branch used to return before `code` was examined at all, so
+    * error=access_denied&code=x&code=y&state=<live> was honoured as a refusal and
+    * consumed the login, despite carrying a smuggled duplicate. Cardinality for
+    * every field is now established before any branch is taken. */
+   snprintf(qs, sizeof(qs), "error=access_denied&code=x&code=y&state=%s", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+   assert(cb.idp_error[0] == '\0' && cb.state[0] == '\0' && cb.code[0] == '\0');
+   /* And an UNDECODABLE or oversized code alongside a valid error, likewise. */
+   snprintf(qs, sizeof(qs), "error=access_denied&code=a%%zz&state=%s", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+   snprintf(qs, sizeof(qs), "error=access_denied&code=a%%0Ab&state=%s", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+   {
+      char bigcode[KB_OIDC_LOGIN_CODE_MAX + 64];
+      memset(bigcode, 'c', sizeof(bigcode) - 1);
+      bigcode[sizeof(bigcode) - 1] = '\0';
+      snprintf(qs, sizeof(qs), "error=access_denied&code=%s&state=%s", bigcode, st);
+      assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+   }
+   /* An error with a single WELL-FORMED code is still an error — the point is
+    * cardinality and encoding, not the mere presence of a code. */
+   snprintf(qs, sizeof(qs), "error=access_denied&code=abc&state=%s", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_IDP_ERROR);
+   assert(cb.code[0] == '\0' && strcmp(cb.state, st) == 0);
+
    /* Same for the other two malformed shapes with a code present. */
    snprintf(qs, sizeof(qs), "error=a%%zz&code=abc&state=%s", st);
    assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);

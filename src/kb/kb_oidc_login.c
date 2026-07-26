@@ -314,12 +314,26 @@ kb_oidc_login_result_t kb_oidc_login_callback_parse(const char *query_string,
       return KB_OIDC_LOGIN_INVALID;
    }
 
-   /* The error branch is taken before the code branch, and on its own: an IdP that
-    * returns an error returns no code, and a callback carrying both is not
-    * something to pick the favourable half of. */
+   /* EVERY FIELD'S CARDINALITY IS ESTABLISHED BEFORE ANY BRANCH IS TAKEN.
+    *
+    * This is the third revision of this function and the first two both shipped the
+    * same class of bug, so the structure is now the fix rather than the order of the
+    * checks. Round 1 of review found ?error= being honoured without a state; round 2
+    * found a DUPLICATED error being honoured as a refusal; round 3 found
+    * `error=access_denied&code=x&code=y&state=<live>` being honoured as a refusal
+    * because the error branch returned before `code` was ever looked at.
+    *
+    * Each fix addressed the specific input and left the shape that produced it — a
+    * branch that returns while some other parameter is still unexamined. So all
+    * three fields are parsed up front, and a malformed ANY of them is an invalid
+    * callback regardless of which branch the well-formed fields would have selected.
+    * A duplicated parameter is parameter smuggling wherever it appears. */
+   char code[KB_OIDC_LOGIN_CODE_MAX + 1] = "";
+   int had_code = form_field(query_string, "code", code, sizeof(code));
    char idp_error[KB_OIDC_LOGIN_IDP_ERR_MAX + 1] = "";
    int had_error = form_field(query_string, "error", idp_error, sizeof(idp_error));
-   if (had_error < 0)
+
+   if (had_code < 0 || had_error < 0)
    {
       /* DUPLICATED, OVERSIZED OR UNDECODABLE. Not an IdP refusal — an invalid
        * callback, and it must be reported as one.
@@ -333,6 +347,7 @@ kb_oidc_login_result_t kb_oidc_login_callback_parse(const char *query_string,
        * different reply the state check exists to withhold, and consumed a pending
        * login on the way. Duplicates are refused for `code` and `state` for exactly
        * this reason; `error` is no different. */
+      OPENSSL_cleanse(code, sizeof(code));
       OPENSSL_cleanse(idp_error, sizeof(idp_error));
       OPENSSL_cleanse(state, sizeof(state));
       memset(out, 0, sizeof(*out));
@@ -347,12 +362,12 @@ kb_oidc_login_result_t kb_oidc_login_callback_parse(const char *query_string,
                idp_error[0] ? idp_error : "unspecified");
       /* The state travels with it, so the caller can consume the login. */
       snprintf(out->state, sizeof(out->state), "%s", state);
+      OPENSSL_cleanse(code, sizeof(code));
       OPENSSL_cleanse(state, sizeof(state));
       return KB_OIDC_LOGIN_IDP_ERROR;
    }
 
-   char code[KB_OIDC_LOGIN_CODE_MAX + 1] = "";
-   if (form_field(query_string, "code", code, sizeof(code)) != 1 || !code[0])
+   if (had_code != 1 || !code[0])
    {
       OPENSSL_cleanse(code, sizeof(code));
       OPENSSL_cleanse(state, sizeof(state));
