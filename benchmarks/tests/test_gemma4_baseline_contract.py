@@ -39,6 +39,23 @@ class GemmaBaselineContractTests(unittest.TestCase):
             "physical_batch_tokens": 2048,
         })
 
+    def test_sweep_uses_explicit_model_load_profiles(self) -> None:
+        self.assertEqual(set(sweep.MODEL_LOAD_PROFILES), {
+            "gemma4_e2b", "gemma4_e4b", "gemma4_12b", "gemma4_26b_a4b",
+            "gemma4_31b", "qwen36_35b_a3b",
+        })
+        e2b = sweep.MODEL_LOAD_PROFILES["gemma4_e2b"]["synthesis"]
+        self.assertEqual(e2b["workers"], 16)
+        self.assertEqual(e2b["parallel_slots"], 16)
+        self.assertGreaterEqual(e2b["context_tokens"] // e2b["parallel_slots"], 4096)
+        for profiles in sweep.MODEL_LOAD_PROFILES.values():
+            synthesis_profile = profiles["synthesis"]
+            self.assertEqual(synthesis_profile["workers"], synthesis_profile["parallel_slots"])
+            self.assertGreaterEqual(
+                synthesis_profile["context_tokens"] // synthesis_profile["parallel_slots"],
+                4096,
+            )
+
     def test_frozen_bundle_is_exact_and_paired(self) -> None:
         result = validator.validate(ROOT / "benchmarks/fixtures/gemma4-unified/ab-v1")
         self.assertEqual(result["case_rows_per_view"], 10_000)

@@ -64,7 +64,7 @@ schema, and the exact frozen source corpus:
 ```sh
 python3 benchmarks/gemma4_baseline/run_synthesis_ab.py \
   --endpoint http://127.0.0.1:8920 --model MODEL --label LABEL \
-  --output-dir results/LABEL --workers 2
+  --output-dir results/LABEL --workers WORKERS
 ```
 
 Embedding uses the same 10,000 queries and fixed 20-document lists. It reports
@@ -152,6 +152,12 @@ then records artifact SHA-256 values and environment identity, pauses the
 deployed LLM container so production cannot share VRAM with the measurement,
 runs the full 10,000 synthesis and 10,000 embedding cases, and restores the exact
 production container in a `finally` block:
+
+Synthesis concurrency is an explicit per-model load profile rather than a fixed
+two-request cap. E2B uses 16 client workers and 16 server slots with a 65,536-token
+aggregate context (4,096 tokens per slot). Progress state and hardware artifacts
+record the selected profile. Larger models use progressively smaller profiles to
+leave room for their weights on the 24 GiB card.
 
 ```sh
 python3 benchmarks/gemma4_baseline/run_254_sweep.py

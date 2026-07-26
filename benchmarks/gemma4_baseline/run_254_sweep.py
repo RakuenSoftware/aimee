@@ -33,6 +33,32 @@ ETTIN_LOAD_PROFILE = {
     "logical_batch_tokens": 2048,
     "physical_batch_tokens": 2048,
 }
+MODEL_LOAD_PROFILES = {
+    "gemma4_e2b": {
+        "synthesis": {"workers": 16, "parallel_slots": 16, "context_tokens": 65536, "physical_batch_tokens": 2048},
+        "embedding": {"parallel_slots": 1, "context_tokens": 8192, "physical_batch_tokens": 8192, "batch_size": 16},
+    },
+    "gemma4_e4b": {
+        "synthesis": {"workers": 12, "parallel_slots": 12, "context_tokens": 49152, "physical_batch_tokens": 2048},
+        "embedding": {"parallel_slots": 1, "context_tokens": 8192, "physical_batch_tokens": 8192, "batch_size": 16},
+    },
+    "gemma4_12b": {
+        "synthesis": {"workers": 8, "parallel_slots": 8, "context_tokens": 32768, "physical_batch_tokens": 2048},
+        "embedding": {"parallel_slots": 1, "context_tokens": 8192, "physical_batch_tokens": 8192, "batch_size": 16},
+    },
+    "gemma4_26b_a4b": {
+        "synthesis": {"workers": 4, "parallel_slots": 4, "context_tokens": 16384, "physical_batch_tokens": 2048},
+        "embedding": {"parallel_slots": 1, "context_tokens": 8192, "physical_batch_tokens": 8192, "batch_size": 16},
+    },
+    "gemma4_31b": {
+        "synthesis": {"workers": 2, "parallel_slots": 2, "context_tokens": 8192, "physical_batch_tokens": 2048},
+        "embedding": {"parallel_slots": 1, "context_tokens": 8192, "physical_batch_tokens": 8192, "batch_size": 16},
+    },
+    "qwen36_35b_a3b": {
+        "synthesis": {"workers": 1, "parallel_slots": 1, "context_tokens": 4096, "physical_batch_tokens": 2048},
+        "embedding": {"parallel_slots": 1, "context_tokens": 8192, "physical_batch_tokens": 8192, "batch_size": 16},
+    },
+}
 
 
 def run(command: list[str], *, capture: bool = False, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -110,6 +136,7 @@ def start_server(
     root: Path,
     model_file: str,
     mode: str,
+    load_profile: dict[str, int],
     log_path: Path,
 ) -> float:
     started = time.monotonic()
@@ -121,9 +148,17 @@ def start_server(
         image, "-m", f"/bench/models/{model_file}", "-ngl", "99", "-fa", "on", "--host", "0.0.0.0", "--port", "8920",
     ]
     if mode == "synthesis":
-        args += ["--jinja", "--ctx-size", "16384", "-ub", "2048", "-np", "2"]
+        args += [
+            "--jinja", "--ctx-size", str(load_profile["context_tokens"]),
+            "-ub", str(load_profile["physical_batch_tokens"]),
+            "-np", str(load_profile["parallel_slots"]),
+        ]
     elif mode == "embedding":
-        args += ["--embeddings", "--pooling", "last", "--ctx-size", "8192", "-ub", "8192", "-np", "1"]
+        args += [
+            "--embeddings", "--pooling", "last", "--ctx-size", str(load_profile["context_tokens"]),
+            "-ub", str(load_profile["physical_batch_tokens"]),
+            "-np", str(load_profile["parallel_slots"]),
+        ]
     else:
         raise ValueError(mode)
     result = run(docker_cmd(socket, *args), capture=True)
@@ -241,6 +276,7 @@ def main() -> int:
         "selected_labels": [model["label"] for model in selected_models],
         "skip_ettin": args.skip_ettin,
         "ettin_load_profile": ETTIN_LOAD_PROFILE,
+        "model_load_profiles": MODEL_LOAD_PROFILES,
         "hardware_identity": {
             "gpu_vendor": Path("/sys/class/drm/card0/device/vendor").read_text(encoding="utf-8").strip(),
             "gpu_device": Path("/sys/class/drm/card0/device/device").read_text(encoding="utf-8").strip(),
@@ -317,23 +353,36 @@ def main() -> int:
             model_results = results_dir / label
             model_results.mkdir(exist_ok=True)
             for mode in ("synthesis", "embedding"):
+                load_profile = MODEL_LOAD_PROFILES[label][mode]
                 current_log = logs_dir / f"server_{label}_{mode}.log"
-                write_state(state_path, active={"label": label, "mode": mode}, completed=completed)
-                load_seconds = start_server(args.socket, manifest["runtime"]["container_image"], args.root, model["file"], mode, current_log)
+                write_state(
+                    state_path,
+                    active={"label": label, "mode": mode, "load_profile": load_profile},
+                    completed=completed,
+                )
+                load_seconds = start_server(
+                    args.socket,
+                    manifest["runtime"]["container_image"],
+                    args.root,
+                    model["file"],
+                    mode,
+                    load_profile,
+                    current_log,
+                )
                 after_load = hardware_snapshot()
                 if mode == "synthesis":
                     command = [
                         "python3", str(args.repo / "benchmarks/gemma4_baseline/run_synthesis_ab.py"),
                         "--endpoint", "http://127.0.0.1:8920", "--model", label, "--label", label,
                         "--bundle", str(args.repo / "benchmarks/fixtures/gemma4-unified/ab-v1"),
-                        "--output-dir", str(model_results), "--workers", "2", "--timeout", "300",
+                        "--output-dir", str(model_results), "--workers", str(load_profile["workers"]), "--timeout", "300",
                     ]
                 else:
                     command = [
                         "python3", str(args.repo / "benchmarks/gemma4_baseline/run_embedding_ab.py"),
                         "--endpoint", "http://127.0.0.1:8920", "--model", label, "--label", label,
                         "--bundle", str(args.repo / "benchmarks/fixtures/gemma4-unified/ab-v1"),
-                        "--output-dir", str(model_results), "--batch-size", "16", "--timeout", "300",
+                        "--output-dir", str(model_results), "--batch-size", str(load_profile["batch_size"]), "--timeout", "300",
                     ]
                 if args.max_cases:
                     command += ["--max-cases", str(args.max_cases)]
@@ -341,7 +390,16 @@ def main() -> int:
                     process = subprocess.run(command, text=True, stdout=runner_log, stderr=subprocess.STDOUT)
                 after_run = hardware_snapshot()
                 (model_results / f"hardware_{mode}.json").write_text(
-                    json.dumps({"cold_load_seconds": load_seconds, "after_load": after_load, "after_run": after_run}, indent=2, sort_keys=True) + "\n",
+                    json.dumps(
+                        {
+                            "cold_load_seconds": load_seconds,
+                            "load_profile": load_profile,
+                            "after_load": after_load,
+                            "after_run": after_run,
+                        },
+                        indent=2,
+                        sort_keys=True,
+                    ) + "\n",
                     encoding="utf-8",
                 )
                 stop_server(args.socket, current_log)
