@@ -71,6 +71,52 @@ prov_pw=$(head -c 18 /dev/urandom | base64 | tr -dc 'A-Za-z0-9')
 auth_role=aimee_kb_token_authority_runtime
 auth_pw=$(head -c 18 /dev/urandom | base64 | tr -dc 'A-Za-z0-9')
 
+# HOW THIS REACHES POSTGRES AS A SUPERUSER. Two shapes, because the two places
+# this has to run are genuinely different:
+#
+#   default   runuser -u postgres over the local peer socket. What a bare-metal or
+#             LXC host gives you, and what every other live gate in scripts/ uses.
+#   CI        AIMEE_TEST_PG_SUPERUSER_URL set. CI's Postgres is a pgvector
+#             CONTAINER: there is no postgres OS account to runuser into and no
+#             peer socket on the host, only TCP with a superuser password. The
+#             extensions this schema needs (vector, pg_trgm) are why CI cannot
+#             just use the runner's preinstalled Postgres instead.
+#
+# Only the SUPERUSER hop changes. The roles actually under test — the provisioner
+# and aimee_kb_token_authority_runtime — authenticate as themselves over TCP in
+# both shapes, with the same passwords and the same role_assert() checks, so the
+# thing being gated is identical either way.
+pg_host=127.0.0.1
+pg_port=5432
+maint_db=postgres
+if [ -n "${AIMEE_TEST_PG_SUPERUSER_URL:-}" ]; then
+  # Derived once into PG* rather than threaded through forty psql invocations as
+  # flags. urllib does the parsing because a DSN with a percent-encoded password
+  # is not something to take apart with sed.
+  eval "$(python3 - "$AIMEE_TEST_PG_SUPERUSER_URL" <<'PARSE'
+import sys, urllib.parse as u
+p = u.urlparse(sys.argv[1])
+def sh(v):
+    return "'" + str(v).replace("'", "'\\''") + "'"
+host = u.unquote(p.hostname or '127.0.0.1')
+port = p.port or 5432
+print('export PGHOST=%s' % sh(host))
+print('export PGPORT=%s' % sh(port))
+print('export PGUSER=%s' % sh(u.unquote(p.username or 'postgres')))
+if p.password:
+    print('export PGPASSWORD=%s' % sh(u.unquote(p.password)))
+print('pg_host=%s' % sh(host))
+print('pg_port=%s' % sh(port))
+# The maintenance database must not be the one this rig drops and recreates.
+print('maint_db=%s' % sh((p.path or '/postgres').lstrip('/') or 'postgres'))
+PARSE
+)"
+  as_super() { "$@"; }
+  echo "run-identity-mint-e2e: superuser via TCP $PGUSER@$pg_host:$pg_port (maintenance db $maint_db)"
+else
+  as_super() { runuser -u postgres -- "$@"; }
+fi
+
 # NOT under /tmp. root_owned_fixed_file() in the provisioners walks every parent
 # directory up to / and rejects any that is group- or other-writable, which /tmp
 # (mode 1777) is. That is an anti-substitution guard — it stops a non-root user
@@ -84,13 +130,13 @@ chmod 0700 "$work"
 cleanup() {
   if [ "$keep" = "1" ]; then
     echo "run-identity-mint-e2e: keeping db=$db work=$work"
-    echo "  authority dsn: postgres://$auth_role:$auth_pw@127.0.0.1:5432/$db"
+    echo "  authority dsn: postgres://$auth_role:$auth_pw@$pg_host:$pg_port/$db"
     echo "  intent: correlation=${corr:-none} jti=${jti:-none}"
     return
   fi
-  runuser -u postgres -- dropdb --force --if-exists "$db" >/dev/null 2>&1 || true
-  runuser -u postgres -- psql -q -c "DROP ROLE IF EXISTS $prov_role" >/dev/null 2>&1 || true
-  runuser -u postgres -- psql -q -c "ALTER ROLE $auth_role PASSWORD NULL" >/dev/null 2>&1 || true
+  as_super dropdb --maintenance-db="$maint_db" --force --if-exists "$db" >/dev/null 2>&1 || true
+  as_super psql -q -d "$maint_db" -c "DROP ROLE IF EXISTS $prov_role" >/dev/null 2>&1 || true
+  as_super psql -q -d "$maint_db" -c "ALTER ROLE $auth_role PASSWORD NULL" >/dev/null 2>&1 || true
   case "$work" in "$workroot"/run.*) rm -rf -- "$work" ;; esac
 }
 trap cleanup EXIT
@@ -124,12 +170,12 @@ run_provisioner() {
     exit "$rc"
   fi
 }
-psqlq() { runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -d "$db" "$@"; }
-psqlt() { runuser -u postgres -- psql -tAX -v ON_ERROR_STOP=1 -d "$db" "$@"; }
+psqlq() { as_super psql -q -v ON_ERROR_STOP=1 -d "$db" "$@"; }
+psqlt() { as_super psql -tAX -v ON_ERROR_STOP=1 -d "$db" "$@"; }
 
 step "Provisioning $db (roles -> schema -> grants, the hardened deploy order)"
-runuser -u postgres -- dropdb --force --if-exists "$db"
-runuser -u postgres -- createdb "$db"
+as_super dropdb --maintenance-db="$maint_db" --force --if-exists "$db"
+as_super createdb --maintenance-db="$maint_db" "$db"
 psqlq -c 'CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;'
 psqlq -f src/db2/schema_roles.sql
 sed 's/__EMBED_DIM__/1024/g' src/db2/schema.sql | psqlq -f -
@@ -143,7 +189,7 @@ psqlq -f src/db2/schema_grants.sql
 # choice. This rig makes one.
 # Idempotent: a previous --keep run leaves the role behind, and it is per-rig
 # rather than per-database so dropdb does not remove it.
-runuser -u postgres -- psql -q -c "DROP ROLE IF EXISTS $prov_role" >/dev/null 2>&1 || true
+as_super psql -q -d "$maint_db" -c "DROP ROLE IF EXISTS $prov_role" >/dev/null 2>&1 || true
 psqlq <<SQL
 CREATE ROLE $prov_role LOGIN PASSWORD '$prov_pw';
 GRANT aimee_kb_migrate TO $prov_role;
@@ -222,7 +268,7 @@ echo "kms helper: answers hwm-read"
 
 
 step "Token roots (establishes the reserved vault slots + the RS256 token root)"
-export AIMEE_KB_TOKEN_ROOTS_PROVISION_DSN="postgres://$prov_role:$prov_pw@127.0.0.1:5432/$db"
+export AIMEE_KB_TOKEN_ROOTS_PROVISION_DSN="postgres://$prov_role:$prov_pw@$pg_host:$pg_port/$db"
 export AIMEE_KB_TOKEN_ROOT_CUSTODY_ID=identity-mint-token-root
 export AIMEE_KB_JWKS_MANIFEST_ROOT_CUSTODY_ID=identity-mint-manifest-root
 export AIMEE_KB_JWKS_PUBLICATION_HWM_CUSTODY_ID=identity-mint-publication-hwm
@@ -233,7 +279,7 @@ psqlt -c "SELECT 'token_root: kind='||root_kind||' v='||current_version||' wire=
 psqlt -c "SELECT 'vault: principal='||principal||' v='||version FROM org_vault_current ORDER BY 1;"
 
 step "JWKS publication (generation 1, the wire key the token's kid names)"
-export AIMEE_KB_JWKS_PUBLISH_DSN="postgres://$prov_role:$prov_pw@127.0.0.1:5432/$db"
+export AIMEE_KB_JWKS_PUBLISH_DSN="postgres://$prov_role:$prov_pw@$pg_host:$pg_port/$db"
 # Unix seconds, not ISO-8601: canonical_time() accepts digits only, deliberately —
 # there is no timezone or format to get wrong in an authenticated validity window.
 # Under PUBLISH_MAX_LIFETIME (86400s). A publication window is a validity claim
@@ -363,12 +409,12 @@ if [ ! -x ./identity-mint-live ]; then
   echo "identity-mint-live not built; run: make -C src identity-mint-live" >&2
   exit 6
 fi
-./identity-mint-live "postgres://$auth_role:$auth_pw@127.0.0.1:5432/$db" "$corr" "$jti"
+./identity-mint-live "postgres://$auth_role:$auth_pw@$pg_host:$pg_port/$db" "$corr" "$jti"
 
 step "The mint is single-use"
 # The same (correlation_id, jti) again must be refused: a token is spent on issue,
 # so a replayed request can never yield a second one.
-if ./identity-mint-live "postgres://$auth_role:$auth_pw@127.0.0.1:5432/$db" "$corr" "$jti" \
+if ./identity-mint-live "postgres://$auth_role:$auth_pw@$pg_host:$pg_port/$db" "$corr" "$jti" \
      >/dev/null 2>"$work/replay.err"; then
   echo "FAIL: a replayed mint succeeded — the jti was not spent" >&2
   exit 7

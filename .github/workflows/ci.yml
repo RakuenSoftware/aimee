@@ -244,6 +244,84 @@ jobs:
       - name: Unit tests
         run: cd src && make -j$(nproc) unit-tests build/obj/tests/p7-pkcs11-harness
 
+  # The data-plane identity mint, end to end, against a live Postgres and a live
+  # signed-HWM KMS helper.
+  #
+  # WHY THIS IS ITS OWN JOB RATHER THAN A make TARGET. The mint's one genuine
+  # failure mode so far was an UNSPECIFIED ARGUMENT EVALUATION ORDER bug that no
+  # unit test could ever have caught: the whole chain — envelope decrypt under
+  # custody, RSA-3072 parse, sign, self-verify — succeeded, and only the result
+  # mapping was wrong. Nothing short of running the real mint and looking at the
+  # returned token distinguishes that from a real crypto fault.
+  #
+  # It is NOT wired as an opt-in make target, because that pattern has already
+  # failed here: p1-rls-gate-check prints "enforced in CI" when AIMEE_TEST_PG_URL
+  # is unset, and no workflow has ever invoked it. A gate that skips by default is
+  # a gate that is off.
+  #
+  # continue-on-error is deliberate and temporary: this job's preconditions (root,
+  # a raised RLIMIT_MEMLOCK, a container Postgres) have never been exercised on a
+  # GitHub runner, only on a bare-metal/LXC host. It reports without blocking
+  # merges until it has been observed green, and the flag comes off then. Leaving
+  # it on permanently would recreate exactly the always-skipping gate above.
+  identity-mint-e2e:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start Postgres (pgvector) with pull retry
+        # Same image and retry rationale as unit-tests: the schema needs the
+        # vector and pg_trgm extensions, which the runner's preinstalled Postgres
+        # does not ship. A container has no postgres OS account and no peer
+        # socket, which is why the harness takes AIMEE_TEST_PG_SUPERUSER_URL.
+        run: |
+          img=pgvector/pgvector:pg18
+          for attempt in 1 2 3 4 5; do
+            docker pull "$img" && break
+            echo "docker pull $img failed (attempt $attempt/5); backing off"
+            sleep $((attempt * 10))
+          done
+          docker run -d --name aimee-mint-pg \
+            -e POSTGRES_USER=aimee -e POSTGRES_PASSWORD=aimee -e POSTGRES_DB=aimee_mint_ci \
+            -p 5432:5432 \
+            --health-cmd pg_isready --health-interval 5s --health-timeout 3s --health-retries 10 \
+            "$img"
+      - name: Install dependencies
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          sudo apt-get install -y -q gcc make \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
+            libpq-dev postgresql-client
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 30); do
+            pg_isready -h localhost -p 5432 -U aimee && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become ready in time"; docker logs aimee-mint-pg || true; exit 1
+      - name: Build the provisioners and the mint driver
+        # identity-mint-live is out of `all` on purpose (it is a driver, not a
+        # shipped binary), so it has to be named.
+        run: cd src && make -j$(nproc) aimee-kb-token-roots-provision aimee-kb-jwks-publish identity-mint-live
+      - name: Report the memlock limit
+        # The provisioners mlockall so signing key material never swaps, and fail
+        # with ENOMEM below roughly their own size. Printed separately so a
+        # limit-related failure is obvious at a glance rather than surfacing three
+        # steps in as a syscall error.
+        run: |
+          echo "runner soft=$(ulimit -l) hard=$(ulimit -H -l)"
+          sudo bash -c 'ulimit -l unlimited && echo "root can raise memlock: yes ($(ulimit -l))"' \
+            || echo "root CANNOT raise memlock — the harness will refuse with its own message"
+      - name: Identity mint end to end
+        run: |
+          sudo bash -c '
+            set -euo pipefail
+            ulimit -l unlimited
+            export AIMEE_TEST_PG_SUPERUSER_URL="postgres://aimee:aimee@127.0.0.1:5432/aimee_mint_ci"
+            exec scripts/run-identity-mint-e2e.sh
+          '
+
   init-migrate-service-test:
     runs-on: ubuntu-latest
     steps:
