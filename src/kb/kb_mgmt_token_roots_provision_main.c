@@ -114,21 +114,38 @@ static int root_owned_fixed_file(const char *path, int executable)
    }
 }
 
-static int harden_process(void)
+/* Returns NULL on success, or a FIXED name for the step that failed.
+ *
+ * Naming the step matters operationally: these four failures are not equally
+ * actionable, and reporting one undifferentiated "hardening" left an operator
+ * with nothing to change. mlockall in particular fails with ENOMEM whenever
+ * RLIMIT_MEMLOCK is below the process's size — the default 8MB in a stock LXC
+ * container is not enough for a libpq + OpenSSL binary — and that is a
+ * one-line host fix once you know it is the cause rather than a code fault.
+ *
+ * The names are compile-time constants naming a syscall, so this leaks nothing:
+ * it says which lock could not be taken, never any value being protected. */
+static const char *harden_process(void)
 {
    struct rlimit no_core = {0, 0};
    (void)umask(077);
-   if (setrlimit(RLIMIT_CORE, &no_core) != 0 || prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0 ||
-       prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 || mlockall(MCL_CURRENT | MCL_FUTURE) != 0)
-      return -1;
+   if (setrlimit(RLIMIT_CORE, &no_core) != 0)
+      return "hardening (core-dump limit)";
+   if (prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0)
+      return "hardening (dumpable)";
+   if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0)
+      return "hardening (no-new-privs)";
+   if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0)
+      /* Almost always RLIMIT_MEMLOCK, so say so rather than just "mlockall". */
+      return "hardening (mlockall; raise RLIMIT_MEMLOCK)";
 #ifdef PR_GET_DUMPABLE
    if (prctl(PR_GET_DUMPABLE, 0, 0, 0, 0) != 0)
    {
       (void)munlockall();
-      return -1;
+      return "hardening (dumpable readback)";
    }
 #endif
-   return 0;
+   return NULL;
 }
 
 static int silence_stderr(int *saved)
@@ -196,9 +213,10 @@ int main(int argc, char **argv)
       fixed_error("usage");
       return EXIT_USAGE;
    }
-   if (harden_process() != 0)
+   const char *harden_failure = harden_process();
+   if (harden_failure)
    {
-      fixed_error("hardening");
+      fixed_error(harden_failure);
       return EXIT_HARDENING;
    }
 
