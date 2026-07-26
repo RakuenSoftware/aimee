@@ -456,7 +456,10 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 		} else {
 			detail = reason + ": " + safeDiagnostic(detail)
 		}
-		if err := e.db.ParkWithDetail(ctx, item.ID, node.ID, reason, detail, step.CostUSD); err != nil {
+		// The delegate has already run and its spend is reconciled; a cancelled
+		// park loses the transition and strands the reservation in 'actual',
+		// which the next replay can only park as replay_unrecoverable.
+		if err := e.db.ParkWithDetail(context.WithoutCancel(ctx), item.ID, node.ID, reason, detail, step.CostUSD); err != nil {
 			return out, err
 		}
 		out.Parked, out.PauseReason = true, reason
@@ -484,7 +487,7 @@ func (e *Engine) parkAfterSpend(ctx context.Context, item db1.WorkItem, reason s
 	if cause != nil {
 		detail += ": " + safeDiagnostic(cause.Error())
 	}
-	if err := e.db.ParkWithDetail(ctx, item.ID, item.Stage, reason, detail, costUSD); err != nil {
+	if err := e.db.ParkWithDetail(context.WithoutCancel(ctx), item.ID, item.Stage, reason, detail, costUSD); err != nil {
 		return fmt.Errorf("%s: %v; park failed: %w", reason, cause, err)
 	}
 	return nil
