@@ -624,6 +624,143 @@ static void test_token_url_split(void)
    assert(!kb_oidc_login_config_valid(&cfg));
 }
 
+/* The callback parser is where an attacker's query string first meets kb, so the
+ * cases below are mostly adversarial: key-boundary confusion, duplicate keys,
+ * broken escapes, and control bytes smuggled through percent-encoding. */
+static void test_callback_parse(void)
+{
+   kb_oidc_login_callback_t cb;
+   /* A well-formed state is exactly the fixed secret length, base64url. */
+   char st[KB_OIDC_LOGIN_SECRET_LEN + 1];
+   for (size_t i = 0; i < KB_OIDC_LOGIN_SECRET_LEN; ++i)
+      st[i] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"[i % 64];
+   st[KB_OIDC_LOGIN_SECRET_LEN] = '\0';
+
+   char qs[2048];
+   snprintf(qs, sizeof(qs), "code=abc123&state=%s", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_OK);
+   assert(strcmp(cb.code, "abc123") == 0 && strcmp(cb.state, st) == 0);
+   assert(cb.idp_error[0] == '\0');
+
+   /* Order does not matter, and unrelated parameters are ignored. */
+   snprintf(qs, sizeof(qs), "iss=https%%3A%%2F%%2Fidp&state=%s&code=xyz&session_state=q", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_OK);
+   assert(strcmp(cb.code, "xyz") == 0 && strcmp(cb.state, st) == 0);
+
+   /* KEY BOUNDARIES. Each of these contains the literal text "state=" and
+    * "code=" but defines neither parameter. A strstr-based parser — the one the
+    * rest of the kb HTTP layer uses for filters — accepts every one of them, and
+    * would take an attacker-chosen value as the CSRF token. */
+   snprintf(qs, sizeof(qs), "my_state=%s&code=abc", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+   snprintf(qs, sizeof(qs), "state=%s&mycode=abc", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+   snprintf(qs, sizeof(qs), "xstate=%s&xcode=abc", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+   /* A key that merely STARTS with the name is not the key either. */
+   snprintf(qs, sizeof(qs), "state_extra=%s&code=abc", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+
+   /* DUPLICATES are refused outright rather than resolved. One of two states is
+    * somebody else's, and both "first wins" and "last wins" are a decision to
+    * believe whichever one the attacker managed to place. */
+   snprintf(qs, sizeof(qs), "state=%s&code=abc&state=%s", st, st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+   snprintf(qs, sizeof(qs), "code=abc&state=%s&code=def", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+
+   /* Percent-decoding, including "+" as space per form-urlencoding. */
+   snprintf(qs, sizeof(qs), "code=a%%2Fb%%2Bc+d&state=%s", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_OK);
+   assert(strcmp(cb.code, "a/b+c d") == 0);
+
+   /* Broken or hostile escapes are refused, never repaired. The CR/LF cases
+    * matter specifically: the decoded code reaches a log line, so accepting them
+    * would hand over a log-injection primitive. */
+   const char *bad_codes[] = {"a%",    "a%2", "a%zz", "a%2G", "a%00b", /* embedded NUL */
+                              "a%0Ab",                                 /* LF */
+                              "a%0Db",                                 /* CR */
+                              "a%09b" /* TAB */};
+   for (size_t i = 0; i < sizeof(bad_codes) / sizeof(bad_codes[0]); ++i)
+   {
+      snprintf(qs, sizeof(qs), "code=%s&state=%s", bad_codes[i], st);
+      assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+      assert(cb.code[0] == '\0' && cb.state[0] == '\0');
+   }
+
+   /* STATE SHAPE is checked here, so the store's constant-time scan is never
+    * handed something that could not be a state. Wrong length either way, and a
+    * character outside base64url, are all refused before the lookup. */
+   char short_state[KB_OIDC_LOGIN_SECRET_LEN];
+   snprintf(short_state, sizeof(short_state), "%s", st);
+   snprintf(qs, sizeof(qs), "code=abc&state=%s", short_state);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+   snprintf(qs, sizeof(qs), "code=abc&state=%sX", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+   {
+      char bad[KB_OIDC_LOGIN_SECRET_LEN + 1];
+      snprintf(bad, sizeof(bad), "%s", st);
+      bad[5] = '+'; /* base64, not base64url */
+      snprintf(qs, sizeof(qs), "code=abc&state=%s", bad);
+      assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+      bad[5] = '/';
+      snprintf(qs, sizeof(qs), "code=abc&state=%s", bad);
+      assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+   }
+
+   /* An oversized code is refused rather than truncated: a truncated code would
+    * be sent to the IdP and rejected there, turning a bounds problem into an
+    * unexplained login failure. */
+   {
+      char big[KB_OIDC_LOGIN_CODE_MAX + 64];
+      memset(big, 'a', sizeof(big) - 1);
+      big[sizeof(big) - 1] = '\0';
+      snprintf(qs, sizeof(qs), "code=%s&state=%s", big, st);
+      assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+   }
+
+   /* MISSING parameters. Neither half is usable on its own. */
+   snprintf(qs, sizeof(qs), "state=%s", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+   assert(kb_oidc_login_callback_parse("code=abc", &cb) == KB_OIDC_LOGIN_INVALID);
+   assert(kb_oidc_login_callback_parse("", &cb) == KB_OIDC_LOGIN_INVALID);
+   assert(kb_oidc_login_callback_parse(NULL, &cb) == KB_OIDC_LOGIN_INVALID);
+   /* An empty code is absent, not a code. */
+   snprintf(qs, sizeof(qs), "code=&state=%s", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+   /* A valueless key has no '=' and so is not the parameter at all. */
+   snprintf(qs, sizeof(qs), "code&state=%s", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+
+   /* THE IdP's OWN ERROR is its own result, so an operator is told to look at
+    * their IdP rather than at kb. */
+   assert(kb_oidc_login_callback_parse("error=access_denied", &cb) == KB_OIDC_LOGIN_IDP_ERROR);
+   assert(strcmp(cb.idp_error, "access_denied") == 0);
+   assert(cb.code[0] == '\0' && cb.state[0] == '\0');
+   /* error_description is never captured — it is attacker-influenced free text. */
+   assert(kb_oidc_login_callback_parse("error=login_required&error_description=Go+away", &cb) ==
+          KB_OIDC_LOGIN_IDP_ERROR);
+   assert(strcmp(cb.idp_error, "login_required") == 0);
+   /* An error alongside a code is still an error: this is not a callback to pick
+    * the favourable half of. */
+   snprintf(qs, sizeof(qs), "code=abc&state=%s&error=access_denied", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_IDP_ERROR);
+   assert(cb.code[0] == '\0' && cb.state[0] == '\0');
+   /* An unusable error value is still a refusal, reported as such rather than as
+    * _INVALID, which would point the operator at the wrong system. */
+   assert(kb_oidc_login_callback_parse("error=&code=x", &cb) == KB_OIDC_LOGIN_IDP_ERROR);
+   assert(strcmp(cb.idp_error, "unspecified") == 0);
+   assert(kb_oidc_login_callback_parse("error=a%zz", &cb) == KB_OIDC_LOGIN_IDP_ERROR);
+   assert(strcmp(cb.idp_error, "unspecified") == 0);
+
+   /* Clearing leaves nothing behind. */
+   snprintf(qs, sizeof(qs), "code=abc123&state=%s", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_OK);
+   kb_oidc_login_callback_clear(&cb);
+   assert(cb.code[0] == '\0' && cb.state[0] == '\0');
+   kb_oidc_login_callback_clear(NULL);
+}
+
 int main(void)
 {
    EVP_PKEY *key = NULL;
@@ -642,6 +779,7 @@ int main(void)
    test_pending_clear();
    test_config_from_env();
    test_token_url_split();
+   test_callback_parse();
 
    free(jwks);
    EVP_PKEY_free(key);

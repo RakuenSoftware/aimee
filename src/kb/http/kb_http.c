@@ -681,7 +681,8 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
    /* Credential bootstrap, both pre-auth: the login surface is how a caller with
     * no credential gets one (§3), and the enrollment token IS the credential.
     * See kb_http_bootstrap.h. */
-   int br = kb_http_bootstrap_route(method, path, body, (int64_t)time(NULL), out_buf, out_cap);
+   int br = kb_http_bootstrap_route(method, path, query_string, body, (int64_t)time(NULL), out_buf,
+                                    out_cap);
    if (br >= 0)
       return br;
 

@@ -5383,12 +5383,19 @@ $(TESTPREFIX)/unit-test-kb-oidc-login-flow: $(OBJDIR)/tests/test_kb_oidc_login_f
                      $(OBJDIR)/util.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
+# The vault and the IdP's network call are stubbed IN THE TEST TU (see the file):
+# linking the real ones would mean standing up a vault and a TLS client to test a
+# routing decision, and kb_oidc_token_exchange_post lives in its own translation
+# unit precisely so a caller can link the codec without dragging in TLS.
 $(TESTPREFIX)/unit-test-kb-http-identity-login: \
                      $(OBJDIR)/tests/test_kb_http_identity_login.o \
                      $(OBJDIR)/kb/http/kb_http_identity_login.o \
+                     $(OBJDIR)/kb/kb_oidc_token_exchange.o \
                      $(OBJDIR)/kb/kb_oidc_login.o \
                      $(OBJDIR)/kb/kb_oidc_login_store.o \
                      $(OBJDIR)/kb/auth_oidc.o \
+                     $(OBJDIR)/kb/verifier.o \
+                     $(OBJDIR)/kb/kb_scope.o \
                      $(OBJDIR)/kb/kb_identity.o \
                      $(OBJDIR)/server/oauth_pkce.o \
                      $(OBJDIR)/util.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o $(OBJDIR)/log.o

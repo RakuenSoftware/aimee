@@ -33,8 +33,15 @@
  *   GET  /v1/identity/auth-mode      -> {"mode":"oidc"|"pam"|"none"}
  *   POST /v1/identity/login/start    -> {"authorize_url":...,"redirect_uri":...}
  *                                       body: {"server_id":"..."}
+ *   GET  /v1/identity/login/callback -> {"subject":...,"server_id":...}
+ *                                       query: code=&state= (or error=)
+ *
+ * `query_string` is the request's raw query (may be NULL). The callback route
+ * needs it; the others ignore it. It is passed SEPARATELY from the path because
+ * the dispatcher matches on the path alone, and folding the query into it would
+ * make every route's strcmp depend on parameters it does not read.
  */
-int kb_http_identity_login_route(const char *method, const char *path, const char *body,
-                                 int64_t now, char *out_buf, int out_cap);
+int kb_http_identity_login_route(const char *method, const char *path, const char *query_string,
+                                 const char *body, int64_t now, char *out_buf, int out_cap);
 
 #endif /* KB_HTTP_IDENTITY_LOGIN_H */

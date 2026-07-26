@@ -3,9 +3,14 @@
 #include "kb_http_identity_login.h"
 
 #include "cJSON.h"
+#include "kb_auth_oidc.h"
 #include "kb_oidc_login.h"
 #include "kb_oidc_login_store.h"
+#include "kb_oidc_token_exchange.h"
 #include "log.h"
+#include "vault_service.h"
+
+#include <openssl/crypto.h> /* OPENSSL_cleanse */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -128,8 +133,164 @@ static int post_login_start(const char *body, int64_t now, char *out_buf, int ou
    return json_body(out_buf, out_cap, 200, o);
 }
 
-int kb_http_identity_login_route(const char *method, const char *path, const char *body,
-                                 int64_t now, char *out_buf, int out_cap)
+/* Where the OIDC client secret lives. Not in kb's environment: the login profile
+ * (kb_oidc_login_config_from_env) deliberately excludes it, so a crash dump or a
+ * `ps` cannot reach it. Read at the moment of the exchange and cleansed after. */
+#define OIDC_LOGIN_VAULT_AGENT "oidc"
+#define OIDC_LOGIN_SECRET_CRED "oidc_login_client_secret"
+
+/* GET /v1/identity/login/callback?code=&state= — finish the authorization-code
+ * login the IdP is redirecting back from.
+ *
+ * THE ORDER OF THE CHECKS BELOW IS THE SECURITY OF THIS ROUTE, so each step says
+ * what it would cost to move it:
+ *
+ *   1. parse            — a malformed or duplicated parameter never reaches the
+ *                         store's lookup.
+ *   2. take by state    — SINGLE USE. Removing the pending login here means a
+ *                         replayed callback (from browser history, a proxy log,
+ *                         a referrer header) finds nothing, even with the right
+ *                         state. Taking it later would leave a replay window.
+ *   3. check_state      — constant-time, over the fixed length. The take already
+ *                         matched, so this is belt-and-braces against the store
+ *                         ever gaining a faster lookup that leaked timing.
+ *   4. exchange         — the code goes to the IdP with the RETAINED verifier and
+ *                         the RETAINED redirect_uri. A stolen code is useless
+ *                         without the verifier, which never left this process.
+ *   5. verify signature — against the registered JWKS, audience pinned to the
+ *                         login client_id. Nothing in the token is believed
+ *                         before this line.
+ *   6. check_nonce      — AFTER verification, because on an unverified token the
+ *                         nonce claim is attacker-chosen. This is what stops an
+ *                         id_token minted for another login being replayed here.
+ *   7. principal        — the identity key is issuer-scoped from the CONFIGURED
+ *                         issuer, so a token cannot nominate its own namespace.
+ *
+ * Every failure answers with the SAME generic message and status. The distinctions
+ * are real and are logged, but reporting them would tell an unauthenticated
+ * caller whether a state existed, whether a code was accepted by the IdP, and
+ * whether a signature or a nonce was the thing that failed — an oracle for
+ * exactly the attacks steps 2-6 exist to stop. */
+static int get_login_callback(const char *query_string, int64_t now, char *out_buf, int out_cap)
+{
+   kb_oidc_login_config_t cfg;
+   if (kb_oidc_login_config_from_env(&cfg) != KB_OIDC_LOGIN_OK)
+      return json_error(out_buf, out_cap, 503, "oidc login is not available");
+
+   kb_oidc_login_callback_t cb;
+   kb_oidc_login_result_t rc = kb_oidc_login_callback_parse(query_string, &cb);
+   if (rc == KB_OIDC_LOGIN_IDP_ERROR)
+   {
+      /* The IdP's own refusal is reported as such, and its error code is safe to
+       * log: it is one of RFC 6749's fixed keywords, and the parser already
+       * refused anything with a control byte in it. An operator seeing this
+       * should look at their IdP, not at kb. */
+      LOG_INFO("kb.oidc.login", "the identity provider refused a login: %s", cb.idp_error);
+      kb_oidc_login_callback_clear(&cb);
+      return json_error(out_buf, out_cap, 401, "the identity provider refused the login");
+   }
+   if (rc != KB_OIDC_LOGIN_OK)
+   {
+      kb_oidc_login_callback_clear(&cb);
+      return json_error(out_buf, out_cap, 400, "invalid callback");
+   }
+
+   /* SINGLE USE from here on: the pending login no longer exists, so every path
+    * below — including each failure — has already consumed it. */
+   kb_oidc_login_pending_t pending;
+   kb_oidc_login_store_result_t taken = kb_oidc_login_store_take(cb.state, now, &pending);
+   if (taken != KB_OIDC_LOGIN_STORE_OK ||
+       kb_oidc_login_check_state(&pending, cb.state) != KB_OIDC_LOGIN_OK)
+   {
+      LOG_WARN("kb.oidc.login", "a callback matched no pending login (store rc=%d)", (int)taken);
+      kb_oidc_login_pending_clear(&pending);
+      kb_oidc_login_callback_clear(&cb);
+      return json_error(out_buf, out_cap, 400, "invalid callback");
+   }
+
+   char secret[512] = "";
+   if (vault_service_get_server_principal(OIDC_LOGIN_VAULT_AGENT, OIDC_LOGIN_SECRET_CRED, secret,
+                                          sizeof(secret)) != VAULT_OK ||
+       !secret[0])
+   {
+      /* Distinct from the generic failure on purpose: this one is a deployment
+       * mistake, not an attack, and it is not an oracle — anyone can already see
+       * from /v1/identity/auth-mode that this kb offers OIDC. */
+      OPENSSL_cleanse(secret, sizeof(secret));
+      kb_oidc_login_pending_clear(&pending);
+      kb_oidc_login_callback_clear(&cb);
+      LOG_ERROR("kb.oidc.login", "no OIDC client secret in the vault (%s/%s)",
+                OIDC_LOGIN_VAULT_AGENT, OIDC_LOGIN_SECRET_CRED);
+      return json_error(out_buf, out_cap, 503, "oidc login is not fully configured");
+   }
+
+   char unverified_id_token[KB_OIDC_TOKEN_EXCHANGE_JWT_MAX] = "";
+   kb_oidc_token_exchange_result_t xrc = kb_oidc_token_exchange_post(
+       &cfg, &pending, cb.code, secret, unverified_id_token, sizeof(unverified_id_token));
+   OPENSSL_cleanse(secret, sizeof(secret));
+   kb_oidc_login_callback_clear(&cb); /* the code has been spent */
+
+   kb_principal_t principal;
+   memset(&principal, 0, sizeof(principal));
+   int ok = 0;
+   if (xrc != KB_OIDC_TOKEN_EXCHANGE_OK)
+   {
+      LOG_WARN("kb.oidc.login", "the token exchange failed (rc=%d)", (int)xrc);
+   }
+   else
+   {
+      /* NOTHING in the token is believed until this returns 1. The audience is
+       * the login client_id, which is what an id_token's "aud" must be. */
+      kb_verify_result_t verified;
+      memset(&verified, 0, sizeof(verified));
+      if (!kb_oidc_verify_id_token(unverified_id_token, cfg.client_id, (long)now, &verified))
+         LOG_WARN("kb.oidc.login", "an id_token failed verification");
+      else if (kb_oidc_login_check_nonce(&pending, unverified_id_token) != KB_OIDC_LOGIN_OK)
+         /* A verified token that belongs to a DIFFERENT login. The signature was
+          * genuine, which is exactly why the nonce check cannot be skipped. */
+         LOG_WARN("kb.oidc.login", "an id_token's nonce did not match this login");
+      else if (kb_oidc_login_principal(&cfg, &verified, &principal) != KB_OIDC_LOGIN_OK)
+         LOG_WARN("kb.oidc.login", "a verified id_token yielded no usable principal");
+      else
+         ok = 1;
+      OPENSSL_cleanse(&verified, sizeof(verified));
+   }
+   OPENSSL_cleanse(unverified_id_token, sizeof(unverified_id_token));
+
+   char server_id[KB_OIDC_LOGIN_SERVER_MAX + 1] = "";
+   snprintf(server_id, sizeof(server_id), "%s", pending.target_server_id);
+   kb_oidc_login_pending_clear(&pending);
+
+   if (!ok)
+      return json_error(out_buf, out_cap, 401, "the login could not be completed");
+
+   /* The canonical identity key, derived rather than read off a field: it is what
+    * the grant and the intent are keyed by, and kb_identity_key refuses an
+    * unauthenticated principal, so this is also the last check that step 7
+    * actually produced one. */
+   /* 576 is the width of the identity tables' subject column
+    * (DB2_IDENTITY_SUBJECT_MAX), matching kb_vault_key_use.c. Not the db2 header,
+    * because this unit has no other reason to depend on it. */
+   char subject[576] = "";
+   if (kb_identity_key(&principal, subject, sizeof(subject)) != 0)
+   {
+      OPENSSL_cleanse(&principal, sizeof(principal));
+      return json_error(out_buf, out_cap, 401, "the login could not be completed");
+   }
+   OPENSSL_cleanse(&principal, sizeof(principal));
+
+   LOG_INFO("kb.oidc.login", "authenticated %s for a write token on %s", subject, server_id);
+   cJSON *o = cJSON_CreateObject();
+   cJSON_AddStringToObject(o, "subject", subject);
+   /* Echoed from the PENDING login, never from the callback's query: taking it
+    * from the query would let a forged callback point a completed login at a
+    * different server. */
+   cJSON_AddStringToObject(o, "server_id", server_id);
+   return json_body(out_buf, out_cap, 200, o);
+}
+
+int kb_http_identity_login_route(const char *method, const char *path, const char *query_string,
+                                 const char *body, int64_t now, char *out_buf, int out_cap)
 {
    if (!method || !path || !out_buf || out_cap <= 0)
       return -1;
@@ -148,6 +309,16 @@ int kb_http_identity_login_route(const char *method, const char *path, const cha
       if (strcmp(method, "POST") != 0)
          return json_error(out_buf, out_cap, 405, "method not allowed");
       return post_login_start(body, now, out_buf, out_cap);
+   }
+   if (strcmp(path, "/v1/identity/login/callback") == 0)
+   {
+      /* GET, because this is where a BROWSER lands: the IdP issues a redirect and
+       * a browser follows it with GET. The route mutates state (it consumes the
+       * pending login) which would normally argue for POST, but the method is not
+       * ours to choose. */
+      if (strcmp(method, "GET") != 0)
+         return json_error(out_buf, out_cap, 405, "method not allowed");
+      return get_login_callback(query_string, now, out_buf, out_cap);
    }
    return -1;
 }

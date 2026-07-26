@@ -80,12 +80,12 @@ static int enroll_redeem_route(const char *method, const char *path, const char 
    return -1;
 }
 
-int kb_http_bootstrap_route(const char *method, const char *path, const char *body, int64_t now,
-                            char *out_buf, int out_cap)
+int kb_http_bootstrap_route(const char *method, const char *path, const char *query_string,
+                            const char *body, int64_t now, char *out_buf, int out_cap)
 {
    if (!method || !path || !out_buf || out_cap <= 0)
       return -1;
-   int ir = kb_http_identity_login_route(method, path, body, now, out_buf, out_cap);
+   int ir = kb_http_identity_login_route(method, path, query_string, body, now, out_buf, out_cap);
    if (ir >= 0)
       return ir;
    return enroll_redeem_route(method, path, body, out_buf, out_cap);

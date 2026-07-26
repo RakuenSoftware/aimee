@@ -10,6 +10,17 @@
 #include <stdlib.h> /* getenv */
 #include <string.h>
 
+static int hex_value(char c)
+{
+   if (c >= '0' && c <= '9')
+      return c - '0';
+   if (c >= 'a' && c <= 'f')
+      return c - 'a' + 10;
+   if (c >= 'A' && c <= 'F')
+      return c - 'A' + 10;
+   return -1;
+}
+
 /* No control bytes, no whitespace, within bounds. These land in a URL and in an
  * audit record, so a newline would be a log-injection primitive. */
 static int plain_field(const char *s, size_t max, int required)
@@ -168,6 +179,145 @@ kb_oidc_login_result_t kb_oidc_token_url_split(const char *url, char *host_out, 
       }
       memcpy(path_out, path, path_len + 1);
    }
+   return KB_OIDC_LOGIN_OK;
+}
+
+/* ── Callback query parsing ───────────────────────────────────────────────── */
+
+/* Percent-decode one form-urlencoded value into out[cap]. Refuses rather than
+ * repairing: a truncated escape, a non-hex digit, an embedded NUL, any control
+ * byte, or a value that does not fit. Control bytes matter beyond tidiness — the
+ * decoded value reaches a log line and an error response, so a CR or LF here
+ * would be a log-injection primitive that the raw query string does not offer.
+ * Returns 0 on success. */
+static int form_decode(const char *begin, const char *end, char *out, size_t cap)
+{
+   size_t n = 0;
+   for (const char *p = begin; p < end; ++p)
+   {
+      unsigned char c = (unsigned char)*p;
+      if (c == '+')
+         c = ' ';
+      else if (c == '%')
+      {
+         if (end - p < 3)
+            return -1;
+         int hi = hex_value(p[1]), lo = hex_value(p[2]);
+         if (hi < 0 || lo < 0)
+            return -1;
+         c = (unsigned char)((hi << 4) | lo);
+         p += 2;
+      }
+      if (c == 0 || c < 0x20 || c == 0x7F)
+         return -1;
+      if (n + 1 >= cap)
+         return -1;
+      out[n++] = (char)c;
+   }
+   out[n] = '\0';
+   return 0;
+}
+
+/* Find `key` in the query string at a KEY BOUNDARY, decode its value into
+ * out[cap], and refuse a duplicate. Returns 1 when found, 0 when absent, -1 when
+ * present but unusable (duplicated, undecodable, or too long for out).
+ *
+ * A duplicate is -1 and not "first wins" or "last wins": when a callback carries
+ * two states, one of them is somebody else's, and every choice of which to
+ * believe is a choice to believe an attacker's. */
+static int form_field(const char *qs, const char *key, char *out, size_t cap)
+{
+   if (cap)
+      out[0] = '\0';
+   if (!qs || !key)
+      return 0;
+   size_t keylen = strlen(key);
+   int found = 0;
+   for (const char *p = qs; *p;)
+   {
+      const char *amp = strchr(p, '&');
+      const char *pair_end = amp ? amp : p + strlen(p);
+      const char *eq = memchr(p, '=', (size_t)(pair_end - p));
+      if (eq && (size_t)(eq - p) == keylen && memcmp(p, key, keylen) == 0)
+      {
+         if (found)
+            return -1; /* a second occurrence of the same key */
+         found = 1;
+         if (form_decode(eq + 1, pair_end, out, cap) != 0)
+         {
+            if (cap)
+               out[0] = '\0';
+            return -1;
+         }
+      }
+      if (!amp)
+         break;
+      p = amp + 1;
+   }
+   return found;
+}
+
+/* base64url, exactly the fixed secret length. Checked before the value can reach
+ * the pending store, so the store's constant-time scan is never handed something
+ * that could not be a state in the first place. */
+static int state_shape_valid(const char *s)
+{
+   if (strnlen(s, KB_OIDC_LOGIN_SECRET_LEN + 1) != KB_OIDC_LOGIN_SECRET_LEN)
+      return 0;
+   for (size_t i = 0; i < KB_OIDC_LOGIN_SECRET_LEN; ++i)
+   {
+      unsigned char c = (unsigned char)s[i];
+      int ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+               c == '-' || c == '_';
+      if (!ok)
+         return 0;
+   }
+   return 1;
+}
+
+void kb_oidc_login_callback_clear(kb_oidc_login_callback_t *cb)
+{
+   if (cb)
+      OPENSSL_cleanse(cb, sizeof(*cb));
+}
+
+kb_oidc_login_result_t kb_oidc_login_callback_parse(const char *query_string,
+                                                    kb_oidc_login_callback_t *out)
+{
+   if (!out)
+      return KB_OIDC_LOGIN_INVALID;
+   memset(out, 0, sizeof(*out));
+   if (!query_string)
+      return KB_OIDC_LOGIN_INVALID;
+
+   /* The error branch is taken FIRST, and on its own: an IdP that returns an
+    * error returns no code, and a callback carrying both is not something to
+    * pick the favourable half of. */
+   char idp_error[KB_OIDC_LOGIN_IDP_ERR_MAX + 1] = "";
+   int had_error = form_field(query_string, "error", idp_error, sizeof(idp_error));
+   if (had_error != 0)
+   {
+      /* An unusable error value is still an IdP refusal — the login has failed
+       * either way, and reporting _INVALID would send an operator looking for a
+       * bug in kb instead of at their IdP. */
+      snprintf(out->idp_error, sizeof(out->idp_error), "%s",
+               (had_error == 1 && idp_error[0]) ? idp_error : "unspecified");
+      return KB_OIDC_LOGIN_IDP_ERROR;
+   }
+
+   char code[KB_OIDC_LOGIN_CODE_MAX + 1] = "";
+   char state[KB_OIDC_LOGIN_SECRET_LEN + 1] = "";
+   if (form_field(query_string, "code", code, sizeof(code)) != 1 || !code[0] ||
+       form_field(query_string, "state", state, sizeof(state)) != 1 || !state_shape_valid(state))
+   {
+      OPENSSL_cleanse(code, sizeof(code));
+      OPENSSL_cleanse(state, sizeof(state));
+      return KB_OIDC_LOGIN_INVALID;
+   }
+   snprintf(out->code, sizeof(out->code), "%s", code);
+   snprintf(out->state, sizeof(out->state), "%s", state);
+   OPENSSL_cleanse(code, sizeof(code));
+   OPENSSL_cleanse(state, sizeof(state));
    return KB_OIDC_LOGIN_OK;
 }
 

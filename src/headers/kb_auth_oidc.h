@@ -88,6 +88,19 @@ extern "C"
     * when the 'oidc' verifier fired). Returns 0 + fills out[cap], -1 if unset. */
    int kb_oidc_configured_issuer(char *out, size_t cap);
 
+   /* Verify an OIDC ID TOKEN for the relying-party login flow, against the
+    * REGISTERED verifier configuration (so the login and the bearer verifier
+    * cannot come to trust different key sets, including a fleet-resolved JWKS).
+    *
+    * `expected_audience` must be the login's client_id and is REQUIRED — see the
+    * implementation for why an id_token cannot be checked against the
+    * resource-server audience, and why empty is a refusal rather than "unchecked".
+    *
+    * Returns 1 and fills *out on success, 0 on any failure (including no OIDC
+    * configuration registered). `now` is injectable for testing. */
+   int kb_oidc_verify_id_token(const char *jwt, const char *expected_audience, long now,
+                               kb_verify_result_t *out);
+
    /* Read the `nonce` claim out of an id_token's payload into out[cap].
     * Returns 0 on success, -1 if absent, empty, unparseable or too long.
     *

@@ -43,6 +43,14 @@ extern "C"
 #define KB_OIDC_LOGIN_SECRET_LEN OAUTH_PKCE_VERIFIER_MIN
 #define KB_OIDC_LOGIN_URL_MAX    2048
 #define KB_OIDC_LOGIN_NONCE_MAX  256
+/* An authorization code is opaque and unbounded by spec. This ceiling is well
+ * clear of what real IdPs emit (Okta, Entra and Keycloak are all under 200) and
+ * exists so a callback URL cannot be used to push an arbitrary amount of
+ * attacker-chosen text through the parser. */
+#define KB_OIDC_LOGIN_CODE_MAX 512
+/* RFC 6749 §4.1.2.1 error codes are short keywords; enough for the longest
+ * ("unsupported_response_type") several times over. */
+#define KB_OIDC_LOGIN_IDP_ERR_MAX 64
 /* Matches the server_id grammar every identity table CHECKs against. */
 #define KB_OIDC_LOGIN_SERVER_MAX 127
 
@@ -93,8 +101,27 @@ extern "C"
       /* No OIDC login front end is configured. A deliberate state, not a
        * failure: a kb may verify bearers without offering a login, and PAM mode
        * leaves the relying-party profile unset entirely. */
-      KB_OIDC_LOGIN_DISABLED
+      KB_OIDC_LOGIN_DISABLED,
+      /* The IdP reported a failure instead of returning a code (RFC 6749
+       * §4.1.2.1: access_denied, login_required, ...). Distinguished from
+       * _INVALID because it is the IdP's answer, not a malformed request, and the
+       * two want different handling: one is reported to the user as "the identity
+       * provider refused", the other is a bug or an attack. */
+      KB_OIDC_LOGIN_IDP_ERROR
    } kb_oidc_login_result_t;
+
+   /* What the IdP's redirect back to kb carried. Holds no secret of kb's own —
+    * the code is single-use and worthless without the retained verifier — but the
+    * code is still a bearer of sorts, so clear it once exchanged. */
+   typedef struct
+   {
+      char code[KB_OIDC_LOGIN_CODE_MAX + 1];
+      char state[KB_OIDC_LOGIN_SECRET_LEN + 1];
+      /* Set only on KB_OIDC_LOGIN_IDP_ERROR; the RFC 6749 "error" code. The
+       * error_description is deliberately NOT captured: it is attacker-influenced
+       * free text whose only use would be echoing it somewhere. */
+      char idp_error[KB_OIDC_LOGIN_IDP_ERR_MAX + 1];
+   } kb_oidc_login_callback_t;
 
    /* Validate `cfg`. Callers that accept operator input should use this before
     * storing it, so a broken profile is refused at configuration time rather
@@ -148,6 +175,34 @@ extern "C"
     * On failure both outputs are emptied. */
    kb_oidc_login_result_t kb_oidc_token_url_split(const char *url, char *host_out, size_t host_cap,
                                                   char *path_out, size_t path_cap);
+
+   /* Parse an OIDC callback's query string (`code`/`state`, or `error`).
+    *
+    * A DEDICATED parser rather than the generic query_param() used elsewhere in
+    * the kb HTTP layer, because that one does strstr(qs, "key=") and would match
+    * "state=" inside "?my_state=" or "&oldstate=" — for a filter parameter that
+    * is untidy, for the CSRF token it is the bug. This matches only at a key
+    * boundary, refuses a repeated key outright (a duplicate is parameter
+    * smuggling, and picking either occurrence picks the attacker's), and
+    * percent-decodes per application/x-www-form-urlencoded, which is what a
+    * redirect query is: "+" decodes to space.
+    *
+    * Returns:
+    *   _OK        code and state both present and well-formed
+    *   _IDP_ERROR "error" was present; out->idp_error is set and code/state empty
+    *   _INVALID   anything else — absent, duplicated, oversized, undecodable, or
+    *              a state that is not the exact fixed secret shape
+    *
+    * The state's shape is checked HERE so a malformed one never reaches the
+    * store's constant-time scan; a wrong-but-well-formed state still does, and
+    * only kb_oidc_login_check_state may judge it. On any non-_OK result the code
+    * and state are empty, so a caller that ignores the result cannot proceed on
+    * partial data. */
+   kb_oidc_login_result_t kb_oidc_login_callback_parse(const char *query_string,
+                                                       kb_oidc_login_callback_t *out);
+
+   /* Zero a callback's contents. Safe on NULL. */
+   void kb_oidc_login_callback_clear(kb_oidc_login_callback_t *cb);
 
    /* Zero a pending login's secrets. Safe on NULL. */
    void kb_oidc_login_pending_clear(kb_oidc_login_pending_t *pending);

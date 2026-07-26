@@ -399,12 +399,12 @@ int kb_oidc_configured_issuer(char *out, size_t cap)
    return ok ? 0 : -1;
 }
 
-static int oidc_verify_fn(const char *presented, const char *configured, kb_verify_result_t *out,
-                          void *ctx)
+/* Resolve the effective verification config: the registered one, with a
+ * fleet-supplied JWKS preferred over the per-instance file. Returns 0 when no
+ * config is registered. Shared by the bearer verifier and the login flow so the
+ * two cannot end up trusting different key sets. */
+static int effective_config(kb_oidc_config_t *cfg)
 {
-   (void)configured;
-   (void)ctx;
-   kb_oidc_config_t cfg;
    kb_oidc_fleet_resolver_fn fleet;
    pthread_mutex_lock(&g_oidc_lock);
    if (!g_oidc_cfg_set)
@@ -412,20 +412,57 @@ static int oidc_verify_fn(const char *presented, const char *configured, kb_veri
       pthread_mutex_unlock(&g_oidc_lock);
       return 0;
    }
-   cfg = g_oidc_cfg;
+   *cfg = g_oidc_cfg;
    fleet = g_fleet_resolver;
    pthread_mutex_unlock(&g_oidc_lock);
 
    /* Fleet-wide JWKS (I10): when a resolver is registered and an issuer is
     * configured, prefer the shared Postgres key set so the fleet agrees on trusted
-    * keys and IdP rotation converges; the file cfg.jwks_json is the fallback used
+    * keys and IdP rotation converges; the file cfg->jwks_json is the fallback used
     * only when the resolver reports no fleet keys. */
-   if (fleet && cfg.issuer[0])
+   if (fleet && cfg->issuer[0])
    {
-      char fleet_jwks[sizeof(cfg.jwks_json)];
-      if (fleet(cfg.issuer, fleet_jwks, sizeof(fleet_jwks)) == 0 && fleet_jwks[0])
-         snprintf(cfg.jwks_json, sizeof(cfg.jwks_json), "%s", fleet_jwks);
+      char fleet_jwks[sizeof(cfg->jwks_json)];
+      if (fleet(cfg->issuer, fleet_jwks, sizeof(fleet_jwks)) == 0 && fleet_jwks[0])
+         snprintf(cfg->jwks_json, sizeof(cfg->jwks_json), "%s", fleet_jwks);
    }
+   return 1;
+}
+
+int kb_oidc_verify_id_token(const char *jwt, const char *expected_audience, long now,
+                            kb_verify_result_t *out)
+{
+   kb_oidc_config_t cfg;
+   if (!jwt || !expected_audience || !expected_audience[0] || !out)
+      return 0;
+   if (!effective_config(&cfg))
+      return 0;
+   /* THE AUDIENCE IS OVERRIDDEN, and that is the whole reason this exists rather
+    * than the login calling the bearer verifier.
+    *
+    * AIMEE_KB_OIDC_AUDIENCE names kb as a RESOURCE SERVER — the audience an
+    * access token carries when a client presents it to kb. An ID TOKEN is a
+    * different thing: OIDC Core §3.1.3.7 step 3 requires its "aud" to be the
+    * relying party's client_id. Verifying an id_token against the resource-server
+    * audience would reject every real IdP's token, and the tempting fix — telling
+    * operators to set AIMEE_KB_OIDC_AUDIENCE to the client_id — would quietly
+    * make kb accept id_tokens as bearers on its own API.
+    *
+    * Empty is refused above rather than treated as "unchecked": for a bearer,
+    * skipping the audience is a documented operator choice, but for an id_token
+    * it would accept one minted for a different relying party of the same IdP. */
+   snprintf(cfg.audience, sizeof(cfg.audience), "%s", expected_audience);
+   return kb_oidc_verify_jwt(jwt, &cfg, now, out);
+}
+
+static int oidc_verify_fn(const char *presented, const char *configured, kb_verify_result_t *out,
+                          void *ctx)
+{
+   (void)configured;
+   (void)ctx;
+   kb_oidc_config_t cfg;
+   if (!effective_config(&cfg))
+      return 0;
    return kb_oidc_verify_jwt(presented, &cfg, (long)time(NULL), out);
 }
 

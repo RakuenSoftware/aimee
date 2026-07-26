@@ -6,6 +6,8 @@
 #include "kb/http/kb_http_servers.h"
 #include "kb_http_telemetry.h"
 #include "db2/server_registry.h"
+#include "kb_oidc_token_exchange.h"
+#include "vault_service.h"
 #include <stdio.h>
 
 /* kb_tls_serve links the primary-authoritative per-request enrollment seam.
@@ -129,4 +131,38 @@ int db2_server_registry_heartbeat(const char *server_id, const char *issuer, con
    (void)health;
    (void)version;
    return g_test_registry_heartbeat_allow ? 0 : -1;
+}
+
+/* The OIDC login callback's two outward dependencies. This test's focus is
+ * routing, and it never drives a login to completion, so a stub that REFUSES is
+ * both sufficient and the safer default: if the callback is ever reached from
+ * here by accident, it fails closed rather than proceeding with a fabricated
+ * secret. The callback's own behaviour is tested in
+ * test_kb_http_identity_login.c, which stubs these to succeed.
+ *
+ * Linking the real ones instead would pull the vault and the TLS client into a
+ * routing test — and kb_oidc_token_exchange_post lives in its own translation
+ * unit specifically so that is avoidable. */
+vault_status_t vault_service_get_server_principal(const char *agent, const char *cred, char *out,
+                                                  size_t cap)
+{
+   (void)agent;
+   (void)cred;
+   if (out && cap)
+      out[0] = '\0';
+   return VAULT_NO_ENTRY;
+}
+
+kb_oidc_token_exchange_result_t
+kb_oidc_token_exchange_post(const kb_oidc_login_config_t *cfg,
+                            const kb_oidc_login_pending_t *pending, const char *code,
+                            const char *client_secret, char *unverified_id_token_out, size_t cap)
+{
+   (void)cfg;
+   (void)pending;
+   (void)code;
+   (void)client_secret;
+   if (unverified_id_token_out && cap)
+      unverified_id_token_out[0] = '\0';
+   return KB_OIDC_TOKEN_EXCHANGE_UNAVAILABLE;
 }

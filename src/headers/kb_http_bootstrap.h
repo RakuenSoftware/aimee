@@ -30,7 +30,7 @@
  *
  * `now` is passed in rather than read so the pending-login lifetime is testable
  * and there is no hidden clock in the request path. */
-int kb_http_bootstrap_route(const char *method, const char *path, const char *body, int64_t now,
-                            char *out_buf, int out_cap);
+int kb_http_bootstrap_route(const char *method, const char *path, const char *query_string,
+                            const char *body, int64_t now, char *out_buf, int out_cap);
 
 #endif /* KB_HTTP_BOOTSTRAP_H */
