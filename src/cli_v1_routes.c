@@ -214,7 +214,10 @@ static const struct
     {"kb", "grant set", "kb.grant.set", NULL, NULL, 30000},
     {"kb", "grant revoke", "kb.grant.revoke", NULL, NULL, 30000},
     {"kb", "grant list", "kb.grant.list", NULL, "grants", 30000},
-    {"kb", "grant show", "kb.grant.list", NULL, "grants", 30000},
+    /* A DISTINCT method from `list`, resolving to the same route. Sharing the method would
+     * leave the marshaller unable to require --subject, and `show` with no subject would
+     * silently list everything. */
+    {"kb", "grant show", "kb.grant.show", NULL, "grants", 30000},
     {"kb", "ingest", "kb.ingest", NULL, NULL, 30000},
     {"kb", "ingest status", "kb.ingest.status", NULL, NULL, 0},
     {"kb", "status", "kb.status", NULL, NULL, 0},

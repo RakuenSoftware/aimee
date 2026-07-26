@@ -251,12 +251,24 @@ static void test_revoke(void)
    assert(kb_client_grant_revoke("srv1", 910001, "owner", &found) == KB_CLIENT_GRANT_OK);
    assert(found == 0);
 
-   /* A body without `found` defaults to 0: claiming a grant existed when kb did not say so
-    * would tell an operator they closed access they never held. */
-   reset(200, "{}");
-   found = 1;
-   assert(kb_client_grant_revoke("srv1", 910001, "owner", &found) == KB_CLIENT_GRANT_OK);
-   assert(found == 0);
+   /* A SUCCESS WITHOUT A BOOLEAN `found` IS NOT A SUCCESS. This test previously asserted the
+    * opposite — that `{}` was OK with found=0 — and a review was right that it codified a
+    * bug: `found: false` is not a safe default, it is an authoritative claim that no grant
+    * existed, which an operator acts on by hunting for a typo. An unusable response must say
+    * "unknown", not "nothing was there". */
+   const char *unusable[] = {"{}", "{\"found\":\"yes\"}", "{\"found\":1}", "{\"other\":true}",
+                             "not json"};
+   for (size_t i = 0; i < sizeof(unusable) / sizeof(unusable[0]); ++i)
+   {
+      reset(200, unusable[i]);
+      found = 1;
+      if (kb_client_grant_revoke("srv1", 910001, "owner", &found) != KB_CLIENT_GRANT_UNAVAILABLE)
+      {
+         fprintf(stderr, "a 200 with body %s was accepted as a usable revoke\n", unusable[i]);
+         assert(0);
+      }
+      assert(found == 0); /* and it must not leave a stale claim behind */
+   }
 }
 
 static void test_list(void)

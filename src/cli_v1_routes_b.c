@@ -1,5 +1,4 @@
 /* ===================================================================
-#include <stdio.h>
  * /v1 thin-client routing: route CLI subcommands through the server's native /v1 HTTP endpoints.
  * Unported commands fail in cli_main before reaching the server.
  * =================================================================== */
@@ -14,6 +13,7 @@
 #if !defined(_WIN32) && !defined(_WIN64)
 #include "aimee_home.h"
 #include <dirent.h>
+#include <stdio.h> /* fprintf: the grant marshaller explains its own refusals */
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -1402,11 +1402,19 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
       }
       int is_set = strcmp(method, "kb.grant.set") == 0;
       int is_revoke = strcmp(method, "kb.grant.revoke") == 0;
+      /* `show` MUST keep its own identity through marshalling. It resolves to the same route
+       * as `list` — it is that listing filtered to one subject — but if it shared the same
+       * METHOD this marshaller could not tell them apart, and
+       * `aimee kb grant show --server s --team 1` would silently issue an UNFILTERED LIST: a
+       * command naming one subject answering with every grant on the server. A review caught
+       * exactly that. */
+      int is_show = strcmp(method, "kb.grant.show") == 0;
       /* set and revoke both name a subject; list does not require one, and uses it as a
        * filter when given (that is `show`). */
-      if ((is_set || is_revoke) && !subject)
+      if ((is_set || is_revoke || is_show) && !subject)
       {
-         fprintf(stderr, "aimee kb grant %s: --subject S is required\n", is_set ? "set" : "revoke");
+         fprintf(stderr, "aimee kb grant %s: --subject S is required\n",
+                 is_set ? "set" : (is_revoke ? "revoke" : "show"));
          fprintf(stderr,
                  "  A subject is owner, oidc:<iss>:<sub>, cert:<issuer>:<serial>, or a bare\n"
                  "  host account.\n");

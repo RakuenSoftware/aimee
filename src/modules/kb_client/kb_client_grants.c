@@ -149,13 +149,22 @@ kb_client_grant_result_t kb_client_grant_revoke(const char *server_id, int64_t t
    }
    cJSON *resp = cJSON_Parse(json);
    free(json);
-   if (rc == KB_CLIENT_GRANT_OK && found_out)
+   if (rc == KB_CLIENT_GRANT_OK)
    {
       const cJSON *found = cJSON_GetObjectItemCaseSensitive(resp, "found");
-      /* Default 0 on a malformed body: claiming a grant existed when kb did not say so
-       * would tell an operator they closed access they never held. */
-      *found_out = cJSON_IsTrue(found);
+      /* A BOOLEAN `found` IS REQUIRED on a success. The first version defaulted a missing or
+       * non-boolean field to 0, reasoning that "did not exist" was the safe default — but
+       * `found: false` is not a safe default, it is an AUTHORITATIVE CLAIM that no grant was
+       * there, which an operator acts on by going to look for a typo. Turning an unusable
+       * protocol response into that claim is worse than admitting the answer is unknown.
+       * A review caught this, and caught that my own test had codified `{}` as a success. */
+      if (!cJSON_IsBool(found))
+         rc = KB_CLIENT_GRANT_UNAVAILABLE;
+      else if (found_out)
+         *found_out = cJSON_IsTrue(found);
    }
+   if (rc != KB_CLIENT_GRANT_OK && found_out)
+      *found_out = 0;
    cJSON_Delete(resp);
    return rc;
 }

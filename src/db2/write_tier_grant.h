@@ -114,9 +114,15 @@ extern "C"
    /* As above, but `include_revoked` WIDENS the listing to contain revoked grants
     * alongside live ones, each with `revoked_at` populated. It is not a revoked-only
     * filter: the question an operator asks is "who can write to this server", and an
-    * answer omitting the live rows invites misreading. */
+    * answer omitting the live rows invites misreading.
+    *
+    * `subject` is an optional exact filter applied IN THE QUERY, before the row ceiling.
+    * That placement is the point: filtering after a capped listing means a subject sorting
+    * beyond the cap is invisible, so a caller asking about one subject would be told it has
+    * no grant purely because other subjects sort ahead of it. NULL for no filter. */
    int db2_write_tier_grant_list_ex(const char *server_id, int64_t team_id, int include_revoked,
-                                    db2_write_tier_grant_row_t *out, size_t cap, size_t *count);
+                                    const char *subject, db2_write_tier_grant_row_t *out,
+                                    size_t cap, size_t *count);
 
 #ifdef __cplusplus
 }

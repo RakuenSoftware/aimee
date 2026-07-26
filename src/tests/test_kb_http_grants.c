@@ -34,6 +34,9 @@ static int stub_set_calls;
 static int stub_revoke_calls;
 static int stub_list_calls;
 static int stub_last_include_revoked;
+static int stub_last_had_subject;
+static int stub_lookup_calls;
+static int stub_lookup_rc;
 static int64_t stub_last_team;
 static char stub_last_subject[600];
 static char stub_last_server[200];
@@ -69,10 +72,14 @@ int db2_write_tier_grant_revoke(const char *server_id, int64_t team_id, const ch
 }
 
 int db2_write_tier_grant_list_ex(const char *server_id, int64_t team_id, int include_revoked,
-                                 db2_write_tier_grant_row_t *out, size_t cap, size_t *count)
+                                 const char *subject, db2_write_tier_grant_row_t *out, size_t cap,
+                                 size_t *count)
 {
    stub_list_calls++;
    stub_last_include_revoked = include_revoked;
+   /* Recorded so a test can prove the filter went DOWN to the query rather than being applied
+    * to whatever rows came back. */
+   stub_last_had_subject = (subject && subject[0]) ? 1 : 0;
    stub_last_team = team_id;
    snprintf(stub_last_server, sizeof(stub_last_server), "%s", server_id ? server_id : "");
    if (count)
@@ -102,17 +109,19 @@ int db2_write_tier_grant_set(const char *server_id, int64_t team_id, const char 
 int db2_write_tier_grant_list(const char *server_id, int64_t team_id,
                               db2_write_tier_grant_row_t *out, size_t cap, size_t *count)
 {
-   return db2_write_tier_grant_list_ex(server_id, team_id, 0, out, cap, count);
+   return db2_write_tier_grant_list_ex(server_id, team_id, 0, NULL, out, cap, count);
 }
 
 int db2_write_tier_grant_lookup(const char *server_id, int64_t team_id, const char *subject,
                                 kb_identity_tier_t *out)
 {
+   stub_lookup_calls++;
    (void)server_id;
    (void)team_id;
    (void)subject;
-   (void)out;
-   return -1;
+   if (out)
+      *out = KB_IDENTITY_TIER_DATA;
+   return stub_lookup_rc;
 }
 
 /* ── Helpers ───────────────────────────────────────────────────────────────── */
@@ -122,6 +131,9 @@ static void reset(void)
    stub_rc = 0;
    stub_set_calls = stub_revoke_calls = stub_list_calls = 0;
    stub_last_include_revoked = -1;
+   stub_last_had_subject = -1;
+   stub_lookup_calls = 0;
+   stub_lookup_rc = DB2_WRITE_TIER_GRANT_NONE;
    stub_last_team = 0;
    stub_last_subject[0] = stub_last_server[0] = '\0';
    stub_row_count = 0;
@@ -327,23 +339,42 @@ static void test_revoke(void)
    char out[4096] = "";
    const char *good = "{\"server_id\":\"srv1\",\"team_id\":910001,\"subject\":\"oidc:iss:alice\"}";
 
-   /* A live grant existed: found = true. */
+   /* `found` COMES FROM AN EXACT LOOKUP, not from scanning a listing.
+    *
+    * The first version searched the general (capped) listing, so a subject sorting beyond the
+    * cap was reported found:false while being successfully revoked — telling an operator
+    * nothing was there when something was. A review caught it. The assertions below are that
+    * the lookup is consulted and the listing is NOT. */
    reset();
-   row(0, "oidc:iss:alice", KB_IDENTITY_TIER_DATA, "");
+   stub_lookup_rc = DB2_WRITE_TIER_GRANT_FOUND;
    assert(route("POST", "/v1/write-tier-grants/revoke", NULL, good, out, sizeof(out)) == 200);
    assert(strstr(out, "\"found\":true"));
    assert(stub_revoke_calls == 1);
+   assert(stub_lookup_calls == 1);
+   assert(stub_list_calls == 0); /* a listing must not be involved at all */
 
    /* Nothing to revoke: found = false. Reported rather than treated as success, because a
-    * subject that was never granted is usually a typo, and silently succeeding would let
-    * an operator believe they closed access they never held. */
+    * subject that was never granted is usually a typo, and silently succeeding would let an
+    * operator believe they closed access they never held. */
    reset();
-   row(0, "oidc:iss:bob", KB_IDENTITY_TIER_DATA, "");
+   stub_lookup_rc = DB2_WRITE_TIER_GRANT_NONE;
    assert(route("POST", "/v1/write-tier-grants/revoke", NULL, good, out, sizeof(out)) == 200);
    assert(strstr(out, "\"found\":false"));
    /* The revoke still ran: it is idempotent, and refusing here would make a retry after a
     * timeout fail. */
    assert(stub_revoke_calls == 1);
+   assert(stub_list_calls == 0);
+
+   /* A FAILED lookup must not be reported as "no grant existed" — that is an authoritative
+    * claim this call is in no position to make. */
+   reset();
+   stub_lookup_rc = -1;
+   assert(route("POST", "/v1/write-tier-grants/revoke", NULL, good, out, sizeof(out)) == 403);
+   assert(stub_revoke_calls == 0); /* and nothing was revoked on a broken read */
+   reset();
+   stub_lookup_rc = -42;
+   assert(route("POST", "/v1/write-tier-grants/revoke", NULL, good, out, sizeof(out)) == 503);
+   assert(stub_revoke_calls == 0);
 
    /* Malformed bodies never reach the database. */
    const char *bad[] = {"{\"team_id\":1,\"subject\":\"owner\"}",
@@ -403,14 +434,29 @@ static void test_list(void)
       }
    }
 
-   /* `show` is this listing filtered to one subject. */
+   /* `show` is this listing filtered to one subject — AND THE FILTER GOES DOWN TO THE QUERY.
+    *
+    * The first version fetched the general listing (capped at GRANTS_LIST_MAX) and filtered it
+    * in C. A review pointed out the consequence: a subject sorting beyond the cap is invisible,
+    * so `show` answers "no grant" for a subject that has one, purely because others sort ahead
+    * of it. The assertion is therefore about WHERE the filter was applied, not just the output.
+    *
+    * The stub returns a row whose subject differs from the request, and the route must return
+    * it VERBATIM — because selecting rows is now the database's job. A route still filtering in
+    * C would drop it and this would fail. */
    reset();
    row(0, "oidc:iss:alice", KB_IDENTITY_TIER_DATA, "");
-   row(1, "oidc:iss:bob", KB_IDENTITY_TIER_FULL, "");
    assert(route("GET", "/v1/write-tier-grants",
                 "server_id=srv1&team_id=910001&subject=oidc:iss:bob", NULL, out,
                 sizeof(out)) == 200);
-   assert(strstr(out, "oidc:iss:bob") && !strstr(out, "oidc:iss:alice"));
+   assert(stub_last_had_subject == 1);
+   assert(strstr(out, "oidc:iss:alice"));
+   /* And a listing with no subject passes none down. */
+   reset();
+   row(0, "oidc:iss:alice", KB_IDENTITY_TIER_DATA, "");
+   assert(route("GET", "/v1/write-tier-grants", "server_id=srv1&team_id=910001", NULL, out,
+                sizeof(out)) == 200);
+   assert(stub_last_had_subject == 0);
 
    /* KEY BOUNDARIES. Each of these contains the literal text "team_id=" or "server_id="
     * and defines neither: a strstr-based parser would accept them, and team_id selects an

@@ -255,17 +255,28 @@ static int post_revoke(const char *body, char *out_buf, int out_cap)
                         "server_id, an integer team_id and a canonical subject are required");
 
    /* Whether a live grant existed is read BEFORE the revoke, so the caller can be told
-    * "there was nothing to revoke" — which is a likely typo'd subject — apart from "it
-    * was already revoked", where the operator's intent is already satisfied. The revoke
-    * itself is idempotent, so a race here costs at worst a misreported `found`, never a
-    * wrong outcome; that is why this one does not need an atomic reporting variant. */
-   db2_write_tier_grant_row_t rows[GRANTS_LIST_MAX];
-   size_t count = 0;
-   int found = 0;
-   if (db2_write_tier_grant_list_ex(server_id, team_id, 1, rows, GRANTS_LIST_MAX, &count) == 0)
-      for (size_t i = 0; i < count; ++i)
-         if (!strcmp(rows[i].subject, subject))
-            found = 1;
+    * "there was nothing to revoke" — a likely typo'd subject — apart from "it was already
+    * revoked", where the operator's intent is already satisfied.
+    *
+    * AN EXACT LOOKUP, not a scan of a listing. The first version fetched the general listing
+    * (capped at GRANTS_LIST_MAX) and searched it in C, so a subject sorting beyond the cap
+    * was reported found:false while being successfully revoked — telling an operator nothing
+    * was there when something was. A review caught it. A lookup asks about exactly this
+    * subject and cannot be crowded out by others.
+    *
+    * The revoke itself is idempotent, so a race between this read and the write costs at
+    * worst a misreported `found`, never a wrong outcome. */
+   kb_identity_tier_t existing = KB_IDENTITY_TIER_OFF;
+   int lookup = db2_write_tier_grant_lookup(server_id, team_id, subject, &existing);
+   if (lookup < 0)
+   {
+      /* A failed lookup must not be reported as "no grant existed": that is an authoritative
+       * claim this call is in no position to make. */
+      LOG_WARN("kb.grants", "could not determine whether a grant existed for %s on %s (rc=%d)",
+               subject, server_id, lookup);
+      return map_db_failure(lookup, out_buf, out_cap);
+   }
+   int found = (lookup == DB2_WRITE_TIER_GRANT_FOUND);
 
    int rc = db2_write_tier_grant_revoke(server_id, team_id, subject);
    if (rc != 0)
@@ -300,8 +311,12 @@ static int get_list(const char *query_string, char *out_buf, int out_cap)
 
    db2_write_tier_grant_row_t rows[GRANTS_LIST_MAX];
    size_t count = 0;
-   int rc = db2_write_tier_grant_list_ex(server_id, team_id, include_revoked, rows, GRANTS_LIST_MAX,
-                                         &count);
+   /* The subject filter goes DOWN to the query, not applied to the rows that come back:
+    * filtering after a capped fetch hides a subject sorting beyond the cap, so `show` would
+    * answer "no grant" for a subject that has one. */
+   int rc =
+       db2_write_tier_grant_list_ex(server_id, team_id, include_revoked,
+                                    have_subject ? subject : NULL, rows, GRANTS_LIST_MAX, &count);
    if (rc != 0)
       return map_db_failure(rc, out_buf, out_cap);
 
@@ -316,8 +331,6 @@ static int get_list(const char *query_string, char *out_buf, int out_cap)
    {
       /* `show` is this listing filtered to one subject, done here rather than as its own
        * route so the row shape has exactly one definition. */
-      if (have_subject && strcmp(rows[i].subject, subject))
-         continue;
       cJSON *g = cJSON_CreateObject();
       cJSON_AddStringToObject(g, "subject", rows[i].subject);
       cJSON_AddStringToObject(g, "tier", kb_identity_tier_str(rows[i].tier));

@@ -218,11 +218,12 @@ int db2_write_tier_grant_revoke(const char *server_id, int64_t team_id, const ch
 int db2_write_tier_grant_list(const char *server_id, int64_t team_id,
                               db2_write_tier_grant_row_t *out, size_t cap, size_t *count)
 {
-   return db2_write_tier_grant_list_ex(server_id, team_id, 0, out, cap, count);
+   return db2_write_tier_grant_list_ex(server_id, team_id, 0, NULL, out, cap, count);
 }
 
 int db2_write_tier_grant_list_ex(const char *server_id, int64_t team_id, int include_revoked,
-                                 db2_write_tier_grant_row_t *out, size_t cap, size_t *count)
+                                 const char *subject, db2_write_tier_grant_row_t *out, size_t cap,
+                                 size_t *count)
 {
    if (count)
       *count = 0;
@@ -239,19 +240,33 @@ int db2_write_tier_grant_list_ex(const char *server_id, int64_t team_id, int inc
    /* Two statements rather than one with a parameter, so the default path's SQL is
     * unchanged and a reader can see exactly which rows each returns. `include_revoked`
     * WIDENS: it does not select revoked rows only. */
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn,
-       include_revoked
-           ? "SELECT subject, tier, granted_by, created_at, updated_at, revoked_at "
-             "FROM kb_write_tier_grant WHERE server_id=?1 AND team_id=?2 ORDER BY subject"
-           : "SELECT subject, tier, granted_by, created_at, updated_at, NULL "
-             "FROM kb_write_tier_grant "
-             "WHERE server_id=?1 AND team_id=?2 AND revoked_at IS NULL ORDER BY subject",
-       err, sizeof(err));
+   /* Four statements rather than one with optional predicates, so each returns exactly the
+    * rows a reader can see it returns. The SUBJECT FILTER IS IN THE QUERY: applying it after
+    * a capped fetch would hide a subject that sorts beyond the cap, and a caller asking
+    * about one subject would be told it has no grant because others sort ahead of it. */
+   const char *sql;
+   if (subject && include_revoked)
+      sql = "SELECT subject, tier, granted_by, created_at, updated_at, revoked_at "
+            "FROM kb_write_tier_grant WHERE server_id=?1 AND team_id=?2 AND subject=?3 "
+            "ORDER BY subject";
+   else if (subject)
+      sql = "SELECT subject, tier, granted_by, created_at, updated_at, NULL "
+            "FROM kb_write_tier_grant WHERE server_id=?1 AND team_id=?2 AND subject=?3 "
+            "AND revoked_at IS NULL ORDER BY subject";
+   else if (include_revoked)
+      sql = "SELECT subject, tier, granted_by, created_at, updated_at, revoked_at "
+            "FROM kb_write_tier_grant WHERE server_id=?1 AND team_id=?2 ORDER BY subject";
+   else
+      sql = "SELECT subject, tier, granted_by, created_at, updated_at, NULL "
+            "FROM kb_write_tier_grant "
+            "WHERE server_id=?1 AND team_id=?2 AND revoked_at IS NULL ORDER BY subject";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", server_id);
    aimee_pg_bind_int64(st, "?2", team_id);
+   if (subject)
+      aimee_pg_bind_text(st, "?3", subject);
    size_t n = 0;
    int failed = 0;
    aimee_pg_step_t step;

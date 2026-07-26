@@ -246,14 +246,29 @@ int db2_write_tier_grant_revoke(const char *server_id, int64_t team_id, const ch
 }
 
 int db2_write_tier_grant_list_ex(const char *server_id, int64_t team_id, int include_revoked,
-                                 db2_write_tier_grant_row_t *out, size_t cap, size_t *count)
+                                 const char *subject, db2_write_tier_grant_row_t *out, size_t cap,
+                                 size_t *count)
 {
    (void)server_id;
    (void)team_id;
    (void)include_revoked;
+   (void)subject;
    (void)out;
    (void)cap;
    if (count)
       *count = 0;
+   return -1;
+}
+
+/* The revoke route now derives `found` from an exact lookup rather than scanning a listing
+ * (a review found the scan reported found:false for a subject sorting beyond the row cap).
+ * Refusing stub, like the others here: this test never revokes a grant. */
+int db2_write_tier_grant_lookup(const char *server_id, int64_t team_id, const char *subject,
+                                kb_identity_tier_t *out)
+{
+   (void)server_id;
+   (void)team_id;
+   (void)subject;
+   (void)out;
    return -1;
 }

@@ -805,6 +805,10 @@ const char *cli_v1_route_for_method(const char *method, const char **verb_out)
        {"kb.grant.set", "POST", "/v1/grants/write-tier/set"},
        {"kb.grant.revoke", "POST", "/v1/grants/write-tier/revoke"},
        {"kb.grant.list", "POST", "/v1/grants/write-tier/list"},
+       /* Same route as list: `show` is that listing filtered to one subject, so the row shape
+        * has one definition. Only the METHOD differs, so the marshaller can require a
+        * subject — without that separation, `show` with no subject silently lists everything. */
+       {"kb.grant.show", "POST", "/v1/grants/write-tier/list"},
        {"kb.status", "GET", "/v1/kb/status"},
        {"kb.curator", "GET", "/v1/kb/curator"},
        {"memory.recall", "POST", "/v1/memory/recall"},
