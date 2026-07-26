@@ -47,11 +47,17 @@ RUN sh scripts/fetch-treesitter.sh \
 FROM debian:trixie-slim AS pgvectorscale-build
 ARG PG_MAJOR
 ARG PGVECTORSCALE_VERSION
+# Same retry as the runtime stage: one transient TLS reset here fails the build.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
     && install -d /usr/share/postgresql-common/pgdg \
-    && curl -fsS -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-        https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    && for a in 1 2 3 4 5; do \
+         curl -fsS --connect-timeout 10 --max-time 60 \
+           -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+           https://www.postgresql.org/media/keys/ACCC4CF8.asc && break; \
+         echo "pgdg key fetch failed (attempt $a/5); backing off"; sleep $((a * 5)); \
+       done \
+    && test -s /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
     && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] http://apt.postgresql.org/pub/repos/apt trixie-pgdg main" \
         > /etc/apt/sources.list.d/pgdg.list \
     && apt-get update \
@@ -104,11 +110,19 @@ RUN apt-get update \
 # stable major) with pgvector 0.8.5 depending only on the server and libc.
 # PostgreSQL 18 is also the version pgvectorscale builds against.
 ARG PG_MAJOR=18
+# The PGDG key fetch is retried: it is a single point of build failure on a
+# network hiccup and this layer runs on every kb build. Seen failing CI with
+# "curl: (56) OpenSSL SSL_read: unexpected eof while reading".
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && install -d /usr/share/postgresql-common/pgdg \
-    && curl -fsS -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-        https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    && for a in 1 2 3 4 5; do \
+         curl -fsS --connect-timeout 10 --max-time 60 \
+           -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+           https://www.postgresql.org/media/keys/ACCC4CF8.asc && break; \
+         echo "pgdg key fetch failed (attempt $a/5); backing off"; sleep $((a * 5)); \
+       done \
+    && test -s /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
     && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] http://apt.postgresql.org/pub/repos/apt trixie-pgdg main" \
         > /etc/apt/sources.list.d/pgdg.list \
     && apt-get update \
