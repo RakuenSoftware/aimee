@@ -1601,3 +1601,55 @@ func chairmanTestRoundtable(t *testing.T) *roundtablecfg.Store {
 	}
 	return store
 }
+
+// replayLostSeatAgents fails every seat the way a replay-only invocation does
+// when its durable delegate result is gone.
+type replayLostSeatAgents struct{}
+
+func (replayLostSeatAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
+	return DelegateResult{}, &DelegateExecutionError{Err: ErrDelegateReplayUnavailable, Dispatched: true}
+}
+
+func (a replayLostSeatAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	return testDelegateGroup(ctx, requests, a.Delegate)
+}
+
+// Parking on a lost replay is unrecoverable by waiting: the reservation stays
+// replay-only, so the resumed attempt replays into the same missing result and
+// parks again. A live slice burned hours cycling that way. The gate must return
+// the error so the engine's reservation recovery runs.
+func TestPanelWithLostReplayReturnsTheErrorInsteadOfParking(t *testing.T) {
+	runner := &NativeRunner{agents: replayLostSeatAgents{}, roundtables: unpinnedTestRoundtable(t, "qa", "reviewer")}
+	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
+	reviewed.Hash = wfe.Hash(reviewed.Content)
+	result, err := runner.roundtable(t.Context(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
+		Proposal: "review the plan", Inputs: map[string]wfe.Artifact{"src": reviewed},
+		ReplayOnly: true,
+	})
+	if !errors.Is(err, ErrDelegateReplayUnavailable) {
+		t.Fatalf("lost replay did not surface for recovery: result=%+v err=%v", result, err)
+	}
+	if result.Status == StepPending && result.PauseReason == "panel_unreachable" {
+		t.Fatal("lost replay parked instead of returning the error")
+	}
+}
+
+// A seat that is merely unreachable is still a park: waiting can fix that.
+func TestPanelWithAnUnreachableSeatStillParks(t *testing.T) {
+	runner := &NativeRunner{agents: chairmanFailureAgents{}, roundtables: unpinnedTestRoundtable(t, "chairman", "chairman")}
+	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
+	reviewed.Hash = wfe.Hash(reviewed.Content)
+	result, err := runner.roundtable(t.Context(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
+		Proposal: "review the plan", Inputs: map[string]wfe.Artifact{"src": reviewed},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StepPending || result.PauseReason != "panel_unreachable" {
+		t.Fatalf("an unreachable seat should still park: %+v", result)
+	}
+}

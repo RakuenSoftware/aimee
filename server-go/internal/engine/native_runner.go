@@ -584,6 +584,10 @@ type panelAnalysis struct {
 	CostUnknown bool
 	Unreachable string
 	Reports     []panelSeatReport
+	// ReplayLost records that a seat could not be replayed because its durable
+	// result is gone. Retrying cannot fix that; only the engine's reservation
+	// recovery can, and it is reached by returning the error rather than parking.
+	ReplayLost bool
 }
 
 func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepResult, error) {
@@ -667,6 +671,16 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	// one unavailable seat must not discard a usable quorum. Park only when the
 	// number of complete reports is actually below that configured minimum.
 	if analysis.Unreachable != "" && len(analysis.Reports) < panel.MinSuccessful {
+		// A seat whose durable result is gone cannot be recovered by waiting: the
+		// reservation stays replay-only, so every retry replays into the same
+		// missing result and parks again. Returning the error hands it to the
+		// engine's reservation recovery, which re-dispatches fresh work or parks
+		// the unreproducible spend for a human. Parking here instead is what made
+		// a slice cycle panel_unreachable for hours without ever progressing.
+		if analysis.ReplayLost {
+			return StepResult{CostUSD: analysis.CostUSD, CostUnknown: analysis.CostUnknown},
+				fmt.Errorf("roundtable panel could not be replayed: %s: %w", analysis.Unreachable, ErrDelegateReplayUnavailable)
+		}
 		rt := roundtableResult(&analysis.Feedback, false, false, analysis, len(seats), analysis.CostUSD)
 		rt.DeadlineHit = deadlineHit || errors.Is(roundtableCtx.Err(), context.DeadlineExceeded)
 		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: analysis.Unreachable, CostUSD: analysis.CostUSD, CostUnknown: analysis.CostUnknown, Roundtable: rt}, nil
@@ -831,6 +845,7 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 	var cost float64
 	costUnknown := false
 	var seatFailures []string
+	replayLost := false
 	for _, o := range outcomes {
 		cost += o.cost
 		costUnknown = costUnknown || o.costUnknown
@@ -838,6 +853,9 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 			reason := "malformed_after_repair"
 			if o.transport {
 				reason = "delegate_error"
+			}
+			if errors.Is(o.err, ErrDelegateReplayUnavailable) {
+				replayLost = true
 			}
 			seatFailures = append(seatFailures, o.seat.persona+": "+reason+": "+o.err.Error())
 			voters--
@@ -895,7 +913,7 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 			feedback.Findings = append(feedback.Findings, wfe.Finding{ID: firstNonempty(f.ID, fmt.Sprintf("%s-%d", o.seat.persona, i+1)), Persona: o.seat.persona, Severity: firstNonempty(f.Severity, "blocking"), Location: f.Location, Summary: f.Summary, Recommendation: f.Recommendation})
 		}
 	}
-	return panelAnalysis{Feedback: feedback, Approvals: approvals, Voters: voters, CostUSD: cost, CostUnknown: costUnknown, Unreachable: strings.Join(seatFailures, "; "), Reports: reports}
+	return panelAnalysis{Feedback: feedback, Approvals: approvals, Voters: voters, CostUSD: cost, CostUnknown: costUnknown, Unreachable: strings.Join(seatFailures, "; "), Reports: reports, ReplayLost: replayLost}
 }
 
 // blockingFindingCount counts only the severities that must stop an artifact.
