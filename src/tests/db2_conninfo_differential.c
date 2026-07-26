@@ -36,7 +36,7 @@ static void check(const char *in)
          printf("CALLER OVERRIDDEN (%s: wanted '%s', got '%s')\n  in : %s\n  out: %s\n",
                 k, vb?vb:"(null)", vr?vr:"(null)", in, out); fails++;
       }
-      if (!caller_set && !caller_keepalives && (!vr || !*vr)) {
+      if (!caller_set && (!vr || !*vr)) {
          printf("BOUND MISSING (%s)\n  in : %s\n  out: %s\n", k, in, out); fails++;
       }
    }

@@ -1087,17 +1087,23 @@ int db2_pg_conninfo_with_bounds(const char *conninfo, char *out, size_t out_sz)
 
    ADD_IF_UNSET("connect_timeout", DB2_CONNECT_TIMEOUT_S);
 
-   /* An explicit `keepalives=` is the caller taking ownership of the whole group,
-    * including switching it off, so add none of it. Otherwise add the enable flag
-    * and fill in only the tuning keys they left unset: a caller who set just
-    * keepalives_idle wants that idle, not the loss of keepalives altogether. */
-   if (!conninfo_has_key(base, "keepalives"))
-   {
-      ADD_IF_UNSET("keepalives", "1");
-      ADD_IF_UNSET("keepalives_idle", "30");
-      ADD_IF_UNSET("keepalives_interval", "10");
-      ADD_IF_UNSET("keepalives_count", "3");
-   }
+   /* One uniform rule for every key: the caller's value wins where they set one,
+    * ours fills in where they did not. No key is special-cased.
+    *
+    * An earlier version treated an explicit `keepalives=` as the caller owning
+    * the whole group and added none of the tuning keys. That was wrong for
+    * `keepalives=1`: the caller is ASKING for keepalives, and withholding the
+    * tuning leaves libpq's default idle — 7200s — where this code intends 30s,
+    * so the setting meant to detect a vanished peer would take two hours to do
+    * it. It also made the invariant conditional, which is how the gap hid.
+    *
+    * With `keepalives=0` the tuning keys are still emitted and simply unused;
+    * carrying three ignored settings is a cosmetic cost, and it buys a rule with
+    * no exception to forget. */
+   ADD_IF_UNSET("keepalives", "1");
+   ADD_IF_UNSET("keepalives_idle", "30");
+   ADD_IF_UNSET("keepalives_interval", "10");
+   ADD_IF_UNSET("keepalives_count", "3");
 #undef ADD_IF_UNSET
 
    /* Two ways to get this wrong, and the first version chose the second one.

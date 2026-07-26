@@ -19,13 +19,13 @@ static void check(const char *in){
    if(!base) goto done;
    res=PQconninfoParse(out,&e3);
    if(!res){ printf("BROKE PARSE\n  in : [%s]\n  out: [%s]\n  %s",in,out,e3?e3:"\n"); fails++; goto done; }
-   int ck=!seq(val_of(base,"keepalives"),val_of(dflt,"keepalives"));
+   /* no keepalives exception any more: the rule is uniform */
    for(size_t i=0;i<5;i++){
       const char*k=KEYS[i]; char*vb=val_of(base,k),*vd=val_of(dflt,k),*vr=val_of(res,k);
       int set=!seq(vb,vd);
       if(set&&!seq(vr,vb)){printf("CALLER OVERRIDDEN %s ('%s'->'%s')\n  in : [%s]\n  out: [%s]\n",
           k,vb?vb:"",vr?vr:"",in,out);fails++;}
-      if(!set&&!ck&&(!vr||!*vr)){printf("BOUND MISSING %s\n  in : [%s]\n  out: [%s]\n",k,in,out);fails++;}
+      if(!set&&(!vr||!*vr)){printf("BOUND MISSING %s\n  in : [%s]\n  out: [%s]\n",k,in,out);fails++;}
    }
    /* dbname/host/user must be byte-identical to what the input alone yields */
    const char *F[]={"dbname","host","port","user"};

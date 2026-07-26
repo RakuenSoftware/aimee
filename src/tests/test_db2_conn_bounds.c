@@ -124,6 +124,9 @@ static void test_caller_supplied_settings_are_not_overridden(void)
    db2_pg_conninfo_with_bounds("host=db keepalives=0", out, sizeof out);
    must(strstr(out, "keepalives=0") != NULL, "the caller's keepalives choice survives");
    must(strstr(out, "keepalives=1") == NULL, "keepalives are not forced on top");
+   /* The tuning keys are still emitted and simply unused. One rule with no
+    * exception beats a special case nobody remembers. */
+   must(strstr(out, "keepalives_idle=30") != NULL, "unset tuning keys are still filled in");
    printf("  PASS: an explicit caller setting is not overridden or duplicated\n");
 }
 
@@ -229,10 +232,13 @@ static void test_option_detection_matches_whole_keys(void)
    must(strstr(out, "keepalives_count=3") != NULL, "the unset tuning keys are filled in");
    must(strstr(out, "connect_timeout=10") != NULL, "the unrelated bound is still added");
 
-   /* An explicit keepalives= is the caller owning the group, including off. */
-   db2_pg_conninfo_with_bounds("host=db keepalives=0", out, sizeof out);
-   must(strstr(out, "keepalives=0") != NULL, "an explicit disable survives");
-   must(strstr(out, "keepalives_idle") == NULL, "no tuning keys are layered onto a disable");
+   /* keepalives=1 without tuning must still get the tuning. Withholding it left
+    * libpq's 7200s default idle where 30s was intended, so a setting whose point
+    * is detecting a vanished peer would have taken two hours to notice. */
+   db2_pg_conninfo_with_bounds("host=db keepalives=1", out, sizeof out);
+   must(strstr(out, "keepalives_idle=30") != NULL, "an enabled keepalives still gets its idle");
+   must(strstr(out, "keepalives_interval=10") != NULL, "and its interval");
+   must(strstr(out, "keepalives_count=3") != NULL, "and its count");
    printf("  PASS: option detection matches whole keys, not substrings\n");
 }
 
