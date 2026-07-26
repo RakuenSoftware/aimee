@@ -46,9 +46,41 @@ cleanup() {
     echo "run-grant-cli-live: keeping db=$db work=$work"
     return
   fi
-  runuser -u postgres -- psql -q -c "ALTER ROLE aimee_kb_owner PASSWORD NULL" >/dev/null 2>&1
+  restore_owner_role
   runuser -u postgres -- dropdb --force --if-exists "$db" >/dev/null 2>&1
   rm -rf -- "$work"
+}
+
+# aimee_kb_owner is CLUSTER-global, not per-database, so this rig must hand it back exactly as
+# it found it. An earlier version reset the password to NULL unconditionally, which is harmless
+# on a scratch box and destroys a live credential anywhere else. rolpassword is the SCRAM
+# verifier, and ALTER ROLE ... PASSWORD accepts an already-hashed string verbatim, so the
+# original can be put back without ever knowing the cleartext.
+snapshot_owner_role() {
+  owner_existed=$(runuser -u postgres -- psql -tAX -c \
+    "SELECT count(*) FROM pg_authid WHERE rolname='aimee_kb_owner'" 2>/dev/null | tr -d ' ')
+  owner_pw_before=$(runuser -u postgres -- psql -tAX -c \
+    "SELECT coalesce(rolpassword,'') FROM pg_authid WHERE rolname='aimee_kb_owner'" 2>/dev/null)
+  owner_login_before=$(runuser -u postgres -- psql -tAX -c \
+    "SELECT rolcanlogin FROM pg_authid WHERE rolname='aimee_kb_owner'" 2>/dev/null | tr -d ' ')
+}
+
+restore_owner_role() {
+  [ "${owner_existed:-0}" = "0" ] && return 0
+  if [ -n "${owner_pw_before:-}" ]; then
+    runuser -u postgres -- psql -q -c \
+      "ALTER ROLE aimee_kb_owner PASSWORD '$owner_pw_before'" >/dev/null 2>&1
+  else
+    runuser -u postgres -- psql -q -c "ALTER ROLE aimee_kb_owner PASSWORD NULL" >/dev/null 2>&1
+  fi
+  # schema_roles.sql declares the role NOLOGIN and this rig grants it LOGIN to connect as it,
+  # so the restore has to work in BOTH directions -- only ever adding NOLOGIN would leave a role
+  # that could log in before the run unable to afterwards.
+  case "${owner_login_before:-}" in
+    t) runuser -u postgres -- psql -q -c "ALTER ROLE aimee_kb_owner LOGIN" >/dev/null 2>&1 ;;
+    f) runuser -u postgres -- psql -q -c "ALTER ROLE aimee_kb_owner NOLOGIN" >/dev/null 2>&1 ;;
+  esac
+  return 0
 }
 trap cleanup EXIT
 
@@ -58,6 +90,7 @@ psqlq() { runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -d "$db" "$@"; }
 psqlt() { runuser -u postgres -- psql -tAX -d "$db" "$@"; }
 
 step "Provisioning $db (roles -> schema -> grants)"
+snapshot_owner_role
 runuser -u postgres -- dropdb --force --if-exists "$db" >/dev/null 2>&1
 # The roles live at cluster scope, so they are created in the maintenance database first —
 # createdb -O below needs the owner role to already exist.
