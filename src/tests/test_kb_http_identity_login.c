@@ -586,6 +586,140 @@ static void test_login_pam(void)
    env_clear();
 }
 
+/* ── The configuration-mode matrix ────────────────────────────────────────── */
+
+/* Each login surface, under each configuration a kb can actually be in.
+ *
+ * WHY A MATRIX AND NOT MORE INDIVIDUAL CASES. The individual tests above each
+ * prove one route behaves correctly in the mode it cares about. What they cannot
+ * prove is that the routes AGREE: that /v1/identity/auth-mode's answer and what
+ * the other three routes actually do are the same story. A kb that advertises
+ * "pam" while the pam route refuses, or advertises "oidc" while the password
+ * route still authenticates, passes every single-route test and is broken — the
+ * second of those is a real IdP bypass. The table makes the whole cross-product
+ * visible in one place, so a route that drifts shows up as a wrong cell rather
+ * than as an absence of coverage.
+ *
+ * The three modes are every state the configuration can reach: no OIDC at all, a
+ * working OIDC profile, and a profile that is present but unusable. The third is
+ * not hypothetical — it is one typo'd URL away, and it is the mode where
+ * "reported" and "enforced" are most likely to diverge. */
+typedef enum
+{
+   MODE_NO_OIDC = 0,
+   MODE_OIDC,
+   MODE_OIDC_BROKEN
+} config_mode_t;
+
+static void apply_mode(config_mode_t mode)
+{
+   env_clear();
+   if (mode == MODE_NO_OIDC)
+      return;
+   env_configure();
+   if (mode == MODE_OIDC_BROKEN)
+      /* Present, and refused by kb_oidc_login_config_valid: the authorize
+       * endpoint must be https. Exactly the shape of an operator typo. */
+      setenv("AIMEE_KB_OIDC_LOGIN_AUTHORIZE_URL", "http://idp.example/authorize", 1);
+}
+
+static const char *mode_name(config_mode_t mode)
+{
+   return mode == MODE_NO_OIDC ? "no-oidc" : (mode == MODE_OIDC ? "oidc" : "oidc-broken");
+}
+
+static void test_config_mode_matrix(void)
+{
+   struct
+   {
+      config_mode_t mode;
+      const char *declared;
+      int start;
+      int callback;
+      int pam;
+   } table[] = {
+       /* No OIDC: the password login is the only way in, and the two OIDC routes
+        * are unavailable rather than merely failing. */
+       {MODE_NO_OIDC, "pam", 503, 503, 200},
+       /* OIDC configured: the OIDC routes work and the password route is REFUSED
+        * — 409, not 401. A 401 would mean "wrong password"; 409 says the mode is
+        * wrong, which is the truth and is what stops an IdP bypass. */
+       {MODE_OIDC, "oidc", 200, 400, 409},
+       /* Configured but unusable: everything falls back to PAM, and crucially the
+        * DECLARED mode matches what the routes do. A kb here can still log its
+        * users in. */
+       {MODE_OIDC_BROKEN, "pam", 503, 503, 200},
+   };
+
+   for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); ++i)
+   {
+      char out[4096] = "";
+      apply_mode(table[i].mode);
+      kb_oidc_login_store_reset();
+
+      /* 1. What the kb SAYS. */
+      assert(route("GET", "/v1/identity/auth-mode", NULL, out, sizeof(out)) == 200);
+      char expect[64];
+      snprintf(expect, sizeof(expect), "\"mode\":\"%s\"", table[i].declared);
+      if (!strstr(out, expect))
+      {
+         fprintf(stderr, "mode %s: auth-mode said %s, expected %s\n", mode_name(table[i].mode), out,
+                 expect);
+         assert(0);
+      }
+
+      /* 2. What the kb DOES, on each of the three login routes. Any mismatch
+       * names the mode and the route, because "an assertion failed in the matrix"
+       * would be the least useful possible failure message. */
+      struct
+      {
+         const char *label, *method, *path, *query, *body;
+         int expected;
+      } probes[] = {
+          {"start", "POST", "/v1/identity/login/start", NULL, "{\"server_id\":\"mintsrv\"}",
+           table[i].start},
+          /* A syntactically fine callback that matches no pending login: in OIDC
+           * mode that is a 400 (the route is live and refuses it), and in the
+           * other modes a 503 (the route is not offered at all). The distinction
+           * is the point — it tells a client whether to expect a redirect. */
+          {"callback", "GET", "/v1/identity/login/callback",
+           "code=abc&state=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", NULL, table[i].callback},
+          {"pam", "POST", "/v1/identity/login/pam", NULL,
+           "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"mintsrv\"}",
+           table[i].pam},
+      };
+      for (size_t j = 0; j < sizeof(probes) / sizeof(probes[0]); ++j)
+      {
+         char body_out[4096] = "";
+         int st = kb_http_identity_login_route(probes[j].method, probes[j].path, probes[j].query,
+                                               probes[j].body, NOW, body_out, sizeof(body_out));
+         if (st != probes[j].expected)
+         {
+            fprintf(stderr, "mode %s route %s: got %d expected %d (%s)\n", mode_name(table[i].mode),
+                    probes[j].label, st, probes[j].expected, body_out);
+            assert(0);
+         }
+      }
+
+      /* 3. THE INVARIANT THAT TIES IT TOGETHER: whichever mode is declared, that
+       * mode's entry point works and the other mode's is refused. Stated once
+       * rather than left to be inferred from the columns. */
+      if (strcmp(table[i].declared, "oidc") == 0)
+      {
+         assert(table[i].start == 200); /* the OIDC way in is open */
+         assert(table[i].pam == 409);   /* and the password way is shut */
+      }
+      else
+      {
+         assert(table[i].pam == 200);   /* the password way in is open */
+         assert(table[i].start == 503); /* and the OIDC way is not offered */
+      }
+   }
+
+   env_clear();
+   kb_oidc_login_store_reset();
+}
+
 static void test_not_our_routes(void)
 {
    char out[4096] = "";
@@ -775,6 +909,7 @@ int main(void)
    test_small_buffer();
    test_callback(key, jwks);
    test_login_pam();
+   test_config_mode_matrix();
    env_clear();
    kb_oidc_login_store_reset();
    free(jwks);
