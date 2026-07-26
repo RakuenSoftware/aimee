@@ -349,6 +349,44 @@ void kb_oidc_set_fleet_resolver(kb_oidc_fleet_resolver_fn fn)
    pthread_mutex_unlock(&g_oidc_lock);
 }
 
+int kb_oidc_id_token_nonce(const char *jwt, char *out, size_t cap)
+{
+   if (!out || cap == 0)
+      return -1;
+   out[0] = '\0';
+   if (!jwt)
+      return -1;
+   const char *dot1 = strchr(jwt, '.');
+   if (!dot1)
+      return -1;
+   const char *dot2 = strchr(dot1 + 1, '.');
+   if (!dot2)
+      return -1;
+   size_t pl_len = (size_t)(dot2 - (dot1 + 1));
+   if (pl_len == 0)
+      return -1;
+   char *pl_json = malloc(pl_len + 1);
+   if (!pl_json)
+      return -1;
+   int rc = -1;
+   if (b64url_decode_str(dot1 + 1, pl_len, pl_json, pl_len + 1) == 0)
+   {
+      cJSON *pl = cJSON_Parse(pl_json);
+      cJSON *n = pl ? cJSON_GetObjectItemCaseSensitive(pl, "nonce") : NULL;
+      if (cJSON_IsString(n) && n->valuestring && n->valuestring[0] &&
+          strlen(n->valuestring) < cap)
+      {
+         snprintf(out, cap, "%s", n->valuestring);
+         rc = 0;
+      }
+      cJSON_Delete(pl);
+   }
+   free(pl_json);
+   if (rc != 0)
+      out[0] = '\0';
+   return rc;
+}
+
 int kb_oidc_configured_issuer(char *out, size_t cap)
 {
    if (!out || cap == 0)

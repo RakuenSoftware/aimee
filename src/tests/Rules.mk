@@ -485,6 +485,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-clarify \
                $(TESTPREFIX)/unit-test-collab-rules \
                $(TESTPREFIX)/unit-test-oauth-pkce \
+               $(TESTPREFIX)/unit-test-kb-oidc-login \
                $(TESTPREFIX)/unit-test-oauth-reauth \
                $(TESTPREFIX)/unit-test-mcp-client \
                $(TESTPREFIX)/unit-test-mcp-client-sse \
@@ -5335,6 +5336,17 @@ $(TESTPREFIX)/unit-test-kb-auth-oidc: $(OBJDIR)/tests/test_kb_auth_oidc.o \
                      $(OBJDIR)/server/oauth_pkce.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# The login core is pure, so it links only the OIDC verifier (for the nonce
+# claim reader), the identity-key builder, and the PKCE primitives. The test
+# overrides platform_random_bytes, so platform objects are deliberately absent.
+$(TESTPREFIX)/unit-test-kb-oidc-login: $(OBJDIR)/tests/test_kb_oidc_login.o \
+                     $(OBJDIR)/kb/kb_oidc_login.o \
+                     $(OBJDIR)/kb/auth_oidc.o \
+                     $(OBJDIR)/kb/kb_identity.o \
+                     $(OBJDIR)/server/oauth_pkce.o \
+                     $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-kb-pki: $(OBJDIR)/tests/test_kb_pki.o \
                      $(OBJDIR)/kb/pki.o \

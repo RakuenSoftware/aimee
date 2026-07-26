@@ -88,6 +88,16 @@ extern "C"
     * when the 'oidc' verifier fired). Returns 0 + fills out[cap], -1 if unset. */
    int kb_oidc_configured_issuer(char *out, size_t cap);
 
+   /* Read the `nonce` claim out of an id_token's payload into out[cap].
+    * Returns 0 on success, -1 if absent, empty, unparseable or too long.
+    *
+    * CALLERS MUST HAVE VERIFIED THE TOKEN FIRST (kb_oidc_verify_jwt returning 1).
+    * This does no signature check of its own — it exists only so the relying-party
+    * login flow can compare the echoed nonce against the one it generated,
+    * without a second copy of the base64url/JSON decoding living elsewhere. On an
+    * unverified token the value it returns is attacker-chosen. */
+   int kb_oidc_id_token_nonce(const char *jwt, char *out, size_t cap);
+
 #ifdef __cplusplus
 }
 #endif

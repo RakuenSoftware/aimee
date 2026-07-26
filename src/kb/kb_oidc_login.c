@@ -1,0 +1,218 @@
+/* kb_oidc_login.c — the pure relying-party core. See kb_oidc_login.h. */
+
+#include "kb_oidc_login.h"
+
+#include "kb_auth_oidc.h" /* kb_oidc_id_token_nonce */
+#include "platform_random.h"
+
+#include <openssl/crypto.h> /* OPENSSL_cleanse */
+#include <stdio.h>
+#include <string.h>
+
+/* No control bytes, no whitespace, within bounds. These land in a URL and in an
+ * audit record, so a newline would be a log-injection primitive. */
+static int plain_field(const char *s, size_t max, int required)
+{
+   if (!s)
+      return !required;
+   size_t n = strnlen(s, max + 1);
+   if (n > max)
+      return 0;
+   if (n == 0)
+      return !required;
+   for (size_t i = 0; i < n; ++i)
+   {
+      unsigned char c = (unsigned char)s[i];
+      if (c <= 0x20 || c == 0x7f)
+         return 0;
+   }
+   return 1;
+}
+
+/* The scope is the one field where a space is meaningful rather than suspicious:
+ * OIDC scopes are a space-delimited list ("openid email profile"). Interior
+ * spaces are allowed, control bytes still are not, and a leading, trailing or
+ * doubled space is refused so the value that reaches the IdP is exactly the list
+ * the operator wrote. */
+static int scope_field(const char *s, size_t max)
+{
+   if (!s)
+      return 1; /* optional */
+   size_t n = strnlen(s, max + 1);
+   if (n > max)
+      return 0;
+   if (n == 0)
+      return 1;
+   if (s[0] == ' ' || s[n - 1] == ' ')
+      return 0;
+   for (size_t i = 0; i < n; ++i)
+   {
+      unsigned char c = (unsigned char)s[i];
+      if (c < 0x20 || c == 0x7f)
+         return 0;
+      if (c == ' ' && s[i + 1] == ' ')
+         return 0;
+   }
+   return 1;
+}
+
+/* Only https, with one exception: a loopback redirect_uri may be http, because
+ * that is how a browser on the operator's own machine completes the flow and
+ * there is no network to eavesdrop. Anything else is refused, so a profile
+ * cannot quietly downgrade the IdP hop to cleartext. */
+static int https_url(const char *s, size_t max, int allow_loopback_http)
+{
+   if (!plain_field(s, max, 1))
+      return 0;
+   if (!strncmp(s, "https://", 8))
+      return s[8] != '\0';
+   if (allow_loopback_http &&
+       (!strncmp(s, "http://127.0.0.1", 16) || !strncmp(s, "http://localhost", 16) ||
+        !strncmp(s, "http://[::1]", 12)))
+      return 1;
+   return 0;
+}
+
+int kb_oidc_login_config_valid(const kb_oidc_login_config_t *cfg)
+{
+   return cfg && plain_field(cfg->issuer, sizeof(cfg->issuer) - 1, 1) &&
+          plain_field(cfg->client_id, sizeof(cfg->client_id) - 1, 1) &&
+          https_url(cfg->authorize_url, sizeof(cfg->authorize_url) - 1, 0) &&
+          https_url(cfg->redirect_uri, sizeof(cfg->redirect_uri) - 1, 1) &&
+          scope_field(cfg->scope, sizeof(cfg->scope) - 1);
+}
+
+/* base64url(32 random bytes) — 43 chars, the RFC 7636 minimum verifier length,
+ * and 256 bits of entropy for state and nonce too. */
+static int draw_secret(char out[KB_OIDC_LOGIN_SECRET_LEN + 1])
+{
+   unsigned char raw[32];
+   if (platform_random_bytes(raw, sizeof(raw)) != 0)
+      return -1;
+   char encoded[64];
+   if (oauth_pkce_base64url_encode(raw, sizeof(raw), encoded, sizeof(encoded)) != 0 ||
+       strlen(encoded) != KB_OIDC_LOGIN_SECRET_LEN)
+   {
+      OPENSSL_cleanse(raw, sizeof(raw));
+      OPENSSL_cleanse(encoded, sizeof(encoded));
+      return -1;
+   }
+   memcpy(out, encoded, KB_OIDC_LOGIN_SECRET_LEN + 1);
+   OPENSSL_cleanse(raw, sizeof(raw));
+   OPENSSL_cleanse(encoded, sizeof(encoded));
+   return 0;
+}
+
+void kb_oidc_login_pending_clear(kb_oidc_login_pending_t *pending)
+{
+   if (pending)
+      OPENSSL_cleanse(pending, sizeof(*pending));
+}
+
+kb_oidc_login_result_t kb_oidc_login_start(const kb_oidc_login_config_t *cfg,
+                                           kb_oidc_login_pending_t *pending, char *url_out,
+                                           size_t url_cap)
+{
+   if (url_out && url_cap)
+      url_out[0] = '\0';
+   if (pending)
+      memset(pending, 0, sizeof(*pending));
+   if (!cfg || !pending || !url_out || url_cap == 0 || !kb_oidc_login_config_valid(cfg))
+      return KB_OIDC_LOGIN_INVALID;
+
+   kb_oidc_login_pending_t candidate;
+   memset(&candidate, 0, sizeof(candidate));
+   /* Three independent draws. Deriving the nonce from the state (or either from
+    * the verifier) would mean one leaked value compromised the others. */
+   if (draw_secret(candidate.state) || draw_secret(candidate.code_verifier) ||
+       draw_secret(candidate.nonce))
+   {
+      OPENSSL_cleanse(&candidate, sizeof(candidate));
+      return KB_OIDC_LOGIN_UNAVAILABLE;
+   }
+   snprintf(candidate.redirect_uri, sizeof(candidate.redirect_uri), "%s", cfg->redirect_uri);
+
+   char challenge[OAUTH_PKCE_CHALLENGE_LEN + 1] = "";
+   if (oauth_pkce_s256_challenge(candidate.code_verifier, challenge, sizeof(challenge)) != 0)
+   {
+      OPENSSL_cleanse(&candidate, sizeof(candidate));
+      return KB_OIDC_LOGIN_UNAVAILABLE;
+   }
+
+   /* "openid" is not optional for an OIDC request: without it the IdP runs a
+    * plain OAuth flow and returns no id_token, which is the only thing this
+    * login can authenticate anybody from. */
+   const oauth_pkce_auth_request_t req = {
+       .authorize_url = cfg->authorize_url,
+       .client_id = cfg->client_id,
+       .redirect_uri = cfg->redirect_uri,
+       .scope = cfg->scope[0] ? cfg->scope : "openid",
+       .state = candidate.state,
+       .code_challenge = challenge,
+       .nonce = candidate.nonce,
+   };
+   int n = oauth_pkce_build_auth_url(&req, url_out, url_cap);
+   OPENSSL_cleanse(challenge, sizeof(challenge));
+   if (n <= 0)
+   {
+      OPENSSL_cleanse(&candidate, sizeof(candidate));
+      if (url_cap)
+         url_out[0] = '\0';
+      return KB_OIDC_LOGIN_UNAVAILABLE;
+   }
+   *pending = candidate;
+   OPENSSL_cleanse(&candidate, sizeof(candidate));
+   return KB_OIDC_LOGIN_OK;
+}
+
+kb_oidc_login_result_t kb_oidc_login_check_state(const kb_oidc_login_pending_t *pending,
+                                                 const char *state_from_callback)
+{
+   if (!pending || !state_from_callback)
+      return KB_OIDC_LOGIN_INVALID;
+   /* A pending login whose state was never drawn cannot match anything. */
+   if (strnlen(pending->state, sizeof(pending->state)) != KB_OIDC_LOGIN_SECRET_LEN)
+      return KB_OIDC_LOGIN_INVALID;
+   /* Length is public and fixed, so checking it first leaks nothing; the
+    * comparison itself is constant time so a wrong state cannot be recovered a
+    * character at a time. */
+   if (strnlen(state_from_callback, KB_OIDC_LOGIN_SECRET_LEN + 1) != KB_OIDC_LOGIN_SECRET_LEN)
+      return KB_OIDC_LOGIN_STATE_MISMATCH;
+   return CRYPTO_memcmp(pending->state, state_from_callback, KB_OIDC_LOGIN_SECRET_LEN) == 0
+              ? KB_OIDC_LOGIN_OK
+              : KB_OIDC_LOGIN_STATE_MISMATCH;
+}
+
+kb_oidc_login_result_t kb_oidc_login_check_nonce(const kb_oidc_login_pending_t *pending,
+                                                 const char *verified_id_token)
+{
+   if (!pending || !verified_id_token)
+      return KB_OIDC_LOGIN_INVALID;
+   if (strnlen(pending->nonce, sizeof(pending->nonce)) != KB_OIDC_LOGIN_SECRET_LEN)
+      return KB_OIDC_LOGIN_INVALID;
+   char claimed[KB_OIDC_LOGIN_NONCE_MAX] = "";
+   if (kb_oidc_id_token_nonce(verified_id_token, claimed, sizeof(claimed)) != 0)
+      return KB_OIDC_LOGIN_NONCE_MISMATCH; /* absent claim is a refusal, not a pass */
+   kb_oidc_login_result_t rc = KB_OIDC_LOGIN_NONCE_MISMATCH;
+   if (strlen(claimed) == KB_OIDC_LOGIN_SECRET_LEN &&
+       CRYPTO_memcmp(pending->nonce, claimed, KB_OIDC_LOGIN_SECRET_LEN) == 0)
+      rc = KB_OIDC_LOGIN_OK;
+   OPENSSL_cleanse(claimed, sizeof(claimed));
+   return rc;
+}
+
+kb_oidc_login_result_t kb_oidc_login_principal(const kb_oidc_login_config_t *cfg,
+                                               const kb_verify_result_t *verified,
+                                               kb_principal_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   if (!cfg || !verified || !out || !kb_oidc_login_config_valid(cfg) || !verified->subject[0])
+      return KB_OIDC_LOGIN_INVALID;
+   /* The issuer is the CONFIGURED one. Taking it from the token would let a
+    * token nominate its own identity namespace and collide with another IdP's
+    * subject. */
+   if (kb_principal_from_verify(verified, cfg->issuer, out) != 0)
+      return KB_OIDC_LOGIN_INVALID;
+   return KB_OIDC_LOGIN_OK;
+}
