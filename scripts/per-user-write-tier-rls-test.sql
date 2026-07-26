@@ -82,6 +82,47 @@ BEGIN
 END $$;
 RESET ROLE;
 
+-- ZERO-GRANT BOOTSTRAP. The hard cutover means a freshly upgraded appliance has
+-- no write-tier grants at all, so the very first grant has to be creatable by
+-- someone. If it were not, the appliance would be permanently write-dead rather
+-- than write-dead until an operator acts. The local UDS operator installs the
+-- 'owner' principal (proposal §7, un-lockout-able), which kb_principal_is_admin
+-- accepts, so it can mint the first grant with no pre-existing grant and no
+-- team-lead row. Asserted against a table that genuinely has none for this team.
+--
+-- Note the team argument is 0, not the target team. set_tenant_context only
+-- enforces membership for a team > 0, so the operator installs a principal with
+-- NO team context — which is exactly what makes it un-lockout-able: it needs no
+-- kb_team_membership row for the team it is about to grant into. Passing the
+-- real team here fails with "team not in principal memberships", which is the
+-- trap an upgrade runbook would otherwise walk straight into.
+SET ROLE aimee_kb_runtime;
+SELECT set_tenant_context('owner', 0);
+DO $$
+DECLARE n INT;
+BEGIN
+  SELECT count(*) INTO n FROM kb_write_tier_grant WHERE team_id=910001 AND subject='oidc:test:boot';
+  IF n <> 0 THEN
+    RAISE EXCEPTION 'FAIL: bootstrap fixture is not actually zero-grant';
+  END IF;
+  PERFORM kb_write_tier_grant_set('wt-srv-alpha', 910001, 'oidc:test:boot', 'full', 'owner');
+  SELECT count(*) INTO n FROM kb_write_tier_grant
+   WHERE team_id=910001 AND subject='oidc:test:boot' AND tier='full' AND revoked_at IS NULL;
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL: the local operator could not create the first grant (appliance would be permanently write-dead)';
+  END IF;
+  IF NOT EXISTS(SELECT 1 FROM kb_audit_event WHERE action='authz.write_tier.set') THEN
+    RAISE EXCEPTION 'FAIL: bootstrap grant left no WORM audit row';
+  END IF;
+  -- and the operator can undo it, so a fat-fingered bootstrap is recoverable.
+  PERFORM kb_write_tier_grant_revoke('wt-srv-alpha', 910001, 'oidc:test:boot');
+  IF EXISTS(SELECT 1 FROM kb_write_tier_grant
+             WHERE subject='oidc:test:boot' AND revoked_at IS NULL) THEN
+    RAISE EXCEPTION 'FAIL: the local operator could not revoke a bootstrap grant';
+  END IF;
+END $$;
+RESET ROLE;
+
 -- Cross-team read isolation: alice sees alpha's grant and nothing of beta's.
 SET ROLE aimee_kb_runtime;
 SELECT set_tenant_context('oidc:test:alice', 910001);
