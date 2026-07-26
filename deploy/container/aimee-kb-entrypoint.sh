@@ -78,7 +78,11 @@ if [ -z "${AIMEE_DB2_URL:-}" ]; then
         --command="CREATE EXTENSION IF NOT EXISTS vector" >/dev/null
     # pgvectorscale is present only in an image built with WITH_PGVECTORSCALE=1.
     # Enable it when it is there; pgvector alone is the supported default.
-    if [ -f "/usr/lib/postgresql/$PGMAJOR/lib/vectorscale.so" ]; then
+    # pgrx installs the library version-stamped (vectorscale-0.9.0.so), so match a
+    # glob -- testing for a bare vectorscale.so silently never enables it. Resolved
+    # in a subshell because $@ still carries the kb's own arguments.
+    vectorscale_lib=$(ls "/usr/lib/postgresql/$PGMAJOR/lib/vectorscale"*.so 2>/dev/null | head -1)
+    if [ -n "$vectorscale_lib" ]; then
         "$PGBIN/psql" --host="$PGSOCK" --dbname="$DB" --no-psqlrc --quiet \
             --command="CREATE EXTENSION IF NOT EXISTS vectorscale" >/dev/null
     fi

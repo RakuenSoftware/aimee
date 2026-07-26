@@ -46,7 +46,7 @@ jobs:
           docker run --rm --user root aimee-kb:pgvectorscale-check sh -c '
             set -e
             pg=/usr/lib/postgresql/${AIMEE_DB2_PG_MAJOR}
-            ls "$pg/lib/vectorscale.so"
+            ls "$pg"/lib/vectorscale*.so
             ls /usr/share/postgresql/${AIMEE_DB2_PG_MAJOR}/extension/vectorscale.control
             install -d -o aimee /tmp/pgd /tmp/pgs
             su -s /bin/sh aimee -c "
