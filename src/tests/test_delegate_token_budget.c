@@ -419,7 +419,6 @@ static void test_load_per_role_budget(void)
 
 /* --- main --- */
 
-
 /* A 20K constant truncated every delegate whose prompt exceeded it -- 1807 times
  * on one deployment -- regardless of what the model could actually hold. The
  * budget has to follow the model: 128K means 128K, 1M means 1M. */
