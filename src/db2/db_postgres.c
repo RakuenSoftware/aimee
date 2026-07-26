@@ -881,6 +881,17 @@ int db2_pg_statement_timeout_ms(void)
    const char *raw = getenv("AIMEE_DB2_STATEMENT_TIMEOUT_MS");
    if (!raw || !raw[0])
       return DB2_DEFAULT_STATEMENT_TIMEOUT_MS;
+
+   /* Canonical decimal digits only, checked before strtol rather than after.
+    * strtol happily accepts " 0", "\t0", "+0" and "-0" and returns 0 — and 0 is
+    * the sentinel that DISABLES the bound. So four malformed spellings would each
+    * silently opt out of the safety property, while the documented contract says
+    * only an explicit "0" does that and anything malformed falls back. It was
+    * also inconsistent: " 0" disabled the bound but "0 " fell back. */
+   for (const char *c = raw; *c; c++)
+      if (*c < '0' || *c > '9')
+         return DB2_DEFAULT_STATEMENT_TIMEOUT_MS;
+
    char *end = NULL;
    errno = 0;
    long v = strtol(raw, &end, 10);

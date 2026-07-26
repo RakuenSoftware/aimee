@@ -64,7 +64,13 @@ static void test_env_override_is_honoured(void)
  * removing the timeout on a typo is precisely the regression this guards. */
 static void test_a_bad_value_falls_back_to_the_bound(void)
 {
-   const char *bad[] = {"", "abc", "-1", "12x", "  ", "1e3"};
+   /* The signed and whitespace-prefixed zeroes matter most. strtol accepts each
+    * and returns 0 — the sentinel that DISABLES the bound — so without a
+    * canonical-digits check these malformed spellings would silently opt out of
+    * the safety property rather than fall back to it. It was inconsistent too:
+    * " 0" disabled the bound while "0 " fell back. */
+   const char *bad[] = {"",   "abc", "-1",  "12x", "  ",  "1e3",     "-0",     "+0",
+                        " 0", "0 ",  "\t0", "0\n", "0x0", "+300000", " 300000"};
    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++)
    {
       setenv("AIMEE_DB2_STATEMENT_TIMEOUT_MS", bad[i], 1);
@@ -274,7 +280,12 @@ static const char *opt_value(PQconninfoOption *opts, const char *key)
    return "";
 }
 
-static void parses_as(const char *conninfo, const char *want_dbname)
+/* Every field the commit message claims is checked IS checked. An earlier version
+ * asserted only dbname while the message said host, port, dbname and user were
+ * all confirmed — a smaller version of the same overclaim this change keeps
+ * having to correct. Pass "" for a field the input does not set. */
+static void parses_as(const char *conninfo, const char *want_dbname, const char *want_host,
+                      const char *want_port, const char *want_user)
 {
    char out[2048];
    must(db2_pg_conninfo_with_bounds(conninfo, out, sizeof out) == 0, "bounds fit");
@@ -283,6 +294,9 @@ static void parses_as(const char *conninfo, const char *want_dbname)
    must(opts != NULL, "libpq parses the generated conninfo");
    /* The bug's signature was the bounds landing INSIDE dbname. */
    must(strcmp(opt_value(opts, "dbname"), want_dbname) == 0, "dbname is exactly the database");
+   must(strcmp(opt_value(opts, "host"), want_host) == 0, "host survives intact");
+   must(strcmp(opt_value(opts, "port"), want_port) == 0, "port survives intact");
+   must(strcmp(opt_value(opts, "user"), want_user) == 0, "user survives intact");
    must(strcmp(opt_value(opts, "connect_timeout"), "10") == 0, "connect_timeout is a real option");
    must(strcmp(opt_value(opts, "keepalives"), "1") == 0, "keepalives is a real option");
    PQconninfoFree(opts);
@@ -292,13 +306,15 @@ static void parses_as(const char *conninfo, const char *want_dbname)
 
 static void test_every_form_parses_as_libpq_intends(void)
 {
-   parses_as("postgresql://aimee:aimee@postgres:5432/aimee_shared", "aimee_shared");
-   parses_as("postgres://h:5432/aimee_shared", "aimee_shared");
-   parses_as("postgresql://h/aimee_shared?sslmode=require", "aimee_shared");
-   parses_as("host=db dbname=aimee_shared user=aimee", "aimee_shared");
+   parses_as("postgresql://aimee:aimee@postgres:5432/aimee_shared", "aimee_shared", "postgres",
+             "5432", "aimee");
+   parses_as("postgres://h:5432/aimee_shared", "aimee_shared", "h", "5432", "");
+   parses_as("postgresql://h/aimee_shared?sslmode=require", "aimee_shared", "h", "", "");
+   parses_as("host=db dbname=aimee_shared user=aimee", "aimee_shared", "db", "", "aimee");
    /* A quoted value holding option-shaped text must not be read as options: the
     * bounds still land, and the database name survives intact. */
-   parses_as("host=db dbname='tenant keepalives=off' user=aimee", "tenant keepalives=off");
+   parses_as("host=db dbname='tenant keepalives=off' user=aimee", "tenant keepalives=off", "db", "",
+             "aimee");
    printf("  PASS: libpq parses every form with the bounds as real options\n");
 }
 
