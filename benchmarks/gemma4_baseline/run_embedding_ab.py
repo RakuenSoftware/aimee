@@ -14,6 +14,7 @@ import json
 import math
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -40,22 +41,31 @@ def request_embeddings(endpoint: str, model: str, texts: list[str], timeout: int
         data=body,
         headers={"Content-Type": "application/json"},
     )
-    started = time.perf_counter()
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        payload = json.load(response)
-    latency = time.perf_counter() - started
-    if gateway_batch:
-        vectors = np.asarray(payload, dtype=np.float32)
-        usage: dict[str, Any] = {}
-    else:
-        ordered = sorted(payload["data"], key=lambda item: int(item["index"]))
-        vectors = np.asarray([item["embedding"] for item in ordered], dtype=np.float32)
-        usage = payload.get("usage", {})
-    if vectors.shape[0] != len(texts) or vectors.ndim != 2:
-        raise RuntimeError(f"unexpected embedding response shape {vectors.shape}")
-    if not np.isfinite(vectors).all():
-        raise RuntimeError("embedding response contains a non-finite value")
-    return vectors, {"latency_s": latency, "usage": usage}
+    last_error: Exception | None = None
+    for attempt in range(3):
+        started = time.perf_counter()
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                payload = json.load(response)
+            latency = time.perf_counter() - started
+            if gateway_batch:
+                vectors = np.asarray(payload, dtype=np.float32)
+                usage: dict[str, Any] = {}
+            else:
+                ordered = sorted(payload["data"], key=lambda item: int(item["index"]))
+                vectors = np.asarray([item["embedding"] for item in ordered], dtype=np.float32)
+                usage = payload.get("usage", {})
+            if vectors.shape[0] != len(texts) or vectors.ndim != 2:
+                raise RuntimeError(f"unexpected embedding response shape {vectors.shape}")
+            if not np.isfinite(vectors).all():
+                raise RuntimeError("embedding response contains a non-finite value")
+            return vectors, {"latency_s": latency, "usage": usage, "attempts": attempt + 1}
+        except (OSError, KeyError, ValueError, urllib.error.URLError) as exc:
+            last_error = exc
+            if attempt < 2:
+                time.sleep(2**attempt)
+    assert last_error is not None
+    raise last_error
 
 
 def normalize(vectors: np.ndarray) -> np.ndarray:

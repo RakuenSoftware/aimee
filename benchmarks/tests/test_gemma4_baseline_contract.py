@@ -20,6 +20,12 @@ sys.path.insert(0, str(MODULES))
 builder = importlib.import_module("build_254_fixtures")
 reranker = importlib.import_module("run_reranking_ab")
 synthesis = importlib.import_module("run_synthesis_ab")
+try:
+    embedding = importlib.import_module("run_embedding_ab")
+except ModuleNotFoundError as exc:
+    if exc.name != "numpy":
+        raise
+    embedding = None
 sweep = importlib.import_module("run_254_sweep")
 validator = importlib.import_module("validate_fixtures")
 
@@ -89,6 +95,31 @@ class GemmaBaselineContractTests(unittest.TestCase):
         self.assertTrue(bounded.startswith("A"))
         self.assertTrue(bounded.endswith("B"))
         self.assertIn("[...truncated...]", bounded)
+
+    def test_embedding_request_retries_transient_timeout(self) -> None:
+        if embedding is None:
+            self.skipTest("numpy is not installed")
+
+        class Response:
+            def __enter__(self) -> "Response":
+                return self
+
+            def __exit__(self, *_args: object) -> None:
+                return None
+
+            def read(self, *_args: object) -> bytes:
+                return json.dumps({
+                    "data": [{"index": 0, "embedding": [1.0, 2.0]}],
+                    "usage": {"prompt_tokens": 1},
+                }).encode()
+
+        with mock.patch.object(embedding.urllib.request, "urlopen", side_effect=[TimeoutError("slow"), Response()]) as urlopen:
+            with mock.patch.object(embedding.time, "sleep") as sleep:
+                vectors, timing = embedding.request_embeddings("http://unused", "test", ["text"], 1, False)
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(1)
+        self.assertEqual(vectors.tolist(), [[1.0, 2.0]])
+        self.assertEqual(timing["attempts"], 2)
 
     def test_reranker_resume_retries_failed_case(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
