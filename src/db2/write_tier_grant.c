@@ -125,6 +125,72 @@ int db2_write_tier_grant_set(const char *server_id, int64_t team_id, const char 
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
+int db2_write_tier_grant_set_reporting(const char *server_id, int64_t team_id, const char *subject,
+                                       kb_identity_tier_t tier, const char *granted_by,
+                                       db2_write_tier_grant_report_t *out)
+{
+   if (out)
+   {
+      /* Zeroed, so had_previous = 0: "no previous tier" must not read as tier 0,
+       * which is a real tier (off). */
+      memset(out, 0, sizeof(*out));
+   }
+   int __g = db2_tenant_require_pg();
+   if (__g)
+      return __g;
+   const char *tier_str = tier_text(tier);
+   if (!out || !grant_args_valid(server_id, team_id, subject) || !tier_str || !granted_by ||
+       !granted_by[0])
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   /* The reporting definer function. It DELEGATES to kb_write_tier_grant_set for
+    * authorization, validation, the upsert and the audit row, and adds only the
+    * observation of the pre-image under the same lock — so this is the same write path as
+    * db2_write_tier_grant_set, not a second one. */
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "SELECT changed, was_revoked, previous_tier, is_member FROM "
+                        "kb_write_tier_grant_set_reporting(?1, ?2, ?3, ?4, ?5)",
+                        err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", server_id);
+   aimee_pg_bind_int64(st, "?2", team_id);
+   aimee_pg_bind_text(st, "?3", subject);
+   aimee_pg_bind_text(st, "?4", tier_str);
+   aimee_pg_bind_text(st, "?5", granted_by);
+   db2_write_tier_grant_report_t report;
+   memset(&report, 0, sizeof(report));
+   int ok = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      const char *changed = aimee_pg_column_text(st, 0);
+      const char *revoked = aimee_pg_column_text(st, 1);
+      const char *previous = aimee_pg_column_text(st, 2);
+      const char *member = aimee_pg_column_text(st, 3);
+      report.changed = (changed && (changed[0] == 't' || changed[0] == '1'));
+      report.was_revoked = (revoked && (revoked[0] == 't' || revoked[0] == '1'));
+      report.is_member = (member && (member[0] == 't' || member[0] == '1'));
+      /* NULL means the grant did not exist. A non-NULL value that does not parse is a
+       * corrupt row, not an absent one, and must not be reported as either. */
+      ok = 1;
+      if (previous && previous[0])
+      {
+         report.had_previous = 1;
+         if (!tier_from_text(previous, &report.previous_tier))
+            ok = 0;
+      }
+   }
+   aimee_pg_finalize(st);
+   if (!ok)
+      return -1;
+   *out = report;
+   return 0;
+}
+
 int db2_write_tier_grant_revoke(const char *server_id, int64_t team_id, const char *subject)
 {
    int __g = db2_tenant_require_pg();
@@ -152,6 +218,12 @@ int db2_write_tier_grant_revoke(const char *server_id, int64_t team_id, const ch
 int db2_write_tier_grant_list(const char *server_id, int64_t team_id,
                               db2_write_tier_grant_row_t *out, size_t cap, size_t *count)
 {
+   return db2_write_tier_grant_list_ex(server_id, team_id, 0, out, cap, count);
+}
+
+int db2_write_tier_grant_list_ex(const char *server_id, int64_t team_id, int include_revoked,
+                                 db2_write_tier_grant_row_t *out, size_t cap, size_t *count)
+{
    if (count)
       *count = 0;
    int __g = db2_tenant_require_pg();
@@ -164,10 +236,17 @@ int db2_write_tier_grant_list(const char *server_id, int64_t team_id,
    if (!conn)
       return -1;
    char err[256] = "";
+   /* Two statements rather than one with a parameter, so the default path's SQL is
+    * unchanged and a reader can see exactly which rows each returns. `include_revoked`
+    * WIDENS: it does not select revoked rows only. */
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
-       "SELECT subject, tier, granted_by, created_at, updated_at FROM kb_write_tier_grant "
-       "WHERE server_id=?1 AND team_id=?2 AND revoked_at IS NULL ORDER BY subject",
+       include_revoked
+           ? "SELECT subject, tier, granted_by, created_at, updated_at, revoked_at "
+             "FROM kb_write_tier_grant WHERE server_id=?1 AND team_id=?2 ORDER BY subject"
+           : "SELECT subject, tier, granted_by, created_at, updated_at, NULL "
+             "FROM kb_write_tier_grant "
+             "WHERE server_id=?1 AND team_id=?2 AND revoked_at IS NULL ORDER BY subject",
        err, sizeof(err));
    if (!st)
       return -1;
@@ -193,6 +272,9 @@ int db2_write_tier_grant_list(const char *server_id, int64_t team_id,
       snprintf(row->created_at, sizeof(row->created_at), "%s", c ? c : "");
       c = aimee_pg_column_text(st, 4);
       snprintf(row->updated_at, sizeof(row->updated_at), "%s", c ? c : "");
+      /* Empty on the default path, where the column is a literal NULL. */
+      c = aimee_pg_column_text(st, 5);
+      snprintf(row->revoked_at, sizeof(row->revoked_at), "%s", c ? c : "");
       ++n;
    }
    if (step == AIMEE_PG_ERR)

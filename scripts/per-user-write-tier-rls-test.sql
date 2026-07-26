@@ -214,5 +214,81 @@ BEGIN
 END $$;
 RESET ROLE;
 
+-- ── The reporting wrapper (increment 5, item 1) ───────────────────────────────
+-- kb_write_tier_grant_set_reporting must observe the state it overwrote AND must not
+-- become a second authorization path. The second half is the point: a wrapper that
+-- restated the policy could drift from, or silently loosen, the function it wraps.
+SET ROLE aimee_kb_runtime;
+-- carol is alpha's team lead (line 28), which is the authority the delegate requires.
+-- alice is deliberately NOT: an assertion above proves she cannot grant to herself, and
+-- reusing her here would have the wrapper refused for the RIGHT reason by accident.
+SELECT set_tenant_context('oidc:test:carol', 910001);
+DO $$
+DECLARE r RECORD; n_before BIGINT; n_after BIGINT;
+BEGIN
+  SELECT count(*) INTO n_before FROM kb_audit_event WHERE action='authz.write_tier.set';
+
+  -- Created: changed, and no previous tier (NULL, not 'off', which is a real tier).
+  SELECT * INTO r FROM kb_write_tier_grant_set_reporting(
+    'wt-srv-alpha', 910001, 'oidc:test:rep', 'data', 'oidc:test:carol');
+  IF NOT r.changed OR r.was_revoked OR r.previous_tier IS NOT NULL THEN
+    RAISE EXCEPTION 'FAIL: creating a grant reported %', r;
+  END IF;
+
+  -- Same tier again: not changed, and the previous tier IS reported.
+  SELECT * INTO r FROM kb_write_tier_grant_set_reporting(
+    'wt-srv-alpha', 910001, 'oidc:test:rep', 'data', 'oidc:test:carol');
+  IF r.changed OR r.previous_tier <> 'data' THEN
+    RAISE EXCEPTION 'FAIL: a no-op re-grant reported %', r;
+  END IF;
+
+  -- Widened: changed, and the previous tier is the OLD one. This is the signal an
+  -- operator script uses to notice that somebody's access just grew.
+  SELECT * INTO r FROM kb_write_tier_grant_set_reporting(
+    'wt-srv-alpha', 910001, 'oidc:test:rep', 'full', 'oidc:test:carol');
+  IF NOT r.changed OR r.previous_tier <> 'data' THEN
+    RAISE EXCEPTION 'FAIL: widening a grant reported %', r;
+  END IF;
+
+  -- Revoked then re-granted: was_revoked is observed, and ONE row survives.
+  PERFORM kb_write_tier_grant_revoke('wt-srv-alpha', 910001, 'oidc:test:rep');
+  SELECT * INTO r FROM kb_write_tier_grant_set_reporting(
+    'wt-srv-alpha', 910001, 'oidc:test:rep', 'data', 'oidc:test:carol');
+  IF NOT r.changed OR NOT r.was_revoked OR r.previous_tier <> 'full' THEN
+    RAISE EXCEPTION 'FAIL: re-granting a revoked grant reported %', r;
+  END IF;
+  IF (SELECT count(*) FROM kb_write_tier_grant
+       WHERE server_id='wt-srv-alpha' AND team_id=910001 AND subject='oidc:test:rep') <> 1 THEN
+    RAISE EXCEPTION 'FAIL: re-granting left more than one row for the triple';
+  END IF;
+
+  -- IT STILL AUDITS, because it delegates. Four successful sets above.
+  SELECT count(*) INTO n_after FROM kb_audit_event WHERE action='authz.write_tier.set';
+  IF n_after <> n_before + 4 THEN
+    RAISE EXCEPTION 'FAIL: the reporting wrapper wrote % audit rows, expected 4',
+      n_after - n_before;
+  END IF;
+END $$;
+RESET ROLE;
+
+-- AND IT MUST NOT LOOSEN AUTHORITY. alice is a MEMBER of alpha but not its lead — the
+-- assertion above already proves she cannot grant to herself through the plain function,
+-- so the wrapper must refuse her too. mallory would be the wrong actor here: she is not a
+-- member at all, so set_tenant_context refuses before the wrapper is ever reached, and
+-- the test would pass without testing anything.
+SET ROLE aimee_kb_runtime;
+SELECT set_tenant_context('oidc:test:alice', 910001);
+DO $$
+BEGIN
+  BEGIN
+    PERFORM kb_write_tier_grant_set_reporting('wt-srv-alpha', 910001, 'oidc:test:alice',
+                                              'full', 'oidc:test:alice');
+    RAISE EXCEPTION 'FAIL: the reporting wrapper granted authority to a non-lead';
+  EXCEPTION WHEN insufficient_privilege THEN
+    NULL; -- expected, and raised INSIDE kb_write_tier_grant_set
+  END;
+END $$;
+RESET ROLE;
+
 \echo '== per-user write-tier grant RLS assertions PASSED =='
 ROLLBACK;
