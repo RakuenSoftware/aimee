@@ -45,8 +45,8 @@ class GemmaBaselineContractTests(unittest.TestCase):
             "gemma4_31b", "qwen36_35b_a3b",
         })
         e2b = sweep.MODEL_LOAD_PROFILES["gemma4_e2b"]["synthesis"]
-        self.assertEqual(e2b["workers"], 16)
-        self.assertEqual(e2b["parallel_slots"], 16)
+        self.assertEqual(e2b["workers"], 64)
+        self.assertEqual(e2b["parallel_slots"], 64)
         self.assertGreaterEqual(e2b["context_tokens"] // e2b["parallel_slots"], 4096)
         for profiles in sweep.MODEL_LOAD_PROFILES.values():
             synthesis_profile = profiles["synthesis"]
@@ -61,8 +61,8 @@ class GemmaBaselineContractTests(unittest.TestCase):
                 8192,
             )
         e2b_embedding = sweep.MODEL_LOAD_PROFILES["gemma4_e2b"]["embedding"]
-        self.assertEqual(e2b_embedding["parallel_slots"], 16)
-        self.assertEqual(e2b_embedding["batch_size"], 16)
+        self.assertEqual(e2b_embedding["parallel_slots"], 64)
+        self.assertEqual(e2b_embedding["batch_size"], 64)
 
     def test_frozen_bundle_is_exact_and_paired(self) -> None:
         result = validator.validate(ROOT / "benchmarks/fixtures/gemma4-unified/ab-v1")

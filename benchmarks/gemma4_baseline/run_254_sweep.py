@@ -35,8 +35,8 @@ ETTIN_LOAD_PROFILE = {
 }
 MODEL_LOAD_PROFILES = {
     "gemma4_e2b": {
-        "synthesis": {"workers": 16, "parallel_slots": 16, "context_tokens": 65536, "physical_batch_tokens": 2048},
-        "embedding": {"parallel_slots": 16, "context_tokens": 131072, "physical_batch_tokens": 8192, "batch_size": 16},
+        "synthesis": {"workers": 64, "parallel_slots": 64, "context_tokens": 262144, "physical_batch_tokens": 2048},
+        "embedding": {"parallel_slots": 64, "context_tokens": 524288, "physical_batch_tokens": 8192, "batch_size": 64},
     },
     "gemma4_e4b": {
         "synthesis": {"workers": 12, "parallel_slots": 12, "context_tokens": 49152, "physical_batch_tokens": 2048},
