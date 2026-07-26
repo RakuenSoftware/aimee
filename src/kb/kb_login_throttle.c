@@ -3,6 +3,9 @@
 #include "kb_login_throttle.h"
 
 #include <pthread.h>
+#include <stdint.h>
+#include <time.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -30,12 +33,47 @@ static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
  * silently start attributing one caller's failures to another if that changes. */
 static __thread char g_peer_ip[64];
 
+/* A PER-PROCESS RANDOM SEED, mixed into every key.
+ *
+ * Without it the hash is fully attacker-computable: FNV-1a is public and the
+ * index is hash % SLOTS, so an attacker could search offline for usernames that
+ * land on chosen slots, occupy all SLOTS of them with live records, and have
+ * every other username refused for a window -- turning a fail-closed throttle
+ * into a global denial of service. Seeding makes slot placement unpredictable,
+ * so that search cannot be done ahead of time.
+ *
+ * (The peer budget already makes this expensive: filling the username table takes
+ * SLOTS*BUDGET failures, and a peer is locked out after BUDGET, so it needs about
+ * as many distinct source addresses as there are slots. The seed removes the
+ * targeting ability regardless, and costs nothing.)
+ *
+ * /dev/urandom rather than an OpenSSL call, so this stays linkable against
+ * L_MINIMAL. If it cannot be read the seed falls back to values that still vary
+ * per process; that is weaker but never worse than the fixed constant it
+ * replaces. */
+static uint64_t g_seed = 0;
+static pthread_once_t g_seed_once = PTHREAD_ONCE_INIT;
+
+static void seed_init(void)
+{
+   FILE *f = fopen("/dev/urandom", "rb");
+   if (f)
+   {
+      if (fread(&g_seed, 1, sizeof(g_seed), f) != sizeof(g_seed))
+         g_seed = 0;
+      fclose(f);
+   }
+   if (!g_seed)
+      g_seed = (uint64_t)(uintptr_t)&g_seed ^ ((uint64_t)getpid() << 32) ^ (uint64_t)time(NULL);
+}
+
 static uint64_t hash_key(const char *prefix, const char *s)
 {
-   /* FNV-1a. A non-cryptographic hash is fine: it is not a secret, and a
-    * collision costs an innocent principal some of its budget rather than
-    * granting an attacker any. */
-   uint64_t h = 1469598103934665603ULL;
+   /* FNV-1a over the seed and the key. Not a MAC and not claimed to be one: the
+    * property needed is only that an attacker cannot predict which slot a chosen
+    * string lands on. */
+   pthread_once(&g_seed_once, seed_init);
+   uint64_t h = 1469598103934665603ULL ^ g_seed;
    for (const char *p = prefix; *p; ++p)
       h = (h ^ (unsigned char)*p) * 1099511628211ULL;
    for (const char *p = s; *p; ++p)
@@ -43,9 +81,32 @@ static uint64_t hash_key(const char *prefix, const char *s)
    return h ? h : 1; /* 0 marks a free slot, so never hand it back as a key. */
 }
 
+/* Has this record run its course?
+ *
+ * `now < window_start` means the wall clock moved BACKWARDS (NTP step, a manual
+ * set, a VM restore). Without that arm the subtraction is negative, the window
+ * never elapses, and every identity sharing that slot stays refused until real
+ * time catches up -- an outage triggered by a clock change. A record from the
+ * future is therefore treated as spent. server_http_rate_check takes the same
+ * precaution, for the same reason. */
 static int expired(const slot_t *s, int64_t now)
 {
+   if (now < s->window_start)
+      return 1;
    return now >= s->locked_until && (now - s->window_start) >= KB_LOGIN_THROTTLE_WINDOW_SEC;
+}
+
+/* Clamp a computed wait into a sane, positive range. The subtraction is on
+ * int64_t and the return is int, so a nonsense clock (or a hostile `now`) could
+ * otherwise truncate to a misleading value -- including a negative one, or a
+ * one-second wait that invites an immediate retry. */
+static int clamp_retry(int64_t seconds)
+{
+   if (seconds < 1)
+      return 1;
+   if (seconds > KB_LOGIN_THROTTLE_MAX_LOCK_SEC)
+      return KB_LOGIN_THROTTLE_MAX_LOCK_SEC;
+   return (int)seconds;
 }
 
 /* Find the slot for `key`, or a slot to use for it.
@@ -64,7 +125,19 @@ static slot_t *take_slot(slot_t *table, uint64_t key, int64_t now)
    size_t idx = (size_t)(key % SLOTS);
    slot_t *s = &table[idx];
    if (s->key == key)
+   {
+      /* A record stamped in the FUTURE means the wall clock moved backwards after
+       * it was written. Reset it here, on the identity's own slot, not only on the
+       * claim path below -- a slot found by its own key never reaches expired(),
+       * so without this the record stays locked until real time catches up. */
+      if (now < s->window_start)
+      {
+         s->window_start = now;
+         s->locked_until = 0;
+         s->fails = 0;
+      }
       return s;
+   }
    if (s->key == 0 || expired(s, now))
    {
       /* Free, or a spent record from another identity: reuse it, reset. */
@@ -89,16 +162,13 @@ static int check_one(slot_t *table, uint64_t key, int64_t now)
       slot_t *occ = &table[(size_t)(key % SLOTS)];
       int64_t until = occ->locked_until > 0 ? occ->locked_until
                                             : occ->window_start + KB_LOGIN_THROTTLE_WINDOW_SEC;
-      int retry = (int)(until - now);
-      return retry > 0 ? retry : 1;
+      return clamp_retry(until - now);
    }
    if (now < s->locked_until)
-   {
-      int retry = (int)(s->locked_until - now);
-      return retry > 0 ? retry : 1;
-   }
-   /* A window that has run out with the budget unspent starts fresh. */
-   if ((now - s->window_start) >= KB_LOGIN_THROTTLE_WINDOW_SEC)
+      return clamp_retry(s->locked_until - now);
+   /* A window that has run out with the budget unspent starts fresh -- as does one
+    * whose start is in the future, which means the clock moved backwards. */
+   if (now < s->window_start || (now - s->window_start) >= KB_LOGIN_THROTTLE_WINDOW_SEC)
    {
       s->window_start = now;
       s->fails = 0;
@@ -111,7 +181,8 @@ static void fail_one(slot_t *table, uint64_t key, int64_t now)
    slot_t *s = take_slot(table, key, now);
    if (!s)
       return; /* Shared slot already refusing; nothing to charge. */
-   if ((now - s->window_start) >= KB_LOGIN_THROTTLE_WINDOW_SEC && now >= s->locked_until)
+   if ((now < s->window_start || (now - s->window_start) >= KB_LOGIN_THROTTLE_WINDOW_SEC) &&
+       now >= s->locked_until)
    {
       s->window_start = now;
       s->fails = 0;
@@ -158,10 +229,18 @@ void kb_login_throttle_set_peer(const char *peer_ip)
    snprintf(g_peer_ip, sizeof(g_peer_ip), "%s", peer_ip ? peer_ip : "");
 }
 
+/* A negative clock is not a real time; treat it as the epoch rather than letting
+ * it flow into the window and lockout arithmetic. */
+static int64_t sane_now(int64_t now)
+{
+   return now < 0 ? 0 : now;
+}
+
 int kb_login_throttle_check(const char *username, int64_t now)
 {
    if (!username)
       username = "";
+   now = sane_now(now);
    pthread_mutex_lock(&g_lock);
    int a = check_one(g_peer, hash_key("peer:", peer_or_unknown()), now);
    int b = check_one(g_user, hash_key("user:", username), now);
@@ -173,6 +252,7 @@ void kb_login_throttle_record_failure(const char *username, int64_t now)
 {
    if (!username)
       username = "";
+   now = sane_now(now);
    pthread_mutex_lock(&g_lock);
    fail_one(g_peer, hash_key("peer:", peer_or_unknown()), now);
    fail_one(g_user, hash_key("user:", username), now);
