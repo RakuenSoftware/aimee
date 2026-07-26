@@ -48,9 +48,10 @@ Concretely:
 
 - **`done/`** — the subject shipped in a merged PR. The file is a historical
   record, not live work.
-- **`rejected/`** — the proposal was reviewed and declined. The reason is
-  recorded in the file. A rejected proposal is not a failure of its author;
-  it is a documented decision.
+- **`rejected/`** — the proposal was reviewed and declined, or replaced by a
+  successor without shipping. The reason or successor is recorded in the file.
+  A rejected proposal is not a failure of its author; it is a documented
+  decision.
 - **`deferred/`** — the proposal is parked. It is neither in flight nor
   rejected. It may be revived by a future PR that moves it back into
   `pending/`.
@@ -58,8 +59,16 @@ Concretely:
 ### Supersession
 
 A superseded proposal carries a `## Successor` header as informational
-metadata, with the path or PR reference of the replacement proposal. The
-header is informational only; the move itself (from `pending/`/`accepted/`
+metadata. Put the replacement path on one line, optionally followed by its PR
+URL on the next, for example:
+
+```
+## Successor
+docs/proposals/pending/replacement.md
+https://github.com/example/aimee/pull/123
+```
+
+The header is informational only; the move itself (from `pending/`/`accepted/`
 into `done/` or `rejected/`) is what records that the proposal is closed.
 The `## Successor` header lets a future reader find the replacement without
 having to reconstruct the decision from the index.
