@@ -10,6 +10,7 @@
 #include "dstr.h"
 #include "cJSON.h"
 #include "git_verify.h"
+#include "model_registry.h"
 #include "log.h"
 #include <ctype.h>
 
@@ -323,6 +324,52 @@ char *delegate_prompt_limit(const char *prompt, int token_budget)
       char *r = dstr_steal(&out);
       return r ? r : safe_strdup(prompt);
    }
+}
+
+/* The input budget a model can actually accept, rather than a fixed constant.
+ *
+ * DELEGATE_TOKEN_BUDGET_DEFAULT is 20000 tokens. Every delegate whose prompt
+ * exceeded that was tail-truncated -- 1807 times on one deployment -- discarding
+ * whatever sat at the end of the system prompt, with only a WARN to say so. A
+ * model advertising a 200K or 1M context was still being cut at 20K.
+ *
+ * Budget = context window - max_output: the window is what the model holds, and
+ * the output ceiling has to be left free or the reply has nowhere to go. An
+ * agent's explicit middleware.context_window wins over the registry, matching
+ * agent_effective_context_window() in the runtime.
+ *
+ * Returns 0 when nothing is known, so the caller keeps its existing default. */
+int delegate_token_budget_for_agent(const char *model, int agent_context_window)
+{
+   int window = agent_context_window > 0 ? agent_context_window : model_context_window(model);
+   if (window <= 0)
+      return 0;
+   int reserve = model_max_output(NULL, model);
+   if (reserve > 0 && reserve < window)
+      window -= reserve;
+   if (window < DELEGATE_TOKEN_BUDGET_MIN_TASK)
+      window = DELEGATE_TOKEN_BUDGET_MIN_TASK;
+   return window;
+}
+
+/* The budget that fits EVERY agent still eligible after routing. The agent is
+ * chosen downstream, so the prompt must fit whichever one wins; the smallest
+ * eligible window is the only safe answer. */
+int delegate_token_budget_for_agents(const agent_config_t *cfg)
+{
+   if (!cfg || cfg->agent_count <= 0)
+      return 0;
+   int smallest = 0;
+   for (int i = 0; i < cfg->agent_count; i++)
+   {
+      int budget = delegate_token_budget_for_agent(cfg->agents[i].model,
+                                                   cfg->agents[i].middleware.context_window);
+      if (budget <= 0)
+         continue;
+      if (smallest == 0 || budget < smallest)
+         smallest = budget;
+   }
+   return smallest;
 }
 
 int delegate_token_budget_load(const char *project_root, const char *role)
