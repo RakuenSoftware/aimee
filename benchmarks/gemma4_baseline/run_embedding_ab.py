@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import sys
 import time
 import urllib.error
@@ -75,6 +76,19 @@ def normalize(vectors: np.ndarray) -> np.ndarray:
     return vectors / norms
 
 
+def atomic_write_json(path: Path, value: Any) -> None:
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def atomic_save_npy(path: Path, value: np.ndarray) -> None:
+    temporary = path.with_name(path.name + ".tmp")
+    with temporary.open("wb") as handle:
+        np.save(handle, value)
+    os.replace(temporary, path)
+
+
 def embed_document_cache(
     endpoint: str,
     model: str,
@@ -88,23 +102,51 @@ def embed_document_cache(
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
     matrix_path = output_dir / f"doc_vectors_{label}.npy"
     ids_path = output_dir / f"doc_ids_{label}.json"
+    telemetry_path = output_dir / f"doc_telemetry_{label}.json"
     if matrix_path.exists() and ids_path.exists():
         cached_ids = json.loads(ids_path.read_text(encoding="utf-8"))
         if cached_ids != ids:
             raise RuntimeError("document embedding cache IDs do not match the frozen suite")
-        return np.load(matrix_path), []
+        telemetry = json.loads(telemetry_path.read_text(encoding="utf-8")) if telemetry_path.exists() else []
+        return np.load(matrix_path), telemetry
+
+    parts_dir = output_dir / f"doc_vectors_{label}.parts"
+    parts_dir.mkdir(exist_ok=True)
+    state_path = parts_dir / "state.json"
+    expected_state = {"batch_size": batch_size, "ids": ids}
+    if state_path.exists():
+        if json.loads(state_path.read_text(encoding="utf-8")) != expected_state:
+            raise RuntimeError("partial document embedding cache does not match the frozen suite or batch size")
+    else:
+        atomic_write_json(state_path, expected_state)
+
     batches: list[np.ndarray] = []
     telemetry: list[dict[str, Any]] = []
     for offset in range(0, len(ids), batch_size):
         batch_ids = ids[offset : offset + batch_size]
-        vectors, timing = request_embeddings(endpoint, model, [corpus[doc_id] for doc_id in batch_ids], timeout, gateway_batch)
+        part_path = parts_dir / f"{offset:08d}.npy"
+        timing_path = parts_dir / f"{offset:08d}.json"
+        if part_path.exists():
+            vectors = np.load(part_path)
+            timing = json.loads(timing_path.read_text(encoding="utf-8"))
+        else:
+            vectors, timing = request_embeddings(
+                endpoint, model, [corpus[doc_id] for doc_id in batch_ids], timeout, gateway_batch
+            )
+            atomic_write_json(timing_path, timing)
+            atomic_save_npy(part_path, vectors)
+        if vectors.ndim != 2 or vectors.shape[0] != len(batch_ids):
+            raise RuntimeError(f"invalid partial document embedding shape {vectors.shape} at offset {offset}")
+        if batches and vectors.shape[1] != batches[0].shape[1]:
+            raise RuntimeError(f"partial document embedding width changed at offset {offset}")
         batches.append(vectors)
         telemetry.append(timing)
         if len(telemetry) % 100 == 0:
             print(f"{label}: embedded {min(offset + batch_size, len(ids))}/{len(ids)} documents", flush=True)
     matrix = np.concatenate(batches, axis=0)
-    np.save(matrix_path, matrix)
-    ids_path.write_text(json.dumps(ids) + "\n", encoding="utf-8")
+    atomic_save_npy(matrix_path, matrix)
+    atomic_write_json(telemetry_path, telemetry)
+    atomic_write_json(ids_path, ids)
     return matrix, telemetry
 
 

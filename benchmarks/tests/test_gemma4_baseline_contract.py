@@ -121,6 +121,35 @@ class GemmaBaselineContractTests(unittest.TestCase):
         self.assertEqual(vectors.tolist(), [[1.0, 2.0]])
         self.assertEqual(timing["attempts"], 2)
 
+    def test_embedding_document_batches_resume_from_partial_cache(self) -> None:
+        if embedding is None:
+            self.skipTest("numpy is not installed")
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            ids = ["a", "b", "c"]
+            corpus = {key: key for key in ids}
+            responses = [
+                (embedding.np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=embedding.np.float32), {"latency_s": 1.0}),
+                (embedding.np.asarray([[1.0, 1.0]], dtype=embedding.np.float32), {"latency_s": 2.0}),
+            ]
+            with mock.patch.object(embedding, "request_embeddings", side_effect=responses) as request:
+                matrix, telemetry = embedding.embed_document_cache(
+                    "http://unused", "test", ids, corpus, output, "resume", 2, 1, False
+                )
+            self.assertEqual(request.call_count, 2)
+            self.assertEqual(matrix.shape, (3, 2))
+            self.assertEqual([row["latency_s"] for row in telemetry], [1.0, 2.0])
+
+            (output / "doc_vectors_resume.npy").unlink()
+            (output / "doc_ids_resume.json").unlink()
+            (output / "doc_telemetry_resume.json").unlink()
+            with mock.patch.object(embedding, "request_embeddings", side_effect=AssertionError("repeated")):
+                resumed, resumed_telemetry = embedding.embed_document_cache(
+                    "http://unused", "test", ids, corpus, output, "resume", 2, 1, False
+                )
+            self.assertEqual(resumed.tolist(), matrix.tolist())
+            self.assertEqual(resumed_telemetry, telemetry)
+
     def test_reranker_resume_retries_failed_case(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
