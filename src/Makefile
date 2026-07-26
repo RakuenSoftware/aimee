@@ -257,7 +257,7 @@ else ifeq ($(UNAME_S),Darwin)
         posix/platform_ipc.c posix/platform_path.c posix/platform_process.c \
         posix/platform_random.c posix/platform_net.c \
         mac/platform_event.c mac/platform_ipc.c mac/platform_process.c \
-        mac/secret_store.c posix/util.c posix/pam_auth.c
+        mac/secret_store.c posix/util.c
     PLATFORM_EXTRA_SRCS = \
         posix/history.c posix/server_main.c \
         posix/cli_client.c posix/cli_main.c \
@@ -273,7 +273,7 @@ else
         posix/platform_ipc.c posix/platform_path.c posix/platform_process.c \
         posix/platform_random.c posix/platform_net.c \
         linux/platform_event.c linux/platform_ipc.c linux/platform_process.c \
-        linux/secret_store.c posix/util.c posix/pam_auth.c
+        linux/secret_store.c posix/util.c
     PLATFORM_EXTRA_SRCS = \
         posix/history.c posix/server_main.c \
         posix/cli_client.c posix/cli_main.c \

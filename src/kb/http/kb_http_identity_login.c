@@ -11,15 +11,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Whether a PAM mediator is configured. PAM is increment 4b, so today this is
- * always 0 — but the declaration route needs a definite answer now, and a
- * hard-coded "oidc" would become a lie the moment PAM lands. Keeping the
- * question in one named function means 4b changes this and nothing else. */
-static int pam_mode_configured(void)
-{
-   return 0;
-}
-
 static int json_error(char *out_buf, int out_cap, int status, const char *message)
 {
    cJSON *o = cJSON_CreateObject();
@@ -54,22 +45,22 @@ static int json_body(char *out_buf, int out_cap, int status, cJSON *o)
  * is exactly what it needs and nothing that helps it attack either flow. */
 static int get_auth_mode(char *out_buf, int out_cap)
 {
+   /* OIDC when it is configured, PAM otherwise. That is the whole rule (§3's
+    * "two mutually-exclusive modes per kb"), and PAM needs no probe of its own:
+    * the PAM login is smoothgui/auth, already in production and shared with
+    * SmoothNAS, so it is simply what a kb does when no issuer is set.
+    *
+    * A configured-but-broken OIDC profile still falls through to PAM — a working
+    * fallback beats reporting a mode nobody can use — but it gets a log line,
+    * because an operator who typo'd the issuer would otherwise see "pam" and have
+    * nowhere to look. */
    kb_oidc_login_config_t cfg;
    kb_oidc_login_result_t rc = kb_oidc_login_config_from_env(&cfg);
-   const char *mode = "none";
-   if (rc == KB_OIDC_LOGIN_OK)
-      mode = "oidc";
-   else if (pam_mode_configured())
-      mode = "pam";
-   else if (rc == KB_OIDC_LOGIN_INVALID)
-      /* Configured but broken. The mode is still "none" — nothing can be logged
-       * in with — but this is the one case worth a log line, because an operator
-       * who set the profile up and typo'd it would otherwise see a silent
-       * "none" and have nowhere to look. */
+   if (rc == KB_OIDC_LOGIN_INVALID)
       LOG_WARN("kb.oidc.login",
-               "an OIDC login profile is configured but unusable; login mode reported as none");
+               "an OIDC login profile is configured but unusable; falling back to pam");
    cJSON *o = cJSON_CreateObject();
-   cJSON_AddStringToObject(o, "mode", mode);
+   cJSON_AddStringToObject(o, "mode", rc == KB_OIDC_LOGIN_OK ? "oidc" : "pam");
    return json_body(out_buf, out_cap, 200, o);
 }
 

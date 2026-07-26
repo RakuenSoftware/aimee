@@ -85,27 +85,30 @@ static void test_auth_mode(void)
 {
    char out[4096] = "";
 
+   /* No OIDC issuer -> PAM. The PAM login is smoothgui/auth, already in
+    * production and shared with SmoothNAS, so it is what a kb offers by default
+    * rather than something that needs its own probe. */
    env_clear();
    assert(route("GET", "/v1/identity/auth-mode", NULL, out, sizeof(out)) == 200);
-   assert(strstr(out, "\"mode\":\"none\""));
+   assert(strstr(out, "\"mode\":\"pam\""));
 
+   /* OIDC configured -> OIDC, and PAM is off. Mutually exclusive (§3). */
    env_configure();
    assert(route("GET", "/v1/identity/auth-mode", NULL, out, sizeof(out)) == 200);
    assert(strstr(out, "\"mode\":\"oidc\""));
-   /* THE property: the declaration says which flow to start and nothing more. An
-    * unauthenticated caller must not learn the issuer, the client id or the
-    * endpoints from it. */
+   assert(!strstr(out, "pam"));
+   /* The declaration says which flow to start and nothing more: an
+    * unauthenticated caller must not learn the issuer, client id or endpoints. */
    assert(!strstr(out, "idp.example"));
    assert(!strstr(out, "aimee-kb"));
    assert(!strstr(out, "authorize"));
    assert(!strstr(out, "client_id"));
 
-   /* A configured-but-broken profile reports "none": nothing can be logged in
-    * with, so claiming "oidc" would send every client into a flow that cannot
-    * complete. */
+   /* A broken OIDC profile falls back to PAM rather than reporting a mode nobody
+    * can use. Logged, but still a working answer. */
    setenv("AIMEE_KB_OIDC_LOGIN_AUTHORIZE_URL", "http://idp.example/authorize", 1);
    assert(route("GET", "/v1/identity/auth-mode", NULL, out, sizeof(out)) == 200);
-   assert(strstr(out, "\"mode\":\"none\""));
+   assert(strstr(out, "\"mode\":\"pam\""));
 
    env_clear();
    assert(route("POST", "/v1/identity/auth-mode", NULL, out, sizeof(out)) == 405);
