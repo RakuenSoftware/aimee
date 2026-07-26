@@ -84,6 +84,9 @@ int db2_write_tier_grant_list_ex(const char *server_id, int64_t team_id, int inc
    /* Recorded so a test can prove the filter went DOWN to the query rather than being applied
     * to whatever rows came back. */
    stub_last_had_subject = (subject && subject[0]) ? 1 : 0;
+   /* The VALUE too, not just its presence: the subject arrives percent-escaped on the wire, so
+    * a test has to be able to prove which principal was actually asked about. */
+   snprintf(stub_last_subject, sizeof(stub_last_subject), "%s", subject ? subject : "");
    stub_last_team = team_id;
    snprintf(stub_last_server, sizeof(stub_last_server), "%s", server_id ? server_id : "");
    if (count)
@@ -622,6 +625,77 @@ static void test_small_buffer(void)
    assert(strstr(tiny, "error"));
 }
 
+/* --- The subject arrives PERCENT-ESCAPED. kb_client_query_escape() escapes it before it goes
+ * into the query string, because an oidc:<iss>:<sub> subject legitimately contains ':' and may
+ * contain a literal '%3A' of its own. Reading it back raw made every prefixed subject fail the
+ * canonical-identity check -- `oidc:test:alice` arrives as `oidc%3Atest%3Aalice`, which has no
+ * ':' at all and is therefore judged a bare username, where '%' is forbidden. `show` and
+ * `list --subject` 400'd for every federated identity while a bare username worked. Found by
+ * scripts/run-grant-explore-live.sh probing set/show for the same subject. --- */
+static void test_list_subject_is_percent_decoded(void)
+{
+   char out[8192] = "";
+
+   /* The exact wire form the client produces for oidc:iss:alice. */
+   reset();
+   row(0, "oidc:iss:alice", KB_IDENTITY_TIER_DATA, "");
+   assert(route("GET", "/v1/write-tier-grants",
+                "server_id=srv1&team_id=910001&subject=oidc%3Aiss%3Aalice", NULL, out,
+                sizeof(out)) == 200);
+   /* Decoded before validation AND pushed down to the query, not filtered afterwards. */
+   assert(!strcmp(stub_last_subject, "oidc:iss:alice"));
+
+   /* cert: subjects too -- '=' is escaped by the client even though the grammar allows it raw. */
+   reset();
+   row(0, "cert:CN=aimee-ca:a1b", KB_IDENTITY_TIER_FULL, "");
+   assert(route("GET", "/v1/write-tier-grants",
+                "server_id=srv1&team_id=910001&subject=cert%3ACN%3Daimee-ca%3Aa1b", NULL, out,
+                sizeof(out)) == 200);
+   assert(!strcmp(stub_last_subject, "cert:CN=aimee-ca:a1b"));
+
+   /* EXACTLY ONE level of decoding. A subject whose identity contains a literal '%3A' is
+    * escaped to '%253A' and must come back as '%3A' -- decoding twice would turn it into ':'
+    * and silently address a DIFFERENT principal. */
+   reset();
+   row(0, "oidc:a%3Ab:c%25d", KB_IDENTITY_TIER_DATA, "");
+   assert(route("GET", "/v1/write-tier-grants",
+                "server_id=srv1&team_id=910001&subject=oidc%3Aa%253Ab%3Ac%2525d", NULL, out,
+                sizeof(out)) == 200);
+   assert(!strcmp(stub_last_subject, "oidc:a%3Ab:c%25d"));
+
+   /* A bare username still works: it needs no escaping and must not be altered. */
+   reset();
+   row(0, "alice", KB_IDENTITY_TIER_DATA, "");
+   assert(route("GET", "/v1/write-tier-grants", "server_id=srv1&team_id=910001&subject=alice", NULL,
+                out, sizeof(out)) == 200);
+   assert(!strcmp(stub_last_subject, "alice"));
+}
+
+static void test_list_malformed_subject_is_refused_not_widened(void)
+{
+   char out[8192] = "";
+
+   /* A malformed escape must be REFUSED. Demoting it to "no subject filter" would answer a
+    * request about one principal by listing every grant on the server -- a wider disclosure
+    * than was asked for, and a wrong answer. */
+   const char *bad[] = {
+       "server_id=srv1&team_id=910001&subject=oidc%3",  /* truncated escape */
+       "server_id=srv1&team_id=910001&subject=oidc%ZZ", /* non-hex escape */
+       "server_id=srv1&team_id=910001&subject=%",       /* a lone percent */
+       "server_id=srv1&team_id=910001&subject=a%00b",   /* NUL would truncate */
+       "server_id=srv1&team_id=910001&subject=a%0Ab",   /* a control byte */
+   };
+   for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i)
+   {
+      reset();
+      row(0, "oidc:iss:alice", KB_IDENTITY_TIER_DATA, "");
+      int st = route("GET", "/v1/write-tier-grants", bad[i], NULL, out, sizeof(out));
+      assert(st == 400);
+      /* and it must not have reached the query at all */
+      assert(stub_last_subject[0] == '\0');
+   }
+}
+
 int main(void)
 {
    test_not_our_routes();
@@ -632,6 +706,8 @@ int main(void)
    test_db_failures();
    test_revoke();
    test_list();
+   test_list_subject_is_percent_decoded();
+   test_list_malformed_subject_is_refused_not_widened();
    test_small_buffer();
    printf("test_kb_http_grants: ok\n");
    return 0;

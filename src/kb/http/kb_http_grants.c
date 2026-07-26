@@ -141,9 +141,64 @@ static int tier_from_wire(const char *s, kb_identity_tier_t *out)
    return 0;
 }
 
+/* Percent-decode ONE level, in place, returning 0 on success and -1 on a malformed escape.
+ *
+ * Required because kb_client_query_escape() escapes the subject before putting it in the query
+ * string — it has to, since an oidc:<iss>:<sub> subject legitimately contains ':' and may
+ * contain a literal '%3A' of its own. Reading the value back raw made every prefixed subject
+ * fail the canonical-identity check: `oidc:test:alice` arrives as `oidc%3Atest%3Aalice`, which
+ * contains no ':' at all and so is judged as a bare username, which forbids '%'. The effect was
+ * that `show` and `list --subject` 400'd for every federated identity while a bare username
+ * worked, i.e. exactly the subjects this feature exists to grant.
+ *
+ * Exactly ONE level, which is what round-trips the grammar: a subject containing a literal
+ * '%3A' is escaped to '%253A' and must decode back to '%3A', not to ':'.
+ *
+ * A malformed escape is REFUSED rather than passed through: a stray '%' means the caller's
+ * intent is unknown, and guessing at an identity is not something to do quietly. '+' is left
+ * alone — this is a query parameter carrying an identity, not an HTML form field, and the
+ * escaper emits %20 for a space, so treating '+' as a space would corrupt a subject. */
+static int hexval(char c)
+{
+   if (c >= '0' && c <= '9')
+      return c - '0';
+   if (c >= 'a' && c <= 'f')
+      return c - 'a' + 10;
+   if (c >= 'A' && c <= 'F')
+      return c - 'A' + 10;
+   return -1;
+}
+
+static int pct_decode_inplace(char *s)
+{
+   char *w = s;
+   for (const char *r = s; *r; ++r)
+   {
+      if (*r != '%')
+      {
+         *w++ = *r;
+         continue;
+      }
+      int hi = hexval(r[1]), lo = r[1] ? hexval(r[2]) : -1;
+      if (hi < 0 || lo < 0)
+         return -1;
+      unsigned char c = (unsigned char)((hi << 4) | lo);
+      /* NUL would truncate the value and C0/DEL have no business in an identity. */
+      if (c < 0x20 || c == 0x7F)
+         return -1;
+      *w++ = (char)c;
+      r += 2;
+   }
+   *w = '\0';
+   return 0;
+}
+
 /* Read one query parameter at a KEY BOUNDARY. The generic helper elsewhere in this layer
  * does strstr(qs, "key="), which matches inside "?my_team_id=" — untidy for a filter and
- * wrong for anything that selects an authorization scope, which team_id does. */
+ * wrong for anything that selects an authorization scope, which team_id does.
+ *
+ * The value is percent-decoded before it is returned, so every caller sees the value the
+ * client sent rather than its wire encoding. */
 static int query_param(const char *qs, const char *key, char *out, size_t cap)
 {
    if (cap)
@@ -163,6 +218,13 @@ static int query_param(const char *qs, const char *key, char *out, size_t cap)
             return -1; /* refused, not truncated */
          memcpy(out, eq + 1, n);
          out[n] = '\0';
+         /* Decoding only ever shortens, so it cannot overflow the cap checked above. */
+         if (pct_decode_inplace(out) != 0)
+         {
+            if (cap)
+               out[0] = '\0';
+            return -1;
+         }
          return 1;
       }
       if (!amp)
@@ -372,7 +434,13 @@ static int get_list(const char *query_string, char *out_buf, int out_cap)
    if (query_param(query_string, "server_id", server_id, sizeof(server_id)) != 1 ||
        !server_id_valid(server_id) || query_team_id(query_string, &team_id) != 0)
       return json_error(out_buf, out_cap, 400, "server_id and an integer team_id are required");
-   int have_subject = query_param(query_string, "subject", subject, sizeof(subject)) == 1;
+   /* A malformed or oversized subject must be REFUSED, never demoted to "no filter": treating
+    * it as absent would answer a request for one subject by listing every grant on the server,
+    * which is both a wider disclosure than was asked for and a wrong answer. */
+   int sub_rc = query_param(query_string, "subject", subject, sizeof(subject));
+   if (sub_rc < 0)
+      return json_error(out_buf, out_cap, 400, "subject is not a canonical identity");
+   int have_subject = sub_rc == 1;
    if (have_subject && !subject_valid(subject))
       return json_error(out_buf, out_cap, 400, "subject is not a canonical identity");
    /* Anything other than an explicit 1/true widens nothing — an unrecognised value must
