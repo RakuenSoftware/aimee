@@ -35,28 +35,28 @@ ETTIN_LOAD_PROFILE = {
 }
 MODEL_LOAD_PROFILES = {
     "gemma4_e2b": {
-        "synthesis": {"workers": 64, "parallel_slots": 64, "context_tokens": 262144, "physical_batch_tokens": 2048},
-        "embedding": {"parallel_slots": 64, "context_tokens": 524288, "physical_batch_tokens": 8192, "batch_size": 64},
+        "synthesis": {"workers": 64, "parallel_slots": 64, "context_tokens": 131072, "physical_batch_tokens": 2048},
+        "embedding": {"parallel_slots": 64, "context_tokens": 131072, "physical_batch_tokens": 2048, "batch_size": 64},
     },
     "gemma4_e4b": {
-        "synthesis": {"workers": 64, "parallel_slots": 64, "context_tokens": 262144, "physical_batch_tokens": 2048},
-        "embedding": {"parallel_slots": 64, "context_tokens": 524288, "physical_batch_tokens": 8192, "batch_size": 64},
+        "synthesis": {"workers": 64, "parallel_slots": 64, "context_tokens": 131072, "physical_batch_tokens": 2048},
+        "embedding": {"parallel_slots": 64, "context_tokens": 131072, "physical_batch_tokens": 2048, "batch_size": 64},
     },
     "gemma4_12b": {
-        "synthesis": {"workers": 32, "parallel_slots": 32, "context_tokens": 131072, "physical_batch_tokens": 2048},
-        "embedding": {"parallel_slots": 32, "context_tokens": 262144, "physical_batch_tokens": 8192, "batch_size": 32},
+        "synthesis": {"workers": 32, "parallel_slots": 32, "context_tokens": 65536, "physical_batch_tokens": 2048},
+        "embedding": {"parallel_slots": 32, "context_tokens": 65536, "physical_batch_tokens": 2048, "batch_size": 32},
     },
     "gemma4_26b_a4b": {
-        "synthesis": {"workers": 16, "parallel_slots": 16, "context_tokens": 65536, "physical_batch_tokens": 2048},
-        "embedding": {"parallel_slots": 16, "context_tokens": 131072, "physical_batch_tokens": 8192, "batch_size": 16},
+        "synthesis": {"workers": 16, "parallel_slots": 16, "context_tokens": 32768, "physical_batch_tokens": 2048},
+        "embedding": {"parallel_slots": 16, "context_tokens": 32768, "physical_batch_tokens": 2048, "batch_size": 16},
     },
     "gemma4_31b": {
-        "synthesis": {"workers": 8, "parallel_slots": 8, "context_tokens": 32768, "physical_batch_tokens": 2048},
-        "embedding": {"parallel_slots": 8, "context_tokens": 65536, "physical_batch_tokens": 8192, "batch_size": 8},
+        "synthesis": {"workers": 8, "parallel_slots": 8, "context_tokens": 16384, "physical_batch_tokens": 2048},
+        "embedding": {"parallel_slots": 8, "context_tokens": 16384, "physical_batch_tokens": 2048, "batch_size": 8},
     },
     "qwen36_35b_a3b": {
-        "synthesis": {"workers": 4, "parallel_slots": 4, "context_tokens": 16384, "physical_batch_tokens": 2048},
-        "embedding": {"parallel_slots": 4, "context_tokens": 32768, "physical_batch_tokens": 8192, "batch_size": 4},
+        "synthesis": {"workers": 4, "parallel_slots": 4, "context_tokens": 8192, "physical_batch_tokens": 2048},
+        "embedding": {"parallel_slots": 4, "context_tokens": 8192, "physical_batch_tokens": 2048, "batch_size": 4},
     },
 }
 
@@ -145,7 +145,8 @@ def start_server(
     args = [
         "run", "--detach", "--rm", "--name", "gemma4-baseline-server", "--network", "host",
         "--device", "/dev/dri:/dev/dri", "--volume", f"{root}:/bench", "--entrypoint", "/opt/llama/llama-server",
-        image, "-m", f"/bench/models/{model_file}", "-ngl", "99", "-fa", "on", "--host", "0.0.0.0", "--port", "8920",
+        image, "-m", f"/bench/models/{model_file}", "-ngl", "99", "-fa", "on", "--cache-ram", "0",
+        "--host", "0.0.0.0", "--port", "8920",
     ]
     if mode == "synthesis":
         args += [

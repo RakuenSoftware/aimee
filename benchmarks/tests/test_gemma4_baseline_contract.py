@@ -47,18 +47,18 @@ class GemmaBaselineContractTests(unittest.TestCase):
         e2b = sweep.MODEL_LOAD_PROFILES["gemma4_e2b"]["synthesis"]
         self.assertEqual(e2b["workers"], 64)
         self.assertEqual(e2b["parallel_slots"], 64)
-        self.assertGreaterEqual(e2b["context_tokens"] // e2b["parallel_slots"], 4096)
+        self.assertGreaterEqual(e2b["context_tokens"] // e2b["parallel_slots"], 2048)
         for profiles in sweep.MODEL_LOAD_PROFILES.values():
             synthesis_profile = profiles["synthesis"]
             self.assertEqual(synthesis_profile["workers"], synthesis_profile["parallel_slots"])
             self.assertGreaterEqual(
                 synthesis_profile["context_tokens"] // synthesis_profile["parallel_slots"],
-                4096,
+                2048,
             )
             embedding_profile = profiles["embedding"]
             self.assertGreaterEqual(
                 embedding_profile["context_tokens"] // embedding_profile["parallel_slots"],
-                8192,
+                2048,
             )
         e2b_embedding = sweep.MODEL_LOAD_PROFILES["gemma4_e2b"]["embedding"]
         self.assertEqual(e2b_embedding["parallel_slots"], 64)

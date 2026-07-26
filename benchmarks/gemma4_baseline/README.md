@@ -154,12 +154,18 @@ runs the full 10,000 synthesis and 10,000 embedding cases, and restores the exac
 production container in a `finally` block:
 
 Synthesis concurrency is an explicit per-model load profile rather than a fixed
-two-request cap. E2B uses 64 client workers and 64 server slots with a 262,144-token
-aggregate context (4,096 tokens per slot). Progress state and hardware artifacts
+two-request cap. E2B uses 64 client workers and 64 server slots with a 131,072-token
+aggregate context (2,048 tokens per slot). Progress state and hardware artifacts
 record the selected profile. Larger models use progressively smaller profiles to
 leave room for their weights on the 24 GiB card. E2B embedding batches contain 64
-inputs and run against 64 server slots with 8,192 context tokens available to
+inputs and run against 64 server slots with 2,048 context tokens available to
 each input instead of being serialized through one slot.
+
+Model benchmark servers disable llama.cpp's prompt cache. The frozen corpus is at
+most 6,229 characters per document, and observed E2B synthesis traffic is at most
+1,557 total tokens, so allocating a large training-length context to every slot
+would consume VRAM without representing this workload. Context capacity and slot
+count are tuned independently.
 
 E4B also starts at 64 slots. The 12B profile starts at 32, 26B at 16, 31B at 8,
 and Qwen 3.6 35B-A3B at 4. Before a complete 12B-or-larger view, run a short
