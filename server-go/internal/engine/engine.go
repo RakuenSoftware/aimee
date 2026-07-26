@@ -561,30 +561,57 @@ func positiveIntParam(node wfe.Node, name string) (int, bool) {
 // clearing these is saying something about the plan or the request, and the park
 // is where a human looks first -- "convergence_limit" alone sends them digging
 // through the feedback artifact to find out what never got fixed.
+//
+// The chairman's findings come first. Its verdict overrides the seats', and its
+// original-request alignment finding is the closest thing the run has to a stated
+// reason the work failed, so it is what a human needs to read first. Each entry
+// carries its recommendation, because "what was wrong" without "what to do" still
+// leaves the reader opening artifacts.
 func unresolvedBlockers(feedback *wfe.ReviewFeedback) string {
 	if feedback == nil {
 		return ""
 	}
-	summaries := make([]string, 0, 3)
-	for _, finding := range feedback.Findings {
+	blocking := func(finding wfe.Finding) bool {
 		switch strings.ToLower(strings.TrimSpace(finding.Severity)) {
 		case "foundational", "blocking":
-		default:
-			continue
+			return strings.TrimSpace(finding.Summary) != ""
 		}
-		summary := strings.TrimSpace(finding.Summary)
-		if summary == "" {
-			continue
+		return false
+	}
+	ordered := make([]wfe.Finding, 0, len(feedback.Findings))
+	for _, finding := range feedback.Findings {
+		if blocking(finding) && strings.EqualFold(strings.TrimSpace(finding.Persona), "chairman") {
+			ordered = append(ordered, finding)
 		}
-		if len(summary) > 160 {
-			summary = summary[:157] + "..."
+	}
+	for _, finding := range feedback.Findings {
+		if blocking(finding) && !strings.EqualFold(strings.TrimSpace(finding.Persona), "chairman") {
+			ordered = append(ordered, finding)
 		}
-		summaries = append(summaries, summary)
-		// Three is enough to characterise the blockage; the full set stays in the
-		// feedback artifact, and an unbounded detail would bloat every event row.
-		if len(summaries) == 3 {
+	}
+
+	clip := func(text string, limit int) string {
+		text = strings.Join(strings.Fields(text), " ")
+		if len(text) > limit {
+			return text[:limit-3] + "..."
+		}
+		return text
+	}
+	entries := make([]string, 0, 3)
+	for _, finding := range ordered {
+		entry := clip(finding.Summary, 200)
+		if rec := clip(finding.Recommendation, 120); rec != "" {
+			entry += " -> " + rec
+		}
+		if persona := strings.TrimSpace(finding.Persona); persona != "" {
+			entry = "[" + persona + "] " + entry
+		}
+		entries = append(entries, entry)
+		// Three is enough to characterise the blockage; the full review stays in
+		// the feedback artifact, and an unbounded detail would bloat every event.
+		if len(entries) == 3 {
 			break
 		}
 	}
-	return strings.Join(summaries, " | ")
+	return strings.Join(entries, " | ")
 }

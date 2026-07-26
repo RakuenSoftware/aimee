@@ -1431,15 +1431,24 @@ func TestUnresolvedBlockersSummarisesWhatHeldTheGate(t *testing.T) {
 		t.Fatalf("no feedback must summarise to nothing, got %q", got)
 	}
 	feedback := &wfe.ReviewFeedback{Findings: []wfe.Finding{
-		{Severity: "suggestion", Summary: "could be tidier"},
-		{Severity: "foundational", Summary: "the declared subject is never defined"},
-		{Severity: "nit", Summary: "typo"},
-		{Severity: "blocking", Summary: "the sweep has no acceptance criterion"},
+		{Severity: "suggestion", Persona: "qa", Summary: "could be tidier"},
+		{Severity: "blocking", Persona: "architect", Summary: "the sweep has no acceptance criterion",
+			Recommendation: "list the files to move"},
+		{Severity: "nit", Persona: "qa", Summary: "typo"},
+		{Severity: "foundational", Persona: "chairman", Summary: "the declared subject is never defined",
+			Recommendation: "amend the proposal to define it"},
 	}}
 	got := unresolvedBlockers(feedback)
-	if !strings.Contains(got, "the declared subject is never defined") ||
-		!strings.Contains(got, "the sweep has no acceptance criterion") {
-		t.Fatalf("blocking and foundational findings must survive: %q", got)
+	// The chairman's verdict overrides the seats', so its reason must lead: it is
+	// the run's stated explanation of why the work failed.
+	if !strings.HasPrefix(got, "[chairman] the declared subject is never defined") {
+		t.Fatalf("chairman's review must come first: %q", got)
+	}
+	if !strings.Contains(got, "-> amend the proposal to define it") {
+		t.Fatalf("recommendation must survive so the reader knows what to do: %q", got)
+	}
+	if !strings.Contains(got, "the sweep has no acceptance criterion") {
+		t.Fatalf("other blocking findings must still appear: %q", got)
 	}
 	// Suggestions and nits never held the gate, so naming them would misdirect
 	// whoever reads the park.
@@ -1455,13 +1464,14 @@ func TestUnresolvedBlockersIsBounded(t *testing.T) {
 	feedback := &wfe.ReviewFeedback{}
 	for i := 0; i < 6; i++ {
 		feedback.Findings = append(feedback.Findings, wfe.Finding{
-			Severity: "blocking", Summary: strings.Repeat("x", 400)})
+			Severity: "blocking", Summary: strings.Repeat("x", 400),
+			Recommendation: strings.Repeat("y", 400)})
 	}
 	got := unresolvedBlockers(feedback)
-	if strings.Count(got, "|") != 2 {
-		t.Fatalf("expected at most three findings, got %d separators", strings.Count(got, "|"))
+	if strings.Count(got, " | ") != 2 {
+		t.Fatalf("expected at most three findings, got %d separators", strings.Count(got, " | "))
 	}
-	if strings.Contains(got, strings.Repeat("x", 200)) {
-		t.Fatal("individual summaries must be truncated")
+	if strings.Contains(got, strings.Repeat("x", 220)) || strings.Contains(got, strings.Repeat("y", 140)) {
+		t.Fatal("summary and recommendation must each be truncated")
 	}
 }
