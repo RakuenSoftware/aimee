@@ -277,6 +277,10 @@ static void test_callback(EVP_PKEY *key, const char *jwks)
 {
    char out[4096] = "";
    char state[64] = "", nonce[64] = "";
+   /* A syntactically valid state that matches no pending login. */
+   char fake_state[KB_OIDC_LOGIN_SECRET_LEN + 1];
+   memset(fake_state, 'A', KB_OIDC_LOGIN_SECRET_LEN);
+   fake_state[KB_OIDC_LOGIN_SECRET_LEN] = '\0';
 
    env_configure();
    /* Register the IdP's keys as the verifier's, from a file — the same path a
@@ -392,10 +396,7 @@ static void test_callback(EVP_PKEY *key, const char *jwks)
     * so a stranger cannot make kb call out on demand. */
    kb_oidc_login_store_reset();
    stub_exchange_calls = 0;
-   char fake[KB_OIDC_LOGIN_SECRET_LEN + 1];
-   memset(fake, 'A', KB_OIDC_LOGIN_SECRET_LEN);
-   fake[KB_OIDC_LOGIN_SECRET_LEN] = '\0';
-   snprintf(query, sizeof(query), "code=THECODE&state=%s", fake);
+   snprintf(query, sizeof(query), "code=THECODE&state=%s", fake_state);
    assert(callback(query, out, sizeof(out)) == 400);
    assert(strstr(out, "invalid callback"));
    assert(stub_exchange_calls == 0);
@@ -406,11 +407,43 @@ static void test_callback(EVP_PKEY *key, const char *jwks)
    assert(callback("code=THECODE", out, sizeof(out)) == 400);
    assert(stub_exchange_calls == 0);
 
-   /* THE IdP'S OWN ERROR is its own answer, so an operator looks at their IdP. */
-   assert(callback("error=access_denied", out, sizeof(out)) == 401);
+   /* THE IdP'S OWN ERROR is its own answer, so an operator looks at their IdP —
+    * but it must belong to a login this kb started.
+    *
+    * MY FIRST VERSION OF THIS WAS WRONG, and the assertion here used to say so:
+    * it asserted that no pending login was "named or needed" and called that not
+    * an oracle. It was. An unsolicited ?error= obtained the distinct
+    * "identity provider refused" answer — measurably different from the generic
+    * 400 — without proving anything, and a genuine refusal left the pending login
+    * alive with a valid state until its TTL, contradicting the single-use
+    * invariant this route claims on every other path. */
+   kb_oidc_login_store_reset();
+   start_login_full("mintsrv", state, sizeof(state), nonce, sizeof(nonce));
+   stub_exchange_calls = 0;
+   snprintf(query, sizeof(query), "error=access_denied&state=%s", state);
+   assert(callback(query, out, sizeof(out)) == 401);
    assert(strstr(out, "the identity provider refused"));
-   /* And it is not an oracle either: no pending login is named or needed. */
+   /* The IdP is never contacted — there is no code to exchange. */
    assert(stub_exchange_calls == 0);
+   /* AND THE LOGIN IS CONSUMED, like every other path through this route. */
+   assert(kb_oidc_login_store_count(NOW) == 0);
+   /* So the same error callback cannot be replayed for the same answer. */
+   assert(callback(query, out, sizeof(out)) == 400);
+   assert(strstr(out, "invalid callback"));
+
+   /* AN UNSOLICITED ERROR — no state, a malformed state, or a state matching no
+    * pending login — gets the GENERIC answer. This is the oracle being closed:
+    * a stranger cannot tell "this kb had a login in flight" from "it did not". */
+   kb_oidc_login_store_reset();
+   assert(callback("error=access_denied", out, sizeof(out)) == 400);
+   assert(strstr(out, "invalid callback"));
+   assert(!strstr(out, "identity provider"));
+   assert(callback("error=access_denied&state=tooshort", out, sizeof(out)) == 400);
+   assert(!strstr(out, "identity provider"));
+   snprintf(query, sizeof(query), "error=access_denied&state=%s", fake_state);
+   assert(callback(query, out, sizeof(out)) == 400);
+   assert(strstr(out, "invalid callback"));
+   assert(!strstr(out, "identity provider"));
 
    /* NO CLIENT SECRET IN THE VAULT is a deployment fault, and says so — it is not
     * an oracle, since auth-mode already advertises that this kb offers OIDC. */

@@ -181,24 +181,19 @@ static int get_login_callback(const char *query_string, int64_t now, char *out_b
 
    kb_oidc_login_callback_t cb;
    kb_oidc_login_result_t rc = kb_oidc_login_callback_parse(query_string, &cb);
-   if (rc == KB_OIDC_LOGIN_IDP_ERROR)
-   {
-      /* The IdP's own refusal is reported as such, and its error code is safe to
-       * log: it is one of RFC 6749's fixed keywords, and the parser already
-       * refused anything with a control byte in it. An operator seeing this
-       * should look at their IdP, not at kb. */
-      LOG_INFO("kb.oidc.login", "the identity provider refused a login: %s", cb.idp_error);
-      kb_oidc_login_callback_clear(&cb);
-      return json_error(out_buf, out_cap, 401, "the identity provider refused the login");
-   }
-   if (rc != KB_OIDC_LOGIN_OK)
+   if (rc != KB_OIDC_LOGIN_OK && rc != KB_OIDC_LOGIN_IDP_ERROR)
    {
       kb_oidc_login_callback_clear(&cb);
       return json_error(out_buf, out_cap, 400, "invalid callback");
    }
 
-   /* SINGLE USE from here on: the pending login no longer exists, so every path
-    * below — including each failure — has already consumed it. */
+   /* SINGLE USE, AND ON THE ERROR PATH TOO. The state lookup happens before the
+    * branch on rc, so a genuine IdP refusal consumes the pending login it belongs
+    * to instead of leaving it live with a valid state until its TTL — and an
+    * UNSOLICITED ?error= cannot obtain the distinct "the identity provider
+    * refused" answer without first proving it belongs to a login this kb started.
+    * RFC 6749 §4.1.2.1 makes state REQUIRED in the error response, so there is no
+    * legitimate error callback this excludes. */
    kb_oidc_login_pending_t pending;
    kb_oidc_login_store_result_t taken = kb_oidc_login_store_take(cb.state, now, &pending);
    if (taken != KB_OIDC_LOGIN_STORE_OK ||
@@ -208,6 +203,18 @@ static int get_login_callback(const char *query_string, int64_t now, char *out_b
       kb_oidc_login_pending_clear(&pending);
       kb_oidc_login_callback_clear(&cb);
       return json_error(out_buf, out_cap, 400, "invalid callback");
+   }
+
+   if (rc == KB_OIDC_LOGIN_IDP_ERROR)
+   {
+      /* Now that the login is accounted for, the IdP's own refusal is reported as
+       * such. Its error code is safe to log: it is one of RFC 6749's fixed
+       * keywords, and the parser refused anything carrying a control byte. An
+       * operator seeing this should look at their IdP, not at kb. */
+      LOG_INFO("kb.oidc.login", "the identity provider refused a login: %s", cb.idp_error);
+      kb_oidc_login_pending_clear(&pending);
+      kb_oidc_login_callback_clear(&cb);
+      return json_error(out_buf, out_cap, 401, "the identity provider refused the login");
    }
 
    char secret[512] = "";
@@ -324,8 +331,19 @@ static int post_login_pam(const char *body, char *out_buf, int out_cap)
     * auth-mode reports. Reporting one mode and enforcing another would leave a kb
     * with a typo'd issuer unable to log anybody in at all. */
    if (orc == KB_OIDC_LOGIN_INVALID)
-      LOG_WARN("kb.pam.login",
-               "an OIDC login profile is configured but unusable; serving pam login");
+      /* Its own log domain so an operator can alert on precisely this: a kb that
+       * was meant to be on OIDC is serving passwords. "kb.pam.login" alone would
+       * be indistinguishable from a kb intentionally in PAM mode.
+       *
+       * It stays a FALLBACK rather than requiring an explicit opt-in flag, which
+       * was considered. Opt-in would mean one typo'd URL locks every user out of a
+       * working kb, and it buys nothing against the threat it looks like it
+       * addresses: an attacker who can invalidate the OIDC profile can equally
+       * delete it, which reaches PAM either way. The defence against downgrade is
+       * that this is loud, not that it is impossible. */
+      LOG_WARN("kb.pam.login.fallback",
+               "an OIDC login profile is configured but UNUSABLE; this kb is serving "
+               "password login instead of oidc — fix the profile or remove it");
 
    cJSON *request = body && body[0] ? cJSON_Parse(body) : NULL;
    const cJSON *juser = request ? cJSON_GetObjectItemCaseSensitive(request, "username") : NULL;

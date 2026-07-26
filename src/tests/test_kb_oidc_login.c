@@ -677,10 +677,14 @@ static void test_callback_parse(void)
    /* Broken or hostile escapes are refused, never repaired. The CR/LF cases
     * matter specifically: the decoded code reaches a log line, so accepting them
     * would hand over a log-injection primitive. */
-   const char *bad_codes[] = {"a%",    "a%2", "a%zz", "a%2G", "a%00b", /* embedded NUL */
-                              "a%0Ab",                                 /* LF */
-                              "a%0Db",                                 /* CR */
-                              "a%09b" /* TAB */};
+   const char *bad_codes[] = {"a%", "a%2", "a%zz", "a%2G", "a%00b", /* embedded NUL */
+                              "a%0Ab",                              /* LF */
+                              "a%0Db",                              /* CR */
+                              "a%09b",                              /* TAB */
+                              /* C1 controls. Some log pipelines and terminals
+                               * still interpret these — 0x9B is CSI — so they are
+                               * an injection primitive exactly as CR/LF are. */
+                              "a%80b", "a%9Bb", "a%9Fb"};
    for (size_t i = 0; i < sizeof(bad_codes) / sizeof(bad_codes[0]); ++i)
    {
       snprintf(qs, sizeof(qs), "code=%s&state=%s", bad_codes[i], st);
@@ -733,24 +737,49 @@ static void test_callback_parse(void)
    assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
 
    /* THE IdP's OWN ERROR is its own result, so an operator is told to look at
-    * their IdP rather than at kb. */
-   assert(kb_oidc_login_callback_parse("error=access_denied", &cb) == KB_OIDC_LOGIN_IDP_ERROR);
+    * their IdP rather than at kb — but ONLY when a well-formed state came with it.
+    *
+    * This was originally wrong, and a review caught it. The parser returned
+    * _IDP_ERROR on ?error= alone, so an UNSOLICITED error callback got the
+    * distinct "identity provider refused" answer without proving it belonged to
+    * any login, and a genuine refusal left its pending login alive with a valid
+    * state until TTL. RFC 6749 4.1.2.1 makes state REQUIRED in the error response
+    * whenever the request carried one, and this relying party always sends one, so
+    * requiring it excludes no legitimate callback. */
+   snprintf(qs, sizeof(qs), "error=access_denied&state=%s", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_IDP_ERROR);
    assert(strcmp(cb.idp_error, "access_denied") == 0);
-   assert(cb.code[0] == '\0' && cb.state[0] == '\0');
+   /* The state comes back so the caller can consume the pending login; the code
+    * does not, because an error response carries none. */
+   assert(strcmp(cb.state, st) == 0);
+   assert(cb.code[0] == '\0');
+
+   /* AN ERROR WITH NO STATE, OR A MALFORMED OR DUPLICATED ONE, IS NOT AN IdP
+    * ERROR — it is an invalid callback. This is exactly what was mishandled. */
+   assert(kb_oidc_login_callback_parse("error=access_denied", &cb) == KB_OIDC_LOGIN_INVALID);
+   assert(cb.idp_error[0] == '\0' && cb.state[0] == '\0');
+   assert(kb_oidc_login_callback_parse("error=access_denied&state=short", &cb) ==
+          KB_OIDC_LOGIN_INVALID);
+   snprintf(qs, sizeof(qs), "error=access_denied&state=%s&state=%s", st, st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+
    /* error_description is never captured — it is attacker-influenced free text. */
-   assert(kb_oidc_login_callback_parse("error=login_required&error_description=Go+away", &cb) ==
-          KB_OIDC_LOGIN_IDP_ERROR);
+   snprintf(qs, sizeof(qs), "error=login_required&error_description=Go+away&state=%s", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_IDP_ERROR);
    assert(strcmp(cb.idp_error, "login_required") == 0);
-   /* An error alongside a code is still an error: this is not a callback to pick
-    * the favourable half of. */
+   /* An error alongside a code is still an error: not a callback to pick the
+    * favourable half of. The state still comes back, so the login is consumed. */
    snprintf(qs, sizeof(qs), "code=abc&state=%s&error=access_denied", st);
    assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_IDP_ERROR);
-   assert(cb.code[0] == '\0' && cb.state[0] == '\0');
-   /* An unusable error value is still a refusal, reported as such rather than as
-    * _INVALID, which would point the operator at the wrong system. */
-   assert(kb_oidc_login_callback_parse("error=&code=x", &cb) == KB_OIDC_LOGIN_IDP_ERROR);
+   assert(cb.code[0] == '\0' && strcmp(cb.state, st) == 0);
+   /* An unusable error VALUE is still a refusal, reported as such rather than as
+    * _INVALID, which would point the operator at the wrong system. It is the STATE
+    * that must be well-formed, not the error keyword. */
+   snprintf(qs, sizeof(qs), "error=&code=x&state=%s", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_IDP_ERROR);
    assert(strcmp(cb.idp_error, "unspecified") == 0);
-   assert(kb_oidc_login_callback_parse("error=a%zz", &cb) == KB_OIDC_LOGIN_IDP_ERROR);
+   snprintf(qs, sizeof(qs), "error=a%%zz&state=%s", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_IDP_ERROR);
    assert(strcmp(cb.idp_error, "unspecified") == 0);
 
    /* Clearing leaves nothing behind. */

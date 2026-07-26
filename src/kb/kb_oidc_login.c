@@ -208,7 +208,12 @@ static int form_decode(const char *begin, const char *end, char *out, size_t cap
          c = (unsigned char)((hi << 4) | lo);
          p += 2;
       }
-      if (c == 0 || c < 0x20 || c == 0x7F)
+      /* C0 controls, DEL, and the C1 range (0x80-0x9F). The decoded value reaches a
+       * log line, and some log pipelines and terminals still interpret C1 — CSI is
+       * 0x9B — so a value carrying them would be an injection primitive in exactly
+       * the way a bare CR or LF is. Rejected rather than stripped: a code or error
+       * keyword has no business containing any of them. */
+      if (c == 0 || c < 0x20 || c == 0x7F || (c >= 0x80 && c <= 0x9F))
          return -1;
       if (n + 1 >= cap)
          return -1;
@@ -290,9 +295,28 @@ kb_oidc_login_result_t kb_oidc_login_callback_parse(const char *query_string,
    if (!query_string)
       return KB_OIDC_LOGIN_INVALID;
 
-   /* The error branch is taken FIRST, and on its own: an IdP that returns an
-    * error returns no code, and a callback carrying both is not something to
-    * pick the favourable half of. */
+   /* THE STATE IS REQUIRED ON BOTH BRANCHES, and that is not symmetry for its own
+    * sake. RFC 6749 §4.1.2.1 makes `state` REQUIRED in the error response
+    * whenever the authorization request carried one, and this relying party always
+    * sends one — so an ?error= with no valid state did not come from a login this
+    * kb started.
+    *
+    * Parsing it here is what lets the caller TAKE and consume the pending login on
+    * the error path too. Without that, a genuine IdP refusal left the login alive
+    * until its TTL with its state still valid, and an unsolicited ?error= got the
+    * distinct "the identity provider refused" answer without proving it belonged
+    * to any login at all. */
+   char state[KB_OIDC_LOGIN_SECRET_LEN + 1] = "";
+   int had_state = form_field(query_string, "state", state, sizeof(state));
+   if (had_state != 1 || !state_shape_valid(state))
+   {
+      OPENSSL_cleanse(state, sizeof(state));
+      return KB_OIDC_LOGIN_INVALID;
+   }
+
+   /* The error branch is taken before the code branch, and on its own: an IdP that
+    * returns an error returns no code, and a callback carrying both is not
+    * something to pick the favourable half of. */
    char idp_error[KB_OIDC_LOGIN_IDP_ERR_MAX + 1] = "";
    int had_error = form_field(query_string, "error", idp_error, sizeof(idp_error));
    if (had_error != 0)
@@ -302,13 +326,14 @@ kb_oidc_login_result_t kb_oidc_login_callback_parse(const char *query_string,
        * bug in kb instead of at their IdP. */
       snprintf(out->idp_error, sizeof(out->idp_error), "%s",
                (had_error == 1 && idp_error[0]) ? idp_error : "unspecified");
+      /* The state travels with it, so the caller can consume the login. */
+      snprintf(out->state, sizeof(out->state), "%s", state);
+      OPENSSL_cleanse(state, sizeof(state));
       return KB_OIDC_LOGIN_IDP_ERROR;
    }
 
    char code[KB_OIDC_LOGIN_CODE_MAX + 1] = "";
-   char state[KB_OIDC_LOGIN_SECRET_LEN + 1] = "";
-   if (form_field(query_string, "code", code, sizeof(code)) != 1 || !code[0] ||
-       form_field(query_string, "state", state, sizeof(state)) != 1 || !state_shape_valid(state))
+   if (form_field(query_string, "code", code, sizeof(code)) != 1 || !code[0])
    {
       OPENSSL_cleanse(code, sizeof(code));
       OPENSSL_cleanse(state, sizeof(state));

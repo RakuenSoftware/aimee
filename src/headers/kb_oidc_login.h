@@ -119,7 +119,10 @@ extern "C"
       char state[KB_OIDC_LOGIN_SECRET_LEN + 1];
       /* Set only on KB_OIDC_LOGIN_IDP_ERROR; the RFC 6749 "error" code. The
        * error_description is deliberately NOT captured: it is attacker-influenced
-       * free text whose only use would be echoing it somewhere. */
+       * free text whose only use would be echoing it somewhere.
+       *
+       * `state` IS still populated on this path — see _callback_parse — so the
+       * caller can consume the pending login the error belongs to. */
       char idp_error[KB_OIDC_LOGIN_IDP_ERR_MAX + 1];
    } kb_oidc_login_callback_t;
 
@@ -189,9 +192,16 @@ extern "C"
     *
     * Returns:
     *   _OK        code and state both present and well-formed
-    *   _IDP_ERROR "error" was present; out->idp_error is set and code/state empty
+    *   _IDP_ERROR "error" was present AND a well-formed state came with it;
+    *              out->idp_error and out->state are set, out->code is empty
     *   _INVALID   anything else — absent, duplicated, oversized, undecodable, or
     *              a state that is not the exact fixed secret shape
+    *
+    * A WELL-FORMED STATE IS REQUIRED ON BOTH BRANCHES. RFC 6749 §4.1.2.1 makes it
+    * REQUIRED in the error response whenever the authorization request carried one,
+    * and this relying party always sends one, so an ?error= without a valid state
+    * did not come from a login this kb started. Returning it to the caller on the
+    * error path is what allows the pending login to be consumed there too.
     *
     * The state's shape is checked HERE so a malformed one never reaches the
     * store's constant-time scan; a wrong-but-well-formed state still does, and

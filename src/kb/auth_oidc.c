@@ -402,7 +402,14 @@ int kb_oidc_configured_issuer(char *out, size_t cap)
 /* Resolve the effective verification config: the registered one, with a
  * fleet-supplied JWKS preferred over the per-instance file. Returns 0 when no
  * config is registered. Shared by the bearer verifier and the login flow so the
- * two cannot end up trusting different key sets. */
+ * two cannot end up trusting different key sets.
+ *
+ * Contract: the CALLER owns *cfg (a stack copy); this fills it and retains
+ * nothing. The registered config is read under g_oidc_lock and the lock is
+ * released before the fleet resolver runs, so a resolver that blocks on I/O
+ * cannot stall a concurrent verification. The result is a snapshot to be used
+ * immediately and never cached — callers may mutate their copy (the login flow
+ * overrides the audience) without affecting the registered config. */
 static int effective_config(kb_oidc_config_t *cfg)
 {
    kb_oidc_fleet_resolver_fn fleet;
