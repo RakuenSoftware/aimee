@@ -319,13 +319,32 @@ kb_oidc_login_result_t kb_oidc_login_callback_parse(const char *query_string,
     * something to pick the favourable half of. */
    char idp_error[KB_OIDC_LOGIN_IDP_ERR_MAX + 1] = "";
    int had_error = form_field(query_string, "error", idp_error, sizeof(idp_error));
-   if (had_error != 0)
+   if (had_error < 0)
    {
-      /* An unusable error value is still an IdP refusal — the login has failed
-       * either way, and reporting _INVALID would send an operator looking for a
-       * bug in kb instead of at their IdP. */
+      /* DUPLICATED, OVERSIZED OR UNDECODABLE. Not an IdP refusal — an invalid
+       * callback, and it must be reported as one.
+       *
+       * This was wrong in the first version of this parser and a review caught it.
+       * The reasoning behind the mistake was "an unusable error value is still a
+       * refusal, so say so"; that is defensible for an error whose VALUE is odd,
+       * but form_field returns -1 for a DUPLICATE key, and `error=x&error=y` is
+       * parameter smuggling, not an identity provider's answer. Mapping it to the
+       * distinct IdP-error response handed an attacker the same measurably
+       * different reply the state check exists to withhold, and consumed a pending
+       * login on the way. Duplicates are refused for `code` and `state` for exactly
+       * this reason; `error` is no different. */
+      OPENSSL_cleanse(idp_error, sizeof(idp_error));
+      OPENSSL_cleanse(state, sizeof(state));
+      memset(out, 0, sizeof(*out));
+      return KB_OIDC_LOGIN_INVALID;
+   }
+   if (had_error > 0)
+   {
+      /* Present and well-formed. An EMPTY value is still a refusal — the IdP said
+       * no without saying why, which is its prerogative — so it reports as
+       * "unspecified" rather than becoming an invalid callback. */
       snprintf(out->idp_error, sizeof(out->idp_error), "%s",
-               (had_error == 1 && idp_error[0]) ? idp_error : "unspecified");
+               idp_error[0] ? idp_error : "unspecified");
       /* The state travels with it, so the caller can consume the login. */
       snprintf(out->state, sizeof(out->state), "%s", state);
       OPENSSL_cleanse(state, sizeof(state));

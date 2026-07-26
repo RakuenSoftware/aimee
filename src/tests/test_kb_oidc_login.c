@@ -805,15 +805,60 @@ static void test_callback_parse(void)
    snprintf(qs, sizeof(qs), "code=abc&state=%s&error=access_denied", st);
    assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_IDP_ERROR);
    assert(cb.code[0] == '\0' && strcmp(cb.state, st) == 0);
-   /* An unusable error VALUE is still a refusal, reported as such rather than as
-    * _INVALID, which would point the operator at the wrong system. It is the STATE
-    * that must be well-formed, not the error keyword. */
+   /* AN EMPTY error VALUE is still a refusal: the IdP said no without saying why,
+    * which is its prerogative. Reported as "unspecified" rather than becoming an
+    * invalid callback, which would point the operator at the wrong system. */
    snprintf(qs, sizeof(qs), "error=&code=x&state=%s", st);
    assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_IDP_ERROR);
    assert(strcmp(cb.idp_error, "unspecified") == 0);
+
+   /* A DUPLICATED, OVERSIZED OR UNDECODABLE error IS NOT AN IdP REFUSAL. The first
+    * version of this parser mapped all of them to _IDP_ERROR and a review caught
+    * it; the test below used to assert the wrong answer for the %zz case.
+    *
+    * The mistake was reasoning that "an unusable error value is still a refusal".
+    * That holds for a value that is merely odd, but form_field returns -1 for a
+    * DUPLICATE key, and error=x&error=y is parameter smuggling, not an identity
+    * provider's answer. Accepting it handed back the measurably distinct IdP-error
+    * reply — and consumed a pending login — which is the same oracle the state
+    * requirement exists to close. Duplicates are refused for code and state; error
+    * is no different. */
+   snprintf(qs, sizeof(qs), "error=access_denied&error=login_required&state=%s", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+   assert(cb.idp_error[0] == '\0' && cb.state[0] == '\0' && cb.code[0] == '\0');
+
+   /* A DUPLICATED error ALONGSIDE A VALID CODE. This is the case that makes the
+    * explicit had_error < 0 branch load-bearing rather than redundant, and a
+    * mutation test is what surfaced it: without that branch, a malformed error is
+    * merely "not an error", so the parser proceeds to the code branch, finds a
+    * perfectly good code, and returns _OK — turning a smuggled parameter into a
+    * SUCCESSFUL authorization instead of a refusal. Every other duplicate case
+    * happens to fail anyway for want of a code, which is why this one has to be
+    * written down. */
+   snprintf(qs, sizeof(qs), "error=x&error=y&code=abc&state=%s", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+   assert(cb.code[0] == '\0' && cb.state[0] == '\0' && cb.idp_error[0] == '\0');
+   /* Same for the other two malformed shapes with a code present. */
+   snprintf(qs, sizeof(qs), "error=a%%zz&code=abc&state=%s", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+   snprintf(qs, sizeof(qs), "error=a%%0Ab&code=abc&state=%s", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+   /* Undecodable: a broken escape. */
    snprintf(qs, sizeof(qs), "error=a%%zz&state=%s", st);
-   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_IDP_ERROR);
-   assert(strcmp(cb.idp_error, "unspecified") == 0);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+   assert(cb.idp_error[0] == '\0' && cb.state[0] == '\0');
+   /* A control byte smuggled in, which would reach a log line. */
+   snprintf(qs, sizeof(qs), "error=a%%0Ab&state=%s", st);
+   assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+   /* Oversized: longer than the error field can hold, so refused not truncated. */
+   {
+      char big[KB_OIDC_LOGIN_IDP_ERR_MAX + 64];
+      memset(big, 'e', sizeof(big) - 1);
+      big[sizeof(big) - 1] = '\0';
+      snprintf(qs, sizeof(qs), "error=%s&state=%s", big, st);
+      assert(kb_oidc_login_callback_parse(qs, &cb) == KB_OIDC_LOGIN_INVALID);
+      assert(cb.idp_error[0] == '\0');
+   }
 
    /* Clearing leaves nothing behind. */
    snprintf(qs, sizeof(qs), "code=abc123&state=%s", st);

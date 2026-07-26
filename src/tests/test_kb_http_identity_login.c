@@ -542,6 +542,35 @@ static void test_callback(EVP_PKEY *key, const char *jwks)
    assert(callback(query, out, sizeof(out)) == 400);
    assert(strstr(out, "invalid callback"));
 
+   /* A DUPLICATED error PARAMETER, with a VALID state for a LIVE login, must get
+    * the generic answer and must NOT consume the login. This is the oracle variant
+    * a review found after the first fix: the parser mapped a duplicate to
+    * _IDP_ERROR, so error=x&error=y&state=<live> obtained the distinct reply and
+    * burned a real user's in-flight login. */
+   kb_oidc_login_store_reset();
+   start_login_full("mintsrv", state, sizeof(state), nonce, sizeof(nonce));
+   snprintf(query, sizeof(query), "error=access_denied&error=login_required&state=%s", state);
+   assert(callback(query, out, sizeof(out)) == 400);
+   assert(strstr(out, "invalid callback"));
+   assert(!strstr(out, "identity provider"));
+   /* The login survives, so the real user can still complete it. */
+   assert(kb_oidc_login_store_count(NOW) == 1);
+   /* AND WITH A VALID CODE ATTACHED it must still be refused, not completed. A
+    * parser that treats a malformed error as merely absent proceeds to the code
+    * branch and authorizes — which would make smuggling a duplicate error into a
+    * genuine callback a way to have it succeed while suppressing nothing. */
+   snprintf(query, sizeof(query), "error=x&error=y&code=THECODE&state=%s", state);
+   stub_intent_calls = 0;
+   assert(callback(query, out, sizeof(out)) == 400);
+   assert(strstr(out, "invalid callback"));
+   assert(stub_intent_calls == 0);
+   assert(kb_oidc_login_store_count(NOW) == 1);
+   /* And the well-formed error for that same login still works afterwards. */
+   snprintf(query, sizeof(query), "error=access_denied&state=%s", state);
+   assert(callback(query, out, sizeof(out)) == 401);
+   assert(strstr(out, "the identity provider refused"));
+   assert(kb_oidc_login_store_count(NOW) == 0);
+
    /* AN UNSOLICITED ERROR — no state, a malformed state, or a state matching no
     * pending login — gets the GENERIC answer. This is the oracle being closed:
     * a stranger cannot tell "this kb had a login in flight" from "it did not". */
@@ -752,6 +781,55 @@ static void test_login_pam(void)
                 "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"s\"}", out,
                 sizeof(out)) == 400);
    assert(stub_pam_calls == 0);
+
+   /* team_id MUST BE AN EXACT INTEGER. cJSON stores every number as a double, so
+    * 770001.9 passes a bare positive-and-in-range check and then becomes 770001 on
+    * the cast — silently authorizing against a team the caller did not name, since
+    * team_id is what selects the FORCE RLS-bound grant lookup. Refused, not
+    * rounded, and PAM is never consulted for any of them. */
+   {
+      const char *bad_teams[] = {
+          "770001.9",             /* fractional, rounds down */
+          "770001.5",             /* fractional, rounds to even/nearest */
+          "0.5",                  /* fractional and below 1 */
+          "-770001",              /* negative */
+          "0",                    /* zero is not a team */
+          "1e400",                /* overflows to inf */
+          "9007199254740993",     /* 2^53+1: not exactly representable as a double */
+          "18446744073709551616", /* far past int64 */
+          "\"770001\"",           /* a string, not a number */
+      };
+      for (size_t i = 0; i < sizeof(bad_teams) / sizeof(bad_teams[0]); ++i)
+      {
+         stub_pam_calls = 0;
+         stub_intent_reset("alice");
+         snprintf(body, sizeof(body),
+                  "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"s\","
+                  "\"team_id\":%s}",
+                  bad_teams[i]);
+         if (route("POST", "/v1/identity/login/pam", body, out, sizeof(out)) != 400)
+         {
+            fprintf(stderr, "team_id %s was ACCEPTED: %s\n", bad_teams[i], out);
+            assert(0);
+         }
+         assert(stub_pam_calls == 0 && stub_intent_calls == 0);
+
+         /* The same values on the OIDC start route, which retains team_id for the
+          * callback and so must refuse them just as hard. */
+         env_configure();
+         snprintf(body, sizeof(body), "{\"server_id\":\"mintsrv\",\"team_id\":%s}", bad_teams[i]);
+         assert(route("POST", "/v1/identity/login/start", body, out, sizeof(out)) == 400);
+         env_clear();
+      }
+      /* The precision BOUNDARY that is still legal: 2^53 - 1 is exactly
+       * representable, so it must be accepted rather than swept up by the guard. */
+      stub_intent_reset("alice");
+      snprintf(body, sizeof(body),
+               "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"s\","
+               "\"team_id\":9007199254740991}");
+      assert(route("POST", "/v1/identity/login/pam", body, out, sizeof(out)) == 200);
+      assert(stub_seen_team == 9007199254740991LL);
+   }
 
    /* METHOD: POST only. */
    assert(route("GET", "/v1/identity/login/pam", NULL, out, sizeof(out)) == 405);

@@ -199,8 +199,13 @@ extern "C"
     *
     * Returns:
     *   _OK        code and state both present and well-formed
-    *   _IDP_ERROR "error" was present AND a well-formed state came with it;
-    *              out->idp_error and out->state are set, out->code is empty
+    *   _IDP_ERROR "error" was present, WELL-FORMED, and a well-formed state came
+    *              with it; out->idp_error and out->state are set, out->code is
+    *              empty. An empty error VALUE still counts (the IdP said no
+    *              without saying why) and reports as "unspecified"; a DUPLICATED,
+    *              oversized or undecodable one does NOT — that is _INVALID, since
+    *              `error=x&error=y` is parameter smuggling rather than an answer
+    *              from an identity provider
     *   _INVALID   anything else — absent, duplicated, oversized, undecodable, or
     *              a state that is not the exact fixed secret shape
     *

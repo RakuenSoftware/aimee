@@ -183,14 +183,26 @@ lockout and account-disable policy would be bypassable by anyone with a local
 account. Conversely a kb with no OIDC profile answers the two OIDC routes with
 `503`, so a client that guessed wrong gets a clear answer rather than a hang.
 
-**Every OIDC callback failure answers identically** — `401 the login could not be
-completed` — whether the state was unknown, the IdP refused the code, the
-signature failed or the nonce belonged to another login. The distinctions are in
-the kb log under `kb.oidc.login`, not in the response, because reporting them
-would tell an unauthenticated caller which check failed. The same applies to the
-password route: a wrong password, an unknown account and a username outside the
-subject grammar all answer `401 authentication failed`. **If you are debugging a
-login, the log is the only place the reason exists.**
+**Callback failures are deliberately coarse**, and there are exactly three answers.
+Anything finer would tell an unauthenticated caller which check failed:
+
+| response | when |
+| --- | --- |
+| `400 invalid callback` | the query is malformed, a parameter is duplicated, or the `state` is absent, malformed, or matches no pending login |
+| `401 the identity provider refused the login` | the IdP returned `error=` **and** a valid `state` for a live pending login |
+| `401 the login could not be completed` | everything after that: the code exchange failed, the signature failed, the nonce belonged to another login, or no usable principal came out |
+
+Note the second row's condition. An `error=` callback that cannot be tied to a
+pending login gets the generic `400`, not the distinct message — otherwise a
+stranger could tell a kb with a login in flight from one without.
+
+The password route is coarser still: a wrong password, an unknown account, a locked
+account and a username outside the subject grammar all answer
+`401 authentication failed`.
+
+**If you are debugging a login, the log is the only place the reason exists** —
+`kb.oidc.login`, `kb.pam.login`, and `kb.pam.login.fallback` for a kb serving
+passwords because its OIDC profile is broken.
 
 **The password route is not rate limited.** kb's limiter is applied on the
 bearer-gated path, and this route is pre-auth. If you expose a PAM-mode kb beyond

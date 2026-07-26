@@ -267,10 +267,20 @@ jobs:
   # once it was proven, because a gate that cannot fail is the always-skipping
   # gate above wearing a different hat.
   #
-  # The one variable not reproducible outside a runner is whether root there can
-  # raise RLIMIT_MEMLOCK. If it cannot, the harness refuses with its own message
-  # naming the limit and how to raise it, and this job goes red — which is the
-  # correct, actionable outcome rather than a silent skip.
+  # The whole job has additionally been replicated in a clean ubuntu:24.04 container
+  # — root, the pgvector container over TCP, no peer socket — where it completes and
+  # mints. That replication is what surfaced the two missing apt packages below.
+  #
+  # The ONE thing not reproducible outside a real runner is whether root there can
+  # raise RLIMIT_MEMLOCK for mlockall: Docker caps the hard limit at 8MB regardless
+  # of the user, whereas a runner is a VM where root normally has no such cap. Both
+  # outcomes were therefore exercised deliberately:
+  #   - raised (--ulimit memlock=-1): the job completes and mints.
+  #   - capped at 8MB: the harness refuses with exit 2 and its own message naming the
+  #     limit and how to raise it, so the job goes red LEGIBLY rather than failing
+  #     somewhere deep with an ENOMEM from a syscall.
+  # The failure mode is decorous, which is what makes shipping this blocking safe
+  # even though the runner's own limit is unverified.
   identity-mint-e2e:
     runs-on: ubuntu-latest
     steps:
@@ -293,12 +303,23 @@ jobs:
             --health-cmd pg_isready --health-interval 5s --health-timeout 3s --health-retries 10 \
             "$img"
       - name: Install dependencies
+        # pkg-config, libzstd-dev and zlib1g-dev are listed EXPLICITLY and the other
+        # jobs in this file do not list them. They are not optional:
+        #   - PQ_CFLAGS comes from `pkg-config --cflags libpq`, so without pkg-config
+        #     there is no -I/usr/include/postgresql and db2/db_postgres.c fails with
+        #     "libpq-fe.h: No such file or directory" despite libpq-dev being present.
+        #   - L_CORE/L_KB link -lzstd -lz, so without those two the provisioners fail
+        #     at link with "cannot find -lzstd".
+        # The existing jobs survive without them only because GitHub's runner images
+        # happen to preinstall them — an undeclared dependency that works until the
+        # image changes. Found by replicating this job in a clean ubuntu:24.04
+        # container, where both failures are immediate.
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          sudo apt-get install -y -q gcc make pkg-config \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-            libpq-dev postgresql-client
+            libpq-dev postgresql-client libzstd-dev zlib1g-dev
       - name: Wait for Postgres
         run: |
           for i in $(seq 1 30); do

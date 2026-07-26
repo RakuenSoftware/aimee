@@ -47,6 +47,34 @@ static int json_body(char *out_buf, int out_cap, int status, cJSON *o)
    return status;
 }
 
+/* Read a JSON team_id, refusing anything that is not an exactly representable
+ * positive integer.
+ *
+ * cJSON stores every number as a double, so `770001.9` passes a bare
+ * "positive and in range" check and then becomes 770001 on the cast. That is not a
+ * cosmetic sloppiness: team_id is the authorization scope — it selects the
+ * FORCE RLS-bound grant lookup — so a silent truncation authorizes against a team
+ * the caller did not name. Anything not exactly an integer is refused rather than
+ * rounded, and the round-trip comparison also catches a value too large to survive
+ * the cast. Returns 0 on success. */
+static int json_team_id(const cJSON *v, int64_t *out)
+{
+   *out = 0;
+   if (!cJSON_IsNumber(v))
+      return -1;
+   double d = v->valuedouble;
+   /* Below 2^53 every integer is exactly representable, so the round trip below is
+    * decisive; at or above it the comparison can succeed for a value that is not
+    * the one written, so refuse outright. No real team id is anywhere near this. */
+   if (!(d >= 1.0) || d >= 9007199254740992.0)
+      return -1;
+   int64_t n = (int64_t)d;
+   if ((double)n != d)
+      return -1; /* fractional */
+   *out = n;
+   return 0;
+}
+
 /* GET /v1/identity/auth-mode — which login mode this kb offers. Deliberately
  * says nothing else: not the issuer, not the client id, not whether a particular
  * user exists. An unauthenticated caller learns only which flow to start, which
@@ -95,15 +123,14 @@ static int post_login_start(const char *body, int64_t now, char *out_buf, int ou
    char server_id[KB_OIDC_LOGIN_SERVER_MAX + 1] = "";
    /* team_id is required at START, not at the callback: it has to be retained
     * alongside the other per-login state so the callback cannot name its own. */
+   int64_t team_id = 0;
    if (!cJSON_IsString(server) || !server->valuestring || !server->valuestring[0] ||
-       strlen(server->valuestring) > KB_OIDC_LOGIN_SERVER_MAX || !cJSON_IsNumber(team) ||
-       team->valuedouble < 1 || team->valuedouble > 9.0e15)
+       strlen(server->valuestring) > KB_OIDC_LOGIN_SERVER_MAX || json_team_id(team, &team_id) != 0)
    {
       cJSON_Delete(request);
-      return json_error(out_buf, out_cap, 400, "server_id and team_id are required");
+      return json_error(out_buf, out_cap, 400, "server_id and an integer team_id are required");
    }
    snprintf(server_id, sizeof(server_id), "%s", server->valuestring);
-   int64_t team_id = (int64_t)team->valuedouble;
    cJSON_Delete(request);
 
    kb_oidc_login_pending_t pending;
@@ -446,10 +473,10 @@ static int post_login_pam(const char *body, char *out_buf, int out_cap)
    const cJSON *jpass = request ? cJSON_GetObjectItemCaseSensitive(request, "password") : NULL;
    const cJSON *jsrv = request ? cJSON_GetObjectItemCaseSensitive(request, "server_id") : NULL;
    const cJSON *jteam = request ? cJSON_GetObjectItemCaseSensitive(request, "team_id") : NULL;
+   int64_t team_id = 0;
    if (!cJSON_IsString(juser) || !juser->valuestring || !cJSON_IsString(jpass) ||
        !jpass->valuestring || !jpass->valuestring[0] || !cJSON_IsString(jsrv) ||
-       !jsrv->valuestring || !jsrv->valuestring[0] || !cJSON_IsNumber(jteam) ||
-       jteam->valuedouble < 1 || jteam->valuedouble > 9.0e15)
+       !jsrv->valuestring || !jsrv->valuestring[0] || json_team_id(jteam, &team_id) != 0)
    {
       /* The password is cleansed on THIS path too — a malformed request still
        * carried one, and cJSON_Delete frees the buffer without clearing it. */
@@ -457,9 +484,8 @@ static int post_login_pam(const char *body, char *out_buf, int out_cap)
          OPENSSL_cleanse(jpass->valuestring, strlen(jpass->valuestring));
       cJSON_Delete(request);
       return json_error(out_buf, out_cap, 400,
-                        "username, password, server_id and team_id are required");
+                        "username, password, server_id and an integer team_id are required");
    }
-   int64_t team_id = (int64_t)jteam->valuedouble;
 
    char username[64] = "", server_id[KB_OIDC_LOGIN_SERVER_MAX + 1] = "";
    char password[512] = "";
