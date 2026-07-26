@@ -641,6 +641,12 @@ ENV_DESC = {
     "AIMEE_KB_CONN": ("Knowledge base (aimee-kb)", "KB connection string (mTLS transport)."),
     "AIMEE_TRANSPORT_KB_POOL_ENABLED": ("Knowledge base (aimee-kb)", "Override server-to-KB mTLS connection pooling. The config default is on; set to 0 for one-shot connections."),
     "AIMEE_SERVER_ID": ("Knowledge base (aimee-kb)", "Registry identity used by the server mTLS heartbeat."),
+    "AIMEE_SERVER_TEAM_ID": (
+        "Knowledge base (aimee-kb)",
+        "The team this server serves, from the same registry row as AIMEE_SERVER_ID. "
+        "Required for per-user /v1 write authorization: unset, the server still starts "
+        "and serves reads but denies every write with no_team_configured.",
+    ),
     "AIMEE_KB_HTTP_BIND": ("Knowledge base (aimee-kb)", "aimee-kb HTTP listener bind address."),
     "AIMEE_KB_MTLS_HOST": ("Knowledge base (aimee-kb)", "aimee-kb mTLS listener host."),
     "AIMEE_KB_MTLS_PORT": ("Knowledge base (aimee-kb)", "aimee-kb mTLS listener port."),

@@ -397,6 +397,28 @@ int server_http_route_allowed(int is_tcp, const char *bearer, const char *method
        is_tcp, server_http_conn_caps(is_tcp, bearer, remote_writes), method, path, remote_writes);
 }
 
+/* remote_writes.global_ignored: requests refused that the retired
+ * aimee.api.remote_writes would formerly have allowed. Request threads run
+ * concurrently, so it carries its own lock rather than racing on a plain
+ * increment or borrowing an unrelated one. */
+static uint64_t g_remote_writes_global_ignored = 0;
+static pthread_mutex_t g_global_ignored_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void server_http_note_global_ignored(void)
+{
+   pthread_mutex_lock(&g_global_ignored_lock);
+   g_remote_writes_global_ignored++;
+   pthread_mutex_unlock(&g_global_ignored_lock);
+}
+
+uint64_t server_http_global_ignored_count(void)
+{
+   pthread_mutex_lock(&g_global_ignored_lock);
+   uint64_t value = g_remote_writes_global_ignored;
+   pthread_mutex_unlock(&g_global_ignored_lock);
+   return value;
+}
+
 void server_http_api_status_report(int http_port, int bearer_configured, int rate_limit_per_min,
                                    char *buf, size_t n)
 {
@@ -435,6 +457,22 @@ void server_http_api_status_report(int http_port, int bearer_configured, int rat
       SAR_APPEND("  rate limit:    %d req/min\n", rate_limit_per_min);
    else
       SAR_APPEND("  rate limit:    unlimited\n");
+
+   /* Per-user write authorization (0.3.0). The counter is surfaced here because
+    * a counter nobody can read is not a metric — an operator mid-cutover needs
+    * to see how much traffic the retired global is no longer letting through.
+    *
+    * Whether AIMEE_SERVER_TEAM_ID is configured is deliberately NOT reported
+    * here: that check lives in the db1-backed resolver, and reaching for it
+    * would drag storage into a status summary. The server already logs an ERROR
+    * naming the variable at startup, which is where an operator diagnosing
+    * "reads work but every write is denied" will actually be looking. */
+   unsigned long long ignored = (unsigned long long)server_http_global_ignored_count();
+   if (ignored)
+      SAR_APPEND("  remote_writes: aimee.api.remote_writes NO LONGER AUTHORIZES; %llu request(s) "
+                 "refused that it would formerly have allowed "
+                 "(remote_writes.global_ignored)\n",
+                 ignored);
 
    SAR_APPEND("\nVS Code model-provider setup (base URL + bearer key + model `aimee`):\n");
    SAR_APPEND(
@@ -1086,29 +1124,8 @@ static int g_management_tls_fd = -1; /* dedicated required-mTLS management liste
 static char g_bearer[256] = "";      /* configured TCP bearer (empty = none) */
 static int g_rate_limit = 0;         /* TCP requests / 60s (0 = unlimited) */
 int g_remote_writes = 0;             /* aimee.api.remote_writes: parsed, authorizes nothing */
-/* remote_writes.global_ignored: requests refused that the retired global would
- * formerly have allowed. Read by the status surface; mutated under g_rate_lock
- * because request threads run concurrently. */
-static uint64_t g_remote_writes_global_ignored = 0;
 static server_http_rate_state_t g_rate_state = {0, 0};
 static pthread_mutex_t g_rate_lock = PTHREAD_MUTEX_INITIALIZER;
-
-/* Bump the ignored-global counter. Request threads run concurrently, so this
- * shares g_rate_lock rather than racing on a plain increment. */
-static void server_http_note_global_ignored(void)
-{
-   pthread_mutex_lock(&g_rate_lock);
-   g_remote_writes_global_ignored++;
-   pthread_mutex_unlock(&g_rate_lock);
-}
-
-uint64_t server_http_global_ignored_count(void)
-{
-   pthread_mutex_lock(&g_rate_lock);
-   uint64_t value = g_remote_writes_global_ignored;
-   pthread_mutex_unlock(&g_rate_lock);
-   return value;
-}
 /* guards g_rate_state across conns */
 static pthread_t g_thread;
 static atomic_int g_running = 0;

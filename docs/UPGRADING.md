@@ -88,11 +88,34 @@ cannot be replayed, and the server refuses if its replay store cannot confirm
 freshness. Clients are expected to obtain tokens as needed rather than caching
 one.
 
+**Set `AIMEE_SERVER_TEAM_ID`.** This release adds one required variable: the id
+of the team this server serves, the same registry row `AIMEE_SERVER_ID` comes
+from. Set them together.
+
+If it is unset the server still **starts and serves reads**, and denies every
+write — deliberately, because refusing to boot would take reads down over a
+write-authorization setting and would disable the local-operator recovery path
+you may need. It logs an error naming the variable at startup, and every denial
+reports `no_team_configured` rather than blaming the caller's token.
+
 **If writes are still refused after granting**, the server distinguishes the
-reasons rather than returning a single opaque denial. Check for: no token
-presented; a token for another server (`aud` mismatch); an expired token; a
-signing key this server has not fetched yet; a team this server is not enrolled
-for; or a replayed `jti`.
+reasons rather than returning a single opaque denial. Each is logged with the
+request id. Check for:
+
+| Reason | Meaning |
+|---|---|
+| `absent` | no identity token presented (an ordinary read-only caller) |
+| `invalid` | malformed, bad signature, wrong `iss`/`aud`, or outside its validity window |
+| `unknown_kid` | signed by a key this server has not fetched yet |
+| `wrong_team` | a valid token for a team this server does not serve |
+| `no_team_configured` | **this server** is missing `AIMEE_SERVER_TEAM_ID` — not a token problem |
+| `replay` | this token's `jti` was already used |
+| `replay_unavailable` | the replay store could not confirm freshness, so the write was refused rather than assumed safe |
+
+`aimee api status` reports `remote_writes.global_ignored` once it is non-zero:
+the number of requests refused that the retired global would formerly have
+allowed. It counts only those, not denials in general, so it measures what this
+cutover is actually costing you.
 
 ---
 
