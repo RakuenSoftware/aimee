@@ -12972,6 +12972,125 @@ BEGIN
     extract(epoch FROM u.created_at)::BIGINT;
 END $$;
 
+-- The private-use and finalize halves of the identity mint, mirroring
+-- kb_management_token_authority_use/readback/finalize.
+--
+-- Each recomputes the snapshot, so the live write-tier grant is re-read at every
+-- step. If a grant is revoked or its tier changed after admission, the recorded
+-- key-use intent and the fresh snapshot disagree and the call raises rather than
+-- signing. Authorization is therefore checked at use time, not merely at
+-- admission time.
+CREATE OR REPLACE FUNCTION kb_management_identity_authority_use(
+  p_correlation_id TEXT,p_jti TEXT)
+RETURNS TABLE(newly_admitted BOOLEAN,correlation_id TEXT,jti TEXT,token_jti TEXT,
+  team_id BIGINT,subject TEXT,tier TEXT,token_issuer TEXT,audience TEXT,kid TEXT,
+  issued_at BIGINT,expires_at BIGINT,installation_id TEXT,installation_generation BIGINT,
+  installation_enrollment_id BIGINT,target_enrollment_id BIGINT,revocation_generation BIGINT,
+  publication_generation SMALLINT,publication_candidate_id TEXT,
+  publication_manifest_sha256 BYTEA,publication_envelope_sha256 BYTEA,
+  token_custody_key_id TEXT,token_version BIGINT,token_public_key BYTEA,
+  token_public_exponent BYTEA,token_public_digest BYTEA,token_jwk_digest BYTEA,
+  vault_seal_epoch BIGINT,hwm_attestation BYTEA,hwm_attestation_digest BYTEA,
+  wrapped_dek BYTEA,nonce BYTEA,ciphertext BYTEA,tag BYTEA,
+  key_use_created_at_epoch BIGINT)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE s RECORD; u public.kb_management_identity_key_use_intent%ROWTYPE;
+BEGIN
+  IF pg_catalog.current_setting('transaction_isolation')<>'repeatable read' THEN
+    RAISE EXCEPTION 'identity token authority: repeatable read required' USING ERRCODE='25001';
+  END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_correlation_id,1345462861));
+  SELECT * INTO s FROM public.kb_management_identity_authority_snapshot(p_correlation_id,p_jti);
+  SELECT x.* INTO u FROM public.kb_management_identity_key_use_intent x
+   WHERE x.correlation_id=p_correlation_id AND x.jti=p_jti FOR SHARE;
+  IF u.correlation_id IS NULL OR
+     ROW(u.token_jti,u.team_id,u.subject,u.tier,u.audience,u.kid,
+       u.token_custody_key_id,u.token_version,u.publication_generation,
+       u.publication_candidate_id,u.publication_manifest_sha256,
+       u.publication_envelope_sha256,u.vault_seal_epoch,u.hwm_attestation_digest)
+     IS DISTINCT FROM ROW(s.token_jti,s.team_id,s.subject,s.tier,s.audience,s.kid,
+       s.token_custody_key_id,s.token_version,s.publication_generation,
+       s.publication_candidate_id,s.publication_manifest_sha256,
+       s.publication_envelope_sha256,s.vault_seal_epoch,s.hwm_attestation_digest) THEN
+    RAISE EXCEPTION 'identity token authority: use not admitted' USING ERRCODE='40001';
+  END IF;
+  RETURN QUERY SELECT false,s.correlation_id,s.jti,s.token_jti,s.team_id,s.subject,s.tier,
+    s.token_issuer,s.audience,s.kid,s.issued_at,s.expires_at,
+    s.installation_id,s.installation_generation,s.installation_enrollment_id,
+    s.target_enrollment_id,s.revocation_generation,s.publication_generation,
+    s.publication_candidate_id,s.publication_manifest_sha256,s.publication_envelope_sha256,
+    s.token_custody_key_id,s.token_version,s.token_public_key,s.token_public_exponent,
+    s.token_public_digest,s.token_jwk_digest,s.vault_seal_epoch,s.hwm_attestation,
+    s.hwm_attestation_digest,s.wrapped_dek,s.nonce,s.ciphertext,s.tag,
+    extract(epoch FROM u.created_at)::BIGINT;
+END $$;
+
+-- Resolve a lost admission COMMIT acknowledgement WITHOUT private-key use: it
+-- returns the admitted tuple only if the key-use intent already exists.
+CREATE OR REPLACE FUNCTION kb_management_identity_authority_readback(
+  p_correlation_id TEXT,p_jti TEXT)
+RETURNS TABLE(newly_admitted BOOLEAN,correlation_id TEXT,jti TEXT,token_jti TEXT,
+  team_id BIGINT,subject TEXT,tier TEXT,token_issuer TEXT,audience TEXT,kid TEXT,
+  issued_at BIGINT,expires_at BIGINT,installation_id TEXT,installation_generation BIGINT,
+  installation_enrollment_id BIGINT,target_enrollment_id BIGINT,revocation_generation BIGINT,
+  publication_generation SMALLINT,publication_candidate_id TEXT,
+  publication_manifest_sha256 BYTEA,publication_envelope_sha256 BYTEA,
+  token_custody_key_id TEXT,token_version BIGINT,token_public_key BYTEA,
+  token_public_exponent BYTEA,token_public_digest BYTEA,token_jwk_digest BYTEA,
+  vault_seal_epoch BIGINT,hwm_attestation BYTEA,hwm_attestation_digest BYTEA,
+  wrapped_dek BYTEA,nonce BYTEA,ciphertext BYTEA,tag BYTEA,
+  key_use_created_at_epoch BIGINT)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE s RECORD; u public.kb_management_identity_key_use_intent%ROWTYPE;
+BEGIN
+  SELECT x.* INTO u FROM public.kb_management_identity_key_use_intent x
+   WHERE x.correlation_id=p_correlation_id AND x.jti=p_jti FOR SHARE;
+  IF u.correlation_id IS NULL THEN RETURN; END IF;
+  SELECT * INTO s FROM public.kb_management_identity_authority_snapshot(p_correlation_id,p_jti);
+  RETURN QUERY SELECT false,s.correlation_id,s.jti,s.token_jti,s.team_id,s.subject,s.tier,
+    s.token_issuer,s.audience,s.kid,s.issued_at,s.expires_at,
+    s.installation_id,s.installation_generation,s.installation_enrollment_id,
+    s.target_enrollment_id,s.revocation_generation,s.publication_generation,
+    s.publication_candidate_id,s.publication_manifest_sha256,s.publication_envelope_sha256,
+    s.token_custody_key_id,s.token_version,s.token_public_key,s.token_public_exponent,
+    s.token_public_digest,s.token_jwk_digest,s.vault_seal_epoch,s.hwm_attestation,
+    s.hwm_attestation_digest,s.wrapped_dek,s.nonce,s.ciphertext,s.tag,
+    extract(epoch FROM u.created_at)::BIGINT;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_identity_authority_finalize(
+  p_correlation_id TEXT,p_jti TEXT) RETURNS BOOLEAN
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE s RECORD; u public.kb_management_identity_key_use_intent%ROWTYPE;
+BEGIN
+  IF pg_catalog.current_setting('transaction_isolation')<>'repeatable read' THEN
+    RAISE EXCEPTION 'identity token authority: repeatable read required' USING ERRCODE='25001';
+  END IF;
+  -- snapshot reacquires/rechecks the complete lock set, including the live
+  -- write-tier grant, against a fresh clock_timestamp.
+  SELECT * INTO s FROM public.kb_management_identity_authority_snapshot(p_correlation_id,p_jti);
+  SELECT x.* INTO u FROM public.kb_management_identity_key_use_intent x
+   WHERE x.correlation_id=p_correlation_id AND x.jti=p_jti FOR SHARE;
+  IF u.correlation_id IS NULL OR
+     ROW(u.token_jti,u.team_id,u.subject,u.tier,u.audience,u.kid,
+       u.token_custody_key_id,u.token_version,u.publication_generation,
+       u.publication_candidate_id,u.publication_manifest_sha256,
+       u.publication_envelope_sha256,u.vault_seal_epoch,u.hwm_attestation_digest)
+     IS DISTINCT FROM ROW(s.token_jti,s.team_id,s.subject,s.tier,s.audience,s.kid,
+       s.token_custody_key_id,s.token_version,s.publication_generation,
+       s.publication_candidate_id,s.publication_manifest_sha256,
+       s.publication_envelope_sha256,s.vault_seal_epoch,s.hwm_attestation_digest) THEN
+    RAISE EXCEPTION 'identity token authority: finalize conflict' USING ERRCODE='40001';
+  END IF;
+  RETURN true;
+END $$;
+REVOKE ALL ON FUNCTION kb_management_identity_authority_snapshot(TEXT,TEXT),
+  kb_management_identity_authority_admit(TEXT,TEXT),
+  kb_management_identity_authority_use(TEXT,TEXT),
+  kb_management_identity_authority_readback(TEXT,TEXT),
+  kb_management_identity_authority_finalize(TEXT,TEXT) FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION kb_management_token_authority_use(
   p_correlation_id TEXT,p_jti TEXT)
 RETURNS TABLE(newly_admitted BOOLEAN,correlation_id TEXT,jti TEXT,team_id BIGINT,

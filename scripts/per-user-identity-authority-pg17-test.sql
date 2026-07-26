@@ -50,6 +50,44 @@ BEGIN
   IF NOT ok THEN
     RAISE EXCEPTION 'FAIL: identity snapshot accepted a malformed correlation_id';
   END IF;
+
+  -- readback must not raise on an absent key-use intent: it exists to resolve a
+  -- lost COMMIT without private-key use, so "nothing admitted" is a normal
+  -- answer (zero rows), not an error.
+  BEGIN
+    PERFORM * FROM kb_management_identity_authority_readback(c, j);
+  EXCEPTION
+    WHEN undefined_column OR undefined_table OR undefined_function OR syntax_error THEN
+      RAISE EXCEPTION 'identity readback body failed to compile: %', SQLERRM;
+    WHEN OTHERS THEN
+      RAISE EXCEPTION 'FAIL: identity readback raised on an absent intent: %', SQLERRM;
+  END;
+
+  -- use and finalize demand REPEATABLE READ. This test transaction is READ
+  -- COMMITTED, so both must refuse with 25001 — which also compiles them.
+  ok := false;
+  BEGIN
+    PERFORM * FROM kb_management_identity_authority_use(c, j);
+  EXCEPTION
+    WHEN sqlstate '25001' THEN ok := true;
+    WHEN undefined_column OR undefined_table OR undefined_function OR syntax_error THEN
+      RAISE EXCEPTION 'identity use body failed to compile: %', SQLERRM;
+  END;
+  IF NOT ok THEN
+    RAISE EXCEPTION 'FAIL: identity use ran outside REPEATABLE READ';
+  END IF;
+
+  ok := false;
+  BEGIN
+    PERFORM kb_management_identity_authority_finalize(c, j);
+  EXCEPTION
+    WHEN sqlstate '25001' THEN ok := true;
+    WHEN undefined_column OR undefined_table OR undefined_function OR syntax_error THEN
+      RAISE EXCEPTION 'identity finalize body failed to compile: %', SQLERRM;
+  END;
+  IF NOT ok THEN
+    RAISE EXCEPTION 'FAIL: identity finalize ran outside REPEATABLE READ';
+  END IF;
 END $$;
 
 -- Structural: the identity intent and its key-use record are authority-owned and
