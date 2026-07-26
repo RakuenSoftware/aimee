@@ -18,6 +18,11 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+try:
+    from .build_254_fixtures import sanitize_text
+except ImportError:  # Executed directly from benchmarks/gemma4_baseline.
+    from build_254_fixtures import sanitize_text
+
 
 JSON_GBNF = r'''
 root   ::= object
@@ -118,6 +123,19 @@ def score(expected: dict[str, Any], actual: dict[str, Any]) -> dict[str, Any]:
         "extra_key_count": len(set(actual) - required),
         "field_scores": field_scores,
     }
+
+
+def persisted_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Redact generated credential/PII-like text after scoring but before persistence."""
+    result = dict(row)
+    response = result.get("response")
+    if isinstance(response, str):
+        sanitized = sanitize_text(response)
+        if sanitized != response:
+            result["response"] = "<REDACTED_GENERATED_RESPONSE>"
+            result["response_redacted"] = True
+            result["response_sha256"] = hashlib.sha256(response.encode()).hexdigest()
+    return result
 
 
 def prompt_for(case: dict[str, Any], content: str) -> str:
@@ -266,7 +284,7 @@ def main() -> int:
                 for case in pending
             }
             for completed, future in enumerate(concurrent.futures.as_completed(futures), 1):
-                row = future.result()
+                row = persisted_row(future.result())
                 done[row["case_id"]] = row
                 handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
                 handle.flush()

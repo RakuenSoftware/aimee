@@ -214,6 +214,20 @@ class GemmaBaselineContractTests(unittest.TestCase):
                 with contextlib.redirect_stdout(io.StringIO()):
                     self.assertEqual(synthesis.main(), 1)
 
+    def test_synthesis_redacts_generated_secret_like_text_after_scoring(self) -> None:
+        row = {
+            "case_id": "case",
+            "ok": True,
+            "metrics": {"content_f1": 1.0},
+            "response": '{"signature":"set_token: credential-shaped-placeholder"}',
+        }
+        persisted = synthesis.persisted_row(row)
+        self.assertEqual(persisted["metrics"], row["metrics"])
+        self.assertEqual(persisted["response"], "<REDACTED_GENERATED_RESPONSE>")
+        self.assertTrue(persisted["response_redacted"])
+        self.assertEqual(persisted["response_sha256"], synthesis.hashlib.sha256(row["response"].encode()).hexdigest())
+        self.assertEqual(row["response"], '{"signature":"set_token: credential-shaped-placeholder"}')
+
 
 if __name__ == "__main__":
     unittest.main()
