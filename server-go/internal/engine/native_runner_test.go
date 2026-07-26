@@ -1724,6 +1724,31 @@ func TestPlannerIsAskedForTheSmallestPlanThatSatisfiesTheRequest(t *testing.T) {
 	}
 }
 
+// Told to defer unrequested work, the planner deferred the work and planned its
+// foundations anyway: a snapshot ledger, then committed git fixtures, each one
+// there only to enable a history-aware mode the same plan listed as deferred.
+// The panel caught both, but every catch costs a gate round, and the run parked
+// at convergence_limit one round short. Deferring has to mean the groundwork too.
+func TestPlannerIsToldNotToBuildFoundationsForWorkItDefers(t *testing.T) {
+	agents := &recordingAgents{draftResponses: []string{"# Plan\n\nDo exactly what was asked."}}
+	runner := &NativeRunner{agents: agents}
+	_, err := runner.author(t.Context(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Repo: "/repo"},
+		Node:     wfe.Node{ID: "plan"},
+		Inputs:   map[string]wfe.Artifact{"proposal": {Type: "proposal", Content: []byte("add a CONTRIBUTING.md section")}},
+	}, "plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := agents.requests[0].Prompt
+	for _, want := range []string{"Deferring it means planning none of it, including its groundwork",
+		"whose only purpose is to enable work this same plan defers"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("planner prompt lets deferred work keep its foundations, missing %q", want)
+		}
+	}
+}
+
 // Reviewers treated only SUBSTITUTION as drift, so a plan that kept the goal and
 // piled work on top read as aligned and the gate ratcheted scope upward every
 // round. Unrequested addition is drift too — without dulling the panel's real

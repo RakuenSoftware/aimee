@@ -237,6 +237,7 @@ func (r *NativeRunner) author(ctx context.Context, req StepRequest, kind string)
 		"do not add deliverables, mechanisms, file formats, flags, or migrations the request did not ask for, and do not generalize a specific ask into a framework. " +
 		"Work the request did not ask for but that you judge genuinely necessary is technical debt. Taking on documented technical debt is completely acceptable; the requirement is that it is written down. " +
 		"Name it under a Technical debt, Deferred follow-up, or Non-goals heading and do not plan it — that is a correct and expected outcome, not a failure to plan. " +
+		"Deferring it means planning none of it, including its groundwork: do not plan a store, fixture, format, or hook whose only purpose is to enable work this same plan defers. " +
 		"What is not acceptable is leaving it undocumented: debt you neither plan nor record is a gap that silently ships.\n\nORIGINAL REQUEST:\n" + string(proposal.Content)
 	if req.Feedback != nil {
 		encoded, _ := json.Marshal(req.Feedback)
