@@ -32,19 +32,64 @@ commands over the existing `db2_write_tier_grant_*` seam, and nothing below it.
 
 ### What this changes in the sections below
 
-1. **No new SQL, and no changes to the existing functions.** The spec composes what
-   exists.
-2. **`changed` / `was_revoked` / `previous_tier` are computed at the CLI layer** with a
-   `db2_write_tier_grant_lookup` before the mutation. The existing `_set` returns
-   `VOID`, and altering a tested function's signature to report what a caller can
-   observe for itself would be gratuitous.
+1. **No CHANGES to the existing functions.** One ADDITIVE operation is needed — see (2)
+   — but nothing shipped is modified.
+2. **`changed` / `was_revoked` / `previous_tier` need an ATOMIC operation, not a
+   lookup-then-mutate.** My first correction proposed reading
+   `db2_write_tier_grant_lookup` before calling `_set`, and a further review pointed out
+   that this is racy: two concurrent local commands can interleave between the read and
+   the write, so a command that succeeds can report stale prior state or the wrong
+   `changed`. Since `changed: true` is precisely the signal a script uses to notice that
+   somebody's access was just widened, best-effort is not good enough for it.
+
+   So the remaining work includes a NEW SQL function returning the observed prior state
+   from inside the same statement — `kb_write_tier_grant_set_reporting(server, team,
+   subject, tier, granted_by)` returning `(changed, was_revoked, previous_tier)` — plus
+   its C seam. It is a new name and a new signature; the shipped
+   `kb_write_tier_grant_set` is untouched, which matters because replacing a function by
+   signature is exactly how this branch nearly shipped an authorization regression.
+
+   The implementation is `INSERT ... ON CONFLICT DO UPDATE ... RETURNING`, which yields
+   the new row, combined with the pre-image the same statement can capture — the point is
+   that one statement observes both, under the row lock, rather than two statements
+   racing.
+3. **`show` does NOT report `was_revoked`, and cannot.** Once `set` clears `revoked_at`
+   the row retains no evidence it was ever revoked, so `show` reading current state has
+   nothing to report. Recovering it would need a read seam over `kb_audit_event`, which
+   does not exist and is not worth adding to report a nicety.
+
+   `was_revoked` therefore appears ONLY on the `set` response, where the atomic operation
+   in (2) observed it. `show` reports current state and the audit log is where history
+   lives — which is the same division the grant-lifecycle section already argues for.
+   Acceptance criterion 12 is corrected accordingly.
+4. **A revoked-inclusive list needs an additive C variant.**
+   `db2_write_tier_grant_list` selects `revoked_at IS NULL` and its row struct carries no
+   `revoked_at`, so `--include-revoked` is not expressible today. The list reads the
+   table directly rather than through a SQL function, so this is a C-only addition: a new
+   entry point taking an `include_revoked` flag and a row struct carrying `revoked_at`,
+   with the existing function delegating to it.
 3. **`set` after `revoke` already clears `revoked_at` in place**, in the existing
    upsert. The long deliberation earlier in this document reached the same answer the
    shipped code had already made; it now cites that code instead of presenting it as a
    new decision.
-4. **The authorization sections are the one place the CLI is deliberately STRICTER than
-   the layer beneath it.** See below — that is a real decision, not an oversight, and it
-   does not alter the DB rule.
+5. **The authorization sections are the one place the CLI is deliberately STRICTER than
+   the layer beneath it.** See below — a real decision, not an oversight, and it does not
+   alter the DB rule.
+
+### So the remaining work is, precisely
+
+| # | work | layer |
+| --- | --- | --- |
+| 1 | `kb_write_tier_grant_set_reporting(...)` returning `(changed, was_revoked, previous_tier)` | new SQL function + grants |
+| 2 | its C seam, plus a revoked-inclusive list variant and a `revoked_at` row field | additive C |
+| 3 | four kb HTTP routes over that seam | kb |
+| 4 | a `kb_client` method per command | server-side client |
+| 5 | four `/v1` routes with the UDS-only check, plus `server_auth.c` capability entries | server |
+| 6 | four CLI route-table entries and help text | CLI |
+
+The earlier claim that this was "four commands over a complete seam with nothing below
+it" was wrong in the same direction as the original premise: it understated what is
+missing. Items 1 and 2 are below the seam.
 
 ## Why this exists
 
@@ -92,10 +137,12 @@ Creates or updates the grant for exactly one `(server_id, team_id, subject)`.
 - `--tier` — `off`, `data` or `full`. `off` is a real tier meaning "explicitly
   denied", which is **not** the same as no grant: it records a decision, and it
   survives a later `list` so an operator can see the denial was intentional.
-- **Idempotent.** Running it twice with the same tier is a no-op that still
-  answers `200`. Running it with a different tier updates in place and is
-  reported as `changed: true` with the previous tier echoed, so a script can tell
-  "already correct" from "just widened somebody's access".
+- **Idempotent.** Running it twice with the same tier is a no-op that still answers
+  `200`. Running it with a different tier updates in place and is reported as
+  `changed: true` with the previous tier echoed, so a script can tell "already correct"
+  from "just widened somebody's access". Those fields come from the atomic operation in
+  correction (2) — NOT from a separate read before the write, which would race with a
+  concurrent command and could report a stale previous tier on a call that succeeded.
 
 #### `set` against a revoked grant
 
@@ -126,8 +173,10 @@ Why in place rather than a second row:
   The grant row is current state; the audit log is history. Conflating the two was
   the error in the first draft.
 
-`show` reports `was_revoked` when a prior revocation was cleared, so an operator can
-see the authority was withdrawn and restored rather than held continuously.
+The `set` response reports `was_revoked` — observed atomically by the operation in
+correction (2) — so the operator performing the re-grant sees that the authority was
+withdrawn and restored rather than held continuously. A LATER `show` cannot: the cleared
+row holds no evidence, and the audit log is where that history is read from.
 `list --include-revoked` widens the listing to include revoked rows **alongside**
 live ones — it is not a filter that shows revoked rows only. (An earlier draft said
 both in different places; this is the definition.) Ordering is unaffected because
@@ -271,8 +320,10 @@ Each of these is a test, not a description.
     can write again.
 11. After (10) there is exactly ONE row for that `(server, team, subject)` — asserted
     against the table, not inferred from the CLI.
-12. After (10), `show` reports `was_revoked`, and the row no longer appears as revoked
-    in `list --include-revoked`.
+12. After (10), the row no longer appears as revoked in `list --include-revoked`.
+    `show` does NOT report `was_revoked` — once the revocation is cleared the row holds
+    no evidence of it, and `was_revoked` is reported only on the `set` response that
+    observed it atomically.
 13. The `kb_audit_event` sequence for grant → revoke → grant is three events in order,
     each with its actor: continuity lives there, not in the row.
 14. `set` after `revoke` with a DIFFERENT tier applies the new tier.

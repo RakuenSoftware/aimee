@@ -116,38 +116,50 @@ grep -q '^replayed code: DENIED' "$work/finish.out" \
   || { echo "the IdP did not refuse a replayed code" >&2; exit 4; }
 
 step "The negative cases, against the same live IdP"
-# A WRONG PKCE VERIFIER. The IdP holds the challenge, so only it can enforce this —
-# no stub can. Corrupt the stored verifier and re-run a fresh login's exchange.
-./oidc-login-live start "$work/pending2" >/dev/null
-url2=$(grep '^AUTHORIZE_URL ' <(./oidc-login-live start "$work/pending3") | cut -d' ' -f2-)
+# A WRONG PKCE VERIFIER. Only the IdP can enforce this — it holds the challenge — so no
+# stub can establish it. Every step below is FATAL: an earlier version treated a missing
+# second code as a skipped check and accepted any nonzero result from the exchange, which
+# meant this script could print PASSED while never testing the thing it claims to prove.
+# A review caught that, and it is exactly the failure mode a "negative case" invites.
+./oidc-login-live start "$work/pending3" >"$work/start3.out"
+url2=$(grep '^AUTHORIZE_URL ' "$work/start3.out" | cut -d' ' -f2-)
+[ -n "$url2" ] || { echo "no authorization URL for the wrong-verifier case" >&2; exit 5; }
 jar2="$work/cookies2"
 form2=$(K -c "$jar2" "$url2" | grep -o 'action="[^"]*"' | head -1 | sed 's/action="//;s/"$//' \
         | python3 -c 'import sys,html;print(html.unescape(sys.stdin.read().strip()))')
+[ -n "$form2" ] || { echo "could not find the IdP login form (wrong-verifier case)" >&2; exit 5; }
 loc2=$(K -b "$jar2" -c "$jar2" -o /dev/null -D - -X POST "$form2" \
          --data-urlencode "username=$USER" --data-urlencode "password=$PASS" \
          --data-urlencode "credentialId=" | tr -d '\r' | awk 'tolower($1)=="location:"{print $2}')
 code2=$(printf '%s' "$loc2" | sed -n 's/.*[?&]code=\([^&]*\).*/\1/p')
-if [ -n "$code2" ]; then
-  # Swap in a different (well-formed) verifier for the same code.
-  python3 - "$work/pending3" <<'PY'
-import sys
-p=sys.argv[1]
-l=open(p).read().split("\n")
-l[1]="X"*len(l[1])            # same length, wrong value
-open(p,"w").write("\n".join(l))
-PY
-  set +e
-  out=$(./oidc-login-live finish "$work/pending3" "$code2" 2>&1)
-  rc=$?
-  set -e
-  printf '%s\n' "$out" | grep -E '^exchange:' || true
-  if [ "$rc" = "0" ]; then
-    echo "the IdP ACCEPTED a wrong PKCE verifier" >&2; exit 5
-  fi
-  echo "  correct: a wrong code_verifier is refused BY THE IdP"
-else
-  echo "  (skipped: could not obtain a second code)" >&2
+# FATAL, not skipped: without a second code this check does not happen, and a script that
+# silently omits its only live PKCE proof is worse than one that fails.
+[ -n "$code2" ] || { echo "could not obtain a second code; the wrong-verifier check did NOT run" >&2; exit 5; }
+
+# Swap in a different but well-formed verifier for that code: same length, wrong value, so
+# the IdP is rejecting the VERIFIER rather than a malformed request.
+verifier_len=$(awk 'NR==2{print length($0)}' "$work/pending3")
+awk -v n="$verifier_len" 'NR==2{s="";for(i=0;i<n;i++)s=s "X";print s;next}{print}' \
+  "$work/pending3" > "$work/pending3.tmp" && mv "$work/pending3.tmp" "$work/pending3"
+
+set +e
+out=$(./oidc-login-live finish "$work/pending3" "$code2" 2>&1)
+rc=$?
+set -e
+printf '%s\n' "$out" | grep -E '^exchange:' || true
+# The SPECIFIC expected outcome, not merely "did not succeed". Accepting any nonzero result
+# would also accept a transport failure, a build problem or a crash — none of which prove
+# anything about PKCE.
+if [ "$rc" = "0" ]; then
+  echo "the IdP ACCEPTED a wrong PKCE verifier" >&2; exit 5
 fi
+printf '%s' "$out" | grep -q '^exchange: DENIED' || {
+  echo "a wrong verifier was refused, but NOT as an IdP OAuth denial — so this does not" >&2
+  echo "  demonstrate PKCE enforcement. Got:" >&2
+  printf '%s\n' "$out" | grep -E '^exchange:' >&2
+  exit 5
+}
+echo "  correct: a wrong code_verifier is refused BY THE IdP, as an OAuth denial"
 
 step "What this proved"
 cat <<'MSG'
