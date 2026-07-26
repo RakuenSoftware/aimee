@@ -508,25 +508,37 @@ func safeDiagnostic(detail string) string {
 	return detail
 }
 
+// maxIterations is how many times one step may repeat before it parks.
+// The parameter is max_rounds. It replaces max_iters, which named the same
+// budget less clearly and was the only one the engine ever read — so a node
+// declaring just max_rounds silently ran on the default, and a live plan gate
+// reached 63 loops that way.
 func maxIterations(node wfe.Node) int {
 	const defaultMax = 20
-	value, ok := node.Params["max_iters"]
+	if n, ok := positiveIntParam(node, "max_rounds"); ok {
+		return n
+	}
+	return defaultMax
+}
+
+func positiveIntParam(node wfe.Node, name string) (int, bool) {
+	value, ok := node.Params[name]
 	if !ok {
-		return defaultMax
+		return 0, false
 	}
 	switch n := value.(type) {
 	case int:
 		if n > 0 {
-			return n
+			return n, true
 		}
 	case int64:
 		if n > 0 && n <= int64(^uint(0)>>1) {
-			return int(n)
+			return int(n), true
 		}
 	case uint64:
 		if n > 0 && n <= uint64(^uint(0)>>1) {
-			return int(n)
+			return int(n), true
 		}
 	}
-	return defaultMax
+	return 0, false
 }
