@@ -1085,10 +1085,31 @@ static int g_tls_fd = -1;            /* optional native-TLS listener (phase 1b) 
 static int g_management_tls_fd = -1; /* dedicated required-mTLS management listener */
 static char g_bearer[256] = "";      /* configured TCP bearer (empty = none) */
 static int g_rate_limit = 0;         /* TCP requests / 60s (0 = unlimited) */
-int g_remote_writes = 0;             /* aimee.api.remote_writes: SERVER_REMOTE_WRITES_* */
+int g_remote_writes = 0;             /* aimee.api.remote_writes: parsed, authorizes nothing */
+/* remote_writes.global_ignored: requests refused that the retired global would
+ * formerly have allowed. Read by the status surface; mutated under g_rate_lock
+ * because request threads run concurrently. */
+static uint64_t g_remote_writes_global_ignored = 0;
 static server_http_rate_state_t g_rate_state = {0, 0};
-static pthread_mutex_t g_rate_lock =
-    PTHREAD_MUTEX_INITIALIZER; /* guards g_rate_state across conns */
+static pthread_mutex_t g_rate_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* Bump the ignored-global counter. Request threads run concurrently, so this
+ * shares g_rate_lock rather than racing on a plain increment. */
+static void server_http_note_global_ignored(void)
+{
+   pthread_mutex_lock(&g_rate_lock);
+   g_remote_writes_global_ignored++;
+   pthread_mutex_unlock(&g_rate_lock);
+}
+
+uint64_t server_http_global_ignored_count(void)
+{
+   pthread_mutex_lock(&g_rate_lock);
+   uint64_t value = g_remote_writes_global_ignored;
+   pthread_mutex_unlock(&g_rate_lock);
+   return value;
+}
+/* guards g_rate_state across conns */
 static pthread_t g_thread;
 static atomic_int g_running = 0;
 static int g_thread_active = 0;
@@ -1693,12 +1714,55 @@ void handle_conn(int fd, int is_tcp, int is_management)
     * until then assume the fail-closed value. UDS never reaches the gate at all
     * (it is guarded by `is_tcp`), so the local operator keeps full capability
     * exactly as §7 requires. */
+   /* Verify the caller's identity token BEFORE capabilities are derived, so the
+    * connection's caps come from the authenticated user rather than from the
+    * retired process-global. Verification has no side effects: the token's
+    * single-use jti is spent later, only once the request is known to be
+    * servable, so a request rejected by the rate limit or the route gate never
+    * burns a token the user would then have to replace. */
    int effective_remote_writes = SERVER_REMOTE_WRITES_OFF;
    server_write_tier_outcome_t write_tier_outcome = SERVER_WRITE_TIER_ABSENT;
+   server_identity_token_claims_t identity_claims;
+   memset(&identity_claims, 0, sizeof(identity_claims));
+   int identity_present = 0;
+   if (is_tcp)
+   {
+      char identity[KB_IDENTITY_TOKEN_WIRE_MAX + 1] = "";
+      char auth_value[KB_IDENTITY_TOKEN_WIRE_MAX + 1] = "";
+      size_t identity_len = 0;
+      if (http_header(buf, "Authorization", auth_value, sizeof(auth_value)))
+      {
+         const char *credential = auth_value;
+         if (strncasecmp(credential, "Bearer ", 7) == 0)
+            credential += 7;
+         while (*credential == ' ')
+            credential++;
+         /* Only a compact JWS can be an identity token. The legacy shared bearer
+          * is an opaque string, so this leaves it alone instead of reporting
+          * every legacy read as a malformed token. */
+         if (strchr(credential, '.'))
+         {
+            identity_len = strnlen(credential, sizeof(identity) - 1);
+            memcpy(identity, credential, identity_len);
+            identity[identity_len] = '\0';
+         }
+      }
+      effective_remote_writes = server_write_tier_verify_for_request(
+          identity_len ? identity : NULL, identity_len, (int64_t)time(NULL), &write_tier_outcome,
+          &identity_claims);
+      identity_present = write_tier_outcome == SERVER_WRITE_TIER_OK;
+      if (write_tier_outcome != SERVER_WRITE_TIER_OK &&
+          write_tier_outcome != SERVER_WRITE_TIER_ABSENT)
+         LOG_INFO("server.http", "%s %s write tier denied (%s) req_id=%s", method, path,
+                  server_write_tier_outcome_str(write_tier_outcome), request_id);
+      OPENSSL_cleanse(identity, sizeof(identity));
+      OPENSSL_cleanse(auth_value, sizeof(auth_value));
+   }
    uint32_t effective_caps =
-       management_authenticated ? 0
-                                : server_http_effective_conn_caps(is_tcp, g_bearer, g_remote_writes,
-                                                                  mtls_mode, mtls_authenticated);
+       management_authenticated
+           ? 0
+           : server_http_effective_conn_caps(is_tcp, g_bearer, effective_remote_writes, mtls_mode,
+                                             mtls_authenticated);
    effective_caps = server_http_enrollment_caps(effective_caps, is_tcp, mtls_authenticated,
                                                 server_conn_io_has_ssl(fd), g_bearer, method, path);
    /* Establish the per-request context (#3) only after authenticating the
@@ -1779,44 +1843,6 @@ void handle_conn(int fd, int is_tcp, int is_management)
       }
    }
 
-   /* Resolve the caller's write tier from their identity token. This replaces
-    * the deployment-wide aimee.api.remote_writes: authority is now a property of
-    * the authenticated user, re-checked on every request. Every failure yields
-    * SERVER_REMOTE_WRITES_OFF with a specific reason, so a denial is always
-    * attributable to one cause rather than a generic refusal. */
-   if (is_tcp)
-   {
-      char identity[KB_IDENTITY_TOKEN_WIRE_MAX + 1] = "";
-      size_t identity_len = 0;
-      char auth_value[KB_IDENTITY_TOKEN_WIRE_MAX + 1] = "";
-      if (http_header(buf, "Authorization", auth_value, sizeof(auth_value)))
-      {
-         const char *credential = auth_value;
-         if (strncasecmp(credential, "Bearer ", 7) == 0)
-            credential += 7;
-         while (*credential == ' ')
-            credential++;
-         /* Only a compact JWS can be an identity token. The legacy shared bearer
-          * is an opaque string, so this leaves it alone rather than feeding it to
-          * the verifier and reporting every legacy read as a malformed token. */
-         if (strchr(credential, '.'))
-         {
-            identity_len = strnlen(credential, sizeof(identity) - 1);
-            memcpy(identity, credential, identity_len);
-            identity[identity_len] = '\0';
-         }
-      }
-      effective_remote_writes =
-          server_write_tier_for_request(identity_len ? identity : NULL, identity_len,
-                                        (int64_t)time(NULL), &write_tier_outcome, NULL);
-      if (write_tier_outcome != SERVER_WRITE_TIER_OK &&
-          write_tier_outcome != SERVER_WRITE_TIER_ABSENT)
-         LOG_INFO("server.http", "%s %s write tier denied (%s) req_id=%s", method, path,
-                  server_write_tier_outcome_str(write_tier_outcome), request_id);
-      OPENSSL_cleanse(identity, sizeof(identity));
-      OPENSSL_cleanse(auth_value, sizeof(auth_value));
-   }
-
    /* Per-route capability gate (TCP only): the route's required capabilities
     * must be a subset of the connection's effective set. UDS is same-user
     * trusted and exempt. A scoped bearer is read/query-only, so compute/write
@@ -1828,9 +1854,40 @@ void handle_conn(int fd, int is_tcp, int is_management)
                     "{\"error\":{\"message\":\"this endpoint requires capabilities beyond the "
                     "presented token's scope\",\"type\":\"permission_error\"}}",
                     request_id);
+      /* Count the requests the retired global would formerly have allowed, so an
+       * operator can see exactly how much traffic the cutover is refusing
+       * instead of inferring it from complaints. Only counts denials the old
+       * global would have permitted - a request that fails for an unrelated
+       * reason is not attributable to this change. */
+      if (g_remote_writes != SERVER_REMOTE_WRITES_OFF &&
+          server_http_route_allowed_caps(is_tcp, effective_caps, method, path, g_remote_writes))
+         server_http_note_global_ignored();
       LOG_INFO("server.http", "%s %s -> 403 (caps) req_id=%s", method, path, request_id);
       return;
    }
+
+   /* The request has cleared every gate, so now - and only now - spend the
+    * token's single-use jti. Doing it earlier would burn a token on a request
+    * that was never served. The check remains binding: a replay, or a replay
+    * store that cannot answer, denies here even though verification succeeded. */
+   if (identity_present)
+   {
+      server_write_tier_outcome_t consumed = SERVER_WRITE_TIER_INVALID;
+      if (server_write_tier_consume_for_request(&identity_claims, (int64_t)time(NULL), &consumed) ==
+              SERVER_REMOTE_WRITES_OFF &&
+          consumed != SERVER_WRITE_TIER_OK)
+      {
+         OPENSSL_cleanse(&identity_claims, sizeof(identity_claims));
+         send_response(fd, 403,
+                       "{\"error\":{\"message\":\"this identity token has already been "
+                       "used\",\"type\":\"permission_error\"}}",
+                       request_id);
+         LOG_INFO("server.http", "%s %s -> 403 (%s) req_id=%s", method, path,
+                  server_write_tier_outcome_str(consumed), request_id);
+         return;
+      }
+   }
+   OPENSSL_cleanse(&identity_claims, sizeof(identity_claims));
 
    config_t transport_cfg;
    config_load(&transport_cfg);
@@ -2415,6 +2472,20 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
       snprintf(g_bearer, sizeof(g_bearer), "%s", bearer_token);
    g_rate_limit = rate_limit_per_min > 0 ? rate_limit_per_min : 0;
    g_remote_writes = remote_writes;
+   /* aimee.api.remote_writes is still parsed so an existing config file loads,
+    * but it no longer authorizes anything: /v1 write authority now comes from
+    * the caller's kb-signed identity token. Say so once, loudly, at startup -
+    * an operator who upgraded with this set to data/full and did not notice
+    * would otherwise conclude the release simply broke writes. */
+   if (g_remote_writes != SERVER_REMOTE_WRITES_OFF)
+      LOG_WARN("server.http",
+               "aimee.api.remote_writes is set but no longer authorizes writes; per-user grants "
+               "replace it (see docs/UPGRADING.md 0.3.0). Requests it would formerly have allowed "
+               "are counted as remote_writes.global_ignored");
+   if (!server_write_tier_team_configured())
+      LOG_ERROR("server.http",
+                "AIMEE_SERVER_TEAM_ID is unset or invalid: reads continue, but every /v1 write "
+                "will be denied with no_team_configured until it is set to this server's team id");
    g_rate_state.window_start = 0;
    g_rate_state.count = 0;
    g_tcp_fd = tcp_listen(tcp_port, bearer_token, 0 /* plaintext: loopback only */);

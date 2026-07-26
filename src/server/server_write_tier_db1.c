@@ -96,9 +96,49 @@ int server_write_tier_team_configured(void)
    return env_team_id(&team);
 }
 
-int server_write_tier_for_request(const char *token, size_t token_len, int64_t now,
-                                  server_write_tier_outcome_t *outcome,
-                                  server_identity_token_claims_t *claims_out)
+/* Assemble the resolver config from this server's environment and JWKS cache.
+ * Returns 1 on success. On failure sets *outcome to the specific reason so the
+ * caller never has to guess whether the problem was the token or the server. */
+static int build_config(server_write_tier_config_t *config, char *jwks, size_t jwks_cap,
+                        int64_t *team, char *bundle, size_t bundle_cap, int64_t now,
+                        server_write_tier_outcome_t *outcome)
+{
+   memset(config, 0, sizeof(*config));
+   if (!env_team_id(team))
+   {
+      *outcome = SERVER_WRITE_TIER_NO_TEAM_CONFIGURED;
+      return 0;
+   }
+   const char *server_id = getenv("AIMEE_SERVER_ID");
+   const char *bundle_path = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
+   if (!server_id || !server_id[0] || !bundle_path || !bundle_path[0])
+   {
+      *outcome = SERVER_WRITE_TIER_INVALID;
+      return 0;
+   }
+   size_t bundle_len = 0, jwks_len = 0;
+   if (server_mgmt_jwks_trust_bundle_load(bundle_path, bundle, bundle_cap, &bundle_len) != 0 ||
+       server_mgmt_jwks_cache_load(bundle, bundle_len, now, jwks, jwks_cap, &jwks_len) !=
+           SERVER_MGMT_JWKS_CACHE_OK ||
+       jwks_len == 0)
+   {
+      /* Without keys we cannot tell a forged token from a good one, so we must
+       * not guess. */
+      *outcome = SERVER_WRITE_TIER_INVALID;
+      return 0;
+   }
+   config->jwks_json = jwks;
+   config->expected_issuer = "kb"; /* proposal §4 pins iss=kb */
+   config->expected_audience = server_id;
+   config->enrolled_teams = team;
+   config->enrolled_team_count = 1; /* a server belongs to exactly one team */
+   config->replay = server_write_tier_replay_db1;
+   return 1;
+}
+
+int server_write_tier_verify_for_request(const char *token, size_t token_len, int64_t now,
+                                         server_write_tier_outcome_t *outcome,
+                                         server_identity_token_claims_t *claims_out)
 {
    server_write_tier_outcome_t local = SERVER_WRITE_TIER_INVALID;
    if (!outcome)
@@ -107,49 +147,46 @@ int server_write_tier_for_request(const char *token, size_t token_len, int64_t n
    if (claims_out)
       memset(claims_out, 0, sizeof(*claims_out));
 
-   /* No credential presented: report that plainly before doing any work, so the
-    * ordinary read-only caller is never mistaken for a misconfiguration. */
+   /* Report an absent credential before doing any work, so the ordinary
+    * read-only caller is never mistaken for a misconfiguration. */
    if (!token || token_len == 0 || token[0] == '\0')
    {
       *outcome = SERVER_WRITE_TIER_ABSENT;
       return SERVER_REMOTE_WRITES_OFF;
    }
 
-   int64_t team = 0;
-   if (!env_team_id(&team))
-   {
-      *outcome = SERVER_WRITE_TIER_NO_TEAM_CONFIGURED;
-      return SERVER_REMOTE_WRITES_OFF;
-   }
-
-   const char *server_id = getenv("AIMEE_SERVER_ID");
-   const char *bundle_path = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
-   if (!server_id || !server_id[0] || !bundle_path || !bundle_path[0])
-      return SERVER_REMOTE_WRITES_OFF; /* INVALID: this server cannot verify anything */
-
+   server_write_tier_config_t config;
    char bundle[SERVER_MGMT_JWKS_BUNDLE_MAX];
-   size_t bundle_len = 0;
    char jwks[SERVER_MGMT_JWKS_BYTES_MAX];
-   size_t jwks_len = 0;
-   int resolved = SERVER_REMOTE_WRITES_OFF;
-   if (server_mgmt_jwks_trust_bundle_load(bundle_path, bundle, sizeof(bundle), &bundle_len) == 0 &&
-       server_mgmt_jwks_cache_load(bundle, bundle_len, now, jwks, sizeof(jwks), &jwks_len) ==
-           SERVER_MGMT_JWKS_CACHE_OK &&
-       jwks_len > 0)
-   {
-      server_write_tier_config_t config;
-      memset(&config, 0, sizeof(config));
-      config.jwks_json = jwks;
-      config.expected_issuer = "kb"; /* proposal §4 pins iss=kb */
-      config.expected_audience = server_id;
-      config.enrolled_teams = &team;
-      config.enrolled_team_count = 1; /* a server belongs to exactly one team */
-      config.replay = server_write_tier_replay_db1;
-      resolved = server_write_tier_resolve(token, token_len, &config, now, outcome, claims_out);
-   }
-   /* A JWKS we cannot load leaves *outcome INVALID: we cannot tell a forged
-    * token from a good one without keys, so we must not guess. */
+   int64_t team = 0;
+   int tier = SERVER_REMOTE_WRITES_OFF;
+   if (build_config(&config, jwks, sizeof(jwks), &team, bundle, sizeof(bundle), now, outcome))
+      tier = server_write_tier_verify(token, token_len, &config, now, outcome, claims_out);
    OPENSSL_cleanse(bundle, sizeof(bundle));
    OPENSSL_cleanse(jwks, sizeof(jwks));
-   return resolved;
+   return tier;
+}
+
+int server_write_tier_consume_for_request(const server_identity_token_claims_t *claims, int64_t now,
+                                          server_write_tier_outcome_t *outcome)
+{
+   server_write_tier_outcome_t local = SERVER_WRITE_TIER_INVALID;
+   if (!outcome)
+      outcome = &local;
+   *outcome = SERVER_WRITE_TIER_INVALID;
+   if (!claims)
+      return SERVER_REMOTE_WRITES_OFF;
+
+   /* Consumption needs only the replay hook, but it goes through the same
+    * builder so a server that cannot verify also cannot spend. */
+   server_write_tier_config_t config;
+   char bundle[SERVER_MGMT_JWKS_BUNDLE_MAX];
+   char jwks[SERVER_MGMT_JWKS_BYTES_MAX];
+   int64_t team = 0;
+   int tier = SERVER_REMOTE_WRITES_OFF;
+   if (build_config(&config, jwks, sizeof(jwks), &team, bundle, sizeof(bundle), now, outcome))
+      tier = server_write_tier_consume(claims, &config, now, outcome);
+   OPENSSL_cleanse(bundle, sizeof(bundle));
+   OPENSSL_cleanse(jwks, sizeof(jwks));
+   return tier;
 }

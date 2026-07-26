@@ -156,6 +156,12 @@ extern "C"
    /* Effective caps for a request after thin-client mTLS authentication. When
     * mTLS is enabled, bearer fallback is a query-only floor and a durable cert
     * gets the authenticated (but not full-trust) set. */
+   /* remote_writes.global_ignored: how many requests were refused that the
+    * retired aimee.api.remote_writes would formerly have allowed. Lets an
+    * operator size the cutover's impact instead of inferring it from
+    * complaints. */
+   uint64_t server_http_global_ignored_count(void);
+
    uint32_t server_http_effective_conn_caps(int is_tcp, const char *bearer, int remote_writes,
                                             int mtls_mode, int mtls_authenticated);
    int server_http_mtls_transport_allowed(int is_tcp, int mtls_mode, int mtls_authenticated);
