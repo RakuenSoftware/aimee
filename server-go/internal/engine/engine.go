@@ -359,6 +359,15 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 
 	switch step.Status {
 	case StepAdvanced:
+		// An approving gate may still have recorded non-blocking deficiencies —
+		// technical debt to act on later. Only the changes path used to persist
+		// feedback, so approving silently discarded them and the debt was never
+		// written down anywhere an operator could find it.
+		if step.Feedback != nil && len(step.Feedback.Findings) > 0 {
+			if err := e.artifacts.PutFeedback(item.ID, *step.Feedback); err != nil {
+				return out, e.parkAfterSpend(ctx, item, "feedback_write_failed", err, step.CostUSD)
+			}
+		}
 		next := node.Next
 		// A gate's pass edge is `on_pass`, not `next`. This holds for every gate,
 		// not just gate.roundtable: gate.ci advances a green PR to the merge stage
