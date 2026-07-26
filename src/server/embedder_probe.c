@@ -2,6 +2,7 @@
  * db2 layer so db2_init can derive a fresh DB's embedding dim from the running
  * embedder without db2 learning the embed transport (db2 stays config-free). */
 #include "embedder_probe.h"
+#include "platform_process.h"
 
 #include "aimee.h" /* EMBED_MAX_DIM + memory.h prerequisites */
 #include "lifecycle.h"
@@ -18,6 +19,12 @@
  * captured at registration. Operator-trusted config, run via /bin/sh with --dim. */
 static char g_embed_cmd[1024] = "";
 
+/* Per-attempt bounds. The floor keeps a nearly-exhausted budget from degenerating
+ * into a zero-timeout attempt; the ceiling keeps one attempt from consuming a
+ * large budget entirely and starving the two-consecutive-reads check. */
+#define PROBE_ATTEMPT_MIN_MS 2000
+#define PROBE_ATTEMPT_MAX_MS 15000
+
 static long probe_mono_ms(void)
 {
    struct timespec ts;
@@ -28,7 +35,7 @@ static long probe_mono_ms(void)
 /* One probe attempt: run `<embed_cmd> --dim`, return the parsed positive dim, or
  * <=0 if the embedder is not ready / the command failed / output was not a single
  * positive integer. */
-static int probe_once(void)
+static int probe_once(int timeout_ms)
 {
    if (!g_embed_cmd[0])
       return -1;
@@ -46,15 +53,33 @@ static int probe_once(void)
    }
    char cmd[1100];
    snprintf(cmd, sizeof(cmd), "%s --dim", g_embed_cmd);
-   FILE *p = popen(cmd, "r");
-   if (!p)
-      return -1;
+
+   /* Bounded, because this runs on the MAIN THREAD during kb startup, before the
+    * HTTP listener exists. The previous popen()/fread() had no timeout, so an
+    * embedder that accepted the exec and then never answered blocked startup
+    * forever — the process stayed alive with no listener, which reads as "up but
+    * not serving". Observed directly: thread 1 parked in fread() under
+    * __libc_start_main with the listener never created.
+    *
+    * That also made embedder_probe_run's budget_ms unenforceable: it is only
+    * consulted AFTER probe_once returns, so a single unbounded attempt made the
+    * whole budget moot. The per-attempt bound is what gives the budget meaning. */
+   char *out = NULL;
+   size_t out_len = 0;
+   int rc = platform_exec_pipe_bounded(cmd, NULL, 0, &out, &out_len, timeout_ms, 64 * 1024);
+   if (rc != 0)
+   {
+      free(out);
+      return -1; /* not ready, failed, timed out, or over-talkative */
+   }
    char buf[64] = "";
-   size_t n = fread(buf, 1, sizeof(buf) - 1, p);
-   buf[n] = '\0';
-   int status = pclose(p);
-   if (status != 0)
-      return -1; /* command signalled "not ready" / error */
+   if (out)
+   {
+      size_t n = out_len < sizeof(buf) - 1 ? out_len : sizeof(buf) - 1;
+      memcpy(buf, out, n);
+      buf[n] = '\0';
+   }
+   free(out);
    char *endp = NULL;
    long v = strtol(buf, &endp, 10);
    /* accept only a clean positive integer (trailing whitespace/newline ok) */
@@ -74,7 +99,15 @@ static int embedder_probe_run(int *out_dim, int budget_ms, char *err, size_t err
    int last = 0; /* last positive read; 0 = none yet */
    for (;;)
    {
-      int d = probe_once();
+      /* Give each attempt what is left of the budget, floored so a nearly-spent
+       * budget still makes a real attempt rather than a zero-length one. */
+      long spent = probe_mono_ms() - start;
+      int remaining = (int)(budget_ms - spent);
+      if (remaining < PROBE_ATTEMPT_MIN_MS)
+         remaining = PROBE_ATTEMPT_MIN_MS;
+      if (remaining > PROBE_ATTEMPT_MAX_MS)
+         remaining = PROBE_ATTEMPT_MAX_MS;
+      int d = probe_once(remaining);
       if (d > 0)
       {
          if (d == last)
