@@ -1469,6 +1469,52 @@ int main(void)
       assert(server_http_route_allowed(1, "plain", "POST", "/v1/memory/search",
                                        SERVER_REMOTE_WRITES_DATA) == 1);
 
+      /* GRANT ADMINISTRATION IS UDS-ONLY, and nothing on the TCP side can reach it.
+       *
+       * This is the one property standing between a fully-trusted remote peer and the
+       * ability to widen its own access: a TCP bearer at remote_writes=full receives
+       * CAPS_ALL (asserted just below), so no capability and no tier distinguishes it from
+       * the local operator. If grant administration were reachable that way, anyone holding
+       * `full` could grant themselves `full` on any server in their team and the tier system
+       * would be decorative.
+       *
+       * Checked ahead of both the tier gate and the capability gate, so it cannot be
+       * satisfied by having enough of either. */
+      assert(v1_route_requires_uds("POST", "/v1/grants/write-tier") == 1);
+      assert(v1_route_requires_uds("POST", "/v1/grants/write-tier/revoke") == 1);
+      assert(v1_route_requires_uds("GET", "/v1/grants/write-tier") == 1);
+      /* A prefix, so a verb added later inherits the restriction instead of having to
+       * remember it. */
+      assert(v1_route_requires_uds("POST", "/v1/grants/write-tier/anything-future") == 1);
+      /* And it claims nothing it should not. */
+      assert(v1_route_requires_uds("POST", "/v1/memory/store") == 0);
+      assert(v1_route_requires_uds("GET", "/v1/kb/status") == 0);
+      /* A shorter path that merely shares a prefix must not be captured. */
+      assert(v1_route_requires_uds("GET", "/v1/grants") == 0);
+      assert(v1_route_requires_uds(NULL, "/v1/grants/write-tier") == 0);
+      assert(v1_route_requires_uds("POST", NULL) == 0);
+
+      /* Over TCP: refused at EVERY tier and with EVERY capability set, including CAPS_ALL
+       * — which is exactly what a remote_writes=full bearer holds. */
+      for (int tier = SERVER_REMOTE_WRITES_OFF; tier <= SERVER_REMOTE_WRITES_FULL; tier++)
+      {
+         assert(server_http_route_allowed_caps(1, CAPS_ALL, "POST", "/v1/grants/write-tier",
+                                               tier) == 0);
+         assert(server_http_route_allowed_caps(1, CAPS_ALL, "POST", "/v1/grants/write-tier/revoke",
+                                               tier) == 0);
+         assert(server_http_route_allowed_caps(1, CAPS_ALL, "GET", "/v1/grants/write-tier", tier) ==
+                0);
+         assert(server_http_route_allowed_caps(1, CAPS_AUTHENTICATED, "POST",
+                                               "/v1/grants/write-tier", tier) == 0);
+      }
+      /* Over UDS: permitted. The route is the local operator's, so it must not be
+       * unreachable everywhere — a check that refused both transports would look like
+       * this one passing. */
+      assert(server_http_route_allowed_caps(0, CAPS_ALL, "POST", "/v1/grants/write-tier",
+                                            SERVER_REMOTE_WRITES_OFF) == 1);
+      assert(server_http_route_allowed_caps(0, CAPS_ALL, "GET", "/v1/grants/write-tier",
+                                            SERVER_REMOTE_WRITES_OFF) == 1);
+
       /* conn caps by level: data keeps CAPS_AUTHENTICATED, full grants CAPS_ALL. */
       assert(server_http_conn_caps(1, "plain", SERVER_REMOTE_WRITES_OFF) == CAPS_AUTHENTICATED);
       assert(server_http_conn_caps(1, "plain", SERVER_REMOTE_WRITES_DATA) == CAPS_AUTHENTICATED);
