@@ -511,7 +511,7 @@ func TestMaxIterationsParksWithoutAbandoning(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		out, err := store.RecordRequestedChanges(ctx, "wi_cap", "plan_gate", "plan",
-			"plan-"+string(rune('a'+i)), "feedback-"+string(rune('a'+i)), 3, 3, 0)
+			"plan-"+string(rune('a'+i)), "feedback-"+string(rune('a'+i)), "subject anchor never defined", 3, 3, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -534,7 +534,7 @@ func TestIdenticalPlanAndFeedbackParksAsNoProgress(t *testing.T) {
 	ctx := context.Background()
 	for i := 0; i < 3; i++ {
 		out, err := store.RecordRequestedChanges(ctx, "wi_repeat", "plan_gate", "plan",
-			"same-plan", "same-feedback", 24, 3, 0)
+			"same-plan", "same-feedback", "", 24, 3, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -558,7 +558,7 @@ func TestChangedPlanOrFeedbackIsPositiveProgress(t *testing.T) {
 	cases := [][2]string{{"plan-a", "feedback-a"}, {"plan-b", "feedback-a"}, {"plan-b", "feedback-b"}}
 	for _, pair := range cases {
 		out, err := store.RecordRequestedChanges(ctx, "wi_progress", "plan_gate", "plan",
-			pair[0], pair[1], 24, 3, 0)
+			pair[0], pair[1], "", 24, 3, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1109,4 +1109,36 @@ func TestRecoverLostReplayReleasesUnresolvedAndParksActual(t *testing.T) {
 			t.Fatal("recover accepted a non-owner")
 		}
 	})
+}
+
+// The production refinement cycle is gate --loop--> author, then
+// author --advance--> gate. That re-entering advance was clearing the gate's own
+// attempt counter, so the cap never accumulated and the pair looped without
+// bound: a live plan gate reached 63 loops against a cap of 20. Entering a stage
+// must not reset the budget that bounds it; only completing one may.
+func TestGateIterationCapSurvivesTheAuthorsReentry(t *testing.T) {
+	store := newTestStore(t)
+	createTestItem(t, store, "wi_loop")
+	ctx := context.Background()
+
+	parkedAt := -1
+	for i := 0; i < 10; i++ {
+		out, err := store.RecordRequestedChanges(ctx, "wi_loop", "plan_gate", "plan",
+			fmt.Sprintf("plan-%d", i), fmt.Sprintf("feedback-%d", i), "", 3, 99, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out.Parked {
+			parkedAt = i
+			break
+		}
+		// The author re-authors and advances back into the gate.
+		if err := store.Move(ctx, "wi_loop", "plan", "plan_gate", "advance", "",
+			fmt.Sprintf("plan-%d", i), 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if parkedAt != 2 {
+		t.Fatalf("gate parked at loop %d, want 2 (cap of 3); the author's re-entry reset the counter", parkedAt)
+	}
 }

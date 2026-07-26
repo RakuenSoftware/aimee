@@ -231,10 +231,34 @@ static int run_docker(const char *const argv[])
 
 #define DOCKER_PROBE_TIMEOUT_MS 15000
 
+/* True when `name` is one of ours. The container-name prefix is matched HERE
+ * rather than with `docker ps --filter name=^aimee-delegate-`: the anchored regex
+ * is a Docker-ism, and runtimes that treat the name filter as a literal substring
+ * (e.g. the LXC-backed docker shim) match nothing at all, silently turning both
+ * cleanup paths into no-ops and leaking a container per stale turn. Filtering in C
+ * keeps the strict prefix the anchor was there to enforce, on every runtime. */
+static int is_delegate_container_name(const char *name)
+{
+   return name && strncmp(name, "aimee-delegate-", 15) == 0;
+}
+
+/* Accept only a bare container id, so a hostile or malformed name can never reach
+ * `docker rm`. */
+static int is_container_id(const char *id)
+{
+   size_t len = id ? strlen(id) : 0;
+   if (len < 12 || len > 64)
+      return 0;
+   for (size_t i = 0; i < len; i++)
+      if (!isxdigit((unsigned char)id[i]))
+         return 0;
+   return 1;
+}
+
 int delegate_backend_docker_remove_orphans(void)
 {
-   const char *list_argv[] = {resolve_docker_bin(),    "ps", "-aq", "--filter",
-                              "name=^aimee-delegate-", NULL};
+   const char *list_argv[] = {resolve_docker_bin(), "ps", "-a", "--format",
+                              "{{.ID}} {{.Names}}", NULL};
    char *out = NULL;
    if (safe_exec_capture_cwd_env_timeout(list_argv, NULL, NULL, &out, 1 << 20,
                                          DOCKER_PROBE_TIMEOUT_MS) != 0)
@@ -244,13 +268,14 @@ int delegate_backend_docker_remove_orphans(void)
    }
    int removed = 0;
    char *save = NULL;
-   for (char *id = strtok_r(out, "\r\n", &save); id; id = strtok_r(NULL, "\r\n", &save))
+   for (char *line = strtok_r(out, "\r\n", &save); line; line = strtok_r(NULL, "\r\n", &save))
    {
-      size_t len = strlen(id);
-      int valid = len >= 12 && len <= 64;
-      for (size_t i = 0; valid && i < len; i++)
-         valid = isxdigit((unsigned char)id[i]) != 0;
-      if (!valid)
+      char id[80], name[256];
+      if (sscanf(line, "%79s %255s", id, name) != 2)
+         continue;
+      if (!is_delegate_container_name(name))
+         continue;
+      if (!is_container_id(id))
       {
          LOG_WARN("delegate-sandbox", "refusing invalid orphan container id from docker: %s", id);
          continue;
@@ -291,9 +316,8 @@ static time_t docker_utc_epoch(int y, int mo, int d, int h, int mi, int s)
  * turn is never removed. Returns the count removed, or -1 on a docker error. */
 int delegate_backend_docker_reap_aged(int max_age_secs)
 {
-   const char *list_argv[] = {
-       resolve_docker_bin(),     "ps", "--filter", "name=^aimee-delegate-", "--format",
-       "{{.ID}} {{.CreatedAt}}", NULL};
+   const char *list_argv[] = {resolve_docker_bin(), "ps", "--format",
+                              "{{.ID}} {{.Names}} {{.CreatedAt}}", NULL};
    char *out = NULL;
    if (safe_exec_capture_cwd_env_timeout(list_argv, NULL, NULL, &out, 1 << 20,
                                          DOCKER_PROBE_TIMEOUT_MS) != 0)
@@ -306,18 +330,14 @@ int delegate_backend_docker_reap_aged(int max_age_secs)
    char *save = NULL;
    for (char *line = strtok_r(out, "\r\n", &save); line; line = strtok_r(NULL, "\r\n", &save))
    {
-      /* Line is Go's default CreatedAt format: "<id> 2006-01-02 15:04:05 -0700 MST". */
-      char id[80];
+      /* Line is "<id> <name> " + Go's default CreatedAt: "2006-01-02 15:04:05 -0700 MST". */
+      char id[80], name[256];
       int yy, mo, dd, hh, mi, ss;
       char off[8] = "+0000";
-      if (sscanf(line, "%79s %d-%d-%d %d:%d:%d %7s", id, &yy, &mo, &dd, &hh, &mi, &ss, off) < 7)
+      if (sscanf(line, "%79s %255s %d-%d-%d %d:%d:%d %7s", id, name, &yy, &mo, &dd, &hh, &mi, &ss,
+                 off) < 8)
          continue;
-      /* Only accept a bare container id (hex), same guard as remove_orphans. */
-      size_t len = strlen(id);
-      int valid = len >= 12 && len <= 64;
-      for (size_t i = 0; valid && i < len; i++)
-         valid = isxdigit((unsigned char)id[i]) != 0;
-      if (!valid)
+      if (!is_delegate_container_name(name) || !is_container_id(id))
          continue;
       long off_secs = 0;
       if ((off[0] == '+' || off[0] == '-') && strlen(off) >= 5 && isdigit((unsigned char)off[1]))

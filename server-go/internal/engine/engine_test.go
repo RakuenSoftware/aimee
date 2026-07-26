@@ -909,7 +909,7 @@ nodes:
   - id: plan_gate
     block: gate.roundtable
     in: {src: plan.out}
-    params: {roundtable: default, max_iters: 24}
+    params: {roundtable: default, max_rounds: 24}
     on_pass: done
     on_fail: plan
   - id: done
@@ -1322,5 +1322,156 @@ func TestDelegateFailedIsOperatorResumable(t *testing.T) {
 	got, err := store.WorkItem(t.Context(), item.ID)
 	if err != nil || got.PauseReason != "" {
 		t.Fatalf("item still paused: %+v err=%v", got, err)
+	}
+}
+
+// max_rounds is the per-node repeat budget. It replaced max_iters, which named
+// the same thing less clearly; a node declaring only max_rounds used to fall
+// through to the default and loop far past its declared cap.
+func TestMaxRoundsIsTheNodeRepeatBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		params map[string]any
+		want   int
+	}{
+		{"declared", map[string]any{"max_rounds": 6}, 6},
+		{"absent falls back to the default", map[string]any{}, 20},
+		{"zero is not a budget", map[string]any{"max_rounds": 0}, 20},
+		{"negative is not a budget", map[string]any{"max_rounds": -3}, 20},
+		{"retired max_iters no longer caps", map[string]any{"max_iters": 3}, 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := maxIterations(wfe.Node{ID: "gate", Params: tc.params}); got != tc.want {
+				t.Fatalf("maxIterations=%d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// The runner's context carries the step deadline. A park happens AFTER the
+// delegate ran and its spend was reconciled, so inheriting that cancellation
+// loses the transition and strands the reservation in 'actual' — the exact
+// state the next replay can only park as replay_unrecoverable, which no
+// operator can resume. Observed in wi_ee32a2e3: "begin park transition:
+// context deadline exceeded", then an unrecoverable park one round later.
+func TestParkSurvivesACancelledStepContext(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte("name: one\nstart: draft\nnodes:\n  - id: draft\n    block: author.proposal\n    next: plan\n  - id: plan\n    block: author.plan\n    in:\n      proposal: draft.out\n")
+	if err := os.WriteFile(filepath.Join(workflowDir, "one.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := wfe.ParseDefinition(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := db1.CreateWorkItem{ID: "wi_park_cancelled", Repo: "repo", ProposalPath: "p",
+		WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "draft", MaxCostUSD: 1}
+	if err := store.CreateWorkItem(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.PutProposal(item.ID, []byte("proposal")); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	eng, err := New(store, artifacts, workflowDir, cancelBeforeParkRunner{cancel: cancel})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Advance(ctx, "wi_park_cancelled"); err != nil {
+		t.Fatalf("advance draft: %v", err)
+	}
+	if _, err := eng.Advance(ctx, "wi_park_cancelled"); err != nil {
+		t.Fatalf("advance plan: %v", err)
+	}
+	got, err := store.WorkItem(t.Context(), "wi_park_cancelled")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PauseReason != "plan_missing" {
+		t.Fatalf("park lost to the cancelled step context: pause_reason=%q", got.PauseReason)
+	}
+	if got.ReservationState != "" || got.ReservedCostUSD != 0 {
+		t.Fatalf("reservation stranded by a lost park: state=%q reserved=%v",
+			got.ReservationState, got.ReservedCostUSD)
+	}
+}
+
+// Cancels the step context the way an expiring deadline would, then returns a
+// result that forces the engine down its park-after-spend path.
+type cancelBeforeParkRunner struct{ cancel context.CancelFunc }
+
+func (r cancelBeforeParkRunner) Run(_ context.Context, req StepRequest) (StepResult, error) {
+	if req.Node.Block != "author.plan" {
+		return StepResult{Status: StepAdvanced, Artifact: "a proposal"}, nil
+	}
+	r.cancel()
+	return StepResult{Status: StepAdvanced, CostUSD: 0.2}, nil
+}
+
+// A gate that spends its whole round budget is evidence about the plan or the
+// request, but the park recorded only "convergence_limit" -- a spent budget with
+// no statement of what was never fixed. Observed on wi_79e96261: ten rounds, and
+// the operator had to open the feedback artifact to learn the gate had been stuck
+// on a subject declaration the proposal never defined.
+func TestUnresolvedBlockersSummarisesWhatHeldTheGate(t *testing.T) {
+	if got := unresolvedBlockers(nil); got != "" {
+		t.Fatalf("no feedback must summarise to nothing, got %q", got)
+	}
+	feedback := &wfe.ReviewFeedback{Findings: []wfe.Finding{
+		{Severity: "suggestion", Persona: "qa", Summary: "could be tidier"},
+		{Severity: "blocking", Persona: "architect", Summary: "the sweep has no acceptance criterion",
+			Recommendation: "list the files to move"},
+		{Severity: "nit", Persona: "qa", Summary: "typo"},
+		{Severity: "foundational", Persona: "chairman", Summary: "the declared subject is never defined",
+			Recommendation: "amend the proposal to define it"},
+	}}
+	got := unresolvedBlockers(feedback)
+	// The chairman's verdict overrides the seats', so its reason must lead: it is
+	// the run's stated explanation of why the work failed.
+	if !strings.HasPrefix(got, "[chairman] the declared subject is never defined") {
+		t.Fatalf("chairman's review must come first: %q", got)
+	}
+	if !strings.Contains(got, "-> amend the proposal to define it") {
+		t.Fatalf("recommendation must survive so the reader knows what to do: %q", got)
+	}
+	if !strings.Contains(got, "the sweep has no acceptance criterion") {
+		t.Fatalf("other blocking findings must still appear: %q", got)
+	}
+	// Suggestions and nits never held the gate, so naming them would misdirect
+	// whoever reads the park.
+	if strings.Contains(got, "could be tidier") || strings.Contains(got, "typo") {
+		t.Fatalf("non-blocking findings must not appear: %q", got)
+	}
+}
+
+// The detail lands on an append-only event row, so an unbounded summary would
+// bloat every park. Three findings characterise the blockage; the rest stay in
+// the feedback artifact.
+func TestUnresolvedBlockersIsBounded(t *testing.T) {
+	feedback := &wfe.ReviewFeedback{}
+	for i := 0; i < 6; i++ {
+		feedback.Findings = append(feedback.Findings, wfe.Finding{
+			Severity: "blocking", Summary: strings.Repeat("x", 400),
+			Recommendation: strings.Repeat("y", 400)})
+	}
+	got := unresolvedBlockers(feedback)
+	if strings.Count(got, " | ") != 2 {
+		t.Fatalf("expected at most three findings, got %d separators", strings.Count(got, " | "))
+	}
+	if strings.Contains(got, strings.Repeat("x", 220)) || strings.Contains(got, strings.Repeat("y", 140)) {
+		t.Fatal("summary and recommendation must each be truncated")
 	}
 }

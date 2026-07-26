@@ -17,7 +17,7 @@ import sys
 from typing import NoReturn
 
 
-DEFAULT_CONTRACT = Path("docs/proposals/pending/git-core-contract.md")
+DEFAULT_CONTRACT = Path("docs/proposals/done/git-core-contract.md")
 DEFAULT_HANDOFF = Path("docs/validation/core-modularization-slice-2.md")
 EVIDENCE_PATH = Path("docs/validation/roundtable/git-core-contract.json")
 CUTOFF = "6ce37f53e1f627c19e15fc01f68959f546a5eded"

@@ -15,7 +15,7 @@ module-root headers, and fourteen direct tests carved out of sixteen `test_git*`
 
 ## The git-core-contract is orthogonal
 
-`git` has a dedicated governance mechanism — `docs/proposals/pending/git-core-contract.md` with
+`git` has a dedicated governance mechanism — `docs/proposals/done/git-core-contract.md` with
 roundtable-approval evidence in `docs/validation/roundtable/git-core-contract.json`, enforced by
 `check_git_core_contract.py` in the `git-core-contract` CI job. That contract bounds git's *core
 capability* — what git may and may not do as a submit-only module against memory's

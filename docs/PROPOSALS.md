@@ -7,8 +7,8 @@ section does not imply global priority.
 
 | State | Folder | Count |
 | --- | --- | --- |
-| Shipped | [`proposals/done/`](proposals/done/) | 65 |
-| Pending | [`proposals/pending/`](proposals/pending/) | 23 |
+| Shipped | [`proposals/done/`](proposals/done/) | 210 |
+| Pending | [`proposals/pending/`](proposals/pending/) | 56 |
 | Accepted (locked, unimplemented) | `proposals/accepted/` | 0 |
 | Deferred | `proposals/deferred/` | 0 |
 | Rejected | `proposals/rejected/` | 0 |
@@ -48,188 +48,70 @@ realized in code and enforced in review; their standalone proposal documents are
    typed mutation verbs, profile packs, stable `--explain`) shared across CLI, MCP,
    and the aimee-kb `/v1/` API.
 
-## Pending
+## Pending (57)
 
-The genuinely open work — twenty-three proposals (all but one not yet implemented).
+The complete 2026-07-26 reconciliation, including source/test/commit evidence for all 79 original files, is in [`PENDING_AUDIT_2026-07-26.md`](proposals/PENDING_AUDIT_2026-07-26.md). The directory listing remains authoritative.
 
-- **The governance arc** (three linked proposals, 2026-07-13 deep-dive): the
-  question they jointly answer is not "do we enforce policy" but "where does the
-  enforcer sit, and can it prove enforcement held without trusting the agent it
-  governs."
-  1. [Attestable enforcement — complete the WORM trust anchor](proposals/pending/governance-attestable-enforcement.md)
-     — flip the hash-chained WORM store default-on and make it authoritative;
-     route every enforcer (attention guard, gateway policy, memory interception,
-     integrity gate, native gate, vault, trigger/forge) into the chain;
-     policy-versioned verdict rows; the sealer sidecar + signed off-host anchor
-     (cross-service anchoring); `aimee audit attest`.
-     **Enforce / Constrain-Verify / Gate-Promote.**
-  2. [One governance policy surface — posture profiles + gate completion](proposals/pending/governance-policy-surface-and-posture.md)
-     — `governance.profile: observe|standard|hardened` over today's scattered,
-     autonomy-on/defenses-off defaults; wire the integrity gate into the ingest
-     fronts that matter (watch-dir trigger content first); `require_approval` as
-     a first-class pre-tool verdict routed to the HMAC human gate; an autonomy
-     kill switch + cumulative spend ledger.
-     **Enforce / Gate-Promote / Classify-Score.**
-  3. [Per-agent identity, delegation chains, fleet registry, signed artifacts](proposals/pending/governance-agent-identity-and-artifact-trust.md)
-     — distinct principals for delegates/autonomous runs instead of the shared
-     server principal; server-assembled `on_behalf_of` chains in audit actors; a
-     fleet registry so unmediated/rogue actors are visible; hash-pin (TOFU) then
-     sign plugins/skills/templates/workflows; authenticate the hook channel.
-     **Enforce / Classify-Score / Gate-Promote.**
+- [Proposal: Agentic supervised SWE-bench — a true, tool-using, Reddit-parity claim](proposals/pending/agentic-supervised-swebench.md)
+- [Proposal: define Aimee's required core capability contract](proposals/pending/aimee-core-capability-contract.md)
+- [Proposal: appliance state-recovery runbook](proposals/pending/appliance-state-recovery-runbook.md)
+- [Proposal: Document proposal-trigger blob deduplication](proposals/pending/automatic-wfe-trigger-blob-dedup-runbook.md)
+- [Proposal: Effective agent tool scoping through aimee's existing toolset seams](proposals/pending/capability-scoped-agent-execution.md)
+- [Capability-thresholded delegate routing: residual work](proposals/pending/capability-thresholded-delegate-routing-residual.md)
+- [Proposal: the code graph should carry the architecture, not just the symbols](proposals/pending/code-graph-architecture-surface.md)
+- [Compaction quality: committed baseline](proposals/pending/compaction-quality-baseline.md)
+- [Config descriptor table: generic save residual](proposals/pending/config-field-descriptor-save-residual.md)
+- [Core substrate and module boundaries: residual work](proposals/pending/core-substrate-and-source-module-boundaries-residual.md)
+- [Proposal: a dedicated extraction model for the curator Tier-A](proposals/pending/dedicated-extraction-model-curator-tier-a.md)
+- [Proposal: Delegate sandbox — aimee-server as the sole egress](proposals/pending/delegate-sandbox-aimee-sole-egress.md)
+- [Proposal: Per-project delegate sandbox image customization](proposals/pending/delegate-sandbox-image-customization.md)
+- [Dynamic tool egress: authenticated registration identity](proposals/pending/dynamic-tool-egress-registration-identity.md)
+- [Proposal: govern and capture the module event bus as one uniform seam](proposals/pending/event-bus-governance-and-capture.md)
+- [Spec: Aimee shared-memory event bus — wire and segment specification (v0)](proposals/pending/event-bus-wire-spec.md)
+- [Proposal: audit feature liveness and remove the background skill curator](proposals/pending/feature-liveness-and-background-curator-removal.md)
+- [Proposal: front-end development module — runtime UI verification and design/visual QA](proposals/pending/frontend-development-module.md)
+- [Proposal: unify embedding + Tier-A synth on one Gemma-4 base; a dedicated EuroBERT reranker](proposals/pending/gemma4-unified-embed-rerank-synth-base.md)
+- [Git core contract: runtime adoption residual](proposals/pending/git-core-contract-runtime-residual.md)
+- [Proposal: Per-agent identity, delegation chains, fleet registry, and signed executable artifacts](proposals/pending/governance-agent-identity-and-artifact-trust.md)
+- [Proposal: Attestable enforcement — complete the WORM trust anchor and make every verdict provable](proposals/pending/governance-attestable-enforcement.md)
+- [Proposal: One governance policy surface — posture profiles, gate completion, and oversight defaults](proposals/pending/governance-policy-surface-and-posture.md)
+- [IR sole path: response and legacy-path residual](proposals/pending/ir-sole-path-residual.md)
+- [KB hybrid outcome wiring: residual work](proposals/pending/kb-hybrid-outcome-wiring-residual.md)
+- [KB ingest: content-push, default-tree indexing, and monotonic delta ordering](proposals/pending/kb-ingest-content-push-deltas.md)
+- [Proposal: deliver the modular refactor safely and measurably](proposals/pending/large-refactor-delivery-and-compatibility.md)
+- [Proposal: Local-first memory & trust patterns — concepts to adopt](proposals/pending/local-first-memory-and-trust-patterns.md)
+- [MCP adapter: general bus routing residual](proposals/pending/mcp-adapter-bus-routing-residual.md)
+- [Proposal: Memory auto-population — feedback→rules, promotion, gated extraction (Proposal 2 Phase 4)](proposals/pending/memory-auto-population-phase4.md)
+- [Proposal: unify memory, learning, skills, and inference boundaries](proposals/pending/memory-learning-and-inference-boundaries.md)
+- [Proposal: `module-loader` — load and host external and user-authored modules](proposals/pending/module-loader.md)
+- [Module runtime ownership and build: residual work](proposals/pending/module-runtime-source-ownership-and-build-residual.md)
+- [mTLS transport performance: rollout evidence](proposals/pending/mtls-transport-rollout-evidence.md)
+- [Operator audit activity: unified surface residual](proposals/pending/operator-audit-activity-residual.md)
+- [Proposal: Org-data connectors — the source-ingestion on-ramp for the every-domain KB](proposals/pending/org-data-connectors-and-source-ingestion.md)
+- [Per-query ranking feature persistence](proposals/pending/per-query-feature-persistence-residual.md)
+- [Proposal: Per-user `remote_writes` authorization](proposals/pending/per-user-remote-writes-authz.md)
+- [Persona-authored outputs: residual work](proposals/pending/persona-authored-outputs-residual.md)
+- [Proposal: split Runtime and Control Plane governance, web modules, and config surfaces](proposals/pending/product-governance-web-and-config.md)
+- [Proposal: Evidence provenance-tier contract — classify + gate Tier-3 (untrusted) memory as an anti-poisoning defense](proposals/pending/proposal-evidence-provenance-tiers.md)
+- [Proposal: Binding retrieval context-contract for agents + a survey of context-engine ideas](proposals/pending/proposal-retrieval-context-contract.md)
+- [Proposal: Proposal-supersession hygiene — same-commit move + a documented rule](proposals/pending/proposal-supersession-hygiene.md)
+- [Remote session start: workspace context residual](proposals/pending/remote-session-start-workspace-context.md)
+- [Route descriptor single source: residual work](proposals/pending/route-descriptor-single-source-of-truth-residual.md)
+- [Proposal: Standing LoCoMo / LongMemEval benchmark cadence](proposals/pending/standing-benchmark-cadence.md)
+- [Proposal: the registration chain and the static thin client](proposals/pending/thin-client-capability-advertisement.md)
+- [Tiered LLM offering: remaining program scope](proposals/pending/tiered-llm-offering-residual.md)
+- [P2b residual: KB forwarding and true streaming](proposals/pending/tiered-llm-p2b-forwarding-and-streaming.md)
+- [P6 residual: native InvokeModel families and pricing](proposals/pending/tiered-llm-p6-native-invokemodel-and-pricing.md)
+- [P9 residual: telemetry forwarding and OTLP](proposals/pending/tiered-llm-p9-forwarding-and-otlp.md)
+- [Turn-scoped change sets and safe workspace restore](proposals/pending/transactional-turn-rewind-and-session-recovery.md)
+- [User-selectable fusion: surface and policy residual](proposals/pending/user-selectable-fusion-surface-residual.md)
+- [Proposal: Close out platform phase 7 — v1 API stability tag + distributed-mode validation](proposals/pending/v1-stability-and-distributed-validation.md)
+- [Design brief: multi-engine fanout, circuit-breaking, provenance, accounting](proposals/pending/web-search-fanout-resilience-accounting.md)
+- [Proposal: webchat project lifecycle — org-scoped clones and true delete/purge](proposals/pending/webchat-project-lifecycle.md)
 
-- [The code graph should carry the architecture, not just the symbols](proposals/pending/code-graph-architecture-surface.md)
-  — five slices that turn the symbol/call graph into an architecture surface: route
-  and storage node kinds with framework-aware extraction, a repo-level orientation
-  pass injected at session-start, baseline/diff as a workflow review gate,
-  coverage + provenance as an honesty envelope, and hop-grouped/confidence-scored
-  impact. Slices 2/5 ship on today's graph; slice 1 is the only real extractor work.
-  **Extract / Detect-Cluster / Recall / Calibrate / Constrain-Verify.**
-- [Make Aimee's core explicit, delete unused complexity, and modularize the source tree](proposals/pending/core-substrate-and-source-module-boundaries.md)
-  — defines the irreducible core as memory (including code intelligence, embedding, and
-  reranking), routing, IR messaging, and translation; makes synthesis and other non-core
-  capabilities optional; audits self-contained feature islands before retaining them; moves
-  feature implementations from global source buckets into documented, dependency-enforced
-  modules; and uses the migration as a deletion-first, DRY refactor rather than a directory
-  shuffle. **Recall / Rerank / Route / Translate / Constrain-Verify.**
-- [The registration chain and the static thin client](proposals/pending/thin-client-capability-advertisement.md)
-  — consuming child of the core-substrate suite. Replaces the static `/v1/capabilities` list with a
-  truthful, generation-stamped projection of the module-runtime capability closure and state;
-  delivers it to the thin client on connect and on server/Control-Plane change; and defines how the
-  client merges both services under the dependency law and re-advertises the effective set to its
-  consumer (MCP/ACP handshake, CLI/web). Drafted 2026-07-23; awaits its own review.
-  **Route / Translate / Constrain-Verify / Gate-Promote.**
-- [Govern and capture the module event bus as one uniform seam](proposals/pending/event-bus-governance-and-capture.md)
-  — consuming child of the core-substrate suite. The core-owned governance/audit tap on the module
-  event bus becomes the single capture and enforcement seam: every inter-module event is recorded,
-  action-class events are authorized before delivery, and the stream feeds the durable ledger and
-  `aimee audit attest`. Consumes the in-flight `governance-attestable-enforcement` (mid-implementation)
-  without modifying it. Drafted 2026-07-23; awaits its own review. **Enforce / Gate-Promote / Constrain-Verify.**
-- [`module-loader` — load and host external and user-authored modules](proposals/pending/module-loader.md)
-  — consuming child of the core-substrate suite; the optional module (renamed from `plugin-loader`)
-  that owns the module package format, fail-closed artifact verification, the OS-sandbox and
-  WebAssembly host runtimes, and the loaded-module lifecycle. Consumes core admission/bus/policy and
-  optional `governance` artifact trust without owning them. Drafted 2026-07-23; awaits its own review.
-  **Gate-Promote / Enforce.**
-- [Aimee shared-memory event bus — wire and segment spec (v0, implemented on `feat/event-bus`)](proposals/pending/event-bus-wire-spec.md)
-  — the normative spec the single in-source C bus host and the C/Go reference clients implement:
-  segment layout, SPSC rings, event encoding, attach/admission handshake, observer routing, the
-  governance/audit tap, credit-based backpressure, ordering, versioning, and capture/replay format.
-  **Written and merged onto the `feat/event-bus` integration branch as of 2026-07-24** (not yet promoted to the mainline) — twelve slices, one PR each, C host +
-  C/Go reference clients proven to interoperate across a process boundary and agree on the wire
-  byte-for-byte, with capture/observational replay and a committed dispatch-overhead budget. Not
-  linked into any shipping binary; the memory-migration tree that will link it is separate. Owned by
-  `module-runtime`. Remains under `pending/` because its parent core-substrate suite is still open;
-  see the spec's Implementation status section and
-  [`docs/dev/EVENT_BUS_FEATURE_TREE.md`](dev/EVENT_BUS_FEATURE_TREE.md). **Translate / Constrain-Verify.**
-- [Memory auto-population — feedback→rules, promotion, gated extraction](proposals/pending/memory-auto-population-phase4.md)
-  — Proposal 2 Phase 4 (deferred §4): gated, default-off auto-population into a review quarantine;
-  feedback→durable org rules with decay; promotion behind a strict operator gate.
-- [kb_hybrid outcome wiring](proposals/pending/kb-hybrid-outcome-wiring.md)
-  — closes the learning-to-rank loop on live data. B1 (the loop-closing plumbing:
-  a dedicated `ranker_outcome` kind, `ranker.emit_event` / `ranker.record_outcome`
-  KB-service endpoints mirroring the memory evidence pattern, and the fitter's
-  training view reading it) is implemented with zero `kb.c` hot-path change; B2 (a
-  production outcome source for code-search) is the remaining open work. Follow-up
-  to the done LTR fitter. **Calibrate / Evaluate-Optimize / Gate-Promote.**
-- [Unify embedding + Tier-A synth on one Gemma-4 base; a dedicated EuroBERT reranker](proposals/pending/gemma4-unified-embed-rerank-synth-base.md)
-  — collapses the separate embedder + Ettin reranker + E4B Tier-A synth (three models) into two:
-  a Gemma-4 base (E2B edge / E4B bigger) carrying **embed (LoRA + MRL head) + Tier-A synth**, and a
-  **dedicated EuroBERT `num_labels=1` reranker** on native `/rerank` that deletes the gateway
-  Dense-head hack. Requires a multi-week llama.cpp PLE forward-graph port (entangled with
-  AltUp/LAuReL). Every role gated on its bench (embed ≥ incumbent, synth ≥ 98% E4B, rerank on a
-  measured latency/depth/native-serving ladder). Revised down from an over-scoped "one base, three
-  roles" draft after adversarial review; build-both / slicing / pruning moved to future.
-  Extends (not supersedes) the Tier-A extraction proposal. **Recall / Rerank / Synthesize /
-  Extract / Evaluate-Optimize / Gate-Promote.**
-- [Agentic supervised SWE-bench](proposals/pending/agentic-supervised-swebench.md)
-  — a true tool-using, iterating agentic SWE-bench harness so the "beats Reddit's
-  −75.5% supervisor-token reduction at no wall-clock penalty" claim is
-  apples-to-apples; official Docker grader as the sole resolution source; a
-  public-claim gate that fails closed (issue #987, builds on PR #986).
-  **Reason / Execute / Persist / Calibrate / Review.**
-- [Remote-first session-start](proposals/pending/remote-first-session-start.md)
-  — the thin client's SessionStart falls back to a recall-only remote path and
-  emits nothing when recall is empty; make `/v1/hooks/session_start` first-class so
-  a thin client gets the full server-assembled brief. Companion to the memory split.
-- [Org-data connectors + source ingestion](proposals/pending/org-data-connectors-and-source-ingestion.md)
-  — the missing ingest front door for the every-domain KB: a uniform connector
-  contract plus a first adapter set (issue tracker / chat / doc-wiki / email),
-  incremental sync with supersession, and ingest-time auth + scope + PII/poison
-  enforcement, all feeding the existing Normalize → staged-pipeline → curator path.
-  **Extract (Normalize) / Classify-Score / Enforce / Gate-Promote.**
-- [First-class operator-audit activity surface](proposals/pending/operator-audit-activity-surface.md)
-  — every shareable DB2 row already carries `operator_id` / `content_hash` /
-  timestamps and a WORM ledger records privileged actions, but there is no legible
-  way to read "who did what, in which scope, when"; add an operator-facing audit
-  activity surface over the existing provenance.
-- [Proposal-supersession hygiene](proposals/pending/proposal-supersession-hygiene.md)
-  — `pending/` is only signal if finished or superseded proposals leave it; adds a
-  same-commit move convention plus a documented supersession rule and the reconcile
-  drift class to enforce it.
-- [Standing LoCoMo / LongMemEval benchmark cadence](proposals/pending/standing-benchmark-cadence.md)
-  — acceptance criteria cite absolute retrieval/memory parity numbers but nothing
-  runs the full benchmarks on a schedule; adds a standing benchmark cadence beyond
-  the PR-only `bench-smoke`.
-- [Close out platform phase 7 — v1 API stability tag + distributed-mode validation](proposals/pending/v1-stability-and-distributed-validation.md)
-  — the aimee-kb platform arc landed phases 1–6; phase 7 (distributed-mode
-  validation + a v1 API stability tag) is the one remaining piece with no closing
-  artifact.
-- [Binding retrieval context-contract for agents](proposals/pending/proposal-retrieval-context-contract.md)
-  — surveys an external context-engine against Aimee (most of its mechanisms
-  already exist: attention guard, per-intent budgets, confidence scorer, symbol
-  preload) and scopes the one clean gap: surface the confidence + caps the memory
-  assembler already computes to the delegate as a *binding* exploration contract,
-  enforced by the existing `cli_attention_guard.c` raw-scan redirect.
-  **Recall / Rank-Fuse / Calibrate / Plan-Search / Enforce / Gate-Promote.**
-- [Evidence provenance-tier contract — gate Tier-3 (untrusted) memory](proposals/pending/proposal-evidence-provenance-tiers.md)
-  — every memory carries an evidence tier (1 direct-human / 2 derived-from-human /
-  3 no-human). The `provenance_category` field and an anchor-eligibility seam
-  (`memory_answer_mode_for_anchor`) already exist, but the INSERT never sets the
-  field so everything defaults to `user_stated` (Tier 1) — delegate content is
-  silently trusted. Adds write-time classification, a category→tier map, and the
-  gate that bars Tier-3 from being *main* evidence (anti-poisoning), plus
-  human-only promotion. **Classify-Score / Enforce / Gate-Promote / Constrain-Verify.**
-- Streaming repetition-collapse guardrail + per-backend temperature calibration **(accepted — queued for autonomous implementation)**
-  — small reasoning models served through the gateway fall into degenerate
-  repetition collapse (a short span re-emitted until `max_tokens` is exhausted).
-  Adds a deterministic streaming detector on the provider-neutral IR-delta relay,
-  a bounded holdback-buffered decode-time intervention (truncate / gated resample
-  using only standard sampling params + stop sequences — no logit access), and a
-  per-backend collapse-rate metric that calibrates the default serving temperature.
-  Fail-open, default-off, shadow → canary → default gated.
-  **Detect-Cluster / Constrain-Verify / Enforce / Calibrate / Evaluate-Optimize /
-  Gate-Promote.**
-- [Rounds-to-resume — make compaction quality measurable](proposals/pending/compaction-quality-measurement.md)
-  — we compact every long session at 80% and expose a pluggable context-engine
-  registry, but measure neither: `test_session_compact.c` asserts thresholds and
-  array sizes, and no suite under `benchmarks/` evals compaction at all. So we test
-  *when* to compact, never *how well*. Adds one metric — turns after a boundary
-  until the agent makes new progress rather than recovering state it already had —
-  reusing the tool signature the circuit breaker already computes
-  (`agent_runtime.c:1607`), narrowed to *read-only* rediscovery so a legitimate
-  repeated `test` is not miscounted. No behavior change; the deliverable is a
-  committed baseline for today's compactor. Carries a **graveyard** of four scoped,
-  code-checked rejections so they are not re-proposed: a `command_run` macro tool
-  (independent calls already batch — the tool surface is not the waste); the wfe as
-  its substitute (a block is an LLM agent + worktree + work item, result seam
-  deliberately payload-free); checkpoint-anchored compaction (durable jobs are never
-  set for interactive sessions — a strict no-op exactly where compaction matters);
-  and deeper per-directory convention discovery (the walk is already correct and
-  tested; `AGENTS.md` is a foreign convention classed untrusted advisory).
-  **Evaluate-Optimize / Calibrate.**
-- [Per-user `remote_writes` authorization](proposals/pending/per-user-remote-writes-authz.md)
-  — make the `/v1` write tier a function of the authenticated individual user instead of one global
-  `aimee.api.remote_writes` switch. aimee reuses standard identity rather than building its own:
-  **OIDC when enabled, otherwise the host's PAM stack via aimee-kb**. Authentication always terminates
-  at aimee-kb (entered from the server web-GUI adoption wizard: OIDC redirect delegated to kb, or a PAM
-  login form); kb mints a short-lived kb-signed token carrying `{subject, tier}` (P5 §3) that the
-  server verifies over the server→kb JWKS channel and feeds into the already-parameterized write gate.
-  Depends on P5/P1; mTLS stays transport-only; the local UDS operator is un-lockout-able; unmatched
-  identities fail closed. **Enforce / Constrain-Verify / Gate-Promote.**
+## Done (209)
 
-## Done (66)
-
-The [`proposals/done/`](proposals/done/) directory holds 66 shipped proposals.
+The [`proposals/done/`](proposals/done/) directory holds 209 shipped proposals.
 Grouped by theme:
 
 - **Universal gateway, ingress & protocol.**

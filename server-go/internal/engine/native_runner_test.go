@@ -1026,9 +1026,15 @@ func TestMalformedCapacityDuplicateCannotSatisfyRequiredPersona(t *testing.T) {
 		{persona: "security", selector: "codex", ordinal: 0},
 		{persona: "security", selector: "minimax", ordinal: 1},
 	}
-	_, _, voters, _, unreachable := runner.runPanelRound(context.Background(), req, seats, "review", "hash", "plan", 1)
-	if unreachable == "" || voters != 1 {
-		t.Fatalf("malformed duplicate satisfied required persona: voters=%d unreachable=%q", voters, unreachable)
+	// The duplicate contradicts itself (approve carrying a finding). It abstains
+	// rather than voting, so it can neither satisfy the required persona nor mask
+	// the seat that failed: both seats drop out and nothing is approved.
+	_, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), req, seats, "review", "hash", "plan", 1)
+	if unreachable == "" || voters != 0 || approvals != 0 {
+		t.Fatalf("malformed duplicate satisfied required persona: approvals=%d voters=%d unreachable=%q", approvals, voters, unreachable)
+	}
+	if !strings.Contains(unreachable, "malformed_after_repair") || !strings.Contains(unreachable, "delegate_error") {
+		t.Fatalf("dropped seats are not self-describing: %q", unreachable)
 	}
 }
 
@@ -1404,5 +1410,416 @@ func TestRoundtableNamingAnAbsentPresetParks(t *testing.T) {
 	}
 	if len(agents.requests) != 0 {
 		t.Fatalf("absent preset dispatched %d seats", len(agents.requests))
+	}
+}
+
+// contradictingSeatAgents answers every seat with a well-formed approval except
+// the named persona, which contradicts itself (approve carrying a finding) on
+// both its first attempt and its repair. The JSON parses, so the syntactic
+// repair path alone never sees it.
+type contradictingSeatAgents struct {
+	mu       sync.Mutex
+	persona  string
+	attempts int
+}
+
+func (a *contradictingSeatAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
+	return DelegateResult{}, errors.New("unexpected direct delegation")
+}
+
+func (a *contradictingSeatAgents) DelegateGroup(_ context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]DelegateGroupResult, len(requests))
+	for i, request := range requests {
+		body := `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`
+		if request.Persona == a.persona {
+			a.attempts++
+			body = `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[{"id":"contradiction","severity":"blocking","summary":"approve carrying a finding"}]}`
+		}
+		out[i] = DelegateGroupResult{Participant: "seat-" + request.Persona, Response: withTestRoundtableIdentity(body, request)}
+	}
+	return out
+}
+
+// A seat whose verdict is still unusable after its repair attempt is absence of
+// evidence, not evidence of a defect. It abstains like an unreachable seat and
+// min_successful decides, instead of vetoing a panel that no revision could
+// satisfy. The repair must still be attempted first.
+func TestContradictorySeatAbstainsAfterRepairInsteadOfVetoingThePanel(t *testing.T) {
+	agents := &contradictingSeatAgents{persona: "architect"}
+	runner := &NativeRunner{agents: agents, roundtables: unpinnedTestRoundtable(t, "architect", "qa", "reviewer")}
+	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
+	reviewed.Hash = wfe.Hash(reviewed.Content)
+	result, err := runner.roundtable(t.Context(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
+		Proposal: "review the plan", Inputs: map[string]wfe.Artifact{"src": reviewed},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// min_successful is 3 here (one seat per persona), so losing a seat drops the
+	// usable reports below the configured floor and the panel must NOT advance.
+	if result.Status == StepAdvanced {
+		t.Fatalf("panel advanced below its configured minimum: %+v", result)
+	}
+	if a := agents.attempts; a != 2 {
+		t.Fatalf("contradictory seat attempts=%d, want 2 (first + one repair)", a)
+	}
+	if result.Roundtable == nil || !result.Roundtable.Degraded || result.Roundtable.ParticipantsUsed != 2 {
+		t.Fatalf("dropped seat is not visible in the record: %+v", result.Roundtable)
+	}
+	for _, finding := range result.Roundtable.Items {
+		if strings.Contains(finding.ID, "malformed") {
+			t.Fatalf("contradictory seat was charged against the artifact: %+v", finding)
+		}
+	}
+}
+
+// The same panel, sized so the remaining seats still meet min_successful, must
+// advance: the abstention costs a voter but does not lower the configured bar.
+func TestPanelAdvancesWhenAbstentionStillLeavesTheConfiguredMinimum(t *testing.T) {
+	agents := &contradictingSeatAgents{persona: "architect"}
+	dir := t.TempDir()
+	body := `{"name":"default","seats":[{"model":"","persona":"architect"},{"model":"","persona":"qa"},{"model":"","persona":"reviewer"}],"min_successful":2}`
+	if err := os.WriteFile(filepath.Join(dir, "default.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := roundtablecfg.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &NativeRunner{agents: agents, roundtables: store}
+	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
+	reviewed.Hash = wfe.Hash(reviewed.Content)
+	result, err := runner.roundtable(t.Context(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
+		Proposal: "review the plan", Inputs: map[string]wfe.Artifact{"src": reviewed},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StepAdvanced {
+		t.Fatalf("two clean approvals against min_successful 2 did not advance: %+v", result)
+	}
+	if result.Roundtable == nil || !result.Roundtable.Degraded {
+		t.Fatalf("advancing on a short panel must still report degraded: %+v", result.Roundtable)
+	}
+}
+
+// proseChairmanAgents answers seats cleanly and makes the chairman return prose
+// on its first turn. `replyAfterRepair` is what the chairman says when re-asked.
+type proseChairmanAgents struct {
+	mu               sync.Mutex
+	chairmanCalls    int
+	replyAfterRepair string
+}
+
+func (a *proseChairmanAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
+	if request.Persona == "chairman" {
+		a.mu.Lock()
+		a.chairmanCalls++
+		call := a.chairmanCalls
+		a.mu.Unlock()
+		if call == 1 {
+			return DelegateResult{Response: "Certainly! Here is my assessment of the plan:\n\nThe plan looks reasonable overall."}, nil
+		}
+		if a.replyAfterRepair == "repeat-prose" {
+			return DelegateResult{Response: "Still prose, still no JSON object anywhere."}, nil
+		}
+		return DelegateResult{Response: chairmanApprovalFor(request)}, nil
+	}
+	return DelegateResult{Response: withTestRoundtableIdentity(`{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`, request)}, nil
+}
+
+func (a *proseChairmanAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	return testDelegateGroup(ctx, requests, a.Delegate)
+}
+
+// An analysis seat gets one repair attempt; the chairman had none, so a single
+// prose reply discarded a completed panel and parked the gate, and the resume
+// re-ran every seat at full cost. It gets the same one attempt now.
+func TestChairmanRepairsItsFirstUnstructuredReply(t *testing.T) {
+	agents := &proseChairmanAgents{}
+	runner := &NativeRunner{agents: agents, roundtables: chairmanTestRoundtable(t)}
+	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
+	reviewed.Hash = wfe.Hash(reviewed.Content)
+	result, err := runner.roundtable(t.Context(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
+		Proposal: "review the plan", Inputs: map[string]wfe.Artifact{"src": reviewed},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StepAdvanced {
+		t.Fatalf("chairman prose was not repaired: %+v", result)
+	}
+	if agents.chairmanCalls != 2 {
+		t.Fatalf("chairman calls=%d, want 2 (first + one repair)", agents.chairmanCalls)
+	}
+}
+
+// When the repair also fails, the park detail must carry what the chairman
+// actually returned. Without it an operator cannot tell prose from a truncated
+// verdict from an empty reply, and the three have different fixes.
+func TestChairmanParkDetailCarriesTheUnusableResponse(t *testing.T) {
+	agents := &proseChairmanAgents{replyAfterRepair: "repeat-prose"}
+	runner := &NativeRunner{agents: agents, roundtables: chairmanTestRoundtable(t)}
+	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
+	reviewed.Hash = wfe.Hash(reviewed.Content)
+	result, err := runner.roundtable(t.Context(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
+		Proposal: "review the plan", Inputs: map[string]wfe.Artifact{"src": reviewed},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StepPending || result.PauseReason != "roundtable_chairman" {
+		t.Fatalf("unusable chairman did not park: %+v", result)
+	}
+	if !strings.Contains(result.Detail, "bytes, begins") || !strings.Contains(result.Detail, "Still prose") {
+		t.Fatalf("park detail discards the chairman response: %q", result.Detail)
+	}
+}
+
+// chairmanTestRoundtable saves a two-seat preset with an enabled chairman.
+func chairmanTestRoundtable(t *testing.T) *roundtablecfg.Store {
+	t.Helper()
+	dir := t.TempDir()
+	body := `{"name":"default","seats":[{"model":"","persona":"qa"},{"model":"","persona":"reviewer"}],` +
+		`"min_successful":2,"chairman":"$random","chairman_enabled":true}`
+	if err := os.WriteFile(filepath.Join(dir, "default.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := roundtablecfg.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store
+}
+
+// replayLostSeatAgents fails every seat the way a replay-only invocation does
+// when its durable delegate result is gone.
+type replayLostSeatAgents struct{}
+
+func (replayLostSeatAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
+	return DelegateResult{}, &DelegateExecutionError{Err: ErrDelegateReplayUnavailable, Dispatched: true}
+}
+
+func (a replayLostSeatAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	return testDelegateGroup(ctx, requests, a.Delegate)
+}
+
+// Parking on a lost replay is unrecoverable by waiting: the reservation stays
+// replay-only, so the resumed attempt replays into the same missing result and
+// parks again. A live slice burned hours cycling that way. The gate must return
+// the error so the engine's reservation recovery runs.
+func TestPanelWithLostReplayReturnsTheErrorInsteadOfParking(t *testing.T) {
+	runner := &NativeRunner{agents: replayLostSeatAgents{}, roundtables: unpinnedTestRoundtable(t, "qa", "reviewer")}
+	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
+	reviewed.Hash = wfe.Hash(reviewed.Content)
+	result, err := runner.roundtable(t.Context(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
+		Proposal: "review the plan", Inputs: map[string]wfe.Artifact{"src": reviewed},
+		ReplayOnly: true,
+	})
+	if !errors.Is(err, ErrDelegateReplayUnavailable) {
+		t.Fatalf("lost replay did not surface for recovery: result=%+v err=%v", result, err)
+	}
+	if result.Status == StepPending && result.PauseReason == "panel_unreachable" {
+		t.Fatal("lost replay parked instead of returning the error")
+	}
+}
+
+// A seat that is merely unreachable is still a park: waiting can fix that.
+func TestPanelWithAnUnreachableSeatStillParks(t *testing.T) {
+	runner := &NativeRunner{agents: chairmanFailureAgents{}, roundtables: unpinnedTestRoundtable(t, "chairman", "chairman")}
+	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
+	reviewed.Hash = wfe.Hash(reviewed.Content)
+	result, err := runner.roundtable(t.Context(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
+		Proposal: "review the plan", Inputs: map[string]wfe.Artifact{"src": reviewed},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StepPending || result.PauseReason != "panel_unreachable" {
+		t.Fatalf("an unreachable seat should still park: %+v", result)
+	}
+}
+
+// The chairman is a separate step: it gets the configured deadline in full,
+// measured from the step context, however long the seats took. Sharing the
+// panel's context starved it to zero whenever they ran long, and it failed on
+// the POST that merely launches its job.
+func TestChairmanGetsItsOwnFullDeadline(t *testing.T) {
+	const deadlineMS = 600_000
+	budget := time.Duration(deadlineMS) * time.Millisecond
+	step := t.Context()
+
+	ctx, done := chairmanDeadline(step, deadlineMS)
+	defer done()
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("chairman ran with no deadline at all")
+	}
+	// Its budget is the configured one, not a remainder, so it must be close to
+	// the full value rather than some fraction of it.
+	if remaining := time.Until(deadline); remaining < budget-time.Minute {
+		t.Fatalf("chairman budget=%v, want the configured %v", remaining, budget)
+	}
+
+	t.Run("an exhausted analysis phase does not shorten it", func(t *testing.T) {
+		exhausted, cancel := context.WithTimeout(step, time.Millisecond)
+		defer cancel()
+		<-exhausted.Done()
+		ctx, done := chairmanDeadline(step, deadlineMS)
+		defer done()
+		if err := ctx.Err(); err != nil {
+			t.Fatalf("chairman inherited a spent budget: %v", err)
+		}
+		deadline, _ := ctx.Deadline()
+		if remaining := time.Until(deadline); remaining < budget-time.Minute {
+			t.Fatalf("chairman budget=%v after slow seats, want %v", remaining, budget)
+		}
+	})
+
+	t.Run("no configured deadline is left alone", func(t *testing.T) {
+		ctx, done := chairmanDeadline(step, 0)
+		defer done()
+		if ctx != step {
+			t.Fatal("an unbounded roundtable must stay unbounded")
+		}
+	})
+}
+
+// The planner expanded a 2.8KB proposal into a 23.7KB plan that split into 11
+// packets, inventing a metadata format, a resolution contract and three CLI
+// flags with no antecedent in the request. Its prompt asked only for a complete
+// plan, and completeness has no upper bound. It must ask for the smallest plan
+// that satisfies the request, and park anything extra as a decision for a human.
+func TestPlannerIsAskedForTheSmallestPlanThatSatisfiesTheRequest(t *testing.T) {
+	agents := &recordingAgents{draftResponses: []string{"# Plan\n\nDo exactly what was asked."}}
+	runner := &NativeRunner{agents: agents}
+	_, err := runner.author(t.Context(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Repo: "/repo"},
+		Node:     wfe.Node{ID: "plan"},
+		Inputs:   map[string]wfe.Artifact{"proposal": {Type: "proposal", Content: []byte("add a CONTRIBUTING.md section")}},
+	}, "plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := agents.requests[0].Prompt
+	for _, want := range []string{"smallest work that satisfies the request", "do not add deliverables",
+		"technical debt", "Taking on documented technical debt is completely acceptable", "leaving it undocumented"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("planner prompt lacks its scope bound %q", want)
+		}
+	}
+}
+
+// Told to defer unrequested work, the planner deferred the work and planned its
+// foundations anyway: a snapshot ledger, then committed git fixtures, each one
+// there only to enable a history-aware mode the same plan listed as deferred.
+// The panel caught both, but every catch costs a gate round, and the run parked
+// at convergence_limit one round short. Deferring has to mean the groundwork too.
+func TestPlannerIsToldNotToBuildFoundationsForWorkItDefers(t *testing.T) {
+	agents := &recordingAgents{draftResponses: []string{"# Plan\n\nDo exactly what was asked."}}
+	runner := &NativeRunner{agents: agents}
+	_, err := runner.author(t.Context(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Repo: "/repo"},
+		Node:     wfe.Node{ID: "plan"},
+		Inputs:   map[string]wfe.Artifact{"proposal": {Type: "proposal", Content: []byte("add a CONTRIBUTING.md section")}},
+	}, "plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := agents.requests[0].Prompt
+	for _, want := range []string{"Deferring it means planning none of it, including its groundwork",
+		"whose only purpose is to enable work this same plan defers"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("planner prompt lets deferred work keep its foundations, missing %q", want)
+		}
+	}
+}
+
+// Reviewers treated only SUBSTITUTION as drift, so a plan that kept the goal and
+// piled work on top read as aligned and the gate ratcheted scope upward every
+// round. Unrequested addition is drift too — without dulling the panel's real
+// job, which is catching omissions and defects.
+func TestPanelTreatsUnrequestedAdditionAsDriftWithoutExcusingDefects(t *testing.T) {
+	agents := &recordingAgents{}
+	runner := &NativeRunner{agents: agents, roundtables: unpinnedTestRoundtable(t, "qa")}
+	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
+	reviewed.Hash = wfe.Hash(reviewed.Content)
+	if _, err := runner.roundtable(t.Context(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
+		Proposal: "add a CONTRIBUTING.md section", Inputs: map[string]wfe.Artifact{"src": reviewed},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	prompt := agents.requests[0].Prompt
+	if !strings.Contains(prompt, "Adding work the request did not ask for is drift") {
+		t.Fatal("panel prompt does not bound scope upward")
+	}
+	// The panel must still be told to report omissions and defects as findings,
+	// or this guard would trade one failure mode for a worse one.
+	if !strings.Contains(prompt, "report those as findings, not as alignment") {
+		t.Fatal("scope guard weakened the panel's defect-finding mandate")
+	}
+	// Deferring necessary unrequested work is the correct handling, so the guard
+	// must not let a reviewer flag the deferral itself as drift.
+	if !strings.Contains(prompt, "Documented technical debt is NOT drift") {
+		t.Fatal("panel could report documented technical debt as drift")
+	}
+	if !strings.Contains(prompt, "neither planned nor documented") {
+		t.Fatal("panel is not told that undocumented debt is a finding")
+	}
+}
+
+// Four runs of the same proposal burned their entire round budget rediscovering
+// that the REQUEST was unimplementable: it asked the lint to fire when a
+// "declared subject" stopped resolving, and no such declaration exists. The gate
+// could only say "changes", so the author rewrote a plan that could never satisfy
+// it, until convergence_limit parked with no recorded reason. A reviewer must be
+// able to say the request itself is the problem.
+func TestBlockedIsAUsableVerdictAndDemandsFindings(t *testing.T) {
+	blocked := panelResponse{Verdict: "blocked"}
+	if panelVerdictError(blocked) == nil {
+		t.Fatal("blocked without findings must be rejected: it names no reason a human could act on")
+	}
+	blocked.Findings = []panelFinding{{Severity: "foundational", Summary: "the request depends on a declaration that does not exist"}}
+	if err := panelVerdictError(blocked); err != nil {
+		t.Fatalf("blocked with a finding must be usable: %v", err)
+	}
+}
+
+// The distinction has to survive in the prompt too, or reviewers will reach for
+// blocked whenever an artifact is merely bad — trading a loop for an escape hatch.
+func TestReviewersAreToldBlockedIsAboutTheRequestNotTheArtifact(t *testing.T) {
+	agents := &recordingAgents{}
+	runner := &NativeRunner{agents: agents, roundtables: unpinnedTestRoundtable(t, "qa")}
+	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
+	reviewed.Hash = wfe.Hash(reviewed.Content)
+	if _, err := runner.roundtable(t.Context(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
+		Proposal: "add a CONTRIBUTING.md section", Inputs: map[string]wfe.Artifact{"src": reviewed},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	prompt := agents.requests[0].Prompt
+	for _, want := range []string{"cannot be implemented as written",
+		"merely wrong, incomplete, or unclear is changes, never blocked"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("panel prompt lacks the blocked contract %q", want)
+		}
 	}
 }

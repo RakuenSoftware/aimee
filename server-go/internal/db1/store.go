@@ -1118,13 +1118,16 @@ VALUES (?, ?, ?, 'go-wfe', ?, ?, ?)`, workItemID, fromStage, kind, detail, conte
 		return fmt.Errorf("record stage transition: %w", err)
 	}
 	if kind != "loop" {
+		// Clearing the stage we just LEFT is the point: it completed, so a later
+		// revisit starts with a fresh budget. Clearing the stage we are entering
+		// is not — it reset the counter that bounds a refinement loop. A gate that
+		// loops to its author (gate --loop--> plan) is re-entered by the author's
+		// own advance (plan --advance--> gate), and that advance was wiping the
+		// gate's accumulated attempts, so its cap could never be reached and the
+		// pair looped without bound. Observed: a plan gate at 63 loops against a
+		// cap of 20, burning five hours before it happened to converge.
 		if _, err := tx.ExecContext(ctx, `DELETE FROM lifecycle_stage_attempt WHERE work_item_id=? AND stage=?`, workItemID, fromStage); err != nil {
 			return fmt.Errorf("clear completed stage attempts: %w", err)
-		}
-		if fromStage != toStage {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM lifecycle_stage_attempt WHERE work_item_id=? AND stage=?`, workItemID, toStage); err != nil {
-				return err
-			}
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -1243,7 +1246,10 @@ func (s *Store) Resume(ctx context.Context, workItemID string) error {
 	}
 	// delegate_failed parks explicitly for a human, so a human must be able to
 	// release it once the underlying delegate problem is addressed.
-	operatorReasons := map[string]bool{"manual": true, "wall_cap": true, "turn_cap": true, "retry_limit": true, "convergence_limit": true, "convergence_no_progress": true, "budget_cap": true, "fanout_limit": true, "workflow_definition_invalid": true, "workflow_block_unavailable": true, "delegate_failed": true}
+	operatorReasons := map[string]bool{"manual": true, "wall_cap": true, "turn_cap": true, "retry_limit": true, "convergence_limit": true, "convergence_no_progress": true, "budget_cap": true, "fanout_limit": true, "workflow_definition_invalid": true, "workflow_block_unavailable": true, "delegate_failed": true,
+		// The roundtable judged the request itself unimplementable. A human amends
+		// the request and resumes; nothing the engine can do releases it.
+		"request_unimplementable": true}
 	if !operatorReasons[reason] {
 		return fmt.Errorf("pause reason %q is lifecycle-owned and cannot be resumed manually", reason)
 	}
@@ -1604,8 +1610,13 @@ type ReviewOutcome struct {
 // RecordRequestedChanges atomically records a plan-gate rejection. A retry cap
 // is a recoverable park, never terminal abandonment. Repeating an identical
 // plan+feedback pair parks early because no information is changing.
+// unresolved names the findings still blocking when the gate runs out of rounds.
+// Without it the park records the bare reason "convergence_limit", which says a
+// budget was spent but not what was never fixed -- leaving a human to reconstruct
+// it from the last feedback artifact. A gate that burned every round on the same
+// finding is evidence about the plan or the request; the park should carry it.
 func (s *Store) RecordRequestedChanges(ctx context.Context, workItemID, gate, planStage,
-	planHash, feedbackHash string, maxIterations, maxIdentical int, costUSD float64) (ReviewOutcome, error) {
+	planHash, feedbackHash, unresolved string, maxIterations, maxIdentical int, costUSD float64) (ReviewOutcome, error) {
 	if workItemID == "" || gate == "" || planStage == "" || planHash == "" || feedbackHash == "" {
 		return ReviewOutcome{}, errors.New("complete review transition coordinates are required")
 	}
@@ -1679,9 +1690,13 @@ SET current_stage=?, pause_reason=?, paused_state=?, content_hash=?, cum_cost_us
 WHERE work_item_id=?`, planStage, out.PauseReason, gate, planHash, costUSD, workItemID); err != nil {
 			return ReviewOutcome{}, fmt.Errorf("park non-converging work item: %w", err)
 		}
+		detail := out.PauseReason
+		if strings.TrimSpace(unresolved) != "" {
+			detail = fmt.Sprintf("%s after %d rounds; still unresolved: %s", out.PauseReason, attempts, unresolved)
+		}
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO lifecycle_event (work_item_id, stage, kind, actor, detail, content_hash, cost_usd)
-VALUES (?, ?, 'pause', 'go-wfe', ?, ?, ?)`, workItemID, gate, out.PauseReason, planHash, costUSD); err != nil {
+VALUES (?, ?, 'pause', 'go-wfe', ?, ?, ?)`, workItemID, gate, detail, planHash, costUSD); err != nil {
 			return ReviewOutcome{}, fmt.Errorf("record convergence park: %w", err)
 		}
 	} else {

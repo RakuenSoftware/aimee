@@ -5,7 +5,7 @@
   final core-vs-module carving of the eighteen IDs and a round-trip proof whose stages flow as bus
   events across the boundary. The amendment reopens this child for re-review and does not inherit the
   2026-07-20 approval.
-- **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md)
+- **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries-residual.md)
 - **Owns:** required module responsibilities, core dependency law, the core-vs-module carving of the
   required set, and the executable core proof
 - **Implementation dependency:** module descriptor/build enforcement

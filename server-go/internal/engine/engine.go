@@ -359,6 +359,15 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 
 	switch step.Status {
 	case StepAdvanced:
+		// An approving gate may still have recorded non-blocking deficiencies —
+		// technical debt to act on later. Only the changes path used to persist
+		// feedback, so approving silently discarded them and the debt was never
+		// written down anywhere an operator could find it.
+		if step.Feedback != nil && len(step.Feedback.Findings) > 0 {
+			if err := e.artifacts.PutFeedback(item.ID, *step.Feedback); err != nil {
+				return out, e.parkAfterSpend(ctx, item, "feedback_write_failed", err, step.CostUSD)
+			}
+		}
 		next := node.Next
 		// A gate's pass edge is `on_pass`, not `next`. This holds for every gate,
 		// not just gate.roundtable: gate.ci advances a green PR to the merge stage
@@ -427,7 +436,8 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 			return out, e.parkAfterSpend(ctx, item, "feedback_encode_failed", err, step.CostUSD)
 		}
 		transition, err := e.db.RecordRequestedChanges(ctx, item.ID, node.ID, node.OnFail,
-			reviewed.Hash, wfe.Hash(encoded), maxIterations(node), e.maxNoProgress, step.CostUSD)
+			reviewed.Hash, wfe.Hash(encoded), unresolvedBlockers(step.Feedback),
+			maxIterations(node), e.maxNoProgress, step.CostUSD)
 		if err != nil {
 			return out, err
 		}
@@ -447,7 +457,10 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 		} else {
 			detail = reason + ": " + safeDiagnostic(detail)
 		}
-		if err := e.db.ParkWithDetail(ctx, item.ID, node.ID, reason, detail, step.CostUSD); err != nil {
+		// The delegate has already run and its spend is reconciled; a cancelled
+		// park loses the transition and strands the reservation in 'actual',
+		// which the next replay can only park as replay_unrecoverable.
+		if err := e.db.ParkWithDetail(context.WithoutCancel(ctx), item.ID, node.ID, reason, detail, step.CostUSD); err != nil {
 			return out, err
 		}
 		out.Parked, out.PauseReason = true, reason
@@ -475,7 +488,7 @@ func (e *Engine) parkAfterSpend(ctx context.Context, item db1.WorkItem, reason s
 	if cause != nil {
 		detail += ": " + safeDiagnostic(cause.Error())
 	}
-	if err := e.db.ParkWithDetail(ctx, item.ID, item.Stage, reason, detail, costUSD); err != nil {
+	if err := e.db.ParkWithDetail(context.WithoutCancel(ctx), item.ID, item.Stage, reason, detail, costUSD); err != nil {
 		return fmt.Errorf("%s: %v; park failed: %w", reason, cause, err)
 	}
 	return nil
@@ -508,25 +521,97 @@ func safeDiagnostic(detail string) string {
 	return detail
 }
 
+// maxIterations is how many times one step may repeat before it parks.
+// The parameter is max_rounds. It replaces max_iters, which named the same
+// budget less clearly and was the only one the engine ever read — so a node
+// declaring just max_rounds silently ran on the default, and a live plan gate
+// reached 63 loops that way.
 func maxIterations(node wfe.Node) int {
 	const defaultMax = 20
-	value, ok := node.Params["max_iters"]
+	if n, ok := positiveIntParam(node, "max_rounds"); ok {
+		return n
+	}
+	return defaultMax
+}
+
+func positiveIntParam(node wfe.Node, name string) (int, bool) {
+	value, ok := node.Params[name]
 	if !ok {
-		return defaultMax
+		return 0, false
 	}
 	switch n := value.(type) {
 	case int:
 		if n > 0 {
-			return n
+			return n, true
 		}
 	case int64:
 		if n > 0 && n <= int64(^uint(0)>>1) {
-			return int(n)
+			return int(n), true
 		}
 	case uint64:
 		if n > 0 && n <= uint64(^uint(0)>>1) {
-			return int(n)
+			return int(n), true
 		}
 	}
-	return defaultMax
+	return 0, false
+}
+
+// unresolvedBlockers summarises what a gate is still blocking on, for the park
+// detail when it exhausts its rounds. A gate that spent its whole budget without
+// clearing these is saying something about the plan or the request, and the park
+// is where a human looks first -- "convergence_limit" alone sends them digging
+// through the feedback artifact to find out what never got fixed.
+//
+// The chairman's findings come first. Its verdict overrides the seats', and its
+// original-request alignment finding is the closest thing the run has to a stated
+// reason the work failed, so it is what a human needs to read first. Each entry
+// carries its recommendation, because "what was wrong" without "what to do" still
+// leaves the reader opening artifacts.
+func unresolvedBlockers(feedback *wfe.ReviewFeedback) string {
+	if feedback == nil {
+		return ""
+	}
+	blocking := func(finding wfe.Finding) bool {
+		switch strings.ToLower(strings.TrimSpace(finding.Severity)) {
+		case "foundational", "blocking":
+			return strings.TrimSpace(finding.Summary) != ""
+		}
+		return false
+	}
+	ordered := make([]wfe.Finding, 0, len(feedback.Findings))
+	for _, finding := range feedback.Findings {
+		if blocking(finding) && strings.EqualFold(strings.TrimSpace(finding.Persona), "chairman") {
+			ordered = append(ordered, finding)
+		}
+	}
+	for _, finding := range feedback.Findings {
+		if blocking(finding) && !strings.EqualFold(strings.TrimSpace(finding.Persona), "chairman") {
+			ordered = append(ordered, finding)
+		}
+	}
+
+	clip := func(text string, limit int) string {
+		text = strings.Join(strings.Fields(text), " ")
+		if len(text) > limit {
+			return text[:limit-3] + "..."
+		}
+		return text
+	}
+	entries := make([]string, 0, 3)
+	for _, finding := range ordered {
+		entry := clip(finding.Summary, 200)
+		if rec := clip(finding.Recommendation, 120); rec != "" {
+			entry += " -> " + rec
+		}
+		if persona := strings.TrimSpace(finding.Persona); persona != "" {
+			entry = "[" + persona + "] " + entry
+		}
+		entries = append(entries, entry)
+		// Three is enough to characterise the blockage; the full review stays in
+		// the feedback artifact, and an unbounded detail would bloat every event.
+		if len(entries) == 3 {
+			break
+		}
+	}
+	return strings.Join(entries, " | ")
 }
