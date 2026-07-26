@@ -47,6 +47,16 @@ fi
 
 # 3. Embedded DB2, only when the operator configured no external server.
 if [ -z "${AIMEE_DB2_URL:-}" ]; then
+    # PostgreSQL refuses to run as root, unconditionally. The image declares
+    # USER aimee, so this only trips when a runtime overrides it (e.g. --user root
+    # to work around bind-mount ownership). Say so, rather than letting initdb
+    # fail with "cannot be run as root" and no indication of the fix.
+    if [ "$(id -u)" = 0 ]; then
+        echo "aimee-kb: the internal database cannot run as root (PostgreSQL forbids it)." >&2
+        echo "  Run the container as the 'aimee' user (the image's default), or set" >&2
+        echo "  AIMEE_DB2_URL to an external PostgreSQL server to skip the internal one." >&2
+        exit 1
+    fi
     PGMAJOR="${AIMEE_DB2_PG_MAJOR:-18}"
     PGBIN="/usr/lib/postgresql/$PGMAJOR/bin"
     PGDATA="$AIMEE_HOME/postgres"
