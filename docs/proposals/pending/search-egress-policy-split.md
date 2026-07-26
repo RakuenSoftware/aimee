@@ -1,7 +1,7 @@
 # Search egress policy: separate untrusted destinations from operator-configured endpoints
 
 *Filed as a precondition record for
-[surface-neutral-retrieval-substrate.md](surface-neutral-retrieval-substrate.md)
+[surface-neutral-retrieval-substrate.md](../done/surface-neutral-retrieval-substrate.md)
 ("S2"). Classification: **security, medium**.*
 
 > **PROMOTED TO BLOCKER.** This was filed as a latent structural gap, on the
@@ -10,7 +10,7 @@
 > snippets.
 >
 > The capability assessment
-> ([web-retrieval-capability-map.md](web-retrieval-capability-map.md)) ranks
+> ([web-retrieval-capability-map.md](../done/web-retrieval-capability-map.md)) ranks
 > "fetch and extract from the top N search results" as the highest-value change
 > available. Those result URLs come from a third-party engine and are influenced
 > by whoever ranks in it. Fetching them through a path with no egress validation

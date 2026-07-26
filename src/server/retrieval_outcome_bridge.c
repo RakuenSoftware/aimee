@@ -1,6 +1,6 @@
 /* retrieval_outcome_bridge.c: dogfood-autolabel -> retrieval outcome bridge.
  * See retrieval_outcome_bridge.h and
- * docs/proposals/pending/kb-hybrid-outcome-wiring.md. */
+ * docs/proposals/done/kb-hybrid-outcome-wiring.md. */
 
 #include "retrieval_outcome_bridge.h"
 #include "config.h"

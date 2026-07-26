@@ -1,15 +1,22 @@
 # Proposal: audit feature liveness and remove the background skill curator
 
-- **State:** PENDING — roundtable-approved 2026-07-20; awaiting project acceptance
-- **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md)
+- **State:** PENDING — previously delivered, regressed on `testing`; repair required.
+- **Parent:** [`core-substrate-and-source-module-boundaries-residual.md`](core-substrate-and-source-module-boundaries-residual.md)
 - **Owns:** feature-liveness evidence/dispositions and deletion of the current background curator
 - **Implementation dependencies:** none; this proposal may land first
 - **Date:** 2026-07-20 (reconciliation note added 2026-07-23)
 
+> **Regression update (2026-07-26).** The liveness disposition and absence checker landed, but
+> `src/modules/skills/skill_curator.c`, its header, and build membership were later reintroduced in
+> `e9093c70`. `python3 scripts/check_background_skill_curator_absence.py` currently exits 1 with
+> `rule=deleted-file`. This proposal therefore remains live until the forbidden background worker is
+> removed again and the checker is enforced in the protected lane. Foreground/operator-triggered
+> skill paths remain outside the deletion scope.
+
 > **2026-07-23 amendment reconciliation.** This proposal is essentially unaffected by the suite
 > amendment: its liveness-evidence rule and the background-curator removal stand. The amendment only
 > strengthens the evidence surface — because every inter-module interaction is now a bus event
-> ([`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md)),
+> ([`core-substrate-and-source-module-boundaries-residual.md`](core-substrate-and-source-module-boundaries-residual.md)),
 > a feature that publishes and subscribes no bus event and has no consumer outside its own cluster is
 > demonstrably dead by construction, which the liveness audit may use as additional mechanical
 > evidence. No change to this proposal's dispositions is required; it still may land first.

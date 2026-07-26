@@ -7,7 +7,7 @@ Single source of truth: the `g_v1_routes[]` array in
 `docs/gen/v1-route-descriptor.json`, a canonical JSON artifact.
 
 This is Step 1 of the "/v1 route single source of truth" proposal
-(docs/proposals/pending/route-descriptor-single-source-of-truth.md): stand up a
+(docs/proposals/done/route-descriptor-single-source-of-truth.md): stand up a
 descriptor that is a *faithful, drift-guarded* extract of the authoritative
 table, proving the descriptor holds every route fact, with ZERO behaviour change.
 Later steps invert the flow so the other route/dispatch tables are generated FROM

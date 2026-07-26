@@ -1,7 +1,7 @@
 # Proposal: unify memory, learning, skills, and inference boundaries
 
 - **State:** PENDING — roundtable-approved 2026-07-20; awaiting project acceptance
-- **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md)
+- **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries-residual.md)
 - **Owns:** memory/inference semantics, code-intelligence placement, learning/skills safety,
   response composition, and optional KB synthesis
 - **Implementation dependencies:** module descriptors and required core contracts
@@ -9,7 +9,7 @@
 
 > **2026-07-23 amendment reconciliation.** The memory/learning/skills/response-composition semantics
 > this proposal owns are unchanged, but the suite amendment
-> ([`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md))
+> ([`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries-residual.md))
 > changes how `memory` runs: it is a **separate program on the shared-memory event bus**, not an
 > in-process C module, and it is the dependency **hub/sink** (suite invariant 14) — nearly every
 > module depends on it while it depends on no feature module, and its public surface is a narrow event
