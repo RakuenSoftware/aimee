@@ -436,7 +436,8 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 			return out, e.parkAfterSpend(ctx, item, "feedback_encode_failed", err, step.CostUSD)
 		}
 		transition, err := e.db.RecordRequestedChanges(ctx, item.ID, node.ID, node.OnFail,
-			reviewed.Hash, wfe.Hash(encoded), maxIterations(node), e.maxNoProgress, step.CostUSD)
+			reviewed.Hash, wfe.Hash(encoded), unresolvedBlockers(step.Feedback),
+			maxIterations(node), e.maxNoProgress, step.CostUSD)
 		if err != nil {
 			return out, err
 		}
@@ -553,4 +554,64 @@ func positiveIntParam(node wfe.Node, name string) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// unresolvedBlockers summarises what a gate is still blocking on, for the park
+// detail when it exhausts its rounds. A gate that spent its whole budget without
+// clearing these is saying something about the plan or the request, and the park
+// is where a human looks first -- "convergence_limit" alone sends them digging
+// through the feedback artifact to find out what never got fixed.
+//
+// The chairman's findings come first. Its verdict overrides the seats', and its
+// original-request alignment finding is the closest thing the run has to a stated
+// reason the work failed, so it is what a human needs to read first. Each entry
+// carries its recommendation, because "what was wrong" without "what to do" still
+// leaves the reader opening artifacts.
+func unresolvedBlockers(feedback *wfe.ReviewFeedback) string {
+	if feedback == nil {
+		return ""
+	}
+	blocking := func(finding wfe.Finding) bool {
+		switch strings.ToLower(strings.TrimSpace(finding.Severity)) {
+		case "foundational", "blocking":
+			return strings.TrimSpace(finding.Summary) != ""
+		}
+		return false
+	}
+	ordered := make([]wfe.Finding, 0, len(feedback.Findings))
+	for _, finding := range feedback.Findings {
+		if blocking(finding) && strings.EqualFold(strings.TrimSpace(finding.Persona), "chairman") {
+			ordered = append(ordered, finding)
+		}
+	}
+	for _, finding := range feedback.Findings {
+		if blocking(finding) && !strings.EqualFold(strings.TrimSpace(finding.Persona), "chairman") {
+			ordered = append(ordered, finding)
+		}
+	}
+
+	clip := func(text string, limit int) string {
+		text = strings.Join(strings.Fields(text), " ")
+		if len(text) > limit {
+			return text[:limit-3] + "..."
+		}
+		return text
+	}
+	entries := make([]string, 0, 3)
+	for _, finding := range ordered {
+		entry := clip(finding.Summary, 200)
+		if rec := clip(finding.Recommendation, 120); rec != "" {
+			entry += " -> " + rec
+		}
+		if persona := strings.TrimSpace(finding.Persona); persona != "" {
+			entry = "[" + persona + "] " + entry
+		}
+		entries = append(entries, entry)
+		// Three is enough to characterise the blockage; the full review stays in
+		// the feedback artifact, and an unbounded detail would bloat every event.
+		if len(entries) == 3 {
+			break
+		}
+	}
+	return strings.Join(entries, " | ")
 }
