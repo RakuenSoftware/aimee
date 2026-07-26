@@ -487,6 +487,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-oauth-pkce \
                $(TESTPREFIX)/unit-test-kb-oidc-login \
                $(TESTPREFIX)/unit-test-kb-oidc-login-store \
+               $(TESTPREFIX)/unit-test-kb-oidc-token-exchange \
                $(TESTPREFIX)/unit-test-oauth-reauth \
                $(TESTPREFIX)/unit-test-mcp-client \
                $(TESTPREFIX)/unit-test-mcp-client-sse \
@@ -5356,6 +5357,15 @@ $(TESTPREFIX)/unit-test-kb-oidc-login-store: $(OBJDIR)/tests/test_kb_oidc_login_
                      $(OBJDIR)/kb/kb_identity.o \
                      $(OBJDIR)/server/oauth_pkce.o \
                      $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-kb-oidc-token-exchange: $(OBJDIR)/tests/test_kb_oidc_token_exchange.o \
+                     $(OBJDIR)/kb/kb_oidc_token_exchange.o \
+                     $(OBJDIR)/kb/kb_oidc_login.o \
+                     $(OBJDIR)/kb/auth_oidc.o \
+                     $(OBJDIR)/kb/kb_identity.o \
+                     $(OBJDIR)/server/oauth_pkce.o \
+                     $(OBJDIR)/util.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-kb-pki: $(OBJDIR)/tests/test_kb_pki.o \
