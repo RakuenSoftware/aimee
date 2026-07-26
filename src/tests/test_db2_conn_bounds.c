@@ -163,16 +163,122 @@ static void test_the_short_uri_scheme_is_recognised(void)
    printf("  PASS: the postgres:// scheme is recognised as a URI too\n");
 }
 
-/* Truncation would produce a conninfo that is not merely unbounded but malformed,
- * so a base that leaves no room is returned unchanged. */
-static void test_no_room_returns_the_conninfo_unchanged(void)
+/* No room must FAIL, not silently hand back an unbounded conninfo. An earlier
+ * revision returned the base unchanged, which is well-formed and therefore
+ * connects — losing the bounds on precisely the long TLS conninfo most likely to
+ * need them, with nothing anywhere to say so. */
+static void test_no_room_fails_rather_than_dropping_the_bounds(void)
 {
    /* Big enough for the conninfo itself, far too small for the bounds. */
    char out[40];
-   db2_pg_conninfo_with_bounds("host=a-fairly-long-hostname-here", out, sizeof out);
-   must(strcmp(out, "host=a-fairly-long-hostname-here") == 0, "returned unchanged, not truncated");
-   printf("  PASS: too little room yields the conninfo unchanged, never a truncated one\n");
+   must(db2_pg_conninfo_with_bounds("host=a-fairly-long-hostname-here", out, sizeof out) == -1,
+        "no room is reported as a failure");
+   must(out[0] == '\0', "no unbounded conninfo is left behind for a caller to use");
+   printf("  PASS: too little room fails instead of silently dropping the bounds\n");
 }
+
+/* An out-of-range override must fall back to the bound. The truncating cast makes
+ * this the sharpest case of all: 4294967296 narrows to int 0, which is the
+ * sentinel for "no statement timeout", so an unchecked overflow removes the bound
+ * entirely rather than merely setting an odd one. */
+static void test_an_out_of_range_override_falls_back(void)
+{
+   const char *over[] = {"4294967296", "5000000000", "99999999999999999999", "-9999999999"};
+   for (size_t i = 0; i < sizeof over / sizeof over[0]; i++)
+   {
+      setenv("AIMEE_DB2_STATEMENT_TIMEOUT_MS", over[i], 1);
+      must(db2_pg_statement_timeout_ms() == 300000,
+           "an out-of-range value falls back to the bound");
+   }
+   unsetenv("AIMEE_DB2_STATEMENT_TIMEOUT_MS");
+   printf("  PASS: an out-of-range override falls back, never to 0 or a negative\n");
+}
+
+/* Whole-key matching, not substring. Both of these were live defects: a value
+ * containing the word suppressed the option, and one keepalive key suppressed the
+ * whole group. */
+static void test_option_detection_matches_whole_keys(void)
+{
+   char out[2048];
+   db2_pg_conninfo_with_bounds("host=db dbname=keepalives_test", out, sizeof out);
+   must(strstr(out, "keepalives=1") != NULL, "a value containing the word does not suppress it");
+
+   db2_pg_conninfo_with_bounds("host=db dbname=connect_timeout_db", out, sizeof out);
+   must(strstr(out, "connect_timeout=10") != NULL, "same for connect_timeout inside a value");
+
+   /* A caller who tuned one keepalive key wants that idle — not the loss of
+    * keepalives altogether. Their key survives, and only it; the rest are filled
+    * in, because the guarantee is that every connection carries the group. */
+   db2_pg_conninfo_with_bounds("host=db keepalives_idle=30", out, sizeof out);
+   must(strstr(out, "keepalives=1") != NULL, "keepalives are still enabled");
+   const char *idle = strstr(out, "keepalives_idle=");
+   must(idle != NULL && strncmp(idle, "keepalives_idle=30", 18) == 0, "the caller's idle survives");
+   must(strstr(idle + 1, "keepalives_idle=") == NULL, "keepalives_idle is not specified twice");
+   must(strstr(out, "keepalives_interval=10") != NULL, "the unset tuning keys are filled in");
+   must(strstr(out, "keepalives_count=3") != NULL, "the unset tuning keys are filled in");
+   must(strstr(out, "connect_timeout=10") != NULL, "the unrelated bound is still added");
+
+   /* An explicit keepalives= is the caller owning the group, including off. */
+   db2_pg_conninfo_with_bounds("host=db keepalives=0", out, sizeof out);
+   must(strstr(out, "keepalives=0") != NULL, "an explicit disable survives");
+   must(strstr(out, "keepalives_idle") == NULL, "no tuning keys are layered onto a disable");
+   printf("  PASS: option detection matches whole keys, not substrings\n");
+}
+
+/* Assert against libpq's OWN parser, not against the shape of our output.
+ *
+ * Every other case here is a string assertion, and string assertions are what let
+ * the URI bug through: appending keywords to a URI produces output containing
+ * "connect_timeout=10", so "the bounds appear" was true of a conninfo that in fact
+ * put them inside dbname. Only the real parser can tell those apart. Gated on
+ * libpq being present so the minimal-link build still runs everything above. */
+#if defined(__has_include)
+#if __has_include(<libpq-fe.h>) && !defined(AIMEE_DISABLE_POSTGRES)
+#define CONN_BOUNDS_HAVE_LIBPQ 1
+#endif
+#endif
+
+#ifdef CONN_BOUNDS_HAVE_LIBPQ
+#include <libpq-fe.h>
+
+static const char *opt_value(PQconninfoOption *opts, const char *key)
+{
+   for (PQconninfoOption *o = opts; o->keyword; o++)
+      if (strcmp(o->keyword, key) == 0)
+         return o->val ? o->val : "";
+   return "";
+}
+
+static void parses_as(const char *conninfo, const char *want_dbname)
+{
+   char out[2048];
+   must(db2_pg_conninfo_with_bounds(conninfo, out, sizeof out) == 0, "bounds fit");
+   char *err = NULL;
+   PQconninfoOption *opts = PQconninfoParse(out, &err);
+   must(opts != NULL, "libpq parses the generated conninfo");
+   /* The bug's signature was the bounds landing INSIDE dbname. */
+   must(strcmp(opt_value(opts, "dbname"), want_dbname) == 0, "dbname is exactly the database");
+   must(strcmp(opt_value(opts, "connect_timeout"), "10") == 0, "connect_timeout is a real option");
+   must(strcmp(opt_value(opts, "keepalives"), "1") == 0, "keepalives is a real option");
+   PQconninfoFree(opts);
+   if (err)
+      PQfreemem(err);
+}
+
+static void test_every_form_parses_as_libpq_intends(void)
+{
+   parses_as("postgresql://aimee:aimee@postgres:5432/aimee_shared", "aimee_shared");
+   parses_as("postgres://h:5432/aimee_shared", "aimee_shared");
+   parses_as("postgresql://h/aimee_shared?sslmode=require", "aimee_shared");
+   parses_as("host=db dbname=aimee_shared user=aimee", "aimee_shared");
+   printf("  PASS: libpq parses every form with the bounds as real options\n");
+}
+#else
+static void test_every_form_parses_as_libpq_intends(void)
+{
+   printf("  SKIP: libpq unavailable in this build; parser assertions not run\n");
+}
+#endif
 
 int main(void)
 {
@@ -186,7 +292,10 @@ int main(void)
    test_a_uri_gets_query_parameters_not_keywords();
    test_a_uri_with_existing_query_is_extended();
    test_the_short_uri_scheme_is_recognised();
-   test_no_room_returns_the_conninfo_unchanged();
+   test_no_room_fails_rather_than_dropping_the_bounds();
+   test_an_out_of_range_override_falls_back();
+   test_option_detection_matches_whole_keys();
+   test_every_form_parses_as_libpq_intends();
    printf("All tests passed.\n");
    return 0;
 }

@@ -6,6 +6,7 @@
 #include "db2_pool.h" /* DB2_POOL_HOLD_CEILING_MS — the pool owns the figure */
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -869,14 +870,21 @@ resource_failure:
 #define DB2_DEFAULT_STATEMENT_TIMEOUT_MS DB2_POOL_HOLD_CEILING_MS
 #define DB2_CONNECT_TIMEOUT_S            "10"
 
+/* Out-of-range is a typo like any other, and the truncating cast makes it the
+ * WORST kind: "4294967296" narrows to int 0, which is the sentinel for "no
+ * statement timeout". An unchecked overflow therefore does not merely pick a
+ * strange bound, it silently removes the bound entirely — the exact outcome this
+ * function exists to make impossible. errno must be inspected because strtol
+ * saturates at LONG_MAX/LONG_MIN rather than reporting failure in its return. */
 int db2_pg_statement_timeout_ms(void)
 {
    const char *raw = getenv("AIMEE_DB2_STATEMENT_TIMEOUT_MS");
    if (!raw || !raw[0])
       return DB2_DEFAULT_STATEMENT_TIMEOUT_MS;
    char *end = NULL;
+   errno = 0;
    long v = strtol(raw, &end, 10);
-   if (!end || *end || v < 0)
+   if (!end || *end || errno == ERANGE || v < 0 || v > INT_MAX)
       return DB2_DEFAULT_STATEMENT_TIMEOUT_MS; /* a typo must not remove the bound */
    return (int)v;
 }
@@ -896,13 +904,39 @@ static int conninfo_is_uri(const char *s)
    return strncmp(s, "postgresql://", 13) == 0 || strncmp(s, "postgres://", 11) == 0;
 }
 
+/* Does the conninfo already set this exact option?
+ *
+ * A bare strstr() is wrong in both directions, and both were live defects. It
+ * matches INSIDE other values, so dbname=keepalives_test suppressed keepalives on
+ * a perfectly ordinary conninfo; and it matches other KEYS sharing the prefix, so
+ * a caller setting only keepalives_idle=30 suppressed keepalives, _interval and
+ * _count as well — losing the property on exactly the conninfo that was trying to
+ * tune it.
+ *
+ * So match a whole key: preceded by a separator (start, space, '?', '&') and
+ * followed by '='. This deliberately does not look inside quoted values; a value
+ * containing " keepalives=" would still fool it, but that requires a quoted value
+ * holding a plausible option assignment, whereas the two cases above are shapes a
+ * normal deployment actually produces. */
+static int conninfo_has_key(const char *base, const char *key)
+{
+   size_t klen = strlen(key);
+   for (const char *p = strstr(base, key); p; p = strstr(p + 1, key))
+   {
+      char before = (p == base) ? '\0' : p[-1];
+      if (before != '\0' && before != ' ' && before != '\t' && before != '?' && before != '&')
+         continue;
+      if (p[klen] == '=')
+         return 1;
+   }
+   return 0;
+}
+
 /* Append the safety parameters unless the caller already set them, so an
  * explicit conninfo still wins. */
-void db2_pg_conninfo_with_bounds(const char *conninfo, char *out, size_t out_sz)
+int db2_pg_conninfo_with_bounds(const char *conninfo, char *out, size_t out_sz)
 {
    const char *base = conninfo ? conninfo : "";
-   int have_connect = strstr(base, "connect_timeout") != NULL;
-   int have_keepalives = strstr(base, "keepalives") != NULL;
    int uri = conninfo_is_uri(base);
    /* First added parameter opens the query string; the rest extend it. */
    const char *sep1 = uri ? (strchr(base, '?') ? "&" : "?") : " ";
@@ -911,24 +945,45 @@ void db2_pg_conninfo_with_bounds(const char *conninfo, char *out, size_t out_sz)
    char params[256];
    int n = 0;
    params[0] = '\0';
-   if (!have_connect)
-      n += snprintf(params + n, sizeof params - (size_t)n, "%sconnect_timeout=%s", n ? sep : sep1,
-                    DB2_CONNECT_TIMEOUT_S);
-   if (!have_keepalives)
-      n += snprintf(params + n, sizeof params - (size_t)n,
-                    "%skeepalives=1%skeepalives_idle=30%skeepalives_interval=10%s"
-                    "keepalives_count=3",
-                    n ? sep : sep1, sep, sep, sep);
 
-   /* A truncated conninfo is not a weaker conninfo, it is an invalid one. If the
-    * bounds do not fit, hand back the caller's string unchanged and let the
-    * connection succeed unbounded rather than fail on a malformed string. */
+/* Add a key only if the caller did not set that exact key, so their value always
+ * wins and nothing is ever specified twice. */
+#define ADD_IF_UNSET(key, val)                                                                     \
+   do                                                                                              \
+   {                                                                                               \
+      if (!conninfo_has_key(base, (key)) && n >= 0 && (size_t)n < sizeof params)                   \
+         n += snprintf(params + n, sizeof params - (size_t)n, "%s%s=%s", n ? sep : sep1, (key),    \
+                       (val));                                                                     \
+   } while (0)
+
+   ADD_IF_UNSET("connect_timeout", DB2_CONNECT_TIMEOUT_S);
+
+   /* An explicit `keepalives=` is the caller taking ownership of the whole group,
+    * including switching it off, so add none of it. Otherwise add the enable flag
+    * and fill in only the tuning keys they left unset: a caller who set just
+    * keepalives_idle wants that idle, not the loss of keepalives altogether. */
+   if (!conninfo_has_key(base, "keepalives"))
+   {
+      ADD_IF_UNSET("keepalives", "1");
+      ADD_IF_UNSET("keepalives_idle", "30");
+      ADD_IF_UNSET("keepalives_interval", "10");
+      ADD_IF_UNSET("keepalives_count", "3");
+   }
+#undef ADD_IF_UNSET
+
+   /* Two ways to get this wrong, and the first version chose the second one.
+    * Truncating yields a malformed conninfo. Returning the base unchanged yields
+    * a well-formed but UNBOUNDED one — which quietly breaks the guarantee that
+    * every connection carries these bounds, on the long TLS conninfo most likely
+    * to need them. Report the failure instead and let the caller refuse. */
    if (strlen(base) + strlen(params) + 1 > out_sz)
    {
-      snprintf(out, out_sz, "%s", base);
-      return;
+      if (out_sz)
+         out[0] = '\0';
+      return -1;
    }
    snprintf(out, out_sz, "%s%s", base, params);
+   return 0;
 }
 
 #ifdef AIMEE_DISABLE_POSTGRES
@@ -1187,7 +1242,11 @@ static void copy_err(char *errbuf, size_t errlen, const char *src)
 void *aimee_pg_open(const char *conninfo, char *errbuf, size_t errlen)
 {
    char bounded[2048];
-   db2_pg_conninfo_with_bounds(conninfo, bounded, sizeof bounded);
+   if (db2_pg_conninfo_with_bounds(conninfo, bounded, sizeof bounded) != 0)
+   {
+      copy_err(errbuf, errlen, "conninfo too long to carry the connection safety bounds");
+      return NULL;
+   }
 
    PGconn *conn = PQconnectdb(bounded);
    if (!conn)
@@ -1217,7 +1276,13 @@ void *aimee_pg_open(const char *conninfo, char *errbuf, size_t errlen)
           * caller that asked for bounds and silently got none is worse than a
           * caller that fails: the pool would carry a member it cannot reclaim,
           * with nothing in the connection to say so. */
-         copy_err(errbuf, errlen, "could not set statement_timeout on the connection");
+         /* Keep libpq's reason: a refused connection is otherwise
+          * indistinguishable between a permission error, an ALTER ROLE
+          * restriction and a connection-state problem. */
+         char why[512];
+         snprintf(why, sizeof why, "could not set statement_timeout on the connection: %s",
+                  PQerrorMessage(conn));
+         copy_err(errbuf, errlen, why);
          PQfinish(conn);
          return NULL;
       }

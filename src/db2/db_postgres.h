@@ -98,6 +98,10 @@ const char *aimee_pg_column_text(aimee_pg_stmt_t *stmt, int col);
  * without a backend: an unbounded pooled connection lets a single query hold a
  * lease past the ceiling the pool can report but not reclaim. */
 int db2_pg_statement_timeout_ms(void);
-void db2_pg_conninfo_with_bounds(const char *conninfo, char *out, size_t out_sz);
+/* Writes `conninfo` plus the safety bounds into `out`. Returns 0 on success, or
+ * -1 (with out emptied) when the result would not fit — the caller must then
+ * REFUSE the connection rather than fall back to the unbounded string, because a
+ * connection that silently carries no bounds is the failure this exists to stop. */
+int db2_pg_conninfo_with_bounds(const char *conninfo, char *out, size_t out_sz);
 
 #endif /* DEC_DB_POSTGRES_H */

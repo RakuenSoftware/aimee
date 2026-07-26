@@ -1489,8 +1489,12 @@ $(TESTPREFIX)/unit-test-compute-pool: $(OBJDIR)/tests/test_compute_pool.o $(OBJD
 # The bounds every pooled connection carries. Built with postgres disabled so the
 # policy is exercised without a backend.
 $(OBJDIR)/tests/test_db2_conn_bounds.o: C_FLAGS += -Idb2
+# libpq is linked so the suite can assert against PQconninfoParse — the real
+# parser is the only thing that distinguishes "the bounds appear in the string"
+# from "the bounds are real options", which is exactly the distinction the URI bug
+# slipped through. The tests still need no running backend.
 $(TESTPREFIX)/unit-test-db2-conn-bounds: $(OBJDIR)/tests/test_db2_conn_bounds.o $(OBJDIR)/db2/db_postgres.o $(OBJDIR)/log.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+	$(TESTLINK_MIN) -o $@ $^ $(PQ_LIB) -lpthread $(EXTRA_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-db2-pool: $(OBJDIR)/tests/test_db2_pool.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/log.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
