@@ -56,6 +56,7 @@
 #include "db2/sketch.h"
 #include "kb.h"
 #include "kb_intel_payload.h"
+#include "kb/kb_login_throttle.h"
 #include "log.h"
 #include "workspace.h"
 #include "cJSON.h"
@@ -209,7 +210,19 @@ static void *listener_thread(void *arg)
        * must not inherit the client connection — otherwise a slow/hung
        * converter keeps the socket open after we close it. */
       fcntl(fd, F_SETFD, FD_CLOEXEC);
+      /* Tell the login throttle who this is BEFORE the request is served. The
+       * pre-auth login routes budget attempts per source address, and an address
+       * they cannot see is one shared bucket rather than an exemption -- so this
+       * failing would over-throttle, never under-throttle. Cleared after the
+       * connection so a later request cannot inherit a stale peer. */
+      {
+         char peer[INET_ADDRSTRLEN] = "";
+         if (!inet_ntop(AF_INET, &addr.sin_addr, peer, sizeof(peer)))
+            peer[0] = '\0';
+         kb_login_throttle_set_peer(peer);
+      }
       handle_connection(fd);
+      kb_login_throttle_set_peer("");
       close(fd);
    }
    return NULL;

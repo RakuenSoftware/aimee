@@ -627,6 +627,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-server-mgmt-checkpoint-client \
                $(TESTPREFIX)/unit-test-kb-mgmt-token \
                $(TESTPREFIX)/unit-test-kb-identity-token \
+               $(TESTPREFIX)/unit-test-kb-login-throttle \
                $(TESTPREFIX)/unit-test-server-identity-token \
                $(TESTPREFIX)/unit-test-server-write-tier-db1 \
                $(TESTPREFIX)/unit-test-server-identity-jti \
@@ -2017,6 +2018,10 @@ $(TESTPREFIX)/unit-test-kb-mgmt-token: $(OBJDIR)/tests/test_kb_mgmt_token.o \
                                        $(OBJDIR)/server/server_mgmt_token.o \
                                        $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-kb-login-throttle: $(OBJDIR)/tests/test_kb_login_throttle.o \
+                                            $(OBJDIR)/kb/kb_login_throttle.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-kb-identity-token: $(OBJDIR)/tests/test_kb_identity_token.o \
                                            $(OBJDIR)/kb/kb_identity_token.o \
@@ -5430,6 +5435,7 @@ $(TESTPREFIX)/unit-test-kb-http-grants: $(OBJDIR)/tests/test_kb_http_grants.o \
 $(TESTPREFIX)/unit-test-kb-http-identity-login: \
                      $(OBJDIR)/tests/test_kb_http_identity_login.o \
                      $(OBJDIR)/kb/http/kb_http_identity_login.o \
+                     $(OBJDIR)/kb/kb_login_throttle.o \
                      $(OBJDIR)/kb/kb_oidc_token_exchange.o \
                      $(OBJDIR)/kb/kb_oidc_login.o \
                      $(OBJDIR)/kb/kb_oidc_login_store.o \
@@ -5707,7 +5713,7 @@ $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/tests/test_kb_http_routes.o \
                      $(OBJDIR)/kb/http/kb_http_search.o \
                      $(OBJDIR)/kb/http/kb_route_acl.o \
                      $(OBJDIR)/kb/http/kb_http_console.o \
-                     $(OBJDIR)/kb/http/kb_http_accounts.o $(OBJDIR)/kb/http/kb_http_bootstrap.o $(OBJDIR)/kb/http/kb_http_identity_login.o $(OBJDIR)/kb/kb_oidc_login.o $(OBJDIR)/kb/kb_oidc_login_store.o \
+                     $(OBJDIR)/kb/http/kb_http_accounts.o $(OBJDIR)/kb/http/kb_http_bootstrap.o $(OBJDIR)/kb/http/kb_http_identity_login.o $(OBJDIR)/kb/kb_oidc_login.o $(OBJDIR)/kb/kb_oidc_login_store.o $(OBJDIR)/kb/kb_login_throttle.o \
                      $(OBJDIR)/kb/http/kb_http_governance.o \
                      $(OBJDIR)/util.o \
                      $(OBJDIR)/kb/kb_scope.o \

@@ -25,6 +25,7 @@
  * or the nonce-after-verification rule that are the point of the route.
  */
 #include "kb_http_identity_login.h"
+#include "kb/kb_login_throttle.h"
 
 #include "db2/management_identity_journal.h"
 #include "kb_auth_oidc.h"
@@ -668,15 +669,58 @@ static void test_login_pam(void)
    };
    for (size_t i = 0; i < sizeof(refused) / sizeof(refused[0]); ++i)
    {
+      /* Each case starts from an empty budget. This list is longer than
+       * KB_LOGIN_THROTTLE_BUDGET, so without the reset the tail of it would be
+       * answered 429 by the brute-force throttle -- correctly, since that IS more
+       * consecutive failures than a caller is allowed. What this loop asserts is
+       * that every one of these credentials is refused ALIKE, which is a separate
+       * property from how many refusals in a row are tolerated; the throttle has
+       * its own assertions below and in test_kb_login_throttle.c. */
+      kb_login_throttle_reset();
       assert(route("POST", "/v1/identity/login/pam", refused[i], out, sizeof(out)) == 401);
       assert(strstr(out, "authentication failed"));
       /* Nothing that says WHICH of the reasons applied. */
       assert(!strstr(out, "username") && !strstr(out, "reserved") && !strstr(out, "no such"));
    }
 
+   /* THE ROUTE ACTUALLY CONSULTS THE THROTTLE. test_kb_login_throttle.c proves the
+    * budget works; it cannot prove this route asks it. A throttle that exists and
+    * is never called passes every test the module has, which is exactly how the
+    * gap this closes would come back.
+    *
+    * Measured before the throttle existed: twelve consecutive wrong passwords on
+    * this route each returned an immediate 401. */
+   kb_login_throttle_reset();
+   {
+      const char *wrong =
+          "{\"username\":\"alice\",\"password\":\"wrong\",\"server_id\":\"s\",\"team_id\":770001}";
+      int saw_429 = 0;
+      for (int i = 0; i < KB_LOGIN_THROTTLE_BUDGET + 3 && !saw_429; ++i)
+         if (route("POST", "/v1/identity/login/pam", wrong, out, sizeof(out)) == 429)
+            saw_429 = 1;
+      assert(saw_429);
+      /* The refusal tells the caller how long to wait, rather than leaving it to
+       * hammer the route and stay locked out forever. */
+      assert(strstr(out, "retry_after"));
+      /* AND IT APPLIES TO A CORRECT PASSWORD TOO. If a valid credential slipped
+       * past the lockout, an attacker who guessed right on attempt N would still
+       * win, and the throttle would be a side channel confirming the guess. */
+      assert(route("POST", "/v1/identity/login/pam",
+                   "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"s\","
+                   "\"team_id\":770001}",
+                   out, sizeof(out)) == 429);
+      /* A throttled attempt must not reach PAM: the point is to stop spending the
+       * host's authentication stack on an attacker. */
+      stub_pam_calls = 0;
+      (void)route("POST", "/v1/identity/login/pam", wrong, out, sizeof(out));
+      assert(stub_pam_calls == 0);
+   }
+   kb_login_throttle_reset();
+
    /* AN UNUSABLE USERNAME NEVER REACHES PAM: refusing it before the host's
     * authentication stack means a malformed subject costs no PAM round trip that
     * could be timed, and nothing outside the grammar can reach the database. */
+   kb_login_throttle_reset();
    stub_pam_calls = 0;
    assert(route("POST", "/v1/identity/login/pam",
                 "{\"username\":\"owner\",\"password\":\"correct\",\"server_id\":\"s\",\"team_id\":"
@@ -749,6 +793,7 @@ static void test_login_pam(void)
       assert(stub_pam_calls == 0);
    }
 
+   kb_login_throttle_reset(); /* judge this group on its own, not on prior refusals */
    /* THE INTENT'S REFUSALS ARE THEIR OWN ANSWERS, and deliberately not folded into
     * the generic 401. A caller here has already PROVED who it is, so telling it
     * that it holds no write-tier grant reveals nothing it could not learn from an
@@ -761,6 +806,7 @@ static void test_login_pam(void)
                 out, sizeof(out)) == 403);
    assert(strstr(out, "no write-tier grant"));
 
+   kb_login_throttle_reset(); /* judge this group on its own, not on prior refusals */
    /* Not a member of the named team: also 403, from the context read, and it never
     * reaches the intent writer. */
    stub_intent_reset("alice");
@@ -772,6 +818,7 @@ static void test_login_pam(void)
    assert(strstr(out, "not a member of that team"));
    assert(stub_intent_calls == 0);
 
+   kb_login_throttle_reset(); /* judge this group on its own, not on prior refusals */
    /* A kb that cannot reach its own authority state answers 503, not 401: the
     * credential was fine and retrying with a different password is pointless. */
    stub_intent_reset("alice");
@@ -783,6 +830,7 @@ static void test_login_pam(void)
    assert(strstr(out, "cannot issue write tokens"));
    stub_intent_reset("alice");
 
+   kb_login_throttle_reset(); /* judge this group on its own, not on prior refusals */
    /* A MISSING team_id is a 400, and PAM is never consulted for it. */
    stub_pam_calls = 0;
    assert(route("POST", "/v1/identity/login/pam",
@@ -839,9 +887,11 @@ static void test_login_pam(void)
       assert(stub_seen_team == 9007199254740991LL);
    }
 
+   kb_login_throttle_reset(); /* judge this group on its own, not on prior refusals */
    /* METHOD: POST only. */
    assert(route("GET", "/v1/identity/login/pam", NULL, out, sizeof(out)) == 405);
 
+   kb_login_throttle_reset(); /* judge this group on its own, not on prior refusals */
    /* MUTUAL EXCLUSION, the rule that matters most: a kb with a working OIDC login
     * profile REFUSES password login outright. Enforced here, not just declared by
     * auth-mode — otherwise the IdP's MFA, lockout and account-disable policy is
@@ -859,6 +909,7 @@ static void test_login_pam(void)
    assert(route("GET", "/v1/identity/auth-mode", NULL, out, sizeof(out)) == 200);
    assert(strstr(out, "\"mode\":\"oidc\""));
 
+   kb_login_throttle_reset(); /* judge this group on its own, not on prior refusals */
    /* A configured-but-BROKEN OIDC profile serves PAM, matching what auth-mode
     * reports. Reporting one mode and enforcing the other would leave a kb with a
     * typo'd issuer unable to log anybody in at all. */

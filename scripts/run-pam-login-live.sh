@@ -79,6 +79,11 @@ SERVER_ID="pam-srv"
 U1="aimeepamt1$$"; P1="Correct-Horse-$$-one"
 U2="aimeepamt2$$"; P2="Correct-Horse-$$-two"
 INSTALLED_PAM=0
+# Read from the header rather than hard-coded, so the rig and the control cannot
+# drift apart silently: change the budget and this assertion follows it.
+KB_BUDGET=$(sed -nE 's/^#define[[:space:]]+KB_LOGIN_THROTTLE_BUDGET[[:space:]]+([0-9]+).*/\1/p' \
+              src/kb/kb_login_throttle.h)
+[ -n "$KB_BUDGET" ] || { echo "pam-live: could not read KB_LOGIN_THROTTLE_BUDGET" >&2; exit 2; }
 
 FAILED=0
 pass() { echo "  ok   $*"; }
@@ -185,6 +190,25 @@ login() { # login <user> <password> -> prints "<status> <body>"
 # A 401 is the ONE answer that means the credential check itself failed. Anything
 # else means PAM accepted the password and the request was refused further along,
 # where the reasons are grants and membership rather than authentication.
+# Restart kb to clear the login throttle between assertion groups.
+#
+# NOT a workaround: the throttle is in-memory and per-process, so a restart is the
+# honest way to give a group a fresh budget. Several groups below deliberately
+# spend more than the budget -- six wrong passwords in a row IS over the limit --
+# and without a reset they would collide with the very control this rig asserts,
+# reporting 429 where they expect 401. Each group therefore starts from a known
+# empty budget, and the throttle group spends it on purpose.
+restart_kb() {
+  kill "$kb_pid" 2>/dev/null; sleep 1; kill -9 "$kb_pid" 2>/dev/null; wait "$kb_pid" 2>/dev/null
+  ./aimee-kb --http-port="$KB_PORT" >>"$kb_log" 2>&1 &
+  kb_pid=$!
+  for i in $(seq 1 60); do
+    curl -sf -H "Authorization: Bearer $KB_BEARER" "http://127.0.0.1:$KB_PORT/v1/health" >/dev/null 2>&1 && return 0
+    sleep 1
+  done
+  echo "pam-live: aimee-kb did not come back after a restart" >&2; exit 2
+}
+
 assert_pam_accepted() { # <label> <user> <password>
   local label=$1 code; code=$(login "$2" "$3")
   local body; body=$(head -c200 "$work/out")
@@ -205,16 +229,22 @@ step "Acceptance §11 (PAM): two real accounts authenticate"
 assert_pam_accepted "$U1 correct password" "$U1" "$P1"
 assert_pam_accepted "$U2 correct password" "$U2" "$P2"
 
+restart_kb
 step "Negatives: every bad credential gets the SAME 401, with no enumeration"
 assert_pam_rejected "$U1 wrong password  " "$U1" "not-$P1"
 assert_pam_rejected "$U1 with U2's password" "$U1" "$P2"
 assert_pam_rejected "nonexistent account " "aimeepamnosuch$$" "$P1"
+# This group deliberately spends more than one budget, so it resets midway. That
+# it has to is the control working: six wrong passwords in a row from one peer IS
+# over the limit, which is the entire point of the group that follows.
+restart_kb
 assert_pam_rejected "empty-ish password  " "$U1" "x"
 # `owner` is reserved by the schema and must be refused BEFORE PAM is consulted.
 assert_pam_rejected "reserved name owner " "owner" "$P1"
 # A username outside the bare-username grammar must never reach the host's stack.
 assert_pam_rejected "ungrammatical name  " "oidc:iss:alice" "$P1"
 
+restart_kb
 step "The refusals are indistinguishable (no account-enumeration oracle)"
 c1=$(login "$U1" "not-$P1"); b1=$(head -c200 "$work/out")
 c2=$(login "aimeepamnosuch$$" "whatever"); b2=$(head -c200 "$work/out")
@@ -224,6 +254,59 @@ else
   fail "a caller can tell a wrong password ($c1 $b1) from an unknown account ($c2 $b2)"
 fi
 
+restart_kb
+step "Brute force is throttled (§11), on the real route"
+# The gap this closes was measured here first: twelve wrong-password attempts in a
+# row each returned an immediate 401, with no delay, lockout or backoff, on a route
+# reachable with no bearer at all. Asserted end to end rather than only in the unit
+# test, because the unit test cannot see the wiring -- a throttle that exists but is
+# never consulted by the route passes every unit test there is.
+throttled=0; first_401=0; attempts=0
+for i in $(seq 1 12); do
+  code=$(login "$U2" "definitely-wrong-$i")
+  attempts=$((attempts+1))
+  case "$code" in
+    401) first_401=$((first_401+1)) ;;
+    429) throttled=$i; break ;;
+    *)   fail "unexpected $code on attempt $i while probing the throttle"; break ;;
+  esac
+done
+expected=$((KB_BUDGET + 1))
+if [ "$throttled" = "$expected" ]; then
+  pass "throttled at attempt $throttled, exactly one past the budget (was: 12 x 401, unthrottled)"
+elif [ "$throttled" -gt 0 ]; then
+  # Still throttled, but not where the budget says it should be. Worth a failure
+  # rather than a pass: a budget that does not match the constant is a budget
+  # nobody can reason about from the source.
+  fail "throttled at attempt $throttled, expected $expected (budget=$KB_BUDGET)"
+else
+  fail "12 wrong-password attempts and never throttled -- §11 'brute-force is rate-limited' unmet"
+fi
+# The refusal must carry a wait the caller can act on...
+if grep -q '"retry_after"' "$work/out" 2>/dev/null; then
+  pass "the 429 carries retry_after: $(head -c120 "$work/out")"
+else
+  fail "the 429 does not tell the caller how long to wait: $(head -c120 "$work/out")"
+fi
+# ...and it must apply to a CORRECT password too. If a valid credential slipped
+# past the throttle, an attacker who guessed right on attempt 500 would still win,
+# and the throttle would be a side channel confirming the guess.
+code=$(login "$U2" "$P2")
+if [ "$code" = "429" ]; then
+  pass "a CORRECT password is also throttled while locked out (no confirmation oracle)"
+else
+  fail "a correct password bypassed the lockout -> $code (the throttle is a side channel)"
+fi
+# A DIFFERENT username from the same peer is also refused: the per-peer budget is
+# what stops one host spraying a password across an account list.
+code=$(login "$U1" "$P1")
+if [ "$code" = "429" ]; then
+  pass "the same peer is refused for a different account (per-peer budget holds)"
+else
+  fail "the peer budget did not hold for a second account -> $code"
+fi
+
+restart_kb
 step "An explicitly installed /etc/pam.d/aimee works too"
 # The host fallback is what the assertions above exercised. A deployment that ships
 # its own service file must work as well, and on a distribution whose /etc/pam.d/other

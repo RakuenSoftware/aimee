@@ -7,6 +7,7 @@
 #include "db2/management_identity_journal.h"
 #include "db2/management_intent_fields.h" /* db2_intent_bare_username (header-only) */
 #include "kb_auth_oidc.h"
+#include "kb/kb_login_throttle.h" /* the pre-auth brute-force budget */
 #include "kb_oidc_login.h"
 #include "kb_oidc_login_store.h"
 #include "kb_oidc_token_exchange.h"
@@ -18,11 +19,38 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static int json_error(char *out_buf, int out_cap, int status, const char *message)
 {
    cJSON *o = cJSON_CreateObject();
    cJSON_AddStringToObject(o, "error", message);
+   char *text = o ? cJSON_PrintUnformatted(o) : NULL;
+   snprintf(out_buf, (size_t)out_cap, "%s", text ? text : "{\"error\":\"internal error\"}");
+   if (text)
+      free(text);
+   cJSON_Delete(o);
+   return status;
+}
+
+/* A refusal that tells the caller how long to wait.
+ *
+ * The wait is a BODY FIELD, not a Retry-After header, and that is a scope
+ * boundary rather than an oversight: every kb route returns (status, json body)
+ * and nothing in this layer can set a response header. Adding one would mean
+ * changing the signature every kb route is written against. The field carries the
+ * same information to any client that reads it; a browser's automatic
+ * Retry-After handling is not relevant to a JSON API. Called out so a reviewer
+ * can overrule it cheaply. */
+static int json_error_retry_after(char *out_buf, int out_cap, int status, const char *message,
+                                  int retry_after)
+{
+   cJSON *o = cJSON_CreateObject();
+   if (o)
+   {
+      cJSON_AddStringToObject(o, "error", message);
+      cJSON_AddNumberToObject(o, "retry_after", retry_after);
+   }
    char *text = o ? cJSON_PrintUnformatted(o) : NULL;
    snprintf(out_buf, (size_t)out_cap, "%s", text ? text : "{\"error\":\"internal error\"}");
    if (text)
@@ -440,10 +468,20 @@ static int get_login_callback(const char *query_string, int64_t now, char *out_b
  * subject CHECK enforces, so an unusable subject is refused before it could reach
  * the database, and `owner` is refused because the schema reserves it.
  *
- * Rate limiting is NOT here. This route is a password oracle by nature and wants
- * throttling, but kb's rate limiter is applied by the bearer-gated path and this
- * route is pre-auth by necessity. Left as its own change rather than a partial
- * one, and called out so it is not mistaken for handled. */
+ * RATE LIMITING IS HERE, via kb_login_throttle. It has to be: this route is a
+ * password oracle by nature, it is reachable with no bearer (that is what a login
+ * surface is), and kb's other rate limiting lives on the bearer-gated path that
+ * this route by necessity sits in front of. Measured before it existed, twelve
+ * wrong-password attempts in a row each returned an immediate 401.
+ *
+ * THE ORDER MATTERS. The throttle is consulted BEFORE the grammar check and
+ * before PAM, and a refusal is charged for EVERY credential rejection —
+ * wrong password, unknown account, the reserved name, an ungrammatical username
+ * alike. Charging only the "real" failures would make the throttle itself an
+ * account-enumeration oracle: a caller could tell a real account from an unknown
+ * one by which attempts started getting 429s. A successful credential check
+ * clears the budget, and a caller that authenticates but is then refused for want
+ * of a grant is NOT charged — it proved who it is. */
 static int post_login_pam(const char *body, char *out_buf, int out_cap)
 {
    kb_oidc_login_config_t oidc;
@@ -504,12 +542,30 @@ static int post_login_pam(const char *body, char *out_buf, int out_cap)
       OPENSSL_cleanse(jpass->valuestring, strlen(jpass->valuestring));
    cJSON_Delete(request);
 
+   /* Throttle BEFORE any credential work: a refused attempt must cost the caller
+    * a round trip and nothing else — no PAM call, no /etc/shadow read. The answer
+    * is 429 with Retry-After, and it is the same answer whatever the username is,
+    * so the throttle cannot be probed to tell real accounts from invented ones. */
+   int64_t now = (int64_t)time(NULL);
+   int retry_after = kb_login_throttle_check(username, now);
+   if (retry_after > 0)
+   {
+      OPENSSL_cleanse(password, sizeof(password));
+      LOG_WARN("kb.pam.login", "a password login was throttled (retry_after=%d)", retry_after);
+      return json_error_retry_after(out_buf, out_cap, 429, "too many login attempts", retry_after);
+   }
+
    /* The subject grammar and the reserved name are checked BEFORE PAM, so an
     * unusable username never reaches the host's authentication stack — and so a
     * refusal here costs no PAM round trip that could be timed. */
    int usable = fits && db2_intent_bare_username(username) && strcmp(username, "owner") != 0;
    int ok = usable && pam_check_credentials(username, password);
    OPENSSL_cleanse(password, sizeof(password));
+
+   if (ok)
+      kb_login_throttle_record_success(username);
+   else
+      kb_login_throttle_record_failure(username, now);
 
    if (!ok)
    {

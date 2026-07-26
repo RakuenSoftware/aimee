@@ -506,6 +506,10 @@ KB_SRCS += kb/kb_management_cert_codec.c kb/kb_management_cert_crypto.c \
            kb/kb_management_health_exchange.c kb/kb_mgmt_status_client.c \
            kb/kb_management_action.c kb/kb_management_runtime.c shared/management_read.c
 KB_SRCS += kb/kb_mgmt_token_authority_ipc.c
+# The pre-auth login brute-force budget. In KB_SRCS rather than a route-local
+# helper because the accept loop in kb/http/kb_http.c also calls it, to record the
+# peer address before the request is served.
+KB_SRCS += kb/kb_login_throttle.c
 KB_SRCS += kb/kb_vault_operator_status.c kb/kb_vault_protected_secret.c \
            kb/kb_vault_activation_latch.c kb/kb_vault_operator_mutation.c \
            kb/kb_vault_operator_runtime.c \
