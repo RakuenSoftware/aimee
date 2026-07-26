@@ -1469,6 +1469,14 @@ int main(void)
       assert(server_http_route_allowed(1, "plain", "POST", "/v1/memory/search",
                                        SERVER_REMOTE_WRITES_DATA) == 1);
 
+      /* CAP_GRANT_ADMIN sits inside CAPS_ALL (so the UDS operator has it) and OUTSIDE
+       * CAPS_AUTHENTICATED (so a mere authenticated bearer does not), matching
+       * CAP_WORKFLOW_ADMIN and CAP_SHADOW_ADMIN. A bearer able to administer grants could
+       * grant ITSELF a higher tier, which is why it cannot be in the authenticated set. */
+      assert((CAPS_ALL & CAP_GRANT_ADMIN) == CAP_GRANT_ADMIN);
+      assert((CAPS_AUTHENTICATED & CAP_GRANT_ADMIN) == 0);
+      assert((CAPS_READ_ONLY & CAP_GRANT_ADMIN) == 0);
+
       /* GRANT ADMINISTRATION IS UDS-ONLY, and nothing on the TCP side can reach it.
        *
        * This is the one property standing between a fully-trusted remote peer and the
@@ -1888,4 +1896,37 @@ int main(void)
    platform_test_rmrf(home);
    printf("OK\n");
    return 0;
+}
+
+/* The kb_client transport, stubbed. This test links the /v1 route table, which now
+ * references the grant handlers, and those call kb over HTTP. The test never invokes them —
+ * its concern is the route gate, not the handler bodies — so refusing stubs are both
+ * sufficient and the safer default: if a grant handler is ever reached from here by
+ * accident, it fails closed rather than proceeding against a fabricated kb.
+ *
+ * The handlers' own behaviour is covered by test_kb_client_grants.c (interpretation of kb's
+ * answers) and test_kb_http_grants.c (kb's side). */
+char *kb_client_v1_post_json(const char *path, cJSON *body, int timeout_ms, int *status_out)
+{
+   (void)path;
+   (void)body;
+   (void)timeout_ms;
+   if (status_out)
+      *status_out = 0;
+   return NULL;
+}
+
+char *kb_client_v1_get_json(const char *path, int timeout_ms, int *status_out)
+{
+   (void)path;
+   (void)timeout_ms;
+   if (status_out)
+      *status_out = 0;
+   return NULL;
+}
+
+char *kb_client_query_escape(const char *s)
+{
+   (void)s;
+   return NULL;
 }

@@ -41,6 +41,7 @@
 #include "kb_client_mtls.h"
 #include "server_workflow_api.h" /* W7: /v1/workflow read+author handlers */
 #include "cJSON.h"
+#include "kb_client_grants.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
@@ -1765,6 +1766,14 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/dashboard/reminders", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ,
      rh_dashboard_reminders},
     {"GET", "/v1/kb/status", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_kb_status},
+    /* Write-tier grant administration. UDS-only via v1_route_requires_uds, which refuses
+     * these over TCP regardless of bearer, tier or capability; CAP_GRANT_ADMIN is defence in
+     * depth. Not given an `op` twin, because there is no NDJSON socket method for grant
+     * administration and inventing one would create a second reachable path to it. */
+    {"POST", "/v1/grants/write-tier", NULL, RM_EXACT, NULL, CAP_GRANT_ADMIN, rh_grant_set},
+    {"POST", "/v1/grants/write-tier/revoke", NULL, RM_EXACT, NULL, CAP_GRANT_ADMIN,
+     rh_grant_revoke},
+    {"GET", "/v1/grants/write-tier", NULL, RM_EXACT, NULL, CAP_GRANT_ADMIN, rh_grant_list},
     {"GET", "/v1/kb/curator", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_kb_curator},
     {"GET", "/v1/agents", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_agents},
     {"GET", "/v1/roadmap", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_roadmap},
