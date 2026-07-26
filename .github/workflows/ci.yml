@@ -259,14 +259,20 @@ jobs:
   # is unset, and no workflow has ever invoked it. A gate that skips by default is
   # a gate that is off.
   #
-  # continue-on-error is deliberate and temporary: this job's preconditions (root,
-  # a raised RLIMIT_MEMLOCK, a container Postgres) have never been exercised on a
-  # GitHub runner, only on a bare-metal/LXC host. It reports without blocking
-  # merges until it has been observed green, and the flag comes off then. Leaving
-  # it on permanently would recreate exactly the always-skipping gate above.
+  # BLOCKING. The harness has been run end to end against all three Postgres
+  # shapes it can meet — local peer auth, a local superuser over TCP, and the
+  # pgvector CONTAINER this job uses reached over TCP — and mints a real
+  # RSA-3072-signed token under vault custody in each, with the replay refused
+  # ALREADY_USED. It was briefly continue-on-error while unproven; that came off
+  # once it was proven, because a gate that cannot fail is the always-skipping
+  # gate above wearing a different hat.
+  #
+  # The one variable not reproducible outside a runner is whether root there can
+  # raise RLIMIT_MEMLOCK. If it cannot, the harness refuses with its own message
+  # naming the limit and how to raise it, and this job goes red — which is the
+  # correct, actionable outcome rather than a silent skip.
   identity-mint-e2e:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Start Postgres (pgvector) with pull retry
@@ -301,9 +307,12 @@ jobs:
           done
           echo "Postgres did not become ready in time"; docker logs aimee-mint-pg || true; exit 1
       - name: Build the provisioners and the mint driver
-        # identity-mint-live is out of `all` on purpose (it is a driver, not a
-        # shipped binary), so it has to be named.
-        run: cd src && make -j$(nproc) aimee-kb-token-roots-provision aimee-kb-jwks-publish identity-mint-live
+        # The provisioner targets are ../-prefixed PATHS (KB_TOKEN_ROOTS_PROVISIONER
+        # = ../aimee-kb-token-roots-provision), not bare names — building by bare
+        # name fails with "No rule to make target". identity-mint-live has a
+        # convenience alias because it is out of `all` on purpose: it is a driver,
+        # not a shipped binary.
+        run: cd src && make -j$(nproc) ../aimee-kb-token-roots-provision ../aimee-kb-jwks-publish identity-mint-live
       - name: Report the memlock limit
         # The provisioners mlockall so signing key material never swaps, and fail
         # with ENOMEM below roughly their own size. Printed separately so a
