@@ -40,7 +40,7 @@
  * So: this gate is fail-closed for built-ins and for third-party MCP, and it is
  * strictly stronger than the name lists it replaces -- but "fail-closed" is not
  * yet a property of the whole gate. See
- * docs/proposals/pending/dynamic-tool-egress-classification.md.
+ * docs/proposals/done/dynamic-tool-egress-classification.md.
  *
  * Pure: no engine, DB, or network dependencies, so it links everywhere the
  * workflow policy is consulted and unit-tests in isolation. */

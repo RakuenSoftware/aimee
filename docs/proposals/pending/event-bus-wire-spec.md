@@ -6,8 +6,8 @@
   and sizes are frozen by the conformance vectors, and both reference clients are held to them. See
   [Implementation status](#implementation-status) for the slice-by-slice map.
 - **Owner:** `module-runtime` (per
-  [`module-runtime-source-ownership-and-build.md`](module-runtime-source-ownership-and-build.md)).
-- **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md)
+  [`module-runtime-source-ownership-and-build.md`](module-runtime-source-ownership-and-build-residual.md)).
+- **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries-residual.md)
 - **Decisions and feature tree:** [`docs/dev/EVENT_BUS_DECISIONS.md`](../../dev/EVENT_BUS_DECISIONS.md)
   (D1–D10) and [`docs/dev/EVENT_BUS_FEATURE_TREE.md`](../../dev/EVENT_BUS_FEATURE_TREE.md) (the twelve
   slices).

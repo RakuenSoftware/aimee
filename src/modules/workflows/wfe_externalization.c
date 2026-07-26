@@ -55,7 +55,7 @@ static int eq_ci(const char *a, const char *b)
  * registry removed that risk for built-ins and the MCP default removed it for
  * third-party MCP servers, but neither covers host-CLI or other dynamic
  * registrations. Closing it needs registration-time classification; see
- * docs/proposals/pending/dynamic-tool-egress-classification.md.
+ * docs/proposals/done/dynamic-tool-egress-classification.md.
  *
  * Extend only with review. */
 static const char *DENY_EXACT[] = {
