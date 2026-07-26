@@ -641,6 +641,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-workload-wire \
                 $(TESTPREFIX)/unit-test-kb-workload-provider
 TEST_TARGETS += $(TESTPREFIX)/unit-test-management-client-instance
 TEST_TARGETS += $(TESTPREFIX)/unit-test-management-action-journal
+TEST_TARGETS += $(TESTPREFIX)/unit-test-management-identity-journal
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-management-cert-lifecycle
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-token-roots-provision
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-token-authority
@@ -2162,6 +2163,14 @@ $(TESTPREFIX)/unit-test-management-client-instance: \
 
 $(TESTPREFIX)/unit-test-management-action-journal: \
     $(OBJDIR)/tests/test_management_action_journal.o \
+    $(OBJDIR)/db2/management_action_journal.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+# The identity journal links management_action_journal.o only for the shared
+# SQLSTATE classifier; the pg layer and tenant scope are mocked in the test.
+$(TESTPREFIX)/unit-test-management-identity-journal: \
+    $(OBJDIR)/tests/test_management_identity_journal.o \
+    $(OBJDIR)/db2/management_identity_journal.o \
     $(OBJDIR)/db2/management_action_journal.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
