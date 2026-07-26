@@ -35,6 +35,9 @@
  *                                       body: {"server_id":"..."}
  *   GET  /v1/identity/login/callback -> {"subject":...,"server_id":...}
  *                                       query: code=&state= (or error=)
+ *   POST /v1/identity/login/pam      -> {"subject":...,"server_id":...}
+ *                                       body: {"username","password","server_id"}
+ *                                       409 when this kb is in OIDC mode
  *
  * `query_string` is the request's raw query (may be NULL). The callback route
  * needs it; the others ignore it. It is passed SEPARATELY from the path because

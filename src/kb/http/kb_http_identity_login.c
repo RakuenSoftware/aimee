@@ -3,6 +3,8 @@
 #include "kb_http_identity_login.h"
 
 #include "cJSON.h"
+#include "pam_auth.h" /* pam_check_credentials — the one PAM policy, shared with the dashboard */
+#include "db2/management_intent_fields.h" /* db2_intent_bare_username (header-only) */
 #include "kb_auth_oidc.h"
 #include "kb_oidc_login.h"
 #include "kb_oidc_login_store.h"
@@ -289,6 +291,95 @@ static int get_login_callback(const char *query_string, int64_t now, char *out_b
    return json_body(out_buf, out_cap, 200, o);
 }
 
+/* POST /v1/identity/login/pam — the other login mode.
+ *
+ * PAM IS DISABLED WHENEVER OIDC IS CONFIGURED, and that is enforced here rather
+ * than merely declared by /v1/identity/auth-mode. The two modes are mutually
+ * exclusive per kb: a kb with an IdP must not also accept host passwords, or the
+ * IdP's policy (MFA, lockout, disabled accounts) is bypassable by anyone with a
+ * local account. A caller that ignores auth-mode and posts here anyway is refused.
+ *
+ * The credential check is pam_check_credentials — the SAME function the dashboard
+ * and SmoothNAS use, not a second PAM stack. There is no kb-specific PAM policy:
+ * the "aimee" PAM service decides, and this route only asks.
+ *
+ * The subject is the BARE USERNAME. There is no `pam:` prefix, because a prefix
+ * would only be meaningful if a host account and some other kind of account could
+ * both be called alice on the same kb — and with the modes mutually exclusive
+ * they cannot. It is validated against the same grammar the identity tables'
+ * subject CHECK enforces, so an unusable subject is refused before it could reach
+ * the database, and `owner` is refused because the schema reserves it.
+ *
+ * Rate limiting is NOT here. This route is a password oracle by nature and wants
+ * throttling, but kb's rate limiter is applied by the bearer-gated path and this
+ * route is pre-auth by necessity. Left as its own change rather than a partial
+ * one, and called out so it is not mistaken for handled. */
+static int post_login_pam(const char *body, char *out_buf, int out_cap)
+{
+   kb_oidc_login_config_t oidc;
+   kb_oidc_login_result_t orc = kb_oidc_login_config_from_env(&oidc);
+   if (orc == KB_OIDC_LOGIN_OK)
+      return json_error(out_buf, out_cap, 409, "this kb uses oidc; password login is disabled");
+   /* A configured-but-BROKEN OIDC profile falls through to PAM, matching what
+    * auth-mode reports. Reporting one mode and enforcing another would leave a kb
+    * with a typo'd issuer unable to log anybody in at all. */
+   if (orc == KB_OIDC_LOGIN_INVALID)
+      LOG_WARN("kb.pam.login",
+               "an OIDC login profile is configured but unusable; serving pam login");
+
+   cJSON *request = body && body[0] ? cJSON_Parse(body) : NULL;
+   const cJSON *juser = request ? cJSON_GetObjectItemCaseSensitive(request, "username") : NULL;
+   const cJSON *jpass = request ? cJSON_GetObjectItemCaseSensitive(request, "password") : NULL;
+   const cJSON *jsrv = request ? cJSON_GetObjectItemCaseSensitive(request, "server_id") : NULL;
+   if (!cJSON_IsString(juser) || !juser->valuestring || !cJSON_IsString(jpass) ||
+       !jpass->valuestring || !jpass->valuestring[0] || !cJSON_IsString(jsrv) ||
+       !jsrv->valuestring || !jsrv->valuestring[0])
+   {
+      cJSON_Delete(request);
+      return json_error(out_buf, out_cap, 400, "username, password and server_id are required");
+   }
+
+   char username[64] = "", server_id[KB_OIDC_LOGIN_SERVER_MAX + 1] = "";
+   char password[512] = "";
+   int fits = strlen(juser->valuestring) < sizeof(username) &&
+              strlen(jpass->valuestring) < sizeof(password) &&
+              strlen(jsrv->valuestring) <= KB_OIDC_LOGIN_SERVER_MAX;
+   if (fits)
+   {
+      snprintf(username, sizeof(username), "%s", juser->valuestring);
+      snprintf(password, sizeof(password), "%s", jpass->valuestring);
+      snprintf(server_id, sizeof(server_id), "%s", jsrv->valuestring);
+   }
+   /* Cleanse the parsed request before the check, not after: cJSON holds the
+    * password in a heap buffer that cJSON_Delete frees without clearing. */
+   if (cJSON_IsString(jpass) && jpass->valuestring)
+      OPENSSL_cleanse(jpass->valuestring, strlen(jpass->valuestring));
+   cJSON_Delete(request);
+
+   /* The subject grammar and the reserved name are checked BEFORE PAM, so an
+    * unusable username never reaches the host's authentication stack — and so a
+    * refusal here costs no PAM round trip that could be timed. */
+   int usable = fits && db2_intent_bare_username(username) && strcmp(username, "owner") != 0;
+   int ok = usable && pam_check_credentials(username, password);
+   OPENSSL_cleanse(password, sizeof(password));
+
+   if (!ok)
+   {
+      /* ONE ANSWER for a bad password, an unknown account, a locked account, a
+       * reserved name and a username outside the grammar. Any distinction here is
+       * an account-enumeration oracle on a pre-auth route. */
+      LOG_WARN("kb.pam.login", "a password login was refused (usable_subject=%d)", usable);
+      return json_error(out_buf, out_cap, 401, "authentication failed");
+   }
+
+   LOG_INFO("kb.pam.login", "authenticated %s for a write token on %s", username, server_id);
+   cJSON *o = cJSON_CreateObject();
+   /* The bare username IS the subject the intent writer records. */
+   cJSON_AddStringToObject(o, "subject", username);
+   cJSON_AddStringToObject(o, "server_id", server_id);
+   return json_body(out_buf, out_cap, 200, o);
+}
+
 int kb_http_identity_login_route(const char *method, const char *path, const char *query_string,
                                  const char *body, int64_t now, char *out_buf, int out_cap)
 {
@@ -309,6 +400,12 @@ int kb_http_identity_login_route(const char *method, const char *path, const cha
       if (strcmp(method, "POST") != 0)
          return json_error(out_buf, out_cap, 405, "method not allowed");
       return post_login_start(body, now, out_buf, out_cap);
+   }
+   if (strcmp(path, "/v1/identity/login/pam") == 0)
+   {
+      if (strcmp(method, "POST") != 0)
+         return json_error(out_buf, out_cap, 405, "method not allowed");
+      return post_login_pam(body, out_buf, out_cap);
    }
    if (strcmp(path, "/v1/identity/login/callback") == 0)
    {

@@ -129,6 +129,21 @@ kb_oidc_token_exchange_post(const kb_oidc_login_config_t *cfg,
    return KB_OIDC_TOKEN_EXCHANGE_OK;
 }
 
+/* PAM. Stubbed because a unit test must not consult the host's authentication
+ * stack: the result would depend on which accounts exist on the build machine.
+ * Records what it was asked so the route's ordering can be checked — in
+ * particular that an unusable username never reaches PAM at all. */
+static int stub_pam_calls;
+static char stub_pam_user[128];
+static char stub_pam_pass[128];
+int pam_check_credentials(const char *user, const char *password)
+{
+   stub_pam_calls++;
+   snprintf(stub_pam_user, sizeof(stub_pam_user), "%s", user ? user : "");
+   snprintf(stub_pam_pass, sizeof(stub_pam_pass), "%s", password ? password : "");
+   return user && password && strcmp(user, "alice") == 0 && strcmp(password, "correct") == 0;
+}
+
 /* ── A real IdP keypair, so verification is real ───────────────────────────── */
 
 static char *b64url(const unsigned char *in, size_t inlen)
@@ -423,6 +438,154 @@ static void test_callback(EVP_PKEY *key, const char *jwks)
    kb_oidc_login_store_reset();
 }
 
+static void test_login_pam(void)
+{
+   char out[4096] = "";
+   char body[2048];
+   env_clear();
+
+   /* THE HAPPY PATH. The subject is the BARE username — no prefix, because with
+    * the modes mutually exclusive there is no other kind of account that could
+    * also be called alice on this kb. */
+   stub_pam_calls = 0;
+   assert(route("POST", "/v1/identity/login/pam",
+                "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"mintsrv\"}", out,
+                sizeof(out)) == 200);
+   assert(strstr(out, "\"subject\":\"alice\""));
+   assert(strstr(out, "\"server_id\":\"mintsrv\""));
+   assert(stub_pam_calls == 1);
+   /* PAM got exactly what was posted, and no prefix was invented. */
+   assert(strcmp(stub_pam_user, "alice") == 0 && strcmp(stub_pam_pass, "correct") == 0);
+   /* No credential is echoed back. */
+   assert(!strstr(out, "correct") && !strstr(out, "password"));
+
+   /* A WRONG PASSWORD, an unknown account, and a username outside the grammar all
+    * answer identically: on a pre-auth route any distinction enumerates accounts. */
+   const char *refused[] = {
+       "{\"username\":\"alice\",\"password\":\"wrong\",\"server_id\":\"s\"}",
+       "{\"username\":\"nosuchuser\",\"password\":\"correct\",\"server_id\":\"s\"}",
+       /* outside the subject grammar the identity tables CHECK */
+       "{\"username\":\"-leading-dash\",\"password\":\"correct\",\"server_id\":\"s\"}",
+       "{\"username\":\"has space\",\"password\":\"correct\",\"server_id\":\"s\"}",
+       "{\"username\":\"has:colon\",\"password\":\"correct\",\"server_id\":\"s\"}",
+       "{\"username\":\"oidc:iss:sub\",\"password\":\"correct\",\"server_id\":\"s\"}",
+       /* reserved by the schema as the host-account name for the owner */
+       "{\"username\":\"owner\",\"password\":\"correct\",\"server_id\":\"s\"}",
+   };
+   for (size_t i = 0; i < sizeof(refused) / sizeof(refused[0]); ++i)
+   {
+      assert(route("POST", "/v1/identity/login/pam", refused[i], out, sizeof(out)) == 401);
+      assert(strstr(out, "authentication failed"));
+      /* Nothing that says WHICH of the reasons applied. */
+      assert(!strstr(out, "username") && !strstr(out, "reserved") && !strstr(out, "no such"));
+   }
+
+   /* AN UNUSABLE USERNAME NEVER REACHES PAM: refusing it before the host's
+    * authentication stack means a malformed subject costs no PAM round trip that
+    * could be timed, and nothing outside the grammar can reach the database. */
+   stub_pam_calls = 0;
+   assert(route("POST", "/v1/identity/login/pam",
+                "{\"username\":\"owner\",\"password\":\"correct\",\"server_id\":\"s\"}", out,
+                sizeof(out)) == 401);
+   assert(route("POST", "/v1/identity/login/pam",
+                "{\"username\":\"has space\",\"password\":\"correct\",\"server_id\":\"s\"}", out,
+                sizeof(out)) == 401);
+   assert(stub_pam_calls == 0);
+
+   /* MALFORMED requests are a 400 — distinct from 401 on purpose, because a
+    * missing field is a client bug and reveals nothing about any account. */
+   const char *bad[] = {
+       "{\"password\":\"correct\",\"server_id\":\"s\"}",
+       "{\"username\":\"alice\",\"server_id\":\"s\"}",
+       "{\"username\":\"alice\",\"password\":\"correct\"}",
+       "{\"username\":\"alice\",\"password\":\"\",\"server_id\":\"s\"}",
+       "{\"username\":5,\"password\":\"correct\",\"server_id\":\"s\"}",
+       "not json",
+       "",
+   };
+   stub_pam_calls = 0;
+   for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i)
+      assert(route("POST", "/v1/identity/login/pam", bad[i], out, sizeof(out)) == 400);
+   assert(route("POST", "/v1/identity/login/pam", NULL, out, sizeof(out)) == 400);
+   assert(stub_pam_calls == 0);
+
+   /* AN OVERSIZED FIELD IS REFUSED, NOT TRUNCATED. The assertion that matters is
+    * stub_pam_calls == 0, not the status: a truncated PASSWORD would still fail
+    * the stub's comparison and still answer 401, so a status-only check passes
+    * whether or not the length is enforced. What must not happen is a shortened
+    * password reaching the host's authentication stack at all — against a real
+    * PAM, a truncation that happened to land on a valid prefix would authenticate
+    * somebody who does not know the password. */
+   {
+      char big[1024];
+      memset(big, 'a', sizeof(big) - 1);
+      big[sizeof(big) - 1] = '\0';
+
+      /* Oversized username. Refused on length; note this one would ALSO be caught
+       * by the 32-char subject grammar, which is why it cannot stand alone. */
+      stub_pam_calls = 0;
+      snprintf(body, sizeof(body),
+               "{\"username\":\"%.200s\",\"password\":\"correct\","
+               "\"server_id\":\"s\"}",
+               big);
+      assert(route("POST", "/v1/identity/login/pam", body, out, sizeof(out)) == 401);
+      assert(stub_pam_calls == 0);
+
+      /* Oversized PASSWORD with a perfectly valid username — the case that
+       * isolates length enforcement, since nothing else about this request is
+       * wrong. */
+      stub_pam_calls = 0;
+      snprintf(body, sizeof(body),
+               "{\"username\":\"alice\",\"password\":\"%.900s\","
+               "\"server_id\":\"s\"}",
+               big);
+      assert(route("POST", "/v1/identity/login/pam", body, out, sizeof(out)) == 401);
+      assert(stub_pam_calls == 0);
+
+      /* And an oversized server_id, which would otherwise be silently shortened
+       * into a different server's name. */
+      stub_pam_calls = 0;
+      snprintf(body, sizeof(body),
+               "{\"username\":\"alice\",\"password\":\"correct\","
+               "\"server_id\":\"%.300s\"}",
+               big);
+      assert(route("POST", "/v1/identity/login/pam", body, out, sizeof(out)) == 401);
+      assert(stub_pam_calls == 0);
+   }
+
+   /* METHOD: POST only. */
+   assert(route("GET", "/v1/identity/login/pam", NULL, out, sizeof(out)) == 405);
+
+   /* MUTUAL EXCLUSION, the rule that matters most: a kb with a working OIDC login
+    * profile REFUSES password login outright. Enforced here, not just declared by
+    * auth-mode — otherwise the IdP's MFA, lockout and account-disable policy is
+    * bypassable by anyone holding a local host password. */
+   env_configure();
+   stub_pam_calls = 0;
+   assert(route("POST", "/v1/identity/login/pam",
+                "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"s\"}", out,
+                sizeof(out)) == 409);
+   assert(strstr(out, "password login is disabled"));
+   /* And PAM was never consulted, so a correct host password buys nothing. */
+   assert(stub_pam_calls == 0);
+   /* auth-mode agrees, so a client is never told to use a route that refuses it. */
+   assert(route("GET", "/v1/identity/auth-mode", NULL, out, sizeof(out)) == 200);
+   assert(strstr(out, "\"mode\":\"oidc\""));
+
+   /* A configured-but-BROKEN OIDC profile serves PAM, matching what auth-mode
+    * reports. Reporting one mode and enforcing the other would leave a kb with a
+    * typo'd issuer unable to log anybody in at all. */
+   setenv("AIMEE_KB_OIDC_LOGIN_AUTHORIZE_URL", "http://not-https.example/authorize", 1);
+   assert(route("GET", "/v1/identity/auth-mode", NULL, out, sizeof(out)) == 200);
+   assert(strstr(out, "\"mode\":\"pam\""));
+   assert(route("POST", "/v1/identity/login/pam",
+                "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"mintsrv\"}", out,
+                sizeof(out)) == 200);
+   assert(strstr(out, "\"subject\":\"alice\""));
+
+   env_clear();
+}
+
 static void test_not_our_routes(void)
 {
    char out[4096] = "";
@@ -611,6 +774,7 @@ int main(void)
    test_login_start_full_store();
    test_small_buffer();
    test_callback(key, jwks);
+   test_login_pam();
    env_clear();
    kb_oidc_login_store_reset();
    free(jwks);
