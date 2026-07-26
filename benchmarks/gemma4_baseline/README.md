@@ -161,11 +161,13 @@ leave room for their weights on the 24 GiB card. E2B embedding batches contain 6
 inputs and run against 64 server slots with 2,048 context tokens available to
 each input instead of being serialized through one slot.
 
-Model benchmark servers disable llama.cpp's prompt cache. The frozen corpus is at
-most 6,229 characters per document, and observed E2B synthesis traffic is at most
-1,557 total tokens, so allocating a large training-length context to every slot
-would consume VRAM without representing this workload. Context capacity and slot
-count are tuned independently.
+Model benchmark servers bound llama.cpp's prompt cache to 512 MiB instead of its
+8 GiB default. This preserves reuse of common instruction, schema, and chat-template
+prefixes without allowing cache policy to dominate the card. The frozen corpus is
+at most 6,229 characters per document, and observed E2B synthesis traffic is at
+most 1,557 total tokens, so allocating a large training-length context to every
+slot would consume VRAM without representing this workload. Context capacity,
+prompt-cache capacity, and slot count are tuned independently.
 
 E4B also starts at 64 slots. The 12B profile starts at 32, 26B at 16, 31B at 8,
 and Qwen 3.6 35B-A3B at 4. Before a complete 12B-or-larger view, run a short

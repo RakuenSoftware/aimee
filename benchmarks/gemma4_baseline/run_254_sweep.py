@@ -145,7 +145,7 @@ def start_server(
     args = [
         "run", "--detach", "--rm", "--name", "gemma4-baseline-server", "--network", "host",
         "--device", "/dev/dri:/dev/dri", "--volume", f"{root}:/bench", "--entrypoint", "/opt/llama/llama-server",
-        image, "-m", f"/bench/models/{model_file}", "-ngl", "99", "-fa", "on", "--cache-ram", "0",
+        image, "-m", f"/bench/models/{model_file}", "-ngl", "99", "-fa", "on", "--cache-ram", "512",
         "--host", "0.0.0.0", "--port", "8920",
     ]
     if mode == "synthesis":
