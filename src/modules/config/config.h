@@ -962,7 +962,7 @@ typedef struct config
    /* When on, the continuation/repair autolabel also writes a retrieval OUTCOME
     * (retrieval_attribution for memory, ranker_outcome for kb_hybrid) for the
     * prior turn's surfaced rows — closing the demotion + learning-to-rank loops.
-    * Default off. See docs/proposals/pending/kb-hybrid-outcome-wiring.md. */
+    * Default off. See docs/proposals/done/kb-hybrid-outcome-wiring.md. */
    int learning_implicit_retrieval_outcome;
 
    /* Autonomous mode: launch agent CLIs with their full autonomous flags,

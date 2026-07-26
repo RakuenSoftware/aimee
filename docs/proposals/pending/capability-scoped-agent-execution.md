@@ -177,10 +177,10 @@ tree and symbols are the durable anchors.
 | `src/server/agent_tools.c:445-487` | `agent_tools_tool_allowed_for_role` | `in_scope` | Currently resolves independently. When bound, replace only its membership source and retain the existing post-membership review-worktree reachability check. Resolver/role fallback is reachable only when the flag is `unbound`. |
 | `src/server/agent_tools.c:540-579` | `agent_tools_filter_for_role` | `in_scope` | Currently resolves independently, then deletes in place without reordering survivors. Use the bound names; `bound_empty` emits zero tools. |
 | `src/posix/agent_runtime.c:556-564` | disclosure consumer | `in_scope` | The provider-neutral runtime builds one provider-shaped array and calls the filter before request construction. |
-| `src/posix/agent_tools_dispatch.c:1878-1964` | dispatch membership call | `in_scope` | `dispatch_tool_call_ctx_inner()` calls the allowed predicate at line 1958. The call site and surrounding order remain unchanged. |
+| `src/modules/tools/agent_tools_dispatch.c:1878-1964` | dispatch membership call | `in_scope` | `dispatch_tool_call_ctx_inner()` calls the allowed predicate at line 1958. The call site and surrounding order remain unchanged. |
 | `src/posix/agent_runtime.c:1550-1551` | model-loop dispatch caller | `in_scope` | Server delegate execution is bracketed by the bind/clear above; this call consumes the same thread-local list. Other legacy callers remain `unbound`. |
 | `src/server/script_rpc.c:179-188` | script-RPC dispatch caller | `owner_required` | Script RPC has its own resolved `script_allowed_tools` check before dispatch. It remains deliberately `unbound`; no script-RPC edit is authorized. |
-| `src/posix/agent_tools_dispatch.c:2227-2229` | generic dispatch wrapper | `owner_required` | Direct non-turn callers remain `unbound` and retain legacy behavior. No wrapper edit is authorized. |
+| `src/modules/tools/agent_tools_dispatch.c:2227-2229` | generic dispatch wrapper | `owner_required` | Direct non-turn callers remain `unbound` and retain legacy behavior. No wrapper edit is authorized. |
 | `src/windows/agent_runtime.c:298-327` | Windows dispatcher | `owner_required` | Separate platform implementation has no named POSIX membership seam. Invariants 1-2 apply only to the POSIX server-delegate Slice 1. The Windows agent-runtime owner must approve a separately gated parity slice before those invariants can be claimed there. |
 | `src/cmd_agent_delegate.c:705-715` | CLI validation resolution | `owner_required` | Preflight validates an explicit CLI toolset and passes it through the existing environment channel. This is not disclosure or execution membership and remains unchanged. |
 | `src/cmd_agent_delegate_toolset.c:38-62` | CLI argument disambiguation resolution | `owner_required` | Read-only parsing/validation use; remains unchanged. |
@@ -223,7 +223,7 @@ owner's separate approval; Slice 1 cannot absorb them.
 
 ## 5. Hook-in with current proposals
 
-- [Persona-authored outputs](persona-authored-outputs.md) owns the `read/write/execute`
+- [Persona-authored outputs](persona-authored-outputs-residual.md) owns the `read/write/execute`
   permission model and exact write-tool set. **Consumed shape here:** none; a later
   owner-approved adapter may narrow the active toolset before this proposal resolves it.
 - The shipped primary-as-manager workflow and pending workflow-policy work own block
@@ -235,12 +235,12 @@ owner's separate approval; Slice 1 cannot absorb them.
 - [Attestable enforcement](governance-attestable-enforcement.md) owns audit event shape,
   policy revision, and the WORM chain. **Consumed shape here:** none; events are unchanged.
 - [Agent identity and artifact trust](governance-agent-identity-and-artifact-trust.md) and
-  [thin-client mTLS](tiered-llm-p8-thinclient-mtls.md) own principals, delegation identity,
+  [thin-client mTLS](../done/tiered-llm-p8-thinclient-mtls.md) own principals, delegation identity,
   authentication, revocation, and connection caps. **Consumed shape here:** none.
-- [IR as the sole path](ir-sole-path-and-pluggable-stages.md) owns canonical request
+- [IR as the sole path](ir-sole-path-residual.md) owns canonical request
   routing. **Consumed shape here:** none; canonical routing remains unchanged.
-- [Response/orchestration stages](response-orchestration-stages.md) and the
-  [delegate first-port plan](orchestration-seam-delegate-firstport.md) own turn/capability
+- [Response/orchestration stages](../done/response-orchestration-stages.md) and the
+  [delegate first-port plan](../done/orchestration-seam-delegate-firstport.md) own turn/capability
   handles. **Consumed shape here:** only the existing turn-local binding lifetime.
 - Provider-neutral cache-aware economizer work owns cache accounting. **Consumed shape
   here:** none; provider tool-array order remains
@@ -250,7 +250,7 @@ owner's separate approval; Slice 1 cannot absorb them.
   filesystem, credential, and network boundaries. **Consumed shape here:** none.
 - [Local-first memory and trust patterns](local-first-memory-and-trust-patterns.md) owns
   non-owner trust defaults and semantic retry deduplication. **Consumed shape here:** none.
-- [Config field descriptors](config-field-descriptor-table.md) owns new scalar config
+- [Config field descriptors](config-field-descriptor-save-residual.md) owns new scalar config
   plumbing. **Consumed shape here:** none; no field is added.
 
 ## 6. Sequencing
