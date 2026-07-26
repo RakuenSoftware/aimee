@@ -1279,6 +1279,28 @@ identity-mint-live: ../identity-mint-live
 .PHONY: oidc-login-live
 oidc-login-live: ../oidc-login-live
 
+# Write-tier ENFORCEMENT driver (dev tool, NOT part of `all`): provisions the real
+# management trust chain (Ed25519-signed JWKS publication envelope in db1, pinned by
+# a root-owned 0600 trust bundle) and mints real RS256 identity tokens, so a LIVE
+# aimee-server can be asked whether a token's tier actually gates a write. Links the
+# production publication/JWKS/token objects rather than reimplementing them, so a
+# change to the real path breaks this rig too.
+# See scripts/run-write-tier-enforce-live.sh.
+../write-tier-enforce-live: $(OBJDIR)/tests/write_tier_enforce_live_main.o \
+                            $(OBJDIR)/server/server_mgmt_jwks_cache.o \
+                            $(OBJDIR)/kb/kb_mgmt_jwks_publication.o \
+                            $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o \
+                            $(OBJDIR)/kb/kb_mgmt_token_public.o \
+                            $(OBJDIR)/kb/kb_identity_token.o \
+                            $(OBJDIR)/server/oauth_pkce.o \
+                            $(OBJDIR)/modules/vault/vault_crypto.o \
+                            $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db.o \
+                            $(OBJDIR)/db1/db_schema.o $(OBJDIR)/cJSON.o
+	$(CC) -o $@ $^ $(L_SERVER)
+
+.PHONY: write-tier-enforce-live
+write-tier-enforce-live: ../write-tier-enforce-live
+
 # Standalone libpq memory-negation eval driver (dev tool, not part of `all`): the
 # aimee-kb object set with kb_main() swapped for a corpus-eval main() plus the
 # mem_eval harness. Links the REAL libpq DB2, so mem_eval_load_corpus opens an
