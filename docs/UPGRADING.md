@@ -61,6 +61,27 @@ shell on the host.
 4. **Verify** that the users you expect appear, with the tiers you expect, before
    you tell anyone the upgrade is done.
 
+**What a `subject` looks like.** This is the field you will get wrong if nobody
+tells you, because a grant for the wrong spelling is silently a grant for nobody.
+A subject is an authenticated identity in one of four forms:
+
+| Form | When | Example |
+|---|---|---|
+| `<username>` | the local-PAM login — a plain host account name | `alice` |
+| `oidc:<iss>:<sub>` | the OIDC login | `oidc:https%3A//idp.example:alice` |
+| `cert:<issuer>:<serial>` | a machine identity from an mTLS client certificate | `cert:CN=aimee-ca:a1b` |
+| `owner` | the single-org bearer principal | `owner` |
+
+The OIDC and cert forms are namespaced by the authority that vouched, because a
+`sub` is unique only within its issuer and a serial only within its CA — the `:`
+inside an issuer URL is percent-encoded so the delimiters stay unambiguous. A
+PAM username carries no prefix: the host is the only authority, and the two login
+modes are mutually exclusive, so there is nothing for it to collide with.
+
+**One name is reserved.** A host account named literally `owner` cannot be
+granted — it is indistinguishable from the bearer principal. If you have such an
+account, it needs a different name or a different login mode.
+
 **The first grant.** Grants are administered by an org admin or the team's lead —
 but on a freshly upgraded appliance there may be neither, so the local operator
 is the root of trust. It installs the principal `owner`, which counts as admin.
@@ -81,6 +102,32 @@ release exists to provide.
 
 **Interactive callers** (thin clients, webchat) obtain a token by logging in
 through the adoption wizard.
+
+**Which login a user gets is not a choice you make per user — it is a property of
+the kb.** The two modes are mutually exclusive:
+
+- **An OIDC issuer is configured** → OIDC, and PAM is off. Set
+  `AIMEE_KB_OIDC_LOGIN_CLIENT_ID`, `AIMEE_KB_OIDC_LOGIN_AUTHORIZE_URL`,
+  `AIMEE_KB_OIDC_LOGIN_TOKEN_URL`, `AIMEE_KB_OIDC_LOGIN_REDIRECT_URI` and
+  `AIMEE_KB_OIDC_ISSUER`. The issuer is shared with the bearer verifier on
+  purpose: the issuer a login trusts and the issuer a token is checked against
+  must not be able to drift apart.
+- **No OIDC issuer** → the local PAM login, which is the one already used for
+  browser sign-in.
+
+`GET /v1/identity/auth-mode` reports which one a given kb is offering. A client
+is expected to ask rather than assume, because the flows differ — one redirects
+to an identity provider, the other collects a password.
+
+The client secret is **not** an environment variable. It is vault-custodied and
+read only at the moment of the code exchange, so it is never sitting where a
+crash dump or a `ps` would reach it.
+
+If an OIDC profile is configured but unusable — a typo in the endpoint, a
+cleartext `http://` URL — the kb falls back to the PAM login and logs a warning
+naming the problem. It does not report a mode nobody can complete a login with.
+Check the kb log for `kb.oidc.login` if a deployment you configured for OIDC is
+offering passwords.
 
 **Tokens are short-lived and single-use.** A token is bound to one server
 (`aud`), carries its own `jti`, and is consumed on first use — a captured token
@@ -116,6 +163,34 @@ request id. Check for:
 the number of requests refused that the retired global would formerly have
 allowed. It counts only those, not denials in general, so it measures what this
 cutover is actually costing you.
+
+---
+
+## 0.3.0 — PAM authentication now actually compiles in (Linux)
+
+**What changed.** aimee auto-detects `libpam` and sets `-DWITH_PAM` when it is
+present. On Linux that detection has never fired: the probe piped an
+`#include` line to the compiler, and inside make's `$(shell ...)` the escaped
+`\#` reached the compiler as a literal backslash, so the test failed regardless
+of what the host had installed. `-DWITH_PAM` was therefore never set, and no
+shipped binary linked `libpam` even though `-lpam` was on the link line.
+
+**Does this affect me?** Only if you use the **local dashboard's HTTP Basic
+Auth** on Linux. That path validates credentials through PAM, and with PAM
+compiled out it took the "PAM not available — reject all credentials" branch, so
+it rejected every login. It failed closed, not open: nobody got in who should not
+have. But if you had concluded the dashboard's Basic Auth was broken or
+unusable, this is why.
+
+**What to do.** Nothing, unless you had worked around it. After upgrading, the
+dashboard authenticates against the host's `aimee` PAM service as originally
+intended, so an account that was previously refused will now succeed. If you
+relied on the dashboard being effectively closed to everyone, gate it at the
+network instead — that was never the intent of the setting.
+
+Builds on hosts *without* `libpam` are unchanged: PAM stays compiled out and the
+credential check still rejects everything rather than degrading to something
+weaker.
 
 ---
 
