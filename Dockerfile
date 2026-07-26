@@ -4,6 +4,14 @@
 # kb build failed here with -Werror=implicit-function-declaration while the native
 # CI build stayed green -- `make all server` does not compile KB_SRCS, so this
 # image was the only place that file was ever built.
+# Global build args. These must precede the FIRST FROM: an ARG declared after one
+# belongs to that stage, and `FROM pgvectorscale-stage-${WITH_PGVECTORSCALE}` would
+# then interpolate to an empty stage name. Same placement as Dockerfile.server's
+# WITH_RUNTIME_WEB / WITH_VSCODE selectors.
+ARG WITH_PGVECTORSCALE=0
+ARG PG_MAJOR=18
+ARG PGVECTORSCALE_VERSION=0.9.0
+
 FROM debian:trixie-slim AS build
 
 RUN apt-get update \
@@ -35,10 +43,6 @@ RUN sh scripts/fetch-treesitter.sh \
 # the same stage-selector idiom as Dockerfile.server's optional components. The
 # Rust toolchain and pgrx live only here; the runtime image receives the built
 # extension files and none of the build chain.
-ARG WITH_PGVECTORSCALE=0
-ARG PG_MAJOR=18
-ARG PGVECTORSCALE_VERSION=0.9.0
-
 FROM debian:trixie-slim AS pgvectorscale-stage-0
 RUN mkdir -p /pgvectorscale
 
