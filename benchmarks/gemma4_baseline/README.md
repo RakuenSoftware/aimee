@@ -127,8 +127,10 @@ Q4_K_M; treat that quantization asymmetry as a caveat for close results.
 The frozen fixture manifest mechanically declares the required model/view matrix:
 all six instruction bases must run synthesis and native-width embedding; they are
 explicitly excluded from reranking because they are not trained cross-encoders.
-Ettin-400M is required for reranking and excluded from synthesis/embedding. The
-validator fails if any cell or reason changes silently.
+Ettin-68M and Ettin-400M are both required for reranking and excluded from
+synthesis/embedding. They provide the supported CPU/small and GPU/mid incumbent
+controls respectively. The validator fails if either control or any matrix cell
+changes silently.
 
 Download and verify the artifacts:
 
@@ -139,8 +141,8 @@ python3 benchmarks/gemma4_baseline/download_models.py \
 ```
 
 On `.254`, the controller runs one model and one role at a time against the RX
-7900 XTX. It first records an isolated Ettin-400M control, then records artifact
-SHA-256 values and environment identity, pauses the
+7900 XTX. It first records isolated Ettin-68M CPU and Ettin-400M GPU controls,
+then records artifact SHA-256 values and environment identity, pauses the
 deployed LLM container so production cannot share VRAM with the measurement,
 runs the full 10,000 synthesis and 10,000 embedding cases, and restores the exact
 production container in a `finally` block:
@@ -148,6 +150,9 @@ production container in a `finally` block:
 ```sh
 python3 benchmarks/gemma4_baseline/run_254_sweep.py
 ```
+
+`--skip-ettin` skips both controls. A normal or resumed qualification run requires
+both controls over all 10,000 frozen reranking cases.
 
 After a complete restored sweep, generate all 15 six-model pairs for both views
 (30 paired reports total):

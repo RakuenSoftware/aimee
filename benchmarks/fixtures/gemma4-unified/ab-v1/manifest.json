@@ -6,6 +6,11 @@
       "reranking": "required_incumbent_control",
       "synthesis": "excluded_reranker_only"
     },
+    "ettin68m": {
+      "embedding": "excluded_reranker_only",
+      "reranking": "required_incumbent_control",
+      "synthesis": "excluded_reranker_only"
+    },
     "gemma4_12b": {
       "embedding": "required_native_width",
       "reranking": "excluded_instruction_base_not_cross_encoder",

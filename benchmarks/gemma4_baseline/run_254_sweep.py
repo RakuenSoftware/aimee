@@ -21,6 +21,12 @@ from pathlib import Path
 from typing import Any
 
 
+ETTIN_CONTROLS = (
+    {"label": "ettin68m", "tier": "cpu", "ngl": "0", "execution": "cpu"},
+    {"label": "ettin400m", "tier": "mid", "ngl": "99", "execution": "gpu"},
+)
+
+
 def run(command: list[str], *, capture: bool = False, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, text=True, capture_output=capture, check=check)
 
@@ -130,7 +136,14 @@ def stop_server(socket: str, log_path: Path) -> None:
     wait_container_gone(socket, "gemma4-baseline-server")
 
 
-def start_ettin_server(socket: str, image: str, deployed_models: Path, log_path: Path) -> float:
+def start_ettin_server(
+    socket: str,
+    image: str,
+    deployed_models: Path,
+    tier: str,
+    ngl: str,
+    log_path: Path,
+) -> float:
     started = time.monotonic()
     run(docker_cmd(socket, "stop", "gemma4-baseline-server"), check=False, capture=True)
     wait_container_gone(socket, "gemma4-baseline-server")
@@ -138,8 +151,8 @@ def start_ettin_server(socket: str, image: str, deployed_models: Path, log_path:
         socket, "run", "--detach", "--rm", "--name", "gemma4-baseline-server", "--network", "host",
         "--device", "/dev/dri:/dev/dri", "--volume", f"{deployed_models}:/models",
         "--env", "AIMEE_LLM_EMBED_MODE=off", "--env", "AIMEE_LLM_SYNTH_MODE=off",
-        "--env", "AIMEE_LLM_RERANK_MODE=local", "--env", "AIMEE_LLM_RERANK_TIER=mid",
-        "--env", "AIMEE_LLM_NGL=99", "--env", "AIMEE_LLM_PORT=8920", image,
+        "--env", "AIMEE_LLM_RERANK_MODE=local", "--env", f"AIMEE_LLM_RERANK_TIER={tier}",
+        "--env", f"AIMEE_LLM_NGL={ngl}", "--env", "AIMEE_LLM_PORT=8920", image,
     )
     result = run(command, capture=True)
     try:
@@ -187,8 +200,10 @@ def main() -> int:
             "reranking": "excluded_instruction_base_not_cross_encoder",
         }:
             raise RuntimeError(f"fixture manifest does not require the expected views for {model['label']}")
-    if not args.skip_ettin and view_matrix.get("ettin400m", {}).get("reranking") != "required_incumbent_control":
-        raise RuntimeError("fixture manifest does not require the Ettin reranking control")
+    if not args.skip_ettin:
+        for control in ETTIN_CONTROLS:
+            if view_matrix.get(control["label"], {}).get("reranking") != "required_incumbent_control":
+                raise RuntimeError(f"fixture manifest does not require the {control['label']} reranking control")
     artifact_rows = []
     for model in selected_models:
         path = args.root / "models" / model["file"]
@@ -230,34 +245,48 @@ def main() -> int:
             run(docker_cmd(args.socket, "stop", args.production_container))
         write_state(state_path, status="running", production_was_running=production_was_running)
         if not args.skip_ettin:
-            ettin_results = results_dir / "ettin400m"
-            ettin_results.mkdir(exist_ok=True)
-            current_log = logs_dir / "server_ettin400m_reranking.log"
-            write_state(state_path, active={"label": "ettin400m", "mode": "reranking"}, completed=completed)
-            load_seconds = start_ettin_server(args.socket, manifest["runtime"]["container_image"], args.deployed_models, current_log)
-            after_load = hardware_snapshot()
-            command = [
-                "python3", str(args.repo / "benchmarks/gemma4_baseline/run_reranking_ab.py"),
-                "--endpoint", "http://127.0.0.1:8920", "--label", "ettin400m",
-                "--bundle", str(args.repo / "benchmarks/fixtures/gemma4-unified/ab-v1"),
-                "--output-dir", str(ettin_results), "--pair-batch-size", "4", "--timeout", "300",
-                "--environment-note", "isolated_rx_7900_xtx_same_runtime_image_as_six_model_sweep",
-            ]
-            if args.max_cases:
-                command += ["--max-cases", str(args.max_cases)]
-            with (logs_dir / "runner_ettin400m_reranking.log").open("a", encoding="utf-8") as runner_log:
-                process = subprocess.run(command, text=True, stdout=runner_log, stderr=subprocess.STDOUT)
-            after_run = hardware_snapshot()
-            (ettin_results / "hardware_reranking.json").write_text(
-                json.dumps({"cold_load_seconds": load_seconds, "after_load": after_load, "after_run": after_run}, indent=2, sort_keys=True) + "\n",
-                encoding="utf-8",
-            )
-            stop_server(args.socket, current_log)
-            current_log = None
-            if process.returncode:
-                raise RuntimeError(f"ettin400m reranking runner exited {process.returncode}")
-            completed.append({"label": "ettin400m", "mode": "reranking"})
-            write_state(state_path, completed=completed)
+            for control in ETTIN_CONTROLS:
+                label = control["label"]
+                ettin_results = results_dir / label
+                ettin_results.mkdir(exist_ok=True)
+                current_log = logs_dir / f"server_{label}_reranking.log"
+                write_state(state_path, active={"label": label, "mode": "reranking"}, completed=completed)
+                load_seconds = start_ettin_server(
+                    args.socket,
+                    manifest["runtime"]["container_image"],
+                    args.deployed_models,
+                    control["tier"],
+                    control["ngl"],
+                    current_log,
+                )
+                after_load = hardware_snapshot()
+                command = [
+                    "python3", str(args.repo / "benchmarks/gemma4_baseline/run_reranking_ab.py"),
+                    "--endpoint", "http://127.0.0.1:8920", "--label", label,
+                    "--bundle", str(args.repo / "benchmarks/fixtures/gemma4-unified/ab-v1"),
+                    "--output-dir", str(ettin_results), "--pair-batch-size", "4", "--timeout", "300",
+                    "--environment-note",
+                    f"isolated_{control['execution']}_rx_7900_xtx_host_same_runtime_image_as_six_model_sweep",
+                ]
+                if args.max_cases:
+                    command += ["--max-cases", str(args.max_cases)]
+                with (logs_dir / f"runner_{label}_reranking.log").open("a", encoding="utf-8") as runner_log:
+                    process = subprocess.run(command, text=True, stdout=runner_log, stderr=subprocess.STDOUT)
+                after_run = hardware_snapshot()
+                (ettin_results / "hardware_reranking.json").write_text(
+                    json.dumps(
+                        {"cold_load_seconds": load_seconds, "after_load": after_load, "after_run": after_run},
+                        indent=2,
+                        sort_keys=True,
+                    ) + "\n",
+                    encoding="utf-8",
+                )
+                stop_server(args.socket, current_log)
+                current_log = None
+                if process.returncode:
+                    raise RuntimeError(f"{label} reranking runner exited {process.returncode}")
+                completed.append({"label": label, "mode": "reranking"})
+                write_state(state_path, completed=completed)
         for model in selected_models:
             label = model["label"]
             model_results = results_dir / label

@@ -463,11 +463,12 @@ def build(host: str, output: Path) -> None:
             "gemma4_e2b", "gemma4_e4b", "gemma4_12b", "gemma4_26b_a4b", "gemma4_31b", "qwen36_35b_a3b"
         )
     }
-    model_views["ettin400m"] = {
-        "synthesis": "excluded_reranker_only",
-        "embedding": "excluded_reranker_only",
-        "reranking": "required_incumbent_control",
-    }
+    for label in ("ettin68m", "ettin400m"):
+        model_views[label] = {
+            "synthesis": "excluded_reranker_only",
+            "embedding": "excluded_reranker_only",
+            "reranking": "required_incumbent_control",
+        }
     manifest = {
         "suite_version": SUITE_VERSION,
         "source": {

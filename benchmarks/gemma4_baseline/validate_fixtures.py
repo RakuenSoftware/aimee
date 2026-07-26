@@ -60,7 +60,8 @@ def validate(bundle: Path) -> dict[str, Any]:
         "gemma4_e2b", "gemma4_e4b", "gemma4_12b", "gemma4_26b_a4b", "gemma4_31b", "qwen36_35b_a3b"
     }
     model_views = manifest.get("baseline_model_views")
-    if not isinstance(model_views, dict) or set(model_views) != six_models | {"ettin400m"}:
+    ettin_controls = {"ettin68m", "ettin400m"}
+    if not isinstance(model_views, dict) or set(model_views) != six_models | ettin_controls:
         raise RuntimeError("baseline model/view matrix mismatch")
     for label in six_models:
         if model_views[label] != {
@@ -69,12 +70,13 @@ def validate(bundle: Path) -> dict[str, Any]:
             "reranking": "excluded_instruction_base_not_cross_encoder",
         }:
             raise RuntimeError(f"{label}: invalid required/excluded view contract")
-    if model_views["ettin400m"] != {
-        "synthesis": "excluded_reranker_only",
-        "embedding": "excluded_reranker_only",
-        "reranking": "required_incumbent_control",
-    }:
-        raise RuntimeError("Ettin required/excluded view contract mismatch")
+    for label in ettin_controls:
+        if model_views[label] != {
+            "synthesis": "excluded_reranker_only",
+            "embedding": "excluded_reranker_only",
+            "reranking": "required_incumbent_control",
+        }:
+            raise RuntimeError(f"{label}: Ettin required/excluded view contract mismatch")
 
     paths = [bundle / name for name in ("corpus.jsonl", "synthesis.jsonl", "embedding.jsonl", "reranking.jsonl")]
     for path in paths:
