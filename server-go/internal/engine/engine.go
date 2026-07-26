@@ -436,7 +436,8 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 			return out, e.parkAfterSpend(ctx, item, "feedback_encode_failed", err, step.CostUSD)
 		}
 		transition, err := e.db.RecordRequestedChanges(ctx, item.ID, node.ID, node.OnFail,
-			reviewed.Hash, wfe.Hash(encoded), maxIterations(node), e.maxNoProgress, step.CostUSD)
+			reviewed.Hash, wfe.Hash(encoded), unresolvedBlockers(step.Feedback),
+			maxIterations(node), e.maxNoProgress, step.CostUSD)
 		if err != nil {
 			return out, err
 		}
@@ -553,4 +554,37 @@ func positiveIntParam(node wfe.Node, name string) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// unresolvedBlockers summarises what a gate is still blocking on, for the park
+// detail when it exhausts its rounds. A gate that spent its whole budget without
+// clearing these is saying something about the plan or the request, and the park
+// is where a human looks first -- "convergence_limit" alone sends them digging
+// through the feedback artifact to find out what never got fixed.
+func unresolvedBlockers(feedback *wfe.ReviewFeedback) string {
+	if feedback == nil {
+		return ""
+	}
+	summaries := make([]string, 0, 3)
+	for _, finding := range feedback.Findings {
+		switch strings.ToLower(strings.TrimSpace(finding.Severity)) {
+		case "foundational", "blocking":
+		default:
+			continue
+		}
+		summary := strings.TrimSpace(finding.Summary)
+		if summary == "" {
+			continue
+		}
+		if len(summary) > 160 {
+			summary = summary[:157] + "..."
+		}
+		summaries = append(summaries, summary)
+		// Three is enough to characterise the blockage; the full set stays in the
+		// feedback artifact, and an unbounded detail would bloat every event row.
+		if len(summaries) == 3 {
+			break
+		}
+	}
+	return strings.Join(summaries, " | ")
 }

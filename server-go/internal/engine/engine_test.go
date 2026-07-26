@@ -1420,3 +1420,48 @@ func (r cancelBeforeParkRunner) Run(_ context.Context, req StepRequest) (StepRes
 	r.cancel()
 	return StepResult{Status: StepAdvanced, CostUSD: 0.2}, nil
 }
+
+// A gate that spends its whole round budget is evidence about the plan or the
+// request, but the park recorded only "convergence_limit" -- a spent budget with
+// no statement of what was never fixed. Observed on wi_79e96261: ten rounds, and
+// the operator had to open the feedback artifact to learn the gate had been stuck
+// on a subject declaration the proposal never defined.
+func TestUnresolvedBlockersSummarisesWhatHeldTheGate(t *testing.T) {
+	if got := unresolvedBlockers(nil); got != "" {
+		t.Fatalf("no feedback must summarise to nothing, got %q", got)
+	}
+	feedback := &wfe.ReviewFeedback{Findings: []wfe.Finding{
+		{Severity: "suggestion", Summary: "could be tidier"},
+		{Severity: "foundational", Summary: "the declared subject is never defined"},
+		{Severity: "nit", Summary: "typo"},
+		{Severity: "blocking", Summary: "the sweep has no acceptance criterion"},
+	}}
+	got := unresolvedBlockers(feedback)
+	if !strings.Contains(got, "the declared subject is never defined") ||
+		!strings.Contains(got, "the sweep has no acceptance criterion") {
+		t.Fatalf("blocking and foundational findings must survive: %q", got)
+	}
+	// Suggestions and nits never held the gate, so naming them would misdirect
+	// whoever reads the park.
+	if strings.Contains(got, "could be tidier") || strings.Contains(got, "typo") {
+		t.Fatalf("non-blocking findings must not appear: %q", got)
+	}
+}
+
+// The detail lands on an append-only event row, so an unbounded summary would
+// bloat every park. Three findings characterise the blockage; the rest stay in
+// the feedback artifact.
+func TestUnresolvedBlockersIsBounded(t *testing.T) {
+	feedback := &wfe.ReviewFeedback{}
+	for i := 0; i < 6; i++ {
+		feedback.Findings = append(feedback.Findings, wfe.Finding{
+			Severity: "blocking", Summary: strings.Repeat("x", 400)})
+	}
+	got := unresolvedBlockers(feedback)
+	if strings.Count(got, "|") != 2 {
+		t.Fatalf("expected at most three findings, got %d separators", strings.Count(got, "|"))
+	}
+	if strings.Contains(got, strings.Repeat("x", 200)) {
+		t.Fatal("individual summaries must be truncated")
+	}
+}
