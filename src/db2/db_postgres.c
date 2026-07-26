@@ -882,15 +882,26 @@ int db2_pg_statement_timeout_ms(void)
    if (!raw || !raw[0])
       return DB2_DEFAULT_STATEMENT_TIMEOUT_MS;
 
-   /* Canonical decimal digits only, checked before strtol rather than after.
-    * strtol happily accepts " 0", "\t0", "+0" and "-0" and returns 0 — and 0 is
-    * the sentinel that DISABLES the bound. So four malformed spellings would each
-    * silently opt out of the safety property, while the documented contract says
-    * only an explicit "0" does that and anything malformed falls back. It was
-    * also inconsistent: " 0" disabled the bound but "0 " fell back. */
+   /* Canonical decimal only, checked before strtol rather than after: digits, and
+    * no redundant leading zero.
+    *
+    * strtol accepts " 0", "\t0", "+0" and "-0" and returns 0 — and 0 is the
+    * sentinel that DISABLES the bound — so each of those malformed spellings
+    * silently opted out of the safety property. Digits-only fixed those but still
+    * let "00" through, and "00" is not the documented opt-out; the contract is
+    * that EXACTLY "0" disables and everything else malformed falls back. The
+    * leading-zero rule makes that literally true, and it also stops "007" quietly
+    * meaning a 7ms timeout.
+    *
+    * This is the fourth way this function has been able to reach "unbounded" by
+    * accident, after the unchecked overflow, the unchecked errno and the signed
+    * zeroes. Hence a rule that rejects by construction rather than a fourth
+    * enumeration of bad spellings. */
    for (const char *c = raw; *c; c++)
       if (*c < '0' || *c > '9')
          return DB2_DEFAULT_STATEMENT_TIMEOUT_MS;
+   if (raw[0] == '0' && raw[1])
+      return DB2_DEFAULT_STATEMENT_TIMEOUT_MS;
 
    char *end = NULL;
    errno = 0;

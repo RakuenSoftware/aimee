@@ -56,6 +56,11 @@ static void test_env_override_is_honoured(void)
     * with genuinely unbounded work can choose it explicitly. */
    setenv("AIMEE_DB2_STATEMENT_TIMEOUT_MS", "0", 1);
    must(db2_pg_statement_timeout_ms() == 0, "explicit 0 disables the bound");
+   /* And EXACTLY "0" — a leading zero is not the documented opt-out, so "00"
+    * falls back rather than silently disabling the bound. */
+   setenv("AIMEE_DB2_STATEMENT_TIMEOUT_MS", "00", 1);
+   must(db2_pg_statement_timeout_ms() == DB2_POOL_HOLD_CEILING_MS,
+        "\"00\" is not the opt-out; it falls back");
    unsetenv("AIMEE_DB2_STATEMENT_TIMEOUT_MS");
    printf("  PASS: an explicit override, including 0, is honoured\n");
 }
@@ -69,8 +74,8 @@ static void test_a_bad_value_falls_back_to_the_bound(void)
     * canonical-digits check these malformed spellings would silently opt out of
     * the safety property rather than fall back to it. It was inconsistent too:
     * " 0" disabled the bound while "0 " fell back. */
-   const char *bad[] = {"",   "abc", "-1",  "12x", "  ",  "1e3",     "-0",     "+0",
-                        " 0", "0 ",  "\t0", "0\n", "0x0", "+300000", " 300000"};
+   const char *bad[] = {"",    "abc", "-1",  "12x", "  ",  "1e3",  "-0",  "+0",      " 0",     "0 ",
+                        "\t0", "0\n", "0x0", "00",  "000", "0060", "007", "+300000", " 300000"};
    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++)
    {
       setenv("AIMEE_DB2_STATEMENT_TIMEOUT_MS", bad[i], 1);
