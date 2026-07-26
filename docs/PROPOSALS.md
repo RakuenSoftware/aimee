@@ -7,8 +7,8 @@ section does not imply global priority.
 
 | State | Folder | Count |
 | --- | --- | --- |
-| Shipped | [`proposals/done/`](proposals/done/) | 209 |
-| Pending | [`proposals/pending/`](proposals/pending/) | 57 |
+| Shipped | [`proposals/done/`](proposals/done/) | 210 |
+| Pending | [`proposals/pending/`](proposals/pending/) | 56 |
 | Accepted (locked, unimplemented) | `proposals/accepted/` | 0 |
 | Deferred | `proposals/deferred/` | 0 |
 | Rejected | `proposals/rejected/` | 0 |
@@ -97,7 +97,6 @@ The complete 2026-07-26 reconciliation, including source/test/commit evidence fo
 - [Proposal: Proposal-supersession hygiene — same-commit move + a documented rule](proposals/pending/proposal-supersession-hygiene.md)
 - [Remote session start: workspace context residual](proposals/pending/remote-session-start-workspace-context.md)
 - [Route descriptor single source: residual work](proposals/pending/route-descriptor-single-source-of-truth-residual.md)
-- [Search egress policy: separate untrusted destinations from operator-configured endpoints](proposals/pending/search-egress-policy-split.md)
 - [Proposal: Standing LoCoMo / LongMemEval benchmark cadence](proposals/pending/standing-benchmark-cadence.md)
 - [Proposal: the registration chain and the static thin client](proposals/pending/thin-client-capability-advertisement.md)
 - [Tiered LLM offering: remaining program scope](proposals/pending/tiered-llm-offering-residual.md)

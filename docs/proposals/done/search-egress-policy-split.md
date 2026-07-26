@@ -1,8 +1,23 @@
 # Search egress policy: separate untrusted destinations from operator-configured endpoints
 
+- **State:** DONE — delivered scope archived 2026-07-26.
+
 *Filed as a precondition record for
-[surface-neutral-retrieval-substrate.md](../done/surface-neutral-retrieval-substrate.md)
+[surface-neutral-retrieval-substrate.md](surface-neutral-retrieval-substrate.md)
 ("S2"). Classification: **security, medium**.*
+
+> **Delivered.** `src/server/web_search.c` now routes every network call through
+> the shared guarded transport in `src/posix/web_egress.c`, with the two policies
+> this proposal asked for: `WEB_EGRESS_UNTRUSTED` for model/result-supplied URLs
+> (DuckDuckGo fetch, and `web_egress_fetch_pinned` for the top-N result fetch that
+> promoted this to a blocker) and `WEB_EGRESS_CONFIGURED` for the operator-supplied
+> SearXNG endpoint. Coverage lives in `src/tests/test_web_egress.c`, with a Windows
+> port at `src/windows/web_egress.c`.
+>
+> Residual, deliberately not blocking: the Tavily call still uses `http_retry_post`
+> directly rather than the guarded transport. Its URL is a compile-time constant,
+> which this proposal explicitly classified as not attacker-steerable, so it is a
+> consistency gap rather than the SSRF this record was about.
 
 > **PROMOTED TO BLOCKER.** This was filed as a latent structural gap, on the
 > reasoning that `web_search`'s endpoints are compile-time constants so nothing
