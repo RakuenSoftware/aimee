@@ -1348,8 +1348,26 @@ static const struct
     {"workspace.remove", marshal_agent_args},
 };
 
+/* See marshal_request_take_reported in the header. Not thread-local: the CLI marshals one
+ * command per process, and a global keeps the contract visible in one place. */
+static int g_marshal_reported;
+
+void marshal_request_note_reported(void)
+{
+   g_marshal_reported = 1;
+}
+
+int marshal_request_take_reported(void)
+{
+   int reported = g_marshal_reported;
+   g_marshal_reported = 0;
+   return reported;
+}
+
 cJSON *marshal_request(const char *method, int argc, char **argv)
 {
+   /* Cleared on entry so a previous command's flag cannot suppress this one's message. */
+   g_marshal_reported = 0;
    /* Custom-body cases (handled before the tables). */
    if (strcmp(method, "init.run") == 0)
    {
@@ -1398,6 +1416,7 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
                     "  '%s' is not an integer. team_id selects the authorization scope, so\n"
                     "  it is refused rather than rounded.\n",
                     team);
+         marshal_request_note_reported();
          return NULL;
       }
       int is_set = strcmp(method, "kb.grant.set") == 0;
@@ -1418,6 +1437,7 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
          fprintf(stderr,
                  "  A subject is owner, oidc:<iss>:<sub>, cert:<issuer>:<serial>, or a bare\n"
                  "  host account.\n");
+         marshal_request_note_reported();
          return NULL;
       }
       if (is_set &&
@@ -1428,6 +1448,7 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
          fprintf(stderr,
                  "  off is a real tier meaning explicitly denied, which is not the same as\n"
                  "  having no grant at all.\n");
+         marshal_request_note_reported();
          return NULL;
       }
       cJSON *req = marshal_no_args(method);

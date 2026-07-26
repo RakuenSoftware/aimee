@@ -1507,7 +1507,22 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
 
    cJSON *req = marshal_request(route->method, fwd_argc, fwd_argv);
    if (!req)
+   {
+      /* A marshalling failure means the arguments could not be turned into a request, so
+       * NOTHING was sent. That used to exit 2 in total silence for every command in the CLI,
+       * which reads as "it worked" to a script and as nothing at all to a person. A review
+       * asked for a generic explanation and it belongs here rather than in each marshaller.
+       *
+       * Suppressed when the marshaller already printed something specific — a per-method
+       * message is strictly better than this one, and two messages for one mistake is worse
+       * than either alone. */
+      if (!marshal_request_take_reported())
+         fprintf(stderr,
+                 "aimee: '%s' — arguments are missing or invalid, so no request was sent.\n"
+                 "  Run 'aimee help' or the command with no arguments for its usage.\n",
+                 route->method);
       return 2;
+   }
 
    int timeout = route->timeout_ms > 0 ? route->timeout_ms : CLIENT_DEFAULT_TIMEOUT_MS;
    if (strcmp(route->method, "delegate") == 0)

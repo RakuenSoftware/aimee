@@ -70,6 +70,19 @@ cJSON *marshal_notes_search(int argc, char **argv);
 cJSON *marshal_primary(int argc, char **argv);
 cJSON *marshal_repo_trust(int argc, char **argv);
 cJSON *marshal_request(const char *method, int argc, char **argv);
+
+/* Whether the last marshal_request that returned NULL already told the user why.
+ *
+ * A marshalling failure ends the command with no request sent, and for most methods the only
+ * evidence was the exit code — see cli_v1_forward. The shared forwarder now prints a generic
+ * explanation, but a marshaller that produced a SPECIFIC one must not be doubled up on. So a
+ * marshaller that prints calls marshal_request_note_reported(); the forwarder consults this
+ * and stays quiet.
+ *
+ * Reading it CLEARS it, so a stale flag cannot suppress the generic message on a later
+ * command in the same process. */
+void marshal_request_note_reported(void);
+int marshal_request_take_reported(void);
 cJSON *marshal_rules_delete(int argc, char **argv);
 cJSON *marshal_session_attach(int argc, char **argv);
 cJSON *marshal_session_brief(int argc, char **argv);

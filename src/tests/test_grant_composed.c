@@ -402,6 +402,32 @@ static void test_kb_failures_surface(void)
    }
 }
 
+/* The reported/suppressed contract on marshalling failure. Before this, EVERY command in the
+ * CLI exited 2 in total silence when its arguments could not be marshalled — which reads as
+ * success to a script and as nothing at all to a person. The generic message now covers that,
+ * and must stay suppressed where a marshaller printed something better. */
+static void test_marshal_failure_is_reported(void)
+{
+   /* A grant refusal explains itself, so the flag is SET and the forwarder stays quiet. */
+   char **a = args("--server", "s", "--team", "1", NULL); /* show with no --subject */
+   assert(marshal_request("kb.grant.show", argcount(a), a) == NULL);
+   assert(marshal_request_take_reported() == 1);
+   /* Reading it CLEARED it, so a stale flag cannot silence the next command. */
+   assert(marshal_request_take_reported() == 0);
+
+   /* A method with no specific message leaves it unset, so the generic one prints. */
+   char **b = args("--server", "s", NULL); /* list with no --team */
+   assert(marshal_request("kb.grant.list", argcount(b), b) == NULL);
+   assert(marshal_request_take_reported() == 1); /* list's team check also explains */
+
+   /* A SUCCESSFUL marshal must not leave the flag set, or the next failure would be silent. */
+   char **c = args("--subject", "owner", "--server", "s", "--team", "1", "--tier", "data", NULL);
+   cJSON *req = marshal_request("kb.grant.set", argcount(c), c);
+   assert(req != NULL);
+   cJSON_Delete(req);
+   assert(marshal_request_take_reported() == 0);
+}
+
 static void test_marshal_refusals_send_nothing(void)
 {
    char resp[8192] = "";
@@ -477,6 +503,7 @@ int main(void)
    test_uds_only();
    test_kb_failures_surface();
    test_marshal_refusals_send_nothing();
+   test_marshal_failure_is_reported();
    printf("test_grant_composed: ok\n");
    return 0;
 }
