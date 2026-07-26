@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import math
@@ -125,11 +126,14 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--pair-batch-size", type=int, default=4)
+    parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--query-char-cap", type=int, default=512)
     parser.add_argument("--candidate-char-cap", type=int, default=1024)
     parser.add_argument("--max-cases", type=int, default=0)
     parser.add_argument("--environment-note", default="")
     args = parser.parse_args()
+    if args.workers < 1 or args.pair_batch_size < 1:
+        parser.error("--workers and --pair-batch-size must be positive")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     corpus = {row["doc_id"]: row["content"] for row in load_jsonl(args.bundle / "corpus.jsonl")}
     cases = load_jsonl(args.bundle / "reranking.jsonl")
@@ -137,18 +141,24 @@ def main() -> int:
         cases = cases[: args.max_cases]
     raw_path = args.output_dir / f"raw_reranking_{args.label}.jsonl"
     done = {row["case_id"]: row for row in load_jsonl(raw_path)} if raw_path.exists() else {}
+    pending = [case for case in cases if not done.get(case["case_id"], {}).get("ok", False)]
     with raw_path.open("a", encoding="utf-8", newline="\n") as handle:
-        pending = (case for case in cases if not done.get(case["case_id"], {}).get("ok", False))
-        for index, case in enumerate(pending, 1):
-            row = call(
-                args.endpoint, case, corpus, args.timeout, args.pair_batch_size,
-                args.query_char_cap, args.candidate_char_cap,
-            )
-            done[case["case_id"]] = row
-            handle.write(json.dumps(row, sort_keys=True) + "\n")
-            handle.flush()
-            if index % 100 == 0:
-                print(f"{args.label}: {len(done)}/{len(cases)}", flush=True)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
+            futures = {
+                executor.submit(
+                    call, args.endpoint, case, corpus, args.timeout, args.pair_batch_size,
+                    args.query_char_cap, args.candidate_char_cap,
+                ): case
+                for case in pending
+            }
+            for completed, future in enumerate(concurrent.futures.as_completed(futures), 1):
+                row = future.result()
+                done[row["case_id"]] = row
+                handle.write(json.dumps(row, sort_keys=True) + "\n")
+                handle.flush()
+                if completed % 100 == 0:
+                    successful = sum(bool(value.get("ok")) for value in done.values())
+                    print(f"{args.label}: {successful}/{len(cases)} successful", flush=True)
     rows = [done[case["case_id"]] for case in cases]
     latencies = [float(row["latency_s"]) for row in rows if row["ok"]]
     names = ("recall_at_1", "recall_at_5", "recall_at_10", "mrr_at_10", "ndcg_at_10")
@@ -157,6 +167,12 @@ def main() -> int:
         "suite_manifest_sha256": hashlib.sha256((args.bundle / "manifest.json").read_bytes()).hexdigest(),
         "cases": len(rows),
         "candidates_per_case": 20,
+        "load_profile": {
+            "workers": args.workers,
+            "pairs_per_request": args.pair_batch_size,
+            "maximum_inflight_pairs": args.workers * args.pair_batch_size,
+            "latency_scope": "case_latency_under_configured_concurrent_load",
+        },
         "input_bounds": {
             "query_chars": args.query_char_cap,
             "candidate_chars": args.candidate_char_cap,

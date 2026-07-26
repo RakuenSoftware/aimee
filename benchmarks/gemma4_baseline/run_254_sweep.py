@@ -25,6 +25,14 @@ ETTIN_CONTROLS = (
     {"label": "ettin68m", "tier": "cpu", "ngl": "0", "execution": "cpu"},
     {"label": "ettin400m", "tier": "mid", "ngl": "99", "execution": "gpu"},
 )
+ETTIN_LOAD_PROFILE = {
+    "workers": 8,
+    "pairs_per_request": 4,
+    "parallel_slots": 32,
+    "context_tokens": 65536,
+    "logical_batch_tokens": 8192,
+    "physical_batch_tokens": 2048,
+}
 
 
 def run(command: list[str], *, capture: bool = False, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -154,8 +162,12 @@ def start_ettin_server(
         "--volume", f"{repo / 'scripts/aimee-llm-supervisor.sh'}:/opt/aimee/supervisor.sh:ro",
         "--env", "AIMEE_LLM_EMBED_MODE=off", "--env", "AIMEE_LLM_SYNTH_MODE=off",
         "--env", "AIMEE_LLM_RERANK_MODE=local", "--env", f"AIMEE_LLM_RERANK_TIER={tier}",
-        "--env", f"AIMEE_LLM_NGL={ngl}", "--env", "AIMEE_LLM_RERANK_BATCH=2048",
-        "--env", "AIMEE_LLM_RERANK_UBATCH=2048", "--env", "AIMEE_LLM_PORT=8920", image,
+        "--env", f"AIMEE_LLM_NGL={ngl}",
+        "--env", f"AIMEE_LLM_RERANK_BATCH={ETTIN_LOAD_PROFILE['logical_batch_tokens']}",
+        "--env", f"AIMEE_LLM_RERANK_UBATCH={ETTIN_LOAD_PROFILE['physical_batch_tokens']}",
+        "--env", f"AIMEE_LLM_RERANK_CTX={ETTIN_LOAD_PROFILE['context_tokens']}",
+        "--env", f"AIMEE_LLM_RERANK_PARALLEL={ETTIN_LOAD_PROFILE['parallel_slots']}",
+        "--env", "AIMEE_LLM_PORT=8920", image,
     )
     result = run(command, capture=True)
     try:
@@ -227,6 +239,7 @@ def main() -> int:
         "max_cases": args.max_cases or 10000,
         "selected_labels": [model["label"] for model in selected_models],
         "skip_ettin": args.skip_ettin,
+        "ettin_load_profile": ETTIN_LOAD_PROFILE,
         "hardware_identity": {
             "gpu_vendor": Path("/sys/class/drm/card0/device/vendor").read_text(encoding="utf-8").strip(),
             "gpu_device": Path("/sys/class/drm/card0/device/device").read_text(encoding="utf-8").strip(),
@@ -268,9 +281,11 @@ def main() -> int:
                     "python3", str(args.repo / "benchmarks/gemma4_baseline/run_reranking_ab.py"),
                     "--endpoint", "http://127.0.0.1:8920", "--label", label,
                     "--bundle", str(args.repo / "benchmarks/fixtures/gemma4-unified/ab-v1"),
-                    "--output-dir", str(ettin_results), "--pair-batch-size", "4", "--timeout", "300",
+                    "--output-dir", str(ettin_results),
+                    "--pair-batch-size", str(ETTIN_LOAD_PROFILE["pairs_per_request"]),
+                    "--workers", str(ETTIN_LOAD_PROFILE["workers"]), "--timeout", "300",
                     "--environment-note",
-                    f"isolated_{control['execution']}_rx_7900_xtx_host_same_runtime_image_as_six_model_sweep",
+                    f"isolated_{control['execution']}_rx_7900_xtx_host_concurrent_quality_sweep",
                 ]
                 if args.max_cases:
                     command += ["--max-cases", str(args.max_cases)]
@@ -279,7 +294,12 @@ def main() -> int:
                 after_run = hardware_snapshot()
                 (ettin_results / "hardware_reranking.json").write_text(
                     json.dumps(
-                        {"cold_load_seconds": load_seconds, "after_load": after_load, "after_run": after_run},
+                        {
+                            "cold_load_seconds": load_seconds,
+                            "load_profile": ETTIN_LOAD_PROFILE,
+                            "after_load": after_load,
+                            "after_run": after_run,
+                        },
                         indent=2,
                         sort_keys=True,
                     ) + "\n",

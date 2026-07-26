@@ -30,6 +30,14 @@ class GemmaBaselineContractTests(unittest.TestCase):
             {"label": "ettin68m", "tier": "cpu", "ngl": "0", "execution": "cpu"},
             {"label": "ettin400m", "tier": "mid", "ngl": "99", "execution": "gpu"},
         ))
+        self.assertEqual(sweep.ETTIN_LOAD_PROFILE, {
+            "workers": 8,
+            "pairs_per_request": 4,
+            "parallel_slots": 32,
+            "context_tokens": 65536,
+            "logical_batch_tokens": 8192,
+            "physical_batch_tokens": 2048,
+        })
 
     def test_frozen_bundle_is_exact_and_paired(self) -> None:
         result = validator.validate(ROOT / "benchmarks/fixtures/gemma4-unified/ab-v1")
@@ -79,13 +87,16 @@ class GemmaBaselineContractTests(unittest.TestCase):
             }
             argv = [
                 "run_reranking_ab.py", "--endpoint", "http://unused", "--label", "resume",
-                "--bundle", str(bundle), "--output-dir", str(output),
+                "--bundle", str(bundle), "--output-dir", str(output), "--workers", "8",
             ]
             with mock.patch.object(sys, "argv", argv), mock.patch.object(reranker, "call", return_value=successful) as call:
                 with contextlib.redirect_stdout(io.StringIO()):
                     self.assertEqual(reranker.main(), 0)
             call.assert_called_once()
             self.assertEqual(json.loads(raw.read_text(encoding="utf-8").splitlines()[-1])["ok"], True)
+            summary = json.loads((output / "summary_reranking_resume.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["load_profile"]["workers"], 8)
+            self.assertEqual(summary["load_profile"]["maximum_inflight_pairs"], 32)
 
     def test_synthesis_resume_does_not_repeat_completed_case(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

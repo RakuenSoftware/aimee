@@ -113,10 +113,14 @@ python3 benchmarks/gemma4_baseline/run_reranking_ab.py \
 The runner applies the same model-independent input bound to every provider:
 queries are at most 512 UTF-8 characters and candidates at most 1,024, retaining
 two-thirds from the head and one-third from the tail with a visible truncation
-marker. The `.254` controller launches both Ettin encoders with a 2,048-token
-physical batch because character bounds do not imply a 512-token bound for code
-and punctuation-heavy inputs. This preserves identical evidence without allowing
-provider-specific tokenizers to select different text.
+marker. The `.254` controller launches both Ettin encoders with eight concurrent
+requests, four pairs per request, 32 processing slots, a 65,536-token aggregate
+context, an 8,192-token logical batch, and a 2,048-token physical batch. Character
+bounds do not imply a 512-token bound for code and punctuation-heavy inputs. The
+pinned concurrent profile saturates available execution capacity while preserving
+identical evidence without provider-specific tokenizers selecting different text.
+The summary records this load profile; use `--workers 1` only for a separately
+labelled isolated-latency pass, not for the canonical traffic sweep.
 
 ## Reproduce the `.254` six-model baseline
 
