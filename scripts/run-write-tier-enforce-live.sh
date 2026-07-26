@@ -48,14 +48,22 @@
 # refuses anything else. That refusal is a security property worth keeping, so the
 # rig complies with it rather than relaxing it.
 #
-# Usage: run-write-tier-enforce-live.sh [--keep]
+# Usage: run-write-tier-enforce-live.sh [--keep] [postgres://superuser@host:port/db]
+#   With no URL it uses the local cluster via `su postgres` (peer auth).
 set -uo pipefail
 export LC_ALL=C
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
 cd "$repo"
 keep=0
-[ "${1:-}" = "--keep" ] && keep=1
+PG_ARG=""
+for a in "$@"; do
+  case "$a" in
+    --keep) keep=1 ;;
+    postgres://*|postgresql://*) PG_ARG="$a" ;;
+    *) echo "enforce-live: unknown argument '$a'" >&2; exit 2 ;;
+  esac
+done
 
 [ "$(id -u)" = "0" ] || { echo "enforce-live: must run as root (the trust bundle must be root-owned)" >&2; exit 2; }
 for b in ./aimee ./aimee-server ./aimee-kb ./write-tier-enforce-live; do
@@ -96,22 +104,44 @@ cleanup() {
   [ -n "${srv_pid:-}" ] && wait "$srv_pid" 2>/dev/null
   [ -n "${kb_pid:-}" ] && wait "$kb_pid" 2>/dev/null
   rm -f "$BUNDLE"
-  su postgres -c "dropdb --if-exists $db" >/dev/null 2>&1
-  su postgres -c "psql -qc \"DROP ROLE IF EXISTS aimee_kb_owner_$$\"" >/dev/null 2>&1
+  # Same access path as provisioning; a cleanup that assumes peer auth would leave
+  # a database and a login role behind on every CI run.
+  pg_admin "DROP DATABASE IF EXISTS $db" >/dev/null 2>&1
+  pg_admin "DROP ROLE IF EXISTS aimee_kb_owner_$$" >/dev/null 2>&1
   if [ "$keep" = "1" ]; then echo "kept: $work"; else rm -rf "$work"; fi
 }
 trap cleanup EXIT
 
 # --- database -------------------------------------------------------------
+# TWO WAYS IN, because the two places this runs differ. On a host with a local
+# cluster (CT 301) there is a `postgres` OS account and peer auth. On a CI runner
+# the cluster is a CONTAINER with neither, so it takes a superuser URL the way the
+# P1 gate does ($1 or AIMEE_TEST_PG_URL). Hard-coding `su postgres` would make this
+# rig unrunnable in CI, which is the one place it most needs to run.
+PGSU_URL="${PG_ARG:-${AIMEE_TEST_PG_URL:-}}"
+if [ -n "$PGSU_URL" ]; then
+  PG_ADMIN_URL="${PGSU_URL%/*}/postgres"
+  pg_admin() { psql -v ON_ERROR_STOP=1 -q "$PG_ADMIN_URL" -c "$1"; }
+  pg_indb()  { psql -v ON_ERROR_STOP=1 -q "${PGSU_URL%/*}/$db" -c "$1"; }
+  pg_host=$(printf '%s' "$PGSU_URL" | sed -E 's#.*@([^:/]+).*#\1#')
+  pg_port=$(printf '%s' "$PGSU_URL" | sed -nE 's#.*:([0-9]+)/.*#\1#p'); pg_port=${pg_port:-5432}
+else
+  pg_admin() { su postgres -c "psql -v ON_ERROR_STOP=1 -q -c \"$1\""; }
+  pg_indb()  { su postgres -c "psql -v ON_ERROR_STOP=1 -q -d $db -c \"$1\""; }
+  pg_host=127.0.0.1; pg_port=5432
+fi
+
 step "Provisioning a disposable database"
 owner="aimee_kb_owner_$$"
-su postgres -c "psql -qc \"CREATE ROLE $owner LOGIN PASSWORD '$kbpw'\"" >/dev/null 2>&1 \
+pg_admin "CREATE ROLE $owner LOGIN PASSWORD '$kbpw'" >/dev/null 2>&1 \
   || { echo "enforce-live: could not create the owner role" >&2; exit 2; }
-su postgres -c "createdb -O $owner $db" >/dev/null 2>&1 \
+pg_admin "CREATE DATABASE $db OWNER $owner" >/dev/null 2>&1 \
   || { echo "enforce-live: could not create the database" >&2; exit 2; }
 # PG15+ : the database owner still needs CREATE on public explicitly.
-su postgres -c "psql -q -d $db -c \"GRANT CREATE ON SCHEMA public TO $owner\"" >/dev/null 2>&1
-echo "database $db owned by $owner"
+pg_indb "GRANT CREATE ON SCHEMA public TO $owner" >/dev/null 2>&1
+# kb's schema needs both extensions, and only a superuser can create them.
+pg_indb "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm" >/dev/null 2>&1
+echo "database $db owned by $owner on $pg_host:$pg_port"
 
 # --- the management trust chain -------------------------------------------
 # Seeded BEFORE the server starts, into the very db1 file the server will open
@@ -137,7 +167,7 @@ aimee:
     bearer_token: $SRV_BEARER
     remote_writes: "off"
 YAML
-export AIMEE_DB2_URL="postgres://$owner:$kbpw@127.0.0.1:5432/$db"
+export AIMEE_DB2_URL="postgres://$owner:$kbpw@$pg_host:$pg_port/$db"
 export AIMEE_KB_API_BEARER_TOKEN="$KB_BEARER"
 ./aimee-kb --http-port="$KB_PORT" >"$kb_log" 2>&1 &
 kb_pid=$!

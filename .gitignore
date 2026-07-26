@@ -172,3 +172,4 @@ intent_record_*.json
 # branch by accident because nothing ignored them.
 scratchpad/
 /oidc-login-live
+/write-tier-enforce-live
