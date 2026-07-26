@@ -4,7 +4,7 @@
 
 This slice defines and mechanically validates the child contract required before Git can be bound
 to the new module runtime. It does not change Git source or claim runtime enforcement. The embedded
-contract in `docs/proposals/pending/git-core-contract.md` is the sole machine-readable contract
+contract in `docs/proposals/done/git-core-contract.md` is the sole machine-readable contract
 instance.
 
 The contract fixes five suite invariants:
@@ -33,7 +33,7 @@ tree path without copying path hashes into a second baseline.
 {
   "schema_version": 1,
   "receiver": "slice-3-proposal-ordering-gate",
-  "contract_file": "docs/proposals/pending/git-core-contract.md",
+  "contract_file": "docs/proposals/done/git-core-contract.md",
   "evidence_file": "docs/validation/roundtable/git-core-contract.json",
   "invariants_source": "git-core-contract.invariants",
   "ordering_script_baseline": "6ce37f53e1f627c19e15fc01f68959f546a5eded",

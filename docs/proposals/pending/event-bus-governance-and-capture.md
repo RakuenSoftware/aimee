@@ -2,7 +2,7 @@
 
 - **State:** DRAFT — 2026-07-23; awaiting roundtable review. A later-drafted consuming child; it does
   not inherit any prior approval.
-- **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md)
+- **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries-residual.md)
 - **Owns:** how governance and audit observe, record, and enforce over the core-owned module event
   bus — the single tap through which every inter-module message is captured, action-class events are
   authorized before delivery, and the stream is fed to the durable ledger and the attestation bundle.

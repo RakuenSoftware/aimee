@@ -3,7 +3,7 @@
  * inline imperative call into a togglable, registered orchestration hook. Disabling the module
  * stops delegate spawns without touching the spawn primitive (delegate_spawn_ondemand).
  *
- * Follow-up port of Slice 3 (docs/proposals/pending/orchestration-seam-delegate-firstport.md):
+ * Follow-up port of Slice 3 (docs/proposals/done/orchestration-seam-delegate-firstport.md):
  * the coord dispatcher is the genuine imperative spawn site (the /v1 turn path only PREVENTS
  * subagents; it never spawns), so it is the honest first port. */
 #ifndef DEC_GW_ORCH_DELEGATES_H

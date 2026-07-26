@@ -1,7 +1,7 @@
 # Proposal: split Runtime and Control Plane governance, web modules, and config surfaces
 
 - **State:** PENDING — roundtable-approved 2026-07-20; awaiting project acceptance
-- **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md)
+- **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries-residual.md)
 - **Owns:** product roles/names, Runtime and Control web lifecycles, dashboards, and advertised
   configuration behavior
 - **Implementation dependencies:** module descriptors, core config/module-runtime contracts, and
@@ -11,7 +11,7 @@
 > **2026-07-23 amendment reconciliation.** The product boundary (Runtime/Control), web-module
 > optionality, and truthful-config ownership this proposal defines are unchanged, but the suite
 > amendment
-> ([`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md))
+> ([`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries-residual.md))
 > makes them concrete in three ways to re-check on re-review: (1) `runtime-web` and `control-web` are
 > **separate programs on the shared-memory event bus**, admitted and routed like any module, not
 > in-process handlers; (2) each product — Runtime and Control — **hosts its own bus** (the single

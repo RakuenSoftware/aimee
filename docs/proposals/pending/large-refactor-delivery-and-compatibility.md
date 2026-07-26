@@ -1,14 +1,14 @@
 # Proposal: deliver the modular refactor safely and measurably
 
 - **State:** PENDING — roundtable-approved 2026-07-20; awaiting project acceptance
-- **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md)
+- **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries-residual.md)
 - **Owns:** implementation sequence, public-surface baselines, cleanup ledgers, compatibility,
   migrations, recovery, and suite-completion profiles
 - **Implementation dependencies:** all architectural child proposals
 - **Date:** 2026-07-20 (reconciliation note added 2026-07-23)
 
 > **2026-07-23 amendment reconciliation.** The suite amendment
-> ([`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md))
+> ([`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries-residual.md))
 > changed the architecture this proposal sequences: core is C and modules are separate programs in
 > any language over a shared-memory event bus, not in-process C-linked modules. The delivery sequence
 > must therefore add and order these slices, which this proposal does not yet detail and which reopen
@@ -101,7 +101,8 @@ tenant rebinding and reauthorization; audit projections are byte/semantically eq
 deterministic views of the canonical ledger.
 
 Migrations are append-only. Destructive data retirement is separate from source deletion and waits
-for the compatibility window. `scripts/recover_refactor.sh` implements recovery for binding check 2:
+for the compatibility window. A future `scripts/recover_refactor.sh` must implement recovery for
+binding check 2; that script does not exist on `testing` as of the 2026-07-26 proposal audit:
 it exports data, attempts a forward fix, and on failure restores the versioned backup into a fresh
 database for verification with the retained prior image. It never reverses an applied migration in
 place.
@@ -146,5 +147,5 @@ test and this generated prose list consume that artifact; neither maintains a se
 - {id: 3, tier: mechanical, check: "scripts/check_deletion_dispositions.sh --inventories build/inventory --consume-approved-feature-dispositions --independent-approval --complete-touch-set --rollback-owner --deadlines --forbid-weaker-duplicate-feature-gates"}
 - {id: 4, tier: mechanical, check: "scripts/check_cleanup_ledger.sh --require-every-slice --require-consumers --require-net-consolidation-or-structured-growth --require-rejected-simpler-alternative --require-expiry-revisit --require-independent-growth-review --require-blast-radius --require-tenant-isolation-custody-edge-evidence"}
 - {id: 5, tier: integration, check: "scripts/test_module_profiles.sh --profiles core,runtime,control,full --full-minus-one-every-optional --absence-dimensions tests/baselines/modules/optional-absence-dimensions.yaml --require-generated-prose-equality --make-cmake-object-equality"}
-- {id: 6, tier: mechanical, check: "scripts/check_suite_consistency.sh --index docs/proposals/pending/core-substrate-and-source-module-boundaries.md --children-required --taxonomy-equal --shared-invariants --no-duplicate-acceptance-ownership"}
+- {id: 6, tier: mechanical, check: "scripts/check_suite_consistency.sh --index docs/proposals/pending/core-substrate-and-source-module-boundaries-residual.md --children-required --taxonomy-equal --shared-invariants --no-duplicate-acceptance-ownership"}
 ```

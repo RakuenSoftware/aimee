@@ -19,7 +19,8 @@ from typing import NoReturn
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SLICE2_ANCHOR = "a3c4d413b6ce5f674994a6e6c4589ae2383819a4"
-CONTRACT_PATH = "docs/proposals/pending/git-core-contract.md"
+ANCHOR_CONTRACT_PATH = "docs/proposals/pending/git-core-contract.md"
+CONTRACT_PATH = "docs/proposals/done/git-core-contract.md"
 EVIDENCE_PATH = "docs/validation/roundtable/git-core-contract.json"
 HANDOFF_PATH = "docs/validation/core-modularization-slice-2.md"
 CHECKER_PATH = "scripts/check_git_core_contract.py"
@@ -42,6 +43,7 @@ HANDOFF = {
     "ordering_script_baseline": "6ce37f53e1f627c19e15fc01f68959f546a5eded",
     "trigger_surface_source": "git-core-contract",
 }
+PINNED_HANDOFF = {**HANDOFF, "contract_file": ANCHOR_CONTRACT_PATH}
 
 
 class OrderingError(ValueError):
@@ -164,8 +166,10 @@ def anchor_text(repo: Path, relative: str, rule: str) -> str:
         fail(rule, f"{relative} at Slice 2 anchor is not UTF-8: {exc}")
 
 
-def validate_handoff(value: dict[str, object], *, label: str) -> None:
-    if value != HANDOFF:
+def validate_handoff(
+    value: dict[str, object], expected: dict[str, object], *, label: str
+) -> None:
+    if value != expected:
         fail("handoff-shape", f"{label} differs from the exact Slice 2 handoff")
 
 
@@ -175,6 +179,31 @@ def validate_trusted_contract(repo: Path) -> None:
         checker_path = Path(directory) / "check_git_core_contract.py"
         checker_path.write_bytes(checker)
         checker_path.chmod(0o400)
+        # The immutable Slice-2 checker predates proposal archival and therefore hardcodes the
+        # original pending/ contract and handoff paths. Validate the current contract with that
+        # trusted checker in a disposable shared clone containing only this path-compatibility
+        # projection; never reintroduce the archived proposal into the live tree.
+        compatibility_root = Path(directory) / "repo"
+        clone = subprocess.run(
+            [GIT, "clone", "--quiet", "--shared", "--no-checkout", str(repo), str(compatibility_root)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if clone.returncode != 0:
+            fail(
+                "checker-compat-clone",
+                clone.stderr.decode("utf-8", "replace").strip() or "shared clone failed",
+            )
+        compatibility_contract = compatibility_root / ANCHOR_CONTRACT_PATH
+        compatibility_contract.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(repo / CONTRACT_PATH, compatibility_contract)
+        compatibility_handoff = compatibility_root / HANDOFF_PATH
+        compatibility_handoff.parent.mkdir(parents=True, exist_ok=True)
+        compatibility_handoff.write_bytes(git(repo, "show", f"{SLICE2_ANCHOR}:{HANDOFF_PATH}"))
+        compatibility_evidence = compatibility_root / EVIDENCE_PATH
+        compatibility_evidence.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(repo / EVIDENCE_PATH, compatibility_evidence)
         try:
             result = subprocess.run(
                 [
@@ -183,7 +212,7 @@ def validate_trusted_contract(repo: Path) -> None:
                     "-S",
                     str(checker_path),
                     "--config-root",
-                    str(repo),
+                    str(compatibility_root),
                     "--require-status",
                     "roundtable-approved",
                 ],
@@ -201,9 +230,9 @@ def validate_trusted_contract(repo: Path) -> None:
 
 def canonical_metadata(repo: Path) -> tuple[dict[str, object], dict[str, object]]:
     contract = extract_json_fence_text(
-        anchor_text(repo, CONTRACT_PATH, "anchor-contract"),
+        anchor_text(repo, ANCHOR_CONTRACT_PATH, "anchor-contract"),
         "git-core-contract",
-        label=f"{SLICE2_ANCHOR}:{CONTRACT_PATH}",
+        label=f"{SLICE2_ANCHOR}:{ANCHOR_CONTRACT_PATH}",
     )
     evidence = git_run(repo, "cat-file", "-e", f"{SLICE2_ANCHOR}:{EVIDENCE_PATH}")
     if evidence.returncode != 0:
@@ -213,7 +242,7 @@ def canonical_metadata(repo: Path) -> tuple[dict[str, object], dict[str, object]
         "slice3-handoff",
         label=f"{SLICE2_ANCHOR}:{HANDOFF_PATH}",
     )
-    validate_handoff(handoff, label="pinned handoff")
+    validate_handoff(handoff, PINNED_HANDOFF, label="pinned handoff")
     return contract, handoff
 
 
@@ -224,7 +253,7 @@ def live_metadata(repo: Path) -> tuple[dict[str, object], dict[str, object]]:
     handoff = extract_json_fence_text(
         read_live_text(repo, HANDOFF_PATH), "slice3-handoff", label=HANDOFF_PATH
     )
-    validate_handoff(handoff, label="live handoff")
+    validate_handoff(handoff, HANDOFF, label="live handoff")
     return contract, handoff
 
 
@@ -278,7 +307,11 @@ def validate_discovery(
     pinned_paths, pinned_roots = path_metadata(pinned)
     if live_paths != pinned_paths or live_roots != pinned_roots:
         fail("discovery-drift", "HEAD trigger paths or claim roots differ from Slice 2 anchor")
-    if json.dumps(live_handoff, sort_keys=True) != json.dumps(pinned_handoff, sort_keys=True):
+    live_handoff_without_path = {k: v for k, v in live_handoff.items() if k != "contract_file"}
+    pinned_handoff_without_path = {k: v for k, v in pinned_handoff.items() if k != "contract_file"}
+    if json.dumps(live_handoff_without_path, sort_keys=True) != json.dumps(
+        pinned_handoff_without_path, sort_keys=True
+    ):
         fail("discovery-drift", "HEAD handoff differs from Slice 2 anchor")
 
 

@@ -7,7 +7,7 @@ Source of truth: docs/gen/v1-route-descriptor.json — the canonical extract of 
 server's g_v1_routes[] table (produced by scripts/gen-v1-route-descriptor.py,
 guarded by docs-gen-check). This generator was repointed off the C table onto the
 descriptor as the first "flip" of the /v1 route SoT proposal
-(docs/proposals/pending/route-descriptor-single-source-of-truth.md): one derived
+(docs/proposals/done/route-descriptor-single-source-of-truth.md): one derived
 table (this CLI map) is now generated FROM the descriptor rather than by
 re-parsing the registry. The emitted block is unchanged — this only moves where
 the data is read from.

@@ -1,12 +1,12 @@
 # Proposal: Memory auto-population — feedback→rules, promotion, gated extraction (Proposal 2 Phase 4)
 
 - **State:** draft (pending — not started). Follow-up to Proposal 2, the
-  [db1/db2 memory architecture](done/memory-db1-db2-architecture.md); implements its deferred §4
+  [db1/db2 memory architecture](../done/memory-db1-db2-architecture.md); implements its deferred §4
   Phase-4 auto-population, split by risk per that proposal's R4 roundtable.
 
 ## Thesis
 
-[Proposal 2](done/memory-db1-db2-architecture.md) shipped the memory *substrate*: db1 = user
+[Proposal 2](../done/memory-db1-db2-architecture.md) shipped the memory *substrate*: db1 = user
 memory, db2 = org memory, recall merges both, and **explicit** capture (`aimee memory
 identity`/`prefer` → db1, `aimee rules +` → db2) populates it by scope. What it deferred (OQ5) is
 **automatic** population — turning the signal aimee already collects (feedback, recurring episodes,
@@ -56,7 +56,7 @@ radius. This proposal makes that split concrete.
 - **Feedback→brief generator**: `kb_client_rules_generate` already synthesizes rule-like guidance
   from the feedback signal for the *ephemeral* brief block; §4 adds a durable-rules sink for the
   same signal.
-- **Gates**: `src/memory_pii_gate.c` (per-attribute PII gating) and `src/memory_fact_gate.c`
+- **Gates**: `src/modules/memory/memory_pii_gate.c` (per-attribute PII gating) and `src/modules/memory/memory_fact_gate.c`
   (typed-fact write validation) exist for the KB typed-facts path; §4a extraction reuses the PII
   gate and the confidence discipline.
 - **db1 user store** (`src/db1/user_memory.c`) + **explicit capture** (server op
