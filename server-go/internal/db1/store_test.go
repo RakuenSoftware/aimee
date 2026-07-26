@@ -511,7 +511,7 @@ func TestMaxIterationsParksWithoutAbandoning(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		out, err := store.RecordRequestedChanges(ctx, "wi_cap", "plan_gate", "plan",
-			"plan-"+string(rune('a'+i)), "feedback-"+string(rune('a'+i)), 3, 3, 0)
+			"plan-"+string(rune('a'+i)), "feedback-"+string(rune('a'+i)), "subject anchor never defined", 3, 3, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -534,7 +534,7 @@ func TestIdenticalPlanAndFeedbackParksAsNoProgress(t *testing.T) {
 	ctx := context.Background()
 	for i := 0; i < 3; i++ {
 		out, err := store.RecordRequestedChanges(ctx, "wi_repeat", "plan_gate", "plan",
-			"same-plan", "same-feedback", 24, 3, 0)
+			"same-plan", "same-feedback", "", 24, 3, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -558,7 +558,7 @@ func TestChangedPlanOrFeedbackIsPositiveProgress(t *testing.T) {
 	cases := [][2]string{{"plan-a", "feedback-a"}, {"plan-b", "feedback-a"}, {"plan-b", "feedback-b"}}
 	for _, pair := range cases {
 		out, err := store.RecordRequestedChanges(ctx, "wi_progress", "plan_gate", "plan",
-			pair[0], pair[1], 24, 3, 0)
+			pair[0], pair[1], "", 24, 3, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1124,7 +1124,7 @@ func TestGateIterationCapSurvivesTheAuthorsReentry(t *testing.T) {
 	parkedAt := -1
 	for i := 0; i < 10; i++ {
 		out, err := store.RecordRequestedChanges(ctx, "wi_loop", "plan_gate", "plan",
-			fmt.Sprintf("plan-%d", i), fmt.Sprintf("feedback-%d", i), 3, 99, 0)
+			fmt.Sprintf("plan-%d", i), fmt.Sprintf("feedback-%d", i), "", 3, 99, 0)
 		if err != nil {
 			t.Fatal(err)
 		}

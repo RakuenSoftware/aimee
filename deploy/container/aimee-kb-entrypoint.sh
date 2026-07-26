@@ -24,6 +24,10 @@
 #    aimee_home() == $AIMEE_HOME verbatim (see src/aimee_home.c), so the file
 #    the kb reads is $AIMEE_HOME/aimee.yaml -- NOT $AIMEE_HOME/.config/aimee/
 #    (that path only applies when AIMEE_HOME is unset and $HOME/.config is used).
+#
+# 3. DB2. An unset AIMEE_DB2_URL means the operator configured no database, so
+#    run the in-image PostgreSQL 17 + pgvector cluster. Any value in
+#    AIMEE_DB2_URL selects an external server and nothing is started here.
 set -e
 
 # 1. Stack rlimit (64 MB == 65536 KiB == 67108864 bytes). Best-effort: some
@@ -39,6 +43,72 @@ default="/opt/aimee/defaults/aimee.yaml"
 if [ ! -f "$cfg" ] && [ -f "$default" ]; then
     mkdir -p "$AIMEE_HOME"
     cp "$default" "$cfg"
+fi
+
+# 3. Embedded DB2, only when the operator configured no external server.
+if [ -z "${AIMEE_DB2_URL:-}" ]; then
+    # PostgreSQL refuses to run as root, unconditionally. The image declares
+    # USER aimee, so this only trips when a runtime overrides it (e.g. --user root
+    # to work around bind-mount ownership). Say so, rather than letting initdb
+    # fail with "cannot be run as root" and no indication of the fix.
+    if [ "$(id -u)" = 0 ]; then
+        echo "aimee-kb: the internal database cannot run as root (PostgreSQL forbids it)." >&2
+        echo "  Run the container as the 'aimee' user (the image's default), or set" >&2
+        echo "  AIMEE_DB2_URL to an external PostgreSQL server to skip the internal one." >&2
+        exit 1
+    fi
+    PGMAJOR="${AIMEE_DB2_PG_MAJOR:-18}"
+    PGBIN="/usr/lib/postgresql/$PGMAJOR/bin"
+    PGDATA="$AIMEE_HOME/postgres"
+    PGSOCK="$AIMEE_HOME/run"
+    DB=aimee_shared
+    mkdir -p "$PGSOCK"
+
+    if [ ! -f "$PGDATA/PG_VERSION" ]; then
+        # initdb as the current (aimee) user, so that user is the cluster
+        # superuser and no password or role grant is needed over the socket.
+        mkdir -p "$PGDATA"
+        "$PGBIN/initdb" --pgdata="$PGDATA" --auth-local=trust --encoding=UTF8 >/dev/null
+    fi
+
+    # No TCP listener: DB2 is reachable only over the socket inside this
+    # container. An operator who wants it exposed runs an external server.
+    "$PGBIN/pg_ctl" --pgdata="$PGDATA" --wait --silent \
+        --options="-c listen_addresses='' -c unix_socket_directories=$PGSOCK" start
+
+    # Stop the cluster cleanly when the container stops. Without this the runtime
+    # SIGKILLs postgres once the kb exits and every start replays WAL recovery.
+    trap '"$PGBIN/pg_ctl" --pgdata="$PGDATA" --mode=fast --wait --silent stop || true' EXIT HUP INT TERM
+
+    if ! "$PGBIN/psql" --host="$PGSOCK" --dbname=postgres --no-psqlrc --quiet \
+        --tuples-only --command="SELECT 1 FROM pg_database WHERE datname='$DB'" | grep -q 1; then
+        "$PGBIN/createdb" --host="$PGSOCK" "$DB"
+    fi
+    "$PGBIN/psql" --host="$PGSOCK" --dbname="$DB" --no-psqlrc --quiet \
+        --command="CREATE EXTENSION IF NOT EXISTS vector" >/dev/null
+    # pgvectorscale is present only in an image built with WITH_PGVECTORSCALE=1.
+    # Enable it when it is there; pgvector alone is the supported default.
+    # pgrx installs the library version-stamped (vectorscale-0.9.0.so), so match a
+    # glob -- testing for a bare vectorscale.so silently never enables it. Resolved
+    # in a subshell because $@ still carries the kb's own arguments.
+    vectorscale_lib=$(ls "/usr/lib/postgresql/$PGMAJOR/lib/vectorscale"*.so 2>/dev/null | head -1)
+    if [ -n "$vectorscale_lib" ]; then
+        "$PGBIN/psql" --host="$PGSOCK" --dbname="$DB" --no-psqlrc --quiet \
+            --command="CREATE EXTENSION IF NOT EXISTS vectorscale" >/dev/null
+    fi
+
+    # libpq reads a directory-valued host as a socket path.
+    AIMEE_DB2_URL="postgresql:///$DB?host=$PGSOCK"
+    export AIMEE_DB2_URL
+
+    # Not exec: the trap above has to outlive the kb so the cluster shuts down
+    # cleanly. Forward the stop signal so the kb still gets its own shutdown.
+    aimee-kb "$@" &
+    kb=$!
+    trap 'kill -TERM "$kb" 2>/dev/null || true' HUP INT TERM
+    rc=0
+    wait "$kb" || rc=$?
+    exit "$rc"
 fi
 
 exec aimee-kb "$@"

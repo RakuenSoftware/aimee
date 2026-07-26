@@ -4,6 +4,10 @@
 # kb build failed here with -Werror=implicit-function-declaration while the native
 # CI build stayed green -- `make all server` does not compile KB_SRCS, so this
 # image was the only place that file was ever built.
+# Global build args, declared before the first FROM so every stage can use them.
+ARG PG_MAJOR=18
+ARG PGVECTORSCALE_VERSION=0.9.0
+
 FROM debian:trixie-slim AS build
 
 RUN apt-get update \
@@ -31,8 +35,59 @@ ARG AIMEE_VERSION=""
 RUN sh scripts/fetch-treesitter.sh \
     && make -C src ../aimee-kb -j"$(nproc)" AIMEE_TREESITTER=1 ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
 
-# Runtime must match the build stage: libpq5 here has to provide the same
-# PostgreSQL 17 symbols the kb was linked against.
+# pgvectorscale (StreamingDiskANN). Always built: it adds ~1 MB to the image, and
+# the kb already decides at RUNTIME whether to use it -- pgvec_vectorscale_available()
+# probes pg_extension and falls back to HNSW with a warning when it is absent
+# (src/db2/pgvec_transport.c). Gating it at build time would defeat that and make
+# the index type a property of which image you happened to pull.
+#
+# The Rust toolchain and pgrx live only in this stage; the runtime image receives
+# the built extension files and none of the build chain. CI caches this layer
+# (cache-from/to type=gha,mode=max), so it recompiles only when the pins below move.
+FROM debian:trixie-slim AS pgvectorscale-build
+ARG PG_MAJOR
+ARG PGVECTORSCALE_VERSION
+# Same retry as the runtime stage: one transient TLS reset here fails the build.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && for a in 1 2 3 4 5; do \
+         curl -fsS --connect-timeout 10 --max-time 60 \
+           -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+           https://www.postgresql.org/media/keys/ACCC4CF8.asc && break; \
+         echo "pgdg key fetch failed (attempt $a/5); backing off"; sleep $((a * 5)); \
+       done \
+    && test -s /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] http://apt.postgresql.org/pub/repos/apt trixie-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential clang git pkg-config libssl-dev \
+        "postgresql-${PG_MAJOR}" "postgresql-server-dev-${PG_MAJOR}" \
+    && rm -rf /var/lib/apt/lists/*
+ENV CARGO_HOME=/usr/local/cargo
+ENV PATH=/usr/local/cargo/bin:$PATH
+# cargo-pgrx must match the pgrx the crate depends on, so it is read from the
+# checkout's Cargo.toml rather than pinned separately here.
+RUN curl -fsS https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \
+    && git clone --depth 1 --branch "${PGVECTORSCALE_VERSION}" \
+        https://github.com/timescale/pgvectorscale.git /src/pgvectorscale \
+    && cd /src/pgvectorscale/pgvectorscale \
+    && pgrx_version="$(awk -F'"' '/^pgrx[[:space:]]*=/{print $2; exit}' Cargo.toml)" \
+    && echo "building pgvectorscale ${PGVECTORSCALE_VERSION} against pgrx ${pgrx_version}" \
+    && cargo install --locked cargo-pgrx --version "${pgrx_version}" \
+    && cargo pgrx init "--pg${PG_MAJOR}=/usr/lib/postgresql/${PG_MAJOR}/bin/pg_config" \
+    && cargo pgrx install --release --pg-config "/usr/lib/postgresql/${PG_MAJOR}/bin/pg_config"
+# Collect only the installed extension artifacts, at the paths the runtime uses.
+RUN mkdir -p "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib" \
+        "/pgvectorscale/usr/share/postgresql/${PG_MAJOR}/extension" \
+    && cp "/usr/lib/postgresql/${PG_MAJOR}/lib/vectorscale"*.so \
+        "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib/" \
+    && cp "/usr/share/postgresql/${PG_MAJOR}/extension/vectorscale"* \
+        "/pgvectorscale/usr/share/postgresql/${PG_MAJOR}/extension/"
+
+# Runtime must match the build stage: libpq5 here has to provide at least the
+# PostgreSQL 17 symbols the kb was linked against (PGDG's libpq 18 does).
 FROM debian:trixie-slim
 
 # python3 (stdlib only) runs the sidecar clients the kb popens: embed-remote.py
@@ -49,8 +104,49 @@ RUN apt-get update \
         zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
+# DB2 engine, from PGDG rather than Debian: trixie ships PostgreSQL 17 with
+# pgvector 0.8.0, and its pgvector hard-depends on postgresql-17-jit-llvm, which
+# drags LLVM into the runtime image. PGDG carries PostgreSQL 18 (the current
+# stable major) with pgvector 0.8.5 depending only on the server and libc.
+# PostgreSQL 18 is also the version pgvectorscale builds against.
+ARG PG_MAJOR=18
+# The PGDG key fetch is retried: it is a single point of build failure on a
+# network hiccup and this layer runs on every kb build. Seen failing CI with
+# "curl: (56) OpenSSL SSL_read: unexpected eof while reading".
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && for a in 1 2 3 4 5; do \
+         curl -fsS --connect-timeout 10 --max-time 60 \
+           -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+           https://www.postgresql.org/media/keys/ACCC4CF8.asc && break; \
+         echo "pgdg key fetch failed (attempt $a/5); backing off"; sleep $((a * 5)); \
+       done \
+    && test -s /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] http://apt.postgresql.org/pub/repos/apt trixie-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        "postgresql-${PG_MAJOR}" \
+        "postgresql-${PG_MAJOR}-pgvector" \
+    && rm -rf /var/lib/apt/lists/*
+ENV AIMEE_DB2_PG_MAJOR=${PG_MAJOR}
+
+# The vectorscale extension files, built above. Whether the kb actually creates
+# diskann indexes stays a runtime decision (context.kb index type + corpus size).
+COPY --from=pgvectorscale-build /pgvectorscale/ /
+
 ENV AIMEE_HOME=/var/lib/aimee
-ENV AIMEE_DB2_URL=postgresql://aimee:aimee@postgres:5432/aimee_shared
+# DB2 is unset on purpose. Unset means "the operator configured nothing", and the
+# entrypoint then runs the in-image PostgreSQL 18 + pgvector cluster under
+# $AIMEE_HOME/postgres. Setting it to any URL selects an external server and the
+# entrypoint starts nothing — that path is fully supported and unchanged.
+#
+# This used to default to postgresql://aimee:aimee@postgres:5432/aimee_shared,
+# which made "nothing configured" indistinguishable from "use the sibling
+# container" and left a bare `docker run` pointed at a host that does not exist.
+# compose.yaml and compose.server.yaml set AIMEE_DB2_URL explicitly, so stacks
+# using them keep their own postgres service exactly as before.
 # No baked embedder/LLM endpoint defaults. The kb runs NO model runtime; it calls
 # an external aimee-llm container (CPU/GPU) or endpoint. Point it with ONE of:
 #   AIMEE_LLM_URL       unified container -> embed + rerank + synth (one knob)
@@ -79,7 +175,8 @@ COPY scripts/embed-remote.py scripts/rerank-remote.py scripts/llm-chat.py \
 # the entrypoint seeds it into $AIMEE_HOME/.config/aimee on first start.
 COPY deploy/container/aimee.yaml /opt/aimee/defaults/aimee.yaml
 COPY deploy/container/aimee-kb-entrypoint.sh /usr/local/bin/aimee-kb-entrypoint.sh
-RUN chmod +x /usr/local/bin/aimee-kb-entrypoint.sh
+COPY deploy/container/aimee-kb-db-export.sh /usr/local/bin/aimee-kb-db-export
+RUN chmod +x /usr/local/bin/aimee-kb-entrypoint.sh /usr/local/bin/aimee-kb-db-export
 
 USER aimee
 WORKDIR /var/lib/aimee

@@ -1610,8 +1610,13 @@ type ReviewOutcome struct {
 // RecordRequestedChanges atomically records a plan-gate rejection. A retry cap
 // is a recoverable park, never terminal abandonment. Repeating an identical
 // plan+feedback pair parks early because no information is changing.
+// unresolved names the findings still blocking when the gate runs out of rounds.
+// Without it the park records the bare reason "convergence_limit", which says a
+// budget was spent but not what was never fixed -- leaving a human to reconstruct
+// it from the last feedback artifact. A gate that burned every round on the same
+// finding is evidence about the plan or the request; the park should carry it.
 func (s *Store) RecordRequestedChanges(ctx context.Context, workItemID, gate, planStage,
-	planHash, feedbackHash string, maxIterations, maxIdentical int, costUSD float64) (ReviewOutcome, error) {
+	planHash, feedbackHash, unresolved string, maxIterations, maxIdentical int, costUSD float64) (ReviewOutcome, error) {
 	if workItemID == "" || gate == "" || planStage == "" || planHash == "" || feedbackHash == "" {
 		return ReviewOutcome{}, errors.New("complete review transition coordinates are required")
 	}
@@ -1685,9 +1690,13 @@ SET current_stage=?, pause_reason=?, paused_state=?, content_hash=?, cum_cost_us
 WHERE work_item_id=?`, planStage, out.PauseReason, gate, planHash, costUSD, workItemID); err != nil {
 			return ReviewOutcome{}, fmt.Errorf("park non-converging work item: %w", err)
 		}
+		detail := out.PauseReason
+		if strings.TrimSpace(unresolved) != "" {
+			detail = fmt.Sprintf("%s after %d rounds; still unresolved: %s", out.PauseReason, attempts, unresolved)
+		}
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO lifecycle_event (work_item_id, stage, kind, actor, detail, content_hash, cost_usd)
-VALUES (?, ?, 'pause', 'go-wfe', ?, ?, ?)`, workItemID, gate, out.PauseReason, planHash, costUSD); err != nil {
+VALUES (?, ?, 'pause', 'go-wfe', ?, ?, ?)`, workItemID, gate, detail, planHash, costUSD); err != nil {
 			return ReviewOutcome{}, fmt.Errorf("record convergence park: %w", err)
 		}
 	} else {
