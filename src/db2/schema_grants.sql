@@ -716,6 +716,16 @@ BEGIN
     public.kb_management_token_authority_readback(TEXT,TEXT),
     public.kb_management_token_authority_finalize(TEXT,TEXT)
     TO aimee_kb_token_authority_runtime;
+  -- The identity mint is reached by the same authority runtime role. Note the
+  -- REVOKE ALL ON ALL FUNCTIONS above: without these grants the identity path
+  -- fails with a permission error (42501) that classifies as DENIED, which is
+  -- indistinguishable from a real authorization refusal at the C layer.
+  GRANT EXECUTE ON FUNCTION
+    public.kb_management_identity_authority_admit(TEXT,TEXT),
+    public.kb_management_identity_authority_use(TEXT,TEXT),
+    public.kb_management_identity_authority_readback(TEXT,TEXT),
+    public.kb_management_identity_authority_finalize(TEXT,TEXT)
+    TO aimee_kb_token_authority_runtime;
   GRANT EXECUTE ON FUNCTION
     public.kb_management_read_authority_claim(TEXT,TEXT,TEXT,INTEGER),
     public.kb_management_read_authority_finalize(TEXT,TEXT,TEXT,TEXT),

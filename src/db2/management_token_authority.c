@@ -25,6 +25,12 @@ static const char SQL_READ_READBACK[] =
     "SELECT * FROM public.kb_management_read_authority_readback(?1,?2)";
 static const char SQL_IDENTITY_ADMIT[] =
     "SELECT * FROM public.kb_management_identity_authority_admit(?1,?2)";
+static const char SQL_IDENTITY_USE[] =
+    "SELECT * FROM public.kb_management_identity_authority_use(?1,?2)";
+static const char SQL_IDENTITY_READBACK[] =
+    "SELECT * FROM public.kb_management_identity_authority_readback(?1,?2)";
+static const char SQL_IDENTITY_FINALIZE[] =
+    "SELECT public.kb_management_identity_authority_finalize(?1,?2)";
 
 static int exact_hex_input(const char *s, size_t n)
 {
@@ -306,6 +312,7 @@ void db2_management_token_authority_abort(db2_management_token_authority_ctx_t *
    char error[AUTHORITY_ERROR_MAX] = "";
    (void)aimee_pg_exec(ctx->connection, "ROLLBACK", error, sizeof(error));
    ctx->use_transaction_open = 0;
+   ctx->use_kind = 0;
    OPENSSL_cleanse(ctx->correlation_id, sizeof(ctx->correlation_id));
    OPENSSL_cleanse(ctx->jti, sizeof(ctx->jti));
    OPENSSL_cleanse(&ctx->use_record, sizeof(ctx->use_record));
@@ -416,15 +423,53 @@ db2_management_token_authority_readback(db2_management_token_authority_ctx_t *ct
                          correlation_id, jti, DB2_MANAGEMENT_TOKEN_AUTHORITY_ABSENT, out);
 }
 
-/* Identity admission. Mirrors committed_call's transaction handling — including
- * treating a lost COMMIT acknowledgement as terminal rather than retrying, since
- * a retry could duplicate a private-key use — but decodes the identity record,
- * which is a different shape (no peer-cert binding, no request digest, a tier
- * instead of a capability, and a token jti distinct from the namespace jti). */
-db2_management_token_authority_result_t
-db2_management_identity_authority_admit(db2_management_token_authority_ctx_t *ctx,
-                                        const char correlation_id[65], const char jti[65],
-                                        kb_identity_token_authority_record_t *out)
+/* Step one identity row out of `sql` and decode it. The identity counterpart of
+ * row_call; separate because the record is a different shape and the namespace
+ * jti must be cross-checked inside the decode rather than against the record. */
+static db2_management_token_authority_result_t
+identity_row_call(db2_management_token_authority_ctx_t *ctx, const char *sql,
+                  const char *correlation_id, const char *jti,
+                  kb_identity_token_authority_record_t *candidate,
+                  db2_management_token_authority_result_t empty_result)
+{
+   char error[AUTHORITY_ERROR_MAX] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(ctx->connection, sql, error, sizeof(error));
+   if (!st)
+      return classify(NULL, error);
+   int bound = aimee_pg_bind_text(st, "?1", correlation_id) || aimee_pg_bind_text(st, "?2", jti);
+   aimee_pg_step_t step = bound ? AIMEE_PG_ERR : aimee_pg_step(st, error, sizeof(error));
+   db2_management_token_authority_result_t rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_UNAVAILABLE;
+   if (!bound && step == AIMEE_PG_ROW && decode_identity_record(st, jti, candidate) == 0)
+   {
+      step = aimee_pg_step(st, error, sizeof(error));
+      rc = step == AIMEE_PG_DONE
+               ? DB2_MANAGEMENT_TOKEN_AUTHORITY_OK
+               : (step == AIMEE_PG_ERR ? classify(aimee_pg_sqlstate(st), error)
+                                       : DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY);
+   }
+   else if (!bound && step == AIMEE_PG_ERR)
+      rc = classify(aimee_pg_sqlstate(st), error);
+   else if (!bound)
+      rc = empty_result;
+   aimee_pg_finalize(st);
+   OPENSSL_cleanse(error, sizeof(error));
+   if (rc != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK || strcmp(candidate->correlation_id, correlation_id))
+   {
+      OPENSSL_cleanse(candidate, sizeof(*candidate));
+      return rc == DB2_MANAGEMENT_TOKEN_AUTHORITY_OK ? DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY
+                                                     : rc;
+   }
+   return rc;
+}
+
+/* Run `sql` inside its own committed REPEATABLE READ transaction. Mirrors
+ * committed_call, including treating a lost COMMIT acknowledgement as terminal
+ * rather than retrying, because a retry could duplicate a private-key use. */
+static db2_management_token_authority_result_t
+identity_committed_call(db2_management_token_authority_ctx_t *ctx, const char *sql,
+                        const char *correlation_id, const char *jti,
+                        db2_management_token_authority_result_t empty_result,
+                        kb_identity_token_authority_record_t *out)
 {
    if (out)
       OPENSSL_cleanse(out, sizeof(*out));
@@ -435,36 +480,10 @@ db2_management_identity_authority_admit(db2_management_token_authority_ctx_t *ct
    if (aimee_pg_exec(ctx->connection, "BEGIN ISOLATION LEVEL REPEATABLE READ READ WRITE", error,
                      sizeof(error)))
       return classify(NULL, error);
-
    kb_identity_token_authority_record_t candidate;
    memset(&candidate, 0, sizeof(candidate));
-   db2_management_token_authority_result_t rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_UNAVAILABLE;
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(ctx->connection, SQL_IDENTITY_ADMIT, error, sizeof(error));
-   if (!st)
-      rc = classify(NULL, error);
-   else
-   {
-      int bound = aimee_pg_bind_text(st, "?1", correlation_id) || aimee_pg_bind_text(st, "?2", jti);
-      aimee_pg_step_t step = bound ? AIMEE_PG_ERR : aimee_pg_step(st, error, sizeof(error));
-      if (!bound && step == AIMEE_PG_ROW && decode_identity_record(st, jti, &candidate) == 0)
-      {
-         step = aimee_pg_step(st, error, sizeof(error));
-         rc = step == AIMEE_PG_DONE
-                  ? DB2_MANAGEMENT_TOKEN_AUTHORITY_OK
-                  : (step == AIMEE_PG_ERR ? classify(aimee_pg_sqlstate(st), error)
-                                          : DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY);
-      }
-      else if (!bound && step == AIMEE_PG_ERR)
-         rc = classify(aimee_pg_sqlstate(st), error);
-      else if (!bound)
-         rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;
-      aimee_pg_finalize(st);
-   }
-   /* The row must be the one that was asked for. */
-   if (rc == DB2_MANAGEMENT_TOKEN_AUTHORITY_OK && strcmp(candidate.correlation_id, correlation_id))
-      rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;
-
+   db2_management_token_authority_result_t rc =
+       identity_row_call(ctx, sql, correlation_id, jti, &candidate, empty_result);
    if (rc != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
    {
       (void)aimee_pg_exec(ctx->connection, "ROLLBACK", error, sizeof(error));
@@ -484,6 +503,113 @@ db2_management_identity_authority_admit(db2_management_token_authority_ctx_t *ct
    OPENSSL_cleanse(&candidate, sizeof(candidate));
    OPENSSL_cleanse(error, sizeof(error));
    return DB2_MANAGEMENT_TOKEN_AUTHORITY_OK;
+}
+
+db2_management_token_authority_result_t
+db2_management_identity_authority_admit(db2_management_token_authority_ctx_t *ctx,
+                                        const char correlation_id[65], const char jti[65],
+                                        kb_identity_token_authority_record_t *out)
+{
+   return identity_committed_call(ctx, SQL_IDENTITY_ADMIT, correlation_id, jti,
+                                  DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY, out);
+}
+
+db2_management_token_authority_result_t
+db2_management_identity_authority_readback(db2_management_token_authority_ctx_t *ctx,
+                                           const char correlation_id[65], const char jti[65],
+                                           kb_identity_token_authority_record_t *out)
+{
+   return identity_committed_call(ctx, SQL_IDENTITY_READBACK, correlation_id, jti,
+                                  DB2_MANAGEMENT_TOKEN_AUTHORITY_ABSENT, out);
+}
+
+/* Opens the REPEATABLE READ transaction that stays held across private-key use
+ * and is closed by db2_management_identity_authority_finalize (or abort). */
+db2_management_token_authority_result_t
+db2_management_identity_authority_use_begin(db2_management_token_authority_ctx_t *ctx,
+                                            const char correlation_id[65], const char jti[65],
+                                            kb_identity_token_authority_record_t *out)
+{
+   if (out)
+      OPENSSL_cleanse(out, sizeof(*out));
+   if (!ctx || !ctx->connection || ctx->use_transaction_open || !out ||
+       !exact_hex_input(correlation_id, 64) || !exact_hex_input(jti, 64))
+      return DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;
+   char error[AUTHORITY_ERROR_MAX] = "";
+   if (aimee_pg_exec(ctx->connection, "BEGIN ISOLATION LEVEL REPEATABLE READ READ WRITE", error,
+                     sizeof(error)))
+      return classify(NULL, error);
+   kb_identity_token_authority_record_t candidate;
+   memset(&candidate, 0, sizeof(candidate));
+   db2_management_token_authority_result_t rc =
+       identity_row_call(ctx, SQL_IDENTITY_USE, correlation_id, jti, &candidate,
+                         DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY);
+   if (rc != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+   {
+      (void)aimee_pg_exec(ctx->connection, "ROLLBACK", error, sizeof(error));
+      OPENSSL_cleanse(&candidate, sizeof(candidate));
+      OPENSSL_cleanse(error, sizeof(error));
+      return rc;
+   }
+   ctx->use_transaction_open = 1;
+   ctx->use_kind = DB2_MANAGEMENT_TOKEN_INTENT_IDENTITY;
+   memcpy(ctx->correlation_id, correlation_id, sizeof(ctx->correlation_id));
+   memcpy(ctx->jti, jti, sizeof(ctx->jti));
+   /* ctx->use_record is the management record and stays zeroed: nothing reads a
+    * cached use record back, and storing identity material in a differently
+    * typed field would only create a way to misread it. */
+   *out = candidate;
+   OPENSSL_cleanse(&candidate, sizeof(candidate));
+   OPENSSL_cleanse(error, sizeof(error));
+   return DB2_MANAGEMENT_TOKEN_AUTHORITY_OK;
+}
+
+db2_management_token_authority_result_t
+db2_management_identity_authority_finalize(db2_management_token_authority_ctx_t *ctx)
+{
+   if (!ctx || !ctx->connection || !ctx->use_transaction_open ||
+       ctx->use_kind != DB2_MANAGEMENT_TOKEN_INTENT_IDENTITY)
+      return DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;
+   char error[AUTHORITY_ERROR_MAX] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(ctx->connection, SQL_IDENTITY_FINALIZE, error, sizeof(error));
+   int bound = !st || aimee_pg_bind_text(st, "?1", ctx->correlation_id) ||
+               aimee_pg_bind_text(st, "?2", ctx->jti);
+   int final = 0;
+   aimee_pg_step_t step = bound ? AIMEE_PG_ERR : aimee_pg_step(st, error, sizeof(error));
+   db2_management_token_authority_result_t rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_UNAVAILABLE;
+   if (!bound && step == AIMEE_PG_ROW && !boolean(st, 0, &final) && final)
+   {
+      step = aimee_pg_step(st, error, sizeof(error));
+      rc = step == AIMEE_PG_DONE
+               ? DB2_MANAGEMENT_TOKEN_AUTHORITY_OK
+               : (step == AIMEE_PG_ERR ? classify(aimee_pg_sqlstate(st), error)
+                                       : DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY);
+   }
+   else if (!bound && step == AIMEE_PG_ERR)
+      rc = classify(aimee_pg_sqlstate(st), error);
+   else if (!bound)
+      rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;
+   if (st)
+      aimee_pg_finalize(st);
+
+   if (rc == DB2_MANAGEMENT_TOKEN_AUTHORITY_OK &&
+       aimee_pg_exec(ctx->connection, "COMMIT", error, sizeof(error)))
+   {
+      /* Never reuse a connection whose signing linearization is ambiguous. */
+      aimee_pg_close(ctx->connection);
+      ctx->connection = NULL;
+      rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_COMMIT_AMBIGUOUS;
+   }
+   else if (rc != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+      (void)aimee_pg_exec(ctx->connection, "ROLLBACK", error, sizeof(error));
+
+   ctx->use_transaction_open = 0;
+   ctx->use_kind = 0;
+   OPENSSL_cleanse(ctx->correlation_id, sizeof(ctx->correlation_id));
+   OPENSSL_cleanse(ctx->jti, sizeof(ctx->jti));
+   OPENSSL_cleanse(error, sizeof(error));
+   return rc;
 }
 
 db2_management_token_authority_result_t
@@ -512,6 +638,7 @@ db2_management_token_authority_use_begin(db2_management_token_authority_ctx_t *c
       return rc;
    }
    ctx->use_transaction_open = 1;
+   ctx->use_kind = DB2_MANAGEMENT_TOKEN_INTENT_ACTION;
    memcpy(ctx->correlation_id, correlation_id, sizeof(ctx->correlation_id));
    memcpy(ctx->jti, jti, sizeof(ctx->jti));
    ctx->use_record = candidate;
@@ -524,7 +651,8 @@ db2_management_token_authority_use_begin(db2_management_token_authority_ctx_t *c
 db2_management_token_authority_result_t
 db2_management_token_authority_finalize(db2_management_token_authority_ctx_t *ctx)
 {
-   if (!ctx || !ctx->connection || !ctx->use_transaction_open)
+   if (!ctx || !ctx->connection || !ctx->use_transaction_open ||
+       ctx->use_kind != DB2_MANAGEMENT_TOKEN_INTENT_ACTION)
       return DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;
    char error[AUTHORITY_ERROR_MAX] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(ctx->connection, SQL_FINALIZE, error, sizeof(error));
@@ -560,6 +688,7 @@ db2_management_token_authority_finalize(db2_management_token_authority_ctx_t *ct
       (void)aimee_pg_exec(ctx->connection, "ROLLBACK", error, sizeof(error));
 
    ctx->use_transaction_open = 0;
+   ctx->use_kind = 0;
    OPENSSL_cleanse(ctx->correlation_id, sizeof(ctx->correlation_id));
    OPENSSL_cleanse(ctx->jti, sizeof(ctx->jti));
    OPENSSL_cleanse(&ctx->use_record, sizeof(ctx->use_record));

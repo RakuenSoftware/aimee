@@ -76,6 +76,37 @@ int main(int argc, char **argv)
    rc = db2_management_token_authority_kind(&ctx, c64, j64, &kind);
    CHECK(rc != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK, "kind of an absent intent is not OK");
 
+   /* readback: nothing admitted is ABSENT, not a hard error — that is what makes
+    * it usable for resolving a lost COMMIT without private-key use. */
+   rc = db2_management_identity_authority_readback(&ctx, c64, j64, &rec);
+   printf("   (readback result code = %d, want ABSENT=%d)\n", (int)rc,
+          (int)DB2_MANAGEMENT_TOKEN_AUTHORITY_ABSENT);
+   CHECK(rc == DB2_MANAGEMENT_TOKEN_AUTHORITY_ABSENT, "readback of an absent intent is ABSENT");
+   CHECK(rec.correlation_id[0] == 0, "absent readback leaves the record zeroed");
+
+   /* use_begin on an absent intent must refuse AND must not leave a transaction
+    * open — a leaked open transaction would hold locks and wedge the authority. */
+   rc = db2_management_identity_authority_use_begin(&ctx, c64, j64, &rec);
+   CHECK(rc != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK, "use_begin on an absent intent is refused");
+   CHECK(ctx.use_transaction_open == 0, "a refused use_begin leaves no open transaction");
+
+   /* finalize with no use transaction open is refused rather than committing
+    * something that was never begun. */
+   rc = db2_management_identity_authority_finalize(&ctx);
+   CHECK(rc == DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY, "finalize without use_begin is refused");
+
+   /* The kind guard: a management finalize must not close an identity use
+    * transaction (and vice versa). Neither is open here, so both refuse. */
+   rc = db2_management_token_authority_finalize(&ctx);
+   CHECK(rc == DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY,
+         "management finalize without its own use_begin is refused");
+
+   /* The connection survived every refusal above: a fail-closed path must not
+    * poison the session. */
+   CHECK(ctx.connection != NULL, "refusals leave the authority connection usable");
+   rc = db2_management_identity_authority_admit(&ctx, c64, j64, &rec);
+   CHECK(rc != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK, "admit still works after the refusals");
+
    db2_management_token_authority_close(&ctx);
    printf(fails ? "IDENTITY FACADE: FAILED\n" : "IDENTITY FACADE: ALL PASSED\n");
    return fails ? 1 : 0;

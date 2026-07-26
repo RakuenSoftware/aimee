@@ -26,6 +26,12 @@ typedef struct
    char correlation_id[65];
    char jti[65];
    kb_mgmt_token_authority_record_t use_record;
+   /* Which token kind opened the use transaction. finalize runs a DIFFERENT SQL
+    * function per kind while keying only on correlation_id/jti, so without this
+    * a mismatched finalize would run the wrong authority function against a
+    * live signing transaction. Set by use_begin, required by finalize, cleared
+    * by abort. */
+   int use_kind;
 } db2_management_token_authority_ctx_t;
 
 typedef enum
@@ -63,6 +69,28 @@ extern "C"
    db2_management_identity_authority_admit(db2_management_token_authority_ctx_t *ctx,
                                            const char correlation_id[65], const char jti[65],
                                            kb_identity_token_authority_record_t *out);
+
+   /* Resolve a lost identity admission COMMIT without private-key use. Returns
+    * ABSENT when nothing was admitted, which is a normal answer here. */
+   db2_management_token_authority_result_t
+   db2_management_identity_authority_readback(db2_management_token_authority_ctx_t *ctx,
+                                              const char correlation_id[65], const char jti[65],
+                                              kb_identity_token_authority_record_t *out);
+
+   /* Open the REPEATABLE READ transaction held across private-key use. Closed by
+    * db2_management_identity_authority_finalize or _abort. */
+   db2_management_token_authority_result_t
+   db2_management_identity_authority_use_begin(db2_management_token_authority_ctx_t *ctx,
+                                               const char correlation_id[65], const char jti[65],
+                                               kb_identity_token_authority_record_t *out);
+
+   /* Re-verify and commit the identity use transaction. Refuses a transaction
+    * opened for a different token kind: finalize keys only on correlation_id/jti
+    * but runs a per-kind SQL function, so the kind guard is what stops a
+    * mismatched call from running the wrong authority function against a live
+    * signing transaction. */
+   db2_management_token_authority_result_t
+   db2_management_identity_authority_finalize(db2_management_token_authority_ctx_t *ctx);
 
    /* Resolve a lost admission COMMIT acknowledgement without private use. */
    db2_management_token_authority_result_t
