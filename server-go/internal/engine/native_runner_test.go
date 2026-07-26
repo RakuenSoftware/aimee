@@ -1783,3 +1783,43 @@ func TestPanelTreatsUnrequestedAdditionAsDriftWithoutExcusingDefects(t *testing.
 		t.Fatal("panel is not told that undocumented debt is a finding")
 	}
 }
+
+// Four runs of the same proposal burned their entire round budget rediscovering
+// that the REQUEST was unimplementable: it asked the lint to fire when a
+// "declared subject" stopped resolving, and no such declaration exists. The gate
+// could only say "changes", so the author rewrote a plan that could never satisfy
+// it, until convergence_limit parked with no recorded reason. A reviewer must be
+// able to say the request itself is the problem.
+func TestBlockedIsAUsableVerdictAndDemandsFindings(t *testing.T) {
+	blocked := panelResponse{Verdict: "blocked"}
+	if panelVerdictError(blocked) == nil {
+		t.Fatal("blocked without findings must be rejected: it names no reason a human could act on")
+	}
+	blocked.Findings = []panelFinding{{Severity: "foundational", Summary: "the request depends on a declaration that does not exist"}}
+	if err := panelVerdictError(blocked); err != nil {
+		t.Fatalf("blocked with a finding must be usable: %v", err)
+	}
+}
+
+// The distinction has to survive in the prompt too, or reviewers will reach for
+// blocked whenever an artifact is merely bad — trading a loop for an escape hatch.
+func TestReviewersAreToldBlockedIsAboutTheRequestNotTheArtifact(t *testing.T) {
+	agents := &recordingAgents{}
+	runner := &NativeRunner{agents: agents, roundtables: unpinnedTestRoundtable(t, "qa")}
+	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
+	reviewed.Hash = wfe.Hash(reviewed.Content)
+	if _, err := runner.roundtable(t.Context(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
+		Proposal: "add a CONTRIBUTING.md section", Inputs: map[string]wfe.Artifact{"src": reviewed},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	prompt := agents.requests[0].Prompt
+	for _, want := range []string{"cannot be implemented as written",
+		"merely wrong, incomplete, or unclear is changes, never blocked"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("panel prompt lacks the blocked contract %q", want)
+		}
+	}
+}
