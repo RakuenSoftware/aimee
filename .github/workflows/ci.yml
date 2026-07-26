@@ -345,6 +345,63 @@ jobs:
             -v "$PWD:/src" -v /tmp/mint-job.sh:/tmp/mint-job.sh:ro \
             ubuntu:24.04 bash /tmp/mint-job.sh
 
+  # BLOCKING. The OIDC relying-party login against a REAL identity provider.
+  #
+  # WHY A SEPARATE JOB FROM THE UNIT SUITE. Every unit test stubs the token-endpoint
+  # POST. That is right for them — a socket in a unit test is a flake — but it left a
+  # class of defect entirely uncovered, and one was found the first time this ran for
+  # real: kb's HTTP client discarded every non-2xx body, so the token exchange's DENIED
+  # result was UNREACHABLE and every identity-provider refusal surfaced as
+  # "unparseable response". A unit test cannot see that, because a stub returns
+  # whatever it is told to.
+  #
+  # It is also the ONLY thing covering `.deliver_error_body = 1` in the exchange:
+  # removing that line passes the entire unit suite, and is caught here.
+  #
+  # What this exercises that nothing else does: a real TLS handshake trusted via the
+  # system CA bundle only, the IdP echoing kb's state, a real client-secret-basic form
+  # POST, a real RS256 id_token verified by KID against a live JWKS that also carries
+  # an encryption key, the audience override, the nonce arriving inside a signed
+  # payload, and the IdP refusing both a replayed code and a wrong PKCE verifier.
+  oidc-login-live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        # pkg-config, libzstd-dev and zlib1g-dev for the same reasons as the mint job:
+        # PQ_CFLAGS comes from pkg-config, and L_KB links -lzstd -lz.
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
+          sudo apt-get install -y -q gcc make pkg-config \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
+            libpq-dev libzstd-dev zlib1g-dev python3 curl ca-certificates
+      - name: Start the identity provider
+        id: idp
+        run: |
+          out=$(sudo bash scripts/oidc-live-idp-up.sh /tmp/aimee-oidc-idp)
+          echo "$out"
+          echo "$out" | grep '^CA_FILE=' >> "$GITHUB_OUTPUT"
+      - name: Trust the IdP's CA, and resolve its name
+        # kb's egress client anchors trust ONLY in the system bundle (it ignores
+        # SSL_CERT_FILE on purpose), so the CA goes into the bundle rather than an env
+        # var. /etc/hosts because the certificate names idp.aimee.test and the client
+        # verifies against that name.
+        run: |
+          sudo cp "${{ steps.idp.outputs.CA_FILE }}" /usr/local/share/ca-certificates/aimee-test-idp-ca.crt
+          sudo update-ca-certificates
+          echo "127.0.0.1 idp.aimee.test" | sudo tee -a /etc/hosts
+      - name: Build the live driver
+        # Out of `all` on purpose: a driver, not a shipped binary. It links the real
+        # token-exchange POST, which is why that call lives in its own translation unit
+        # — everything else links the codec without dragging in TLS.
+        run: cd src && make -j$(nproc) oidc-login-live
+      - name: The login, end to end, against the real IdP
+        run: sudo -E bash scripts/run-oidc-login-live.sh 127.0.0.1
+      - name: IdP logs on failure
+        if: failure()
+        run: docker logs aimee-oidc-idp 2>&1 | tail -60
+
   init-migrate-service-test:
     runs-on: ubuntu-latest
     steps:
