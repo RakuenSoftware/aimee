@@ -334,6 +334,33 @@ static void test_newline_separated_options_are_seen(void)
    printf("  PASS: newline-separated options are seen, not swallowed into a value\n");
 }
 
+/* A URI already ending in '?' or '&' must not gain another separator: that makes
+ * an empty query parameter, which libpq REJECTS outright ("missing key/value
+ * separator"). The whole connection then fails, which is worse than any lost
+ * bound — and `postgresql://h/db?` is a conninfo libpq accepts on its own, so a
+ * legal input reaches it. Found by differential testing against libpq, not by
+ * inspection. */
+static void test_a_trailing_query_separator_does_not_break_the_uri(void)
+{
+   char out[2048];
+   char *err = NULL;
+   const char *inputs[] = {"postgresql://h/db?", "postgresql://h/db?keepalives=0&"};
+   for (size_t i = 0; i < sizeof inputs / sizeof inputs[0]; i++)
+   {
+      db2_pg_conninfo_with_bounds(inputs[i], out, sizeof out);
+      PQconninfoOption *opts = PQconninfoParse(out, &err);
+      must(opts != NULL, "libpq still parses a URI with a trailing separator");
+      must(strcmp(opt_value(opts, "connect_timeout"), "10") == 0, "the bound is still added");
+      PQconninfoFree(opts);
+      if (err)
+      {
+         PQfreemem(err);
+         err = NULL;
+      }
+   }
+   printf("  PASS: a URI ending in '?' or '&' gains no empty query parameter\n");
+}
+
 /* libpq percent-decodes URI query keys: connect%5Ftimeout=3 IS connect_timeout.
  * A raw byte compare misses it, appends the bound a second time, and the later
  * value wins — overriding the caller. */
@@ -377,6 +404,7 @@ int main(void)
    test_quoted_values_cannot_suppress_the_bounds();
    test_every_form_parses_as_libpq_intends();
    test_newline_separated_options_are_seen();
+   test_a_trailing_query_separator_does_not_break_the_uri();
    test_percent_encoded_uri_keys_are_recognised();
    printf("All tests passed.\n");
    return 0;

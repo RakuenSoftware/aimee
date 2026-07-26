@@ -1031,8 +1031,22 @@ int db2_pg_conninfo_with_bounds(const char *conninfo, char *out, size_t out_sz)
 {
    const char *base = conninfo ? conninfo : "";
    int uri = conninfo_is_uri(base);
-   /* First added parameter opens the query string; the rest extend it. */
-   const char *sep1 = uri ? (strchr(base, '?') ? "&" : "?") : " ";
+   /* First added parameter opens the query string; the rest extend it.
+    *
+    * A URI already ending in '?' or '&' needs NO separator. Adding one there
+    * creates an empty query parameter, and libpq rejects that outright —
+    * "missing key/value separator" — so the whole connection fails rather than
+    * merely losing a bound. `postgresql://h/db?` is a conninfo libpq accepts on
+    * its own, so this is reachable from a legal input. */
+   size_t blen = strlen(base);
+   char last = blen ? base[blen - 1] : '\0';
+   const char *sep1;
+   if (!uri)
+      sep1 = " ";
+   else if (last == '?' || last == '&')
+      sep1 = "";
+   else
+      sep1 = strchr(base, '?') ? "&" : "?";
    const char *sep = uri ? "&" : " ";
 
    char params[256];
