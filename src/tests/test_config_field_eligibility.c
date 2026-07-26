@@ -1,6 +1,6 @@
 /* test_config_field_eligibility.c: pins the flat-vs-non-flat eligibility inventory
  * for the config_fields[] descriptor table (Proposal A, step 0 —
- * docs/proposals/pending/config-field-descriptor-table.md).
+ * docs/proposals/done/config-field-descriptor-table.md).
  *
  * "flat" = a top-level YAML scalar whose config_load parse is a PURE type-guarded
  * assignment (no value guard, coercion, enum mapping, cross-field derivation, or

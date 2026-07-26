@@ -14,7 +14,7 @@
 
 The code graph indexes symbols, references, and call edges — `src/index.c`,
 `src/extractors_extra.c`, keyed on the shared ontology in
-`src/headers/memory_ontology.h` (`NODE_FILE`, `NODE_FUNCTION`, `NODE_STRUCT`,
+`src/modules/memory/memory_ontology.h` (`NODE_FILE`, `NODE_FUNCTION`, `NODE_STRUCT`,
 `NODE_MODULE`, …). That graph answers "who calls this" and "what does an edit
 touch," and it does it from a database lookup instead of a filesystem scan. Good.
 But it stops at the call graph. It does not know the shape of the thing it is

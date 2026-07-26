@@ -12,7 +12,7 @@
   per-action audit
   ([governance-decision-records-and-action-audit](../done/governance-decision-records-and-action-audit.md)).
   Renders through the pending
-  [operator-audit-activity-surface](operator-audit-activity-surface.md).
+  [operator-audit-activity-surface](operator-audit-activity-residual.md).
 
 ## Thesis
 
@@ -26,14 +26,14 @@ aimee is structurally ahead here. Its authoritative enforcers already sit outsid
 the governed agent's process — `pre_tool_check` runs server-side for delegates and
 MCP dispatch (`src/server/server.c:924`, `src/server/server_compute_async.c:206`),
 the gateway rewrites the primary's LLM traffic in aimee's own process
-(`src/gateway_policy.c`), workflow gates are engine-owned and HMAC-non-forgeable
-(`src/workflow/wfe_approval.c`), and a hash-chained, MAC-checkpointed WORM store
+(`src/modules/gateway/gateway_policy.c`), workflow gates are engine-owned and HMAC-non-forgeable
+(`src/modules/workflows/wfe_approval.c`), and a hash-chained, MAC-checkpointed WORM store
 exists and verifies (`src/modules/audit/audit_worm.c`, `src/modules/audit/audit_worm_chain.c`). What is missing
 is the last mile that turns "we log verdicts" into "we can attest verdicts":
 
 1. the tamper-evident chain is **default-off** (`audit_worm_enabled` has no
    initializer assignment → 0) while the default-on audit path (`audit.log`,
-   `audit_action_enabled = 1`, `src/config.c:818`) is **not chained**;
+   `audit_action_enabled = 1`, `src/modules/config/config.c:818`) is **not chained**;
 2. several live enforcers **never reach the chain at all** (attention guard,
    gateway policy, memory interception, integrity gate, native gate, vault log,
    trigger/forge ops each write their own side log or nothing);
@@ -76,7 +76,7 @@ datatracker.ietf.org draft-sharif-agent-audit-trail.
 
 | Piece | Where | Status |
 | --- | --- | --- |
-| Per-tool-call verdict + exactly-once audit emit | `pre_tool_check` wrapper, `src/guardrails_action_audit.c:90-146` (fail-open post-verdict; actor primary/delegate; keyed-HMAC `args_hash`) | shipped, default-on to `audit.log` |
+| Per-tool-call verdict + exactly-once audit emit | `pre_tool_check` wrapper, `src/modules/guardrails/guardrails_action_audit.c:90-146` (fail-open post-verdict; actor primary/delegate; keyed-HMAC `args_hash`) | shipped, default-on to `audit.log` |
 | Hash-chained WORM store, MAC checkpoints, green/amber/red verify | `src/modules/audit/audit_worm.c`, `src/modules/audit/audit_worm_chain.c`; dedicated chain key `.audit-chain-key` | shipped, **default-off dual-write** |
 | Sealing to kernel-immutable segments (crypto-only degrade) | `src/modules/audit/audit_worm.c` (`VACUUM INTO` + `FS_IMMUTABLE_FL`) | shipped; sealer runs in-process, sidecar deferred |
 | Decision records (status / supersedes / revisit / linked policy, one-active-per-scope) | `decision_log`, `db2_decision_log_record()` | shipped |
@@ -105,12 +105,12 @@ enforcement points that decide allow/block but never write a chained row:
 | Enforcer | Today's sink | Delta |
 | --- | --- | --- |
 | Attention guard / session-worktree isolation (`src/cli_attention_guard.c:617-666`) | per-session JSON under `.cache/attention/` + stderr | emit `tool.guard` verdict via the existing hook→server report path; client-side blocks buffered and flushed on next server contact (hook subprocesses must not need DB access) |
-| Gateway policy (`src/gateway_policy.c:94-211`: subagent strip, response police, model pin) | none | `gateway.policy` rows: what was stripped/pinned, request id — the gateway is aimee's own process; direct `audit_event()` |
+| Gateway policy (`src/modules/gateway/gateway_policy.c:94-211`: subagent strip, response police, model pin) | none | `gateway.policy` rows: what was stripped/pinned, request id — the gateway is aimee's own process; direct `audit_event()` |
 | Memory interception (`server_memory_intercept`, `src/server/server.c:729,907`) | `interception.jsonl` | `memory.intercept` rows (deny+redirect is a governed verdict); keep the jsonl as operational detail |
 | Integrity gate verdicts (`src/integrity_gate.c:247-315`) | returned struct only; caller decides | `ingest.integrity` rows at each wired call site (Part 2 wires the sites) with category + verdict + source class |
 | S2 native gate DENY / WOULD-DENY (`src/cmd_hooks.c:180-212`, `src/server/s2_native_gate_hook.c`) | `audit_log("s2-native-gate", …)` | route through `audit_event` like the other block sites |
 | Vault writes / capability grants (`src/server/server_vault.c`) | dedicated append-only file | dual-write `vault.write` / `vault.capability` rows (fingerprints only, per its existing redaction) |
-| Trigger fires + forge ops (`src/server/trigger_scheduler.c`, `src/server/wfe_live_forge.c:35-47`) | lifecycle events | `trigger.fire` / `forge.op` rows incl. the `forge_allowed()` rail decision — autonomous runs are default-on (`wfe_live_forge_enabled = 1`, `src/config.c:811`); their governed ops belong in the chain first |
+| Trigger fires + forge ops (`src/server/trigger_scheduler.c`, `src/modules/workflows/wfe_live_forge.c:35-47`) | lifecycle events | `trigger.fire` / `forge.op` rows incl. the `forge_allowed()` rail decision — autonomous runs are default-on (`wfe_live_forge_enabled = 1`, `src/modules/config/config.c:811`); their governed ops belong in the chain first |
 
 Plus the lint guard: mutation entry points in the audited domains must route
 through `audit_event`; a bypassing call site fails CI (per done proposal §4).

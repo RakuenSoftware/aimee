@@ -1,6 +1,6 @@
 # Design brief: multi-engine fanout, circuit-breaking, provenance, accounting
 
-Items 3–6 of [web-retrieval-capability-map.md](web-retrieval-capability-map.md).
+Items 3–6 of [web-retrieval-capability-map.md](../done/web-retrieval-capability-map.md).
 Items 1 and 2 (search→extract fusion, page cache) merged in #1830.
 
 This brief asks for decisions on seven points. Each states what I propose and
