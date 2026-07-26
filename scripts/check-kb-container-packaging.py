@@ -17,7 +17,7 @@ REQUIRED_DOCKERFILE_PATTERNS = {
     "aimee-home-env": r"(?m)^ENV\s+AIMEE_HOME=/var/lib/aimee\b",
     # DB2 ships IN the image so an unconfigured deployment has a working vector
     # store without pulling a third-party database image at runtime.
-    "db2-embedded-engine": r"(?m)^\s+postgresql-17-pgvector\b",
+    "db2-embedded-engine": r"postgresql-\$\{PG_MAJOR\}-pgvector",
     "runtime-user": r"(?m)^USER\s+aimee\b",
     "health-v1": r"HEALTHCHECK[\s\S]*/v1/health",
     "exposes-http": r"EXPOSE\s+8741",
@@ -183,7 +183,7 @@ def plant_test() -> int:
                     "RUN make -C src ../aimee-kb",
                     "FROM debian",
                     "RUN apt-get install -y \\",
-                    "        postgresql-17-pgvector \\",
+                    "        postgresql-${PG_MAJOR}-pgvector \\",
                     "        python3",
                     "ENV AIMEE_HOME=/var/lib/aimee",
                     "COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb",

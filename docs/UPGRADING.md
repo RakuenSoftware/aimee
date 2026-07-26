@@ -7,12 +7,19 @@ it can break an existing deployment, and what to do about it.
 
 ## 2026-07 — The `aimee-kb` image runs its own pgvector when you configure none
 
-**What changed.** The `aimee-kb` image now ships PostgreSQL 17 with the `pgvector`
-extension. If `AIMEE_DB2_URL` is **unset**, the container initialises and runs its
-own cluster under `$AIMEE_HOME/postgres`, reachable only over a local socket. If
+**What changed.** The `aimee-kb` image now ships PostgreSQL 18 with the `pgvector`
+extension (18.4 + pgvector 0.8.5, from PGDG — the current stable major). If
+`AIMEE_DB2_URL` is **unset**, the container initialises and runs its own cluster
+under `$AIMEE_HOME/postgres`, reachable only over a local socket. If
 `AIMEE_DB2_URL` is **set**, nothing is started and the external server is used
 exactly as before — that path is fully supported and is still the right choice for
 a shared, backed-up, or managed database.
+
+**pgvectorscale** (StreamingDiskANN indexes) is an opt-in upgrade rather than the
+default, because it is packaged nowhere and has to be built from source:
+`docker build --build-arg WITH_PGVECTORSCALE=1`. It needs PostgreSQL 18, which the
+image now uses. When the extension is present the entrypoint enables it; the
+supported default remains plain `pgvector`.
 
 The image no longer bakes `AIMEE_DB2_URL=postgresql://aimee:aimee@postgres:5432/aimee_shared`.
 That default made "the operator configured nothing" indistinguishable from "use the
@@ -38,9 +45,19 @@ subject to a shared per-IP quota that fails as a hung connection rather than a c
 error. Shipping the engine in the image removes a third-party registry from the
 production start path.
 
-**Moving between the two.** The embedded cluster is an ordinary PostgreSQL 17 data
-directory, so `pg_dump`/`pg_restore` moves it to an external server whenever you
-outgrow it; set `AIMEE_DB2_URL` afterwards and the container stops starting its own.
+**Moving to an external server.** The image ships `aimee-kb-db-export` for exactly
+this:
+
+```
+docker exec aimee-kb aimee-kb-db-export postgresql://user:pw@host:5432/aimee_shared
+docker exec aimee-kb aimee-kb-db-export --wipe postgresql://user:pw@host:5432/aimee_shared
+```
+
+It refuses to start if the target is unreachable or lacks the `vector` extension,
+dumps and restores, then compares the row count of every user table and **aborts
+leaving the internal data intact** if they differ. `--wipe` removes the internal
+data directory only after that comparison passed. Set `AIMEE_DB2_URL` to the target
+afterwards and the container stops starting its own cluster.
 
 ---
 

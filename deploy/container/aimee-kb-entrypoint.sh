@@ -47,7 +47,8 @@ fi
 
 # 3. Embedded DB2, only when the operator configured no external server.
 if [ -z "${AIMEE_DB2_URL:-}" ]; then
-    PGBIN=/usr/lib/postgresql/17/bin
+    PGMAJOR="${AIMEE_DB2_PG_MAJOR:-18}"
+    PGBIN="/usr/lib/postgresql/$PGMAJOR/bin"
     PGDATA="$AIMEE_HOME/postgres"
     PGSOCK="$AIMEE_HOME/run"
     DB=aimee_shared
@@ -75,6 +76,12 @@ if [ -z "${AIMEE_DB2_URL:-}" ]; then
     fi
     "$PGBIN/psql" --host="$PGSOCK" --dbname="$DB" --no-psqlrc --quiet \
         --command="CREATE EXTENSION IF NOT EXISTS vector" >/dev/null
+    # pgvectorscale is present only in an image built with WITH_PGVECTORSCALE=1.
+    # Enable it when it is there; pgvector alone is the supported default.
+    if [ -f "/usr/lib/postgresql/$PGMAJOR/lib/vectorscale.so" ]; then
+        "$PGBIN/psql" --host="$PGSOCK" --dbname="$DB" --no-psqlrc --quiet \
+            --command="CREATE EXTENSION IF NOT EXISTS vectorscale" >/dev/null
+    fi
 
     # libpq reads a directory-valued host as a socket path.
     AIMEE_DB2_URL="postgresql:///$DB?host=$PGSOCK"
