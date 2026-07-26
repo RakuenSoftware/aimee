@@ -55,6 +55,38 @@ class GemmaBaselineContractTests(unittest.TestCase):
         self.assertTrue(bounded.endswith("B"))
         self.assertIn("[...truncated...]", bounded)
 
+    def test_reranker_resume_retries_failed_case(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle, output = root / "bundle", root / "results"
+            bundle.mkdir()
+            output.mkdir()
+            (bundle / "manifest.json").write_text('{"suite":"test"}\n', encoding="utf-8")
+            (bundle / "corpus.jsonl").write_text(
+                json.dumps({"doc_id": "doc", "content": "candidate"}) + "\n", encoding="utf-8"
+            )
+            case = {
+                "case_id": "case", "query": "query", "candidate_doc_ids": ["doc"],
+                "relevance": {"doc": 1},
+            }
+            (bundle / "reranking.jsonl").write_text(json.dumps(case) + "\n", encoding="utf-8")
+            raw = output / "raw_reranking_resume.jsonl"
+            raw.write_text(json.dumps({"case_id": "case", "ok": False}) + "\n", encoding="utf-8")
+            successful = {
+                "case_id": "case", "ok": True, "attempts": 1, "latency_s": 0.1,
+                "request_chunks": 1, "scores": [1.0], "ranked_doc_ids": ["doc"],
+                "metrics": reranker.ranking_metrics(["doc"], {"doc": 1}),
+            }
+            argv = [
+                "run_reranking_ab.py", "--endpoint", "http://unused", "--label", "resume",
+                "--bundle", str(bundle), "--output-dir", str(output),
+            ]
+            with mock.patch.object(sys, "argv", argv), mock.patch.object(reranker, "call", return_value=successful) as call:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(reranker.main(), 0)
+            call.assert_called_once()
+            self.assertEqual(json.loads(raw.read_text(encoding="utf-8").splitlines()[-1])["ok"], True)
+
     def test_synthesis_resume_does_not_repeat_completed_case(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -138,7 +138,8 @@ def main() -> int:
     raw_path = args.output_dir / f"raw_reranking_{args.label}.jsonl"
     done = {row["case_id"]: row for row in load_jsonl(raw_path)} if raw_path.exists() else {}
     with raw_path.open("a", encoding="utf-8", newline="\n") as handle:
-        for index, case in enumerate((case for case in cases if case["case_id"] not in done), 1):
+        pending = (case for case in cases if not done.get(case["case_id"], {}).get("ok", False))
+        for index, case in enumerate(pending, 1):
             row = call(
                 args.endpoint, case, corpus, args.timeout, args.pair_batch_size,
                 args.query_char_cap, args.candidate_char_cap,

@@ -113,8 +113,10 @@ python3 benchmarks/gemma4_baseline/run_reranking_ab.py \
 The runner applies the same model-independent input bound to every provider:
 queries are at most 512 UTF-8 characters and candidates at most 1,024, retaining
 two-thirds from the head and one-third from the tail with a visible truncation
-marker. This keeps the shared suite inside Ettin's common 512-token context
-without allowing provider-specific tokenizers to select different evidence.
+marker. The `.254` controller launches both Ettin encoders with a 2,048-token
+physical batch because character bounds do not imply a 512-token bound for code
+and punctuation-heavy inputs. This preserves identical evidence without allowing
+provider-specific tokenizers to select different text.
 
 ## Reproduce the `.254` six-model baseline
 

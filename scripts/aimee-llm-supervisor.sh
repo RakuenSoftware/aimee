@@ -53,6 +53,8 @@ RERANK_ASSET_BASE="${AIMEE_LLM_RERANK_ASSET_BASE:-https://github.com/RakuenSoftw
 EMBED_TIER="${AIMEE_LLM_EMBED_TIER:-${AIMEE_LLM_TIER:-cpu}}"
 RERANK_TIER="${AIMEE_LLM_RERANK_TIER:-${AIMEE_LLM_TIER:-cpu}}"
 SYNTH_TIER="${AIMEE_LLM_SYNTH_TIER:-${AIMEE_LLM_TIER:-cpu}}"
+RERANK_BATCH="${AIMEE_LLM_RERANK_BATCH:-2048}"
+RERANK_UBATCH="${AIMEE_LLM_RERANK_UBATCH:-512}"
 
 embed_coords() {
   case "$EMBED_TIER" in
@@ -290,7 +292,8 @@ case "${AIMEE_LLM_STUB:-}" in
     fi
     # Reranker ENCODER: CLS pooling + flash-attn; the gateway applies the Dense head.
     if [ "$RERANK_MODE" = "local" ]; then
-      start rerank 8082 -ngl "$RERANK_NGL" -m "$RERANK_D/rerank-encoder.gguf" --embeddings --pooling cls -fa on
+      start rerank 8082 -ngl "$RERANK_NGL" -m "$RERANK_D/rerank-encoder.gguf" --embeddings --pooling cls -fa on \
+        -b "$RERANK_BATCH" -ub "$RERANK_UBATCH"
     fi
     # Synth: OpenAI-compatible /v1/chat/completions (grammar/JSON via --jinja). The
     # synth MODEL + its runtime profile come from the synth tier above; explicit

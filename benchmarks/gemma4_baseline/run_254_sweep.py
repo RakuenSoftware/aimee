@@ -140,6 +140,7 @@ def start_ettin_server(
     socket: str,
     image: str,
     deployed_models: Path,
+    repo: Path,
     tier: str,
     ngl: str,
     log_path: Path,
@@ -150,9 +151,11 @@ def start_ettin_server(
     command = docker_cmd(
         socket, "run", "--detach", "--rm", "--name", "gemma4-baseline-server", "--network", "host",
         "--device", "/dev/dri:/dev/dri", "--volume", f"{deployed_models}:/models",
+        "--volume", f"{repo / 'scripts/aimee-llm-supervisor.sh'}:/opt/aimee/aimee-llm-supervisor.sh:ro",
         "--env", "AIMEE_LLM_EMBED_MODE=off", "--env", "AIMEE_LLM_SYNTH_MODE=off",
         "--env", "AIMEE_LLM_RERANK_MODE=local", "--env", f"AIMEE_LLM_RERANK_TIER={tier}",
-        "--env", f"AIMEE_LLM_NGL={ngl}", "--env", "AIMEE_LLM_PORT=8920", image,
+        "--env", f"AIMEE_LLM_NGL={ngl}", "--env", "AIMEE_LLM_RERANK_BATCH=2048",
+        "--env", "AIMEE_LLM_RERANK_UBATCH=2048", "--env", "AIMEE_LLM_PORT=8920", image,
     )
     result = run(command, capture=True)
     try:
@@ -255,6 +258,7 @@ def main() -> int:
                     args.socket,
                     manifest["runtime"]["container_image"],
                     args.deployed_models,
+                    args.repo,
                     control["tier"],
                     control["ngl"],
                     current_log,
