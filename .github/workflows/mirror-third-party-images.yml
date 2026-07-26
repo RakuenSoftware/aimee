@@ -1,0 +1,73 @@
+# Mirror the third-party images aimee depends on into ghcr.io, so neither CI nor
+# a production `docker compose up` pulls them anonymously from Docker Hub.
+#
+# Anonymous Docker Hub allows 100 pulls per 6h per IP. GitHub runners share NAT'd
+# egress, and operators behind one office IP share it too, so that budget is
+# routinely exhausted. It does not surface as a clean 429 — the connection hangs
+# and dies as `Get "https://registry-1.docker.io/v2/": context deadline exceeded`,
+# which reads like a network blip. Retries cannot fix a quota: the unit-tests job
+# already wrapped its pull in five backed-off attempts and still lost all five.
+#
+# This job is deliberately OFF the critical path. It is the only place that talks
+# to Docker Hub; if it fails, CI and production keep pulling the last good mirror
+# and nothing breaks until someone re-runs it.
+#
+# `imagetools create` copies the manifest list between registries without pulling
+# layers to the runner, so multi-arch images stay multi-arch.
+name: Mirror third-party images
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly re-sync so a moving upstream tag does not drift indefinitely.
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          # pg16 backs compose.yaml / compose.server.yaml; pg18 backs the
+          # unit-tests job. Both are the debian variant: it ships pgvector >= 0.7
+          # (halfvec) and the contrib modules incl. pg_trgm, which the alpine
+          # postgres images do not.
+          - source: pgvector/pgvector:pg16
+            target: pgvector:pg16
+          - source: pgvector/pgvector:pg18
+            target: pgvector:pg18
+    steps:
+      # ghcr paths must be lowercase; owners may be mixed-case (e.g. "JBailes").
+      - name: Normalize owner
+        run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Copy ${{ matrix.image.source }} to ghcr.io
+        run: |
+          src="${{ matrix.image.source }}"
+          dst="ghcr.io/${OWNER}/${{ matrix.image.target }}"
+          # The upstream read is the one Docker Hub call left in the repo. Retry
+          # it here, where a failure costs a re-run instead of a red required
+          # check or a broken install.
+          for attempt in 1 2 3 4 5; do
+            if docker buildx imagetools create --tag "$dst" "$src"; then
+              echo "mirrored $src -> $dst"
+              docker buildx imagetools inspect "$dst" | head -20
+              exit 0
+            fi
+            echo "mirror $src failed (attempt $attempt/5); backing off"
+            sleep $((attempt * 15))
+          done
+          echo "::error::could not mirror $src after 5 attempts"
+          exit 1
