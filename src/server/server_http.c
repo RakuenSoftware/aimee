@@ -10,9 +10,12 @@
 #include "server_http_internal.h"
 #include "server_http.h"
 #include "sandbox_pkg_proxy.h" /* delegate-sandbox package forward proxy (UDS demux) */
-#include "server.h"            /* CAP_* / CAPS_* capability bits, server_capability_for_method */
-#include "server_conn_io.h"    /* transport-aware fd I/O (native-TLS phase 1) */
-#include "server_tls.h"        /* native TLS termination (phase 1b) */
+#include "kb_identity_token.h"
+#include "server_write_tier.h"
+#include "server_write_tier_db1.h"
+#include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
+#include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
+#include "server_tls.h"     /* native TLS termination (phase 1b) */
 #include "server_mgmt_checkpoint_client.h"
 #include "pki.h"                       /* P8a per-request durable cert revocation/expiry re-check */
 #include "workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
@@ -1684,8 +1687,14 @@ void handle_conn(int fd, int is_tcp, int is_management)
       LOG_INFO("server.http", "%s %s -> 401 (mtls required) req_id=%s", method, path, request_id);
       return;
    }
-   int effective_remote_writes =
-       is_tcp && mtls_mode > 0 ? SERVER_REMOTE_WRITES_OFF : g_remote_writes;
+   /* Per-user remote_writes (proposal §5): the process-global no longer
+    * authorizes anything. The real tier is resolved from the caller's kb-signed
+    * identity token further down, once the Authorization header has been read;
+    * until then assume the fail-closed value. UDS never reaches the gate at all
+    * (it is guarded by `is_tcp`), so the local operator keeps full capability
+    * exactly as §7 requires. */
+   int effective_remote_writes = SERVER_REMOTE_WRITES_OFF;
+   server_write_tier_outcome_t write_tier_outcome = SERVER_WRITE_TIER_ABSENT;
    uint32_t effective_caps =
        management_authenticated ? 0
                                 : server_http_effective_conn_caps(is_tcp, g_bearer, g_remote_writes,
@@ -1768,6 +1777,44 @@ void handle_conn(int fd, int is_tcp, int is_management)
          LOG_INFO("server.http", "%s %s -> 429 req_id=%s", method, path, request_id);
          return;
       }
+   }
+
+   /* Resolve the caller's write tier from their identity token. This replaces
+    * the deployment-wide aimee.api.remote_writes: authority is now a property of
+    * the authenticated user, re-checked on every request. Every failure yields
+    * SERVER_REMOTE_WRITES_OFF with a specific reason, so a denial is always
+    * attributable to one cause rather than a generic refusal. */
+   if (is_tcp)
+   {
+      char identity[KB_IDENTITY_TOKEN_WIRE_MAX + 1] = "";
+      size_t identity_len = 0;
+      char auth_value[KB_IDENTITY_TOKEN_WIRE_MAX + 1] = "";
+      if (http_header(buf, "Authorization", auth_value, sizeof(auth_value)))
+      {
+         const char *credential = auth_value;
+         if (strncasecmp(credential, "Bearer ", 7) == 0)
+            credential += 7;
+         while (*credential == ' ')
+            credential++;
+         /* Only a compact JWS can be an identity token. The legacy shared bearer
+          * is an opaque string, so this leaves it alone rather than feeding it to
+          * the verifier and reporting every legacy read as a malformed token. */
+         if (strchr(credential, '.'))
+         {
+            identity_len = strnlen(credential, sizeof(identity) - 1);
+            memcpy(identity, credential, identity_len);
+            identity[identity_len] = '\0';
+         }
+      }
+      effective_remote_writes =
+          server_write_tier_for_request(identity_len ? identity : NULL, identity_len,
+                                        (int64_t)time(NULL), &write_tier_outcome, NULL);
+      if (write_tier_outcome != SERVER_WRITE_TIER_OK &&
+          write_tier_outcome != SERVER_WRITE_TIER_ABSENT)
+         LOG_INFO("server.http", "%s %s write tier denied (%s) req_id=%s", method, path,
+                  server_write_tier_outcome_str(write_tier_outcome), request_id);
+      OPENSSL_cleanse(identity, sizeof(identity));
+      OPENSSL_cleanse(auth_value, sizeof(auth_value));
    }
 
    /* Per-route capability gate (TCP only): the route's required capabilities
