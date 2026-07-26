@@ -1246,7 +1246,10 @@ func (s *Store) Resume(ctx context.Context, workItemID string) error {
 	}
 	// delegate_failed parks explicitly for a human, so a human must be able to
 	// release it once the underlying delegate problem is addressed.
-	operatorReasons := map[string]bool{"manual": true, "wall_cap": true, "turn_cap": true, "retry_limit": true, "convergence_limit": true, "convergence_no_progress": true, "budget_cap": true, "fanout_limit": true, "workflow_definition_invalid": true, "workflow_block_unavailable": true, "delegate_failed": true}
+	operatorReasons := map[string]bool{"manual": true, "wall_cap": true, "turn_cap": true, "retry_limit": true, "convergence_limit": true, "convergence_no_progress": true, "budget_cap": true, "fanout_limit": true, "workflow_definition_invalid": true, "workflow_block_unavailable": true, "delegate_failed": true,
+		// The roundtable judged the request itself unimplementable. A human amends
+		// the request and resumes; nothing the engine can do releases it.
+		"request_unimplementable": true}
 	if !operatorReasons[reason] {
 		return fmt.Errorf("pause reason %q is lifecycle-owned and cannot be resumed manually", reason)
 	}
