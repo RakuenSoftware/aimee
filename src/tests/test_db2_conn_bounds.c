@@ -225,20 +225,45 @@ static void test_option_detection_matches_whole_keys(void)
    printf("  PASS: option detection matches whole keys, not substrings\n");
 }
 
+/* Option-shaped text inside a QUOTED value is not an option. A tenant name is
+ * attacker-influenced in a multi-tenant deployment, and the failure is silent and
+ * unsafe — the option looks set, so the bound is never added. */
+static void test_quoted_values_cannot_suppress_the_bounds(void)
+{
+   char out[2048];
+   db2_pg_conninfo_with_bounds("host=db dbname='tenant keepalives=off'", out, sizeof out);
+   must(strstr(out, "keepalives=1") != NULL, "text inside a quoted value does not suppress");
+   must(strstr(out, "dbname='tenant keepalives=off'") != NULL, "the quoted value is preserved");
+
+   db2_pg_conninfo_with_bounds("host=db password='p connect_timeout=1'", out, sizeof out);
+   must(strstr(out, "connect_timeout=10") != NULL, "same for connect_timeout in a password");
+
+   /* An escaped quote must not end the value early and expose the rest. */
+   db2_pg_conninfo_with_bounds("host=db dbname='a\\' keepalives=off'", out, sizeof out);
+   must(strstr(out, "keepalives=1") != NULL, "an escaped quote does not end the value early");
+
+   /* A URI's password and path are not the query string. */
+   db2_pg_conninfo_with_bounds("postgresql://u:keepalives=off@h/db", out, sizeof out);
+   must(strstr(out, "keepalives=1") != NULL, "URI userinfo is not read as options");
+   printf("  PASS: option-shaped text in a quoted value or URI authority is not an option\n");
+}
+
 /* Assert against libpq's OWN parser, not against the shape of our output.
  *
  * Every other case here is a string assertion, and string assertions are what let
  * the URI bug through: appending keywords to a URI produces output containing
  * "connect_timeout=10", so "the bounds appear" was true of a conninfo that in fact
- * put them inside dbname. Only the real parser can tell those apart. Gated on
- * libpq being present so the minimal-link build still runs everything above. */
-#if defined(__has_include)
-#if __has_include(<libpq-fe.h>) && !defined(AIMEE_DISABLE_POSTGRES)
-#define CONN_BOUNDS_HAVE_LIBPQ 1
+ * put them inside dbname. Only the real parser can tell those apart.
+ *
+ * These assertions are MANDATORY, not best-effort. An earlier revision compiled
+ * them out when libpq was missing and printed SKIP, so a fully green run did not
+ * prove the parser check had executed — the same "green does not mean what it
+ * says" trap this file keeps falling into. The target links libpq unconditionally
+ * (see tests/Rules.mk), so a missing header is a build misconfiguration and must
+ * break the build rather than quietly reduce coverage. */
+#if defined(__has_include) && !__has_include(<libpq-fe.h>)
+#error "test_db2_conn_bounds requires libpq: the PQconninfoParse assertions are not optional"
 #endif
-#endif
-
-#ifdef CONN_BOUNDS_HAVE_LIBPQ
 #include <libpq-fe.h>
 
 static const char *opt_value(PQconninfoOption *opts, const char *key)
@@ -271,14 +296,11 @@ static void test_every_form_parses_as_libpq_intends(void)
    parses_as("postgres://h:5432/aimee_shared", "aimee_shared");
    parses_as("postgresql://h/aimee_shared?sslmode=require", "aimee_shared");
    parses_as("host=db dbname=aimee_shared user=aimee", "aimee_shared");
+   /* A quoted value holding option-shaped text must not be read as options: the
+    * bounds still land, and the database name survives intact. */
+   parses_as("host=db dbname='tenant keepalives=off' user=aimee", "tenant keepalives=off");
    printf("  PASS: libpq parses every form with the bounds as real options\n");
 }
-#else
-static void test_every_form_parses_as_libpq_intends(void)
-{
-   printf("  SKIP: libpq unavailable in this build; parser assertions not run\n");
-}
-#endif
 
 int main(void)
 {
@@ -295,6 +317,7 @@ int main(void)
    test_no_room_fails_rather_than_dropping_the_bounds();
    test_an_out_of_range_override_falls_back();
    test_option_detection_matches_whole_keys();
+   test_quoted_values_cannot_suppress_the_bounds();
    test_every_form_parses_as_libpq_intends();
    printf("All tests passed.\n");
    return 0;

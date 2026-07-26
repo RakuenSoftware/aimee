@@ -906,27 +906,81 @@ static int conninfo_is_uri(const char *s)
 
 /* Does the conninfo already set this exact option?
  *
- * A bare strstr() is wrong in both directions, and both were live defects. It
- * matches INSIDE other values, so dbname=keepalives_test suppressed keepalives on
- * a perfectly ordinary conninfo; and it matches other KEYS sharing the prefix, so
- * a caller setting only keepalives_idle=30 suppressed keepalives, _interval and
- * _count as well — losing the property on exactly the conninfo that was trying to
- * tune it.
+ * This has to walk the string's real grammar, not search it. A bare strstr() was
+ * wrong in three ways, each a live defect: it matched INSIDE values, so
+ * dbname=keepalives_test suppressed keepalives on an ordinary conninfo; it
+ * matched keys sharing a prefix, so keepalives_idle=30 suppressed the whole
+ * group; and checking only for a preceding separator still matches option-shaped
+ * text inside a QUOTED value, so dbname='tenant keepalives=off' — a legal
+ * conninfo, and a tenant name is attacker-influenced in a multi-tenant
+ * deployment — silently dropped the bounds.
  *
- * So match a whole key: preceded by a separator (start, space, '?', '&') and
- * followed by '='. This deliberately does not look inside quoted values; a value
- * containing " keepalives=" would still fool it, but that requires a quoted value
- * holding a plausible option assignment, whereas the two cases above are shapes a
- * normal deployment actually produces. */
+ * Every one of those failures is silent and in the unsafe direction: the option
+ * appears set, so the bound is not added. So the scan tracks where values begin
+ * and end, honouring single quotes and backslash escapes for the keyword/value
+ * form, and looks only at the query component of a URI. */
 static int conninfo_has_key(const char *base, const char *key)
 {
    size_t klen = strlen(key);
-   for (const char *p = strstr(base, key); p; p = strstr(p + 1, key))
+
+   if (conninfo_is_uri(base))
    {
-      char before = (p == base) ? '\0' : p[-1];
-      if (before != '\0' && before != ' ' && before != '\t' && before != '?' && before != '&')
+      /* Only the query string holds options. Anything earlier is userinfo, host
+       * or path — a password or database name there must never be read as one. */
+      const char *p = strchr(base, '?');
+      if (!p)
+         return 0;
+      for (p++; *p;)
+      {
+         if (strncmp(p, key, klen) == 0 && p[klen] == '=')
+            return 1;
+         const char *amp = strchr(p, '&');
+         if (!amp)
+            break;
+         p = amp + 1;
+      }
+      return 0;
+   }
+
+   for (const char *p = base; *p;)
+   {
+      while (*p == ' ' || *p == '\t')
+         p++;
+      if (!*p)
+         break;
+      const char *kstart = p;
+      while (*p && *p != '=' && *p != ' ' && *p != '\t')
+         p++;
+      size_t this_len = (size_t)(p - kstart);
+      while (*p == ' ' || *p == '\t')
+         p++;
+      if (*p != '=')
+      {
+         /* Not a key=value pair; the token is junk. Nothing was consumed by the
+          * value scan below, so step one byte to guarantee progress. */
+         if (p == kstart)
+            p++;
          continue;
-      if (p[klen] == '=')
+      }
+      p++;
+      while (*p == ' ' || *p == '\t')
+         p++;
+      int match = (this_len == klen && strncmp(kstart, key, klen) == 0);
+      if (*p == '\'')
+      {
+         for (p++; *p && *p != '\''; p++)
+            if (*p == '\\' && p[1])
+               p++;
+         if (*p == '\'')
+            p++;
+      }
+      else
+      {
+         for (; *p && *p != ' ' && *p != '\t'; p++)
+            if (*p == '\\' && p[1])
+               p++;
+      }
+      if (match)
          return 1;
    }
    return 0;
