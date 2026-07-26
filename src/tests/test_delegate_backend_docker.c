@@ -241,7 +241,8 @@ static const char *write_fake_docker_fixture(void)
            "    for path in \"$STATE_DIR\"/*.exists; do\n"
            "      [ -e \"$path\" ] || continue\n"
            "      name=\"${path##*/}\"\n"
-           "      printf '%%s\\n' \"${name%%.exists}\"\n"
+           "      id=\"${name%%.exists}\"\n"
+           "      printf '%%s aimee-delegate-%%s\\n' \"$id\" \"$id\"\n"
            "    done\n"
            "    exit 0\n"
            "    ;;\n"
@@ -885,8 +886,10 @@ static void test_reap_aged_removes_only_old(void)
            "#!/bin/bash\n"
            "case \"$1\" in\n"
            "  ps)\n"
-           "    echo \"aaaaaaaaaaaa 2000-01-01 00:00:00 +0000 UTC\"\n"
-           "    echo \"bbbbbbbbbbbb $(date -u +'%%Y-%%m-%%d %%H:%%M:%%S') +0000 UTC\"\n"
+           "    echo \"aaaaaaaaaaaa aimee-delegate-old 2000-01-01 00:00:00 +0000 UTC\"\n"
+           "    echo \"bbbbbbbbbbbb aimee-delegate-new $(date -u +'%%Y-%%m-%%d %%H:%%M:%%S') "
+           "+0000 UTC\"\n"
+           "    echo \"cccccccccccc some-other-container 2000-01-01 00:00:00 +0000 UTC\"\n"
            "    ;;\n"
            "  rm)\n"
            "    shift 2\n"
@@ -907,8 +910,11 @@ static void test_reap_aged_removes_only_old(void)
    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
    buf[n] = '\0';
    fclose(f);
-   assert(strstr(buf, "aaaaaaaaaaaa") != NULL); /* ancient -> reaped */
-   assert(strstr(buf, "bbbbbbbbbbbb") == NULL); /* current -> kept */
+   assert(strstr(buf, "aaaaaaaaaaaa") != NULL); /* ancient delegate -> reaped */
+   assert(strstr(buf, "bbbbbbbbbbbb") == NULL); /* current delegate -> kept */
+   /* Ancient, but NOT ours. The container-name prefix is enforced in C now that the
+    * `--filter name=^aimee-delegate-` anchor is gone, so this must survive. */
+   assert(strstr(buf, "cccccccccccc") == NULL);
 
    unsetenv("AIMEE_DOCKER_BIN");
    unlink(script);
