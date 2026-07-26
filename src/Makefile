@@ -1656,10 +1656,10 @@ p1-rls-gate-check:
 	  echo "== P1 RLS isolation gate (AIMEE_TEST_PG_URL set) =="; \
 	  bash ../scripts/run-p1-rls-gate.sh "$$AIMEE_TEST_PG_URL"; \
 	else \
-	  echo "== P1 RLS isolation gate SKIPPED (AIMEE_TEST_PG_URL unset) =="; \
-	  echo "   NOT enforced anywhere: no workflow invokes this target. Run it by"; \
-	  echo "   hand with AIMEE_TEST_PG_URL set, or see the identity-mint-e2e job"; \
-	  echo "   in .github/workflows/ci.yml for a gate wired to actually run."; \
+	  echo "== P1 RLS isolation gate skipped here (AIMEE_TEST_PG_URL unset) =="; \
+	  echo "   Enforced by the p1-rls-gate job in .github/workflows/ci.yml, which"; \
+	  echo "   runs it against a pgvector container on every push. Set"; \
+	  echo "   AIMEE_TEST_PG_URL to run it locally as well."; \
 	fi
 
 # aimee's own agents must not fall behind aimee's MCP surface. A tool added to the
