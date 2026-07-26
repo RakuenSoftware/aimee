@@ -7830,10 +7830,21 @@ CREATE TABLE IF NOT EXISTS kb_write_tier_grant (
 -- requirement that the grant lookup and the enforced `team` claim agree is a
 -- schema invariant, not a convention.  A subject granted at team X therefore
 -- cannot be replayed against team Y even if the row were forged.
+-- THE DEPENDENT FOREIGN KEY IS DROPPED FIRST. This whole block re-runs on every schema
+-- apply, and the unique constraint below cannot be dropped while the foreign key still
+-- references its index:
+--   ERROR: cannot drop constraint kb_server_registry_server_team_key ... because other
+--   objects depend on it
+--   DETAIL: constraint kb_write_tier_grant_server_team_fk ... depends on index ...
+-- The original order worked exactly once, on a database where neither existed yet, and
+-- failed on every subsequent apply — which means aimee-kb could not boot against a database
+-- its own migrate step had already provisioned, since kb applies the schema at startup too.
+-- Found by standing up kb for real; no unit test or fresh-database gate can see it, because
+-- both only ever apply this once.
+ALTER TABLE kb_write_tier_grant DROP CONSTRAINT IF EXISTS kb_write_tier_grant_server_team_fk;
 ALTER TABLE kb_server_registry DROP CONSTRAINT IF EXISTS kb_server_registry_server_team_key;
 ALTER TABLE kb_server_registry ADD CONSTRAINT kb_server_registry_server_team_key
   UNIQUE (server_id,team_id);
-ALTER TABLE kb_write_tier_grant DROP CONSTRAINT IF EXISTS kb_write_tier_grant_server_team_fk;
 ALTER TABLE kb_write_tier_grant ADD CONSTRAINT kb_write_tier_grant_server_team_fk
   FOREIGN KEY (server_id,team_id) REFERENCES kb_server_registry(server_id,team_id);
 ALTER TABLE kb_write_tier_grant ENABLE ROW LEVEL SECURITY;
