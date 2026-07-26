@@ -1252,6 +1252,13 @@ $(KB_TOKEN_AUTHORITY): $(TOKEN_AUTHORITY_OBJS) $(TOKEN_AUTHORITY_VAULT_OBJS) \
 .PHONY: identity-mint-live
 identity-mint-live: ../identity-mint-live
 
+# NOTE THE ORDER-ONLY $(KB_RESOLVER) DEPENDENCY BELOW. kb's HTTP client does not
+# resolve names in-process: it forks aimee-kb-resolver, located NEXT TO THE RUNNING
+# EXECUTABLE via /proc/self/exe. Without that binary beside it this driver cannot
+# resolve the IdP's hostname and every exchange fails as UNAVAILABLE — which is
+# exactly how it failed on its first real CI run, while passing locally, because the
+# local tree already had the helper from a previous `make all`.
+#
 # Live OIDC relying-party driver (dev tool, NOT part of `all`): drives the login
 # against a real identity provider, which is the one part of increment 4a every
 # other test stubs. Links the real token-exchange POST — and therefore TLS and the
@@ -1265,7 +1272,8 @@ identity-mint-live: ../identity-mint-live
                     $(OBJDIR)/kb/kb_identity.o $(OBJDIR)/kb/http/kb_http_client.o \
                     $(OBJDIR)/kb/http/kb_tls.o $(OBJDIR)/server/oauth_pkce.o \
                     $(KB_PLATFORM_OBJS) $(OBJDIR)/cJSON.o $(OBJDIR)/util.o $(OBJDIR)/dstr.o \
-                    $(OBJDIR)/log.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/aimee_home.o
+                    $(OBJDIR)/log.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/aimee_home.o \
+                    | $(KB_RESOLVER)
 	$(CC) -o $@ $^ $(L_KB)
 
 .PHONY: oidc-login-live
