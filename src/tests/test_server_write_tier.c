@@ -270,6 +270,82 @@ int main(void)
    else
       printf("ok: claims are zeroed on denial\n");
 
+   /* --- verify / consume split ------------------------------------------
+    *
+    * The whole point of the split: the tier is needed early (it determines the
+    * connection's capabilities) but the single-use jti must only be spent once
+    * the request is actually going to be served. Verifying must therefore be
+    * free of side effects, or a request rejected for an unrelated reason - a
+    * rate limit, say - would burn a token the user then has to replace to retry
+    * something that never ran. */
+   g_replay_calls = 0;
+   g_replay_answer = 0;
+   n = mint("kid-a", "server-1", 7, KB_IDENTITY_TIER_FULL, "jti-00000020", 1000, 1300, tok,
+            sizeof(tok));
+   server_write_tier_outcome_t voc = (server_write_tier_outcome_t)-1;
+   server_identity_token_claims_t vclaims;
+   int vtier = server_write_tier_verify(tok, n, &cfg, 1100, &voc, &vclaims);
+   if (vtier != SERVER_REMOTE_WRITES_FULL || voc != SERVER_WRITE_TIER_OK)
+   {
+      printf("FAIL: verify did not return the token's tier\n");
+      fails++;
+   }
+   else if (g_replay_calls != 0)
+   {
+      printf("FAIL: verify consumed the token (%d replay calls)\n", g_replay_calls);
+      fails++;
+   }
+   else
+      printf("ok: verify yields the tier WITHOUT spending the token\n");
+
+   /* Verifying repeatedly is harmless — nothing has been spent yet. */
+   assert(server_write_tier_verify(tok, n, &cfg, 1100, &voc, NULL) == SERVER_REMOTE_WRITES_FULL);
+   assert(server_write_tier_verify(tok, n, &cfg, 1100, &voc, NULL) == SERVER_REMOTE_WRITES_FULL);
+   if (g_replay_calls != 0)
+   {
+      printf("FAIL: repeated verification spent the token\n");
+      fails++;
+   }
+   else
+      printf("ok: verification is repeatable and side-effect free\n");
+
+   /* Consuming spends it exactly once. */
+   int ctier = server_write_tier_consume(&vclaims, &cfg, 1100, &voc);
+   if (ctier != SERVER_REMOTE_WRITES_FULL || voc != SERVER_WRITE_TIER_OK || g_replay_calls != 1)
+   {
+      printf("FAIL: consume did not spend the token exactly once\n");
+      fails++;
+   }
+   else
+      printf("ok: consume spends the token and keeps the verified tier\n");
+
+   /* A replay at consumption denies even though verification succeeded — the
+    * late check is still binding, which is what makes the split safe. */
+   g_replay_answer = 1;
+   if (server_write_tier_consume(&vclaims, &cfg, 1100, &voc) != SERVER_REMOTE_WRITES_OFF ||
+       voc != SERVER_WRITE_TIER_REPLAY)
+   {
+      printf("FAIL: a replay at consumption did not deny\n");
+      fails++;
+   }
+   else
+      printf("ok: replay still denies at consumption after a clean verify\n");
+   g_replay_answer = 0;
+
+   /* verify needs no replay hook at all; consume refuses without one rather
+    * than silently treating the token as fresh. */
+   server_write_tier_config_t noreplay = cfg;
+   noreplay.replay = NULL;
+   assert(server_write_tier_verify(tok, n, &noreplay, 1100, &voc, NULL) ==
+          SERVER_REMOTE_WRITES_FULL);
+   if (server_write_tier_consume(&vclaims, &noreplay, 1100, &voc) != SERVER_REMOTE_WRITES_OFF)
+   {
+      printf("FAIL: consume without a replay hook did not deny\n");
+      fails++;
+   }
+   else
+      printf("ok: verify needs no store; consume refuses without one\n");
+
    EVP_PKEY_free(g_key);
    printf(fails ? "test_server_write_tier: FAILED\n"
                 : "  PASS: server_write_tier denies by default and names every reason\n");

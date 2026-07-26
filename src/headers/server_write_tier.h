@@ -73,7 +73,7 @@ extern "C"
       void *replay_ctx;
    } server_write_tier_config_t;
 
-   /* Resolve the write tier for one request.
+   /* Resolve the write tier for one request: verify THEN consume.
     *
     * `token` is the raw bearer credential (already stripped of any "Bearer "
     * prefix), or NULL/empty when none was presented. On success writes the
@@ -85,6 +85,32 @@ extern "C"
                                  const server_write_tier_config_t *config, int64_t now,
                                  server_write_tier_outcome_t *outcome,
                                  server_identity_token_claims_t *claims_out);
+
+   /* The PURE half of resolve: signature, issuer, audience, window and team, with
+    * NO replay consumption and no side effects at all.
+    *
+    * This exists because the caller needs the tier at two different moments. The
+    * tier determines the connection's capabilities, which are computed early;
+    * but consuming the single-use jti must happen late, only once the request is
+    * actually going to be served. Verifying early and consuming early would burn
+    * a user's token on a request that is then rejected for an unrelated reason —
+    * a rate limit, say — and the user would have to obtain a new token to retry
+    * something that never ran.
+    *
+    * `config->replay` is not called and may be NULL. */
+   int server_write_tier_verify(const char *token, size_t token_len,
+                                const server_write_tier_config_t *config, int64_t now,
+                                server_write_tier_outcome_t *outcome,
+                                server_identity_token_claims_t *claims_out);
+
+   /* The CONSUMING half: spend the single-use jti for claims already returned by
+    * server_write_tier_verify. Returns the tier that survives consumption, i.e.
+    * the verified tier on success and SERVER_REMOTE_WRITES_OFF on replay or when
+    * the replay store cannot answer. Call at most once per request, and only
+    * when the request is going to be served. */
+   int server_write_tier_consume(const server_identity_token_claims_t *claims,
+                                 const server_write_tier_config_t *config, int64_t now,
+                                 server_write_tier_outcome_t *outcome);
 
    /* Stable lowercase label for logs and the deny metric. Never NULL. */
    const char *server_write_tier_outcome_str(server_write_tier_outcome_t outcome);
