@@ -4,8 +4,11 @@
 
 #include "cJSON.h"
 #include "db2/management_intent_fields.h" /* db2_intent_canonical_actor (header-only) */
+#include "db2/db2_tenant.h"               /* db2_tenant_scope_*: sets aimee.principal */
 #include "db2/write_tier_grant.h"
+#include "kb_identity.h" /* kb_identity_key: the actor's canonical identity */
 #include "kb_identity_token.h"
+#include "kb_reqctx.h" /* kb_reqctx_actor: the VERIFIED per-request principal */
 #include "log.h"
 
 #include <stdio.h>
@@ -56,6 +59,49 @@ static int map_db_failure(int rc, char *out_buf, int out_cap)
    return json_error(out_buf, out_cap, 403,
                      "refused: grant administration requires admin or team-lead authority, "
                      "and the (server, team) pair must be registered");
+}
+
+/* Open a tenant scope for the AUTHENTICATED actor, which is what makes the definer functions
+ * work at all.
+ *
+ * kb_write_tier_grant_set / _revoke are SECURITY DEFINER and read the acting identity from
+ * aimee.principal, which only a tenant scope sets. The first version of these routes called the
+ * db2 seam with NO scope open, so aimee.principal was unset, and the definer correctly refused
+ * every call as "admin or team lead only" — increment 5 was wired end to end and could not
+ * create a grant. Found by standing the whole stack up; nothing below this layer can see it,
+ * because each layer's tests supply their own actor.
+ *
+ * THE ACTOR COMES FROM AUTHENTICATION, never from the request body. kb_reqctx_actor() is the
+ * principal kb's verifier produced for this request — for the server's bearer that is the owner
+ * principal — so a caller cannot nominate whose authority it is acting under. That is also why
+ * granted_by is derived here rather than accepted: an audit trail that records a value from the
+ * request can be written to order.
+ *
+ * Returns 0 with a scope open, or an HTTP status written into out_buf. */
+static int grant_scope_begin(int64_t team_id, char *actor_key, size_t actor_cap, char *out_buf,
+                             int out_cap, int *status_out)
+{
+   const kb_principal_t *actor = kb_reqctx_actor();
+   if (!actor)
+   {
+      *status_out = json_error(out_buf, out_cap, 401, "authentication required");
+      return -1;
+   }
+   if (kb_identity_key(actor, actor_key, actor_cap) != 0)
+   {
+      /* An authenticated principal with no derivable identity key cannot be recorded as a
+       * granter, and a grant whose actor cannot be named must not be made. */
+      *status_out = json_error(out_buf, out_cap, 403, "the caller has no usable identity");
+      return -1;
+   }
+   int rc = db2_tenant_scope_begin(actor, team_id);
+   if (rc != 0)
+   {
+      LOG_WARN("kb.grants", "tenant scope refused for team %lld (rc=%d)", (long long)team_id, rc);
+      *status_out = map_db_failure(rc, out_buf, out_cap);
+      return -1;
+   }
+   return 0;
 }
 
 /* A team id from JSON. cJSON stores every number as a double, so a bare range check
@@ -208,19 +254,34 @@ static int post_set(const char *body, char *out_buf, int out_cap)
    /* The REPORTING variant, not the plain setter: `changed` tells an operator script that
     * somebody's access just grew, and it can only be trusted when the prior state was
     * observed under the same lock as the write. */
+   char actor_key[578] = "";
+   int scope_status = 0;
+   if (grant_scope_begin(team_id, actor_key, sizeof(actor_key), out_buf, out_cap, &scope_status) !=
+       0)
+      return scope_status;
+
+   /* granted_by is the AUTHENTICATED actor, not the `granted_by` the request carried. The wire
+    * field is ignored precisely because an audit trail recording a caller-supplied name can be
+    * written to order. */
    db2_write_tier_grant_report_t report;
    int rc =
-       db2_write_tier_grant_set_reporting(server_id, team_id, subject, tier, granted_by, &report);
+       db2_write_tier_grant_set_reporting(server_id, team_id, subject, tier, actor_key, &report);
    if (rc != 0)
    {
+      db2_tenant_scope_rollback();
       LOG_WARN("kb.grants", "write-tier grant set refused for %s on %s (rc=%d)", subject, server_id,
                rc);
       return map_db_failure(rc, out_buf, out_cap);
    }
 
-   LOG_INFO("kb.grants", "write-tier grant %s for %s on %s team %lld -> %s",
+   if (db2_tenant_scope_commit() != 0)
+      /* The grant may or may not exist. Unavailable rather than success: a caller told
+       * "granted" would not retry, and one told nothing would. */
+      return json_error(out_buf, out_cap, 503,
+                        "the grant may not have been committed; re-run to confirm");
+   LOG_INFO("kb.grants", "write-tier grant %s for %s on %s team %lld -> %s (by %s)",
             report.changed ? "changed" : "unchanged", subject, server_id, (long long)team_id,
-            kb_identity_tier_str(tier));
+            kb_identity_tier_str(tier), actor_key);
    cJSON *o = cJSON_CreateObject();
    cJSON_AddBoolToObject(o, "changed", report.changed);
    cJSON_AddBoolToObject(o, "was_revoked", report.was_revoked);
@@ -266,10 +327,17 @@ static int post_revoke(const char *body, char *out_buf, int out_cap)
     *
     * The revoke itself is idempotent, so a race between this read and the write costs at
     * worst a misreported `found`, never a wrong outcome. */
+   char actor_key[578] = "";
+   int scope_status = 0;
+   if (grant_scope_begin(team_id, actor_key, sizeof(actor_key), out_buf, out_cap, &scope_status) !=
+       0)
+      return scope_status;
+
    kb_identity_tier_t existing = KB_IDENTITY_TIER_OFF;
    int lookup = db2_write_tier_grant_lookup(server_id, team_id, subject, &existing);
    if (lookup < 0)
    {
+      db2_tenant_scope_rollback();
       /* A failed lookup must not be reported as "no grant existed": that is an authoritative
        * claim this call is in no position to make. */
       LOG_WARN("kb.grants", "could not determine whether a grant existed for %s on %s (rc=%d)",
@@ -281,12 +349,16 @@ static int post_revoke(const char *body, char *out_buf, int out_cap)
    int rc = db2_write_tier_grant_revoke(server_id, team_id, subject);
    if (rc != 0)
    {
+      db2_tenant_scope_rollback();
       LOG_WARN("kb.grants", "write-tier grant revoke refused for %s on %s (rc=%d)", subject,
                server_id, rc);
       return map_db_failure(rc, out_buf, out_cap);
    }
-   LOG_INFO("kb.grants", "write-tier grant revoked for %s on %s team %lld (existed=%d)", subject,
-            server_id, (long long)team_id, found);
+   if (db2_tenant_scope_commit() != 0)
+      return json_error(out_buf, out_cap, 503,
+                        "the revocation may not have been committed; re-run to confirm");
+   LOG_INFO("kb.grants", "write-tier grant revoked for %s on %s team %lld (existed=%d, by %s)",
+            subject, server_id, (long long)team_id, found, actor_key);
    cJSON *o = cJSON_CreateObject();
    cJSON_AddBoolToObject(o, "found", found);
    return json_body(out_buf, out_cap, 200, o);
@@ -309,6 +381,12 @@ static int get_list(const char *query_string, char *out_buf, int out_cap)
    if (query_param(query_string, "include_revoked", flag, sizeof(flag)) == 1)
       include_revoked = (!strcmp(flag, "1") || !strcmp(flag, "true"));
 
+   char actor_key[578] = "";
+   int scope_status = 0;
+   if (grant_scope_begin(team_id, actor_key, sizeof(actor_key), out_buf, out_cap, &scope_status) !=
+       0)
+      return scope_status;
+
    db2_write_tier_grant_row_t rows[GRANTS_LIST_MAX];
    size_t count = 0;
    /* The subject filter goes DOWN to the query, not applied to the rows that come back:
@@ -318,7 +396,13 @@ static int get_list(const char *query_string, char *out_buf, int out_cap)
        db2_write_tier_grant_list_ex(server_id, team_id, include_revoked,
                                     have_subject ? subject : NULL, rows, GRANTS_LIST_MAX, &count);
    if (rc != 0)
+   {
+      db2_tenant_scope_rollback();
       return map_db_failure(rc, out_buf, out_cap);
+   }
+   /* A read, so a failed commit is not ambiguous the way a write's is. */
+   if (db2_tenant_scope_commit() != 0)
+      return json_error(out_buf, out_cap, 503, "could not read the grants");
 
    cJSON *o = cJSON_CreateObject();
    cJSON *arr = cJSON_AddArrayToObject(o, "grants");

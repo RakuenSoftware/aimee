@@ -91,9 +91,10 @@ int rh_grant_set(const route_req_t *rq, char *resp, int cap)
       return err_json(resp, cap, 400,
                       "server_id, an integer team_id, subject and tier are required");
    }
-   /* The acting operator is recorded as the granter. This route is UDS-only, so that is the
-    * local operator — the root of trust §7 defines — and not a caller-supplied name, which
-    * would let the audit trail be written to order. */
+   /* granted_by is sent for wire compatibility but kb IGNORES it: kb derives the granter from
+    * the principal its own verifier produced for the request. That is the stronger rule — a
+    * value travelling in a body can be written to order, and kb should not have to trust this
+    * server's word about who acted. Kept as "owner" so the field is never absent. */
    kb_client_grant_change_t change;
    kb_client_grant_result_t rc = kb_client_grant_set(jsrv->valuestring, team_id, jsub->valuestring,
                                                      jtier->valuestring, "owner", &change);

@@ -22,6 +22,8 @@
 
 #include "cJSON.h"
 #include "db2/write_tier_grant.h"
+#include "kb_identity.h"
+#include "kb_reqctx.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -40,6 +42,7 @@ static int stub_lookup_rc;
 static int64_t stub_last_team;
 static char stub_last_subject[600];
 static char stub_last_server[200];
+static char stub_last_granted_by[600];
 static kb_identity_tier_t stub_last_tier;
 static db2_write_tier_grant_report_t stub_report;
 static size_t stub_row_count;
@@ -53,6 +56,7 @@ int db2_write_tier_grant_set_reporting(const char *server_id, int64_t team_id, c
    assert(server_id && subject && granted_by && out);
    snprintf(stub_last_server, sizeof(stub_last_server), "%s", server_id);
    snprintf(stub_last_subject, sizeof(stub_last_subject), "%s", subject);
+   snprintf(stub_last_granted_by, sizeof(stub_last_granted_by), "%s", granted_by ? granted_by : "");
    stub_last_team = team_id;
    stub_last_tier = tier;
    memset(out, 0, sizeof(*out));
@@ -124,6 +128,41 @@ int db2_write_tier_grant_lookup(const char *server_id, int64_t team_id, const ch
    return stub_lookup_rc;
 }
 
+/* The routes now open a tenant scope for the AUTHENTICATED actor, because the definer functions
+ * read aimee.principal and a call with no scope is refused as "admin or team lead only" — which
+ * is how increment 5 shipped wired-but-unusable until a live run found it. These stubs let the
+ * routing tests supply an actor and observe that a scope was opened and closed. */
+static int stub_scope_begins;
+static int stub_scope_commits;
+static int stub_scope_rollbacks;
+static int stub_scope_rc;
+static kb_principal_t stub_actor;
+static int stub_have_actor;
+
+const kb_principal_t *kb_reqctx_actor(void)
+{
+   return stub_have_actor ? &stub_actor : NULL;
+}
+
+int db2_tenant_scope_begin(const kb_principal_t *p, int64_t team)
+{
+   stub_scope_begins++;
+   (void)p;
+   (void)team;
+   return stub_scope_rc;
+}
+
+int db2_tenant_scope_commit(void)
+{
+   stub_scope_commits++;
+   return 0;
+}
+
+void db2_tenant_scope_rollback(void)
+{
+   stub_scope_rollbacks++;
+}
+
 /* ── Helpers ───────────────────────────────────────────────────────────────── */
 
 static void reset(void)
@@ -134,6 +173,13 @@ static void reset(void)
    stub_last_had_subject = -1;
    stub_lookup_calls = 0;
    stub_lookup_rc = DB2_WRITE_TIER_GRANT_NONE;
+   stub_scope_begins = stub_scope_commits = stub_scope_rollbacks = 0;
+   stub_scope_rc = 0;
+   /* An owner principal, which is what kb's verifier produces for the server's bearer. */
+   memset(&stub_actor, 0, sizeof(stub_actor));
+   stub_actor.kind = KB_PRIN_OWNER;
+   stub_actor.authenticated = 1;
+   stub_have_actor = 1;
    stub_last_team = 0;
    stub_last_subject[0] = stub_last_server[0] = '\0';
    stub_row_count = 0;
@@ -301,6 +347,73 @@ static void test_set_rejects(void)
                 "\"tier\":\"full\",\"granted_by\":\"o\"}",
                 out, sizeof(out)) == 200);
    assert(stub_last_team == 9007199254740991LL);
+}
+
+/* THE TENANT SCOPE IS THE THING THAT MAKES THESE ROUTES WORK AT ALL.
+ *
+ * kb_write_tier_grant_set / _revoke are SECURITY DEFINER and read the acting identity from
+ * aimee.principal, which only a tenant scope sets. The first version of these routes opened no
+ * scope, so every call was refused as "admin or team lead only" — increment 5 was wired end to
+ * end and could not create a grant. A live run found it; no layer-local test could, because each
+ * layer's tests supply their own actor. */
+static void test_actor_scope(void)
+{
+   char out[4096] = "";
+   const char *good = "{\"server_id\":\"srv1\",\"team_id\":910001,\"subject\":\"owner\","
+                      "\"tier\":\"data\",\"granted_by\":\"owner\"}";
+
+   /* A scope is opened and COMMITTED on the success path. */
+   reset();
+   stub_report.changed = 1;
+   assert(route("POST", "/v1/write-tier-grants/set", NULL, good, out, sizeof(out)) == 200);
+   assert(stub_scope_begins == 1 && stub_scope_commits == 1 && stub_scope_rollbacks == 0);
+
+   /* NO AUTHENTICATED ACTOR: refused 401, and the database is never touched. A grant whose actor
+    * cannot be named must not be made. */
+   reset();
+   stub_have_actor = 0;
+   assert(route("POST", "/v1/write-tier-grants/set", NULL, good, out, sizeof(out)) == 401);
+   assert(stub_set_calls == 0 && stub_scope_begins == 0);
+   reset();
+   stub_have_actor = 0;
+   assert(route("POST", "/v1/write-tier-grants/revoke", NULL,
+                "{\"server_id\":\"s\",\"team_id\":1,\"subject\":\"owner\"}", out,
+                sizeof(out)) == 401);
+   assert(stub_revoke_calls == 0);
+   reset();
+   stub_have_actor = 0;
+   assert(route("GET", "/v1/write-tier-grants", "server_id=s&team_id=1", NULL, out, sizeof(out)) ==
+          401);
+   assert(stub_list_calls == 0);
+
+   /* A scope that cannot be opened refuses before the write, and rolls nothing back because
+    * nothing began. */
+   reset();
+   stub_scope_rc = -1;
+   assert(route("POST", "/v1/write-tier-grants/set", NULL, good, out, sizeof(out)) == 403);
+   assert(stub_set_calls == 0);
+
+   /* A FAILING db call ROLLS BACK rather than leaving a scope open on the connection. */
+   reset();
+   stub_rc = -1;
+   assert(route("POST", "/v1/write-tier-grants/set", NULL, good, out, sizeof(out)) == 403);
+   assert(stub_scope_begins == 1 && stub_scope_rollbacks == 1 && stub_scope_commits == 0);
+   reset();
+   stub_lookup_rc = -1;
+   assert(route("POST", "/v1/write-tier-grants/revoke", NULL,
+                "{\"server_id\":\"s\",\"team_id\":1,\"subject\":\"owner\"}", out,
+                sizeof(out)) == 403);
+   assert(stub_scope_rollbacks == 1 && stub_scope_commits == 0);
+
+   /* THE GRANTER IS THE AUTHENTICATED ACTOR, not the request's granted_by. A body that names
+    * somebody else must not change who the audit trail records. */
+   reset();
+   stub_report.changed = 1;
+   assert(route("POST", "/v1/write-tier-grants/set", NULL,
+                "{\"server_id\":\"srv1\",\"team_id\":910001,\"subject\":\"alice\","
+                "\"tier\":\"data\",\"granted_by\":\"mallory\"}",
+                out, sizeof(out)) == 200);
+   assert(!strcmp(stub_last_granted_by, "owner"));
 }
 
 static void test_db_failures(void)
@@ -515,6 +628,7 @@ int main(void)
    test_methods();
    test_set();
    test_set_rejects();
+   test_actor_scope();
    test_db_failures();
    test_revoke();
    test_list();

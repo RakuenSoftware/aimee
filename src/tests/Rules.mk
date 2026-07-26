@@ -5422,6 +5422,7 @@ $(TESTPREFIX)/unit-test-kb-client-grants: $(OBJDIR)/tests/test_kb_client_grants.
 # requests reach the seam at all, and with what arguments.
 $(TESTPREFIX)/unit-test-kb-http-grants: $(OBJDIR)/tests/test_kb_http_grants.o \
                      $(OBJDIR)/kb/http/kb_http_grants.o \
+                     $(OBJDIR)/kb/kb_identity.o \
                      $(OBJDIR)/kb/kb_identity_token.o \
                      $(OBJDIR)/util.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o $(OBJDIR)/log.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
