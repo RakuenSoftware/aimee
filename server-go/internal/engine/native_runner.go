@@ -576,6 +576,19 @@ type panelSeatReport struct {
 	Response panelResponse
 }
 
+// chairmanDeadline gives the chairman its own budget, measured from the step
+// context rather than from whatever the analysis phase left behind. The chairman
+// is a separate delegate turn: it reads every seat's report plus the artifact and
+// writes the final verdict, so it needs the same time a seat had, not a remainder.
+// Sharing one deadline starved it to zero whenever the seats ran long, and it
+// failed on the POST that launches its job.
+func chairmanDeadline(step context.Context, deadlineMS int) (context.Context, context.CancelFunc) {
+	if deadlineMS <= 0 {
+		return step, func() {}
+	}
+	return context.WithTimeout(step, time.Duration(deadlineMS)*time.Millisecond)
+}
+
 type panelAnalysis struct {
 	Feedback    wfe.ReviewFeedback
 	Approvals   int
@@ -701,6 +714,13 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 		}
 	}
 	if panel.ChairmanEnabled {
+		// The chairman is a separate step and gets its own deadline, not the tail of
+		// the analysis phase's. It previously inherited the shared panel context, so
+		// slow seats left it nothing and it failed on the POST that launches its job
+		// — discarding a completed panel and re-running those same slow seats.
+		chairmanCtx, chairmanCancel := chairmanDeadline(ctx, panel.DeadlineMS)
+		roundtableCtx = chairmanCtx
+		defer chairmanCancel()
 		req.CostLimitUSD = remainingCostLimit(stepCostLimit, totalCost)
 		if stepCostLimit > 0 && req.CostLimitUSD <= 0 {
 			rt := roundtableResult(&feedback, false, false, analysis, len(seats), totalCost)

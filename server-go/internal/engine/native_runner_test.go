@@ -1653,3 +1653,48 @@ func TestPanelWithAnUnreachableSeatStillParks(t *testing.T) {
 		t.Fatalf("an unreachable seat should still park: %+v", result)
 	}
 }
+
+// The chairman is a separate step: it gets the configured deadline in full,
+// measured from the step context, however long the seats took. Sharing the
+// panel's context starved it to zero whenever they ran long, and it failed on
+// the POST that merely launches its job.
+func TestChairmanGetsItsOwnFullDeadline(t *testing.T) {
+	const deadlineMS = 600_000
+	budget := time.Duration(deadlineMS) * time.Millisecond
+	step := t.Context()
+
+	ctx, done := chairmanDeadline(step, deadlineMS)
+	defer done()
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("chairman ran with no deadline at all")
+	}
+	// Its budget is the configured one, not a remainder, so it must be close to
+	// the full value rather than some fraction of it.
+	if remaining := time.Until(deadline); remaining < budget-time.Minute {
+		t.Fatalf("chairman budget=%v, want the configured %v", remaining, budget)
+	}
+
+	t.Run("an exhausted analysis phase does not shorten it", func(t *testing.T) {
+		exhausted, cancel := context.WithTimeout(step, time.Millisecond)
+		defer cancel()
+		<-exhausted.Done()
+		ctx, done := chairmanDeadline(step, deadlineMS)
+		defer done()
+		if err := ctx.Err(); err != nil {
+			t.Fatalf("chairman inherited a spent budget: %v", err)
+		}
+		deadline, _ := ctx.Deadline()
+		if remaining := time.Until(deadline); remaining < budget-time.Minute {
+			t.Fatalf("chairman budget=%v after slow seats, want %v", remaining, budget)
+		}
+	})
+
+	t.Run("no configured deadline is left alone", func(t *testing.T) {
+		ctx, done := chairmanDeadline(step, 0)
+		defer done()
+		if ctx != step {
+			t.Fatal("an unbounded roundtable must stay unbounded")
+		}
+	})
+}
