@@ -181,7 +181,8 @@ static void test_happy_path(EVP_PKEY *idp_key, const char *jwks)
    /* 1. START. */
    kb_oidc_login_pending_t pending;
    char url[KB_OIDC_LOGIN_URL_MAX];
-   assert(kb_oidc_login_start(&cfg, "srv-a", &pending, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
+   assert(kb_oidc_login_start(&cfg, "srv-a", 770001, &pending, url, sizeof(url)) ==
+          KB_OIDC_LOGIN_OK);
 
    /* 2. RETAIN across the browser redirect. */
    assert(kb_oidc_login_store_put(&pending, NOW, 300) == KB_OIDC_LOGIN_STORE_OK);
@@ -268,7 +269,8 @@ static void test_replayed_callback_fails(EVP_PKEY *idp_key, const char *jwks)
    kb_oidc_login_config_t cfg = rp_config();
    kb_oidc_login_pending_t pending;
    char url[KB_OIDC_LOGIN_URL_MAX];
-   assert(kb_oidc_login_start(&cfg, "srv-a", &pending, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
+   assert(kb_oidc_login_start(&cfg, "srv-a", 770001, &pending, url, sizeof(url)) ==
+          KB_OIDC_LOGIN_OK);
    assert(kb_oidc_login_store_put(&pending, NOW, 300) == KB_OIDC_LOGIN_STORE_OK);
 
    char state[128];
@@ -287,8 +289,9 @@ static void test_foreign_state_fails(void)
    kb_oidc_login_config_t cfg = rp_config();
    kb_oidc_login_pending_t mine, theirs;
    char my_url[KB_OIDC_LOGIN_URL_MAX], their_url[KB_OIDC_LOGIN_URL_MAX];
-   assert(kb_oidc_login_start(&cfg, "srv-a", &mine, my_url, sizeof(my_url)) == KB_OIDC_LOGIN_OK);
-   assert(kb_oidc_login_start(&cfg, "srv-a", &theirs, their_url, sizeof(their_url)) ==
+   assert(kb_oidc_login_start(&cfg, "srv-a", 770001, &mine, my_url, sizeof(my_url)) ==
+          KB_OIDC_LOGIN_OK);
+   assert(kb_oidc_login_start(&cfg, "srv-a", 770001, &theirs, their_url, sizeof(their_url)) ==
           KB_OIDC_LOGIN_OK);
    /* Only one of them was ever started by this kb. */
    assert(kb_oidc_login_store_put(&mine, NOW, 300) == KB_OIDC_LOGIN_STORE_OK);
@@ -314,10 +317,10 @@ static void test_valid_token_from_another_login_fails(EVP_PKEY *idp_key, const c
    /* Two logins started by this same kb. */
    kb_oidc_login_pending_t victim, attacker;
    char victim_url[KB_OIDC_LOGIN_URL_MAX], attacker_url[KB_OIDC_LOGIN_URL_MAX];
-   assert(kb_oidc_login_start(&cfg, "srv-a", &victim, victim_url, sizeof(victim_url)) ==
+   assert(kb_oidc_login_start(&cfg, "srv-a", 770001, &victim, victim_url, sizeof(victim_url)) ==
           KB_OIDC_LOGIN_OK);
-   assert(kb_oidc_login_start(&cfg, "srv-a", &attacker, attacker_url, sizeof(attacker_url)) ==
-          KB_OIDC_LOGIN_OK);
+   assert(kb_oidc_login_start(&cfg, "srv-a", 770001, &attacker, attacker_url,
+                              sizeof(attacker_url)) == KB_OIDC_LOGIN_OK);
 
    /* The IdP mints a token for the ATTACKER's login: correctly signed, correct
     * issuer and audience, unexpired. It verifies. */

@@ -352,6 +352,54 @@ echo "fixture: installation=$inst enrollment(target)=770101 enrollment(local)=77
 psqlt -c "SELECT 'revocation generation: '||generation FROM kb_cert_revocation_generation
             WHERE singleton=1;"
 
+step "Login context: the two values a login front-end reads rather than is told"
+# kb_management_identity_login_context is what the OIDC callback and the PAM route
+# call before filing an intent. It must return exactly the kid and installation
+# this rig provisioned — if it returned anything else, a real login would file an
+# intent the mint then refuses, and the failure would surface far from its cause.
+psqlt >"$work/logctx.out" 2>&1 <<SQL || true
+BEGIN;
+SELECT set_config('aimee.principal', 'alice', true);
+SELECT set_config('aimee.team', '770001', true);
+SELECT 'LOGCTX '||installation_id||' '||kid
+  FROM kb_management_identity_login_context(770001);
+COMMIT;
+SQL
+logctx=$(grep '^LOGCTX ' "$work/logctx.out" | head -1)
+if [ -z "$logctx" ]; then
+  echo "login context refused — a login front-end could not file an intent:" >&2
+  sed -n '1,6p' "$work/logctx.out" >&2
+  exit 5
+fi
+set -- $logctx
+if [ "$2" != "$inst" ] || [ "$3" != "$kid" ]; then
+  echo "login context DISAGREES with provisioned state:" >&2
+  echo "  returned installation=$2 kid=$3" >&2
+  echo "  provisioned installation=$inst kid=$kid" >&2
+  exit 5
+fi
+echo "login context agrees: installation=${2:0:12}... kid=$3"
+
+# The negative cases, which are the whole reason this is not a plain SELECT: a
+# non-member must not be able to learn that this team has an active instance, and
+# the named team must match the scope the caller set.
+for probe in "notamember:770001:a stranger" "alice:770002:a team the caller is not scoped to"; do
+  who=${probe%%:*}; rest=${probe#*:}; team=${rest%%:*}; label=${rest#*:}
+  out=$(psqlt 2>&1 <<SQL || true
+BEGIN;
+SELECT set_config('aimee.principal', '$who', true);
+SELECT set_config('aimee.team', '$team', true);
+SELECT 'LEAK '||installation_id FROM kb_management_identity_login_context($team);
+COMMIT;
+SQL
+)
+  if printf '%s' "$out" | grep -q '^LEAK '; then
+    echo "login context LEAKED to $label ($who/$team)" >&2
+    exit 5
+  fi
+  echo "  refused $label: correct"
+done
+
 step "Identity intent (the login seam) then the snapshot (all 11 gates)"
 # The intent writer runs as the authenticated principal with the grant as the
 # authorization, exactly as a login front end drives it. Then the snapshot: it is

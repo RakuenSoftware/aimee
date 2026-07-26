@@ -372,7 +372,7 @@ static int server_id_valid(const char *s)
 }
 
 kb_oidc_login_result_t kb_oidc_login_start(const kb_oidc_login_config_t *cfg,
-                                           const char *target_server_id,
+                                           const char *target_server_id, int64_t team_id,
                                            kb_oidc_login_pending_t *pending, char *url_out,
                                            size_t url_cap)
 {
@@ -381,7 +381,7 @@ kb_oidc_login_result_t kb_oidc_login_start(const kb_oidc_login_config_t *cfg,
    if (pending)
       memset(pending, 0, sizeof(*pending));
    if (!cfg || !pending || !url_out || url_cap == 0 || !kb_oidc_login_config_valid(cfg) ||
-       !server_id_valid(target_server_id))
+       !server_id_valid(target_server_id) || team_id < 1)
       return KB_OIDC_LOGIN_INVALID;
 
    kb_oidc_login_pending_t candidate;
@@ -396,6 +396,7 @@ kb_oidc_login_result_t kb_oidc_login_start(const kb_oidc_login_config_t *cfg,
    }
    snprintf(candidate.redirect_uri, sizeof(candidate.redirect_uri), "%s", cfg->redirect_uri);
    snprintf(candidate.target_server_id, sizeof(candidate.target_server_id), "%s", target_server_id);
+   candidate.team_id = team_id;
 
    char challenge[OAUTH_PKCE_CHALLENGE_LEN + 1] = "";
    if (oauth_pkce_s256_challenge(candidate.code_verifier, challenge, sizeof(challenge)) != 0)

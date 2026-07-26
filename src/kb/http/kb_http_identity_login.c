@@ -4,6 +4,7 @@
 
 #include "cJSON.h"
 #include "pam_auth.h" /* pam_check_credentials — the one PAM policy, shared with the dashboard */
+#include "db2/management_identity_journal.h"
 #include "db2/management_intent_fields.h" /* db2_intent_bare_username (header-only) */
 #include "kb_auth_oidc.h"
 #include "kb_oidc_login.h"
@@ -90,23 +91,29 @@ static int post_login_start(const char *body, int64_t now, char *out_buf, int ou
 
    cJSON *request = body && body[0] ? cJSON_Parse(body) : NULL;
    const cJSON *server = request ? cJSON_GetObjectItemCaseSensitive(request, "server_id") : NULL;
+   const cJSON *team = request ? cJSON_GetObjectItemCaseSensitive(request, "team_id") : NULL;
    char server_id[KB_OIDC_LOGIN_SERVER_MAX + 1] = "";
+   /* team_id is required at START, not at the callback: it has to be retained
+    * alongside the other per-login state so the callback cannot name its own. */
    if (!cJSON_IsString(server) || !server->valuestring || !server->valuestring[0] ||
-       strlen(server->valuestring) > KB_OIDC_LOGIN_SERVER_MAX)
+       strlen(server->valuestring) > KB_OIDC_LOGIN_SERVER_MAX || !cJSON_IsNumber(team) ||
+       team->valuedouble < 1 || team->valuedouble > 9.0e15)
    {
       cJSON_Delete(request);
-      return json_error(out_buf, out_cap, 400, "server_id is required");
+      return json_error(out_buf, out_cap, 400, "server_id and team_id are required");
    }
    snprintf(server_id, sizeof(server_id), "%s", server->valuestring);
+   int64_t team_id = (int64_t)team->valuedouble;
    cJSON_Delete(request);
 
    kb_oidc_login_pending_t pending;
    char url[KB_OIDC_LOGIN_URL_MAX];
-   kb_oidc_login_result_t rc = kb_oidc_login_start(&cfg, server_id, &pending, url, sizeof(url));
+   kb_oidc_login_result_t rc =
+       kb_oidc_login_start(&cfg, server_id, team_id, &pending, url, sizeof(url));
    if (rc == KB_OIDC_LOGIN_INVALID)
       /* The profile was already checked, so this is the server_id failing the
-       * grammar the identity tables CHECK. */
-      return json_error(out_buf, out_cap, 400, "server_id is not a valid identifier");
+       * grammar the identity tables CHECK, or a non-positive team. */
+      return json_error(out_buf, out_cap, 400, "server_id or team_id is not valid");
    if (rc != KB_OIDC_LOGIN_OK)
    {
       LOG_WARN("kb.oidc.login", "could not start a login (rc=%d)", (int)rc);
@@ -132,6 +139,90 @@ static int post_login_start(const char *body, int64_t now, char *out_buf, int ou
    cJSON_AddStringToObject(o, "redirect_uri", cfg.redirect_uri);
    /* The pending record is now the store's; this copy has served its purpose. */
    kb_oidc_login_pending_clear(&pending);
+   return json_body(out_buf, out_cap, 200, o);
+}
+
+/* The issuer recorded on every intent this kb files. A constant, not configuration:
+ * it names the AUTHORITY that will sign the token (this kb), which is not something
+ * a deployment or a caller gets to vary — the mint's own checks bind the token root
+ * and publication to it. Distinct from the OIDC issuer, which names who
+ * authenticated the user. */
+#define IDENTITY_INTENT_TOKEN_ISSUER "kb"
+
+/* How long a minted write token lives. Short by policy: a token is consumed on
+ * first use anyway, so this only bounds how long an unused one stays mintable.
+ * DB2_IDENTITY_TTL_MAX_SECONDS is the ceiling the schema enforces. */
+#define IDENTITY_INTENT_TTL_SECONDS 300
+
+/* File the identity intent for an authenticated principal and render the result.
+ *
+ * Shared by both login modes deliberately. The two routes differ entirely in how
+ * they authenticate and not at all in what they do afterwards, and the moment that
+ * stops being true one mode acquires an authorization step the other lacks.
+ *
+ * kid and installation_id are READ here, never taken from the caller — see
+ * db2_identity_login_context. Failures are mapped to the same generic answer the
+ * calling route uses for an authentication failure, because "you are who you say
+ * but have no grant on that server" is not something to spell out to a caller that
+ * has just proved only its own identity. */
+static int file_intent(const kb_principal_t *principal, const char *subject, int64_t team_id,
+                       const char *server_id, db2_identity_auth_mode_t mode, const char *log_domain,
+                       char *out_buf, int out_cap)
+{
+   char installation_id[33] = "", kid[DB2_IDENTITY_KID_MAX + 1] = "";
+   db2_management_action_result_t rc =
+       db2_identity_login_context(principal, team_id, installation_id, kid);
+   if (rc != DB2_MANAGEMENT_ACTION_OK)
+   {
+      LOG_WARN(log_domain, "no identity login context for team %lld (rc=%d)", (long long)team_id,
+               (int)rc);
+      return json_error(out_buf, out_cap, rc == DB2_MANAGEMENT_ACTION_DENIED ? 403 : 503,
+                        rc == DB2_MANAGEMENT_ACTION_DENIED
+                            ? "not a member of that team"
+                            : "this kb cannot issue write tokens right now");
+   }
+
+   db2_identity_intent_operation_t op;
+   rc = db2_identity_intent_operation_init(team_id, server_id, mode, IDENTITY_INTENT_TOKEN_ISSUER,
+                                           kid, IDENTITY_INTENT_TTL_SECONDS, installation_id, &op);
+   if (rc != DB2_MANAGEMENT_ACTION_OK)
+   {
+      LOG_ERROR(log_domain, "could not prepare an identity intent (rc=%d)", (int)rc);
+      return json_error(out_buf, out_cap, 503, "this kb cannot issue write tokens right now");
+   }
+
+   db2_identity_intent_t intent;
+   rc = db2_identity_intent_start(principal, &op, &intent);
+   if (rc != DB2_MANAGEMENT_ACTION_OK)
+   {
+      /* DENIED is the common and expected case: authenticated, but with no live
+       * write-tier grant on that server. It is reported as its own 403 rather than
+       * folded into the generic auth failure — the caller has already proved who it
+       * is, so telling it that it lacks a grant reveals nothing it could not learn
+       * by asking an operator, and hiding it would make the flow undebuggable. */
+      LOG_WARN(log_domain, "identity intent refused for %s on %s (rc=%d)", subject, server_id,
+               (int)rc);
+      return json_error(out_buf, out_cap, rc == DB2_MANAGEMENT_ACTION_DENIED ? 403 : 503,
+                        rc == DB2_MANAGEMENT_ACTION_DENIED
+                            ? "no write-tier grant for that subject on that server"
+                            : "this kb cannot issue write tokens right now");
+   }
+
+   LOG_INFO(log_domain, "identity intent filed for %s on %s (team %lld, replayed=%d)",
+            intent.subject, intent.target_server_id, (long long)intent.team_id, intent.replayed);
+   cJSON *o = cJSON_CreateObject();
+   /* The SUBJECT the DATABASE resolved, not the one this route computed. They must
+    * agree — the SQL takes it from aimee.principal — and returning the recorded one
+    * means the caller sees exactly what the mint will act on. */
+   cJSON_AddStringToObject(o, "subject", intent.subject);
+   cJSON_AddStringToObject(o, "server_id", intent.target_server_id);
+   cJSON_AddNumberToObject(o, "team_id", (double)intent.team_id);
+   /* The pair the token authority mints from. Not secret — they authorize nothing
+    * on their own, and the mint re-reads every precondition — but they are what the
+    * caller presents to collect its token. */
+   cJSON_AddStringToObject(o, "correlation_id", intent.correlation_id);
+   cJSON_AddStringToObject(o, "jti", intent.jti);
+   cJSON_AddNumberToObject(o, "expires_at", (double)intent.expires_at);
    return json_body(out_buf, out_cap, 200, o);
 }
 
@@ -268,6 +359,7 @@ static int get_login_callback(const char *query_string, int64_t now, char *out_b
 
    char server_id[KB_OIDC_LOGIN_SERVER_MAX + 1] = "";
    snprintf(server_id, sizeof(server_id), "%s", pending.target_server_id);
+   int64_t team_id = pending.team_id;
    kb_oidc_login_pending_clear(&pending);
 
    if (!ok)
@@ -286,16 +378,20 @@ static int get_login_callback(const char *query_string, int64_t now, char *out_b
       OPENSSL_cleanse(&principal, sizeof(principal));
       return json_error(out_buf, out_cap, 401, "the login could not be completed");
    }
+   /* The intent writer needs the PRINCIPAL, not the derived key: db2_tenant_scope
+    * sets aimee.principal from it, and the SQL reads the subject from there. Kept
+    * as its own copy so the ordering below stays explicit about when it dies. */
+   kb_principal_t principal_copy = principal;
    OPENSSL_cleanse(&principal, sizeof(principal));
 
    LOG_INFO("kb.oidc.login", "authenticated %s for a write token on %s", subject, server_id);
-   cJSON *o = cJSON_CreateObject();
-   cJSON_AddStringToObject(o, "subject", subject);
-   /* Echoed from the PENDING login, never from the callback's query: taking it
-    * from the query would let a forged callback point a completed login at a
-    * different server. */
-   cJSON_AddStringToObject(o, "server_id", server_id);
-   return json_body(out_buf, out_cap, 200, o);
+   /* The server_id and team_id come from the PENDING login, never the callback's
+    * query: taking either from the query would let a forged callback point a
+    * completed login at a different server or team. */
+   int status = file_intent(&principal_copy, subject, team_id, server_id,
+                            DB2_IDENTITY_AUTH_MODE_OIDC, "kb.oidc.login", out_buf, out_cap);
+   OPENSSL_cleanse(&principal_copy, sizeof(principal_copy));
+   return status;
 }
 
 /* POST /v1/identity/login/pam — the other login mode.
@@ -349,13 +445,21 @@ static int post_login_pam(const char *body, char *out_buf, int out_cap)
    const cJSON *juser = request ? cJSON_GetObjectItemCaseSensitive(request, "username") : NULL;
    const cJSON *jpass = request ? cJSON_GetObjectItemCaseSensitive(request, "password") : NULL;
    const cJSON *jsrv = request ? cJSON_GetObjectItemCaseSensitive(request, "server_id") : NULL;
+   const cJSON *jteam = request ? cJSON_GetObjectItemCaseSensitive(request, "team_id") : NULL;
    if (!cJSON_IsString(juser) || !juser->valuestring || !cJSON_IsString(jpass) ||
        !jpass->valuestring || !jpass->valuestring[0] || !cJSON_IsString(jsrv) ||
-       !jsrv->valuestring || !jsrv->valuestring[0])
+       !jsrv->valuestring || !jsrv->valuestring[0] || !cJSON_IsNumber(jteam) ||
+       jteam->valuedouble < 1 || jteam->valuedouble > 9.0e15)
    {
+      /* The password is cleansed on THIS path too — a malformed request still
+       * carried one, and cJSON_Delete frees the buffer without clearing it. */
+      if (cJSON_IsString(jpass) && jpass->valuestring)
+         OPENSSL_cleanse(jpass->valuestring, strlen(jpass->valuestring));
       cJSON_Delete(request);
-      return json_error(out_buf, out_cap, 400, "username, password and server_id are required");
+      return json_error(out_buf, out_cap, 400,
+                        "username, password, server_id and team_id are required");
    }
+   int64_t team_id = (int64_t)jteam->valuedouble;
 
    char username[64] = "", server_id[KB_OIDC_LOGIN_SERVER_MAX + 1] = "";
    char password[512] = "";
@@ -391,11 +495,20 @@ static int post_login_pam(const char *body, char *out_buf, int out_cap)
    }
 
    LOG_INFO("kb.pam.login", "authenticated %s for a write token on %s", username, server_id);
-   cJSON *o = cJSON_CreateObject();
-   /* The bare username IS the subject the intent writer records. */
-   cJSON_AddStringToObject(o, "subject", username);
-   cJSON_AddStringToObject(o, "server_id", server_id);
-   return json_body(out_buf, out_cap, 200, o);
+   /* A host-account principal: the bare username IS the subject, so the identity
+    * key and the subject are the same string. kb_principal_from_host_account is
+    * what marks it authenticated — a zero-initialised principal is refused by every
+    * tenant-scoped entry, which is exactly the protection wanted here. */
+   kb_principal_t principal;
+   if (kb_principal_from_host_account(username, &principal) != 0)
+   {
+      LOG_ERROR("kb.pam.login", "authenticated %s but could not build a principal", username);
+      return json_error(out_buf, out_cap, 401, "authentication failed");
+   }
+   int status = file_intent(&principal, username, team_id, server_id, DB2_IDENTITY_AUTH_MODE_PAM,
+                            "kb.pam.login", out_buf, out_cap);
+   OPENSSL_cleanse(&principal, sizeof(principal));
+   return status;
 }
 
 int kb_http_identity_login_route(const char *method, const char *path, const char *query_string,

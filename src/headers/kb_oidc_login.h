@@ -32,6 +32,7 @@
 #include "oauth_pkce.h"
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -89,6 +90,12 @@ extern "C"
        * kb_write_tier_grant and requires the registry to carry that server on
        * that team, so an unknown or foreign server is refused there. */
       char target_server_id[KB_OIDC_LOGIN_SERVER_MAX + 1];
+      /* Which team the write token is for. RETAINED for the same reason as the
+       * server id, and it matters more: the intent's authorization is a grant on
+       * (server_id, team_id, subject), so a callback allowed to name its own team
+       * could redirect a completed login at a team the user never chose. Taking it
+       * from the callback's query would make that a one-parameter attack. */
+      int64_t team_id;
    } kb_oidc_login_pending_t;
 
    typedef enum
@@ -136,11 +143,11 @@ extern "C"
     * (response_type=code, PKCE S256, state, nonce) to url_out.
     *
     * `target_server_id` must match the server_id grammar the identity tables
-    * CHECK; it is refused here rather than at intent time so a malformed one
-    * cannot reach the database. On any failure *pending is zeroed and url_out is
-    * empty. */
+    * CHECK and `team_id` must be positive; both are refused here rather than at
+    * intent time so a malformed one cannot reach the database. On any failure *pending is zeroed
+    * and url_out is empty. */
    kb_oidc_login_result_t kb_oidc_login_start(const kb_oidc_login_config_t *cfg,
-                                              const char *target_server_id,
+                                              const char *target_server_id, int64_t team_id,
                                               kb_oidc_login_pending_t *pending, char *url_out,
                                               size_t url_cap);
 

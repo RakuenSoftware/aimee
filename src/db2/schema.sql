@@ -11591,6 +11591,79 @@ CREATE TRIGGER kb_management_identity_delete_guard
 --     re-applies at mint time), so an ungranted subject cannot even record an
 --     intent.  The tier itself is deliberately NOT recorded here — the snapshot
 --     reads it live, so a grant changed between login and mint is honoured.
+-- The two values a login front-end needs for an identity intent and CANNOT be
+-- allowed to supply: the signing kid of the live JWKS publication, and the
+-- installation_id of the team's active management instance.
+--
+-- WHY THESE ARE READ AND NOT PARAMETERS. Both are inputs to
+-- kb_management_identity_intent_start, and both are checked again by
+-- kb_management_identity_authority_snapshot at mint time. If the login route took
+-- them from its caller, a caller could name a kid from a superseded publication or
+-- another team's installation; the mint would refuse, but only after the intent
+-- was on record, turning a nonsense request into a durable WORM row and a
+-- confusing refusal much later. Reading them here means a login can only ever
+-- file an intent against the state that actually exists.
+--
+-- Scoped exactly like the writer: aimee.principal and aimee.team must be set and
+-- agree with p_team_id, and the actor must be a MEMBER of that team. Membership
+-- rather than the write-tier grant, because the grant is per-server and this
+-- answer is per-team — and without any membership check this would let a stranger
+-- enumerate which teams have an active management instance.
+DROP FUNCTION IF EXISTS kb_management_identity_login_context(BIGINT);
+CREATE FUNCTION kb_management_identity_login_context(p_team_id BIGINT)
+RETURNS TABLE(installation_id TEXT,kid TEXT)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE
+  v_actor TEXT:=pg_catalog.current_setting('aimee.principal',true);
+  v_team TEXT:=pg_catalog.current_setting('aimee.team',true);
+  i public.kb_management_instance%ROWTYPE;
+  pr public.kb_management_jwks_publication_registry%ROWTYPE;
+  pgen public.kb_management_jwks_publication_generation%ROWTYPE;
+  v_instances BIGINT;
+  -- extract(... FROM ...) is SQL syntax, not a callable function, so it cannot be
+  -- schema-qualified; search_path is pinned to pg_catalog,pg_temp above, which is
+  -- what makes the bare form safe here.
+  t BIGINT:=extract(epoch FROM pg_catalog.now())::BIGINT;
+BEGIN
+  IF p_team_id IS NULL OR p_team_id<1 THEN
+    RAISE EXCEPTION 'invalid management identity login context' USING ERRCODE='22023';
+  END IF;
+  IF v_actor IS NULL OR char_length(v_actor) NOT BETWEEN 1 AND 576 OR
+     v_actor ~ '[[:cntrl:]]' OR v_team IS NULL OR v_team !~ '^[1-9][0-9]{0,18}$' OR
+     v_team::NUMERIC<>p_team_id::NUMERIC THEN
+    RAISE EXCEPTION 'management identity scope denied' USING ERRCODE='42501';
+  END IF;
+  PERFORM 1 FROM public.kb_team_membership m
+    WHERE m.identity_key=v_actor AND m.team=p_team_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'management identity scope denied' USING ERRCODE='42501';
+  END IF;
+
+  -- Exactly one active instance, or refuse. Two would make the choice arbitrary
+  -- and the mint's later instance checks unpredictable; picking one silently is
+  -- how a deployment mid-replacement gets an intent against the outgoing lineage.
+  SELECT count(*) INTO v_instances FROM public.kb_management_instance x
+    WHERE x.team_id=p_team_id AND x.state='active';
+  IF v_instances<>1 THEN
+    RAISE EXCEPTION 'management identity instance unavailable' USING ERRCODE='40001';
+  END IF;
+  SELECT x.* INTO i FROM public.kb_management_instance x
+    WHERE x.team_id=p_team_id AND x.state='active';
+
+  -- The publication must be the current one AND inside its validity window. A kid
+  -- from an expired publication would be recorded and then refused at mint time.
+  SELECT x.* INTO pr FROM public.kb_management_jwks_publication_registry x
+    WHERE x.singleton=1;
+  SELECT x.* INTO pgen FROM public.kb_management_jwks_publication_generation x
+    WHERE x.generation=pr.current_generation;
+  IF pgen.generation IS NULL OR pgen.token_wire_id IS NULL OR
+     pgen.valid_from>t OR t>=pgen.valid_until THEN
+    RAISE EXCEPTION 'identity token authority: publication unavailable' USING ERRCODE='40001';
+  END IF;
+
+  RETURN QUERY SELECT i.installation_id,pgen.token_wire_id;
+END $$;
+
 DROP FUNCTION IF EXISTS kb_management_identity_intent_start(
   TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT);
 CREATE FUNCTION kb_management_identity_intent_start(

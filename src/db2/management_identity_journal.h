@@ -118,6 +118,27 @@ extern "C"
                              const db2_identity_intent_operation_t *operation,
                              db2_identity_intent_t *out);
 
+   /* The two intent inputs a login front-end must READ rather than be told: the
+    * signing kid of the live JWKS publication, and the installation_id of the
+    * team's active management instance.
+    *
+    * Deliberately not parameters on the login routes. Both are re-checked by
+    * kb_management_identity_authority_snapshot at mint time, so a caller-supplied
+    * kid from a superseded publication or another team's installation would be
+    * refused there — but only after the intent was already a durable WORM row, and
+    * with a refusal far from its cause. Reading them means a login can only file
+    * an intent against state that exists.
+    *
+    * DENIED when the principal is not a member of `team_id`; UNAVAILABLE when the
+    * team has no single active instance or the current publication is outside its
+    * validity window — both of which are real deployment states, not bugs, and
+    * both of which must stop a login rather than produce an intent that cannot
+    * mint. */
+   db2_management_action_result_t db2_identity_login_context(const kb_principal_t *principal,
+                                                             int64_t team_id,
+                                                             char installation_id[33],
+                                                             char kid[DB2_IDENTITY_KID_MAX + 1]);
+
    /* The wire string for an auth mode ("oidc"/"pam"), or NULL if out of range. */
    const char *db2_identity_auth_mode_str(db2_identity_auth_mode_t mode);
 

@@ -41,7 +41,7 @@ static kb_oidc_login_pending_t make_pending(const char *redirect)
    snprintf(cfg.redirect_uri, sizeof(cfg.redirect_uri), "%s", redirect);
    kb_oidc_login_pending_t p;
    char url[KB_OIDC_LOGIN_URL_MAX];
-   assert(kb_oidc_login_start(&cfg, "srv-a", &p, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
+   assert(kb_oidc_login_start(&cfg, "srv-a", 770001, &p, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
    return p;
 }
 

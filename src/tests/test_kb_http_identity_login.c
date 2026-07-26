@@ -26,6 +26,7 @@
  */
 #include "kb_http_identity_login.h"
 
+#include "db2/management_identity_journal.h"
 #include "kb_auth_oidc.h"
 #include "kb_oidc_login.h"
 #include "kb_oidc_login_store.h"
@@ -127,6 +128,107 @@ kb_oidc_token_exchange_post(const kb_oidc_login_config_t *cfg,
       return stub_exchange_result;
    snprintf(unverified_id_token_out, cap, "%s", stub_exchange_token ? stub_exchange_token : "");
    return KB_OIDC_TOKEN_EXCHANGE_OK;
+}
+
+/* ── The identity-intent seam ──────────────────────────────────────────────── */
+
+/* Stubbed because filing an intent needs Postgres, and what this test is for is
+ * the ROUTE's behaviour around it: that both modes reach it, that neither can
+ * name its own team, and that its refusals are mapped to the right status. The
+ * SQL side is covered by the P1 RLS gate and the live mint harness.
+ *
+ * The stub records the team and subject it was handed, which is how the
+ * "a callback cannot choose its own team" property is actually checked. */
+static db2_management_action_result_t stub_ctx_result = DB2_MANAGEMENT_ACTION_OK;
+static db2_management_action_result_t stub_intent_result = DB2_MANAGEMENT_ACTION_OK;
+static int stub_ctx_calls, stub_intent_calls;
+static int64_t stub_seen_team;
+static char stub_seen_subject[600];
+static db2_identity_auth_mode_t stub_seen_mode;
+
+db2_management_action_result_t db2_identity_login_context(const kb_principal_t *principal,
+                                                          int64_t team_id, char installation_id[33],
+                                                          char kid[DB2_IDENTITY_KID_MAX + 1])
+{
+   stub_ctx_calls++;
+   /* The route must pass an AUTHENTICATED principal — a zero-initialised one would
+    * be refused by the real tenant scope, so assert it here rather than let a
+    * permissive stub hide it. */
+   assert(principal && principal->authenticated);
+   stub_seen_team = team_id;
+   if (stub_ctx_result != DB2_MANAGEMENT_ACTION_OK)
+      return stub_ctx_result;
+   snprintf(installation_id, 33, "%s", "0123456789abcdef0123456789abcdef");
+   snprintf(kid, DB2_IDENTITY_KID_MAX + 1, "%s", "p5-token-v1-test");
+   return DB2_MANAGEMENT_ACTION_OK;
+}
+
+/* operation_init is pure (validate + draw three ids) but shares a translation unit
+ * with the two functions above, so it is stubbed rather than linked. Its own
+ * validation is covered by the db2 journal's test; what matters here is that the
+ * route feeds it the values the CONTEXT read, so the stub asserts exactly that and
+ * nothing else. */
+db2_management_action_result_t
+db2_identity_intent_operation_init(int64_t team_id, const char *target_server_id,
+                                   db2_identity_auth_mode_t auth_mode, const char *token_issuer,
+                                   const char *kid, int ttl_seconds, const char *installation_id,
+                                   db2_identity_intent_operation_t *out)
+{
+   assert(out && target_server_id && token_issuer && kid && installation_id);
+   assert(strcmp(kid, "p5-token-v1-test") == 0);
+   assert(strcmp(installation_id, "0123456789abcdef0123456789abcdef") == 0);
+   assert(ttl_seconds > 0 && ttl_seconds <= DB2_IDENTITY_TTL_MAX_SECONDS);
+   memset(out, 0, sizeof(*out));
+   out->team_id = team_id;
+   out->auth_mode = auth_mode;
+   out->ttl_seconds = ttl_seconds;
+   snprintf(out->target_server_id, sizeof(out->target_server_id), "%s", target_server_id);
+   snprintf(out->token_issuer, sizeof(out->token_issuer), "%s", token_issuer);
+   snprintf(out->kid, sizeof(out->kid), "%s", kid);
+   snprintf(out->installation_id, sizeof(out->installation_id), "%s", installation_id);
+   snprintf(out->correlation_id, sizeof(out->correlation_id), "%s",
+            "1111111111111111111111111111111111111111111111111111111111111111");
+   snprintf(out->jti, sizeof(out->jti), "%s",
+            "2222222222222222222222222222222222222222222222222222222222222222");
+   snprintf(out->token_jti, sizeof(out->token_jti), "%s", "tok-jti-test-value");
+   return DB2_MANAGEMENT_ACTION_OK;
+}
+
+db2_management_action_result_t db2_identity_intent_start(const kb_principal_t *principal,
+                                                         const db2_identity_intent_operation_t *op,
+                                                         db2_identity_intent_t *out)
+{
+   stub_intent_calls++;
+   assert(principal && principal->authenticated && op && out);
+   /* The kid and installation must be the ones the CONTEXT read, never anything
+    * the caller supplied — this is the property that keeps a login from filing an
+    * intent against a superseded publication. */
+   assert(strcmp(op->kid, "p5-token-v1-test") == 0);
+   assert(strcmp(op->installation_id, "0123456789abcdef0123456789abcdef") == 0);
+   assert(strcmp(op->token_issuer, "kb") == 0);
+   stub_seen_mode = op->auth_mode;
+   memset(out, 0, sizeof(*out));
+   if (stub_intent_result != DB2_MANAGEMENT_ACTION_OK)
+      return stub_intent_result;
+   /* The subject the DATABASE resolves. Deliberately echoed from what the scope
+    * would carry, so the route's "return the recorded subject" contract is real. */
+   snprintf(out->subject, sizeof(out->subject), "%s", stub_seen_subject);
+   snprintf(out->correlation_id, sizeof(out->correlation_id), "%s", op->correlation_id);
+   snprintf(out->jti, sizeof(out->jti), "%s", op->jti);
+   snprintf(out->target_server_id, sizeof(out->target_server_id), "%s", op->target_server_id);
+   out->team_id = op->team_id;
+   out->expires_at = 1780000300;
+   return DB2_MANAGEMENT_ACTION_OK;
+}
+
+static void stub_intent_reset(const char *expected_subject)
+{
+   stub_ctx_result = DB2_MANAGEMENT_ACTION_OK;
+   stub_intent_result = DB2_MANAGEMENT_ACTION_OK;
+   stub_ctx_calls = stub_intent_calls = 0;
+   stub_seen_team = 0;
+   stub_seen_mode = (db2_identity_auth_mode_t)0;
+   snprintf(stub_seen_subject, sizeof(stub_seen_subject), "%s", expected_subject);
 }
 
 /* PAM. Stubbed because a unit test must not consult the host's authentication
@@ -245,7 +347,7 @@ static void start_login_full(const char *server_id, char *state_out, size_t stat
 {
    char out[4096] = "";
    char body[256];
-   snprintf(body, sizeof(body), "{\"server_id\":\"%s\"}", server_id);
+   snprintf(body, sizeof(body), "{\"server_id\":\"%s\",\"team_id\":770001}", server_id);
    assert(route("POST", "/v1/identity/login/start", body, out, sizeof(out)) == 200);
    nonce_from_url(out, nonce_out, nonce_cap);
    const char *p = strstr(out, "state=");
@@ -312,6 +414,7 @@ static void test_callback(EVP_PKEY *key, const char *jwks)
    stub_exchange_calls = 0;
    char query[512];
    snprintf(query, sizeof(query), "code=THECODE&state=%s", state);
+   stub_intent_reset("oidc:https%3A//idp.example:alice");
    assert(callback(query, out, sizeof(out)) == 200);
    /* The subject is the ISSUER-SCOPED identity key, not the bare "sub": a token
     * from another IdP with sub=alice must not collide with this one.
@@ -322,6 +425,14 @@ static void test_callback(EVP_PKEY *key, const char *jwks)
     * subject or issuer containing a colon cannot be made to look like a different
     * pair. This is the value the intent writer records. */
    assert(strstr(out, "\"subject\":\"oidc:https%3A//idp.example:alice\""));
+   /* THE INTENT IS FILED, which is the point of the whole flow. */
+   assert(stub_ctx_calls == 1 && stub_intent_calls == 1);
+   assert(stub_seen_mode == DB2_IDENTITY_AUTH_MODE_OIDC);
+   /* The team came from the PENDING login. The callback's query never named one. */
+   assert(stub_seen_team == 770001);
+   /* And the caller gets the pair the token authority mints from. */
+   assert(strstr(out, "\"correlation_id\":\"") && strstr(out, "\"jti\":\""));
+   assert(strstr(out, "\"team_id\":770001"));
    /* The server_id comes from the PENDING login. The callback's query never named
     * one, and could not be allowed to. */
    assert(strstr(out, "\"server_id\":\"mintsrv\""));
@@ -481,11 +592,19 @@ static void test_login_pam(void)
     * the modes mutually exclusive there is no other kind of account that could
     * also be called alice on this kb. */
    stub_pam_calls = 0;
+   stub_intent_reset("alice");
    assert(route("POST", "/v1/identity/login/pam",
-                "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"mintsrv\"}", out,
-                sizeof(out)) == 200);
+                "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"mintsrv\",\"team_"
+                "id\":770001}",
+                out, sizeof(out)) == 200);
    assert(strstr(out, "\"subject\":\"alice\""));
    assert(strstr(out, "\"server_id\":\"mintsrv\""));
+   /* BOTH MODES REACH THE SAME INTENT STEP. If one of them ever stopped, that mode
+    * would have acquired an authorization path the other lacks. */
+   assert(stub_ctx_calls == 1 && stub_intent_calls == 1);
+   assert(stub_seen_mode == DB2_IDENTITY_AUTH_MODE_PAM);
+   assert(stub_seen_team == 770001);
+   assert(strstr(out, "\"correlation_id\":\"") && strstr(out, "\"jti\":\""));
    assert(stub_pam_calls == 1);
    /* PAM got exactly what was posted, and no prefix was invented. */
    assert(strcmp(stub_pam_user, "alice") == 0 && strcmp(stub_pam_pass, "correct") == 0);
@@ -495,15 +614,20 @@ static void test_login_pam(void)
    /* A WRONG PASSWORD, an unknown account, and a username outside the grammar all
     * answer identically: on a pre-auth route any distinction enumerates accounts. */
    const char *refused[] = {
-       "{\"username\":\"alice\",\"password\":\"wrong\",\"server_id\":\"s\"}",
-       "{\"username\":\"nosuchuser\",\"password\":\"correct\",\"server_id\":\"s\"}",
+       "{\"username\":\"alice\",\"password\":\"wrong\",\"server_id\":\"s\",\"team_id\":770001}",
+       "{\"username\":\"nosuchuser\",\"password\":\"correct\",\"server_id\":\"s\",\"team_id\":"
+       "770001}",
        /* outside the subject grammar the identity tables CHECK */
-       "{\"username\":\"-leading-dash\",\"password\":\"correct\",\"server_id\":\"s\"}",
-       "{\"username\":\"has space\",\"password\":\"correct\",\"server_id\":\"s\"}",
-       "{\"username\":\"has:colon\",\"password\":\"correct\",\"server_id\":\"s\"}",
-       "{\"username\":\"oidc:iss:sub\",\"password\":\"correct\",\"server_id\":\"s\"}",
+       "{\"username\":\"-leading-dash\",\"password\":\"correct\",\"server_id\":\"s\",\"team_id\":"
+       "770001}",
+       "{\"username\":\"has "
+       "space\",\"password\":\"correct\",\"server_id\":\"s\",\"team_id\":770001}",
+       "{\"username\":\"has:colon\",\"password\":\"correct\",\"server_id\":\"s\",\"team_id\":"
+       "770001}",
+       "{\"username\":\"oidc:iss:sub\",\"password\":\"correct\",\"server_id\":\"s\",\"team_id\":"
+       "770001}",
        /* reserved by the schema as the host-account name for the owner */
-       "{\"username\":\"owner\",\"password\":\"correct\",\"server_id\":\"s\"}",
+       "{\"username\":\"owner\",\"password\":\"correct\",\"server_id\":\"s\",\"team_id\":770001}",
    };
    for (size_t i = 0; i < sizeof(refused) / sizeof(refused[0]); ++i)
    {
@@ -518,21 +642,23 @@ static void test_login_pam(void)
     * could be timed, and nothing outside the grammar can reach the database. */
    stub_pam_calls = 0;
    assert(route("POST", "/v1/identity/login/pam",
-                "{\"username\":\"owner\",\"password\":\"correct\",\"server_id\":\"s\"}", out,
-                sizeof(out)) == 401);
+                "{\"username\":\"owner\",\"password\":\"correct\",\"server_id\":\"s\",\"team_id\":"
+                "770001}",
+                out, sizeof(out)) == 401);
    assert(route("POST", "/v1/identity/login/pam",
-                "{\"username\":\"has space\",\"password\":\"correct\",\"server_id\":\"s\"}", out,
-                sizeof(out)) == 401);
+                "{\"username\":\"has "
+                "space\",\"password\":\"correct\",\"server_id\":\"s\",\"team_id\":770001}",
+                out, sizeof(out)) == 401);
    assert(stub_pam_calls == 0);
 
    /* MALFORMED requests are a 400 — distinct from 401 on purpose, because a
     * missing field is a client bug and reveals nothing about any account. */
    const char *bad[] = {
-       "{\"password\":\"correct\",\"server_id\":\"s\"}",
-       "{\"username\":\"alice\",\"server_id\":\"s\"}",
+       "{\"password\":\"correct\",\"server_id\":\"s\",\"team_id\":770001}",
+       "{\"username\":\"alice\",\"server_id\":\"s\",\"team_id\":770001}",
        "{\"username\":\"alice\",\"password\":\"correct\"}",
-       "{\"username\":\"alice\",\"password\":\"\",\"server_id\":\"s\"}",
-       "{\"username\":5,\"password\":\"correct\",\"server_id\":\"s\"}",
+       "{\"username\":\"alice\",\"password\":\"\",\"server_id\":\"s\",\"team_id\":770001}",
+       "{\"username\":5,\"password\":\"correct\",\"server_id\":\"s\",\"team_id\":770001}",
        "not json",
        "",
    };
@@ -559,7 +685,7 @@ static void test_login_pam(void)
       stub_pam_calls = 0;
       snprintf(body, sizeof(body),
                "{\"username\":\"%.200s\",\"password\":\"correct\","
-               "\"server_id\":\"s\"}",
+               "\"server_id\":\"s\",\"team_id\":770001}",
                big);
       assert(route("POST", "/v1/identity/login/pam", body, out, sizeof(out)) == 401);
       assert(stub_pam_calls == 0);
@@ -570,7 +696,7 @@ static void test_login_pam(void)
       stub_pam_calls = 0;
       snprintf(body, sizeof(body),
                "{\"username\":\"alice\",\"password\":\"%.900s\","
-               "\"server_id\":\"s\"}",
+               "\"server_id\":\"s\",\"team_id\":770001}",
                big);
       assert(route("POST", "/v1/identity/login/pam", body, out, sizeof(out)) == 401);
       assert(stub_pam_calls == 0);
@@ -580,11 +706,52 @@ static void test_login_pam(void)
       stub_pam_calls = 0;
       snprintf(body, sizeof(body),
                "{\"username\":\"alice\",\"password\":\"correct\","
-               "\"server_id\":\"%.300s\"}",
+               "\"server_id\":\"%.300s\",\"team_id\":770001}",
                big);
       assert(route("POST", "/v1/identity/login/pam", body, out, sizeof(out)) == 401);
       assert(stub_pam_calls == 0);
    }
+
+   /* THE INTENT'S REFUSALS ARE THEIR OWN ANSWERS, and deliberately not folded into
+    * the generic 401. A caller here has already PROVED who it is, so telling it
+    * that it holds no write-tier grant reveals nothing it could not learn from an
+    * operator — and hiding it would make the flow undebuggable. */
+   stub_intent_reset("alice");
+   stub_intent_result = DB2_MANAGEMENT_ACTION_DENIED;
+   assert(route("POST", "/v1/identity/login/pam",
+                "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"s\","
+                "\"team_id\":770001}",
+                out, sizeof(out)) == 403);
+   assert(strstr(out, "no write-tier grant"));
+
+   /* Not a member of the named team: also 403, from the context read, and it never
+    * reaches the intent writer. */
+   stub_intent_reset("alice");
+   stub_ctx_result = DB2_MANAGEMENT_ACTION_DENIED;
+   assert(route("POST", "/v1/identity/login/pam",
+                "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"s\","
+                "\"team_id\":770001}",
+                out, sizeof(out)) == 403);
+   assert(strstr(out, "not a member of that team"));
+   assert(stub_intent_calls == 0);
+
+   /* A kb that cannot reach its own authority state answers 503, not 401: the
+    * credential was fine and retrying with a different password is pointless. */
+   stub_intent_reset("alice");
+   stub_ctx_result = DB2_MANAGEMENT_ACTION_UNAVAILABLE;
+   assert(route("POST", "/v1/identity/login/pam",
+                "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"s\","
+                "\"team_id\":770001}",
+                out, sizeof(out)) == 503);
+   assert(strstr(out, "cannot issue write tokens"));
+   stub_intent_reset("alice");
+
+   /* A MISSING team_id is a 400, and PAM is never consulted for it. */
+   stub_pam_calls = 0;
+   assert(route("POST", "/v1/identity/login/pam",
+                "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"s\"}", out,
+                sizeof(out)) == 400);
+   assert(stub_pam_calls == 0);
 
    /* METHOD: POST only. */
    assert(route("GET", "/v1/identity/login/pam", NULL, out, sizeof(out)) == 405);
@@ -596,8 +763,9 @@ static void test_login_pam(void)
    env_configure();
    stub_pam_calls = 0;
    assert(route("POST", "/v1/identity/login/pam",
-                "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"s\"}", out,
-                sizeof(out)) == 409);
+                "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"s\",\"team_id\":"
+                "770001}",
+                out, sizeof(out)) == 409);
    assert(strstr(out, "password login is disabled"));
    /* And PAM was never consulted, so a correct host password buys nothing. */
    assert(stub_pam_calls == 0);
@@ -612,8 +780,9 @@ static void test_login_pam(void)
    assert(route("GET", "/v1/identity/auth-mode", NULL, out, sizeof(out)) == 200);
    assert(strstr(out, "\"mode\":\"pam\""));
    assert(route("POST", "/v1/identity/login/pam",
-                "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"mintsrv\"}", out,
-                sizeof(out)) == 200);
+                "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"mintsrv\",\"team_"
+                "id\":770001}",
+                out, sizeof(out)) == 200);
    assert(strstr(out, "\"subject\":\"alice\""));
 
    env_clear();
@@ -689,6 +858,7 @@ static void test_config_mode_matrix(void)
       char out[4096] = "";
       apply_mode(table[i].mode);
       kb_oidc_login_store_reset();
+      stub_intent_reset("alice");
 
       /* 1. What the kb SAYS. */
       assert(route("GET", "/v1/identity/auth-mode", NULL, out, sizeof(out)) == 200);
@@ -709,8 +879,8 @@ static void test_config_mode_matrix(void)
          const char *label, *method, *path, *query, *body;
          int expected;
       } probes[] = {
-          {"start", "POST", "/v1/identity/login/start", NULL, "{\"server_id\":\"mintsrv\"}",
-           table[i].start},
+          {"start", "POST", "/v1/identity/login/start", NULL,
+           "{\"server_id\":\"mintsrv\",\"team_id\":770001}", table[i].start},
           /* A syntactically fine callback that matches no pending login: in OIDC
            * mode that is a 400 (the route is live and refuses it), and in the
            * other modes a 503 (the route is not offered at all). The distinction
@@ -718,7 +888,8 @@ static void test_config_mode_matrix(void)
           {"callback", "GET", "/v1/identity/login/callback",
            "code=abc&state=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", NULL, table[i].callback},
           {"pam", "POST", "/v1/identity/login/pam", NULL,
-           "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"mintsrv\"}",
+           "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"mintsrv\",\"team_id\":"
+           "770001}",
            table[i].pam},
       };
       for (size_t j = 0; j < sizeof(probes) / sizeof(probes[0]); ++j)
@@ -811,8 +982,8 @@ static void test_login_start_unavailable(void)
    kb_oidc_login_store_reset();
 
    env_clear();
-   assert(route("POST", "/v1/identity/login/start", "{\"server_id\":\"srv-a\"}", out,
-                sizeof(out)) == 503);
+   assert(route("POST", "/v1/identity/login/start", "{\"server_id\":\"srv-a\",\"team_id\":770001}",
+                out, sizeof(out)) == 503);
    char unconfigured[4096];
    snprintf(unconfigured, sizeof(unconfigured), "%s", out);
 
@@ -821,8 +992,8 @@ static void test_login_start_unavailable(void)
     * configuration. */
    env_configure();
    setenv("AIMEE_KB_OIDC_LOGIN_TOKEN_URL", "https://idp.example:8443/token", 1);
-   assert(route("POST", "/v1/identity/login/start", "{\"server_id\":\"srv-a\"}", out,
-                sizeof(out)) == 503);
+   assert(route("POST", "/v1/identity/login/start", "{\"server_id\":\"srv-a\",\"team_id\":770001}",
+                out, sizeof(out)) == 503);
    assert(!strcmp(out, unconfigured));
    /* And nothing was retained on either path. */
    assert(kb_oidc_login_store_count(NOW) == 0);
@@ -835,8 +1006,8 @@ static void test_login_start(void)
    kb_oidc_login_store_reset();
    env_configure();
 
-   assert(route("POST", "/v1/identity/login/start", "{\"server_id\":\"srv-a\"}", out,
-                sizeof(out)) == 200);
+   assert(route("POST", "/v1/identity/login/start", "{\"server_id\":\"srv-a\",\"team_id\":770001}",
+                out, sizeof(out)) == 200);
    assert(strstr(out, "\"authorize_url\":\"https://idp.example/authorize?"));
    assert(strstr(out, "\"redirect_uri\":\"https://kb.example/v1/identity/login/callback\""));
    /* The login really was retained — the URL is only useful if the callback can
@@ -855,8 +1026,8 @@ static void test_login_start(void)
    assert(!strstr(out, "srv-a"));
 
    /* Two logins are independent: the second does not disturb the first. */
-   assert(route("POST", "/v1/identity/login/start", "{\"server_id\":\"srv-b\"}", out,
-                sizeof(out)) == 200);
+   assert(route("POST", "/v1/identity/login/start", "{\"server_id\":\"srv-b\",\"team_id\":770001}",
+                out, sizeof(out)) == 200);
    assert(kb_oidc_login_store_count(NOW) == 2);
 
    /* A missing, empty, non-string or oversize server_id is a 400, and retains
@@ -866,21 +1037,21 @@ static void test_login_start(void)
    assert(route("POST", "/v1/identity/login/start", NULL, out, sizeof(out)) == 400);
    assert(route("POST", "/v1/identity/login/start", "", out, sizeof(out)) == 400);
    assert(route("POST", "/v1/identity/login/start", "not json", out, sizeof(out)) == 400);
-   assert(route("POST", "/v1/identity/login/start", "{\"server_id\":\"\"}", out, sizeof(out)) ==
-          400);
+   assert(route("POST", "/v1/identity/login/start", "{\"server_id\":\"\",\"team_id\":770001}", out,
+                sizeof(out)) == 400);
    assert(route("POST", "/v1/identity/login/start", "{\"server_id\":42}", out, sizeof(out)) == 400);
    /* Outside the grammar the identity tables CHECK — refused at the edge rather
     * than at intent time. */
-   assert(route("POST", "/v1/identity/login/start", "{\"server_id\":\"-bad\"}", out, sizeof(out)) ==
-          400);
-   assert(route("POST", "/v1/identity/login/start", "{\"server_id\":\"has space\"}", out,
-                sizeof(out)) == 400);
+   assert(route("POST", "/v1/identity/login/start", "{\"server_id\":\"-bad\",\"team_id\":770001}",
+                out, sizeof(out)) == 400);
+   assert(route("POST", "/v1/identity/login/start",
+                "{\"server_id\":\"has space\",\"team_id\":770001}", out, sizeof(out)) == 400);
    assert(kb_oidc_login_store_count(NOW) == before);
 
    /* Start mutates state, so it is POST only. A GET would be prefetchable by a
     * browser or a link scanner, which would burn pending-login slots. */
-   assert(route("GET", "/v1/identity/login/start", "{\"server_id\":\"srv-a\"}", out, sizeof(out)) ==
-          405);
+   assert(route("GET", "/v1/identity/login/start", "{\"server_id\":\"srv-a\",\"team_id\":770001}",
+                out, sizeof(out)) == 405);
    assert(kb_oidc_login_store_count(NOW) == before);
 
    env_clear();
@@ -894,12 +1065,12 @@ static void test_login_start_full_store(void)
    env_configure();
 
    for (int i = 0; i < KB_OIDC_LOGIN_STORE_SLOTS; ++i)
-      assert(route("POST", "/v1/identity/login/start", "{\"server_id\":\"srv-a\"}", out,
-                   sizeof(out)) == 200);
+      assert(route("POST", "/v1/identity/login/start",
+                   "{\"server_id\":\"srv-a\",\"team_id\":770001}", out, sizeof(out)) == 200);
    /* A full store is 503 with a retry hint, not a 500 and not a URL that would
     * fail later at the callback. */
-   assert(route("POST", "/v1/identity/login/start", "{\"server_id\":\"srv-a\"}", out,
-                sizeof(out)) == 503);
+   assert(route("POST", "/v1/identity/login/start", "{\"server_id\":\"srv-a\",\"team_id\":770001}",
+                out, sizeof(out)) == 503);
    assert(!strstr(out, "authorize_url"));
    assert(strstr(out, "retry"));
 
@@ -914,8 +1085,8 @@ static void test_small_buffer(void)
    char tiny[24] = "";
    kb_oidc_login_store_reset();
    env_configure();
-   int rc =
-       route("POST", "/v1/identity/login/start", "{\"server_id\":\"srv-a\"}", tiny, sizeof(tiny));
+   int rc = route("POST", "/v1/identity/login/start",
+                  "{\"server_id\":\"srv-a\",\"team_id\":770001}", tiny, sizeof(tiny));
    assert(rc == 500);
    assert(strstr(tiny, "error"));
    env_clear();

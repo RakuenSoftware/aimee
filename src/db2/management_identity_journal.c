@@ -160,6 +160,67 @@ db2_identity_intent_operation_init(int64_t team_id, const char *target_server_id
    return DB2_MANAGEMENT_ACTION_OK;
 }
 
+db2_management_action_result_t db2_identity_login_context(const kb_principal_t *principal,
+                                                          int64_t team_id, char installation_id[33],
+                                                          char kid[DB2_IDENTITY_KID_MAX + 1])
+{
+   if (installation_id)
+      installation_id[0] = '\0';
+   if (kid)
+      kid[0] = '\0';
+   if (!principal || !installation_id || !kid || team_id < 1)
+      return DB2_MANAGEMENT_ACTION_INVALID;
+
+   /* The same tenant scope the writer opens, for the same reason: it refuses an
+    * unauthenticated principal and sets aimee.principal/aimee.team, which is
+    * where the SQL function reads the actor from. */
+   int tx = db2_tenant_scope_begin(principal, team_id);
+   if (tx != 0)
+      return (tx == DB2_ERR_TENANT_DENIED || tx == DB2_ERR_TENANT_UNAUTHENTICATED)
+                 ? DB2_MANAGEMENT_ACTION_DENIED
+                 : DB2_MANAGEMENT_ACTION_UNAVAILABLE;
+   char err[256] = "";
+   aimee_pg_prepare_error_t kind = AIMEE_PG_PREPARE_OK;
+   aimee_pg_stmt_t *st = aimee_pg_prepare_ex(
+       db2_conn(), "SELECT * FROM public.kb_management_identity_login_context(?1)", &kind, err,
+       sizeof(err));
+   if (!st)
+   {
+      db2_tenant_scope_rollback();
+      return DB2_MANAGEMENT_ACTION_UNAVAILABLE;
+   }
+   char inst[33] = "", wire[DB2_IDENTITY_KID_MAX + 1] = "";
+   db2_management_action_result_t rc =
+       aimee_pg_bind_int64(st, "?1", team_id) ? DB2_MANAGEMENT_ACTION_UNAVAILABLE : first_row(st);
+   if (rc != DB2_MANAGEMENT_ACTION_OK)
+   {
+      aimee_pg_finalize(st);
+      db2_tenant_scope_rollback();
+      return rc;
+   }
+   const char *c0 = aimee_pg_column_text(st, 0), *c1 = aimee_pg_column_text(st, 1);
+   int ok = c0 && c1 && db2_intent_input_hex(c0, 32) &&
+            db2_intent_input_text(c1, DB2_IDENTITY_KID_MAX, 1);
+   if (ok)
+   {
+      snprintf(inst, sizeof(inst), "%s", c0);
+      snprintf(wire, sizeof(wire), "%s", c1);
+   }
+   rc = finish_row(st, ok);
+   if (rc != DB2_MANAGEMENT_ACTION_OK)
+   {
+      db2_tenant_scope_rollback();
+      return rc;
+   }
+   /* A read-only scope, so a failed commit costs nothing and is not ambiguous in
+    * the way the writer's is — there is no row that may or may not exist. */
+   if (db2_tenant_scope_commit() != 0)
+      return DB2_MANAGEMENT_ACTION_UNAVAILABLE;
+   snprintf(installation_id, 33, "%s", inst);
+   snprintf(kid, DB2_IDENTITY_KID_MAX + 1, "%s", wire);
+   return DB2_MANAGEMENT_ACTION_OK;
+}
+
 db2_management_action_result_t db2_identity_intent_start(const kb_principal_t *principal,
                                                          const db2_identity_intent_operation_t *op,
                                                          db2_identity_intent_t *out)

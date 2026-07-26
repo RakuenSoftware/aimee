@@ -138,9 +138,39 @@ an authentication one, and `auth-mode` already advertises that the kb offers OID
 | route | mode | purpose |
 | --- | --- | --- |
 | `GET /v1/identity/auth-mode` | both | which mode this kb offers |
-| `POST /v1/identity/login/start` | OIDC | `{server_id}` → `{authorize_url, redirect_uri}` |
+| `POST /v1/identity/login/start` | OIDC | `{server_id, team_id}` → `{authorize_url, redirect_uri}` |
 | `GET /v1/identity/login/callback` | OIDC | the IdP's redirect; `?code=&state=` |
-| `POST /v1/identity/login/pam` | PAM | `{username, password, server_id}` |
+| `POST /v1/identity/login/pam` | PAM | `{username, password, server_id, team_id}` |
+
+A completed login of either kind returns the filed identity intent:
+
+```json
+{"subject":"alice","server_id":"mintsrv","team_id":770001,
+ "correlation_id":"<64 hex>","jti":"<64 hex>","expires_at":1780000300}
+```
+
+`correlation_id` and `jti` are what the token authority mints from. They are not
+secret and authorize nothing on their own — the mint re-reads the grant, the
+registry, both enrollments and the vault epoch under its own locks — but they are
+what a caller presents to collect its token.
+
+**`team_id` is supplied at login START, not at the callback.** For OIDC it is
+retained server-side with the state, nonce and PKCE verifier. This is deliberate: an
+intent's authorization is a grant on `(server_id, team_id, subject)`, so a callback
+allowed to name its own team could point a completed login at a team the user never
+chose.
+
+Two refusals are distinct from an authentication failure, because at that point the
+caller has already proved who it is:
+
+| status | meaning |
+| --- | --- |
+| `403 not a member of that team` | authenticated, but not on `team_id` |
+| `403 no write-tier grant for that subject on that server` | on the team, but no live grant |
+| `503 this kb cannot issue write tokens right now` | no active management instance for the team, or the JWKS publication is outside its validity window |
+
+The `503` is a **deployment** state, not a user error: provision the token authority
+(see below) and check that the team has exactly one `active` management instance.
 
 All four are **pre-auth** by necessity — they are how a caller with no credential
 gets one.

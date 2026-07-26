@@ -199,7 +199,8 @@ static void test_start(void)
    char url[KB_OIDC_LOGIN_URL_MAX];
 
    random_failure = 0;
-   assert(kb_oidc_login_start(&cfg, "srv-a", &pending, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
+   assert(kb_oidc_login_start(&cfg, "srv-a", 770001, &pending, url, sizeof(url)) ==
+          KB_OIDC_LOGIN_OK);
 
    /* Three independent secrets, each at full length. */
    assert(strlen(pending.state) == KB_OIDC_LOGIN_SECRET_LEN);
@@ -231,20 +232,25 @@ static void test_start(void)
 
    /* An explicit scope is honoured verbatim. */
    snprintf(cfg.scope, sizeof(cfg.scope), "%s", "openid email");
-   assert(kb_oidc_login_start(&cfg, "srv-a", &pending, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
+   assert(kb_oidc_login_start(&cfg, "srv-a", 770001, &pending, url, sizeof(url)) ==
+          KB_OIDC_LOGIN_OK);
    assert(strstr(url, "&scope=openid%20email"));
 
    /* Bad arguments and a bad profile produce no pending login. */
    cfg = good_config();
-   assert(kb_oidc_login_start(NULL, "srv-a", &pending, url, sizeof(url)) == KB_OIDC_LOGIN_INVALID);
-   assert(kb_oidc_login_start(&cfg, "srv-a", NULL, url, sizeof(url)) == KB_OIDC_LOGIN_INVALID);
-   assert(kb_oidc_login_start(&cfg, "srv-a", &pending, NULL, sizeof(url)) == KB_OIDC_LOGIN_INVALID);
-   assert(kb_oidc_login_start(&cfg, "srv-a", &pending, url, 0) == KB_OIDC_LOGIN_INVALID);
+   assert(kb_oidc_login_start(NULL, "srv-a", 770001, &pending, url, sizeof(url)) ==
+          KB_OIDC_LOGIN_INVALID);
+   assert(kb_oidc_login_start(&cfg, "srv-a", 770001, NULL, url, sizeof(url)) ==
+          KB_OIDC_LOGIN_INVALID);
+   assert(kb_oidc_login_start(&cfg, "srv-a", 770001, &pending, NULL, sizeof(url)) ==
+          KB_OIDC_LOGIN_INVALID);
+   assert(kb_oidc_login_start(&cfg, "srv-a", 770001, &pending, url, 0) == KB_OIDC_LOGIN_INVALID);
 
    /* The target server is retained, because the callback must file the intent
     * against the server the LOGIN named — taking it from the callback's query
     * string would let a forged callback redirect a completed login elsewhere. */
-   assert(kb_oidc_login_start(&cfg, "srv-a", &pending, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
+   assert(kb_oidc_login_start(&cfg, "srv-a", 770001, &pending, url, sizeof(url)) ==
+          KB_OIDC_LOGIN_OK);
    assert(!strcmp(pending.target_server_id, "srv-a"));
    /* It is NOT in the authorization URL: the IdP has no business knowing which
     * aimee-server the token is for. */
@@ -252,27 +258,51 @@ static void test_start(void)
 
    /* A server id outside the grammar the identity tables CHECK is refused here,
     * so a malformed one never reaches the database. */
-   assert(kb_oidc_login_start(&cfg, NULL, &pending, url, sizeof(url)) == KB_OIDC_LOGIN_INVALID);
-   assert(kb_oidc_login_start(&cfg, "", &pending, url, sizeof(url)) == KB_OIDC_LOGIN_INVALID);
-   assert(kb_oidc_login_start(&cfg, "-leading-dash", &pending, url, sizeof(url)) ==
+   assert(kb_oidc_login_start(&cfg, NULL, 770001, &pending, url, sizeof(url)) ==
           KB_OIDC_LOGIN_INVALID);
-   assert(kb_oidc_login_start(&cfg, ".dot", &pending, url, sizeof(url)) == KB_OIDC_LOGIN_INVALID);
-   assert(kb_oidc_login_start(&cfg, "has space", &pending, url, sizeof(url)) ==
+   assert(kb_oidc_login_start(&cfg, "", 770001, &pending, url, sizeof(url)) ==
           KB_OIDC_LOGIN_INVALID);
-   assert(kb_oidc_login_start(&cfg, "has/slash", &pending, url, sizeof(url)) ==
+   assert(kb_oidc_login_start(&cfg, "-leading-dash", 770001, &pending, url, sizeof(url)) ==
+          KB_OIDC_LOGIN_INVALID);
+   assert(kb_oidc_login_start(&cfg, ".dot", 770001, &pending, url, sizeof(url)) ==
+          KB_OIDC_LOGIN_INVALID);
+   assert(kb_oidc_login_start(&cfg, "has space", 770001, &pending, url, sizeof(url)) ==
+          KB_OIDC_LOGIN_INVALID);
+   assert(kb_oidc_login_start(&cfg, "has/slash", 770001, &pending, url, sizeof(url)) ==
           KB_OIDC_LOGIN_INVALID);
    char too_long[KB_OIDC_LOGIN_SERVER_MAX + 8];
    memset(too_long, 'a', sizeof(too_long) - 1);
    too_long[sizeof(too_long) - 1] = '\0';
-   assert(kb_oidc_login_start(&cfg, too_long, &pending, url, sizeof(url)) == KB_OIDC_LOGIN_INVALID);
+   assert(kb_oidc_login_start(&cfg, too_long, 770001, &pending, url, sizeof(url)) ==
+          KB_OIDC_LOGIN_INVALID);
    /* Legal shapes: dots, underscores and dashes after the first character. */
-   assert(kb_oidc_login_start(&cfg, "a", &pending, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
-   assert(kb_oidc_login_start(&cfg, "srv.1_a-b", &pending, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
+   assert(kb_oidc_login_start(&cfg, "a", 770001, &pending, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
+   assert(kb_oidc_login_start(&cfg, "srv.1_a-b", 770001, &pending, url, sizeof(url)) ==
+          KB_OIDC_LOGIN_OK);
+
+   /* THE TEAM IS RETAINED, and a non-positive one is refused here rather than at
+    * intent time. It matters more than the server id: the intent's authorization is
+    * a grant on (server_id, team_id, subject), so a callback permitted to name its
+    * own team could point a completed login at a team the user never chose. */
+   assert(kb_oidc_login_start(&cfg, "srv-a", 770001, &pending, url, sizeof(url)) ==
+          KB_OIDC_LOGIN_OK);
+   assert(pending.team_id == 770001);
+   assert(kb_oidc_login_start(&cfg, "srv-a", 0, &pending, url, sizeof(url)) ==
+          KB_OIDC_LOGIN_INVALID);
+   assert(pending.team_id == 0); /* zeroed on refusal, like every other field */
+   assert(kb_oidc_login_start(&cfg, "srv-a", -1, &pending, url, sizeof(url)) ==
+          KB_OIDC_LOGIN_INVALID);
+   /* The team never appears in the authorization URL: it is kb's own state, and the
+    * IdP has no business seeing which team a token is destined for. */
+   assert(kb_oidc_login_start(&cfg, "srv-a", 770001, &pending, url, sizeof(url)) ==
+          KB_OIDC_LOGIN_OK);
+   assert(!strstr(url, "770001"));
 
    kb_oidc_login_config_t bad = cfg;
    snprintf(bad.authorize_url, sizeof(bad.authorize_url), "%s", "http://idp/authorize");
    memset(&pending, 0xaa, sizeof(pending));
-   assert(kb_oidc_login_start(&bad, "srv-a", &pending, url, sizeof(url)) == KB_OIDC_LOGIN_INVALID);
+   assert(kb_oidc_login_start(&bad, "srv-a", 770001, &pending, url, sizeof(url)) ==
+          KB_OIDC_LOGIN_INVALID);
    kb_oidc_login_pending_t zero;
    memset(&zero, 0, sizeof(zero));
    assert(!memcmp(&pending, &zero, sizeof(pending)));
@@ -282,7 +312,7 @@ static void test_start(void)
     * pending — a half-built request must not be startable. */
    char tiny[32];
    memset(&pending, 0xaa, sizeof(pending));
-   assert(kb_oidc_login_start(&cfg, "srv-a", &pending, tiny, sizeof(tiny)) ==
+   assert(kb_oidc_login_start(&cfg, "srv-a", 770001, &pending, tiny, sizeof(tiny)) ==
           KB_OIDC_LOGIN_UNAVAILABLE);
    assert(!memcmp(&pending, &zero, sizeof(pending)));
    assert(tiny[0] == '\0');
@@ -290,7 +320,7 @@ static void test_start(void)
    /* A CSPRNG failure must never yield a weak login. */
    random_failure = 1;
    memset(&pending, 0xaa, sizeof(pending));
-   assert(kb_oidc_login_start(&cfg, "srv-a", &pending, url, sizeof(url)) ==
+   assert(kb_oidc_login_start(&cfg, "srv-a", 770001, &pending, url, sizeof(url)) ==
           KB_OIDC_LOGIN_UNAVAILABLE);
    assert(!memcmp(&pending, &zero, sizeof(pending)));
    random_failure = 0;
@@ -301,7 +331,8 @@ static void test_check_state(void)
    kb_oidc_login_config_t cfg = good_config();
    kb_oidc_login_pending_t pending;
    char url[KB_OIDC_LOGIN_URL_MAX];
-   assert(kb_oidc_login_start(&cfg, "srv-a", &pending, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
+   assert(kb_oidc_login_start(&cfg, "srv-a", 770001, &pending, url, sizeof(url)) ==
+          KB_OIDC_LOGIN_OK);
 
    assert(kb_oidc_login_check_state(&pending, pending.state) == KB_OIDC_LOGIN_OK);
 
@@ -334,7 +365,7 @@ static void test_check_state(void)
 
    /* Another login's state does not satisfy this one. */
    kb_oidc_login_pending_t other;
-   assert(kb_oidc_login_start(&cfg, "srv-a", &other, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
+   assert(kb_oidc_login_start(&cfg, "srv-a", 770001, &other, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
    assert(kb_oidc_login_check_state(&pending, other.state) == KB_OIDC_LOGIN_STATE_MISMATCH);
 }
 
@@ -343,8 +374,9 @@ static void test_check_nonce(EVP_PKEY *key, const char *jwks)
    kb_oidc_login_config_t cfg = good_config();
    kb_oidc_login_pending_t pending, other;
    char url[KB_OIDC_LOGIN_URL_MAX];
-   assert(kb_oidc_login_start(&cfg, "srv-a", &pending, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
-   assert(kb_oidc_login_start(&cfg, "srv-a", &other, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
+   assert(kb_oidc_login_start(&cfg, "srv-a", 770001, &pending, url, sizeof(url)) ==
+          KB_OIDC_LOGIN_OK);
+   assert(kb_oidc_login_start(&cfg, "srv-a", 770001, &other, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
 
    kb_oidc_config_t vcfg;
    memset(&vcfg, 0, sizeof(vcfg));
@@ -454,7 +486,8 @@ static void test_pending_clear(void)
    kb_oidc_login_config_t cfg = good_config();
    kb_oidc_login_pending_t pending;
    char url[KB_OIDC_LOGIN_URL_MAX];
-   assert(kb_oidc_login_start(&cfg, "srv-a", &pending, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
+   assert(kb_oidc_login_start(&cfg, "srv-a", 770001, &pending, url, sizeof(url)) ==
+          KB_OIDC_LOGIN_OK);
    kb_oidc_login_pending_clear(&pending);
    kb_oidc_login_pending_t zero;
    memset(&zero, 0, sizeof(zero));
