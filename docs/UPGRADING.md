@@ -121,7 +121,50 @@ to an identity provider, the other collects a password.
 
 The client secret is **not** an environment variable. It is vault-custodied and
 read only at the moment of the code exchange, so it is never sitting where a
-crash dump or a `ps` would reach it.
+crash dump or a `ps` would reach it. Store it before anyone tries to log in:
+
+| where | value |
+| --- | --- |
+| vault agent | `oidc` |
+| vault cred | `oidc_login_client_secret` |
+
+A kb with an OIDC profile but no stored secret answers the callback with
+`503 oidc login is not fully configured` and logs `kb.oidc.login`. That is
+deliberately distinguishable from a failed login — it is a deployment fault, not
+an authentication one, and `auth-mode` already advertises that the kb offers OIDC.
+
+### The login routes
+
+| route | mode | purpose |
+| --- | --- | --- |
+| `GET /v1/identity/auth-mode` | both | which mode this kb offers |
+| `POST /v1/identity/login/start` | OIDC | `{server_id}` → `{authorize_url, redirect_uri}` |
+| `GET /v1/identity/login/callback` | OIDC | the IdP's redirect; `?code=&state=` |
+| `POST /v1/identity/login/pam` | PAM | `{username, password, server_id}` |
+
+All four are **pre-auth** by necessity — they are how a caller with no credential
+gets one.
+
+**The modes are enforced, not just reported.** A kb with a working OIDC profile
+answers `POST /v1/identity/login/pam` with `409` and never consults PAM. This
+matters if you are migrating: the moment an OIDC profile becomes valid, host
+passwords stop working as a way in, by design. If they still worked, an IdP's MFA,
+lockout and account-disable policy would be bypassable by anyone with a local
+account. Conversely a kb with no OIDC profile answers the two OIDC routes with
+`503`, so a client that guessed wrong gets a clear answer rather than a hang.
+
+**Every OIDC callback failure answers identically** — `401 the login could not be
+completed` — whether the state was unknown, the IdP refused the code, the
+signature failed or the nonce belonged to another login. The distinctions are in
+the kb log under `kb.oidc.login`, not in the response, because reporting them
+would tell an unauthenticated caller which check failed. The same applies to the
+password route: a wrong password, an unknown account and a username outside the
+subject grammar all answer `401 authentication failed`. **If you are debugging a
+login, the log is the only place the reason exists.**
+
+**The password route is not rate limited.** kb's limiter is applied on the
+bearer-gated path, and this route is pre-auth. If you expose a PAM-mode kb beyond
+a trusted network, put throttling in front of `POST /v1/identity/login/pam`.
 
 If an OIDC profile is configured but unusable — a typo in the endpoint, a
 cleartext `http://` URL — the kb falls back to the PAM login and logs a warning
