@@ -1698,3 +1698,63 @@ func TestChairmanGetsItsOwnFullDeadline(t *testing.T) {
 		}
 	})
 }
+
+// The planner expanded a 2.8KB proposal into a 23.7KB plan that split into 11
+// packets, inventing a metadata format, a resolution contract and three CLI
+// flags with no antecedent in the request. Its prompt asked only for a complete
+// plan, and completeness has no upper bound. It must ask for the smallest plan
+// that satisfies the request, and park anything extra as a decision for a human.
+func TestPlannerIsAskedForTheSmallestPlanThatSatisfiesTheRequest(t *testing.T) {
+	agents := &recordingAgents{draftResponses: []string{"# Plan\n\nDo exactly what was asked."}}
+	runner := &NativeRunner{agents: agents}
+	_, err := runner.author(t.Context(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Repo: "/repo"},
+		Node:     wfe.Node{ID: "plan"},
+		Inputs:   map[string]wfe.Artifact{"proposal": {Type: "proposal", Content: []byte("add a CONTRIBUTING.md section")}},
+	}, "plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := agents.requests[0].Prompt
+	for _, want := range []string{"smallest work that satisfies the request", "do not add deliverables",
+		"technical debt", "Taking on documented technical debt is completely acceptable", "leaving it undocumented"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("planner prompt lacks its scope bound %q", want)
+		}
+	}
+}
+
+// Reviewers treated only SUBSTITUTION as drift, so a plan that kept the goal and
+// piled work on top read as aligned and the gate ratcheted scope upward every
+// round. Unrequested addition is drift too — without dulling the panel's real
+// job, which is catching omissions and defects.
+func TestPanelTreatsUnrequestedAdditionAsDriftWithoutExcusingDefects(t *testing.T) {
+	agents := &recordingAgents{}
+	runner := &NativeRunner{agents: agents, roundtables: unpinnedTestRoundtable(t, "qa")}
+	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
+	reviewed.Hash = wfe.Hash(reviewed.Content)
+	if _, err := runner.roundtable(t.Context(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
+		Proposal: "add a CONTRIBUTING.md section", Inputs: map[string]wfe.Artifact{"src": reviewed},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	prompt := agents.requests[0].Prompt
+	if !strings.Contains(prompt, "Adding work the request did not ask for is drift") {
+		t.Fatal("panel prompt does not bound scope upward")
+	}
+	// The panel must still be told to report omissions and defects as findings,
+	// or this guard would trade one failure mode for a worse one.
+	if !strings.Contains(prompt, "report those as findings, not as alignment") {
+		t.Fatal("scope guard weakened the panel's defect-finding mandate")
+	}
+	// Deferring necessary unrequested work is the correct handling, so the guard
+	// must not let a reviewer flag the deferral itself as drift.
+	if !strings.Contains(prompt, "Documented technical debt is NOT drift") {
+		t.Fatal("panel could report documented technical debt as drift")
+	}
+	if !strings.Contains(prompt, "neither planned nor documented") {
+		t.Fatal("panel is not told that undocumented debt is a finding")
+	}
+}
