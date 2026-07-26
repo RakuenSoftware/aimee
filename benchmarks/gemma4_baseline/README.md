@@ -161,6 +161,12 @@ leave room for their weights on the 24 GiB card. E2B embedding batches contain 6
 inputs and run against 64 server slots with 8,192 context tokens available to
 each input instead of being serialized through one slot.
 
+E4B also starts at 64 slots. The 12B profile starts at 32, 26B at 16, 31B at 8,
+and Qwen 3.6 35B-A3B at 4. Before a complete 12B-or-larger view, run a short
+all-slots-occupied capacity check using the same frozen cases. Reduce a profile
+only when server loading or concurrent requests actually fail; do not infer a
+small slot count merely from parameter count.
+
 ```sh
 python3 benchmarks/gemma4_baseline/run_254_sweep.py
 ```
