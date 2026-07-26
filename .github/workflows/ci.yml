@@ -465,6 +465,66 @@ jobs:
         if: failure()
         run: docker logs aimee-enforce-pg 2>&1 | tail -60
 
+  # BLOCKING. The PAM half of acceptance §11, against a real PAM stack.
+  #
+  # WHY IT IS HERE. §11 requires the happy path on BOTH identity paths. OIDC has a
+  # live rig and a blocking job; PAM had neither. Its only coverage is
+  # test_kb_http_identity_login.c, which cannot call PAM at all — so "does this
+  # authenticate a real OS user on a real host?" was never asked. §10 phase 5
+  # flagged precisely this ("a working pam_unix-backed service file and two known
+  # test users") and it was never closed.
+  #
+  # The failure modes are ones no unit test can see: wrong PAM service name, missing
+  # service file, or kb unable to read /etc/shadow. Each returns "authentication
+  # failed" for EVERY user — deliberately indistinguishable from a wrong password,
+  # which is exactly what makes it easy to ship broken and hard to notice.
+  #
+  # It needs no vault chain: post_login_pam checks the password BEFORE filing a mint
+  # intent, so a 401 (credential rejected) separates cleanly from a 403 (accepted,
+  # then refused for want of a grant). Runner-created throwaway accounts and a
+  # Postgres for kb to boot against are the whole fixture.
+  pam-login-live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start Postgres (pgvector) with pull retry
+        run: |
+          img=pgvector/pgvector:pg18
+          for attempt in 1 2 3 4 5; do
+            docker pull "$img" && break
+            echo "docker pull $img failed (attempt $attempt/5); backing off"
+            sleep $((attempt * 10))
+          done
+          docker run -d --name aimee-pam-pg --network host \
+            -e POSTGRES_USER=aimee -e POSTGRES_PASSWORD=aimee -e POSTGRES_DB=aimee_pam_ci \
+            "$img"
+      - name: Install dependencies
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
+          sudo apt-get install -y -q gcc make pkg-config \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
+            libpq-dev postgresql-client libzstd-dev zlib1g-dev python3 curl ca-certificates \
+            libpam-modules passwd
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 40); do
+            docker exec aimee-pam-pg pg_isready -U aimee >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become ready in time"; docker logs aimee-pam-pg || true; exit 1
+      - name: Build the stack
+        # `all` rather than aimee-kb alone: kb forks aimee-kb-resolver from beside its
+        # own executable.
+        run: cd src && make -j"$(nproc)" all
+      - name: PAM login, end to end, against real host accounts
+        # Root because pam_unix reads /etc/shadow and the rig creates and deletes
+        # throwaway accounts. It restores every piece of host state it touches.
+        run: sudo -E bash scripts/run-pam-login-live.sh postgres://aimee:aimee@127.0.0.1:5432/aimee_pam_ci
+      - name: Postgres logs on failure
+        if: failure()
+        run: docker logs aimee-pam-pg 2>&1 | tail -60
+
   # BLOCKING. The P1 DB-layer tenancy-isolation gate.
   #
   # WHY IT IS HERE NOW. scripts/run-p1-rls-gate.sh has existed and passed for a long
