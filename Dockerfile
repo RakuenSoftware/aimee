@@ -45,12 +45,23 @@ RUN apt-get update \
         libpq5 \
         libssl3 \
         libzstd1 \
+        postgresql-17 \
+        postgresql-17-pgvector \
         python3 \
         zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
 ENV AIMEE_HOME=/var/lib/aimee
-ENV AIMEE_DB2_URL=postgresql://aimee:aimee@postgres:5432/aimee_shared
+# DB2 is unset on purpose. Unset means "the operator configured nothing", and the
+# entrypoint then runs the in-image PostgreSQL 17 + pgvector cluster under
+# $AIMEE_HOME/postgres. Setting it to any URL selects an external server and the
+# entrypoint starts nothing — that path is fully supported and unchanged.
+#
+# This used to default to postgresql://aimee:aimee@postgres:5432/aimee_shared,
+# which made "nothing configured" indistinguishable from "use the sibling
+# container" and left a bare `docker run` pointed at a host that does not exist.
+# compose.yaml and compose.server.yaml set AIMEE_DB2_URL explicitly, so stacks
+# using them keep their own postgres service exactly as before.
 # No baked embedder/LLM endpoint defaults. The kb runs NO model runtime; it calls
 # an external aimee-llm container (CPU/GPU) or endpoint. Point it with ONE of:
 #   AIMEE_LLM_URL       unified container -> embed + rerank + synth (one knob)

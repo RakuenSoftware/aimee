@@ -5,6 +5,45 @@ it can break an existing deployment, and what to do about it.
 
 ---
 
+## 2026-07 — The `aimee-kb` image runs its own pgvector when you configure none
+
+**What changed.** The `aimee-kb` image now ships PostgreSQL 17 with the `pgvector`
+extension. If `AIMEE_DB2_URL` is **unset**, the container initialises and runs its
+own cluster under `$AIMEE_HOME/postgres`, reachable only over a local socket. If
+`AIMEE_DB2_URL` is **set**, nothing is started and the external server is used
+exactly as before — that path is fully supported and is still the right choice for
+a shared, backed-up, or managed database.
+
+The image no longer bakes `AIMEE_DB2_URL=postgresql://aimee:aimee@postgres:5432/aimee_shared`.
+That default made "the operator configured nothing" indistinguishable from "use the
+sibling container", so the container could not tell when to run its own database —
+and a bare `docker run` inherited a `postgres` hostname that does not resolve.
+
+**Does this affect me?** Not if you use `compose.yaml`, `compose.server.yaml`, the
+SmoothNAS units, or `deploy/`. All of them already set `AIMEE_DB2_URL` explicitly,
+so they keep their own `postgres` service and their existing volume untouched.
+Nothing to do, and no data moves.
+
+You are affected only if you ran the `aimee-kb` image **without** setting
+`AIMEE_DB2_URL` and relied on the baked default to reach a container named
+`postgres`. Set it explicitly to keep that behaviour:
+
+```
+docker run -e AIMEE_DB2_URL=postgresql://aimee:aimee@postgres:5432/aimee_shared ...
+```
+
+**Why.** An unconfigured deployment previously had no working vector store, and the
+default pulled `pgvector/pgvector` from Docker Hub at run time — an anonymous pull,
+subject to a shared per-IP quota that fails as a hung connection rather than a clear
+error. Shipping the engine in the image removes a third-party registry from the
+production start path.
+
+**Moving between the two.** The embedded cluster is an ordinary PostgreSQL 17 data
+directory, so `pg_dump`/`pg_restore` moves it to an external server whenever you
+outgrow it; set `AIMEE_DB2_URL` afterwards and the container stops starting its own.
+
+---
+
 ## 2026-07 — The `plugin-loader` is removed
 
 **What changed.** aimee's built-in `plugin-loader` subsystem has been removed

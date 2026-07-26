@@ -15,7 +15,9 @@ REQUIRED_DOCKERFILE_PATTERNS = {
     "builds-aimee-kb": r"make\s+-C\s+src\s+\.\./aimee-kb",
     "copies-aimee-kb": r"COPY\s+--from=build\s+/src/aimee-kb\s+/usr/local/bin/aimee-kb",
     "aimee-home-env": r"(?m)^ENV\s+AIMEE_HOME=/var/lib/aimee\b",
-    "db2-url-env": r"AIMEE_DB2_URL=.*postgres",
+    # DB2 ships IN the image so an unconfigured deployment has a working vector
+    # store without pulling a third-party database image at runtime.
+    "db2-embedded-engine": r"(?m)^\s+postgresql-17-pgvector\b",
     "runtime-user": r"(?m)^USER\s+aimee\b",
     "health-v1": r"HEALTHCHECK[\s\S]*/v1/health",
     "exposes-http": r"EXPOSE\s+8741",
@@ -31,6 +33,11 @@ FORBIDDEN_DOCKERFILE_PATTERNS = {
     "server-binary": r"aimee-server",
     "sqlite-package": r"sqlite3|libsqlite3",
     "db1-reference": r"\bDB1\b|db1/",
+    # A baked DB2 URL makes "the operator configured nothing" indistinguishable
+    # from "use the sibling postgres container", so the entrypoint cannot tell
+    # when to run the embedded cluster -- and a bare `docker run` inherits a
+    # hostname that does not resolve. compose declares its own DB2 URL instead.
+    "db2-url-pinned": r"(?m)^ENV\s+AIMEE_DB2_URL=",
 }
 
 REQUIRED_COMPOSE_PATTERNS = {
@@ -142,7 +149,7 @@ def plant_test() -> int:
             "Dockerfile missing named-build-stage",
             "Dockerfile missing copies-aimee-kb",
             "Dockerfile missing aimee-home-env",
-            "Dockerfile missing db2-url-env",
+            "Dockerfile missing db2-embedded-engine",
             "Dockerfile missing runtime-user",
             "Dockerfile missing health-v1",
             "Dockerfile missing exposes-http",
@@ -173,13 +180,12 @@ def plant_test() -> int:
             "\n".join(
                 [
                     "FROM debian AS build",
-                    "ENV AIMEE_DB2_URL=postgresql://aimee:aimee@postgres:5432/aimee_shared",
                     "RUN make -C src ../aimee-kb",
                     "FROM debian",
                     "RUN apt-get install -y \\",
+                    "        postgresql-17-pgvector \\",
                     "        python3",
                     "ENV AIMEE_HOME=/var/lib/aimee",
-                    "ENV AIMEE_DB2_URL=postgresql://aimee:aimee@postgres:5432/aimee_shared",
                     "COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb",
                     "COPY scripts/embed-remote.py /opt/aimee/scripts/",
                     "COPY deploy/container/aimee.yaml /var/lib/aimee/.config/aimee/aimee.yaml",
