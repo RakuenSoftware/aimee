@@ -7797,11 +7797,28 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_kbsrv_mgmt_fp ON kb_server_registry(mgmt_f
 -- The composite subject grammar is enforced in C by the token authority and the
 -- server verifier; the CHECK here is the coarse shape only, so a malformed
 -- subject cannot be stored and later fail closed at mint time instead.
+-- A subject is an authenticated identity in one of four forms:
+--   owner                      the single-org bearer principal
+--   oidc:<iss>:<sub>           issuer-scoped, because a `sub` is unique only
+--                              within its issuer
+--   cert:<issuer>:<serial>     issuer-scoped for the same reason
+--   <username>                 a host account authenticated by the PAM login
+--
+-- The bare form carries no prefix on purpose. oidc/cert are namespaced because
+-- their names need an authority to be unique; a host account has exactly one
+-- authority (this host) and OIDC and PAM are mutually exclusive per kb, so there
+-- is no second namespace for it to collide with. This is also what
+-- kb_identity_token.h has always documented the `sub` claim as: "OIDC (iss,sub)
+-- composite or PAM username".
+--
+-- RESERVED: a host account named literally `owner` would be indistinguishable
+-- from the bearer principal, and no regex can separate them. Whatever derives a
+-- subject from a PAM username must refuse that name.
 CREATE TABLE IF NOT EXISTS kb_write_tier_grant (
   server_id TEXT NOT NULL,
   team_id BIGINT NOT NULL REFERENCES kb_team(id),
   subject TEXT NOT NULL CHECK (char_length(subject) BETWEEN 1 AND 576 AND
-    subject ~ '^(owner|(oidc|cert):[^:[:cntrl:]]+:[^:[:cntrl:]]+)$'),
+    subject ~ '^(owner|(oidc|cert):[^:[:cntrl:]]+:[^:[:cntrl:]]+|[A-Za-z0-9_][A-Za-z0-9._-]{0,31})$'),
   tier TEXT NOT NULL CHECK (tier IN ('off','data','full')),
   granted_by TEXT NOT NULL CHECK (char_length(granted_by) BETWEEN 1 AND 576),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -11487,7 +11504,7 @@ CREATE TABLE IF NOT EXISTS kb_management_identity_intent (
   token_jti TEXT NOT NULL UNIQUE CHECK (token_jti ~ '^[A-Za-z0-9._-]{8,128}$'),
   team_id BIGINT NOT NULL REFERENCES kb_team(id),
   subject TEXT NOT NULL CHECK (char_length(subject) BETWEEN 1 AND 576 AND
-    subject ~ '^(owner|(oidc|cert):[^:[:cntrl:]]+:[^:[:cntrl:]]+)$'),
+    subject ~ '^(owner|(oidc|cert):[^:[:cntrl:]]+:[^:[:cntrl:]]+|[A-Za-z0-9_][A-Za-z0-9._-]{0,31})$'),
   auth_mode TEXT NOT NULL CHECK (auth_mode IN ('oidc','pam')),
   target_server_id TEXT NOT NULL CHECK (target_server_id ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$'),
   token_issuer TEXT NOT NULL CHECK (char_length(token_issuer) BETWEEN 1 AND 255),

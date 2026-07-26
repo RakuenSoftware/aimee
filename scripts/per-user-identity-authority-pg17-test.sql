@@ -357,5 +357,58 @@ BEGIN
   PERFORM set_config('aimee.team','',true);
 END $$;
 
+-- ============================================================================
+-- Subject grammar. A subject is an authenticated identity in one of four forms,
+-- and the bare one is the PAM login's (kb_identity_token.h has always documented
+-- the token `sub` as "OIDC (iss,sub) composite or PAM username").
+--
+-- Worth asserting in SQL and not only in C: this CHECK and
+-- db2_intent_canonical_actor in db2/management_intent_fields.h encode the SAME
+-- rule in two languages, and whichever is looser silently becomes the real one.
+-- ============================================================================
+DO $$
+DECLARE
+  ok BOOLEAN;
+  s TEXT;
+  accepted TEXT[] := ARRAY[
+    'owner',
+    'alice',                                -- bare PAM host account
+    'svc_user-1.2',                         -- dots, dashes, underscores
+    '_leading_underscore',
+    'oidc:https%3A//idp.example:alice',
+    'cert:CN=aimee-ca:a1b'];
+  refused TEXT[] := ARRAY[
+    '',                                     -- empty
+    '-leading-dash',                        -- not a username
+    '.leading-dot',
+    'has space',
+    'has/slash',
+    'oidc:onlytwoparts',                    -- prefixed but incomplete
+    'oidc::empty',
+    'toolongtoolongtoolongtoolongtoolong9'];  -- 36 chars, over the 32 limit
+BEGIN
+  FOREACH s IN ARRAY accepted LOOP
+    BEGIN
+      INSERT INTO kb_write_tier_grant(server_id, team_id, subject, tier, granted_by)
+        VALUES ('idsrv', 930001, s, 'data', 'owner');
+      DELETE FROM kb_write_tier_grant WHERE server_id='idsrv' AND subject=s;
+    EXCEPTION WHEN check_violation THEN
+      RAISE EXCEPTION 'FAIL: subject CHECK refused a valid identity key: [%]', s;
+    END;
+  END LOOP;
+
+  FOREACH s IN ARRAY refused LOOP
+    ok := false;
+    BEGIN
+      INSERT INTO kb_write_tier_grant(server_id, team_id, subject, tier, granted_by)
+        VALUES ('idsrv', 930001, s, 'data', 'owner');
+    EXCEPTION WHEN check_violation THEN ok := true;
+    END;
+    IF NOT ok THEN
+      RAISE EXCEPTION 'FAIL: subject CHECK admitted a non-identity: [%]', s;
+    END IF;
+  END LOOP;
+END $$;
+
 \echo '== per-user identity token authority assertions PASSED =='
 ROLLBACK;

@@ -178,8 +178,18 @@ const char *aimee_pg_column_text(aimee_pg_stmt_t *st, int col)
       return "7"; /* team_id */
    case 5:
       /* Subject comes from aimee.principal, never from a bind. A value that is
-       * not a canonical identity key must be refused. */
-      return mock_bad_field == 1 ? "not-an-identity-key" : "oidc:https%3A//issuer:alice";
+       * not a canonical identity key must be refused.
+       *
+       * The invalid fixture has a SPACE in it deliberately. Now that a bare
+       * host-account name is a valid subject, an unprefixed string is no longer
+       * invalid by default — "not-an-identity-key" is a perfectly legal POSIX
+       * username. So the only values left to reject are ones that match neither
+       * the prefixed forms nor a username, and that is exactly what the C grammar
+       * and the schema CHECK now have to carry between them. */
+      return mock_bad_field == 1   ? "not an identity key"
+             : mock_bad_field == 6 ? "alice"    /* bare: a PAM host account */
+             : mock_bad_field == 7 ? "-badname" /* bare, but not a username  */
+                                   : "oidc:https%3A//issuer:alice";
    case 6:
       return mock_bad_field == 2 ? "ldap" : bound_text[6]; /* auth_mode */
    case 7:
@@ -430,6 +440,22 @@ static void test_start_rejects_mismatched_row(void)
    db2_identity_intent_operation_t op = make_operation();
    kb_principal_t principal = make_principal();
    db2_identity_intent_t out;
+
+   /* A BARE username is a valid subject — the PAM login's form, and what
+    * kb_identity_token.h documents the `sub` as. It must round-trip, or the C
+    * grammar and the schema CHECK disagree and one silently becomes the rule.
+    * Unprefixed because a host account has one authority and the two login modes
+    * are mutually exclusive, so there is no namespace to collide with. */
+   reset_mocks();
+   mock_bad_field = 6;
+   assert(db2_identity_intent_start(&principal, &op, &out) == DB2_MANAGEMENT_ACTION_OK);
+   assert(!strcmp(out.subject, "alice"));
+
+   /* But not anything unprefixed: a leading '-' is not a username, and admitting
+    * it would widen the subject column to arbitrary text. */
+   reset_mocks();
+   mock_bad_field = 7;
+   assert(db2_identity_intent_start(&principal, &op, &out) == DB2_MANAGEMENT_ACTION_INTEGRITY);
 
    /* Each perturbation is a way the returned row could disagree with what was
     * asked for; every one must be INTEGRITY rather than a usable intent. */

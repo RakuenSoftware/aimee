@@ -140,15 +140,49 @@ static inline int db2_intent_encoded_component(const char *s, size_t n)
    return 1;
 }
 
-/* The canonical immutable identity key: `owner`, `oidc:<iss>:<sub>` or
- * `cert:<issuer>:<serial>` with a normalized lowercase-hex serial. Matches the
- * subject CHECK on both kb_write_tier_grant and every management intent. */
+/* A host account name, as authenticated by the PAM login: the bare form of a
+ * subject. Unprefixed on purpose — oidc/cert are namespaced because their names
+ * are unique only within an issuer, whereas a host account has exactly one
+ * authority and OIDC/PAM are mutually exclusive per kb, so there is no second
+ * namespace to collide with. Bounds match the Linux 32-character limit and the
+ * subject CHECK in db2/schema.sql. */
+static inline int db2_intent_bare_username(const char *s)
+{
+   size_t n = strlen(s);
+   if (n == 0 || n > 32)
+      return 0;
+   unsigned char first = (unsigned char)s[0];
+   if (!((first >= 'A' && first <= 'Z') || (first >= 'a' && first <= 'z') ||
+         (first >= '0' && first <= '9') || first == '_'))
+      return 0;
+   for (size_t i = 1; i < n; ++i)
+   {
+      unsigned char c = (unsigned char)s[i];
+      if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+            c == '.' || c == '_' || c == '-'))
+         return 0;
+   }
+   return 1;
+}
+
+/* The canonical immutable identity key, in one of four forms: `owner`,
+ * `oidc:<iss>:<sub>`, `cert:<issuer>:<serial>` (normalized lowercase-hex
+ * serial), or a bare host-account `<username>`. Matches the subject CHECK on
+ * both kb_write_tier_grant and every management intent — if this and that regex
+ * ever disagree, one of them silently becomes the real rule, so they change
+ * together. */
 static inline int db2_intent_canonical_actor(const char *s, size_t cap)
 {
    if (!db2_intent_fixed_text(s, cap, DB2_INTENT_ACTOR_MAX, 0))
       return 0;
    if (!strcmp(s, "owner"))
       return 1;
+   /* No ':' means it can only be the bare form; the prefixed forms are checked
+    * below. Note `owner` was matched above, which is why a host account named
+    * `owner` is indistinguishable from the bearer principal and is reserved —
+    * see the note on kb_write_tier_grant. */
+   if (!strchr(s, ':'))
+      return db2_intent_bare_username(s);
    int cert = !strncmp(s, "cert:", 5);
    size_t prefix = cert ? 5 : (!strncmp(s, "oidc:", 5) ? 5 : 0);
    if (!prefix)
