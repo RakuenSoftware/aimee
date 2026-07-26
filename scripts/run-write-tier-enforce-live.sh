@@ -348,6 +348,26 @@ code=$(call POST "$STORE" "$(mint data)" "$store_body")
 if stored_ok "$code"; then pass "remote_writes=full + tier=data  -> $code (unchanged)"
 else fail "remote_writes=full + tier=data  -> $code (expected 2xx)"; fi
 
+# §11 also requires the OBSERVABILITY half: "the startup warning + global_ignored
+# metric fire when it is non-default". Nothing tested that, and a metric nobody
+# reads is how an operator ends up inferring a cutover from user complaints. The
+# refusals just above are exactly the condition that increments it -- requests the
+# retired global WOULD have allowed -- so the counter must now be non-zero.
+# Read over UDS: /v1/api/status is a read, and this asserts the operator-visible
+# surface rather than a counter reachable only from inside the process.
+sock=$(ls "$AIMEE_HOME"/*.sock 2>/dev/null | head -1)
+if [ -n "$sock" ] && [ -S "$sock" ]; then
+  curl -s --unix-socket "$sock" "http://localhost/v1/api/status" -o "$work/apistatus" 2>/dev/null
+  if grep -q 'global_ignored' "$work/apistatus" 2>/dev/null; then
+    n=$(sed -n 's/.*NO LONGER AUTHORIZES; \([0-9]*\) request.*/\1/p' "$work/apistatus" | head -1)
+    pass "remote_writes.global_ignored reported to the operator (${n:-?} request(s) refused)"
+  else
+    fail "global_ignored is absent from /v1/api/status after refusals the retired global would have allowed"
+  fi
+else
+  fail "could not reach the unix socket to read /v1/api/status"
+fi
+
 # --- 7. UDS precedence -----------------------------------------------------
 # §7/§11: the local operator is OS-attested and keeps full capability with no
 # token at all. If this ever fails the local CLI is broken by the feature.
