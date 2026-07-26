@@ -486,6 +486,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-collab-rules \
                $(TESTPREFIX)/unit-test-oauth-pkce \
                $(TESTPREFIX)/unit-test-subject-grammar \
+               $(TESTPREFIX)/unit-test-kb-client-grants \
                $(TESTPREFIX)/unit-test-kb-http-grants \
                $(TESTPREFIX)/unit-test-kb-oidc-login \
                $(TESTPREFIX)/unit-test-kb-oidc-login-store \
@@ -5388,6 +5389,14 @@ $(TESTPREFIX)/unit-test-kb-oidc-login-flow: $(OBJDIR)/tests/test_kb_oidc_login_f
 # linking the real ones would mean standing up a vault and a TLS client to test a
 # routing decision, and kb_oidc_token_exchange_post lives in its own translation
 # unit precisely so a caller can link the codec without dragging in TLS.
+# The HTTP transport is stubbed IN THE TEST TU. What this pins is how the client
+# INTERPRETS kb's answers — where an operator gets misled, since each outcome implies a
+# different next action.
+$(TESTPREFIX)/unit-test-kb-client-grants: $(OBJDIR)/tests/test_kb_client_grants.o \
+                     $(OBJDIR)/modules/kb_client/kb_client_grants.o \
+                     $(OBJDIR)/util.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o $(OBJDIR)/log.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
 # The db2 seam is stubbed IN THE TEST TU: it needs Postgres, and its own behaviour is
 # covered by the P1 RLS gate. What this pins is the routing and validation layer — which
 # requests reach the seam at all, and with what arguments.
