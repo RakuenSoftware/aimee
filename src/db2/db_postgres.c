@@ -2,6 +2,8 @@
  * docs/STORAGE_TIERS.md. */
 
 #include "db_postgres.h"
+
+#include "db2_pool.h" /* DB2_POOL_HOLD_CEILING_MS — the pool owns the figure */
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
@@ -863,6 +865,72 @@ resource_failure:
 
 /* --- libpq-dependent code below ---------------------------------- */
 
+/* Not a second opinion on the figure — the pool owns it. */
+#define DB2_DEFAULT_STATEMENT_TIMEOUT_MS DB2_POOL_HOLD_CEILING_MS
+#define DB2_CONNECT_TIMEOUT_S            "10"
+
+int db2_pg_statement_timeout_ms(void)
+{
+   const char *raw = getenv("AIMEE_DB2_STATEMENT_TIMEOUT_MS");
+   if (!raw || !raw[0])
+      return DB2_DEFAULT_STATEMENT_TIMEOUT_MS;
+   char *end = NULL;
+   long v = strtol(raw, &end, 10);
+   if (!end || *end || v < 0)
+      return DB2_DEFAULT_STATEMENT_TIMEOUT_MS; /* a typo must not remove the bound */
+   return (int)v;
+}
+
+/* PQconnectdb accepts EITHER a keyword/value string ("host=db user=aimee") OR a
+ * URI ("postgresql://user@host/db"), and the two forms cannot be mixed. Appending
+ * " connect_timeout=10" to a URI is not merely ineffective: libpq parses it
+ * without complaint and folds the trailing text into the DATABASE NAME, yielding
+ * dbname="aimee_shared connect_timeout=10 ...". The connection then fails on a
+ * database that does not exist, and the bounds are silently absent — so the
+ * mistake costs both the connection and the property it was meant to add.
+ *
+ * Deployments set AIMEE_DB2_URL as a URI, so both forms must be handled: a URI
+ * takes its parameters in the query string, joined with '&' after a '?'. */
+static int conninfo_is_uri(const char *s)
+{
+   return strncmp(s, "postgresql://", 13) == 0 || strncmp(s, "postgres://", 11) == 0;
+}
+
+/* Append the safety parameters unless the caller already set them, so an
+ * explicit conninfo still wins. */
+void db2_pg_conninfo_with_bounds(const char *conninfo, char *out, size_t out_sz)
+{
+   const char *base = conninfo ? conninfo : "";
+   int have_connect = strstr(base, "connect_timeout") != NULL;
+   int have_keepalives = strstr(base, "keepalives") != NULL;
+   int uri = conninfo_is_uri(base);
+   /* First added parameter opens the query string; the rest extend it. */
+   const char *sep1 = uri ? (strchr(base, '?') ? "&" : "?") : " ";
+   const char *sep = uri ? "&" : " ";
+
+   char params[256];
+   int n = 0;
+   params[0] = '\0';
+   if (!have_connect)
+      n += snprintf(params + n, sizeof params - (size_t)n, "%sconnect_timeout=%s", n ? sep : sep1,
+                    DB2_CONNECT_TIMEOUT_S);
+   if (!have_keepalives)
+      n += snprintf(params + n, sizeof params - (size_t)n,
+                    "%skeepalives=1%skeepalives_idle=30%skeepalives_interval=10%s"
+                    "keepalives_count=3",
+                    n ? sep : sep1, sep, sep, sep);
+
+   /* A truncated conninfo is not a weaker conninfo, it is an invalid one. If the
+    * bounds do not fit, hand back the caller's string unchanged and let the
+    * connection succeed unbounded rather than fail on a malformed string. */
+   if (strlen(base) + strlen(params) + 1 > out_sz)
+   {
+      snprintf(out, out_sz, "%s", base);
+      return;
+   }
+   snprintf(out, out_sz, "%s%s", base, params);
+}
+
 #ifdef AIMEE_DISABLE_POSTGRES
 
 /* Build-time opt-out for platforms where libpq isn't available (mostly
@@ -1092,9 +1160,36 @@ static void copy_err(char *errbuf, size_t errlen, const char *src)
    snprintf(errbuf, errlen, "%s", src ? src : "");
 }
 
+/* Bounds every connection this process opens, so no single operation can hold a
+ * pool lease indefinitely.
+ *
+ * This exists because there were no bounds here at all — not because any outage
+ * was traced to their absence. The reaper deliberately will not reclaim a live
+ * thread's connection (libpq forbids concurrent use), so an over-ceiling lease is
+ * something the pool can report but not stop. With no statement_timeout, a query
+ * that never returns is indistinguishable from one that is merely slow, and
+ * bounding the statement is the only lever available at this layer.
+ *
+ * The pool already declares 300s as the longest a lease may reasonably be held.
+ * That figure is now ENFORCED at the server rather than only observed after the
+ * fact: a statement cannot outlive the ceiling that defines "stuck".
+ *
+ * Keepalives matter for the same reason — a peer that vanishes without a FIN
+ * leaves a read blocked forever, which no statement_timeout can interrupt
+ * because the server never sees the query.
+ *
+ * The default is the pool's own DB2_POOL_HOLD_CEILING_MS, so the two cannot
+ * drift apart.
+ *
+ * AIMEE_DB2_STATEMENT_TIMEOUT_MS overrides the default for a deployment with
+ * genuinely longer work; 0 disables it, which restores the old unbounded
+ * behaviour and should be a deliberate choice. */
 void *aimee_pg_open(const char *conninfo, char *errbuf, size_t errlen)
 {
-   PGconn *conn = PQconnectdb(conninfo ? conninfo : "");
+   char bounded[2048];
+   db2_pg_conninfo_with_bounds(conninfo, bounded, sizeof bounded);
+
+   PGconn *conn = PQconnectdb(bounded);
    if (!conn)
    {
       copy_err(errbuf, errlen, "PQconnectdb returned NULL");
@@ -1105,6 +1200,27 @@ void *aimee_pg_open(const char *conninfo, char *errbuf, size_t errlen)
       copy_err(errbuf, errlen, PQerrorMessage(conn));
       PQfinish(conn);
       return NULL;
+   }
+
+   int timeout_ms = db2_pg_statement_timeout_ms();
+   if (timeout_ms > 0)
+   {
+      char sql[96];
+      snprintf(sql, sizeof sql, "SET statement_timeout = %d", timeout_ms);
+      PGresult *r = PQexec(conn, sql);
+      int ok = r && PQresultStatus(r) == PGRES_COMMAND_OK;
+      if (r)
+         PQclear(r);
+      if (!ok)
+      {
+         /* Refuse the connection rather than hand back an unbounded one. A
+          * caller that asked for bounds and silently got none is worse than a
+          * caller that fails: the pool would carry a member it cannot reclaim,
+          * with nothing in the connection to say so. */
+         copy_err(errbuf, errlen, "could not set statement_timeout on the connection");
+         PQfinish(conn);
+         return NULL;
+      }
    }
    return conn;
 }

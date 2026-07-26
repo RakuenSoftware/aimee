@@ -94,4 +94,10 @@ int64_t aimee_pg_column_int64(aimee_pg_stmt_t *stmt, int col);
 double aimee_pg_column_double(aimee_pg_stmt_t *stmt, int col);
 const char *aimee_pg_column_text(aimee_pg_stmt_t *stmt, int col);
 
+/* Connection safety bounds. Shared (not libpq-gated) so the policy is testable
+ * without a backend: an unbounded pooled connection lets a single query hold a
+ * lease past the ceiling the pool can report but not reclaim. */
+int db2_pg_statement_timeout_ms(void);
+void db2_pg_conninfo_with_bounds(const char *conninfo, char *out, size_t out_sz);
+
 #endif /* DEC_DB_POSTGRES_H */
