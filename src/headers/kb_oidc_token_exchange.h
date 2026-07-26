@@ -5,11 +5,15 @@
  * authorization code and its PKCE verifier to the IdP's token endpoint and gets
  * an id_token back.
  *
- * Only the CODEC lives here — building the request and reading the response —
- * because that is where a mistake is security-relevant, and it is exactly the
- * part that needs no socket to test. The one-shot HTTPS POST is
- * kb_http_tls_exchange (kb/http/kb_http_client.h); this unit never opens one, so
- * every rule below is checked by a unit test rather than against a live IdP.
+ * The CODEC — building the request, reading the response — is
+ * kb/kb_oidc_token_exchange.c, deliberately socket-free, because that is where a
+ * mistake is security-relevant and it is exactly the part a unit test can pin.
+ * Every rule below is therefore checked against a unit test rather than a live
+ * IdP.
+ *
+ * The one network function, kb_oidc_token_exchange_post, is a SEPARATE
+ * translation unit (kb/kb_oidc_token_exchange_post.c) so that linking the codec
+ * does not drag in TLS and the HTTP client. It adds no decisions of its own.
  *
  * Two things this deliberately does NOT do:
  *
@@ -43,10 +47,11 @@ extern "C"
    typedef enum
    {
       KB_OIDC_TOKEN_EXCHANGE_OK = 0,
-      KB_OIDC_TOKEN_EXCHANGE_INVALID,   /* bad argument, or an unusable field */
-      KB_OIDC_TOKEN_EXCHANGE_TOO_LARGE, /* would not fit the caller's buffer */
-      KB_OIDC_TOKEN_EXCHANGE_MALFORMED, /* response is not a token response */
-      KB_OIDC_TOKEN_EXCHANGE_DENIED     /* the IdP returned an OAuth error */
+      KB_OIDC_TOKEN_EXCHANGE_INVALID,    /* bad argument, or an unusable field */
+      KB_OIDC_TOKEN_EXCHANGE_TOO_LARGE,  /* would not fit the caller's buffer */
+      KB_OIDC_TOKEN_EXCHANGE_MALFORMED,  /* response is not a token response */
+      KB_OIDC_TOKEN_EXCHANGE_DENIED,     /* the IdP returned an OAuth error */
+      KB_OIDC_TOKEN_EXCHANGE_UNAVAILABLE /* the exchange never reached the IdP */
    } kb_oidc_token_exchange_result_t;
 
    /* Build the application/x-www-form-urlencoded token request for `pending` and
@@ -89,6 +94,26 @@ extern "C"
                                                                    size_t body_len,
                                                                    char *unverified_id_token_out,
                                                                    size_t cap);
+
+   /* Perform the exchange: one HTTPS POST to cfg->token_url with the body and
+    * Basic credentials built above, then extract the id_token from the response.
+    *
+    * The only part of this unit that touches the network. It adds nothing to the
+    * codec's decisions — it exists so the caller does not assemble a
+    * kb_http_request_t by hand and get the header set or the response ceiling
+    * wrong. Transport goes through kb_http_tls_exchange, which pins TLS
+    * verification to the authority name and port 443.
+    *
+    * `client_secret` is borrowed for the duration of the call and never retained.
+    * Every intermediate buffer that held it or the code is cleansed before
+    * returning, on both the success and failure paths.
+    *
+    * A non-2xx response is _DENIED when the body is a readable OAuth error and
+    * _MALFORMED otherwise; a transport failure is _UNAVAILABLE. The returned
+    * token is UNVERIFIED — see kb_oidc_token_response_id_token. */
+   kb_oidc_token_exchange_result_t kb_oidc_token_exchange_post(
+       const kb_oidc_login_config_t *cfg, const kb_oidc_login_pending_t *pending, const char *code,
+       const char *client_secret, char *unverified_id_token_out, size_t cap);
 
 #ifdef __cplusplus
 }

@@ -116,6 +116,7 @@ static kb_oidc_login_config_t good_config(void)
    snprintf(cfg.issuer, sizeof(cfg.issuer), "%s", "https://idp.example");
    snprintf(cfg.client_id, sizeof(cfg.client_id), "%s", "aimee-kb");
    snprintf(cfg.authorize_url, sizeof(cfg.authorize_url), "%s", "https://idp.example/authorize");
+   snprintf(cfg.token_url, sizeof(cfg.token_url), "%s", "https://idp.example/token");
    snprintf(cfg.redirect_uri, sizeof(cfg.redirect_uri), "%s", "https://kb.example/oidc/callback");
    return cfg;
 }
@@ -438,6 +439,7 @@ static void test_config_from_env(void)
     * assert something other than what it reads. */
    unsetenv("AIMEE_KB_OIDC_LOGIN_CLIENT_ID");
    unsetenv("AIMEE_KB_OIDC_LOGIN_AUTHORIZE_URL");
+   unsetenv("AIMEE_KB_OIDC_LOGIN_TOKEN_URL");
    unsetenv("AIMEE_KB_OIDC_LOGIN_REDIRECT_URI");
    unsetenv("AIMEE_KB_OIDC_LOGIN_SCOPE");
    unsetenv("AIMEE_KB_OIDC_ISSUER");
@@ -459,9 +461,12 @@ static void test_config_from_env(void)
 
    setenv("AIMEE_KB_OIDC_ISSUER", "https://idp.example", 1);
    setenv("AIMEE_KB_OIDC_LOGIN_AUTHORIZE_URL", "https://idp.example/authorize", 1);
+   assert(kb_oidc_login_config_from_env(&cfg) == KB_OIDC_LOGIN_INVALID); /* no token url */
+   setenv("AIMEE_KB_OIDC_LOGIN_TOKEN_URL", "https://idp.example/token", 1);
    assert(kb_oidc_login_config_from_env(&cfg) == KB_OIDC_LOGIN_INVALID); /* no redirect */
    setenv("AIMEE_KB_OIDC_LOGIN_REDIRECT_URI", "https://kb.example/oidc/callback", 1);
    assert(kb_oidc_login_config_from_env(&cfg) == KB_OIDC_LOGIN_OK);
+   assert(!strcmp(cfg.token_url, "https://idp.example/token"));
    assert(!strcmp(cfg.client_id, "aimee-kb"));
    assert(!strcmp(cfg.authorize_url, "https://idp.example/authorize"));
    assert(!strcmp(cfg.redirect_uri, "https://kb.example/oidc/callback"));
@@ -493,9 +498,100 @@ static void test_config_from_env(void)
 
    unsetenv("AIMEE_KB_OIDC_LOGIN_CLIENT_ID");
    unsetenv("AIMEE_KB_OIDC_LOGIN_AUTHORIZE_URL");
+   unsetenv("AIMEE_KB_OIDC_LOGIN_TOKEN_URL");
    unsetenv("AIMEE_KB_OIDC_LOGIN_REDIRECT_URI");
    unsetenv("AIMEE_KB_OIDC_LOGIN_SCOPE");
    unsetenv("AIMEE_KB_OIDC_ISSUER");
+}
+
+static void test_token_url_split(void)
+{
+   char host[256], path[512];
+
+   assert(kb_oidc_token_url_split("https://idp.example/oauth/token", host, sizeof(host), path,
+                                  sizeof(path)) == KB_OIDC_LOGIN_OK);
+   assert(!strcmp(host, "idp.example"));
+   assert(!strcmp(path, "/oauth/token"));
+
+   /* No path means the root. */
+   assert(kb_oidc_token_url_split("https://idp.example", host, sizeof(host), path, sizeof(path)) ==
+          KB_OIDC_LOGIN_OK);
+   assert(!strcmp(host, "idp.example") && !strcmp(path, "/"));
+   assert(kb_oidc_token_url_split("https://idp.example/", host, sizeof(host), path, sizeof(path)) ==
+          KB_OIDC_LOGIN_OK);
+   assert(!strcmp(path, "/"));
+
+   /* Validate-only mode, used by the profile check. */
+   assert(kb_oidc_token_url_split("https://idp.example/token", NULL, 0, NULL, 0) ==
+          KB_OIDC_LOGIN_OK);
+
+   /* Cleartext, and no scheme at all. */
+   assert(kb_oidc_token_url_split("http://idp.example/token", host, sizeof(host), path,
+                                  sizeof(path)) == KB_OIDC_LOGIN_INVALID);
+   assert(kb_oidc_token_url_split("idp.example/token", host, sizeof(host), path, sizeof(path)) ==
+          KB_OIDC_LOGIN_INVALID);
+   assert(kb_oidc_token_url_split(NULL, host, sizeof(host), path, sizeof(path)) ==
+          KB_OIDC_LOGIN_INVALID);
+   assert(host[0] == '\0' && path[0] == '\0');
+
+   /* THE case worth refusing rather than coercing: an explicit port. The egress
+    * client dials 443 regardless, so accepting ":8443" would silently send the
+    * client secret to a different service than the operator named. Even ":443"
+    * is refused, because accepting it would mean the parser has to be trusted to
+    * tell the two apart. */
+   assert(kb_oidc_token_url_split("https://idp.example:8443/token", host, sizeof(host), path,
+                                  sizeof(path)) == KB_OIDC_LOGIN_INVALID);
+   assert(kb_oidc_token_url_split("https://idp.example:443/token", host, sizeof(host), path,
+                                  sizeof(path)) == KB_OIDC_LOGIN_INVALID);
+
+   /* Userinfo: how a URL is made to look like one host while resolving to
+    * another. */
+   assert(kb_oidc_token_url_split("https://idp.example@evil.test/token", host, sizeof(host), path,
+                                  sizeof(path)) == KB_OIDC_LOGIN_INVALID);
+
+   /* An origin-form target carries no query or fragment. */
+   assert(kb_oidc_token_url_split("https://idp.example/token?x=1", host, sizeof(host), path,
+                                  sizeof(path)) == KB_OIDC_LOGIN_INVALID);
+   assert(kb_oidc_token_url_split("https://idp.example/token#f", host, sizeof(host), path,
+                                  sizeof(path)) == KB_OIDC_LOGIN_INVALID);
+
+   /* "//" would be read as an authority, not a path. */
+   assert(kb_oidc_token_url_split("https://idp.example//token", host, sizeof(host), path,
+                                  sizeof(path)) == KB_OIDC_LOGIN_INVALID);
+
+   /* Empty, malformed and non-ASCII hosts. */
+   assert(kb_oidc_token_url_split("https:///token", host, sizeof(host), path, sizeof(path)) ==
+          KB_OIDC_LOGIN_INVALID);
+   assert(kb_oidc_token_url_split("https://.idp.example/t", host, sizeof(host), path,
+                                  sizeof(path)) == KB_OIDC_LOGIN_INVALID);
+   assert(kb_oidc_token_url_split("https://idp.example./t", host, sizeof(host), path,
+                                  sizeof(path)) == KB_OIDC_LOGIN_INVALID);
+   assert(kb_oidc_token_url_split("https://[::1]/t", host, sizeof(host), path, sizeof(path)) ==
+          KB_OIDC_LOGIN_INVALID);
+   assert(kb_oidc_token_url_split("https://idp_example/t", host, sizeof(host), path,
+                                  sizeof(path)) == KB_OIDC_LOGIN_INVALID);
+   /* A space in the path would split the request line. */
+   assert(kb_oidc_token_url_split("https://idp.example/to ken", host, sizeof(host), path,
+                                  sizeof(path)) == KB_OIDC_LOGIN_INVALID);
+
+   /* Outputs too small refuse, and leave nothing partially written. */
+   char tiny[4];
+   assert(kb_oidc_token_url_split("https://idp.example/token", tiny, sizeof(tiny), path,
+                                  sizeof(path)) == KB_OIDC_LOGIN_INVALID);
+   assert(tiny[0] == '\0');
+   assert(kb_oidc_token_url_split("https://idp.example/token", host, sizeof(host), tiny,
+                                  sizeof(tiny)) == KB_OIDC_LOGIN_INVALID);
+   assert(host[0] == '\0' && tiny[0] == '\0');
+
+   /* And a profile naming an unusable token endpoint is refused as a whole, so
+    * the failure lands at configuration time rather than at somebody's login. */
+   kb_oidc_login_config_t cfg = good_config();
+   assert(kb_oidc_login_config_valid(&cfg));
+   snprintf(cfg.token_url, sizeof(cfg.token_url), "%s", "https://idp.example:8443/token");
+   assert(!kb_oidc_login_config_valid(&cfg));
+   cfg = good_config();
+   cfg.token_url[0] = '\0';
+   assert(!kb_oidc_login_config_valid(&cfg));
 }
 
 int main(void)
@@ -515,6 +611,7 @@ int main(void)
    test_principal();
    test_pending_clear();
    test_config_from_env();
+   test_token_url_split();
 
    free(jwks);
    EVP_PKEY_free(key);

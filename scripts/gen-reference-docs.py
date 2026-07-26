@@ -669,6 +669,10 @@ ENV_DESC = {
         "Knowledge base (aimee-kb)",
         "IdP authorization endpoint the login redirects to (https only).",
     ),
+    "AIMEE_KB_OIDC_LOGIN_TOKEN_URL": (
+        "Knowledge base (aimee-kb)",
+        "IdP token endpoint for the code exchange (https, default port only).",
+    ),
     "AIMEE_KB_OIDC_LOGIN_REDIRECT_URI": (
         "Knowledge base (aimee-kb)",
         "This kb's OIDC callback URL (https, or http on loopback only).",

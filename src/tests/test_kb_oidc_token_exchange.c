@@ -37,6 +37,7 @@ static kb_oidc_login_pending_t make_pending(const char *redirect)
    snprintf(cfg.issuer, sizeof(cfg.issuer), "%s", "https://idp.example");
    snprintf(cfg.client_id, sizeof(cfg.client_id), "%s", "aimee-kb");
    snprintf(cfg.authorize_url, sizeof(cfg.authorize_url), "%s", "https://idp.example/authorize");
+   snprintf(cfg.token_url, sizeof(cfg.token_url), "%s", "https://idp.example/token");
    snprintf(cfg.redirect_uri, sizeof(cfg.redirect_uri), "%s", redirect);
    kb_oidc_login_pending_t p;
    char url[KB_OIDC_LOGIN_URL_MAX];

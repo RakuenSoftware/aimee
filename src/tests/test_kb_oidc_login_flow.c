@@ -138,6 +138,7 @@ static kb_oidc_login_config_t rp_config(void)
    snprintf(cfg.issuer, sizeof(cfg.issuer), "%s", ISSUER);
    snprintf(cfg.client_id, sizeof(cfg.client_id), "%s", CLIENT_ID);
    snprintf(cfg.authorize_url, sizeof(cfg.authorize_url), "%s/authorize", ISSUER);
+   snprintf(cfg.token_url, sizeof(cfg.token_url), "%s/token", ISSUER);
    snprintf(cfg.redirect_uri, sizeof(cfg.redirect_uri), "%s",
             "https://kb.example/v1/identity/login/callback");
    return cfg;

@@ -79,6 +79,11 @@ int kb_oidc_login_config_valid(const kb_oidc_login_config_t *cfg)
    return cfg && plain_field(cfg->issuer, sizeof(cfg->issuer) - 1, 1) &&
           plain_field(cfg->client_id, sizeof(cfg->client_id) - 1, 1) &&
           https_url(cfg->authorize_url, sizeof(cfg->authorize_url) - 1, 0) &&
+          /* The token endpoint is a server-to-server hop with the client secret
+           * on it, so there is no loopback-http exception and it must be
+           * splittable into the host/path the pinned-443 egress client takes. */
+          https_url(cfg->token_url, sizeof(cfg->token_url) - 1, 0) &&
+          kb_oidc_token_url_split(cfg->token_url, NULL, 0, NULL, 0) == KB_OIDC_LOGIN_OK &&
           https_url(cfg->redirect_uri, sizeof(cfg->redirect_uri) - 1, 1) &&
           scope_field(cfg->scope, sizeof(cfg->scope) - 1);
 }
@@ -102,6 +107,68 @@ static int draw_secret(char out[KB_OIDC_LOGIN_SECRET_LEN + 1])
    OPENSSL_cleanse(raw, sizeof(raw));
    OPENSSL_cleanse(encoded, sizeof(encoded));
    return 0;
+}
+
+kb_oidc_login_result_t kb_oidc_token_url_split(const char *url, char *host_out, size_t host_cap,
+                                               char *path_out, size_t path_cap)
+{
+   if (host_out && host_cap)
+      host_out[0] = '\0';
+   if (path_out && path_cap)
+      path_out[0] = '\0';
+   if (!url || strncmp(url, "https://", 8) != 0)
+      return KB_OIDC_LOGIN_INVALID;
+   const char *host = url + 8;
+   /* The host runs to the first '/', and everything from there is the path. */
+   const char *slash = strchr(host, '/');
+   size_t host_len = slash ? (size_t)(slash - host) : strlen(host);
+   if (host_len == 0)
+      return KB_OIDC_LOGIN_INVALID;
+   for (size_t i = 0; i < host_len; ++i)
+   {
+      unsigned char c = (unsigned char)host[i];
+      /* Letters, digits, '-' and '.' only. This rejects userinfo ('@'), an
+       * explicit port (':'), IPv6 literals ('[') and anything non-ASCII, each of
+       * which the egress client would refuse anyway — better to refuse the
+       * profile than to fail every login. */
+      if (c >= 0x80 || !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                         (c >= '0' && c <= '9') || c == '-' || c == '.'))
+         return KB_OIDC_LOGIN_INVALID;
+   }
+   if (host[0] == '.' || host[host_len - 1] == '.')
+      return KB_OIDC_LOGIN_INVALID;
+
+   const char *path = slash ? slash : "/";
+   size_t path_len = strlen(path);
+   /* An origin-form target carries no query or fragment, and "//" at the start
+    * would be read as an authority rather than a path. */
+   if (path[0] != '/' || path[1] == '/' || strchr(path, '?') || strchr(path, '#'))
+      return KB_OIDC_LOGIN_INVALID;
+   for (size_t i = 0; i < path_len; ++i)
+   {
+      unsigned char c = (unsigned char)path[i];
+      if (c < 0x20 || c >= 0x80 || c == ' ' || c == 0x7f)
+         return KB_OIDC_LOGIN_INVALID;
+   }
+
+   if (host_out)
+   {
+      if (host_len >= host_cap)
+         return KB_OIDC_LOGIN_INVALID;
+      memcpy(host_out, host, host_len);
+      host_out[host_len] = '\0';
+   }
+   if (path_out)
+   {
+      if (path_len >= path_cap)
+      {
+         if (host_out && host_cap)
+            host_out[0] = '\0';
+         return KB_OIDC_LOGIN_INVALID;
+      }
+      memcpy(path_out, path, path_len + 1);
+   }
+   return KB_OIDC_LOGIN_OK;
 }
 
 void kb_oidc_login_pending_clear(kb_oidc_login_pending_t *pending)
@@ -233,6 +300,7 @@ kb_oidc_login_result_t kb_oidc_login_config_from_env(kb_oidc_login_config_t *out
        copy_env(out->issuer, sizeof(out->issuer), getenv("AIMEE_KB_OIDC_ISSUER")) ||
        copy_env(out->authorize_url, sizeof(out->authorize_url),
                 getenv("AIMEE_KB_OIDC_LOGIN_AUTHORIZE_URL")) ||
+       copy_env(out->token_url, sizeof(out->token_url), getenv("AIMEE_KB_OIDC_LOGIN_TOKEN_URL")) ||
        copy_env(out->redirect_uri, sizeof(out->redirect_uri),
                 getenv("AIMEE_KB_OIDC_LOGIN_REDIRECT_URI")) ||
        copy_env(out->scope, sizeof(out->scope), getenv("AIMEE_KB_OIDC_LOGIN_SCOPE")))

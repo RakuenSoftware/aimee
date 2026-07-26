@@ -52,8 +52,12 @@ extern "C"
       char issuer[256];        /* expected id_token "iss"; required */
       char client_id[256];     /* required */
       char authorize_url[512]; /* IdP authorization endpoint; required */
-      char redirect_uri[512];  /* this kb's callback; required */
-      char scope[256];         /* "" -> "openid" */
+      /* IdP token endpoint; required. https on the default port only — the kb
+       * egress client pins 443, so a URL naming another port would be silently
+       * dialled on 443 and is refused instead. */
+      char token_url[512];
+      char redirect_uri[512]; /* this kb's callback; required */
+      char scope[256];        /* "" -> "openid" */
    } kb_oidc_login_config_t;
 
    /* A login kb has started and not yet completed. Holds secrets: zero it with
@@ -112,6 +116,21 @@ extern "C"
                                                   const kb_verify_result_t *verified,
                                                   kb_principal_t *out);
 
+   /* Split an https URL into the host and origin-path the kb egress client takes
+    * (kb_http_request_t carries them separately and pins port 443).
+    *
+    * Refuses, rather than coercing: a non-https scheme; userinfo (an "@" before
+    * the path, which is how a URL is made to look like one host while resolving
+    * to another); an explicit port — even ":443" — because the client dials 443
+    * regardless and accepting a port would mean a URL naming :8443 was silently
+    * sent to 443; a query or fragment, which an origin-form target may not carry;
+    * and an empty host.
+    *
+    * An absent path becomes "/". Pass NULL/0 for both outputs to validate only.
+    * On failure both outputs are emptied. */
+   kb_oidc_login_result_t kb_oidc_token_url_split(const char *url, char *host_out, size_t host_cap,
+                                                  char *path_out, size_t path_cap);
+
    /* Zero a pending login's secrets. Safe on NULL. */
    void kb_oidc_login_pending_clear(kb_oidc_login_pending_t *pending);
 
@@ -121,6 +140,7 @@ extern "C"
     *
     *   AIMEE_KB_OIDC_LOGIN_CLIENT_ID     required — enables the login front end
     *   AIMEE_KB_OIDC_LOGIN_AUTHORIZE_URL required
+    *   AIMEE_KB_OIDC_LOGIN_TOKEN_URL     required
     *   AIMEE_KB_OIDC_LOGIN_REDIRECT_URI  required
     *   AIMEE_KB_OIDC_LOGIN_SCOPE         optional; "" -> "openid"
     *   AIMEE_KB_OIDC_ISSUER              required — SHARED with the verifier, so

@@ -305,7 +305,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 213 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. Secrets and tokens should be supplied through the environment or credential vault, never committed.
+The binaries read 214 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. Secrets and tokens should be supplied through the environment or credential vault, never committed.
 
 ### Paths & assets
 
@@ -390,6 +390,7 @@ The binaries read 213 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_KB_OIDC_LOGIN_CLIENT_ID` | OIDC relying-party client id; setting it enables the per-user login front end. |
 | `AIMEE_KB_OIDC_LOGIN_REDIRECT_URI` | This kb's OIDC callback URL (https, or http on loopback only). |
 | `AIMEE_KB_OIDC_LOGIN_SCOPE` | Space-delimited OIDC scopes for the login request; defaults to openid. |
+| `AIMEE_KB_OIDC_LOGIN_TOKEN_URL` | IdP token endpoint for the code exchange (https, default port only). |
 | `AIMEE_KB_OIDC_SCOPE_CLAIM` | OIDC claim carrying the scope. |
 | `AIMEE_KB_OIDC_SCOPE_KIND` | OIDC scope-kind interpretation. |
 | `AIMEE_LLM_MODEL` | Model label sent to AIMEE_LLM_URL's chat endpoint (single-model gateways ignore it). Default 'aimee-synth'. |
