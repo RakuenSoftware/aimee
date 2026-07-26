@@ -160,7 +160,7 @@ def start_ettin_server(
         socket, "run", "--detach", "--rm", "--name", "gemma4-baseline-server", "--network", "host",
         "--device", "/dev/dri:/dev/dri", "--volume", f"{deployed_models}:/models",
         "--volume", f"{repo / 'scripts/aimee-llm-supervisor.sh'}:/opt/aimee/aimee-llm-supervisor.sh:ro",
-        "--entrypoint", "/opt/aimee/aimee-llm-supervisor.sh",
+        "--entrypoint", "/bin/sh",
         "--env", "AIMEE_LLM_EMBED_MODE=off", "--env", "AIMEE_LLM_SYNTH_MODE=off",
         "--env", "AIMEE_LLM_RERANK_MODE=local", "--env", f"AIMEE_LLM_RERANK_TIER={tier}",
         "--env", f"AIMEE_LLM_NGL={ngl}",
@@ -168,7 +168,7 @@ def start_ettin_server(
         "--env", f"AIMEE_LLM_RERANK_UBATCH={ETTIN_LOAD_PROFILE['physical_batch_tokens']}",
         "--env", f"AIMEE_LLM_RERANK_CTX={ETTIN_LOAD_PROFILE['context_tokens']}",
         "--env", f"AIMEE_LLM_RERANK_PARALLEL={ETTIN_LOAD_PROFILE['parallel_slots']}",
-        "--env", "AIMEE_LLM_PORT=8920", image,
+        "--env", "AIMEE_LLM_PORT=8920", image, "/opt/aimee/aimee-llm-supervisor.sh",
     )
     result = run(command, capture=True)
     try:
