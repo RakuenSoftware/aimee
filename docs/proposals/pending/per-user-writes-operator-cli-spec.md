@@ -28,7 +28,9 @@ my duplicate SQL has been reverted.
 
 So increment 5 is **narrower than three rounds of review believed**: the data and C
 layers are done. What is missing is only the operator-facing surface — four CLI
-commands over the existing `db2_write_tier_grant_*` seam, and nothing below it.
+commands over the existing `db2_write_tier_grant_*` seam PLUS two additive operations
+below it — see the remaining-work table. It is not "nothing below the seam"; that was a
+second over-optimistic restatement, corrected in the same round that found it.
 
 ### What this changes in the sections below
 
@@ -87,9 +89,11 @@ commands over the existing `db2_write_tier_grant_*` seam, and nothing below it.
 | 5 | four `/v1` routes with the UDS-only check, plus `server_auth.c` capability entries | server |
 | 6 | four CLI route-table entries and help text | CLI |
 
-The earlier claim that this was "four commands over a complete seam with nothing below
-it" was wrong in the same direction as the original premise: it understated what is
-missing. Items 1 and 2 are below the seam.
+Two earlier characterisations of this increment were wrong, both in the same direction:
+"grants can only be made with hand-written SQL" (there was a full seam) and then "four
+commands over a complete seam with nothing below it" (items 1 and 2 in the table above
+are below the seam). **The table is normative; any prose elsewhere that disagrees with
+it is stale and the table wins.**
 
 ## Why this exists
 
@@ -156,8 +160,9 @@ upsert on the unique `(server_id, team_id, subject)` key. Both cannot hold.
 This is not a new decision: the shipped `kb_write_tier_grant_set` already does it, via
 `ON CONFLICT ... DO UPDATE SET ..., revoked_at = NULL`. The reasoning below is why that
 existing behaviour is the right one to build on, not a proposal to change it. The
-`changed` / `was_revoked` / `previous_tier` fields are computed by the CLI from a
-`db2_write_tier_grant_lookup` taken before the mutation.
+`changed` / `was_revoked` / `previous_tier` fields come from the ATOMIC reporting
+operation required by correction (2) — never from a lookup taken before the mutation,
+which would race with a concurrent command.
 
 Why in place rather than a second row:
 
@@ -261,10 +266,19 @@ Table output, and `--json` yielding `{"grants":[...]}` — matching the
 aimee kb grant show --subject <s> --server <id> --team <id> [--json]
 ```
 
-One grant with its full audit trail: `tier`, `granted_by`, `granted_at`,
-`revoked_at`. `404` when absent. Exists separately from `list` because "what
-exactly does this one subject have, and who gave it to them" is the question asked
-during an incident, and grepping a table is a worse answer.
+One grant's CURRENT metadata: `tier`, `granted_by`, `created_at`, `updated_at`,
+`revoked_at`. `404` when absent.
+
+**Not an audit trail.** An earlier draft called it one, which contradicted this
+document's own position that history lives in `kb_audit_event` and that no audit-event
+read seam is in scope. `show` reads the grant row and nothing else, so it reports what is
+true NOW: it cannot say the grant was previously revoked and restored, nor who changed it
+before the last change. For that, read `kb_audit_event` — the mutations are already
+recorded there by the existing SQL.
+
+It exists separately from `list` because "what exactly does this one subject have, and
+who granted it" is the question asked during an incident, and grepping a table is a worse
+answer. That remains true of current state alone.
 
 ## Authorization
 
@@ -304,7 +318,8 @@ requiring new behaviour.
 
 Each of these is a test, not a description.
 
-1. `set` then `show` returns the tier that was set.
+1. `set` then `show` returns the tier that was set, and `show` returns CURRENT grant
+   metadata only — no history, and no `was_revoked`.
 2. `set` twice with the same tier: both `200`, second reports `changed: false`.
 3. `set` with a different tier: reports `changed: true` and the previous tier.
 4. `set --tier off` creates a row that `list` shows, distinct from no row at all.
