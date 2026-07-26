@@ -898,7 +898,11 @@ int db2_pg_statement_timeout_ms(void)
  * mistake costs both the connection and the property it was meant to add.
  *
  * Deployments set AIMEE_DB2_URL as a URI, so both forms must be handled: a URI
- * takes its parameters in the query string, joined with '&' after a '?'. */
+ * takes its parameters in the query string, joined with '&' after a '?'.
+ *
+ * Both URI schemes count. libpq accepts postgres:// as well as postgresql://, so
+ * recognising only the longer one would put a postgres:// deployment straight
+ * back into the mixed-form bug above. */
 static int conninfo_is_uri(const char *s)
 {
    return strncmp(s, "postgresql://", 13) == 0 || strncmp(s, "postgres://", 11) == 0;
