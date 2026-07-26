@@ -431,6 +431,73 @@ static void test_pending_clear(void)
    kb_oidc_login_pending_clear(NULL); /* must not crash */
 }
 
+static void test_config_from_env(void)
+{
+   /* Unset everything first: these tests run in whatever environment CI hands
+    * them, and a leaked AIMEE_KB_OIDC_* from another suite would make this
+    * assert something other than what it reads. */
+   unsetenv("AIMEE_KB_OIDC_LOGIN_CLIENT_ID");
+   unsetenv("AIMEE_KB_OIDC_LOGIN_AUTHORIZE_URL");
+   unsetenv("AIMEE_KB_OIDC_LOGIN_REDIRECT_URI");
+   unsetenv("AIMEE_KB_OIDC_LOGIN_SCOPE");
+   unsetenv("AIMEE_KB_OIDC_ISSUER");
+
+   kb_oidc_login_config_t cfg;
+   /* No client id -> the login front end is OFF. A deliberate state, not an
+    * error: a kb may verify bearers without offering a login, and PAM mode
+    * leaves all of this unset. */
+   assert(kb_oidc_login_config_from_env(&cfg) == KB_OIDC_LOGIN_DISABLED);
+   assert(kb_oidc_login_config_from_env(NULL) == KB_OIDC_LOGIN_INVALID);
+
+   setenv("AIMEE_KB_OIDC_LOGIN_CLIENT_ID", "aimee-kb", 1);
+   /* Set-but-incomplete must be LOUD. An operator who configured a login and
+    * left out the endpoint has to find out, not silently get no logins. */
+   assert(kb_oidc_login_config_from_env(&cfg) == KB_OIDC_LOGIN_INVALID);
+   kb_oidc_login_config_t zero;
+   memset(&zero, 0, sizeof(zero));
+   assert(!memcmp(&cfg, &zero, sizeof(cfg)));
+
+   setenv("AIMEE_KB_OIDC_ISSUER", "https://idp.example", 1);
+   setenv("AIMEE_KB_OIDC_LOGIN_AUTHORIZE_URL", "https://idp.example/authorize", 1);
+   assert(kb_oidc_login_config_from_env(&cfg) == KB_OIDC_LOGIN_INVALID); /* no redirect */
+   setenv("AIMEE_KB_OIDC_LOGIN_REDIRECT_URI", "https://kb.example/oidc/callback", 1);
+   assert(kb_oidc_login_config_from_env(&cfg) == KB_OIDC_LOGIN_OK);
+   assert(!strcmp(cfg.client_id, "aimee-kb"));
+   assert(!strcmp(cfg.authorize_url, "https://idp.example/authorize"));
+   assert(!strcmp(cfg.redirect_uri, "https://kb.example/oidc/callback"));
+   /* The issuer is the VERIFIER's AIMEE_KB_OIDC_ISSUER, deliberately shared: two
+    * separate knobs could drift, and then the issuer a login trusts would not be
+    * the issuer a bearer is verified against. */
+   assert(!strcmp(cfg.issuer, "https://idp.example"));
+   assert(cfg.scope[0] == '\0'); /* defaulted to openid at start time, not here */
+
+   setenv("AIMEE_KB_OIDC_LOGIN_SCOPE", "openid email", 1);
+   assert(kb_oidc_login_config_from_env(&cfg) == KB_OIDC_LOGIN_OK);
+   assert(!strcmp(cfg.scope, "openid email"));
+
+   /* A cleartext endpoint from the environment is refused exactly as one from a
+    * struct is — env is not a trusted bypass of the profile rules. */
+   setenv("AIMEE_KB_OIDC_LOGIN_AUTHORIZE_URL", "http://idp.example/authorize", 1);
+   assert(kb_oidc_login_config_from_env(&cfg) == KB_OIDC_LOGIN_INVALID);
+   setenv("AIMEE_KB_OIDC_LOGIN_AUTHORIZE_URL", "https://idp.example/authorize", 1);
+
+   /* An oversize value is refused rather than truncated: a silently shortened
+    * redirect_uri would fail at the IdP for no visible reason. */
+   char huge[900];
+   memset(huge, 'a', sizeof(huge) - 1);
+   huge[sizeof(huge) - 1] = '\0';
+   char url[1024];
+   snprintf(url, sizeof(url), "https://kb.example/%s", huge);
+   setenv("AIMEE_KB_OIDC_LOGIN_REDIRECT_URI", url, 1);
+   assert(kb_oidc_login_config_from_env(&cfg) == KB_OIDC_LOGIN_INVALID);
+
+   unsetenv("AIMEE_KB_OIDC_LOGIN_CLIENT_ID");
+   unsetenv("AIMEE_KB_OIDC_LOGIN_AUTHORIZE_URL");
+   unsetenv("AIMEE_KB_OIDC_LOGIN_REDIRECT_URI");
+   unsetenv("AIMEE_KB_OIDC_LOGIN_SCOPE");
+   unsetenv("AIMEE_KB_OIDC_ISSUER");
+}
+
 int main(void)
 {
    EVP_PKEY *key = NULL;
@@ -447,6 +514,7 @@ int main(void)
    test_check_nonce(key, jwks);
    test_principal();
    test_pending_clear();
+   test_config_from_env();
 
    free(jwks);
    EVP_PKEY_free(key);

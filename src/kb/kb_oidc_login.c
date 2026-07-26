@@ -7,6 +7,7 @@
 
 #include <openssl/crypto.h> /* OPENSSL_cleanse */
 #include <stdio.h>
+#include <stdlib.h> /* getenv */
 #include <string.h>
 
 /* No control bytes, no whitespace, within bounds. These land in a URL and in an
@@ -199,6 +200,55 @@ kb_oidc_login_result_t kb_oidc_login_check_nonce(const kb_oidc_login_pending_t *
       rc = KB_OIDC_LOGIN_OK;
    OPENSSL_cleanse(claimed, sizeof(claimed));
    return rc;
+}
+
+/* Copy an environment value into a fixed field, refusing rather than truncating:
+ * a silently shortened authorize_url or redirect_uri would produce a login that
+ * fails at the IdP for no visible reason. */
+static int copy_env(char *dst, size_t cap, const char *value)
+{
+   if (!value)
+      return 0;
+   size_t n = strnlen(value, cap);
+   if (n >= cap)
+      return -1;
+   memcpy(dst, value, n + 1);
+   return 0;
+}
+
+kb_oidc_login_result_t kb_oidc_login_config_from_env(kb_oidc_login_config_t *out)
+{
+   if (!out)
+      return KB_OIDC_LOGIN_INVALID;
+   memset(out, 0, sizeof(*out));
+   const char *client_id = getenv("AIMEE_KB_OIDC_LOGIN_CLIENT_ID");
+   if (!client_id || !client_id[0])
+      return KB_OIDC_LOGIN_DISABLED;
+
+   /* The issuer is the verifier's own AIMEE_KB_OIDC_ISSUER, not a login-specific
+    * one. Two separate knobs could drift, and then the issuer a login trusts
+    * would not be the issuer a bearer is checked against — which is exactly the
+    * confusion the issuer-scoped identity key exists to prevent. */
+   if (copy_env(out->client_id, sizeof(out->client_id), client_id) ||
+       copy_env(out->issuer, sizeof(out->issuer), getenv("AIMEE_KB_OIDC_ISSUER")) ||
+       copy_env(out->authorize_url, sizeof(out->authorize_url),
+                getenv("AIMEE_KB_OIDC_LOGIN_AUTHORIZE_URL")) ||
+       copy_env(out->redirect_uri, sizeof(out->redirect_uri),
+                getenv("AIMEE_KB_OIDC_LOGIN_REDIRECT_URI")) ||
+       copy_env(out->scope, sizeof(out->scope), getenv("AIMEE_KB_OIDC_LOGIN_SCOPE")))
+   {
+      memset(out, 0, sizeof(*out));
+      return KB_OIDC_LOGIN_INVALID;
+   }
+   /* Set-but-broken is INVALID, never a quiet fall back to DISABLED: an operator
+    * who configured a login and typo'd the endpoint must find out at startup, not
+    * discover that logins silently do not exist. */
+   if (!kb_oidc_login_config_valid(out))
+   {
+      memset(out, 0, sizeof(*out));
+      return KB_OIDC_LOGIN_INVALID;
+   }
+   return KB_OIDC_LOGIN_OK;
 }
 
 kb_oidc_login_result_t kb_oidc_login_principal(const kb_oidc_login_config_t *cfg,

@@ -73,7 +73,11 @@ extern "C"
       KB_OIDC_LOGIN_INVALID,     /* missing/malformed configuration or argument */
       KB_OIDC_LOGIN_UNAVAILABLE, /* CSPRNG failed, or the URL did not fit */
       KB_OIDC_LOGIN_STATE_MISMATCH,
-      KB_OIDC_LOGIN_NONCE_MISMATCH
+      KB_OIDC_LOGIN_NONCE_MISMATCH,
+      /* No OIDC login front end is configured. A deliberate state, not a
+       * failure: a kb may verify bearers without offering a login, and PAM mode
+       * leaves the relying-party profile unset entirely. */
+      KB_OIDC_LOGIN_DISABLED
    } kb_oidc_login_result_t;
 
    /* Validate `cfg`. Callers that accept operator input should use this before
@@ -110,6 +114,31 @@ extern "C"
 
    /* Zero a pending login's secrets. Safe on NULL. */
    void kb_oidc_login_pending_clear(kb_oidc_login_pending_t *pending);
+
+   /* Load the relying-party profile from the environment, alongside the verifier
+    * configuration kb_oidc_register_from_env already reads (proposal §3 grounds
+    * the OIDC mode in that same AIMEE_KB_OIDC_* configuration):
+    *
+    *   AIMEE_KB_OIDC_LOGIN_CLIENT_ID     required — enables the login front end
+    *   AIMEE_KB_OIDC_LOGIN_AUTHORIZE_URL required
+    *   AIMEE_KB_OIDC_LOGIN_REDIRECT_URI  required
+    *   AIMEE_KB_OIDC_LOGIN_SCOPE         optional; "" -> "openid"
+    *   AIMEE_KB_OIDC_ISSUER              required — SHARED with the verifier, so
+    *                                     the issuer a login trusts and the issuer
+    *                                     a bearer is verified against cannot
+    *                                     drift apart
+    *
+    * The client SECRET is deliberately absent: it is vault-custodied and read
+    * only at the moment of the code exchange, so it never sits in kb's
+    * environment where a crash dump or a `ps` would reach it.
+    *
+    * Returns KB_OIDC_LOGIN_OK with *out filled when the login front end is
+    * configured; KB_OIDC_LOGIN_DISABLED when AIMEE_KB_OIDC_LOGIN_CLIENT_ID is
+    * unset (the deliberate "OIDC login off" state, not an error — a kb may still
+    * verify bearers, and PAM mode leaves all of this unset);
+    * KB_OIDC_LOGIN_INVALID when it is set but the profile is incomplete or
+    * unusable, which must be loud rather than a silent fallback to disabled. */
+   kb_oidc_login_result_t kb_oidc_login_config_from_env(kb_oidc_login_config_t *out);
 
 #ifdef __cplusplus
 }

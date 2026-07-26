@@ -657,6 +657,26 @@ ENV_DESC = {
     "AIMEE_KB_OIDC_JWKS_FILE": ("Knowledge base (aimee-kb)", "OIDC JWKS file for KB API auth."),
     "AIMEE_KB_OIDC_SCOPE_CLAIM": ("Knowledge base (aimee-kb)", "OIDC claim carrying the scope."),
     "AIMEE_KB_OIDC_SCOPE_KIND": ("Knowledge base (aimee-kb)", "OIDC scope-kind interpretation."),
+    # Relying-party profile for the per-user /v1 write login (proposal
+    # per-user-remote-writes-authz.md §3). Setting the client id is what enables
+    # the login front end; the client SECRET is deliberately absent from the
+    # environment, being vault-custodied and read only at the code exchange.
+    "AIMEE_KB_OIDC_LOGIN_CLIENT_ID": (
+        "Knowledge base (aimee-kb)",
+        "OIDC relying-party client id; setting it enables the per-user login front end.",
+    ),
+    "AIMEE_KB_OIDC_LOGIN_AUTHORIZE_URL": (
+        "Knowledge base (aimee-kb)",
+        "IdP authorization endpoint the login redirects to (https only).",
+    ),
+    "AIMEE_KB_OIDC_LOGIN_REDIRECT_URI": (
+        "Knowledge base (aimee-kb)",
+        "This kb's OIDC callback URL (https, or http on loopback only).",
+    ),
+    "AIMEE_KB_OIDC_LOGIN_SCOPE": (
+        "Knowledge base (aimee-kb)",
+        "Space-delimited OIDC scopes for the login request; defaults to openid.",
+    ),
     "AIMEE_VECTOR_KB_BATCH_SIZE": ("Knowledge base (aimee-kb)", "Embedding batch size for KB vector ingest."),
     # Database & vectors
     "AIMEE_DB2_URL": ("Database & vectors", "Postgres (DB2) connection URL for the KB store."),
