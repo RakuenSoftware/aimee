@@ -257,7 +257,7 @@ def main() -> int:
     if raw_path.exists():
         for row in load_jsonl(raw_path):
             done[row["case_id"]] = row
-    pending = [case for case in cases if case["case_id"] not in done]
+    pending = [case for case in cases if not done.get(case["case_id"], {}).get("ok", False)]
 
     with raw_path.open("a", encoding="utf-8", newline="\n") as handle:
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
@@ -278,7 +278,7 @@ def main() -> int:
     summary_path = args.output_dir / f"summary_{args.label}.json"
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(summary, indent=2, sort_keys=True))
-    return 0 if summary["overall"]["n"] == len(cases) else 1
+    return 0 if summary["overall"]["n"] == len(cases) and all(row.get("ok", False) for row in rows) else 1
 
 
 if __name__ == "__main__":

@@ -154,6 +154,66 @@ class GemmaBaselineContractTests(unittest.TestCase):
             with mock.patch.object(sys, "argv", argv), mock.patch.object(synthesis, "call", side_effect=AssertionError("repeated")), contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(synthesis.main(), 0)
 
+    def test_synthesis_resume_retries_failed_case(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle, output = root / "bundle", root / "results"
+            bundle.mkdir()
+            output.mkdir()
+            (bundle / "manifest.json").write_text('{"suite":"test"}\n', encoding="utf-8")
+            (bundle / "corpus.jsonl").write_text(
+                json.dumps({"doc_id": "doc", "content": "source"}) + "\n", encoding="utf-8"
+            )
+            case = {
+                "case_id": "case", "task": "entity", "instruction": "extract",
+                "source_doc_id": "doc", "expected": {"name": "x", "entity_kind": "test", "context": "source"},
+            }
+            (bundle / "synthesis.jsonl").write_text(json.dumps(case) + "\n", encoding="utf-8")
+            raw = output / "raw_resume.jsonl"
+            raw.write_text(json.dumps({"case_id": "case", "task": "entity", "ok": False}) + "\n", encoding="utf-8")
+            result = {
+                "case_id": "case", "task": "entity", "ok": True, "attempts": 1, "latency_s": 0.1,
+                "raw_parse": True, "empty": False, "truncated": False,
+                "usage": {"completion_tokens": 1, "prompt_tokens": 1}, "timings": {},
+                "metrics": {"schema_valid": True, "required_field_recall": 1.0, "content_f1": 1.0},
+            }
+            argv = [
+                "run_synthesis_ab.py", "--endpoint", "http://unused", "--model", "test", "--label", "resume",
+                "--bundle", str(bundle), "--output-dir", str(output),
+            ]
+            with mock.patch.object(sys, "argv", argv), mock.patch.object(synthesis, "call", return_value=result) as call:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(synthesis.main(), 0)
+            call.assert_called_once()
+            self.assertTrue(json.loads(raw.read_text(encoding="utf-8").splitlines()[-1])["ok"])
+
+    def test_synthesis_fails_closed_when_retry_still_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle, output = root / "bundle", root / "results"
+            bundle.mkdir()
+            (bundle / "manifest.json").write_text('{"suite":"test"}\n', encoding="utf-8")
+            (bundle / "corpus.jsonl").write_text(
+                json.dumps({"doc_id": "doc", "content": "source"}) + "\n", encoding="utf-8"
+            )
+            case = {
+                "case_id": "case", "task": "entity", "instruction": "extract",
+                "source_doc_id": "doc", "expected": {"name": "x", "entity_kind": "test", "context": "source"},
+            }
+            (bundle / "synthesis.jsonl").write_text(json.dumps(case) + "\n", encoding="utf-8")
+            failed = {
+                "case_id": "case", "task": "entity", "ok": False, "attempts": 3, "latency_s": 0.0,
+                "raw_parse": False, "empty": True, "truncated": False,
+                "metrics": {"schema_valid": False, "required_field_recall": 0.0, "content_f1": 0.0},
+            }
+            argv = [
+                "run_synthesis_ab.py", "--endpoint", "http://unused", "--model", "test", "--label", "resume",
+                "--bundle", str(bundle), "--output-dir", str(output),
+            ]
+            with mock.patch.object(sys, "argv", argv), mock.patch.object(synthesis, "call", return_value=failed):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(synthesis.main(), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
