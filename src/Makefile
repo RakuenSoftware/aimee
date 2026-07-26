@@ -1252,6 +1252,25 @@ $(KB_TOKEN_AUTHORITY): $(TOKEN_AUTHORITY_OBJS) $(TOKEN_AUTHORITY_VAULT_OBJS) \
 .PHONY: identity-mint-live
 identity-mint-live: ../identity-mint-live
 
+# Live OIDC relying-party driver (dev tool, NOT part of `all`): drives the login
+# against a real identity provider, which is the one part of increment 4a every
+# other test stubs. Links the real token-exchange POST — and therefore TLS and the
+# kb HTTP client — which is exactly why the codec lives in a separate translation
+# unit from the network call: everything else can link the codec alone.
+# See scripts/run-oidc-login-live.sh.
+../oidc-login-live: $(OBJDIR)/tests/oidc_login_live_main.o \
+                    $(OBJDIR)/kb/kb_oidc_login.o $(OBJDIR)/kb/kb_oidc_token_exchange.o \
+                    $(OBJDIR)/kb/kb_oidc_token_exchange_post.o $(OBJDIR)/kb/auth_oidc.o \
+                    $(OBJDIR)/kb/verifier.o $(OBJDIR)/kb/kb_scope.o \
+                    $(OBJDIR)/kb/kb_identity.o $(OBJDIR)/kb/http/kb_http_client.o \
+                    $(OBJDIR)/kb/http/kb_tls.o $(OBJDIR)/server/oauth_pkce.o \
+                    $(KB_PLATFORM_OBJS) $(OBJDIR)/cJSON.o $(OBJDIR)/util.o $(OBJDIR)/dstr.o \
+                    $(OBJDIR)/log.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/aimee_home.o
+	$(CC) -o $@ $^ $(L_KB)
+
+.PHONY: oidc-login-live
+oidc-login-live: ../oidc-login-live
+
 # Standalone libpq memory-negation eval driver (dev tool, not part of `all`): the
 # aimee-kb object set with kb_main() swapped for a corpus-eval main() plus the
 # mem_eval harness. Links the REAL libpq DB2, so mem_eval_load_corpus opens an

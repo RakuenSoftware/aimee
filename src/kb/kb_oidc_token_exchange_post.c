@@ -99,6 +99,12 @@ kb_oidc_token_exchange_post(const kb_oidc_login_config_t *cfg,
           .response_body_max = KB_OIDC_TOKEN_EXCHANGE_RESPONSE_MAX,
           .connect_timeout_ms = TOKEN_CONNECT_TIMEOUT_MS,
           .total_timeout_ms = TOKEN_TOTAL_TIMEOUT_MS,
+          /* RFC 6749 §5.2: the token endpoint reports failure as a 400 whose BODY
+           * carries {"error":"invalid_grant", ...}. Without this the parser discards
+           * every non-2xx body, so _DENIED was unreachable and every IdP refusal —
+           * a spent code, a wrong verifier — surfaced as _MALFORMED. Found by running
+           * against a real identity provider; no stub could show it. */
+          .deliver_error_body = 1,
       };
       collect_t collected;
       memset(&collected, 0, sizeof(collected));

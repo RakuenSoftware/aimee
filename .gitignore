@@ -171,3 +171,4 @@ intent_record_*.json
 # The durable record lives in docs/proposals/ — 24 of these were committed to a
 # branch by accident because nothing ignored them.
 scratchpad/
+/oidc-login-live
