@@ -41,6 +41,20 @@ static const char *WS[]={" ","\t","\n","\r","\v","\f","  "};
 static const char *OPTK[]={"connect_timeout","keepalives","keepalives_idle",
    "keepalives_interval","keepalives_count","sslmode","application_name","dbname","options"};
 static const char *OPTV[]={"0","1","3","60","require","x","'a b'","'k keepalives=0'","''"};
+/* Percent-encode a random subset of the key's characters, in both hex cases.
+ * libpq decodes these, so connect%5Ftimeout IS connect_timeout — a generator that
+ * only ever emits plain keys never exercises that path at all. */
+static void encode_key(const char *k, char *out, size_t cap){
+   size_t n=0;
+   for(const char*c=k; *c && n+4<cap; c++){
+      if(rand()%4==0){
+         const char *hex = (rand()%2) ? "0123456789abcdef" : "0123456789ABCDEF";
+         out[n++]='%'; out[n++]=hex[((unsigned char)*c)>>4]; out[n++]=hex[((unsigned char)*c)&15];
+      } else out[n++]=*c;
+   }
+   out[n]='\0';
+}
+
 int main(int argc,char**argv){
    unsigned seed = argc>1?(unsigned)atoi(argv[1]):1;
    srand(seed);
@@ -56,7 +70,9 @@ int main(int argc,char**argv){
          for(int i=0;i<np;i++){
             const char*k=OPTK[rand()%9]; const char*v=OPTV[rand()%9];
             if(strchr(v,'\''))continue;
-            n+=snprintf(buf+n,sizeof buf-n,"%c%s=%s",i==0?'?':'&',k,v);
+            char ek[64];
+            encode_key(k, ek, sizeof ek);
+            n+=snprintf(buf+n,sizeof buf-n,"%c%s=%s",i==0?'?':'&',ek,v);
          }
          if(rand()%8==0) n+=snprintf(buf+n,sizeof buf-n,"%c",n&&strchr(buf,'?')?'&':'?');
       } else {
