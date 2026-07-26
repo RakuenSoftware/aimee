@@ -129,7 +129,11 @@ endif
 ifeq ($(OS),Windows_NT)
 WITH_PAM ?= 0
 else
-WITH_PAM ?= $(shell echo '\#include <security/pam_appl.h>' | $(CC) -xc -fsyntax-only - 2>$(NULLDEV) && echo 1 || echo 0)
+# Probe with -include rather than a piped '#include' line: inside $(shell ...) the
+# '\#' escape reached the compiler as a literal backslash, so this test failed
+# ALWAYS and PAM was silently never compiled in on Linux even with libpam-dev
+# installed. -include needs no '#' at all, so there is nothing left to mis-escape.
+WITH_PAM ?= $(shell : | $(CC) -xc -fsyntax-only -include security/pam_appl.h - 2>$(NULLDEV) && echo 1 || echo 0)
 endif
 ifeq ($(WITH_PAM),1)
     PAM_FLAGS = -DWITH_PAM
@@ -253,7 +257,7 @@ else ifeq ($(UNAME_S),Darwin)
         posix/platform_ipc.c posix/platform_path.c posix/platform_process.c \
         posix/platform_random.c posix/platform_net.c \
         mac/platform_event.c mac/platform_ipc.c mac/platform_process.c \
-        mac/secret_store.c posix/util.c
+        mac/secret_store.c posix/util.c posix/pam_auth.c
     PLATFORM_EXTRA_SRCS = \
         posix/history.c posix/server_main.c \
         posix/cli_client.c posix/cli_main.c \
@@ -269,7 +273,7 @@ else
         posix/platform_ipc.c posix/platform_path.c posix/platform_process.c \
         posix/platform_random.c posix/platform_net.c \
         linux/platform_event.c linux/platform_ipc.c linux/platform_process.c \
-        linux/secret_store.c posix/util.c
+        linux/secret_store.c posix/util.c posix/pam_auth.c
     PLATFORM_EXTRA_SRCS = \
         posix/history.c posix/server_main.c \
         posix/cli_client.c posix/cli_main.c \
