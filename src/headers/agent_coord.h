@@ -43,6 +43,14 @@ char *delegate_prompt_limit(const char *prompt, int token_budget);
  * Returns the configured value, or DELEGATE_TOKEN_BUDGET_DEFAULT if not set. */
 int delegate_token_budget_load(const char *project_root, const char *role);
 
+/* Input budget a specific model can accept (context window minus its output
+ * ceiling), honouring an agent's explicit context_window override. 0 = unknown. */
+int delegate_token_budget_for_agent(const char *model, int agent_context_window);
+
+/* Smallest such budget across every agent still eligible after routing: the
+ * agent is picked downstream, so the prompt has to fit the smallest of them. */
+int delegate_token_budget_for_agents(const agent_config_t *cfg);
+
 int agent_coordinate(agent_config_t *cfg, const char *task, agent_result_t *out);
 int agent_vote(agent_config_t *cfg, const char *role, const char *prompt, int n_voters,
                agent_result_t *out);

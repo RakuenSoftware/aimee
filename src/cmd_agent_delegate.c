@@ -882,8 +882,18 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
     * ~/.config/aimee/projects/<name>/project.yaml; defaults to 20K tokens. */
    if (sys_prompt)
    {
+      /* Precedence: --token-budget, then an explicit project.yaml value, then what
+       * the eligible models actually accept. The old behaviour stopped at the
+       * 20K constant, so a 200K or 1M-context model still had its system prompt
+       * tail-truncated -- silently, apart from a WARN. */
       int budget = token_budget_override > 0 ? token_budget_override
                                              : delegate_token_budget_load(cwd_for_template, role);
+      if (token_budget_override <= 0 && budget == DELEGATE_TOKEN_BUDGET_DEFAULT)
+      {
+         int model_budget = delegate_token_budget_for_agents(&cfg);
+         if (model_budget > budget)
+            budget = model_budget;
+      }
       char *limited = delegate_prompt_limit(sys_prompt, budget);
       if (limited)
       {
