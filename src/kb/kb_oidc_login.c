@@ -177,7 +177,27 @@ void kb_oidc_login_pending_clear(kb_oidc_login_pending_t *pending)
       OPENSSL_cleanse(pending, sizeof(*pending));
 }
 
+/* The server_id grammar the identity tables CHECK:
+ * ^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$ */
+static int server_id_valid(const char *s)
+{
+   if (!s)
+      return 0;
+   size_t n = strnlen(s, KB_OIDC_LOGIN_SERVER_MAX + 1);
+   if (n == 0 || n > KB_OIDC_LOGIN_SERVER_MAX)
+      return 0;
+   for (size_t i = 0; i < n; ++i)
+   {
+      unsigned char c = (unsigned char)s[i];
+      int alnum = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+      if (i == 0 ? !alnum : !(alnum || c == '.' || c == '_' || c == '-'))
+         return 0;
+   }
+   return 1;
+}
+
 kb_oidc_login_result_t kb_oidc_login_start(const kb_oidc_login_config_t *cfg,
+                                           const char *target_server_id,
                                            kb_oidc_login_pending_t *pending, char *url_out,
                                            size_t url_cap)
 {
@@ -185,7 +205,8 @@ kb_oidc_login_result_t kb_oidc_login_start(const kb_oidc_login_config_t *cfg,
       url_out[0] = '\0';
    if (pending)
       memset(pending, 0, sizeof(*pending));
-   if (!cfg || !pending || !url_out || url_cap == 0 || !kb_oidc_login_config_valid(cfg))
+   if (!cfg || !pending || !url_out || url_cap == 0 || !kb_oidc_login_config_valid(cfg) ||
+       !server_id_valid(target_server_id))
       return KB_OIDC_LOGIN_INVALID;
 
    kb_oidc_login_pending_t candidate;
@@ -199,6 +220,7 @@ kb_oidc_login_result_t kb_oidc_login_start(const kb_oidc_login_config_t *cfg,
       return KB_OIDC_LOGIN_UNAVAILABLE;
    }
    snprintf(candidate.redirect_uri, sizeof(candidate.redirect_uri), "%s", cfg->redirect_uri);
+   snprintf(candidate.target_server_id, sizeof(candidate.target_server_id), "%s", target_server_id);
 
    char challenge[OAUTH_PKCE_CHALLENGE_LEN + 1] = "";
    if (oauth_pkce_s256_challenge(candidate.code_verifier, challenge, sizeof(challenge)) != 0)

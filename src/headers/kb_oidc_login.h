@@ -43,6 +43,8 @@ extern "C"
 #define KB_OIDC_LOGIN_SECRET_LEN OAUTH_PKCE_VERIFIER_MIN
 #define KB_OIDC_LOGIN_URL_MAX    2048
 #define KB_OIDC_LOGIN_NONCE_MAX  256
+/* Matches the server_id grammar every identity table CHECKs against. */
+#define KB_OIDC_LOGIN_SERVER_MAX 127
 
    /* The relying-party profile. kb holds this; aimee-server never does. The
     * client secret is NOT here: it lives in the vault and is read only by the
@@ -69,6 +71,16 @@ extern "C"
       char code_verifier[KB_OIDC_LOGIN_SECRET_LEN + 1];
       char nonce[KB_OIDC_LOGIN_SECRET_LEN + 1];
       char redirect_uri[512]; /* retained: the exchange must send the same one */
+      /* Which aimee-server this login wants a write token for. Retained because
+       * the callback has to file the intent against the SAME server the login
+       * named, and because taking it from the callback's query string would let
+       * a forged callback redirect a completed login at another server.
+       *
+       * Caller-supplied at start, and safe to be: naming a server grants
+       * nothing. The intent writer looks up (server_id, team_id, subject) in
+       * kb_write_tier_grant and requires the registry to carry that server on
+       * that team, so an unknown or foreign server is refused there. */
+      char target_server_id[KB_OIDC_LOGIN_SERVER_MAX + 1];
    } kb_oidc_login_pending_t;
 
    typedef enum
@@ -89,10 +101,16 @@ extern "C"
     * than at somebody's login. */
    int kb_oidc_login_config_valid(const kb_oidc_login_config_t *cfg);
 
-   /* Start a login: draw state/verifier/nonce, and write the authorization URL
+   /* Start a login for a write token on `target_server_id`: draw
+    * state/verifier/nonce, retain the target, and write the authorization URL
     * (response_type=code, PKCE S256, state, nonce) to url_out.
-    * On any failure *pending is zeroed and url_out is empty. */
+    *
+    * `target_server_id` must match the server_id grammar the identity tables
+    * CHECK; it is refused here rather than at intent time so a malformed one
+    * cannot reach the database. On any failure *pending is zeroed and url_out is
+    * empty. */
    kb_oidc_login_result_t kb_oidc_login_start(const kb_oidc_login_config_t *cfg,
+                                              const char *target_server_id,
                                               kb_oidc_login_pending_t *pending, char *url_out,
                                               size_t url_cap);
 

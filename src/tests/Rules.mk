@@ -489,6 +489,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-oidc-login-store \
                $(TESTPREFIX)/unit-test-kb-oidc-token-exchange \
                $(TESTPREFIX)/unit-test-kb-oidc-login-flow \
+               $(TESTPREFIX)/unit-test-kb-http-identity-login \
                $(TESTPREFIX)/unit-test-oauth-reauth \
                $(TESTPREFIX)/unit-test-mcp-client \
                $(TESTPREFIX)/unit-test-mcp-client-sse \
@@ -5381,6 +5382,17 @@ $(TESTPREFIX)/unit-test-kb-oidc-login-flow: $(OBJDIR)/tests/test_kb_oidc_login_f
                      $(OBJDIR)/util.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
+$(TESTPREFIX)/unit-test-kb-http-identity-login: \
+                     $(OBJDIR)/tests/test_kb_http_identity_login.o \
+                     $(OBJDIR)/kb/http/kb_http_identity_login.o \
+                     $(OBJDIR)/kb/kb_oidc_login.o \
+                     $(OBJDIR)/kb/kb_oidc_login_store.o \
+                     $(OBJDIR)/kb/auth_oidc.o \
+                     $(OBJDIR)/kb/kb_identity.o \
+                     $(OBJDIR)/server/oauth_pkce.o \
+                     $(OBJDIR)/util.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o $(OBJDIR)/log.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
 $(TESTPREFIX)/unit-test-kb-pki: $(OBJDIR)/tests/test_kb_pki.o \
                      $(OBJDIR)/kb/pki.o \
                      $(OBJDIR)/kb/modules/vault/vault_crypto.o \
@@ -5635,7 +5647,7 @@ $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/tests/test_kb_http_routes.o \
                      $(OBJDIR)/kb/http/kb_http_search.o \
                      $(OBJDIR)/kb/http/kb_route_acl.o \
                      $(OBJDIR)/kb/http/kb_http_console.o \
-                     $(OBJDIR)/kb/http/kb_http_accounts.o \
+                     $(OBJDIR)/kb/http/kb_http_accounts.o $(OBJDIR)/kb/http/kb_http_bootstrap.o $(OBJDIR)/kb/http/kb_http_identity_login.o $(OBJDIR)/kb/kb_oidc_login.o $(OBJDIR)/kb/kb_oidc_login_store.o \
                      $(OBJDIR)/kb/http/kb_http_governance.o \
                      $(OBJDIR)/util.o \
                      $(OBJDIR)/kb/kb_scope.o \

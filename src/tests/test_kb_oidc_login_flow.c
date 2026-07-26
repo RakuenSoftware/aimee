@@ -181,7 +181,7 @@ static void test_happy_path(EVP_PKEY *idp_key, const char *jwks)
    /* 1. START. */
    kb_oidc_login_pending_t pending;
    char url[KB_OIDC_LOGIN_URL_MAX];
-   assert(kb_oidc_login_start(&cfg, &pending, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
+   assert(kb_oidc_login_start(&cfg, "srv-a", &pending, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
 
    /* 2. RETAIN across the browser redirect. */
    assert(kb_oidc_login_store_put(&pending, NOW, 300) == KB_OIDC_LOGIN_STORE_OK);
@@ -246,6 +246,11 @@ static void test_happy_path(EVP_PKEY *idp_key, const char *jwks)
     * oidc:<iss>:<sub> with the issuer's ':' percent-encoded. */
    assert(!strcmp(identity_key, "oidc:https%3A//idp.example:alice"));
 
+   /* The target server survived the redirect, so the intent the callback files
+    * names the server the LOGIN asked for rather than anything the callback
+    * carried. This is the field db2_identity_intent_start takes. */
+   assert(!strcmp(resumed.target_server_id, "srv-a"));
+
    /* The login is spent: nothing is left to replay. */
    assert(kb_oidc_login_store_count(NOW + 5) == 0);
 
@@ -263,7 +268,7 @@ static void test_replayed_callback_fails(EVP_PKEY *idp_key, const char *jwks)
    kb_oidc_login_config_t cfg = rp_config();
    kb_oidc_login_pending_t pending;
    char url[KB_OIDC_LOGIN_URL_MAX];
-   assert(kb_oidc_login_start(&cfg, &pending, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
+   assert(kb_oidc_login_start(&cfg, "srv-a", &pending, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
    assert(kb_oidc_login_store_put(&pending, NOW, 300) == KB_OIDC_LOGIN_STORE_OK);
 
    char state[128];
@@ -282,8 +287,9 @@ static void test_foreign_state_fails(void)
    kb_oidc_login_config_t cfg = rp_config();
    kb_oidc_login_pending_t mine, theirs;
    char my_url[KB_OIDC_LOGIN_URL_MAX], their_url[KB_OIDC_LOGIN_URL_MAX];
-   assert(kb_oidc_login_start(&cfg, &mine, my_url, sizeof(my_url)) == KB_OIDC_LOGIN_OK);
-   assert(kb_oidc_login_start(&cfg, &theirs, their_url, sizeof(their_url)) == KB_OIDC_LOGIN_OK);
+   assert(kb_oidc_login_start(&cfg, "srv-a", &mine, my_url, sizeof(my_url)) == KB_OIDC_LOGIN_OK);
+   assert(kb_oidc_login_start(&cfg, "srv-a", &theirs, their_url, sizeof(their_url)) ==
+          KB_OIDC_LOGIN_OK);
    /* Only one of them was ever started by this kb. */
    assert(kb_oidc_login_store_put(&mine, NOW, 300) == KB_OIDC_LOGIN_STORE_OK);
 
@@ -308,8 +314,9 @@ static void test_valid_token_from_another_login_fails(EVP_PKEY *idp_key, const c
    /* Two logins started by this same kb. */
    kb_oidc_login_pending_t victim, attacker;
    char victim_url[KB_OIDC_LOGIN_URL_MAX], attacker_url[KB_OIDC_LOGIN_URL_MAX];
-   assert(kb_oidc_login_start(&cfg, &victim, victim_url, sizeof(victim_url)) == KB_OIDC_LOGIN_OK);
-   assert(kb_oidc_login_start(&cfg, &attacker, attacker_url, sizeof(attacker_url)) ==
+   assert(kb_oidc_login_start(&cfg, "srv-a", &victim, victim_url, sizeof(victim_url)) ==
+          KB_OIDC_LOGIN_OK);
+   assert(kb_oidc_login_start(&cfg, "srv-a", &attacker, attacker_url, sizeof(attacker_url)) ==
           KB_OIDC_LOGIN_OK);
 
    /* The IdP mints a token for the ATTACKER's login: correctly signed, correct

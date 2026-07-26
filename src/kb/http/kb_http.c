@@ -27,6 +27,8 @@
 #include "kb_route_acl.h"
 #include "kb_http_console.h"
 #include "kb_http_accounts.h"
+#include "kb_http_bootstrap.h"
+#include <time.h>
 #include "kb_http_governance.h"
 #include "kb_http_insights.h"
 #include "kb_http_budget.h"
@@ -676,61 +678,12 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
                      const char *auth_header, const char *bearer_token, const char *body,
                      int body_len, char *out_buf, int out_cap)
 {
-   /* The single-use enrollment token is the credential, so redeem precedes bearer
-    * auth. The caller supplies a CSR; its private key never leaves the client. */
-   if (strcmp(path, "/v1/enroll/redeem") == 0)
-   {
-      if (strcmp(method, "POST") != 0)
-      {
-         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
-         return 405;
-      }
-      cJSON *req = body ? cJSON_Parse(body) : NULL;
-      const cJSON *jtok = req ? cJSON_GetObjectItemCaseSensitive(req, "token") : NULL;
-      const cJSON *jcsr = req ? cJSON_GetObjectItemCaseSensitive(req, "csr") : NULL;
-      if (!cJSON_IsString(jtok) || !cJSON_IsString(jcsr))
-      {
-         cJSON_Delete(req);
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"bad request: token (string) and csr (PEM string) required\"}");
-         return 400;
-      }
-      char scope[KB_ENROLL_SCOPE_MAX];
-      char *cert = malloc(KB_PKI_CERT_PEM_MAX);
-      int rc = cert ? kb_enroll_redeem_csr(kb_default_config_dir(), jtok->valuestring,
-                                           jcsr->valuestring, 60L * 60 * 24 * 90, scope,
-                                           sizeof(scope), cert, KB_PKI_CERT_PEM_MAX)
-                    : -1;
-      cJSON_Delete(req);
-      if (rc != 0)
-      {
-         free(cert);
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"enrollment failed: invalid or used token, or bad CSR\"}");
-         return 401;
-      }
-      /* Persist the issuer/serial and mTLS certificate-DER SHA-256. Fail closed
-       * rather than release an authority the enrollment database cannot revoke. */
-      char fp[KB_PKI_FP_HEX] = "", issuer[256] = "", raw_serial[128] = "", serial[128] = "";
-      if (kb_pki_ca_fingerprint(cert, fp, sizeof(fp)) != 0 ||
-          kb_pki_cert_metadata(cert, issuer, sizeof(issuer), raw_serial, sizeof(raw_serial)) != 0 ||
-          kb_cert_serial_normalize(raw_serial, serial, sizeof(serial)) != 0 ||
-          db2_enrollment_insert(scope, fp, issuer, serial, "", 0, NULL) != 0)
-      {
-         free(cert);
-         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"enrollment persistence unavailable\"}");
-         return 503;
-      }
-      cJSON *resp = cJSON_CreateObject();
-      cJSON_AddStringToObject(resp, "client_cert", cert);
-      cJSON_AddStringToObject(resp, "scope", scope);
-      char *out = cJSON_PrintUnformatted(resp);
-      snprintf(out_buf, (size_t)out_cap, "%s", out ? out : "{}");
-      free(out);
-      cJSON_Delete(resp);
-      free(cert);
-      return 200;
-   }
+   /* Credential bootstrap, both pre-auth: the login surface is how a caller with
+    * no credential gets one (§3), and the enrollment token IS the credential.
+    * See kb_http_bootstrap.h. */
+   int br = kb_http_bootstrap_route(method, path, body, (int64_t)time(NULL), out_buf, out_cap);
+   if (br >= 0)
+      return br;
 
    /* P9a telemetry scrape/ingest TOKEN path: the dedicated token authorizes GET
     * /v1/metrics + POST /v1/telemetry/metrics WITHOUT the kb bearer, so it runs

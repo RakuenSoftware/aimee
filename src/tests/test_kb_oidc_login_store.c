@@ -59,7 +59,7 @@ static kb_oidc_login_pending_t start_login(void)
    kb_oidc_login_config_t cfg = good_config();
    kb_oidc_login_pending_t p;
    char url[KB_OIDC_LOGIN_URL_MAX];
-   assert(kb_oidc_login_start(&cfg, &p, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
+   assert(kb_oidc_login_start(&cfg, "srv-a", &p, url, sizeof(url)) == KB_OIDC_LOGIN_OK);
    return p;
 }
 
