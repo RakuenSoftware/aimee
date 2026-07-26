@@ -798,6 +798,13 @@ const char *cli_v1_route_for_method(const char *method, const char **verb_out)
        /* Custom-handler routes whose response still matches the dispatch method. */
        {"session.list", "GET", "/v1/sessions"},
        {"kb.search", "POST", "/v1/kb/search"},
+       /* Write-tier grant administration. Bespoke handlers, so the generator cannot see
+        * them; POST on all three because the thin client marshals flags into a body. The
+        * server refuses these over TCP (v1_route_requires_uds), so a remote endpoint fails
+        * there rather than here. */
+       {"kb.grant.set", "POST", "/v1/grants/write-tier/set"},
+       {"kb.grant.revoke", "POST", "/v1/grants/write-tier/revoke"},
+       {"kb.grant.list", "POST", "/v1/grants/write-tier/list"},
        {"kb.status", "GET", "/v1/kb/status"},
        {"kb.curator", "GET", "/v1/kb/curator"},
        {"memory.recall", "POST", "/v1/memory/recall"},

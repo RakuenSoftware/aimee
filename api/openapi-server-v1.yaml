@@ -1407,21 +1407,37 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
-  /grants/write-tier:
-    get:
+  /grants/write-tier/list:
+    post:
       summary: List per-user write-tier grants for a (server, team)
       description: >-
+        POST for a read, deliberately: the thin client marshals a command's flags into a JSON
+        body and has no per-method query-string builder, and `aimee kb grant list` is the only
+        caller. The body also suits a subject, which can contain ':' and '%'.
         LOCAL UDS ONLY. Refused over the TCP listener regardless of bearer or
         aimee.api.remote_writes, because a remote caller reaching this would already hold a
         write tier and could widen its own access. aimee-kb independently requires admin or
         team-lead authority. `include_revoked` WIDENS the listing to contain revoked grants
         alongside live ones; it is not a revoked-only filter. `subject` filters to one
         subject, which is how `show` is served.
-      parameters:
-        - { in: query, name: server_id, required: true, schema: { type: string } }
-        - { in: query, name: team_id, required: true, schema: { type: integer, format: int64 } }
-        - { in: query, name: subject, required: false, schema: { type: string } }
-        - { in: query, name: include_revoked, required: false, schema: { type: string, enum: ["1", "true"] } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [server_id, team_id]
+              properties:
+                server_id: { type: string }
+                team_id: { type: integer, format: int64 }
+                subject:
+                  type: string
+                  description: Optional filter to one subject; this is how `show` is served.
+                include_revoked:
+                  type: boolean
+                  description: >-
+                    WIDENS the listing to include revoked grants alongside live ones. Not a
+                    revoked-only filter.
       responses:
         "200":
           description: >-
@@ -1461,10 +1477,11 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /grants/write-tier/set:
     post:
       summary: Create or update a per-user write-tier grant
       description: >-
-        LOCAL UDS ONLY (see the GET). Idempotent. The response reports what was replaced,
+        LOCAL UDS ONLY (see /grants/write-tier/list). Idempotent. The response reports what was replaced,
         observed atomically by aimee-kb: `changed` distinguishes a no-op from a real change,
         which is how a script notices that somebody's access just grew. `previous_tier` is
         ABSENT when the grant did not exist, because "created" and "changed from off" are
@@ -1524,7 +1541,7 @@ paths:
     post:
       summary: Revoke a per-user write-tier grant
       description: >-
-        LOCAL UDS ONLY (see GET /grants/write-tier). Idempotent, so a retry after a timeout
+        LOCAL UDS ONLY (see /grants/write-tier/list). Idempotent, so a retry after a timeout
         succeeds. Takes effect immediately for MINTING — aimee-kb re-reads the grant when it
         mints — but a token already issued remains usable for up to its 300s lifetime, once.
       requestBody:

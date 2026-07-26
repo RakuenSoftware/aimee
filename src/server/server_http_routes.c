@@ -1770,10 +1770,14 @@ static const http_route_t g_v1_routes[] = {
      * these over TCP regardless of bearer, tier or capability; CAP_GRANT_ADMIN is defence in
      * depth. Not given an `op` twin, because there is no NDJSON socket method for grant
      * administration and inventing one would create a second reachable path to it. */
-    {"POST", "/v1/grants/write-tier", NULL, RM_EXACT, NULL, CAP_GRANT_ADMIN, rh_grant_set},
+    /* All three are POST, including the read. The thin client marshals a command's flags
+     * into a JSON BODY and has no per-method query-string builder, so a GET here would need
+     * a bespoke path builder for one route — and `aimee kb grant list` is the only caller.
+     * The body is also the better fit for a subject, which can contain ':' and '%'. */
+    {"POST", "/v1/grants/write-tier/set", NULL, RM_EXACT, NULL, CAP_GRANT_ADMIN, rh_grant_set},
     {"POST", "/v1/grants/write-tier/revoke", NULL, RM_EXACT, NULL, CAP_GRANT_ADMIN,
      rh_grant_revoke},
-    {"GET", "/v1/grants/write-tier", NULL, RM_EXACT, NULL, CAP_GRANT_ADMIN, rh_grant_list},
+    {"POST", "/v1/grants/write-tier/list", NULL, RM_EXACT, NULL, CAP_GRANT_ADMIN, rh_grant_list},
     {"GET", "/v1/kb/curator", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_kb_curator},
     {"GET", "/v1/agents", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_agents},
     {"GET", "/v1/roadmap", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_roadmap},

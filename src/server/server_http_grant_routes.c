@@ -148,36 +148,37 @@ int rh_grant_revoke(const route_req_t *rq, char *resp, int cap)
 
 int rh_grant_list(const route_req_t *rq, char *resp, int cap)
 {
-   (void)rq;
-   char server_id[128] = "", subject[578] = "", flag[8] = "", team_raw[32] = "";
-   rh_query_str("server_id", server_id, sizeof(server_id));
-   if (!server_id[0])
-      return err_json(resp, cap, 400, "server_id is required");
-   /* The STRING form, then a strict parse. rh_query_long would accept "910001abc" and
-    * return 910001, because strtol stops at the junk — and team_id selects the
-    * authorization scope, so administering a different team than the operator typed is not
-    * a rounding error. */
-   rh_query_str("team_id", team_raw, sizeof(team_raw));
-   char *tail = NULL;
-   long long v = team_raw[0] ? strtoll(team_raw, &tail, 10) : 0;
-   if (!team_raw[0] || !tail || *tail || v < 1 || v > 9007199254740991LL)
-      return err_json(resp, cap, 400, "an integer team_id is required");
-   int64_t team_id = (int64_t)v;
-   rh_query_str("subject", subject, sizeof(subject));
-   int have_subject = subject[0] != '\0';
-   rh_query_str("include_revoked", flag, sizeof(flag));
-   /* Only an explicit 1/true widens. An unrecognised value must not read as "yes" on a
-    * parameter that reveals revoked history. */
-   int include_revoked = (!strcmp(flag, "1") || !strcmp(flag, "true"));
+   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
+   const cJSON *jsrv = body ? cJSON_GetObjectItemCaseSensitive(body, "server_id") : NULL;
+   const cJSON *jteam = body ? cJSON_GetObjectItemCaseSensitive(body, "team_id") : NULL;
+   const cJSON *jsub = body ? cJSON_GetObjectItemCaseSensitive(body, "subject") : NULL;
+   const cJSON *jrev = body ? cJSON_GetObjectItemCaseSensitive(body, "include_revoked") : NULL;
+   int64_t team_id = 0;
+   if (!cJSON_IsString(jsrv) || !jsrv->valuestring || !jsrv->valuestring[0] ||
+       grant_team_id(jteam, &team_id) != 0)
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "server_id and an integer team_id are required");
+   }
+   /* An optional filter: this is how `show` is served, so the row shape has exactly one
+    * definition rather than a second endpoint returning a subset of the same rows. */
+   int have_subject = cJSON_IsString(jsub) && jsub->valuestring && jsub->valuestring[0];
+   /* Only an explicit true widens. Anything else must not read as "yes" on a parameter that
+    * reveals revoked history. */
+   int include_revoked = cJSON_IsTrue(jrev);
 
    kb_client_grant_row_t *rows = calloc(GRANT_LIST_CAP, sizeof(*rows));
    if (!rows)
+   {
+      cJSON_Delete(body);
       return err_json(resp, cap, 500, "out of memory");
+   }
    size_t count = 0;
    int truncated = 0;
    kb_client_grant_result_t rc =
-       kb_client_grant_list(server_id, team_id, have_subject ? subject : NULL, include_revoked,
-                            rows, GRANT_LIST_CAP, &count, &truncated);
+       kb_client_grant_list(jsrv->valuestring, team_id, have_subject ? jsub->valuestring : NULL,
+                            include_revoked, rows, GRANT_LIST_CAP, &count, &truncated);
+   cJSON_Delete(body);
    if (rc != KB_CLIENT_GRANT_OK)
    {
       free(rows);

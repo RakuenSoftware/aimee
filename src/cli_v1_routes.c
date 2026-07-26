@@ -209,6 +209,12 @@ static const struct
     {"kb", "search", "kb.search", NULL, NULL, 60000},
     {"kb", "update", "kb.update", NULL, NULL, 900000},
     {"kb", "docs push", "kb.docs.push", NULL, NULL, 900000},
+    /* Grant administration. `show` maps to the same method as `list` — it is that listing
+     * filtered to one subject, so there is one row shape and one route. */
+    {"kb", "grant set", "kb.grant.set", NULL, NULL, 30000},
+    {"kb", "grant revoke", "kb.grant.revoke", NULL, NULL, 30000},
+    {"kb", "grant list", "kb.grant.list", NULL, "grants", 30000},
+    {"kb", "grant show", "kb.grant.list", NULL, "grants", 30000},
     {"kb", "ingest", "kb.ingest", NULL, NULL, 30000},
     {"kb", "ingest status", "kb.ingest.status", NULL, NULL, 0},
     {"kb", "status", "kb.status", NULL, NULL, 0},

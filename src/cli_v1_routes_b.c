@@ -1,4 +1,5 @@
 /* ===================================================================
+#include <stdio.h>
  * /v1 thin-client routing: route CLI subcommands through the server's native /v1 HTTP endpoints.
  * Unported commands fail in cli_main before reaching the server.
  * =================================================================== */
@@ -1358,6 +1359,80 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
       char cwd[4096];
       if (req && getcwd(cwd, sizeof(cwd)))
          cJSON_AddStringToObject(req, "cwd", cwd);
+      return req;
+   }
+   /* Write-tier grant administration. Flags rather than positionals, because four of them
+    * are mandatory and their order would otherwise be load-bearing and unmemorable.
+    *
+    * team_id is parsed STRICTLY and refused rather than coerced: it selects the
+    * authorization scope, so "770001x" quietly becoming 770001 would administer a team the
+    * operator did not type. A missing or malformed one yields NULL, which the caller
+    * reports as a usage error rather than sending to the server. */
+   if (strncmp(method, "kb.grant.", 9) == 0)
+   {
+      const char *subject = NULL, *server_id = NULL, *team = NULL, *tier = NULL;
+      int include_revoked = 0;
+      for (int i = 0; i < argc; i++)
+      {
+         if (!strcmp(argv[i], "--include-revoked"))
+            include_revoked = 1;
+         else if (i + 1 < argc && !strcmp(argv[i], "--subject"))
+            subject = argv[++i];
+         else if (i + 1 < argc && !strcmp(argv[i], "--server"))
+            server_id = argv[++i];
+         else if (i + 1 < argc && !strcmp(argv[i], "--team"))
+            team = argv[++i];
+         else if (i + 1 < argc && !strcmp(argv[i], "--tier"))
+            tier = argv[++i];
+      }
+      char *tail = NULL;
+      long long team_id = team ? strtoll(team, &tail, 10) : 0;
+      /* A marshal failure is a silent exit 2 in the shared forwarder, so each refusal says
+       * what was wrong HERE: an operator who mistypes a flag on a security command must not
+       * be left guessing whether anything happened. */
+      if (!server_id || !team || !tail || *tail || team_id < 1)
+      {
+         fprintf(stderr, "aimee kb grant: --server ID and an integer --team N are required\n");
+         if (team && (!tail || *tail))
+            fprintf(stderr,
+                    "  '%s' is not an integer. team_id selects the authorization scope, so\n"
+                    "  it is refused rather than rounded.\n",
+                    team);
+         return NULL;
+      }
+      int is_set = strcmp(method, "kb.grant.set") == 0;
+      int is_revoke = strcmp(method, "kb.grant.revoke") == 0;
+      /* set and revoke both name a subject; list does not require one, and uses it as a
+       * filter when given (that is `show`). */
+      if ((is_set || is_revoke) && !subject)
+      {
+         fprintf(stderr, "aimee kb grant %s: --subject S is required\n", is_set ? "set" : "revoke");
+         fprintf(stderr,
+                 "  A subject is owner, oidc:<iss>:<sub>, cert:<issuer>:<serial>, or a bare\n"
+                 "  host account.\n");
+         return NULL;
+      }
+      if (is_set &&
+          (!tier || (strcmp(tier, "off") && strcmp(tier, "data") && strcmp(tier, "full"))))
+      {
+         fprintf(stderr, "aimee kb grant set: --tier must be off, data or full%s%s%s\n",
+                 tier ? " (got '" : "", tier ? tier : "", tier ? "')" : "");
+         fprintf(stderr,
+                 "  off is a real tier meaning explicitly denied, which is not the same as\n"
+                 "  having no grant at all.\n");
+         return NULL;
+      }
+      cJSON *req = marshal_no_args(method);
+      if (!req)
+         return NULL;
+      cJSON_AddStringToObject(req, "server_id", server_id);
+      cJSON_AddNumberToObject(req, "team_id", (double)team_id);
+      if (subject)
+         cJSON_AddStringToObject(req, "subject", subject);
+      if (is_set)
+         cJSON_AddStringToObject(req, "tier", tier);
+      if (!is_set && !is_revoke && include_revoked)
+         cJSON_AddBoolToObject(req, "include_revoked", 1);
       return req;
    }
    if (strcmp(method, "toolset.show") == 0 || strcmp(method, "toolset.resolve") == 0)
