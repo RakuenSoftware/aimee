@@ -1235,6 +1235,23 @@ $(KB_TOKEN_AUTHORITY): $(TOKEN_AUTHORITY_OBJS) $(TOKEN_AUTHORITY_VAULT_OBJS) \
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_KB)
 
+# One-shot driver that mints a single data-plane identity token, for
+# scripts/run-identity-mint-e2e.sh. NOT part of `all` and not an installation
+# surface: it links the authority service and the vault custody objects, which
+# every ordinary target deliberately excludes (ordinary KB links only the bounded
+# IPC client). Built on demand, exactly like the eval drivers below.
+#
+# It reuses TOKEN_AUTHORITY_OBJS minus the daemon's own main, so the path it
+# exercises is the daemon's rather than a convenient approximation of it.
+../identity-mint-live: $(filter-out $(OBJDIR)/kb/kb_mgmt_token_authority_main.o,$(TOKEN_AUTHORITY_OBJS)) \
+                      $(TOKEN_AUTHORITY_VAULT_OBJS) $(STATUS_PROVISIONER_PLATFORM_OBJS) \
+                      $(OBJDIR)/tests/identity_mint_live_main.o $(OBJDIR)/cJSON.o \
+                      $(OBJDIR)/modules/config/config.o $(OBJDIR)/aimee_home.o
+	$(CC) -o $@ $^ $(L_KB)
+
+.PHONY: identity-mint-live
+identity-mint-live: ../identity-mint-live
+
 # Standalone libpq memory-negation eval driver (dev tool, not part of `all`): the
 # aimee-kb object set with kb_main() swapped for a corpus-eval main() plus the
 # mem_eval harness. Links the REAL libpq DB2, so mem_eval_load_corpus opens an

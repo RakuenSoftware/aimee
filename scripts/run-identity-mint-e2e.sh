@@ -61,6 +61,15 @@ fi
 db=aimee_identity_mint_e2e
 prov_role=aimee_mint_provisioner
 prov_pw=$(head -c 18 /dev/urandom | base64 | tr -dc 'A-Za-z0-9')
+# The token authority connects as ITSELF, not through a member role: role_assert()
+# in db2/management_token_authority.c requires current_user to literally be
+# aimee_kb_token_authority_runtime, with LOGIN, NOINHERIT, no superuser/bypassrls/
+# createdb/createrole/replication, a search_path pinned to 'pg_catalog, pg_temp',
+# row_security on, and no CREATE on public. schema_roles.sql already creates it
+# with every one of those attributes — it just has no password, because a real
+# deploy authenticates it by peer or certificate rather than a secret in a script.
+auth_role=aimee_kb_token_authority_runtime
+auth_pw=$(head -c 18 /dev/urandom | base64 | tr -dc 'A-Za-z0-9')
 
 # NOT under /tmp. root_owned_fixed_file() in the provisioners walks every parent
 # directory up to / and rejects any that is group- or other-writable, which /tmp
@@ -75,10 +84,13 @@ chmod 0700 "$work"
 cleanup() {
   if [ "$keep" = "1" ]; then
     echo "run-identity-mint-e2e: keeping db=$db work=$work"
+    echo "  authority dsn: postgres://$auth_role:$auth_pw@127.0.0.1:5432/$db"
+    echo "  intent: correlation=${corr:-none} jti=${jti:-none}"
     return
   fi
   runuser -u postgres -- dropdb --force --if-exists "$db" >/dev/null 2>&1 || true
   runuser -u postgres -- psql -q -c "DROP ROLE IF EXISTS $prov_role" >/dev/null 2>&1 || true
+  runuser -u postgres -- psql -q -c "ALTER ROLE $auth_role PASSWORD NULL" >/dev/null 2>&1 || true
   case "$work" in "$workroot"/run.*) rm -rf -- "$work" ;; esac
 }
 trap cleanup EXIT
@@ -135,12 +147,27 @@ runuser -u postgres -- psql -q -c "DROP ROLE IF EXISTS $prov_role" >/dev/null 2>
 psqlq <<SQL
 CREATE ROLE $prov_role LOGIN PASSWORD '$prov_pw';
 GRANT aimee_kb_migrate TO $prov_role;
+
+-- Give the authority role a password for this rig, and pin the search_path
+-- role_assert() demands. Both are rig concessions: the attributes that matter
+-- (NOINHERIT, no superuser, no CREATE on public) come from schema_roles.sql and
+-- are NOT relaxed here.
+ALTER ROLE $auth_role PASSWORD '$auth_pw';
+ALTER ROLE $auth_role SET search_path = 'pg_catalog, pg_temp';
+ALTER ROLE $auth_role SET row_security = on;
 SQL
 
 step "Signed-HWM KMS helper (local Ed25519; same attestation format as CT 261)"
 openssl genpkey -algorithm Ed25519 -out "$work/hwm-private.pem" 2>/dev/null
 openssl pkey -in "$work/hwm-private.pem" -pubout -outform DER | tail -c 32 >"$work/hwm-public.raw"
 head -c 32 /dev/urandom >"$work/kek.raw"
+# The protected-use path reaches the vault store and KEK cache under AIMEE_HOME.
+# run-p2b-egress-ct260.sh sets this for the same reason; without it the store has
+# nowhere to live and the signing step fails with a bare UNAVAILABLE.
+export AIMEE_HOME="$work/aimee-home"
+mkdir -p "$AIMEE_HOME"
+chmod 0700 "$AIMEE_HOME"
+
 export AIMEE_VAULT_KMS_HELPER="$work/kms-helper"
 export AIMEE_VAULT_KMS_KEY_ID=identity-mint-e2e-kek
 export AIMEE_VAULT_KMS_HWM_PUBKEY="$work/hwm-public.raw"
@@ -327,6 +354,34 @@ else
   sed -n '1,6p' "$work/snapshot.out" >&2
   exit 5
 fi
+
+step "MINT: identity_issue under vault custody"
+# The one step psql cannot reach: admit -> use -> sign -> finalize happens in C.
+# identity-mint-live links the authority service and vault objects and calls the
+# same kb_mgmt_token_authority_service_issue the daemon hands to its IPC loop.
+if [ ! -x ./identity-mint-live ]; then
+  echo "identity-mint-live not built; run: make -C src identity-mint-live" >&2
+  exit 6
+fi
+./identity-mint-live "postgres://$auth_role:$auth_pw@127.0.0.1:5432/$db" "$corr" "$jti"
+
+step "The mint is single-use"
+# The same (correlation_id, jti) again must be refused: a token is spent on issue,
+# so a replayed request can never yield a second one.
+if ./identity-mint-live "postgres://$auth_role:$auth_pw@127.0.0.1:5432/$db" "$corr" "$jti" \
+     >/dev/null 2>"$work/replay.err"; then
+  echo "FAIL: a replayed mint succeeded — the jti was not spent" >&2
+  exit 7
+fi
+sed -n '1,2p' "$work/replay.err"
+echo "  correct: the second attempt is refused"
+
+step "What the mint recorded"
+psqlt -c "SELECT 'intent state='||state||' jwt_present='||(jwt IS NOT NULL)::text||
+                 ' jwt_sha256_present='||(jwt_sha256 IS NOT NULL)::text
+            FROM kb_management_identity_intent WHERE correlation_id='$corr';"
+psqlt -c "SELECT 'key_use rows='||count(*)::text FROM kb_management_identity_key_use_intent
+            WHERE correlation_id='$corr';"
 
 step "State summary"
 psqlt <<'SQL'

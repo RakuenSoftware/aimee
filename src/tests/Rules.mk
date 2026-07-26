@@ -5398,6 +5398,9 @@ $(TESTPREFIX)/unit-test-kb-http-identity-login: \
 # server's token unit for its predicate; the db2 one is header-only inline.
 $(TESTPREFIX)/unit-test-subject-grammar: $(OBJDIR)/tests/test_subject_grammar.o \
                      $(OBJDIR)/server/server_mgmt_token.o \
+                     $(OBJDIR)/kb/kb_mgmt_token_authority.o \
+                     $(OBJDIR)/kb/kb_mgmt_token_public.o \
+                     $(OBJDIR)/kb/kb_identity_token.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 

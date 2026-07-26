@@ -238,10 +238,21 @@ int main(void)
    bad.expires_at = bad.issued_at;
    assert(!kb_identity_token_authority_record_valid(&bad));
 
-   bad = record; /* a subject outside the composite-identity grammar */
-   assert(!set_subject(&bad, "user-42", 0));
+   bad = record; /* a subject outside every accepted form */
+   /* NOT "user-42": that is a legal bare host-account name, and the bare form is
+    * the PAM login's subject (see tests/subject_corpus.h). An unprefixed string is
+    * no longer invalid by default, so the fixture needs one that matches nothing —
+    * a space, a leading dash, or a truncated prefix. */
+   assert(!set_subject(&bad, "not a name", 0));
+   assert(!set_subject(&bad, "-leading-dash", 0));
    assert(!set_subject(&bad, "oidc:idp:sub:extra", 0));
    assert(set_subject(&bad, "owner", 0));
+
+   /* The bare PAM form IS accepted — the authority must not reject a subject the
+    * database already admitted, which it did until the mint refused with
+    * INTEGRITY after every gate had passed. */
+   assert(set_subject(&bad, "alice", 0));
+   assert(set_subject(&bad, "svc_user-1.2", 0));
 
    /* A cert serial is bounded at the 79 hex digits the server accepts. */
    assert(!set_subject(&bad, "cert:issuer-ca:", 80));

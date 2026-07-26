@@ -52,6 +52,27 @@ static int digest(const void *p, size_t n, uint8_t out[32])
                                                                                               : -1;
 }
 
+/* A bare host-account name: the PAM login's subject form, which
+ * kb_identity_token.h documents the token `sub` as ("OIDC (iss,sub) composite or
+ * PAM username"). Bounds mirror the Linux 32-character limit. */
+static int bare_username(const char *s)
+{
+   size_t n = strlen(s);
+   if (n == 0 || n > 32)
+      return 0;
+   unsigned char f = (unsigned char)s[0];
+   if (!((f >= 'A' && f <= 'Z') || (f >= 'a' && f <= 'z') || (f >= '0' && f <= '9') || f == '_'))
+      return 0;
+   for (size_t i = 1; i < n; ++i)
+   {
+      unsigned char c = (unsigned char)s[i];
+      if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+            c == '.' || c == '_' || c == '-'))
+         return 0;
+   }
+   return 1;
+}
+
 static int canonical_actor(const char *s)
 {
    if (!fixed_text(s, 577, 1, 576, 0))
@@ -59,6 +80,10 @@ static int canonical_actor(const char *s)
    if (!strcmp(s, "owner"))
       return 1;
    int is_cert = !strncmp(s, "cert:", 5);
+   /* Deliberately NOT widened to the bare PAM form: this also validates the
+    * MANAGEMENT token's actor_identity (kb_mgmt_token_authority_record_valid),
+    * which comes from kb_admin_grant / kb_team_lead and is never a bare account.
+    * The data-plane widening lives in canonical_subject() below. */
    if (!is_cert && strncmp(s, "oidc:", 5))
       return 0;
    const char *middle = strchr(s + 5, ':');
@@ -174,12 +199,32 @@ int kb_mgmt_token_authority_record_valid(const kb_mgmt_token_authority_record_t 
  * authority holds itself to the stricter of the two. */
 static int canonical_subject(const char *s)
 {
+   if (!fixed_text(s, 577, 1, 576, 0))
+      return 0;
+   /* The bare PAM form. This is the FOURTH copy of the data-plane subject grammar
+    * — the others are the CHECK in db2/schema.sql, db2_intent_canonical_actor and
+    * server_identity_subject_valid — and it is the one that bit: it rejected a
+    * bare name the database had already admitted, so the authority refused to mint
+    * with INTEGRITY after all eleven gates had passed. All four are now held to
+    * tests/subject_corpus.h.
+    *
+    * Checked HERE rather than in canonical_actor(), because that one also
+    * validates the management token's actor and widening it would widen the
+    * management surface as a side effect — the exact mistake already made once in
+    * server_mgmt_token.c and caught there by its own suite. */
+   if (bare_username(s))
+      return 1;
    if (!canonical_actor(s))
       return 0;
    if (strncmp(s, "cert:", 5))
       return 1;
    const char *serial = strchr(s + 5, ':');
    return serial && strlen(serial + 1) <= 79;
+}
+
+int kb_identity_token_authority_subject_valid(const char *subject)
+{
+   return canonical_subject(subject) ? 1 : 0;
 }
 
 int kb_identity_token_authority_record_valid(const kb_identity_token_authority_record_t *r)

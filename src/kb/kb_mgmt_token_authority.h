@@ -141,7 +141,13 @@ extern "C"
                                           char *jwt_out, size_t jwt_cap, size_t *jwt_len);
 
    /* Validate the fixed identity record independently of private-key use. */
-   int kb_identity_token_authority_record_valid(const kb_identity_token_authority_record_t *record);
+   /* 1 if `subject` is a well-formed DATA-PLANE subject. Exposed only so the grammar
+ * can be cross-checked against its three other copies (tests/subject_corpus.h);
+ * the authority itself reaches it through record_valid. Not the management actor
+ * grammar, which is stricter and excludes the bare form. */
+int kb_identity_token_authority_subject_valid(const char *subject);
+
+int kb_identity_token_authority_record_valid(const kb_identity_token_authority_record_t *record);
 
 #ifdef __cplusplus
 }

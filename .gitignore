@@ -14,6 +14,7 @@ aimee-forwarder
 /aimee-kb-token-authority
 /aimee-kb-status-authority
 /aimee-kb-status-provision
+/identity-mint-live
 # Lean/worker build variants.
 /aimee-kb-lean
 /aimee-lean
