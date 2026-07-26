@@ -4,11 +4,7 @@
 # kb build failed here with -Werror=implicit-function-declaration while the native
 # CI build stayed green -- `make all server` does not compile KB_SRCS, so this
 # image was the only place that file was ever built.
-# Global build args. These must precede the FIRST FROM: an ARG declared after one
-# belongs to that stage, and `FROM pgvectorscale-stage-${WITH_PGVECTORSCALE}` would
-# then interpolate to an empty stage name. Same placement as Dockerfile.server's
-# WITH_RUNTIME_WEB / WITH_VSCODE selectors.
-ARG WITH_PGVECTORSCALE=0
+# Global build args, declared before the first FROM so every stage can use them.
 ARG PG_MAJOR=18
 ARG PGVECTORSCALE_VERSION=0.9.0
 
@@ -39,14 +35,16 @@ ARG AIMEE_VERSION=""
 RUN sh scripts/fetch-treesitter.sh \
     && make -C src ../aimee-kb -j"$(nproc)" AIMEE_TREESITTER=1 ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
 
-# pgvectorscale build. Selected by WITH_PGVECTORSCALE (0 = skip, 1 = build), using
-# the same stage-selector idiom as Dockerfile.server's optional components. The
-# Rust toolchain and pgrx live only here; the runtime image receives the built
-# extension files and none of the build chain.
-FROM debian:trixie-slim AS pgvectorscale-stage-0
-RUN mkdir -p /pgvectorscale
-
-FROM debian:trixie-slim AS pgvectorscale-stage-1
+# pgvectorscale (StreamingDiskANN). Always built: it adds ~1 MB to the image, and
+# the kb already decides at RUNTIME whether to use it -- pgvec_vectorscale_available()
+# probes pg_extension and falls back to HNSW with a warning when it is absent
+# (src/db2/pgvec_transport.c). Gating it at build time would defeat that and make
+# the index type a property of which image you happened to pull.
+#
+# The Rust toolchain and pgrx live only in this stage; the runtime image receives
+# the built extension files and none of the build chain. CI caches this layer
+# (cache-from/to type=gha,mode=max), so it recompiles only when the pins below move.
+FROM debian:trixie-slim AS pgvectorscale-build
 ARG PG_MAJOR
 ARG PGVECTORSCALE_VERSION
 RUN apt-get update \
@@ -81,8 +79,6 @@ RUN mkdir -p "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib" \
         "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib/" \
     && cp "/usr/share/postgresql/${PG_MAJOR}/extension/vectorscale"* \
         "/pgvectorscale/usr/share/postgresql/${PG_MAJOR}/extension/"
-
-FROM pgvectorscale-stage-${WITH_PGVECTORSCALE} AS pgvectorscale-stage
 
 # Runtime must match the build stage: libpq5 here has to provide at least the
 # PostgreSQL 17 symbols the kb was linked against (PGDG's libpq 18 does).
@@ -122,12 +118,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 ENV AIMEE_DB2_PG_MAJOR=${PG_MAJOR}
 
-# pgvectorscale (StreamingDiskANN) is an opt-in upgrade, not the default: it is
-# packaged nowhere, so it is built from source in the stage above. Default 0 keeps
-# the shipped image at postgres + pgvector.
-#   docker build --build-arg WITH_PGVECTORSCALE=1 -f Dockerfile .
-ARG WITH_PGVECTORSCALE=0
-COPY --from=pgvectorscale-stage /pgvectorscale/ /
+# The vectorscale extension files, built above. Whether the kb actually creates
+# diskann indexes stays a runtime decision (context.kb index type + corpus size).
+COPY --from=pgvectorscale-build /pgvectorscale/ /
 
 ENV AIMEE_HOME=/var/lib/aimee
 # DB2 is unset on purpose. Unset means "the operator configured nothing", and the

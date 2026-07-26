@@ -15,11 +15,13 @@ under `$AIMEE_HOME/postgres`, reachable only over a local socket. If
 exactly as before — that path is fully supported and is still the right choice for
 a shared, backed-up, or managed database.
 
-**pgvectorscale** (StreamingDiskANN indexes) is an opt-in upgrade rather than the
-default, because it is packaged nowhere and has to be built from source:
-`docker build --build-arg WITH_PGVECTORSCALE=1`. It needs PostgreSQL 18, which the
-image now uses. When the extension is present the entrypoint enables it; the
-supported default remains plain `pgvector`.
+**pgvectorscale** (StreamingDiskANN indexes) ships in the same image. There is no
+separate build or image variant: it costs about 1 MB, needs PostgreSQL 18 which the
+image now uses, and the kb already chooses the index type at **runtime** —
+`pgvec_vectorscale_available()` probes for the extension and falls back to HNSW with
+a warning when it is missing. Making it a build flag would have turned the index
+type into a property of which image you pulled. Configure the index type as you
+always have; nothing about the image selects it.
 
 The image no longer bakes `AIMEE_DB2_URL=postgresql://aimee:aimee@postgres:5432/aimee_shared`.
 That default made "the operator configured nothing" indistinguishable from "use the
