@@ -7818,7 +7818,7 @@ CREATE TABLE IF NOT EXISTS kb_write_tier_grant (
   server_id TEXT NOT NULL,
   team_id BIGINT NOT NULL REFERENCES kb_team(id),
   subject TEXT NOT NULL CHECK (char_length(subject) BETWEEN 1 AND 576 AND
-    subject ~ '^(owner|(oidc|cert):[^:[:cntrl:]]+:[^:[:cntrl:]]+|[A-Za-z0-9_][A-Za-z0-9._-]{0,31})$'),
+    subject ~ '^(owner|oidc:([^%:[:cntrl:]]|%25|%3A)+:([^%:[:cntrl:]]|%25|%3A)+|cert:([^%:[:cntrl:]]|%25|%3A)+:[0-9a-f]{1,79}|[A-Za-z0-9_][A-Za-z0-9._-]{0,31})$'),
   tier TEXT NOT NULL CHECK (tier IN ('off','data','full')),
   granted_by TEXT NOT NULL CHECK (char_length(granted_by) BETWEEN 1 AND 576),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -11504,7 +11504,7 @@ CREATE TABLE IF NOT EXISTS kb_management_identity_intent (
   token_jti TEXT NOT NULL UNIQUE CHECK (token_jti ~ '^[A-Za-z0-9._-]{8,128}$'),
   team_id BIGINT NOT NULL REFERENCES kb_team(id),
   subject TEXT NOT NULL CHECK (char_length(subject) BETWEEN 1 AND 576 AND
-    subject ~ '^(owner|(oidc|cert):[^:[:cntrl:]]+:[^:[:cntrl:]]+|[A-Za-z0-9_][A-Za-z0-9._-]{0,31})$'),
+    subject ~ '^(owner|oidc:([^%:[:cntrl:]]|%25|%3A)+:([^%:[:cntrl:]]|%25|%3A)+|cert:([^%:[:cntrl:]]|%25|%3A)+:[0-9a-f]{1,79}|[A-Za-z0-9_][A-Za-z0-9._-]{0,31})$'),
   auth_mode TEXT NOT NULL CHECK (auth_mode IN ('oidc','pam')),
   target_server_id TEXT NOT NULL CHECK (target_server_id ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$'),
   token_issuer TEXT NOT NULL CHECK (char_length(token_issuer) BETWEEN 1 AND 255),

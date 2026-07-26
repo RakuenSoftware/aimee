@@ -485,6 +485,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-clarify \
                $(TESTPREFIX)/unit-test-collab-rules \
                $(TESTPREFIX)/unit-test-oauth-pkce \
+               $(TESTPREFIX)/unit-test-subject-grammar \
                $(TESTPREFIX)/unit-test-kb-oidc-login \
                $(TESTPREFIX)/unit-test-kb-oidc-login-store \
                $(TESTPREFIX)/unit-test-kb-oidc-token-exchange \
@@ -5392,6 +5393,13 @@ $(TESTPREFIX)/unit-test-kb-http-identity-login: \
                      $(OBJDIR)/server/oauth_pkce.o \
                      $(OBJDIR)/util.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o $(OBJDIR)/log.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+# Both C copies of the subject grammar, against tests/subject_corpus.h. Links the
+# server's token unit for its predicate; the db2 one is header-only inline.
+$(TESTPREFIX)/unit-test-subject-grammar: $(OBJDIR)/tests/test_subject_grammar.o \
+                     $(OBJDIR)/server/server_mgmt_token.o \
+                     $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-kb-pki: $(OBJDIR)/tests/test_kb_pki.o \
                      $(OBJDIR)/kb/pki.o \

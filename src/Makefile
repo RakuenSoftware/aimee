@@ -1441,6 +1441,22 @@ docs-gen:
 	@python3 ../scripts/gen-reference-docs.py
 	@python3 ../scripts/gen-v1-route-descriptor.py
 
+# The subject grammar's SQL corpus, generated from src/tests/subject_corpus.h.
+subject-corpus-gen:
+	@python3 ../scripts/gen-subject-corpus-sql.py
+
+# CI gate: fail if the generated SQL corpus is stale. Without this, editing the
+# corpus would update the C cross-check while the Postgres CHECK kept being tested
+# against the previous list — reintroducing exactly the silent drift the corpus
+# exists to prevent.
+subject-corpus-check: subject-corpus-gen
+	@if ! git -C .. diff --quiet -- scripts/gen/subject-corpus.sql; then \
+		echo "subject-corpus-check: scripts/gen/subject-corpus.sql is stale — run 'make subject-corpus-gen' and commit the result"; \
+		git -C .. --no-pager diff --stat -- scripts/gen/subject-corpus.sql; \
+		exit 1; \
+	fi; \
+	echo "subject-corpus-check: ok"
+
 # CI gate: fail if docs/gen is stale relative to the committed spec.
 docs-gen-check: docs-gen
 	@if ! git -C .. diff --quiet -- docs/gen/; then \
@@ -1587,7 +1603,7 @@ CLANG_FORMAT ?= clang-format-19
 # Target-specific, so a standalone `make bus-blast-radius-check` stays strict.
 lint: BUS_BLAST_RADIUS_FLAGS := --allow-unbuilt
 
-lint: native-tool-parity-check inc-check line-check curator-sidecar-parse-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check proposal-reconcile-check dev-accept-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check p1-tenant-guard-check bus-blast-radius-check
+lint: subject-corpus-check native-tool-parity-check inc-check line-check curator-sidecar-parse-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check proposal-reconcile-check dev-accept-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check p1-tenant-guard-check bus-blast-radius-check
 
 # P1 (N1): every tenant-scoped db2 entrypoint must call db2_tenant_require_pg(),
 # so a new entry can never silently run without RLS on the SQLite shim.

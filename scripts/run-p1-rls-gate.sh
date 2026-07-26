@@ -57,6 +57,13 @@ psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/per-user-write-tier-rls-test
 echo "== Per-user identity token authority assertions =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/per-user-identity-authority-pg17-test.sql"
 
+# The subject grammar, against the corpus shared with the two C validators. Its
+# own step because it reuses the fixture the file above builds, and because a
+# failure here means "three copies of one rule have drifted", not "the authority
+# is broken".
+echo "== Subject grammar corpus (generated from src/tests/subject_corpus.h) =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/gen/subject-corpus.sql"
+
 echo "== P5-B status authority + revocation generation assertions =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p5b_status_pg17_test.sql"
 

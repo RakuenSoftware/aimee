@@ -378,7 +378,7 @@ static int identity_key(const char *s)
  * scripts/check_tier_deps.sh) — but they must agree, and whichever is stricter
  * wins SILENTLY: a subject the database admits but this rejects mints a token the
  * server then refuses as malformed. Change all three together. */
-static int identity_subject(const char *s)
+int server_identity_subject_valid(const char *s)
 {
    if (!s || strnlen(s, 577) > 576)
       return 0;
@@ -771,8 +771,8 @@ static int parse_identity_payload(cJSON *payload, const unsigned char *raw, size
          return 0;
    kb_identity_tier_t tier;
    if (strcmp(v[1]->valuestring, issuer) != 0 || strcmp(v[2]->valuestring, audience) != 0 ||
-       !identity_subject(v[3]->valuestring) || !identity_tier_from_str(v[5]->valuestring, &tier) ||
-       !ascii_token(v[6]->valuestring, 8, 128))
+       !server_identity_subject_valid(v[3]->valuestring) ||
+       !identity_tier_from_str(v[5]->valuestring, &tier) || !ascii_token(v[6]->valuestring, 8, 128))
       return 0;
    out->team_id = team;
    out->tier = tier;

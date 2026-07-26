@@ -31,6 +31,20 @@ extern "C"
     * token whose exp-iat exceeds this is rejected regardless of the clock. */
 #define SERVER_IDENTITY_TOKEN_MAX_LIFETIME 3600
 
+   /* 1 if `s` is a well-formed data-plane subject: `owner`, `oidc:<iss>:<sub>`,
+    * `cert:<issuer>:<serial>`, or a bare host-account `<username>`.
+    *
+    * Exposed so the grammar can be cross-checked against its other two copies —
+    * the subject CHECK in db2/schema.sql and db2_intent_canonical_actor in
+    * db2/management_intent_fields.h. Those three cannot share an implementation
+    * (the server links neither DB2_OBJS nor libpq), so the only thing that keeps
+    * them from drifting is testing them against one shared corpus, and that needs
+    * this predicate reachable. See tests/subject_corpus.h.
+    *
+    * Deliberately NOT the management token's actor grammar, which is stricter and
+    * excludes the bare form. */
+   int server_identity_subject_valid(const char *s);
+
    typedef struct
    {
       char issuer[256];
