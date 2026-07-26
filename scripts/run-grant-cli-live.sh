@@ -228,14 +228,18 @@ out=$(G set --subject alice --server livesrv --team 990001 --tier data) || fail 
   || fail "the audit row does not name the operator as actor"
 echo "  row=data granted_by=owner, audited with actor=owner"
 
-# FROM HERE ON, ASSERTIONS ARE DATABASE-ONLY.
+# FROM HERE ON, ASSERTIONS ARE DATABASE-ONLY, BY CHOICE.
 #
-# The response fields — changed, previous_tier, was_revoked, is_member, found — are NOT
-# observable through the CLI. The thin client's generic renderer prints nothing useful for these
-# routes, because the local command that formatted them was removed when the commands were moved
-# onto /v1 and no per-method formatter replaced it. That is a real gap, recorded as such rather
-# than papered over, and it is precisely why this rig asserts on Postgres: the effects are what
-# an operator depends on, and they are verifiable.
+# They used to be database-only by necessity: the response fields — changed, previous_tier,
+# was_revoked, is_member, found — were not observable at all, because the local command that
+# formatted them was removed when these commands moved onto /v1 and no per-method formatter
+# replaced it. That gap is now closed, so the prose IS assertable, and it is asserted — in
+# run-grant-cli-hardened-live.sh (live, including both safety warnings) and in
+# test_cli_v1_delegate.c (per field, per stream).
+#
+# This rig stays on the database deliberately rather than duplicating that: what an operator
+# ultimately depends on is the row and the audit event, and asserting those here keeps this
+# rig meaningful even if the wording changes.
 
 step "set again with the same tier leaves the row alone"
 G set --subject alice --server livesrv --team 990001 --tier data >/dev/null || fail "set2"
