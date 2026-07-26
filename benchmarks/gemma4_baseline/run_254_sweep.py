@@ -159,8 +159,8 @@ def start_ettin_server(
     command = docker_cmd(
         socket, "run", "--detach", "--rm", "--name", "gemma4-baseline-server", "--network", "host",
         "--device", "/dev/dri:/dev/dri", "--volume", f"{deployed_models}:/models",
-        "--volume", f"{repo / 'scripts/aimee-llm-supervisor.sh'}:/opt/aimee/benchmark-supervisor.sh:ro",
-        "--entrypoint", "/opt/aimee/benchmark-supervisor.sh",
+        "--volume", f"{repo / 'scripts/aimee-llm-supervisor.sh'}:/opt/aimee/aimee-llm-supervisor.sh:ro",
+        "--entrypoint", "/opt/aimee/aimee-llm-supervisor.sh",
         "--env", "AIMEE_LLM_EMBED_MODE=off", "--env", "AIMEE_LLM_SYNTH_MODE=off",
         "--env", "AIMEE_LLM_RERANK_MODE=local", "--env", f"AIMEE_LLM_RERANK_TIER={tier}",
         "--env", f"AIMEE_LLM_NGL={ngl}",
