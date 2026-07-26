@@ -11559,6 +11559,164 @@ CREATE TRIGGER kb_management_identity_delete_guard
   BEFORE DELETE OR TRUNCATE ON kb_management_identity_intent
   FOR EACH STATEMENT EXECUTE FUNCTION kb_management_identity_worm_guard();
 
+-- The writer for the identity intent above (proposal §3).  Until this landed the
+-- table had no writer at all: the mint pipeline (admit -> use -> sign ->
+-- finalize) could only be driven from a hand-seeded row, so no login front-end
+-- could reach it.  This is the seam a login mode calls once it has an
+-- AUTHENTICATED subject.
+--
+-- Two differences from kb_management_action_intent_start, both deliberate:
+--   * The subject is `aimee.principal`, never a parameter.  A login front-end
+--     cannot ask for a token on behalf of someone else; it can only ask for one
+--     for whoever it just authenticated into the scope.
+--   * Authorization is the live kb_write_tier_grant, not admin/team-lead.  For a
+--     data-plane token the grant IS the authorization (same rule the snapshot
+--     re-applies at mint time), so an ungranted subject cannot even record an
+--     intent.  The tier itself is deliberately NOT recorded here — the snapshot
+--     reads it live, so a grant changed between login and mint is honoured.
+DROP FUNCTION IF EXISTS kb_management_identity_intent_start(
+  TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT);
+CREATE FUNCTION kb_management_identity_intent_start(
+  p_correlation_id TEXT,p_jti TEXT,p_token_jti TEXT,p_team_id BIGINT,
+  p_target_server_id TEXT,p_auth_mode TEXT,p_token_issuer TEXT,p_kid TEXT,
+  p_ttl_seconds INTEGER,p_installation_id TEXT
+) RETURNS TABLE(replayed BOOLEAN,correlation_id TEXT,jti TEXT,token_jti TEXT,team_id BIGINT,
+  subject TEXT,auth_mode TEXT,target_server_id TEXT,token_issuer TEXT,audience TEXT,kid TEXT,
+  issued_at BIGINT,expires_at BIGINT,installation_id TEXT,installation_generation BIGINT,
+  installation_enrollment_id BIGINT,target_enrollment_id BIGINT,revocation_generation BIGINT,
+  created_at_epoch BIGINT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE
+  v_actor TEXT:=pg_catalog.current_setting('aimee.principal',true);
+  v_team TEXT:=pg_catalog.current_setting('aimee.team',true);
+  a public.kb_management_identity_intent%ROWTYPE;
+  g public.kb_write_tier_grant%ROWTYPE;
+  r public.kb_server_registry%ROWTYPE;
+  te public.kb_enrollments%ROWTYPE;
+  i public.kb_management_instance%ROWTYPE;
+  le public.kb_enrollments%ROWTYPE;
+  v_rev BIGINT; v_iat BIGINT; v_detail TEXT; v_reserved BIGINT;
+BEGIN
+  IF pg_catalog.pg_is_in_recovery() OR pg_catalog.current_setting('transaction_read_only')<>'off' THEN
+    RAISE EXCEPTION 'primary required' USING ERRCODE='25006';
+  END IF;
+  IF p_correlation_id IS NULL OR p_jti IS NULL OR p_token_jti IS NULL OR p_team_id IS NULL OR
+     p_target_server_id IS NULL OR p_auth_mode IS NULL OR p_token_issuer IS NULL OR
+     p_kid IS NULL OR p_ttl_seconds IS NULL OR p_installation_id IS NULL OR
+     p_correlation_id !~ '^[0-9a-f]{64}$' OR p_jti !~ '^[0-9a-f]{64}$' OR
+     p_token_jti !~ '^[A-Za-z0-9._-]{8,128}$' OR
+     p_team_id<1 OR p_target_server_id !~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$' OR
+     p_auth_mode NOT IN ('oidc','pam') OR
+     char_length(p_token_issuer) NOT BETWEEN 1 AND 255 OR
+     p_token_issuer ~ '[[:cntrl:]]' OR p_kid !~ '^[A-Za-z0-9._-]{1,64}$' OR
+     -- Bounded by the intent CHECK, which is in turn bounded by the server's
+     -- SERVER_IDENTITY_TOKEN_MAX_LIFETIME: never record what cannot verify.
+     p_ttl_seconds NOT BETWEEN 1 AND 3600 OR p_installation_id !~ '^[0-9a-f]{32}$' THEN
+    RAISE EXCEPTION 'invalid management identity intent' USING ERRCODE='22023';
+  END IF;
+  IF v_actor IS NULL OR char_length(v_actor) NOT BETWEEN 1 AND 576 OR
+     v_actor ~ '[[:cntrl:]]' OR v_team IS NULL OR v_team !~ '^[1-9][0-9]{0,18}$' OR
+     v_team::NUMERIC<>p_team_id::NUMERIC THEN
+    RAISE EXCEPTION 'management identity scope denied' USING ERRCODE='42501';
+  END IF;
+
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_correlation_id,1345462851));
+  SELECT x.* INTO a FROM public.kb_management_identity_intent x
+    WHERE x.correlation_id=p_correlation_id;
+  IF a.correlation_id IS NOT NULL THEN
+    IF ROW(a.jti,a.token_jti,a.team_id,a.subject,a.auth_mode,a.target_server_id,
+           a.token_issuer,a.audience,a.kid,a.expires_at-a.issued_at,a.installation_id)
+       IS DISTINCT FROM
+       ROW(p_jti,p_token_jti,p_team_id,v_actor,p_auth_mode,p_target_server_id,
+           p_token_issuer,p_target_server_id,p_kid,p_ttl_seconds,p_installation_id) THEN
+      RAISE EXCEPTION 'management identity intent replay conflict' USING ERRCODE='23505';
+    END IF;
+    RETURN QUERY SELECT TRUE,a.correlation_id,a.jti,a.token_jti,a.team_id,a.subject,a.auth_mode,
+      a.target_server_id,a.token_issuer,a.audience,a.kid,a.issued_at,a.expires_at,
+      a.installation_id,a.installation_generation,a.installation_enrollment_id,
+      a.target_enrollment_id,a.revocation_generation,
+      extract(epoch FROM a.created_at)::BIGINT;
+    RETURN;
+  END IF;
+
+  -- These reads are deliberately UNLOCKED, unlike the action path's.  Filing an
+  -- intent grants nothing: kb_management_identity_authority_snapshot re-reads
+  -- the grant, the registry, the instance and both enrollments under its own
+  -- FOR SHARE at mint time and refuses if any of them moved.  Holding row locks
+  -- here would only add contention — and would force this writer to hold UPDATE
+  -- on the grant table (Postgres requires it for FOR SHARE), which is exactly
+  -- the privilege a login front-end must never have.  The checks below are
+  -- therefore an early, honest refusal, not the authorization.
+  --
+  -- The grant is that authorization.  Absent or revoked => no intent, so the
+  -- ungranted case never even reaches the signing pipeline.
+  SELECT x.* INTO g FROM public.kb_write_tier_grant x
+    WHERE x.server_id=p_target_server_id AND x.team_id=p_team_id AND x.subject=v_actor
+      AND x.revoked_at IS NULL;
+  IF g.subject IS NULL THEN
+    RAISE EXCEPTION 'management identity not granted' USING ERRCODE='42501';
+  END IF;
+
+  SELECT x.* INTO r FROM public.kb_server_registry x
+    WHERE x.server_id=p_target_server_id;
+  IF r.server_id IS NULL OR r.team_id<>p_team_id OR r.status<>'active' THEN
+    RAISE EXCEPTION 'target management authority denied' USING ERRCODE='28000';
+  END IF;
+  SELECT x.* INTO i FROM public.kb_management_instance x
+    WHERE x.installation_id=p_installation_id;
+  IF i.installation_id IS NULL OR i.team_id<>p_team_id OR i.state<>'active' OR
+     i.current_generation<1 OR i.current_enrollment_id IS NULL THEN
+    RAISE EXCEPTION 'local management authority denied' USING ERRCODE='28000';
+  END IF;
+
+  SELECT x.* INTO te FROM public.kb_enrollments x
+    WHERE x.scope='p5-server-management' AND x.cert_issuer=r.mgmt_issuer AND
+      x.cert_serial_norm=r.mgmt_serial_norm AND x.fingerprint=r.mgmt_fingerprint;
+  SELECT x.* INTO le FROM public.kb_enrollments x
+    WHERE x.id=i.current_enrollment_id;
+  SELECT x.generation INTO v_rev FROM public.kb_cert_revocation_generation x
+    WHERE x.singleton=1;
+  IF te.id IS NULL OR te.state<>'active' OR te.revoked_at<>'' OR
+     NULLIF(te.expires_at,'')::TIMESTAMPTZ<=pg_catalog.now() OR
+     te.cert_issuer<>r.mgmt_issuer OR te.cert_serial_norm<>r.mgmt_serial_norm OR
+     te.fingerprint<>r.mgmt_fingerprint OR
+     le.id IS NULL OR le.scope<>'p5-kb-management' OR le.authority_id<>i.authority_id OR
+     le.state<>'active' OR le.revoked_at<>'' OR
+     NULLIF(le.expires_at,'')::TIMESTAMPTZ<=pg_catalog.now() OR v_rev IS NULL THEN
+    RAISE EXCEPTION 'management certificate authority denied' USING ERRCODE='28000';
+  END IF;
+
+  v_iat:=pg_catalog.floor(extract(epoch FROM pg_catalog.statement_timestamp()))::BIGINT;
+  INSERT INTO public.kb_management_token_intent_namespace(correlation_id,jti,kind)
+    VALUES(p_correlation_id,p_jti,'identity') ON CONFLICT DO NOTHING;
+  GET DIAGNOSTICS v_reserved=ROW_COUNT;
+  IF v_reserved<>1 THEN
+    RAISE EXCEPTION 'management identity namespace conflict' USING ERRCODE='23505';
+  END IF;
+  INSERT INTO public.kb_management_identity_intent(
+    correlation_id,jti,kind,token_jti,team_id,subject,auth_mode,target_server_id,
+    token_issuer,audience,kid,issued_at,expires_at,installation_id,installation_generation,
+    installation_enrollment_id,target_enrollment_id,revocation_generation,state)
+  VALUES(p_correlation_id,p_jti,'identity',p_token_jti,p_team_id,v_actor,p_auth_mode,
+    p_target_server_id,p_token_issuer,p_target_server_id,p_kid,v_iat,v_iat+p_ttl_seconds,
+    i.installation_id,i.current_generation,le.id,te.id,v_rev,'pending')
+  RETURNING * INTO a;
+  v_detail:=pg_catalog.json_build_object(
+    'correlation_id',a.correlation_id,'team_id',a.team_id,'target_server_id',a.target_server_id,
+    'jti',a.jti,'token_jti',a.token_jti,'auth_mode',a.auth_mode,'kid',a.kid,
+    'expires_at',a.expires_at)::TEXT;
+  PERFORM public.kb_audit_worm_append('kb',v_actor,
+    'management.identity.intent',a.correlation_id,'allow',v_detail);
+  RETURN QUERY SELECT FALSE,a.correlation_id,a.jti,a.token_jti,a.team_id,a.subject,a.auth_mode,
+    a.target_server_id,a.token_issuer,a.audience,a.kid,a.issued_at,a.expires_at,
+    a.installation_id,a.installation_generation,a.installation_enrollment_id,
+    a.target_enrollment_id,a.revocation_generation,
+    extract(epoch FROM a.created_at)::BIGINT;
+END $$;
+REVOKE ALL ON FUNCTION kb_management_identity_intent_start(
+  TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT) FROM PUBLIC;
+
 CREATE TABLE IF NOT EXISTS kb_management_action_intent (
   correlation_id TEXT PRIMARY KEY CHECK (correlation_id ~ '^[0-9a-f]{64}$'),
   jti TEXT NOT NULL UNIQUE CHECK (jti ~ '^[0-9a-f]{64}$'),

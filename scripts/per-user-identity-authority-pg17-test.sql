@@ -176,5 +176,186 @@ BEGIN
   END;
 END $$;
 
+-- ============================================================================
+-- kb_management_identity_intent_start — the writer a login mode calls once it
+-- has an authenticated subject. Everything above assumed an intent already
+-- existed; this covers the only thing that may create one.
+-- ============================================================================
+
+-- Both fixture subjects are team members, so that what the assertions below
+-- isolate really is the GRANT. The writer reads kb_write_tier_grant as the
+-- logged-in principal under FORCE RLS, and that table's read policy is scoped to
+-- the principal's teams — without a membership row every subject would refuse
+-- for lack of visibility and the grant checks would prove nothing.
+INSERT INTO kb_team_membership(identity_key, team)
+  VALUES ('oidc:idp.test:ungranted', 930001),
+         ('oidc:idp.test:nogrant', 930001);
+
+-- Structural: the subject is NOT a parameter. This is the guarantee that a
+-- login front-end cannot mint on behalf of anyone but whoever it authenticated
+-- into the scope, so it is asserted on the signature rather than trusted to the
+-- body. Ten arguments, none of them a subject.
+DO $$
+DECLARE args TEXT;
+BEGIN
+  SELECT pg_get_function_arguments(oid) INTO args FROM pg_proc
+    WHERE proname='kb_management_identity_intent_start';
+  IF args IS NULL THEN
+    RAISE EXCEPTION 'FAIL: the identity intent writer does not exist';
+  END IF;
+  IF args LIKE '%subject%' THEN
+    RAISE EXCEPTION 'FAIL: the identity intent writer takes a caller-supplied subject: %', args;
+  END IF;
+  IF NOT has_function_privilege('aimee_kb_runtime',
+       'public.kb_management_identity_intent_start(TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT)',
+       'EXECUTE') THEN
+    RAISE EXCEPTION 'FAIL: runtime cannot execute the identity intent writer (no login can mint)';
+  END IF;
+END $$;
+
+DO $$
+DECLARE ok BOOLEAN; msg TEXT;
+BEGIN
+  -- No aimee.principal in scope: there is no authenticated subject to record an
+  -- intent for, so the writer must refuse rather than invent one. Also compiles
+  -- the body (%ROWTYPE and column references are not resolved at CREATE).
+  PERFORM set_config('aimee.principal','',true);
+  PERFORM set_config('aimee.team','',true);
+  ok := false;
+  BEGIN
+    PERFORM * FROM kb_management_identity_intent_start(
+      repeat('1',64), repeat('2',64), 'id-jti-00000001', 930001,
+      'idsrv', 'oidc', 'kb', 'kid-test', 300, repeat('a',32));
+  EXCEPTION
+    WHEN sqlstate '42501' THEN ok := true;
+    WHEN undefined_column OR undefined_table OR undefined_function OR syntax_error THEN
+      RAISE EXCEPTION 'identity intent writer body failed to compile: %', SQLERRM;
+  END;
+  IF NOT ok THEN
+    RAISE EXCEPTION 'FAIL: the identity intent writer ran with no authenticated principal';
+  END IF;
+
+  -- Malformed identifiers are rejected before any lookup.
+  ok := false;
+  BEGIN
+    PERFORM * FROM kb_management_identity_intent_start(
+      'nothex', repeat('2',64), 'id-jti-00000001', 930001,
+      'idsrv', 'oidc', 'kb', 'kid-test', 300, repeat('a',32));
+  EXCEPTION WHEN sqlstate '22023' THEN ok := true;
+  END;
+  IF NOT ok THEN
+    RAISE EXCEPTION 'FAIL: the identity intent writer accepted a malformed correlation_id';
+  END IF;
+
+  -- A TTL the server's verifier would throw away must never be recorded.
+  ok := false;
+  BEGIN
+    PERFORM * FROM kb_management_identity_intent_start(
+      repeat('1',64), repeat('2',64), 'id-jti-00000001', 930001,
+      'idsrv', 'oidc', 'kb', 'kid-test', 3601, repeat('a',32));
+  EXCEPTION WHEN sqlstate '22023' THEN ok := true;
+  END;
+  IF NOT ok THEN
+    RAISE EXCEPTION 'FAIL: the identity intent writer accepted an unverifiable TTL';
+  END IF;
+
+  -- Only the two declared auth modes exist; a third would silently widen the
+  -- login surface.
+  ok := false;
+  BEGIN
+    PERFORM * FROM kb_management_identity_intent_start(
+      repeat('1',64), repeat('2',64), 'id-jti-00000001', 930001,
+      'idsrv', 'ldap', 'kb', 'kid-test', 300, repeat('a',32));
+  EXCEPTION WHEN sqlstate '22023' THEN ok := true;
+  END;
+  IF NOT ok THEN
+    RAISE EXCEPTION 'FAIL: the identity intent writer accepted an undeclared auth mode';
+  END IF;
+
+  -- A principal whose scope names a different team than the intent does.
+  PERFORM set_config('aimee.principal','oidc:idp.test:ungranted',true);
+  PERFORM set_config('aimee.team','930002',true);
+  ok := false;
+  BEGIN
+    PERFORM * FROM kb_management_identity_intent_start(
+      repeat('1',64), repeat('2',64), 'id-jti-00000001', 930001,
+      'idsrv', 'oidc', 'kb', 'kid-test', 300, repeat('a',32));
+  EXCEPTION WHEN sqlstate '42501' THEN ok := true;
+  END;
+  IF NOT ok THEN
+    RAISE EXCEPTION 'FAIL: the identity intent writer crossed team scopes';
+  END IF;
+
+  -- THE load-bearing case: an authenticated subject with no live grant cannot
+  -- even file an intent, so the ungranted path never reaches the signing
+  -- pipeline at all. 'oidc:idp.test:nogrant' has no kb_write_tier_grant row.
+  PERFORM set_config('aimee.principal','oidc:idp.test:nogrant',true);
+  PERFORM set_config('aimee.team','930001',true);
+  ok := false;
+  BEGIN
+    PERFORM * FROM kb_management_identity_intent_start(
+      repeat('1',64), repeat('2',64), 'id-jti-00000001', 930001,
+      'idsrv', 'oidc', 'kb', 'kid-test', 300, repeat('a',32));
+  EXCEPTION
+    WHEN sqlstate '42501' THEN
+      GET STACKED DIAGNOSTICS msg = MESSAGE_TEXT;
+      IF msg NOT LIKE '%not granted%' THEN
+        RAISE EXCEPTION 'FAIL: expected a grant refusal, got: %', msg;
+      END IF;
+      ok := true;
+  END;
+  IF NOT ok THEN
+    RAISE EXCEPTION 'FAIL: an ungranted subject filed an identity intent';
+  END IF;
+
+  -- And the mirror of the snapshot assertion above: with a live grant the
+  -- writer must get PAST the grant check, or the refusal above would pass even
+  -- if the grant lookup were a blanket deny. This fixture has no management
+  -- instance, so it still refuses (28000) — just not as ungranted.
+  PERFORM set_config('aimee.principal','oidc:idp.test:ungranted',true);
+  BEGIN
+    PERFORM * FROM kb_management_identity_intent_start(
+      repeat('1',64), repeat('2',64), 'id-jti-00000001', 930001,
+      'idsrv', 'oidc', 'kb', 'kid-test', 300, repeat('a',32));
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS msg = MESSAGE_TEXT;
+    IF msg LIKE '%not granted%' THEN
+      RAISE EXCEPTION 'FAIL: a live grant still refused as ungranted (grant lookup is broken)';
+    END IF;
+  END;
+  PERFORM set_config('aimee.principal','',true);
+  PERFORM set_config('aimee.team','',true);
+END $$;
+
+-- A grant for a subject who is not a member of the team it names must not
+-- authorize anything. The writer reads the grant as the principal under FORCE
+-- RLS, so the membership scope is a second, independent barrier: a grant row
+-- planted for a non-member is invisible and the intent is refused.
+INSERT INTO kb_write_tier_grant(server_id, team_id, subject, tier, granted_by)
+  VALUES ('idsrv', 930001, 'oidc:idp.test:outsider', 'full', 'owner');
+DO $$
+DECLARE ok BOOLEAN := false; msg TEXT;
+BEGIN
+  PERFORM set_config('aimee.principal','oidc:idp.test:outsider',true);
+  PERFORM set_config('aimee.team','930001',true);
+  BEGIN
+    PERFORM * FROM kb_management_identity_intent_start(
+      repeat('3',64), repeat('4',64), 'id-jti-00000002', 930001,
+      'idsrv', 'oidc', 'kb', 'kid-test', 300, repeat('a',32));
+  EXCEPTION
+    WHEN sqlstate '42501' THEN
+      GET STACKED DIAGNOSTICS msg = MESSAGE_TEXT;
+      IF msg NOT LIKE '%not granted%' THEN
+        RAISE EXCEPTION 'FAIL: expected a grant refusal for a non-member, got: %', msg;
+      END IF;
+      ok := true;
+  END;
+  IF NOT ok THEN
+    RAISE EXCEPTION 'FAIL: a grant planted for a non-member authorized an identity intent';
+  END IF;
+  PERFORM set_config('aimee.principal','',true);
+  PERFORM set_config('aimee.team','',true);
+END $$;
+
 \echo '== per-user identity token authority assertions PASSED =='
 ROLLBACK;

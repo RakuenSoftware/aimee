@@ -945,6 +945,7 @@ BEGIN
   ALTER TABLE public.kb_management_token_intent_namespace OWNER TO aimee_kb_owner;
   EXECUTE 'ALTER FUNCTION public.kb_management_action_worm_guard() OWNER TO aimee_kb_owner';
   EXECUTE 'ALTER FUNCTION public.kb_management_action_intent_start(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_identity_intent_start(TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT) OWNER TO aimee_kb_owner';
   EXECUTE 'ALTER FUNCTION public.kb_management_action_outcome_append(TEXT,TEXT,TEXT,INTEGER,TEXT) OWNER TO aimee_kb_owner';
   EXECUTE 'ALTER FUNCTION public.kb_management_read_publication_generation() OWNER TO aimee_kb_owner';
   EXECUTE 'ALTER FUNCTION public.kb_management_read_intent_start(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BYTEA,TEXT,TEXT,INTEGER,TEXT) OWNER TO aimee_kb_owner';
@@ -956,6 +957,10 @@ BEGIN
     public.kb_cert_revocation_generation,public.kb_admin_grant,
     public.kb_team_lead,public.kb_team_membership,public.kb_audit_event TO aimee_kb_owner;
   GRANT SELECT,INSERT ON public.kb_management_read_intent TO aimee_kb_owner;
+  -- The identity intent writer runs as this owner; the mint pipeline still runs
+  -- as the token-authority definer, so INSERT/SELECT is all the writer needs.
+  GRANT SELECT,INSERT ON public.kb_management_identity_intent TO aimee_kb_owner;
+  GRANT SELECT ON public.kb_write_tier_grant TO aimee_kb_owner;
   GRANT SELECT ON public.kb_management_jwks_publication_registry,
     public.kb_management_jwks_publication_generation,
     public.kb_management_jwks_publication_candidate,public.kb_management_token_root
@@ -969,6 +974,7 @@ BEGIN
     public.kb_management_read_key_use FROM PUBLIC;
   REVOKE ALL ON FUNCTION public.kb_management_action_worm_guard(),
     public.kb_management_action_intent_start(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT),
+    public.kb_management_identity_intent_start(TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT),
     public.kb_management_action_outcome_append(TEXT,TEXT,TEXT,INTEGER,TEXT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION public.kb_management_read_transition_guard(),
     public.kb_management_read_worm_guard(),
@@ -986,6 +992,7 @@ BEGIN
       FROM aimee_kb_runtime;
     GRANT EXECUTE ON FUNCTION
       public.kb_management_action_intent_start(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT),
+      public.kb_management_identity_intent_start(TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT),
       public.kb_management_action_outcome_append(TEXT,TEXT,TEXT,INTEGER,TEXT)
       TO aimee_kb_runtime;
     GRANT EXECUTE ON FUNCTION
