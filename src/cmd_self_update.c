@@ -20,6 +20,7 @@
 
 #include "cli_client.h"
 #include "cJSON.h"
+#include "headers/aimee_client.h"
 #include "headers/aimee_home.h"
 #include "headers/aimee_version.h"
 #include "headers/util.h"
@@ -55,11 +56,30 @@ int aimee_fetch_server_version(char *out, size_t cap)
    char *endpoint = cli_v1_client_endpoint();
    if (!endpoint)
       return -1;
-   char *bearer = cli_v1_client_bearer();
    int status = 0;
-   cJSON *resp = cli_http_request(endpoint, "GET", "/v1/version", NULL, bearer, 5000, &status);
+   cJSON *resp = NULL;
+#if defined(_WIN32) || defined(_WIN64)
+   /* Windows must not use cli_http_request here: its implementation writes a
+    * plaintext HTTP/1.1 request onto a raw Winsock socket with no TLS handshake,
+    * and /v1 is TLS-only off-loopback, so it can never reach a real deployment.
+    * `self-update` was the only caller left on that path, which is why it failed
+    * against a server every other command on the same binary was reaching --
+    * and then blamed "no remote endpoint configured, or the server is
+    * unreachable". aimee_client_request is the Schannel transport the rest of the
+    * Windows client already uses; it resolves the configured remote itself. */
+   free(endpoint);
+   char *raw = aimee_client_request("GET", "/v1/version", NULL, &status);
+   if (raw)
+   {
+      resp = cJSON_Parse(raw);
+      free(raw);
+   }
+#else
+   char *bearer = cli_v1_client_bearer();
+   resp = cli_http_request(endpoint, "GET", "/v1/version", NULL, bearer, 5000, &status);
    free(endpoint);
    free(bearer);
+#endif
    if (!resp)
       return -1;
    int rc = -1;
