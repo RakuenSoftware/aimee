@@ -237,6 +237,8 @@ aimee workspace list                                       # list roots and the 
 You can also drop an `aimee.workspace.yaml` manifest in a directory and run `aimee setup` to clone, install dependencies, index, and generate starter rules for a multi-repo workspace in one shot, see [Workspace Management](WORKSPACES.md).
 
 > Indexing and memory writes are server-side mutations, so over the network they need a **write-tier grant of at least `data` for your own subject** (see [1.4](#14-before-you-expose-it-on-a-network)); `aimee.api.remote_writes` no longer authorizes them. Workspace registration itself works regardless.
+>
+> Without a grant these return `403 … requires capabilities beyond the presented token's scope`, so on a brand-new install your first `aimee memory store` or `aimee kb ingest` will fail until one is issued. [UPGRADING.md](UPGRADING.md) has the procedure: how a subject is spelled for each login mode, and how the local operator issues the first grant. Running on the server itself over the local Unix socket is exempt.
 
 ### 2.5 Add agents (delegates)
 
@@ -319,6 +321,8 @@ aimee workspace list                            # list roots and the projects un
 ```
 
 > Indexing and memory writes are server-side mutations, so over the network they need a **write-tier grant of at least `data` for your own subject** (see [1.4](#14-before-you-expose-it-on-a-network)); `aimee.api.remote_writes` no longer authorizes them. Workspace registration itself works regardless.
+>
+> Without a grant these return `403 … requires capabilities beyond the presented token's scope`, so on a brand-new install your first `aimee memory store` or `aimee kb ingest` will fail until one is issued. [UPGRADING.md](UPGRADING.md) has the procedure: how a subject is spelled for each login mode, and how the local operator issues the first grant. Running on the server itself over the local Unix socket is exempt.
 
 ### 3.5 Add agents (delegates)
 
