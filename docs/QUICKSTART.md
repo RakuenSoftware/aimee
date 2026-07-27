@@ -149,7 +149,7 @@ mv aimee-linux-x86_64 ~/.local/bin/aimee
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-**Option B, build the thin client from source** (needs a C compiler, `make`, and `libsqlite3-dev`; add `libssl-dev` to keep `https://` support):
+**Option B, build the thin client from source** (needs a C compiler, `make`, `libsqlite3-dev`, and `zlib1g-dev`; add `libssl-dev` to keep `https://` support):
 
 ```bash
 git clone https://github.com/RakuenSoftware/aimee.git

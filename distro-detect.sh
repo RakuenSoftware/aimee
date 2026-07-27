@@ -41,6 +41,7 @@ pkg_name() {
                 libsqlite3-dev)      echo "sqlite-devel" ;;
                 libpq-dev)           echo "libpq-devel" ;;
                 libzstd-dev)         echo "libzstd-devel" ;;
+                zlib1g-dev)          echo "zlib-devel" ;;
                 libcurl4-openssl-dev) echo "libcurl-devel" ;;
                 libpam0g-dev)        echo "pam-devel" ;;
                 libsecret-1-dev)     echo "libsecret-devel" ;;
@@ -72,6 +73,7 @@ pkg_name() {
                 libsqlite3-dev)      echo "sqlite" ;;
                 libpq-dev)           echo "postgresql-libs" ;;
                 libzstd-dev)         echo "zstd" ;;
+                zlib1g-dev)          echo "zlib" ;;
                 libcurl4-openssl-dev) echo "curl" ;;
                 libpam0g-dev)        echo "pam" ;;
                 libsecret-1-dev)     echo "libsecret" ;;
@@ -90,6 +92,7 @@ pkg_name() {
                 libsqlite3-dev)      echo "sqlite" ;;
                 libpq-dev)           echo "libpq" ;;
                 libzstd-dev)         echo "zstd" ;;
+                zlib1g-dev)          echo "zlib" ;;
                 libcurl4-openssl-dev) echo "curl" ;;
                 libpam0g-dev)        echo "" ;;  # PAM is built-in on macOS
                 universal-ctags)     echo "universal-ctags" ;;
@@ -132,6 +135,7 @@ REQUIRED_DEPS=(
     libsqlite3-dev
     libpq-dev
     libzstd-dev
+    zlib1g-dev
     libcurl4-openssl-dev
     libpam0g-dev
     universal-ctags
@@ -151,6 +155,7 @@ dep_present() {
         libsqlite3-dev)       pkg-config --exists sqlite3 2>/dev/null ;;
         libpq-dev)            pkg-config --exists libpq 2>/dev/null ;;
         libzstd-dev)          pkg-config --exists libzstd 2>/dev/null ;;
+        zlib1g-dev)           pkg-config --exists zlib 2>/dev/null ;;
         libcurl4-openssl-dev) pkg-config --exists libcurl 2>/dev/null ;;
         # No pkg-config .pc for PAM; probe the header the way cgo will, which
         # also resolves the macOS SDK location. If no C compiler is present yet
