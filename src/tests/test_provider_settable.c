@@ -44,8 +44,8 @@ static void test_accepts_configured_agent(void)
    add_agent(&acfg, "MiniMax-M3", "anthropic");
    add_agent(&acfg, "kimi-k2.7-code", "anthropic");
 
-   assert(provider_name_settable("MiniMax-M3", &acfg) == 1);   /* by name */
-   assert(provider_name_settable("anthropic", &acfg) == 1);    /* by provider */
+   assert(provider_name_settable("MiniMax-M3", &acfg) == 1); /* by name */
+   assert(provider_name_settable("anthropic", &acfg) == 1);  /* by provider */
    assert(provider_name_settable("kimi-k2.7-code", &acfg) == 1);
    printf("  PASS: a configured agent is settable by name or provider\n");
 }

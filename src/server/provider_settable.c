@@ -46,4 +46,3 @@ int provider_name_settable(const char *name, const agent_config_t *acfg)
          return 1;
    return 0;
 }
-
