@@ -62,6 +62,22 @@ extern "C"
     */
    int util_url_is_ssh(const char *url);
 
+   /* Report whether `url` names a REMOTE git transport this server will fetch.
+    *
+    * Returns 1 for http(s)://, ssh://, git:// and the scp-like user@host:path
+    * form. Returns 0 for everything else — notably `file://` and bare local
+    * paths, which git would happily clone from the server's own filesystem.
+    *
+    * This is the guard for clone URLs that arrive from a client over /v1: it
+    * keeps a caller from pulling a repository readable by the server account
+    * into their workspace (where it is then indexed and served back). The
+    * git_project_* primitives stay scheme-agnostic on purpose, so their
+    * offline unit tests can clone over file://.
+    *
+    * Returns 0 on NULL/empty input.
+    */
+   int util_url_is_remote(const char *url);
+
    /* Report whether a host uses case-insensitive routing for path segments.
     *
     * Known-insensitive: github.com, gitlab.com, bitbucket.org, and their
