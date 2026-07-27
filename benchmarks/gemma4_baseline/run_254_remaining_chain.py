@@ -8,6 +8,7 @@ import hashlib
 import json
 import subprocess
 import time
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -77,10 +78,27 @@ def plan_sha256(plan: list[dict[str, Any]]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def wait_production_health(url: str, timeout: int = 900) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    last_error = ""
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=5) as response:
+                payload = json.load(response)
+            if payload.get("status") == "ok":
+                return payload
+            last_error = f"unexpected status: {payload.get('status')!r}"
+        except Exception as exc:  # noqa: BLE001 - retained for restoration diagnosis
+            last_error = f"{type(exc).__name__}: {exc}"
+        time.sleep(2)
+    raise RuntimeError(f"production service did not become healthy: {last_error}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path("/mnt/media/gemma4-baseline"))
     parser.add_argument("--repo", type=Path, default=Path("/mnt/media/gemma4-baseline/repo"))
+    parser.add_argument("--production-health-url", default="http://192.168.1.254:8742/health")
     args = parser.parse_args()
 
     logs = args.root / "logs"
@@ -95,6 +113,7 @@ def main() -> int:
         if prior_fingerprint and prior_fingerprint != fingerprint:
             raise RuntimeError("refusing to resume a different remaining-stage plan")
         if state.get("status") == "complete":
+            wait_production_health(args.production_health_url)
             return 0
     completed = list(state.get("completed", []))
     completed_names = {entry["name"] for entry in completed}
@@ -136,6 +155,8 @@ def main() -> int:
                 raise RuntimeError(f"{active} exited {process.returncode}; see {log_path}")
             completed.append({"name": active, "completed_unix": int(time.time()), "log": str(log_path)})
             completed_names.add(active)
+        active = "production_health_verification"
+        production_health = wait_production_health(args.production_health_url)
         write_json_atomic(
             state_path,
             {
@@ -146,6 +167,7 @@ def main() -> int:
                 "active": None,
                 "started_unix": started_unix,
                 "completed_unix": int(time.time()),
+                "production_health": production_health,
             },
         )
         return 0

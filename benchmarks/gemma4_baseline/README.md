@@ -272,7 +272,9 @@ The remaining qualification stages can be queued as one resumable, fail-closed
 chain. It waits at the EuroBERT handoff gate, then runs the E4B synthesis-only
 recovery, followed by both required views for Gemma 4 26B-A4B, Gemma 4 31B, and
 Qwen3.6 35B-A3B. A nonzero child exit stops the chain; every child controller
-must restore a healthy production service before returning success:
+must restore a healthy production service before returning success. The parent
+also performs an independent final production-health probe before recording the
+chain complete:
 
 ```sh
 python3 benchmarks/gemma4_baseline/run_254_remaining_chain.py

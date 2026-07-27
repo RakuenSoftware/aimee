@@ -395,17 +395,23 @@ class GemmaBaselineContractTests(unittest.TestCase):
             succeeded = mock.Mock(returncode=0)
             with mock.patch.object(sys, "argv", argv), mock.patch.object(
                 remaining_chain.subprocess, "run", return_value=succeeded
-            ) as run:
+            ) as run, mock.patch.object(
+                remaining_chain, "wait_production_health", return_value={"status": "ok"}
+            ) as health:
                 self.assertEqual(remaining_chain.main(), 0)
                 self.assertEqual(run.call_count, 3)
+                health.assert_called_once_with("http://192.168.1.254:8742/health")
             state_path = root / "remaining_chain_state.json"
             state = json.loads(state_path.read_text(encoding="utf-8"))
             self.assertEqual(state["status"], "complete")
             self.assertEqual(len(state["completed"]), 3)
             with mock.patch.object(sys, "argv", argv), mock.patch.object(
                 remaining_chain.subprocess, "run", side_effect=AssertionError("repeated")
-            ):
+            ), mock.patch.object(
+                remaining_chain, "wait_production_health", return_value={"status": "ok"}
+            ) as health:
                 self.assertEqual(remaining_chain.main(), 0)
+                health.assert_called_once_with("http://192.168.1.254:8742/health")
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "root"
@@ -421,6 +427,22 @@ class GemmaBaselineContractTests(unittest.TestCase):
             state = json.loads((root / "remaining_chain_state.json").read_text(encoding="utf-8"))
             self.assertEqual(state["status"], "failed")
             self.assertEqual(state["active"], "eurobert_rerankers")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "root"
+            repo = Path(directory) / "repo"
+            root.mkdir()
+            argv = ["run_254_remaining_chain.py", "--root", str(root), "--repo", str(repo)]
+            with mock.patch.object(sys, "argv", argv), mock.patch.object(
+                remaining_chain.subprocess, "run", return_value=mock.Mock(returncode=0)
+            ), mock.patch.object(
+                remaining_chain, "wait_production_health", side_effect=RuntimeError("unhealthy")
+            ):
+                with self.assertRaisesRegex(RuntimeError, "unhealthy"):
+                    remaining_chain.main()
+            state = json.loads((root / "remaining_chain_state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["status"], "failed")
+            self.assertEqual(state["active"], "production_health_verification")
 
     def test_frozen_bundle_is_exact_and_paired(self) -> None:
         result = validator.validate(ROOT / "benchmarks/fixtures/gemma4-unified/ab-v1")
