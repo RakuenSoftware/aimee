@@ -27,6 +27,13 @@ import subprocess
 import sys
 
 
+# Keep one curator attempt inside the native sidecar's 300-second watchdog.
+# Durable curator jobs own retries; the generic llm-chat retry loop must not
+# leave multiple CPU generations running for one job.
+CURATOR_LLM_TIMEOUT_DEFAULT = 285
+CURATOR_LLM_TIMEOUT_MAX = 285
+
+
 def resolve_llm_endpoint(env) -> tuple[str, str | None]:
     """OpenAI-compatible base URL for the sidecar, or an error to report.
 
@@ -122,14 +129,19 @@ def call_llm(prompt: str, max_tokens: int) -> tuple:
     env["LLM_ENDPOINT"] = endpoint
     env.setdefault("LLM_MODEL", "qwen3")
 
-    timeout_s = int(env.get("LLM_TIMEOUT", "120"))
+    timeout_s = min(
+        max(int(env.get("LLM_TIMEOUT", str(CURATOR_LLM_TIMEOUT_DEFAULT))), 1),
+        CURATOR_LLM_TIMEOUT_MAX,
+    )
+    env["LLM_TIMEOUT"] = str(timeout_s)
+    env["LLM_RETRIES"] = "0"
     try:
         result = subprocess.run(
             ["python3", llm_script],
             input=prompt,
             capture_output=True,
             text=True,
-            timeout=timeout_s,
+            timeout=timeout_s + 5,
             env=env,
         )
         if result.returncode != 0:
