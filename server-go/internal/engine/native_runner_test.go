@@ -1931,3 +1931,57 @@ func TestMergeStepFailsTerminallyOnConflictButStillPendsOnLostRace(t *testing.T)
 		})
 	}
 }
+
+// A slice whose earlier attempt already committed the work must not be retried
+// forever. baseHead is HEAD at the start of the CURRENT attempt, so once a prior
+// attempt committed, a delegate that correctly finds nothing left to do leaves
+// head == baseHead and looked identical to one that did nothing at all. Observed
+// on wi_e51e37cf slice g0.0: two "wfe: impl" commits carrying the entire change,
+// and every redispatch reporting "no owned files changed". Ask the BRANCH whether
+// work exists, not the attempt.
+func TestBranchHasWorkOverBaseSeesCommitsFromEarlierAttempts(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	git := func(dir string, args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	git(root, "init", "-b", "trunk", repo)
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(repo, "add", "README")
+	git(repo, "commit", "-m", "init")
+	git(repo, "branch", "aimee/feat/wi_parent")
+	ctx := context.Background()
+
+	// Cut from the base with nothing done yet: the slice has produced no work.
+	git(repo, "checkout", "-q", "-b", "aimee/wi/slice", "aimee/feat/wi_parent")
+	if branchHasWorkOverBase(ctx, repo, "wi_parent") {
+		t.Fatal("a slice with no commits over its base must not count as work")
+	}
+
+	// An earlier attempt commits the implementation.
+	if err := os.WriteFile(filepath.Join(repo, "impl.txt"), []byte("done\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(repo, "add", "impl.txt")
+	git(repo, "commit", "-m", "wfe: impl")
+	if !branchHasWorkOverBase(ctx, repo, "wi_parent") {
+		t.Fatal("a slice carrying a commit over its base must count as work")
+	}
+
+	// No parent (a root item) is not a slice and must stay strict.
+	if branchHasWorkOverBase(ctx, repo, "") {
+		t.Fatal("an item with no parent must not be treated as having slice work")
+	}
+	// An unresolvable base must stay strict rather than excuse an empty slice.
+	if branchHasWorkOverBase(ctx, repo, "wi_does_not_exist") {
+		t.Fatal("an unresolved base must not count as work")
+	}
+}
