@@ -1069,3 +1069,140 @@ func TestHTTPAgentClientRequiresAuthenticationOffLoopback(t *testing.T) {
 		t.Fatalf("authenticated remote agent service rejected: %v", err)
 	}
 }
+
+// A panel seat must not be given to an agent that is already at max_parallel
+// while an idle agent is eligible. The router used to count only the seats it
+// was assigning in this group, so an agent saturated by other work still looked
+// free: the seat was dispatched, admission refused it with
+// aimee_err=concurrency_limit, and a panel needing 2 of 3 seats was reported
+// unreachable while another agent sat idle. Observed live on run wi_e51e37cf,
+// where every "claude" seat failed instantly with
+// "agent 'claude' at concurrency limit (max_parallel=3)".
+func TestGroupRoutingSkipsAnAgentAlreadyAtItsConcurrencyLimit(t *testing.T) {
+	var mu sync.Mutex
+	var vias []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/agent/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]any{
+				// Saturated by work outside this group.
+				{"name": "busy", "provider": "p1", "model": "m1", "enabled": true, "max_parallel": 3,
+					"active_delegates": 3, "roles": []string{"review"}, "personas": []string{"all"}},
+				// Idle and equally eligible.
+				{"name": "idle", "provider": "p2", "model": "m2", "enabled": true, "max_parallel": 3,
+					"active_delegates": 0, "roles": []string{"review"}, "personas": []string{"all"}},
+			}})
+		case "/v1/delegate/run":
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			mu.Lock()
+			vias = append(vias, fmt.Sprint(payload["via"]))
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 1, "participant": "p"})
+		case "/v1/delegate/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "ok"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.DelegateGroup(t.Context(), []DelegateRequest{
+		{Role: "review", Persona: "architect", Prompt: "review"},
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	if len(vias) != 1 {
+		t.Fatalf("expected one dispatch, got %v", vias)
+	}
+	if vias[0] != "idle" {
+		t.Fatalf("seat routed to %q; a saturated agent must not be preferred over an idle one", vias[0])
+	}
+}
+
+// PREFER, never exclude: when every eligible agent is saturated the seat must
+// still be filled. Dispatch then fails as capacity backpressure, which the
+// engine retries -- refusing to route instead makes the panel unreachable,
+// which it does not recover from.
+func TestGroupRoutingStillFillsASeatWhenEveryAgentIsSaturated(t *testing.T) {
+	var mu sync.Mutex
+	var vias []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/agent/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]any{
+				{"name": "busy-a", "provider": "p1", "model": "m1", "enabled": true, "max_parallel": 2,
+					"active_delegates": 2, "roles": []string{"review"}, "personas": []string{"all"}},
+				{"name": "busy-b", "provider": "p2", "model": "m2", "enabled": true, "max_parallel": 2,
+					"active_delegates": 5, "roles": []string{"review"}, "personas": []string{"all"}},
+			}})
+		case "/v1/delegate/run":
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			mu.Lock()
+			vias = append(vias, fmt.Sprint(payload["via"]))
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 1, "participant": "p"})
+		case "/v1/delegate/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "ok"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.DelegateGroup(t.Context(), []DelegateRequest{
+		{Role: "review", Persona: "architect", Prompt: "review"},
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	if len(vias) != 1 {
+		t.Fatalf("a saturated roster must still fill the seat, got dispatches %v", vias)
+	}
+}
+
+// An agent that reports no occupancy at all (older delegate service) must keep
+// its previous behaviour and stay routable -- absent must not read as "busy".
+func TestGroupRoutingTreatsUnreportedOccupancyAsRoutable(t *testing.T) {
+	var mu sync.Mutex
+	var vias []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/agent/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]any{
+				{"name": "unreported", "provider": "p1", "model": "m1", "enabled": true, "max_parallel": 1,
+					"roles": []string{"review"}, "personas": []string{"all"}},
+			}})
+		case "/v1/delegate/run":
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			mu.Lock()
+			vias = append(vias, fmt.Sprint(payload["via"]))
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 1, "participant": "p"})
+		case "/v1/delegate/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "ok"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.DelegateGroup(t.Context(), []DelegateRequest{
+		{Role: "review", Persona: "architect", Prompt: "review"},
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	if len(vias) != 1 || vias[0] != "unreported" {
+		t.Fatalf("unreported occupancy must stay routable, got %v", vias)
+	}
+}
