@@ -1287,8 +1287,8 @@ native_provider_http:
          {
             if (liveness_is_degenerate_response(parsed.content))
             {
-               if (total_calls == 0 &&
-                   agent_session_retry_degenerate_response(messages, &turn, &degenerate_retry_count))
+               if (total_calls == 0 && agent_session_retry_degenerate_response(
+                                           messages, &turn, &degenerate_retry_count))
                {
                   agent_free_parsed_response(&parsed);
                   continue;
