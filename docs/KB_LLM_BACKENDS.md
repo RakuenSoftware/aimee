@@ -1,120 +1,62 @@
-# aimee-kb LLM backends: embedding, reranking & synthesis
+# KB inference backends
 
-How to point `aimee-kb` at the model backend that does its **embedding**,
-**reranking**, and **synthesis**.
+`aimee-kb` runs no model. It stores source and derived records, schedules work, and calls an inference
+service for embedding, reranking, extraction, or synthesis.
 
-## Principle: the kb runs no model
+The standard backend is `aimee-llm` on the deployment network.
 
-`aimee-kb` is a thin DB2 / curator service. It **never** runs an LLM or embedder
-in-process. It *calls* one over HTTP. Inference lives in a separate **`aimee-llm`
-container** (the unified Vulkan llama.cpp stack, deployed as the SmoothNAS
-`aimee-llm` plugin) or any external OpenAI-compatible endpoint. `aimee-llm` is a
-**model-less** image: the **tier** (`cpu` / `small` / `mid` / `large`) is
-chosen at runtime via `AIMEE_LLM_TIER` and the models are downloaded on first
-boot. (For offline CPU-only deploys a pre-baked **`aimee-llm-cpu`** variant ships
-the cpu tier's models in the image; either way the kb just sees a container at
-`aimee-llm:8742`.) You only ever give the kb a **URL**. The tiers themselves are documented in
-[AIMEE_KB_SYNTH_TIERS.md](AIMEE_KB_SYNTH_TIERS.md).
+## Required operations
 
-## Tiers: what each backend provides
-
-All served by the one `aimee-llm` image; `AIMEE_LLM_TIER` picks which models it
-downloads on first boot. "Model download" is the first-boot fetch into the
-`/models` volume (the image itself is small and model-less).
-
-| `AIMEE_LLM_TIER` | Embedding / reranking | Synthesis | Embedding dim | Model download |
-| --- | --- | --- | --- | --- |
-| **`cpu`** (default) | Qwen3-Emb-0.6B + ettin-68m | **Tier-A** only (gemma-4-E4B, CPU) | **1024** | ~6.5 GB |
-| **`small`** | Qwen3-Emb-4B + ettin-400m | **Tier-A + Tier-B** (Gemma 4 12B) | **2560** (set explicitly) | ~11.4 GB |
-| **`mid`** | Qwen3-Emb-4B + ettin-400m | **Tier-A + Tier-B** (Gemma 4 26B-A4B, 24 GB card, 2 slots) | **2560** (set explicitly) | ~17.8 GB |
-| **`large`** | Qwen3-Emb-4B + ettin-400m | **Tier-A + Tier-B** (same 26B-A4B, 32 GB card, 4 slots × 256 K) | **2560** (set explicitly) | ~17.8 GB |
-| **External LLM** | per the endpoint | per the endpoint | per the endpoint | — |
-
-`small`, `mid`, and `large` share the 2560-dim embedder, so a KB moves between them
-with no re-embed. `large` is identical to `mid` bar `SYNTH_SLOTS=4` (4 concurrent
-agents for a 32 GB card). Pick by synth need + card size, not by the KB — switching
-is a `AIMEE_LLM_TIER` change (the new tier downloads to its own `/models` subdir).
-
-*Tier-A* = mechanical extract/index passes. *Tier-B* = reasoning passes (judge,
-resolve-entities, contradictions, **synthesize**, promote). A small CPU model is
-deliberately **not** allowed to run Tier-B (the weak-model-poisons-the-graph
-guard), so CPU-only deployments get retrieval + Tier-A synthesis; Tier-B turns on
-when you point the kb at a capable container via `AIMEE_LLM_URL`.
-
-## Zero-config default
-
-If **no** LLM is configured, the kb deployment brings up a **cpu-tier `aimee-llm`
-container beside it** (`AIMEE_LLM_TIER=cpu`) and points itself at it: embedding,
-reranking, and Tier-A synthesis work with nothing to set. The operator only opts
-*up*: set `AIMEE_LLM_TIER=small|mid|large` (with a GPU) or point at an external LLM
-and the CPU sibling is not started.
-
-> The default CPU sibling is owned by the **deploy unit** (the smoothnas plugin /
-> compose), not the kb process. The kb never touches a container runtime.
-
-## Config surface
-
-All optional. Precedence is **per service**: an explicit per-service URL wins,
-then `AIMEE_LLM_URL`, then the zero-config CPU default.
-
-| Variable | Drives | Default |
+| Operation | Used for | Required |
 | --- | --- | --- |
-| `AIMEE_LLM_URL` | embedding **+** reranking **+** synthesis (Tier-A + Tier-B, at `{url}/v1`) | the auto CPU sibling |
-| `AIMEE_EMBEDDER_URL` | embedding (`/embed`, `/embed_batch`) | `AIMEE_LLM_URL` |
-| `AIMEE_RERANKER_URL` | reranking (`/rerank`) | `AIMEE_EMBEDDER_URL` → `AIMEE_LLM_URL` |
-| `AIMEE_EMBEDDING_DIM` | pgvector schema width | `1024` (CPU); set `2560` for the GPU tier |
-| `AIMEE_LLM_MODEL` | model label sent to `AIMEE_LLM_URL` | `aimee-synth` (gateways ignore it) |
-| `LLM_ENDPOINT` | **Tier-A synth only** (small-model interface) | unset |
+| embed / batch embed | dense memory, docs, code, evidence | for dense retrieval |
+| rerank | refine fused top-k | optional |
+| chat/synthesis | curator extraction, summaries, answer synthesis | optional by pipeline |
 
-- **`AIMEE_LLM_URL` is the one knob.** Point it at a container and embedding,
-  reranking, and synthesis all use it. `{AIMEE_LLM_URL}` serves `/embed`,
-  `/embed_batch`, `/rerank`; `{AIMEE_LLM_URL}/v1` serves chat completions for the
-  curator. Give the base URL **without** `/v1` (a trailing `/v1` or `/` is
-  tolerated).
-- **Split a service out** by setting `AIMEE_EMBEDDER_URL` and/or
-  `AIMEE_RERANKER_URL`. They override `AIMEE_LLM_URL` for just that service.
-- **Auth:** the kb sends **no bearer** on the embed/rerank/synth path, so the
-  container must run **auth-off** (empty `AIMEE_LLM_AUTH_TOKEN`). This is safe on
-  the internal deployment network (the `aimee-llm` gateway is not exposed
-  off-host).
+A stage reports degradation when its operation is unavailable. Lexical retrieval can still work
+without embedding; it must not claim dense or reranked results.
 
-### Embedding dimension
+## Configure
 
-The dim is **explicit**, not auto-detected:
+Set the inference base URL for the KB, normally through `AIMEE_EMBEDDER_URL` or the matching
+descriptor-backed key. Configure one embedding model identity and one dimension for the deployment.
 
-- **Unset → 1024**: the CPU / Qwen3-0.6B tier.
-- **GPU / 4B tier → set `AIMEE_EMBEDDING_DIM=2560`.**
+Use [generated configuration](gen/configuration.md) for current names. Container environment values
+override file values where documented.
 
-Changing the dim against a **populated** kb is a **drop-and-rebuild re-embed**:
-1024 and 2560 are a different model identity *and* width, and the `kb_meta` drift
-guard refuses to serve a new embedder against a mismatched corpus. Plan a
-re-embed (snapshot → drop dim-sized `halfvec` tables → rebuild at the new dim →
-parity gate) when moving between CPU and GPU tiers. See
-[runbooks/unified-llm-cutover.md](runbooks/unified-llm-cutover.md).
+## Dimension
 
-## Examples
+The model output and DB2 vector-column dimension must match. The KB records the schema dimension and
+refuses startup on drift.
 
-**GPU container (this deployment's `.254`):**
-```
-AIMEE_LLM_URL=http://10.100.0.1:8742      # embed + rerank + Tier-A&B synth
-AIMEE_EMBEDDING_DIM=2560                   # GPU / 4B tier
-```
+Changing to another model with the same width requires a controlled re-embed. Changing width also
+requires rebuilding the derived vector tables. See [Retrieval stack](retrieval-stack.md).
 
-**External embedder, GPU for synth:**
-```
-AIMEE_LLM_URL=http://10.100.0.1:8742       # synth (+ rerank, unless split)
-AIMEE_EMBEDDER_URL=https://embed.internal  # pin embedding elsewhere
-AIMEE_EMBEDDING_DIM=<that model's dim>
-```
+## Custom backend
 
-**Default (nothing set):** the deploy brings up the cpu-tier `aimee-llm` sibling
-(`AIMEE_LLM_TIER=cpu`); retrieval + Tier-A synthesis work at 1024-dim with no
-configuration.
+A custom service must provide:
 
-## Notes for plugin / compose operators
+- bounded request and response bodies;
+- stable model identity and dimension;
+- timeouts and cancellation;
+- deterministic error classification;
+- batch behavior that preserves input order;
+- health and readiness separate from process liveness;
+- no silent fallback to a different model.
 
-The `aimee-kb` smoothnas plugin and the compose topologies expose `AIMEE_LLM_URL`
-/ `AIMEE_EMBEDDER_URL` / `AIMEE_RERANKER_URL` / `AIMEE_EMBEDDING_DIM` as config.
-The kb image carries **no** baked embedder/LLM endpoint defaults. An unset
-backend falls back to the 384-dim builtin embedder (test/shim only), so a real
-deployment either relies on the default CPU sibling or sets one of the URLs above.
+Keep credentials and provider endpoints in the owning deployment, not KB documents or workflow
+artifacts.
+
+## Validate
+
+Before enabling traffic:
+
+1. probe health and model identity;
+2. embed a fixed string and verify dimension;
+3. run a batch and verify order/count;
+4. rerank a fixed candidate set;
+5. run one structured curator response through its schema;
+6. stop the backend and confirm honest degradation;
+7. restart it and confirm queued work resumes.
+
+See [Inference tiers](AIMEE_KB_SYNTH_TIERS.md).
