@@ -106,6 +106,68 @@ int main(void)
    wfe_git_freeze(dir, bb, b3, h3, hh3, err, sizeof err);
    assert(strcmp(hh3, h_change) == 0);
 
+   /* --- add/add pre-check: a slice that re-creates a file a sibling landed ---
+    * Two slices of one work item are cut from the feature branch together; when
+    * each CREATES the same file, the first merges and the rest hit add/add,
+    * which no rebase resolves. Catch it at freeze instead of at merge. */
+   {
+      char sdir[] = "/tmp/wfe_addadd_XXXXXX";
+      if (wfe_test_mkdtemp(sdir))
+      {
+         /* feature branch with the file already landed by "slice 0" */
+         snprintf(cmd, sizeof cmd,
+                  "cd %s && git init -q -b feat && git config user.email t@t && "
+                  "git config user.name t && git config commit.gpgsign false && "
+                  "printf 'seed\\n' > seed.txt && git add -A && git commit -q -m seed && "
+                  "git rev-parse HEAD > /tmp/wfe_addadd_base",
+                  sdir);
+         if (sh(cmd) == 0)
+         {
+            char cut[64] = "";
+            FILE *bf = fopen("/tmp/wfe_addadd_base", "r");
+            if (bf)
+            {
+               if (fgets(cut, sizeof cut, bf))
+                  cut[strcspn(cut, "\r\n")] = '\0';
+               fclose(bf);
+            }
+            char clash[512];
+
+            /* slice 0 lands doc.md on feat; our slice creates its OWN doc.md. */
+            snprintf(cmd, sizeof cmd,
+                     "cd %s && printf 'from slice0\\n' > doc.md && git add -A && "
+                     "git commit -q -m slice0 && git checkout -q -b mine %s && "
+                     "printf 'from mine\\n' > doc.md && git add -A && git commit -q -m mine",
+                     sdir, cut);
+            assert(sh(cmd) == 0);
+            assert(wfe_slice_recreates_base_path(sdir, "feat", cut, clash, sizeof clash) == 1);
+            assert(strcmp(clash, "doc.md") == 0); /* names the colliding path */
+
+            /* IDENTICAL content is not a conflict: git merges that add/add
+             * cleanly, so flagging it would reject work that would land. */
+            snprintf(cmd, sizeof cmd,
+                     "cd %s && git checkout -q -b same %s && printf 'from slice0\\n' > doc.md && "
+                     "git add -A && git commit -q -m same",
+                     sdir, cut);
+            assert(sh(cmd) == 0);
+            assert(wfe_slice_recreates_base_path(sdir, "feat", cut, clash, sizeof clash) == 0);
+
+            /* A file only WE create (absent on the base ref) is not a collision. */
+            snprintf(cmd, sizeof cmd,
+                     "cd %s && git checkout -q -b solo %s && printf 'only mine\\n' > solo.md && "
+                     "git add -A && git commit -q -m solo",
+                     sdir, cut);
+            assert(sh(cmd) == 0);
+            assert(wfe_slice_recreates_base_path(sdir, "feat", cut, clash, sizeof clash) == 0);
+
+            /* Bad args / unresolvable refs fail SAFE (0), never a false block. */
+            assert(wfe_slice_recreates_base_path(NULL, "feat", cut, clash, sizeof clash) == 0);
+            assert(wfe_slice_recreates_base_path(sdir, "", cut, clash, sizeof clash) == 0);
+            assert(wfe_slice_recreates_base_path(sdir, "feat", "", clash, sizeof clash) == 0);
+         }
+      }
+   }
+
    /* --- TDD anti-deletion guard: red-authored tests must survive GREEN --- */
    /* red commit: add a test file (currently on branch feat). */
    snprintf(cmd, sizeof cmd,
