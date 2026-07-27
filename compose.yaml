@@ -9,7 +9,7 @@ services:
     profiles: ["legacy-embedder"]
     # Published image (pushed to ghcr on every merge to main); override
     # AIMEE_EMBEDDER_IMAGE to pin a version or use a fork/registry.
-    image: ${AIMEE_EMBEDDER_IMAGE:-ghcr.io/rakuensoftware/aimee-embedder:latest}
+    image: ${AIMEE_EMBEDDER_IMAGE:-ghcr.io/rakuensoftware/aimee-embedder:${AIMEE_IMAGE_TAG:-latest}}
     build:
       context: .
       dockerfile: Dockerfile.embedder
@@ -42,7 +42,7 @@ services:
     restart: unless-stopped
     # Published image (pushed to ghcr on every merge to main); override
     # AIMEE_KB_IMAGE to pin a version or use a fork/registry.
-    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:latest}
+    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:${AIMEE_IMAGE_TAG:-latest}}
     build:
       context: .
       dockerfile: Dockerfile
@@ -93,7 +93,7 @@ services:
   #   cred the container idles healthy with a clear log rather than crash-looping.
   aimee-control-web:
     restart: unless-stopped
-    image: ${AIMEE_CONTROL_WEB_IMAGE:-ghcr.io/rakuensoftware/aimee-control-web:latest}
+    image: ${AIMEE_CONTROL_WEB_IMAGE:-ghcr.io/rakuensoftware/aimee-control-web:${AIMEE_IMAGE_TAG:-latest}}
     build:
       context: .
       dockerfile: Dockerfile.control-web
@@ -166,7 +166,7 @@ services:
     # all-external / remote-kb stack never starts it. CI opts it in via
     # COMPOSE_PROFILES=llm (see e2e-matrix.sh) to exercise the kb->gateway contract.
     profiles: ["llm"]
-    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
+    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:${AIMEE_IMAGE_TAG:-latest}}
     build:
       context: .
       dockerfile: ${AIMEE_LLM_DOCKERFILE:-Dockerfile.aimee-llm}

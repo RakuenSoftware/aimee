@@ -30,7 +30,7 @@ services:
     # Published image (built + pushed to ghcr on every merge to main): `docker
     # compose pull` fetches it; `up --build` rebuilds locally and tags it the same.
     # Override AIMEE_SERVER_IMAGE to pin a version or use a fork/registry.
-    image: ${AIMEE_SERVER_IMAGE:-ghcr.io/rakuensoftware/aimee-server:latest}
+    image: ${AIMEE_SERVER_IMAGE:-ghcr.io/rakuensoftware/aimee-server:${AIMEE_IMAGE_TAG:-latest}}
     # The server's worker threads need a 64 MB stack (the 8 MB container default
     # overflows during startup — matches systemd's LimitSTACK=67108864).
     ulimits:

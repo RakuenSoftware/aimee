@@ -29,6 +29,24 @@ The final **Deploy** step starts:
 Change `AIMEE_WEBCHAT_USER` and `AIMEE_WEBCHAT_PASSWORD` before exposing this host. The defaults are
 for local setup only.
 
+### Choosing an image channel
+
+The stack runs the released `:latest` images by default. To run a tested-but-unreleased build, set
+`AIMEE_IMAGE_TAG` once — it moves the server, the KB and the LLM together:
+
+```bash
+AIMEE_IMAGE_TAG=testing docker compose -f compose.server-managed.yaml up -d
+```
+
+Set it for the wizard's **Deploy** step too, not just the server: the server re-runs Compose for the
+managed services, so the tag has to be in its environment or the KB and LLM fall back to `:latest`
+while the server runs `:testing`. The line above already does this. Mixing versions this way is a
+real failure mode, not a theoretical one — a KB and a server from different builds can disagree
+about the inference contract and leave the KB permanently unhealthy.
+
+A single service can still be pinned individually (`AIMEE_KB_IMAGE=…`), and an explicit pin always
+wins over `AIMEE_IMAGE_TAG`.
+
 Check the containers:
 
 ```bash

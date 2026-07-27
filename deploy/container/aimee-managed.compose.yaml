@@ -30,7 +30,7 @@ services:
   aimee-kb:
     profiles: ["kb"]
     restart: unless-stopped
-    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:latest}
+    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:${AIMEE_IMAGE_TAG:-latest}}
     networks: [aimee]
     # The kb's worker threads need a 64 MB stack (the 8 MB default SIGSEGVs on real
     # kb queries). Matches systemd's LimitSTACK=67108864.
@@ -65,7 +65,7 @@ services:
   aimee-llm:
     profiles: ["llm"]
     restart: unless-stopped
-    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
+    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:${AIMEE_IMAGE_TAG:-latest}}
     networks: [aimee]
     environment:
       AIMEE_LLM_PORT: "8742"

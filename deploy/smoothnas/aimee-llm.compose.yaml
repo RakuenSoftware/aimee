@@ -9,7 +9,7 @@ name: aimee-llm
 services:
   aimee-llm:
     restart: unless-stopped
-    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
+    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:${AIMEE_IMAGE_TAG:-latest}}
     environment:
       AIMEE_LLM_PORT: "8742"
       AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-99}

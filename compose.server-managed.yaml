@@ -31,7 +31,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.server
-    image: ${AIMEE_SERVER_IMAGE:-ghcr.io/rakuensoftware/aimee-server:latest}
+    image: ${AIMEE_SERVER_IMAGE:-ghcr.io/rakuensoftware/aimee-server:${AIMEE_IMAGE_TAG:-latest}}
     networks: [aimee]
     ulimits:
       stack: 67108864
@@ -60,11 +60,20 @@ services:
       AIMEE_DEPLOY_ENABLED: "1"
       AIMEE_DEPLOY_COMPOSE_FILE: /opt/aimee/deploy/aimee-managed.compose.yaml
       COMPOSE_PROJECT_NAME: aimee
+      # The image channel for the WHOLE stack, in one knob: AIMEE_IMAGE_TAG=testing
+      # runs a tested-but-unreleased build without hand-setting an image variable
+      # per service. It is forwarded into the server's own environment because the
+      # server re-runs compose for the managed services (deploy_apply.c copies
+      # environ), so the tag has to survive that hop or the wizard's Deploy would
+      # silently fall back to :latest for the kb and llm while the server itself
+      # ran :testing — a split-version stack, which is how a kb with no `dim` in
+      # /health got paired with a server that expected one.
+      AIMEE_IMAGE_TAG: ${AIMEE_IMAGE_TAG:-latest}
       # Passed through to the managed services when a role is placed local (tier,
       # images). ONE LLM image serves every tier — it is model-less and downloads
       # what the wizard selected — so there is no separate CPU image to override.
-      AIMEE_LLM_IMAGE: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
-      AIMEE_KB_IMAGE: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:latest}
+      AIMEE_LLM_IMAGE: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:${AIMEE_IMAGE_TAG:-latest}}
+      AIMEE_KB_IMAGE: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:${AIMEE_IMAGE_TAG:-latest}}
       AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-cpu}
       AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}
       # "Sign in with OAuth" client IDs (public; see oauth_defaults.h). Set the
