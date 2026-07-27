@@ -248,59 +248,109 @@ static void test_slot_placement_is_not_attacker_computable(void)
 {
    /* The index is hash % SLOTS. If the hash were the bare public FNV-1a an
     * attacker could search offline for usernames landing on chosen slots, occupy
-    * every slot, and have all other usernames refused -- a fail-closed throttle
-    * turned into a global outage. The seed is per process, so the mapping cannot
-    * be precomputed.
+    * all SLOTS of them, and have every other username refused -- a fail-closed
+    * throttle turned into a global outage. The seed is per process so the mapping
+    * cannot be precomputed.
     *
-    * Asserted as a property rather than by reimplementing the hash: two distinct
-    * usernames that would collide under the UNSEEDED hash must not be forced to
-    * share a budget. Compute an unseeded FNV-1a collision here, then show the two
-    * names have independent budgets in the real table. */
-   uint64_t (*unseeded)(const char *) = NULL;
-   (void)unseeded;
-   char a[32], b[32];
-   int found = 0;
-   for (int i = 0; i < 4000 && !found; i++)
+    * THIS IS A STATISTICAL PROPERTY OVER BOTH PAIRS AND SEEDS, and it took three
+    * tries to test it honestly. Worth recording, because each wrong version
+    * looked reasonable:
+    *
+    *   1. ONE pair, ONE seed: a single Bernoulli sample. It flaked on CI, and a
+    *      flake here is indistinguishable from the defect.
+    *   2. Many pairs, ONE pinned seed: deterministic but powerless -- measurement
+    *      showed a knowingly-broken hash still passing.
+    *   3. ONE pair, many seeds: also powerless, because the correlation is
+    *      PAIR-DEPENDENT. The first pair this search yields happens to decorrelate
+    *      well even with the defect present.
+    *
+    * Sweeping both is what actually separates the regimes. Measured over 64 pairs
+    * x 64 seeds:
+    *
+    *     seeding only the FNV basis ... 2.25%    (23x ideal)
+    *     with hash_key's finalizer .... 0.024%   (ideal is 1/SLOTS = 0.098%)
+    *
+    * At PAIRS*SEEDS = 1024 samples that is ~23 expected transfers with the defect
+    * and ~0.25 without, so MAX_TRANSFERS = 8 sits far from both. Deterministic:
+    * the pair list and the seed list are both fixed. */
+#define PAIRS         64
+#define SEEDS_PER     16
+#define MAX_TRANSFERS 8
+   static char names[PAIRS][2][32];
+   int npairs = 0;
    {
-      snprintf(a, sizeof(a), "colide%d", i);
-      uint64_t ha = 1469598103934665603ULL;
-      for (const char *p = "user:"; *p; ++p)
-         ha = (ha ^ (unsigned char)*p) * 1099511628211ULL;
-      for (const char *p = a; *p; ++p)
-         ha = (ha ^ (unsigned char)*p) * 1099511628211ULL;
-      for (int j = i + 1; j < 4000; j++)
+      static int seen[1024];
+      static char seen_name[1024][32];
+      for (int i = 0; i < 1024; i++)
+         seen[i] = 0;
+      for (int i = 0; i < 200000 && npairs < PAIRS; i++)
       {
-         snprintf(b, sizeof(b), "colide%d", j);
-         uint64_t hb = 1469598103934665603ULL;
+         char cand[32];
+         snprintf(cand, sizeof(cand), "colide%d", i);
+         uint64_t h = 1469598103934665603ULL;
          for (const char *p = "user:"; *p; ++p)
-            hb = (hb ^ (unsigned char)*p) * 1099511628211ULL;
-         for (const char *p = b; *p; ++p)
-            hb = (hb ^ (unsigned char)*p) * 1099511628211ULL;
-         if ((ha % 1024) == (hb % 1024))
+            h = (h ^ (unsigned char)*p) * 1099511628211ULL;
+         for (const char *p = cand; *p; ++p)
+            h = (h ^ (unsigned char)*p) * 1099511628211ULL;
+         int slot = (int)(h % 1024);
+         if (!seen[slot])
          {
-            found = 1;
-            break;
+            seen[slot] = 1;
+            snprintf(seen_name[slot], sizeof(seen_name[slot]), "%s", cand);
+            continue;
          }
+         snprintf(names[npairs][0], sizeof(names[npairs][0]), "%s", seen_name[slot]);
+         snprintf(names[npairs][1], sizeof(names[npairs][1]), "%s", cand);
+         npairs++;
       }
    }
-   assert(found); /* the unseeded hash does collide; that is the premise */
+   assert(npairs == PAIRS); /* the unseeded hash does collide; that is the premise */
 
-   /* Under the SEEDED hash these two are almost certainly in different slots, so
-    * spending one budget must leave the other intact. A precomputed collision no
-    * longer transfers to the running process. */
-   kb_login_throttle_reset();
-   kb_login_throttle_set_peer("10.5.0.4");
-   for (int i = 0; i < KB_LOGIN_THROTTLE_BUDGET; i++)
-      kb_login_throttle_record_failure(a, NOW);
-   /* The PEER budget is spent too, so check from a fresh peer to isolate the
-    * username budget -- otherwise this would pass for the wrong reason. */
-   kb_login_throttle_set_peer("10.5.0.5");
-   assert(kb_login_throttle_check(a, NOW) > 0);  /* a is out of budget */
-   assert(kb_login_throttle_check(b, NOW) == 0); /* b is untouched */
+   int transfers = 0;
+   for (int pi = 0; pi < npairs; pi++)
+   {
+      for (int si = 0; si < SEEDS_PER; si++)
+      {
+         /* splitmix64 over the index: a fixed, well-spread seed list. */
+         uint64_t z = 0x9e3779b97f4a7c15ULL * (uint64_t)(pi * SEEDS_PER + si + 1);
+         z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+         z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+         z ^= z >> 31;
+         kb_login_throttle_set_seed_for_test(z);
+
+         kb_login_throttle_set_peer("10.5.0.4");
+         for (int k = 0; k < KB_LOGIN_THROTTLE_BUDGET; k++)
+            kb_login_throttle_record_failure(names[pi][0], NOW);
+         /* The PEER budget is spent too, so check from a fresh peer to isolate the
+          * username budget -- otherwise this would pass for the wrong reason. */
+         kb_login_throttle_set_peer("10.5.0.5");
+         assert(kb_login_throttle_check(names[pi][0], NOW) > 0); /* out of budget */
+         if (kb_login_throttle_check(names[pi][1], NOW) != 0)
+            transfers++;
+      }
+   }
+   if (transfers > MAX_TRANSFERS)
+   {
+      fprintf(stderr,
+              "slot placement is still attacker-computable: a precomputed collision "
+              "survived seeding in %d of %d samples (expected <= %d; ~%d means the "
+              "seed is not reaching the slot index)\n",
+              transfers, PAIRS * SEEDS_PER, MAX_TRANSFERS, PAIRS * SEEDS_PER * 22 / 1000);
+      assert(0);
+   }
+#undef PAIRS
+#undef SEEDS_PER
+#undef MAX_TRANSFERS
 }
 
 int main(void)
 {
+   /* Pin the slot seed. Placement is randomly seeded in production by design;
+    * leaving it random here makes every "an unrelated identity is unaffected"
+    * assertion a 1/SLOTS coin flip per fixture name, which is how this suite
+    * came to flake on CI and get re-run instead of read. */
+   kb_login_throttle_set_seed_for_test(0x5eed10c8a71105ULL);
+
    test_budget_runs_out();
    test_lockout_is_exponential();
    test_peer_and_user_budgets_are_independent();
