@@ -1581,12 +1581,12 @@ void print_server_health(cJSON *resp)
       if (kbs && strcmp(kbs, "ok") == 0)
       {
          cJSON *vec = cJSON_GetObjectItemCaseSensitive(kb, "vectors");
-         printf("  db2:         %s\n", cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(kb, "db2_ok"))
-                                           ? "ok"
-                                           : "unavailable");
-         printf("  pgvector:    %s\n",
-                cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(kb, "pgvec_ok")) ? "ok"
+         printf("  store:       %s\n",
+                cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(kb, "store_ok")) ? "ok"
                                                                                : "unavailable");
+         printf("  vector index:%s\n",
+                cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(kb, "vectors_ok")) ? "ok"
+                                                                                 : "unavailable");
          printf("  embedder:    %s\n",
                 cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(kb, "embed_configured"))
                     ? "configured"

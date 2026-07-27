@@ -80,7 +80,13 @@
  * the kb is the part most likely to be broken while everything around it looks
  * fine. The probe is bounded by kb_client_health's CLIENT_DEFAULT_TIMEOUT_MS, and
  * an unreachable kb is REPORTED rather than failing the call: a broken kb must
- * still let you run the command that tells you the kb is broken. */
+ * still let you run the command that tells you the kb is broken.
+ *
+ * Field names are deliberately tier-neutral (store_ok / vectors_ok, not db2_ok /
+ * pgvec_ok): these strings land in the thin client, which must not carry the
+ * storage tier's vocabulary — build-integrity greps the client binary for exactly
+ * that and fails the build. The client reports whether the kb's store and vector
+ * index are healthy without knowing what implements them. */
 void server_health_add_kb(cJSON *resp)
 {
    if (!resp)
@@ -95,8 +101,8 @@ void server_health_add_kb(cJSON *resp)
    cJSON_AddStringToObject(kbo, "status", reachable ? "ok" : "unreachable");
    if (!reachable)
       return;
-   cJSON_AddBoolToObject(kbo, "db2_ok", kb.db2_ok ? 1 : 0);
-   cJSON_AddBoolToObject(kbo, "pgvec_ok", kb.pgvec_ok ? 1 : 0);
+   cJSON_AddBoolToObject(kbo, "store_ok", kb.db2_ok ? 1 : 0);
+   cJSON_AddBoolToObject(kbo, "vectors_ok", kb.pgvec_ok ? 1 : 0);
    cJSON_AddBoolToObject(kbo, "embed_configured", kb.embed_ok ? 1 : 0);
    cJSON_AddNumberToObject(kbo, "vectors", kb.pgvec_vectors);
 }
