@@ -306,6 +306,16 @@ cJSON *cli_v1_dispatch_local(cJSON *request, int timeout_ms)
          return resp;
       }
 
+      /* HTTP auth failures use the server's standard nested error envelope. */
+      if (strcmp(tool, "permission_tool") == 0)
+      {
+         cJSON *resp = cJSON_CreateObject();
+         cJSON *error = cJSON_AddObjectToObject(resp, "error");
+         cJSON_AddStringToObject(error, "message", "write-tier grant required");
+         cJSON_AddStringToObject(error, "type", "permission_error");
+         return resp;
+      }
+
       if (strcmp(tool, "session_status") == 0)
       {
          cJSON *resp = cJSON_CreateObject();
@@ -757,6 +767,30 @@ static void test_tools_call_server_error(void)
    cJSON_Delete(req);
 }
 
+static void test_tools_call_nested_http_error(void)
+{
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "jsonrpc", "2.0");
+   cJSON_AddNumberToObject(req, "id", 13.25);
+   cJSON_AddStringToObject(req, "method", "tools/call");
+   cJSON *params = cJSON_AddObjectToObject(req, "params");
+   cJSON_AddStringToObject(params, "name", "permission_tool");
+   cJSON_AddObjectToObject(params, "arguments");
+
+   cJSON *resp = capture_response(req);
+   cJSON *result = cJSON_GetObjectItemCaseSensitive(resp, "result");
+   assert(cJSON_IsObject(result));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(result, "isError")));
+   cJSON *content = cJSON_GetObjectItemCaseSensitive(result, "content");
+   cJSON *block = cJSON_IsArray(content) ? cJSON_GetArrayItem(content, 0) : NULL;
+   cJSON *text = block ? cJSON_GetObjectItemCaseSensitive(block, "text") : NULL;
+   assert(cJSON_IsString(text));
+   assert(strstr(text->valuestring, "write-tier grant required") != NULL);
+
+   cJSON_Delete(resp);
+   cJSON_Delete(req);
+}
+
 static void test_tools_call_structured_content_passthrough(void)
 {
    cJSON *req = cJSON_CreateObject();
@@ -964,6 +998,7 @@ int main(void)
    test_tools_list_preserves_server_error();
    test_tools_call_success();
    test_tools_call_server_error();
+   test_tools_call_nested_http_error();
    test_tools_call_structured_content_passthrough();
    test_tools_call_get_help_without_arguments();
    test_tools_call_get_help_with_empty_object_arguments();
