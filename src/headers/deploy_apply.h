@@ -6,7 +6,7 @@
 /* deploy_apply — server-orchestrated container deploy.
  *
  * When aimee-server runs with the host Docker socket mounted, the setup wizard can
- * bring up the managed sibling services (postgres + aimee-kb + aimee-llm) itself:
+ * bring up the managed sibling services (aimee-kb + aimee-llm) itself:
  * the operator deploys ONE container (aimee-server) and the finished wizard spins
  * up the rest. The wizard's page-2 config is translated by config_emit_deploy_env
  * into the compose env (COMPOSE_PROFILES + AIMEE_LLM_* + AIMEE_KB_API_* …), and

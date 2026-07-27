@@ -38,6 +38,11 @@ if [ -z "$target" ]; then
     exit 2
 fi
 
+# Never echo credentials embedded in the target URL. Keep the real URL only in
+# the process-local variable passed to libpq.
+safe_target=$(printf '%s' "$target" | sed -E \
+    's#^(postgres(ql)?://[^:/@]+):[^@]*@#\1:<redacted>@#')
+
 : "${AIMEE_HOME:=/var/lib/aimee}"
 PGMAJOR="${AIMEE_DB2_PG_MAJOR:-18}"
 PGBIN="/usr/lib/postgresql/$PGMAJOR/bin"
@@ -53,7 +58,11 @@ fi
 # The cluster is normally already running under the kb. Start it if this runs in a
 # stopped container, and leave it as it was found.
 started_here=0
-if ! "$PGBIN/pg_isready" --host="$PGSOCK" --quiet 2>/dev/null; then
+# Name an existing maintenance database explicitly. With only --host, libpq
+# defaults the database name to the OS user ("aimee"); the readiness result is
+# still positive, but PostgreSQL logs a misleading FATAL for every probe because
+# that database intentionally does not exist.
+if ! "$PGBIN/pg_isready" --host="$PGSOCK" --dbname=postgres --quiet 2>/dev/null; then
     "$PGBIN/pg_ctl" --pgdata="$PGDATA" --wait --silent \
         --options="-c listen_addresses='' -c unix_socket_directories=$PGSOCK" start
     started_here=1
@@ -66,11 +75,11 @@ trap stop_if_started EXIT
 # Fail before dumping if the target is unreachable, so a bad URL never gets as far
 # as a half-finished move.
 if ! "$PGBIN/psql" "$target" --no-psqlrc --quiet --command="SELECT 1" >/dev/null 2>&1; then
-    echo "aimee-kb-db-export: cannot reach target $target" >&2
+    echo "aimee-kb-db-export: cannot reach target $safe_target" >&2
     exit 1
 fi
 
-echo "exporting internal $DB -> $target"
+echo "exporting internal $DB -> $safe_target"
 # pgvector/vectorscale must exist on the target before types resolve; the dump
 # carries the CREATE EXTENSION, but the extension has to be installed server-side.
 if ! "$PGBIN/psql" "$target" --no-psqlrc --quiet --tuples-only \
@@ -84,11 +93,15 @@ fi
 "$PGBIN/pg_restore" --dbname="$target" --no-owner --no-acl --exit-on-error \
     /tmp/aimee-db2-export.dump
 
-# Verify before destroying anything: compare the row count of every user table.
+# Verify before destroying anything: compare exact row counts for every user
+# table. pg_stat_user_tables.n_live_tup is an estimate and can legitimately
+# differ immediately after restore, so it cannot be used as a migration proof.
+count_sql="SELECT format('SELECT %L || '':'' || count(*) FROM %I.%I;', schemaname||'.'||relname, schemaname, relname) FROM pg_stat_user_tables ORDER BY schemaname, relname"
 src_counts=$("$PGBIN/psql" --host="$PGSOCK" --dbname="$DB" --no-psqlrc --tuples-only --no-align \
-    --command="SELECT relname||':'||n_live_tup FROM pg_stat_user_tables ORDER BY relname")
+    --command="$count_sql" | "$PGBIN/psql" --host="$PGSOCK" --dbname="$DB" \
+    --no-psqlrc --tuples-only --no-align)
 dst_counts=$("$PGBIN/psql" "$target" --no-psqlrc --tuples-only --no-align \
-    --command="SELECT relname||':'||n_live_tup FROM pg_stat_user_tables ORDER BY relname")
+    --command="$count_sql" | "$PGBIN/psql" "$target" --no-psqlrc --tuples-only --no-align)
 if [ "$src_counts" != "$dst_counts" ]; then
     echo "aimee-kb-db-export: row counts differ after restore; internal data left untouched" >&2
     echo "--- internal ---"; echo "$src_counts"
@@ -110,5 +123,5 @@ fi
 
 echo
 echo "restart aimee-kb with:"
-echo "  AIMEE_DB2_URL=$target"
+echo "  AIMEE_DB2_URL=$safe_target"
 echo "the entrypoint starts no internal cluster while that is set."

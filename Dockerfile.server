@@ -146,8 +146,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Docker CLI + compose plugin (static client binaries — no daemon). Lets
-# aimee-server orchestrate the managed sibling services (postgres + aimee-kb +
-# aimee-llm) with `docker compose up -d` against a mounted host Docker socket, so
+# aimee-server orchestrate the managed sibling services (aimee-kb + aimee-llm)
+# with `docker compose up -d` against a mounted host Docker socket, so
 # the setup wizard can bring the stack up itself (server-orchestrated deploy). This
 # is inert unless the deploy compose mounts /var/run/docker.sock and sets
 # AIMEE_DEPLOY_ENABLED=1 (compose.server-managed.yaml); the plain image is

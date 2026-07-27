@@ -5750,6 +5750,7 @@ $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/tests/test_kb_http_routes.o \
                      $(OBJDIR)/kb/kb_identity_token.o \
                      $(OBJDIR)/tests/support/kb_http_route_stubs.o \
                      $(OBJDIR)/kb/http/kb_http.o \
+                     $(OBJDIR)/kb/http/kb_http_listener.o \
                      $(OBJDIR)/kb/http/kb_http_conn.o \
                      $(OBJDIR)/tests/support/kb_ws_stub.o \
                      $(OBJDIR)/kb/http/kb_http_search.o \

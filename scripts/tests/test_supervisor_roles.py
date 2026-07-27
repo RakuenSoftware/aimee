@@ -1,7 +1,7 @@
 """Role- and tier-decouple coverage for scripts/aimee-llm-supervisor.sh.
 
 Runs the REAL supervisor with PATH shims for the external commands it drives —
-`wget` (records fetch URLs, creates the dest), the llama binary (records its full
+`curl` (records fetch URLs, creates the dest), the llama binary (records its full
 argv, one line per launch), `python3` (the gateway: dumps its env then exits so
 the supervisor's `wait -n` returns), and `sha256sum` (no-op). Each combo then
 asserts which models were downloaded, which llama-servers were launched (and with
@@ -35,18 +35,19 @@ def _make_shims(tmp):
     logdir = tmp / "log"
     bindir.mkdir()
     logdir.mkdir()
-    _write(bindir / "wget", textwrap.dedent(f"""\
+    _write(bindir / "curl", textwrap.dedent(f"""\
         #!/usr/bin/env bash
         dest=""; url=""
         while [ $# -gt 0 ]; do
           case "$1" in
-            -O) dest="$2"; shift 2;;
+            -o) dest="$2"; shift 2;;
             -*) shift;;
             *) url="$1"; shift;;
           esac
         done
         [ -n "$dest" ] && : > "$dest"
-        echo "$url" >> "{logdir}/wget.log"
+        echo "$url" >> "{logdir}/fetch.log"
+        [ "${{FETCH_FAIL_AFTER_WRITE:-0}}" = 1 ] && exit 1
         exit 0
         """))
     # llama-server: record the full argv (one line), then detach from the captured
@@ -108,7 +109,7 @@ class SupervisorRoleTest(unittest.TestCase):
                 if "=" in line:
                     key, val = line.split("=", 1)
                     gw[key] = val
-        return proc, lines("wget.log"), lines("llama.log"), gw
+        return proc, lines("fetch.log"), lines("llama.log"), gw
 
     def _launched(self, llama):
         return {_port(a): a for a in llama}
@@ -124,6 +125,18 @@ class SupervisorRoleTest(unittest.TestCase):
         self.assertEqual(gw.get("AIMEE_LLM_EMBED_URL"), "http://127.0.0.1:8081")
         self.assertEqual(gw.get("AIMEE_LLM_SYNTH_URL"), "http://127.0.0.1:8083")
         self.assertTrue(gw.get("AIMEE_LLM_RERANK_HEAD", "").endswith("cpu/rerank-head"))
+
+    def test_completed_download_survives_resumer_failure(self):
+        # A resumer may report non-zero when it sees an already-complete file left
+        # by a process that died just before the ready marker was written. A valid
+        # pinned artifact must still be accepted instead of restart-looping.
+        proc, urls, llama, _gw = self.run_supervisor(
+            modes={"AIMEE_LLM_RERANK_MODE": "off", "AIMEE_LLM_SYNTH_MODE": "off"},
+            extra_env={"FETCH_FAIL_AFTER_WRITE": "1"})
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(len(urls), 1, urls)
+        self.assertEqual(set(self._launched(llama)), {"8081"})
+        self.assertIn("complete despite downloader status", proc.stderr)
 
     def test_external_embed_skips_embed_download_and_server(self):
         proc, urls, llama, gw = self.run_supervisor(

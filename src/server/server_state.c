@@ -613,6 +613,7 @@ int handle_kb_docs_push(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
    const char *scope = jo_str(req, "scope", "global");
    cJSON *paths_j = cJSON_GetObjectItemCaseSensitive(req, "paths");
+   cJSON *documents_j = cJSON_GetObjectItemCaseSensitive(req, "documents");
 
    const char *paths[128];
    int path_count = 0;
@@ -626,6 +627,32 @@ int handle_kb_docs_push(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          if (cJSON_IsString(item) && item->valuestring && item->valuestring[0])
             paths[path_count++] = item->valuestring;
       }
+   }
+   if (cJSON_IsArray(documents_j) && cJSON_GetArraySize(documents_j) > 0)
+   {
+      const char *doc_keys[128];
+      const char *contents[128];
+      int content_lengths[128];
+      int doc_count = 0;
+      cJSON *doc = NULL;
+      cJSON_ArrayForEach(doc, documents_j)
+      {
+         if (doc_count >= (int)(sizeof(doc_keys) / sizeof(doc_keys[0])) || !cJSON_IsObject(doc))
+            return server_send_error(conn, "invalid docs content", NULL);
+         cJSON *path = cJSON_GetObjectItemCaseSensitive(doc, "path");
+         cJSON *content = cJSON_GetObjectItemCaseSensitive(doc, "content");
+         if (!cJSON_IsString(path) || !path->valuestring || !path->valuestring[0] ||
+             !cJSON_IsString(content) || !content->valuestring || !content->valuestring[0])
+            return server_send_error(conn, "invalid docs content", NULL);
+         doc_keys[doc_count] = path->valuestring;
+         contents[doc_count] = content->valuestring;
+         content_lengths[doc_count] = (int)strlen(content->valuestring);
+         doc_count++;
+      }
+      return kb_relay_send(
+          conn,
+          kb_client_docs_push_content_json(scope, doc_keys, contents, content_lengths, doc_count),
+          "knowledge service docs push failed");
    }
    if (path_count <= 0)
       return server_send_error(conn, "docs paths required", NULL);

@@ -15,11 +15,9 @@
 #include <stdlib.h>
 #include <string.h>
 #ifdef __linux__
-#include <fcntl.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/rand.h>
-#include <unistd.h>
 #endif
 #ifdef _WIN32
 #include <direct.h>
@@ -28,7 +26,9 @@
 #define AIMEE_UNSETENV(k)  _putenv_s((k), "")
 #define AIMEE_SETENV(k, v) _putenv_s((k), (v))
 #else
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #define AIMEE_MKDIR(p)     mkdir((p), 0700)
 #define AIMEE_UNSETENV(k)  unsetenv(k)
 #define AIMEE_SETENV(k, v) setenv((k), (v), 1)
@@ -61,6 +61,47 @@ static void tls_insecure_restore(char *saved)
 static void remote_conf_path(char *out, size_t out_sz)
 {
    snprintf(out, out_sz, "%s/remote.conf", aimee_home());
+}
+
+/* remote.conf contains the bearer token, so never let the caller's umask make
+ * it group/world-readable.  Opening without O_TRUNC lets us repair the mode of
+ * an existing file before replacing its contents. */
+static FILE *open_remote_conf_write(const char *path)
+{
+#ifdef _WIN32
+   return fopen(path, "w");
+#else
+   int flags = O_WRONLY | O_CREAT;
+#ifdef O_CLOEXEC
+   flags |= O_CLOEXEC;
+#endif
+#ifdef O_NOFOLLOW
+   flags |= O_NOFOLLOW;
+#endif
+   int fd = open(path, flags, S_IRUSR | S_IWUSR);
+   if (fd < 0)
+      return NULL;
+   if (fchmod(fd, S_IRUSR | S_IWUSR) != 0 || ftruncate(fd, 0) != 0)
+   {
+      close(fd);
+      return NULL;
+   }
+   FILE *f = fdopen(fd, "w");
+   if (!f)
+      close(fd);
+   return f;
+#endif
+}
+
+static int write_remote_conf(const char *path, const char *url, const char *token)
+{
+   FILE *f = open_remote_conf_write(path);
+   if (!f)
+      return -1;
+   int failed = fprintf(f, "%s\n%s\n", url, token ? token : "") < 0;
+   if (fclose(f) != 0)
+      failed = 1;
+   return failed ? -1 : 0;
 }
 
 /* Create |dir| and any missing parents (best effort, ignores existing/errors).
@@ -391,11 +432,10 @@ static int remote_enroll(const char *url, char *out, size_t out_sz, int json_out
     * adopt it for subsequent requests in this process. */
    char path[512];
    remote_conf_path(path, sizeof(path));
-   FILE *f = fopen(path, "w");
-   if (f)
+   if (write_remote_conf(path, url, out) != 0)
    {
-      fprintf(f, "%s\n%s\n", url, out);
-      fclose(f);
+      fprintf(stderr, "aimee: cannot securely write %s\n", path);
+      return -1;
    }
    aimee_client_set_remote(url, out);
    int mtls_enrolled = remote_enroll_client_cert(json_output);
@@ -418,14 +458,11 @@ static int remote_set(const char *url, const char *token, int json_output)
    char path[512];
    remote_conf_path(path, sizeof(path));
    ensure_dir_p(aimee_home());
-   FILE *f = fopen(path, "w");
-   if (!f)
+   if (write_remote_conf(path, url, token) != 0)
    {
-      fprintf(stderr, "aimee: cannot write %s\n", path);
+      fprintf(stderr, "aimee: cannot securely write %s\n", path);
       return 1;
    }
-   fprintf(f, "%s\n%s\n", url, token ? token : "");
-   fclose(f);
 
    /* For an https remote, establish trust now so later commands need no
     * AIMEE_TLS_INSECURE flag. If it already verifies (publicly-trusted CA, or a

@@ -922,8 +922,8 @@ static int deploy_route_guard(char *resp, int cap)
    return 0;
 }
 
-/* POST /v1/deploy/apply — bring up the managed sibling services (postgres +
- * aimee-kb + aimee-llm) for the current wizard config via `docker compose up -d`
+/* POST /v1/deploy/apply — bring up the managed sibling services (aimee-kb +
+ * aimee-llm) for the current wizard config via `docker compose up -d`
  * on a background thread. Returns {ok, status:"started"|"running"}. */
 int rh_deploy_apply(const route_req_t *rq, char *resp, int cap)
 {

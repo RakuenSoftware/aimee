@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "aimee_client.h"
@@ -26,6 +27,20 @@ static void test_set_then_load(void)
    char *tok = (char *)"tok123";
    char *argv[] = {(char *)"set", url, tok};
    assert(cli_remote_cmd(3, argv, 1) == 0);
+
+   char path[256];
+   struct stat st;
+   snprintf(path, sizeof(path), "%s/remote.conf", g_home);
+   assert(stat(path, &st) == 0);
+   assert((st.st_mode & 0777) == 0600);
+
+   /* Re-setting a target must repair an older, permissive config rather than
+    * preserving its mode through O_CREAT. */
+   assert(chmod(path, 0644) == 0);
+   assert(cli_remote_cmd(3, argv, 1) == 0);
+   assert(stat(path, &st) == 0);
+   assert((st.st_mode & 0777) == 0600);
+   PASS("remote.conf is created private and permissive files are repaired");
 
    /* Persisted config drives the transport once loaded. */
    cli_remote_load_persisted();

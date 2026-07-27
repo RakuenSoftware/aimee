@@ -11,14 +11,10 @@
 #    the small default. The container's hard limit is unlimited, so raise the
 #    soft limit here before exec.
 #
-# 2. Baked config seeding. The default config that selects the embedder/LLM
-#    sidecar commands is baked at $AIMEE_HOME/.config/aimee/aimee.yaml. Docker
-#    *named* volumes copy image content into a fresh volume, so the baked file
-#    survives; *bind* mounts (including SmoothNAS "flat" plugin volumes) shadow
-#    the directory with an empty host dir, dropping the config — the kb then
-#    falls back to a non-functional builtin embedder (embed_ok=false). Keep the
-#    canonical default outside $AIMEE_HOME (at /opt/aimee/defaults) and seed it
-#    in if the config is missing, so embeddings work under any volume type.
+# 2. Baked config seeding. The image keeps its default embedder/LLM config at
+#    /opt/aimee/defaults/aimee.yaml. Seed that into $AIMEE_HOME/aimee.yaml when
+#    a fresh named or bind-mounted volume is empty, so both volume types get the
+#    same working defaults without clobbering an operator-provided config.
 #
 #    The config path is aimee_home()/aimee.yaml; with AIMEE_HOME set,
 #    aimee_home() == $AIMEE_HOME verbatim (see src/aimee_home.c), so the file
@@ -26,7 +22,7 @@
 #    (that path only applies when AIMEE_HOME is unset and $HOME/.config is used).
 #
 # 3. DB2. An unset AIMEE_DB2_URL means the operator configured no database, so
-#    run the in-image PostgreSQL 17 + pgvector cluster. Any value in
+#    run the in-image PostgreSQL 18 + pgvector cluster. Any value in
 #    AIMEE_DB2_URL selects an external server and nothing is started here.
 set -e
 
@@ -75,6 +71,13 @@ if [ -z "${AIMEE_DB2_URL:-}" ]; then
     # container. An operator who wants it exposed runs an external server.
     "$PGBIN/pg_ctl" --pgdata="$PGDATA" --wait --silent \
         --options="-c listen_addresses='' -c unix_socket_directories=$PGSOCK" start
+    pg_pid=$(head -1 "$PGDATA/postmaster.pid")
+    case "$pg_pid" in
+        ''|*[!0-9]*)
+            echo "aimee-kb: embedded PostgreSQL started without a valid postmaster PID" >&2
+            exit 1
+            ;;
+    esac
 
     # Stop the cluster cleanly when the container stops. Without this the runtime
     # SIGKILLs postgres once the kb exits and every start replays WAL recovery.
@@ -86,8 +89,8 @@ if [ -z "${AIMEE_DB2_URL:-}" ]; then
     fi
     "$PGBIN/psql" --host="$PGSOCK" --dbname="$DB" --no-psqlrc --quiet \
         --command="CREATE EXTENSION IF NOT EXISTS vector" >/dev/null
-    # pgvectorscale is present only in an image built with WITH_PGVECTORSCALE=1.
-    # Enable it when it is there; pgvector alone is the supported default.
+    # Enable pgvectorscale when its extension library is present. pgvector alone
+    # remains a supported fallback for images built without the optional layer.
     # pgrx installs the library version-stamped (vectorscale-0.9.0.so), so match a
     # glob -- testing for a bare vectorscale.so silently never enables it. Resolved
     # in a subshell because $@ still carries the kb's own arguments.
@@ -106,6 +109,52 @@ if [ -z "${AIMEE_DB2_URL:-}" ]; then
     aimee-kb "$@" &
     kb=$!
     trap 'kill -TERM "$kb" 2>/dev/null || true' HUP INT TERM
+
+    # POSIX sh has no portable wait -n. Monitor both children, including Linux
+    # zombies: kill -0 still succeeds for a dead-but-unreaped postmaster, which
+    # previously left the container running unhealthy forever after PostgreSQL
+    # crashed. Either child is load-bearing, so stop its peer and let the
+    # container restart them together.
+    process_alive() {
+        _pid=$1
+        kill -0 "$_pid" 2>/dev/null || return 1
+        [ -r "/proc/$_pid/stat" ] || return 1
+        IFS=' ' read -r _stat_pid _stat_comm _stat_state _stat_rest < "/proc/$_pid/stat" || return 1
+        [ "$_stat_state" != Z ]
+    }
+
+    first=
+    while [ -z "$first" ]; do
+        if ! process_alive "$kb"; then
+            first=kb
+        elif ! process_alive "$pg_pid"; then
+            first=postgres
+        else
+            sleep 0.1
+        fi
+    done
+
+    if [ "$first" = postgres ]; then
+        echo "aimee-kb: embedded PostgreSQL exited; restarting the KB container as one unit" >&2
+        kill -TERM "$kb" 2>/dev/null || true
+        # A database failure can leave worker threads blocked in libpq while
+        # the kb is trying to shut down.  Do not let PID 1 wait forever: that
+        # prevents Docker's restart policy from ever rebuilding the unit and
+        # leaves the last successful health result looking deceptively green.
+        _stop_ticks=0
+        while process_alive "$kb" && [ "$_stop_ticks" -lt 50 ]; do
+            sleep 0.1
+            _stop_ticks=$((_stop_ticks + 1))
+        done
+        if process_alive "$kb"; then
+            echo "aimee-kb: KB did not stop after 5s; forcing shutdown" >&2
+            kill -KILL "$kb" 2>/dev/null || true
+        fi
+        wait "$kb" 2>/dev/null || true
+        wait "$pg_pid" 2>/dev/null || true
+        exit 1
+    fi
+
     rc=0
     wait "$kb" || rc=$?
     exit "$rc"
