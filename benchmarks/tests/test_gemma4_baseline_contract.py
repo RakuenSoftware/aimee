@@ -230,6 +230,13 @@ class GemmaBaselineContractTests(unittest.TestCase):
             "batch_size": 16,
         })
 
+    def test_sweep_mode_selection_supports_isolated_recovery(self) -> None:
+        self.assertEqual(sweep.parse_modes("synthesis"), ("synthesis",))
+        self.assertEqual(sweep.parse_modes("embedding,synthesis"), ("embedding", "synthesis"))
+        for invalid in ("", "reranking", "synthesis,synthesis"):
+            with self.assertRaises(ValueError):
+                sweep.parse_modes(invalid)
+
     def test_frozen_bundle_is_exact_and_paired(self) -> None:
         result = validator.validate(ROOT / "benchmarks/fixtures/gemma4-unified/ab-v1")
         self.assertEqual(result["case_rows_per_view"], 10_000)

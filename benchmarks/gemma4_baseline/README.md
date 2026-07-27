@@ -197,6 +197,15 @@ manifest for every model. Replacement rerankers consume `reranking.jsonl` throug
 their provider adapter, but must retain the identical candidate order, case IDs,
 and input-bound algorithm so paired deltas against Ettin remain meaningful.
 
+Use `--modes synthesis` for a synthesis-only recovery. This avoids revisiting a
+completed embedding run and replacing its measured request telemetry with zeros
+from a cache-only pass. For example, the isolated E4B retry is:
+
+```sh
+python3 benchmarks/gemma4_baseline/run_254_sweep.py \
+  --skip-ettin --labels gemma4_e4b --modes synthesis
+```
+
 ## EuroBERT reranker extension
 
 The official EuroBERT-210M and EuroBERT-610M checkpoints are masked-language

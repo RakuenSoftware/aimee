@@ -59,6 +59,19 @@ MODEL_LOAD_PROFILES = {
         "embedding": {"parallel_slots": 4, "context_tokens": 8192, "physical_batch_tokens": 2048, "batch_size": 4},
     },
 }
+MODEL_MODES = ("synthesis", "embedding")
+
+
+def parse_modes(value: str) -> tuple[str, ...]:
+    modes = tuple(part.strip() for part in value.split(",") if part.strip())
+    if not modes:
+        raise ValueError("at least one model mode is required")
+    if len(set(modes)) != len(modes):
+        raise ValueError("model modes must not be repeated")
+    unknown = set(modes) - set(MODEL_MODES)
+    if unknown:
+        raise ValueError(f"unknown model modes: {sorted(unknown)}")
+    return modes
 
 
 def run(command: list[str], *, capture: bool = False, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -225,8 +238,17 @@ def main() -> int:
     parser.add_argument("--deployed-models", type=Path, default=Path("/mnt/media/.plugins/aimee-llm/llm/models"))
     parser.add_argument("--max-cases", type=int, default=0, help="Zero runs the complete 10,000-case suites")
     parser.add_argument("--labels", help="Comma-separated model labels for a resumable subset run")
+    parser.add_argument(
+        "--modes",
+        default=",".join(MODEL_MODES),
+        help="Comma-separated model modes; use synthesis alone for synthesis-only recovery",
+    )
     parser.add_argument("--skip-ettin", action="store_true")
     args = parser.parse_args()
+    try:
+        selected_modes = parse_modes(args.modes)
+    except ValueError as exc:
+        parser.error(str(exc))
     args.root.mkdir(parents=True, exist_ok=True)
     results_dir = args.root / (f"results_smoke_{args.max_cases}" if args.max_cases else "results")
     logs_dir = args.root / "logs"
@@ -275,6 +297,7 @@ def main() -> int:
         "llama_cpp_build": manifest["runtime"]["llama_cpp_build"],
         "max_cases": args.max_cases or 10000,
         "selected_labels": [model["label"] for model in selected_models],
+        "selected_modes": list(selected_modes),
         "skip_ettin": args.skip_ettin,
         "ettin_load_profile": ETTIN_LOAD_PROFILE,
         "model_load_profiles": MODEL_LOAD_PROFILES,
@@ -353,7 +376,7 @@ def main() -> int:
             label = model["label"]
             model_results = results_dir / label
             model_results.mkdir(exist_ok=True)
-            for mode in ("synthesis", "embedding"):
+            for mode in selected_modes:
                 load_profile = MODEL_LOAD_PROFILES[label][mode]
                 current_log = logs_dir / f"server_{label}_{mode}.log"
                 write_state(
