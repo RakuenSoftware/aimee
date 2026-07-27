@@ -73,7 +73,7 @@ rerank_coords() {
 synth_coords() {
   case "$SYNTH_TIER" in
     cpu)
-      SYNTH_REPO="ggml-org/gemma-4-E4B-it-GGUF"; SYNTH_FILE="gemma-4-E4B-it-Q4_K_M.gguf"
+      SYNTH_REPO="ggml-org/gemma-4-E4B-it-GGUF"; SYNTH_FILE="gemma-4-E4B-it-Q4_0.gguf"
       SYNTH_REVISION="main"; SYNTH_SHA256=""
       TIER_FA="off"; TIER_MOE="0"; TIER_N_CPU_MOE="0"; TIER_SLOTS="1"; TIER_CTX="32768"; SYNTH_NGL=0
       ;;
