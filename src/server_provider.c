@@ -291,6 +291,16 @@ int handle_provider_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return rc;
 }
 
+/* Provider settability policy lives in server/provider_settable.c (pure, unit
+ * tested); this TU only loads the config and reports the error. */
+static int provider_name_resolvable(const char *name)
+{
+   agent_config_t acfg;
+   if (agent_load_config(&acfg) != 0)
+      return provider_name_settable(name, NULL);
+   return provider_name_settable(name, &acfg);
+}
+
 int handle_provider_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -300,6 +310,14 @@ int handle_provider_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *name = jname->valuestring;
    if (strlen(name) >= 16)
       return server_send_error(conn, "provider name too long (max 15 chars)", NULL);
+   if (!provider_name_resolvable(name))
+   {
+      char err[192];
+      snprintf(err, sizeof(err),
+               "unknown provider '%s': not a configured agent, adapter, or built-in provider",
+               name);
+      return server_send_error(conn, err, NULL);
+   }
    config_t cfg;
    config_load(&cfg);
    snprintf(cfg.provider, sizeof(cfg.provider), "%s", name);

@@ -450,6 +450,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-conversation \
                $(TESTPREFIX)/unit-test-agent-loop \
                $(TESTPREFIX)/unit-test-agent-max-turns \
+               $(TESTPREFIX)/unit-test-provider-settable \
                $(TESTPREFIX)/unit-test-file-snapshot \
                $(TESTPREFIX)/unit-test-execution-trace \
                $(TESTPREFIX)/unit-test-diagnose \
@@ -5152,6 +5153,12 @@ $(TESTPREFIX)/unit-test-cmd-run: $(OBJDIR)/tests/test_cmd_run.o \
 
 $(TESTPREFIX)/unit-test-conversation: $(OBJDIR)/tests/test_conversation.o \
                                        $(OBJDIR)/conversation.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-provider-settable: $(OBJDIR)/tests/test_provider_settable.o \
+                                         $(OBJDIR)/server/provider_settable.o \
+                                         $(OBJDIR)/server/agent_adapter.o \
+                                         $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-agent-max-turns: $(OBJDIR)/tests/test_agent_max_turns.o \
