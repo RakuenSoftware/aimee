@@ -3,7 +3,7 @@
 # aimee-server-docker-smoke.sh — prove the full aimee-server + aimee-kb Docker
 # stack spins up and that the server actually talks to the kb container.
 #
-# Brings up compose.server.yaml (postgres + embedder + aimee-kb + aimee-server),
+# Brings up compose.server.yaml (aimee-llm + self-contained aimee-kb + aimee-server),
 # waits for aimee-server to report healthy, then exercises the server /v1 API —
 # including the two endpoints that PROXY THROUGH to the kb over HTTP
 # (AIMEE_KB_API_URL), which is the cross-container wiring under test:

@@ -2,7 +2,7 @@
 
 This guide takes you from nothing to a working aimee install in four parts:
 
-1. **[Run the server](#part-1-run-the-server-in-docker)**, deploy the single `aimee-server` container and let the setup wizard bring up the knowledge base, LLM, and Postgres for you.
+1. **[Run the server](#part-1-run-the-server-in-docker)**, deploy the single `aimee-server` container and let the setup wizard bring up the self-contained knowledge base and LLM for you.
 2. **[Install the Linux client](#part-2--linux-client)**, install the thin `aimee` binary, point it at your server, and set up workspaces and agents.
 3. **[Install the Windows client](#part-3--windows-client)**, same, for Windows.
 4. **[Install the macOS client](#part-4--macos-client)**, same, for macOS.
@@ -13,7 +13,7 @@ The model is the same on every developer machine: **the services run in Docker (
 
 ## Part 1, Run the server (in Docker)
 
-You start **one container — `aimee-server`** — with the host Docker socket mounted. Everything else is handled in the browser: the setup wizard's **Deploy** step brings up `aimee-kb`, `aimee-llm`, and Postgres (DB2 + pgvector) for you, on CPU or GPU. There is no second compose command.
+You start **one container — `aimee-server`** — with the host Docker socket mounted. Everything else is handled in the browser: the setup wizard's **Deploy** step brings up `aimee-kb` (with its bundled PostgreSQL DB2 + pgvector) and `aimee-llm` for you, on CPU or GPU. There is no second compose command or database container.
 
 Advanced operators who prefer to run each service as its own long-lived container (the manual split stack — `deploy/compose/aimee.yaml` and friends) still can; see [1.5](#15-managing-the-stack) and [MANUAL.md](../MANUAL.md). This guide takes the self-deploying path.
 
@@ -45,11 +45,11 @@ The wizard covers:
 - **Primary provider** — which agent aimee drives.
 - **Knowledge base** — a local one (default), or an existing remote `aimee-kb`.
 - **Deploy topology** — where the embedder / reranker / synthesizer run (CPU by default, or a GPU).
-- **Shared store** — the bundled Postgres (default; nothing to enter), or an existing database.
+- **Shared store** — PostgreSQL bundled inside `aimee-kb` (default; nothing to enter), or an existing external database.
 - **Connection** — connect a git host so aimee can clone your repos. Pick one auth method and the wizard shows only its fields: **OAuth sign-in** (GitHub, GitLab, Gitea/Forgejo), an **access token** (HTTPS, any host including Bitbucket), or an **SSH key** (private key for `git@host:owner/repo.git`). Public repos clone without any of them. Optional — you can connect a host later.
 - **Workspaces & projects** — point at an owner/org, list its repos, and bulk-clone them into a workspace.
 
-The final **Deploy** launches `aimee-kb` + the LLM container + Postgres and shows their status. On the default CPU topology that LLM container is `aimee-llm-cpu`, whose weights are baked into the image, so the wait is the 11 GB image pull rather than a model download; later boots are fast — state lives in named volumes.
+The final **Deploy** launches `aimee-kb` + the LLM container and shows their status. On first boot, the KB initializes PostgreSQL inside its own container. On the default CPU topology the LLM container is `aimee-llm-cpu`, whose weights are baked into the image, so the wait is the 11 GB image pull rather than a model download; later boots are fast — state lives in named volumes.
 
 #### Your login account
 
@@ -88,7 +88,7 @@ Until the wizard's **Deploy** step has run, `/v1/health` returns `200` but
 yet. That is expected at this point. After Deploy:
 
 ```bash
-docker ps    # aimee-server, aimee-kb, postgres, and the LLM container
+docker ps    # aimee-server, aimee-kb, and the LLM container
 ```
 
 The LLM container is **`aimee-llm-cpu`** on the default CPU topology and `aimee-llm`
@@ -152,7 +152,7 @@ docker compose -f compose.server-managed.yaml down                 # stop the se
 docker compose -f compose.server-managed.yaml up -d --pull always  # update the server image
 ```
 
-The wizard-deployed services (`aimee-kb`, `aimee-llm`, `postgres`) run as their own Docker project — use `docker ps` / `docker logs`, or re-run the wizard's **Deploy** to reconcile them after a config change. State lives in the `aimee-managed-*` volumes; removing them erases the knowledge base + DB2.
+The wizard-deployed services (`aimee-kb`, `aimee-llm`) run as their own Docker project — use `docker ps` / `docker logs`, or re-run the wizard's **Deploy** to reconcile them after a config change. KB and embedded-DB2 state live together in the `aimee-managed-kb-home` volume; removing it erases the knowledge base.
 
 Advanced: you can run each service as its own container instead of letting the server orchestrate them (`compose.server.yaml`, `compose.yaml`) — see [MANUAL.md](../MANUAL.md).
 
@@ -213,7 +213,13 @@ exits non-zero and tells you where the real bearer is. `aimee remote status` lik
 distinguishes "reachable but not authorized" (a bad or spent token) from unreachable,
 and exits non-zero for both, so it is safe to use as a setup check in a script.
 
-Use your real bearer token instead of `aimee-local-dev` if you changed it. The server's `/v1` is TLS-only off-loopback; certificate verification is on by default, so set `AIMEE_TLS_INSECURE=1` for the auto-provisioned self-signed cert (or trust/pin it). Alternatives to `aimee remote set`: set `AIMEE_SERVER_URL` / `AIMEE_SERVER_TOKEN`, or pass `--server https://YOUR_SERVER:8743 --server-token=...` per command. Precedence is `--server` flag > env > persisted `remote.conf`.
+On a new default install, `remote set` pins the self-signed certificate, prints its
+SHA-256 fingerprint for out-of-band verification, enrolls a client mTLS identity,
+and rotates the public bootstrap bearer. `aimee-local-dev` then stops working. Use
+your provisioned token instead if the operator disabled bootstrap enrollment.
+Alternatives to `aimee remote set`: set `AIMEE_SERVER_URL` / `AIMEE_SERVER_TOKEN`,
+or pass `--server https://YOUR_SERVER:8743 --server-token=...` per command.
+Precedence is `--server` flag > env > persisted `remote.conf`.
 
 ### 2.3 Configure your AI coding tool
 
@@ -433,6 +439,21 @@ Agent/provider control over the network requires a **write-tier grant of `full`*
 
 As on the other platforms, `aimee acp-serve` and the web chat work against a remote server: the client registers your current directory as a **detached workspace** and opens a reverse channel, so the agent runs server-side while its file and tool actions act on your local tree. Run `aimee chat` from inside the repository you want the agent to work in, with a **write-tier grant of `full`** for your subject (see [1.4](#14-before-you-expose-it-on-a-network)). You can also drive aimee from your AI coding tool, or use the browser webchat at `https://YOUR_SERVER:8443`.
 
+To verify that the client sends local document bytes to the remote KB—the server
+does not need access to the client's filesystem—stage a small document twice and
+confirm the second upload is deduplicated:
+
+```bash
+aimee kb docs push --scope onboarding README.md
+aimee kb docs push --scope onboarding README.md # reports the document skipped
+aimee memory store onboarding.check "remote memory is working" --tier L2 --kind fact
+aimee memory search "remote memory"
+```
+
+`kb docs push` stages corpus documents for review/release processing. Its upload
+counter and second-run skip counter validate transport and content deduplication;
+staging does not make a document immediately searchable.
+
 ---
 
 ## Where things live
@@ -441,7 +462,7 @@ As on the other platforms, `aimee acp-serve` and the web chat work against a rem
 |------|------|
 | `<aimee_home>/remote.conf` | Persisted thin-client remote target (`aimee remote set`). `aimee_home` is `~/.config/aimee` on Linux/macOS; `%LOCALAPPDATA%\aimee` on Windows. |
 | `aimee.yaml` | Server config (bearer, `remote_writes`, kb wiring, agents). In Docker this is inside the `*-home` volume at `/var/lib/aimee/aimee.yaml`. |
-| Named Docker volumes | `*-postgres` (DB2), `*-home` (server/kb state), `*-workspaces`. (The `--profile external-llm` sidecar adds `aimee-llm-models` for its GGUF cache.) |
+| Named Docker volumes | `*-kb-home` (KB + embedded DB2), `*-server-home`, and `*-workspaces`. A downloadable LLM service also uses `*-llm-models` for its GGUF cache. |
 
 ## TLS support by build
 

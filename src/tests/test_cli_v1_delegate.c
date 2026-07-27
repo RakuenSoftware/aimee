@@ -600,21 +600,39 @@ static void test_server_status_route_lookup(void)
 static void test_kb_docs_push_route_and_marshal(void)
 {
    cli_v1_route_t route;
-   char *lookup[] = {"docs", "push", "--scope", "project", "a.md", "b.md"};
+   char path1[] = "/tmp/aimee-cli-doc-one-XXXXXX";
+   char path2[] = "/tmp/aimee-cli-doc-two-XXXXXX";
+   int fd1 = mkstemp(path1), fd2 = mkstemp(path2);
+   assert(fd1 >= 0 && fd2 >= 0);
+   assert(write(fd1, "alpha doc\n", 10) == 10);
+   assert(write(fd2, "beta doc\n", 9) == 9);
+   close(fd1);
+   close(fd2);
+
+   char *lookup[] = {"docs", "push", "--scope", "project", path1, path2};
    assert(cli_v1_lookup("kb", 6, lookup, &route));
    assert(strcmp(route.method, "kb.docs.push") == 0);
    assert(route.skip_subcmd == 2);
 
-   char *args[] = {"--scope", "project", "a.md", "b.md"};
+   char *args[] = {"--scope", "project", path1, path2};
    cJSON *req = marshal_request(route.method, 4, args);
    assert(req != NULL);
    assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "kb.docs.push") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "scope")->valuestring, "project") == 0);
    cJSON *paths = cJSON_GetObjectItem(req, "paths");
    assert(cJSON_IsArray(paths) && cJSON_GetArraySize(paths) == 2);
-   assert(strstr(cJSON_GetArrayItem(paths, 0)->valuestring, "/a.md") != NULL);
-   assert(strstr(cJSON_GetArrayItem(paths, 1)->valuestring, "/b.md") != NULL);
+   assert(strcmp(cJSON_GetArrayItem(paths, 0)->valuestring, path1) == 0);
+   assert(strcmp(cJSON_GetArrayItem(paths, 1)->valuestring, path2) == 0);
+   cJSON *documents = cJSON_GetObjectItem(req, "documents");
+   assert(cJSON_IsArray(documents) && cJSON_GetArraySize(documents) == 2);
+   cJSON *doc1 = cJSON_GetArrayItem(documents, 0);
+   assert(strcmp(cJSON_GetObjectItem(doc1, "path")->valuestring, path1) == 0);
+   assert(strcmp(cJSON_GetObjectItem(doc1, "content")->valuestring, "alpha doc\n") == 0);
    cJSON_Delete(req);
+
+   assert(marshal_kb_docs_push(0, NULL) == NULL);
+   unlink(path1);
+   unlink(path2);
 
    printf("  PASS: test_kb_docs_push_route_and_marshal\n");
 }

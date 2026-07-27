@@ -6,6 +6,7 @@ numpy-guarded do_rerank test against a mocked encoder. No model, no network.
 import importlib.util
 import os
 import unittest
+from unittest import mock
 
 GW = os.path.join(os.path.dirname(__file__), "..", "aimee_llm_gateway.py")
 
@@ -15,6 +16,27 @@ def _gw():
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m
+
+
+class StartupEnvironment(unittest.TestCase):
+    def test_empty_stub_dimensions_use_default(self):
+        # Compose materializes optional unset values as empty strings. Importing
+        # the real-model gateway must not crash on int("").
+        with mock.patch.dict(os.environ,
+                             {"AIMEE_LLM_STUB_DIM": "", "EMBEDDER_STUB_DIM": ""}):
+            self.assertEqual(_gw().STUB_DIM, 1024)
+
+    def test_empty_primary_dimension_uses_embedder_fallback(self):
+        with mock.patch.dict(os.environ,
+                             {"AIMEE_LLM_STUB_DIM": "", "EMBEDDER_STUB_DIM": "2560"}):
+            self.assertEqual(_gw().STUB_DIM, 2560)
+
+    def test_empty_synth_discovery_values_use_defaults(self):
+        with mock.patch.dict(os.environ,
+                             {"AIMEE_LLM_SYNTH_SLOTS": "", "AIMEE_LLM_SYNTH_CTX": ""}):
+            gw = _gw()
+            self.assertEqual(gw.SYNTH_SLOTS, 1)
+            self.assertEqual(gw.SYNTH_CONTEXT, 32768)
 
 
 class BatchValidation(unittest.TestCase):
@@ -70,6 +92,24 @@ class HealthAggregation(unittest.TestCase):
 
     def test_down_when_any_configured_child_down(self):
         self.assertEqual(self.gw.health_state({"embed": True, "rerank": False}), "down")
+
+
+class Discovery(unittest.TestCase):
+    def setUp(self):
+        self.gw = _gw()
+
+    def test_openai_model_catalog_lists_synth_alias(self):
+        self.gw.STUB = True
+        catalog = self.gw.model_catalog()
+        self.assertEqual(catalog["object"], "list")
+        self.assertEqual(catalog["data"][0]["id"], "aimee-synth")
+
+    def test_slots_report_per_request_context(self):
+        self.gw.SYNTH_SLOTS = 4
+        self.gw.SYNTH_CONTEXT = 1024000
+        slots = self.gw.slot_catalog()
+        self.assertEqual(len(slots), 4)
+        self.assertTrue(all(slot["n_ctx"] == 256000 for slot in slots))
 
 
 class RerankHandler(unittest.TestCase):

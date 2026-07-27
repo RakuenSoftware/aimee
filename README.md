@@ -46,21 +46,23 @@ git clone https://github.com/RakuenSoftware/aimee.git
 cd aimee
 
 # Start aimee-server. It mounts the host Docker socket so the wizard can launch
-# aimee-kb, the LLM, and Postgres for you — CPU or GPU. No second compose command.
+# aimee-kb (including its embedded PostgreSQL), and the LLM for you — CPU or GPU.
+# No second compose command or database container.
 docker compose -f compose.server-managed.yaml up -d
 ```
 
 Open <https://localhost:8443>, log in as `aimee` / `aimee-local-dev`, and run the setup
 wizard: pick a primary agent, choose CPU or GPU, connect a git host, pick workspaces. Its
-**Deploy** step brings up aimee-kb, the LLM, and Postgres. Change the login (`AIMEE_WEBCHAT_USER`
+**Deploy** step brings up aimee-kb and the LLM; PostgreSQL + pgvector run inside the KB
+container and persist in its volume. Change the login (`AIMEE_WEBCHAT_USER`
 / `AIMEE_WEBCHAT_PASSWORD`) before you put it on a network.
 
 Then install the `aimee` CLI on each dev machine and point it at the server:
 
 ```bash
-aimee remote set https://host:8743 aimee-local-dev  # AIMEE_TLS_INSECURE=1 for the self-signed cert
-aimee status                                        # server + DB1 state
-aimee kb status                                     # knowledge-base health
+aimee remote set https://host:8743 aimee-local-dev # pins TLS, enrolls mTLS, rotates bootstrap
+aimee status                                       # server + DB1 state
+aimee kb status                                    # knowledge-base health
 ```
 
 `aimee-local-dev` is a **one-time bootstrap bearer**: the first `remote set` trades it

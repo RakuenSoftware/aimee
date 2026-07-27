@@ -17,6 +17,7 @@ static char *g_last_path;
 static char *g_last_body;
 static char *g_last_content_type;
 static int g_post_calls;
+static int g_last_timeout_ms;
 static int g_next_status = 200;
 static const char *g_next_response = "{\"missing\":[],\"present\":1}";
 static const char *g_response_queue[8];
@@ -32,7 +33,7 @@ static const char *next_stub_response(void)
 
 char *kb_client_v1_post_json(const char *path, cJSON *body, int timeout_ms, int *status_out)
 {
-   (void)timeout_ms;
+   g_last_timeout_ms = timeout_ms;
    free(g_last_path);
    free(g_last_body);
    g_last_path = strdup(path ? path : "");
@@ -54,7 +55,7 @@ char *kb_client_v1_post_body(const char *path, const char *body, int timeout_ms,
 char *kb_client_v1_post_body_with_type(const char *path, const char *body, const char *content_type,
                                        int timeout_ms, int *status_out)
 {
-   (void)timeout_ms;
+   g_last_timeout_ms = timeout_ms;
    free(g_last_path);
    free(g_last_body);
    free(g_last_content_type);
@@ -78,6 +79,7 @@ static void reset_stub(void)
    g_last_body = NULL;
    g_last_content_type = NULL;
    g_post_calls = 0;
+   g_last_timeout_ms = 0;
    g_next_status = 200;
    g_next_response = "{\"missing\":[],\"present\":1}";
    g_response_queue_count = 0;
@@ -123,6 +125,7 @@ static void test_manifest_posts_hashes(void)
    assert(resp != NULL);
    assert(strcmp(resp, g_next_response) == 0);
    assert(g_post_calls == 1);
+   assert(g_last_timeout_ms == 60000);
    assert(strcmp(g_last_path, "/v1/docs/manifest") == 0);
 
    cJSON *body = cJSON_Parse(g_last_body);
@@ -169,7 +172,9 @@ static void test_manifest_http_error_returns_error(void)
    char *resp = kb_client_docs_manifest_json("project", paths, 1);
    assert(resp != NULL);
    assert(strstr(resp, "\"status\":\"error\"") != NULL);
+   assert(strstr(resp, "HTTP 503") != NULL);
    assert(g_post_calls == 1);
+   assert(g_last_timeout_ms == 60000);
    free(resp);
    unlink(path);
    free(path);
@@ -185,6 +190,7 @@ static void test_upload_posts_multipart(void)
    char *resp = kb_client_docs_upload_json("project", paths, 1);
    assert(resp != NULL);
    assert(g_post_calls == 1);
+   assert(g_last_timeout_ms == 60000);
    assert(strcmp(g_last_path, "/v1/docs") == 0);
    assert(strstr(g_last_content_type, "Content-Type: multipart/form-data; boundary=") != NULL);
    assert(strstr(g_last_body, "Content-Disposition: form-data; name=\"scope\"") != NULL);
@@ -375,6 +381,55 @@ static void test_push_rejects_unknown_manifest_path(void)
    free(path);
 }
 
+static void test_push_preserves_manifest_error(void)
+{
+   reset_stub();
+   char *path = write_temp_doc("one\n");
+   const char *paths[] = {path};
+   queue_response("{\"status\":\"error\",\"message\":\"database queue unavailable\"}");
+
+   char *resp = kb_client_docs_push_json("project", paths, 1);
+   assert(resp != NULL);
+   assert(strstr(resp, "database queue unavailable") != NULL);
+   assert(strstr(resp, "missing array") == NULL);
+   free(resp);
+   unlink(path);
+   free(path);
+
+   reset_stub();
+   const char *keys[] = {"/client/guide.md"};
+   const char *contents[] = {"remote bytes\n"};
+   int lengths[] = {(int)strlen(contents[0])};
+   queue_response("{\"error\":{\"message\":\"manifest service overloaded\"}}");
+   resp = kb_client_docs_push_content_json("project", keys, contents, lengths, 1);
+   assert(resp != NULL);
+   assert(strstr(resp, "manifest service overloaded") != NULL);
+   assert(strstr(resp, "missing array") == NULL);
+   free(resp);
+}
+
+static void test_push_content_uploads_client_bytes(void)
+{
+   reset_stub();
+   const char *keys[] = {"/client/guide.md"};
+   const char *contents[] = {"# Remote guide\nThe heliotrope code is 7319.\n"};
+   int lengths[] = {(int)strlen(contents[0])};
+   queue_response("{\"missing\":[{\"doc_key\":\"/client/guide.md\","
+                  "\"content_hash\":\"abc\",\"scope\":\"project\"}],"
+                  "\"present\":0,\"total\":1,\"missing_count\":1}");
+   queue_response("{\"doc_id\":17,\"state\":\"staged\"}");
+
+   char *resp = kb_client_docs_push_content_json("project", keys, contents, lengths, 1);
+   assert(resp != NULL);
+   assert(g_post_calls == 2);
+   assert(strcmp(g_last_path, "/v1/docs") == 0);
+   assert(strstr(g_last_body, "filename=\"/client/guide.md\"") != NULL);
+   assert(strstr(g_last_body, "heliotrope code is 7319") != NULL);
+   assert(strstr(resp, "\"status\":\"ok\"") != NULL);
+   assert(strstr(resp, "\"uploaded\":1") != NULL);
+   free(resp);
+}
+
 int main(void)
 {
    test_manifest_posts_hashes();
@@ -389,6 +444,8 @@ int main(void)
    test_push_skips_when_manifest_present();
    test_push_uploads_only_manifest_missing();
    test_push_rejects_unknown_manifest_path();
+   test_push_preserves_manifest_error();
+   test_push_content_uploads_client_bytes();
    reset_stub();
    printf("kb_client_docs: ok\n");
    return 0;

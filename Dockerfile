@@ -145,8 +145,8 @@ ENV AIMEE_HOME=/var/lib/aimee
 # This used to default to postgresql://aimee:aimee@postgres:5432/aimee_shared,
 # which made "nothing configured" indistinguishable from "use the sibling
 # container" and left a bare `docker run` pointed at a host that does not exist.
-# compose.yaml and compose.server.yaml set AIMEE_DB2_URL explicitly, so stacks
-# using them keep their own postgres service exactly as before.
+# New-install Compose manifests leave AIMEE_DB2_URL unset so the KB owns this
+# internal cluster. Operators can still set the variable to select an external DB2.
 # No baked embedder/LLM endpoint defaults. The kb runs NO model runtime; it calls
 # an external aimee-llm container (CPU/GPU) or endpoint. Point it with ONE of:
 #   AIMEE_LLM_URL       unified container -> embed + rerank + synth (one knob)

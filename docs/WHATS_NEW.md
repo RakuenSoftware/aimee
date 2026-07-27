@@ -141,13 +141,21 @@ credentials live in the server's **sealed vault**; see
   that bundled `aimee-server` + `aimee-kb` + a CPU LLM (models baked in) is gone —
   `Dockerfile.combined`, `compose.combined.yaml`, and `combined-entrypoint.sh` are
   removed. Use the **split stack** instead: `docker compose -f deploy/compose/aimee.yaml up -d`
-  brings up `aimee-server` + `aimee-kb` + a CPU `aimee-llm` + Postgres in one command
+  brings up `aimee-server` + self-contained `aimee-kb` + a CPU `aimee-llm` in one command
   (add `-f deploy/compose/aimee.gpu.yaml` for a GPU synth tier). The self-deploying
   server is unchanged — the setup wizard still provisions `aimee-kb` + a CPU
   `aimee-llm` on demand over the mounted Docker socket. The pure-CPU appliance LLM
   is now the pre-baked **`aimee-llm-cpu`** image (cpu-tier GGUFs baked in; serves
   offline with no first-boot download and no `/models` volume). See
   [QUICKSTART.md](QUICKSTART.md).
+- **Compose database topology changed.** New installs no longer create a separate
+  `postgres` service: PostgreSQL 18, pgvector, and pgvectorscale run privately
+  inside `aimee-kb`, and their data persists in the existing KB home volume.
+  Upgrades from a split-stack release that used the old sibling PostgreSQL do
+  **not** import that old named volume automatically. Back it up before changing
+  manifests, then either keep the database reachable and set `AIMEE_DB2_URL`
+  explicitly or dump/restore it into the new embedded cluster. Do not run
+  `docker compose down -v` while the old volume is your only copy.
 - **Self-hosted GPU inference tiers**: the `aimee-llm` inference image is a
   **model-less** image whose **tier** is chosen at runtime via `AIMEE_LLM_TIER` — the models
   download on first boot into a `/models` volume, so there is nothing baked and no per-tier

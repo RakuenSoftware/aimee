@@ -11,6 +11,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* A manifest or staged upload can sit behind the KB's bounded request workers
+ * while concurrent memory/index writes finish.  The generic CLI transport
+ * default (5 s) is intentionally fail-fast for interactive probes, but is too
+ * short for this bulk operation and produced false schema errors under load. */
+#define KB_CLIENT_DOCS_TIMEOUT_MS (60 * 1000)
+
 static char *kb_client_docs_error_json(const char *message)
 {
    cJSON *obj = cJSON_CreateObject();
@@ -161,7 +167,7 @@ static char *kb_client_docs_upload_one_json(const char *scope, const char *path,
       return NULL;
 
    char *resp = kb_client_v1_post_body_with_type("/v1/docs", body, content_type,
-                                                 CLIENT_DEFAULT_TIMEOUT_MS, http_status);
+                                                 KB_CLIENT_DOCS_TIMEOUT_MS, http_status);
    free(body);
    return resp;
 }
@@ -182,6 +188,39 @@ static int kb_client_docs_json_int(cJSON *obj, const char *key, int fallback)
 {
    cJSON *n = obj ? cJSON_GetObjectItemCaseSensitive(obj, key) : NULL;
    return cJSON_IsNumber(n) ? (int)n->valuedouble : fallback;
+}
+
+static char *kb_client_docs_manifest_post(cJSON *body)
+{
+   int http_status = -1;
+   char *resp =
+       kb_client_v1_post_json("/v1/docs/manifest", body, KB_CLIENT_DOCS_TIMEOUT_MS, &http_status);
+   if (resp)
+      return resp;
+   if (http_status >= 100)
+      return kb_client_docs_error_jsonf("docs manifest request returned HTTP %d", http_status);
+   return kb_client_docs_error_json("docs manifest request timed out or did not respond");
+}
+
+/* Preserve an upstream error envelope instead of reporting it as a malformed
+ * successful manifest.  This made a transport timeout look like the KB had
+ * omitted its required `missing` array, hiding the actionable failure. */
+static char *kb_client_docs_manifest_shape_error(cJSON *manifest)
+{
+   cJSON *message = cJSON_GetObjectItemCaseSensitive(manifest, "message");
+   if (cJSON_IsString(message) && message->valuestring && message->valuestring[0])
+      return kb_client_docs_error_json(message->valuestring);
+
+   cJSON *error = cJSON_GetObjectItemCaseSensitive(manifest, "error");
+   if (cJSON_IsString(error) && error->valuestring && error->valuestring[0])
+      return kb_client_docs_error_json(error->valuestring);
+   if (cJSON_IsObject(error))
+   {
+      message = cJSON_GetObjectItemCaseSensitive(error, "message");
+      if (cJSON_IsString(message) && message->valuestring && message->valuestring[0])
+         return kb_client_docs_error_json(message->valuestring);
+   }
+   return kb_client_docs_error_json("docs manifest missing array required");
 }
 
 char *kb_client_docs_manifest_json(const char *scope, const char **paths, int path_count)
@@ -231,12 +270,8 @@ char *kb_client_docs_manifest_json(const char *scope, const char **paths, int pa
       }
    }
 
-   int http_status = -1;
-   char *resp =
-       kb_client_v1_post_json("/v1/docs/manifest", root, CLIENT_DEFAULT_TIMEOUT_MS, &http_status);
+   char *resp = kb_client_docs_manifest_post(root);
    cJSON_Delete(root);
-   if (!resp)
-      return kb_client_docs_error_json("docs manifest request failed");
    return resp;
 }
 
@@ -319,9 +354,10 @@ char *kb_client_docs_push_json(const char *scope, const char **paths, int path_c
    cJSON *missing = cJSON_GetObjectItemCaseSensitive(manifest, "missing");
    if (!cJSON_IsArray(missing))
    {
+      char *error = kb_client_docs_manifest_shape_error(manifest);
       cJSON_Delete(manifest);
       free(manifest_json);
-      return kb_client_docs_error_json("docs manifest missing array required");
+      return error;
    }
 
    int missing_count = cJSON_GetArraySize(missing);
@@ -405,6 +441,211 @@ char *kb_client_docs_push_json(const char *scope, const char **paths, int path_c
    char *json = cJSON_PrintUnformatted(root);
    cJSON_Delete(root);
    free(upload_json);
+   free(manifest_json);
+   return json ? json : kb_client_docs_error_json("json failed");
+}
+
+/* Build the same manifest used by the path-based local client, but from bytes
+ * supplied by a thin client.  doc_keys remain the user's original absolute
+ * paths, preserving manifest de-duplication and source attribution. */
+static char *kb_client_docs_content_manifest_json(const char *scope, const char **doc_keys,
+                                                  const char **contents, const int *content_lengths,
+                                                  int doc_count)
+{
+   if (!doc_keys || !contents || !content_lengths || doc_count <= 0)
+      return kb_client_docs_error_json("docs content required");
+
+   cJSON *root = cJSON_CreateObject();
+   cJSON *docs = root ? cJSON_AddArrayToObject(root, "docs") : NULL;
+   if (!root || !docs)
+   {
+      cJSON_Delete(root);
+      return kb_client_docs_error_json("oom");
+   }
+   if (scope && scope[0])
+      cJSON_AddStringToObject(root, "scope", scope);
+
+   for (int i = 0; i < doc_count; i++)
+   {
+      if (!doc_keys[i] || !doc_keys[i][0] || !contents[i] || content_lengths[i] <= 0 ||
+          memchr(contents[i], '\0', (size_t)content_lengths[i]))
+      {
+         cJSON_Delete(root);
+         return kb_client_docs_error_json("invalid docs content");
+      }
+      char hash[KB_DOC_HASH_HEX_LEN + 1];
+      kb_doc_content_hash(contents[i], content_lengths[i], hash);
+      cJSON *doc = cJSON_CreateObject();
+      if (!doc || !cJSON_AddStringToObject(doc, "doc_key", doc_keys[i]) ||
+          !cJSON_AddStringToObject(doc, "content_hash", hash) || !cJSON_AddItemToArray(docs, doc))
+      {
+         cJSON_Delete(doc);
+         cJSON_Delete(root);
+         return kb_client_docs_error_json("oom");
+      }
+   }
+
+   char *resp = kb_client_docs_manifest_post(root);
+   cJSON_Delete(root);
+   return resp;
+}
+
+static cJSON *kb_client_docs_content_upload(const char *scope, const char **doc_keys,
+                                            const char **contents, const int *content_lengths,
+                                            const int *selected, int selected_count, int *uploaded,
+                                            int *failed)
+{
+   cJSON *root = cJSON_CreateObject();
+   cJSON *docs = root ? cJSON_AddArrayToObject(root, "docs") : NULL;
+   if (!root || !docs)
+   {
+      cJSON_Delete(root);
+      return NULL;
+   }
+   *uploaded = 0;
+   *failed = 0;
+
+   for (int i = 0; i < selected_count; i++)
+   {
+      int idx = selected[i];
+      int http_status = -1;
+      char content_type[192];
+      char *body =
+          kb_client_docs_multipart_body(scope, doc_keys[idx], contents[idx], content_lengths[idx],
+                                        content_type, sizeof(content_type));
+      char *resp = NULL;
+      if (body)
+      {
+         resp = kb_client_v1_post_body_with_type("/v1/docs", body, content_type,
+                                                 KB_CLIENT_DOCS_TIMEOUT_MS, &http_status);
+         free(body);
+      }
+
+      cJSON *doc = cJSON_CreateObject();
+      if (!doc)
+      {
+         free(resp);
+         cJSON_Delete(root);
+         return NULL;
+      }
+      cJSON_AddStringToObject(doc, "path", doc_keys[idx]);
+      cJSON_AddNumberToObject(doc, "http_status", http_status);
+      if (resp)
+      {
+         (*uploaded)++;
+         cJSON_AddStringToObject(doc, "status", "ok");
+         cJSON *response = cJSON_Parse(resp);
+         if (response)
+            cJSON_AddItemToObject(doc, "response", response);
+         else
+            cJSON_AddStringToObject(doc, "response", resp);
+      }
+      else
+      {
+         (*failed)++;
+         cJSON_AddStringToObject(doc, "status", "error");
+         cJSON_AddStringToObject(doc, "message", "docs upload request failed");
+      }
+      free(resp);
+      cJSON_AddItemToArray(docs, doc);
+   }
+
+   cJSON_AddStringToObject(root, "status", *failed ? "error" : "ok");
+   cJSON_AddNumberToObject(root, "uploaded", *uploaded);
+   cJSON_AddNumberToObject(root, "failed", *failed);
+   cJSON_AddNumberToObject(root, "total", selected_count);
+   return root;
+}
+
+char *kb_client_docs_push_content_json(const char *scope, const char **doc_keys,
+                                       const char **contents, const int *content_lengths,
+                                       int doc_count)
+{
+   if (!doc_keys || !contents || !content_lengths || doc_count <= 0)
+      return kb_client_docs_error_json("docs content required");
+
+   char *manifest_json =
+       kb_client_docs_content_manifest_json(scope, doc_keys, contents, content_lengths, doc_count);
+   cJSON *manifest = manifest_json ? cJSON_Parse(manifest_json) : NULL;
+   if (!manifest)
+   {
+      free(manifest_json);
+      return kb_client_docs_error_json("docs manifest response invalid");
+   }
+   cJSON *missing = cJSON_GetObjectItemCaseSensitive(manifest, "missing");
+   if (!cJSON_IsArray(missing))
+   {
+      char *error = kb_client_docs_manifest_shape_error(manifest);
+      cJSON_Delete(manifest);
+      free(manifest_json);
+      return error;
+   }
+
+   int missing_count = cJSON_GetArraySize(missing);
+   int *selected = missing_count > 0 ? calloc((size_t)missing_count, sizeof(*selected)) : NULL;
+   if (missing_count > 0 && !selected)
+   {
+      cJSON_Delete(manifest);
+      free(manifest_json);
+      return kb_client_docs_error_json("oom");
+   }
+   int selected_count = 0;
+   for (int i = 0; i < missing_count; i++)
+   {
+      cJSON *item = cJSON_GetArrayItem(missing, i);
+      cJSON *doc_key = cJSON_GetObjectItemCaseSensitive(item, "doc_key");
+      if (!cJSON_IsString(doc_key) || !doc_key->valuestring || !doc_key->valuestring[0])
+      {
+         free(selected);
+         cJSON_Delete(manifest);
+         free(manifest_json);
+         return kb_client_docs_error_json("docs manifest missing doc_key");
+      }
+      int idx = kb_client_docs_find_path(doc_keys, doc_count, doc_key->valuestring);
+      if (idx < 0)
+      {
+         free(selected);
+         cJSON_Delete(manifest);
+         free(manifest_json);
+         return kb_client_docs_error_json("docs manifest referenced unknown path");
+      }
+      selected[selected_count++] = idx;
+   }
+
+   int uploaded = 0, failed = 0;
+   cJSON *upload = NULL;
+   if (selected_count > 0)
+      upload = kb_client_docs_content_upload(scope, doc_keys, contents, content_lengths, selected,
+                                             selected_count, &uploaded, &failed);
+   free(selected);
+   if (selected_count > 0 && !upload)
+   {
+      cJSON_Delete(manifest);
+      free(manifest_json);
+      return kb_client_docs_error_json("oom");
+   }
+
+   cJSON *root = cJSON_CreateObject();
+   if (!root)
+   {
+      cJSON_Delete(upload);
+      cJSON_Delete(manifest);
+      free(manifest_json);
+      return kb_client_docs_error_json("oom");
+   }
+   cJSON_AddStringToObject(root, "status", failed ? "error" : "ok");
+   cJSON_AddNumberToObject(root, "total", doc_count);
+   cJSON_AddNumberToObject(root, "present", kb_client_docs_json_int(manifest, "present", 0));
+   cJSON_AddNumberToObject(root, "missing_count", selected_count);
+   cJSON_AddNumberToObject(root, "uploaded", uploaded);
+   cJSON_AddNumberToObject(root, "failed", failed);
+   cJSON_AddNumberToObject(root, "skipped", doc_count - selected_count);
+   cJSON_AddItemToObject(root, "manifest", manifest);
+   if (upload)
+      cJSON_AddItemToObject(root, "upload", upload);
+
+   char *json = cJSON_PrintUnformatted(root);
+   cJSON_Delete(root);
    free(manifest_json);
    return json ? json : kb_client_docs_error_json("json failed");
 }

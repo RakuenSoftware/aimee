@@ -1,6 +1,6 @@
 # aimee — SmoothNAS compose-native plugin (plugins-11).
 #
-# This is the whole aimee split stack (postgres + aimee-llm + aimee-kb +
+# This is the whole aimee split stack (aimee-llm + self-contained aimee-kb +
 # aimee-server) as a single docker-compose project, installable directly by
 # tierd's compose backend (no smoothnas.io/v1 Plugin manifest needed). It is the
 # GPU tier: the unified aimee-llm runs Vulkan/RADV on the host /dev/dri (7900 XTX
@@ -9,8 +9,8 @@
 #
 # Migrated from deploy/compose/aimee.yaml (+ aimee.gpu.yaml). Two things change
 # vs the split *manifest* plugins (aimee-kb/-server/-llm .plugin.yaml):
-#   1. Services talk over the compose network by name (postgres, aimee-llm,
-#      aimee-kb) — the manifest's bridge-IP wiring (10.100.0.1) is gone.
+#   1. Services talk over the compose network by name (aimee-llm, aimee-kb) —
+#      the manifest's bridge-IP wiring (10.100.0.1) is gone.
 #   2. Persistent state is placed on smoothfs tiers via `x-smoothnas` on the
 #      named volumes (mechanism B: tierd rewrites these to host binds).
 #
@@ -25,24 +25,6 @@
 # compose plugins an install-time tier map is a tracked follow-up.
 name: aimee
 services:
-  postgres:
-    restart: unless-stopped
-    image: pgvector/pgvector:pg17
-    # uid 1000 matches the smoothfs tier's forced owner (stock postgres otherwise
-    # drops to its own user and can't read the uid-1000-owned data dir).
-    user: "1000:1000"
-    environment:
-      POSTGRES_DB: aimee_shared
-      POSTGRES_USER: aimee
-      POSTGRES_PASSWORD: aimee
-    volumes:
-      - aimee-postgres:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aimee -d aimee_shared"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   aimee-llm:
     restart: unless-stopped
     # Profile-gated: brought up only when the page-2 config puts a role local
@@ -74,7 +56,8 @@ services:
       stack: 67108864 # 64 MB worker-thread stack (was the aimee-stack profile)
     environment:
       AIMEE_HOME: /var/lib/aimee
-      AIMEE_DB2_URL: postgresql://aimee:aimee@postgres:5432/aimee_shared
+      # Empty selects PostgreSQL + pgvector bundled in the KB image.
+      AIMEE_DB2_URL: ${AIMEE_DB2_URL:-}
       AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8742}
       AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-2560}
       AIMEE_KB_HTTP_BIND: "1"
@@ -82,7 +65,6 @@ services:
     ports:
       - "8741:8741"
     depends_on:
-      postgres: { condition: service_healthy }
       # required:false: kb fail-opens on embedding when the llm profile is off.
       aimee-llm: { condition: service_healthy, required: false }
     healthcheck:
@@ -123,8 +105,6 @@ services:
 
 # Persistent state on smoothfs tiers. Set `tier:` to a pool on your box.
 volumes:
-  aimee-postgres:
-    x-smoothnas: { tier: aimee-data }
   aimee-kb-home:
     x-smoothnas: { tier: aimee-data }
   aimee-server-home:
