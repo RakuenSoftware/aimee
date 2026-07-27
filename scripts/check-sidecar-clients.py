@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -170,11 +171,54 @@ def check_llm_chat_reasoning_split() -> None:
     print("  llm-chat.py reasoning split: ok")
 
 
+def check_no_baked_endpoint_defaults() -> None:
+    """No sidecar may carry a baked-in network address as its endpoint default.
+
+    Three of them shipped `env.setdefault("LLM_ENDPOINT", "http://<a LAN IP>")`.
+    Where nothing owned that address, every curator code-extraction job failed
+    `No route to host` and the queue never drained — silently, because doc
+    extraction used a different path and kept working. Where something DID own
+    it, the sidecar would post the user's code and prompts to a stranger's
+    machine. embed-remote.py had already removed its equivalent fallback; these
+    outlived that cleanup, so pin the rule down here.
+
+    An endpoint must come from the environment (AIMEE_LLM_URL / LLM_ENDPOINT) or
+    fail closed. Literal loopback is fine — it addresses only this host.
+    """
+    host_literal = re.compile(
+        r"""setdefault\(\s*["'](?:LLM_ENDPOINT|AIMEE_LLM_URL|LLM_BASE_URL)["']\s*,\s*["']([^"']+)["']"""
+    )
+    offenders = []
+    self_name = Path(__file__).name
+    for path in sorted(SCRIPTS.glob("*.py")):
+        if path.name == self_name:
+            continue  # this file quotes the banned pattern to describe it
+        for lineno, line in enumerate(path.read_text().splitlines(), 1):
+            m = host_literal.search(line)
+            if not m:
+                continue
+            value = m.group(1)
+            if "127.0.0.1" in value or "localhost" in value:
+                continue
+            offenders.append(f"{path.name}:{lineno}: baked endpoint default {value!r}")
+
+    if offenders:
+        for o in offenders:
+            print(f"  FAIL {o}")
+        raise AssertionError(
+            "sidecar endpoints must come from the environment or fail closed; "
+            "a baked address either breaks every deployment that does not own it "
+            "or leaks user code to whoever does"
+        )
+    print("  no baked endpoint defaults: ok")
+
+
 def main() -> int:
     print("sidecar-clients:")
     check_embed_remote()
     check_llm_chat()
     check_llm_chat_reasoning_split()
+    check_no_baked_endpoint_defaults()
     print("sidecar-clients: ok")
     return 0
 
