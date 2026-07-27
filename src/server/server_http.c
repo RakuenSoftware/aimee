@@ -924,6 +924,11 @@ _Thread_local uint32_t g_rpc_conn_caps = CAPS_READ_ONLY;
  * non-blocking so an oversize response can never hang the server thread; if the
  * response is truncated it fails to parse and we return an error rather than a
  * partial body. Returns an HTTP status; resp holds the JSON response body. */
+/* Upper bound on how long the dispatch bridge waits for a reply. Generous because
+ * a deferred handler may be running a real tool, and safe because it blocks one
+ * connection's own worker thread rather than the listener. */
+#define LOOPBACK_REPLY_TIMEOUT_SECS 30
+
 int loopback_rpc(const char *body, int body_len, char *resp, int resp_cap, uint32_t conn_caps)
 {
    int sp[2];
