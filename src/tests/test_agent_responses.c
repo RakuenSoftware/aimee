@@ -101,6 +101,75 @@ void test_responses_object_folds_in_delta_text(void)
    cJSON_Delete(resp);
 }
 
+/* The codex wire delivers a function_call as a response.output_item.done event and
+ * its response.completed event carries "output":[] -- exactly the emptiness the text
+ * case above handles. The streamed call was collected and then discarded, so
+ * responses_backend_parse saw no tool call and the delegate reported
+ * "no content in final response" with tool_calls=0 on every attempt, at turn 1,
+ * forever. Measured live: item_types=[reasoning,function_call] on the wire, zero
+ * tool calls extracted. Fold the streamed call back in, as the text is. */
+void test_responses_object_folds_in_streamed_function_call(void)
+{
+   const char *body =
+       "event: response.output_item.done\r\n"
+       "data: {\"item\":{\"type\":\"reasoning\",\"summary\":\"thinking\"}}\r\n\r\n"
+       "event: response.output_item.done\r\n"
+       "data: {\"item\":{\"type\":\"function_call\",\"call_id\":\"call_42\","
+       "\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"/tmp/x\\\"}\"}}\r\n\r\n"
+       "event: response.completed\r\n"
+       "data: {\"response\":{\"output\":[],\"usage\":{\"input_tokens\":5,\"output_tokens\":7}}}"
+       "\r\n\r\n";
+
+   struct cJSON *resp = agent_responses_sse_response_object(body);
+   assert(resp != NULL);
+   struct cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
+   assert(cJSON_IsArray(output));
+   struct cJSON *item = NULL;
+   const char *name = NULL, *call_id = NULL;
+   cJSON_ArrayForEach(item, output)
+   {
+      struct cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "type");
+      if (type && cJSON_IsString(type) && strcmp(type->valuestring, "function_call") == 0)
+      {
+         struct cJSON *n = cJSON_GetObjectItemCaseSensitive(item, "name");
+         struct cJSON *c = cJSON_GetObjectItemCaseSensitive(item, "call_id");
+         name = n && cJSON_IsString(n) ? n->valuestring : NULL;
+         call_id = c && cJSON_IsString(c) ? c->valuestring : NULL;
+      }
+   }
+   assert(name != NULL && strcmp(name, "read_file") == 0);
+   assert(call_id != NULL && strcmp(call_id, "call_42") == 0);
+   cJSON_Delete(resp);
+}
+
+/* Never duplicate a call the completed payload already carries -- that payload is
+ * authoritative whenever it is populated, and a doubled call would be executed twice. */
+void test_responses_object_keeps_existing_function_call(void)
+{
+   const char *body =
+       "event: response.output_item.done\r\n"
+       "data: {\"item\":{\"type\":\"function_call\",\"call_id\":\"call_7\","
+       "\"name\":\"list_files\",\"arguments\":\"{}\"}}\r\n\r\n"
+       "event: response.completed\r\n"
+       "data: {\"response\":{\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_7\","
+       "\"name\":\"list_files\",\"arguments\":\"{}\"}],\"usage\":{\"input_tokens\":1,"
+       "\"output_tokens\":2}}}\r\n\r\n";
+
+   struct cJSON *resp = agent_responses_sse_response_object(body);
+   assert(resp != NULL);
+   struct cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
+   int calls = 0;
+   struct cJSON *item = NULL;
+   cJSON_ArrayForEach(item, output)
+   {
+      struct cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "type");
+      if (type && cJSON_IsString(type) && strcmp(type->valuestring, "function_call") == 0)
+         calls++;
+   }
+   assert(calls == 1);
+   cJSON_Delete(resp);
+}
+
 /* Guard against double-injection: when the completed object ALREADY carries the
  * message text (non-codex responses that repeat it in output[]), the extractor must
  * leave a single output_text -- not append a duplicate. */
