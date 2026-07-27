@@ -693,7 +693,25 @@ static int attn_resolve_existing_ancestor(const char *path, char *out, size_t ou
  *     "../" but not a symlink: "<scratch>/link/src/x.c" where "link" points at
  *     the primary checkout is lexically inside scratch and physically not. Both
  *     the scratch root and the target's deepest existing ancestor are resolved
- *     through symlinks and the latter must still lie under the former. */
+ *     through symlinks and the latter must still lie under the former — AND the
+ *     resolved root must still carry the expected layout beneath the resolved
+ *     temp dir, or a session directory that is ITSELF a symlink into the
+ *     checkout would land both sides inside the checkout and pass trivially.
+ *
+ * WHAT THIS DOES NOT DO, stated rather than left implied: the resolution is a
+ * PREFLIGHT. A PreToolUse hook advises; the harness performs the write after the
+ * hook returns, so a directory checked here can in principle be swapped for a
+ * symlink before that write. Closing that needs no-follow / beneath semantics
+ * bound to the eventual open, which this process does not perform and cannot
+ * impose on the harness.
+ *
+ * That limit is not specific to this carve-out and is not the weakest link:
+ * attn_path_in_managed_worktree — the rule that admits ordinary work — is purely
+ * LEXICAL, with no resolution at all, so a symlink inside a worktree pointing at
+ * the primary checkout already passes it. This path is strictly stronger than
+ * the control it sits beside. Removing the carve-out would restore the original
+ * defect (file tools blocked while an equivalent shell heredoc passes) without
+ * closing a race that exists independently of it. */
 static int attn_path_is_session_scratch(const char *norm, const char *session_id)
 {
    if (!norm || !session_id || !session_id[0])
@@ -732,6 +750,36 @@ static int attn_path_is_session_scratch(const char *norm, const char *session_id
    char root_real[2048], target_real[2048];
    if (!attn_resolve_existing_ancestor(root, root_real, sizeof(root_real)))
       return 0; /* the session dir must actually exist to be carved out */
+
+   /* THE ROOT ITSELF MUST BE GENUINE SCRATCH. Comparing the target against the
+    * resolved root proves the target does not escape the root — it says nothing
+    * about where the ROOT went. If the session directory is itself a symlink into
+    * the primary checkout, both sides resolve inside the checkout, the prefix
+    * test below passes, and the carve-out authorises writing to the repository.
+    * So the resolved root must still carry the expected claude-<uid> / slug /
+    * session-id shape beneath the RESOLVED temp dir: same layout, no
+    * redirection anywhere along it. */
+   char tmp_real[2048];
+   if (!attn_resolve_existing_ancestor(tmpdir, tmp_real, sizeof(tmp_real)))
+      return 0;
+   size_t tl = strlen(tmp_real);
+   if (strncmp(root_real, tmp_real, tl) != 0 || root_real[tl] != '/')
+      return 0;
+   {
+      const char *q = root_real + tl;
+      char c2[256];
+      if (!attn_next_component(&q, c2, sizeof(c2)))
+         return 0;
+      if (strncmp(c2, "claude-", 7) != 0 || !c2[7])
+         return 0;
+      if (!attn_next_component(&q, c2, sizeof(c2))) /* project slug */
+         return 0;
+      if (!attn_next_component(&q, c2, sizeof(c2)) || strcmp(c2, session_id) != 0)
+         return 0;
+      if (*q != '\0') /* nothing may follow the session dir */
+         return 0;
+   }
+
    if (!attn_resolve_existing_ancestor(norm, target_real, sizeof(target_real)))
       return 0;
    size_t rl = strlen(root_real);

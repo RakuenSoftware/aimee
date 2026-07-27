@@ -246,6 +246,22 @@ static void test_session_scratch_decision(const char *primary_cwd)
    snprintf(p, sizeof(p), "%s/scratchpad/escape/src/x.c", root);
    assert(attn_session_isolation_blocked(ATTN_OP_SOFT, p, primary_cwd, sid) == 1);
 
+   /* THE SESSION DIRECTORY ITSELF AS A SYMLINK into the checkout. This is the
+    * shape the prefix check alone cannot catch: resolving both sides lands them
+    * INSIDE the checkout, so the target trivially sits under the root and the
+    * carve-out would authorise writing to the repository. Only anchoring the
+    * resolved root back to the expected claude-<uid>/<slug>/<session-id> shape
+    * beneath the resolved temp dir rejects it. */
+   {
+      char linkroot[700], realrepo[700];
+      snprintf(realrepo, sizeof(realrepo), "%s/repo", outside);
+      snprintf(linkroot, sizeof(linkroot), "%s/claude-1000/-home-u-repo/%s", tmproot, "sid-linked");
+      remove(linkroot);
+      assert(symlink(realrepo, linkroot) == 0);
+      snprintf(p, sizeof(p), "%s/src/x.c", linkroot);
+      assert(attn_session_isolation_blocked(ATTN_OP_SOFT, p, primary_cwd, "sid-linked") == 1);
+   }
+
    /* A "../" escape out of the session dir stays blocked (lexical, as before). */
    snprintf(p, sizeof(p), "%s/../../../home/u/repo/src/x.c", root);
    assert(attn_session_isolation_blocked(ATTN_OP_SOFT, p, primary_cwd, sid) == 1);
