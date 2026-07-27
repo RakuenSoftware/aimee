@@ -8,7 +8,7 @@ name: aimee-kb
 services:
   aimee-kb:
     restart: unless-stopped
-    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:latest}
+    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:${AIMEE_IMAGE_TAG:-latest}}
     ulimits:
       stack: 67108864
     environment:
