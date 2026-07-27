@@ -207,6 +207,7 @@ static const struct
     {"wm", "list", "wm.list", NULL, "entries", 0},
     {"primary", NULL, "primary.set", NULL, NULL, 0},
     {"kb", "search", "kb.search", NULL, NULL, 60000},
+    {"kb", "build", "kb.build", NULL, NULL, 900000},
     {"kb", "update", "kb.update", NULL, NULL, 900000},
     {"kb", "docs push", "kb.docs.push", NULL, NULL, 900000},
     /* Grant administration. `show` maps to the same method as `list` — it is that listing
