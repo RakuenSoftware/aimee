@@ -208,6 +208,8 @@ cJSON *handle_git_issue(cJSON *args)
    return stub_git_content("git_issue");
 }
 
+static int g_tools_list_forbidden;
+
 /* cli_mcp_serve now forwards over the co-located /v1 dispatch instead of the
  * legacy NDJSON socket, so the mock backend is cli_v1_dispatch_local (same
  * {method,...} request → canned dispatch response). */
@@ -222,6 +224,12 @@ cJSON *cli_v1_dispatch_local(cJSON *request, int timeout_ms)
    if (strcmp(method->valuestring, "mcp.tools_list") == 0)
    {
       cJSON *resp = cJSON_CreateObject();
+      if (g_tools_list_forbidden)
+      {
+         cJSON *error = cJSON_AddObjectToObject(resp, "error");
+         cJSON_AddStringToObject(error, "message", "query token lacks catalog access");
+         return resp;
+      }
       cJSON_AddStringToObject(resp, "status", "ok");
       cJSON *tools = cJSON_CreateArray();
       cJSON *tool = cJSON_CreateObject();
@@ -669,6 +677,28 @@ static void test_tools_list(void)
    cJSON_Delete(req);
 }
 
+static void test_tools_list_preserves_server_error(void)
+{
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "jsonrpc", "2.0");
+   cJSON_AddNumberToObject(req, "id", 11);
+   cJSON_AddStringToObject(req, "method", "tools/list");
+   cJSON_AddObjectToObject(req, "params");
+
+   g_tools_list_forbidden = 1;
+   cJSON *resp = capture_response(req);
+   g_tools_list_forbidden = 0;
+
+   cJSON *error = cJSON_GetObjectItemCaseSensitive(resp, "error");
+   cJSON *message = cJSON_GetObjectItemCaseSensitive(error, "message");
+   assert(cJSON_IsString(message));
+   assert(strstr(message->valuestring, "Failed to list tools") != NULL);
+   assert(strstr(message->valuestring, "query token lacks catalog access") != NULL);
+
+   cJSON_Delete(resp);
+   cJSON_Delete(req);
+}
+
 static void test_tools_call_success(void)
 {
    g_last_mcp_call_cwd[0] = '\0';
@@ -931,6 +961,7 @@ int main(void)
    test_resources_read_unknown_uri();
    test_initialize();
    test_tools_list();
+   test_tools_list_preserves_server_error();
    test_tools_call_success();
    test_tools_call_server_error();
    test_tools_call_structured_content_passthrough();

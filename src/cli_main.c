@@ -1728,8 +1728,8 @@ int main(int argc, char **argv)
       /* No subcommand: print usage. `aimee` used to forward a "launch" to the
        * server and exec a provider TUI, which is not a sensible default for a
        * CLI — it made the bare command do the single heaviest thing available,
-       * and off a TTY it exited 0 having printed nothing at all. `aimee chat`
-       * still launches a session; the bare command now says what it can do. */
+       * and off a TTY it exited 0 having printed nothing at all. Interactive
+       * clients use the ACP/editor surfaces; the bare command says what it can do. */
       (void)debug;
       usage();
       return 0;

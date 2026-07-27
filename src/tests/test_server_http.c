@@ -1298,6 +1298,16 @@ int main(void)
       assert(server_http_route_caps("DELETE", "/v1/personas/alice") == CAP_SESSION_ADMIN);
       assert(server_http_route_caps("POST", "/v1/personas") == CAP_SESSION_ADMIN);
       assert(server_http_route_caps("GET", "/v1/role_templates") == CAP_SESSION_READ);
+      /* MCP startup is catalog introspection, not tool execution. Query-only
+       * remote clients must be able to complete tools/list; mcp.call remains
+       * separately gated by CAP_TOOL_EXECUTE. */
+      assert(server_capability_for_method("mcp.tools_list") == CAP_SESSION_READ);
+      assert(server_http_route_caps("GET", "/v1/mcp/tools_list") == CAP_SESSION_READ);
+      assert(server_http_route_allowed_caps(1, CAPS_READ_ONLY, "GET", "/v1/mcp/tools_list",
+                                            SERVER_REMOTE_WRITES_OFF) == 1);
+      assert(server_capability_for_method("mcp.call") == CAP_TOOL_EXECUTE);
+      assert(server_http_route_allowed_caps(1, CAPS_READ_ONLY, "POST", "/v1/mcp/call",
+                                            SERVER_REMOTE_WRITES_OFF) == 0);
       assert(server_http_route_caps("DELETE", "/v1/role_templates/qa") == CAP_SESSION_ADMIN);
       assert(server_http_route_caps("GET", "/v1/roundtables") == CAP_SESSION_READ);
       assert(server_http_route_caps("PUT", "/v1/roundtables/default") == CAP_SESSION_ADMIN);
@@ -1349,6 +1359,7 @@ int main(void)
       assert(server_http_route_caps("GET", "/v1/workflow/repo/file") == CAP_DASHBOARD_READ);
       /* Presence is session-scoped; the streaming routes carry caps too. */
       assert(server_http_route_caps("GET", "/v1/sessions") == CAP_SESSION_READ);
+      assert(server_http_route_caps("POST", "/v1/sessions/list") == CAP_SESSION_READ);
       assert(server_http_route_caps("POST", "/v1/sessions/s1/attach") == CAP_SESSION_READ);
       assert(server_http_route_caps("GET", "/v1/sessions/s1/events") == CAP_SESSION_READ);
       assert(server_http_route_caps("POST", "/v1/chat/stream") ==
