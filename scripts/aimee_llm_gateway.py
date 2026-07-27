@@ -49,7 +49,9 @@ RERANK_SEP = "</s>"
 # exercises the real kb -> gateway contract (and the /embed,/rerank,/v1/chat
 # shapes) cheaply. Vectors are deterministic per-input so retrieval is stable.
 STUB = os.environ.get("AIMEE_LLM_STUB", "") not in ("", "0", "false")
-STUB_DIM = int(os.environ.get("AIMEE_LLM_STUB_DIM", os.environ.get("EMBEDDER_STUB_DIM", "1024")))
+STUB_DIM = int(os.environ.get("AIMEE_LLM_STUB_DIM")
+               or os.environ.get("EMBEDDER_STUB_DIM")
+               or "1024")
 
 
 def _stub_vec(text):
@@ -70,6 +72,20 @@ def _stub_vec(text):
 # all three. Streaming is disabled in the first release (typed 400).
 SYNTH_URL = os.environ.get("AIMEE_LLM_SYNTH_URL", "").rstrip("/")
 SYNTH_MODE = os.environ.get("AIMEE_LLM_SYNTH_MODE", "local")
+SYNTH_MODEL = os.environ.get("AIMEE_LLM_SYNTH_MODEL", "aimee-synth")
+
+
+def _positive_env_int(name, default):
+    """Compose commonly materializes unset optional values as empty strings."""
+    try:
+        value = int(os.environ.get(name, "") or default)
+    except ValueError:
+        value = default
+    return value if value > 0 else default
+
+
+SYNTH_SLOTS = _positive_env_int("AIMEE_LLM_SYNTH_SLOTS", 1)
+SYNTH_CONTEXT = _positive_env_int("AIMEE_LLM_SYNTH_CTX", 32768)
 
 # ---- §1a security: the gateway is privileged (it holds upstream creds + routes) ----
 # Bearer auth (constant-time). mTLS is the documented production posture; bearer-with-the
@@ -526,6 +542,25 @@ def child_health():
     return out
 
 
+def model_catalog():
+    """OpenAI-compatible discovery for `aimee agent local` onboarding."""
+    available = STUB or bool(SYNTH_URL)
+    data = []
+    if available:
+        data.append({"id": SYNTH_MODEL, "object": "model", "owned_by": "aimee"})
+    return {"object": "list", "data": data}
+
+
+def slot_catalog():
+    """llama-server-compatible capacity discovery for the local-agent probe.
+
+    llama.cpp divides --ctx-size across --parallel slots, so report the usable
+    per-request window rather than the aggregate allocation.
+    """
+    per_slot_context = max(1, SYNTH_CONTEXT // SYNTH_SLOTS)
+    return [{"id": slot, "n_ctx": per_slot_context} for slot in range(SYNTH_SLOTS)]
+
+
 def build_server():
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -552,7 +587,11 @@ def build_server():
 
         def do_GET(self):
             path = self.path.rstrip("/")
-            if path == "/health":
+            if path == "/v1/models":
+                self._send(200, model_catalog())
+            elif path == "/slots":
+                self._send(200, slot_catalog())
+            elif path == "/health":
                 if STUB:
                     # Report the dim so the kb's embedder-autodim sizes the schema
                     # (the embed-remote.py --dim probe reads payload["dim"]).

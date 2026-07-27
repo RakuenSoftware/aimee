@@ -20,7 +20,8 @@
 #
 # Images:
 #   ghcr.io/rakuensoftware/aimee-kb     (kb /v1 on :8741)
-#   pgvector/pgvector:pg17              (Postgres, public)
+# PostgreSQL 18 + pgvector are bundled in the aimee-kb image and persist under
+# the KB home volume; no database sibling service is required.
 apiVersion: smoothnas.io/v1
 kind: Plugin
 metadata:
@@ -40,42 +41,13 @@ profiles:
   # for runtimes that forbid an in-container raise.
   - aimee-stack
 services:
-  - name: postgres
-    artifact:
-      type: oci-image
-      image: pgvector/pgvector:pg17
-    container:
-      restartPolicy: unless-stopped
-      # Run as uid 1000 to match the smoothfs tier's forced owner (the stock
-      # postgres image otherwise drops to its own user and can't access its
-      # uid-1000-owned data dir). Requires SmoothNAS v0.1.20+ runtime.
-      user: "1000:1000"
-    env:
-      POSTGRES_DB: aimee_shared
-      POSTGRES_USER: aimee
-      POSTGRES_PASSWORD: aimee
-    volumes:
-      - name: pgdata
-        mode: tier-bound
-        slot: HDD
-        bind: /var/lib/postgresql/data
-    health:
-      test: ["CMD-SHELL", "pg_isready -U aimee -d aimee_shared"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   - name: kb
     artifact:
       type: oci-image
       image: ghcr.io/rakuensoftware/aimee-kb:latest
     container:
       restartPolicy: unless-stopped
-    dependsOn:
-      postgres:
-        condition: service_healthy
     env:
-      AIMEE_DB2_URL: postgresql://aimee:aimee@{{service.postgres.host}}:5432/aimee_shared
       # ONE knob: point the kb at a unified aimee-llm container and it drives
       # embedding (/embed), reranking (/rerank) AND synthesis (curator Tier-A +
       # Tier-B, at {url}/v1). The kb runs NO model itself — this is just the URL it

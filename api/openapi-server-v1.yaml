@@ -5705,7 +5705,7 @@ paths:
       summary: Bring up the managed sibling services
       description: >
         Server-orchestrated deploy: run `docker compose up -d` for the managed
-        services (postgres + aimee-kb + aimee-llm) the current wizard config selects,
+        services (aimee-kb + aimee-llm) the current wizard config selects,
         on a background thread. Requires AIMEE_DEPLOY_ENABLED + a mounted Docker
         socket. Capability: tool:execute.
       responses:

@@ -83,7 +83,7 @@ extern "C"
    int db2_kb_documents_fts_search(const char *project, const char *query, int64_t *ids,
                                    double *scores, int max);
 
-   /* INSERT OR IGNORE a kb_async_jobs row: (kind, document_id, project,
+   /* INSERT OR IGNORE a kb_async_jobs row: (kind, subject id, project,
     * status='pending'). Used by kb_build to enqueue an async embedding
     * job for a freshly-inserted chunk. Returns 0 on success, -1 on
     * SQL / connection error. */

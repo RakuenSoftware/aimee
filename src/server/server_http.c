@@ -959,6 +959,11 @@ int loopback_rpc(const char *body, int body_len, char *resp, int resp_cap, uint3
       if (n <= 0)
          break;
       total += (size_t)n;
+      /* server_dispatch emits one NDJSON response. The newline is the message
+       * boundary; another in-process reference may keep the socket alive, so
+       * waiting for process-wide EOF can otherwise hang this adapter. */
+      if (memchr(resp, '\n', total) != NULL)
+         break;
       if (total >= (size_t)resp_cap - 1)
          break;
    }

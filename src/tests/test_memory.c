@@ -211,6 +211,18 @@ static void test_insert_merge(void)
    teardown();
 }
 
+static void test_near_duplicate_numeric_keys_remain_distinct(void)
+{
+   setup();
+   memory_t one, two;
+   assert(memory_insert(TIER_L1, KIND_FACT, "worker-1", "first worker", 0.8, "s1", &one) == 0);
+   assert(memory_insert(TIER_L1, KIND_FACT, "worker-2", "second worker", 0.8, "s2", &two) == 0);
+   assert(one.id > 0 && two.id > 0 && one.id != two.id);
+   assert(fetch_memory_count_by_key("worker-1") == 1);
+   assert(fetch_memory_count_by_key("worker-2") == 1);
+   teardown();
+}
+
 static void test_touch_memory(void)
 {
    setup();
@@ -2380,6 +2392,7 @@ int main(void)
    measure_query_embedding_memo_recall();
    test_insert_memory();
    test_insert_merge();
+   test_near_duplicate_numeric_keys_remain_distinct();
    test_touch_memory();
    test_promote();
    test_memory_promote_uses_calibration_profile();

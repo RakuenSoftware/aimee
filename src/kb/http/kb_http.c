@@ -60,24 +60,12 @@
 #include "log.h"
 #include "workspace.h"
 #include "cJSON.h"
-#include <arpa/inet.h>
-#include <errno.h>
-#include <netinet/in.h>
-#include <pthread.h>
-#include <sys/socket.h>
 #include <unistd.h>
-#include <fcntl.h>
-#define KB_HTTP_BACKLOG  16
 #define KB_HTTP_READ_MAX 4096
 #define KB_HTTP_RESP_MAX (1024 * 1024)
 extern kb_service_ctx_t *g_kb_ctx;
 int kb_dispatch_action_json(const char *action, const char *body, int body_len, char *out_buf,
                             int out_cap);
-
-static pthread_t g_thread;
-static int g_listen_fd = -1;
-static volatile int g_running = 0;
-char g_bearer_token[256];
 
 /* ── response helpers ───────────────────────────────────────────────────── */
 
@@ -185,110 +173,6 @@ int kb_http_route(const char *method, const char *path, const char *auth_header,
 
    snprintf(out_buf, (size_t)out_cap, "{\"error\":\"not found\"}");
    return 404;
-}
-
-/* ── per-connection handler (implementation in kb_http_conn.c) ──────────── */
-void handle_connection(int fd);
-
-/* ── listener thread ─────────────────────────────────────────────────────── */
-
-static void *listener_thread(void *arg)
-{
-   (void)arg;
-   while (g_running)
-   {
-      struct sockaddr_in addr;
-      socklen_t addrlen = sizeof(addr);
-      int fd = accept(g_listen_fd, (struct sockaddr *)&addr, &addrlen);
-      if (fd < 0)
-      {
-         if (g_running)
-            LOG_WARN("kb_http", "accept failed: %s", strerror(errno));
-         break;
-      }
-      /* CLOEXEC: ingest spawns converter subprocesses (pandoc/pdftotext) that
-       * must not inherit the client connection — otherwise a slow/hung
-       * converter keeps the socket open after we close it. */
-      fcntl(fd, F_SETFD, FD_CLOEXEC);
-      /* Tell the login throttle who this is BEFORE the request is served. The
-       * pre-auth login routes budget attempts per source address, and an address
-       * they cannot see is one shared bucket rather than an exemption -- so this
-       * failing would over-throttle, never under-throttle. Cleared after the
-       * connection so a later request cannot inherit a stale peer. */
-      {
-         char peer[INET_ADDRSTRLEN] = "";
-         if (!inet_ntop(AF_INET, &addr.sin_addr, peer, sizeof(peer)))
-            peer[0] = '\0';
-         kb_login_throttle_set_peer(peer);
-      }
-      handle_connection(fd);
-      kb_login_throttle_set_peer("");
-      close(fd);
-   }
-   return NULL;
-}
-
-/* ── public start/stop ───────────────────────────────────────────────────── */
-
-int kb_http_start(int port, const char *bearer_token)
-{
-   if (port <= 0)
-      return 0;
-
-   g_bearer_token[0] = '\0';
-   if (bearer_token && bearer_token[0])
-      snprintf(g_bearer_token, sizeof(g_bearer_token), "%s", bearer_token);
-
-   g_listen_fd = socket(AF_INET, SOCK_STREAM, 0);
-   if (g_listen_fd < 0)
-      return -1;
-   /* CLOEXEC: the ingest path forks converter subprocesses (pandoc/pdftotext);
-    * they must not inherit the listening socket, or a hung converter holds the
-    * port open and blocks the service from rebinding on restart. */
-   fcntl(g_listen_fd, F_SETFD, FD_CLOEXEC);
-   int opt = 1;
-   setsockopt(g_listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-   const char *b = getenv("AIMEE_KB_HTTP_BIND");
-   in_addr_t baddr = (b && b[0]) ? INADDR_ANY : INADDR_LOOPBACK;
-   struct sockaddr_in sa;
-   memset(&sa, 0, sizeof(sa));
-   sa.sin_family = AF_INET;
-   sa.sin_addr.s_addr = htonl(baddr);
-   sa.sin_port = htons((uint16_t)port);
-
-   if (bind(g_listen_fd, (struct sockaddr *)&sa, sizeof(sa)) < 0 ||
-       listen(g_listen_fd, KB_HTTP_BACKLOG) < 0)
-   {
-      close(g_listen_fd);
-      g_listen_fd = -1;
-      return -1;
-   }
-
-   g_running = 1;
-   if (pthread_create(&g_thread, NULL, listener_thread, NULL) != 0)
-   {
-      g_running = 0;
-      close(g_listen_fd);
-      g_listen_fd = -1;
-      return -1;
-   }
-
-   LOG_INFO("kb_http", "listening on %s:%d", baddr == INADDR_ANY ? "0.0.0.0" : "127.0.0.1", port);
-   return 0;
-}
-
-void kb_http_stop(void)
-{
-   if (!g_running)
-      return;
-   g_running = 0;
-   if (g_listen_fd >= 0)
-   {
-      shutdown(g_listen_fd, SHUT_RDWR);
-      close(g_listen_fd);
-      g_listen_fd = -1;
-   }
-   pthread_join(g_thread, NULL);
 }
 
 /* ── Phase 5 backend declarations ────────────────────────────────────────── */

@@ -3,7 +3,7 @@
 # aimee-kb-docker-smoke.sh — prove an aimee-kb Docker container fully spins up
 # and is usable.
 #
-# Brings up the compose.yaml stack (postgres + embedder + aimee-kb), waits for
+# Brings up the compose.yaml stack (self-contained aimee-kb + aimee-llm), waits for
 # the kb to report healthy, then exercises the live /v1 surface end to end:
 #
 #   1. /v1/health              — HTTP API is up

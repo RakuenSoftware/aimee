@@ -209,6 +209,11 @@ char *kb_client_ingest_json(const char *workspace, const char *embedding_command
 char *kb_client_docs_manifest_json(const char *scope, const char **paths, int path_count);
 char *kb_client_docs_upload_json(const char *scope, const char **paths, int path_count);
 char *kb_client_docs_push_json(const char *scope, const char **paths, int path_count);
+/* Thin-client variant: the caller has already read each document on the client
+ * host, so the server never tries to dereference a path it cannot see. */
+char *kb_client_docs_push_content_json(const char *scope, const char **doc_keys,
+                                       const char **contents, const int *content_lengths,
+                                       int doc_count);
 
 /* Query the background ingest queue (kb_ingest_queue) state and recent completions.
  * Returns heap-allocated JSON with queue stats, active workers, and last 10 jobs. */
