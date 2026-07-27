@@ -1695,9 +1695,17 @@ void handle_conn(int fd, int is_tcp, int is_management)
    if (is_tcp && !server_http_route_allowed_caps(is_tcp, effective_caps, method, path,
                                                  effective_remote_writes))
    {
+      /* Name the remedy. The bare "beyond the presented token's scope" left a
+       * caller with nowhere to go: following QUICKSTART end to end now lands here
+       * on the first kb write, and nothing on screen says a write-tier grant is
+       * what is missing or who issues it. The mechanism is already public
+       * (QUICKSTART 1.4, docs/UPGRADING.md), so pointing at it leaks nothing. */
       send_response(fd, 403,
                     "{\"error\":{\"message\":\"this endpoint requires capabilities beyond the "
-                    "presented token's scope\",\"type\":\"permission_error\"}}",
+                    "presented token's scope. Over the network a bearer is read/query only "
+                    "until your subject holds a write-tier grant on this server; an operator "
+                    "issues one with `aimee kb grant set` (see docs/UPGRADING.md).\","
+                    "\"type\":\"permission_error\"}}",
                     request_id);
       /* Count the requests the retired global would formerly have allowed, so an
        * operator can see exactly how much traffic the cutover is refusing

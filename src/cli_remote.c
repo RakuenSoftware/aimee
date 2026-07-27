@@ -460,21 +460,34 @@ static int remote_set(const char *url, const char *token, int json_output)
     * bootstrap token configured and is reported by remote_enroll. */
    int enrolled = 0;
    int mtls_enrolled = 0;
+   int bootstrap_enroll_failed = 0;
    char strong_token[256] = "";
-   if (verified && token && strcmp(token, AIMEE_BOOTSTRAP_BEARER) == 0 &&
-       remote_enroll(url, strong_token, sizeof(strong_token), json_output) == 0)
+   if (verified && token && strcmp(token, AIMEE_BOOTSTRAP_BEARER) == 0)
    {
-      enrolled = 1;
-      mtls_enrolled = g_remote_mtls_enrolled;
+      if (remote_enroll(url, strong_token, sizeof(strong_token), json_output) == 0)
+      {
+         enrolled = 1;
+         mtls_enrolled = g_remote_mtls_enrolled;
+      }
+      else
+      {
+         /* The bootstrap bearer was supplied, the channel is trusted, and the
+          * rotation was refused (typically: already consumed by an earlier client,
+          * or by following the manual rotation in QUICKSTART 1.3). What is now on
+          * disk is the dead bootstrap token, so every later command will 401.
+          * remote_enroll has already printed the recovery options; make the exit
+          * status say it failed instead of reporting a successful setup. */
+         bootstrap_enroll_failed = 1;
+      }
    }
    else if (verified && token && token[0] && remote_enroll_client_cert(json_output) == 0)
       mtls_enrolled = 1;
 
    if (json_output)
-      printf("{\"ok\":true,\"url\":\"%s\",\"token\":%s,\"pinned\":%s,\"verified\":%s,"
+      printf("{\"ok\":%s,\"url\":\"%s\",\"token\":%s,\"pinned\":%s,\"verified\":%s,"
              "\"enrolled\":%s,\"mtls_enrolled\":%s}\n",
-             url, token && *token ? "true" : "false", pinned ? "true" : "false",
-             verified ? "true" : "false", enrolled ? "true" : "false",
+             bootstrap_enroll_failed ? "false" : "true", url, token && *token ? "true" : "false",
+             pinned ? "true" : "false", verified ? "true" : "false", enrolled ? "true" : "false",
              mtls_enrolled ? "true" : "false");
    else
    {
@@ -488,7 +501,7 @@ static int remote_set(const char *url, const char *token, int json_output)
              "available on this platform).\n"
              "       Start the server and re-run `aimee remote set`, or `aimee remote trust`.\n");
    }
-   return 0;
+   return bootstrap_enroll_failed ? 1 : 0;
 }
 
 /* Re-pin the cert of the already-configured remote (e.g. after the server's
@@ -554,13 +567,19 @@ static int remote_status(int json_output)
    int st = 0;
    char *body = aimee_client_request("GET", "/v1/health", NULL, &st);
    int reachable = (body != NULL && st >= 200 && st < 500);
+   /* A 401/403 means the transport is fine but the stored token is not accepted —
+    * the single most common setup failure. Reporting a bare "Reachable: yes" for it
+    * (and exiting 0) told users their client was configured when no command would
+    * work; say what is actually wrong and fail. */
+   int unauthorized = (body != NULL && (st == 401 || st == 403));
+   int ok = (body != NULL && st >= 200 && st < 400);
    free(body);
 
    if (json_output)
    {
-      printf("{\"remote\":%s,\"target\":\"%s\",\"reachable\":%s,\"status\":%d}\n",
+      printf("{\"remote\":%s,\"target\":\"%s\",\"reachable\":%s,\"authorized\":%s,\"status\":%d}\n",
              active ? "true" : "false", active ? desc : "local-uds", reachable ? "true" : "false",
-             st);
+             unauthorized ? "false" : (ok ? "true" : "false"), st);
    }
    else
    {
@@ -568,9 +587,19 @@ static int remote_status(int json_output)
          printf("Transport: remote TCP -> %s\n", desc);
       else
          printf("Transport: local Unix socket (no remote configured)\n");
-      printf("Reachable: %s (GET /v1/health -> %d)\n", reachable ? "yes" : "no", st);
+      if (unauthorized)
+      {
+         printf("Reachable: yes, but NOT authorized (GET /v1/health -> %d)\n", st);
+         printf("  The server answered but rejected the stored token. Re-run\n"
+                "  `aimee remote set <url> <token>` with this server's bearer, or\n"
+                "  `aimee remote enroll` from an already-enrolled client.\n");
+      }
+      else
+      {
+         printf("Reachable: %s (GET /v1/health -> %d)\n", reachable ? "yes" : "no", st);
+      }
    }
-   return reachable ? 0 : 1;
+   return ok ? 0 : 1;
 }
 
 /* Force enrollment on the already-configured remote: rotate the server's /v1

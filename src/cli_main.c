@@ -550,11 +550,25 @@ static void ensemble_usage(void)
            "  See docs/ENSEMBLE.md. `aimee delegate aggregate|roundtable` remain as aliases.\n");
 }
 
-static int unsupported_client_command(const char *cmd, int json_output)
+/* Report a command that could not be routed. Two very different causes share this
+ * path: the command family genuinely has no /v1 route, or it has routes and the
+ * SUBCOMMAND was wrong. Blaming the command for the latter sends users (and
+ * maintainers) hunting for a missing route that already exists -- e.g. `aimee
+ * economizer status` reported "command 'economizer' has no /v1 route" when the
+ * registered subcommand is `stats`. So name the subcommand and list the real ones
+ * whenever the family has any. */
+static int unsupported_client_command(const char *cmd, const char *subcmd, int json_output)
 {
    const char *name = (cmd && cmd[0]) ? cmd : "launch";
-   char msg[256];
-   snprintf(msg, sizeof(msg), "command '%s' has no /v1 route; add a /v1 route", name);
+   char subs[512];
+   int have_subs = cli_v1_subcommands(name, subs, sizeof(subs));
+   char msg[768];
+   if (have_subs > 0 && subcmd && subcmd[0])
+      snprintf(msg, sizeof(msg), "'%s' is not a subcommand of '%s'; try: %s", subcmd, name, subs);
+   else if (have_subs > 0)
+      snprintf(msg, sizeof(msg), "'%s' needs a subcommand; try: %s", name, subs);
+   else
+      snprintf(msg, sizeof(msg), "command '%s' has no /v1 route", name);
 
    if (json_output)
    {
@@ -2000,5 +2014,5 @@ int main(int argc, char **argv)
       }
    }
 
-   return unsupported_client_command(cmd, json_output);
+   return unsupported_client_command(cmd, sub_argc >= 1 ? sub_argv[0] : NULL, json_output);
 }

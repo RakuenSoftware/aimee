@@ -7,6 +7,7 @@
 #include "util.h"
 
 #include <errno.h>
+#include <stdarg.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -105,16 +106,41 @@ static int roundtable_receive_timeout_ms(const cJSON *request)
    return deadline_ms + GO_ROUNDTABLE_TRANSPORT_GRACE_MS;
 }
 
-static char *post_go_roundtable(const char *body, int receive_timeout_ms, int *status)
+/* Report WHY the Go roundtable call produced no body. Every failure below used to
+ * `return NULL`, and the caller rendered all of them as "Go roundtable service is
+ * unreachable" — so a review that ran for its full deadline and timed out looked
+ * exactly like a service that was never started, sending diagnosis after a missing
+ * process while the real cause was a seat that never returned. */
+static void rt_fail(char *reason, size_t cap, const char *fmt, ...)
+{
+   if (!reason || !cap)
+      return;
+   va_list ap;
+   va_start(ap, fmt);
+   vsnprintf(reason, cap, fmt, ap);
+   va_end(ap);
+}
+
+static char *post_go_roundtable(const char *body, int receive_timeout_ms, int *status, char *reason,
+                                size_t reason_cap)
 {
    if (status)
       *status = 0;
+   if (reason && reason_cap)
+      reason[0] = '\0';
    const char *socket_path = getenv("AIMEE_WFE_HTTP_SOCKET");
    if (!socket_path || !socket_path[0])
+   {
+      rt_fail(reason, reason_cap,
+              "AIMEE_WFE_HTTP_SOCKET is unset (the Go WFE control plane was never started)");
       return NULL;
+   }
    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
    if (fd < 0)
+   {
+      rt_fail(reason, reason_cap, "socket(AF_UNIX) failed: %s", strerror(errno));
       return NULL;
+   }
    // Derive the receive bound from the same saved preset the Go service
    // acquires. The transport grace covers response serialization and socket
    // delivery without replacing the configured roundtable deadline.
@@ -124,6 +150,7 @@ static char *post_go_roundtable(const char *body, int receive_timeout_ms, int *s
    if (setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &send_timeout, sizeof(send_timeout)) != 0 ||
        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &receive_timeout, sizeof(receive_timeout)) != 0)
    {
+      rt_fail(reason, reason_cap, "setsockopt on %s failed: %s", socket_path, strerror(errno));
       close(fd);
       return NULL;
    }
@@ -134,6 +161,8 @@ static char *post_go_roundtable(const char *body, int receive_timeout_ms, int *s
            (int)sizeof addr.sun_path ||
        connect(fd, (struct sockaddr *)&addr, sizeof addr) != 0)
    {
+      rt_fail(reason, reason_cap, "cannot connect to the Go WFE socket %s: %s", socket_path,
+              strerror(errno));
       close(fd);
       return NULL;
    }
@@ -144,6 +173,7 @@ static char *post_go_roundtable(const char *body, int receive_timeout_ms, int *s
    char *head = malloc(head_cap);
    if (!head)
    {
+      rt_fail(reason, reason_cap, "out of memory building the request");
       close(fd);
       return NULL;
    }
@@ -156,6 +186,8 @@ static char *post_go_roundtable(const char *body, int receive_timeout_ms, int *s
    if (head_n <= 0 || (size_t)head_n >= head_cap || write_all(fd, head, (size_t)head_n) != 0 ||
        write_all(fd, body, strlen(body)) != 0)
    {
+      rt_fail(reason, reason_cap, "sending the review request failed after %ds: %s",
+              GO_ROUNDTABLE_SEND_TIMEOUT_SECS, strerror(errno));
       free(head);
       close(fd);
       return NULL;
@@ -165,6 +197,7 @@ static char *post_go_roundtable(const char *body, int receive_timeout_ms, int *s
    char *raw = malloc(cap);
    if (!raw)
    {
+      rt_fail(reason, reason_cap, "out of memory reading the response");
       close(fd);
       return NULL;
    }
@@ -174,6 +207,8 @@ static char *post_go_roundtable(const char *body, int receive_timeout_ms, int *s
       {
          if (cap >= GO_ROUNDTABLE_MAX_RESPONSE)
          {
+            rt_fail(reason, reason_cap, "the review response exceeded %u bytes",
+                    GO_ROUNDTABLE_MAX_RESPONSE);
             free(raw);
             close(fd);
             return NULL;
@@ -202,6 +237,17 @@ static char *post_go_roundtable(const char *body, int receive_timeout_ms, int *s
    int http_status = 0;
    if (sscanf(raw, "HTTP/1.%*d %d", &http_status) != 1)
    {
+      /* The dominant case: the receive timeout elapsed with nothing read, because the
+       * panel was still running. Say so — it is a deadline, not a missing service. */
+      if (used == 0)
+         rt_fail(reason, reason_cap,
+                 "no response within %dms — the panel was still running when the deadline "
+                 "elapsed (raise the preset's deadline_ms, or check for a stalled seat with "
+                 "`aimee jobs list`)",
+                 receive_timeout_ms);
+      else
+         rt_fail(reason, reason_cap, "malformed response from the Go WFE service (%zu bytes)",
+                 used);
       free(raw);
       return NULL;
    }
@@ -210,6 +256,7 @@ static char *post_go_roundtable(const char *body, int receive_timeout_ms, int *s
    char *body_at = strstr(raw, "\r\n\r\n");
    if (!body_at)
    {
+      rt_fail(reason, reason_cap, "truncated response from the Go WFE service (%zu bytes)", used);
       free(raw);
       return NULL;
    }
@@ -274,10 +321,17 @@ int wfe_roundtable_proxy(server_conn_t *conn, const cJSON *request)
    if (!wire)
       return server_send_error(conn, "out of memory", NULL);
    int status = 0;
-   char *body = post_go_roundtable(wire, roundtable_receive_timeout_ms(request), &status);
+   char reason[320] = "";
+   char *body = post_go_roundtable(wire, roundtable_receive_timeout_ms(request), &status, reason,
+                                   sizeof(reason));
    free(wire);
    if (!body)
-      return server_send_error(conn, "Go roundtable service is unreachable", NULL);
+   {
+      char msg[420];
+      snprintf(msg, sizeof(msg), "roundtable review failed: %s",
+               reason[0] ? reason : "the Go WFE service returned nothing");
+      return server_send_error(conn, msg, NULL);
+   }
    cJSON *response = cJSON_Parse(body);
    free(body);
    cJSON *error = response ? cJSON_GetObjectItemCaseSensitive(response, "error") : NULL;

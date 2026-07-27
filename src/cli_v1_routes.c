@@ -207,6 +207,7 @@ static const struct
     {"wm", "list", "wm.list", NULL, "entries", 0},
     {"primary", NULL, "primary.set", NULL, NULL, 0},
     {"kb", "search", "kb.search", NULL, NULL, 60000},
+    {"kb", "build", "kb.build", NULL, NULL, 900000},
     {"kb", "update", "kb.update", NULL, NULL, 900000},
     {"kb", "docs push", "kb.docs.push", NULL, NULL, 900000},
     /* Grant administration. `show` maps to the same method as `list` — it is that listing
@@ -354,6 +355,45 @@ static const struct
     {"delegate-backend", "exec", "delegate.backend_exec", NULL, NULL, 90000},
     {NULL, NULL, NULL, NULL, NULL, 0},
 };
+
+/* Collect the subcommands registered for `cmd` into `out` as a comma-separated
+ * list, so a failed lookup can say which ones exist instead of blaming the whole
+ * command. Rows whose subcmd is NULL (match-any) or "" (bare command) are
+ * skipped -- they are not names a user can type. Returns the number found. */
+int cli_v1_subcommands(const char *cmd, char *out, size_t cap)
+{
+   if (out && cap)
+      out[0] = '\0';
+   if (!cmd)
+      return 0;
+   int n = 0;
+   size_t len = 0;
+   /* rpc_routes ends with a {NULL,...} sentinel — stop there, do not walk the
+    * array by sizeof or the terminator's NULL cmd reaches strcmp. */
+   for (size_t i = 0; rpc_routes[i].cmd; i++)
+   {
+      if (strcmp(rpc_routes[i].cmd, cmd) != 0)
+         continue;
+      const char *sub = rpc_routes[i].subcmd;
+      if (!sub || !sub[0])
+         continue;
+      n++;
+      if (!out || !cap)
+         continue;
+      size_t need = strlen(sub) + (len ? 2 : 0);
+      if (len + need >= cap)
+         continue; /* keep the list truncated rather than overflow */
+      if (len)
+      {
+         memcpy(out + len, ", ", 2);
+         len += 2;
+      }
+      memcpy(out + len, sub, strlen(sub));
+      len += strlen(sub);
+      out[len] = '\0';
+   }
+   return n;
+}
 
 int cli_v1_lookup(const char *cmd, int sub_argc, char **sub_argv, cli_v1_route_t *route)
 {
@@ -1203,10 +1243,20 @@ cJSON *marshal_kb_build(int argc, char **argv)
 
    cJSON *req = marshal_no_args("kb.build");
 
-   if (opts.pos_count >= 1)
-      cJSON_AddStringToObject(req, "path", opts.positional[0]);
-   if (opts.pos_count >= 2)
-      cJSON_AddStringToObject(req, "project", opts.positional[1]);
+   /* MANUAL §7.16 documents `kb build [--path DIR] [--project NAME]`, but only the
+    * positional forms were read, so the documented flags parsed into opts.flags and
+    * were silently dropped — the build ran against no path at all. Accept the
+    * documented flags, falling back to the positional forms that already shipped. */
+   const char *path = rpc_get(&opts, "path");
+   const char *project = rpc_get(&opts, "project");
+   if (!path && opts.pos_count >= 1)
+      path = opts.positional[0];
+   if (!project && opts.pos_count >= 2)
+      project = opts.positional[1];
+   if (path)
+      cJSON_AddStringToObject(req, "path", path);
+   if (project)
+      cJSON_AddStringToObject(req, "project", project);
    if (rpc_get(&opts, "force"))
       cJSON_AddTrueToObject(req, "force");
    const char *v;

@@ -146,7 +146,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-working-memory $(TESTPREFIX)/unit-test-working-memory-mock $(TESTPREFIX)/unit-test-local-resolution $(TESTPREFIX)/unit-test-cognify-jobs $(TESTPREFIX)/unit-test-extractors-extra \
                $(TESTPREFIX)/unit-test-evidence-replay $(TESTPREFIX)/unit-test-git-pr-ci-grade $(TESTPREFIX)/unit-test-roundtable-verify $(TESTPREFIX)/unit-test-roundtable-chair $(TESTPREFIX)/unit-test-sweep-logic $(TESTPREFIX)/unit-test-sweep-scope $(TESTPREFIX)/unit-test-sweep-parse \
                $(TESTPREFIX)/unit-test-css-analyze $(TESTPREFIX)/unit-test-typed-facts $(TESTPREFIX)/unit-test-css-graph $(TESTPREFIX)/unit-test-css-insights $(TESTPREFIX)/unit-test-css-oracle $(TESTPREFIX)/unit-test-css-render-oracle $(TESTPREFIX)/unit-test-css-migration $(TESTPREFIX)/unit-test-css-render $(TESTPREFIX)/unit-test-css-render-cmd \
-               $(TESTPREFIX)/unit-test-compute-pool $(TESTPREFIX)/unit-test-db2-pool $(TESTPREFIX)/unit-test-cli-launch \
+               $(TESTPREFIX)/unit-test-compute-pool $(TESTPREFIX)/unit-test-db2-pool $(TESTPREFIX)/unit-test-db2-conn-bounds $(TESTPREFIX)/unit-test-db2-conn-open $(TESTPREFIX)/unit-test-cli-launch \
                $(TESTPREFIX)/unit-test-server-session-pools \
                $(TESTPREFIX)/unit-test-presence \
                $(TESTPREFIX)/unit-test-cli-provider \
@@ -313,6 +313,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-gateway-p4-delegate \
                $(TESTPREFIX)/unit-test-hud \
                $(TESTPREFIX)/unit-test-coord-jobs \
+               $(TESTPREFIX)/unit-test-deploy-apply \
+               $(TESTPREFIX)/unit-test-cli-v1-subcommands \
                $(TESTPREFIX)/unit-test-plan-waves \
                $(TESTPREFIX)/unit-test-history \
                $(TESTPREFIX)/unit-test-events \
@@ -1071,6 +1073,14 @@ $(TESTPREFIX)/unit-test-cli-v1-delegate: $(OBJDIR)/tests/test_cli_v1_delegate.o 
                                   $(OBJDIR)/codex_auth.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
+$(TESTPREFIX)/unit-test-cli-v1-subcommands: $(OBJDIR)/tests/test_cli_v1_subcommands.o \
+                                  $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o \
+                                  $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o \
+                                  $(OBJDIR)/cli_client.o $(OBJDIR)/posix/cli_client.o \
+                                  $(OBJDIR)/aimee_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
+                                  $(OBJDIR)/aimee_home.o $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-cli-server-compat: $(OBJDIR)/tests/test_cli_server_compat.o \
                                   $(OBJDIR)/cJSON.o $(OBJDIR)/posix/util.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
@@ -1500,6 +1510,27 @@ $(TESTPREFIX)/unit-test-extractors-extra: $(OBJDIR)/tests/test_extractors_extra.
 
 $(TESTPREFIX)/unit-test-compute-pool: $(OBJDIR)/tests/test_compute_pool.o $(OBJDIR)/server/compute_pool.o $(OBJDIR)/log.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+# The bounds every pooled connection carries. Built with postgres disabled so the
+# policy is exercised without a backend.
+$(OBJDIR)/tests/test_db2_conn_bounds.o: C_FLAGS += -Idb2
+# libpq is linked so the suite can assert against PQconninfoParse — the real
+# parser is the only thing that distinguishes "the bounds appear in the string"
+# from "the bounds are real options", which is exactly the distinction the URI bug
+# slipped through. The tests still need no running backend.
+$(TESTPREFIX)/unit-test-db2-conn-bounds: $(OBJDIR)/tests/test_db2_conn_bounds.o $(OBJDIR)/db2/db_postgres.o $(OBJDIR)/log.o
+	$(TESTLINK_MIN) -o $@ $^ $(PQ_LIB) -lpthread $(EXTRA_L_FLAGS)
+
+# aimee_pg_open's own contract. The test defines the libpq entry points that
+# function calls; a definition in an object file wins over the same symbol in a
+# shared library, so these land on the fakes while the rest of libpq stays real.
+# That is what makes "SET statement_timeout fails" reachable — a live backend
+# cannot be asked to reject it on demand. LTO is left on (the rest of the build
+# uses it, and libpq is a shared library with no IR, so nothing can be inlined
+# across the seam regardless).
+$(OBJDIR)/tests/test_db2_conn_open.o: C_FLAGS += -Idb2
+$(TESTPREFIX)/unit-test-db2-conn-open: $(OBJDIR)/tests/test_db2_conn_open.o $(OBJDIR)/db2/db_postgres.o $(OBJDIR)/log.o
+	$(TESTLINK_MIN) -o $@ $^ $(PQ_LIB) -lpthread $(EXTRA_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-db2-pool: $(OBJDIR)/tests/test_db2_pool.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/log.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
@@ -3650,6 +3681,11 @@ $(TESTPREFIX)/unit-test-coord-jobs: $(OBJDIR)/tests/test_coord_jobs.o \
                             $(OBJDIR)/modules/delegates/delegate_prompt.o \
                             $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# deploy_apply.c is #included by the test for its statics, and the two config
+# symbols it calls are stubbed there — so this links nothing else.
+$(TESTPREFIX)/unit-test-deploy-apply: $(OBJDIR)/tests/test_deploy_apply.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread
 
 $(TESTPREFIX)/unit-test-plan-waves: $(OBJDIR)/tests/test_plan_waves.o \
                             $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
