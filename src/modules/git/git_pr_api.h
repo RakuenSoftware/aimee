@@ -100,7 +100,25 @@ int git_pr_ci_permits_merge(git_pr_ci_t ci);
 
 /* Squash-merge PUT /pulls/<n>/merge with an explicitly empty synthesized
  * commit body. Returns 0 merged, 1 already merged, 2 not mergeable (405/409),
- * -1 error. */
+ * 3 merge CONFLICT, -1 error.
+ *
+ * 2 vs 3 matters to every caller that retries. GitHub answers 405/409 for two
+ * unrelated situations: a lost race (the head or base moved between the
+ * mergeability check and the PUT — "Head branch was modified", "Base branch was
+ * modified"), and a genuine content conflict ("Pull Request has merge
+ * conflicts"). The first resolves itself on a retry; the second is a property of
+ * the two trees and is identical on every retry, forever. Collapsing them made
+ * the engine re-attempt an unwinnable merge indefinitely (observed: 15 attempts
+ * over 3 hours on one run, holding the single active-root slot). Callers must
+ * treat 3 as terminal. */
+
+/* Does this 405/409 merge error describe a content CONFLICT (terminal) rather
+ * than a lost race (retryable)? Text-matching a forge message is unlovely, but
+ * GitHub returns the same status for both and the message is the only signal it
+ * gives. Fails SAFE: an unrecognised message is reported as NOT a conflict, so
+ * an unfamiliar phrasing degrades to today's retry behaviour rather than
+ * terminating a run that could have succeeded. Pure; unit-tested. */
+int git_pr_merge_err_is_conflict(const char *err);
 int git_pr_merge_via_api(const char *principal, const char *repo_dir, int number, char *err,
                          size_t errlen);
 
