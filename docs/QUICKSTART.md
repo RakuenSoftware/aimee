@@ -81,10 +81,32 @@ If the server endpoints return `200` and `kb/status` reports the DB and vector s
     users only**, a `full` grant permits remote code execution as that subject.
 
   Grants live in `kb_write_tier_grant` and are administered with
-  `kb_write_tier_grant_set` / `kb_write_tier_grant_revoke`. A user obtains an
+  `kb_write_tier_grant_set` / `kb_write_tier_grant_revoke` (`aimee kb grant
+  set|list|revoke --server <id> --team <n>`, local UDS only). A user obtains an
   identity token by logging in to kb (OIDC, or PAM when no OIDC profile is
   configured). See [UPGRADING.md](UPGRADING.md) for granting the first user, the
   exact subject spelling, and how to tell "no grant" apart from "wrong subject".
+
+  **A grant is not enough on its own.** The server can only resolve a caller's tier
+  once it knows who it is and which keys to trust, so all three of these must be set
+  on `aimee-server` or *every* `/v1` write is denied regardless of grants:
+
+  | Variable | What it is |
+  |---|---|
+  | `AIMEE_SERVER_TEAM_ID` | the kb team this server is enrolled in |
+  | `AIMEE_SERVER_ID` | this server's id — the identity token's audience |
+  | `AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE` | path to the root-owned `0600` trust bundle pinning kb's signing keys |
+
+  **`compose.server-managed.yaml` does not set these**, so a stock Docker install
+  cannot enable remote writes until you add them — see
+  [#2026](https://github.com/RakuenSoftware/aimee/issues/2026). The server says so at
+  startup, and that line is the fastest way to confirm the cause:
+
+  ```
+  ERROR server.http: AIMEE_SERVER_TEAM_ID is unset or invalid: reads continue, but
+  every /v1 write will be denied with no_team_configured until it is set to this
+  server's team id
+  ```
 
   (Workspace registration over the network, `workspace add/serve/remove`, is a
   deliberate, bearer-gated exception and works with no grant at all.)
