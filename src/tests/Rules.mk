@@ -629,6 +629,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-server-mgmt-checkpoint-client \
                $(TESTPREFIX)/unit-test-kb-mgmt-token \
                $(TESTPREFIX)/unit-test-kb-identity-token \
+               $(TESTPREFIX)/unit-test-workspace-scan-indexed \
                $(TESTPREFIX)/unit-test-kb-login-throttle \
                $(TESTPREFIX)/unit-test-server-identity-token \
                $(TESTPREFIX)/unit-test-server-write-tier-db1 \
@@ -2049,6 +2050,10 @@ $(TESTPREFIX)/unit-test-kb-mgmt-token: $(OBJDIR)/tests/test_kb_mgmt_token.o \
                                        $(OBJDIR)/server/server_mgmt_token.o \
                                        $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-workspace-scan-indexed: $(OBJDIR)/tests/test_workspace_scan_indexed.o \
+                                            $(OBJDIR)/server/server_workspace_scan.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-kb-login-throttle: $(OBJDIR)/tests/test_kb_login_throttle.o \
                                             $(OBJDIR)/kb/kb_login_throttle.o
