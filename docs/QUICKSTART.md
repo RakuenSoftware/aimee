@@ -224,6 +224,18 @@ Workspace registration itself is bearer-gated and can succeed without a grant. I
 cannot: without `data`, `workspace add` reports the registered workspace, then exits non-zero after
 ingesting zero files. Run the index commands after the grant.
 
+> **Not available on the Windows thin client.** `workspace add` and `index scan` upload the working
+> tree over a POSIX-only path, so on Windows they refuse:
+>
+> ```
+> aimee: remote workspace add is not supported on this platform
+> aimee: remote index scan is not supported on this platform
+> ```
+>
+> Register and index the tree from a Linux or macOS client that can reach it, or clone it onto the
+> server through the setup wizard's *Workspaces & projects* step. The read side works normally on
+> Windows: `workspace list`, `index overview` and `index find` all query the server.
+
 Large repositories ingest in chunks. Use `aimee kb status` and `aimee kb ingest status` to follow
 the queue.
 
