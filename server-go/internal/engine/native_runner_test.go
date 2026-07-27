@@ -1985,3 +1985,79 @@ func TestBranchHasWorkOverBaseSeesCommitsFromEarlierAttempts(t *testing.T) {
 		t.Fatal("an unresolved base must not count as work")
 	}
 }
+
+// The intended slice cycle is: cut a branch from the feature tip, do the work,
+// merge back into the feature branch, and let the NEXT slice start from the
+// updated tip. That merge happens through the FORGE, which advances the remote
+// feature branch -- nothing advances the local aimee/feat/<parent> ref. Reading it
+// locally therefore hands slice N+1 the state the run began with, and every slice
+// that already landed is invisible to it. Measured on wi_f96d4b18: local
+// e161dd34, remote da80f8e7, merged file absent locally.
+func TestFeatureBaseRefPrefersTheForgeAdvancedRemoteTip(t *testing.T) {
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin.git")
+	repo := filepath.Join(root, "repo")
+	git := func(dir string, args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	git(root, "init", "--bare", "-b", "trunk", origin)
+	git(root, "clone", origin, repo)
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(repo, "add", "README")
+	git(repo, "commit", "-m", "init")
+	git(repo, "push", "-u", "origin", "trunk")
+	git(repo, "branch", "aimee/feat/wi_parent")
+	git(repo, "push", "origin", "aimee/feat/wi_parent")
+
+	// Slice 0 lands through the forge: the REMOTE feature branch gains a commit
+	// while this clone's local ref deliberately stays behind.
+	landed := filepath.Join(root, "landed")
+	git(root, "clone", "-b", "aimee/feat/wi_parent", origin, landed)
+	if err := os.WriteFile(filepath.Join(landed, "slice0.txt"), []byte("landed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(landed, "add", "slice0.txt")
+	git(landed, "commit", "-m", "slice 0")
+	git(landed, "push", "origin", "aimee/feat/wi_parent")
+
+	ctx := context.Background()
+	base := featureBaseRef(ctx, repo, "wi_parent")
+	if base != "origin/aimee/feat/wi_parent" {
+		t.Fatalf("resolved base = %q, want the fetched remote tip", base)
+	}
+	// And it must actually carry slice 0's work, which the local ref does not.
+	if out, err := exec.Command("git", "-C", repo, "cat-file", "-e",
+		base+":slice0.txt").CombinedOutput(); err != nil {
+		t.Fatalf("resolved base is missing the landed slice: %v: %s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", repo, "cat-file", "-e",
+		"aimee/feat/wi_parent:slice0.txt").CombinedOutput(); err == nil {
+		t.Fatalf("local ref unexpectedly already carried the landed slice: %s", out)
+	}
+
+	// Integrating must now bring that landed work into the slice worktree.
+	git(repo, "checkout", "-q", "-b", "aimee/wi/slice1", "aimee/feat/wi_parent")
+	reason, err := integrateFeatureBase(ctx, repo, "wi_parent")
+	if err != nil || reason != "" {
+		t.Fatalf("integrate failed: reason=%q err=%v", reason, err)
+	}
+	if _, statErr := os.Stat(filepath.Join(repo, "slice0.txt")); statErr != nil {
+		t.Fatalf("next slice did not receive the landed work: %v", statErr)
+	}
+
+	// No parent is not a slice; an unknown parent must not resolve.
+	if featureBaseRef(ctx, repo, "") != "" {
+		t.Fatal("an item with no parent must not resolve a feature base")
+	}
+	if featureBaseRef(ctx, repo, "wi_missing") != "" {
+		t.Fatal("an unknown parent must not resolve a feature base")
+	}
+}
