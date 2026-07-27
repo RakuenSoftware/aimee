@@ -229,14 +229,29 @@ Opt out of the global registration with `AIMEE_NO_CLIENT_INTEGRATIONS=1` (or set
 A workspace is a set of repositories aimee indexes and works across as one unit.
 
 ```bash
-aimee workspace add /path/to/your/repo                     # register an existing checkout and index it
-aimee workspace add --repo git@github.com:org/repo.git     # clone, register, and index
-aimee workspace list                                       # list roots and the projects under each
+aimee workspace add /path/to/your/repo   # register this host's checkout (see the note below on indexing)
+aimee workspace list                     # list roots and the projects under each
 ```
 
 You can also drop an `aimee.workspace.yaml` manifest in a directory and run `aimee setup` to clone, install dependencies, index, and generate starter rules for a multi-repo workspace in one shot, see [Workspace Management](WORKSPACES.md).
 
-> Indexing and memory writes are server-side mutations, so over the network they need a **write-tier grant of at least `data` for your own subject** (see [1.4](#14-before-you-expose-it-on-a-network)); `aimee.api.remote_writes` no longer authorizes them. Workspace registration itself works regardless.
+> Indexing and memory writes are server-side mutations, so over the network they need a **write-tier grant of at least `data` for your own subject** (see [1.4](#14-before-you-expose-it-on-a-network)); `aimee.api.remote_writes` no longer authorizes them.
+>
+> Registering a workspace is exempt and lands with no grant — but the **indexing it
+> then kicks off is not**. Without a grant `aimee workspace add` reports
+> `workspace registered`, then `index ingest batch failed … capabilities beyond the
+> presented token's scope` and `ingested 0 file(s)`, and exits non-zero. The
+> workspace is registered; nothing is indexed until a grant exists.
+>
+> The `agent` family (§2.5) is exec/control rather than a data write, so it needs a
+> `full` grant — that includes reads like `aimee agent list`.
+>
+> **Cloning a repo onto the server** is a browser-side operation, not a CLI one:
+> the setup wizard's *Workspaces & projects* step clones into the server's own
+> workspace tree. `aimee workspace add --repo <url>` exists only in a local
+> (same-host) install — from a thin client it fails with
+> `workspace: cannot resolve path '--repo' on this host`, because the clone route
+> requires a browser login rather than a bearer.
 >
 > Without a grant these return `403 … requires capabilities beyond the presented
 > token's scope`, so on a brand-new install your first `aimee memory store` or
@@ -339,12 +354,27 @@ Opt out of the global registration with `AIMEE_NO_CLIENT_INTEGRATIONS=1` (or set
 A workspace is a set of repositories aimee indexes and works across as one unit.
 
 ```powershell
-aimee workspace add C:\path\to\your\repo        # register an existing checkout and index it
-aimee workspace add --repo https://github.com/org/repo.git   # clone, register, and index
+aimee workspace add C:\path\to\your\repo   # register this host's checkout (see the note below on indexing)
 aimee workspace list                            # list roots and the projects under each
 ```
 
-> Indexing and memory writes are server-side mutations, so over the network they need a **write-tier grant of at least `data` for your own subject** (see [1.4](#14-before-you-expose-it-on-a-network)); `aimee.api.remote_writes` no longer authorizes them. Workspace registration itself works regardless.
+> Indexing and memory writes are server-side mutations, so over the network they need a **write-tier grant of at least `data` for your own subject** (see [1.4](#14-before-you-expose-it-on-a-network)); `aimee.api.remote_writes` no longer authorizes them.
+>
+> Registering a workspace is exempt and lands with no grant — but the **indexing it
+> then kicks off is not**. Without a grant `aimee workspace add` reports
+> `workspace registered`, then `index ingest batch failed … capabilities beyond the
+> presented token's scope` and `ingested 0 file(s)`, and exits non-zero. The
+> workspace is registered; nothing is indexed until a grant exists.
+>
+> The `agent` family (§2.5) is exec/control rather than a data write, so it needs a
+> `full` grant — that includes reads like `aimee agent list`.
+>
+> **Cloning a repo onto the server** is a browser-side operation, not a CLI one:
+> the setup wizard's *Workspaces & projects* step clones into the server's own
+> workspace tree. `aimee workspace add --repo <url>` exists only in a local
+> (same-host) install — from a thin client it fails with
+> `workspace: cannot resolve path '--repo' on this host`, because the clone route
+> requires a browser login rather than a bearer.
 >
 > Without a grant these return `403 … requires capabilities beyond the presented
 > token's scope`, so on a brand-new install your first `aimee memory store` or
@@ -456,8 +486,7 @@ Opt out of the global registration with `AIMEE_NO_CLIENT_INTEGRATIONS=1` (or `cl
 ### 4.4 Set up workspaces
 
 ```bash
-aimee workspace add /path/to/your/repo                     # register an existing checkout and index it
-aimee workspace add --repo git@github.com:org/repo.git     # clone, register, and index
+aimee workspace add /path/to/your/repo   # register this host's checkout (see the note below on indexing)
 aimee workspace list
 ```
 
