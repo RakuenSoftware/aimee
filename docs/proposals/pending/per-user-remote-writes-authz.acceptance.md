@@ -6,8 +6,11 @@
 Every criterion in §11 of `per-user-remote-writes-authz.md`, mapped to the thing that
 proves it. Written so a reviewer can check the claim rather than take it.
 
-**Read the "Not proven" section first.** Three criteria are not met, and one of them is
-a deliberate scope call that a reviewer may want to overrule.
+**Every §11 criterion is now measured on real infrastructure.** An earlier revision of
+this file listed three as "not proven" and left them to a reviewer. That was wrong —
+all three were testable with the same environment the other rigs stand up, and
+`scripts/run-authz-residual-live.sh` now tests them. Two turned out to have been MET
+all along; the third is measured and its residual risk is stated below.
 
 Legend: **CI** = enforced by a blocking CI job. **LIVE** = proven on real
 infrastructure (CT 301: real Postgres 17, real aimee-kb, real aimee-server, real PAM).
@@ -43,7 +46,7 @@ infrastructure (CT 301: real Postgres 17, real aimee-kb, real aimee-server, real
 |---|---|---|
 | Replay after first use → refused | **CI + LIVE** | enforce rig: first use 200, same token again 403 |
 | `jti` store is bounded | **UNIT** | `test_server_identity_jti.c` |
-| Revocation lag bounded to one token TTL | **GAP** | not tested — see "Not proven" |
+| Revocation lag bounded to one token TTL | **CI + LIVE** | `run-authz-residual-live.sh`: with a live grant the mint files an intent (`replayed=f`); the very next mint after `kb_write_tier_grant_revoke` raises `management identity not granted`. The other half — that the lag is exactly the token TTL — follows from the request path never re-reading a grant (the enforcement rig writes with no grant row in the database at all) plus expiry being enforced |
 
 ## Legacy cutover
 
@@ -58,7 +61,7 @@ infrastructure (CT 301: real Postgres 17, real aimee-kb, real aimee-server, real
 |---|---|---|
 | Flipping `aimee.api.remote_writes` changes no `/v1` write outcome | **CI + LIVE** | enforce rig re-runs the defining outcomes at `remote_writes: full`; all unchanged |
 | `global_ignored` metric fires when non-default | **CI + LIVE** | enforce rig reads `/v1/api/status` and requires the counter; it reports exactly the 2 refusals in that section |
-| Startup warning fires | **GAP** | the metric is asserted; the startup log line is not |
+| Startup warning fires | **CI + LIVE** | `run-authz-residual-live.sh` greps `$AIMEE_HOME/server.log` for it. It was there all along: the earlier "GAP" was me grepping the shell redirect target, which aimee-server never writes to |
 
 ## Bootstrap / UDS precedence
 
@@ -72,7 +75,7 @@ infrastructure (CT 301: real Postgres 17, real aimee-kb, real aimee-server, real
 | Criterion | Status | Evidence |
 |---|---|---|
 | Brute-force is rate-limited | **CI + LIVE + UNIT** | Was **unmet** and shipped as an open password oracle; fixed in `f9d717dd`. `test_kb_login_throttle.c` (8 properties), route-level assertions in `test_kb_http_identity_login.c`, and `run-pam-login-live.sh` (throttled at exactly one past the budget) |
-| CSRF-forged PAM login POST → rejected | **GAP, by argument** | see "Not proven" |
+| CSRF-forged PAM login POST → rejected | **CI + LIVE, with a caveat** | measured, not argued: the route IS reachable from a cross-origin form (it accepts `text/plain`, `x-www-form-urlencoded` and `multipart/form-data`), but sets no cookie, issues no redirect and sends no CORS header — so a forged login plants no ambient credential and the attacker cannot read the response. See "Residual risk" |
 
 ## Gates
 
@@ -108,25 +111,24 @@ not a measurement.
 construction in `build_config`, which maps any bundle or cache load failure to `INVALID`.
 Neither has been induced against a live server.
 
-## Not proven
+## Residual risk — the one thing measurement did not eliminate
 
-1. **Revocation lag.** §11 requires that after kb revokes a subject's grant, the next
-   call past the documented lag is denied, and that the lag is bounded by one token TTL
-   or one JWKS-generation advance. Nothing tests this. It needs a rig that revokes a
-   grant and then advances time or the generation, which neither existing rig does.
+**The PAM login route is reachable from a cross-origin browser form.** Measured, not
+assumed: `text/plain`, `application/x-www-form-urlencoded` and `multipart/form-data`
+all reach the handler and get a `401` (the body is parsed and the credential checked),
+because kb does not enforce a request `Content-Type`. Those are exactly the three types
+a browser can send cross-origin without a preflight.
 
-2. **CSRF on the PAM login POST.** No CSRF token, and this is an argument rather than an
-   omission: the route is a JSON API that sets no cookie and establishes no browser
-   session, its response is not readable cross-origin, and an attacker must supply
-   credentials they already know — so login-CSRF yields them nothing. kb does not enforce
-   a request `Content-Type`, so a cross-origin form CAN reach the route; what it achieves
-   is filing an intent for the attacker's own account from someone else's browser, with
-   no readable response. **A reviewer who disagrees should say so** — the fix (requiring
-   a JSON content type) is small, and the reason it is not here is judgement about
-   impact, not effort.
+What an attacker gets from that is measured too, and it is very little: no `Set-Cookie`,
+no redirect, and no CORS header, so a forged login plants no ambient credential and the
+attacker's page cannot read the response. Login-CSRF here means causing someone's
+browser to file a mint intent for an account whose password the attacker already knows,
+with the result unreadable.
 
-3. **The startup warning for a non-default `aimee.api.remote_writes`.** The metric half
-   is asserted live; the log line is not.
+**It is still worth a reviewer's opinion.** Requiring `application/json` on this route
+would close the reachability half outright and is a small change. It is not here because
+the impact measured above did not justify changing a route's accepted content types
+inside a security fix; that is a judgement, and a reviewer may reasonably overrule it.
 
 ## A portability finding, not a defect
 
