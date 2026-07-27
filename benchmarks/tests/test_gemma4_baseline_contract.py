@@ -7,6 +7,7 @@ import hashlib
 import importlib
 import io
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -320,6 +321,26 @@ class GemmaBaselineContractTests(unittest.TestCase):
             "logical_batch_tokens": 2048,
             "physical_batch_tokens": 2048,
         })
+
+    def test_sweep_servers_use_a_durable_smoothnas_restart_policy(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, stdout="container-id\n", stderr="")
+        with mock.patch.object(sweep, "remove_container") as remove, mock.patch.object(
+            sweep, "run", return_value=completed
+        ) as run, mock.patch.object(sweep, "wait_health", return_value={"status": "ok"}):
+            sweep.start_server(
+                "/docker.sock",
+                "image",
+                Path("/bench"),
+                "model.gguf",
+                "embedding",
+                sweep.MODEL_LOAD_PROFILES["gemma4_12b"]["embedding"],
+                Path("/tmp/server.log"),
+            )
+        remove.assert_called_once_with("/docker.sock", "gemma4-baseline-server")
+        command = run.call_args.args[0]
+        self.assertIn("--restart", command)
+        self.assertEqual(command[command.index("--restart") + 1], "unless-stopped")
+        self.assertNotIn("--rm", command)
 
     def test_controllers_require_healthy_production_restoration(self) -> None:
         for controller in (sweep, eurobert_controller):

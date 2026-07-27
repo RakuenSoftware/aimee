@@ -62,6 +62,7 @@ MODEL_LOAD_PROFILES = {
     },
 }
 MODEL_MODES = ("synthesis", "embedding")
+SERVER_RESTART_POLICY = "unless-stopped"
 
 
 def validate_completed_view(
@@ -156,6 +157,12 @@ def wait_container_gone(socket: str, name: str, timeout: int = 60) -> None:
     raise RuntimeError(f"container name was not released: {name}")
 
 
+def remove_container(socket: str, name: str) -> None:
+    """Remove a benchmark container whose durable restart policy outlives exit."""
+    run(docker_cmd(socket, "rm", "--force", name), capture=True, check=False)
+    wait_container_gone(socket, name)
+
+
 def write_state(path: Path, **values: Any) -> None:
     current = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     current.update(values)
@@ -189,10 +196,10 @@ def start_server(
     log_path: Path,
 ) -> float:
     started = time.monotonic()
-    run(docker_cmd(socket, "stop", "gemma4-baseline-server"), check=False, capture=True)
-    wait_container_gone(socket, "gemma4-baseline-server")
+    remove_container(socket, "gemma4-baseline-server")
     args = [
-        "run", "--detach", "--rm", "--name", "gemma4-baseline-server", "--network", "host",
+        "run", "--detach", "--restart", SERVER_RESTART_POLICY,
+        "--name", "gemma4-baseline-server", "--network", "host",
         "--device", "/dev/dri:/dev/dri", "--volume", f"{root}:/bench", "--entrypoint", "/opt/llama/llama-server",
         image, "-m", f"/bench/models/{model_file}", "-ngl", "99", "-fa", "on", "--cache-ram", "512",
         "--host", "0.0.0.0", "--port", "8920",
@@ -226,7 +233,7 @@ def stop_server(socket: str, log_path: Path) -> None:
     logs = run(docker_cmd(socket, "logs", "gemma4-baseline-server"), capture=True, check=False)
     log_path.write_text(logs.stdout + logs.stderr, encoding="utf-8")
     run(docker_cmd(socket, "stop", "gemma4-baseline-server"), capture=True, check=False)
-    wait_container_gone(socket, "gemma4-baseline-server")
+    remove_container(socket, "gemma4-baseline-server")
 
 
 def start_ettin_server(
@@ -239,10 +246,10 @@ def start_ettin_server(
     log_path: Path,
 ) -> float:
     started = time.monotonic()
-    run(docker_cmd(socket, "stop", "gemma4-baseline-server"), check=False, capture=True)
-    wait_container_gone(socket, "gemma4-baseline-server")
+    remove_container(socket, "gemma4-baseline-server")
     command = docker_cmd(
-        socket, "run", "--detach", "--rm", "--name", "gemma4-baseline-server", "--network", "host",
+        socket, "run", "--detach", "--restart", SERVER_RESTART_POLICY,
+        "--name", "gemma4-baseline-server", "--network", "host",
         "--device", "/dev/dri:/dev/dri", "--volume", f"{deployed_models}:/models",
         "--volume", f"{repo / 'scripts/aimee-llm-supervisor.sh'}:/opt/aimee/aimee-llm-supervisor.sh:ro",
         "--entrypoint", "/bin/bash",
