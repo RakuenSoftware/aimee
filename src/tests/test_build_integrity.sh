@@ -404,6 +404,13 @@ if [ -f ../Dockerfile ]; then
     if grep -Eq 'aimee-server|DB1|db1/' ../Dockerfile; then
         split_failures="$split_failures dockerfile-links-server-or-db1"
     fi
+    if ! grep -Fq '"postgresql-${PG_MAJOR}"' ../Dockerfile ||
+       ! grep -Fq '"postgresql-${PG_MAJOR}-pgvector"' ../Dockerfile; then
+        split_failures="$split_failures dockerfile-missing-embedded-postgres"
+    fi
+    if ! grep -Fq 'ENTRYPOINT ["/usr/local/bin/aimee-kb-entrypoint.sh"]' ../Dockerfile; then
+        split_failures="$split_failures dockerfile-missing-kb-db-entrypoint"
+    fi
 else
     split_failures="$split_failures missing-dockerfile"
 fi
@@ -411,8 +418,8 @@ if [ -f ../compose.yaml ]; then
     if ! grep -Eq '^[[:space:]]+aimee-kb:' ../compose.yaml; then
         split_failures="$split_failures compose-missing-aimee-kb-service"
     fi
-    if ! grep -Eq '^[[:space:]]+postgres:' ../compose.yaml; then
-        split_failures="$split_failures compose-missing-postgres-service"
+    if grep -Eq '^[[:space:]]+postgres:' ../compose.yaml; then
+        split_failures="$split_failures compose-retains-sibling-postgres-service"
     fi
     if ! grep -Eq 'AIMEE_DB2_URL[=:]' ../compose.yaml; then
         split_failures="$split_failures compose-missing-db2-url"
