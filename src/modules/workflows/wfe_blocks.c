@@ -1514,6 +1514,13 @@ static wfe_step_result_t exec_merge(wfe_ctx *ctx, const wfe_node_t *node)
       return wfe_step_advanced("merged", "", 0.0);
    case WFE_MERGE_NOT_MERGEABLE:
       return wfe_step_looped();
+   case WFE_MERGE_CONFLICT:
+      /* Terminal: the conflict is a property of the two trees, so every retry
+       * reproduces it. Looping (or parking in the self-resolving merge_pending)
+       * would re-attempt it forever while holding the run's active-root slot and
+       * blocking every other work item behind it. Fail so the slot is released
+       * and a human sees a conflict that needs a content decision. */
+      return wfe_step_failed();
    default:
       /* transient/unknown forge error on the merge act itself: park for a human
        * re-drive rather than hard-failing the run. We only reach here with a

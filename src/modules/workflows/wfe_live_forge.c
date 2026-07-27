@@ -315,6 +315,13 @@ static wfe_merge_result_t live_merge(const char *repo, const char *pr)
    case 2:
       aimee_log(LOG_WARN, "wfe-forge", "merge of PR %d: %s", num, err);
       return WFE_MERGE_NOT_MERGEABLE;
+   case 3:
+      /* A content conflict, not a lost race. Looping here re-attempts a merge
+       * that is identical every time and can never succeed, while the run holds
+       * the single active-root slot. Terminal, and say what conflicted. */
+      aimee_log(LOG_ERROR, "wfe-forge", "merge of PR %d conflicts and cannot be retried: %s", num,
+                err);
+      return WFE_MERGE_CONFLICT;
    default:
       aimee_log(LOG_WARN, "wfe-forge", "merge of PR %d: %s", num, err);
       return WFE_MERGE_ERROR; /* unknown -> park for a human */

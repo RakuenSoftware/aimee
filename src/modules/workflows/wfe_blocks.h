@@ -42,7 +42,8 @@ typedef enum
 {
    WFE_MERGE_OK = 0,        /* merged now */
    WFE_MERGE_ALREADY,       /* already merged -> idempotent no-op success */
-   WFE_MERGE_NOT_MERGEABLE, /* conflict / lost race -> loop */
+   WFE_MERGE_NOT_MERGEABLE, /* lost race (head/base moved) -> loop; self-resolves */
+   WFE_MERGE_CONFLICT,      /* content conflict -> TERMINAL; retrying cannot win */
    WFE_MERGE_ERROR          /* forge error -> fail closed */
 } wfe_merge_result_t;
 
