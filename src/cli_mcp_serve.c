@@ -327,8 +327,25 @@ static void handle_tools_list(cJSON *id)
    cJSON *tools = cJSON_GetObjectItemCaseSensitive(resp, "tools");
    if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0 || !cJSON_IsArray(tools))
    {
+      /* Preserve an actionable /v1 error (notably authz failures) instead of
+       * collapsing every non-list response to an opaque startup error. */
+      const char *detail = NULL;
+      cJSON *message = cJSON_GetObjectItemCaseSensitive(resp, "message");
+      cJSON *error = cJSON_GetObjectItemCaseSensitive(resp, "error");
+      if (cJSON_IsString(message))
+         detail = message->valuestring;
+      else if (cJSON_IsObject(error))
+      {
+         message = cJSON_GetObjectItemCaseSensitive(error, "message");
+         if (cJSON_IsString(message))
+            detail = message->valuestring;
+      }
+
+      char errmsg[640];
+      snprintf(errmsg, sizeof(errmsg), "Failed to list tools%s%s", detail ? ": " : "",
+               detail ? detail : "");
       cJSON_Delete(resp);
-      mcp_error(id, -32603, "Failed to list tools");
+      mcp_error(id, -32603, errmsg);
       return;
    }
 

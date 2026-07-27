@@ -131,7 +131,11 @@ const method_policy_t method_registry[] = {
     {"chat.send_stream", CAP_CHAT, "chat stream"},
     {"chat.graceful_cancel", CAP_CHAT, "cancel an in-flight chat turn (owner-authz)"},
     {"chat.interrupt", CAP_CHAT, "stop an in-flight turn and queue a steer (owner-authz)"},
-    {"mcp.tools_list", CAP_TOOL_EXECUTE, "MCP tool list"},
+    /* Tool definitions are read-only session metadata. Keeping this behind
+     * CAP_TOOL_EXECUTE makes an authenticated query-only/thin-client bearer
+     * fail during the MCP startup handshake before it can call even read-only
+     * tools. Tool execution remains independently gated at mcp.call. */
+    {"mcp.tools_list", CAP_SESSION_READ, "MCP tool list"},
     {"mcp.audit", CAP_TOOL_EXECUTE, "MCP OSV audit"},
     {"mcp.recheck", CAP_TOOL_EXECUTE, "MCP OSV recheck"},
     {"mcp.call", CAP_TOOL_EXECUTE, "MCP tool call"},

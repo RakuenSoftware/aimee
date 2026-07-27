@@ -1001,20 +1001,18 @@ static int g_listen_fd = -1;         /* UDS listener (always bound) */
 static int g_tcp_fd = -1;            /* optional localhost TCP listener */
 static int g_tls_fd = -1;            /* optional native-TLS listener (phase 1b) */
 static int g_management_tls_fd = -1; /* dedicated required-mTLS management listener */
-static char g_bearer[256] = "";      /* configured TCP bearer (empty = none) */
-static int g_rate_limit = 0;         /* TCP requests / 60s (0 = unlimited) */
-int g_remote_writes = 0;             /* aimee.api.remote_writes: parsed, authorizes nothing */
+static char g_uds_path[sizeof(((struct sockaddr_un *)0)->sun_path)] = "";
+static char g_bearer[256] = ""; /* configured TCP bearer (empty = none) */
+static int g_rate_limit = 0;    /* TCP requests / 60s (0 = unlimited) */
+int g_remote_writes = 0;        /* aimee.api.remote_writes: parsed, authorizes nothing */
 static server_http_rate_state_t g_rate_state = {0, 0};
 static pthread_mutex_t g_rate_lock = PTHREAD_MUTEX_INITIALIZER;
 /* guards g_rate_state across conns */
 static pthread_t g_thread;
 static atomic_int g_running = 0;
 static int g_thread_active = 0;
-/* Serializes listener publication and teardown. In particular, start cannot
- * reuse a just-closed fd until the old accept loop has observed its stop and
- * exited. */
+/* Serialize publication/teardown so start cannot reuse an fd before the old loop exits. */
 static pthread_mutex_t g_listener_lifecycle_lock = PTHREAD_MUTEX_INITIALIZER;
-
 const char *server_http_default_path(void)
 {
    static char path[512];
@@ -2331,6 +2329,7 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
       pthread_mutex_unlock(&g_listener_lifecycle_lock);
       return listener_failure;
    }
+   snprintf(g_uds_path, sizeof(g_uds_path), "%s", addr.sun_path);
 
    /* Optional localhost TCP listener for OpenAI-style external tools. */
    g_bearer[0] = '\0';
@@ -2474,9 +2473,7 @@ void server_http_stop(void)
     * entered the handler, then join the complete request lifetime before
     * tearing down its checkpoint-client credentials. */
    server_http_management_actions_shutdown_begin();
-   /* Wake poll/accept without releasing descriptor numbers yet. Closing first
-    * would let an unrelated thread reuse a number while the old accept loop
-    * still holds it in its poll snapshot. */
+   /* Wake poll/accept before closing, so another thread cannot reuse its snapshotted fds. */
    if (g_listen_fd >= 0)
       shutdown(g_listen_fd, SHUT_RDWR);
    if (g_tcp_fd >= 0)
@@ -2495,6 +2492,9 @@ void server_http_stop(void)
    close_listener_fd(&g_tcp_fd);
    close_listener_fd(&g_tls_fd);
    close_listener_fd(&g_management_tls_fd);
+   if (g_uds_path[0])
+      unlink(g_uds_path);
+   g_uds_path[0] = '\0';
    server_mgmt_checkpoint_client_stop();
    pthread_mutex_unlock(&g_listener_lifecycle_lock);
 }
