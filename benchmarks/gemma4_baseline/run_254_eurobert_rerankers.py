@@ -65,6 +65,10 @@ def pairwise_report_command(
     ]
 
 
+def evaluation_labels(manifest: dict[str, Any]) -> list[str]:
+    return [label for model in manifest["models"] for label in (model["pretrained_label"], model["label"])]
+
+
 def assert_completed_pairwise_index(path: Path, labels: list[str]) -> dict[str, Any]:
     index = json.loads(path.read_text(encoding="utf-8"))
     expected_pairs = list(itertools.combinations(["ettin68m", "ettin400m", *labels], 2))
@@ -91,6 +95,11 @@ def wait_container_gone(socket: str, name: str, timeout: int = 60) -> None:
             return
         time.sleep(0.25)
     raise RuntimeError(f"container name was not released: {name}")
+
+
+def remove_container(socket: str, name: str) -> None:
+    run(docker_cmd(socket, "rm", "--force", name), capture=True, check=False)
+    wait_container_gone(socket, name)
 
 
 def wait_health(url: str, timeout: int = 900, accepted_status: str = "ready") -> dict[str, Any]:
@@ -204,7 +213,8 @@ def gpu_container_prefix(
     if detach:
         command.append("--detach")
     command += [
-        "--rm",
+        "--restart",
+        "unless-stopped" if detach else "on-failure:1",
         "--name",
         name,
         "--network",
@@ -239,7 +249,9 @@ def train_model(
     label: str,
     output_dir: Path,
 ) -> None:
-    command = gpu_container_prefix(socket, f"eurobert-train-{label}", root, repo, image)
+    name = f"eurobert-train-{label}"
+    remove_container(socket, name)
+    command = gpu_container_prefix(socket, name, root, repo, image)
     command += [
         "/repo/benchmarks/gemma4_baseline/train_eurobert_reranker.py",
         "--manifest",
@@ -250,7 +262,10 @@ def train_model(
         f"/bench/{output_dir.relative_to(root)}",
         "--resume",
     ]
-    run(command)
+    try:
+        run(command)
+    finally:
+        remove_container(socket, name)
 
 
 def smoke_model(
@@ -262,7 +277,9 @@ def smoke_model(
     label: str,
     output_path: Path,
 ) -> None:
-    command = gpu_container_prefix(socket, f"eurobert-smoke-{label}", root, repo, image)
+    name = f"eurobert-smoke-{label}"
+    remove_container(socket, name)
+    command = gpu_container_prefix(socket, name, root, repo, image)
     command += [
         "/repo/benchmarks/gemma4_baseline/smoke_eurobert_runtime.py",
         "--manifest",
@@ -272,7 +289,10 @@ def smoke_model(
         "--output",
         f"/bench/{output_path.relative_to(root)}",
     ]
-    run(command)
+    try:
+        run(command)
+    finally:
+        remove_container(socket, name)
 
 
 def start_server(
@@ -281,18 +301,35 @@ def start_server(
     repo: Path,
     image: str,
     label: str,
-    model_dir: Path,
+    model: dict[str, Any],
+    model_dir: Path | None,
     serving: dict[str, Any],
 ) -> tuple[str, dict[str, Any], float]:
     started = time.monotonic()
     name = "eurobert-reranker-server"
-    run(docker_cmd(socket, "stop", name), capture=True, check=False)
-    wait_container_gone(socket, name)
+    remove_container(socket, name)
     command = gpu_container_prefix(socket, name, root, repo, image, detach=True)
+    if model_dir is None:
+        command += [
+            "/repo/benchmarks/gemma4_baseline/serve_eurobert_biencoder.py",
+            "--model",
+            model["repository"],
+            "--revision",
+            model["revision"],
+            "--expected-model-type",
+            model["expected_model_type"],
+            "--expected-hidden-size",
+            str(model["expected_hidden_size"]),
+            "--expected-layers",
+            str(model["expected_layers"]),
+        ]
+    else:
+        command += [
+            "/repo/benchmarks/gemma4_baseline/serve_cross_encoder.py",
+            "--model",
+            f"/bench/{model_dir.relative_to(root)}",
+        ]
     command += [
-        "/repo/benchmarks/gemma4_baseline/serve_cross_encoder.py",
-        "--model",
-        f"/bench/{model_dir.relative_to(root)}",
         "--port",
         str(serving["port"]),
         "--batch-size",
@@ -315,8 +352,87 @@ def start_server(
 def stop_server(socket: str, logs_path: Path) -> None:
     logs = run(docker_cmd(socket, "logs", "eurobert-reranker-server"), capture=True, check=False)
     logs_path.write_text(logs.stdout + logs.stderr, encoding="utf-8")
-    run(docker_cmd(socket, "stop", "eurobert-reranker-server"), capture=True, check=False)
-    wait_container_gone(socket, "eurobert-reranker-server")
+    remove_container(socket, "eurobert-reranker-server")
+
+
+def benchmark_model(
+    socket: str,
+    root: Path,
+    repo: Path,
+    image: str,
+    manifest: dict[str, Any],
+    model: dict[str, Any],
+    label: str,
+    model_dir: Path | None,
+    results: Path,
+    logs: Path,
+    extension_sha: str,
+    max_cases: int,
+) -> None:
+    _, health, load_seconds = start_server(
+        socket,
+        root,
+        repo,
+        image,
+        label,
+        model,
+        model_dir,
+        manifest["serving"],
+    )
+    after_load = hardware_snapshot()
+    try:
+        command = [
+            "python3",
+            str(repo / "benchmarks/gemma4_baseline/run_reranking_ab.py"),
+            "--endpoint",
+            f"http://127.0.0.1:{manifest['serving']['port']}",
+            "--label",
+            label,
+            "--bundle",
+            str(repo / "benchmarks/fixtures/gemma4-unified/ab-v1"),
+            "--output-dir",
+            str(results / label),
+            "--workers",
+            str(manifest["serving"]["workers"]),
+            "--pair-batch-size",
+            str(manifest["serving"]["pairs_per_request"]),
+            "--query-char-cap",
+            str(manifest["serving"]["query_char_cap"]),
+            "--candidate-char-cap",
+            str(manifest["serving"]["candidate_char_cap"]),
+            "--environment-note",
+            json.dumps({"extension_manifest_sha256": extension_sha, "health": health}, sort_keys=True),
+        ]
+        if max_cases:
+            command += ["--max-cases", str(max_cases)]
+        run(command)
+        after_run = hardware_snapshot()
+        label_results = results / label
+        label_results.mkdir(exist_ok=True)
+        (label_results / "hardware_reranking.json").write_text(
+            json.dumps(
+                {
+                    "cold_load_seconds": load_seconds,
+                    "load_profile": manifest["serving"],
+                    "health": health,
+                    "after_load": after_load,
+                    "after_run": after_run,
+                },
+                indent=2,
+                sort_keys=True,
+            ) + "\n",
+            encoding="utf-8",
+        )
+    finally:
+        stop_server(socket, logs / f"server_{label}.log")
+    if not max_cases:
+        validate_and_write_checkpoint(
+            repo / "benchmarks/fixtures/gemma4-unified/ab-v1",
+            results / label,
+            label,
+            "reranking",
+            results / label / "validation_reranking.json",
+        )
 
 
 def main() -> int:
@@ -386,10 +502,27 @@ def main() -> int:
             write_state(state_path, status="building_runtime")
             build_image(args.socket, args.repo, manifest)
         for label in selected:
+            model = by_label[label]
             model_root = models_root / label
             final_dir = model_root / "final"
             smoke_path = model_root / "runtime_smoke.json"
-            smoke_expected = expected_smoke_provenance(manifest_path, manifest, by_label[label])
+            pretrained_label = model["pretrained_label"]
+            write_state(state_path, status="pretrained_reranking", active_label=pretrained_label)
+            benchmark_model(
+                args.socket,
+                args.root,
+                args.repo,
+                manifest["runtime"]["image_tag"],
+                manifest,
+                model,
+                pretrained_label,
+                None,
+                results,
+                logs,
+                extension_sha,
+                args.max_cases,
+            )
+            smoke_expected = expected_smoke_provenance(manifest_path, manifest, model)
             try:
                 assert_completed_smoke(smoke_path, smoke_expected)
                 smoke_complete = True
@@ -407,7 +540,7 @@ def main() -> int:
                     smoke_path,
                 )
             assert_completed_smoke(smoke_path, smoke_expected)
-            expected = expected_provenance(manifest_path, manifest, by_label[label])
+            expected = expected_provenance(manifest_path, manifest, model)
             try:
                 assert_completed_training_dir(model_root, expected)
                 training_complete = True
@@ -427,76 +560,27 @@ def main() -> int:
                     model_root,
                 )
             assert_completed_training_dir(model_root, expected)
-            write_state(state_path, status="reranking", active_label=label)
-            _, health, load_seconds = start_server(
+            write_state(state_path, status="trained_reranking", active_label=label)
+            benchmark_model(
                 args.socket,
                 args.root,
                 args.repo,
                 manifest["runtime"]["image_tag"],
+                manifest,
+                model,
                 label,
                 final_dir,
-                manifest["serving"],
+                results,
+                logs,
+                extension_sha,
+                args.max_cases,
             )
-            after_load = hardware_snapshot()
-            try:
-                command = [
-                    "python3",
-                    str(args.repo / "benchmarks/gemma4_baseline/run_reranking_ab.py"),
-                    "--endpoint",
-                    f"http://127.0.0.1:{manifest['serving']['port']}",
-                    "--label",
-                    label,
-                    "--bundle",
-                    str(args.repo / "benchmarks/fixtures/gemma4-unified/ab-v1"),
-                    "--output-dir",
-                    str(results / label),
-                    "--workers",
-                    str(manifest["serving"]["workers"]),
-                    "--pair-batch-size",
-                    str(manifest["serving"]["pairs_per_request"]),
-                    "--query-char-cap",
-                    str(manifest["serving"]["query_char_cap"]),
-                    "--candidate-char-cap",
-                    str(manifest["serving"]["candidate_char_cap"]),
-                    "--environment-note",
-                    json.dumps({"extension_manifest_sha256": extension_sha, "health": health}, sort_keys=True),
-                ]
-                if args.max_cases:
-                    command += ["--max-cases", str(args.max_cases)]
-                run(command)
-                after_run = hardware_snapshot()
-                label_results = results / label
-                label_results.mkdir(exist_ok=True)
-                (label_results / "hardware_reranking.json").write_text(
-                    json.dumps(
-                        {
-                            "cold_load_seconds": load_seconds,
-                            "load_profile": manifest["serving"],
-                            "health": health,
-                            "after_load": after_load,
-                            "after_run": after_run,
-                        },
-                        indent=2,
-                        sort_keys=True,
-                    ) + "\n",
-                    encoding="utf-8",
-                )
-            finally:
-                stop_server(args.socket, logs / f"server_{label}.log")
-            if not args.max_cases:
-                validate_and_write_checkpoint(
-                    args.repo / "benchmarks/fixtures/gemma4-unified/ab-v1",
-                    results / label,
-                    label,
-                    "reranking",
-                    results / label / "validation_reranking.json",
-                )
         write_state(state_path, status="complete", active_label=None)
     except Exception as exc:
         write_state(state_path, status="failed", error=f"{type(exc).__name__}: {exc}")
         raise
     finally:
-        run(docker_cmd(args.socket, "stop", "eurobert-reranker-server"), capture=True, check=False)
+        remove_container(args.socket, "eurobert-reranker-server")
         if production_was_running:
             try:
                 restore_production(
@@ -525,7 +609,7 @@ def main() -> int:
                 )
             )
             pairwise_index_path = results / "reranker_pairwise/INDEX.json"
-            pairwise_index = assert_completed_pairwise_index(pairwise_index_path, list(by_label))
+            pairwise_index = assert_completed_pairwise_index(pairwise_index_path, evaluation_labels(manifest))
             write_state(
                 state_path,
                 pairwise_status="complete",

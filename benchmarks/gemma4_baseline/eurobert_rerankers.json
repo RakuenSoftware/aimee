@@ -17,22 +17,41 @@
       "agnews",
       "amazon_qa",
       "arxiv_title_abstract",
-      "biorxiv_title_abstract",
       "gooaq_qa",
-      "msmarco",
+      "quora",
       "stackexchange_qa",
-      "stackoverflow_title_body"
+      "stackoverflow_title_body",
+      "rerank_fever",
+      "rerank_fiqa",
+      "rerank_hotpotqa",
+      "rerank_msmarco",
+      "rerank_nq",
+      "rerank_squadv2",
+      "rerank_trivia"
     ],
-    "examples_per_config": 72000,
-    "selection": "ordered train prefix at the pinned dataset revision",
+    "examples_per_config": 39000,
+    "selection": "equal per-config train prefixes at the pinned revision, then deterministic global shuffle",
+    "shuffle": true,
     "loss": "MSELoss with identity activation over teacher scores",
     "max_length": 512,
     "per_device_batch_size": 4,
-    "gradient_accumulation_steps": 4,
-    "effective_batch_size": 16,
+    "gradient_accumulation_steps": 32,
+    "effective_batch_size": 128,
     "epochs": 1,
-    "learning_rate": 0.00003,
-    "warmup_ratio": 0.03,
+    "learning_rate": 0.000028,
+    "warmup_ratio": 0.1,
+    "weight_decay": 0.1,
+    "adam_beta1": 0.9,
+    "adam_beta2": 0.95,
+    "adam_epsilon": 0.00001,
+    "lr_scheduler_type": "linear",
+    "validation": {
+      "config": "quora",
+      "split": "validation[:5000]",
+      "selection": "pinned dataset validation split; never the frozen 10k benchmark",
+      "metric": "eval_loss",
+      "eval_steps": 500
+    },
     "seed": 12,
     "precision": "bf16",
     "gradient_checkpointing": true
@@ -50,23 +69,29 @@
   "models": [
     {
       "label": "eurobert210m_reranker",
+      "pretrained_label": "eurobert210m_pretrained",
       "family": "EuroBERT",
       "parameters": "210M",
       "repository": "EuroBERT/EuroBERT-210m",
       "revision": "39b51e15dd1f1a06f58b5cbf6a8a188cec60bd0e",
       "expected_model_type": "eurobert",
       "expected_hidden_size": 768,
-      "expected_layers": 12
+      "expected_layers": 12,
+      "classifier_pooling": "late",
+      "learning_rate": 0.000028
     },
     {
       "label": "eurobert610m_reranker",
+      "pretrained_label": "eurobert610m_pretrained",
       "family": "EuroBERT",
       "parameters": "610M",
       "repository": "EuroBERT/EuroBERT-610m",
       "revision": "d9af784ed20db6c2096e335ec6a67dd4a219924c",
       "expected_model_type": "eurobert",
       "expected_hidden_size": 1152,
-      "expected_layers": 26
+      "expected_layers": 26,
+      "classifier_pooling": "late",
+      "learning_rate": 0.000015
     }
   ]
 }

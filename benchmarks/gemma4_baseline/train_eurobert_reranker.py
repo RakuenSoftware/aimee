@@ -121,7 +121,25 @@ def load_training_data(training: dict[str, Any]):
         if set(dataset.column_names) != {"query", "document", "label"}:
             raise RuntimeError(f"{config}: unexpected columns {dataset.column_names}")
         datasets.append(dataset)
-    return concatenate_datasets(datasets)
+    combined = concatenate_datasets(datasets)
+    if training.get("shuffle"):
+        combined = combined.shuffle(seed=int(training["seed"]))
+    return combined
+
+
+def load_validation_data(training: dict[str, Any]):
+    from datasets import load_dataset
+
+    validation = training["validation"]
+    dataset = load_dataset(
+        training["dataset"],
+        validation["config"],
+        split=validation["split"],
+        revision=training["dataset_revision"],
+    )
+    if set(dataset.column_names) != {"query", "document", "label"}:
+        raise RuntimeError(f"validation: unexpected columns {dataset.column_names}")
+    return dataset
 
 
 def verify_loaded_model(model: Any, spec: dict[str, Any]) -> None:
@@ -130,6 +148,7 @@ def verify_loaded_model(model: Any, spec: dict[str, Any]) -> None:
         "model_type": spec["expected_model_type"],
         "hidden_size": spec["expected_hidden_size"],
         "num_hidden_layers": spec["expected_layers"],
+        "classifier_pooling": spec["classifier_pooling"],
     }
     actual = {key: getattr(config, key, None) for key in expected}
     if actual != expected:
@@ -167,6 +186,7 @@ def main() -> int:
     seed = int(training["seed"])
     set_seed(seed)
     train_dataset = load_training_data(training)
+    eval_dataset = load_validation_data(training)
     model = CrossEncoder(
         spec["repository"],
         revision=spec["revision"],
@@ -174,30 +194,48 @@ def main() -> int:
         max_length=int(training["max_length"]),
         activation_fn=torch.nn.Identity(),
         model_kwargs={"attn_implementation": "sdpa"},
+        config_kwargs={"classifier_pooling": spec["classifier_pooling"]},
     )
     verify_loaded_model(model, spec)
     loss = MSELoss(model, activation_fn=torch.nn.Identity())
     checkpoint_dir = args.output_dir / "checkpoints"
+    eval_steps = int(training["validation"]["eval_steps"])
     train_args = CrossEncoderTrainingArguments(
         output_dir=str(checkpoint_dir),
         num_train_epochs=float(training["epochs"]),
         per_device_train_batch_size=int(training["per_device_batch_size"]),
         gradient_accumulation_steps=int(training["gradient_accumulation_steps"]),
-        learning_rate=float(training["learning_rate"]),
+        learning_rate=float(spec.get("learning_rate", training["learning_rate"])),
         warmup_ratio=float(training["warmup_ratio"]),
+        weight_decay=float(training["weight_decay"]),
+        adam_beta1=float(training["adam_beta1"]),
+        adam_beta2=float(training["adam_beta2"]),
+        adam_epsilon=float(training["adam_epsilon"]),
+        lr_scheduler_type=training["lr_scheduler_type"],
         bf16=training["precision"] == "bf16",
         fp16=training["precision"] == "fp16",
         gradient_checkpointing=bool(training["gradient_checkpointing"]),
         seed=seed,
         data_seed=seed,
+        eval_strategy="steps",
+        eval_steps=eval_steps,
         save_strategy="steps",
-        save_steps=2000,
+        save_steps=eval_steps,
         save_total_limit=2,
+        load_best_model_at_end=True,
+        metric_for_best_model=training["validation"]["metric"],
+        greater_is_better=False,
         logging_steps=100,
         report_to="none",
         dataloader_num_workers=min(8, os.cpu_count() or 1),
     )
-    trainer = CrossEncoderTrainer(model=model, args=train_args, train_dataset=train_dataset, loss=loss)
+    trainer = CrossEncoderTrainer(
+        model=model,
+        args=train_args,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        loss=loss,
+    )
     checkpoint = get_last_checkpoint(str(checkpoint_dir)) if args.resume and checkpoint_dir.exists() else None
     trainer.train(resume_from_checkpoint=checkpoint)
     final_dir = args.output_dir / "final"

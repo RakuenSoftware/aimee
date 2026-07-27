@@ -20,28 +20,65 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def model_context(label: str, eurobert_examples: int) -> dict[str, Any]:
+    if label in ETTIN_LABELS:
+        return {
+            "family": "Ettin",
+            "model_state": "released_reranker",
+            "scoring_mode": "cross_encoder_scalar_score",
+            "reranker_training_examples": ETTIN_TRAINING_EXAMPLES,
+        }
+    if label.endswith("_pretrained"):
+        return {
+            "family": "EuroBERT",
+            "model_state": "official_pretrained_base",
+            "scoring_mode": "mean_pooled_bi_encoder_cosine_similarity",
+            "reranker_training_examples": 0,
+        }
+    return {
+        "family": "EuroBERT",
+        "model_state": "ettin_teacher_score_finetuned",
+        "scoring_mode": "cross_encoder_scalar_score",
+        "reranker_training_examples": eurobert_examples,
+    }
+
+
 def comparison_context(left: str, right: str, eurobert_examples: int) -> dict[str, Any]:
-    cross_family = (left in ETTIN_LABELS) != (right in ETTIN_LABELS)
+    left_model = model_context(left, eurobert_examples)
+    right_model = model_context(right, eurobert_examples)
     involves_published_ettin = left in ETTIN_LABELS or right in ETTIN_LABELS
-    context: dict[str, Any] = {
-        "quality_pairing": "same frozen cases, candidate order, input bounds, and scoring metrics",
-        "latency_qualification": (
+    involves_pretrained_control = left.endswith("_pretrained") or right.endswith("_pretrained")
+    if involves_pretrained_control:
+        latency_qualification = (
+            "not_comparable: stock EuroBERT is a mean-pooled bi-encoder cosine quality control, "
+            "not a cross-encoder latency baseline"
+        )
+    elif involves_published_ettin:
+        latency_qualification = (
             "diagnostic_only: published Ettin append-only logs mix the original serialized profile "
             "with the corrected concurrent continuation; quality deltas remain paired"
-        ) if involves_published_ettin else "qualified: both EuroBERT runs use the same clean load profile",
-    }
-    if cross_family:
-        context.update(
-            {
-                "training_budget_equal": False,
-                "ettin_training_examples": ETTIN_TRAINING_EXAMPLES,
-                "eurobert_training_examples": eurobert_examples,
-                "training_budget_note": (
-                    "Released Ettin checkpoints used the full dataset; this bounded EuroBERT experiment "
-                    "uses the declared subset, so the result compares available models rather than equal budgets."
-                ),
-            }
         )
+    else:
+        latency_qualification = "qualified: both trained EuroBERT runs use the same clean cross-encoder load profile"
+    context: dict[str, Any] = {
+        "quality_pairing": "same frozen cases, candidate order, input bounds, and scoring metrics",
+        "latency_qualification": latency_qualification,
+        "models": {left: left_model, right: right_model},
+        "training_budget_equal": (
+            left_model["reranker_training_examples"] == right_model["reranker_training_examples"]
+        ),
+    }
+    if involves_published_ettin:
+        context.update({
+            "ettin_training_examples": ETTIN_TRAINING_EXAMPLES,
+            "eurobert_training_examples": (
+                0 if involves_pretrained_control else eurobert_examples
+            ),
+            "training_budget_note": (
+                "Released Ettin checkpoints used the full dataset; trained EuroBERT uses the declared bounded "
+                "subset, while stock EuroBERT has seen zero reranker examples."
+            ),
+        })
     return context
 
 
@@ -64,7 +101,9 @@ def main() -> int:
     require_restored_state(args.main_state)
     require_restored_state(args.eurobert_state)
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
-    eurobert_labels = tuple(model["label"] for model in manifest["models"])
+    eurobert_labels = tuple(
+        label for model in manifest["models"] for label in (model["pretrained_label"], model["label"])
+    )
     eurobert_examples = len(manifest["training"]["configs"]) * int(manifest["training"]["examples_per_config"])
     labels = (*ETTIN_LABELS, *eurobert_labels)
     states = {

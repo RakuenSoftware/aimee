@@ -23,6 +23,7 @@ builder = importlib.import_module("build_254_fixtures")
 reranker = importlib.import_module("run_reranking_ab")
 eurobert_controller = importlib.import_module("run_254_eurobert_rerankers")
 eurobert_server = importlib.import_module("serve_cross_encoder")
+eurobert_biencoder = importlib.import_module("serve_eurobert_biencoder")
 eurobert_smoke = importlib.import_module("smoke_eurobert_runtime")
 eurobert_trainer = importlib.import_module("train_eurobert_reranker")
 comparison = importlib.import_module("compare_ab")
@@ -162,6 +163,10 @@ class GemmaBaselineContractTests(unittest.TestCase):
             ["eurobert210m_reranker", "eurobert610m_reranker"],
         )
         self.assertEqual(
+            [model["pretrained_label"] for model in manifest["models"]],
+            ["eurobert210m_pretrained", "eurobert610m_pretrained"],
+        )
+        self.assertEqual(
             [model["revision"] for model in manifest["models"]],
             [
                 "39b51e15dd1f1a06f58b5cbf6a8a188cec60bd0e",
@@ -172,10 +177,25 @@ class GemmaBaselineContractTests(unittest.TestCase):
             [(model["expected_hidden_size"], model["expected_layers"]) for model in manifest["models"]],
             [(768, 12), (1152, 26)],
         )
+        self.assertEqual([model["classifier_pooling"] for model in manifest["models"]], ["late", "late"])
         training = manifest["training"]
         self.assertEqual(training["dataset_revision"], "7f07e8686db233d934eacde4bf47a9995f73811e")
-        self.assertEqual(len(training["configs"]) * training["examples_per_config"], 576_000)
-        self.assertEqual(training["effective_batch_size"], 16)
+        self.assertEqual(len(training["configs"]) * training["examples_per_config"], 546_000)
+        self.assertEqual(training["effective_batch_size"], 128)
+        self.assertEqual(
+            set(training["configs"][-7:]),
+            {
+                "rerank_fever", "rerank_fiqa", "rerank_hotpotqa", "rerank_msmarco",
+                "rerank_nq", "rerank_squadv2", "rerank_trivia",
+            },
+        )
+        self.assertTrue(training["shuffle"])
+        self.assertEqual(training["validation"]["split"], "validation[:5000]")
+        self.assertEqual(training["validation"]["metric"], "eval_loss")
+        self.assertEqual(training["warmup_ratio"], 0.1)
+        self.assertEqual(training["weight_decay"], 0.1)
+        self.assertEqual((training["adam_beta1"], training["adam_beta2"]), (0.9, 0.95))
+        self.assertEqual(training["lr_scheduler_type"], "linear")
         self.assertEqual(training["max_length"], 512)
         self.assertEqual(manifest["serving"]["max_length"], training["max_length"])
         self.assertEqual(training["loss"], "MSELoss with identity activation over teacher scores")
@@ -252,6 +272,20 @@ class GemmaBaselineContractTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 eurobert_server.validate_pairs(invalid)
 
+    def test_pretrained_eurobert_control_deduplicates_texts_and_verifies_identity(self) -> None:
+        pairs = [["query", "candidate"], ["query", "second"], ["second", "candidate"]]
+        self.assertEqual(
+            eurobert_biencoder.ordered_unique_texts(pairs),
+            ["query", "candidate", "second"],
+        )
+        config = type("Config", (), {
+            "model_type": "eurobert", "hidden_size": 768, "num_hidden_layers": 12,
+        })()
+        model = type("Model", (), {"config": config})()
+        eurobert_biencoder.verify_model_identity(model, "eurobert", 768, 12)
+        with self.assertRaisesRegex(RuntimeError, "identity mismatch"):
+            eurobert_biencoder.verify_model_identity(model, "eurobert", 1152, 26)
+
     def test_eurobert_controller_requests_exclusive_rocm_devices(self) -> None:
         command = eurobert_controller.gpu_container_prefix(
             "/docker.sock",
@@ -262,9 +296,22 @@ class GemmaBaselineContractTests(unittest.TestCase):
             detach=True,
         )
         self.assertEqual(command[:5], ["docker", "-H", "unix:///docker.sock", "run", "--detach"])
-        self.assertEqual(command.count("--rm"), 1)
+        self.assertNotIn("--rm", command)
+        self.assertEqual(command[command.index("--restart") + 1], "unless-stopped")
         self.assertIn("/dev/kfd:/dev/kfd", command)
         self.assertIn("/dev/dri:/dev/dri", command)
+        one_shot = eurobert_controller.gpu_container_prefix(
+            "/docker.sock", "train", Path("/bench"), Path("/repo"), "image"
+        )
+        self.assertEqual(one_shot[one_shot.index("--restart") + 1], "on-failure:1")
+        manifest = json.loads((MODULES / "eurobert_rerankers.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            eurobert_controller.evaluation_labels(manifest),
+            [
+                "eurobert210m_pretrained", "eurobert210m_reranker",
+                "eurobert610m_pretrained", "eurobert610m_reranker",
+            ],
+        )
         self.assertEqual(eurobert_controller.sweep_lock_flags(True), eurobert_controller.fcntl.LOCK_EX)
         self.assertEqual(
             eurobert_controller.sweep_lock_flags(False),
@@ -282,7 +329,10 @@ class GemmaBaselineContractTests(unittest.TestCase):
                 eurobert_controller.assert_restored_handoff(state_path)
 
     def test_eurobert_controller_verifies_all_pairwise_report_artifacts(self) -> None:
-        labels = ["eurobert210m_reranker", "eurobert610m_reranker"]
+        labels = [
+            "eurobert210m_pretrained", "eurobert210m_reranker",
+            "eurobert610m_pretrained", "eurobert610m_reranker",
+        ]
         expected_pairs = list(
             eurobert_controller.itertools.combinations(["ettin68m", "ettin400m", *labels], 2)
         )
@@ -303,7 +353,7 @@ class GemmaBaselineContractTests(unittest.TestCase):
                 json.dumps({"pair_count": len(reports), "reports": reports}), encoding="utf-8"
             )
             actual = eurobert_controller.assert_completed_pairwise_index(index_path, labels)
-            self.assertEqual(actual["pair_count"], 6)
+            self.assertEqual(actual["pair_count"], 15)
             (output / reports[-1]["file"]).write_text("corrupt", encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "artifact verification failed"):
                 eurobert_controller.assert_completed_pairwise_index(index_path, labels)
@@ -639,15 +689,23 @@ class GemmaBaselineContractTests(unittest.TestCase):
                 comparison.load(path)
 
     def test_cross_family_reranker_report_discloses_training_asymmetry(self) -> None:
-        context = reranker_reports.comparison_context("ettin400m", "eurobert610m_reranker", 576_000)
+        context = reranker_reports.comparison_context("ettin400m", "eurobert610m_reranker", 546_000)
         self.assertIs(context["training_budget_equal"], False)
         self.assertEqual(context["ettin_training_examples"], 143_393_475)
-        self.assertEqual(context["eurobert_training_examples"], 576_000)
+        self.assertEqual(context["eurobert_training_examples"], 546_000)
         self.assertIn("diagnostic_only", context["latency_qualification"])
         eurobert_only = reranker_reports.comparison_context(
-            "eurobert210m_reranker", "eurobert610m_reranker", 576_000
+            "eurobert210m_reranker", "eurobert610m_reranker", 546_000
         )
         self.assertIn("qualified", eurobert_only["latency_qualification"])
+        pretrained = reranker_reports.comparison_context(
+            "eurobert210m_pretrained", "eurobert210m_reranker", 546_000
+        )
+        self.assertIn("not_comparable", pretrained["latency_qualification"])
+        self.assertEqual(
+            pretrained["models"]["eurobert210m_pretrained"]["reranker_training_examples"],
+            0,
+        )
 
     def test_synthesis_resume_does_not_repeat_completed_case(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

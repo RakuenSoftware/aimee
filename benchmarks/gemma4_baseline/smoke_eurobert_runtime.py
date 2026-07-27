@@ -73,6 +73,7 @@ def main() -> int:
         max_length=int(training["max_length"]),
         activation_fn=torch.nn.Identity(),
         model_kwargs={"attn_implementation": "sdpa"},
+        config_kwargs={"classifier_pooling": spec["classifier_pooling"]},
     )
     verify_loaded_model(model, spec)
     model.gradient_checkpointing_enable()
@@ -91,7 +92,10 @@ def main() -> int:
 
     labels = torch.linspace(-1.0, 1.0, batch_size, device=model.device)
     loss_fn = MSELoss(model, activation_fn=torch.nn.Identity())
-    optimizer = torch.optim.AdamW(model.parameters(), lr=float(training["learning_rate"]))
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=float(spec.get("learning_rate", training["learning_rate"])),
+    )
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
     started = time.monotonic()

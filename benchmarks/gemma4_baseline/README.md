@@ -210,12 +210,20 @@ python3 benchmarks/gemma4_baseline/run_254_sweep.py \
 
 The official EuroBERT-210M and EuroBERT-610M checkpoints are masked-language
 encoder bases, not ready-made rerankers. `eurobert_rerankers.json` therefore pins
-both official base revisions and gives each one the same one-score cross-encoder
-head and training recipe. Each model sees the same ordered 576,000-example subset
-of the pinned `cross-encoder/ettin-reranker-v1-data` teacher-score dataset: 72,000
-examples from each of eight declared configurations, MSE loss, 512 tokens, one
-epoch, effective batch 16, seed 12, and bf16. No frozen evaluation row is used for
-training.
+both official base revisions. Before training, each untouched base is measured as
+an attention-masked mean-pooled, L2-normalized bi-encoder cosine control. That
+control has no trained reranking head and is quality-only; its latency is not
+comparable to a cross-encoder.
+
+Each base then receives EuroBERT's one-score, late-token-pooled cross-encoder
+head and the same bounded recipe over the pinned
+`cross-encoder/ettin-reranker-v1-data` teacher scores:
+39,000 examples from each of 14 declared configurations, including all seven
+retrieval reranking configurations, followed by a deterministic global shuffle
+(546,000 examples total). Training uses MSE loss, 512 tokens, one epoch, effective
+batch 128, bf16, linear decay, 10% warmup, weight decay 0.1, and model-specific
+learning rates. Best-checkpoint selection uses 5,000 rows from the pinned Quora
+validation split. No frozen evaluation row is used for training or validation.
 
 This is a bounded matched EuroBERT comparison, not a claim that the training
 budgets are equal to the released Ettin models: Ettin was trained on the full
@@ -223,14 +231,14 @@ budgets are equal to the released Ettin models: Ettin was trained on the full
 delta. The extension deliberately does not alter the frozen fixture manifest, so
 its SHA-256 and all already-completed Ettin/Gemma results remain valid.
 
-The `.254` extension controller builds a manifest-pinned PyTorch/ROCm image,
-requires each model to pass one bf16 forward/backward/AdamW step at the declared
-batch size and 512-token limit, trains or resumes each model, serves aligned
-`/rerank` scores with a 32-pair microbatcher, runs the same 10,000 cases and
-8-worker/4-pair load profile, and restores production in a `finally` block. It
-returns success only after the production health endpoint is ready. The
-controller takes the same `sweep.lock` as the main controller and therefore
-cannot overlap another GPU benchmark:
+The `.254` extension controller builds a manifest-pinned PyTorch/ROCm image. For
+each size it benchmarks the untouched base, requires one bf16
+forward/backward/AdamW smoke step, trains or resumes the cross-encoder, then
+benchmarks the trained model. Both passes use the same frozen 10,000 cases and
+8-worker/4-pair load profile. Containers use explicit SmoothNAS-safe restart and
+cleanup policies, and production is restored in a `finally` block. The controller
+takes the same `sweep.lock` as the main controller and cannot overlap another GPU
+benchmark.
 
 Training completion fails closed: a saved `config.json` alone is not accepted.
 The controller requires a completed provenance record and rechecks the byte size
@@ -252,9 +260,9 @@ Use `--max-cases N` only to smoke-test the runtime. Model, dataset, container,
 Python-package, training, and serving identities are recorded separately from
 the unchanged evaluation-suite identity.
 
-After both EuroBERT rerankers complete and production is restored, the full
-controller generates and verifies all six paired comparisons across Ettin
-68M/400M and EuroBERT 210M/610M. The following command reproduces them manually:
+After both EuroBERT sizes complete and production is restored, the full controller
+generates and verifies all 15 paired comparisons across Ettin 68M/400M plus stock
+and trained EuroBERT 210M/610M. The following command reproduces them manually:
 
 ```sh
 python3 benchmarks/gemma4_baseline/reranker_pairwise_reports.py \
@@ -264,21 +272,10 @@ python3 benchmarks/gemma4_baseline/reranker_pairwise_reports.py \
   --eurobert-state /mnt/media/gemma4-baseline/eurobert_sweep_state.json
 ```
 
-Every cross-family report states the unequal training budgets. Reranking latency
-deltas remain diagnostic until Ettin is rerun from an empty output directory
-under one clean load profile; paired quality deltas remain valid.
-
-The remaining qualification stages can be queued as one resumable, fail-closed
-chain. It waits at the EuroBERT handoff gate, then runs the E4B synthesis-only
-recovery, followed by both required views for Gemma 4 26B-A4B, Gemma 4 31B, and
-Qwen3.6 35B-A3B. A nonzero child exit stops the chain; every child controller
-must restore a healthy production service before returning success. The parent
-also performs an independent final production-health probe before recording the
-chain complete:
-
-```sh
-python3 benchmarks/gemma4_baseline/run_254_remaining_chain.py
-```
+Every report records each model's scoring mode and reranker-example count. Stock
+EuroBERT latency is explicitly non-comparable to cross-encoder latency. Ettin
+latency deltas also remain diagnostic until Ettin is rerun from an empty output
+directory under one clean load profile; paired quality deltas remain valid.
 
 Run the contract tests (exact counts/hashes/shared IDs, matrix enforcement,
 fail-closed secret scanning, reranker bounds, and resume behavior):
