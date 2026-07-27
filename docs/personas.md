@@ -1,166 +1,57 @@
 # Personas
 
-A **persona** is the primary agent's identity, its system-prompt voice, craft
-principles, session-brief hints, the delegate roles it advertises, and its
-**delegate policy**. Personas are server-owned and user-extensible: aimee ships
-nine built-ins and seeds them as editable files, and you can add your own.
+A persona is a named review or working perspective. It changes instructions and preferences, not
+capabilities, credentials, tools, or workspace authority.
 
-## Built-in personas
+Built-in personas cover engineering, architecture, security, QA, review, contrarian review, and
+technical writing. List the running catalog instead of relying on a copied count.
 
-| Persona | Role | Delegate policy |
-|---|---|---|
-| `engineer` (default) | Autonomous software engineer | **full**, must delegate multi-file/infra/parallel work |
-| `novel` | Fiction author / worldbuilder | **readonly**, writes prose itself; read-only delegates only (continuity, beat-check, review) |
-| `songwriter` | Songwriter / lyricist | **none**, does all the work itself; no delegates |
-| `qa` | Senior QA / test reviewer | **readonly**, reviews and reports; read-only delegates only (review, diagnose, validate, research) |
-| `security` | Senior application-security reviewer | **readonly**, reviews and reports; read-only delegates only (review, diagnose, validate, research) |
-| `reviewer` | Senior **contrarian** code reviewer (thorough, comprehensive) | **readonly**, reviews and reports; read-only delegates only (review, diagnose, validate, research) |
-| `reviewer-constructive` | Senior **constructive** code reviewer (assess as written) | **readonly**, reviews and reports; read-only delegates only (review, diagnose, validate, research) |
-| `architect` | Software-architecture reviewer | **readonly**, reviews and reports; read-only delegates only (review, diagnose, validate, research) |
-| `technical-writer` | Senior technical writer / documentation reviewer | **readonly**, reviews and reports; read-only delegates only (review, diagnose, validate, research) |
+## Contents
 
-The six reviewer personas (`qa`, `security`, `reviewer`,
-`reviewer-constructive`, `architect`, `technical-writer`) reframe the agent as a read-only senior
-reviewer: it investigates and surfaces findings with evidence, never editing the
-code. They share a common **Review Principles** block and each carry their own
-review methodology. `reviewer` and `reviewer-constructive` are a deliberate pair
-,  the former is adversarial (tries to refute), the latter assesses the work as
-written, so a roundtable panel can blend both stances. `technical-writer`
-judges the documentation of a change — accuracy against the code, completeness,
-clarity, runnable examples — and is an eligible seat on the default `build`
-workflow's documentation gate. It writes and reviews to a human standard:
-brevity first, and machine-sounding prose (AI clichés, filler, padded
-sentences) is itself a finding.
+A persona can define:
 
-## Where personas live
+- name and short purpose;
+- principles and review lens;
+- expected evidence and output shape;
+- role preferences;
+- optional model/agent routing hints.
 
-Single markdown files, resolved project → user → built-in:
+Keep it specific. “Be thorough” is not a persona. “Check trust-boundary changes, negative auth tests,
+and secret handling” is.
 
-- Project: `<project>/.aimee/personas/<name>.md`
-- User: `~/.config/aimee/personas/<name>.md`
-- Built-in fallback
-  (engineer/novel/songwriter/qa/security/reviewer/reviewer-constructive/architect/technical-writer)
+## Use
 
-`aimee init` seeds the built-ins as editable files under
-`~/.config/aimee/personas/` (idempotent, it never overwrites an existing file),
-so they are self-documenting starting points you can copy and edit.
-
-## File format
-
-YAML frontmatter + markdown sections:
-
-```markdown
----
-name: noir-detective
-description: Hard-boiled detective narrator
-delegates: readonly          # full | readonly | none  (default: full)
-roles: [continuity, beat-check, review, research]
-check_role: continuity       # done-gate delegate for `aimee manuscript check`
-check_marker: CONTINUITY      # verdict stem (CONTINUITY: PASS|FAIL)
----
-## Persona
-You are a hard-boiled detective novelist working in %s.
-Write in terse, atmospheric first-person...
-
-## Principles
-# Craft Principles
-- Keep the voice clipped and cynical...
-
-## Brief
-- Recall the case facts before writing a scene.
+```bash
+aimee delegate review --persona security "Review the current diff"
+aimee delegate code --persona engineer "Implement this accepted slice"
 ```
 
-- `%s` in **Persona** is replaced with the working directory.
-- All sections and frontmatter keys are optional; sensible defaults apply
-  (an unknown persona resolves to `engineer`; an omitted `delegates` is `full`).
+Delegate commands require a persona where the help says so. A persona used with a write role still
+needs normal write authority.
 
-## Delegate policy (config-controlled)
+## Roundtables
 
-The `delegates` frontmatter key controls whether and how the agent may use
-`aimee delegate`. It is enforced two ways, a strong instruction in the agent's
-prompt, **and** a hard refusal at the command:
+Roundtable presets assign personas to seats. The seat then pins a model or selects a random eligible
+review agent. The persona is the lens; the seat/model is the identity that ran it.
 
-- **`full`**, the agent is told it MUST delegate multi-file changes,
-  infrastructure, deployments, and parallel work. All roles allowed.
-- **`readonly`**, the agent does writing/editing itself and may use **read-only
-  delegates only** (review/checks). `aimee delegate <write-role>` is refused.
-- **`none`**, `aimee delegate` is refused entirely; the agent does all work
-  itself.
+Workflow `gate.roundtable` names a preset and can require particular personas. If the panel cannot be
+formed, the gate parks rather than lowering quorum silently.
 
-In every persona the **Agent tool is disabled** (it is removed from the agent's
-toolset); aimee delegates are the only sub-agent mechanism.
+## Custom personas
 
-## Using a persona
+Store custom persona files in the configured persona directory and manage them through the browser
+or typed persona API where available. Validate the name, keep files private when they contain
+organization policy, and version changes that affect workflow review.
 
-- **From the CLI:** `aimee persona use <name>` switches the session's persona;
-  `aimee persona list` shows the available personas. (The `/persona` slash command
-  lived in the OpenCode TUI bridge, which has been removed.)
-  `/engineer`, `/novel`, `/songwriter` are aliases. The persona is stored
-  per-session on the server.
-- **In webchat:** the persona is per-session too. The webchat server exposes
-  `GET /api/chat/personas` (the selector list) and `GET`/`POST /api/chat/persona`
-  (read / set the session's persona), proxied to aimee-server's `/v1` API over
-  its Unix socket. A set persona is sticky for that browser session, so both the
-  chat system prompt and delegate-policy enforcement honor it, exactly like a
-  TUI session.
-- **Durable default:** `aimee init --novel` / `--songwriter` sets the default
-  persona for the install (written to `~/.config/aimee/mode`).
-- **Inspect:** over the V1 API (below), `GET /v1/personas`.
+Do not put credentials, private user data, or unbounded project context in a persona.
 
-## Assigning a persona to a delegate (required)
+## Design rules
 
-Every delegate runs **as a persona**; it is **required**, not optional. The
-persona sets the delegate's identity and principles; for a non-engineer
-built-in or a custom persona, its identity prose (the "You are …" body) is
-layered onto the role template, so e.g. a `review` delegate run as `security`
-reviews with the security reviewer's methodology rather than the generic
-engineer framing.
+- one clear lens per persona;
+- observable evidence requirements;
+- no claims of authority the runtime does not grant;
+- no provider-specific tricks unless the persona is explicitly provider-bound;
+- stable names for workflow and roundtable references;
+- short enough to leave room for the actual task and evidence.
 
-- **CLI:** `aimee delegate <role> --persona <name> "prompt"`. Omitting
-  `--persona` is an error. An unknown persona name warns and falls back to the
-  engineer principles.
-- **MCP `delegate` tool:** `persona` is a **required** property alongside `role`
-  and `prompt`.
-
-The persona name resolves from the built-ins or a user-level persona file (the
-same set as the rest of the persona surface). The delegate's *role* still
-governs tool access and write capability; the *persona* governs its identity and
-principles, and they compose.
-
-## Personas in roundtables and workflows
-
-A **roundtable** review panel is staffed by personas: each panelist is a persona
-run on a delegate model, and the panel pairs personas to models reproducibly run
-to run (the contrarian `reviewer` and constructive `reviewer-constructive` make a
-natural adversarial/constructive split). The default review panel is
-`security`, `architect`, `qa`, `reviewer`.
-
-In a [workflow](WORKFLOWS.md), a `gate.roundtable` step names its panel by
-persona, and any action step can be assigned a persona/delegate pair:
-
-```yaml
-- id: review
-  block: gate.roundtable
-  params:
-    panel:
-      required: [security, architect, qa, reviewer]
-    quorum: 4
-```
-
-The webchat **Workflows** tab includes a persona manager (create/edit personas)
-and a per-step persona picker, both backed by `/api/chat/personas`. So the same
-eight built-ins, plus any you add, are the vocabulary for chat identity,
-delegate assignment, roundtable panels, and per-step workflow roles alike.
-
-## V1 HTTP API
-
-Personas are reached over aimee-server's `/v1` HTTP API (Unix socket
-`~/.config/aimee/aimee-http.sock`), clients never read the files directly:
-
-| Method & path | Returns |
-|---|---|
-| `GET /v1/personas` | list (`name`, `description`, `builtin`) |
-| `GET /v1/personas/<name>` | full persona (roles, check_role, check_marker, delegates, builtin) |
-| `GET /v1/persona` | the active durable-default persona |
-| `GET /v1/sessions/<id>/persona` | the session's persona (else durable default) |
-| `POST /v1/sessions/<id>/persona` `{"name":...}` | set the session's persona |
+See [Delegates](DELEGATES.md) and [Roundtables](ENSEMBLE.md).

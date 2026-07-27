@@ -1,59 +1,37 @@
-# aimee: VS Code extension
+# VS Code extension
 
-Chat with **aimee** inside VS Code. Prompts are routed through `aimee-server`'s
-OpenAI-compatible `/v1` API, so they go through aimee's delegate fabric with
-memory and guardrails applied, with no new server protocol, just the surface that
-already ships (see [docs/VSCODE.md](../../docs/VSCODE.md) and
-[the proposal](../../docs/proposals/pending/vscode-integration.md)).
+The extension connects VS Code to `aimee-server` through existing `/v1` APIs. It adds:
 
-> **Status: Tier 3 complete (phases 1-5).** Ships the `@aimee` chat participant
-> (**stateful** - streams `/v1/responses` and threads `previous_response_id`, so
-> aimee's session memory persists across turns), a server-health status item,
-> command-palette queries (**aimee: Recall from memory** -> `/v1/memory/recall`,
-> **aimee: Search knowledge base** -> `/v1/kb/search`, results in the *aimee*
-> output channel), a **Language Model Chat Provider** registering "aimee" in the
-> native model picker (select it as the model for any chat; streams
-> `/v1/chat/completions`; requires VS Code 1.104+, the rest works on older
-> builds), and a **docked chat panel** (**aimee: Open chat panel**). Reusing the
-> full `frontend/` React webchat as the panel is a possible future refinement.
+- an `@aimee` chat participant;
+- an aimee language-model provider in the model picker;
+- memory and KB search commands;
+- a server-health status item;
+- a docked chat panel.
 
-## Setup
+Conversation turns keep the server response/session identifier so memory and tool state continue
+across turns. The extension owns no server state.
 
-1. Enable the aimee-server loopback `/v1` listener and get a token:
+## Configure
 
-   ```bash
-   aimee api status
-   ```
+Run:
 
-   If it reports *disabled*, add to `~/.config/aimee/aimee.yaml`:
+```bash
+aimee api status
+```
 
-   ```yaml
-   aimee:
-     api:
-       http_port: 8910
-       bearer_token: "<generate-a-long-random-secret>"
-       rate_limit_per_min: 60
-   ```
+Set the reported API base and an appropriately scoped credential in VS Code settings. Prefer an
+enrolled HTTPS endpoint; use loopback HTTP only for a local server.
 
-   then `aimee server restart`. A `project:`-scoped bearer is recommended so the
-   editor can read and chat but not perform admin mutations.
-
-2. In VS Code settings, set:
-   - `aimee.apiBase`: default `http://127.0.0.1:8910/v1`
-   - `aimee.bearerToken`: your `bearer_token`
-
-3. Open **Copilot Chat** and type `@aimee <your prompt>`.
-
-The status-bar item (right side) shows whether aimee-server is reachable; click
-it (or run **aimee: Show server status**) to re-check.
-
-## Build (sideload)
+## Build
 
 ```bash
 cd editors/vscode
 npm install
-npm run compile        # tsc -> out/extension.js
-# package a .vsix with: npx @vscode/vsce package
+npm run check
+npm run compile
 ```
 
-`npm run check` type-checks without emitting.
+Package with `npx @vscode/vsce package` when the extension manifest and target VS Code version are
+ready.
+
+See [VS Code](../../docs/VSCODE.md).
