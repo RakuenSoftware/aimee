@@ -36,7 +36,7 @@ static pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
 static int g_active = 0;
 static int g_waiters = 0;
 static long g_grants = 0, g_timeouts = 0, g_stuck = 0, g_poisoned = 0;
-static int64_t g_hold_ceiling_ms = 300000; /* settable for tests */
+static int64_t g_hold_ceiling_ms = DB2_POOL_HOLD_CEILING_MS; /* settable for tests */
 static pthread_t g_reaper_thread;
 static volatile int g_reaper_stop = 0;
 static int g_reaper_running = 0;
@@ -363,7 +363,7 @@ void db2_pool_shutdown(void)
 void db2_pool_set_test_ceiling_ms(int ceiling_ms)
 {
    pthread_mutex_lock(&g_mtx);
-   g_hold_ceiling_ms = ceiling_ms > 0 ? ceiling_ms : 300000;
+   g_hold_ceiling_ms = ceiling_ms > 0 ? ceiling_ms : DB2_POOL_HOLD_CEILING_MS;
    pthread_mutex_unlock(&g_mtx);
 }
 
