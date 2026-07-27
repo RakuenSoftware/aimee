@@ -77,7 +77,7 @@ int main(void)
     * have merged. Hence the predicate fails SAFE toward retry. */
    assert(git_pr_merge_err_is_conflict("github API (pr merge, HTTP 405): Pull Request has merge "
                                        "conflicts"));
-   assert(git_pr_merge_err_is_conflict("merge conflict")); /* minimal phrasing */
+   assert(git_pr_merge_err_is_conflict("merge conflict"));           /* minimal phrasing */
    assert(git_pr_merge_err_is_conflict("MERGE CONFLICTS DETECTED")); /* case-insensitive */
 
    /* Lost races must stay retryable — these are the messages a retry wins. */

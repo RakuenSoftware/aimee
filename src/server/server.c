@@ -41,8 +41,8 @@
 #include "server_pipeline.h" /* roundtable authoring pipeline (pipeline.*) */
 #include "commands.h"
 #include "agent.h"
-#include "agent_exec.h"     /* agent_audit_async_flush — drain audit queue at shutdown */
-#include "webuser_editor.h" /* webuser_editor_shutdown — reap editors at shutdown (WP-I) */
+#include "agent_exec.h"      /* agent_audit_async_flush — drain audit queue at shutdown */
+#include "webuser_editor.h"  /* webuser_editor_shutdown — reap editors at shutdown (WP-I) */
 #include "agent_admission.h" /* agent_admission_agent_active — route capacity probe */
 #include "agent_config.h"
 #include "provider_catalog.h"
@@ -2348,10 +2348,7 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * delegates to itself, and an agent flagged "Primary Agent Only"
     * (agents.json `primary_only`) is never a delegation target. */
    agent_set_route_policy_filter(server_agent_route_policy_excluded);
-   /* Prefer a seat with a free concurrency slot. Routing otherwise hands out an
-    * agent already at max_parallel, which admission immediately rejects — and
-    * at-limit deliberately never records provider health, so such an agent is
-    * never marked DOWN and stays selectable indefinitely. */
+   /* Prefer a seat with a free slot over a saturated one (see agent_config.h). */
    agent_set_route_capacity_probe(agent_admission_agent_active);
    LOG_INFO("server",
             "initialized (v%s, protocol %d, background=%d session=%d threads); /v1 HTTP "

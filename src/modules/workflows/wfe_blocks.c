@@ -1312,8 +1312,8 @@ int wfe_slice_recreates_base_path(const char *workdir, const char *base_ref, con
 
    /* Paths this slice ADDED relative to where it was cut. -z keeps paths with
     * spaces/specials unambiguous (no core.quotePath quoting). */
-   const char *argv[] = {"git", "-C",          workdir, "diff",           "--name-only",
-                         "-z",  "--diff-filter=A",      base_sha, "HEAD", NULL};
+   const char *argv[] = {"git",    "-C",   workdir, "diff", "--name-only", "-z", "--diff-filter=A",
+                         base_sha, "HEAD", NULL};
    char *added = NULL;
    if (git_capture(argv, &added) != 0 || !added)
    {
