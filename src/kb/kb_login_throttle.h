@@ -72,6 +72,17 @@ extern "C"
    /* Test seam: drop all state. */
    void kb_login_throttle_reset(void);
 
+   /* Test seam: pin the slot seed so placement is reproducible.
+    *
+    * The seed is per process and random by design, which makes every "some other
+    * identity is unaffected" assertion a coin flip: two fixture names land in the
+    * same slot with probability 1/SLOTS per run, and a suite with several such
+    * names fails often enough to be noticed and re-run rather than read. That is
+    * how a real weakness in this hash stayed hidden -- the failures looked like
+    * noise. Tests pin the seed and get deterministic placement; nothing in the
+    * product calls this, so production keeps the random seed. */
+   void kb_login_throttle_set_seed_for_test(uint64_t seed);
+
 #ifdef __cplusplus
 }
 #endif

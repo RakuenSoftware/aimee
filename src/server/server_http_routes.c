@@ -2354,7 +2354,22 @@ uint32_t v1_route_caps_lookup(const char *method, const char *path)
  * rather than a per-row struct field — avoids a missing-initializer churn across
  * every existing read row under -Wextra. Add a data-write route's op here when
  * you add the row. */
+/* Data-plane writes. A route whose op is NOT here is invisible to the write-tier
+ * gate, so a caller holding only the shared bearer reaches it with no grant.
+ *
+ * index.ingest was missing, and the asymmetry was visible from a plain client on a
+ * clean install: POST /v1/memory/store -> 403 while POST /v1/index/ingest -> 200
+ * for the same caller, with kb then queueing curator work for the new project.
+ * Both the acceptance criteria and QUICKSTART call indexing a data-plane write
+ * needing at least `data`, so the omission was an oversight rather than a
+ * decision — the routes that ARE deliberately reachable without a tier live in
+ * v1_route_tcp_exempt (the workspace resource plane), and this was not one.
+ *
+ * Consequence, and it matches the documented contract: a remote
+ * `aimee workspace add` does registration (exempt) plus ingest, so the ingest half
+ * now needs a `data` grant while registration keeps working with none. */
 static const char *const g_v1_write_ops[] = {"memory.store",
+                                             "index.ingest",
                                              "work.add",
                                              "work.claim",
                                              "work.complete",
