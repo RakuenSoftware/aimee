@@ -58,9 +58,15 @@ wizard: pick a primary agent, choose CPU or GPU, connect a git host, pick worksp
 Then install the `aimee` CLI on each dev machine and point it at the server:
 
 ```bash
-aimee remote set https://host:8743 <token>   # AIMEE_TLS_INSECURE=1 for the self-signed cert
-aimee status                                  # server, DB1, and kb health
+aimee remote set https://host:8743 aimee-local-dev  # AIMEE_TLS_INSECURE=1 for the self-signed cert
+aimee status                                        # server, DB1, and kb health
 ```
+
+`aimee-local-dev` is a **one-time bootstrap bearer**: the first `remote set` trades it
+for a strong per-deployment token, pins the server's certificate and enrols a client
+certificate, and it stops working after that. A second machine uses the rotated token
+(the server keeps it in `aimee.yaml` under `aimee.api.bearer_token`). See
+[QUICKSTART 1.3](docs/QUICKSTART.md#13-verify-its-healthy).
 
 aimee wires its hooks and MCP server into your AI coding tools on first run — opt out with
 `AIMEE_NO_CLIENT_INTEGRATIONS=1`.
