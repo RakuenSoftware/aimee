@@ -127,6 +127,31 @@ BEGIN
   -- as kb_admin_grant: runtime holds DML, RLS constrains it.
   GRANT SELECT, INSERT, UPDATE, DELETE ON kb_team_lead TO aimee_kb_runtime;
 
+  -- kb_write_tier_grant authorizes per-user /v1 writes. Runtime READS through
+  -- RLS, but the definer functions are the ONLY write path: a grant change must
+  -- carry a WORM audit row, and kb_audit_worm_append is not granted to runtime
+  -- (so runtime cannot forge audit rows). Withholding INSERT/UPDATE here is what
+  -- makes the audit inseparable from the change rather than merely conventional.
+  -- DELETE stays withheld too: a grant is revoked, never erased.
+  GRANT SELECT ON kb_write_tier_grant TO aimee_kb_runtime;
+  REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON kb_write_tier_grant FROM aimee_kb_runtime;
+
+  -- Identity-token authority state is authority-owned, exactly like the
+  -- management and read intents it sits beside: ordinary runtime must not be
+  -- able to read a pending mint or the immutable key-use record, even though RLS
+  -- would already return no rows. The blanket "GRANT ... ON ALL TABLES" above
+  -- reaches these tables, so the grant has to be taken back explicitly.
+  REVOKE ALL ON kb_management_identity_intent,
+    kb_management_identity_key_use_intent FROM aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION
+    kb_write_tier_grant_set(TEXT,BIGINT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
+  -- The reporting wrapper delegates to the function above for every decision, so it
+  -- needs no privilege the runtime does not already hold.
+  GRANT EXECUTE ON FUNCTION
+    kb_write_tier_grant_set_reporting(TEXT,BIGINT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION
+    kb_write_tier_grant_revoke(TEXT,BIGINT,TEXT) TO aimee_kb_runtime;
+
   -- The metering functions are the ONLY write path; EXECUTE to runtime, never PUBLIC.
   REVOKE ALL ON FUNCTION org_pricing_add_version(TEXT,TEXT,NUMERIC,NUMERIC,NUMERIC,NUMERIC) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_pricing_current_version(TEXT) FROM PUBLIC;
@@ -695,6 +720,16 @@ BEGIN
     public.kb_management_token_authority_readback(TEXT,TEXT),
     public.kb_management_token_authority_finalize(TEXT,TEXT)
     TO aimee_kb_token_authority_runtime;
+  -- The identity mint is reached by the same authority runtime role. Note the
+  -- REVOKE ALL ON ALL FUNCTIONS above: without these grants the identity path
+  -- fails with a permission error (42501) that classifies as DENIED, which is
+  -- indistinguishable from a real authorization refusal at the C layer.
+  GRANT EXECUTE ON FUNCTION
+    public.kb_management_identity_authority_admit(TEXT,TEXT),
+    public.kb_management_identity_authority_use(TEXT,TEXT),
+    public.kb_management_identity_authority_readback(TEXT,TEXT),
+    public.kb_management_identity_authority_finalize(TEXT,TEXT)
+    TO aimee_kb_token_authority_runtime;
   GRANT EXECUTE ON FUNCTION
     public.kb_management_read_authority_claim(TEXT,TEXT,TEXT,INTEGER),
     public.kb_management_read_authority_finalize(TEXT,TEXT,TEXT,TEXT),
@@ -914,6 +949,8 @@ BEGIN
   ALTER TABLE public.kb_management_token_intent_namespace OWNER TO aimee_kb_owner;
   EXECUTE 'ALTER FUNCTION public.kb_management_action_worm_guard() OWNER TO aimee_kb_owner';
   EXECUTE 'ALTER FUNCTION public.kb_management_action_intent_start(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_identity_intent_start(TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_identity_login_context(BIGINT) OWNER TO aimee_kb_owner';
   EXECUTE 'ALTER FUNCTION public.kb_management_action_outcome_append(TEXT,TEXT,TEXT,INTEGER,TEXT) OWNER TO aimee_kb_owner';
   EXECUTE 'ALTER FUNCTION public.kb_management_read_publication_generation() OWNER TO aimee_kb_owner';
   EXECUTE 'ALTER FUNCTION public.kb_management_read_intent_start(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BYTEA,TEXT,TEXT,INTEGER,TEXT) OWNER TO aimee_kb_owner';
@@ -925,6 +962,10 @@ BEGIN
     public.kb_cert_revocation_generation,public.kb_admin_grant,
     public.kb_team_lead,public.kb_team_membership,public.kb_audit_event TO aimee_kb_owner;
   GRANT SELECT,INSERT ON public.kb_management_read_intent TO aimee_kb_owner;
+  -- The identity intent writer runs as this owner; the mint pipeline still runs
+  -- as the token-authority definer, so INSERT/SELECT is all the writer needs.
+  GRANT SELECT,INSERT ON public.kb_management_identity_intent TO aimee_kb_owner;
+  GRANT SELECT ON public.kb_write_tier_grant TO aimee_kb_owner;
   GRANT SELECT ON public.kb_management_jwks_publication_registry,
     public.kb_management_jwks_publication_generation,
     public.kb_management_jwks_publication_candidate,public.kb_management_token_root
@@ -938,6 +979,8 @@ BEGIN
     public.kb_management_read_key_use FROM PUBLIC;
   REVOKE ALL ON FUNCTION public.kb_management_action_worm_guard(),
     public.kb_management_action_intent_start(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT),
+    public.kb_management_identity_intent_start(TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT),
+    public.kb_management_identity_login_context(BIGINT),
     public.kb_management_action_outcome_append(TEXT,TEXT,TEXT,INTEGER,TEXT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION public.kb_management_read_transition_guard(),
     public.kb_management_read_worm_guard(),
@@ -955,6 +998,8 @@ BEGIN
       FROM aimee_kb_runtime;
     GRANT EXECUTE ON FUNCTION
       public.kb_management_action_intent_start(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT),
+      public.kb_management_identity_intent_start(TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT),
+      public.kb_management_identity_login_context(BIGINT),
       public.kb_management_action_outcome_append(TEXT,TEXT,TEXT,INTEGER,TEXT)
       TO aimee_kb_runtime;
     GRANT EXECUTE ON FUNCTION

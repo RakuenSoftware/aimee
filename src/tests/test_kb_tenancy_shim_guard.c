@@ -9,6 +9,7 @@
 #include "project.h"
 #include "membership.h"
 #include "admin_grant.h"
+#include "write_tier_grant.h"
 #include "oidc_jwks.h"
 #include "db_postgres.h"
 
@@ -128,6 +129,19 @@ int main(void)
    REQUIRES_PG(db2_admin_grant_add("k", "oidc", "by", &id), "db2_admin_grant_add");
    REQUIRES_PG(db2_admin_grant_revoke("k"), "db2_admin_grant_revoke");
    REQUIRES_PG(db2_admin_grant_is_active("k"), "db2_admin_grant_is_active");
+
+   {
+      kb_identity_tier_t tier;
+      db2_write_tier_grant_row_t rows[2];
+      size_t count = 0;
+      REQUIRES_PG(db2_write_tier_grant_lookup("srv", 1, "owner", &tier),
+                  "db2_write_tier_grant_lookup");
+      REQUIRES_PG(db2_write_tier_grant_set("srv", 1, "owner", KB_IDENTITY_TIER_DATA, "by"),
+                  "db2_write_tier_grant_set");
+      REQUIRES_PG(db2_write_tier_grant_revoke("srv", 1, "owner"), "db2_write_tier_grant_revoke");
+      REQUIRES_PG(db2_write_tier_grant_list("srv", 1, rows, 2, &count),
+                  "db2_write_tier_grant_list");
+   }
 
    REQUIRES_PG(db2_jwks_add("iss", "kid", "{}", &id), "db2_jwks_add");
    REQUIRES_PG(db2_jwks_retire("iss", "kid"), "db2_jwks_retire");

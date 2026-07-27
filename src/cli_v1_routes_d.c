@@ -32,6 +32,13 @@ static const struct
     {"audit.snapshot", pt_print_audit},
     {"init.run", pt_print_init_run},
     {"rules.generate", pt_print_rules_generate},
+    {"kb.grant.set", pt_print_grant_set},
+    {"kb.grant.revoke", pt_print_grant_revoke},
+    /* show is list filtered to one subject and shares its row shape, so it shares
+     * the printer too; they are distinct methods only so the marshaller can require
+     * show's --subject. */
+    {"kb.grant.list", pt_print_grant_list},
+    {"kb.grant.show", pt_print_grant_list},
     {"skill.list", pt_print_skill_list},
     {"skill.show", pt_print_skill_show},
     {"git.verify", pt_print_git_verify},
@@ -798,6 +805,17 @@ const char *cli_v1_route_for_method(const char *method, const char **verb_out)
        /* Custom-handler routes whose response still matches the dispatch method. */
        {"session.list", "GET", "/v1/sessions"},
        {"kb.search", "POST", "/v1/kb/search"},
+       /* Write-tier grant administration. Bespoke handlers, so the generator cannot see
+        * them; POST on all three because the thin client marshals flags into a body. The
+        * server refuses these over TCP (v1_route_requires_uds), so a remote endpoint fails
+        * there rather than here. */
+       {"kb.grant.set", "POST", "/v1/grants/write-tier/set"},
+       {"kb.grant.revoke", "POST", "/v1/grants/write-tier/revoke"},
+       {"kb.grant.list", "POST", "/v1/grants/write-tier/list"},
+       /* Same route as list: `show` is that listing filtered to one subject, so the row shape
+        * has one definition. Only the METHOD differs, so the marshaller can require a
+        * subject — without that separation, `show` with no subject silently lists everything. */
+       {"kb.grant.show", "POST", "/v1/grants/write-tier/list"},
        {"kb.status", "GET", "/v1/kb/status"},
        {"kb.curator", "GET", "/v1/kb/curator"},
        {"memory.recall", "POST", "/v1/memory/recall"},
@@ -1496,7 +1514,22 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
 
    cJSON *req = marshal_request(route->method, fwd_argc, fwd_argv);
    if (!req)
+   {
+      /* A marshalling failure means the arguments could not be turned into a request, so
+       * NOTHING was sent. That used to exit 2 in total silence for every command in the CLI,
+       * which reads as "it worked" to a script and as nothing at all to a person. A review
+       * asked for a generic explanation and it belongs here rather than in each marshaller.
+       *
+       * Suppressed when the marshaller already printed something specific — a per-method
+       * message is strictly better than this one, and two messages for one mistake is worse
+       * than either alone. */
+      if (!marshal_request_take_reported())
+         fprintf(stderr,
+                 "aimee: '%s' — arguments are missing or invalid, so no request was sent.\n"
+                 "  Run 'aimee help' or the command with no arguments for its usage.\n",
+                 route->method);
       return 2;
+   }
 
    int timeout = route->timeout_ms > 0 ? route->timeout_ms : CLIENT_DEFAULT_TIMEOUT_MS;
    if (strcmp(route->method, "delegate") == 0)

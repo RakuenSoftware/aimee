@@ -50,6 +50,23 @@ static kb_http_body_action_t capture_body(const unsigned char *bytes, size_t len
    return KB_HTTP_BODY_CONTINUE;
 }
 
+static kb_http_result_t parse_parts_ex(const unsigned char *wire, size_t length, size_t split,
+                                       size_t body_max, capture_t *capture, int deliver_error_body)
+{
+   kb_http_response_parser_t *parser = NULL;
+   assert(kb_http_response_parser_init(&parser, body_max, capture_headers, capture_body, capture) ==
+          KB_HTTP_OK);
+   kb_http_response_parser_deliver_error_body(parser, deliver_error_body);
+   kb_http_result_t result = kb_http_response_parser_feed(parser, wire, split);
+   if (result == KB_HTTP_MORE)
+      result = kb_http_response_parser_feed(parser, wire + split, length - split);
+   if (result == KB_HTTP_MORE)
+      result = kb_http_response_parser_finish_eof(parser);
+   kb_http_response_parser_free(&parser);
+   assert(parser == NULL);
+   return result;
+}
+
 static kb_http_result_t parse_parts(const unsigned char *wire, size_t length, size_t split,
                                     size_t body_max, capture_t *capture)
 {
@@ -108,6 +125,67 @@ static void chunked_boundaries(void)
       assert(capture.response.content_length == 0);
       assert(capture.body_len == 9 && memcmp(capture.body, "Wikipedia", 9) == 0);
    }
+}
+
+/* The non-2xx body gate, both ways.
+ *
+ * The DEFAULT (discard) is not merely a performance choice: an error body from
+ * arbitrary egress is attacker-influenced content nobody reads, so it must not be
+ * buffered. The OPT-IN exists because RFC 6749 §5.2 makes the OAuth token endpoint's
+ * 400 body the error carrier — {"error":"invalid_grant"} appears nowhere else.
+ *
+ * This test exists because the opt-in did not, and its absence was invisible: the
+ * token exchange's _DENIED result was UNREACHABLE, so every identity-provider
+ * refusal surfaced as "the IdP sent us something unparseable". Nothing in the unit
+ * suite could show that, because it only appears when a real IdP answers 400. */
+static void error_body_gate(void)
+{
+   /* Content-Length is the exact body length: {"error":"invalid_grant"} is 25 bytes. */
+   static const unsigned char oauth_error[] =
+       "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: 25\r\n\r\n"
+       "{\"error\":\"invalid_grant\"}";
+   const size_t len = sizeof(oauth_error) - 1;
+
+   /* Default: the headers callback still runs, the body does not reach it. */
+   capture_t discarded = {.gate = KB_HTTP_GATE_DELIVER};
+   assert(parse_parts_ex(oauth_error, len, len, 64, &discarded, 0) == KB_HTTP_OK);
+   assert(discarded.headers_called == 1);
+   assert(discarded.body_called == 0 && discarded.body_len == 0);
+   assert(discarded.response.status == 400);
+
+   /* Opted in: the same response delivers its body, which is the only place the
+    * OAuth error code appears. */
+   capture_t delivered = {.gate = KB_HTTP_GATE_DELIVER};
+   assert(parse_parts_ex(oauth_error, len, len, 64, &delivered, 1) == KB_HTTP_OK);
+   assert(delivered.headers_called == 1);
+   assert(delivered.body_called >= 1 && delivered.body_len == 25);
+   assert(memcmp(delivered.body, "{\"error\":\"invalid_grant\"}", 25) == 0);
+   assert(delivered.response.status == 400);
+
+   /* The opt-in does not override the headers callback's own decision: a callback
+    * that says DISCARD is still obeyed. The flag widens WHICH statuses may deliver,
+    * it does not force delivery. */
+   capture_t refused = {.gate = KB_HTTP_GATE_DISCARD};
+   assert(parse_parts_ex(oauth_error, len, len, 64, &refused, 1) == KB_HTTP_OK);
+   assert(refused.body_called == 0 && refused.body_len == 0);
+
+   /* And it changes nothing for a 2xx, which delivered already. */
+   static const unsigned char okay[] = "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc";
+   capture_t two_xx = {.gate = KB_HTTP_GATE_DELIVER};
+   assert(parse_parts_ex(okay, sizeof(okay) - 1, sizeof(okay) - 1, 64, &two_xx, 0) == KB_HTTP_OK);
+   assert(two_xx.body_len == 3);
+   capture_t two_xx_opt = {.gate = KB_HTTP_GATE_DELIVER};
+   assert(parse_parts_ex(okay, sizeof(okay) - 1, sizeof(okay) - 1, 64, &two_xx_opt, 1) ==
+          KB_HTTP_OK);
+   assert(two_xx_opt.body_len == 3);
+
+   /* The body ceiling still applies to a delivered error body — opting in must not
+    * become a way to make kb buffer an unbounded 400. */
+   capture_t bounded = {.gate = KB_HTTP_GATE_DELIVER};
+   assert(parse_parts_ex(oauth_error, len, len, 8, &bounded, 1) != KB_HTTP_OK);
+
+   /* NULL is tolerated, so a caller that never sets the flag cannot crash. */
+   kb_http_response_parser_deliver_error_body(NULL, 1);
 }
 
 static void gate_and_abort(void)
@@ -460,6 +538,7 @@ int main(void)
    content_length_boundaries();
    chunked_boundaries();
    gate_and_abort();
+   error_body_gate();
    post_completion_surplus();
    malformed_matrix();
    request_validation();

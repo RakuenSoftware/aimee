@@ -1446,6 +1446,194 @@ static void test_delegate_scope_is_forwarded(void)
    cJSON_Delete(req);
 }
 
+/* --- kb grant text rendering. These four commands printed NOTHING in text mode
+ * until the printers were added: every outcome field was --json-only. Two of the
+ * fields are safety-relevant (is_member=false means the grant is inert; a revoke
+ * leaves an issued token alive until it expires), so these assert on the operator's
+ * actual bytes, split by stream, rather than on the printer returning. --- */
+static void grant_render(const char *method, const char *json, char *out, size_t out_cap, char *err,
+                         size_t err_cap)
+{
+   cJSON *resp = cJSON_Parse(json);
+   assert(resp != NULL);
+
+   char opath[] = "/tmp/aimee-grant-out-XXXXXX";
+   char epath[] = "/tmp/aimee-grant-err-XXXXXX";
+   int ofd = mkstemp(opath), efd = mkstemp(epath);
+   assert(ofd >= 0 && efd >= 0);
+   int old_out = dup(STDOUT_FILENO), old_err = dup(STDERR_FILENO);
+   assert(old_out >= 0 && old_err >= 0);
+   fflush(stdout);
+   fflush(stderr);
+   assert(dup2(ofd, STDOUT_FILENO) >= 0);
+   assert(dup2(efd, STDERR_FILENO) >= 0);
+
+   print_text_output(method, resp);
+
+   fflush(stdout);
+   fflush(stderr);
+   assert(dup2(old_out, STDOUT_FILENO) >= 0);
+   assert(dup2(old_err, STDERR_FILENO) >= 0);
+   close(old_out);
+   close(old_err);
+   close(ofd);
+   close(efd);
+
+   FILE *f = fopen(opath, "rb");
+   assert(f != NULL);
+   size_t n = fread(out, 1, out_cap - 1, f);
+   fclose(f);
+   out[n] = '\0';
+   f = fopen(epath, "rb");
+   assert(f != NULL);
+   n = fread(err, 1, err_cap - 1, f);
+   fclose(f);
+   err[n] = '\0';
+   unlink(opath);
+   unlink(epath);
+   cJSON_Delete(resp);
+}
+
+static void test_grant_set_created_vs_changed_from_off(void)
+{
+   char out[2048], err[2048];
+
+   /* previous_tier ABSENT: the grant did not exist. */
+   grant_render("kb.grant.set", "{\"changed\":true,\"was_revoked\":false,\"is_member\":true}", out,
+                sizeof(out), err, sizeof(err));
+   assert(strstr(out, "created") != NULL);
+   assert(strstr(out, "changed from") == NULL);
+   assert(err[0] == '\0'); /* a member grant that took effect warns about nothing */
+
+   /* previous_tier "off": it DID exist and was off. Must not render like "created". */
+   grant_render(
+       "kb.grant.set",
+       "{\"changed\":true,\"was_revoked\":false,\"is_member\":true,\"previous_tier\":\"off\"}", out,
+       sizeof(out), err, sizeof(err));
+   assert(strstr(out, "changed from off") != NULL);
+   assert(strstr(out, "created") == NULL);
+}
+
+static void test_grant_set_unchanged_reports_current_tier(void)
+{
+   char out[2048], err[2048];
+   grant_render(
+       "kb.grant.set",
+       "{\"changed\":false,\"was_revoked\":false,\"is_member\":true,\"previous_tier\":\"data\"}",
+       out, sizeof(out), err, sizeof(err));
+   assert(strstr(out, "unchanged") != NULL);
+   assert(strstr(out, "data") != NULL);
+}
+
+static void test_grant_set_warns_when_subject_is_not_a_member(void)
+{
+   char out[2048], err[2048];
+   grant_render("kb.grant.set", "{\"changed\":true,\"was_revoked\":false,\"is_member\":false}", out,
+                sizeof(out), err, sizeof(err));
+   /* The grant was written, so the outcome is still success on stdout... */
+   assert(strstr(out, "created") != NULL);
+   /* ...but the operator MUST be told it does nothing yet. */
+   assert(strstr(err, "not a member") != NULL);
+   assert(strstr(err, "no effect") != NULL);
+}
+
+static void test_grant_set_reports_reinstated_revocation(void)
+{
+   char out[2048], err[2048];
+   grant_render("kb.grant.set", "{\"changed\":true,\"was_revoked\":true,\"is_member\":true}", out,
+                sizeof(out), err, sizeof(err));
+   assert(strstr(out, "reinstated") != NULL);
+}
+
+static void test_grant_set_missing_outcome_is_not_reported_as_success(void)
+{
+   char out[2048], err[2048];
+   /* A response without `changed` is a protocol fault. Rendering "unchanged" for it
+    * would be a confident false claim about authorization state. */
+   grant_render("kb.grant.set", "{\"is_member\":true}", out, sizeof(out), err, sizeof(err));
+   assert(strstr(out, "unchanged") == NULL);
+   assert(strstr(out, "created") == NULL);
+   assert(strstr(err, "no outcome") != NULL);
+}
+
+static void test_grant_revoke_found_warns_about_residual_token(void)
+{
+   char out[2048], err[2048];
+   grant_render("kb.grant.revoke", "{\"found\":true}", out, sizeof(out), err, sizeof(err));
+   assert(strstr(out, "revoked") != NULL);
+   /* Access is gone SHORTLY, not immediately; the operator cannot infer this. */
+   assert(strstr(err, "300s") != NULL);
+}
+
+static void test_grant_revoke_not_found_does_not_look_like_success(void)
+{
+   char out[2048], err[2048];
+   grant_render("kb.grant.revoke", "{\"found\":false}", out, sizeof(out), err, sizeof(err));
+   assert(strstr(out, "no grant existed") != NULL);
+   /* No revocation happened, so the residual-token note must NOT appear. */
+   assert(strstr(err, "300s") == NULL);
+}
+
+static void test_grant_revoke_missing_found_is_not_reported_as_absent(void)
+{
+   char out[2048], err[2048];
+   grant_render("kb.grant.revoke", "{}", out, sizeof(out), err, sizeof(err));
+   assert(strstr(out, "no grant existed") == NULL);
+   assert(strstr(err, "no outcome") != NULL);
+}
+
+static void test_grant_list_renders_rows_and_marks_revoked(void)
+{
+   char out[4096], err[2048];
+   grant_render("kb.grant.list",
+                "{\"grants\":["
+                "{\"subject\":\"oidc:iss:alice\",\"tier\":\"data\",\"granted_by\":\"owner\","
+                "\"created_at\":\"2026-07-01T00:00:00Z\",\"updated_at\":\"2026-07-01T00:00:00Z\"},"
+                "{\"subject\":\"oidc:iss:bob\",\"tier\":\"full\",\"granted_by\":\"owner\","
+                "\"created_at\":\"2026-07-02T00:00:00Z\",\"updated_at\":\"2026-07-03T00:00:00Z\","
+                "\"revoked_at\":\"2026-07-04T00:00:00Z\"}],\"truncated\":false}",
+                out, sizeof(out), err, sizeof(err));
+   assert(strstr(out, "oidc:iss:alice") != NULL);
+   assert(strstr(out, "data") != NULL);
+   assert(strstr(out, "active since") != NULL);
+   /* A revoked grant must be visibly distinct from a live one. */
+   assert(strstr(out, "revoked 2026-07-04T00:00:00Z") != NULL);
+   assert(err[0] == '\0');
+}
+
+static void test_grant_list_empty_says_so(void)
+{
+   char out[2048], err[2048];
+   /* Printing nothing is what the missing formatter did, and is indistinguishable
+    * from a broken command. */
+   grant_render("kb.grant.list", "{\"grants\":[],\"truncated\":false}", out, sizeof(out), err,
+                sizeof(err));
+   assert(strstr(out, "no write-tier grants") != NULL);
+}
+
+static void test_grant_list_truncation_is_surfaced(void)
+{
+   char out[2048], err[2048];
+   grant_render("kb.grant.list",
+                "{\"grants\":[{\"subject\":\"s\",\"tier\":\"data\",\"granted_by\":\"owner\","
+                "\"created_at\":\"t\",\"updated_at\":\"t\"}],\"truncated\":true}",
+                out, sizeof(out), err, sizeof(err));
+   /* Otherwise a capped page reads as a complete answer. */
+   assert(strstr(err, "more grants exist") != NULL);
+}
+
+static void test_grant_show_shares_the_list_renderer(void)
+{
+   char out[2048], err[2048];
+   grant_render("kb.grant.show",
+                "{\"grants\":[{\"subject\":\"oidc:iss:alice\",\"tier\":\"full\","
+                "\"granted_by\":\"owner\",\"created_at\":\"t\",\"updated_at\":\"t\"}],"
+                "\"truncated\":false}",
+                out, sizeof(out), err, sizeof(err));
+   assert(strstr(out, "oidc:iss:alice") != NULL);
+   assert(strstr(out, "full") != NULL);
+}
+
 int main(void)
 {
    printf("test_cli_v1_delegate\n");
@@ -1477,6 +1665,18 @@ int main(void)
    test_git_verify_marshaled_with_session_id();
    test_get_help_route_marshaled();
    test_subcommand_json_flag_is_output_mode();
+   test_grant_set_created_vs_changed_from_off();
+   test_grant_set_unchanged_reports_current_tier();
+   test_grant_set_warns_when_subject_is_not_a_member();
+   test_grant_set_reports_reinstated_revocation();
+   test_grant_set_missing_outcome_is_not_reported_as_success();
+   test_grant_revoke_found_warns_about_residual_token();
+   test_grant_revoke_not_found_does_not_look_like_success();
+   test_grant_revoke_missing_found_is_not_reported_as_absent();
+   test_grant_list_renders_rows_and_marks_revoked();
+   test_grant_list_empty_says_so();
+   test_grant_list_truncation_is_surfaced();
+   test_grant_show_shares_the_list_renderer();
    test_index_find_callers_json_flag_not_project();
    test_trigger_routes_lookup();
    test_dogfood_routes_and_marshaling();

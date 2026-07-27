@@ -173,14 +173,42 @@ int main(void)
              SERVER_IDENTITY_TOKEN_INVALID);
    }
 
-   /* 8) Non-conforming subject (not the P1 composite form) is rejected. */
+   /* 8) A BARE host-account name is accepted: it is the PAM login's subject form,
+    * and what kb_identity_token.h documents the `sub` as. This must agree with the
+    * subject CHECK in db2/schema.sql — a subject the database admits but the
+    * verifier rejects would mint a token the server then refuses as malformed. */
    {
       c = base_claims();
-      snprintf(c.subject, sizeof(c.subject), "just-a-name");
+      snprintf(c.subject, sizeof(c.subject), "alice");
       assert(kb_identity_token_build(&c, sign_rs256, NULL, jwt, sizeof(jwt), &jl) ==
              KB_IDENTITY_TOKEN_OK);
       assert(server_identity_token_verify(jwt, jl, jwks, "kb", "server-abc", NOW, &out) ==
-             SERVER_IDENTITY_TOKEN_INVALID);
+             SERVER_IDENTITY_TOKEN_OK);
+      assert(strcmp(out.subject, "alice") == 0);
+
+      c = base_claims();
+      snprintf(c.subject, sizeof(c.subject), "svc_user-1.2");
+      assert(kb_identity_token_build(&c, sign_rs256, NULL, jwt, sizeof(jwt), &jl) ==
+             KB_IDENTITY_TOKEN_OK);
+      assert(server_identity_token_verify(jwt, jl, jwks, "kb", "server-abc", NOW, &out) ==
+             SERVER_IDENTITY_TOKEN_OK);
+   }
+
+   /* 8b) But a subject matching NO form is still rejected. Note the fixture needs
+    * a space: now that a bare username is valid, an unprefixed string is no
+    * longer non-conforming by default. */
+   {
+      const char *bad[] = {"not a name", "-leading-dash", ".leading-dot", "has/slash",
+                           "oidc:onlytwoparts"};
+      for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i)
+      {
+         c = base_claims();
+         snprintf(c.subject, sizeof(c.subject), "%s", bad[i]);
+         assert(kb_identity_token_build(&c, sign_rs256, NULL, jwt, sizeof(jwt), &jl) ==
+                KB_IDENTITY_TOKEN_OK);
+         assert(server_identity_token_verify(jwt, jl, jwks, "kb", "server-abc", NOW, &out) ==
+                SERVER_IDENTITY_TOKEN_INVALID);
+      }
    }
 
    /* 9) Malformed wire (single segment) is rejected, not crashed. */

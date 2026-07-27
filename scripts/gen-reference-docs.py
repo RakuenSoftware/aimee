@@ -641,6 +641,12 @@ ENV_DESC = {
     "AIMEE_KB_CONN": ("Knowledge base (aimee-kb)", "KB connection string (mTLS transport)."),
     "AIMEE_TRANSPORT_KB_POOL_ENABLED": ("Knowledge base (aimee-kb)", "Override server-to-KB mTLS connection pooling. The config default is on; set to 0 for one-shot connections."),
     "AIMEE_SERVER_ID": ("Knowledge base (aimee-kb)", "Registry identity used by the server mTLS heartbeat."),
+    "AIMEE_SERVER_TEAM_ID": (
+        "Knowledge base (aimee-kb)",
+        "The team this server serves, from the same registry row as AIMEE_SERVER_ID. "
+        "Required for per-user /v1 write authorization: unset, the server still starts "
+        "and serves reads but denies every write with no_team_configured.",
+    ),
     "AIMEE_KB_HTTP_BIND": ("Knowledge base (aimee-kb)", "aimee-kb HTTP listener bind address."),
     "AIMEE_KB_MTLS_HOST": ("Knowledge base (aimee-kb)", "aimee-kb mTLS listener host."),
     "AIMEE_KB_MTLS_PORT": ("Knowledge base (aimee-kb)", "aimee-kb mTLS listener port."),
@@ -651,6 +657,30 @@ ENV_DESC = {
     "AIMEE_KB_OIDC_JWKS_FILE": ("Knowledge base (aimee-kb)", "OIDC JWKS file for KB API auth."),
     "AIMEE_KB_OIDC_SCOPE_CLAIM": ("Knowledge base (aimee-kb)", "OIDC claim carrying the scope."),
     "AIMEE_KB_OIDC_SCOPE_KIND": ("Knowledge base (aimee-kb)", "OIDC scope-kind interpretation."),
+    # Relying-party profile for the per-user /v1 write login (proposal
+    # per-user-remote-writes-authz.md §3). Setting the client id is what enables
+    # the login front end; the client SECRET is deliberately absent from the
+    # environment, being vault-custodied and read only at the code exchange.
+    "AIMEE_KB_OIDC_LOGIN_CLIENT_ID": (
+        "Knowledge base (aimee-kb)",
+        "OIDC relying-party client id; setting it enables the per-user login front end.",
+    ),
+    "AIMEE_KB_OIDC_LOGIN_AUTHORIZE_URL": (
+        "Knowledge base (aimee-kb)",
+        "IdP authorization endpoint the login redirects to (https only).",
+    ),
+    "AIMEE_KB_OIDC_LOGIN_TOKEN_URL": (
+        "Knowledge base (aimee-kb)",
+        "IdP token endpoint for the code exchange (https, default port only).",
+    ),
+    "AIMEE_KB_OIDC_LOGIN_REDIRECT_URI": (
+        "Knowledge base (aimee-kb)",
+        "This kb's OIDC callback URL (https, or http on loopback only).",
+    ),
+    "AIMEE_KB_OIDC_LOGIN_SCOPE": (
+        "Knowledge base (aimee-kb)",
+        "Space-delimited OIDC scopes for the login request; defaults to openid.",
+    ),
     "AIMEE_VECTOR_KB_BATCH_SIZE": ("Knowledge base (aimee-kb)", "Embedding batch size for KB vector ingest."),
     # Database & vectors
     "AIMEE_DB2_URL": ("Database & vectors", "Postgres (DB2) connection URL for the KB store."),
