@@ -956,21 +956,9 @@ int loopback_rpc(const char *body, int body_len, char *resp, int resp_cap, uint3
    pthread_mutex_destroy(&fake.mutex);
    pthread_cond_destroy(&fake.can_close);
 
-   /* Do NOT shut the write end before reading. A handler that hands its work to a
-    * worker replies LATER through a dup of this socketpair (create_compute_ctx dups
-    * conn->fd rather than retaining the conn), and shutdown() applies to the socket
-    * — so it killed the dup's write too. That is why /v1/tools/execute answered 502
-    * "rpc produced no response" for every input, valid or not.
-    *
-    * Bound the read instead, so a handler that never replies cannot hang the
-    * adapter. Inline handlers have already written by the time server_dispatch
-    * returns, so they hit the newline break on the first pass and are unchanged.
-    * loopback_rpc runs on the per-connection worker (conn_worker -> handle_conn),
-    * not the listener, so waiting blocks only the connection that asked. */
-   {
-      struct timeval rcv = {LOOPBACK_REPLY_TIMEOUT_SECS, 0};
-      (void)setsockopt(sp[0], SOL_SOCKET, SO_RCVTIMEO, &rcv, sizeof(rcv));
-   }
+   /* Deferred handlers reply through a dup, so bound the read instead of shutting it down. */
+   struct timeval rcv = {LOOPBACK_REPLY_TIMEOUT_SECS, 0};
+   (void)setsockopt(sp[0], SOL_SOCKET, SO_RCVTIMEO, &rcv, sizeof(rcv));
 
    size_t total = 0;
    for (;;)
@@ -2360,10 +2348,26 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
                "aimee.api.remote_writes is set but no longer authorizes writes; per-user grants "
                "replace it (see docs/UPGRADING.md 0.3.0). Requests it would formerly have allowed "
                "are counted as remote_writes.global_ignored");
-   if (!server_write_tier_team_configured())
+   switch (server_write_tier_config_state())
+   {
+   case SERVER_WRITE_TIER_CONFIG_NO_TEAM:
       LOG_ERROR("server.http",
                 "AIMEE_SERVER_TEAM_ID is unset or invalid: reads continue, but every /v1 write "
                 "will be denied with no_team_configured until it is set to this server's team id");
+      break;
+   case SERVER_WRITE_TIER_CONFIG_NO_SERVER_ID:
+      LOG_ERROR("server.http",
+                "AIMEE_SERVER_ID is unset: reads continue, but every /v1 write will be denied "
+                "with invalid until it is set to this server's enrolled registry id");
+      break;
+   case SERVER_WRITE_TIER_CONFIG_NO_TRUST_BUNDLE:
+      LOG_ERROR("server.http",
+                "AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE is unset: reads continue, but every /v1 "
+                "write will be denied with invalid until the management trust bundle is mounted");
+      break;
+   case SERVER_WRITE_TIER_CONFIG_READY:
+      break;
+   }
    g_rate_state.window_start = 0;
    g_rate_state.count = 0;
    g_tcp_fd = tcp_listen(tcp_port, bearer_token, 0 /* plaintext: loopback only */);

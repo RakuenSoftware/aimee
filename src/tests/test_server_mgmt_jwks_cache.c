@@ -93,16 +93,21 @@ int main(void)
       int trust_fd = mkstemp(trust_path);
       assert(trust_fd >= 0);
       assert(write(trust_fd, bundle, bundle_n) == (ssize_t)bundle_n);
-      assert(close(trust_fd) == 0 && chmod(trust_path, 0600) == 0);
+      /* The container runs aimee-server as UID 1000. The bundle is public
+       * verification material, so root-owned 0644 is the supported shape: the
+       * server can read it but cannot replace or modify it. */
+      assert(close(trust_fd) == 0 && chmod(trust_path, 0644) == 0);
       char loaded[SERVER_MGMT_JWKS_BUNDLE_MAX];
       size_t loaded_n = 0;
       assert(server_mgmt_jwks_trust_bundle_load(trust_path, loaded, sizeof(loaded), &loaded_n) ==
              0);
       assert(loaded_n == bundle_n && !memcmp(loaded, bundle, bundle_n));
-      assert(chmod(trust_path, 0660) == 0);
+      assert(chmod(trust_path, 0664) == 0);
       assert(server_mgmt_jwks_trust_bundle_load(trust_path, loaded, sizeof(loaded), &loaded_n) !=
              0);
       assert(chmod(trust_path, 0600) == 0);
+      assert(server_mgmt_jwks_trust_bundle_load(trust_path, loaded, sizeof(loaded), &loaded_n) ==
+             0);
       char link_path[sizeof(trust_path) + 8];
       snprintf(link_path, sizeof(link_path), "%s.link", trust_path);
       assert(link(trust_path, link_path) == 0);

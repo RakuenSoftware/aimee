@@ -1378,7 +1378,6 @@ static int handle_memory_user_capture(server_ctx_t *ctx, server_conn_t *conn, cJ
       return server_send_error(conn, "kind and key are required", request_id);
    if (!content || !content[0])
       return server_send_error(conn, "content is required", request_id);
-
    if (db1_user_memory_upsert(kind, tier, key, content, 1.0, sid) != 0)
       return server_send_error(conn, "failed to store user memory", request_id);
 
@@ -1624,6 +1623,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"mcp.audit", handle_mcp_audit},
     {"mcp.recheck", handle_mcp_recheck},
     {"mcp.call", handle_mcp_call},
+    {"help.get", handle_get_help}, /* handler force-selects get_help */
     /* Triggers */
     {"trigger.fire", handle_trigger_fire},
     {"trigger.list", handle_trigger_list},
