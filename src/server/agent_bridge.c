@@ -605,6 +605,22 @@ static void responses_parse_sse_events(const char *body, parsed_response_t *out,
    free(data);
 }
 
+/* 1 if `resp`'s output array already carries a function_call item. */
+static int responses_object_has_function_call(cJSON *resp)
+{
+   cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
+   if (!cJSON_IsArray(output))
+      return 0;
+   cJSON *item = NULL;
+   cJSON_ArrayForEach(item, output)
+   {
+      cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "type");
+      if (type && cJSON_IsString(type) && strcmp(type->valuestring, "function_call") == 0)
+         return 1;
+   }
+   return 0;
+}
+
 /* 1 if `resp`'s output array already carries a non-empty output_text part. */
 static int responses_object_has_output_text(cJSON *resp)
 {
@@ -661,9 +677,39 @@ cJSON *agent_responses_sse_response_object(const char *body)
    responses_take_longer_content(&scratch, &part_text);
    responses_take_longer_content(&scratch, &done_text);
    responses_take_longer_content(&scratch, &delta_text);
-   cJSON_Delete(collected);
 
    cJSON *resp = completed ? completed : cJSON_Parse(body);
+   /* Codex's response.completed payload can arrive with an output array that
+    * omits the items it already streamed -- the same emptiness handled for text
+    * just below. A function_call delivered via response.output_item.done was
+    * therefore collected here and then thrown away with `collected`, so the
+    * whole turn produced no tool call and no text: the delegate reported
+    * "no content in final response" with tool_calls=0 on every attempt.
+    * Measured on a live codex turn: item_types=[reasoning,function_call] on the
+    * wire, zero tool calls extracted.
+    *
+    * Fold the streamed function_call items back in when the response object
+    * carries none of its own. Never when it does -- the completed payload is
+    * authoritative whenever it is populated. */
+   if (resp && !responses_object_has_function_call(resp))
+   {
+      const cJSON *item = NULL;
+      cJSON_ArrayForEach(item, collected)
+      {
+         const cJSON *type = cJSON_GetObjectItemCaseSensitive((cJSON *)item, "type");
+         if (!cJSON_IsString(type) || strcmp(type->valuestring, "function_call") != 0)
+            continue;
+         cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
+         if (!cJSON_IsArray(output))
+            output = cJSON_AddArrayToObject(resp, "output");
+         cJSON *dup = cJSON_Duplicate(item, 1);
+         if (output && dup)
+            cJSON_AddItemToArray(output, dup);
+         else
+            cJSON_Delete(dup);
+      }
+   }
+   cJSON_Delete(collected);
    if (resp && scratch.content && scratch.content[0] && !responses_object_has_output_text(resp))
    {
       cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
