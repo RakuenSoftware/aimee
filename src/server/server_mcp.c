@@ -1677,6 +1677,15 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return rc;
 }
 
+int handle_get_help(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   if (!req || !cJSON_IsObject(req))
+      return server_send_error(conn, "invalid help request", NULL);
+   cJSON_DeleteItemFromObjectCaseSensitive(req, "tool");
+   cJSON_AddStringToObject(req, "tool", "get_help");
+   return handle_mcp_call(ctx, conn, req);
+}
+
 static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    cJSON *jtool = cJSON_GetObjectItemCaseSensitive(req, "tool");

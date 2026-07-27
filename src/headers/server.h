@@ -8,6 +8,13 @@
 #include "compute_pool.h"
 #include "platform_event.h"
 #include "provider_catalog.h"
+
+/* True when `name` is a provider the chat path can resolve: a built-in CLI
+ * provider, a known adapter, or an agent in `acfg` (matched by name or by
+ * provider). Gates the durable primary write in handle_provider_set so a
+ * mistyped `aimee provider <word>` cannot brick every later chat turn.
+ * `acfg` may be NULL to check only the built-in/adapter sets. */
+int provider_name_settable(const char *name, const agent_config_t *acfg);
 #include "vault_principal.h"
 
 /* Forward declaration */
@@ -477,6 +484,7 @@ cJSON *mcp_build_full_served_list(void);
 int handle_mcp_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_mcp_recheck(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_get_help(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 
 /* Record the served-call verdict from a sub-handler that returned early (same
  * thread as handle_mcp_call). See server_mcp.c. */

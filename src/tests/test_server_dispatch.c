@@ -1118,6 +1118,11 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return stub_handler(conn, "mcp.call");
 }
 
+int handle_get_help(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "help.get");
+}
+
 int handle_mcp_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "mcp.audit");
@@ -1559,6 +1564,12 @@ static void test_routing(void)
    assert(has_cron_add);
    assert(has_trajectory_export);
    assert(has_trajectory_batch);
+   cJSON_Delete(json);
+
+   json =
+       dispatch_json(ctx, conn, "{\"method\":\"help.get\"}", strlen("{\"method\":\"help.get\"}"));
+   assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring, "help.get") == 0);
+   assert(strcmp(g_last_handler, "help.get") == 0);
    cJSON_Delete(json);
 
    json = dispatch_json(ctx, conn, "{\"method\":\"session.list\"}",

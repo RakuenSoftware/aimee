@@ -173,3 +173,7 @@ intent_record_*.json
 scratchpad/
 /oidc-login-live
 /write-tier-enforce-live
+
+# Local public verification roots mounted read-only by the server Compose files.
+# The directory is created by Docker on first use and must never be committed.
+/server-management/

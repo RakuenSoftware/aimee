@@ -125,6 +125,38 @@ static void test_invalid_inputs(void)
    PASS("invalid_inputs");
 }
 
+/* The clone-URL gate for untrusted input: a caller must not be able to make the
+ * server clone from its OWN filesystem (the repo would then be indexed into the
+ * kb and served back through chat). */
+static void test_is_remote(void)
+{
+   /* Real remotes — every transport the normalizer recognizes. */
+   assert(util_url_is_remote("https://github.com/org/repo") == 1);
+   assert(util_url_is_remote("https://github.com/org/repo.git") == 1);
+   assert(util_url_is_remote("http://gitea.example.com/team/proj") == 1);
+   assert(util_url_is_remote("ssh://git@github.com/org/repo.git") == 1);
+   assert(util_url_is_remote("git://github.com/org/repo") == 1);
+   assert(util_url_is_remote("git@github.com:org/repo.git") == 1);
+
+   /* Local filesystem access — the case this gate exists for. */
+   assert(util_url_is_remote("file:///tmp/repo") == 0);
+   assert(util_url_is_remote("file:///etc/passwd") == 0);
+   assert(util_url_is_remote("/srv/git/private.git") == 0);
+   assert(util_url_is_remote("../../etc") == 0);
+   assert(util_url_is_remote("~/private-repo") == 0);
+
+   /* Other transports git understands but this server does not offer. */
+   assert(util_url_is_remote("rsync://host/path") == 0);
+   assert(util_url_is_remote("ftp://host/path") == 0);
+
+   /* Degenerate input. */
+   assert(util_url_is_remote(NULL) == 0);
+   assert(util_url_is_remote("") == 0);
+   assert(util_url_is_remote("https://") == 0);
+   assert(util_url_is_remote("https://github.com") == 0); /* no path */
+   PASS("is_remote");
+}
+
 static void test_workspace_parent(void)
 {
    /* github repo → org workspace */
@@ -200,6 +232,7 @@ int main(void)
    test_path_sanitization();
    test_case_normalization();
    test_invalid_inputs();
+   test_is_remote();
    test_workspace_parent();
    test_host_case_classifier();
    test_is_ssh();
