@@ -420,7 +420,19 @@ static int bootstrap_local_tools_begin(void)
    char path[1024];
    snprintf(path, sizeof(path), "%s/aimee-db2-bootstrap-%u-%s.lock", tmp, (unsigned)getuid(),
             AIMEE_DB2_BOOTSTRAP_DB);
-   int fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+   /* O_EXCL first, so we can tell "we just created the lock" from "a previous
+    * attempt left it behind". This matters: open(O_CREAT) stamps a NEW file
+    * with the current time, so the cooldown check below saw `now - mtime == 0`
+    * and skipped — meaning the very FIRST bootstrap on a fresh host, the one
+    * case the fallback exists for, never ran. It only became reachable once the
+    * cooldown had expired, five minutes into a crash loop. */
+   int created = 1;
+   int fd = open(path, O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
+   if (fd < 0)
+   {
+      created = 0;
+      fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+   }
    if (fd < 0)
       return -2;
    if (flock(fd, LOCK_EX | LOCK_NB) != 0)
@@ -430,7 +442,8 @@ static int bootstrap_local_tools_begin(void)
    }
    struct stat st;
    time_t now = time(NULL);
-   if (fstat(fd, &st) == 0 && st.st_mtime > 0 && now - st.st_mtime < DB2_BOOTSTRAP_COOLDOWN_SECS)
+   if (!created && fstat(fd, &st) == 0 && st.st_mtime > 0 &&
+       now - st.st_mtime < DB2_BOOTSTRAP_COOLDOWN_SECS)
    {
       flock(fd, LOCK_UN); /* attempted within the cooldown window — skip */
       close(fd);
@@ -1626,14 +1639,40 @@ int main(int argc, char **argv)
    {
       cJSON *resp = cJSON_CreateObject();
       int rc = kb_bootstrap_db2_resolve(&kb_cfg, resp);
-      cJSON_Delete(resp);
       if (rc != 0)
       {
+         /* kb_bootstrap_db2_resolve already recorded WHY each fallback failed —
+          * the per-step command outcomes plus a message and a remediation. That
+          * detail used to be discarded, so the only thing an operator saw was
+          * "bootstrap failed", which does not distinguish "Postgres is not
+          * running" from "this image ships no Postgres at all" (the published
+          * aimee-kb:latest predating the embedded-DB2 packaging is exactly the
+          * latter). Print it: this message is the whole diagnosis for a KB that
+          * will not start. */
          fprintf(stderr, "aimee-kb: db2_url not configured and bootstrap failed; "
                          "run `aimee init` or set AIMEE_DB2_URL\n");
+         const cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
+         if (cJSON_IsString(msg) && msg->valuestring[0])
+            fprintf(stderr, "aimee-kb:   cause: %s\n", msg->valuestring);
+         const cJSON *steps = cJSON_GetObjectItemCaseSensitive(resp, "steps");
+         const cJSON *step = NULL;
+         cJSON_ArrayForEach(step, steps)
+         {
+            char *one = cJSON_PrintUnformatted(step);
+            if (one)
+            {
+               fprintf(stderr, "aimee-kb:   step: %s\n", one);
+               free(one);
+            }
+         }
+         const cJSON *fix = cJSON_GetObjectItemCaseSensitive(resp, "remediation");
+         if (cJSON_IsString(fix) && fix->valuestring[0])
+            fprintf(stderr, "aimee-kb:   remediation: %s\n", fix->valuestring);
+         cJSON_Delete(resp);
          agent_http_cleanup();
          return 1;
       }
+      cJSON_Delete(resp);
    }
 
    /* Publish the fully resolved daemon config before request threads start.
