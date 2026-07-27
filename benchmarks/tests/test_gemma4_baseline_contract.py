@@ -23,6 +23,8 @@ eurobert_controller = importlib.import_module("run_254_eurobert_rerankers")
 eurobert_server = importlib.import_module("serve_cross_encoder")
 eurobert_smoke = importlib.import_module("smoke_eurobert_runtime")
 eurobert_trainer = importlib.import_module("train_eurobert_reranker")
+comparison = importlib.import_module("compare_ab")
+reranker_reports = importlib.import_module("reranker_pairwise_reports")
 synthesis = importlib.import_module("run_synthesis_ab")
 try:
     embedding = importlib.import_module("run_embedding_ab")
@@ -349,6 +351,35 @@ class GemmaBaselineContractTests(unittest.TestCase):
             summary = json.loads((output / "summary_reranking_resume.json").read_text(encoding="utf-8"))
             self.assertEqual(summary["load_profile"]["workers"], 8)
             self.assertEqual(summary["load_profile"]["maximum_inflight_pairs"], 32)
+
+    def test_pairwise_loader_reduces_append_only_rows_to_latest(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "raw.jsonl"
+            path.write_text(
+                "\n".join(
+                    (
+                        json.dumps({"case_id": "a", "ok": False}),
+                        json.dumps({"case_id": "b", "ok": True, "value": 1}),
+                        json.dumps({"case_id": "a", "ok": True, "value": 2}),
+                    )
+                ) + "\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(comparison.load(path)["a"]["value"], 2)
+            path.write_text(json.dumps({"case_id": "a", "ok": False}) + "\n", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "latest case rows are unsuccessful"):
+                comparison.load(path)
+
+    def test_cross_family_reranker_report_discloses_training_asymmetry(self) -> None:
+        context = reranker_reports.comparison_context("ettin400m", "eurobert610m_reranker", 576_000)
+        self.assertIs(context["training_budget_equal"], False)
+        self.assertEqual(context["ettin_training_examples"], 143_393_475)
+        self.assertEqual(context["eurobert_training_examples"], 576_000)
+        self.assertIn("diagnostic_only", context["latency_qualification"])
+        eurobert_only = reranker_reports.comparison_context(
+            "eurobert210m_reranker", "eurobert610m_reranker", 576_000
+        )
+        self.assertIn("qualified", eurobert_only["latency_qualification"])
 
     def test_synthesis_resume_does_not_repeat_completed_case(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

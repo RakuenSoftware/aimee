@@ -243,6 +243,21 @@ Use `--max-cases N` only to smoke-test the runtime. Model, dataset, container,
 Python-package, training, and serving identities are recorded separately from
 the unchanged evaluation-suite identity.
 
+After both EuroBERT rerankers complete and production is restored, generate all
+six paired comparisons across Ettin 68M/400M and EuroBERT 210M/610M:
+
+```sh
+python3 benchmarks/gemma4_baseline/reranker_pairwise_reports.py \
+  --results /mnt/media/gemma4-baseline/results \
+  --manifest /mnt/media/gemma4-baseline/repo/benchmarks/gemma4_baseline/eurobert_rerankers.json \
+  --main-state /mnt/media/gemma4-baseline/results/RUN_STATE.json \
+  --eurobert-state /mnt/media/gemma4-baseline/eurobert_sweep_state.json
+```
+
+Every cross-family report states the unequal training budgets. Reranking latency
+deltas remain diagnostic until Ettin is rerun from an empty output directory
+under one clean load profile; paired quality deltas remain valid.
+
 Run the contract tests (exact counts/hashes/shared IDs, matrix enforcement,
 fail-closed secret scanning, reranker bounds, and resume behavior):
 

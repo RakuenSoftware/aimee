@@ -9,15 +9,17 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
-import numpy as np
-
 
 def load(path: Path) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
     with path.open("r", encoding="utf-8") as handle:
-        rows = [json.loads(line) for line in handle if line.strip()]
-    result = {row["case_id"]: row for row in rows}
-    if len(result) != len(rows):
-        raise RuntimeError(f"duplicate case IDs in {path}")
+        for line in handle:
+            if line.strip():
+                row = json.loads(line)
+                result[row["case_id"]] = row
+    failed = [case_id for case_id, row in result.items() if not row.get("ok", True)]
+    if failed:
+        raise RuntimeError(f"{len(failed)} latest case rows are unsuccessful in {path}")
     return result
 
 
@@ -28,7 +30,9 @@ def load_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def interval(differences: np.ndarray, seed: int, replicates: int) -> tuple[float, float]:
+def interval(differences: Any, seed: int, replicates: int) -> tuple[float, float]:
+    import numpy as np
+
     rng = np.random.default_rng(seed)
     means = np.empty(replicates, dtype=np.float64)
     batch = 100
@@ -56,6 +60,8 @@ def main() -> int:
     parser.add_argument("--replicates", type=int, default=10000)
     parser.add_argument("--seed", type=int, default=1)
     args = parser.parse_args()
+    import numpy as np
+
     left, right = load(args.left), load(args.right)
     left_summary, right_summary = load_json(args.left_summary), load_json(args.right_summary)
     left_state, right_state = load_json(args.left_environment), load_json(args.right_environment)
@@ -65,13 +71,25 @@ def main() -> int:
         raise RuntimeError("summary fixture-manifest hashes differ")
     if left_env.get("fixtures_manifest_sha256") != suite_hash or right_env.get("fixtures_manifest_sha256") != suite_hash:
         raise RuntimeError("run environment does not match the result fixture-manifest hash")
-    identity_keys = ("host", "kernel", "container_image", "llama_cpp_build", "hardware_identity")
+    common_identity_keys = ("host", "kernel", "hardware_identity")
+    runtime_identity_keys = ("container_image", "llama_cpp_build", "base_image", "packages")
+    identity_keys = common_identity_keys if args.kind == "reranking" else (
+        *common_identity_keys,
+        "container_image",
+        "llama_cpp_build",
+    )
     identity_mismatches = [key for key in identity_keys if left_env.get(key) != right_env.get(key)]
     if identity_mismatches:
         raise RuntimeError(f"run environments differ: {identity_mismatches}")
     if set(left) != set(right):
         raise RuntimeError(f"case populations differ: left-only={len(set(left)-set(right))}, right-only={len(set(right)-set(left))}")
     case_ids = sorted(left)
+    if args.kind == "reranking":
+        for key in ("cases", "candidates_per_case", "load_profile", "input_bounds"):
+            if left_summary.get(key) != right_summary.get(key):
+                raise RuntimeError(f"reranking summaries differ in {key}")
+        if left_summary.get("success_rate") != 1.0 or right_summary.get("success_rate") != 1.0:
+            raise RuntimeError("reranking summaries are not fully successful")
 
     getters: dict[str, Callable[[dict[str, Any]], float]]
     if args.kind == "synthesis":
@@ -112,7 +130,11 @@ def main() -> int:
         "dimension": args.dimension if args.kind == "embedding" else None,
         "bootstrap": {"replicates": args.replicates, "seed": args.seed, "method": "paired_percentile"},
         "suite_manifest_sha256": suite_hash,
-        "pinned_environment": {key: left_env.get(key) for key in identity_keys},
+        "pinned_environment": {
+            "common": {key: left_env.get(key) for key in common_identity_keys},
+            "left_runtime": {key: left_env.get(key) for key in runtime_identity_keys},
+            "right_runtime": {key: right_env.get(key) for key in runtime_identity_keys},
+        } if args.kind == "reranking" else {key: left_env.get(key) for key in identity_keys},
         "metrics": metrics,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)

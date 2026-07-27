@@ -64,6 +64,25 @@ def write_state(path: Path, **values: Any) -> None:
     path.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def environment_identity(suite_sha: str, runtime: dict[str, Any]) -> dict[str, Any]:
+    hardware = {
+        "gpu_vendor": Path("/sys/class/drm/card0/device/vendor").read_text(encoding="utf-8").strip(),
+        "gpu_device": Path("/sys/class/drm/card0/device/device").read_text(encoding="utf-8").strip(),
+        "gpu_vram_total_bytes": int(
+            Path("/sys/class/drm/card0/device/mem_info_vram_total").read_text(encoding="utf-8").strip()
+        ),
+    }
+    return {
+        "fixtures_manifest_sha256": suite_sha,
+        "host": run(["hostname"], capture=True).stdout.strip(),
+        "kernel": run(["uname", "-srmo"], capture=True).stdout.strip(),
+        "hardware_identity": hardware,
+        "container_image": runtime["image_tag"],
+        "base_image": runtime["base_image"],
+        "packages": runtime["packages"],
+    }
+
+
 def build_image(socket: str, repo: Path, manifest: dict[str, Any]) -> None:
     runtime = manifest["runtime"]
     packages = runtime["packages"]
@@ -262,6 +281,7 @@ def main() -> int:
         suite_manifest_sha256=suite_sha,
         selected_labels=selected,
         production_was_running=production_was_running,
+        environment=environment_identity(suite_sha, manifest["runtime"]),
     )
     if production_was_running:
         run(docker_cmd(args.socket, "stop", args.production_container))
