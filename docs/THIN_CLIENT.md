@@ -1,207 +1,115 @@
-# Thin Client: Workspaces, Agents & Credentials
+# Thin client
 
-This document describes how the `aimee` thin client works against a **remote**
-`aimee-server` (e.g. a shared server reached over `tcp:`), covering three things
-specific to remote operation:
+`aimee` is a DB-free client for Linux, macOS, and Windows. It owns client-local work—hooks, stdio
+protocols, source reads, uploads, and local CLI-agent execution. The server owns state, policy,
+credentials, and model calls.
 
-1. **Workspaces** are ingested *from the client* (the server never reads the
-   client's filesystem), the client still owns the working tree.
-2. **Agent/delegate credentials live in the server's sealed vault**, encrypted
-   at rest and decryptable by the server autonomously. They are **not** held on
-   the client and there is **no** RAM session keyring (the legacy client-held
-   keyring + per-session push were retired; the vault is the single store).
-3. The **attention guard** is inert by default.
+## Connect
 
-It complements [WORKSPACES.md](WORKSPACES.md), [DELEGATES.md](DELEGATES.md), and
-[SECURITY.md](SECURITY.md).
+```bash
+aimee remote set https://host:8743 <bootstrap-bearer>
+aimee remote status
+```
 
-## What runs where
+The enrollment path pins the server certificate and rotates the bootstrap bearer. Linux also
+enrolls a client mTLS certificate. Verify the printed fingerprint out of band.
 
-| Concern | Thin client (your machine) | aimee-server (remote) |
+Connection precedence is:
+
+1. per-command transport flags;
+2. `AIMEE_SERVER_URL` and token/certificate environment;
+3. `~/.config/aimee/remote.conf`;
+4. the local Unix socket.
+
+`aimee remote clear` removes the persisted remote target and returns to the local socket.
+
+## What stays on the client
+
+- the checked-out working tree;
+- local paths and filesystem handles;
+- supported coding-tool hook and MCP/ACP configuration;
+- native TLS trust state;
+- installed provider CLIs and their local logins;
+- runner execution explicitly delegated back to this client.
+
+The client does not hold DB1, DB2, server vault keys, workflow state, or KB credentials.
+
+## Workspaces and uploads
+
+```bash
+cd /path/to/project
+aimee workspace add .
+aimee index scan .
+aimee kb docs push ./docs/design.pdf
+```
+
+The client reads and uploads bytes. The server records a detached workspace and sends content to the
+KB. It never tries to open `/path/to/project` on its own filesystem.
+
+Uploads are bounded and chunked where the operation permits it. A source change during an upload is
+detected through size/hash metadata rather than accepted as one coherent file.
+
+## Remote writes
+
+The shared bearer is read-only. A remote write needs a short-lived KB-signed identity plus a grant
+for the exact server, team, and subject. `data` covers memory, document, and index writes. `full`
+also covers agent, delegate, runner, and workspace control.
+
+The server refuses every remote write until its server ID, team ID, and management-JWKS trust bundle
+are configured. The old `aimee.api.remote_writes` value is not an authorizer.
+
+## Local CLI agents
+
+Some providers are local programs rather than HTTP APIs. They need the local executable, terminal,
+working tree, and login. When a remote workspace selects one, the server sends a bounded execution
+request over the client runner channel.
+
+The provider login stays on the client. The server receives output and status, not the credential.
+Runner and workspace writes require full remote-write authority.
+
+Claude CLI delegation is disabled by default. Enable it only after checking the provider's terms for
+unattended use.
+
+## Credentials
+
+API keys, server-side OAuth tokens, git credentials, and delegate secrets belong in the server vault.
+Do not keep them in `agents.json` or push them once per session.
+
+Legacy client key files should be imported, verified, and removed using the installed agent/vault
+commands. Keep a secure backup until the first successful provider probe.
+
+## Client integrations
+
+Setup can register:
+
+- Claude Code hooks and MCP;
+- the Codex local plugin, hooks, and MCP;
+- supported Copilot hooks and MCP;
+- VS Code MCP/ACP/model endpoints;
+- Claude Desktop MCP.
+
+Set `AIMEE_NO_CLIENT_INTEGRATIONS=1` before setup to skip global changes. Registrations point to the
+local `aimee` binary, which inherits the remote target.
+
+## TLS by platform
+
+| Platform | Backend | Automatic certificate enrollment |
 | --- | --- | --- |
-| Your working tree / files | yes | no (never reads client fs) |
-| Agent API keys / Codex OAuth | not stored here | **sealed vault**, encrypted at rest |
-| Interactive CLI logins (Claude CLI, Codex CLI) | login lives here | runs against the client's login (see below) |
-| Engine, agent loop, DB1/DB2, KB |, | yes |
-| Code index, memory, chat/delegate execution |, | yes |
+| Linux | OpenSSL | yes |
+| macOS | Secure Transport | no; provision explicitly when required |
+| Windows | Schannel | no; provision explicitly when required |
 
-Point the client at the server once:
+`AIMEE_TLS_INSECURE=1` is only for first contact with a known self-signed server. Confirm and pin the
+fingerprint, then remove it.
 
-```sh
-aimee remote set https://SERVER:8743 <bearer-token>
-# or per-invocation: --server / AIMEE_SERVER_URL (+ --server-token / AIMEE_SERVER_TOKEN)
-```
+## Failure behavior
 
-The server's `/v1` is TLS-only off-loopback (`:8743`, auto-provisioned self-signed
-cert; plaintext `:8740` is loopback-only). Set `AIMEE_TLS_INSECURE=1` for the
-self-signed cert, or trust/pin it.
+- A changed certificate pin stops the connection.
+- An expired or revoked client identity returns an authentication error.
+- A missing, `off`, or insufficient grant returns `403` for writes.
+- An unavailable client runner fails the local-CLI attempt; the server does not move that login to
+  itself.
+- A partial upload is not committed as a complete object.
+- A server/client operation mismatch returns a typed unsupported-operation error.
 
-A remote endpoint is "tcp" (`http(s)://host:port`) vs. a co-located unix socket.
-The behaviors below activate only for a **remote tcp** endpoint; co-located use
-is unchanged.
-
-### Exclusive transport selection
-
-A configured remote is an **exclusive** choice for a thin-client command that
-reaches the `/v1` API: the request goes to the remote, with no probe of a
-co-located unix socket and no fallback between them. One such invocation cannot
-be served partly by the remote and partly by a local server.
-
-Ordinary `/v1` command routing was already remote-aware; this closes the gap for
-the commands that were still pinned to the local socket:
-
-| Command | With a remote configured |
-| --- | --- |
-| `aimee hooks pre` / `hooks post` | dispatched to the remote |
-| `aimee session-start` | served by the remote, selected before any local availability probe |
-| `aimee optimize points\|baseline\|replay\|run\|compare` | dispatched to the remote |
-| delegate-availability probe (ordinary startup) | dispatched to the remote |
-
-When the remote is **unreachable**:
-
-- `aimee optimize …` fails. It does not fall back to a co-located server, so a
-  mistyped or down endpoint surfaces as an error rather than silently reporting
-  some other server's data.
-- `aimee hooks …` still **fails open** (the tool call is allowed). That is the
-  established policy-server-unavailable behavior, not a local fallback — no
-  local socket is contacted either way.
-
-For local execution, clear the remote (`aimee remote clear`, or drop `--server` /
-`AIMEE_SERVER_URL` / `AIMEE_API_ENDPOINT` from the environment).
-
-The memory-file guard is unaffected. On a remote-only host the pre-tool hook used
-to run a narrowed local path that enforced only the `memory_redirect` check,
-because the full `pre_tool_check` needed local session state. The full check now
-runs on the remote instead, so the guard is enforced by the server rather than
-partially reimplemented on the client.
-
-### Server write posture
-
-Mutating `/v1` calls require the server to allow remote writes. Set it in the
-server's `aimee.yaml` (`aimee.api.remote_writes: off|data|full`) **or** via the
-`AIMEE_API_REMOTE_WRITES` environment variable (deploy truth, applied even when
-the config file is read-only or absent, e.g. a containerized server). `full`
-grants the LAN bearer the capabilities needed for workspace add and ingest; use
-it only on trusted networks.
-
-## Workspaces (client-push ingest)
-
-On a thin client the workspace root lives on *your* machine, which the server
-cannot read. `aimee workspace add <path>` therefore:
-
-1. resolves `<path>` locally,
-2. registers it on the server as a **`detached`** workspace (the server stores
-   the path verbatim and does not try to scan its own filesystem),
-3. collects the source files locally and pushes them to `POST /v1/index/ingest`,
-   which relays them to aimee-kb's code index.
-
-```sh
-aimee workspace add ~/dev          # register + ingest from this machine
-aimee workspace list               # shows dev as [detached] + indexed projects
-aimee index scan [path]            # re-push one path, or every detached workspace
-aimee index find <symbol>          # query the code index
-```
-
-Notes:
-- The push is **chunked** to stay under aimee-kb's 1 MB request-body cap; large
-  trees are split across several batches.
-- A single `workspace add` collects up to `CODE_COLLECT_MAX_FILES` (4096) files
-  and logs when a tree is truncated; re-run `index scan` from the client to
-  re-push after changes.
-- VCS/build/hidden directories (`.git`, `node_modules`, `target`, `dist`, …) and
-  binary/oversized files are skipped.
-
-## Agents & credentials (server vault)
-
-Credentials for delegates and the primary provider, API keys and Codex/OAuth
-tokens, live in the server's **sealed vault**: encrypted at rest, keyed by
-agent, and decryptable by the server autonomously (a dual-access wrap lets the
-server unseal them without an interactive unlock). They are **not** held on the
-client, and there is **no** per-session RAM keyring or credential push. The
-vault is the single, permanent store. See [SECURITY.md](SECURITY.md).
-
-- `agent add` stores the **definition** (name, endpoint, model, roles, provider)
-  and, with `--key`, seals the **key into the vault** under the server principal.
-  Plaintext key storage is refused, the key only ever lands encrypted.
-- Every chat/delegate turn resolves the agent's credential from the vault (the
-  in-flight turn's attested principal, falling back to the server principal). No
-  credential is pushed per session and none is cached on the client.
-
-### Adding an agent
-
-```sh
-aimee agent add minimax https://api.minimax.io/v1/chat/completions MiniMax-M3 \
-      --key "$MINIMAX_KEY" --provider openai --default \
-      --roles "code,review,explain,refactor,draft,execute,summarize,format,diagnose,validate"
-```
-
-`--key K` sends `K` to the server once, where it is sealed into the vault; it is
-never stored on the client and never written to disk in plaintext. Set the
-primary chat provider to any configured agent:
-
-```sh
-aimee config set provider minimax
-```
-
-You configure agents **once on the server**, the vault is shared across every
-client that reaches it, so there is no per-machine key setup.
-
-### Migrating legacy client-held keys
-
-If an older client left keys in `~/.config/aimee/agent-keys.json`, move them into
-the vault:
-
-```sh
-aimee agent key import --dry-run   # preview what would be vaulted; changes nothing
-aimee agent key import             # vault each leftover key AND scrub it from the
-                                   # plaintext agent-keys.json (scrub is the default)
-aimee agent key import --keep      # vault but retain the local plaintext copy
-```
-
-Keys belong only in the encrypted server vault, so `import` deletes each plaintext
-entry once its vault store is confirmed. Pass `--keep` only if you deliberately want
-an offline plaintext backup.
-
-This is the **only** remaining use of `agent-keys.json`; new keys go straight to
-the vault. Run it on the server host over the Unix socket, or from a connection
-holding the `vault:write:server` capability.
-
-### Codex (ChatGPT OAuth)
-
-Codex/OAuth tokens are stored in the vault too, so a Codex agent authenticates
-server-side with no per-session push from the client. Use the server-hosted
-OAuth setup, which installs the CLI and seals the token into the vault:
-
-```sh
-aimee agent setup codex-oauth       # server-hosted OAuth → token sealed in the vault
-aimee config set provider codex      # optional: use Codex as the primary
-```
-
-`provider codex` is the Codex adapter (provider `chatgpt`, `auth_type`
-`codex-oauth`, the responses-wire delegate driver). A legacy plaintext token
-(from an older db1/secrets store) is migrated into the vault and scrubbed on
-first use.
-
-## Attention guard
-
-The PreToolUse attention guard (`aimee attention-guard`, used by the Claude Code
-integration) is **inert by default**: recursive raw scans (`grep -r`, `Grep`,
-`Glob`, …) are allowed unless you set a positive `ingress_max_raw_scans` cap in
-`aimee.yaml`, after which a session may run that many raw scans before further
-ones are redirected toward the indexed tools. The destructive-file guard (it
-blocks a hard-destructive command on a file the session has actively edited) is
-always on. `AIMEE_GUARD=0` disables the guard entirely.
-
-The client's Claude Code integration (MCP server + hooks) is registered at the
-**installed** binary path and self-heals: running the installed client rewrites
-any stale hook/MCP command (e.g. one left pointing at an old build directory) to
-the resolved binary.
-
-## New `/v1` endpoints
-
-| Method | Endpoint | Purpose |
-| --- | --- | --- |
-| POST | `/v1/index/ingest` | Index client-pushed `{rel_path, content}` files for a workspace the server cannot see (relays to aimee-kb). |
-
-Both `/v1/index/scan` and `/v1/index/ingest` run as synchronous handlers under
-the async op-run worker (poll `GET /v1/runs/{id}`).
+Use `aimee remote status`, then `aimee status`, then the failing command with `--json` when available.
