@@ -3051,6 +3051,12 @@ paths:
       summary: Call an MCP tool
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Call result, content: { application/json: { schema: { type: object } } } } }
+  /help:
+    post:
+      summary: Read the built-in help index or a named help topic
+      description: Read-only narrow endpoint; it always dispatches get_help regardless of any tool field in the request.
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Help content, content: { application/json: { schema: { type: object } } } } }
   /workspaces/context:
     post:
       summary: Workspace context

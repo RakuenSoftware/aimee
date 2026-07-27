@@ -66,6 +66,23 @@ FORBIDDEN_COMPOSE_PATTERNS = {
     "standalone-postgres-service": r"(?m)^\s{2}postgres:",
 }
 
+SERVER_IDENTITY_ENV = {
+    "AIMEE_SERVER_ID": "${AIMEE_SERVER_ID:-}",
+    "AIMEE_SERVER_TEAM_ID": "${AIMEE_SERVER_TEAM_ID:-}",
+    "AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE": (
+        "${AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE:-"
+        "/run/aimee/management/jwks-trust-bundle.json}"
+    ),
+    "AIMEE_KB_CONN": "${AIMEE_KB_CONN:-}",
+}
+SERVER_MANAGEMENT_MOUNT = (
+    "${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}:/run/aimee/management:ro"
+)
+KB_MTLS_ENV = {
+    "AIMEE_KB_MTLS_HOST": "0.0.0.0",
+    "AIMEE_KB_MTLS_PORT": "8745",
+}
+
 REQUIRED_DOCKERIGNORE_ENTRIES = {
     ".git",
     ".aimee",
@@ -290,6 +307,71 @@ def kb_publication_failures(text: str) -> list[str]:
     return failures
 
 
+def server_identity_failures(text: str) -> list[str]:
+    """Validate the opt-in server identity contract in a release Compose file.
+
+    Empty server/team/enrollment values preserve read-only startup. The public
+    trust roots have a stable in-container default and a read-only host mount so
+    an operator can enable writes without editing a shipped manifest.
+    """
+    if yaml is None:
+        return ["PyYAML is required to validate the effective Compose model"]
+    try:
+        model = yaml.load(text, Loader=UniqueKeySafeLoader)
+    except yaml.YAMLError as exc:
+        return [f"invalid Compose YAML: {exc.__class__.__name__}"]
+    services = model.get("services") if isinstance(model, dict) else None
+    service = services.get("aimee-server") if isinstance(services, dict) else None
+    if not isinstance(service, dict):
+        return ["missing aimee-server service"]
+    failures: list[str] = []
+    environment = service.get("environment")
+    if not isinstance(environment, dict):
+        return ["aimee-server environment must use parsed mapping form"]
+    for name, expected in SERVER_IDENTITY_ENV.items():
+        if environment.get(name) != expected:
+            failures.append(f"aimee-server {name} must pass through as {expected}")
+    volumes = service.get("volumes")
+    if not isinstance(volumes, list) or SERVER_MANAGEMENT_MOUNT not in volumes:
+        failures.append("aimee-server missing the read-only management trust mount")
+    return failures
+
+
+def kb_mtls_failures(text: str) -> list[str]:
+    """Require the private enrollment/JWKS listener in managed KB topologies."""
+    if yaml is None:
+        return ["PyYAML is required to validate the effective Compose model"]
+    try:
+        model = yaml.load(text, Loader=UniqueKeySafeLoader)
+    except yaml.YAMLError as exc:
+        return [f"invalid Compose YAML: {exc.__class__.__name__}"]
+    services = model.get("services") if isinstance(model, dict) else None
+    service = services.get("aimee-kb") if isinstance(services, dict) else None
+    if not isinstance(service, dict):
+        return ["missing aimee-kb service"]
+    environment = service.get("environment")
+    if not isinstance(environment, dict):
+        return ["aimee-kb environment must use parsed mapping form"]
+    return [
+        f"aimee-kb {name} must be exactly {expected}"
+        for name, expected in KB_MTLS_ENV.items()
+        if str(environment.get(name, "")) != expected
+    ]
+
+
+def server_default_config_failures(text: str) -> list[str]:
+    if yaml is None:
+        return ["PyYAML is required to validate the server container defaults"]
+    try:
+        model = yaml.load(text, Loader=UniqueKeySafeLoader)
+    except yaml.YAMLError as exc:
+        return [f"invalid server default YAML: {exc.__class__.__name__}"]
+    api = model.get("aimee", {}).get("api") if isinstance(model, dict) else None
+    if not isinstance(api, dict) or api.get("remote_writes") != "off":
+        return ["server container default remote_writes must be the inert value 'off'"]
+    return []
+
+
 def check(root: Path) -> list[str]:
     failures: list[str] = []
     dockerfile = root / "Dockerfile"
@@ -304,11 +386,16 @@ def check(root: Path) -> list[str]:
         failures.append(".env enables optional Compose profiles by default")
 
     server_dockerfile = root / "Dockerfile.server"
+    server_defaults = root / "deploy" / "container" / "aimee-server-remote-writes.yaml"
     server_tls = root / "src" / "server" / "server_tls.c"
     if not server_dockerfile.exists() or "ENV AIMEE_HOME=/var/lib/aimee" not in read(
         server_dockerfile
     ):
         failures.append("server image missing AIMEE_HOME=/var/lib/aimee certificate root")
+    if not server_defaults.exists():
+        failures.append("missing server container default configuration")
+    else:
+        failures.extend(server_default_config_failures(read(server_defaults)))
     if not server_tls.exists() or not all(
         marker in read(server_tls)
         for marker in ('"%s/tls/server.crt"', "config_default_dir()", "pki_ensure_self_signed_server_cert")
@@ -324,6 +411,9 @@ def check(root: Path) -> list[str]:
         path = root / topology
         if not path.exists() or not re.search(r"(?m)^  aimee-server:\s*$", read(path)):
             failures.append(f"{topology} missing aimee-server certificate-bearing service")
+        elif path.exists():
+            for failure in server_identity_failures(read(path)):
+                failures.append(f"{topology} {failure}")
 
     if not dockerfile.exists():
         failures.append("missing Dockerfile")
@@ -350,6 +440,15 @@ def check(root: Path) -> list[str]:
     else:
         for failure in kb_publication_failures(read(server_compose)):
             failures.append(f"compose.server.yaml {failure}")
+        for failure in kb_mtls_failures(read(server_compose)):
+            failures.append(f"compose.server.yaml {failure}")
+
+    managed_compose = root / "deploy" / "container" / "aimee-managed.compose.yaml"
+    if not managed_compose.exists():
+        failures.append("missing deploy/container/aimee-managed.compose.yaml")
+    else:
+        for failure in kb_mtls_failures(read(managed_compose)):
+            failures.append(f"deploy/container/aimee-managed.compose.yaml {failure}")
 
     if not dockerignore.exists():
         failures.append("missing .dockerignore")
@@ -444,6 +543,8 @@ def plant_test() -> int:
                     "      AIMEE_HOME: /var/lib/aimee",
                     "      AIMEE_DB2_URL: ${AIMEE_DB2_URL:-}",
                     "      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8080}",
+                    "      AIMEE_KB_MTLS_HOST: 0.0.0.0",
+                    '      AIMEE_KB_MTLS_PORT: "8745"',
                     "    ports:",
                     '      - "127.0.0.1:8741:8741"',
                     "    healthcheck:",
@@ -453,17 +554,41 @@ def plant_test() -> int:
             ),
             encoding="utf-8",
         )
+        server_service = "\n".join(
+            [
+                "  aimee-server:",
+                "    environment:",
+                "      AIMEE_SERVER_ID: ${AIMEE_SERVER_ID:-}",
+                "      AIMEE_SERVER_TEAM_ID: ${AIMEE_SERVER_TEAM_ID:-}",
+                "      AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE: "
+                "${AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE:-/run/aimee/management/jwks-trust-bundle.json}",
+                "      AIMEE_KB_CONN: ${AIMEE_KB_CONN:-}",
+                "    volumes:",
+                "      - ${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}:/run/aimee/management:ro",
+                "",
+            ]
+        )
         (root / "compose.server.yaml").write_text(
-            read(root / "compose.yaml") + "  aimee-server:\n", encoding="utf-8"
+            read(root / "compose.yaml") + server_service, encoding="utf-8"
         )
         (root / "compose.server-managed.yaml").write_text(
-            "services:\n  aimee-server:\n", encoding="utf-8"
+            "services:\n" + server_service, encoding="utf-8"
         )
         (root / "compose.server-standalone.yaml").write_text(
-            "services:\n  aimee-server:\n", encoding="utf-8"
+            "services:\n" + server_service, encoding="utf-8"
         )
         (root / "Dockerfile.server").write_text(
             "FROM debian\nENV AIMEE_HOME=/var/lib/aimee\n", encoding="utf-8"
+        )
+        (root / "deploy/container").mkdir(parents=True)
+        (root / "deploy/container/aimee-managed.compose.yaml").write_text(
+            "services:\n  aimee-kb:\n    environment:\n"
+            "      AIMEE_KB_MTLS_HOST: 0.0.0.0\n"
+            '      AIMEE_KB_MTLS_PORT: "8745"\n',
+            encoding="utf-8",
+        )
+        (root / "deploy/container/aimee-server-remote-writes.yaml").write_text(
+            'aimee:\n  api:\n    remote_writes: "off"\n', encoding="utf-8"
         )
         (root / "src/server").mkdir(parents=True)
         (root / "src/server/server_tls.c").write_text(
@@ -480,6 +605,41 @@ def plant_test() -> int:
             print("kb-container-packaging plant: failed", file=sys.stderr)
             for item in found:
                 print(f"  found: {item}", file=sys.stderr)
+            return 1
+
+        identity_compose = read(root / "compose.server-managed.yaml")
+        for marker in (
+            "      AIMEE_SERVER_ID: ${AIMEE_SERVER_ID:-}\n",
+            "      AIMEE_SERVER_TEAM_ID: ${AIMEE_SERVER_TEAM_ID:-}\n",
+            "      AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE: "
+            "${AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE:-/run/aimee/management/jwks-trust-bundle.json}\n",
+            "      AIMEE_KB_CONN: ${AIMEE_KB_CONN:-}\n",
+            "      - ${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}:"
+            "/run/aimee/management:ro\n",
+        ):
+            planted = identity_compose.replace(marker, "", 1)
+            if planted == identity_compose or not server_identity_failures(planted):
+                print(f"kb-container-packaging plant: missed server identity marker {marker!r}", file=sys.stderr)
+                return 1
+
+        for marker in (
+            "      AIMEE_KB_MTLS_HOST: 0.0.0.0\n",
+            '      AIMEE_KB_MTLS_PORT: "8745"\n',
+        ):
+            planted = read(root / "deploy/container/aimee-managed.compose.yaml").replace(
+                marker, "", 1
+            )
+            if not kb_mtls_failures(planted):
+                print(
+                    f"kb-container-packaging plant: missed KB mTLS marker {marker!r}",
+                    file=sys.stderr,
+                )
+                return 1
+
+        if not server_default_config_failures(
+            "aimee:\n  api:\n    remote_writes: data\n"
+        ):
+            print("kb-container-packaging plant: missed active legacy remote_writes default", file=sys.stderr)
             return 1
 
         (root / ".env").write_text("COMPOSE_PROFILES=curator-llm\n", encoding="utf-8")

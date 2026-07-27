@@ -484,6 +484,7 @@ cJSON *mcp_build_full_served_list(void);
 int handle_mcp_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_mcp_recheck(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_get_help(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 
 /* Record the served-call verdict from a sub-handler that returned early (same
  * thread as handle_mcp_call). See server_mcp.c. */

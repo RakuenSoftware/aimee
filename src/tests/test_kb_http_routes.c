@@ -1596,6 +1596,7 @@ static void test_capabilities(void)
 #include "db2/enrollments.h"
 #include "kb_identity.h"
 static int g_stub_revoked_calls = 0;
+static char g_stub_enrollment_expires_at[32];
 int kb_http_egress_route(const char *method, const char *path, const char *body, int body_len,
                          const kb_principal_t *transport, const char *fingerprint, char *out,
                          int out_cap)
@@ -1617,7 +1618,8 @@ int db2_enrollment_insert(const char *scope, const char *fingerprint, const char
    (void)fingerprint;
    (void)cert_issuer;
    (void)cert_serial_norm;
-   (void)expires_at;
+   snprintf(g_stub_enrollment_expires_at, sizeof(g_stub_enrollment_expires_at), "%s",
+            expires_at ? expires_at : "");
    (void)legacy;
    if (out_id)
       *out_id = 1;
@@ -2290,11 +2292,15 @@ static void test_enroll_redeem_route(void)
    cJSON_AddStringToObject(rj, "token", token);
    cJSON_AddStringToObject(rj, "csr", csr);
    char *rb = cJSON_PrintUnformatted(rj);
+   g_stub_enrollment_expires_at[0] = '\0';
    s = kb_http_route_ex("POST", "/v1/enroll/redeem", NULL, NULL, NULL, rb, (int)strlen(rb), buf,
                         sizeof(buf));
    assert(s == 200);
    assert(strstr(buf, "\"client_cert\"") && strstr(buf, "BEGIN CERTIFICATE"));
    assert(strstr(buf, "project:redeem"));
+   assert(strlen(g_stub_enrollment_expires_at) == 20);
+   assert(g_stub_enrollment_expires_at[4] == '-' && g_stub_enrollment_expires_at[10] == 'T' &&
+          g_stub_enrollment_expires_at[19] == 'Z');
 
    /* replaying the same (single-use) token -> 401. */
    s = kb_http_route_ex("POST", "/v1/enroll/redeem", NULL, NULL, NULL, rb, (int)strlen(rb), buf,
@@ -2844,6 +2850,11 @@ static void test_mtls_listener(void)
       char conn2[600];
       assert(kb_enroll_conn_string_build("localhost", port, fp, token2, conn2, sizeof(conn2)) > 0);
 
+      char identity_file[160];
+      snprintf(identity_file, sizeof(identity_file), "/tmp/aimee-kb-client-identity-%ld.json",
+               (long)getpid());
+      unlink(identity_file);
+      kb_client_mtls_set_identity_path_for_test(identity_file);
       setenv("AIMEE_KB_CONN", conn2, 1);
       setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "0", 1);
       assert(kb_client_mtls_configured() == 1);
@@ -2851,6 +2862,26 @@ static void test_mtls_listener(void)
       char *r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
       assert(st2 == 200);
       assert(r && strstr(r, "\"status\":\"ok\""));
+      free(r);
+      struct stat identity_stat;
+      assert(stat(identity_file, &identity_stat) == 0 && S_ISREG(identity_stat.st_mode));
+      assert((identity_stat.st_mode & 0777) == 0600 && identity_stat.st_uid == geteuid());
+      FILE *identity_stream = fopen(identity_file, "r");
+      assert(identity_stream);
+      char identity_json[32768];
+      size_t identity_n = fread(identity_json, 1, sizeof(identity_json) - 1, identity_stream);
+      assert(!ferror(identity_stream) && feof(identity_stream));
+      fclose(identity_stream);
+      identity_json[identity_n] = '\0';
+      assert(strstr(identity_json, "\"version\":1") && strstr(identity_json, "PRIVATE KEY"));
+      assert(strstr(identity_json, token2) == NULL); /* never persist the one-time credential */
+
+      /* Simulate a full server process restart. The enrollment token was spent
+       * by the first request, so this can pass only by validating and loading
+       * the owner-only identity file. */
+      kb_client_mtls_reset_for_test();
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      assert(st2 == 200 && r && strstr(r, "\"status\":\"ok\""));
       free(r);
       int pool_total = -1, pool_idle = -1, pool_busy = -1, pool_waiters = -1;
       unsigned long pool_exhausted = 1;
@@ -2915,7 +2946,9 @@ static void test_mtls_listener(void)
       assert(pool_total == 0 && pool_idle == 0);
       unsetenv("AIMEE_TRANSPORT_KB_POOL_ENABLED");
       unsetenv("AIMEE_KB_CONN");
+      kb_client_mtls_set_identity_path_for_test(NULL);
       assert(kb_client_mtls_configured() == 0);
+      unlink(identity_file);
       remove(store2);
    }
 
