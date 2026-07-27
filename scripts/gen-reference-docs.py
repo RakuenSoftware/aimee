@@ -684,6 +684,18 @@ ENV_DESC = {
     "AIMEE_VECTOR_KB_BATCH_SIZE": ("Knowledge base (aimee-kb)", "Embedding batch size for KB vector ingest."),
     # Database & vectors
     "AIMEE_DB2_URL": ("Database & vectors", "Postgres (DB2) connection URL for the KB store."),
+    "AIMEE_DB2_STATEMENT_TIMEOUT_MS": (
+        "Database & vectors",
+        "Per-connection `statement_timeout` in ms. Defaults to the pool's stuck-lease "
+        "ceiling (`DB2_POOL_HOLD_CEILING_MS`, 300000), because a statement must not "
+        "outlive the duration that defines a lease as stuck — the pool can report such a "
+        "lease but cannot reclaim it. The value must be canonical decimal digits with no "
+        "sign, surrounding whitespace or leading zero. Exactly `0` disables the bound — a "
+        "deliberate opt-out for genuinely long work — and every other spelling of zero "
+        "(`00`, `+0`, `-0`, ` 0`) is treated as malformed. Anything malformed or "
+        "out-of-range falls back to the default and never to unlimited, so no typo can "
+        "silently remove the bound.",
+    ),
     "AIMEE_EMBEDDING_DIM": ("Database & vectors", "Embedding dimension (drives halfvec column sizing)."),
     "AIMEE_PGVEC_SLOW_QUERY_MS": ("Database & vectors", "Slow-query log threshold (ms) for the pgvector transport."),
     # Memory

@@ -305,7 +305,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 214 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. Secrets and tokens should be supplied through the environment or credential vault, never committed.
+The binaries read 215 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. Secrets and tokens should be supplied through the environment or credential vault, never committed.
 
 ### Paths & assets
 
@@ -404,6 +404,7 @@ The binaries read 214 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 | Variable | Description |
 |----------|-------------|
+| `AIMEE_DB2_STATEMENT_TIMEOUT_MS` | Per-connection `statement_timeout` in ms. Defaults to the pool's stuck-lease ceiling (`DB2_POOL_HOLD_CEILING_MS`, 300000), because a statement must not outlive the duration that defines a lease as stuck — the pool can report such a lease but cannot reclaim it. The value must be canonical decimal digits with no sign, surrounding whitespace or leading zero. Exactly `0` disables the bound — a deliberate opt-out for genuinely long work — and every other spelling of zero (`00`, `+0`, `-0`, ` 0`) is treated as malformed. Anything malformed or out-of-range falls back to the default and never to unlimited, so no typo can silently remove the bound. |
 | `AIMEE_DB2_URL` | Postgres (DB2) connection URL for the KB store. |
 | `AIMEE_EMBEDDING_DIM` | Embedding dimension (drives halfvec column sizing). |
 | `AIMEE_PGVEC_SLOW_QUERY_MS` | Slow-query log threshold (ms) for the pgvector transport. |
