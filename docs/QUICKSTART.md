@@ -203,7 +203,8 @@ aimee remote set https://YOUR_SERVER:8743 aimee-local-dev
 aimee remote set https://YOUR_SERVER:8743 "$(cat .aimee-server-bearer)"
 
 aimee remote status     # resolved transport + /v1/health probe
-aimee status            # server, DB1, and kb health
+aimee status            # server + DB1 state
+aimee kb status         # knowledge-base health (vector store, embedder, ingest queue)
 ```
 
 `aimee-local-dev` only works **once per server**, so passing it after a previous
@@ -295,7 +296,8 @@ aimee version
 ```powershell
 aimee remote set https://YOUR_SERVER:8743 aimee-local-dev
 aimee remote status     # shows the resolved transport + a /v1/health probe
-aimee status            # server, DB1, and kb health
+aimee status            # server + DB1 state
+aimee kb status         # knowledge-base health (vector store, embedder, ingest queue)
 ```
 
 Use your real bearer token instead of `aimee-local-dev` if you changed it. The server's `/v1` is TLS-only off-loopback; `https://` works with certificate verification on by default (Schannel against the Windows cert store), so set `AIMEE_TLS_INSECURE=1` for the auto-provisioned self-signed cert (or trust/pin it). Alternatives to `aimee remote set`: set `AIMEE_SERVER_URL` / `AIMEE_SERVER_TOKEN` environment variables, or pass `--server https://YOUR_SERVER:8743 --server-token=...` per command. Precedence is `--server` flag > env > persisted `remote.conf`.
@@ -390,7 +392,8 @@ aimee version
 ```bash
 aimee remote set https://YOUR_SERVER:8743 aimee-local-dev
 aimee remote status     # resolved transport + /v1/health probe
-aimee status            # server, DB1, and kb health
+aimee status            # server + DB1 state
+aimee kb status         # knowledge-base health (vector store, embedder, ingest queue)
 ```
 
 Both the prebuilt universal binary and a source build speak `https://` with certificate verification on by default (Secure Transport against the Keychain); set `AIMEE_TLS_INSECURE=1` for a self-signed dev cert. As on the other platforms, you can use `AIMEE_SERVER_URL` / `AIMEE_SERVER_TOKEN` or `--server` instead of `aimee remote set`.

@@ -296,7 +296,8 @@ full target list and the layering rules.
 
 ```bash
 aimee version
-aimee status        # server, DB1, and kb health
+aimee status        # server + DB1 state
+aimee kb status     # knowledge-base health (vector store, embedder, ingest queue)
 ```
 
 Against a Docker server, set `AIMEE_SERVER_URL`/`AIMEE_SERVER_TOKEN` (or `aimee
