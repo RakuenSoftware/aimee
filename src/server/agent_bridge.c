@@ -223,6 +223,18 @@ cJSON *agent_build_request_responses(const agent_t *agent, cJSON *input, cJSON *
 
    cJSON_AddBoolToObject(req, "store", 0);
    cJSON_AddBoolToObject(req, "stream", 1);
+   /* EXPERIMENT (unverified): the codex backend returns reasoning-only turns --
+    * two reasoning output items, no message, no function_call, 0 text deltas,
+    * 47 of 71 output tokens spent on reasoning. Declare reasoning intent and ask
+    * for encrypted reasoning content so it can be replayed across turns (store
+    * is 0, so the server keeps no state of its own). */
+   {
+      cJSON *reasoning = cJSON_AddObjectToObject(req, "reasoning");
+      cJSON_AddStringToObject(reasoning, "effort", "medium");
+      cJSON_AddStringToObject(reasoning, "summary", "auto");
+      cJSON *include = cJSON_AddArrayToObject(req, "include");
+      cJSON_AddItemToArray(include, cJSON_CreateString("reasoning.encrypted_content"));
+   }
    if (safe_input)
       cJSON_AddItemToObject(req, "input", safe_input);
    else
