@@ -1314,6 +1314,10 @@ func (r *NativeRunner) merge(ctx context.Context, req StepRequest) (StepResult, 
 		return StepResult{}, err
 	}
 	if err := r.forge.Merge(ctx, workdir, prRef, base); err != nil {
+		if mergeErrIsConflict(err) {
+			return StepResult{Status: StepFailed,
+				Detail: "merge conflict needs a content decision, no retry can resolve it: " + err.Error()}, nil
+		}
 		return StepResult{Status: StepPending, PauseReason: "merge_pending", Detail: err.Error()}, nil
 	}
 	return StepResult{Status: StepAdvanced, ArtifactType: "none", Artifact: "merged"}, nil
