@@ -4,8 +4,8 @@
  *   1. the deploy never passes --remove-orphans (the managed compose shares
  *      COMPOSE_PROJECT_NAME with compose.server-managed.yaml, so an orphan sweep
  *      stops and removes aimee-server itself — the container running the deploy);
- *   2. the LLM variant that was NOT selected is retired, so the mutually-exclusive
- *      GPU/CPU services never both answer to the `aimee-llm` network name.
+ *   2. the legacy pre-baked aimee-llm-cpu container is retired, so it cannot keep
+ *      answering to the `aimee-llm` network name alongside the one LLM service.
  *
  * deploy_apply.c is included directly to reach its static helpers; the two config
  * symbols it calls are stubbed so the test needs no database. */
@@ -23,7 +23,7 @@
 
 /* --- stubs for the config surface deploy_apply.c pulls in --- */
 
-static char g_stub_profiles[64] = "kb,llm-cpu";
+static char g_stub_profiles[64] = "kb,llm";
 
 int config_load(config_t *cfg)
 {
@@ -40,79 +40,6 @@ void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
 }
 
 #include "../server/deploy_apply.c"
-
-/* --- profiles_select: whole-entry matching, not substring --- */
-
-static void test_profiles_select(void)
-{
-   assert(profiles_select("kb,llm-cpu", "llm-cpu") == 1);
-   assert(profiles_select("kb,llm", "llm") == 1);
-   assert(profiles_select("kb", "llm") == 0);
-   assert(profiles_select("", "llm") == 0);
-   assert(profiles_select(NULL, "llm") == 0);
-
-   /* The regression that a substring match would cause: "llm-cpu" must NOT read as
-    * the GPU profile "llm", or the deploy would retire the variant it just brought
-    * up and leave the stale one running. */
-   assert(profiles_select("kb,llm-cpu", "llm") == 0);
-   assert(profiles_select("llm-cpu", "llm") == 0);
-
-   /* leading/trailing entries and a single entry */
-   assert(profiles_select("llm,kb", "llm") == 1);
-   assert(profiles_select("kb,llm", "kb") == 1);
-   assert(profiles_select("llm", "llm") == 1);
-   printf("  profiles_select ok\n");
-}
-
-/* --- envp_get --- */
-
-static void test_envp_get(void)
-{
-   char *envp[] = {(char *)"PATH=/bin", (char *)"COMPOSE_PROFILES=kb,llm", (char *)"X=1", NULL};
-   assert(strcmp(envp_get(envp, "COMPOSE_PROFILES"), "kb,llm") == 0);
-   assert(strcmp(envp_get(envp, "PATH"), "/bin") == 0);
-   assert(envp_get(envp, "MISSING") == NULL);
-   /* a prefix of a real key must not match */
-   assert(envp_get(envp, "COMPOSE") == NULL);
-   assert(envp_get(NULL, "PATH") == NULL);
-   printf("  envp_get ok\n");
-}
-
-/* --- envp_with_profile: replaces, never appends a second entry --- */
-
-static void test_envp_with_profile(void)
-{
-   char *envp[] = {(char *)"PATH=/bin", (char *)"COMPOSE_PROFILES=kb,llm-cpu", (char *)"X=1", NULL};
-   char **out = envp_with_profile(envp, "llm");
-   assert(out != NULL);
-
-   int profiles_seen = 0, path_seen = 0, x_seen = 0;
-   for (size_t i = 0; out[i]; i++)
-   {
-      if (strncmp(out[i], "COMPOSE_PROFILES=", 17) == 0)
-      {
-         profiles_seen++;
-         /* the forced value wins — a duplicate entry would leave the child's
-          * getenv() free to return the deploy's own selection instead */
-         assert(strcmp(out[i], "COMPOSE_PROFILES=llm") == 0);
-      }
-      else if (strcmp(out[i], "PATH=/bin") == 0)
-         path_seen = 1;
-      else if (strcmp(out[i], "X=1") == 0)
-         x_seen = 1;
-   }
-   assert(profiles_seen == 1);
-   assert(path_seen && x_seen);
-   free_envp(out);
-
-   /* an env with no COMPOSE_PROFILES still gains exactly one */
-   char *bare[] = {(char *)"PATH=/bin", NULL};
-   out = envp_with_profile(bare, "llm-cpu");
-   assert(out != NULL);
-   assert(strcmp(envp_get(out, "COMPOSE_PROFILES"), "llm-cpu") == 0);
-   free_envp(out);
-   printf("  envp_with_profile ok\n");
-}
 
 /* --- the deploy argv itself --- */
 
@@ -145,6 +72,26 @@ static void test_deploy_argv_has_no_remove_orphans(void)
    printf("  deploy argv omits --remove-orphans ok\n");
 }
 
+/* --- the legacy CPU container is retired by name --- */
+
+static void test_retire_targets_legacy_cpu_container(void)
+{
+   /* aimee-llm-cpu is no longer a service of the managed compose file, so `up`
+    * cannot touch it and `docker compose rm <service>` would not find it. It has
+    * to be removed by container name, or it keeps holding the `aimee-llm` network
+    * alias next to the real LLM service and the kb can reach the stale one. */
+   char out[256] = "";
+   char *envp[] = {(char *)"PATH=/nonexistent-for-test", NULL};
+   char file[512];
+   deploy_apply_compose_file(file, sizeof(file));
+
+   /* No docker on this PATH: the call must be a harmless no-op, never fatal and
+    * never a partial write into `out`. */
+   deploy_retire_stale_llm(envp, file, out, sizeof(out));
+   assert(out[0] == '\0');
+   printf("  legacy cpu retirement is non-fatal without docker ok\n");
+}
+
 /* --- compose file resolution --- */
 
 static void test_compose_file_default(void)
@@ -159,10 +106,8 @@ static void test_compose_file_default(void)
 int main(void)
 {
    printf("test_deploy_apply\n");
-   test_profiles_select();
-   test_envp_get();
-   test_envp_with_profile();
    test_deploy_argv_has_no_remove_orphans();
+   test_retire_targets_legacy_cpu_container();
    test_compose_file_default();
    printf("test_deploy_apply: all passed\n");
    return 0;

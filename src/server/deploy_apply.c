@@ -175,112 +175,31 @@ static int run_capture(const char *const argv[], char **envp, char *out, size_t 
    return 0;
 }
 
-/* Read KEY's value out of a NULL-terminated envp, or NULL when unset. */
-static const char *envp_get(char **envp, const char *key)
-{
-   if (!envp || !key)
-      return NULL;
-   size_t klen = strlen(key);
-   for (size_t i = 0; envp[i]; i++)
-      if (strncmp(envp[i], key, klen) == 0 && envp[i][klen] == '=')
-         return envp[i] + klen + 1;
-   return NULL;
-}
-
-/* Does COMPOSE_PROFILES select `name` as a whole, comma-separated entry?
- * Substring matching would report "llm" for the "llm-cpu" profile. */
-static int profiles_select(const char *profiles, const char *name)
-{
-   if (!profiles || !name)
-      return 0;
-   size_t nlen = strlen(name);
-   for (const char *p = profiles; *p;)
-   {
-      const char *comma = strchr(p, ',');
-      size_t len = comma ? (size_t)(comma - p) : strlen(p);
-      if (len == nlen && strncmp(p, name, nlen) == 0)
-         return 1;
-      if (!comma)
-         break;
-      p = comma + 1;
-   }
-   return 0;
-}
-
-/* Return a copy of envp with COMPOSE_PROFILES forced to `profile` (replacing any
- * existing entry, so the child cannot see the deploy's own selection). Heap-owned;
- * free with free_envp. NULL on OOM. */
-static char **envp_with_profile(char **envp, const char *profile)
-{
-   size_t base = 0;
-   for (size_t i = 0; envp && envp[i]; i++)
-      base++;
-   char **out = calloc(base + 2, sizeof(char *));
-   if (!out)
-      return NULL;
-   size_t n = 0;
-   for (size_t i = 0; envp && envp[i]; i++)
-   {
-      if (strncmp(envp[i], "COMPOSE_PROFILES=", 17) == 0)
-         continue;
-      out[n] = strdup(envp[i]);
-      if (!out[n])
-      {
-         free_envp(out);
-         return NULL;
-      }
-      n++;
-   }
-   size_t len = strlen("COMPOSE_PROFILES=") + strlen(profile) + 1;
-   out[n] = malloc(len);
-   if (!out[n])
-   {
-      free_envp(out);
-      return NULL;
-   }
-   snprintf(out[n], len, "COMPOSE_PROFILES=%s", profile);
-   out[n + 1] = NULL;
-   return out;
-}
-
-/* Drop the LLM variant this deploy did not select.
+/* Retire the pre-baked aimee-llm-cpu container left over from an older install.
  *
- * The managed compose runs under the SAME COMPOSE_PROJECT_NAME as
- * compose.server-managed.yaml, so `docker compose … up --remove-orphans` classifies
- * aimee-server — which is not a service of the managed file — as an orphan and stops
- * and removes the very container running the deploy. (docker compose --dry-run
- * reports "Container aimee-aimee-server-1 Stopping/Removing".) So the deploy must not
- * pass --remove-orphans, and instead retires the one orphan the managed stack can
- * really leave behind: the GPU (aimee-llm) and CPU (aimee-llm-cpu) services are
- * mutually exclusive and both answer to the network name `aimee-llm`, so switching
- * topology must take the previous one down or the alias resolves to two containers.
+ * There is now ONE LLM service (aimee-llm, model-less, downloads the selected
+ * tier). The retired aimee-llm-cpu carried the network alias `aimee-llm`, so a
+ * leftover container would make that name resolve to two containers and the kb
+ * could reach the stale one. It is no longer a service of the managed compose
+ * file, so `up` will never touch it — it has to be removed by name.
  *
- * Removing a service that was never up is a no-op, so failures here are not fatal to
- * the deploy; the output is appended for the wizard to show. */
+ * This cannot be done with --remove-orphans. The managed compose runs under the
+ * SAME COMPOSE_PROJECT_NAME as compose.server-managed.yaml, so an orphan sweep
+ * classifies aimee-server — not a service of the managed file — as an orphan and
+ * stops and removes the very container running the deploy. (docker compose
+ * --dry-run reports "Container aimee-aimee-server-1 Stopping/Removing".)
+ *
+ * Removing a container that was never up is a no-op, so failures here are not
+ * fatal to the deploy; the output is appended for the wizard to show. */
 static void deploy_retire_stale_llm(char **envp, const char *file, char *out, size_t out_cap)
 {
-   const char *profiles = envp_get(envp, "COMPOSE_PROFILES");
-   static const struct
-   {
-      const char *profile, *service;
-   } variants[] = {{"llm", "aimee-llm"}, {"llm-cpu", "aimee-llm-cpu"}};
-
-   for (size_t i = 0; i < sizeof(variants) / sizeof(variants[0]); i++)
-   {
-      if (profiles_select(profiles, variants[i].profile))
-         continue; /* this is the variant the deploy is bringing up */
-      char **venv = envp_with_profile(envp, variants[i].profile);
-      if (!venv)
-         continue;
-      const char *argv[] = {"docker", "compose",           "-f", file, "rm", "-s",
-                            "-f",     variants[i].service, NULL};
-      char buf[512];
-      int code = -1;
-      if (run_capture(argv, venv, buf, sizeof(buf), &code) == 0 && code == 0 && buf[0] &&
-          out_cap > strlen(out) + 1)
-         snprintf(out + strlen(out), out_cap - strlen(out), "%s", buf);
-      free_envp(venv);
-   }
+   (void)file; /* the service is gone from the compose file; address it directly */
+   const char *argv[] = {"docker", "rm", "-f", "aimee-aimee-llm-cpu-1", NULL};
+   char buf[512];
+   int code = -1;
+   if (run_capture(argv, envp, buf, sizeof(buf), &code) == 0 && code == 0 && buf[0] &&
+       out_cap > strlen(out) + 1)
+      snprintf(out + strlen(out), out_cap - strlen(out), "retired legacy aimee-llm-cpu: %s", buf);
 }
 
 /* Background worker: `docker compose -f <file> up -d`.
