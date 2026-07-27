@@ -476,7 +476,29 @@ int platform_setenv(const char *name, const char *value)
 {
    if (!name)
       return -1;
-   return SetEnvironmentVariableA(name, value ? value : "") ? 0 : -1;
+   const char *v = value ? value : "";
+   /* Two environments have to agree here, and only one of them was being written.
+    *
+    * SetEnvironmentVariable updates the Win32 process environment block, which is
+    * what CreateProcess hands to children. getenv() does NOT read that block: it
+    * reads the C runtime's own copy, built at startup and never refreshed from
+    * Win32. Setting only the Win32 block therefore left every in-process getenv()
+    * still seeing the old value, and the call looked like it had succeeded.
+    *
+    * `--profile=NAME` sets AIMEE_PROFILE through here and aimee_home() reads it
+    * with getenv(), so the profile was silently ignored and the client used the
+    * DEFAULT profile's server and token -- the wrong target, with no error. Every
+    * other caller (AIMEE_ACTIVE_TOOLSET, the AIMEE_DELEGATE_DEPTH recursion guard,
+    * the memory rerank modes) had the same silent no-op.
+    *
+    * _putenv_s updates the CRT copy; SetEnvironmentVariable stays so children keep
+    * inheriting it. One difference from POSIX is unavoidable: setenv(name, "", 1)
+    * keeps an empty-valued variable, while Windows treats an empty value as a
+    * delete, so getenv() returns NULL rather than "". Every caller tests
+    * `v && v[0]`, so both spellings mean the same thing to them. */
+   if (_putenv_s(name, v) != 0)
+      return -1;
+   return SetEnvironmentVariableA(name, v) ? 0 : -1;
 }
 
 unsigned int platform_getuid(void)
