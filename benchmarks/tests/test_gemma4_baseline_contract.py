@@ -22,6 +22,7 @@ sys.path.insert(0, str(MODULES))
 builder = importlib.import_module("build_254_fixtures")
 reranker = importlib.import_module("run_reranking_ab")
 eurobert_controller = importlib.import_module("run_254_eurobert_rerankers")
+eurobert_bootstrap = importlib.import_module("bootstrap_eurobert_runtime")
 eurobert_server = importlib.import_module("serve_cross_encoder")
 eurobert_biencoder = importlib.import_module("serve_eurobert_biencoder")
 eurobert_smoke = importlib.import_module("smoke_eurobert_runtime")
@@ -298,6 +299,7 @@ class GemmaBaselineContractTests(unittest.TestCase):
         self.assertEqual(command[:5], ["docker", "-H", "unix:///docker.sock", "run", "--detach"])
         self.assertNotIn("--rm", command)
         self.assertEqual(command[command.index("--restart") + 1], "unless-stopped")
+        self.assertEqual(command[command.index("--entrypoint") + 1], "python3")
         self.assertIn("/dev/kfd:/dev/kfd", command)
         self.assertIn("/dev/dri:/dev/dri", command)
         one_shot = eurobert_controller.gpu_container_prefix(
@@ -312,6 +314,32 @@ class GemmaBaselineContractTests(unittest.TestCase):
                 "eurobert610m_pretrained", "eurobert610m_reranker",
             ],
         )
+
+    def test_eurobert_runtime_bootstrap_avoids_ephemeral_image_builds(self) -> None:
+        manifest_path = MODULES / "eurobert_rerankers.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        root = Path("/bench")
+        venv_dir = eurobert_controller.runtime_venv_dir(root, manifest["runtime"])
+        self.assertEqual(
+            eurobert_controller.container_python(root, venv_dir),
+            f"/bench/{venv_dir.relative_to(root)}/bin/python3",
+        )
+        expected = eurobert_bootstrap.expected_provenance(manifest_path, manifest)
+        self.assertEqual(expected["runtime"], manifest["runtime"])
+        with mock.patch.object(eurobert_controller, "remove_container") as remove, mock.patch.object(
+            eurobert_controller, "run"
+        ) as run:
+            eurobert_controller.build_runtime(
+                "/docker.sock", root, ROOT, manifest_path, manifest, venv_dir
+            )
+        self.assertEqual(remove.call_count, 2)
+        command = run.call_args.args[0]
+        self.assertEqual(command[:4], ["docker", "-H", "unix:///docker.sock", "run"])
+        self.assertNotIn("build", command)
+        self.assertIn(manifest["runtime"]["base_image"], command)
+        self.assertEqual(command[command.index("--restart") + 1], "on-failure:1")
+        self.assertEqual(command[command.index("--entrypoint") + 1], "python3")
+        self.assertIn("/repo/benchmarks/gemma4_baseline/bootstrap_eurobert_runtime.py", command)
         self.assertEqual(eurobert_controller.sweep_lock_flags(True), eurobert_controller.fcntl.LOCK_EX)
         self.assertEqual(
             eurobert_controller.sweep_lock_flags(False),

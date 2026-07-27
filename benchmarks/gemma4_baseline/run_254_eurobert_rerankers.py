@@ -150,7 +150,7 @@ def environment_identity(suite_sha: str, runtime: dict[str, Any]) -> dict[str, A
         "host": run(["hostname"], capture=True).stdout.strip(),
         "kernel": run(["uname", "-srmo"], capture=True).stdout.strip(),
         "hardware_identity": hardware,
-        "container_image": runtime["image_tag"],
+        "container_image": runtime["base_image"],
         "base_image": runtime["base_image"],
         "packages": runtime["packages"],
     }
@@ -173,31 +173,13 @@ def hardware_snapshot() -> dict[str, int]:
     return result
 
 
-def build_image(socket: str, repo: Path, manifest: dict[str, Any]) -> None:
-    runtime = manifest["runtime"]
-    packages = runtime["packages"]
-    command = docker_cmd(
-        socket,
-        "build",
-        "--file",
-        str(repo / "benchmarks/gemma4_baseline/Dockerfile.eurobert-reranker"),
-        "--tag",
-        runtime["image_tag"],
-        "--build-arg",
-        f"ROCM_PYTORCH_IMAGE={runtime['base_image']}",
-        "--build-arg",
-        f"SENTENCE_TRANSFORMERS_VERSION={packages['sentence-transformers']}",
-        "--build-arg",
-        f"TRANSFORMERS_VERSION={packages['transformers']}",
-        "--build-arg",
-        f"DATASETS_VERSION={packages['datasets']}",
-        "--build-arg",
-        f"ACCELERATE_VERSION={packages['accelerate']}",
-        "--build-arg",
-        f"SAFETENSORS_VERSION={packages['safetensors']}",
-        str(repo),
-    )
-    run(command)
+def runtime_venv_dir(root: Path, runtime: dict[str, Any]) -> Path:
+    identity = hashlib.sha256(json.dumps(runtime, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+    return root / "eurobert-runtime" / identity / "venv"
+
+
+def container_python(root: Path, venv_dir: Path) -> str:
+    return f"/bench/{venv_dir.relative_to(root)}/bin/python3"
 
 
 def gpu_container_prefix(
@@ -208,6 +190,7 @@ def gpu_container_prefix(
     image: str,
     *,
     detach: bool = False,
+    python_executable: str = "python3",
 ) -> list[str]:
     command = docker_cmd(socket, "run")
     if detach:
@@ -235,9 +218,42 @@ def gpu_container_prefix(
         "HF_HOME=/bench/hf-cache",
         "--env",
         "HSA_OVERRIDE_GFX_VERSION=11.0.0",
+        "--entrypoint",
+        python_executable,
         image,
     ]
     return command
+
+
+def build_runtime(
+    socket: str,
+    root: Path,
+    repo: Path,
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    venv_dir: Path,
+) -> None:
+    name = "eurobert-runtime-bootstrap"
+    remove_container(socket, name)
+    command = gpu_container_prefix(
+        socket,
+        name,
+        root,
+        repo,
+        manifest["runtime"]["base_image"],
+        python_executable="python3",
+    )
+    command += [
+        "/repo/benchmarks/gemma4_baseline/bootstrap_eurobert_runtime.py",
+        "--manifest",
+        f"/repo/{manifest_path.relative_to(repo)}",
+        "--venv-dir",
+        f"/bench/{venv_dir.relative_to(root)}",
+    ]
+    try:
+        run(command)
+    finally:
+        remove_container(socket, name)
 
 
 def train_model(
@@ -248,10 +264,13 @@ def train_model(
     manifest_path: Path,
     label: str,
     output_dir: Path,
+    python_executable: str,
 ) -> None:
     name = f"eurobert-train-{label}"
     remove_container(socket, name)
-    command = gpu_container_prefix(socket, name, root, repo, image)
+    command = gpu_container_prefix(
+        socket, name, root, repo, image, python_executable=python_executable
+    )
     command += [
         "/repo/benchmarks/gemma4_baseline/train_eurobert_reranker.py",
         "--manifest",
@@ -276,10 +295,13 @@ def smoke_model(
     manifest_path: Path,
     label: str,
     output_path: Path,
+    python_executable: str,
 ) -> None:
     name = f"eurobert-smoke-{label}"
     remove_container(socket, name)
-    command = gpu_container_prefix(socket, name, root, repo, image)
+    command = gpu_container_prefix(
+        socket, name, root, repo, image, python_executable=python_executable
+    )
     command += [
         "/repo/benchmarks/gemma4_baseline/smoke_eurobert_runtime.py",
         "--manifest",
@@ -304,11 +326,20 @@ def start_server(
     model: dict[str, Any],
     model_dir: Path | None,
     serving: dict[str, Any],
+    python_executable: str,
 ) -> tuple[str, dict[str, Any], float]:
     started = time.monotonic()
     name = "eurobert-reranker-server"
     remove_container(socket, name)
-    command = gpu_container_prefix(socket, name, root, repo, image, detach=True)
+    command = gpu_container_prefix(
+        socket,
+        name,
+        root,
+        repo,
+        image,
+        detach=True,
+        python_executable=python_executable,
+    )
     if model_dir is None:
         command += [
             "/repo/benchmarks/gemma4_baseline/serve_eurobert_biencoder.py",
@@ -368,6 +399,7 @@ def benchmark_model(
     logs: Path,
     extension_sha: str,
     max_cases: int,
+    python_executable: str,
 ) -> None:
     _, health, load_seconds = start_server(
         socket,
@@ -378,6 +410,7 @@ def benchmark_model(
         model,
         model_dir,
         manifest["serving"],
+        python_executable,
     )
     after_load = hardware_snapshot()
     try:
@@ -483,6 +516,9 @@ def main() -> int:
     extension_sha = manifest_sha256(manifest_path)
     models_root = args.root / "eurobert-rerankers" / extension_sha[:16]
     models_root.mkdir(parents=True, exist_ok=True)
+    venv_dir = runtime_venv_dir(args.root, manifest["runtime"])
+    python_executable = container_python(args.root, venv_dir)
+    runtime_image = manifest["runtime"]["base_image"]
 
     production_was_running = inspect_running(args.socket, args.production_container)
     write_state(
@@ -494,13 +530,12 @@ def main() -> int:
         production_was_running=production_was_running,
         environment=environment_identity(suite_sha, manifest["runtime"]),
     )
-    if production_was_running:
-        run(docker_cmd(args.socket, "stop", args.production_container))
-
     try:
         if not args.skip_build:
-            write_state(state_path, status="building_runtime")
-            build_image(args.socket, args.repo, manifest)
+            write_state(state_path, status="bootstrapping_runtime")
+            build_runtime(args.socket, args.root, args.repo, manifest_path, manifest, venv_dir)
+        if production_was_running:
+            run(docker_cmd(args.socket, "stop", args.production_container))
         for label in selected:
             model = by_label[label]
             model_root = models_root / label
@@ -512,7 +547,7 @@ def main() -> int:
                 args.socket,
                 args.root,
                 args.repo,
-                manifest["runtime"]["image_tag"],
+                runtime_image,
                 manifest,
                 model,
                 pretrained_label,
@@ -521,6 +556,7 @@ def main() -> int:
                 logs,
                 extension_sha,
                 args.max_cases,
+                python_executable,
             )
             smoke_expected = expected_smoke_provenance(manifest_path, manifest, model)
             try:
@@ -534,10 +570,11 @@ def main() -> int:
                     args.socket,
                     args.root,
                     args.repo,
-                    manifest["runtime"]["image_tag"],
+                    runtime_image,
                     manifest_path,
                     label,
                     smoke_path,
+                    python_executable,
                 )
             assert_completed_smoke(smoke_path, smoke_expected)
             expected = expected_provenance(manifest_path, manifest, model)
@@ -554,10 +591,11 @@ def main() -> int:
                     args.socket,
                     args.root,
                     args.repo,
-                    manifest["runtime"]["image_tag"],
+                    runtime_image,
                     manifest_path,
                     label,
                     model_root,
+                    python_executable,
                 )
             assert_completed_training_dir(model_root, expected)
             write_state(state_path, status="trained_reranking", active_label=label)
@@ -565,7 +603,7 @@ def main() -> int:
                 args.socket,
                 args.root,
                 args.repo,
-                manifest["runtime"]["image_tag"],
+                runtime_image,
                 manifest,
                 model,
                 label,
@@ -574,6 +612,7 @@ def main() -> int:
                 logs,
                 extension_sha,
                 args.max_cases,
+                python_executable,
             )
         write_state(state_path, status="complete", active_label=None)
     except Exception as exc:

@@ -231,8 +231,11 @@ budgets are equal to the released Ettin models: Ettin was trained on the full
 delta. The extension deliberately does not alter the frozen fixture manifest, so
 its SHA-256 and all already-completed Ettin/Gemma results remain valid.
 
-The `.254` extension controller builds a manifest-pinned PyTorch/ROCm image. For
-each size it benchmarks the untouched base, requires one bf16
+The `.254` extension controller bootstraps the manifest-pinned Python packages
+into a verified persistent environment from the pinned PyTorch/ROCm base-image
+digest. This avoids SmoothNAS's unsupported ephemeral BuildKit workers while
+each actual task still runs in a fresh, durable-policy container. For each size
+it benchmarks the untouched base, requires one bf16
 forward/backward/AdamW smoke step, trains or resumes the cross-encoder, then
 benchmarks the trained model. Both passes use the same frozen 10,000 cases and
 8-worker/4-pair load profile. Containers use explicit SmoothNAS-safe restart and

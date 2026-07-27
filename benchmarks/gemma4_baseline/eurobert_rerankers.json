@@ -1,7 +1,6 @@
 {
   "runtime": {
     "base_image": "rocm/pytorch@sha256:ab1d350b818b90123cfda31363019d11c0d41a8f12a19e3cb2cb40cf0261137d",
-    "image_tag": "aimee-eurobert-reranker:rocm6.4-pytorch2.6",
     "packages": {
       "accelerate": "1.14.0",
       "datasets": "5.0.0",
