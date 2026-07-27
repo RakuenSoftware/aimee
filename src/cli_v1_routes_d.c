@@ -647,6 +647,7 @@ static const struct
     {"evidence.provenance_retrieval_event", "POST", "/v1/audit/provenance"},
     {"evidence.trace_retrieval_event", "POST", "/v1/audit/trace"},
     {"graph.explain", "POST", "/v1/graph/explain"},
+    {"help.get", "POST", "/v1/help"},
     {"hooks.post", "POST", "/v1/hooks/post"},
     {"hooks.pre", "POST", "/v1/hooks/pre"},
     {"hooks.session_start", "POST", "/v1/hooks/session_start"},

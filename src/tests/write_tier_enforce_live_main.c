@@ -17,7 +17,7 @@
  * were all composition defects of exactly that shape.
  *
  * WHY A DRIVER AND NOT A SHELL SCRIPT. The server does not accept a raw JWKS. It
- * reads AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE, a root-owned 0600 file pinning a
+ * reads AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE, a root-owned 0644 file pinning a
  * manifest key, then loads a SIGNED PUBLICATION ENVELOPE from db1 and validates
  * it against that bundle. Standing that up means real Ed25519 manifest signing,
  * the real envelope encoder, and a real db1 row — none of which can be faked
@@ -145,19 +145,18 @@ static int fetch_envelope(void *opaque, char *out, size_t cap, size_t *out_n)
    return 0;
 }
 
-/* The trust bundle must be a root-owned regular file with no extra links and
- * mode 0600 — server_mgmt_jwks_trust_bundle_load enforces all of that. Writing
- * it any other way makes the server refuse to start, which is the behaviour we
- * want to keep, so the rig complies rather than relaxing it. */
+/* The trust bundle must be a root-owned regular file with no extra links and no
+ * group/world WRITE bits. It is public verification material, so 0644 is the
+ * container-compatible shape: UID 1000 can read it but cannot modify it. */
 static int write_trust_bundle(const char *path, const char *bundle, size_t bundle_n)
 {
    (void)unlink(path);
-   int fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+   int fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0644);
    if (fd < 0)
       return -1;
    int ok = write(fd, bundle, bundle_n) == (ssize_t)bundle_n;
    ok = close(fd) == 0 && ok;
-   if (ok && chmod(path, 0600) != 0)
+   if (ok && chmod(path, 0644) != 0)
       ok = 0;
    return ok ? 0 : -1;
 }
@@ -223,7 +222,7 @@ static int cmd_provision(const char *db1_path, const char *bundle_path, const ch
    OPENSSL_cleanse(manifest_seed, sizeof(manifest_seed));
 
    if (write_trust_bundle(bundle_path, bundle, bundle_n) != 0)
-      return fail("could not write the trust bundle 0600");
+      return fail("could not write the trust bundle 0644");
 
    if (db1_init(db1_path) != 0)
       return fail("could not open db1");

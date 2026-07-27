@@ -13,6 +13,14 @@ extern "C"
 {
 #endif
 
+   typedef enum
+   {
+      SERVER_WRITE_TIER_CONFIG_READY = 0,
+      SERVER_WRITE_TIER_CONFIG_NO_TEAM,
+      SERVER_WRITE_TIER_CONFIG_NO_SERVER_ID,
+      SERVER_WRITE_TIER_CONFIG_NO_TRUST_BUNDLE
+   } server_write_tier_config_state_t;
+
    /* Matches server_write_tier_replay_fn: 0 = fresh and now recorded,
     * 1 = already seen, negative = the store did not record it (deny). */
    int server_write_tier_replay_db1(void *ctx, const server_identity_token_claims_t *claims,
@@ -46,6 +54,13 @@ extern "C"
     * log the misconfiguration once and loudly, instead of leaving an operator to
     * infer it from a stream of denied writes. */
    int server_write_tier_team_configured(void);
+
+   /* Syntactic startup preflight for the three deployment inputs. This does not
+    * claim that the mounted bundle or cached JWKS is valid; those are checked by
+    * server_mgmt_jwks_cache_startup after DB1 opens. It exists so partial
+    * Compose configuration names the missing variable instead of collapsing to
+    * the generic token outcome `invalid`. */
+   server_write_tier_config_state_t server_write_tier_config_state(void);
 
 #ifdef __cplusplus
 }

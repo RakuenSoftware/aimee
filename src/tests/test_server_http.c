@@ -1134,6 +1134,12 @@ int main(void)
              server_capability_for_method("memory.recall"));
       assert(server_http_route_caps("POST", "/v1/chat/completions") ==
              server_capability_for_method("chat.send_stream"));
+      /* Help is a narrow read endpoint. Keep generic MCP execution privileged:
+       * the help handler force-selects get_help before dispatch. */
+      assert(server_http_route_caps("POST", "/v1/help") == CAP_SESSION_READ);
+      assert(server_http_route_caps("POST", "/v1/help") ==
+             server_capability_for_method("help.get"));
+      assert(server_http_route_caps("POST", "/v1/mcp/call") == CAP_TOOL_EXECUTE);
 
       /* Reads sit within the read-only set; compute requires CAP_CHAT. */
       assert((server_http_route_caps("GET", "/v1/rules") & ~CAPS_READ_ONLY) == 0);
@@ -1561,6 +1567,10 @@ int main(void)
                                             SERVER_REMOTE_WRITES_OFF) == 0);
       assert(server_http_route_allowed_caps(1, CAPS_AUTHENTICATED, "POST", "/v1/chat/completions",
                                             SERVER_REMOTE_WRITES_OFF) == 1);
+      assert(server_http_route_allowed_caps(1, CAPS_READ_ONLY, "POST", "/v1/help",
+                                            SERVER_REMOTE_WRITES_OFF) == 1);
+      assert(server_http_route_allowed_caps(1, CAPS_READ_ONLY, "POST", "/v1/mcp/call",
+                                            SERVER_REMOTE_WRITES_OFF) == 0);
 
       /* UDS is always full, independent of the level. */
       assert(server_http_conn_caps(0, NULL, SERVER_REMOTE_WRITES_OFF) == CAPS_ALL);

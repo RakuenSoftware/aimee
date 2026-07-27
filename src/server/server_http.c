@@ -2360,10 +2360,26 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
                "aimee.api.remote_writes is set but no longer authorizes writes; per-user grants "
                "replace it (see docs/UPGRADING.md 0.3.0). Requests it would formerly have allowed "
                "are counted as remote_writes.global_ignored");
-   if (!server_write_tier_team_configured())
+   switch (server_write_tier_config_state())
+   {
+   case SERVER_WRITE_TIER_CONFIG_NO_TEAM:
       LOG_ERROR("server.http",
                 "AIMEE_SERVER_TEAM_ID is unset or invalid: reads continue, but every /v1 write "
                 "will be denied with no_team_configured until it is set to this server's team id");
+      break;
+   case SERVER_WRITE_TIER_CONFIG_NO_SERVER_ID:
+      LOG_ERROR("server.http",
+                "AIMEE_SERVER_ID is unset: reads continue, but every /v1 write will be denied "
+                "with invalid until it is set to this server's enrolled registry id");
+      break;
+   case SERVER_WRITE_TIER_CONFIG_NO_TRUST_BUNDLE:
+      LOG_ERROR("server.http",
+                "AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE is unset: reads continue, but every /v1 "
+                "write will be denied with invalid until the management trust bundle is mounted");
+      break;
+   case SERVER_WRITE_TIER_CONFIG_READY:
+      break;
+   }
    g_rate_state.window_start = 0;
    g_rate_state.count = 0;
    g_tcp_fd = tcp_listen(tcp_port, bearer_token, 0 /* plaintext: loopback only */);
