@@ -400,7 +400,17 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	// still the freeze no-op path.
 	if result.Partial && baseHeadErr == nil {
 		head, headErr := gitText(ctx, workdir, "rev-parse", "HEAD")
-		if headErr == nil && head == baseHead {
+		// baseHead is HEAD at the start of THIS attempt, so on a redispatch it
+		// already contains whatever earlier attempts committed. A delegate that
+		// correctly finds the work done then leaves no new commit and looks
+		// identical to one that did nothing at all -- and the slice retried until
+		// its wall cap, forever. Observed on wi_e51e37cf slice g0.0: two "wfe:
+		// impl" commits carrying the whole change, and every redispatch reporting
+		// "no owned files changed; result treated as incomplete".
+		//
+		// So only fail when the BRANCH carries no work either. Ask the branch, not
+		// this attempt.
+		if headErr == nil && head == baseHead && !branchHasWorkOverBase(ctx, workdir, req.WorkItem.ParentID) {
 			detail := strings.TrimSpace(result.Response)
 			if detail == "" {
 				detail = "delegate returned a partial result and produced no commit"
@@ -517,6 +527,32 @@ func commitChanges(ctx context.Context, workdir, stage string) error {
 // clean worktree, and returns the park reason "base_integration_conflict" so the
 // slice surfaces distinctly instead of masquerading as convergence_no_progress or
 // poisoning the reused worktree.
+// branchHasWorkOverBase reports whether this slice's branch carries any commit
+// beyond the feature base it was cut from -- i.e. whether the slice has already
+// produced work, regardless of what the current attempt did.
+//
+// Answers false when the base cannot be resolved. That preserves the existing
+// stricter behaviour rather than letting an unresolved base excuse a genuinely
+// empty slice: an unverifiable claim of work is not work.
+func branchHasWorkOverBase(ctx context.Context, workdir, parentID string) bool {
+	if parentID == "" {
+		return false
+	}
+	base := "aimee/feat/" + parentID
+	// Prefer the remote tip for the same reason the worktree does: slices merge
+	// through the forge, so the local ref can lag behind what has landed.
+	if _, err := gitText(ctx, workdir, "rev-parse", "--verify", "--quiet", "origin/"+base+"^{commit}"); err == nil {
+		base = "origin/" + base
+	} else if _, err := gitText(ctx, workdir, "rev-parse", "--verify", "--quiet", base+"^{commit}"); err != nil {
+		return false
+	}
+	count, err := gitText(ctx, workdir, "rev-list", "--count", base+"..HEAD")
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(count) != "" && strings.TrimSpace(count) != "0"
+}
+
 func integrateFeatureBase(ctx context.Context, workdir, parentID string) (string, error) {
 	base := "aimee/feat/" + parentID
 	// The feature branch may not exist yet (first generation, before any slice has
