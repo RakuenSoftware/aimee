@@ -24,7 +24,7 @@ extern "C"
     * from DB1. Idempotent. Returns 0 on success, -1 on failure (logged). */
    int pki_ca_ensure(void);
 
-   /* Issue a client cert for `cn` (which must pass vault_principal_cert_sanitize),
+   /* Issue a client cert for `cn` (which must pass vault_principal_name_sanitize),
     * valid for `validity_days`, signed by the CA. Writes the cert PEM and key PEM
     * into the caller's buffers and the hex serial into serial_out, and records the
     * cert in DB1. Returns 0 on success, -1 on failure. */

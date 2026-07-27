@@ -175,13 +175,29 @@ static int run_capture(const char *const argv[], char **envp, char *out, size_t 
    return 0;
 }
 
-/* Background worker: `docker compose -f <file> up -d --remove-orphans`. */
+/* Background worker: `docker compose -f <file> up -d`.
+ *
+ * NO --remove-orphans, and this is not a style preference: it made the deploy
+ * STOP THE SERVER RUNNING IT. aimee-server is started by compose.server-managed.yaml
+ * under COMPOSE_PROJECT_NAME=aimee, and the managed file this command targets
+ * defines only postgres/aimee-kb/aimee-llm. So compose finds a container in
+ * project "aimee" that its file does not define, calls it an orphan, and removes
+ * it — the orchestrator deleting itself mid-deploy. Observed on a clean install:
+ * the wizard's Deploy step ran, and 47 seconds later the server logged
+ * "server: shut down" and the container exited, leaving a new user with a dead
+ * install and no obvious cause.
+ *
+ * The shared project name is deliberate (the managed services join the server's
+ * network), so the fix is to drop the orphan sweep rather than the project. What
+ * that gives up is small and recoverable: a service removed from the managed file
+ * leaves its container behind until an operator prunes it. What it buys is that
+ * deploying cannot destroy the thing doing the deploying. */
 static void *deploy_worker(void *arg)
 {
    (void)arg;
    char file[512];
    deploy_apply_compose_file(file, sizeof(file));
-   const char *argv[] = {"docker", "compose", "-f", file, "up", "-d", "--remove-orphans", NULL};
+   const char *argv[] = {"docker", "compose", "-f", file, "up", "-d", NULL};
    char **envp = build_deploy_envp();
 
    char out[DEPLOY_OUT_CAP];

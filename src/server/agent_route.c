@@ -152,6 +152,32 @@ void agent_set_route_policy_filter(int (*fn)(const agent_t *agent))
    g_route_policy_filter = fn;
 }
 
+/* Optional route-time capacity probe; see agent_set_route_capacity_probe. A hook,
+ * like the health and policy filters above, so this unit keeps no link
+ * dependency on the admission controller and filter-less builds (CLI / tests)
+ * keep the prior behaviour. */
+static int (*g_route_capacity_probe)(const char *agent_name) = NULL;
+
+void agent_set_route_capacity_probe(int (*fn)(const char *agent_name))
+{
+   g_route_capacity_probe = fn;
+}
+
+/* Does this agent have a free concurrency slot right now? Returns 1 when it
+ * does, and ALSO when capacity is unknown — no probe registered, controller
+ * unconfigured (-1), or an agent with no per-agent cap. Unknown must read as
+ * "yes": this predicate only narrows a candidate set, so answering "no" on
+ * ignorance would drop seats for a reason we cannot substantiate. */
+static int agent_has_free_slot(const agent_t *ag)
+{
+   if (!g_route_capacity_probe || !ag || !ag->name[0] || ag->max_parallel <= 0)
+      return 1;
+   int active = g_route_capacity_probe(ag->name);
+   if (active < 0)
+      return 1; /* unconfigured / unknown */
+   return active < ag->max_parallel;
+}
+
 /* See agent_config.h: marks the current thread's turn as PRIMARY (not
  * delegation) so the policy filter doesn't exclude the provider-named agent
  * from its own chat turn. */
@@ -373,7 +399,31 @@ int delegate_pick_for_role(agent_config_t *cfg, const char *role, const char *co
    }
    if (n == 0)
       return -1;
-   return elig[delegate_role_rand() % (unsigned)n];
+
+   /* Prefer a seat that can actually start now. Eligibility above asks whether
+    * the agent is routable (health, policy, structure, credentials) but not
+    * whether it has a free concurrency slot, so a saturated agent stayed
+    * selectable and the seat failed at admission with AGENT_RC_AT_LIMIT. Health
+    * cannot close that gap: being at-limit is deliberately NOT recorded as a
+    * provider fault (agent_fallback.c), so such an agent is never marked DOWN.
+    * Live effect: roundtable seats drew a saturated agent, failed instantly, and
+    * a panel needing 2 of 3 seats was declared unreachable while other agents
+    * sat idle.
+    *
+    * PREFER, never exclude. If every eligible agent is saturated we fall back to
+    * the full eligible set, so this cannot turn a populated roster into "no
+    * agent for role" (-1) — the caller still gets a seat and blocking admission
+    * waits for a slot, exactly as before. It only stops us choosing a full agent
+    * over a free one. */
+   int freeel[MAX_AGENTS];
+   int nfree = 0;
+   for (int i = 0; i < n; i++)
+      if (agent_has_free_slot(&cfg->agents[elig[i]]))
+         freeel[nfree++] = elig[i];
+
+   const int *pool = nfree > 0 ? freeel : elig;
+   int pool_n = nfree > 0 ? nfree : n;
+   return pool[delegate_role_rand() % (unsigned)pool_n];
 }
 
 int agent_pick_named_for_role(agent_config_t *cfg, const char *name, const char *role)

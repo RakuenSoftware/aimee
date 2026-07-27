@@ -35,19 +35,37 @@ typedef enum
                               client CA -> a per-client "cert:<CN>" principal (mtls-client-identity) */
 } attested_transport_t;
 
-/* mTLS client-cert identity: the principal is "cert:" + a sanitized CN. The CN is
- * limited to [A-Za-z0-9._-] so it can never embed a ':' and collide with the
- * uid:/webuser: namespaces; the "cert:" prefix is added by the server, never by
- * the cert. */
+/* mTLS client-cert identity: the principal is "cert:" + a sanitized CN. */
 #define VAULT_CERT_PRINCIPAL_PREFIX "cert:"
 #define VAULT_CERT_CN_MAX           128
 
-/* Validate + copy a client-cert CN into out (NUL-terminated). Returns 1 iff cn is
- * a non-empty string of [A-Za-z0-9._-], at most VAULT_CERT_CN_MAX bytes (so the
- * "cert:<CN>" principal fits VAULT_PRINCIPAL_MAX); 0 otherwise (caller fails
- * closed). This is what blocks principal-spoofing CNs (e.g. "uid:0", embedded
- * ':' / newlines / path traversal). */
-int vault_principal_cert_sanitize(const char *cn, char *out, size_t out_len);
+/* ONE rule for every attacker-influenced name that becomes part of a vault
+ * principal — a client-cert CN and a webchat username both go through this.
+ *
+ * They used to differ: the CN was sanitized and the webuser name was
+ * interpolated raw, for no stated reason, even though the argument for
+ * sanitizing applies identically to both. A name is a name; which channel
+ * carried it does not change what characters are safe in a principal.
+ *
+ * Returns 1 iff `name` is a non-empty string of [A-Za-z0-9._-] at most
+ * VAULT_CERT_CN_MAX bytes (so any "<prefix>:<name>" principal fits
+ * VAULT_PRINCIPAL_MAX); 0 otherwise, and the caller fails closed to NO principal.
+ *
+ * What the charset buys, concretely:
+ *   - no ':' — so a name can never embed the namespace separator and make
+ *     "webuser:x" or "cert:x" read as a different principal form
+ *   - no '/' — so a principal can never become a path component that traverses
+ *   - no control characters or whitespace — a principal reaches audit records and
+ *     logs, where a newline is an injection primitive
+ *   - no '|' — the file vault's AEAD AAD is "principal|agent|cred", and a '|' in
+ *     any component makes two different slots share one AAD
+ *
+ * A name outside the set gets no vault rather than a mangled one. That is a
+ * deliberate refusal, not an oversight: a legitimate POSIX login name is already
+ * inside this set, so anything outside it is either a misconfiguration or an
+ * attempt. Note it excludes the trailing '$' of a Samba machine account — if such
+ * an account ever needs a per-user vault, this is the one place to widen. */
+int vault_principal_name_sanitize(const char *name, char *out, size_t out_len);
 
 /* Max length of a vault principal string ("webuser:" + a 128-byte username, or
  * "uid:" + digits) including the NUL. */
@@ -65,6 +83,9 @@ int vault_principal_cert_sanitize(const char *cn, char *out, size_t out_len);
  * Writes the principal string into out (out[0]=='\0' when there is NO vault
  * identity) and returns the attested transport classification:
  *   - webuser asserted WITH a valid token  -> ATTEST_WEBCHAT_TRUSTED, "webuser:<name>"
+ *     (principal EMPTY if the name fails vault_principal_name_sanitize — the
+ *     classification is kept so gating still sees a webchat hop, exactly as the
+ *     cert path keeps ATTEST_MTLS_CLIENT for an unsanitizable CN)
  *   - webuser asserted WITHOUT a valid token (spoof) -> classification per the
  *     underlying transport, principal EMPTY (the assertion is refused, not honored)
  *   - plain UDS peer with uid > 0           -> ATTEST_UDS_PEERCRED,    "uid:<n>"

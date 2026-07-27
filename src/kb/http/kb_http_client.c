@@ -50,6 +50,8 @@ struct kb_http_response_parser
    parser_state_t state;
    kb_http_result_t terminal;
    size_t body_max, body_seen, remaining;
+   /* See kb_http_request_t.deliver_error_body. */
+   int deliver_error_body;
    unsigned char headers[KB_HTTP_HEADER_BLOCK_MAX + 1U];
    size_t headers_len;
    char chunk_line[KB_HTTP_CHUNK_LINE_MAX + 1U];
@@ -238,7 +240,12 @@ static kb_http_result_t parse_headers(kb_http_response_parser_t *p)
       return parser_fail(p, KB_HTTP_CALLBACK_ABORT);
    if (parser_deadline(p) != KB_HTTP_MORE)
       return p->terminal;
-   p->gate = p->response.status >= 200 && p->response.status <= 299 ? gate : KB_HTTP_GATE_DISCARD;
+   /* A non-2xx body is discarded unless the caller opted in — see
+    * kb_http_request_t.deliver_error_body. The opt-in exists because an OAuth token
+    * endpoint's 400 body carries the error code and is the only place it appears. */
+   p->gate = (p->response.status >= 200 && p->response.status <= 299) || p->deliver_error_body
+                 ? gate
+                 : KB_HTTP_GATE_DISCARD;
    return KB_HTTP_MORE;
 }
 
@@ -258,6 +265,12 @@ kb_http_result_t kb_http_response_parser_init(kb_http_response_parser_t **out, s
    p->state = PARSER_HEADERS;
    *out = p;
    return KB_HTTP_OK;
+}
+
+void kb_http_response_parser_deliver_error_body(kb_http_response_parser_t *p, int deliver)
+{
+   if (p)
+      p->deliver_error_body = deliver ? 1 : 0;
 }
 
 static kb_http_result_t deliver(kb_http_response_parser_t *p, const unsigned char *bytes,
@@ -1602,6 +1615,7 @@ kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
    if (result != KB_HTTP_OK)
       goto done;
    parser->deadline_ns = deadline;
+   kb_http_response_parser_deliver_error_body(parser, request->deliver_error_body);
    for (;;)
    {
       unsigned char buffer[16384];
