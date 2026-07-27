@@ -1667,9 +1667,10 @@ clean:
 	       tests/unit-test-* tests/bench-perf tests/fuzz_extractors tests/fuzz_json_parse \
 	       tests/fuzz_config_load tests/fuzz_memory_search tests/fuzz_message_frame tests/fuzz_acl_parse \
 	       tests/fuzz_kb_workload_wire tests/fuzz_server_mgmt_token tests/fuzz_kb_mgmt_token \
+	       tests/fuzz_kb_mgmt_token_authority_ipc \
 	       tests/fuzz_kb_mgmt_jwks_publication \
 	       tests/fuzz_kb_mgmt_checkpoint tests/fuzz_kb_management_action \
-	       tests/fuzz_server_mgmt_action \
+	       tests/fuzz_server_mgmt_action tests/fuzz_server_mgmt_read_config \
 	       coverage.info coverage-report agent_help_data.h tool_prompts_data.h
 
 # Pinned clang-format version. Must match what CI installs so `make lint`
