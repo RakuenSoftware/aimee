@@ -83,26 +83,33 @@ static void test_degenerate_retry_instruction(void)
    cJSON_Delete(messages);
 }
 
+/* The degenerate retry fires only when the delegate has executed nothing yet, so
+ * it must leave the tool interface intact. It used to force a text-only turn,
+ * which stripped the tools the instruction tells the model to use and told it the
+ * tool budget was closed -- a write role could then never produce its file. The
+ * retry appends exactly one instruction and is bounded to a single attempt. */
 static void test_degenerate_retry_budget(void)
 {
    cJSON *messages = cJSON_CreateArray();
    int turn = 0;
    int retry_count = 0;
-   int force_text_only_retry = 0;
 
-   assert(agent_session_retry_degenerate_response(messages, &turn, &retry_count,
-                                                  &force_text_only_retry) == 1);
+   assert(agent_session_retry_degenerate_response(messages, &turn, &retry_count) == 1);
    assert(turn == 1);
    assert(retry_count == 1);
-   assert(force_text_only_retry == 1);
    assert(cJSON_GetArraySize(messages) == 1);
 
-   force_text_only_retry = 0;
-   assert(agent_session_retry_degenerate_response(messages, &turn, &retry_count,
-                                                  &force_text_only_retry) == 0);
+   /* The appended instruction must keep pointing the model AT the tool interface;
+    * it must never tell it the budget is closed or to stop calling tools. */
+   cJSON *retry_msg = cJSON_GetArrayItem(messages, 0);
+   const char *retry_text = cJSON_GetStringValue(cJSON_GetObjectItem(retry_msg, "content"));
+   assert(retry_text != NULL);
+   assert(strstr(retry_text, "use the available tool interface") != NULL);
+   assert(strstr(retry_text, "tool budget was closed") == NULL);
+
+   assert(agent_session_retry_degenerate_response(messages, &turn, &retry_count) == 0);
    assert(turn == 1);
    assert(retry_count == 1);
-   assert(force_text_only_retry == 0);
    assert(cJSON_GetArraySize(messages) == 1);
 
    cJSON_Delete(messages);
