@@ -162,9 +162,9 @@ int db2_kb_ingest_queue_complete(int64_t job_id, int files_indexed, int chunks_a
    aimee_pg_bind_int(s, "?2", files_indexed);
    aimee_pg_bind_int(s, "?3", chunks_added);
    aimee_pg_bind_int(s, "?4", embeddings_added);
-   (void)aimee_pg_step(s, err, sizeof(err));
+   int step = aimee_pg_step(s, err, sizeof(err));
    aimee_pg_finalize(s);
-   return 0;
+   return step == AIMEE_PG_DONE ? 0 : -1;
 }
 
 int db2_kb_ingest_queue_fail(int64_t job_id, const char *error_message)

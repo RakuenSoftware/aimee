@@ -291,7 +291,9 @@ static int g_init_thread_set = 0;
  * pool is exhausted/unavailable, a private overflow connection (pooled=0).
  * Stored in g_thread_conn_key; the destructor returns/closes it on thread exit
  * (this is the reliable reclaim-on-thread-death the pool reaper deliberately
- * leaves to us). g_lease_depth refcounts db2_lease_begin/_end so nested units
+ * leaves to us). A failed acquisition never falls back to g_conn: libpq forbids
+ * concurrent use of one PGconn, and g_conn belongs exclusively to the init
+ * thread. g_lease_depth refcounts db2_lease_begin/_end so nested units
  * reuse one lease. */
 typedef struct
 {
@@ -495,8 +497,8 @@ static int db2_verify_pre_provisioned(void *conn, int expected_dim, char *err, s
 /* Acquire this thread's connection: a pool lease, or — if the pool is
  * unavailable/exhausted — a private overflow connection. Stores it in the
  * thread key so the destructor returns/closes it on thread exit. Caller holds
- * no lock. Returns NULL only if everything fails (then db2_conn falls back to
- * g_conn as a last resort). */
+ * no lock. Returns NULL if both the pool lease and overflow connection fail;
+ * the caller must fail the operation rather than sharing g_conn. */
 static void *db2_thread_acquire(void)
 {
    void *conn = NULL;
@@ -532,7 +534,15 @@ static void *db2_thread_acquire(void)
             aimee_pg_close(conn);
          return NULL;
       }
-      pthread_setspecific(g_thread_conn_key, L);
+      if (pthread_setspecific(g_thread_conn_key, L) != 0)
+      {
+         free(L);
+         if (pooled)
+            db2_pool_return(conn);
+         else
+            aimee_pg_close(conn);
+         return NULL;
+      }
    }
    L->conn = conn;
    L->pooled = pooled;
@@ -550,8 +560,7 @@ void *db2_conn(void)
       return g_conn;
    /* Every other thread leases from the pool (lazily; returned on thread exit
     * by the destructor, or sooner via db2_lease_end at a job boundary). */
-   void *c = db2_thread_acquire();
-   return c ? c : g_conn;
+   return db2_thread_acquire();
 }
 
 void db2_lease_begin(void)
@@ -622,19 +631,48 @@ void *db2_thread_conn_open(char *errbuf, size_t errlen)
       return NULL;
    }
    void *conn = aimee_pg_open(url, errbuf, errlen);
-   if (conn)
-      pthread_setspecific(g_thread_conn_key, conn);
+   if (!conn)
+      return NULL;
+   db2_thread_lease_t *L = (db2_thread_lease_t *)pthread_getspecific(g_thread_conn_key);
+   if (!L)
+   {
+      L = (db2_thread_lease_t *)calloc(1, sizeof(*L));
+      if (!L)
+      {
+         aimee_pg_close(conn);
+         return NULL;
+      }
+      if (pthread_setspecific(g_thread_conn_key, L) != 0)
+      {
+         free(L);
+         aimee_pg_close(conn);
+         return NULL;
+      }
+   }
+   if (L->conn)
+   {
+      if (L->pooled)
+         db2_pool_return(L->conn);
+      else
+         aimee_pg_close(L->conn);
+   }
+   L->conn = conn;
+   L->pooled = 0;
    return conn;
 }
 
 void db2_thread_conn_close(void)
 {
    pthread_once(&g_thread_conn_key_once, thread_conn_key_init);
-   void *conn = pthread_getspecific(g_thread_conn_key);
-   if (conn)
+   db2_thread_lease_t *L = (db2_thread_lease_t *)pthread_getspecific(g_thread_conn_key);
+   if (L && L->conn)
    {
-      aimee_pg_close(conn);
-      pthread_setspecific(g_thread_conn_key, NULL);
+      if (L->pooled)
+         db2_pool_return(L->conn);
+      else
+         aimee_pg_close(L->conn);
+      L->conn = NULL;
+      L->pooled = 0;
    }
 }
 
