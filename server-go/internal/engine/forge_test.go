@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"os/exec"
@@ -82,5 +83,48 @@ func TestPullNumber(t *testing.T) {
 	}
 	if _, err := pullNumber("https://github.com/acme/repo/pull/not-a-number"); err == nil {
 		t.Fatal("invalid pull reference accepted")
+	}
+}
+
+func TestMergeErrIsConflict(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			// The exact string the resource plane produced in production while
+			// slices g0.1/g0.2 retried an unwinnable merge every 15 seconds.
+			name: "live conflict payload",
+			err: errors.New(`forge resource 400: {"error":"github API (pr merge, HTTP 405): ` +
+				`Pull Request has merge conflicts"}`),
+			want: true,
+		},
+		{name: "singular", err: errors.New("Pull Request has a merge conflict"), want: true},
+		{name: "mixed case", err: errors.New("Merge Conflict detected"), want: true},
+		{name: "upper case", err: errors.New("MERGE CONFLICTS PRESENT"), want: true},
+		{
+			// A lost race: head or base moved mid-merge. Retrying wins it, so it
+			// must stay retryable even though GitHub answers 405 here too.
+			name: "lost race",
+			err:  errors.New("Base branch was modified. Review and try the merge again."),
+			want: false,
+		},
+		{
+			// HTTP 409 is literally named "Conflict"; the bare word must not be
+			// enough to reject a winnable race.
+			name: "bare conflict word",
+			err:  errors.New("forge resource 409: Conflict"),
+			want: false,
+		},
+		{name: "unrelated failure", err: errors.New("forge resource plane is unavailable"), want: false},
+		{name: "empty message", err: errors.New(""), want: false},
+		{name: "nil error", err: nil, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mergeErrIsConflict(tc.err); got != tc.want {
+				t.Fatalf("mergeErrIsConflict(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
 	}
 }
