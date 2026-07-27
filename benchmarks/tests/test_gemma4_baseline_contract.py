@@ -77,6 +77,29 @@ class GemmaBaselineContractTests(unittest.TestCase):
             self.assertEqual(json.loads(output.read_text(encoding="utf-8")), evidence)
             self.assertFalse(output.with_suffix(".json.tmp").exists())
 
+    def test_result_validation_rejects_incomplete_hardware_telemetry(self) -> None:
+        valid = {
+            "cold_load_seconds": 1.0,
+            "load_profile": {"workers": 1},
+            "after_load": {
+                "vram_total_bytes": 16,
+                "vram_used_bytes": 8,
+                "memavailable_bytes": 32,
+            },
+            "after_run": {
+                "vram_total_bytes": 16,
+                "vram_used_bytes": 9,
+                "memavailable_bytes": 24,
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "hardware.json"
+            path.write_text(json.dumps(valid), encoding="utf-8")
+            result_validator.validate_hardware_artifact(path, "model", "reranking")
+            path.write_text(json.dumps({**valid, "after_run": {}}), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "invalid after_run snapshot"):
+                result_validator.validate_hardware_artifact(path, "model", "reranking")
+
     def test_full_sweeps_validate_completed_views_but_smokes_do_not(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             result = Path(directory)

@@ -168,6 +168,23 @@ def validate_reranking(
     }
 
 
+def validate_hardware_artifact(path: Path, label: str, view: str) -> None:
+    hardware = load_object(path)
+    if float(hardware.get("cold_load_seconds", 0)) <= 0:
+        raise RuntimeError(f"{label}:{view}: hardware artifact has no positive cold-load time")
+    if not isinstance(hardware.get("load_profile"), dict) or not hardware["load_profile"]:
+        raise RuntimeError(f"{label}:{view}: hardware artifact has no load profile")
+    for phase in ("after_load", "after_run"):
+        snapshot = hardware.get(phase)
+        if not isinstance(snapshot, dict):
+            raise RuntimeError(f"{label}:{view}: hardware artifact has no {phase} snapshot")
+        total = int(snapshot.get("vram_total_bytes", 0))
+        used = int(snapshot.get("vram_used_bytes", -1))
+        available = int(snapshot.get("memavailable_bytes", 0))
+        if total <= 0 or used < 0 or used > total or available <= 0:
+            raise RuntimeError(f"{label}:{view}: hardware artifact has an invalid {phase} snapshot")
+
+
 def validate_checkpoint(bundle: Path, result_dir: Path, label: str, view: str) -> dict[str, Any]:
     suite_sha = file_sha256(bundle / "manifest.json")
     validators = {
@@ -179,6 +196,7 @@ def validate_checkpoint(bundle: Path, result_dir: Path, label: str, view: str) -
     for path in (raw_path, summary_path, hardware_path):
         if not path.is_file():
             raise RuntimeError(f"required checkpoint artifact is missing: {path}")
+    validate_hardware_artifact(hardware_path, label, view)
     assert_no_obvious_secrets((raw_path, summary_path, hardware_path))
     return {
         "label": label,
