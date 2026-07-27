@@ -20,8 +20,10 @@ Advanced operators who prefer to run each service as its own long-lived containe
 ### Prerequisites
 
 - Docker Engine + the Docker Compose plugin (`docker compose`, v2).
+- `git`, `curl` and `jq` — used by the commands below. A stock server image may have none of them (`apt-get install git curl jq`).
 - Host Docker socket access — `compose.server-managed.yaml` mounts it so the server can launch the other containers. It's root-equivalent, so run this only on a host you trust the server on.
-- ~8 GB RAM and ~10 GB disk. `aimee-llm` pulls ~5.5 GB of CPU model weights (embed, rerank, synth) into a volume the first time the wizard deploys it.
+- **~25 GB free disk.** Measured on a clean Debian 13 host after a full CPU deploy: 11.7 GB of images + 7 GB of volumes ≈ 19 GB of Docker data, ~20 GB total with the OS and checkout. Most of it is `aimee-llm-cpu`, an 11 GB image with the embed/rerank/synth weights **baked in** — the CPU tier downloads no models at deploy time and mounts no model volume. (The GPU `aimee-llm` image is small and fetches its tier into a volume on first boot instead.)
+- **8 GB RAM works; 16 GB is comfortable.** The model weights are mmap'd, so most of the LLM container's footprint is reclaimable page cache — on a 16 GB host the idle stack sits at ~4 GB resident plus ~5 GB cache.
 - No credentials or API keys needed for the default build.
 
 ### 1.1 Start the server
@@ -47,7 +49,7 @@ The wizard covers:
 - **Connection** — connect a git host so aimee can clone your repos. Pick one auth method and the wizard shows only its fields: **OAuth sign-in** (GitHub, GitLab, Gitea/Forgejo), an **access token** (HTTPS, any host including Bitbucket), or an **SSH key** (private key for `git@host:owner/repo.git`). Public repos clone without any of them. Optional — you can connect a host later.
 - **Workspaces & projects** — point at an owner/org, list its repos, and bulk-clone them into a workspace.
 
-The final **Deploy** launches `aimee-kb` + `aimee-llm` + Postgres and shows their status. The first run pulls images and the CPU model weights (a few minutes); later boots are fast — state lives in named volumes.
+The final **Deploy** launches `aimee-kb` + the LLM container + Postgres and shows their status. On the default CPU topology that LLM container is `aimee-llm-cpu`, whose weights are baked into the image, so the wait is the 11 GB image pull rather than a model download; later boots are fast — state lives in named volumes.
 
 #### Your login account
 
@@ -57,20 +59,44 @@ Each provisioned account is mirrored (username + its `/etc/shadow` hash, never t
 
 ### 1.3 Verify it's healthy
 
-```bash
-# Server /v1 over TLS (default bearer is "aimee-local-dev"; -k accepts the self-signed cert):
-curl -k -H 'Authorization: Bearer aimee-local-dev' https://localhost:8743/v1/health
-curl -k -H 'Authorization: Bearer aimee-local-dev' https://localhost:8743/v1/kb/status
+`aimee-local-dev` is a **one-time bootstrap bearer**: it authorizes exactly one call,
+the rotation below, and nothing else. Using it on an ordinary route returns `401`
+with `"the one-time bootstrap bearer must be rotated before use"` — that is the
+expected response, not a broken server. Rotate it once, then use the token you get
+back. (`-k` accepts the self-signed cert.)
 
-# The managed containers (after the wizard's Deploy step):
-docker ps    # aimee-server, aimee-kb, aimee-llm, and postgres should be running
+```bash
+# One-time: exchange the bootstrap bearer for a real one and keep it private.
+ROTATED=$(curl -k -fsS -X POST \
+  -H 'Authorization: Bearer aimee-local-dev' -H 'Content-Type: application/json' \
+  https://localhost:8743/v1/api/rotate_bearer -d '{}' | jq -er '.bearer_token')
+(umask 077 && printf '%s\n' "$ROTATED" > .aimee-server-bearer)
+
+# Now /v1 answers. Both of these should print 200:
+curl -k -sS -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $ROTATED" \
+  https://localhost:8743/v1/health
+curl -k -sS -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $ROTATED" \
+  https://localhost:8743/v1/kb/status
 ```
 
-If the server endpoints return `200` and `kb/status` reports the DB and vector store ready, the stack is up.
+`aimee remote set https://<host>:8743 <token>` does this rotation for you and stores
+the result, so the thin client in [Part 2](#part-2-linux-client) needs no manual step;
+`aimee remote enroll` re-runs it on its own.
+
+Until the wizard's **Deploy** step has run, `/v1/health` returns `200` but
+`/v1/kb/status` reports `"available": false` — the knowledge base container is not up
+yet. That is expected at this point. After Deploy:
+
+```bash
+docker ps    # aimee-server, aimee-kb, postgres, and the LLM container
+```
+
+The LLM container is **`aimee-llm-cpu`** on the default CPU topology and `aimee-llm`
+when a role is placed on a GPU; both answer to the network name `aimee-llm`.
 
 ### 1.4 Before you expose it on a network
 
-- **Override the default bearer.** `aimee-local-dev` is a loopback convenience only. Mount your own `aimee.yaml` at `/var/lib/aimee/aimee.yaml` with a real bearer and terminate TLS at a reverse proxy.
+- **Rotate the bootstrap bearer** ([1.3](#13-verify-its-healthy)) before anything reaches the network — until you do, `/v1` is unusable anyway. For a real deployment also mount your own `aimee.yaml` at `/var/lib/aimee/aimee.yaml` with your own bearer, and terminate TLS at a reverse proxy.
 - **Remote writes are off by default, and are authorized per user.** Over the network a
   remote bearer is **read/query only**. Holding the bearer no longer grants write
   access to anyone: each subject that may write needs its own **write-tier grant**,
@@ -169,10 +195,22 @@ aimee version
 ### 2.2 Point the client at your server
 
 ```bash
+# If you have NOT rotated the bootstrap bearer yet, pass it and the client rotates
+# it for you (and pins the cert + enrols an mTLS client certificate):
 aimee remote set https://YOUR_SERVER:8743 aimee-local-dev
+
+# If you DID follow 1.3, that token is already spent — pass the rotated one instead:
+aimee remote set https://YOUR_SERVER:8743 "$(cat .aimee-server-bearer)"
+
 aimee remote status     # resolved transport + /v1/health probe
 aimee status            # server, DB1, and kb health
 ```
+
+`aimee-local-dev` only works **once per server**, so passing it after a previous
+client (or [1.3](#13-verify-its-healthy)) already enrolled fails — `aimee remote set`
+exits non-zero and tells you where the real bearer is. `aimee remote status` likewise
+distinguishes "reachable but not authorized" (a bad or spent token) from unreachable,
+and exits non-zero for both, so it is safe to use as a setup check in a script.
 
 Use your real bearer token instead of `aimee-local-dev` if you changed it. The server's `/v1` is TLS-only off-loopback; certificate verification is on by default, so set `AIMEE_TLS_INSECURE=1` for the auto-provisioned self-signed cert (or trust/pin it). Alternatives to `aimee remote set`: set `AIMEE_SERVER_URL` / `AIMEE_SERVER_TOKEN`, or pass `--server https://YOUR_SERVER:8743 --server-token=...` per command. Precedence is `--server` flag > env > persisted `remote.conf`.
 
