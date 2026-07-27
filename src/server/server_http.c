@@ -956,21 +956,9 @@ int loopback_rpc(const char *body, int body_len, char *resp, int resp_cap, uint3
    pthread_mutex_destroy(&fake.mutex);
    pthread_cond_destroy(&fake.can_close);
 
-   /* Do NOT shut the write end before reading. A handler that hands its work to a
-    * worker replies LATER through a dup of this socketpair (create_compute_ctx dups
-    * conn->fd rather than retaining the conn), and shutdown() applies to the socket
-    * — so it killed the dup's write too. That is why /v1/tools/execute answered 502
-    * "rpc produced no response" for every input, valid or not.
-    *
-    * Bound the read instead, so a handler that never replies cannot hang the
-    * adapter. Inline handlers have already written by the time server_dispatch
-    * returns, so they hit the newline break on the first pass and are unchanged.
-    * loopback_rpc runs on the per-connection worker (conn_worker -> handle_conn),
-    * not the listener, so waiting blocks only the connection that asked. */
-   {
-      struct timeval rcv = {LOOPBACK_REPLY_TIMEOUT_SECS, 0};
-      (void)setsockopt(sp[0], SOL_SOCKET, SO_RCVTIMEO, &rcv, sizeof(rcv));
-   }
+   /* Deferred handlers reply through a dup, so bound the read instead of shutting it down. */
+   struct timeval rcv = {LOOPBACK_REPLY_TIMEOUT_SECS, 0};
+   (void)setsockopt(sp[0], SOL_SOCKET, SO_RCVTIMEO, &rcv, sizeof(rcv));
 
    size_t total = 0;
    for (;;)
