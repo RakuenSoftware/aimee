@@ -132,11 +132,45 @@ static const client_help_t client_help[] = {
 #include "cli_help_data.h"
 };
 
+/* Commands the Windows thin client does not carry: they reach the server over the
+ * Unix-domain /v1 socket, which it does not build (see the _WIN32 guard in the
+ * dispatcher). Windows help listed them anyway, so `aimee` advertised
+ * `manuscript` and `persona` as core commands and both answered "has no /v1
+ * route" -- which reads as a route someone forgot to add rather than a platform
+ * that does not carry the command. */
+static int client_cmd_available(const char *name)
+{
+#ifdef _WIN32
+   static const char *const unavailable[] = {"manuscript", "persona", "roles", NULL};
+   for (int i = 0; unavailable[i]; i++)
+      if (strcmp(name, unavailable[i]) == 0)
+         return 0;
+#else
+   (void)name;
+#endif
+   return 1;
+}
+
+/* `remote` is marked ADVANCED, which hides it from the default help. On Windows it
+ * is the one command a new user MUST run -- it is how the client is pointed at its
+ * server (QUICKSTART 3.2) -- so hiding it left the only required setup step
+ * undiscoverable from `aimee` with no arguments. */
+static client_cmd_tier_t client_cmd_tier(const client_help_t *entry)
+{
+#ifdef _WIN32
+   if (strcmp(entry->name, "remote") == 0)
+      return CLIENT_TIER_CORE;
+#endif
+   return entry->tier;
+}
+
 static void print_client_commands(FILE *out, client_cmd_tier_t tier)
 {
    for (int i = 0; client_help[i].name; i++)
    {
-      if (client_help[i].tier != tier || client_help[i].hidden_default)
+      if (client_cmd_tier(&client_help[i]) != tier || client_help[i].hidden_default)
+         continue;
+      if (!client_cmd_available(client_help[i].name))
          continue;
       fprintf(out, "  %-16s %s\n", client_help[i].name, client_help[i].help);
    }
@@ -150,8 +184,16 @@ static void usage(void)
                    "Commands:\n");
    print_client_commands(stderr, CLIENT_TIER_CORE);
    fprintf(stderr, "\n"
-                   "Run 'aimee help --all' to see all commands including advanced and admin.\n"
-                   "Server is started automatically if not running.\n");
+                   "Run 'aimee help --all' to see all commands including advanced and admin.\n");
+#ifdef _WIN32
+   /* Windows is the thin client only -- there is no local server to start, so the
+    * POSIX footer promised something that never happens here. Point at the step
+    * that actually has to happen instead. */
+   fprintf(stderr, "Point this client at your server with "
+                   "'aimee remote set <url> <token>'.\n");
+#else
+   fprintf(stderr, "Server is started automatically if not running.\n");
+#endif
 }
 
 static int client_help_command(int argc, char **argv)
@@ -563,7 +605,12 @@ static int unsupported_client_command(const char *cmd, const char *subcmd, int j
    char subs[512];
    int have_subs = cli_v1_subcommands(name, subs, sizeof(subs));
    char msg[768];
-   if (have_subs > 0 && subcmd && subcmd[0])
+   if (!client_cmd_available(name))
+      snprintf(msg, sizeof(msg),
+               "'%s' is not available on the Windows thin client; it needs the local "
+               "Unix socket, so run it on the server host",
+               name);
+   else if (have_subs > 0 && subcmd && subcmd[0])
       snprintf(msg, sizeof(msg), "'%s' is not a subcommand of '%s'; try: %s", subcmd, name, subs);
    else if (have_subs > 0)
       snprintf(msg, sizeof(msg), "'%s' needs a subcommand; try: %s", name, subs);
