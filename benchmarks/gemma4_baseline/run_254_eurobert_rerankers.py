@@ -29,6 +29,15 @@ def sweep_lock_flags(wait_for_lock: bool) -> int:
     return fcntl.LOCK_EX if wait_for_lock else fcntl.LOCK_EX | fcntl.LOCK_NB
 
 
+def assert_restored_handoff(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        raise RuntimeError(f"handoff state is missing: {path}")
+    state = json.loads(path.read_text(encoding="utf-8"))
+    if state.get("status") != "complete" or state.get("production_restored") is not True:
+        raise RuntimeError(f"prior sweep did not complete with production restored: {path}")
+    return state
+
+
 def manifest_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -257,6 +266,11 @@ def main() -> int:
         action="store_true",
         help="Wait for another benchmark to restore production and release the shared sweep lock",
     )
+    parser.add_argument(
+        "--handoff-state",
+        type=Path,
+        help="Prior main RUN_STATE.json required to be complete/restored after a blocking lock wait",
+    )
     args = parser.parse_args()
 
     manifest_path = args.manifest or args.repo / "benchmarks/gemma4_baseline/eurobert_rerankers.json"
@@ -274,6 +288,8 @@ def main() -> int:
     logs.mkdir(exist_ok=True)
     lock_handle = (args.root / "sweep.lock").open("w", encoding="utf-8")
     fcntl.flock(lock_handle, sweep_lock_flags(args.wait_for_lock))
+    if args.wait_for_lock:
+        assert_restored_handoff(args.handoff_state or results / "RUN_STATE.json")
     state_path = args.root / "eurobert_sweep_state.json"
     suite_sha = hashlib.sha256(
         (args.repo / "benchmarks/fixtures/gemma4-unified/ab-v1/manifest.json").read_bytes()

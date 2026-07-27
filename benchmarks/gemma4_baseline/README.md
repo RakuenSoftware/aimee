@@ -242,7 +242,10 @@ python3 benchmarks/gemma4_baseline/run_254_eurobert_rerankers.py
 It may be queued safely behind an active main sweep with `--wait-for-lock`. The
 main controller restores production before process exit releases the lock; the
 EuroBERT controller acquires it only afterward and independently preserves that
-restoration state in its own `finally` block.
+restoration state in its own `finally` block. After acquiring the lock it also
+fails closed unless the prior main `RUN_STATE.json` records both completion and
+successful production restoration. Use `--handoff-state` to override that state
+path when the preceding sweep used a nondefault results directory.
 
 Use `--max-cases N` only to smoke-test the runtime. Model, dataset, container,
 Python-package, training, and serving identities are recorded separately from

@@ -189,6 +189,16 @@ class GemmaBaselineContractTests(unittest.TestCase):
             eurobert_controller.sweep_lock_flags(False),
             eurobert_controller.fcntl.LOCK_EX | eurobert_controller.fcntl.LOCK_NB,
         )
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = Path(directory) / "RUN_STATE.json"
+            state_path.write_text(
+                json.dumps({"status": "complete", "production_restored": True}),
+                encoding="utf-8",
+            )
+            self.assertEqual(eurobert_controller.assert_restored_handoff(state_path)["status"], "complete")
+            state_path.write_text(json.dumps({"status": "failed"}), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "did not complete"):
+                eurobert_controller.assert_restored_handoff(state_path)
 
     def test_sweep_requires_both_ettin_execution_profiles(self) -> None:
         self.assertEqual(sweep.ETTIN_CONTROLS, (
