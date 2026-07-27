@@ -307,11 +307,12 @@ resolve_one() { # ROLE MODE localurl
   esac
 }
 
-# DOWNLOAD-ONLY mode (build-time pre-bake): fetch the resolved tiers' models into
-# $MODELS_DIR and exit without launching anything. Dockerfile.aimee-llm uses this
-# (AIMEE_LLM_BAKE_TIER) to bake the cpu tier into the aimee-llm-cpu image, keeping
-# the tier table here as the single source of truth instead of duplicating model
-# URLs in the Dockerfile.
+# DOWNLOAD-ONLY mode: fetch the resolved tiers' models into $MODELS_DIR and exit
+# without launching anything. Used to pre-seed a /models volume so first serve is
+# not blocked on a multi-GB pull. No image bakes models any more — there is one
+# model-less aimee-llm that downloads the tier it is given — so nothing in-tree
+# calls this at build time; it stays because the tier table lives here, and
+# pre-seeding a volume must not duplicate those model URLs elsewhere.
 if [ "${AIMEE_LLM_DOWNLOAD_ONLY:-0}" = "1" ]; then
   download_models || { echo "aimee-llm: pre-bake download failed" >&2; exit 1; }
   exit 0
