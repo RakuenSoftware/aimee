@@ -147,7 +147,8 @@ int kb_handle_ingest(int fd, cJSON *req)
             pgvec_kb_vector_delete_project(pname);
             db2_kb_file_index_delete_project(pname);
          }
-         db2_kb_ingest_queue_enqueue(pname, projects[i], pws, force);
+         db2_kb_ingest_queue_enqueue(pname, projects[i], pws, force,
+                                     DB2_KB_INGEST_PRIO_INTERACTIVE);
          total_queued++;
       }
    }
@@ -169,7 +170,8 @@ int kb_handle_ingest(int fd, cJSON *req)
                pgvec_kb_vector_delete_project(pname);
                db2_kb_file_index_delete_project(pname);
             }
-            db2_kb_ingest_queue_enqueue(pname, projects[i], pws, force);
+            db2_kb_ingest_queue_enqueue(pname, projects[i], pws, force,
+                                        DB2_KB_INGEST_PRIO_INTERACTIVE);
             total_queued++;
          }
       }

@@ -90,7 +90,7 @@ static void kbiw_enqueue_all(kb_service_ctx_t *ctx)
          char pws[256];
          workspace_repo_index_keys(projects[i], cfg.workspaces[w], pname, sizeof(pname), pws,
                                    sizeof(pws));
-         db2_kb_ingest_queue_enqueue(pname, projects[i], pws, 0);
+         db2_kb_ingest_queue_enqueue(pname, projects[i], pws, 0, DB2_KB_INGEST_PRIO_BULK);
          total++;
       }
    }
@@ -372,7 +372,7 @@ static void *kbiw_watch_thread(void *arg)
             char pws[256];
             workspace_repo_index_keys(watches[j].root, watches[j].workspace, pname, sizeof(pname),
                                       pws, sizeof(pws));
-            db2_kb_ingest_queue_enqueue(pname, watches[j].root, pws, 0);
+            db2_kb_ingest_queue_enqueue(pname, watches[j].root, pws, 0, DB2_KB_INGEST_PRIO_BULK);
             watches[j].last_queued = now;
             kb_worker_notify(ctx);
             break;

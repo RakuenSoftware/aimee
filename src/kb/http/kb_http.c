@@ -1754,7 +1754,8 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
                pgvec_kb_vector_delete_project(pname);
                db2_kb_file_index_delete_project(pname);
             }
-            db2_kb_ingest_queue_enqueue(pname, projects[i], workspace, force);
+            db2_kb_ingest_queue_enqueue(pname, projects[i], workspace, force,
+                                        DB2_KB_INGEST_PRIO_INTERACTIVE);
             total_queued++;
          }
       }
@@ -1774,7 +1775,8 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
                   pgvec_kb_vector_delete_project(pname);
                   db2_kb_file_index_delete_project(pname);
                }
-               db2_kb_ingest_queue_enqueue(pname, projects[i], cfg.workspaces[w], force);
+               db2_kb_ingest_queue_enqueue(pname, projects[i], cfg.workspaces[w], force,
+                                           DB2_KB_INGEST_PRIO_INTERACTIVE);
                total_queued++;
             }
          }
