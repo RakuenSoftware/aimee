@@ -1279,6 +1279,91 @@ static wfe_step_result_t exec_source_archive(wfe_ctx *ctx, const wfe_node_t *nod
    return wfe_step_advanced(handle, head, 0.0);
 }
 
+/* Does this slice CREATE a path that already exists on `base_ref`, with
+ * different content? That is an add/add conflict waiting to happen at merge.
+ *
+ * Slices of one work item are cut from the feature branch at the same instant
+ * and merged one at a time. When two of them each *create* the same file — the
+ * normal shape when the deliverable is a single document — the first merges and
+ * every later one hits `add/add`: two independently authored versions with no
+ * common ancestor for the content. Nothing mechanical resolves that; a rebase
+ * reproduces it exactly. Left undetected it surfaces only at merge, as a bare
+ * forge 400, after every slice has paid its full implementation cost.
+ *
+ * Checked against the CURRENT feature head rather than against sibling slices,
+ * which is both simpler and race-free: there is no shared mutable state to
+ * serialise, only a read of a branch that already reflects whatever has merged.
+ * The trade-off is that it fires from the second colliding slice onward, not on
+ * the first — the first one is not yet a collision.
+ *
+ * Identical content is NOT flagged: git merges an add/add cleanly when both
+ * sides added the same bytes, so failing it would reject work that would land.
+ *
+ * Returns 1 and fills `path_out` when a diverging collision exists, else 0.
+ * Fails SAFE: any git error returns 0, leaving today's behaviour (surface at
+ * merge) rather than failing a slice on a command we could not run. */
+int wfe_slice_recreates_base_path(const char *workdir, const char *base_ref, const char *base_sha,
+                                  char *path_out, size_t path_cap)
+{
+   if (path_out && path_cap)
+      path_out[0] = '\0';
+   if (!workdir || !workdir[0] || !base_ref || !base_ref[0] || !base_sha || !base_sha[0])
+      return 0;
+
+   /* Paths this slice ADDED relative to where it was cut. -z keeps paths with
+    * spaces/specials unambiguous (no core.quotePath quoting). */
+   const char *argv[] = {"git", "-C",          workdir, "diff",           "--name-only",
+                         "-z",  "--diff-filter=A",      base_sha, "HEAD", NULL};
+   char *added = NULL;
+   if (git_capture(argv, &added) != 0 || !added)
+   {
+      free(added);
+      return 0;
+   }
+
+   int found = 0;
+   for (const char *p = added; *p && !found; p += strlen(p) + 1)
+   {
+      char ours[80] = "", theirs[80] = "";
+      char spec_ours[1200], spec_theirs[1200];
+      snprintf(spec_ours, sizeof spec_ours, "HEAD:%s", p);
+      snprintf(spec_theirs, sizeof spec_theirs, "%s:%s", base_ref, p);
+
+      /* Absent on the base ref -> no collision; this slice is the only author. */
+      const char *tv[] = {"git", "-C", workdir, "rev-parse", "--verify", "-q", spec_theirs, NULL};
+      char *t = NULL;
+      if (git_capture(tv, &t) != 0 || !t || !t[0])
+      {
+         free(t);
+         continue;
+      }
+      snprintf(theirs, sizeof theirs, "%s", t);
+      chomp(theirs);
+      free(t);
+
+      const char *ov[] = {"git", "-C", workdir, "rev-parse", "--verify", "-q", spec_ours, NULL};
+      char *o = NULL;
+      if (git_capture(ov, &o) != 0 || !o || !o[0])
+      {
+         free(o);
+         continue;
+      }
+      snprintf(ours, sizeof ours, "%s", o);
+      chomp(ours);
+      free(o);
+
+      /* Same blob on both sides merges cleanly — only divergence conflicts. */
+      if (ours[0] && theirs[0] && strcmp(ours, theirs) != 0)
+      {
+         if (path_out && path_cap)
+            snprintf(path_out, path_cap, "%s", p);
+         found = 1;
+      }
+   }
+   free(added);
+   return found;
+}
+
 /* freeze: capture the cumulative diff at a stable freeze commit. */
 static wfe_step_result_t exec_freeze(wfe_ctx *ctx, const wfe_node_t *node)
 {
@@ -1289,6 +1374,35 @@ static wfe_step_result_t exec_freeze(wfe_ctx *ctx, const wfe_node_t *node)
    if (wfe_git_freeze(wd, base_branch ? base_branch : "HEAD", base, head, dhash, err, sizeof err) !=
        0)
       return wfe_step_failed();
+
+   /* Fail now, not at merge, if this slice re-creates a file a sibling already
+    * landed on the feature branch with different content. That is an add/add
+    * conflict: no rebase or retry resolves it, so letting it reach merge only
+    * spends the rest of the pipeline to arrive at an unwinnable merge. Naming
+    * the path here is the difference between an actionable failure and the bare
+    * forge 400 it would otherwise become. */
+   if (base_branch && base_branch[0])
+   {
+      char clash[1024];
+      if (wfe_slice_recreates_base_path(wd, base_branch, base, clash, sizeof clash))
+      {
+         /* PERMANENT, not TRANSIENT: re-running the slice produces another
+          * independently authored version of the same file, which collides the
+          * same way. There is no new input that changes the outcome, so the
+          * taxonomy's "never auto-retry without new input" rule applies at its
+          * strongest here.
+          *
+          * The colliding path is known (`clash`) but not reported: this block
+          * interface carries no message field, by design — a step speaks only
+          * through wfe_step_result_t. Surfacing it needs that struct widened,
+          * which is a broader change than this fix; until then the operator sees
+          * a permanent freeze failure rather than the path. Still a strict
+          * improvement on discovering it as a bare forge 400 at merge, after the
+          * whole pipeline has run. */
+         return wfe_step_failed_class(WFE_FAIL_PERMANENT, 0);
+      }
+   }
+
    char handle[80];
    snprintf(handle, sizeof handle, "%s.out", node->id);
    return wfe_step_advanced(handle, dhash, 0.0);
