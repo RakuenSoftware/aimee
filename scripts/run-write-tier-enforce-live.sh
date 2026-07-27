@@ -26,7 +26,7 @@
 #
 # WHAT IS REAL HERE. A real aimee-server with a real TCP listener, a real
 # aimee-kb, real Postgres, a real Ed25519-signed JWKS publication envelope in db1
-# pinned by a real root-owned 0600 trust bundle, and real RS256 tokens. Nothing is
+# pinned by a real root-owned 0644 trust bundle, and real RS256 tokens. Nothing is
 # stubbed and no check is weakened to make it pass.
 #
 # WHAT IS STOOD IN FOR, deliberately: the RSA token key is generated locally rather
@@ -44,9 +44,9 @@
 # consulted.
 #
 # MUST RUN AS ROOT on a host with Postgres: server_mgmt_jwks_trust_bundle_load
-# requires the bundle to be a root-owned, single-link, 0600 regular file, and
-# refuses anything else. That refusal is a security property worth keeping, so the
-# rig complies with it rather than relaxing it.
+# requires the bundle to be a root-owned, single-link regular file with no
+# group/world write bits. The public bundle is 0644 so a non-root container server
+# can read it; the loader still refuses an untrusted owner or writable file.
 #
 # Usage: run-write-tier-enforce-live.sh [--keep] [postgres://superuser@host:port/db]
 #   With no URL it uses the local cluster via `su postgres` (peer auth).
@@ -106,7 +106,7 @@ step "Provisioning the JWKS trust chain (real envelope, real signature)"
 kid=$(./write-tier-enforce-live provision \
         --db1 "$AIMEE_HOME/aimee.db" --bundle "$BUNDLE" --key "$TOKEN_KEY") \
   || { echo "enforce-live: trust chain provisioning failed" >&2; exit 2; }
-echo "${kid}   trust bundle $BUNDLE (root-owned 0600)"
+echo "${kid}   trust bundle $BUNDLE (root-owned 0644)"
 
 # --- kb --------------------------------------------------------------------
 # The boot recipe (config shape, TCP DSN, health poll) is the shared one; only the

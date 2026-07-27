@@ -722,12 +722,12 @@ static void test_get_help_route_marshaled(void)
    char *topic_lookup[] = {"work", "queue"};
    assert(cli_v1_lookup("get_help", 2, topic_lookup, &route));
    assert(strcmp(route.method, "get_help") == 0);
-   assert(strcmp(route.server_method, "mcp.call") == 0);
+   assert(strcmp(route.server_method, "help.get") == 0);
    assert(route.skip_subcmd == 0);
 
    cJSON *req = marshal_request(route.method, 2, topic_lookup);
    assert(req != NULL);
-   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "mcp.call") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "help.get") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "tool")->valuestring, "get_help") == 0);
    cJSON *args = cJSON_GetObjectItem(req, "arguments");
    assert(cJSON_IsObject(args));
@@ -736,11 +736,11 @@ static void test_get_help_route_marshaled(void)
 
    assert(cli_v1_lookup("get-help", 2, topic_lookup, &route));
    assert(strcmp(route.method, "get_help") == 0);
-   assert(strcmp(route.server_method, "mcp.call") == 0);
+   assert(strcmp(route.server_method, "help.get") == 0);
 
    req = marshal_request(route.method, 0, NULL);
    assert(req != NULL);
-   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "mcp.call") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "help.get") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "tool")->valuestring, "get_help") == 0);
    args = cJSON_GetObjectItem(req, "arguments");
    assert(cJSON_IsObject(args));
