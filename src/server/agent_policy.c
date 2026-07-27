@@ -418,6 +418,10 @@ void agent_trace_log(int plan_id, int turn, const char *direction, const char *c
 
    db1_execution_trace_insert_row_t row = {
        .plan_id = plan_id,
+       /* Attribute the row to its delegate. Concurrent delegates previously wrote
+        * into one undifferentiated stream, so their turns interleaved and any
+        * timing read off it mixed several jobs together. */
+       .session_id = session_id(),
        .turn = turn,
        .direction = direction,
        .content = content,

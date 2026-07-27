@@ -16,26 +16,47 @@ int db1_execution_trace_insert(const db1_execution_trace_insert_row_t *row)
    if (!db)
       return -1;
 
-   const char *sql_with_context = "INSERT INTO execution_trace (plan_id, turn, direction, content,"
-                                  " tool_name, tool_args, tool_result, context_hash)"
-                                  " VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+   const char *sql_with_context =
+       "INSERT INTO execution_trace (plan_id, session_id, turn, direction, content,"
+       " tool_name, tool_args, tool_result, context_hash)"
+       " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
    sqlite3_stmt *stmt = NULL;
    if (sqlite3_prepare_v2(db, sql_with_context, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
 
    sqlite3_bind_int(stmt, 1, row->plan_id > 0 ? row->plan_id : 0);
-   sqlite3_bind_int(stmt, 2, row->turn);
-   sqlite3_bind_text(stmt, 3, row->direction, -1, SQLITE_TRANSIENT);
-   sqlite3_bind_text(stmt, 4, row->content ? row->content : "", -1, SQLITE_TRANSIENT);
-   sqlite3_bind_text(stmt, 5, row->tool_name ? row->tool_name : "", -1, SQLITE_TRANSIENT);
-   sqlite3_bind_text(stmt, 6, row->tool_args ? row->tool_args : "", -1, SQLITE_TRANSIENT);
-   sqlite3_bind_text(stmt, 7, row->tool_result ? row->tool_result : "", -1, SQLITE_TRANSIENT);
-   sqlite3_bind_text(stmt, 8, row->context_hash ? row->context_hash : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 2, row->session_id ? row->session_id : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int(stmt, 3, row->turn);
+   sqlite3_bind_text(stmt, 4, row->direction, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 5, row->content ? row->content : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 6, row->tool_name ? row->tool_name : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 7, row->tool_args ? row->tool_args : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 8, row->tool_result ? row->tool_result : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 9, row->context_hash ? row->context_hash : "", -1, SQLITE_TRANSIENT);
 
    const int rc = sqlite3_step(stmt);
    sqlite3_finalize(stmt);
    return rc == SQLITE_DONE ? 0 : -1;
+}
+
+/* How many trace rows belong to `session_id`. Exists so attribution is checkable:
+ * concurrent delegates share the table and are otherwise indistinguishable. */
+int db1_execution_trace_count_for_session(const char *session_id)
+{
+   sqlite3 *db = db1_conn();
+   if (!db || !session_id)
+      return -1;
+   sqlite3_stmt *stmt = NULL;
+   if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM execution_trace WHERE session_id = ?", -1,
+                          &stmt, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(stmt, 1, session_id, -1, SQLITE_TRANSIENT);
+   int count = -1;
+   if (sqlite3_step(stmt) == SQLITE_ROW)
+      count = sqlite3_column_int(stmt, 0);
+   sqlite3_finalize(stmt);
+   return count;
 }
 
 int db1_execution_trace_list_recent(db1_execution_trace_recent_row_t *out, int max)
