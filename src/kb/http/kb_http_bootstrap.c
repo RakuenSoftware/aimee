@@ -18,6 +18,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+#define KB_ENROLL_CERT_VALID_SECS (60L * 60 * 24 * 90)
+
+static int enrollment_expiry(char out[32])
+{
+   time_t now = time(NULL);
+   time_t expires = now + KB_ENROLL_CERT_VALID_SECS;
+   struct tm utc;
+   if (now == (time_t)-1 || expires < now || !gmtime_r(&expires, &utc) ||
+       strftime(out, 32, "%Y-%m-%dT%H:%M:%SZ", &utc) == 0)
+      return -1;
+   return 0;
+}
 
 static int enroll_redeem_route(const char *method, const char *path, const char *body,
                                char *out_buf, int out_cap)
@@ -44,7 +58,7 @@ static int enroll_redeem_route(const char *method, const char *path, const char 
       char scope[KB_ENROLL_SCOPE_MAX];
       char *cert = malloc(KB_PKI_CERT_PEM_MAX);
       int rc = cert ? kb_enroll_redeem_csr(kb_default_config_dir(), jtok->valuestring,
-                                           jcsr->valuestring, 60L * 60 * 24 * 90, scope,
+                                           jcsr->valuestring, KB_ENROLL_CERT_VALID_SECS, scope,
                                            sizeof(scope), cert, KB_PKI_CERT_PEM_MAX)
                     : -1;
       cJSON_Delete(req);
@@ -58,10 +72,12 @@ static int enroll_redeem_route(const char *method, const char *path, const char 
       /* Persist the issuer/serial and mTLS certificate-DER SHA-256. Fail closed
        * rather than release an authority the enrollment database cannot revoke. */
       char fp[KB_PKI_FP_HEX] = "", issuer[256] = "", raw_serial[128] = "", serial[128] = "";
+      char expires_at[32] = "";
       if (kb_pki_ca_fingerprint(cert, fp, sizeof(fp)) != 0 ||
           kb_pki_cert_metadata(cert, issuer, sizeof(issuer), raw_serial, sizeof(raw_serial)) != 0 ||
           kb_cert_serial_normalize(raw_serial, serial, sizeof(serial)) != 0 ||
-          db2_enrollment_insert(scope, fp, issuer, serial, "", 0, NULL) != 0)
+          enrollment_expiry(expires_at) != 0 ||
+          db2_enrollment_insert(scope, fp, issuer, serial, expires_at, 0, NULL) != 0)
       {
          free(cert);
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"enrollment persistence unavailable\"}");

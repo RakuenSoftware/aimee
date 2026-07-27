@@ -45,6 +45,10 @@ services:
       # an external endpoint; the kb fail-opens on embedding if it is unreachable.
       AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8742}
       AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
+      # Internal-only mTLS lane used for server enrollment and signed management
+      # JWKS refresh. It is reachable on the Compose network, not published.
+      AIMEE_KB_MTLS_HOST: 0.0.0.0
+      AIMEE_KB_MTLS_PORT: "8745"
     command: ["--http-port=8741"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]

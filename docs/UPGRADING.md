@@ -40,10 +40,34 @@ The shared bearer is read-only after this upgrade. `aimee.api.remote_writes=data
 parsed, warns at startup, and increments `remote_writes.global_ignored`; it does not authorize a
 user write.
 
-Configure the server with `AIMEE_SERVER_ID`, `AIMEE_SERVER_TEAM_ID`, and
-`AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE`. Missing team configuration returns
-`no_team_configured`; missing or stale signing trust fails closed. The managed compose file does not
-set these for you.
+Configure the server with `AIMEE_SERVER_ID`, `AIMEE_SERVER_TEAM_ID`,
+`AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE`, and the one-time `AIMEE_KB_CONN` enrollment string.
+Missing team configuration returns `no_team_configured`; missing or stale signing trust fails
+closed. The shipped server Compose files pass these values through from `.env`, leave their
+identity values empty, and mount
+`${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}:/run/aimee/management:ro`.
+
+A fresh embedded KB has no team. Create the first one through its private PostgreSQL socket:
+
+```bash
+KB_CONTAINER=$(docker ps --filter label=com.docker.compose.project=aimee \
+  --filter label=com.docker.compose.service=aimee-kb --format '{{.ID}}')
+docker exec \
+  -e 'AIMEE_DB2_URL=postgresql:///aimee_shared?host=/var/lib/aimee/run' \
+  "$KB_CONTAINER" aimee-kb team create default
+```
+
+Enroll the server into the returned team, finalize the matching `kb_server_registry` row, publish
+the signed JWKS, and install the exported public bundle as `root:root 0644` under
+`server-management/jwks-trust-bundle.json`. The container runs as UID 1000, so a root-owned
+`0600` bundle cannot be read. The loader still rejects symlinks, extra hard links, a non-root
+owner, and all group/world write bits.
+
+Put all four values in `.env`, recreate the server container, and restart it once after the KB is
+ready. Successful enrollment atomically saves the mTLS certificate and private key at
+`$AIMEE_HOME/kb-client-identity.json` with owner-only mode `0600`. It does not save the one-time
+token, and it validates the stored identity against the connection string's CA pin on every restart.
+Startup logs name the missing input when a deployment remains read-only.
 
 Grants are keyed by server, team, and exact authenticated subject:
 
