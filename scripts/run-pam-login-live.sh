@@ -46,136 +46,57 @@
 set -uo pipefail
 export LC_ALL=C
 
-repo=$(cd "$(dirname "$0")/.." && pwd)
-cd "$repo"
-keep=0
-PG_ARG=""
-for a in "$@"; do
-  case "$a" in
-    --keep) keep=1 ;;
-    postgres://*|postgresql://*) PG_ARG="$a" ;;
-    *) echo "pam-live: unknown argument '$a'" >&2; exit 2 ;;
-  esac
-done
+# Uses the shared environment in scripts/lib/aimee-live-env.sh: the disposable
+# database, the kb boot recipe and the throwaway host accounts were all duplicated
+# here, and each copy was a place for the same traps to be rediscovered.
+LIVE_KB_PORT=18861
+LIVE_KB_BEARER="pam-live-token"
+LIVE_SERVER_ID="pam-srv"
 
-[ "$(id -u)" = "0" ] || { echo "pam-live: must run as root (pam_unix reads /etc/shadow)" >&2; exit 2; }
-for b in ./aimee-kb; do
-  [ -x "$b" ] || { echo "pam-live: $b not built (make -C src all)" >&2; exit 2; }
-done
-[ -x ./aimee-kb-resolver ] || { echo "pam-live: ./aimee-kb-resolver not built" >&2; exit 2; }
+. "$(cd "$(dirname "$0")" && pwd)/lib/aimee-live-env.sh"
 
-work=$(mktemp -d /tmp/aimee-pam-live-XXXXXX)
-export AIMEE_HOME="$work/home"
-mkdir -p "$AIMEE_HOME"
-kb_log="$work/kb.log"
-db="aimee_pam_$$"
-kbpw="pam$(head -c8 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-KB_PORT=18861
-KB_BEARER="pam-live-token"
-TEAM_ID=990001
-SERVER_ID="pam-srv"
-# Two accounts, as §11 asks for. Distinct passwords, so a rig that mixed them up
-# would show as a failure rather than a pass.
-U1="aimeepamt1$$"; P1="Correct-Horse-$$-one"
-U2="aimeepamt2$$"; P2="Correct-Horse-$$-two"
+# The PAM service file is this rig's own state, not the shared environment's, so
+# it is removed through the helper's extra-cleanup hook rather than a second EXIT
+# trap (the helper installs the only one).
 INSTALLED_PAM=0
+LIVE_EXTRA_CLEANUP='[ "$INSTALLED_PAM" = "1" ] && rm -f /etc/pam.d/aimee'
+
+live_env_init "pam-login" "$@"
+
+[ -x ./aimee-kb-resolver ] || { echo "pam-live: ./aimee-kb-resolver not built" >&2; exit 2; }
 # Read from the header rather than hard-coded, so the rig and the control cannot
 # drift apart silently: change the budget and this assertion follows it.
 KB_BUDGET=$(sed -nE 's/^#define[[:space:]]+KB_LOGIN_THROTTLE_BUDGET[[:space:]]+([0-9]+).*/\1/p' \
               src/kb/kb_login_throttle.h)
 [ -n "$KB_BUDGET" ] || { echo "pam-live: could not read KB_LOGIN_THROTTLE_BUDGET" >&2; exit 2; }
 
-FAILED=0
-pass() { echo "  ok   $*"; }
-fail() { echo "  FAIL $*"; FAILED=$((FAILED+1)); }
-step() { echo; echo "== $*"; }
-
-pg_admin() { :; }
-cleanup() {
-  [ -n "${kb_pid:-}" ] && kill "$kb_pid" 2>/dev/null
-  sleep 1
-  [ -n "${kb_pid:-}" ] && kill -9 "$kb_pid" 2>/dev/null
-  [ -n "${kb_pid:-}" ] && wait "$kb_pid" 2>/dev/null
-  # Host accounts are real system state; leaving them behind would be a slow leak
-  # of login-capable users on any box this ever runs on.
-  userdel -r "$U1" 2>/dev/null
-  userdel -r "$U2" 2>/dev/null
-  [ "$INSTALLED_PAM" = "1" ] && rm -f /etc/pam.d/aimee
-  pg_admin "DROP DATABASE IF EXISTS $db" >/dev/null 2>&1
-  pg_admin "DROP ROLE IF EXISTS aimee_pam_owner_$$" >/dev/null 2>&1
-  if [ "$keep" = "1" ]; then echo "kept: $work"; else rm -rf "$work"; fi
-}
-trap cleanup EXIT
-
-# --- postgres, the same two ways in as the enforcement rig ------------------
-PGSU_URL="${PG_ARG:-${AIMEE_TEST_PG_URL:-}}"
-if [ -n "$PGSU_URL" ]; then
-  PG_ADMIN_URL="${PGSU_URL%/*}/postgres"
-  pg_admin() { psql -v ON_ERROR_STOP=1 -q "$PG_ADMIN_URL" -c "$1"; }
-  pg_indb()  { psql -v ON_ERROR_STOP=1 -q "${PGSU_URL%/*}/$db" -c "$1"; }
-  pg_host=$(printf '%s' "$PGSU_URL" | sed -E 's#.*@([^:/]+).*#\1#')
-  pg_port=$(printf '%s' "$PGSU_URL" | sed -nE 's#.*:([0-9]+)/.*#\1#p'); pg_port=${pg_port:-5432}
-else
-  pg_admin() { su postgres -c "psql -v ON_ERROR_STOP=1 -q -c \"$1\""; }
-  pg_indb()  { su postgres -c "psql -v ON_ERROR_STOP=1 -q -d $db -c \"$1\""; }
-  pg_host=127.0.0.1; pg_port=5432
-fi
-
-step "Provisioning a disposable database"
-owner="aimee_pam_owner_$$"
-pg_admin "CREATE ROLE $owner LOGIN PASSWORD '$kbpw'" >/dev/null 2>&1 \
-  || { echo "pam-live: could not create the owner role" >&2; exit 2; }
-pg_admin "CREATE DATABASE $db OWNER $owner" >/dev/null 2>&1 \
-  || { echo "pam-live: could not create the database" >&2; exit 2; }
-pg_indb "GRANT CREATE ON SCHEMA public TO $owner" >/dev/null 2>&1
-pg_indb "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm" >/dev/null 2>&1
-echo "database $db on $pg_host:$pg_port"
+live_env_pg_create
 
 # --- the two host accounts --------------------------------------------------
+# TWO, as §11 asks for, with distinct passwords so a rig that mixed them up shows
+# as a failure rather than a pass.
 step "Creating two real host accounts"
-for pair in "$U1:$P1" "$U2:$P2"; do
-  u=${pair%%:*}; p=${pair#*:}
-  useradd -M -s /usr/sbin/nologin "$u" 2>/dev/null \
-    || { echo "pam-live: could not create $u" >&2; exit 2; }
-  printf '%s:%s\n' "$u" "$p" | chpasswd \
-    || { echo "pam-live: could not set a password for $u" >&2; exit 2; }
-done
-# Independent proof the accounts really do authenticate, so a later 401 can be
-# attributed to kb rather than to a broken fixture. A rig that cannot tell those
-# apart reports "PAM is broken" when it created the users wrong.
-if command -v python3 >/dev/null 2>&1 && python3 -c 'import pam' >/dev/null 2>&1; then
-  echo "  (python3-pam present; kb remains the authority under test)"
-fi
-echo "accounts $U1 and $U2 created"
+live_env_add_host_account "aimeepamt1$$" "Correct-Horse-$$-one"
+U1="$LIVE_PAM_USER"; P1="$LIVE_PAM_PASS"
+live_env_add_host_account "aimeepamt2$$" "Correct-Horse-$$-two"
+U2="$LIVE_PAM_USER"; P2="$LIVE_PAM_PASS"
 if [ -f /etc/pam.d/aimee ]; then
   echo "  /etc/pam.d/aimee EXISTS on this host — testing the host's own stack"
 else
   echo "  /etc/pam.d/aimee ABSENT — pam_start(\"aimee\") will fall through to /etc/pam.d/other"
 fi
 
-# --- kb ---------------------------------------------------------------------
-step "Starting aimee-kb in PAM mode (no OIDC profile configured)"
-cat > "$AIMEE_HOME/aimee.yaml" <<YAML
-embedding_dim: 1024
-kb:
-  api:
-    bearer_token: $KB_BEARER
-YAML
-export AIMEE_DB2_URL="postgres://$owner:$kbpw@$pg_host:$pg_port/$db"
-export AIMEE_KB_API_BEARER_TOKEN="$KB_BEARER"
-# Every OIDC variable must be unset: a configured profile makes the PAM route
-# answer 409 and this whole rig would pass vacuously.
-for v in $(env | sed -nE 's/^(AIMEE_KB_OIDC[A-Z_]*)=.*/\1/p'); do unset "$v"; done
-./aimee-kb --http-port="$KB_PORT" >"$kb_log" 2>&1 &
-kb_pid=$!
-for i in $(seq 1 60); do
-  curl -sf -H "Authorization: Bearer $KB_BEARER" "http://127.0.0.1:$KB_PORT/v1/health" >/dev/null 2>&1 && break
-  kill -0 "$kb_pid" 2>/dev/null || { echo "pam-live: aimee-kb exited; see $kb_log" >&2; tail -20 "$kb_log" >&2; exit 2; }
-  sleep 1
-done
-curl -sf -H "Authorization: Bearer $KB_BEARER" "http://127.0.0.1:$KB_PORT/v1/health" >/dev/null 2>&1 \
-  || { echo "pam-live: aimee-kb never became healthy" >&2; tail -20 "$kb_log" >&2; exit 2; }
-echo "aimee-kb healthy on $KB_PORT"
+# NOTE: the identity fixture is deliberately NOT seeded. These assertions turn on
+# whether PAM accepted the password, and a request that authenticates is then
+# refused for want of a grant -- which is exactly what assert_pam_accepted looks
+# for. Seeding grants here would change what a non-401 means.
+live_env_start_kb
+
+TEAM_ID="$LIVE_TEAM"
+SERVER_ID="$LIVE_SERVER_ID"
+KB_PORT="$LIVE_KB_PORT"
+KB_BEARER="$LIVE_KB_BEARER"
+work="$LIVE_WORK"
 
 login() { # login <user> <password> -> prints "<status> <body>"
   local u=$1 p=$2
@@ -198,16 +119,7 @@ login() { # login <user> <password> -> prints "<status> <body>"
 # and without a reset they would collide with the very control this rig asserts,
 # reporting 429 where they expect 401. Each group therefore starts from a known
 # empty budget, and the throttle group spends it on purpose.
-restart_kb() {
-  kill "$kb_pid" 2>/dev/null; sleep 1; kill -9 "$kb_pid" 2>/dev/null; wait "$kb_pid" 2>/dev/null
-  ./aimee-kb --http-port="$KB_PORT" >>"$kb_log" 2>&1 &
-  kb_pid=$!
-  for i in $(seq 1 60); do
-    curl -sf -H "Authorization: Bearer $KB_BEARER" "http://127.0.0.1:$KB_PORT/v1/health" >/dev/null 2>&1 && return 0
-    sleep 1
-  done
-  echo "pam-live: aimee-kb did not come back after a restart" >&2; exit 2
-}
+restart_kb() { live_env_restart_kb; }
 
 assert_pam_accepted() { # <label> <user> <password>
   local label=$1 code; code=$(login "$2" "$3")
@@ -331,7 +243,7 @@ step "OIDC and PAM are mutually exclusive"
 # With a usable OIDC profile the PAM route must refuse with 409 and never consult a
 # password -- otherwise an IdP's MFA and lockout policy is bypassable by anyone with
 # a local account.
-kill "$kb_pid" 2>/dev/null; sleep 1; kill -9 "$kb_pid" 2>/dev/null; wait "$kb_pid" 2>/dev/null
+kill "$LIVE_KB_PID" 2>/dev/null; sleep 1; kill -9 "$LIVE_KB_PID" 2>/dev/null; wait "$LIVE_KB_PID" 2>/dev/null
 # The full profile kb_oidc_login_config_from_env requires. A PARTIAL profile is
 # KB_OIDC_LOGIN_INVALID, which deliberately falls back to PAM -- so a rig that set
 # only some of these would test the fallback and report mutual exclusion as proven.
@@ -343,8 +255,11 @@ export AIMEE_KB_OIDC_LOGIN_AUTHORIZE_URL="https://idp.aimee.test/authorize"
 export AIMEE_KB_OIDC_LOGIN_TOKEN_URL="https://idp.aimee.test/token"
 export AIMEE_KB_OIDC_LOGIN_REDIRECT_URI="https://kb.aimee.test/v1/identity/login/callback"
 export AIMEE_KB_OIDC_LOGIN_SCOPE="openid profile"
+# Started by hand, NOT via live_env_start_kb: that helper strips every
+# AIMEE_KB_OIDC_* variable (a stray one makes PAM answer 409 and every PAM
+# assertion pass vacuously), and this is the one place that wants them set.
 ./aimee-kb --http-port="$KB_PORT" >"$work/kb-oidc.log" 2>&1 &
-kb_pid=$!
+LIVE_KB_PID=$!
 for i in $(seq 1 60); do
   curl -sf -H "Authorization: Bearer $KB_BEARER" "http://127.0.0.1:$KB_PORT/v1/health" >/dev/null 2>&1 && break
   sleep 1
@@ -362,13 +277,4 @@ else
   fail "with OIDC configured the PAM route returned $code, expected 409 (auth-mode: $mode)"
 fi
 
-step "Result"
-if [ "$FAILED" = "0" ]; then
-  echo "== PASSED — real host accounts authenticate through kb's PAM route"
-  echo "LIVE_EXIT=0"
-  exit 0
-fi
-echo "== FAILED — $FAILED assertion(s)"
-echo "kb log:"; tail -30 "$kb_log" 2>/dev/null
-echo "LIVE_EXIT=1"
-exit 1
+live_env_verdict "real host accounts authenticate through kb's PAM route"

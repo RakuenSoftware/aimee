@@ -53,19 +53,25 @@
 set -uo pipefail
 export LC_ALL=C
 
-repo=$(cd "$(dirname "$0")/.." && pwd)
-cd "$repo"
-keep=0
-PG_ARG=""
-for a in "$@"; do
-  case "$a" in
-    --keep) keep=1 ;;
-    postgres://*|postgresql://*) PG_ARG="$a" ;;
-    *) echo "enforce-live: unknown argument '$a'" >&2; exit 2 ;;
-  esac
-done
+# Uses the shared environment in scripts/lib/aimee-live-env.sh for the parts every
+# live rig needs — the two ways in to Postgres, the disposable database, aimee-kb,
+# and an aimee-server with a TCP listener. The trust chain below stays here: it is
+# what THIS rig is about, not boilerplate.
+LIVE_KB_PORT=18841
+LIVE_SRV_PORT=18843
+LIVE_SERVER_ID="enforce-srv"
+LIVE_KB_BEARER="enforce-kb-token"
+LIVE_SRV_BEARER="enforce-tcp-bearer"
 
-[ "$(id -u)" = "0" ] || { echo "enforce-live: must run as root (the trust bundle must be root-owned)" >&2; exit 2; }
+. "$(cd "$(dirname "$0")" && pwd)/lib/aimee-live-env.sh"
+
+BUNDLE=/root/aimee-enforce-trust-$$.pem
+# The trust bundle is this rig's own state. It goes through the extra-cleanup hook
+# because the helper installs the only EXIT trap.
+LIVE_EXTRA_CLEANUP='rm -f "$BUNDLE"'
+
+live_env_init "enforce" "$@"
+
 for b in ./aimee ./aimee-server ./aimee-kb ./write-tier-enforce-live; do
   [ -x "$b" ] || { echo "enforce-live: $b not built" >&2; exit 2; }
 done
@@ -73,75 +79,23 @@ done
 # something else entirely. Learned on this branch's first real CI run.
 [ -x ./aimee-kb-resolver ] || { echo "enforce-live: ./aimee-kb-resolver not built" >&2; exit 2; }
 
-work=$(mktemp -d /tmp/aimee-enforce-live-XXXXXX)
-export AIMEE_HOME="$work/home"
-mkdir -p "$AIMEE_HOME"
-kb_log="$work/kb.log"; srv_log="$work/server.log"
-db="aimee_enforce_$$"
-kbpw="enf$(head -c8 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-KB_PORT=18841
-SRV_TCP_PORT=18843
-SERVER_ID="enforce-srv"
-TEAM_ID=990001
-SRV_BEARER="enforce-tcp-bearer"
-KB_BEARER="enforce-kb-token"
-BUNDLE=/root/aimee-enforce-trust-$$.pem
+live_env_pg_create
+
+# The names this rig's body already uses, mapped onto the shared environment, so
+# the assertions below read exactly as they did before the migration.
+work="$LIVE_WORK"
+db="$LIVE_DB"
+owner="$LIVE_OWNER"
+kb_log="$LIVE_KB_LOG"; srv_log="$LIVE_SRV_LOG"
+KB_PORT="$LIVE_KB_PORT"
+SRV_TCP_PORT="$LIVE_SRV_PORT"
+SERVER_ID="$LIVE_SERVER_ID"
+TEAM_ID="$LIVE_TEAM"
+SRV_BEARER="$LIVE_SRV_BEARER"
+KB_BEARER="$LIVE_KB_BEARER"
 TOKEN_KEY="$work/token.pem"
-
-FAILED=0
-pass() { echo "  ok   $*"; }
-fail() { echo "  FAIL $*"; FAILED=$((FAILED+1)); }
-step() { echo; echo "== $*"; }
-
-cleanup() {
-  [ -n "${srv_pid:-}" ] && kill "$srv_pid" 2>/dev/null
-  [ -n "${kb_pid:-}" ] && kill "$kb_pid" 2>/dev/null
-  sleep 1
-  [ -n "${srv_pid:-}" ] && kill -9 "$srv_pid" 2>/dev/null
-  [ -n "${kb_pid:-}" ] && kill -9 "$kb_pid" 2>/dev/null
-  # Reap them, so the shell does not print "Killed" job notices after the verdict.
-  # In CI output a stray "Killed" reads as a crash in the thing being tested.
-  [ -n "${srv_pid:-}" ] && wait "$srv_pid" 2>/dev/null
-  [ -n "${kb_pid:-}" ] && wait "$kb_pid" 2>/dev/null
-  rm -f "$BUNDLE"
-  # Same access path as provisioning; a cleanup that assumes peer auth would leave
-  # a database and a login role behind on every CI run.
-  pg_admin "DROP DATABASE IF EXISTS $db" >/dev/null 2>&1
-  pg_admin "DROP ROLE IF EXISTS aimee_kb_owner_$$" >/dev/null 2>&1
-  if [ "$keep" = "1" ]; then echo "kept: $work"; else rm -rf "$work"; fi
-}
-trap cleanup EXIT
-
-# --- database -------------------------------------------------------------
-# TWO WAYS IN, because the two places this runs differ. On a host with a local
-# cluster (CT 301) there is a `postgres` OS account and peer auth. On a CI runner
-# the cluster is a CONTAINER with neither, so it takes a superuser URL the way the
-# P1 gate does ($1 or AIMEE_TEST_PG_URL). Hard-coding `su postgres` would make this
-# rig unrunnable in CI, which is the one place it most needs to run.
-PGSU_URL="${PG_ARG:-${AIMEE_TEST_PG_URL:-}}"
-if [ -n "$PGSU_URL" ]; then
-  PG_ADMIN_URL="${PGSU_URL%/*}/postgres"
-  pg_admin() { psql -v ON_ERROR_STOP=1 -q "$PG_ADMIN_URL" -c "$1"; }
-  pg_indb()  { psql -v ON_ERROR_STOP=1 -q "${PGSU_URL%/*}/$db" -c "$1"; }
-  pg_host=$(printf '%s' "$PGSU_URL" | sed -E 's#.*@([^:/]+).*#\1#')
-  pg_port=$(printf '%s' "$PGSU_URL" | sed -nE 's#.*:([0-9]+)/.*#\1#p'); pg_port=${pg_port:-5432}
-else
-  pg_admin() { su postgres -c "psql -v ON_ERROR_STOP=1 -q -c \"$1\""; }
-  pg_indb()  { su postgres -c "psql -v ON_ERROR_STOP=1 -q -d $db -c \"$1\""; }
-  pg_host=127.0.0.1; pg_port=5432
-fi
-
-step "Provisioning a disposable database"
-owner="aimee_kb_owner_$$"
-pg_admin "CREATE ROLE $owner LOGIN PASSWORD '$kbpw'" >/dev/null 2>&1 \
-  || { echo "enforce-live: could not create the owner role" >&2; exit 2; }
-pg_admin "CREATE DATABASE $db OWNER $owner" >/dev/null 2>&1 \
-  || { echo "enforce-live: could not create the database" >&2; exit 2; }
-# PG15+ : the database owner still needs CREATE on public explicitly.
-pg_indb "GRANT CREATE ON SCHEMA public TO $owner" >/dev/null 2>&1
-# kb's schema needs both extensions, and only a superuser can create them.
-pg_indb "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm" >/dev/null 2>&1
-echo "database $db owned by $owner on $pg_host:$pg_port"
+pg_indb()     { pg_db -c "$1"; }
+pg_indb_val() { pg_val "$1"; }
 
 # --- the management trust chain -------------------------------------------
 # Seeded BEFORE the server starts, into the very db1 file the server will open
@@ -155,53 +109,17 @@ kid=$(./write-tier-enforce-live provision \
 echo "${kid}   trust bundle $BUNDLE (root-owned 0600)"
 
 # --- kb --------------------------------------------------------------------
-step "Starting aimee-kb"
-cat > "$AIMEE_HOME/aimee.yaml" <<YAML
-embedding_dim: 1024
-kb:
-  api:
-    bearer_token: $KB_BEARER
-aimee:
-  api:
-    http_port: $SRV_TCP_PORT
-    bearer_token: $SRV_BEARER
-    remote_writes: "off"
-YAML
-export AIMEE_DB2_URL="postgres://$owner:$kbpw@$pg_host:$pg_port/$db"
-export AIMEE_KB_API_BEARER_TOKEN="$KB_BEARER"
-./aimee-kb --http-port="$KB_PORT" >"$kb_log" 2>&1 &
-kb_pid=$!
-for i in $(seq 1 60); do
-  curl -sf -H "Authorization: Bearer $KB_BEARER" \
-    "http://127.0.0.1:$KB_PORT/v1/health" >/dev/null 2>&1 && break
-  kill -0 "$kb_pid" 2>/dev/null || { echo "enforce-live: aimee-kb exited; see $kb_log" >&2; tail -20 "$kb_log" >&2; exit 2; }
-  sleep 1
-done
-curl -sf -H "Authorization: Bearer $KB_BEARER" "http://127.0.0.1:$KB_PORT/v1/health" >/dev/null 2>&1 \
-  || { echo "enforce-live: aimee-kb never became healthy" >&2; tail -20 "$kb_log" >&2; exit 2; }
-echo "aimee-kb healthy on $KB_PORT"
+# The boot recipe (config shape, TCP DSN, health poll) is the shared one; only the
+# trust chain above is this rig's own.
+live_env_start_kb
 
 # --- server ----------------------------------------------------------------
 # AIMEE_SERVER_ID is the token AUDIENCE and AIMEE_SERVER_TEAM_ID the single team
 # this server is enrolled in; both are read by server_write_tier_db1's
 # build_config, and either being unset denies every token for a reason that has
 # nothing to do with the token.
-step "Starting aimee-server with a TCP listener and the trust bundle"
-export AIMEE_KB_API_URL="http://127.0.0.1:$KB_PORT"
-export AIMEE_SERVER_ID="$SERVER_ID"
-export AIMEE_SERVER_TEAM_ID="$TEAM_ID"
 export AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE="$BUNDLE"
-./aimee-server >"$srv_log" 2>&1 &
-srv_pid=$!
-for i in $(seq 1 60); do
-  curl -sf -H "x-api-key: $SRV_BEARER" "http://127.0.0.1:$SRV_TCP_PORT/v1/health" >/dev/null 2>&1 && break
-  kill -0 "$srv_pid" 2>/dev/null || { echo "enforce-live: aimee-server exited; see $srv_log" >&2; tail -20 "$srv_log" >&2; exit 2; }
-  sleep 1
-done
-health=$(curl -s -o /dev/null -w '%{http_code}' -H "x-api-key: $SRV_BEARER" \
-           "http://127.0.0.1:$SRV_TCP_PORT/v1/health")
-[ "$health" = "200" ] || { echo "enforce-live: TCP listener not usable (health=$health)" >&2; tail -20 "$srv_log" >&2; exit 2; }
-echo "aimee-server TCP listener healthy on $SRV_TCP_PORT"
+live_env_start_server
 
 # --- helpers ---------------------------------------------------------------
 # A FRESH jti per call, from entropy rather than a counter. `t=$(mint data)` runs
@@ -330,14 +248,8 @@ else fail "replayed   -> $second (expected a refusal; the jti was already spent)
 # by actually flipping it to the most permissive value and re-running the two
 # outcomes that define the feature.
 step "The retired global authorizer changes no outcome"
-sed -i 's/    remote_writes: "off"/    remote_writes: full/' "$AIMEE_HOME/aimee.yaml"
-kill "$srv_pid" 2>/dev/null; sleep 1; kill -9 "$srv_pid" 2>/dev/null; wait "$srv_pid" 2>/dev/null
-./aimee-server >"$srv_log.full" 2>&1 &
-srv_pid=$!
-for i in $(seq 1 60); do
-  curl -sf -H "x-api-key: $SRV_BEARER" "http://127.0.0.1:$SRV_TCP_PORT/v1/health" >/dev/null 2>&1 && break
-  sleep 1
-done
+sed -i 's/    remote_writes: off/    remote_writes: full/' "$AIMEE_HOME/aimee.yaml"
+live_env_restart_server full
 code=$(call POST "$STORE" "$(mint off)" "$store_body")
 if [ "$code" = "403" ]; then pass "remote_writes=full + tier=off  -> 403 (the global does not widen)"
 else fail "remote_writes=full + tier=off  -> $code (expected 403; the global is retired)"; fi
@@ -389,14 +301,102 @@ else
   fi
 fi
 
-# --- verdict ---------------------------------------------------------------
-step "Result"
-if [ "$FAILED" = "0" ]; then
-  echo "== PASSED — a minted token's tier gates a real write, end to end"
-  echo "LIVE_EXIT=0"
-  exit 0
+# --- 8. revocation lag, measured across a real TTL boundary ----------------
+# §11: "after kb revokes a subject's grant, the next call past the documented lag
+# is denied", the lag being bounded by ONE TOKEN TTL.
+#
+# The residual rig proves one half — kb refuses to MINT for a revoked subject the
+# moment the grant is gone. That half says nothing about tokens already in the
+# wild, and an earlier revision inferred the rest from "the request path never
+# reads a grant" rather than measuring it. Inference is not measurement, and this
+# is the rig with a real signing key and a real trust bundle, so the measurement
+# belongs here.
+#
+# THREE tokens sharing one short TTL, because the jti is single-use: reusing one
+# token would be refused as a REPLAY and the rig would credit revocation for a
+# refusal it did not cause.
+#
+# ORDER MATTERS, and getting it wrong makes this section prove nothing. The mint
+# tool signs directly and never consults a grant, so tokens minted BEFORE the
+# grant exists have no relationship to the authorization being revoked: the
+# sequence would then show independently-signed tokens surviving an unrelated
+# database write and later expiring, which is a statement about expiry, not about
+# revocation. The grant is created and ASSERTED first, and only then are the
+# tokens issued under it.
+step "Revocation lag is bounded by one token TTL"
+REV_TTL=20
+rev_sub="oidc:test:revsubject"
+
+# The rest of this rig deliberately runs with NO grant rows — that is how it shows
+# the request path never consults one. This group is the exception and needs the
+# rows a grant lives among: the team, the subject's membership, and an admin who
+# may grant. Seeded HERE rather than in the rig's setup so the earlier sections
+# keep their "no grant row anywhere in the database" property.
+pg_indb "INSERT INTO kb_team(id,name) VALUES ($TEAM_ID,'enforce') ON CONFLICT DO NOTHING" >/dev/null 2>&1
+pg_indb "INSERT INTO kb_team_membership(identity_key,team) VALUES ('$rev_sub',$TEAM_ID),('owner',$TEAM_ID) ON CONFLICT DO NOTHING" >/dev/null 2>&1
+pg_indb "INSERT INTO kb_admin_grant(identity_key,granted_by) VALUES ('owner','owner') ON CONFLICT DO NOTHING" >/dev/null 2>&1
+# kb_write_tier_grant has a composite FK onto kb_server_registry(server_id,team_id):
+# a grant cannot name a server the registry has never heard of. Nothing else in
+# this rig registers one, because nothing else here needs a grant at all.
+pg_indb "INSERT INTO kb_server_registry(server_id,cert_cn,mgmt_cert_cn,team_id,endpoint,status,
+                                        mgmt_issuer,mgmt_serial_norm,mgmt_fingerprint)
+         VALUES ('$SERVER_ID','cn','mcn',$TEAM_ID,'https://$SERVER_ID','active',
+                 'CN=ca','01',repeat('c',64))
+         ON CONFLICT DO NOTHING" >/dev/null 2>&1
+
+# grant_set/grant_revoke take the actor from aimee.principal rather than an
+# argument, so an audit trail cannot be written to order; both must run scoped.
+rev_scoped() { pg_indb_val "BEGIN; SET LOCAL aimee.principal='owner'; SET LOCAL aimee.team='$TEAM_ID'; $1; COMMIT;"; }
+rev_set_out=$(rev_scoped "SELECT kb_write_tier_grant_set('$SERVER_ID',$TEAM_ID,'$rev_sub','data','owner')" 2>&1)
+rev_live=$(pg_indb_val "SELECT count(*) FROM kb_write_tier_grant WHERE server_id='$SERVER_ID' AND team_id=$TEAM_ID AND subject='$rev_sub' AND revoked_at IS NULL" | tr -d ' ')
+if [ "${rev_live:-0}" = "1" ]; then
+  pass "seeded a live grant for $rev_sub"
+else
+  # Without a grant there is nothing to revoke, and the sequence below would
+  # measure EXPIRY while reporting revocation — so say why, not just that.
+  fail "could not seed the grant for $rev_sub (live=${rev_live:-?}); without it the assertions \
+below would prove expiry, not revocation. psql said: $(printf '%s' "$rev_set_out" | grep -m1 '^ERROR:' | head -c200)"
 fi
-echo "== FAILED — $FAILED assertion(s)"
-echo "server log: $srv_log"; tail -30 "$srv_log" 2>/dev/null
-echo "LIVE_EXIT=1"
-exit 1
+
+# ONLY NOW are the tokens issued — under an authorization that demonstrably exists.
+# Minting them earlier would have made every assertion below a statement about
+# expiry, since the mint tool never consults a grant.
+rev_now=$(date +%s)
+rev_exp=$((rev_now + REV_TTL))
+rev_mint() { # rev_mint -> a token for rev_sub expiring at rev_exp
+  local jti="enf-$$-rev-$(head -c8 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  ./write-tier-enforce-live mint --key "$TOKEN_KEY" --aud "$SERVER_ID" \
+    --team "$TEAM_ID" --sub "$rev_sub" --tier data --jti "$jti" \
+    --iat "$rev_now" --exp "$rev_exp"
+}
+t_pre=$(rev_mint); t_mid=$(rev_mint); t_post=$(rev_mint)
+
+code=$(call POST "$STORE" "$t_pre" "$store_body")
+if stored_ok "$code"; then pass "before revoke: a granted subject's token writes -> $code"
+else fail "before revoke: expected a stored 2xx, got $code — the rest of this group would be meaningless"; fi
+
+rev_scoped "SELECT kb_write_tier_grant_revoke('$SERVER_ID',$TEAM_ID,'$rev_sub')" >/dev/null 2>&1
+rev_after=$(pg_indb_val "SELECT count(*) FROM kb_write_tier_grant WHERE server_id='$SERVER_ID' AND team_id=$TEAM_ID AND subject='$rev_sub' AND revoked_at IS NULL" | tr -d ' ')
+if [ "${rev_after:-x}" = "0" ]; then pass "revoke stamped revoked_at (0 live grants remain)"
+else fail "revoke left ${rev_after:-?} live grant(s); the boundary below would not be a revocation boundary"; fi
+
+# THE LAG ITSELF: a token issued before the revoke keeps working after it. This is
+# the property that makes the lag exactly one TTL rather than instantaneous, and
+# it is a real measurement rather than an argument about the request path.
+code=$(call POST "$STORE" "$t_mid" "$store_body")
+if stored_ok "$code"; then pass "during the lag: an already-issued token still writes -> $code (the lag is real)"
+else fail "during the lag: an already-issued token was refused ($code) — then the lag is not one TTL"; fi
+
+# THE BOUNDARY: past exp, the first request is denied. Waiting the remainder of
+# the TTL is what makes this a measurement of the bound and not of expiry alone.
+sleep_for=$((rev_exp - $(date +%s) + 2))
+[ "$sleep_for" -gt 0 ] && sleep "$sleep_for"
+code=$(call POST "$STORE" "$t_post" "$store_body")
+if [ "$code" = "401" ] || [ "$code" = "403" ]; then
+  pass "past the TTL boundary: the first request with a pre-revoke token is denied -> $code"
+else
+  fail "past the TTL boundary a pre-revoke token still worked ($code): the lag is NOT bounded by the TTL"
+fi
+
+# --- verdict ---------------------------------------------------------------
+live_env_verdict "a minted token's tier gates a real write, end to end"

@@ -119,6 +119,9 @@ static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, 
    char *p = line_end + 2;
    char *headers_end = buf + header_len - 2;
    int header_count = 0;
+   /* Start every request with no content type, so a request that sends none
+    * cannot inherit the previous one's on a reused connection. */
+   kb_reqctx_set_content_type("");
    while (p < headers_end && !(p[0] == '\r' && p[1] == '\n'))
    {
       if (++header_count > KB_TLS_HEADER_COUNT_MAX)
@@ -159,6 +162,20 @@ static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, 
             value = value * 10 + (size_t)(*q - '0');
          }
          content_len = value;
+      }
+      if (name_len == 12 && !strncasecmp(p, "Content-Type", 12))
+      {
+         /* Kept for the routes whose security depends on it (see kb_reqctx.h). */
+         char *v = colon + 1;
+         while (v < e && (*v == ' ' || *v == '\t'))
+            v++;
+         char ct[128];
+         size_t vlen = (size_t)(e - v);
+         if (vlen >= sizeof(ct))
+            vlen = sizeof(ct) - 1;
+         memcpy(ct, v, vlen);
+         ct[vlen] = '\0';
+         kb_reqctx_set_content_type(ct);
       }
       if (name_len == 10 && !strncasecmp(p, "Connection", 10) &&
           header_value_has_token(colon + 1, e, "close"))

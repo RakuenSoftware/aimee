@@ -46,7 +46,7 @@ infrastructure (CT 301: real Postgres 17, real aimee-kb, real aimee-server, real
 |---|---|---|
 | Replay after first use → refused | **CI + LIVE** | enforce rig: first use 200, same token again 403 |
 | `jti` store is bounded | **UNIT** | `test_server_identity_jti.c` |
-| Revocation lag bounded to one token TTL | **CI + LIVE** | `run-authz-residual-live.sh`: with a live grant the mint files an intent (`replayed=f`); the very next mint after `kb_write_tier_grant_revoke` raises `management identity not granted`. The other half — that the lag is exactly the token TTL — follows from the request path never re-reading a grant (the enforcement rig writes with no grant row in the database at all) plus expiry being enforced |
+| Revocation lag bounded to one token TTL | **CI + LIVE** | Both halves are now measured, not one measured and one inferred. `run-authz-residual-live.sh`: with a live grant the mint files an intent (`replayed=f`); the very next mint after `kb_write_tier_grant_revoke` raises `management identity not granted`. `run-write-tier-enforce-live.sh` §8 crosses the boundary with real tokens — three minted before the revoke sharing one 20s TTL (the `jti` is single-use, so reusing one would be refused as a REPLAY and credit revocation for a refusal it did not cause): **200** before the revoke, **200** after it while unexpired (this is the lag), **403** on the first request past `exp` |
 
 ## Legacy cutover
 
@@ -75,7 +75,7 @@ infrastructure (CT 301: real Postgres 17, real aimee-kb, real aimee-server, real
 | Criterion | Status | Evidence |
 |---|---|---|
 | Brute-force is rate-limited | **CI + LIVE + UNIT** | Was **unmet** and shipped as an open password oracle; fixed in `f9d717dd`. `test_kb_login_throttle.c` (8 properties), route-level assertions in `test_kb_http_identity_login.c`, and `run-pam-login-live.sh` (throttled at exactly one past the budget) |
-| CSRF-forged PAM login POST → rejected | **CI + LIVE, with a caveat** | measured, not argued: the route IS reachable from a cross-origin form (it accepts `text/plain`, `x-www-form-urlencoded` and `multipart/form-data`), but sets no cookie, issues no redirect and sends no CORS header — so a forged login plants no ambient credential and the attacker cannot read the response. See "Residual risk" |
+| CSRF-forged PAM login POST → rejected | **CI + LIVE** | `run-authz-residual-live.sh` drives the three encodings a browser can send cross-origin without a preflight, as browser-faithful bodies rather than JSON with a swapped header, and requires **415** for each — plus a request naming no content type at all. The route now requires `application/json`, which a cross-origin form cannot send without a preflight it will fail. Red-checked: with the requirement removed, the `text/plain` form **completes a login (HTTP 200)** |
 
 ## Gates
 
@@ -111,24 +111,50 @@ not a measurement.
 construction in `build_config`, which maps any bundle or cache load failure to `INVALID`.
 Neither has been induced against a live server.
 
-## Residual risk — the one thing measurement did not eliminate
+**The enforcement rig's "no grant row anywhere" property now has a scope.** Sections 1–7
+still run with an empty `kb_write_tier_grant`, which is what shows the request path never
+consults one. Section 8 (the revocation boundary) necessarily seeds a grant, plus the
+team, membership, admin and server-registry rows a grant has foreign keys onto. It is
+placed last so the earlier property is unaffected. Worth stating because the first
+version of that section seeded nothing, the `grant_set` failed silently on a foreign-key
+violation, and the sequence measured **expiry while reporting revocation** — a false pass
+caught only by asserting the seed itself.
 
-**The PAM login route is reachable from a cross-origin browser form.** Measured, not
-assumed: `text/plain`, `application/x-www-form-urlencoded` and `multipart/form-data`
-all reach the handler and get a `401` (the body is parsed and the credential checked),
-because kb does not enforce a request `Content-Type`. Those are exactly the three types
-a browser can send cross-origin without a preflight.
+## The CSRF finding, and how the first version of it was wrong
 
-What an attacker gets from that is measured too, and it is very little: no `Set-Cookie`,
-no redirect, and no CORS header, so a forged login plants no ambient credential and the
-attacker's page cannot read the response. Login-CSRF here means causing someone's
-browser to file a mint intent for an account whose password the attacker already knows,
-with the result unreadable.
+**A cross-origin browser form could complete a PAM login.** Not "reach the route and
+get a 401" — complete it. An `enctype=text/plain` form emits `name=value` with no
+escaping, so splitting the payload to put the browser's `=` inside a JSON string value
+produces a body that is valid JSON on the wire. Measured against a live kb with the
+content-type requirement removed: **HTTP 200**.
 
-**It is still worth a reviewer's opinion.** Requiring `application/json` on this route
-would close the reachability half outright and is a small change. It is not here because
-the impact measured above did not justify changing a route's accepted content types
-inside a security fix; that is a judgement, and a reviewer may reasonably overrule it.
+Two earlier accounts of this were both wrong, in opposite directions, and are recorded
+because the errors are instructive:
+
+1. **"Login-CSRF here yields an attacker nothing."** It yields a completed
+   authentication against a real host account. The blast radius is still bounded — no
+   `Set-Cookie`, no redirect, no CORS header, so nothing ambient is planted and the
+   response cannot be read cross-origin — but "nothing" was too generous.
+2. **The first rig written to test it sent raw JSON with a swapped `Content-Type`
+   header**, which no browser can do, and reported a note instead of failing. A later
+   version sent a *malformed* `text/plain` body (the `=` outside a string), so the route
+   refused it at parse and the assertion passed for a reason unrelated to the control.
+   The rig now asserts the forgery body is valid JSON *before* using it.
+
+**The fix.** `post_login_pam` requires `application/json`, checked before the login
+throttle so a forged request cannot spend the named user's budget and turn a CSRF that
+achieves little into a denial of service that achieves plenty. The request's
+`Content-Type` reaches the handler through `kb_reqctx` — the same per-request context
+the codebase already uses for the authenticated actor — because a new `kb_http_route_ex`
+parameter would have touched every route and every test call site to serve one.
+
+Nothing in the tree posted to this route with another content type, so there was no
+consumer to break.
+
+**What remains unproven here:** `application/x-www-form-urlencoded` cannot deliver JSON
+in any case, because the browser percent-encodes the field name and kb never url-decodes
+a body. It is asserted anyway — it must stay refused, and the refusal must not depend on
+that accident of encoding.
 
 ## A portability finding, not a defect
 

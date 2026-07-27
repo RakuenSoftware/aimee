@@ -5443,6 +5443,7 @@ $(TESTPREFIX)/unit-test-kb-http-identity-login: \
                      $(OBJDIR)/kb/verifier.o \
                      $(OBJDIR)/kb/kb_scope.o \
                      $(OBJDIR)/kb/kb_identity.o \
+                     $(OBJDIR)/kb/kb_reqctx.o \
                      $(OBJDIR)/server/oauth_pkce.o \
                      $(OBJDIR)/util.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o $(OBJDIR)/log.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto

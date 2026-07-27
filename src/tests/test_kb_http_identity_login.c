@@ -32,6 +32,7 @@
 #include "kb_oidc_login.h"
 #include "kb_oidc_login_store.h"
 #include "kb_oidc_token_exchange.h"
+#include "kb_reqctx.h"
 #include "vault_service.h"
 
 #include <openssl/core_names.h>
@@ -77,9 +78,21 @@ static void env_configure(void)
    setenv("AIMEE_KB_OIDC_LOGIN_REDIRECT_URI", "https://kb.example/v1/identity/login/callback", 1);
 }
 
+/* Every caller in this file sends JSON, which is what a real client does, so the
+ * content type the connection layer would have recorded is set here rather than
+ * at 22 call sites. route_ct() is for the tests that are ABOUT the content type. */
+static int route_ct(const char *method, const char *path, const char *body, const char *ctype,
+                    char *out, int cap)
+{
+   kb_reqctx_set_content_type(ctype);
+   int rc = kb_http_identity_login_route(method, path, NULL, body, NOW, out, cap);
+   kb_reqctx_clear_content_type();
+   return rc;
+}
+
 static int route(const char *method, const char *path, const char *body, char *out, int cap)
 {
-   return kb_http_identity_login_route(method, path, NULL, body, NOW, out, cap);
+   return route_ct(method, path, body, "application/json", out, cap);
 }
 
 /* ── Stubs for the two things a route test must not do ─────────────────────── */
@@ -925,6 +938,73 @@ static void test_login_pam(void)
    env_clear();
 }
 
+/* ── CSRF: the content types a browser can forge ──────────────────────────── */
+
+/* A cross-origin HTML form can send exactly three content types without a
+ * preflight. While this route accepted a JSON body under any of them it was
+ * drivable from an attacker's page — measured on a live kb, all three reached
+ * credential processing and answered 401. Requiring application/json means the
+ * only type that works is one a cross-origin form cannot send without a
+ * preflight it will fail.
+ *
+ * The assertion that matters is stub_pam_calls == 0, not the status: a refusal
+ * that still ran the credential check would leave the password oracle open (and
+ * the throttle chargeable) even while answering 415. */
+static void test_login_pam_requires_json(void)
+{
+   char out[4096];
+   const char *body = "{\"username\":\"alice\",\"password\":\"correct\","
+                      "\"server_id\":\"mintsrv\",\"team_id\":770001}";
+   env_clear();
+   kb_login_throttle_reset();
+
+   const char *forgeable[] = {"text/plain", "application/x-www-form-urlencoded",
+                              "multipart/form-data; boundary=----x", "text/plain;charset=UTF-8"};
+   for (size_t i = 0; i < sizeof(forgeable) / sizeof(forgeable[0]); i++)
+   {
+      stub_pam_calls = 0;
+      assert(route_ct("POST", "/v1/identity/login/pam", body, forgeable[i], out, sizeof(out)) ==
+             415);
+      assert(stub_pam_calls == 0);
+   }
+
+   /* A request that names no content type at all is refused too: a route that
+    * requires JSON must not accept one that never said what it was sending. */
+   stub_pam_calls = 0;
+   assert(route_ct("POST", "/v1/identity/login/pam", body, "", out, sizeof(out)) == 415);
+   assert(stub_pam_calls == 0);
+
+   /* "application/jsonx" is a DIFFERENT media type, not JSON with a suffix. */
+   stub_pam_calls = 0;
+   assert(route_ct("POST", "/v1/identity/login/pam", body, "application/jsonx", out, sizeof(out)) ==
+          415);
+   assert(stub_pam_calls == 0);
+
+   /* JSON still works, including with a parameter and odd case — refusing those
+    * would break real clients while stopping no attacker. */
+   const char *ok[] = {"application/json", "application/json; charset=utf-8", "APPLICATION/JSON",
+                       " application/json"};
+   for (size_t i = 0; i < sizeof(ok) / sizeof(ok[0]); i++)
+   {
+      stub_intent_reset("alice");
+      stub_pam_calls = 0;
+      assert(route_ct("POST", "/v1/identity/login/pam", body, ok[i], out, sizeof(out)) == 200);
+      assert(stub_pam_calls == 1);
+   }
+
+   /* The refusal happens BEFORE the throttle. Otherwise a forged cross-origin
+    * form would spend the named user's login budget and lock them out — turning
+    * a CSRF that achieves nothing into a denial of service that does. */
+   kb_login_throttle_reset();
+   for (int i = 0; i < 40; i++)
+      assert(route_ct("POST", "/v1/identity/login/pam", body, "text/plain", out, sizeof(out)) ==
+             415);
+   stub_intent_reset("alice");
+   assert(route("POST", "/v1/identity/login/pam", body, out, sizeof(out)) == 200);
+
+   env_clear();
+}
+
 /* ── The configuration-mode matrix ────────────────────────────────────────── */
 
 /* Each login surface, under each configuration a kb can actually be in.
@@ -1032,8 +1112,12 @@ static void test_config_mode_matrix(void)
       for (size_t j = 0; j < sizeof(probes) / sizeof(probes[0]); ++j)
       {
          char body_out[4096] = "";
+         /* What a real client sends; the PAM route now requires it. This matrix
+          * is about MODE, so it must not also be testing the content type. */
+         kb_reqctx_set_content_type("application/json");
          int st = kb_http_identity_login_route(probes[j].method, probes[j].path, probes[j].query,
                                                probes[j].body, NOW, body_out, sizeof(body_out));
+         kb_reqctx_clear_content_type();
          if (st != probes[j].expected)
          {
             fprintf(stderr, "mode %s route %s: got %d expected %d (%s)\n", mode_name(table[i].mode),
@@ -1250,6 +1334,7 @@ int main(void)
    test_small_buffer();
    test_callback(key, jwks);
    test_login_pam();
+   test_login_pam_requires_json();
    test_config_mode_matrix();
    env_clear();
    kb_oidc_login_store_reset();

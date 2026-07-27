@@ -11,6 +11,7 @@
 #include "kb_oidc_login.h"
 #include "kb_oidc_login_store.h"
 #include "kb_oidc_token_exchange.h"
+#include "kb_reqctx.h" /* the request's Content-Type — CSRF surface on the PAM login */
 #include "log.h"
 #include "vault_service.h"
 
@@ -484,6 +485,21 @@ static int get_login_callback(const char *query_string, int64_t now, char *out_b
  * of a grant is NOT charged — it proved who it is. */
 static int post_login_pam(const char *body, char *out_buf, int out_cap)
 {
+   /* CSRF: a browser can send exactly text/plain, application/x-www-form-urlencoded
+    * and multipart/form-data cross-origin without a preflight. Accepting a JSON
+    * body under any of them made this route drivable from a form on an attacker's
+    * page — measured, not assumed: all three reached credential processing and
+    * returned 401. Requiring application/json means a cross-origin form cannot
+    * reach the credential check at all, because the one content type this route
+    * accepts is the one that forces a preflight the attacker's origin will fail.
+    *
+    * BEFORE the throttle deliberately: a request that never reaches the
+    * credential check must not consume another caller's login budget, or a
+    * forged form becomes a denial-of-service against the real user it names.
+    * Nothing in the tree posts here with another content type. */
+   if (!kb_reqctx_content_type_is_json())
+      return json_error(out_buf, out_cap, 415, "content-type must be application/json");
+
    kb_oidc_login_config_t oidc;
    kb_oidc_login_result_t orc = kb_oidc_login_config_from_env(&oidc);
    if (orc == KB_OIDC_LOGIN_OK)

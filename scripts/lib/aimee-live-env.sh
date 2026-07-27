@@ -1,6 +1,6 @@
 # aimee-live-env.sh — a STANDARD live test environment. Source it; do not run it.
 #
-# WHY THIS EXISTS. Three live rigs on this branch each grew their own copy of the
+# WHY THIS EXISTS. Live rigs on this branch each grew their own copy of the
 # same boot sequence, and each rediscovered the same traps: the DSN must be TCP
 # because kb runs as root and peer auth would say root; embedding_dim must be
 # PINNED; the kb port comes ONLY from --http-port (AIMEE_KB_PORT and a flat
@@ -25,7 +25,19 @@
 #   live_env_verdict "what was proven"
 #
 # live_env_init installs an EXIT trap that stops both daemons and drops the
-# database and role. Rigs must not install their own EXIT trap.
+# database and role. Rigs must not install their own EXIT trap; rig-specific
+# teardown goes in LIVE_EXTRA_CLEANUP.
+#
+# WHO USES IT, and who deliberately does not. run-authz-residual-live.sh,
+# run-pam-login-live.sh and run-write-tier-enforce-live.sh are on it.
+#
+# run-grant-cli-live.sh is NOT, and should not be: it provisions the REAL
+# cluster-scope roles from src/db2/schema_roles.sql and connects as the real
+# aimee_kb_owner, because whoever pre-applies the schema has to be the role kb
+# will connect as. That provisioning IS part of what the rig tests, so putting it
+# behind this helper's disposable-database path would quietly reduce its coverage
+# to prove a tidier call site. Shared setup is worth having; shared setup that
+# replaces the thing under test is not.
 
 # --- assertions -------------------------------------------------------------
 LIVE_FAILED=0
@@ -104,6 +116,15 @@ live_env_init() {
    # denied" -- a fixture that looks perfect in a superuser SELECT and is
    # invisible to the code under test. The role name is part of the schema's
    # contract, so a live rig has to borrow the real one and hand it back.
+   #
+   # CONSEQUENCE, worth stating because it is not obvious and it bites hard: the
+   # name is FIXED, so two helper-based rigs must not run against ONE cluster at
+   # the same time. Both would snapshot the role as absent, both would treat it as
+   # theirs, and the first to finish would drop the owner out from under the other's
+   # database. CI is safe because each live job gets its own Postgres service, and
+   # CT 301 runs them one at a time. Postgres refuses to drop a role that still owns
+   # objects, so the damage is bounded and live_env_release_owner reports it -- but
+   # do not rely on that as a design.
    LIVE_OWNER="aimee_kb_owner"
    LIVE_PW="lv$(head -c8 /dev/urandom | od -An -tx1 | tr -d ' \n')"
    LIVE_KB_PORT=${LIVE_KB_PORT:-18901}
@@ -197,6 +218,35 @@ live_env_snapshot_owner() {
    LIVE_OWNER_PW=$(pg_admin_val "SELECT coalesce(rolpassword,'') FROM pg_authid WHERE rolname='$LIVE_OWNER'")
    LIVE_OWNER_LOGIN=$(pg_admin_val "SELECT rolcanlogin FROM pg_authid WHERE rolname='$LIVE_OWNER'")
 }
+# Hands the owner role back. Two different obligations, and conflating them
+# leaked a role: a role the rig CREATED must be DROPPED (leaving it behind means
+# a cluster-global LOGIN role with this file's known test password sitting on the
+# host forever), while a role it BORROWED must be restored and never dropped.
+# Only safe once the database it owns is gone, so cleanup calls it after the DROP
+# DATABASE — with --keep the database survives, so the created role has to as
+# well and cleanup says so instead.
+live_env_release_owner() {
+   if [ "${LIVE_OWNER_EXISTED:-0}" = "0" ]; then
+      local drop_err
+      drop_err=$(pg_admin "DROP ROLE IF EXISTS $LIVE_OWNER" 2>&1)
+      local still
+      still=$(pg_admin_val "SELECT count(*) FROM pg_authid WHERE rolname='$LIVE_OWNER'")
+      if [ "$still" != "0" ]; then
+         # FAIL, do not merely report. The whole point of dropping it is that a
+         # cluster-global role with this file's known password must not outlive the
+         # run; a rig that detects the leak and still exits 0 has converted a
+         # credential leak into a log line nobody reads.
+         echo "$LIVE_NAME: could not drop the role this rig created ($LIVE_OWNER)." >&2
+         echo "  It has this rig's known password and can log in. Drop it by hand:" >&2
+         echo "    psql -c \"DROP ROLE $LIVE_OWNER\"" >&2
+         [ -n "$drop_err" ] && echo "  psql said: $(printf '%s' "$drop_err" | head -1)" >&2
+         LIVE_OWNER_LEAKED=1
+      fi
+      return 0
+   fi
+   live_env_restore_owner
+}
+
 live_env_restore_owner() {
    [ "${LIVE_OWNER_EXISTED:-0}" = "0" ] && return 0
    if [ -n "${LIVE_OWNER_PW:-}" ]; then
@@ -350,6 +400,35 @@ SQL
 }
 
 # --- daemons ----------------------------------------------------------------
+# Creates a real host account and returns via LIVE_PAM_USER / LIVE_PAM_PASS.
+# A rig that needs to prove what a SUCCESSFUL login does cannot do it with a
+# wrong password: the response to a rejected credential is a different response.
+# Removed by cleanup — a rig that leaves login accounts behind on a host is the
+# same class of mistake as leaving a database role behind.
+live_env_add_host_account() {
+   LIVE_PAM_USER="${1:-liveuser_$$}"
+   LIVE_PAM_PASS="${2:-Live-Pass-$$-xyz}"
+   userdel -r "$LIVE_PAM_USER" >/dev/null 2>&1
+   useradd -M -s /usr/sbin/nologin "$LIVE_PAM_USER" 2>/dev/null || {
+      echo "$LIVE_NAME: could not create the host account $LIVE_PAM_USER" >&2
+      exit 2
+   }
+   printf '%s:%s\n' "$LIVE_PAM_USER" "$LIVE_PAM_PASS" | chpasswd || {
+      echo "$LIVE_NAME: could not set a password for $LIVE_PAM_USER" >&2
+      exit 2
+   }
+   LIVE_HOST_ACCOUNTS="${LIVE_HOST_ACCOUNTS:-} $LIVE_PAM_USER"
+   echo "host account $LIVE_PAM_USER created"
+}
+
+live_env_remove_host_accounts() {
+   local u
+   for u in ${LIVE_HOST_ACCOUNTS:-}; do
+      userdel -r "$u" >/dev/null 2>&1
+   done
+   LIVE_HOST_ACCOUNTS=""
+}
+
 live_env_write_config() {
    cat >"$AIMEE_HOME/aimee.yaml" <<YAML
 embedding_dim: 1024
@@ -367,6 +446,13 @@ YAML
 live_env_start_kb() {
    step "Starting aimee-kb"
    live_env_write_config
+   # EVERY OIDC variable must be unset. kb treats a configured OIDC profile as
+   # mutually exclusive with PAM, so a stray AIMEE_KB_OIDC_* in the environment
+   # makes the PAM route answer 409 and every PAM assertion in every rig passes
+   # VACUOUSLY. This is in the shared helper rather than one rig because the
+   # failure is silent and identical wherever it happens.
+   local v
+   for v in $(env | sed -nE 's/^(AIMEE_KB_OIDC[A-Z_]*)=.*/\1/p'); do unset "$v"; done
    # TCP, not the socket: kb runs as root here and peer auth would present root.
    export AIMEE_DB2_URL="postgres://$LIVE_OWNER:$LIVE_PW@$LIVE_PG_HOST:$LIVE_PG_PORT/$LIVE_DB"
    export AIMEE_KB_API_BEARER_TOKEN="$LIVE_KB_BEARER"
@@ -427,6 +513,18 @@ live_env_start_server() {
       }
       sleep 1
    done
+   # The loop above ends the same way whether it broke on success or ran out of
+   # attempts with a live-but-wedged process, so it cannot be the proof. Without
+   # this final probe the rig announced "healthy" against a server answering
+   # nothing, and every later curl returned empty — which assertions looking for
+   # the ABSENCE of a header (no Set-Cookie, no redirect, no CORS) would have
+   # read as a pass. Health has to be demonstrated, not assumed.
+   curl -sf -H "x-api-key: $LIVE_SRV_BEARER" \
+      "http://127.0.0.1:$LIVE_SRV_PORT/v1/health" >/dev/null 2>&1 || {
+      echo "$LIVE_NAME: aimee-server never became healthy" >&2
+      tail -20 "$LIVE_SRV_LOG" >&2
+      exit 2
+   }
    echo "aimee-server TCP listener healthy on $LIVE_SRV_PORT"
 }
 
@@ -456,19 +554,39 @@ live_env_cleanup() {
    [ -n "${LIVE_SRV_PID:-}" ] && wait "$LIVE_SRV_PID" 2>/dev/null
    [ -n "${LIVE_KB_PID:-}" ] && wait "$LIVE_KB_PID" 2>/dev/null
    [ -n "${LIVE_EXTRA_CLEANUP:-}" ] && eval "$LIVE_EXTRA_CLEANUP"
+   live_env_remove_host_accounts
    # --keep must keep the DATABASE too. Keeping only the work directory is useless
    # for the thing --keep is for -- looking at the rows a failing assertion saw.
    if [ "${LIVE_KEEP:-0}" = "1" ]; then
       echo "kept: $LIVE_WORK"
       echo "kept database: $LIVE_DB (owner $LIVE_OWNER); drop with:"
       echo "  psql -c 'DROP DATABASE $LIVE_DB'"
-      # Even when keeping the database, the BORROWED cluster-global role goes back.
-      live_env_restore_owner
+      # The kept database is still owned by the role, so a role this rig CREATED
+      # cannot be dropped yet — say so, with the command, rather than leaving an
+      # unannounced login role behind.
+      if [ "${LIVE_OWNER_EXISTED:-0}" = "0" ]; then
+         echo "kept role: $LIVE_OWNER (created by this rig, has its test password); after the drop:"
+         echo "  psql -c 'DROP ROLE $LIVE_OWNER'"
+      else
+         # A BORROWED cluster-global role goes back even when the database stays.
+         live_env_restore_owner
+      fi
       return 0
    fi
    pg_admin "DROP DATABASE IF EXISTS $LIVE_DB" >/dev/null 2>&1
-   # The role is BORROWED, never dropped: it is cluster-global and other databases
-   # may own objects with it.
-   live_env_restore_owner
+   # After the database is gone: drop a role this rig created, restore one it
+   # borrowed. A borrowed role is cluster-global and other databases may own
+   # objects with it, so it is never dropped.
+   live_env_release_owner
    rm -rf "$LIVE_WORK"
+   # A leaked login role FAILS THE RUN, even when every assertion passed. This
+   # runs in the EXIT trap, after live_env_verdict has already called exit, so
+   # overriding the status here is the only way to make it stick -- and it must
+   # stick, or "cleanup leaves no credential behind" is an aspiration rather than
+   # a property CI enforces.
+   if [ "${LIVE_OWNER_LEAKED:-0}" = "1" ]; then
+      echo "== FAILED — the run left the cluster-global role $LIVE_OWNER behind"
+      echo "LIVE_EXIT=1"
+      exit 1
+   fi
 }

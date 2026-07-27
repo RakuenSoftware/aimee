@@ -45,6 +45,10 @@ LIVE_REMOTE_WRITES=full
 
 live_env_init "authz-residual" "$@"
 live_env_pg_create
+# A real host account, because the CSRF impact measurement has to be taken on a
+# login that SUCCEEDS; the response to a rejected credential is a different
+# response and cannot stand in for it.
+live_env_add_host_account "residual_$$" "Resid-Pass-$$-7q"
 live_env_start_kb
 live_env_seed_identity_fixture
 # kb caches nothing that matters here, but the fixture landed after boot, so
@@ -116,52 +120,169 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-step "2. CSRF: can a cross-origin browser form drive the PAM login?"
+step "2. CSRF: a cross-origin browser form must NOT reach the PAM login"
 
-# A browser can send only these three content types cross-origin without a
-# preflight. If kb accepts a JSON body under any of them, an HTML form on an
-# attacker's page can reach this route.
-pam_body=$(printf '{"username":"alice","password":"x","server_id":"%s","team_id":%d}' "$LIVE_SERVER_ID" "$LIVE_TEAM")
-reachable=0
-for ct in "text/plain" "application/x-www-form-urlencoded" "multipart/form-data"; do
-   code=$(kb_post /v1/identity/login/pam "$pam_body" "$ct")
-   # 401 means it PARSED the body and refused the credential -- i.e. reachable.
-   # 400 would mean the body was rejected before any credential work.
-   if [ "$code" = "401" ] || [ "$code" = "403" ] || [ "$code" = "429" ]; then
-      reachable=1
-      echo "  note: content-type '$ct' -> $code (body parsed; route reachable)"
+# The impact measurement needs a login that SUCCEEDS, so the host account needs
+# what any other subject needs: team membership and a live write-tier grant.
+# (alice's grant was deliberately revoked above and must stay revoked.)
+pg_db -c "INSERT INTO kb_team_membership(identity_key,team) VALUES ('$LIVE_PAM_USER',$LIVE_TEAM) ON CONFLICT DO NOTHING" >/dev/null 2>&1
+pg_scoped owner "SELECT kb_write_tier_grant_set('$LIVE_SERVER_ID',$LIVE_TEAM,'$LIVE_PAM_USER','data','owner')" >/dev/null 2>&1
+csrf_granted=$(pg_val "SELECT tier FROM kb_write_tier_grant WHERE server_id='$LIVE_SERVER_ID' AND team_id=$LIVE_TEAM AND subject='$LIVE_PAM_USER' AND revoked_at IS NULL")
+if [ "$csrf_granted" = "data" ]; then
+   pass "the host account $LIVE_PAM_USER is granted and can log in for real"
+else
+   fail "could not grant $LIVE_PAM_USER (got '$csrf_granted'); the impact measurement needs a successful login"
+fi
+
+# §11 says "CSRF-forged PAM login POST -> rejected". An earlier version of this
+# section printed a note when a forged shape got through and passed anyway, which
+# is not a test of that criterion -- CI stayed green while the criterion was
+# unmet. It now FAILS, and the route was changed so that it can pass: the handler
+# requires application/json, which is the one content type a cross-origin form
+# cannot send without a preflight.
+#
+# The bodies below are what a BROWSER would actually put on the wire, not JSON
+# with a swapped Content-Type header. That distinction matters: an attacker can
+# only send what an HTML form emits.
+csrf_user="${LIVE_PAM_USER}"
+json_body=$(printf '{"username":"%s","password":"%s","server_id":"%s","team_id":%d}' \
+   "$csrf_user" "$LIVE_PAM_PASS" "$LIVE_SERVER_ID" "$LIVE_TEAM")
+
+# enctype=text/plain emits exactly "name=value\r\n" with NO escaping, which is
+# what makes it the usable JSON-forgery vector: split the payload so the '=' the
+# browser inserts lands INSIDE a string value, and the bytes on the wire are
+# valid JSON. Getting this wrong is easy and self-defeating -- an earlier version
+# here put the '=' outside a string, so the body was not JSON, the route rejected
+# it at parse, and the assertion passed for a reason that had nothing to do with
+# the control being tested.
+tp_name=$(printf '{"username":"%s","password":"%s","server_id":"%s","team_id":%d,"pad":"' \
+   "$csrf_user" "$LIVE_PAM_PASS" "$LIVE_SERVER_ID" "$LIVE_TEAM")
+tp_body=$(printf '%s=%s\r\n' "$tp_name" '"}')
+# PREREQUISITE, not a nicety: if this body is not valid JSON then the route would
+# refuse it at parse and the 415 assertion below would pass without the
+# content-type control doing anything. An earlier version checked this only when
+# python3 happened to be installed and continued silently otherwise -- which is
+# the same false pass, just conditional on the host.
+if ! command -v python3 >/dev/null 2>&1; then
+   echo "authz-residual: python3 is required to verify the CSRF forgery body is valid JSON;" >&2
+   echo "  without it the 415 assertions cannot be distinguished from a parse refusal." >&2
+   exit 2
+fi
+if printf '%s' "$tp_body" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' 2>/dev/null; then
+   pass "the text/plain form body is valid JSON, so it is a real forgery attempt"
+else
+   fail "the text/plain form body is not valid JSON — this vector would be refused at parse, \
+proving nothing about the CSRF control"
+fi
+# enctype=application/x-www-form-urlencoded emits "name=value" with the name
+# PERCENT-ENCODED. kb never url-decodes a body, so what arrives is not JSON and
+# this vector cannot deliver a credential even without the content-type check.
+# Included anyway: it must stay refused, and the refusal must not depend on that
+# accident of encoding.
+ue_body="$(printf '%s' "$json_body" | od -An -tx1 -v | tr -d ' \n' | sed 's/../%&/g')="
+# enctype=multipart/form-data emits a boundary-delimited part.
+mp_boundary="----WebKitFormBoundaryLiveCsrf"
+mp_body=$(printf -- '--%s\r\nContent-Disposition: form-data; name="j"\r\n\r\n%s\r\n--%s--\r\n' \
+   "$mp_boundary" "$json_body" "$mp_boundary")
+
+csrf_reached=0
+check_forged() { # check_forged <label> <content-type> <body>
+   local code
+   code=$(kb_post /v1/identity/login/pam "$3" "$2")
+   if [ "$code" = "415" ]; then
+      pass "forged $1 refused with 415 before any credential work"
    else
-      echo "  note: content-type '$ct' -> $code"
+      csrf_reached=1
+      fail "forged $1 reached the login handler (HTTP $code) — a cross-origin form can drive it"
+   fi
+}
+check_forged "text/plain form" "text/plain" "$tp_body"
+check_forged "urlencoded form" "application/x-www-form-urlencoded" "$ue_body"
+check_forged "multipart form" "multipart/form-data; boundary=$mp_boundary" "$mp_body"
+# A form that names no content type at all must not slip through either.
+code=$(curl -s -o "$LIVE_WORK/out" -w '%{http_code}' -X POST --data-binary "$json_body" \
+   -H 'Content-Type:' "$KB/v1/identity/login/pam")
+if [ "$code" = "415" ]; then
+   pass "a request with no Content-Type is refused too"
+else
+   fail "a request with no Content-Type reached the handler (HTTP $code)"
+fi
+
+# THE CONTENT-TYPE PARSER ITSELF, over a real socket. RFC 9110 allows zero or
+# more spaces or tabs after the colon, so a client sending
+# "Content-Type:application/json" is sending JSON -- and a route that requires
+# JSON must not answer 415 to it. Raw bytes rather than curl, because curl
+# normalises the header it is given and would hide exactly the difference under
+# test. The route tests cannot cover this: they call the router directly and
+# never go through a header parser at all.
+raw_login() { # raw_login <literal header line> -> HTTP status
+   local hdr=$1 body=$2 resp=""
+   exec 3<>"/dev/tcp/127.0.0.1/$LIVE_KB_PORT" || { echo "000"; return; }
+   printf 'POST /v1/identity/login/pam HTTP/1.1\r\nHost: 127.0.0.1\r\n%s\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s' \
+      "$hdr" "${#body}" "$body" >&3
+   resp=$(timeout 10 head -1 <&3)
+   exec 3<&-
+   printf '%s' "$resp" | sed -nE 's#^HTTP/1\.1 ([0-9]{3}).*#\1#p'
+}
+for hdr in 'Content-Type:application/json' \
+   'Content-Type: application/json' \
+   "$(printf 'Content-Type:\tapplication/json')" \
+   'Content-Type:   application/json   '; do
+   code=$(raw_login "$hdr" "$json_body")
+   if [ "$code" = "200" ]; then
+      pass "wire form '$(printf '%s' "$hdr" | cat -A | head -c60)' accepted -> 200"
+   else
+      fail "wire form '$(printf '%s' "$hdr" | cat -A | head -c60)' -> ${code:-no response}; \
+optional whitespace after the colon is legal and must not read as a missing content type"
    fi
 done
-if [ "$reachable" = "1" ]; then
-   # This is the honest finding, recorded as a NOTE rather than a failure: the
-   # route IS reachable from a cross-origin form. What matters is what that buys
-   # an attacker, which the next two assertions measure.
-   echo "  FINDING: the route accepts a browser-sendable content type, so a"
-   echo "           cross-origin form CAN reach it. Impact measured below."
+
+# THE REFUSAL MUST BE FREE. If a forged request were charged to the login
+# throttle, a form on an attacker's page could lock the named user out — turning
+# a CSRF that achieves nothing into a denial of service that achieves plenty.
+# Measured from outside: after a burst of forged requests, a real login for the
+# same user must still succeed rather than answer 429.
+i=0
+while [ $i -lt 40 ]; do
+   kb_post /v1/identity/login/pam "$tp_body" "text/plain" >/dev/null
+   i=$((i + 1))
+done
+code=$(kb_post /v1/identity/login/pam "$json_body")
+if [ "$code" = "429" ]; then
+   fail "40 forged cross-origin requests spent the real user's login budget (429): CSRF becomes DoS"
+else
+   pass "40 forged requests cost the real user nothing (a genuine login still answers $code)"
 fi
 
-# What a login-CSRF would actually achieve: the response is the only thing of
-# value, and a cross-origin form cannot read it. Assert that the route hands back
-# nothing that works as an ambient browser credential -- no cookie, no redirect.
-code=$(kb_post /v1/identity/login/pam "$pam_body")
-hdrs=$(curl -s -D - -o /dev/null -X POST -H 'Content-Type: application/json' \
-   --data "$pam_body" "$KB/v1/identity/login/pam")
-if printf '%s' "$hdrs" | grep -qi '^set-cookie:'; then
-   fail "the login route sets a COOKIE, so login-CSRF would plant an ambient credential"
+# WHAT A FORGED LOGIN WOULD ACHIEVE IF ONE LANDED. Measured on a SUCCESSFUL
+# login, with an attacker's Origin, and without following redirects -- an earlier
+# version measured a FAILED login with no Origin, and cookie/redirect/CORS
+# behaviour can all differ by authentication outcome and by Origin, so that
+# measurement did not support the claim it was cited for.
+hdrs=$(curl -s -D - -o "$LIVE_WORK/succ" -w '\n%{http_code}' --max-redirs 0 -X POST \
+   -H 'Content-Type: application/json' -H 'Origin: https://attacker.example' \
+   --data "$json_body" "$KB/v1/identity/login/pam")
+succ_code=$(printf '%s' "$hdrs" | tail -1)
+if [ "$succ_code" = "200" ]; then
+   pass "the impact measurement is taken on a SUCCESSFUL login (HTTP 200)"
 else
-   pass "no Set-Cookie: a forged cross-origin login plants no ambient credential"
+   fail "could not drive a successful login for the impact measurement (HTTP $succ_code); \
+the cookie/redirect/CORS assertions below would be measuring a refusal"
+fi
+if printf '%s' "$hdrs" | grep -qi '^set-cookie:'; then
+   fail "the login route sets a COOKIE on success, so a forged login would plant an ambient credential"
+else
+   pass "no Set-Cookie even on success: a forged login plants no ambient credential"
 fi
 if printf '%s' "$hdrs" | grep -qiE '^location:'; then
-   fail "the login route REDIRECTS, which a browser would follow after a forged POST"
+   fail "the login route REDIRECTS on success, which a browser would follow after a forged POST"
 else
-   pass "no redirect: nothing for a browser to follow after a forged POST"
+   pass "no redirect on success: nothing for a browser to follow"
 fi
 if printf '%s' "$hdrs" | grep -qi '^access-control-allow-origin:'; then
-   fail "CORS is enabled on the login route, so an attacker page could READ the response"
+   fail "CORS is enabled, so an attacker's page could READ a successful login response"
 else
-   pass "no CORS header: an attacker's page cannot read the response body"
+   pass "no Access-Control-Allow-Origin for an attacker Origin: the response is unreadable cross-origin"
 fi
 
 # ---------------------------------------------------------------------------
