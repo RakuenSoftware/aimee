@@ -1028,7 +1028,31 @@ native_provider_http:
          ir_primary =
              agent_ir_parse_responses(response_body, rescue_mode, &n_rescued, &parsed) == 0;
          if (!ir_primary)
+         {
+            /* An unparseable body used to become an indistinguishable "empty
+             * response": the turn reported no content and no tool calls, the
+             * body was freed, and nothing said whether the provider returned an
+             * error, an unknown event shape, or genuinely nothing. Every codex
+             * failure looked identical and could not be told apart from a model
+             * that simply said nothing. Log a bounded excerpt so the wire is
+             * recoverable from the log alone. */
+            LOG_WARN("agent", "delegate '%s': responses body did not parse; first %d bytes: %.400s",
+                     agent->name, (int)(response_body ? strlen(response_body) : 0),
+                     response_body ? response_body : "(null)");
             memset(&parsed, 0, sizeof(parsed));
+         }
+         else if (!parsed.content && parsed.call_count == 0)
+         {
+            /* Parsed cleanly yet carries neither text nor a tool call. Same
+             * indistinguishable outcome as above, different cause: the events
+             * were understood but held nothing we extract. Worth the same
+             * bounded excerpt -- this is the shape that has to change. */
+            LOG_WARN("agent",
+                     "delegate '%s': responses body parsed but yielded no content and no tool "
+                     "call; first %d bytes: %.400s",
+                     agent->name, (int)(response_body ? strlen(response_body) : 0),
+                     response_body ? response_body : "(null)");
+         }
       }
       else
       {
