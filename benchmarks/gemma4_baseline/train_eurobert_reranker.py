@@ -179,9 +179,9 @@ def main() -> int:
     from transformers.trainer_utils import get_last_checkpoint
 
     if not torch.cuda.is_available():
-        raise RuntimeError("ROCm device is not available through torch.cuda")
+        raise RuntimeError("CUDA device is not available through torch.cuda")
     if training["precision"] == "bf16" and not torch.cuda.is_bf16_supported():
-        raise RuntimeError("the selected ROCm device does not report bf16 support")
+        raise RuntimeError("the selected CUDA device does not report bf16 support")
 
     seed = int(training["seed"])
     set_seed(seed)
@@ -249,6 +249,7 @@ def main() -> int:
             "hostname": platform.node(),
             "python": platform.python_version(),
             "torch": torch.__version__,
+            "cuda": torch.version.cuda,
             "hip": torch.version.hip,
             "device": torch.cuda.get_device_name(0),
         },

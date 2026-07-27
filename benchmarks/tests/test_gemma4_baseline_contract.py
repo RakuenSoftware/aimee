@@ -21,8 +21,9 @@ sys.path.insert(0, str(MODULES))
 
 builder = importlib.import_module("build_254_fixtures")
 reranker = importlib.import_module("run_reranking_ab")
-eurobert_controller = importlib.import_module("run_254_eurobert_rerankers")
+eurobert_controller = importlib.import_module("run_253_eurobert_rerankers")
 eurobert_bootstrap = importlib.import_module("bootstrap_eurobert_runtime")
+encoder_reports = importlib.import_module("encoder_pairwise_reports")
 eurobert_server = importlib.import_module("serve_cross_encoder")
 eurobert_biencoder = importlib.import_module("serve_eurobert_biencoder")
 eurobert_smoke = importlib.import_module("smoke_eurobert_runtime")
@@ -168,6 +169,14 @@ class GemmaBaselineContractTests(unittest.TestCase):
             ["eurobert210m_pretrained", "eurobert610m_pretrained"],
         )
         self.assertEqual(
+            [model["pretrained_encoder_label"] for model in manifest["models"]],
+            ["eurobert210m_pretrained_encoder", "eurobert610m_pretrained_encoder"],
+        )
+        self.assertEqual(
+            [model["encoder_label"] for model in manifest["models"]],
+            ["eurobert210m_reranker_encoder", "eurobert610m_reranker_encoder"],
+        )
+        self.assertEqual(
             [model["revision"] for model in manifest["models"]],
             [
                 "39b51e15dd1f1a06f58b5cbf6a8a188cec60bd0e",
@@ -200,10 +209,15 @@ class GemmaBaselineContractTests(unittest.TestCase):
         self.assertEqual(training["max_length"], 512)
         self.assertEqual(manifest["serving"]["max_length"], training["max_length"])
         self.assertEqual(training["loss"], "MSELoss with identity activation over teacher scores")
-        dockerfile = (MODULES / "Dockerfile.eurobert-reranker").read_text(encoding="utf-8")
-        self.assertIn(manifest["runtime"]["base_image"], dockerfile)
-        for package, version in manifest["runtime"]["packages"].items():
-            self.assertIn(version, dockerfile, package)
+        runtime = manifest["runtime"]
+        self.assertEqual(runtime["execution"], "native_cuda")
+        self.assertEqual(runtime["torch"], {
+            "version": "2.7.1+cu128",
+            "index_url": "https://download.pytorch.org/whl/cu128",
+            "cuda": "12.8",
+        })
+        self.assertEqual(runtime["platform"]["gpu"], "NVIDIA GeForce RTX 5080")
+        self.assertEqual(runtime["platform"]["nvidia_driver"], "595.84")
 
     def test_eurobert_extension_does_not_mutate_the_frozen_model_view_matrix(self) -> None:
         result = validator.validate(ROOT / "benchmarks/fixtures/gemma4-unified/ab-v1")
@@ -287,25 +301,7 @@ class GemmaBaselineContractTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "identity mismatch"):
             eurobert_biencoder.verify_model_identity(model, "eurobert", 1152, 26)
 
-    def test_eurobert_controller_requests_exclusive_rocm_devices(self) -> None:
-        command = eurobert_controller.gpu_container_prefix(
-            "/docker.sock",
-            "server",
-            Path("/bench"),
-            Path("/repo"),
-            "image",
-            detach=True,
-        )
-        self.assertEqual(command[:5], ["docker", "-H", "unix:///docker.sock", "run", "--detach"])
-        self.assertNotIn("--rm", command)
-        self.assertEqual(command[command.index("--restart") + 1], "unless-stopped")
-        self.assertEqual(command[command.index("--entrypoint") + 1], "python3")
-        self.assertIn("/dev/kfd:/dev/kfd", command)
-        self.assertIn("/dev/dri:/dev/dri", command)
-        one_shot = eurobert_controller.gpu_container_prefix(
-            "/docker.sock", "train", Path("/bench"), Path("/repo"), "image"
-        )
-        self.assertEqual(one_shot[one_shot.index("--restart") + 1], "on-failure:1")
+    def test_eurobert_controller_uses_native_cuda_and_dual_role_labels(self) -> None:
         manifest = json.loads((MODULES / "eurobert_rerankers.json").read_text(encoding="utf-8"))
         self.assertEqual(
             eurobert_controller.evaluation_labels(manifest),
@@ -314,32 +310,63 @@ class GemmaBaselineContractTests(unittest.TestCase):
                 "eurobert610m_pretrained", "eurobert610m_reranker",
             ],
         )
+        self.assertEqual(
+            eurobert_controller.encoder_evaluation_labels(manifest),
+            [
+                "eurobert210m_pretrained_encoder", "eurobert210m_reranker_encoder",
+                "eurobert610m_pretrained_encoder", "eurobert610m_reranker_encoder",
+            ],
+        )
+        model = manifest["models"][0]
+        serving = manifest["serving"]
+        process = mock.Mock()
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            eurobert_controller.subprocess, "Popen", return_value=process
+        ) as popen, mock.patch.object(
+            eurobert_controller, "wait_health", return_value={"status": "ready"}
+        ):
+            actual, _, _ = eurobert_controller.start_server(
+                ROOT,
+                model["pretrained_encoder_label"],
+                model,
+                None,
+                "embedding",
+                serving,
+                "/venv/bin/python3",
+                Path(directory) / "server.log",
+            )
+        self.assertIs(actual, process)
+        command = popen.call_args.args[0]
+        self.assertEqual(command[0], "/venv/bin/python3")
+        self.assertIn("serve_eurobert_biencoder.py", command[1])
+        self.assertNotIn("docker", command)
+        self.assertIn("--revision", command)
 
-    def test_eurobert_runtime_bootstrap_avoids_ephemeral_image_builds(self) -> None:
+    def test_eurobert_biencoder_validates_openai_embedding_inputs(self) -> None:
+        self.assertEqual(eurobert_biencoder.embedding_texts({"input": "query"}), ["query"])
+        self.assertEqual(eurobert_biencoder.embedding_texts({"input": ["a", "b"]}), ["a", "b"])
+        for invalid in ({}, {"input": []}, {"input": ["a", 1]}, []):
+            with self.assertRaises(ValueError):
+                eurobert_biencoder.embedding_texts(invalid)
+
+    def test_eurobert_runtime_bootstrap_uses_pinned_native_cuda_venv(self) -> None:
         manifest_path = MODULES / "eurobert_rerankers.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         root = Path("/bench")
         venv_dir = eurobert_controller.runtime_venv_dir(root, manifest["runtime"])
         self.assertEqual(
-            eurobert_controller.container_python(root, venv_dir),
-            f"/bench/{venv_dir.relative_to(root)}/bin/python3",
+            eurobert_controller.venv_python(venv_dir),
+            str(venv_dir / "bin/python3"),
         )
         expected = eurobert_bootstrap.expected_provenance(manifest_path, manifest)
         self.assertEqual(expected["runtime"], manifest["runtime"])
-        with mock.patch.object(eurobert_controller, "remove_container") as remove, mock.patch.object(
-            eurobert_controller, "run"
-        ) as run:
-            eurobert_controller.build_runtime(
-                "/docker.sock", root, ROOT, manifest_path, manifest, venv_dir
-            )
-        self.assertEqual(remove.call_count, 2)
+        with mock.patch.object(eurobert_controller, "run") as run:
+            eurobert_controller.build_runtime(ROOT, manifest_path, venv_dir)
         command = run.call_args.args[0]
-        self.assertEqual(command[:4], ["docker", "-H", "unix:///docker.sock", "run"])
+        self.assertEqual(command[0], "python3")
         self.assertNotIn("build", command)
-        self.assertIn(manifest["runtime"]["base_image"], command)
-        self.assertEqual(command[command.index("--restart") + 1], "on-failure:1")
-        self.assertEqual(command[command.index("--entrypoint") + 1], "python3")
-        self.assertIn("/repo/benchmarks/gemma4_baseline/bootstrap_eurobert_runtime.py", command)
+        self.assertIn(str(MODULES / "bootstrap_eurobert_runtime.py"), command)
+        self.assertEqual(command[command.index("--venv-dir") + 1], str(venv_dir))
         self.assertEqual(eurobert_controller.sweep_lock_flags(True), eurobert_controller.fcntl.LOCK_EX)
         self.assertEqual(
             eurobert_controller.sweep_lock_flags(False),
@@ -439,35 +466,29 @@ class GemmaBaselineContractTests(unittest.TestCase):
         self.assertEqual(command[command.index("-fit") + 1], "off")
         self.assertIn("--embeddings", command)
 
-    def test_controllers_require_healthy_production_restoration(self) -> None:
-        for controller in (sweep, eurobert_controller):
-            with self.subTest(controller=controller.__name__), tempfile.TemporaryDirectory() as directory:
-                state_path = Path(directory) / "state.json"
-                state_path.write_text("{}\n", encoding="utf-8")
-                health = {"status": "ok"}
-                with mock.patch.object(controller, "inspect_running", return_value=False), mock.patch.object(
-                    controller, "run"
-                ) as run, mock.patch.object(controller, "wait_health", return_value=health) as wait:
-                    self.assertEqual(
-                        controller.restore_production("/docker.sock", "production", "http://health", state_path),
-                        health,
-                    )
-                run.assert_called_once_with(
-                    controller.docker_cmd("/docker.sock", "start", "production")
+    def test_254_controller_requires_healthy_production_restoration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = Path(directory) / "state.json"
+            state_path.write_text("{}\n", encoding="utf-8")
+            health = {"status": "ok"}
+            with mock.patch.object(sweep, "inspect_running", return_value=False), mock.patch.object(
+                sweep, "run"
+            ) as run, mock.patch.object(sweep, "wait_health", return_value=health) as wait:
+                self.assertEqual(
+                    sweep.restore_production("/docker.sock", "production", "http://health", state_path),
+                    health,
                 )
-                if controller is eurobert_controller:
-                    wait.assert_called_once_with("http://health", timeout=900, accepted_status="ok")
-                else:
-                    wait.assert_called_once_with("http://health", timeout=900)
-                state = json.loads(state_path.read_text(encoding="utf-8"))
-                self.assertIs(state["production_restored"], True)
-                self.assertEqual(state["production_health"], health)
+            run.assert_called_once_with(sweep.docker_cmd("/docker.sock", "start", "production"))
+            wait.assert_called_once_with("http://health", timeout=900)
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertIs(state["production_restored"], True)
+            self.assertEqual(state["production_health"], health)
 
-                with mock.patch.object(controller, "inspect_running", return_value=True), mock.patch.object(
-                    controller, "wait_health", side_effect=RuntimeError("unhealthy")
-                ):
-                    with self.assertRaisesRegex(RuntimeError, "unhealthy"):
-                        controller.restore_production("/docker.sock", "production", "http://health", state_path)
+            with mock.patch.object(sweep, "inspect_running", return_value=True), mock.patch.object(
+                sweep, "wait_health", side_effect=RuntimeError("unhealthy")
+            ):
+                with self.assertRaisesRegex(RuntimeError, "unhealthy"):
+                    sweep.restore_production("/docker.sock", "production", "http://health", state_path)
 
     def test_sweep_uses_explicit_model_load_profiles(self) -> None:
         self.assertEqual(set(sweep.MODEL_LOAD_PROFILES), {
@@ -734,6 +755,18 @@ class GemmaBaselineContractTests(unittest.TestCase):
             pretrained["models"]["eurobert210m_pretrained"]["reranker_training_examples"],
             0,
         )
+
+    def test_encoder_report_marks_post_training_dual_role_candidate(self) -> None:
+        cross_family = encoder_reports.comparison_context(
+            "gemma4_e2b", "eurobert210m_reranker_encoder", 546_000
+        )
+        self.assertIn("not_comparable", cross_family["latency_qualification"])
+        trained = cross_family["models"]["eurobert210m_reranker_encoder"]
+        self.assertIs(trained["dual_role_candidate"], True)
+        self.assertEqual(trained["reranker_training_examples"], 546_000)
+        pretrained = encoder_reports.model_context("eurobert210m_pretrained_encoder", 546_000)
+        self.assertIs(pretrained["dual_role_candidate"], False)
+        self.assertEqual(pretrained["reranker_training_examples"], 0)
 
     def test_synthesis_resume_does_not_repeat_completed_case(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

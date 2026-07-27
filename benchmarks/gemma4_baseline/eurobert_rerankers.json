@@ -1,6 +1,18 @@
 {
   "runtime": {
-    "base_image": "rocm/pytorch@sha256:ab1d350b818b90123cfda31363019d11c0d41a8f12a19e3cb2cb40cf0261137d",
+    "execution": "native_cuda",
+    "python": "3.12",
+    "torch": {
+      "version": "2.7.1+cu128",
+      "index_url": "https://download.pytorch.org/whl/cu128",
+      "cuda": "12.8"
+    },
+    "platform": {
+      "os": "Ubuntu 24.04",
+      "cloud_image_sha256": "d1940f7d69d343355e183dff1e08a59852d32e7309baa7a4bad8365b11b005ac",
+      "gpu": "NVIDIA GeForce RTX 5080",
+      "nvidia_driver": "595.84"
+    },
     "packages": {
       "accelerate": "1.14.0",
       "datasets": "5.0.0",
@@ -69,6 +81,8 @@
     {
       "label": "eurobert210m_reranker",
       "pretrained_label": "eurobert210m_pretrained",
+      "encoder_label": "eurobert210m_reranker_encoder",
+      "pretrained_encoder_label": "eurobert210m_pretrained_encoder",
       "family": "EuroBERT",
       "parameters": "210M",
       "repository": "EuroBERT/EuroBERT-210m",
@@ -82,6 +96,8 @@
     {
       "label": "eurobert610m_reranker",
       "pretrained_label": "eurobert610m_pretrained",
+      "encoder_label": "eurobert610m_reranker_encoder",
+      "pretrained_encoder_label": "eurobert610m_pretrained_encoder",
       "family": "EuroBERT",
       "parameters": "610M",
       "repository": "EuroBERT/EuroBERT-610m",

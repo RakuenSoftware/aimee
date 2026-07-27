@@ -231,49 +231,53 @@ budgets are equal to the released Ettin models: Ettin was trained on the full
 delta. The extension deliberately does not alter the frozen fixture manifest, so
 its SHA-256 and all already-completed Ettin/Gemma results remain valid.
 
-The `.254` extension controller bootstraps the manifest-pinned Python packages
-into a verified persistent environment from the pinned PyTorch/ROCm base-image
-digest. This avoids SmoothNAS's unsupported ephemeral BuildKit workers while
-each actual task still runs in a fresh, durable-policy container. For each size
-it benchmarks the untouched base, requires one bf16
-forward/backward/AdamW smoke step, trains or resumes the cross-encoder, then
-benchmarks the trained model. Both passes use the same frozen 10,000 cases and
-8-worker/4-pair load profile. Containers use explicit SmoothNAS-safe restart and
-cleanup policies, and production is restored in a `finally` block. The controller
-takes the same `sweep.lock` as the main controller and cannot overlap another GPU
-benchmark.
+The `.253` extension controller runs in the isolated VM109 RTX 5080 environment;
+it never pauses or modifies `.254` production. It bootstraps a verified native
+Python 3.12 environment with pinned PyTorch 2.7.1+cu128 and pinned packages. For
+each size it benchmarks the untouched base as both an encoder and an
+encoder-similarity quality control, requires one bf16 forward/backward/AdamW
+smoke step, trains or resumes the cross-encoder, then benchmarks the trained
+checkpoint as both a cross-encoder reranker and a mean-pooled encoder. The
+post-training encoder pass is a required dual-role gate: it determines whether
+one EuroBERT base can replace separate embedding and reranking artifacts.
+Reranking uses the frozen 10,000 cases and 8-worker/4-pair load profile;
+embedding uses the exact frozen 10,000-query/23,688-document retrieval view.
 
 Training completion fails closed: a saved `config.json` alone is not accepted.
 The controller requires a completed provenance record and rechecks the byte size
 and SHA-256 of every final model artifact before serving or skipping training.
 
 ```sh
-python3 benchmarks/gemma4_baseline/run_254_eurobert_rerankers.py
+python3 benchmarks/gemma4_baseline/run_253_eurobert_rerankers.py
 ```
 
-It may be queued safely behind an active main sweep with `--wait-for-lock`. The
-main controller restores production before process exit releases the lock; the
-EuroBERT controller acquires it only afterward and independently preserves that
-restoration state in its own `finally` block. After acquiring the lock it also
-fails closed unless the prior main `RUN_STATE.json` records both completion and
-successful production restoration. Use `--handoff-state` to override that state
-path when the preceding sweep used a nondefault results directory.
+The controller uses a local `.253` lock to prevent duplicate EuroBERT runs and
+fails closed unless its copied main `RUN_STATE.json` proves the source Ettin and
+Gemma results completed with `.254` production restored. Use `--handoff-state`
+when that copied state uses a nondefault path. The old `.254` EuroBERT entry point
+now exits immediately with a relocation message.
 
-Use `--max-cases N` only to smoke-test the runtime. Model, dataset, container,
-Python-package, training, and serving identities are recorded separately from
-the unchanged evaluation-suite identity.
+Use `--max-cases N` only to smoke-test the runtime. Model, dataset, CUDA/Python
+packages, GPU/driver, training, and serving identities are recorded separately
+from the unchanged evaluation-suite identity.
 
-After both EuroBERT sizes complete and production is restored, the full controller
-generates and verifies all 15 paired comparisons across Ettin 68M/400M plus stock
-and trained EuroBERT 210M/610M. The following command reproduces them manually:
+After both EuroBERT sizes complete, the controller generates and verifies two
+15-report matrices: Ettin 68M/400M versus stock/trained EuroBERT reranking, and
+Gemma 4 E2B/E4B versus stock/post-reranker-training EuroBERT embeddings. The
+following command reproduces the reranker matrix manually:
 
 ```sh
 python3 benchmarks/gemma4_baseline/reranker_pairwise_reports.py \
-  --results /mnt/media/gemma4-baseline/results \
-  --manifest /mnt/media/gemma4-baseline/repo/benchmarks/gemma4_baseline/eurobert_rerankers.json \
-  --main-state /mnt/media/gemma4-baseline/results/RUN_STATE.json \
-  --eurobert-state /mnt/media/gemma4-baseline/eurobert_sweep_state.json
+  --results /srv/eurobert/results \
+  --manifest /srv/aimee/benchmarks/gemma4_baseline/eurobert_rerankers.json \
+  --main-state /srv/eurobert/results/RUN_STATE.json \
+  --eurobert-state /srv/eurobert/eurobert_sweep_state.json
 ```
+
+Replace the script with `encoder_pairwise_reports.py` to reproduce the encoder
+matrix. Quality deltas are paired. Gemma/EuroBERT latency is explicitly not
+compared because those models ran on different hosts and GPU architectures;
+pre/post EuroBERT latency is comparable within the clean `.253` profile.
 
 Every report records each model's scoring mode and reranker-example count. Stock
 EuroBERT latency is explicitly non-comparable to cross-encoder latency. Ettin

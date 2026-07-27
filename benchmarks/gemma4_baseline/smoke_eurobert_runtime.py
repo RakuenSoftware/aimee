@@ -59,9 +59,9 @@ def main() -> int:
     from transformers import set_seed
 
     if not torch.cuda.is_available():
-        raise RuntimeError("ROCm device is not available through torch.cuda")
+        raise RuntimeError("CUDA device is not available through torch.cuda")
     if not torch.cuda.is_bf16_supported():
-        raise RuntimeError("the selected ROCm device does not report bf16 support")
+        raise RuntimeError("the selected CUDA device does not report bf16 support")
 
     seed = int(training["seed"])
     set_seed(seed)
@@ -115,6 +115,7 @@ def main() -> int:
             "hostname": platform.node(),
             "python": platform.python_version(),
             "torch": torch.__version__,
+            "cuda": torch.version.cuda,
             "hip": torch.version.hip,
             "device": torch.cuda.get_device_name(0),
         },

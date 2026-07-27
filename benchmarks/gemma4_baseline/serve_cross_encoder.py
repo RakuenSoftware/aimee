@@ -143,7 +143,7 @@ def main() -> int:
     from sentence_transformers import CrossEncoder
 
     if not torch.cuda.is_available():
-        raise RuntimeError("ROCm device is not available through torch.cuda")
+        raise RuntimeError("CUDA device is not available through torch.cuda")
     model = CrossEncoder(
         args.model,
         revision=args.revision,
@@ -160,6 +160,7 @@ def main() -> int:
         "revision": args.revision,
         "device": torch.cuda.get_device_name(0),
         "torch": torch.__version__,
+        "cuda": torch.version.cuda,
         "hip": torch.version.hip,
         "dtype": "bfloat16",
         "max_length": args.max_length,

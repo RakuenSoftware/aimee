@@ -82,10 +82,14 @@ def comparison_context(left: str, right: str, eurobert_examples: int) -> dict[st
     return context
 
 
-def require_restored_state(path: Path) -> dict[str, Any]:
+def require_completed_state(path: Path, *, production_was_in_scope: bool) -> dict[str, Any]:
     state = json.loads(path.read_text(encoding="utf-8"))
-    if state.get("status") != "complete" or state.get("production_restored") is not True:
-        raise RuntimeError(f"benchmark state is not complete with production restored: {path}")
+    if state.get("status") != "complete":
+        raise RuntimeError(f"benchmark state is not complete: {path}")
+    if production_was_in_scope and state.get("production_restored") is not True:
+        raise RuntimeError(f"benchmark state does not prove production restoration: {path}")
+    if not production_was_in_scope and state.get("production_impacted") is not False:
+        raise RuntimeError(f"isolated benchmark state does not prove production was untouched: {path}")
     return state
 
 
@@ -98,8 +102,8 @@ def main() -> int:
     parser.add_argument("--compare-script", type=Path, default=Path(__file__).with_name("compare_ab.py"))
     args = parser.parse_args()
 
-    require_restored_state(args.main_state)
-    require_restored_state(args.eurobert_state)
+    require_completed_state(args.main_state, production_was_in_scope=True)
+    require_completed_state(args.eurobert_state, production_was_in_scope=False)
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     eurobert_labels = tuple(
         label for model in manifest["models"] for label in (model["pretrained_label"], model["label"])
