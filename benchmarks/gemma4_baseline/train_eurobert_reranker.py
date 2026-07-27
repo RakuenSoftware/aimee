@@ -88,6 +88,7 @@ def expected_provenance(manifest_path: Path, manifest: dict[str, Any], model: di
     training = manifest["training"]
     return {
         "manifest_sha256": sha256(manifest_path),
+        "trainer_sha256": sha256(Path(__file__).resolve()),
         "model": model,
         "training": training,
         "training_examples": len(training["configs"]) * int(training["examples_per_config"]),

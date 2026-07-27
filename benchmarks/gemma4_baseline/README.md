@@ -215,10 +215,12 @@ delta. The extension deliberately does not alter the frozen fixture manifest, so
 its SHA-256 and all already-completed Ettin/Gemma results remain valid.
 
 The `.254` extension controller builds a manifest-pinned PyTorch/ROCm image,
-trains or resumes each model, serves aligned `/rerank` scores with a 32-pair
-microbatcher, runs the same 10,000 cases and 8-worker/4-pair load profile, and
-restores production in a `finally` block. It takes the same `sweep.lock` as the
-main controller and therefore cannot overlap another GPU benchmark:
+requires each model to pass one bf16 forward/backward/AdamW step at the declared
+batch size and 512-token limit, trains or resumes each model, serves aligned
+`/rerank` scores with a 32-pair microbatcher, runs the same 10,000 cases and
+8-worker/4-pair load profile, and restores production in a `finally` block. It
+takes the same `sweep.lock` as the main controller and therefore cannot overlap
+another GPU benchmark:
 
 Training completion fails closed: a saved `config.json` alone is not accepted.
 The controller requires a completed provenance record and rechecks the byte size

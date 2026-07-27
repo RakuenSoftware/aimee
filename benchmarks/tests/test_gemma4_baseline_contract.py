@@ -21,6 +21,7 @@ builder = importlib.import_module("build_254_fixtures")
 reranker = importlib.import_module("run_reranking_ab")
 eurobert_controller = importlib.import_module("run_254_eurobert_rerankers")
 eurobert_server = importlib.import_module("serve_cross_encoder")
+eurobert_smoke = importlib.import_module("smoke_eurobert_runtime")
 eurobert_trainer = importlib.import_module("train_eurobert_reranker")
 synthesis = importlib.import_module("run_synthesis_ab")
 try:
@@ -144,6 +145,22 @@ class GemmaBaselineContractTests(unittest.TestCase):
             (final_dir / "model.safetensors").write_text("truncated", encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "artifact verification failed"):
                 eurobert_trainer.assert_completed_training_dir(output_dir, expected)
+
+    def test_eurobert_runtime_smoke_is_pinned_and_fail_closed(self) -> None:
+        manifest_path = MODULES / "eurobert_rerankers.json"
+        manifest, model = eurobert_trainer.load_spec(manifest_path, "eurobert610m_reranker")
+        expected = eurobert_smoke.expected_smoke_provenance(manifest_path, manifest, model)
+        self.assertIn("trainer_sha256", expected)
+        self.assertIn("smoke_script_sha256", expected)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runtime_smoke.json"
+            completed = {**expected, "status": "complete"}
+            eurobert_trainer.write_json_atomic(path, completed)
+            self.assertEqual(eurobert_smoke.assert_completed_smoke(path, expected), completed)
+            changed = {**completed, "smoke_script_sha256": "0" * 64}
+            eurobert_trainer.write_json_atomic(path, changed)
+            with self.assertRaisesRegex(RuntimeError, "provenance does not match"):
+                eurobert_smoke.assert_completed_smoke(path, expected)
 
     def test_cross_encoder_server_validates_aligned_string_pairs(self) -> None:
         pairs = [["query", "document"], ["second", "candidate"]]

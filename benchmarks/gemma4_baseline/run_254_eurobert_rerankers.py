@@ -13,6 +13,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from smoke_eurobert_runtime import assert_completed_smoke, expected_smoke_provenance
 from train_eurobert_reranker import assert_completed_training_dir, expected_provenance
 
 
@@ -152,6 +153,28 @@ def train_model(
     run(command)
 
 
+def smoke_model(
+    socket: str,
+    root: Path,
+    repo: Path,
+    image: str,
+    manifest_path: Path,
+    label: str,
+    output_path: Path,
+) -> None:
+    command = gpu_container_prefix(socket, f"eurobert-smoke-{label}", root, repo, image)
+    command += [
+        "/repo/benchmarks/gemma4_baseline/smoke_eurobert_runtime.py",
+        "--manifest",
+        f"/repo/{manifest_path.relative_to(repo)}",
+        "--label",
+        label,
+        "--output",
+        f"/bench/{output_path.relative_to(root)}",
+    ]
+    run(command)
+
+
 def start_server(
     socket: str,
     root: Path,
@@ -250,6 +273,25 @@ def main() -> int:
         for label in selected:
             model_root = models_root / label
             final_dir = model_root / "final"
+            smoke_path = model_root / "runtime_smoke.json"
+            smoke_expected = expected_smoke_provenance(manifest_path, manifest, by_label[label])
+            try:
+                assert_completed_smoke(smoke_path, smoke_expected)
+                smoke_complete = True
+            except (OSError, RuntimeError, ValueError, json.JSONDecodeError):
+                smoke_complete = False
+            if not smoke_complete:
+                write_state(state_path, status="runtime_smoke", active_label=label)
+                smoke_model(
+                    args.socket,
+                    args.root,
+                    args.repo,
+                    manifest["runtime"]["image_tag"],
+                    manifest_path,
+                    label,
+                    smoke_path,
+                )
+            assert_completed_smoke(smoke_path, smoke_expected)
             expected = expected_provenance(manifest_path, manifest, by_label[label])
             try:
                 assert_completed_training_dir(model_root, expected)
