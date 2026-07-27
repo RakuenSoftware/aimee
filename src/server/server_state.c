@@ -1553,6 +1553,21 @@ int handle_workspace_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (config_save(&cfg) != 0)
       return server_send_error(conn, "workspace: failed to save config", NULL);
 
+   /* Republish the live snapshot now instead of waiting for the server loop's
+    * config_reload_if_changed() tick — the same read-your-writes fix workspace.add
+    * already carries, which this path was simply never given.
+    *
+    * config_load() returns the SNAPSHOT in the server, not the file, so until that
+    * tick every reader still saw the removed entry. Measured: `workspace remove`
+    * followed immediately by `workspace add` answered "already registered", and a
+    * second `workspace remove` answered "removed" again — both reading a registry
+    * the first remove had already written away. Inserting a 3s pause made both
+    * correct, which is what identified the poll interval as the variable.
+    *
+    * A remove that a caller cannot immediately act on is worse than a slow one:
+    * scripted setup (and the wizard) issue these back to back. */
+   (void)config_reload_if_changed();
+
    /* Closing a workspace revokes any brokered forge token for it (zeroed in
     * memory) — the "revoked on session close" half of the forge-credential
     * contract (workspace-resource-plane §4). No-op when none was installed. */
