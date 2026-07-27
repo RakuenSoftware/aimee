@@ -272,9 +272,8 @@ static void deploy_retire_stale_llm(char **envp, const char *file, char *out, si
       char **venv = envp_with_profile(envp, variants[i].profile);
       if (!venv)
          continue;
-      const char *argv[] = {"docker", "compose", "-f",           file,
-                            "rm",     "-s",      "-f",           variants[i].service,
-                            NULL};
+      const char *argv[] = {"docker", "compose",           "-f", file, "rm", "-s",
+                            "-f",     variants[i].service, NULL};
       char buf[512];
       int code = -1;
       if (run_capture(argv, venv, buf, sizeof(buf), &code) == 0 && code == 0 && buf[0] &&
@@ -349,7 +348,8 @@ static void *deploy_worker(void *arg)
       deploy_retire_stale_llm(envp, file, out, sizeof(out));
       size_t used = strlen(out);
       if (run_capture(argv, envp, out + used, sizeof(out) - used, &code) != 0)
-         snprintf(out, sizeof(out), "deploy: failed to run `docker compose` (is docker on PATH?)\n");
+         snprintf(out, sizeof(out),
+                  "deploy: failed to run `docker compose` (is docker on PATH?)\n");
    }
    free_envp(envp);
 

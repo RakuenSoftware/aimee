@@ -121,8 +121,8 @@ static void rt_fail(char *reason, size_t cap, const char *fmt, ...)
    va_end(ap);
 }
 
-static char *post_go_roundtable(const char *body, int receive_timeout_ms, int *status,
-                                char *reason, size_t reason_cap)
+static char *post_go_roundtable(const char *body, int receive_timeout_ms, int *status, char *reason,
+                                size_t reason_cap)
 {
    if (status)
       *status = 0;
@@ -322,9 +322,8 @@ int wfe_roundtable_proxy(server_conn_t *conn, const cJSON *request)
       return server_send_error(conn, "out of memory", NULL);
    int status = 0;
    char reason[320] = "";
-   char *body =
-       post_go_roundtable(wire, roundtable_receive_timeout_ms(request), &status, reason,
-                          sizeof(reason));
+   char *body = post_go_roundtable(wire, roundtable_receive_timeout_ms(request), &status, reason,
+                                   sizeof(reason));
    free(wire);
    if (!body)
    {
