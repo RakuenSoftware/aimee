@@ -9,6 +9,7 @@
 #include "harness_memory_audit.h"  /* hmem_audit */
 #include "harness_memory_common.h" /* hmem_resolve_project / hmem_project_key_ok */
 #include "harness_memory_scope.h"  /* hmem_scope_for_client */
+#include "kb_client.h"             /* kb_client_health */
 #include "json_fluent.h"           /* jo_ok */
 #include "memory_redirect.h"       /* memory_redirect_classify / _bash_targets / _rematerialize */
 #include "server.h"
@@ -67,6 +68,39 @@
  * VS Code / OpenAI-compatible model-provider setup snippets. Read-only; the
  * bearer secret is never returned (only whether one is configured). The CLI
  * (`aimee api status`) prints the `report` field. */
+
+/* Attach the knowledge-base block to a server.health response.
+ *
+ * Lives here rather than in server.c only because that file is at its line-check
+ * ceiling; this TU exists for exactly that reason.
+ *
+ * NOT the container healthcheck: that polls /v1/health (rh_health), a pure
+ * liveness answer with no downstream dependency. This is the dispatch route
+ * /v1/server/health, reached only when a human asks "is my install healthy" — and
+ * the kb is the part most likely to be broken while everything around it looks
+ * fine. The probe is bounded by kb_client_health's CLIENT_DEFAULT_TIMEOUT_MS, and
+ * an unreachable kb is REPORTED rather than failing the call: a broken kb must
+ * still let you run the command that tells you the kb is broken. */
+void server_health_add_kb(cJSON *resp)
+{
+   if (!resp)
+      return;
+   kb_health_t kb;
+   memset(&kb, 0, sizeof(kb));
+   int kb_rc = kb_client_health(&kb);
+   cJSON *kbo = cJSON_AddObjectToObject(resp, "kb");
+   if (!kbo)
+      return;
+   int reachable = (kb_rc == 0 && kb.process_ok);
+   cJSON_AddStringToObject(kbo, "status", reachable ? "ok" : "unreachable");
+   if (!reachable)
+      return;
+   cJSON_AddBoolToObject(kbo, "db2_ok", kb.db2_ok ? 1 : 0);
+   cJSON_AddBoolToObject(kbo, "pgvec_ok", kb.pgvec_ok ? 1 : 0);
+   cJSON_AddBoolToObject(kbo, "embed_configured", kb.embed_ok ? 1 : 0);
+   cJSON_AddNumberToObject(kbo, "vectors", kb.pgvec_vectors);
+}
+
 int handle_api_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;

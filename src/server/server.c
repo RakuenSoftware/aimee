@@ -23,7 +23,6 @@
 #include "server_tls.h" /* server_http_api_status_report */
 #include "server_mgmt_status.h"
 #include "server_mgmt_jwks_cache.h"
-#include "kb_client.h" /* kb_client_health — the kb probe in server.health */
 #include "kb_client_mtls.h"
 #include "config.h" /* config_t / config_load for api.status, api.enable */
 #include <aimee/delegates/delegate_backend_docker.h>
@@ -379,35 +378,7 @@ static int handle_server_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
    cJSON_AddNumberToObject(resp, "uptime", (double)(time(NULL) - ctx->start_time));
    cJSON_AddStringToObject(resp, "state", db1_is_initialized() ? "ok" : "unavailable");
    cJSON_AddNumberToObject(resp, "connections", ctx->conn_count);
-
-   /* Include the knowledge base, because "is my install healthy" is the question
-    * `aimee status` is asked and the kb is the part most likely to be broken while
-    * everything around it looks fine — a deployment was found failing every embed
-    * for sixteen hours behind a server reporting ok, with nothing in this response
-    * to show it.
-    *
-    * This is NOT the container healthcheck: that polls /v1/health (rh_health),
-    * which stays a pure liveness answer with no downstream dependency. This is the
-    * dispatch route /v1/server/health, reached only when someone asks. The probe is
-    * bounded by kb_client_health's CLIENT_DEFAULT_TIMEOUT_MS, and an unreachable kb
-    * reports here rather than failing the call — a broken kb must still let you run
-    * the command that tells you the kb is broken. */
-   kb_health_t kb;
-   memset(&kb, 0, sizeof(kb));
-   int kb_rc = kb_client_health(&kb);
-   cJSON *kbo = cJSON_AddObjectToObject(resp, "kb");
-   if (kbo)
-   {
-      int reachable = (kb_rc == 0 && kb.process_ok);
-      cJSON_AddStringToObject(kbo, "status", reachable ? "ok" : "unreachable");
-      if (reachable)
-      {
-         cJSON_AddBoolToObject(kbo, "db2_ok", kb.db2_ok ? 1 : 0);
-         cJSON_AddBoolToObject(kbo, "pgvec_ok", kb.pgvec_ok ? 1 : 0);
-         cJSON_AddBoolToObject(kbo, "embed_configured", kb.embed_ok ? 1 : 0);
-         cJSON_AddNumberToObject(kbo, "vectors", kb.pgvec_vectors);
-      }
-   }
+   server_health_add_kb(resp); /* kb block — see server_api_status.c */
    return server_send_ok(conn, resp);
 }
 
