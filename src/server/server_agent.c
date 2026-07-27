@@ -477,6 +477,12 @@ static cJSON *server_agent_to_json(const agent_t *ag)
    cJSON_AddBoolToObject(obj, "primary_only", ag->primary_only);
    cJSON_AddNumberToObject(obj, "max_turns", ag->max_turns);
    cJSON_AddNumberToObject(obj, "max_parallel", ag->max_parallel);
+   /* Live occupancy, so an out-of-process router (the Go WFE) can avoid seating
+    * an agent that is already at max_parallel. Omitted entirely when unknown --
+    * a consumer must not read "absent" as "idle". */
+   int active = agent_route_agent_active(ag->name);
+   if (active >= 0)
+      cJSON_AddNumberToObject(obj, "active_delegates", active);
    if (ag->middleware.context_window > 0)
       cJSON_AddNumberToObject(obj, "context_window", ag->middleware.context_window);
    cJSON *roles = cJSON_CreateArray();

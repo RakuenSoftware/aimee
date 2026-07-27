@@ -127,6 +127,9 @@ void agent_set_route_policy_filter(int (*fn)(const agent_t *agent));
  * "no agent available", and blocking admission still waits for a slot. An
  * unknown answer (-1, or no probe) counts as "has capacity". */
 void agent_set_route_capacity_probe(int (*fn)(const char *agent_name));
+/* Live delegate occupancy for `agent_name`, or -1 when unknown. Lets the served
+ * agent list publish occupancy to out-of-process routers (the Go WFE). */
+int agent_route_agent_active(const char *agent_name);
 
 /* Primary-turn marker for the delegate-policy filter. The PRIMARY chat turn
  * routes the provider-named agent through the same machinery as delegation
