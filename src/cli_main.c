@@ -1760,11 +1760,17 @@ int main(int argc, char **argv)
       }
       /* aggregate / roundtable (and anything else) fall through to the /v1 routes. */
    }
+   /* `remote` configures the transport itself: it writes remote.conf and pins the
+    * server certificate, all locally, before any transport exists. It must stay
+    * outside the _WIN32 guard below -- it is the FIRST command a Windows thin
+    * client runs (QUICKSTART 3.2), and gating it on the Unix socket made it
+    * unreachable there ("command 'remote' has no /v1 route"), so the documented
+    * setup could not be completed at all. It needs no AF_UNIX. */
+   if (strcmp(cmd, "remote") == 0)
+      return cli_remote_cmd(sub_argc, sub_argv, json_output);
 #ifndef _WIN32
    /* manuscript mode talks to the server over the Unix-domain /v1 socket
     * (http_uds_client, AF_UNIX), which the Windows client does not build. */
-   if (strcmp(cmd, "remote") == 0)
-      return cli_remote_cmd(sub_argc, sub_argv, json_output);
    if (strcmp(cmd, "manuscript") == 0)
       return cmd_manuscript_run(sub_argc, sub_argv, json_output);
    /* persona management likewise goes over the /v1 socket (server-owned config). */
