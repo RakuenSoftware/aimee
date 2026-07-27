@@ -11,8 +11,7 @@
 int agent_session_retry_final_tool_violation(cJSON *messages, const char *attempted_action,
                                              int *turn, int *max_t, int initial_max_t,
                                              int *retry_count, char *error, size_t error_len);
-int agent_session_retry_degenerate_response(cJSON *messages, int *turn, int *retry_count,
-                                            int *force_text_only_retry);
+int agent_session_retry_degenerate_response(cJSON *messages, int *turn, int *retry_count);
 int agent_session_retry_required_evidence(cJSON *messages, int *turn, int *max_t, int initial_max_t,
                                           int *retry_count, char *error, size_t error_len);
 int agent_required_evidence_keep_tools(int required, int successful_evidence_calls);
