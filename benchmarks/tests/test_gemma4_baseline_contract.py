@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import importlib
 import io
 import json
@@ -255,6 +256,33 @@ class GemmaBaselineContractTests(unittest.TestCase):
             state_path.write_text(json.dumps({"status": "failed"}), encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "did not complete"):
                 eurobert_controller.assert_restored_handoff(state_path)
+
+    def test_eurobert_controller_verifies_all_pairwise_report_artifacts(self) -> None:
+        labels = ["eurobert210m_reranker", "eurobert610m_reranker"]
+        expected_pairs = list(
+            eurobert_controller.itertools.combinations(["ettin68m", "ettin400m", *labels], 2)
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            reports = []
+            for left, right in expected_pairs:
+                path = output / f"reranking_{left}_vs_{right}.json"
+                path.write_text(json.dumps({"left": left, "right": right}), encoding="utf-8")
+                reports.append({
+                    "left": left,
+                    "right": right,
+                    "file": path.name,
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                })
+            index_path = output / "INDEX.json"
+            index_path.write_text(
+                json.dumps({"pair_count": len(reports), "reports": reports}), encoding="utf-8"
+            )
+            actual = eurobert_controller.assert_completed_pairwise_index(index_path, labels)
+            self.assertEqual(actual["pair_count"], 6)
+            (output / reports[-1]["file"]).write_text("corrupt", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "artifact verification failed"):
+                eurobert_controller.assert_completed_pairwise_index(index_path, labels)
 
     def test_sweep_requires_both_ettin_execution_profiles(self) -> None:
         self.assertEqual(sweep.ETTIN_CONTROLS, (

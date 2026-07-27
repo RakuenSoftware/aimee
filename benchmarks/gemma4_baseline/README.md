@@ -251,8 +251,9 @@ Use `--max-cases N` only to smoke-test the runtime. Model, dataset, container,
 Python-package, training, and serving identities are recorded separately from
 the unchanged evaluation-suite identity.
 
-After both EuroBERT rerankers complete and production is restored, generate all
-six paired comparisons across Ettin 68M/400M and EuroBERT 210M/610M:
+After both EuroBERT rerankers complete and production is restored, the full
+controller generates and verifies all six paired comparisons across Ettin
+68M/400M and EuroBERT 210M/610M. The following command reproduces them manually:
 
 ```sh
 python3 benchmarks/gemma4_baseline/reranker_pairwise_reports.py \

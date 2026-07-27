@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import hashlib
+import itertools
 import json
 import subprocess
 import time
@@ -41,6 +42,41 @@ def assert_restored_handoff(path: Path) -> dict[str, Any]:
 
 def manifest_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def pairwise_report_command(
+    root: Path,
+    repo: Path,
+    manifest_path: Path,
+    main_state: Path,
+    eurobert_state: Path,
+) -> list[str]:
+    return [
+        "python3",
+        str(repo / "benchmarks/gemma4_baseline/reranker_pairwise_reports.py"),
+        "--results",
+        str(root / "results"),
+        "--manifest",
+        str(manifest_path),
+        "--main-state",
+        str(main_state),
+        "--eurobert-state",
+        str(eurobert_state),
+    ]
+
+
+def assert_completed_pairwise_index(path: Path, labels: list[str]) -> dict[str, Any]:
+    index = json.loads(path.read_text(encoding="utf-8"))
+    expected_pairs = list(itertools.combinations(["ettin68m", "ettin400m", *labels], 2))
+    reports = index.get("reports", [])
+    actual_pairs = [(report.get("left"), report.get("right")) for report in reports]
+    if index.get("pair_count") != len(expected_pairs) or actual_pairs != expected_pairs:
+        raise RuntimeError("pairwise report index does not contain the exact expected model pairs")
+    for report in reports:
+        output = path.parent / report["file"]
+        if not output.is_file() or manifest_sha256(output) != report.get("sha256"):
+            raise RuntimeError(f"pairwise report artifact verification failed: {output}")
+    return index
 
 
 def inspect_running(socket: str, name: str) -> bool:
@@ -452,6 +488,37 @@ def main() -> int:
             state_path,
             production_restored=production_was_running and inspect_running(args.socket, args.production_container),
         )
+    if not args.max_cases and set(selected) == set(by_label):
+        try:
+            write_state(state_path, pairwise_status="running")
+            run(
+                pairwise_report_command(
+                    args.root,
+                    args.repo,
+                    manifest_path,
+                    args.handoff_state or results / "RUN_STATE.json",
+                    state_path,
+                )
+            )
+            pairwise_index_path = results / "reranker_pairwise/INDEX.json"
+            pairwise_index = assert_completed_pairwise_index(pairwise_index_path, list(by_label))
+            write_state(
+                state_path,
+                pairwise_status="complete",
+                pairwise_index={
+                    "file": str(pairwise_index_path),
+                    "sha256": manifest_sha256(pairwise_index_path),
+                    "pair_count": pairwise_index["pair_count"],
+                },
+            )
+        except Exception as exc:
+            write_state(
+                state_path,
+                status="failed",
+                pairwise_status="failed",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            raise
     return 0
 
 
