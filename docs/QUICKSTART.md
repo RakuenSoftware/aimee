@@ -203,8 +203,7 @@ aimee remote set https://YOUR_SERVER:8743 aimee-local-dev
 aimee remote set https://YOUR_SERVER:8743 "$(cat .aimee-server-bearer)"
 
 aimee remote status     # resolved transport + /v1/health probe
-aimee status            # server + DB1 state
-aimee kb status         # knowledge-base health (vector store, embedder, ingest queue)
+aimee status            # server, DB1, and knowledge-base health
 ```
 
 `aimee-local-dev` only works **once per server**, so passing it after a previous
@@ -239,7 +238,31 @@ You can also drop an `aimee.workspace.yaml` manifest in a directory and run `aim
 
 > Indexing and memory writes are server-side mutations, so over the network they need a **write-tier grant of at least `data` for your own subject** (see [1.4](#14-before-you-expose-it-on-a-network)); `aimee.api.remote_writes` no longer authorizes them. Workspace registration itself works regardless.
 >
-> Without a grant these return `403 … requires capabilities beyond the presented token's scope`, so on a brand-new install your first `aimee memory store` or `aimee kb ingest` will fail until one is issued. [UPGRADING.md](UPGRADING.md) has the procedure: how a subject is spelled for each login mode, and how the local operator issues the first grant. Running on the server itself over the local Unix socket is exempt.
+> Without a grant these return `403 … requires capabilities beyond the presented
+> token's scope`, so on a brand-new install your first `aimee memory store` or
+> `aimee kb ingest` **will fail** until one is issued.
+>
+> The server's local Unix socket is exempt (same-user trusted peer), so on a
+> single-machine install the quickest way to write is to run the command there:
+>
+> ```bash
+> docker compose -f compose.server-managed.yaml exec -u aimee aimee-server \
+>   aimee memory store my-key "some fact"
+> ```
+>
+> For writes **from another machine**, that client's subject needs a write-tier
+> grant — `data` for memory/index writes, `full` to also allow exec/control.
+> Grants are keyed by `(server_id, team_id, subject)` and issued on the server:
+>
+> ```bash
+> aimee kb grant set --subject <subject> --server <server-id> --team <team-id> --tier data
+> aimee kb grant list --server <server-id> --team <team-id>      # confirm it landed
+> ```
+>
+> [UPGRADING.md](UPGRADING.md) is the reference for the two parts that are easy to
+> get wrong: how a subject is spelled for each login mode (a grant for the wrong
+> spelling is silently a grant for nobody), and why the operator installs its own
+> context with team `0`.
 
 ### 2.5 Add agents (delegates)
 
@@ -296,8 +319,7 @@ aimee version
 ```powershell
 aimee remote set https://YOUR_SERVER:8743 aimee-local-dev
 aimee remote status     # shows the resolved transport + a /v1/health probe
-aimee status            # server + DB1 state
-aimee kb status         # knowledge-base health (vector store, embedder, ingest queue)
+aimee status            # server, DB1, and knowledge-base health
 ```
 
 Use your real bearer token instead of `aimee-local-dev` if you changed it. The server's `/v1` is TLS-only off-loopback; `https://` works with certificate verification on by default (Schannel against the Windows cert store), so set `AIMEE_TLS_INSECURE=1` for the auto-provisioned self-signed cert (or trust/pin it). Alternatives to `aimee remote set`: set `AIMEE_SERVER_URL` / `AIMEE_SERVER_TOKEN` environment variables, or pass `--server https://YOUR_SERVER:8743 --server-token=...` per command. Precedence is `--server` flag > env > persisted `remote.conf`.
@@ -324,7 +346,31 @@ aimee workspace list                            # list roots and the projects un
 
 > Indexing and memory writes are server-side mutations, so over the network they need a **write-tier grant of at least `data` for your own subject** (see [1.4](#14-before-you-expose-it-on-a-network)); `aimee.api.remote_writes` no longer authorizes them. Workspace registration itself works regardless.
 >
-> Without a grant these return `403 … requires capabilities beyond the presented token's scope`, so on a brand-new install your first `aimee memory store` or `aimee kb ingest` will fail until one is issued. [UPGRADING.md](UPGRADING.md) has the procedure: how a subject is spelled for each login mode, and how the local operator issues the first grant. Running on the server itself over the local Unix socket is exempt.
+> Without a grant these return `403 … requires capabilities beyond the presented
+> token's scope`, so on a brand-new install your first `aimee memory store` or
+> `aimee kb ingest` **will fail** until one is issued.
+>
+> The server's local Unix socket is exempt (same-user trusted peer), so on a
+> single-machine install the quickest way to write is to run the command there:
+>
+> ```bash
+> docker compose -f compose.server-managed.yaml exec -u aimee aimee-server \
+>   aimee memory store my-key "some fact"
+> ```
+>
+> For writes **from another machine**, that client's subject needs a write-tier
+> grant — `data` for memory/index writes, `full` to also allow exec/control.
+> Grants are keyed by `(server_id, team_id, subject)` and issued on the server:
+>
+> ```bash
+> aimee kb grant set --subject <subject> --server <server-id> --team <team-id> --tier data
+> aimee kb grant list --server <server-id> --team <team-id>      # confirm it landed
+> ```
+>
+> [UPGRADING.md](UPGRADING.md) is the reference for the two parts that are easy to
+> get wrong: how a subject is spelled for each login mode (a grant for the wrong
+> spelling is silently a grant for nobody), and why the operator installs its own
+> context with team `0`.
 
 ### 3.5 Add agents (delegates)
 
@@ -392,8 +438,7 @@ aimee version
 ```bash
 aimee remote set https://YOUR_SERVER:8743 aimee-local-dev
 aimee remote status     # resolved transport + /v1/health probe
-aimee status            # server + DB1 state
-aimee kb status         # knowledge-base health (vector store, embedder, ingest queue)
+aimee status            # server, DB1, and knowledge-base health
 ```
 
 Both the prebuilt universal binary and a source build speak `https://` with certificate verification on by default (Secure Transport against the Keychain); set `AIMEE_TLS_INSECURE=1` for a self-signed dev cert. As on the other platforms, you can use `AIMEE_SERVER_URL` / `AIMEE_SERVER_TOKEN` or `--server` instead of `aimee remote set`.
