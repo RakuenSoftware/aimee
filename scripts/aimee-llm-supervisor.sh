@@ -73,8 +73,11 @@ rerank_coords() {
 synth_coords() {
   case "$SYNTH_TIER" in
     cpu)
-      SYNTH_REPO="ggml-org/gemma-4-E4B-it-GGUF"; SYNTH_FILE="gemma-4-E4B-it-Q4_K_M.gguf"
-      SYNTH_REVISION="main"; SYNTH_SHA256=""
+      # ggml-org publishes this repo at Q4_0/Q8_0/BF16 only — there is no Q4_K_M
+      # build, so the old filename 404'd and the cpu tier could never be baked.
+      SYNTH_REPO="ggml-org/gemma-4-E4B-it-GGUF"; SYNTH_FILE="gemma-4-E4B-it-Q4_0.gguf"
+      SYNTH_REVISION="b8093469224f83f5c38f691eb906c380e9e63114"
+      SYNTH_SHA256="a555b900214b477d8880e7832e0b8925e139b0159640036b09fe472b6f2097f2"
       TIER_FA="off"; TIER_MOE="0"; TIER_N_CPU_MOE="0"; TIER_SLOTS="1"; TIER_CTX="32768"; SYNTH_NGL=0
       ;;
     small)

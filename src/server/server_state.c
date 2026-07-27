@@ -45,74 +45,6 @@ int send_and_free(server_conn_t *conn, cJSON *resp)
    return server_send_ok(conn, resp);
 }
 
-/* Write a JSON response and newline directly to a raw fd.
- * Used by kb proxy threads that run off the event loop. */
-static void kb_proxy_write_response(int fd, cJSON *resp)
-{
-   char *json = cJSON_PrintUnformatted(resp);
-   if (!json)
-      return;
-   size_t len = strlen(json);
-   size_t off = 0;
-   while (off < len)
-   {
-      ssize_t n = write(fd, json + off, len - off);
-      if (n <= 0)
-      {
-         if (n < 0 && errno == EINTR)
-            continue;
-         break;
-      }
-      off += (size_t)n;
-   }
-   free(json);
-   (void)write(fd, "\n", 1);
-}
-
-/* Generic context for kb proxy threads. */
-typedef struct
-{
-   int conn_fd;
-   cJSON *req;
-} kb_proxy_ctx_t;
-
-static kb_proxy_ctx_t *kb_proxy_ctx_new(server_conn_t *conn, cJSON *req)
-{
-   kb_proxy_ctx_t *c = malloc(sizeof(*c));
-   if (!c)
-      return NULL;
-   c->conn_fd = conn->fd;
-   c->req = cJSON_Duplicate(req, 1);
-   if (!c->req)
-   {
-      free(c);
-      return NULL;
-   }
-   return c;
-}
-
-static void kb_proxy_ctx_free(kb_proxy_ctx_t *c)
-{
-   if (!c)
-      return;
-   cJSON_Delete(c->req);
-   free(c);
-}
-
-static void kb_proxy_spawn(server_conn_t *conn, cJSON *req, void *(*thread_fn)(void *))
-{
-   kb_proxy_ctx_t *c = kb_proxy_ctx_new(conn, req);
-   if (!c)
-      return;
-   pthread_t tid;
-   if (pthread_create(&tid, NULL, thread_fn, c) != 0)
-   {
-      kb_proxy_ctx_free(c);
-      return;
-   }
-   pthread_detach(tid);
-}
-
 /* --- Memory handlers --- */
 
 int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -319,9 +251,10 @@ int handle_index_scan(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    /* Synchronous (inline kb scan + send_and_free), like handle_index_ingest:
     * over /v1 this runs in the async op-run worker (HTTP already returned the
     * run handle) and over NDJSON in the per-connection worker, so blocking here
-    * is fine. A kb_proxy_spawn detached-thread reply is NOT captured by the
-    * op-run's loopback_rpc (it reads the socketpair synchronously), which is why
-    * a remote /v1 index.scan previously failed with "rpc produced no response". */
+    * is fine. A detached-thread reply is NOT captured by the op-run's loopback_rpc
+    * (it reads the socketpair synchronously), which is why a remote /v1 index.scan
+    * previously failed with "rpc produced no response". Every relay handler in this
+    * file now replies inline for that reason — see the kb.build group below. */
    int force = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "force")) ? 1 : 0;
    kb_client_index_scan_result_t res;
    memset(&res, 0, sizeof(res));
@@ -462,45 +395,32 @@ int handle_index_find_callers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
 
 /* --- Graph code-projection handlers --- */
 
-/* graph.sync_code runs the code-graph projection (DB2-heavy) off the request
- * lane via kb_proxy_spawn, the same non-blocking pattern as index.scan, so it
- * never ties up the ephemeral request handler. */
-static void *graph_sync_code_thread(void *arg)
-{
-   kb_proxy_ctx_t *c = arg;
-   const char *project = jo_str(c->req, "project", NULL);
-
-   kb_client_graph_sync_result_t res;
-   memset(&res, 0, sizeof(res));
-   int rc = kb_client_graph_sync_code(project ? project : "", &res);
-
-   cJSON *resp = cJSON_CreateObject();
-   if (rc == 0)
-   {
-      cJSON_AddStringToObject(resp, "status", "ok");
-      cJSON_AddStringToObject(resp, "project", res.project);
-      cJSON_AddNumberToObject(resp, "generation_id", (double)res.generation_id);
-      cJSON_AddNumberToObject(resp, "edge_count", (double)res.edge_count);
-   }
-   else
-   {
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message", "graph sync-code failed");
-   }
-   kb_proxy_write_response(c->conn_fd, resp);
-   cJSON_Delete(resp);
-   kb_proxy_ctx_free(c);
-   return NULL;
-}
-
+/* graph.sync_code runs the code-graph projection (DB2-heavy). Synchronous, for the
+ * reason spelled out on handle_index_scan: a detached-thread reply is written after
+ * the op-run's loopback_rpc has already read and shut its socketpair, so it never
+ * reaches the caller. Over /v1 this body runs in the async op-run worker (HTTP has
+ * already returned the run handle) and over NDJSON in the per-connection worker, so
+ * blocking here does not tie up the request lane either way. */
 int handle_graph_sync_code(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    const char *project = jo_str(req, "project", NULL);
    if (!project || !project[0])
       return server_send_error(conn, "graph.sync_code requires a project", NULL);
-   kb_proxy_spawn(conn, req, graph_sync_code_thread);
-   return 0;
+
+   kb_client_graph_sync_result_t res;
+   memset(&res, 0, sizeof(res));
+   int rc = kb_client_graph_sync_code(project, &res);
+   if (rc != 0)
+      return server_send_error(conn, "graph sync-code failed", NULL);
+
+   cJSON *resp = jo_ok();
+   if (!resp)
+      return server_send_error(conn, "out of memory", NULL);
+   cJSON_AddStringToObject(resp, "project", res.project);
+   cJSON_AddNumberToObject(resp, "generation_id", (double)res.generation_id);
+   cJSON_AddNumberToObject(resp, "edge_count", (double)res.edge_count);
+   return send_and_free(conn, resp);
 }
 
 int handle_graph_explain(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -632,84 +552,67 @@ int handle_curator_invalidated(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    return send_and_free(conn, resp);
 }
 
-/* --- kb proxy threads (build / update / ingest) ---
- * These call aimee-kb which can take minutes for large repos.  Running them
- * synchronously on the event-loop thread would block the server for the entire
- * duration, making every other aimee command appear frozen.  Each handler
- * spawns a detached thread that performs the kb RPC and writes the response
- * directly to the connection fd when it is ready. */
+/* kb.build / kb.update / kb.ingest / kb.docs.push relay to aimee-kb.
+ *
+ * All four are SYNCHRONOUS, for the reason on handle_index_scan: these used to
+ * reply from a detached thread, whose write lands after the op-run's
+ * loopback_rpc has read and shut its socketpair — so over /v1 every one of them
+ * failed with "rpc produced no response", i.e. the whole KB write surface was dead
+ * for thin clients and the browser alike. Over /v1 these bodies run in the async
+ * op-run worker (HTTP already returned the run handle) and over NDJSON in the
+ * per-connection worker, so blocking here does not tie up the request lane. */
 
-static void *kb_build_thread(void *arg)
+/* Parse aimee-kb's JSON relay reply, or emit `fallback` as a dispatch error. */
+static int kb_relay_send(server_conn_t *conn, char *json, const char *fallback)
 {
-   kb_proxy_ctx_t *c = arg;
-   const char *path = jo_str(c->req, "path", "");
-   const char *project = jo_str(c->req, "project", "");
-   const char *embed_cmd = jo_str(c->req, "embedding_command", NULL);
-   int force = jo_int(c->req, "force", 0);
-
-   char *json = kb_client_build_json(path, project, embed_cmd, force);
    cJSON *resp = json ? cJSON_Parse(json) : NULL;
    free(json);
    if (!resp)
-      resp = cJSON_Parse("{\"status\":\"error\",\"message\":\"knowledge service build failed\"}");
-   if (resp)
-   {
-      kb_proxy_write_response(c->conn_fd, resp);
-      cJSON_Delete(resp);
-   }
-   kb_proxy_ctx_free(c);
-   return NULL;
+      return server_send_error(conn, fallback, NULL);
+   return send_and_free(conn, resp);
 }
 
-static void *kb_update_thread(void *arg)
+int handle_kb_build(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   kb_proxy_ctx_t *c = arg;
-   const char *path = jo_str(c->req, "path", "");
-   const char *project = jo_str(c->req, "project", "");
-   const char *embed_cmd = jo_str(c->req, "embedding_command", NULL);
+   (void)ctx;
+   const char *path = jo_str(req, "path", "");
+   const char *project = jo_str(req, "project", "");
+   const char *embed_cmd = jo_str(req, "embedding_command", NULL);
+   int force = jo_int(req, "force", 0);
 
-   char *json = kb_client_update_json(path, project, embed_cmd);
-   cJSON *resp = json ? cJSON_Parse(json) : NULL;
-   free(json);
-   if (!resp)
-      resp = cJSON_Parse("{\"status\":\"error\",\"message\":\"knowledge service update failed\"}");
-   if (resp)
-   {
-      kb_proxy_write_response(c->conn_fd, resp);
-      cJSON_Delete(resp);
-   }
-   kb_proxy_ctx_free(c);
-   return NULL;
+   return kb_relay_send(conn, kb_client_build_json(path, project, embed_cmd, force),
+                        "knowledge service build failed");
 }
 
-static void *kb_ingest_thread(void *arg)
+int handle_kb_update(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   kb_proxy_ctx_t *c = arg;
-   const char *workspace = jo_str(c->req, "workspace", NULL);
-   const char *embed_cmd = jo_str(c->req, "embedding_command", NULL);
-   int force = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(c->req, "force")) ? 1 : 0;
+   (void)ctx;
+   const char *path = jo_str(req, "path", "");
+   const char *project = jo_str(req, "project", "");
+   const char *embed_cmd = jo_str(req, "embedding_command", NULL);
 
-   char *json = kb_client_ingest_json(workspace, embed_cmd, force);
-   cJSON *resp = json ? cJSON_Parse(json) : NULL;
-   free(json);
-   if (!resp)
-      resp = cJSON_Parse("{\"status\":\"error\",\"message\":\"knowledge service ingest failed\"}");
-   if (resp)
-   {
-      /* aimee-kb wakes its own ingest workers on enqueue (kb_handle_ingest),
-       * so the server just relays the response. */
-      kb_proxy_write_response(c->conn_fd, resp);
-      cJSON_Delete(resp);
-   }
-   kb_proxy_ctx_free(c);
-   return NULL;
+   return kb_relay_send(conn, kb_client_update_json(path, project, embed_cmd),
+                        "knowledge service update failed");
 }
 
-static void *kb_docs_push_thread(void *arg)
+int handle_kb_ingest(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   kb_proxy_ctx_t *c = arg;
-   const char *scope = jo_str(c->req, "scope", "global");
-   cJSON *paths_j = cJSON_GetObjectItemCaseSensitive(c->req, "paths");
+   (void)ctx;
+   const char *workspace = jo_str(req, "workspace", NULL);
+   const char *embed_cmd = jo_str(req, "embedding_command", NULL);
+   int force = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "force")) ? 1 : 0;
+
+   /* aimee-kb wakes its own ingest workers on enqueue (kb_handle_ingest), so the
+    * server just relays the response. */
+   return kb_relay_send(conn, kb_client_ingest_json(workspace, embed_cmd, force),
+                        "knowledge service ingest failed");
+}
+
+int handle_kb_docs_push(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *scope = jo_str(req, "scope", "global");
+   cJSON *paths_j = cJSON_GetObjectItemCaseSensitive(req, "paths");
 
    const char *paths[128];
    int path_count = 0;
@@ -724,57 +627,11 @@ static void *kb_docs_push_thread(void *arg)
             paths[path_count++] = item->valuestring;
       }
    }
-
-   cJSON *resp = NULL;
    if (path_count <= 0)
-   {
-      resp = cJSON_Parse("{\"status\":\"error\",\"message\":\"docs paths required\"}");
-   }
-   else
-   {
-      char *json = kb_client_docs_push_json(scope, paths, path_count);
-      resp = json ? cJSON_Parse(json) : NULL;
-      free(json);
-      if (!resp)
-         resp = cJSON_Parse("{\"status\":\"error\",\"message\":\"knowledge service docs push "
-                            "failed\"}");
-   }
+      return server_send_error(conn, "docs paths required", NULL);
 
-   if (resp)
-   {
-      kb_proxy_write_response(c->conn_fd, resp);
-      cJSON_Delete(resp);
-   }
-   kb_proxy_ctx_free(c);
-   return NULL;
-}
-
-int handle_kb_build(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-   kb_proxy_spawn(conn, req, kb_build_thread);
-   return 0;
-}
-
-int handle_kb_update(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-   kb_proxy_spawn(conn, req, kb_update_thread);
-   return 0;
-}
-
-int handle_kb_ingest(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-   kb_proxy_spawn(conn, req, kb_ingest_thread);
-   return 0;
-}
-
-int handle_kb_docs_push(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-   kb_proxy_spawn(conn, req, kb_docs_push_thread);
-   return 0;
+   return kb_relay_send(conn, kb_client_docs_push_json(scope, paths, path_count),
+                        "knowledge service docs push failed");
 }
 
 int handle_kb_ingest_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

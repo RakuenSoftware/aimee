@@ -1033,11 +1033,70 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
              (strcmp(st->valuestring, "completed") == 0 || strcmp(st->valuestring, "failed") == 0 ||
               strcmp(st->valuestring, "cancelled") == 0))
          {
+            int ok = strcmp(st->valuestring, "completed") == 0;
             cJSON *result = cJSON_DetachItemFromObjectCaseSensitive(snap, "result");
+            if (ok && result)
+            {
+               cJSON_Delete(snap);
+               return result;
+            }
+            /* A failed/cancelled run, or a completed one with no result, used to
+             * become an empty object. Printers then rendered that as a zero-valued
+             * SUCCESS — `aimee kb build` reported "files indexed: 0, chunks added: 0"
+             * with exit status 0 when the run had actually failed, hiding the failure
+             * from humans and scripts alike. Surface it as an error envelope instead,
+             * carrying whatever the run recorded. */
+            const char *why = NULL;
+            /* A failed run usually carries its reason inside `result` (e.g.
+             * {"result":{"error":"rpc produced no response"}}), so look there first. */
+            if (result)
+            {
+               cJSON *re = cJSON_GetObjectItemCaseSensitive(result, "error");
+               if (cJSON_IsString(re) && re->valuestring[0])
+                  why = re->valuestring;
+               else if (cJSON_IsObject(re))
+               {
+                  cJSON *rm = cJSON_GetObjectItemCaseSensitive(re, "message");
+                  if (cJSON_IsString(rm) && rm->valuestring[0])
+                     why = rm->valuestring;
+               }
+            }
+            cJSON *e = why ? NULL : cJSON_GetObjectItemCaseSensitive(snap, "error");
+            if (cJSON_IsString(e) && e->valuestring[0])
+               why = e->valuestring;
+            else if (cJSON_IsObject(e))
+            {
+               cJSON *m = cJSON_GetObjectItemCaseSensitive(e, "message");
+               if (cJSON_IsString(m) && m->valuestring[0])
+                  why = m->valuestring;
+            }
+            if (!why)
+            {
+               cJSON *m = cJSON_GetObjectItemCaseSensitive(snap, "message");
+               if (cJSON_IsString(m) && m->valuestring[0])
+                  why = m->valuestring;
+            }
+            char msg[320];
+            if (why)
+               snprintf(msg, sizeof(msg), "%s", why);
+            else
+               snprintf(msg, sizeof(msg), "run %s with no result", st->valuestring);
+            /* Emit the OBJECT envelope {"error":{"message":...}}, not the string
+             * form. cli_v1_forward only treats a top-level string "error" as a
+             * failure when http_status >= 400 (a 2xx may legitimately carry one —
+             * cron.run returns job stderr that way), and the async path reports
+             * http_status 0. The object form is unconditionally an error there, so
+             * this reaches the caller as a real failure with exit status 1. */
+            cJSON *env = cJSON_CreateObject();
+            cJSON *err = env ? cJSON_AddObjectToObject(env, "error") : NULL;
+            if (err)
+            {
+               cJSON_AddStringToObject(err, "message", msg);
+               cJSON_AddStringToObject(err, "type", "run_failed");
+            }
+            cJSON_Delete(result);
             cJSON_Delete(snap);
-            /* Completed runs carry the raw dispatch result; a failed/empty run yields
-             * an empty object so the caller still gets a well-formed response. */
-            return result ? result : cJSON_CreateObject();
+            return env;
          }
          cJSON_Delete(snap);
       }
