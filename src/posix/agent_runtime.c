@@ -1071,13 +1071,35 @@ native_provider_http:
             }
             for (const char *q = b; (q = strstr(q, "\"type\":\"reasoning\"")) != NULL; q++)
                n_reasoning++;
+            /* Name the item types actually arriving: counting only "reasoning"
+             * left four items per turn unaccounted for once reasoning intent was
+             * declared. Collect the item.type of every output_item.done. */
+            char types[512] = "";
+            for (const char *q = b; (q = strstr(q, "event: response.output_item.done")) != NULL;
+                 q++)
+            {
+               const char *it = strstr(q, "\"item\":{");
+               if (!it)
+                  break;
+               const char *ty = strstr(it, "\"type\":\"");
+               if (!ty)
+                  continue;
+               ty += 8;
+               const char *end = strchr(ty, '"');
+               if (!end || end - ty > 40)
+                  continue;
+               char one[64];
+               snprintf(one, sizeof(one), "%.*s,", (int)(end - ty), ty);
+               if (strlen(types) + strlen(one) < sizeof(types) - 1)
+                  strcat(types, one);
+            }
             const char *tail = blen > 600 ? b + blen - 600 : b;
             LOG_WARN("agent",
                      "delegate '%s': responses body parsed but yielded no content and no tool "
                      "call; %zu bytes, events: output_item.done=%d output_text.delta=%d "
-                     "completed=%d failed=%d reasoning_items=%d; tail: %.600s",
+                     "completed=%d failed=%d reasoning_items=%d; item_types=[%s]; tail: %.400s",
                      agent->name, blen, n_item_done, n_delta, n_completed, n_failed, n_reasoning,
-                     tail);
+                     types, tail);
          }
       }
       else

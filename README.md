@@ -61,8 +61,8 @@ Then install the `aimee` CLI on each dev machine and point it at the server:
 
 ```bash
 aimee remote set https://host:8743 aimee-local-dev # pins TLS, enrolls mTLS, rotates bootstrap
-aimee status                                       # server + DB1 state
-aimee kb status                                    # knowledge-base health
+aimee status                                       # server, DB1, and knowledge-base health
+aimee kb status                                    # knowledge-base detail (ingest queue, curator)
 ```
 
 `aimee-local-dev` is a **one-time bootstrap bearer**: the first `remote set` trades it

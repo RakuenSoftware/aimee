@@ -8,6 +8,7 @@
 #include "../db1/db.h"
 #include "../db1/eval.h"
 #include "../db1/server_sessions.h"
+#include "kb_client.h" /* kb_health_t for the stub below */
 #include "agent_config.h"
 #include "agent_eval.h"
 #include "hud.h"
@@ -662,6 +663,16 @@ int handle_curator_invalidated(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
 {
    return stub_handler(conn, "curator.invalidated");
 }
+/* server_api_status.c (linked here for handle_api_*) probes the kb from
+ * server.health. This test exercises the dispatch table, not the kb, so answer
+ * "unreachable" without linking the whole kb client. */
+int kb_client_health(kb_health_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
 int handle_kb_build(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "kb.build");

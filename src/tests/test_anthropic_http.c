@@ -684,7 +684,7 @@ static void test_messages_buffered_anthropic_strips_stream_false_path(void)
 
    reset_capture();
    g_driver = &anthropic;
-   assert(messages_buffered("{\"model\":\"ignored\",\"stream\":true,"
+   assert(messages_buffered("{\"max_tokens\":16,\"model\":\"ignored\",\"stream\":true,"
                             "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
                             resp, sizeof(resp)) == 200);
    sent = parse(g_last_body);
@@ -738,7 +738,7 @@ static void test_messages_buffered_openai_family_translates(void)
    reset_capture();
    g_driver = &openai;
    assert(
-       messages_buffered("{\"model\":\"ignored\",\"system\":\"SYS\","
+       messages_buffered("{\"max_tokens\":16,\"model\":\"ignored\",\"system\":\"SYS\","
                          "\"messages\":[{\"role\":\"assistant\",\"content\":["
                          "{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"Read\","
                          "\"input\":{\"path\":\"a.c\"}}]}],"
@@ -772,7 +772,7 @@ static void test_messages_buffered_system_prompt_driver_no_duplicate_system(void
 
    reset_capture();
    g_driver = &chatgpt;
-   assert(messages_buffered("{\"model\":\"ignored\",\"system\":\"SYS\","
+   assert(messages_buffered("{\"max_tokens\":16,\"model\":\"ignored\",\"system\":\"SYS\","
                             "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
                             resp, sizeof(resp)) == 200);
    sent = parse(g_last_body);
@@ -798,7 +798,7 @@ static void test_messages_buffered_system_prompt_capability_no_duplicate_system(
 
    reset_capture();
    g_driver = &capable;
-   assert(messages_buffered("{\"model\":\"ignored\",\"system\":\"SYS\","
+   assert(messages_buffered("{\"max_tokens\":16,\"model\":\"ignored\",\"system\":\"SYS\","
                             "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
                             resp, sizeof(resp)) == 200);
    sent = parse(g_last_body);

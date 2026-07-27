@@ -378,6 +378,7 @@ static int handle_server_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
    cJSON_AddNumberToObject(resp, "uptime", (double)(time(NULL) - ctx->start_time));
    cJSON_AddStringToObject(resp, "state", db1_is_initialized() ? "ok" : "unavailable");
    cJSON_AddNumberToObject(resp, "connections", ctx->conn_count);
+   server_health_add_kb(resp); /* kb block — see server_api_status.c */
    return server_send_ok(conn, resp);
 }
 
