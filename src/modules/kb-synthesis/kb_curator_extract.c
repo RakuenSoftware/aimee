@@ -537,6 +537,11 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
    aimee_log(LOG_INFO, "kb.curator.extract", "invoking curator LLM for doc %lld (cmd fallback: %s)",
              (long long)job.document_id, cmd);
 
+   /* The model can legitimately take minutes on the bundled CPU backend. The
+    * durable job is already claimed, and every remaining DB operation can
+    * re-acquire lazily, so do not pin a pool member across the network call. */
+   db2_lease_release_idle();
+
    char sidecar_err[512] = "";
    const char *sys_prompt = novel_mode ? CE_SYSTEM_PROMPT : CE_EXTRACT_DOC_PROMPT;
    cJSON *extract_schema = ce_build_extract_schema();

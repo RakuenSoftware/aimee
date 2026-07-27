@@ -388,9 +388,13 @@ static void handle_tools_call(cJSON *id, cJSON *req)
 
    /* Check server response status */
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (status && cJSON_IsString(status) && strcmp(status->valuestring, "error") == 0)
+   cJSON *error = cJSON_GetObjectItemCaseSensitive(resp, "error");
+   if ((cJSON_IsString(status) && strcmp(status->valuestring, "error") == 0) ||
+       cJSON_IsObject(error))
    {
       cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
+      if (!cJSON_IsString(msg) && cJSON_IsObject(error))
+         msg = cJSON_GetObjectItemCaseSensitive(error, "message");
       const char *errmsg = (msg && cJSON_IsString(msg)) ? msg->valuestring : "server error";
       /* Server-side delegation handlers already attach actionable Fix
        * guidance for known error patterns (see delegation_error_guidance),

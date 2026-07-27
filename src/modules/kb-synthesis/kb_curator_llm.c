@@ -9,6 +9,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define KB_CURATOR_PROVIDER_TIMEOUT_MS 300000
+
 /* Build [{role:system, content:system_prompt}?, {role:user, content:request_json}]. */
 static cJSON *build_messages(const char *system_prompt, const char *request_json)
 {
@@ -50,6 +52,15 @@ char *kb_curator_llm_run(const config_t *cfg, kb_curator_stage_t stage, const ch
    provider_def_t def;
    if (cfg && kb_curator_provider_for_stage(cfg, stage, &def))
    {
+      /* Curator work is already retried by its durable job queue. Keep one
+       * provider attempt bounded by the same five-minute ceiling as the legacy
+       * sidecar instead of nesting the provider client's three retries. The old
+       * 120s default was shorter than a normal constrained extraction on the
+       * bundled CPU model and created overlapping abandoned generations. */
+      if (def.timeout_ms <= 0)
+         def.timeout_ms = KB_CURATOR_PROVIDER_TIMEOUT_MS;
+      if (def.max_attempts <= 0)
+         def.max_attempts = 1;
       cJSON *msgs = build_messages(system_prompt, request_json);
       if (!msgs)
       {

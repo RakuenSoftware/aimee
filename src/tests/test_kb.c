@@ -262,6 +262,39 @@ static void test_build_single_file(void)
    printf("  PASS: build single markdown file\n");
 }
 
+static void test_build_sanitizes_malformed_utf8(void)
+{
+   char tmpdir[] = "/tmp/aimee_kb_test_utf8_XXXXXX";
+   assert(mkdtemp(tmpdir) != NULL);
+   char fpath[512];
+   snprintf(fpath, sizeof(fpath), "%s/legacy.md", tmpdir);
+   FILE *f = fopen(fpath, "wb");
+   assert(f != NULL);
+   const unsigned char body[] = "# Legacy\n\nA \x92quoted\x94 CP-1252 phrase.\n";
+   assert(fwrite(body, 1, sizeof(body) - 1, f) == sizeof(body) - 1);
+   fclose(f);
+
+   open_test_db();
+   kb_stats_t stats;
+   assert(kb_build(tmpdir, "test_utf8", NULL, 1, &stats) == 0);
+   assert(stats.files_indexed == 1);
+   assert(stats.chunks_added > 0);
+
+   char *stored = db2_kb_file_index_get_content("test_utf8", "legacy.md");
+   assert(stored != NULL);
+   assert(strcmp(stored, "# Legacy\n\nA ?quoted? CP-1252 phrase.\n") == 0);
+   free(stored);
+
+   char *result = kb_search_json("test_utf8", "quoted phrase", NULL, 3);
+   assert(result != NULL);
+   assert(strstr(result, "?quoted? CP-1252 phrase") != NULL);
+   free(result);
+   close_test_db();
+   unlink(fpath);
+   platform_test_rmrf(tmpdir);
+   printf("  PASS: malformed UTF-8 is sanitized before Postgres text boundaries\n");
+}
+
 static void test_build_incremental_update(void)
 {
    char tmpdir[] = "/tmp/aimee_kb_test_incr_XXXXXX";
@@ -1030,6 +1063,7 @@ int main(void)
    /* Build/search tests */
    test_build_empty_dir();
    test_build_single_file();
+   test_build_sanitizes_malformed_utf8();
    test_build_incremental_update();
    test_bloom_dedupe_skips_duplicate_content();
    test_minhash_shadow_signatures_persist();
