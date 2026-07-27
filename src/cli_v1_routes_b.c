@@ -639,7 +639,7 @@ static cJSON *marshal_git_verify(int argc, char **argv)
 static cJSON *marshal_get_help(int argc, char **argv)
 {
    cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "method", "mcp.call");
+   cJSON_AddStringToObject(req, "method", "help.get");
    cJSON_AddStringToObject(req, "tool", "get_help");
 
    cJSON *args = cJSON_CreateObject();

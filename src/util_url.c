@@ -63,6 +63,20 @@ int util_url_is_ssh(const char *url)
    return at != NULL && at > url && colon > at + 1;
 }
 
+/* Remote-transport gate for clone URLs that arrive from a client. Defined in
+ * terms of the normalizer so there is exactly ONE scheme allowlist
+ * (scheme_recognized) to keep in step: anything the canonical pipeline cannot
+ * parse as a remote — file://, rsync://, a bare local path — is not remote. */
+int util_url_is_remote(const char *url)
+{
+   if (!url || !*url)
+      return 0;
+   char *norm = util_url_normalize(url);
+   int ok = norm != NULL;
+   free(norm);
+   return ok;
+}
+
 char *util_url_normalize(const char *url)
 {
    if (!url || !*url)

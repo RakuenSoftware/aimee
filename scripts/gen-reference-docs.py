@@ -805,6 +805,16 @@ ENV_DESC = {
     "AIMEE_DEFAULT_BRANCH": ("Workflow engine", "Override the target repo's real default branch (its trunk) that a `base:trunk` `branch.open`/`pr.open` resolves to; else read from `git origin/HEAD`. Distinct from `AIMEE_AUTONOMY_BASE` (the aimee integration branch). A final feature PR opens against this branch (open-only, never auto-merged)."),
     # Git verify / MCP
     "AIMEE_VERIFY_PARALLEL": ("Git verify / MCP", "Run `aimee git verify` steps in parallel."),
+    "AIMEE_EXEC_PIPE_TIMEOUT_MS": (
+        "Agents & delegates",
+        "How long a sidecar subprocess (embed, rerank, cognify, rewrite, css render, "
+        "oauth token, guardrails) may run before it is killed, in ms. Default 120000. "
+        "Bounds the pathological case, not normal latency: an unbounded wait here parks "
+        "the calling request thread permanently when a sidecar hangs instead of exiting, "
+        "which has taken a kb offline while it still accepted connections. On expiry the "
+        "child's whole process GROUP is killed, because the immediate child is /bin/sh "
+        "and the work is its child.",
+    ),
     "AIMEE_VERIFY_STEP_TIMEOUT_MS": ("Git verify / MCP", "Per-step timeout (ms) for git verify."),
     "AIMEE_MCP_CWD": ("Git verify / MCP", "Working-directory hint for MCP git-root resolution."),
     "AIMEE_MCP_TOOL_PROFILE": ("Git verify / MCP", "MCP tools/list presentation profile: 'core'/'lean' (default — Tier-0 high-frequency tools only, with find_tools/describe_tool reaching the rest) or 'full' (present every tool upfront)."),

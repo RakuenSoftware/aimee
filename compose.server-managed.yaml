@@ -45,18 +45,25 @@ services:
       AIMEE_WEBCHAT_PASSWORD: aimee-local-dev
       # Reach the managed kb by name on the shared network once it is up.
       AIMEE_KB_API_URL: http://aimee-kb:8741
+      # Per-user remote-write identity. These stay empty on a read-only install,
+      # but MUST be passed through so a provisioned deployment can opt in without
+      # editing this manifest. The trust bundle is mounted read-only below.
+      AIMEE_SERVER_ID: ${AIMEE_SERVER_ID:-}
+      AIMEE_SERVER_TEAM_ID: ${AIMEE_SERVER_TEAM_ID:-}
+      AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE: ${AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE:-/run/aimee/management/jwks-trust-bundle.json}
+      # Optional server -> kb mTLS enrollment string. HTTP remains the ordinary
+      # data path; mTLS is required to refresh the signed management JWKS.
+      AIMEE_KB_CONN: ${AIMEE_KB_CONN:-}
       # Turn on server-orchestrated deploy: the wizard's "Deploy" runs the managed
       # compose against the socket below. COMPOSE_PROJECT_NAME pins the project so
       # `up` and `ps` (status polling) agree on it.
       AIMEE_DEPLOY_ENABLED: "1"
       AIMEE_DEPLOY_COMPOSE_FILE: /opt/aimee/deploy/aimee-managed.compose.yaml
       COMPOSE_PROJECT_NAME: aimee
-      # Passed through to the managed services when a role is placed local (GPU
-      # tier, images, default LLM tier). Left at defaults for a CPU deploy.
+      # Passed through to the managed services when a role is placed local (tier,
+      # images). ONE LLM image serves every tier — it is model-less and downloads
+      # what the wizard selected — so there is no separate CPU image to override.
       AIMEE_LLM_IMAGE: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
-      # The CPU deploy (the default topology) runs aimee-llm-cpu, not aimee-llm, so
-      # it needs its own override or a pinned/mirrored CPU stack is unreachable.
-      AIMEE_LLM_CPU_IMAGE: ${AIMEE_LLM_CPU_IMAGE:-ghcr.io/rakuensoftware/aimee-llm-cpu:latest}
       AIMEE_KB_IMAGE: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:latest}
       AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-cpu}
       AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}
@@ -76,6 +83,10 @@ services:
     volumes:
       - aimee-server-home:/var/lib/aimee
       - aimee-server-workspaces:/var/lib/aimee-workspaces
+      # Public verification roots, not a private key. Files in this directory
+      # must be root-owned and not group/world-writable; 0644 lets the UID 1000
+      # server read them while this read-only mount prevents container writes.
+      - ${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}:/run/aimee/management:ro
       # The host Docker socket — lets aimee-server launch the managed services.
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:

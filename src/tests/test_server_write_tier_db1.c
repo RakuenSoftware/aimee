@@ -11,6 +11,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -32,6 +33,20 @@ static server_identity_token_claims_t claims(const char *jti, kb_identity_tier_t
 
 int main(void)
 {
+   unsetenv("AIMEE_SERVER_TEAM_ID");
+   unsetenv("AIMEE_SERVER_ID");
+   unsetenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
+   assert(server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_NO_TEAM);
+   setenv("AIMEE_SERVER_TEAM_ID", "not-a-team", 1);
+   assert(server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_NO_TEAM);
+   setenv("AIMEE_SERVER_TEAM_ID", "7", 1);
+   assert(server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_NO_SERVER_ID);
+   setenv("AIMEE_SERVER_ID", "managed-server", 1);
+   assert(server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_NO_TRUST_BUNDLE);
+   setenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE", "/run/aimee/management/jwks-trust-bundle.json", 1);
+   assert(server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_READY);
+   printf("ok: startup preflight identifies each missing Compose input\n");
+
    char path[] = "/tmp/aimee-write-tier-db1-XXXXXX";
    int fd = mkstemp(path);
    assert(fd >= 0);

@@ -135,6 +135,7 @@ const method_policy_t method_registry[] = {
     {"mcp.audit", CAP_TOOL_EXECUTE, "MCP OSV audit"},
     {"mcp.recheck", CAP_TOOL_EXECUTE, "MCP OSV recheck"},
     {"mcp.call", CAP_TOOL_EXECUTE, "MCP tool call"},
+    {"help.get", CAP_SESSION_READ, "read the built-in help index"},
     /* Triggers */
     {"trigger.*", CAP_TOOL_EXECUTE, "trigger operation"},
 

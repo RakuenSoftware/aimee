@@ -120,10 +120,50 @@ identity and a grant keyed by `(server_id, team_id, subject)`. The server must a
 - `AIMEE_SERVER_ID`;
 - `AIMEE_SERVER_TEAM_ID`;
 - `AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE`, pointing to the root-owned trust bundle for the KB signing
-  keys.
+  keys;
+- `AIMEE_KB_CONN`, the one-time `aimee://` enrollment string used to establish the server's mTLS
+  identity with the KB.
 
-The stock managed compose file does not set them. It remains remotely read-only until the server is
-enrolled with the KB and these values are added. A local Unix-socket operator cannot be locked out.
+The shipped server Compose files pass these values through from `.env`, leave their identity
+values empty, and mount `${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}` read-only at
+`/run/aimee/management`. The empty configuration is deliberately read-only. It becomes
+write-capable only after the server is enrolled with the KB and the authority values are supplied.
+A local Unix-socket operator cannot be locked out.
+
+A fresh embedded KB has no team. Create the first team locally without exposing an HTTP admin route:
+
+```bash
+KB_CONTAINER=$(docker ps --filter label=com.docker.compose.project=aimee \
+  --filter label=com.docker.compose.service=aimee-kb --format '{{.ID}}')
+docker exec \
+  -e 'AIMEE_DB2_URL=postgresql:///aimee_shared?host=/var/lib/aimee/run' \
+  "$KB_CONTAINER" aimee-kb team create default
+```
+
+Use the returned numeric team id when the authority enrolls the server. After finalizing the matching
+server-registry row and publishing signed JWKS, install the exported public trust bundle and record
+the enrollment values:
+
+```bash
+sudo install -d -o root -g root -m 0755 server-management
+sudo install -o root -g root -m 0644 /path/from/authority/jwks-trust-bundle.json \
+  server-management/jwks-trust-bundle.json
+
+cat >>.env <<'EOF'
+AIMEE_SERVER_ID=YOUR_ENROLLED_SERVER_ID
+AIMEE_SERVER_TEAM_ID=YOUR_NUMERIC_TEAM_ID
+AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE=/run/aimee/management/jwks-trust-bundle.json
+AIMEE_KB_CONN=aimee://THE_ONE_TIME_ENROLLMENT_STRING
+EOF
+
+docker compose -f compose.server-managed.yaml up -d --force-recreate aimee-server
+```
+
+The bundle is public verification material. In the shipped container it must be root-owned and
+readable by server UID 1000, so use `0644`; group/world write bits, symlinks, extra hard links, and a
+non-root owner are rejected. On successful enrollment the certificate and key are atomically saved
+at `$AIMEE_HOME/kb-client-identity.json` with mode `0600`. The one-time token is never saved, and
+the identity is revalidated against its CA pin after every process restart.
 
 Grant administration is local-socket only. Run it on the server, using the exact subject returned by
 the user's PAM or OIDC login:
@@ -165,6 +205,18 @@ directly.
 Workspace registration itself is bearer-gated and can succeed without a grant. Its index upload
 cannot: without `data`, `workspace add` reports the registered workspace, then exits non-zero after
 ingesting zero files. Run the index commands after the grant.
+
+> **Not available on the Windows thin client.** `workspace add` and `index scan` upload the working
+> tree over a POSIX-only path, so on Windows they refuse:
+>
+> ```
+> aimee: remote workspace add is not supported on this platform
+> aimee: remote index scan is not supported on this platform
+> ```
+>
+> Register and index the tree from a Linux or macOS client that can reach it, or clone it onto the
+> server through the setup wizard's *Workspaces & projects* step. The read side works normally on
+> Windows: `workspace list`, `index overview` and `index find` all query the server.
 
 Large repositories ingest in chunks. Use `aimee kb status` and `aimee kb ingest status` to follow
 the queue.
