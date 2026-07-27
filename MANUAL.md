@@ -595,7 +595,7 @@ noted in parentheses.
 > Some older in-process command modules still exist in the source tree
 > (`cmd_roadmap.c`, `cmd_auto.c`, extended `cmd_memory_*` maintenance verbs), but
 > they are not part of the installed thin-client contract until they have a typed
-> server RPC route. If `aimee <command>` says "has no typed server RPC route",
+> server RPC route. If `aimee <command>` says "has no /v1 route",
 > treat that command as implementation work in progress rather than user-facing
 > documentation.
 
@@ -784,19 +784,19 @@ visible in `aimee help --all` for your installed build.
 - `graph sync-code` · `graph explain`.
 - `trajectory export` · `trajectory batch`.
 
-### 7.20 Manuscript, `aimee manuscript`
+### 7.21 Manuscript, `aimee manuscript`
 
 Novel/long-form writing helpers (client-local): `manuscript scenes` ·
 `manuscript wordcount` · `manuscript outline` · `manuscript check [files…]`.
 
-### 7.21 Server, profiles, admin
+### 7.22 Server, profiles, admin
 
 - `server start` · `server restart` · `server status` / `server health`, manage `aimee-server`.
 - `profile create|list|show|delete|current [--force]`, configuration profiles.
 - `git verify` / `verify` (`git.verify`), verify current changes before merge.
 - `clean [--force]`, remove local config and integrations.
 
-### 7.22 Hidden / integration entry points
+### 7.23 Hidden / integration entry points
 
 Used by tool integrations, not typed by users directly:
 

@@ -1243,10 +1243,20 @@ cJSON *marshal_kb_build(int argc, char **argv)
 
    cJSON *req = marshal_no_args("kb.build");
 
-   if (opts.pos_count >= 1)
-      cJSON_AddStringToObject(req, "path", opts.positional[0]);
-   if (opts.pos_count >= 2)
-      cJSON_AddStringToObject(req, "project", opts.positional[1]);
+   /* MANUAL §7.16 documents `kb build [--path DIR] [--project NAME]`, but only the
+    * positional forms were read, so the documented flags parsed into opts.flags and
+    * were silently dropped — the build ran against no path at all. Accept the
+    * documented flags, falling back to the positional forms that already shipped. */
+   const char *path = rpc_get(&opts, "path");
+   const char *project = rpc_get(&opts, "project");
+   if (!path && opts.pos_count >= 1)
+      path = opts.positional[0];
+   if (!project && opts.pos_count >= 2)
+      project = opts.positional[1];
+   if (path)
+      cJSON_AddStringToObject(req, "path", path);
+   if (project)
+      cJSON_AddStringToObject(req, "project", project);
    if (rpc_get(&opts, "force"))
       cJSON_AddTrueToObject(req, "force");
    const char *v;
