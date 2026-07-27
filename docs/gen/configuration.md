@@ -303,7 +303,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 215 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. Secrets and tokens should be supplied through the environment or credential vault, never committed.
+The binaries read 216 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. Secrets and tokens should be supplied through the environment or credential vault, never committed.
 
 ### Paths & assets
 
@@ -589,6 +589,12 @@ The binaries read 215 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_TEST_PG_URL` | PostgreSQL URL used only by live test harnesses. |
 | `AIMEE_WITNESS_CADENCE_TEST_S` | Test-only override that shortens witness checkpoint and verification cadence. |
 | `AIMEE_WITNESS_HARNESS_ROLE` | Restricted PostgreSQL role used by the witness live harness. |
+
+### Agents & delegates
+
+| Variable | Description |
+|----------|-------------|
+| `AIMEE_EXEC_PIPE_TIMEOUT_MS` | How long a sidecar subprocess (embed, rerank, cognify, rewrite, css render, oauth token, guardrails) may run before it is killed, in ms. Default 120000. Bounds the pathological case, not normal latency: an unbounded wait here parks the calling request thread permanently when a sidecar hangs instead of exiting, which has taken a kb offline while it still accepted connections. On expiry the child's whole process GROUP is killed, because the immediate child is /bin/sh and the work is its child. |
 
 ## External & provider environment
 
