@@ -2,6 +2,7 @@
 #include "platform_process.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -223,6 +224,26 @@ int platform_exec_capture(const char *cmd, char **out, size_t *out_len, int time
    return platform_exec_capture_cancellable(cmd, out, out_len, timeout_ms, NULL, NULL);
 }
 
+/* How long a sidecar subprocess may take before it is killed. Generous: these
+ * are model/HTTP sidecars, not interactive calls. Overridable for operators with
+ * unusually slow sidecars, and for tests. */
+#define EXEC_PIPE_DEFAULT_TIMEOUT_MS 120000
+/* After the child closes stdout it should exit immediately; this only covers
+ * scheduling, not work. */
+#define EXEC_PIPE_EXIT_GRACE_MS 2000
+
+static int exec_pipe_timeout_ms(void)
+{
+   const char *env = getenv("AIMEE_EXEC_PIPE_TIMEOUT_MS");
+   if (env && env[0])
+   {
+      int v = atoi(env);
+      if (v > 0)
+         return v;
+   }
+   return EXEC_PIPE_DEFAULT_TIMEOUT_MS;
+}
+
 int platform_exec_pipe(const char *cmd, const char *input, size_t input_len, char **out,
                        size_t *out_len)
 {
@@ -243,6 +264,11 @@ int platform_exec_pipe(const char *cmd, const char *input, size_t input_len, cha
 
    if (pid == 0)
    {
+      /* Own process group, as platform_exec_capture already does: the child is
+       * /bin/sh, and the work (python3 embed-remote.py) is its CHILD. Killing
+       * only the shell on timeout orphans the real process, which keeps holding
+       * the endpoint it was stuck on. Kill the group or do not bother. */
+      setpgid(0, 0);
       close(stdin_pipe[1]);
       close(stdout_pipe[0]);
       dup2(stdin_pipe[0], STDIN_FILENO);
@@ -254,6 +280,7 @@ int platform_exec_pipe(const char *cmd, const char *input, size_t input_len, cha
       _exit(127);
    }
 
+   setpgid(pid, pid); /* race-free: both sides set it (see the child above) */
    close(stdin_pipe[0]);
    close(stdout_pipe[1]);
 
@@ -298,9 +325,51 @@ int platform_exec_pipe(const char *cmd, const char *input, size_t input_len, cha
       return -1;
    }
 
-   ssize_t n;
-   while ((n = read(stdout_pipe[0], buf + len, cap - len - 1)) > 0)
+   /* Bounded read. An unbounded read() here blocks the CALLING THREAD forever
+    * when the child hangs rather than exits -- a sidecar whose endpoint accepts
+    * the connection and never answers, or a stalled DNS lookup. Every caller of
+    * this function is a sidecar in a request path (embed, rerank, cognify,
+    * rewrite, css render, oauth token, guardrails), so a thread lost here is a
+    * server thread lost for good.
+    *
+    * Observed in production: a kb whose embedder was unreachable pinned a DB2
+    * pool lease for 21.8 HOURS -- one thread stuck in this read() -- and the
+    * reaper logged "missed lease_end?" 3895 times because it cannot safely
+    * reclaim a connection a live thread may still be using. Reproduced from a
+    * clean container: under six concurrent searches the worker threads were
+    * consumed one by one until /v1/health itself stopped answering and the
+    * container went unhealthy while still accepting connections.
+    *
+    * Kill the child on expiry so it cannot linger either. */
+   const int timeout_ms = exec_pipe_timeout_ms();
+   struct timespec start_ts;
+   clock_gettime(CLOCK_MONOTONIC, &start_ts);
+   int timed_out = 0;
+   for (;;)
    {
+      struct timespec now_ts;
+      clock_gettime(CLOCK_MONOTONIC, &now_ts);
+      long elapsed_ms =
+          (now_ts.tv_sec - start_ts.tv_sec) * 1000 + (now_ts.tv_nsec - start_ts.tv_nsec) / 1000000;
+      long remaining = (long)timeout_ms - elapsed_ms;
+      if (remaining <= 0)
+      {
+         timed_out = 1;
+         break;
+      }
+      struct pollfd pfd = {.fd = stdout_pipe[0], .events = POLLIN};
+      int pr = poll(&pfd, 1, (int)(remaining > 1000 ? 1000 : remaining));
+      if (pr < 0)
+      {
+         if (errno == EINTR)
+            continue;
+         break;
+      }
+      if (pr == 0)
+         continue; /* re-check the deadline */
+      ssize_t n = read(stdout_pipe[0], buf + len, cap - len - 1);
+      if (n <= 0)
+         break; /* EOF or error: the child closed stdout */
       len += (size_t)n;
       if (len + 1024 > cap)
       {
@@ -314,8 +383,47 @@ int platform_exec_pipe(const char *cmd, const char *input, size_t input_len, cha
    close(stdout_pipe[0]);
    buf[len] = '\0';
 
-   int status;
-   waitpid(pid, &status, 0);
+   if (timed_out)
+   {
+      kill(-pid, SIGKILL); /* the group: the shell AND the work it spawned */
+      kill(pid, SIGKILL);
+      waitpid(pid, NULL, 0); /* prompt: the child was just killed */
+      free(buf);
+      *out = NULL;
+      if (out_len)
+         *out_len = 0;
+      return -1;
+   }
+
+   /* The child closed stdout; it should exit promptly. Do not trust "should" --
+    * bound this too, then kill, or a child that closes stdout and hangs leaves
+    * the same wedged thread this function exists to prevent. */
+   int status = 0;
+   int reaped = 0;
+   for (int waited_ms = 0; waited_ms < EXEC_PIPE_EXIT_GRACE_MS; waited_ms += 20)
+   {
+      pid_t r = waitpid(pid, &status, WNOHANG);
+      if (r == pid)
+      {
+         reaped = 1;
+         break;
+      }
+      if (r < 0)
+         break;
+      struct timespec nap = {.tv_sec = 0, .tv_nsec = 20 * 1000 * 1000};
+      nanosleep(&nap, NULL);
+   }
+   if (!reaped)
+   {
+      kill(-pid, SIGKILL);
+      kill(pid, SIGKILL);
+      waitpid(pid, &status, 0);
+      free(buf);
+      *out = NULL;
+      if (out_len)
+         *out_len = 0;
+      return -1;
+   }
 
    *out = buf;
    if (out_len)
