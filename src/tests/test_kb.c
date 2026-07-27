@@ -295,6 +295,23 @@ static void test_build_sanitizes_malformed_utf8(void)
    printf("  PASS: malformed UTF-8 is sanitized before Postgres text boundaries\n");
 }
 
+static void test_chunk_insert_sanitizes_replayed_malformed_utf8(void)
+{
+   open_test_db();
+   const char replayed[] = "durable \x92queue\x94 payload \xed\xa0\x80";
+   int64_t id = db2_kb_documents_insert_chunk("test_utf8_boundary", "legacy.md", "hash", 0, "", 1,
+                                              1, replayed, 4);
+   assert(id > 0);
+
+   db2_kb_document_row_t row;
+   assert(db2_kb_document_fetch(id, "test_utf8_boundary", &row) == 1);
+   assert(strcmp(row.content, "durable ?queue? payload ???") == 0);
+   /* The persistence adapter must not mutate caller-owned data. */
+   assert((unsigned char)replayed[8] == 0x92);
+   close_test_db();
+   printf("  PASS: replayed malformed UTF-8 is sanitized at chunk persistence boundary\n");
+}
+
 static void test_build_incremental_update(void)
 {
    char tmpdir[] = "/tmp/aimee_kb_test_incr_XXXXXX";
@@ -1064,6 +1081,7 @@ int main(void)
    test_build_empty_dir();
    test_build_single_file();
    test_build_sanitizes_malformed_utf8();
+   test_chunk_insert_sanitizes_replayed_malformed_utf8();
    test_build_incremental_update();
    test_bloom_dedupe_skips_duplicate_content();
    test_minhash_shadow_signatures_persist();
