@@ -1569,6 +1569,37 @@ void print_server_health(cJSON *resp)
       printf("  uptime:      %.0fs\n", uptime->valuedouble);
    if (cJSON_IsNumber(connections))
       printf("  connections: %d\n", (int)connections->valuedouble);
+
+   /* The kb line is the point of running this command on a sick install; print it
+    * whenever the server sent one, and say plainly when the kb is unreachable
+    * rather than leaving its absence to be interpreted. */
+   cJSON *kb = cJSON_GetObjectItemCaseSensitive(resp, "kb");
+   if (cJSON_IsObject(kb))
+   {
+      const char *kbs = json_str(kb, "status");
+      printf("aimee-kb: %s\n", (kbs && kbs[0]) ? kbs : "unknown");
+      if (kbs && strcmp(kbs, "ok") == 0)
+      {
+         cJSON *vec = cJSON_GetObjectItemCaseSensitive(kb, "vectors");
+         printf("  store:       %s\n",
+                cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(kb, "store_ok")) ? "ok"
+                                                                               : "unavailable");
+         printf("  vector index:%s\n",
+                cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(kb, "vectors_ok")) ? "ok"
+                                                                                 : "unavailable");
+         printf("  embedder:    %s\n",
+                cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(kb, "embed_configured"))
+                    ? "configured"
+                    : "not configured");
+         if (cJSON_IsNumber(vec))
+            printf("  vectors:     %d\n", (int)vec->valuedouble);
+      }
+      else
+      {
+         printf("  the knowledge base did not answer; memory and kb search will not work.\n");
+         printf("  `aimee kb status` has the detail.\n");
+      }
+   }
 }
 
 const char *json_str(cJSON *obj, const char *key)

@@ -203,8 +203,7 @@ aimee remote set https://YOUR_SERVER:8743 aimee-local-dev
 aimee remote set https://YOUR_SERVER:8743 "$(cat .aimee-server-bearer)"
 
 aimee remote status     # resolved transport + /v1/health probe
-aimee status            # server + DB1 state
-aimee kb status         # knowledge-base health (vector store, embedder, ingest queue)
+aimee status            # server, DB1, and knowledge-base health
 ```
 
 `aimee-local-dev` only works **once per server**, so passing it after a previous
@@ -236,16 +235,54 @@ Opt out of the global registration with `AIMEE_NO_CLIENT_INTEGRATIONS=1` (or set
 A workspace is a set of repositories aimee indexes and works across as one unit.
 
 ```bash
-aimee workspace add /path/to/your/repo                     # register an existing checkout and index it
-aimee workspace add --repo git@github.com:org/repo.git     # clone, register, and index
-aimee workspace list                                       # list roots and the projects under each
+aimee workspace add /path/to/your/repo   # register this host's checkout (see the note below on indexing)
+aimee workspace list                     # list roots and the projects under each
 ```
 
 You can also drop an `aimee.workspace.yaml` manifest in a directory and run `aimee setup` to clone, install dependencies, index, and generate starter rules for a multi-repo workspace in one shot, see [Workspace Management](WORKSPACES.md).
 
-> Indexing and memory writes are server-side mutations, so over the network they need a **write-tier grant of at least `data` for your own subject** (see [1.4](#14-before-you-expose-it-on-a-network)); `aimee.api.remote_writes` no longer authorizes them. Workspace registration itself works regardless.
+> Indexing and memory writes are server-side mutations, so over the network they need a **write-tier grant of at least `data` for your own subject** (see [1.4](#14-before-you-expose-it-on-a-network)); `aimee.api.remote_writes` no longer authorizes them.
 >
-> Without a grant these return `403 … requires capabilities beyond the presented token's scope`, so on a brand-new install your first `aimee memory store` or `aimee kb ingest` will fail until one is issued. [UPGRADING.md](UPGRADING.md) has the procedure: how a subject is spelled for each login mode, and how the local operator issues the first grant. Running on the server itself over the local Unix socket is exempt.
+> Registering a workspace is exempt and lands with no grant — but the **indexing it
+> then kicks off is not**. Without a grant `aimee workspace add` reports
+> `workspace registered`, then `index ingest batch failed … capabilities beyond the
+> presented token's scope` and `ingested 0 file(s)`, and exits non-zero. The
+> workspace is registered; nothing is indexed until a grant exists.
+>
+> The `agent` family (§2.5) is exec/control rather than a data write, so it needs a
+> `full` grant — that includes reads like `aimee agent list`.
+>
+> **Cloning a repo onto the server** is a browser-side operation, not a CLI one:
+> the setup wizard's *Workspaces & projects* step clones into the server's own
+> workspace tree. `aimee workspace add --repo <url>` exists only in a local
+> (same-host) install — against a remote server it refuses and points you here,
+> because the clone route requires a browser login rather than a bearer.
+>
+> Without a grant these return `403 … requires capabilities beyond the presented
+> token's scope`, so on a brand-new install your first `aimee memory store` or
+> `aimee kb ingest` **will fail** until one is issued.
+>
+> The server's local Unix socket is exempt (same-user trusted peer), so on a
+> single-machine install the quickest way to write is to run the command there:
+>
+> ```bash
+> docker compose -f compose.server-managed.yaml exec -u aimee aimee-server \
+>   aimee memory store my-key "some fact"
+> ```
+>
+> For writes **from another machine**, that client's subject needs a write-tier
+> grant — `data` for memory/index writes, `full` to also allow exec/control.
+> Grants are keyed by `(server_id, team_id, subject)` and issued on the server:
+>
+> ```bash
+> aimee kb grant set --subject <subject> --server <server-id> --team <team-id> --tier data
+> aimee kb grant list --server <server-id> --team <team-id>      # confirm it landed
+> ```
+>
+> [UPGRADING.md](UPGRADING.md) is the reference for the two parts that are easy to
+> get wrong: how a subject is spelled for each login mode (a grant for the wrong
+> spelling is silently a grant for nobody), and why the operator installs its own
+> context with team `0`.
 
 ### 2.5 Add agents (delegates)
 
@@ -302,8 +339,7 @@ aimee version
 ```powershell
 aimee remote set https://YOUR_SERVER:8743 aimee-local-dev
 aimee remote status     # shows the resolved transport + a /v1/health probe
-aimee status            # server + DB1 state
-aimee kb status         # knowledge-base health (vector store, embedder, ingest queue)
+aimee status            # server, DB1, and knowledge-base health
 ```
 
 Use your real bearer token instead of `aimee-local-dev` if you changed it. The server's `/v1` is TLS-only off-loopback; `https://` works with certificate verification on by default (Schannel against the Windows cert store), so set `AIMEE_TLS_INSECURE=1` for the auto-provisioned self-signed cert (or trust/pin it). Alternatives to `aimee remote set`: set `AIMEE_SERVER_URL` / `AIMEE_SERVER_TOKEN` environment variables, or pass `--server https://YOUR_SERVER:8743 --server-token=...` per command. Precedence is `--server` flag > env > persisted `remote.conf`.
@@ -323,14 +359,52 @@ Opt out of the global registration with `AIMEE_NO_CLIENT_INTEGRATIONS=1` (or set
 A workspace is a set of repositories aimee indexes and works across as one unit.
 
 ```powershell
-aimee workspace add C:\path\to\your\repo        # register an existing checkout and index it
-aimee workspace add --repo https://github.com/org/repo.git   # clone, register, and index
+aimee workspace add C:\path\to\your\repo   # register this host's checkout (see the note below on indexing)
 aimee workspace list                            # list roots and the projects under each
 ```
 
-> Indexing and memory writes are server-side mutations, so over the network they need a **write-tier grant of at least `data` for your own subject** (see [1.4](#14-before-you-expose-it-on-a-network)); `aimee.api.remote_writes` no longer authorizes them. Workspace registration itself works regardless.
+> Indexing and memory writes are server-side mutations, so over the network they need a **write-tier grant of at least `data` for your own subject** (see [1.4](#14-before-you-expose-it-on-a-network)); `aimee.api.remote_writes` no longer authorizes them.
 >
-> Without a grant these return `403 … requires capabilities beyond the presented token's scope`, so on a brand-new install your first `aimee memory store` or `aimee kb ingest` will fail until one is issued. [UPGRADING.md](UPGRADING.md) has the procedure: how a subject is spelled for each login mode, and how the local operator issues the first grant. Running on the server itself over the local Unix socket is exempt.
+> Registering a workspace is exempt and lands with no grant — but the **indexing it
+> then kicks off is not**. Without a grant `aimee workspace add` reports
+> `workspace registered`, then `index ingest batch failed … capabilities beyond the
+> presented token's scope` and `ingested 0 file(s)`, and exits non-zero. The
+> workspace is registered; nothing is indexed until a grant exists.
+>
+> The `agent` family (§2.5) is exec/control rather than a data write, so it needs a
+> `full` grant — that includes reads like `aimee agent list`.
+>
+> **Cloning a repo onto the server** is a browser-side operation, not a CLI one:
+> the setup wizard's *Workspaces & projects* step clones into the server's own
+> workspace tree. `aimee workspace add --repo <url>` exists only in a local
+> (same-host) install — against a remote server it refuses and points you here,
+> because the clone route requires a browser login rather than a bearer.
+>
+> Without a grant these return `403 … requires capabilities beyond the presented
+> token's scope`, so on a brand-new install your first `aimee memory store` or
+> `aimee kb ingest` **will fail** until one is issued.
+>
+> The server's local Unix socket is exempt (same-user trusted peer), so on a
+> single-machine install the quickest way to write is to run the command there:
+>
+> ```bash
+> docker compose -f compose.server-managed.yaml exec -u aimee aimee-server \
+>   aimee memory store my-key "some fact"
+> ```
+>
+> For writes **from another machine**, that client's subject needs a write-tier
+> grant — `data` for memory/index writes, `full` to also allow exec/control.
+> Grants are keyed by `(server_id, team_id, subject)` and issued on the server:
+>
+> ```bash
+> aimee kb grant set --subject <subject> --server <server-id> --team <team-id> --tier data
+> aimee kb grant list --server <server-id> --team <team-id>      # confirm it landed
+> ```
+>
+> [UPGRADING.md](UPGRADING.md) is the reference for the two parts that are easy to
+> get wrong: how a subject is spelled for each login mode (a grant for the wrong
+> spelling is silently a grant for nobody), and why the operator installs its own
+> context with team `0`.
 
 ### 3.5 Add agents (delegates)
 
@@ -398,8 +472,7 @@ aimee version
 ```bash
 aimee remote set https://YOUR_SERVER:8743 aimee-local-dev
 aimee remote status     # resolved transport + /v1/health probe
-aimee status            # server + DB1 state
-aimee kb status         # knowledge-base health (vector store, embedder, ingest queue)
+aimee status            # server, DB1, and knowledge-base health
 ```
 
 Both the prebuilt universal binary and a source build speak `https://` with certificate verification on by default (Secure Transport against the Keychain); set `AIMEE_TLS_INSECURE=1` for a self-signed dev cert. As on the other platforms, you can use `AIMEE_SERVER_URL` / `AIMEE_SERVER_TOKEN` or `--server` instead of `aimee remote set`.
@@ -417,8 +490,7 @@ Opt out of the global registration with `AIMEE_NO_CLIENT_INTEGRATIONS=1` (or `cl
 ### 4.4 Set up workspaces
 
 ```bash
-aimee workspace add /path/to/your/repo                     # register an existing checkout and index it
-aimee workspace add --repo git@github.com:org/repo.git     # clone, register, and index
+aimee workspace add /path/to/your/repo   # register this host's checkout (see the note below on indexing)
 aimee workspace list
 ```
 
