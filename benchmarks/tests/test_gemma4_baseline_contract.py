@@ -342,6 +342,25 @@ class GemmaBaselineContractTests(unittest.TestCase):
         self.assertEqual(command[command.index("--restart") + 1], "unless-stopped")
         self.assertNotIn("--rm", command)
 
+    def test_sweep_host_server_pins_the_7900_xtx_and_disables_auto_fit(self) -> None:
+        process = mock.Mock()
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            sweep.subprocess, "Popen", return_value=process
+        ) as popen, mock.patch.object(sweep, "wait_host_health", return_value={"status": "ok"}):
+            actual, _ = sweep.start_host_server(
+                Path("/runtime/llama-server"),
+                Path("/bench"),
+                "model.gguf",
+                "embedding",
+                sweep.MODEL_LOAD_PROFILES["gemma4_12b"]["embedding"],
+                Path(directory) / "server.log",
+            )
+        self.assertIs(actual, process)
+        command = popen.call_args.args[0]
+        self.assertEqual(command[command.index("--device") + 1], "Vulkan1")
+        self.assertEqual(command[command.index("-fit") + 1], "off")
+        self.assertIn("--embeddings", command)
+
     def test_controllers_require_healthy_production_restoration(self) -> None:
         for controller in (sweep, eurobert_controller):
             with self.subTest(controller=controller.__name__), tempfile.TemporaryDirectory() as directory:

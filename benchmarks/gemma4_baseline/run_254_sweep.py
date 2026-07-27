@@ -63,6 +63,7 @@ MODEL_LOAD_PROFILES = {
 }
 MODEL_MODES = ("synthesis", "embedding")
 SERVER_RESTART_POLICY = "unless-stopped"
+HOST_LLAMA_DEVICE = "Vulkan1"
 
 
 def validate_completed_view(
@@ -123,6 +124,30 @@ def wait_health(url: str, timeout: int = 900, accepted_status: str = "ok") -> di
             last_error = f"{type(exc).__name__}: {exc}"
         time.sleep(2)
     raise RuntimeError(f"server did not become healthy: {last_error}")
+
+
+def wait_host_health(
+    process: subprocess.Popen[str],
+    url: str,
+    timeout: int = 900,
+    accepted_status: str = "ok",
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    last_error = ""
+    while time.monotonic() < deadline:
+        returncode = process.poll()
+        if returncode is not None:
+            raise RuntimeError(f"host llama-server exited {returncode} during startup")
+        try:
+            with urllib.request.urlopen(url, timeout=5) as response:
+                payload = json.load(response)
+            if payload.get("status") == accepted_status:
+                return payload
+            last_error = f"unexpected status: {payload.get('status')!r}"
+        except Exception as exc:  # noqa: BLE001 - retained for the server log
+            last_error = f"{type(exc).__name__}: {exc}"
+        time.sleep(2)
+    raise RuntimeError(f"host llama-server did not become healthy: {last_error}")
 
 
 def docker_cmd(socket: str, *parts: str) -> list[str]:
@@ -236,6 +261,75 @@ def stop_server(socket: str, log_path: Path) -> None:
     remove_container(socket, "gemma4-baseline-server")
 
 
+def stop_host_server(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=30)
+
+
+def start_host_server(
+    binary: Path,
+    root: Path,
+    model_file: str,
+    mode: str,
+    load_profile: dict[str, int],
+    log_path: Path,
+) -> tuple[subprocess.Popen[str], float]:
+    started = time.monotonic()
+    command = [
+        str(binary),
+        "-m",
+        str(root / "models" / model_file),
+        "--device",
+        HOST_LLAMA_DEVICE,
+        "-fit",
+        "off",
+        "-ngl",
+        "99",
+        "-fa",
+        "on",
+        "--cache-ram",
+        "512",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8920",
+    ]
+    if mode == "synthesis":
+        command += [
+            "--jinja", "--ctx-size", str(load_profile["context_tokens"]),
+            "-ub", str(load_profile["physical_batch_tokens"]),
+            "-np", str(load_profile["parallel_slots"]),
+        ]
+    elif mode == "embedding":
+        command += [
+            "--embeddings", "--pooling", "last", "--ctx-size", str(load_profile["context_tokens"]),
+            "-ub", str(load_profile["physical_batch_tokens"]),
+            "-np", str(load_profile["parallel_slots"]),
+        ]
+    else:
+        raise ValueError(mode)
+    with log_path.open("w", encoding="utf-8") as server_log:
+        process = subprocess.Popen(
+            command,
+            text=True,
+            stdout=server_log,
+            stderr=subprocess.STDOUT,
+        )
+    try:
+        wait_host_health(process, "http://127.0.0.1:8920/health")
+    except Exception as exc:
+        stop_host_server(process)
+        tail = log_path.read_text(encoding="utf-8", errors="replace")[-16_000:]
+        raise RuntimeError(f"host llama-server startup failed: {exc}\n{tail}") from exc
+    return process, time.monotonic() - started
+
+
 def start_ettin_server(
     socket: str,
     image: str,
@@ -279,6 +373,11 @@ def main() -> int:
     parser.add_argument("--socket", default="/run/smoothnas-runtime/docker.sock")
     parser.add_argument("--production-container", default="aimee-llm-llm")
     parser.add_argument("--production-health-url", default="http://192.168.1.254:8742/health")
+    parser.add_argument(
+        "--host-llama-server",
+        type=Path,
+        help="Run the pinned llama-server binary directly on the host instead of a temporary LXC container",
+    )
     parser.add_argument("--deployed-models", type=Path, default=Path("/mnt/media/.plugins/aimee-llm/llm/models"))
     parser.add_argument("--max-cases", type=int, default=0, help="Zero runs the complete 10,000-case suites")
     parser.add_argument("--labels", help="Comma-separated model labels for a resumable subset run")
@@ -289,6 +388,8 @@ def main() -> int:
     )
     parser.add_argument("--skip-ettin", action="store_true")
     args = parser.parse_args()
+    if args.host_llama_server is not None and not args.host_llama_server.is_file():
+        parser.error(f"host llama-server is missing: {args.host_llama_server}")
     try:
         selected_modes = parse_modes(args.modes)
     except ValueError as exc:
@@ -343,6 +444,10 @@ def main() -> int:
         "selected_labels": [model["label"] for model in selected_models],
         "selected_modes": list(selected_modes),
         "skip_ettin": args.skip_ettin,
+        "model_server_execution": "host" if args.host_llama_server else "smoothnas_lxc",
+        "host_llama_server": str(args.host_llama_server) if args.host_llama_server else None,
+        "host_llama_device": HOST_LLAMA_DEVICE if args.host_llama_server else None,
+        "host_llama_fit": "off" if args.host_llama_server else None,
         "ettin_load_profile": ETTIN_LOAD_PROFILE,
         "model_load_profiles": MODEL_LOAD_PROFILES,
         "hardware_identity": {
@@ -360,6 +465,8 @@ def main() -> int:
     )
     production_was_running = inspect_running(args.socket, args.production_container)
     current_log: Path | None = None
+    current_host_process: subprocess.Popen[str] | None = None
+    current_server_kind: str | None = None
     completed: list[dict[str, str]] = []
     try:
         if production_was_running:
@@ -423,21 +530,38 @@ def main() -> int:
             model_results.mkdir(exist_ok=True)
             for mode in selected_modes:
                 load_profile = MODEL_LOAD_PROFILES[label][mode]
+                effective_load_profile: dict[str, Any] = dict(load_profile)
+                if args.host_llama_server:
+                    effective_load_profile.update(
+                        {"execution": "host", "device": HOST_LLAMA_DEVICE, "fit": "off"}
+                    )
                 current_log = logs_dir / f"server_{label}_{mode}.log"
+                current_server_kind = "host" if args.host_llama_server else "container"
                 write_state(
                     state_path,
-                    active={"label": label, "mode": mode, "load_profile": load_profile},
+                    active={"label": label, "mode": mode, "load_profile": effective_load_profile},
                     completed=completed,
                 )
-                load_seconds = start_server(
-                    args.socket,
-                    manifest["runtime"]["container_image"],
-                    args.root,
-                    model["file"],
-                    mode,
-                    load_profile,
-                    current_log,
-                )
+                if args.host_llama_server:
+                    remove_container(args.socket, "gemma4-baseline-server")
+                    current_host_process, load_seconds = start_host_server(
+                        args.host_llama_server,
+                        args.root,
+                        model["file"],
+                        mode,
+                        load_profile,
+                        current_log,
+                    )
+                else:
+                    load_seconds = start_server(
+                        args.socket,
+                        manifest["runtime"]["container_image"],
+                        args.root,
+                        model["file"],
+                        mode,
+                        load_profile,
+                        current_log,
+                    )
                 after_load = hardware_snapshot()
                 if mode == "synthesis":
                     command = [
@@ -462,7 +586,7 @@ def main() -> int:
                     json.dumps(
                         {
                             "cold_load_seconds": load_seconds,
-                            "load_profile": load_profile,
+                            "load_profile": effective_load_profile,
                             "after_load": after_load,
                             "after_run": after_run,
                         },
@@ -471,8 +595,13 @@ def main() -> int:
                     ) + "\n",
                     encoding="utf-8",
                 )
-                stop_server(args.socket, current_log)
+                if current_host_process is not None:
+                    stop_host_server(current_host_process)
+                    current_host_process = None
+                else:
+                    stop_server(args.socket, current_log)
                 current_log = None
+                current_server_kind = None
                 if process.returncode:
                     raise RuntimeError(f"{label} {mode} runner exited {process.returncode}")
                 validate_completed_view(args.repo, model_results, label, mode, args.max_cases)
@@ -481,7 +610,9 @@ def main() -> int:
         write_state(state_path, status="complete", active=None, completed=completed, completed_unix=int(time.time()))
         return 0
     except Exception as exc:
-        if current_log is not None:
+        if current_server_kind == "host" and current_host_process is not None:
+            stop_host_server(current_host_process)
+        elif current_server_kind == "container" and current_log is not None:
             stop_server(args.socket, current_log)
         write_state(state_path, status="failed", error=f"{type(exc).__name__}: {exc}", completed=completed, failed_unix=int(time.time()))
         raise
