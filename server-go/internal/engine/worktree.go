@@ -82,6 +82,19 @@ func (m *WorktreeManager) Ensure(ctx context.Context, item db1.WorkItem, feature
 		}
 	} else if item.ParentID != "" {
 		base = "aimee/feat/" + item.ParentID
+		// A slice merges through the forge, which advances the REMOTE feature
+		// branch. This local ref stays wherever the run started, so branching a
+		// later slice from it hands the delegate a tree missing every slice that
+		// already landed. It then recreates those files and the merge is an
+		// add/add conflict no retry can resolve. Prefer the remote tip, exactly
+		// as a feature worktree already prefers origin/<trunk> above, and fall
+		// back to the local ref when there is no remote (offline or fresh repo).
+		remote := "origin/" + base
+		_, _ = gitText(ctx, repo, "fetch", "--quiet", "origin",
+			"+refs/heads/"+base+":refs/remotes/"+remote)
+		if _, checkErr := gitText(ctx, repo, "rev-parse", "--verify", remote+"^{commit}"); checkErr == nil {
+			base = remote
+		}
 	}
 	if _, err := gitText(ctx, repo, "rev-parse", "--verify", base+"^{commit}"); err != nil {
 		return "", "", fmt.Errorf("resolve worktree base %q: %w", base, err)
