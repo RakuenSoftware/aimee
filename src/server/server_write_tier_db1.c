@@ -96,6 +96,20 @@ int server_write_tier_team_configured(void)
    return env_team_id(&team);
 }
 
+server_write_tier_config_state_t server_write_tier_config_state(void)
+{
+   int64_t team = 0;
+   if (!env_team_id(&team))
+      return SERVER_WRITE_TIER_CONFIG_NO_TEAM;
+   const char *server_id = getenv("AIMEE_SERVER_ID");
+   if (!server_id || !server_id[0])
+      return SERVER_WRITE_TIER_CONFIG_NO_SERVER_ID;
+   const char *bundle_path = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
+   if (!bundle_path || !bundle_path[0])
+      return SERVER_WRITE_TIER_CONFIG_NO_TRUST_BUNDLE;
+   return SERVER_WRITE_TIER_CONFIG_READY;
+}
+
 /* Assemble the resolver config from this server's environment and JWKS cache.
  * Returns 1 on success. On failure sets *outcome to the specific reason so the
  * caller never has to guess whether the problem was the token or the server. */

@@ -27,6 +27,7 @@
 #include "webuser_editor.h"  /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
 #include "workspace_scope.h" /* ws_scope_user_root — project workspace root */
 #include "util.h"            /* bounded argv execution for structural worktree checks */
+#include "util_url.h"        /* util_url_is_remote — reject file:// / local-path clone urls */
 #include <ctype.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -115,6 +116,12 @@ int rh_workspace_clone(const route_req_t *rq, char *resp, int cap)
     * "derive", identical to an absent field. */
    const char *org = (cJSON_IsString(jorg) && jorg->valuestring[0]) ? jorg->valuestring : NULL;
    const char *token = (cJSON_IsString(jtoken) && jtoken->valuestring) ? jtoken->valuestring : NULL;
+
+   if (!util_url_is_remote(url))
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "clone url must be an http(s), ssh, or git remote");
+   }
 
    char dest[MAX_PATH_LEN], pname[GIT_PROJECT_NAME_MAX], err[256];
    int rc = git_project_clone(principal, url, name, org, token, dest, sizeof(dest), pname,
@@ -247,10 +254,14 @@ int rh_workspace_clone_org(const route_req_t *rq, char *resp, int cap)
       cJSON *r = cJSON_CreateObject();
       cJSON_AddStringToObject(r, "name", name ? name : "");
       char dest[MAX_PATH_LEN], pname[GIT_PROJECT_NAME_MAX], err[256];
+      /* Same untrusted-input rule as /v1/workspace/clone: a batch entry must
+       * also name a real remote, so one crafted clone_url cannot smuggle a
+       * local path in through the bulk route. */
+      int remote_ok = util_url_is_remote(url);
       /* token=NULL → the host's stored credential (or server identity) is used. */
-      int rc = url ? git_project_clone(principal, url, name, owner, NULL, dest, sizeof(dest), pname,
-                                       sizeof(pname), err, sizeof(err))
-                   : -1;
+      int rc = remote_ok ? git_project_clone(principal, url, name, owner, NULL, dest, sizeof(dest),
+                                             pname, sizeof(pname), err, sizeof(err))
+                         : -1;
       if (rc == 0)
       {
          index_scan_project(pname, dest, 0); /* best-effort: make it searchable */
@@ -263,7 +274,10 @@ int rh_workspace_clone_org(const route_req_t *rq, char *resp, int cap)
       {
          cJSON_AddBoolToObject(r, "ok", 0);
          cJSON_AddNullToObject(r, "project");
-         cJSON_AddStringToObject(r, "error", url ? err : "missing clone_url");
+         cJSON_AddStringToObject(
+             r, "error",
+             !url ? "missing clone_url"
+                  : (!remote_ok ? "clone_url must be an http(s), ssh, or git remote" : err));
       }
       cJSON_AddItemToArray(results, r);
    }
