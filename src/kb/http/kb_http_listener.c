@@ -20,6 +20,13 @@
 #define KB_HTTP_BACKLOG 64
 #define KB_HTTP_WORKERS 16
 
+/* Idle timeout for an accepted connection, applied per read/write rather than to
+ * the request as a whole: a large ingest that keeps producing data resets it on
+ * every chunk, while a peer that goes silent is dropped and its worker returned.
+ * Without this a client that connects and never sends holds a worker forever --
+ * sixteen such sockets took the entire kb offline (see the listener loop). */
+#define KB_HTTP_IO_TIMEOUT_S 60
+
 void handle_connection(int fd);
 
 typedef struct
@@ -105,31 +112,62 @@ static void *listener_thread(void *arg)
    (void)arg;
    while (g_running)
    {
-      struct sockaddr_in addr;
-      socklen_t addrlen = sizeof(addr);
-      int fd = accept(g_listen_fd, (struct sockaddr *)&addr, &addrlen);
-      if (fd < 0)
-      {
-         if (g_running)
-            LOG_WARN("kb_http", "accept failed: %s", strerror(errno));
-         break;
-      }
-      fcntl(fd, F_SETFD, FD_CLOEXEC);
-      char peer[INET_ADDRSTRLEN] = "";
-      if (!inet_ntop(AF_INET, &addr.sin_addr, peer, sizeof(peer)))
-         peer[0] = '\0';
-
+      /* Claim the worker slot BEFORE accepting, not after.
+       *
+       * Accepting first and then blocking on the slot means a connection that
+       * has already been taken out of the kernel's accept queue sits in user
+       * space unread and unanswered for as long as the workers stay busy, and
+       * the loop does not return to accept() while it waits. If the workers
+       * never free -- one wedged handler per slot is enough -- the listener is
+       * dead: the backlog fills, nothing new is accepted, and every fd already
+       * pulled out of it is stranded.
+       *
+       * Observed on a live kb whose 16 workers were all blocked. The listen
+       * socket had a full accept queue (Recv-Q 17, backlog 16) and the accepted
+       * sockets sat in CLOSE-WAIT holding unread request bytes -- peers had
+       * given up and closed, and nothing ever read or closed this side. Health
+       * checks could not even connect, so the container was marked unhealthy
+       * with no error logged anywhere.
+       *
+       * Waiting for the slot first leaves pending connections queued in the
+       * kernel where they belong: they are still there when a worker frees, and
+       * once the backlog is full new peers get a prompt refusal instead of an
+       * accepted socket nobody will ever serve. It does not stop handlers from
+       * wedging -- it stops one wedged handler from taking the listener and a
+       * pile of file descriptors down with it. */
       pthread_mutex_lock(&g_worker_mutex);
       while (g_running && g_worker_count >= KB_HTTP_WORKERS)
          pthread_cond_wait(&g_worker_cond, &g_worker_mutex);
       if (!g_running)
       {
          pthread_mutex_unlock(&g_worker_mutex);
-         close(fd);
          break;
       }
       g_worker_count++;
       pthread_mutex_unlock(&g_worker_mutex);
+
+      struct sockaddr_in addr;
+      socklen_t addrlen = sizeof(addr);
+      int fd = accept(g_listen_fd, (struct sockaddr *)&addr, &addrlen);
+      if (fd < 0)
+      {
+         /* The slot was claimed above; give it back or the pool bleeds one
+          * worker per failed accept until the listener can never run again. */
+         worker_finished();
+         if (g_running)
+            LOG_WARN("kb_http", "accept failed: %s", strerror(errno));
+         break;
+      }
+      fcntl(fd, F_SETFD, FD_CLOEXEC);
+      /* A silent peer must not own a worker indefinitely. read() then returns
+       * -1/EAGAIN, which both read loops in kb_http_conn.c already treat as
+       * end-of-input, so the connection is closed and the slot handed back. */
+      struct timeval io_timeout = {.tv_sec = KB_HTTP_IO_TIMEOUT_S, .tv_usec = 0};
+      setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &io_timeout, sizeof(io_timeout));
+      setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &io_timeout, sizeof(io_timeout));
+      char peer[INET_ADDRSTRLEN] = "";
+      if (!inet_ntop(AF_INET, &addr.sin_addr, peer, sizeof(peer)))
+         peer[0] = '\0';
 
       if (spawn_connection_worker(fd, peer) != 0)
       {
