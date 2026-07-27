@@ -19,6 +19,9 @@ sys.path.insert(0, str(MODULES))
 
 builder = importlib.import_module("build_254_fixtures")
 reranker = importlib.import_module("run_reranking_ab")
+eurobert_controller = importlib.import_module("run_254_eurobert_rerankers")
+eurobert_server = importlib.import_module("serve_cross_encoder")
+eurobert_trainer = importlib.import_module("train_eurobert_reranker")
 synthesis = importlib.import_module("run_synthesis_ab")
 try:
     embedding = importlib.import_module("run_embedding_ab")
@@ -31,6 +34,74 @@ validator = importlib.import_module("validate_fixtures")
 
 
 class GemmaBaselineContractTests(unittest.TestCase):
+    def test_eurobert_reranker_extension_is_matched_and_pinned(self) -> None:
+        path = MODULES / "eurobert_rerankers.json"
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            [model["label"] for model in manifest["models"]],
+            ["eurobert210m_reranker", "eurobert610m_reranker"],
+        )
+        self.assertEqual(
+            [model["revision"] for model in manifest["models"]],
+            [
+                "39b51e15dd1f1a06f58b5cbf6a8a188cec60bd0e",
+                "d9af784ed20db6c2096e335ec6a67dd4a219924c",
+            ],
+        )
+        self.assertEqual(
+            [(model["expected_hidden_size"], model["expected_layers"]) for model in manifest["models"]],
+            [(768, 12), (1152, 26)],
+        )
+        training = manifest["training"]
+        self.assertEqual(training["dataset_revision"], "7f07e8686db233d934eacde4bf47a9995f73811e")
+        self.assertEqual(len(training["configs"]) * training["examples_per_config"], 576_000)
+        self.assertEqual(training["effective_batch_size"], 16)
+        self.assertEqual(training["max_length"], 512)
+        self.assertEqual(manifest["serving"]["max_length"], training["max_length"])
+        self.assertEqual(training["loss"], "MSELoss with identity activation over teacher scores")
+        dockerfile = (MODULES / "Dockerfile.eurobert-reranker").read_text(encoding="utf-8")
+        self.assertIn(manifest["runtime"]["base_image"], dockerfile)
+        for package, version in manifest["runtime"]["packages"].items():
+            self.assertIn(version, dockerfile, package)
+
+    def test_eurobert_extension_does_not_mutate_the_frozen_model_view_matrix(self) -> None:
+        result = validator.validate(ROOT / "benchmarks/fixtures/gemma4-unified/ab-v1")
+        self.assertNotIn("eurobert210m_reranker", result["baseline_model_views"])
+        self.assertNotIn("eurobert610m_reranker", result["baseline_model_views"])
+
+    def test_eurobert_training_provenance_rejects_drift(self) -> None:
+        manifest_path = MODULES / "eurobert_rerankers.json"
+        manifest, model = eurobert_trainer.load_spec(manifest_path, "eurobert210m_reranker")
+        expected = eurobert_trainer.expected_provenance(manifest_path, manifest, model)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "training_provenance.json"
+            path.write_text(json.dumps(expected), encoding="utf-8")
+            eurobert_trainer.assert_compatible_provenance(path, expected)
+            changed = {**expected, "training_examples": expected["training_examples"] + 1}
+            with self.assertRaisesRegex(RuntimeError, "incompatible training directory"):
+                eurobert_trainer.assert_compatible_provenance(path, changed)
+
+    def test_cross_encoder_server_validates_aligned_string_pairs(self) -> None:
+        pairs = [["query", "document"], ["second", "candidate"]]
+        self.assertEqual(eurobert_server.validate_pairs(pairs), pairs)
+        for invalid in ({}, [["query"]], [["query", 1]]):
+            with self.assertRaises(ValueError):
+                eurobert_server.validate_pairs(invalid)
+
+    def test_eurobert_controller_requests_exclusive_rocm_devices(self) -> None:
+        command = eurobert_controller.gpu_container_prefix(
+            "/docker.sock",
+            "server",
+            Path("/bench"),
+            Path("/repo"),
+            "image",
+            detach=True,
+        )
+        self.assertEqual(command[:5], ["docker", "-H", "unix:///docker.sock", "run", "--detach"])
+        self.assertEqual(command.count("--rm"), 1)
+        self.assertIn("/dev/kfd:/dev/kfd", command)
+        self.assertIn("/dev/dri:/dev/dri", command)
+
     def test_sweep_requires_both_ettin_execution_profiles(self) -> None:
         self.assertEqual(sweep.ETTIN_CONTROLS, (
             {"label": "ettin68m", "tier": "cpu", "ngl": "0", "execution": "cpu"},

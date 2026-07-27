@@ -197,6 +197,37 @@ manifest for every model. Replacement rerankers consume `reranking.jsonl` throug
 their provider adapter, but must retain the identical candidate order, case IDs,
 and input-bound algorithm so paired deltas against Ettin remain meaningful.
 
+## EuroBERT reranker extension
+
+The official EuroBERT-210M and EuroBERT-610M checkpoints are masked-language
+encoder bases, not ready-made rerankers. `eurobert_rerankers.json` therefore pins
+both official base revisions and gives each one the same one-score cross-encoder
+head and training recipe. Each model sees the same ordered 576,000-example subset
+of the pinned `cross-encoder/ettin-reranker-v1-data` teacher-score dataset: 72,000
+examples from each of eight declared configurations, MSE loss, 512 tokens, one
+epoch, effective batch 16, seed 12, and bf16. No frozen evaluation row is used for
+training.
+
+This is a bounded matched EuroBERT comparison, not a claim that the training
+budgets are equal to the released Ettin models: Ettin was trained on the full
+143,393,475-example dataset. Report that asymmetry next to every EuroBERT/Ettin
+delta. The extension deliberately does not alter the frozen fixture manifest, so
+its SHA-256 and all already-completed Ettin/Gemma results remain valid.
+
+The `.254` extension controller builds a manifest-pinned PyTorch/ROCm image,
+trains or resumes each model, serves aligned `/rerank` scores with a 32-pair
+microbatcher, runs the same 10,000 cases and 8-worker/4-pair load profile, and
+restores production in a `finally` block. It takes the same `sweep.lock` as the
+main controller and therefore cannot overlap another GPU benchmark:
+
+```sh
+python3 benchmarks/gemma4_baseline/run_254_eurobert_rerankers.py
+```
+
+Use `--max-cases N` only to smoke-test the runtime. Model, dataset, container,
+Python-package, training, and serving identities are recorded separately from
+the unchanged evaluation-suite identity.
+
 Run the contract tests (exact counts/hashes/shared IDs, matrix enforcement,
 fail-closed secret scanning, reranker bounds, and resume behavior):
 

@@ -1,0 +1,72 @@
+{
+  "runtime": {
+    "base_image": "rocm/pytorch@sha256:ab1d350b818b90123cfda31363019d11c0d41a8f12a19e3cb2cb40cf0261137d",
+    "image_tag": "aimee-eurobert-reranker:rocm6.4-pytorch2.6",
+    "packages": {
+      "accelerate": "1.14.0",
+      "datasets": "5.0.0",
+      "safetensors": "0.8.0",
+      "sentence-transformers": "5.6.1",
+      "transformers": "5.14.1"
+    }
+  },
+  "training": {
+    "dataset": "cross-encoder/ettin-reranker-v1-data",
+    "dataset_revision": "7f07e8686db233d934eacde4bf47a9995f73811e",
+    "configs": [
+      "agnews",
+      "amazon_qa",
+      "arxiv_title_abstract",
+      "biorxiv_title_abstract",
+      "gooaq_qa",
+      "msmarco",
+      "stackexchange_qa",
+      "stackoverflow_title_body"
+    ],
+    "examples_per_config": 72000,
+    "selection": "ordered train prefix at the pinned dataset revision",
+    "loss": "MSELoss with identity activation over teacher scores",
+    "max_length": 512,
+    "per_device_batch_size": 4,
+    "gradient_accumulation_steps": 4,
+    "effective_batch_size": 16,
+    "epochs": 1,
+    "learning_rate": 0.00003,
+    "warmup_ratio": 0.03,
+    "seed": 12,
+    "precision": "bf16",
+    "gradient_checkpointing": true
+  },
+  "serving": {
+    "port": 8920,
+    "max_length": 512,
+    "batch_size": 32,
+    "maximum_batch_wait_ms": 10,
+    "workers": 8,
+    "pairs_per_request": 4,
+    "query_char_cap": 512,
+    "candidate_char_cap": 1024
+  },
+  "models": [
+    {
+      "label": "eurobert210m_reranker",
+      "family": "EuroBERT",
+      "parameters": "210M",
+      "repository": "EuroBERT/EuroBERT-210m",
+      "revision": "39b51e15dd1f1a06f58b5cbf6a8a188cec60bd0e",
+      "expected_model_type": "eurobert",
+      "expected_hidden_size": 768,
+      "expected_layers": 12
+    },
+    {
+      "label": "eurobert610m_reranker",
+      "family": "EuroBERT",
+      "parameters": "610M",
+      "repository": "EuroBERT/EuroBERT-610m",
+      "revision": "d9af784ed20db6c2096e335ec6a67dd4a219924c",
+      "expected_model_type": "eurobert",
+      "expected_hidden_size": 1152,
+      "expected_layers": 26
+    }
+  ]
+}
