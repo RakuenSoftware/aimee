@@ -33,6 +33,8 @@ type server struct {
 	rl       *auth.RateLimiter
 	users    *auth.UserManager
 	authH    *auth.Handler
+	spaCSP   string
+	loginCSP string
 }
 
 func run(cfg *config) error {
@@ -65,16 +67,19 @@ func run(cfg *config) error {
 		rl:       rl,
 		users:    users,
 		authH:    authH,
+		spaCSP:   contentSecurityPolicy(spaHTML),
+		loginCSP: contentSecurityPolicy([]byte(loginHTML)),
 	}
 
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
+	handler := s.securityHeaders(mux)
 
 	addr := fmt.Sprintf(":%d", cfg.port)
 
 	if !cfg.tlsEnabled() {
 		log.Printf("aimee-runtime-web: http on %s", addr)
-		return http.ListenAndServe(addr, mux)
+		return http.ListenAndServe(addr, handler)
 	}
 
 	cert, key, err := ensureTLSCert(cfg)
@@ -94,7 +99,7 @@ func run(cfg *config) error {
 
 	srv := &http.Server{
 		Addr:      addr,
-		Handler:   mux,
+		Handler:   handler,
 		TLSConfig: tlsCfg,
 	}
 

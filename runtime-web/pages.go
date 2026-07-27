@@ -102,6 +102,7 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	w.Header().Set("Content-Security-Policy", s.loginCSP)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprint(w, loginHTML)
 }
@@ -131,6 +132,7 @@ func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
 // broken until the cache was manually cleared). Force revalidation so a redeploy
 // is always picked up on the next navigation.
 func (s *server) handleSPA(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Security-Policy", s.spaCSP)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Pragma", "no-cache")
