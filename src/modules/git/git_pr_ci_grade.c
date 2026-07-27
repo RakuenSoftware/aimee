@@ -5,7 +5,45 @@
 
 #include "cJSON.h"
 
+#include <ctype.h>
 #include <string.h>
+
+/* Case-insensitive substring search. Not strcasestr(): that is a GNU extension,
+ * and this file is deliberately built into minimal test binaries that do not
+ * define _GNU_SOURCE. */
+static const char *ci_grade_casestr(const char *hay, const char *needle)
+{
+   if (!hay || !needle || !needle[0])
+      return NULL;
+   for (const char *h = hay; *h; h++)
+   {
+      const char *a = h, *b = needle;
+      while (*a && *b && tolower((unsigned char)*a) == tolower((unsigned char)*b))
+      {
+         a++;
+         b++;
+      }
+      if (!*b)
+         return h;
+   }
+   return NULL;
+}
+
+int git_pr_merge_err_is_conflict(const char *err)
+{
+   if (!err || !err[0])
+      return 0;
+   /* GitHub's conflict wording, observed live: "Pull Request has merge
+    * conflicts". Match the distinctive noun phrase rather than the whole
+    * sentence, so a reworded message ("has merge conflict", "merge conflicts
+    * detected") still classifies.
+    *
+    * "conflict" alone is deliberately NOT matched: HTTP 409 is literally named
+    * "Conflict" and its lost-race messages can carry the bare word, and that is
+    * exactly the case that must stay retryable. Requiring the pair keeps the
+    * predicate from terminating runs that a retry would have won. */
+   return ci_grade_casestr(err, "merge conflict") != NULL;
+}
 
 int git_pr_ci_permits_merge(git_pr_ci_t ci)
 {
