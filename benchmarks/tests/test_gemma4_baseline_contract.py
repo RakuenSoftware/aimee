@@ -54,6 +54,38 @@ class GemmaBaselineContractTests(unittest.TestCase):
                 self.assertEqual(evidence["raw_rows"], raw_rows)
                 self.assertEqual(evidence["secret_scan"], "pass")
 
+    def test_result_validation_evidence_is_written_atomically(self) -> None:
+        bundle = ROOT / "benchmarks/fixtures/gemma4-unified/ab-v1"
+        result = ROOT / "benchmarks/results/gemma4-unified/ab-v1/gemma4_12b"
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "validation_synthesis.json"
+            evidence = result_validator.validate_and_write_checkpoint(
+                bundle,
+                result,
+                "gemma4_12b",
+                "synthesis",
+                output,
+            )
+            self.assertEqual(json.loads(output.read_text(encoding="utf-8")), evidence)
+            self.assertFalse(output.with_suffix(".json.tmp").exists())
+
+    def test_full_sweeps_validate_completed_views_but_smokes_do_not(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            result = Path(directory)
+            with mock.patch.object(sweep, "validate_and_write_checkpoint") as validate:
+                output = sweep.validate_completed_view(ROOT, result, "model", "embedding", 0)
+                self.assertEqual(output, result / "validation_embedding.json")
+                validate.assert_called_once_with(
+                    ROOT / "benchmarks/fixtures/gemma4-unified/ab-v1",
+                    result,
+                    "model",
+                    "embedding",
+                    result / "validation_embedding.json",
+                )
+            with mock.patch.object(sweep, "validate_and_write_checkpoint") as validate:
+                self.assertIsNone(sweep.validate_completed_view(ROOT, result, "model", "embedding", 2))
+                validate.assert_not_called()
+
     def test_published_12b_synthesis_checkpoint_reduces_to_exact_summary(self) -> None:
         bundle = ROOT / "benchmarks/fixtures/gemma4-unified/ab-v1"
         result = ROOT / "benchmarks/results/gemma4-unified/ab-v1/gemma4_12b"

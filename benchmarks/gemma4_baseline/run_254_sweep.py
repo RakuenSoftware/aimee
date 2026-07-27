@@ -20,6 +20,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from validate_result_checkpoint import validate_and_write_checkpoint
+
 
 ETTIN_CONTROLS = (
     {"label": "ettin68m", "tier": "cpu", "ngl": "0", "execution": "cpu"},
@@ -60,6 +62,26 @@ MODEL_LOAD_PROFILES = {
     },
 }
 MODEL_MODES = ("synthesis", "embedding")
+
+
+def validate_completed_view(
+    repo: Path,
+    result_dir: Path,
+    label: str,
+    view: str,
+    max_cases: int,
+) -> Path | None:
+    if max_cases:
+        return None
+    output = result_dir / f"validation_{view}.json"
+    validate_and_write_checkpoint(
+        repo / "benchmarks/fixtures/gemma4-unified/ab-v1",
+        result_dir,
+        label,
+        view,
+        output,
+    )
+    return output
 
 
 def parse_modes(value: str) -> tuple[str, ...]:
@@ -370,6 +392,7 @@ def main() -> int:
                 current_log = None
                 if process.returncode:
                     raise RuntimeError(f"{label} reranking runner exited {process.returncode}")
+                validate_completed_view(args.repo, ettin_results, label, "reranking", args.max_cases)
                 completed.append({"label": label, "mode": "reranking"})
                 write_state(state_path, completed=completed)
         for model in selected_models:
@@ -430,6 +453,7 @@ def main() -> int:
                 current_log = None
                 if process.returncode:
                     raise RuntimeError(f"{label} {mode} runner exited {process.returncode}")
+                validate_completed_view(args.repo, model_results, label, mode, args.max_cases)
                 completed.append({"label": label, "mode": mode})
                 write_state(state_path, completed=completed)
         write_state(state_path, status="complete", active=None, completed=completed, completed_unix=int(time.time()))

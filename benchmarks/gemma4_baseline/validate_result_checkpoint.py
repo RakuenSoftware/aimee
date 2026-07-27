@@ -193,6 +193,24 @@ def validate_checkpoint(bundle: Path, result_dir: Path, label: str, view: str) -
     }
 
 
+def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def validate_and_write_checkpoint(
+    bundle: Path,
+    result_dir: Path,
+    label: str,
+    view: str,
+    output: Path,
+) -> dict[str, Any]:
+    evidence = validate_checkpoint(bundle, result_dir, label, view)
+    write_json_atomic(output, evidence)
+    return evidence
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--bundle", type=Path, required=True)
@@ -204,7 +222,7 @@ def main() -> int:
     evidence = validate_checkpoint(args.bundle, args.result_dir, args.label, args.view)
     serialized = json.dumps(evidence, indent=2, sort_keys=True) + "\n"
     if args.output:
-        args.output.write_text(serialized, encoding="utf-8")
+        write_json_atomic(args.output, evidence)
     print(serialized, end="")
     return 0
 

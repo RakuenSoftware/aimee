@@ -294,3 +294,6 @@ python3 benchmarks/gemma4_baseline/validate_result_checkpoint.py \
 
 The validator enforces the exact frozen case population, latest-row success,
 recomputed metrics, suite identity, required hardware artifact, and secret scan.
+Full controller runs invoke it automatically and persist `validation_<view>.json`
+before marking a view complete; `--max-cases` smoke runs intentionally skip the
+10,000-case acceptance gate.

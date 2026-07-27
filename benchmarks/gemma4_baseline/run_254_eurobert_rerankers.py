@@ -15,6 +15,7 @@ from typing import Any
 
 from smoke_eurobert_runtime import assert_completed_smoke, expected_smoke_provenance
 from train_eurobert_reranker import assert_completed_training_dir, expected_provenance
+from validate_result_checkpoint import validate_and_write_checkpoint
 
 
 def run(command: list[str], *, capture: bool = False, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -431,6 +432,14 @@ def main() -> int:
                 )
             finally:
                 stop_server(args.socket, logs / f"server_{label}.log")
+            if not args.max_cases:
+                validate_and_write_checkpoint(
+                    args.repo / "benchmarks/fixtures/gemma4-unified/ab-v1",
+                    results / label,
+                    label,
+                    "reranking",
+                    results / label / "validation_reranking.json",
+                )
         write_state(state_path, status="complete", active_label=None)
     except Exception as exc:
         write_state(state_path, status="failed", error=f"{type(exc).__name__}: {exc}")
