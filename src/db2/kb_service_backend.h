@@ -324,8 +324,20 @@ extern "C"
    } db2_kb_ingest_recent_t;
 
    int db2_kb_ingest_queue_reset_running(void);
+
+   /* Queue priority. The claim is ordered by priority first, then id, so a request
+    * someone is waiting on does not sit behind a full background sweep — a reindex
+    * of a large workspace enqueues thousands of rows, and strict FIFO made every
+    * later interactive ingest wait them out. Two levels only: work a caller is
+    * blocked on, and everything else. */
+   typedef enum
+   {
+      DB2_KB_INGEST_PRIO_BULK = 0,        /* periodic sweep, inotify re-scan */
+      DB2_KB_INGEST_PRIO_INTERACTIVE = 10 /* an explicit ingest request */
+   } db2_kb_ingest_priority_t;
+
    int db2_kb_ingest_queue_enqueue(const char *project, const char *root_path,
-                                   const char *workspace, int force);
+                                   const char *workspace, int force, int priority);
    int db2_kb_ingest_queue_claim_next(db2_kb_ingest_job_t *out);
    int db2_kb_ingest_queue_complete(int64_t job_id, int files_indexed, int chunks_added,
                                     int embeddings_added);

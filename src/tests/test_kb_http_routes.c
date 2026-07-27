@@ -1195,9 +1195,13 @@ int workspace_discover_projects(const char *root, int max_depth, char projects[]
    return g_discover_count;
 }
 
+/* Captured so a route test can assert the priority it enqueued at. */
+static int g_ingest_priority = -1;
+
 int db2_kb_ingest_queue_enqueue(const char *project, const char *root_path, const char *workspace,
-                                int force)
+                                int force, int priority)
 {
+   g_ingest_priority = priority;
    snprintf(g_ingest_project, sizeof(g_ingest_project), "%s", project);
    snprintf(g_ingest_root, sizeof(g_ingest_root), "%s", root_path);
    snprintf(g_ingest_workspace, sizeof(g_ingest_workspace), "%s", workspace);
@@ -4222,6 +4226,10 @@ static void test_ingest_enqueue_ok(void)
    assert(strcmp(g_ingest_root, "/workspace/proj-alpha") == 0);
    assert(strcmp(g_ingest_workspace, "/workspace") == 0);
    assert(g_ingest_force == 1);
+   /* An HTTP ingest is a request someone is waiting on, so it must enqueue ABOVE
+    * the background sweep — otherwise it queues behind a whole reindex. */
+   assert(g_ingest_priority == DB2_KB_INGEST_PRIO_INTERACTIVE);
+   assert(g_ingest_priority > DB2_KB_INGEST_PRIO_BULK);
    assert(g_worker_notify_count == 1);
    assert(strstr(buf, "\"projects_queued\":1") != NULL);
 }
