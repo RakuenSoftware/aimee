@@ -34,6 +34,42 @@ validator = importlib.import_module("validate_fixtures")
 
 
 class GemmaBaselineContractTests(unittest.TestCase):
+    def test_published_12b_synthesis_checkpoint_reduces_to_exact_summary(self) -> None:
+        bundle = ROOT / "benchmarks/fixtures/gemma4-unified/ab-v1"
+        result = ROOT / "benchmarks/results/gemma4-unified/ab-v1/gemma4_12b"
+        cases = synthesis.load_jsonl(bundle / "synthesis.jsonl")
+        raw_path = result / "raw_gemma4_12b.jsonl"
+        rows = synthesis.load_jsonl(raw_path)
+        latest = {row["case_id"]: row for row in rows}
+        self.assertEqual(len(rows), 10_013)
+        self.assertEqual(set(latest), {case["case_id"] for case in cases})
+        self.assertTrue(all(latest[case["case_id"]].get("ok") for case in cases))
+        expected = json.loads((result / "summary_gemma4_12b.json").read_text(encoding="utf-8"))
+        actual = synthesis.summarize(
+            [latest[case["case_id"]] for case in cases],
+            "gemma4_12b",
+            "gemma4_12b",
+            validator.file_sha256(bundle / "manifest.json"),
+        )
+        self.assertEqual(actual, expected)
+        builder.assert_no_obvious_secrets([raw_path])
+
+    def test_published_e4b_embedding_checkpoint_reproduces_summary(self) -> None:
+        bundle = ROOT / "benchmarks/fixtures/gemma4-unified/ab-v1"
+        result = ROOT / "benchmarks/results/gemma4-unified/ab-v1/gemma4_e4b"
+        cases = synthesis.load_jsonl(bundle / "embedding.jsonl")
+        raw_path = result / "raw_embedding_gemma4_e4b.jsonl"
+        rows = synthesis.load_jsonl(raw_path)
+        self.assertEqual(len(rows), 10_000)
+        self.assertEqual({row["case_id"] for row in rows}, {case["case_id"] for case in cases})
+        summary = json.loads((result / "summary_embedding_gemma4_e4b.json").read_text(encoding="utf-8"))
+        self.assertEqual(summary["suite_manifest_sha256"], validator.file_sha256(bundle / "manifest.json"))
+        self.assertEqual(summary["native_dimensions"], 2_560)
+        for metric in ("recall_at_1", "recall_at_5", "recall_at_10", "mrr_at_10", "ndcg_at_10"):
+            actual = sum(float(row["metrics"]["native"][metric]) for row in rows) / len(rows)
+            self.assertAlmostEqual(actual, float(summary["dimensions"]["native"][metric]), places=15)
+        builder.assert_no_obvious_secrets([raw_path])
+
     def test_eurobert_reranker_extension_is_matched_and_pinned(self) -> None:
         path = MODULES / "eurobert_rerankers.json"
         manifest = json.loads(path.read_text(encoding="utf-8"))

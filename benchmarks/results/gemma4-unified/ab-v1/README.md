@@ -50,6 +50,37 @@ model files before the sweep. E2B was
 `gemma-4-E2B-it-Q4_0.gguf` at SHA-256
 `8e30dff3ac4c8434c49a7036fa15564bdbb6044e42bf04550bf1a096ad7e6a52`.
 
+## Additional completed view checkpoints
+
+Gemma 4 E4B completed the embedding view at its native 2,560 dimensions. Its
+synthesis view is intentionally absent from this checkpoint because four frozen
+cases do not yet have successful final rows.
+
+| Embedding model | Cases | Native width | MRR@10 | NDCG@10 | Recall@1 | Recall@5 | Recall@10 | Vectors/s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Gemma 4 E4B | 10,000 | 2,560 | 0.328657 | 0.422186 | 0.1832 | 0.5205 | 0.7275 | 2.2839 |
+
+The E4B raw embedding file contains exactly 10,000 unique frozen case IDs. Its
+raw metric means reproduce every summary value, and both artifacts use suite
+manifest SHA-256 `16d2c16add86052ff24be410699ab9452ee1a36252de6dba31ab5391de7ab81c`.
+The 64-slot/64-input profile used 131,072 aggregate context tokens and a 2,048-token
+physical batch. The completion snapshot records approximately 12.34 GiB VRAM and
+a 10.75-second cold load.
+
+Gemma 4 12B completed the synthesis view. Its append-only raw log has 10,013 rows:
+13 failed rows from the interrupted pass are superseded by successful retries,
+leaving exactly 10,000 unique successful final cases. Recomputing the summary
+from those latest rows reproduces the published summary exactly.
+
+| Synthesis model | Cases | Request success | Raw JSON parse | Schema valid | Required-field recall | Content F1 | p50 latency | p95 latency |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Gemma 4 12B | 10,000 | 100% | 100% | 99.96% | 97.57% | 0.327918 | 42.39 s | 91.84 s |
+
+The 12B synthesis view used 32 workers/slots, 65,536 aggregate context tokens,
+and a 2,048-token physical batch. Its completion snapshot records approximately
+23.77 GiB VRAM and a 40.94-second cold load. The 12B embedding view remains outside
+this checkpoint until its own 10,000-case summary is complete.
+
 ## Latency qualification status
 
 The latency fields in these summaries are diagnostic only and must not be used
@@ -83,3 +114,9 @@ after all 10,000 cases have final results.
 | `gemma4_e2b/raw_gemma4_e2b.jsonl` | `c1e9470649901a5893e98a9f2282209739518411e2190b9190fd90fce6eaf137` |
 | `gemma4_e2b/summary_embedding_gemma4_e2b.json` | `a7c0cf0019a4ffbed8bcf9e58d1e6e5bb33c3315d47f4c3d269ce91e854bf04f` |
 | `gemma4_e2b/summary_gemma4_e2b.json` | `aa372da4d602d201a132c3a3bda6e10ddb538f502c093bd7207137dc1b618c32` |
+| `gemma4_e4b/hardware_embedding.json` | `e2edd2cc526cff329be4a278d1acfd75d7f456edaf350066e4d55916a1989b83` |
+| `gemma4_e4b/raw_embedding_gemma4_e4b.jsonl` | `891dc7e8e827d4b5562fd4395b9f840a639d25ce32f6c920cc3d6e9d5a1b1a52` |
+| `gemma4_e4b/summary_embedding_gemma4_e4b.json` | `8b41cb5d9427ab72daa032537bd820f8ebc634036d88192d205ff593cf2aa874` |
+| `gemma4_12b/hardware_synthesis.json` | `a046d9197ee7eb5da0166f9671e226205e4655a605e111bddc9f84f9e7c0f879` |
+| `gemma4_12b/raw_gemma4_12b.jsonl` | `d5299e3e1b5b59de80da0f0d8ef57fd4d2cb13c68d2621fdad7dc781a7139ee4` |
+| `gemma4_12b/summary_gemma4_12b.json` | `d00141a350bc78083b6a932b2673f6a578ee39dc7510b8ffcb3ec5039ab46060` |
