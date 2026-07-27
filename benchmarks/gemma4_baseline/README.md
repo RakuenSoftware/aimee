@@ -266,6 +266,16 @@ Every cross-family report states the unequal training budgets. Reranking latency
 deltas remain diagnostic until Ettin is rerun from an empty output directory
 under one clean load profile; paired quality deltas remain valid.
 
+The remaining qualification stages can be queued as one resumable, fail-closed
+chain. It waits at the EuroBERT handoff gate, then runs the E4B synthesis-only
+recovery, followed by both required views for Gemma 4 26B-A4B, Gemma 4 31B, and
+Qwen3.6 35B-A3B. A nonzero child exit stops the chain; every child controller
+restores production before returning:
+
+```sh
+python3 benchmarks/gemma4_baseline/run_254_remaining_chain.py
+```
+
 Run the contract tests (exact counts/hashes/shared IDs, matrix enforcement,
 fail-closed secret scanning, reranker bounds, and resume behavior):
 

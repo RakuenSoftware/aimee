@@ -25,6 +25,7 @@ eurobert_smoke = importlib.import_module("smoke_eurobert_runtime")
 eurobert_trainer = importlib.import_module("train_eurobert_reranker")
 comparison = importlib.import_module("compare_ab")
 reranker_reports = importlib.import_module("reranker_pairwise_reports")
+remaining_chain = importlib.import_module("run_254_remaining_chain")
 synthesis = importlib.import_module("run_synthesis_ab")
 try:
     embedding = importlib.import_module("run_embedding_ab")
@@ -253,6 +254,60 @@ class GemmaBaselineContractTests(unittest.TestCase):
         for invalid in ("", "reranking", "synthesis,synthesis"):
             with self.assertRaises(ValueError):
                 sweep.parse_modes(invalid)
+
+    def test_remaining_chain_preserves_required_stage_order_and_scope(self) -> None:
+        root = Path("/bench")
+        repo = Path("/repo")
+        plan = remaining_chain.stage_plan(root, repo)
+        self.assertEqual(
+            [stage["name"] for stage in plan],
+            ["eurobert_rerankers", "gemma4_e4b_synthesis_recovery", "remaining_model_views"],
+        )
+        eurobert, e4b, remaining = (stage["command"] for stage in plan)
+        self.assertIn("--wait-for-lock", eurobert)
+        self.assertEqual(eurobert[eurobert.index("--handoff-state") + 1], "/bench/results/RUN_STATE.json")
+        self.assertEqual(e4b[e4b.index("--modes") + 1], "synthesis")
+        self.assertEqual(e4b[e4b.index("--labels") + 1], "gemma4_e4b")
+        self.assertEqual(
+            remaining[remaining.index("--labels") + 1],
+            "gemma4_26b_a4b,gemma4_31b,qwen36_35b_a3b",
+        )
+
+    def test_remaining_chain_is_resumable_and_stops_on_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "root"
+            repo = Path(directory) / "repo"
+            root.mkdir()
+            argv = ["run_254_remaining_chain.py", "--root", str(root), "--repo", str(repo)]
+            succeeded = mock.Mock(returncode=0)
+            with mock.patch.object(sys, "argv", argv), mock.patch.object(
+                remaining_chain.subprocess, "run", return_value=succeeded
+            ) as run:
+                self.assertEqual(remaining_chain.main(), 0)
+                self.assertEqual(run.call_count, 3)
+            state_path = root / "remaining_chain_state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(state["status"], "complete")
+            self.assertEqual(len(state["completed"]), 3)
+            with mock.patch.object(sys, "argv", argv), mock.patch.object(
+                remaining_chain.subprocess, "run", side_effect=AssertionError("repeated")
+            ):
+                self.assertEqual(remaining_chain.main(), 0)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "root"
+            repo = Path(directory) / "repo"
+            root.mkdir()
+            argv = ["run_254_remaining_chain.py", "--root", str(root), "--repo", str(repo)]
+            with mock.patch.object(sys, "argv", argv), mock.patch.object(
+                remaining_chain.subprocess, "run", return_value=mock.Mock(returncode=1)
+            ) as run:
+                with self.assertRaisesRegex(RuntimeError, "eurobert_rerankers exited 1"):
+                    remaining_chain.main()
+                run.assert_called_once()
+            state = json.loads((root / "remaining_chain_state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["status"], "failed")
+            self.assertEqual(state["active"], "eurobert_rerankers")
 
     def test_frozen_bundle_is_exact_and_paired(self) -> None:
         result = validator.validate(ROOT / "benchmarks/fixtures/gemma4-unified/ab-v1")
