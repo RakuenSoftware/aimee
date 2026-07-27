@@ -176,6 +176,15 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (config_save(&cfg) != 0)
       return server_send_error(conn, "workspace: failed to save config", NULL);
 
+   /* Republish the live snapshot now instead of waiting for the server loop's
+    * config_reload_if_changed() tick. In the server, config_load() returns the
+    * snapshot rather than disk, so until that tick a `workspace list` issued right
+    * after this `workspace add` read a config without the new entry and reported
+    * "No workspaces configured" — intermittently, depending on where the write
+    * landed in the poll interval. Making the write read-your-writes consistent
+    * costs one reload on a rare path. */
+   (void)config_reload_if_changed();
+
    /* A `detached` workspace's root lives on the client; this server cannot
     * enumerate or read it, so we don't discover projects or kick a server-side
     * scan (which would read this host's filesystem). Ingestion is client-driven:

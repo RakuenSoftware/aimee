@@ -53,6 +53,9 @@ services:
       # Passed through to the managed services when a role is placed local (GPU
       # tier, images, default LLM tier). Left at defaults for a CPU deploy.
       AIMEE_LLM_IMAGE: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
+      # The CPU deploy (the default topology) runs aimee-llm-cpu, not aimee-llm, so
+      # it needs its own override or a pinned/mirrored CPU stack is unreachable.
+      AIMEE_LLM_CPU_IMAGE: ${AIMEE_LLM_CPU_IMAGE:-ghcr.io/rakuensoftware/aimee-llm-cpu:latest}
       AIMEE_KB_IMAGE: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:latest}
       AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-cpu}
       AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}
