@@ -555,9 +555,14 @@ native_provider_http:
     * discard an otherwise healthy panelist. Preserve tools for the normal run,
     * but make the one bounded degenerate-response retry a synthesis-only turn. */
    int tok = agent_request_max_tokens(agent, max_tokens);
-   int max_t = agent_resolve_max_turns(agent, role);
+   /* Turn-budget policy keys off the BUDGET role, not the routing role: the
+    * primary webchat turn is routed as "code" (server_compute.c) but must be
+    * budgeted as a primary session — uncapped, and never told its tool budget is
+    * exhausted. `budget_role` is NULL exactly when this is a primary turn. */
+   const char *budget_role = agent_budget_role(role);
+   int max_t = agent_resolve_max_turns(agent, budget_role);
    int initial_max_t = max_t;
-   int final_after_turns = delegate_final_after_turns_for_role(role);
+   int final_after_turns = delegate_final_after_turns_for_role(budget_role);
 
    /* Stuck detection state */
    char last_tool_sig[256] = {0};
@@ -588,7 +593,7 @@ native_provider_http:
    rtr_tracker_t rtr;
    memset(&rtr, 0, sizeof(rtr));
 
-   int mw_max_turns = role ? max_t : 0;
+   int mw_max_turns = budget_role ? max_t : 0;
    mw_pipeline_t mw_pipeline;
    mw_pipeline_cfgs_t mw_cfgs;
    mw_pipeline_build(&mw_pipeline, &mw_cfgs, &agent->middleware, mw_max_turns, agent->model);
@@ -640,7 +645,7 @@ native_provider_http:
          mw_ctx.tool_calls = total_calls;
          mw_ctx.consecutive_errors = consecutive_errors;
 
-         mw_pipeline_cfgs_set_max_turns(&mw_cfgs, role ? max_t : 0);
+         mw_pipeline_cfgs_set_max_turns(&mw_cfgs, budget_role ? max_t : 0);
          mw_result_t mw_res = mw_pipeline_run(&mw_pipeline, &mw_ctx);
 
          if (mw_res.action == MW_STOP)
@@ -718,10 +723,11 @@ native_provider_http:
 
       maybe_compact_before_request(&fb_agent, messages, (chatgpt || anthropic) ? sys : NULL);
 
-      /* Primary sessions (role == NULL) never close the tool budget — the user
-       * can always send another message.  Pass max_turns=0 so HARD never fires. */
-      liveness_final_response_mode_t final_mode =
-          liveness_final_response_mode(turn, role ? max_t : 0, total_calls, final_after_turns);
+      /* Primary sessions never close the tool budget — the user can always send
+       * another message.  budget_role is NULL for them (including the webchat
+       * turn, which is ROUTED as "code"), so max_turns=0 and HARD never fires. */
+      liveness_final_response_mode_t final_mode = liveness_final_response_mode(
+          turn, budget_role ? max_t : 0, total_calls, final_after_turns);
       int final_instruction_turn = final_mode != LIVENESS_FINAL_RESPONSE_NONE;
       int final_text_only_turn = !liveness_final_response_allows_tools(final_mode);
       /* A final-only turn cannot satisfy an evidence gate. Keep read-only tools
