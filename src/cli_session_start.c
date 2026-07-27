@@ -243,7 +243,7 @@ static void ss_append_worktree_isolation(struct ss_sbuf *ctx, const char *sid)
    /* Already inside a managed (.aimee/.claude/.codex) worktree -> a mutating op
     * would not be blocked; don't nag or create a redundant worktree. Mirrors the
     * guard's own decision so the directive fires exactly when it would block. */
-   if (!attn_session_isolation_blocked(ATTN_OP_SOFT, NULL, cwd))
+   if (!attn_session_isolation_blocked(ATTN_OP_SOFT, NULL, cwd, sid))
       return;
 
    /* Need a stable session id to name the worktree; Claude Code always sends one. */
