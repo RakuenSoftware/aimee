@@ -1043,15 +1043,35 @@ native_provider_http:
          }
          else if (!parsed.content && parsed.call_count == 0)
          {
-            /* Parsed cleanly yet carries neither text nor a tool call. Same
-             * indistinguishable outcome as above, different cause: the events
-             * were understood but held nothing we extract. Worth the same
-             * bounded excerpt -- this is the shape that has to change. */
+            /* Parsed cleanly yet carries neither text nor a tool call. The head
+             * of the stream says nothing useful here -- it is always
+             * response.created -- so report the SHAPE instead: which event types
+             * arrived, and the tail, where response.completed carries the final
+             * output array. That names the item types we are failing to extract
+             * rather than leaving it to be guessed. */
+            const char *b = response_body ? response_body : "";
+            size_t blen = strlen(b);
+            int n_item_done = 0, n_delta = 0, n_completed = 0, n_reasoning = 0, n_failed = 0;
+            for (const char *q = b; (q = strstr(q, "event: ")) != NULL; q++)
+            {
+               if (strncmp(q + 7, "response.output_item.done", 25) == 0)
+                  n_item_done++;
+               else if (strncmp(q + 7, "response.output_text.delta", 26) == 0)
+                  n_delta++;
+               else if (strncmp(q + 7, "response.completed", 18) == 0)
+                  n_completed++;
+               else if (strncmp(q + 7, "response.failed", 15) == 0)
+                  n_failed++;
+            }
+            for (const char *q = b; (q = strstr(q, "\"type\":\"reasoning\"")) != NULL; q++)
+               n_reasoning++;
+            const char *tail = blen > 600 ? b + blen - 600 : b;
             LOG_WARN("agent",
                      "delegate '%s': responses body parsed but yielded no content and no tool "
-                     "call; first %d bytes: %.400s",
-                     agent->name, (int)(response_body ? strlen(response_body) : 0),
-                     response_body ? response_body : "(null)");
+                     "call; %zu bytes, events: output_item.done=%d output_text.delta=%d "
+                     "completed=%d failed=%d reasoning_items=%d; tail: %.600s",
+                     agent->name, blen, n_item_done, n_delta, n_completed, n_failed, n_reasoning,
+                     tail);
          }
       }
       else
