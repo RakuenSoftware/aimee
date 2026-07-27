@@ -324,6 +324,14 @@ static void test_claim_bounds_bindings_and_actor(EVP_PKEY *key, const char *jwks
        "cert:issuer:01AF",
        "cert:issuer:nothex",
        "cert::01af",
+       /* A bare host-account name. The DATA-PLANE identity token accepts this
+        * (it is the PAM login's subject form), and both verifiers live in
+        * server_mgmt_token.c — an earlier version of that change widened the
+        * management actor as a side effect, which this list caught. The
+        * management actor comes from kb_admin_grant / kb_team_lead and is never a
+        * bare account, so it must stay a rejection. */
+       "alice",
+       "svc_user-1.2",
    };
    for (size_t i = 0; i < sizeof(bad_actor) / sizeof(bad_actor[0]); ++i)
    {

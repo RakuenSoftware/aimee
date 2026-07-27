@@ -1,6 +1,7 @@
 /* dashboard.c: POSIX HTTP dashboard server (Linux/macOS) */
 #include "aimee.h"
 #include "dashboard.h"
+#include "pam_auth.h"
 #include "kb_client.h"
 #include "platform_path.h"
 #include "cJSON.h"
@@ -206,50 +207,9 @@ static const char *cors_check_origin(const char *request_buf)
    return NULL;
 }
 
-/* --- PAM-based HTTP Basic Auth (optional, requires -DWITH_PAM and -lpam) --- */
-
-#if defined(__linux__) && defined(WITH_PAM)
-#include <security/pam_appl.h>
-
-static int pam_conversation(int num_msg, const struct pam_message **msg, struct pam_response **resp,
-                            void *appdata_ptr)
-{
-   const char *password = (const char *)appdata_ptr;
-   struct pam_response *reply = calloc((size_t)num_msg, sizeof(struct pam_response));
-   if (!reply)
-      return PAM_BUF_ERR;
-   for (int i = 0; i < num_msg; i++)
-   {
-      if (msg[i]->msg_style == PAM_PROMPT_ECHO_OFF || msg[i]->msg_style == PAM_PROMPT_ECHO_ON)
-         reply[i].resp = strdup(password);
-   }
-   *resp = reply;
-   return PAM_SUCCESS;
-}
-
-int pam_check_credentials(const char *user, const char *password)
-{
-   struct pam_conv conv = {pam_conversation, (void *)password};
-   pam_handle_t *pamh = NULL;
-   int rc = pam_start("aimee", user, &conv, &pamh);
-   if (rc != PAM_SUCCESS)
-      return 0;
-   rc = pam_authenticate(pamh, PAM_SILENT);
-   int ok = (rc == PAM_SUCCESS);
-   if (ok)
-      rc = pam_acct_mgmt(pamh, PAM_SILENT);
-   ok = ok && (rc == PAM_SUCCESS);
-   pam_end(pamh, rc);
-   return ok;
-}
-#else
-int pam_check_credentials(const char *user, const char *password)
-{
-   (void)user;
-   (void)password;
-   return 0; /* PAM not available -- reject all credentials */
-}
-#endif
+/* The PAM credential check now lives in posix/pam_auth.c, so aimee-kb's
+ * password-login route can link it without linking the dashboard. See
+ * headers/pam_auth.h — there is deliberately only one PAM policy. */
 
 /* Base64 decode (minimal, for Authorization header) */
 int base64_decode(const char *in, char *out, size_t out_len)

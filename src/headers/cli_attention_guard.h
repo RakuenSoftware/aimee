@@ -61,8 +61,18 @@ int attn_weight_for(attn_op_t op);
  * worktree, else 0. The effective target is the absolute `file_path` when given
  * (Edit/Write), otherwise `cwd` (a relative file_path resolves under cwd; a Bash
  * mutation runs there). Read/raw-scan ops are never blocked. Used by
- * handle_attention_guard only when require_session_worktree is enabled. */
-int attn_session_isolation_blocked(attn_op_t op, const char *file_path, const char *cwd);
+ * handle_attention_guard only when require_session_worktree is enabled.
+ * `session_id` (the hook's session id, may be NULL) admits this session's own
+ * harness scratch dir — "<tmp>/claude-<uid>/<slug>/<session-id>/..." — which is
+ * harness-owned temp space rather than repo content. */
+int attn_session_isolation_blocked(attn_op_t op, const char *file_path, const char *cwd,
+                                   const char *session_id);
+
+/* Writes the effective target that attn_session_isolation_blocked judges — the
+ * absolute `file_path` when given, `cwd`/`file_path` joined when relative, else
+ * `cwd` — lexically normalized. Exposed so the refusal diagnostic can name the
+ * path it actually judged rather than assuming it was the cwd. */
+void attn_session_isolation_target(const char *file_path, const char *cwd, char *out, size_t outsz);
 
 /* External-memory decision (pure, testable). Returns 1 to BLOCK a tool call
  * that would WRITE an external file-based agent-memory store

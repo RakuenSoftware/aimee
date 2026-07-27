@@ -619,7 +619,13 @@ int git_pr_merge_via_api(const char *principal, const char *repo_dir, int number
    else if (st == 405 || st == 409)
    {
       gh_err(resp, st, "pr merge", err, errlen);
-      res = 2; /* not mergeable / head moved */
+      /* Separate the terminal case from the retryable one. A content conflict is
+       * a property of the two trees: retrying reproduces it exactly. A moved
+       * head/base is a lost race that a retry wins. Both arrive as 405/409, so
+       * the body is the only discriminator GitHub gives us. Match on the message
+       * text produced by gh_err rather than the raw body so a conflict reported
+       * with different JSON framing still classifies. */
+      res = git_pr_merge_err_is_conflict(err) ? 3 : 2;
    }
    else
    {

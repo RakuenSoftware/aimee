@@ -305,7 +305,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 209 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. Secrets and tokens should be supplied through the environment or credential vault, never committed.
+The binaries read 215 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. Secrets and tokens should be supplied through the environment or credential vault, never committed.
 
 ### Paths & assets
 
@@ -386,11 +386,17 @@ The binaries read 209 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_KB_OIDC_AUDIENCE` | OIDC audience for KB API auth. |
 | `AIMEE_KB_OIDC_ISSUER` | OIDC issuer for KB API auth. |
 | `AIMEE_KB_OIDC_JWKS_FILE` | OIDC JWKS file for KB API auth. |
+| `AIMEE_KB_OIDC_LOGIN_AUTHORIZE_URL` | IdP authorization endpoint the login redirects to (https only). |
+| `AIMEE_KB_OIDC_LOGIN_CLIENT_ID` | OIDC relying-party client id; setting it enables the per-user login front end. |
+| `AIMEE_KB_OIDC_LOGIN_REDIRECT_URI` | This kb's OIDC callback URL (https, or http on loopback only). |
+| `AIMEE_KB_OIDC_LOGIN_SCOPE` | Space-delimited OIDC scopes for the login request; defaults to openid. |
+| `AIMEE_KB_OIDC_LOGIN_TOKEN_URL` | IdP token endpoint for the code exchange (https, default port only). |
 | `AIMEE_KB_OIDC_SCOPE_CLAIM` | OIDC claim carrying the scope. |
 | `AIMEE_KB_OIDC_SCOPE_KIND` | OIDC scope-kind interpretation. |
 | `AIMEE_LLM_MODEL` | Model label sent to AIMEE_LLM_URL's chat endpoint (single-model gateways ignore it). Default 'aimee-synth'. |
 | `AIMEE_LLM_URL` | One knob: base URL of the aimee-llm container the kb calls for embedding (/embed), reranking (/rerank) AND synthesis (curator Tier-A + Tier-B at {url}/v1). The kb runs no model itself. AIMEE_EMBEDDER_URL/AIMEE_RERANKER_URL override per service. See docs/KB_LLM_BACKENDS.md. |
 | `AIMEE_SERVER_ID` | Registry identity used by the server mTLS heartbeat. |
+| `AIMEE_SERVER_TEAM_ID` | The team this server serves, from the same registry row as AIMEE_SERVER_ID. Required for per-user /v1 write authorization: unset, the server still starts and serves reads but denies every write with no_team_configured. |
 | `AIMEE_TRANSPORT_KB_POOL_ENABLED` | Override server-to-KB mTLS connection pooling. The config default is on; set to 0 for one-shot connections. |
 | `AIMEE_VECTOR_KB_BATCH_SIZE` | Embedding batch size for KB vector ingest. |
 

@@ -71,11 +71,51 @@ If the server endpoints return `200` and `kb/status` reports the DB and vector s
 ### 1.4 Before you expose it on a network
 
 - **Override the default bearer.** `aimee-local-dev` is a loopback convenience only. Mount your own `aimee.yaml` at `/var/lib/aimee/aimee.yaml` with a real bearer and terminate TLS at a reverse proxy.
-- **Remote writes are off by default.** Over the network a remote bearer is **read/query only** until you opt in. To let remote clients write memory, run the index, etc., set `aimee.api.remote_writes` in your mounted `aimee.yaml`:
-  - `data`, allow data-plane writes (`memory store`, `work …`, `rules …`, `skill …`).
-  - `full`, also allow exec/control (`delegate`, `agent`, `provider`, `cron`). **Trusted networks only**, a leaked `full` bearer permits remote code execution.
+- **Remote writes are off by default, and are authorized per user.** Over the network a
+  remote bearer is **read/query only**. Holding the bearer no longer grants write
+  access to anyone: each subject that may write needs its own **write-tier grant**,
+  and the tier comes from the caller's own kb-signed identity token, not from a
+  server-wide switch.
+  - `data`, data-plane writes (`memory store`, `work …`, `rules …`, `skill …`).
+  - `full`, also exec/control (`delegate`, `agent`, `provider`, `cron`). **Trusted
+    users only**, a `full` grant permits remote code execution as that subject.
 
-  (Workspace registration over the network, `workspace add/serve/remove`, is a deliberate, bearer-gated exception and works even with remote writes off.)
+  Grants live in `kb_write_tier_grant` and are administered with
+  `kb_write_tier_grant_set` / `kb_write_tier_grant_revoke` (`aimee kb grant
+  set|list|revoke --server <id> --team <n>`, local UDS only). A user obtains an
+  identity token by logging in to kb (OIDC, or PAM when no OIDC profile is
+  configured). See [UPGRADING.md](UPGRADING.md) for granting the first user, the
+  exact subject spelling, and how to tell "no grant" apart from "wrong subject".
+
+  **A grant is not enough on its own.** The server can only resolve a caller's tier
+  once it knows who it is and which keys to trust, so all three of these must be set
+  on `aimee-server` or *every* `/v1` write is denied regardless of grants:
+
+  | Variable | What it is |
+  |---|---|
+  | `AIMEE_SERVER_TEAM_ID` | the kb team this server is enrolled in |
+  | `AIMEE_SERVER_ID` | this server's id — the identity token's audience |
+  | `AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE` | path to the root-owned `0600` trust bundle pinning kb's signing keys |
+
+  **`compose.server-managed.yaml` does not set these**, so a stock Docker install
+  cannot enable remote writes until you add them — see
+  [#2026](https://github.com/RakuenSoftware/aimee/issues/2026). The server says so at
+  startup, and that line is the fastest way to confirm the cause:
+
+  ```
+  ERROR server.http: AIMEE_SERVER_TEAM_ID is unset or invalid: reads continue, but
+  every /v1 write will be denied with no_team_configured until it is set to this
+  server's team id
+  ```
+
+  (Workspace registration over the network, `workspace add/serve/remove`, is a
+  deliberate, bearer-gated exception and works with no grant at all.)
+
+> **`aimee.api.remote_writes` no longer authorizes anything.** It is still parsed,
+> so an old config loads, but it grants nothing: the server warns at startup and
+> counts the requests it would formerly have allowed in
+> `remote_writes.global_ignored` (visible via `aimee api status`). If writes are
+> refused after an upgrade, the cause is a missing grant, not this setting.
 
 ### 1.5 Managing the stack
 
@@ -158,7 +198,7 @@ aimee workspace list                                       # list roots and the 
 
 You can also drop an `aimee.workspace.yaml` manifest in a directory and run `aimee setup` to clone, install dependencies, index, and generate starter rules for a multi-repo workspace in one shot, see [Workspace Management](WORKSPACES.md).
 
-> Indexing and memory writes are server-side mutations, so they need the server's `aimee.api.remote_writes` to be at least `data` (see [1.4](#14-before-you-expose-it-on-a-network)). Workspace registration itself works regardless.
+> Indexing and memory writes are server-side mutations, so over the network they need a **write-tier grant of at least `data` for your own subject** (see [1.4](#14-before-you-expose-it-on-a-network)); `aimee.api.remote_writes` no longer authorizes them. Workspace registration itself works regardless.
 
 ### 2.5 Add agents (delegates)
 
@@ -171,13 +211,13 @@ aimee agent local local http://YOUR_LLM_HOST:8080 --model MODEL --slots 4  # loc
 aimee agent list                      # inspect registered agents + routing data
 ```
 
-Agent/provider control commands are exec/control operations, so over the network they need the server's `remote_writes` set to `full`. The primary agent (Claude Code, Codex, …) then routes delegateable work automatically; you can also call `aimee delegate <role> "<task>"` directly. See [Setting Up Delegates](DELEGATES.md) for the full agent schema and routing details.
+Agent/provider control commands are exec/control operations, so over the network they need a **write-tier grant of `full` for your subject** (see [1.4](#14-before-you-expose-it-on-a-network)). The primary agent (Claude Code, Codex, …) then routes delegateable work automatically; you can also call `aimee delegate <role> "<task>"` directly. See [Setting Up Delegates](DELEGATES.md) for the full agent schema and routing details.
 
 ### 2.6 Interactive chat
 
 `aimee acp-serve` and the web chat work against a remote server. When the client is pointed at a remote `/v1` endpoint, it registers your current directory as a **detached workspace** and opens a reverse channel back to it: the agent loop runs on the server, and its file and tool actions reach back into your local working tree over that channel. The client still holds no engine and no database, it renders the session and serves its own tree. Run `aimee chat` from inside the repository you want the agent to work in.
 
-Because `launch`/`chat` are exec/control operations, the server's `aimee.api.remote_writes` must be set to `full` for a remote session (see [1.4](#14-before-you-expose-it-on-a-network)). You can also drive aimee from your AI coding tool (configured in [2.3](#23-configure-your-ai-coding-tool)), or use the browser webchat at `https://YOUR_SERVER:8443`.
+Because `launch`/`chat` are exec/control operations, a remote session needs a **write-tier grant of `full` for your subject** (see [1.4](#14-before-you-expose-it-on-a-network)). You can also drive aimee from your AI coding tool (configured in [2.3](#23-configure-your-ai-coding-tool)), or use the browser webchat at `https://YOUR_SERVER:8443`.
 
 ---
 
@@ -240,7 +280,7 @@ aimee workspace add --repo https://github.com/org/repo.git   # clone, register, 
 aimee workspace list                            # list roots and the projects under each
 ```
 
-> Indexing and memory writes are server-side mutations, so they need the server's `aimee.api.remote_writes` to be at least `data` (see [1.4](#14-before-you-expose-it-on-a-network)). Workspace registration itself works regardless.
+> Indexing and memory writes are server-side mutations, so over the network they need a **write-tier grant of at least `data` for your own subject** (see [1.4](#14-before-you-expose-it-on-a-network)); `aimee.api.remote_writes` no longer authorizes them. Workspace registration itself works regardless.
 
 ### 3.5 Add agents (delegates)
 
@@ -253,13 +293,13 @@ aimee agent local local http://YOUR_LLM_HOST:8080 --model MODEL --slots 4  # loc
 aimee agent list                      # inspect registered agents + routing data
 ```
 
-Agent/provider control commands are exec/control operations, so over the network they need the server's `remote_writes` set to `full`. The primary agent (Claude Code, Codex, …) then routes delegateable work automatically; you can also call `aimee delegate <role> "<task>"` directly.
+Agent/provider control commands are exec/control operations, so over the network they need a **write-tier grant of `full` for your subject** (see [1.4](#14-before-you-expose-it-on-a-network)). The primary agent (Claude Code, Codex, …) then routes delegateable work automatically; you can also call `aimee delegate <role> "<task>"` directly.
 
 ### 3.6 Interactive chat
 
 `aimee acp-serve` and the web chat work against a remote server. Pointed at a remote `/v1` endpoint, the client registers your current directory as a **detached workspace** and opens a reverse channel: the agent runs on the server while its file and tool actions reach back into your local working tree (the reverse channel is supported on the Windows client). Run `aimee chat` from inside the repository you want the agent to work in.
 
-Because `launch`/`chat` are exec/control operations, the server's `aimee.api.remote_writes` must be `full` for a remote session (see [1.4](#14-before-you-expose-it-on-a-network)). You can also drive aimee from your AI coding tool (configured in [3.3](#33-configure-your-ai-coding-tool)), or use the browser webchat at `https://YOUR_SERVER:8443`.
+Because `launch`/`chat` are exec/control operations, a remote session needs a **write-tier grant of `full` for your subject** (see [1.4](#14-before-you-expose-it-on-a-network)). You can also drive aimee from your AI coding tool (configured in [3.3](#33-configure-your-ai-coding-tool)), or use the browser webchat at `https://YOUR_SERVER:8443`.
 
 ---
 
@@ -331,7 +371,7 @@ aimee workspace add --repo git@github.com:org/repo.git     # clone, register, an
 aimee workspace list
 ```
 
-You can also drop an `aimee.workspace.yaml` manifest in a directory and run `aimee setup` to clone, install dependencies, index, and generate starter rules for a multi-repo workspace in one shot, see [Workspace Management](WORKSPACES.md). As on the other platforms, indexing/memory writes require the server's `remote_writes` to be at least `data`.
+You can also drop an `aimee.workspace.yaml` manifest in a directory and run `aimee setup` to clone, install dependencies, index, and generate starter rules for a multi-repo workspace in one shot, see [Workspace Management](WORKSPACES.md). As on the other platforms, indexing/memory writes require a **write-tier grant of at least `data`** for your subject.
 
 ### 4.5 Add agents (delegates)
 
@@ -342,11 +382,11 @@ aimee agent local local http://YOUR_LLM_HOST:8080 --model MODEL --slots 4   # lo
 aimee agent list
 ```
 
-Agent/provider control over the network requires the server's `remote_writes` to be `full`. See [Setting Up Delegates](DELEGATES.md) for the full agent schema and routing details.
+Agent/provider control over the network requires a **write-tier grant of `full`** for your subject. See [Setting Up Delegates](DELEGATES.md) for the full agent schema and routing details.
 
 ### 4.6 Interactive chat
 
-As on the other platforms, `aimee acp-serve` and the web chat work against a remote server: the client registers your current directory as a **detached workspace** and opens a reverse channel, so the agent runs server-side while its file and tool actions act on your local tree. Run `aimee chat` from inside the repository you want the agent to work in, with the server's `aimee.api.remote_writes` set to `full` (see [1.4](#14-before-you-expose-it-on-a-network)). You can also drive aimee from your AI coding tool, or use the browser webchat at `https://YOUR_SERVER:8443`.
+As on the other platforms, `aimee acp-serve` and the web chat work against a remote server: the client registers your current directory as a **detached workspace** and opens a reverse channel, so the agent runs server-side while its file and tool actions act on your local tree. Run `aimee chat` from inside the repository you want the agent to work in, with a **write-tier grant of `full`** for your subject (see [1.4](#14-before-you-expose-it-on-a-network)). You can also drive aimee from your AI coding tool, or use the browser webchat at `https://YOUR_SERVER:8443`.
 
 ---
 

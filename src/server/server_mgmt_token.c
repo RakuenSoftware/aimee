@@ -314,6 +314,35 @@ static int identity_component(const char *s, size_t n)
    return 1;
 }
 
+/* A bare host-account name: the PAM login's subject form, which
+ * kb_identity_token.h has always documented the `sub` as ("OIDC (iss,sub)
+ * composite or PAM username"). Bounds mirror the Linux 32-character limit.
+ *
+ * Unprefixed because a host account has exactly one authority and the two login
+ * modes are mutually exclusive per kb, so there is nothing for a prefix to
+ * disambiguate. */
+static int bare_username(const char *s)
+{
+   size_t n = strlen(s);
+   if (n == 0 || n > 32)
+      return 0;
+   unsigned char f = (unsigned char)s[0];
+   if (!((f >= 'A' && f <= 'Z') || (f >= 'a' && f <= 'z') || (f >= '0' && f <= '9') || f == '_'))
+      return 0;
+   for (size_t i = 1; i < n; ++i)
+   {
+      unsigned char c = (unsigned char)s[i];
+      if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+            c == '.' || c == '_' || c == '-'))
+         return 0;
+   }
+   return 1;
+}
+
+/* The prefixed identity-key forms: `owner`, `oidc:<iss>:<sub>`,
+ * `cert:<issuer>:<serial>`. Used for the MANAGEMENT token's actor, which is an
+ * admin or team lead out of kb_admin_grant / kb_team_lead and is never a bare
+ * host account — widening this would widen the management actor too. */
 static int identity_key(const char *s)
 {
    if (!s || strnlen(s, 577) > 576)
@@ -330,6 +359,32 @@ static int identity_key(const char *s)
        !identity_component(sep + 1, strlen(sep + 1)))
       return 0;
    return oidc || lower_hex(sep + 1, 0, 79);
+}
+
+/* The DATA-PLANE identity token's subject: the prefixed forms above, plus a bare
+ * host-account name for the PAM login — which kb_identity_token.h has always
+ * documented the `sub` as ("OIDC (iss,sub) composite or PAM username").
+ *
+ * Deliberately separate from identity_key(): that one also validates the
+ * management token's actor, which comes from kb_admin_grant / kb_team_lead and is
+ * never a bare account, so sharing one function would widen the management
+ * surface as a side effect of a data-plane change. It did, in the first version
+ * of this commit — the management token suite caught it.
+ *
+ * This is the THIRD place the data-plane grammar is encoded; the others are the
+ * subject CHECK in db2/schema.sql and db2_intent_canonical_actor in
+ * db2/management_intent_fields.h. They cannot share code — the server is
+ * deliberately free of DB2_OBJS and libpq (see the $(SERVER) rule and
+ * scripts/check_tier_deps.sh) — but they must agree, and whichever is stricter
+ * wins SILENTLY: a subject the database admits but this rejects mints a token the
+ * server then refuses as malformed. Change all three together. */
+int server_identity_subject_valid(const char *s)
+{
+   if (!s || strnlen(s, 577) > 576)
+      return 0;
+   if (strncmp(s, "oidc:", 5) == 0 || strncmp(s, "cert:", 5) == 0 || strcmp(s, "owner") == 0)
+      return identity_key(s);
+   return bare_username(s);
 }
 
 static int copy_string(const cJSON *item, char *out, size_t cap)
@@ -716,8 +771,8 @@ static int parse_identity_payload(cJSON *payload, const unsigned char *raw, size
          return 0;
    kb_identity_tier_t tier;
    if (strcmp(v[1]->valuestring, issuer) != 0 || strcmp(v[2]->valuestring, audience) != 0 ||
-       !identity_key(v[3]->valuestring) || !identity_tier_from_str(v[5]->valuestring, &tier) ||
-       !ascii_token(v[6]->valuestring, 8, 128))
+       !server_identity_subject_valid(v[3]->valuestring) ||
+       !identity_tier_from_str(v[5]->valuestring, &tier) || !ascii_token(v[6]->valuestring, 8, 128))
       return 0;
    out->team_id = team;
    out->tier = tier;

@@ -1475,3 +1475,102 @@ func TestUnresolvedBlockersIsBounded(t *testing.T) {
 		t.Fatal("summary and recommendation must each be truncated")
 	}
 }
+
+// conflictMergeRunner stands in for the merge step meeting a genuine content
+// conflict: the discriminator in forge.go classified the forge error as
+// terminal, so the runner reports StepFailed instead of StepPending.
+type conflictMergeRunner struct{}
+
+func (conflictMergeRunner) Run(context.Context, StepRequest) (StepResult, error) {
+	return StepResult{Status: StepFailed,
+		Detail: "merge conflict needs a content decision, no retry can resolve it"}, nil
+}
+
+// A merge that hits a content conflict must END the item, not park it. Before
+// this was wired up, every merge failure became StepPending/"merge_pending",
+// which the scheduler re-queues on a 15s backoff forever — so an unmergeable
+// slice held the single active-root slot indefinitely and the whole run
+// deadlocked. StepFailed is the status that releases it, and nothing covered
+// that mapping.
+func TestStepFailedFinishesItemRejectedSoTheSlotIsReleased(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte(`name: slice
+start: merge
+nodes:
+  - id: source
+    block: understand
+  - id: impl
+    block: implement
+    in: {plan: source.out}
+  - id: freeze
+    block: freeze
+    in: {branch: impl.out}
+    next: pr
+  - id: pr
+    block: pr.open
+    in: {src: freeze.out}
+    next: ci
+  - id: ci
+    block: gate.ci
+    in: {pr: pr.out}
+    on_pass: merge
+    on_fail: impl
+  - id: merge
+    block: merge
+    in: {pr: pr.out}
+`)
+	if err := os.WriteFile(filepath.Join(workflowDir, "slice.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := wfe.ParseDefinition(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.PutProposal("wi_conflict", []byte("proposal")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := artifacts.PutNodeArtifact("wi_conflict", "pr", "pr", []byte("https://github.com/acme/repo/pull/42")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateWorkItem(context.Background(), db1.CreateWorkItem{ID: "wi_conflict",
+		Repo: "repo", ProposalPath: "p", WorkflowName: "slice",
+		WorkflowVersion: def.Version, StartStage: "merge"}); err != nil {
+		t.Fatal(err)
+	}
+	eng, err := New(store, artifacts, workflowDir, conflictMergeRunner{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := eng.Advance(context.Background(), "wi_conflict")
+	if err != nil {
+		t.Fatalf("advance: %v", err)
+	}
+	if !out.Terminal || out.State != "rejected" {
+		t.Fatalf("a merge conflict must finish the item rejected, got terminal=%v state=%q",
+			out.Terminal, out.State)
+	}
+	if out.Parked || out.PauseReason != "" {
+		t.Fatalf("a merge conflict must not park for retry, got parked=%v reason=%q",
+			out.Parked, out.PauseReason)
+	}
+	item, err := store.WorkItem(context.Background(), "wi_conflict")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.State != "rejected" {
+		t.Fatalf("persisted state = %q, want rejected", item.State)
+	}
+}

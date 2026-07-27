@@ -376,6 +376,10 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		}
 		prompt += "\n\nTDD: failing tests have already been authored in the worktree. Make them pass without weakening or deleting their assertions."
 	}
+	// acceptPartial is granted here on the contract that this block "is
+	// independently committed and verified by the Go native runner". Record the
+	// pre-delegate HEAD so that promise can actually be checked below.
+	baseHead, baseHeadErr := gitText(ctx, workdir, "rev-parse", "HEAD")
 	result, err := r.delegate(ctx, req, DelegateRequest{Role: "code", Persona: paramString(req.Node, "persona", "engineer"), Delegate: paramString(req.Node, "delegate", ""), Prompt: prompt, Workdir: workdir, Tools: true, acceptPartial: true})
 	if err != nil {
 		return StepResult{}, err
@@ -387,6 +391,23 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	}
 	if err := commitChanges(ctx, workdir, req.Node.ID); err != nil {
 		return StepResult{}, err
+	}
+	// A delegate that reported partial AND left no commit did not implement the
+	// task -- it said so itself. Advancing turns that into an empty diff at freeze,
+	// which reads as "the work is already in the base" and accepts the slice, so a
+	// run can reach done=N with no commits, no artifact and no PR. Only the partial
+	// case fails here: a completed delegate that legitimately had nothing to do is
+	// still the freeze no-op path.
+	if result.Partial && baseHeadErr == nil {
+		head, headErr := gitText(ctx, workdir, "rev-parse", "HEAD")
+		if headErr == nil && head == baseHead {
+			detail := strings.TrimSpace(result.Response)
+			if detail == "" {
+				detail = "delegate returned a partial result and produced no commit"
+			}
+			return StepResult{Status: StepChanges, Detail: safeDiagnostic(detail),
+				CostUSD: cost, CostUnknown: costUnknown}, nil
+		}
 	}
 	if !docs {
 		if err := r.verifier.Verify(ctx, workdir); err != nil {
@@ -1293,6 +1314,10 @@ func (r *NativeRunner) merge(ctx context.Context, req StepRequest) (StepResult, 
 		return StepResult{}, err
 	}
 	if err := r.forge.Merge(ctx, workdir, prRef, base); err != nil {
+		if mergeErrIsConflict(err) {
+			return StepResult{Status: StepFailed,
+				Detail: "merge conflict needs a content decision, no retry can resolve it: " + err.Error()}, nil
+		}
 		return StepResult{Status: StepPending, PauseReason: "merge_pending", Detail: err.Error()}, nil
 	}
 	return StepResult{Status: StepAdvanced, ArtifactType: "none", Artifact: "merged"}, nil

@@ -52,6 +52,12 @@ typedef struct
    const char *scope;          /* optional; NULL or "" to omit */
    const char *state;          /* optional; NULL or "" to omit */
    const char *code_challenge; /* required, from oauth_pkce_s256_challenge() */
+   /* OIDC nonce (OpenID Connect Core §3.1.2.1). Optional here because plain
+    * OAuth 2.0 has no such parameter, but an OIDC relying party must send one:
+    * it is echoed in the id_token and is what binds that token to THIS
+    * authorization request. PKCE protects the code; the nonce protects the
+    * token. NULL or "" to omit. */
+   const char *nonce;
 } oauth_pkce_auth_request_t;
 
 /* Write the authorization URL to |out|. The URL has the form

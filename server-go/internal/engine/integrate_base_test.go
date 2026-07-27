@@ -5,7 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
 // gitRun runs a git command in dir, failing the test on error.
@@ -118,5 +122,90 @@ func TestIntegrateFeatureBaseConflictAbortsCleanly(t *testing.T) {
 	// The slice's own commit survives.
 	if _, err := os.Stat(filepath.Join(slicedir, "shared.go")); err != nil {
 		t.Fatalf("slice's own shared.go should survive the abort: %v", err)
+	}
+}
+
+// A delegate that reports partial and writes nothing must fail its slice, not
+// advance it. Observed on wi_3d5de168: every implement job came back
+//
+//	partial — "named file 'docs/runbooks/appliance-state-recovery.md' was not
+//	created by delegate ... The task remains unimplemented"
+//
+// and the engine advanced anyway. freeze then saw an empty diff, read it as "the
+// work is already in the base", and accepted the slice — so the run reached
+// done=5 with no commits, no file and no PR, recorded as success.
+type partialNoCommitAgents struct{}
+
+func (partialNoCommitAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
+	return DelegateResult{
+		Response: "named file 'docs/runbooks/x.md' was not created by delegate; the task remains unimplemented",
+		Partial:  true,
+	}, nil
+}
+
+func (a partialNoCommitAgents) DelegateGroup(_ context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	out := make([]DelegateGroupResult, len(requests))
+	for i := range requests {
+		out[i] = DelegateGroupResult{Response: "partial"}
+	}
+	return out
+}
+
+func TestPartialImplementWithNoCommitDoesNotAdvance(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "init", "-b", "trunk")
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "README")
+	gitRun(t, repo, "commit", "-m", "init")
+	gitRun(t, repo, "remote", "add", "origin", repo)
+	gitRun(t, repo, "update-ref", "refs/remotes/origin/trunk", "HEAD")
+	gitRun(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+
+	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := t.Context()
+	for _, in := range []db1.CreateWorkItem{
+		{ID: "wi_parent", Repo: repo, ProposalPath: "p", WorkflowName: "build", StartStage: "feature"},
+		{ID: "wi_child", Repo: repo, ProposalPath: "c", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_parent"},
+	} {
+		if err := store.CreateWorkItem(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manager, err := NewWorktreeManager(store, filepath.Join(root, "trees"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, _ := store.WorkItem(ctx, "wi_parent")
+	if _, _, err := manager.Ensure(ctx, parent, true); err != nil {
+		t.Fatal(err)
+	}
+	child, _ := store.WorkItem(ctx, "wi_child")
+
+	runner := &NativeRunner{agents: partialNoCommitAgents{}, worktrees: manager, db: store}
+	// docs=true: the verifier is skipped on a documentation slice, which is how
+	// this reached freeze with nothing in the worktree.
+	out, err := runner.mutate(ctx, StepRequest{WorkItem: child, Node: wfe.Node{ID: "impl"}}, true)
+	if err != nil {
+		t.Fatalf("mutate: %v", err)
+	}
+	if out.Status == StepAdvanced {
+		t.Fatal("a partial delegate that produced no commit must not advance the slice")
+	}
+	if out.Status != StepChanges {
+		t.Fatalf("expected StepChanges, got %q", out.Status)
+	}
+	// The delegate already said exactly what was wrong; that is the finding.
+	if !strings.Contains(out.Detail, "was not created by delegate") {
+		t.Fatalf("delegate's own diagnosis must survive into the step detail: %q", out.Detail)
 	}
 }

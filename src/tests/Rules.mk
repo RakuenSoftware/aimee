@@ -485,6 +485,15 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-clarify \
                $(TESTPREFIX)/unit-test-collab-rules \
                $(TESTPREFIX)/unit-test-oauth-pkce \
+               $(TESTPREFIX)/unit-test-subject-grammar \
+               $(TESTPREFIX)/unit-test-grant-composed \
+               $(TESTPREFIX)/unit-test-kb-client-grants \
+               $(TESTPREFIX)/unit-test-kb-http-grants \
+               $(TESTPREFIX)/unit-test-kb-oidc-login \
+               $(TESTPREFIX)/unit-test-kb-oidc-login-store \
+               $(TESTPREFIX)/unit-test-kb-oidc-token-exchange \
+               $(TESTPREFIX)/unit-test-kb-oidc-login-flow \
+               $(TESTPREFIX)/unit-test-kb-http-identity-login \
                $(TESTPREFIX)/unit-test-oauth-reauth \
                $(TESTPREFIX)/unit-test-mcp-client \
                $(TESTPREFIX)/unit-test-mcp-client-sse \
@@ -618,7 +627,10 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-server-mgmt-checkpoint-client \
                $(TESTPREFIX)/unit-test-kb-mgmt-token \
                $(TESTPREFIX)/unit-test-kb-identity-token \
+               $(TESTPREFIX)/unit-test-kb-login-throttle \
                $(TESTPREFIX)/unit-test-server-identity-token \
+               $(TESTPREFIX)/unit-test-server-write-tier-db1 \
+               $(TESTPREFIX)/unit-test-server-identity-jti \
                $(TESTPREFIX)/unit-test-server-management-jti \
                $(TESTPREFIX)/unit-test-server-management-tls \
                $(TESTPREFIX)/unit-test-kb-mgmt-status-authority \
@@ -639,9 +651,12 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-workload-wire \
                 $(TESTPREFIX)/unit-test-kb-workload-provider
 TEST_TARGETS += $(TESTPREFIX)/unit-test-management-client-instance
 TEST_TARGETS += $(TESTPREFIX)/unit-test-management-action-journal
+TEST_TARGETS += $(TESTPREFIX)/unit-test-management-identity-journal
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-management-cert-lifecycle
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-token-roots-provision
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-token-authority
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-write-tier
+TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-identity-token-authority
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-token-authority-ipc
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-jwks-publication
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-mgmt-jwks-cache
@@ -1577,7 +1592,7 @@ $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o 
                       $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
 	                                $(OBJDIR)/server/server_config.o $(OBJDIR)/modules/config/config_fields.o \
 	                                $(OBJDIR)/server/modules/skills/skill_review.o $(OBJDIR)/tests/support/skill_jobs_stub.o \
-	                                $(OBJDIR)/server/server_hooks.o $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/modules/vault/vault_principal.o \
+	                                $(OBJDIR)/server/server_hooks.o $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/server_http_authz.o $(OBJDIR)/modules/vault/vault_principal.o \
 	                                $(OBJDIR)/tests/support/workflow_api_stub.o \
 	                                $(OBJDIR)/tests/support/vault_handlers_stub.o \
 	                                $(OBJDIR)/tests/support/toolset_stub.o \
@@ -2025,7 +2040,19 @@ $(TESTPREFIX)/unit-test-kb-mgmt-token: $(OBJDIR)/tests/test_kb_mgmt_token.o \
                                        $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+$(TESTPREFIX)/unit-test-kb-login-throttle: $(OBJDIR)/tests/test_kb_login_throttle.o \
+                                            $(OBJDIR)/kb/kb_login_throttle.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
 $(TESTPREFIX)/unit-test-kb-identity-token: $(OBJDIR)/tests/test_kb_identity_token.o \
+                                           $(OBJDIR)/kb/kb_identity_token.o \
+                                           $(OBJDIR)/server/oauth_pkce.o \
+                                           $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-server-write-tier: $(OBJDIR)/tests/test_server_write_tier.o \
+                                           $(OBJDIR)/server/server_write_tier.o \
+                                           $(OBJDIR)/server/server_mgmt_token.o \
                                            $(OBJDIR)/kb/kb_identity_token.o \
                                            $(OBJDIR)/server/oauth_pkce.o \
                                            $(OBJDIR)/cJSON.o
@@ -2036,6 +2063,18 @@ $(TESTPREFIX)/unit-test-server-identity-token: $(OBJDIR)/tests/test_server_ident
                                                $(OBJDIR)/kb/kb_identity_token.o \
                                                $(OBJDIR)/server/oauth_pkce.o \
                                                $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-server-write-tier-db1: \
+    $(OBJDIR)/tests/test_server_write_tier_db1.o \
+    $(OBJDIR)/server/server_write_tier_db1.o $(OBJDIR)/db1/server_identity_jti.o \
+    $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-server-identity-jti: \
+    $(OBJDIR)/tests/test_server_identity_jti.o \
+    $(OBJDIR)/db1/server_identity_jti.o $(OBJDIR)/db1/db1_init.o \
+    $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-management-jti: \
@@ -2115,6 +2154,14 @@ $(TESTPREFIX)/unit-test-kb-mgmt-token-authority: \
     $(OBJDIR)/modules/vault/vault_crypto.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+$(TESTPREFIX)/unit-test-kb-identity-token-authority: \
+    $(OBJDIR)/tests/test_kb_identity_token_authority.o \
+    $(OBJDIR)/kb/kb_mgmt_token_authority.o $(OBJDIR)/kb/kb_mgmt_token.o \
+    $(OBJDIR)/kb/kb_identity_token.o $(OBJDIR)/kb/kb_mgmt_token_public.o \
+    $(OBJDIR)/server/server_mgmt_token.o $(OBJDIR)/server/oauth_pkce.o \
+    $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-kb-mgmt-token-authority-ipc: \
     $(OBJDIR)/tests/test_kb_mgmt_token_authority_ipc.o \
     $(OBJDIR)/kb/kb_mgmt_token_authority_ipc.o
@@ -2151,6 +2198,14 @@ $(TESTPREFIX)/unit-test-management-client-instance: \
 
 $(TESTPREFIX)/unit-test-management-action-journal: \
     $(OBJDIR)/tests/test_management_action_journal.o \
+    $(OBJDIR)/db2/management_action_journal.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+# The identity journal links management_action_journal.o only for the shared
+# SQLSTATE classifier; the pg layer and tenant scope are mocked in the test.
+$(TESTPREFIX)/unit-test-management-identity-journal: \
+    $(OBJDIR)/tests/test_management_identity_journal.o \
+    $(OBJDIR)/db2/management_identity_journal.o \
     $(OBJDIR)/db2/management_action_journal.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
@@ -4920,7 +4975,9 @@ $(TESTPREFIX)/unit-test-persona: $(OBJDIR)/tests/test_persona.o \
 
 $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
-                           $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_keepalive.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/tests/support/router_advise_stub.o $(OBJDIR)/modules/vault/vault_principal.o $(OBJDIR)/server/presence.o \
+                           $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_keepalive.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o \
+                     $(OBJDIR)/server/server_http_grant_routes.o \
+                     $(OBJDIR)/modules/kb_client/kb_client_grants.o $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/server_http_authz.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/tests/support/router_advise_stub.o $(OBJDIR)/modules/vault/vault_principal.o $(OBJDIR)/server/presence.o \
                            $(OBJDIR)/server/server_mgmt_status.o $(OBJDIR)/server/server_mgmt_endpoint.o $(OBJDIR)/shared/management_read.o $(OBJDIR)/server/server_mgmt_read_endpoint.o $(OBJDIR)/server/server_mgmt_read_source.o $(OBJDIR)/server/server_mgmt_audit.o $(OBJDIR)/server/server_mgmt_token.o $(OBJDIR)/kb/kb_mgmt_status.o $(OBJDIR)/kb/kb_mgmt_endpoint.o \
                            $(OBJDIR)/server/cli_session_pty.o $(OBJDIR)/server/cli_session.o $(OBJDIR)/posix/workspace_provider.o \
                            $(OBJDIR)/modules/workspace/workspace_runner_registry.o $(OBJDIR)/modules/workspace/workspace_runner_queue.o \
@@ -5316,6 +5373,112 @@ $(TESTPREFIX)/unit-test-kb-auth-oidc: $(OBJDIR)/tests/test_kb_auth_oidc.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+# The login core is pure, so it links only the OIDC verifier (for the nonce
+# claim reader), the identity-key builder, and the PKCE primitives. The test
+# overrides platform_random_bytes, so platform objects are deliberately absent.
+$(TESTPREFIX)/unit-test-kb-oidc-login: $(OBJDIR)/tests/test_kb_oidc_login.o \
+                     $(OBJDIR)/kb/kb_oidc_login.o \
+                     $(OBJDIR)/kb/auth_oidc.o \
+                     $(OBJDIR)/kb/kb_identity.o \
+                     $(OBJDIR)/server/oauth_pkce.o \
+                     $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-kb-oidc-login-store: $(OBJDIR)/tests/test_kb_oidc_login_store.o \
+                     $(OBJDIR)/kb/kb_oidc_login_store.o \
+                     $(OBJDIR)/kb/kb_oidc_login.o \
+                     $(OBJDIR)/kb/auth_oidc.o \
+                     $(OBJDIR)/kb/kb_identity.o \
+                     $(OBJDIR)/server/oauth_pkce.o \
+                     $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-kb-oidc-token-exchange: $(OBJDIR)/tests/test_kb_oidc_token_exchange.o \
+                     $(OBJDIR)/kb/kb_oidc_token_exchange.o \
+                     $(OBJDIR)/kb/kb_oidc_login.o \
+                     $(OBJDIR)/kb/auth_oidc.o \
+                     $(OBJDIR)/kb/kb_identity.o \
+                     $(OBJDIR)/server/oauth_pkce.o \
+                     $(OBJDIR)/util.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+# Composition test: all four increment-4a units linked together, so a seam
+# mismatch between them fails here rather than at a real login.
+$(TESTPREFIX)/unit-test-kb-oidc-login-flow: $(OBJDIR)/tests/test_kb_oidc_login_flow.o \
+                     $(OBJDIR)/kb/kb_oidc_login.o \
+                     $(OBJDIR)/kb/kb_oidc_login_store.o \
+                     $(OBJDIR)/kb/kb_oidc_token_exchange.o \
+                     $(OBJDIR)/kb/auth_oidc.o \
+                     $(OBJDIR)/kb/kb_identity.o \
+                     $(OBJDIR)/server/oauth_pkce.o \
+                     $(OBJDIR)/util.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+# The vault and the IdP's network call are stubbed IN THE TEST TU (see the file):
+# linking the real ones would mean standing up a vault and a TLS client to test a
+# routing decision, and kb_oidc_token_exchange_post lives in its own translation
+# unit precisely so a caller can link the codec without dragging in TLS.
+# The grant commands through the SHIPPING routing boundary: real marshalling, real
+# method->path resolution, the real UDS gate, real server handlers. Only kb_client is
+# stubbed. Added because a review found a defect no layer-local test could see — `show`
+# sharing a method with `list` and therefore issuing an unfiltered listing.
+# Deliberately does NOT link server_http_routes.o: the route table references every handler
+# in the server and would drag the whole binary in. The one link that leaves uncovered — the
+# table's path -> handler row — is covered by server-api-conformance-check and the committed
+# route descriptor, both of which read that table. Everything else in the chain is real.
+$(TESTPREFIX)/unit-test-grant-composed: $(OBJDIR)/tests/test_grant_composed.o \
+                     $(OBJDIR)/server/server_http_grant_routes.o \
+                     $(OBJDIR)/server/server_http_authz.o \
+                     $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o \
+                     $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o \
+                     $(OBJDIR)/posix/util.o \
+                     $(OBJDIR)/util.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o $(OBJDIR)/log.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+# The HTTP transport is stubbed IN THE TEST TU. What this pins is how the client
+# INTERPRETS kb's answers — where an operator gets misled, since each outcome implies a
+# different next action.
+$(TESTPREFIX)/unit-test-kb-client-grants: $(OBJDIR)/tests/test_kb_client_grants.o \
+                     $(OBJDIR)/modules/kb_client/kb_client_grants.o \
+                     $(OBJDIR)/util.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o $(OBJDIR)/log.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+# The db2 seam is stubbed IN THE TEST TU: it needs Postgres, and its own behaviour is
+# covered by the P1 RLS gate. What this pins is the routing and validation layer — which
+# requests reach the seam at all, and with what arguments.
+$(TESTPREFIX)/unit-test-kb-http-grants: $(OBJDIR)/tests/test_kb_http_grants.o \
+                     $(OBJDIR)/kb/http/kb_http_grants.o \
+                     $(OBJDIR)/kb/kb_identity.o \
+                     $(OBJDIR)/kb/kb_identity_token.o \
+                     $(OBJDIR)/util.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o $(OBJDIR)/log.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-kb-http-identity-login: \
+                     $(OBJDIR)/tests/test_kb_http_identity_login.o \
+                     $(OBJDIR)/kb/http/kb_http_identity_login.o \
+                     $(OBJDIR)/kb/kb_login_throttle.o \
+                     $(OBJDIR)/kb/kb_oidc_token_exchange.o \
+                     $(OBJDIR)/kb/kb_oidc_login.o \
+                     $(OBJDIR)/kb/kb_oidc_login_store.o \
+                     $(OBJDIR)/kb/auth_oidc.o \
+                     $(OBJDIR)/kb/verifier.o \
+                     $(OBJDIR)/kb/kb_scope.o \
+                     $(OBJDIR)/kb/kb_identity.o \
+                     $(OBJDIR)/kb/kb_reqctx.o \
+                     $(OBJDIR)/server/oauth_pkce.o \
+                     $(OBJDIR)/util.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o $(OBJDIR)/log.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+# Both C copies of the subject grammar, against tests/subject_corpus.h. Links the
+# server's token unit for its predicate; the db2 one is header-only inline.
+$(TESTPREFIX)/unit-test-subject-grammar: $(OBJDIR)/tests/test_subject_grammar.o \
+                     $(OBJDIR)/server/server_mgmt_token.o \
+                     $(OBJDIR)/kb/kb_mgmt_token_authority.o \
+                     $(OBJDIR)/kb/kb_mgmt_token_public.o \
+                     $(OBJDIR)/kb/kb_identity_token.o \
+                     $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-kb-pki: $(OBJDIR)/tests/test_kb_pki.o \
                      $(OBJDIR)/kb/pki.o \
                      $(OBJDIR)/kb/modules/vault/vault_crypto.o \
@@ -5537,7 +5700,8 @@ $(TESTPREFIX)/unit-test-db2-hardening: $(OBJDIR)/tests/test_db2_hardening.o \
 
 $(TESTPREFIX)/unit-test-kb-tenancy-shim-guard: $(OBJDIR)/tests/test_kb_tenancy_shim_guard.o \
                      $(OBJDIR)/db2/team.o $(OBJDIR)/db2/project.o $(OBJDIR)/db2/membership.o \
-                     $(OBJDIR)/db2/admin_grant.o $(OBJDIR)/db2/oidc_jwks.o \
+                     $(OBJDIR)/db2/admin_grant.o $(OBJDIR)/db2/write_tier_grant.o \
+                     $(OBJDIR)/db2/oidc_jwks.o \
                      $(OBJDIR)/db2/db2_tenant.o $(OBJDIR)/kb/kb_identity.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -5562,6 +5726,8 @@ $(TESTPREFIX)/unit-test-kb-ingest-format: $(OBJDIR)/tests/test_kb_ingest_format.
 $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/tests/test_kb_http_routes.o \
                      $(OBJDIR)/tests/support/corpus_jobs_http_stub.o \
                      $(OBJDIR)/tests/support/pdf_route_stubs.o \
+                     $(OBJDIR)/kb/http/kb_http_grants.o \
+                     $(OBJDIR)/kb/kb_identity_token.o \
                      $(OBJDIR)/tests/support/kb_http_route_stubs.o \
                      $(OBJDIR)/kb/http/kb_http.o \
                      $(OBJDIR)/kb/http/kb_http_conn.o \
@@ -5569,7 +5735,7 @@ $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/tests/test_kb_http_routes.o \
                      $(OBJDIR)/kb/http/kb_http_search.o \
                      $(OBJDIR)/kb/http/kb_route_acl.o \
                      $(OBJDIR)/kb/http/kb_http_console.o \
-                     $(OBJDIR)/kb/http/kb_http_accounts.o \
+                     $(OBJDIR)/kb/http/kb_http_accounts.o $(OBJDIR)/kb/http/kb_http_bootstrap.o $(OBJDIR)/kb/http/kb_http_identity_login.o $(OBJDIR)/kb/kb_oidc_login.o $(OBJDIR)/kb/kb_oidc_login_store.o $(OBJDIR)/kb/kb_login_throttle.o \
                      $(OBJDIR)/kb/http/kb_http_governance.o \
                      $(OBJDIR)/util.o \
                      $(OBJDIR)/kb/kb_scope.o \
