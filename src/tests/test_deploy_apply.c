@@ -78,18 +78,30 @@ static void test_retire_targets_legacy_cpu_container(void)
 {
    /* aimee-llm-cpu is no longer a service of the managed compose file, so `up`
     * cannot touch it and `docker compose rm <service>` would not find it. It has
-    * to be removed by container name, or it keeps holding the `aimee-llm` network
-    * alias next to the real LLM service and the kb can reach the stale one. */
-   char out[256] = "";
-   char *envp[] = {(char *)"PATH=/nonexistent-for-test", NULL};
-   char file[512];
-   deploy_apply_compose_file(file, sizeof(file));
+    * to be removed by CONTAINER name, or it keeps holding the `aimee-llm` network
+    * alias next to the real LLM service and the kb can reach the stale one.
+    *
+    * Assert the command, not the effect of running it: the retirement execs
+    * docker, and whether a docker exists differs between a dev box and CI. */
+   const char *argv[8];
+   int n = deploy_retire_argv(argv, sizeof(argv) / sizeof(argv[0]));
+   assert(n == 4);
+   assert(argv[n] == NULL);
+   assert(strcmp(argv[0], "docker") == 0);
+   assert(strcmp(argv[1], "rm") == 0);
+   assert(strcmp(argv[2], "-f") == 0);
+   /* the container name, NOT the compose service name */
+   assert(strcmp(argv[3], "aimee-aimee-llm-cpu-1") == 0);
 
-   /* No docker on this PATH: the call must be a harmless no-op, never fatal and
-    * never a partial write into `out`. */
-   deploy_retire_stale_llm(envp, file, out, sizeof(out));
-   assert(out[0] == '\0');
-   printf("  legacy cpu retirement is non-fatal without docker ok\n");
+   /* `docker compose rm` would be wrong here — the service no longer exists. */
+   for (int i = 0; i < n; i++)
+      assert(strcmp(argv[i], "compose") != 0);
+
+   /* a buffer with no room for the NULL terminator is refused, not overrun */
+   const char *tight[4];
+   assert(deploy_retire_argv(tight, 4) == -1);
+   assert(deploy_retire_argv(NULL, 8) == -1);
+   printf("  legacy cpu retirement targets the container by name ok\n");
 }
 
 /* --- compose file resolution --- */

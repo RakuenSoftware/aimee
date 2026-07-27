@@ -191,10 +191,33 @@ static int run_capture(const char *const argv[], char **envp, char *out, size_t 
  *
  * Removing a container that was never up is a no-op, so failures here are not
  * fatal to the deploy; the output is appended for the wizard to show. */
+
+/* The container the retirement targets. Named, not derived, because it is no
+ * longer a compose service — nothing can regenerate this string for us. */
+#define DEPLOY_LEGACY_LLM_CPU_CONTAINER "aimee-aimee-llm-cpu-1"
+
+/* Fill argv with the retirement command and NULL-terminate it. Separated out for
+ * the same reason as deploy_up_argv: the command is then assertable in a test
+ * without shelling out to a docker that may or may not exist on the machine
+ * running the suite. Returns the argument count, or -1 when cap is too small. */
+static int deploy_retire_argv(const char **argv, size_t cap)
+{
+   const char *cmd[] = {"docker", "rm", "-f", DEPLOY_LEGACY_LLM_CPU_CONTAINER};
+   size_t n = sizeof(cmd) / sizeof(cmd[0]);
+   if (!argv || cap < n + 1)
+      return -1;
+   for (size_t i = 0; i < n; i++)
+      argv[i] = cmd[i];
+   argv[n] = NULL;
+   return (int)n;
+}
+
 static void deploy_retire_stale_llm(char **envp, const char *file, char *out, size_t out_cap)
 {
    (void)file; /* the service is gone from the compose file; address it directly */
-   const char *argv[] = {"docker", "rm", "-f", "aimee-aimee-llm-cpu-1", NULL};
+   const char *argv[8];
+   if (deploy_retire_argv(argv, sizeof(argv) / sizeof(argv[0])) < 0)
+      return;
    char buf[512];
    int code = -1;
    if (run_capture(argv, envp, buf, sizeof(buf), &code) == 0 && code == 0 && buf[0] &&
