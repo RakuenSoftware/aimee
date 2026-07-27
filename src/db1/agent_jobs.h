@@ -18,6 +18,7 @@ extern "C"
 
 #define DB1_AJ_ROLE_LEN   32
 #define DB1_AJ_AGENT_LEN  64
+#define DB1_AJ_PARTICIPANT_LEN 65
 #define DB1_AJ_STATUS_LEN 32
 #define DB1_AJ_TS_LEN     32
 
@@ -38,6 +39,7 @@ extern "C"
        * db1_agent_job_get/list_recent; free with db1_agent_job_free. */
       char *prompt;
       char agent_name[DB1_AJ_AGENT_LEN];
+      char participant_token[DB1_AJ_PARTICIPANT_LEN];
       char status[DB1_AJ_STATUS_LEN];
       char *result;
       int cursor_turn;
@@ -53,6 +55,9 @@ extern "C"
        * with the same (current_tool, api_call_count) across polls means
        * forward progress has stalled. */
       int api_call_count;
+      double cost_usd;
+      /* 0 means no measurement is available, never "the job was free". */
+      int cost_known;
       char created_at[DB1_AJ_TS_LEN];
       char updated_at[DB1_AJ_TS_LEN];
    } db1_agent_job_t;
@@ -65,6 +70,14 @@ extern "C"
 
    /* UPDATE status/cursor_turn/result + updated_at=now. */
    void db1_agent_job_update(int job_id, const char *status, int cursor_turn, const char *result);
+
+   /* Publish a terminal status, result and the realized cost copied from the
+    * completed delegate response in one checked write, so a status poll can
+    * never observe a terminal job whose cost is still the default zero.
+    * has_cost==0 leaves the stored cost and its known flag untouched, so an
+    * unmeasured terminal write stays explicitly unknown. Returns 0 on success. */
+   int db1_agent_job_complete(int job_id, const char *status, int cursor_turn, const char *result,
+                              int has_cost, double cost_usd);
 
    /* UPDATE agent_name + updated_at=now once routing has selected an agent. */
    void db1_agent_job_set_agent(int job_id, const char *agent_name);
@@ -111,6 +124,10 @@ extern "C"
     * out->result are heap-allocated (never NULL) and must be released with
     * db1_agent_job_free. On miss, out is zero-initialized (free is still safe). */
    int db1_agent_job_get(int job_id, db1_agent_job_t *out);
+
+   /* Resolve an unguessable participant capability to its durable delegate job.
+    * Exact-token lookup keeps agent identity behind the delegation boundary. */
+   int db1_agent_job_get_by_participant(const char *participant_token, db1_agent_job_t *out);
 
    /* Release the heap-owned fields (prompt/result) of a job loaded by
     * db1_agent_job_get / db1_agent_job_list_recent. Idempotent and NULL-safe:

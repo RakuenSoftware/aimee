@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -52,6 +54,90 @@ func TestHTTPAgentClientReusesDurableRemoteJob(t *testing.T) {
 	}
 }
 
+func TestHTTPAgentClientDistinguishesRejectedFromAmbiguousDispatch(t *testing.T) {
+	request := DelegateRequest{Role: "code", Persona: "engineer", Prompt: "implement"}
+	for _, tc := range []struct {
+		name       string
+		status     int
+		body       string
+		dispatched bool
+	}{
+		{name: "admission rejection", status: http.StatusBadRequest, body: `{"error":"cost limit cannot fit prompt"}`},
+		{name: "accepted response lost", status: http.StatusOK, body: `{`, dispatched: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, callErr := client.Delegate(t.Context(), request)
+			if callErr == nil {
+				t.Fatal("expected delegate failure")
+			}
+			var execution *DelegateExecutionError
+			if errors.As(callErr, &execution) != tc.dispatched {
+				t.Fatalf("error=%T %v dispatched=%v", callErr, callErr, execution)
+			}
+			if execution != nil && (execution.CostKnown || execution.CostUSD != 0) {
+				t.Fatalf("ambiguous response claimed measured cost: %+v", execution)
+			}
+		})
+	}
+}
+
+func TestHTTPAgentClientRetainsAmbiguityAfterMeasuredReroute(t *testing.T) {
+	var launches atomic.Int32
+	var secondLimit float64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			job := launches.Add(1)
+			if job == 2 {
+				secondLimit, _ = payload["max_cost_usd"].(float64)
+				_, _ = w.Write([]byte(`{`))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": job})
+		case "/v1/delegate/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "failed", "error": "quota", "cost_usd": .1})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, callErr := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review", MaxCostUSD: .5})
+	var execution *DelegateExecutionError
+	if !errors.As(callErr, &execution) || !execution.Dispatched || execution.CostKnown || execution.CostUSD != .1 {
+		t.Fatalf("error=%v execution=%+v", callErr, execution)
+	}
+	if launches.Load() != 2 || secondLimit != .4 {
+		t.Fatalf("launches=%d second_limit=%v", launches.Load(), secondLimit)
+	}
+}
+
+func TestHTTPAgentClientReplayMissRemainsUnresolved(t *testing.T) {
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: "http://127.0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, callErr := client.Delegate(t.Context(), DelegateRequest{Role: "code", Persona: "engineer", Prompt: "implement", ReplayOnly: true})
+	var execution *DelegateExecutionError
+	if !errors.As(callErr, &execution) || !execution.Dispatched || execution.CostKnown {
+		t.Fatalf("error=%v execution=%+v", callErr, execution)
+	}
+}
+
 func TestHTTPAgentClientDurableSlotsLaunchDistinctJobs(t *testing.T) {
 	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
 	if err != nil {
@@ -67,6 +153,9 @@ func TestHTTPAgentClientDurableSlotsLaunchDistinctJobs(t *testing.T) {
 			if provided, ok := payload["provided_target"].(bool); !ok || !provided {
 				t.Errorf("provided review target missing from payload %v", payload)
 			}
+			if limit, ok := payload["max_cost_usd"].(float64); !ok || limit != .5 {
+				t.Errorf("workflow cost limit missing from payload %v", payload)
+			}
 			for _, localOnly := range []string{"durable_slot", "DurableSlot", "durableslot", "retry_tag", "RetryTag"} {
 				if _, leaked := payload[localOnly]; leaked {
 					t.Errorf("local durable-key field %q leaked in payload %v", localOnly, payload)
@@ -75,7 +164,7 @@ func TestHTTPAgentClientDurableSlotsLaunchDistinctJobs(t *testing.T) {
 			jobID := launches.Add(1)
 			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": jobID})
 		case "/v1/delegate/status":
-			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "complete"})
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "complete", "participant": "delegate-job:1"})
 		default:
 			http.NotFound(w, r)
 		}
@@ -86,7 +175,7 @@ func TestHTTPAgentClientDurableSlotsLaunchDistinctJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := DelegateRequest{Role: "review", Persona: "qa", Prompt: "review complete artifact",
-		WorkItemID: "wi_slots", Stage: "gate", ExecutionVersion: "v1", ProvidedTarget: true}
+		WorkItemID: "wi_slots", Stage: "gate", ExecutionVersion: "v1", ProvidedTarget: true, MaxCostUSD: .5}
 	for _, slot := range []string{"panel:gate:round:1:seat:0", "panel:gate:round:1:seat:1"} {
 		request.DurableSlot = slot
 		if _, err := client.Delegate(t.Context(), request); err != nil {
@@ -109,7 +198,7 @@ func TestHTTPAgentClientOmitsProvidedTargetByDefault(t *testing.T) {
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 1})
 		case "/v1/delegate/status":
-			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "complete"})
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "complete", "participant": "delegate-job:1"})
 		default:
 			http.NotFound(w, r)
 		}
@@ -121,6 +210,93 @@ func TestHTTPAgentClientOmitsProvidedTargetByDefault(t *testing.T) {
 	}
 	if _, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review worktree"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestHTTPAgentClientGroupDelegatesEverySpecificationWithoutResolvingRandom(t *testing.T) {
+	var launches atomic.Int32
+	var mu sync.Mutex
+	var vias []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/agent/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]any{
+				{"name": "a-down", "provider": "third", "model": "down", "enabled": true, "delegate_available": false, "max_parallel": 10, "roles": []string{"review"}, "personas": []string{"all"}},
+				{"name": "codex", "provider": "openai", "model": "gpt", "enabled": true, "max_parallel": 2, "roles": []string{"review"}, "personas": []string{"all"}},
+				{"name": "minimax", "provider": "minimax", "model": "m3", "enabled": true, "max_parallel": 2, "roles": []string{"review"}, "personas": []string{"all"}},
+			}})
+		case "/v1/delegate/run":
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			mu.Lock()
+			vias = append(vias, fmt.Sprint(payload["via"]))
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": launches.Add(1), "participant": "opaque-participant"})
+		case "/v1/delegate/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "complete"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := client.DelegateGroup(t.Context(), []DelegateRequest{
+		{Role: "review", Persona: "security", Prompt: "review artifact"},
+		{Role: "review", Persona: "qa", Prompt: "review artifact", Delegate: "codex"},
+		{Role: "review", Persona: "architect", Prompt: "review artifact"},
+	})
+	if len(results) != 3 || launches.Load() != 3 {
+		t.Fatalf("results=%d launches=%d", len(results), launches.Load())
+	}
+	for _, result := range results {
+		if result.Err != nil {
+			t.Fatal(result.Err)
+		}
+		if result.Participant != "opaque-participant" {
+			t.Fatalf("participant = %q, want delegate-issued continuation", result.Participant)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	sort.Strings(vias)
+	if fmt.Sprint(vias) != "[codex codex minimax]" {
+		t.Fatalf("delegate group did not fill diverse seats: %v", vias)
+	}
+}
+
+func TestHTTPAgentClientRetriesUnpinnedRoutingButNeverWeakensPin(t *testing.T) {
+	var launches atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": launches.Add(1)})
+		case "/v1/delegate/status":
+			if launches.Load() == 1 {
+				_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "failed", "error": "subscription temporarily exhausted"})
+			} else {
+				_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "complete", "agent_name": "minimax"})
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review artifact"})
+	if err != nil || result.Agent != "minimax" || launches.Load() != 2 {
+		t.Fatalf("result=%+v err=%v launches=%d", result, err, launches.Load())
+	}
+
+	launches.Store(0)
+	_, err = client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review artifact", Delegate: "codex"})
+	if err == nil || launches.Load() != 1 {
+		t.Fatalf("explicit pin was substituted: err=%v launches=%d", err, launches.Load())
 	}
 }
 
@@ -166,7 +342,7 @@ func TestHTTPAgentClientPreservesContextCancellationWhenRemoteDoesNotAcknowledge
 	if !errors.Is(callErr, context.Canceled) {
 		t.Fatalf("context cancellation was replaced: %v", callErr)
 	}
-	if jobID, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err != nil || jobID != 45 {
+	if jobID, _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err != nil || jobID != 45 {
 		t.Fatalf("unacknowledged remote cancellation mapping job=%d err=%v", jobID, err)
 	}
 }
@@ -229,8 +405,78 @@ func TestHTTPAgentClientCancelsDelegateResourceAndForgetsAcknowledgedJob(t *test
 	if singularCancels.Load() != 0 || pluralCancels.Load() != 1 || cancelledJobID.Load() != 43 {
 		t.Fatalf("singular=%d plural=%d job_id=%d", singularCancels.Load(), pluralCancels.Load(), cancelledJobID.Load())
 	}
-	if _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
+	if _, _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
 		t.Fatal("acknowledged cancelled delegate retained its durable mapping")
+	}
+}
+
+func TestCancelTerminalJobsRecoversCommitToCancelCrashWindow(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "db.sqlite")
+	store, err := db1.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	const workItemID = "wi_crash_recovery"
+	if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{ID: workItemID, Repo: "repo", ProposalPath: workItemID, WorkflowName: "build", StartStage: "impl"}); err != nil {
+		t.Fatal(err)
+	}
+	request := DelegateRequest{Role: "code", Persona: "engineer", Prompt: "implement", WorkItemID: workItemID, Stage: "impl", ExecutionVersion: "v1"}
+	key := delegateJobKey(request)
+	if err := store.SaveWorkflowDelegateJob(t.Context(), key, workItemID, 77, "participant-77"); err != nil {
+		t.Fatal(err)
+	}
+	const completedID = "wi_completed_mapping"
+	if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{ID: completedID, Repo: "repo", ProposalPath: completedID, WorkflowName: "build", StartStage: "impl"}); err != nil {
+		t.Fatal(err)
+	}
+	completedKey := completedID + ":impl:v1:hash"
+	if err := store.SaveWorkflowDelegateJob(t.Context(), completedKey, completedID, 78, "participant-78"); err != nil {
+		t.Fatal(err)
+	}
+	rawDB, err := sql.Open("sqlite", "file:"+dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rawDB.Close()
+	if _, err := rawDB.ExecContext(t.Context(), `CREATE TABLE IF NOT EXISTS agent_jobs (id INTEGER PRIMARY KEY,status TEXT NOT NULL); INSERT INTO agent_jobs(id,status) VALUES(77,'running'),(78,'done')`); err != nil {
+		t.Fatal(err)
+	}
+	// Model a server failure immediately after the terminal lifecycle commit:
+	// the durable delegate mapping remains and no in-memory cancel callback ran.
+	if _, err := store.StopTree(t.Context(), workItemID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.StopTree(t.Context(), completedID); err != nil {
+		t.Fatal(err)
+	}
+	var cancelledJob atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/jobs/cancel" {
+			http.NotFound(w, r)
+			return
+		}
+		var body struct {
+			JobID int `json:"job_id"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		cancelledJob.Store(int32(body.JobID))
+		_ = json.NewEncoder(w).Encode(map[string]any{"cancelled": true})
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelled, err := client.CancelTerminalJobs(t.Context())
+	if err != nil || cancelled != 1 || cancelledJob.Load() != 77 {
+		t.Fatalf("cancelled=%d job=%d err=%v", cancelled, cancelledJob.Load(), err)
+	}
+	if _, _, err := store.DelegateJob(t.Context(), key); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("acknowledged terminal mapping retained: %v", err)
+	}
+	if jobID, _, err := store.DelegateJob(t.Context(), completedKey); err != nil || jobID != 78 {
+		t.Fatalf("completed mapping was incorrectly cancelled: job=%d err=%v", jobID, err)
 	}
 }
 
@@ -272,7 +518,7 @@ func TestCancelRemoteRetainsMappingWithoutBooleanAcknowledgement(t *testing.T) {
 				t.Fatal(err)
 			}
 			const key = "cancel-unacknowledged"
-			if err := store.SaveDelegateJob(t.Context(), key, 44); err != nil {
+			if err := store.SaveDelegateJob(t.Context(), key, 44, "participant-44"); err != nil {
 				t.Fatal(err)
 			}
 			cancelErr := client.cancelRemoteAndForget(44, key, t.Context())
@@ -282,7 +528,7 @@ func TestCancelRemoteRetainsMappingWithoutBooleanAcknowledgement(t *testing.T) {
 			if !errors.Is(cancelErr, ErrDelegateCancelUnacknowledged) {
 				t.Fatalf("cancel error=%v", cancelErr)
 			}
-			if jobID, err := store.DelegateJob(t.Context(), key); err != nil || jobID != 44 {
+			if jobID, _, err := store.DelegateJob(t.Context(), key); err != nil || jobID != 44 {
 				t.Fatalf("unacknowledged cancellation mapping job=%d err=%v", jobID, err)
 			}
 		})
@@ -348,7 +594,7 @@ func TestHTTPAgentClientRejectsLaunchWithoutJobID(t *testing.T) {
 	}
 	request := DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review",
 		WorkItemID: "wi_no_capacity", Stage: "gate", ExecutionVersion: "v1"}
-	if jobID, lookupErr := store.DelegateJob(t.Context(), delegateJobKey(request)); !errors.Is(lookupErr, sql.ErrNoRows) {
+	if jobID, _, lookupErr := store.DelegateJob(t.Context(), delegateJobKey(request)); !errors.Is(lookupErr, sql.ErrNoRows) {
 		t.Fatalf("invalid launch mapping job=%d err=%v", jobID, lookupErr)
 	}
 	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store})
@@ -475,7 +721,7 @@ func TestHTTPAgentClientExpiresUnassignedPendingJob(t *testing.T) {
 	if launches.Load() != 1 || cancellations.Load() != 1 {
 		t.Fatalf("launches=%d cancellations=%d", launches.Load(), cancellations.Load())
 	}
-	if _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
+	if _, _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
 		t.Fatal("expired pending job retained its durable mapping")
 	}
 	if _, err := client.Delegate(t.Context(), request); err == nil {
@@ -536,7 +782,7 @@ func TestHTTPAgentClientExpiresUnassignedRunningJob(t *testing.T) {
 	if cancelledJobID.Load() != 20 || gotCancelReason != "unassigned delegate lease expired" {
 		t.Fatalf("cancelled job=%d reason=%q", cancelledJobID.Load(), gotCancelReason)
 	}
-	if _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
+	if _, _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
 		t.Fatal("expired running job retained its durable mapping")
 	}
 }
@@ -588,7 +834,7 @@ func TestHTTPAgentClientAssignedObservationClearsUnassignedLease(t *testing.T) {
 	if cancellations.Load() != 0 {
 		t.Fatalf("assigned job was cancelled %d times", cancellations.Load())
 	}
-	if jobID, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err != nil || jobID != 21 {
+	if jobID, _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err != nil || jobID != 21 {
 		t.Fatalf("assigned job mapping was not retained: job=%d err=%v", jobID, err)
 	}
 }
@@ -629,7 +875,7 @@ func TestHTTPAgentClientTerminalEmptyAgentDoesNotExpire(t *testing.T) {
 	if cancellations.Load() != 0 {
 		t.Fatalf("terminal job was cancelled %d times", cancellations.Load())
 	}
-	if _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
+	if _, _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
 		t.Fatal("terminal job retained its durable mapping")
 	}
 }
@@ -715,7 +961,7 @@ func TestHTTPAgentClientExpiresAfterTransientStatusFailures(t *testing.T) {
 	if cancellations.Load() != 1 {
 		t.Fatalf("cancellations=%d, want 1", cancellations.Load())
 	}
-	if _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
+	if _, _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
 		t.Fatal("expired job retained mapping after transient status failures")
 	}
 }
@@ -742,13 +988,13 @@ func TestHTTPAgentClientRetainsMappingWhenExpiryCancellationFails(t *testing.T) 
 		t.Fatal(err)
 	}
 	const key = "durable-key"
-	if err := store.SaveDelegateJob(t.Context(), key, 20); err != nil {
+	if err := store.SaveDelegateJob(t.Context(), key, 20, "participant-20"); err != nil {
 		t.Fatal(err)
 	}
 	if err := client.expireUnassigned(20, key, time.Now()); err == nil || !errors.Is(err, ErrDelegateUnassignedExpired) {
 		t.Fatalf("failed cancellation lost structured expiry: %v", err)
 	}
-	if jobID, err := store.DelegateJob(t.Context(), key); err != nil || jobID != 20 {
+	if jobID, _, err := store.DelegateJob(t.Context(), key); err != nil || jobID != 20 {
 		t.Fatalf("mapping after failed cancel: job=%d err=%v", jobID, err)
 	}
 }
@@ -768,14 +1014,14 @@ func TestHTTPAgentClientRetainsMappingWhenExpiryCancellationRejected(t *testing.
 		t.Fatal(err)
 	}
 	const key = "durable-rejected-key"
-	if err := store.SaveDelegateJob(t.Context(), key, 23); err != nil {
+	if err := store.SaveDelegateJob(t.Context(), key, 23, "participant-23"); err != nil {
 		t.Fatal(err)
 	}
 	if err := client.expireUnassigned(23, key, time.Now()); err == nil ||
 		!errors.Is(err, ErrDelegateUnassignedExpired) || !strings.Contains(err.Error(), "durable mapping retained") {
 		t.Fatalf("rejected cancellation lost structured expiry: %v", err)
 	}
-	if jobID, err := store.DelegateJob(t.Context(), key); err != nil || jobID != 23 {
+	if jobID, _, err := store.DelegateJob(t.Context(), key); err != nil || jobID != 23 {
 		t.Fatalf("mapping after rejected cancel: job=%d err=%v", jobID, err)
 	}
 }
@@ -815,44 +1061,148 @@ func TestDelegateJobKeyIncludesExplicitEligibilityFallback(t *testing.T) {
 	}
 }
 
-func TestHTTPAgentClientEligibleRosterUsesEnabledRoleCapacity(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/agent/list" {
-			http.NotFound(w, r)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]any{
-			{"name": "codex", "provider": "chatgpt", "enabled": true, "max_parallel": 10, "roles": []string{"all"}},
-			{"name": "minimax", "provider": "anthropic", "enabled": true, "max_parallel": 4, "roles": []string{"review"}},
-			{"name": "primary", "provider": "claude", "enabled": true, "primary_only": true, "max_parallel": 4, "roles": []string{"all"}},
-			{"name": "disabled", "provider": "openai", "enabled": false, "max_parallel": 3, "roles": []string{"all"}},
-			{"name": "code-only", "provider": "openai", "enabled": true, "max_parallel": 2, "roles": []string{"code"}},
-			{"name": "   ", "provider": "openai", "enabled": true, "max_parallel": 2, "roles": []string{"all"}},
-			{"name": "empty-role", "provider": "openai", "enabled": true, "max_parallel": 2, "roles": []string{""}},
-		}})
-	}))
-	defer server.Close()
-	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL})
-	if err != nil {
-		t.Fatal(err)
-	}
-	roster, err := client.EligibleAgents(context.Background(), "review")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(roster) != 2 || roster[0].Name != "codex" || roster[0].MaxParallel != 10 || roster[1].Name != "minimax" {
-		t.Fatalf("roster=%+v", roster)
-	}
-	if _, err := client.EligibleAgents(context.Background(), ""); err == nil {
-		t.Fatal("empty eligibility role accepted")
-	}
-}
-
 func TestHTTPAgentClientRequiresAuthenticationOffLoopback(t *testing.T) {
 	if _, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: "https://resource-plane.example"}); err == nil {
 		t.Fatal("unauthenticated non-loopback agent service accepted")
 	}
 	if _, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: "https://resource-plane.example", Bearer: "token"}); err != nil {
 		t.Fatalf("authenticated remote agent service rejected: %v", err)
+	}
+}
+
+// A panel seat must not be given to an agent that is already at max_parallel
+// while an idle agent is eligible. The router used to count only the seats it
+// was assigning in this group, so an agent saturated by other work still looked
+// free: the seat was dispatched, admission refused it with
+// aimee_err=concurrency_limit, and a panel needing 2 of 3 seats was reported
+// unreachable while another agent sat idle. Observed live on run wi_e51e37cf,
+// where every "claude" seat failed instantly with
+// "agent 'claude' at concurrency limit (max_parallel=3)".
+func TestGroupRoutingSkipsAnAgentAlreadyAtItsConcurrencyLimit(t *testing.T) {
+	var mu sync.Mutex
+	var vias []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/agent/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]any{
+				// Saturated by work outside this group.
+				{"name": "busy", "provider": "p1", "model": "m1", "enabled": true, "max_parallel": 3,
+					"active_delegates": 3, "roles": []string{"review"}, "personas": []string{"all"}},
+				// Idle and equally eligible.
+				{"name": "idle", "provider": "p2", "model": "m2", "enabled": true, "max_parallel": 3,
+					"active_delegates": 0, "roles": []string{"review"}, "personas": []string{"all"}},
+			}})
+		case "/v1/delegate/run":
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			mu.Lock()
+			vias = append(vias, fmt.Sprint(payload["via"]))
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 1, "participant": "p"})
+		case "/v1/delegate/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "ok"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.DelegateGroup(t.Context(), []DelegateRequest{
+		{Role: "review", Persona: "architect", Prompt: "review"},
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	if len(vias) != 1 {
+		t.Fatalf("expected one dispatch, got %v", vias)
+	}
+	if vias[0] != "idle" {
+		t.Fatalf("seat routed to %q; a saturated agent must not be preferred over an idle one", vias[0])
+	}
+}
+
+// PREFER, never exclude: when every eligible agent is saturated the seat must
+// still be filled. Dispatch then fails as capacity backpressure, which the
+// engine retries -- refusing to route instead makes the panel unreachable,
+// which it does not recover from.
+func TestGroupRoutingStillFillsASeatWhenEveryAgentIsSaturated(t *testing.T) {
+	var mu sync.Mutex
+	var vias []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/agent/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]any{
+				{"name": "busy-a", "provider": "p1", "model": "m1", "enabled": true, "max_parallel": 2,
+					"active_delegates": 2, "roles": []string{"review"}, "personas": []string{"all"}},
+				{"name": "busy-b", "provider": "p2", "model": "m2", "enabled": true, "max_parallel": 2,
+					"active_delegates": 5, "roles": []string{"review"}, "personas": []string{"all"}},
+			}})
+		case "/v1/delegate/run":
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			mu.Lock()
+			vias = append(vias, fmt.Sprint(payload["via"]))
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 1, "participant": "p"})
+		case "/v1/delegate/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "ok"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.DelegateGroup(t.Context(), []DelegateRequest{
+		{Role: "review", Persona: "architect", Prompt: "review"},
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	if len(vias) != 1 {
+		t.Fatalf("a saturated roster must still fill the seat, got dispatches %v", vias)
+	}
+}
+
+// An agent that reports no occupancy at all (older delegate service) must keep
+// its previous behaviour and stay routable -- absent must not read as "busy".
+func TestGroupRoutingTreatsUnreportedOccupancyAsRoutable(t *testing.T) {
+	var mu sync.Mutex
+	var vias []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/agent/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]any{
+				{"name": "unreported", "provider": "p1", "model": "m1", "enabled": true, "max_parallel": 1,
+					"roles": []string{"review"}, "personas": []string{"all"}},
+			}})
+		case "/v1/delegate/run":
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			mu.Lock()
+			vias = append(vias, fmt.Sprint(payload["via"]))
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 1, "participant": "p"})
+		case "/v1/delegate/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "ok"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.DelegateGroup(t.Context(), []DelegateRequest{
+		{Role: "review", Persona: "architect", Prompt: "review"},
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	if len(vias) != 1 || vias[0] != "unreported" {
+		t.Fatalf("unreported occupancy must stay routable, got %v", vias)
 	}
 }

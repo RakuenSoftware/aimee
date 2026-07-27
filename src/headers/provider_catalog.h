@@ -35,10 +35,19 @@ typedef enum
 #define PROVIDER_STALE_SECONDS 3600
 /* Seconds since last success before an entry is considered down due to age. */
 #define PROVIDER_DOWN_SECONDS (3 * PROVIDER_STALE_SECONDS)
-/* Cooldown after a streak-induced DOWN before the circuit breaker half-opens:
- * the agent becomes routable again so a probe can let it recover without a
- * server restart. Measured from the last failure. */
+/* BASE cooldown after a streak-induced DOWN before the circuit breaker
+ * half-opens: the agent becomes routable again so a probe can let it recover
+ * without a server restart. Measured from the last failure.
+ *
+ * This is the cooldown for a BLIP. It doubles per breaker trip - see
+ * provider_catalog_cooldown_seconds() - because a fixed 60s meant an agent that
+ * could not possibly succeed was retried as eagerly as a briefly flaky one. */
 #define PROVIDER_DOWN_COOLDOWN_SECONDS 60
+
+/* Ceiling on the backed-off cooldown. Long enough that a hopeless seat stops
+ * churning through routing, short enough that a provider which recovers quietly
+ * is picked up again without operator action. */
+#define PROVIDER_DOWN_COOLDOWN_MAX_SECONDS 1800
 
 /* Locality-inferred default concurrency limits.
  * Only applied when no explicit per-model / per-provider config override
@@ -70,6 +79,10 @@ typedef struct
    time_t last_failure;
    char last_failure_class[64];
    int failure_streak;
+   /* Breaker TRIPS since the last success: one per half-open probe that failed
+    * again. Drives the cooldown backoff. Distinct from failure_streak, which
+    * counts dispatches and so inflates with parallelism. */
+   int breaker_trips;
    int active_count; /* in-flight delegates for this agent */
 } provider_catalog_entry_t;
 
@@ -91,6 +104,20 @@ void provider_catalog_record_failure(const char *agent_name, const char *failure
 /* Query health state for a named agent.  Returns HEALTHY for unknown agents
  * so unknown names never block routing. */
 catalog_health_t provider_catalog_get_health(const char *agent_name);
+
+/* How long this agent must stay DOWN before the breaker half-opens, in seconds.
+ *
+ * PROVIDER_DOWN_COOLDOWN_SECONDS for a first trip, doubling per SUBSEQUENT trip
+ * up to PROVIDER_DOWN_COOLDOWN_MAX_SECONDS. Driven by breaker TRIPS, not by the
+ * raw failure streak: the streak climbs once per dispatch, so under high
+ * parallelism a provider that blipped for two seconds could bank hundreds of
+ * failures and be penalised as though it had been down for hours. A trip only
+ * happens when a half-open probe fails, which costs real wall-clock, so it
+ * tracks "how long has this actually been broken" far better.
+ *
+ * Returns the BASE cooldown for an agent that is not tripped (including unknown
+ * agents), so a caller can compare against it without special-casing. */
+int provider_catalog_cooldown_seconds(const char *agent_name);
 
 /* Query locality for a named agent. */
 provider_locality_t provider_catalog_get_locality(const char *agent_name);

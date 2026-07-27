@@ -8,10 +8,12 @@
 #include <unistd.h>
 #include "aimee.h"
 #include "db.h"
+#include <aimee/audit/obs_bus.h> /* obs_bus_flush — gsem_record records guardrail events async now */
 #include "db1.h"
 #include "db2.h"
 #include "db2_test_shim.h"
 #include "workspace.h"
+#include "workspace_turn.h" /* workspace_turn_set_container_bound_for_test */
 #include "platform_test_util.h"
 #include "git_verify.h"
 
@@ -1373,6 +1375,47 @@ static void test_no_worktree_blocks_writes(void)
    guardrails_close_test_sqlite();
 }
 
+/* A delegate bound to its own sandbox container writes into the container's bind-mounted
+ * worktree — the mount IS the boundary. The host-side "not running in a worktree" guard
+ * cannot see that and would block every write (the live failure: MiniMax/kimi implement
+ * slices produced zero diff because every write_file/execute_script was refused). The
+ * container-bound turn must be exempt from BOTH worktree-location block sites. */
+static void test_container_delegate_exempt_from_worktree_guard(void)
+{
+   guardrails_open_test_sqlite();
+   session_state_t state;
+   memset(&state, 0, sizeof(state));
+   strcpy(state.session_mode, MODE_IMPLEMENT);
+   strcpy(state.guardrail_mode, MODE_APPROVE);
+   char msg[1024] = "";
+
+   /* Baseline: NOT a container delegate, cwd outside any worktree -> write is blocked. */
+   workspace_turn_set_container_bound_for_test(0);
+   int rc = pre_tool_check(
+       "Edit", "{\"file_path\":\"/tmp/test.c\",\"old_string\":\"a\",\"new_string\":\"b\"}", &state,
+       MODE_APPROVE, "/tmp", msg, sizeof(msg));
+   assert(rc == 2 && strstr(msg, "not running in a worktree") != NULL);
+
+   /* Container-bound delegate: the same write must NOT be blocked by the worktree guard. */
+   workspace_turn_set_container_bound_for_test(1);
+   msg[0] = '\0';
+   rc = pre_tool_check("Edit",
+                       "{\"file_path\":\"/tmp/test.c\",\"old_string\":\"a\",\"new_string\":\"b\"}",
+                       &state, MODE_APPROVE, "/tmp", msg, sizeof(msg));
+   assert(strstr(msg, "not running in a worktree") == NULL);
+
+   /* execute_script (the script_tool path, second block site) is also exempt. */
+   msg[0] = '\0';
+   rc =
+       pre_tool_check("execute_script", "{\"language\":\"bash\",\"body\":\"echo x > /tmp/test.c\"}",
+                      &state, MODE_APPROVE, "/tmp", msg, sizeof(msg));
+   assert(strstr(msg, "not running in a worktree") == NULL);
+   (void)rc;
+
+   workspace_turn_set_container_bound_for_test(-1); /* restore real behavior */
+   guardrails_close_test_sqlite();
+}
+
 static void test_shell_command_targeting_worktree_allows_write(void)
 {
    guardrails_open_test_sqlite();
@@ -2095,6 +2138,9 @@ static void test_semantic_advisory_pre_tool_check(void)
    strcpy(state.session_mode, MODE_IMPLEMENT);
    strcpy(state.guardrail_mode, MODE_APPROVE);
 
+   /* gsem_record now records over the event bus (async); flush so the count
+    * baseline and the post-check counts reflect the writes deterministically. */
+   obs_bus_flush();
    guardrail_event_counts_t before_counts;
    assert(db1_guardrail_event_counts_7d(&before_counts) == 0);
 
@@ -2125,6 +2171,7 @@ static void test_semantic_advisory_pre_tool_check(void)
    assert(rc == 0);
    assert(strstr(msg, "semantic guardrail: high risk") != NULL);
 
+   obs_bus_flush(); /* drain the two async guardrail events into db1 before counting */
    guardrail_event_counts_t counts;
    assert(db1_guardrail_event_counts_7d(&counts) == 0);
    assert(counts.warn == before_counts.warn);
@@ -3479,6 +3526,7 @@ int main(void)
    test_unknown_subagent_surface_blocked();
    test_hook_call_count_increments();
    test_no_worktree_blocks_writes();
+   test_container_delegate_exempt_from_worktree_guard();
    test_shell_command_targeting_worktree_allows_write();
    test_write_file_targeting_worktree_allows_stale_cwd();
    test_external_feature_checkout_allows_writes();

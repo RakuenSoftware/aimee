@@ -7,8 +7,8 @@
 #include "cJSON.h"
 #include "config.h"
 #include "mcp_osv_cache.h"
-#include "mcp_client_registry.h"
-#include "mcp_tools.h"
+#include "aimee/protocols/mcp/mcp_client_registry.h"
+#include "aimee/protocols/mcp/mcp_tools.h"
 
 static const char *g_http_response;
 static int g_http_status = -1;
@@ -167,7 +167,7 @@ static void test_boot_and_lazy_tools(void)
             mock_server_path());
    snprintf(cfg.mcp_clients[0].command[1], sizeof(cfg.mcp_clients[0].command[1]), "%s", "happy");
 
-   assert(mcp_client_registry_boot(&cfg) == 1);
+   assert(mcp_client_registry_boot(&cfg, CONFIG_MCP_INSTALL_SERVER) == 1);
    assert(mcp_client_registry_count() == 1);
    assert(strcmp(mcp_client_registry_name_at(0), "mock") == 0);
    assert(mcp_client_registry_get("mock") != NULL);
@@ -189,6 +189,45 @@ static void test_boot_and_lazy_tools(void)
    assert(mcp_client_registry_get("mock") == NULL);
 }
 
+/* A daemon boots ONLY the plugins whose install target it hosts: a server boots
+ * install:server clients, a kb boots install:kb clients, never the other's. */
+static void test_install_target_filtering(void)
+{
+   config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.mcp_client_count = 2;
+   /* client 0: server-hosted */
+   snprintf(cfg.mcp_clients[0].name, sizeof(cfg.mcp_clients[0].name), "%s", "srv");
+   cfg.mcp_clients[0].transport = CONFIG_MCP_TRANSPORT_STDIO;
+   cfg.mcp_clients[0].install = CONFIG_MCP_INSTALL_SERVER;
+   cfg.mcp_clients[0].command_count = 2;
+   snprintf(cfg.mcp_clients[0].command[0], sizeof(cfg.mcp_clients[0].command[0]), "%s",
+            mock_server_path());
+   snprintf(cfg.mcp_clients[0].command[1], sizeof(cfg.mcp_clients[0].command[1]), "%s", "happy");
+   /* client 1: kb-hosted (same mock binary) */
+   snprintf(cfg.mcp_clients[1].name, sizeof(cfg.mcp_clients[1].name), "%s", "shared");
+   cfg.mcp_clients[1].transport = CONFIG_MCP_TRANSPORT_STDIO;
+   cfg.mcp_clients[1].install = CONFIG_MCP_INSTALL_KB;
+   cfg.mcp_clients[1].command_count = 2;
+   snprintf(cfg.mcp_clients[1].command[0], sizeof(cfg.mcp_clients[1].command[0]), "%s",
+            mock_server_path());
+   snprintf(cfg.mcp_clients[1].command[1], sizeof(cfg.mcp_clients[1].command[1]), "%s", "happy");
+
+   /* Boot as the server: only the install:server plugin starts. */
+   assert(mcp_client_registry_boot(&cfg, CONFIG_MCP_INSTALL_SERVER) == 1);
+   assert(mcp_client_registry_count() == 1);
+   assert(mcp_client_registry_get("srv") != NULL);
+   assert(mcp_client_registry_get("shared") == NULL);
+   mcp_client_registry_shutdown();
+
+   /* Boot as the kb: only the install:kb plugin starts. */
+   assert(mcp_client_registry_boot(&cfg, CONFIG_MCP_INSTALL_KB) == 1);
+   assert(mcp_client_registry_count() == 1);
+   assert(mcp_client_registry_get("shared") != NULL);
+   assert(mcp_client_registry_get("srv") == NULL);
+   mcp_client_registry_shutdown();
+}
+
 static void test_namespaced_tools_and_dispatch(void)
 {
    config_t cfg;
@@ -201,7 +240,7 @@ static void test_namespaced_tools_and_dispatch(void)
             mock_server_path());
    snprintf(cfg.mcp_clients[0].command[1], sizeof(cfg.mcp_clients[0].command[1]), "%s", "happy");
 
-   assert(mcp_client_registry_boot(&cfg) == 1);
+   assert(mcp_client_registry_boot(&cfg, CONFIG_MCP_INSTALL_SERVER) == 1);
 
    cJSON *remote_tools = mcp_client_registry_build_namespaced_tools(1000);
    assert(cJSON_IsArray(remote_tools));
@@ -309,7 +348,7 @@ static void test_failed_client_does_not_abort_boot(void)
             mock_server_path());
    snprintf(cfg.mcp_clients[1].command[1], sizeof(cfg.mcp_clients[1].command[1]), "%s", "happy");
 
-   assert(mcp_client_registry_boot(&cfg) == 1);
+   assert(mcp_client_registry_boot(&cfg, CONFIG_MCP_INSTALL_SERVER) == 1);
    assert(mcp_client_registry_count() == 1);
    assert(mcp_client_registry_get("missing") == NULL);
    assert(mcp_client_registry_get("mock") != NULL);
@@ -336,7 +375,7 @@ static void test_osv_gate_blocks_malware(void)
    snprintf(cfg.mcp_clients[0].command[0], sizeof(cfg.mcp_clients[0].command[0]), "%s", "npx");
    snprintf(cfg.mcp_clients[0].command[1], sizeof(cfg.mcp_clients[0].command[1]), "%s", "bad-pkg");
 
-   assert(mcp_client_registry_boot(&cfg) == 0);
+   assert(mcp_client_registry_boot(&cfg, CONFIG_MCP_INSTALL_SERVER) == 0);
    assert(mcp_client_registry_count() == 0);
    assert(g_http_calls == 1);
    assert(strcmp(g_last_audit_verdict, "malware") == 0);
@@ -365,7 +404,7 @@ static void test_osv_gate_shadow_and_allowlist_allow(void)
    cfg.mcp_clients[0].command_count = 2;
    snprintf(cfg.mcp_clients[0].command[0], sizeof(cfg.mcp_clients[0].command[0]), "%s", npx_path);
    snprintf(cfg.mcp_clients[0].command[1], sizeof(cfg.mcp_clients[0].command[1]), "%s", "bad-pkg");
-   assert(mcp_client_registry_boot(&cfg) == 1);
+   assert(mcp_client_registry_boot(&cfg, CONFIG_MCP_INSTALL_SERVER) == 1);
    assert(strcmp(g_last_audit_action, "shadow_block") == 0);
    mcp_client_registry_shutdown();
 
@@ -376,7 +415,7 @@ static void test_osv_gate_shadow_and_allowlist_allow(void)
    cfg.mcp_osv_enforce = 1;
    cfg.mcp_osv_allow_count = 1;
    snprintf(cfg.mcp_osv_allow[0], sizeof(cfg.mcp_osv_allow[0]), "%s", "npm:bad-pkg");
-   assert(mcp_client_registry_boot(&cfg) == 1);
+   assert(mcp_client_registry_boot(&cfg, CONFIG_MCP_INSTALL_SERVER) == 1);
    assert(g_http_calls == 0);
    assert(strcmp(g_last_audit_action, "allow_allowlisted") == 0);
    mcp_client_registry_shutdown();
@@ -404,7 +443,7 @@ static void test_osv_offline_cache_miss_allows(void)
    snprintf(cfg.mcp_clients[0].command[0], sizeof(cfg.mcp_clients[0].command[0]), "%s", npx_path);
    snprintf(cfg.mcp_clients[0].command[1], sizeof(cfg.mcp_clients[0].command[1]), "%s", "pkg");
 
-   assert(mcp_client_registry_boot(&cfg) == 1);
+   assert(mcp_client_registry_boot(&cfg, CONFIG_MCP_INSTALL_SERVER) == 1);
    assert(g_http_calls == 0);
    assert(strcmp(g_last_audit_verdict, "unknown") == 0);
    assert(strcmp(g_last_audit_action, "allow") == 0);
@@ -476,7 +515,7 @@ static void test_osv_offline_cache_miss_allows(void)
    "until} req:command\n"                                                                          \
    "recall {block_type,command,limit,limit_tokens,query,since} req:command\n"                      \
    "roadmap {command,roadmap_id} req:command\n"                                                    \
-   "roundtable_review {brief,diff,roundtable} req:diff\n"                                          \
+   "roundtable_review {artifact_stage,brief,diff,original_request,roundtable,workdir} req:diff\n"  \
    "rules {command,reason,text} req:command\n"                                                     \
    "search_docs {max_results,query} req:query\n"                                                   \
    "search_memory {filter,query} req:query\n"                                                      \
@@ -684,6 +723,7 @@ int main(void)
    test_tool_profile_filter();
    test_flat_list_keeps_family_members();
    test_boot_and_lazy_tools();
+   test_install_target_filtering();
    test_namespaced_tools_and_dispatch();
    test_failed_client_does_not_abort_boot();
    test_osv_gate_blocks_malware();

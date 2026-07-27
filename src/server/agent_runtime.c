@@ -4,9 +4,8 @@
 #include "aimee_errors.h"
 #include "db1.h"
 #include "db1/delegations.h" /* db1_delegation_spawn_is_stopped — admission cancel poll */
-#include "delegate_role.h"
-#include "skill_curator.h"
-#include "skill_review.h"
+#include <aimee/delegates/delegate_role.h>
+#include <aimee/skills/skill_review.h>
 #include "provider_catalog.h"
 #include "db2/agent_hints.h"
 #include "db2/agent_outcomes.h"
@@ -21,12 +20,12 @@
 #include "agent_tools.h"
 #include "agent_tunnel.h"
 #include "config.h"
-#include "delegate_driver.h"
+#include <aimee/delegates/delegate_driver.h>
 #include "http_retry.h"
 #include "log.h"
 #include "model_sampling.h"
 #include "payload_rewrite.h"
-#include "headers/plugin_c_hook.h"
+#include "aimee/module-runtime/pre_llm_hook.h"
 #include "prompts.h"
 #include "util.h"
 #include "cJSON.h"
@@ -287,6 +286,18 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
    {
       const char *ec = agent_error_is_retryable(out->error) ? "retryable" : "error";
       provider_catalog_record_failure(ag->name, ec);
+      /* Surface WHY a delegate attempt failed. Without this the only trace of a failed
+       * turn is the downstream "fallback: trying same-tier agent" line, which hides the
+       * reason — so a delegate that loops/falls-back to no diff is undiagnosable from the
+       * log. The tool-progress counters distinguish "model produced no/no-usable tool
+       * call" (tool_calls low or successful_tool_calls==0) from a provider/transport
+       * error, and stop_reason shows how the provider ended the turn. */
+      aimee_log(LOG_WARN, "agent",
+                "delegate '%s' attempt failed (rc=%d, class=%s, turns=%d, tool_calls=%d, "
+                "successful=%d, stop=%s): %s",
+                ag->name, rc, ec, out->turns, out->tool_calls, out->successful_tool_calls,
+                out->stop_reason[0] ? out->stop_reason : "-",
+                out->error[0] ? out->error : "(no error text)");
    }
    return rc;
 }
@@ -1603,9 +1614,6 @@ char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *n
             char *resp = kb_client_memory_maintenance_run_json(0, 0, 0);
             free(resp);
          }
-         /* Review fires from server.c hook path; curator runs on scheduler tick. */
-         if (maint_cfg.skills_curator_enabled)
-            skill_curator_maybe();
       }
    }
    int recall_injected = 0;

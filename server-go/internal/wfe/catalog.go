@@ -8,18 +8,23 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"go.yaml.in/yaml/v3"
 )
 
 type BlockDefinition struct {
-	Name             string   `json:"name" yaml:"name"`
-	Produces         string   `json:"produces" yaml:"produces,omitempty"`
-	Accepts          []string `json:"accepts" yaml:"-"`
-	InputPorts       []string `json:"input_ports" yaml:"-"`
-	RequiredPorts    []string `json:"required_ports" yaml:"-"`
-	Custom           bool     `json:"custom" yaml:"-"`
-	RequiresInput    bool     `json:"requires_input" yaml:"-"`
+	Name          string   `json:"name" yaml:"name"`
+	Produces      string   `json:"produces" yaml:"produces,omitempty"`
+	Accepts       []string `json:"accepts" yaml:"-"`
+	InputPorts    []string `json:"input_ports" yaml:"-"`
+	RequiredPorts []string `json:"required_ports" yaml:"-"`
+	Custom        bool     `json:"custom" yaml:"-"`
+	RequiresInput bool     `json:"requires_input" yaml:"-"`
+	// RequiredParams are node params the block cannot run without. They are part
+	// of the block contract exactly like RequiredPorts, so a workflow that omits
+	// one fails validation instead of resolving something implicit at runtime.
+	RequiredParams   []string `json:"required_params,omitempty" yaml:"-"`
 	Executor         string   `json:"executor,omitempty" yaml:"executor,omitempty"`
 	Consumes         string   `json:"consumes,omitempty" yaml:"consumes,omitempty"`
 	Persona          string   `json:"persona,omitempty" yaml:"persona,omitempty"`
@@ -43,7 +48,7 @@ var BuiltinBlocks = []BlockDefinition{
 	{Name: "document", Produces: "branch", Accepts: []string{"branch"}, InputPorts: []string{"branch"}, RequiredPorts: []string{"branch"}, RequiresInput: true},
 	{Name: "source.archive", Produces: "branch", Accepts: []string{"branch"}, InputPorts: []string{"branch"}, RequiredPorts: []string{"branch"}, RequiresInput: true},
 	{Name: "freeze", Produces: "frozen_diff", Accepts: []string{"branch"}, InputPorts: []string{"branch"}, RequiredPorts: []string{"branch"}, RequiresInput: true},
-	{Name: "gate.roundtable", Produces: "verdict", Accepts: []string{"proposal", "plan", "frozen_diff"}, InputPorts: []string{"src"}, RequiredPorts: []string{"src"}, RequiresInput: true},
+	{Name: "gate.roundtable", Produces: "verdict", Accepts: []string{"proposal", "plan", "frozen_diff"}, InputPorts: []string{"src"}, RequiredPorts: []string{"src"}, RequiresInput: true, RequiredParams: []string{"roundtable"}},
 	{Name: "gate.human", Produces: "approval", Accepts: []string{"proposal", "plan", "branch", "frozen_diff", "pr"}, InputPorts: []string{"src"}, RequiredPorts: []string{"src"}, RequiresInput: true},
 	{Name: "pr.open", Produces: "pr", Accepts: []string{"proposal", "frozen_diff"}, InputPorts: []string{"src"}, RequiredPorts: []string{"src"}, RequiresInput: true},
 	{Name: "merge", Produces: "none", Accepts: []string{"pr"}, InputPorts: []string{"pr"}, RequiredPorts: []string{"pr"}, RequiresInput: true},
@@ -55,6 +60,19 @@ var BuiltinBlocks = []BlockDefinition{
 	{Name: "gate.deliver", Produces: "none", Accepts: []string{"verdict", "approval"}, InputPorts: []string{"verdict"}, RequiredPorts: []string{"verdict"}, RequiresInput: true},
 	{Name: "branch.open", Produces: "branch", Accepts: []string{"plan"}},
 	{Name: "foreach.workflow", Produces: "branch", Accepts: []string{"plan", "branch"}, InputPorts: []string{"packets", "feature"}, RequiredPorts: []string{"packets", "feature"}, RequiresInput: true},
+}
+
+// requiredParams enforces the block's RequiredParams against one node. A param
+// present but blank is the same failure as an absent one: both leave the block
+// with nothing to resolve.
+func requiredParams(node Node, block BlockDefinition) error {
+	for _, required := range block.RequiredParams {
+		value, ok := node.Params[required].(string)
+		if !ok || strings.TrimSpace(value) == "" {
+			return fmt.Errorf("node %q requires param %q for block %q", node.ID, required, node.Block)
+		}
+	}
+	return nil
 }
 
 func BuiltinCatalog() map[string]BlockDefinition {
@@ -277,6 +295,9 @@ func (d Definition) ValidateCatalog(catalog map[string]BlockDefinition) error {
 			if _, ok := node.In[required]; !ok {
 				return fmt.Errorf("node %q requires input port %q", node.ID, required)
 			}
+		}
+		if err := requiredParams(node, block); err != nil {
+			return err
 		}
 	}
 	for _, node := range d.Nodes {

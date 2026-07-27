@@ -18,31 +18,33 @@
 #include "server_http.h"
 #include "openai_shape.h"
 #include "ingress_preinject.h"
-#include "gateway_pipeline.h"         /* gw_request_t + gw_pipeline_run_request — shared seam */
-#include "gw_stage_memory.h"          /* gw_stage_memory + gw_memory_system_prompt (P3) */
-#include "gw_stage_registry.h"        /* Slice 7: config-driven stage catalog */
-#include "gw_stage_governance.h"      /* response seam Slice 2: togglable governance */
-#include "dogfood.h"                  /* dogfood_autolabel_next_turn_live */
-#include "learning_implicit.h"        /* learning_implicit_detect_turn */
-#include "retrieval_outcome_bridge.h" /* retrieval_outcome_bridge_on_autolabel */
-#include "openai_responses_store.h"   /* previous_response_id continuation store */
-#include "openai_runs_store.h"        /* GET /v1/runs/{id} record store */
+#include <aimee/gateway/gateway_pipeline.h> /* gw_request_t + gw_pipeline_run_request — shared seam */
+#include "gw_stage_memory.h"                /* gw_stage_memory + gw_memory_system_prompt (P3) */
+#include "gw_stage_registry.h"              /* Slice 7: config-driven stage catalog */
+#include "gw_stage_governance.h"            /* response seam Slice 2: togglable governance */
+#include "dogfood.h"                        /* dogfood_autolabel_next_turn_live */
+#include "learning_implicit.h"              /* learning_implicit_detect_turn */
+#include "retrieval_outcome_bridge.h"       /* retrieval_outcome_bridge_on_autolabel */
+#include "openai_responses_store.h"         /* previous_response_id continuation store */
+#include "openai_runs_store.h"              /* GET /v1/runs/{id} record store */
 #include "aimee.h" /* EMBED_MAX_DIM, MAX_PATH_LEN (used by agent_types.h below) */
 #include "aimee_errors.h"
 #include "config.h" /* config_t, config_load */
 #include "agent_config.h"
 #include "agent_exec.h"
-#include "agent_protocol.h"  /* parsed_response_t, message_history_repair */
-#include "delegate_driver.h" /* single provider step for the Codex proxy */
+#include "agent_protocol.h"                  /* parsed_response_t, message_history_repair */
+#include <aimee/delegates/delegate_driver.h> /* single provider step for the Codex proxy */
 #include "http_retry.h"
 #include "economizer_wire_snapshot.h"
+#include "gateway_mutate_wire.h"
+#include "server_http_identity.h"
 #include "cJSON.h"
 #include "agent_tools.h" /* agent_tools_set_tool_event_cb — /v1/runs tool events */
 #include "agent_types.h"
-#include "gateway_policy.h" /* gateway_policy_apply_request — tool-policing stage */
-#include "router_advise.h"  /* gw_stage_router — the request->workflow seam */
-#include "aimee_ir_serve.h" /* IR-routed /v1/responses parse */
-#include "memory.h"         /* memory_embed_text */
+#include <aimee/gateway/gateway_policy.h> /* gateway_policy_apply_request — tool-policing stage */
+#include "router_advise.h"                /* gw_stage_router — the request->workflow seam */
+#include "aimee_ir_serve.h"               /* IR-routed /v1/responses parse */
+#include "memory.h"                       /* memory_embed_text */
 #include "request_context.h"
 #include "response_dedup.h"
 #include "token_tracker.h"
@@ -976,25 +978,53 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
 
    int tok = agent_request_max_tokens(agent, max_tokens);
 
-   char *body = openai_build_body(agent, driver, messages, eff_tools, eff_system, tok, temperature);
+   /* AGGRESSIVE may apply the existing lossy reducer to OpenAI-family request
+    * history. SAFE never enters this path. Anthropic-backed routes remain
+    * untouched to preserve their cache prefix. */
+   gw_mutate_ctx_t gwmc;
+   gw_mutate_ctx_init(&gwmc);
+   cJSON *mbox = NULL;
+   cJSON *econ_messages = messages;
+   int upstream_is_anthropic = driver && driver->name && strcmp(driver->name, "anthropic") == 0;
+   if (gw_mutate_upstream_ok(upstream_is_anthropic))
+   {
+      mbox = cJSON_CreateObject();
+      if (mbox)
+      {
+         cJSON_AddItemReferenceToObject(mbox, "input", messages);
+         gw_buffered_mutate(mbox, "input", agent->model, eff_system,
+                            server_http_identity_session_hdr(), server_http_identity_bearer(),
+                            server_http_identity_principal(), &gwmc);
+         cJSON *reduced = cJSON_GetObjectItemCaseSensitive(mbox, "input");
+         if (reduced)
+            econ_messages = reduced;
+      }
+   }
+
+   char *body =
+       openai_build_body(agent, driver, econ_messages, eff_tools, eff_system, tok, temperature);
    if (!body)
    {
+      cJSON_Delete(mbox);
+      gw_mutate_ctx_free(&gwmc);
       cJSON_Delete(gw_raw);
       return -1;
    }
 
    config_t econ_cfg;
-   int proof_gated = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) == ECON_MODE_PROOF_GATED;
+   int economizer_active = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) != ECON_MODE_OFF;
    int wire_anthropic = driver && driver->name && strcmp(driver->name, "anthropic") == 0;
    econ_wire_route_t wire_route = wire_anthropic              ? ECON_WIRE_ANTHROPIC_MESSAGES
                                   : strstr(url, "/responses") ? ECON_WIRE_OPENAI_RESPONSES
                                                               : ECON_WIRE_OPENAI_CHAT;
    econ_wire_snapshot_t *wire_snapshot = NULL;
    econ_wire_bytes_t wire_body;
-   if (econ_wire_select(proof_gated, wire_route, body, strlen(body), &wire_snapshot, &wire_body) !=
-       0)
+   if (econ_wire_select(economizer_active, wire_route, body, strlen(body), &wire_snapshot,
+                        &wire_body) != 0)
    {
       free(body);
+      cJSON_Delete(mbox);
+      gw_mutate_ctx_free(&gwmc);
       cJSON_Delete(gw_raw);
       return -1;
    }
@@ -1012,6 +1042,8 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    free(body);
    econ_wire_snapshot_destroy(wire_snapshot);
 
+   cJSON_Delete(mbox);
+   gw_mutate_ctx_free(&gwmc);
    cJSON_Delete(gw_raw);
 
    if (http_status != 200 || !response_body)

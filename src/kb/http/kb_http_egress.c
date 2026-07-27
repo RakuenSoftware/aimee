@@ -1,7 +1,7 @@
 /* P2b-a buffered certificate-authorized Bedrock egress route. */
 #include "kb_http_egress.h"
 
-#include "aimee_frontend.h"
+#include <aimee/translation/aimee_frontend.h>
 #include "cJSON.h"
 #include "db2/enrollments.h"
 #include "db2/org_egress.h"

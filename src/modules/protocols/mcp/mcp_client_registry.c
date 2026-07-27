@@ -1,4 +1,4 @@
-#include "mcp_client_registry.h"
+#include "aimee/protocols/mcp/mcp_client_registry.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -273,7 +273,7 @@ static int registry_start_client(const config_t *cfg, const config_mcp_client_t 
    return 0;
 }
 
-int mcp_client_registry_boot(const config_t *cfg)
+int mcp_client_registry_boot(const config_t *cfg, config_mcp_install_t host)
 {
    if (!cfg)
       return 0;
@@ -292,8 +292,12 @@ int mcp_client_registry_boot(const config_t *cfg)
       g_registry_atexit_registered = 1;
    }
 
+   /* Boot only the clients this daemon hosts: aimee-server starts install:server
+    * plugins, aimee-kb starts install:kb plugins. A plugin is owned by exactly one
+    * daemon, so its tools resolve unambiguously. */
    for (int i = 0; i < cfg->mcp_client_count; i++)
-      (void)registry_start_client(cfg, &cfg->mcp_clients[i]);
+      if (cfg->mcp_clients[i].install == host)
+         (void)registry_start_client(cfg, &cfg->mcp_clients[i]);
 
    g_registry_booted = 1;
    int count = g_registry_count;
@@ -507,4 +511,24 @@ int mcp_client_registry_call_tool(const char *qualified_name, const cJSON *args,
                                  err_buf, err_buf_len);
    REGISTRY_UNLOCK();
    return rc;
+}
+
+/* The transport kind serving a namespaced tool, for the audit `mode` field. Zero
+ * if the tool is not namespaced or its client is not live. Read under the registry
+ * lock so it does not race a concurrent shutdown. */
+mcp_transport_kind_t mcp_client_registry_transport_kind(const char *qualified_name)
+{
+   char client_name[64];
+   char tool_name[128];
+   if (split_namespaced_tool(qualified_name, client_name, sizeof(client_name), tool_name,
+                             sizeof(tool_name)) != 0)
+      return (mcp_transport_kind_t)0;
+
+   REGISTRY_LOCK();
+   int idx = registry_find_locked(client_name);
+   mcp_transport_kind_t kind = (idx >= 0 && g_registry[idx].session.transport)
+                                   ? g_registry[idx].session.transport->kind
+                                   : (mcp_transport_kind_t)0;
+   REGISTRY_UNLOCK();
+   return kind;
 }

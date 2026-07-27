@@ -1,4 +1,4 @@
-#include "delegate_role.h"
+#include <aimee/delegates/delegate_role.h>
 #include "role_templates.h" /* role_template_max_turns (per-role cap) */
 
 #include <string.h>
@@ -25,18 +25,34 @@ static int delegate_agent_supports_role(const agent_t *agent, const char *role)
 {
    if (!agent || !role || !role[0])
       return 0;
-   for (int i = 0; i < agent->role_count; i++)
+   /* Single source of truth for role eligibility: has the `all` wildcard or the
+    * role itself. No exec-role fallback (see agent_has_role / agent_supports_role). */
+   return agent_has_role(agent, role);
+}
+
+/* Roles deleted in the persona-vs-role cull. They are named here so an operator
+ * or custom persona that still requests one gets a CLEAR error, rather than the
+ * hazardous half-supported state of the name still being accepted as an
+ * arbitrary role string while its semantics (write classification, tool
+ * defaults, built-in template) have all been removed - which would silently hand
+ * back a read-only delegate with a generic prompt. */
+static const char *const g_removed_roles[] = {"prose",   "line-edit", "lyric", "hook",
+                                              "prosody", "songform",  NULL};
+
+const char *delegate_role_removed_reason(const char *role)
+{
+   if (!role || !role[0])
+      return NULL;
+   for (int i = 0; g_removed_roles[i]; i++)
    {
-      /* "all" is a wildcard: the agent serves every role. */
-      if (strcmp(agent->roles[i], "all") == 0 || strcmp(agent->roles[i], role) == 0)
-         return 1;
+      if (strcmp(role, g_removed_roles[i]) == 0)
+         /* Do NOT advertise "declare it in exec_roles" as a workaround: the CLI
+          * rejects the name before routing is consulted, so that advice would
+          * send an operator down a path that cannot work. */
+         return "removed: novel/songwriter work is a PERSONA concern, not a delegate role. "
+                "Use a persona with a general role such as draft, review or validate.";
    }
-   for (int i = 0; i < agent->exec_role_count; i++)
-   {
-      if (strcmp(agent->exec_roles[i], role) == 0)
-         return 1;
-   }
-   return 0;
+   return NULL;
 }
 
 const char *delegate_role_canonicalize(const char *role)
@@ -56,11 +72,7 @@ int delegate_role_is_write(const char *role)
    if (!role || !role[0])
       return 0;
    const char *canonical = delegate_role_canonicalize(role);
-   return strcmp(canonical, "code") == 0 || strcmp(canonical, "refactor") == 0 ||
-          /* Novel-mode write roles: they draft/edit manuscript files. */
-          strcmp(canonical, "prose") == 0 || strcmp(canonical, "line-edit") == 0 ||
-          /* Songwriter-mode write roles: they draft/edit lyric files. */
-          strcmp(canonical, "lyric") == 0 || strcmp(canonical, "hook") == 0;
+   return strcmp(canonical, "code") == 0 || strcmp(canonical, "refactor") == 0;
 }
 
 int delegate_role_enable_tools_by_default(const char *role)
@@ -72,10 +84,8 @@ int delegate_role_enable_tools_by_default(const char *role)
    return strcmp(role, "review") == 0 || strcmp(role, "search") == 0 ||
           strcmp(role, "execute") == 0 || strcmp(role, "diagnose") == 0 ||
           strcmp(role, "validate") == 0 ||
-          /* Novel-mode read-only roles inspect the world bible by default. */
-          strcmp(role, "continuity") == 0 || strcmp(role, "beat-check") == 0 ||
-          /* Songwriter-mode read-only roles inspect the songbook by default. */
-          strcmp(role, "prosody") == 0 || strcmp(role, "songform") == 0;
+          /* Novel-mode read-only checks inspect the world bible by default. */
+          strcmp(role, "continuity") == 0 || strcmp(role, "beat-check") == 0;
 }
 
 int delegate_role_result_cache_enabled(const char *role)

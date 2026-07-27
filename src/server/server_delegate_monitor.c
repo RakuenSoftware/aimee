@@ -1,7 +1,10 @@
 /* server_delegate_monitor.c: see server_delegate_monitor.h */
 
 #include "server_delegate_monitor.h"
-#include "http_retry.h" /* http_set_progress_cb */
+#include <aimee/delegates/delegate_backend_docker.h> /* delegate_backend_docker_reap_aged (leaked-container reap) */
+#include "agent_admission.h" /* agent_admission_touch / _reap_idle (wedged-slot reclaim) */
+#include "http_retry.h"      /* http_set_progress_cb */
+#include "cli_session.h"     /* cli_session_set_heartbeat_cb (tmux-CLI delegates) */
 #include "log.h"
 
 #include <pthread.h>
@@ -21,6 +24,11 @@ int db1_agent_job_classify_stale(int job_id, int idle_threshold_secs, int in_too
 int db1_agent_job_cancel_by_id(int job_id, const char *reason);
 void db1_agent_job_heartbeat(int job_id);
 
+/* The id of the delegation running on this thread (== the admission context handle for a
+ * delegate turn). Weak so unit binaries that don't link the runtime resolve it to NULL and
+ * simply skip the admission touch; the server always provides the strong definition. */
+const char *delegation_active_id(void) __attribute__((weak));
+
 /* Per-turn heartbeat for the in-flight background delegate on this thread. The
  * http_retry progress callback fires after every model HTTP attempt; bumping the
  * heartbeat there keeps a slow-but-progressing delegate alive (see header). */
@@ -30,17 +38,37 @@ static void delegate_heartbeat_cb(void)
 {
    if (g_hb_job_id > 0)
       db1_agent_job_heartbeat(g_hb_job_id);
+   /* Same liveness signal for the admission controller: a tmux-CLI delegate holds its
+    * slot for the whole turn, so touch it here to keep the wedged-slot reaper off a
+    * healthy long turn. delegation_active_id() is the slot's context handle. */
+   if (delegation_active_id)
+   {
+      const char *deleg = delegation_active_id();
+      if (deleg && deleg[0])
+         agent_admission_touch(deleg);
+   }
+}
+
+/* cli_session heartbeat callbacks carry a void* ud; ignore it and bump the same
+ * thread-local job as the HTTP path so a tmux-CLI delegate (claude/codex) stays
+ * alive through a long turn instead of being reaped as idle. */
+static void delegate_heartbeat_cli_cb(void *ud)
+{
+   (void)ud;
+   delegate_heartbeat_cb();
 }
 
 void server_delegate_heartbeat_begin(int job_id)
 {
    g_hb_job_id = job_id > 0 ? job_id : 0;
    http_set_progress_cb(job_id > 0 ? delegate_heartbeat_cb : NULL);
+   cli_session_set_heartbeat_cb(job_id > 0 ? delegate_heartbeat_cli_cb : NULL, NULL);
 }
 
 void server_delegate_heartbeat_end(void)
 {
    http_set_progress_cb(NULL);
+   cli_session_set_heartbeat_cb(NULL, NULL);
    g_hb_job_id = 0;
 }
 
@@ -79,13 +107,41 @@ int server_delegate_monitor_sweep(int idle_threshold_secs, int in_tool_threshold
    return cancelled;
 }
 
+/* Reap aged delegate containers this many sweeps apart (~5 min at 30 s/sweep).
+ * The sweep above stale-cancels the JOB but never removes its container; only the
+ * normal completion path does. Without this, a stale/crashed delegate leaks its
+ * container until the next restart, accumulating until the image volume fills. */
+#define CONTAINER_REAP_EVERY_N_SWEEPS 10
+/* Age threshold for the container reap. Above DEFAULT_IN_TOOL_THRESHOLD_SECS so a
+ * live long-running turn is never removed. */
+#define CONTAINER_REAP_AGE_SECS 1800
+
+/* Idle threshold for reclaiming a wedged admission slot: a holder that stops touching
+ * its context (heartbeat every ~15 s) for this long has died or wedged without releasing,
+ * so its concurrency capacity is pinned and blocks new turns for that agent. Sits far
+ * above the heartbeat interval (a healthy long turn is never reaped) yet below the
+ * stale-job cancel thresholds so freed capacity returns promptly, each sweep. */
+#define ADMISSION_IDLE_REAP_SECS 240
+
 static void *monitor_thread(void *arg)
 {
    (void)arg;
+   int sweeps = 0;
    while (!g_monitor_stop)
    {
       (void)server_delegate_monitor_sweep(DEFAULT_IDLE_THRESHOLD_SECS,
                                           DEFAULT_IN_TOOL_THRESHOLD_SECS);
+
+      int freed = agent_admission_reap_idle(ADMISSION_IDLE_REAP_SECS);
+      if (freed > 0)
+         LOG_WARN("server.delegate_monitor", "reclaimed %d wedged admission slot(s)", freed);
+
+      if (++sweeps % CONTAINER_REAP_EVERY_N_SWEEPS == 0)
+      {
+         int reaped = delegate_backend_docker_reap_aged(CONTAINER_REAP_AGE_SECS);
+         if (reaped > 0)
+            LOG_INFO("server.delegate_monitor", "reaped %d aged delegate container(s)", reaped);
+      }
 
       /* Sleep in 1 s chunks so shutdown is responsive. */
       for (int slept = 0; slept < DEFAULT_POLL_INTERVAL_SECS && !g_monitor_stop; slept++)

@@ -4,6 +4,10 @@
 #include "db1.h"
 #include "agent.h"
 #include "agent_config.h"
+#include "agent_tier_lint.h" /* agent_resolved_price */
+#include "model_registry.h"
+#include <math.h>
+#include <errno.h>
 #include "agent_tunnel.h"
 #include "commands.h"
 #include "hardware_probe.h"
@@ -240,6 +244,33 @@ static int ag_probe_models(const char *endpoint, const char *requested_model, ch
    return status;
 }
 
+/* Strict $/Mtok parse: finite, non-negative, fully consumed. Rejects "nan",
+ * "inf", trailing junk, and the empty string. atof() would accept or silently
+ * zero all of these, and a NaN override defeats every `<=` comparison in the
+ * price resolver, making an unset price look set. */
+static int ag_parse_price(const char *s, double *out)
+{
+   if (!s || !s[0])
+      return 0;
+   errno = 0;
+   char *end = NULL;
+   double v = strtod(s, &end);
+   if (errno != 0 || end == s || (end && *end != '\0'))
+      return 0;
+   if (!isfinite(v) || v < 0.0)
+      return 0;
+   *out = v;
+   return 1;
+}
+
+static int ag_price_usage(const char *flag, const char *value)
+{
+   fprintf(stderr,
+           "aimee: %s expects a finite non-negative number ($ per million tokens), got '%s'\n",
+           flag, value ? value : "");
+   return 1;
+}
+
 static int ag_probe_slots(const char *endpoint, int *slots_out, int *ctx_out, char *errbuf,
                           size_t errbuf_len)
 {
@@ -289,7 +320,7 @@ static int ag_set_model_concurrency(const char *model, int limit)
       if (strcmp(cfg.concurrency_per_model[i].key, model) == 0)
       {
          cfg.concurrency_per_model[i].limit = limit;
-         return config_save(&cfg);
+         return config_set_concurrency(&cfg);
       }
    }
 
@@ -300,7 +331,7 @@ static int ag_set_model_concurrency(const char *model, int limit)
        &cfg.concurrency_per_model[cfg.concurrency_per_model_count++];
    snprintf(entry->key, sizeof(entry->key), "%s", model);
    entry->limit = limit;
-   return config_save(&cfg);
+   return config_set_concurrency(&cfg);
 }
 
 static int ag_model_still_configured(const agent_config_t *cfg, const char *model)
@@ -330,7 +361,7 @@ static int ag_clear_model_concurrency_if_unused(const agent_config_t *agents, co
               (size_t)(cfg.concurrency_per_model_count - i - 1) *
                   sizeof(cfg.concurrency_per_model[0]));
       cfg.concurrency_per_model_count--;
-      return config_save(&cfg);
+      return config_set_concurrency(&cfg);
    }
 
    return 0;
@@ -388,7 +419,82 @@ static void ag_list(app_ctx_t *ctx, int argc, char **argv)
          cJSON_AddStringToObject(obj, "model", ag->model);
          cJSON_AddStringToObject(obj, "auth_type", ag->auth_type);
          cJSON_AddStringToObject(obj, "provider", ag->provider);
+         /* Vendor identity used for capability/price lookup, which differs from
+          * `provider` (the wire shape) for a third-party model served over
+          * another vendor's API. Surfaced so the GUI can show provider+model. */
+         cJSON_AddStringToObject(obj, "catalog_provider", agent_catalog_provider(ag));
+         /* Canonical `provider:model` reference (the form model_capability_resolve_ref
+          * parses and `aimee model show` accepts) plus the catalog's human label,
+          * so any surface that must name a SPECIFIC model — roundtable seats,
+          * routing attribution, a picker — can show provider+model without
+          * hand-maintained strings. display_name is omitted when the catalog has
+          * none rather than echoing the id, so a consumer can tell them apart. */
+         if (ag->model[0])
+         {
+            char ref[MODEL_PROVIDER_MAX + MAX_MODEL_LEN + 2];
+            snprintf(ref, sizeof(ref), "%s:%s", agent_catalog_provider(ag), ag->model);
+            cJSON_AddStringToObject(obj, "model_ref", ref);
+            model_capability_t dcap;
+            if (model_capability_get(agent_catalog_provider(ag), ag->model, &dcap) &&
+                dcap.display_name[0])
+               cJSON_AddStringToObject(obj, "model_display_name", dcap.display_name);
+         }
          cJSON_AddNumberToObject(obj, "cost_tier", ag->cost_tier);
+         /* Effective price ($/Mtok): operator override when set, else catalog.
+          * Emitted only when BOTH axes resolve, so a consumer never reads an
+          * unknown price as free. `price_overridden` tells the GUI whether the
+          * operator pinned it or it came from the catalog. */
+         {
+            double pin = 0.0, pout = 0.0, pcached = 0.0;
+            if (agent_resolved_price(ag, &pin, &pout, &pcached))
+            {
+               /* BASE-BAND rate. Named so a consumer cannot mistake it for the
+                * effective price of a large request: several providers charge
+                * more above a context threshold, and this figure is only correct
+                * below the first band. `price_bands` carries the rest. */
+               cJSON_AddNumberToObject(obj, "price_base_in_per_mtok", pin);
+               cJSON_AddNumberToObject(obj, "price_base_out_per_mtok", pout);
+               /* Omitted entirely when unpublished, so a consumer cannot mistake
+                * an absent cache rate for a free one. */
+               if (pcached > 0.0)
+                  cJSON_AddNumberToObject(obj, "price_base_cached_per_mtok", pcached);
+               /* DEPRECATED aliases, retained so the rename is not a silent
+                * machine-interface break for existing `agent list --json`
+                * consumers. They carry the BASE-band rate; read price_bands to
+                * price a large request. */
+               cJSON_AddNumberToObject(obj, "price_in_per_mtok", pin);
+               cJSON_AddNumberToObject(obj, "price_out_per_mtok", pout);
+               if (pcached > 0.0)
+                  cJSON_AddNumberToObject(obj, "price_cached_per_mtok", pcached);
+
+               model_capability_t cap;
+               if (ag->model[0] &&
+                   model_capability_get(agent_catalog_provider(ag), ag->model, &cap) &&
+                   cap.price_band_count > 0)
+               {
+                  cJSON *bands = cJSON_AddArrayToObject(obj, "price_bands");
+                  for (int b = 0; bands && b < cap.price_band_count; b++)
+                  {
+                     double bin = 0.0, bout = 0.0, bcached = 0.0;
+                     int above = cap.price_bands[b].above_tokens;
+                     if (!agent_resolved_price_at_context(ag, above + 1, &bin, &bout, &bcached))
+                        continue;
+                     cJSON *e = cJSON_CreateObject();
+                     if (!e)
+                        continue;
+                     cJSON_AddNumberToObject(e, "above_tokens", above);
+                     cJSON_AddNumberToObject(e, "in_per_mtok", bin);
+                     cJSON_AddNumberToObject(e, "out_per_mtok", bout);
+                     if (bcached > 0.0)
+                        cJSON_AddNumberToObject(e, "cached_per_mtok", bcached);
+                     cJSON_AddItemToArray(bands, e);
+                  }
+               }
+            }
+            cJSON_AddBoolToObject(obj, "price_overridden",
+                                  ag->price_in_per_mtok > 0.0 || ag->price_out_per_mtok > 0.0 ||
+                                      ag->price_cached_per_mtok > 0.0);
+         }
          cJSON_AddBoolToObject(obj, "enabled", ag->enabled);
          cJSON_AddBoolToObject(obj, "tools_enabled", ag->tools_enabled);
          cJSON_AddNumberToObject(obj, "max_turns", ag->max_turns);
@@ -422,9 +528,22 @@ static void ag_list(app_ctx_t *ctx, int argc, char **argv)
       for (int i = 0; i < cfg->agent_count; i++)
       {
          agent_t *ag = &cfg->agents[i];
-         printf("%-16s %-6s tier=%d parallel=%d model=%s endpoint=%s%s\n", ag->name,
+         double pin = 0.0, pout = 0.0, pcached = 0.0;
+         char price[96] = "";
+         if (agent_resolved_price(ag, &pin, &pout, &pcached))
+         {
+            char cached[32] = "";
+            if (pcached > 0.0)
+               snprintf(cached, sizeof(cached), " cached=$%.2f", pcached);
+            snprintf(price, sizeof(price), " base in=$%.2f out=$%.2f%s%s", pin, pout, cached,
+                     (ag->price_in_per_mtok > 0.0 || ag->price_out_per_mtok > 0.0 ||
+                      ag->price_cached_per_mtok > 0.0)
+                         ? " *"
+                         : "");
+         }
+         printf("%-16s %-6s tier=%d parallel=%d model=%s endpoint=%s%s%s\n", ag->name,
                 ag->enabled ? "ON" : "OFF", ag->cost_tier, ag->max_parallel, ag->model,
-                ag->endpoint, ag->tools_enabled ? " [tools]" : "");
+                ag->endpoint, ag->tools_enabled ? " [tools]" : "", price);
       }
    }
 }
@@ -768,6 +887,25 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
          ag_set_roles_csv(ag, argv[++i]);
       else if (strcmp(argv[i], "--cost-tier") == 0 && i + 1 < argc)
          ag->cost_tier = atoi(argv[++i]);
+      /* Price overrides ($/Mtok). Only meaningful when this deployment does not
+       * pay the published catalog rate. Parsed strictly: atof() would turn
+       * "garbage" into 0 (silently meaning "unset") and would accept "nan" and
+       * "inf", which then defeat every ordered comparison downstream. */
+      else if (strcmp(argv[i], "--price-in") == 0 && i + 1 < argc)
+      {
+         if (!ag_parse_price(argv[++i], &ag->price_in_per_mtok))
+            return ag_price_usage("--price-in", argv[i]);
+      }
+      else if (strcmp(argv[i], "--price-out") == 0 && i + 1 < argc)
+      {
+         if (!ag_parse_price(argv[++i], &ag->price_out_per_mtok))
+            return ag_price_usage("--price-out", argv[i]);
+      }
+      else if (strcmp(argv[i], "--price-cached") == 0 && i + 1 < argc)
+      {
+         if (!ag_parse_price(argv[++i], &ag->price_cached_per_mtok))
+            return ag_price_usage("--price-cached", argv[i]);
+      }
       else if (strcmp(argv[i], "--tools-enabled") == 0 || strcmp(argv[i], "--tools") == 0)
          ag->tools_enabled = 1;
       else if (strcmp(argv[i], "--max-turns") == 0 && i + 1 < argc)

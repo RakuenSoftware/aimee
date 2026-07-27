@@ -2,7 +2,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include "delegate_plan.h"
+#include <aimee/delegates/delegate_plan.h>
 
 static cJSON *arr(cJSON *obj, const char *name)
 {

@@ -1,8 +1,8 @@
 #ifndef KB_BEDROCK_EGRESS_H
 #define KB_BEDROCK_EGRESS_H
 
-#include "aimee_backend.h"
-#include "aimee_ir_stream.h"
+#include <aimee/translation/aimee_backend.h>
+#include <aimee/translation/aimee_ir_stream.h>
 #include "db2/org_model_catalog.h"
 #include "modules/aws/aws_eventstream.h"
 #include "modules/aws/aws_sigv4.h"

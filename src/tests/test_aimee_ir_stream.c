@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "aimee_ir_stream.h"
+#include <aimee/translation/aimee_ir_stream.h>
 #include "cJSON.h"
 
 /* accumulate the Anthropic SSE rendered from one OpenAI chunk */

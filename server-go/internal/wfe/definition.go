@@ -116,6 +116,14 @@ func (d Definition) Validate() error {
 				return fmt.Errorf("node %q input %q references unsupported output %q", node.ID, input, output)
 			}
 		}
+		// Built-in required params are checked here, not only in ValidateCatalog,
+		// so no load path can reach the runner with a block that has nothing to
+		// resolve. Custom blocks declare theirs and are covered by ValidateCatalog.
+		if block, builtIn := BuiltinCatalog()[node.Block]; builtIn {
+			if err := requiredParams(node, block); err != nil {
+				return err
+			}
+		}
 		if node.Block == "gate.roundtable" {
 			panel, _ := node.Params["panel"].(map[string]any)
 			if panel != nil {

@@ -42,7 +42,8 @@ typedef enum
 {
    WFE_MERGE_OK = 0,        /* merged now */
    WFE_MERGE_ALREADY,       /* already merged -> idempotent no-op success */
-   WFE_MERGE_NOT_MERGEABLE, /* conflict / lost race -> loop */
+   WFE_MERGE_NOT_MERGEABLE, /* lost race (head/base moved) -> loop; self-resolves */
+   WFE_MERGE_CONFLICT,      /* content conflict -> TERMINAL; retrying cannot win */
    WFE_MERGE_ERROR          /* forge error -> fail closed */
 } wfe_merge_result_t;
 
@@ -168,6 +169,23 @@ int wfe_tdd_red_ok(const char *workdir);
  * file. Best-effort by design so a non-git/degraded workdir stays drivable. Exposed
  * for the unit test. */
 int wfe_tdd_tests_survive(const char *workdir, const char *red_sha);
+
+/* Add/add pre-check at freeze. Returns 1 (and fills `path_out`) when this slice
+ * CREATES a path that already exists on `base_ref` with DIFFERENT content — the
+ * shape that cannot be merged once a sibling slice has landed the same file, and
+ * that no rebase resolves. Identical content is not flagged: git merges an
+ * add/add cleanly when both sides added the same bytes.
+ *
+ * Compared against the current feature head rather than against sibling slices,
+ * which is race-free — it reads a branch that already reflects whatever merged,
+ * so there is no shared mutable state to serialise. It therefore fires from the
+ * second colliding slice onward; the first is not yet a collision.
+ *
+ * Best-effort like the guard above: any git failure returns 0, leaving the merge
+ * to surface it, rather than failing a slice on a command we could not run.
+ * Exposed for the unit test. */
+int wfe_slice_recreates_base_path(const char *workdir, const char *base_ref, const char *base_sha,
+                                  char *path_out, size_t path_cap);
 
 /* ---- Child-workflow fan-out seam for foreach.workflow (sliced-lifecycle build).
  * The block decomposes the split packets into one CHILD workflow run per packet

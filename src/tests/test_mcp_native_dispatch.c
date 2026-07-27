@@ -117,12 +117,73 @@ static void test_no_provider_is_an_error_not_a_crash(void)
    printf("  PASS: no_provider_is_an_error_not_a_crash\n");
 }
 
+/* --- kb-federation integration (gated on a live aimee-kb) ---
+ *
+ * These exercise the MCP-adapter Phase 1 server side against a REAL aimee-kb that
+ * hosts an install:kb plugin named "echo" exposing an "echo" tool. They are
+ * SKIPPED unless AIMEE_KB_API_URL points at such a kb (so the normal unit suite
+ * stays hermetic). Reproduce:
+ *   aimee-kb --http-port=8741   (config: mcp_clients:[{name:echo,transport:stdio,
+ *                                command:[python3,echo_plugin.py],install:kb}])
+ *   AIMEE_KB_API_URL=http://127.0.0.1:8741 ./unit-test-mcp-native-dispatch */
+static const char *kb_integration_url(void)
+{
+   const char *u = getenv("AIMEE_KB_API_URL");
+   return (u && u[0]) ? u : NULL;
+}
+
+/* Advertise: a kb-hosted plugin's tool DEF federates into the server's LLM tool
+ * array (build_tools_array), so an agent turn can see and call it. */
+static void test_kb_federated_tool_is_advertised(void)
+{
+   if (!kb_integration_url())
+   {
+      printf("  SKIP: kb_federated_tool_is_advertised (set AIMEE_KB_API_URL)\n");
+      return;
+   }
+   cJSON *tools = build_tools_array();
+   assert(tools != NULL);
+   int found = 0;
+   cJSON *t = NULL;
+   cJSON_ArrayForEach(t, tools)
+   {
+      cJSON *fn = cJSON_GetObjectItemCaseSensitive(t, "function");
+      cJSON *nm = fn ? cJSON_GetObjectItemCaseSensitive(fn, "name") : NULL;
+      if (cJSON_IsString(nm) && strcmp(nm->valuestring, "echo:echo") == 0)
+      {
+         found = 1;
+         break;
+      }
+   }
+   cJSON_Delete(tools);
+   assert(found); /* the kb-federated tool reached the LLM-facing tools/list */
+   printf("  PASS: kb_federated_tool_is_advertised (echo:echo in build_tools_array)\n");
+}
+
+/* Dispatch: a namespaced call this server does NOT host locally routes to the kb
+ * (kb_client_mcp_call) and returns the plugin's result — the increment-4 branch. */
+static void test_kb_federated_tool_dispatches_to_kb(void)
+{
+   if (!kb_integration_url())
+   {
+      printf("  SKIP: kb_federated_tool_dispatches_to_kb (set AIMEE_KB_API_URL)\n");
+      return;
+   }
+   char *out = dispatch_tool_call("echo:echo", "{\"text\":\"kb-routed\"}", 8000);
+   assert(out != NULL);
+   assert(strstr(out, "echo: kb-routed") != NULL); /* plugin echoed, routed server->kb */
+   free(out);
+   printf("  PASS: kb_federated_tool_dispatches_to_kb\n");
+}
+
 int main(void)
 {
    printf("test_mcp_native_dispatch:\n");
    test_registered_tool_dispatches_to_the_provider();
    test_unregistered_name_still_reports_unknown();
    test_no_provider_is_an_error_not_a_crash();
+   test_kb_federated_tool_is_advertised();
+   test_kb_federated_tool_dispatches_to_kb();
    printf("All mcp_native_dispatch tests passed.\n");
    return 0;
 }

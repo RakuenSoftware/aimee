@@ -56,8 +56,16 @@ SYNTH_TIER="${AIMEE_LLM_SYNTH_TIER:-${AIMEE_LLM_TIER:-cpu}}"
 
 embed_coords() {
   case "$EMBED_TIER" in
-    cpu)             EMBED_REPO="Qwen/Qwen3-Embedding-0.6B-GGUF"; EMBED_FILE="Qwen3-Embedding-0.6B-f16.gguf"; EMBED_NGL=0 ;;
-    small|mid|large) EMBED_REPO="Qwen/Qwen3-Embedding-4B-GGUF";   EMBED_FILE="Qwen3-Embedding-4B-Q8_0.gguf";  EMBED_NGL="$NGL" ;;
+    cpu)
+      EMBED_REPO="Qwen/Qwen3-Embedding-0.6B-GGUF"; EMBED_FILE="Qwen3-Embedding-0.6B-f16.gguf"
+      EMBED_REVISION="370f27d7550e0def9b39c1f16d3fbaa13aa67728"
+      EMBED_SHA256="421a27e58d165478cc7acb984a688c2aa41404968b0203e7cd743ece44c54340"
+      EMBED_NGL=0
+      ;;
+    small|mid|large)
+      EMBED_REPO="Qwen/Qwen3-Embedding-4B-GGUF"; EMBED_FILE="Qwen3-Embedding-4B-Q8_0.gguf"
+      EMBED_REVISION="main"; EMBED_SHA256=""; EMBED_NGL="$NGL"
+      ;;
     *) echo "aimee-llm: invalid AIMEE_LLM_EMBED_TIER='$EMBED_TIER' (cpu, small, mid, large)" >&2; exit 1 ;;
   esac
   EMBED_D="$MODELS_DIR/$EMBED_TIER"
@@ -73,8 +81,11 @@ rerank_coords() {
 synth_coords() {
   case "$SYNTH_TIER" in
     cpu)
-      SYNTH_REPO="ggml-org/gemma-4-E4B-it-GGUF"; SYNTH_FILE="gemma-4-E4B-it-Q4_K_M.gguf"
-      SYNTH_REVISION="main"; SYNTH_SHA256=""
+      # ggml-org publishes this repo at Q4_0/Q8_0/BF16 only — there is no Q4_K_M
+      # build, so the old filename 404'd and the cpu tier could never be baked.
+      SYNTH_REPO="ggml-org/gemma-4-E4B-it-GGUF"; SYNTH_FILE="gemma-4-E4B-it-Q4_0.gguf"
+      SYNTH_REVISION="b8093469224f83f5c38f691eb906c380e9e63114"
+      SYNTH_SHA256="a555b900214b477d8880e7832e0b8925e139b0159640036b09fe472b6f2097f2"
       TIER_FA="off"; TIER_MOE="0"; TIER_N_CPU_MOE="0"; TIER_SLOTS="1"; TIER_CTX="32768"; SYNTH_NGL=0
       ;;
     small)
@@ -142,6 +153,12 @@ MOE="${AIMEE_LLM_SYNTH_MOE:-$TIER_MOE}"
 MOE_LAYERS="${AIMEE_LLM_SYNTH_MOE_LAYERS:-40}"
 N_CPU_MOE="${AIMEE_LLM_SYNTH_N_CPU_MOE:-$TIER_N_CPU_MOE}"
 SLOTS="${AIMEE_LLM_SYNTH_SLOTS:-$TIER_SLOTS}"
+# The gateway exposes OpenAI /v1/models and llama-server /slots discovery so a
+# first-time `aimee agent local` probe can register this bundled runtime without
+# false 404 warnings. Export the RESOLVED tier defaults, not just explicit env
+# overrides, and let /slots convert the aggregate context into a per-slot value.
+export AIMEE_LLM_SYNTH_SLOTS="$SLOTS"
+export AIMEE_LLM_SYNTH_CTX="$SYNTH_CTX"
 # Host-RAM prompt-cache cap (MiB). llama-server's default is 8192 (8 GiB) of
 # ANONYMOUS host RAM for its server-side prompt/checkpoint cache — independent of
 # the KV cache, which lives in VRAM under -ngl. On a modest appliance (e.g. a 16 GB
@@ -166,20 +183,41 @@ start() { # name port extra-args...   (caller passes -ngl per role: cpu=0, gpu=$
   pids+=("$!")
 }
 
-# fetch URL DEST — download with retries; return non-zero on failure (the caller
-# leaves .ready absent so the next start retries a partial pull).
+# fetch URL DEST [SHA256] — download with retries; return non-zero on failure (the
+# caller leaves .ready absent so the next start retries a partial pull). Verify a
+# known checksum both before and after the transfer. The post-failure check is
+# deliberate: wget -c returns 1/416 when a prior process completed the file but
+# died before writing the .ready marker. Without this check the container loops
+# forever even though the cached artifact is complete.
+verify_sha256() { # DEST SHA256
+  [ -n "$2" ] && [ -f "$1" ] && echo "$2  $1" | sha256sum -c - >/dev/null 2>&1
+}
+
 fetch() {
-  local url="$1" dest="$2"
-  # wget when available (the standalone aimee-llm image), else curl (the combined
-  # image ships curl only — its runtime stage has no wget, and a silent hard
-  # dependency here meant every model fetch failed there).
-  if command -v wget >/dev/null 2>&1; then
-    wget -q -c --tries=5 --timeout=30 --waitretry=10 -O "$dest" "$url" \
-      || { echo "aimee-llm: download FAILED: $url" >&2; return 1; }
-  else
-    curl -fsSL --connect-timeout 30 --retry 5 --retry-delay 10 -C - -o "$dest" "$url" \
-      || { echo "aimee-llm: download FAILED: $url" >&2; return 1; }
+  local url="$1" dest="$2" expected_sha="${3:-}" fetch_rc=0
+  if verify_sha256 "$dest" "$expected_sha"; then
+    echo "aimee-llm: using verified cached artifact: $dest" >&2
+    return 0
   fi
+  # Prefer curl: Hugging Face's Xet CDN resumes multi-GB artifacts reliably and
+  # substantially faster through it. Keep wget for stripped-down custom images.
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --connect-timeout 30 --retry 5 --retry-all-errors --retry-delay 10 \
+      -C - -o "$dest" "$url" \
+      || fetch_rc=$?
+  else
+    wget -q -c --tries=5 --timeout=30 --waitretry=10 -O "$dest" "$url" || fetch_rc=$?
+  fi
+  if [ -n "$expected_sha" ]; then
+    if verify_sha256 "$dest" "$expected_sha"; then
+      [ "$fetch_rc" -ne 0 ] \
+        && echo "aimee-llm: resumed artifact is complete despite downloader status $fetch_rc: $dest" >&2
+      return 0
+    fi
+    echo "aimee-llm: download checksum MISMATCH: $url" >&2
+    return 1
+  fi
+  [ "$fetch_rc" -eq 0 ] || { echo "aimee-llm: download FAILED: $url" >&2; return 1; }
 }
 
 # download_models — fetch ONLY the roles served locally, each into its own tier's
@@ -199,7 +237,8 @@ download_models() {
   if [ "$EMBED_MODE" = "local" ] && [ ! -f "$EMBED_D/.embed.ready" ]; then
     echo "aimee-llm: fetching embed tier '$EMBED_TIER' into $EMBED_D" >&2
     mkdir -p "$EMBED_D" || return 1
-    fetch "https://huggingface.co/${EMBED_REPO}/resolve/main/${EMBED_FILE}" "$EMBED_D/embed.gguf" || return 1
+    fetch "https://huggingface.co/${EMBED_REPO}/resolve/${EMBED_REVISION}/${EMBED_FILE}" \
+      "$EMBED_D/embed.gguf" "$EMBED_SHA256" || return 1
     touch "$EMBED_D/.embed.ready"
   fi
 
@@ -208,7 +247,8 @@ download_models() {
   if [ "$SYNTH_MODE" = "local" ] && [ ! -f "$SYNTH_D/.synth.ready" ]; then
     echo "aimee-llm: fetching synth tier '$SYNTH_TIER' into $SYNTH_D" >&2
     mkdir -p "$SYNTH_D" || return 1
-    fetch "https://huggingface.co/${SYNTH_REPO}/resolve/${SYNTH_REVISION}/${SYNTH_FILE}" "$SYNTH_D/synth.gguf" || return 1
+    fetch "https://huggingface.co/${SYNTH_REPO}/resolve/${SYNTH_REVISION}/${SYNTH_FILE}" \
+      "$SYNTH_D/synth.gguf" "$SYNTH_SHA256" || return 1
     if [ -n "$SYNTH_SHA256" ]; then
       echo "${SYNTH_SHA256}  $SYNTH_D/synth.gguf" | sha256sum -c - >&2 || {
         echo "aimee-llm: synth.gguf sha256 MISMATCH — refusing to serve" >&2; return 1; }
@@ -267,11 +307,12 @@ resolve_one() { # ROLE MODE localurl
   esac
 }
 
-# DOWNLOAD-ONLY mode (build-time pre-bake): fetch the resolved tiers' models into
-# $MODELS_DIR and exit without launching anything. Dockerfile.aimee-llm uses this
-# (AIMEE_LLM_BAKE_TIER) to bake the cpu tier into the aimee-llm-cpu image, keeping
-# the tier table here as the single source of truth instead of duplicating model
-# URLs in the Dockerfile.
+# DOWNLOAD-ONLY mode: fetch the resolved tiers' models into $MODELS_DIR and exit
+# without launching anything. Used to pre-seed a /models volume so first serve is
+# not blocked on a multi-GB pull. No image bakes models any more — there is one
+# model-less aimee-llm that downloads the tier it is given — so nothing in-tree
+# calls this at build time; it stays because the tier table lives here, and
+# pre-seeding a volume must not duplicate those model URLs elsewhere.
 if [ "${AIMEE_LLM_DOWNLOAD_ONLY:-0}" = "1" ]; then
   download_models || { echo "aimee-llm: pre-bake download failed" >&2; exit 1; }
   exit 0

@@ -101,6 +101,11 @@ extern "C"
     * back to its parent's session via db1_cost_fold_record. */
    double db1_token_audit_cost_for_delegation(const char *delegation_id);
 
+   /* Same realized-only sum, but distinguishes "no realized row exists" (or the
+    * store is unavailable) from a genuine zero. Returns 0 and sets *out_cost
+    * when a measurement exists, -1 when the cost is unknown. */
+   int db1_token_audit_cost_for_delegation_ex(const char *delegation_id, double *out_cost);
+
    /* Per-session supervisor-vs-worker token split (realized rows only).
     * "supervisor" = the primary agent's own turns for this session
     * (delegation_id EMPTY/NULL); "worker" = delegate children (delegation_id

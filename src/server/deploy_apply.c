@@ -175,21 +175,124 @@ static int run_capture(const char *const argv[], char **envp, char *out, size_t 
    return 0;
 }
 
-/* Background worker: `docker compose -f <file> up -d --remove-orphans`. */
+/* Retire the pre-baked aimee-llm-cpu container left over from an older install.
+ *
+ * There is now ONE LLM service (aimee-llm, model-less, downloads the selected
+ * tier). The retired aimee-llm-cpu carried the network alias `aimee-llm`, so a
+ * leftover container would make that name resolve to two containers and the kb
+ * could reach the stale one. It is no longer a service of the managed compose
+ * file, so `up` will never touch it — it has to be removed by name.
+ *
+ * This cannot be done with --remove-orphans. The managed compose runs under the
+ * SAME COMPOSE_PROJECT_NAME as compose.server-managed.yaml, so an orphan sweep
+ * classifies aimee-server — not a service of the managed file — as an orphan and
+ * stops and removes the very container running the deploy. (docker compose
+ * --dry-run reports "Container aimee-aimee-server-1 Stopping/Removing".)
+ *
+ * Removing a container that was never up is a no-op, so failures here are not
+ * fatal to the deploy; the output is appended for the wizard to show. */
+
+/* The container the retirement targets. Named, not derived, because it is no
+ * longer a compose service — nothing can regenerate this string for us. */
+#define DEPLOY_LEGACY_LLM_CPU_CONTAINER "aimee-aimee-llm-cpu-1"
+
+/* Fill argv with the retirement command and NULL-terminate it. Separated out for
+ * the same reason as deploy_up_argv: the command is then assertable in a test
+ * without shelling out to a docker that may or may not exist on the machine
+ * running the suite. Returns the argument count, or -1 when cap is too small. */
+static int deploy_retire_argv(const char **argv, size_t cap)
+{
+   const char *cmd[] = {"docker", "rm", "-f", DEPLOY_LEGACY_LLM_CPU_CONTAINER};
+   size_t n = sizeof(cmd) / sizeof(cmd[0]);
+   if (!argv || cap < n + 1)
+      return -1;
+   for (size_t i = 0; i < n; i++)
+      argv[i] = cmd[i];
+   argv[n] = NULL;
+   return (int)n;
+}
+
+static void deploy_retire_stale_llm(char **envp, const char *file, char *out, size_t out_cap)
+{
+   (void)file; /* the service is gone from the compose file; address it directly */
+   const char *argv[8];
+   if (deploy_retire_argv(argv, sizeof(argv) / sizeof(argv[0])) < 0)
+      return;
+   char buf[512];
+   int code = -1;
+   if (run_capture(argv, envp, buf, sizeof(buf), &code) == 0 && code == 0 && buf[0] &&
+       out_cap > strlen(out) + 1)
+      snprintf(out + strlen(out), out_cap - strlen(out), "retired legacy aimee-llm-cpu: %s", buf);
+}
+
+/* Background worker: `docker compose -f <file> up -d`.
+ *
+ * NO --remove-orphans, and this is not a style preference: it made the deploy
+ * STOP THE SERVER RUNNING IT. aimee-server is started by compose.server-managed.yaml
+ * under COMPOSE_PROJECT_NAME=aimee, and the managed file this command targets
+ * defines only postgres/aimee-kb/aimee-llm. So compose finds a container in
+ * project "aimee" that its file does not define, calls it an orphan, and removes
+ * it — the orchestrator deleting itself mid-deploy. Observed on a clean install:
+ * the wizard's Deploy step ran, and 47 seconds later the server logged
+ * "server: shut down" and the container exited, leaving a new user with a dead
+ * install and no obvious cause.
+ *
+ * The shared project name is deliberate (the managed services join the server's
+ * network), so the fix is to drop the orphan sweep rather than the project. What
+ * that gives up is small and recoverable: a service removed from the managed file
+ * leaves its container behind until an operator prunes it. What it buys is that
+ * deploying cannot destroy the thing doing the deploying.
+ *
+ * It also retires the LLM variant this deploy did NOT select (see
+ * deploy_retire_stale_llm) — the one orphan the managed stack really can leave
+ * behind, since the GPU and CPU services are mutually exclusive and both answer
+ * to the network name `aimee-llm`. */
+/* Fill argv with the managed-deploy `up` command for `file` and NULL-terminate it.
+ * Deliberately omits --remove-orphans, for the reason above. Returns the number of
+ * arguments written, or -1 when cap is too small. Separated out so the command is
+ * assertable in a test rather than inlined in the worker. */
+static int deploy_up_argv(const char *file, const char **argv, size_t cap)
+{
+   const char *cmd[] = {"docker", "compose", "-f", file, "up", "-d"};
+   size_t n = sizeof(cmd) / sizeof(cmd[0]);
+   if (!argv || cap < n + 1)
+      return -1;
+   for (size_t i = 0; i < n; i++)
+      argv[i] = cmd[i];
+   argv[n] = NULL;
+   return (int)n;
+}
+
 static void *deploy_worker(void *arg)
 {
    (void)arg;
    char file[512];
    deploy_apply_compose_file(file, sizeof(file));
-   const char *argv[] = {"docker", "compose", "-f", file, "up", "-d", "--remove-orphans", NULL};
+   const char *argv[8];
+   if (deploy_up_argv(file, argv, sizeof(argv) / sizeof(argv[0])) < 0)
+   {
+      pthread_mutex_lock(&g_lock);
+      g_running = 0;
+      g_last_exit = -1;
+      snprintf(g_last_out, sizeof(g_last_out), "deploy: could not build the compose command\n");
+      pthread_mutex_unlock(&g_lock);
+      return NULL;
+   }
    char **envp = build_deploy_envp();
 
    char out[DEPLOY_OUT_CAP];
    int code = -1;
    if (!envp)
       snprintf(out, sizeof(out), "deploy: failed to load config / build environment\n");
-   else if (run_capture(argv, envp, out, sizeof(out), &code) != 0)
-      snprintf(out, sizeof(out), "deploy: failed to run `docker compose` (is docker on PATH?)\n");
+   else
+   {
+      out[0] = '\0';
+      deploy_retire_stale_llm(envp, file, out, sizeof(out));
+      size_t used = strlen(out);
+      if (run_capture(argv, envp, out + used, sizeof(out) - used, &code) != 0)
+         snprintf(out, sizeof(out),
+                  "deploy: failed to run `docker compose` (is docker on PATH?)\n");
+   }
    free_envp(envp);
 
    pthread_mutex_lock(&g_lock);

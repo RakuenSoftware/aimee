@@ -10,4 +10,12 @@ int send_and_free(server_conn_t *conn, cJSON *resp);
 int workspace_rpc_args(cJSON *req, char **argv, int max);
 void ws_git_line(const char *const argv[], char *out, size_t outsz);
 
+/* Did a workspace scan actually index the project? Pure decision, split out so it
+ * can be tested without a live kb — it reports success to the user, and it was
+ * getting that wrong.
+ *
+ * `rc` is kb_client_index_scan's return; `skipped`, `inspected` and `files` come
+ * from its result. Returns 1 when the project is genuinely indexed, else 0. */
+int server_workspace_scan_indexed(int rc, int skipped, int inspected, int files);
+
 #endif /* SERVER_STATE_INTERNAL_H */

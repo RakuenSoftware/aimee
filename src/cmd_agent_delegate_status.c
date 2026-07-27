@@ -51,6 +51,8 @@ void delegate_print_help(void)
            "  --provider NAME    Route to the cheapest matching agent for a provider\n"
            "  --model NAME       Override the routed agent's model for this run\n"
            "  --tier N           Route to the best agent at cost tier N\n"
+           "  --scope S          Packet size: \"bounded\" or \"whole_task\"; agents with a\n"
+           "                     lower max_scope are excluded (default whole_task)\n"
            "  --plan             Use plan-mode execution\n"
            "  --dry-run          Show what would be sent without executing\n"
            "\n"
@@ -58,7 +60,7 @@ void delegate_print_help(void)
            "  aimee delegate plan <proposal.md>  Generate read-only work packets\n"
            "  aimee delegate launch <plan.json>  Queue reviewed packets into a coord job\n"
            "  aimee delegate aggregate \"<task>\"  MoA ensemble: diverse models + synthesis\n"
-           "  aimee delegate roundtable \"<task>\"  Multi-round collaborative drafting/review\n"
+           "  aimee roundtable review ARTIFACT [\"original request\"]  Configured review\n"
            "  aimee delegate status <background_task_id>   Check background delegate status\n"
            "  aimee delegate --list-roles        List available roles\n"
            "\n"
@@ -70,6 +72,8 @@ void delegate_print_help(void)
            "  aimee delegate summarize --persona engineer --prompt-file /tmp/prompt.txt\n"
            "  printf 'Review `git diff` output' | aimee delegate review --persona reviewer "
            "--prompt-stdin\n"
+           "  git diff | aimee roundtable review - \"Review this exact diff\"\n"
+           "  aimee roundtable review --artifact /tmp/pr.diff --run-id review-pr-1828\n"
            "  aimee delegate execute --tools --persona engineer \"Check nginx status on "
            "wol-web\"\n");
 }

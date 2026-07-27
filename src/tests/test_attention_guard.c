@@ -167,6 +167,115 @@ static void test_guard_enforcement(void)
    printf("enforcement OK\n");
 }
 
+/* The session-scratch carve-out. Real directories, because the decision is no
+ * longer purely lexical: it resolves the scratch root and the target's deepest
+ * existing ancestor through symlinks and requires physical containment. Every
+ * negative below therefore CREATES its directories too — otherwise it would
+ * pass merely because the path did not exist, which proves nothing about the
+ * layout check it is meant to pin. */
+static void test_session_scratch_decision(const char *primary_cwd)
+{
+   const char *sid = "21bc2e70-537c-4d1d-b970-7afc858a7769";
+   char tmproot[256], outside[256], cmd[700];
+   snprintf(tmproot, sizeof(tmproot), "/tmp/aimee_scratch_test_%d", (int)getpid());
+   snprintf(outside, sizeof(outside), "/tmp/aimee_scratch_out_%d", (int)getpid());
+   setenv("TMPDIR", tmproot, 1);
+
+   char root[512], p[900];
+   snprintf(root, sizeof(root), "%s/claude-1000/-home-u-repo/%s", tmproot, sid);
+   snprintf(p, sizeof(p), "%s/scratchpad", root);
+   platform_mkdir_p(p, 0700);
+   snprintf(p, sizeof(p), "%s/tasks", root);
+   platform_mkdir_p(p, 0700);
+   snprintf(p, sizeof(p), "%s/repo/src", outside);
+   platform_mkdir_p(p, 0700);
+
+   /* This session's own scratch is writable — harness-owned temp space, not
+    * repo content, and blocking it only pushed the same write into a shell
+    * heredoc the guard does not classify as mutating. */
+   snprintf(p, sizeof(p), "%s/scratchpad/notes.md", root);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, p, primary_cwd, sid) == 0);
+   assert(attn_session_isolation_blocked(ATTN_OP_HARD, p, primary_cwd, sid) == 0);
+   /* Sibling harness dirs under the same session (task output, spills) too. */
+   snprintf(p, sizeof(p), "%s/tasks/b1.output", root);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, p, primary_cwd, sid) == 0);
+
+   /* Bound to THIS session: not a general "/tmp is writable" hole, and one
+    * session cannot reach into another's scratch. */
+   snprintf(p, sizeof(p), "%s/scratchpad/notes.md", root);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, p, primary_cwd, NULL) == 1);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, p, primary_cwd, "") == 1);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, p, primary_cwd, "other-session") == 1);
+   snprintf(p, sizeof(p), "%s/anything.md", tmproot);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, p, primary_cwd, sid) == 1);
+
+   /* LAYOUT IS POSITIONAL, not a set of substring probes. Each of these carries
+    * a "claude-" component and the session id as a whole component somewhere —
+    * the shape an earlier revision of this carve-out wrongly admitted. */
+   snprintf(p, sizeof(p), "%s/unrelated/claude-marker/%s/checkout", tmproot, sid);
+   platform_mkdir_p(p, 0700); /* exists, so this is the layout check failing */
+   snprintf(p, sizeof(p), "%s/unrelated/claude-marker/%s/checkout/x.c", tmproot, sid);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, p, primary_cwd, sid) == 1);
+   /* Session id in the project-slug position (reordered). */
+   snprintf(p, sizeof(p), "%s/claude-1000/%s/-home-u-repo", tmproot, sid);
+   platform_mkdir_p(p, 0700);
+   snprintf(p, sizeof(p), "%s/claude-1000/%s/-home-u-repo/x.c", tmproot, sid);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, p, primary_cwd, sid) == 1);
+   /* Slug level missing entirely (too shallow). */
+   snprintf(p, sizeof(p), "%s/claude-1000/%s/x.c", tmproot, sid);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, p, primary_cwd, sid) == 1);
+   /* A bare "claude-" with no uid suffix is not the harness dir. */
+   snprintf(p, sizeof(p), "%s/claude-/-home-u-repo/%s/scratchpad", tmproot, sid);
+   platform_mkdir_p(p, 0700);
+   snprintf(p, sizeof(p), "%s/claude-/-home-u-repo/%s/scratchpad/x.md", tmproot, sid);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, p, primary_cwd, sid) == 1);
+   /* The session id must be a whole component, not a prefix match. */
+   snprintf(p, sizeof(p), "%s/claude-1000/-home-u-repo/%sx", tmproot, sid);
+   platform_mkdir_p(p, 0700);
+   snprintf(p, sizeof(p), "%s/claude-1000/-home-u-repo/%sx/y.md", tmproot, sid);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, p, primary_cwd, sid) == 1);
+
+   /* CONTAINMENT IS PHYSICAL. A symlink inside scratch pointing at a checkout
+    * is lexically inside the session dir and physically outside it; normalizing
+    * "../" does not catch this. */
+   char link[700];
+   snprintf(link, sizeof(link), "%s/scratchpad/escape", root);
+   snprintf(p, sizeof(p), "%s/repo", outside);
+   remove(link);
+   assert(symlink(p, link) == 0);
+   snprintf(p, sizeof(p), "%s/scratchpad/escape/src/x.c", root);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, p, primary_cwd, sid) == 1);
+
+   /* THE SESSION DIRECTORY ITSELF AS A SYMLINK into the checkout. This is the
+    * shape the prefix check alone cannot catch: resolving both sides lands them
+    * INSIDE the checkout, so the target trivially sits under the root and the
+    * carve-out would authorise writing to the repository. Only anchoring the
+    * resolved root back to the expected claude-<uid>/<slug>/<session-id> shape
+    * beneath the resolved temp dir rejects it. */
+   {
+      char linkroot[700], realrepo[700];
+      snprintf(realrepo, sizeof(realrepo), "%s/repo", outside);
+      snprintf(linkroot, sizeof(linkroot), "%s/claude-1000/-home-u-repo/%s", tmproot, "sid-linked");
+      remove(linkroot);
+      assert(symlink(realrepo, linkroot) == 0);
+      snprintf(p, sizeof(p), "%s/src/x.c", linkroot);
+      assert(attn_session_isolation_blocked(ATTN_OP_SOFT, p, primary_cwd, "sid-linked") == 1);
+   }
+
+   /* A "../" escape out of the session dir stays blocked (lexical, as before). */
+   snprintf(p, sizeof(p), "%s/../../../home/u/repo/src/x.c", root);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, p, primary_cwd, sid) == 1);
+
+   /* Outside the temp root entirely, session id and claude- dir notwithstanding. */
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT,
+                                         "/home/u/repo/claude-1000/-home-u-repo/x/src/x.c",
+                                         primary_cwd, sid) == 1);
+
+   unsetenv("TMPDIR");
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s' '%s'", tmproot, outside);
+   (void)system(cmd);
+}
+
 /* Pure decision tests for the session-isolation guard. */
 static void test_session_isolation_decision(void)
 {
@@ -176,64 +285,69 @@ static void test_session_isolation_decision(void)
    const char *primary_cwd = "/home/u/repo";
 
    /* Read/raw-scan ops are never blocked, regardless of location. */
-   assert(attn_session_isolation_blocked(ATTN_OP_READ, primary, primary_cwd) == 0);
-   assert(attn_session_isolation_blocked(ATTN_OP_RAW_SCAN, primary, primary_cwd) == 0);
+   assert(attn_session_isolation_blocked(ATTN_OP_READ, primary, primary_cwd, NULL) == 0);
+   assert(attn_session_isolation_blocked(ATTN_OP_RAW_SCAN, primary, primary_cwd, NULL) == 0);
 
    /* Mutating op with an absolute target inside a managed worktree -> allowed. */
-   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, wt, primary_cwd) == 0);
-   assert(attn_session_isolation_blocked(ATTN_OP_HARD, wt, primary_cwd) == 0);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, wt, primary_cwd, NULL) == 0);
+   assert(attn_session_isolation_blocked(ATTN_OP_HARD, wt, primary_cwd, NULL) == 0);
 
    /* Mutating op with an absolute target in the primary checkout -> BLOCKED,
     * even if cwd happens to be a worktree (escaping the worktree). */
-   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, primary, primary_cwd) == 1);
-   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, primary, wt_cwd) == 1);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, primary, primary_cwd, NULL) == 1);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, primary, wt_cwd, NULL) == 1);
 
    /* Relative / no file_path -> cwd is authoritative. */
-   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, "src/x.c", wt_cwd) == 0);
-   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, "src/x.c", primary_cwd) == 1);
-   assert(attn_session_isolation_blocked(ATTN_OP_HARD, NULL, wt_cwd) == 0);
-   assert(attn_session_isolation_blocked(ATTN_OP_HARD, NULL, primary_cwd) == 1);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, "src/x.c", wt_cwd, NULL) == 0);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, "src/x.c", primary_cwd, NULL) == 1);
+   assert(attn_session_isolation_blocked(ATTN_OP_HARD, NULL, wt_cwd, NULL) == 0);
+   assert(attn_session_isolation_blocked(ATTN_OP_HARD, NULL, primary_cwd, NULL) == 1);
 
    /* Claude Code's native worktrees (/.claude/worktrees/) are equally isolated
     * branches and are honoured too (target path OR cwd). */
    const char *cc_wt = "/home/u/repo/.claude/worktrees/feat/src/x.c";
    const char *cc_wt_cwd = "/home/u/repo/.claude/worktrees/feat";
-   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, cc_wt, primary_cwd) == 0);
-   assert(attn_session_isolation_blocked(ATTN_OP_HARD, NULL, cc_wt_cwd) == 0);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, cc_wt, primary_cwd, NULL) == 0);
+   assert(attn_session_isolation_blocked(ATTN_OP_HARD, NULL, cc_wt_cwd, NULL) == 0);
    /* The loose "/.claude" prefix (e.g. ~/.claude/) is NOT a managed worktree. */
-   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, "/home/u/.claude/x.c", primary_cwd) == 1);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, "/home/u/.claude/x.c", primary_cwd, NULL) ==
+          1);
    /* ...but the harness's own per-project state dir (auto-memory etc.) is
     * session state, not repo content — writable from any cwd. */
    assert(attn_session_isolation_blocked(ATTN_OP_SOFT, "/home/u/.claude/projects/p/memory/m.md",
-                                         primary_cwd) == 0);
+                                         primary_cwd, NULL) == 0);
    assert(attn_session_isolation_blocked(ATTN_OP_HARD, "/home/u/.claude/projects/p/MEMORY.md",
-                                         wt_cwd) == 0);
+                                         wt_cwd, NULL) == 0);
 
    /* Codex's native worktrees (/.codex/worktrees/) are honoured the same way. */
    const char *cx_wt = "/home/u/repo/.codex/worktrees/feat/src/x.c";
    const char *cx_wt_cwd = "/home/u/repo/.codex/worktrees/feat";
-   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, cx_wt, primary_cwd) == 0);
-   assert(attn_session_isolation_blocked(ATTN_OP_HARD, NULL, cx_wt_cwd) == 0);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, cx_wt, primary_cwd, NULL) == 0);
+   assert(attn_session_isolation_blocked(ATTN_OP_HARD, NULL, cx_wt_cwd, NULL) == 0);
    /* The loose "/.codex" prefix is NOT a managed worktree. */
-   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, "/home/u/.codex/x.c", primary_cwd) == 1);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, "/home/u/.codex/x.c", primary_cwd, NULL) ==
+          1);
 
    /* The loose "/.aimee-" prefix is NOT treated as a managed worktree (only the
     * canonical "/.aimee/worktrees/" counts) — avoids false-matching e.g. a
     * user's "/.aimee-notes" dir. */
-   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, "/tmp/.aimee-xyz/src/x.c", primary_cwd) ==
-          1);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, "/tmp/.aimee-xyz/src/x.c", primary_cwd,
+                                         NULL) == 1);
 
    /* Path-traversal escape OUT of a worktree is blocked (lexically normalized). */
-   assert(attn_session_isolation_blocked(
-              ATTN_OP_SOFT, "/repo/.aimee/worktrees/x/main/../../../src/y.c", primary_cwd) == 1);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT,
+                                         "/repo/.aimee/worktrees/x/main/../../../src/y.c",
+                                         primary_cwd, NULL) == 1);
    /* '..' that stays WITHIN the worktree is still allowed. */
    assert(attn_session_isolation_blocked(
-              ATTN_OP_SOFT, "/repo/.aimee/worktrees/x/main/sub/../file.c", primary_cwd) == 0);
+              ATTN_OP_SOFT, "/repo/.aimee/worktrees/x/main/sub/../file.c", primary_cwd, NULL) == 0);
    /* A relative target whose '..' climbs out of a worktree cwd is blocked. */
-   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, "../../../etc/x", wt_cwd) == 1);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, "../../../etc/x", wt_cwd, NULL) == 1);
 
    /* Fail-closed when both target and cwd are unknown. */
-   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, NULL, NULL) == 1);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, NULL, NULL, NULL) == 1);
+
+   test_session_scratch_decision(primary_cwd);
    printf("isolation decision OK\n");
 }
 
@@ -353,6 +467,32 @@ static void test_external_memory_enforcement(void)
 /* Functional test: the require_session_worktree gate. The handler uses the real
  * process cwd (the build dir — not a managed worktree), so an Edit with an
  * absolute file_path drives the decision deterministically. */
+/* Runs handle_attention_guard with stderr redirected into `out`, so a test can
+ * assert on the refusal diagnostic itself. Returns the handler's exit code. */
+static int capture_stderr(char *out, size_t outsz)
+{
+   char tmp[256];
+   snprintf(tmp, sizeof(tmp), "/tmp/aimee_attn_stderr_%d", (int)getpid());
+   int saved = dup(STDERR_FILENO);
+   assert(saved >= 0);
+   FILE *f = fopen(tmp, "w+");
+   assert(f != NULL);
+   fflush(stderr);
+   assert(dup2(fileno(f), STDERR_FILENO) >= 0);
+
+   int rc = handle_attention_guard();
+
+   fflush(stderr);
+   assert(dup2(saved, STDERR_FILENO) >= 0);
+   close(saved);
+   rewind(f);
+   size_t n = fread(out, 1, outsz - 1, f);
+   out[n] = '\0';
+   fclose(f);
+   unlink(tmp);
+   return rc;
+}
+
 static void test_isolation_enforcement(void)
 {
    snprintf(g_home, sizeof(g_home), "/tmp/aimee_iso_test_%d", (int)getpid());
@@ -399,6 +539,33 @@ static void test_isolation_enforcement(void)
    g_stdin_json = EDIT_PRIMARY_HOOK;
    assert(handle_attention_guard() == 2);
    unsetenv("AIMEE_GUARD");
+
+   /* (7) The refusal must name the path it JUDGED. With an absolute file_path
+    *     the effective target is that file — and the cwd can be a perfectly
+    *     good managed worktree. Reporting the cwd as "not a managed worktree"
+    *     there is a false statement that sends the reader diagnosing the wrong
+    *     thing (observed: a whole session lost to it). */
+   char wtcwd[512];
+   snprintf(wtcwd, sizeof(wtcwd), "%s/repo/.aimee/worktrees/ab/main", g_home);
+   platform_mkdir_p(wtcwd, 0700);
+   char prev_cwd[512];
+   assert(getcwd(prev_cwd, sizeof(prev_cwd)) != NULL);
+   assert(chdir(wtcwd) == 0);
+
+   g_stdin_json = EDIT_PRIMARY_HOOK; /* target /home/u/repo/src/x.c, cwd IS managed */
+   char msg[4096];
+   assert(capture_stderr(&msg[0], sizeof(msg)) == 2);
+   assert(strstr(msg, "/home/u/repo/src/x.c") != NULL); /* names the real offender */
+   assert(strstr(msg, wtcwd) == NULL);                  /* does not accuse the good cwd */
+
+   /* A Bash mutation has no file_path, so the cwd IS the judged target and
+    * naming it is correct. Same cwd, and now it is allowed — which is exactly
+    * why claiming it was unmanaged above was wrong. */
+   g_stdin_json = "{\"session_id\":\"isotest\",\"tool_name\":\"Bash\","
+                  "\"tool_input\":{\"command\":\"rm -rf build\"}}";
+   assert(handle_attention_guard() == 0);
+
+   assert(chdir(prev_cwd) == 0);
 
    rm_path(cfgpath);
    g_stdin_json = NULL;

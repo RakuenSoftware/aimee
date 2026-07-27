@@ -2,7 +2,7 @@
 #include "aimee.h"
 #include "aux_router.h"
 #include "db1.h"
-#include "delegate_role.h"
+#include <aimee/delegates/delegate_role.h>
 #include "server.h"
 #include "json_fluent.h" /* jo_ok */
 #include "cJSON.h"
@@ -32,6 +32,7 @@ static cJSON *agent_job_to_json(const db1_agent_job_t *job, int include_prompt, 
    if (job->current_tool[0])
       cJSON_AddStringToObject(obj, "current_tool", job->current_tool);
    cJSON_AddNumberToObject(obj, "api_call_count", job->api_call_count);
+   cJSON_AddNumberToObject(obj, "cost_usd", job->cost_usd);
    int default_max_turns = delegate_default_max_turns_for_role(job->role);
    if (default_max_turns > 0)
       cJSON_AddNumberToObject(obj, "default_max_turns", default_max_turns);

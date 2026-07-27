@@ -46,7 +46,7 @@ struct cJSON;
 #define SESSION_COMPACT_SUMMARY_MAX 8192
 
 /* Pre-boundary read-only tool signatures captured for the rounds-to-resume
- * metric (see docs/proposals/pending/compaction-quality-measurement.md).
+ * metric (see docs/proposals/done/compaction-quality-measurement.md).
  *
  * Why capture here: compaction DELETES the summarised messages, so the set of
  * tool calls the agent had already made is destroyed by the very operation we

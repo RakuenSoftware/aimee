@@ -16,7 +16,7 @@ typedef enum
    CFG_BOOL,
    CFG_INT,
    CFG_FLOAT,
-   CFG_ECON_MODE /* int enum stored, but get/set as "off|proof_gated" */
+   CFG_ECON_MODE /* int enum stored, but get/set as "off|safe|aggressive" */
 } config_field_type_t;
 
 /* When a config.set / Settings change takes effect (live-config-reload P2). Default 0 = HOT.
@@ -79,5 +79,16 @@ cJSON *config_field_value_json(const config_t *cfg, const config_field_t *f);
 /* Parse `value` and assign it into the field. Returns 0 on success, -1 on an
  * invalid value (e.g. non-boolean text for a bool field). */
 int config_field_set_value(config_t *cfg, const config_field_t *f, const char *value);
+
+/* Apply the table-driven defaults for every FLAT config field into cfg. Called by
+ * config_set_defaults so a flat field's default lives only in config_flat_defaults[].
+ * Non-flat defaults remain in config_set_defaults. */
+void config_apply_flat_defaults(config_t *cfg);
+
+/* Table-driven parse of the flat scalar config fields from a parsed YAML root
+ * (Proposal A, step 3). Assigns each present, correctly-typed flat field; matches
+ * the inline config_load parse. config_load calls this instead of the per-field
+ * blocks. (css_render_command is excluded and keeps its bespoke block.) */
+void config_parse_flat_fields(config_t *cfg, const cJSON *root);
 
 #endif /* CONFIG_FIELDS_H */

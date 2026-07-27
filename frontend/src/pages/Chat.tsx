@@ -1375,12 +1375,20 @@ export default function Chat() {
   const [activeSkill, setActiveSkill] = useState<string>('');
   const [availablePersonas, setAvailablePersonas] = useState<PersonaInfo[]>([]);
   const [activePersona, setActivePersona] = useState<string>('');
+  /* The agent serving this tab's turns. `activeAgent` is the SESSION PIN (empty
+   * = not pinned); `defaultAgent` is what an unpinned turn actually lands on,
+   * reported by /api/agents (server-side agent_default_primary). The selector
+   * shows the pin when there is one, else the default, so it always names the
+   * agent you are really talking to. */
+  const [activeAgent, setActiveAgent] = useState<string>('');
+  const [defaultAgent, setDefaultAgent] = useState<string>('');
   const [lspDiag, setLspDiag] = useState<{ errors: number; warnings: number; active_servers: number } | null>(null);
   const [workflowInfo, setWorkflowInfo] = useState<WorkflowSessionInfo | null>(null);
   const [workflowLoading, setWorkflowLoading] = useState(false);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
   const [workflowChanged, setWorkflowChanged] = useState(false);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
+  const [pluginLoaderAvailable, setPluginLoaderAvailable] = useState(false);
   const [pluginsLoading, setPluginsLoading] = useState(false);
   const [pluginsError, setPluginsError] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -1422,10 +1430,6 @@ export default function Chat() {
   const tabsRef = useRef<TabData[]>(tabs);
   const activeIdxRef = useRef(activeIdx);
   const projectRootRef = useRef(projectRoot);
-  // Live `working` for the presence-event effect: lets turn_done decide whether
-  // THIS surface originated the turn (skip persist) or is merely observing a
-  // turn that ran/completed while detached (persist it into history).
-  const workingRef = useRef(working);
   // Live mirror of remoteTurnActive so sendMessage can synchronously tell whether
   // a server/foreign turn (e.g. a steer auto-continue) is in flight for the tab.
   const remoteTurnActiveRef = useRef(false);
@@ -1499,7 +1503,6 @@ export default function Chat() {
       if (!live.has(sid)) bgStreamsRef.current.delete(sid);
     }
   }, [tabs]);
-  useEffect(() => { workingRef.current = working; }, [working]);
   // Cancel any pending stream-flush timer on unmount.
   useEffect(() => () => { if (flushTimerRef.current !== null) window.clearTimeout(flushTimerRef.current); }, []);
 
@@ -1602,9 +1605,25 @@ export default function Chat() {
     const turnIdOf = (raw: string): string => {
       try { return (JSON.parse(raw) as { turn_id?: string }).turn_id || ''; } catch { return ''; }
     };
+    // Did THIS surface originate the turn? Read the send refs directly rather
+    // than the `working` render state: `working` is derived from workBySid
+    // (recomputeWorkCounts -> setWorkBySid -> re-render), so a ref synced to it
+    // in a useEffect lags the POST by a render + effect flush. turn_started
+    // routinely arrives inside that window, the surface's OWN turn was then
+    // classified as foreign, and turn_done appended a SECOND assistant message
+    // beside the one pollLiveTurn was already rendering — the doubled replies.
+    // activeSendAbortRefs is populated synchronously before the POST, so it is
+    // already accurate when the first ring event lands.
+    const hasLocalSendFor = (sid: string): boolean => {
+      for (const owner of activeSendAbortRefs.current.values())
+        if (owner === sid) return true;
+      for (const q of sendQueuesRef.current.values())
+        for (const it of q) if (it.originSid === sid) return true;
+      return false;
+    };
     es.addEventListener('turn_started', (ev: MessageEvent<string>) => {
       saveCursor(ev);
-      curTurnId = turnIdOf(ev.data); observed = ''; wasWorking = workingRef.current;
+      curTurnId = turnIdOf(ev.data); observed = ''; wasWorking = hasLocalSendFor(activeAimeeSid);
       // A steer continuation is server-initiated: render it even if this surface
       // still looks "working" from the just-cancelled turn's closing stream. Only
       // for the session this events stream is bound to (the one we steered).
@@ -1639,10 +1658,11 @@ export default function Chat() {
       const tid = turnIdOf(ev.data) || curTurnId; // turn_started always carries turn_id
       const text = observed;
       // Persist a turn observed-while-detached EXACTLY ONCE. Gates:
-      //  - wasWorking: snapshot at turn_started — THIS surface originated the turn
-      //    (its own send path stores the assistant message). This is the sole
-      //    "did I originate it" gate; a NEW local send mid-observation must NOT
-      //    drop a foreign turn, so the live workingRef is deliberately not used.
+      //  - wasWorking: snapshot at turn_started (see hasLocalSendFor) — THIS
+      //    surface originated the turn, and its own send path already renders and
+      //    stores the assistant message. This is the sole "did I originate it"
+      //    gate, and it is snapshotted, not re-read: a NEW local send mid-
+      //    observation must NOT make us drop a foreign turn.
       //  - cursor resume (above) means a fresh mount / auto-reconnect does NOT
       //    replay already-seen turns, so the ring no longer re-emits a completed
       //    turn. persistedTurnsRef (turn_id dedup) + the content-tail guard remain
@@ -1801,10 +1821,15 @@ export default function Chat() {
       .catch(() => {});
   }, []);
 
-  /* Reflect the active tab's current persona (per-session, else durable default) */
+  /* Reflect the active tab's current persona (per-session, else durable default).
+     A tab that has not sent its first message yet has NO aimee session id — it
+     used to be left blank here, so the <select> fell back to whatever option
+     happened to be first rather than the persona the turn would actually use.
+     Ask without a sid in that case: the server answers with the durable default,
+     which is engineer unless the operator changed it. */
   useEffect(() => {
-    if (!activePersonaSid) return;
-    fetch(`/api/chat/persona?sid=${encodeURIComponent(activePersonaSid)}`)
+    const q = activePersonaSid ? `?sid=${encodeURIComponent(activePersonaSid)}` : '';
+    fetch(`/api/chat/persona${q}`)
       .then(r => r.json())
       .then((d: { name?: string }) => setActivePersona(d.name ?? ''))
       .catch(() => {});
@@ -1814,15 +1839,28 @@ export default function Chat() {
     setPluginsLoading(true);
     try {
       const resp = await fetch('/api/plugins');
+      if (!resp.ok) {
+        setPluginLoaderAvailable(false);
+        setPlugins([]);
+        setPluginsError(null);
+        return;
+      }
       const data = await resp.json() as PluginInfo[];
+      setPluginLoaderAvailable(true);
       setPlugins(Array.isArray(data) ? data : []);
       setPluginsError(null);
     } catch {
+      setPluginLoaderAvailable(false);
+      setPlugins([]);
       setPluginsError('Failed to load plugins');
     } finally {
       setPluginsLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    void refreshPlugins();
+  }, [refreshPlugins]);
 
   useEffect(() => {
     if (pluginsOpen) void refreshPlugins();
@@ -1839,9 +1877,21 @@ export default function Chat() {
   useEffect(() => {
     fetch('/api/agents')
       .then(r => r.json())
-      .then((d: { agents?: AgentInfo[] }) => setAgents(d.agents ?? []))
+      .then((d: { agents?: AgentInfo[]; default_agent?: string }) => {
+        setAgents(d.agents ?? []);
+        setDefaultAgent(d.default_agent ?? '');
+      })
       .catch(() => {});
   }, []);
+
+  /* Reflect this tab's pinned agent (empty = following the configured default) */
+  useEffect(() => {
+    if (!activePersonaSid) { setActiveAgent(''); return; }
+    fetch(`/api/chat/primary?sid=${encodeURIComponent(activePersonaSid)}`)
+      .then(r => r.json())
+      .then((d: { agent?: string }) => setActiveAgent(d.agent ?? ''))
+      .catch(() => {});
+  }, [activePersonaSid]);
 
   useEffect(() => {
     fetch('/api/metrics')
@@ -1963,6 +2013,24 @@ export default function Chat() {
       });
       if (!resp.ok) setActivePersona(prev);
     } catch { setActivePersona(prev); }
+  }
+
+  /* Pin the agent that serves this tab's turns. Per session (like the persona),
+     so other tabs and the durable config are untouched; it takes effect on the
+     next turn (chat_stream_worker reads the pin before cfg.provider). */
+  async function changeAgent(name: string) {
+    const sid = tabsRef.current[activeIdxRef.current]?.aimeeSid;
+    if (!sid || !name) return;
+    const prev = activeAgent;
+    setActiveAgent(name);
+    try {
+      const resp = await fetch('/api/chat/primary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
+        body: JSON.stringify({ sid, agent: name }),
+      });
+      if (!resp.ok) setActiveAgent(prev);
+    } catch { setActiveAgent(prev); }
   }
 
   async function togglePlugin(name: string) {
@@ -3045,6 +3113,37 @@ export default function Chat() {
             </select>
           </>
         )}
+        {agents.length > 0 && (
+          <>
+            <span style={{ fontSize: '11px', color: tokens.borderLight, fontFamily: 'system-ui', marginLeft: '4px' }}>|</span>
+            <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}>
+              Agent:
+            </span>
+            <select
+              value={activeAgent || defaultAgent}
+              onChange={e => changeAgent(e.target.value)}
+              title={activeAgent
+                ? 'The agent serving this tab (pinned for this session)'
+                : `Following the configured primary${defaultAgent ? ` (${defaultAgent})` : ''} — pick one to pin it for this session`}
+              style={{
+                fontSize: '11px', fontFamily: 'system-ui',
+                // Unpinned (following the default) reads as the muted state, the
+                // same way an unset persona does.
+                background: activeAgent ? tokens.primary : tokens.surface,
+                color: activeAgent ? tokens.surface : tokens.textFaint,
+                border: `1px solid ${activeAgent ? tokens.primary : tokens.borderLight}`,
+                borderRadius: '10px', cursor: 'pointer', padding: '2px 6px',
+                outline: 'none',
+              }}
+            >
+              {agents.map(a => (
+                <option key={a.name} value={a.name}>
+                  {a.name}{a.name === defaultAgent ? ' (primary)' : ''}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
         {availablePersonas.length > 0 && (
           <>
             <span style={{ fontSize: '11px', color: tokens.borderLight, fontFamily: 'system-ui', marginLeft: '4px' }}>|</span>
@@ -3133,7 +3232,7 @@ export default function Chat() {
           metrics={allTimeMetrics}
         />
 
-        <PluginsPanel
+        {pluginLoaderAvailable && <PluginsPanel
           open={pluginsOpen}
           plugins={plugins}
           loading={pluginsLoading}
@@ -3141,7 +3240,7 @@ export default function Chat() {
           onToggle={() => { setPluginsOpen(o => !o); setRulesOpen(false); setContextOpen(false); }}
           onRefresh={() => { void refreshPlugins(); }}
           onPluginToggle={name => { void togglePlugin(name); }}
-        />
+        />}
 
         {/* Rules sidebar */}
         <RulesPanel open={rulesOpen} onToggle={() => { setRulesOpen(o => !o); setPluginsOpen(false); setContextOpen(false); }} />

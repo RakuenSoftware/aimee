@@ -12,6 +12,17 @@ import (
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
+func TestDiscussionPromptUsesJSONIdentityEscaping(t *testing.T) {
+	prompt := buildDiscussionPrompt("run\x01\"\\", "hash\x02", 1, nil, nil)
+	if strings.Contains(prompt, `\x01`) || strings.Contains(prompt, `\x02`) {
+		t.Fatalf("discussion identity used Go quoting instead of JSON escaping: %q", prompt)
+	}
+	if !strings.Contains(prompt, `"run_id":"run\u0001\"\\"`) ||
+		!strings.Contains(prompt, `"artifact_hash":"hash\u0002"`) {
+		t.Fatalf("discussion response contract lacks JSON-escaped identity: %q", prompt)
+	}
+}
+
 type discussionTestAgents struct {
 	mu       sync.Mutex
 	requests []DelegateRequest
@@ -26,12 +37,16 @@ func (a *discussionTestAgents) Delegate(_ context.Context, request DelegateReque
 	return DelegateResult{Response: response}, err
 }
 
+func (a *discussionTestAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	return testDelegateGroup(ctx, requests, a.Delegate)
+}
+
 func discussionAnalysis(severity string) panelAnalysis {
 	return panelAnalysis{
 		Feedback: wfe.ReviewFeedback{SchemaVersion: 1, ArtifactHash: "hash", Findings: []wfe.Finding{{ID: "direction", Persona: "architecture", Severity: severity, Summary: "the direction is wrong"}}},
 		Reports: []panelSeatReport{
-			{Seat: panelSeat{persona: "architecture", delegate: "codex", ordinal: 0}, Response: panelResponse{ArtifactStage: "plan", Verdict: "changes"}},
-			{Seat: panelSeat{persona: "reviewer", delegate: "minimax", ordinal: 1}, Response: panelResponse{ArtifactStage: "plan", Verdict: "changes"}},
+			{Seat: panelSeat{persona: "architecture", participant: "participant-a", ordinal: 0}, Response: panelResponse{ArtifactStage: "plan", Verdict: "changes"}},
+			{Seat: panelSeat{persona: "reviewer", participant: "participant-b", ordinal: 1}, Response: panelResponse{ArtifactStage: "plan", Verdict: "changes"}},
 		},
 		Voters: 2,
 	}
@@ -44,7 +59,7 @@ func TestDiscussionNitsHaveExactlyOneCycle(t *testing.T) {
 		return fmt.Sprintf(`{"positions":[{"id":%q,"position":"agree"}]}`, issueID), nil
 	}}
 	runner := &NativeRunner{agents: agents}
-	feedback, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
+	feedback, _, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
 	if errText != "" || len(feedback.Findings) != 1 {
 		t.Fatalf("discussion failed: err=%q feedback=%+v", errText, feedback)
 	}
@@ -68,7 +83,7 @@ func TestDiscussionAbstentionAloneDoesNotExtend(t *testing.T) {
 		return fmt.Sprintf(`{"positions":[{"id":%q,"position":"abstain"}]}`, issueID), nil
 	}}
 	runner := &NativeRunner{agents: agents}
-	feedback, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
+	feedback, _, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
 	if errText != "" || len(feedback.Findings) != 1 || len(agents.requests) != 2 {
 		t.Fatalf("abstention extended or erased issue: calls=%d err=%q feedback=%+v", len(agents.requests), errText, feedback)
 	}
@@ -82,9 +97,22 @@ func TestDiscussionRejectsIncompleteBallots(t *testing.T) {
 		return fmt.Sprintf(`{"positions":[{"id":%q,"position":"agree"}]}`, issueID), nil
 	}}
 	runner := &NativeRunner{agents: agents}
-	_, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
+	_, _, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
 	if !strings.Contains(errText, "discussion quorum 0/2") {
 		t.Fatalf("incomplete ballots counted as successful: %q", errText)
+	}
+}
+
+func TestDiscussionRejectsStaleRunAndArtifactIdentity(t *testing.T) {
+	analysis := discussionAnalysis("blocking")
+	issueID := makeDiscussionIssues(analysis.Feedback.Findings)[0].ID
+	agents := &discussionTestAgents{respond: func(DelegateRequest) (string, error) {
+		return fmt.Sprintf(`{"run_id":"another-run","artifact_hash":"stale","positions":[{"id":%q,"position":"agree"}]}`, issueID), nil
+	}}
+	runner := &NativeRunner{agents: agents}
+	_, _, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
+	if !strings.Contains(errText, "discussion quorum 0/2") {
+		t.Fatalf("stale discussion ballots counted as successful: %q", errText)
 	}
 }
 
@@ -99,7 +127,7 @@ func TestDiscussionOrdinaryDisagreementDoesNotExtend(t *testing.T) {
 		return fmt.Sprintf(`{"positions":[{"id":%q,"position":%q}]}`, issueID, position), nil
 	}}
 	runner := &NativeRunner{agents: agents}
-	feedback, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
+	feedback, _, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
 	if errText != "" || len(feedback.Findings) != 1 || len(agents.requests) != 2 {
 		t.Fatalf("ordinary disagreement extended: calls=%d err=%q feedback=%+v", len(agents.requests), errText, feedback)
 	}
@@ -116,9 +144,36 @@ func TestDiscussionFoundationalTieExtendsOnlyUntilMajority(t *testing.T) {
 		return fmt.Sprintf(`{"positions":[{"id":%q,"position":%q}]}`, issueID, position), nil
 	}}
 	runner := &NativeRunner{agents: agents}
-	feedback, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
+	feedback, _, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
 	if errText != "" || len(feedback.Findings) != 1 || len(agents.requests) != 4 {
 		t.Fatalf("foundational consensus: calls=%d err=%q feedback=%+v", len(agents.requests), errText, feedback)
+	}
+}
+
+func TestDiscussionFailureRemainsDegradedAfterSeatRecovers(t *testing.T) {
+	analysis := discussionAnalysis("foundational")
+	analysis.Reports = append(analysis.Reports, panelSeatReport{
+		Seat:     panelSeat{persona: "qa", participant: "participant-c", ordinal: 2},
+		Response: panelResponse{ArtifactStage: "plan", Verdict: "changes"},
+	})
+	issueID := makeDiscussionIssues(analysis.Feedback.Findings)[0].ID
+	agents := &discussionTestAgents{respond: func(request DelegateRequest) (string, error) {
+		if strings.Contains(request.DurableSlot, ":discussion:1:") && strings.HasSuffix(request.DurableSlot, "seat:2") {
+			return "", fmt.Errorf("temporary seat failure")
+		}
+		position := "agree"
+		if strings.Contains(request.DurableSlot, ":discussion:1:") && strings.HasSuffix(request.DurableSlot, "seat:1") {
+			position = "disagree"
+		}
+		return fmt.Sprintf(`{"positions":[{"id":%q,"position":%q}]}`, issueID, position), nil
+	}}
+	runner := &NativeRunner{agents: agents}
+	feedback, _, _, _, failed, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
+	if errText != "" || len(feedback.Findings) != 1 || len(agents.requests) != 6 {
+		t.Fatalf("seat recovery did not complete consensus: calls=%d err=%q feedback=%+v", len(agents.requests), errText, feedback)
+	}
+	if failed != 1 {
+		t.Fatalf("recovered seat erased degradation: failed=%d, want 1", failed)
 	}
 }
 
@@ -129,7 +184,7 @@ func TestDiscussionFoundationalAgreementHasOneCycle(t *testing.T) {
 		return fmt.Sprintf(`{"positions":[{"id":%q,"position":"agree"}]}`, issueID), nil
 	}}
 	runner := &NativeRunner{agents: agents}
-	_, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
+	_, _, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
 	if errText != "" || len(agents.requests) != 2 {
 		t.Fatalf("unanimous foundational issue extended: calls=%d err=%q", len(agents.requests), errText)
 	}
@@ -142,7 +197,7 @@ func TestDiscussionRejectMajorityDropsIssueDeterministically(t *testing.T) {
 		return fmt.Sprintf(`{"positions":[{"id":%q,"position":"disagree"}]}`, issueID), nil
 	}}
 	runner := &NativeRunner{agents: agents}
-	feedback, approvals, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
+	feedback, approvals, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
 	if errText != "" || len(feedback.Findings) != 0 || approvals != 2 {
 		t.Fatalf("deterministic rejection failed: approvals=%d err=%q feedback=%+v", approvals, errText, feedback)
 	}

@@ -25,6 +25,27 @@ typedef struct
    int64_t expires_at;
 } server_mgmt_token_claims_t;
 
+typedef enum
+{
+   SERVER_MGMT_TOKEN_INVALID = 0,
+   SERVER_MGMT_TOKEN_OK = 1,
+   SERVER_MGMT_TOKEN_UNKNOWN_KID = 2,
+} server_mgmt_token_result_t;
+
+server_mgmt_token_result_t
+server_mgmt_token_verify_ex(const char *jwt, size_t jwt_len, const char *jwks_json,
+                            const char *expected_issuer, const char *expected_audience,
+                            const char *peer_issuer, const char *peer_serial,
+                            const char *peer_fingerprint, const char *request_sha256, int64_t now,
+                            server_mgmt_token_claims_t *out);
+
+/* Read flow only: authenticates every fixed binding and requires remote_reads,
+ * but returns the signed request digest for nonce-bound recomputation. */
+server_mgmt_token_result_t server_mgmt_token_verify_read_claims_ex(
+    const char *jwt, size_t jwt_len, const char *jwks_json, const char *expected_issuer,
+    const char *expected_audience, const char *peer_issuer, const char *peer_serial,
+    const char *peer_fingerprint, int64_t now, server_mgmt_token_claims_t *out);
+
 /* Verify an authenticated, caller-supplied management JWKS and return one
  * fully typed claim tuple. No caller may reparse the compact token. */
 int server_mgmt_token_verify(const char *jwt, size_t jwt_len, const char *jwks_json,

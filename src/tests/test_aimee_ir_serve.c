@@ -8,7 +8,7 @@
 
 #include "aimee.h"
 #include "agent_protocol.h"
-#include "aimee_ir.h"
+#include <aimee/ir/aimee_ir.h>
 #include "aimee_ir_serve.h"
 #include "cJSON.h"
 

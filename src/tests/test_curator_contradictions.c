@@ -11,7 +11,7 @@
 
 #include "aimee.h"
 #include "db2_test_shim.h"
-#include "../kb/kb_curator_contradictions.h"
+#include "kb_curator_contradictions.h"
 
 static void seed(sqlite3 *db, const char *sql)
 {

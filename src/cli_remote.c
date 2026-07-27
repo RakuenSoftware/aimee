@@ -15,11 +15,9 @@
 #include <stdlib.h>
 #include <string.h>
 #ifdef __linux__
-#include <fcntl.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/rand.h>
-#include <unistd.h>
 #endif
 #ifdef _WIN32
 #include <direct.h>
@@ -28,7 +26,9 @@
 #define AIMEE_UNSETENV(k)  _putenv_s((k), "")
 #define AIMEE_SETENV(k, v) _putenv_s((k), (v))
 #else
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #define AIMEE_MKDIR(p)     mkdir((p), 0700)
 #define AIMEE_UNSETENV(k)  unsetenv(k)
 #define AIMEE_SETENV(k, v) setenv((k), (v), 1)
@@ -61,6 +61,47 @@ static void tls_insecure_restore(char *saved)
 static void remote_conf_path(char *out, size_t out_sz)
 {
    snprintf(out, out_sz, "%s/remote.conf", aimee_home());
+}
+
+/* remote.conf contains the bearer token, so never let the caller's umask make
+ * it group/world-readable.  Opening without O_TRUNC lets us repair the mode of
+ * an existing file before replacing its contents. */
+static FILE *open_remote_conf_write(const char *path)
+{
+#ifdef _WIN32
+   return fopen(path, "w");
+#else
+   int flags = O_WRONLY | O_CREAT;
+#ifdef O_CLOEXEC
+   flags |= O_CLOEXEC;
+#endif
+#ifdef O_NOFOLLOW
+   flags |= O_NOFOLLOW;
+#endif
+   int fd = open(path, flags, S_IRUSR | S_IWUSR);
+   if (fd < 0)
+      return NULL;
+   if (fchmod(fd, S_IRUSR | S_IWUSR) != 0 || ftruncate(fd, 0) != 0)
+   {
+      close(fd);
+      return NULL;
+   }
+   FILE *f = fdopen(fd, "w");
+   if (!f)
+      close(fd);
+   return f;
+#endif
+}
+
+static int write_remote_conf(const char *path, const char *url, const char *token)
+{
+   FILE *f = open_remote_conf_write(path);
+   if (!f)
+      return -1;
+   int failed = fprintf(f, "%s\n%s\n", url, token ? token : "") < 0;
+   if (fclose(f) != 0)
+      failed = 1;
+   return failed ? -1 : 0;
 }
 
 /* Create |dir| and any missing parents (best effort, ignores existing/errors).
@@ -391,11 +432,10 @@ static int remote_enroll(const char *url, char *out, size_t out_sz, int json_out
     * adopt it for subsequent requests in this process. */
    char path[512];
    remote_conf_path(path, sizeof(path));
-   FILE *f = fopen(path, "w");
-   if (f)
+   if (write_remote_conf(path, url, out) != 0)
    {
-      fprintf(f, "%s\n%s\n", url, out);
-      fclose(f);
+      fprintf(stderr, "aimee: cannot securely write %s\n", path);
+      return -1;
    }
    aimee_client_set_remote(url, out);
    int mtls_enrolled = remote_enroll_client_cert(json_output);
@@ -418,14 +458,11 @@ static int remote_set(const char *url, const char *token, int json_output)
    char path[512];
    remote_conf_path(path, sizeof(path));
    ensure_dir_p(aimee_home());
-   FILE *f = fopen(path, "w");
-   if (!f)
+   if (write_remote_conf(path, url, token) != 0)
    {
-      fprintf(stderr, "aimee: cannot write %s\n", path);
+      fprintf(stderr, "aimee: cannot securely write %s\n", path);
       return 1;
    }
-   fprintf(f, "%s\n%s\n", url, token ? token : "");
-   fclose(f);
 
    /* For an https remote, establish trust now so later commands need no
     * AIMEE_TLS_INSECURE flag. If it already verifies (publicly-trusted CA, or a
@@ -460,21 +497,34 @@ static int remote_set(const char *url, const char *token, int json_output)
     * bootstrap token configured and is reported by remote_enroll. */
    int enrolled = 0;
    int mtls_enrolled = 0;
+   int bootstrap_enroll_failed = 0;
    char strong_token[256] = "";
-   if (verified && token && strcmp(token, AIMEE_BOOTSTRAP_BEARER) == 0 &&
-       remote_enroll(url, strong_token, sizeof(strong_token), json_output) == 0)
+   if (verified && token && strcmp(token, AIMEE_BOOTSTRAP_BEARER) == 0)
    {
-      enrolled = 1;
-      mtls_enrolled = g_remote_mtls_enrolled;
+      if (remote_enroll(url, strong_token, sizeof(strong_token), json_output) == 0)
+      {
+         enrolled = 1;
+         mtls_enrolled = g_remote_mtls_enrolled;
+      }
+      else
+      {
+         /* The bootstrap bearer was supplied, the channel is trusted, and the
+          * rotation was refused (typically: already consumed by an earlier client,
+          * or by following the manual rotation in QUICKSTART 1.3). What is now on
+          * disk is the dead bootstrap token, so every later command will 401.
+          * remote_enroll has already printed the recovery options; make the exit
+          * status say it failed instead of reporting a successful setup. */
+         bootstrap_enroll_failed = 1;
+      }
    }
    else if (verified && token && token[0] && remote_enroll_client_cert(json_output) == 0)
       mtls_enrolled = 1;
 
    if (json_output)
-      printf("{\"ok\":true,\"url\":\"%s\",\"token\":%s,\"pinned\":%s,\"verified\":%s,"
+      printf("{\"ok\":%s,\"url\":\"%s\",\"token\":%s,\"pinned\":%s,\"verified\":%s,"
              "\"enrolled\":%s,\"mtls_enrolled\":%s}\n",
-             url, token && *token ? "true" : "false", pinned ? "true" : "false",
-             verified ? "true" : "false", enrolled ? "true" : "false",
+             bootstrap_enroll_failed ? "false" : "true", url, token && *token ? "true" : "false",
+             pinned ? "true" : "false", verified ? "true" : "false", enrolled ? "true" : "false",
              mtls_enrolled ? "true" : "false");
    else
    {
@@ -488,7 +538,7 @@ static int remote_set(const char *url, const char *token, int json_output)
              "available on this platform).\n"
              "       Start the server and re-run `aimee remote set`, or `aimee remote trust`.\n");
    }
-   return 0;
+   return bootstrap_enroll_failed ? 1 : 0;
 }
 
 /* Re-pin the cert of the already-configured remote (e.g. after the server's
@@ -554,13 +604,19 @@ static int remote_status(int json_output)
    int st = 0;
    char *body = aimee_client_request("GET", "/v1/health", NULL, &st);
    int reachable = (body != NULL && st >= 200 && st < 500);
+   /* A 401/403 means the transport is fine but the stored token is not accepted —
+    * the single most common setup failure. Reporting a bare "Reachable: yes" for it
+    * (and exiting 0) told users their client was configured when no command would
+    * work; say what is actually wrong and fail. */
+   int unauthorized = (body != NULL && (st == 401 || st == 403));
+   int ok = (body != NULL && st >= 200 && st < 400);
    free(body);
 
    if (json_output)
    {
-      printf("{\"remote\":%s,\"target\":\"%s\",\"reachable\":%s,\"status\":%d}\n",
+      printf("{\"remote\":%s,\"target\":\"%s\",\"reachable\":%s,\"authorized\":%s,\"status\":%d}\n",
              active ? "true" : "false", active ? desc : "local-uds", reachable ? "true" : "false",
-             st);
+             unauthorized ? "false" : (ok ? "true" : "false"), st);
    }
    else
    {
@@ -568,9 +624,19 @@ static int remote_status(int json_output)
          printf("Transport: remote TCP -> %s\n", desc);
       else
          printf("Transport: local Unix socket (no remote configured)\n");
-      printf("Reachable: %s (GET /v1/health -> %d)\n", reachable ? "yes" : "no", st);
+      if (unauthorized)
+      {
+         printf("Reachable: yes, but NOT authorized (GET /v1/health -> %d)\n", st);
+         printf("  The server answered but rejected the stored token. Re-run\n"
+                "  `aimee remote set <url> <token>` with this server's bearer, or\n"
+                "  `aimee remote enroll` from an already-enrolled client.\n");
+      }
+      else
+      {
+         printf("Reachable: %s (GET /v1/health -> %d)\n", reachable ? "yes" : "no", st);
+      }
    }
-   return reachable ? 0 : 1;
+   return ok ? 0 : 1;
 }
 
 /* Force enrollment on the already-configured remote: rotate the server's /v1

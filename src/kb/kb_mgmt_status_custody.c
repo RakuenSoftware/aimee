@@ -15,7 +15,8 @@ static pthread_mutex_t g_custody_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct
 {
-   kb_mgmt_status_t *status;
+   unsigned char *signature;
+   size_t signature_size;
    db2_management_status_key_ctx_t *database;
    unsigned char *transcript;
    size_t transcript_size;
@@ -44,7 +45,7 @@ static void custody_cleanup(void *opaque)
    OPENSSL_cleanse(c->candidate, sizeof(*c->candidate));
    OPENSSL_cleanse(c->admitted, sizeof(*c->admitted));
    if (!c->keep_signature)
-      OPENSSL_cleanse(c->status->signature, sizeof(c->status->signature));
+      OPENSSL_cleanse(c->signature, c->signature_size);
    if (c->mutex_locked)
       (void)pthread_mutex_unlock(&g_custody_mutex);
 }
@@ -95,7 +96,8 @@ kb_mgmt_status_custody_result_t kb_mgmt_status_custody_sign(kb_mgmt_status_t *st
    kb_mgmt_status_custody_result_t rc = KB_MGMT_STATUS_CUSTODY_UNAVAILABLE;
    int old_cancel_state = PTHREAD_CANCEL_ENABLE;
    custody_cleanup_t cleanup = {
-       .status = status,
+       .signature = status->signature,
+       .signature_size = sizeof(status->signature),
        .database = cfg->database,
        .transcript = transcript,
        .transcript_size = sizeof(transcript),
@@ -187,6 +189,138 @@ kb_mgmt_status_custody_result_t kb_mgmt_status_custody_sign(kb_mgmt_status_t *st
 done:
    /* Keep the cleanup handler installed while cancellation is restored: a
     * pending cancellation must roll back the guard and erase the signature. */
+   (void)pthread_setcancelstate(old_cancel_state, NULL);
+   if (old_cancel_state == PTHREAD_CANCEL_ENABLE)
+      pthread_testcancel();
+   cleanup.keep_signature = rc == KB_MGMT_STATUS_CUSTODY_OK;
+   pthread_cleanup_pop(1);
+   return rc;
+}
+
+static int sign_checkpoint_only(const unsigned char *secret, size_t len, void *ctx)
+{
+   return len == KB_MGMT_STATUS_KEY_LEN
+              ? kb_mgmt_checkpoint_sign((kb_mgmt_checkpoint_t *)ctx, secret)
+              : -1;
+}
+
+kb_mgmt_status_custody_result_t
+kb_mgmt_status_custody_sign_checkpoint(kb_mgmt_checkpoint_t *checkpoint,
+                                       const kb_mgmt_checkpoint_request_t *request, void *opaque)
+{
+   kb_mgmt_status_custody_t *cfg = opaque;
+   if (!checkpoint || !request || !cfg || !cfg->database || !cfg->custody_key_id ||
+       !cfg->custody_key_id[0] || strlen(cfg->custody_key_id) > 600 ||
+       !kb_vault_management_status_keys_allowed())
+      return KB_MGMT_STATUS_CUSTODY_UNAVAILABLE;
+   unsigned char transcript[512], request_hash[32] = {0}, use_hash[32] = {0};
+   char request_digest[65], use_id[65];
+   size_t transcript_len = 0;
+   uint8_t fresh_att[DB2_VAULT_KEY_USE_ATTEST_MAX] = {0};
+   size_t fresh_att_len = 0;
+   uint64_t version = 0;
+   db2_vault_key_use_envelope_t candidate, admitted;
+   memset(&candidate, 0, sizeof(candidate));
+   memset(&admitted, 0, sizeof(admitted));
+   kb_mgmt_status_custody_result_t rc = KB_MGMT_STATUS_CUSTODY_UNAVAILABLE;
+   int old_cancel_state = PTHREAD_CANCEL_ENABLE;
+   custody_cleanup_t cleanup = {
+       .signature = checkpoint->signature,
+       .signature_size = sizeof(checkpoint->signature),
+       .database = cfg->database,
+       .transcript = transcript,
+       .transcript_size = sizeof(transcript),
+       .request_hash = request_hash,
+       .use_hash = use_hash,
+       .fresh_att = fresh_att,
+       .fresh_att_size = sizeof(fresh_att),
+       .candidate = &candidate,
+       .admitted = &admitted,
+   };
+   if (pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancel_state) ||
+       pthread_mutex_lock(&g_custody_mutex))
+   {
+      OPENSSL_cleanse(checkpoint->signature, sizeof(checkpoint->signature));
+      (void)pthread_setcancelstate(old_cancel_state, NULL);
+      return KB_MGMT_STATUS_CUSTODY_UNAVAILABLE;
+   }
+   cleanup.mutex_locked = 1;
+   pthread_cleanup_push(custody_cleanup, &cleanup);
+   int read_purpose = !strcmp(request->purpose, "management.read.v1") ||
+                      !strcmp(request->purpose, "management.read.config.v1");
+   const char *request_domain = read_purpose ? "management.read.checkpoint.request.v1\n"
+                                             : "management.action.checkpoint.request.v1\n";
+   const char *use_domain = read_purpose ? "management.read.checkpoint.use.v1\n"
+                                         : "management.action.checkpoint.use.v1\n";
+   if ((strcmp(request->purpose, "management.action.v1") &&
+        strcmp(request->purpose, "management.read.v1") &&
+        strcmp(request->purpose, "management.read.config.v1")) ||
+       kb_mgmt_checkpoint_transcript(checkpoint, transcript, sizeof(transcript), &transcript_len) ||
+       hash_domain(request_domain, transcript, transcript_len, request_hash) ||
+       hash_domain(use_domain, transcript, transcript_len, use_hash))
+      goto checkpoint_done;
+   hex32(request_hash, request_digest);
+   hex32(use_hash, use_id);
+   if (vault_hwm_read(cfg->custody_key_id, &version, fresh_att, sizeof(fresh_att),
+                      &fresh_att_len) ||
+       !version || version > INT64_MAX ||
+       vault_hwm_verify(cfg->custody_key_id, version, fresh_att, fresh_att_len) ||
+       db2_management_status_key_candidate(cfg->database, cfg->custody_key_id, checkpoint->key_id,
+                                           (int64_t)version, &candidate) ||
+       candidate.version != (int64_t)version ||
+       vault_hwm_verify(cfg->custody_key_id, version, candidate.hwm_attestation,
+                        candidate.hwm_attestation_len))
+      goto checkpoint_done;
+   uint64_t local_epoch = vault_use_epoch_snapshot();
+   db2_management_status_admission_t p = {
+       .use_id = use_id,
+       .custody_key_id = cfg->custody_key_id,
+       .wire_key_id = checkpoint->key_id,
+       .version = (int64_t)version,
+       .request_digest = request_digest,
+       .caller_issuer = request->caller_issuer,
+       .caller_serial_norm = request->caller_serial_norm,
+       .caller_fingerprint = request->caller_fingerprint,
+       .target_server_id = request->target_server_id,
+       .target_mgmt_fingerprint = request->authenticated_peer_fingerprint,
+       .revocation_generation = (int64_t)checkpoint->generation,
+       .hwm_attestation = candidate.hwm_attestation,
+       .hwm_attestation_len = candidate.hwm_attestation_len,
+   };
+   int admitted_rc = db2_management_status_key_admit(cfg->database, &p, &admitted);
+   if (admitted_rc == 0)
+   {
+      rc = KB_MGMT_STATUS_CUSTODY_CONFLICT;
+      goto checkpoint_done;
+   }
+   if (admitted_rc < 0)
+   {
+      rc = admitted_rc == DB2_VAULT_KEY_USE_INTEGRITY ? KB_MGMT_STATUS_CUSTODY_INTEGRITY
+                                                      : KB_MGMT_STATUS_CUSTODY_UNAVAILABLE;
+      goto checkpoint_done;
+   }
+   if (admitted_rc != 1 || admitted.version != (int64_t)version ||
+       admitted.hwm_attestation_len != candidate.hwm_attestation_len ||
+       CRYPTO_memcmp(admitted.hwm_attestation, candidate.hwm_attestation,
+                     candidate.hwm_attestation_len))
+   {
+      rc = KB_MGMT_STATUS_CUSTODY_INTEGRITY;
+      goto checkpoint_done;
+   }
+   if (db2_management_status_key_guard_begin(cfg->database, admitted.seal_epoch))
+      goto checkpoint_done;
+   cleanup.guard_open = 1;
+   if (kb_vault_protected_use(local_epoch, "org:p5-status", "management", "ed25519", &admitted,
+                              sign_checkpoint_only, checkpoint) != KB_VAULT_KEY_USE_OK)
+      goto checkpoint_done;
+   if (db2_management_status_key_guard_end(cfg->database, 1))
+   {
+      cleanup.guard_open = 0;
+      goto checkpoint_done;
+   }
+   cleanup.guard_open = 0;
+   rc = KB_MGMT_STATUS_CUSTODY_OK;
+checkpoint_done:
    (void)pthread_setcancelstate(old_cancel_state, NULL);
    if (old_cancel_state == PTHREAD_CANCEL_ENABLE)
       pthread_testcancel();

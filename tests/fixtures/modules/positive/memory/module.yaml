@@ -1,0 +1,6 @@
+{
+  "descriptor_version": 1,
+  "id": "memory",
+  "dependencies": ["config", "ir"],
+  "runtime_toggle": {"supported": false}
+}

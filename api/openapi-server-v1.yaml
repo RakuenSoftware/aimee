@@ -345,6 +345,134 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /management/action/challenge:
+    post:
+      summary: Issue a nonce for a management control-plane action
+      description: >
+        Requires the dedicated kb management-client mTLS certificate profile.
+        The nonce is short-lived, single-use, and bound to this TLS connection,
+        peer certificate, target server, and management.action.v1 purpose. The
+        subsequent action request must use the same live TLS connection.
+      responses:
+        "200":
+          description: Management action challenge issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nonce, expires_at]
+                properties:
+                  nonce: { type: string, description: Canonical base64url without padding }
+                  expires_at: { type: string, pattern: '^[0-9]+$' }
+        "401": { description: Dedicated management-client certificate required }
+        "429": { description: Outstanding challenge capacity reached }
+        "503": { description: Management action verification is not configured }
+  /management/read/challenge:
+    post:
+      summary: Issue a nonce for a bounded management read
+      description: >
+        Requires the dedicated kb management-client mTLS profile. The nonce is
+        short-lived, single-use, same-connection bound, and purpose-separated as
+        management.read.v1.
+      responses:
+        "200":
+          description: Management-read challenge issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nonce, purpose, expires_at]
+                additionalProperties: false
+                properties:
+                  nonce: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+                  purpose: { type: string, enum: [management.read.v1] }
+                  expires_at: { type: integer }
+        "403": { description: Dedicated management-client certificate required }
+        "503": { description: Management-read verification is unavailable }
+  /management/read/agents:
+    get:
+      summary: Return the bounded management agent projection
+      description: >
+        Requires a nonce-bound status proof and a remote_reads JWT on the same
+        pinned mTLS connection. The response contains only the frozen safe fields.
+      responses:
+        "200":
+          description: Bounded agent projection
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [server_id, team, agents]
+                additionalProperties: false
+                properties:
+                  server_id: { type: string, minLength: 1, maxLength: 127, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$' }
+                  team: { type: integer, format: int64, minimum: 1 }
+                  agents:
+                    type: array
+                    maxItems: 16
+                    items:
+                      type: object
+                      required: [name, provider, model, enabled, delegate_available, primary_only, max_parallel]
+                      additionalProperties: false
+                      properties:
+                        name: { type: string, pattern: '^[A-Za-z0-9._-]{1,63}$' }
+                        provider: { type: string, pattern: '^[A-Za-z0-9._-]{1,15}$' }
+                        model: { type: string, maxLength: 127 }
+                        enabled: { type: boolean }
+                        delegate_available: { type: boolean }
+                        primary_only: { type: boolean }
+                        max_parallel: { type: integer, minimum: 0, maximum: 1024 }
+        "403": { description: Management read forbidden }
+        "409": { description: Nonce or JTI already consumed }
+        "502": { description: Integrity verification failed }
+        "503": { description: Management read unavailable }
+  /management/read/config/challenge:
+    post:
+      summary: Issue a purpose-separated nonce for a bounded configuration read
+      responses:
+        "200":
+          description: Configuration-read challenge issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nonce, purpose, expires_at]
+                additionalProperties: false
+                properties:
+                  nonce: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+                  purpose: { type: string, enum: [management.read.config.v1] }
+                  expires_at: { type: integer }
+        "403": { description: Dedicated management-client certificate required }
+        "503": { description: Management-read verification is unavailable }
+  /management/read/config:
+    get:
+      summary: Return the bounded five-field safe configuration projection
+      responses:
+        "200":
+          description: Safe configuration projection
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [server_id, team, config]
+                properties:
+                  server_id: { type: string, minLength: 1, maxLength: 127, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$' }
+                  team: { type: integer, format: int64, minimum: 1 }
+                  config:
+                    type: object
+                    additionalProperties: false
+                    required: [mtls, remote_writes, client_transport, cli_session_forwarding, require_aimee_git]
+                    properties:
+                      mtls: { type: string, enum: [off, optional, required] }
+                      remote_writes: { type: string, enum: [off, data, full] }
+                      client_transport: { type: string, enum: [socket, http, auto] }
+                      cli_session_forwarding: { type: boolean }
+                      require_aimee_git: { type: boolean }
+        "403": { description: Management read forbidden }
+        "409": { description: Nonce or JTI already consumed }
+        "502": { description: Integrity verification failed }
+        "503": { description: Management read unavailable }
   /management/challenge:
     post:
       summary: Issue a nonce for a read-only management health check
@@ -1279,6 +1407,180 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /grants/write-tier/list:
+    post:
+      summary: List per-user write-tier grants for a (server, team)
+      description: >-
+        POST for a read, deliberately: the thin client marshals a command's flags into a JSON
+        body and has no per-method query-string builder, and `aimee kb grant list` is the only
+        caller. The body also suits a subject, which can contain ':' and '%'.
+        LOCAL UDS ONLY. Refused over the TCP listener regardless of bearer or
+        aimee.api.remote_writes, because a remote caller reaching this would already hold a
+        write tier and could widen its own access. aimee-kb independently requires admin or
+        team-lead authority. `include_revoked` WIDENS the listing to contain revoked grants
+        alongside live ones; it is not a revoked-only filter. `subject` filters to one
+        subject, which is how `show` is served.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [server_id, team_id]
+              properties:
+                server_id: { type: string }
+                team_id: { type: integer, format: int64 }
+                subject:
+                  type: string
+                  description: Optional filter to one subject; this is how `show` is served.
+                include_revoked:
+                  type: boolean
+                  description: >-
+                    WIDENS the listing to include revoked grants alongside live ones. Not a
+                    revoked-only filter.
+      responses:
+        "200":
+          description: >-
+            Grants, plus `truncated` when the answer is partial — from this server's ceiling
+            or aimee-kb's. A partial list read as complete understates who can write.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  grants:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        subject: { type: string }
+                        tier: { type: string, enum: [off, data, full] }
+                        granted_by: { type: string }
+                        created_at: { type: string }
+                        updated_at: { type: string }
+                        revoked_at:
+                          type: string
+                          description: Absent for a live grant.
+                  truncated: { type: boolean }
+        "400":
+          description: server_id or an integer team_id missing or unusable
+          content:
+            application/json:
+              schema: { type: object }
+        "403":
+          description: Not reachable over this transport, or aimee-kb refused
+          content:
+            application/json:
+              schema: { type: object }
+        "503":
+          description: aimee-kb unreachable, or not on the postgres backend
+          content:
+            application/json:
+              schema: { type: object }
+  /grants/write-tier/set:
+    post:
+      summary: Create or update a per-user write-tier grant
+      description: >-
+        LOCAL UDS ONLY (see /grants/write-tier/list). Idempotent. The response reports what was replaced,
+        observed atomically by aimee-kb: `changed` distinguishes a no-op from a real change,
+        which is how a script notices that somebody's access just grew. `previous_tier` is
+        ABSENT when the grant did not exist, because "created" and "changed from off" are
+        different facts. The granter recorded in the audit trail is the local operator, not a
+        value from this request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [server_id, team_id, subject, tier]
+              properties:
+                server_id: { type: string }
+                team_id: { type: integer, format: int64 }
+                subject:
+                  type: string
+                  description: >-
+                    A canonical identity: owner, oidc:<iss>:<sub>, cert:<issuer>:<serial>, or
+                    a bare host account.
+                tier: { type: string, enum: [off, data, full] }
+      responses:
+        "200":
+          description: The grant now has the requested tier
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  changed: { type: boolean }
+                  was_revoked: { type: boolean }
+                  previous_tier:
+                    type: string
+                    enum: [off, data, full]
+                    description: Absent when the grant did not previously exist.
+                  is_member:
+                    type: boolean
+                    description: >-
+                      False when the subject is not on the team. The grant is created anyway
+                      and is inert until they are — a warning, not a refusal.
+        "400":
+          description: Missing or unusable field, or a non-integer team_id
+          content:
+            application/json:
+              schema: { type: object }
+        "403":
+          description: Not reachable over this transport, or aimee-kb refused
+          content:
+            application/json:
+              schema: { type: object }
+        "503":
+          description: aimee-kb unreachable, or not on the postgres backend
+          content:
+            application/json:
+              schema: { type: object }
+  /grants/write-tier/revoke:
+    post:
+      summary: Revoke a per-user write-tier grant
+      description: >-
+        LOCAL UDS ONLY (see /grants/write-tier/list). Idempotent, so a retry after a timeout
+        succeeds. Takes effect immediately for MINTING — aimee-kb re-reads the grant when it
+        mints — but a token already issued remains usable for up to its 300s lifetime, once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [server_id, team_id, subject]
+              properties:
+                server_id: { type: string }
+                team_id: { type: integer, format: int64 }
+                subject: { type: string }
+      responses:
+        "200":
+          description: >-
+            Revoked. `found` is false when no grant existed at all — likely a typo'd subject,
+            and distinct from one already revoked, where the intent was already satisfied.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  found: { type: boolean }
+        "400":
+          description: Missing or unusable field
+          content:
+            application/json:
+              schema: { type: object }
+        "403":
+          description: Not reachable over this transport, or aimee-kb refused
+          content:
+            application/json:
+              schema: { type: object }
+        "503":
+          description: aimee-kb unreachable, or not on the postgres backend
+          content:
+            application/json:
+              schema: { type: object }
   /kb/status:
     get:
       summary: Knowledge-base / vector status (proxied to aimee-kb)
@@ -2296,6 +2598,15 @@ paths:
     post:
       summary: Append a hash-chained metric.snapshot row
       responses: { "200": { description: Snapshot result, content: { application/json: { schema: { type: object } } } } }
+  /audit/captures:
+    get:
+      summary: List the audit-on-bus capture files (recorded governed-action event streams) available for replay
+      responses: { "200": { description: Capture file list, content: { application/json: { schema: { type: object } } } } }
+  /audit/replay:
+    post:
+      summary: Replay one audit-on-bus capture file's governed-action rows as JSON (paged; observational)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Replay page, content: { application/json: { schema: { type: object } } } } }
   /agent/local:
     get:
       summary: List local agents
@@ -2484,28 +2795,10 @@ paths:
     get:
       summary: Plans dashboard
       responses: { "200": { description: Plans, content: { application/json: { schema: { type: object } } } } }
-  /dashboard/plugins:
-    get:
-      summary: Plugins dashboard
-      responses: { "200": { description: Plugins, content: { application/json: { schema: { type: object } } } } }
   /dashboard/traces:
     get:
       summary: Traces dashboard
       responses: { "200": { description: Traces, content: { application/json: { schema: { type: object } } } } }
-  /plugins:
-    get:
-      summary: List installed plugins
-      responses: { "200": { description: Plugins, content: { application/json: { schema: { type: object } } } } }
-  /plugins/enable:
-    post:
-      summary: Enable an installed plugin
-      requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Plugin, content: { application/json: { schema: { type: object } } } } }
-  /plugins/disable:
-    post:
-      summary: Disable an installed plugin
-      requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Plugin, content: { application/json: { schema: { type: object } } } } }
   /insights/overview:
     get:
       summary: Insights overview
@@ -2758,6 +3051,12 @@ paths:
       summary: Call an MCP tool
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Call result, content: { application/json: { schema: { type: object } } } } }
+  /help:
+    post:
+      summary: Read the built-in help index or a named help topic
+      description: Read-only narrow endpoint; it always dispatches get_help regardless of any tool field in the request.
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Help content, content: { application/json: { schema: { type: object } } } } }
   /workspaces/context:
     post:
       summary: Workspace context
@@ -2941,34 +3240,26 @@ paths:
               properties:
                 prompt: { type: string }
       responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
-  /delegate/roundtable:
+  /roundtable/review:
     post:
-      summary: Multi-round agent roundtable over ensemble.reference_models (async; poll GET /runs/{id})
+      summary: Review a complete artifact through the resolved roundtable
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [prompt]
+              required: [artifact]
               properties:
-                prompt: { type: string }
-                mode: { type: string, enum: [draft, review] }
-                turns: { type: string, enum: [parallel, sequential] }
-                rounds: { type: integer }
-                apply: { type: boolean }
-                brief:
-                  oneOf:
-                    - { type: string }
-                    - type: object
-                      properties:
-                        focus: { type: array, items: { type: string } }
-                        fixes: { type: array, items: { type: string } }
-                        invariants: { type: array, items: { type: string } }
-                        questions: { type: array, items: { type: string } }
+                artifact: { type: string }
+                original_request: { type: string }
+                artifact_stage: { type: string, enum: [intent, plan, frozen_diff] }
+                roundtable: { type: string }
+                workdir: { type: string }
+                run_id: { type: string }
       responses:
         "200":
-          description: Queued op run; poll GET /runs/{id}. Final result includes artifact, items, answered_questions, and coverage_gaps.
+          description: Completed roundtable review with structured findings and participant accounting.
           content:
             application/json:
               schema: { type: object }
@@ -5420,7 +5711,7 @@ paths:
       summary: Bring up the managed sibling services
       description: >
         Server-orchestrated deploy: run `docker compose up -d` for the managed
-        services (postgres + aimee-kb + aimee-llm) the current wizard config selects,
+        services (aimee-kb + aimee-llm) the current wizard config selects,
         on a background thread. Requires AIMEE_DEPLOY_ENABLED + a mounted Docker
         socket. Capability: tool:execute.
       responses:

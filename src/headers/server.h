@@ -1,12 +1,20 @@
 #ifndef DEC_SERVER_H
 #define DEC_SERVER_H 1
 
+#include "aimee_features.h"
 #include <stdint.h>
 #include <pthread.h>
 #include <sys/types.h>
 #include "compute_pool.h"
 #include "platform_event.h"
 #include "provider_catalog.h"
+
+/* True when `name` is a provider the chat path can resolve: a built-in CLI
+ * provider, a known adapter, or an agent in `acfg` (matched by name or by
+ * provider). Gates the durable primary write in handle_provider_set so a
+ * mistyped `aimee provider <word>` cannot brick every later chat turn.
+ * `acfg` may be NULL to check only the built-in/adapter sets. */
+int provider_name_settable(const char *name, const agent_config_t *acfg);
 #include "vault_principal.h"
 
 /* Forward declaration */
@@ -43,11 +51,12 @@ typedef struct cJSON cJSON;
 #define CONN_WRITE_DEADLINE_MS 10000 /* 10 seconds */
 
 /* Per-method payload size limits */
-#define LIMIT_MEMORY   (256 * 1024)      /* 256KB for memory operations */
-#define LIMIT_TOOL     (4 * 1024 * 1024) /* 4MB for tool I/O */
-#define LIMIT_DELEGATE (4 * 1024 * 1024) /* 4MB: supports 2MB prompt-file + JSON overhead */
-#define LIMIT_CHAT     (512 * 1024)      /* 512KB for chat messages */
-#define LIMIT_INGEST   (1024 * 1024)     /* 1MB: client-pushed code files (kb req cap) */
+#define LIMIT_MEMORY     (256 * 1024)        /* 256KB for memory operations */
+#define LIMIT_TOOL       (4 * 1024 * 1024)   /* 4MB for tool I/O */
+#define LIMIT_DELEGATE   (4 * 1024 * 1024)   /* 4MB: supports 2MB prompt-file + JSON overhead */
+#define LIMIT_ROUNDTABLE (128 * 1024 * 1024) /* 16MB artifact plus worst-case JSON escaping */
+#define LIMIT_CHAT       (512 * 1024)        /* 512KB for chat messages */
+#define LIMIT_INGEST     (1024 * 1024)       /* 1MB: client-pushed code files (kb req cap) */
 #define LIMIT_TRANSCRIPT                                                                           \
    (3 * 1024 * 1024)               /* 3MB: session transcript snapshots (< SHTTP_MAX_BODY) */
 #define LIMIT_DEFAULT (256 * 1024) /* 256KB default */
@@ -86,8 +95,19 @@ typedef struct cJSON cJSON;
  * only), so a mere authenticated bearer cannot tap live traffic. */
 #define CAP_SHADOW_ADMIN (1u << 17)
 
+/* Operator-level: administer per-user /v1 write-tier grants — who may write to which
+ * remote server. Deliberately OUTSIDE CAPS_AUTHENTICATED for the same reason as the two
+ * above, and the reason is sharper here: a bearer that could administer grants could grant
+ * ITSELF a higher tier, which would make the whole tier system decorative.
+ *
+ * This is defence in depth and not the primary control. The primary control is
+ * v1_route_requires_uds, which refuses these routes over TCP regardless of capability —
+ * necessary because a remote_writes=full bearer holds CAPS_ALL and would otherwise satisfy
+ * any capability check. kb then independently requires admin or team-lead authority. */
+#define CAP_GRANT_ADMIN (1u << 18)
+
 /* Composite capability sets */
-#define CAPS_ALL 0x3FFFFu
+#define CAPS_ALL 0x7FFFFu
 #define CAPS_READ_ONLY                                                                             \
    (CAP_CHAT | CAP_MEMORY_READ | CAP_RULES_READ | CAP_INDEX_READ | CAP_SESSION_READ |              \
     CAP_DASHBOARD_READ | CAP_DESCRIBE_READ)
@@ -353,16 +373,14 @@ int handle_dashboard_delegations(server_ctx_t *ctx, server_conn_t *conn, cJSON *
 int handle_dashboard_traces(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_plans(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_logs(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_dashboard_plugins(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_plugin_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_plugin_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_plugin_disable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_onboard(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_lsp_diagnostics_summary(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_all(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_audit_verify(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_audit_captures(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_audit_replay(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_audit_checkpoint(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_audit_seal(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_audit_snapshot(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -386,7 +404,7 @@ int handle_identity_diff(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_tool_execute(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_roundtable_review_proxy(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* Deepening sweep (Part B): analysis-only — proposes seams per area and re-grounds
  * each against the live code index; returns a JSON report. Files nothing. */
 int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -441,6 +459,9 @@ int handle_agent_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_local(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+/* Returns 0 only after the atomic agents.json replacement committed; every
+ * nonzero result is proven pre-effect.  Used by the management action barrier. */
+int server_agent_management_set_enabled(const char *name, int enabled);
 int handle_agent_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_roles(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_personas(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -463,6 +484,11 @@ cJSON *mcp_build_full_served_list(void);
 int handle_mcp_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_mcp_recheck(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_get_help(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+
+/* Record the served-call verdict from a sub-handler that returned early (same
+ * thread as handle_mcp_call). See server_mcp.c. */
+void server_mcp_served_outcome(const char *verdict, const char *reason);
 int handle_toolset_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_toolset_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_toolset_resolve(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

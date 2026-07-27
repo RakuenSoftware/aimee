@@ -290,13 +290,22 @@ static void test_root_aad_fixtures(void)
                                                0x14, 0x95, 0xfe, 0x4f, 0x15, 0xac, 0x7d, 0x8b,
                                                0x73, 0x64, 0xce, 0xea, 0x3b, 0xc1, 0x6d, 0xd7,
                                                0x9f, 0xab, 0x8e, 0xe0, 0x48, 0x7d, 0x5c, 0xfd};
-   uint8_t token[VAULT_ENVELOPE_AAD_MAX], manifest[VAULT_ENVELOPE_AAD_MAX], digest[32];
-   size_t token_len = 0, manifest_len = 0;
+   uint8_t token[VAULT_ENVELOPE_AAD_MAX], leaf_token[KB_MGMT_TOKEN_ROOT_AAD_MAX];
+   uint8_t manifest[VAULT_ENVELOPE_AAD_MAX], digest[32];
+   size_t token_len = 0, leaf_token_len = 0, manifest_len = 0;
    unsigned int digest_len = 0;
    assert(!kb_mgmt_root_aad(KB_MGMT_ROOT_TOKEN, 2, token, sizeof(token), &token_len));
    assert(token_len == 90 &&
           EVP_Digest(token, token_len, digest, &digest_len, EVP_sha256(), NULL) == 1 &&
           digest_len == 32 && !CRYPTO_memcmp(digest, token_sha256, 32));
+   assert(!kb_mgmt_token_root_aad(2, leaf_token, sizeof(leaf_token), &leaf_token_len));
+   assert(leaf_token_len == token_len && !CRYPTO_memcmp(leaf_token, token, token_len));
+   uint8_t versioned[KB_MGMT_TOKEN_ROOT_AAD_MAX];
+   size_t versioned_len = 0;
+   assert(!kb_mgmt_token_root_aad(INT64_C(0x0102030405060708), versioned, sizeof(versioned),
+                                  &versioned_len));
+   assert(versioned_len == 90 &&
+          !memcmp(versioned + versioned_len - 8, "\x01\x02\x03\x04\x05\x06\x07\x08", 8));
    assert(!kb_mgmt_root_aad(KB_MGMT_ROOT_MANIFEST, 2, manifest, sizeof(manifest), &manifest_len));
    assert(manifest_len == 103 &&
           EVP_Digest(manifest, manifest_len, digest, &digest_len, EVP_sha256(), NULL) == 1 &&

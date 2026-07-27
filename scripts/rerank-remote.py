@@ -24,7 +24,8 @@ Config (env), in precedence order:
   AIMEE_EMBEDDER_URL  base URL of the embedder service (rerank shares it by default)
   AIMEE_LLM_URL       base URL of the unified aimee-llm container (one knob for
                       embed + rerank + synth)
-  (fallback)          http://embedder:8080 (legacy compose embedder service)
+  (unset)             no reranker configured; reported immediately. Pin the
+                      legacy compose service explicitly if wanted.
   AIMEE_RERANK_TIMEOUT  request timeout seconds (default 30)
 
 Usage:
@@ -36,16 +37,26 @@ import sys
 import urllib.error
 import urllib.request
 
+# No implicit legacy fallback -- see the note in embed-remote.py. Defaulting to
+# the old combined-compose http://embedder:8080 made an unconfigured kb dial a
+# host that cannot resolve on a split deploy or a bare `docker run`. Pin the
+# legacy service explicitly if you want it.
 ENDPOINT = (
     os.environ.get("AIMEE_RERANKER_URL")
     or os.environ.get("AIMEE_EMBEDDER_URL")
     or os.environ.get("AIMEE_LLM_URL")
-    or "http://embedder:8080"
+    or ""
 ).rstrip("/")
 TIMEOUT = int(os.environ.get("AIMEE_RERANK_TIMEOUT", "30"))
 
 
 def main() -> None:
+    if not ENDPOINT:
+        sys.stderr.write(
+            "rerank-remote: no reranker configured "
+            "(set AIMEE_LLM_URL, or AIMEE_RERANKER_URL to pin one)\n"
+        )
+        sys.exit(1)
     payload = sys.stdin.read()
     if not payload.strip():
         sys.stderr.write("rerank-remote: empty input\n")

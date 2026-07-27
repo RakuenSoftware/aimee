@@ -207,6 +207,28 @@ func (f *HTTPForge) execute(ctx context.Context, input, output any) error {
 	return nil
 }
 
+// mergeErrIsConflict reports whether a failed Merge describes a content
+// conflict, which is terminal, rather than a lost race, which a retry wins.
+//
+// GitHub answers HTTP 405/409 for both. A lost race means head or base moved
+// while we were merging ("Base branch was modified"); retrying wins it. A
+// content conflict is a property of the two trees, so no retry can ever win and
+// the step must fail instead of pending forever.
+//
+// Match the noun phrase "merge conflict" (this also covers "merge conflicts").
+// The bare word "conflict" is deliberately NOT matched: HTTP 409 is literally
+// named "Conflict" and its lost-race messages can carry that bare word, which
+// would misclassify a winnable race as terminal.
+//
+// Fails safe: an unrecognised message is reported as NOT a conflict, preserving
+// the retrying behaviour rather than rejecting work on a message we do not know.
+func mergeErrIsConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "merge conflict")
+}
+
 func managedBranch(branch string) bool {
 	return strings.HasPrefix(branch, "aimee/wi/wi_") || strings.HasPrefix(branch, "aimee/feat/wi_")
 }

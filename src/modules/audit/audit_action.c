@@ -1,6 +1,6 @@
 /* audit_action.c: governed-action audit primitives. See audit_action.h for the
  * args_hash contract. */
-#include "audit_action.h"
+#include <aimee/audit/audit_action.h>
 
 #include <fcntl.h>
 #include <stdint.h>

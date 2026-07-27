@@ -127,4 +127,10 @@ extern "C"
 }
 #endif
 
+/* The provider CLI's --allowedTools list, exposed as data so the egress-gate
+ * accounting test can enumerate it. Every entry must be classified by that test;
+ * see src/tests/test_cli_claude_allowlist.c. */
+const char *const *cli_claude_allowed_tools(void);
+size_t cli_claude_allowed_tools_count(void);
+
 #endif /* DEC_PROVIDER_CLI_ADAPTER_H */

@@ -8,6 +8,7 @@
 #include "../db1/db.h"
 #include "../db1/eval.h"
 #include "../db1/server_sessions.h"
+#include "kb_client.h" /* kb_health_t for the stub below */
 #include "agent_config.h"
 #include "agent_eval.h"
 #include "hud.h"
@@ -405,6 +406,14 @@ int handle_audit_snapshot(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "audit.snapshot");
 }
+int handle_audit_captures(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "audit.captures");
+}
+int handle_audit_replay(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "audit.replay");
+}
 
 /* hooks.session_start invokes session_start_emit (cmd_session_lifecycle.c)
  * which the test does not link. Stub it and the session-id thread-local so
@@ -654,6 +663,16 @@ int handle_curator_invalidated(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
 {
    return stub_handler(conn, "curator.invalidated");
 }
+/* server_api_status.c (linked here for handle_api_*) probes the kb from
+ * server.health. This test exercises the dispatch table, not the kb, so answer
+ * "unreachable" without linking the whole kb client. */
+int kb_client_health(kb_health_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
 int handle_kb_build(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "kb.build");
@@ -851,22 +870,6 @@ int handle_dashboard_logs(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "dashboard.logs");
 }
-int handle_dashboard_plugins(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "dashboard.plugins");
-}
-int handle_plugin_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "plugin.list");
-}
-int handle_plugin_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "plugin.enable");
-}
-int handle_plugin_disable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "plugin.disable");
-}
 int handle_dashboard_onboard(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "dashboard.onboard");
@@ -959,9 +962,9 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
 {
    return stub_handler(conn, "delegate.aggregate");
 }
-int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+int handle_roundtable_review_proxy(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "delegate.roundtable");
+   return stub_handler(conn, "roundtable.review");
 }
 int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -1115,6 +1118,11 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return stub_handler(conn, "mcp.call");
 }
 
+int handle_get_help(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "help.get");
+}
+
 int handle_mcp_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "mcp.audit");
@@ -1213,15 +1221,17 @@ int config_save(const config_t *cfg)
  * test does not link the real config.o. */
 const char *econ_mode_name(int mode)
 {
-   return mode == ECON_MODE_PROOF_GATED ? "proof_gated" : "off";
+   return mode == ECON_MODE_AGGRESSIVE ? "aggressive" : mode == ECON_MODE_SAFE ? "safe" : "off";
 }
 
 int econ_mode_parse(const char *s)
 {
    if (s && strcmp(s, "off") == 0)
       return ECON_MODE_OFF;
-   if (s && strcmp(s, "proof_gated") == 0)
-      return ECON_MODE_PROOF_GATED;
+   if (s && strcmp(s, "safe") == 0)
+      return ECON_MODE_SAFE;
+   if (s && strcmp(s, "aggressive") == 0)
+      return ECON_MODE_AGGRESSIVE;
    return -1;
 }
 
@@ -1410,6 +1420,33 @@ static void test_large_mcp_call_payload_within_limit(void)
    free(ctx);
 }
 
+static void test_large_roundtable_payload_within_limit(void)
+{
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+   conn->peer_uid = getuid();
+   conn->capabilities = CAPS_AUTHENTICATED;
+
+   size_t size = LIMIT_DEFAULT + 64;
+   char *msg = malloc(size + 1);
+   assert(msg != NULL);
+   snprintf(msg, size + 1, "{\"method\":\"roundtable.review\",\"artifact\":\"");
+   size_t used = strlen(msg);
+   memset(msg + used, 'a', size - used - 2);
+   msg[size - 2] = '"';
+   msg[size - 1] = '}';
+   msg[size] = '\0';
+
+   cJSON *json = dispatch_json(ctx, conn, msg, size);
+   assert(strcmp(cJSON_GetObjectItem(json, "status")->valuestring, "ok") == 0);
+   assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring, "roundtable.review") == 0);
+   cJSON_Delete(json);
+   free(msg);
+   free(conn);
+   free(ctx);
+}
+
 static void test_unknown_method(void)
 {
    server_ctx_t *ctx = calloc(1, sizeof(*ctx));
@@ -1529,6 +1566,12 @@ static void test_routing(void)
    assert(has_trajectory_batch);
    cJSON_Delete(json);
 
+   json =
+       dispatch_json(ctx, conn, "{\"method\":\"help.get\"}", strlen("{\"method\":\"help.get\"}"));
+   assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring, "help.get") == 0);
+   assert(strcmp(g_last_handler, "help.get") == 0);
+   cJSON_Delete(json);
+
    json = dispatch_json(ctx, conn, "{\"method\":\"session.list\"}",
                         strlen("{\"method\":\"session.list\"}"));
    assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring, "session.list") == 0);
@@ -1635,10 +1678,10 @@ static void test_routing(void)
    assert(strcmp(g_last_handler, "delegate.status") == 0);
    cJSON_Delete(json);
 
-   json = dispatch_json(ctx, conn, "{\"method\":\"delegate.roundtable\",\"prompt\":\"draft\"}",
-                        strlen("{\"method\":\"delegate.roundtable\",\"prompt\":\"draft\"}"));
-   assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring, "delegate.roundtable") == 0);
-   assert(strcmp(g_last_handler, "delegate.roundtable") == 0);
+   json = dispatch_json(ctx, conn, "{\"method\":\"roundtable.review\",\"prompt\":\"draft\"}",
+                        strlen("{\"method\":\"roundtable.review\",\"prompt\":\"draft\"}"));
+   assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring, "roundtable.review") == 0);
+   assert(strcmp(g_last_handler, "roundtable.review") == 0);
    cJSON_Delete(json);
 
    json = dispatch_json(ctx, conn, "{\"method\":\"delegate.launch\"}",
@@ -1882,6 +1925,7 @@ int main(void)
    test_missing_method();
    test_oversized_payload();
    test_large_delegate_payload_within_limit();
+   test_large_roundtable_payload_within_limit();
    test_large_mcp_call_payload_within_limit();
    test_unknown_method();
    test_removed_storage_named_migration_alias();

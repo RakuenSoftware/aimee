@@ -1,0 +1,33 @@
+{
+  "description": "Event-bus performance budget baseline (D4 / shared invariant 15). NOTE ON WHY THIS FILE IS SMALL: the reason for moving onto the event bus is NOT speed — it is auditability, record+replay, and observability (every event can flow through the bus capture/tap). Performance is only a guardrail: the bus must not be so slow that it regresses a hot path toward milliseconds. So this file commits absolute speed guardrails, not a performance case for the migration. Each metric is an ABSOLUTE ceiling plus, where a migration made one load-bearing, a CORRECTNESS invariant — not a regression comparison against a pre-migration baseline. What matters for a migrated module is that it WORKS CORRECTLY and that its bus path is a REASONABLE ABSOLUTE SPEED; how it compares to the old in-process call is not the budget. 'Reasonable' has a concrete bar: sub-millisecond is fine — nanoseconds to low microseconds is perfectly acceptable, and a ceiling only exists to catch a gross regression that would push the bus toward milliseconds (e.g. a per-event syscall, or an async publish silently becoming synchronous). The ceilings below sit in the low-microsecond band with generous headroom; observed values are in the ns range. scripts/check_bus_perf_gate.sh enforces these as a merge gate, and changing a ceiling is a reviewed change to this file so 'within budget' always names a real, checkable number.",
+  "metrics": {
+    "dispatch_overhead_ns": {
+      "description": "Per-event bus dispatch: host enqueue (a producer writing its outbound ring) through client dequeue (a subscriber reading its inbound ring), excluding module work on the payload. Median over batched samples from src/tests/bus_bench.c.",
+      "ceiling_ns": 2000,
+      "observed_ns": 134,
+      "observed_note": "reference dev box, 16-byte inline payload; the ceiling carries ~15x headroom so CI variance does not flake the gate while a gross regression (e.g. a per-event syscall) still trips it."
+    },
+    "audit_enqueue_overhead_ns": {
+      "description": "Caller-side cost of publishing one governed-action audit row over the bus (audit_bus_emit), EXCLUDING the ledger write, which the migration moves off the caller's thread. This is the committed budget shape for the first real migration (delivery step 3), which is asynchronous: for an async publish the number that matters is what it costs the caller, not a request/reply round trip. Median over test_bus_audit_durability's per-emit samples.",
+      "ceiling_ns": 5000,
+      "observed_ns": 82,
+      "observed_note": "reference dev box; ~60x headroom absorbs CI variance and the occasional backpressure retry while a gross regression (a per-emit syscall, or the async being lost so the caller waits on the write) still trips the gate."
+    },
+    "audit_durability": {
+      "invariant": "exactly-once",
+      "max_dropped": 0,
+      "description": "The audit migration is all-or-nothing: the direct write is gone, so every row the bus accepts MUST reach the ledger exactly once, and a graceful shutdown MUST drain the in-flight rows. Enforced by test_bus_audit_durability (emits 5000 rows through the real producer/consumer, requires exactly 5000 in the real ledger, each once, zero drops). This is a correctness invariant, not a latency budget, but it is committed here because stripping the direct path made it load-bearing."
+    },
+    "memory_roundtrip_p50_ns": {
+      "status": "pending",
+      "reason": "Audit, not memory, is the first migrated module (memory is not yet modularized). When memory does move onto the bus, its budget is what this file's philosophy says: an ABSOLUTE round-trip ceiling (a reasonable p50/p99 for a request/reply over the bus, filled in here from the migrated module's own measurement) plus a CORRECTNESS invariant (the bus answer is parity-equal to a direct call). It is NOT a factor against a pre-migration in-process baseline — that comparison is explicitly not the budget. Pending until memory migrates."
+    },
+    "memory_roundtrip_p99_ns": {
+      "status": "pending",
+      "reason": "see memory_roundtrip_p50_ns."
+    },
+    "memory_roundtrip_budget_shape": {
+      "description": "When memory migrates: commit an absolute round-trip ceiling (reasonable-speed p50/p99, like dispatch_overhead_ns and audit_enqueue_overhead_ns) and a parity correctness invariant (bus answer == direct-call answer, like audit_durability's exactly-once). No pre-migration regression factor — correctness plus reasonable absolute speed is the whole budget."
+    }
+  }
+}

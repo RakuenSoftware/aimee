@@ -13,7 +13,8 @@
 #
 # PREREQUISITE: the server must allow data writes over its TCP bearer, i.e.
 # aimee.api.remote_writes = "data" (or "full"). The container default is "off";
-# use compose.remote-writes.yaml (or mount a config) to enable it. If writes are
+# set AIMEE_API_REMOTE_WRITES=data on the server service (or mount a config) to
+# enable it. If writes are
 # refused, this script says so explicitly rather than silently passing.
 #
 # Env: SERVER_URL (default https://localhost:8743), BEARER (default aimee-local-dev).

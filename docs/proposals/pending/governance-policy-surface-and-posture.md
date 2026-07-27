@@ -10,15 +10,15 @@
   [governance-decision-records-and-action-audit](../done/governance-decision-records-and-action-audit.md)
   proposal declared policy consolidation a non-goal *"until a concrete need
   appears."* The need has appeared: autonomous execution is now default-on
-  (`wfe_live_forge_enabled = 1`, operator ruling 2026-07-13, `src/config.c:811`;
-  triggers default `mode: "autonomous"`, `src/config_trigger.c:13`) while the
+  (`wfe_live_forge_enabled = 1`, operator ruling 2026-07-13, `src/modules/config/config.c:811`;
+  triggers default `mode: "autonomous"`, `src/modules/config/config_trigger.c:13`) while the
   defensive gates that should envelop it are default-off, shadow-mode, or wired
   into a single call site.
 
 ## Thesis
 
 aimee's individual controls are strong; its *posture* is incoherent. Verified
-defaults as of today (`src/config.c` initializer unless noted):
+defaults as of today (`src/modules/config/config.c` initializer unless noted):
 
 | Control | Default | The problem |
 | --- | --- | --- |
@@ -26,7 +26,7 @@ defaults as of today (`src/config.c` initializer unless noted):
 | trigger `mode` | **`autonomous`** | watch-dir content starts hands-off runs with no default human gate |
 | `integrity_enabled` (injection/poison gate) | **OFF** (`:698`) | the one deterministic anti-injection control is inert |
 | `integrity_dry_run` | **ON** (`:699`) | even when enabled it only shadows |
-| integrity gate wiring | **one call site** (`src/learning_router.c:419`) | KB ingest, memory writes, webchat, and — critically — watch-dir trigger content are unscreened |
+| integrity gate wiring | **one call site** (`src/modules/learning/learning_router.c:419`) | KB ingest, memory writes, webchat, and — critically — watch-dir trigger content are unscreened |
 | `guardrails_blast_radius_advisory_enabled` | **OFF** (`:756`) | blast-radius advisory never fires |
 | `audit_worm_enabled` | **OFF** | tamper-evident audit idles (Part 1, A1) |
 | TCP rate limit | 0 = **unlimited** (`src/server/server_http.c:1000`) | no default backpressure on a bearer |
@@ -103,8 +103,8 @@ deterministic and fail-open in `observe`, fail-closed for REJECT in
 ### B3 — `require_approval` as a first-class verdict
 
 Today's `pre_tool_check` contract is `0=allow / 1=rewrite / 2=block`
-(`src/headers/guardrails.h:134`); human approval exists only as a workflow-graph
-node (`gate.human`, HMAC-signed, `src/workflow/wfe_approval.c:217-237`). The
+(`src/modules/guardrails/guardrails.h:134`); human approval exists only as a workflow-graph
+node (`gate.human`, HMAC-signed, `src/modules/workflows/wfe_approval.c:217-237`). The
 missing verdict is **park-for-approval on a rule match** — the triad every
 surveyed policy layer converged on (`allow / deny / require_approval`), and
 OWASP ASI09's control shape.
@@ -129,7 +129,7 @@ OWASP ASI09's control shape.
   running autonomous work item at its next step boundary, disarms trigger rules,
   and revokes outstanding delegate job leases (`db1_agent_job_take_lease` seam)
   so parked work cannot be re-taken. Today's opt-outs are config flags and
-  per-op re-checks (`forge_allowed()`, `src/server/wfe_live_forge.c:35-47`) —
+  per-op re-checks (`forge_allowed()`, `src/modules/workflows/wfe_live_forge.c:35-47`) —
   good bounding rails, but there is no single operator action that *stops the
   fleet now* and leaves a chain row (`autonomy.stop`) saying who stopped it and
   what was parked. Restart is deliberate (`aimee autonomy resume`, distinct row).
@@ -139,7 +139,7 @@ OWASP ASI09's control shape.
   principal/scope/day) with a soft ceiling → `require_approval` (B3) and a hard
   ceiling → park. This converts cost from a per-run parameter into governance.
 - **Externalization always gated in `hardened`.** The union of the native gate's
-  externalization classes (`src/workflow/wfe_native_gate.c:158-208`) and forge
+  externalization classes (`src/modules/workflows/wfe_native_gate.c:158-208`) and forge
   ops is the "leaves the machine" set; `hardened` routes all of it through B3.
 
 ## Non-goals

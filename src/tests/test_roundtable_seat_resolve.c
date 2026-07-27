@@ -23,6 +23,17 @@ static void mk_agent(agent_t *a, const char *name, const char *role, int enabled
    snprintf(a->api_key, sizeof a->api_key, "sk-test-%s", name); /* literal -> routable */
 }
 
+/* Stub capacity probe: reports slots in use per agent name, or -1 for unknown. */
+static int g_cap_full, g_cap_free;
+static int cap_probe(const char *agent_name)
+{
+   if (agent_name && strcmp(agent_name, "full") == 0)
+      return g_cap_full;
+   if (agent_name && strcmp(agent_name, "free") == 0)
+      return g_cap_free;
+   return -1;
+}
+
 int main(void)
 {
    /* Deterministic random draws. */
@@ -43,13 +54,11 @@ int main(void)
    mk_agent(&cfg.agents[1], "agentB", "review", 1);
    mk_agent(&cfg.agents[2], "agentC", "review", 1);
    mk_agent(&cfg.agents[3], "agentD", "review", 0); /* disabled */
-   /* agentE serves only "code": an EXPLICIT exec_roles list omitting "review" is
-    * what actually makes an agent non-review-capable (an empty exec list falls back
-    * to the default roles, which include "review"). This mirrors a specialized
-    * agent like gpu-mid that must never be seated on a review panel. */
+   /* agentE declares only the "code" role and NO explicit exec_roles. Because
+    * `review` is not a default exec role, that alone makes it non-review-capable:
+    * an implementation-only delegate (e.g. a local synth model) is never seated on
+    * a review panel just for leaving exec_roles empty. */
    mk_agent(&cfg.agents[4], "agentE", "code", 1);
-   snprintf(cfg.agents[4].exec_roles[0], sizeof cfg.agents[4].exec_roles[0], "code");
-   cfg.agents[4].exec_role_count = 1;
    cfg.agent_count = 5;
 
    int idx = -1;
@@ -96,6 +105,53 @@ int main(void)
    /* Bad args. */
    assert(rt_resolve_seat_model(NULL, "agentA", "review", NULL, 0, &idx) == RT_SEAT_INVALID);
    assert(rt_resolve_seat_model(&cfg, "agentA", "review", NULL, 0, NULL) == RT_SEAT_INVALID);
+
+   /* --- a "$random" seat prefers an agent with a free concurrency slot ---
+    * Routing checks health/policy/structure but not capacity, so a saturated
+    * agent stayed selectable and the seat failed at admission with
+    * AGENT_RC_AT_LIMIT. Health cannot compensate: at-limit is deliberately never
+    * recorded as a provider fault, so the agent is never marked DOWN. */
+   agent_config_t ccfg;
+   memset(&ccfg, 0, sizeof ccfg);
+   mk_agent(&ccfg.agents[0], "full", "review", 1);
+   mk_agent(&ccfg.agents[1], "free", "review", 1);
+   ccfg.agents[0].max_parallel = 3;
+   ccfg.agents[1].max_parallel = 3;
+   ccfg.agent_count = 2;
+
+   agent_set_route_capacity_probe(cap_probe);
+   /* "full" is at its cap, "free" is idle: every draw must pick "free". */
+   g_cap_full = 3;
+   g_cap_free = 0;
+   for (int i = 0; i < 40; i++)
+   {
+      assert(rt_resolve_seat_model(&ccfg, "$random", "review", NULL, 0, &idx) == RT_SEAT_OK);
+      assert(idx == 1); /* never the saturated agent while a free one exists */
+   }
+
+   /* Both saturated: PREFER must not become EXCLUDE. The seat still resolves —
+    * the caller gets an agent and blocking admission waits for a slot — rather
+    * than collapsing a populated roster into "no agent for role". */
+   g_cap_full = 3;
+   g_cap_free = 3;
+   assert(rt_resolve_seat_model(&ccfg, "$random", "review", NULL, 0, &idx) == RT_SEAT_OK);
+   assert(idx == 0 || idx == 1);
+
+   /* Unknown capacity (-1, i.e. controller unconfigured) must read as "has
+    * capacity", so an unconfigured build keeps the prior behaviour. */
+   g_cap_full = -1;
+   g_cap_free = -1;
+   assert(rt_resolve_seat_model(&ccfg, "$random", "review", NULL, 0, &idx) == RT_SEAT_OK);
+   assert(idx == 0 || idx == 1);
+
+   /* A pinned seat is unaffected by capacity: it resolves to that exact agent
+    * (no substitution) even when saturated — admission decides, not routing. */
+   g_cap_full = 3;
+   g_cap_free = 0;
+   assert(rt_resolve_seat_model(&ccfg, "full", "review", NULL, 0, &idx) == RT_SEAT_OK);
+   assert(idx == 0);
+
+   agent_set_route_capacity_probe(NULL); /* leave the global clean for other tests */
 
    printf("test_roundtable_seat_resolve: OK\n");
    return 0;

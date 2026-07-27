@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "substantive": [
+    "kb-synthesis",
+    "learning",
+    "memory",
+    "module-runtime",
+    "delegates",
+    "gateway",
+    "ir",
+    "protocols",
+    "response-composition",
+    "routing",
+    "skills",
+    "translation",
+    "execution-policy",
+    "vault",
+    "workspace",
+    "tools",
+    "git",
+    "config",
+    "audit",
+    "workflows",
+    "roundtable",
+    "benchmarks",
+    "control-web",
+    "governance",
+    "runtime-web"
+  ],
+  "debt": []
+}

@@ -1,5 +1,5 @@
 {
-  "name": "aimee-webchat",
+  "name": "aimee-runtime-web",
   "private": true,
   "version": "0.0.1",
   "type": "module",
@@ -17,9 +17,11 @@
     "react-router-dom": "^7.5.0"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.4.1",
+    "jsdom": "^26.1.0",
     "typescript": "~5.8.3",
     "vite": "^6.3.1",
     "vite-plugin-singlefile": "^2.0.1",

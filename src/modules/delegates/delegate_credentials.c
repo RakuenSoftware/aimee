@@ -1,6 +1,6 @@
 /* delegate_credentials.c: see delegate_credentials.h */
 
-#include "delegate_credentials.h"
+#include <aimee/delegates/delegate_credentials.h>
 #include "util.h"
 
 #include <pthread.h>

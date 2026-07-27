@@ -190,7 +190,8 @@ static int valid(const kb_mgmt_token_claims_t *c)
    return c && control_free(c->issuer, sizeof(c->issuer), 1, 255) &&
           token(c->audience, sizeof(c->audience), 1, 127) && identity_key(c->subject) &&
           c->team_id > 0 && c->team_id <= JSON_INT_MAX &&
-          c->capability == KB_MGMT_TOKEN_CAP_REMOTE_WRITES &&
+          (c->capability == KB_MGMT_TOKEN_CAP_REMOTE_WRITES ||
+           c->capability == KB_MGMT_TOKEN_CAP_REMOTE_READS) &&
           token(c->jti, sizeof(c->jti), 16, 128) &&
           token(c->correlation_id, sizeof(c->correlation_id), 1, 128) &&
           lower_hex(c->request_sha256, sizeof(c->request_sha256), 64, 64) &&
@@ -216,6 +217,9 @@ kb_mgmt_token_result_t kb_mgmt_token_build(const kb_mgmt_token_claims_t *c,
    char header[HEADER_MAX + 1], payload[PAYLOAD_MAX + 1];
    writer_t h = {header, HEADER_MAX, 0}, p = {payload, PAYLOAD_MAX, 0};
    static const char header_prefix[] = "{\"alg\":\"RS256\",\"typ\":\"JWT\",\"kid\":";
+   const char *capability =
+       c->capability == KB_MGMT_TOKEN_CAP_REMOTE_WRITES ? "remote_writes" : "remote_reads";
+   size_t capability_cap = c->capability == KB_MGMT_TOKEN_CAP_REMOTE_WRITES ? 14u : 13u;
    int ok =
        put(&h, header_prefix, sizeof(header_prefix) - 1) && quoted(&h, c->kid, sizeof(c->kid)) &&
        put(&h, "}", 1) && put(&p, "{\"v\":1", 6) &&
@@ -223,7 +227,7 @@ kb_mgmt_token_result_t kb_mgmt_token_build(const kb_mgmt_token_claims_t *c,
        member(&p, ",\"aud\":", c->audience, sizeof(c->audience)) &&
        member(&p, ",\"sub\":", c->subject, sizeof(c->subject)) &&
        uint_member(&p, ",\"team_id\":", c->team_id) &&
-       member(&p, ",\"cap\":", "remote_writes", 14) &&
+       member(&p, ",\"cap\":", capability, capability_cap) &&
        member(&p, ",\"jti\":", c->jti, sizeof(c->jti)) &&
        member(&p, ",\"correlation_id\":", c->correlation_id, sizeof(c->correlation_id)) &&
        member(&p, ",\"request_sha256\":", c->request_sha256, sizeof(c->request_sha256)) &&

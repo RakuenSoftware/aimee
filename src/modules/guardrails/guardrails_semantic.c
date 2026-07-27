@@ -10,6 +10,7 @@
  * JSON) degrades to parse_ok=0 and recommendation="allow". The deterministic
  * guardrail result is unaffected. One warning is logged on failure. */
 #include "guardrails_semantic.h"
+#include <aimee/audit/obs_bus.h> /* guardrail events cross the event bus, not a direct db1 insert */
 #include "db1/guardrail_events.h"
 #if !defined(AIMEE_DB2_DISABLED)
 #include "db2/bandit.h"
@@ -307,5 +308,10 @@ void gsem_record(const char *session_id, const gsem_input_t *in, const gsem_outp
    bounded_copy(e.explanation, sizeof(e.explanation), out->explanation);
    e.dry_run = dry_run;
 
-   db1_guardrail_event_insert(&e);
+   /* The guardrail-semantic risk event now crosses the event bus (the second
+    * module migrated onto it): this publishes; the bus consumer performs the real
+    * db1 guardrail_events insert, and the capture tap records it alongside the
+    * governed-action audit rows in one replayable stream. The direct insert is
+    * gone. Off the critical path and best-effort, as before. */
+   obs_bus_emit_guardrail(&e);
 }

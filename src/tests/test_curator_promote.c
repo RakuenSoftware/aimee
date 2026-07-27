@@ -11,7 +11,7 @@
 #include <stdlib.h>
 #include "aimee.h"
 #include "db2_test_shim.h"
-#include "../kb/kb_curator_promote.h"
+#include "kb_curator_promote.h"
 
 void *db2_conn(void);
 

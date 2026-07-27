@@ -13,8 +13,23 @@
 /* promoted cross-TU (former .inc statics) */
 int conn_offload(int fd, int is_tcp, int is_tls, int is_management);
 int server_http_management_health_route(const char *method, const char *path);
+int server_http_management_route(const char *method, const char *path);
+int server_http_management_action_route(const char *method, const char *path);
+int server_http_management_read_route(const char *method, const char *path);
 int server_http_management_request_syntax_valid(const char *method, const char *path,
                                                 const char *request, size_t request_len);
+int server_http_management_action_framing_valid(const char *method, const char *path,
+                                                const char *request, size_t request_len);
+int server_http_management_read_framing_valid(const char *method, const char *path,
+                                              const char *request, size_t request_len);
+int server_http_remote_writes(void);
+int server_http_management_action_begin(void);
+int server_http_management_action_allowed(void);
+void server_http_management_action_end(void);
+void server_http_management_actions_start(void);
+void server_http_management_actions_shutdown_begin(void);
+void server_http_management_actions_stop_and_wait(void);
+int server_http_management_checkpoint_files_valid(const server_http_management_config_t *);
 void server_http_management_set_error(const char *error);
 cJSON *persona_to_json(const persona_t *p);
 void request_id_header(char *dst, size_t n, const char *request_id);
@@ -124,11 +139,21 @@ int server_http_keepalive_take(void);
 int server_http_keepalive_framing_valid(const char *request, size_t total);
 int server_http_keepalive_route_eligible(const char *path);
 int server_http_gzip_route_eligible(const char *path);
+uint32_t server_http_enrollment_caps(uint32_t caps, int is_tcp, int mtls_authenticated,
+                                     int native_tls, const char *bearer, const char *method,
+                                     const char *path);
 void server_http_gzip_set(int enabled);
 int server_http_gzip_peek(void);
 
 /* PC2: CI webhook route handler (defined in server_ci_route.c). */
 int rh_dev_ci_event(const route_req_t *rq, char *resp, int cap);
+
+/* Write-tier grant administration (server/server_http_grant_routes.c). In their own TU
+ * because the route table's file has a 2500-line ceiling. UDS-only — see
+ * v1_route_requires_uds. */
+int rh_grant_set(const route_req_t *rq, char *resp, int cap);
+int rh_grant_revoke(const route_req_t *rq, char *resp, int cap);
+int rh_grant_list(const route_req_t *rq, char *resp, int cap);
 
 /* Workflow Actions lifecycle + project-file-browser route adapters + the shared
  * unsigned-long query-param helper — defined in server_http_config_routes.c

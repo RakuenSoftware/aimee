@@ -115,6 +115,13 @@ int main(void)
       memset(&cfg, 0, sizeof(cfg));
       config_load(&cfg);
       assert(strcmp(cfg.provider, "claude") == 0);
+      /* Capability routing defaults ON: routing enforces the packet's required
+       * capabilities and minimum context window. Pinned explicitly so flipping
+       * it is a deliberate, reviewed change rather than an accident — with it
+       * off, agent_route_with_caps() degrades to cost-tier-only and capability
+       * is never consulted. */
+      assert(cfg.model_meta_capability_routing == 1);
+      assert(cfg.model_meta_refresh_minutes == 60);
       /* kb.typed_facts.* autonomous reconciliation defaults (§7.2/§8). */
       assert(cfg.kb_typed_facts_auto_promote_enabled == 1);
       assert(cfg.kb_typed_facts_promote_threshold == 3);
@@ -139,7 +146,6 @@ int main(void)
       assert(cfg.db1_path[0] != '\0');
       assert(strcmp(cfg.guardrails_semantic_mode, "off") == 0); /* default */
       assert(cfg.skills_review_nudge_interval == 10);
-      assert(cfg.skills_curator_interval_hours == 168);
       assert(cfg.skills_stale_after_days == 30);
       assert(cfg.skills_archive_after_days == 90);
       assert(cfg.skills_dispatch_enabled == 1);
@@ -169,10 +175,18 @@ int main(void)
       /* git co-change backfill defaults on: index scan seeds co_edited edges that
        * blast radius already reads (incremental/idempotent). */
       assert(cfg.code_cochange_git_enabled == 1);
-      assert(cfg.transport_kb_pool_enabled == 0);
-      assert(cfg.transport_server_keepalive_enabled == 0);
+      assert(cfg.transport_kb_pool_enabled == 1);
+      assert(cfg.transport_server_keepalive_enabled == 1);
       assert(cfg.transport_thinclient_gzip_enabled == 0);
       assert(cfg.transport_kb_gzip_enabled == 0);
+      cJSON *rollback_root = cJSON_CreateObject();
+      cJSON *rollback_transport = cJSON_AddObjectToObject(rollback_root, "transport");
+      cJSON_AddBoolToObject(rollback_transport, "kb_pool_enabled", 0);
+      cJSON_AddBoolToObject(rollback_transport, "server_keepalive_enabled", 0);
+      config_parse_transport_section(&cfg, rollback_root);
+      assert(cfg.transport_kb_pool_enabled == 0);
+      assert(cfg.transport_server_keepalive_enabled == 0);
+      cJSON_Delete(rollback_root);
       /* css_render_command defaults to the conventional sidecar curl (inert until
        * the sidecar is up), so render-capture works out of the box on-demand. */
       assert(strcmp(cfg.css_render_command, CONFIG_DEFAULT_CSS_RENDER_COMMAND) == 0);
@@ -259,7 +273,6 @@ int main(void)
       cfg.guardrails_semantic_prompt_threshold = 0.65;
       cfg.guardrails_semantic_block_threshold = 0.95;
       cfg.skills_review_nudge_interval = 12;
-      cfg.skills_curator_interval_hours = 240;
       cfg.skills_stale_after_days = 45;
       cfg.skills_archive_after_days = 120;
       cfg.skills_dispatch_enabled = 0;
@@ -422,7 +435,9 @@ int main(void)
       snprintf(cfg.proxy_token, sizeof(cfg.proxy_token), "ptok");
       cfg.max_background_processes = 9;
       cfg.model_meta_refresh_minutes = 15;
-      cfg.model_meta_capability_routing = 1;
+      /* Non-default value, so the round trip proves persistence rather than
+       * agreeing with the default by accident (capability_routing defaults ON). */
+      cfg.model_meta_capability_routing = 0;
       snprintf(cfg.search_backend, sizeof(cfg.search_backend), "searxng");
       cfg.search_max_results = 7;
       snprintf(cfg.search_searxng_url, sizeof(cfg.search_searxng_url), "http://sx:8888");
@@ -529,7 +544,6 @@ int main(void)
       assert(fabs(cfg2.guardrails_semantic_prompt_threshold - 0.65) < 0.0001);
       assert(fabs(cfg2.guardrails_semantic_block_threshold - 0.95) < 0.0001);
       assert(cfg2.skills_review_nudge_interval == 12);
-      assert(cfg2.skills_curator_interval_hours == 240);
       assert(cfg2.skills_stale_after_days == 45);
       assert(cfg2.skills_archive_after_days == 120);
       assert(cfg2.skills_dispatch_enabled == 0);
@@ -635,7 +649,7 @@ int main(void)
       assert(strcmp(cfg2.proxy_url, "http://proxy:3128") == 0);
       assert(strcmp(cfg2.proxy_token, "ptok") == 0);
       assert(cfg2.max_background_processes == 9);
-      assert(cfg2.model_meta_refresh_minutes == 15 && cfg2.model_meta_capability_routing == 1);
+      assert(cfg2.model_meta_refresh_minutes == 15 && cfg2.model_meta_capability_routing == 0);
       assert(strcmp(cfg2.search_backend, "searxng") == 0 && cfg2.search_max_results == 7);
       assert(strcmp(cfg2.search_searxng_url, "http://sx:8888") == 0);
       assert(cfg2.aux_enabled == 1 && strcmp(cfg2.aux_default_provider, "openai") == 0);
@@ -920,6 +934,34 @@ int main(void)
       int rc = config_load(&cfg);
       assert(rc == -1); /* strict mode rejects */
       g_config_strict = 0;
+   }
+
+   /* Retired background skill-curator keys remain load-compatible for existing
+    * installations, but saving the config must scrub them permanently. */
+   {
+      char cpath[512];
+      snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
+      FILE *f = fopen(cpath, "w");
+      assert(f);
+      fprintf(f, "provider: claude\nskills:\n  curator:\n    enabled: true\n"
+                 "  curator_interval_hours: 12\n");
+      fclose(f);
+
+      static config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      g_config_strict = 1;
+      assert(config_load(&cfg) == 0);
+      assert(config_save(&cfg) == 0);
+      g_config_strict = 0;
+
+      f = fopen(cpath, "r");
+      assert(f);
+      char saved[65536];
+      size_t saved_len = fread(saved, 1, sizeof(saved) - 1, f);
+      fclose(f);
+      saved[saved_len] = '\0';
+      assert(strstr(saved, "curator_interval_hours") == NULL);
+      assert(strstr(saved, "skills:\n  curator:") == NULL);
    }
 
    /* --- schema validation: type mismatch detected --- */
@@ -2459,8 +2501,12 @@ int main(void)
       assert(strstr(env, "AIMEE_LLM_URL=http://aimee-llm:8742\n") != NULL);
       assert(strstr(env, "AIMEE_EMBEDDING_DIM") == NULL); /* local embed => unpinned/derived */
 
-      /* Local kb; all roles local at the CPU tier => the pre-baked llm-cpu profile
-       * (aimee-llm-cpu image), NOT the download "llm" profile. Same aimee-llm URL. */
+      /* Local kb; all roles local at the CPU tier => the SAME "llm" profile as a
+       * GPU tier. There is one LLM service now: aimee-llm is model-less and
+       * downloads whichever tier the roles ask for, so the tier no longer picks a
+       * different image (there used to be a pre-baked aimee-llm-cpu on its own
+       * mutually exclusive "llm-cpu" profile). The per-role tier still rides
+       * along in the env. */
       memset(&cfg, 0, sizeof(cfg));
       snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
       snprintf(cfg.llm_embed_backend, sizeof(cfg.llm_embed_backend), "local");
@@ -2468,16 +2514,19 @@ int main(void)
       snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "local");
       snprintf(cfg.llm_synth_tier, sizeof(cfg.llm_synth_tier), "cpu");
       config_emit_deploy_env(&cfg, env, sizeof(env));
-      assert(strstr(env, "COMPOSE_PROFILES=kb,llm-cpu\n") != NULL);
-      assert(strstr(env, "COMPOSE_PROFILES=kb,llm\n") == NULL); /* not the GPU profile */
+      assert(strstr(env, "COMPOSE_PROFILES=kb,llm\n") != NULL);
+      assert(strstr(env, "llm-cpu") == NULL); /* the second image is gone */
+      assert(strstr(env, "AIMEE_LLM_EMBED_TIER=cpu\n") != NULL);
+      assert(strstr(env, "AIMEE_LLM_SYNTH_TIER=cpu\n") != NULL);
       assert(strstr(env, "AIMEE_LLM_URL=http://aimee-llm:8742\n") != NULL);
 
-      /* A local role with an unset tier resolves to cpu, so it also takes llm-cpu. */
+      /* A local role with an unset tier takes the same profile. */
       memset(&cfg, 0, sizeof(cfg));
       snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
       snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "local");
       config_emit_deploy_env(&cfg, env, sizeof(env));
-      assert(strstr(env, "COMPOSE_PROFILES=kb,llm-cpu\n") != NULL);
+      assert(strstr(env, "COMPOSE_PROFILES=kb,llm\n") != NULL);
+      assert(strstr(env, "llm-cpu") == NULL);
 
       /* Remote kb: connect out, deploy nothing (no profiles, no llm env). */
       memset(&cfg, 0, sizeof(cfg));

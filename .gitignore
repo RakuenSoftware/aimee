@@ -5,15 +5,30 @@
 aimee-forwarder
 /aimee-mcp
 /aimee-kb
+/aimee-witness-verify
 /aimee-kb-resolver
+# Provisioning and authority binaries. These were absent, so a `git add -A` after
+# building them committed the artifacts — which is exactly what happened once.
+/aimee-kb-jwks-publish
+/aimee-kb-token-roots-provision
+/aimee-kb-token-authority
+/aimee-kb-status-authority
+/aimee-kb-status-provision
+/identity-mint-live
+# Lean/worker build variants.
+/aimee-kb-lean
+/aimee-lean
+/aimee-server-lean
+/aimee-worker
 /aimee-negation-eval
 /aimee-blast-radius-eval
-/aimee-webchat
+/aimee-runtime-web
 /aimee-gateway
 src/build/
 src/*.a
 src/server.log
 src/tests/unit-test-*
+src/tests/fuzz_server_mgmt_read_config
 /build/
 /build-*/
 
@@ -151,3 +166,14 @@ intent_record_*.json
 
 # Local default output from `go build ./cmd/aimee-server` in the Go rewrite.
 /server-go/aimee-server
+
+# Session scratch working files (throwaway diffs, drivers, design drafts).
+# The durable record lives in docs/proposals/ — 24 of these were committed to a
+# branch by accident because nothing ignored them.
+scratchpad/
+/oidc-login-live
+/write-tier-enforce-live
+
+# Local public verification roots mounted read-only by the server Compose files.
+# The directory is created by Docker on first use and must never be committed.
+/server-management/

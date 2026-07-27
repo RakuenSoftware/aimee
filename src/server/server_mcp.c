@@ -13,7 +13,8 @@
 #include "util.h" /* is_safe_id */
 #include "kb_client.h"
 #include "dashboard.h"
-#include "mcp_tools.h"
+#include <aimee/protocols/mcp/mcp_tools.h>
+#include "agent_tools.h" /* agent_tools_emit_tool_completion — served tool-call outcome audit */
 #include "mcp_git.h"
 #include "git_verify.h"
 #include "workspace_turn.h"
@@ -21,8 +22,8 @@
 #include "agent_coord.h"
 #include "agent_tasks.h"
 #include "agent_pipeline.h"
-#include "delegate_economics.h"
-#include "delegate_patch_coordinator.h"
+#include <aimee/delegates/delegate_economics.h>
+#include <aimee/delegates/delegate_patch_coordinator.h>
 #include "platform_path.h"
 #include "lsp.h"
 #include "server_mcp_learning.h"
@@ -35,6 +36,7 @@
 #include "server_mcp_gateway.h"
 #include "server_http.h"
 #include "server_pipeline.h" /* handle_pipeline_* for the pipeline.* MCP tools */
+#include "wfe_roundtable_proxy.h"
 #include "headers/conversation_context.h"
 #include "headers/payload_rewrite.h"
 #include "headers/session_search_tool.h"
@@ -117,6 +119,21 @@ static int handle_mcp_roundtable_review(server_conn_t *conn, cJSON *args)
       return server_send_error(conn, "out of memory", NULL);
    cJSON_AddStringToObject(body, "prompt", diff->valuestring);
    cJSON_AddStringToObject(body, "mode", "review");
+   for (const char *const *field =
+            (const char *const[]){"original_request", "artifact_stage", "workdir", NULL};
+        *field; field++)
+   {
+      cJSON *value = cJSON_GetObjectItemCaseSensitive(args, *field);
+      if (!value)
+         continue;
+      if (!cJSON_IsString(value) || !value->valuestring || !value->valuestring[0])
+      {
+         cJSON_Delete(body);
+         return server_send_error(
+             conn, "roundtable_review evidence fields must be non-empty strings", NULL);
+      }
+      cJSON_AddStringToObject(body, *field, value->valuestring);
+   }
    cJSON *brief = cJSON_GetObjectItemCaseSensitive(args, "brief");
    if (brief)
    {
@@ -146,39 +163,9 @@ static int handle_mcp_roundtable_review(server_conn_t *conn, cJSON *args)
       cJSON_AddStringToObject(body, "roundtable", roundtable->valuestring);
    }
 
-   char *line = cJSON_PrintUnformatted(body);
+   int rc = wfe_roundtable_proxy(conn, body);
    cJSON_Delete(body);
-   if (!line)
-      return server_send_error(conn, "out of memory", NULL);
-
-   char respbuf[8192];
-   int st = server_http_submit_op_run("delegate.roundtable", line, conn->capabilities, respbuf,
-                                      sizeof(respbuf));
-   free(line);
-   if (st < 200 || st >= 300)
-   {
-      cJSON *err = cJSON_Parse(respbuf);
-      cJSON *msg = err ? cJSON_GetObjectItemCaseSensitive(err, "error") : NULL;
-      const char *text =
-          cJSON_IsString(msg) ? msg->valuestring : "could not queue roundtable_review";
-      int rc = server_send_error(conn, text, NULL);
-      cJSON_Delete(err);
-      return rc;
-   }
-
-   cJSON *snap = cJSON_Parse(respbuf);
-   if (!snap)
-      return server_send_error(conn, "could not parse queued run", NULL);
-   cJSON *id = cJSON_GetObjectItemCaseSensitive(snap, "id");
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(snap, "status");
-   cJSON *resp = jo_ok();
-   cJSON_AddStringToObject(resp, "run_id", cJSON_IsString(id) ? id->valuestring : "");
-   cJSON_AddStringToObject(resp, "id", cJSON_IsString(id) ? id->valuestring : "");
-   cJSON_AddStringToObject(resp, "object", "op.run");
-   cJSON_AddStringToObject(resp, "method", "delegate.roundtable");
-   cJSON_AddStringToObject(resp, "status", cJSON_IsString(status) ? status->valuestring : "queued");
-   cJSON_Delete(snap);
-   return server_send_ok(conn, resp);
+   return rc;
 }
 cJSON *tool_get_help(cJSON *args)
 {
@@ -1642,7 +1629,64 @@ void mcp_session_register(server_conn_t *conn, const char *sid)
    (void)db1_server_session_create(sid, "mcp", principal);
 }
 
+/* Served tool-call outcome, thread-local so concurrent served calls do not clobber
+ * each other. handle_mcp_call_inner sets the resolved tool and, at its
+ * refusal/error return paths, a fixed verdict/reason enum; the wrapper emits one
+ * "served" completion row. It is the SERVED-DISPATCH outcome (refused / bad tool /
+ * dispatched) — a delegate's own deeper success/failure is audited where it runs. */
+static __thread const char *g_served_verdict = "ok";
+static __thread const char *g_served_reason = "";
+static __thread char g_served_tool[96] = "";
+
+static void served_outcome(const char *verdict, const char *reason)
+{
+   g_served_verdict = verdict;
+   g_served_reason = reason;
+}
+
+/* Public setter so a sub-handler in another TU (delegate / roundtable / pipeline)
+ * that admission-refuses or bad-args-rejects a served call — and sends its own
+ * response, then returns to handle_mcp_call — can record the true verdict rather
+ * than letting the wrapper default to ok=dispatched. It runs on the same thread as
+ * handle_mcp_call, so it writes the same thread-local outcome. */
+void server_mcp_served_outcome(const char *verdict, const char *reason)
+{
+   served_outcome(verdict, reason);
+}
+
+static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+
 int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   g_served_verdict = "ok";
+   g_served_reason = "";
+   g_served_tool[0] = '\0';
+
+   int rc = handle_mcp_call_inner(ctx, conn, req);
+
+   /* One served completion row per call: mode=served, the resolved tool, the
+    * caller's session id, and the classified verdict/reason. Identity + enums
+    * only — no argument or result content, never the raw error text. */
+   cJSON *jsid = cJSON_GetObjectItemCaseSensitive(req, "session_id");
+   const char *sid = (jsid && cJSON_IsString(jsid)) ? jsid->valuestring : NULL;
+   agent_tool_completion_t o = {.actor = (sid && sid[0]) ? sid : "mcp-client",
+                                .verdict = g_served_verdict,
+                                .reason_code = g_served_reason,
+                                .mode = "served"};
+   agent_tools_emit_tool_completion(g_served_tool[0] ? g_served_tool : "?", &o);
+   return rc;
+}
+
+int handle_get_help(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   if (!req || !cJSON_IsObject(req))
+      return server_send_error(conn, "invalid help request", NULL);
+   cJSON_DeleteItemFromObjectCaseSensitive(req, "tool");
+   cJSON_AddStringToObject(req, "tool", "get_help");
+   return handle_mcp_call(ctx, conn, req);
+}
+
+static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    cJSON *jtool = cJSON_GetObjectItemCaseSensitive(req, "tool");
    cJSON *jargs = cJSON_GetObjectItemCaseSensitive(req, "arguments");
@@ -1654,14 +1698,20 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    mcp_session_register(conn, sid);
 
    if (!cJSON_IsString(jtool))
+   {
+      served_outcome("error", "bad_args");
       return server_send_error(conn, "missing 'tool' parameter", NULL);
+   }
 
    int owns_jargs = 0;
    if (!jargs)
    {
       jargs = cJSON_CreateObject();
       if (!jargs)
+      {
+         served_outcome("error", "internal");
          return server_send_error(conn, "out of memory", NULL);
+      }
       owns_jargs = 1;
    }
    if (cJSON_IsString(jcwd) && jcwd->valuestring[0] && cJSON_IsObject(jargs) &&
@@ -1669,6 +1719,7 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cJSON_AddStringToObject(jargs, "cwd", jcwd->valuestring);
 
    const char *tool = jtool->valuestring;
+   snprintf(g_served_tool, sizeof g_served_tool, "%s", tool); /* served audit identity */
    cJSON *content = NULL;
    cJSON *structured = NULL;
 
@@ -1682,12 +1733,16 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       {
          char emsg[160];
          snprintf(emsg, sizeof(emsg), "%s requires a valid 'command' (see describe_tool)", tool);
+         served_outcome("error", "bad_args");
          if (owns_jargs)
             cJSON_Delete(jargs);
          return server_send_error(conn, emsg, NULL);
       }
       if (fd == 1)
+      {
          tool = fam_tool;
+         snprintf(g_served_tool, sizeof g_served_tool, "%s", tool); /* expanded family name */
+      }
    }
 
    /* S2 sub-slice 4: pre-delivery externalization guard at the tool-DISPATCH seam.
@@ -1702,6 +1757,7 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       char deny_msg[256] = "";
       if (wfe_mcp_toolcall_action(sid, tool, deny_msg, sizeof deny_msg) == WFE_TC_DENY)
       {
+         served_outcome("refused", "policy");
          if (owns_jargs)
             cJSON_Delete(jargs);
          return server_send_error(conn,
@@ -1782,6 +1838,7 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          uint32_t required = server_capability_for_method(pipeline_tools[i].method);
          if (required && conn && (conn->capabilities & required) == 0)
          {
+            served_outcome("refused", "role");
             if (owns_jargs)
                cJSON_Delete(jargs);
             return server_send_error(conn, "forbidden: insufficient capabilities", NULL);
@@ -1811,6 +1868,7 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       int rc = server_mcp_handle_ensemble_tool(conn, tool, jargs, &content, &structured);
       if (rc != 0)
       {
+         served_outcome("error", "tool_error");
          if (owns_jargs)
             cJSON_Delete(jargs);
          return rc;
@@ -1827,6 +1885,7 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cJSON *jc = cJSON_GetObjectItemCaseSensitive(jargs, "command");
       if (!cJSON_IsString(jc) || !jc->valuestring[0])
       {
+         served_outcome("error", "bad_args");
          if (owns_jargs)
             cJSON_Delete(jargs);
          return server_send_error(conn, "git requires a 'command' (status, commit, branch, pr, …)",
@@ -1842,6 +1901,7 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       content = server_mcp_process_tool(tool, jargs);
    if (!content)
    {
+      served_outcome("error", "unknown_tool");
       char errmsg[256];
       snprintf(errmsg, sizeof(errmsg), "unknown MCP tool: %s", tool);
       if (owns_jargs)

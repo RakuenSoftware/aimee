@@ -21,8 +21,8 @@
 #include "server_http.h"
 
 #include "agent_config.h"
-#include "aimee_home.h"        /* aimee_home() for the origin working dir */
-#include "delegate_ensemble.h" /* ENSEMBLE_MAX_REFS */
+#include "aimee_home.h" /* aimee_home() for the origin working dir */
+#include <aimee/ir/panel_result.h>
 #include "local_operator.h"
 #include "model_registry.h"
 #include "platform_path.h" /* platform_mkdir_p */
@@ -528,7 +528,7 @@ int handle_pipeline_resume(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 /* Submit a roundtable pass (draft or review) as a pipeline-owned op-run. The
  * worker captures the terminal envelope into the ledger (#18). */
 
-/* Attach the artifact as `prompt` (handle_delegate_roundtable reads "prompt",
+/* Attach the artifact as `prompt` (the Go roundtable transport reads "prompt",
  * min 20 chars — #1) and the brief — as a JSON object when run.brief holds one
  * (so questions/invariants/fixes reach the panel and the questions bar can be
  * enforced, #3), otherwise as a focus string. */
@@ -816,7 +816,7 @@ static int submit_pass(server_conn_t *conn, rtp_run_t *run, const char *phase, c
    cJSON_Delete(body);
 
    char runresp[4096];
-   int rc = server_http_submit_op_run("delegate.roundtable", bj ? bj : "{}", conn->capabilities,
+   int rc = server_http_submit_op_run("roundtable.review", bj ? bj : "{}", conn->capabilities,
                                       runresp, (int)sizeof(runresp));
    free(bj);
    if (rc < 200 || rc >= 300)
@@ -855,10 +855,10 @@ static int resolve_panel(const config_t *cfg, rtp_panel_t *out)
       memset(out, 0, sizeof(*out));
       return 0; /* no registry -> treat as unresolved, caller decides */
    }
-   rtp_participant_t parts[ENSEMBLE_MAX_REFS];
+   rtp_participant_t parts[AIMEE_PANEL_MAX_PARTICIPANTS];
    int n = cfg->ensemble_reference_count;
-   if (n > ENSEMBLE_MAX_REFS)
-      n = ENSEMBLE_MAX_REFS;
+   if (n > AIMEE_PANEL_MAX_PARTICIPANTS)
+      n = AIMEE_PANEL_MAX_PARTICIPANTS;
    for (int i = 0; i < n; i++)
    {
       agent_t *ag = agent_find(&acfg, cfg->ensemble_reference_models[i]);
@@ -929,7 +929,7 @@ static int submit_chunk_pass(server_conn_t *conn, rtp_run_t *run, const char *ph
    char *bj = cJSON_PrintUnformatted(body);
    cJSON_Delete(body);
    char rr[2048];
-   int rc = server_http_submit_op_run("delegate.roundtable", bj ? bj : "{}", conn->capabilities, rr,
+   int rc = server_http_submit_op_run("roundtable.review", bj ? bj : "{}", conn->capabilities, rr,
                                       (int)sizeof(rr));
    free(bj);
    if (rc < 200 || rc >= 300)
@@ -1015,7 +1015,7 @@ static int resubmit_same_pass(server_conn_t *conn, rtp_run_t *run, rtp_pass_t *l
    cJSON_Delete(body);
    free(a);
    char rr[4096];
-   int rc = server_http_submit_op_run("delegate.roundtable", bj ? bj : "{}", conn->capabilities, rr,
+   int rc = server_http_submit_op_run("roundtable.review", bj ? bj : "{}", conn->capabilities, rr,
                                       (int)sizeof(rr));
    free(bj);
    cJSON *resp = jo_ok();

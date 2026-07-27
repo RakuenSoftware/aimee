@@ -1,0 +1,34 @@
+{
+  "descriptor_version": 1,
+  "id": "gateway",
+  "dependencies": [
+    "config",
+    "execution-policy",
+    "ir",
+    "module-runtime",
+    "protocols",
+    "translation"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  },
+  "ownership_complete": true,
+  "sources": [
+    "src/modules/gateway/gateway_delegate.c",
+    "src/modules/gateway/gateway_pipeline.c",
+    "src/modules/gateway/gateway_policy.c"
+  ],
+  "public_headers": [
+    "src/modules/gateway/include/aimee/gateway/gateway_delegate.h",
+    "src/modules/gateway/include/aimee/gateway/gateway_pipeline.h",
+    "src/modules/gateway/include/aimee/gateway/gateway_policy.h"
+  ],
+  "tests": [
+    "src/tests/test_gateway_p4_delegate.c",
+    "src/tests/test_gateway_pipeline.c",
+    "src/tests/test_gateway_policy.c"
+  ],
+  "docs": [
+    "docs/modules/gateway.md"
+  ]
+}

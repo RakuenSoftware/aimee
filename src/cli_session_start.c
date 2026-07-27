@@ -243,7 +243,7 @@ static void ss_append_worktree_isolation(struct ss_sbuf *ctx, const char *sid)
    /* Already inside a managed (.aimee/.claude/.codex) worktree -> a mutating op
     * would not be blocked; don't nag or create a redundant worktree. Mirrors the
     * guard's own decision so the directive fires exactly when it would block. */
-   if (!attn_session_isolation_blocked(ATTN_OP_SOFT, NULL, cwd))
+   if (!attn_session_isolation_blocked(ATTN_OP_SOFT, NULL, cwd, sid))
       return;
 
    /* Need a stable session id to name the worktree; Claude Code always sends one. */
@@ -707,6 +707,17 @@ int handle_session_start(int json_output)
     * in the environment of the claude subprocess it forks. */
    int nonblocking = (getenv("AIMEE_SESSION_ID") != NULL);
 
+   /* Remote configuration is an exclusive transport choice.  Select it before
+    * any local availability probe so one hook invocation cannot touch both the
+    * co-located and remote servers. */
+   if (cli_v1_has_remote_endpoint())
+   {
+      int rc = handle_session_start_remote(sid);
+      cJSON_Delete(hook_json);
+      free(stdin_data);
+      return rc;
+   }
+
    const char *sock = cli_ensure_server_for_method("hooks.session_start");
 
    /* .md memory is retired: central memory is NOT re-materialized into local .md
@@ -715,16 +726,6 @@ int handle_session_start(int json_output)
 
    if (!sock)
    {
-      /* No co-located server. If a remote /v1 endpoint is configured, the thin
-       * client serves session-start itself via the read-only recall route — no
-       * local aimee-server needed (see handle_session_start_remote). */
-      if (cli_v1_has_remote_endpoint())
-      {
-         int rc = handle_session_start_remote(sid);
-         cJSON_Delete(hook_json);
-         free(stdin_data);
-         return rc;
-      }
       if (!nonblocking)
          fprintf(stderr, "aimee: cannot run session-start; server unavailable\n");
       cJSON_Delete(hook_json);

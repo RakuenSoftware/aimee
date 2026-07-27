@@ -1,81 +1,64 @@
-# The aimee Economizer
+# Economizer
 
-The economizer is fail-closed: it may change a provider request only when a local,
-provider-specific proof establishes a strict call-level cost reduction. If any required fact is
-unknown, the original provider body is sent unchanged.
+The economizer reduces provider context and cost after the request has become canonical IR. It must
+preserve tool semantics, recoverability, and provider cache behavior.
 
-```yaml
-economizer:
-  mode: off             # off | proof_gated (default: off)
+## Tiers
+
+| Tier | Behavior |
+| --- | --- |
+| `off` | no reduction or cache mutation |
+| `safe` | lossless folding, stable cache boundaries, command-aware condensation with spills |
+| `aggressive` | safe tier plus configured lossy compression/mutation on supported provider families |
+
+`modules.economizer: false` is the hard off switch.
+
+## Order
+
+```text
+provider ingress -> canonical IR -> invariant/policy checks
+                 -> folding and tool condensation
+                 -> provider cache alignment
+                 -> provider translation
 ```
 
-```sh
-aimee config set economizer.mode proof_gated
+Provider-specific JSON is not the economizer's working format. Anthropic, OpenAI Responses, Chat
+Completions, Gemini, Mistral, and Bedrock share the canonical stages; translation handles wire
+differences at the edge.
+
+## Safe tier
+
+- Stable old context can be folded into a recoverable summary/reference.
+- Recognized command output keeps failures and diagnostics while dropping repeated progress/noise.
+- Full tool output is written to a bounded spill with a recovery pointer.
+- Cache breakpoints are placed where provider semantics permit them.
+- A disabled or failed reducer returns the original IR.
+
+Lossless means the system can recover the omitted bytes, not that every provider receives them in
+the first request.
+
+## Aggressive tier
+
+Lossy operations need an explicit provider and content contract. They must not alter tool-call IDs,
+arguments, result pairing, system/developer authority, current user intent, or required evidence.
+
+Unsupported provider families stay on the safe path. A global tier does not justify mutating a wire
+format that has no tested adapter.
+
+## Accounting
+
+Telemetry records input bytes/tokens before and after each stage, spill bytes, cache decisions,
+avoided cost, recovery, and fallback. Do not count a reduction twice when folding and provider cache
+alignment touch the same prefix.
+
+```bash
+aimee economizer stats
 ```
 
-## Current release behavior
+## Verify
 
-The live transform registry is empty. Therefore both modes currently send the same pristine request:
+Test byte-identical off mode, tool-call/result pairing, retry, streaming, Unicode, large outputs,
+spill recovery, cache boundaries, provider round trips, and failures in each stage. Quality gates
+must compare task outcomes, not only token counts.
 
-- `off` bypasses economizer registry validation and the snapshot allocation.
-- `proof_gated` validates the signed empty registry, then copies the final provider body into an
-  immutable wire snapshot.
-
-The snapshot's pointer and exact byte length are passed to the HTTP transport and retained for every
-ordinary retry. A retry can duplicate delivery after an ambiguous network failure, but it cannot
-rebuild, restore, or substitute a different economizer representation.
-
-This release deliberately removes the previous live history folding, tool-output condensation,
-body compression, gateway mutation, and economizer-owned restore/resend behavior. Their helper code
-may remain for offline or isolated tests, but it has no production request caller. The economizer
-also does not add, remove, or move OpenAI or Anthropic cache controls.
-
-## Why the planners are provider-specific
-
-OpenAI and Anthropic both reward stable cacheable prefixes, but their cache breakpoints, write/read
-prices, long-context rules, and response accounting differ. Neither API exposes enough pre-dispatch
-settlement information to let a generic compressor safely infer cache residency or hidden
-breakpoints.
-
-The OpenAI and Anthropic planners therefore use separate signed pricing and cache-semantics
-contracts. They operate only on local evidence and fully serialized alternatives. Remote token-count
-calls, cache probes, predicted cache hits, and post-response usage fields cannot authorize a change.
-
-The planners can return a proof for reviewed fixtures, but they are not yet connected to a live
-transform because the production registry has no entries. A future transform needs its own lossless
-semantic contract, exact tokenizer/model compatibility, provenance rules, and converged review
-before it can enter that registry.
-
-## Configuration migration
-
-The old scalar values `economizer: safe` and `economizer: aggressive`, and the old
-`economizer.enabled` / `economizer.aggressive` object, are unsupported. They are not mapped because
-either mapping could silently activate behavior the operator did not select. Replace them explicitly
-with:
-
-```yaml
-economizer:
-  mode: off
-```
-
-or, to enable the proof fence for future reviewed transforms:
-
-```yaml
-economizer:
-  mode: proof_gated
-```
-
-An omitted setting defaults to `off`. Explicit legacy or malformed values make configuration loading
-fail instead of falling back to an active mode.
-
-## Claims this release does not make
-
-- It does not claim that generic compression, summarization, recall, or rehydration saves money.
-- It does not claim completed-task savings from a cheaper individual call.
-- It does not claim knowledge of provider cache residency or undocumented breakpoints.
-- It does not claim exactly-once delivery across transport failures.
-- It does not report hypothetical savings as realized savings.
-
-The normative safety rules and implementation plan are in
-`docs/proposals/pending/provider-neutral-economizer-safety-spec.md` and
-`docs/proposals/pending/provider-neutral-cache-aware-economizer.md`.
+See [Tool-output condensation](tool-output-condensation.md).

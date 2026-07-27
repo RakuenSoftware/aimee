@@ -59,6 +59,13 @@ func (s *Server) devSubmit(w http.ResponseWriter, r *http.Request) {
 	if s.config != nil {
 		cap = s.config.Int("trigger.max_concurrent", cap)
 	}
+	// See scanTrigger: the store treats <=0 as unlimited (child slices depend on
+	// that), so a configured 0 must be refused here or "pause admission" would
+	// instead remove the limit.
+	if cap == 0 {
+		writeError(w, http.StatusConflict, errors.New("admission paused: trigger.max_concurrent is 0"))
+		return
+	}
 	registry, err := s.workflowRegistry()
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, err)

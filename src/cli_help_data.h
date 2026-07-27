@@ -16,6 +16,8 @@
      "  disable               Restore Claude Code to its default endpoint\n"},
     {"remote", "Point the thin client at a remote aimee-server", CLIENT_TIER_ADVANCED, 0,
      "  set <url> [token]  Persist a remote server target\n"
+     "  enroll            Rotate the bearer and enroll this client certificate\n"
+     "  trust             Pin the configured server certificate again\n"
      "  status             Show the resolved transport and a health probe\n"
      "  clear              Revert to the local Unix socket\n"},
     {"wm", "Working memory (session-scoped scratch)", CLIENT_TIER_CORE, 0,
@@ -27,13 +29,15 @@
      "  overview         List indexed projects\n"
      "  list             List indexed projects\n"
      "  scan             Scan workspaces and (re)build the index (--force)\n"
+     "  watch <name> <root>  Install git hooks that re-index after branch changes\n"
      "  blast-radius     Show files affected by changes to a file\n"
      "  structure        Show file structure\n"
      "  callers          Find callers of a symbol\n"},
     {"workspace", "Workspace management (add, list, remove)", CLIENT_TIER_ADVANCED, 0,
      "  add <path>       Register a directory as a workspace and index its projects\n"
      "  list             List configured workspaces and their indexed projects\n"
-     "  remove <path>    Unregister a workspace\n"},
+     "  remove <path>    Unregister a workspace\n"
+     "  serve <id>       Run the authorized remote-workspace request loop\n"},
     {"memory", "Stored memory", CLIENT_TIER_CORE, 0,
      "  search           Search stored memory\n"
      "  store            Store a memory\n"
@@ -89,8 +93,10 @@
      "                   research -> execute. REQUIRES --persona NAME (e.g.\n"
      "                   engineer, qa, security, reviewer, architect). --tools\n"
      "                   enables tool use for roles that do not enable it by\n"
-     "                   default. See `aimee delegate <role> --help` for the full\n"
-     "                   flag set (--persona, --context-file, --via, etc.).\n"
+     "                   default. --scope bounded|whole_task caps how open-ended\n"
+     "                   the task may be (enforced against each agent's max_scope).\n"
+     "                   See `aimee delegate <role> --help` for the full flag set\n"
+     "                   (--persona, --context-file, --via, --scope, etc.).\n"
      "  plan             Generate read-only work packets from a proposal\n"
      "  launch <plan>    Queue a reviewed packet plan into a coord job\n"
      "  status <job_id> [job_id...]  Check background delegate status\n"
@@ -120,12 +126,26 @@
     {"agent", "Sub-agent management", CLIENT_TIER_ADVANCED, 0,
      "  list             List configured delegates\n"
      "  add              Add or update a delegate provider\n"
+     "  setup            Run an agent provider's attended OAuth setup\n"
      "  local            Register/update a local OpenAI-compatible delegate\n"
      "                   (--provider openai|llama-eval for request shaping)\n"
      "  remove           Remove a configured delegate\n"
      "  enable           Enable a configured delegate\n"
      "  disable          Disable a configured delegate\n"
      "  probe            Probe delegate endpoint, slots, and execution\n"},
+    {"codex", "Codex OAuth recovery", CLIENT_TIER_ADVANCED, 0,
+     "  reauth           Re-authenticate Codex after refresh is rejected\n"},
+    {"persona", "Persona management", CLIENT_TIER_CORE, 0,
+     "  list             List available personas\n"
+     "  show <name>      Print one persona\n"
+     "  edit <name>      Edit or create a persona in $EDITOR\n"
+     "  add <name>       Alias for edit\n"
+     "  rm <name>        Reset a built-in or remove a custom persona\n"},
+    {"roles", "Delegate role templates", CLIENT_TIER_ADVANCED, 0,
+     "  list             List role templates\n"
+     "  show <role>      Print one role template\n"
+     "  edit <role>      Edit or create a template in $EDITOR\n"
+     "  rm <role>        Reset a built-in or remove a custom template\n"},
     {"provider", "Model provider profiles and catalogs", CLIENT_TIER_ADVANCED, 0,
      "  list             List registered providers (--available, --json)\n"
      "  show <name>      Show provider profile details\n"
@@ -133,6 +153,11 @@
      "  test <name>      Probe provider credentials and connectivity\n"
      "  quota [name]     Show process-local credential pool quota state\n"},
     {"version", "Print version", CLIENT_TIER_CORE, 0, NULL},
+    {"self-update", "Update this thin client to the server release", CLIENT_TIER_CORE, 0,
+     "  --check          Report whether an update is available\n"
+     "  --version vX.Y.Z  Install a specific release without downgrading\n"
+     "  --yes            Do not ask before replacing the binary\n"
+     "  --require-verify  Fail if the published SHA-256 cannot be verified\n"},
     {"help", "Show help for a command", CLIENT_TIER_CORE, 1, NULL},
 
     {"status", "System health overview", CLIENT_TIER_ADVANCED, 0, NULL},
@@ -169,6 +194,10 @@
     {"ensemble", "A panel of agents (mixture-of-agents, roundtable)", CLIENT_TIER_ADVANCED, 0,
      "  aggregate        Mixture-of-Agents ensemble aggregate\n"
      "  roundtable       Multi-round agent roundtable\n"},
+    {"roundtable", "Review an artifact with a configured roundtable", CLIENT_TIER_ADVANCED, 0,
+     "  review <artifact>  Run the configured roundtable review\n"
+     "                     --roundtable NAME selects a saved preset\n"
+     "                     --original-request TEXT supplies the governing request\n"},
     {"pipeline", "Roundtable authoring pipelines", CLIENT_TIER_ADVANCED, 0,
      "  start            Start an authoring pipeline from a one-line idea\n"
      "  status           Show a pipeline's state, phase, latest review digest and gate\n"
@@ -224,10 +253,22 @@
      "  update           Update the knowledge base\n"
      "  ingest           Ingest documents (status: ingest status)\n"
      "  status           Show knowledge-base status\n"
-     "  docs push        Push docs into the knowledge base\n"},
+     "  docs push        Push docs into the knowledge base\n"
+     "  grant set        Set one subject's write tier (--server, --team, --subject, --tier)\n"
+     "  grant show       Show one subject's grant (--server, --team, --subject)\n"
+     "  grant list       List grants (--server, --team, [--include-revoked])\n"
+     "  grant revoke     Revoke one subject's grant (--server, --team, --subject)\n"},
     {"graph", "Code-graph projection and explain", CLIENT_TIER_ADVANCED, 0,
      "  sync-code        Project the code graph\n"
      "  explain          Explain a code-graph relationship\n"},
+    {"css", "CSS migration analysis and render verification", CLIENT_TIER_ADVANCED, 0,
+     "  report           Show a CSS-health overview\n"
+     "  dead-rules | conflicts | duplicate-declarations | duplicate-selectors\n"
+     "  unresolved | important-audit | high-specificity | unused-vars | token-candidates\n"
+     "  migrate-enumerate | migrate-list | rules-doc | assert-conventions | conventions\n"
+     "  render-store <project> <unit> <before|after> <snapshot.json>\n"
+     "  render-capture <project> <unit> <before|after> <html-file> <css-file>\n"
+     "  render-verify <project> <unit>\n"},
     {"optimize", "Bandit optimization loop", CLIENT_TIER_ADVANCED, 0,
      "  points                          List registered decision points\n"
      "  baseline --point <name>         Show current arm posteriors for a point\n"

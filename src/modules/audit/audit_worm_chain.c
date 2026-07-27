@@ -6,7 +6,7 @@
 #include <unistd.h>
 
 #include "aimee_home.h"
-#include "audit_worm_chain.h"
+#include <aimee/audit/audit_worm_chain.h>
 #include "dstr.h"
 #include "wfe_def.h" /* wfe_sha256_raw */
 

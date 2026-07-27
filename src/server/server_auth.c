@@ -66,13 +66,12 @@ const method_policy_t method_registry[] = {
     {"dashboard.*", CAP_DASHBOARD_READ, "dashboard operation"},
     {"economizer.*", CAP_DASHBOARD_READ, "economizer telemetry"},
     {"audit.verify", CAP_DASHBOARD_READ, "WORM audit chain verify"},
+    {"audit.captures", CAP_DASHBOARD_READ, "list audit-on-bus capture streams"},
+    {"audit.replay", CAP_DASHBOARD_READ, "replay an audit-on-bus capture stream"},
     {"audit.checkpoint", CAP_TOOL_EXECUTE, "WORM audit checkpoint"},
     {"audit.seal", CAP_TOOL_EXECUTE, "WORM audit seal snapshot"},
     {"audit.snapshot", CAP_TOOL_EXECUTE, "WORM audit metric snapshot"},
-    {"plugin.list", CAP_DASHBOARD_READ, "plugin list"},
     {"hosts.list", CAP_DASHBOARD_READ, "host + GPU inventory"},
-    {"plugin.enable", CAP_TOOL_EXECUTE, "enable plugin"},
-    {"plugin.disable", CAP_TOOL_EXECUTE, "disable plugin"},
     {"lsp.*", CAP_DASHBOARD_READ, "lsp status"},
     /* Workspace. Reads (context/get/list) are index:read; register/remove
      * mutate the instance-scoped registry and a detached client performs them
@@ -90,7 +89,7 @@ const method_policy_t method_registry[] = {
     {"tool.execute", CAP_TOOL_EXECUTE, "execute tool"},
     {"delegate", CAP_DELEGATE, "delegate task"},
     {"delegate.aggregate", CAP_DELEGATE, "Mixture-of-Agents ensemble aggregate"},
-    {"delegate.roundtable", CAP_DELEGATE, "multi-round agent roundtable"},
+    {"roundtable.review", CAP_DELEGATE, "Go roundtable review transport"},
     {"dev.sweep", CAP_DELEGATE, "deepening sweep (spawns proposer delegates; analysis-only)"},
     {"delegate.status", CAP_DELEGATE, "delegate status"},
     /* Credential vault (WP-C.1): UDS-only in practice — the service layer refuses
@@ -136,6 +135,7 @@ const method_policy_t method_registry[] = {
     {"mcp.audit", CAP_TOOL_EXECUTE, "MCP OSV audit"},
     {"mcp.recheck", CAP_TOOL_EXECUTE, "MCP OSV recheck"},
     {"mcp.call", CAP_TOOL_EXECUTE, "MCP tool call"},
+    {"help.get", CAP_SESSION_READ, "read the built-in help index"},
     /* Triggers */
     {"trigger.*", CAP_TOOL_EXECUTE, "trigger operation"},
 

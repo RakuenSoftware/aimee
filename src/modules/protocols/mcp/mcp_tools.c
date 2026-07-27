@@ -1,10 +1,9 @@
 /* mcp_tools.c: shared MCP tool definitions */
 #include "cJSON.h"
-#include "mcp_client_registry.h"
+#include <aimee/protocols/mcp/mcp_client_registry.h>
 #include "mcp_skill_tools.h"
-#include "mcp_tools.h"
+#include <aimee/protocols/mcp/mcp_tools.h>
 #include "mcp_tools_gateway.h"
-#include "plugin.h"
 #include "session_search_tool.h"
 #include "log.h"
 #include <stdio.h>
@@ -629,13 +628,18 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
           tools,
           mcp_tool_new(
               "roundtable_review",
-              "Run the multi-agent roundtable in review mode against caller-provided diff "
-              "text. Returns a queued run id; poll /v1/runs/{id}. The result's items "
-              "describe items_round while artifact is artifact_round (the best round); "
-              "compare those fields before assuming the findings match the artifact.",
+              "Review a supplied artifact with the configured Go roundtable. Every seat is an "
+              "ordinary delegate request; the result is returned after synthesis.",
               cJSON_Parse("{\"type\":\"object\",\"properties\":{"
                           "\"diff\":{\"type\":\"string\",\"description\":\"Unified diff or code "
                           "under review.\",\"minLength\":20},"
+                          "\"original_request\":{\"type\":\"string\",\"description\":\"Complete "
+                          "original request used to detect goal drift.\"},"
+                          "\"artifact_stage\":{\"type\":\"string\",\"enum\":[\"intent\",\"plan\","
+                          "\"frozen_diff\"],\"description\":\"Lifecycle stage of the supplied "
+                          "artifact; defaults to frozen_diff.\"},"
+                          "\"workdir\":{\"type\":\"string\",\"description\":\"Optional checkout "
+                          "available to delegate tools.\"},"
                           "\"brief\":{\"description\":\"Optional directed review brief as a string "
                           "or object with focus/fixes/invariants/questions string arrays.\","
                           "\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\","
@@ -1722,48 +1726,6 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
     * separate, namespaced entries). */
    if (collapse)
       mcp_collapse_families(tools);
-
-   /* Plugin tools: load registry + project-local, add enabled tools */
-   {
-      plugin_t plugins[PLUGIN_MAX_PLUGINS];
-      int pcount = plugin_registry_load(plugins, PLUGIN_MAX_PLUGINS);
-      /* Also discover local plugins from configured workspaces */
-      config_t pcfg;
-      config_load(&pcfg);
-      const char *roots[64];
-      for (int ri = 0; ri < pcfg.workspace_count && ri < 64; ri++)
-         roots[ri] = pcfg.workspaces[ri];
-      plugin_discover_local(roots, pcfg.workspace_count, plugins, &pcount, PLUGIN_MAX_PLUGINS);
-
-      static plugin_tool_t ptool_buf[PLUGIN_MAX_PLUGINS * PLUGIN_MAX_TOOLS];
-      int ptool_count = plugin_collect_tools(plugins, pcount, ptool_buf,
-                                             (int)(sizeof(ptool_buf) / sizeof(ptool_buf[0])));
-      for (int pi = 0; pi < ptool_count; pi++)
-      {
-         const plugin_tool_t *pt = &ptool_buf[pi];
-         /* Namespace: "plugin:<name>" */
-         char namespaced[128];
-         snprintf(namespaced, sizeof(namespaced), "plugin:%s", pt->name);
-
-         if (tools_array_has_name(tools, pt->name) || tools_array_has_name(tools, namespaced))
-         {
-            LOG_WARN("mcp-tools", "plugin tool '%s' conflicts, skipped", pt->name);
-            continue;
-         }
-
-         cJSON *schema = cJSON_Parse(pt->input_schema_json);
-         if (!schema)
-            schema = cJSON_CreateObject();
-
-         /* Include permission level in the description */
-         char desc[640];
-         snprintf(desc, sizeof(desc), "%s [plugin, permission=%s]",
-                  pt->description[0] ? pt->description : pt->name,
-                  plugin_permission_name(pt->permission));
-
-         cJSON_AddItemToArray(tools, mcp_tool_new(namespaced, desc, schema));
-      }
-   }
 
    cJSON *remote_tools = mcp_client_registry_build_namespaced_tools(1000);
    if (cJSON_IsArray(remote_tools))

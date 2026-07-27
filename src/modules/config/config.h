@@ -153,10 +153,23 @@ typedef enum
    CONFIG_MCP_TRANSPORT_SSE = 2
 } config_mcp_transport_t;
 
+/* Which daemon hosts (runs) this MCP plugin, deciding its exposure scope:
+ *   SERVER — booted by aimee-server; the plugin's tools are exposed only to that
+ *            server's own sessions (the historical, default behavior).
+ *   KB     — booted by aimee-kb; the plugin's tools are exposed to everything
+ *            hooked up to that kb (every server + thin client), reached from a
+ *            server over kb_client HTTP. */
+typedef enum
+{
+   CONFIG_MCP_INSTALL_SERVER = 0,
+   CONFIG_MCP_INSTALL_KB = 1
+} config_mcp_install_t;
+
 typedef struct
 {
    char name[64];
    config_mcp_transport_t transport;
+   config_mcp_install_t install; /* which daemon runs it (scope); default SERVER */
    char command[CONFIG_MCP_MAX_COMMAND_ARGS][256];
    int command_count;
    char cwd[CONFIG_MCP_MAX_CWD];
@@ -949,7 +962,7 @@ typedef struct config
    /* When on, the continuation/repair autolabel also writes a retrieval OUTCOME
     * (retrieval_attribution for memory, ranker_outcome for kb_hybrid) for the
     * prior turn's surfaced rows — closing the demotion + learning-to-rank loops.
-    * Default off. See docs/proposals/pending/kb-hybrid-outcome-wiring.md. */
+    * Default off. See docs/proposals/done/kb-hybrid-outcome-wiring.md. */
    int learning_implicit_retrieval_outcome;
 
    /* Autonomous mode: launch agent CLIs with their full autonomous flags,
@@ -1059,11 +1072,27 @@ typedef struct config
     * search_max_results: default result count (0 = use WEB_SEARCH_DEFAULT_MAX_RESULTS = 5)
     * search_searxng_url: required when backend = "searxng", e.g. "https://searxng.example.com"
     * search_tavily_api_key: required when backend = "tavily"
+    * search_backends: optional comma-separated list enabling multi-engine fanout
+    * search_fetch_pages: -1 unset (default on), 0 off, 1 on
     */
    char search_backend[32];
    int search_max_results;
    char search_searxng_url[512];
    char search_tavily_api_key[256];
+   /* search_backends: optional comma-separated engine list for multi-engine
+    * fanout, e.g. "duckduckgo,searxng". When empty, search_backend is used
+    * alone. Engines missing their required credential are skipped rather than
+    * failing the search, so listing an engine you have not configured yet
+    * degrades to the ones you have.
+    *
+    * Fanout is OFF unless this is set: it multiplies latency and outbound
+    * requests, and a default install has exactly one usable engine
+    * (duckduckgo) so it would buy nothing. */
+   char search_backends[256];
+   /* search_fetch_pages: fetch the top results and return extracted page text
+    * instead of only engine snippets. 0 = off, 1 = on, -1/unset = built-in
+    * default (on). See WEB_SEARCH_FETCH_PAGES_DEFAULT. */
+   int search_fetch_pages;
 
    /* Tool result compaction settings.
     * compact_enabled: 0 = off, 1 = on (default when unset).
@@ -1119,26 +1148,29 @@ typedef struct config
    int economizer_mode;
 
    /* Pluggable-module enablement (`modules:` block). The canonical, user-facing surface for
-    * enabling/disabling the pipeline modules — memory (request stage), governance (response
-    * stage), delegates + workflows (orchestration hooks). Each is a TRISTATE:
+    * enabling/disabling modules — memory (request stage), governance (response stage), delegates +
+    * workflows (orchestration hooks), and optional roundtable panels. Each is a TRISTATE:
     *   -1  unspecified — the config does not set it; the resolver falls back to the module's
     *       deprecated env toggle (AIMEE_STAGE_MEMORY / _GOVERNANCE / AIMEE_ORCH_DELEGATES /
-    *       _WORKFLOWS) and then to its default-ON.
+    *       _WORKFLOWS / AIMEE_MODULE_ROUNDTABLE) and then to its descriptor default (roundtable
+    *       defaults OFF; the legacy gateway-stage modules default ON).
     *    0  user-disabled.    1  user-enabled.
     * Resolution is centralized in config_module_enabled() so the future admin/governance FORCE
     * tier (aimee-kb governance state that can pin a module on or off over the user's choice)
     * slots in at ONE site. Defaults are -1 (unspecified) so existing env-configured deployments
     * are unaffected until an operator writes the `modules:` block.
-    * CONTRIBUTORS: do NOT resolve module enablement inline at a wire site. ALWAYS call
-    * config_module_enabled(cfg->module_X, <env default>), where the env default is the module's
-    * own predicate (gw_stage_memory_enabled / gw_response_governance_enabled /
-    * gw_orch_delegates_enabled / gw_orch_workflows_enabled, reading AIMEE_STAGE_MEMORY /
-    * AIMEE_STAGE_GOVERNANCE / AIMEE_ORCH_DELEGATES / AIMEE_ORCH_WORKFLOWS). One resolver = the
-    * FORCE tier has exactly one place to extend. */
+    * CONTRIBUTORS: do not resolve module enablement inline at a wire site. For legacy gateway-stage
+    * modules, call config_module_enabled(cfg->module_X, <module env predicate>). For roundtable,
+    * call the owner-provided roundtable_module_enabled(cfg), which applies modules.roundtable,
+    * then AIMEE_MODULE_ROUNDTABLE, then the descriptor default. Keeping resolution behind one owner
+    * API leaves one place for a future FORCE tier. */
    int module_memory;
    int module_governance;
    int module_delegates;
    int module_workflows;
+   /* Optional multi-agent panel deliberation. Unspecified (-1) falls back to the
+    * roundtable-owned AIMEE_MODULE_ROUNDTABLE resolver, whose descriptor default is OFF. */
+   int module_roundtable;
    /* The economizer module toggle. econ_mode() returns ECON_MODE_OFF whenever this is
     * user-disabled (0), so the `modules:` off-switch overrides the economizer mode. */
    int module_economizer;
@@ -1301,9 +1333,10 @@ typedef struct config
    int cache_aware_rewrite_max_defer_turns;
    int cache_aware_rewrite_segment_check_turns;
 
-   /* Live transport rollout controls (transport.*). All default off so a new
-    * binary stays on the established one-shot, uncompressed wire behavior
-    * until an operator selects a measured canary cohort. */
+   /* Live transport controls (transport.*). The measured defaults enable KB
+    * pooling and resident-client keep-alive; either can be set false for the
+    * one-shot rollback path. gzip stays default-off until a link profile meets
+    * both the wire-reduction and latency promotion gates. */
    int transport_kb_pool_enabled;
    int transport_server_keepalive_enabled;
    int transport_thinclient_gzip_enabled;
@@ -1900,11 +1933,11 @@ typedef struct config
    /* Skill lifecycle and review settings (skills.*). */
    int skills_review_enabled;
    int skills_review_nudge_interval;
-   int skills_curator_enabled;
-   int skills_curator_interval_hours;
    int skills_stale_after_days;
    int skills_archive_after_days;
    int skills_dispatch_enabled;
+   int skills_curator_enabled;
+   int skills_curator_interval_hours;
    int skills_dispatch_max_index;
    int skills_dispatch_advisory;
    int skills_capability_autostub;
@@ -1947,8 +1980,23 @@ typedef struct config
 
    /* Model metadata refresh (model_meta.*).
     * model_meta_refresh_minutes: interval for background models.dev cache refresh; default 60.
-    * model_meta_capability_routing: 0 = cost-tier only (default), 1 = filter by capability flags.
+    * model_meta_capability_routing: 1 = filter by capability flags (default),
+    *   0 = cost-tier only. When on, a candidate must satisfy the packet's
+    *   required capabilities and minimum context window; when nothing does,
+    *   routing escalates to the most capable seat rather than failing.
     */
+   /* routing.prefer_local: try FREE local delegates first whenever one is
+    * eligible, before falling back to paid remote seats. Off by default.
+    *
+    * This is an ORDERING preference among agents that already satisfy the packet
+    * - never a relaxation of eligibility. A local agent still cannot exceed its
+    * declared max_scope: local tokens are free, which removes the COST argument
+    * for over-selecting, but not the wall-clock one. A local model failing
+    * whole-task work still burns a session, a review and an escalation, and still
+    * produces a bad diff. So "free" changes which seat is preferred, not which
+    * seats are eligible. */
+   int prefer_local_agents;
+
    int model_meta_refresh_minutes;
    int model_meta_capability_routing;
 
@@ -2010,11 +2058,6 @@ typedef struct config
    char context_engine[64];
 } config_t;
 
-/* Parse plugin extension config keys (context.engine, etc.) that were
- * excluded from config_load() due to file-size constraints.
- * Call after config_load() in server startup. */
-void config_load_plugin_extensions(config_t *cfg);
-
 #define CONFIG_LSP_MAX_SERVERS    8
 #define CONFIG_LSP_MAX_ARGS       16
 #define CONFIG_LSP_MAX_EXTENSIONS 8
@@ -2066,7 +2109,8 @@ int config_load(config_t *cfg);
  * current config for immediate, push-driven reload. config_t is a flat POD, so reads are a
  * lock-free struct copy. Additive in P1a: not yet wired into config_load or a push trigger.
  *   config_snapshot_init  — seed the snapshot from a loaded config (once, at startup).
- *   config_snapshot_get   — copy the live snapshot into `out` (seqlock read). -1 if uninit.
+ *   config_snapshot_get   — copy the live snapshot into `out` under a reader pin. -1 if uninit
+ *                           or the bounded reader counter is saturated.
  *   config_reload         — re-read the file, VALIDATE-or-keep, and publish only if the
  *                           content-hash token changed (self-reload no-op guard).
  *                           Returns 1 = published, 0 = no-op (unchanged), -1 = kept (bad). */
@@ -2098,17 +2142,19 @@ int config_autonomy_lookup(const char *env_name, long *out);
  * and internally by config_reload. Ordinary readers should use config_load. */
 int config_load_file(config_t *cfg);
 
-/* The only economizer modes. OFF is the baseline; PROOF_GATED freezes the
- * completed body behind the signed-empty-registry fence. */
+/* Economizer policy. SAFE permits only deterministic, mechanically lossless
+ * transforms of fresh local content. AGGRESSIVE additionally permits the
+ * existing lossy history/tool-result reducers. */
 typedef enum
 {
    ECON_MODE_OFF = 0,
-   ECON_MODE_PROOF_GATED = 1
+   ECON_MODE_SAFE = 1,
+   ECON_MODE_AGGRESSIVE = 2
 } econ_mode_t;
 
 int econ_mode(const config_t *cfg);
-const char *econ_mode_name(int mode); /* "off"/"proof_gated" */
-int econ_mode_parse(const char *s);   /* mode, or -1 for legacy/unknown */
+const char *econ_mode_name(int mode); /* "off"/"safe"/"aggressive" */
+int econ_mode_parse(const char *s);   /* mode, or -1 for unknown */
 
 /* Semantic-guardrails escalation mode — the single control that replaced the
  * enabled/dry_run/advisory_only/allow_ml_only_block quad. */
@@ -2122,8 +2168,7 @@ enum
 const char *guardrails_semantic_mode_name(int mode); /* "off"/"dry_run"/"advisory"/"enforce" */
 int guardrails_semantic_mode_parse(const char *s);   /* string -> GSEM_MODE_* (OFF on unknown) */
 
-/* Legacy reduction gates remain temporarily for isolated old modules. They are
- * hard-disabled in every mode and have no production request-path caller. */
+/* Reduction gates used by the existing context economizer. */
 int econ_reduction_master_on(const config_t *cfg);
 int econ_gateway_mutate_on(const config_t *cfg);
 
@@ -2137,10 +2182,11 @@ int econ_gateway_mutate_on(const config_t *cfg);
  * `config_tristate` is one of cfg->module_* (-1 = unspecified). Pure: reads its args only. */
 int config_module_enabled(int config_tristate, int env_default);
 
-/* Deprecated compatibility shape for isolated legacy unit tests. econ_preset()
- * always zeroes it; no mode can reactivate these levers. */
+/* Internal policy levers. SAFE enables only json_compact. AGGRESSIVE enables
+ * the legacy lossy reducers as well. */
 typedef struct
 {
+   int json_compact;
    int history_fold;
    int compress;
    int command_filter;
@@ -2170,6 +2216,17 @@ int config_persist_mode(const char *mode);
 
 /* Save config to default path (atomic write via rename). */
 int config_save(const config_t *cfg);
+
+/* config_set: the single, surgical config write path (Proposal B). Validates and sets
+ * one key in the config YAML document (preserving all other keys), persists, and
+ * republishes the snapshot. Returns 0, or -1 on unknown key / invalid value / IO error.
+ * Never serialises config_t — no whole-file rebuild, no parse/save drift. */
+int config_set(const char *key, const char *value);
+
+/* config_set_concurrency: surgically rewrite the `concurrency:` section of the config
+ * YAML from cfg (preserving all other keys) and republish. The structured-write partner
+ * to config_set, for the concurrency limits (nested object + per-model/provider arrays). */
+int config_set_concurrency(const config_t *cfg);
 
 /* Default config directory: ~/.config/aimee/ */
 const char *config_default_dir(void);

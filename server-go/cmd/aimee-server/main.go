@@ -48,8 +48,8 @@ func main() {
 		"optional bearer for the agent resource plane")
 	workflowDir := flag.String("workflow-dir", "", "workflow definition directory")
 	configPath := flag.String("config", "", "aimee.yaml path")
-	concurrency := flag.Int("workflow-concurrency", envInt("AIMEE_AUTONOMY_CONCURRENCY", 2),
-		"maximum concurrent workflows")
+	concurrency := flag.Int("workflow-concurrency", envInt("AIMEE_AUTONOMY_CONCURRENCY", 5),
+		"maximum concurrent work items across the whole WFE (total agent budget)")
 	bearerToken := flag.String("bearer-token", os.Getenv("AIMEE_API_BEARER_TOKEN"),
 		"bearer required by TCP and optional on Unix sockets")
 	flag.Parse()
@@ -94,6 +94,7 @@ func main() {
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	defer rootCancel()
 	var runner engine.Runner
+	var agentClient *engine.HTTPAgentClient
 	var worktreeManager *engine.WorktreeManager
 	if *runnerURL != "" {
 		runner, err = engine.NewHTTPRunner(engine.HTTPRunnerConfig{
@@ -113,6 +114,7 @@ func main() {
 		if clientErr != nil {
 			log.Fatal(clientErr)
 		}
+		agentClient = agents
 		worktrees, worktreeErr := engine.NewWorktreeManager(store, filepath.Join(*home, "wfe-worktrees"))
 		if worktreeErr != nil {
 			log.Fatal(worktreeErr)
@@ -132,14 +134,15 @@ func main() {
 		if runnerErr != nil {
 			log.Fatal(runnerErr)
 		}
-		roundtables, roundtableErr := roundtable.NewStore(filepath.Join(*home, "roundtables"), func() (string, error) {
-			name, _, err := configStore.StringValue("roundtable.default")
-			return name, err
-		})
+		// No configured-default source: a roundtable review names its roundtable
+		// in the workflow, which validation requires. roundtable.default no longer
+		// selects a panel for the Go control plane.
+		roundtables, roundtableErr := roundtable.NewStore(filepath.Join(*home, "roundtables"))
 		if roundtableErr != nil {
 			log.Fatal(roundtableErr)
 		}
 		nativeRunner.SetRoundtableStore(roundtables)
+		handler.SetRoundtableReviewer(nativeRunner)
 		runner = nativeRunner
 	}
 	if runner != nil {
@@ -148,6 +151,9 @@ func main() {
 			log.Fatal(err)
 		}
 		scheduler := engine.NewScheduler(store, workflowEngine, *concurrency, nil)
+		if agentClient != nil {
+			scheduler.SetTerminalCancellation(agentClient.CancelTerminalJobs)
+		}
 		var liveMu sync.Mutex
 		lastConcurrency := *concurrency
 		lastPolicy := engine.RunPolicy{MaxTurns: 300, MaxWall: 1800 * time.Second, AutoResumeWall: true, MaxResumes: 50}
@@ -167,6 +173,13 @@ func main() {
 			defer liveMu.Unlock()
 			lastConcurrency = readInt("autonomy.concurrency", lastConcurrency)
 			return lastConcurrency
+		})
+		lastPerWorkflow := 1
+		scheduler.SetPerWorkflowSource(func() int {
+			liveMu.Lock()
+			defer liveMu.Unlock()
+			lastPerWorkflow = readInt("autonomy.per_workflow_concurrency", lastPerWorkflow)
+			return lastPerWorkflow
 		})
 		scheduler.SetPolicySource(func() engine.RunPolicy {
 			liveMu.Lock()

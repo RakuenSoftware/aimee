@@ -18,7 +18,7 @@ extern "C"
     * touching the kb.c retrieval hot path (endpoint-driven, mirroring the memory
     * surface's evidence pattern). The training view then joins these outcomes to
     * the already-written feature_rows. See
-    * docs/proposals/pending/kb-hybrid-outcome-wiring.md. */
+    * docs/proposals/done/kb-hybrid-outcome-wiring.md. */
 
    /* Mint a kb_hybrid retrieval_event capturing the surfaced kb_document doc_ids.
     * id_out receives the event id (>= 37 bytes; may be NULL). 0 ok / -1 error. */

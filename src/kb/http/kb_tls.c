@@ -17,6 +17,7 @@
 #include <string.h>
 
 #include <netdb.h>
+#include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -397,6 +398,8 @@ static kb_tls_client_conn_t *client_conn_open_owned_ctx(const char *host, int po
    freeaddrinfo(res);
    if (conn->fd < 0)
       goto fail;
+   int one = 1;
+   (void)setsockopt(conn->fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
    struct timeval timeout = {.tv_sec = 30, .tv_usec = 0};
    setsockopt(conn->fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
    setsockopt(conn->fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));

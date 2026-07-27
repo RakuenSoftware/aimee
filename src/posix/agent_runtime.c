@@ -6,20 +6,21 @@
 #include "aimee.h"
 #include "agent.h"
 #include "aimee_ir_shadow.h"
-#include "aimee_backend.h"  /* anthropic_backend_parse / openai_backend_parse */
-#include "aimee_ir.h"       /* aimee_response_t + block accessors */
-#include "tool_call_args.h" /* assistant_message arg normalize/sanitize */
+#include <aimee/translation/aimee_backend.h> /* anthropic_backend_parse / openai_backend_parse */
+#include <aimee/ir/aimee_ir.h>               /* aimee_response_t + block accessors */
+#include "tool_call_args.h"                  /* assistant_message arg normalize/sanitize */
 #include "agent_exec.h"
 #include "agent_protocol.h"
 #include "agent_runtime_messages.h"
 #include "agent_tools.h"
 #include "agent_tunnel.h"
-#include "delegate_driver.h"
-#include "delegate_role.h"
-#include "delegate_xml_fallback.h"
-#include "gateway_delegate.h"
-#include "gateway_policy.h"
+#include <aimee/delegates/delegate_driver.h>
+#include <aimee/delegates/delegate_role.h>
+#include <aimee/delegates/delegate_xml_fallback.h>
+#include <aimee/gateway/gateway_delegate.h>
+#include <aimee/gateway/gateway_policy.h>
 #include "http_retry.h"
+#include "economizer.h"
 #include "economizer_wire_snapshot.h"
 #include "log.h"
 #include "middleware.h"
@@ -86,6 +87,31 @@ static int agent_delegation_stopped(char *buf, size_t bufsz)
    if (buf && bufsz > 0)
       snprintf(buf, bufsz, "delegate %s (%s)", reason, delegation_id);
    return 1;
+}
+
+/* Apply the SAFE contract at the authenticated local-tool completion boundary.
+ * The result has not crossed a provider boundary yet. econ_json_compact removes
+ * only RFC 8259 whitespace outside strings and succeeds only when strictly
+ * shorter; malformed/non-JSON output remains byte-identical. */
+static char *agent_economize_fresh_tool_result(char *result)
+{
+   if (!result)
+      return NULL;
+   config_t cfg;
+   econ_preset_t preset;
+   if (config_load(&cfg) != 0)
+      return result;
+   econ_preset(&cfg, &preset);
+   if (!preset.json_compact)
+      return result;
+
+   uint8_t *compacted = NULL;
+   size_t compacted_len = 0;
+   if (econ_json_compact(result, strlen(result), &compacted, &compacted_len) != ECON_JSON_OK)
+      return result;
+   (void)compacted_len; /* output is NUL-terminated for the existing tool-result surface */
+   free(result);
+   return (char *)compacted;
 }
 
 static int agent_durable_cancelled(char *buf, size_t bufsz)
@@ -159,7 +185,20 @@ static int agent_bootstrap_repository_evidence(cJSON *messages, int turn, int ti
                                                char *last_tool_result, size_t last_tool_result_n)
 {
    static const char *const name = "list_files";
-   static const char *const args = "{\"path\":\".\"}";
+   /* Never let a synthetic evidence call fall back to the server process CWD.
+    * Delegate execution installs its effective worktree in thread-local command
+    * context; a direct roundtable without a checkout must remain ungrounded. */
+   const char *worktree = run_cmd_get_cwd();
+   if (!worktree || !worktree[0] || !aimee_path_is_absolute(worktree))
+      return 0;
+   cJSON *arg_obj = cJSON_CreateObject();
+   if (!arg_obj)
+      return 0;
+   cJSON_AddStringToObject(arg_obj, "path", worktree);
+   char *args = cJSON_PrintUnformatted(arg_obj);
+   cJSON_Delete(arg_obj);
+   if (!args)
+      return 0;
    char *result = dispatch_tool_call_ctx(name, args, timeout_ms);
    agent_trace_log(0, turn, "tool_call", NULL, name, args, result, NULL);
    if (last_tool_name && last_tool_name_n)
@@ -170,6 +209,7 @@ static int agent_bootstrap_repository_evidence(cJSON *messages, int turn, int ti
    if (usable)
       agent_session_append_repository_evidence(messages, name, args, result);
    free(result);
+   free(args);
    return usable;
 }
 
@@ -514,11 +554,15 @@ native_provider_http:
     * seats). Retrying with the identical tool contract can repeat forever and
     * discard an otherwise healthy panelist. Preserve tools for the normal run,
     * but make the one bounded degenerate-response retry a synthesis-only turn. */
-   int force_text_only_retry = 0;
    int tok = agent_request_max_tokens(agent, max_tokens);
-   int max_t = agent_resolve_max_turns(agent, role);
+   /* Turn-budget policy keys off the BUDGET role, not the routing role: the
+    * primary webchat turn is routed as "code" (server_compute.c) but must be
+    * budgeted as a primary session — uncapped, and never told its tool budget is
+    * exhausted. `budget_role` is NULL exactly when this is a primary turn. */
+   const char *budget_role = agent_budget_role(role);
+   int max_t = agent_resolve_max_turns(agent, budget_role);
    int initial_max_t = max_t;
-   int final_after_turns = delegate_final_after_turns_for_role(role);
+   int final_after_turns = delegate_final_after_turns_for_role(budget_role);
 
    /* Stuck detection state */
    char last_tool_sig[256] = {0};
@@ -549,10 +593,15 @@ native_provider_http:
    rtr_tracker_t rtr;
    memset(&rtr, 0, sizeof(rtr));
 
-   int mw_max_turns = role ? max_t : 0;
+   int mw_max_turns = budget_role ? max_t : 0;
    mw_pipeline_t mw_pipeline;
    mw_pipeline_cfgs_t mw_cfgs;
    mw_pipeline_build(&mw_pipeline, &mw_cfgs, &agent->middleware, mw_max_turns, agent->model);
+
+   /* Persistent only within this agent loop; AGGRESSIVE may freeze a reduced
+    * prefix across turns. SAFE never enters context_reduce. */
+   reduce_state_t agent_reduce_state;
+   memset(&agent_reduce_state, 0, sizeof(agent_reduce_state));
 
    while (turn < max_t)
    {
@@ -596,7 +645,7 @@ native_provider_http:
          mw_ctx.tool_calls = total_calls;
          mw_ctx.consecutive_errors = consecutive_errors;
 
-         mw_pipeline_cfgs_set_max_turns(&mw_cfgs, role ? max_t : 0);
+         mw_pipeline_cfgs_set_max_turns(&mw_cfgs, budget_role ? max_t : 0);
          mw_result_t mw_res = mw_pipeline_run(&mw_pipeline, &mw_ctx);
 
          if (mw_res.action == MW_STOP)
@@ -674,14 +723,13 @@ native_provider_http:
 
       maybe_compact_before_request(&fb_agent, messages, (chatgpt || anthropic) ? sys : NULL);
 
-      /* Primary sessions (role == NULL) never close the tool budget — the user
-       * can always send another message.  Pass max_turns=0 so HARD never fires. */
-      liveness_final_response_mode_t final_mode =
-          liveness_final_response_mode(turn, role ? max_t : 0, total_calls, final_after_turns);
-      int final_instruction_turn =
-          force_text_only_retry || final_mode != LIVENESS_FINAL_RESPONSE_NONE;
-      int final_text_only_turn =
-          force_text_only_retry || !liveness_final_response_allows_tools(final_mode);
+      /* Primary sessions never close the tool budget — the user can always send
+       * another message.  budget_role is NULL for them (including the webchat
+       * turn, which is ROUTED as "code"), so max_turns=0 and HARD never fires. */
+      liveness_final_response_mode_t final_mode = liveness_final_response_mode(
+          turn, budget_role ? max_t : 0, total_calls, final_after_turns);
+      int final_instruction_turn = final_mode != LIVENESS_FINAL_RESPONSE_NONE;
+      int final_text_only_turn = !liveness_final_response_allows_tools(final_mode);
       /* A final-only turn cannot satisfy an evidence gate. Keep read-only tools
        * available until one actually succeeds; provider tool_choice is a request,
        * not an enforcement boundary, and some compatible endpoints ignore it. */
@@ -691,7 +739,6 @@ native_provider_http:
          final_instruction_turn = 0;
          final_text_only_turn = 0;
       }
-      force_text_only_retry = 0;
       if (final_instruction_turn && !final_instruction_added)
       {
          agent_session_append_final_instruction(messages);
@@ -704,18 +751,66 @@ native_provider_http:
       fb_agent.require_initial_tool_call = agent_require_initial_tool_choice(
           agent->require_initial_tool_call, successful_tool_calls, active_tools != NULL);
 
+      /* AGGRESSIVE opts into the existing lossy context reducers on OpenAI-family
+       * routes. SAFE never touches previously sent history, and native Anthropic
+       * history is never reduced because its exact prefix controls cache reuse. */
+      reduce_result_t agent_reduce_result;
+      memset(&agent_reduce_result, 0, sizeof(agent_reduce_result));
+      int reduce_active = 0;
+      {
+         config_t ecfg;
+         econ_preset_t preset;
+         if (config_load(&ecfg) == 0)
+            econ_preset(&ecfg, &preset);
+         else
+            memset(&preset, 0, sizeof preset);
+         if (!anthropic && (preset.history_fold || preset.compress))
+         {
+            reduce_config_t rcfg;
+            memset(&rcfg, 0, sizeof rcfg);
+            rcfg.delegate_seam = 1;
+            rcfg.history_fold = preset.history_fold && !chatgpt;
+            rcfg.compress = preset.compress;
+            rcfg.freeze_guard_enabled = 1;
+            rcfg.freeze_guard_horizon = preset.freeze_guard_horizon;
+            rcfg.fold.retained_msgs = ecfg.fold_retained_msgs;
+            rcfg.fold.min_fold_msgs = ecfg.fold_min_fold_msgs;
+            rcfg.fold.reasoning_excerpt_bytes = ecfg.fold_excerpt_bytes;
+            rcfg.fold.compact_head_bytes = ecfg.compact_head_bytes;
+            rcfg.fold.compact_tail_bytes = ecfg.compact_tail_bytes;
+            rcfg.fold.register_enabled = ecfg.fold_register_enabled;
+            rcfg.fold.closet.enabled = ecfg.coord_closet_enabled;
+            rcfg.fold.closet.budget_bytes = ecfg.coord_closet_budget_bytes;
+            rcfg.fold.closet.max_ratio_pct = ecfg.coord_closet_max_ratio_pct;
+            rcfg.fold.closet.denylist =
+                ecfg.coord_closet_denylist[0] ? ecfg.coord_closet_denylist : NULL;
+            agent_reduce_state.reduced = 0;
+            agent_reduce_state.turn = turn;
+            if (context_reduce(messages, sys, fb_agent.model, NULL, REDUCE_SEAM_DELEGATE, &rcfg,
+                               &agent_reduce_state, &agent_reduce_result) == 0 &&
+                agent_reduce_result.mutated && agent_reduce_result.messages)
+               reduce_active = 1;
+            else if (!reduce_active)
+            {
+               context_reduce_result_free(&agent_reduce_result);
+               memset(&agent_reduce_result, 0, sizeof agent_reduce_result);
+            }
+         }
+      }
+      cJSON *eff_messages = reduce_active ? agent_reduce_result.messages : messages;
+
       /* Build request (use fb_agent which may have fallback model after turn 0) */
       cJSON *req;
       if (chatgpt)
-         req = agent_build_request_responses(&fb_agent, messages, active_tools, sys);
+         req = agent_build_request_responses(&fb_agent, eff_messages, active_tools, sys);
       else if (anthropic)
       {
-         track_anthropic_payload_rewrite(driver, &fb_agent, messages, sys);
-         req = agent_build_request_anthropic(&fb_agent, messages, active_tools, sys, tok,
+         track_anthropic_payload_rewrite(driver, &fb_agent, eff_messages, sys);
+         req = agent_build_request_anthropic(&fb_agent, eff_messages, active_tools, sys, tok,
                                              temperature);
       }
       else
-         req = agent_build_request_openai(&fb_agent, messages, active_tools, tok, temperature);
+         req = agent_build_request_openai(&fb_agent, eff_messages, active_tools, tok, temperature);
 
       /* Universal-gateway P4: run aimee's own outbound call through the same request
        * pipeline the proxy ingresses use, so a config-enabled tool-policing policy
@@ -728,11 +823,13 @@ native_provider_http:
       {
          snprintf(out->error, sizeof(out->error), "gateway request pipeline failed");
          cJSON_Delete(req);
+         context_reduce_result_free(&agent_reduce_result);
          break;
       }
 
       char *body = cJSON_PrintUnformatted(req);
       cJSON_Delete(req);
+      context_reduce_result_free(&agent_reduce_result);
       if (!body)
       {
          snprintf(out->error, sizeof(out->error), "failed to build request");
@@ -775,15 +872,14 @@ native_provider_http:
                                         api_call_count);
       }
       config_t econ_cfg;
-      int proof_gated =
-          config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) == ECON_MODE_PROOF_GATED;
+      int economizer_active = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) != ECON_MODE_OFF;
       econ_wire_route_t wire_route = anthropic                   ? ECON_WIRE_ANTHROPIC_MESSAGES
                                      : chatgpt                   ? ECON_WIRE_OPENAI_RESPONSES
                                      : strstr(url, "/responses") ? ECON_WIRE_OPENAI_RESPONSES
                                                                  : ECON_WIRE_OPENAI_CHAT;
       econ_wire_snapshot_t *wire_snapshot = NULL;
       econ_wire_bytes_t wire_body;
-      if (econ_wire_select(proof_gated, wire_route, body, strlen(body), &wire_snapshot,
+      if (econ_wire_select(economizer_active, wire_route, body, strlen(body), &wire_snapshot,
                            &wire_body) != 0)
       {
          snprintf(out->error, sizeof(out->error), "economizer wire fence unavailable");
@@ -836,8 +932,8 @@ native_provider_http:
             }
             econ_wire_snapshot_t *fb_snapshot = NULL;
             econ_wire_bytes_t fb_wire_body;
-            if (econ_wire_select(proof_gated, wire_route, fb_body, strlen(fb_body), &fb_snapshot,
-                                 &fb_wire_body) != 0)
+            if (econ_wire_select(economizer_active, wire_route, fb_body, strlen(fb_body),
+                                 &fb_snapshot, &fb_wire_body) != 0)
             {
                snprintf(out->error, sizeof(out->error),
                         "economizer wire fence unavailable for fallback");
@@ -938,7 +1034,73 @@ native_provider_http:
          ir_primary =
              agent_ir_parse_responses(response_body, rescue_mode, &n_rescued, &parsed) == 0;
          if (!ir_primary)
+         {
+            /* An unparseable body used to become an indistinguishable "empty
+             * response": the turn reported no content and no tool calls, the
+             * body was freed, and nothing said whether the provider returned an
+             * error, an unknown event shape, or genuinely nothing. Every codex
+             * failure looked identical and could not be told apart from a model
+             * that simply said nothing. Log a bounded excerpt so the wire is
+             * recoverable from the log alone. */
+            LOG_WARN("agent", "delegate '%s': responses body did not parse; first %d bytes: %.400s",
+                     agent->name, (int)(response_body ? strlen(response_body) : 0),
+                     response_body ? response_body : "(null)");
             memset(&parsed, 0, sizeof(parsed));
+         }
+         else if (!parsed.content && parsed.call_count == 0)
+         {
+            /* Parsed cleanly yet carries neither text nor a tool call. The head
+             * of the stream says nothing useful here -- it is always
+             * response.created -- so report the SHAPE instead: which event types
+             * arrived, and the tail, where response.completed carries the final
+             * output array. That names the item types we are failing to extract
+             * rather than leaving it to be guessed. */
+            const char *b = response_body ? response_body : "";
+            size_t blen = strlen(b);
+            int n_item_done = 0, n_delta = 0, n_completed = 0, n_reasoning = 0, n_failed = 0;
+            for (const char *q = b; (q = strstr(q, "event: ")) != NULL; q++)
+            {
+               if (strncmp(q + 7, "response.output_item.done", 25) == 0)
+                  n_item_done++;
+               else if (strncmp(q + 7, "response.output_text.delta", 26) == 0)
+                  n_delta++;
+               else if (strncmp(q + 7, "response.completed", 18) == 0)
+                  n_completed++;
+               else if (strncmp(q + 7, "response.failed", 15) == 0)
+                  n_failed++;
+            }
+            for (const char *q = b; (q = strstr(q, "\"type\":\"reasoning\"")) != NULL; q++)
+               n_reasoning++;
+            /* Name the item types actually arriving: counting only "reasoning"
+             * left four items per turn unaccounted for once reasoning intent was
+             * declared. Collect the item.type of every output_item.done. */
+            char types[512] = "";
+            for (const char *q = b; (q = strstr(q, "event: response.output_item.done")) != NULL;
+                 q++)
+            {
+               const char *it = strstr(q, "\"item\":{");
+               if (!it)
+                  break;
+               const char *ty = strstr(it, "\"type\":\"");
+               if (!ty)
+                  continue;
+               ty += 8;
+               const char *end = strchr(ty, '"');
+               if (!end || end - ty > 40)
+                  continue;
+               char one[64];
+               snprintf(one, sizeof(one), "%.*s,", (int)(end - ty), ty);
+               if (strlen(types) + strlen(one) < sizeof(types) - 1)
+                  strcat(types, one);
+            }
+            const char *tail = blen > 600 ? b + blen - 600 : b;
+            LOG_WARN("agent",
+                     "delegate '%s': responses body parsed but yielded no content and no tool "
+                     "call; %zu bytes, events: output_item.done=%d output_text.delta=%d "
+                     "completed=%d failed=%d reasoning_items=%d; item_types=[%s]; tail: %.400s",
+                     agent->name, blen, n_item_done, n_delta, n_completed, n_failed, n_reasoning,
+                     types, tail);
+         }
       }
       else
       {
@@ -994,22 +1156,26 @@ native_provider_http:
          required_evidence_responses++;
 
       /* ChatGPT can expose provider-native Task/Agent tools outside the function
-       * catalog and ignore a named tool_choice. The gateway must still deny those
-       * delegation calls, but an evidence-gated seat must not become permanently
-       * unusable as a result. When policing removed every call, perform one
-       * deterministic, read-only repository bootstrap and return its output to
-       * that same seat. This is a fallback for a denied native call, not a general
-       * substitute for model-selected tools. */
+       * catalog, ignore a named tool_choice, or return a native tool response the
+       * wire parser cannot recognize. The gateway still denies identified native
+       * delegation calls. When no advertised call survives, perform one bounded,
+       * read-only bootstrap from the delegate's explicit worktree and return its
+       * output to that same seat. */
       /* This value is intentionally captured after policy compaction. A mixed
        * [denied, allowed] response retains its allowed call and never falls back. */
       int remaining_calls_after_policy = parsed.call_count;
       if (agent_required_evidence_needs_fallback(agent->require_initial_tool_call,
-                                                 successful_tool_calls, chatgpt, denied_calls,
+                                                 successful_tool_calls, chatgpt,
                                                  remaining_calls_after_policy))
       {
-         aimee_log(LOG_WARN, "agent.evidence",
-                   "provider selected denied tool '%s'; bootstrapping seat with list_files",
-                   denied_tool[0] ? denied_tool : "Subagent");
+         if (denied_calls > 0)
+            aimee_log(LOG_WARN, "agent.evidence",
+                      "provider selected denied tool '%s'; bootstrapping seat with list_files",
+                      denied_tool[0] ? denied_tool : "Subagent");
+         else
+            aimee_log(LOG_WARN, "agent.evidence",
+                      "provider returned no executable repository call; bootstrapping seat with "
+                      "list_files");
          total_calls++;
          if (agent_bootstrap_repository_evidence(messages, turn, agent->timeout_ms, last_tool_name,
                                                  sizeof last_tool_name, last_tool_result,
@@ -1193,9 +1359,8 @@ native_provider_http:
          {
             if (liveness_is_degenerate_response(parsed.content))
             {
-               if (total_calls == 0 &&
-                   agent_session_retry_degenerate_response(messages, &turn, &degenerate_retry_count,
-                                                           &force_text_only_retry))
+               if (total_calls == 0 && agent_session_retry_degenerate_response(
+                                           messages, &turn, &degenerate_retry_count))
                {
                   agent_free_parsed_response(&parsed);
                   continue;
@@ -1225,8 +1390,7 @@ native_provider_http:
              * reasoning-only content. The final-tool retry below is mutually
              * exclusive because it requires total_calls > 0. */
             if (total_calls == 0 &&
-                agent_session_retry_degenerate_response(messages, &turn, &degenerate_retry_count,
-                                                        &force_text_only_retry))
+                agent_session_retry_degenerate_response(messages, &turn, &degenerate_retry_count))
             {
                agent_free_parsed_response(&parsed);
                continue;
@@ -1486,6 +1650,7 @@ native_provider_http:
          }
          char *result_str = dispatch_tool_call_ctx(parsed.calls[i].name, parsed.calls[i].arguments,
                                                    agent->timeout_ms);
+         result_str = agent_economize_fresh_tool_result(result_str);
          {
             int dj = agent_get_durable_job_id();
             if (dj > 0)

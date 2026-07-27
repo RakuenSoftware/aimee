@@ -1,0 +1,14 @@
+{
+  "descriptor_version": 1,
+  "id": "runtime-web",
+  "dependencies": [
+    "config",
+    "gateway",
+    "module-runtime",
+    "protocols"
+  ],
+  "enabled_by_default": true,
+  "runtime_toggle": {
+    "supported": true
+  }
+}

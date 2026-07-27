@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "audit_action.h"
+#include <aimee/audit/audit_action.h>
 #include "cJSON.h"
 #include "config.h" /* require_aimee_git */
 #include "log.h"

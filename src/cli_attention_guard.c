@@ -626,6 +626,168 @@ static int attn_path_is_harness_state(const char *norm)
    return norm && strstr(norm, "/.claude/projects/") != NULL;
 }
 
+/* Copies the next '/'-delimited component of `*p` into `out` and advances `*p`
+ * past it. Returns 0 when there is no component left or it does not fit. */
+static int attn_next_component(const char **p, char *out, size_t outsz)
+{
+   const char *s = *p;
+   if (*s != '/')
+      return 0;
+   s++;
+   const char *end = strchr(s, '/');
+   size_t len = end ? (size_t)(end - s) : strlen(s);
+   if (len == 0 || len >= outsz)
+      return 0;
+   memcpy(out, s, len);
+   out[len] = '\0';
+   *p = end ? end : s + len;
+   return 1;
+}
+
+/* Resolves the deepest EXISTING ancestor of `path` through symlinks. The tail
+ * that does not exist yet cannot contain a symlink, so resolving the existing
+ * prefix is enough to decide containment for a not-yet-created file. */
+static int attn_resolve_existing_ancestor(const char *path, char *out, size_t outsz)
+{
+   char buf[2048];
+   snprintf(buf, sizeof(buf), "%s", path);
+   for (;;)
+   {
+      char *r = realpath(buf, NULL);
+      if (r)
+      {
+         int fits = snprintf(out, outsz, "%s", r) >= 0 && strlen(r) < outsz;
+         free(r);
+         return fits;
+      }
+      char *slash = strrchr(buf, '/');
+      if (!slash || slash == buf)
+         return 0;
+      *slash = '\0';
+   }
+}
+
+/* Returns 1 iff `norm` is inside THIS session's harness scratch directory:
+ * "<tmp>/claude-<uid>/<project-slug>/<session-id>/..." (scratchpad, task output,
+ * tool-result spills). Same rationale as the projects state dir above — it is
+ * harness-owned session scratch, not repo content, so blocking it protects no
+ * checkout. It also blocked only the honest path: a Bash heredoc to the same
+ * file was never a SOFT/HARD op, so the guard stopped Write/Edit and waved the
+ * shell through, which is worse than allowing both.
+ *
+ * Bound to `session_id`, so the carve-out admits the scratch dir the harness
+ * gave THIS session and nothing else — never a general "/tmp is writable" hole,
+ * and never another session's scratch. An absent session id means no carve-out.
+ *
+ * Two things this deliberately does NOT do loosely, both because a carve-out in
+ * a fail-closed control is exactly where a hole would hide:
+ *
+ *   - The LAYOUT is positional, not a set of substring probes. An earlier
+ *     revision accepted any temp path that contained "/claude-" somewhere and
+ *     the session id as some component, which admitted unrelated shapes like
+ *     "<tmp>/unrelated/claude-marker/<session-id>/checkout/x". The components
+ *     must now be exactly <claude-*>/<slug>/<session-id> directly beneath the
+ *     temp root.
+ *
+ *   - CONTAINMENT is filesystem-resolved, not lexical. Normalization stops
+ *     "../" but not a symlink: "<scratch>/link/src/x.c" where "link" points at
+ *     the primary checkout is lexically inside scratch and physically not. Both
+ *     the scratch root and the target's deepest existing ancestor are resolved
+ *     through symlinks and the latter must still lie under the former — AND the
+ *     resolved root must still carry the expected layout beneath the resolved
+ *     temp dir, or a session directory that is ITSELF a symlink into the
+ *     checkout would land both sides inside the checkout and pass trivially.
+ *
+ * WHAT THIS DOES NOT DO, stated rather than left implied: the resolution is a
+ * PREFLIGHT. A PreToolUse hook advises; the harness performs the write after the
+ * hook returns, so a directory checked here can in principle be swapped for a
+ * symlink before that write. Closing that needs no-follow / beneath semantics
+ * bound to the eventual open, which this process does not perform and cannot
+ * impose on the harness.
+ *
+ * That limit is not specific to this carve-out and is not the weakest link:
+ * attn_path_in_managed_worktree — the rule that admits ordinary work — is purely
+ * LEXICAL, with no resolution at all, so a symlink inside a worktree pointing at
+ * the primary checkout already passes it. This path is strictly stronger than
+ * the control it sits beside. Removing the carve-out would restore the original
+ * defect (file tools blocked while an equivalent shell heredoc passes) without
+ * closing a race that exists independently of it. */
+static int attn_path_is_session_scratch(const char *norm, const char *session_id)
+{
+   if (!norm || !session_id || !session_id[0])
+      return 0;
+
+   const char *tmpdir = getenv("TMPDIR");
+   if (!tmpdir || !tmpdir[0] || tmpdir[0] != '/')
+      tmpdir = "/tmp";
+   size_t tlen = strlen(tmpdir);
+   while (tlen > 1 && tmpdir[tlen - 1] == '/')
+      tlen--;
+   if (strncmp(norm, tmpdir, tlen) != 0 || norm[tlen] != '/')
+      return 0;
+
+   /* Exactly <tmp>/claude-<uid>/<project-slug>/<session-id>[/...]. */
+   const char *p = norm + tlen;
+   char comp[256];
+   if (!attn_next_component(&p, comp, sizeof(comp)))
+      return 0;
+   if (strncmp(comp, "claude-", 7) != 0 || !comp[7])
+      return 0;
+   if (!attn_next_component(&p, comp, sizeof(comp))) /* project slug */
+      return 0;
+   if (!attn_next_component(&p, comp, sizeof(comp)) || strcmp(comp, session_id) != 0)
+      return 0;
+
+   /* Physical containment: the lexical shape is right, now prove the target
+    * does not leave the session dir through a symlink. */
+   char root[2048];
+   size_t rootlen = (size_t)(p - norm);
+   if (rootlen >= sizeof(root))
+      return 0;
+   memcpy(root, norm, rootlen);
+   root[rootlen] = '\0';
+
+   char root_real[2048], target_real[2048];
+   if (!attn_resolve_existing_ancestor(root, root_real, sizeof(root_real)))
+      return 0; /* the session dir must actually exist to be carved out */
+
+   /* THE ROOT ITSELF MUST BE GENUINE SCRATCH. Comparing the target against the
+    * resolved root proves the target does not escape the root — it says nothing
+    * about where the ROOT went. If the session directory is itself a symlink into
+    * the primary checkout, both sides resolve inside the checkout, the prefix
+    * test below passes, and the carve-out authorises writing to the repository.
+    * So the resolved root must still carry the expected claude-<uid> / slug /
+    * session-id shape beneath the RESOLVED temp dir: same layout, no
+    * redirection anywhere along it. */
+   char tmp_real[2048];
+   if (!attn_resolve_existing_ancestor(tmpdir, tmp_real, sizeof(tmp_real)))
+      return 0;
+   size_t tl = strlen(tmp_real);
+   if (strncmp(root_real, tmp_real, tl) != 0 || root_real[tl] != '/')
+      return 0;
+   {
+      const char *q = root_real + tl;
+      char c2[256];
+      if (!attn_next_component(&q, c2, sizeof(c2)))
+         return 0;
+      if (strncmp(c2, "claude-", 7) != 0 || !c2[7])
+         return 0;
+      if (!attn_next_component(&q, c2, sizeof(c2))) /* project slug */
+         return 0;
+      if (!attn_next_component(&q, c2, sizeof(c2)) || strcmp(c2, session_id) != 0)
+         return 0;
+      if (*q != '\0') /* nothing may follow the session dir */
+         return 0;
+   }
+
+   if (!attn_resolve_existing_ancestor(norm, target_real, sizeof(target_real)))
+      return 0;
+   size_t rl = strlen(root_real);
+   if (strncmp(target_real, root_real, rl) != 0)
+      return 0;
+   return target_real[rl] == '\0' || target_real[rl] == '/';
+}
+
 /* Returns 1 iff `norm` points into an external file-based agent-memory store:
  * Claude Code's per-project auto-memory dir
  * ("~/.claude/projects/<slug>/memory/..." incl. its MEMORY.md index). Matches
@@ -748,11 +910,8 @@ int attn_external_memory_blocked(attn_op_t op, const char *tool_name, const char
  * relative), else `cwd` itself (a Bash mutation runs there). The joined path is
  * lexically normalized before the worktree check so a "../" escape out of the
  * worktree is blocked even though the raw string still contained the marker. */
-int attn_session_isolation_blocked(attn_op_t op, const char *file_path, const char *cwd)
+void attn_session_isolation_target(const char *file_path, const char *cwd, char *out, size_t outsz)
 {
-   if (op != ATTN_OP_SOFT && op != ATTN_OP_HARD)
-      return 0;
-
    char joined[2048];
    if (file_path && file_path[0] == '/')
       snprintf(joined, sizeof(joined), "%s", file_path);
@@ -761,9 +920,19 @@ int attn_session_isolation_blocked(attn_op_t op, const char *file_path, const ch
    else
       snprintf(joined, sizeof(joined), "%s", cwd ? cwd : "");
 
+   attn_lexical_normalize(joined, out, outsz);
+}
+
+int attn_session_isolation_blocked(attn_op_t op, const char *file_path, const char *cwd,
+                                   const char *session_id)
+{
+   if (op != ATTN_OP_SOFT && op != ATTN_OP_HARD)
+      return 0;
+
    char norm[2048];
-   attn_lexical_normalize(joined, norm, sizeof(norm));
-   if (attn_path_in_managed_worktree(norm) || attn_path_is_harness_state(norm))
+   attn_session_isolation_target(file_path, cwd, norm, sizeof(norm));
+   if (attn_path_in_managed_worktree(norm) || attn_path_is_harness_state(norm) ||
+       attn_path_is_session_scratch(norm, session_id))
       return 0;
    return 1;
 }
@@ -839,17 +1008,31 @@ int handle_attention_guard(void)
          cwd[0] = '\0';
       const char *fp =
           ti ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ti, "file_path")) : NULL;
-      if (attn_session_isolation_blocked(op, fp, cwd))
+      if (attn_session_isolation_blocked(op, fp, cwd, sid))
       {
+         /* Name the path that was actually judged. When an absolute file_path is
+          * given it IS the effective target, and the cwd may be a perfectly good
+          * managed worktree — saying otherwise sends the reader off diagnosing a
+          * worktree that is not the problem. */
+         char target[2048];
+         attn_session_isolation_target(fp, cwd, target, sizeof(target));
+         char where[2300];
+         if (fp && fp[0])
+            snprintf(where, sizeof(where), "the write target '%s' is not inside a managed worktree",
+                     target);
+         else
+            snprintf(where, sizeof(where),
+                     "this session is operating in '%s', which is not a "
+                     "managed worktree",
+                     cwd[0] ? cwd : "(unknown cwd)");
          fprintf(stderr,
-                 "aimee attention-guard: refusing a mutating op outside a session worktree. "
-                 "This session is operating in '%s', which is not a managed worktree "
+                 "aimee attention-guard: refusing a mutating op outside a session worktree — %s "
                  "(.aimee/worktrees/... or .claude/worktrees/...). aimee requires each mutating "
                  "session to run in an isolated worktree+branch off the default branch: create "
                  "one (Claude Code: EnterWorktree; aimee: launch `aimee`, which materializes a "
                  "worktree and chdirs into it). An operator may set require_session_worktree: "
                  "false in aimee.yaml to disable this — there is no env-var bypass.\n",
-                 cwd[0] ? cwd : "(unknown cwd)");
+                 where);
          cJSON_Delete(hook);
          free(stdin_data);
          return 2;

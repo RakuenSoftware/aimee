@@ -16,7 +16,7 @@
  *
  * Default-off behind config learning_implicit_retrieval_outcome. Observation-only:
  * writes evidence artifacts, never changes the turn's answer.
- * See docs/proposals/pending/kb-hybrid-outcome-wiring.md. */
+ * See docs/proposals/done/kb-hybrid-outcome-wiring.md. */
 #ifndef DEC_RETRIEVAL_OUTCOME_BRIDGE_H
 #define DEC_RETRIEVAL_OUTCOME_BRIDGE_H 1
 

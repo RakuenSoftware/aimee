@@ -1,6 +1,6 @@
 #include "server_skill.h"
 #include "aimee.h"
-#include "skill.h"
+#include <aimee/skills/skill.h>
 #include "cJSON.h"
 #include "json_fluent.h" /* jo_ok */
 #include "kb_client.h"

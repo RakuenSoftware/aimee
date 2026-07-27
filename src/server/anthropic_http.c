@@ -21,19 +21,21 @@
 #include "agent_types.h"
 #include "anthropic_ingress.h"
 #include "cJSON.h"
-#include "delegate_driver.h"
+#include <aimee/delegates/delegate_driver.h>
 #include "economizer_wire_snapshot.h"
-#include "gateway_policy.h"
-#include "gateway_pipeline.h"
+#include "gateway_mutate_wire.h"
+#include "server_http_identity.h"
+#include <aimee/gateway/gateway_policy.h>
+#include <aimee/gateway/gateway_pipeline.h>
 #include "gw_stage_memory.h"
 #include "gw_stage_registry.h"
 #include "gw_stage_governance.h"
 #include "router_advise.h"   /* gw_stage_router — the request->workflow seam */
 #include "aimee_ir_shadow.h" /* Slice 3: IR shadow-mode observer */
-#include "aimee_ir_metrics.h"
-#include "aimee_ir_serve.h"  /* Slice 5: IR live request-build */
-#include "aimee_backend.h"   /* Slice 3: openai_backend_parse (IR response path) */
-#include "aimee_ir_stream.h" /* Slice 5-wire: IR-delta incremental relay */
+#include <aimee/ir/aimee_ir_metrics.h>
+#include "aimee_ir_serve.h"                  /* Slice 5: IR live request-build */
+#include <aimee/translation/aimee_backend.h> /* Slice 3: openai_backend_parse (IR response path) */
+#include <aimee/translation/aimee_ir_stream.h> /* Slice 5-wire: IR-delta incremental relay */
 #include "ingress_preinject.h"
 #include "json_fluent.h"
 #include "log.h"
@@ -443,12 +445,42 @@ static int messages_buffered(const char *body, char *resp, int cap)
    const delegate_driver_t *driver;
    parsed_response_t parsed = {0}; /* freed only on the success path, but init defensively */
    econ_wire_snapshot_t *wire_snapshot = NULL;
+   gw_mutate_ctx_t gwmc;
    int status, http_status, rc;
    const char *model;
+
+   gw_mutate_ctx_init(&gwmc);
 
    if (!req)
       return write_error(resp, cap, 400, "invalid_request_error", "invalid JSON body", 0);
    model = jo_cstr(req, "model");
+
+   /* Reject the two shapes that otherwise HANG. The Anthropic Messages API requires
+    * max_tokens and a non-empty messages array; without them this request reached
+    * the provider path and never came back — an empty body, `{}`, `{"model":"x"}`
+    * and `{"messages":[]}` all sat forever instead of answering. A caller that omits
+    * a required field must get a 400, not an open socket.
+    *
+    * Validated here, before anything else is allocated, so the cleanup is just the
+    * parsed body — the same shape as the no-primary-agent branch below. This bounds
+    * the malformed-input case only; it does NOT put a deadline on the provider call
+    * itself, which is a separate concern. */
+   {
+      const cJSON *jmax = cJSON_GetObjectItemCaseSensitive(req, "max_tokens");
+      if (!cJSON_IsNumber(jmax) || jmax->valuedouble < 1)
+      {
+         cJSON_Delete(req);
+         return write_error(resp, cap, 400, "invalid_request_error",
+                            "max_tokens is required and must be a positive integer", 0);
+      }
+      const cJSON *jmsgs = cJSON_GetObjectItemCaseSensitive(req, "messages");
+      if (jmsgs && (!cJSON_IsArray(jmsgs) || cJSON_GetArraySize(jmsgs) == 0))
+      {
+         cJSON_Delete(req);
+         return write_error(resp, cap, 400, "invalid_request_error",
+                            "messages must be a non-empty array", 0);
+      }
+   }
 
    /* SHADOW (Slice 3): observe the IR round-trip on this live request. No-op unless
     * AIMEE_IR_SHADOW is set; never affects the response. */
@@ -481,6 +513,16 @@ static int messages_buffered(const char *body, char *resp, int cap)
     * the pointer cached above (line ~397) could now dangle. */
    model = jo_cstr(req, "model");
 
+   /* Only AGGRESSIVE and only an OpenAI-family upstream. Native Anthropic
+    * requests keep the client's exact cache prefix and cache_control layout. */
+   if (gw_mutate_upstream_ok(parity))
+   {
+      char *mut_sys = anthropic_system_to_text(req);
+      gw_buffered_mutate(req, "messages", model, mut_sys, server_http_identity_session_hdr(),
+                         server_http_identity_bearer(), server_http_identity_principal(), &gwmc);
+      free(mut_sys);
+   }
+
    translate_request(req, driver, ag, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
@@ -511,12 +553,12 @@ static int messages_buffered(const char *body, char *resp, int cap)
                                          responses_wire);
    const char *pristine_body = prov_body ? prov_body : "{}";
    config_t econ_cfg;
-   int proof_gated = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) == ECON_MODE_PROOF_GATED;
+   int economizer_active = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) != ECON_MODE_OFF;
    econ_wire_route_t wire_route = parity           ? ECON_WIRE_ANTHROPIC_MESSAGES
                                   : responses_wire ? ECON_WIRE_OPENAI_RESPONSES
                                                    : ECON_WIRE_OPENAI_CHAT;
    econ_wire_bytes_t wire_body;
-   if (econ_wire_select(proof_gated, wire_route, pristine_body, strlen(pristine_body),
+   if (econ_wire_select(economizer_active, wire_route, pristine_body, strlen(pristine_body),
                         &wire_snapshot, &wire_body) != 0)
    {
       status = write_error(resp, cap, 503, "api_error", "economizer wire fence unavailable",
@@ -603,6 +645,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
 
 cleanup:
    econ_wire_snapshot_destroy(wire_snapshot);
+   gw_mutate_ctx_free(&gwmc);
    cJSON_Delete(out);
    cJSON_Delete(provider_resp);
    free(response);
@@ -1070,8 +1113,11 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    int input_est;
    int responses_wire = 0;
    econ_wire_snapshot_t *wire_snapshot = NULL;
+   gw_mutate_ctx_t gwmc;
    const void *wire_prov_body = NULL;
    size_t wire_prov_body_len = 0;
+
+   gw_mutate_ctx_init(&gwmc);
 
    mint_msg_id(msg_id, sizeof(msg_id));
 
@@ -1112,6 +1158,14 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    /* Re-read `model`: the model-pin stage may have replaced req's "model" node, so
     * the pointer cached at the top of this function could now dangle. */
    model = jo_cstr(req, "model");
+
+   if (gw_mutate_upstream_ok(parity))
+   {
+      char *mut_sys = anthropic_system_to_text(req);
+      gw_buffered_mutate(req, "messages", model, mut_sys, server_http_identity_session_hdr(),
+                         server_http_identity_bearer(), server_http_identity_principal(), &gwmc);
+      free(mut_sys);
+   }
 
    translate_request(req, driver, ag, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
@@ -1176,12 +1230,12 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
 
    const char *pristine_body = prov_body ? prov_body : "{}";
    config_t econ_cfg;
-   int proof_gated = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) == ECON_MODE_PROOF_GATED;
+   int economizer_active = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) != ECON_MODE_OFF;
    econ_wire_route_t wire_route = parity           ? ECON_WIRE_ANTHROPIC_MESSAGES
                                   : responses_wire ? ECON_WIRE_OPENAI_RESPONSES
                                                    : ECON_WIRE_OPENAI_CHAT;
    econ_wire_bytes_t wire_body;
-   if (econ_wire_select(proof_gated, wire_route, pristine_body, strlen(pristine_body),
+   if (econ_wire_select(economizer_active, wire_route, pristine_body, strlen(pristine_body),
                         &wire_snapshot, &wire_body) != 0)
    {
       xl = anthropic_stream_begin(msg_id, model, 0, emit, ctx);
@@ -1232,6 +1286,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
                          input_est, emit, ctx);
 cleanup:
    econ_wire_snapshot_destroy(wire_snapshot);
+   gw_mutate_ctx_free(&gwmc);
    free(prov_body);
    free(system_text);
    cJSON_Delete(messages);

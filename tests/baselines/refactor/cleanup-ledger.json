@@ -1,0 +1,1854 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "slice": 5,
+      "state": "present_and_verified",
+      "disposition": "Deleted the self-contained background skill-curator feature after its liveness audit found no independent production consumer.",
+      "production": {
+        "added": [],
+        "deleted": [
+          "background skill-curator scheduler, state, metrics, configuration, and implementation"
+        ],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "legacy nested config remains accepted as unknown input and is omitted on save",
+        "the inert maintenance_state row is retained without a reader"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice removed production code.",
+        "rejected_simpler_alternative": "Keeping or relocating the unconsumed feature was rejected.",
+        "revisit": "The absence gate prevents accidental resurrection; a new supported journey requires a new proposal."
+      },
+      "consumers": [
+        "skill review",
+        "generic memory maintenance",
+        "KB synthesis curator"
+      ],
+      "blast_radius": "The absence checker preserves the adjacent live maintenance and KB-curator boundaries while rejecting deleted sources, symbols, config, and build objects.",
+      "independent_review": "Roundtable run oprun_g6a5f2d161a3aecef_1784623013_6 approved the disposition.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-5.md",
+        "docs/audit/dispositions/background-skill-curator.yaml"
+      ]
+    },
+    {
+      "slice": 8,
+      "state": "present_and_verified",
+      "disposition": "Moved plugin discovery implementation and its header to plugin-loader without changing behavior or prematurely moving the mixed extension contract.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": [
+          "plugin-loader discovery source and header gained one canonical owner"
+        ]
+      },
+      "fallbacks": [
+        "the relocated header temporarily retained its legacy plugin.h include edge"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "This was a path-only ownership move plus validation.",
+        "rejected_simpler_alternative": "Moving the mixed ABI in the same slice was rejected as an unsafe ownership claim.",
+        "revisit": "The temporary include edge was assigned to the following contract-split slice."
+      },
+      "consumers": [
+        "Runtime startup",
+        "plugin-loader focused tests",
+        "Make and CMake build graphs"
+      ],
+      "blast_radius": "The slice was restricted to the loader-only file pair; extension ABI, hooks, CLI, dashboard, and runtime consumers remained unchanged.",
+      "independent_review": "Roundtable approved the narrowed loader-only move.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-8.md"
+      ]
+    },
+    {
+      "slice": 9,
+      "state": "present_and_verified",
+      "disposition": "Moved the required pre-LLM hook registry into module-runtime and consolidated physical-ownership enforcement.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": [
+          "pre-LLM hook registry source and header moved into module-runtime",
+          "module source ownership checks now use one data-driven checker"
+        ]
+      },
+      "fallbacks": [
+        "legacy plugin_chook symbol names remain for compatibility"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "Production behavior and symbol inventory were preserved.",
+        "rejected_simpler_alternative": "Treating the required hook registry as optional plugin loading was rejected.",
+        "revisit": "Compatibility symbol names can be reconsidered only through the compatibility process."
+      },
+      "consumers": [
+        "agent runtime",
+        "module-runtime",
+        "focused hook tests"
+      ],
+      "blast_radius": "The source, public include, Make/CMake objects, agent-runtime consumer, and focused test moved together.",
+      "independent_review": "The slice received roundtable review before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-9.md"
+      ]
+    },
+    {
+      "slice": 10,
+      "state": "present_and_verified",
+      "disposition": "Separated the required extension ABI from optional loader management and deleted an unused wrapper island.",
+      "production": {
+        "added": [],
+        "deleted": [
+          "plugin_ctx convenience wrapper implementation, header, and unused extended symbols"
+        ],
+        "consolidated": [
+          "required typed registries and context lifecycle moved into module-runtime"
+        ]
+      },
+      "fallbacks": [
+        "retained public plugin symbol names preserve compatibility"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The contract split removed a duplicate wrapper layer.",
+        "rejected_simpler_alternative": "Relocating the unused wrapper would preserve duplicate API and global state.",
+        "revisit": "Retained compatibility names require an approved compatibility record before removal."
+      },
+      "consumers": [
+        "module-runtime registries",
+        "plugin-loader",
+        "Runtime and protocol consumers"
+      ],
+      "blast_radius": "The full source definition/reference inventory and both build graphs were checked before deleting the wrapper island.",
+      "independent_review": "The exact diff returned to roundtable after material corrections.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-10.md"
+      ]
+    },
+    {
+      "slice": 11,
+      "state": "present_and_verified",
+      "disposition": "Made plugin-loader default-off and physically absent while retaining the required extension runtime in every profile.",
+      "production": {
+        "added": [
+          "compile-time plugin-loader profile selection and capability guards"
+        ],
+        "deleted": [],
+        "consolidated": [
+          "one feature flag controls Make, CMake, runtime, CLI, HTTP, OpenAPI, dashboard, and GUI exposure"
+        ]
+      },
+      "fallbacks": [
+        "re-enabling plugin-loader reads the preserved installed-plugin registry"
+      ],
+      "net_growth": {
+        "status": "justified",
+        "rationale": "Small conditional seams are required to prove the optional module is absent from disabled builds.",
+        "rejected_simpler_alternative": "Runtime-only disablement would leave loader objects, symbols, routes, and configuration residue.",
+        "revisit": "Generated profiles will replace hand-wired feature selection in the descriptor-generation phase."
+      },
+      "consumers": [
+        "default headless/runtime builds",
+        "full builds that opt into plugin-loader",
+        "web capability probe"
+      ],
+      "blast_radius": "Disabled and enabled Make/CMake profiles verify object, symbol, route, OpenAPI, dashboard, and GUI behavior.",
+      "independent_review": "Roundtable approved the implementation and both focused CI corrections; all pull-request checks passed.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-11.md"
+      ]
+    },
+    {
+      "slice": 12,
+      "state": "present_and_verified",
+      "disposition": "Added one deterministic surface baseline and one cleanup ledger contract before broader source movement.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": [
+          "public surface drift is represented by one index",
+          "slice cleanup accounting is represented by one ledger"
+        ]
+      },
+      "fallbacks": [],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice adds repository validation and documentation only, not shipped production code.",
+        "rejected_simpler_alternative": "Independent ad hoc snapshots would duplicate membership and normalization rules.",
+        "revisit": "Replace source projections with generated descriptor projections as those become authoritative."
+      },
+      "consumers": [
+        "modular-refactor CI",
+        "maintainers reviewing later source moves"
+      ],
+      "blast_radius": "The gate reads repository files only, never a live database, network service, built binary, or ambient toolchain.",
+      "independent_review": "The implementation plan and exact diff are reviewed by the modularization roundtable.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-12.md",
+        "docs/refactor-baselines.md"
+      ]
+    },
+    {
+      "slice": 13,
+      "state": "present_and_verified",
+      "disposition": "Added the strict individual module-documentation catalog and promoted the runtime/loading family without creating placeholder docs.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": [
+          "module-runtime and plugin-loader now share one documentation schema and cross-link their ownership boundary"
+        ]
+      },
+      "fallbacks": [
+        "24 module documents remain explicit status debt"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "",
+        "rejected_simpler_alternative": "",
+        "revisit": ""
+      },
+      "consumers": [
+        "module maintainers",
+        "modular-refactor CI"
+      ],
+      "blast_radius": "Documentation and repository validation only; no production source, descriptor, build, route, config, or runtime behavior changes.",
+      "independent_review": "Technical-writing and exact-diff roundtable review are required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-13.md",
+        "docs/modules/module-runtime.md"
+      ]
+    },
+    {
+      "slice": 14,
+      "state": "present_and_verified",
+      "disposition": "Documented the memory, learning, skills, response-composition, and KB-synthesis family against current source and made physical-ownership gaps explicit.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "nineteen module documents remain explicit status debt",
+        "distributed source ownership remains for later behavior-preserving slices"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice adds documentation and baseline accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Placeholder documents would hide the actual split between target ownership and current physical placement.",
+        "revisit": "Each documented relocation candidate requires a focused liveness, consumer, surface, and compatibility audit before movement."
+      },
+      "consumers": [
+        "module maintainers",
+        "technical writers",
+        "modular-refactor CI",
+        "future source-movement slices"
+      ],
+      "blast_radius": "No runtime surface changes; the documentation gate verifies descriptor dependencies, activation claims, and the exact debt partition.",
+      "independent_review": "Technical-writing and exact-diff roundtable review are required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-14.md",
+        "docs/modules/memory.md",
+        "docs/modules/learning.md",
+        "docs/modules/skills.md",
+        "docs/modules/response-composition.md",
+        "docs/modules/kb-synthesis.md"
+      ]
+    },
+    {
+      "slice": 15,
+      "state": "present_and_verified",
+      "disposition": "Documented the six required core execution modules against current source and separated canonical ownership from similarly named local routers, adapters, and providers.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "thirteen module documents remain explicit status debt",
+        "distributed execution-path source remains for focused liveness and movement slices"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice adds documentation and baseline accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Treating filenames as ownership would incorrectly move local workflow/delivery routers and direction-specific protocol adapters.",
+        "revisit": "Each overlap candidate requires definition/caller, build, parity, supported-journey, and configuration-surface evidence before consolidation or deletion."
+      },
+      "consumers": [
+        "module maintainers",
+        "technical writers",
+        "modular-refactor CI",
+        "future execution-path source slices"
+      ],
+      "blast_radius": "No runtime surface changes; the documentation gate verifies dependencies, activation claims, and the exact debt partition.",
+      "independent_review": "Technical-writing and exact-diff roundtable review are required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-15.md",
+        "docs/modules/ir.md",
+        "docs/modules/translation.md",
+        "docs/modules/routing.md",
+        "docs/modules/gateway.md",
+        "docs/modules/protocols.md",
+        "docs/modules/delegates.md"
+      ]
+    },
+    {
+      "slice": 16,
+      "state": "present_and_verified",
+      "disposition": "Documented the five required execution-authority modules against current source, including policy, raw-secret, workspace, tool-dispatch, Git's submit-to-memory boundary, and working-tree claims with hypothesis-unverified markers preserved; three duplicated-by-adjacent-module candidates are deferred or referred for relocation, and no dead-code candidate is confirmed.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "eight module documents remain explicit status debt",
+        "distributed execution-policy and tools source remains for focused liveness and movement slices"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice adds documentation and baseline accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "A second documentation schema or speculative source move would duplicate gates and overstate static reachability evidence.",
+        "revisit": "The validation record refers duplicated-by-adjacent-module candidates to later source slices with runtime liveness and behavior comparison."
+      },
+      "consumers": [
+        "module maintainers",
+        "technical writers",
+        "future execution-authority source slices"
+      ],
+      "blast_radius": "No runtime surface changes; the strict module-doc gate and close-time path check constrain the slice to five docs, status, validation, and ledger accounting.",
+      "independent_review": "Technical-writing and exact-diff roundtable review are required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-16.md",
+        "docs/modules/execution-policy.md",
+        "docs/modules/vault.md",
+        "docs/modules/workspace.md",
+        "docs/modules/tools.md",
+        "docs/modules/git.md"
+      ]
+    },
+    {
+      "slice": 17,
+      "state": "present_and_verified",
+      "disposition": "Documented required-core config and audit against current reload, GUI projection, action evidence, legacy ledger, and WORM implementations without overstating restart, retention, or immutable-storage guarantees.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "six optional module documents remain explicit status debt",
+        "dynamic live-consumer filtering for GUI config fields is not present",
+        "distributed config ownership and dual audit stores remain for focused source slices"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice adds documentation and baseline accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Calling all persisted settings live or all audit persistence WORM would conceal verified contract gaps and collapse distinct guarantees.",
+        "revisit": "Source slices must prove consumer liveness, round-trip compatibility, authority migration, privacy, and store parity before consolidation or removal."
+      },
+      "consumers": [
+        "module maintainers",
+        "technical writers",
+        "future config and audit source slices"
+      ],
+      "blast_radius": "No runtime surface changes; the strict module-doc gate and close-time path check constrain the slice to two docs, status, validation, and ledger accounting.",
+      "independent_review": "Technical-writing and exact-diff roundtable review are required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-17.md",
+        "docs/modules/config.md",
+        "docs/modules/audit.md"
+      ]
+    },
+    {
+      "slice": 18,
+      "state": "present_and_verified",
+      "disposition": "Documented optional workflows, roundtable, and benchmarks with a shared ownership/liveness matrix; triggers remain workflow intake, workflow/roundtable integration preserves split ownership, and legacy eval names do not create an evals module or runtime benchmark authority.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "three control-plane module documents remain explicit status debt",
+        "workflow and roundtable optionality is not fully enforced by current startup/build wiring",
+        "the benchmarks target directory remains descriptor-only while live harnesses remain distributed under legacy names"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice adds documentation and baseline accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Treating descriptor optionality as implemented or renaming every legacy eval symbol in a docs slice would hide current liveness and compatibility constraints.",
+        "revisit": "Profile/source slices must add effective activation, move ownership, preserve aliases and data contracts, and prove disabled residue plus supported journeys."
+      },
+      "consumers": [
+        "module maintainers",
+        "technical writers",
+        "future optional execution and benchmark source slices"
+      ],
+      "blast_radius": "No runtime surface changes; close-time path checks constrain the slice to three docs, one validation record, status, and ledger accounting.",
+      "independent_review": "Technical-writing and exact-final-diff roundtable review are required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-18.md",
+        "docs/modules/workflows.md",
+        "docs/modules/roundtable.md",
+        "docs/modules/benchmarks.md"
+      ]
+    },
+    {
+      "slice": 19,
+      "state": "present_and_verified",
+      "disposition": "Completed the individual module documentation catalog with the Control Plane, Runtime web, and optional governance contracts; separated target default-on GUI lifecycle from current wiring, made dashboards inseparable, and preserved provider-neutral OIDC plus core SSH/SSHSIG and enforcement boundaries.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "control-web and runtime-web remain descriptor-only while implementations are distributed",
+        "current Control console default-off startup contradicts the target default-on profile",
+        "governance selection does not yet omit distributed OIDC and response-policy code",
+        "effective GUI configuration filtering is not implemented"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice adds documentation and baseline accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Describing target lifecycle as current behavior or treating Git-provider OAuth as organizational OIDC would hide the highest-risk implementation gaps.",
+        "revisit": "Profile/source slices must unify generated lifecycle controls, move owned source, preserve bounded aliases and data custody, and prove headless plus full-minus-one journeys."
+      },
+      "consumers": [
+        "module maintainers",
+        "technical writers",
+        "future product rename, governance, web, and effective-config source slices"
+      ],
+      "blast_radius": "No runtime surface changes; close-time path checks constrain the slice to three docs, one validation record, status, and ledger accounting, while the validation matrix records tenant, custody, identity, and disabled-profile boundaries.",
+      "independent_review": "Technical-writing and exact-final-diff roundtable review are required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-19.md",
+        "docs/modules/control-web.md",
+        "docs/modules/governance.md",
+        "docs/modules/runtime-web.md"
+      ]
+    },
+    {
+      "slice": 20,
+      "state": "present_and_verified",
+      "disposition": "Added the exact governance capability-ownership artifact and deterministic CI gate before descriptor enrichment or distributed governance source movement.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": [
+          "one proposal-authored governance block projects into one machine-readable ownership artifact"
+        ]
+      },
+      "fallbacks": [
+        "distributed governance and OIDC production code has not moved",
+        "broad source/header/test/docs/build/config/route/data ownership is not yet described by descriptors"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice adds repository validation and documentation only, not shipped production code.",
+        "rejected_simpler_alternative": "Starting source movement without a binding ownership contract would leave optional governance and core safety boundaries unenforced.",
+        "revisit": "Extend descriptor ownership fields in focused families, then generate build profiles before moving distributed governance code."
+      },
+      "consumers": [
+        "descriptor validation CI",
+        "future governance/profile/source slices",
+        "module maintainers"
+      ],
+      "blast_radius": "The checker reads only the proposal's normative governance block, its machine-readable projection, canonical inventory, and module descriptors; mutation tests cover capability, owner, classification, dependency, alias, parser, path, ordering, and CLI failures without changing runtime behavior.",
+      "independent_review": "Technical-writing and exact-final-diff roundtable review are required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-20.md",
+        "tests/baselines/modules/governance-ownership.yaml",
+        "scripts/check_capability_ownership.py",
+        "scripts/tests/test_check_capability_ownership.py"
+      ]
+    },
+    {
+      "slice": 21,
+      "state": "present_and_verified",
+      "disposition": "Piloted optional source, public-header, test, and documentation ownership fields on required module-runtime with one shared fail-closed validator and deterministic declared-ownership report.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "Make and CMake retain separate build-input lists until descriptor-driven generation",
+        "the remaining twenty-five descriptors omit ownership fields pending focused family slices",
+        "mixed plugin-loader test ownership remains deliberately unclaimed by module-runtime"
+      ],
+      "net_growth": {
+        "status": "justified",
+        "rationale": "The slice extends repository validation, schema, tests, and documentation without adding shipped runtime code.",
+        "rejected_simpler_alternative": "Bulk-populating every descriptor before proving role and containment rules would turn unverified path guesses into apparent authority.",
+        "revisit": "Enrich one ownership family at a time, then replace duplicate Make and CMake lists with a single generated projection after profile parity is proven."
+      },
+      "consumers": [
+        "descriptor validation CI",
+        "module maintainers",
+        "future generated-build and source-movement slices"
+      ],
+      "blast_radius": "Only optional descriptor vocabulary and module-runtime inventory change; mutation tests cover each role, order, omission, missing and nonregular files, normalization, traversal, symlink rejection, local and cross-descriptor duplicates, cross-role claims, CLI output, and unrelated docs.",
+      "independent_review": "Technical-writing and exact-final-diff roundtable review are required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-21.md",
+        "src/modules/module-runtime/module.yaml",
+        "src/modules/module.schema.json",
+        "scripts/validate_module_descriptors.py",
+        "scripts/tests/test_validate_module_descriptors.py"
+      ]
+    },
+    {
+      "slice": 22,
+      "state": "present_and_verified",
+      "disposition": "Enriched the optional plugin-loader descriptor with its two sources, two public headers, two primary-behavior tests, and canonical documentation without changing build or runtime behavior.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "Make and CMake remain authoritative build-input lists until descriptor-driven generation",
+        "twenty-four descriptors still omit ownership fields pending focused family slices",
+        "test_plugin.c retains module-runtime setup because no behavior defect justifies a test split"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata and documentation only, not shipped production code.",
+        "rejected_simpler_alternative": "Leaving test_plugin.c unclaimed would hide live plugin.c coverage, while dual ownership or a speculative test split would weaken the one-owner boundary.",
+        "revisit": "Split mixed tests only when a reproduced maintenance or behavior defect justifies changing fixtures and build wiring."
+      },
+      "consumers": [
+        "descriptor validation CI",
+        "plugin-loader maintainers",
+        "future generated-build and ownership-completion slices"
+      ],
+      "blast_radius": "Only plugin-loader ownership metadata and its explanatory documentation change; enabled and default-off profile CI continue to prove liveness and physical omission.",
+      "independent_review": "Technical-writing and exact-final-diff roundtable review are required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-22.md"
+      ]
+    },
+    {
+      "slice": 23,
+      "state": "present_and_verified",
+      "disposition": "Moved audit's four public contracts to the canonical include tree, converted all consumers and build roots, declared implementation/header/document ownership, and added a descriptor-derived guard against flat-header and include-root regression.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": [
+          "four flat audit public-header locations replaced by one canonical include namespace"
+        ]
+      },
+      "fallbacks": [
+        "audit test ownership is explicitly empty pending issue #1753",
+        "Make and CMake remain authoritative build-input lists until descriptor-driven generation",
+        "server SQLite and KB PostgreSQL WORM stores remain independently owned across the shared chain contract"
+      ],
+      "net_growth": {
+        "status": "justified",
+        "rationale": "One small descriptor-derived checker and mutation suite prevent retired public-header paths, basename includes, and source-root build exposure from returning for this and future canonicalized modules.",
+        "rejected_simpler_alternative": "Audit-specific checks in the source-move validator would mix migration residue with implementation ownership and require another registry for each module.",
+        "revisit": "Issue #1753 must resolve audit test ownership within the next two module re-rooting slices; descriptor-driven build projection later replaces duplicate Make and CMake inventories."
+      },
+      "consumers": [
+        "audit consumers",
+        "descriptor validation CI",
+        "future public-header re-rooting slices"
+      ],
+      "blast_radius": "Production changes are physical header moves plus include substitutions; public names, prototypes, source inputs, target visibility, storage behavior, and runtime behavior remain unchanged.",
+      "independent_review": "Aimee technical-writing review was satisfied on 2026-07-22 with its wording corrections applied; exact-final-diff roundtable review remains required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-23.md",
+        "docs/modules/audit.md",
+        "src/modules/audit/module.yaml",
+        "scripts/check_module_header_layout.py",
+        "scripts/tests/test_check_module_header_layout.py"
+      ]
+    },
+    {
+      "slice": 24,
+      "state": "present_and_verified",
+      "disposition": "Assigned audit's four direct unit tests to the audit descriptor and documented every audit-named test without dual-claiming cross-boundary integrations.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "Make and CMake retain separate test registrations until descriptor-driven generation",
+        "KB, vault, log, DB1, DB2, code-audit, and memory-harness integration tests remain outside audit ownership"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata and documentation only, not shipped production code or test behavior.",
+        "rejected_simpler_alternative": "Assigning tests by filename would falsely dual-claim mixed integration tests; leaving all tests unclaimed would hide four direct module contracts.",
+        "revisit": "Reassign a mixed integration test only after its production boundary has one canonical owner or a reproduced maintenance defect justifies splitting the test."
+      },
+      "consumers": [
+        "audit maintainers",
+        "descriptor validation CI",
+        "future generated test projections"
+      ],
+      "blast_radius": "Only the audit descriptor, audit documentation, validation record, and cleanup ledger change; production sources, public headers, test sources, build registrations, storage behavior, and runtime behavior remain unchanged.",
+      "independent_review": "Aimee technical-writer job 7234 approved the artifact without edits; exact-final-diff roundtable review remains required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-24.md",
+        "docs/modules/audit.md",
+        "src/modules/audit/module.yaml"
+      ]
+    },
+    {
+      "slice": 25,
+      "state": "present_and_verified",
+      "disposition": "Moved the required skills implementation and public contracts from the singular legacy root into the canonical plural module and include namespace without changing behavior or target membership.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": [
+          "one singular skills source/header root replaced by the canonical plural module and public include namespace"
+        ]
+      },
+      "fallbacks": [
+        "Make and CMake retain separate source and include inventories until descriptor-driven generation",
+        "optional benchmarks source isolation remains deferred because its build and runtime surfaces require a separate liveness and profile slice"
+      ],
+      "net_growth": {
+        "status": "justified",
+        "rationale": "Small reusable legacy-root and retired-curator mutation guards prevent the obsolete directory, build spelling, and deleted feature from returning.",
+        "rejected_simpler_alternative": "Relying on successful compilation would permit forwarding headers, source-root exposure, and historical curator resurrection to recreate split ownership.",
+        "revisit": "Add later path-only moves to the generic legacy-root registry and replace duplicate build inventories after descriptor-driven generation proves parity."
+      },
+      "consumers": [
+        "skills consumers",
+        "descriptor validation CI",
+        "future canonical module-root slices"
+      ],
+      "blast_radius": "Production changes are physical source/header moves and include substitutions; public symbols, target membership, CLI/API/config/storage behavior, and runtime behavior remain unchanged.",
+      "independent_review": "Aimee technical-writer job 7477 approved the documentation set without edits on 2026-07-22; exact-final-diff roundtable review remains required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-25.md",
+        "docs/modules/skills.md",
+        "src/modules/skills/module.yaml",
+        "scripts/check_module_source_ownership.py",
+        "scripts/tests/test_check_module_source_ownership.py",
+        "scripts/check_background_skill_curator_absence.py",
+        "scripts/tests/test_check_background_skill_curator_absence.py"
+      ]
+    },
+    {
+      "slice": 26,
+      "state": "present_and_verified",
+      "disposition": "Moved the required gateway pipeline, policy, and delegate seam plus their public contracts into canonical gateway module ownership while preserving the optional-provider boundary.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": [
+          "three root gateway sources and three flat public headers replaced by one canonical module and include namespace"
+        ]
+      },
+      "fallbacks": [
+        "gateway context, pairing, and session-key placement remains pending a lifecycle audit",
+        "Telegram, webhook, ntfy, STT/TTS, and delivery providers remain outside the required core move",
+        "CMake does not yet compile the three gateway implementation files and this slice preserves that target membership"
+      ],
+      "net_growth": {
+        "status": "justified",
+        "rationale": "Three data entries extend the existing reusable ownership registry, and one existing baseline pattern now retains canonical module public APIs; no new checker or runtime subsystem is introduced.",
+        "rejected_simpler_alternative": "Compilation alone would allow flat forwarding headers, retired root sources, and legacy object paths to recreate split ownership.",
+        "revisit": "Audit the remaining gateway lifecycle and provider families independently before assigning or moving them."
+      },
+      "consumers": [
+        "gateway ingress and delegate consumers",
+        "descriptor validation CI",
+        "future gateway provider-isolation slices"
+      ],
+      "blast_radius": "Production changes are physical source/header moves and include substitutions; public APIs, targets, visibility, stage order, configuration, storage, and runtime behavior remain unchanged.",
+      "independent_review": "Aimee technical-writer job 7686 approved the revised documentation set on 2026-07-22; exact-final-diff roundtable review remains required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-26.md",
+        "docs/modules/gateway.md",
+        "src/modules/gateway/module.yaml",
+        "scripts/check_module_source_ownership.py",
+        "scripts/tests/test_check_module_source_ownership.py",
+        "scripts/refactor_baselines.py",
+        "scripts/tests/test_refactor_baselines.py"
+      ]
+    },
+    {
+      "slice": 30,
+      "state": "present_and_verified",
+      "disposition": "Moved four externally consumed required-core MCP/ACP headers into the canonical protocols include namespace, completed module-local descriptor ownership, and removed broad implementation include roots without changing protocol behavior or build membership.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": [
+          "four MCP/ACP public contracts now have one canonical include path",
+          "two protocol implementation include roots were replaced by one public include root"
+        ]
+      },
+      "fallbacks": [
+        "server_mcp, cli_mcp_serve, outbound cli_acp, and MCP persistence remain outside physical protocols ownership pending focused composition and data-boundary slices",
+        "Make and CMake retain separate source inventories until descriptor-driven generation"
+      ],
+      "net_growth": {
+        "status": "justified",
+        "rationale": "The existing descriptor and header-layout validators gain generic nested-namespace coverage; no new checker, forwarding header, runtime subsystem, or public helper API is introduced.",
+        "rejected_simpler_alternative": "Leaving broad implementation roots or promoting a private registration helper would preserve split ownership and expose more API than production consumers require.",
+        "revisit": "Move the deferred protocol composition and persistence families only after their caller, lifecycle, wire, and data contracts are independently inventoried."
+      },
+      "consumers": [
+        "MCP client and registry consumers",
+        "MCP server composition",
+        "ACP CLI composition",
+        "descriptor and module-header CI"
+      ],
+      "blast_radius": "Production changes are physical public-header moves and include substitutions; symbols, wire framing, CLI names, routes, runtime defaults, persistence, source inputs, and target object membership remain unchanged.",
+      "independent_review": "Aimee technical-writer job 10340 approved the module documentation; exact-final-diff roundtable approval remains required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-30.md",
+        "docs/modules/protocols.md",
+        "src/modules/protocols/module.yaml",
+        "scripts/check_module_header_layout.py",
+        "scripts/tests/test_check_module_header_layout.py",
+        "scripts/tests/test_validate_module_descriptors.py"
+      ]
+    },
+    {
+      "slice": 31,
+      "state": "present_and_verified",
+      "disposition": "Completed required-core IR module-local ownership after proving both production sources ship with non-test consumers and recording narrower test-support API cleanup candidates.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "translation remains independently incomplete",
+        "aimee_ir_request_equal and aimee_ir_metrics_reset remain test-support exports",
+        "aimee_ir_response_reasoning currently has only test callers"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Marking IR complete from filesystem enumeration alone would hide whether its sources ship or self-consume only; combining translation would weaken the independently green dependency boundary.",
+        "revisit": "Review the three symbol-level candidates in a focused public/test API cleanup, and complete translation as a separate graph-ordered slice."
+      },
+      "consumers": [
+        "IR maintainers",
+        "translation",
+        "memory",
+        "delegates",
+        "server and POSIX runtimes",
+        "future descriptor-generated builds"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, runtime, or wire behavior changes; descriptor validation gains IR-specific missing-source, planted-source/header, and missing-document failures.",
+      "independent_review": "Technical-writer review and exact-final-diff roundtable approval are required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-31.md",
+        "docs/modules/ir.md",
+        "src/modules/ir/module.yaml",
+        "scripts/tests/test_validate_module_descriptors.py"
+      ]
+    },
+    {
+      "slice": 32,
+      "state": "present_and_verified",
+      "disposition": "Completed required-core translation module-local ownership after proving every source contains a shipping path and separating seven test-only adapter helpers as explicit cleanup or activation candidates.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "legacy serve, shadow, and direct wire translators remain outside module ownership pending parity-backed separation",
+        "seven intended buffered-egress or Bedrock-streaming helpers currently have test callers only"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Filesystem enumeration alone would hide test-only exported helpers, while deleting them inside a metadata slice would skip compatibility and readiness decisions.",
+        "revisit": "Audit each test-only helper family for focused activation, privatization, or deletion, and separate legacy translators only after parity evidence."
+      },
+      "consumers": [
+        "translation maintainers",
+        "IR serve and shadow",
+        "agent runtimes",
+        "KB Bedrock egress",
+        "protocols",
+        "future descriptor-generated builds"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, runtime, or wire behavior changes; descriptor validation gains translation source-family, planted-file, and missing-document failures.",
+      "independent_review": "Technical-writer review and exact-final-diff roundtable approval are required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-32.md",
+        "docs/modules/translation.md",
+        "src/modules/translation/module.yaml",
+        "scripts/tests/test_validate_module_descriptors.py"
+      ]
+    },
+    {
+      "slice": 33,
+      "state": "present_and_verified",
+      "disposition": "Completed the validator-enforced required-core skills module-root ownership domain after proving all three sources have shipping consumers, recording the two canonical public headers and two direct tests, and separating four test-facing public declarations as focused API or activation cleanup candidates.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "Make and CMake retain separate source inventories until descriptor-driven generation",
+        "skill_trigger_matches_content and skill_name_is_valid remain public test contracts despite internal production use",
+        "skill_record_activation and skill_metrics remain unwired telemetry exports pending activation-or-deletion review"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Filesystem enumeration alone would hide whether the three sources ship and whether their public surface contains self-tested-only features.",
+        "revisit": "Privatize test-facing helpers where possible and either wire or delete activation telemetry in a focused behavior and compatibility slice."
+      },
+      "consumers": [
+        "skill CLI and server surfaces",
+        "delegates",
+        "session briefing",
+        "guardrails",
+        "protocol adapters",
+        "future descriptor-generated builds"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, stored data, or runtime behavior changes; descriptor validation gains skills-specific missing-source, planted-source/header, and missing-document failures.",
+      "independent_review": "The slice decision roundtable approved the bounded ownership-completion plan without findings; technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-33.md",
+        "docs/modules/skills.md",
+        "src/modules/skills/module.yaml",
+        "scripts/tests/test_validate_module_descriptors.py"
+      ]
+    },
+    {
+      "slice": 34,
+      "state": "present_and_verified",
+      "disposition": "Completed the validator-enforced required-core audit module-root ownership domain after proving all four sources have shipping Make consumers, recording the four canonical public headers and four direct tests, and documenting the narrower existing CMake membership and test-facing API candidates.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "CMake retains its pre-existing action-and-ledger-only audit source membership while Make ships the full server WORM store and the chain source used for canonical KB row hashing",
+        "Make and CMake remain separately maintained build inventories",
+        "nine test-facing, embedding, verification, or internal helper exports remain pending focused compatibility review"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Filesystem enumeration alone would hide the CMake capability gap, the shared KB row-hash consumer, and public helpers whose tests do not establish external production use.",
+        "revisit": "Resolve CMake WORM capability intentionally, then privatize, activate, or delete test-facing and module-internal exports in a focused API slice."
+      },
+      "consumers": [
+        "guardrails and execution policy",
+        "audit CLI and server management",
+        "trajectory export",
+        "KB vault operations",
+        "DB2 PostgreSQL WORM storage",
+        "future descriptor-generated builds"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains audit-specific missing-source, planted-source/header, and missing-document failures.",
+      "independent_review": "The decision roundtable required the exact diff, concrete Make/CMake membership, enumerated API candidates, and named mutations before approval; technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-34.md",
+        "docs/modules/audit.md",
+        "src/modules/audit/module.yaml",
+        "scripts/tests/test_validate_module_descriptors.py"
+      ]
+    },
+    {
+      "slice": 35,
+      "state": "present_and_verified",
+      "disposition": "Completed the validator-enforced required-core module-runtime module-root ownership domain after confirming both sources are listed in the Make and CMake core source sets and locally compiling the Make build, recording the two canonical public headers and the single direct test, separating producer-facing extension ABI from host-side readers, and documenting the CMake test-registration gap and the typed-registry liveness gaps. CMake compilation remains pending the required pull-request CMake job.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "CMake registers no module-runtime test target, so the declared pre-LLM hook test executes only in the Make suite; the concrete follow-up target is CTest executing that test",
+        "Make and CMake remain separately maintained build inventories",
+        "producer-facing extension ABI including plugin_chook_register_pre_llm and the plugin_ctx_t register_* callbacks has no host-side caller and remains pending a focused extension-compatibility review",
+        "plugin_memory_providers and plugin_context_engines are never written because the loader routes registration through its own memory and context-engine bridges, and plugin_slash_commands is written but never read outside tests"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Filesystem enumeration alone would hide the CMake test-registration gap, the plugin-loader-owned complementary coverage of extension.c, and the difference between exported extension ABI awaiting a producer and genuinely dead code.",
+        "revisit": "Register the module-runtime test in CMake, then align or retire the unwritten registry bridges and decide the producer-facing export surface in a focused extension-compatibility slice."
+      },
+      "consumers": [
+        "plugin-loader",
+        "server agent runtime pre-LLM path",
+        "plugin CLI",
+        "MCP tool projection",
+        "future descriptor-generated builds"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains module-runtime-specific missing-source, planted-source/header, and missing-document failures plus a latch-cleared failure across every complete descriptor.",
+      "independent_review": "The decision roundtable approved the ownership-only structure and required one correction: the producer-facing pre-LLM registration surface must not be described as unreachable in production, because a dynamically loaded extension can call the exported API. The correction is applied in the module and validation documents; technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-35.md",
+        "docs/modules/module-runtime.md",
+        "src/modules/module-runtime/module.yaml",
+        "scripts/tests/test_validate_module_descriptors.py"
+      ]
+    },
+    {
+      "slice": 36,
+      "state": "present_and_verified",
+      "disposition": "Completed the validator-enforced ownership domain for plugin-loader, the first optional default-off module to take the latch, after confirming both build systems gate and compile both sources symmetrically, recording the two canonical public headers and two direct tests, enumerating exports with no tracked production caller outside the module and two with no tracked-tree caller at all, and separating feature gating from ownership for the command-layer and server-layer adapters.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "Neither plugin test is registered with CTest, so Make's registration is the only tracked build registration that runs them; the concrete follow-up target is CTest executing both tests in an enabled profile",
+        "Make and CMake remain separately maintained build inventories",
+        "plugin_load_all_registered and plugin_loader_set_install_prefix have no caller in the tracked tree but remain declared public exports, so removal or rewiring stays pending an API and ABI compatibility decision",
+        "the plugin_load_all_registered header comment still references plugin_collect_delegate_backends, removed by the ABI and loader split in #1722",
+        "plugin_registry_path, plugin_registry_save, plugin_load_and_register, plugin_tool_conflicts_with_builtin, and plugin_registry_get remain exported despite having no tracked production caller outside the module, the last two having only the focused test as a tracked external caller",
+        "cmd_plugin.c, server_plugin.c, and the dashboard, MCP, and config adapters remain unowned by any descriptor as broader layer-ownership debt"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Filesystem enumeration alone would hide the CMake test-registration gap, the superseded second registration entry point and its stale header comment, and the difference between an export with no tracked-tree caller and one that is provably unused by every consumer.",
+        "revisit": "Register both plugin tests in CMake, then decide the fate of the two uncalled entry points, the stale header comment, and the five exports with no tracked production caller outside the module in a focused API and ABI slice."
+      },
+      "consumers": [
+        "guarded Runtime startup",
+        "plugin CLI",
+        "plugin management HTTP and dashboard routes",
+        "MCP tool projection",
+        "hook aggregation",
+        "future descriptor-generated builds"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains plugin-loader-specific missing-source, planted-source/header, missing-document, and cleared-latch failures, all independent of AIMEE_WITH_PLUGIN_LOADER.",
+      "independent_review": "The decision roundtable approved the ownership-only structure on the first optional module and required two narrowings: absence of tracked-tree callers must not be stated as absence of callers or as proof the exports are not ABI, and the removed helper must be described as absent from the current tree rather than as never having existed. Both are applied, and the repository history establishing the #1722 removal was audited. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-36.md",
+        "scripts/tests/test_validate_module_descriptors.py"
+      ]
+    },
+    {
+      "slice": 37,
+      "state": "present_and_verified",
+      "disposition": "Corrected a factual error merged by slices 35 and 36, which claimed CMake registered no test target for module-runtime or plugin-loader because the audit read only the top-level CMakeLists.txt and missed src/tests/CMakeLists.txt, and supplemented the corrected prose with a derived control that pins the per-test build-file registration of every descriptor-declared test to a reviewed baseline.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "This entry supersedes the slice 35 fallback claiming CMake registers no module-runtime test target: src/tests/CMakeLists.txt registers test_plugin_c_hook as a CTest case, so module-runtime has no test-registration debt",
+        "This entry supersedes the slice 36 fallback claiming neither plugin test is registered with CTest: test_plugin_loader is registered and only test_plugin is not, so the remaining debt is one test rather than two",
+        "The historical slice 35 and 36 entries are left intact so the record still shows what each slice asserted when it was reviewed and merged",
+        "test_plugin remains the only descriptor-declared test of a latched module that CTest does not register",
+        "test_audit_action and test_audit_ledger are registered with CTest but not with Make, the inverse asymmetry already recorded by slice 34"
+      ],
+      "net_growth": {
+        "status": "justified",
+        "rationale": "A prose correction alone cannot prevent the same audit error from recurring, so the slice adds one derived checker, its failure-mode tests, and a generated baseline.",
+        "rejected_simpler_alternative": "Editing the documents and leaving registration facts to future manual greps would repeat the exact mistake that produced the error, since the miss was reading one build file instead of two.",
+        "revisit": "Fold the baseline into descriptor-generated build profiles once those become authoritative, and delete it if registration is then derived rather than pinned."
+      },
+      "consumers": [
+        "module-inventory CI",
+        "future ownership slices asserting build and test membership",
+        "maintainers reading the slice 35 and 36 records"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; module-inventory CI gains a registration-drift failure and its failure-mode tests.",
+      "independent_review": "The slice decision roundtable required that the correction ship separately from the gateway latch, that a regression control be derived from src/tests/CMakeLists.txt rather than the correction resting on prose, and that the merged slice 35 and 36 ledger entries be superseded rather than rewritten in place. All three are applied; technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "scripts/check_module_test_registration.py",
+        "scripts/tests/test_check_module_test_registration.py",
+        "tests/baselines/refactor/module-test-registration.json",
+        "docs/validation/core-modularization-slice-35.md",
+        "docs/validation/core-modularization-slice-36.md"
+      ]
+    },
+    {
+      "slice": 38,
+      "state": "present_and_verified",
+      "disposition": "Completed the validator-enforced required-core gateway module-root ownership domain after confirming Make compiles all three sources while no CMake target compiles any of them by the documented thin-client policy, recording the three canonical public headers and three direct tests, separating the src/modules/gateway orchestration module from the identically named src/gateway delivery binary, and enumerating the single export with no tracked-tree caller outside tests.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "No CMake target compiles the three gateway sources, which follows from CMakeLists.txt building only the aimee thin client plus the unit-test suite after the server, kb, gateway and webchat targets were removed for source-list drift; this is an intentional profile boundary rather than debt",
+        "CMake's aimee-agent library includes posix/agent_runtime.c, which calls gateway_delegate symbols that no CMake target compiles, so that archive is not self-contained with respect to gateway symbols; green CI shows no currently registered CTest binary pulls that object in a way that leaves the gateway symbols unresolved, and the inference was not reproduced locally because cmake was unavailable",
+        "CTest registers none of the three declared gateway tests, an audited condition consistent with the module being outside the thin-client profile though not derivable from it, since CMake owns a unit-test suite of its own",
+        "gateway_policy_is_denied_tool has no tracked-tree caller outside the focused test and remains a privatization or deletion candidate pending an API compatibility decision",
+        "src/tests/test_anthropic_http.c defines its own gateway_policy_pin_model stub, so that binary does not exercise the module implementation",
+        "src/gateway, the aimee-gateway delivery binary, remains unowned by any descriptor as broader layer-ownership debt",
+        "the .claude/hooks subagent-block tooling still references gateway_policy_strip_tools by its pre-move src/gateway_policy.c path"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Filesystem enumeration alone would hide the intentional CMake profile boundary, would confuse the identically named src/gateway delivery binary and its test-name prefix with this module, and would not separate the profile boundary from the latent aimee-agent dependency-closure gap.",
+        "revisit": "Decide the aimee-agent dependency closure if a CMake-built consumer ever pulls posix/agent_runtime.c, then resolve gateway_policy_is_denied_tool and assign an owner to src/gateway in a later layer-ownership slice."
+      },
+      "consumers": [
+        "server Anthropic and OpenAI ingress",
+        "posix agent runtime delegate loop",
+        "server compute",
+        "governance response stage",
+        "future descriptor-generated builds"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains gateway-specific missing-source, planted-source/header, missing-document, and cleared-latch failures, all independent of any build profile.",
+      "independent_review": "The decision roundtable approved the ownership-only structure and required that the intentional CMake thin-client boundary not be collapsed with the latent aimee-agent dependency-closure gap, and that the latter be labeled an inference from source lists plus green CI rather than a reproduced result. Both are applied; technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-38.md",
+        "docs/modules/gateway.md",
+        "src/modules/gateway/module.yaml",
+        "scripts/tests/test_validate_module_descriptors.py"
+      ]
+    },
+    {
+      "slice": 39,
+      "state": "present_and_verified",
+      "disposition": "Closed the vacuous-latch hole by refusing ownership_complete on a module root that holds no source and no private header, where set equality would hold trivially, and registered the eight descriptors currently in that state together with the implementation locations their own canonical documents name.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "Eight descriptors remain unmigrated with an empty module root; the guard prevents them being marked complete but does not schedule their migration",
+        "control-web and runtime-web have canonical documents that name no implementation location at all, so migrating either begins by locating the code",
+        "execution-policy, routing and tools are each named across three or more directories and are decomposition questions rather than file moves",
+        "The register records locations named by module documents, not audited ownership assignments",
+        "Nine further descriptors have module-local files that no descriptor declares and are tracked separately as declaration-then-latch work"
+      ],
+      "net_growth": {
+        "status": "justified",
+        "rationale": "The slice adds one validator rule, its mutation tests, and a tracking document; without the rule a single docs field stands between an unmigrated module and an assertion that it is complete.",
+        "rejected_simpler_alternative": "Relying on the existing canonical-document requirement to block empty-root latching was rejected: it blocks by accident rather than by intent, and it would stop blocking the moment a descriptor declared its document.",
+        "revisit": "Delete the register when its last row is migrated; revisit the guard only if a module is designed that genuinely owns no module-local C, in which case extend the completeness domain rather than weaken the rule."
+      },
+      "consumers": [
+        "descriptor-envelope CI",
+        "future migration and declaration slices",
+        "maintainers reading the descriptor graph against the real source layout"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains an empty-domain refusal exercised against all eight unmigrated descriptors.",
+      "independent_review": "The scoping roundtable required the guard be unconditional rather than offering an opt-out for a hypothetical header-only module, required its message to read as not-migrated rather than broken, required the unmigrated set be given a tracked record rather than the guard alone, and required that authoring previously-undeclared ownership claims be split from latching them so an audit never reviews declarations it just wrote. All four are applied; technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-class-a-migration.md",
+        "scripts/validate_module_descriptors.py",
+        "scripts/tests/test_validate_module_descriptors.py",
+        "docs/modules/module-runtime.md"
+      ]
+    },
+    {
+      "slice": 40,
+      "state": "present_and_verified",
+      "disposition": "Declared the governance descriptor's sources, private header, test, and document without setting ownership_complete, as the declaration half of the declaration-then-latch split the scoping roundtable required for modules with module-local files no descriptor declares, and confirmed the single source is live production code with a clean build membership.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "The descriptor now declares the response-governance stage alone; the OIDC, identity, policy-distribution and console surfaces the canonical document describes remain distributed across kb, DB2, management and console layers and are not yet module-local",
+        "ownership_complete is deliberately left unset so the follow-up latch slice reviews declarations reviewed on their own first",
+        "CMake compiles no governance source under any target of its own, the same intentional thin-client profile boundary recorded for gateway",
+        "The two weak governance symbols in ir_ingress_stubs.c are deliberate test stubs, not a second implementation"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes descriptor metadata, the regenerated test-registration baseline, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Declaring and latching in one slice was rejected on roundtable direction: it would make the completeness audit review declarations authored in the same change, and doing that across the nine module class would lock in the wrong precedent.",
+        "revisit": "The follow-up latch slice sets ownership_complete, adds the governance latch mutation tests, and records the completeness audit; the broader governance plane remains a later migration."
+      },
+      "consumers": [
+        "server Anthropic and OpenAI response paths",
+        "descriptor-envelope and module-inventory CI",
+        "the governance latch slice",
+        "future Class B declaration slices"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; the descriptor gains declared ownership fields validated for existence and containment, and the test-registration baseline gains the governance row.",
+      "independent_review": "The scoping roundtable established that declaration and latching are separate acts and that governance is the correct first module because it is smallest and the first to carry a private header, exercising a validator path the nine latched modules never have. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-40.md",
+        "docs/modules/governance.md",
+        "src/modules/governance/module.yaml",
+        "tests/baselines/refactor/module-test-registration.json"
+      ]
+    },
+    {
+      "slice": 41,
+      "state": "present_and_verified",
+      "disposition": "Set ownership_complete on the governance descriptor against the declarations slice 40 authored and reviewed on their own, the latch half of the declaration-then-latch pair, and exercised the validator's private_headers set-equality enforcement against a real declared module for the first time.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "The latch asserts the descriptor covers the module root as it stands, one source and one private header, not that the OIDC, identity, policy-distribution and console governance surfaces have been migrated; those remain distributed across kb, DB2, management and console layers",
+        "CMake compiles no governance source under a target of its own, the same intentional thin-client profile boundary recorded for gateway"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Latching in the same slice that declared the files was rejected on roundtable direction, so the completeness audit reviews declarations merged on their own first rather than claims written in the same change.",
+        "revisit": "The remaining eight Class B modules follow the same declaration-then-latch pair; the broader governance plane remains a later migration that will extend these declarations."
+      },
+      "consumers": [
+        "descriptor-envelope and module-inventory CI",
+        "the remaining Class B declaration and latch slices",
+        "future descriptor-generated builds"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains governance-specific missing-source, missing-private-header, planted-source/header, missing-document, and cleared-latch failures, the first exercising private_headers set-equality on a real declared module.",
+      "independent_review": "The scoping roundtable required declaration and latching be separate acts; slice 40 declared and this slice latches. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-41.md",
+        "docs/modules/governance.md",
+        "src/modules/governance/module.yaml",
+        "scripts/tests/test_validate_module_descriptors.py"
+      ]
+    },
+    {
+      "slice": 42,
+      "state": "present_and_verified",
+      "disposition": "Declared the learning descriptor's four sources, four module-root private headers, two direct tests, and document without setting ownership_complete, the declaration half of the pair for the second Class B module, and settled two questions governance did not raise: a de-facto public header that stays privately declared, and a CMake source asymmetry.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "learning.h is a de-facto public contract included repository-wide including by aimee.h, but is declared private because it sits at the module root; promoting it under include/aimee/learning would move the file and rewrite every include site and is deferred to a separate header-layout slice",
+        "CMake compiles three of the four sources and omits learning_bundle.c whose callers are entirely server/kb/db2/config-side, the same intentional thin-client boundary recorded for gateway and audit, not drift",
+        "test_learning_synth.c and test_learning_version.c carry the learning name but are KB tests of kb/kb_learning_synth.c and kb/kb_learning_version.c and are not claimed",
+        "DB2 learning persistence and the KB synthesis lane remain outside the module root as physical-ownership debt"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes descriptor metadata, the regenerated test-registration baseline, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Declaring learning.h as a public header was rejected because the layout checker requires public headers under the canonical include tree, which would force a file move and repository-wide include rewrites into an ownership-metadata slice.",
+        "revisit": "Slice 43 latches learning; a separate header-layout slice may relocate learning.h under the canonical include tree and declare it public."
+      },
+      "consumers": [
+        "cmd_learning and cmd_rules",
+        "server and KB learning routes",
+        "config and delegates layers",
+        "the learning latch slice",
+        "remaining Class B declaration slices"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; the descriptor gains declared ownership fields validated for existence and containment, and the test-registration baseline gains two learning rows.",
+      "independent_review": "The slice-decision roundtable confirmed all three scoping decisions: declare learning.h private with the public-contract tension recorded and relocation deferred, classify the synth and version tests as KB tests, and document the learning_bundle.c CMake omission as an intentional boundary. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-42.md",
+        "docs/modules/learning.md",
+        "src/modules/learning/module.yaml",
+        "tests/baselines/refactor/module-test-registration.json"
+      ]
+    },
+    {
+      "slice": 43,
+      "state": "present_and_verified",
+      "disposition": "Set ownership_complete on the learning descriptor against the declarations slice 42 authored and reviewed on their own, the latch half of the pair for the second Class B module, and exercised the sources and private_headers set-equality checks against a multi-element declared set for the first time.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "The latch asserts the descriptor covers the module root as it stands, four sources and four module-root headers, not that the DB2 persistence or KB synthesis lane have been moved into the module; those remain physical-ownership debt",
+        "learning.h stays declared private with its de-facto-public status recorded; relocation under the canonical include tree is a separate header-layout slice",
+        "CMake compiles three of the four sources and omits server/kb-only learning_bundle.c, the same intentional thin-client boundary recorded for gateway and audit"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Latching in the same slice that declared the files was rejected on roundtable direction, so the completeness audit reviews declarations merged on their own first rather than claims written in the same change.",
+        "revisit": "The remaining seven Class B modules follow the same declaration-then-latch pair; a separate header-layout slice may relocate learning.h and declare it public."
+      },
+      "consumers": [
+        "descriptor-envelope and module-inventory CI",
+        "the remaining Class B declaration and latch slices",
+        "future descriptor-generated builds"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains learning-specific missing-source, missing-private-header, planted-source/header, missing-document, and cleared-latch failures, the first exercising set-equality on a multi-element declared source and private-header set; the cleared-latch assertion is also converted from a hardcoded module list to a graph-derived scan, which retroactively restores coverage of governance and prevents future drift.",
+      "independent_review": "The slice-decision roundtable approved the declaration scope in slice 42; this slice adds only the completeness assertion. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-43.md",
+        "docs/modules/learning.md",
+        "src/modules/learning/module.yaml",
+        "scripts/tests/test_validate_module_descriptors.py"
+      ]
+    },
+    {
+      "slice": 44,
+      "state": "present_and_verified",
+      "disposition": "Declared the workspace descriptor's eleven sources, eleven module-root private headers, eleven direct tests, and document without setting ownership_complete, the declaration half of the pair for the third and largest Class B module so far, carving eleven module tests out of a twelve-target family and confirming three internal-only sources are live.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "CMake compiles four of the eleven sources, the thin-client-reachable subset, and omits seven server/runner-side units, the same intentional thin-client boundary recorded for gateway, audit, and learning; the required CMake jobs building the thin client green from the four-source set are the standing evidence the client closure does not reach the seven",
+        "workspace_provider_container.c, workspace_provider_detached.c, and workspace_runner_queue.c have no external includer but are live module-internal units selected through workspace_provider.h and workspace_runner_registry.h",
+        "test_workspace_memory.c carries the workspace name and links workspace.o but is a memory test of memory_auto_tag_workspace, defined in src/modules/memory/memory_core.c, and is not claimed",
+        "all eleven headers are declared private because none sits under a canonical include tree; workspace_provider.h is the dispatch interface with no paired source and cli_workspace_serve.c has no paired header"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes descriptor metadata, the regenerated test-registration baseline, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Claiming test_workspace_memory.c by its name, or flagging the three internal-only sources as dead, was rejected: the first is a memory test by subject and the second three are wired through the module's own provider and runner interfaces.",
+        "revisit": "Slice 45 latches workspace and makes the runner_queue-through-runner_registry wiring explicit in the completeness audit; a separate header-layout slice may relocate workspace headers under a canonical include tree."
+      },
+      "consumers": [
+        "server, posix, db2, and cmd workspace consumers",
+        "the client serve path",
+        "the workspace latch slice",
+        "remaining Class B declaration slices"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; the descriptor gains declared ownership fields validated for existence and containment, and the test-registration baseline gains eleven workspace rows.",
+      "independent_review": "The slice-decision roundtable confirmed all three scoping decisions: exclude test_workspace_memory.c as a memory test, treat the three internal-only sources as live module-owned, and document the seven-source CMake omission as an intentional thin-client boundary. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-44.md",
+        "docs/modules/workspace.md",
+        "src/modules/workspace/module.yaml",
+        "tests/baselines/refactor/module-test-registration.json"
+      ]
+    },
+    {
+      "slice": 45,
+      "state": "present_and_verified",
+      "disposition": "Set ownership_complete on the workspace descriptor against the declarations slice 44 authored and reviewed on their own, the latch half of the pair for the third and largest Class B module, and exercised the sources and private_headers set-equality checks against an eleven-element declared set, the largest in the program.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "The latch asserts the descriptor covers the module root as it stands, eleven sources and eleven module-root headers, not that the compatibility worktree declarations in guardrails.h or adjacent workspace-touching code outside the module root have been moved in",
+        "CMake compiles four of the eleven sources and omits seven server/runner-side units, the same intentional thin-client boundary recorded for gateway, audit, and learning",
+        "workspace_runner_queue.c is reachable in production through workspace_runner_registry.h, which includes workspace_runner_queue.h and has external callers in the runner and serve paths"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Latching in the same slice that declared the files was rejected on roundtable direction, so the completeness audit reviews declarations merged on their own first rather than claims written in the same change.",
+        "revisit": "The remaining six Class B modules follow the same declaration-then-latch pair; a separate header-layout slice may relocate workspace headers under a canonical include tree."
+      },
+      "consumers": [
+        "descriptor-envelope and module-inventory CI",
+        "the remaining Class B declaration and latch slices",
+        "future descriptor-generated builds"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains workspace-specific missing-source, missing-private-header, planted-source/header, missing-document, and cleared-latch failures, the first exercising set-equality on an eleven-element declared source and private-header set.",
+      "independent_review": "The slice-decision roundtable approved the declaration scope in slice 44 and carried the runner-queue wiring evidence forward to this slice; this slice adds only the completeness assertion and that evidence. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-45.md",
+        "docs/modules/workspace.md",
+        "src/modules/workspace/module.yaml",
+        "scripts/tests/test_validate_module_descriptors.py"
+      ]
+    },
+    {
+      "slice": 46,
+      "state": "present_and_verified",
+      "disposition": "Declared the vault descriptor's twelve sources, thirteen module-root private headers, eleven direct tests, and document without setting ownership_complete, the declaration half of the pair for the fourth and most test-classification-heavy Class B module, resolving seventeen test files down to eleven module tests by subject and confirming every source is live including the always-compiled custody backends.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "CMake compiles six of the twelve sources, the thin-client-reachable subset, and omits the four custody backends, vault_hwm.c, and vault_server_key.c, the same intentional thin-client boundary recorded for gateway, audit, learning, and workspace",
+        "vault_hwm.c has no external includer but is live: vault_custody_kms.c calls vault_hwm_attest_verify; the tpm2 and pkcs11 custody sources are always compiled, switching between real impl and fail-closed stub by -D flag",
+        "Five test_vault_* files exercise other modules and are not claimed: audit (server_vault.c), seal and tpm2_stub (kb_vault_policy.c), pg (kb_main.c), bootstrap (server_vault_bootstrap.c)",
+        "test_vault_tpm2.c backs the WITH_TPM2-gated p7-tpm2-harness and is claimed on roundtable direction as the only test exercising the real vault_custody_tpm2.c",
+        "test_vault_custody_pkcs11.c is an orphan no target builds, left undeclared and flagged for a later cleanup; vault_hwm.c, vault_custody_mock.c, and vault_custody_pkcs11.c have no declared direct test and are covered transitively"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes descriptor metadata, the regenerated test-registration baseline, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Claiming the five other-module tests by their vault name, or the orphan pkcs11 test as coverage, was rejected: each of the five drives another module's source by subject, and an unbuilt orphan is not a coverage claim.",
+        "revisit": "Slice 47 latches vault; a later cleanup wires or deletes the orphan test_vault_custody_pkcs11.c, and a separate header-layout slice may relocate vault headers under a canonical include tree."
+      },
+      "consumers": [
+        "server, kb, db2 credential and custody consumers",
+        "the vault latch slice",
+        "remaining Class B declaration slices"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; the descriptor gains declared ownership fields validated for existence and containment, and the test-registration baseline gains eleven vault rows.",
+      "independent_review": "The slice-decision roundtable confirmed the subject-over-name exclusion of the five other-module tests, directed that the orphan pkcs11 test stay undeclared and flagged, and directed that the WITH_TPM2-gated tpm2 harness be declared as the only test of the real tpm2 custody source. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-46.md",
+        "docs/modules/vault.md",
+        "src/modules/vault/module.yaml",
+        "tests/baselines/refactor/module-test-registration.json"
+      ]
+    },
+    {
+      "slice": 47,
+      "state": "present_and_verified",
+      "disposition": "Set ownership_complete on the vault descriptor against the declarations slice 46 authored and reviewed on their own, the latch half of the pair for the fourth Class B module, and exercised the private_headers set-equality check against a thirteen-element set that includes the unpaired vault_internal.h backend-seam header.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "The latch asserts the descriptor covers the module root as it stands, twelve sources and thirteen module-root headers, not that the server, KB, or DB2 vault code outside the module root has been moved in",
+        "CMake compiles six of the twelve sources and omits the four custody backends, vault_hwm.c, and vault_server_key.c, the same intentional thin-client boundary recorded for gateway, audit, learning, and workspace",
+        "test_vault_custody_pkcs11.c remains an orphan no target builds, flagged for a later cleanup"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Latching in the same slice that declared the files was rejected on roundtable direction, so the completeness audit reviews declarations merged on their own first rather than claims written in the same change.",
+        "revisit": "The remaining five Class B modules follow the same declaration-then-latch pair; a later cleanup wires or deletes the orphan pkcs11 test, and a separate header-layout slice may relocate vault headers under a canonical include tree."
+      },
+      "consumers": [
+        "descriptor-envelope and module-inventory CI",
+        "the remaining Class B declaration and latch slices",
+        "future descriptor-generated builds"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains vault-specific missing-source, missing-private-header, planted-source/header, missing-document, and cleared-latch failures, the first exercising set-equality on a thirteen-element header set that includes an unpaired backend-seam header.",
+      "independent_review": "The slice-decision roundtable approved the declaration scope in slice 46, including the subject-over-name test exclusions and the tpm2-harness claim; this slice adds only the completeness assertion. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-47.md",
+        "docs/modules/vault.md",
+        "src/modules/vault/module.yaml",
+        "scripts/tests/test_validate_module_descriptors.py"
+      ]
+    },
+    {
+      "slice": 48,
+      "state": "present_and_verified",
+      "disposition": "Declared the config descriptor's fifteen sources, seven module-root private headers, four direct tests, and document without setting ownership_complete, the declaration half of the pair for the fifth Class B module, a required-core and heavily depended-upon module with a clean structure and no orphan or cross-module test ambiguity.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "CMake compiles twelve of the fifteen sources and omits config_fields.c, config_mode.c, and config_server_api.c whose callers are cmd/server/TLS-side, the same intentional thin-client boundary recorded for gateway, audit, learning, workspace, and vault",
+        "config_fields.h is declared private per the current layout but is a cross-cutting get/set allowlist reached by cmd and server layers, a public-header candidate for a future header-layout slice",
+        "config_internal.h is the internal seam header with no paired source, and nine section-parser sources declare through config.h, config_sections.h, and config_internal.h rather than a paired header",
+        "test_config_economizer.c is a config test of the economizer setting resolution, not an economizer-module test; adjacent test_cmd_config.c and frontend settings tests are not claimed"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes descriptor metadata, the regenerated test-registration baseline, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Excluding test_config_economizer.c by its name, or fixing the CMake three-source omission as drift, was rejected: the test's subject is config's economizer-setting resolution and links the core bundle, and the omission is the established thin-client boundary evidenced by green thin-client CMake builds.",
+        "revisit": "Slice 49 latches config; a separate header-layout slice may promote config_fields.h to a canonical public header given its cross-module reach."
+      },
+      "consumers": [
+        "nearly every module that declares config as a dependency",
+        "the cmd and server config surfaces",
+        "the config latch slice",
+        "remaining Class B declaration slices"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; the descriptor gains declared ownership fields validated for existence and containment, and the test-registration baseline gains four config rows.",
+      "independent_review": "The slice-decision roundtable confirmed all three scoping decisions with no findings: test_config_economizer.c is a config test by subject and link evidence, the CMake three-source omission is an intentional thin-client boundary, and config_fields.h and config_internal.h are correctly declared private with the config_fields.h promotion noted for a future slice. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-48.md",
+        "docs/modules/config.md",
+        "src/modules/config/module.yaml",
+        "tests/baselines/refactor/module-test-registration.json"
+      ]
+    },
+    {
+      "slice": 49,
+      "state": "present_and_verified",
+      "disposition": "Set ownership_complete on the config descriptor against the declarations slice 48 authored and reviewed on their own, the latch half of the pair for the fifth Class B module, exercising the source set-equality check against a fifteen-element declared set, the largest source set latched so far.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "The latch asserts the descriptor covers the module root as it stands, fifteen sources and seven module-root headers, not that the cmd/server/UI config-facing code outside the module root has been moved in",
+        "CMake compiles twelve of the fifteen sources and omits config_fields.c, config_mode.c, and config_server_api.c, the same intentional thin-client boundary recorded for gateway, audit, learning, workspace, and vault",
+        "config_fields.h remains declared private, a public-header candidate for a future header-layout slice"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Latching in the same slice that declared the files was rejected on roundtable direction, so the completeness audit reviews declarations merged on their own first rather than claims written in the same change.",
+        "revisit": "The remaining four Class B modules follow the same declaration-then-latch pair; a separate header-layout slice may promote config_fields.h to a canonical public header."
+      },
+      "consumers": [
+        "descriptor-envelope and module-inventory CI",
+        "the remaining Class B declaration and latch slices",
+        "future descriptor-generated builds"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains config-specific missing-source, missing-private-header, planted-source/header, missing-document, and cleared-latch failures, the first applied to a fifteen-element declared source set, the largest so far.",
+      "independent_review": "The slice-decision roundtable approved the declaration scope in slice 48 with no findings; this slice adds only the completeness assertion. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-49.md",
+        "docs/modules/config.md",
+        "src/modules/config/module.yaml",
+        "scripts/tests/test_validate_module_descriptors.py"
+      ]
+    },
+    {
+      "slice": 50,
+      "state": "present_and_verified",
+      "disposition": "Declared the git descriptor's twenty-six sources, eighteen module-root private headers, fourteen direct tests, and document without setting ownership_complete, the declaration half of the pair for the sixth and largest-by-file-count Class B module, keeping the ownership latch orthogonal to the separate git-core-contract governance.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "CMake compiles twelve of the twenty-six sources, the eight git_verify_* and four mcp_git_* the thin client reaches, and omits the fourteen credential/OAuth/ops/forge-vault/host/org-repos/PR-API sources, the same intentional thin-client boundary recorded for gateway, audit, learning, workspace, vault, and config",
+        "Three declared tests (test_git_oauth_device, test_git_oauth_gh, test_git_org_repos) are CTest-only, recorded make:false ctest:true, the inverse asymmetry audit records for its action and ledger tests",
+        "test_forge_app_token.c is excluded because its subject src/forge_app_token.c is a root-level non-module source; test_forge_credentials_live.c is excluded as a supplementary live integration harness whose source forge_credentials.c already has a unit test",
+        "git_verify_internal.h and mcp_git.h are unpaired seam/shared headers declared private; the git-core-contract proposal and its approval evidence are untouched"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes descriptor metadata, the regenerated test-registration baseline, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Claiming test_forge_app_token.c or test_forge_credentials_live.c by their forge name, or excluding the CTest-only oauth and org-repos tests because Make does not build them, was rejected: the first two exercise a non-module source or are supplementary integration, and the CTest-only three drive git-module sources.",
+        "revisit": "Slice 51 latches git; a separate header-layout slice may relocate git headers under a canonical include tree."
+      },
+      "consumers": [
+        "server, kb, cmd, and MCP git consumers",
+        "the git latch slice",
+        "remaining Class B declaration slices"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; the descriptor gains declared ownership fields validated for existence and containment, and the test-registration baseline gains fourteen git rows including three CTest-only rows.",
+      "independent_review": "The slice-decision roundtable confirmed all three scoping decisions and caught a header-count arithmetic error (sixteen paired plus two unpaired equals eighteen, not seventeen plus two), which is corrected in the written declaration. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-50.md",
+        "docs/modules/git.md",
+        "src/modules/git/module.yaml",
+        "tests/baselines/refactor/module-test-registration.json"
+      ]
+    },
+    {
+      "slice": 51,
+      "state": "present_and_verified",
+      "disposition": "Set ownership_complete on the git descriptor against the declarations slice 50 authored and reviewed on their own, the latch half of the pair for the sixth Class B module, exercising the source and private_headers set-equality checks against the largest declared sets in the program, twenty-six sources and eighteen headers.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "The latch asserts the descriptor covers the module root as it stands, twenty-six sources and eighteen headers, not that the root-level src/forge_app_token.c or the server/kb git-facing code outside the module root has been moved in",
+        "CMake compiles twelve of the twenty-six sources and omits the fourteen credential/OAuth/ops/forge-vault/host/org-repos/PR-API sources, the same intentional thin-client boundary recorded for gateway, audit, learning, workspace, vault, and config",
+        "The latch is independent of the git-core-contract governance, which bounds git's core capability rather than its file ownership and is untouched"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Latching in the same slice that declared the files was rejected on roundtable direction, so the completeness audit reviews declarations merged on their own first rather than claims written in the same change.",
+        "revisit": "The remaining three Class B modules follow the same declaration-then-latch pair; a separate header-layout slice may relocate git headers under a canonical include tree."
+      },
+      "consumers": [
+        "descriptor-envelope and module-inventory CI",
+        "the remaining Class B declaration and latch slices",
+        "future descriptor-generated builds"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains git-specific missing-source, missing-private-header, planted-source/header, missing-document, and cleared-latch failures against the largest declared sets in the program.",
+      "independent_review": "The slice-decision roundtable approved the declaration scope in slice 50 and caught the header-count arithmetic corrected there; this slice adds only the completeness assertion. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-51.md",
+        "docs/modules/git.md",
+        "src/modules/git/module.yaml",
+        "scripts/tests/test_validate_module_descriptors.py"
+      ]
+    },
+    {
+      "slice": 52,
+      "state": "present_and_verified",
+      "disposition": "Completed the delegates descriptor's source declaration by adding the twenty-four sources an earlier slice left undeclared, and expanded the declared tests from two to nineteen by subject, without setting ownership_complete; delegates is the only Class B module with a canonical public header tree and zero module-root headers, so it declares no private_headers.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "The descriptor declares no private_headers because the module root holds no header; an absent field is an empty declared set against an empty actual set, verified directly against the validator so the slice 53 latch does not rest on an untested convention",
+        "CMake compiles twenty-three of the twenty-seven sources and omits aimee_ir_rescue.c, delegate_ephemeral_ws.c, delegate_sandbox_image.c, and gw_orch_delegates.c, the server/kb-side units, the same intentional thin-client boundary recorded for gateway, audit, learning, workspace, vault, config, and git",
+        "Six adjacent test files are not claimed because their subject is another module: delegate_liveness (server/liveness.o), delegate_token_budget (server/agent_coord.o), delegate_ensemble (roundtable), gw_orch_workflows and gw_orchestration_seam (no delegates object), and panel_ir_contract (IR panel_result.h)",
+        "test_delegate_context_shed, test_delegate_dispatch_reliability, and test_delegate_handoff each link only delegate_prompt.o and together are that source's coverage; there is no test_delegate_prompt.c",
+        "The main durable delegate worker and HTTP/RPC orchestration remain in src/server/server_compute* as relocation debt outside the module root"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes descriptor metadata, the regenerated test-registration baseline, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Declaring only the twenty-four missing sources and leaving the test declaration at the earlier slice's two was rejected on roundtable direction: with all twenty-seven sources claimed, a two-test declaration would be a deliberate understatement of the module's real coverage even though tests sit outside set-equality.",
+        "revisit": "Slice 53 latches delegates; relocating the server-side delegate worker into the module would extend these declarations."
+      },
+      "consumers": [
+        "server compute delegate path",
+        "CLI delegate entry points",
+        "routing and the gateway orchestration seam",
+        "the delegates latch slice",
+        "remaining Class B declaration slices"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; the descriptor gains twenty-four source entries and seventeen test entries validated for existence and containment, and the test-registration baseline gains nineteen delegates rows.",
+      "independent_review": "The slice-decision roundtable confirmed all three scoping decisions: expand the tests to nineteen, treat the three delegate_prompt-only tests as that source's coverage, and omit the private_headers field for a module with zero module-root headers. It flagged that slice 53 should verify the latcher treats an absent field as evaluated-empty; that was verified against the validator before writing this slice. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-52.md",
+        "docs/modules/delegates.md",
+        "src/modules/delegates/module.yaml",
+        "tests/baselines/refactor/module-test-registration.json"
+      ]
+    },
+    {
+      "slice": 53,
+      "state": "present_and_verified",
+      "disposition": "Set ownership_complete on the delegates descriptor against the declarations slice 52 authored and reviewed on their own, the latch half of the pair for the seventh Class B module, and proved that an absent private_headers field enforces an empty set rather than skipping the role.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "The latch asserts the descriptor covers the module root as it stands, twenty-seven sources and no headers, not that the durable delegate worker in src/server/server_compute* or the root cmd_agent_delegate.c entry point have been moved in; the module document records those as relocation debt",
+        "CMake compiles twenty-three of the twenty-seven sources and omits the IR-rescue, ephemeral-workspace, sandbox-image, and gateway-orchestration units, the same intentional thin-client boundary recorded for the earlier modules",
+        "This is the first latched module with zero private headers and a canonical public header tree, so its private_headers role is enforced as an empty set rather than a declared list"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Latching in the same slice that declared the files was rejected on roundtable direction, so the completeness audit reviews declarations merged on their own first rather than claims written in the same change.",
+        "revisit": "The remaining two Class B modules follow the same declaration-then-latch pair; relocating the server-side delegate worker into the module would extend these declarations."
+      },
+      "consumers": [
+        "descriptor-envelope and module-inventory CI",
+        "the remaining Class B declaration and latch slices",
+        "future descriptor-generated builds"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains delegates-specific missing-source, planted-source, planted-header, missing-document, and cleared-latch failures, the planted-header case proving the absent private_headers field enforces emptiness.",
+      "independent_review": "The slice-decision roundtable approved the declaration scope in slice 52 and flagged that the latcher's treatment of an absent field should be verified; that was verified before slice 52 was written and is re-proven here by the planted-header mutation. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-53.md",
+        "docs/modules/delegates.md",
+        "src/modules/delegates/module.yaml",
+        "scripts/tests/test_validate_module_descriptors.py"
+      ]
+    },
+    {
+      "slice": 54,
+      "state": "present_and_verified",
+      "disposition": "Declared the workflows descriptor's thirty sources, twenty-four module-root private headers, thirty-three direct tests, and document without setting ownership_complete, the declaration half of the pair for the eighth and second-largest Class B module, and recorded that the wfe_ name prefix is shared with DB1 so future tests must be classified by linked object rather than name.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "The wfe_ prefix is shared with src/db1/wfe_store.c and src/db1/wfe_binding.c, so a test_wfe_* filename is not an ownership signal; three of the four exclusions exist because of that collision and future test_wfe_* files must be classified by which object their target links",
+        "Four candidates are excluded for linking no workflows object: test_wfe_binding (DB1 binding store), test_wfe_gate_apply and test_wfe_submitter (db1/wfe_store.o), and test_workflow_gate_caps (a route capability contract with no module object)",
+        "test_wfe_webapi.c is the most cross-cutting declared test, linking db1, config, and server objects alongside three workflows engine objects; it is claimed because cross-cutting has never been an exclusion criterion and excluding it would orphan the engine's HTTP boundary",
+        "CMake compiles twenty-four of the thirty sources and omits the six live, panel, forge, replay, and gateway-orchestration units that are server-side, the same intentional thin-client boundary recorded for the eight earlier modules",
+        "Every one of the twenty-four headers pairs with a source; six sources carry no paired header and declare through the paired ones"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes descriptor metadata, the regenerated test-registration baseline, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Classifying the test_wfe_* files by name was rejected because the prefix is shared with DB1; the linked-object criterion is what separates the three DB1 store and binding tests from the thirty-three workflows tests.",
+        "revisit": "Slice 55 latches workflows; the DB1 wfe_store and wfe_binding sources remain outside this module and will be declared when db1 is given a descriptor."
+      },
+      "consumers": [
+        "workflow intake, engine, and scheduler paths",
+        "the gateway orchestration seam",
+        "the workflows latch slice",
+        "the remaining memory Class B declaration slice"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; the descriptor gains declared ownership fields validated for existence and containment, and the test-registration baseline gains thirty-three workflows rows, eleven of which are CTest-registered as well as Make-registered.",
+      "independent_review": "The slice-decision roundtable confirmed all three scoping decisions, agreed test_wfe_webapi.c should be included under the linked-object criterion, and specifically endorsed recording the wfe_ prefix collision in the validation record so future slices do not re-derive the trap. It also flagged loose phrasing in the unpaired-source list, which is corrected with the exact six names. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-54.md",
+        "docs/modules/workflows.md",
+        "src/modules/workflows/module.yaml",
+        "tests/baselines/refactor/module-test-registration.json"
+      ]
+    },
+    {
+      "slice": 55,
+      "state": "present_and_verified",
+      "disposition": "Set ownership_complete on the workflows descriptor against the declarations slice 54 authored and reviewed on their own, the latch half of the pair for the eighth Class B module, and recorded that latching narrows but does not resolve the wfe_ name-prefix hazard shared with DB1.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "The latch asserts the descriptor covers the module root as it stands, thirty sources and twenty-four headers, not that DB1's wfe_store.c and wfe_binding.c or the server-side workflow route handlers have been moved in",
+        "Latching guarantees a new wfe_*.c or wfe_*.h in the module root must be declared, but says nothing about a new wfe_-named file under src/db1 and nothing about how a future test_wfe_*.c is attributed; test attribution remains a linked-object judgement surfaced by the test-registration baseline",
+        "CMake compiles twenty-four of the thirty sources and omits the six live, panel, forge, replay, and gateway-orchestration units that are server-side, the same intentional thin-client boundary recorded for the eight earlier modules"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Latching in the same slice that declared the files was rejected on roundtable direction, so the completeness audit reviews declarations merged on their own first rather than claims written in the same change.",
+        "revisit": "One Class B module remains, memory; DB1's wfe_store.c and wfe_binding.c will be declared when db1 is given a descriptor."
+      },
+      "consumers": [
+        "descriptor-envelope and module-inventory CI",
+        "the remaining memory declaration and latch slices",
+        "future descriptor-generated builds"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains workflows-specific missing-source, missing-private-header, planted-source/header, missing-document, and cleared-latch failures against the second-largest declared sets in the program.",
+      "independent_review": "The slice-decision roundtable approved the declaration scope in slice 54, endorsed recording the wfe_ prefix collision, and caught loose phrasing in the unpaired-source list corrected there; this slice adds only the completeness assertion. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-55.md",
+        "docs/modules/workflows.md",
+        "src/modules/workflows/module.yaml",
+        "scripts/tests/test_validate_module_descriptors.py"
+      ]
+    },
+    {
+      "slice": 56,
+      "state": "present_and_verified",
+      "disposition": "Declared the memory descriptor's thirty-two sources, twelve module-root private headers, sixteen direct tests, and document without setting ownership_complete, the declaration half of the pair for the ninth and final Class B module and the largest by source count, and repaired a validator fixture that had used memory as its example of an undeclared module.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "The memory name collides in two directions and a *memory* filename is not an ownership signal: DB1 owns a separate working-memory store at src/db1/wm.c tested by test_working_memory.c, and the root level owns the memory-interception harness at src/harness_memory_*.c tested by four test_harness_memory* files; neither family is claimed, nor are test_kb_client_memory.c or test_server_memory_benchmark.c",
+        "Five of the twelve headers carry no paired source, the highest unpaired count in the module graph: memory_assemble_util.h, memory_core_internal.h, memory_ontology.h, memory_platform.h, memory_rewrite_llm.h",
+        "CMake compiles nineteen of the thirty-two sources and omits the memory-core CRUD, search, tiers and scope family, extraction, the fact and PII gates, graph fusion, and the gateway stage, the same intentional thin-client boundary recorded for the eight earlier Class B modules",
+        "test_memory_embed_dim_guard.c is a memory-to-DB2 boundary test claimed on roundtable direction because the behaviour under test is memory's refusal to write a mismatched vector, not DB2's configuration",
+        "test_workspace_memory.c is claimed here because its subject memory_auto_tag_workspace is defined in memory_core.c, which is why slice 44 excluded it from workspace"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes descriptor metadata, the regenerated test-registration baseline, a validator-test fixture, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Repointing the stale ownership-report fixture at another named module was rejected because it would go stale again the moment that module is declared; the fixture now derives the undeclared set from the report itself.",
+        "revisit": "Slice 57 latches memory and completes the Class B programme; DB1's working-memory store and the root-level memory harness remain outside the module and will be declared when db1 and the root surface are given descriptors."
+      },
+      "consumers": [
+        "recall, assembly, and ranking paths across server and kb",
+        "the gateway memory stage",
+        "the memory latch slice",
+        "future descriptor-generated builds"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; the descriptor gains declared ownership fields validated for existence and containment, the test-registration baseline gains sixteen memory rows, and one validator fixture becomes graph-derived rather than naming a single module.",
+      "independent_review": "The slice-decision roundtable confirmed all three scoping decisions and required three documentation improvements, all applied: name test_memory_embed_dim_guard.c explicitly as a memory-to-DB2 boundary test rather than leaving it implicit, carry the slice 44 cross-reference for test_workspace_memory.c into the validation record, and record an explicit name-collision warning for DB1's working-memory store and the root-level harness as slice 54 did for the wfe_ prefix. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-56.md",
+        "docs/modules/memory.md",
+        "src/modules/memory/module.yaml",
+        "tests/baselines/refactor/module-test-registration.json"
+      ]
+    },
+    {
+      "slice": 57,
+      "state": "present_and_verified",
+      "disposition": "Set ownership_complete on the memory descriptor against the declarations slice 56 authored and reviewed on their own, completing the Class B programme: all nine descriptors whose module roots held undeclared implementation files now declare those roots exhaustively and latch them, leaving eighteen of the twenty-six descriptors latched.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": [
+        "The latch asserts the descriptor covers the module root as it stands, thirty-two sources and twelve headers, not that DB1's working-memory store, the root-level memory-interception harness, or the server and kb memory-facing code have been moved in",
+        "CMake compiles nineteen of the thirty-two sources, the same intentional thin-client boundary recorded for the eight earlier Class B modules",
+        "The eight remaining unlatched descriptors are exactly the Class A set with empty module roots, blocked by the ownership-empty-domain guard from slice 39; their remaining work is code migration, not declaration, and is tracked in the Class A migration register",
+        "Deferred follow-ups this programme recorded rather than absorbed remain open: the API and ABI cleanup candidates in plugin-loader, module-runtime, and gateway; the orphan test_vault_custody_pkcs11.c; the CTest registration of test_plugin; and the header-layout promotions of learning.h and config_fields.h"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Latching in the same slice that declared the files was rejected on roundtable direction throughout the programme, so every completeness audit reviewed declarations merged on their own first rather than claims written in the same change.",
+        "revisit": "The declaration-and-latch phase is finished; what remains is Class A code migration and the deferred API, ABI, test-registration, and header-layout follow-ups."
+      },
+      "consumers": [
+        "descriptor-envelope and module-inventory CI",
+        "future descriptor-generated builds",
+        "the Class A migration slices"
+      ],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains memory-specific missing-source, missing-private-header, planted-source/header, missing-document, and cleared-latch failures, the private-header case exercising one of the five unpaired headers.",
+      "independent_review": "The slice-decision roundtable approved the declaration scope in slice 56 and required three documentation improvements applied there; this slice adds only the completeness assertion. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-57.md",
+        "docs/modules/memory.md",
+        "src/modules/memory/module.yaml",
+        "scripts/tests/test_validate_module_descriptors.py"
+      ]
+    },
+    {
+      "slice": 58,
+      "state": "present_and_verified",
+      "disposition": "Migrated the cohesive agent/memory eval framework from the forbidden-named non-descriptor directory src/modules/agent_eval/ into src/modules/benchmarks/, giving the empty benchmarks descriptor its implementation and latching it as the first Class A code migration.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": [
+          "the four eval-framework sources and two headers gained their canonical benchmarks owner; the forbidden agent_eval directory name was eliminated"
+        ]
+      },
+      "fallbacks": [
+        "the agent_eval_ symbol prefix and agent_eval.h header filename are retained as the framework's API identity; a symbol rename is out of scope"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "A path-only relocation plus descriptor declaration and latch; no code, symbols, or behaviour changed.",
+        "rejected_simpler_alternative": "Renaming the descriptor id to agent_eval (zero file moves) was rejected because the roundtable-approved taxonomy forbids the agent-eval and evals names.",
+        "revisit": "The remaining seven Class A modules follow the same migrate-then-latch pattern; the empty-domain guard prevents an empty benchmarks root from being re-latched."
+      },
+      "consumers": [
+        "CLI and server eval/benchmark callers",
+        "the sixteen external agent_eval.h includers",
+        "Make and CMake build graphs"
+      ],
+      "blast_radius": "Restricted to the module relocation and build-path repointing; the flat -I swap keeps the sixteen include sites unchanged, and no other module's sources, symbols, or tests change.",
+      "independent_review": "Delegate review MiniMax-M3 job 12215 assessed the decomposition; the roundtable-approved proposal memory-learning-and-inference-boundaries.md mandates the benchmarks name.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-58-benchmarks-migration.md",
+        "docs/proposals/pending/memory-learning-and-inference-boundaries.md"
+      ]
+    },
+    {
+      "slice": 59,
+      "state": "present_and_verified",
+      "disposition": "Migrated the required tools module (core capability #18, tool dispatch): relocated the posix agent_tools* implementation family and the agent_tools.h contract from src/posix and src/headers into src/modules/tools/, and latched. The server-side turn-session slice (server/agent_tools.c) was left in place as a not-module-local implementation of the same contract.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": [
+          "the three agent_tools* sources, the private seam, and the cross-platform agent_tools.h contract gained their canonical tools owner under src/modules/tools/"
+        ]
+      },
+      "fallbacks": [
+        "server/agent_tools.c stays in the server implementing the turn/snapshot/toolset session-state slice of agent_tools.h, not module-local, mirroring memory's DB1/DB2 storage split; the agent_tools_ symbol prefix and header filenames are retained"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "A path relocation plus descriptor declaration and latch; no code, symbols, or behaviour changed.",
+        "rejected_simpler_alternative": "Moving server/agent_tools.c into the module too was rejected: it would collide with the posix agent_tools.c filename and pull server-side session orchestration into the dispatch module.",
+        "revisit": "Five Class A modules remain (control-web, execution-policy, kb-synthesis, response-composition, routing, runtime-web); execution-policy and routing are distributed decompositions, the web modules have no located source."
+      },
+      "consumers": [
+        "the server, posix, delegates, Windows client, and tests that include agent_tools.h",
+        "Make and CMake build graphs",
+        "server/agent_tools.c (session-state slice)"
+      ],
+      "blast_radius": "The relocation plus the -Imodules/tools addition (global in Make, six CMake include lists); the 30 agent_tools.h include sites are unchanged, and server/agent_tools.c and every other consumer are untouched beyond include resolution.",
+      "independent_review": "Self-reviewed under explicit operator authorization for self-review-only; the roundtable was unavailable this cycle (kimi quota-exhausted, MiniMax unresponsive). Validated on the .253 aimee-test container (Make + CMake).",
+      "evidence": [
+        "docs/validation/core-modularization-slice-59-tools-migration.md",
+        "docs/modules/tools.md"
+      ]
+    },
+    {
+      "slice": 60,
+      "state": "present_and_verified",
+      "disposition": "Migrated the required routing module (Class A #3): extracted the self-contained routing block (role dispatch, capability/tier selection, delegate pick, availability, route-block reasons, route filters; ~503 lines) from src/server/agent_config.c into src/modules/routing/routing.c and latched. The config/auth half of agent_config.c stays in the server.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": [
+          "the routing surface gained its canonical routing owner under src/modules/routing/routing.c; agent_config.c is reduced to config/auth"
+        ]
+      },
+      "fallbacks": [
+        "the routing contract stays in the shared src/headers/agent_config.h; routing.c implements it while the server implements the config/auth half, reached through the same header (memory/DB2 pattern); delegate_routing.c stays in the delegates module; routing has no module-private header"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "A code relocation (function block move) plus descriptor declaration and latch; no code, symbols, or behaviour changed. The linker enforces the partition.",
+        "rejected_simpler_alternative": "Splitting agent_config.h into a routing header was rejected as unnecessary churn across ~30 consumers; the shared contract with cross-module implementation is the established pattern.",
+        "revisit": "Four Class A modules remain plus execution-policy (highest-risk, agent_policy.c distributed across three modules); the web/IR modules have no located source."
+      },
+      "consumers": [
+        "every agent_route*/delegate_pick consumer (server, delegates, tests) via agent_config.h",
+        "Make and CMake build graphs",
+        "the config/auth half of agent_config.c"
+      ],
+      "blast_radius": "The routing block move plus adding routing.o next to agent_config.o in the source/object/test-link lists; the shared agent_config.h and its ~30 consumers are unchanged, and the config/auth code is untouched beyond the removed block.",
+      "independent_review": "Self-reviewed under explicit operator authorization for self-review-only; the roundtable was unavailable this cycle. Validated on the .253 aimee-test container (Make + CMake + routing test); the linker enforces partition correctness.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-60-routing-migration.md",
+        "docs/modules/routing.md"
+      ]
+    },
+    {
+      "slice": 61,
+      "state": "present_and_verified",
+      "disposition": "Migrated the required execution-policy module (Class A #4): extracted the tool-action policy decision (policy_load + policy_check_tool + g_policy_json, the contiguous /* Policy checking */ section) from src/server/agent_policy.c into src/modules/execution-policy/execution_policy.c and latched. Schema/argument validation (tool_validate), side-effect classification (tool_side_effect), and the trace/metrics/manifest half stay in agent_policy.c per the module boundary.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": [
+          "the policy-decision section gained its canonical execution-policy owner; agent_policy.c keeps validation, side-effect classification, and trace/metrics"
+        ]
+      },
+      "fallbacks": [
+        "a broad first extraction that pulled tool_validate and the schema-validation helpers into execution-policy was rejected on review as doc-violating and redone decision-only; the decision contract stays in the shared headers/agent_exec.h, which the module implements while the server implements the rest; guardrails pre_tool_check and gateway policing remain enforcement consumers; execution-policy has no module-private header"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "A code relocation (contiguous section move) plus descriptor declaration and latch; no code, symbols, or behaviour changed. nm confirms execution_policy.o defines policy_check_tool and not tool_validate/trace; the linker enforces the partition.",
+        "rejected_simpler_alternative": "Moving the whole agent_policy.c policy region (including tool_validate) was rejected: execution-policy.md assigns schema/argument validation to tools, not execution-policy.",
+        "revisit": "Consolidating the distributed enforcement points (guardrails pre_tool_check, gateway policing) onto this decision engine is future work. Four Class A modules remain; kb-synthesis is a large KB-coupled extraction, the web/IR modules have no located source."
+      },
+      "consumers": [
+        "external callers of policy_check_tool/policy_load via agent_exec.h",
+        "guardrails pre_tool_check and gateway policing (decision consumers)",
+        "Make and CMake build graphs"
+      ],
+      "blast_radius": "The policy-section move plus adding execution_policy.o next to agent_policy.o in the source/object/test-link lists; the shared agent_exec.h and its consumers are unchanged, and the validation/trace half of agent_policy.c is untouched beyond the removed section.",
+      "independent_review": "Self-reviewed under explicit operator authorization for self-review-only (roundtable unavailable this cycle); the broad-extraction error was caught by self-review against execution-policy.md. Validated on the .253 aimee-test container (Make + CMake); nm + the linker confirm the partition.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-61-execution-policy-migration.md",
+        "docs/modules/execution-policy.md"
+      ]
+    },
+    {
+      "slice": 62,
+      "state": "present_and_verified",
+      "disposition": "Migrated the optional kb-synthesis module (Class A #5, final movable): relocated the KB curator family (21 sources + 16 headers) from src/kb/ into src/modules/kb-synthesis/ and latched. The curator is KB-tier — it includes KB-internal service headers — so it compiles with the KB build flags into $(OBJDIR)/kb/modules/kb-synthesis/ and links only into aimee-kb.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": [
+          "the 21 curator sources and 16 headers gained their canonical kb-synthesis owner under src/modules/kb-synthesis/"
+        ]
+      },
+      "fallbacks": [
+        "curator sources moved out of KB_SRCS into a KB_SYNTHESIS_SRCS/OBJS pair so they keep KB build flags and the kb obj tree; -Imodules/kb-synthesis added to the global C_FLAGS for the in-KB and server/CLI consumers; kb_curator_provider.c (core adapter) and the DB2 artifact/link storage APIs stay their owners'; config_kb_curator.c (config module) is untouched"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "A path relocation (whole family) plus descriptor declaration and latch; no code, symbols, or behaviour changed. The linker enforces the partition; the KB obj tree keeps the KB compile flags.",
+        "rejected_simpler_alternative": "Keeping curator in KB_SRCS with a modules/ path was rejected: KB_OBJS would path it to the generic (server-flags) obj tree, losing the KB build defines curator needs.",
+        "revisit": "Only the three no-source modules remain (control-web, runtime-web, response-composition); their code does not exist yet and they are correctly kept unlatched."
+      },
+      "consumers": [
+        "aimee-kb (kb.c, cmd_kb.c, curator config/profile)",
+        "server/CLI binaries that include curator config/profile headers",
+        "the 22 test_curator_* tests",
+        "Make and CMake build graphs"
+      ],
+      "blast_radius": "The 37-file family move, a KB_SYNTHESIS_SRCS/OBJS pair wired into the aimee-kb/negation-eval/blast-radius link targets and ALL_SRCS/ALL_OBJS, one global -I addition, 20 test obj-ref repoints, and 7 CMake source repoints; the KB-internal service headers and the DB2 storage APIs are unchanged.",
+      "independent_review": "Self-reviewed under explicit operator authorization for self-review-only, informed by the panel review that flagged kb-synthesis as the hardest remainder. Validated on the .253 aimee-test container (aimee-kb build KB-tier + curator tests); the linker enforces the partition.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-62-kb-synthesis-migration.md",
+        "docs/modules/kb-synthesis.md"
+      ]
+    }
+  ]
+}

@@ -49,9 +49,9 @@ nodes:
       src: freeze.out
     params:
       # explicit reviewer persona, validator-checked disjoint from the rt_gate
-      # panel below (anti-rubber-stamp); bounded re-delegation via max_iters.
+      # panel below (anti-rubber-stamp); bounded re-delegation via max_rounds.
       reviewer: contrarian
-      max_iters: 3
+      max_rounds: 3
     on_pass: rt_gate
     on_fail: split
   # The primary leads the roundtable; wfe_gate_decide owns pass/fail (fail-closed
@@ -61,6 +61,7 @@ nodes:
     in:
       src: freeze.out
     params:
+      roundtable: implementation
       panel:
         required:
           - security

@@ -147,6 +147,17 @@ static provider_catalog_entry_t *find_entry_locked(const char *agent_name)
 }
 
 /* Recompute health state from streak + last_success timestamp. */
+/* Cooldown for this entry: base, doubled per breaker trip beyond the first,
+ * capped. See provider_catalog_cooldown_seconds() for why trips and not streak. */
+static int cooldown_for_locked(const provider_catalog_entry_t *e)
+{
+   int cooldown = PROVIDER_DOWN_COOLDOWN_SECONDS;
+   for (int i = 0; e && i < e->breaker_trips && cooldown < PROVIDER_DOWN_COOLDOWN_MAX_SECONDS; i++)
+      cooldown *= 2;
+   return cooldown > PROVIDER_DOWN_COOLDOWN_MAX_SECONDS ? PROVIDER_DOWN_COOLDOWN_MAX_SECONDS
+                                                        : cooldown;
+}
+
 static void recompute_health(provider_catalog_entry_t *e)
 {
    time_t now = time(NULL);
@@ -159,7 +170,7 @@ static void recompute_health(provider_catalog_entry_t *e)
        * streak is preserved: a probe failure (record_failure refreshes
        * last_failure) snaps it straight back to DOWN for another cooldown,
        * while a probe success clears the streak. */
-      if (e->last_failure > 0 && difftime(now, e->last_failure) >= PROVIDER_DOWN_COOLDOWN_SECONDS)
+      if (e->last_failure > 0 && difftime(now, e->last_failure) >= cooldown_for_locked(e))
       {
          e->health = CATALOG_HEALTH_DEGRADED;
          return;
@@ -205,6 +216,7 @@ void provider_catalog_record_success(const char *agent_name)
    if (e)
    {
       e->failure_streak = 0;
+      e->breaker_trips = 0;
       e->last_success = time(NULL);
       recompute_health(e);
    }
@@ -223,22 +235,69 @@ void provider_catalog_record_failure(const char *agent_name, const char *failure
    provider_catalog_entry_t *e = find_entry_locked(agent_name);
    if (e)
    {
+      /* Count a breaker TRIP only for a genuine half-open probe re-failure - a
+       * failure arriving while the breaker had already opened (streak >= 3) and
+       * then HALF-OPENED to DEGRADED after its cooldown. That is real evidence
+       * the provider is still broken, and it lengthens the next cooldown.
+       *
+       * Both clauses are needed, because DEGRADED has TWO sources in
+       * recompute_health: the half-open transition from DOWN (streak >= 3), and
+       * an ordinary early streak of 1-2 failures. The streak >= 3 clause excludes
+       * the latter - a second failure while merely warming up must not be counted
+       * as a breaker trip and start backing off before the breaker has even
+       * opened. The burst of concurrent failures that first opens the breaker is
+       * also excluded: those arrive while HEALTHY or already DOWN, so counting
+       * them would let parallelism, not elapsed time, drive the backoff.
+       *
+       * Under concurrency this can under-count - two probes half-open, both fail,
+       * the first flips DEGRADED->DOWN so the second sees DOWN and is not counted.
+       * That is acceptable: it is one trip per half-open CYCLE, and real cycles
+       * are serialised by the wall-clock cooldown, so the backoff still grows
+       * monotonically across them. Over-counting, which would over-penalise, is
+       * what the gates prevent. */
+      if (e->health == CATALOG_HEALTH_DEGRADED && e->failure_streak >= 3)
+         e->breaker_trips++;
       e->failure_streak++;
       e->last_failure = time(NULL);
       if (failure_class && failure_class[0])
          snprintf(e->last_failure_class, sizeof(e->last_failure_class), "%s", failure_class);
       recompute_health(e);
 
-      if (e->health == CATALOG_HEALTH_DEGRADED || e->health == CATALOG_HEALTH_DOWN)
-         aimee_log(LOG_WARN, "provider_catalog", "agent '%s' health → %s (streak %d, class: %s)",
-                   agent_name, catalog_health_label(e->health), e->failure_streak,
-                   e->last_failure_class[0] ? e->last_failure_class : "unknown");
+      if (e->health == CATALOG_HEALTH_DOWN)
+         /* DOWN excludes the agent from routing, so this is the line an operator
+          * needs to correlate a quorum/availability problem to a specific seat.
+          * Carry the class, the trip-driven cooldown and when the next probe can
+          * half-open it, so a persistent outage reads as a growing cooldown
+          * rather than a silent 60s heartbeat. */
+         aimee_log(LOG_WARN, "provider_catalog",
+                   "agent '%s' health → DOWN (streak %d, trips %d, class: %s, "
+                   "cooldown %ds, next probe in <= %ds)",
+                   agent_name, e->failure_streak, e->breaker_trips,
+                   e->last_failure_class[0] ? e->last_failure_class : "unknown",
+                   cooldown_for_locked(e), cooldown_for_locked(e));
+      else if (e->health == CATALOG_HEALTH_DEGRADED)
+         aimee_log(LOG_WARN, "provider_catalog",
+                   "agent '%s' health → DEGRADED (streak %d, class: %s)", agent_name,
+                   e->failure_streak, e->last_failure_class[0] ? e->last_failure_class : "unknown");
       else
          aimee_log(LOG_DEBUG, "provider_catalog", "agent '%s' failure streak %d → %s", agent_name,
                    e->failure_streak, catalog_health_label(e->health));
    }
 
    pthread_mutex_unlock(&g_cat.lock);
+}
+
+int provider_catalog_cooldown_seconds(const char *agent_name)
+{
+   if (!agent_name || !agent_name[0])
+      return PROVIDER_DOWN_COOLDOWN_SECONDS;
+
+   pthread_once(&g_cat_once, catalog_once_init);
+   pthread_mutex_lock(&g_cat.lock);
+   provider_catalog_entry_t *e = find_entry_locked(agent_name);
+   int cd = e ? cooldown_for_locked(e) : PROVIDER_DOWN_COOLDOWN_SECONDS;
+   pthread_mutex_unlock(&g_cat.lock);
+   return cd;
 }
 
 catalog_health_t provider_catalog_get_health(const char *agent_name)

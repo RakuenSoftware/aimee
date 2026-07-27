@@ -14,7 +14,7 @@ coverage-report
 /aimee-server
 /aimee-kb
 /aimee-gateway
-/aimee-webchat
+/aimee-runtime-web
 /aimee-lean
 /aimee-server-lean
 /aimee-kb-lean

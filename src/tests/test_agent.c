@@ -12,6 +12,7 @@
 #include "db1.h"
 #include "agent.h"
 #include "agent_config.h"
+#include <aimee/delegates/delegate_role.h>
 #include "agent_tools.h"
 #include "anchor_snapshot.h"
 #include <arpa/inet.h>
@@ -30,17 +31,58 @@ void test_agent_route_with_caps_honors_tools_enabled(void);
 void test_agent_route_with_caps_honors_context_override(void);
 void test_tools_enabled_capability_default(void);
 void test_agent_default_primary_skips_disabled(void);
+void test_catalog_provider_separates_vendor_from_wire(void);
+void test_catalog_provider_explicit_round_trip(void);
+void test_unknown_context_window_does_not_pass_min_context(void);
+void test_context_window_table_covers_live_vendors(void);
+void test_catalog_provider_host_matching_is_label_anchored(void);
+void test_catalog_provider_namespaced_model_ids(void);
+void test_moonshot_heuristic_scopes_reasoning_to_known_families(void);
+void test_catalog_provider_maps_cli_provider_names(void);
+void test_primary_turn_reaches_default_above_min_tier(void);
+void test_primary_turn_default_must_still_satisfy_caps(void);
+void test_catalog_provider_endpoint_parser_edges(void);
+void test_request_max_tokens_clamped_to_context_window(void);
+void test_registration_prefix(void);
+void test_registration_grouping(void);
+void test_declared_roles_route_precisely(void);
+void test_scope_ceiling_matches_work_to_capability(void);
+void test_escalation_target_selection(void);
+void test_prefer_local_orders_but_never_bypasses(void);
+void test_prefer_healthy_over_degraded(void);
+void test_provider_general_registration_expands(void);
+void test_provider_general_preserves_explicit_catalog_provider(void);
+void test_provider_general_overflow_rejects_config(void);
+void test_provider_general_auto_uses_curated_allowlist(void);
+void test_provider_general_auto_requires_curated_set(void);
+void test_provider_general_rejects_malformed_registrations(void);
+void test_capability_routing_flag_behaviour_diff(void);
+void test_capability_gate_escalates_instead_of_failing(void);
+void test_no_escalation_when_capability_routing_disabled(void);
+void test_escalation_respects_policy_and_health_gates(void);
 
 /* Defined in test_agent_responses.c (split out to keep this file under the
  * 2000-line hard limit); called from main() below. */
 void test_responses_parser_keeps_all_output_text_parts(void);
 void test_responses_parser_accumulates_output_text_deltas(void);
 void test_responses_object_folds_in_delta_text(void);
+void test_responses_object_folds_in_streamed_function_call(void);
+void test_responses_object_keeps_existing_function_call(void);
 void test_responses_object_keeps_existing_text(void);
 void test_ir_parse_responses_tool_call(void);
 void test_ir_parse_responses_text_only(void);
 void test_responses_parser_uses_output_text_done(void);
 void test_responses_parser_separates_message_items(void);
+
+/* Strong override of the weak delegation_active_id() (agent_tools_dispatch.c) so a
+ * test can simulate running inside a delegation. NULL => the trusted primary
+ * session. server_compute_mailbox.o (the real strong definition) is not linked
+ * into unit-test-agent, so this override is unambiguous. */
+static const char *g_test_delegation_id;
+const char *delegation_active_id(void)
+{
+   return g_test_delegation_id;
+}
 
 /* --- Expose tool functions for testing via redeclaration --- */
 char *tool_bash(const char *command, int timeout_ms);
@@ -361,8 +403,13 @@ static void test_agent_route(void)
    cfg.agents[1].cost_tier = 1;
    cfg.agents[1].enabled = 1;
    cfg.agents[1].tools_enabled = 1;
-   strcpy(cfg.agents[1].exec_roles[0], "custom_exec");
-   cfg.agents[1].exec_role_count = 1;
+   /* Selection is declared-role only: a role must appear in `roles` (or `all`).
+    * exec_roles govern tool exposure, not who is routed, so a role-less agent is
+    * routable for nothing and a role reaches only the agents that declare it. */
+   strcpy(cfg.agents[0].roles[0], "execute");
+   cfg.agents[0].role_count = 1;
+   strcpy(cfg.agents[1].roles[0], "custom_exec");
+   cfg.agents[1].role_count = 1;
    assert(agent_route(&cfg, "execute") == &cfg.agents[0]);
    assert(agent_route(&cfg, "custom_exec") == &cfg.agents[1]);
    assert(agent_route(&cfg, "no_role") == NULL);
@@ -995,13 +1042,32 @@ static void test_local_synth_not_masked_by_tmux_codex(void)
    assert(routed_a != synth);
 
    /* Case B — the fix: codex in its correct HTTP (chatgpt) shape. No tmux backend
-    * at the cheapest tier, so the local synth (the default agent) is routable. */
+    * at the cheapest tier, so the local synth is ROUTABLE again.
+    *
+    * Both peers now sit at tier 0, and agent_pick_balanced() round-robins them
+    * on a PROCESS-WIDE static cursor. Asserting a single call returns synth was
+    * therefore an assertion about cursor parity, not about masking — it passed
+    * only because of how many routing calls happened to run before it, and any
+    * new test elsewhere in the binary could flip it. The property that actually
+    * matters is that synth is reachable at all, so sample the rotation. */
    codex->backend[0] = '\0';
    codex->cli_kind[0] = '\0';
    codex->cli_cmd[0] = '\0';
    snprintf(codex->provider, sizeof(codex->provider), "chatgpt");
    snprintf(codex->auth_type, sizeof(codex->auth_type), "codex-oauth");
-   assert(agent_route(&cfg, "execute") == synth);
+   int saw_synth = 0, saw_codex = 0;
+   for (int i = 0; i < 8; i++)
+   {
+      agent_t *r = agent_route(&cfg, "execute");
+      if (r == synth)
+         saw_synth = 1;
+      else if (r == codex)
+         saw_codex = 1;
+      else
+         assert(0 && "routed to an unexpected agent");
+   }
+   assert(saw_synth); /* the masking bug would make this impossible */
+   assert(saw_codex); /* and both peers share the tier, so both must appear */
 
    if (old_path)
    {
@@ -1105,17 +1171,34 @@ static void test_agent_is_exec_role(void)
    agent_t agent;
    memset(&agent, 0, sizeof(agent));
 
-   /* No explicit exec_roles: use defaults */
+   /* No explicit exec_roles: use defaults. CANONICAL names only — `test` and
+    * `implement` used to be listed here but are ALIASES (delegate_role.c maps
+    * them to validate/code), and every routing path canonicalises before this is
+    * reached (cmd_agent_delegate.c, server_compute.c), so they could never match
+    * and were dead entries. */
    assert(agent_is_exec_role(&agent, "deploy") == 1);
    assert(agent_is_exec_role(&agent, "validate") == 1);
-   assert(agent_is_exec_role(&agent, "test") == 1);
    assert(agent_is_exec_role(&agent, "diagnose") == 1);
    assert(agent_is_exec_role(&agent, "execute") == 1);
    assert(agent_is_exec_role(&agent, "code") == 1);
    assert(agent_is_exec_role(&agent, "refactor") == 1);
    assert(agent_is_exec_role(&agent, "draft") == 1);
-   assert(agent_is_exec_role(&agent, "implement") == 1);
+   /* Aliases are NOT exec roles; they resolve to their canonical form first. */
+   assert(agent_is_exec_role(&agent, "test") == 0);
+   assert(agent_is_exec_role(&agent, "implement") == 0);
+   assert(strcmp(delegate_role_canonicalize("test"), "validate") == 0);
+   assert(strcmp(delegate_role_canonicalize("implement"), "code") == 0);
    assert(agent_is_exec_role(&agent, "summarize") == 0);
+   /* Novel-mode checks the novel persona genuinely delegates stay. */
+   assert(agent_is_exec_role(&agent, "continuity") == 1);
+   assert(agent_is_exec_role(&agent, "beat-check") == 1);
+   /* Songwriter/novel WRITE work was culled: no persona could reach it. */
+   assert(agent_is_exec_role(&agent, "lyric") == 0);
+   assert(agent_is_exec_role(&agent, "prosody") == 0);
+   assert(agent_is_exec_role(&agent, "prose") == 0);
+   assert(agent_is_exec_role(&agent, "line-edit") == 0);
+   assert(agent_is_exec_role(&agent, "hook") == 0);
+   assert(agent_is_exec_role(&agent, "songform") == 0);
 
    /* With explicit exec_roles */
    strcpy(agent.exec_roles[0], "deploy");
@@ -1163,6 +1246,29 @@ static void test_tool_bash(void)
 
    result = tool_bash("yes x | head -c 65536", 5000);
    assert(result && strstr(result, "\"exit_code\":0") != NULL);
+   free(result);
+}
+
+/* Containment: a DELEGATE (untrusted model) must never run a shell UNSANDBOXED on
+ * the aimee-server host — that host is uid 0 with the docker socket mounted, so an
+ * unsandboxed command is a host-root escalation. The test config's sandbox mode is
+ * OFF (default), so tool_bash would otherwise fork on the host; with a delegation
+ * active it must refuse instead. The primary session (no delegation) still runs. */
+static void test_tool_bash_delegate_unsandboxed_refused(void)
+{
+   g_test_delegation_id = "test-deleg";
+   char *result = tool_bash("echo escalated", 5000);
+   assert(result != NULL);
+   assert(strstr(result, "refused") != NULL);   /* fail-closed */
+   assert(strstr(result, "escalated") == NULL); /* the command did NOT run */
+   assert(strstr(result, "\"exit_code\":-1") != NULL);
+   free(result);
+
+   /* The trusted primary (operator) session still runs on the host. */
+   g_test_delegation_id = NULL;
+   result = tool_bash("echo primary-ok", 5000);
+   assert(result != NULL);
+   assert(strstr(result, "primary-ok") != NULL);
    free(result);
 }
 
@@ -2354,9 +2460,19 @@ static void test_dispatch_tool_call(void)
    assert(strstr(result, "error") == NULL);
    free(result);
 
+   /* execute_script is write-capable and therefore requires the managed
+    * worktree context that a real delegate turn supplies. */
+   char script_root[] = "/tmp/aimee-script-dispatch.XXXXXX";
+   assert(mkdtemp(script_root) != NULL);
+   char script_cwd[MAX_PATH_LEN];
+   assert(snprintf(script_cwd, sizeof(script_cwd), "%s/.aimee/worktrees/unit-test-agent/main",
+                   script_root) < (int)sizeof(script_cwd));
+   assert(platform_mkdir_p(script_cwd, 0700) == 0 || access(script_cwd, F_OK) == 0);
+   run_cmd_set_cwd(script_cwd);
    result = dispatch_tool_call(
        "execute_script",
        "{\"language\":\"python\",\"body\":\"print('script_dispatch')\",\"timeout_secs\":5}", 5000);
+   run_cmd_set_cwd(NULL);
    assert(result != NULL);
    json = parse_json_or_die(result);
    assert(strstr(cJSON_GetObjectItem(json, "stdout")->valuestring, "script_dispatch") != NULL);
@@ -2378,11 +2494,14 @@ static void test_dispatch_tool_call(void)
    free(result);
 
    /* Write file error includes recovery hint */
-   result = dispatch_tool_call("write_file", "{\"path\":\"/nonexistent/dir/file\"}", 5000);
+   run_cmd_set_cwd(script_cwd);
+   result = dispatch_tool_call("write_file", "{\"path\":\"nonexistent/dir/file\"}", 5000);
+   run_cmd_set_cwd(NULL);
    assert(result != NULL);
    if (strstr(result, "error"))
       assert(strstr(result, "Recovery:") != NULL);
    free(result);
+   platform_test_rmrf(script_root);
 
    /* Missing parameter */
    result = dispatch_tool_call("bash", "{}", 5000);
@@ -3164,6 +3283,35 @@ int main(void)
    test_agent_config_provider_cli_roundtrip();
    test_tools_enabled_capability_default();
    test_agent_default_primary_skips_disabled();
+   test_catalog_provider_separates_vendor_from_wire();
+   test_catalog_provider_explicit_round_trip();
+   test_unknown_context_window_does_not_pass_min_context();
+   test_context_window_table_covers_live_vendors();
+   test_catalog_provider_host_matching_is_label_anchored();
+   test_catalog_provider_namespaced_model_ids();
+   test_moonshot_heuristic_scopes_reasoning_to_known_families();
+   test_catalog_provider_maps_cli_provider_names();
+   test_primary_turn_reaches_default_above_min_tier();
+   test_primary_turn_default_must_still_satisfy_caps();
+   test_catalog_provider_endpoint_parser_edges();
+   test_request_max_tokens_clamped_to_context_window();
+   test_registration_prefix();
+   test_registration_grouping();
+   test_declared_roles_route_precisely();
+   test_scope_ceiling_matches_work_to_capability();
+   test_escalation_target_selection();
+   test_prefer_local_orders_but_never_bypasses();
+   test_prefer_healthy_over_degraded();
+   test_provider_general_registration_expands();
+   test_provider_general_preserves_explicit_catalog_provider();
+   test_provider_general_overflow_rejects_config();
+   test_provider_general_auto_uses_curated_allowlist();
+   test_provider_general_auto_requires_curated_set();
+   test_provider_general_rejects_malformed_registrations();
+   test_capability_routing_flag_behaviour_diff();
+   test_capability_gate_escalates_instead_of_failing();
+   test_no_escalation_when_capability_routing_disabled();
+   test_escalation_respects_policy_and_health_gates();
    test_agent_config_cache_detects_same_mtime_rewrite();
    test_agent_adapter_registry();
    test_agent_config_deletion_guard();
@@ -3174,6 +3322,8 @@ int main(void)
    test_responses_parser_keeps_all_output_text_parts();
    test_responses_parser_accumulates_output_text_deltas();
    test_responses_object_folds_in_delta_text();
+   test_responses_object_folds_in_streamed_function_call();
+   test_responses_object_keeps_existing_function_call();
    test_responses_object_keeps_existing_text();
    test_ir_parse_responses_tool_call();
    test_ir_parse_responses_text_only();
@@ -3181,6 +3331,7 @@ int main(void)
    test_responses_parser_separates_message_items();
    test_agent_is_exec_role();
    test_tool_bash();
+   test_tool_bash_delegate_unsandboxed_refused();
    test_detached_skips_worktree_rewrite();
    test_tool_read_file();
    test_tool_write_file();

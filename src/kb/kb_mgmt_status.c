@@ -54,8 +54,11 @@ static int status_shape(const kb_mgmt_status_t *s)
           printable(s->caller_issuer, 1, 600) && hex_lower(s->caller_serial_norm, 1, 128) &&
           hex_lower(s->caller_fingerprint, 64, 64) && ascii_token(s->target_server_id, 1, 127) &&
           hex_lower(s->target_mgmt_fingerprint, 64, 64) &&
-          strcmp(s->purpose, "management.health.v1") == 0 && s->issued_at > 0 &&
-          s->expires_at > s->issued_at && s->expires_at - s->issued_at <= 10 &&
+          (!strcmp(s->purpose, "management.health.v1") ||
+           !strcmp(s->purpose, "management.action.v1") ||
+           !strcmp(s->purpose, "management.read.v1") ||
+           !strcmp(s->purpose, "management.read.config.v1")) &&
+          s->issued_at > 0 && s->expires_at > s->issued_at && s->expires_at - s->issued_at <= 10 &&
           s->revocation_generation >= 1;
 }
 
@@ -389,4 +392,133 @@ int kb_mgmt_status_validate(const kb_mgmt_status_t *s, uint64_t now, uint64_t hi
        (now > s->expires_at && now - s->expires_at > 2) || s->revocation_generation < high_water)
       return -1;
    return 0;
+}
+
+#define CHECKPOINT_DOMAIN "management.action.checkpoint.v1"
+
+static int checkpoint_shape(const kb_mgmt_checkpoint_t *c)
+{
+   return c && c->version == 1 && hex_lower(c->request_sha256, 64, 64) &&
+          (c->revoked == 0 || c->revoked == 1) && c->generation >= 1 && c->issued_at > 0 &&
+          c->issued_at <= UINT64_MAX - 5 && c->expires_at == c->issued_at + 5 &&
+          ascii_token(c->key_id, 1, 64);
+}
+
+int kb_mgmt_checkpoint_transcript(const kb_mgmt_checkpoint_t *c, unsigned char *out, size_t cap,
+                                  size_t *out_len)
+{
+   if (!checkpoint_shape(c) || !out || !out_len)
+      return -1;
+   size_t o = 0;
+   if (put_bytes(out, cap, &o, CHECKPOINT_DOMAIN, sizeof(CHECKPOINT_DOMAIN) - 1) ||
+       put_u32(out, cap, &o, c->version) ||
+       put_bytes(out, cap, &o, c->request_sha256, strlen(c->request_sha256)) ||
+       put_u32(out, cap, &o, (uint32_t)c->revoked) || put_u64(out, cap, &o, c->generation) ||
+       put_u64(out, cap, &o, c->issued_at) || put_u64(out, cap, &o, c->expires_at) ||
+       put_bytes(out, cap, &o, c->key_id, strlen(c->key_id)))
+      return -1;
+   *out_len = o;
+   return 0;
+}
+
+static int checkpoint_crypt(kb_mgmt_checkpoint_t *c, const unsigned char key[32], int sign)
+{
+   unsigned char msg[512];
+   size_t msg_len = 0, sig_len = sizeof(c->signature);
+   if (!c || !key || kb_mgmt_checkpoint_transcript(c, msg, sizeof(msg), &msg_len))
+      return -1;
+   EVP_PKEY *pkey = sign ? EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519, NULL, key, 32)
+                         : EVP_PKEY_new_raw_public_key(EVP_PKEY_ED25519, NULL, key, 32);
+   EVP_MD_CTX *ctx = pkey ? EVP_MD_CTX_new() : NULL;
+   int ok = sign ? (ctx && EVP_DigestSignInit(ctx, NULL, NULL, NULL, pkey) == 1 &&
+                    EVP_DigestSign(ctx, c->signature, &sig_len, msg, msg_len) == 1 && sig_len == 64)
+                 : (ctx && EVP_DigestVerifyInit(ctx, NULL, NULL, NULL, pkey) == 1 &&
+                    EVP_DigestVerify(ctx, c->signature, 64, msg, msg_len) == 1);
+   EVP_MD_CTX_free(ctx);
+   EVP_PKEY_free(pkey);
+   return ok ? 0 : -1;
+}
+
+int kb_mgmt_checkpoint_sign(kb_mgmt_checkpoint_t *c, const unsigned char key[32])
+{
+   return checkpoint_crypt(c, key, 1);
+}
+
+int kb_mgmt_checkpoint_verify_signature(const kb_mgmt_checkpoint_t *c, const unsigned char key[32])
+{
+   return checkpoint_crypt((kb_mgmt_checkpoint_t *)c, key, 0);
+}
+
+int kb_mgmt_checkpoint_to_json(const kb_mgmt_checkpoint_t *c, char *out, size_t cap)
+{
+   char sig[96];
+   if (!checkpoint_shape(c) || !out || !cap ||
+       b64_encode(c->signature, sizeof(c->signature), sig, sizeof(sig)))
+      return -1;
+   int n = snprintf(out, cap,
+                    "{\"version\":\"1\",\"domain\":\"%s\",\"request_sha256\":\"%s\","
+                    "\"revoked\":%s,\"generation\":\"%llu\",\"issued_at\":\"%llu\","
+                    "\"expires_at\":\"%llu\",\"key_id\":\"%s\",\"signature\":\"%s\"}",
+                    CHECKPOINT_DOMAIN, c->request_sha256, c->revoked ? "true" : "false",
+                    (unsigned long long)c->generation, (unsigned long long)c->issued_at,
+                    (unsigned long long)c->expires_at, c->key_id, sig);
+   return n > 0 && (size_t)n < cap ? 0 : -1;
+}
+
+int kb_mgmt_checkpoint_from_json(const char *raw, kb_mgmt_checkpoint_t *c)
+{
+   static const char *names[] = {"version",    "domain",     "request_sha256",
+                                 "revoked",    "generation", "issued_at",
+                                 "expires_at", "key_id",     "signature"};
+   if (!raw || !c || strnlen(raw, KB_MGMT_CHECKPOINT_JSON_MAX + 1) > KB_MGMT_CHECKPOINT_JSON_MAX)
+      return -1;
+   const char *end = NULL;
+   cJSON *j = cJSON_ParseWithOpts(raw, &end, 1);
+   const cJSON *p = cJSON_IsObject(j) ? j->child : NULL;
+   for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
+   {
+      if (!p || !p->string || strcmp(p->string, names[i]))
+         goto bad;
+      p = p->next;
+   }
+   if (p || !end || *end)
+      goto bad;
+   const char *version = json_string(j, names[0]), *domain = json_string(j, names[1]);
+   const char *digest = json_string(j, names[2]), *generation = json_string(j, names[4]);
+   const char *issued = json_string(j, names[5]), *expires = json_string(j, names[6]);
+   const char *key_id = json_string(j, names[7]), *sig = json_string(j, names[8]);
+   const cJSON *revoked = cJSON_GetObjectItemCaseSensitive(j, names[3]);
+   uint64_t v = 0;
+   memset(c, 0, sizeof(*c));
+   if (!version || !domain || strcmp(domain, CHECKPOINT_DOMAIN) || !digest || !generation ||
+       !issued || !expires || !key_id || !sig ||
+       (!cJSON_IsTrue(revoked) && !cJSON_IsFalse(revoked)) || u64_decimal(version, &v) || v != 1 ||
+       copy_string(c->request_sha256, sizeof(c->request_sha256), digest) ||
+       u64_decimal(generation, &c->generation) || u64_decimal(issued, &c->issued_at) ||
+       u64_decimal(expires, &c->expires_at) || copy_string(c->key_id, sizeof(c->key_id), key_id) ||
+       b64_decode_exact(sig, c->signature, sizeof(c->signature)))
+      goto bad;
+   c->version = 1;
+   c->revoked = cJSON_IsTrue(revoked) ? 1 : 0;
+   cJSON_Delete(j);
+   char canonical[KB_MGMT_CHECKPOINT_JSON_MAX + 1];
+   if (!checkpoint_shape(c) || kb_mgmt_checkpoint_to_json(c, canonical, sizeof(canonical)) ||
+       strcmp(canonical, raw))
+   {
+      memset(c, 0, sizeof(*c));
+      return -1;
+   }
+   return 0;
+bad:
+   cJSON_Delete(j);
+   memset(c, 0, sizeof(*c));
+   return -1;
+}
+
+int kb_mgmt_checkpoint_validate(const kb_mgmt_checkpoint_t *c, uint64_t now, uint64_t high_water)
+{
+   return checkpoint_shape(c) && c->issued_at <= now && now < c->expires_at &&
+                  c->generation >= high_water
+              ? 0
+              : -1;
 }

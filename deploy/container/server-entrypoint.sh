@@ -1,7 +1,7 @@
 #!/bin/sh
 # Entrypoint for the aimee-server image with the co-located webchat browser UI.
 #
-# Runs as root so it can bootstrap the PAM login user and run aimee-webchat
+# Runs as root so it can bootstrap the PAM login user and run aimee-runtime-web
 # (which needs /etc/shadow access for pam_unix). aimee-server itself is dropped
 # to the unprivileged "aimee" user. Lifecycle follows the SERVER: when it exits,
 # webchat is torn down and the container exits with the server's status;
@@ -34,6 +34,14 @@ WFE_SOCKET_WAIT_TENTHS="${AIMEE_WFE_SOCKET_WAIT_TENTHS:-150}"
 # by the runuser child); hard limit is unlimited on typical hosts. Best-effort.
 ulimit -s 65536 2>/dev/null || true
 
+# Preserve post-mortem evidence when the temporary C resource plane crashes.
+# Required appliance profiles fail closed if either the resource limit or the
+# storage policy cannot guarantee it; other runtimes stay warning-compatible.
+. /usr/local/bin/core-storage.sh
+if ! aimee_enable_core_dumps || ! aimee_prepare_core_storage; then
+    exit 1
+fi
+
 # Seed the baked default config into AIMEE_HOME if absent. The server reads its
 # /v1 listener settings (port + bearer) from $AIMEE_HOME/aimee.yaml; a
 # bind-mounted (empty) volume would otherwise leave the listener unconfigured.
@@ -57,25 +65,30 @@ fi
 # seed hash) is refreshed when the image ships a newer one. An operator-edited
 # default (hash diverged) or one of unknown provenance (no seed record and not
 # already equal to the shipped default) is never clobbered.
-if [ -d /opt/aimee/defaults/workflows ]; then
-    mkdir -p "$AIMEE_HOME/workflows/.seeded"
-    for wf in /opt/aimee/defaults/workflows/*.yaml; do
-        [ -e "$wf" ] || continue
-        base=$(basename "$wf")
-        dst="$AIMEE_HOME/workflows/$base"
-        rec="$AIMEE_HOME/workflows/.seeded/$base"
+# seed_managed_defaults <source-dir> <glob-suffix> <dest-dir>
+seed_managed_defaults() {
+    seed_src="$1"
+    seed_ext="$2"
+    seed_dst="$3"
+    [ -d "$seed_src" ] || return 0
+    mkdir -p "$seed_dst/.seeded"
+    for shipped_file in "$seed_src"/*"$seed_ext"; do
+        [ -e "$shipped_file" ] || continue
+        base=$(basename "$shipped_file")
+        dst="$seed_dst/$base"
+        rec="$seed_dst/.seeded/$base"
         if ! command -v sha256sum >/dev/null 2>&1; then
             # No hasher available: fall back to conservative never-clobber seed.
-            [ -f "$dst" ] || cp "$wf" "$dst"
+            [ -f "$dst" ] || cp "$shipped_file" "$dst"
             continue
         fi
-        shipped=$(sha256sum "$wf" | cut -d' ' -f1)
+        shipped=$(sha256sum "$shipped_file" | cut -d' ' -f1)
         if [ ! -f "$dst" ]; then
-            cp "$wf" "$dst" && printf '%s\n' "$shipped" > "$rec"
+            cp "$shipped_file" "$dst" && printf '%s\n' "$shipped" > "$rec"
         elif [ -f "$rec" ]; then
             disk=$(sha256sum "$dst" | cut -d' ' -f1)
             if [ "$disk" = "$(cat "$rec")" ] && [ "$disk" != "$shipped" ]; then
-                cp "$wf" "$dst" && printf '%s\n' "$shipped" > "$rec"
+                cp "$shipped_file" "$dst" && printf '%s\n' "$shipped" > "$rec"
             fi
         elif [ "$(sha256sum "$dst" | cut -d' ' -f1)" = "$shipped" ]; then
             # No record yet, but already identical to the shipped default: adopt
@@ -83,10 +96,16 @@ if [ -d /opt/aimee/defaults/workflows ]; then
             printf '%s\n' "$shipped" > "$rec"
         fi
     done
-fi
+}
+seed_managed_defaults /opt/aimee/defaults/workflows .yaml "$AIMEE_HOME/workflows"
+# The roundtable presets those workflows name. Seeded on the same terms: a gate
+# cannot resolve a panel until its preset exists on disk.
+seed_managed_defaults /opt/aimee/defaults/roundtables .json "$AIMEE_HOME/roundtables"
 chown aimee:aimee "$AIMEE_HOME" "${AIMEE_WORKSPACES_DIR:-/var/lib/aimee-workspaces}" 2>/dev/null || true
 [ -f "$AIMEE_HOME/aimee.yaml" ] && chown aimee:aimee "$AIMEE_HOME/aimee.yaml" 2>/dev/null || true
 [ -f "$AIMEE_HOME/agents.json" ] && chown aimee:aimee "$AIMEE_HOME/agents.json" 2>/dev/null || true
+# Seeded as root; the server and its preset-editing API run as aimee.
+[ -d "$AIMEE_HOME/roundtables" ] && chown -R aimee:aimee "$AIMEE_HOME/roundtables" 2>/dev/null || true
 
 # The server-hosted OAuth CLIs (claude/codex) and their npm prefix live under the
 # aimee home and MUST be writable by the unprivileged 'aimee' user that runs the
@@ -103,7 +122,8 @@ for cli_dir in .codex .claude .config .npm-global; do
     [ -e "$AIMEE_HOME/$cli_dir" ] && chown -R aimee:aimee "$AIMEE_HOME/$cli_dir" 2>/dev/null || true
 done
 
-. /usr/local/bin/webchat-lib.sh
+. /usr/local/bin/runtime-web-lib.sh
+. /usr/local/bin/plane-supervisor.sh
 
 log() { printf '[server-entrypoint] %s\n' "$*"; }
 
@@ -171,7 +191,10 @@ runuser -u aimee -- aimee-server --prewarm-cli-oauth >/dev/null 2>&1 &
 
 log "starting aimee-server (socket=$SERVER_SOCK) as user aimee"
 rm -f "$AIMEE_HOME/aimee-http.sock" "$AIMEE_WFE_HTTP_SOCKET"
-runuser -u aimee -- aimee-server --socket="$SERVER_SOCK" &
+# runuser/PAM resets selected resource limits, including RLIMIT_CORE, after the
+# parent entrypoint configured them. Raise the soft limit again as the final
+# unprivileged child operation so the actual server process inherits it.
+runuser -u aimee -- sh -c 'set -eu; . /usr/local/bin/core-storage.sh; aimee_enable_core_dumps; aimee_verify_core_dump; exec aimee-server --socket="$1"' sh "$SERVER_SOCK" &
 server_pid=$!
 
 if [ "$AIMEE_WFE_ENGINE" = go ]; then
@@ -194,34 +217,18 @@ if [ "$AIMEE_WFE_ENGINE" = go ]; then
         exit 1
     fi
     log "starting Go WFE control plane (socket=$AIMEE_WFE_HTTP_SOCKET)"
-    runuser -u aimee -- aimee-wfe \
-        --home "$AIMEE_HOME" \
-        --socket "$AIMEE_WFE_HTTP_SOCKET" \
-        --config "$AIMEE_HOME/aimee.yaml" \
-        --workflow-dir "$AIMEE_HOME/workflows" \
-        --agent-service-socket "$AIMEE_HOME/aimee-http.sock" &
+    runuser -u aimee -- sh -c 'set -eu; . /usr/local/bin/core-storage.sh; aimee_enable_core_dumps; exec aimee-wfe --home "$1" --socket "$2" --config "$3" --workflow-dir "$4" --agent-service-socket "$5"' sh \
+        "$AIMEE_HOME" "$AIMEE_WFE_HTTP_SOCKET" "$AIMEE_HOME/aimee.yaml" \
+        "$AIMEE_HOME/workflows" "$AIMEE_HOME/aimee-http.sock" &
     wfe_pid=$!
 fi
 
 if [ -n "$wfe_pid" ]; then
-    # POSIX sh has no portable wait -n. GNU tail's PID watcher gives us the same
-    # first-exit notification without a shell polling loop.
-    watch_dir=$(mktemp -d /tmp/aimee-plane-watch.XXXXXX)
-    watch_fifo="$watch_dir/first"
-    mkfifo "$watch_fifo"
-    ( tail -s 0.1 --pid="$server_pid" -f /dev/null; printf '%s\n' server > "$watch_fifo" ) & server_watch=$!
-    ( tail -s 0.1 --pid="$wfe_pid" -f /dev/null; printf '%s\n' wfe > "$watch_fifo" ) & wfe_watch=$!
-    IFS= read -r first < "$watch_fifo"
-    kill "$server_watch" "$wfe_watch" 2>/dev/null || true
-    wait "$server_watch" 2>/dev/null || true
-    wait "$wfe_watch" 2>/dev/null || true
-    rm -f "$watch_fifo"
-    rmdir "$watch_dir"
+    status=0
+    aimee_supervise_plane_unit "$server_pid" "$wfe_pid" || status=$?
+    first=$AIMEE_FIRST_EXIT
     log "$first plane exited; terminating its peer so the container restarts as one unit"
     shutdown
-    wait "$server_pid" 2>/dev/null || true
-    wait "$wfe_pid" 2>/dev/null || true
-    status=1
 else
     if wait "$server_pid"; then status=0; else status=$?; fi
 fi

@@ -9,27 +9,13 @@
 #
 #   docker compose -f compose.server.yaml up --build
 #
-# Server /v1 on :8743 over native TLS (bearer "aimee-local-dev"; self-signed cert
-# auto-provisioned — pass curl -k or trust it); kb /v1 on :8741. The aimee-webchat
+# Server /v1 on :8743 over native TLS (`aimee-local-dev` is bootstrap enrollment-only
+# and can call only bearer rotation; trust/pin the auto-provisioned certificate first);
+# kb /v1 is on :8741. The aimee-runtime-web
 # browser UI is on https://localhost:8443 (self-signed; log in as
 # AIMEE_WEBCHAT_USER / AIMEE_WEBCHAT_PASSWORD, default aimee / aimee-local-dev).
-#   curl -k -H "Authorization: Bearer aimee-local-dev" https://localhost:8743/v1/health
+# Enrollment and verified health commands: docs/QUICKSTART.md section 1.3.
 services:
-  postgres:
-    restart: unless-stopped
-    image: pgvector/pgvector:pg16
-    environment:
-      POSTGRES_DB: aimee_shared
-      POSTGRES_USER: aimee
-      POSTGRES_PASSWORD: aimee
-    volumes:
-      - aimee-server-postgres:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aimee -d aimee_shared"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # LEGACY torch embedder — retired from the default topology by the unified-llm
   # cutover (the kb now uses the `aimee-llm` container via AIMEE_LLM_URL). Kept
   # behind a profile for rollback: `docker compose --profile legacy-embedder up`.
@@ -38,7 +24,7 @@ services:
     profiles: ["legacy-embedder"]
     # Published image (pushed to ghcr on every merge to main); override
     # AIMEE_EMBEDDER_IMAGE to pin a version or use a fork/registry.
-    image: ${AIMEE_EMBEDDER_IMAGE:-ghcr.io/rakuensoftware/aimee-embedder:latest}
+    image: ${AIMEE_EMBEDDER_IMAGE:-ghcr.io/rakuensoftware/aimee-embedder:${AIMEE_IMAGE_TAG:-latest}}
     build:
       context: .
       dockerfile: Dockerfile.embedder
@@ -71,7 +57,7 @@ services:
     restart: unless-stopped
     # Published image (pushed to ghcr on every merge to main); override
     # AIMEE_KB_IMAGE to pin a version or use a fork/registry.
-    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:latest}
+    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:${AIMEE_IMAGE_TAG:-latest}}
     build:
       context: .
       dockerfile: Dockerfile
@@ -82,20 +68,23 @@ services:
       stack: 67108864
     environment:
       AIMEE_HOME: /var/lib/aimee
-      AIMEE_DB2_URL: postgresql://aimee:aimee@postgres:5432/aimee_shared
+      # Empty by default: the KB image owns PostgreSQL + pgvector for a new
+      # install. Set AIMEE_DB2_URL explicitly only to keep/use an external DB2.
+      AIMEE_DB2_URL: ${AIMEE_DB2_URL:-}
       # One knob: embed + rerank + synth (curator Tier-A & B at {url}/v1) via the
       # unified aimee-llm container. The kb runs no model. Override
       # AIMEE_EMBEDDER_URL / AIMEE_RERANKER_URL to pin a service elsewhere.
       AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8080}
       # Embedding dim — empty = config default 1024 (CPU tier); set 2560 for GPU.
       AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
+      # Internal-only enrollment/JWKS lane; never published on the host.
+      AIMEE_KB_MTLS_HOST: 0.0.0.0
+      AIMEE_KB_MTLS_PORT: "8745"
     # aimee-kb serves /v1 over HTTP only; the legacy --socket transport was retired (#2747).
     command: ["--http-port=8741"]
     ports:
-      - "8741:8741"
+      - "127.0.0.1:8741:8741"
     depends_on:
-      postgres:
-        condition: service_healthy
       aimee-llm:
         condition: service_healthy
     healthcheck:
@@ -110,13 +99,13 @@ services:
     restart: unless-stopped
     # Published image (pushed to ghcr on every merge to main); override
     # AIMEE_SERVER_IMAGE to pin a version or use a fork/registry.
-    image: ${AIMEE_SERVER_IMAGE:-ghcr.io/rakuensoftware/aimee-server:latest}
+    image: ${AIMEE_SERVER_IMAGE:-ghcr.io/rakuensoftware/aimee-server:${AIMEE_IMAGE_TAG:-latest}}
     build:
       context: .
       dockerfile: Dockerfile.server
-      # The browser UI (aimee-webchat) is built and bundled by default. Its npm
+      # The browser UI (aimee-runtime-web) is built and bundled by default. Its npm
       # dependency (@rakuensoftware/smoothgui) is vendored under frontend/vendor/,
-      # so the build needs NO credentials. Build --build-arg WITH_WEBCHAT=0 to
+      # so the build needs NO credentials. Build --build-arg WITH_RUNTIME_WEB=0 to
       # ship the server-only image.
     # The server's worker threads need a 64 MB stack (the 8 MB container default
     # overflows during startup — matches systemd's LimitSTACK=67108864).
@@ -129,15 +118,21 @@ services:
       # Reach the kb over its /v1 HTTP API. The base URL must NOT include /v1 —
       # kb_client paths already carry the /v1 prefix (kb_client_v1_url).
       AIMEE_KB_API_URL: http://aimee-kb:8741
+      # Optional per-user remote-write identity. Empty preserves the default
+      # read-only posture; provisioned values pass through without manifest edits.
+      AIMEE_SERVER_ID: ${AIMEE_SERVER_ID:-}
+      AIMEE_SERVER_TEAM_ID: ${AIMEE_SERVER_TEAM_ID:-}
+      AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE: ${AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE:-/run/aimee/management/jwks-trust-bundle.json}
+      AIMEE_KB_CONN: ${AIMEE_KB_CONN:-}
       AIMEE_SERVER_HTTP_BIND: "1"
       # Browser webchat (HTTPS on :8443). ON by default — it is a first-class
       # surface, built into the image (no credentials needed). Set
-      # AIMEE_WEBCHAT_ENABLED=0 to ship server-only. The entrypoint provisions the
+      # AIMEE_RUNTIME_WEB_ENABLED=0 to ship server-only. The entrypoint provisions the
       # single login account below via PAM; change it (and use a real password)
       # for anything beyond local dev. Leave USER/PASSWORD unset to serve the UI
       # with no account (login page up, nobody can sign in until one is
       # provisioned).
-      AIMEE_WEBCHAT_ENABLED: "1"
+      AIMEE_RUNTIME_WEB_ENABLED: "1"
       AIMEE_WEBCHAT_USER: aimee
       AIMEE_WEBCHAT_PASSWORD: aimee-local-dev
       # "Sign in with OAuth" (webchat → git host). Set the GitHub client ID +
@@ -161,7 +156,7 @@ services:
       # plaintext /v1 off-loopback). Plaintext 8740 stays bound to 127.0.0.1 inside
       # the container (the healthcheck below still uses it) and is NOT published.
       - "8743:8743"
-      # webchat UI — on by default; gated off only by AIMEE_WEBCHAT_ENABLED=0 above.
+      # webchat UI — on by default; gated off only by AIMEE_RUNTIME_WEB_ENABLED=0 above.
       - "8443:8443"
     depends_on:
       aimee-kb:
@@ -179,14 +174,11 @@ services:
       # Durable mirror-tier state (AIMEE_WORKSPACES_DIR): bare mirrors +
       # reconstructed worktrees, persisted across recreations on their own volume.
       - aimee-server-workspaces:/var/lib/aimee-workspaces
+      - ${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}:/run/aimee/management:ro
 
-  # Bundled local LLM for the kb synthesis / curator passes — llama.cpp's
-  # llama-server (OpenAI-compatible /v1). On by default; Gemma 3n E4B (GGUF Q4)
-  # is fetched once at first boot into the volume (the multi-GB download is why
-  # start_period is long). Called only from the kb's background drain, so a
-  # warming model never blocks ingest. BYO: set LLM_ENDPOINT to your own endpoint
-  # and skip this service (`docker compose up --scale llm=0`). Override
-  # LLAMA_ARG_HF_REPO for a different/smaller GGUF.
+  # Legacy synth-only llama.cpp service retained as an explicit compatibility
+  # profile. The default stack uses `aimee-llm` below for embed + rerank + synth.
+  # Enable only with `--profile curator-llm` while testing a rollback.
   llm:
     restart: unless-stopped
     image: ghcr.io/ggml-org/llama.cpp:server
@@ -216,7 +208,7 @@ services:
   # CI/dev: AIMEE_LLM_DOCKERFILE=Dockerfile.aimee-llm-stub + AIMEE_LLM_STUB=1.
   aimee-llm:
     restart: unless-stopped
-    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
+    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:${AIMEE_IMAGE_TAG:-latest}}
     build:
       context: .
       dockerfile: ${AIMEE_LLM_DOCKERFILE:-Dockerfile.aimee-llm}
@@ -242,6 +234,5 @@ volumes:
   aimee-kb-home:
   aimee-server-home:
   aimee-server-workspaces:
-  aimee-server-postgres:
   aimee-embedder-models:
   aimee-llm-models:

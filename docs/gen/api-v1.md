@@ -2,7 +2,7 @@
 
 > Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. Do not edit by hand; run `make docs-gen` to regenerate.
 
-Total endpoints: 80
+Total endpoints: 88
 
 ## Endpoints
 
@@ -336,6 +336,77 @@ Responses:
 - `200` — Overview envelope
 - `401` — Unauthorized
 - `403` — Forbidden (credential not permitted for this route)
+
+### `GET /v1/console/pipeline`
+
+Curator pipeline registry, presets, and current config (console)
+
+The curator pipeline as data for the web console's Pipeline page: the live
+stage registry (name, label, lane, budget, order, config_key, requires),
+the built-in presets, and the current value of every config key the page
+toggles. The kb owns the curator, so this is served in-process.
+Requires a console-admin credential.
+
+Responses:
+
+- `200` — Pipeline envelope
+- `401` — Unauthorized
+- `403` — Forbidden (credential not permitted for this route)
+
+### `POST /v1/console/pipeline/config`
+
+Set one curator-pipeline config key (console)
+
+Sets a single pipeline config key and persists it to aimee.yaml; the
+curator picks it up on its next config load. The key must be a stage
+enable flag advertised by the live registry, or one of the pipeline's own
+keys (stage order, user presets, custom stages) — anything else is 403, so
+this route cannot reach arbitrary config. Requires a console-admin
+credential.
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Saved; echoes the stored value
+- `400` — Missing/invalid key or value
+- `401` — Unauthorized
+- `403` — Not a pipeline config key, or credential not permitted
+
+### `GET /v1/console/settings`
+
+KB-owned configuration (console)
+
+Every config option aimee-kb owns — the embedder, the reranker, the synth
+tier, and the knowledge base itself — with its current value, section, and
+whether it needs a kb restart. The split from aimee-server's own settings
+is by which binary reads the option (KB_SETTINGS in
+src/kb/http/kb_http_console.c). Requires a console-admin credential.
+
+Responses:
+
+- `200` — KB-owned settings
+- `401` — Unauthorized
+- `403` — Forbidden (credential not permitted for this route)
+
+### `POST /v1/console/settings/config`
+
+Set one KB-owned config option (console)
+
+Sets a single KB-owned option and persists it to aimee.yaml. The key must
+be one the kb owns — anything else (aimee-server's keys, db2_url, the
+agent roster) is 403, so this route cannot reach arbitrary config. Options
+flagged `restart` take effect when aimee-kb next starts. Requires a
+console-admin credential.
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Saved; echoes the stored value
+- `400` — Missing/invalid key or value
+- `401` — Unauthorized
+- `403` — Not a KB-owned setting, or credential not permitted
 
 ### `GET /v1/decisions`
 
@@ -997,6 +1068,90 @@ Responses:
 - `200` — Search results
 - `400` — Bad request (missing query)
 - `401` — Unauthorized
+
+### `GET /v1/servers`
+
+List registered servers for one team
+
+Returns the primary-backed, tenant-scoped server registry view.
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `team` | query | yes | integer | Positive signed-64-bit team id serialized as canonical decimal without a sign or leading zero. |
+
+Responses:
+
+- `200` — Bounded server registry list
+- `400` — Invalid or missing team
+- `401` — Authentication required
+- `403` — Actor is not authorized for the requested team
+- `503` — Registry unavailable
+
+### `POST /v1/servers/{server_id}/actions`
+
+Enable or disable one agent on one registered server
+
+Executes one identity-propagating, journaled management action. The server's remote_writes policy remains authoritative and the request is never safely retryable after an ambiguous dispatch.
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `server_id` | path | yes | string |  |
+| `team` | query | yes | integer | Positive signed-64-bit team id serialized as canonical decimal without a sign or leading zero. |
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Action succeeded
+- `400` — Invalid team or action envelope
+- `401` — Authentication required
+- `403` — Actor, team, capability, or server policy denied the action
+- `404` — Server not found
+- `409` — Replay, registry conflict, or unresolved prior intent
+- `502` — Action result is indeterminate
+- `503` — Management runtime or dependency unavailable
+
+### `GET /v1/servers/{server_id}/agents`
+
+Read the bounded public agent projection from one registered server
+
+Performs the nonce-bound management-read exchange over the server's pinned mTLS session. The response contains only the seven frozen public agent fields and is authorized independently from remote_writes.
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `server_id` | path | yes | string |  |
+| `team` | query | yes | integer | Positive signed-64-bit team id serialized as canonical decimal without a sign or leading zero. |
+
+Responses:
+
+- `200` — Complete bounded agent projection
+- `400` — Invalid path or team query
+- `401` — Authentication required
+- `403` — Management read denied
+- `404` — Server not found
+- `409` — Read intent or target state conflict
+- `502` — Authenticated management response failed integrity validation
+- `503` — Management read runtime or dependency unavailable
+
+### `GET /v1/servers/{server_id}/config`
+
+Read the bounded safe configuration projection from one registered server
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `server_id` | path | yes | string |  |
+| `team` | query | yes | integer |  |
+
+Responses:
+
+- `200` — Complete five-field safe configuration projection
+- `400` — Invalid path or team query
+- `401` — Authentication required
+- `403` — Management read denied
+- `404` — Server not found
+- `409` — Read intent or target state conflict
+- `502` — Authenticated management response failed integrity validation
+- `503` — Management read runtime or dependency unavailable
 
 ### `GET /v1/servers/{server_id}/health`
 

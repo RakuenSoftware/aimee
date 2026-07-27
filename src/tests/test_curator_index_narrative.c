@@ -10,7 +10,7 @@
 
 #include "aimee.h"
 #include "db2_test_shim.h"
-#include "../kb/kb_curator_index_narrative.h"
+#include "kb_curator_index_narrative.h"
 
 /* Stub the heavy embed + vector deps the handler references but this test never
  * reaches (the handler returns early with no seeded narrative artifacts). */

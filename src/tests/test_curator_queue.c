@@ -12,9 +12,10 @@
 
 #include "aimee.h"
 #include "kb_curator_extract.h"
-#include "kb/kb_curator_sidecar.h"
+#include "kb_curator_sidecar.h"
 #include "platform_test_util.h"
 #include "db2_test_shim.h"
+#include "db2/kb_payload.h"
 #include "../kb_curator_queue.h"
 #include "../kb_curator_extract.h"
 #include "../kb/kb_memory_facts.h"
@@ -45,6 +46,23 @@ static int jobs(sqlite3 *db)
    int n = sqlite3_column_int(st, 0);
    sqlite3_finalize(st);
    return n;
+}
+
+static void test_polymorphic_async_subject(sqlite3 *db)
+{
+   /* memory_facts uses a memories.id as the queue subject. It must not require
+    * an unrelated kb_documents row with the same numeric id. */
+   assert(db2_kb_async_enqueue("memory_facts", 777777, "memory") == 0);
+   sqlite3_stmt *st = NULL;
+   assert(sqlite3_prepare_v2(db,
+                             "SELECT count(*) FROM kb_async_jobs"
+                             " WHERE kind='memory_facts' AND document_id=777777",
+                             -1, &st, NULL) == SQLITE_OK);
+   assert(sqlite3_step(st) == SQLITE_ROW);
+   assert(sqlite3_column_int(st, 0) == 1);
+   sqlite3_finalize(st);
+   seed(db, "DELETE FROM kb_async_jobs WHERE kind='memory_facts' AND document_id=777777");
+   printf("  PASS: polymorphic async subject accepts a memory id without a document row\n");
 }
 
 static const char *job_status(sqlite3 *db, int64_t id)
@@ -84,10 +102,9 @@ static int job_attempts(sqlite3 *db, int64_t id)
  * the follow-on claim from re-running these jobs and muddying the assertions. */
 static void test_reclaim_stale_running_extract_doc(sqlite3 *db)
 {
-   /* Backing docs: kb_async_jobs.document_id is a FK onto kb_documents. The ids
-    * sit deliberately far above the docs seeded earlier in this process, because
-    * kb_async_jobs is UNIQUE(kind, document_id) and those already hold
-    * extract_doc rows. */
+   /* Backing docs preserve the semantic validity of the extract_doc fixtures.
+    * The ids sit deliberately far above docs seeded earlier in this process,
+    * because kb_async_jobs is UNIQUE(kind, document_id). */
    seed(db, "INSERT INTO kb_documents (id,project,file_path,file_hash,chunk_index,content,doc_kind)"
             " VALUES (9001,'p','r1.md','rh1',0,'t','')");
    seed(db, "INSERT INTO kb_documents (id,project,file_path,file_hash,chunk_index,content,doc_kind)"
@@ -238,6 +255,8 @@ int main(void)
 
    printf("test_curator_queue:\n");
    sqlite3 *db = open_db();
+
+   test_polymorphic_async_subject(db);
 
    /* Contract: every non-pdf doc gets one extract_doc job; PDFs are excluded;
     * re-running enqueues nothing. Guard for "docs present but zero jobs". */

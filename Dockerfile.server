@@ -4,12 +4,12 @@
 # simply unavailable, so this image also runs standalone (DB1-backed endpoints
 # only). The legacy unix-socket kb transport + autostart were retired (#2747).
 #
-# WITH_WEBCHAT bundles the browser UI (aimee-webchat). It is ON by default — the
+# WITH_RUNTIME_WEB bundles the browser UI (aimee-runtime-web). It is ON by default — the
 # UI is a first-class surface. @rakuensoftware/smoothgui is vendored as a tarball
 # under frontend/vendor/ (a file: dependency), so the frontend builds with NO
-# registry token and NO credentials. Set --build-arg WITH_WEBCHAT=0 to build the
+# registry token and NO credentials. Set --build-arg WITH_RUNTIME_WEB=0 to build the
 # server-only image (skips the frontend + Go webchat stages entirely).
-ARG WITH_WEBCHAT=1
+ARG WITH_RUNTIME_WEB=1
 # WITH_VSCODE bundles code-server (full in-browser VSCode, Open-VSX only) for the
 # webchat Projects/editor surface. ON by default — the editor is a first-class
 # feature; build with --build-arg WITH_VSCODE=0 to omit it (saves ~100 MB).
@@ -55,18 +55,18 @@ COPY frontend/ ./
 RUN npm run build
 
 # --- webchat service: the standalone Go browser server (cgo: PAM + sqlite) ---
-FROM golang:1.25-bookworm AS webchat-build
+FROM golang:1.25-bookworm AS runtime-web-build
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
         libpam0g-dev \
         pkg-config \
     && rm -rf /var/lib/apt/lists/*
-WORKDIR /src/webchat
-COPY webchat/go.mod webchat/go.sum ./
+WORKDIR /src/runtime-web
+COPY runtime-web/go.mod runtime-web/go.sum ./
 RUN go mod download
-COPY webchat/ ./
-RUN CGO_ENABLED=1 go build -o /out/aimee-webchat .
+COPY runtime-web/ ./
+RUN CGO_ENABLED=1 go build -o /out/aimee-runtime-web .
 
 # Go owns the WFE control plane. It is built and run independently from the
 # temporary C agent resource plane so a provider crash restarts both processes
@@ -80,16 +80,16 @@ RUN go mod download
 COPY server-go/ ./
 RUN CGO_ENABLED=0 go build -trimpath -o /out/aimee-wfe ./cmd/aimee-server
 
-# Collect webchat artifacts into a uniform /webchat layout. The "1" variant pulls
+# Collect webchat artifacts into a uniform /runtime-web layout. The "1" variant pulls
 # from the frontend + Go builds above (only in the build graph when
-# WITH_WEBCHAT=1 selects this stage). The "0" variant is empty → no webchat in the
-# image (WITH_WEBCHAT=0 opts the UI out of the build entirely).
-FROM debian:bookworm-slim AS webchat-stage-1
-COPY --from=webchat-build /out/aimee-webchat /webchat/aimee-webchat
-COPY --from=frontend-build /frontend/dist/index.html /webchat/index.html
-FROM debian:bookworm-slim AS webchat-stage-0
-RUN mkdir -p /webchat
-FROM webchat-stage-${WITH_WEBCHAT} AS webchat-stage
+# WITH_RUNTIME_WEB=1 selects this stage). The "0" variant is empty → no webchat in the
+# image (WITH_RUNTIME_WEB=0 opts the UI out of the build entirely).
+FROM debian:bookworm-slim AS runtime-web-stage-1
+COPY --from=runtime-web-build /out/aimee-runtime-web /runtime-web/aimee-runtime-web
+COPY --from=frontend-build /frontend/dist/index.html /runtime-web/index.html
+FROM debian:bookworm-slim AS runtime-web-stage-0
+RUN mkdir -p /runtime-web
+FROM runtime-web-stage-${WITH_RUNTIME_WEB} AS runtime-web-stage
 
 # Optional code-server (full VSCode in the browser). The "1" variant fetches the
 # pinned, arch-matched .deb and extracts it under /opt/codeserver (only in the
@@ -99,9 +99,13 @@ FROM webchat-stage-${WITH_WEBCHAT} AS webchat-stage
 FROM debian:bookworm-slim AS code-server-stage-1
 ARG TARGETARCH
 ARG CODE_SERVER_VERSION=4.96.4
+# Release downloads go through GitHub/CDN edges that intermittently return 5xx
+# (a 504 here failed the whole T3 e2e-docker topology). `curl -fsSL` alone turns
+# that into a hard build failure, so retry with backoff. --retry-all-errors is
+# required: -f makes an HTTP 504 exit 22, which plain --retry would NOT retry.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
-    && curl -fsSL "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/code-server_${CODE_SERVER_VERSION}_${TARGETARCH}.deb" -o /tmp/cs.deb \
+    && curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --retry-max-time 180 --connect-timeout 30 "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/code-server_${CODE_SERVER_VERSION}_${TARGETARCH}.deb" -o /tmp/cs.deb \
     && mkdir -p /opt/codeserver \
     && dpkg-deb -x /tmp/cs.deb /opt/codeserver \
     && rm /tmp/cs.deb \
@@ -116,7 +120,7 @@ FROM debian:bookworm-slim
 # (crypto), libzstd + zlib (compression). The server reaches Postgres-backed DB2
 # only through aimee-kb, so it does not link libpq itself. curl is for the
 # container HEALTHCHECK. libpam0g + libpam-modules (pam_unix.so) back the
-# co-located aimee-webchat browser login.
+# co-located aimee-runtime-web browser login.
 #
 # tmux + nodejs + npm are enablers for server-hosted OAuth CLI agents
 # (`aimee agent add claude-oauth` / `codex-oauth`): the vendor CLI is installed on
@@ -142,8 +146,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Docker CLI + compose plugin (static client binaries — no daemon). Lets
-# aimee-server orchestrate the managed sibling services (postgres + aimee-kb +
-# aimee-llm) with `docker compose up -d` against a mounted host Docker socket, so
+# aimee-server orchestrate the managed sibling services (aimee-kb + aimee-llm)
+# with `docker compose up -d` against a mounted host Docker socket, so
 # the setup wizard can bring the stack up itself (server-orchestrated deploy). This
 # is inert unless the deploy compose mounts /var/run/docker.sock and sets
 # AIMEE_DEPLOY_ENABLED=1 (compose.server-managed.yaml); the plain image is
@@ -157,12 +161,12 @@ RUN set -eux; \
       arm64) darch=aarch64; carch=aarch64 ;; \
       *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
-    curl -fsSL "https://download.docker.com/linux/static/stable/${darch}/docker-${DOCKER_CLI_VERSION}.tgz" \
+    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --retry-max-time 180 --connect-timeout 30 "https://download.docker.com/linux/static/stable/${darch}/docker-${DOCKER_CLI_VERSION}.tgz" \
       | tar -xz -C /tmp docker/docker; \
     install -m0755 /tmp/docker/docker /usr/local/bin/docker; \
     rm -rf /tmp/docker; \
     mkdir -p /usr/local/lib/docker/cli-plugins; \
-    curl -fsSL "https://github.com/docker/compose/releases/download/v${DOCKER_COMPOSE_VERSION}/docker-compose-linux-${carch}" \
+    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --retry-max-time 180 --connect-timeout 30 "https://github.com/docker/compose/releases/download/v${DOCKER_COMPOSE_VERSION}/docker-compose-linux-${carch}" \
       -o /usr/local/lib/docker/cli-plugins/docker-compose; \
     chmod 0755 /usr/local/lib/docker/cli-plugins/docker-compose; \
     docker --version; docker compose version
@@ -175,7 +179,7 @@ ARG GH_CLI_VERSION=2.96.0
 RUN set -eux; \
     gharch="${TARGETARCH:-amd64}"; \
     case "$gharch" in amd64|arm64) ;; *) echo "unsupported TARGETARCH=${gharch}" >&2; exit 1 ;; esac; \
-    curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_CLI_VERSION}/gh_${GH_CLI_VERSION}_linux_${gharch}.tar.gz" \
+    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --retry-max-time 180 --connect-timeout 30 "https://github.com/cli/cli/releases/download/v${GH_CLI_VERSION}/gh_${GH_CLI_VERSION}_linux_${gharch}.tar.gz" \
       | tar -xz -C /tmp "gh_${GH_CLI_VERSION}_linux_${gharch}/bin/gh"; \
     install -m0755 "/tmp/gh_${GH_CLI_VERSION}_linux_${gharch}/bin/gh" /usr/local/bin/gh; \
     rm -rf "/tmp/gh_${GH_CLI_VERSION}_linux_${gharch}"; \
@@ -191,6 +195,16 @@ ENV AIMEE_HOME=/var/lib/aimee
 # (their OAuth tokens live under $AIMEE_HOME too: ~/.claude, ~/.codex).
 ENV NPM_CONFIG_PREFIX=/var/lib/aimee/.npm-global
 ENV PATH=/var/lib/aimee/.npm-global/bin:$PATH
+# claude-code self-updates on launch by default. In this npm-global-prefix layout
+# its updater reinstalls the package WITHOUT re-running the install.cjs postinstall
+# that fetches the platform-native binary, leaving an empty package dir and a
+# dangling bin/claude symlink -> the launcher becomes "claude: not found" and every
+# tmux-cli seat that runs it dies with "failed to send prompt to tmux session".
+# aimee owns the pinned install + postinstall (server_cli_oauth.c); disable the
+# vendor auto-updater so it cannot brick that install. aimee-server (the tmux
+# server) exports this to every pane it spawns. Bind-mounted $AIMEE_HOME means the
+# broken state would otherwise persist across container recreate.
+ENV DISABLE_AUTOUPDATER=1
 # Serve the /v1 HTTP API on 0.0.0.0 (the binary defaults to loopback) so the
 # published container port reaches it. The bearer token in the baked aimee.yaml
 # is still required on every request.
@@ -217,12 +231,13 @@ ENV AIMEE_WORKSPACES_DIR=/var/lib/aimee-workspaces
 # a uniform owner (e.g. SmoothNAS smoothfs tiers force uid 1000). The entrypoint
 # stays root (for webchat PAM) and drops the server to this user.
 RUN useradd --uid 1000 --user-group --home-dir /var/lib/aimee --create-home --shell /usr/sbin/nologin aimee \
-    && mkdir -p /var/lib/aimee-workspaces \
+    && mkdir -p /var/lib/aimee-workspaces /mnt/media/cores \
+    && chmod 1777 /mnt/media/cores \
     && chown aimee:aimee /var/lib/aimee-workspaces
 # Durable mirror-tier state (AIMEE_WORKSPACES_DIR). Declaring it a VOLUME means an
 # anonymous volume persists the checkouts across `docker run` recreations even
 # when no named volume is mounted; operators can bind/name it for backups.
-VOLUME /var/lib/aimee-workspaces
+VOLUME /var/lib/aimee-workspaces /mnt/media/cores
 COPY --from=build /src/aimee-server /usr/local/bin/aimee-server
 COPY --from=wfe-build /out/aimee-wfe /usr/local/bin/aimee-wfe
 # Static TCP<->UDS bridge; aimee-server docker-cp's it into a proxy-mode delegate sandbox.
@@ -234,25 +249,28 @@ COPY --from=build /src/aimee /usr/local/bin/aimee
 # Co-located webchat browser UI: the Go service, the single-file React SPA, the
 # PAM stack for browser login, and the bootstrap/launch helpers. webchat shares
 # AIMEE_HOME so its Unix-socket transports line up with the server.
-# Optional webchat: /webchat is empty unless built with WITH_WEBCHAT=1. Install
+# Optional webchat: /runtime-web is empty unless built with WITH_RUNTIME_WEB=1. Install
 # the binary + SPA when present; the entrypoint skips the browser UI when absent.
-COPY --from=webchat-stage /webchat/ /tmp/webchat-stage/
-RUN if [ -f /tmp/webchat-stage/aimee-webchat ]; then \
-        install -m 0755 /tmp/webchat-stage/aimee-webchat /usr/local/bin/aimee-webchat; \
-        mkdir -p /usr/local/share/aimee-webchat; \
-        cp /tmp/webchat-stage/index.html /usr/local/share/aimee-webchat/index.html; \
+COPY --from=runtime-web-stage /runtime-web/ /tmp/runtime-web-stage/
+RUN if [ -f /tmp/runtime-web-stage/aimee-runtime-web ]; then \
+        install -m 0755 /tmp/runtime-web-stage/aimee-runtime-web /usr/local/bin/aimee-runtime-web; \
+        mkdir -p /usr/local/share/aimee-runtime-web; \
+        cp /tmp/runtime-web-stage/index.html /usr/local/share/aimee-runtime-web/index.html; \
         echo "aimee: webchat bundled in image"; \
-    else echo "aimee: webchat not bundled (built with WITH_WEBCHAT=0)"; fi; \
-    rm -rf /tmp/webchat-stage
+    else echo "aimee: webchat not bundled (built with WITH_RUNTIME_WEB=0)"; fi; \
+    rm -rf /tmp/runtime-web-stage
 # Optional code-server: /opt/codeserver/usr is empty unless WITH_VSCODE=1, so
 # this COPY is a no-op in the default build. When present it lands code-server at
 # /usr/bin/code-server; the webchat supervisor launches a per-user instance.
 COPY --from=code-server-stage /opt/codeserver/usr/ /usr/
 RUN if command -v code-server >/dev/null 2>&1; then echo "aimee: code-server bundled ($(code-server --version 2>/dev/null | head -1))"; else echo "aimee: code-server not bundled (built with WITH_VSCODE=0)"; fi
-COPY deploy/container/pam-aimee-webchat /etc/pam.d/aimee-webchat
-COPY deploy/container/webchat-lib.sh /usr/local/bin/webchat-lib.sh
+COPY deploy/container/pam-aimee-runtime-web /etc/pam.d/aimee-runtime-web
+COPY deploy/container/runtime-web-lib.sh /usr/local/bin/runtime-web-lib.sh
+COPY deploy/container/plane-supervisor.sh /usr/local/bin/plane-supervisor.sh
+COPY deploy/container/core-storage.sh /usr/local/bin/core-storage.sh
 COPY deploy/container/server-entrypoint.sh /usr/local/bin/aimee-server-entrypoint
-RUN chmod +x /usr/local/bin/aimee-server-entrypoint
+RUN chmod +x /usr/local/bin/aimee-server-entrypoint \
+    /usr/local/bin/core-storage.sh /usr/local/bin/plane-supervisor.sh
 
 # Baked default config (enables the inbound /v1 HTTP listener: port + bearer).
 # Kept OUTSIDE $AIMEE_HOME so a bind-mounted (empty) volume can't shadow it; the
@@ -264,12 +282,16 @@ COPY deploy/container/agents.json /opt/aimee/defaults/agents.json
 # Default dev-lifecycle workflow(s) for autonomous development (default-on). The
 # entrypoint seeds them into $AIMEE_HOME/workflows on first start.
 COPY config/workflows/ /opt/aimee/defaults/workflows/
+# Roundtable presets those workflows name. A roundtable review resolves only a
+# saved roundtable, so a workflow gate cannot run until its preset exists. The
+# entrypoint seeds them into $AIMEE_HOME/roundtables on first start.
+COPY config/roundtables/ /opt/aimee/defaults/roundtables/
 
 # Runs as root: the entrypoint bootstraps the webchat PAM user and runs webchat
 # (pam_unix needs /etc/shadow), then drops aimee-server to the "aimee" user.
 WORKDIR /var/lib/aimee
 # 8740 = server /v1 (plaintext, loopback-only); 8743 = server /v1 over native TLS
-# (the remote thin-client port); 8443 = aimee-webchat browser UI (HTTPS).
+# (the remote thin-client port); 8443 = aimee-runtime-web browser UI (HTTPS).
 EXPOSE 8740 8743 8443
 
 # NOTE: the server's worker threads need a 64 MB stack (the 8 MB container

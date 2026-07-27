@@ -7,7 +7,7 @@
 #include "agent_exec.h"
 #include "agent_config.h"
 #include "config.h"
-#include "delegate_credentials.h"
+#include <aimee/delegates/delegate_credentials.h>
 #include "cost_fold.h"
 #include "log.h"
 #include "persona.h"
@@ -92,6 +92,37 @@ static int review_items_same(const roundtable_review_item_t *a, const char *iden
 {
    return a && identity && summary && strcmp(a->identity_key, identity) == 0 &&
           strcmp(a->summary, summary) == 0;
+}
+
+/* Seat label for attribution: the agent AND the model it actually served.
+ *
+ * A registered agent is not always one model — a provider-general registration
+ * (codex -> sol/terra/luna) makes the bare agent name ambiguous, and the models
+ * within a provider differ in capability, which is precisely what a reviewer
+ * needs to know when weighing a finding. Uses the canonical `agent:model` form
+ * already understood elsewhere (model_capability_resolve_ref), kept compact
+ * because `sources` is a fixed 256-byte comma-joined list shared by every seat.
+ *
+ * Falls back to the bare name when the model is unknown or merely repeats it —
+ * several agents are named after their single model today, and "MiniMax-M3:
+ * MiniMax-M3" would be noise. */
+static void review_seat_label(const agent_result_t *r, char *buf, size_t len)
+{
+   if (!buf || len == 0)
+      return;
+   buf[0] = '\0';
+   if (!r)
+      return;
+   const char *name = r->agent_name;
+   const char *model = r->served_model[0] ? r->served_model : r->model;
+   if (!name || !name[0])
+      name = model && model[0] ? model : "";
+   if (!model || !model[0] || strcmp(model, name) == 0)
+   {
+      snprintf(buf, len, "%s", name);
+      return;
+   }
+   snprintf(buf, len, "%s:%s", name, model);
 }
 
 static void review_item_add_source(roundtable_review_item_t *item, const char *source)
@@ -282,8 +313,12 @@ void capture_round_review_items(const agent_result_t *results, int ref_count,
    out->original_request_alignment_summary[0] = '\0';
    out->original_request_alignment_sources[0] = '\0';
    for (int i = 0; i < ref_count; i++)
-      capture_review_items_from_text(results[i].response, results[i].agent_name,
+   {
+      char seat[MAX_AGENT_NAME + MAX_MODEL_LEN + 2];
+      review_seat_label(&results[i], seat, sizeof(seat));
+      capture_review_items_from_text(results[i].response, seat,
                                      results[i].successful_tool_calls > 0, out);
+   }
    if (!out->original_request_alignment[0])
    {
       snprintf(out->original_request_alignment, sizeof out->original_request_alignment, "unclear");

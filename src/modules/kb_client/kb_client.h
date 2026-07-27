@@ -209,6 +209,11 @@ char *kb_client_ingest_json(const char *workspace, const char *embedding_command
 char *kb_client_docs_manifest_json(const char *scope, const char **paths, int path_count);
 char *kb_client_docs_upload_json(const char *scope, const char **paths, int path_count);
 char *kb_client_docs_push_json(const char *scope, const char **paths, int path_count);
+/* Thin-client variant: the caller has already read each document on the client
+ * host, so the server never tries to dereference a path it cannot see. */
+char *kb_client_docs_push_content_json(const char *scope, const char **doc_keys,
+                                       const char **contents, const int *content_lengths,
+                                       int doc_count);
 
 /* Query the background ingest queue (kb_ingest_queue) state and recent completions.
  * Returns heap-allocated JSON with queue stats, active workers, and last 10 jobs. */
@@ -608,6 +613,29 @@ int kb_client_memory_link_create(int64_t source_id, int64_t target_id, const cha
 int kb_client_memory_link_query(int64_t memory_id, memory_link_t *out, int max);
 int kb_client_memory_link_delete(int64_t link_id);
 
+/* Audit hook: notified after each SERVER-INITIATED memory mutation via aimee-kb
+ * (insert / update / delete / reject) with NON-CONTENT fields only — the
+ * operation, the memory id, and (for insert) the tier / kind / key identity,
+ * confidence, and session — plus whether the kb call succeeded. The memory
+ * CONTENT (and use_cases / reject reason), the PII-bearing payload, is NEVER
+ * passed. This is the SERVER's view of the memory changes it requested; aimee-kb
+ * records the authoritative event on its own bus at the mutation site. Installed
+ * once at startup by a server-only bridge forwarding to the observability bus;
+ * kb_client itself has NO event-bus dependency (stays linkable everywhere). NULL
+ * by default. Set once before serving. */
+typedef void (*kb_client_memory_audit_hook_fn)(const char *op, int64_t id, const char *tier,
+                                               const char *kind, const char *key, double confidence,
+                                               const char *session_id, int ok);
+void kb_client_set_memory_audit_hook(kb_client_memory_audit_hook_fn fn);
+
+/* Internal: fire the memory-audit hook (if installed). Defined in the dep-free
+ * kb_client_memory_audit.c (kept free of RPC/cJSON so the bridge->bus test can
+ * link the seam without the whole kb_client stack); callable from the kb_client
+ * memory TUs (mutations, and kb_client_memory.c for delete). */
+void kb_client_memory_audit_note(const char *op, int64_t id, const char *tier, const char *kind,
+                                 const char *key, double confidence, const char *session_id,
+                                 int ok);
+
 /* Delete a memory by id via aimee-kb.  Returns 0 on success, -1 on
  * failure / kb unreachable.  Mirrors memory_delete(). */
 int kb_client_memory_delete(int64_t id);
@@ -708,6 +736,15 @@ int kb_client_tool_registry_lookup(const char *name, char *out_input_schema, siz
  * unreachable.  Used by aimee-server to populate a process-local
  * cache so per-tool-call validation does not RPC every turn. */
 char *kb_client_tool_registry_snapshot_json(void);
+
+/* Invoke a tool on an MCP plugin the KB HOSTS (config install: kb) over the mTLS
+ * /v1/actions/mcp.call channel.  |qualified_name| is "<client>:<tool>".  |actor|
+ * identifies the caller (the dispatch role) for the kb's content-free audit row;
+ * may be NULL.  On success returns 0 and, when out_result is non-NULL, sets it to
+ * an owned cJSON (the plugin's result); on failure returns -1 with a message in
+ * err_buf. |args| is borrowed. */
+int kb_client_mcp_call(const char *qualified_name, const cJSON *args, int timeout_ms,
+                       const char *actor, cJSON **out_result, char *err_buf, size_t err_buf_len);
 
 /* List the memory_relation_schema rows owned by aimee-kb.  Writes up
  * to |max| rows into |out| and returns the number written. */

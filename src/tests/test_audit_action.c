@@ -11,7 +11,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "audit_action.h"
+#include <aimee/audit/audit_action.h>
 
 static char g_home[512];
 

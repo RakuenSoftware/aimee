@@ -1,12 +1,26 @@
 # Proposal: split Runtime and Control Plane governance, web modules, and config surfaces
 
 - **State:** PENDING — roundtable-approved 2026-07-20; awaiting project acceptance
-- **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md)
+- **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries-residual.md)
 - **Owns:** product roles/names, Runtime and Control web lifecycles, dashboards, and advertised
   configuration behavior
 - **Implementation dependencies:** module descriptors, core config/module-runtime contracts, and
   suite compatibility records
-- **Date:** 2026-07-20
+- **Date:** 2026-07-20 (reconciliation note added 2026-07-23)
+
+> **2026-07-23 amendment reconciliation.** The product boundary (Runtime/Control), web-module
+> optionality, and truthful-config ownership this proposal defines are unchanged, but the suite
+> amendment
+> ([`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries-residual.md))
+> makes them concrete in three ways to re-check on re-review: (1) `runtime-web` and `control-web` are
+> **separate programs on the shared-memory event bus**, admitted and routed like any module, not
+> in-process handlers; (2) each product — Runtime and Control — **hosts its own bus** (the single
+> in-source C bus host), and cross-product paths use the existing network transport, so this
+> proposal's admission/topology wording should reference the bus host explicitly; (3) the advertised
+> **effective configuration** surface and the runtime **capability advertisement** to clients are the
+> same capability data observed at two ends — modules publish capabilities to core over the bus, and
+> [`thin-client-capability-advertisement.md`](thin-client-capability-advertisement.md) projects them,
+> so this proposal's config-surface ownership and that advertisement must not diverge.
 
 ## Decision
 
@@ -38,6 +52,22 @@ core multi-tenant shared-memory and management contracts using core principal/te
 tenant-scoped local reference authenticator, but exposes no OIDC or organizational-governance
 surface through CLI, environment/configuration, API, or web. Its audit projection remains a
 deterministic read-only view sourced directly from the core audit ledger.
+
+OIDC is a provider-neutral governance contract. Control manages named issuer profiles rather than
+shipping provider-specific modes. A profile declares standards-based issuer discovery or explicit
+authorization, token, user-info, JWKS, and end-session endpoints; client identity; a vault-backed
+client-secret reference; redirect URIs; scopes; PKCE and nonce policy; accepted signing algorithms;
+and mappings from namespaced claims to Aimee tenant, principal, group, and role attributes. GitHub,
+Entra ID, Okta, Keycloak, Auth0, or another conforming issuer may be configured through the same
+contract; none is compiled in, privileged, or selected by a provider enum.
+
+When `governance` is selected, issuer profiles are configurable from Aimee Control Plane's
+governance UI and the equivalent CLI, environment/configuration, and non-web API surfaces. The UI
+renders effective fields from the same descriptor/config metadata and stores secrets only through
+`vault`; it never embeds a client secret in rendered config or browser state. With `control-web`
+disabled, every OIDC operation remains available headlessly. With `governance` absent, issuer
+profiles and every OIDC setting are absent from advertised GUI, CLI, environment catalog, config
+schema, and API surfaces; accepted legacy input, if any, is migration-only and never advertised.
 
 Core contracts remain product-neutral. Runtime and Control choose deployment topology and custody:
 Runtime hosts per-user memory and enforcement instances; Control hosts multi-tenant shared-memory

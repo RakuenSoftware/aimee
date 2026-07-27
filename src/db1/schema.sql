@@ -9,6 +9,22 @@ CREATE TABLE IF NOT EXISTS diagnosis_items ( id INTEGER PRIMARY KEY AUTOINCREMEN
 CREATE TABLE IF NOT EXISTS ensembles ( id INTEGER PRIMARY KEY AUTOINCREMENT, template_name TEXT NOT NULL, channel TEXT NOT NULL DEFAULT 'general', status TEXT NOT NULL DEFAULT 'active', current_phase INTEGER NOT NULL DEFAULT 0, current_turn INTEGER NOT NULL DEFAULT 0, expected_agent TEXT NOT NULL DEFAULT '', expected_role TEXT NOT NULL DEFAULT '', paused_reason TEXT NOT NULL DEFAULT '', template_json TEXT NOT NULL DEFAULT '{}', assignments_json TEXT NOT NULL DEFAULT '{}', context_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE INDEX IF NOT EXISTS idx_ensembles_status ON ensembles(status, updated_at DESC);
 CREATE TABLE IF NOT EXISTS context_cache ( hash TEXT PRIMARY KEY, output TEXT NOT NULL, session_id TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+-- Fetched web pages, STRIPPED TO TEXT, keyed by canonical URL.
+-- Keyed by URL alone and NOT by (url, query, budget): extraction is a
+-- deterministic pure function of (text, query, budget) that is re-run on every
+-- hit, so the cache supplies the document and never freezes a policy decision.
+-- pinned_addr is the address the egress guard validated and connected to at
+-- fetch time; a hit re-checks it against the current deny-list so tightening
+-- the policy retroactively invalidates entries it would now refuse.
+CREATE TABLE IF NOT EXISTS web_page_cache (
+  url          TEXT PRIMARY KEY,
+  body         TEXT NOT NULL,
+  byte_len     INTEGER NOT NULL DEFAULT 0,
+  pinned_addr  TEXT NOT NULL DEFAULT '',
+  fetched_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  last_used_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_web_page_cache_lru ON web_page_cache (last_used_at);
 CREATE TABLE IF NOT EXISTS agent_cache ( id INTEGER PRIMARY KEY, role TEXT NOT NULL, prompt TEXT NOT NULL, result TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE INDEX IF NOT EXISTS idx_agent_cache_lookup ON agent_cache(role, prompt);
 CREATE TABLE IF NOT EXISTS primary_sessions ( session_id TEXT NOT NULL, agent_name TEXT NOT NULL DEFAULT '', provider TEXT NOT NULL DEFAULT '', messages_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (session_id, agent_name, provider));
@@ -94,11 +110,62 @@ CREATE TABLE IF NOT EXISTS server_management_jti (
 );
 CREATE INDEX IF NOT EXISTS idx_server_management_jti_expiry
   ON server_management_jti(expires_at,jti);
+
+-- Replay store for the data-plane identity token (proposal
+-- per-user-remote-writes-authz.md §4/§9). A SIBLING of server_management_jti
+-- rather than a reuse of it: that table's peer_issuer / peer_serial /
+-- peer_fingerprint / request_sha256 columns are NOT NULL because a management
+-- token genuinely carries all four. An identity token carries none of them - it
+-- has no peer certificate and no request digest - so reusing the table would
+-- mean writing placeholder provenance into a security-audit table, or relaxing
+-- constraints that are the reason that table is trustworthy. Neither is
+-- acceptable, so the identity token gets its own shape: a tier instead of a
+-- capability, and no peer or request binding at all.
+--
+-- The jti floor is 8 rather than 16, matching what the server's identity
+-- verifier accepts (ascii_token 8..128).
+CREATE TABLE IF NOT EXISTS server_identity_jti (
+  jti TEXT PRIMARY KEY NOT NULL CHECK(
+    typeof(jti)='text' AND length(jti) BETWEEN 8 AND 128 AND instr(jti,char(0))=0 AND
+    jti NOT GLOB '*[^A-Za-z0-9._-]*'),
+  issuer TEXT NOT NULL CHECK(
+    typeof(issuer)='text' AND length(issuer) BETWEEN 1 AND 255 AND instr(issuer,char(0))=0 AND
+    issuer NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || ']*')),
+  kid TEXT NOT NULL CHECK(
+    typeof(kid)='text' AND length(kid) BETWEEN 1 AND 64 AND instr(kid,char(0))=0 AND
+    kid NOT GLOB '*[^A-Za-z0-9._-]*'),
+  audience TEXT NOT NULL CHECK(
+    typeof(audience)='text' AND length(audience) BETWEEN 1 AND 127 AND instr(audience,char(0))=0 AND
+    audience NOT GLOB '*[^A-Za-z0-9._-]*'),
+  subject TEXT NOT NULL CHECK(
+    typeof(subject)='text' AND length(subject) BETWEEN 1 AND 576 AND instr(subject,char(0))=0 AND
+    subject NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || ']*')),
+  team_id INTEGER NOT NULL CHECK(typeof(team_id)='integer' AND team_id > 0),
+  tier TEXT NOT NULL CHECK(typeof(tier)='text' AND tier IN ('off','data','full')),
+  issued_at INTEGER NOT NULL CHECK(typeof(issued_at)='integer' AND issued_at >= 0),
+  expires_at INTEGER NOT NULL CHECK(typeof(expires_at)='integer' AND expires_at > issued_at),
+  consumed_at INTEGER NOT NULL CHECK(typeof(consumed_at)='integer' AND consumed_at >= issued_at AND consumed_at < expires_at)
+);
+CREATE INDEX IF NOT EXISTS idx_server_identity_jti_expiry
+  ON server_identity_jti(expires_at,jti);
+CREATE TABLE IF NOT EXISTS server_management_jwks_cache (
+  singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+  generation INTEGER NOT NULL CHECK(generation=1),
+  valid_from INTEGER NOT NULL CHECK(valid_from>=0),
+  valid_until INTEGER NOT NULL CHECK(valid_until>valid_from),
+  jwks_bytes BLOB NOT NULL CHECK(length(jwks_bytes) BETWEEN 1 AND 1023),
+  envelope_bytes BLOB NOT NULL CHECK(length(envelope_bytes) BETWEEN 1 AND 3071),
+  envelope_sha256 BLOB NOT NULL CHECK(length(envelope_sha256)=32),
+  manifest_sha256 BLOB NOT NULL CHECK(length(manifest_sha256)=32),
+  trust_bundle_sha256 BLOB NOT NULL CHECK(length(trust_bundle_sha256)=32),
+  fetched_at INTEGER NOT NULL CHECK(fetched_at>=0)
+);
 CREATE TABLE IF NOT EXISTS token_audit ( id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL DEFAULT '', delegation_id TEXT NOT NULL DEFAULT '', project_name TEXT NOT NULL DEFAULT '', tool_name TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT '', requested_model TEXT NOT NULL DEFAULT '', stop_reason TEXT NOT NULL DEFAULT '', usage_kind TEXT NOT NULL DEFAULT 'realized', agent_log_id INTEGER NOT NULL DEFAULT 0, request_id TEXT NOT NULL DEFAULT '', idempotency_key TEXT NOT NULL DEFAULT '', attempt INTEGER NOT NULL DEFAULT 0, principal TEXT NOT NULL DEFAULT '', served_model TEXT NOT NULL DEFAULT '', duration_ms INTEGER NOT NULL DEFAULT 0, metadata TEXT NOT NULL DEFAULT '', prompt_tokens INTEGER NOT NULL DEFAULT 0, completion_tokens INTEGER NOT NULL DEFAULT 0, cache_write_tokens INTEGER NOT NULL DEFAULT 0, cache_read_tokens INTEGER NOT NULL DEFAULT 0, estimated_cost_usd REAL NOT NULL DEFAULT 0.0, created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS model_catalog ( provider TEXT NOT NULL, model TEXT NOT NULL, context_window INTEGER NOT NULL DEFAULT 0, pricing_tier INTEGER NOT NULL DEFAULT 0, tool_support INTEGER NOT NULL DEFAULT 0, streaming_support INTEGER NOT NULL DEFAULT 0, fetched_at TEXT NOT NULL DEFAULT (datetime('now')), metadata_json TEXT NOT NULL DEFAULT '{}', PRIMARY KEY (provider, model));
 CREATE TABLE IF NOT EXISTS model_pricing ( model TEXT PRIMARY KEY, cost_in_per_mtok REAL NOT NULL DEFAULT 0 CHECK (cost_in_per_mtok >= 0), cost_out_per_mtok REAL NOT NULL DEFAULT 0 CHECK (cost_out_per_mtok >= 0), updated_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE INDEX IF NOT EXISTS idx_model_catalog_fetched ON model_catalog(provider, fetched_at);
-CREATE TABLE IF NOT EXISTS agent_jobs ( id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT NOT NULL DEFAULT '', prompt TEXT NOT NULL DEFAULT '', agent_name TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', result TEXT NOT NULL DEFAULT '', cursor TEXT NOT NULL DEFAULT '', lease_owner TEXT NOT NULL DEFAULT '', heartbeat_at TEXT NOT NULL DEFAULT '', current_tool TEXT NOT NULL DEFAULT '', api_call_count INTEGER NOT NULL DEFAULT 0, cancelled_at TEXT DEFAULT '', cancel_reason TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS agent_jobs ( id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT NOT NULL DEFAULT '', prompt TEXT NOT NULL DEFAULT '', agent_name TEXT NOT NULL DEFAULT '', participant_token TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', result TEXT NOT NULL DEFAULT '', cursor TEXT NOT NULL DEFAULT '', lease_owner TEXT NOT NULL DEFAULT '', heartbeat_at TEXT NOT NULL DEFAULT '', current_tool TEXT NOT NULL DEFAULT '', api_call_count INTEGER NOT NULL DEFAULT 0, cost_usd REAL NOT NULL DEFAULT 0, cost_known INTEGER NOT NULL DEFAULT 0, cancelled_at TEXT DEFAULT '', cancel_reason TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_jobs_participant_token ON agent_jobs(participant_token) WHERE participant_token <> '';
 CREATE TABLE IF NOT EXISTS agent_log ( id INTEGER PRIMARY KEY AUTOINCREMENT, agent_name TEXT NOT NULL DEFAULT '', role TEXT NOT NULL, input TEXT NOT NULL DEFAULT '', output TEXT NOT NULL DEFAULT '', prompt_tokens INTEGER NOT NULL DEFAULT 0, completion_tokens INTEGER NOT NULL DEFAULT 0, latency_ms INTEGER NOT NULL DEFAULT 0, success INTEGER NOT NULL DEFAULT 0, error TEXT DEFAULT NULL, confidence INTEGER NOT NULL DEFAULT -1, turns INTEGER NOT NULL DEFAULT 0, tool_calls INTEGER NOT NULL DEFAULT 0, session_id TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS cost_fold_log ( id INTEGER PRIMARY KEY AUTOINCREMENT, parent_session_id TEXT NOT NULL, child_session_id TEXT NOT NULL, cost_usd REAL NOT NULL DEFAULT 0.0, cost_source TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE(parent_session_id, child_session_id));
 CREATE TABLE IF NOT EXISTS execution_plans ( id INTEGER PRIMARY KEY AUTOINCREMENT, agent_name TEXT NOT NULL DEFAULT '', task TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', confidence REAL NOT NULL DEFAULT 1.0, cancelled_at TEXT DEFAULT '', cancel_reason TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')));
@@ -113,7 +180,7 @@ CREATE INDEX IF NOT EXISTS idx_trigger_runs_status ON trigger_runs(status);
 CREATE TABLE IF NOT EXISTS cron_jobs ( id TEXT PRIMARY KEY, schedule TEXT NOT NULL, mode TEXT NOT NULL CHECK (mode IN ('script','llm','hybrid')), script TEXT NOT NULL DEFAULT '', prompt TEXT NOT NULL DEFAULT '', skills_csv TEXT NOT NULL DEFAULT '', workdir TEXT NOT NULL DEFAULT '', deliver_target TEXT NOT NULL DEFAULT '', deliver_only_if_changed INTEGER NOT NULL DEFAULT 0, deliver_first_run_silent INTEGER NOT NULL DEFAULT 0, context_from TEXT NOT NULL DEFAULT '', when_context_contains TEXT NOT NULL DEFAULT '', pre_wake_gate INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1, next_run_at INTEGER DEFAULT 0, last_run_at INTEGER DEFAULT 0, last_run_status TEXT NOT NULL DEFAULT '', last_run_output_hash TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')));
 CREATE TABLE IF NOT EXISTS cron_job_runs ( id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL, started_at INTEGER NOT NULL DEFAULT (strftime('%s','now')), completed_at INTEGER DEFAULT 0, status TEXT NOT NULL DEFAULT '', silent INTEGER NOT NULL DEFAULT 0, delivered INTEGER NOT NULL DEFAULT 0, output TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '', output_hash TEXT NOT NULL DEFAULT '', FOREIGN KEY (job_id) REFERENCES cron_jobs(id));
 CREATE INDEX IF NOT EXISTS idx_cron_job_runs_job ON cron_job_runs(job_id, id DESC);
-CREATE TABLE IF NOT EXISTS execution_trace ( id INTEGER PRIMARY KEY AUTOINCREMENT, plan_id INTEGER NOT NULL DEFAULT 0, turn INTEGER NOT NULL DEFAULT 0, direction TEXT NOT NULL DEFAULT 'call', content TEXT NOT NULL DEFAULT '', tool_name TEXT NOT NULL DEFAULT '', tool_args TEXT NOT NULL DEFAULT '', tool_result TEXT NOT NULL DEFAULT '', context_hash TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS execution_trace ( id INTEGER PRIMARY KEY AUTOINCREMENT, plan_id INTEGER NOT NULL DEFAULT 0, session_id TEXT NOT NULL DEFAULT '', turn INTEGER NOT NULL DEFAULT 0, direction TEXT NOT NULL DEFAULT 'call', content TEXT NOT NULL DEFAULT '', tool_name TEXT NOT NULL DEFAULT '', tool_args TEXT NOT NULL DEFAULT '', tool_result TEXT NOT NULL DEFAULT '', context_hash TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS windows ( id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, seq INTEGER NOT NULL, summary TEXT NOT NULL DEFAULT '', tier TEXT NOT NULL DEFAULT 'raw', thread_id INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS window_terms ( window_id INTEGER NOT NULL REFERENCES windows(id) ON DELETE CASCADE, term TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS window_files ( window_id INTEGER NOT NULL REFERENCES windows(id) ON DELETE CASCADE, file_path TEXT NOT NULL);

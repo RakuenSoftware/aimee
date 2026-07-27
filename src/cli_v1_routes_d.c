@@ -25,13 +25,20 @@ static const struct
    const char *method;
    pt_print_fn fn;
 } pt_print_table[] = {
-    {"delegate.roundtable", pt_print_delegate_roundtable},
+    {"roundtable.review", pt_print_roundtable_review},
     {"audit.verify", pt_print_audit},
     {"audit.checkpoint", pt_print_audit},
     {"audit.seal", pt_print_audit},
     {"audit.snapshot", pt_print_audit},
     {"init.run", pt_print_init_run},
     {"rules.generate", pt_print_rules_generate},
+    {"kb.grant.set", pt_print_grant_set},
+    {"kb.grant.revoke", pt_print_grant_revoke},
+    /* show is list filtered to one subject and shares its row shape, so it shares
+     * the printer too; they are distinct methods only so the marshaller can require
+     * show's --subject. */
+    {"kb.grant.list", pt_print_grant_list},
+    {"kb.grant.show", pt_print_grant_list},
     {"skill.list", pt_print_skill_list},
     {"skill.show", pt_print_skill_show},
     {"git.verify", pt_print_git_verify},
@@ -574,7 +581,9 @@ static const struct
     {"api.status", "GET", "/v1/api/status"},
     {"attempt.list", "POST", "/v1/attempts/list"},
     {"attempt.record", "POST", "/v1/attempts/record"},
+    {"audit.captures", "GET", "/v1/audit/captures"},
     {"audit.checkpoint", "POST", "/v1/audit/checkpoint"},
+    {"audit.replay", "POST", "/v1/audit/replay"},
     {"audit.seal", "POST", "/v1/audit/seal"},
     {"audit.snapshot", "POST", "/v1/audit/snapshot"},
     {"audit.verify", "GET", "/v1/audit/verify"},
@@ -617,7 +626,6 @@ static const struct
     {"dashboard.metrics", "GET", "/v1/dashboard/metrics"},
     {"dashboard.onboard", "GET", "/v1/dashboard/onboard"},
     {"dashboard.plans", "GET", "/v1/dashboard/plans"},
-    {"dashboard.plugins", "GET", "/v1/dashboard/plugins"},
     {"dashboard.traces", "GET", "/v1/dashboard/traces"},
     {"delegate", "POST", "/v1/delegate/run"},
     {"delegate.backend_exec", "POST", "/v1/delegate/backend_exec"},
@@ -639,6 +647,7 @@ static const struct
     {"evidence.provenance_retrieval_event", "POST", "/v1/audit/provenance"},
     {"evidence.trace_retrieval_event", "POST", "/v1/audit/trace"},
     {"graph.explain", "POST", "/v1/graph/explain"},
+    {"help.get", "POST", "/v1/help"},
     {"hooks.post", "POST", "/v1/hooks/post"},
     {"hooks.pre", "POST", "/v1/hooks/pre"},
     {"hooks.session_start", "POST", "/v1/hooks/session_start"},
@@ -682,9 +691,6 @@ static const struct
     {"optimize.export", "GET", "/v1/optimize/export"},
     {"optimize.promote", "POST", "/v1/optimize/promote"},
     {"optimize.replay_record", "POST", "/v1/optimize/replay-record"},
-    {"plugin.disable", "POST", "/v1/plugins/disable"},
-    {"plugin.enable", "POST", "/v1/plugins/enable"},
-    {"plugin.list", "GET", "/v1/plugins"},
     {"provider.get", "POST", "/v1/provider/get"},
     {"provider.list", "GET", "/v1/provider/list"},
     {"provider.models", "GET", "/v1/provider/models"},
@@ -751,8 +757,9 @@ static const struct
    const char *path;
 } CLI_V1_ASYNC_ROUTES[] = {
     {"curator.synthesize", "POST", "/v1/curator/synthesize"},
+#if AIMEE_WITH_ROUNDTABLE
     {"delegate.aggregate", "POST", "/v1/delegate/aggregate"},
-    {"delegate.roundtable", "POST", "/v1/delegate/roundtable"},
+#endif
     {"dev.sweep", "POST", "/v1/dev/sweep"},
     {"eval.run", "POST", "/v1/eval/run"},
     {"graph.sync_code", "POST", "/v1/graph/sync_code"},
@@ -763,6 +770,7 @@ static const struct
     {"kb.ingest", "POST", "/v1/kb/ingest"},
     {"kb.update", "POST", "/v1/kb/update"},
     {"memory.benchmark", "POST", "/v1/memory/benchmark"},
+    {"roundtable.review", "POST", "/v1/roundtable/review"},
     {"rules.generate", "POST", "/v1/rules/generate"},
 };
 /* @@GEN-CLI-V1-ROUTES END @@ */
@@ -798,6 +806,17 @@ const char *cli_v1_route_for_method(const char *method, const char **verb_out)
        /* Custom-handler routes whose response still matches the dispatch method. */
        {"session.list", "GET", "/v1/sessions"},
        {"kb.search", "POST", "/v1/kb/search"},
+       /* Write-tier grant administration. Bespoke handlers, so the generator cannot see
+        * them; POST on all three because the thin client marshals flags into a body. The
+        * server refuses these over TCP (v1_route_requires_uds), so a remote endpoint fails
+        * there rather than here. */
+       {"kb.grant.set", "POST", "/v1/grants/write-tier/set"},
+       {"kb.grant.revoke", "POST", "/v1/grants/write-tier/revoke"},
+       {"kb.grant.list", "POST", "/v1/grants/write-tier/list"},
+       /* Same route as list: `show` is that listing filtered to one subject, so the row shape
+        * has one definition. Only the METHOD differs, so the marshaller can require a
+        * subject — without that separation, `show` with no subject silently lists everything. */
+       {"kb.grant.show", "POST", "/v1/grants/write-tier/list"},
        {"kb.status", "GET", "/v1/kb/status"},
        {"kb.curator", "GET", "/v1/kb/curator"},
        {"memory.recall", "POST", "/v1/memory/recall"},
@@ -960,8 +979,15 @@ static cJSON *cli_v1_send(const char *remote, const char *bearer, const char *ve
    char *r = aimee_client_request(verb, path, body, &status);
    if (r)
    {
-      if (status >= 200 && status < 300)
-         resp = cJSON_Parse(r);
+      /* Parse the body whatever the status, as the POSIX branch above does. The
+       * server states WHY it refused in the body of its 4xx ({"status":"error",
+       * "message":...}), and the caller already renders that. Gating the parse on
+       * 2xx threw those bodies away and left resp==NULL, which the caller can only
+       * report as "could not reach the aimee-server /v1 endpoint (is the server
+       * running?)" -- so on Windows an authorization refusal was indistinguishable
+       * from an outage, and sent users to debug a server that had just answered.
+       * A non-JSON body still parses to NULL and falls through as before. */
+      resp = cJSON_Parse(r);
       free(r);
    }
 #endif
@@ -1015,11 +1041,70 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
              (strcmp(st->valuestring, "completed") == 0 || strcmp(st->valuestring, "failed") == 0 ||
               strcmp(st->valuestring, "cancelled") == 0))
          {
+            int ok = strcmp(st->valuestring, "completed") == 0;
             cJSON *result = cJSON_DetachItemFromObjectCaseSensitive(snap, "result");
+            if (ok && result)
+            {
+               cJSON_Delete(snap);
+               return result;
+            }
+            /* A failed/cancelled run, or a completed one with no result, used to
+             * become an empty object. Printers then rendered that as a zero-valued
+             * SUCCESS — `aimee kb build` reported "files indexed: 0, chunks added: 0"
+             * with exit status 0 when the run had actually failed, hiding the failure
+             * from humans and scripts alike. Surface it as an error envelope instead,
+             * carrying whatever the run recorded. */
+            const char *why = NULL;
+            /* A failed run usually carries its reason inside `result` (e.g.
+             * {"result":{"error":"rpc produced no response"}}), so look there first. */
+            if (result)
+            {
+               cJSON *re = cJSON_GetObjectItemCaseSensitive(result, "error");
+               if (cJSON_IsString(re) && re->valuestring[0])
+                  why = re->valuestring;
+               else if (cJSON_IsObject(re))
+               {
+                  cJSON *rm = cJSON_GetObjectItemCaseSensitive(re, "message");
+                  if (cJSON_IsString(rm) && rm->valuestring[0])
+                     why = rm->valuestring;
+               }
+            }
+            cJSON *e = why ? NULL : cJSON_GetObjectItemCaseSensitive(snap, "error");
+            if (cJSON_IsString(e) && e->valuestring[0])
+               why = e->valuestring;
+            else if (cJSON_IsObject(e))
+            {
+               cJSON *m = cJSON_GetObjectItemCaseSensitive(e, "message");
+               if (cJSON_IsString(m) && m->valuestring[0])
+                  why = m->valuestring;
+            }
+            if (!why)
+            {
+               cJSON *m = cJSON_GetObjectItemCaseSensitive(snap, "message");
+               if (cJSON_IsString(m) && m->valuestring[0])
+                  why = m->valuestring;
+            }
+            char msg[320];
+            if (why)
+               snprintf(msg, sizeof(msg), "%s", why);
+            else
+               snprintf(msg, sizeof(msg), "run %s with no result", st->valuestring);
+            /* Emit the OBJECT envelope {"error":{"message":...}}, not the string
+             * form. cli_v1_forward only treats a top-level string "error" as a
+             * failure when http_status >= 400 (a 2xx may legitimately carry one —
+             * cron.run returns job stderr that way), and the async path reports
+             * http_status 0. The object form is unconditionally an error there, so
+             * this reaches the caller as a real failure with exit status 1. */
+            cJSON *env = cJSON_CreateObject();
+            cJSON *err = env ? cJSON_AddObjectToObject(env, "error") : NULL;
+            if (err)
+            {
+               cJSON_AddStringToObject(err, "message", msg);
+               cJSON_AddStringToObject(err, "type", "run_failed");
+            }
+            cJSON_Delete(result);
             cJSON_Delete(snap);
-            /* Completed runs carry the raw dispatch result; a failed/empty run yields
-             * an empty object so the caller still gets a well-formed response. */
-            return result ? result : cJSON_CreateObject();
+            return env;
          }
          cJSON_Delete(snap);
       }
@@ -1248,6 +1333,22 @@ int cli_workspace_add_remote(const char *path)
    if (!path || !path[0])
    {
       fprintf(stderr, "usage: aimee workspace add <path>\n");
+      return 1;
+   }
+   /* `--repo <url>` exists in the local (same-host) command but not here, and the
+    * flag used to fall through to realpath() and come back as
+    * "cannot resolve path '--repo' on this host" — which reads like a broken path
+    * argument rather than an unsupported mode, and says nothing about what to do.
+    * Cloning onto the server needs a browser login (the clone route is webchat-only),
+    * so name that instead of letting the user debug a phantom path. */
+   if (path[0] == '-')
+   {
+      fprintf(stderr,
+              "aimee: `workspace add %s` is not available against a remote server.\n"
+              "  Cloning a repo onto the server is a browser operation: open the web UI\n"
+              "  and use the setup wizard's \"Workspaces & projects\" step.\n"
+              "  From the CLI, `aimee workspace add <path>` registers a path on THIS host.\n",
+              path);
       return 1;
    }
    char *abs = realpath(path, NULL);
@@ -1496,7 +1597,22 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
 
    cJSON *req = marshal_request(route->method, fwd_argc, fwd_argv);
    if (!req)
+   {
+      /* A marshalling failure means the arguments could not be turned into a request, so
+       * NOTHING was sent. That used to exit 2 in total silence for every command in the CLI,
+       * which reads as "it worked" to a script and as nothing at all to a person. A review
+       * asked for a generic explanation and it belongs here rather than in each marshaller.
+       *
+       * Suppressed when the marshaller already printed something specific — a per-method
+       * message is strictly better than this one, and two messages for one mistake is worse
+       * than either alone. */
+      if (!marshal_request_take_reported())
+         fprintf(stderr,
+                 "aimee: '%s' — arguments are missing or invalid, so no request was sent.\n"
+                 "  Run 'aimee help' or the command with no arguments for its usage.\n",
+                 route->method);
       return 2;
+   }
 
    int timeout = route->timeout_ms > 0 ? route->timeout_ms : CLIENT_DEFAULT_TIMEOUT_MS;
    if (strcmp(route->method, "delegate") == 0)

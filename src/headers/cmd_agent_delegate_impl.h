@@ -217,6 +217,13 @@ int delegate_apply_route_overrides(agent_config_t *cfg, const char *role, const 
 int delegate_route_preflight(agent_config_t *cfg, const char *role, char *errbuf, size_t errbuf_sz);
 void delegate_infer_capability_requirements(const char *prompt, int tools_enabled,
                                             unsigned *required_caps_out, int *min_context_out);
+/* Disable every agent whose declared max_scope ceiling cannot serve a packet of
+ * this scope. AGENT_SCOPE_UNSET is a no-op here (the routing filter resolves it
+ * to whole_task). On "nothing can serve it" the error LISTS the fleet and each
+ * agent's ceiling, so the operator is not left guessing which seat to change. */
+int delegate_filter_route_scope(agent_config_t *cfg, agent_scope_t scope, char *errbuf,
+                                size_t errbuf_sz);
+
 int delegate_filter_route_capabilities(agent_config_t *cfg, const char *role,
                                        unsigned required_caps, int min_context, int drop_deprecated,
                                        char *errbuf, size_t errbuf_sz);

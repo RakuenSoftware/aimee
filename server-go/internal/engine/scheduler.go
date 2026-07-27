@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,8 +16,12 @@ type Scheduler struct {
 	engine            *Engine
 	concurrency       int
 	concurrencySource func() int
+	perWorkflow       int
+	perWorkflowSource func() int
 	policySource      func() RunPolicy
 	pollEvery         time.Duration
+	transientPauses   []transientPause
+	cancelTerminal    func(context.Context) (int, error)
 	log               *slog.Logger
 
 	mu      sync.Mutex
@@ -25,15 +30,54 @@ type Scheduler struct {
 	wake    chan struct{}
 }
 
+type transientPause struct {
+	reason  string
+	backoff time.Duration
+}
+
+// Scheduler-owned pauses describe unavailable execution machinery, not a
+// lifecycle decision. Retrying them creates a new execution version, so
+// cancelled or malformed durable delegate results cannot poison every future
+// attempt. Work-item cost and turn caps remain the bounded safety backstops.
+var schedulerTransientPauses = []transientPause{
+	{reason: "runner_unavailable", backoff: 5 * time.Second},
+	// Provider throttles advertise retry-after windows in the tens of seconds;
+	// re-dispatching on the runner_unavailable backoff just re-trips the limit.
+	{reason: "capacity_backpressure", backoff: 30 * time.Second},
+	{reason: "ci_pending", backoff: 15 * time.Second},
+	{reason: "merge_pending", backoff: 15 * time.Second},
+	{reason: "panel_unreachable", backoff: 60 * time.Second},
+	{reason: "roundtable_discussion", backoff: 60 * time.Second},
+	{reason: "roundtable_chairman", backoff: 60 * time.Second},
+}
+
 func (s *Scheduler) SetConcurrencySource(source func() int) {
 	s.mu.Lock()
 	s.concurrencySource = source
 	s.mu.Unlock()
 	s.Notify()
 }
+
+// SetPerWorkflowSource installs a live override for the per-workflow concurrency
+// cap: at most this many work items belonging to the same root workflow run may
+// execute at once. It bounds how much of the global agent budget a single
+// workflow can consume, so one fan-out cannot starve every other run.
+func (s *Scheduler) SetPerWorkflowSource(source func() int) {
+	s.mu.Lock()
+	s.perWorkflowSource = source
+	s.mu.Unlock()
+	s.Notify()
+}
 func (s *Scheduler) SetPolicySource(source func() RunPolicy) {
 	s.mu.Lock()
 	s.policySource = source
+	s.mu.Unlock()
+	s.Notify()
+}
+
+func (s *Scheduler) SetTerminalCancellation(cancel func(context.Context) (int, error)) {
+	s.mu.Lock()
+	s.cancelTerminal = cancel
 	s.mu.Unlock()
 	s.Notify()
 }
@@ -53,8 +97,9 @@ func NewScheduler(db *db1.Store, engine *Engine, concurrency int, logger *slog.L
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Scheduler{db: db, engine: engine, concurrency: concurrency,
-		pollEvery: time.Second, log: logger, running: make(map[string]struct{}),
+	return &Scheduler{db: db, engine: engine, concurrency: concurrency, perWorkflow: 1,
+		pollEvery: time.Second, transientPauses: append([]transientPause(nil), schedulerTransientPauses...),
+		log: logger, running: make(map[string]struct{}),
 		cancels: make(map[string]context.CancelFunc), wake: make(chan struct{}, 1)}
 }
 
@@ -95,7 +140,10 @@ func (s *Scheduler) fill(ctx context.Context) {
 	s.mu.Lock()
 	policySource := s.policySource
 	concurrencySource := s.concurrencySource
+	perWorkflowSource := s.perWorkflowSource
+	cancelTerminal := s.cancelTerminal
 	concurrency := s.concurrency
+	perWorkflow := s.perWorkflow
 	s.mu.Unlock()
 	if policySource != nil {
 		policy := policySource()
@@ -114,11 +162,26 @@ func (s *Scheduler) fill(ctx context.Context) {
 			}
 		}
 	}
-	for reason, backoff := range map[string]time.Duration{"runner_unavailable": 5 * time.Second, "ci_pending": 15 * time.Second, "merge_pending": 15 * time.Second, "panel_unreachable": 60 * time.Second} {
-		if resumed, err := s.db.ResumeTransient(ctx, reason, backoff); err != nil {
-			s.log.Error("resume transient workflows", "reason", reason, "error", err)
+	if stopped, err := s.db.ReconcileOrphanedDescendants(ctx); err != nil {
+		s.log.Error("reconcile orphaned workflow descendants", "error", err)
+	} else if len(stopped) > 0 {
+		for _, workItemID := range stopped {
+			s.Cancel(workItemID)
+		}
+		s.log.Warn("stopped orphaned workflow descendants", "count", len(stopped))
+	}
+	if cancelTerminal != nil {
+		if cancelled, err := cancelTerminal(ctx); err != nil {
+			s.log.Error("cancel terminal workflow delegate jobs", "cancelled", cancelled, "error", err)
+		} else if cancelled > 0 {
+			s.log.Info("cancelled terminal workflow delegate jobs", "count", cancelled)
+		}
+	}
+	for _, pause := range s.transientPauses {
+		if resumed, err := s.db.ResumeTransient(ctx, pause.reason, pause.backoff); err != nil {
+			s.log.Error("resume transient workflows", "reason", pause.reason, "error", err)
 		} else if resumed > 0 {
-			s.log.Info("resumed transient workflows", "reason", reason, "count", resumed)
+			s.log.Info("resumed transient workflows", "reason", pause.reason, "count", resumed)
 		}
 	}
 	if resumed, err := s.db.ResumeReadyParents(ctx); err != nil {
@@ -130,6 +193,14 @@ func (s *Scheduler) fill(ctx context.Context) {
 		if live := concurrencySource(); live > 0 {
 			concurrency = live
 		}
+	}
+	if perWorkflowSource != nil {
+		if live := perWorkflowSource(); live > 0 {
+			perWorkflow = live
+		}
+	}
+	if perWorkflow < 1 {
+		perWorkflow = 1
 	}
 	s.mu.Lock()
 	available := concurrency - len(s.running)
@@ -149,8 +220,17 @@ func (s *Scheduler) fill(ctx context.Context) {
 		if item.State != "active" || item.PauseReason != "" {
 			continue
 		}
+		root := rootWorkflowID(item.ID)
 		s.mu.Lock()
 		if _, exists := s.running[item.ID]; exists {
+			s.mu.Unlock()
+			continue
+		}
+		// Per-workflow cap: never let one root workflow occupy more than
+		// perWorkflow slots at once, even when the global budget has room. The
+		// count includes items dispatched earlier in this same pass, since they
+		// were already added to s.running above.
+		if s.runningForRootLocked(root) >= perWorkflow {
 			s.mu.Unlock()
 			continue
 		}
@@ -159,6 +239,28 @@ func (s *Scheduler) fill(ctx context.Context) {
 		available--
 		go s.drive(ctx, item.ID)
 	}
+}
+
+// rootWorkflowID returns the root work-item ID shared by every item in a single
+// workflow run. Children are named "<root>.s<split>.g<gen>.<slice>", so the root
+// is the prefix up to the first "." (a root ID like "wi_<hash>" has none).
+func rootWorkflowID(id string) string {
+	if dot := strings.IndexByte(id, '.'); dot >= 0 {
+		return id[:dot]
+	}
+	return id
+}
+
+// runningForRootLocked counts currently-dispatched work items belonging to the
+// given root workflow. Caller must hold s.mu.
+func (s *Scheduler) runningForRootLocked(root string) int {
+	n := 0
+	for id := range s.running {
+		if rootWorkflowID(id) == root {
+			n++
+		}
+	}
+	return n
 }
 
 func (s *Scheduler) drive(ctx context.Context, workItemID string) {

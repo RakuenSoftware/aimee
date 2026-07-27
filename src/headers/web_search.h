@@ -13,6 +13,20 @@
 /* Maximum bytes in the formatted output block before truncation */
 #define WEB_SEARCH_MAX_OUTPUT_BYTES 8192
 
+/* Pass as `fetch_pages` to mean "the caller has no opinion" -- config decides,
+ * falling back to WEB_SEARCH_FETCH_PAGES_DEFAULT. Distinct from an explicit 0,
+ * which means the caller really does want snippets only. */
+#define WEB_SEARCH_FETCH_PAGES_UNSET (-1)
+
+/* Built-in default for page fetching: ON.
+ *
+ * A search that returns the answer beats one that returns links to the answer,
+ * and the alternative costs a whole extra agent turn to read one of the results.
+ * The price is latency -- bounded by the per-page and total deadlines in
+ * web_search.c, with partial results tolerated -- and it is why `fetch_pages:
+ * false` on the tool, or `search.fetch_pages: false` in config, exists. */
+#define WEB_SEARCH_FETCH_PAGES_DEFAULT 1
+
 typedef struct
 {
    char *title;
@@ -31,6 +45,20 @@ typedef struct
  * The caller must free() the returned string.
  */
 char *web_search(const char *query, int max_results);
+
+/* web_search with optional page fusion.
+ *
+ * fetch_pages   non-zero: fetch the top results through the guarded egress path
+ *               and append query-relevant extracted spans after the (unchanged)
+ *               snippet block. Off by default -- fetching pages turns a ~1s
+ *               search into several seconds.
+ * extract_query optional; when NULL or empty the search query is used. Useful
+ *               when the caller wants something the search terms do not express,
+ *               e.g. "return the README verbatim".
+ *
+ * Posix only for the fusion half: it needs the pinned-connect egress path. On
+ * Windows fetch_pages is ignored and the snippet block is returned unchanged. */
+char *web_search_ex(const char *query, int max_results, int fetch_pages, const char *extract_query);
 
 /*
  * web_search_format_results: build the text block from a result array.

@@ -7,7 +7,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "audit_worm_chain.h"
+#include <aimee/audit/audit_worm_chain.h>
 #include "config.h"
 #include "db2_internal.h"
 #include "db_postgres.h"

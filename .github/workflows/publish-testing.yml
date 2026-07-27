@@ -85,13 +85,13 @@ jobs:
           # builds are fast and never start the LTO C build from scratch.
           cache-from: type=gha,scope=${{ matrix.image.name }}-amd64
           cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}-amd64
-          # WITH_WEBCHAT bundles the browser UI (default for aimee-server; the
+          # WITH_RUNTIME_WEB bundles the browser UI (default for aimee-server; the
           # aimee-kb image ignores it). WITH_LLM=0: no LLM is bundled — the deploy
           # stack runs a separate, profile-gated aimee-llm container instead (see
           # compose.server.yaml).
           build-args: |
             AIMEE_VERSION=testing-${{ env.SHA7 }}
-            WITH_WEBCHAT=1
+            WITH_RUNTIME_WEB=1
             WITH_LLM=0
           tags: |
             ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }}:testing

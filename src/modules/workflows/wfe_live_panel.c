@@ -214,7 +214,13 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
 
       roundtable_result_t rt;
       memset(&rt, 0, sizeof rt);
-      if (delegate_roundtable_run(&acfg, &cfg, task, &opts, &rt) != 0)
+      const char *previous_cwd = run_cmd_get_cwd();
+      char previous_cwd_copy[MAX_PATH_LEN];
+      snprintf(previous_cwd_copy, sizeof previous_cwd_copy, "%s", previous_cwd ? previous_cwd : "");
+      run_cmd_set_cwd(pkt->workdir);
+      int roundtable_rc = delegate_roundtable_run(&acfg, &cfg, task, &opts, &rt);
+      run_cmd_set_cwd(previous_cwd_copy[0] ? previous_cwd_copy : NULL);
+      if (roundtable_rc != 0)
       {
          delegate_roundtable_result_free(&rt);
          rc_final = WFE_PANEL_UNREACHABLE;

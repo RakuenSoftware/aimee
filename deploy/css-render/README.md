@@ -1,107 +1,80 @@
-# aimee css-render sidecar (#4-full render backend)
+# CSS render sidecar
 
-The render backend for the CSS migration assistant's **rendered computed-style
-oracle** (#4-full). It turns `{html, css}` into a computed-style snapshot by
-rendering in headless Chromium, so the oracle can diff the *computed* style of a
-component before vs. after a conversion, the real correctness signal, stronger
-than the static declaration-set oracle.
+This sidecar gives the CSS migration assistant a computed-style oracle. It renders untrusted HTML
+and CSS in headless Chromium, then returns a bounded snapshot for before/after comparison. aimee-kb
+never embeds a browser.
 
-Because it renders **untrusted** application/exemplar markup in a browser engine
-(a code-execution surface, proposal §8), it runs as an **isolated container** that
-aimee-kb reaches only over HTTP (or stdin/stdout). aimee never embeds a browser.
+## Contract
 
-## How aimee talks to it
+`css_render_command` reads this on stdin:
 
-aimee's render adapter is the configured `css_render_command`: a shell command
-that reads `{"html","css"}` on stdin and writes the snapshot JSON on stdout
-(exactly like `embedding_command` drives the embedder). Two shapes:
-
-- **HTTP sidecar**, a long-running container; the command `curl`s it.
-- **One-shot**, an ephemeral container per render reading stdin → stdout → exit
-  (`oneshot.js`); zero idle footprint.
-
-With it configured, aimee-kb registers the backend at startup and
-`aimee css render-capture <project> <unit> <before|after> <html> <css>` renders +
-stores a snapshot; `aimee css render-verify <project> <unit>` diffs before/after.
-
-## Files
-
-- `snapshot.js`, shared headless render (the `[data-ref]` capture + property
-  allowlist).
-- `render.js`, long-running HTTP server (`POST /render`, `GET /health`).
-- `oneshot.js`, stdin `{html,css}` → stdout snapshot → exit.
-- `css-render-ctl.sh`, on-demand lifecycle (`up` / `down` / `status` / `reap` /
-  `render`).
-- `Dockerfile`, isolated, non-root, JS-disabled render context.
-
-## Snapshot contract
-
-Request: `{"html":"...","css":"..."}` → 
 ```json
-{"nodes":[{"ref":"<selector>","computed":{"<prop>":"<value>", ...}}, ...]}
+{"html":"...","css":"..."}
 ```
-Nodes captured = every element with a `data-ref` attribute. Properties = a fixed
-box/visual allowlist (`snapshot.js` `PROPS`), small so diffs stay stable and
-snapshots bounded.
 
-## Build
+It writes:
 
-```sh
+```json
+{"nodes":[{"ref":"header","computed":{"display":"flex"}}]}
+```
+
+Only elements with `data-ref` are captured. `snapshot.js` fixes the property allowlist so snapshots
+stay small and stable.
+
+Files:
+
+- `snapshot.js`: render and capture;
+- `render.js`: long-running `POST /render` server plus `GET /health`;
+- `oneshot.js`: one render over stdin/stdout;
+- `css-render-ctl.sh`: start, stop, inspect, reap, or run the container;
+- `Dockerfile`: non-root Chromium image with page JavaScript disabled.
+
+## Run it
+
+Build once:
+
+```bash
 docker build -t aimee-css-render deploy/css-render
 ```
 
-## On-demand deployment (don't run Chromium 24/7)
+For a migration session, start the HTTP sidecar:
 
-Pick one of three patterns. All keep Chromium off except while migrating.
-
-### 1. Session-scoped (recommended, no privilege change to aimee-kb)
-
-Start the sidecar only around a migration session; aimee-kb just `curl`s it.
-
-```sh
-deploy/css-render/css-render-ctl.sh up            # before migrating
-# aimee.yaml (aimee-kb):
-#   css_style_graph_enabled: true
-#   css_render_command: "curl -s --max-time 30 --data-binary @- http://<host>:8780/render"
-# ... run `aimee css render-capture ...` / render-verify ...
-deploy/css-render/css-render-ctl.sh down          # after
+```bash
+deploy/css-render/css-render-ctl.sh up
 ```
 
-aimee-kb needs **no** container privileges, it only makes an HTTP call. The
-oracle reports `UNAVAILABLE` (never a fake verdict) whenever the sidecar is down.
-
-### 2. Lazy-start + idle-stop
-
-As (1), but leave it warm during active work and let a cron reap it after idle
-(render.js stamps a marker on every render):
-
-```cron
-*/5 * * * *  /path/css-render-ctl.sh reap 900     # stop after 15 min idle
-```
-
-### 3. Per-render ephemeral (zero idle)
-
-A fresh container per render via `oneshot.js`. Point `css_render_command` straight
-at it:
+Point aimee-kb at it:
 
 ```yaml
-css_render_command: "/path/css-render-ctl.sh render"   # == docker run --rm -i aimee-css-render node oneshot.js
+css_style_graph_enabled: true
+css_render_command: "curl -s --max-time 30 --data-binary @- http://host:8780/render"
 ```
 
-This is the most "as-needed" (no idle container at all) but pays Chromium
-cold-start (~1–3 s) per render, and **requires container-launch access wherever
-`css_render_command` runs** (i.e. a Docker socket reachable from aimee-kb), a
-privilege surface to weigh vs. patterns 1–2.
+Capture and compare:
 
-### Non-default runtimes
-
-`css-render-ctl.sh` honours `DOCKER` and `DOCKER_HOST`. For the smoothnas
-LXC2Docker runtime:
-
-```sh
-DOCKER_HOST=unix:///run/smoothnas-runtime/docker.sock deploy/css-render/css-render-ctl.sh up
+```bash
+aimee css render-capture <project> <unit> before before.html before.css
+aimee css render-capture <project> <unit> after after.html after.css
+aimee css render-verify <project> <unit>
 ```
 
-Run the sidecar on an isolated network with no access to internal services (it
-executes untrusted CSS/HTML). JavaScript is disabled in the render context; only
-`<style>` + markup are evaluated.
+Stop it when done:
+
+```bash
+deploy/css-render/css-render-ctl.sh down
+```
+
+For zero idle cost, run one container per render:
+
+```yaml
+css_render_command: "/path/to/css-render-ctl.sh render"
+```
+
+That path pays Chromium startup on every call and needs access to a container runtime. The HTTP
+sidecar keeps Docker authority out of aimee-kb.
+
+`css-render-ctl.sh` honors `DOCKER` and `DOCKER_HOST`. If the backend is down, the oracle reports
+`UNAVAILABLE`; it does not invent a verdict.
+
+Run the sidecar on an isolated network with no route to internal services. HTML and CSS are
+untrusted input even with page JavaScript disabled.

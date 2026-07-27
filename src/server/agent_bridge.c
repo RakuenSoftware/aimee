@@ -10,6 +10,7 @@
 #include "log.h"
 #include "model_sampling.h"
 #include "model_registry.h"
+#include "agent_config.h" /* agent_catalog_provider */
 #include "tool_call_args.h"
 #include "cJSON.h"
 #include <string.h>
@@ -116,14 +117,49 @@ static void openrouter_add_routing_hint(const agent_t *agent, cJSON *req)
    }
    cJSON_AddItemToObject(req, "models", models);
 }
+/* Reject the gross misconfiguration where the OUTPUT limit alone would consume
+ * the entire context window, leaving no room for any prompt at all.
+ *
+ * Scope, precisely: this function does NOT know the request's prompt size, so it
+ * cannot and does not guarantee `prompt + output <= window`. It only bounds the
+ * case that is invalid regardless of prompt — an output cap at or above the
+ * whole window. Half the window is a policy choice for that case, not a derived
+ * bound. agent_exec_context_budget_chars() clamps its own PROMPT arithmetic, but
+ * that is a local calculation; without this the REQUEST still carried the
+ * oversized limit, so a 200k-window agent pinned at 300k asked for 300k output.
+ *
+ * The window is the agent's effective ceiling: the operator's policy value when
+ * set, else the model catalog. Consulting only middleware.context_window left a
+ * catalogued 8k model with no override accepting a pinned 300k. */
+static int agent_clamp_to_context(const agent_t *agent, int tokens)
+{
+   if (!agent || tokens <= 0)
+      return tokens;
+   int window = agent->middleware.context_window;
+   if (window <= 0)
+   {
+      model_capability_t cap;
+      if (model_capability_get(agent_catalog_provider(agent), agent->model, &cap))
+         window = cap.context_window;
+   }
+   if (window > 1 && tokens >= window)
+      return window / 2;
+   return tokens;
+}
+
 int agent_request_max_tokens(const agent_t *agent, int requested)
 {
    if (requested > 0)
-      return requested; /* caller pinned an explicit budget (e.g. a short ping) */
+      return agent_clamp_to_context(agent, requested); /* caller pinned a budget */
    if (agent && agent->max_tokens > 0)
-      return agent->max_tokens; /* agents.json / --max-tokens pinned a cap */
+      return agent_clamp_to_context(agent, agent->max_tokens); /* agents.json cap */
    /* No explicit cap: use the model's own output ceiling, never a hardcoded one. */
-   return model_max_output(agent ? agent->provider : NULL, agent ? agent->model : NULL);
+   /* Catalog identity, not the wire provider: a third-party vendor on another
+    * vendor's API otherwise resolves the wrong capability row and gets the
+    * non-reasoning 8192 output ceiling instead of its real one. */
+   return agent_clamp_to_context(
+       agent,
+       model_max_output(agent ? agent_catalog_provider(agent) : NULL, agent ? agent->model : NULL));
 }
 
 cJSON *agent_build_request_openai(const agent_t *agent, cJSON *messages, cJSON *tools,
@@ -569,6 +605,22 @@ static void responses_parse_sse_events(const char *body, parsed_response_t *out,
    free(data);
 }
 
+/* 1 if `resp`'s output array already carries a function_call item. */
+static int responses_object_has_function_call(cJSON *resp)
+{
+   cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
+   if (!cJSON_IsArray(output))
+      return 0;
+   cJSON *item = NULL;
+   cJSON_ArrayForEach(item, output)
+   {
+      cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "type");
+      if (type && cJSON_IsString(type) && strcmp(type->valuestring, "function_call") == 0)
+         return 1;
+   }
+   return 0;
+}
+
 /* 1 if `resp`'s output array already carries a non-empty output_text part. */
 static int responses_object_has_output_text(cJSON *resp)
 {
@@ -625,9 +677,39 @@ cJSON *agent_responses_sse_response_object(const char *body)
    responses_take_longer_content(&scratch, &part_text);
    responses_take_longer_content(&scratch, &done_text);
    responses_take_longer_content(&scratch, &delta_text);
-   cJSON_Delete(collected);
 
    cJSON *resp = completed ? completed : cJSON_Parse(body);
+   /* Codex's response.completed payload can arrive with an output array that
+    * omits the items it already streamed -- the same emptiness handled for text
+    * just below. A function_call delivered via response.output_item.done was
+    * therefore collected here and then thrown away with `collected`, so the
+    * whole turn produced no tool call and no text: the delegate reported
+    * "no content in final response" with tool_calls=0 on every attempt.
+    * Measured on a live codex turn: item_types=[reasoning,function_call] on the
+    * wire, zero tool calls extracted.
+    *
+    * Fold the streamed function_call items back in when the response object
+    * carries none of its own. Never when it does -- the completed payload is
+    * authoritative whenever it is populated. */
+   if (resp && !responses_object_has_function_call(resp))
+   {
+      const cJSON *item = NULL;
+      cJSON_ArrayForEach(item, collected)
+      {
+         const cJSON *type = cJSON_GetObjectItemCaseSensitive((cJSON *)item, "type");
+         if (!cJSON_IsString(type) || strcmp(type->valuestring, "function_call") != 0)
+            continue;
+         cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
+         if (!cJSON_IsArray(output))
+            output = cJSON_AddArrayToObject(resp, "output");
+         cJSON *dup = cJSON_Duplicate(item, 1);
+         if (output && dup)
+            cJSON_AddItemToArray(output, dup);
+         else
+            cJSON_Delete(dup);
+      }
+   }
+   cJSON_Delete(collected);
    if (resp && scratch.content && scratch.content[0] && !responses_object_has_output_text(resp))
    {
       cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");

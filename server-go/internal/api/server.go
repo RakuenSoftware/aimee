@@ -14,6 +14,7 @@ import (
 
 	appconfig "github.com/JBailes/aimee/server-go/internal/config"
 	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/roundtable"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
@@ -27,9 +28,13 @@ type Server struct {
 	notify          func()
 	cancel          func(string)
 	cleanupWorktree func(context.Context, db1.WorkItem) error
-	triggerMu       sync.Mutex
-	triggerErrorsMu sync.Mutex
-	triggerErrors   map[string]string
+	roundtable      interface {
+		Review(context.Context, roundtable.ReviewRequest) (roundtable.RunResult, error)
+	}
+	artifactHTTPClient *http.Client
+	triggerMu          sync.Mutex
+	triggerErrorsMu    sync.Mutex
+	triggerErrors      map[string]string
 }
 
 func New(db *db1.Store, artifacts *wfe.ArtifactStore, workflowDir ...string) (*Server, error) {
@@ -71,6 +76,7 @@ func New(db *db1.Store, artifacts *wfe.ArtifactStore, workflowDir ...string) (*S
 	s.mux.HandleFunc("POST /v1/config/set", s.configSet)
 	s.mux.HandleFunc("POST /v1/trigger/fire", s.triggerFire)
 	s.mux.HandleFunc("POST /v1/dev/submit", s.devSubmit)
+	s.mux.HandleFunc("POST /v1/roundtable/review", s.roundtableReview)
 	return s, nil
 }
 
@@ -80,6 +86,15 @@ func (s *Server) SetWorktreeCleanup(cleanup func(context.Context, db1.WorkItem) 
 	s.cleanupWorktree = cleanup
 }
 func (s *Server) SetConfigStore(store *appconfig.Store) { s.config = store }
+func (s *Server) SetRoundtableReviewer(reviewer interface {
+	Review(context.Context, roundtable.ReviewRequest) (roundtable.RunResult, error)
+}) {
+	s.roundtable = reviewer
+}
+
+func (s *Server) SetRoundtableArtifactHTTPClient(client *http.Client) {
+	s.artifactHTTPClient = client
+}
 
 func (s *Server) workflowRegistry() (*wfe.Registry, error) {
 	if s.workflows != nil {

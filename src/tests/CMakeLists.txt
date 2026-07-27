@@ -34,26 +34,6 @@ endfunction()
 
 # Portable unit tests that build cleanly under both POSIX and the current
 # Windows CMake target set.
-add_executable(test_plugin_loader test_plugin_loader.c)
-target_include_directories(test_plugin_loader PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/..
-  ${CMAKE_CURRENT_SOURCE_DIR}/../headers
-    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
-  ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
-aimee_enable_test_asserts(test_plugin_loader)
-if(TARGET aimee-agent)
-  if(NOT WIN32)
-    target_link_libraries(test_plugin_loader PRIVATE
-      -Wl,--start-group aimee-agent aimee-data aimee-core -Wl,--end-group)
-  else()
-    target_link_libraries(test_plugin_loader PRIVATE aimee-agent aimee-data aimee-core)
-  endif()
-elseif(TARGET aimee-core)
-  target_link_libraries(test_plugin_loader PRIVATE aimee-core)
-endif()
-add_test(NAME test_plugin_loader COMMAND test_plugin_loader)
-set_tests_properties(test_plugin_loader PROPERTIES
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 aimee_add_test(test_memory_provider test_memory_provider.c)
 aimee_add_test(test_harness_memory test_harness_memory.c)
 aimee_add_test(test_memory_redirect test_memory_redirect.c)
@@ -68,11 +48,12 @@ aimee_add_test(test_plugin_c_hook test_plugin_c_hook.c)
 # the module + cJSON directly rather than linking aimee-core, so the test's
 # agent_http_get/git_host_cred_get stubs don't clash with the real symbols.
 add_executable(test_git_org_repos test_git_org_repos.c
-  ../server/git_org_repos.c ../vendor/cJSON.c)
+  ../modules/git/git_org_repos.c ../vendor/cJSON.c)
 target_include_directories(test_git_org_repos PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
     ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/git
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 aimee_enable_test_asserts(test_git_org_repos)
 add_test(NAME test_git_org_repos COMMAND test_git_org_repos)
@@ -83,11 +64,13 @@ set_tests_properties(test_git_org_repos PROPERTIES
 # GitLab/Gitea device flow. HTTP + vault externals stubbed in the test (never
 # invoked by the pure functions under test).
 add_executable(test_git_oauth_device test_git_oauth_device.c
-  ../server/git_oauth_device.c ../vendor/cJSON.c)
+  ../modules/git/git_oauth_device.c ../vendor/cJSON.c)
 target_include_directories(test_git_oauth_device PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
     ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/git
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/vault
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 aimee_enable_test_asserts(test_git_oauth_device)
 add_test(NAME test_git_oauth_device COMMAND test_git_oauth_device)
@@ -99,11 +82,12 @@ set_tests_properties(test_git_oauth_device PROPERTIES
 # (never invoked by the pure functions under test). POSIX-only (<pty.h>).
 if(NOT WIN32)
   add_executable(test_git_oauth_gh test_git_oauth_gh.c
-    ../server/git_oauth_gh.c)
+    ../modules/git/git_oauth_gh.c)
   target_include_directories(test_git_oauth_gh PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..
     ${CMAKE_CURRENT_SOURCE_DIR}/../headers
     ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/git
     ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
   target_link_libraries(test_git_oauth_gh PRIVATE Threads::Threads)
   aimee_enable_test_asserts(test_git_oauth_gh)
@@ -130,6 +114,98 @@ add_test(NAME test_context_engine COMMAND test_context_engine)
 set_tests_properties(test_context_engine PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 aimee_add_test(test_util test_util.c)
+
+# Event-bus wire codec (feature tree slice 1). Self-contained: bus_wire.c has no
+# dependency beyond libc, so the test links it directly rather than via a lib.
+aimee_add_test(test_bus_wire test_bus_wire.c ../modules/bus/bus_wire.c)
+target_include_directories(test_bus_wire PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+target_compile_definitions(test_bus_wire PRIVATE
+  BUS_VECTOR_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bus")
+aimee_add_test(test_bus_ring test_bus_ring.c ../modules/bus/bus_ring.c)
+target_include_directories(test_bus_ring PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+find_package(Threads REQUIRED)
+target_link_libraries(test_bus_ring PRIVATE Threads::Threads)
+aimee_add_test(test_bus_region test_bus_region.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c)
+target_include_directories(test_bus_region PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+aimee_add_test(test_bus_arena test_bus_arena.c ../modules/bus/bus_arena.c)
+target_include_directories(test_bus_arena PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+aimee_add_test(test_bus_host test_bus_host.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c)
+target_include_directories(test_bus_host PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+
+aimee_add_test(test_bus_route test_bus_route.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c)
+target_include_directories(test_bus_route PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+
+aimee_add_test(test_bus_flow test_bus_flow.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c)
+target_include_directories(test_bus_flow PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+
+aimee_add_test(test_bus_client test_bus_client.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c)
+target_include_directories(test_bus_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+find_package(Threads REQUIRED)
+target_link_libraries(test_bus_client PRIVATE Threads::Threads)
+aimee_add_test(test_bus_capture test_bus_capture.c ../modules/bus/bus_capture.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c)
+target_include_directories(test_bus_capture PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+target_link_libraries(test_bus_capture PRIVATE Threads::Threads)
+
+# First real module-on-bus integration: the DB1-backed user-memory recall served
+# over the bus and verified against a direct call (feature-tree memory-first slice).
+# The bus sources are compiled straight into this test binary; the real DB1 memory
+# path comes from aimee-core, which aimee_add_test links. A test binary only — D7
+# keeps the bus out of every shipping target.
+aimee_add_test(test_bus_memory_recall test_bus_memory_recall.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c)
+target_include_directories(test_bus_memory_recall PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+target_link_libraries(test_bus_memory_recall PRIVATE Threads::Threads)
+
+# Real mutating memory op over the bus: upsert (insert + update), verified by
+# reading the real store back. Same rationale as the recall test above (D7-clean).
+aimee_add_test(test_bus_memory_upsert test_bus_memory_upsert.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c)
+target_include_directories(test_bus_memory_upsert PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+target_link_libraries(test_bus_memory_upsert PRIVATE Threads::Threads)
+
+# A second, distinct module over the bus: real config_autonomy_lookup vs a direct
+# call, incl. a live env-override case. Config deps come from aimee-core. D7-clean.
+aimee_add_test(test_bus_config_autonomy test_bus_config_autonomy.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c)
+target_include_directories(test_bus_config_autonomy PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+target_link_libraries(test_bus_config_autonomy PRIVATE Threads::Threads)
+
+# audit-on-bus durability: the first module being migrated onto the bus. Emits N
+# rows through the real producer/consumer and requires the real ledger to hold
+# exactly N, each once, zero drops. obs_bus + bus compiled in; the ledger reader
+# and file writer come from aimee-core. Test binary only.
+aimee_add_test(test_bus_audit_durability test_bus_audit_durability.c ../modules/audit/obs_bus.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c ../modules/bus/bus_capture.c)
+target_include_directories(test_bus_audit_durability PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
+target_link_libraries(test_bus_audit_durability PRIVATE Threads::Threads)
+
+# audit-on-bus record+replay: the auditability payoff. Emits rows, reads the real
+# capture file back, requires faithful ordered replay of every governed-action row.
+aimee_add_test(test_bus_audit_replay test_bus_audit_replay.c ../modules/audit/obs_bus.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c ../modules/bus/bus_capture.c)
+target_include_directories(test_bus_audit_replay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
+target_link_libraries(test_bus_audit_replay PRIVATE Threads::Threads)
+
+# audit-on-bus capture retention: prior sessions kept, files bounded.
+aimee_add_test(test_bus_audit_retention test_bus_audit_retention.c ../modules/audit/obs_bus.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c ../modules/bus/bus_capture.c)
+target_include_directories(test_bus_audit_retention PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
+target_link_libraries(test_bus_audit_retention PRIVATE Threads::Threads)
+
+# The operator replay tool (aimee-server --audit-replay): render a capture file.
+aimee_add_test(test_bus_audit_replay_tool test_bus_audit_replay_tool.c ../modules/audit/obs_bus.c ../modules/audit/audit_replay.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c ../modules/bus/bus_capture.c)
+target_include_directories(test_bus_audit_replay_tool PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
+target_link_libraries(test_bus_audit_replay_tool PRIVATE Threads::Threads)
+
+# Second module on the bus: the guardrail-semantic event -> db1 guardrail_events.
+aimee_add_test(test_bus_guardrail_durability test_bus_guardrail_durability.c ../modules/audit/obs_bus.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c ../modules/bus/bus_capture.c)
+target_include_directories(test_bus_guardrail_durability PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
+target_link_libraries(test_bus_guardrail_durability PRIVATE Threads::Threads)
+
+# Shutdown race: concurrent producers vs obs_bus_stop() (UAF regression).
+aimee_add_test(test_bus_shutdown_race test_bus_shutdown_race.c ../modules/audit/obs_bus.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c ../modules/bus/bus_capture.c)
+target_include_directories(test_bus_shutdown_race PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
+target_link_libraries(test_bus_shutdown_race PRIVATE Threads::Threads)
+
+
+
+
+
+
 aimee_add_test(test_self_update test_self_update.c ../self_update_util.c)
 aimee_add_test(test_audit_action test_audit_action.c)
 aimee_add_test(test_audit_action_log test_audit_action_log.c)
@@ -157,13 +233,13 @@ aimee_add_test(test_wfe_autonomous_route test_wfe_autonomous_route.c)
 aimee_add_test(test_wfe_router_catalog test_wfe_router_catalog.c)
 aimee_add_test(test_wfe_enforce test_wfe_enforce.c)
 aimee_add_test(test_wfe_advance test_wfe_advance.c)
-aimee_add_test(test_aimee_ir test_aimee_ir.c ../server/aimee_ir.c)
-aimee_add_test(test_aimee_ir_metrics test_aimee_ir_metrics.c ../server/aimee_ir_metrics.c)
-aimee_add_test(test_aimee_frontend test_aimee_frontend.c ../server/aimee_frontend_anthropic.c ../server/aimee_frontend_openai.c ../server/aimee_frontend_responses.c ../server/aimee_ir.c)
-aimee_add_test(test_aimee_backend test_aimee_backend.c ../server/aimee_backend_anthropic.c ../server/aimee_backend_openai.c ../server/aimee_backend_responses.c ../server/aimee_frontend_anthropic.c ../server/aimee_frontend_openai.c ../server/aimee_ir.c)
-aimee_add_test(test_aimee_ir_shadow test_aimee_ir_shadow.c ../server/aimee_ir_shadow.c ../server/aimee_ir_metrics.c ../server/aimee_backend_anthropic.c ../server/aimee_frontend_anthropic.c ../server/aimee_frontend_openai.c ../server/aimee_ir.c)
-aimee_add_test(test_aimee_ir_serve test_aimee_ir_serve.c ../server/aimee_ir_serve.c ../server/aimee_backend_openai.c ../server/aimee_backend_responses.c ../server/aimee_frontend_anthropic.c ../server/aimee_frontend_responses.c ../server/aimee_ir.c ../server/aimee_ir_metrics.c)
-aimee_add_test(test_aimee_ir_stream test_aimee_ir_stream.c ../server/aimee_ir_stream.c ../server/aimee_ir.c)
+aimee_add_test(test_aimee_ir test_aimee_ir.c ../modules/ir/aimee_ir.c)
+aimee_add_test(test_aimee_ir_metrics test_aimee_ir_metrics.c ../modules/ir/aimee_ir_metrics.c)
+aimee_add_test(test_aimee_frontend test_aimee_frontend.c ../modules/translation/aimee_frontend_anthropic.c ../modules/translation/aimee_frontend_openai.c ../modules/translation/aimee_frontend_responses.c ../modules/ir/aimee_ir.c)
+aimee_add_test(test_aimee_backend test_aimee_backend.c ../modules/translation/aimee_backend_anthropic.c ../modules/translation/aimee_backend_openai.c ../modules/translation/aimee_backend_responses.c ../modules/translation/aimee_frontend_anthropic.c ../modules/translation/aimee_frontend_openai.c ../modules/ir/aimee_ir.c)
+aimee_add_test(test_aimee_ir_shadow test_aimee_ir_shadow.c ../server/aimee_ir_shadow.c ../modules/ir/aimee_ir_metrics.c ../modules/translation/aimee_backend_anthropic.c ../modules/translation/aimee_frontend_anthropic.c ../modules/translation/aimee_frontend_openai.c ../modules/ir/aimee_ir.c)
+aimee_add_test(test_aimee_ir_serve test_aimee_ir_serve.c ../server/aimee_ir_serve.c ../modules/translation/aimee_backend_openai.c ../modules/translation/aimee_backend_responses.c ../modules/translation/aimee_frontend_anthropic.c ../modules/translation/aimee_frontend_responses.c ../modules/ir/aimee_ir.c ../modules/ir/aimee_ir_metrics.c)
+aimee_add_test(test_aimee_ir_stream test_aimee_ir_stream.c ../modules/translation/aimee_ir_stream.c ../modules/ir/aimee_ir.c)
 aimee_add_test(test_wfe_binding test_wfe_binding.c)
 aimee_add_test(test_shutdown_forensics test_shutdown_forensics.c)
 

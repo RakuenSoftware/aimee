@@ -2,6 +2,7 @@
  * dirs). Load and schema validation stay in config.c. */
 #include "aimee.h"
 #include "config_internal.h"
+#include "config_fields.h"
 #include "db1_optional.h"
 #include "maintenance.h"
 #include "platform_process.h"
@@ -53,7 +54,7 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
     * operator actually set, so an untouched config never sprouts a modules: block and the
     * resolver's env/default fallback stays in effect for the rest. */
    if (cfg->module_memory != -1 || cfg->module_governance != -1 || cfg->module_delegates != -1 ||
-       cfg->module_workflows != -1 || cfg->module_economizer != -1)
+       cfg->module_workflows != -1 || cfg->module_roundtable != -1 || cfg->module_economizer != -1)
    {
       cJSON *m = cJSON_AddObjectToObject(root, "modules");
       if (m)
@@ -66,6 +67,8 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
             cJSON_AddBoolToObject(m, "delegates", cfg->module_delegates ? 1 : 0);
          if (cfg->module_workflows != -1)
             cJSON_AddBoolToObject(m, "workflows", cfg->module_workflows ? 1 : 0);
+         if (cfg->module_roundtable != -1)
+            cJSON_AddBoolToObject(m, "roundtable", cfg->module_roundtable ? 1 : 0);
          if (cfg->module_economizer != -1)
             cJSON_AddBoolToObject(m, "economizer", cfg->module_economizer ? 1 : 0);
       }
@@ -179,8 +182,15 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
    if (cfg->max_background_processes > 0)
       cJSON_AddNumberToObject(root, "max_background_processes", cfg->max_background_processes);
 
-   /* model_meta.* (defaults refresh_minutes=60, capability_routing=0) */
-   if (cfg->model_meta_refresh_minutes != 60 || cfg->model_meta_capability_routing)
+   if (cfg->prefer_local_agents)
+   {
+      cJSON *rt = cJSON_AddObjectToObject(root, "routing");
+      if (rt)
+         cJSON_AddBoolToObject(rt, "prefer_local", 1);
+   }
+
+   /* model_meta.* (defaults refresh_minutes=60, capability_routing=1) */
+   if (cfg->model_meta_refresh_minutes != 60 || !cfg->model_meta_capability_routing)
    {
       cJSON *mm = cJSON_AddObjectToObject(root, "model_meta");
       if (mm)
@@ -193,7 +203,7 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
 
    /* search.* (web-search backend config) */
    if (cfg->search_backend[0] || cfg->search_max_results > 0 || cfg->search_searxng_url[0] ||
-       cfg->search_tavily_api_key[0])
+       cfg->search_tavily_api_key[0] || cfg->search_backends[0] || cfg->search_fetch_pages >= 0)
    {
       cJSON *sr = cJSON_AddObjectToObject(root, "search");
       if (sr)
@@ -206,6 +216,10 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
             cJSON_AddStringToObject(sr, "searxng_url", cfg->search_searxng_url);
          if (cfg->search_tavily_api_key[0])
             cJSON_AddStringToObject(sr, "tavily_api_key", cfg->search_tavily_api_key);
+         if (cfg->search_backends[0])
+            cJSON_AddStringToObject(sr, "backends", cfg->search_backends);
+         if (cfg->search_fetch_pages >= 0)
+            cJSON_AddBoolToObject(sr, "fetch_pages", cfg->search_fetch_pages ? 1 : 0);
       }
    }
 
@@ -304,6 +318,50 @@ static const char *config_save_default_db1_path(void)
    const char *dir = config_default_dir();
    snprintf(path, sizeof(path), "%s/aimee.db", dir ? dir : "/tmp");
    return path;
+}
+
+static void config_save_concurrency(const config_t *cfg, cJSON *root)
+{
+   int save_preempt_requeue =
+       cfg->concurrency_preempt_requeue_max != CONFIG_DEFAULT_CONCURRENCY_PREEMPT_REQUEUE_MAX;
+
+   /* Concurrency limits (only save if configured) */
+   if (cfg->concurrency_default || cfg->maximum_total_concurrent_agent_sessions ||
+       cfg->concurrency_per_model_count || cfg->concurrency_per_provider_count ||
+       cfg->concurrency_preempt_enabled || !cfg->concurrency_preempt_single_slot_only ||
+       (cfg->concurrency_preempt_enabled && save_preempt_requeue))
+   {
+      cJSON *conc = cJSON_AddObjectToObject(root, "concurrency");
+      if (cfg->concurrency_default)
+         cJSON_AddNumberToObject(conc, "default", cfg->concurrency_default);
+      if (cfg->maximum_total_concurrent_agent_sessions)
+         cJSON_AddNumberToObject(conc, "maximum_total_concurrent_agent_sessions",
+                                 cfg->maximum_total_concurrent_agent_sessions);
+      if (cfg->concurrency_per_model_count > 0)
+      {
+         cJSON *pm = cJSON_AddObjectToObject(conc, "per_model");
+         for (int i = 0; i < cfg->concurrency_per_model_count; i++)
+            cJSON_AddNumberToObject(pm, cfg->concurrency_per_model[i].key,
+                                    cfg->concurrency_per_model[i].limit);
+      }
+      if (cfg->concurrency_per_provider_count > 0)
+      {
+         cJSON *pp = cJSON_AddObjectToObject(conc, "per_provider");
+         for (int i = 0; i < cfg->concurrency_per_provider_count; i++)
+            cJSON_AddNumberToObject(pp, cfg->concurrency_per_provider[i].key,
+                                    cfg->concurrency_per_provider[i].limit);
+      }
+      if (cfg->concurrency_preempt_enabled || !cfg->concurrency_preempt_single_slot_only ||
+          (cfg->concurrency_preempt_enabled && save_preempt_requeue))
+      {
+         cJSON *preempt = cJSON_AddObjectToObject(conc, "preempt");
+         cJSON_AddBoolToObject(preempt, "enabled", cfg->concurrency_preempt_enabled);
+         if (!cfg->concurrency_preempt_single_slot_only)
+            cJSON_AddBoolToObject(preempt, "single_slot_only", 0);
+         if (cfg->concurrency_preempt_enabled && save_preempt_requeue)
+            cJSON_AddNumberToObject(preempt, "requeue_max", cfg->concurrency_preempt_requeue_max);
+      }
+   }
 }
 
 int config_save(const config_t *cfg)
@@ -551,12 +609,11 @@ int config_save(const config_t *cfg)
       if (cfg->memory_maintenance_summarize_enabled)
          cJSON_AddBoolToObject(mem_maint, "summarize_enabled", 1);
    }
-   if (cfg->skills_review_nudge_interval != 10 || cfg->skills_curator_interval_hours != 168 ||
-       cfg->skills_stale_after_days != 30 || cfg->skills_archive_after_days != 90 ||
-       cfg->skills_review_enabled || cfg->skills_curator_enabled || !cfg->skills_dispatch_enabled ||
-       cfg->skills_dispatch_max_index != 24 || cfg->skills_dispatch_advisory ||
-       cfg->skills_capability_autostub || cfg->skills_eval_gate_enabled ||
-       cfg->skills_eval_threshold != 0.01)
+   if (cfg->skills_review_nudge_interval != 10 || cfg->skills_stale_after_days != 30 ||
+       cfg->skills_archive_after_days != 90 || cfg->skills_review_enabled ||
+       !cfg->skills_dispatch_enabled || cfg->skills_dispatch_max_index != 24 ||
+       cfg->skills_dispatch_advisory || cfg->skills_capability_autostub ||
+       cfg->skills_eval_gate_enabled || cfg->skills_eval_threshold != 0.01)
    {
       cJSON *skills = cJSON_AddObjectToObject(root, "skills");
       if (cfg->skills_review_enabled)
@@ -565,12 +622,6 @@ int config_save(const config_t *cfg)
          cJSON_AddBoolToObject(review, "enabled", 1);
       }
       cJSON_AddNumberToObject(skills, "review_nudge_interval", cfg->skills_review_nudge_interval);
-      if (cfg->skills_curator_enabled)
-      {
-         cJSON *curator = cJSON_AddObjectToObject(skills, "curator");
-         cJSON_AddBoolToObject(curator, "enabled", 1);
-      }
-      cJSON_AddNumberToObject(skills, "curator_interval_hours", cfg->skills_curator_interval_hours);
       cJSON_AddNumberToObject(skills, "stale_after_days", cfg->skills_stale_after_days);
       cJSON_AddNumberToObject(skills, "archive_after_days", cfg->skills_archive_after_days);
       cJSON *dispatch = cJSON_AddObjectToObject(skills, "dispatch");
@@ -972,18 +1023,17 @@ int config_save(const config_t *cfg)
    if (cfg->fidelity_check_enabled)
       cJSON_AddBoolToObject(root, "fidelity_check_enabled", 1);
 
-   /* Cross-verification */
-   if (cfg->cross_verify || cfg->verify_cmd[0] || cfg->verify_role[0])
-   {
-      cJSON *cv = cJSON_AddObjectToObject(root, "cross_verify");
-      cJSON_AddBoolToObject(cv, "enabled", cfg->cross_verify);
-      if (cfg->verify_cmd[0])
-         cJSON_AddStringToObject(cv, "verify_cmd", cfg->verify_cmd);
-      if (cfg->verify_role[0])
-         cJSON_AddStringToObject(cv, "role", cfg->verify_role);
-      if (cfg->verify_prompt[0])
-         cJSON_AddStringToObject(cv, "prompt", cfg->verify_prompt);
-   }
+   /* Cross-verification — flat top-level keys (was the cross_verify:{enabled,...}
+    * object; config_parse_cross_verify_section still reads the old object form for
+    * back-compat). */
+   if (cfg->cross_verify)
+      cJSON_AddBoolToObject(root, "cross_verify", 1);
+   if (cfg->verify_cmd[0])
+      cJSON_AddStringToObject(root, "verify_cmd", cfg->verify_cmd);
+   if (cfg->verify_role[0])
+      cJSON_AddStringToObject(root, "verify_role", cfg->verify_role);
+   if (cfg->verify_prompt[0])
+      cJSON_AddStringToObject(root, "verify_prompt", cfg->verify_prompt);
 
    /* Agent iteration limits (only save if non-default) */
    if (cfg->max_iterations)
@@ -1015,46 +1065,7 @@ int config_save(const config_t *cfg)
          cJSON_AddNumberToObject(retry, "max_ms", cfg->retry_max_ms);
    }
 
-   int save_preempt_requeue =
-       cfg->concurrency_preempt_requeue_max != CONFIG_DEFAULT_CONCURRENCY_PREEMPT_REQUEUE_MAX;
-
-   /* Concurrency limits (only save if configured) */
-   if (cfg->concurrency_default || cfg->maximum_total_concurrent_agent_sessions ||
-       cfg->concurrency_per_model_count || cfg->concurrency_per_provider_count ||
-       cfg->concurrency_preempt_enabled || !cfg->concurrency_preempt_single_slot_only ||
-       (cfg->concurrency_preempt_enabled && save_preempt_requeue))
-   {
-      cJSON *conc = cJSON_AddObjectToObject(root, "concurrency");
-      if (cfg->concurrency_default)
-         cJSON_AddNumberToObject(conc, "default", cfg->concurrency_default);
-      if (cfg->maximum_total_concurrent_agent_sessions)
-         cJSON_AddNumberToObject(conc, "maximum_total_concurrent_agent_sessions",
-                                 cfg->maximum_total_concurrent_agent_sessions);
-      if (cfg->concurrency_per_model_count > 0)
-      {
-         cJSON *pm = cJSON_AddObjectToObject(conc, "per_model");
-         for (int i = 0; i < cfg->concurrency_per_model_count; i++)
-            cJSON_AddNumberToObject(pm, cfg->concurrency_per_model[i].key,
-                                    cfg->concurrency_per_model[i].limit);
-      }
-      if (cfg->concurrency_per_provider_count > 0)
-      {
-         cJSON *pp = cJSON_AddObjectToObject(conc, "per_provider");
-         for (int i = 0; i < cfg->concurrency_per_provider_count; i++)
-            cJSON_AddNumberToObject(pp, cfg->concurrency_per_provider[i].key,
-                                    cfg->concurrency_per_provider[i].limit);
-      }
-      if (cfg->concurrency_preempt_enabled || !cfg->concurrency_preempt_single_slot_only ||
-          (cfg->concurrency_preempt_enabled && save_preempt_requeue))
-      {
-         cJSON *preempt = cJSON_AddObjectToObject(conc, "preempt");
-         cJSON_AddBoolToObject(preempt, "enabled", cfg->concurrency_preempt_enabled);
-         if (!cfg->concurrency_preempt_single_slot_only)
-            cJSON_AddBoolToObject(preempt, "single_slot_only", 0);
-         if (cfg->concurrency_preempt_enabled && save_preempt_requeue)
-            cJSON_AddNumberToObject(preempt, "requeue_max", cfg->concurrency_preempt_requeue_max);
-      }
-   }
+   config_save_concurrency(cfg, root);
 
    /* Tool result compaction (only save non-default values) */
    if (!cfg->compact_enabled || cfg->compact_threshold || cfg->compact_head_bytes ||
@@ -1129,12 +1140,12 @@ int config_save(const config_t *cfg)
       }
    }
 
-   /* OFF is the default. Persist proof_gated in the explicit nested public shape. */
-   if (cfg->economizer_mode == ECON_MODE_PROOF_GATED)
+   /* SAFE is the default. Persist either non-default choice explicitly. */
+   if (cfg->economizer_mode != ECON_MODE_SAFE)
    {
       cJSON *econ = cJSON_AddObjectToObject(root, "economizer");
       if (econ)
-         cJSON_AddStringToObject(econ, "mode", "proof_gated");
+         cJSON_AddStringToObject(econ, "mode", econ_mode_name(cfg->economizer_mode));
    }
 
    /* Autonomous-dev knobs — persist only non-defaults (defaults: skeptics 0, fanout off,
@@ -1241,6 +1252,8 @@ int config_save(const config_t *cfg)
             cJSON_AddStringToObject(entry, "url", client->url);
          if (client->bearer_token_env[0])
             cJSON_AddStringToObject(entry, "bearer_token_env", client->bearer_token_env);
+         if (client->install == CONFIG_MCP_INSTALL_KB)
+            cJSON_AddStringToObject(entry, "install", "kb"); /* omit "server" (the default) */
 
          cJSON_AddItemToArray(mcp_arr, entry);
       }
@@ -1473,4 +1486,158 @@ int config_conversation_dirs(const config_t *cfg, char dirs[][MAX_PATH_LEN], int
    }
 
    return count;
+}
+
+/* ---- Surgical, key-addressed config write (Proposal B write side) ----------
+ * config_set is the single save path. It edits the config YAML as a *document*
+ * — load, set one key, write back, republish — never re-serialising config_t.
+ * There is no whole-file rebuild, so parse and save cannot drift, and a write
+ * preserves every other key already in the file. */
+
+static cJSON *config_set_value_node(const config_field_t *f, const char *value)
+{
+   if (f->is_bool || f->type == CFG_BOOL)
+   {
+      if (strcmp(value, "true") == 0 || strcmp(value, "1") == 0)
+         return cJSON_CreateBool(1);
+      if (strcmp(value, "false") == 0 || strcmp(value, "0") == 0)
+         return cJSON_CreateBool(0);
+      return NULL; /* not a boolean */
+   }
+   if (f->type == CFG_INT)
+      return cJSON_CreateNumber(atoi(value));
+   if (f->type == CFG_FLOAT)
+      return cJSON_CreateNumber(atof(value));
+   if (f->type == CFG_ECON_MODE)
+   {
+      if (econ_mode_parse(value) < 0)
+         return NULL; /* not off|safe|aggressive */
+      return cJSON_CreateString(value);
+   }
+   return cJSON_CreateString(value);
+}
+
+/* Set a possibly-dotted key (a.b.c) in the doc to node (takes ownership). */
+static void config_doc_set(cJSON *root, const char *key, cJSON *node)
+{
+   const char *dot = strchr(key, '.');
+   if (!dot)
+   {
+      cJSON_DeleteItemFromObjectCaseSensitive(root, key);
+      cJSON_AddItemToObject(root, key, node);
+      return;
+   }
+   char head[128];
+   size_t n = (size_t)(dot - key);
+   if (n >= sizeof(head))
+      n = sizeof(head) - 1;
+   memcpy(head, key, n);
+   head[n] = '\0';
+   cJSON *sub = cJSON_GetObjectItemCaseSensitive(root, head);
+   if (!cJSON_IsObject(sub))
+   {
+      cJSON_DeleteItemFromObjectCaseSensitive(root, head);
+      sub = cJSON_CreateObject();
+      cJSON_AddItemToObject(root, head, sub);
+   }
+   config_doc_set(sub, dot + 1, node);
+}
+
+static cJSON *config_load_doc(void)
+{
+   const char *path = config_default_path();
+   FILE *fp = fopen(path, "r");
+   if (!fp)
+      return cJSON_CreateObject();
+   fseek(fp, 0, SEEK_END);
+   long len = ftell(fp);
+   fseek(fp, 0, SEEK_SET);
+   if (len <= 0 || len > 4 * 1024 * 1024)
+   {
+      fclose(fp);
+      return cJSON_CreateObject();
+   }
+   char *buf = malloc((size_t)len + 1);
+   if (!buf)
+   {
+      fclose(fp);
+      return cJSON_CreateObject();
+   }
+   size_t rd = fread(buf, 1, (size_t)len, fp);
+   fclose(fp);
+   buf[rd] = '\0';
+   cJSON *root = yaml_parse(buf);
+   free(buf);
+   return root ? root : cJSON_CreateObject();
+}
+
+static int config_write_doc(cJSON *root)
+{
+   char *yaml_str = yaml_emit(root);
+   if (!yaml_str)
+      return -1;
+   const char *path = config_default_path();
+   char tmp[MAX_PATH_LEN];
+   snprintf(tmp, sizeof(tmp), "%s.tmp.%d", path, (int)getpid());
+   FILE *fp = fopen(tmp, "w");
+   if (!fp)
+   {
+      free(yaml_str);
+      return -1;
+   }
+   fputs(yaml_str, fp);
+   fclose(fp);
+   free(yaml_str);
+   chmod(tmp, 0600);
+   if (rename(tmp, path) != 0)
+   {
+      unlink(tmp);
+      return -1;
+   }
+   return 0;
+}
+
+int config_set(const char *key, const char *value)
+{
+   if (!key || !value)
+      return -1;
+   const config_field_t *f = config_field_lookup(key);
+   if (!f)
+      return -1; /* unknown key */
+   cJSON *node = config_set_value_node(f, value);
+   if (!node)
+      return -1; /* invalid value for the field's type */
+   ensure_config_dir();
+   cJSON *root = config_load_doc();
+   config_doc_set(root, key, node);
+   int rc = config_write_doc(root);
+   cJSON_Delete(root);
+   if (rc == 0)
+      (void)config_reload(); /* republish the snapshot so live readers see it */
+   return rc;
+}
+
+/* Surgical write of a whole config *section*: rebuild just that section's subtree
+ * in the document from cfg (via its serializer), preserving every other key.
+ * The structured counterpart to config_set — for arrays / nested objects (concurrency,
+ * workspaces, ...) that a flat scalar config_set cannot express. No whole-file rebuild. */
+static int config_set_section(const char *key, void (*emit)(const config_t *, cJSON *),
+                              const config_t *cfg)
+{
+   if (!key || !emit || !cfg)
+      return -1;
+   ensure_config_dir();
+   cJSON *root = config_load_doc();
+   cJSON_DeleteItemFromObjectCaseSensitive(root, key);
+   emit(cfg, root);
+   int rc = config_write_doc(root);
+   cJSON_Delete(root);
+   if (rc == 0)
+      (void)config_reload();
+   return rc;
+}
+
+int config_set_concurrency(const config_t *cfg)
+{
+   return config_set_section("concurrency", config_save_concurrency, cfg);
 }

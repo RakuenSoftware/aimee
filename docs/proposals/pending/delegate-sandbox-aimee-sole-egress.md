@@ -95,7 +95,7 @@ whether the agent can see its own subject.
 
 | Already built | Where |
 |---|---|
-| Container lifecycle: create / start / exec / stop / rm, hibernate-on-exit | `src/server/delegate_backend_docker.c` (697 lines), **registered** at `server.c:2059` |
+| Container lifecycle: create / start / exec / stop / rm, hibernate-on-exit | `src/modules/delegates/delegate_backend_docker.c` (697 lines), **registered** at `server.c:2059` |
 | Workspace anchoring: `-v <workspace>:/workspace -w /workspace`, absolute paths and `..` rejected | same |
 | File ops through `docker exec` (read/write/list, b64-wrapped) | same |
 | The `/v1` Unix socket the sandbox talks to | `server_http.c` — always served, no TCP port needed |
@@ -108,7 +108,7 @@ first. Same ordering applies to everything below.
 
 ## The gap
 
-`td_bash` (`src/posix/agent_tools_dispatch.c:328`) does not use a backend. It
+`td_bash` (`src/modules/tools/agent_tools_dispatch.c:328`) does not use a backend. It
 routes to the detached workspace provider, else falls through to `run_cmd` —
 **in-process, inside the aimee-server container**. The docker backend's `exec()` has
 exactly one caller: `server.c:499`, a `delegate.*` RPC.

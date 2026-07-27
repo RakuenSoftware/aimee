@@ -116,7 +116,19 @@ export AIMEE_NO_AUTOSTART=1
 
 "$SERVICE_SERVER" --foreground >/dev/null 2>&1 &
 SERVER_PID=$!
-sleep 1
+
+# Wait for the server to actually bind its HTTP socket instead of guessing with a
+# fixed `sleep 1`. On a loaded CI runner startup regularly takes several seconds,
+# and the 1s guess made this the run's flakiest test ("service route server
+# started" / "client ... server unavailable"). Poll for the socket (~30s cap) and
+# bail early if the server process dies so a crash fails fast instead of timing
+# out. A unix-socket server binds+listens as the last init step, so socket-present
+# means ready to serve.
+for _ in $(seq 1 300); do
+    [ -S "$HTTP_SOCK" ] && break
+    kill -0 "$SERVER_PID" 2>/dev/null || break
+    sleep 0.1
+done
 
 check "service route server started" test -S "$HTTP_SOCK"
 check_output "client init routes through server to kb owner" '"knowledge_ready":true' \

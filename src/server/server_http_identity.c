@@ -42,9 +42,10 @@ static _Thread_local char tl_session_hdr[80] = "";
  * beyond this is deterministic (same input -> same truncated string -> same session
  * key), so it only risks two >2KB bearers that share a 2KB prefix sharing a disable
  * bucket — a benign availability edge, not a security boundary. */
-static _Thread_local char tl_bearer[2048] = "";
+static _Thread_local char tl_bearer[4097] = "";
 static _Thread_local char tl_status_staple[KB_MGMT_STATUS_JSON_MAX + 1] = "";
 static _Thread_local server_tls_peer_cert_t tl_peer_cert;
+static _Thread_local server_tls_peer_cert_t tl_local_cert;
 static _Thread_local char tl_local_fingerprint[65] = "";
 
 /* The shared secret that authenticates a webchat `webuser:` assertion is the
@@ -119,6 +120,7 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf)
     * principal (resolved + sanitized in vault_principal_resolve). */
    char cert_cn[VAULT_CERT_CN_MAX + 1] = "";
    memset(&tl_peer_cert, 0, sizeof(tl_peer_cert));
+   memset(&tl_local_cert, 0, sizeof(tl_local_cert));
    tl_local_fingerprint[0] = '\0';
    if (is_tls)
    {
@@ -126,7 +128,9 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf)
       SSL *ssl = server_conn_io_get_ssl(fd);
       server_tls_peer_identity(ssl, cert_cn, sizeof(cert_cn), serial, sizeof(serial));
       server_tls_peer_cert(ssl, &tl_peer_cert);
-      server_tls_local_fingerprint(ssl, tl_local_fingerprint);
+      if (server_tls_local_cert(ssl, &tl_local_cert))
+         snprintf(tl_local_fingerprint, sizeof(tl_local_fingerprint), "%s",
+                  tl_local_cert.fingerprint);
    }
    tl_transport = vault_principal_resolve(is_tcp, is_tls, peer_uid, webuser, webuser_token_ok,
                                           cert_cn, tl_principal, sizeof(tl_principal));
@@ -139,7 +143,7 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf)
    if (buf)
    {
       http_header(buf, "aimee-session-id", tl_session_hdr, sizeof(tl_session_hdr));
-      char authz[2048] = "";
+      char authz[4105] = "";
       /* Bearer scheme token is case-insensitive (RFC 7235 §2.1). */
       if (http_header(buf, "Authorization", authz, sizeof(authz)) &&
           strncasecmp(authz, "Bearer ", 7) == 0)
@@ -173,6 +177,11 @@ const char *server_http_identity_local_fingerprint(void)
    return tl_local_fingerprint;
 }
 
+const server_tls_peer_cert_t *server_http_identity_local_cert(void)
+{
+   return tl_local_cert.fingerprint[0] ? &tl_local_cert : NULL;
+}
+
 const char *server_http_identity_principal(void)
 {
    return tl_principal;
@@ -197,6 +206,7 @@ void server_http_identity_clear(void)
    memset(tl_bearer, 0, sizeof(tl_bearer)); /* zero the secret, don't just truncate */
    memset(tl_status_staple, 0, sizeof(tl_status_staple));
    memset(&tl_peer_cert, 0, sizeof(tl_peer_cert));
+   memset(&tl_local_cert, 0, sizeof(tl_local_cert));
    memset(tl_local_fingerprint, 0, sizeof(tl_local_fingerprint));
 }
 

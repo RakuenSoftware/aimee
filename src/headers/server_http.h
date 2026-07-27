@@ -8,6 +8,7 @@
 #ifndef DEC_SERVER_HTTP_H
 #define DEC_SERVER_HTTP_H 1
 
+#include "aimee_features.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -42,6 +43,14 @@ extern "C"
       char cert[SERVER_HTTP_MGMT_PATH_MAX];
       char key[SERVER_HTTP_MGMT_PATH_MAX];
       char client_ca[SERVER_HTTP_MGMT_PATH_MAX];
+      char status_endpoint[SERVER_HTTP_MGMT_PATH_MAX];
+      char status_ca[SERVER_HTTP_MGMT_PATH_MAX];
+      char status_leaf_pin[65];
+      char status_secondary_leaf_pin[65];
+      char status_client_cert[SERVER_HTTP_MGMT_PATH_MAX];
+      char status_client_key[SERVER_HTTP_MGMT_PATH_MAX];
+      char status_key_id[65];
+      char status_public_key[65];
    } server_http_management_config_t;
 
    /* Parse the all-or-none dedicated-management listener environment packet.
@@ -54,6 +63,8 @@ extern "C"
    int server_http_management_bind_addr(const char *text, uint32_t *out);
    int server_http_management_framing_valid(const char *method, const char *path,
                                             const char *request, size_t request_len);
+   int server_http_management_action_framing_valid(const char *method, const char *path,
+                                                   const char *request, size_t request_len);
 
    /* Start the HTTP listener(s), spawning a detached accept-loop thread that
     * polls all bound sockets. The UDS at uds_path (unlinked first;
@@ -145,6 +156,12 @@ extern "C"
    /* Effective caps for a request after thin-client mTLS authentication. When
     * mTLS is enabled, bearer fallback is a query-only floor and a durable cert
     * gets the authenticated (but not full-trust) set. */
+   /* remote_writes.global_ignored: how many requests were refused that the
+    * retired aimee.api.remote_writes would formerly have allowed. Lets an
+    * operator size the cutover's impact instead of inferring it from
+    * complaints. */
+   uint64_t server_http_global_ignored_count(void);
+
    uint32_t server_http_effective_conn_caps(int is_tcp, const char *bearer, int remote_writes,
                                             int mtls_mode, int mtls_authenticated);
    int server_http_mtls_transport_allowed(int is_tcp, int mtls_mode, int mtls_authenticated);
@@ -180,6 +197,15 @@ extern "C"
                                              const char *path, uint32_t caps);
    int server_http_route_allowed(int is_tcp, const char *bearer, const char *method,
                                  const char *path, int remote_writes);
+   /* Whether a route is reachable ONLY over the local UDS listener — never over TCP,
+    * whatever the bearer and whatever aimee.api.remote_writes says.
+    *
+    * Distinct from server_http_route_is_local_only, whose name is historical and which
+    * reports whether a route dispatches a data-write op. Exposed so the property can be
+    * tested directly: it is the only thing standing between a fully-trusted TCP peer and
+    * grant administration, since such a peer already holds CAPS_ALL. */
+   int v1_route_requires_uds(const char *method, const char *path);
+
    int server_http_route_allowed_caps(int is_tcp, uint32_t have, const char *method,
                                       const char *path, int remote_writes);
 
@@ -228,6 +254,7 @@ extern "C"
    int server_http_route(const char *method, const char *path, const char *body, int body_len,
                          char *resp, int resp_cap);
 
+#if AIMEE_WITH_ROUNDTABLE
    /* Submit an existing dispatch method through the HTTP async op-run machinery
     * without going through a /v1 route. `body_json` is the method body before
     * method/__run_id injection. `conn_caps` are the caller capabilities to use
@@ -235,6 +262,7 @@ extern "C"
     * method capability before creating a run. */
    int server_http_submit_op_run(const char *op_method, const char *body_json, uint32_t conn_caps,
                                  char *resp, int resp_cap);
+#endif
 
    /* --- OpenAI-compatible completion seam ---
     * The /v1/chat/completions and /v1/completions routes run real inference,

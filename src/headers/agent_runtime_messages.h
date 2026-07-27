@@ -11,8 +11,7 @@
 int agent_session_retry_final_tool_violation(cJSON *messages, const char *attempted_action,
                                              int *turn, int *max_t, int initial_max_t,
                                              int *retry_count, char *error, size_t error_len);
-int agent_session_retry_degenerate_response(cJSON *messages, int *turn, int *retry_count,
-                                            int *force_text_only_retry);
+int agent_session_retry_degenerate_response(cJSON *messages, int *turn, int *retry_count);
 int agent_session_retry_required_evidence(cJSON *messages, int *turn, int *max_t, int initial_max_t,
                                           int *retry_count, char *error, size_t error_len);
 int agent_required_evidence_keep_tools(int required, int successful_evidence_calls);
@@ -21,8 +20,7 @@ int agent_required_evidence_reject_response(int required, int successful_evidenc
 int agent_required_evidence_budget_exhausted(int required, int successful_evidence_calls,
                                              int pre_evidence_responses);
 int agent_required_evidence_needs_fallback(int required, int successful_evidence_calls,
-                                           int chatgpt_provider, int denied_calls,
-                                           int remaining_calls);
+                                           int chatgpt_provider, int remaining_calls);
 void agent_session_append_final_message(cJSON *messages, const char *content);
 void agent_session_append_final_instruction(cJSON *messages);
 void agent_session_append_final_retry_instruction(cJSON *messages, const char *attempted_action);

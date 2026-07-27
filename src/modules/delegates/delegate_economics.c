@@ -1,5 +1,5 @@
 /* delegate_economics.c: aggregate delegate runs around supervisor attention. */
-#include "delegate_economics.h"
+#include <aimee/delegates/delegate_economics.h>
 #include "cmd_agent_delegate_impl.h"
 
 #include <stdio.h>

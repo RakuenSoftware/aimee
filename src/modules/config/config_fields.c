@@ -183,6 +183,12 @@ const config_field_t config_fields[] = {
      CFG_FLOAT, RELOAD_HOT, FGROUP_ADVANCED},
     {"autonomous", offsetof(config_t, autonomous), sizeof(int), 1, CFG_BOOL},
     {"cross_verify", offsetof(config_t, cross_verify), sizeof(int), 1, CFG_BOOL},
+    {"verify_cmd", offsetof(config_t, verify_cmd), sizeof(((config_t *)0)->verify_cmd), 0,
+     CFG_STRING},
+    {"verify_role", offsetof(config_t, verify_role), sizeof(((config_t *)0)->verify_role), 0,
+     CFG_STRING},
+    {"verify_prompt", offsetof(config_t, verify_prompt), sizeof(((config_t *)0)->verify_prompt), 0,
+     CFG_STRING},
     {"max_iterations", offsetof(config_t, max_iterations), sizeof(int), 0, CFG_INT},
     {"max_iterations_delegate", offsetof(config_t, max_iterations_delegate), sizeof(int), 0,
      CFG_INT},
@@ -383,7 +389,7 @@ const config_field_t config_fields[] = {
     /* Trigger admission policy. The scheduler reads this from the live config snapshot on
      * every sweep, so GUI changes take effect without a restart. */
     {"trigger.max_concurrent", offsetof(config_t, trigger_max_concurrent), sizeof(int), 0, CFG_INT},
-    /* The only economizer control. Legacy scalar/tier fields are not settable. */
+    /* The only economizer control: off, safe, or aggressive. */
     {"economizer.mode", offsetof(config_t, economizer_mode), sizeof(int), 0, CFG_ECON_MODE,
      RELOAD_HOT},
     /* Autonomous-development pipeline knobs (Phase-C). New config_t fields bridged to the
@@ -538,4 +544,142 @@ int config_field_set_value(config_t *cfg, const config_field_t *f, const char *v
    else
       snprintf(base, f->size, "%s", value);
    return 0;
+}
+
+/* Flat-field defaults (Proposal A, step 1). Single home for the default value of
+ * every FLAT config field (see test_config_field_eligibility.c). config_set_defaults
+ * applies these table-driven instead of hand-assigning each — so a default lives in
+ * exactly one place (here), keyed by the same name as its config_fields[] descriptor.
+ * Values are in config_field_set_value's string form (bool: "true"/"false"; int: a
+ * decimal; string: the literal). Non-flat fields keep their bespoke defaults in
+ * config_set_defaults (side effects, env derivation, or computed values). */
+static const struct
+{
+   const char *key;
+   const char *value;
+} config_flat_defaults[] = {
+    {"db2_url", ""},
+    {"provider", "claude"},
+    {"default_persona", "engineer"},
+    {"claude_model", ""},
+    {"openai_endpoint", "https://api.openai.com/v1"},
+    {"openai_model", "gpt-4o"},
+    {"openai_key_cmd", ""},
+    {"guardrail_mode", "approve"},
+    {"embedding_command", ""},
+    {"embedding_model", ""},
+    {"embedding_endpoint", ""},
+    {"kb_client_url", ""},
+    {"kb_client_bearer_token", ""},
+    {"memory_rerank_mode", ""},
+    {"ingress_preinject_enabled", "true"},
+    {"ingress_preinject_anthropic_enabled", "false"},
+    {"ingress_compress_enabled", "true"},
+    {"gateway_prevent_subagents", "false"},
+    {"gateway_pin_model", "false"},
+    {"require_session_worktree", "true"},
+    {"require_aimee_memory", "true"},
+    {"require_aimee_git", "true"},
+    {"subagent_ban_enabled", "true"},
+    {"delegate_sandbox_require_isolation", "false"},
+    {"delegate_sandbox_learn_packages", "true"},
+    {"typed_facts_enabled", "true"},
+    {"kb_pdf_ingest_enabled", "false"},
+    {"kb_pdf_vector_enabled", "false"},
+    {"kb_pdf_tsr_enabled", "false"},
+    {"tsr_command", ""},
+    {"kb_pdf_assets_enabled", "false"},
+    {"kb_pdf_blob_dir", ""},
+    {"kb_pdf_blob_recon_secs", "3600"},
+    {"kb_pdf_blob_orphan_alarm_mb", "1024"},
+    {"kb_pdf_ocr_enabled", "false"},
+    {"ocr_command", ""},
+    {"css_style_graph_enabled", "true"},
+    {"code_cochange_git_enabled", "true"},
+    {"wfe_live_forge_enabled", "false"},
+    {"wfe_proposals_autoscan_enabled", "false"},
+    {"client_integrations_enabled", "true"},
+    {"audit_action_enabled", "true"},
+    {"audit_worm_enabled", "false"},
+    {"css_render_command",
+     "curl -s --max-time 30 --data-binary @- http://aimee-css-render:8780/render"},
+    {"kb_evidence_emit_enabled", "false"},
+    {"fidelity_check_enabled", "false"},
+    {"autonomous", "false"},
+    {"max_iterations", "0"},
+    {"max_iterations_delegate", "0"},
+    {"verify_enabled", "false"},
+    {"delegate_graph_context_enabled", "false"},
+    {"verify_cross_project", "false"},
+    {"cross_verify", "false"},
+    {"verify_cmd", ""},
+    {"verify_role", ""},
+    {"verify_prompt", ""},
+    {NULL, NULL}, /* sentinel — config_apply_flat_defaults iterates until .key is NULL */
+};
+
+void config_apply_flat_defaults(config_t *cfg)
+{
+   if (!cfg)
+      return;
+   for (int i = 0; config_flat_defaults[i].key; i++)
+   {
+      const config_field_t *f = config_field_lookup(config_flat_defaults[i].key);
+      if (f)
+         (void)config_field_set_value(cfg, f, config_flat_defaults[i].value);
+   }
+}
+
+/* Assign a flat field from its parsed JSON node, matching the inline config_load
+ * parse exactly: a present, correctly-typed value is assigned; anything else
+ * leaves the field at its default. Strings use the non-empty guard (an explicit
+ * "" leaves the default) — the form 45 of the 51 genericised string fields already
+ * used, and behaviour-identical for the rest because their default is "". */
+static void config_field_set_from_json(config_t *cfg, const config_field_t *f, const cJSON *item)
+{
+   char *base = (char *)cfg + f->offset;
+   switch (f->type)
+   {
+   case CFG_BOOL:
+      if (cJSON_IsBool(item))
+         *(int *)base = cJSON_IsTrue(item);
+      break;
+   case CFG_INT:
+      if (cJSON_IsNumber(item))
+         *(int *)base = (int)item->valuedouble;
+      break;
+   case CFG_FLOAT:
+      if (cJSON_IsNumber(item))
+         *(double *)base = item->valuedouble;
+      break;
+   case CFG_STRING:
+      if (cJSON_IsString(item) && item->valuestring[0])
+         snprintf(base, f->size, "%s", item->valuestring);
+      break;
+   case CFG_ECON_MODE:
+      break; /* not a flat field; parsed by its bespoke handler */
+   }
+}
+
+/* Table-driven parse of the flat scalar fields (Proposal A, step 3): replaces the
+ * per-field inline `item = GetObjectItem(root, key); if (typed) cfg->x = ...` blocks
+ * in config_load with one loop over the flat set. css_render_command is the sole
+ * exception — its default is non-empty AND its inline guard admits an explicit ""
+ * (to disable rendering), so it keeps its bespoke block to preserve that behaviour. */
+void config_parse_flat_fields(config_t *cfg, const cJSON *root)
+{
+   if (!cfg || !root)
+      return;
+   for (int i = 0; config_flat_defaults[i].key; i++)
+   {
+      const char *key = config_flat_defaults[i].key;
+      if (strcmp(key, "css_render_command") == 0)
+         continue; /* kept inline: non-empty default + empty-string is meaningful */
+      const cJSON *item = cJSON_GetObjectItemCaseSensitive((cJSON *)root, key);
+      if (!item)
+         continue;
+      const config_field_t *f = config_field_lookup(key);
+      if (f)
+         config_field_set_from_json(cfg, f, item);
+   }
 }

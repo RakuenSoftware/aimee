@@ -501,6 +501,16 @@ static int custody_unseal_unlocked(const void *params, size_t len)
    return g_custody->unseal ? g_custody->unseal(g_custody->ctx, params, len) : 0;
 }
 
+static vault_custody_auth_result_t custody_unseal_typed_unlocked(const void *params, size_t len)
+{
+   if (!g_custody->typed_unseal)
+      return VAULT_CUSTODY_AUTH_UNSUPPORTED;
+   int rc = g_custody->typed_unseal(g_custody->ctx, params, len);
+   return rc >= VAULT_CUSTODY_AUTHORIZED && rc <= VAULT_CUSTODY_AUTH_UNSUPPORTED
+              ? (vault_custody_auth_result_t)rc
+              : VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
+}
+
 /* Always clear local key material and epoch synchronization, even when the
  * provider reports a seal failure. Caller holds g_use_lock exclusively. */
 static int custody_seal_failclosed_unlocked(void)
@@ -673,6 +683,80 @@ int vault_is_sealed(void)
    if (g_fork_child_invalid || ensure_atfork() != 0)
       return 1;
    return custody_is_sealed_unlocked();
+}
+
+vault_custody_local_status_t vault_custody_selected_local_status(void)
+{
+   if (g_fork_child_invalid || ensure_atfork() != 0)
+      return VAULT_CUSTODY_LOCAL_UNAVAILABLE;
+
+   /* Provider binding is startup-only.  g_hwm_mu nevertheless makes the
+    * pointer snapshot race-free for tests and rejects a concurrent rebind
+    * instead of allowing an operator status request to block behind it. */
+   if (pthread_mutex_trylock(&g_hwm_mu) != 0)
+      return VAULT_CUSTODY_LOCAL_UNAVAILABLE;
+   const vault_custody_provider_t *provider = g_custody;
+   int (*status_fn)(void *, unsigned) = provider ? provider->local_status : NULL;
+   void *ctx = provider ? provider->ctx : NULL;
+   pthread_mutex_unlock(&g_hwm_mu);
+
+   if (!status_fn)
+      return VAULT_CUSTODY_LOCAL_UNAVAILABLE;
+   int status = status_fn(ctx, 50);
+   return status >= VAULT_CUSTODY_LOCAL_AVAILABLE_SEALED && status <= VAULT_CUSTODY_LOCAL_MALFORMED
+              ? (vault_custody_local_status_t)status
+              : VAULT_CUSTODY_LOCAL_MALFORMED;
+}
+
+vault_custody_auth_result_t
+vault_custody_selected_authorization_preflight(const void *secret, size_t secret_len,
+                                               uint64_t expected_generation)
+{
+   if (g_fork_child_invalid || ensure_atfork() != 0 || g_owned_guard || g_owned_use || !secret ||
+       secret_len == 0 || secret_len > VAULT_CUSTODY_AUTH_SECRET_MAX || expected_generation == 0 ||
+       expected_generation > INT64_MAX)
+      return VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
+
+   pthread_mutex_lock(&g_hwm_mu);
+   const vault_custody_provider_t *provider = g_custody;
+   int (*preflight)(void *, const void *, size_t, uint64_t) =
+       provider ? provider->authorization_preflight : NULL;
+   void *ctx = provider ? provider->ctx : NULL;
+   pthread_mutex_unlock(&g_hwm_mu);
+   int rc = preflight ? preflight(ctx, secret, secret_len, expected_generation)
+                      : VAULT_CUSTODY_AUTH_UNSUPPORTED;
+   return rc >= VAULT_CUSTODY_AUTHORIZED && rc <= VAULT_CUSTODY_AUTH_UNSUPPORTED
+              ? (vault_custody_auth_result_t)rc
+              : VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
+}
+
+vault_custody_auth_result_t
+vault_custody_selected_authorization_preflight_current(const void *secret, size_t secret_len,
+                                                       uint64_t *generation)
+{
+   if (generation)
+      *generation = 0;
+   if (!generation || g_fork_child_invalid || ensure_atfork() != 0 || g_owned_guard ||
+       g_owned_use || !secret || secret_len == 0 || secret_len > VAULT_CUSTODY_AUTH_SECRET_MAX)
+      return VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
+
+   pthread_mutex_lock(&g_hwm_mu);
+   const vault_custody_provider_t *provider = g_custody;
+   int (*preflight)(void *, const void *, size_t, uint64_t *) =
+       provider ? provider->authorization_preflight_current : NULL;
+   void *ctx = provider ? provider->ctx : NULL;
+   pthread_mutex_unlock(&g_hwm_mu);
+   int rc =
+       preflight ? preflight(ctx, secret, secret_len, generation) : VAULT_CUSTODY_AUTH_UNSUPPORTED;
+   if (rc < VAULT_CUSTODY_AUTHORIZED || rc > VAULT_CUSTODY_AUTH_UNSUPPORTED)
+      rc = VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
+   if (rc != VAULT_CUSTODY_AUTHORIZED || *generation == 0 || *generation > INT64_MAX)
+   {
+      *generation = 0;
+      return rc == VAULT_CUSTODY_AUTHORIZED ? VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE
+                                            : (vault_custody_auth_result_t)rc;
+   }
+   return VAULT_CUSTODY_AUTHORIZED;
 }
 
 int vault_unseal(const void *params, size_t len)
@@ -871,6 +955,15 @@ int vault_maintenance_guard_unseal(vault_maintenance_guard_t *guard, const void 
    return valid == VAULT_MAINTENANCE_OK ? custody_unseal_unlocked(params, len) : valid;
 }
 
+vault_custody_auth_result_t vault_maintenance_guard_unseal_typed(vault_maintenance_guard_t *guard,
+                                                                 const void *params, size_t len)
+{
+   int valid = maintenance_validate(guard);
+   if (valid != VAULT_MAINTENANCE_OK || !params || len == 0 || len > VAULT_CUSTODY_AUTH_SECRET_MAX)
+      return VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
+   return custody_unseal_typed_unlocked(params, len);
+}
+
 int vault_maintenance_guard_seal(vault_maintenance_guard_t *guard)
 {
    int valid = maintenance_validate(guard);
@@ -906,6 +999,63 @@ int vault_maintenance_guard_end(vault_maintenance_guard_t **guard)
    pthread_rwlock_unlock(&g_use_lock);
    (void)pthread_setcancelstate(prior, NULL);
    return seal_rc == 0 ? VAULT_MAINTENANCE_OK : VAULT_MAINTENANCE_ERROR;
+}
+
+int vault_maintenance_guard_end_operational(vault_maintenance_guard_t **guard,
+                                            uint64_t committed_primary_epoch)
+{
+   if (!guard)
+      return VAULT_MAINTENANCE_INVALID;
+   int valid = maintenance_validate(*guard);
+   if (valid != VAULT_MAINTENANCE_OK)
+      return valid;
+
+   int failure = VAULT_MAINTENANCE_OK;
+   if (!committed_primary_epoch || committed_primary_epoch > INT64_MAX ||
+       !g_primary_epoch_initialized || g_primary_seal_epoch != committed_primary_epoch ||
+       g_use_epoch == UINT64_MAX)
+      failure = VAULT_MAINTENANCE_EPOCH;
+   else if (custody_is_sealed_unlocked())
+      failure = VAULT_MAINTENANCE_SEALED;
+   else
+   {
+      uint8_t *arena;
+      size_t mapped;
+      pthread_mutex_lock(&g_maintenance_mu);
+      arena = g_maintenance.arena;
+      mapped = g_maintenance.arena_len;
+      pthread_mutex_unlock(&g_maintenance_mu);
+      OPENSSL_cleanse(arena, mapped);
+      if (custody_get_kek_unlocked(arena) != 0 || custody_is_sealed_unlocked())
+         failure = VAULT_MAINTENANCE_ERROR;
+      OPENSSL_cleanse(arena, mapped);
+   }
+
+   if (failure != VAULT_MAINTENANCE_OK)
+   {
+      int end_rc = vault_maintenance_guard_end(guard);
+      return end_rc == VAULT_MAINTENANCE_OK ? failure : VAULT_MAINTENANCE_ERROR;
+   }
+
+   /* Publish a fresh local admission generation immediately before releasing
+    * the exclusive writer.  Readers can only observe the increment after the
+    * rwlock acquire/release edge and must also present the committed epoch. */
+   g_use_epoch++;
+   uint8_t *arena;
+   size_t mapped;
+   int prior;
+   pthread_mutex_lock(&g_maintenance_mu);
+   arena = g_maintenance.arena;
+   mapped = g_maintenance.arena_len;
+   prior = g_maintenance.prior_cancel_state;
+   memset(&g_maintenance, 0, sizeof(g_maintenance));
+   g_owned_guard = NULL;
+   *guard = NULL;
+   pthread_mutex_unlock(&g_maintenance_mu);
+   maintenance_arena_free(arena, mapped);
+   pthread_rwlock_unlock(&g_use_lock);
+   (void)pthread_setcancelstate(prior, NULL);
+   return VAULT_MAINTENANCE_OK;
 }
 
 int vault_hwm_read(const char *key_id, uint64_t *version, uint8_t *att, size_t att_cap,

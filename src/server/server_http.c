@@ -10,10 +10,14 @@
 #include "server_http_internal.h"
 #include "server_http.h"
 #include "sandbox_pkg_proxy.h" /* delegate-sandbox package forward proxy (UDS demux) */
-#include "server.h"            /* CAP_* / CAPS_* capability bits, server_capability_for_method */
-#include "server_conn_io.h"    /* transport-aware fd I/O (native-TLS phase 1) */
-#include "server_tls.h"        /* native TLS termination (phase 1b) */
-#include "pki.h"               /* P8a per-request durable cert revocation/expiry re-check */
+#include "kb_identity_token.h"
+#include "server_write_tier.h"
+#include "server_write_tier_db1.h"
+#include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
+#include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
+#include "server_tls.h"     /* native TLS termination (phase 1b) */
+#include "server_mgmt_checkpoint_client.h"
+#include "pki.h"                       /* P8a per-request durable cert revocation/expiry re-check */
 #include "workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
 #include "forge_credentials.h"         /* forge_cred_install for the /v1 token-install route */
 #include <time.h>
@@ -23,7 +27,7 @@
 #include "cli_session_pty.h"
 #include "config.h"
 #include "prompts.h"
-#include "delegate_role.h"
+#include <aimee/delegates/delegate_role.h>
 #include "log.h"
 #include "aimee_version.h"
 #include "openai_shape.h"
@@ -34,6 +38,7 @@
 #include "presence.h"
 #include "request_context.h"
 #include "server_http_identity.h" /* WP-C.0 attested-identity capture/threading */
+#include "server_http_authz.h"    /* capability/route-gate policy + per-user write tier */
 #include "server_workflow_api.h"  /* W7: /v1/workflow read+author handlers */
 #include "shadow_mirror.h"        /* generic shadow-traffic mirror */
 #include "http_content_encoding.h"
@@ -53,13 +58,9 @@
 #include <unistd.h>
 #include <stdatomic.h>
 
-/* Max request body. The OpenAI/Codex Responses surface sends large bodies — a
- * Codex turn carries ~20KB instructions + ~18 tool schemas + the full
- * conversation/tool-call history (175KB+ and growing), so the cap must be well
- * above the legacy 64KB or large requests are truncated and misparsed. */
-#define SHTTP_MAX_BODY (4 * 1024 * 1024)
-#define SHTTP_BACKLOG  16
-
+#define SHTTP_MAX_BODY            (4 * 1024 * 1024)
+#define SHTTP_MAX_ROUNDTABLE_BODY (128 * 1024 * 1024)
+#define SHTTP_BACKLOG             16
 /* ── per-session persona store ──────────────────────────────────────────── */
 
 #define SHTTP_MAX_SESSIONS 256
@@ -280,147 +281,10 @@ int server_http_bootstrap_gate(int is_tcp, const char *live_bearer, const char *
    return 1;    /* refuse: enrollment required */
 }
 
-#define SHTTP_RATE_WINDOW_SECS 60
-
-int server_http_rate_check(server_http_rate_state_t *st, int limit_per_min, long now)
-{
-   if (!st || limit_per_min <= 0)
-      return 0; /* limiting disabled */
-   if (now - st->window_start >= SHTTP_RATE_WINDOW_SECS || now < st->window_start)
-   {
-      st->window_start = now;
-      st->count = 0;
-   }
-   if (st->count < limit_per_min)
-   {
-      st->count++;
-      return 0;
-   }
-   int retry = (int)(SHTTP_RATE_WINDOW_SECS - (now - st->window_start));
-   return retry > 0 ? retry : 1;
-}
-
-void server_http_request_id(const char *provided, int pid, unsigned long seq, char *buf, size_t n)
-{
-   if (!buf || n == 0)
-      return;
-   if (provided && provided[0])
-      snprintf(buf, n, "%s", provided);
-   else
-      snprintf(buf, n, "%d-%lu", pid, seq);
-}
-
 /* The declarative /v1 route registry (server_http_routes.inc, included below)
  * is the single source of truth for dispatch, per-route capabilities, and the
  * OpenAPI path inventory. server_http_route_caps and server_http_route are thin
  * public entry points over it; route matching lives in route_match(). */
-/* 1 if the route is a data-plane write. At the default remote_writes=off these
- * routes are local-UDS-only; remote_writes=data/full can expose them over TCP
- * after the per-route capability check. */
-
-/* Capability bitmask a /v1 route requires (route_caps subset of conn_caps gates
- * the request in handle_conn). 0 = public, or an unrecognized route (which then
- * 404s in the router). Pure — no socket, no globals. */
-uint32_t server_http_route_caps(const char *method, const char *path)
-{
-   return v1_route_caps_lookup(method, path);
-}
-
-/* Public accessor for the data-write classification (test + introspection).
- * Historical name retained for ABI compatibility; see
- * v1_route_is_local_only in server_http_routes.inc. */
-int server_http_route_is_local_only(const char *method, const char *path)
-{
-   return v1_route_is_local_only(method, path);
-}
-
-uint32_t server_http_conn_caps(int is_tcp, const char *bearer, int remote_writes)
-{
-   if (!is_tcp)
-      return CAPS_ALL; /* UDS: same-user, filesystem-attested */
-   if (bearer && strncmp(bearer, "scope:", 6) == 0)
-      return CAPS_READ_ONLY & ~(uint32_t)CAP_CHAT; /* scoped: query-only, no compute */
-   /* Unscoped TCP bearer. "full" makes it fully trusted (CAPS_ALL), which also
-    * permits the delegate/tool methods over /v1 (gated on == CAPS_ALL); "off"/"data"
-    * keep CAPS_AUTHENTICATED (write caps present, but mutating routes are gated
-    * separately in server_http_route_allowed). */
-   if (remote_writes >= SERVER_REMOTE_WRITES_FULL)
-      return CAPS_ALL;
-   return CAPS_AUTHENTICATED;
-}
-
-uint32_t server_http_effective_conn_caps(int is_tcp, const char *bearer, int remote_writes,
-                                         int mtls_mode, int mtls_authenticated)
-{
-   if (!is_tcp || mtls_mode <= 0)
-      return server_http_conn_caps(is_tcp, bearer, remote_writes);
-   if (mtls_authenticated)
-      return CAPS_AUTHENTICATED;
-   /* Optional-mode bearer fallback is deliberately weaker than a client cert:
-    * query/session reads only, with no compute or mutation capability. */
-   return CAPS_READ_ONLY & ~(uint32_t)CAP_CHAT;
-}
-
-int server_http_mtls_transport_allowed(int is_tcp, int mtls_mode, int mtls_authenticated)
-{
-   return !is_tcp || mtls_mode < 2 || mtls_authenticated;
-}
-
-/* Routes deliberately reachable over the TCP listener regardless of
- * aimee.api.remote_writes (still capability-gated): the detached-workspace
- * reverse channel and registry mutations (workspace-resource-plane). The serving
- * client IS the fs/exec authority and must drive these from another host. */
-static int v1_route_tcp_exempt(const char *method, const char *path)
-{
-   if (!method || !path)
-      return 0;
-   if (strcmp(path, "/v1/runner/poll") == 0 || strcmp(path, "/v1/runner/respond") == 0)
-      return 1;
-   if (strcmp(method, "POST") == 0 && strcmp(path, "/v1/workspaces") == 0) /* workspace.add */
-      return 1;
-   if (strcmp(method, "DELETE") == 0 && strncmp(path, "/v1/workspaces/", 15) == 0) /* .remove */
-      return 1;
-   return 0;
-}
-
-int server_http_route_allowed_caps(int is_tcp, uint32_t have, const char *method, const char *path,
-                                   int remote_writes)
-{
-   /* Over the TCP listener, a route that needs any capability beyond the read set
-    * (CAPS_READ_ONLY) is "privileged" and denied unless the operator opts in via
-    * aimee.api.remote_writes, so a leaked/shared bearer cannot mutate or execute
-    * remotely at the default. Two tiers: data-plane writes (memory, work, rules,
-    * skill, ... — v1_route_is_local_only / g_v1_write_ops) need
-    * remote_writes>=data; everything else privileged (delegate, cron, agent,
-    * provider, api, worktree, session admin, ...) is exec/control and needs
-    * remote_writes==full. The detached-workspace plane (runner + workspace
-    * add/remove) is exempt — designed to be driven by a remote fs authority. UDS
-    * is the same-user trusted peer and bypasses all of this. */
-   if (is_tcp && !v1_route_tcp_exempt(method, path))
-   {
-      int data_write = v1_route_is_local_only(method, path); /* g_v1_write_ops */
-      uint32_t rc = server_http_route_caps(method, path);
-      int privileged = (rc & ~(uint32_t)CAPS_READ_ONLY) != 0; /* needs a non-read cap */
-      if (data_write || privileged)
-      {
-         /* data-plane writes open at "data"; everything else privileged (exec/
-          * control) needs "full". A data-write keeps the lower bar even if its
-          * cap is weak. */
-         int need_tier = data_write ? SERVER_REMOTE_WRITES_DATA : SERVER_REMOTE_WRITES_FULL;
-         if (remote_writes < need_tier)
-            return 0;
-      }
-   }
-   uint32_t need = server_http_route_caps(method, path);
-   return (need & ~have) == 0;
-}
-
-int server_http_route_allowed(int is_tcp, const char *bearer, const char *method, const char *path,
-                              int remote_writes)
-{
-   return server_http_route_allowed_caps(
-       is_tcp, server_http_conn_caps(is_tcp, bearer, remote_writes), method, path, remote_writes);
-}
 
 void server_http_api_status_report(int http_port, int bearer_configured, int rate_limit_per_min,
                                    char *buf, size_t n)
@@ -460,6 +324,22 @@ void server_http_api_status_report(int http_port, int bearer_configured, int rat
       SAR_APPEND("  rate limit:    %d req/min\n", rate_limit_per_min);
    else
       SAR_APPEND("  rate limit:    unlimited\n");
+
+   /* Per-user write authorization (0.3.0). The counter is surfaced here because
+    * a counter nobody can read is not a metric — an operator mid-cutover needs
+    * to see how much traffic the retired global is no longer letting through.
+    *
+    * Whether AIMEE_SERVER_TEAM_ID is configured is deliberately NOT reported
+    * here: that check lives in the db1-backed resolver, and reaching for it
+    * would drag storage into a status summary. The server already logs an ERROR
+    * naming the variable at startup, which is where an operator diagnosing
+    * "reads work but every write is denied" will actually be looking. */
+   unsigned long long ignored = (unsigned long long)server_http_global_ignored_count();
+   if (ignored)
+      SAR_APPEND("  remote_writes: aimee.api.remote_writes NO LONGER AUTHORIZES; %llu request(s) "
+                 "refused that it would formerly have allowed "
+                 "(remote_writes.global_ignored)\n",
+                 ignored);
 
    SAR_APPEND("\nVS Code model-provider setup (base URL + bearer key + model `aimee`):\n");
    SAR_APPEND(
@@ -1044,6 +924,11 @@ _Thread_local uint32_t g_rpc_conn_caps = CAPS_READ_ONLY;
  * non-blocking so an oversize response can never hang the server thread; if the
  * response is truncated it fails to parse and we return an error rather than a
  * partial body. Returns an HTTP status; resp holds the JSON response body. */
+/* Upper bound on how long the dispatch bridge waits for a reply. Generous because
+ * a deferred handler may be running a real tool, and safe because it blocks one
+ * connection's own worker thread rather than the listener. */
+#define LOOPBACK_REPLY_TIMEOUT_SECS 30
+
 int loopback_rpc(const char *body, int body_len, char *resp, int resp_cap, uint32_t conn_caps)
 {
    int sp[2];
@@ -1070,7 +955,10 @@ int loopback_rpc(const char *body, int body_len, char *resp, int resp_cap, uint3
 
    pthread_mutex_destroy(&fake.mutex);
    pthread_cond_destroy(&fake.can_close);
-   shutdown(sp[1], SHUT_WR);
+
+   /* Deferred handlers reply through a dup, so bound the read instead of shutting it down. */
+   struct timeval rcv = {LOOPBACK_REPLY_TIMEOUT_SECS, 0};
+   (void)setsockopt(sp[0], SOL_SOCKET, SO_RCVTIMEO, &rcv, sizeof(rcv));
 
    size_t total = 0;
    for (;;)
@@ -1079,6 +967,11 @@ int loopback_rpc(const char *body, int body_len, char *resp, int resp_cap, uint3
       if (n <= 0)
          break;
       total += (size_t)n;
+      /* server_dispatch emits one NDJSON response. The newline is the message
+       * boundary; another in-process reference may keep the socket alive, so
+       * waiting for process-wide EOF can otherwise hang this adapter. */
+      if (memchr(resp, '\n', total) != NULL)
+         break;
       if (total >= (size_t)resp_cap - 1)
          break;
    }
@@ -1110,10 +1003,10 @@ static int g_tls_fd = -1;            /* optional native-TLS listener (phase 1b) 
 static int g_management_tls_fd = -1; /* dedicated required-mTLS management listener */
 static char g_bearer[256] = "";      /* configured TCP bearer (empty = none) */
 static int g_rate_limit = 0;         /* TCP requests / 60s (0 = unlimited) */
-static int g_remote_writes = 0;      /* aimee.api.remote_writes: SERVER_REMOTE_WRITES_* */
+int g_remote_writes = 0;             /* aimee.api.remote_writes: parsed, authorizes nothing */
 static server_http_rate_state_t g_rate_state = {0, 0};
-static pthread_mutex_t g_rate_lock =
-    PTHREAD_MUTEX_INITIALIZER; /* guards g_rate_state across conns */
+static pthread_mutex_t g_rate_lock = PTHREAD_MUTEX_INITIALIZER;
+/* guards g_rate_state across conns */
 static pthread_t g_thread;
 static atomic_int g_running = 0;
 static int g_thread_active = 0;
@@ -1597,10 +1490,17 @@ void handle_conn(int fd, int is_tcp, int is_management)
 
    /* The management lane rejects malformed/ambiguous framing before peer
     * classification, so authorization results cannot become a parser oracle. */
+   const char *management_header_end = is_management ? strstr(buf, "\r\n\r\n") : NULL;
+   size_t management_header_len =
+       management_header_end ? (size_t)(management_header_end + 4 - buf) : (size_t)total;
    if (is_management &&
-       (!server_http_management_request_syntax_valid(method, path, buf, (size_t)total) ||
+       (!server_http_management_request_syntax_valid(method, path, buf, management_header_len) ||
         (server_http_management_health_route(method, path) &&
-         !server_http_management_framing_valid(method, path, buf, (size_t)total))))
+         !server_http_management_framing_valid(method, path, buf, management_header_len)) ||
+        (server_http_management_action_route(method, path) &&
+         !server_http_management_action_framing_valid(method, path, buf, management_header_len)) ||
+        (server_http_management_read_route(method, path) &&
+         !server_http_management_read_framing_valid(method, path, buf, management_header_len))))
    {
       send_response(fd, 400, "{\"error\":\"invalid management request framing\"}", request_id);
       return;
@@ -1631,7 +1531,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
                                    management_peer.management_profile, management_peer.cn);
    if (management_auth == SERVER_HTTP_MANAGEMENT_DENY)
    {
-      int status = server_http_management_health_route(method, path) ? 401 : 403;
+      int status = server_http_management_route(method, path) ? 401 : 403;
       send_response(fd, status,
                     status == 401 ? "{\"error\":{\"message\":\"a verified management client "
                                     "certificate is required on the management listener\",\"type\":"
@@ -1705,13 +1605,24 @@ void handle_conn(int fd, int is_tcp, int is_management)
       LOG_INFO("server.http", "%s %s -> 401 (mtls required) req_id=%s", method, path, request_id);
       return;
    }
-   int effective_remote_writes =
-       is_tcp && mtls_mode > 0 ? SERVER_REMOTE_WRITES_OFF : g_remote_writes;
+   /* Per-user remote_writes (proposal §5): the process-global no longer
+    * authorizes anything — the tier comes from the caller's own kb-signed
+    * identity token, resolved here BEFORE capabilities are derived. Verification
+    * has no side effects; the token's single-use jti is spent further down, only
+    * once the request is known to be servable. UDS never reaches the gate at all
+    * (server_http_resolve_write_tier is a no-op when !is_tcp), so the local
+    * operator keeps full capability exactly as §7 requires. */
+   server_identity_token_claims_t identity_claims;
+   int identity_present = 0;
+   int effective_remote_writes = server_http_resolve_write_tier(
+       is_tcp, buf, method, path, request_id, &identity_claims, &identity_present);
    uint32_t effective_caps =
-       management_authenticated ? 0
-                                : server_http_effective_conn_caps(is_tcp, g_bearer, g_remote_writes,
-                                                                  mtls_mode, mtls_authenticated);
-
+       management_authenticated
+           ? 0
+           : server_http_effective_conn_caps(is_tcp, g_bearer, effective_remote_writes, mtls_mode,
+                                             mtls_authenticated);
+   effective_caps = server_http_enrollment_caps(effective_caps, is_tcp, mtls_authenticated,
+                                                server_conn_io_has_ssl(fd), g_bearer, method, path);
    /* Establish the per-request context (#3) only after authenticating the
     * durable certificate, so downstream dispatch sees the same effective caps
     * as the outer route gate. */
@@ -1797,13 +1708,52 @@ void handle_conn(int fd, int is_tcp, int is_management)
    if (is_tcp && !server_http_route_allowed_caps(is_tcp, effective_caps, method, path,
                                                  effective_remote_writes))
    {
+      /* Name the remedy. The bare "beyond the presented token's scope" left a
+       * caller with nowhere to go: following QUICKSTART end to end now lands here
+       * on the first kb write, and nothing on screen says a write-tier grant is
+       * what is missing or who issues it. The mechanism is already public
+       * (QUICKSTART 1.4, docs/UPGRADING.md), so pointing at it leaks nothing. */
       send_response(fd, 403,
                     "{\"error\":{\"message\":\"this endpoint requires capabilities beyond the "
-                    "presented token's scope\",\"type\":\"permission_error\"}}",
+                    "presented token's scope. Over the network a bearer is read/query only "
+                    "until your subject holds a write-tier grant on this server; an operator "
+                    "issues one with `aimee kb grant set` (see docs/UPGRADING.md).\","
+                    "\"type\":\"permission_error\"}}",
                     request_id);
+      /* Count the requests the retired global would formerly have allowed, so an
+       * operator can see exactly how much traffic the cutover is refusing
+       * instead of inferring it from complaints. Only counts denials the old
+       * global would have permitted - a request that fails for an unrelated
+       * reason is not attributable to this change. */
+      if (g_remote_writes != SERVER_REMOTE_WRITES_OFF &&
+          server_http_route_allowed_caps(is_tcp, effective_caps, method, path, g_remote_writes))
+         server_http_note_global_ignored();
       LOG_INFO("server.http", "%s %s -> 403 (caps) req_id=%s", method, path, request_id);
       return;
    }
+
+   /* The request has cleared every gate, so now - and only now - spend the
+    * token's single-use jti. Doing it earlier would burn a token on a request
+    * that was never served. The check remains binding: a replay, or a replay
+    * store that cannot answer, denies here even though verification succeeded. */
+   if (identity_present)
+   {
+      server_write_tier_outcome_t consumed = SERVER_WRITE_TIER_INVALID;
+      if (server_write_tier_consume_for_request(&identity_claims, (int64_t)time(NULL), &consumed) ==
+              SERVER_REMOTE_WRITES_OFF &&
+          consumed != SERVER_WRITE_TIER_OK)
+      {
+         OPENSSL_cleanse(&identity_claims, sizeof(identity_claims));
+         send_response(fd, 403,
+                       "{\"error\":{\"message\":\"this identity token has already been "
+                       "used\",\"type\":\"permission_error\"}}",
+                       request_id);
+         LOG_INFO("server.http", "%s %s -> 403 (%s) req_id=%s", method, path,
+                  server_write_tier_outcome_str(consumed), request_id);
+         return;
+      }
+   }
+   OPENSSL_cleanse(&identity_claims, sizeof(identity_claims));
 
    config_t transport_cfg;
    config_load(&transport_cfg);
@@ -1934,22 +1884,27 @@ void handle_conn(int fd, int is_tcp, int is_management)
          return;
       }
    }
-
-   /* Body via Content-Length (read remainder after the header block). Header
-    * names are case-insensitive (RFC 7230 §3.2): clients such as the Codex CLI
-    * (reqwest/hyper) send a lowercase `content-length`, so match it via the
-    * case-insensitive header lookup rather than a literal strstr — otherwise the
-    * body is never read and large POSTs misparse as empty. */
    char *body = NULL;
    int body_len = 0;
    char clbuf[32] = "";
    if (http_header(buf, "Content-Length", clbuf, sizeof(clbuf)))
    {
-      body_len = atoi(clbuf);
-      if (body_len < 0)
-         body_len = 0;
-      if (body_len > SHTTP_MAX_BODY)
-         body_len = SHTTP_MAX_BODY;
+      errno = 0;
+      char *clend = NULL;
+      long declared = strtol(clbuf, &clend, 10);
+      int route_limit =
+          !strcmp(path, "/v1/roundtable/review") ? SHTTP_MAX_ROUNDTABLE_BODY : SHTTP_MAX_BODY;
+      int invalid = errno == ERANGE || clend == clbuf || *clend != '\0' || declared < 0;
+      if (invalid || declared > route_limit)
+      {
+         server_http_keepalive_set(0);
+         send_response(fd, invalid ? 400 : 413,
+                       invalid ? "{\"error\":\"invalid content length\"}"
+                               : "{\"error\":\"request body exceeds route limit\"}",
+                       request_id);
+         return;
+      }
+      body_len = (int)declared;
       body = malloc((size_t)body_len + 1);
       if (body)
       {
@@ -2344,7 +2299,8 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
       return SERVER_HTTP_START_MGMT_FATAL;
    }
    if (management.enabled &&
-       server_tls_management_init(management.cert, management.key, management.client_ca) != 0)
+       (!server_http_management_checkpoint_files_valid(&management) ||
+        server_tls_management_init(management.cert, management.key, management.client_ca) != 0))
    {
       server_http_management_set_error("management TLS certificate/key/CA");
       LOG_ERROR("server.http", "dedicated management TLS configuration is not loadable");
@@ -2382,6 +2338,36 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
       snprintf(g_bearer, sizeof(g_bearer), "%s", bearer_token);
    g_rate_limit = rate_limit_per_min > 0 ? rate_limit_per_min : 0;
    g_remote_writes = remote_writes;
+   /* aimee.api.remote_writes is still parsed so an existing config file loads,
+    * but it no longer authorizes anything: /v1 write authority now comes from
+    * the caller's kb-signed identity token. Say so once, loudly, at startup -
+    * an operator who upgraded with this set to data/full and did not notice
+    * would otherwise conclude the release simply broke writes. */
+   if (g_remote_writes != SERVER_REMOTE_WRITES_OFF)
+      LOG_WARN("server.http",
+               "aimee.api.remote_writes is set but no longer authorizes writes; per-user grants "
+               "replace it (see docs/UPGRADING.md 0.3.0). Requests it would formerly have allowed "
+               "are counted as remote_writes.global_ignored");
+   switch (server_write_tier_config_state())
+   {
+   case SERVER_WRITE_TIER_CONFIG_NO_TEAM:
+      LOG_ERROR("server.http",
+                "AIMEE_SERVER_TEAM_ID is unset or invalid: reads continue, but every /v1 write "
+                "will be denied with no_team_configured until it is set to this server's team id");
+      break;
+   case SERVER_WRITE_TIER_CONFIG_NO_SERVER_ID:
+      LOG_ERROR("server.http",
+                "AIMEE_SERVER_ID is unset: reads continue, but every /v1 write will be denied "
+                "with invalid until it is set to this server's enrolled registry id");
+      break;
+   case SERVER_WRITE_TIER_CONFIG_NO_TRUST_BUNDLE:
+      LOG_ERROR("server.http",
+                "AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE is unset: reads continue, but every /v1 "
+                "write will be denied with invalid until the management trust bundle is mounted");
+      break;
+   case SERVER_WRITE_TIER_CONFIG_READY:
+      break;
+   }
    g_rate_state.window_start = 0;
    g_rate_state.count = 0;
    g_tcp_fd = tcp_listen(tcp_port, bearer_token, 0 /* plaintext: loopback only */);
@@ -2415,8 +2401,20 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
          pthread_mutex_unlock(&g_listener_lifecycle_lock);
          return SERVER_HTTP_START_MGMT_FATAL;
       }
+      if (server_mgmt_checkpoint_client_start(&management) != 0)
+      {
+         server_http_management_set_error("management checkpoint client");
+         close_listener_fd(&g_management_tls_fd);
+         close_listener_fd(&g_tls_fd);
+         close_listener_fd(&g_tcp_fd);
+         close_listener_fd(&g_listen_fd);
+         unlink(uds_path);
+         pthread_mutex_unlock(&g_listener_lifecycle_lock);
+         return SERVER_HTTP_START_MGMT_FATAL;
+      }
    }
 
+   server_http_management_actions_start();
    atomic_store(&g_running, 1);
    /* The listener thread runs dispatch-backed /v1 routes inline (rh_dispatch_op
     * -> loopback_rpc -> server_dispatch -> handler), whose call chains carry
@@ -2436,6 +2434,7 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
       pthread_attr_destroy(lattr_p);
    if (prc != 0)
    {
+      server_http_management_actions_stop_and_wait();
       if (management.enabled)
          server_http_management_set_error("management listener thread");
       atomic_store(&g_running, 0);
@@ -2448,6 +2447,7 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
       }
       close_listener_fd(&g_tls_fd);
       close_listener_fd(&g_management_tls_fd);
+      server_mgmt_checkpoint_client_stop();
       unlink(uds_path);
       pthread_mutex_unlock(&g_listener_lifecycle_lock);
       return listener_failure;
@@ -2470,6 +2470,10 @@ void server_http_stop(void)
 {
    pthread_mutex_lock(&g_listener_lifecycle_lock);
    atomic_store(&g_running, 0);
+   /* Reject the final dispatch seam of every action that has not already
+    * entered the handler, then join the complete request lifetime before
+    * tearing down its checkpoint-client credentials. */
+   server_http_management_actions_shutdown_begin();
    /* Wake poll/accept without releasing descriptor numbers yet. Closing first
     * would let an unrelated thread reuse a number while the old accept loop
     * still holds it in its poll snapshot. */
@@ -2486,9 +2490,11 @@ void server_http_stop(void)
       pthread_join(g_thread, NULL);
       g_thread_active = 0;
    }
+   server_http_management_actions_stop_and_wait();
    close_listener_fd(&g_listen_fd);
    close_listener_fd(&g_tcp_fd);
    close_listener_fd(&g_tls_fd);
    close_listener_fd(&g_management_tls_fd);
+   server_mgmt_checkpoint_client_stop();
    pthread_mutex_unlock(&g_listener_lifecycle_lock);
 }

@@ -324,6 +324,14 @@ static void test_claim_bounds_bindings_and_actor(EVP_PKEY *key, const char *jwks
        "cert:issuer:01AF",
        "cert:issuer:nothex",
        "cert::01af",
+       /* A bare host-account name. The DATA-PLANE identity token accepts this
+        * (it is the PAM login's subject form), and both verifiers live in
+        * server_mgmt_token.c — an earlier version of that change widened the
+        * management actor as a side effect, which this list caught. The
+        * management actor comes from kb_admin_grant / kb_team_lead and is never a
+        * bare account, so it must stay a rejection. */
+       "alice",
+       "svc_user-1.2",
    };
    for (size_t i = 0; i < sizeof(bad_actor) / sizeof(bad_actor[0]); ++i)
    {
@@ -503,6 +511,44 @@ int main(void)
           claims.expires_at == NOW + 90);
    assert(strcmp(claims.subject, "oidc:https%3A//idp.example:user%3A42") == 0);
    assert(strcmp(claims.kid, "management-1") == 0);
+
+   char *read_raw = replace_once(raw, "\"cap\":\"remote_writes\"", "\"cap\":\"remote_reads\"");
+   char *read_jwt =
+       mint(key, "{\"alg\":\"RS256\",\"typ\":\"JWT\",\"kid\":\"management-1\"}", read_raw);
+   assert(!verify(read_jwt, strlen(read_jwt), jwks, NOW, &claims));
+   assert(server_mgmt_token_verify_read_claims_ex(read_jwt, strlen(read_jwt), jwks, issuer,
+                                                  audience, peer_issuer, peer_serial, fingerprint,
+                                                  NOW, &claims) == SERVER_MGMT_TOKEN_OK);
+   assert(!strcmp(claims.capability, "remote_reads") &&
+          !strcmp(claims.request_sha256, request_hash));
+   memset(&claims, 0xa5, sizeof(claims));
+   assert(server_mgmt_token_verify_read_claims_ex(jwt, strlen(jwt), jwks, issuer, audience,
+                                                  peer_issuer, peer_serial, fingerprint, NOW,
+                                                  &claims) == SERVER_MGMT_TOKEN_INVALID);
+   for (size_t i = 0; i < sizeof(claims); ++i)
+      assert(((const unsigned char *)&claims)[i] == 0);
+   free(read_jwt);
+   free(read_raw);
+
+   char *unknown_cap = replace_once(raw, "\"cap\":\"remote_writes\"", "\"cap\":\"remote_execute\"");
+   expect_payload_reject(key, jwks, unknown_cap);
+   free(unknown_cap);
+
+   char *unknown = mint(key, "{\"alg\":\"RS256\",\"typ\":\"JWT\",\"kid\":\"management-2\"}", raw);
+   memset(&claims, 0xa5, sizeof(claims));
+   assert(server_mgmt_token_verify_ex(unknown, strlen(unknown), jwks, issuer, audience, peer_issuer,
+                                      peer_serial, fingerprint, request_hash, NOW,
+                                      &claims) == SERVER_MGMT_TOKEN_UNKNOWN_KID);
+   for (size_t i = 0; i < sizeof(claims); ++i)
+      assert(((const unsigned char *)&claims)[i] == 0);
+   char *malformed_jwks = replace_once(jwks, "\"e\":\"AQAB\"", "\"e\":\"AQ\"");
+   assert(server_mgmt_token_verify_ex(unknown, strlen(unknown), malformed_jwks, issuer, audience,
+                                      peer_issuer, peer_serial, fingerprint, request_hash, NOW,
+                                      &claims) == SERVER_MGMT_TOKEN_INVALID);
+   assert(!server_mgmt_token_verify(unknown, strlen(unknown), jwks, issuer, audience, peer_issuer,
+                                    peer_serial, fingerprint, request_hash, NOW, &claims));
+   free(malformed_jwks);
+   free(unknown);
 
    test_header_matrix(key, jwks, raw);
    test_payload_type_and_numeric_matrix(key, jwks, raw);

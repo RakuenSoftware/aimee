@@ -18,7 +18,7 @@
  * Reading pwd back from the remote so an in-command `cd` persists
  * (matching the local backend's shell-state wrapper) is a follow-up iter. */
 
-#include "delegate_backend_ssh.h"
+#include <aimee/delegates/delegate_backend_ssh.h>
 #include "util.h"
 
 #include "aimee.h" /* MAX_PATH_LEN */

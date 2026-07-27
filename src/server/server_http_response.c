@@ -18,14 +18,16 @@
 #include "cli_session_pty.h"
 #include "config.h"
 #include "prompts.h"
-#include "delegate_role.h"
+#include <aimee/delegates/delegate_role.h>
 #include "log.h"
 #include "aimee_version.h"
 #include "openai_shape.h"
 #include "ingress_preinject.h"
 #include "openapi_server_data.h" /* AIMEE_OPENAPI_SERVER_YAML_STR (generated from api/openapi-server-v1.yaml) */
 #include "openai_runs_store.h"
+#if AIMEE_WITH_ROUNDTABLE
 #include "roundtable_pipeline_capture.h" /* pipeline op-run capture seam (#18/#20) */
+#endif
 #include "presence.h"
 #include "request_context.h"
 #include "server_http_identity.h" /* WP-C.0 attested-identity capture/threading */
@@ -43,6 +45,36 @@
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+
+#define SHTTP_RATE_WINDOW_SECS 60
+
+int server_http_rate_check(server_http_rate_state_t *st, int limit_per_min, long now)
+{
+   if (!st || limit_per_min <= 0)
+      return 0;
+   if (now - st->window_start >= SHTTP_RATE_WINDOW_SECS || now < st->window_start)
+   {
+      st->window_start = now;
+      st->count = 0;
+   }
+   if (st->count < limit_per_min)
+   {
+      st->count++;
+      return 0;
+   }
+   int retry = (int)(SHTTP_RATE_WINDOW_SECS - (now - st->window_start));
+   return retry > 0 ? retry : 1;
+}
+
+void server_http_request_id(const char *provided, int pid, unsigned long seq, char *buf, size_t n)
+{
+   if (!buf || n == 0)
+      return;
+   if (provided && provided[0])
+      snprintf(buf, n, "%s", provided);
+   else
+      snprintf(buf, n, "%d-%lu", pid, seq);
+}
 #include <time.h>
 #include <unistd.h>
 #include <stdatomic.h>

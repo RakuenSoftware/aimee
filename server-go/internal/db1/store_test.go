@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -47,6 +48,140 @@ func TestOpenMigratesPreGoWorkflowSchema(t *testing.T) {
 	}
 	if item.SourcePath == "" {
 		t.Fatal("source_path migration missing")
+	}
+}
+
+func TestOpenBackfillsLegacyDelegateMappingOwnership(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy-mapping.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`
+CREATE TABLE lifecycle_work_item (
+ id INTEGER PRIMARY KEY, work_item_id TEXT UNIQUE, repo TEXT DEFAULT '', proposal_path TEXT DEFAULT '',
+ workflow_name TEXT DEFAULT 'build', workflow_version TEXT DEFAULT '', current_stage TEXT DEFAULT '',
+ state TEXT DEFAULT 'active', mode TEXT DEFAULT 'autonomous', pause_reason TEXT DEFAULT '', paused_state TEXT DEFAULT '',
+ content_hash TEXT DEFAULT '', pr_ref TEXT DEFAULT '', submitter TEXT DEFAULT '', cum_cost_usd REAL DEFAULT 0,
+ override_count INTEGER DEFAULT 0, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+ UNIQUE(repo, proposal_path));
+INSERT INTO lifecycle_work_item(work_item_id,repo,proposal_path,current_stage,state) VALUES('wi_legacy_owner','repo','legacy','impl','stopped');
+INSERT INTO lifecycle_work_item(work_item_id,repo,proposal_path,current_stage,state) VALUES('wi_%_wildcard','repo','wildcard','impl','stopped');
+CREATE TABLE lifecycle_delegate_job (
+ execution_key TEXT PRIMARY KEY, job_id INTEGER NOT NULL, participant_token TEXT NOT NULL DEFAULT '',
+ updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+INSERT INTO lifecycle_delegate_job(execution_key,job_id) VALUES('wi_legacy_owner:impl:v1:hash',91);
+INSERT INTO lifecycle_delegate_job(execution_key,job_id) VALUES('wi_X_wildcard:impl:v1:hash',92);
+CREATE TABLE agent_jobs (id INTEGER PRIMARY KEY,status TEXT NOT NULL,participant_token TEXT NOT NULL DEFAULT '');
+INSERT INTO agent_jobs(id,status) VALUES(91,'running'),(92,'running');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	mappings, err := store.TerminalDelegateJobs(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mappings) != 1 || mappings[0].ExecutionKey != "wi_legacy_owner:impl:v1:hash" || mappings[0].JobID != 91 {
+		t.Fatalf("legacy mappings=%+v", mappings)
+	}
+}
+
+func TestTerminalDelegateJobsReturnsBoundedBatch(t *testing.T) {
+	store := newTestStore(t)
+	if _, err := store.db.ExecContext(t.Context(), `CREATE TABLE agent_jobs (id INTEGER PRIMARY KEY,status TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= terminalCancellationBatchSize+2; i++ {
+		workItemID := fmt.Sprintf("wi_terminal_batch_%02d", i)
+		if err := store.CreateWorkItem(t.Context(), CreateWorkItem{ID: workItemID, Repo: "repo", ProposalPath: workItemID, WorkflowName: "build", StartStage: "impl"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SaveWorkflowDelegateJob(t.Context(), workItemID+":impl:v1:hash", workItemID, i, ""); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.db.ExecContext(t.Context(), `INSERT INTO agent_jobs(id,status) VALUES(?,'running')`, i); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.StopTree(t.Context(), workItemID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mappings, err := store.TerminalDelegateJobs(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mappings) != terminalCancellationBatchSize {
+		t.Fatalf("mappings=%d want bounded batch %d", len(mappings), terminalCancellationBatchSize)
+	}
+	second, err := store.TerminalDelegateJobs(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != terminalCancellationBatchSize || second[0].JobID != terminalCancellationBatchSize+1 || second[1].JobID != terminalCancellationBatchSize+2 {
+		t.Fatalf("second batch did not rotate past failed jobs: %+v", second)
+	}
+}
+
+func TestPausedParentIsNotReconciledOrCancelledAsTerminal(t *testing.T) {
+	store := newTestStore(t)
+	ctx := t.Context()
+	if _, err := store.db.ExecContext(ctx, `CREATE TABLE agent_jobs (id INTEGER PRIMARY KEY,status TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateWorkItem(ctx, CreateWorkItem{ID: "wi_paused_parent", Repo: "repo", ProposalPath: "parent", WorkflowName: "build", StartStage: "slices"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateWorkItem(ctx, CreateWorkItem{ID: "wi_paused_child", Repo: "repo", ProposalPath: "child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_paused_parent"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Park(ctx, "wi_paused_parent", "slices", "manual", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveWorkflowDelegateJob(ctx, "wi_paused_parent:slices:v1:hash", "wi_paused_parent", 81, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO agent_jobs(id,status) VALUES(81,'running')`); err != nil {
+		t.Fatal(err)
+	}
+	orphans, err := store.ReconcileOrphanedDescendants(ctx)
+	if err != nil || len(orphans) != 0 {
+		t.Fatalf("paused parent reconciled descendants: ids=%v err=%v", orphans, err)
+	}
+	mappings, err := store.TerminalDelegateJobs(ctx)
+	if err != nil || len(mappings) != 0 {
+		t.Fatalf("paused parent selected for cancellation: mappings=%v err=%v", mappings, err)
+	}
+}
+
+func TestStopTreeStopsPausedRootAndPausedDescendant(t *testing.T) {
+	store := newTestStore(t)
+	ctx := t.Context()
+	for _, item := range []CreateWorkItem{
+		{ID: "wi_paused_tree", Repo: "repo", ProposalPath: "paused-root", WorkflowName: "build", StartStage: "slices"},
+		{ID: "wi_paused_tree.child", Repo: "repo", ProposalPath: "paused-child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_paused_tree"},
+	} {
+		if err := store.CreateWorkItem(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Park(ctx, item.ID, item.StartStage, "manual", 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stopped, err := store.StopTree(ctx, "wi_paused_tree")
+	if err != nil || len(stopped) != 2 {
+		t.Fatalf("stop paused tree: ids=%v err=%v", stopped, err)
+	}
+	for _, id := range stopped {
+		item, err := store.WorkItem(ctx, id)
+		if err != nil || item.State != "stopped" || item.PauseReason != "" {
+			t.Fatalf("paused member not stopped: item=%+v err=%v", item, err)
+		}
 	}
 }
 
@@ -184,7 +319,7 @@ func TestWorkflowBudgetAggregatesChildrenAndParksWholeTree(t *testing.T) {
 	if err := store.Park(ctx, "wi_budget.child", "review", "human_gate", 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.ParkBudgetTree(ctx, root, .30); err != nil {
+	if err := store.ParkBudgetTree(ctx, root, "wi_budget.child", .30); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"wi_budget"} {
@@ -221,6 +356,143 @@ func TestGenericResumeCannotBypassLifecycleOwnedPause(t *testing.T) {
 	}
 }
 
+func TestStopTerminalizesActiveWorkflowTree(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	for _, in := range []CreateWorkItem{
+		{ID: "wi_stop_tree", Repo: "repo", ProposalPath: "root", WorkflowName: "build", StartStage: "slices"},
+		{ID: "wi_stop_tree.child", Repo: "repo", ProposalPath: "child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_stop_tree"},
+		{ID: "wi_stop_tree.grandchild", Repo: "repo", ProposalPath: "grandchild", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_stop_tree.child"},
+	} {
+		if err := store.CreateWorkItem(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stopped, err := store.StopTree(ctx, "wi_stop_tree")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(stopped, ","); got != "wi_stop_tree,wi_stop_tree.child,wi_stop_tree.grandchild" {
+		t.Fatalf("stopped IDs=%q", got)
+	}
+	for _, id := range []string{"wi_stop_tree", "wi_stop_tree.child", "wi_stop_tree.grandchild"} {
+		item, err := store.WorkItem(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if item.State != "stopped" {
+			t.Fatalf("%s state=%q want stopped", id, item.State)
+		}
+		events, err := store.Events(ctx, id, 0, 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		last := events[len(events)-1]
+		if last.Kind != "terminal" || last.Detail != "operator_stop" {
+			t.Fatalf("%s last event=%+v", id, last)
+		}
+	}
+}
+
+func TestCreateChildRejectsTerminalParent(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	if err := store.CreateWorkItem(ctx, CreateWorkItem{ID: "wi_terminal_parent", Repo: "repo", ProposalPath: "root", WorkflowName: "build", StartStage: "slices"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Stop(ctx, "wi_terminal_parent"); err != nil {
+		t.Fatal(err)
+	}
+	err := store.CreateWorkItem(ctx, CreateWorkItem{ID: "wi_late_child", Repo: "repo", ProposalPath: "child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_terminal_parent"})
+	if err == nil || !strings.Contains(err.Error(), "parent work item is not active") {
+		t.Fatalf("create child under terminal parent: %v", err)
+	}
+	if _, err := store.WorkItem(ctx, "wi_late_child"); err == nil {
+		t.Fatal("late child was persisted")
+	}
+}
+
+func TestCreateChildRacingStopTreeCannotLeaveActiveOrphan(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	for iteration := 0; iteration < 50; iteration++ {
+		rootID := fmt.Sprintf("wi_stop_race_%d", iteration)
+		childID := rootID + ".child"
+		if err := store.CreateWorkItem(ctx, CreateWorkItem{ID: rootID, Repo: "repo", ProposalPath: rootID, WorkflowName: "build", StartStage: "slices"}); err != nil {
+			t.Fatal(err)
+		}
+		start := make(chan struct{})
+		var stopErr, createErr error
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, stopErr = store.StopTree(ctx, rootID)
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			createErr = store.CreateWorkItem(ctx, CreateWorkItem{ID: childID, Repo: "repo", ProposalPath: childID, WorkflowName: "slice", StartStage: "impl", ParentID: rootID})
+		}()
+		close(start)
+		wg.Wait()
+		if stopErr != nil {
+			t.Fatalf("iteration %d stop: %v", iteration, stopErr)
+		}
+		child, err := store.WorkItem(ctx, childID)
+		switch {
+		case createErr == nil && err != nil:
+			t.Fatalf("iteration %d successful child creation missing: %v", iteration, err)
+		case createErr == nil && child.State != "stopped":
+			t.Fatalf("iteration %d child state=%q want stopped", iteration, child.State)
+		case createErr != nil && err == nil:
+			t.Fatalf("iteration %d failed child creation persisted item=%+v: %v", iteration, child, createErr)
+		case createErr != nil && !strings.Contains(createErr.Error(), "parent work item is not active"):
+			t.Fatalf("iteration %d unexpected child error: %v", iteration, createErr)
+		}
+	}
+}
+
+func TestReconcileOrphanedDescendantsStopsCorruptActiveTree(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	for _, in := range []CreateWorkItem{
+		{ID: "wi_orphan_root", Repo: "repo", ProposalPath: "root", WorkflowName: "build", StartStage: "slices"},
+		{ID: "wi_orphan_child", Repo: "repo", ProposalPath: "child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_orphan_root"},
+		{ID: "wi_orphan_grandchild", Repo: "repo", ProposalPath: "grandchild", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_orphan_child"},
+	} {
+		if err := store.CreateWorkItem(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Reproduce state written by the old non-cascading Stop implementation.
+	if _, err := store.db.ExecContext(ctx, `UPDATE lifecycle_work_item SET state='stopped' WHERE work_item_id='wi_orphan_root'`); err != nil {
+		t.Fatal(err)
+	}
+	stopped, err := store.ReconcileOrphanedDescendants(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(stopped, ","); got != "wi_orphan_child,wi_orphan_grandchild" {
+		t.Fatalf("stopped=%q", got)
+	}
+	for _, id := range []string{"wi_orphan_child", "wi_orphan_grandchild"} {
+		item, err := store.WorkItem(ctx, id)
+		if err != nil || item.State != "stopped" {
+			t.Fatalf("%s item=%+v err=%v", id, item, err)
+		}
+		events, err := store.Events(ctx, id, 0, 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		last := events[len(events)-1]
+		if last.Kind != "terminal" || last.Detail != "ancestor_terminal" {
+			t.Fatalf("%s last event=%+v", id, last)
+		}
+	}
+}
+
 func createTestItem(t *testing.T, store *Store, id string) {
 	t.Helper()
 	err := store.CreateWorkItem(context.Background(), CreateWorkItem{
@@ -239,7 +511,7 @@ func TestMaxIterationsParksWithoutAbandoning(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		out, err := store.RecordRequestedChanges(ctx, "wi_cap", "plan_gate", "plan",
-			"plan-"+string(rune('a'+i)), "feedback-"+string(rune('a'+i)), 3, 3, 0)
+			"plan-"+string(rune('a'+i)), "feedback-"+string(rune('a'+i)), "subject anchor never defined", 3, 3, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -262,7 +534,7 @@ func TestIdenticalPlanAndFeedbackParksAsNoProgress(t *testing.T) {
 	ctx := context.Background()
 	for i := 0; i < 3; i++ {
 		out, err := store.RecordRequestedChanges(ctx, "wi_repeat", "plan_gate", "plan",
-			"same-plan", "same-feedback", 24, 3, 0)
+			"same-plan", "same-feedback", "", 24, 3, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -286,7 +558,7 @@ func TestChangedPlanOrFeedbackIsPositiveProgress(t *testing.T) {
 	cases := [][2]string{{"plan-a", "feedback-a"}, {"plan-b", "feedback-a"}, {"plan-b", "feedback-b"}}
 	for _, pair := range cases {
 		out, err := store.RecordRequestedChanges(ctx, "wi_progress", "plan_gate", "plan",
-			pair[0], pair[1], 24, 3, 0)
+			pair[0], pair[1], "", 24, 3, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -411,24 +683,462 @@ func TestCancelUnassignedDelegateJobRacesAssignment(t *testing.T) {
 func TestForgetDelegateJobIfMatchesCannotEraseNewerRetry(t *testing.T) {
 	store := newTestStore(t)
 	const key = "same-logical-seat"
-	if err := store.SaveDelegateJob(t.Context(), key, 51); err != nil {
+	if err := store.SaveDelegateJob(t.Context(), key, 51, "participant-51"); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SaveDelegateJob(t.Context(), key, 52); err != nil {
+	if err := store.SaveDelegateJob(t.Context(), key, 52, "participant-52"); err != nil {
 		t.Fatal(err)
 	}
 	forgot, err := store.ForgetDelegateJobIfMatches(t.Context(), key, 51)
 	if err != nil || forgot {
 		t.Fatalf("stale cleanup forgot=%v err=%v", forgot, err)
 	}
-	if jobID, err := store.DelegateJob(t.Context(), key); err != nil || jobID != 52 {
-		t.Fatalf("newer retry mapping job=%d err=%v", jobID, err)
+	if jobID, participant, err := store.DelegateJob(t.Context(), key); err != nil || jobID != 52 || participant != "participant-52" {
+		t.Fatalf("newer retry mapping job=%d participant=%q err=%v", jobID, participant, err)
 	}
 	forgot, err = store.ForgetDelegateJobIfMatches(t.Context(), key, 52)
 	if err != nil || !forgot {
 		t.Fatalf("matching cleanup forgot=%v err=%v", forgot, err)
 	}
-	if _, err := store.DelegateJob(t.Context(), key); err == nil {
+	if _, _, err := store.DelegateJob(t.Context(), key); err == nil {
 		t.Fatal("matching cleanup retained mapping")
+	}
+}
+
+func TestConcurrentStoreOpenDoesNotClearLiveBudgetLease(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aimee.db")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	item := CreateWorkItem{ID: "wi_live_lease", Repo: "repo", ProposalPath: "live-lease", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "work", MaxCostUSD: 1}
+	if err := first.CreateWorkItem(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.ReserveWorkflowBudget(t.Context(), item.ID, "live-owner"); err != nil {
+		t.Fatal(err)
+	}
+	second, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	reservation, err := second.ReserveWorkflowBudget(t.Context(), item.ID, "competing-owner")
+	if err != nil || !reservation.Busy || reservation.Allowed {
+		t.Fatalf("reservation=%+v err=%v", reservation, err)
+	}
+}
+
+func TestExpiredPostDispatchLeaseBecomesReplayOnlyAfterRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aimee.db")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := CreateWorkItem{ID: "wi_expired_lease", Repo: "repo", ProposalPath: "expired-lease", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "work", MaxCostUSD: .75}
+	if err := first.CreateWorkItem(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	initial, err := first.ReserveWorkflowBudget(t.Context(), item.ID, "dead-owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.db.ExecContext(t.Context(), `UPDATE lifecycle_work_item SET reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, item.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	replay, err := restarted.ReserveWorkflowBudget(t.Context(), item.ID, "restart-owner")
+	if err != nil || !replay.ReplayOnly || replay.Amount != initial.Amount {
+		t.Fatalf("replay=%+v initial=%+v err=%v", replay, initial, err)
+	}
+}
+
+func TestBudgetTreeParkPreservesAndConsumesInflightSibling(t *testing.T) {
+	store := newTestStore(t)
+	ctx := t.Context()
+	for _, item := range []CreateWorkItem{
+		{ID: "wi_park_root", Repo: "repo", ProposalPath: "park-root", WorkflowName: "build", StartStage: "fanout", MaxCostUSD: 1},
+		{ID: "wi_park_a", Repo: "repo", ProposalPath: "park-a", WorkflowName: "slice", StartStage: "work", ParentID: "wi_park_root"},
+		{ID: "wi_park_b", Repo: "repo", ProposalPath: "park-b", WorkflowName: "slice", StartStage: "work", ParentID: "wi_park_root"},
+	} {
+		if err := store.CreateWorkItem(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, err := store.ReserveWorkflowBudget(ctx, "wi_park_a", "owner-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := store.ReserveWorkflowBudget(ctx, "wi_park_b", "owner-b")
+	if err != nil || a.Amount+b.Amount > 1 {
+		t.Fatalf("a=%+v b=%+v err=%v", a, b, err)
+	}
+	if allowed, err := store.ReconcileWorkflowBudget(ctx, "wi_park_a", "owner-a", .7); err != nil || allowed {
+		t.Fatalf("overspend allowed=%v err=%v", allowed, err)
+	}
+	if err := store.ParkBudgetTree(ctx, "wi_park_root", "wi_park_a", .7); err != nil {
+		t.Fatal(err)
+	}
+	inflight, err := store.WorkItem(ctx, "wi_park_b")
+	if err != nil || inflight.PauseReason != "" || inflight.ReservedCostUSD != b.Amount {
+		t.Fatalf("in-flight sibling was destroyed: %+v err=%v", inflight, err)
+	}
+	if allowed, err := store.ReconcileWorkflowBudget(ctx, "wi_park_b", "owner-b", .3); err != nil || !allowed {
+		t.Fatalf("sibling reconcile allowed=%v err=%v", allowed, err)
+	}
+	if err := store.Move(ctx, "wi_park_b", "work", "done", "advance", "", "", .3); err != nil {
+		t.Fatal(err)
+	}
+	_, spent, _, err := store.WorkflowBudget(ctx, "wi_park_root")
+	if err != nil || spent != 1 {
+		t.Fatalf("spent=%v err=%v", spent, err)
+	}
+}
+
+func TestBudgetTreeParkPreservesReconciledSiblingAcrossStores(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aimee.db")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	second, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	ctx := t.Context()
+	for _, item := range []CreateWorkItem{
+		{ID: "wi_xproc_root", Repo: "repo", ProposalPath: "xproc-root", WorkflowName: "build", StartStage: "fanout", MaxCostUSD: 1},
+		{ID: "wi_xproc_a", Repo: "repo", ProposalPath: "xproc-a", WorkflowName: "slice", StartStage: "work", ParentID: "wi_xproc_root"},
+		{ID: "wi_xproc_b", Repo: "repo", ProposalPath: "xproc-b", WorkflowName: "slice", StartStage: "work", ParentID: "wi_xproc_root"},
+	} {
+		if err := first.CreateWorkItem(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := first.ReserveWorkflowBudget(ctx, "wi_xproc_a", "owner-a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := second.ReserveWorkflowBudget(ctx, "wi_xproc_b", "owner-b"); err != nil {
+		t.Fatal(err)
+	}
+	if allowed, err := first.ReconcileWorkflowBudget(ctx, "wi_xproc_a", "owner-a", .7); err != nil || allowed {
+		t.Fatalf("a allowed=%v err=%v", allowed, err)
+	}
+	if allowed, err := second.ReconcileWorkflowBudget(ctx, "wi_xproc_b", "owner-b", .3); err != nil || !allowed {
+		t.Fatalf("b allowed=%v err=%v", allowed, err)
+	}
+	// This is the cross-process window: B has measured and reconciled spend but
+	// has not committed its lifecycle transition when A parks the capped tree.
+	if err := first.ParkBudgetTree(ctx, "wi_xproc_root", "wi_xproc_a", .7); err != nil {
+		t.Fatal(err)
+	}
+	b, err := second.WorkItem(ctx, "wi_xproc_b")
+	if err != nil || b.PauseReason != "" || b.ReservedCostUSD != .3 || b.ReservationState != "actual" {
+		t.Fatalf("reconciled sibling=%+v err=%v", b, err)
+	}
+	if err := second.Move(ctx, "wi_xproc_b", "work", "done", "advance", "", "", .3); err != nil {
+		t.Fatal(err)
+	}
+	_, spent, _, err := first.WorkflowBudget(ctx, "wi_xproc_root")
+	if err != nil || spent != 1 {
+		t.Fatalf("spent=%v err=%v", spent, err)
+	}
+}
+
+func TestZeroCostReconciliationRequiresReplayAfterRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aimee.db")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := CreateWorkItem{ID: "wi_zero_replay", Repo: "repo", ProposalPath: "zero-replay", WorkflowName: "build", StartStage: "work"}
+	if err := store.CreateWorkItem(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	if reservation, err := store.ReserveWorkflowBudget(t.Context(), item.ID, "first"); err != nil || !reservation.Allowed {
+		t.Fatalf("reservation=%+v err=%v", reservation, err)
+	}
+	if allowed, err := store.ReconcileWorkflowBudget(t.Context(), item.ID, "first", 0); err != nil || !allowed {
+		t.Fatalf("allowed=%v err=%v", allowed, err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	// Replay ownership is leased. While the reconciling owner's lease is live a
+	// competing invocation is refused rather than allowed to replay in parallel.
+	if busy, err := store.ReserveWorkflowBudget(t.Context(), item.ID, "second"); err != nil || !busy.Busy || busy.Allowed || busy.ReplayOnly {
+		t.Fatalf("busy=%+v err=%v", busy, err)
+	}
+	if _, err := store.db.ExecContext(t.Context(), `UPDATE lifecycle_work_item SET reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, item.ID); err != nil {
+		t.Fatal(err)
+	}
+	replay, err := store.ReserveWorkflowBudget(t.Context(), item.ID, "second")
+	if err != nil || !replay.ReplayOnly || replay.Amount != 0 {
+		t.Fatalf("replay=%+v err=%v", replay, err)
+	}
+	if allowed, err := store.ReconcileWorkflowBudget(t.Context(), item.ID, "second", 0); err != nil || !allowed {
+		t.Fatalf("replay allowed=%v err=%v", allowed, err)
+	}
+	if err := store.Move(t.Context(), item.ID, "work", "done", "advance", "", "", 0); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.WorkItem(t.Context(), item.ID)
+	if err != nil || got.ReservationState != "" || got.ReservedCostUSD != 0 {
+		t.Fatalf("item=%+v err=%v", got, err)
+	}
+}
+
+// A crash between a denied reconciliation and ParkBudgetTree must not let the
+// restarted replay commit the over-budget transition.
+func TestDeniedReconciliationStaysDeniedAcrossRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aimee.db")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	for _, item := range []CreateWorkItem{
+		{ID: "wi_deny_root", Repo: "repo", ProposalPath: "deny-root", WorkflowName: "build", StartStage: "fanout", MaxCostUSD: 1},
+		{ID: "wi_deny_a", Repo: "repo", ProposalPath: "deny-a", WorkflowName: "slice", StartStage: "work", ParentID: "wi_deny_root"},
+		{ID: "wi_deny_b", Repo: "repo", ProposalPath: "deny-b", WorkflowName: "slice", StartStage: "work", ParentID: "wi_deny_root"},
+	} {
+		if err := first.CreateWorkItem(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := first.ReserveWorkflowBudget(ctx, "wi_deny_a", "owner-a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.ReserveWorkflowBudget(ctx, "wi_deny_b", "owner-b"); err != nil {
+		t.Fatal(err)
+	}
+	// B commits real spend; A then overshoots what the tree can still afford.
+	if allowed, err := first.ReconcileWorkflowBudget(ctx, "wi_deny_b", "owner-b", .6); err != nil || !allowed {
+		t.Fatalf("b allowed=%v err=%v", allowed, err)
+	}
+	if allowed, err := first.ReconcileWorkflowBudget(ctx, "wi_deny_a", "owner-a", .7); err != nil || allowed {
+		t.Fatalf("a allowed=%v err=%v", allowed, err)
+	}
+	// Crash before ParkBudgetTree: the denied decision was never acted on.
+	if _, err := first.db.ExecContext(ctx, `UPDATE lifecycle_work_item SET reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, "wi_deny_a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	replay, err := restarted.ReserveWorkflowBudget(ctx, "wi_deny_a", "restart-owner")
+	if err != nil || !replay.ReplayOnly || replay.Amount != .7 {
+		t.Fatalf("replay=%+v err=%v", replay, err)
+	}
+	if allowed, err := restarted.ReconcileWorkflowBudget(ctx, "wi_deny_a", "restart-owner", .7); err != nil || allowed {
+		t.Fatalf("replayed denial allowed=%v err=%v", allowed, err)
+	}
+}
+
+// Two processes must not both enter replay execution for the same reservation.
+func TestConcurrentReplayAdmissionAdmitsExactlyOneOwner(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aimee.db")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	second, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	ctx := t.Context()
+	item := CreateWorkItem{ID: "wi_replay_race", Repo: "repo", ProposalPath: "replay-race", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "work", MaxCostUSD: 1}
+	if err := first.CreateWorkItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.ReserveWorkflowBudget(ctx, item.ID, "dead-owner"); err != nil {
+		t.Fatal(err)
+	}
+	if allowed, err := first.ReconcileWorkflowBudget(ctx, item.ID, "dead-owner", .4); err != nil || !allowed {
+		t.Fatalf("allowed=%v err=%v", allowed, err)
+	}
+	if _, err := first.db.ExecContext(ctx, `UPDATE lifecycle_work_item SET reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, item.ID); err != nil {
+		t.Fatal(err)
+	}
+	winner, err := first.ReserveWorkflowBudget(ctx, item.ID, "replay-one")
+	if err != nil || !winner.ReplayOnly {
+		t.Fatalf("winner=%+v err=%v", winner, err)
+	}
+	loser, err := second.ReserveWorkflowBudget(ctx, item.ID, "replay-two")
+	if err != nil || !loser.Busy || loser.ReplayOnly || loser.Allowed {
+		t.Fatalf("loser=%+v err=%v", loser, err)
+	}
+	// Only the admitted owner can consume the reservation.
+	if _, err := second.ReconcileWorkflowBudget(ctx, item.ID, "replay-two", .4); err == nil {
+		t.Fatal("losing owner reconciled the reservation")
+	}
+	if allowed, err := first.ReconcileWorkflowBudget(ctx, item.ID, "replay-one", .4); err != nil || !allowed {
+		t.Fatalf("winner reconcile allowed=%v err=%v", allowed, err)
+	}
+}
+
+// A non-finite runner cost must be rejected at the durable boundary, not written
+// into cum_cost_usd where it would strand the whole tree in budget_cap.
+func TestReconcileRejectsNonFiniteCost(t *testing.T) {
+	store := newTestStore(t)
+	ctx := t.Context()
+	item := CreateWorkItem{ID: "wi_nonfinite", Repo: "repo", ProposalPath: "nonfinite", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "work", MaxCostUSD: 1}
+	if err := store.CreateWorkItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ReserveWorkflowBudget(ctx, item.ID, "owner"); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []float64{math.NaN(), math.Inf(1), math.Inf(-1), -1} {
+		if _, err := store.ReconcileWorkflowBudget(ctx, item.ID, "owner", bad); err == nil {
+			t.Fatalf("reconcile accepted non-finite/negative cost %v", bad)
+		}
+		if err := store.ParkRunnerFailure(ctx, item.ID, "work", "owner", "runner_unavailable", "d", true, false, bad); err == nil {
+			t.Fatalf("park accepted non-finite/negative cost %v", bad)
+		}
+	}
+	// The rejected reconciles left the reservation intact for a real retry.
+	got, err := store.WorkItem(ctx, item.ID)
+	if err != nil || got.CumulativeCostUSD != 0 {
+		t.Fatalf("cum_cost polluted by rejected cost: %+v err=%v", got, err)
+	}
+}
+
+// A replay whose durable result is gone recovers per reservation state: an
+// 'unresolved' (interrupted) reservation is released for a fresh dispatch; an
+// 'actual' (measured, reconciled) reservation commits its cost and parks for a
+// human rather than silently re-billing it.
+func TestRecoverLostReplayReleasesUnresolvedAndParksActual(t *testing.T) {
+	ctx := t.Context()
+
+	t.Run("unresolved_redispatches", func(t *testing.T) {
+		store := newTestStore(t)
+		item := CreateWorkItem{ID: "wi_lost_unresolved", Repo: "r", ProposalPath: "u", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "impl", MaxCostUSD: 1}
+		if err := store.CreateWorkItem(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.ReserveWorkflowBudget(ctx, item.ID, "owner1"); err != nil {
+			t.Fatal(err)
+		}
+		// Ambiguous post-dispatch failure leaves the reservation 'unresolved'.
+		if err := store.ParkRunnerFailure(ctx, item.ID, "impl", "owner1", "runner_unavailable", "d", true, false, 0); err != nil {
+			t.Fatal(err)
+		}
+		// A restart resumes: a new owner takes replay ownership.
+		if _, err := store.db.ExecContext(ctx, `UPDATE lifecycle_work_item SET pause_reason='', reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, item.ID); err != nil {
+			t.Fatal(err)
+		}
+		res, err := store.ReserveWorkflowBudget(ctx, item.ID, "owner2")
+		if err != nil || !res.ReplayOnly {
+			t.Fatalf("res=%+v err=%v", res, err)
+		}
+		redispatch, err := store.RecoverLostReplay(ctx, item.ID, "impl", "owner2")
+		if err != nil || !redispatch {
+			t.Fatalf("redispatch=%v err=%v", redispatch, err)
+		}
+		got, err := store.WorkItem(ctx, item.ID)
+		if err != nil || got.State != "active" || got.PauseReason != "" || got.ReservationState != "" || got.ReservedCostUSD != 0 {
+			t.Fatalf("item not runnable/cleared: %+v err=%v", got, err)
+		}
+	})
+
+	t.Run("actual_parks_for_human", func(t *testing.T) {
+		store := newTestStore(t)
+		item := CreateWorkItem{ID: "wi_lost_actual", Repo: "r", ProposalPath: "a", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "impl", MaxCostUSD: 1}
+		if err := store.CreateWorkItem(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.ReserveWorkflowBudget(ctx, item.ID, "owner1"); err != nil {
+			t.Fatal(err)
+		}
+		if allowed, err := store.ReconcileWorkflowBudget(ctx, item.ID, "owner1", 0.4); err != nil || !allowed {
+			t.Fatalf("reconcile allowed=%v err=%v", allowed, err)
+		}
+		if _, err := store.db.ExecContext(ctx, `UPDATE lifecycle_work_item SET reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, item.ID); err != nil {
+			t.Fatal(err)
+		}
+		res, err := store.ReserveWorkflowBudget(ctx, item.ID, "owner2")
+		if err != nil || !res.ReplayOnly {
+			t.Fatalf("res=%+v err=%v", res, err)
+		}
+		redispatch, err := store.RecoverLostReplay(ctx, item.ID, "impl", "owner2")
+		if err != nil || redispatch {
+			t.Fatalf("redispatch=%v err=%v", redispatch, err)
+		}
+		got, err := store.WorkItem(ctx, item.ID)
+		if err != nil || got.PauseReason != "replay_unrecoverable" || got.ReservationState != "" || got.ReservedCostUSD != 0 || got.CumulativeCostUSD != 0.4 {
+			t.Fatalf("expected parked with committed cost: %+v err=%v", got, err)
+		}
+	})
+
+	t.Run("wrong_owner_refused", func(t *testing.T) {
+		store := newTestStore(t)
+		item := CreateWorkItem{ID: "wi_lost_owner", Repo: "r", ProposalPath: "o", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "impl", MaxCostUSD: 1}
+		if err := store.CreateWorkItem(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.ReserveWorkflowBudget(ctx, item.ID, "owner1"); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.ParkRunnerFailure(ctx, item.ID, "impl", "owner1", "runner_unavailable", "d", true, false, 0); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.RecoverLostReplay(ctx, item.ID, "impl", "intruder"); err == nil {
+			t.Fatal("recover accepted a non-owner")
+		}
+	})
+}
+
+// The production refinement cycle is gate --loop--> author, then
+// author --advance--> gate. That re-entering advance was clearing the gate's own
+// attempt counter, so the cap never accumulated and the pair looped without
+// bound: a live plan gate reached 63 loops against a cap of 20. Entering a stage
+// must not reset the budget that bounds it; only completing one may.
+func TestGateIterationCapSurvivesTheAuthorsReentry(t *testing.T) {
+	store := newTestStore(t)
+	createTestItem(t, store, "wi_loop")
+	ctx := context.Background()
+
+	parkedAt := -1
+	for i := 0; i < 10; i++ {
+		out, err := store.RecordRequestedChanges(ctx, "wi_loop", "plan_gate", "plan",
+			fmt.Sprintf("plan-%d", i), fmt.Sprintf("feedback-%d", i), "", 3, 99, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out.Parked {
+			parkedAt = i
+			break
+		}
+		// The author re-authors and advances back into the gate.
+		if err := store.Move(ctx, "wi_loop", "plan", "plan_gate", "advance", "",
+			fmt.Sprintf("plan-%d", i), 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if parkedAt != 2 {
+		t.Fatalf("gate parked at loop %d, want 2 (cap of 3); the author's re-entry reset the counter", parkedAt)
 	}
 }

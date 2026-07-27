@@ -1,6 +1,6 @@
 /* delegate_openai.c: OpenAI-compatible provider driver (covers openai, ollama, chatgpt) */
 #include "aimee.h"
-#include "delegate_driver.h"
+#include <aimee/delegates/delegate_driver.h>
 #include "agent_protocol.h"
 #include "agent_tools.h"
 #include <string.h>

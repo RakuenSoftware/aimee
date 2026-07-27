@@ -22,29 +22,32 @@
 #include "server_http.h"
 #include "server_tls.h" /* server_http_api_status_report */
 #include "server_mgmt_status.h"
+#include "server_mgmt_jwks_cache.h"
+#include "kb_client_mtls.h"
 #include "config.h" /* config_t / config_load for api.status, api.enable */
-#include "delegate_backend_docker.h"
+#include <aimee/delegates/delegate_backend_docker.h>
 #include "workspace_provider.h" /* the shared provider: probe docker for the sandbox posture */
 #include "workspace_turn.h"     /* the ONE workspace bound, shared with the delegate turn */
-#include "delegate_backend_local.h"
-#include "delegate_backend_ssh.h"
+#include <aimee/delegates/delegate_backend_local.h>
+#include <aimee/delegates/delegate_backend_ssh.h>
 #include "server_delegate_monitor.h"
 #include "server_coord_dispatcher.h"
 #include "server_skill.h"
 #include "server_compute_impl.h"
-#include "skill_review.h"
+#include <aimee/skills/skill_review.h>
 #include "trigger_scheduler.h"
 #include "server_trigger.h"
 #include "server_cron.h"
 #include "server_pipeline.h" /* roundtable authoring pipeline (pipeline.*) */
 #include "commands.h"
 #include "agent.h"
-#include "agent_exec.h"     /* agent_audit_async_flush — drain audit queue at shutdown */
-#include "webuser_editor.h" /* webuser_editor_shutdown — reap editors at shutdown (WP-I) */
+#include "agent_exec.h"      /* agent_audit_async_flush — drain audit queue at shutdown */
+#include "webuser_editor.h"  /* webuser_editor_shutdown — reap editors at shutdown (WP-I) */
+#include "agent_admission.h" /* agent_admission_agent_active — route capacity probe */
 #include "agent_config.h"
 #include "provider_catalog.h"
-#include "delegate_credentials.h"
-#include "delegate_sandbox_image.h"
+#include <aimee/delegates/delegate_credentials.h>
+#include <aimee/delegates/delegate_sandbox_image.h>
 #include "model_registry.h"
 #include "model_provider.h"
 #include "model_registry.h"
@@ -375,6 +378,7 @@ static int handle_server_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
    cJSON_AddNumberToObject(resp, "uptime", (double)(time(NULL) - ctx->start_time));
    cJSON_AddStringToObject(resp, "state", db1_is_initialized() ? "ok" : "unavailable");
    cJSON_AddNumberToObject(resp, "connections", ctx->conn_count);
+   server_health_add_kb(resp); /* kb block — see server_api_status.c */
    return server_send_ok(conn, resp);
 }
 
@@ -1374,7 +1378,6 @@ static int handle_memory_user_capture(server_ctx_t *ctx, server_conn_t *conn, cJ
       return server_send_error(conn, "kind and key are required", request_id);
    if (!content || !content[0])
       return server_send_error(conn, "content is required", request_id);
-
    if (db1_user_memory_upsert(kind, tier, key, content, 1.0, sid) != 0)
       return server_send_error(conn, "failed to store user memory", request_id);
 
@@ -1530,8 +1533,6 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"hosts.list", handle_hosts_list},
     {"primary.get", handle_primary_get},
     {"primary.clear", handle_primary_clear},
-    /* Work queue */
-    /* Attempt log */
     {"attempt.record", handle_attempt_record},
     {"attempt.list", handle_attempt_list},
     /* Dashboard */
@@ -1541,15 +1542,13 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"dashboard.traces", handle_dashboard_traces},
     {"dashboard.plans", handle_dashboard_plans},
     {"dashboard.logs", handle_dashboard_logs},
-    {"dashboard.plugins", handle_dashboard_plugins},
-    {"plugin.list", handle_plugin_list},
-    {"plugin.enable", handle_plugin_enable},
-    {"plugin.disable", handle_plugin_disable},
     {"dashboard.onboard", handle_dashboard_onboard},
     {"dashboard.memory_stats", handle_dashboard_memory_stats},
     {"dashboard.all", handle_dashboard_all},
     {"dashboard.audit", handle_dashboard_audit},
     {"audit.verify", handle_audit_verify},
+    {"audit.captures", handle_audit_captures},
+    {"audit.replay", handle_audit_replay},
     {"audit.checkpoint", handle_audit_checkpoint},
     {"audit.seal", handle_audit_seal},
     {"audit.snapshot", handle_audit_snapshot},
@@ -1578,7 +1577,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
      * rh_dispatch_op_async. Direct raw dispatch remains synchronous for
      * compatibility with the dispatch-method surface. */
     {"delegate.aggregate", handle_delegate_aggregate},
-    {"delegate.roundtable", handle_delegate_roundtable},
+    {"roundtable.review", handle_roundtable_review_proxy},
     {"dev.sweep", handle_dev_sweep},
     {"delegate.launch", handle_delegate_launch},
     {"delegate.status", handle_delegate_status},
@@ -1624,6 +1623,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"mcp.audit", handle_mcp_audit},
     {"mcp.recheck", handle_mcp_recheck},
     {"mcp.call", handle_mcp_call},
+    {"help.get", handle_get_help}, /* handler force-selects get_help */
     /* Triggers */
     {"trigger.fire", handle_trigger_fire},
     {"trigger.list", handle_trigger_list},
@@ -1689,13 +1689,10 @@ static size_t method_size_limit(const char *method)
       const char *prefix;
       size_t max;
    } limits[] = {
-       {"memory.", LIMIT_MEMORY},
-       {"tool.", LIMIT_TOOL},
-       {"delegate", LIMIT_DELEGATE},
-       {"mcp.call", LIMIT_DELEGATE},
-       {"chat.", LIMIT_CHAT},
-       {"index.ingest", LIMIT_INGEST},
-       {"session.record_transcript", LIMIT_TRANSCRIPT},
+       {"memory.", LIMIT_MEMORY},      {"tool.", LIMIT_TOOL},
+       {"delegate", LIMIT_DELEGATE},   {"roundtable.review", LIMIT_ROUNDTABLE},
+       {"mcp.call", LIMIT_DELEGATE},   {"chat.", LIMIT_CHAT},
+       {"index.ingest", LIMIT_INGEST}, {"session.record_transcript", LIMIT_TRANSCRIPT},
        {NULL, LIMIT_DEFAULT},
    };
 
@@ -1926,6 +1923,13 @@ static void server_pid_clear(const char *socket_path)
 static int server_agent_route_is_down(const char *agent_name)
 {
    return provider_catalog_get_health(agent_name) == CATALOG_HEALTH_DOWN;
+}
+
+/* Route-time DEGRADED predicate (nonzero when degraded): a half-opened breaker
+ * or intermittent failures. Not excluded - routing only PREFERS a healthy peer. */
+static int server_agent_route_is_degraded(const char *agent_name)
+{
+   return provider_catalog_get_health(agent_name) == CATALOG_HEALTH_DEGRADED;
 }
 
 /* Route-time delegate-policy predicate (returns nonzero to EXCLUDE):
@@ -2196,6 +2200,12 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
          LOG_INFO("server", "cancelled %d delegate jobs orphaned by the prior process", orphaned);
       if (server_mgmt_status_init() != 0)
          LOG_WARN("server", "management status nonce initialization failed");
+      const char *trust_path = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
+      if (trust_path && trust_path[0] &&
+          server_mgmt_jwks_cache_startup(trust_path, (int64_t)time(NULL),
+                                         kb_client_mtls_management_jwks_fetch,
+                                         NULL) != SERVER_MGMT_JWKS_CACHE_OK)
+         LOG_WARN("server.mgmt", "management JWKS authorization unavailable");
    }
    /* Container cleanup is independent of DB availability. No worker pool exists
     * yet, so a matching container cannot belong to this server generation. */
@@ -2332,10 +2342,15 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * delegates. Routing falls back to a healthy peer; only when every candidate
     * for a role is DOWN does routing return a clean "no agent available". */
    agent_set_route_health_filter(server_agent_route_is_down);
+   /* Prefer a healthy seat over a degraded one when both serve the role, so a
+    * flapping seat stops winning on price alone while healthy peers exist. */
+   agent_set_route_degraded_filter(server_agent_route_is_degraded);
    /* Delegate-policy invariants at every routing decision: the primary never
     * delegates to itself, and an agent flagged "Primary Agent Only"
     * (agents.json `primary_only`) is never a delegation target. */
    agent_set_route_policy_filter(server_agent_route_policy_excluded);
+   /* Prefer a seat with a free slot over a saturated one (see agent_config.h). */
+   agent_set_route_capacity_probe(agent_admission_agent_active);
    LOG_INFO("server",
             "initialized (v%s, protocol %d, background=%d session=%d threads); /v1 HTTP "
             "surface owns the listeners",

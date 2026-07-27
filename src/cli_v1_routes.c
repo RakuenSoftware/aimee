@@ -207,8 +207,18 @@ static const struct
     {"wm", "list", "wm.list", NULL, "entries", 0},
     {"primary", NULL, "primary.set", NULL, NULL, 0},
     {"kb", "search", "kb.search", NULL, NULL, 60000},
+    {"kb", "build", "kb.build", NULL, NULL, 900000},
     {"kb", "update", "kb.update", NULL, NULL, 900000},
     {"kb", "docs push", "kb.docs.push", NULL, NULL, 900000},
+    /* Grant administration. `show` maps to the same method as `list` — it is that listing
+     * filtered to one subject, so there is one row shape and one route. */
+    {"kb", "grant set", "kb.grant.set", NULL, NULL, 30000},
+    {"kb", "grant revoke", "kb.grant.revoke", NULL, NULL, 30000},
+    {"kb", "grant list", "kb.grant.list", NULL, "grants", 30000},
+    /* A DISTINCT method from `list`, resolving to the same route. Sharing the method would
+     * leave the marshaller unable to require --subject, and `show` with no subject would
+     * silently list everything. */
+    {"kb", "grant show", "kb.grant.show", NULL, "grants", 30000},
     {"kb", "ingest", "kb.ingest", NULL, NULL, 30000},
     {"kb", "ingest status", "kb.ingest.status", NULL, NULL, 0},
     {"kb", "status", "kb.status", NULL, NULL, 0},
@@ -241,14 +251,8 @@ static const struct
      * ensemble; without it the prompt fell through to the catch-all delegate
      * route, which maps positional[0] -> role and never ran the engine. */
     {"delegate", "aggregate", "delegate.aggregate", NULL, NULL, 600000},
-    {"delegate", "roundtable", "delegate.roundtable", NULL, NULL, 900000},
-    /* `ensemble` is the umbrella verb for a panel of agents. Its aggregate (MoA
-     * fan-out + synthesis) and roundtable (review/debate panel) modes reuse the
-     * exact delegate.* server methods; the third mode is the persistent, templated
-     * turn-based session (db1 `ensembles`, agent-driven via the ensemble_* MCP
-     * tools). `delegate aggregate/roundtable` stay as back-compat aliases. */
+    {"roundtable", "review", "roundtable.review", NULL, NULL, 900000},
     {"ensemble", "aggregate", "delegate.aggregate", NULL, NULL, 600000},
-    {"ensemble", "roundtable", "delegate.roundtable", NULL, NULL, 900000},
     /* Codex/openai delegate agents have agent->timeout_ms == 900000 server-side.
      * The CLI must outlast that, otherwise we report "no response" while the
      * server is still genuinely working. */
@@ -315,8 +319,8 @@ static const struct
     {"audit", "trace", "evidence.trace_retrieval_event", NULL, NULL, 0},
     {"audit", "provenance", "evidence.provenance_retrieval_event", NULL, NULL, 0},
     {"audit", "fidelity", "evidence.fidelity_retrieval_event", NULL, NULL, 0},
-    {"get_help", NULL, "get_help", "mcp.call", NULL, 0},
-    {"get-help", NULL, "get_help", "mcp.call", NULL, 0},
+    {"get_help", NULL, "get_help", "help.get", NULL, 0},
+    {"get-help", NULL, "get_help", "help.get", NULL, 0},
     {"verify", NULL, "git.verify", "mcp.call", NULL, 900000},
     {"git", "verify", "git.verify", "mcp.call", NULL, 900000},
     {"provider", "list", "provider.list", NULL, "providers", 300000},
@@ -351,6 +355,45 @@ static const struct
     {"delegate-backend", "exec", "delegate.backend_exec", NULL, NULL, 90000},
     {NULL, NULL, NULL, NULL, NULL, 0},
 };
+
+/* Collect the subcommands registered for `cmd` into `out` as a comma-separated
+ * list, so a failed lookup can say which ones exist instead of blaming the whole
+ * command. Rows whose subcmd is NULL (match-any) or "" (bare command) are
+ * skipped -- they are not names a user can type. Returns the number found. */
+int cli_v1_subcommands(const char *cmd, char *out, size_t cap)
+{
+   if (out && cap)
+      out[0] = '\0';
+   if (!cmd)
+      return 0;
+   int n = 0;
+   size_t len = 0;
+   /* rpc_routes ends with a {NULL,...} sentinel — stop there, do not walk the
+    * array by sizeof or the terminator's NULL cmd reaches strcmp. */
+   for (size_t i = 0; rpc_routes[i].cmd; i++)
+   {
+      if (strcmp(rpc_routes[i].cmd, cmd) != 0)
+         continue;
+      const char *sub = rpc_routes[i].subcmd;
+      if (!sub || !sub[0])
+         continue;
+      n++;
+      if (!out || !cap)
+         continue;
+      size_t need = strlen(sub) + (len ? 2 : 0);
+      if (len + need >= cap)
+         continue; /* keep the list truncated rather than overflow */
+      if (len)
+      {
+         memcpy(out + len, ", ", 2);
+         len += 2;
+      }
+      memcpy(out + len, sub, strlen(sub));
+      len += strlen(sub);
+      out[len] = '\0';
+   }
+   return n;
+}
 
 int cli_v1_lookup(const char *cmd, int sub_argc, char **sub_argv, cli_v1_route_t *route)
 {
@@ -748,11 +791,20 @@ cJSON *marshal_index_structure(int argc, char **argv)
 
 cJSON *marshal_index_find_callers(int argc, char **argv)
 {
+   /* `project` is an OPTIONAL second positional, so an output-mode flag like
+    * `--json` must not be mistaken for it: `aimee index callers <symbol> --json`
+    * would otherwise send project="--json", which matches no project and returns
+    * an empty result. Parse flags out (rpc_parse drops `--json` as a valueless
+    * bool) and read only the true positionals. */
+   static const char *bools[] = {"json", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bools, &opts);
+
    cJSON *req = marshal_no_args("index.find_callers");
-   if (argc > 0)
-      cJSON_AddStringToObject(req, "symbol", argv[0]);
-   if (argc > 1)
-      cJSON_AddStringToObject(req, "project", argv[1]);
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "symbol", opts.positional[0]);
+   if (opts.pos_count > 1)
+      cJSON_AddStringToObject(req, "project", opts.positional[1]);
    return req;
 }
 
@@ -1191,10 +1243,20 @@ cJSON *marshal_kb_build(int argc, char **argv)
 
    cJSON *req = marshal_no_args("kb.build");
 
-   if (opts.pos_count >= 1)
-      cJSON_AddStringToObject(req, "path", opts.positional[0]);
-   if (opts.pos_count >= 2)
-      cJSON_AddStringToObject(req, "project", opts.positional[1]);
+   /* MANUAL §7.16 documents `kb build [--path DIR] [--project NAME]`, but only the
+    * positional forms were read, so the documented flags parsed into opts.flags and
+    * were silently dropped — the build ran against no path at all. Accept the
+    * documented flags, falling back to the positional forms that already shipped. */
+   const char *path = rpc_get(&opts, "path");
+   const char *project = rpc_get(&opts, "project");
+   if (!path && opts.pos_count >= 1)
+      path = opts.positional[0];
+   if (!project && opts.pos_count >= 2)
+      project = opts.positional[1];
+   if (path)
+      cJSON_AddStringToObject(req, "path", path);
+   if (project)
+      cJSON_AddStringToObject(req, "project", project);
    if (rpc_get(&opts, "force"))
       cJSON_AddTrueToObject(req, "force");
    const char *v;
@@ -1238,11 +1300,57 @@ cJSON *marshal_kb_ingest(int argc, char **argv)
    return req;
 }
 
+#define CLI_KB_DOCS_PUSH_MAX_BYTES (2U * 1024U * 1024U)
+
+static char *marshal_read_kb_doc(const char *path, size_t *len_out)
+{
+   if (len_out)
+      *len_out = 0;
+   FILE *fp = path && path[0] ? fopen(path, "rb") : NULL;
+   if (!fp || fseek(fp, 0, SEEK_END) != 0)
+   {
+      if (fp)
+         fclose(fp);
+      return NULL;
+   }
+   long len = ftell(fp);
+   if (len <= 0 || len > (long)CLI_KB_DOCS_PUSH_MAX_BYTES || fseek(fp, 0, SEEK_SET) != 0)
+   {
+      fclose(fp);
+      return NULL;
+   }
+   char *content = malloc((size_t)len + 1);
+   if (!content)
+   {
+      fclose(fp);
+      return NULL;
+   }
+   size_t nread = fread(content, 1, (size_t)len, fp);
+   int failed = ferror(fp) || nread != (size_t)len || memchr(content, '\0', nread) != NULL;
+   fclose(fp);
+   if (failed)
+   {
+      free(content);
+      return NULL;
+   }
+   content[nread] = '\0';
+   if (len_out)
+      *len_out = nread;
+   return content;
+}
+
 cJSON *marshal_kb_docs_push(int argc, char **argv)
 {
    static const char *bool_flags[] = {"json", NULL};
    rpc_opts_t opts;
    rpc_parse(argc, argv, bool_flags, &opts);
+
+   if (opts.pos_count <= 0)
+   {
+      fprintf(stderr,
+              "usage: aimee kb docs push [--scope SCOPE|--project NAME] <file> [file...]\n");
+      return NULL;
+   }
 
    cJSON *req = marshal_no_args("kb.docs.push");
 
@@ -1253,6 +1361,8 @@ cJSON *marshal_kb_docs_push(int argc, char **argv)
       cJSON_AddStringToObject(req, "scope", scope);
 
    cJSON *paths = cJSON_AddArrayToObject(req, "paths");
+   cJSON *documents = cJSON_AddArrayToObject(req, "documents");
+   size_t total_bytes = 0;
    for (int i = 0; paths && i < opts.pos_count; i++)
    {
       const char *path = opts.positional[i];
@@ -1266,7 +1376,30 @@ cJSON *marshal_kb_docs_push(int argc, char **argv)
             path = abs_path;
          }
       }
+      if (!path || !path[0] || strchr(path, '"') || strchr(path, '\r') || strchr(path, '\n'))
+      {
+         fprintf(stderr, "aimee: invalid docs path: %s\n", path ? path : "");
+         cJSON_Delete(req);
+         return NULL;
+      }
+      size_t content_len = 0;
+      char *content = marshal_read_kb_doc(path, &content_len);
+      if (!content || total_bytes + content_len > CLI_KB_DOCS_PUSH_MAX_BYTES)
+      {
+         fprintf(stderr,
+                 "aimee: could not read docs path (non-empty text, 2 MiB command limit): %s\n",
+                 path);
+         free(content);
+         cJSON_Delete(req);
+         return NULL;
+      }
+      total_bytes += content_len;
       cJSON_AddItemToArray(paths, cJSON_CreateString(path ? path : ""));
+      cJSON *doc = cJSON_CreateObject();
+      cJSON_AddStringToObject(doc, "path", path);
+      cJSON_AddStringToObject(doc, "content", content);
+      cJSON_AddItemToArray(documents, doc);
+      free(content);
    }
    return req;
 }
@@ -1386,7 +1519,7 @@ cJSON *marshal_insights_overview(int argc, char **argv)
    return req;
 }
 
-static char *marshal_read_prompt_file(const char *path)
+static char *marshal_read_file_limited(const char *path, size_t limit)
 {
    FILE *f;
    long len;
@@ -1396,13 +1529,13 @@ static char *marshal_read_prompt_file(const char *path)
    if (!path || !path[0])
       return NULL;
 
-   f = fopen(path, "r");
+   f = fopen(path, "rb");
    if (!f)
       return NULL;
    fseek(f, 0, SEEK_END);
    len = ftell(f);
    fseek(f, 0, SEEK_SET);
-   if (len <= 0 || len > 2 * 1024 * 1024)
+   if (len <= 0 || (size_t)len > limit)
    {
       fclose(f);
       return NULL;
@@ -1419,25 +1552,28 @@ static char *marshal_read_prompt_file(const char *path)
    return buf;
 }
 
-static char *marshal_read_prompt_stdin(void)
+static char *marshal_read_stdin_limited(size_t limit)
 {
-   size_t cap = 4096;
+   size_t cap = limit < 4095 ? limit + 1 : 4096;
    size_t len = 0;
    char *buf = malloc(cap);
    if (!buf)
       return NULL;
    for (;;)
    {
-      if (len + 1024 >= cap)
+      if (len == limit)
       {
-         if (cap >= 2 * 1024 * 1024)
-         {
-            free(buf);
-            return NULL;
-         }
+         int extra = fgetc(stdin);
+         if (extra == EOF && !ferror(stdin))
+            break;
+         free(buf);
+         return NULL;
+      }
+      if (len + 1024 >= cap && cap < limit + 1)
+      {
          size_t next = cap * 2;
-         if (next > 2 * 1024 * 1024 + 1)
-            next = 2 * 1024 * 1024 + 1;
+         if (next > limit + 1)
+            next = limit + 1;
          char *nb = realloc(buf, next);
          if (!nb)
          {
@@ -1466,6 +1602,16 @@ static char *marshal_read_prompt_stdin(void)
       return NULL;
    }
    return buf;
+}
+
+static char *marshal_read_prompt_file(const char *path)
+{
+   return marshal_read_file_limited(path, 2u * 1024u * 1024u);
+}
+
+static char *marshal_read_prompt_stdin(void)
+{
+   return marshal_read_stdin_limited(2u * 1024u * 1024u);
 }
 
 static char *client_strdup(const char *s)
@@ -1760,15 +1906,67 @@ cJSON *marshal_delegate_aggregate(int argc, char **argv)
    return req;
 }
 
-cJSON *marshal_delegate_roundtable(int argc, char **argv)
+cJSON *marshal_roundtable_review(int argc, char **argv)
 {
-   static const char *bool_flags[] = {"json", "apply", NULL};
+   static const char *bool_flags[] = {"json", "apply", "artifact-stdin", NULL};
    rpc_opts_t opts;
    rpc_parse(argc, argv, bool_flags, &opts);
-   cJSON *req = marshal_no_args("delegate.roundtable");
+   cJSON *req = marshal_no_args("roundtable.review");
+
+   /* Explicit artifact bytes are authoritative. Paths are read by the thin
+    * client and never sent to the server, so a remote appliance cannot replace
+    * them with an unrelated workspace artifact. `--artifact -`, positional
+    * `-`, and `--artifact-stdin` all read stdin. */
+   const char *artifact_path = rpc_get(&opts, "artifact");
+   int artifact_stdin = rpc_has_flag(&opts, "artifact-stdin");
+   int artifact_positional = 0;
+   if (artifact_path && strcmp(artifact_path, "-") == 0)
+      artifact_stdin = 1;
+   if (artifact_stdin && artifact_path && strcmp(artifact_path, "-") != 0)
+   {
+      cJSON_Delete(req);
+      return NULL;
+   }
+   if (!artifact_path && opts.pos_count > 0 && opts.positional[0] &&
+       strcmp(opts.positional[0], "-") == 0)
+   {
+      artifact_stdin = 1;
+      artifact_positional = 1;
+   }
+   char *artifact_text = NULL;
+   if (artifact_stdin)
+      artifact_text = marshal_read_stdin_limited(16u * 1024u * 1024u);
+   else if (artifact_path)
+      artifact_text = marshal_read_file_limited(artifact_path, 16u * 1024u * 1024u);
+   else if (opts.pos_count > 0 && opts.positional[0])
+   {
+      FILE *probe = fopen(opts.positional[0], "rb");
+      if (probe)
+      {
+         fclose(probe);
+         artifact_positional = 1;
+         artifact_text = marshal_read_file_limited(opts.positional[0], 16u * 1024u * 1024u);
+         if (!artifact_text)
+         {
+            cJSON_Delete(req);
+            return NULL;
+         }
+      }
+   }
+   if ((artifact_stdin || artifact_path) && !artifact_text)
+   {
+      cJSON_Delete(req);
+      return NULL;
+   }
+   if (artifact_text)
+      cJSON_AddStringToObject(req, "artifact", artifact_text);
+
    /* Fold --context-file / --files / --context-dir / --context preloads into the
     * prompt, mirroring marshal_delegate() so both paths ship identical payloads. */
-   char *prompt = (opts.pos_count > 0 && opts.positional[0]) ? strdup(opts.positional[0]) : NULL;
+   int prompt_index = artifact_positional ? 1 : 0;
+   char *prompt = (opts.pos_count > prompt_index && opts.positional[prompt_index])
+                      ? strdup(opts.positional[prompt_index])
+                      : NULL;
    char *preload = marshal_build_preload_context(&opts);
    if (preload)
    {
@@ -1785,11 +1983,35 @@ cJSON *marshal_delegate_roundtable(int argc, char **argv)
       free(preload);
    }
    if (prompt && prompt[0])
-      cJSON_AddStringToObject(req, "prompt", prompt);
+   {
+      if (artifact_text)
+         cJSON_AddStringToObject(req, "original_request", prompt);
+      else
+         cJSON_AddStringToObject(req, "prompt", prompt);
+   }
    free(prompt);
+   free(artifact_text);
+   const char *original_request = rpc_get(&opts, "original-request");
+   if (original_request)
+   {
+      cJSON_DeleteItemFromObjectCaseSensitive(req, "original_request");
+      cJSON_AddStringToObject(req, "original_request", original_request);
+   }
    const char *mode = rpc_get(&opts, "mode");
    if (mode)
       cJSON_AddStringToObject(req, "mode", mode);
+   const char *roundtable = rpc_get(&opts, "roundtable");
+   if (roundtable)
+      cJSON_AddStringToObject(req, "roundtable", roundtable);
+   const char *artifact_stage = rpc_get(&opts, "artifact-stage");
+   if (artifact_stage)
+      cJSON_AddStringToObject(req, "artifact_stage", artifact_stage);
+   const char *workdir = rpc_get(&opts, "workdir");
+   if (workdir)
+      cJSON_AddStringToObject(req, "workdir", workdir);
+   const char *run_id = rpc_get(&opts, "run-id");
+   if (run_id)
+      cJSON_AddStringToObject(req, "run_id", run_id);
    const char *turns = rpc_get(&opts, "turns");
    if (turns)
       cJSON_AddStringToObject(req, "turns", turns);
@@ -1805,7 +2027,7 @@ cJSON *marshal_delegate_roundtable(int argc, char **argv)
       cJSON *parsed = cJSON_Parse(brief_json);
       if (!parsed)
       {
-         fprintf(stderr, "aimee: delegate roundtable: --brief-json must be valid JSON\n");
+         fprintf(stderr, "aimee: roundtable review: --brief-json must be valid JSON\n");
          exit(1);
       }
       cJSON_DeleteItemFromObjectCaseSensitive(req, "brief");
@@ -1825,6 +2047,44 @@ cJSON *marshal_delegate(int argc, char **argv)
    rpc_parse(argc, argv, bool_flags, &opts);
 
    cJSON *req = marshal_no_args("delegate");
+
+   /* --scope is pure ROUTING POLICY: it names a ceiling the seat choice must
+    * respect, carries no caller-supplied code, and the server is already the
+    * thing picking the seat. So it is forwarded and enforced server-side.
+    * Validate here so a typo fails at the client with a usable message rather
+    * than being silently ignored by a server that cannot parse it. */
+   const char *scope = rpc_get(&opts, "scope");
+   if (scope)
+   {
+      /* Spelled out rather than calling agent_scope_from_string: that lives in
+       * agent_config.c, which the thin client deliberately does not link. The
+       * server re-parses with the canonical function, so this is only a
+       * fail-fast on a typo - keep the two names in step with agent_scope_t. */
+      if (strcmp(scope, "bounded") != 0 && strcmp(scope, "whole_task") != 0)
+      {
+         fprintf(stderr,
+                 "aimee: delegate --scope expects \"bounded\" or \"whole_task\", got '%s'\n",
+                 scope);
+         exit(1);
+      }
+      cJSON_AddStringToObject(req, "scope", scope);
+   }
+
+   /* --verify is NOT forwarded. Verification runs a caller-supplied shell
+    * command and its exit status is the sole evidence used to decide a model was
+    * inadequate - so honouring it server-side would both execute caller-supplied
+    * code on a shared server and hand whoever passes the flag control of
+    * escalation, and therefore of spend. The thin client cannot run it either:
+    * it links no delegate engine (cmd_agent_delegate.c is in CMD_SRCS, not
+    * CLI_SRCS). Until that has a designed home, refuse rather than accept a flag
+    * that would be silently ignored. */
+   if (rpc_get(&opts, "verify"))
+   {
+      fprintf(stderr, "aimee: delegate --verify is not supported for a server-routed run: "
+                      "verification and one-shot escalation are not implemented server-side, and "
+                      "the thin client has no local delegate engine to run them in.\n");
+      exit(1);
+   }
 
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "role", opts.positional[0]);

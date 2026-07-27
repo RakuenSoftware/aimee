@@ -54,9 +54,9 @@ The shipped path is small and useful:
 
 - `src/server/agent_tools.c::agent_tools_begin_turn()` resets a thread-local snapshot id
   for each internal model/tool round.
-- `src/posix/agent_tools_dispatch.c` calls `auto_snapshot_record()` before the anchored
+- `src/modules/tools/agent_tools_dispatch.c` calls `auto_snapshot_record()` before the anchored
   edit, legacy edit, and write-file paths.
-- `src/posix/agent_tools.c::auto_snapshot_record()` creates one DB1 snapshot for that
+- `src/modules/tools/agent_tools.c::auto_snapshot_record()` creates one DB1 snapshot for that
   internal round when `rewind.auto_snapshot` is enabled.
 - `src/db1/fsnap.c` stores absolute paths and inline bytes in `file_snapshots` /
   `file_snapshot_entries`.
@@ -100,10 +100,10 @@ before a turn or make a multi-file mistake easy to inspect and reverse.
 | Stale-edit prevention | immutable `anchor_snapshot`, `edit_anchored_plan()`, `diff.c`, and [hashline editing](../done/proposal-hashline-edit-and-lean-websearch.md) | Anchored edits pass their already-read current bytes into capture; no second read or parallel snapshot model. `diff.c` renders previews. |
 | Tool capability policy | tool registry/guardrails and the capability-scoped execution design | Restore is a governed native operation below capability admission. Approval can never grant workspace or session ownership. |
 | Audit | `audit_action_log`, [shipped WORM append/checkpoint](../done/auditable-worm-audit-store.md), and [pending attestable enforcement](governance-attestable-enforcement.md) | Emit bounded change-set events through the common audit bridge; do not add a third audit store. |
-| CLI and `/v1` parity | `cli_v1_routes*`, `g_v1_routes[]`, route drift scripts, and [route descriptor convergence](route-descriptor-single-source-of-truth.md) | Server owns behavior. CLI, MCP, and webchat are adapters over the same domain service. |
-| Configuration | existing nested `rewind` section and [config descriptor convergence](config-field-descriptor-table.md) | Evolve the existing section. The pending flat-field descriptor proposal does not own nested objects. |
+| CLI and `/v1` parity | `cli_v1_routes*`, `g_v1_routes[]`, route drift scripts, and [route descriptor convergence](route-descriptor-single-source-of-truth-residual.md) | Server owns behavior. CLI, MCP, and webchat are adapters over the same domain service. |
+| Configuration | existing nested `rewind` section and [config descriptor convergence](config-field-descriptor-save-residual.md) | Evolve the existing section. The pending flat-field descriptor proposal does not own nested objects. |
 | Health and repair | `cmd_doctor.c`, DB1 diagnostics | Overall `aimee doctor` reports rewind health; `aimee rewind doctor` is only a focused view/action surface. |
-| Operator activity | audit endpoints and [operator audit activity surface](operator-audit-activity-surface.md) | The activity UI consumes the same safe audit events when that proposal lands. |
+| Operator activity | audit endpoints and [operator audit activity surface](operator-audit-activity-residual.md) | The activity UI consumes the same safe audit events when that proposal lands. |
 | Appliance recovery | [appliance state recovery runbook](appliance-state-recovery-runbook.md) | The runbook may call rewind verification; it does not own change-set repair semantics. |
 
 ### 2.1 Explicit non-ownership

@@ -563,6 +563,14 @@ void config_parse_search_section(config_t *cfg, cJSON *root)
          snprintf(cfg->search_searxng_url, sizeof(cfg->search_searxng_url), "%s",
                   item->valuestring);
 
+      item = cJSON_GetObjectItemCaseSensitive(srch, "backends");
+      if (cJSON_IsString(item) && item->valuestring[0])
+         snprintf(cfg->search_backends, sizeof(cfg->search_backends), "%s", item->valuestring);
+
+      item = cJSON_GetObjectItemCaseSensitive(srch, "fetch_pages");
+      if (cJSON_IsBool(item))
+         cfg->search_fetch_pages = cJSON_IsTrue(item) ? 1 : 0;
+
       item = cJSON_GetObjectItemCaseSensitive(srch, "tavily_api_key");
       if (cJSON_IsString(item) && item->valuestring[0])
          snprintf(cfg->search_tavily_api_key, sizeof(cfg->search_tavily_api_key), "%s",
@@ -745,7 +753,7 @@ void config_parse_modules_section(config_t *cfg, cJSON *root)
    } toggles[] = {
        {"memory", &cfg->module_memory},         {"governance", &cfg->module_governance},
        {"delegates", &cfg->module_delegates},   {"workflows", &cfg->module_workflows},
-       {"economizer", &cfg->module_economizer},
+       {"roundtable", &cfg->module_roundtable}, {"economizer", &cfg->module_economizer},
    };
    for (size_t i = 0; i < sizeof(toggles) / sizeof(toggles[0]); i++)
    {
@@ -755,8 +763,7 @@ void config_parse_modules_section(config_t *cfg, cJSON *root)
    }
 }
 
-/* Parse the only supported public shape: economizer: {mode: off|proof_gated}.
- * Explicit legacy values fail activation; they never map to a new mode. */
+/* Parse the public shape: economizer: {mode: off|safe|aggressive}. */
 int config_parse_economizer_section(config_t *cfg, cJSON *root)
 {
    cJSON *econ = cJSON_GetObjectItemCaseSensitive(root, "economizer");
@@ -764,8 +771,8 @@ int config_parse_economizer_section(config_t *cfg, cJSON *root)
       return 0;
    if (!cJSON_IsObject(econ))
    {
-      fprintf(stderr, "aimee: config error: scalar economizer values are no longer supported; use "
-                      "economizer: {mode: off|proof_gated}\n");
+      fprintf(stderr, "aimee: config error: economizer must be an object; use "
+                      "economizer: {mode: off|safe|aggressive}\n");
       return -1;
    }
 
@@ -787,16 +794,15 @@ int config_parse_economizer_section(config_t *cfg, cJSON *root)
    }
    if (fields != 1 || !cJSON_IsString(mode) || !mode->valuestring)
    {
-      fprintf(stderr, "aimee: config error: economizer.mode must be exactly off or proof_gated\n");
+      fprintf(stderr, "aimee: config error: economizer.mode must be off, safe, or aggressive\n");
       return -1;
    }
    int parsed = econ_mode_parse(mode->valuestring);
    if (parsed < 0)
    {
       fprintf(stderr,
-              "aimee: config error: economizer mode \"%s\" is unsupported; legacy "
-              "safe/aggressive modes cannot be migrated automatically; choose off or "
-              "proof_gated explicitly\n",
+              "aimee: config error: economizer mode \"%s\" is unsupported; choose "
+              "off, safe, or aggressive\n",
               mode->valuestring);
       return -1;
    }
@@ -1042,6 +1048,12 @@ void config_parse_mcp_clients_section(config_t *cfg, cJSON *root)
          if (cJSON_IsString(bearer) && bearer->valuestring[0])
             snprintf(client->bearer_token_env, sizeof(client->bearer_token_env), "%s",
                      bearer->valuestring);
+
+         /* install: "server" (default) exposes the plugin only to this server's
+          * sessions; "kb" runs it on aimee-kb, shared to everything on that kb. */
+         cJSON *install = cJSON_GetObjectItemCaseSensitive(mcp_entry, "install");
+         if (cJSON_IsString(install) && strcasecmp(install->valuestring, "kb") == 0)
+            client->install = CONFIG_MCP_INSTALL_KB;
 
          if (client->transport == CONFIG_MCP_TRANSPORT_STDIO && client->command_count == 0)
             continue;
@@ -1376,6 +1388,13 @@ void config_parse_model_meta_section(config_t *cfg, cJSON *root)
       if (cJSON_IsBool(item))
          cfg->model_meta_capability_routing = cJSON_IsTrue(item) ? 1 : 0;
    }
+   cJSON *routing_cfg = cJSON_GetObjectItemCaseSensitive(root, "routing");
+   if (cJSON_IsObject(routing_cfg))
+   {
+      item = cJSON_GetObjectItemCaseSensitive(routing_cfg, "prefer_local");
+      if (cJSON_IsBool(item))
+         cfg->prefer_local_agents = cJSON_IsTrue(item) ? 1 : 0;
+   }
 }
 void config_parse_db2_section(config_t *cfg, cJSON *root)
 {
@@ -1614,4 +1633,18 @@ void config_parse_kb_section2(config_t *cfg, cJSON *root)
             cfg->code_hybrid_rrf_k = item->valuedouble;
       }
    }
+}
+
+/* context.engine: name — re-homed from the deleted config_plugin.c so that a
+ * single config_load() populates cfg->context_engine directly from the already
+ * parsed aimee.yaml root (the old code re-opened and re-parsed the file). The
+ * value drives context_engine_set_active() in server_main. */
+void config_parse_context_engine(config_t *cfg, cJSON *root)
+{
+   cJSON *ctx = cJSON_GetObjectItemCaseSensitive(root, "context");
+   if (!cJSON_IsObject(ctx))
+      return;
+   cJSON *eng = cJSON_GetObjectItemCaseSensitive(ctx, "engine");
+   if (cJSON_IsString(eng) && eng->valuestring && eng->valuestring[0])
+      snprintf(cfg->context_engine, sizeof(cfg->context_engine), "%s", eng->valuestring);
 }

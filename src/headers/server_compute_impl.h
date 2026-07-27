@@ -121,8 +121,6 @@ void delegate_ondemand_set_ceiling(int ceiling);
 void delegate_ondemand_drain(int timeout_ms);
 /* Fire-and-forget: spawn a skill review delegate for session_id. */
 void server_compute_skill_review_async(server_ctx_t *ctx, const char *session_id);
-/* Fire-and-forget: run the skill curator cycle on the compute pool. */
-void server_compute_skill_curator_async(server_ctx_t *ctx);
 
 /* Platform-provided: chat.send_stream worker thread entry point */
 void chat_stream_worker(void *arg);

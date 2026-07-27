@@ -1,5 +1,6 @@
 /* test_platform_process.c: tests for platform_exec_capture timeout behavior */
 #include <assert.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -101,6 +102,53 @@ static void test_exec_pipe_child_exits_without_reading(void)
    free(input);
 }
 
+/* A sidecar that HANGS rather than exits must not take the calling thread with
+ * it. Every platform_exec_pipe caller is a sidecar in a request path, so a
+ * thread lost here is a server thread lost permanently.
+ *
+ * Production: a kb whose embedder was unreachable pinned a DB2 pool lease for
+ * 21.8 hours -- one thread parked in this function's read() -- and the pool
+ * reaper logged "missed lease_end?" 3895 times, unable to reclaim a connection a
+ * live thread might still use. Reproduced from a clean container: six concurrent
+ * searches consumed the worker threads one by one until /v1/health itself stopped
+ * answering while the port still accepted connections. */
+static void test_exec_pipe_hanging_child_does_not_block_forever(void)
+{
+   platform_setenv("AIMEE_EXEC_PIPE_TIMEOUT_MS", "1500");
+
+   struct timespec t0, t1;
+   clock_gettime(CLOCK_MONOTONIC, &t0);
+   char *out = NULL;
+   size_t len = 0;
+   /* Holds stdout open and never writes or exits: exactly the wedged-sidecar
+    * shape. Without a bounded read this call never returns. */
+   int rc = platform_exec_pipe("sleep 60", NULL, 0, &out, &len);
+   clock_gettime(CLOCK_MONOTONIC, &t1);
+
+   long elapsed_ms = (t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000;
+   assert(rc != 0);            /* reported as a failure, not a silent empty result */
+   assert(elapsed_ms < 15000); /* returned on the timeout, not after the child */
+   free(out);
+
+   /* The child must be KILLED, not merely abandoned. Proven by a marker the
+    * child would create if it were still alive after we returned: the work runs
+    * as a grandchild of /bin/sh, so killing only the shell leaves it running.
+    * A process-table check is unusable here -- pgrep matches its own command
+    * line, and on a shared machine other processes' arguments collide. */
+   unlink("/tmp/aimee_exec_pipe_probe_marker");
+   out = NULL;
+   len = 0;
+   platform_setenv("AIMEE_EXEC_PIPE_TIMEOUT_MS", "800");
+   rc = platform_exec_pipe("sleep 4; touch /tmp/aimee_exec_pipe_probe_marker", NULL, 0, &out, &len);
+   assert(rc != 0);
+   free(out);
+   struct timespec settle = {.tv_sec = 6, .tv_nsec = 0};
+   nanosleep(&settle, NULL);
+   assert(access("/tmp/aimee_exec_pipe_probe_marker", F_OK) != 0);
+
+   platform_setenv("AIMEE_EXEC_PIPE_TIMEOUT_MS", "");
+}
+
 int main(void)
 {
    test_exec_capture_basic();
@@ -109,6 +157,7 @@ int main(void)
    test_exec_capture_no_timeout_fast_cmd();
    test_exec_capture_cancellable();
    test_exec_pipe_child_exits_without_reading();
+   test_exec_pipe_hanging_child_does_not_block_forever();
    printf("platform_process: all tests passed\n");
    return 0;
 }

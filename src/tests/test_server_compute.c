@@ -185,7 +185,7 @@ int agent_load_config(agent_config_t *cfg)
    memset(cfg, 0, sizeof(*cfg));
    cfg->agent_count = 1;
    snprintf(cfg->agents[0].name, sizeof(cfg->agents[0].name), "test-agent");
-   snprintf(cfg->agents[0].model, sizeof(cfg->agents[0].model), "test-model");
+   snprintf(cfg->agents[0].model, sizeof(cfg->agents[0].model), "gpt-4o");
    snprintf(cfg->agents[0].provider, sizeof(cfg->agents[0].provider), "openai");
    cfg->agents[0].enabled = 1;
    cfg->agents[0].tools_enabled = g_config_tools_enabled;
@@ -409,6 +409,35 @@ agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const conf
    (void)min_context;
    return agent_route(cfg, role);
 }
+/* The compute path now routes through the SCOPED variant so a packet's scope
+ * ceiling is enforced server-side. Honour the ceiling in the stub rather than
+ * ignoring the argument: routing that silently admitted an over-scope seat is
+ * exactly the bug this replaced, and a stub that drops the parameter could not
+ * catch a regression to it. */
+agent_t *agent_route_with_caps_scoped(agent_config_t *cfg, const char *role,
+                                      const config_t *sys_cfg, unsigned required_caps,
+                                      int min_context, agent_scope_t scope)
+{
+   agent_t *ag = agent_route_with_caps(cfg, role, sys_cfg, required_caps, min_context);
+   if (ag && scope != AGENT_SCOPE_UNSET && ag->max_scope != AGENT_SCOPE_UNSET &&
+       ag->max_scope < scope)
+      return NULL;
+   return ag;
+}
+const char *agent_scope_name(agent_scope_t s)
+{
+   return s == AGENT_SCOPE_BOUNDED      ? "bounded"
+          : s == AGENT_SCOPE_WHOLE_TASK ? "whole_task"
+                                        : "unset";
+}
+agent_scope_t agent_scope_from_string(const char *s)
+{
+   if (s && strcmp(s, "bounded") == 0)
+      return AGENT_SCOPE_BOUNDED;
+   if (s && strcmp(s, "whole_task") == 0)
+      return AGENT_SCOPE_WHOLE_TASK;
+   return AGENT_SCOPE_UNSET;
+}
 int agent_is_claude_cli(const agent_t *agent)
 {
    (void)agent;
@@ -422,6 +451,16 @@ agent_t *agent_find(agent_config_t *cfg, const char *name)
       if (strcmp(cfg->agents[i].name, name) == 0)
          return &cfg->agents[i];
    return NULL;
+}
+
+/* Mirrors agent_config.c: the catalog (vendor) identity for capability lookup,
+ * falling back to the wire provider when unset. Stubbed here because these tests
+ * link delegate_routing.o without agent_config.o. */
+const char *agent_catalog_provider(const agent_t *agent)
+{
+   if (!agent)
+      return "";
+   return agent->catalog_provider[0] ? agent->catalog_provider : agent->provider;
 }
 
 int agent_has_role(const agent_t *agent, const char *role)
@@ -1286,6 +1325,16 @@ static void test_delegate_status_handler(void)
    assert(strcmp(cJSON_GetObjectItem(g_last_response, "job_status")->valuestring, "done") == 0);
    assert(strcmp(cJSON_GetObjectItem(g_last_response, "role")->valuestring, "code") == 0);
    assert(strcmp(cJSON_GetObjectItem(g_last_response, "agent_name")->valuestring, "codex") == 0);
+   assert(cJSON_GetObjectItem(g_last_response, "participant") == NULL);
+   db1_agent_job_t issued;
+   assert(db1_agent_job_get(job_id, &issued) == 0);
+   assert(strlen(issued.participant_token) == 64);
+   db1_agent_job_t continued;
+   assert(db1_agent_job_get_by_participant(issued.participant_token, &continued) == 0);
+   assert(continued.id == job_id && strcmp(continued.agent_name, "codex") == 0);
+   db1_agent_job_free(&continued);
+   assert(db1_agent_job_get_by_participant(
+              "0000000000000000000000000000000000000000000000000000000000000000", &continued) != 0);
    assert(cJSON_GetObjectItem(g_last_response, "cursor_turn")->valueint == 3);
    assert(strcmp(cJSON_GetObjectItem(g_last_response, "result")->valuestring, "ok") == 0);
    cJSON_Delete(req);
@@ -1340,12 +1389,15 @@ static void test_delegate_background_handler(void)
    cJSON_AddStringToObject(req, "role", "reviewer");
    cJSON_AddStringToObject(req, "persona", "engineer");
    cJSON_AddStringToObject(req, "prompt", "run the background delegate test prompt");
+   cJSON_AddStringToObject(req, "via", "codex");
    cJSON_AddTrueToObject(req, "background");
 
    assert(handle_delegate(ctx, conn, req) == 0);
    assert(g_last_response != NULL);
    cJSON *jid = cJSON_GetObjectItem(g_last_response, "job_id");
    assert(cJSON_IsNumber(jid));
+   cJSON *participant = cJSON_GetObjectItem(g_last_response, "participant");
+   assert(cJSON_IsString(participant) && strlen(participant->valuestring) == 64);
    int job_id = jid->valueint;
    assert(job_id > 0);
    assert(strcmp(cJSON_GetObjectItem(g_last_response, "job_status")->valuestring, "pending") == 0);
@@ -1355,6 +1407,7 @@ static void test_delegate_background_handler(void)
    assert(strcmp(job.status, "pending") == 0);
    assert(strcmp(job.role, "review") == 0);
    assert(strcmp(job.prompt, "run the background delegate test prompt") == 0);
+   assert(strcmp(job.agent_name, "codex") == 0);
 
    assert(g_submitted_fn == delegate_worker);
    assert(g_submitted_arg != NULL);
@@ -2770,6 +2823,27 @@ static void test_delegate_worker_ok_response_shape(void)
    printf("  PASS: test_delegate_worker_ok_response_shape\n");
 }
 
+static void test_delegate_cost_cap_rejects_oversized_input_before_provider(void)
+{
+   reset_last_response();
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "role", "execute");
+   cJSON_AddStringToObject(req, "persona", "engineer");
+   cJSON_AddStringToObject(req, "prompt",
+                           "This prompt plus the conservative provider framing cannot fit the "
+                           "sub-token workflow cost allowance.");
+   cJSON_AddNumberToObject(req, "max_cost_usd", 0.000000001);
+   cJSON *resp = sci_drive_delegate(req);
+   cJSON_Delete(req);
+   assert(resp != NULL);
+   assert(strcmp(cJSON_GetObjectItem(resp, "status")->valuestring, "error") == 0);
+   assert(g_agent_run_calls == 0);
+   assert(g_agent_tool_run_calls == 0);
+   cJSON_Delete(resp);
+   reset_last_response();
+   printf("  PASS: test_delegate_cost_cap_rejects_oversized_input_before_provider\n");
+}
+
 /* The same context-restore invariants must hold when the run fails (rc != 0). */
 static void test_delegate_worker_restores_state_on_error(void)
 {
@@ -3097,6 +3171,7 @@ int main(void)
    test_inspection_roles_get_evidence_bundle();
    test_delegate_worker_restores_caller_context();
    test_delegate_worker_ok_response_shape();
+   test_delegate_cost_cap_rejects_oversized_input_before_provider();
    test_delegate_worker_restores_state_on_error();
    test_delegate_worker_sets_session_override_during_run();
    test_create_compute_ctx_threads_vault_identity();

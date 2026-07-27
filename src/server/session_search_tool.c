@@ -83,7 +83,14 @@ static int best_match_index(cJSON *messages, const char *query)
       if (str_contains_ci(message_text(cJSON_GetArrayItem(messages, i)), query))
          return i;
    }
-   return n > 0 ? 0 : -1;
+   /* No message body contains the query. The DB-level search also matches on
+    * session_id / agent_name / provider, and message_text() cannot read
+    * structured (array) content, so a session can legitimately reach here with
+    * no in-message hit. Report "no match" rather than pointing at message 0,
+    * which would present an unrelated message as the search result. Callers
+    * guard for -1: the snippet is emptied and the window falls back to the
+    * start of the session. */
+   return -1;
 }
 
 static const char *session_title(const char *session_id, char *buf, size_t cap)

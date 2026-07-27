@@ -342,7 +342,8 @@ static void test_tls_roundtrip(void)
    char url[64];
    snprintf(url, sizeof(url), "https://127.0.0.1:%d", port);
    setenv("AIMEE_TLS_INSECURE", "1", 1); /* accept the self-signed cert */
-   setenv("AIMEE_TRANSPORT_SERVER_KEEPALIVE_ENABLED", "1", 1);
+   /* Keep-alive is the measured default; no environment opt-in is required. */
+   unsetenv("AIMEE_TRANSPORT_SERVER_KEEPALIVE_ENABLED");
    aimee_client_set_remote(url, NULL);
 
    int st = -1;

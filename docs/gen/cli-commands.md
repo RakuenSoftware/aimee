@@ -5,7 +5,7 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 60
+Total commands: 66
 
 ## Core commands
 
@@ -35,8 +35,10 @@ Subcommands:
                    research -> execute. REQUIRES --persona NAME (e.g.
                    engineer, qa, security, reviewer, architect). --tools
                    enables tool use for roles that do not enable it by
-                   default. See `aimee delegate <role> --help` for the full
-                   flag set (--persona, --context-file, --via, etc.).
+                   default. --scope bounded|whole_task caps how open-ended
+                   the task may be (enforced against each agent's max_scope).
+                   See `aimee delegate <role> --help` for the full flag set
+                   (--persona, --context-file, --via, --scope, etc.).
   plan             Generate read-only work packets from a proposal
   launch <plan>    Queue a reviewed packet plan into a coord job
   status <job_id> [job_id...]  Check background delegate status
@@ -63,6 +65,7 @@ Subcommands:
   overview         List indexed projects
   list             List indexed projects
   scan             Scan workspaces and (re)build the index (--force)
+  watch <name> <root>  Install git hooks that re-index after branch changes
   blast-radius     Show files affected by changes to a file
   structure        Show file structure
   callers          Find callers of a symbol
@@ -89,6 +92,10 @@ Subcommands:
   ingest           Ingest documents (status: ingest status)
   status           Show knowledge-base status
   docs push        Push docs into the knowledge base
+  grant set        Set one subject's write tier (--server, --team, --subject, --tier)
+  grant show       Show one subject's grant (--server, --team, --subject)
+  grant list       List grants (--server, --team, [--include-revoked])
+  grant revoke     Revoke one subject's grant (--server, --team, --subject)
 ```
 
 ### `aimee manuscript`
@@ -120,6 +127,20 @@ Subcommands:
   read             Assemble current memory context
 ```
 
+### `aimee persona`
+
+Persona management.
+
+Subcommands:
+
+```
+  list             List available personas
+  show <name>      Print one persona
+  edit <name>      Edit or create a persona in $EDITOR
+  add <name>       Alias for edit
+  rm <name>        Reset a built-in or remove a custom persona
+```
+
 ### `aimee rules`
 
 Rule management (list, generate, delete).
@@ -130,6 +151,19 @@ Subcommands:
   list             List active rules
   generate         Generate a rules prompt
   delete           Delete one rule
+```
+
+### `aimee self-update`
+
+Update this thin client to the server release.
+
+Subcommands:
+
+```
+  --check          Report whether an update is available
+  --version vX.Y.Z  Install a specific release without downgrading
+  --yes            Do not ask before replacing the binary
+  --require-verify  Fail if the published SHA-256 cannot be verified
 ```
 
 ### `aimee session-start`
@@ -204,6 +238,7 @@ Subcommands:
 ```
   list             List configured delegates
   add              Add or update a delegate provider
+  setup            Run an agent provider's attended OAuth setup
   local            Register/update a local OpenAI-compatible delegate
                    (--provider openai|llama-eval for request shaping)
   remove           Remove a configured delegate
@@ -280,6 +315,16 @@ Subcommands:
                          requires a configured server, kb, and code index
 ```
 
+### `aimee codex`
+
+Codex OAuth recovery.
+
+Subcommands:
+
+```
+  reauth           Re-authenticate Codex after refresh is rejected
+```
+
 ### `aimee cron`
 
 Cron jobs and watchdog runs.
@@ -295,6 +340,22 @@ Subcommands:
   enable <id>      Enable a cron job
   disable <id>     Disable a cron job (--all for rollback)
   remove <id>      Remove a cron job
+```
+
+### `aimee css`
+
+CSS migration analysis and render verification.
+
+Subcommands:
+
+```
+  report           Show a CSS-health overview
+  dead-rules | conflicts | duplicate-declarations | duplicate-selectors
+  unresolved | important-audit | high-specificity | unused-vars | token-candidates
+  migrate-enumerate | migrate-list | rules-doc | assert-conventions | conventions
+  render-store <project> <unit> <before|after> <snapshot.json>
+  render-capture <project> <unit> <before|after> <html-file> <css-file>
+  render-verify <project> <unit>
 ```
 
 ### `aimee curator`
@@ -520,8 +581,35 @@ Subcommands:
 
 ```
   set <url> [token]  Persist a remote server target
+  enroll            Rotate the bearer and enroll this client certificate
+  trust             Pin the configured server certificate again
   status             Show the resolved transport and a health probe
   clear              Revert to the local Unix socket
+```
+
+### `aimee roles`
+
+Delegate role templates.
+
+Subcommands:
+
+```
+  list             List role templates
+  show <role>      Print one role template
+  edit <role>      Edit or create a template in $EDITOR
+  rm <role>        Reset a built-in or remove a custom template
+```
+
+### `aimee roundtable`
+
+Review an artifact with a configured roundtable.
+
+Subcommands:
+
+```
+  review <artifact>  Run the configured roundtable review
+                     --roundtable NAME selects a saved preset
+                     --original-request TEXT supplies the governing request
 ```
 
 ### `aimee server`
@@ -607,6 +695,7 @@ Subcommands:
   add <path>       Register a directory as a workspace and index its projects
   list             List configured workspaces and their indexed projects
   remove <path>    Unregister a workspace
+  serve <id>       Run the authorized remote-workspace request loop
 ```
 
 ### `aimee worktree`

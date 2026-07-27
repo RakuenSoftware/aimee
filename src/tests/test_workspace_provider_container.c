@@ -88,7 +88,10 @@ static int fake_list_dir(delegate_backend_t *self, void *state, const char *path
    e[2] = safe_strdup("util.c");
    e[3] = NULL;
    *out = e;
-   return 0;
+   /* Match the real backends (docker_list_dir/local_list_dir): list_dir returns the
+    * ENTRY COUNT on success, not 0. Returning 0 here masked the wsc_list bug that read
+    * any non-zero as failure, so every non-empty directory listing was rejected. */
+   return 3;
 }
 
 static delegate_backend_t g_fake = {.name = "fake",

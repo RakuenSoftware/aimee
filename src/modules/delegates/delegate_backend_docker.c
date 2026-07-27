@@ -18,7 +18,7 @@
  * struct and exec() prefixes `cd <cwd> &&` to subsequent commands
  * when set. */
 
-#include "delegate_backend_docker.h"
+#include <aimee/delegates/delegate_backend_docker.h>
 #include "util.h"
 
 #include "aimee.h"      /* MAX_PATH_LEN */
@@ -231,10 +231,34 @@ static int run_docker(const char *const argv[])
 
 #define DOCKER_PROBE_TIMEOUT_MS 15000
 
+/* True when `name` is one of ours. The container-name prefix is matched HERE
+ * rather than with `docker ps --filter name=^aimee-delegate-`: the anchored regex
+ * is a Docker-ism, and runtimes that treat the name filter as a literal substring
+ * (e.g. the LXC-backed docker shim) match nothing at all, silently turning both
+ * cleanup paths into no-ops and leaking a container per stale turn. Filtering in C
+ * keeps the strict prefix the anchor was there to enforce, on every runtime. */
+static int is_delegate_container_name(const char *name)
+{
+   return name && strncmp(name, "aimee-delegate-", 15) == 0;
+}
+
+/* Accept only a bare container id, so a hostile or malformed name can never reach
+ * `docker rm`. */
+static int is_container_id(const char *id)
+{
+   size_t len = id ? strlen(id) : 0;
+   if (len < 12 || len > 64)
+      return 0;
+   for (size_t i = 0; i < len; i++)
+      if (!isxdigit((unsigned char)id[i]))
+         return 0;
+   return 1;
+}
+
 int delegate_backend_docker_remove_orphans(void)
 {
-   const char *list_argv[] = {resolve_docker_bin(),    "ps", "-aq", "--filter",
-                              "name=^aimee-delegate-", NULL};
+   const char *list_argv[] = {resolve_docker_bin(), "ps", "-a", "--format",
+                              "{{.ID}} {{.Names}}", NULL};
    char *out = NULL;
    if (safe_exec_capture_cwd_env_timeout(list_argv, NULL, NULL, &out, 1 << 20,
                                          DOCKER_PROBE_TIMEOUT_MS) != 0)
@@ -244,13 +268,14 @@ int delegate_backend_docker_remove_orphans(void)
    }
    int removed = 0;
    char *save = NULL;
-   for (char *id = strtok_r(out, "\r\n", &save); id; id = strtok_r(NULL, "\r\n", &save))
+   for (char *line = strtok_r(out, "\r\n", &save); line; line = strtok_r(NULL, "\r\n", &save))
    {
-      size_t len = strlen(id);
-      int valid = len >= 12 && len <= 64;
-      for (size_t i = 0; valid && i < len; i++)
-         valid = isxdigit((unsigned char)id[i]) != 0;
-      if (!valid)
+      char id[80], name[256];
+      if (sscanf(line, "%79s %255s", id, name) != 2)
+         continue;
+      if (!is_delegate_container_name(name))
+         continue;
+      if (!is_container_id(id))
       {
          LOG_WARN("delegate-sandbox", "refusing invalid orphan container id from docker: %s", id);
          continue;
@@ -260,6 +285,75 @@ int delegate_backend_docker_remove_orphans(void)
          removed++;
       else
          LOG_WARN("delegate-sandbox", "failed to remove orphan container %s", id);
+   }
+   free(out);
+   return removed;
+}
+
+/* Days-from-civil (Hinnant) → UTC epoch seconds for a naive Y-M-D H:M:S.
+ * Avoids the non-portable timegm(); the caller applies the TZ offset. */
+static time_t docker_utc_epoch(int y, int mo, int d, int h, int mi, int s)
+{
+   y -= mo <= 2;
+   int era = (y >= 0 ? y : y - 399) / 400;
+   unsigned yoe = (unsigned)(y - era * 400);
+   unsigned doy = (153u * (unsigned)(mo + (mo > 2 ? -3 : 9)) + 2u) / 5u + (unsigned)d - 1u;
+   unsigned doe = yoe * 365u + yoe / 4u - yoe / 100u + doy;
+   long days = (long)era * 146097L + (long)doe - 719468L;
+   return (time_t)days * 86400 + h * 3600 + mi * 60 + s;
+}
+
+/* Periodic runtime reap of aged delegate containers.
+ *
+ * remove_orphans() only runs at startup, and docker_release() only removes the
+ * container on the NORMAL turn-completion path. When the heartbeat monitor
+ * stale-cancels a delegate job (or the delegate crashes/fails) its running
+ * container is left behind — leaking one container per stale/failed turn until the
+ * next restart. Over a long uptime these accumulate and fill the image volume.
+ *
+ * Reap any aimee-delegate-* container older than max_age_secs, chosen ABOVE the
+ * in-tool job cap (DEFAULT_IN_TOOL_THRESHOLD_SECS, 1200s) so a live long-running
+ * turn is never removed. Returns the count removed, or -1 on a docker error. */
+int delegate_backend_docker_reap_aged(int max_age_secs)
+{
+   const char *list_argv[] = {resolve_docker_bin(), "ps", "--format",
+                              "{{.ID}} {{.Names}} {{.CreatedAt}}", NULL};
+   char *out = NULL;
+   if (safe_exec_capture_cwd_env_timeout(list_argv, NULL, NULL, &out, 1 << 20,
+                                         DOCKER_PROBE_TIMEOUT_MS) != 0)
+   {
+      free(out);
+      return -1;
+   }
+   time_t now = time(NULL);
+   int removed = 0;
+   char *save = NULL;
+   for (char *line = strtok_r(out, "\r\n", &save); line; line = strtok_r(NULL, "\r\n", &save))
+   {
+      /* Line is "<id> <name> " + Go's default CreatedAt: "2006-01-02 15:04:05 -0700 MST". */
+      char id[80], name[256];
+      int yy, mo, dd, hh, mi, ss;
+      char off[8] = "+0000";
+      if (sscanf(line, "%79s %255s %d-%d-%d %d:%d:%d %7s", id, name, &yy, &mo, &dd, &hh, &mi, &ss,
+                 off) < 8)
+         continue;
+      if (!is_delegate_container_name(name) || !is_container_id(id))
+         continue;
+      long off_secs = 0;
+      if ((off[0] == '+' || off[0] == '-') && strlen(off) >= 5 && isdigit((unsigned char)off[1]))
+      {
+         int oh = (off[1] - '0') * 10 + (off[2] - '0');
+         int om = (off[3] - '0') * 10 + (off[4] - '0');
+         off_secs = (long)(oh * 3600 + om * 60) * (off[0] == '-' ? -1 : 1);
+      }
+      time_t created = docker_utc_epoch(yy, mo, dd, hh, mi, ss) - off_secs;
+      if (created <= 0 || (long)(now - created) < max_age_secs)
+         continue;
+      const char *rm_argv[] = {resolve_docker_bin(), "rm", "-f", id, NULL};
+      if (run_docker(rm_argv) == 0)
+         removed++;
+      else
+         LOG_WARN("delegate-sandbox", "failed to reap aged delegate container %s", id);
    }
    free(out);
    return removed;
@@ -827,6 +921,20 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
             create_argv[n++] = "NO_PROXY=localhost,127.0.0.1";
          }
       }
+      /* Trust every tree inside the container for git. Even running as the tree's
+       * owner (userflag above), a disjoint linked worktree resolves its .git to a
+       * SEPARATELY-mounted gitdir whose ownership git checks independently, so a plain
+       * `git status` from the delegate still trips "detected dubious ownership" and
+       * refuses — breaking the model's git-based inspection of its own worktree. The
+       * container is a single-purpose sandbox with only the mounted trees, so trusting
+       * all of them is safe. GIT_CONFIG_* is inherited by every `docker exec`, so it
+       * applies to plain `git` invocations without the caller adding -c safe.directory. */
+      create_argv[n++] = "-e";
+      create_argv[n++] = "GIT_CONFIG_COUNT=1";
+      create_argv[n++] = "-e";
+      create_argv[n++] = "GIT_CONFIG_KEY_0=safe.directory";
+      create_argv[n++] = "-e";
+      create_argv[n++] = "GIT_CONFIG_VALUE_0=*";
       if (userflag[0])
       {
          create_argv[n++] = "--user";
@@ -1129,8 +1237,8 @@ static int docker_resolve_in_workspace(const docker_state_t *st, const char *rel
 {
    if (!st || !rel || !out || outsz == 0)
       return -1;
-   if (rel[0] == '/')
-      return -1;
+   /* Reject any parent-traversal segment outright — it could escape the workspace
+    * whether the input is relative or absolute. */
    const char *p = rel;
    while (*p)
    {
@@ -1143,8 +1251,28 @@ static int docker_resolve_in_workspace(const docker_state_t *st, const char *rel
       if (*p == '/')
          p++;
    }
-   if (snprintf(out, outsz, "%s/%s", st->workdir[0] ? st->workdir : resolve_docker_workdir(),
-                rel) >= (int)outsz)
+   const char *workdir = st->workdir[0] ? st->workdir : resolve_docker_workdir();
+   if (rel[0] == '/')
+   {
+      /* Accept an ABSOLUTE path only when it is within the workspace root. The slice
+       * worktree is bind-mounted path-identically, so such a path is already the valid
+       * in-container path. The native file tools (tool_read_file/tool_write_file) resolve
+       * to an absolute path via the thread cwd BEFORE calling the provider, so without
+       * this branch every in-workspace read/write is wrongly rejected (bash still works
+       * because it runs a raw `cd && ...` command that never reaches this resolver) — the
+       * live symptom was container delegates hitting "cannot open"/"cannot write" on their
+       * own worktree. A path OUTSIDE the workspace stays refused: the container must not
+       * reach the host tree. */
+      size_t wlen = strlen(workdir);
+      if (strncmp(rel, workdir, wlen) == 0 && (rel[wlen] == '/' || rel[wlen] == '\0'))
+      {
+         if (snprintf(out, outsz, "%s", rel) >= (int)outsz)
+            return -1;
+         return 0;
+      }
+      return -1;
+   }
+   if (snprintf(out, outsz, "%s/%s", workdir, rel) >= (int)outsz)
       return -1;
    return 0;
 }
@@ -1251,15 +1379,27 @@ static int docker_list_dir(delegate_backend_t *self, void *state, const char *p,
    docker_state_t *st = state;
    char abs[MAX_PATH_LEN];
    if (docker_resolve_in_workspace(st, p, abs, sizeof(abs)) != 0)
+   {
+      /* The tool surfaces only "glob failed"; log why so a list_files that keeps failing
+       * on a delegate's own worktree is diagnosable (path outside workdir, or ".."). */
+      LOG_WARN("delegate-backend-docker", "list_dir: path '%s' did not resolve in workspace '%s'",
+               p, st->workdir[0] ? st->workdir : resolve_docker_workdir());
       return -1;
+   }
 
    char buf[64 * 1024] = {0};
    char err[4096] = {0};
    delegate_exec_result_t r = {0, 0, buf, sizeof(buf), err, sizeof(err)};
    char cmd[MAX_PATH_LEN + 16];
    snprintf(cmd, sizeof(cmd), "ls -1A %s", abs);
-   if (docker_exec(self, state, cmd, 30000, &r) != 0 || r.exit_code != 0)
+   int xrc = docker_exec(self, state, cmd, 30000, &r);
+   if (xrc != 0 || r.exit_code != 0)
+   {
+      LOG_WARN("delegate-backend-docker",
+               "list_dir: 'ls -1A %s' failed (exec_rc=%d exit=%d): %.200s", abs, xrc, r.exit_code,
+               err[0] ? err : "(no stderr)");
       return -1;
+   }
 
    int n = 0;
    for (const char *q = buf; *q; q++)

@@ -43,6 +43,26 @@
 #include <unistd.h>
 #include <pthread.h>
 
+/* The store-side memory-mutation audit sink (NULL = no audit); installed once at
+ * aimee-kb startup by the KB observability bridge. See memory.h. */
+static memory_audit_hook_fn g_mem_audit_hook = NULL;
+
+void memory_set_audit_hook(memory_audit_hook_fn fn)
+{
+   g_mem_audit_hook = fn;
+}
+
+/* Fire the audit hook (if installed) with the mutation's NON-CONTENT identity.
+ * Never receives memory content; the key/kind are fingerprinted downstream. */
+static void mem_audit(const char *op, int64_t id, const char *tier, const char *kind,
+                      const char *key, double confidence, const char *session_id)
+{
+   memory_audit_hook_fn h = g_mem_audit_hook;
+   if (h)
+      h(op, id, tier ? tier : "", kind ? kind : "", key ? key : "", confidence,
+        session_id ? session_id : "");
+}
+
 /* gate_check_sensitive, gate_check_ephemeral, and gate_has_evidence_markers
  * are platform-owned quality gates. */
 
@@ -170,6 +190,43 @@ static int memory_semantic_value_equivalent(const char *a, const char *b)
    if (strcmp(norm_a, norm_b) == 0)
       return 1;
    return trigram_similarity(norm_a, norm_b) >= 0.92;
+}
+
+/* Near-key dedupe is useful for spelling variants, but numeric tokens commonly
+ * distinguish deliberately separate entries (worker-1 vs worker-2, v1 vs v2).
+ * Never merge keys whose ordered numeric-token signatures differ. */
+static int memory_numeric_key_signature(const char *key, char *out, size_t out_len)
+{
+   if (!out || out_len == 0)
+      return 0;
+   size_t n = 0;
+   int tokens = 0;
+   for (size_t i = 0; key && key[i];)
+   {
+      if (!isdigit((unsigned char)key[i]))
+      {
+         i++;
+         continue;
+      }
+      if (tokens++ > 0 && n + 1 < out_len)
+         out[n++] = ',';
+      while (isdigit((unsigned char)key[i]))
+      {
+         if (n + 1 < out_len)
+            out[n++] = key[i];
+         i++;
+      }
+   }
+   out[n] = '\0';
+   return tokens;
+}
+
+static int memory_keys_have_different_numeric_tokens(const char *a, const char *b)
+{
+   char sig_a[128], sig_b[128];
+   int n_a = memory_numeric_key_signature(a, sig_a, sizeof(sig_a));
+   int n_b = memory_numeric_key_signature(b, sig_b, sizeof(sig_b));
+   return (n_a != n_b) || (n_a > 0 && strcmp(sig_a, sig_b) != 0);
 }
 
 int memory_insert_ex(const char *tier, const char *kind, const char *key, const char *content,
@@ -334,6 +391,9 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
             db1_context_cache_invalidate();
          if (!skip_side_effects)
             memory_maybe_run_maintenance();
+         /* An existing memory's content was overwritten by an exact-key merge —
+          * a real mutation, audited (distinct op so merges stay filterable). */
+         mem_audit("memory.merge", existing_id, tier, kind, norm_key, new_conf, session_id);
          return 0;
       }
    }
@@ -353,6 +413,8 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
       double dup_surprise = 0.5;
       for (int i = 0; i < n_cands; i++)
       {
+         if (memory_keys_have_different_numeric_tokens(norm_key, cands[i].key))
+            continue;
          double sim = trigram_similarity(norm_key, cands[i].key);
          if (sim >= DEDUP_THRESHOLD)
          {
@@ -404,6 +466,9 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
          if (db1_context_cache_invalidate)
             db1_context_cache_invalidate();
          memory_maybe_run_maintenance();
+         /* An existing near-duplicate memory's content was overwritten — audited
+          * (the submitted key's identity fingerprint; task_id is the merged id). */
+         mem_audit("memory.merge", dup_id, tier, kind, norm_key, new_conf, session_id);
          return 0;
       }
    }
@@ -438,6 +503,8 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
          db1_context_cache_invalidate();
       if (!skip_side_effects)
          memory_maybe_run_maintenance();
+      /* Authoritative store-side audit: a new memory was written (non-content). */
+      mem_audit("memory.insert", new_id, tier, kind, norm_key, confidence, session_id);
       return 0;
    }
 }
@@ -463,12 +530,18 @@ int memory_update_content(int64_t id, const char *content)
    if (id <= 0 || !content || !content[0])
       return -1;
    int changes = db2_memory_update_content(id, content);
-   return changes > 0 ? 0 : -1;
+   int rc = changes > 0 ? 0 : -1;
+   if (rc == 0)
+      mem_audit("memory.update", id, NULL, NULL, NULL, 0.0, NULL);
+   return rc;
 }
 
 int memory_reject(int64_t id, const char *reason)
 {
-   return db2_memory_reject(id, reason);
+   int rc = db2_memory_reject(id, reason);
+   if (rc == 0)
+      mem_audit("memory.reject", id, NULL, NULL, NULL, 0.0, NULL);
+   return rc;
 }
 
 int memory_list(const char *tier, const char *kind, int limit, memory_t *out, int max)
@@ -507,7 +580,10 @@ int memory_delete(int64_t id)
    int changes = db2_memory_delete_row(id);
    if (changes > 0 && db1_context_cache_invalidate)
       db1_context_cache_invalidate();
-   return changes > 0 ? 0 : -1;
+   int rc = changes > 0 ? 0 : -1;
+   if (rc == 0)
+      mem_audit("memory.delete", id, NULL, NULL, NULL, 0.0, NULL);
+   return rc;
 }
 
 int memory_stats(memory_stats_t *out)
