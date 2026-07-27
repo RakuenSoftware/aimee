@@ -554,7 +554,6 @@ native_provider_http:
     * seats). Retrying with the identical tool contract can repeat forever and
     * discard an otherwise healthy panelist. Preserve tools for the normal run,
     * but make the one bounded degenerate-response retry a synthesis-only turn. */
-   int force_text_only_retry = 0;
    int tok = agent_request_max_tokens(agent, max_tokens);
    int max_t = agent_resolve_max_turns(agent, role);
    int initial_max_t = max_t;
@@ -723,10 +722,8 @@ native_provider_http:
        * can always send another message.  Pass max_turns=0 so HARD never fires. */
       liveness_final_response_mode_t final_mode =
           liveness_final_response_mode(turn, role ? max_t : 0, total_calls, final_after_turns);
-      int final_instruction_turn =
-          force_text_only_retry || final_mode != LIVENESS_FINAL_RESPONSE_NONE;
-      int final_text_only_turn =
-          force_text_only_retry || !liveness_final_response_allows_tools(final_mode);
+      int final_instruction_turn = final_mode != LIVENESS_FINAL_RESPONSE_NONE;
+      int final_text_only_turn = !liveness_final_response_allows_tools(final_mode);
       /* A final-only turn cannot satisfy an evidence gate. Keep read-only tools
        * available until one actually succeeds; provider tool_choice is a request,
        * not an enforcement boundary, and some compatible endpoints ignore it. */
@@ -736,7 +733,6 @@ native_provider_http:
          final_instruction_turn = 0;
          final_text_only_turn = 0;
       }
-      force_text_only_retry = 0;
       if (final_instruction_turn && !final_instruction_added)
       {
          agent_session_append_final_instruction(messages);
@@ -1291,9 +1287,8 @@ native_provider_http:
          {
             if (liveness_is_degenerate_response(parsed.content))
             {
-               if (total_calls == 0 &&
-                   agent_session_retry_degenerate_response(messages, &turn, &degenerate_retry_count,
-                                                           &force_text_only_retry))
+               if (total_calls == 0 && agent_session_retry_degenerate_response(
+                                           messages, &turn, &degenerate_retry_count))
                {
                   agent_free_parsed_response(&parsed);
                   continue;
@@ -1323,8 +1318,7 @@ native_provider_http:
              * reasoning-only content. The final-tool retry below is mutually
              * exclusive because it requires total_calls > 0. */
             if (total_calls == 0 &&
-                agent_session_retry_degenerate_response(messages, &turn, &degenerate_retry_count,
-                                                        &force_text_only_retry))
+                agent_session_retry_degenerate_response(messages, &turn, &degenerate_retry_count))
             {
                agent_free_parsed_response(&parsed);
                continue;
