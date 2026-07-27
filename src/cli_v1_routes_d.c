@@ -978,8 +978,15 @@ static cJSON *cli_v1_send(const char *remote, const char *bearer, const char *ve
    char *r = aimee_client_request(verb, path, body, &status);
    if (r)
    {
-      if (status >= 200 && status < 300)
-         resp = cJSON_Parse(r);
+      /* Parse the body whatever the status, as the POSIX branch above does. The
+       * server states WHY it refused in the body of its 4xx ({"status":"error",
+       * "message":...}), and the caller already renders that. Gating the parse on
+       * 2xx threw those bodies away and left resp==NULL, which the caller can only
+       * report as "could not reach the aimee-server /v1 endpoint (is the server
+       * running?)" -- so on Windows an authorization refusal was indistinguishable
+       * from an outage, and sent users to debug a server that had just answered.
+       * A non-JSON body still parses to NULL and falls through as before. */
+      resp = cJSON_Parse(r);
       free(r);
    }
 #endif
