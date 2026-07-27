@@ -282,3 +282,15 @@ fail-closed secret scanning, reranker bounds, and resume behavior):
 ```sh
 python3 -m unittest benchmarks.tests.test_gemma4_baseline_contract -v
 ```
+
+Before publishing any completed view, generate fail-closed acceptance evidence:
+
+```sh
+python3 benchmarks/gemma4_baseline/validate_result_checkpoint.py \
+  --bundle benchmarks/fixtures/gemma4-unified/ab-v1 \
+  --result-dir /mnt/media/gemma4-baseline/results/gemma4_12b \
+  --label gemma4_12b --view embedding
+```
+
+The validator enforces the exact frozen case population, latest-row success,
+recomputed metrics, suite identity, required hardware artifact, and secret scan.

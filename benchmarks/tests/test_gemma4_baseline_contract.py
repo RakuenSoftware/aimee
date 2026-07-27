@@ -26,6 +26,7 @@ eurobert_trainer = importlib.import_module("train_eurobert_reranker")
 comparison = importlib.import_module("compare_ab")
 reranker_reports = importlib.import_module("reranker_pairwise_reports")
 remaining_chain = importlib.import_module("run_254_remaining_chain")
+result_validator = importlib.import_module("validate_result_checkpoint")
 synthesis = importlib.import_module("run_synthesis_ab")
 try:
     embedding = importlib.import_module("run_embedding_ab")
@@ -38,6 +39,21 @@ validator = importlib.import_module("validate_fixtures")
 
 
 class GemmaBaselineContractTests(unittest.TestCase):
+    def test_published_checkpoints_pass_fail_closed_result_validation(self) -> None:
+        bundle = ROOT / "benchmarks/fixtures/gemma4-unified/ab-v1"
+        results = ROOT / "benchmarks/results/gemma4-unified/ab-v1"
+        checks = (
+            ("gemma4_12b", "synthesis", 10_013),
+            ("gemma4_e4b", "embedding", 10_000),
+            ("ettin68m", "reranking", 10_014),
+        )
+        for label, view, raw_rows in checks:
+            with self.subTest(label=label, view=view):
+                evidence = result_validator.validate_checkpoint(bundle, results / label, label, view)
+                self.assertEqual(evidence["latest_rows"], 10_000)
+                self.assertEqual(evidence["raw_rows"], raw_rows)
+                self.assertEqual(evidence["secret_scan"], "pass")
+
     def test_published_12b_synthesis_checkpoint_reduces_to_exact_summary(self) -> None:
         bundle = ROOT / "benchmarks/fixtures/gemma4-unified/ab-v1"
         result = ROOT / "benchmarks/results/gemma4-unified/ab-v1/gemma4_12b"

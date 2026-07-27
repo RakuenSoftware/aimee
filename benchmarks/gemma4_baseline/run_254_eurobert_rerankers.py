@@ -96,6 +96,23 @@ def environment_identity(suite_sha: str, runtime: dict[str, Any]) -> dict[str, A
     }
 
 
+def hardware_snapshot() -> dict[str, int]:
+    result: dict[str, int] = {}
+    paths = {
+        "vram_used_bytes": Path("/sys/class/drm/card0/device/mem_info_vram_used"),
+        "vram_total_bytes": Path("/sys/class/drm/card0/device/mem_info_vram_total"),
+        "gpu_busy_percent": Path("/sys/class/drm/card0/device/gpu_busy_percent"),
+    }
+    for name, path in paths.items():
+        if path.exists():
+            result[name] = int(path.read_text(encoding="utf-8").strip())
+    for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+        key, _, raw = line.partition(":")
+        if key in {"MemAvailable", "SwapTotal", "SwapFree"}:
+            result[f"{key.lower()}_bytes"] = int(raw.strip().split()[0]) * 1024
+    return result
+
+
 def build_image(socket: str, repo: Path, manifest: dict[str, Any]) -> None:
     runtime = manifest["runtime"]
     packages = runtime["packages"]
@@ -215,7 +232,8 @@ def start_server(
     label: str,
     model_dir: Path,
     serving: dict[str, Any],
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str, dict[str, Any], float]:
+    started = time.monotonic()
     name = "eurobert-reranker-server"
     run(docker_cmd(socket, "stop", name), capture=True, check=False)
     wait_container_gone(socket, name)
@@ -240,7 +258,7 @@ def start_server(
     except Exception:
         logs = run(docker_cmd(socket, "logs", container_id), capture=True, check=False)
         raise RuntimeError(f"{label} server startup failed:\n{logs.stdout}{logs.stderr}")
-    return container_id, health
+    return container_id, health, time.monotonic() - started
 
 
 def stop_server(socket: str, logs_path: Path) -> None:
@@ -358,7 +376,7 @@ def main() -> int:
                 )
             assert_completed_training_dir(model_root, expected)
             write_state(state_path, status="reranking", active_label=label)
-            _, health = start_server(
+            _, health, load_seconds = start_server(
                 args.socket,
                 args.root,
                 args.repo,
@@ -367,6 +385,7 @@ def main() -> int:
                 final_dir,
                 manifest["serving"],
             )
+            after_load = hardware_snapshot()
             try:
                 command = [
                     "python3",
@@ -393,6 +412,23 @@ def main() -> int:
                 if args.max_cases:
                     command += ["--max-cases", str(args.max_cases)]
                 run(command)
+                after_run = hardware_snapshot()
+                label_results = results / label
+                label_results.mkdir(exist_ok=True)
+                (label_results / "hardware_reranking.json").write_text(
+                    json.dumps(
+                        {
+                            "cold_load_seconds": load_seconds,
+                            "load_profile": manifest["serving"],
+                            "health": health,
+                            "after_load": after_load,
+                            "after_run": after_run,
+                        },
+                        indent=2,
+                        sort_keys=True,
+                    ) + "\n",
+                    encoding="utf-8",
+                )
             finally:
                 stop_server(args.socket, logs / f"server_{label}.log")
         write_state(state_path, status="complete", active_label=None)
