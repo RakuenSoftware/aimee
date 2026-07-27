@@ -1,7 +1,7 @@
 /* pki.c: see pki.h. aimee's self-generated client-cert CA + issuance/revocation. */
 #include "pki.h"
 #include "vault_service.h"   /* seal/inject the CA key */
-#include "vault_principal.h" /* vault_principal_cert_sanitize */
+#include "vault_principal.h" /* vault_principal_name_sanitize */
 #include "config.h"          /* config_default_dir */
 #include "db1_internal.h"    /* db1_conn */
 #include "aimee.h"           /* MAX_PATH_LEN */
@@ -726,7 +726,7 @@ int pki_issue(const char *cn, int validity_days, char *cert_pem, size_t cert_len
               size_t key_len, char *serial_out, size_t serial_len)
 {
    char san[VAULT_CERT_CN_MAX + 1];
-   if (!cn || !vault_principal_cert_sanitize(cn, san, sizeof(san)) || !cert_pem || !key_pem ||
+   if (!cn || !vault_principal_name_sanitize(cn, san, sizeof(san)) || !cert_pem || !key_pem ||
        !serial_out)
       return -1;
    if (validity_days <= 0)
@@ -795,7 +795,7 @@ int pki_sign_csr(const char *cn, int validity_days, const char *csr_pem, char *c
                  size_t cert_len, char *serial_out, size_t serial_len)
 {
    char san[VAULT_CERT_CN_MAX + 1];
-   if (!cn || !vault_principal_cert_sanitize(cn, san, sizeof(san)) || !csr_pem || !cert_pem ||
+   if (!cn || !vault_principal_name_sanitize(cn, san, sizeof(san)) || !csr_pem || !cert_pem ||
        !serial_out || cert_len == 0 || serial_len == 0)
       return -1;
    if (validity_days <= 0)

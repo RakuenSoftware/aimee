@@ -89,18 +89,25 @@ static int root_owned_fixed_file(const char *path, int executable)
    }
 }
 
-static int harden_process(void)
+/* Returns NULL on success, or a FIXED name for the step that failed — see the
+ * note in kb_mgmt_token_roots_provision_main.c. One undifferentiated
+ * "hardening" left an operator with nothing to change. The names are
+ * compile-time constants naming a syscall and leak nothing. */
+static const char *harden_process(void)
 {
    struct rlimit no_core = {0, 0};
    (void)umask(077);
-   if (setrlimit(RLIMIT_CORE, &no_core) != 0 || prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0 ||
-       prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0)
-      return -1;
+   if (setrlimit(RLIMIT_CORE, &no_core) != 0)
+      return "hardening (core-dump limit)";
+   if (prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0)
+      return "hardening (dumpable)";
+   if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0)
+      return "hardening (no-new-privs)";
 #ifdef PR_GET_DUMPABLE
    if (prctl(PR_GET_DUMPABLE, 0, 0, 0, 0) != 0)
-      return -1;
+      return "hardening (dumpable readback)";
 #endif
-   return 0;
+   return NULL;
 }
 
 /* The KMS helper is trusted code, but its diagnostics are provider-controlled
@@ -386,9 +393,10 @@ int main(int argc, char **argv)
       fixed_error("usage");
       return EXIT_USAGE;
    }
-   if (harden_process() != 0)
+   const char *harden_failure = harden_process();
+   if (harden_failure)
    {
-      fixed_error("hardening");
+      fixed_error(harden_failure);
       return EXIT_HARDENING;
    }
 

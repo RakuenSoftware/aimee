@@ -93,6 +93,13 @@ DB1_ONLY_TABLES = {
     "server_mgmt_nonce",
     "server_mgmt_status_hwm",
     "server_management_jti",
+    # The data-plane sibling of server_management_jti: per-server single-use
+    # rejection for kb-signed identity tokens (proposal
+    # per-user-remote-writes-authz.md §9).  A separate table because that one's
+    # peer/request columns are NOT NULL and an identity token has neither.
+    # Replay state is per-server runtime, never replicated, so it is DB1-local
+    # for the same reason the management one is.
+    "server_identity_jti",
     "server_management_jwks_cache",
     "session_state",
     "user_memories",

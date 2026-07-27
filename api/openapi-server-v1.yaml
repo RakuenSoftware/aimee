@@ -1407,6 +1407,180 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /grants/write-tier/list:
+    post:
+      summary: List per-user write-tier grants for a (server, team)
+      description: >-
+        POST for a read, deliberately: the thin client marshals a command's flags into a JSON
+        body and has no per-method query-string builder, and `aimee kb grant list` is the only
+        caller. The body also suits a subject, which can contain ':' and '%'.
+        LOCAL UDS ONLY. Refused over the TCP listener regardless of bearer or
+        aimee.api.remote_writes, because a remote caller reaching this would already hold a
+        write tier and could widen its own access. aimee-kb independently requires admin or
+        team-lead authority. `include_revoked` WIDENS the listing to contain revoked grants
+        alongside live ones; it is not a revoked-only filter. `subject` filters to one
+        subject, which is how `show` is served.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [server_id, team_id]
+              properties:
+                server_id: { type: string }
+                team_id: { type: integer, format: int64 }
+                subject:
+                  type: string
+                  description: Optional filter to one subject; this is how `show` is served.
+                include_revoked:
+                  type: boolean
+                  description: >-
+                    WIDENS the listing to include revoked grants alongside live ones. Not a
+                    revoked-only filter.
+      responses:
+        "200":
+          description: >-
+            Grants, plus `truncated` when the answer is partial — from this server's ceiling
+            or aimee-kb's. A partial list read as complete understates who can write.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  grants:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        subject: { type: string }
+                        tier: { type: string, enum: [off, data, full] }
+                        granted_by: { type: string }
+                        created_at: { type: string }
+                        updated_at: { type: string }
+                        revoked_at:
+                          type: string
+                          description: Absent for a live grant.
+                  truncated: { type: boolean }
+        "400":
+          description: server_id or an integer team_id missing or unusable
+          content:
+            application/json:
+              schema: { type: object }
+        "403":
+          description: Not reachable over this transport, or aimee-kb refused
+          content:
+            application/json:
+              schema: { type: object }
+        "503":
+          description: aimee-kb unreachable, or not on the postgres backend
+          content:
+            application/json:
+              schema: { type: object }
+  /grants/write-tier/set:
+    post:
+      summary: Create or update a per-user write-tier grant
+      description: >-
+        LOCAL UDS ONLY (see /grants/write-tier/list). Idempotent. The response reports what was replaced,
+        observed atomically by aimee-kb: `changed` distinguishes a no-op from a real change,
+        which is how a script notices that somebody's access just grew. `previous_tier` is
+        ABSENT when the grant did not exist, because "created" and "changed from off" are
+        different facts. The granter recorded in the audit trail is the local operator, not a
+        value from this request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [server_id, team_id, subject, tier]
+              properties:
+                server_id: { type: string }
+                team_id: { type: integer, format: int64 }
+                subject:
+                  type: string
+                  description: >-
+                    A canonical identity: owner, oidc:<iss>:<sub>, cert:<issuer>:<serial>, or
+                    a bare host account.
+                tier: { type: string, enum: [off, data, full] }
+      responses:
+        "200":
+          description: The grant now has the requested tier
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  changed: { type: boolean }
+                  was_revoked: { type: boolean }
+                  previous_tier:
+                    type: string
+                    enum: [off, data, full]
+                    description: Absent when the grant did not previously exist.
+                  is_member:
+                    type: boolean
+                    description: >-
+                      False when the subject is not on the team. The grant is created anyway
+                      and is inert until they are — a warning, not a refusal.
+        "400":
+          description: Missing or unusable field, or a non-integer team_id
+          content:
+            application/json:
+              schema: { type: object }
+        "403":
+          description: Not reachable over this transport, or aimee-kb refused
+          content:
+            application/json:
+              schema: { type: object }
+        "503":
+          description: aimee-kb unreachable, or not on the postgres backend
+          content:
+            application/json:
+              schema: { type: object }
+  /grants/write-tier/revoke:
+    post:
+      summary: Revoke a per-user write-tier grant
+      description: >-
+        LOCAL UDS ONLY (see /grants/write-tier/list). Idempotent, so a retry after a timeout
+        succeeds. Takes effect immediately for MINTING — aimee-kb re-reads the grant when it
+        mints — but a token already issued remains usable for up to its 300s lifetime, once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [server_id, team_id, subject]
+              properties:
+                server_id: { type: string }
+                team_id: { type: integer, format: int64 }
+                subject: { type: string }
+      responses:
+        "200":
+          description: >-
+            Revoked. `found` is false when no grant existed at all — likely a typo'd subject,
+            and distinct from one already revoked, where the intent was already satisfied.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  found: { type: boolean }
+        "400":
+          description: Missing or unusable field
+          content:
+            application/json:
+              schema: { type: object }
+        "403":
+          description: Not reachable over this transport, or aimee-kb refused
+          content:
+            application/json:
+              schema: { type: object }
+        "503":
+          description: aimee-kb unreachable, or not on the postgres backend
+          content:
+            application/json:
+              schema: { type: object }
   /kb/status:
     get:
       summary: Knowledge-base / vector status (proxied to aimee-kb)

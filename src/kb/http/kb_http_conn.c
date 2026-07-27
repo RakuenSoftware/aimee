@@ -42,6 +42,31 @@ extern void send_response_ex(int fd, int status, const char *body, const char *r
                              const char *content_type);
 extern char g_bearer_token[];
 
+/* Copies the value of header `name` at `line` into `out`, if that is the header
+ * this line carries. RFC 9110: the colon may be followed by zero or more spaces
+ * or tabs, and trailing whitespace is not part of the value. Returns 1 on a
+ * match (even for an empty value), 0 when the line is a different header. */
+static int header_value(const char *line, const char *name, char *out, size_t out_cap)
+{
+   size_t nlen = strlen(name);
+   if (strncasecmp(line, name, nlen) != 0 || line[nlen] != ':')
+      return 0;
+   const char *v = line + nlen + 1;
+   while (*v == ' ' || *v == '\t')
+      v++;
+   const char *end = strpbrk(v, "\r\n");
+   if (!end)
+      end = v + strlen(v);
+   while (end > v && (end[-1] == ' ' || end[-1] == '\t'))
+      end--;
+   size_t len = (size_t)(end - v);
+   if (len >= out_cap)
+      len = out_cap - 1;
+   memcpy(out, v, len);
+   out[len] = '\0';
+   return 1;
+}
+
 /* ── per-connection handler ──────────────────────────────────────────────── */
 
 void handle_connection(int fd)
@@ -109,24 +134,30 @@ void handle_connection(int fd)
       }
    }
 
-   /* Extract Authorization header value */
+   /* Extract Authorization and Content-Type header values. Content-Type is
+    * carried in the per-request context (kb_reqctx.h) rather than a new router
+    * parameter: only the login route's security depends on it.
+    *
+    * RFC 9110 allows ZERO OR MORE spaces or tabs after the colon, so
+    * "Content-Type:application/json" and a tab-separated form are both valid.
+    * Matching only "Name: " with exactly one space treats those as ABSENT, which
+    * for a route that requires JSON turns a legitimate request into a 415. The
+    * TLS front end already parsed optional whitespace; this one did not, and the
+    * inconsistency was invisible because the route-level tests bypass both. */
    char auth_val[512] = {0};
+   char ctype_val[128] = {0};
    const char *p = buf;
    while ((p = strstr(p, "\r\n")) != NULL)
    {
       p += 2;
-      if (strncasecmp(p, "Authorization: ", 15) == 0)
-      {
-         const char *v = p + 15;
-         const char *end = strpbrk(v, "\r\n");
-         int len = end ? (int)(end - v) : (int)strlen(v);
-         if (len >= (int)sizeof(auth_val))
-            len = (int)sizeof(auth_val) - 1;
-         memcpy(auth_val, v, (size_t)len);
-         auth_val[len] = '\0';
+      if (!auth_val[0])
+         header_value(p, "Authorization", auth_val, sizeof(auth_val));
+      if (!ctype_val[0])
+         header_value(p, "Content-Type", ctype_val, sizeof(ctype_val));
+      if (auth_val[0] && ctype_val[0])
          break;
-      }
    }
+   kb_reqctx_set_content_type(ctype_val);
 
    char *resp_heap = malloc(KB_HTTP_RESP_MAX);
    if (!resp_heap)
@@ -236,6 +267,10 @@ void handle_connection(int fd)
                         g_bearer_token[0] ? g_bearer_token : NULL, req_body_ptr, req_body_len,
                         resp_heap, KB_HTTP_RESP_MAX);
    kb_reqctx_clear(); /* drop the request's actor before the worker handles the next */
+   /* Same for the content type: a worker thread is reused, and a stale JSON
+    * content type left behind would let the NEXT request past a check that its
+    * own headers should have failed. */
+   kb_reqctx_clear_content_type();
 
    aimee_log(LOG_INFO, "kb.http", "request_id=%s method=%s path=%s status=%d", request_id, method,
              clean_path, status);

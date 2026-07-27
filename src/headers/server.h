@@ -88,8 +88,19 @@ typedef struct cJSON cJSON;
  * only), so a mere authenticated bearer cannot tap live traffic. */
 #define CAP_SHADOW_ADMIN (1u << 17)
 
+/* Operator-level: administer per-user /v1 write-tier grants — who may write to which
+ * remote server. Deliberately OUTSIDE CAPS_AUTHENTICATED for the same reason as the two
+ * above, and the reason is sharper here: a bearer that could administer grants could grant
+ * ITSELF a higher tier, which would make the whole tier system decorative.
+ *
+ * This is defence in depth and not the primary control. The primary control is
+ * v1_route_requires_uds, which refuses these routes over TCP regardless of capability —
+ * necessary because a remote_writes=full bearer holds CAPS_ALL and would otherwise satisfy
+ * any capability check. kb then independently requires admin or team-lead authority. */
+#define CAP_GRANT_ADMIN (1u << 18)
+
 /* Composite capability sets */
-#define CAPS_ALL 0x3FFFFu
+#define CAPS_ALL 0x7FFFFu
 #define CAPS_READ_ONLY                                                                             \
    (CAP_CHAT | CAP_MEMORY_READ | CAP_RULES_READ | CAP_INDEX_READ | CAP_SESSION_READ |              \
     CAP_DASHBOARD_READ | CAP_DESCRIBE_READ)
