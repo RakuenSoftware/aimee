@@ -538,12 +538,9 @@ func branchHasWorkOverBase(ctx context.Context, workdir, parentID string) bool {
 	if parentID == "" {
 		return false
 	}
-	base := "aimee/feat/" + parentID
-	// Prefer the remote tip for the same reason the worktree does: slices merge
-	// through the forge, so the local ref can lag behind what has landed.
-	if _, err := gitText(ctx, workdir, "rev-parse", "--verify", "--quiet", "origin/"+base+"^{commit}"); err == nil {
-		base = "origin/" + base
-	} else if _, err := gitText(ctx, workdir, "rev-parse", "--verify", "--quiet", base+"^{commit}"); err != nil {
+	// One definition of "the feature tip" for every consumer -- see featureBaseRef.
+	base := featureBaseRef(ctx, workdir, parentID)
+	if base == "" {
 		return false
 	}
 	count, err := gitText(ctx, workdir, "rev-list", "--count", base+"..HEAD")
@@ -553,11 +550,43 @@ func branchHasWorkOverBase(ctx context.Context, workdir, parentID string) bool {
 	return strings.TrimSpace(count) != "" && strings.TrimSpace(count) != "0"
 }
 
+// featureBaseRef resolves the ref carrying the feature branch's real tip, or ""
+// when it cannot be resolved.
+//
+// A slice merges through the FORGE, which advances the remote feature branch.
+// Nothing advances the local aimee/feat/<parent> ref, so reading it locally hands
+// slice N+1 the state the run started with and every slice that already landed is
+// invisible. Measured on wi_f96d4b18: local e161dd34, remote da80f8e7, with the
+// merged file absent locally.
+//
+// #2023 fixed this for the base a slice worktree is CUT from. This is the second
+// consumer -- the merge that brings the feature branch INTO an existing slice --
+// and it had the same stale read, so the intended
+// "branch from the feature tip, merge back on completion" cycle only ever saw the
+// original tip. Fetch, then prefer the remote ref, falling back to the local one
+// when there is no remote (offline or a fresh repo).
+func featureBaseRef(ctx context.Context, workdir, parentID string) string {
+	if parentID == "" {
+		return ""
+	}
+	local := "aimee/feat/" + parentID
+	remote := "origin/" + local
+	_, _ = gitText(ctx, workdir, "fetch", "--quiet", "origin",
+		"+refs/heads/"+local+":refs/remotes/"+remote)
+	if _, err := gitText(ctx, workdir, "rev-parse", "--verify", "--quiet", remote+"^{commit}"); err == nil {
+		return remote
+	}
+	if _, err := gitText(ctx, workdir, "rev-parse", "--verify", "--quiet", local+"^{commit}"); err == nil {
+		return local
+	}
+	return ""
+}
+
 func integrateFeatureBase(ctx context.Context, workdir, parentID string) (string, error) {
-	base := "aimee/feat/" + parentID
+	base := featureBaseRef(ctx, workdir, parentID)
 	// The feature branch may not exist yet (first generation, before any slice has
 	// merged into it) — nothing to integrate.
-	if _, err := gitText(ctx, workdir, "rev-parse", "--verify", "--quiet", base+"^{commit}"); err != nil {
+	if base == "" {
 		return "", nil
 	}
 	// Already contains the base tip: merge would be a no-op.
