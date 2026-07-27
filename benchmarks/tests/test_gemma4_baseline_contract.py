@@ -298,6 +298,36 @@ class GemmaBaselineContractTests(unittest.TestCase):
             "physical_batch_tokens": 2048,
         })
 
+    def test_controllers_require_healthy_production_restoration(self) -> None:
+        for controller in (sweep, eurobert_controller):
+            with self.subTest(controller=controller.__name__), tempfile.TemporaryDirectory() as directory:
+                state_path = Path(directory) / "state.json"
+                state_path.write_text("{}\n", encoding="utf-8")
+                health = {"status": "ok"}
+                with mock.patch.object(controller, "inspect_running", return_value=False), mock.patch.object(
+                    controller, "run"
+                ) as run, mock.patch.object(controller, "wait_health", return_value=health) as wait:
+                    self.assertEqual(
+                        controller.restore_production("/docker.sock", "production", "http://health", state_path),
+                        health,
+                    )
+                run.assert_called_once_with(
+                    controller.docker_cmd("/docker.sock", "start", "production")
+                )
+                if controller is eurobert_controller:
+                    wait.assert_called_once_with("http://health", timeout=900, accepted_status="ok")
+                else:
+                    wait.assert_called_once_with("http://health", timeout=900)
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+                self.assertIs(state["production_restored"], True)
+                self.assertEqual(state["production_health"], health)
+
+                with mock.patch.object(controller, "inspect_running", return_value=True), mock.patch.object(
+                    controller, "wait_health", side_effect=RuntimeError("unhealthy")
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "unhealthy"):
+                        controller.restore_production("/docker.sock", "production", "http://health", state_path)
+
     def test_sweep_uses_explicit_model_load_profiles(self) -> None:
         self.assertEqual(set(sweep.MODEL_LOAD_PROFILES), {
             "gemma4_e2b", "gemma4_e4b", "gemma4_12b", "gemma4_26b_a4b",

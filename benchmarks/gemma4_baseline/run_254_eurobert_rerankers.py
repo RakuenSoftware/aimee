@@ -93,25 +93,39 @@ def wait_container_gone(socket: str, name: str, timeout: int = 60) -> None:
     raise RuntimeError(f"container name was not released: {name}")
 
 
-def wait_health(url: str, timeout: int = 900) -> dict[str, Any]:
+def wait_health(url: str, timeout: int = 900, accepted_status: str = "ready") -> dict[str, Any]:
     deadline = time.monotonic() + timeout
     last_error = ""
     while time.monotonic() < deadline:
         try:
             with urllib.request.urlopen(url, timeout=5) as response:
                 payload = json.load(response)
-            if payload.get("status") == "ready":
+            if payload.get("status") == accepted_status:
                 return payload
+            last_error = f"unexpected status: {payload.get('status')!r}"
         except Exception as exc:  # noqa: BLE001 - retained for startup diagnosis
             last_error = f"{type(exc).__name__}: {exc}"
         time.sleep(2)
-    raise RuntimeError(f"reranker did not become healthy: {last_error}")
+    raise RuntimeError(f"server did not become healthy: {last_error}")
 
 
 def write_state(path: Path, **values: Any) -> None:
     current = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     current.update(values)
     path.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def restore_production(
+    socket: str,
+    container: str,
+    health_url: str,
+    state_path: Path,
+) -> dict[str, Any]:
+    if not inspect_running(socket, container):
+        run(docker_cmd(socket, "start", container))
+    health = wait_health(health_url, timeout=900, accepted_status="ok")
+    write_state(state_path, production_restored=True, production_health=health)
+    return health
 
 
 def environment_identity(suite_sha: str, runtime: dict[str, Any]) -> dict[str, Any]:
@@ -312,6 +326,7 @@ def main() -> int:
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--socket", default="/run/smoothnas-runtime/docker.sock")
     parser.add_argument("--production-container", default="aimee-llm-llm")
+    parser.add_argument("--production-health-url", default="http://192.168.1.254:8742/health")
     parser.add_argument("--labels", help="Comma-separated EuroBERT labels")
     parser.add_argument("--max-cases", type=int, default=0)
     parser.add_argument("--skip-build", action="store_true")
@@ -482,12 +497,21 @@ def main() -> int:
         raise
     finally:
         run(docker_cmd(args.socket, "stop", "eurobert-reranker-server"), capture=True, check=False)
-        if production_was_running and not inspect_running(args.socket, args.production_container):
-            run(docker_cmd(args.socket, "start", args.production_container))
-        write_state(
-            state_path,
-            production_restored=production_was_running and inspect_running(args.socket, args.production_container),
-        )
+        if production_was_running:
+            try:
+                restore_production(
+                    args.socket,
+                    args.production_container,
+                    args.production_health_url,
+                    state_path,
+                )
+            except Exception as exc:  # noqa: BLE001
+                write_state(
+                    state_path,
+                    production_restored=False,
+                    production_restore_error=f"{type(exc).__name__}: {exc}",
+                )
+                raise RuntimeError("production service restoration failed") from exc
     if not args.max_cases and set(selected) == set(by_label):
         try:
             write_state(state_path, pairwise_status="running")

@@ -117,6 +117,7 @@ def wait_health(url: str, timeout: int = 900, accepted_status: str = "ok") -> di
                 payload = json.load(response)
             if payload.get("status") == accepted_status:
                 return payload
+            last_error = f"unexpected status: {payload.get('status')!r}"
         except Exception as exc:  # noqa: BLE001 - retained for the server log
             last_error = f"{type(exc).__name__}: {exc}"
         time.sleep(2)
@@ -130,6 +131,19 @@ def docker_cmd(socket: str, *parts: str) -> list[str]:
 def inspect_running(socket: str, name: str) -> bool:
     result = run(docker_cmd(socket, "inspect", "--format", "{{.State.Running}}", name), capture=True, check=False)
     return result.returncode == 0 and result.stdout.strip() == "true"
+
+
+def restore_production(
+    socket: str,
+    container: str,
+    health_url: str,
+    state_path: Path,
+) -> dict[str, Any]:
+    if not inspect_running(socket, container):
+        run(docker_cmd(socket, "start", container))
+    health = wait_health(health_url, timeout=900)
+    write_state(state_path, production_restored=True, production_health=health)
+    return health
 
 
 def wait_container_gone(socket: str, name: str, timeout: int = 60) -> None:
@@ -257,6 +271,7 @@ def main() -> int:
     parser.add_argument("--repo", type=Path, default=Path("/mnt/media/gemma4-baseline/repo"))
     parser.add_argument("--socket", default="/run/smoothnas-runtime/docker.sock")
     parser.add_argument("--production-container", default="aimee-llm-llm")
+    parser.add_argument("--production-health-url", default="http://192.168.1.254:8742/health")
     parser.add_argument("--deployed-models", type=Path, default=Path("/mnt/media/.plugins/aimee-llm/llm/models"))
     parser.add_argument("--max-cases", type=int, default=0, help="Zero runs the complete 10,000-case suites")
     parser.add_argument("--labels", help="Comma-separated model labels for a resumable subset run")
@@ -464,13 +479,17 @@ def main() -> int:
         write_state(state_path, status="failed", error=f"{type(exc).__name__}: {exc}", completed=completed, failed_unix=int(time.time()))
         raise
     finally:
-        if production_was_running and not inspect_running(args.socket, args.production_container):
-            run(docker_cmd(args.socket, "start", args.production_container), check=False)
+        if production_was_running:
             try:
-                wait_health("http://192.168.1.254:8742/health", timeout=900)
-                write_state(state_path, production_restored=True)
+                restore_production(
+                    args.socket,
+                    args.production_container,
+                    args.production_health_url,
+                    state_path,
+                )
             except Exception as exc:  # noqa: BLE001
                 write_state(state_path, production_restored=False, production_restore_error=f"{type(exc).__name__}: {exc}")
+                raise RuntimeError("production service restoration failed") from exc
 
 
 if __name__ == "__main__":

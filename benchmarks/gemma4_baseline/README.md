@@ -228,8 +228,9 @@ requires each model to pass one bf16 forward/backward/AdamW step at the declared
 batch size and 512-token limit, trains or resumes each model, serves aligned
 `/rerank` scores with a 32-pair microbatcher, runs the same 10,000 cases and
 8-worker/4-pair load profile, and restores production in a `finally` block. It
-takes the same `sweep.lock` as the main controller and therefore cannot overlap
-another GPU benchmark:
+returns success only after the production health endpoint is ready. The
+controller takes the same `sweep.lock` as the main controller and therefore
+cannot overlap another GPU benchmark:
 
 Training completion fails closed: a saved `config.json` alone is not accepted.
 The controller requires a completed provenance record and rechecks the byte size
@@ -271,7 +272,7 @@ The remaining qualification stages can be queued as one resumable, fail-closed
 chain. It waits at the EuroBERT handoff gate, then runs the E4B synthesis-only
 recovery, followed by both required views for Gemma 4 26B-A4B, Gemma 4 31B, and
 Qwen3.6 35B-A3B. A nonzero child exit stops the chain; every child controller
-restores production before returning:
+must restore a healthy production service before returning success:
 
 ```sh
 python3 benchmarks/gemma4_baseline/run_254_remaining_chain.py
