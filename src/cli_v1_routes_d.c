@@ -1327,6 +1327,22 @@ int cli_workspace_add_remote(const char *path)
       fprintf(stderr, "usage: aimee workspace add <path>\n");
       return 1;
    }
+   /* `--repo <url>` exists in the local (same-host) command but not here, and the
+    * flag used to fall through to realpath() and come back as
+    * "cannot resolve path '--repo' on this host" — which reads like a broken path
+    * argument rather than an unsupported mode, and says nothing about what to do.
+    * Cloning onto the server needs a browser login (the clone route is webchat-only),
+    * so name that instead of letting the user debug a phantom path. */
+   if (path[0] == '-')
+   {
+      fprintf(stderr,
+              "aimee: `workspace add %s` is not available against a remote server.\n"
+              "  Cloning a repo onto the server is a browser operation: open the web UI\n"
+              "  and use the setup wizard's \"Workspaces & projects\" step.\n"
+              "  From the CLI, `aimee workspace add <path>` registers a path on THIS host.\n",
+              path);
+      return 1;
+   }
    char *abs = realpath(path, NULL);
    if (!abs)
    {
