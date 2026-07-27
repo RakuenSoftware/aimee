@@ -239,6 +239,11 @@ and SHA-256 of every final model artifact before serving or skipping training.
 python3 benchmarks/gemma4_baseline/run_254_eurobert_rerankers.py
 ```
 
+It may be queued safely behind an active main sweep with `--wait-for-lock`. The
+main controller restores production before process exit releases the lock; the
+EuroBERT controller acquires it only afterward and independently preserves that
+restoration state in its own `finally` block.
+
 Use `--max-cases N` only to smoke-test the runtime. Model, dataset, container,
 Python-package, training, and serving identities are recorded separately from
 the unchanged evaluation-suite identity.

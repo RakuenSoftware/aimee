@@ -184,6 +184,11 @@ class GemmaBaselineContractTests(unittest.TestCase):
         self.assertEqual(command.count("--rm"), 1)
         self.assertIn("/dev/kfd:/dev/kfd", command)
         self.assertIn("/dev/dri:/dev/dri", command)
+        self.assertEqual(eurobert_controller.sweep_lock_flags(True), eurobert_controller.fcntl.LOCK_EX)
+        self.assertEqual(
+            eurobert_controller.sweep_lock_flags(False),
+            eurobert_controller.fcntl.LOCK_EX | eurobert_controller.fcntl.LOCK_NB,
+        )
 
     def test_sweep_requires_both_ettin_execution_profiles(self) -> None:
         self.assertEqual(sweep.ETTIN_CONTROLS, (

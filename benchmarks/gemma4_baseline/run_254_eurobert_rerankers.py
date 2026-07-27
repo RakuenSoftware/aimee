@@ -25,6 +25,10 @@ def docker_cmd(socket: str, *parts: str) -> list[str]:
     return ["docker", "-H", f"unix://{socket}", *parts]
 
 
+def sweep_lock_flags(wait_for_lock: bool) -> int:
+    return fcntl.LOCK_EX if wait_for_lock else fcntl.LOCK_EX | fcntl.LOCK_NB
+
+
 def manifest_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -248,6 +252,11 @@ def main() -> int:
     parser.add_argument("--max-cases", type=int, default=0)
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--skip-training", action="store_true")
+    parser.add_argument(
+        "--wait-for-lock",
+        action="store_true",
+        help="Wait for another benchmark to restore production and release the shared sweep lock",
+    )
     args = parser.parse_args()
 
     manifest_path = args.manifest or args.repo / "benchmarks/gemma4_baseline/eurobert_rerankers.json"
@@ -264,7 +273,7 @@ def main() -> int:
     results.mkdir(exist_ok=True)
     logs.mkdir(exist_ok=True)
     lock_handle = (args.root / "sweep.lock").open("w", encoding="utf-8")
-    fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    fcntl.flock(lock_handle, sweep_lock_flags(args.wait_for_lock))
     state_path = args.root / "eurobert_sweep_state.json"
     suite_sha = hashlib.sha256(
         (args.repo / "benchmarks/fixtures/gemma4-unified/ab-v1/manifest.json").read_bytes()
