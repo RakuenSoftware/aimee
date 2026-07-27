@@ -470,6 +470,9 @@ SERVER_SRCS += server/memory_audit_bridge.c
 # The sole object linking the tools dispatcher to the audit bus (agent_tools stays
 # bus-free — it exposes only a NULL-default completion hook). Server-only.
 SERVER_SRCS += server/tool_completion_audit_bridge.c
+# Pure policy: which provider names may be persisted as the durable primary
+# (unit tested standalone, so it stays out of the server_provider.c handler TU).
+SERVER_SRCS += server/provider_settable.c
 SERVER_OBJS = $(SERVER_SRCS:%.c=$(OBJDIR)/%.o)
 SERVER_DATA_SRCS = $(filter-out $(SERVER_SRCS) modules/guardrails/guardrails_orchestrator.c,$(DATA_SRCS))
 SERVER_DATA_OBJS = $(SERVER_DATA_SRCS:%.c=$(OBJDIR)/server/%.o) \
