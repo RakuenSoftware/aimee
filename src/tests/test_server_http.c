@@ -1178,6 +1178,19 @@ int main(void)
       assert(server_http_route_is_local_only("POST", "/v1/workspaces") == 0);
       assert(server_http_route_is_local_only("DELETE", "/v1/workspaces/%2Fp") == 0);
 
+      /* INDEXING IS A DATA-PLANE WRITE. It was absent from g_v1_write_ops, so the
+       * write-tier gate never saw it: on a clean install the same bearer got 403
+       * on /v1/memory/store and 200 on /v1/index/ingest, and kb queued curator
+       * work for the new project. Registration staying exempt while its ingest is
+       * gated is exactly what §1.4 and Parts 2-4 of QUICKSTART promise, so the
+       * pair is asserted together — they are easy to conflate, and conflating
+       * them is how the gap got in. */
+      assert(server_http_route_is_local_only("POST", "/v1/index/ingest") == 1);
+      /* The index READ family must stay ungated, or every query needs a grant. */
+      assert(server_http_route_is_local_only("POST", "/v1/index/find") == 0);
+      assert(server_http_route_is_local_only("POST", "/v1/index/deps") == 0);
+      assert(server_http_route_is_local_only("POST", "/v1/memory/search") == 0);
+
       /* Detached-runner reverse channel: tool:execute, TCP-reachable (the
        * serving client drives it remotely). An unscoped TCP bearer holds
        * CAP_TOOL_EXECUTE (CAPS_AUTHENTICATED) so it is allowed; a scoped
