@@ -43,7 +43,13 @@ credential-like syntax scanner after scoring. The committed row replaces only
 that response text with `<REDACTED_GENERATED_RESPONSE>`, records
 `response_redacted: true` and the original response SHA-256, and preserves its
 pre-redaction metrics and telemetry. The authorized benchmark host retains the
-unpublished append-only source log.
+same score-preserving redacted checkpoint used here; the credential-shaped text
+is not retained in either publishable result copy.
+
+Each completed view also includes `validation_<view>.json`. These acceptance
+records prove the exact frozen case population, latest-row success, metric
+reproduction, suite identity, required hardware snapshot, artifact hashes, and
+a passing secret scan.
 
 `ARTIFACTS.json` freezes the locally verified sizes and SHA-256 digests of all six
 model files before the sweep. E2B was
@@ -105,18 +111,24 @@ after all 10,000 cases have final results.
 | `ettin68m/hardware_reranking.json` | `0ac6ddeb72c6df3a25f082086a51d8c2fcba8b57348dfdb825743aed3e0c3754` |
 | `ettin68m/raw_reranking_ettin68m.jsonl` | `ea15cda7838f49bb1ea092a685f79ae02b4a43898568347d1e72b6401ac59ee5` |
 | `ettin68m/summary_reranking_ettin68m.json` | `a903b731d1762ba4902ada0ac35d56d3a34a2c189daa0c7b09627f3c68e9ceab` |
+| `ettin68m/validation_reranking.json` | `6fedf2d5dd6ced671164f28eeb8e1cae3cb49f7e74956e509685fcd02c9bc897` |
 | `ettin400m/hardware_reranking.json` | `e46b9b4c3428ea51de43e65c8d5ebfc352126a2092e9a506856f971610616868` |
 | `ettin400m/raw_reranking_ettin400m.jsonl` | `338288a81adb8b45355cfa47e3919ddd971e189b85895ca047256c3f734051d3` |
 | `ettin400m/summary_reranking_ettin400m.json` | `b3238d38ec4013f4e398f9d4f25dde3b644b32f54bdda392e0098862e14c29f2` |
+| `ettin400m/validation_reranking.json` | `1e30b3ddf668b6c1085e81696abf1648ee13d79796f68e686541019748d5449f` |
 | `gemma4_e2b/hardware_embedding.json` | `8571642ef9c0909f8a5eba44a0fe569bb297ffb1e4c2265b2b3c4aacf62fec50` |
 | `gemma4_e2b/hardware_synthesis.json` | `29f82375841c12f56c0585c9c71b4a6aefc47cfa9ca5516a76f5a7d47570475d` |
 | `gemma4_e2b/raw_embedding_gemma4_e2b.jsonl` | `30a9da053ce28643d11aad9b0c2dbc8a97af99184726f8fc8244f71c68255371` |
 | `gemma4_e2b/raw_gemma4_e2b.jsonl` | `c1e9470649901a5893e98a9f2282209739518411e2190b9190fd90fce6eaf137` |
 | `gemma4_e2b/summary_embedding_gemma4_e2b.json` | `a7c0cf0019a4ffbed8bcf9e58d1e6e5bb33c3315d47f4c3d269ce91e854bf04f` |
 | `gemma4_e2b/summary_gemma4_e2b.json` | `aa372da4d602d201a132c3a3bda6e10ddb538f502c093bd7207137dc1b618c32` |
+| `gemma4_e2b/validation_embedding.json` | `4737d80f203489c41230fd720da01a065f4e26eb5887fff3376f355740a99a3f` |
+| `gemma4_e2b/validation_synthesis.json` | `066d75a13929b1fabd4ca62e9de4606e43d9aa2a0f6ae0461b991d4c3ee20740` |
 | `gemma4_e4b/hardware_embedding.json` | `e2edd2cc526cff329be4a278d1acfd75d7f456edaf350066e4d55916a1989b83` |
 | `gemma4_e4b/raw_embedding_gemma4_e4b.jsonl` | `891dc7e8e827d4b5562fd4395b9f840a639d25ce32f6c920cc3d6e9d5a1b1a52` |
 | `gemma4_e4b/summary_embedding_gemma4_e4b.json` | `8b41cb5d9427ab72daa032537bd820f8ebc634036d88192d205ff593cf2aa874` |
+| `gemma4_e4b/validation_embedding.json` | `7fd92b8b19f0c1318fd8a871f54473500a4f7bf50037824f01a70d63b958c0bd` |
 | `gemma4_12b/hardware_synthesis.json` | `a046d9197ee7eb5da0166f9671e226205e4655a605e111bddc9f84f9e7c0f879` |
 | `gemma4_12b/raw_gemma4_12b.jsonl` | `d5299e3e1b5b59de80da0f0d8ef57fd4d2cb13c68d2621fdad7dc781a7139ee4` |
 | `gemma4_12b/summary_gemma4_12b.json` | `d00141a350bc78083b6a932b2673f6a578ee39dc7510b8ffcb3ec5039ab46060` |
+| `gemma4_12b/validation_synthesis.json` | `8be1285bcf31d80584148a747aa41f6a5c66fd6190feaf1a65f6dee6fcb5e54a` |

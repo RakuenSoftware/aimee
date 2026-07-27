@@ -43,9 +43,12 @@ class GemmaBaselineContractTests(unittest.TestCase):
         bundle = ROOT / "benchmarks/fixtures/gemma4-unified/ab-v1"
         results = ROOT / "benchmarks/results/gemma4-unified/ab-v1"
         checks = (
-            ("gemma4_12b", "synthesis", 10_013),
-            ("gemma4_e4b", "embedding", 10_000),
             ("ettin68m", "reranking", 10_014),
+            ("ettin400m", "reranking", 10_204),
+            ("gemma4_e2b", "synthesis", 10_000),
+            ("gemma4_e2b", "embedding", 10_000),
+            ("gemma4_e4b", "embedding", 10_000),
+            ("gemma4_12b", "synthesis", 10_013),
         )
         for label, view, raw_rows in checks:
             with self.subTest(label=label, view=view):
@@ -53,6 +56,10 @@ class GemmaBaselineContractTests(unittest.TestCase):
                 self.assertEqual(evidence["latest_rows"], 10_000)
                 self.assertEqual(evidence["raw_rows"], raw_rows)
                 self.assertEqual(evidence["secret_scan"], "pass")
+                committed = json.loads(
+                    (results / label / f"validation_{view}.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(committed, evidence)
 
     def test_result_validation_evidence_is_written_atomically(self) -> None:
         bundle = ROOT / "benchmarks/fixtures/gemma4-unified/ab-v1"
