@@ -219,7 +219,22 @@ deny "wrong issuer          " "$(./write-tier-enforce-live mint --key "$TOKEN_KE
 # unknown to this server.
 ./write-tier-enforce-live provision --db1 "$work/other.db" --bundle "$work/other.pem" --key "$work/other-key.pem" >/dev/null 2>&1
 deny "signed by a foreign key" "$(./write-tier-enforce-live mint --key "$work/other-key.pem" --aud "$SERVER_ID" --team $TEAM_ID --sub 'oidc:test:alice' --tier full --jti enf-$$-key)"
-deny "tampered signature    " "$(mint full | sed 's/.$/A/')"
+# The mutation must be GUARANTEED to change the token. `sed 's/.$/A/'` did not:
+# when the signature already ended in 'A' it rewrote 'A' as 'A', left the token
+# byte-identical, and the server correctly accepted it -- so the rig reported
+# "tampered signature -> 200 (expected a refusal)" and a green build failed
+# claiming the signature check was broken. Base64url gives that a ~1-in-64 chance
+# per run; observed on CI. Flip the last character to a DIFFERENT one instead.
+orig_tok=$(mint full)
+case "$orig_tok" in
+  *A) tampered="${orig_tok%?}B" ;;
+  *)  tampered="${orig_tok%?}A" ;;
+esac
+if [ "$tampered" = "$orig_tok" ]; then
+  fail "tampered signature: the mutation left the token unchanged, so this proves nothing"
+else
+  deny "tampered signature    " "$tampered"
+fi
 
 # --- 4. no token at all ----------------------------------------------------
 # The legacy-cutover half of §11: a valid shared bearer, and nothing else, must
