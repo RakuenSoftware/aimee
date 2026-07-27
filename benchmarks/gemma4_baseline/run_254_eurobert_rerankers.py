@@ -13,6 +13,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from train_eurobert_reranker import assert_completed_training_dir, expected_provenance
+
 
 def run(command: list[str], *, capture: bool = False, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, text=True, capture_output=capture, check=check)
@@ -248,9 +250,15 @@ def main() -> int:
         for label in selected:
             model_root = models_root / label
             final_dir = model_root / "final"
-            if not (final_dir / "config.json").exists():
+            expected = expected_provenance(manifest_path, manifest, by_label[label])
+            try:
+                assert_completed_training_dir(model_root, expected)
+                training_complete = True
+            except (OSError, RuntimeError, ValueError, json.JSONDecodeError):
+                training_complete = False
+            if not training_complete:
                 if args.skip_training:
-                    raise RuntimeError(f"{label}: trained model is missing at {final_dir}")
+                    raise RuntimeError(f"{label}: no verified complete model exists at {final_dir}")
                 write_state(state_path, status="training", active_label=label)
                 train_model(
                     args.socket,
@@ -261,6 +269,7 @@ def main() -> int:
                     label,
                     model_root,
                 )
+            assert_completed_training_dir(model_root, expected)
             write_state(state_path, status="reranking", active_label=label)
             _, health = start_server(
                 args.socket,

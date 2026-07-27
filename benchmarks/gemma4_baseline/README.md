@@ -220,6 +220,10 @@ microbatcher, runs the same 10,000 cases and 8-worker/4-pair load profile, and
 restores production in a `finally` block. It takes the same `sweep.lock` as the
 main controller and therefore cannot overlap another GPU benchmark:
 
+Training completion fails closed: a saved `config.json` alone is not accepted.
+The controller requires a completed provenance record and rechecks the byte size
+and SHA-256 of every final model artifact before serving or skipping training.
+
 ```sh
 python3 benchmarks/gemma4_baseline/run_254_eurobert_rerankers.py
 ```

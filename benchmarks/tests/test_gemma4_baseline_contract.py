@@ -117,6 +117,34 @@ class GemmaBaselineContractTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "incompatible training directory"):
                 eurobert_trainer.assert_compatible_provenance(path, changed)
 
+    def test_eurobert_training_completion_requires_verified_artifacts(self) -> None:
+        manifest_path = MODULES / "eurobert_rerankers.json"
+        manifest, model = eurobert_trainer.load_spec(manifest_path, "eurobert210m_reranker")
+        expected = eurobert_trainer.expected_provenance(manifest_path, manifest, model)
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            final_dir = output_dir / "final"
+            final_dir.mkdir()
+            for name in (
+                "config.json",
+                "config_sentence_transformers.json",
+                "modules.json",
+                "tokenizer_config.json",
+                "model.safetensors",
+            ):
+                (final_dir / name).write_text(name, encoding="utf-8")
+            artifacts = eurobert_trainer.collect_final_artifacts(final_dir)
+            provenance = {**expected, "status": "complete", "final_artifacts": artifacts}
+            path = output_dir / "training_provenance.json"
+            eurobert_trainer.write_json_atomic(path, provenance)
+            self.assertEqual(
+                eurobert_trainer.assert_completed_training_dir(output_dir, expected),
+                provenance,
+            )
+            (final_dir / "model.safetensors").write_text("truncated", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "artifact verification failed"):
+                eurobert_trainer.assert_completed_training_dir(output_dir, expected)
+
     def test_cross_encoder_server_validates_aligned_string_pairs(self) -> None:
         pairs = [["query", "document"], ["second", "candidate"]]
         self.assertEqual(eurobert_server.validate_pairs(pairs), pairs)

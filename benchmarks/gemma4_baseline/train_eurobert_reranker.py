@@ -20,6 +20,62 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def collect_final_artifacts(final_dir: Path) -> list[dict[str, Any]]:
+    required = {
+        "config.json",
+        "config_sentence_transformers.json",
+        "modules.json",
+        "tokenizer_config.json",
+    }
+    present = {path.name for path in final_dir.iterdir() if path.is_file()}
+    missing = required - present
+    if missing:
+        raise RuntimeError(f"final model is missing required artifacts: {', '.join(sorted(missing))}")
+    if not any(
+        name in present
+        for name in ("model.safetensors", "model.safetensors.index.json", "pytorch_model.bin")
+    ):
+        raise RuntimeError("final model has no saved weights or weight index")
+
+    artifacts = []
+    for path in sorted(candidate for candidate in final_dir.rglob("*") if candidate.is_file()):
+        artifacts.append(
+            {
+                "path": path.relative_to(final_dir).as_posix(),
+                "bytes": path.stat().st_size,
+                "sha256": sha256(path),
+            }
+        )
+    return artifacts
+
+
+def assert_completed_training_dir(output_dir: Path, expected: dict[str, Any]) -> dict[str, Any]:
+    provenance_path = output_dir / "training_provenance.json"
+    if not provenance_path.exists():
+        raise RuntimeError(f"training completion record is missing: {provenance_path}")
+    actual = json.loads(provenance_path.read_text(encoding="utf-8"))
+    comparable = {key: actual.get(key) for key in expected}
+    if comparable != expected:
+        raise RuntimeError(f"training completion provenance does not match: {output_dir}")
+    if actual.get("status") != "complete":
+        raise RuntimeError(f"training is not marked complete: {output_dir}")
+
+    final_dir = output_dir / "final"
+    recorded = actual.get("final_artifacts")
+    if not isinstance(recorded, list) or not recorded:
+        raise RuntimeError(f"final artifact manifest is missing: {output_dir}")
+    observed = collect_final_artifacts(final_dir)
+    if observed != recorded:
+        raise RuntimeError(f"final artifact verification failed: {output_dir}")
+    return actual
+
+
 def load_spec(path: Path, label: str) -> tuple[dict[str, Any], dict[str, Any]]:
     manifest = json.loads(path.read_text(encoding="utf-8"))
     matches = [model for model in manifest["models"] if model["label"] == label]
@@ -93,7 +149,7 @@ def main() -> int:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     provenance_path = args.output_dir / "training_provenance.json"
     assert_compatible_provenance(provenance_path, expected)
-    provenance_path.write_text(json.dumps(expected, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_json_atomic(provenance_path, {**expected, "status": "training"})
 
     import torch
     from sentence_transformers import CrossEncoder
@@ -145,9 +201,11 @@ def main() -> int:
     trainer.train(resume_from_checkpoint=checkpoint)
     final_dir = args.output_dir / "final"
     model.save_pretrained(str(final_dir))
+    final_artifacts = collect_final_artifacts(final_dir)
 
     completed = {
         **expected,
+        "status": "complete",
         "environment": {
             "hostname": platform.node(),
             "python": platform.python_version(),
@@ -157,8 +215,9 @@ def main() -> int:
         },
         "train_metrics": trainer.state.log_history[-1] if trainer.state.log_history else {},
         "final_model": str(final_dir),
+        "final_artifacts": final_artifacts,
     }
-    provenance_path.write_text(json.dumps(completed, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_json_atomic(provenance_path, completed)
     print(json.dumps(completed, indent=2, sort_keys=True))
     return 0
 
