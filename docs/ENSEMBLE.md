@@ -1,168 +1,81 @@
-# Ensembles
+# Roundtables and ensembles
 
-An **ensemble** is a panel of agents collaborating on one task instead of a
-single delegate. aimee runs ensembles in three modes that share one concept, one
-config namespace (`ensemble.*` / `roundtable.*`), and one `aimee ensemble` verb —
-and they **compose** (a delegate's output can feed a running session, below).
+Use an ensemble when independent answers improve the result. Use a roundtable when reviewers need a
+shared artifact, named lenses, evidence, and a verdict.
 
-| Mode | Shape | Reach it via |
-|---|---|---|
-| **aggregate** (Mixture-of-Agents) | fan out one prompt to diverse models in parallel, one aggregator synthesizes a single answer | `aimee ensemble aggregate` · `aimee delegate aggregate` · method `delegate.aggregate` |
-| **roundtable** | a configured multi-persona panel; every seat analyzes once before finalization | method `delegate.roundtable` · the workflow `gate.roundtable` block |
-| **session** | a persistent, templated, turn-based session (code-review, debate, planning, design-critique) | the `ensemble_*` MCP tools · a delegate bound to a channel · `aimee ensemble session …` |
+## Aggregate
 
-The first two are one-shot panels that return a synthesized artifact. The third
-is a stateful, multi-phase conversation that lives in the DB and advances a turn
-at a time. All three are "a group of agents working a problem together" — the
-difference is parallel-and-synthesize vs. turn-by-turn.
-
-> Naming: the delegate Mixture-of-Agents / roundtable subsystem
-> ([`src/modules/roundtable/delegate_ensemble.c`](../src/modules/roundtable/delegate_ensemble.c)) and the
-> templated session store ([`src/db1/ensemble.c`](../src/db1/ensemble.c)) are two
-> expressions of the same "ensemble" concept, deliberately sharing the name and
-> the `aimee ensemble` command, not a collision.
-
-## aggregate — Mixture-of-Agents
-
-Fan one prompt out to the reference panel in parallel; an aggregator folds their
-answers into one. Weak or partial panels degrade to the best single candidate
-rather than failing.
+An aggregate run sends the same task to several eligible agents, then asks an aggregator to produce
+one answer. It is useful for drafting, research, and questions with several plausible approaches.
 
 ```bash
-aimee ensemble aggregate "Design a migration plan for the auth schema"
-# equivalent, back-compat alias:
-aimee delegate aggregate "Design a migration plan for the auth schema"
+aimee ensemble aggregate --help
 ```
 
-Configured by `ensemble.*` (see [Settings](SETTINGS.md)):
+The run keeps partial-failure metadata. A missing seat does not become an empty vote. The aggregator
+sees the successful answers and the declared degradation.
 
-- Saved roundtable seats are the complete panel. The roundtable name is
-  required: an omitted name resolves nothing and is an error, never an implicit
-  panel. A named preset may contain any supported number of seats; its exact
-  count is authoritative and is never expanded from the eligible roster.
-- `ensemble.reference_models` is retained as the preset's applied compatibility
-  representation; it does not authorize an unconfigured panel.
-- `ensemble.reference_personas` — optional per-reference persona overrides.
-- `ensemble.aggregator` — the agent that synthesizes the final answer.
-- `ensemble.min_successful` — min references that must succeed before degrading (default 2).
-- `ensemble.max_cost_usd` — optional per-run USD cap (0 / unset = no cap).
+## Roundtable
 
-## roundtable — review / debate panel
-
-Runs one independent analysis per configured seat before finalization. Review
-panelists get read-only Aimee index tools and a
-diverse persona lineup (original-request alignment, security, architect, QA,
-contrarian, constructive reviewer).
-
-When a saved roundtable enables **Discussion mode**, the same successful seats
-compare their independent reports once before deterministic synthesis. Nits,
-suggestions, and ordinary blocking findings always stop after that one cycle.
-A foundational finding also stops after one cycle when the seats agree or one
-position already has a strict majority. Only an explicitly disputed
-foundational finding may continue to another cycle, and subsequent cycles carry
-only those contested stable issue IDs. Discussion ends when a strict majority
-forms; deadline or quorum loss parks the workflow visibly for scheduler retry
-rather than fabricating consensus. Deterministic synthesis retains findings unless a strict majority
-rejects them.
-The denominator is the successful seated participants that return a complete,
-valid ballot in that discussion cycle. Abstentions remain in that denominator
-but do not by themselves count as disagreement or extend discussion. The saved
-`deadline_ms` is the overall analysis-plus-Discussion-plus-Chairman budget; an
-omitted or zero value is normalized to 600 seconds.
-The runtime treats that overall deadline as one work-conserving budget shared by
-analysis, Discussion, and Chairman. It does not divide the deadline into equal
-phase slices: enabled providers can have materially different normal latency,
-and a healthy seat must not be cancelled before the configured overall deadline
-merely because downstream phases are enabled. Later phases receive the remaining
-budget, and the single overall deadline remains the hard upper bound.
-The C compatibility proxy derives its finite receive timeout from that acquired
-preset deadline and adds only transport grace; it does not impose a shorter
-fixed deadline or wait without a bound.
-
-An unavailable or unusable independent-analysis seat is recorded as failed and
-makes the result degraded. It parks the roundtable only when the remaining
-complete reports are below the preset's `min_successful`; a satisfied configured
-minimum proceeds to discussion or deterministic synthesis without hiding the
-failed seat.
-
-After deterministic synthesis, a preset may optionally require a **chairman**.
-The chairman is one configured, enabled review agent selected visibly in the
-Roundtable GUI. It receives the original request, reviewed artifact, independent
-reports, and deterministic feedback, then submits one final structured verdict.
-There is no chairman retry across the roster: an unavailable chairman, malformed
-verdict, stage mismatch, or contradictory verdict parks the workflow visibly for
-scheduler retry with a new execution version. A valid `changes` verdict with
-`drifted` or `unclear` alignment is refinement feedback, not an execution failure.
-With the chairman disabled, deterministic synthesis is final.
-
-Every review must explicitly report `original_request_alignment` as `aligned`,
-`drifted`, or `unclear`, with a comparison to the originating request. A useful
-refinement remains aligned; substituting an unrelated goal or deliverable is
-drift. WFE gates fail closed on `drifted`, `unclear`, or an omitted assessment,
-so implementation quality cannot accidentally earn approval for work that does
-not answer the request.
-
-Roundtable participation metadata follows three rules:
-
-- `participants_failed` counts unusable responses in the adopted best round;
-  `participants_required_failed` counts the subset in its caller-authored,
-  required prefix. The latter is additive response metadata.
-- Every configured seat is attempted and remains visible in the total. There are
-  no automatically filled capacity seats.
-- `required_participants == 0` preserves the legacy all-required behavior. A
-  value larger than the effective panel fails closed before invoking a model.
-
-`degraded` describes the run as a whole and is intentionally sticky: truncation,
-a failed required seat, insufficient successful responses,
-an aggregator failure, or verification degradation cannot be hidden merely by
-selecting a later artifact. Consequently, an adopted round with zero required
-failures does not clear an earlier run-level degradation.
-
-The execution deadline is tuned by `roundtable.deadline_ms`. The workflow engine's
-`gate.roundtable` block ([Workflows](WORKFLOWS.md)) is the same panel used as a
-pass/fail review gate inside a run.
-
-Prefer `aimee ensemble roundtable --mode review` (or the `delegate.roundtable`
-tool) for a multi-model review **gate**; use `aimee delegate review --via M` for
-a single, exploratory, tools-on review of live code. See
-[Delegates](DELEGATES.md).
-
-## session — templated, turn-based
-
-A persistent session where a template lays out phases and roles, and agents take
-turns. Ships with `code-review`, `debate`, `planning`, and `design-critique`
-templates; drop a project-local template in `ensemble_templates/` (the legacy
-`session_templates/` path still resolves). State lives in the DB1 `ensembles`
-table.
-
-Agents drive sessions with the **MCP tools** `ensemble_start`, `ensemble_status`,
-`ensemble_pause`, `ensemble_advance`, and `ensemble_list` (the `session_*` names
-remain as hidden aliases). Each `ensemble_advance` records a turn and returns the
-next expected participant and prompt.
-
-```jsonc
-// ensemble_start
-{ "template": "code-review", "channel": "pr-482",
-  "assignments": { "reviewer": ["claude-1", "gemini"], "author": ["me"] } }
+```bash
+aimee ensemble roundtable --help
 ```
 
-`aimee ensemble session <start|status|pause|advance|list>` is the human-facing
-counterpart; today it points at the MCP path (thin-client session control over
-`/v1` is a pending enhancement).
+A roundtable has:
 
-## How the modes compose
+- a named preset;
+- seats with personas;
+- a pinned model or `$random` per seat;
+- a review or drafting mode;
+- parallel or sequential turns;
+- quorum, round, deadline, and cost limits;
+- an optional reasoning chair.
 
-A delegate that runs on a **channel** advances the session ensemble bound to that
-channel with its output: after the delegate replies, aimee looks up the current
-ensemble for the channel
-([`db1_ensemble_find_current_by_channel`](../src/db1/ensemble.h)) and calls
-`ensemble_advance` with the delegate's result as that turn. So an aggregate or
-roundtable run can *be a turn* in a longer templated session — the one-shot panel
-feeds the stateful one.
+Parallel review is the normal path. Every lens runs at once under the compute and agent-admission
+limits. Sequential turns are for discussions where a later seat must read earlier arguments.
 
-## See also
+## Seat selection
 
-- [Delegates](DELEGATES.md) — the delegate core aggregate/roundtable run on.
-- [Workflows](WORKFLOWS.md) — `gate.roundtable` uses the same review panel.
-- [Personas](personas.md) — the reviewer personas panelists run as.
-- [Settings](SETTINGS.md) — the `ensemble.*` / `roundtable.*` keys.
+A pinned seat is a hard requirement. If its agent is disabled, unroutable, saturated, or fails, the
+seat fails. aimee does not substitute a different model and pretend the panel stayed the same.
+
+A random seat chooses any viable review-capable agent not already seated. A failed random seat may
+retry on another eligible agent. Agents whose role list excludes `review` are never seated.
+
+If the required panel cannot be formed, a workflow gate parks as `panel_degraded`.
+
+## Evidence and verdicts
+
+Reviewers must point to repository evidence: paths, symbols, diffs, tests, logs, or a specific
+contract. Unsupported findings are weak evidence, not blockers.
+
+The chair receives the seat outputs and can:
+
+- merge duplicates;
+- remove claims without evidence;
+- distinguish blockers from debt;
+- preserve disagreement;
+- state the smallest change needed for approval.
+
+An unusable response abstains. It is never counted as approval. Quorum is evaluated from valid
+verdicts only.
+
+## Workflow gates
+
+`gate.roundtable` names a preset in `params.roundtable` and binds a proposal, plan, or frozen diff.
+The gate persists its findings. A failed gate sends those findings back to the authoring or
+implementation loop so the next pass addresses the actual objections.
+
+Each gate may use a different preset: plan, security, acceptance, and documentation reviews need not
+share a panel.
+
+## Cost and audit
+
+Seat usage, latency, cost, retries, model identity, evidence, chair output, and final verdict belong
+to the originating session or workflow. A positive cost ceiling stops dispatch before the next seat
+would exceed it; zero means no ensemble-specific ceiling.
+
+Tool and model activity follow the normal audit path. Roundtable artifacts remain distinct from the
+proposal, plan, and diff they reviewed.
+
+See [Personas](personas.md), [Delegates](DELEGATES.md), and [Workflows](WORKFLOWS.md).

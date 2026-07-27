@@ -1,7 +1,7 @@
-# Shared Module Boundary
+# Shared contracts
 
-This directory is reserved for source-level contracts shared by `aimee-server`
-and `aimee-kb`.
+Only source-level contracts intentionally shared by `aimee-server` and `aimee-kb` belong here:
+bounded DTOs, transport envelopes, and ownership-free utilities.
 
-Only DTOs, transport envelopes, and utilities that are intentionally public to
-both services belong here.
+No database handles, provider clients, credentials, policy decisions, process globals, or storage
+fallbacks. Shared does not mean unowned.

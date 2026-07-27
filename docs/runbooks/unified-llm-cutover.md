@@ -1,143 +1,55 @@
-# Runbook: cut over to the unified `aimee-llm` container
+# Cut over to `aimee-llm`
 
-The unified-llm-container migration (P7). **Operator-gated**: the production flip
-(deploy + corpus re-embed) is a deliberate maintenance op, never automatic. P1–P6 ship the
-pieces; this runbook is the order of operations + the gates.
+This maintenance operation moves embedding, reranking, and synthesis to the unified inference
+service. A model or embedding-width change requires controlled corpus re-embedding.
 
-Validated before this runbook (`.253`/`.254`, see `benchmarks/results/unified-llm/`):
-the images build, serve `/embed`+`/rerank`(ettin encoder + gateway
-head)+`/v1/chat/completions`, and offload to the AMD 7900 XTX via Vulkan (`-ngl 99`).
+## Gate in staging
 
-> **Naming update (post-cutover):** the images built here were renamed
-> `aimee-llm-cpu`/`aimee-llm-gpu` → `aimee-kb-cpu`/`aimee-kb-gpu-small` (+ `gpu-mid`/`gpu-large`),
-> and have since been **collapsed back into one model-less `aimee-llm` image**: the tier is
-> chosen at runtime via `AIMEE_LLM_TIER` (`cpu`/`small`/`mid`/`large`) and the models download
-> on first boot — there are no baked per-tier images anymore. The steps below keep the original
-> names as a record; for the current image, tiers, and env knobs see
-> [../AIMEE_KB_SYNTH_TIERS.md](../AIMEE_KB_SYNTH_TIERS.md).
+- pin the image and model digests;
+- reproduce the old retrieval baseline on the real corpus;
+- require the new stack to meet the declared nDCG/MRR/rank-agreement floor;
+- verify structured curator output, degradation, restart, and mixed-load slot stability;
+- rehearse forward and rollback migrations from a fresh database restore.
 
-## 0. What changes
+Do not cut over after a failed quality gate.
 
-- **From:** torch `aimee-embedder` (pplx-embed + ettin via sentence-transformers) + the
-  stock `llm` llama.cpp container (gemma synth).
-- **To:** one model-less `aimee-llm` image: Vulkan llama.cpp serving embed
-  (Qwen3-Embedding) + rerank (ettin encoder + the gateway Dense head) + synth (gemma). The
-  tier (`AIMEE_LLM_TIER`) selects the models, which download on first boot into `/models`.
-- **Corpus re-embed required:** `pplx-embed` → `Qwen3-Embedding` is a **`model_id` change**
-  (and 0.6B→1024 / 4B→2560 a possible **dim** change), so the `kb_meta` drift guard (P1,
-  now activated, `db2_set_embedder_model_id`) will **refuse** to serve the new embedder
-  against the old corpus. The re-embed is the controlled drop-and-rebuild below.
+## Prepare
 
-## 1. Pre-cutover ship-floor gate (staging, BEFORE the production flip)
+1. Back up DB2 and verify the backup.
+2. Record source/vector row counts, model identity, dimension, config, and baseline queries.
+3. Put KB writes into maintenance.
+4. Start `aimee-llm` on the deployment network with the chosen tier.
+5. Probe the exact model identity and embedding dimension at the URL the KB will use.
 
-The ship-floor gate is a **pre-cutover precondition** (proposal §2): the new
-embed+rerank+fusion stack must hit **≥95%** of the pplx/ettin baseline (nDCG@10 / MRR@10 +
-top-k rank-agreement ≥0.95) on the real corpus, in staging, against the checked-in fixture
-`tests/fixtures/pplx_baseline.json`. **Gate fail → freeze, investigate, do NOT cut over.**
-Because the gate is upstream of the cutover, pplx/ettin is removed *completely* in the
-release (no in-image rollback flag); a post-cutover revert is a deploy-tag rollback (§5).
+An internal unauthenticated inference endpoint must remain private. Use service auth before exposing
+it beyond the trusted deployment network.
 
-## 2. Build + publish the images
+## Re-embed
 
-CI builds + publishes the **one** model-less `aimee-llm` image as part of the normal cycle
-(no per-tier images — the tier is a runtime env, not a build):
-- **main:** `.github/workflows/publish-images.yml` (via `auto-release.yml`) builds `aimee-llm`
-  on every release and tags it `:<version>` + `:latest`. It is in both the `build` and `merge`
-  matrices; the merge step applies the tags. Multi-arch amd64+arm64 (the llama.cpp Vulkan
-  tarball is TARGETARCH-mapped in the Dockerfile).
-- **testing:** `.github/workflows/publish-llm-testing.yml` builds `aimee-llm` on `testing`
-  pushes that touch `Dockerfile.aimee-llm` or the gateway/supervisor scripts, tagged `:testing`
-  (+ `:testing-<sha>`, amd64).
-- **rerank artifacts (automatic):** `.github/workflows/publish-rerank-artifacts.yml` converts
-  the ettin rerankers and uploads them to the `rerank-artifacts-v1` GitHub release, which the
-  supervisor fetches on first boot. Both publish workflows above CALL it as a prerequisite
-  (`needs`), so a container image is never published without the release existing — no manual
-  step. It is idempotent: the expensive conversion runs only when an asset is missing (first
-  run, or after you delete the release / dispatch it with `force=true` to bump the reranker);
-  every other run just confirms the assets are present and skips.
+Use the checked-in migration/runbook for the exact derived vector tables:
 
-To build out-of-band (e.g. on a PVE CT with docker) — one model-less image, no model build-args:
+1. drop and recreate the dimensioned derived tables in one controlled migration;
+2. update the recorded model identity and dimension only with the schema change;
+3. replay source rows through the new embedder in bounded batches;
+4. keep the KB degraded/maintenance until parity passes.
 
-```
-docker build -f Dockerfile.aimee-llm -t aimee-llm .
-# then at run time pick the tier:  docker run -e AIMEE_LLM_TIER=small ... aimee-llm
-```
-(The tier selects the models the supervisor downloads on first boot; see the tiers doc.)
+Deleting rows alone does not change a PostgreSQL vector column's dimension.
 
-## 3. Deploy to `.254` (tierd / LXC, GPU)
+## Verify
 
-`.254` runs containers via **tierd** (LXC), not raw docker, with GPU passthrough via the
-Vulkan/RADV render path (**not** ROCm/`kfd`). Deploy the GPU image as a tierd plugin
-(manifest-swap, per the `.254` deploy memory) + `AIMEE_LLM_NGL=99`. The in-repo manifest is
-`deploy/smoothnas/aimee-llm.plugin.yaml` (pin its image to `:testing` for staging,
-`:latest`/`:<version>` for production). GPU passthrough uses the **built-in `gpu-amd`
-profile** (compiled into tierd, the one Wolf/Steam use), so there is no custom profile to
-install and no node path to pin; verified on .254 the container enumerates `Vulkan0 : AMD
-Radeon Graphics (RADV GFX1100)` and offloads to VRAM. The gateway is host-published on
-**:8742** (NOT :8080, since Wolf's WolfLeash UI host-publishes 8080, and two plugins on one host
-port silently collide: the runtime DNATs both, one wins and the other is unreachable though
-"running"). Point the kb at it: `AIMEE_EMBEDDER_URL=http://10.100.0.1:8742` (the gateway preserves the
-`/embed`+`/embed_batch`+`/rerank` contract, so `embed-remote.py`/`rerank-remote.py` are
-untouched). Set the kb's `embedding_model` to the new identity (activates the P1 guard) and
-`embedding_dim` to the tier's dim (2560 for the 4B GPU tier). **Verify the URL actually
-serves the named model before re-embedding**: a misrouted `AIMEE_EMBEDDER_URL` (still
-pointing at the old embedder) would silently embed under the new identity and the guard
-would not catch it (it checks identity-vs-corpus, not URL-vs-identity). **Auth on the embed
-path:** the kb embeds/reranks with NO bearer (`memory_embed_http_post` sends a NULL auth
-header), so when this gateway backs `AIMEE_EMBEDDER_URL` it MUST run **auth-off**: leave
-`AIMEE_LLM_AUTH_TOKEN` empty/unset. The gateway treats an empty token as "auth disabled,"
-acceptable here because it is `expose:false` (internal bridge only; deployment network is the
-boundary). Only set `AIMEE_LLM_AUTH_TOKEN` when the gateway serves *only* bearer-capable
-callers (e.g. curator `tier_b` synth); if so it comes from the secret store (vault / Docker
-secret / `.gitignore`d per-host `.env`), **never a checked-in plaintext value**.
+- source and vector counts match expected coverage;
+- every vector has the new dimension and no NaN/all-zero value;
+- sampled source IDs map to the correct vector rows;
+- baseline recall stays above the quality gate;
+- reranking and synthesis identify the intended models;
+- a killed inference child produces explicit degradation and recovery;
+- queue backlog drains after restart;
+- latency and resident memory remain within the tier budget.
 
-## 4. Corpus re-embed (controlled drop-and-rebuild, the `maintenance` window)
+## Roll back
 
-In-place `halfvec` type changes against a live kb are forbidden. The migration:
+Rollback needs the old service image/model and a reverse re-embed from source or verified snapshot.
+It is another maintenance operation, not an environment toggle. Keep the old image and snapshot for
+the same declared window and rehearse the reverse path before production cutover.
 
-1. **Snapshot** the current vector tables.
-2. Gate the kb to **`maintenance`**.
-3. **Drop** the dim-sized `halfvec` tables; **recreate** at the new `(model_id, dim)` (the
-   schema applies at the new dim; `db2_embedding_model_record_or_check` records the new
-   identity on the fresh `kb_meta`).
-4. **Replay** the source rows through the new embedder (bounded batch).
-5. **Parity gate:** pre-drop vs post-backfill counts must match **and** a sampled
-   value-check must pass (row counts alone miss silent corruption: wrong rows re-embedded,
-   off-by-one batch, wrong prompt template, a dim swap). Over a held-out sample (≥1% or 10k
-   rows, whichever is larger): every vector has the expected `array_length`, no NaN/all-zero
-   rows, and, where a stable subset is re-embeddable from the snapshot, cosine vs the
-   snapshot is within tolerance for the *same* model (and `kb_meta.schema_embedder_model_id`
-   is the new identity). Any divergence → `degraded`, hold. On parity → lift `maintenance`.
-
-Plan the window from the corpus size × the new embedder's throughput (record peak RSS per
-inner `llama-server`; the embed model is offloaded so it's GPU-bound).
-
-## 5. Rollback (one-time safety net, initial cutover only)
-
-The ship-floor gate (§1) means a regression never ships. If a post-cutover issue still
-demands it: deploy-tag **rollback to the prior release tag** (which still contains
-pplx/ettin) **+** the **reverse re-embed** (a checked-in, idempotent schema-revert migration
-restoring the prior dim-sized `halfvec` from the §4 snapshot, CI round-tripped before
-cutover). This is a gated maintenance op, not an instant toggle. Once the first
-post-cutover release is validated, no prior tag contains pplx/ettin and rollback is no
-longer deploy-tag-based; retain the prior tag in the registry for a defined window (e.g. 6
-months). **Snapshot retention ≥ tag retention**: the §4 snapshot is the only rollback
-input once the tag ages out, so it must outlive the tag, with a checksum and an expiry
-review. Pre-cutover checklist (all must be true before §3): snapshot present + checksum
-verified; reverse-migration **rehearsed in staging** (round-trips to the prior dim/identity);
-ship-floor gate green.
-
-## 6. Retire the old surfaces
-
-After validation: remove `Dockerfile.embedder` + the `embedder`/`llm` compose/deploy
-services + the `codex-auth`/pplx-ettin references. (Kept until here so the prior tag is a
-working rollback target, §5.)
-
-## Gates summary
-
-| Gate | When | Pass |
-|------|------|------|
-| ship-floor ≥95% | staging, pre-cutover | nDCG/MRR ≥95% of pplx fixture + rank-agreement ≥0.95 |
-| drift guard | kb startup post-deploy | `kb_meta` records the new `(model_id, dim)`; refuses a stale mismatch |
-| parity | post-re-embed | pre-drop == post-backfill counts; else `degraded` |
-| kill-a-child smoke | post-deploy | one inner llama-server killed; others keep serving |
+See [Inference tiers](../AIMEE_KB_SYNTH_TIERS.md) and [Retrieval](../retrieval-stack.md).
