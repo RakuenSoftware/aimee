@@ -71,6 +71,12 @@ class GemmaBaselineContractTests(unittest.TestCase):
         self.assertEqual(e2b_embedding["batch_size"], 64)
         self.assertEqual(sweep.MODEL_LOAD_PROFILES["gemma4_e4b"]["synthesis"]["parallel_slots"], 64)
         self.assertEqual(sweep.MODEL_LOAD_PROFILES["gemma4_12b"]["synthesis"]["parallel_slots"], 32)
+        self.assertEqual(sweep.MODEL_LOAD_PROFILES["gemma4_12b"]["embedding"], {
+            "parallel_slots": 16,
+            "context_tokens": 32768,
+            "physical_batch_tokens": 2048,
+            "batch_size": 16,
+        })
 
     def test_frozen_bundle_is_exact_and_paired(self) -> None:
         result = validator.validate(ROOT / "benchmarks/fixtures/gemma4-unified/ab-v1")

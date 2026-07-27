@@ -44,7 +44,7 @@ MODEL_LOAD_PROFILES = {
     },
     "gemma4_12b": {
         "synthesis": {"workers": 32, "parallel_slots": 32, "context_tokens": 65536, "physical_batch_tokens": 2048},
-        "embedding": {"parallel_slots": 32, "context_tokens": 65536, "physical_batch_tokens": 2048, "batch_size": 32},
+        "embedding": {"parallel_slots": 16, "context_tokens": 32768, "physical_batch_tokens": 2048, "batch_size": 16},
     },
     "gemma4_26b_a4b": {
         "synthesis": {"workers": 16, "parallel_slots": 16, "context_tokens": 32768, "physical_batch_tokens": 2048},
