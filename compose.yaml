@@ -1,19 +1,4 @@
 services:
-  postgres:
-    restart: unless-stopped
-    image: pgvector/pgvector:pg16
-    environment:
-      POSTGRES_DB: aimee_shared
-      POSTGRES_USER: aimee
-      POSTGRES_PASSWORD: aimee
-    volumes:
-      - aimee-kb-postgres:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aimee -d aimee_shared"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # LEGACY torch embedder. Retired from the default topology by the unified-llm
   # cutover — the kb now embeds/reranks/synthesizes against the `aimee-llm`
   # container (below) via AIMEE_LLM_URL. Kept behind a profile for rollback /
@@ -68,7 +53,9 @@ services:
       stack: 67108864
     environment:
       AIMEE_HOME: /var/lib/aimee
-      AIMEE_DB2_URL: postgresql://aimee:aimee@postgres:5432/aimee_shared
+      # Empty by default: the KB image owns PostgreSQL + pgvector for a new
+      # install. Set AIMEE_DB2_URL explicitly only to keep/use an external DB2.
+      AIMEE_DB2_URL: ${AIMEE_DB2_URL:-}
       # One knob: embed (/embed) + rerank (/rerank) + synth (curator Tier-A & B,
       # at {url}/v1) all via the unified aimee-llm container. The kb runs no model.
       # Override AIMEE_EMBEDDER_URL / AIMEE_RERANKER_URL to pin a service elsewhere.
@@ -79,10 +66,8 @@ services:
     # aimee-kb serves /v1 over HTTP only; the legacy --socket transport was retired (#2747).
     command: ["--http-port=8741"]
     ports:
-      - "8741:8741"
+      - "127.0.0.1:8741:8741"
     depends_on:
-      postgres:
-        condition: service_healthy
       # required:false so the kb starts even when the aimee-llm service is not in
       # the active profile set (all-external / remote-kb): it fail-opens on
       # embedding until an LLM is reachable. When the `llm` profile IS on, it
@@ -208,6 +193,5 @@ services:
 volumes:
   aimee-kb-home:
   control-web-home:
-  aimee-kb-postgres:
   aimee-embedder-models:
   aimee-llm-models:

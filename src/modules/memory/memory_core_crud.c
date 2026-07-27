@@ -192,6 +192,43 @@ static int memory_semantic_value_equivalent(const char *a, const char *b)
    return trigram_similarity(norm_a, norm_b) >= 0.92;
 }
 
+/* Near-key dedupe is useful for spelling variants, but numeric tokens commonly
+ * distinguish deliberately separate entries (worker-1 vs worker-2, v1 vs v2).
+ * Never merge keys whose ordered numeric-token signatures differ. */
+static int memory_numeric_key_signature(const char *key, char *out, size_t out_len)
+{
+   if (!out || out_len == 0)
+      return 0;
+   size_t n = 0;
+   int tokens = 0;
+   for (size_t i = 0; key && key[i];)
+   {
+      if (!isdigit((unsigned char)key[i]))
+      {
+         i++;
+         continue;
+      }
+      if (tokens++ > 0 && n + 1 < out_len)
+         out[n++] = ',';
+      while (isdigit((unsigned char)key[i]))
+      {
+         if (n + 1 < out_len)
+            out[n++] = key[i];
+         i++;
+      }
+   }
+   out[n] = '\0';
+   return tokens;
+}
+
+static int memory_keys_have_different_numeric_tokens(const char *a, const char *b)
+{
+   char sig_a[128], sig_b[128];
+   int n_a = memory_numeric_key_signature(a, sig_a, sizeof(sig_a));
+   int n_b = memory_numeric_key_signature(b, sig_b, sizeof(sig_b));
+   return (n_a != n_b) || (n_a > 0 && strcmp(sig_a, sig_b) != 0);
+}
+
 int memory_insert_ex(const char *tier, const char *kind, const char *key, const char *content,
                      const char *use_cases, double confidence, const char *session_id,
                      memory_t *out)
@@ -376,6 +413,8 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
       double dup_surprise = 0.5;
       for (int i = 0; i < n_cands; i++)
       {
+         if (memory_keys_have_different_numeric_tokens(norm_key, cands[i].key))
+            continue;
          double sim = trigram_similarity(norm_key, cands[i].key);
          if (sim >= DEDUP_THRESHOLD)
          {

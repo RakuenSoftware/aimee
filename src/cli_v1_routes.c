@@ -1300,11 +1300,57 @@ cJSON *marshal_kb_ingest(int argc, char **argv)
    return req;
 }
 
+#define CLI_KB_DOCS_PUSH_MAX_BYTES (2U * 1024U * 1024U)
+
+static char *marshal_read_kb_doc(const char *path, size_t *len_out)
+{
+   if (len_out)
+      *len_out = 0;
+   FILE *fp = path && path[0] ? fopen(path, "rb") : NULL;
+   if (!fp || fseek(fp, 0, SEEK_END) != 0)
+   {
+      if (fp)
+         fclose(fp);
+      return NULL;
+   }
+   long len = ftell(fp);
+   if (len <= 0 || len > (long)CLI_KB_DOCS_PUSH_MAX_BYTES || fseek(fp, 0, SEEK_SET) != 0)
+   {
+      fclose(fp);
+      return NULL;
+   }
+   char *content = malloc((size_t)len + 1);
+   if (!content)
+   {
+      fclose(fp);
+      return NULL;
+   }
+   size_t nread = fread(content, 1, (size_t)len, fp);
+   int failed = ferror(fp) || nread != (size_t)len || memchr(content, '\0', nread) != NULL;
+   fclose(fp);
+   if (failed)
+   {
+      free(content);
+      return NULL;
+   }
+   content[nread] = '\0';
+   if (len_out)
+      *len_out = nread;
+   return content;
+}
+
 cJSON *marshal_kb_docs_push(int argc, char **argv)
 {
    static const char *bool_flags[] = {"json", NULL};
    rpc_opts_t opts;
    rpc_parse(argc, argv, bool_flags, &opts);
+
+   if (opts.pos_count <= 0)
+   {
+      fprintf(stderr,
+              "usage: aimee kb docs push [--scope SCOPE|--project NAME] <file> [file...]\n");
+      return NULL;
+   }
 
    cJSON *req = marshal_no_args("kb.docs.push");
 
@@ -1315,6 +1361,8 @@ cJSON *marshal_kb_docs_push(int argc, char **argv)
       cJSON_AddStringToObject(req, "scope", scope);
 
    cJSON *paths = cJSON_AddArrayToObject(req, "paths");
+   cJSON *documents = cJSON_AddArrayToObject(req, "documents");
+   size_t total_bytes = 0;
    for (int i = 0; paths && i < opts.pos_count; i++)
    {
       const char *path = opts.positional[i];
@@ -1328,7 +1376,30 @@ cJSON *marshal_kb_docs_push(int argc, char **argv)
             path = abs_path;
          }
       }
+      if (!path || !path[0] || strchr(path, '"') || strchr(path, '\r') || strchr(path, '\n'))
+      {
+         fprintf(stderr, "aimee: invalid docs path: %s\n", path ? path : "");
+         cJSON_Delete(req);
+         return NULL;
+      }
+      size_t content_len = 0;
+      char *content = marshal_read_kb_doc(path, &content_len);
+      if (!content || total_bytes + content_len > CLI_KB_DOCS_PUSH_MAX_BYTES)
+      {
+         fprintf(stderr,
+                 "aimee: could not read docs path (non-empty text, 2 MiB command limit): %s\n",
+                 path);
+         free(content);
+         cJSON_Delete(req);
+         return NULL;
+      }
+      total_bytes += content_len;
       cJSON_AddItemToArray(paths, cJSON_CreateString(path ? path : ""));
+      cJSON *doc = cJSON_CreateObject();
+      cJSON_AddStringToObject(doc, "path", path);
+      cJSON_AddStringToObject(doc, "content", content);
+      cJSON_AddItemToArray(documents, doc);
+      free(content);
    }
    return req;
 }

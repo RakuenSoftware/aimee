@@ -6,7 +6,7 @@
 # operator directly; the server picks the services with COMPOSE_PROFILES, which
 # `aimee config deploy-env` derives from the wizard's page-2 config:
 #
-#   local kb, LLM external/off  -> COMPOSE_PROFILES=kb         -> postgres + aimee-kb
+#   local kb, LLM external/off  -> COMPOSE_PROFILES=kb         -> aimee-kb
 #   local kb, a local GPU tier  -> COMPOSE_PROFILES=kb,llm     -> + aimee-llm (downloads)
 #   local kb, a local CPU tier  -> COMPOSE_PROFILES=kb,llm-cpu -> + aimee-llm-cpu (pre-baked)
 #   remote kb                   -> COMPOSE_PROFILES=            -> nothing (server connects out)
@@ -17,7 +17,7 @@
 # reach whichever is deployed at the same http://aimee-llm:8742.
 #
 # Every service joins the EXTERNAL `aimee` network that aimee-server is also on, so
-# the server reaches them by name (aimee-kb:8741, aimee-llm:8742, postgres:5432).
+# the server reaches them by name (aimee-kb:8741, aimee-llm:8742).
 # That network is created by compose.server-managed.yaml.
 
 networks:
@@ -26,23 +26,6 @@ networks:
     name: aimee
 
 services:
-  postgres:
-    profiles: ["kb"]
-    restart: unless-stopped
-    image: pgvector/pgvector:pg16
-    networks: [aimee]
-    environment:
-      POSTGRES_DB: aimee_shared
-      POSTGRES_USER: aimee
-      POSTGRES_PASSWORD: aimee
-    volumes:
-      - aimee-managed-postgres:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aimee -d aimee_shared"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   aimee-kb:
     profiles: ["kb"]
     restart: unless-stopped
@@ -54,16 +37,15 @@ services:
       stack: 67108864
     environment:
       AIMEE_HOME: /var/lib/aimee
-      AIMEE_DB2_URL: postgresql://aimee:aimee@postgres:5432/aimee_shared
+      # Empty by default: the KB image owns PostgreSQL + pgvector for a new
+      # install. Set AIMEE_DB2_URL explicitly only to keep/use an external DB2.
+      AIMEE_DB2_URL: ${AIMEE_DB2_URL:-}
       # embed + rerank + synth via the unified aimee-llm container (the kb runs no
       # model). When no role is local (llm profile off) the operator points this at
       # an external endpoint; the kb fail-opens on embedding if it is unreachable.
       AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8742}
       AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
     command: ["--http-port=8741"]
-    depends_on:
-      postgres:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
       interval: 10s
@@ -124,6 +106,5 @@ services:
       retries: 5
 
 volumes:
-  aimee-managed-postgres:
   aimee-managed-kb-home:
   aimee-managed-llm-models:

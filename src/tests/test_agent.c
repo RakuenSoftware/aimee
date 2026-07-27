@@ -2458,9 +2458,19 @@ static void test_dispatch_tool_call(void)
    assert(strstr(result, "error") == NULL);
    free(result);
 
+   /* execute_script is write-capable and therefore requires the managed
+    * worktree context that a real delegate turn supplies. */
+   char script_root[] = "/tmp/aimee-script-dispatch.XXXXXX";
+   assert(mkdtemp(script_root) != NULL);
+   char script_cwd[MAX_PATH_LEN];
+   assert(snprintf(script_cwd, sizeof(script_cwd), "%s/.aimee/worktrees/unit-test-agent/main",
+                   script_root) < (int)sizeof(script_cwd));
+   assert(platform_mkdir_p(script_cwd, 0700) == 0 || access(script_cwd, F_OK) == 0);
+   run_cmd_set_cwd(script_cwd);
    result = dispatch_tool_call(
        "execute_script",
        "{\"language\":\"python\",\"body\":\"print('script_dispatch')\",\"timeout_secs\":5}", 5000);
+   run_cmd_set_cwd(NULL);
    assert(result != NULL);
    json = parse_json_or_die(result);
    assert(strstr(cJSON_GetObjectItem(json, "stdout")->valuestring, "script_dispatch") != NULL);
@@ -2482,11 +2492,14 @@ static void test_dispatch_tool_call(void)
    free(result);
 
    /* Write file error includes recovery hint */
-   result = dispatch_tool_call("write_file", "{\"path\":\"/nonexistent/dir/file\"}", 5000);
+   run_cmd_set_cwd(script_cwd);
+   result = dispatch_tool_call("write_file", "{\"path\":\"nonexistent/dir/file\"}", 5000);
+   run_cmd_set_cwd(NULL);
    assert(result != NULL);
    if (strstr(result, "error"))
       assert(strstr(result, "Recovery:") != NULL);
    free(result);
+   platform_test_rmrf(script_root);
 
    /* Missing parameter */
    result = dispatch_tool_call("bash", "{}", 5000);

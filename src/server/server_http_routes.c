@@ -1321,6 +1321,9 @@ static void op_run_worker_run(void *arg)
       {
          if (cJSON_GetObjectItemCaseSensitive(parsed, "error"))
             ok = 0;
+         cJSON *dispatch_status = cJSON_GetObjectItemCaseSensitive(parsed, "status");
+         if (cJSON_IsString(dispatch_status) && strcmp(dispatch_status->valuestring, "error") == 0)
+            ok = 0;
          cJSON *cancelled = cJSON_GetObjectItemCaseSensitive(parsed, "cancelled");
          if (cJSON_IsTrue(cancelled))
             terminal_status = OPENAI_RUN_CANCELLED;

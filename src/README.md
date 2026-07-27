@@ -935,8 +935,10 @@ Containers are the recommended deployment (developers then install only the
 [thin client](#2-install-the-thin-client)). Three compose files ship; pick by
 topology. They build from two images: **`aimee-server`** (`Dockerfile.server`) and
 **`aimee-kb`** (`Dockerfile`).
-Every stack also brings up a `pgvector/pgvector:pg16` Postgres (DB2), and the kb
-auto-applies its DB2 schema on first boot. The stacks run the
+For a new install, PostgreSQL + pgvector (DB2) run inside `aimee-kb` and persist
+with the KB home volume; no database sidecar is required. Set `AIMEE_DB2_URL`
+only to select an external database. The KB auto-applies its DB2 schema on first
+boot. The stacks run the
 `aimee-llm` inference gateway (embeddings, reranking, and synthesis) as a service,
 which downloads its cpu-tier models on first boot, so embedding and reranking work with
 nothing external. The tier is chosen by `AIMEE_LLM_TIER`: `cpu` serves
@@ -958,8 +960,8 @@ run a standalone embedder or curator LLM instead, use the
 
 | File | Brings up | Use when |
 |------|-----------|----------|
-| `compose.server.yaml` | `aimee-server` + `aimee-kb` + Postgres + the `aimee-llm` inference gateway | **Recommended default**: the full split stack brought up together; server `/v1` over TLS on `:8743` (plaintext `:8740` loopback-only), kb `:8741`; scale/update/place server and kb independently |
-| `compose.yaml` | `aimee-kb` + Postgres (pgvector) + the `aimee-llm` inference gateway | The knowledge service (DB2 + vectors) on its own: building block for a shared/scaled kb |
+| `compose.server.yaml` | `aimee-server` + self-contained `aimee-kb` + the `aimee-llm` inference gateway | **Recommended default**: the full split stack brought up together; server `/v1` over TLS on `:8743` (plaintext `:8740` loopback-only), kb `:8741`; scale/update/place server and kb independently |
+| `compose.yaml` | Self-contained `aimee-kb` (embedded PostgreSQL/pgvector) + the `aimee-llm` inference gateway | The knowledge service (DB2 + vectors) on its own: building block for a shared/scaled kb |
 | `compose.server-standalone.yaml` | `aimee-server` only (SQLite DB1, no kb) | DB1-backed `/v1` endpoints with no shared knowledge |
 
 #### Server + kb split stack (recommended)
@@ -991,7 +993,7 @@ survive container recreation; the image declares it a `VOLUME`, so even a plain
 docker compose -f compose.yaml up --build -d
 ```
 
-Brings up just `aimee-kb` + Postgres + the `aimee-llm` gateway, serving `/v1` on `:8741`: the
+Brings up self-contained `aimee-kb` + the `aimee-llm` gateway, serving `/v1` on `:8741`: the
 building block behind a shared or horizontally-scaled kb that many servers point at:
 
 ```bash

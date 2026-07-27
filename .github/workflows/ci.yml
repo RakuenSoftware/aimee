@@ -98,7 +98,7 @@ jobs:
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q clang-format-19
+          sudo apt-get install -y -q clang-format-19 ripgrep
       - name: Check formatting
         run: cd src && make lint
       - name: Check 3db tier dependencies

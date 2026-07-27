@@ -659,10 +659,10 @@ static SSL_CTX *g_mtls_ctx = NULL;
 
 #define KB_MTLS_CONNECTIONS_MAX   64
 #define KB_MTLS_QUEUE_CAP         64
-#define KB_MTLS_WORKER_STACK_SIZE (4 * 1024 * 1024)
+#define KB_MTLS_WORKER_STACK_SIZE (16 * 1024 * 1024)
 /* Request routes load config_t on the worker stack. Keep ample headroom for
- * route-local state and TLS/libpq frames; a 1 MiB worker stack crashed live
- * /v1/health requests because config_t alone is roughly 750 KiB. */
+ * route-local state and TLS/libpq frames; live memory queries exhausted 4 MiB
+ * once nested search and config frames were active concurrently. */
 _Static_assert(KB_MTLS_WORKER_STACK_SIZE >= sizeof(config_t) + 1024 * 1024,
                "kb mTLS worker stack must accommodate config_t plus route headroom");
 static pthread_t g_mtls_workers[KB_MTLS_CONNECTIONS_MAX];
@@ -696,6 +696,7 @@ static void *mtls_worker_thread(void *arg)
       int one = 1;
       (void)setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
       kb_tls_serve_conn(fd, g_mtls_ctx);
+      db2_lease_release_idle();
       close(fd);
       pthread_mutex_lock(&g_mtls_queue_mu);
       if (g_mtls_connections_live > 0)

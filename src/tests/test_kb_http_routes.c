@@ -49,6 +49,9 @@ void db2_lease_begin(void)
 void db2_lease_end(void)
 {
 }
+void db2_lease_release_idle(void)
+{
+}
 int aimee_pg_exec(void *c, const char *s, char *e, size_t n)
 {
    (void)c;
@@ -5178,6 +5181,69 @@ static void test_http_body_too_large_413(void)
    assert(strstr(resp, "request body too large"));
 }
 
+/* A slow upload must not monopolize the listener and prevent an independent
+ * health request from being accepted. This regresses the serial-listener bug
+ * where bursts beyond the listen backlog were dropped while one DB-backed
+ * request ran. */
+static int reserve_tcp_port(void)
+{
+   int fd = socket(AF_INET, SOCK_STREAM, 0);
+   assert(fd >= 0);
+   struct sockaddr_in sa;
+   memset(&sa, 0, sizeof(sa));
+   sa.sin_family = AF_INET;
+   sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+   sa.sin_port = 0;
+   assert(bind(fd, (struct sockaddr *)&sa, sizeof(sa)) == 0);
+   socklen_t n = sizeof(sa);
+   assert(getsockname(fd, (struct sockaddr *)&sa, &n) == 0);
+   int port = ntohs(sa.sin_port);
+   close(fd);
+   return port;
+}
+
+static int connect_local_port(int port)
+{
+   int fd = socket(AF_INET, SOCK_STREAM, 0);
+   assert(fd >= 0);
+   struct sockaddr_in sa;
+   memset(&sa, 0, sizeof(sa));
+   sa.sin_family = AF_INET;
+   sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+   sa.sin_port = htons((uint16_t)port);
+   assert(connect(fd, (struct sockaddr *)&sa, sizeof(sa)) == 0);
+   return fd;
+}
+
+static void test_http_listener_concurrent_requests(void)
+{
+   int port = reserve_tcp_port();
+   assert(kb_http_start(port, NULL) == 0);
+
+   int slow = connect_local_port(port);
+   const char *partial = "POST /v1/health HTTP/1.1\r\nContent-Length: 1\r\n\r\n";
+   assert(write(slow, partial, strlen(partial)) == (ssize_t)strlen(partial));
+
+   int fast = connect_local_port(port);
+   struct timeval tv = {.tv_sec = 2, .tv_usec = 0};
+   assert(setsockopt(fast, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == 0);
+   const char *health = "GET /v1/health HTTP/1.1\r\nContent-Length: 0\r\n\r\n";
+   assert(write(fast, health, strlen(health)) == (ssize_t)strlen(health));
+   char resp[2048];
+   int nr = (int)read(fast, resp, sizeof(resp) - 1);
+   assert(nr > 0);
+   resp[nr] = '\0';
+   assert(strstr(resp, "200 OK") != NULL);
+   close(fast);
+
+   assert(write(slow, "x", 1) == 1);
+   assert(setsockopt(slow, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == 0);
+   nr = (int)read(slow, resp, sizeof(resp) - 1);
+   assert(nr > 0);
+   close(slow);
+   kb_http_stop();
+}
+
 int main(void)
 {
    printf("kb_http_routes: ");
@@ -5203,6 +5269,7 @@ int main(void)
    test_mtls_serve();
    test_mtls_listener();
    test_http_body_too_large_413();
+   test_http_listener_concurrent_requests();
    test_bearer_auth_ok();
    test_bearer_auth_missing();
    test_bearer_auth_wrong();

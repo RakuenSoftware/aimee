@@ -4,6 +4,7 @@
 #include "config_database.h"
 #include "css_render_cmd.h"
 #include "db2/code_index.h"
+#include "db2/db2.h"
 #include "kb_witness_cadence.h"
 #include "kb_auth_oidc.h"
 #include "kb_oidc_jwks_fleet.h"
@@ -1635,6 +1636,11 @@ int main(int argc, char **argv)
       }
    }
 
+   /* Publish the fully resolved daemon config before request threads start.
+    * This keeps hot-path config reads on the lock-free snapshot instead of
+    * racing through the process-wide file mtime cache. */
+   config_snapshot_init(&kb_cfg);
+
    /* DB2 owns project, workspace, and global knowledge for aimee-kb.
     *
     * Wait out a not-yet-ready Postgres on a bounded backoff instead of exiting
@@ -2109,6 +2115,7 @@ int main(int argc, char **argv)
          recovered = 0;
       } while (db2_org_egress_recover(100, &recovered) == 0 && recovered == 100);
    }
+   db2_lease_release_idle();
    time_t next_egress_recovery = time(NULL) + 5;
    /* HTTP listener runs on its own thread; block here until a signal
     * (SIGINT/SIGTERM/SIGHUP) flips running, then tear down. */
@@ -2123,6 +2130,9 @@ int main(int argc, char **argv)
       }
       kb_management_runtime_tick((int64_t)now);
       kb_witness_cadence_tick(now); /* P7-witness-e2: periodic checkpoint cadence */
+      /* Main-thread maintenance leases lazily from the DB2 pool. Return the
+       * lease before sleeping so the daemon does not pin one member forever. */
+      db2_lease_release_idle();
       struct timespec ts = {.tv_sec = 0, .tv_nsec = 200L * 1000 * 1000};
       nanosleep(&ts, NULL);
    }
