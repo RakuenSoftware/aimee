@@ -305,7 +305,7 @@ static int cmd_mint(const char *key_path, const char *issuer, const char *aud, c
        * them into one message sends the reader looking at the claims when the
        * signer is what failed. */
       fprintf(stderr, "write-tier-enforce-live: token build failed: %s\n",
-              rc == KB_IDENTITY_TOKEN_INVALID          ? "claims rejected"
+              rc == KB_IDENTITY_TOKEN_INVALID            ? "claims rejected"
               : rc == KB_IDENTITY_TOKEN_SIGN_UNAVAILABLE ? "signer failed"
                                                          : "output buffer too small");
       return 1;

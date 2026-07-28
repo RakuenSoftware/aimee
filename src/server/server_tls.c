@@ -819,9 +819,7 @@ int server_tls_init_default(void)
    char cert[MAX_PATH_LEN], key[MAX_PATH_LEN];
    snprintf(cert, sizeof(cert), "%s/tls/server.crt", config_default_dir());
    snprintf(key, sizeof(key), "%s/tls/server.key", config_default_dir());
-   config_t cfg;
-   config_load(&cfg);
-   int effective_mtls = pki_mtls_ramp_init(cfg.server_api_mtls);
+   int effective_mtls = pki_mtls_ramp_init(config_server_api_mtls());
    if (effective_mtls < 0)
       return -1;
    if (effective_mtls == 1)
@@ -841,7 +839,7 @@ int server_tls_init_default(void)
     * file and the verify callback starts consulting the snapshot. */
    if (effective_mtls > 0 && pki_ca_ensure() != 0)
       return -1;
-   return server_tls_init(cert, key, effective_mtls, cfg.server_api_mtls_client_ca);
+   return server_tls_init(cert, key, effective_mtls, config_server_api_mtls_client_ca());
 }
 
 SSL *server_tls_begin(int fd)

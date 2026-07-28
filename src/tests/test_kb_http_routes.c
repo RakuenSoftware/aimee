@@ -1028,6 +1028,24 @@ int config_load(config_t *cfg)
    return 0;
 }
 
+/* Accessor stubs: the production seam moved from config_load to per-field
+ * accessors. These return exactly what the stub above puts in the struct, so
+ * the assertions below are unchanged. */
+int config_kb_curator_extract_docs_enabled(void)
+{
+   return 1;
+}
+
+int config_workspace_count(void)
+{
+   return 1;
+}
+
+const char *config_workspaces(int index)
+{
+   return index == 0 ? "/workspace" : "";
+}
+
 const char *config_embedding_command(const config_t *cfg, const char *requested)
 {
    if (requested && requested[0])

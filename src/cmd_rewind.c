@@ -26,9 +26,7 @@ static void rewind_print_help(void)
 
 static void cmd_rewind_list(app_ctx_t *ctx)
 {
-   config_t db1_cfg;
-   config_load(&db1_cfg);
-   if (db1_init(db1_cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
       fatal("rewind list: could not initialize DB1");
    const char *sid = session_id();
    if (!sid || !sid[0])
@@ -58,9 +56,7 @@ static void cmd_rewind_list(app_ctx_t *ctx)
 
 static void cmd_rewind_create(app_ctx_t *ctx, int argc, char **argv)
 {
-   config_t db1_cfg;
-   config_load(&db1_cfg);
-   if (db1_init(db1_cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
       fatal("rewind create: could not initialize DB1");
    const char *sid = session_id();
    if (!sid || !sid[0])
@@ -83,9 +79,7 @@ static void cmd_rewind_add(app_ctx_t *ctx, int argc, char **argv)
       fprintf(stderr, "rewind add: usage: aimee rewind add <cp_id> <path>\n");
       return;
    }
-   config_t db1_cfg;
-   config_load(&db1_cfg);
-   if (db1_init(db1_cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
       fatal("rewind add: could not initialize DB1");
    int64_t cp_id = (int64_t)atoll(argv[0]);
    int rc = db1_fsnap_record_file(cp_id, argv[1]);
@@ -110,10 +104,7 @@ static void cmd_rewind_restore(app_ctx_t *ctx, int argc, char **argv)
       if (strcmp(argv[i], "--no-restore") == 0)
          no_restore = 1;
    }
-
-   config_t db1_cfg;
-   config_load(&db1_cfg);
-   if (db1_init(db1_cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
       fatal("rewind restore: could not initialize DB1");
    int64_t cp_id = (int64_t)atoll(argv[0]);
    fsnap_info_t info;
@@ -147,9 +138,7 @@ static void cmd_rewind_restore(app_ctx_t *ctx, int argc, char **argv)
 
 static void cmd_rewind_prune(app_ctx_t *ctx, int argc, char **argv)
 {
-   config_t db1_cfg;
-   config_load(&db1_cfg);
-   if (db1_init(db1_cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
       fatal("rewind prune: could not initialize DB1");
    const char *sid = session_id();
    if (!sid || !sid[0])

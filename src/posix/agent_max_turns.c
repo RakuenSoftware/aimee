@@ -17,9 +17,7 @@ int agent_resolve_max_turns(const agent_t *agent, const char *role)
     * cap"; a run is unbounded UNLESS an operator set a global iteration cap
     * (GUI-settable max_iterations[_delegate], 0/unset = no cap). This is the
     * "-1 = infinite, for everything, by default" contract. */
-   config_t iter_cfg;
-   config_load(&iter_cfg);
-   int cap = role ? iter_cfg.max_iterations_delegate : iter_cfg.max_iterations;
+   int cap = role ? config_max_iterations_delegate() : config_max_iterations();
    return cap > 0 ? cap : INT_MAX;
 }
 

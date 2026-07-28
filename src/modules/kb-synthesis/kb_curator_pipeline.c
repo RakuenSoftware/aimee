@@ -4,7 +4,7 @@
 #include "kb_curator_pipeline.h"
 
 int kb_curator_pipeline_run_pass(const kb_curator_stage_desc_t *stages, size_t n, int lane_filter,
-                                 const config_t *cfg, const kb_curator_extract_opts_t *opts,
+                                 const kb_curator_extract_opts_t *opts,
                                  void (*set_status)(const char *label))
 {
    if (!stages)
@@ -17,7 +17,7 @@ int kb_curator_pipeline_run_pass(const kb_curator_stage_desc_t *stages, size_t n
          continue;
       if (lane_filter >= 0 && (int)st->lane != lane_filter)
          continue;
-      if (st->enabled && !st->enabled(cfg))
+      if (st->enabled && !st->enabled())
          continue;
       int budget = st->budget > 0 ? st->budget : 1;
       for (int b = 0; b < budget; b++)

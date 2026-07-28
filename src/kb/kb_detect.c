@@ -32,7 +32,7 @@ static struct
 int kb_detect_observe(const config_t *cfg, double mean_dense_score, int n_candidates)
 {
    (void)n_candidates;
-   if (!cfg || !cfg->drift_detect_shadow_enabled)
+   if (!cfg || !config_drift_detect_shadow_enabled())
       return 0;
    if (isnan(mean_dense_score))
       return 0;

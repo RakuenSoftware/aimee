@@ -1079,10 +1079,8 @@ static void webchat_enable(void)
 {
    /* Find the service file relative to a workspace root or CWD */
    char src[MAX_PATH_LEN];
-   config_t ws_cfg;
-   config_load(&ws_cfg);
-   if (ws_cfg.workspace_count > 0)
-      snprintf(src, sizeof(src), "%s/" WEBCHAT_SERVICE_SRC, ws_cfg.workspaces[0]);
+   if (config_workspace_count() > 0)
+      snprintf(src, sizeof(src), "%s/" WEBCHAT_SERVICE_SRC, config_workspaces(0));
    else
       snprintf(src, sizeof(src), WEBCHAT_SERVICE_SRC);
 

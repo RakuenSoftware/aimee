@@ -245,22 +245,44 @@ const char *gsem_policy(const gsem_output_t *out, double warn_t, double prompt_t
    return "allow";
 }
 
-void gsem_apply_strictness_arm(config_t *cfg)
+/* Effective semantic thresholds: the configured value, clamped when the
+ * "guardrail_strictness" bandit arm is promoted to strict.
+ *
+ * This replaced gsem_apply_strictness_arm(config_t *), which mutated a caller's
+ * config in place and so required every caller to hold the struct. The clamp is
+ * transient — it was never saved — so it belongs behind a function that answers
+ * "what threshold applies right now", not behind a struct edit.
+ *
+ * Returning the value rather than mutating also makes the clamp testable on its
+ * own, which it was not before. */
+static int gsem_strict_arm_active(void)
 {
 #if defined(AIMEE_DB2_DISABLED)
-   (void)cfg;
+   return 0;
 #else
    char arm[64] = "";
-   if (!cfg || db2_bandit_promotion_get("guardrail_strictness", arm, sizeof(arm)) != 0 ||
-       strcmp(arm, "strict") != 0)
-      return;
-   if (cfg->guardrails_semantic_warn_threshold > 0.30)
-      cfg->guardrails_semantic_warn_threshold = 0.30;
-   if (cfg->guardrails_semantic_prompt_threshold > 0.55)
-      cfg->guardrails_semantic_prompt_threshold = 0.55;
-   if (cfg->guardrails_semantic_block_threshold > 0.80)
-      cfg->guardrails_semantic_block_threshold = 0.80;
+   if (db2_bandit_promotion_get("guardrail_strictness", arm, sizeof(arm)) != 0)
+      return 0;
+   return strcmp(arm, "strict") == 0;
 #endif
+}
+
+double gsem_effective_warn_threshold(void)
+{
+   double v = config_guardrails_semantic_warn_threshold();
+   return (gsem_strict_arm_active() && v > 0.30) ? 0.30 : v;
+}
+
+double gsem_effective_prompt_threshold(void)
+{
+   double v = config_guardrails_semantic_prompt_threshold();
+   return (gsem_strict_arm_active() && v > 0.55) ? 0.55 : v;
+}
+
+double gsem_effective_block_threshold(void)
+{
+   double v = config_guardrails_semantic_block_threshold();
+   return (gsem_strict_arm_active() && v > 0.80) ? 0.80 : v;
 }
 
 int gsem_format_advisory_message(char *buf, size_t buf_len, const char *action,

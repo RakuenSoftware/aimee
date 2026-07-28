@@ -860,15 +860,15 @@ char *agent_load_project_contract(const char *project_root)
 
 /* Build a compact_config_t from the application-level config_t.
  * Per-tool entries are stored as "tool_name=threshold" strings in config. */
-static void compact_cfg_from_app_config(const config_t *app, compact_config_t *out)
+static void compact_cfg_from_app_config(compact_config_t *out)
 {
    memset(out, 0, sizeof(*out));
-   out->enabled = app->compact_enabled;
-   out->threshold = app->compact_threshold;
-   out->head_bytes = app->compact_head_bytes;
-   out->tail_bytes = app->compact_tail_bytes;
+   out->enabled = config_compact_enabled();
+   out->threshold = config_compact_threshold();
+   out->head_bytes = config_compact_head_bytes();
+   out->tail_bytes = config_compact_tail_bytes();
 
-   int count = app->compact_per_tool_count;
+   int count = config_compact_per_tool_count();
    if (count > COMPACT_MAX_PER_TOOL)
       count = COMPACT_MAX_PER_TOOL;
 
@@ -876,7 +876,7 @@ static void compact_cfg_from_app_config(const config_t *app, compact_config_t *o
    {
       char tool[64];
       int thresh = 0;
-      if (sscanf(app->compact_per_tool[i], "%63[^=]=%d", tool, &thresh) == 2)
+      if (sscanf(config_compact_per_tool(i), "%63[^=]=%d", tool, &thresh) == 2)
       {
          snprintf(out->per_tool[i].tool, sizeof(out->per_tool[i].tool), "%s", tool);
          out->per_tool[i].threshold = thresh;
@@ -906,7 +906,7 @@ char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *to
    compact_config_t cfg;
    int loaded = (config_load(&app_cfg) == 0);
    if (loaded)
-      compact_cfg_from_app_config(&app_cfg, &cfg);
+      compact_cfg_from_app_config(&cfg);
    else
       memset(&cfg, 0, sizeof(cfg)); /* use defaults on load failure */
 

@@ -496,10 +496,8 @@ static int skill_arg_int(const char *s, int *out)
 static void skill_cmd_lifecycle(app_ctx_t *ctx, int argc, char **argv)
 {
    int json_output = ctx && ctx->json_output;
-   config_t cfg;
-   config_load(&cfg);
-   int stale_days = cfg.skills_stale_after_days;
-   int archive_days = cfg.skills_archive_after_days;
+   int stale_days = config_skills_stale_after_days();
+   int archive_days = config_skills_archive_after_days();
    for (int i = 0; i < argc; i++)
    {
       if (strcmp(argv[i], "--json") == 0)
@@ -566,10 +564,7 @@ static void skill_cmd_autostub(app_ctx_t *ctx, int argc, char **argv)
          return;
       }
    }
-
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.skills_capability_autostub && !force)
+   if (!config_skills_capability_autostub() && !force)
    {
       if (json_output)
          printf("{\"status\":\"disabled\",\"reason\":\"skills.capability.autostub is false\"}\n");

@@ -295,14 +295,11 @@ static char *build_session_context(const char *client_cwd)
 
    {
       char cwd[MAX_PATH_LEN];
-      config_t skill_cfg;
       char *skill_index = NULL;
-      config_load(&skill_cfg);
-      if (skill_cfg.skills_dispatch_enabled)
+      if (config_skills_dispatch_enabled())
       {
          snprintf(cwd, sizeof(cwd), "%s", scope_cwd);
-         skill_index =
-             session_briefing_render_skill_index(cwd, skill_cfg.skills_dispatch_max_index);
+         skill_index = session_briefing_render_skill_index(cwd, config_skills_dispatch_max_index());
       }
       if (skill_index && skill_index[0])
       {
@@ -668,12 +665,12 @@ static int stale_session_threshold_secs(const config_t *cfg)
 /* Remove sibling worktrees for a stale session.
  * Uses worktree_cleanup() which checks each workspace's git root for the
  * standard .aimee-<project>-<short_session> sibling directory. */
-static void remove_stale_worktrees(const config_t *cfg, const char *sid)
+static void remove_stale_worktrees(const char *sid)
 {
-   for (int i = 0; i < cfg->workspace_count; i++)
+   for (int i = 0; i < config_workspace_count(); i++)
    {
       char git_root[MAX_PATH_LEN];
-      if (git_repo_root(cfg->workspaces[i], git_root, sizeof(git_root)) == 0)
+      if (git_repo_root(config_workspaces(i), git_root, sizeof(git_root)) == 0)
          worktree_cleanup(git_root, sid, NULL);
    }
 }
@@ -699,7 +696,7 @@ void prune_stale_sessions(const config_t *cfg)
       did_maintenance = 1;
 
       /* Remove worktrees for this session */
-      remove_stale_worktrees(cfg, stale_sid);
+      remove_stale_worktrees(stale_sid);
 
       /* Delete the stale state row + child tables from DB1 */
       db1_session_state_delete(stale_sid);
@@ -748,7 +745,7 @@ void prune_stale_sessions(const config_t *cfg)
       for (int i = 0; i < n; i++)
       {
          if (expired_ids[i][0])
-            remove_stale_worktrees(cfg, expired_ids[i]);
+            remove_stale_worktrees(expired_ids[i]);
       }
       (void)db1_server_session_delete_expired(threshold);
    }
@@ -913,21 +910,21 @@ static void session_enforce_worktree_cap(const config_t *cfg)
 
 /* Register sibling worktree mappings for configured workspaces and the client
  * CWD's git repo, deduplicating by git root and respecting MAX_WORKTREES. */
-static void session_register_worktrees(const config_t *cfg, const char *client_cwd, const char *sid,
+static void session_register_worktrees(const char *client_cwd, const char *sid,
                                        session_state_t *state)
 {
-   for (int i = 0; i < cfg->workspace_count && state->worktree_count < MAX_WORKTREES; i++)
+   for (int i = 0; i < config_workspace_count() && state->worktree_count < MAX_WORKTREES; i++)
    {
       struct stat ws_st;
-      if (stat(cfg->workspaces[i], &ws_st) != 0 || !S_ISDIR(ws_st.st_mode))
+      if (stat(config_workspaces(i), &ws_st) != 0 || !S_ISDIR(ws_st.st_mode))
       {
          LOG_WARN("workspace", "workspace '%s' does not exist, skipping worktree",
-                  cfg->workspaces[i]);
+                  config_workspaces(i));
          continue;
       }
 
       char gr[MAX_PATH_LEN];
-      if (git_repo_root(cfg->workspaces[i], gr, sizeof(gr)) == 0)
+      if (git_repo_root(config_workspaces(i), gr, sizeof(gr)) == 0)
       {
          /* Deduplicate by git_root */
          if (!session_worktree_is_registered(state, gr))
@@ -1299,7 +1296,7 @@ void session_start_emit(app_ctx_t *ctx, const char *hook_input, FILE *out)
    snprintf(state.guardrail_mode, sizeof(state.guardrail_mode), "%s", config_guardrail_mode(&cfg));
 
    /* Register sibling worktrees for configured workspaces and CWD's git repo. */
-   session_register_worktrees(&cfg, client_cwd, sid, &state);
+   session_register_worktrees(client_cwd, sid, &state);
 
    /* Prepare isolated sibling checkouts (startup only). */
    if (is_startup)

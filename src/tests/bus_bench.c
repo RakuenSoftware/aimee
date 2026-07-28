@@ -140,8 +140,7 @@ int main(int argc, char **argv)
    printf("dispatch_overhead_ns=%llu\n", (unsigned long long)median);
    printf("dispatch_overhead_p99_ns=%llu\n", (unsigned long long)p99);
    fprintf(stderr, "bench: %llu batches of %u events (median %llu ns/event, p99 %llu ns)\n",
-           (unsigned long long)batches, batch, (unsigned long long)median,
-           (unsigned long long)p99);
+           (unsigned long long)batches, batch, (unsigned long long)median, (unsigned long long)p99);
 
    free(samples);
    bus_client_detach(&pub);

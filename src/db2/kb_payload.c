@@ -981,10 +981,9 @@ int db2_kb_pdf_search_chunks(const char *project, const char *query, int max,
     * candidate→row resolution (defense in depth). Vector candidates whose chunk row is
     * gone are simply skipped — never dropped from a join that would also drop lexical
     * hits. */
-   config_t cfg;
-   if (n < max && config_load(&cfg) == 0 && cfg.kb_pdf_vector_enabled)
+   if (n < max && config_kb_pdf_vector_enabled())
    {
-      const char *embed_cmd = config_embedding_command(&cfg, NULL);
+      const char *embed_cmd = config_embedding_command_current(NULL);
       if (embed_cmd && embed_cmd[0])
       {
          float qvec[EMBED_MAX_DIM];
@@ -1056,8 +1055,7 @@ int db2_kb_pdf_reembed_all(void)
     * kb_embeddings (auto-backfilled by the doc-embed drain), PDF vectors are only
     * (re)derived from these jobs. No-op when the PDF-vector capability is off, so a
     * reset never leaves embed_pdf jobs draining with nowhere to land. */
-   config_t cfg;
-   if (config_load(&cfg) != 0 || !cfg.kb_pdf_vector_enabled)
+   if (!config_kb_pdf_vector_enabled())
       return 0;
    void *conn = db2_conn();
    if (!conn)
@@ -1475,8 +1473,7 @@ int db2_kb_pdf_quarantine_confirm(const char *project, const char *document_key)
     * class, so quarantine_state='' after confirm is exactly the just-confirmed
     * chunks) and enqueue an idempotent embed_pdf job per chunk when the capability
     * is on. Row-by-row so an arbitrarily large doc is fully covered. */
-   config_t cfg;
-   if (config_load(&cfg) != 0 || !cfg.kb_pdf_vector_enabled)
+   if (!config_kb_pdf_vector_enabled())
       return n;
    void *conn = db2_conn();
    if (!conn)

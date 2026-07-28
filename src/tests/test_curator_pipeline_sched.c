@@ -45,14 +45,12 @@ static int run_off(const kb_curator_extract_opts_t *o)
    n_off++;
    return 0;
 }
-static int en_true(const config_t *c)
+static int en_true(void)
 {
-   (void)c;
    return 1;
 }
-static int en_false(const config_t *c)
+static int en_false(void)
 {
-   (void)c;
    return 0;
 }
 static void reset(void)
@@ -76,7 +74,7 @@ int main(void)
    reset();
    q_a = 1;
    q_b = 5;
-   int r = kb_curator_pipeline_run_pass(st, 3, -1, NULL, &opts, NULL);
+   int r = kb_curator_pipeline_run_pass(st, 3, -1, &opts, NULL);
    assert(r == 1);
    assert(n_a == 1 && q_a == 0); /* LLM stage: one unit this pass */
    assert(n_b == 6 && q_b == 0); /* INDEX stage: budget 32 drained 5 (6th call idle) */
@@ -85,7 +83,7 @@ int main(void)
 
    /* 2: idle pass returns 0. */
    reset();
-   r = kb_curator_pipeline_run_pass(st, 3, -1, NULL, &opts, NULL);
+   r = kb_curator_pipeline_run_pass(st, 3, -1, &opts, NULL);
    assert(r == 0);
    printf("  PASS: idle pass returns 0\n");
 
@@ -93,7 +91,7 @@ int main(void)
    reset();
    q_a = 1;
    q_b = 3;
-   r = kb_curator_pipeline_run_pass(st, 3, KB_CURATOR_LANE_INDEX, NULL, &opts, NULL);
+   r = kb_curator_pipeline_run_pass(st, 3, KB_CURATOR_LANE_INDEX, &opts, NULL);
    assert(r == 1);
    assert(n_a == 0); /* LLM stage filtered out */
    assert(q_b == 0); /* INDEX stage drained */
@@ -108,7 +106,7 @@ int main(void)
        {"err", "err", en_true, run_err, 1, KB_CURATOR_LANE_LLM},
        {"b", "b", en_true, run_b, 32, KB_CURATOR_LANE_INDEX},
    };
-   r = kb_curator_pipeline_run_pass(ste, 3, -1, NULL, &opts, NULL);
+   r = kb_curator_pipeline_run_pass(ste, 3, -1, &opts, NULL);
    assert(r == -1);
    assert(n_a == 1 && n_err == 1 && n_b == 0); /* stopped at the error */
    printf("  PASS: stage error stops the pass\n");
