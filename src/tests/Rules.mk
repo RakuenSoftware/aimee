@@ -682,7 +682,16 @@ unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	@# EXIT. 64 of the 112 tests that make one never remove it, and they used to
 	@# pile up in /tmp across every run until tmpfs ran out of INODES (40k dirs,
 	@# 857k inodes, with 45GB still free) and nothing could create a file.
-	@th="$$(mktemp -d /tmp/aimee-unit-home.XXXXXX)"; \
+	@# Short name on purpose. Every test temp dir now hangs off this prefix, so
+	@# its length is added to every path the suite creates. At least one test —
+	@# test_parent_write_guard_readonly_large_find — lists 300 files through
+	@# tool_bash, whose head+tail compaction drops the middle; the longer the
+	@# paths, the more bytes and the tighter the cut, and with
+	@# "aimee-unit-home.XXXXXX" (22 chars over /tmp) its final entry fell out of
+	@# the preserved tail and the assertion failed. That test is fragile about
+	@# output size — its own comment admits as much — but a short prefix costs
+	@# nothing and keeps this change from perturbing it.
+	@th="$$(mktemp -d /tmp/aut.XXXXXX)"; \
 	export HOME="$$th" TMPDIR="$$th"; unset AIMEE_HOME; \
 	trap 'rm -rf "$$th"' EXIT; \
 	jobs="$(TEST_RUN_JOBS)"; \
@@ -1601,7 +1610,7 @@ $(TESTPREFIX)/unit-test-acp-server: $(OBJDIR)/tests/test_acp_server.o \
                            $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
-$(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o $(OBJDIR)/server/server.o $(OBJDIR)/server/server_error_kind.o $(OBJDIR)/server/server_seed_config.o $(OBJDIR)/server/server_api_status.o $(OBJDIR)/server_provider.o $(OBJDIR)/server/provider_settable.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/server_insights.o $(OBJDIR)/server_eval.o \
+$(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o $(OBJDIR)/server/server.o $(OBJDIR)/server/server_seed_config.o $(OBJDIR)/server/server_api_status.o $(OBJDIR)/server_provider.o $(OBJDIR)/server/provider_settable.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/server_insights.o $(OBJDIR)/server_eval.o \
 	$(OBJDIR)/server/s2_native_gate_hook.o $(OBJDIR)/modules/workflows/wfe_native_gate.o $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/modules/workflows/tool_egress.o \
 	$(OBJDIR)/db1/wfe_binding.o $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_enforce.o \
                       $(OBJDIR)/harness_memory_common.o $(OBJDIR)/modules/delegates/delegate_sandbox_image.o $(OBJDIR)/modules/sandbox/sandbox_learned.o \
