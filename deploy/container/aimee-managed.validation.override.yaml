@@ -6,6 +6,13 @@ networks:
     external: false
     name: ${COMPOSE_PROJECT_NAME}-network
 
+volumes:
+  # The managed compose file normally reads the server-owned workspace volume.
+  # Validation must not depend on or mount production state.
+  aimee-server-workspaces:
+    external: false
+    name: ${COMPOSE_PROJECT_NAME}-server-workspaces
+
 services:
   aimee-kb:
     volumes:
