@@ -7,9 +7,9 @@ networks:
     name: ${COMPOSE_PROJECT_NAME}-network
 
 # The production manifest shares the server's durable workspace volume by its
-# fixed external name. This validator does not launch a server and must not
-# depend on (or attach to) a live server project, so give the otherwise-empty
-# read-only mount its own disposable project-local volume.
+# fixed external name. Validation does not launch a server and must not depend
+# on or mount production state, so this otherwise-empty read-only mount is a
+# disposable project-local volume.
 volumes:
   aimee-server-workspaces:
     external: false
