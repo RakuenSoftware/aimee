@@ -238,8 +238,8 @@ int main(void)
       cfg.server_api_bearer_extra_count = 2;
       snprintf(cfg.server_api_bearer_extra[0], sizeof(cfg.server_api_bearer_extra[0]),
                "tok-client-one");
-      snprintf(cfg.server_api_bearer_extra[1], sizeof(cfg.server_api_bearer_extra[1]),
-               "tok-client-two");
+      memset(cfg.server_api_bearer_extra[1], 'x', 180);
+      cfg.server_api_bearer_extra[1][180] = '\0';
       cfg.server_api_rate_limit_per_min = 60;
       cfg.server_api_max_event_streams = 512;
       snprintf(cfg.server_api_client_transport, sizeof(cfg.server_api_client_transport), "http");
@@ -501,7 +501,8 @@ int main(void)
       assert(strcmp(cfg2.server_api_bearer_token, "tok-api-xyz") == 0);
       assert(cfg2.server_api_bearer_extra_count == 2);
       assert(strcmp(cfg2.server_api_bearer_extra[0], "tok-client-one") == 0);
-      assert(strcmp(cfg2.server_api_bearer_extra[1], "tok-client-two") == 0);
+      assert(strlen(cfg2.server_api_bearer_extra[1]) == 180);
+      assert(strspn(cfg2.server_api_bearer_extra[1], "x") == 180);
       assert(cfg2.server_api_rate_limit_per_min == 60);
       assert(cfg2.server_api_max_event_streams == 512);
       assert(strcmp(cfg2.server_api_client_transport, "http") == 0);

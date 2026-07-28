@@ -7,6 +7,7 @@ import importlib.util
 import io
 import json
 import os
+import socket
 import threading
 import unittest
 import urllib.error
@@ -35,6 +36,34 @@ class StartupEnvironment(unittest.TestCase):
         with mock.patch.dict(os.environ,
                              {"AIMEE_LLM_STUB_DIM": "", "EMBEDDER_STUB_DIM": "2560"}):
             self.assertEqual(_gw().STUB_DIM, 2560)
+
+    def test_embedding_dimension_pin_drives_stub_default(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AIMEE_LLM_STUB_DIM": "",
+                "EMBEDDER_STUB_DIM": "",
+                "AIMEE_EMBEDDING_DIM": "3840",
+            },
+        ):
+            gw = _gw()
+            self.assertEqual(gw.EXPECTED_EMBED_DIM, 3840)
+            self.assertEqual(gw.STUB_DIM, 3840)
+
+    def test_embedding_dimension_drift_is_rejected(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AIMEE_LLM_STUB": "1",
+                "AIMEE_LLM_STUB_DIM": "4",
+                "AIMEE_EMBEDDING_DIM": "3",
+            },
+        ):
+            gw = _gw()
+            with self.assertRaises(gw.GatewayError) as exc:
+                gw.do_embed("drift")
+            self.assertEqual(exc.exception.status, 503)
+            self.assertEqual(exc.exception.body["error"]["code"], "embedding_dim_mismatch")
 
     def test_empty_synth_discovery_values_use_defaults(self):
         with mock.patch.dict(os.environ,
@@ -427,6 +456,108 @@ class MalformedBodyStatus(unittest.TestCase):
             "/v1/chat/completions",
             json.dumps({"messages": [{"role": "user", "content": "hi"}]}).encode())
         self.assertEqual(status, 200)
+
+
+class ManagedServiceAuth(unittest.TestCase):
+    """Managed setup must prove the KB's actual credential over real HTTP."""
+
+    def setUp(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AIMEE_LLM_STUB": "1",
+                "AIMEE_LLM_PORT": "0",
+                "AIMEE_LLM_BIND": "127.0.0.1",
+                "AIMEE_LLM_AUTH_TOKEN": "managed-kb-service-token",
+                "AIMEE_EMBEDDING_DIM": "",
+            },
+            clear=False,
+        ):
+            self.gw = _gw()
+        self.srv = self.gw.build_server()
+        self.port = self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+
+    def _verify(self, token=None):
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/auth/verify",
+            data=b"{}",
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read())
+
+    def _post(self, path, payload, token=None, content_type="application/json"):
+        headers = {"Content-Type": content_type}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}{path}",
+            data=data,
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read())
+
+    def test_only_the_managed_service_bearer_verifies(self):
+        self.assertEqual(self._verify()[0], 401)
+        self.assertEqual(self._verify("wrong")[0], 401)
+        status, body = self._verify("managed-kb-service-token")
+        self.assertEqual(status, 200)
+        self.assertEqual(body, {"status": "ok", "scope": "curator"})
+
+    def test_unauthenticated_request_is_rejected_before_body_read(self):
+        with socket.create_connection(("127.0.0.1", self.port), timeout=2) as conn:
+            conn.settimeout(2)
+            conn.sendall(
+                b"POST /embed HTTP/1.1\r\n"
+                b"Host: localhost\r\n"
+                b"Content-Length: 10000000\r\n"
+                b"Connection: close\r\n\r\n"
+            )
+            response = conn.recv(4096)
+        self.assertIn(b" 401 ", response.split(b"\r\n", 1)[0])
+
+    def test_all_kb_inference_routes_require_the_managed_bearer(self):
+        cases = (
+            ("/embed", b"hello", "text/plain"),
+            ("/embed_batch", ["hello", "world"], "application/json"),
+            ("/rerank", [["query", "candidate"]], "application/json"),
+            (
+                "/v1/chat/completions",
+                {"messages": [{"role": "user", "content": "hello"}]},
+                "application/json",
+            ),
+        )
+        for path, payload, content_type in cases:
+            with self.subTest(path=path):
+                self.assertEqual(self._post(path, payload, content_type=content_type)[0], 401)
+                self.assertEqual(
+                    self._post(path, payload, token="wrong", content_type=content_type)[0], 401
+                )
+                status, _ = self._post(
+                    path,
+                    payload,
+                    token="managed-kb-service-token",
+                    content_type=content_type,
+                )
+                self.assertEqual(status, 200)
 
 
 if __name__ == "__main__":

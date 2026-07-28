@@ -24,6 +24,8 @@ Config (env), in precedence order:
   AIMEE_EMBEDDER_URL  base URL of the embedder service (rerank shares it by default)
   AIMEE_LLM_URL       base URL of the unified aimee-llm container (one knob for
                       embed + rerank + synth)
+  AIMEE_LLM_AUTH_TOKEN bearer service identity for authenticated gateways
+  AIMEE_LLM_AUTH_REQUIRED=1 refuse requests when that identity is missing
   (unset)             no reranker configured; reported immediately. Pin the
                       legacy compose service explicitly if wanted.
   AIMEE_RERANK_TIMEOUT  request timeout seconds (default 30)
@@ -48,9 +50,16 @@ ENDPOINT = (
     or ""
 ).rstrip("/")
 TIMEOUT = int(os.environ.get("AIMEE_RERANK_TIMEOUT", "30"))
+AUTH_TOKEN = os.environ.get("AIMEE_LLM_AUTH_TOKEN", "")
+AUTH_REQUIRED = os.environ.get("AIMEE_LLM_AUTH_REQUIRED", "") == "1"
 
 
 def main() -> None:
+    if AUTH_REQUIRED and not AUTH_TOKEN:
+        sys.stderr.write(
+            "rerank-remote: AIMEE_LLM_AUTH_REQUIRED=1 but AIMEE_LLM_AUTH_TOKEN is empty\n"
+        )
+        sys.exit(1)
     if not ENDPOINT:
         sys.stderr.write(
             "rerank-remote: no reranker configured "
@@ -62,10 +71,13 @@ def main() -> None:
         sys.stderr.write("rerank-remote: empty input\n")
         sys.exit(1)
 
+    headers = {"content-type": "application/json"}
+    if AUTH_TOKEN:
+        headers["authorization"] = f"Bearer {AUTH_TOKEN}"
     req = urllib.request.Request(
         f"{ENDPOINT}/rerank",
         data=payload.encode("utf-8"),
-        headers={"content-type": "application/json"},
+        headers=headers,
         method="POST",
     )
     try:

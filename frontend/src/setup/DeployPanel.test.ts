@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parsePs } from './DeployPanel';
+import { parsePs, remoteSetCommand } from './DeployPanel';
 
 /* `docker compose ps --format json` has two wire shapes across versions: a single
  * JSON array (older) and newline-delimited objects (newer). parsePs must handle
@@ -37,5 +37,19 @@ describe('parsePs', () => {
 
   it('drops entries with no resolvable name', () => {
     expect(parsePs('{"State":"running"}')).toEqual([]);
+  });
+});
+
+describe('remoteSetCommand', () => {
+  it('builds the one-command first-user enrollment', () => {
+    expect(remoteSetCommand('aimee.example', 8743, 'secret')).toBe(
+      'aimee remote set https://aimee.example:8743 secret',
+    );
+  });
+
+  it('brackets an IPv6 host', () => {
+    expect(remoteSetCommand('2001:db8::10', 9443, 'secret')).toBe(
+      'aimee remote set https://[2001:db8::10]:9443 secret',
+    );
   });
 });

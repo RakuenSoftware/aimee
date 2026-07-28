@@ -7,13 +7,16 @@
 #include "server/server_mgmt_endpoint.h"
 #include "server/wfe_http_proxy.h"
 #include "agent_config.h"
+#include "config.h"
 #include "cJSON.h"
+#include "db1.h"
 #include "openai_runs_store.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
 #include "util.h"
 #include <netinet/in.h> /* INADDR_ANY / INADDR_LOOPBACK for the bind-policy test */
 #include <assert.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -22,6 +25,23 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+
+typedef struct
+{
+   pthread_barrier_t *barrier;
+   int result;
+   char bearer[65];
+} wizard_bootstrap_thread_t;
+
+static void *wizard_bootstrap_thread(void *arg)
+{
+   wizard_bootstrap_thread_t *thread = arg;
+   int barrier_result = pthread_barrier_wait(thread->barrier);
+   assert(barrier_result == 0 || barrier_result == PTHREAD_BARRIER_SERIAL_THREAD);
+   thread->result =
+       server_http_first_user_bootstrap("webuser:alice", thread->bearer, sizeof(thread->bearer));
+   return NULL;
+}
 
 int kb_client_mtls_management_jwks_fetch(void *ctx, char *out, size_t cap, size_t *len)
 {
@@ -65,6 +85,13 @@ int server_mgmt_checkpoint_client_start(const server_http_management_config_t *c
 
 void server_mgmt_checkpoint_client_stop(void)
 {
+}
+
+/* The route-only fixture links server_dev_submit without the autonomy driver;
+ * keep its shared intake cap at the production default. */
+double wfe_autonomy_default_max_cost_usd(void)
+{
+   return 5.0;
 }
 
 /* Narrow response-writer seams not otherwise needed by this route-only unit. */
@@ -885,7 +912,7 @@ int main(void)
       const char *e2 = "enrolled-two-cccccccccccccccccccccccccc";
       const char *extra[] = {e1, e2};
 
-      char hdr[128];
+      char hdr[384];
       snprintf(hdr, sizeof(hdr), "Bearer %s", primary);
       assert(server_http_authorize_multi(1, primary, extra, 2, hdr, NULL, 0) == 0);
 
@@ -939,6 +966,18 @@ int main(void)
       assert(server_http_enrolled_bearer_count() == 0);
       assert(server_http_authorize_enrolled(1, live, hdr, NULL, 0) == 401);
       assert(server_http_authorize_enrolled(1, live, "Bearer rotated-primary", NULL, 0) == 0);
+
+      /* bearer_tokens_extra predates wizard enrollment and permits existing
+       * operator-supplied values longer than the new 64-hex minted token. An
+       * upgrade must not truncate and silently revoke those clients. */
+      char long_token[192];
+      memset(long_token, 'L', sizeof(long_token) - 1);
+      long_token[sizeof(long_token) - 1] = '\0';
+      const char *long_extra[] = {long_token};
+      server_http_set_bearer_extra(long_extra, 1);
+      snprintf(hdr, sizeof(hdr), "Bearer %s", long_token);
+      assert(server_http_authorize_enrolled(1, live, hdr, NULL, 0) == 0);
+      server_http_set_bearer_extra(NULL, 0);
 
       printf("  PASS: authorize_multi accepts every enrolled client, rejects the rest\n");
    }
@@ -1012,20 +1051,32 @@ int main(void)
    {
       unsetenv("AIMEE_API_BEARER_TOKEN"); /* TOFU active */
       const char *BOOT = "aimee-local-dev";
+      const char *enrolled[] = {"wizard-user-token"};
+      server_http_set_bearer_extra(enrolled, 1);
+      int bootstrap_only = -1;
+      assert(server_http_authorize_enrolled_request(1, BOOT, "Bearer aimee-local-dev", NULL, 0,
+                                                    &bootstrap_only) == 0);
+      assert(bootstrap_only == 1);
+      assert(server_http_authorize_enrolled_request(1, BOOT, "Bearer wizard-user-token", NULL, 0,
+                                                    &bootstrap_only) == 0);
+      assert(bootstrap_only == 0); /* additive enrollment bypasses the recovery gate */
       /* Bootstrap still live: real routes refused (1), rotate_bearer allowed (0). */
-      assert(server_http_bootstrap_gate(1, BOOT, "GET", "/v1/config") == 1);
-      assert(server_http_bootstrap_gate(1, BOOT, "POST", "/v1/config/set") == 1);
-      assert(server_http_bootstrap_gate(1, BOOT, "POST", "/v1/api/rotate_bearer") == 0);
+      assert(server_http_bootstrap_gate(1, 1, "GET", "/v1/config") == 1);
+      assert(server_http_bootstrap_gate(1, 1, "POST", "/v1/config/set") == 1);
+      assert(server_http_bootstrap_gate(1, 1, "POST", "/v1/api/rotate_bearer") == 0);
       /* GET on the rotate path is not the rotate op -> still refused. */
-      assert(server_http_bootstrap_gate(1, BOOT, "GET", "/v1/api/rotate_bearer") == 1);
+      assert(server_http_bootstrap_gate(1, 1, "GET", "/v1/api/rotate_bearer") == 1);
       /* UDS is exempt (local trust). */
-      assert(server_http_bootstrap_gate(0, BOOT, "GET", "/v1/config") == 0);
+      assert(server_http_bootstrap_gate(0, 1, "GET", "/v1/config") == 0);
       /* Once rotated to a strong bearer, the gate is off for every route. */
-      assert(server_http_bootstrap_gate(1, "deadbeef-strong-token", "GET", "/v1/config") == 0);
+      assert(server_http_bootstrap_gate(1, 0, "GET", "/v1/config") == 0);
       /* Operator-pinned bearer opts out of TOFU even if it equals the bootstrap. */
       setenv("AIMEE_API_BEARER_TOKEN", BOOT, 1);
-      assert(server_http_bootstrap_gate(1, BOOT, "GET", "/v1/config") == 0);
+      assert(server_http_authorize_enrolled_request(1, BOOT, "Bearer aimee-local-dev", NULL, 0,
+                                                    &bootstrap_only) == 0);
+      assert(bootstrap_only == 0);
       unsetenv("AIMEE_API_BEARER_TOKEN");
+      server_http_set_bearer_extra(NULL, 0);
 
       uint32_t bootstrap_caps =
           server_http_effective_conn_caps(1, BOOT, SERVER_REMOTE_WRITES_OFF, 1, 0);
@@ -1049,7 +1100,7 @@ int main(void)
               CAP_SESSION_ADMIN) != 0);
       /* The public bootstrap may rotate only; the outer bootstrap gate refuses
        * additive enrollment even though the route is otherwise TCP-reachable. */
-      assert(server_http_bootstrap_gate(1, BOOT, "POST", "/v1/api/enroll_bearer") == 1);
+      assert(server_http_bootstrap_gate(1, 1, "POST", "/v1/api/enroll_bearer") == 1);
    }
 
    /* --- P5-B3b dedicated management transport classification. The two
@@ -2132,6 +2183,55 @@ int main(void)
                                                strlen(conflicting_connection)) == 0);
       assert(server_http_request_framing_valid(folded, strlen(folded)) == 0);
       assert(server_http_request_framing_valid(pipelined, strlen(pipelined)) == 0);
+   }
+
+   /* The wizard creates one durable identity transaction: additive bearer now,
+    * explicit full tier only after the CSR certificate is bound. */
+   {
+      assert(db1_init(":memory:") == 0);
+      assert(config_set_server_api_bearer_token("primary") == 0);
+      assert(config_set_server_api_mtls(1) == 0);
+      assert(config_set_server_api_bearer_extra_count(0) == 0);
+
+      pthread_barrier_t barrier;
+      pthread_t workers[2];
+      wizard_bootstrap_thread_t attempts[2] = {{.barrier = &barrier}, {.barrier = &barrier}};
+      assert(pthread_barrier_init(&barrier, NULL, 3) == 0);
+      assert(pthread_create(&workers[0], NULL, wizard_bootstrap_thread, &attempts[0]) == 0);
+      assert(pthread_create(&workers[1], NULL, wizard_bootstrap_thread, &attempts[1]) == 0);
+      int barrier_result = pthread_barrier_wait(&barrier);
+      assert(barrier_result == 0 || barrier_result == PTHREAD_BARRIER_SERIAL_THREAD);
+      assert(pthread_join(workers[0], NULL) == 0);
+      assert(pthread_join(workers[1], NULL) == 0);
+      assert(pthread_barrier_destroy(&barrier) == 0);
+      assert(attempts[0].result == 0 && attempts[1].result == 0);
+      assert(strcmp(attempts[0].bearer, attempts[1].bearer) == 0);
+
+      char bearer[65], again[65], principal[128];
+      snprintf(bearer, sizeof(bearer), "%s", attempts[0].bearer);
+      assert(strlen(bearer) == 64 && server_http_enrolled_bearer_count() == 1);
+      assert(config_server_api_bearer_extra_count() == 1);
+      assert(strcmp(config_server_api_bearer_extra(0), bearer) == 0);
+      assert(server_http_authorize_enrolled(1, "primary", NULL, bearer, 0) == 0);
+      assert(server_http_first_user_bootstrap("webuser:alice", again, sizeof(again)) == 0);
+      assert(strcmp(again, bearer) == 0); /* refresh is idempotent */
+      assert(server_http_first_user_bootstrap("webuser:bob", again, sizeof(again)) == -2);
+
+      assert(server_http_first_user_cert_tier("A1B2", principal, sizeof(principal)) == 0);
+      int effective_tier = SERVER_REMOTE_WRITES_OFF;
+      assert(server_http_first_user_apply_cert_grant(0, "A1B2", &effective_tier, principal,
+                                                     sizeof(principal)) == 0);
+      assert(effective_tier == SERVER_REMOTE_WRITES_OFF && !principal[0]);
+      assert(server_http_first_user_bind_cert(bearer, "A1B2") == 1);
+      assert(server_http_first_user_cert_tier("A1B2", principal, sizeof(principal)) == 2);
+      assert(strcmp(principal, "webuser:alice") == 0);
+      effective_tier = SERVER_REMOTE_WRITES_OFF;
+      assert(server_http_first_user_apply_cert_grant(1, "A1B2", &effective_tier, principal,
+                                                     sizeof(principal)) == 2);
+      assert(effective_tier == SERVER_REMOTE_WRITES_FULL);
+      assert(strcmp(principal, "webuser:alice") == 0);
+      assert(server_http_first_user_bootstrap("webuser:alice", again, sizeof(again)) == 1);
+      db1_shutdown();
    }
 
    compute_pool_shutdown(&g_test_server_ctx.orchestration_pool);

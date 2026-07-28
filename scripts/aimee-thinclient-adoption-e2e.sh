@@ -9,8 +9,9 @@
 #      (POST /v1/api/rotate_bearer),
 #   3. persist the NEW token to the client's remote.conf (never the bootstrap),
 #      while the server persists the same token in its aimee.yaml,
-#   4. leave the bootstrap dead: raw requests with it get 401, and a SECOND
-#      fresh client presenting the bootstrap is refused enrollment.
+#   4. enroll the client's mTLS identity and promote the server to required mTLS,
+#   5. leave every bearer-only client locked out, while the enrolled client
+#      remains usable and a SECOND fresh client cannot reuse the bootstrap.
 #
 # This drives the real `aimee` client binary against a real local aimee-server
 # over the TLS /v1 listener — the exact flow a fresh appliance install runs on
@@ -124,19 +125,19 @@ AIMEE_HOME="$CLIENT_HOME" "$AIMEE_BIN" remote status >/dev/null 2>&1 \
   && ok "adopted client reaches /v1 with the new bearer" \
   || bad "adopted client reaches /v1 with the new bearer"
 
-# --- the bootstrap is dead -------------------------------------------------
-bold "==> The consumed bootstrap no longer authorizes anything"
+# --- mTLS promotion leaves every bare bearer locked out --------------------
+bold "==> Required mTLS rejects bearer-only requests after enrollment"
 st="$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' \
       -H "Authorization: Bearer ${BOOTSTRAP}" "${URL}/v1/health")"
-[[ "$st" == 401 ]] \
-  && ok "raw request with the bootstrap -> 401" \
-  || bad "raw request with the bootstrap -> 401" "got HTTP $st"
+[[ "$st" == 000 || "$st" == 401 ]] \
+  && ok "raw request with the bootstrap rejected before dispatch" \
+  || bad "raw request with the bootstrap rejected before dispatch" "got HTTP $st"
 
 st="$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' \
       -H "Authorization: Bearer ${client_token}" "${URL}/v1/health")"
-[[ "$st" == 200 ]] \
-  && ok "raw request with the rotated bearer -> 200" \
-  || bad "raw request with the rotated bearer -> 200" "got HTTP $st"
+[[ "$st" == 000 || "$st" == 401 ]] \
+  && ok "raw request with the rotated bearer also needs the enrolled certificate" \
+  || bad "raw request with the rotated bearer also needs the enrolled certificate" "got HTTP $st"
 
 # --- a second fresh client cannot re-adopt with the bootstrap ---------------
 bold "==> A second fresh client presenting the bootstrap is refused enrollment"

@@ -555,8 +555,12 @@ static void test_resources_read_config(void)
    cJSON *cfg = cJSON_Parse(text->valuestring);
    assert(cfg != NULL);
    cJSON *version = cJSON_GetObjectItemCaseSensitive(cfg, "version");
+   cJSON *mcp_version = cJSON_GetObjectItemCaseSensitive(cfg, "mcpVersion");
    cJSON *session = cJSON_GetObjectItemCaseSensitive(cfg, "sessionId");
    assert(cJSON_IsString(version));
+   assert(strcmp(version->valuestring, AIMEE_VERSION) == 0);
+   assert(cJSON_IsString(mcp_version));
+   assert(strcmp(mcp_version->valuestring, AIMEE_VERSION) == 0);
    assert(cJSON_IsString(session));
    assert(strcmp(session->valuestring, "test-session") == 0);
 
@@ -671,6 +675,9 @@ static void test_initialize(void)
    assert(cJSON_IsObject(info));
    cJSON *name = cJSON_GetObjectItemCaseSensitive(info, "name");
    assert(cJSON_IsString(name) && strcmp(name->valuestring, "aimee") == 0);
+   cJSON *server_version = cJSON_GetObjectItemCaseSensitive(info, "version");
+   assert(cJSON_IsString(server_version));
+   assert(strcmp(server_version->valuestring, AIMEE_VERSION) == 0);
 
    cJSON *instructions = cJSON_GetObjectItemCaseSensitive(result, "instructions");
    assert(cJSON_IsString(instructions));

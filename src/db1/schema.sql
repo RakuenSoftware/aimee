@@ -187,6 +187,25 @@ CREATE TABLE IF NOT EXISTS window_files ( window_id INTEGER NOT NULL REFERENCES 
 CREATE VIRTUAL TABLE IF NOT EXISTS window_fts USING fts5(summary, content='windows', content_rowid='id', tokenize='porter unicode61');
 CREATE VIRTUAL TABLE IF NOT EXISTS window_fts_trigram USING fts5(summary, content='windows', content_rowid='id', tokenize='trigram');
 CREATE TABLE IF NOT EXISTS local_operator ( secret_ref TEXT PRIMARY KEY, operator_uuid TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 0, display_hint TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')));
+-- The authenticated setup-wizard user is the immutable first remote owner.
+-- Its enrollment bearer is not itself a write grant: the grant becomes active
+-- only after CSR signing binds it to a unique, durably rostered mTLS serial.
+CREATE TABLE IF NOT EXISTS remote_first_user (
+  singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+  principal TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL CHECK(created_at>=0)
+);
+CREATE TABLE IF NOT EXISTS remote_client_grants (
+  bearer_sha256 TEXT PRIMARY KEY CHECK(length(bearer_sha256)=64),
+  principal TEXT NOT NULL,
+  tier TEXT NOT NULL CHECK(tier IN ('data','full')),
+  cert_serial TEXT UNIQUE,
+  created_at INTEGER NOT NULL CHECK(created_at>=0),
+  bound_at INTEGER CHECK(bound_at IS NULL OR bound_at>=created_at),
+  CHECK((cert_serial IS NULL)=(bound_at IS NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_remote_client_grants_one_pending
+  ON remote_client_grants(principal) WHERE cert_serial IS NULL;
 CREATE TABLE IF NOT EXISTS project_clones ( clone_path TEXT PRIMARY KEY, project_uuid TEXT NOT NULL, canonical_url TEXT NOT NULL DEFAULT '', origin_url TEXT NOT NULL DEFAULT '', upstream_url TEXT NOT NULL DEFAULT '', last_seen_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS branch_ownership ( id INTEGER PRIMARY KEY AUTOINCREMENT, repo_path TEXT NOT NULL, branch_name TEXT NOT NULL, session_id TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE(repo_path, branch_name));
 CREATE TABLE IF NOT EXISTS tool_local_availability ( tool_uuid TEXT PRIMARY KEY, usable INTEGER NOT NULL DEFAULT 0, binary_path TEXT NOT NULL DEFAULT '', checked_at TEXT NOT NULL DEFAULT (datetime('now')));

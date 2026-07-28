@@ -82,6 +82,7 @@ Fields under `autonomy.*` tune these limits. Some load at workflow-process start
 | `panel_degraded` | restore eligible reviewers or change the named preset |
 | `convergence_limit` | inspect the last blockers and refine the request/workflow |
 | `convergence_no_progress` | break the repeated plan/feedback cycle |
+| `dependency_pending` | no action; the scheduler resumes the slice after its declared predecessors are accepted |
 | agent capacity | wait, cancel stale work, or raise a safe limit |
 | missing commit | repair the delegate result; do not advance an empty implementation |
 | merge conflict | resolve against the current feature tip and rerun verification |

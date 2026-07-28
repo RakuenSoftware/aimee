@@ -5813,8 +5813,10 @@ paths:
       description: >
         Server-orchestrated deploy: run `docker compose up -d` for the managed
         services (aimee-kb + aimee-llm) the current wizard config selects,
-        on a background thread. Requires AIMEE_DEPLOY_ENABLED + a mounted Docker
-        socket. Capability: tool:execute.
+        on a background thread. Atomically claims the authenticated wizard user
+        as the first remote owner and returns that user's enrollment-only bearer;
+        CSR signing later binds its explicit full grant to mTLS. Requires
+        AIMEE_DEPLOY_ENABLED + a mounted Docker socket. Capability: tool:execute.
       responses:
         "200":
           description: Deploy started (or already running)
@@ -5825,6 +5827,18 @@ paths:
                 properties:
                   ok: { type: boolean }
                   status: { type: string, enum: [started, running] }
+                  enrollment:
+                    type: object
+                    required: [state, principal, tier, mtls, tls_port]
+                    properties:
+                      state: { type: string, enum: [ready, paired] }
+                      principal: { type: string, example: "webuser:aimee" }
+                      tier: { type: string, enum: [full] }
+                      mtls: { type: boolean }
+                      tls_port: { type: integer }
+                      bearer_token:
+                        type: string
+                        description: Present only while the first user's mTLS enrollment is pending.
         "403":
           description: Not a webchat user
           content:

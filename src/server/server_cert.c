@@ -6,6 +6,8 @@
  * even reach them. */
 #include "server.h" /* server_conn_t, server_send_*, handle_cert_* decls */
 #include "pki.h"
+#include "server_http.h"
+#include "server_http_identity.h"
 #include "vault_principal.h" /* attested_transport_t */
 #include "cJSON.h"
 #include <openssl/crypto.h> /* OPENSSL_cleanse */
@@ -91,6 +93,21 @@ int handle_cert_sign(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (pki_sign_csr(jcn->valuestring, days, jcsr->valuestring, cert, sizeof(cert), serial,
                     sizeof(serial)) != 0)
       return server_send_error(conn, "cert: CSR signing failed", NULL);
+
+   /* A bearer minted by the setup wizard is an enrollment credential, not a
+    * standing write grant.  Activate that grant only now, after possession of
+    * the client-generated private key has been proved by the CSR and its serial
+    * is durably present in the PKI roster. Ordinary operator-issued certs have
+    * no matching enrollment record and retain their existing behavior. */
+   int bound = server_http_first_user_bind_cert(server_http_identity_bearer(), serial);
+   if (bound < 0)
+   {
+      (void)pki_revoke(serial);
+      return server_send_error(conn,
+                               bound == -2 ? "cert: this enrollment bearer is already paired"
+                                           : "cert: could not persist the first-user write grant",
+                               NULL);
+   }
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return server_send_error(conn, "cert: out of memory", NULL);

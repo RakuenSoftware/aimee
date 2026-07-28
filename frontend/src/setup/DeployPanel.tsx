@@ -39,6 +39,15 @@ interface DeployStatus {
   ps: string;
 }
 
+interface Enrollment {
+  state: 'ready' | 'paired';
+  principal: string;
+  tier: 'full';
+  mtls: boolean;
+  tls_port: number;
+  bearer_token?: string;
+}
+
 export interface Svc {
   name: string;
   state: string;
@@ -73,11 +82,18 @@ export function parsePs(ps: string): Svc[] {
   return out.filter((s) => s.name);
 }
 
+export function remoteSetCommand(hostname: string, port: number, bearer: string): string {
+  const host = hostname.includes(':') && !hostname.startsWith('[') ? `[${hostname}]` : hostname;
+  return `aimee remote set https://${host}:${port} ${bearer}`;
+}
+
 export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<DeployStatus | null>(null);
   const [applying, setApplying] = useState(false);
   const [err, setErr] = useState('');
+  const [enrollment, setEnrollment] = useState<Enrollment | null>(null);
+  const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -144,11 +160,30 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
         setApplying(false);
         return;
       }
+      if (d.enrollment?.state === 'ready' || d.enrollment?.state === 'paired') {
+        setEnrollment({
+          state: d.enrollment.state,
+          principal: String(d.enrollment.principal ?? ''),
+          tier: 'full',
+          mtls: !!d.enrollment.mtls,
+          tls_port: Number(d.enrollment.tls_port) || 8743,
+          bearer_token: d.enrollment.bearer_token ? String(d.enrollment.bearer_token) : undefined,
+        });
+      }
       await loadStatus();
       timer.current = setTimeout(poll, 3000);
     } catch {
       setErr('aimee-server unavailable');
       setApplying(false);
+    }
+  }
+
+  async function copyEnrollment(command: string) {
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopied(true);
+    } catch {
+      setErr('Could not copy automatically; select the command below and copy it manually.');
     }
   }
 
@@ -170,6 +205,9 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
   const svcs = parsePs(status.ps);
   const settledOk = !status.running && status.last_exit === 0;
   const settledErr = !status.running && status.last_exit !== null && status.last_exit !== 0;
+  const enrollmentCommand = enrollment?.bearer_token
+    ? remoteSetCommand(window.location.hostname, enrollment.tls_port, enrollment.bearer_token)
+    : '';
 
   return (
     <div style={box}>
@@ -203,6 +241,31 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
       {settledErr && <div style={{ fontSize: 12, color: '#c62828' }}>⛔ Deploy exited with code {status.last_exit}. See the log below.</div>}
       {err && <div style={{ fontSize: 12, color: '#c62828' }}>{err}</div>}
 
+      {enrollment?.state === 'ready' && enrollmentCommand && (
+        <div style={{ ...pairing, marginTop: 9 }}>
+          <div style={{ fontWeight: 700, fontSize: 12.5 }}>Connect your client</div>
+          <div style={{ fontSize: 12, color: '#556', lineHeight: 1.45, marginTop: 3 }}>
+            Run this once on a Linux workstation. It pins the server, creates your private key
+            locally, enrolls mTLS, and activates full write access for{' '}
+            <code>{enrollment.principal}</code>.
+          </div>
+          <div style={{ display: 'flex', alignItems: 'start', gap: 7 }}>
+            <pre style={{ ...pre, flex: 1 }}>{enrollmentCommand}</pre>
+            <Button onClick={() => copyEnrollment(enrollmentCommand)}>
+              {copied ? 'Copied' : 'Copy command'}
+            </Button>
+          </div>
+          <div style={{ fontSize: 11.5, color: '#667', marginTop: 5 }}>
+            The bearer alone cannot write; the full grant is bound to the enrolled client certificate.
+          </div>
+        </div>
+      )}
+      {enrollment?.state === 'paired' && (
+        <div style={{ ...pairing, marginTop: 9, color: '#2c6f46' }}>
+          ✅ {enrollment.principal} already has an enrolled mTLS client with full write access.
+        </div>
+      )}
+
       {status.output.trim() && (
         <details style={{ marginTop: 6 }}>
           <summary style={{ cursor: 'pointer', fontSize: 12, color: '#667' }}>Deploy log</summary>
@@ -219,4 +282,8 @@ const box: React.CSSProperties = {
 const pre: React.CSSProperties = {
   whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: '#eef1f6', borderRadius: 6,
   padding: '8px 10px', fontSize: 11.5, margin: '6px 0 0', maxHeight: 220, overflow: 'auto',
+};
+const pairing: React.CSSProperties = {
+  border: '1px solid #cbd8eb', borderRadius: 7, background: '#f1f6fd', padding: '8px 10px',
+  fontSize: 12,
 };
