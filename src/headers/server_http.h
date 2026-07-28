@@ -105,6 +105,13 @@ extern "C"
    int server_http_authorize(int is_tcp, const char *bearer_cfg, const char *auth_header,
                              const char *api_key_header, int has_session_key);
 
+   /* JSON body for a server_http_authorize rejection (pure — unit-testable).
+    * |az| is that function's non-zero return. The 401 text carries the recovery
+    * path for a bearer rotation, which invalidates every already-paired client
+    * at once; clients echo this text verbatim, so it is the only guidance most
+    * operators will see. */
+   const char *server_http_auth_error_body(int az);
+
    /* Trust-on-first-use gate (pure — unit-testable). Returns 1 when an authorized
     * TCP request must be REFUSED because the live listener bearer is still the
     * one-time bootstrap default (AIMEE_BOOTSTRAP_BEARER) and the route is not the
