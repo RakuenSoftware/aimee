@@ -559,7 +559,23 @@ static const struct
    const char *value;
 } config_flat_defaults[] = {
     {"db2_url", ""},
-    {"provider", "claude"},
+    /* EMPTY on purpose: a fresh install has no primary until one is chosen.
+     *
+     * This defaulted to "claude", which pre-populated an install with a provider
+     * the operator never picked. chat_agent_add_builtin_provider then synthesized
+     * a claude tmux-CLI agent for it, and chat_agent_select_provider PINNED the
+     * turn to that agent — so on a machine with no claude CLI every turn died
+     * with "no agent available for role 'code'", naming an internal role, while
+     * the agents the operator had actually added sat right there disabled for the
+     * turn. Completing the setup wizard did not help: the wizard writes
+     * agents.json's default_agent, and this pin overrode it.
+     *
+     * Empty means "not chosen": select_provider returns without pinning, every
+     * configured agent stays eligible, and agents.json's default_agent decides —
+     * which is what the wizard set. Setting a primary explicitly still pins, as
+     * before. Only NEW installs see this; an existing config has its own value
+     * persisted and is unaffected. */
+    {"provider", ""},
     {"default_persona", "engineer"},
     {"claude_model", ""},
     {"openai_endpoint", "https://api.openai.com/v1"},

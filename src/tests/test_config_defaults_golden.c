@@ -20,7 +20,10 @@ typedef struct
 } golden_t;
 static const golden_t g_golden[] = {
     {"db2_url", "\"\""},
-    {"provider", "\"claude\""},
+    /* EMPTY: a fresh install has no primary until one is chosen. It used to be
+     * "claude", which pinned the chat turn to a synthesized claude CLI agent and
+     * broke chat on any machine without that CLI. See config_fields.c. */
+    {"provider", "\"\""},
     {"default_persona", "\"engineer\""},
     {"claude_model", "\"\""},
     {"openai_endpoint", "\"https://api.openai.com/v1\""},

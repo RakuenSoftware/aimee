@@ -44,10 +44,16 @@ int main(void)
    assert(a.autonomous == 1);
 
    /* An explicit empty string for a genericised field leaves the default
-    * (non-empty guard) — provider stays "claude", not "". */
+    * (non-empty guard) — default_persona stays "engineer", not "".
+    *
+    * This used to demonstrate the property with `provider`, whose default was
+    * "claude". That default is now EMPTY on purpose (a fresh install has no
+    * primary until one is chosen), so provider can no longer show the guard —
+    * an empty default is indistinguishable from a wiped one. The guard itself is
+    * unchanged; this just picks a field that still has a non-empty default. */
    config_t b;
-   load_with("provider: \"\"\n", &b);
-   assert(strcmp(b.provider, "claude") == 0 &&
+   load_with("default_persona: \"\"\n", &b);
+   assert(strcmp(b.default_persona, "engineer") == 0 &&
           "empty-string yaml must not wipe a genericised string default");
 
    /* css_render_command keeps its inline any-string block: an explicit "" DOES
