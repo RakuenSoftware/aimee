@@ -214,9 +214,74 @@ static void ce_mark_done(int64_t job_id)
    aimee_pg_finalize(st);
 }
 
+/* Is this failure the PROVIDER being unavailable, rather than anything about the
+ * job? 503/429 and a -1 transport failure all mean "the upstream would not serve
+ * this right now" — the document was never looked at, so the outcome carries no
+ * information about whether it can be extracted.
+ *
+ * Matched on the message because that is what the call site has: provider_client
+ * reports "provider HTTP %d" and the sidecar path forwards it verbatim. */
+int kb_curator_error_is_provider_unavailable(const char *error_msg)
+{
+   if (!error_msg || !error_msg[0])
+      return 0;
+   return strstr(error_msg, "provider HTTP 503") != NULL ||
+          strstr(error_msg, "provider HTTP 429") != NULL ||
+          strstr(error_msg, "provider HTTP -1") != NULL;
+}
+
+/* Requeue WITHOUT spending an attempt: undo the increment ce_claim_job applied,
+ * and back off.
+ *
+ * A provider outage used to burn the whole budget in seconds. The upstream
+ * gateway opens a circuit breaker and then refuses everything for its cooldown,
+ * so three claims inside one cooldown drove a job straight to terminal 'failed'
+ * — permanent, unreviewed data loss from a condition that heals itself a minute
+ * later. Observed on a live deployment: every failed row sat at exactly
+ * attempts=3 with last_error "provider HTTP 503".
+ *
+ * The budget exists to stop a POISON JOB looping forever. An outage is not a
+ * poison job, and spending the budget on it protects nothing. The row stays
+ * 'pending' for as long as the provider is down; next_attempt_at bounds the
+ * retry load, and the operator sees the backlog in `aimee kb status`. */
+void kb_curator_mark_retry_provider_unavailable(int64_t job_id, int attempts, const char *error_msg)
+{
+   void *conn = db2_conn();
+   if (!conn)
+      return;
+
+   char err[CE_ERRBUF] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "UPDATE kb_async_jobs"
+                        " SET status = 'pending', last_error = ?1,"
+                        "     attempts = CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END,"
+                        "     next_attempt_at = ?3, updated_at = pg_now_text()"
+                        " WHERE id = ?2",
+                        err, sizeof(err));
+   if (!st)
+      return;
+   char errbuf[512];
+   snprintf(errbuf, sizeof(errbuf), "%s", error_msg ? error_msg : "provider unavailable");
+   aimee_pg_bind_text(st, "?1", errbuf);
+   aimee_pg_bind_int64(st, "?2", job_id);
+   /* Back off on the attempt number we just gave back, so a long outage still
+    * lengthens the interval instead of hammering a breaker that is open. */
+   char next_at[32];
+   kb_curator_next_attempt_at(attempts > 0 ? attempts : 1, next_at, sizeof(next_at));
+   aimee_pg_bind_text(st, "?3", next_at);
+   (void)aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+}
+
 static void ce_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempts,
                                   const char *error_msg)
 {
+   if (kb_curator_error_is_provider_unavailable(error_msg))
+   {
+      kb_curator_mark_retry_provider_unavailable(job_id, attempts, error_msg);
+      return;
+   }
    void *conn = db2_conn();
    if (!conn)
       return;

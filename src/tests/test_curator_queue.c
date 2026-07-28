@@ -21,6 +21,36 @@
 #include "../kb/kb_memory_facts.h"
 #include "config.h"
 
+/* An upstream outage must not be charged to the job. The gateway opens a circuit
+ * breaker and 503s everything for its cooldown, so three claims inside one
+ * cooldown used to drive a job to terminal 'failed' — permanent data loss from a
+ * condition that heals in a minute. Observed live: every failed row at exactly
+ * attempts=3, last_error "provider HTTP 503".
+ *
+ * Classification is what decides retry-vs-terminal, so pin it directly: a
+ * provider-availability failure is distinguishable from a real job failure. */
+static void test_provider_unavailable_is_not_a_job_failure(void)
+{
+   /* The breaker's own 503, and the two other ways the upstream declines. */
+   assert(kb_curator_error_is_provider_unavailable("provider HTTP 503"));
+   assert(kb_curator_error_is_provider_unavailable("provider HTTP 429"));
+   assert(kb_curator_error_is_provider_unavailable("provider HTTP -1"));
+
+   /* A 4xx that is ABOUT the request, a malformed reply, and a missing document
+    * are all real job failures: retrying them forever would be the poison-job
+    * loop the attempt budget exists to stop. */
+   assert(!kb_curator_error_is_provider_unavailable("provider HTTP 400"));
+   assert(!kb_curator_error_is_provider_unavailable("provider HTTP 422"));
+   assert(!kb_curator_error_is_provider_unavailable("sidecar returned non-JSON"));
+   assert(!kb_curator_error_is_provider_unavailable("kb_documents row not found"));
+   assert(!kb_curator_error_is_provider_unavailable("artifact write failed"));
+
+   /* Absent/empty error text must not be guessed into a retry. */
+   assert(!kb_curator_error_is_provider_unavailable(NULL));
+   assert(!kb_curator_error_is_provider_unavailable(""));
+   printf("  PASS: provider-unavailable is classified apart from job failure\n");
+}
+
 static sqlite3 *open_db(void)
 {
    db2_test_shim_open();
@@ -187,11 +217,11 @@ static void test_retry_backoff_defers_reclaim(sqlite3 *db)
    seed(db, "UPDATE kb_async_jobs SET status='done' WHERE status='pending'");
 
    seed(db, "INSERT INTO kb_documents (id,project,file_path,file_hash,chunk_index,content,doc_kind)"
-            " VALUES (9101,'p','bo.md','boh',0,'t','')");
+            " VALUES (9401,'p','bo.md','boh',0,'t','')");
    /* Backoff still running: the job is pending but must be passed over. */
    seed(db,
         "INSERT INTO kb_async_jobs (id,kind,document_id,project,status,attempts,next_attempt_at)"
-        " VALUES (9101,'extract_doc',9101,'p','pending',1,'2999-01-01 00:00:00')");
+        " VALUES (9401,'extract_doc',9401,'p','pending',1,'2999-01-01 00:00:00')");
 
    kb_curator_extract_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -199,13 +229,13 @@ static void test_retry_backoff_defers_reclaim(sqlite3 *db)
    snprintf(opts.extract_command, sizeof(opts.extract_command), "%s", "true");
 
    (void)kb_curator_extract_one(&opts);
-   assert(job_attempts(db, 9101) == 1); /* untouched: still deferred */
-   assert(strcmp(job_status(db, 9101), "pending") == 0);
+   assert(job_attempts(db, 9401) == 1); /* untouched: still deferred */
+   assert(strcmp(job_status(db, 9401), "pending") == 0);
 
    /* Backoff elapsed: claimable again. */
-   seed(db, "UPDATE kb_async_jobs SET next_attempt_at='2000-01-01 00:00:00' WHERE id=9101");
+   seed(db, "UPDATE kb_async_jobs SET next_attempt_at='2000-01-01 00:00:00' WHERE id=9401");
    (void)kb_curator_extract_one(&opts);
-   assert(job_attempts(db, 9101) == 2); /* claimed: attempts advanced */
+   assert(job_attempts(db, 9401) == 2); /* claimed: attempts advanced */
 
    printf("  PASS: test_retry_backoff_defers_reclaim (deferred, then claimed)\n");
 }
@@ -243,6 +273,28 @@ static void test_retry_delay_curve(void)
    assert(kb_curator_retry_delay_seconds(0) == KB_CURATOR_RETRY_BASE_S);      /* degenerate */
    assert(kb_curator_retry_delay_seconds(-5) == KB_CURATOR_RETRY_BASE_S);
    printf("  PASS: test_retry_delay_curve\n");
+}
+
+/* The behaviour that matters: a job already AT its attempt limit must survive the
+ * provider being down. Before the fix this row went terminal 'failed' and the
+ * document left the pipeline for good. */
+static void test_provider_outage_requeues(sqlite3 *db)
+{
+   seed(db, "INSERT INTO kb_documents (id,project,file_path,file_hash,chunk_index,content,doc_kind)"
+            " VALUES (9601,'p','out.md','oh1',0,'t','')");
+   /* attempts=3 is the exhausted budget: the next terminal decision fails it. */
+   seed(db, "INSERT INTO kb_async_jobs (id,kind,document_id,project,status,attempts,claimed_by,"
+            "claimed_at,created_at,updated_at) VALUES (9601,'extract_doc',9601,'p','running',3,"
+            "'kb.curator.drain',datetime('now'),datetime('now'),datetime('now'))");
+
+   kb_curator_mark_retry_provider_unavailable(9601, 3, "provider HTTP 503");
+
+   /* Retryable, not terminal — the outage says nothing about this document. */
+   assert(strcmp(job_status(db, 9601), "pending") == 0);
+   /* The claim's increment is given back, so a long outage cannot walk the
+    * budget to exhaustion one refused claim at a time. */
+   assert(job_attempts(db, 9601) == 2);
+   printf("  PASS: provider outage requeues at attempt limit without spending budget\n");
 }
 
 int main(void)
@@ -290,6 +342,8 @@ int main(void)
    test_retry_delay_curve();
    test_retry_backoff_defers_reclaim(db);
    test_retry_backoff_ignores_fresh_jobs(db);
+   test_provider_unavailable_is_not_a_job_failure();
+   test_provider_outage_requeues(db);
 
    printf("test_curator_queue: all tests passed\n");
    return 0;
