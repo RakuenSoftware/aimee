@@ -677,8 +677,22 @@ unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	@# exporting AIMEE_HOME would OVERRIDE the many tests that set HOME themselves
 	@# to steer the config dir (e.g. test_session_brief). Exporting HOME leaves the
 	@# default safe while a test's own setenv still wins inside its process.
-	@th="$$(mktemp -d /tmp/aimee-unit-home.XXXXXX)"; \
-	export HOME="$$th"; unset AIMEE_HOME; \
+	@# TMPDIR as well as HOME: platform_tmpdir() honours it, so the directories
+	@# tests create with platform_mkdtemp() land inside $$th and go with it on
+	@# EXIT. 64 of the 112 tests that make one never remove it, and they used to
+	@# pile up in /tmp across every run until tmpfs ran out of INODES (40k dirs,
+	@# 857k inodes, with 45GB still free) and nothing could create a file.
+	@# Short name on purpose. Every test temp dir now hangs off this prefix, so
+	@# its length is added to every path the suite creates. At least one test —
+	@# test_parent_write_guard_readonly_large_find — lists 300 files through
+	@# tool_bash, whose head+tail compaction drops the middle; the longer the
+	@# paths, the more bytes and the tighter the cut, and with
+	@# "aimee-unit-home.XXXXXX" (22 chars over /tmp) its final entry fell out of
+	@# the preserved tail and the assertion failed. That test is fragile about
+	@# output size — its own comment admits as much — but a short prefix costs
+	@# nothing and keeps this change from perturbing it.
+	@th="$$(mktemp -d /tmp/aut.XXXXXX)"; \
+	export HOME="$$th" TMPDIR="$$th"; unset AIMEE_HOME; \
 	trap 'rm -rf "$$th"' EXIT; \
 	jobs="$(TEST_RUN_JOBS)"; \
 	if [ "$$jobs" -le 1 ]; then \
