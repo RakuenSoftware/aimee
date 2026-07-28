@@ -78,6 +78,11 @@ SERVER_IDENTITY_ENV = {
 SERVER_MANAGEMENT_MOUNT = (
     "${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}:/run/aimee/management:ro"
 )
+SERVER_MANAGED_TRUST_ENV = (
+    "${AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE:-"
+    "/run/aimee/managed-trust/jwks-trust-bundle.json}"
+)
+SERVER_MANAGED_TRUST_MOUNT = "aimee-managed-jwks-trust:/run/aimee/managed-trust:ro"
 KB_MTLS_ENV = {
     "AIMEE_KB_MTLS_HOST": "0.0.0.0",
     "AIMEE_KB_MTLS_PORT": "8745",
@@ -307,7 +312,7 @@ def kb_publication_failures(text: str) -> list[str]:
     return failures
 
 
-def server_identity_failures(text: str) -> list[str]:
+def server_identity_failures(text: str, managed: bool = False) -> list[str]:
     """Validate the opt-in server identity contract in a release Compose file.
 
     Empty server/team/enrollment values preserve read-only startup. The public
@@ -328,12 +333,19 @@ def server_identity_failures(text: str) -> list[str]:
     environment = service.get("environment")
     if not isinstance(environment, dict):
         return ["aimee-server environment must use parsed mapping form"]
-    for name, expected in SERVER_IDENTITY_ENV.items():
+    expected_env = dict(SERVER_IDENTITY_ENV)
+    if managed:
+        expected_env["AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE"] = SERVER_MANAGED_TRUST_ENV
+    for name, expected in expected_env.items():
         if environment.get(name) != expected:
             failures.append(f"aimee-server {name} must pass through as {expected}")
     volumes = service.get("volumes")
     if not isinstance(volumes, list) or SERVER_MANAGEMENT_MOUNT not in volumes:
         failures.append("aimee-server missing the read-only management trust mount")
+    if managed and (
+        not isinstance(volumes, list) or SERVER_MANAGED_TRUST_MOUNT not in volumes
+    ):
+        failures.append("aimee-server missing the read-only wizard-managed trust volume")
     return failures
 
 
@@ -469,7 +481,9 @@ def check(root: Path) -> list[str]:
         if not path.exists() or not re.search(r"(?m)^  aimee-server:\s*$", read(path)):
             failures.append(f"{topology} missing aimee-server certificate-bearing service")
         elif path.exists():
-            for failure in server_identity_failures(read(path)):
+            for failure in server_identity_failures(
+                read(path), managed=topology == "compose.server-managed.yaml"
+            ):
                 failures.append(f"{topology} {failure}")
 
     if not dockerfile.exists():
@@ -628,11 +642,19 @@ def plant_test() -> int:
                 "",
             ]
         )
+        managed_server_service = server_service.replace(
+            "${AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE:-/run/aimee/management/jwks-trust-bundle.json}",
+            "${AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE:-/run/aimee/managed-trust/jwks-trust-bundle.json}",
+        ).replace(
+            "      - ${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}:/run/aimee/management:ro",
+            "      - ${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}:/run/aimee/management:ro\n"
+            "      - aimee-managed-jwks-trust:/run/aimee/managed-trust:ro",
+        )
         (root / "compose.server.yaml").write_text(
             read(root / "compose.yaml") + server_service, encoding="utf-8"
         )
         (root / "compose.server-managed.yaml").write_text(
-            "services:\n" + server_service, encoding="utf-8"
+            "services:\n" + managed_server_service, encoding="utf-8"
         )
         (root / "compose.server-standalone.yaml").write_text(
             "services:\n" + server_service, encoding="utf-8"
@@ -696,13 +718,14 @@ def plant_test() -> int:
             "      AIMEE_SERVER_ID: ${AIMEE_SERVER_ID:-}\n",
             "      AIMEE_SERVER_TEAM_ID: ${AIMEE_SERVER_TEAM_ID:-}\n",
             "      AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE: "
-            "${AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE:-/run/aimee/management/jwks-trust-bundle.json}\n",
+            "${AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE:-/run/aimee/managed-trust/jwks-trust-bundle.json}\n",
             "      AIMEE_KB_CONN: ${AIMEE_KB_CONN:-}\n",
             "      - ${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}:"
             "/run/aimee/management:ro\n",
+            "      - aimee-managed-jwks-trust:/run/aimee/managed-trust:ro\n",
         ):
             planted = identity_compose.replace(marker, "", 1)
-            if planted == identity_compose or not server_identity_failures(planted):
+            if planted == identity_compose or not server_identity_failures(planted, managed=True):
                 print(f"kb-container-packaging plant: missed server identity marker {marker!r}", file=sys.stderr)
                 return 1
 

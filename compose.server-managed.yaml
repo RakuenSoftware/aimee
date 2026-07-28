@@ -50,7 +50,7 @@ services:
       # editing this manifest. The trust bundle is mounted read-only below.
       AIMEE_SERVER_ID: ${AIMEE_SERVER_ID:-}
       AIMEE_SERVER_TEAM_ID: ${AIMEE_SERVER_TEAM_ID:-}
-      AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE: ${AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE:-/run/aimee/management/jwks-trust-bundle.json}
+      AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE: ${AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE:-/run/aimee/managed-trust/jwks-trust-bundle.json}
       # Optional server -> kb mTLS enrollment string. HTTP remains the ordinary
       # data path; mTLS is required to refresh the signed management JWKS.
       AIMEE_KB_CONN: ${AIMEE_KB_CONN:-}
@@ -74,6 +74,9 @@ services:
       # what the wizard selected — so there is no separate CPU image to override.
       AIMEE_LLM_IMAGE: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:${AIMEE_IMAGE_TAG:-latest}}
       AIMEE_KB_IMAGE: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:${AIMEE_IMAGE_TAG:-latest}}
+      # Separate one-shot image containing the offline root provisioner and JWKS
+      # publisher. These binaries never enter the ordinary KB/server images.
+      AIMEE_AUTHORITY_BOOTSTRAP_IMAGE: ${AIMEE_AUTHORITY_BOOTSTRAP_IMAGE:-ghcr.io/rakuensoftware/aimee-authority-bootstrap:${AIMEE_IMAGE_TAG:-latest}}
       AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-cpu}
       AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}
       # Optional operator-supplied KB -> LLM service bearer. When omitted, the
@@ -103,6 +106,9 @@ services:
       # must be root-owned and not group/world-writable; 0644 lets the UID 1000
       # server read them while this read-only mount prevents container writes.
       - ${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}:/run/aimee/management:ro
+      # Wizard-generated public verification roots. Only the one-shot authority
+      # bootstrap mounts this volume writable; the server can never replace it.
+      - aimee-managed-jwks-trust:/run/aimee/managed-trust:ro
       # The host Docker socket — lets aimee-server launch the managed services.
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
@@ -115,3 +121,4 @@ services:
 volumes:
   aimee-server-home:
   aimee-server-workspaces:
+  aimee-managed-jwks-trust:

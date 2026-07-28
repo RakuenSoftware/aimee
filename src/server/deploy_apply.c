@@ -521,6 +521,22 @@ static int deploy_identity_bootstrap_argv(const char *file, const char **argv, s
    return (int)n;
 }
 
+/* Run the isolated offline root/JWKS bootstrap. The service receives only named
+ * volumes and the KB's private Unix socket; no custody key or trust bundle
+ * crosses the server process, host argv, or captured output. */
+static int deploy_authority_bootstrap_argv(const char *file, const char **argv, size_t cap)
+{
+   const char *cmd[] = {"docker", "compose", "-f", file,
+                        "run",    "--rm",    "-T", "aimee-authority-bootstrap"};
+   size_t n = sizeof(cmd) / sizeof(cmd[0]);
+   if (!argv || !file || !file[0] || cap < n + 1)
+      return -1;
+   for (size_t i = 0; i < n; i++)
+      argv[i] = cmd[i];
+   argv[n] = NULL;
+   return (int)n;
+}
+
 static void *deploy_worker(void *arg)
 {
    (void)arg;
@@ -555,6 +571,32 @@ static void *deploy_worker(void *arg)
          snprintf(out, sizeof(out),
                   "deploy: failed to run `docker compose` (is docker on PATH?)\n");
       else if (code == 0 && managed_identity)
+      {
+         const char *authority_argv[12];
+         int authority_code = -1;
+         char authority_out[1024] = "";
+         if (deploy_authority_bootstrap_argv(
+                 file, authority_argv, sizeof(authority_argv) / sizeof(authority_argv[0])) < 0 ||
+             run_capture(authority_argv, envp, authority_out, sizeof(authority_out),
+                         &authority_code) != 0 ||
+             authority_code != 0)
+         {
+            code = authority_code == 0 ? -1 : authority_code;
+            used = strlen(out);
+            if (used < sizeof(out) - 1)
+               snprintf(out + used, sizeof(out) - used,
+                        "deploy: managed authority/JWKS bootstrap failed%s%s\n",
+                        authority_out[0] ? ": " : "", authority_out);
+         }
+         else
+         {
+            used = strlen(out);
+            if (used < sizeof(out) - 1)
+               snprintf(out + used, sizeof(out) - used,
+                        "deploy: managed authority roots and signed JWKS verified\n");
+         }
+      }
+      if (code == 0 && managed_identity)
       {
          const char *identity_argv[12];
          int identity_code = -1;

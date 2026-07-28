@@ -102,6 +102,31 @@ services:
       - aimee-managed-kb-home:/var/lib/aimee
       - aimee-server-home:/var/lib/aimee-server
 
+  # Root custody and signed-JWKS publication stay out of both online images.
+  # The browser wizard explicitly runs this one-shot service before server
+  # enrollment. Its software-backed KMS state persists in a private volume; its
+  # only server-visible output is the public root-owned trust bundle below.
+  aimee-authority-bootstrap:
+    profiles: ["authority-bootstrap"]
+    image: ${AIMEE_AUTHORITY_BOOTSTRAP_IMAGE:-ghcr.io/rakuensoftware/aimee-authority-bootstrap:${AIMEE_IMAGE_TAG:-latest}}
+    user: "0:0"
+    network_mode: none
+    cap_add: [IPC_LOCK]
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    depends_on:
+      aimee-kb: { condition: service_healthy }
+    volumes:
+      - aimee-managed-kb-home:/var/lib/aimee-kb
+      - aimee-managed-authority-home:/var/lib/aimee-authority
+      # The provisioner clears its environment before private use. Its vault
+      # fallback therefore resolves here; this is the same private volume under
+      # a second fixed mount, never a host bind.
+      - aimee-managed-authority-home:/tmp/.config/aimee
+      - aimee-managed-jwks-trust:/run/aimee-trust
+
   # The one LLM service, for every tier: a model-less image that pulls the tier
   # the wizard selected on first boot and persists it in the /models volume.
   # Selected by COMPOSE_PROFILES=...,llm whenever any role is served locally.
@@ -155,9 +180,13 @@ services:
 volumes:
   aimee-managed-kb-home:
   aimee-managed-llm-models:
+  aimee-managed-authority-home:
   aimee-server-workspaces:
     external: true
     name: aimee_aimee-server-workspaces
   aimee-server-home:
     external: true
     name: aimee_aimee-server-home
+  aimee-managed-jwks-trust:
+    external: true
+    name: aimee_aimee-managed-jwks-trust

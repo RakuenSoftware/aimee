@@ -262,6 +262,29 @@ static void test_managed_identity_bootstrap_runs_inside_kb_without_secret_argv(v
    printf("  deploy invokes the KB-owned managed identity bootstrap without host secret argv ok\n");
 }
 
+static void test_managed_authority_bootstrap_is_isolated_and_secret_free(void)
+{
+   const char *argv[16];
+   int n = deploy_authority_bootstrap_argv("/managed.yaml", argv, sizeof(argv) / sizeof(argv[0]));
+   assert(n > 0 && argv[n] == NULL);
+   assert(strcmp(argv[0], "docker") == 0 && strcmp(argv[1], "compose") == 0);
+   assert(strcmp(argv[3], "/managed.yaml") == 0 && strcmp(argv[4], "run") == 0);
+
+   int saw_bootstrap = 0;
+   for (int i = 0; i < n; i++)
+   {
+      assert(strstr(argv[i], "PRIVATE KEY") == NULL);
+      assert(strstr(argv[i], "KMS_KEY") == NULL);
+      assert(strstr(argv[i], "postgresql://") == NULL);
+      assert(strcmp(argv[i], "--no-deps") != 0);
+      if (strcmp(argv[i], "aimee-authority-bootstrap") == 0)
+         saw_bootstrap = 1;
+   }
+   assert(saw_bootstrap);
+   assert(deploy_authority_bootstrap_argv("/managed.yaml", argv, (size_t)n) == -1);
+   printf("  deploy invokes isolated authority bootstrap without host secret argv ok\n");
+}
+
 /* --- the legacy CPU container is retired by name --- */
 
 static void test_retire_targets_legacy_cpu_container(void)
@@ -312,6 +335,7 @@ int main(void)
    test_deploy_argv_has_no_remove_orphans();
    test_llm_probe_uses_kb_credential_without_host_secret();
    test_managed_identity_bootstrap_runs_inside_kb_without_secret_argv();
+   test_managed_authority_bootstrap_is_isolated_and_secret_free();
    test_retire_targets_legacy_cpu_container();
    test_compose_file_default();
    printf("test_deploy_apply: all passed\n");

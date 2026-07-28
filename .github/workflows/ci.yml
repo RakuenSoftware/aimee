@@ -103,6 +103,8 @@ jobs:
         run: cd src && make lint
       - name: Check 3db tier dependencies
         run: ./scripts/check_tier_deps.sh
+      - name: Check managed authority packaging boundary
+        run: python3 scripts/check-managed-authority-packaging.py
 
   build:
     runs-on: ubuntu-latest
