@@ -1630,17 +1630,57 @@ void pt_print_kb_ingest_status(const char *method, cJSON *resp)
       }
    }
 }
+/* Renders what kb_service_kb.c actually sends. Three fields used to be dropped
+ * on the floor, and each omission read as good news:
+ *
+ *   summary_status  the server's OWN degraded/maintenance verdict (vector down,
+ *                   re-embed stuck). Omitting it makes a degraded kb look fine.
+ *   queue           the real backlog. A kb with thousands pending and hundreds
+ *                   failed rendered as "Background ingest: 0 pending", because
+ *                   ingest_queue is a DIFFERENT queue that is legitimately 0.
+ *   vector          points live nested under it; the old code read a top-level
+ *                   "vector_points" this route has never emitted, so the line
+ *                   was dead and the store always looked empty.
+ *
+ * A status command that hides backlog and degradation is worse than no status
+ * command: it is consulted precisely when someone suspects trouble. */
 void pt_print_kb_status(const char *method, cJSON *resp)
 {
    cJSON *proj = cJSON_GetObjectItemCaseSensitive(resp, "project");
    cJSON *chunks = cJSON_GetObjectItemCaseSensitive(resp, "chunks");
-   cJSON *vpts = cJSON_GetObjectItemCaseSensitive(resp, "vector_points");
+   cJSON *summary = cJSON_GetObjectItemCaseSensitive(resp, "summary_status");
    if (cJSON_IsString(proj))
       printf("project: %s\n", proj->valuestring);
+   if (cJSON_IsString(summary))
+      printf("status:        %s\n", summary->valuestring);
    if (cJSON_IsNumber(chunks))
       printf("chunks:        %d\n", (int)chunks->valuedouble);
-   if (cJSON_IsNumber(vpts))
-      printf("vector points: %d\n", (int)vpts->valuedouble);
+
+   cJSON *vec = cJSON_GetObjectItemCaseSensitive(resp, "vector");
+   if (cJSON_IsObject(vec))
+   {
+      cJSON *kbp = cJSON_GetObjectItemCaseSensitive(vec, "kb_points");
+      cJSON *memp = cJSON_GetObjectItemCaseSensitive(vec, "memory_points");
+      if (cJSON_IsNumber(kbp) || cJSON_IsNumber(memp))
+         printf("vector points: %d kb, %d memory\n",
+                cJSON_IsNumber(kbp) ? (int)kbp->valuedouble : 0,
+                cJSON_IsNumber(memp) ? (int)memp->valuedouble : 0);
+   }
+
+   /* Printed whenever the server sent it, including all-zero: "0 failed" is a
+    * fact an operator wants confirmed, not an absence to be inferred. */
+   cJSON *q = cJSON_GetObjectItemCaseSensitive(resp, "queue");
+   if (cJSON_IsObject(q))
+   {
+      cJSON *qp = cJSON_GetObjectItemCaseSensitive(q, "pending");
+      cJSON *qr = cJSON_GetObjectItemCaseSensitive(q, "running");
+      cJSON *qf = cJSON_GetObjectItemCaseSensitive(q, "failed");
+      printf("Queue:     %d pending, %d running, %d failed\n",
+             cJSON_IsNumber(qp) ? (int)qp->valuedouble : 0,
+             cJSON_IsNumber(qr) ? (int)qr->valuedouble : 0,
+             cJSON_IsNumber(qf) ? (int)qf->valuedouble : 0);
+   }
+
    cJSON *iq = cJSON_GetObjectItemCaseSensitive(resp, "ingest_queue");
    if (cJSON_IsObject(iq))
    {
