@@ -1,0 +1,34 @@
+{
+  "artifacts": {
+    "hardware_embedding.json": {
+      "bytes": 641,
+      "sha256": "e2edd2cc526cff329be4a278d1acfd75d7f456edaf350066e4d55916a1989b83"
+    },
+    "raw_embedding_gemma4_e4b.jsonl": {
+      "bytes": 1938865,
+      "sha256": "891dc7e8e827d4b5562fd4395b9f840a639d25ce32f6c920cc3d6e9d5a1b1a52"
+    },
+    "summary_embedding_gemma4_e4b.json": {
+      "bytes": 710,
+      "sha256": "8b41cb5d9427ab72daa032537bd820f8ebc634036d88192d205ff593cf2aa874"
+    }
+  },
+  "label": "gemma4_e4b",
+  "latest_rows": 10000,
+  "metrics": {
+    "native": {
+      "dimensions": 2560,
+      "mrr_at_10": 0.32865674603174605,
+      "ndcg_at_10": 0.4221858362790011,
+      "projection": "none",
+      "recall_at_1": 0.1832,
+      "recall_at_10": 0.7275,
+      "recall_at_5": 0.5205
+    }
+  },
+  "raw_rows": 10000,
+  "secret_scan": "pass",
+  "suite_manifest_sha256": "16d2c16add86052ff24be410699ab9452ee1a36252de6dba31ab5391de7ab81c",
+  "vectors_per_second": 2.283945118312231,
+  "view": "embedding"
+}
