@@ -411,7 +411,7 @@ The binaries read 221 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_KB_JWKS_PUBLICATION_HWM_CUSTODY_ID` | Custody identifier for the JWKS publication high-water mark. |
 | `AIMEE_KB_JWKS_PUBLISH_DSN` | Provisioning database URL used by the JWKS publisher; secret. |
 | `AIMEE_KB_MGMT_STATUS_SECONDARY_LEAF_PIN` | Secondary TLS leaf pin accepted during management-status certificate rotation. |
-| `AIMEE_KB_MTLS_HOST` | aimee-kb mTLS listener host. |
+| `AIMEE_KB_MTLS_HOST` | Advertised mTLS hostname placed in the aimee-kb server certificate; the listener binds all interfaces. |
 | `AIMEE_KB_MTLS_PORT` | aimee-kb mTLS listener port. |
 | `AIMEE_KB_OIDC_AUDIENCE` | OIDC audience for KB API auth. |
 | `AIMEE_KB_OIDC_ISSUER` | OIDC issuer for KB API auth. |

@@ -702,7 +702,10 @@ ENV_DESC = {
         "and serves reads but denies every write with no_team_configured.",
     ),
     "AIMEE_KB_HTTP_BIND": ("Knowledge base (aimee-kb)", "aimee-kb HTTP listener bind address."),
-    "AIMEE_KB_MTLS_HOST": ("Knowledge base (aimee-kb)", "aimee-kb mTLS listener host."),
+    "AIMEE_KB_MTLS_HOST": (
+        "Knowledge base (aimee-kb)",
+        "Advertised mTLS hostname placed in the aimee-kb server certificate; the listener binds all interfaces.",
+    ),
     "AIMEE_KB_MTLS_PORT": ("Knowledge base (aimee-kb)", "aimee-kb mTLS listener port."),
     "AIMEE_KB_EMIT_ENROLL": ("Knowledge base (aimee-kb)", "Emit a client enrollment token on KB start."),
     "AIMEE_KB_EMIT_SCOPE": ("Knowledge base (aimee-kb)", "Scope for the emitted enrollment token."),

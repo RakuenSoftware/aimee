@@ -60,8 +60,10 @@ services:
       AIMEE_LLM_MODEL: ${AIMEE_LLM_MODEL:-aimee-synth}
       AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
       # Internal-only mTLS lane used for server enrollment and signed management
-      # JWKS refresh. It is reachable on the Compose network, not published.
-      AIMEE_KB_MTLS_HOST: 0.0.0.0
+      # JWKS refresh. It is reachable on the Compose network, not published. The
+      # value is the certificate DNS identity; the listener still binds all
+      # container interfaces inside kb_mtls_start().
+      AIMEE_KB_MTLS_HOST: aimee-kb
       AIMEE_KB_MTLS_PORT: "8745"
     command: ["--http-port=8741"]
     healthcheck:

@@ -84,7 +84,7 @@ SERVER_MANAGED_TRUST_ENV = (
 )
 SERVER_MANAGED_TRUST_MOUNT = "aimee-managed-jwks-trust:/run/aimee/managed-trust:ro"
 KB_MTLS_ENV = {
-    "AIMEE_KB_MTLS_HOST": "0.0.0.0",
+    "AIMEE_KB_MTLS_HOST": "aimee-kb",
     "AIMEE_KB_MTLS_PORT": "8745",
 }
 
@@ -617,7 +617,7 @@ def plant_test() -> int:
                     "      AIMEE_HOME: /var/lib/aimee",
                     "      AIMEE_DB2_URL: ${AIMEE_DB2_URL:-}",
                     "      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8080}",
-                    "      AIMEE_KB_MTLS_HOST: 0.0.0.0",
+                    "      AIMEE_KB_MTLS_HOST: aimee-kb",
                     '      AIMEE_KB_MTLS_PORT: "8745"',
                     "    ports:",
                     '      - "127.0.0.1:8741:8741"',
@@ -667,7 +667,7 @@ def plant_test() -> int:
             "services:\n"
             "  aimee-kb:\n"
             "    environment:\n"
-            "      AIMEE_KB_MTLS_HOST: 0.0.0.0\n"
+            "      AIMEE_KB_MTLS_HOST: aimee-kb\n"
             '      AIMEE_KB_MTLS_PORT: "8745"\n'
             "      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8742}\n"
             "      AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}\n"
@@ -730,7 +730,7 @@ def plant_test() -> int:
                 return 1
 
         for marker in (
-            "      AIMEE_KB_MTLS_HOST: 0.0.0.0\n",
+            "      AIMEE_KB_MTLS_HOST: aimee-kb\n",
             '      AIMEE_KB_MTLS_PORT: "8745"\n',
         ):
             planted = read(root / "deploy/container/aimee-managed.compose.yaml").replace(
