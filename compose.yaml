@@ -82,6 +82,7 @@ services:
       retries: 5
     volumes:
       - aimee-kb-home:/var/lib/aimee
+      - aimee-server-workspaces:/var/lib/aimee-workspaces:ro
 
   # aimee-control-web: the Control Plane web console (dashboard / accounts / governance).
   # Optional module `control-web` — ships ENABLED. Turn it off for a fully scripted
@@ -192,6 +193,7 @@ services:
 
 volumes:
   aimee-kb-home:
+  aimee-server-workspaces:
   control-web-home:
   aimee-embedder-models:
   aimee-llm-models:
