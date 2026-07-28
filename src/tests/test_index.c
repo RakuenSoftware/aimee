@@ -582,6 +582,54 @@ int main(void)
       assert(strcmp(body, gitmod_body) == 0);
    }
 
+   /* --- malformed bytes are normalized before either canonical ingest path
+    * reaches Postgres TEXT; pushed buffers remain caller-owned and immutable. --- */
+   {
+      char *invalid_dir = malloc(PATH_MAX);
+      assert(invalid_dir != NULL);
+      snprintf(invalid_dir, PATH_MAX, "%s/aimee-test-index-utf8-XXXXXX", platform_tmpdir());
+      assert(platform_mkdtemp(invalid_dir) != NULL);
+
+      char path[PATH_MAX];
+      snprintf(path, sizeof(path), "%s/legacy.c", invalid_dir);
+      FILE *f = fopen(path, "wb");
+      assert(f != NULL);
+      const char invalid_disk[] = "void legacy_\x92symbol(void) {} /* \xed\xa0\x80 */\n";
+      assert(fwrite(invalid_disk, 1, sizeof(invalid_disk) - 1, f) == sizeof(invalid_disk) - 1);
+      fclose(f);
+
+      int inspected = 0;
+      assert(canonical_index_scan_project("utf8disk", invalid_dir, 1, &inspected) == 1);
+      assert(inspected == 1);
+      char stored[256];
+      file_content("utf8disk", "legacy.c", stored, sizeof(stored));
+      assert(strcmp(stored, "void legacy_?symbol(void) {} /* ??? */\n") == 0);
+
+      const char invalid_push[] = "int pushed_\x94value = 1; /* \x80 */\n";
+      canonical_index_file_input_t input = {"pushed.c", invalid_push};
+      assert(canonical_index_scan_files("utf8push", "remote", &input, 1, 1, &inspected) == 1);
+      file_content("utf8push", "pushed.c", stored, sizeof(stored));
+      assert(strcmp(stored, "int pushed_?value = 1; /* ? */\n") == 0);
+      assert((unsigned char)invalid_push[11] == 0x94);
+
+      const char invalid_adapter[] = "adapter \x92"
+                                     "body \xed\xa0\x80";
+      int64_t pid = db2_code_index_project_upsert("utf8adapter", "/remote");
+      assert(pid > 0);
+      int64_t fid = db2_code_index_file_upsert(pid, "adapter.c", "2026-07-28T00:00:00Z");
+      assert(fid > 0);
+      code_index_file_data_t data = {.content = invalid_adapter};
+      assert(db2_code_index_file_replace(fid, &data) == 0);
+      file_content("utf8adapter", "adapter.c", stored, sizeof(stored));
+      assert(strcmp(stored, "adapter ?body ???") == 0);
+      assert((unsigned char)invalid_adapter[8] == 0x92);
+
+      char cmd[PATH_MAX + 16];
+      snprintf(cmd, sizeof(cmd), "rm -rf %s", invalid_dir);
+      (void)system(cmd);
+      free(invalid_dir);
+   }
+
    /* --- production co-change path: canonical scan populates co_edited edges from
     * git history, the bulk gate holds, re-scan is idempotent, and blast radius
     * surfaces a co-edited file with no structural import link. This guards the

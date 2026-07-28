@@ -117,12 +117,22 @@ int kb_tls_peer_cn(SSL *ssl, char *out, size_t cap)
 {
    if (!ssl || !out || cap == 0)
       return -1;
+   out[0] = '\0';
    X509 *peer = SSL_get1_peer_certificate(ssl);
    if (!peer)
       return -1;
-   int n = X509_NAME_get_text_by_NID(X509_get_subject_name(peer), NID_commonName, out, (int)cap);
+   X509_NAME *name = X509_get_subject_name(peer);
+   int required = X509_NAME_get_text_by_NID(name, NID_commonName, NULL, 0);
+   int n = required > 0 && (size_t)required < cap
+               ? X509_NAME_get_text_by_NID(name, NID_commonName, out, (int)cap)
+               : -1;
    X509_free(peer);
-   return n > 0 ? 0 : -1;
+   if (n != required)
+   {
+      out[0] = '\0';
+      return -1;
+   }
+   return 0;
 }
 
 int kb_tls_peer_fingerprint(SSL *ssl, char *hex_out, size_t cap)
@@ -154,6 +164,7 @@ int kb_tls_peer_issuer(SSL *ssl, char *out, size_t cap)
 {
    if (!ssl || !out || cap == 0)
       return -1;
+   out[0] = '\0';
    X509 *peer = SSL_get1_peer_certificate(ssl);
    if (!peer)
       return -1;
@@ -161,9 +172,13 @@ int kb_tls_peer_issuer(SSL *ssl, char *out, size_t cap)
    int rc = -1;
    if (dn)
    {
-      snprintf(out, cap, "%s", dn);
+      size_t n = strlen(dn);
+      if (n < cap)
+      {
+         memcpy(out, dn, n + 1);
+         rc = 0;
+      }
       OPENSSL_free(dn);
-      rc = 0;
    }
    X509_free(peer);
    return rc;
@@ -175,6 +190,7 @@ int kb_tls_peer_serial(SSL *ssl, char *out, size_t cap)
 {
    if (!ssl || !out || cap == 0)
       return -1;
+   out[0] = '\0';
    X509 *peer = SSL_get1_peer_certificate(ssl);
    if (!peer)
       return -1;
@@ -186,9 +202,13 @@ int kb_tls_peer_serial(SSL *ssl, char *out, size_t cap)
       char *hex = BN_bn2hex(bn);
       if (hex)
       {
-         snprintf(out, cap, "%s", hex);
+         size_t n = strlen(hex);
+         if (n < cap)
+         {
+            memcpy(out, hex, n + 1);
+            rc = 0;
+         }
          OPENSSL_free(hex);
-         rc = 0;
       }
       BN_free(bn);
    }

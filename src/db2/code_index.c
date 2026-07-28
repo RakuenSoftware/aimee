@@ -7,9 +7,11 @@
 #include "db2.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
+#include "util.h"
 
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define CIDX_ERRBUF 256
@@ -635,9 +637,17 @@ int db2_code_index_file_replace(int64_t file_id, const code_index_file_data_t *d
    if (!conn)
       return -1;
 
+   char *clean_content = strdup(data->content ? data->content : "");
+   if (!clean_content)
+      return -1;
+   (void)text_sanitize_utf8(clean_content);
+
    char err[CIDX_ERRBUF] = "";
    if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
+   {
+      free(clean_content);
       return -1;
+   }
 
    int rc = 0;
    if (db2_exec_conn_int64(conn, "DELETE FROM file_exports WHERE file_id = ?1", file_id) != 0)
@@ -658,7 +668,7 @@ int db2_code_index_file_replace(int64_t file_id, const code_index_file_data_t *d
       if (st)
       {
          aimee_pg_bind_int64(st, "?1", file_id);
-         aimee_pg_bind_text(st, "?2", data->content ? data->content : "");
+         aimee_pg_bind_text(st, "?2", clean_content);
          if (aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_DONE)
             rc = -1;
          aimee_pg_finalize(st);
@@ -784,9 +794,16 @@ int db2_code_index_file_replace(int64_t file_id, const code_index_file_data_t *d
    }
 
    if (rc == 0)
-      aimee_pg_exec(conn, "COMMIT", err, sizeof(err));
+   {
+      if (aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
+      {
+         aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+         rc = -1;
+      }
+   }
    else
       aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+   free(clean_content);
    return rc;
 }
 

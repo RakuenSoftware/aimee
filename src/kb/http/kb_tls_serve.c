@@ -341,8 +341,9 @@ static int mtls_renew(const char *scope_cn, const char *old_fp, const char *old_
       snprintf(resp, (size_t)cap, "{\"error\":\"renew failed: bad CSR\"}");
       return 400;
    }
-   char new_fp[KB_PKI_FP_HEX] = "", new_issuer[256] = "", raw_serial[128] = "";
-   char new_serial[128] = "";
+   char new_fp[KB_PKI_FP_HEX] = "", new_issuer[KB_PKI_ISSUER_MAX + 1] = "";
+   char raw_serial[KB_PKI_SERIAL_MAX + 1] = "";
+   char new_serial[KB_PKI_SERIAL_MAX + 1] = "";
    int metadata_ok = kb_pki_ca_fingerprint(cert, new_fp, sizeof(new_fp)) == 0 &&
                      kb_pki_cert_metadata(cert, new_issuer, sizeof(new_issuer), raw_serial,
                                           sizeof(raw_serial)) == 0 &&
@@ -492,7 +493,8 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
        * to an active enrollment. Unknown, revoked, and authority-error outcomes
        * all fail closed before routing; active use gets a debounced last-seen bump. */
       int cert_authority = 0;
-      char fp[65] = "", issuer[256] = "", serial[128] = "";
+      char fp[65] = "", issuer[KB_TLS_PEER_ISSUER_MAX + 1] = "";
+      char serial[KB_TLS_PEER_SERIAL_MAX + 1] = "";
       kb_principal_t transport;
       memset(&transport, 0, sizeof(transport));
       if (have_cert)
@@ -581,8 +583,7 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
             status = 405;
          }
          else
-            status = mtls_management_jwks(transport.issuer, transport.subject, fp, resp,
-                                          KB_TLS_RESP_MAX);
+            status = mtls_management_jwks(issuer, transport.subject, fp, resp, KB_TLS_RESP_MAX);
          if (status == 403 || status == 503)
             close_after_response = 1;
       }
@@ -597,8 +598,7 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
          }
          else
          {
-            status = mtls_renew(cn, fp, transport.issuer, transport.subject, body, resp,
-                                KB_TLS_RESP_MAX);
+            status = mtls_renew(cn, fp, issuer, transport.subject, body, resp, KB_TLS_RESP_MAX);
          }
       }
       else if (have_cert && strcmp(cpath, "/v1/server/heartbeat") == 0)
