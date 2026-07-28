@@ -71,7 +71,9 @@ static int enroll_redeem_route(const char *method, const char *path, const char 
       }
       /* Persist the issuer/serial and mTLS certificate-DER SHA-256. Fail closed
        * rather than release an authority the enrollment database cannot revoke. */
-      char fp[KB_PKI_FP_HEX] = "", issuer[256] = "", raw_serial[128] = "", serial[128] = "";
+      char fp[KB_PKI_FP_HEX] = "", issuer[KB_PKI_ISSUER_MAX + 1] = "";
+      char raw_serial[KB_PKI_SERIAL_MAX + 1] = "";
+      char serial[KB_PKI_SERIAL_MAX + 1] = "";
       char expires_at[32] = "";
       if (kb_pki_ca_fingerprint(cert, fp, sizeof(fp)) != 0 ||
           kb_pki_cert_metadata(cert, issuer, sizeof(issuer), raw_serial, sizeof(raw_serial)) != 0 ||
