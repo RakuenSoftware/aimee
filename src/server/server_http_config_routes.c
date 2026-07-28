@@ -307,11 +307,10 @@ int route_role_template_remove(const char *name, char *resp, int cap)
 /* The current active-preset name (config.roundtable_default), or "" if none. */
 static void rt_active_name(char *out, size_t out_n)
 {
-   config_t cfg;
    if (out && out_n)
       out[0] = '\0';
-   if (config_load(&cfg) == 0 && out && out_n)
-      snprintf(out, out_n, "%s", cfg.roundtable_default);
+   if (out && out_n)
+      snprintf(out, out_n, "%s", config_roundtable_default());
 }
 
 int route_roundtables_list(char *resp, int cap)
@@ -924,19 +923,52 @@ static int deploy_route_guard(char *resp, int cap)
 
 /* POST /v1/deploy/apply — bring up the managed sibling services (aimee-kb +
  * aimee-llm) for the current wizard config via `docker compose up -d`
- * on a background thread. Returns {ok, status:"started"|"running"}. */
+ * on a background thread. The response also carries the authenticated first
+ * user's recoverable enrollment state and, until pairing, its bearer. */
 int rh_deploy_apply(const route_req_t *rq, char *resp, int cap)
 {
    (void)rq;
    int g = deploy_route_guard(resp, cap);
    if (g)
       return g;
+
+   /* Deploy and first-user authorization are one wizard operation.  Claim the
+    * authenticated browser identity before touching Docker so a stack can never
+    * come up in the old half-provisioned state (services running, but no usable
+    * remote owner). The returned bearer is enrollment-only; /v1/cert/sign binds
+    * it to the client's CSR-produced mTLS certificate and activates `full`. */
+   char enrollment_bearer[65] = "";
+   const char *principal = server_http_identity_principal();
+   int enrollment =
+       server_http_first_user_bootstrap(principal, enrollment_bearer, sizeof(enrollment_bearer));
+   if (enrollment == -2)
+      return err_json(resp, cap, 403, "this appliance already belongs to its first setup user");
+   if (enrollment < 0)
+      return err_json(resp, cap, 500,
+                      "could not provision the first user (bearer, mTLS, and full-write grant)");
+
    int rc = deploy_apply_start();
    if (rc < 0)
       return err_json(resp, cap, 500, "could not start the deploy");
-   int n = snprintf(resp, (size_t)cap, "{\"ok\":true,\"status\":\"%s\"}",
-                    rc == 1 ? "running" : "started");
-   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+
+   int tls_port = config_server_api_tls_port();
+   cJSON *out = cJSON_CreateObject();
+   cJSON *pairing = out ? cJSON_AddObjectToObject(out, "enrollment") : NULL;
+   if (!out || !pairing)
+   {
+      cJSON_Delete(out);
+      return err_json(resp, cap, 500, "out of memory");
+   }
+   cJSON_AddBoolToObject(out, "ok", 1);
+   cJSON_AddStringToObject(out, "status", rc == 1 ? "running" : "started");
+   cJSON_AddStringToObject(pairing, "state", enrollment == 1 ? "paired" : "ready");
+   cJSON_AddStringToObject(pairing, "principal", principal);
+   cJSON_AddStringToObject(pairing, "tier", "full");
+   cJSON_AddBoolToObject(pairing, "mtls", 1);
+   cJSON_AddNumberToObject(pairing, "tls_port", tls_port > 0 ? tls_port : 8743);
+   if (enrollment == 0)
+      cJSON_AddStringToObject(pairing, "bearer_token", enrollment_bearer);
+   return emit(resp, cap, out);
 }
 
 /* GET /v1/deploy/status — the background deploy's state plus `docker compose ps`.

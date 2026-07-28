@@ -26,6 +26,16 @@ The final **Deploy** step starts:
 - `aimee-kb`, including private PostgreSQL 18, pgvector, and pgvectorscale;
 - `aimee-llm`, with the selected inference tier.
 
+Deploy also claims the signed-in browser account as the first remote owner. It displays one
+`aimee remote set ...` command that provisions that user's bearer, mTLS certificate, and explicit
+`full` write grant. Keep that page open until you run the command in step 3.
+
+When the wizard creates a local `aimee-llm`, it also creates a separate, persistent 256-bit service
+identity for `aimee-kb`. The managed stack supplies the endpoint, role/tier configuration, and bearer
+to both containers, then the KB uses that credential for embedding, reranking, and synthesis. This is
+automatic; do not copy the user's enrollment bearer into the LLM configuration. The managed LLM
+refuses to start if its service credential is missing.
+
 Change `AIMEE_WEBCHAT_USER` and `AIMEE_WEBCHAT_PASSWORD` before exposing this host. The defaults are
 for local setup only.
 
@@ -97,10 +107,10 @@ The client is DB-free. It does not need PostgreSQL, SQLite, the KB, or model lib
 
 ## 3. Enroll the client
 
-Use the server URL and the one-use bootstrap bearer:
+Copy the exact command shown by the wizard after **Deploy**. It looks like this:
 
 ```bash
-aimee remote set https://server.example:8743 aimee-local-dev
+aimee remote set https://server.example:8743 <wizard-bearer>
 aimee remote status
 ```
 
@@ -108,12 +118,18 @@ aimee remote status
 
 1. connects to the private server certificate;
 2. prints and stores its fingerprint;
-3. trades the bootstrap bearer for a deployment bearer;
-4. enrolls an individual mTLS certificate on Linux;
-5. writes private state to `~/.config/aimee/remote.conf`.
+3. on Linux, generates the client private key locally and submits only a signed CSR;
+4. enrolls an individual mTLS certificate and binds it to the wizard user;
+5. activates that certificate's explicit `full` grant;
+6. writes private state to `~/.config/aimee/remote.conf`.
 
 Verify the fingerprint against the server through a second channel. Do not accept an unexpected
-change. The bootstrap bearer stops authorizing ordinary routes after enrollment.
+change. The wizard bearer alone is read-only: write authority requires the matching enrolled
+certificate. Re-running Deploy as the same user is idempotent; a different user cannot replace the
+first owner.
+
+Automatic first-user certificate enrollment is currently Linux-only. macOS and Windows clients fail
+closed instead of silently receiving bearer-only write access; use a Linux client for this quickstart.
 
 For a self-signed certificate during local setup, set `AIMEE_TLS_INSECURE=1` only for the enrollment
 command. The stored fingerprint is the trust anchor after that. Do not leave insecure TLS enabled.
@@ -130,10 +146,13 @@ aimee kb status    # detailed store, vector, ingest, and curator state
 aimee audit verify
 ```
 
-### Remote write setup
+### Additional users and authority-managed grants
 
-The rotated shared bearer authorizes reads only. Remote writes need a short-lived, KB-signed user
-identity and a grant keyed by `(server_id, team_id, subject)`. The server must also have these set:
+The first wizard user is already ready to write after step 3; none of the manual work below is
+required for that quickstart path.
+
+Larger installations can add PAM/OIDC users with short-lived, KB-signed identities and grants keyed
+by `(server_id, team_id, subject)`. That authority-managed path requires:
 
 - `AIMEE_SERVER_ID`;
 - `AIMEE_SERVER_TEAM_ID`;
@@ -144,9 +163,9 @@ identity and a grant keyed by `(server_id, team_id, subject)`. The server must a
 
 The shipped server Compose files pass these values through from `.env`, leave their identity
 values empty, and mount `${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}` read-only at
-`/run/aimee/management`. The empty configuration is deliberately read-only. It becomes
-write-capable only after the server is enrolled with the KB and the authority values are supplied.
-A local Unix-socket operator cannot be locked out.
+`/run/aimee/management`. The empty authority configuration grants no additional users. The explicit
+certificate-bound first wizard owner remains available for bootstrap administration, and a local
+Unix-socket operator cannot be locked out.
 
 A fresh embedded KB has no team. Create the first team locally without exposing an HTTP admin route:
 

@@ -67,4 +67,8 @@ const char *request_context_idempotency_key(void);
  * context / untrusted. Never returns NULL. */
 const char *request_context_principal(void);
 
+/* Internal server-authoritative replacement after a verified mTLS serial has
+ * resolved to a durable user grant. Client headers never call this seam. */
+void request_context_override_principal(const char *principal);
+
 #endif /* DEC_REQUEST_CONTEXT_H */

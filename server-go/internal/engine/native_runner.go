@@ -619,7 +619,15 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 	}
 	base := ""
 	if item.ParentID != "" {
-		base = "aimee/feat/" + item.ParentID
+		// Slice PRs merge through the forge, which advances the remote feature
+		// branch while the local aimee/feat/<parent> ref stays at the run's
+		// starting point.  Freeze against the same fetched feature tip used by
+		// slice creation/integration; otherwise every later slice's review
+		// artifact incorrectly includes all previously merged sibling work.
+		base = featureBaseRef(ctx, workdir, item.ParentID)
+		if base == "" {
+			return StepResult{}, errors.New("parent feature branch is unavailable")
+		}
 	} else {
 		trunk, e := repoDefaultBranch(ctx, workdir)
 		if e != nil {

@@ -80,6 +80,89 @@ func TestIntegrateFeatureBasePicksUpSiblingMerge(t *testing.T) {
 	}
 }
 
+// A slice freeze must review only that slice's delta over the latest feature
+// tip. Forge merges advance origin/aimee/feat/<parent>, not the stale local ref;
+// using the local ref makes later slice artifacts include every landed sibling
+// and causes strict scope review to reject unrelated prerequisite work as drift.
+func TestFreezeUsesMergedRemoteFeatureTip(t *testing.T) {
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin.git")
+	repo := filepath.Join(root, "repo")
+	gitRun(t, root, "init", "--bare", "-b", "trunk", origin)
+	gitRun(t, root, "clone", origin, repo)
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("root\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "README")
+	gitRun(t, repo, "commit", "-m", "init")
+	gitRun(t, repo, "push", "-u", "origin", "trunk")
+
+	feature := "aimee/feat/wi_parent"
+	gitRun(t, repo, "branch", feature)
+	gitRun(t, repo, "push", "origin", feature)
+
+	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := t.Context()
+	for _, in := range []db1.CreateWorkItem{
+		{ID: "wi_parent", Repo: repo, ProposalPath: "p", WorkflowName: "build", StartStage: "feature"},
+		{ID: "wi_child", Repo: repo, ProposalPath: "c", WorkflowName: "slice", StartStage: "freeze", ParentID: "wi_parent"},
+	} {
+		if err := store.CreateWorkItem(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manager, err := NewWorktreeManager(store, filepath.Join(root, "trees"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := store.WorkItem(ctx, "wi_child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workdir, _, err := manager.Ensure(ctx, child, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a sibling PR merging after this child worktree was created.
+	landed := filepath.Join(root, "landed")
+	gitRun(t, root, "clone", "-b", feature, origin, landed)
+	if err := os.WriteFile(filepath.Join(landed, "sibling.txt"), []byte("landed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, landed, "add", "sibling.txt")
+	gitRun(t, landed, "commit", "-m", "sibling")
+	gitRun(t, landed, "push", "origin", feature)
+	if park, err := integrateFeatureBase(ctx, workdir, "wi_parent"); err != nil || park != "" {
+		t.Fatalf("integrateFeatureBase: park=%q err=%v", park, err)
+	}
+
+	if err := os.WriteFile(filepath.Join(workdir, "child.txt"), []byte("child\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, workdir, "add", "child.txt")
+	gitRun(t, workdir, "commit", "-m", "child")
+
+	runner := &NativeRunner{db: store, worktrees: manager}
+	result, err := runner.freeze(ctx, StepRequest{WorkItem: child})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StepAdvanced {
+		t.Fatalf("freeze status=%q detail=%q", result.Status, result.Detail)
+	}
+	if strings.Contains(result.Artifact, "sibling.txt") {
+		t.Fatalf("freeze leaked previously merged sibling work:\n%s", result.Artifact)
+	}
+	if !strings.Contains(result.Artifact, "child.txt") {
+		t.Fatalf("freeze omitted this slice's change:\n%s", result.Artifact)
+	}
+}
+
 func TestIntegrateFeatureBaseNoopWhenAlreadyCurrent(t *testing.T) {
 	repo, slicedir := setupSliceRepo(t)
 	_ = repo

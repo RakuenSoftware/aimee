@@ -3,14 +3,20 @@
 
 #include "deploy_apply.h"
 
+#include "aimee_home.h"      /* persistent managed service credential */
 #include "config.h"          /* config_t, config_load */
 #include "config_database.h" /* config_emit_deploy_env */
+#include "platform_random.h" /* 256-bit managed kb -> llm bearer */
 
+#include <ctype.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -18,12 +24,131 @@ extern char **environ;
 
 #define DEPLOY_DEFAULT_COMPOSE "/opt/aimee/deploy/aimee-managed.compose.yaml"
 #define DEPLOY_OUT_CAP         8192 /* tail of compose output kept for the UI */
+#define DEPLOY_LLM_TOKEN_FILE  ".managed-kb-llm-token"
+#define DEPLOY_LLM_TOKEN_HEX   64 /* 256-bit opaque bearer */
 
 /* Background-deploy state (one at a time; the wizard drives a single stack). */
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static int g_running = 0;
 static int g_last_exit = INT_MIN;
 static char g_last_out[DEPLOY_OUT_CAP];
+
+static int deploy_env_has_llm_profile(const char *env)
+{
+   const char *p = env ? strstr(env, "COMPOSE_PROFILES=") : NULL;
+   if (!p)
+      return 0;
+   p += strlen("COMPOSE_PROFILES=");
+   const char *end = strchr(p, '\n');
+   if (!end)
+      end = p + strlen(p);
+   while (p < end)
+   {
+      while (p < end && (*p == ',' || isspace((unsigned char)*p)))
+         p++;
+      const char *word = p;
+      while (p < end && *p != ',' && !isspace((unsigned char)*p))
+         p++;
+      if ((size_t)(p - word) == 3 && memcmp(word, "llm", 3) == 0)
+         return 1;
+   }
+   return 0;
+}
+
+static int deploy_llm_token_valid(const char *token)
+{
+   if (!token)
+      return 0;
+   size_t n = strlen(token);
+   if (n < 32 || n > 512)
+      return 0;
+   /* RFC 6750 b64token alphabet. Generated values are lowercase hex; the wider
+    * alphabet permits an explicitly supplied migration credential without
+    * admitting whitespace/control bytes into an HTTP Authorization field. */
+   for (size_t i = 0; i < n; i++)
+      if (!(isalnum((unsigned char)token[i]) || token[i] == '-' || token[i] == '.' ||
+            token[i] == '_' || token[i] == '~' || token[i] == '+' || token[i] == '/' ||
+            token[i] == '='))
+         return 0;
+   return 1;
+}
+
+/* Read or atomically create the stable service bearer shared only by the managed
+ * aimee-kb and aimee-llm containers. The server's persistent AIMEE_HOME volume is
+ * the authority for the credential, so a redeploy/restart does not silently
+ * rotate one side away from the other. An explicit operator token wins. */
+static int deploy_llm_token(char *out, size_t cap)
+{
+   if (!out || cap < DEPLOY_LLM_TOKEN_HEX + 1)
+      return -1;
+   /* AIMEE_LLM_AUTH_TOKEN is the child credential and may be stale inherited
+    * process state. It is deliberately ignored here. Operators who must adopt
+    * an existing managed LLM use the distinct, explicit override variable. */
+   const char *configured = getenv("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
+   if (configured && configured[0])
+   {
+      if (!deploy_llm_token_valid(configured) || strlen(configured) >= cap)
+         return -1;
+      snprintf(out, cap, "%s", configured);
+      return 0;
+   }
+
+   const char *home = aimee_home();
+   if (!home || !home[0])
+      return -1;
+   char path[PATH_MAX];
+   int pn = snprintf(path, sizeof(path), "%s/%s", home, DEPLOY_LLM_TOKEN_FILE);
+   if (pn < 0 || (size_t)pn >= sizeof(path))
+      return -1;
+
+   int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+   if (fd >= 0)
+   {
+      struct stat st;
+      ssize_t n = read(fd, out, cap - 1);
+      int saved = errno;
+      int ok = fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_uid == geteuid() &&
+               (st.st_mode & 077) == 0 && st.st_size > 0 && st.st_size < (off_t)cap &&
+               n == st.st_size;
+      close(fd);
+      errno = saved;
+      if (!ok)
+         return -1;
+      while (n > 0 && (out[n - 1] == '\n' || out[n - 1] == '\r'))
+         n--;
+      out[n] = '\0';
+      return deploy_llm_token_valid(out) ? 0 : -1;
+   }
+   if (errno != ENOENT)
+      return -1;
+
+   char proposed[DEPLOY_LLM_TOKEN_HEX + 1];
+   if (platform_random_hex(proposed, DEPLOY_LLM_TOKEN_HEX) != 0)
+      return -1;
+   fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+   if (fd < 0)
+   {
+      /* Another deploy process may have won the create race. Re-enter through
+       * the validated read path rather than overwriting its credential. */
+      if (errno == EEXIST)
+         return deploy_llm_token(out, cap);
+      return -1;
+   }
+   size_t len = strlen(proposed);
+   ssize_t written = write(fd, proposed, len);
+   int ok = written == (ssize_t)len && fsync(fd) == 0 && fchmod(fd, 0600) == 0;
+   int saved = errno;
+   close(fd);
+   errno = saved;
+   if (!ok)
+   {
+      unlink(path);
+      return -1;
+   }
+   snprintf(out, cap, "%s", proposed);
+   memset(proposed, 0, sizeof(proposed));
+   return 0;
+}
 
 int deploy_apply_enabled(void)
 {
@@ -49,17 +174,61 @@ static void free_envp(char **envp)
    free(envp);
 }
 
+/* True when deploy_env contains a KEY= line for inherited KEY=VALUE. This makes
+ * the documented "wizard config wins" merge real: duplicate process-environment
+ * names have no portable first/last-wins rule. */
+static int deploy_env_overrides(const char *deploy_env, const char *inherited)
+{
+   const char *eq = inherited ? strchr(inherited, '=') : NULL;
+   if (!deploy_env || !eq)
+      return 0;
+   size_t key_len = (size_t)(eq - inherited);
+   const char *line = deploy_env;
+   while (*line)
+   {
+      const char *end = strchr(line, '\n');
+      if (!end)
+         end = line + strlen(line);
+      if ((size_t)(end - line) > key_len && line[key_len] == '=' &&
+          memcmp(line, inherited, key_len) == 0)
+         return 1;
+      line = *end ? end + 1 : end;
+   }
+   return 0;
+}
+
 /* Build the child environment: the current environ, plus the deploy-env KEY=VALUE
  * lines config_emit_deploy_env produced for the live config (later entries win, so
  * the deploy-env overrides any inherited value). Returns a NULL-terminated,
  * heap-owned array, or NULL on OOM / no config. */
-static char **build_deploy_envp(void)
+static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out)
 {
+   if (err && err_cap)
+      err[0] = '\0';
+   if (managed_llm_out)
+      *managed_llm_out = 0;
    config_t cfg;
    if (config_load(&cfg) < 0)
+   {
+      if (err && err_cap)
+         snprintf(err, err_cap, "could not load the saved wizard configuration");
       return NULL;
+   }
    char env[2048];
    config_emit_deploy_env(&cfg, env, sizeof(env));
+
+   char llm_token[513] = "";
+   const int managed_llm = deploy_env_has_llm_profile(env);
+   if (managed_llm_out)
+      *managed_llm_out = managed_llm;
+   if (managed_llm && deploy_llm_token(llm_token, sizeof(llm_token)) != 0)
+   {
+      if (err && err_cap)
+         snprintf(err, err_cap,
+                  "could not create/read the managed KB-to-LLM credential under AIMEE_HOME "
+                  "(the file must be regular, private, and readable by aimee-server)");
+      return NULL; /* fail closed: never launch a keyless managed LLM */
+   }
 
    size_t base = 0;
    for (char **e = environ; e && *e; e++)
@@ -71,12 +240,23 @@ static char **build_deploy_envp(void)
       if (*p == '\n')
          extra++;
 
-   char **envp = calloc(base + extra + 1, sizeof(char *));
+   char **envp = calloc(base + extra + (managed_llm ? 2 : 0) + 1, sizeof(char *));
    if (!envp)
+   {
+      if (err && err_cap)
+         snprintf(err, err_cap, "out of memory while building the managed service environment");
       return NULL;
+   }
    size_t n = 0;
    for (char **e = environ; e && *e; e++)
    {
+      /* The generated/persisted credential is authoritative for this child.
+       * Do not leave an inherited empty/stale duplicate before it: getenv and
+       * Compose are not required to choose the later duplicate. */
+      if (deploy_env_overrides(env, *e) ||
+          (managed_llm && (strncmp(*e, "AIMEE_LLM_AUTH_TOKEN=", 21) == 0 ||
+                           strncmp(*e, "AIMEE_LLM_AUTH_REQUIRED=", 24) == 0)))
+         continue;
       envp[n] = strdup(*e);
       if (!envp[n])
       {
@@ -106,6 +286,25 @@ static char **build_deploy_envp(void)
       if (!nl)
          break;
       line = nl + 1;
+   }
+   if (managed_llm)
+   {
+      size_t len = strlen("AIMEE_LLM_AUTH_TOKEN=") + strlen(llm_token);
+      envp[n] = malloc(len + 1);
+      if (!envp[n])
+      {
+         free_envp(envp);
+         return NULL;
+      }
+      snprintf(envp[n++], len + 1, "AIMEE_LLM_AUTH_TOKEN=%s", llm_token);
+      memset(llm_token, 0, sizeof(llm_token));
+      envp[n] = strdup("AIMEE_LLM_AUTH_REQUIRED=1");
+      if (!envp[n])
+      {
+         free_envp(envp);
+         return NULL;
+      }
+      n++;
    }
    envp[n] = NULL;
    return envp;
@@ -263,6 +462,27 @@ static int deploy_up_argv(const char *file, const char **argv, size_t cap)
    return (int)n;
 }
 
+/* Verify from INSIDE aimee-kb that its configured endpoint and bearer are the
+ * exact credentials accepted by aimee-llm. The token is expanded by the child
+ * container's shell and never appears in the host argv or captured output. */
+static int deploy_llm_probe_argv(const char *file, const char **argv, size_t cap)
+{
+   static const char *probe = "test -n \"$AIMEE_LLM_URL\"; "
+                              "test -n \"$AIMEE_LLM_AUTH_TOKEN\"; "
+                              "curl -fsS -H \"Authorization: Bearer $AIMEE_LLM_AUTH_TOKEN\" "
+                              "-H 'Content-Type: application/json' -X POST --data '{}' "
+                              "\"${AIMEE_LLM_URL%/}/auth/verify\" >/dev/null";
+   const char *cmd[] = {"docker", "compose",  "-f", file,  "exec",
+                        "-T",     "aimee-kb", "sh", "-ec", probe};
+   size_t n = sizeof(cmd) / sizeof(cmd[0]);
+   if (!argv || cap < n + 1)
+      return -1;
+   for (size_t i = 0; i < n; i++)
+      argv[i] = cmd[i];
+   argv[n] = NULL;
+   return (int)n;
+}
+
 static void *deploy_worker(void *arg)
 {
    (void)arg;
@@ -278,12 +498,15 @@ static void *deploy_worker(void *arg)
       pthread_mutex_unlock(&g_lock);
       return NULL;
    }
-   char **envp = build_deploy_envp();
+   char env_err[256];
+   int managed_llm = 0;
+   char **envp = build_deploy_envp(env_err, sizeof(env_err), &managed_llm);
 
    char out[DEPLOY_OUT_CAP];
    int code = -1;
    if (!envp)
-      snprintf(out, sizeof(out), "deploy: failed to load config / build environment\n");
+      snprintf(out, sizeof(out), "deploy: %s\n",
+               env_err[0] ? env_err : "failed to build the managed service environment");
    else
    {
       out[0] = '\0';
@@ -292,6 +515,31 @@ static void *deploy_worker(void *arg)
       if (run_capture(argv, envp, out + used, sizeof(out) - used, &code) != 0)
          snprintf(out, sizeof(out),
                   "deploy: failed to run `docker compose` (is docker on PATH?)\n");
+      else if (code == 0 && managed_llm)
+      {
+         const char *probe_argv[12];
+         int probe_code = -1;
+         char probe_out[1024] = "";
+         if (deploy_llm_probe_argv(file, probe_argv, sizeof(probe_argv) / sizeof(probe_argv[0])) <
+                 0 ||
+             run_capture(probe_argv, envp, probe_out, sizeof(probe_out), &probe_code) != 0 ||
+             probe_code != 0)
+         {
+            code = probe_code == 0 ? -1 : probe_code;
+            used = strlen(out);
+            if (used < sizeof(out) - 1)
+               snprintf(out + used, sizeof(out) - used,
+                        "deploy: KB-to-LLM credential verification failed%s%s\n",
+                        probe_out[0] ? ": " : "", probe_out);
+         }
+         else
+         {
+            used = strlen(out);
+            if (used < sizeof(out) - 1)
+               snprintf(out + used, sizeof(out) - used,
+                        "deploy: authenticated KB-to-LLM connection verified\n");
+         }
+      }
    }
    free_envp(envp);
 
@@ -347,7 +595,7 @@ int deploy_apply_status(char *out, size_t out_cap, int *exit_code)
    const char *argv[] = {"docker", "compose", "-f", file, "ps", "-a", "--format", "json", NULL};
    /* Pass the deploy env (COMPOSE_PROFILES + COMPOSE_PROJECT_NAME) so `ps` scopes
     * to the same project/profiles the apply used; fall back to environ on OOM. */
-   char **envp = build_deploy_envp();
+   char **envp = build_deploy_envp(NULL, 0, NULL);
    int rc = run_capture(argv, envp, out, out_cap, exit_code);
    free_envp(envp);
    return rc;

@@ -1535,6 +1535,10 @@ typedef struct config
     *
     * Bounded so a compromised or looping enroller cannot grow the accepted set
     * without limit — past the cap, enrolment fails closed rather than evicting. */
+   /* Keep the existing configured-token width: deployments may already have
+    * manually supplied bearer_tokens_extra values longer than the 64-hex
+    * tokens minted by the enrollment API. Truncating them on upgrade would
+    * silently revoke those clients. */
    char server_api_bearer_extra[AIMEE_API_BEARER_EXTRA_MAX][256];
    int server_api_bearer_extra_count;
    int server_api_rate_limit_per_min;
@@ -2126,6 +2130,11 @@ static inline int config_issue(const char *fmt, ...)
 /* Load config from default path. Returns defaults if missing.
  * In strict mode, returns -1 on validation errors. */
 int config_load(config_t *cfg);
+
+/* Bounded enrolled-bearer operations owned by the config module. Callers get a
+ * coherent copy or append one token without naming or copying config_t. */
+int config_server_api_bearer_extra_snapshot(char out[][256], int max);
+int config_server_api_bearer_extra_append(const char *bearer);
 
 /* Live config snapshot (live-config-reload P1a) — a double-buffer + seqlock holding the
  * current config for immediate, push-driven reload. config_t is a flat POD, so reads are a

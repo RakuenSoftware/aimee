@@ -18,6 +18,8 @@ Config (env), in precedence order:
   AIMEE_EMBEDDER_URL  base URL of the embedder service (pins the embedder)
   AIMEE_LLM_URL       base URL of the unified aimee-llm container (one knob for
                       embed + rerank + synth); used when AIMEE_EMBEDDER_URL is unset
+  AIMEE_LLM_AUTH_TOKEN bearer service identity for authenticated gateways
+  AIMEE_LLM_AUTH_REQUIRED=1 refuse requests when that identity is missing
   (unset)             no embedder configured; reported immediately so the caller
                       can use its builtin path. Pin the legacy compose service
                       with AIMEE_EMBEDDER_URL=http://embedder:8080 if wanted.
@@ -49,11 +51,29 @@ NO_ENDPOINT_MESSAGE = (
     "(set AIMEE_LLM_URL, or AIMEE_EMBEDDER_URL to pin one)\n"
 )
 TIMEOUT = int(os.environ.get("AIMEE_EMBEDDER_TIMEOUT", "30"))
+AUTH_TOKEN = os.environ.get("AIMEE_LLM_AUTH_TOKEN", "")
+AUTH_REQUIRED = os.environ.get("AIMEE_LLM_AUTH_REQUIRED", "") == "1"
+
+
+def _auth_ready() -> bool:
+    if AUTH_REQUIRED and not AUTH_TOKEN:
+        sys.stderr.write(
+            "embed-remote: AIMEE_LLM_AUTH_REQUIRED=1 but AIMEE_LLM_AUTH_TOKEN is empty\n"
+        )
+        return False
+    return True
+
+
+def _headers(content_type: str) -> dict[str, str]:
+    headers = {"content-type": content_type}
+    if AUTH_TOKEN:
+        headers["authorization"] = f"Bearer {AUTH_TOKEN}"
+    return headers
 
 
 def _post(path: str, data: bytes, content_type: str) -> str:
     req = urllib.request.Request(
-        f"{ENDPOINT}{path}", data=data, headers={"content-type": content_type}, method="POST"
+        f"{ENDPOINT}{path}", data=data, headers=_headers(content_type), method="POST"
     )
     with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
         return resp.read().decode("utf-8")
@@ -65,11 +85,14 @@ def probe_dim() -> int:
     positive integer dim; exit non-zero (caller treats as 'not ready') while the
     model is still loading, on any HTTP/parse error, or on a missing/non-positive
     dim. Single GET, no embedding — cheap enough to poll."""
+    if not _auth_ready():
+        return 1
     if not ENDPOINT:
         sys.stderr.write(NO_ENDPOINT_MESSAGE)
         return 1
     try:
-        with urllib.request.urlopen(f"{ENDPOINT}/health", timeout=TIMEOUT) as resp:
+        req = urllib.request.Request(f"{ENDPOINT}/health", headers=_headers("application/json"))
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, OSError) as exc:
         sys.stderr.write(f"embed-remote --dim: /health at {ENDPOINT} unreachable: {exc}\n")
@@ -91,6 +114,8 @@ def probe_dim() -> int:
 def main() -> None:
     if "--dim" in sys.argv[1:]:
         sys.exit(probe_dim())
+    if not _auth_ready():
+        sys.exit(1)
     if not ENDPOINT:
         sys.stderr.write(NO_ENDPOINT_MESSAGE)
         sys.exit(1)

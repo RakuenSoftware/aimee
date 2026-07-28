@@ -129,6 +129,23 @@ extern "C"
    /* server_http_authorize_multi against the live enrolled set. */
    int server_http_authorize_enrolled(int is_tcp, const char *bearer_cfg, const char *auth_header,
                                       const char *api_key_header, int has_session_key);
+   int server_http_authorize_enrolled_request(int is_tcp, const char *bearer_cfg,
+                                              const char *auth_header, const char *api_key_header,
+                                              int has_session_key, int *bootstrap_only);
+
+   /* Provision the authenticated setup-wizard user as the appliance's first
+    * remote owner.  The returned bearer is enrollment-only until /v1/cert/sign
+    * binds it to the client's CSR-produced mTLS certificate.  Returns 0 with a
+    * bearer ready, 1 when that owner is already paired, -2 when another user
+    * owns the appliance, or -1 on validation/storage/config failure. */
+   int server_http_first_user_bootstrap(const char *principal, char *bearer, size_t bearer_cap);
+
+   /* Complete and resolve the explicit first-user certificate grant. */
+   int server_http_first_user_bind_cert(const char *bearer, const char *cert_serial);
+   int server_http_first_user_cert_tier(const char *cert_serial, char *principal,
+                                        size_t principal_cap);
+   int server_http_first_user_apply_cert_grant(int mtls_authenticated, const char *cert_serial,
+                                               int *tier, char *principal, size_t principal_cap);
 
    /* Synchronize the primary bearer with enrolled-bearer reads. Rotation clears
     * enrolled credentials; startup preserves the extras just loaded from config. */
@@ -143,7 +160,7 @@ extern "C"
     * never perform a real operation. Returns 0 (allow) for UDS, once the bearer
     * has been rotated (live_bearer != bootstrap), for the rotate_bearer route
     * itself, or when the operator pinned AIMEE_API_BEARER_TOKEN (TOFU opt-out). */
-   int server_http_bootstrap_gate(int is_tcp, const char *live_bearer, const char *method,
+   int server_http_bootstrap_gate(int is_tcp, int bootstrap_only, const char *method,
                                   const char *path);
 
    /* Fixed-window per-bearer rate limiter (pure — unit-testable). State is a
