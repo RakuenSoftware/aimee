@@ -1660,10 +1660,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
                                            has_api_key ? api_key : NULL, has_skey);
       if (az != 0)
       {
-         const char *msg = az == 401 ? "{\"error\":{\"message\":\"missing or invalid bearer "
-                                       "token\",\"type\":\"authentication_error\"}}"
-                                     : "{\"error\":{\"message\":\"this endpoint requires a "
-                                       "configured bearer token\",\"type\":\"server_error\"}}";
+         const char *msg = server_http_auth_error_body(az);
          send_response(fd, az, msg, request_id);
          LOG_INFO("server.http", "%s %s -> %d req_id=%s", method, path, az, request_id);
          return;
