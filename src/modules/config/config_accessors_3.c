@@ -1118,7 +1118,7 @@ const char *config_computer_use_allowed_domains(int index)
 
 const char *config_server_api_bearer_extra(int index)
 {
-   static _Thread_local char buf[65];
+   static _Thread_local char buf[256];
    buf[0] = 0;
    if (index < 0 || index >= (AIMEE_API_BEARER_EXTRA_MAX))
       return buf;

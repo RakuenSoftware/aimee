@@ -90,7 +90,8 @@ model and producing misleading diagnostics. The image and seeded config now pin 
    removes any inherited empty/stale duplicate, and passes one authoritative value to Compose.
 10. Compose gives the bearer and endpoint to the KB, requires the bearer for the LLM, enforces the
     gateway bind guard, and orders KB startup behind LLM health. Native embedding, batch embedding,
-    reranking, Tier-A extraction, and Tier-B synthesis all use the credential.
+    reranking, Tier-A extraction, and Tier-B synthesis all use the credential and fail closed if it
+    is absent. A pinned embedding dimension reaches both services and is enforced by the gateway.
 11. Before reporting deploy success, the orchestrator executes an authenticated `/auth/verify` from
     inside the KB container. This proves the actual endpoint and bearer installed in the KB, without
     putting the secret in the host command line or browser response.
@@ -101,12 +102,14 @@ model and producing misleading diagnostics. The image and seeded config now pin 
 | --- | --- | --- |
 | `aimee-kb` | `AIMEE_LLM_URL=http://aimee-llm:8742` | unified embed/rerank/synth base |
 | `aimee-kb` | `AIMEE_LLM_AUTH_TOKEN=<stable 256-bit bearer>` | service identity on every inference request |
+| `aimee-kb` | `AIMEE_LLM_AUTH_REQUIRED=1` | missing service identity is a configuration failure, never a keyless downgrade |
 | `aimee-kb` | `AIMEE_LLM_MODEL` (default `aimee-synth`) | chat/synthesis model label |
 | `aimee-kb` | `LLM_API_KEY=$AIMEE_LLM_AUTH_TOKEN` | compatibility alias for curator sidecars |
 | `aimee-kb` | `AIMEE_EMBEDDING_DIM` when pinned | DB2 vector width; otherwise derived from gateway health |
 | `aimee-llm` | same `AIMEE_LLM_AUTH_TOKEN`, `AIMEE_LLM_STRICT_BIND=1` | same identity and fail-closed wildcard bind |
 | `aimee-llm` | `AIMEE_LLM_{EMBED,RERANK,SYNTH}_{MODE,TIER,URL}` | per-role local/external/off routing and selected artifact tier |
 | `aimee-llm` | `AIMEE_LLM_SYNTH_MODEL=$AIMEE_LLM_MODEL` | shared model label |
+| `aimee-llm` | `AIMEE_EMBEDDING_DIM` when pinned | enforce the same vector width as the KB; empty derives the model-native width |
 
 The KB calls `/embed`, `/embed_batch`, `/rerank`, `/v1/chat/completions`, and `/auth/verify` on the
 unified base. If any role is external while another is local, the gateway receives and proxies that
@@ -132,6 +135,8 @@ operator decision.
 - The KB-to-LLM token is distinct from every user credential, stored mode `0600`, stable across
   redeploys, absent when no local LLM is created, and never rendered by the wizard.
 - A managed local LLM cannot start with authentication disabled.
+- A managed KB cannot issue embed, batch, rerank, or synth requests without its service bearer.
+- A pinned embedding dimension is identical on KB and LLM; model-output drift is rejected.
 
 ## User experience
 
@@ -174,6 +179,8 @@ and belongs to the same renewal/reset lifecycle scope called out below.
 
 `make -C src wizard-bootstrap-e2e` starts a fresh real server and client with isolated state and proves:
 
+- the server has no `AIMEE_SERVER_TEAM_ID`, server registry ID, or management JWKS bundle; the local
+  first-owner path is deliberately independent of the later KB-issued team-token authority;
 - wizard Deploy returns a pending bearer for `webuser:alice`;
 - bearer-only persona write is `403`;
 - `aimee remote set` generates the key/CSR and enrolls mTLS;
@@ -191,8 +198,9 @@ binary boundary checks must remain green.
 
 Managed-service tests additionally prove credential generation, `0600` persistence, restart
 stability, explicit operator override, absence outside the local-LLM profile, removal of inherited
-empty duplicates, gateway denial for absent/wrong bearers, and bearer propagation through embed,
-rerank, and curator clients.
+empty duplicates, gateway denial for absent/wrong bearers, client-side refusal when managed auth is
+missing, bearer propagation through embed, rerank, and curator clients, and embedding-dimension drift
+rejection.
 
 ### Executed validation
 
@@ -202,9 +210,13 @@ rerank, and curator clients.
   scoped, override-safe, and probed without a host-argv secret.
 - `src/build/obj/tests/unit-test-kb-curator-provider` — PASS: unified endpoint and service bearer reach
   both curator tiers.
-- `python3 scripts/check-sidecar-clients.py` — PASS: embed and rerank clients attach the bearer.
-- `python3 -m unittest -v scripts.tests.test_gateway scripts.tests.test_gateway_security` — 52 PASS,
-  2 dependency-only skips; absent/wrong managed tokens are 401 and the correct token verifies.
+- `src/build/obj/tests/unit-test-memory-embed-http-auth` — PASS: the native embed/batch client attaches
+  its bearer and refuses missing or oversized managed credentials before transport.
+- `python3 scripts/check-sidecar-clients.py` — PASS: embed and rerank clients attach the bearer and
+  fail before transport when managed auth is required but absent.
+- `python3 -m unittest -v scripts.tests.test_gateway scripts.tests.test_gateway_security` — 56 PASS,
+  2 dependency-only skips; every inference route rejects absent/wrong managed tokens, the correct
+  token succeeds, and a pinned dimension mismatch is a typed `503`.
 - `python3 scripts/check-kb-container-packaging.py --root .` and `--plant-test` — PASS: the complete
   managed role/identity contract is now a guarded packaging invariant.
 - `frontend` tests/check, `runtime-web` Go tests, `make -C src all`, `make -C src lint`,
@@ -231,4 +243,5 @@ rerank, and curator clients.
 - Regression proof: `scripts/test-wizard-first-user-bootstrap.sh`,
   `scripts/validate-managed-kb-llm-compose.sh`, `src/tests/test_remote_client_grant.c`,
   `src/tests/test_server_http.c`, `src/tests/test_deploy_apply.c`,
-  `src/tests/test_kb_curator_provider.c`, and gateway/sidecar tests.
+  `src/tests/test_kb_curator_provider.c`, `src/tests/test_memory_embed_http_auth.c`, and
+  gateway/sidecar tests.

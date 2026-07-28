@@ -1,4 +1,6 @@
-#include "config.h"
+#include <stdint.h>
+
+#include "config_accessors.h"
 #include "log.h"
 #include "pki.h"
 #include "server_conn_io.h"
@@ -25,19 +27,13 @@ const char *config_default_dir(void)
 {
    return "/nonexistent";
 }
-int config_load(config_t *cfg)
-{
-   memset(cfg, 0, sizeof(*cfg));
-   cfg->server_api_mtls = g_default_mtls_mode;
-   return 0;
-}
 int config_server_api_mtls(void)
 {
    return g_default_mtls_mode;
 }
 const char *config_server_api_mtls_client_ca(void)
 {
-   return "";
+   return "/nonexistent/tls/client-ca.crt";
 }
 int pki_ca_ensure(void)
 {

@@ -25,7 +25,7 @@
  * dispatch-backed routes run on detached connection workers, so authorization,
  * enrollment and rotation genuinely execute concurrently. One lock protects
  * both this set and the primary bearer stored by server_http.c. */
-static char g_bearer_extra[AIMEE_API_BEARER_EXTRA_MAX][65];
+static char g_bearer_extra[AIMEE_API_BEARER_EXTRA_MAX][256];
 static int g_bearer_extra_count = 0;
 static pthread_mutex_t g_bearer_lock = PTHREAD_MUTEX_INITIALIZER;
 /* The DB claim and config publication form one cross-store transaction. Serialize
@@ -150,14 +150,14 @@ static int bearer_sha256(const char *bearer, char out[65])
    return 0;
 }
 
-static int configured_bearer_snapshot(char out[][65])
+static int configured_bearer_snapshot(char out[][256])
 {
    return config_server_api_bearer_extra_snapshot(out, AIMEE_API_BEARER_EXTRA_MAX);
 }
 
 static void publish_configured_bearers(void)
 {
-   char configured[AIMEE_API_BEARER_EXTRA_MAX][65];
+   char configured[AIMEE_API_BEARER_EXTRA_MAX][256];
    const char *extra[AIMEE_API_BEARER_EXTRA_MAX];
    int count = configured_bearer_snapshot(configured);
    if (count < 0)
@@ -170,7 +170,7 @@ static void publish_configured_bearers(void)
 /* Return the configured cleartext bearer whose digest is |wanted|.  Cleartext
  * remains in the existing protected config because the HTTP authenticator needs
  * it; DB1 stores only the digest used to attach identity/grant metadata. */
-static int configured_bearer_for_hash(char configured[][65], int count, const char *wanted,
+static int configured_bearer_for_hash(char configured[][256], int count, const char *wanted,
                                       char *out, size_t out_cap)
 {
    if (!configured || count < 0 || !wanted || !out || out_cap < 65)
@@ -180,6 +180,11 @@ static int configured_bearer_for_hash(char configured[][65], int count, const ch
       char digest[65];
       if (bearer_sha256(configured[i], digest) == 0 && server_ct_equal(digest, wanted))
       {
+         if (strlen(configured[i]) + 1 > out_cap)
+         {
+            OPENSSL_cleanse(digest, sizeof(digest));
+            return 0;
+         }
          snprintf(out, out_cap, "%s", configured[i]);
          OPENSSL_cleanse(digest, sizeof(digest));
          return 1;
@@ -191,13 +196,14 @@ static int configured_bearer_for_hash(char configured[][65], int count, const ch
 
 static int first_user_bootstrap_locked(const char *principal, char *bearer, size_t bearer_cap)
 {
+   int result = -1;
    if (bearer && bearer_cap)
       bearer[0] = '\0';
    if (!principal || strncmp(principal, "webuser:", 8) != 0 || !principal[8] || !bearer ||
        bearer_cap < 65)
       return -1;
 
-   char configured[AIMEE_API_BEARER_EXTRA_MAX][65];
+   char configured[AIMEE_API_BEARER_EXTRA_MAX][256];
    int configured_count = configured_bearer_snapshot(configured);
    if (configured_count < 0 || !config_server_api_bearer_token()[0] ||
        config_server_api_mtls() <= 0)
@@ -209,44 +215,56 @@ static int first_user_bootstrap_locked(const char *principal, char *bearer, size
    char proposed[65] = "";
    char proposed_hash[65] = "";
    if (platform_random_hex(proposed, 64) != 0 || bearer_sha256(proposed, proposed_hash) != 0)
-      return -1;
+      goto done;
 
    db1_remote_client_grant_t grant;
    db1_remote_client_claim_result_t claimed =
        db1_remote_client_claim(principal, proposed_hash, (int64_t)time(NULL), &grant);
    if (claimed == DB1_REMOTE_CLIENT_CLAIM_OWNED_BY_OTHER)
-      return -2;
+   {
+      result = -2;
+      goto done;
+   }
    if (claimed == DB1_REMOTE_CLIENT_CLAIM_BOUND)
-      return 1;
+   {
+      result = 1;
+      goto done;
+   }
    if (claimed == DB1_REMOTE_CLIENT_CLAIM_UNBOUND)
    {
       if (configured_bearer_for_hash(configured, configured_count, grant.bearer_sha256, bearer,
                                      bearer_cap))
-         return 0;
+      {
+         result = 0;
+         goto done;
+      }
       /* A crash may have committed DB1 just before the config write.  That row
        * never authenticated and is safe to abandon; retry once with the newly
        * generated value rather than leaving setup permanently wedged. */
       if (db1_remote_client_abandon(grant.bearer_sha256) != 0)
-         return -1;
+         goto done;
       claimed = db1_remote_client_claim(principal, proposed_hash, (int64_t)time(NULL), &grant);
    }
    if (claimed != DB1_REMOTE_CLIENT_CLAIM_NEW || configured_count >= AIMEE_API_BEARER_EXTRA_MAX)
    {
       if (claimed == DB1_REMOTE_CLIENT_CLAIM_NEW)
          (void)db1_remote_client_abandon(proposed_hash);
-      return -1;
+      goto done;
    }
 
    if (config_server_api_bearer_extra_append(proposed) != 0)
    {
       (void)db1_remote_client_abandon(proposed_hash);
-      return -1;
+      goto done;
    }
    publish_configured_bearers();
    snprintf(bearer, bearer_cap, "%s", proposed);
+   result = 0;
+
+done:
    OPENSSL_cleanse(proposed, sizeof(proposed));
    OPENSSL_cleanse(proposed_hash, sizeof(proposed_hash));
-   return 0;
+   return result;
 }
 
 int server_http_first_user_bootstrap(const char *principal, char *bearer, size_t bearer_cap)

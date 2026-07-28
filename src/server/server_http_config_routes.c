@@ -923,7 +923,8 @@ static int deploy_route_guard(char *resp, int cap)
 
 /* POST /v1/deploy/apply — bring up the managed sibling services (aimee-kb +
  * aimee-llm) for the current wizard config via `docker compose up -d`
- * on a background thread. Returns {ok, status:"started"|"running"}. */
+ * on a background thread. The response also carries the authenticated first
+ * user's recoverable enrollment state and, until pairing, its bearer. */
 int rh_deploy_apply(const route_req_t *rq, char *resp, int cap)
 {
    (void)rq;

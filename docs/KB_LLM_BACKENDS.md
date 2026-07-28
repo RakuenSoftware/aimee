@@ -7,19 +7,25 @@ The standard backend is `aimee-llm` on the deployment network.
 
 In a wizard-managed deployment, starting the local LLM is also an identity transaction. The server
 generates a persistent 256-bit `AIMEE_LLM_AUTH_TOKEN`, passes it to the KB and LLM only, and configures
-the KB's unified endpoint and selected role tiers. Every embed, batch, rerank, and chat request carries
+`AIMEE_LLM_AUTH_REQUIRED=1` on the KB so none of its clients can silently downgrade to keyless access.
+It also configures the KB's unified endpoint and selected role tiers. Every embed, batch, rerank, and chat request carries
 that bearer. The gateway starts with its unauthenticated wildcard-bind guard enforced, so a missing
 credential fails deployment instead of silently trusting every container on the bridge. This service
 identity is distinct from browser login, first-user enrollment, and server-to-KB credentials.
 Setup reports success only after executing an authenticated `/auth/verify` request from inside the KB
 container, using the endpoint and bearer that the KB actually received.
 
+An external-only topology does not create this local service identity and defaults
+`AIMEE_LLM_AUTH_REQUIRED` to `0`; an operator may still set it to `1` together with the external
+gateway's bearer. This prevents the local-LLM security rule from disabling intentionally keyless
+external endpoints.
+
 The managed contract is explicit:
 
 | Consumer | Configuration received | Request surface |
 | --- | --- | --- |
 | `aimee-kb` | `AIMEE_LLM_URL=http://aimee-llm:8742`, `AIMEE_LLM_AUTH_TOKEN`, `AIMEE_LLM_MODEL` (default `aimee-synth`), and an optional pinned `AIMEE_EMBEDDING_DIM` | `/embed`, `/embed_batch`, `/rerank`, `/v1/chat/completions`, `/auth/verify` |
-| `aimee-llm` | the same `AIMEE_LLM_AUTH_TOKEN`; `AIMEE_LLM_{EMBED,RERANK,SYNTH}_{MODE,TIER,URL}`; `AIMEE_LLM_SYNTH_MODEL`; and the runtime GPU settings | serves a local role, proxies its configured external URL, or rejects an `off` role |
+| `aimee-llm` | the same `AIMEE_LLM_AUTH_TOKEN`; `AIMEE_LLM_{EMBED,RERANK,SYNTH}_{MODE,TIER,URL}`; `AIMEE_LLM_SYNTH_MODEL`; optional `AIMEE_EMBEDDING_DIM`; and the runtime GPU settings | serves a local role, proxies its configured external URL, or rejects an `off` role; rejects an embedding-dimension mismatch when pinned |
 | legacy KB curator sidecars | `LLM_API_KEY` aliasing the same service bearer | the unified gateway's OpenAI-compatible `/v1` surface |
 
 The role configuration and credential form one deployment transaction. The server does not report a

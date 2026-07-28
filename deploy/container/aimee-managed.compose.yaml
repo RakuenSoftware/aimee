@@ -49,6 +49,10 @@ services:
       # to BOTH sides. This is not the wizard user's bearer: it is the KB's own
       # identity for every embed, rerank, and synth request to its LLM.
       AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
+      # Managed clients must never downgrade to keyless requests if credential
+      # injection is broken. Standalone/external deployments remain compatible
+      # unless they opt into this invariant themselves.
+      AIMEE_LLM_AUTH_REQUIRED: ${AIMEE_LLM_AUTH_REQUIRED:-0}
       # Legacy curator sidecars consume the generic OpenAI-compatible name.
       LLM_API_KEY: ${AIMEE_LLM_AUTH_TOKEN:-}
       # One stable model label is shared with the unified gateway. The gateway is
@@ -104,6 +108,9 @@ services:
       AIMEE_LLM_SYNTH_TIER: ${AIMEE_LLM_SYNTH_TIER:-cpu}
       AIMEE_LLM_SYNTH_URL: ${AIMEE_LLM_SYNTH_URL:-}
       AIMEE_LLM_SYNTH_MODEL: ${AIMEE_LLM_MODEL:-aimee-synth}
+      # Empty means derive the model's native dimension at runtime. A wizard or
+      # operator pin reaches both sides and the gateway rejects model drift.
+      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
       # A local managed LLM is never allowed to start keyless. deploy_apply.c
       # generates/persists this before Compose sees the service.
       # Keep interpolation profile-safe: Compose expands inactive profiles too.

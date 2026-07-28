@@ -50,9 +50,22 @@ RERANK_SEP = "</s>"
 # exercises the real kb -> gateway contract (and the /embed,/rerank,/v1/chat
 # shapes) cheaply. Vectors are deterministic per-input so retrieval is stable.
 STUB = os.environ.get("AIMEE_LLM_STUB", "") not in ("", "0", "false")
-STUB_DIM = int(os.environ.get("AIMEE_LLM_STUB_DIM")
-               or os.environ.get("EMBEDDER_STUB_DIM")
-               or "1024")
+
+
+def _optional_positive_env_int(name):
+    """Return a positive configured integer, or None to derive at runtime."""
+    try:
+        value = int(os.environ.get(name, "") or "0")
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+EXPECTED_EMBED_DIM = _optional_positive_env_int("AIMEE_EMBEDDING_DIM")
+STUB_DIM = (_optional_positive_env_int("AIMEE_LLM_STUB_DIM")
+            or _optional_positive_env_int("EMBEDDER_STUB_DIM")
+            or EXPECTED_EMBED_DIM
+            or 1024)
 
 
 def _stub_vec(text):
@@ -296,6 +309,17 @@ def embed_dim():
     return _embed_dim
 
 
+def _validate_embed_dim(vec):
+    """Enforce an optional wizard/operator pin; otherwise preserve native dim."""
+    if EXPECTED_EMBED_DIM is not None and len(vec) != EXPECTED_EMBED_DIM:
+        raise GatewayError(
+            503,
+            "embedding_dim_mismatch",
+            f"embedder returned {len(vec)} dimensions; expected {EXPECTED_EMBED_DIM}",
+        )
+    return vec
+
+
 # ---- handlers (call llama.cpp; the rerank head is the validated P2 path) ----
 
 _head = None
@@ -314,15 +338,21 @@ def _rerank_head():
 
 def do_embed(text):
     if STUB:
-        return _stub_vec(text)
-    return _embeddings(EMBED_URL, text)
+        vec = _stub_vec(text)
+    else:
+        vec = _embeddings(EMBED_URL, text)
+    return _validate_embed_dim(vec)
 
 
 def do_embed_batch(texts):
     validate_batch(texts)
     if STUB:
-        return [_stub_vec(t) for t in texts]
-    return _embeddings(EMBED_URL, list(texts)) if texts else []
+        vecs = [_stub_vec(t) for t in texts]
+    else:
+        vecs = _embeddings(EMBED_URL, list(texts)) if texts else []
+    for vec in vecs:
+        _validate_embed_dim(vec)
+    return vecs
 
 
 def do_rerank(obj):
@@ -635,13 +665,15 @@ def build_server():
 
         def do_POST(self):
             path = self.path.rstrip("/")
-            n = int(self.headers.get("content-length", "0") or "0")
-            raw = self.rfile.read(n) if n else b""
             try:
                 # §1a: every work request is authenticated; the scope is DERIVED from the
-                # identity (a caller-supplied X-Aimee-Scope is rejected).
+                # identity (a caller-supplied X-Aimee-Scope is rejected). Authenticate
+                # before reading the body so an untrusted bridge peer cannot hold a
+                # worker or force allocations with an unauthenticated Content-Length.
                 check_auth(self.headers.get("Authorization"))
                 scope = derive_scope(self.headers.get)
+                n = int(self.headers.get("content-length", "0") or "0")
+                raw = self.rfile.read(n) if n else b""
                 if path == "/auth/verify":
                     # Cheap deploy-time proof that the request came from a caller
                     # holding the configured service identity. No model role has

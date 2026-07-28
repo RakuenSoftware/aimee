@@ -41,6 +41,7 @@ export COMPOSE_PROFILES="kb,llm"
 export AIMEE_KB_IMAGE="$kb_base_image"
 export AIMEE_LLM_IMAGE="$llm_image"
 export AIMEE_LLM_AUTH_TOKEN="$token"
+export AIMEE_LLM_AUTH_REQUIRED="1"
 export AIMEE_LLM_MODEL="validation-synth"
 export AIMEE_LLM_EMBED_MODE="local"
 export AIMEE_LLM_EMBED_TIER="mid"
@@ -48,6 +49,7 @@ export AIMEE_LLM_RERANK_MODE="local"
 export AIMEE_LLM_RERANK_TIER="small"
 export AIMEE_LLM_SYNTH_MODE="local"
 export AIMEE_LLM_SYNTH_TIER="cpu"
+export AIMEE_EMBEDDING_DIM="1024"
 export AIMEE_VALIDATION_ROOT="$root"
 
 compose=(docker compose -f "$root/deploy/container/aimee-managed.compose.yaml" -f "$override")
@@ -59,6 +61,7 @@ compose=(docker compose -f "$root/deploy/container/aimee-managed.compose.yaml" -
 echo "managed-kb-llm: checking propagated identity and role configuration"
 "${compose[@]}" exec -T aimee-kb sh -ec '
   test "${#AIMEE_LLM_AUTH_TOKEN}" -eq 64
+  test "$AIMEE_LLM_AUTH_REQUIRED" = "1"
   test "$AIMEE_LLM_URL" = "http://aimee-llm:8742"
   test "$AIMEE_LLM_MODEL" = "validation-synth"
   test "$LLM_API_KEY" = "$AIMEE_LLM_AUTH_TOKEN"
@@ -70,6 +73,7 @@ echo "managed-kb-llm: checking propagated identity and role configuration"
   test "$AIMEE_LLM_RERANK_MODE/$AIMEE_LLM_RERANK_TIER" = "local/small"
   test "$AIMEE_LLM_SYNTH_MODE/$AIMEE_LLM_SYNTH_TIER" = "local/cpu"
   test "$AIMEE_LLM_SYNTH_MODEL" = "validation-synth"
+  test "$AIMEE_EMBEDDING_DIM" = "1024"
 '
 
 # Missing and incorrect credentials fail; the KB's actual environment succeeds.

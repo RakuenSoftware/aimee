@@ -912,7 +912,7 @@ int main(void)
       const char *e2 = "enrolled-two-cccccccccccccccccccccccccc";
       const char *extra[] = {e1, e2};
 
-      char hdr[128];
+      char hdr[384];
       snprintf(hdr, sizeof(hdr), "Bearer %s", primary);
       assert(server_http_authorize_multi(1, primary, extra, 2, hdr, NULL, 0) == 0);
 
@@ -966,6 +966,18 @@ int main(void)
       assert(server_http_enrolled_bearer_count() == 0);
       assert(server_http_authorize_enrolled(1, live, hdr, NULL, 0) == 401);
       assert(server_http_authorize_enrolled(1, live, "Bearer rotated-primary", NULL, 0) == 0);
+
+      /* bearer_tokens_extra predates wizard enrollment and permits existing
+       * operator-supplied values longer than the new 64-hex minted token. An
+       * upgrade must not truncate and silently revoke those clients. */
+      char long_token[192];
+      memset(long_token, 'L', sizeof(long_token) - 1);
+      long_token[sizeof(long_token) - 1] = '\0';
+      const char *long_extra[] = {long_token};
+      server_http_set_bearer_extra(long_extra, 1);
+      snprintf(hdr, sizeof(hdr), "Bearer %s", long_token);
+      assert(server_http_authorize_enrolled(1, live, hdr, NULL, 0) == 0);
+      server_http_set_bearer_extra(NULL, 0);
 
       printf("  PASS: authorize_multi accepts every enrolled client, rejects the rest\n");
    }

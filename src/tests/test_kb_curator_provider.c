@@ -16,6 +16,7 @@ static void clear_llm_env(void)
    unsetenv("AIMEE_LLM_URL");
    unsetenv("AIMEE_LLM_MODEL");
    unsetenv("AIMEE_LLM_AUTH_TOKEN");
+   unsetenv("AIMEE_LLM_AUTH_REQUIRED");
 }
 
 static void test_tier_classification(void)
@@ -162,6 +163,13 @@ static void test_aimee_llm_url(void)
    setenv("AIMEE_LLM_AUTH_TOKEN", "kb-to-llm-service-token", 1);
    assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
    assert(b.api_key && strcmp(b.api_key, "kb-to-llm-service-token") == 0);
+
+   /* Managed mode must not silently downgrade the unified gateway to keyless. */
+   unsetenv("AIMEE_LLM_AUTH_TOKEN");
+   setenv("AIMEE_LLM_AUTH_REQUIRED", "1", 1);
+   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 0);
+   setenv("AIMEE_LLM_AUTH_TOKEN", "kb-to-llm-service-token", 1);
+   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
 
    /* Trailing slash and an already-/v1 URL both normalize to exactly one /v1. */
    setenv("AIMEE_LLM_URL", "http://host:8742/", 1);
