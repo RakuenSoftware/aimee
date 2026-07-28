@@ -565,6 +565,39 @@ static void test_memory_stats_route(void)
    printf("  PASS: test_memory_stats_route\n");
 }
 
+static void test_memory_delete_and_supersede_routes(void)
+{
+   cli_v1_route_t route;
+
+   char *delete_lookup[] = {"delete", "181"};
+   assert(cli_v1_lookup("memory", 2, delete_lookup, &route));
+   assert(strcmp(route.method, "memory.delete") == 0);
+   assert(route.skip_subcmd == 1);
+
+   cJSON *req = marshal_request(route.method, 1, delete_lookup + 1);
+   assert(req != NULL);
+   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "memory.delete") == 0);
+   assert((long long)cJSON_GetObjectItem(req, "id")->valuedouble == 181);
+   cJSON_Delete(req);
+
+   char *supersede_lookup[] = {"supersede", "181", "corrected fact", "--confidence=0.75",
+                               "--session=release-e2e"};
+   assert(cli_v1_lookup("memory", 5, supersede_lookup, &route));
+   assert(strcmp(route.method, "memory.supersede") == 0);
+   assert(route.skip_subcmd == 1);
+
+   req = marshal_request(route.method, 4, supersede_lookup + 1);
+   assert(req != NULL);
+   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "memory.supersede") == 0);
+   assert((long long)cJSON_GetObjectItem(req, "old_id")->valuedouble == 181);
+   assert(strcmp(cJSON_GetObjectItem(req, "new_content")->valuestring, "corrected fact") == 0);
+   assert(cJSON_GetObjectItem(req, "confidence")->valuedouble == 0.75);
+   assert(strcmp(cJSON_GetObjectItem(req, "session_id")->valuestring, "release-e2e") == 0);
+   cJSON_Delete(req);
+
+   printf("  PASS: test_memory_delete_and_supersede_routes\n");
+}
+
 static void test_server_status_route_lookup(void)
 {
    cli_v1_route_t route;
@@ -1678,6 +1711,7 @@ int main(void)
    test_model_routes_and_marshaling();
    test_memory_show_alias_route();
    test_memory_stats_route();
+   test_memory_delete_and_supersede_routes();
    test_server_status_route_lookup();
    test_kb_docs_push_route_and_marshal();
    test_git_verify_failure_detection();

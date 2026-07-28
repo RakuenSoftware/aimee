@@ -3319,6 +3319,77 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /memory/delete:
+    post:
+      summary: Delete a memory by id
+      description: >
+        Removes a memory permanently. Prefer /memory/supersede when a belief has
+        merely been replaced: the supersession chain is walked by
+        memory.list_superseded_keys and memory.fact_history, and deleting breaks
+        provenance and the negative examples effectiveness scoring relies on.
+        Delete is for content that should not exist at all — a credential, PII
+        under an erasure request, data written to the wrong store.
+        Requires the memory-write capability.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: integer, minimum: 1, maximum: 9007199254740991 }
+      responses:
+        "200":
+          description: Deletion result ({ id, deleted })
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Missing or non-positive id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: No such memory, or the knowledge service refused
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /memory/supersede:
+    post:
+      summary: Replace a memory with a corrected one, linking the two
+      description: >
+        The preferred correction: the old memory is retained and linked to its
+        replacement, so provenance and retrieval history stay intact.
+        Requires the memory-write capability.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [old_id, new_content]
+              properties:
+                old_id: { type: integer, minimum: 1, maximum: 9007199254740991 }
+                new_content: { type: string }
+                confidence: { type: number, minimum: 0, maximum: 1 }
+                session_id: { type: string }
+      responses:
+        "200":
+          description: The superseding memory envelope
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Missing old_id or empty new_content
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: No such memory, or the knowledge service refused
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /memory/get:
     post:
       summary: Get a memory by id
