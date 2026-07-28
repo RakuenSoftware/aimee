@@ -33,8 +33,10 @@ static int g_running = 0;
 static int g_last_exit = INT_MIN;
 static char g_last_out[DEPLOY_OUT_CAP];
 
-static int deploy_env_has_llm_profile(const char *env)
+static int deploy_env_has_profile(const char *env, const char *profile)
 {
+   if (!profile || !profile[0])
+      return 0;
    const char *p = env ? strstr(env, "COMPOSE_PROFILES=") : NULL;
    if (!p)
       return 0;
@@ -49,7 +51,8 @@ static int deploy_env_has_llm_profile(const char *env)
       const char *word = p;
       while (p < end && *p != ',' && !isspace((unsigned char)*p))
          p++;
-      if ((size_t)(p - word) == 3 && memcmp(word, "llm", 3) == 0)
+      if ((size_t)(p - word) == strlen(profile) &&
+          memcmp(word, profile, strlen(profile)) == 0)
          return 1;
    }
    return 0;
@@ -201,12 +204,15 @@ static int deploy_env_overrides(const char *deploy_env, const char *inherited)
  * lines config_emit_deploy_env produced for the live config (later entries win, so
  * the deploy-env overrides any inherited value). Returns a NULL-terminated,
  * heap-owned array, or NULL on OOM / no config. */
-static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out)
+static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
+                                int *managed_identity_out)
 {
    if (err && err_cap)
       err[0] = '\0';
    if (managed_llm_out)
       *managed_llm_out = 0;
+   if (managed_identity_out)
+      *managed_identity_out = 0;
    config_t cfg;
    if (config_load(&cfg) < 0)
    {
@@ -218,9 +224,26 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out)
    config_emit_deploy_env(&cfg, env, sizeof(env));
 
    char llm_token[513] = "";
-   const int managed_llm = deploy_env_has_llm_profile(env);
+   const int managed_llm = deploy_env_has_profile(env, "llm");
+   const int managed_kb = deploy_env_has_profile(env, "kb");
+   const char *explicit_conn = getenv("AIMEE_KB_CONN");
+   const char *explicit_id = getenv("AIMEE_SERVER_ID");
+   const char *explicit_team = getenv("AIMEE_SERVER_TEAM_ID");
+   const int explicit_parts = (explicit_conn && explicit_conn[0] ? 1 : 0) +
+                              (explicit_id && explicit_id[0] ? 1 : 0) +
+                              (explicit_team && explicit_team[0] ? 1 : 0);
+   if (managed_kb && explicit_parts != 0 && explicit_parts != 3)
+   {
+      if (err && err_cap)
+         snprintf(err, err_cap,
+                  "partial explicit server identity: AIMEE_KB_CONN, AIMEE_SERVER_ID, and "
+                  "AIMEE_SERVER_TEAM_ID must be set together");
+      return NULL;
+   }
    if (managed_llm_out)
       *managed_llm_out = managed_llm;
+   if (managed_identity_out)
+      *managed_identity_out = managed_kb && explicit_parts == 0;
    if (managed_llm && deploy_llm_token(llm_token, sizeof(llm_token)) != 0)
    {
       if (err && err_cap)
@@ -483,6 +506,22 @@ static int deploy_llm_probe_argv(const char *file, const char **argv, size_t cap
    return (int)n;
 }
 
+/* Run the one-shot managed identity installer after the KB is healthy. The
+ * service mounts both private named volumes and writes the server identity
+ * directly, so no enrollment token or private key crosses host argv/stdout. */
+static int deploy_identity_bootstrap_argv(const char *file, const char **argv, size_t cap)
+{
+   const char *cmd[] = {"docker", "compose", "-f", file, "run", "--rm", "-T",
+                        "aimee-server-identity"};
+   size_t n = sizeof(cmd) / sizeof(cmd[0]);
+   if (!argv || !file || !file[0] || cap < n + 1)
+      return -1;
+   for (size_t i = 0; i < n; i++)
+      argv[i] = cmd[i];
+   argv[n] = NULL;
+   return (int)n;
+}
+
 static void *deploy_worker(void *arg)
 {
    (void)arg;
@@ -500,7 +539,9 @@ static void *deploy_worker(void *arg)
    }
    char env_err[256];
    int managed_llm = 0;
-   char **envp = build_deploy_envp(env_err, sizeof(env_err), &managed_llm);
+   int managed_identity = 0;
+   char **envp =
+       build_deploy_envp(env_err, sizeof(env_err), &managed_llm, &managed_identity);
 
    char out[DEPLOY_OUT_CAP];
    int code = -1;
@@ -515,7 +556,34 @@ static void *deploy_worker(void *arg)
       if (run_capture(argv, envp, out + used, sizeof(out) - used, &code) != 0)
          snprintf(out, sizeof(out),
                   "deploy: failed to run `docker compose` (is docker on PATH?)\n");
-      else if (code == 0 && managed_llm)
+      else if (code == 0 && managed_identity)
+      {
+         const char *identity_argv[12];
+         int identity_code = -1;
+         char identity_out[1024] = "";
+         if (deploy_identity_bootstrap_argv(file, identity_argv,
+                                            sizeof(identity_argv) /
+                                                sizeof(identity_argv[0])) < 0 ||
+             run_capture(identity_argv, envp, identity_out, sizeof(identity_out),
+                         &identity_code) != 0 ||
+             identity_code != 0)
+         {
+            code = identity_code == 0 ? -1 : identity_code;
+            used = strlen(out);
+            if (used < sizeof(out) - 1)
+               snprintf(out + used, sizeof(out) - used,
+                        "deploy: managed server identity enrollment failed%s%s\n",
+                        identity_out[0] ? ": " : "", identity_out);
+         }
+         else
+         {
+            used = strlen(out);
+            if (used < sizeof(out) - 1)
+               snprintf(out + used, sizeof(out) - used,
+                        "deploy: managed server identity enrolled and verified\n");
+         }
+      }
+      if (code == 0 && managed_llm)
       {
          const char *probe_argv[12];
          int probe_code = -1;
@@ -595,7 +663,7 @@ int deploy_apply_status(char *out, size_t out_cap, int *exit_code)
    const char *argv[] = {"docker", "compose", "-f", file, "ps", "-a", "--format", "json", NULL};
    /* Pass the deploy env (COMPOSE_PROFILES + COMPOSE_PROJECT_NAME) so `ps` scopes
     * to the same project/profiles the apply used; fall back to environ on OOM. */
-   char **envp = build_deploy_envp(NULL, 0, NULL);
+   char **envp = build_deploy_envp(NULL, 0, NULL, NULL);
    int rc = run_capture(argv, envp, out, out_cap, exit_code);
    free_envp(envp);
    return rc;

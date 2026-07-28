@@ -53,6 +53,14 @@ int kb_client_mtls_management_jwks_fetch(void *ctx, char *out, size_t cap, size_
    return -1;
 }
 
+int kb_client_mtls_managed_metadata(char *server_id, size_t cap, long long *team_id)
+{
+   (void)server_id;
+   (void)cap;
+   (void)team_id;
+   return 0;
+}
+
 int audit_worm_append(const char *role, const char *principal, const char *action,
                       const char *resource, const char *verdict, const char *detail)
 {

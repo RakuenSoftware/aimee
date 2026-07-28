@@ -77,6 +77,31 @@ services:
       # Sharing it read-only lets kb.build/update resolve server workspace paths.
       - aimee-server-workspaces:/var/lib/aimee-workspaces:ro
 
+  # Explicitly targeted by deploy_apply after the managed KB is healthy. Keeping
+  # this on its own profile prevents ordinary `compose up` from treating a
+  # one-shot enrollment job as a long-running sibling. It mounts both private
+  # volumes, so no key, enrollment token, or trust material crosses host argv.
+  aimee-server-identity:
+    profiles: ["identity-bootstrap"]
+    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:${AIMEE_IMAGE_TAG:-latest}}
+    user: "0:0"
+    environment:
+      AIMEE_HOME: /var/lib/aimee
+      AIMEE_DB2_URL: postgresql:///aimee_shared?host=/var/lib/aimee/run&user=aimee
+    command:
+      - managed-server-identity
+      - install
+      - --server-home=/var/lib/aimee-server
+      - --host=aimee-kb
+      - --port=8745
+      - --endpoint=https://aimee-server:8743
+      - --uid=1000
+    depends_on:
+      aimee-kb: { condition: service_healthy }
+    volumes:
+      - aimee-managed-kb-home:/var/lib/aimee
+      - aimee-server-home:/var/lib/aimee-server
+
   # The one LLM service, for every tier: a model-less image that pulls the tier
   # the wizard selected on first boot and persists it in the /models volume.
   # Selected by COMPOSE_PROFILES=...,llm whenever any role is served locally.
@@ -133,3 +158,6 @@ volumes:
   aimee-server-workspaces:
     external: true
     name: aimee_aimee-server-workspaces
+  aimee-server-home:
+    external: true
+    name: aimee_aimee-server-home

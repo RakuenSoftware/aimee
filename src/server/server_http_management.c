@@ -2,6 +2,7 @@
 #include "server_mgmt_endpoint.h"
 #include "kb_mgmt_endpoint.h"
 #include "kb_mgmt_status.h"
+#include "server_runtime_identity.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -260,7 +261,10 @@ int server_http_management_config_from_env(server_http_management_config_t *out)
    errno = 0;
    unsigned long port =
        port_text && port_text[0] >= '1' && port_text[0] <= '9' ? strtoul(port_text, &end, 10) : 0;
-   const char *server_id = getenv("AIMEE_SERVER_ID");
+   char server_id_buf[128];
+   const char *server_id = server_runtime_server_id_load(server_id_buf, sizeof(server_id_buf))
+                               ? server_id_buf
+                               : NULL;
    const char *status_key_id = getenv("AIMEE_MGMT_STATUS_KEY_ID");
    const char *status_public = getenv("AIMEE_MGMT_STATUS_PUBLIC_KEY");
    const char *token_issuer = getenv("AIMEE_SERVER_MGMT_ISSUER");

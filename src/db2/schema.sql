@@ -8046,6 +8046,14 @@ BEGIN
        OR r.owner_subject<>v_actor THEN
       RAISE EXCEPTION 'registry pending idempotency conflict' USING ERRCODE='23505';
     END IF;
+    IF (r.status='pending' AND r.activation_expires_at<=now()) OR r.status='expired' THEN
+      UPDATE kb_server_registry SET status='pending',
+        activation_expires_at=now()+make_interval(secs=>p_ttl_seconds),updated_at=now()
+        WHERE kb_server_registry.server_id=r.server_id;
+      PERFORM kb_audit_worm_append('operator',v_actor,'server.registry.rearmed',r.server_id,
+        'allow','operation='||p_operation);
+      RETURN QUERY SELECT r.server_id,'pending'::TEXT; RETURN;
+    END IF;
     RETURN QUERY SELECT r.server_id,r.status; RETURN;
   END IF;
   INSERT INTO kb_server_registry(server_id,cert_cn,mgmt_cert_cn,owner_subject,team_id,
@@ -8102,9 +8110,9 @@ BEGIN
   END IF;
   INSERT INTO kb_enrollments(scope,fingerprint,serial,state,expires_at,legacy,cert_issuer,
     cert_serial_norm,authority_id) VALUES
-    ('p5-server-client',p_client_fp,p_client_serial,'active',r.activation_expires_at::TEXT,0,
+    ('p5-server-client',p_client_fp,p_client_serial,'active',pg_now_text('+90 days'),0,
       p_client_issuer,p_client_serial,substr(p_client_fp,1,32)),
-    ('p5-server-management',p_mgmt_fp,p_mgmt_serial,'active',r.activation_expires_at::TEXT,0,
+    ('p5-server-management',p_mgmt_fp,p_mgmt_serial,'active',pg_now_text('+90 days'),0,
       p_mgmt_issuer,p_mgmt_serial,substr(p_mgmt_fp,1,32));
   UPDATE kb_server_registry SET status='active',client_issuer=p_client_issuer,
     client_serial_norm=p_client_serial,client_fingerprint=p_client_fp,

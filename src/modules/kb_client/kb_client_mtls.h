@@ -14,6 +14,13 @@
  * established an owner-only identity under AIMEE_HOME. */
 int kb_client_mtls_configured(void);
 
+/* Read the stable server/team binding from a wizard-installed version-2
+ * identity. Explicit AIMEE_SERVER_ID / AIMEE_SERVER_TEAM_ID settings remain
+ * authoritative at their call sites; these accessors are the managed fallback.
+ * Returns 1 when a complete ready identity was loaded, 0 when none is present. */
+int kb_client_mtls_managed_metadata(char *server_id_out, size_t server_id_cap,
+                                    long long *team_id_out);
+
 /* Perform a /v1 request to the configured remote kb over mTLS. Enrolls once on
  * first use (TOFU-pin the CA, redeem the token for a client cert). Returns the
  * heap response body (caller frees) with *status_out set, or NULL on failure.

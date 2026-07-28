@@ -2965,6 +2965,39 @@ static void test_mtls_listener(void)
       assert(pool_total == 0 && pool_idle == 0);
       unsetenv("AIMEE_TRANSPORT_KB_POOL_ENABLED");
       unsetenv("AIMEE_KB_CONN");
+
+      /* A wizard-managed v2 identity owns its endpoint and stable registry
+       * binding, so it remains configured with no one-time connection string
+       * in the process environment. */
+      cJSON *managed = cJSON_CreateObject();
+      assert(managed);
+      cJSON_AddNumberToObject(managed, "version", 2);
+      cJSON_AddStringToObject(managed, "state", "ready");
+      cJSON_AddStringToObject(managed, "host", "localhost");
+      cJSON_AddNumberToObject(managed, "port", port);
+      cJSON_AddStringToObject(managed, "server_id", "managed-server-test");
+      cJSON_AddNumberToObject(managed, "team_id", 42);
+      cJSON_AddStringToObject(managed, "ca", ca.cert_pem);
+      cJSON_AddStringToObject(managed, "cert", ccert);
+      cJSON_AddStringToObject(managed, "key", ckey);
+      char *managed_json = cJSON_PrintUnformatted(managed);
+      cJSON_Delete(managed);
+      assert(managed_json);
+      identity_stream = fopen(identity_file, "w");
+      assert(identity_stream && fputs(managed_json, identity_stream) >= 0 && fclose(identity_stream) == 0);
+      free(managed_json);
+      assert(chmod(identity_file, 0600) == 0);
+      kb_client_mtls_reset_for_test();
+      assert(kb_client_mtls_configured() == 1);
+      char managed_server[128];
+      long long managed_team = 0;
+      assert(kb_client_mtls_managed_metadata(managed_server, sizeof(managed_server),
+                                             &managed_team) == 1);
+      assert(strcmp(managed_server, "managed-server-test") == 0 && managed_team == 42);
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      assert(st2 == 200 && r && strstr(r, "\"status\":\"ok\""));
+      free(r);
+
       kb_client_mtls_set_identity_path_for_test(NULL);
       assert(kb_client_mtls_configured() == 0);
       unlink(identity_file);

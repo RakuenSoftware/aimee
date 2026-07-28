@@ -6,6 +6,7 @@
 #include "db2/code_index.h"
 #include "db2/db2.h"
 #include "kb_witness_cadence.h"
+#include "managed_server_identity_install.h"
 #include "kb_auth_oidc.h"
 #include "kb_oidc_jwks_fleet.h"
 #include "kb_identity.h"
@@ -49,6 +50,7 @@
 #include "kb_memory_audit_bridge.h" /* record memory mutations on aimee-kb's own obs bus */
 #include "log.h"                    /* audit_log_open — KB memory-audit ledger */
 #include <signal.h>
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -779,6 +781,84 @@ static int kb_cmd_tenancy_init_db2(void)
    return 0;
 }
 
+static int kb_parse_unsigned(const char *text, unsigned long long max,
+                             unsigned long long *out)
+{
+   if (!text || !text[0] || !out)
+      return -1;
+   char *end = NULL;
+   errno = 0;
+   unsigned long long value = strtoull(text, &end, 10);
+   if (errno || !end || *end || value > max)
+      return -1;
+   *out = value;
+   return 0;
+}
+
+static int kb_cmd_managed_server_identity(int argc, char **argv)
+{
+   if (argc < 3 || strcmp(argv[2], "install") != 0)
+   {
+      fputs("Usage: aimee-kb managed-server-identity install --server-home=PATH "
+            "--host=HOST --port=N --endpoint=URL --uid=N\n",
+            stderr);
+      return 1;
+   }
+   kb_managed_server_identity_install_options_t options = {0};
+   int port_seen = 0, owner_seen = 0;
+   unsigned long long owner = 0;
+   for (int i = 3; i < argc; i++)
+   {
+      if (strncmp(argv[i], "--server-home=", 14) == 0 && !options.server_home)
+         options.server_home = argv[i] + 14;
+      else if (strncmp(argv[i], "--host=", 7) == 0 && !options.host)
+         options.host = argv[i] + 7;
+      else if (strncmp(argv[i], "--port=", 7) == 0 && !port_seen)
+      {
+         unsigned long long port = 0;
+         port_seen = 1;
+         if (kb_parse_unsigned(argv[i] + 7, 65535, &port) == 0)
+            options.port = (int)port;
+      }
+      else if (strncmp(argv[i], "--endpoint=", 11) == 0 && !options.endpoint)
+         options.endpoint = argv[i] + 11;
+      else if (strncmp(argv[i], "--uid=", 6) == 0 && !owner_seen)
+      {
+         owner_seen = 1;
+         if (kb_parse_unsigned(argv[i] + 6, (unsigned long long)(uid_t)-1, &owner) != 0)
+            owner_seen = -1;
+      }
+      else
+      {
+         fprintf(stderr, "aimee-kb managed-server-identity: invalid or duplicate option: %s\n",
+                 argv[i]);
+         return 1;
+      }
+   }
+   if (!options.server_home || !options.host || !options.endpoint || options.port < 1 ||
+       options.port > 65535 || owner_seen != 1)
+   {
+      fputs("aimee-kb managed-server-identity: incomplete install options\n", stderr);
+      return 1;
+   }
+   options.owner = (uid_t)owner;
+   int initialized = 0;
+   for (int attempt = 0; attempt < 60 && !initialized; attempt++)
+   {
+      if (kb_cmd_tenancy_init_db2() == 0)
+         initialized = 1;
+      else
+         sleep(1);
+   }
+   if (!initialized)
+      return 1;
+   int rc = kb_managed_server_identity_install(&options) == 0 ? 0 : 1;
+   if (rc)
+      fputs("aimee-kb managed-server-identity: install failed\n", stderr);
+   db2_shutdown();
+   return rc;
+}
+
 /* Operator-facing spend reporting CLI (P3b):
  *   aimee-kb spend --team X [--project Y] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--json]
  * Runs in-process against DB2 as the install owner principal (an org-admin, so the
@@ -1472,6 +1552,8 @@ int main(int argc, char **argv)
    /* Subcommands (must precede the daemon flag loop). */
    if (argc > 1 && strcmp(argv[1], "enroll") == 0)
       return kb_cmd_enroll(argc, argv);
+   if (argc > 1 && strcmp(argv[1], "managed-server-identity") == 0)
+      return kb_cmd_managed_server_identity(argc, argv);
    if (argc > 1 && (strcmp(argv[1], "team") == 0 || strcmp(argv[1], "project") == 0 ||
                     strcmp(argv[1], "models") == 0))
       return kb_cmd_tenancy(argc, argv);

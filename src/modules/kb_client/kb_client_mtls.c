@@ -19,6 +19,7 @@
 #include <pthread.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <math.h>
 #include <openssl/crypto.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,13 +50,9 @@ static int identity_path(char *out, size_t cap)
    return n > 0 && (size_t)n < cap && out[0] == '/' ? 0 : -1;
 }
 
-static int identity_valid(const kb_enroll_conn_t *connection, const char *ca, const char *cert,
-                          const char *key)
+static int identity_material_valid(const char *ca, const char *cert, const char *key)
 {
-   char fingerprint[KB_PKI_FP_HEX];
-   if (!connection || !ca || !cert || !key || !ca[0] || !cert[0] || !key[0] ||
-       kb_pki_ca_fingerprint(ca, fingerprint, sizeof(fingerprint)) != 0 ||
-       strcasecmp(fingerprint, connection->ca_sha256) != 0 ||
+   if (!ca || !cert || !key || !ca[0] || !cert[0] || !key[0] ||
        kb_pki_verify_client_cert(ca, cert) != 1)
       return 0;
    SSL_CTX *ctx = kb_tls_client_ctx(ca, cert, key);
@@ -65,9 +62,29 @@ static int identity_valid(const kb_enroll_conn_t *connection, const char *ca, co
    return kb_tls_cert_expires_within(cert, 0) == 0;
 }
 
-static int identity_load(const kb_enroll_conn_t *connection, char *ca, size_t ca_cap, char *cert,
-                         size_t cert_cap, char *key, size_t key_cap)
+static int identity_matches_connection(const kb_enroll_conn_t *connection, const char *ca)
 {
+   char fingerprint[KB_PKI_FP_HEX];
+   return connection && ca &&
+          kb_pki_ca_fingerprint(ca, fingerprint, sizeof(fingerprint)) == 0 &&
+          strcasecmp(fingerprint, connection->ca_sha256) == 0;
+}
+
+typedef struct
+{
+   int version;
+   char host[256];
+   int port;
+   char server_id[128];
+   long long team_id;
+} identity_metadata_t;
+
+static int identity_load(const kb_enroll_conn_t *connection, char *ca, size_t ca_cap, char *cert,
+                         size_t cert_cap, char *key, size_t key_cap,
+                         identity_metadata_t *metadata)
+{
+   if (metadata)
+      memset(metadata, 0, sizeof(*metadata));
    char path[1024];
    if (identity_path(path, sizeof(path)) != 0)
       return -1;
@@ -111,16 +128,49 @@ static int identity_load(const kb_enroll_conn_t *connection, char *ca, size_t ca
    cJSON *jca = j ? cJSON_GetObjectItemCaseSensitive(j, "ca") : NULL;
    cJSON *jcert = j ? cJSON_GetObjectItemCaseSensitive(j, "cert") : NULL;
    cJSON *jkey = j ? cJSON_GetObjectItemCaseSensitive(j, "key") : NULL;
-   int ok = parsed_all && cJSON_IsNumber(version) && version->valuedouble == 1 &&
+   cJSON *state = j ? cJSON_GetObjectItemCaseSensitive(j, "state") : NULL;
+   cJSON *host = j ? cJSON_GetObjectItemCaseSensitive(j, "host") : NULL;
+   cJSON *port = j ? cJSON_GetObjectItemCaseSensitive(j, "port") : NULL;
+   cJSON *server_id = j ? cJSON_GetObjectItemCaseSensitive(j, "server_id") : NULL;
+   cJSON *team_id = j ? cJSON_GetObjectItemCaseSensitive(j, "team_id") : NULL;
+   int is_v1 = cJSON_IsNumber(version) && version->valuedouble == 1;
+   int is_v2 = cJSON_IsNumber(version) && version->valuedouble == 2 && cJSON_IsString(state) &&
+               strcmp(state->valuestring, "ready") == 0 && cJSON_IsString(host) &&
+               host->valuestring[0] &&
+               strlen(host->valuestring) < sizeof(((identity_metadata_t *)0)->host) &&
+               cJSON_IsNumber(port) && port->valuedouble >= 1 && port->valuedouble <= 65535 &&
+               floor(port->valuedouble) == port->valuedouble && cJSON_IsString(server_id) &&
+               server_id->valuestring[0] &&
+               strlen(server_id->valuestring) < sizeof(((identity_metadata_t *)0)->server_id) &&
+               cJSON_IsNumber(team_id) && team_id->valuedouble >= 1 &&
+               team_id->valuedouble <= 9007199254740991.0 &&
+               floor(team_id->valuedouble) == team_id->valuedouble;
+   int endpoint_ok = is_v1 ? connection != NULL
+                           : (!connection || (strcmp(connection->host, host->valuestring) == 0 &&
+                                              connection->port == (int)port->valuedouble));
+   int ok = parsed_all && (is_v1 || is_v2) && endpoint_ok &&
             cJSON_IsString(jca) && cJSON_IsString(jcert) && cJSON_IsString(jkey) &&
             strlen(jca->valuestring) < ca_cap && strlen(jcert->valuestring) < cert_cap &&
             strlen(jkey->valuestring) < key_cap &&
-            identity_valid(connection, jca->valuestring, jcert->valuestring, jkey->valuestring);
+            (!connection || identity_matches_connection(connection, jca->valuestring)) &&
+            identity_material_valid(jca->valuestring, jcert->valuestring, jkey->valuestring);
    if (ok)
    {
       snprintf(ca, ca_cap, "%s", jca->valuestring);
       snprintf(cert, cert_cap, "%s", jcert->valuestring);
       snprintf(key, key_cap, "%s", jkey->valuestring);
+      if (metadata)
+      {
+         metadata->version = is_v2 ? 2 : 1;
+         if (is_v2)
+         {
+            snprintf(metadata->host, sizeof(metadata->host), "%s", host->valuestring);
+            metadata->port = (int)port->valuedouble;
+            snprintf(metadata->server_id, sizeof(metadata->server_id), "%s",
+                     server_id->valuestring);
+            metadata->team_id = (long long)team_id->valuedouble;
+         }
+      }
    }
    if (cJSON_IsString(jkey))
       OPENSSL_cleanse(jkey->valuestring, strlen(jkey->valuestring));
@@ -443,7 +493,36 @@ static void pool_return(kb_pool_entry_t *entry, int reusable)
 int kb_client_mtls_configured(void)
 {
    const char *c = getenv("AIMEE_KB_CONN");
-   return (c && c[0]) ? 1 : 0;
+   if (c && c[0])
+      return 1;
+   char ca[sizeof(g_ca)], cert[sizeof(g_cert)], key[sizeof(g_key)];
+   identity_metadata_t metadata;
+   int configured = identity_load(NULL, ca, sizeof(ca), cert, sizeof(cert), key, sizeof(key),
+                                  &metadata) == 0 &&
+                    metadata.version == 2;
+   OPENSSL_cleanse(key, sizeof(key));
+   return configured;
+}
+
+int kb_client_mtls_managed_metadata(char *server_id_out, size_t server_id_cap,
+                                    long long *team_id_out)
+{
+   if (server_id_out && server_id_cap)
+      server_id_out[0] = '\0';
+   if (team_id_out)
+      *team_id_out = 0;
+   char ca[sizeof(g_ca)], cert[sizeof(g_cert)], key[sizeof(g_key)];
+   identity_metadata_t metadata;
+   int ok = identity_load(NULL, ca, sizeof(ca), cert, sizeof(cert), key, sizeof(key), &metadata) ==
+                0 &&
+            metadata.version == 2 && server_id_out && server_id_cap > strlen(metadata.server_id) &&
+            team_id_out;
+   OPENSSL_cleanse(key, sizeof(key));
+   if (!ok)
+      return 0;
+   snprintf(server_id_out, server_id_cap, "%s", metadata.server_id);
+   *team_id_out = metadata.team_id;
+   return 1;
 }
 
 /* Load the durable identity or enroll once and persist it before use. The
@@ -463,7 +542,8 @@ static int ensure_enrolled(void)
    kb_enroll_conn_t pc;
    if (conn && conn[0] && kb_enroll_conn_string_parse(conn, &pc) == 0)
    {
-      if (identity_load(&pc, g_ca, sizeof(g_ca), g_cert, sizeof(g_cert), g_key, sizeof(g_key)) ==
+      if (identity_load(&pc, g_ca, sizeof(g_ca), g_cert, sizeof(g_cert), g_key, sizeof(g_key),
+                        NULL) ==
               0 ||
           (kb_tls_enroll(conn, g_ca, sizeof(g_ca), g_cert, sizeof(g_cert), g_key, sizeof(g_key)) ==
                0 &&
@@ -471,6 +551,19 @@ static int ensure_enrolled(void)
       {
          snprintf(g_host, sizeof(g_host), "%s", pc.host);
          g_port = pc.port;
+         g_enrolled = 1;
+         rc = 0;
+      }
+   }
+   else if (!conn || !conn[0])
+   {
+      identity_metadata_t metadata;
+      if (identity_load(NULL, g_ca, sizeof(g_ca), g_cert, sizeof(g_cert), g_key, sizeof(g_key),
+                        &metadata) == 0 &&
+          metadata.version == 2)
+      {
+         snprintf(g_host, sizeof(g_host), "%s", metadata.host);
+         g_port = metadata.port;
          g_enrolled = 1;
          rc = 0;
       }

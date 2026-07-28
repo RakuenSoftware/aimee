@@ -8,6 +8,7 @@
 #include "server_mgmt_jwks_cache.h"
 #include "management_read.h"
 #include "server_mgmt_status.h"
+#include "server_runtime_identity.h"
 
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
@@ -233,7 +234,10 @@ static int server_http_mgmt_read(server_mgmt_read_selector_t selector, char *res
       return server_http_mgmt_read_error(SERVER_MGMT_READ_UNAVAILABLE, resp, cap);
    const server_tls_peer_cert_t *peer = server_http_identity_peer_cert();
    const server_tls_peer_cert_t *local = server_http_identity_local_cert();
-   const char *target = getenv("AIMEE_SERVER_ID");
+   char target_buf[128];
+   const char *target = server_runtime_server_id_load(target_buf, sizeof(target_buf))
+                            ? target_buf
+                            : NULL;
    const char *issuer = getenv("AIMEE_SERVER_MGMT_ISSUER");
    const char *jwt = server_http_identity_bearer();
    const char *staple = server_http_identity_status_staple();
