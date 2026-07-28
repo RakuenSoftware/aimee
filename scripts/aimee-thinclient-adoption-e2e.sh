@@ -141,7 +141,14 @@ st="$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' \
 
 # --- a second fresh client cannot re-adopt with the bootstrap ---------------
 bold "==> A second fresh client presenting the bootstrap is refused enrollment"
-set2_json="$(AIMEE_HOME="$CLIENT2_HOME" "$AIMEE_BIN" --json remote set "$URL" "$BOOTSTRAP" 2>"$CLIENT2_HOME/set.err")" || true
+set2_rc=0
+set2_json="$(AIMEE_HOME="$CLIENT2_HOME" "$AIMEE_BIN" --json remote set "$URL" "$BOOTSTRAP" 2>"$CLIENT2_HOME/set.err")" || set2_rc=$?
+[[ "$set2_rc" -ne 0 ]] \
+  && ok "second client's remote set exits non-zero" \
+  || bad "second client's remote set exits non-zero" "exit: $set2_rc"
+[[ "$set2_json" == *'"ok":false'* ]] \
+  && ok "second client's JSON reports setup failure" \
+  || bad "second client's JSON reports setup failure" "$set2_json"
 [[ "$set2_json" == *'"enrolled":false'* ]] \
   && ok "second client not enrolled (one-shot TOFU)" \
   || bad "second client not enrolled (one-shot TOFU)" "$set2_json"

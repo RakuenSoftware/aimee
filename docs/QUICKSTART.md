@@ -74,7 +74,22 @@ The old combined image is gone.
 
 ## 2. Install the client
 
-Download the binary for your platform from the latest GitHub release.
+The client and server must use the same release channel. If step 1 used the default `:latest`
+images, download the client from the latest GitHub release as shown below.
+
+If step 1 used `AIMEE_IMAGE_TAG=testing`, the latest release client may not know routes added by the
+testing server. Build the Linux client from the same checkout instead, then continue at step 3:
+
+```bash
+make -C src -j4 ../aimee
+install -Dm755 aimee ~/.local/bin/aimee
+export PATH="$PATH:$HOME/.local/bin"
+aimee version
+```
+
+The source build requires the development packages listed by `./install-deps.sh`. Do not pair an
+older release client with `:testing` images and treat missing-route or stale-version output as a
+server failure.
 
 ### Linux
 
@@ -273,8 +288,9 @@ additional authority-managed user needs at least a `data` grant.
 > server through the setup wizard's *Workspaces & projects* step. The read side works normally on
 > Windows: `workspace list`, `index overview` and `index find` all query the server.
 
-Large repositories ingest in chunks. Use `aimee kb status` and `aimee kb ingest status` to follow
-the queue.
+Large repositories ingest in chunks. The client prints one progress line per uploaded batch. Use
+`aimee kb status` to inspect the queue. A channel-matched client also provides the dedicated
+`aimee kb ingest status` view.
 
 ## 6. Connect a coding tool
 
@@ -294,8 +310,10 @@ aimee mcp-serve
 The process inherits the enrolled remote target. It exposes memory, index, delegation, and other
 allowed tools while all state remains on the server.
 
-Use `aimee api status` for OpenAI- or Anthropic-compatible endpoint snippets. ACP editors use the
-ACP bridge. The removed `aimee chat` TUI is not part of current builds.
+Use `aimee api status` for OpenAI- or Anthropic-compatible endpoint snippets. The model API binds
+server loopback by design; when the coding tool runs on another machine, use the SSH tunnel printed
+by the command before pasting the local URL into the editor. ACP editors use the ACP bridge. The
+removed `aimee chat` TUI is not part of current builds.
 
 ## 7. Add delegates
 
@@ -308,11 +326,24 @@ aimee provider list --available
 
 Remote agent and delegate commands require a `full` grant, including `aimee agent list`.
 
+`ON` in the seeded roster means configured, not authenticated. Before probing or delegating, make
+sure `provider list --available` shows a provider you intend to use. Local providers need their
+endpoint registered; API or OAuth credentials belong in the server vault, not `agents.json` or the
+project:
+
+```bash
+aimee vault unlock
+aimee vault set <agent> <credential-name> <secret>
+```
+
 Probe an agent before relying on it:
 
 ```bash
 aimee agent probe <name>
 ```
+
+A failed execution probe exits non-zero, even though the server successfully completed the
+diagnostic request.
 
 Run one task:
 
@@ -320,11 +351,11 @@ Run one task:
 aimee delegate review --persona reviewer "Review the current diff"
 ```
 
-Local API or OAuth credentials belong in the server vault, not `agents.json` or the project:
+Delegation is asynchronous. The command prints a job id; follow it to completion rather than
+treating `pending` as a successful review:
 
 ```bash
-aimee vault unlock
-aimee vault set <agent> <credential-name> <secret>
+aimee jobs status <job-id>
 ```
 
 See [Delegates](DELEGATES.md) for local endpoints, API providers, CLI agents, roles, and sandbox

@@ -528,7 +528,11 @@ static int remote_set(const char *url, const char *token, int json_output)
     * bootstrap token configured and is reported by remote_enroll. */
    int enrolled = 0;
    int mtls_enrolled = 0;
-   int bootstrap_enroll_failed = 0;
+   /* Persisting the target is useful for a later `remote trust`, but an https
+    * setup that cannot prove the peer is not a successful pairing. In
+    * particular, an already-enrolled mTLS server may reject the TLS handshake
+    * before a consumed bootstrap bearer can reach rotate_bearer. */
+   int remote_set_failed = is_https && !verified;
    char strong_token[256] = "";
    if (verified && token && strcmp(token, AIMEE_BOOTSTRAP_BEARER) == 0)
    {
@@ -545,7 +549,7 @@ static int remote_set(const char *url, const char *token, int json_output)
           * disk is the dead bootstrap token, so every later command will 401.
           * remote_enroll has already printed the recovery options; make the exit
           * status say it failed instead of reporting a successful setup. */
-         bootstrap_enroll_failed = 1;
+         remote_set_failed = 1;
       }
    }
    else if (verified && token && token[0] && remote_enroll_client_cert(json_output) == 0)
@@ -554,7 +558,7 @@ static int remote_set(const char *url, const char *token, int json_output)
    if (json_output)
       printf("{\"ok\":%s,\"url\":\"%s\",\"token\":%s,\"pinned\":%s,\"verified\":%s,"
              "\"enrolled\":%s,\"mtls_enrolled\":%s}\n",
-             bootstrap_enroll_failed ? "false" : "true", url, token && *token ? "true" : "false",
+             remote_set_failed ? "false" : "true", url, token && *token ? "true" : "false",
              pinned ? "true" : "false", verified ? "true" : "false", enrolled ? "true" : "false",
              mtls_enrolled ? "true" : "false");
    else
@@ -569,7 +573,7 @@ static int remote_set(const char *url, const char *token, int json_output)
              "available on this platform).\n"
              "       Start the server and re-run `aimee remote set`, or `aimee remote trust`.\n");
    }
-   return bootstrap_enroll_failed ? 1 : 0;
+   return remote_set_failed ? 1 : 0;
 }
 
 /* Re-pin the cert of the already-configured remote (e.g. after the server's

@@ -191,6 +191,22 @@ static int delegate_timeout_from_args(int argc, char **argv)
    return rpc_get_int(&opts, "timeout", 0);
 }
 
+/* `agent probe` is a diagnostic command, so its process status must agree with
+ * the result it prints.  A 2xx response only means the server completed the
+ * probe; it does not mean the provider was usable.  Prefer the execution probe
+ * when it ran because some hosted providers reject /models while accepting
+ * inference.  With --no-run, model availability is the strongest result we
+ * have. */
+static int agent_probe_response_is_failure(cJSON *resp)
+{
+   cJSON *execution_ok = cJSON_GetObjectItemCaseSensitive(resp, "execution_ok");
+   if (execution_ok)
+      return !cJSON_IsTrue(execution_ok);
+
+   cJSON *model_available = cJSON_GetObjectItemCaseSensitive(resp, "model_available");
+   return model_available && !cJSON_IsTrue(model_available);
+}
+
 static int write_delegate_output_file(const char *path, const char *text)
 {
    if (!path || !path[0] || !text)
@@ -1232,11 +1248,15 @@ static void ws_ingest_flush(ws_ingest_ctx_t *s)
    }
    else
    {
-      if (cli_ws_ingest_batch(s->remote, s->bearer, s->base, s->abs_root, s->batch) == 0)
+      int batch_no = s->batches + 1;
+      int batch_ok = cli_ws_ingest_batch(s->remote, s->bearer, s->base, s->abs_root, s->batch) == 0;
+      if (batch_ok)
          s->pushed += have;
       else
          s->failed += have;
       s->batches++;
+      fprintf(stderr, "index upload: batch %d %s (%d file%s; %d uploaded total)\n", batch_no,
+              batch_ok ? "complete" : "failed", have, have == 1 ? "" : "s", s->pushed);
    }
    s->batch = NULL;
    s->batch_bytes = 0;
@@ -1320,6 +1340,7 @@ static void ws_tree_ingest_cb(const char *repo_abs, void *ctx)
    const char *base = strrchr(repo_abs, '/');
    base = (base && base[1]) ? base + 1 : repo_abs;
    printf("indexing project: %s\n", base);
+   fflush(stdout);
    if (cli_ws_ingest_root(t->remote, t->bearer, repo_abs) != 0)
       t->rc = 1;
    t->count++;
@@ -1395,6 +1416,7 @@ int cli_workspace_add_remote(const char *path)
    if (rresp)
       cJSON_Delete(rresp);
    printf("workspace registered: %s (detached)\n", abs);
+   fflush(stdout);
 
    int rc = cli_ws_ingest_tree(remote, bearer, abs);
    free(abs);
@@ -1786,6 +1808,10 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
          exit_rc = 1;
    }
    else if (strcmp(route->method, "git.verify") == 0 && git_verify_response_is_failure(resp))
+   {
+      exit_rc = 1;
+   }
+   else if (strcmp(route->method, "agent.probe") == 0 && agent_probe_response_is_failure(resp))
    {
       exit_rc = 1;
    }

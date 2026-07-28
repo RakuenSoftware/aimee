@@ -1938,6 +1938,8 @@ int main(void)
       /* Enabled listener: emits the loopback base URL, model id, and providers. */
       server_http_api_status_report(8910, 1, 60, report, sizeof(report));
       assert(strstr(report, "http://127.0.0.1:8910/v1"));
+      assert(strstr(report, "server loopback"));
+      assert(strstr(report, "ssh -L 8910:127.0.0.1:8910 <server-host>"));
       assert(strstr(report, "model aimee"));
       assert(strstr(report, "Continue"));
       assert(strstr(report, "Copilot"));
