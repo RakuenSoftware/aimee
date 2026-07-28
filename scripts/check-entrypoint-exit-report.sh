@@ -45,37 +45,49 @@ expect() {
 
 echo "check-entrypoint-exit-report:"
 
-# A signalled stop must not be described as a failure.
-expect "SIGTERM'd server is reported as a termination, not a failure" \
-    "$(plane_exit_message server 1 1)" \
-    "aimee-server stopped on termination signal (status 1); shutting down webchat"
+# A signalled stop must not read as a failure. The status carries the signal
+# (wait reports 128+N), so the wording is derived from it rather than from a
+# separate flag that could contradict it.
+expect "SIGTERM'd server names the signal, not a bare failure" \
+    "$(plane_exit_message server 143)" \
+    "aimee-server stopped on signal 15 (status 143); shutting down webchat"
 
-# ...and a real failure must still read as one, same status code.
-expect "unsignalled exit 1 is still reported as a failure" \
-    "$(plane_exit_message server 1 0)" \
+expect "SIGKILL/OOM is distinguishable from SIGTERM" \
+    "$(plane_exit_message server 137)" \
+    "aimee-server stopped on signal 9 (status 137); shutting down webchat"
+
+# ...and a genuine failure still reads as one.
+expect "plain exit 1 is reported as a failure" \
+    "$(plane_exit_message server 1)" \
     "aimee-server exited (status 1); shutting down webchat"
 
-# The two above share status 1 — that is the whole point. Prove they differ.
-if [ "$(plane_exit_message server 1 1)" = "$(plane_exit_message server 1 0)" ]; then
-    echo "  FAIL: signalled and failed exits are indistinguishable at status 1" >&2
+expect "plain exit 3 is reported with its own code" \
+    "$(plane_exit_message server 3)" \
+    "aimee-server exited (status 3); shutting down webchat"
+
+# The three below all used to collapse to "exited (status 1)". Prove they differ.
+if [ "$(plane_exit_message server 143)" = "$(plane_exit_message server 1)" ] ||
+   [ "$(plane_exit_message server 137)" = "$(plane_exit_message server 143)" ]; then
+    echo "  FAIL: signalled and failed exits are indistinguishable" >&2
     fail=1
 else
-    echo "  ok: signalled and failed exits differ despite identical status"
+    echo "  ok: SIGTERM, SIGKILL and a plain failure all read differently"
 fi
 
-# The WFE plane must be named as itself.
+# The WFE plane must be named as itself — no status can convey this, which is
+# why the naming fix is separate from the status fix.
 expect "wfe exit names aimee-wfe" \
-    "$(plane_exit_message wfe 2 0)" \
-    "aimee-wfe exited (status 2); shutting down webchat"
+    "$(plane_exit_message wfe 3)" \
+    "aimee-wfe exited (status 3); shutting down webchat"
 
-expect "wfe termination names aimee-wfe" \
-    "$(plane_exit_message wfe 1 1)" \
-    "aimee-wfe stopped on termination signal (status 1); shutting down webchat"
+expect "wfe signal names aimee-wfe" \
+    "$(plane_exit_message wfe 143)" \
+    "aimee-wfe stopped on signal 15 (status 143); shutting down webchat"
 
 # Single-plane path leaves `first` empty; it must still name the server.
 expect "empty first defaults to aimee-server" \
-    "$(plane_exit_message '' 137 0)" \
-    "aimee-server exited (status 137); shutting down webchat"
+    "$(plane_exit_message '' 137)" \
+    "aimee-server stopped on signal 9 (status 137); shutting down webchat"
 
 if [ "$fail" -ne 0 ]; then
     echo "check-entrypoint-exit-report: FAILED" >&2
