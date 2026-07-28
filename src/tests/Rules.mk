@@ -667,6 +667,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-identity-token-authority
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-token-authority-ipc
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-jwks-publication
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-mgmt-jwks-cache
+TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-offline-hardening
 unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	@# Point the run's HOME at a throwaway dir so a test that does NOT isolate its
 	@# own environment defaults to $$th/.config/aimee, never the developer's real
@@ -2225,6 +2226,11 @@ $(TESTPREFIX)/unit-test-server-mgmt-jwks-cache: \
     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o \
     $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-kb-mgmt-offline-hardening: \
+    $(OBJDIR)/tests/test_kb_mgmt_offline_hardening.o \
+    $(OBJDIR)/kb/kb_mgmt_offline_hardening.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-management-status-runtime: \
     $(OBJDIR)/tests/test_management_status_runtime.o \

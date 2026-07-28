@@ -29,8 +29,10 @@ def main() -> int:
 
     if 'profiles: ["authority-bootstrap"]' not in managed:
         failures.append("authority one-shot profile")
-    if "cap_add: [IPC_LOCK]" not in managed or "memlock:" not in managed:
-        failures.append("protected-memory capability")
+    if 'AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK: "1"' not in managed:
+        failures.append("explicit no-swap memory-hardening fallback")
+    if "privileged: true" in managed or "cap_add:" in managed:
+        failures.append("authority bootstrap must not request ineffective extra privilege")
     if "network_mode: none" not in managed:
         failures.append("offline bootstrap network isolation")
     if "aimee-managed-jwks-trust:/run/aimee-trust" not in managed:
@@ -41,6 +43,14 @@ def main() -> int:
         failures.append("server must not mount authority custody volume")
     if "aimee-authority-bootstrap" not in deploy or "deploy_authority_bootstrap_argv" not in deploy:
         failures.append("wizard deploy orchestration")
+
+    for offline_main in (
+        ROOT / "src/kb/kb_mgmt_token_roots_provision_main.c",
+        ROOT / "src/kb/kb_mgmt_jwks_publish_main.c",
+    ):
+        text = offline_main.read_text(encoding="utf-8")
+        if "kb_mgmt_offline_harden_process()" not in text:
+            failures.append(f"managed no-swap hardening missing from {offline_main.name}")
 
     for ordinary in (ROOT / "Dockerfile", ROOT / "Dockerfile.server"):
         text = ordinary.read_text(encoding="utf-8")

@@ -40,6 +40,10 @@ not linked into or installed in the ordinary KB/server images. The default
 single-host authority is software-backed and appropriate to the local managed
 installation. Deployments requiring hardware custody should keep using an
 operator-managed authority/KMS and supply the explicit identity packet.
+The one-shot locks its address space when the runtime permits it. On an
+unprivileged container host that cannot raise `RLIMIT_MEMLOCK`, it proceeds only
+after verifying through `/proc/swaps` that the host has no active swap; otherwise
+Deploy fails closed.
 
 Deploy also claims the signed-in browser account as the first remote owner. It displays one
 `aimee remote set ...` command that provisions that user's bearer, mTLS certificate, and explicit
