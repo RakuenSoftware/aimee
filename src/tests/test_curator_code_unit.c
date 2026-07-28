@@ -691,7 +691,8 @@ static void test_queue_counts_surface_failures(void)
                        "host'),"
                        "(9302,'p','b.c','fn_b','failed',3,'connect 10.0.0.9:8080: No route to "
                        "host'),"
-                       "(9303,'p','c.c','fn_c','pending',0,'')",
+                       "(9303,'p','c.c','fn_c','pending',1,'temporary timeout'),"
+                       "(9304,'p','d.c','fn_d','done',1,'recovered timeout')",
                        NULL, NULL, NULL) == SQLITE_OK);
 
    kb_curator_queue_counts_t qc;
@@ -701,10 +702,11 @@ static void test_queue_counts_surface_failures(void)
    /* The two dead jobs are visible instead of vanishing between the buckets. */
    assert(qc.code_unit_failing == 2);
    assert(qc.code_unit_pending == 1);
-   assert(qc.code_unit_done == 0);
+   assert(qc.code_unit_done == 1);
 
    /* And the reason travels with the count. */
    assert(strstr(qc.code_unit_last_error, "No route to host") != NULL);
+   assert(strstr(qc.code_unit_last_error, "recovered") == NULL);
 
    db2_test_shim_close();
    printf("  PASS: test_queue_counts_surface_failures (failed jobs counted, not silently dropped "

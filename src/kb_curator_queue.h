@@ -33,10 +33,9 @@ typedef struct
    int extract_done;    /* kb_async_jobs kind='extract_doc' status='done' */
    int code_unit_pending;
    int code_unit_done;
-   /* Jobs carrying a recorded failure (last_error set). Counted separately
-    * because a failing job is neither 'pending' nor 'done', so it appeared in
-    * NEITHER of the counters above — which is how a curator whose every job
-    * failed still reported a healthy kb. */
+   /* Terminally failed jobs. Counted separately because a failed job is neither
+    * 'pending' nor 'done', so it appeared in NEITHER of the counters above —
+    * which is how a curator whose every job failed still reported a healthy kb. */
    int extract_failing;
    int code_unit_failing;
    int code_unit_last_error_len; /* >0 when a sample error was captured */
