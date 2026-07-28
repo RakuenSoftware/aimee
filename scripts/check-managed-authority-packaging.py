@@ -33,6 +33,11 @@ def main() -> int:
 
     if 'profiles: ["authority-bootstrap"]' not in managed:
         failures.append("authority one-shot profile")
+    identity_service = managed.split("  aimee-server-identity:", 1)[-1].split(
+        "  aimee-authority-bootstrap:", 1
+    )[0]
+    if "networks: [aimee]" not in identity_service:
+        failures.append("server identity must share the managed KB network")
     if 'AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK: "1"' not in managed:
         failures.append("explicit no-swap memory-hardening fallback")
     if "privileged: true" in managed or "cap_add:" in managed:

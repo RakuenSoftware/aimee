@@ -85,6 +85,7 @@ services:
     profiles: ["identity-bootstrap"]
     image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:${AIMEE_IMAGE_TAG:-latest}}
     user: "0:0"
+    networks: [aimee]
     environment:
       AIMEE_HOME: /var/lib/aimee
       AIMEE_DB2_URL: postgresql:///aimee_shared?host=/var/lib/aimee/run&user=aimee
