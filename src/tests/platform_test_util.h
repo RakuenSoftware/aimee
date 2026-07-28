@@ -93,25 +93,9 @@ static inline int platform_mkstemp(char *path, size_t path_size, const char *pre
 #include <sys/stat.h>
 #include <unistd.h>
 
-/* Honour TMPDIR so the suite can confine every test's scratch space to one
- * directory it already reaps.
- *
- * This returned a hardcoded "/tmp", which made the leak below unfixable from
- * the harness: the unit-tests target creates a throwaway HOME and removes it on
- * EXIT, but 64 of the 112 tests that call platform_mkdtemp() never remove their
- * own directory, and every one of them landed in /tmp regardless of that trap.
- * They accumulated across runs until tmpfs ran out of INODES — 40k leaked
- * directories holding 857k inodes, 82% of the filesystem, with 45GB of space
- * still free. At that point nothing on the machine could create a file.
- *
- * With TMPDIR respected, those directories are created inside the run's own
- * temp home and the existing trap takes them with it. The 64 tests are left
- * alone deliberately: one honoured variable fixes them all, and fixing them
- * individually would be 64 chances to miss one. */
 static inline const char *platform_tmpdir(void)
 {
-   const char *dir = getenv("TMPDIR");
-   return (dir && dir[0] == '/') ? dir : "/tmp";
+   return "/tmp";
 }
 #ifndef DEC_PLATFORM_PROCESS_H
 static inline int platform_setenv(const char *name, const char *value)

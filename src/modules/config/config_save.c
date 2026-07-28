@@ -1326,12 +1326,6 @@ int config_save(const config_t *cfg)
          cJSON_AddStringToObject(api_obj, "mtls_client_ca", cfg->server_api_mtls_client_ca);
       if (cfg->server_api_bearer_token[0])
          cJSON_AddStringToObject(api_obj, "bearer_token", cfg->server_api_bearer_token);
-      if (cfg->server_api_bearer_extra_count > 0)
-      {
-         cJSON *extra = cJSON_AddArrayToObject(api_obj, "bearer_tokens_extra");
-         for (int i = 0; extra && i < cfg->server_api_bearer_extra_count; i++)
-            cJSON_AddItemToArray(extra, cJSON_CreateString(cfg->server_api_bearer_extra[i]));
-      }
       if (cfg->server_api_rate_limit_per_min > 0)
          cJSON_AddNumberToObject(api_obj, "rate_limit_per_min", cfg->server_api_rate_limit_per_min);
       if (cfg->server_api_max_event_streams > 0)

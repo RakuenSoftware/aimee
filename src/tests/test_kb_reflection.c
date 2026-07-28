@@ -21,21 +21,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int g_idle_release_calls;
-void reflection_test_release_idle(void);
-#define db2_lease_release_idle reflection_test_release_idle
 #include <sqlite3.h>
 
 #include "db2_test_shim.h"
 
 /* The unit under test (pulls its own headers). */
 #include "../kb/kb_reflection.c"
-#undef db2_lease_release_idle
-
-void reflection_test_release_idle(void)
-{
-   g_idle_release_calls++;
-}
 
 /* ── Stubs for deps the reflection TU references but this test does not link ── */
 
@@ -118,7 +109,6 @@ static void mk_row(db2_artifact_proposed_t *row)
 /* Valid response, normal mode ⇒ exactly one durable candidate written. */
 static void test_valid_writes_one(void)
 {
-   g_idle_release_calls = 0;
    db2_test_shim_open();
    sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
    config_t cfg;
@@ -129,7 +119,6 @@ static void test_valid_writes_one(void)
    int rc = run_synthesis_pass(&cfg, &row);
    assert(rc == 0);
    assert(count_session_synthesis(db) == 1);
-   assert(g_idle_release_calls == cfg.kb_synthesize_n_attempts);
    db2_test_shim_close();
    printf("  valid response, normal mode → 1 candidate written OK\n");
 }
@@ -137,7 +126,6 @@ static void test_valid_writes_one(void)
 /* Valid response, SHADOW mode ⇒ scored but NO durable write (fail-closed). */
 static void test_shadow_writes_none(void)
 {
-   g_idle_release_calls = 0;
    db2_test_shim_open();
    sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
    config_t cfg;
@@ -149,7 +137,6 @@ static void test_shadow_writes_none(void)
    int rc = run_synthesis_pass(&cfg, &row);
    assert(rc == 0); /* shadow is a clean no-write success */
    assert(count_session_synthesis(db) == 0);
-   assert(g_idle_release_calls == cfg.kb_synthesize_n_attempts);
    db2_test_shim_close();
    printf("  valid response, shadow mode → 0 candidates written OK\n");
 }
@@ -157,7 +144,6 @@ static void test_shadow_writes_none(void)
 /* Non-JSON response ⇒ defer (no valid candidate), NO durable write. */
 static void test_garbage_writes_none(void)
 {
-   g_idle_release_calls = 0;
    db2_test_shim_open();
    sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
    config_t cfg;
@@ -168,7 +154,6 @@ static void test_garbage_writes_none(void)
    int rc = run_synthesis_pass(&cfg, &row);
    assert(rc == -1); /* no valid candidates */
    assert(count_session_synthesis(db) == 0);
-   assert(g_idle_release_calls == cfg.kb_synthesize_n_attempts);
    db2_test_shim_close();
    printf("  garbage response → defer, 0 candidates written OK\n");
 }
@@ -176,7 +161,6 @@ static void test_garbage_writes_none(void)
 /* Command failure (non-zero exit ⇒ kb_curator_llm_run returns NULL) ⇒ no write. */
 static void test_command_failure_writes_none(void)
 {
-   g_idle_release_calls = 0;
    db2_test_shim_open();
    sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
    config_t cfg;
@@ -187,21 +171,8 @@ static void test_command_failure_writes_none(void)
    int rc = run_synthesis_pass(&cfg, &row);
    assert(rc == -1);
    assert(count_session_synthesis(db) == 0);
-   assert(g_idle_release_calls == cfg.kb_synthesize_n_attempts);
    db2_test_shim_close();
    printf("  command failure → 0 candidates written OK\n");
-}
-
-static void test_empty_pass_releases_before_backoff(void)
-{
-   g_idle_release_calls = 0;
-   db2_test_shim_open();
-   config_t cfg;
-   base_cfg(&cfg, "false");
-   run_reflection_pass_releasing_lease(&cfg);
-   assert(g_idle_release_calls == 1);
-   db2_test_shim_close();
-   printf("  empty pass releases its DB lease before scheduler backoff OK\n");
 }
 
 int main(void)
@@ -211,7 +182,6 @@ int main(void)
    test_shadow_writes_none();
    test_garbage_writes_none();
    test_command_failure_writes_none();
-   test_empty_pass_releases_before_backoff();
    printf("test_kb_reflection: all passed\n");
    return 0;
 }

@@ -122,11 +122,6 @@ FROM debian:bookworm-slim
 # container HEALTHCHECK. libpam0g + libpam-modules (pam_unix.so) back the
 # co-located aimee-runtime-web browser login.
 #
-# The Go workflow engine runs repository verification after implementation.
-# Keep the baseline Make/C/C++ toolchain in the runtime image so automatic
-# Makefile discovery and ordinary native project verification do not fail merely
-# because the control-plane image was slimmed after its own build stage.
-#
 # tmux + nodejs + npm are enablers for server-hosted OAuth CLI agents
 # (`aimee agent add claude-oauth` / `codex-oauth`): the vendor CLI is installed on
 # demand into the home-volume npm prefix (NPM_CONFIG_PREFIX below) and its OAuth
@@ -134,7 +129,6 @@ FROM debian:bookworm-slim
 # (claude-code and the codex CLI both support Node >= 18).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        build-essential \
         ca-certificates \
         curl \
         git \

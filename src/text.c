@@ -789,11 +789,7 @@ int extract_negation_tokens(const char *text, char *buf, size_t buf_len)
    };
    char toks[NEG_MAX_TOKS][64];
    int n = neg_tokenise(text, toks, NEG_MAX_TOKS);
-   /* neg_tokenise is bounded by contract; retain an explicit range guard before
-    * converting n to size_t for the partial-array clears. Besides failing
-    * closed if that helper ever changes, this prevents LTO/sanitizer builds
-    * from treating a hypothetical negative count as a huge memset. */
-   if (n <= 0 || n > NEG_MAX_TOKS)
+   if (n == 0)
       return 0;
 
    /* Mark tokens that are negation markers */

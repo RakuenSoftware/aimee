@@ -263,8 +263,7 @@ static void kb_health_add_curator_tier(cJSON *curator, const char *key, const co
 
 /* Curator observability block for /v1/health (§4): which tiers have a provider
  * (Tier-A extract/index, Tier-B reason/judge) and the curator queue depth. */
-static void kb_health_add_curator(cJSON *resp, const config_t *cfg,
-                                  kb_curator_queue_counts_t *out_counts)
+static void kb_health_add_curator(cJSON *resp, const config_t *cfg)
 {
    cJSON *curator = cJSON_AddObjectToObject(resp, "curator");
    if (!curator)
@@ -274,8 +273,6 @@ static void kb_health_add_curator(cJSON *resp, const config_t *cfg,
 
    kb_curator_queue_counts_t qc;
    kb_curator_queue_counts(&qc);
-   if (out_counts)
-      *out_counts = qc;
    cJSON *q = cJSON_AddObjectToObject(curator, "queue");
    if (q)
    {
@@ -283,10 +280,6 @@ static void kb_health_add_curator(cJSON *resp, const config_t *cfg,
       cJSON_AddNumberToObject(q, "extract_done", qc.extract_done);
       cJSON_AddNumberToObject(q, "code_unit_pending", qc.code_unit_pending);
       cJSON_AddNumberToObject(q, "code_unit_done", qc.code_unit_done);
-      cJSON_AddNumberToObject(q, "extract_failing", qc.extract_failing);
-      cJSON_AddNumberToObject(q, "code_unit_failing", qc.code_unit_failing);
-      if (qc.last_error[0])
-         cJSON_AddStringToObject(q, "last_error", qc.last_error);
    }
 }
 
@@ -349,9 +342,7 @@ static cJSON *kb_service_health_object(void)
     * a follow-up — it needs a bounded async probe so the health path never blocks,
     * and the gated state needs a custom curator /health (the bundled official
     * llama.cpp doesn't expose it). api_key is never surfaced. */
-   kb_curator_queue_counts_t qc;
-   memset(&qc, 0, sizeof(qc));
-   kb_health_add_curator(resp, &cfg, &qc);
+   kb_health_add_curator(resp, &cfg);
 
    /* Freshness: read last_ingest_at from kb_runtime_state */
    char last_ingest_at[64] = "";
@@ -393,26 +384,6 @@ static cJSON *kb_service_health_object(void)
       cJSON_AddItemToArray(warnings, cJSON_CreateString("pgvector extension not loaded in DB2"));
    if (!pgvec_collection_ok)
       cJSON_AddItemToArray(warnings, cJSON_CreateString("KB vector table missing"));
-   /* A curator that fails every job used to leave the kb reporting a clean
-    * bill of health. The counters said pending=41485 done=0 — indistinguishable
-    * from "queued, not started yet" — and nothing in warnings mentioned that
-    * every one of those jobs had already burned its attempts against an
-    * unreachable endpoint. `aimee status` printed "aimee-kb: ok" throughout,
-    * for hours, while code indexing was completely dead.
-    *
-    * Say it. The sample error is included because the count alone does not tell
-    * an operator whether to fix a config value or a network. */
-   if (qc.code_unit_failing > 0 || qc.extract_failing > 0)
-   {
-      char msg[384];
-      int n = qc.code_unit_failing + qc.extract_failing;
-      if (qc.last_error[0])
-         snprintf(msg, sizeof(msg), "curator: %d job(s) failing — last error: %s", n,
-                  qc.last_error);
-      else
-         snprintf(msg, sizeof(msg), "curator: %d job(s) failing", n);
-      cJSON_AddItemToArray(warnings, cJSON_CreateString(msg));
-   }
    if (freshness_days > 30)
       cJSON_AddItemToArray(warnings, cJSON_CreateString("KB not ingested in over 30 days"));
    else if (freshness_days > 7)

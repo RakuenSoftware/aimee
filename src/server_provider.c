@@ -150,56 +150,20 @@ static cJSON *server_provider_json(const model_provider_t *p)
    return obj;
 }
 
-/* Has the OPERATOR configured this provider, as opposed to aimee merely knowing
- * it exists? A credential or an explicit `provider set` is evidence of a
- * deliberate choice. auth_type "none" alone (ollama, llama_native) is NOT:
- * those need no key, so they would otherwise report configured on a machine
- * where nothing is installed or running. That is the difference between this
- * and server_provider_has_credentials(), which answers "usable right now". */
-static int server_provider_is_configured(const model_provider_t *p, const char *selected_provider)
-{
-   if (!p)
-      return 0;
-   if (selected_provider && selected_provider[0] && strcmp(p->name, selected_provider) == 0)
-      return 1;
-   if (!p->env_vars)
-      return 0;
-   for (int i = 0; p->env_vars[i]; i++)
-   {
-      const char *val = getenv(p->env_vars[i]);
-      if (val && val[0])
-         return 1;
-   }
-   return 0;
-}
-
 int handle_provider_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    int available_only = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "available_only"));
-   int show_all = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "all"));
    int json_output = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "json"));
    model_provider_t *providers[64];
    int n = model_provider_list(providers, 64);
-   config_t cfg = {0};
-   (void)config_load(&cfg);
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddBoolToObject(resp, "json", json_output);
-   cJSON_AddBoolToObject(resp, "all", show_all);
-   cJSON_AddBoolToObject(resp, "available_only", available_only);
    cJSON *arr = cJSON_CreateArray();
    for (int i = 0; i < n; i++)
    {
       if (available_only && !server_provider_has_credentials(providers[i]))
-         continue;
-      /* Default is what the operator CONFIGURED. This returned the whole
-       * built-in catalogue — seven entries, every one "[no key]" — which the
-       * client renders as a registration table, so a brand-new install looked
-       * pre-populated with providers nobody had chosen. Nothing was installed;
-       * they were names aimee knows. `--all` still shows that catalogue. */
-      if (!show_all && !available_only &&
-          !server_provider_is_configured(providers[i], cfg.provider))
          continue;
       cJSON_AddItemToArray(arr, server_provider_json(providers[i]));
    }

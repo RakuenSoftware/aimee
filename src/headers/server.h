@@ -268,19 +268,6 @@ server_ctx_t *server_active_ctx(void);
 int server_send_response(server_conn_t *conn, cJSON *resp);
 int server_send_error(server_conn_t *conn, const char *message, const char *request_id);
 
-/* Fault classes for server_send_error_kind. The dispatch envelope otherwise says
- * only "error", which leaves anything mapping it to HTTP unable to separate a
- * caller's mistake from a server-side failure — so runtime-web called all of
- * them 502. Optional and additive: an unclassified error keeps the old
- * behaviour. */
-#define SERVER_ERR_INVALID_ARGUMENT  "invalid_argument"  /* caller sent bad/missing input */
-#define SERVER_ERR_NOT_FOUND         "not_found"         /* named thing does not exist */
-#define SERVER_ERR_PERMISSION_DENIED "permission_denied" /* caller not allowed */
-#define SERVER_ERR_UNAVAILABLE       "unavailable"       /* a dependency is down */
-
-int server_send_error_kind(server_conn_t *conn, const char *kind, const char *message,
-                           const char *request_id);
-
 /* Declared from cJSON.h so the inline below needs no cJSON.h include here; the
  * real declaration is identical, so including both is harmless. */
 void cJSON_Delete(cJSON *item);
@@ -325,8 +312,6 @@ int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_benchmark(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_scan(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

@@ -1020,11 +1020,15 @@ const char *server_http_default_path(void)
    return path;
 }
 
-/* Hot-swap the live TCP/TLS bearer without a restart. Rotation is a revoke-all
- * operation, so it atomically clears every additionally-enrolled bearer too. */
+/* Hot-swap the live TCP/TLS bearer without a restart. Callable only from a /v1
+ * route handler (e.g. api.rotate_bearer), which runs on the single listener
+ * thread that also reads g_bearer for authorization — so the write is serialized
+ * against auth reads and needs no lock. NULL/empty clears the bearer. */
 void server_http_set_bearer(const char *bearer)
 {
-   server_http_update_primary_bearer(g_bearer, sizeof(g_bearer), bearer, 1 /* revoke enrolled */);
+   g_bearer[0] = '\0';
+   if (bearer && bearer[0])
+      snprintf(g_bearer, sizeof(g_bearer), "%s", bearer);
 }
 
 /* Write the whole buffer. Returns the bytes written, or -1 on a write error
@@ -1617,16 +1621,13 @@ void handle_conn(int fd, int is_tcp, int is_management)
    int identity_present = 0;
    int effective_remote_writes = server_http_resolve_write_tier(
        is_tcp, buf, method, path, request_id, &identity_claims, &identity_present);
-   char request_bearer[sizeof(g_bearer)];
-   server_http_primary_bearer_snapshot(g_bearer, request_bearer, sizeof(request_bearer));
    uint32_t effective_caps =
        management_authenticated
            ? 0
-           : server_http_effective_conn_caps(is_tcp, request_bearer, effective_remote_writes,
-                                             mtls_mode, mtls_authenticated);
-   effective_caps =
-       server_http_enrollment_caps(effective_caps, is_tcp, mtls_authenticated,
-                                   server_conn_io_has_ssl(fd), request_bearer, method, path);
+           : server_http_effective_conn_caps(is_tcp, g_bearer, effective_remote_writes, mtls_mode,
+                                             mtls_authenticated);
+   effective_caps = server_http_enrollment_caps(effective_caps, is_tcp, mtls_authenticated,
+                                                server_conn_io_has_ssl(fd), g_bearer, method, path);
    /* Establish the per-request context (#3) only after authenticating the
     * durable certificate, so downstream dispatch sees the same effective caps
     * as the outer route gate. */
@@ -1655,11 +1656,14 @@ void handle_conn(int fd, int is_tcp, int is_management)
       anthropic_http_capture_request_headers(buf); /* parity: per-request anthropic-* hdrs */
       int az = transport_authenticated
                    ? 0
-                   : server_http_authorize_enrolled(is_tcp, g_bearer, has_auth ? auth : NULL,
-                                                    has_api_key ? api_key : NULL, has_skey);
+                   : server_http_authorize(is_tcp, g_bearer, has_auth ? auth : NULL,
+                                           has_api_key ? api_key : NULL, has_skey);
       if (az != 0)
       {
-         const char *msg = server_http_auth_error_body(az);
+         const char *msg = az == 401 ? "{\"error\":{\"message\":\"missing or invalid bearer "
+                                       "token\",\"type\":\"authentication_error\"}}"
+                                     : "{\"error\":{\"message\":\"this endpoint requires a "
+                                       "configured bearer token\",\"type\":\"server_error\"}}";
          send_response(fd, az, msg, request_id);
          LOG_INFO("server.http", "%s %s -> %d req_id=%s", method, path, az, request_id);
          return;
@@ -1673,8 +1677,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
        * solely to mint the real bearer, after which g_bearer no longer equals the
        * bootstrap and this gate self-disables. Closes the "a network-published
        * server keeps accepting the public default bearer" hole. */
-      if (!management_authenticated &&
-          server_http_bootstrap_gate(is_tcp, request_bearer, method, path))
+      if (!management_authenticated && server_http_bootstrap_gate(is_tcp, g_bearer, method, path))
       {
          send_response(fd, 401,
                        "{\"error\":{\"message\":\"the one-time bootstrap bearer must be rotated "
@@ -2329,9 +2332,9 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
    snprintf(g_uds_path, sizeof(g_uds_path), "%s", addr.sun_path);
 
    /* Optional localhost TCP listener for OpenAI-style external tools. */
-   /* Startup preserves the enrolled set published from config before this call. */
-   server_http_update_primary_bearer(g_bearer, sizeof(g_bearer), bearer_token,
-                                     0 /* preserve enrolled */);
+   g_bearer[0] = '\0';
+   if (bearer_token && bearer_token[0])
+      snprintf(g_bearer, sizeof(g_bearer), "%s", bearer_token);
    g_rate_limit = rate_limit_per_min > 0 ? rate_limit_per_min : 0;
    g_remote_writes = remote_writes;
    /* aimee.api.remote_writes is still parsed so an existing config file loads,

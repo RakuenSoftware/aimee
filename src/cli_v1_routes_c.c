@@ -1963,19 +1963,6 @@ void pt_print_provider_list(const char *method, cJSON *resp)
    }
    else if (cJSON_IsArray(providers))
    {
-      /* An empty list is the normal state of a new install: nothing is
-       * configured until the operator configures it. Say that, rather than
-       * printing a bare header that reads like a broken query. */
-      if (cJSON_GetArraySize(providers) == 0)
-      {
-         if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(resp, "all")))
-            printf("no providers known\n");
-         else if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(resp, "available_only")))
-            printf("no providers available\n");
-         else
-            printf("no providers configured — `aimee provider list --all` shows what can be\n");
-         return;
-      }
       printf("%-20s  %-24s  %-10s  %s\n", "provider", "display", "auth", "status");
       cJSON *p;
       cJSON_ArrayForEach(p, providers)

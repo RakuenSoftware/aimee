@@ -458,12 +458,11 @@ static void test_provider_routes_and_marshaling(void)
    assert(strcmp(route.method, "provider.quota") == 0);
    assert(route.skip_subcmd == 1);
 
-   char *list_argv[] = {"--available", "--all", "--json"};
-   cJSON *req = marshal_provider_list(3, list_argv);
+   char *list_argv[] = {"--available", "--json"};
+   cJSON *req = marshal_provider_list(2, list_argv);
    assert(req != NULL);
    assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "provider.list") == 0);
    assert(cJSON_IsTrue(cJSON_GetObjectItem(req, "available_only")));
-   assert(cJSON_IsTrue(cJSON_GetObjectItem(req, "all")));
    assert(cJSON_IsTrue(cJSON_GetObjectItem(req, "json")));
    cJSON_Delete(req);
 
@@ -565,39 +564,6 @@ static void test_memory_stats_route(void)
    printf("  PASS: test_memory_stats_route\n");
 }
 
-static void test_memory_delete_and_supersede_routes(void)
-{
-   cli_v1_route_t route;
-
-   char *delete_lookup[] = {"delete", "181"};
-   assert(cli_v1_lookup("memory", 2, delete_lookup, &route));
-   assert(strcmp(route.method, "memory.delete") == 0);
-   assert(route.skip_subcmd == 1);
-
-   cJSON *req = marshal_request(route.method, 1, delete_lookup + 1);
-   assert(req != NULL);
-   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "memory.delete") == 0);
-   assert((long long)cJSON_GetObjectItem(req, "id")->valuedouble == 181);
-   cJSON_Delete(req);
-
-   char *supersede_lookup[] = {"supersede", "181", "corrected fact", "--confidence=0.75",
-                               "--session=release-e2e"};
-   assert(cli_v1_lookup("memory", 5, supersede_lookup, &route));
-   assert(strcmp(route.method, "memory.supersede") == 0);
-   assert(route.skip_subcmd == 1);
-
-   req = marshal_request(route.method, 4, supersede_lookup + 1);
-   assert(req != NULL);
-   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "memory.supersede") == 0);
-   assert((long long)cJSON_GetObjectItem(req, "old_id")->valuedouble == 181);
-   assert(strcmp(cJSON_GetObjectItem(req, "new_content")->valuestring, "corrected fact") == 0);
-   assert(cJSON_GetObjectItem(req, "confidence")->valuedouble == 0.75);
-   assert(strcmp(cJSON_GetObjectItem(req, "session_id")->valuestring, "release-e2e") == 0);
-   cJSON_Delete(req);
-
-   printf("  PASS: test_memory_delete_and_supersede_routes\n");
-}
-
 static void test_server_status_route_lookup(void)
 {
    cli_v1_route_t route;
@@ -669,33 +635,6 @@ static void test_kb_docs_push_route_and_marshal(void)
    unlink(path2);
 
    printf("  PASS: test_kb_docs_push_route_and_marshal\n");
-}
-
-static void test_kb_remote_status_routes(void)
-{
-   cli_v1_route_t route;
-   const char *verb = NULL;
-
-   char *health_lookup[] = {"health"};
-   assert(cli_v1_lookup("kb", 1, health_lookup, &route));
-   assert(strcmp(route.method, "kb.health") == 0);
-   assert(strcmp(cli_v1_route_for_method(route.method, &verb), "/v1/kb/status") == 0);
-   assert(strcmp(verb, "GET") == 0);
-
-   char *ingest_lookup[] = {"ingest", "status"};
-   assert(cli_v1_lookup("kb", 2, ingest_lookup, &route));
-   assert(strcmp(route.method, "kb.ingest.status") == 0);
-   assert(strcmp(cli_v1_route_for_method(route.method, &verb), "/v1/kb/ingest/status") == 0);
-   assert(strcmp(verb, "GET") == 0);
-
-   char *status_lookup[] = {"status", "release-e2e"};
-   assert(cli_v1_lookup("kb", 2, status_lookup, &route));
-   cJSON *req = marshal_request(route.method, 1, status_lookup + 1);
-   assert(req != NULL);
-   assert(strcmp(cJSON_GetObjectItem(req, "project")->valuestring, "release-e2e") == 0);
-   cJSON_Delete(req);
-
-   printf("  PASS: test_kb_remote_status_routes\n");
 }
 
 static cJSON *mcp_text_response(const char *text)
@@ -1738,10 +1677,8 @@ int main(void)
    test_model_routes_and_marshaling();
    test_memory_show_alias_route();
    test_memory_stats_route();
-   test_memory_delete_and_supersede_routes();
    test_server_status_route_lookup();
    test_kb_docs_push_route_and_marshal();
-   test_kb_remote_status_routes();
    test_git_verify_failure_detection();
    test_git_verify_marshaled_with_session_id();
    test_get_help_route_marshaled();

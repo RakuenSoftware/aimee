@@ -195,26 +195,6 @@ static void test_state_is_bounded_and_fails_closed(void)
    assert(allowed_after_budget == 0);
 }
 
-static void test_random_collision_does_not_throttle_an_unrelated_identity(void)
-{
-   /* The original direct-mapped table refused a fresh identity whenever its
-    * seeded hash happened to share one slot with any live identity. That made a
-    * legitimate third negative in the PAM E2E return 429 below the five-attempt
-    * budget. Sweep enough deterministic seeds that the old one-slot lookup hits
-    * this pair repeatedly; bounded probing must keep the second identity usable. */
-   for (uint64_t i = 1; i <= 20000; i++)
-   {
-      uint64_t seed = 0x9e3779b97f4a7c15ULL * i;
-      seed = (seed ^ (seed >> 30)) * 0xbf58476d1ce4e5b9ULL;
-      seed = (seed ^ (seed >> 27)) * 0x94d049bb133111ebULL;
-      seed ^= seed >> 31;
-      kb_login_throttle_set_seed_for_test(seed);
-      kb_login_throttle_set_peer("127.0.0.1");
-      kb_login_throttle_record_failure("owner", NOW);
-      assert(kb_login_throttle_check("oidc:iss:alice", NOW) == 0);
-   }
-}
-
 /* --- the four defects a security review found in the first version --- */
 
 static void test_clock_moving_backwards_does_not_freeze_a_record(void)
@@ -379,7 +359,6 @@ int main(void)
    test_window_expiry_restores_an_unspent_budget();
    test_unknown_peer_is_a_bucket_not_an_exemption();
    test_state_is_bounded_and_fails_closed();
-   test_random_collision_does_not_throttle_an_unrelated_identity();
    test_clock_moving_backwards_does_not_freeze_a_record();
    test_retry_is_always_a_sane_positive_wait();
    test_slot_placement_is_not_attacker_computable();

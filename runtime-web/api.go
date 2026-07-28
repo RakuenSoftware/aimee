@@ -343,7 +343,7 @@ func (s *server) handleAgentAdd(w http.ResponseWriter, r *http.Request) {
 	// Surface the server's dispatch error (e.g. the vault refusal) to the UI as
 	// {"error": ...}; the Agents page reads res.error.
 	if rerr := rpcError(msg); rerr != nil {
-		writeJSONError(w, rpcErrorStatus(rerr), rerr.Error())
+		writeJSONError(w, http.StatusBadGateway, rerr.Error())
 		return
 	}
 	if st != http.StatusOK {

@@ -677,22 +677,8 @@ unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	@# exporting AIMEE_HOME would OVERRIDE the many tests that set HOME themselves
 	@# to steer the config dir (e.g. test_session_brief). Exporting HOME leaves the
 	@# default safe while a test's own setenv still wins inside its process.
-	@# TMPDIR as well as HOME: platform_tmpdir() honours it, so the directories
-	@# tests create with platform_mkdtemp() land inside $$th and go with it on
-	@# EXIT. 64 of the 112 tests that make one never remove it, and they used to
-	@# pile up in /tmp across every run until tmpfs ran out of INODES (40k dirs,
-	@# 857k inodes, with 45GB still free) and nothing could create a file.
-	@# Short name on purpose. Every test temp dir now hangs off this prefix, so
-	@# its length is added to every path the suite creates. At least one test —
-	@# test_parent_write_guard_readonly_large_find — lists 300 files through
-	@# tool_bash, whose head+tail compaction drops the middle; the longer the
-	@# paths, the more bytes and the tighter the cut, and with
-	@# "aimee-unit-home.XXXXXX" (22 chars over /tmp) its final entry fell out of
-	@# the preserved tail and the assertion failed. That test is fragile about
-	@# output size — its own comment admits as much — but a short prefix costs
-	@# nothing and keeps this change from perturbing it.
-	@th="$$(mktemp -d /tmp/aut.XXXXXX)"; \
-	export HOME="$$th" TMPDIR="$$th"; unset AIMEE_HOME; \
+	@th="$$(mktemp -d /tmp/aimee-unit-home.XXXXXX)"; \
+	export HOME="$$th"; unset AIMEE_HOME; \
 	trap 'rm -rf "$$th"' EXIT; \
 	jobs="$(TEST_RUN_JOBS)"; \
 	if [ "$$jobs" -le 1 ]; then \
@@ -1610,7 +1596,7 @@ $(TESTPREFIX)/unit-test-acp-server: $(OBJDIR)/tests/test_acp_server.o \
                            $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
-$(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o $(OBJDIR)/server/server.o $(OBJDIR)/server/server_error_kind.o $(OBJDIR)/server/server_seed_config.o $(OBJDIR)/server/server_api_status.o $(OBJDIR)/server_provider.o $(OBJDIR)/server/provider_settable.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/server_insights.o $(OBJDIR)/server_eval.o \
+$(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o $(OBJDIR)/server/server.o $(OBJDIR)/server/server_seed_config.o $(OBJDIR)/server/server_api_status.o $(OBJDIR)/server_provider.o $(OBJDIR)/server/provider_settable.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/server_insights.o $(OBJDIR)/server_eval.o \
 	$(OBJDIR)/server/s2_native_gate_hook.o $(OBJDIR)/modules/workflows/wfe_native_gate.o $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/modules/workflows/tool_egress.o \
 	$(OBJDIR)/db1/wfe_binding.o $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_enforce.o \
                       $(OBJDIR)/harness_memory_common.o $(OBJDIR)/modules/delegates/delegate_sandbox_image.o $(OBJDIR)/modules/sandbox/sandbox_learned.o \
@@ -1618,7 +1604,7 @@ $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o 
                       $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
 	                                $(OBJDIR)/server/server_config.o $(OBJDIR)/modules/config/config_fields.o \
 	                                $(OBJDIR)/server/modules/skills/skill_review.o $(OBJDIR)/tests/support/skill_jobs_stub.o \
-	                                $(OBJDIR)/server/server_hooks.o $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_bearer_auth.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/server_http_authz.o $(OBJDIR)/modules/vault/vault_principal.o \
+	                                $(OBJDIR)/server/server_hooks.o $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/server_http_authz.o $(OBJDIR)/modules/vault/vault_principal.o \
 	                                $(OBJDIR)/tests/support/workflow_api_stub.o \
 	                                $(OBJDIR)/tests/support/vault_handlers_stub.o \
 	                                $(OBJDIR)/tests/support/toolset_stub.o \
@@ -5010,7 +4996,7 @@ $(TESTPREFIX)/unit-test-persona: $(OBJDIR)/tests/test_persona.o \
 
 $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
-                           $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_bearer_auth.o $(OBJDIR)/server/server_http_keepalive.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/wfe_http_proxy.o \
+                           $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_keepalive.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o \
                      $(OBJDIR)/server/server_http_grant_routes.o \
                      $(OBJDIR)/modules/kb_client/kb_client_grants.o $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/server_http_authz.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/tests/support/router_advise_stub.o $(OBJDIR)/modules/vault/vault_principal.o $(OBJDIR)/server/presence.o \
                            $(OBJDIR)/server/server_mgmt_status.o $(OBJDIR)/server/server_mgmt_endpoint.o $(OBJDIR)/shared/management_read.o $(OBJDIR)/server/server_mgmt_read_endpoint.o $(OBJDIR)/server/server_mgmt_read_source.o $(OBJDIR)/server/server_mgmt_audit.o $(OBJDIR)/server/server_mgmt_token.o $(OBJDIR)/kb/kb_mgmt_status.o $(OBJDIR)/kb/kb_mgmt_endpoint.o \

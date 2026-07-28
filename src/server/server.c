@@ -327,7 +327,12 @@ int server_send_response(server_conn_t *conn, cJSON *resp)
 
 int server_send_error(server_conn_t *conn, const char *message, const char *request_id)
 {
-   return server_send_error_kind(conn, NULL, message, request_id);
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "error");
+   cJSON_AddStringToObject(resp, "message", message);
+   if (request_id)
+      cJSON_AddStringToObject(resp, "request_id", request_id);
+   return server_send_ok(conn, resp);
 }
 
 /* --- Method handlers --- */
@@ -1394,7 +1399,6 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"api.status", handle_api_status},
     {"api.enable", handle_api_enable},
     {"api.rotate_bearer", handle_api_rotate_bearer},
-    {"api.enroll_bearer", handle_api_enroll_bearer},
     {"api.disable", handle_api_disable},
     {"insights.overview", handle_insights_overview},
     {"toolset.list", handle_toolset_list},
@@ -1459,8 +1463,6 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"memory.list", handle_memory_list},
     {"memory.stats", handle_memory_stats},
     {"memory.get", handle_memory_get},
-    {"memory.delete", handle_memory_delete},
-    {"memory.supersede", handle_memory_supersede},
     {"memory.read", handle_memory_read},
     {"memory.benchmark", handle_memory_benchmark},
     {"index.scan", handle_index_scan},

@@ -889,7 +889,6 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server_insights.c
     ${AIMEE_SRC_DIR}/server_eval.c
     ${AIMEE_SRC_DIR}/server/server_api_status.c
-    server/server_error_kind.c
     ${AIMEE_SRC_DIR}/server/server_seed_config.c
     ${AIMEE_SRC_DIR}/server/server_auth.c
     ${AIMEE_SRC_DIR}/server/server_hooks.c
@@ -898,7 +897,6 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/presence.c
     ${AIMEE_SRC_DIR}/server/turn_registry.c
     ${AIMEE_SRC_DIR}/server/wfe_live_delegate.c
-    ${AIMEE_SRC_DIR}/server/wfe_http_proxy.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_scheduler.c
     ${AIMEE_SRC_DIR}/modules/vault/vault_principal.c
     ${AIMEE_SRC_DIR}/modules/vault/vault_crypto.c
