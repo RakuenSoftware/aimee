@@ -55,6 +55,20 @@ else
     pass "Go is the exclusive WFE runtime owner"
 fi
 
+if grep -qF '[ -d "$AIMEE_HOME/workflows" ] && chown -R aimee:aimee "$AIMEE_HOME/workflows"' \
+    ../deploy/container/server-entrypoint.sh; then
+    pass "server entrypoint makes the workflow registry writable by the Go WFE"
+else
+    fail "server entrypoint leaves the workflow registry root-owned"
+fi
+
+if awk '/^FROM /{runtime=($0=="FROM debian:bookworm-slim"); found=0} runtime && /build-essential/{found=1} END{exit !found}' \
+    ../Dockerfile.server; then
+    pass "server runtime carries the baseline workflow verification toolchain"
+else
+    fail "server runtime cannot execute Make/C/C++ workflow verification"
+fi
+
 case "$MODE" in
     default) echo "build-integrity:" ;;
     --build-variants) echo "build-variants:" ;;
@@ -235,7 +249,11 @@ fi
 
 hook_payload=$(printf '{"tool_name":"spawn_agent","tool_input":{"prompt":"x"},"cwd":"%s"}' "$(pwd)")
 set +e
-hook_out=$(printf '%s' "$hook_payload" | AIMEE_HOOK_CLIENT=claude ../aimee hooks pre 2>/dev/null)
+# Force the transport-failure path this regression exercises.  A developer may
+# already have a healthy local server; without an explicit unreachable target,
+# that server's policy response makes this test depend on host state.
+hook_out=$(printf '%s' "$hook_payload" |
+    AIMEE_HOOK_CLIENT=claude AIMEE_SERVER_URL=http://127.0.0.1:9 ../aimee hooks pre 2>/dev/null)
 hook_rc=$?
 set -e
 if [ "$hook_rc" -eq 0 ] &&

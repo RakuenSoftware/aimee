@@ -260,7 +260,10 @@ func (r *NativeRunner) structured(ctx context.Context, req StepRequest, kind str
 	} else {
 		source := inputText(req, "plan")
 		if source == "" {
-			return StepResult{}, errors.New("split requires an in.plan artifact binding")
+			source = inputText(req, "intent")
+		}
+		if source == "" {
+			return StepResult{}, errors.New("split requires an in.plan or in.intent artifact binding")
 		}
 		prompt = "Decompose the complete approved plan below. Return only JSON shaped {\"schema_version\":1,\"packets\":[{\"packet_id\":\"p1\",\"summary\":\"...\",\"target_blocks\":[\"implement\"],\"dependencies\":[],\"acceptance_criteria\":[\"...\"]}]}. Do not omit work or truncate content.\n\nPLAN:\n" + source
 		if req.Feedback != nil {
