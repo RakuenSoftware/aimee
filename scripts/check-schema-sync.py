@@ -88,6 +88,10 @@ DB1_ONLY_TABLES = {
     "pipelines",
     "plan_steps",
     "primary_sessions",
+    # setup-wizard first-owner claim and certificate-bound bootstrap grant
+    # (per-appliance authorization state, enforced by aimee-server)
+    "remote_first_user",
+    "remote_client_grants",
     "project_clones",
     "server_sessions",
     "server_mgmt_nonce",

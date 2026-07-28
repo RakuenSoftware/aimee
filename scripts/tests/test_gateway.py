@@ -429,5 +429,52 @@ class MalformedBodyStatus(unittest.TestCase):
         self.assertEqual(status, 200)
 
 
+class ManagedServiceAuth(unittest.TestCase):
+    """Managed setup must prove the KB's actual credential over real HTTP."""
+
+    def setUp(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AIMEE_LLM_STUB": "1",
+                "AIMEE_LLM_PORT": "0",
+                "AIMEE_LLM_BIND": "127.0.0.1",
+                "AIMEE_LLM_AUTH_TOKEN": "managed-kb-service-token",
+            },
+            clear=False,
+        ):
+            self.gw = _gw()
+        self.srv = self.gw.build_server()
+        self.port = self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+
+    def _verify(self, token=None):
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/auth/verify",
+            data=b"{}",
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read())
+
+    def test_only_the_managed_service_bearer_verifies(self):
+        self.assertEqual(self._verify()[0], 401)
+        self.assertEqual(self._verify("wrong")[0], 401)
+        status, body = self._verify("managed-kb-service-token")
+        self.assertEqual(status, 200)
+        self.assertEqual(body, {"status": "ok", "scope": "curator"})
+
+
 if __name__ == "__main__":
     unittest.main()

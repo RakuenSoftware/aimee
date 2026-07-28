@@ -445,9 +445,19 @@ static void memory_embed_http_url(const char *base, const char *path, char *out,
 int memory_embed_http_post(const char *base, const char *path, const char *body, char **resp)
 {
    char url[1024];
+   char auth[640];
+   const char *auth_header = NULL;
+   const char *token = getenv("AIMEE_LLM_AUTH_TOKEN");
+   if (token && token[0])
+   {
+      int n = snprintf(auth, sizeof(auth), "Authorization: Bearer %s", token);
+      if (n < 0 || (size_t)n >= sizeof(auth))
+         return -1;
+      auth_header = auth;
+   }
    memory_embed_http_url(base, path, url, sizeof(url));
    *resp = NULL;
-   int status = agent_http_post(url, NULL, body, resp, MEMORY_EMBED_HTTP_TIMEOUT_MS, NULL);
+   int status = agent_http_post(url, auth_header, body, resp, MEMORY_EMBED_HTTP_TIMEOUT_MS, NULL);
    if (status < 200 || status >= 300 || !*resp)
    {
       free(*resp);

@@ -7,6 +7,7 @@ config / AIMEE_EMBEDDER_URL are untouched):
   POST /embed        body = raw UTF-8 text                 -> JSON float array (dim)
   POST /embed_batch  body = JSON [text, ...]               -> JSON [[float,...], ...]
   POST /rerank       body = JSON [[query, candidate], ...] -> JSON [float, ...]
+  POST /auth/verify  authenticated service-identity check (no model work)
   GET  /health       -> {"status": ok|loading|down, "model":..., "dim":N}
 
 …but the backend is **llama.cpp**, not torch/sentence-transformers:
@@ -641,7 +642,12 @@ def build_server():
                 # identity (a caller-supplied X-Aimee-Scope is rejected).
                 check_auth(self.headers.get("Authorization"))
                 scope = derive_scope(self.headers.get)
-                if path == "/embed":
+                if path == "/auth/verify":
+                    # Cheap deploy-time proof that the request came from a caller
+                    # holding the configured service identity. No model role has
+                    # to be enabled, and no credential is reflected in the body.
+                    self._send(200, {"status": "ok", "scope": scope})
+                elif path == "/embed":
                     text = raw.decode("utf-8", errors="replace")
                     if not text.strip():
                         raise GatewayError(400, "bad_request", "empty input")

@@ -68,27 +68,33 @@ primary agent, inference tier, git hosts, and workspaces. Its last step starts:
 - `aimee-kb`, with private PostgreSQL 18, pgvector, and pgvectorscale inside the container;
 - `aimee-llm`, on CPU or GPU.
 
+It also displays the one client-enrollment command for the signed-in first user.
+For a local inference tier, setup separately provisions an authenticated KB-to-LLM service identity;
+no inference credential needs to be copied from the browser.
+
 Change `AIMEE_WEBCHAT_USER` and `AIMEE_WEBCHAT_PASSWORD` before putting it on a network. The
 managed compose file mounts the Docker socket; that gives aimee-server control of the host Docker
 daemon. Use the regular split stack if you do not want that.
 
-Install the `aimee` release binary on each development machine, then enroll it:
+Install the `aimee` release binary on your development machine, then copy the exact command shown by
+the wizard:
 
 ```bash
-aimee remote set https://host:8743 aimee-local-dev
+aimee remote set https://host:8743 <wizard-bearer>
 aimee remote status
 aimee status       # server, DB1, and KB health
 aimee kb status    # detailed KB state
 ```
 
-`remote set` pins a private server certificate, prints its fingerprint, rotates the one-use
-bootstrap bearer, and, on Linux, enrolls an individual mTLS certificate. Confirm the fingerprint
-out of band. The bootstrap bearer stops working after the first enrollment.
+`remote set` pins the server certificate, prints its fingerprint, and, on Linux, generates a private
+key locally and enrolls an individual mTLS certificate. The server binds that certificate to the
+wizard user and activates the user's explicit full-write grant. Confirm the fingerprint out of band.
+The bearer by itself remains read-only. Automatic first-user enrollment is currently Linux-only.
 
 The client registers hooks and MCP with supported coding tools on first setup. Set
-`AIMEE_NO_CLIENT_INTEGRATIONS=1` to keep global tool configuration untouched. The shared bearer is
-read-only. Configure server identity trust and grant the user before running write or delegate
-commands; the [Quickstart](docs/QUICKSTART.md#remote-write-setup) covers it.
+`AIMEE_NO_CLIENT_INTEGRATIONS=1` to keep global tool configuration untouched. Additional PAM/OIDC
+users use the authority-managed grant flow described in the
+[Quickstart](docs/QUICKSTART.md#additional-users-and-authority-managed-grants).
 
 ```bash
 aimee memory store myhost "PVE at 10.0.0.1"

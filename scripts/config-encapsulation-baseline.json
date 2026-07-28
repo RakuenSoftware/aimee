@@ -737,10 +737,6 @@
       "decls": 5,
       "loads": 3
     },
-    "src/server/server_http_config_routes.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/server/server_http_reqctx.c": {
       "decls": 1,
       "loads": 1
@@ -1119,8 +1115,8 @@
     }
   },
   "totals": {
-    "decls": 961,
-    "files": 279,
-    "loads": 507
+    "decls": 960,
+    "files": 278,
+    "loads": 506
   }
 }

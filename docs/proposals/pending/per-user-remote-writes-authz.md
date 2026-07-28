@@ -1,7 +1,7 @@
 # Proposal: Per-user `remote_writes` authorization
 
-- **State:** DRAFT — 2026-07-25; revised after roundtable (requested-changes) review. No implementation
-  has started.
+- **State:** IMPLEMENTED, acceptance in progress — 2026-07-28. The first-administrator bootstrap
+  supplement is under review in [wizard-first-user-bootstrap](wizard-first-user-bootstrap.md).
 - **Charter roles:** Enforce / Constrain-Verify / Gate-Promote.
 - **Depends on (DONE, merged):** the P5 JWKS + token-authority substrate — **P5-C2b** signed JWKS
   publication (`src/kb/kb_mgmt_jwks_publication.c`), **P5-C2c** authenticated server→kb JWKS fetch +
@@ -44,8 +44,11 @@ the `/v1` data plane today.
   entirely (§7); (b) the **one-time bootstrap bearer** (`handle_api_rotate_bearer`, rotate-only,
   single-use-in-effect, audited) and **single-use enrollment tokens**, which bootstrap the *first
   admin* who then configures kb. These are aimee-owned bootstrap credentials by design; they establish
-  administrative identity, not standing per-user data writes, and keep their existing lifecycle
-  guarantees (rotate-only / single-use / audited). Their carve-out is stated, not hidden.
+  administrative identity and keep their existing lifecycle guarantees (rotate-only / single-use /
+  audited). The setup wizard's enrollment bearer is a further explicit carve-out: the bearer itself
+  never grants writes, but signing its client-held CSR binds a local first-owner `full` grant to that
+  exact mTLS certificate. Additional interactive users still use the KB-authenticated token path.
+  The carve-outs are stated, not hidden.
 
 ## 3. Login & identity flow
 

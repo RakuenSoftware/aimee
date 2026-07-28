@@ -7,10 +7,17 @@
  * server_http.c sits at the 2500-line ceiling enforced by line-check.
  */
 #include <stdio.h>
-#include <string.h>
 #include <pthread.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#include <openssl/crypto.h>
+#include <openssl/sha.h>
 
 #include "config.h"
+#include "db1/remote_client_grant.h"
+#include "platform_random.h"
 #include "server.h"
 #include "server_http.h"
 
@@ -18,9 +25,13 @@
  * dispatch-backed routes run on detached connection workers, so authorization,
  * enrollment and rotation genuinely execute concurrently. One lock protects
  * both this set and the primary bearer stored by server_http.c. */
-static char g_bearer_extra[AIMEE_API_BEARER_EXTRA_MAX][256];
+static char g_bearer_extra[AIMEE_API_BEARER_EXTRA_MAX][65];
 static int g_bearer_extra_count = 0;
 static pthread_mutex_t g_bearer_lock = PTHREAD_MUTEX_INITIALIZER;
+/* The DB claim and config publication form one cross-store transaction. Serialize
+ * same-process wizard retries so an UNBOUND reader cannot mistake another
+ * worker's not-yet-published claim for crash residue and abandon it. */
+static pthread_mutex_t g_first_user_bootstrap_lock = PTHREAD_MUTEX_INITIALIZER;
 
 void server_http_set_bearer_extra(const char *const *bearers, int n)
 {
@@ -45,9 +56,9 @@ void server_http_set_bearer_extra(const char *const *bearers, int n)
 int server_http_enrolled_bearer_count(void)
 {
    pthread_mutex_lock(&g_bearer_lock);
-   int n = g_bearer_extra_count;
+   int count = g_bearer_extra_count;
    pthread_mutex_unlock(&g_bearer_lock);
-   return n;
+   return count;
 }
 
 /* Replace the live primary under the same lock as the enrolled set. Rotation
@@ -85,6 +96,16 @@ void server_http_primary_bearer_snapshot(const char *live, char *out, size_t out
 int server_http_authorize_enrolled(int is_tcp, const char *bearer_cfg, const char *auth_header,
                                    const char *api_key_header, int has_session_key)
 {
+   return server_http_authorize_enrolled_request(is_tcp, bearer_cfg, auth_header, api_key_header,
+                                                 has_session_key, NULL);
+}
+
+int server_http_authorize_enrolled_request(int is_tcp, const char *bearer_cfg,
+                                           const char *auth_header, const char *api_key_header,
+                                           int has_session_key, int *bootstrap_only)
+{
+   if (bootstrap_only)
+      *bootstrap_only = 0;
    pthread_mutex_lock(&g_bearer_lock);
    /* A two-dimensional char array is not an array of char pointers. Build the
     * pointer view explicitly; casting the storage makes token bytes become
@@ -92,10 +113,184 @@ int server_http_authorize_enrolled(int is_tcp, const char *bearer_cfg, const cha
    const char *extra[AIMEE_API_BEARER_EXTRA_MAX];
    for (int i = 0; i < g_bearer_extra_count; i++)
       extra[i] = g_bearer_extra[i];
-   int rc = server_http_authorize_multi(is_tcp, bearer_cfg, extra, g_bearer_extra_count,
-                                        auth_header, api_key_header, has_session_key);
+   int result = server_http_authorize_multi(is_tcp, bearer_cfg, extra, g_bearer_extra_count,
+                                            auth_header, api_key_header, has_session_key);
+   if (bootstrap_only && result == 0 && is_tcp && bearer_cfg &&
+       strcmp(bearer_cfg, AIMEE_BOOTSTRAP_BEARER) == 0)
+   {
+      const char *pin = getenv("AIMEE_API_BEARER_TOKEN");
+      int primary_match =
+          (auth_header && strncmp(auth_header, "Bearer ", 7) == 0 && auth_header[7] &&
+           server_ct_equal(auth_header + 7, bearer_cfg)) ||
+          (api_key_header && api_key_header[0] && server_ct_equal(api_key_header, bearer_cfg));
+      int extra_match = 0;
+      for (int i = 0; i < g_bearer_extra_count; i++)
+      {
+         if (auth_header && strncmp(auth_header, "Bearer ", 7) == 0 && auth_header[7])
+            extra_match |= server_ct_equal(auth_header + 7, g_bearer_extra[i]);
+         if (api_key_header && api_key_header[0])
+            extra_match |= server_ct_equal(api_key_header, g_bearer_extra[i]);
+      }
+      *bootstrap_only = primary_match && !extra_match && !(pin && pin[0]);
+   }
    pthread_mutex_unlock(&g_bearer_lock);
+   return result;
+}
+
+static int bearer_sha256(const char *bearer, char out[65])
+{
+   unsigned char digest[SHA256_DIGEST_LENGTH];
+   if (!bearer || !bearer[0] || !out ||
+       !SHA256((const unsigned char *)bearer, strlen(bearer), digest))
+      return -1;
+   for (size_t i = 0; i < sizeof(digest); i++)
+      snprintf(out + i * 2, 3, "%02x", digest[i]);
+   out[64] = '\0';
+   OPENSSL_cleanse(digest, sizeof(digest));
+   return 0;
+}
+
+static int configured_bearer_snapshot(char out[][65])
+{
+   return config_server_api_bearer_extra_snapshot(out, AIMEE_API_BEARER_EXTRA_MAX);
+}
+
+static void publish_configured_bearers(void)
+{
+   char configured[AIMEE_API_BEARER_EXTRA_MAX][65];
+   const char *extra[AIMEE_API_BEARER_EXTRA_MAX];
+   int count = configured_bearer_snapshot(configured);
+   if (count < 0)
+      count = 0;
+   for (int i = 0; i < count; i++)
+      extra[i] = configured[i];
+   server_http_set_bearer_extra(extra, count);
+}
+
+/* Return the configured cleartext bearer whose digest is |wanted|.  Cleartext
+ * remains in the existing protected config because the HTTP authenticator needs
+ * it; DB1 stores only the digest used to attach identity/grant metadata. */
+static int configured_bearer_for_hash(char configured[][65], int count, const char *wanted,
+                                      char *out, size_t out_cap)
+{
+   if (!configured || count < 0 || !wanted || !out || out_cap < 65)
+      return 0;
+   for (int i = 0; i < count; i++)
+   {
+      char digest[65];
+      if (bearer_sha256(configured[i], digest) == 0 && server_ct_equal(digest, wanted))
+      {
+         snprintf(out, out_cap, "%s", configured[i]);
+         OPENSSL_cleanse(digest, sizeof(digest));
+         return 1;
+      }
+      OPENSSL_cleanse(digest, sizeof(digest));
+   }
+   return 0;
+}
+
+static int first_user_bootstrap_locked(const char *principal, char *bearer, size_t bearer_cap)
+{
+   if (bearer && bearer_cap)
+      bearer[0] = '\0';
+   if (!principal || strncmp(principal, "webuser:", 8) != 0 || !principal[8] || !bearer ||
+       bearer_cap < 65)
+      return -1;
+
+   char configured[AIMEE_API_BEARER_EXTRA_MAX][65];
+   int configured_count = configured_bearer_snapshot(configured);
+   if (configured_count < 0 || !config_server_api_bearer_token()[0] ||
+       config_server_api_mtls() <= 0)
+      return -1;
+
+   /* A proposed value is required by the atomic DB1 claim even when this call
+    * discovers an earlier pending/bound record. It is never published unless
+    * the claim result is NEW. */
+   char proposed[65] = "";
+   char proposed_hash[65] = "";
+   if (platform_random_hex(proposed, 64) != 0 || bearer_sha256(proposed, proposed_hash) != 0)
+      return -1;
+
+   db1_remote_client_grant_t grant;
+   db1_remote_client_claim_result_t claimed =
+       db1_remote_client_claim(principal, proposed_hash, (int64_t)time(NULL), &grant);
+   if (claimed == DB1_REMOTE_CLIENT_CLAIM_OWNED_BY_OTHER)
+      return -2;
+   if (claimed == DB1_REMOTE_CLIENT_CLAIM_BOUND)
+      return 1;
+   if (claimed == DB1_REMOTE_CLIENT_CLAIM_UNBOUND)
+   {
+      if (configured_bearer_for_hash(configured, configured_count, grant.bearer_sha256, bearer,
+                                     bearer_cap))
+         return 0;
+      /* A crash may have committed DB1 just before the config write.  That row
+       * never authenticated and is safe to abandon; retry once with the newly
+       * generated value rather than leaving setup permanently wedged. */
+      if (db1_remote_client_abandon(grant.bearer_sha256) != 0)
+         return -1;
+      claimed = db1_remote_client_claim(principal, proposed_hash, (int64_t)time(NULL), &grant);
+   }
+   if (claimed != DB1_REMOTE_CLIENT_CLAIM_NEW || configured_count >= AIMEE_API_BEARER_EXTRA_MAX)
+   {
+      if (claimed == DB1_REMOTE_CLIENT_CLAIM_NEW)
+         (void)db1_remote_client_abandon(proposed_hash);
+      return -1;
+   }
+
+   if (config_server_api_bearer_extra_append(proposed) != 0)
+   {
+      (void)db1_remote_client_abandon(proposed_hash);
+      return -1;
+   }
+   publish_configured_bearers();
+   snprintf(bearer, bearer_cap, "%s", proposed);
+   OPENSSL_cleanse(proposed, sizeof(proposed));
+   OPENSSL_cleanse(proposed_hash, sizeof(proposed_hash));
+   return 0;
+}
+
+int server_http_first_user_bootstrap(const char *principal, char *bearer, size_t bearer_cap)
+{
+   pthread_mutex_lock(&g_first_user_bootstrap_lock);
+   int result = first_user_bootstrap_locked(principal, bearer, bearer_cap);
+   pthread_mutex_unlock(&g_first_user_bootstrap_lock);
+   return result;
+}
+
+int server_http_first_user_bind_cert(const char *bearer, const char *cert_serial)
+{
+   if (!bearer || !bearer[0])
+      return 0; /* local UDS/operator issuance is not a wizard enrollment */
+   char digest[65] = "";
+   if (bearer_sha256(bearer, digest) != 0)
+      return -1;
+   int rc = db1_remote_client_bind(digest, cert_serial, (int64_t)time(NULL));
+   OPENSSL_cleanse(digest, sizeof(digest));
    return rc;
+}
+
+int server_http_first_user_cert_tier(const char *cert_serial, char *principal, size_t principal_cap)
+{
+   return db1_remote_client_tier(cert_serial, principal, principal_cap);
+}
+
+int server_http_first_user_apply_cert_grant(int mtls_authenticated, const char *cert_serial,
+                                            int *tier, char *principal, size_t principal_cap)
+{
+   if (principal && principal_cap)
+      principal[0] = '\0';
+   if (!mtls_authenticated || !cert_serial || !cert_serial[0] || !tier || !principal ||
+       principal_cap == 0)
+      return 0;
+   int granted = server_http_first_user_cert_tier(cert_serial, principal, principal_cap);
+   if (granted < 0)
+   {
+      principal[0] = '\0';
+      return -1;
+   }
+   if (granted > *tier)
+      *tier = granted;
+   return granted;
 }
 
 /* Body for an auth rejection on /v1. Split out of handle_conn so the wording is

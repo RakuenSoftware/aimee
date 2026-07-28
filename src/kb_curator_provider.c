@@ -92,7 +92,8 @@ int kb_curator_provider_for_stage(const config_t *cfg, kb_curator_stage_t stage,
          const char *env_model = getenv("AIMEE_LLM_MODEL");
          base_url = synth_url;
          model = (env_model && env_model[0]) ? env_model : AIMEE_LLM_DEFAULT_MODEL;
-         api_key = ""; /* keyless container on a trusted network */
+         const char *service_token = getenv("AIMEE_LLM_AUTH_TOKEN");
+         api_key = (service_token && service_token[0]) ? service_token : "";
       }
       else if (kb_curator_stage_tier(stage) == KB_CURATOR_TIER_A)
       {

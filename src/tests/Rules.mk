@@ -425,7 +425,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-git-ops \
                $(TESTPREFIX)/unit-test-webuser-editor \
                $(TESTPREFIX)/unit-test-vault-bootstrap \
-               $(TESTPREFIX)/unit-test-pki \
+               $(TESTPREFIX)/unit-test-pki $(TESTPREFIX)/unit-test-remote-client-grant \
                $(TESTPREFIX)/unit-test-aimee-tls-clientcert \
                $(TESTPREFIX)/unit-test-aimee-tls-pin \
                $(TESTPREFIX)/unit-test-vault-server-key \
@@ -4963,6 +4963,11 @@ $(TESTPREFIX)/unit-test-pki: $(OBJDIR)/tests/test_pki.o $(OBJDIR)/server/pki.o \
                               $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
                               $(OBJDIR)/modules/vault/vault_server_key.o $(OBJDIR)/modules/vault/vault_principal.o \
+                              $(DB1_OBJS) \
+                              $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-remote-client-grant: $(OBJDIR)/tests/test_remote_client_grant.o \
                               $(DB1_OBJS) \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

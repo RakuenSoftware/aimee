@@ -49,6 +49,7 @@ def _run(script: str, env: dict[str, str], stdin: str) -> str:
 
 def check_embed_remote() -> None:
     vector = [round(i * 0.001, 3) for i in range(384)]
+    token = "kb-to-llm-test-token"
 
     class EmbedStub(BaseHTTPRequestHandler):
         def log_message(self, *a):  # quiet
@@ -56,6 +57,7 @@ def check_embed_remote() -> None:
 
         def do_POST(self):
             assert self.path.rstrip("/") == "/embed", self.path
+            assert self.headers.get("authorization") == f"Bearer {token}"
             length = int(self.headers.get("content-length", "0") or "0")
             self.rfile.read(length)
             body = json.dumps(vector).encode()
@@ -67,12 +69,48 @@ def check_embed_remote() -> None:
 
     server, url = _serve(EmbedStub)
     try:
-        out = _run("embed-remote.py", {"AIMEE_EMBEDDER_URL": url}, "hello world")
+        out = _run(
+            "embed-remote.py",
+            {"AIMEE_EMBEDDER_URL": url, "AIMEE_LLM_AUTH_TOKEN": token},
+            "hello world",
+        )
         parsed = json.loads(out)
         assert isinstance(parsed, list) and len(parsed) == 384, f"got {len(parsed)} dims"
     finally:
         server.shutdown()
     print("  embed-remote.py: ok")
+
+
+def check_rerank_remote() -> None:
+    token = "kb-to-llm-test-token"
+
+    class RerankStub(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            assert self.path.rstrip("/") == "/rerank", self.path
+            assert self.headers.get("authorization") == f"Bearer {token}"
+            length = int(self.headers.get("content-length", "0") or "0")
+            pairs = json.loads(self.rfile.read(length))
+            body = json.dumps([0.75 for _ in pairs]).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server, url = _serve(RerankStub)
+    try:
+        out = _run(
+            "rerank-remote.py",
+            {"AIMEE_RERANKER_URL": url, "AIMEE_LLM_AUTH_TOKEN": token},
+            '[["query", "candidate"]]',
+        )
+        assert json.loads(out) == [0.75]
+    finally:
+        server.shutdown()
+    print("  rerank-remote.py: ok")
 
 
 def check_llm_chat() -> None:
@@ -216,6 +254,7 @@ def check_no_baked_endpoint_defaults() -> None:
 def main() -> int:
     print("sidecar-clients:")
     check_embed_remote()
+    check_rerank_remote()
     check_llm_chat()
     check_llm_chat_reasoning_split()
     check_no_baked_endpoint_defaults()

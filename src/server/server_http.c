@@ -268,14 +268,10 @@ int server_http_authorize(int is_tcp, const char *bearer_cfg, const char *auth_h
    return 0;
 }
 
-int server_http_bootstrap_gate(int is_tcp, const char *live_bearer, const char *method,
-                               const char *path)
+int server_http_bootstrap_gate(int is_tcp, int bootstrap_only, const char *method, const char *path)
 {
-   if (!is_tcp || !live_bearer || strcmp(live_bearer, AIMEE_BOOTSTRAP_BEARER) != 0)
-      return 0; /* UDS, or already rotated to a strong token -> gate off */
-   const char *pin = getenv("AIMEE_API_BEARER_TOKEN");
-   if (pin && pin[0])
-      return 0; /* operator pinned the bearer -> opted out of TOFU */
+   if (!is_tcp || !bootstrap_only)
+      return 0;
    if (method && path && strcmp(method, "POST") == 0 && strcmp(path, "/v1/api/rotate_bearer") == 0)
       return 0; /* the one route the bootstrap may reach: mint the strong token */
    return 1;    /* refuse: enrollment required */
@@ -1617,6 +1613,10 @@ void handle_conn(int fd, int is_tcp, int is_management)
    int identity_present = 0;
    int effective_remote_writes = server_http_resolve_write_tier(
        is_tcp, buf, method, path, request_id, &identity_claims, &identity_present);
+   char first_user_principal[128] = "";
+   (void)server_http_first_user_apply_cert_grant(mtls_authenticated, rc_serial,
+                                                 &effective_remote_writes, first_user_principal,
+                                                 sizeof(first_user_principal));
    char request_bearer[sizeof(g_bearer)];
    server_http_primary_bearer_snapshot(g_bearer, request_bearer, sizeof(request_bearer));
    uint32_t effective_caps =
@@ -1631,13 +1631,15 @@ void handle_conn(int fd, int is_tcp, int is_management)
     * durable certificate, so downstream dispatch sees the same effective caps
     * as the outer route gate. */
    server_http_populate_request_context(fd, is_tcp, buf, request_id, method, path, effective_caps);
-
+   if (first_user_principal[0])
+      request_context_override_principal(first_user_principal);
    /* Authorize before reading the body: TCP requires either the durably valid
     * client certificate above or a valid bearer; UDS relies on permissions. */
    {
       char auth[512] = "";
       char api_key[512] = "";
       char skey[256] = "";
+      int bootstrap_only = 0;
       int has_auth = http_header(buf, "Authorization", auth, sizeof(auth));
       int has_api_key = http_header(buf, "x-api-key", api_key, sizeof(api_key));
       int has_skey = http_header(buf, "X-Aimee-Session-Key", skey, sizeof(skey));
@@ -1655,8 +1657,9 @@ void handle_conn(int fd, int is_tcp, int is_management)
       anthropic_http_capture_request_headers(buf); /* parity: per-request anthropic-* hdrs */
       int az = transport_authenticated
                    ? 0
-                   : server_http_authorize_enrolled(is_tcp, g_bearer, has_auth ? auth : NULL,
-                                                    has_api_key ? api_key : NULL, has_skey);
+                   : server_http_authorize_enrolled_request(
+                         is_tcp, g_bearer, has_auth ? auth : NULL, has_api_key ? api_key : NULL,
+                         has_skey, &bootstrap_only);
       if (az != 0)
       {
          const char *msg = server_http_auth_error_body(az);
@@ -1665,16 +1668,12 @@ void handle_conn(int fd, int is_tcp, int is_management)
          return;
       }
 
-      /* Trust-on-first-use enforcement: while the live /v1 bearer is still the
-       * well-known image-seeded bootstrap, the ONLY route permitted on the TCP
-       * listener is rotating it to a strong per-deployment token. Auth already
-       * passed, so the caller presented the bootstrap; refuse every other route
-       * so the pre-set default can never perform a real operation — it exists
-       * solely to mint the real bearer, after which g_bearer no longer equals the
-       * bootstrap and this gate self-disables. Closes the "a network-published
-       * server keeps accepting the public default bearer" hole. */
+      /* The image-seeded recovery bearer is rotate-only. Classification above
+       * is based on the credential that authenticated this request, so an
+       * additive wizard enrollment bearer remains usable for CSR signing even
+       * while the unrelated recovery bearer is still configured as primary. */
       if (!management_authenticated &&
-          server_http_bootstrap_gate(is_tcp, request_bearer, method, path))
+          server_http_bootstrap_gate(is_tcp, bootstrap_only, method, path))
       {
          send_response(fd, 401,
                        "{\"error\":{\"message\":\"the one-time bootstrap bearer must be rotated "
@@ -2085,6 +2084,8 @@ void handle_conn(int fd, int is_tcp, int is_management)
     * loopback_rpc copies it into the synthesized conn. Cleared after the route so
     * a reused worker thread cannot leak it into the next request. */
    server_http_identity_capture(fd, is_tcp, buf);
+   if (first_user_principal[0])
+      server_http_identity_override_principal(first_user_principal);
    server_http_identity_set_query(query); /* cleared by server_http_identity_clear */
    int status = server_http_route(method, path, body, body_len, resp, SHTTP_RESP_MAX);
    g_rpc_conn_caps = CAPS_READ_ONLY;
@@ -2094,7 +2095,6 @@ void handle_conn(int fd, int is_tcp, int is_management)
    free(resp);
    free(body);
 }
-
 /* Per-connection worker: each accepted connection is handled on its own
  * detached thread, so a slow request (e.g. a synchronous chat completion) or an
  * SSE stream cannot block the accept loop, and independent /v1 requests run
