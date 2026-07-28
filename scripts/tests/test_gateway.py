@@ -4,6 +4,7 @@
 numpy-guarded do_rerank test against a mocked encoder. No model, no network.
 """
 import importlib.util
+import io
 import json
 import os
 import threading
@@ -212,6 +213,67 @@ class Synth(unittest.TestCase):
         out = self.gw.do_synth({"messages": [{"role": "user", "content": "hi"}], "stream": False})
         self.assertEqual(captured["url"], "http://synth:8083/v1/chat/completions")
         self.assertIn("choices", out)
+
+
+class ClientDisconnectHandling(unittest.TestCase):
+    def setUp(self):
+        self.gw = _gw()
+        self.gw.BIND = "127.0.0.1"
+        self.gw.PORT = 0
+        self.gw.STUB = True
+        self.server = self.gw.build_server()
+        self.addCleanup(self.server.server_close)
+
+    def handler(self, payload, write_error):
+        raw = json.dumps(payload).encode("utf-8")
+        handler = object.__new__(self.server.RequestHandlerClass)
+        handler.path = "/v1/chat/completions"
+        handler.headers = {"content-length": str(len(raw))}
+        handler.rfile = io.BytesIO(raw)
+        handler.wfile = mock.Mock()
+        handler.wfile.write.side_effect = write_error
+        handler.send_response = mock.Mock()
+        handler.send_header = mock.Mock()
+        handler.end_headers = mock.Mock()
+        return handler
+
+    def test_nonstream_disconnect_does_not_attempt_second_response(self):
+        for error in (BrokenPipeError(), ConnectionResetError()):
+            with self.subTest(error=type(error).__name__):
+                handler = self.handler({"messages": []}, error)
+                handler.do_POST()
+                handler.send_response.assert_called_once_with(200)
+                handler.wfile.write.assert_called_once()
+
+    def test_stream_disconnect_does_not_attempt_json_error(self):
+        handler = self.handler({"messages": [], "stream": True}, BrokenPipeError())
+        handler.do_POST()
+        handler.send_response.assert_called_once_with(200)
+        handler.wfile.write.assert_called_once()
+
+    def test_stream_disconnect_does_not_trip_upstream_breaker(self):
+        self.gw.STUB = False
+        self.gw.SYNTH_URL = "http://synth:8083"
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self, _size):
+                return b"data: first chunk\n\n"
+
+        with mock.patch.object(self.gw.urllib.request, "urlopen", return_value=Response()), \
+                mock.patch.object(self.gw._synth_breaker, "allow", return_value=True), \
+                mock.patch.object(self.gw._synth_breaker, "record") as record:
+            with self.assertRaises(self.gw.ClientDisconnected):
+                self.gw.do_synth_stream(
+                    {"messages": [], "stream": True},
+                    mock.Mock(side_effect=self.gw.ClientDisconnected()),
+                )
+        record.assert_not_called()
 
 
 class RoleHealth(unittest.TestCase):
