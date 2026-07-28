@@ -134,7 +134,10 @@ chown root:root "$bundle_tmp"
 # current bounded publication window.
 if ! aimee-kb-jwks-publish --export-public >/dev/null 2>&1; then
     times=$(psql "$authority_db_url" -X -qAt -v ON_ERROR_STOP=1 \
-        -c "SELECT valid_from||' '||valid_until FROM kb_management_jwks_publication_candidate WHERE generation=1")
+        -c "SET search_path=pg_catalog,pg_temp; SET ROLE aimee_kb_jwks_publish;
+            SELECT valid_from||' '||valid_until
+              FROM public.kb_management_jwks_publication_inspect()
+             WHERE generation=1 AND phase<>'empty'")
     if [ -n "$times" ]; then
         set -- $times
         valid_from=$1
@@ -152,5 +155,7 @@ mv "$bundle_tmp" "$trust_dir/jwks-trust-bundle.json"
 trap - EXIT HUP INT TERM
 bundle_digest=$(sha256sum "$trust_dir/jwks-trust-bundle.json" | cut -d' ' -f1)
 valid_until=$(psql "$authority_db_url" -X -qAt -v ON_ERROR_STOP=1 \
-    -c 'SELECT valid_until FROM kb_management_jwks_publication_generation WHERE generation=1')
+    -c 'SET search_path=pg_catalog,pg_temp; SET ROLE aimee_kb_jwks_publish;
+        SELECT valid_until FROM public.kb_management_jwks_publication_final()
+         WHERE generation=1')
 echo "aimee-authority-bootstrap: ready generation=1 valid_until=$valid_until trust_sha256=$bundle_digest"
