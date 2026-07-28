@@ -3,6 +3,7 @@
 #include "managed_server_identity.h"
 #include "db2/db2.h"
 #include "db2/db2_tenant.h"
+#include "db2/membership.h"
 #include "db2/server_registry.h"
 #include "db2/team.h"
 #include "kb_identity.h"
@@ -49,6 +50,19 @@ static int select_team(const kb_principal_t *owner, int64_t *team_id)
          }
       rc = matches == 1 ? 0 : -1;
    }
+   /* set_tenant_context validates membership even for the bootstrap owner. Keep
+    * team creation and the owner membership in the same transaction so a fresh
+    * managed install cannot commit a team that its next registry transaction is
+    * forbidden to select. Preserve an existing default when upgrading a KB
+    * with more than one team. */
+   char owner_key[576];
+   int64_t existing_default = 0;
+   if (rc == 0 &&
+       (kb_identity_key(owner, owner_key, sizeof(owner_key)) != 0 ||
+        db2_membership_add(owner_key, *team_id,
+                           db2_membership_default_team(owner_key, &existing_default) != 0,
+                           NULL) != 0))
+      rc = -1;
    if (rc != 0)
    {
       db2_tenant_scope_rollback();
