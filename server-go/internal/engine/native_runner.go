@@ -110,6 +110,15 @@ func NewNativeRunner(db *db1.Store, worktrees *WorktreeManager, agents AgentClie
 }
 
 func (r *NativeRunner) Run(ctx context.Context, req StepRequest) (StepResult, error) {
+	if req.WorkItem.ParentID != "" {
+		result, blocked, err := r.packetDependencyGate(ctx, req.WorkItem)
+		if err != nil {
+			return StepResult{}, err
+		}
+		if blocked {
+			return result, nil
+		}
+	}
 	switch req.Node.Block {
 	case "trigger.watch-dir", "author.proposal":
 		return StepResult{Status: StepAdvanced, ArtifactType: "proposal", Artifact: req.Proposal}, nil
@@ -154,6 +163,84 @@ func (r *NativeRunner) Run(ctx context.Context, req StepRequest) (StepResult, er
 		}
 		return r.custom(ctx, req, block)
 	}
+}
+
+type workflowPacket struct {
+	PacketID     string   `json:"packet_id"`
+	Dependencies []string `json:"dependencies"`
+}
+
+// packetDependencyGate keeps a generated slice at its current stage until every
+// dependency in the approved packet plan has actually reached accepted. Packet
+// order and the per-workflow concurrency limit are scheduling policy, not a
+// dependency contract: a parked predecessor must never make the next slice
+// runnable merely because it released an execution slot.
+func (r *NativeRunner) packetDependencyGate(ctx context.Context, item db1.WorkItem) (StepResult, bool, error) {
+	content, err := r.artifacts.Proposal(item.ID)
+	if err != nil {
+		return StepResult{}, false, fmt.Errorf("load slice packet: %w", err)
+	}
+	var packet workflowPacket
+	if err := json.Unmarshal(content, &packet); err != nil || strings.TrimSpace(packet.PacketID) == "" {
+		if err == nil {
+			err = errors.New("packet_id is required")
+		}
+		return StepResult{}, false, fmt.Errorf("decode slice packet: %w", err)
+	}
+	if len(packet.Dependencies) == 0 {
+		return StepResult{}, false, nil
+	}
+
+	lastDot := strings.LastIndexByte(item.ID, '.')
+	if lastDot < 0 {
+		return StepResult{}, false, errors.New("slice work-item id has no packet generation")
+	}
+	generationPrefix := item.ID[:lastDot+1]
+	siblings, err := r.db.Children(ctx, item.ParentID)
+	if err != nil {
+		return StepResult{}, false, fmt.Errorf("load slice siblings: %w", err)
+	}
+	byPacketID := make(map[string]db1.WorkItem, len(siblings))
+	for _, sibling := range siblings {
+		if !strings.HasPrefix(sibling.ID, generationPrefix) {
+			continue
+		}
+		siblingContent, readErr := r.artifacts.Proposal(sibling.ID)
+		if readErr != nil {
+			return StepResult{}, false, fmt.Errorf("load sibling packet %s: %w", sibling.ID, readErr)
+		}
+		var siblingPacket workflowPacket
+		if err := json.Unmarshal(siblingContent, &siblingPacket); err != nil || strings.TrimSpace(siblingPacket.PacketID) == "" {
+			if err == nil {
+				err = errors.New("packet_id is required")
+			}
+			return StepResult{}, false, fmt.Errorf("decode sibling packet %s: %w", sibling.ID, err)
+		}
+		if _, exists := byPacketID[siblingPacket.PacketID]; exists {
+			return StepResult{}, false, fmt.Errorf("duplicate packet_id %s in slice generation", siblingPacket.PacketID)
+		}
+		byPacketID[siblingPacket.PacketID] = sibling
+	}
+
+	for _, dependencyID := range packet.Dependencies {
+		dependency, ok := byPacketID[dependencyID]
+		if !ok {
+			return StepResult{Status: StepFailed, Detail: "packet dependency " + dependencyID + " is unavailable"}, true, nil
+		}
+		switch dependency.State {
+		case "accepted":
+			continue
+		case "rejected", "stopped", "abandoned":
+			return StepResult{Status: StepFailed, Detail: fmt.Sprintf("packet dependency %s ended %s", dependencyID, dependency.State)}, true, nil
+		default:
+			detail := fmt.Sprintf("waiting for packet dependency %s (%s)", dependencyID, dependency.State)
+			if dependency.PauseReason != "" {
+				detail += ": " + dependency.PauseReason
+			}
+			return StepResult{Status: StepPending, PauseReason: "dependency_pending", Detail: detail}, true, nil
+		}
+	}
+	return StepResult{}, false, nil
 }
 
 func (r *NativeRunner) custom(ctx context.Context, req StepRequest, block wfe.BlockDefinition) (StepResult, error) {
@@ -1712,6 +1799,7 @@ func validateStructured(kind string, doc []byte) error {
 		return errors.New("packet plan requires at least one packet")
 	}
 	ids := make([]string, 0, len(packets))
+	dependencies := make(map[string][]string, len(packets))
 	for _, raw := range packets {
 		packet, ok := raw.(map[string]any)
 		if !ok {
@@ -1722,6 +1810,25 @@ func validateStructured(kind string, doc []byte) error {
 			return errors.New("packet_id is required")
 		}
 		ids = append(ids, id)
+		if rawDependencies, exists := packet["dependencies"]; exists {
+			values, valid := rawDependencies.([]any)
+			if !valid {
+				return fmt.Errorf("packet %s dependencies must be an array", id)
+			}
+			seen := make(map[string]bool, len(values))
+			for _, rawDependency := range values {
+				dependency, valid := rawDependency.(string)
+				dependency = strings.TrimSpace(dependency)
+				if !valid || dependency == "" {
+					return fmt.Errorf("packet %s has an invalid dependency", id)
+				}
+				if seen[dependency] {
+					return fmt.Errorf("packet %s repeats dependency %s", id, dependency)
+				}
+				seen[dependency] = true
+				dependencies[id] = append(dependencies[id], dependency)
+			}
+		}
 		if len(stringSlice(packet["acceptance_criteria"])) == 0 {
 			return fmt.Errorf("packet %s needs acceptance criteria", id)
 		}
@@ -1730,6 +1837,45 @@ func validateStructured(kind string, doc []byte) error {
 	for i := 1; i < len(ids); i++ {
 		if ids[i] == ids[i-1] {
 			return fmt.Errorf("duplicate packet_id %s", ids[i])
+		}
+	}
+	known := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		known[id] = true
+	}
+	for id, packetDependencies := range dependencies {
+		for _, dependency := range packetDependencies {
+			if dependency == id {
+				return fmt.Errorf("packet %s cannot depend on itself", id)
+			}
+			if !known[dependency] {
+				return fmt.Errorf("packet %s depends on unknown packet %s", id, dependency)
+			}
+		}
+	}
+	visiting := make(map[string]bool, len(ids))
+	visited := make(map[string]bool, len(ids))
+	var visit func(string) error
+	visit = func(id string) error {
+		if visiting[id] {
+			return fmt.Errorf("packet dependency cycle includes %s", id)
+		}
+		if visited[id] {
+			return nil
+		}
+		visiting[id] = true
+		for _, dependency := range dependencies[id] {
+			if err := visit(dependency); err != nil {
+				return err
+			}
+		}
+		visiting[id] = false
+		visited[id] = true
+		return nil
+	}
+	for _, id := range ids {
+		if err := visit(id); err != nil {
+			return err
 		}
 	}
 	return nil
