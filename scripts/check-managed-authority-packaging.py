@@ -17,6 +17,7 @@ def main() -> int:
     bootstrap = (ROOT / "deploy/container/aimee-managed-authority-bootstrap.sh").read_text(
         encoding="utf-8"
     )
+    helper = (ROOT / "scripts/managed_kms_helper.py").read_text(encoding="utf-8")
     failures: list[str] = []
 
     required_docker = {
@@ -54,6 +55,22 @@ def main() -> int:
         failures.append("authority migration membership")
     if '"$helper" hwm-read "$AIMEE_VAULT_KMS_KEY_ID" 0 0' not in bootstrap:
         failures.append("software KMS self-check must use the custody provider argv contract")
+    if "SET ROLE aimee_kb_jwks_publish" not in bootstrap:
+        failures.append("publisher metadata queries must enter the isolated publisher role")
+    for table in (
+        "kb_management_jwks_publication_candidate",
+        "kb_management_jwks_publication_generation",
+    ):
+        if re.search(rf"FROM\s+(?:public\.)?{table}\b", bootstrap, re.I):
+            failures.append(f"authority script must not directly read {table}")
+    for function in (
+        "public.kb_management_jwks_publication_inspect()",
+        "public.kb_management_jwks_publication_final()",
+    ):
+        if function not in bootstrap:
+            failures.append(f"authority script missing narrow metadata reader {function}")
+    if 'sys.argv[3:] != ["0", "0"]' not in helper:
+        failures.append("managed KMS HWM read argument contract")
     for dsn in ("AIMEE_KB_TOKEN_ROOTS_PROVISION_DSN", "AIMEE_KB_JWKS_PUBLISH_DSN"):
         if f'export {dsn}="$authority_db_url"' not in bootstrap:
             failures.append(f"least-privilege {dsn}")
