@@ -14,6 +14,9 @@ def main() -> int:
     managed = (ROOT / "deploy/container/aimee-managed.compose.yaml").read_text(encoding="utf-8")
     outer = (ROOT / "compose.server-managed.yaml").read_text(encoding="utf-8")
     deploy = (ROOT / "src/server/deploy_apply.c").read_text(encoding="utf-8")
+    bootstrap = (ROOT / "deploy/container/aimee-managed-authority-bootstrap.sh").read_text(
+        encoding="utf-8"
+    )
     failures: list[str] = []
 
     required_docker = {
@@ -43,6 +46,15 @@ def main() -> int:
         failures.append("server must not mount authority custody volume")
     if "aimee-authority-bootstrap" not in deploy or "deploy_authority_bootstrap_argv" not in deploy:
         failures.append("wizard deploy orchestration")
+    if "authority_db_role=aimee_managed_authority_login" not in bootstrap:
+        failures.append("dedicated authority database login")
+    if 'user=$authority_db_role' not in bootstrap:
+        failures.append("authority tools must not use the database superuser")
+    if "GRANT aimee_kb_migrate TO $authority_db_role" not in bootstrap:
+        failures.append("authority migration membership")
+    for dsn in ("AIMEE_KB_TOKEN_ROOTS_PROVISION_DSN", "AIMEE_KB_JWKS_PUBLISH_DSN"):
+        if f'export {dsn}="$authority_db_url"' not in bootstrap:
+            failures.append(f"least-privilege {dsn}")
 
     for offline_main in (
         ROOT / "src/kb/kb_mgmt_token_roots_provision_main.c",

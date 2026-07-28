@@ -4,7 +4,9 @@ set -eu
 
 authority=/var/lib/aimee-authority
 trust_dir=/run/aimee-trust
-db_url='postgresql:///aimee_shared?host=/var/lib/aimee-kb/run&user=aimee'
+admin_db_url='postgresql:///aimee_shared?host=/var/lib/aimee-kb/run&user=aimee'
+authority_db_role=aimee_managed_authority_login
+authority_db_url="postgresql:///aimee_shared?host=/var/lib/aimee-kb/run&user=$authority_db_role"
 helper="$authority/managed-kms-helper"
 private="$authority/hwm-private.pem"
 public="$authority/hwm-public.raw"
@@ -88,10 +90,21 @@ trap - EXIT HUP INT TERM
 # hardened role/grant topology out of band, then make that local deploy identity
 # a migration member so the two offline tools can SET ROLE to their isolated
 # provisioner compartments. No TCP database credential is created.
-psql "$db_url" -X -q -v ON_ERROR_STOP=1 -f /usr/share/aimee/schema_roles.sql >/dev/null
-psql "$db_url" -X -q -v ON_ERROR_STOP=1 -f /usr/share/aimee/schema_grants.sql >/dev/null
-psql "$db_url" -X -q -v ON_ERROR_STOP=1 \
-    -c 'GRANT aimee_kb_migrate TO aimee' >/dev/null
+psql "$admin_db_url" -X -q -v ON_ERROR_STOP=1 -f /usr/share/aimee/schema_roles.sql >/dev/null
+psql "$admin_db_url" -X -q -v ON_ERROR_STOP=1 -f /usr/share/aimee/schema_grants.sql >/dev/null
+psql "$admin_db_url" -X -q -v ON_ERROR_STOP=1 <<SQL >/dev/null
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname='$authority_db_role') THEN
+    CREATE ROLE $authority_db_role LOGIN NOINHERIT NOBYPASSRLS
+      NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
+  END IF;
+END
+\$\$;
+ALTER ROLE $authority_db_role LOGIN NOINHERIT NOBYPASSRLS
+  NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
+GRANT aimee_kb_migrate TO $authority_db_role;
+SQL
 
 export AIMEE_VAULT_KMS_HELPER="$helper"
 export AIMEE_VAULT_KMS_KEY_ID=managed-software-kek-v1
@@ -100,8 +113,8 @@ export AIMEE_VAULT_KMS_HWM_DOMAIN=aimee-managed-authority-v1
 export AIMEE_KB_TOKEN_ROOT_CUSTODY_ID=managed-token-root-v1
 export AIMEE_KB_JWKS_MANIFEST_ROOT_CUSTODY_ID=managed-jwks-manifest-root-v1
 export AIMEE_KB_JWKS_PUBLICATION_HWM_CUSTODY_ID=managed-jwks-publication-v1
-export AIMEE_KB_TOKEN_ROOTS_PROVISION_DSN="$db_url"
-export AIMEE_KB_JWKS_PUBLISH_DSN="$db_url"
+export AIMEE_KB_TOKEN_ROOTS_PROVISION_DSN="$authority_db_url"
+export AIMEE_KB_JWKS_PUBLISH_DSN="$authority_db_url"
 
 "$helper" hwm-read "$AIMEE_VAULT_KMS_KEY_ID" >/dev/null || fail "software KMS self-check failed"
 
@@ -118,7 +131,7 @@ chown root:root "$bundle_tmp"
 # resume any staged validity tuple exactly; otherwise create generation 1 for the
 # current bounded publication window.
 if ! aimee-kb-jwks-publish --export-public >/dev/null 2>&1; then
-    times=$(psql "$db_url" -X -qAt -v ON_ERROR_STOP=1 \
+    times=$(psql "$authority_db_url" -X -qAt -v ON_ERROR_STOP=1 \
         -c "SELECT valid_from||' '||valid_until FROM kb_management_jwks_publication_candidate WHERE generation=1")
     if [ -n "$times" ]; then
         set -- $times
@@ -136,6 +149,6 @@ aimee-kb-jwks-publish --export-public >/dev/null || fail "signed JWKS verificati
 mv "$bundle_tmp" "$trust_dir/jwks-trust-bundle.json"
 trap - EXIT HUP INT TERM
 bundle_digest=$(sha256sum "$trust_dir/jwks-trust-bundle.json" | cut -d' ' -f1)
-valid_until=$(psql "$db_url" -X -qAt -v ON_ERROR_STOP=1 \
+valid_until=$(psql "$authority_db_url" -X -qAt -v ON_ERROR_STOP=1 \
     -c 'SELECT valid_until FROM kb_management_jwks_publication_generation WHERE generation=1')
 echo "aimee-authority-bootstrap: ready generation=1 valid_until=$valid_until trust_sha256=$bundle_digest"
