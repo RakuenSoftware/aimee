@@ -45,6 +45,12 @@ representation schema, output compatibility, health, and generation identity.
     the repository itself and is therefore identical for two tenants indexing the same upstream.
 13. Recovery from a stale generation requires the authority to publish one. A caller without it is
     told what is published instead of being asked to retry an action it cannot perform.
+14. Output that fails validation never enters the knowledge base. Retrieval runs before a request is
+    served; validation runs before anything derived from a response is persisted. A response that is
+    refused, aborted, or fails a guardrail leaves no trace in memory, and a rejection is recorded as
+    a rejection rather than as an absence.
+15. Condensed context is an index into evidence, never a replacement for it. Every condensation
+    names the exact records it covers and can be resolved back to them.
 
 ## Evidence authority and lineage
 
@@ -138,6 +144,57 @@ The committed generation is authoritative for its snapshot. Current worktree byt
 packets are a higher-freshness primary overlay for reads and edits; uncommitted bytes are never
 mislabeled as part of the committed generation.
 
+## Condensed context and durable state
+
+A long-running session outgrows any context window, so the runtime condenses its own history. This
+is an evidence-producing process and obeys the same authority rules as any other.
+
+Condensation is tiered. Raw interaction records are the retained evidence. When they exceed a
+budget, a background pass replaces a span of them in the working context with a dense condensation
+of that span; when condensations themselves exceed a budget, a further pass condenses those. Each
+condensation is tertiary evidence: it names the exact record range it covers, retains lineage to
+that range, and can always be resolved back to the underlying records. Dropping a span from the
+working context never deletes it, and a condensation never becomes the citation target — a caller
+that needs what was actually said reads the records the condensation points at.
+
+Because a condensation is a model output, it is subject to the untrusted-output rules below and to
+invariant 14: a condensation that fails validation is discarded and the raw span stays in context.
+
+Promotion between tiers is driven by a measured budget, not a message count, and is designed so the
+transition is gradual rather than a cliff:
+
+- each tier has an explicit token budget, measured rather than estimated from message counts;
+- condensation is precomputed in the background at a fraction of the budget, so the common case is
+  already prepared when the budget is reached;
+- a hard ceiling above the budget forces condensation synchronously when background work has fallen
+  behind, so the context cannot silently overrun;
+- the interval, budget, ceiling, and whether a given condensation was precomputed or forced are all
+  observable, because a forced condensation is a latency and quality event worth seeing.
+
+Caller-supplied size hints for opaque parts may inform a budget but never determine it. A hint is
+untrusted input, and a budget decision made from an unverified count is a denial-of-service surface.
+
+The same pass that condenses also extracts durable facts, rather than paying for a second reading of
+the same records. Extraction is schema-bound, and an extracted fact carries the lineage of the
+records it came from like any other tertiary object. Extracted state is stored as state and injected
+as state; it does not rewrite the stable prefix of a prompt, so a volatile fact cannot invalidate a
+cached prefix on every turn.
+
+Durable state and transcripts have different lifetimes and different scopes:
+
+- transcript scope is the conversation: the ordered records of one exchange;
+- durable scope is the principal: facts that outlive any single conversation.
+
+Delegation follows from that split. A delegated agent receives a fresh conversation identity and a
+derived, deterministic principal identity, so it inherits durable facts without inheriting the
+parent's transcript, and its own records are attributable to the delegation rather than merged into
+the parent's history. Source-derived state remains fenced to its repository/ref/commit/generation
+regardless of scope; the split governs conversational state, never source authority.
+
+Structured durable state is schema-validated and updated by field-level merge. Whole-document
+replacement requires a writer to restate everything it did not intend to change, which silently
+discards concurrent updates from another session or delegate.
+
 ## Continuous refresh
 
 Events reduce latency and reconciliation provides correctness:
@@ -154,6 +211,12 @@ Events reduce latency and reconciliation provides correctness:
 Health exposes observed and published revision, lag, last check, last success, failure reason, and
 freshness objective. Retrieval returns generation and freshness metadata and fails closed when policy
 does not allow stale evidence.
+
+Elapsed time is part of that metadata, not only source revision. When a session resumes after a
+meaningful pause, the gap is marked explicitly in the context rather than left implicit, because
+retained context reads as continuous no matter how long ago it was written, and a reader that cannot
+see the gap will treat a stale assumption as a current one. This is invariant 9 at the context
+layer: the passage of time is evidence about freshness, and suppressing it is a silent staleness.
 
 ## Incremental publication
 
@@ -192,14 +255,18 @@ Query execution is ordered so that access and source scope constrain everything 
 2. assemble a bounded candidate union from exact lexical retrieval, any installed learned-sparse
    leg, dense nearest neighbours, and typed structural graph expansion, under a per-leg candidate
    budget and a total union ceiling, both configured rather than implied;
-3. rescore that union with the provider's latent signals where available;
-4. rerank a small final set with the provider's cross-encoder;
-5. apply deterministic authority, provenance deduplication, and freshness policy;
-6. escalate every surviving candidate to its primary version and exact anchors for presentation.
+3. widen each match to a bounded window of its neighbours — adjacent chunks of the same document,
+   adjacent records of the same exchange — because a match is usually a fragment of the thing the
+   caller needed, and adjacency is the sequential counterpart of typed graph expansion;
+4. rescore that union with the provider's latent signals where available;
+5. rerank a small final set with the provider's cross-encoder;
+6. apply deterministic authority, provenance deduplication, and freshness policy;
+7. escalate every surviving candidate to its primary version and exact anchors for presentation.
 
-Steps 3 and 4 are optional and reorder only within the union produced by steps 1 and 2. They cannot
+Steps 4 and 5 are optional and reorder only within the union produced by steps 1 to 3. They cannot
 add a candidate that access, snapshot, or freshness policy excluded, and they cannot reorder around
-step 5, which always runs last and is independent of any learned signal.
+step 6, which always runs last and is independent of any learned signal. Adjacency in step 3 widens
+within the same document or exchange only; it is not a path to a record the caller's scope excluded.
 
 The reranking input is an evidence packet, not raw text: original document identity, secondary
 anchors, the graph path that produced the candidate, evidence tier, authority, valid and observed
@@ -211,7 +278,7 @@ exhaustive. A ranking stage that receives fewer candidates than it asked for is 
 a caller cannot see that from the results alone.
 
 Exact lexical retrieval is always present in the union and is never gated on provider health. When
-the provider is absent, unhealthy, or incompatible, steps 3 and 4 are skipped and the deterministic
+the provider is absent, unhealthy, or incompatible, steps 4 and 5 are skipped and the deterministic
 path serves the query with its quality recorded, not silently degraded. The same obligation applies
 to the runtime's own context injectors: losing source context because no checkout resolved, or
 because no generation is current, is a degradation and is logged as one. It is never allowed to look
