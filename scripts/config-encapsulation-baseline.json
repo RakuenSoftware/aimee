@@ -1066,7 +1066,7 @@
       "loads": 0
     },
     "src/tests/test_server_dispatch.c": {
-      "decls": 5,
+      "decls": 7,
       "loads": 2
     },
     "src/tests/test_server_jobs_aux.c": {
@@ -1119,7 +1119,7 @@
     }
   },
   "totals": {
-    "decls": 959,
+    "decls": 961,
     "files": 279,
     "loads": 507
   }
