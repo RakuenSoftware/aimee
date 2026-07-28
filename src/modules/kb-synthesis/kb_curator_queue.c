@@ -204,14 +204,14 @@ void kb_curator_queue_counts(kb_curator_queue_counts_t *out)
 
    char err[CQ_ERRBUF] = "";
    /* extract_doc pending/done from kb_async_jobs (one scan). */
-   /* The failing count is deliberately "has a recorded error", not "status =
-    * failed": a job that has burned its attempts is in neither 'pending' nor
-    * 'done', so counting only those two made a curator that failed EVERY job
-    * indistinguishable from one with nothing to do. */
+   /* A terminally failed job is neither 'pending' nor 'done', so counting only
+    * those two made a curator that failed EVERY job indistinguishable from one
+    * with nothing to do. Do not key this on last_error alone: successful jobs do
+    * not currently clear a prior retry error, and would warn forever. */
    static const char *sql_doc = "SELECT"
                                 " COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),0),"
                                 " COALESCE(SUM(CASE WHEN status='done' THEN 1 ELSE 0 END),0),"
-                                " COALESCE(SUM(CASE WHEN last_error <> '' THEN 1 ELSE 0 END),0)"
+                                " COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),0)"
                                 " FROM kb_async_jobs WHERE kind='extract_doc'";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql_doc, err, sizeof(err));
    if (st)
@@ -229,11 +229,11 @@ void kb_curator_queue_counts(kb_curator_queue_counts_t *out)
    static const char *sql_code = "SELECT"
                                  " COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),0),"
                                  " COALESCE(SUM(CASE WHEN status='done' THEN 1 ELSE 0 END),0),"
-                                 " COALESCE(SUM(CASE WHEN last_error <> '' THEN 1 ELSE 0 END),0),"
+                                 " COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),0),"
                                  /* One sample error, so the operator is told WHY rather than just
                                   * how many. The message that mattered here was a connection
                                   * refusal naming an address nobody recognised. */
-                                 " COALESCE(MAX(last_error),'')"
+                                 " COALESCE(MAX(CASE WHEN status='failed' THEN last_error ELSE '' END),'')"
                                  " FROM kb_code_unit_jobs";
    st = aimee_pg_prepare(conn, sql_code, err, sizeof(err));
    if (st)
