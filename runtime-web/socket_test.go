@@ -1,0 +1,60 @@
+package main
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+	"testing"
+)
+
+// A dispatch error the server classified must map onto the right HTTP status.
+//
+// Everything used to become 502 Bad Gateway, so `agent add` with no arguments
+// answered "502: usage: agent add <name> <endpoint> <model>" — a caller's
+// mistake reported as an upstream failure, which misleads log readers and
+// invites clients to retry a request that can never succeed.
+func TestRPCErrorStatusMapsClassifiedFaults(t *testing.T) {
+	mk := func(body string) error {
+		var msg map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(body), &msg); err != nil {
+			t.Fatalf("bad fixture %s: %v", body, err)
+		}
+		return rpcError(msg)
+	}
+
+	cases := []struct {
+		name string
+		body string
+		want int
+	}{
+		{"invalid_argument", `{"status":"error","kind":"invalid_argument","message":"usage: agent add"}`, http.StatusBadRequest},
+		{"not_found", `{"status":"error","kind":"not_found","message":"no such agent"}`, http.StatusNotFound},
+		{"permission_denied", `{"status":"error","kind":"permission_denied","message":"nope"}`, http.StatusForbidden},
+		{"unavailable", `{"status":"error","kind":"unavailable","message":"kb down"}`, http.StatusServiceUnavailable},
+		// Unclassified keeps the old behaviour ON PURPOSE: most of the server's
+		// error sites are unaudited, and guessing would mislabel real server
+		// faults as the caller's fault.
+		{"unclassified stays 502", `{"status":"error","message":"something broke"}`, http.StatusBadGateway},
+		{"unknown kind stays 502", `{"status":"error","kind":"wat","message":"x"}`, http.StatusBadGateway},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := mk(tc.body)
+			if err == nil {
+				t.Fatalf("expected an error for %s", tc.body)
+			}
+			if got := rpcErrorStatus(err); got != tc.want {
+				t.Fatalf("status = %d, want %d (%s)", got, tc.want, tc.body)
+			}
+			// The message must survive classification unchanged.
+			if !strings.Contains(err.Error(), "server: ") {
+				t.Fatalf("message lost its prefix: %q", err.Error())
+			}
+		})
+	}
+
+	// A success envelope is still not an error.
+	if err := mk(`{"status":"ok"}`); err != nil {
+		t.Fatalf("ok envelope produced an error: %v", err)
+	}
+}

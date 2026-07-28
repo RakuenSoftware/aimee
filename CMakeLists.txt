@@ -889,6 +889,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server_insights.c
     ${AIMEE_SRC_DIR}/server_eval.c
     ${AIMEE_SRC_DIR}/server/server_api_status.c
+    server/server_error_kind.c
     ${AIMEE_SRC_DIR}/server/server_seed_config.c
     ${AIMEE_SRC_DIR}/server/server_auth.c
     ${AIMEE_SRC_DIR}/server/server_hooks.c
