@@ -45,10 +45,6 @@
       "decls": 4,
       "loads": 4
     },
-    "src/cmd_mcp.c": {
-      "decls": 2,
-      "loads": 2
-    },
     "src/cmd_memory.c": {
       "decls": 1,
       "loads": 1
@@ -717,10 +713,6 @@
       "decls": 2,
       "loads": 2
     },
-    "src/server/server_mcp_tools.c": {
-      "decls": 2,
-      "loads": 2
-    },
     "src/server/server_mgmt_read_source.c": {
       "decls": 1,
       "loads": 1
@@ -752,10 +744,6 @@
     "src/server/server_workflow_api.c": {
       "decls": 1,
       "loads": 1
-    },
-    "src/server/trigger_scheduler.c": {
-      "decls": 4,
-      "loads": 3
     },
     "src/server/web_search.c": {
       "decls": 2,
@@ -1075,8 +1063,8 @@
     }
   },
   "totals": {
-    "decls": 939,
-    "files": 268,
-    "loads": 485
+    "decls": 931,
+    "files": 265,
+    "loads": 478
   }
 }

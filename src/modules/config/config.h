@@ -2284,6 +2284,14 @@ const char *config_embedding_command_current(const char *requested);
  * above, which never returns empty. */
 const char *config_embedding_command_field(void);
 
+/* Copy one element of a config array out. For callers that pass the whole
+ * element onward (scheduler callbacks, the cron executor) rather than reading a
+ * single member. The element types are shared domain types; config_t is not.
+ * Returns 0 on success, -1 on a bad index or unreadable config. */
+int config_cron_job_at(int index, cron_job_t *out);
+int config_trigger_rule_at(int index, trigger_rule_t *out);
+int config_mcp_client_at(int index, config_mcp_client_t *out);
+
 /* Opaque boolean accessors — read one flag without naming config_t.
  * Fail closed (0) when the config cannot be loaded. */
 int config_audit_worm_enabled(void);

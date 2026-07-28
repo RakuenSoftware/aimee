@@ -73,11 +73,9 @@ static void mcp_cmd_audit(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)argc;
    (void)argv;
-   config_t cfg;
-   config_load(&cfg);
-   if (db1_init(cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
    {
-      fprintf(stderr, "mcp audit: db1_init failed for %s\n", cfg.db1_path);
+      fprintf(stderr, "mcp audit: db1_init failed for %s\n", config_db1_path());
       return;
    }
 
@@ -86,9 +84,12 @@ static void mcp_cmd_audit(app_ctx_t *ctx, int argc, char **argv)
       printf("%-20s %-8s %-36s %-12s %-20s %s\n", "client", "eco", "package", "verdict",
              "checked_at", "advisories");
 
-   for (int i = 0; i < cfg.mcp_client_count; i++)
+   for (int i = 0; i < config_mcp_client_count(); i++)
    {
-      const config_mcp_client_t *client = &cfg.mcp_clients[i];
+      config_mcp_client_t client_buf;
+      if (config_mcp_client_at(i, &client_buf) != 0)
+         continue;
+      config_mcp_client_t *client = &client_buf;
       osv_target_t target;
       if (client_target(client, &target) != 0)
       {
@@ -117,18 +118,19 @@ static void mcp_cmd_recheck(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)ctx;
    const char *filter = argc >= 1 ? argv[0] : NULL;
-   config_t cfg;
-   config_load(&cfg);
-   if (db1_init(cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
    {
-      fprintf(stderr, "mcp recheck: db1_init failed for %s\n", cfg.db1_path);
+      fprintf(stderr, "mcp recheck: db1_init failed for %s\n", config_db1_path());
       return;
    }
 
    int checked = 0;
-   for (int i = 0; i < cfg.mcp_client_count; i++)
+   for (int i = 0; i < config_mcp_client_count(); i++)
    {
-      config_mcp_client_t *client = &cfg.mcp_clients[i];
+      config_mcp_client_t client_buf;
+      if (config_mcp_client_at(i, &client_buf) != 0)
+         continue;
+      config_mcp_client_t *client = &client_buf;
       if (filter && strcmp(filter, client->name) != 0)
          continue;
       osv_target_t target;
