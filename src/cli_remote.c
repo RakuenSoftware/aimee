@@ -148,7 +148,8 @@ static int read_remote_conf(char *url, size_t url_sz, char *token, size_t token_
 }
 
 /* remote_enroll is defined below; forward-declare for the load-time auto-enroll. */
-static int remote_enroll(const char *url, char *out, size_t out_sz, int json_output);
+static int remote_enroll(const char *url, const char *current_token, char *out, size_t out_sz,
+                         int json_output);
 static int remote_enroll_client_cert(int quiet);
 static int g_remote_mtls_enrolled;
 
@@ -172,7 +173,7 @@ void cli_remote_load_persisted(void)
    if (strcmp(token, AIMEE_BOOTSTRAP_BEARER) == 0)
    {
       char strong[256];
-      remote_enroll(url, strong, sizeof(strong), 1 /* quiet */);
+      remote_enroll(url, token, strong, sizeof(strong), 1 /* quiet */);
    }
    else if (token[0])
       remote_enroll_client_cert(1 /* quiet; idempotent when already installed */);
@@ -398,11 +399,29 @@ static int remote_pin_cert(const char *url, int json_output)
  * it for the rest of this process. Writes the new token into |out|. Returns 0 on
  * success, -1 otherwise. Non-fatal to callers: on failure the prior token stays
  * in place on disk and in effect. */
-static int remote_enroll(const char *url, char *out, size_t out_sz, int json_output)
+static int remote_enroll(const char *url, const char *current_token, char *out, size_t out_sz,
+                         int json_output)
 {
    g_remote_mtls_enrolled = 0;
    int st = 0;
-   char *body = aimee_client_request("POST", "/v1/api/rotate_bearer", "{}", &st);
+   /* Holding the bootstrap, ROTATE: the shared image-seeded default must stop
+    * working the moment a real credential exists. Holding a real credential,
+    * ENROL: minting a token for one more client must not revoke the token every
+    * other client is already using. Pairing used to rotate in both cases, so the
+    * second client to pair silently locked out the first. */
+   int is_bootstrap = current_token && strcmp(current_token, AIMEE_BOOTSTRAP_BEARER) == 0;
+   const char *endpoint = is_bootstrap ? "/v1/api/rotate_bearer" : "/v1/api/enroll_bearer";
+   char *body = aimee_client_request("POST", endpoint, "{}", &st);
+   if ((!body || st == 404 || st == 400) && !is_bootstrap)
+   {
+      /* Older server without the additive route: fall back to rotation so
+       * enrolment still succeeds, but say plainly what it costs. */
+      free(body);
+      if (!json_output)
+         fprintf(stderr, "  enroll: server has no additive enrollment; falling back to rotation — "
+                         "this REVOKES\n         every other paired client.\n");
+      body = aimee_client_request("POST", "/v1/api/rotate_bearer", "{}", &st);
+   }
    if (!body || st != 200)
    {
       if (st == 401 && !json_output)
@@ -501,7 +520,7 @@ static int remote_set(const char *url, const char *token, int json_output)
    char strong_token[256] = "";
    if (verified && token && strcmp(token, AIMEE_BOOTSTRAP_BEARER) == 0)
    {
-      if (remote_enroll(url, strong_token, sizeof(strong_token), json_output) == 0)
+      if (remote_enroll(url, token, strong_token, sizeof(strong_token), json_output) == 0)
       {
          enrolled = 1;
          mtls_enrolled = g_remote_mtls_enrolled;
@@ -652,7 +671,7 @@ static int remote_enroll_cmd(int json_output)
    }
    aimee_client_set_remote(url, token[0] ? token : NULL);
    char strong[256] = "";
-   if (remote_enroll(url, strong, sizeof(strong), json_output) != 0)
+   if (remote_enroll(url, token, strong, sizeof(strong), json_output) != 0)
    {
       if (!json_output)
          fprintf(stderr, "aimee: enrollment failed (is the remote reachable and the current token "

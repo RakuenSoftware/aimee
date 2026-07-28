@@ -1966,6 +1966,7 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/api/status", NULL, RM_EXACT, "api.status", 0, rh_dispatch_op},
     {"POST", "/v1/api/enable", NULL, RM_EXACT, "api.enable", 0, rh_dispatch_op},
     {"POST", "/v1/api/rotate_bearer", NULL, RM_EXACT, "api.rotate_bearer", 0, rh_dispatch_op},
+    {"POST", "/v1/api/enroll_bearer", NULL, RM_EXACT, "api.enroll_bearer", 0, rh_dispatch_op},
     {"POST", "/v1/api/disable", NULL, RM_EXACT, "api.disable", 0, rh_dispatch_op},
     /* dashboard/insights/identity/dogfood/lsp op-parity wave 4; read views are GET. */
     {"GET", "/v1/dashboard/all", NULL, RM_EXACT, "dashboard.all", 0, rh_dispatch_op},
