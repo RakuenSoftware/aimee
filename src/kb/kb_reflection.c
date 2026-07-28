@@ -113,6 +113,12 @@ static int run_synthesis_pass(const config_t *cfg, const db2_artifact_proposed_t
       char *req_str = cJSON_PrintUnformatted(req);
       cJSON_Delete(req);
 
+      /* Graph enrichment above may acquire a pooled DB2 connection. Reflection
+       * synthesis can then spend up to the provider timeout waiting on each LLM
+       * attempt; return that idle lease before network work so the scheduler
+       * cannot shrink the bounded pool. Later durable writes re-acquire lazily. */
+      db2_lease_release_idle();
+
       /* Route through the shared curator LLM path: a configured Tier-B provider
        * (provider_client) if present, else the legacy kb_synthesize_command
        * sidecar. A NULL return is a fail — skip this attempt (fail-closed: no
@@ -302,6 +308,14 @@ static void run_reflection_pass(const config_t *cfg)
 
 static kb_reflection_ctx_t *g_rctx = NULL;
 
+static void run_reflection_pass_releasing_lease(const config_t *cfg)
+{
+   run_reflection_pass(cfg);
+   /* A pass acquires DB2 even when there is no eligible work. Return the lazy
+    * lease before the scheduler's long half-window backoff. */
+   db2_lease_release_idle();
+}
+
 static void *reflection_thread_main(void *arg)
 {
    kb_reflection_ctx_t *ctx = (kb_reflection_ctx_t *)arg;
@@ -350,7 +364,7 @@ static void *reflection_thread_main(void *arg)
       aimee_log(LOG_INFO, "kb.reflection", "idle=%lds >= threshold=%lds; firing reflection pass",
                 idle_secs, idle_threshold);
       kb_background_set("reflection", "idle=%lds threshold=%lds", idle_secs, idle_threshold);
-      run_reflection_pass(&cfg);
+      run_reflection_pass_releasing_lease(&cfg);
       kb_background_clear("reflection");
       last_fired = now;
 
