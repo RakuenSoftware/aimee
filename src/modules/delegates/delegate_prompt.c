@@ -1572,11 +1572,28 @@ char *delegate_inject_code_context(const char *prompt)
 
    delegate_current_source_t source;
    if (delegate_current_source_resolve(NULL, &source) != 0)
+   {
+      /* Losing source context is a degradation, not an empty result: say so
+       * rather than letting the delegate run blind and look merely unlucky.
+       * Detached HEAD lands here, because current-checkout routing fails
+       * closed rather than substituting the default branch. */
+      aimee_log(LOG_WARN, "delegate",
+                "code context skipped: no attached checkout resolved (detached HEAD or "
+                "non-repository cwd); delegate runs without indexed code context");
       return NULL;
+   }
 
    code_search_hit_t hits[6];
    int n = kb_client_index_code_search_current(source.repository_key, source.root, query, hits, 6);
-   if (n <= 0)
+   if (n < 0)
+   {
+      aimee_log(LOG_WARN, "delegate",
+                "code context skipped: index search failed for %s (kb unreachable or generation "
+                "not current); delegate runs without indexed code context",
+                source.repository_key[0] ? source.repository_key : "?");
+      return NULL;
+   }
+   if (n == 0)
       return NULL;
 
    char buf[2048];
@@ -1680,11 +1697,24 @@ char *delegate_inject_graph_context(const char *prompt, const char *cwd)
 
    delegate_current_source_t source;
    if (delegate_current_source_resolve(cwd, &source) != 0)
+   {
+      aimee_log(LOG_WARN, "delegate",
+                "structural context skipped: no attached checkout resolved (detached HEAD or "
+                "non-repository cwd); delegate runs without the code graph");
       return NULL;
+   }
    kb_client_index_scan_result_t scan;
+   memset(&scan, 0, sizeof(scan));
    if (kb_client_index_scan_current(source.repository_key, source.root, 0, &scan) != 0 ||
        !scan.physical_project[0])
+   {
+      aimee_log(LOG_WARN, "delegate",
+                "structural context skipped: no current generation for %s%s%s; delegate runs "
+                "without the code graph",
+                source.repository_key[0] ? source.repository_key : "?",
+                scan.reason[0] ? ": " : "", scan.reason);
       return NULL;
+   }
 
    char buf[4096];
    int pos = 0, rem = (int)sizeof(buf);
