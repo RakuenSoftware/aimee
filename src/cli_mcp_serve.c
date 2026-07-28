@@ -19,7 +19,7 @@
 
 #define MCP_LINE_MAX         65536
 #define MCP_PROTOCOL_VERSION "2024-11-05"
-#define MCP_VERSION          "0.2.0"
+#define MCP_VERSION          AIMEE_VERSION
 
 #define DEFAULT_TIMEOUT_MS  30000
 #define DELEGATE_TIMEOUT_MS 300000
