@@ -327,12 +327,7 @@ int server_send_response(server_conn_t *conn, cJSON *resp)
 
 int server_send_error(server_conn_t *conn, const char *message, const char *request_id)
 {
-   cJSON *resp = cJSON_CreateObject();
-   cJSON_AddStringToObject(resp, "status", "error");
-   cJSON_AddStringToObject(resp, "message", message);
-   if (request_id)
-      cJSON_AddStringToObject(resp, "request_id", request_id);
-   return server_send_ok(conn, resp);
+   return server_send_error_kind(conn, NULL, message, request_id);
 }
 
 /* --- Method handlers --- */
