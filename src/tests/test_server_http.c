@@ -786,6 +786,63 @@ int main(void)
       server_http_set_notes_search_handler(NULL);
    }
 
+   /* --- server_http_authorize_multi: pairing a client must not evict one ---
+    *
+    * Enrolling a client used to be implemented AS rotating the single global
+    * bearer, so the second client to pair silently invalidated the first and
+    * every already-paired client started failing at the same instant. The whole
+    * point of the extra set is that both credentials keep working. */
+   {
+      const char *primary = "primary-token-aaaaaaaaaaaaaaaaaaaaaaaa";
+      const char *e1 = "enrolled-one-bbbbbbbbbbbbbbbbbbbbbbbbbb";
+      const char *e2 = "enrolled-two-cccccccccccccccccccccccccc";
+      const char *extra[] = {e1, e2};
+
+      char hdr[128];
+      snprintf(hdr, sizeof(hdr), "Bearer %s", primary);
+      assert(server_http_authorize_multi(1, primary, extra, 2, hdr, NULL, 0) == 0);
+
+      /* ...and BOTH enrolled clients still work — the property that was missing */
+      snprintf(hdr, sizeof(hdr), "Bearer %s", e1);
+      assert(server_http_authorize_multi(1, primary, extra, 2, hdr, NULL, 0) == 0);
+      snprintf(hdr, sizeof(hdr), "Bearer %s", e2);
+      assert(server_http_authorize_multi(1, primary, extra, 2, hdr, NULL, 0) == 0);
+
+      /* An unrelated token is still refused: the set is additive, not permissive. */
+      assert(server_http_authorize_multi(1, primary, extra, 2, "Bearer nope", NULL, 0) == 401);
+      assert(server_http_authorize_multi(1, primary, extra, 2, NULL, NULL, 0) == 401);
+
+      /* x-api-key honours the extra set exactly as Authorization does. */
+      assert(server_http_authorize_multi(1, primary, extra, 2, NULL, e2, 0) == 0);
+      assert(server_http_authorize_multi(1, primary, extra, 2, NULL, "nope", 0) == 401);
+
+      /* A near-miss must not pass: no prefix/substring acceptance. */
+      snprintf(hdr, sizeof(hdr), "Bearer %.*s", 10, e1);
+      assert(server_http_authorize_multi(1, primary, extra, 2, hdr, NULL, 0) == 401);
+
+      /* With no extras it must behave exactly like the single-token function. */
+      assert(server_http_authorize_multi(1, primary, NULL, 0, "Bearer nope", NULL, 0) ==
+             server_http_authorize(1, primary, "Bearer nope", NULL, 0));
+      snprintf(hdr, sizeof(hdr), "Bearer %s", primary);
+      assert(server_http_authorize_multi(1, primary, NULL, 0, hdr, NULL, 0) == 0);
+
+      /* UDS stays unauthenticated regardless of the extra set. */
+      assert(server_http_authorize_multi(0, primary, extra, 2, "Bearer nope", NULL, 0) == 0);
+
+      /* A 503 (no bearer configured on TCP) is a server misconfiguration that
+       * extra tokens must not paper over. */
+      assert(server_http_authorize_multi(1, "", extra, 2, "Bearer nope", NULL, 0) == 503);
+
+      /* Empty slots in the set are skipped, not treated as a wildcard match on
+       * an empty presented token. */
+      const char *sparse[] = {"", e1, ""};
+      assert(server_http_authorize_multi(1, primary, sparse, 3, "Bearer ", NULL, 0) == 401);
+      snprintf(hdr, sizeof(hdr), "Bearer %s", e1);
+      assert(server_http_authorize_multi(1, primary, sparse, 3, hdr, NULL, 0) == 0);
+
+      printf("  PASS: authorize_multi accepts every enrolled client, rejects the rest\n");
+   }
+
    /* --- server_http_auth_error_body: the 401 must carry a way out ---
     *
     * A bearer rotation invalidates every already-paired client at once, and the

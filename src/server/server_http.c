@@ -1656,8 +1656,8 @@ void handle_conn(int fd, int is_tcp, int is_management)
       anthropic_http_capture_request_headers(buf); /* parity: per-request anthropic-* hdrs */
       int az = transport_authenticated
                    ? 0
-                   : server_http_authorize(is_tcp, g_bearer, has_auth ? auth : NULL,
-                                           has_api_key ? api_key : NULL, has_skey);
+                   : server_http_authorize_enrolled(is_tcp, g_bearer, has_auth ? auth : NULL,
+                                                    has_api_key ? api_key : NULL, has_skey);
       if (az != 0)
       {
          const char *msg = server_http_auth_error_body(az);

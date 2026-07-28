@@ -258,6 +258,63 @@ int handle_api_rotate_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return rc;
 }
 
+/* api.enroll_bearer: mint a fresh bearer and ADD it to the accepted set, leaving
+ * the primary and every previously-enrolled token working.
+ *
+ * This exists because pairing a client used to be done with rotate_bearer, which
+ * replaces the single global bearer — so the second client to enrol silently
+ * evicted the first, and every already-paired client began failing at the same
+ * instant. Pairing is additive; revoking is rotate_bearer's job and stays
+ * separate, explicit, and unchanged.
+ *
+ * Fails closed at the cap rather than evicting the oldest: silently dropping a
+ * credential someone is still using is the exact failure this replaces.
+ * CAP_SESSION_ADMIN-gated, like api.enable and api.rotate_bearer. */
+int handle_api_enroll_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+
+   config_t cfg;
+   config_load(&cfg);
+
+   if (cfg.server_api_bearer_token[0] == '\0')
+      return handle_api_error(conn, "no primary bearer configured; run api.enable first");
+   if (cfg.server_api_bearer_extra_count >= AIMEE_API_BEARER_EXTRA_MAX)
+      return handle_api_error(conn,
+                              "enrolled bearer limit reached; revoke an unused client with "
+                              "api.rotate_bearer (which resets all) before enrolling another");
+
+   char minted[256];
+   if (platform_random_hex(minted, 64) != 0)
+      return handle_api_error(conn, "failed to generate bearer token");
+
+   int slot = cfg.server_api_bearer_extra_count;
+   snprintf(cfg.server_api_bearer_extra[slot], sizeof(cfg.server_api_bearer_extra[0]), "%s",
+            minted);
+   cfg.server_api_bearer_extra_count = slot + 1;
+
+   if (config_save(&cfg) != 0)
+      return handle_api_error(conn, "failed to persist aimee.api config");
+
+   /* Hot-swap so the new token authorizes immediately, on the same threading
+    * contract as server_http_set_bearer: this handler runs on the listener
+    * thread that reads the set for authorization. */
+   const char *extra[AIMEE_API_BEARER_EXTRA_MAX];
+   for (int i = 0; i < cfg.server_api_bearer_extra_count; i++)
+      extra[i] = cfg.server_api_bearer_extra[i];
+   server_http_set_bearer_extra(extra, cfg.server_api_bearer_extra_count);
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "bearer_token", minted);
+   cJSON_AddNumberToObject(resp, "enrolled_count", cfg.server_api_bearer_extra_count);
+   cJSON_AddNumberToObject(resp, "enrolled_max", AIMEE_API_BEARER_EXTRA_MAX);
+   int rc = server_send_response(conn, resp);
+   cJSON_Delete(resp);
+   return rc;
+}
+
 /* api.disable: turn the loopback /v1 listener off (clears aimee.api.http_port).
  * The bearer token and rate limit are left in place so a later `enable` reuses
  * them. Takes effect on the next server restart. */

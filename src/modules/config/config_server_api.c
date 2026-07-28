@@ -48,6 +48,25 @@ void config_parse_server_api(config_t *cfg, const cJSON *root)
             strncpy(cfg->server_api_bearer_token, item->valuestring,
                     sizeof(cfg->server_api_bearer_token) - 1);
 
+         /* Additional accepted bearers. Pairing a new client must not revoke
+          * the credential every other client is already using. */
+         item = cJSON_GetObjectItemCaseSensitive(api, "bearer_tokens_extra");
+         if (cJSON_IsArray(item))
+         {
+            cfg->server_api_bearer_extra_count = 0;
+            cJSON *tok = NULL;
+            cJSON_ArrayForEach(tok, item)
+            {
+               if (cfg->server_api_bearer_extra_count >= AIMEE_API_BEARER_EXTRA_MAX)
+                  break;
+               if (!cJSON_IsString(tok) || !tok->valuestring || !tok->valuestring[0])
+                  continue;
+               snprintf(cfg->server_api_bearer_extra[cfg->server_api_bearer_extra_count],
+                        sizeof(cfg->server_api_bearer_extra[0]), "%s", tok->valuestring);
+               cfg->server_api_bearer_extra_count++;
+            }
+         }
+
          item = cJSON_GetObjectItemCaseSensitive(api, "rate_limit_per_min");
          if (cJSON_IsNumber(item))
             cfg->server_api_rate_limit_per_min = (int)item->valuedouble;
