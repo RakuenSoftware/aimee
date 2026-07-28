@@ -1166,3 +1166,38 @@ int config_compact_enabled(void)
    config_field_read(offsetof(config_t, compact_enabled), sizeof(v), &v);
    return v;
 }
+
+int config_compact_threshold(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, compact_threshold), sizeof(v), &v);
+   return v;
+}
+
+int config_compact_head_bytes(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, compact_head_bytes), sizeof(v), &v);
+   return v;
+}
+
+int config_compact_tail_bytes(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, compact_tail_bytes), sizeof(v), &v);
+   return v;
+}
+
+int config_compact_per_tool_count(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, compact_per_tool_count), sizeof(v), &v);
+   return v;
+}
+
+int config_coord_closet_enabled(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, coord_closet_enabled), sizeof(v), &v);
+   return v;
+}

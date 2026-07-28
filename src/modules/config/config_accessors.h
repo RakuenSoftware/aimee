@@ -508,4 +508,22 @@ const char *config_roundtable_default(void);
 const char *config_roundtable_pipeline_done_bar(void);
 const char *config_context_engine(void);
 
+/* char[][] fields: one row per call. Returns "" for an out-of-range
+ * index, so a caller that loops past the count gets empty rather than
+ * reading adjacent memory. Same thread-local lifetime as above. */
+const char *config_workspaces(int index);
+const char *config_workspace_providers(int index);
+const char *config_workspace_vcs_remote(int index);
+const char *config_workspace_vcs_head(int index);
+const char *config_workspace_sandbox_image(int index);
+const char *config_charter_safety_axioms(int index);
+const char *config_charter_hard_constraints(int index);
+const char *config_charter_values(int index);
+const char *config_charter_tone_boundaries(int index);
+const char *config_compact_per_tool(int index);
+const char *config_mcp_osv_allow(int index);
+const char *config_computer_use_allowed_domains(int index);
+const char *config_ensemble_reference_models(int index);
+const char *config_ensemble_reference_personas(int index);
+
 #endif /* DEC_CONFIG_ACCESSORS_H */

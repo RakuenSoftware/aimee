@@ -18,41 +18,6 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
-int config_compact_threshold(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, compact_threshold), sizeof(v), &v);
-   return v;
-}
-
-int config_compact_head_bytes(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, compact_head_bytes), sizeof(v), &v);
-   return v;
-}
-
-int config_compact_tail_bytes(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, compact_tail_bytes), sizeof(v), &v);
-   return v;
-}
-
-int config_compact_per_tool_count(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, compact_per_tool_count), sizeof(v), &v);
-   return v;
-}
-
-int config_coord_closet_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, coord_closet_enabled), sizeof(v), &v);
-   return v;
-}
-
 int config_coord_closet_budget_bytes(void)
 {
    int v = 0;
@@ -1163,5 +1128,75 @@ int config_kb_curator_cross_repo_m(void)
 {
    int v = 0;
    config_field_read(offsetof(config_t, kb_curator_cross_repo_m), sizeof(v), &v);
+   return v;
+}
+
+int config_kb_curator_cross_repo_p_pct(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, kb_curator_cross_repo_p_pct), sizeof(v), &v);
+   return v;
+}
+
+int config_kb_curator_cross_repo_len_min(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, kb_curator_cross_repo_len_min), sizeof(v), &v);
+   return v;
+}
+
+int config_kb_curator_cross_repo_caller_collision_c(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, kb_curator_cross_repo_caller_collision_c), sizeof(v), &v);
+   return v;
+}
+
+int config_kb_curator_cross_repo_max_candidates(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, kb_curator_cross_repo_max_candidates), sizeof(v), &v);
+   return v;
+}
+
+int config_kb_curator_cross_repo_query_timeout_ms(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, kb_curator_cross_repo_query_timeout_ms), sizeof(v), &v);
+   return v;
+}
+
+int config_kb_curator_cross_repo_review_queue_max(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, kb_curator_cross_repo_review_queue_max), sizeof(v), &v);
+   return v;
+}
+
+int config_kb_evidence_embed_enabled(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, kb_evidence_embed_enabled), sizeof(v), &v);
+   return v;
+}
+
+int config_kb_evidence_embed_batch(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, kb_evidence_embed_batch), sizeof(v), &v);
+   return v;
+}
+
+int config_skills_review_enabled(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, skills_review_enabled), sizeof(v), &v);
+   return v;
+}
+
+int config_skills_review_nudge_interval(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, skills_review_nudge_interval), sizeof(v), &v);
    return v;
 }

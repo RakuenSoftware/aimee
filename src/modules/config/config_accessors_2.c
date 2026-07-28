@@ -18,76 +18,6 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
-int config_kb_curator_cross_repo_p_pct(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_cross_repo_p_pct), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_cross_repo_len_min(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_cross_repo_len_min), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_cross_repo_caller_collision_c(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_cross_repo_caller_collision_c), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_cross_repo_max_candidates(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_cross_repo_max_candidates), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_cross_repo_query_timeout_ms(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_cross_repo_query_timeout_ms), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_cross_repo_review_queue_max(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_cross_repo_review_queue_max), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_evidence_embed_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_evidence_embed_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_evidence_embed_batch(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_evidence_embed_batch), sizeof(v), &v);
-   return v;
-}
-
-int config_skills_review_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, skills_review_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_skills_review_nudge_interval(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, skills_review_nudge_interval), sizeof(v), &v);
-   return v;
-}
-
 int config_skills_stale_after_days(void)
 {
    int v = 0;
@@ -1404,6 +1334,174 @@ const char *config_context_engine(void)
    static _Thread_local char buf[64];
    buf[0] = 0;
    config_field_read(offsetof(config_t, context_engine), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_workspaces(int index)
+{
+   static _Thread_local char buf[MAX_PATH_LEN];
+   buf[0] = 0;
+   if (index < 0 || index >= (64))
+      return buf;
+   config_field_read(offsetof(config_t, workspaces) + (size_t)index * sizeof(buf), sizeof(buf),
+                     buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_workspace_providers(int index)
+{
+   static _Thread_local char buf[16];
+   buf[0] = 0;
+   if (index < 0 || index >= (64))
+      return buf;
+   config_field_read(offsetof(config_t, workspace_providers) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_workspace_vcs_remote(int index)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   if (index < 0 || index >= (64))
+      return buf;
+   config_field_read(offsetof(config_t, workspace_vcs_remote) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_workspace_vcs_head(int index)
+{
+   static _Thread_local char buf[64];
+   buf[0] = 0;
+   if (index < 0 || index >= (64))
+      return buf;
+   config_field_read(offsetof(config_t, workspace_vcs_head) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_workspace_sandbox_image(int index)
+{
+   static _Thread_local char buf[256];
+   buf[0] = 0;
+   if (index < 0 || index >= (64))
+      return buf;
+   config_field_read(offsetof(config_t, workspace_sandbox_image) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_charter_safety_axioms(int index)
+{
+   static _Thread_local char buf[CONFIG_CHARTER_ENTRY_LEN];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_CHARTER_MAX_ENTRIES))
+      return buf;
+   config_field_read(offsetof(config_t, charter_safety_axioms) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_charter_hard_constraints(int index)
+{
+   static _Thread_local char buf[CONFIG_CHARTER_ENTRY_LEN];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_CHARTER_MAX_ENTRIES))
+      return buf;
+   config_field_read(offsetof(config_t, charter_hard_constraints) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_charter_values(int index)
+{
+   static _Thread_local char buf[CONFIG_CHARTER_ENTRY_LEN];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_CHARTER_MAX_ENTRIES))
+      return buf;
+   config_field_read(offsetof(config_t, charter_values) + (size_t)index * sizeof(buf), sizeof(buf),
+                     buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_charter_tone_boundaries(int index)
+{
+   static _Thread_local char buf[CONFIG_CHARTER_ENTRY_LEN];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_CHARTER_MAX_ENTRIES))
+      return buf;
+   config_field_read(offsetof(config_t, charter_tone_boundaries) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_compact_per_tool(int index)
+{
+   static _Thread_local char buf[128];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_COMPACT_MAX_PER_TOOL))
+      return buf;
+   config_field_read(offsetof(config_t, compact_per_tool) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_mcp_osv_allow(int index)
+{
+   static _Thread_local char buf[256];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_MCP_OSV_MAX_ALLOW))
+      return buf;
+   config_field_read(offsetof(config_t, mcp_osv_allow) + (size_t)index * sizeof(buf), sizeof(buf),
+                     buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_computer_use_allowed_domains(int index)
+{
+   static _Thread_local char buf[128];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_COMPUTER_USE_MAX_DOMAINS))
+      return buf;
+   config_field_read(offsetof(config_t, computer_use_allowed_domains) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_ensemble_reference_models(int index)
+{
+   static _Thread_local char buf[128];
+   buf[0] = 0;
+   if (index < 0 || index >= (32))
+      return buf;
+   config_field_read(offsetof(config_t, ensemble_reference_models) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_ensemble_reference_personas(int index)
+{
+   static _Thread_local char buf[64];
+   buf[0] = 0;
+   if (index < 0 || index >= (32))
+      return buf;
+   config_field_read(offsetof(config_t, ensemble_reference_personas) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }

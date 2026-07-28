@@ -90,6 +90,8 @@ def members():
         if base == "char":
             if arr and arr.count("[") == 1:
                 out.append(("string", name, arr))
+            elif arr and arr.count("[") == 2:
+                out.append(("string2d", name, arr))
             # char[][] (string arrays) need an indexed accessor; not generated here.
         elif base in SCALARS and not arr:
             out.append(("scalar", name, SCALARS[base]))
@@ -99,6 +101,7 @@ def members():
 def main():
     ms = members()
     strings = [m for m in ms if m[0] == "string"]
+    string2d = [m for m in ms if m[0] == "string2d"]
     scalars = [m for m in ms if m[0] == "scalar"]
 
     banner = (
@@ -124,6 +127,14 @@ def main():
     )
     for _, name, _arr in strings:
         h.append(f"const char *config_{name}(void);")
+    h.append("")
+    h.append(
+        "/* char[][] fields: one row per call. Returns \"\" for an out-of-range\n"
+        " * index, so a caller that loops past the count gets empty rather than\n"
+        " * reading adjacent memory. Same thread-local lifetime as above. */"
+    )
+    for _, name, _arr in string2d:
+        h.append(f"const char *config_{name}(int index);")
     h += ["", "#endif /* DEC_CONFIG_ACCESSORS_H */", ""]
     OUT_H.write_text("\n".join(h))
 
@@ -164,6 +175,24 @@ def main():
             "}",
             "",
         ])
+    for _, name, arr in string2d:
+        rows = arr[1:arr.index("]")]
+        inner = arr[arr.index("]") + 2:-1]
+        blocks.append([
+            f"const char *config_{name}(int index)",
+            "{",
+            f"   static _Thread_local char buf[{inner}];",
+            "   buf[0] = 0;",
+            f"   if (index < 0 || index >= ({rows}))",
+            "      return buf;",
+            f"   config_field_read(offsetof(config_t, {name}) + (size_t)index * sizeof(buf),",
+            "                     sizeof(buf), buf);",
+            "   buf[sizeof(buf) - 1] = 0;",
+            "   return buf;",
+            "}",
+            "",
+        ])
+
     # Shard whole accessor blocks, never mid-function: splitting on a line count
     # produced a file ending inside a function body and one starting with a bare
     # `return`, which the compiler caught but which no line-based split can avoid.
@@ -178,7 +207,7 @@ def main():
 
     print(
         f"gen_config_accessors: wrote {len(scalars)} scalar + {len(strings)} string "
-        f"accessor(s) across {SHARDS} shard(s) + {OUT_H.name}"
+        f"+ {len(string2d)} indexed accessor(s) across {SHARDS} shard(s)"
     )
     return 0
 

@@ -53,6 +53,26 @@ int main(void)
    CK_INT(typed_facts_enabled);
    CK_INT(audit_worm_enabled);
 
+   /* Indexed accessors must agree row-for-row, and must refuse an out-of-range
+    * index rather than read adjacent memory. */
+   for (int i = 0; i < 64; i++)
+   {
+      if (strcmp(config_workspaces(i), cfg->workspaces[i]) != 0)
+      {
+         printf("MISMATCH workspaces[%d]: '%s' vs '%s'\n", i, config_workspaces(i),
+                cfg->workspaces[i]);
+         return 1;
+      }
+      checked++;
+   }
+   if (config_workspaces(-1)[0] != 0 || config_workspaces(64)[0] != 0 ||
+       config_workspaces(100000)[0] != 0)
+   {
+      printf("out-of-range index did not return an empty row\n");
+      return 1;
+   }
+   checked += 3;
+
    printf("accessor parity: %d field(s) match the loaded struct\n", checked);
    free(cfg);
    return 0;

@@ -1579,9 +1579,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       }
       db2_kb_runtime_state_set_now("last_ingest_at");
       {
-         config_t cfg;
-         config_load(&cfg);
-         if (cfg.kb_curator_extract_docs_enabled)
+         if (config_kb_curator_extract_docs_enabled())
             kb_curator_queue_docs_for_project(project);
       }
       kb_http_write_build_stats(out_buf, out_cap, project, &stats);
@@ -1608,9 +1606,6 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
                   "{\"error\":\"failed to open knowledge service store\"}");
          return 503;
       }
-
-      config_t cfg;
-      config_load(&cfg);
 
       char workspace[MAX_PATH_LEN] = "";
       (void)json_str(body, "workspace", workspace, sizeof(workspace));
@@ -1645,9 +1640,9 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       }
       else
       {
-         for (int w = 0; w < cfg.workspace_count; w++)
+         for (int w = 0; w < config_workspace_count(); w++)
          {
-            int n = workspace_discover_projects(cfg.workspaces[w], 3, projects,
+            int n = workspace_discover_projects(config_workspaces(w), 3, projects,
                                                 MAX_DISCOVERED_PROJECTS);
             for (int i = 0; i < n; i++)
             {
@@ -1659,7 +1654,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
                   pgvec_kb_vector_delete_project(pname);
                   db2_kb_file_index_delete_project(pname);
                }
-               db2_kb_ingest_queue_enqueue(pname, projects[i], cfg.workspaces[w], force,
+               db2_kb_ingest_queue_enqueue(pname, projects[i], config_workspaces(w), force,
                                            DB2_KB_INGEST_PRIO_INTERACTIVE);
                total_queued++;
             }

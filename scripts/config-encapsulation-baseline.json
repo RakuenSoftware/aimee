@@ -46,8 +46,8 @@
       "loads": 1
     },
     "src/cmd_infra.c": {
-      "decls": 9,
-      "loads": 7
+      "decls": 8,
+      "loads": 6
     },
     "src/cmd_kb.c": {
       "decls": 4,
@@ -182,8 +182,8 @@
       "loads": 1
     },
     "src/kb/http/kb_http.c": {
-      "decls": 8,
-      "loads": 8
+      "decls": 6,
+      "loads": 6
     },
     "src/kb/http/kb_http_code.c": {
       "decls": 4,
@@ -417,10 +417,6 @@
       "decls": 2,
       "loads": 2
     },
-    "src/modules/git/mcp_git_query.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/modules/guardrails/guardrails_action_audit.c": {
       "decls": 4,
       "loads": 2
@@ -540,10 +536,6 @@
     "src/modules/memory/memory_core_internal.h": {
       "decls": 3,
       "loads": 0
-    },
-    "src/modules/memory/memory_core_scope_embed.c": {
-      "decls": 1,
-      "loads": 1
     },
     "src/modules/memory/memory_core_search_b.c": {
       "decls": 7,
@@ -1163,8 +1155,8 @@
     }
   },
   "totals": {
-    "decls": 1021,
-    "files": 290,
-    "loads": 523
+    "decls": 1016,
+    "files": 288,
+    "loads": 518
   }
 }
