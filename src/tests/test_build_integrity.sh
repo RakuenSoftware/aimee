@@ -187,6 +187,34 @@ else
     fail "scripts reference missing make targets:$bad_script_targets"
 fi
 
+# The cross-platform smoke exports both modern URL and legacy endpoint forms.
+# Preserve the transport scheme: POSIX gives AIMEE_API_ENDPOINT precedence, so
+# mapping an https:// URL to tcp: makes a healthy TLS server look unreachable.
+smoke_tmp=$(mktemp -d "${TMPDIR:-/tmp}/aimee-smoke-endpoint.XXXXXX") || smoke_tmp=
+smoke_endpoints_ok=0
+if [ -n "$smoke_tmp" ]; then
+    printf '%s\n' '#!/bin/sh' 'test "${AIMEE_API_ENDPOINT:-}" = "${EXPECTED_ENDPOINT:?}"' \
+        > "$smoke_tmp/fake-aimee"
+    chmod +x "$smoke_tmp/fake-aimee"
+    smoke_endpoints_ok=1
+    for smoke_case in 'http://example.test:8740|tcp:example.test:8740' \
+                      'https://example.test:8743|tls:example.test:8743'; do
+        smoke_url=${smoke_case%%|*}
+        smoke_expected=${smoke_case#*|}
+        if ! AIMEE_BIN="$smoke_tmp/fake-aimee" SERVER_URL="$smoke_url" \
+             EXPECTED_ENDPOINT="$smoke_expected" FORCE_MODE=full \
+             bash ../scripts/aimee-thin-client-smoke.sh >/dev/null 2>&1; then
+            smoke_endpoints_ok=0
+        fi
+    done
+    rm -rf "$smoke_tmp"
+fi
+if [ "$smoke_endpoints_ok" = "1" ]; then
+    pass "thin-client smoke preserves HTTP/TLS endpoint schemes"
+else
+    fail "thin-client smoke endpoint scheme regression"
+fi
+
 # 7a. PreToolUse grep redirect hook must keep targeted file inspection unblocked.
 if python3 ../scripts/test-redirect-grep-hook.py >/dev/null 2>&1; then
     pass "redirect grep hook classifier"
@@ -643,6 +671,7 @@ _check_existing_shipped_artifacts() {
     provider_help_rc=$?
     if [ "$provider_help_rc" -eq 0 ] &&
        grep -q "provider" <<< "$provider_help_output" &&
+       grep -q -- "--all" <<< "$provider_help_output" &&
        ! grep -q "Unknown command" <<< "$provider_help_output"; then
         pass "server-routed provider help is client-side"
     else
@@ -792,6 +821,7 @@ _group_integ() {
     provider_help_rc=$?
     if [ "$provider_help_rc" -eq 0 ] &&
        grep -q "provider" <<< "$provider_help_output" &&
+       grep -q -- "--all" <<< "$provider_help_output" &&
        ! grep -q "Unknown command" <<< "$provider_help_output"; then
         pass "server-routed provider help is client-side"
     else

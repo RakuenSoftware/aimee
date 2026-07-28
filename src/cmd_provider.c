@@ -71,13 +71,17 @@ static int provider_models_cached(model_provider_t *p, char ***models_out, int *
 }
 
 /* Has the OPERATOR configured this provider, as opposed to aimee merely knowing
- * it exists? A credential actually present is the only evidence we have of a
- * deliberate choice. auth_type "none" (ollama, llama_native) is NOT evidence:
- * those need no key, so they would report configured on a machine where nothing
- * is installed or running. */
-static int provider_is_configured(const model_provider_t *p)
+ * it exists? A credential or an explicit `provider set` is evidence of a
+ * deliberate choice. auth_type "none" alone (ollama, llama_native) is NOT:
+ * those need no key, so they would otherwise report configured on a machine
+ * where nothing is installed or running. */
+static int provider_is_configured(const model_provider_t *p, const char *selected_provider)
 {
-   if (!p || !p->env_vars)
+   if (!p)
+      return 0;
+   if (selected_provider && selected_provider[0] && strcmp(p->name, selected_provider) == 0)
+      return 1;
+   if (!p->env_vars)
       return 0;
    for (int i = 0; p->env_vars[i]; i++)
    {
@@ -102,6 +106,8 @@ static void provider_list(app_ctx_t *ctx, int argc, char **argv)
 
    model_provider_t *providers[64];
    int n = model_provider_list(providers, 64);
+   config_t cfg = {0};
+   (void)config_load(&cfg);
 
    /* Default: only what the operator configured. This used to print the whole
     * built-in catalogue — seven rows, every one "[no key]" — under a heading
@@ -118,7 +124,7 @@ static void provider_list(app_ctx_t *ctx, int argc, char **argv)
       int available = provider_has_credentials(p);
       if (only_available && !available)
          continue;
-      if (!show_all && !only_available && !provider_is_configured(p))
+      if (!show_all && !only_available && !provider_is_configured(p, cfg.provider))
          continue;
       const char *key_var = provider_first_env_var(p);
       printf("%-20s  %-24s  %-10s  %s\n", p->name, p->display_name ? p->display_name : "",
