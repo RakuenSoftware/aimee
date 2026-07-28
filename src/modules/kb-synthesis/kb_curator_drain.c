@@ -133,9 +133,9 @@ static int kb_cross_repo_meta_rebuild(void)
  * cheap when nothing changed. Gated on kb_curator_projection_graph_enabled
  * (default on); cross_repo refresh additionally gated on
  * kb_curator_cross_repo_graph_enabled. */
-static void kb_curator_projection_sweep(const config_t *cfg)
+static void kb_curator_projection_sweep(void)
 {
-   if (!cfg->kb_curator_projection_graph_enabled)
+   if (!config_kb_curator_projection_graph_enabled())
       return;
    project_info_t projects[128];
    int np = index_list_projects(projects, 128);
@@ -155,7 +155,7 @@ static void kb_curator_projection_sweep(const config_t *cfg)
    if (built > 0)
       aimee_log(LOG_INFO, "kb.graph.projection",
                 "published %lld edge(s) across %d changed project(s)", (long long)total, built);
-   if (built > 0 && cfg->kb_curator_cross_repo_graph_enabled)
+   if (built > 0 && config_kb_curator_cross_repo_graph_enabled())
       kb_cross_repo_meta_rebuild();
 }
 
@@ -1013,7 +1013,7 @@ static void *kb_curator_index_lane_main(void *arg)
 
       /* Pure-DB2 projection-graph + cross-repo refresh once per poll, ahead of the
        * INDEX queue drain -- content-addressed, so cheap when nothing changed. */
-      kb_curator_projection_sweep(&cfg);
+      kb_curator_projection_sweep();
 
       /* Same stage-order resolution as the LLM lane; run_pass filters to this lane. */
       kb_curator_stage_desc_t ordered[16 + KB_CURATOR_MAX_CUSTOM];

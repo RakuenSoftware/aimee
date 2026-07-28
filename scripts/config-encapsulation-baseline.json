@@ -418,7 +418,7 @@
       "loads": 7
     },
     "src/modules/kb-synthesis/kb_curator_drain.c": {
-      "decls": 13,
+      "decls": 12,
       "loads": 11
     },
     "src/modules/kb-synthesis/kb_curator_extract.c": {
@@ -1119,7 +1119,7 @@
     }
   },
   "totals": {
-    "decls": 975,
+    "decls": 974,
     "files": 279,
     "loads": 507
   }
