@@ -285,8 +285,8 @@ static void kb_health_add_curator(cJSON *resp, const config_t *cfg,
       cJSON_AddNumberToObject(q, "code_unit_done", qc.code_unit_done);
       cJSON_AddNumberToObject(q, "extract_failing", qc.extract_failing);
       cJSON_AddNumberToObject(q, "code_unit_failing", qc.code_unit_failing);
-      if (qc.code_unit_last_error[0])
-         cJSON_AddStringToObject(q, "last_error", qc.code_unit_last_error);
+      if (qc.last_error[0])
+         cJSON_AddStringToObject(q, "last_error", qc.last_error);
    }
 }
 
@@ -406,9 +406,9 @@ static cJSON *kb_service_health_object(void)
    {
       char msg[384];
       int n = qc.code_unit_failing + qc.extract_failing;
-      if (qc.code_unit_last_error[0])
+      if (qc.last_error[0])
          snprintf(msg, sizeof(msg), "curator: %d job(s) failing — last error: %s", n,
-                  qc.code_unit_last_error);
+                  qc.last_error);
       else
          snprintf(msg, sizeof(msg), "curator: %d job(s) failing", n);
       cJSON_AddItemToArray(warnings, cJSON_CreateString(msg));

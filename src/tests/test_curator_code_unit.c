@@ -686,13 +686,23 @@ static void test_queue_counts_surface_failures(void)
 
    assert(sqlite3_exec(db,
                        "INSERT INTO kb_code_unit_jobs (id,project,file_path,symbol,status,attempts,"
-                       "last_error) VALUES "
-                       "(9301,'p','a.c','fn_a','failed',3,'connect 10.0.0.9:8080: No route to "
-                       "host'),"
-                       "(9302,'p','b.c','fn_b','failed',3,'connect 10.0.0.9:8080: No route to "
-                       "host'),"
-                       "(9303,'p','c.c','fn_c','pending',1,'temporary timeout'),"
-                       "(9304,'p','d.c','fn_d','done',1,'recovered timeout')",
+                       "last_error,updated_at) VALUES "
+                       "(9301,'p','a.c','fn_a','failed',3,'older code-unit failure',"
+                       "'2026-07-28 10:00:00'),"
+                       "(9302,'p','b.c','fn_b','failed',3,'newer code-unit failure',"
+                       "'2026-07-28 10:01:00'),"
+                       "(9303,'p','c.c','fn_c','pending',1,'newest but pending',"
+                       "'2026-07-28 10:04:00'),"
+                       "(9304,'p','d.c','fn_d','done',1,'newest but recovered',"
+                       "'2026-07-28 10:05:00')",
+                       NULL, NULL, NULL) == SQLITE_OK);
+   assert(sqlite3_exec(db,
+                       "INSERT INTO kb_async_jobs (id,kind,document_id,project,status,attempts,"
+                       "last_error,updated_at) VALUES "
+                       "(9305,'extract_doc',9305,'p','failed',3,'latest extract failure',"
+                       "'2026-07-28 10:02:00'),"
+                       "(9306,'extract_doc',9306,'p','done',1,'later recovered extract error',"
+                       "'2026-07-28 10:03:00')",
                        NULL, NULL, NULL) == SQLITE_OK);
 
    kb_curator_queue_counts_t qc;
@@ -703,10 +713,12 @@ static void test_queue_counts_surface_failures(void)
    assert(qc.code_unit_failing == 2);
    assert(qc.code_unit_pending == 1);
    assert(qc.code_unit_done == 1);
+   assert(qc.extract_failing == 1);
 
-   /* And the reason travels with the count. */
-   assert(strstr(qc.code_unit_last_error, "No route to host") != NULL);
-   assert(strstr(qc.code_unit_last_error, "recovered") == NULL);
+   /* The newest terminal reason across both queues travels with the count;
+    * newer pending/done historical errors are deliberately ignored. */
+   assert(strcmp(qc.last_error, "latest extract failure") == 0);
+   assert(strstr(qc.last_error, "recovered") == NULL);
 
    db2_test_shim_close();
    printf("  PASS: test_queue_counts_surface_failures (failed jobs counted, not silently dropped "

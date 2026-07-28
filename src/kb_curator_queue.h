@@ -38,8 +38,8 @@ typedef struct
     * which is how a curator whose every job failed still reported a healthy kb. */
    int extract_failing;
    int code_unit_failing;
-   int code_unit_last_error_len; /* >0 when a sample error was captured */
-   char code_unit_last_error[256];
+   int last_error_len; /* >0 when the newest terminal failure was captured */
+   char last_error[256];
 } kb_curator_queue_counts_t;
 
 /* Fill *out with current curator queue depths (zeroed on any error / no DB). */
