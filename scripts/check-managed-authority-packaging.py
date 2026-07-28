@@ -52,6 +52,8 @@ def main() -> int:
         failures.append("authority tools must not use the database superuser")
     if "GRANT aimee_kb_migrate TO $authority_db_role" not in bootstrap:
         failures.append("authority migration membership")
+    if '"$helper" hwm-read "$AIMEE_VAULT_KMS_KEY_ID" 0 0' not in bootstrap:
+        failures.append("software KMS self-check must use the custody provider argv contract")
     for dsn in ("AIMEE_KB_TOKEN_ROOTS_PROVISION_DSN", "AIMEE_KB_JWKS_PUBLISH_DSN"):
         if f'export {dsn}="$authority_db_url"' not in bootstrap:
             failures.append(f"least-privilege {dsn}")

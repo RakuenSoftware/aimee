@@ -152,7 +152,11 @@ def main() -> int:
                 return 4
             state_replace(state_path, next_version)
             version = next_version
-        elif operation != "hwm-read" or len(sys.argv) != 3:
+        # vault_custody_kms invokes every HWM operation with the expected/next
+        # slots populated; the direct bootstrap self-check historically used
+        # the shorter read-only form.  Accept those two exact shapes and reject
+        # every other argv surface.
+        elif operation != "hwm-read" or len(sys.argv) not in (3, 5):
             return 2
         signature = sign(key_id, version)
         sys.stdout.buffer.write(f"{version}\n".encode("ascii") + signature)

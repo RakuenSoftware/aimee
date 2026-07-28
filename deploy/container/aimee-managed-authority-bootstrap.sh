@@ -116,7 +116,9 @@ export AIMEE_KB_JWKS_PUBLICATION_HWM_CUSTODY_ID=managed-jwks-publication-v1
 export AIMEE_KB_TOKEN_ROOTS_PROVISION_DSN="$authority_db_url"
 export AIMEE_KB_JWKS_PUBLISH_DSN="$authority_db_url"
 
-"$helper" hwm-read "$AIMEE_VAULT_KMS_KEY_ID" >/dev/null || fail "software KMS self-check failed"
+# Match the custody provider's real argv contract so this check cannot pass
+# while the in-process provider is guaranteed to fail later.
+"$helper" hwm-read "$AIMEE_VAULT_KMS_KEY_ID" 0 0 >/dev/null || fail "software KMS self-check failed"
 
 # Root provisioning is crash-resumable. Always use the explicit export path for
 # the deployment file so a retry cannot replace or invent a trust pin.
