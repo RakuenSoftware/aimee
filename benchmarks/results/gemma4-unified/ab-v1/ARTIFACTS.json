@@ -1,0 +1,38 @@
+[
+  {
+    "bytes": 2841481184,
+    "file": "gemma-4-E2B-it-Q4_0.gguf",
+    "label": "gemma4_e2b",
+    "sha256": "8e30dff3ac4c8434c49a7036fa15564bdbb6044e42bf04550bf1a096ad7e6a52"
+  },
+  {
+    "bytes": 4590807392,
+    "file": "gemma-4-E4B-it-Q4_0.gguf",
+    "label": "gemma4_e4b",
+    "sha256": "a555b900214b477d8880e7832e0b8925e139b0159640036b09fe472b6f2097f2"
+  },
+  {
+    "bytes": 6716355328,
+    "file": "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf",
+    "label": "gemma4_12b",
+    "sha256": "cc9ff072e0a8203429ed854e6662c17a6c2bc1e5dca5b475dd4736caaacbc165"
+  },
+  {
+    "bytes": 14249045120,
+    "file": "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf",
+    "label": "gemma4_26b_a4b",
+    "sha256": "dcf179a91153e3a7ece792e48ef872180d9d6ef9b7677f0a0bd3e83cfe624d5e"
+  },
+  {
+    "bytes": 18323733440,
+    "file": "gemma-4-31B-it-Q4_K_M.gguf",
+    "label": "gemma4_31b",
+    "sha256": "38bd64c852c4b460434cc7162fa9bdcf242faf86502581a754cb72956bb17f84"
+  },
+  {
+    "bytes": 22134528992,
+    "file": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+    "label": "qwen36_35b_a3b",
+    "sha256": "ac0e2c1189e055faa36eff361580e79c5bd6f8e76bffb4ce547f167d53e31a61"
+  }
+]

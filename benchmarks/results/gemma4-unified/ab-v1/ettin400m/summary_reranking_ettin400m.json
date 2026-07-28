@@ -1,0 +1,30 @@
+{
+  "candidates_per_case": 20,
+  "cases": 10000,
+  "environment_note": "isolated_gpu_rx_7900_xtx_host_concurrent_quality_sweep",
+  "input_bounds": {
+    "candidate_chars": 1024,
+    "method": "utf8_head_2_over_3_tail_1_over_3_with_marker",
+    "query_chars": 512
+  },
+  "label": "ettin400m",
+  "latency_s": {
+    "p50": 1.2334007814642973,
+    "p95": 3.709386544462177,
+    "p99": 8.75742777512351
+  },
+  "load_profile": {
+    "latency_scope": "case_latency_under_configured_concurrent_load",
+    "maximum_inflight_pairs": 32,
+    "pairs_per_request": 4,
+    "workers": 8
+  },
+  "mrr_at_10": 0.5620279365079365,
+  "ndcg_at_10": 0.643879297837796,
+  "recall_at_1": 0.372,
+  "recall_at_10": 0.8969,
+  "recall_at_5": 0.7996,
+  "requests_retried": 0,
+  "success_rate": 1.0,
+  "suite_manifest_sha256": "16d2c16add86052ff24be410699ab9452ee1a36252de6dba31ab5391de7ab81c"
+}
