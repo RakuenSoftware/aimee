@@ -79,17 +79,23 @@ Download the binary for your platform from the latest GitHub release.
 ### Linux
 
 ```bash
-install -Dm755 aimee-linux-x86_64 ~/.local/bin/aimee
+mkdir -p ~/.local/bin
+curl -fL https://github.com/RakuenSoftware/aimee/releases/latest/download/aimee-linux-x86_64 \
+  -o ~/.local/bin/aimee
+chmod 755 ~/.local/bin/aimee
 export PATH="$PATH:$HOME/.local/bin"
 aimee version
 ```
 
-Use `aimee-linux-arm64` on ARM64.
+Use `aimee-linux-arm64` instead on ARM64.
 
 ### macOS
 
 ```bash
-install -m755 aimee-macos-universal ~/.local/bin/aimee
+mkdir -p ~/.local/bin
+curl -fL https://github.com/RakuenSoftware/aimee/releases/latest/download/aimee-macos-universal \
+  -o ~/.local/bin/aimee
+chmod 755 ~/.local/bin/aimee
 xattr -d com.apple.quarantine ~/.local/bin/aimee 2>/dev/null || true
 export PATH="$PATH:$HOME/.local/bin"
 aimee version
@@ -97,9 +103,18 @@ aimee version
 
 ### Windows
 
-Rename the download to `aimee.exe`, put it in a directory on `PATH`, then open a new PowerShell:
+In PowerShell, download the released client into a directory on your user `PATH`:
 
 ```powershell
+$bin = "$env:LOCALAPPDATA\aimee\bin"
+New-Item -ItemType Directory -Force $bin | Out-Null
+Invoke-WebRequest https://github.com/RakuenSoftware/aimee/releases/latest/download/aimee-windows-x86_64.exe -OutFile "$bin\aimee.exe"
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+$paths = @($userPath -split ';' | Where-Object { $_ })
+if ($bin -notin $paths) {
+  [Environment]::SetEnvironmentVariable("Path", (($paths + $bin) -join ';'), "User")
+}
+$env:Path = "$env:Path;$bin"
 aimee version
 ```
 
@@ -131,12 +146,14 @@ first owner.
 Automatic first-user certificate enrollment is currently Linux-only. macOS and Windows clients fail
 closed instead of silently receiving bearer-only write access; use a Linux client for this quickstart.
 
-For a self-signed certificate during local setup, set `AIMEE_TLS_INSECURE=1` only for the enrollment
-command. The stored fingerprint is the trust anchor after that. Do not leave insecure TLS enabled.
+Self-signed local servers need no insecure-mode flag: `remote set` pins the leaf and reports its
+fingerprint for verification.
 
-macOS uses Secure Transport and Windows uses Schannel. Automatic CSR enrollment is currently the
-Linux path; configure the client certificate explicitly on the other platforms when the server
-requires mTLS.
+The complete write-capable quickstart below currently requires the Linux client. macOS uses Secure
+Transport and Windows uses Schannel, but automatic CSR enrollment is not yet implemented on those
+two clients. They can connect while mTLS is optional, but remain read-only and will not connect once
+the server's enrolled-client roster promotes mTLS to required. Do not mistake a copied bearer for a
+client identity.
 
 ## 4. Verify the stack
 
@@ -146,13 +163,25 @@ aimee kb status    # detailed store, vector, ingest, and curator state
 aimee audit verify
 ```
 
+### Verify first-user write access
+
+The Linux client enrolled in step 3 already has the first wizard user's certificate-bound `full`
+grant. No authority setup or server-side grant command is part of the single-user quickstart. Prove
+that the setup is durable before continuing:
+
+```bash
+aimee memory store quickstart "Enrollment works"
+aimee memory search "Enrollment works"
+```
+
+The bearer alone remains read-only, and changing the retired `aimee.api.remote_writes` setting does
+not grant access.
+
 ### Additional users and authority-managed grants
 
-The first wizard user is already ready to write after step 3; none of the manual work below is
-required for that quickstart path.
-
-Larger installations can add PAM/OIDC users with short-lived, KB-signed identities and grants keyed
-by `(server_id, team_id, subject)`. That authority-managed path requires:
+Skip this section for the first wizard user. Larger installations can add PAM/OIDC users with
+short-lived, KB-signed identities and grants keyed by `(server_id, team_id, subject)`. That path
+requires:
 
 - `AIMEE_SERVER_ID`;
 - `AIMEE_SERVER_TEAM_ID`;
@@ -161,8 +190,8 @@ by `(server_id, team_id, subject)`. That authority-managed path requires:
 - `AIMEE_KB_CONN`, the one-time `aimee://` enrollment string used to establish the server's mTLS
   identity with the KB.
 
-The shipped server Compose files pass these values through from `.env`, leave their identity
-values empty, and mount `${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}` read-only at
+The shipped server Compose files pass these values through from `.env`, leave their identity values
+empty, and mount `${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}` read-only at
 `/run/aimee/management`. The empty authority configuration grants no additional users. The explicit
 certificate-bound first wizard owner remains available for bootstrap administration, and a local
 Unix-socket operator cannot be locked out.
@@ -199,8 +228,8 @@ docker compose -f compose.server-managed.yaml up -d --force-recreate aimee-serve
 The bundle is public verification material. In the shipped container it must be root-owned and
 readable by server UID 1000, so use `0644`; group/world write bits, symlinks, extra hard links, and a
 non-root owner are rejected. On successful enrollment the certificate and key are atomically saved
-at `$AIMEE_HOME/kb-client-identity.json` with mode `0600`. The one-time token is never saved, and
-the identity is revalidated against its CA pin after every process restart.
+at `$AIMEE_HOME/kb-client-identity.json` with mode `0600`. The one-time token is never saved, and the
+identity is revalidated against its CA pin after every process restart.
 
 Grant administration is local-socket only. Run it on the server, using the exact subject returned by
 the user's PAM or OIDC login:
@@ -213,16 +242,6 @@ aimee kb grant show --server <server-id> --team <team-id> --subject <subject>
 Use `data` for memory, document, and index writes. Use `full` only for users who also need agent,
 delegate, runner, or workspace-control operations. See [Upgrading](UPGRADING.md#restore-remote-writes)
 for subject forms, first-grant recovery, and refusal reasons.
-
-After the grant and user login, test a durable write and read:
-
-```bash
-aimee memory store quickstart "Enrollment works"
-aimee memory search "Enrollment works"
-```
-
-`aimee.api.remote_writes` is a retired global authorizer. It remains parsed for compatibility, but
-changing it does not make this write succeed.
 
 ## 5. Add a workspace
 
@@ -239,9 +258,8 @@ aimee index find main
 The client uploads content to the server and KB. The remote server never reads `/path/to/project`
 directly.
 
-Workspace registration itself is bearer-gated and can succeed without a grant. Its index upload
-cannot: without `data`, `workspace add` reports the registered workspace, then exits non-zero after
-ingesting zero files. Run the index commands after the grant.
+Workspace registration and index upload both work for the first wizard user after enrollment. An
+additional authority-managed user needs at least a `data` grant.
 
 > **Not available on the Windows thin client.** `workspace add` and `index scan` upload the working
 > tree over a POSIX-only path, so on Windows they refuse:

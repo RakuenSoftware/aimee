@@ -11,13 +11,13 @@
 # This exercises the server→kb mutation path + DB2 persistence + retrieval, the
 # core of aimee that a deploy-only smoke never touches.
 #
-# PREREQUISITE: the server must allow data writes over its TCP bearer, i.e.
-# aimee.api.remote_writes = "data" (or "full"). The container default is "off";
-# set AIMEE_API_REMOTE_WRITES=data on the server service (or mount a config) to
-# enable it. If writes are
-# refused, this script says so explicitly rather than silently passing.
+# PREREQUISITE: this direct-curl harness runs as the first wizard user and must
+# present the client certificate enrolled by `aimee remote set`. A bearer by
+# itself is deliberately read-only, and `aimee.api.remote_writes` cannot widen it.
+# Authority-managed identity-token coverage lives in run-write-tier-enforce-live.sh.
 #
-# Env: SERVER_URL (default https://localhost:8743), BEARER (default aimee-local-dev).
+# Env: SERVER_URL (default https://localhost:8743), BEARER (default aimee-local-dev),
+#      CLIENT_CERT and CLIENT_KEY (the enrolled PEM files; both or neither).
 # Exit code: 0 = the sentinel round-tripped through store→list→search.
 
 set -uo pipefail
@@ -26,6 +26,14 @@ SERVER_URL="${SERVER_URL:-https://localhost:8743}"
 BEARER="${BEARER:-aimee-local-dev}"
 AUTH=(-H "Authorization: Bearer ${BEARER}")
 JSON=(-H 'content-type: application/json')
+IDENTITY=()
+if [[ -n "${CLIENT_CERT:-}" || -n "${CLIENT_KEY:-}" ]]; then
+  if [[ ! -r "${CLIENT_CERT:-}" || ! -r "${CLIENT_KEY:-}" ]]; then
+    echo "CLIENT_CERT and CLIENT_KEY must both name readable enrolled PEM files" >&2
+    exit 2
+  fi
+  IDENTITY=(--cert "$CLIENT_CERT" --key "$CLIENT_KEY")
+fi
 
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
@@ -44,20 +52,20 @@ bad() { red   "  FAIL  $*"; FAIL=$((FAIL + 1)); }
 bold "==> Write→read round-trip at ${SERVER_URL} (sentinel ${SENT})"
 
 # 1) STORE -----------------------------------------------------------------
-store_body="$(curl -s -k "${AUTH[@]}" "${JSON[@]}" -X POST \
+store_body="$(curl -s -k "${IDENTITY[@]}" "${AUTH[@]}" "${JSON[@]}" -X POST \
   -d "{\"key\":\"${KEY}\",\"content\":\"${CONTENT}\",\"kind\":\"fact\"}" \
   "${SERVER_URL}/v1/memory/store" 2>/dev/null)"
 if [[ "$store_body" == *'"status":"ok"'* && "$store_body" == *'"id"'* ]]; then
   ok "store accepted ($store_body)"
 elif [[ "$store_body" == *forbidden* || "$store_body" == *"remote write"* || "$store_body" == *cap* ]]; then
-  bad "store REFUSED — server is not allowing TCP data writes (set remote_writes=data): $store_body"
+  bad "store REFUSED — complete the first-user mTLS enrollment or configure a per-user grant: $store_body"
   echo; bold "==> Summary: ${PASS} passed, ${FAIL} failed"; exit 1
 else
   bad "store unexpected response: ${store_body:-<none>}"
 fi
 
 # 2) LIST reads it back verbatim ------------------------------------------
-list_body="$(curl -s -k "${AUTH[@]}" "${JSON[@]}" -X POST -d '{"limit":50}' \
+list_body="$(curl -s -k "${IDENTITY[@]}" "${AUTH[@]}" "${JSON[@]}" -X POST -d '{"limit":50}' \
   "${SERVER_URL}/v1/memory/list" 2>/dev/null)"
 if [[ "$list_body" == *"$SENT"* ]]; then
   ok "list returns the stored content (round-trip persisted)"
@@ -66,7 +74,7 @@ else
 fi
 
 # 3) SEARCH retrieves it by keyword ---------------------------------------
-search_body="$(curl -s -k "${AUTH[@]}" "${JSON[@]}" -X POST \
+search_body="$(curl -s -k "${IDENTITY[@]}" "${AUTH[@]}" "${JSON[@]}" -X POST \
   -d "{\"keywords\":[\"${SENT}\"],\"limit\":10}" \
   "${SERVER_URL}/v1/memory/search" 2>/dev/null)"
 if [[ "$search_body" == *"$SENT"* ]]; then
