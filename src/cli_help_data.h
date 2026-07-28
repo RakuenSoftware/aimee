@@ -147,7 +147,7 @@
      "  edit <role>      Edit or create a template in $EDITOR\n"
      "  rm <role>        Reset a built-in or remove a custom template\n"},
     {"provider", "Model provider profiles and catalogs", CLIENT_TIER_ADVANCED, 0,
-     "  list             List registered providers (--available, --json)\n"
+     "  list             List configured providers (--all, --available, --json)\n"
      "  show <name>      Show provider profile details\n"
      "  models <name>    Fetch provider model catalog (--json)\n"
      "  test <name>      Probe provider credentials and connectivity\n"

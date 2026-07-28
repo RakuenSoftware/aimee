@@ -643,6 +643,7 @@ _check_existing_shipped_artifacts() {
     provider_help_rc=$?
     if [ "$provider_help_rc" -eq 0 ] &&
        grep -q "provider" <<< "$provider_help_output" &&
+       grep -q -- "--all" <<< "$provider_help_output" &&
        ! grep -q "Unknown command" <<< "$provider_help_output"; then
         pass "server-routed provider help is client-side"
     else
@@ -792,6 +793,7 @@ _group_integ() {
     provider_help_rc=$?
     if [ "$provider_help_rc" -eq 0 ] &&
        grep -q "provider" <<< "$provider_help_output" &&
+       grep -q -- "--all" <<< "$provider_help_output" &&
        ! grep -q "Unknown command" <<< "$provider_help_output"; then
         pass "server-routed provider help is client-side"
     else

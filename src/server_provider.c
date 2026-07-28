@@ -151,14 +151,18 @@ static cJSON *server_provider_json(const model_provider_t *p)
 }
 
 /* Has the OPERATOR configured this provider, as opposed to aimee merely knowing
- * it exists? A credential actually present is the only evidence of a deliberate
- * choice. auth_type "none" (ollama, llama_native) is NOT evidence: those need no
- * key, so they would report configured on a machine where nothing is installed
- * or running. That is the difference between this and
- * server_provider_has_credentials(), which answers "usable right now". */
-static int server_provider_is_configured(const model_provider_t *p)
+ * it exists? A credential or an explicit `provider set` is evidence of a
+ * deliberate choice. auth_type "none" alone (ollama, llama_native) is NOT:
+ * those need no key, so they would otherwise report configured on a machine
+ * where nothing is installed or running. That is the difference between this
+ * and server_provider_has_credentials(), which answers "usable right now". */
+static int server_provider_is_configured(const model_provider_t *p, const char *selected_provider)
 {
-   if (!p || !p->env_vars)
+   if (!p)
+      return 0;
+   if (selected_provider && selected_provider[0] && strcmp(p->name, selected_provider) == 0)
+      return 1;
+   if (!p->env_vars)
       return 0;
    for (int i = 0; p->env_vars[i]; i++)
    {
@@ -177,6 +181,8 @@ int handle_provider_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    int json_output = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "json"));
    model_provider_t *providers[64];
    int n = model_provider_list(providers, 64);
+   config_t cfg = {0};
+   (void)config_load(&cfg);
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddBoolToObject(resp, "json", json_output);
@@ -192,7 +198,8 @@ int handle_provider_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
        * client renders as a registration table, so a brand-new install looked
        * pre-populated with providers nobody had chosen. Nothing was installed;
        * they were names aimee knows. `--all` still shows that catalogue. */
-      if (!show_all && !available_only && !server_provider_is_configured(providers[i]))
+      if (!show_all && !available_only &&
+          !server_provider_is_configured(providers[i], cfg.provider))
          continue;
       cJSON_AddItemToArray(arr, server_provider_json(providers[i]));
    }
