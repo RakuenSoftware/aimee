@@ -458,11 +458,12 @@ static void test_provider_routes_and_marshaling(void)
    assert(strcmp(route.method, "provider.quota") == 0);
    assert(route.skip_subcmd == 1);
 
-   char *list_argv[] = {"--available", "--json"};
-   cJSON *req = marshal_provider_list(2, list_argv);
+   char *list_argv[] = {"--available", "--all", "--json"};
+   cJSON *req = marshal_provider_list(3, list_argv);
    assert(req != NULL);
    assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "provider.list") == 0);
    assert(cJSON_IsTrue(cJSON_GetObjectItem(req, "available_only")));
+   assert(cJSON_IsTrue(cJSON_GetObjectItem(req, "all")));
    assert(cJSON_IsTrue(cJSON_GetObjectItem(req, "json")));
    cJSON_Delete(req);
 
