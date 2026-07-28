@@ -149,6 +149,12 @@ type recordingAgents struct {
 	draftResponses []string
 }
 
+type fixedResponseAgents struct{ response string }
+
+func (a fixedResponseAgents) Delegate(context.Context, DelegateRequest) (DelegateResult, error) {
+	return DelegateResult{Response: a.response}, nil
+}
+
 type scriptedReviewAgents struct {
 	mu        sync.Mutex
 	responses []string
@@ -810,6 +816,21 @@ func TestDirectRoundtableReviewReturnsAndVerifiesRunArtifactIdentity(t *testing.
 		if !strings.Contains(request.Prompt, "DIRECT_ARTIFACT_MARKER") {
 			t.Fatalf("review request received another run's artifact: %+v", request)
 		}
+	}
+}
+
+func TestNativeRunnerSplitAcceptsManagedChangeIntentBinding(t *testing.T) {
+	runner := &NativeRunner{agents: fixedResponseAgents{response: `{"schema_version":1,"packets":[{"packet_id":"p1","summary":"implement feature","target_blocks":["implement"],"dependencies":[],"acceptance_criteria":["feature exists"]}]}`}}
+	intent := []byte(`{"schema_version":1,"status":"unconfirmed","summary":"implement feature","rationale":"proposal","acceptance_criteria":["feature exists"]}`)
+	result, err := runner.structured(context.Background(), StepRequest{
+		WorkItem: db1.WorkItem{Repo: "/repo"},
+		Inputs:   map[string]wfe.Artifact{"intent": {Type: "intent", Content: intent, Hash: wfe.Hash(intent)}},
+	}, "packets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StepAdvanced || result.ArtifactType != "plan" {
+		t.Fatalf("result=%+v", result)
 	}
 }
 
