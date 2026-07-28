@@ -26,6 +26,14 @@ int config_load(config_t *cfg)
    }
    return 0;
 }
+
+/* Accessor stubs: the production seam moved from config_load to per-field
+ * accessors. Values match what this file's config_load stub produced, so the
+ * assertions below are unchanged. */
+int config_gateway_prevent_subagents(void)
+{
+   return g_prevent;
+}
 const char *guardrails_canonical_tool_name(const char *n)
 {
    if (n && (strcmp(n, "Task") == 0 || strcmp(n, "Agent") == 0))

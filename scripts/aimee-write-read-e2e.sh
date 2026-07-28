@@ -11,11 +11,10 @@
 # This exercises the server→kb mutation path + DB2 persistence + retrieval, the
 # core of aimee that a deploy-only smoke never touches.
 #
-# PREREQUISITE: for the managed single-user policy, the server must set
-# aimee.api.remote_writes = "data" (or "full") and the caller must present the
-# client certificate enrolled by `aimee remote set`. A bearer by itself is
-# deliberately read-only. Strict multi-user deployments additionally require
-# their normal per-user identity token/grant.
+# PREREQUISITE: this direct-curl harness runs as the first wizard user and must
+# present the client certificate enrolled by `aimee remote set`. A bearer by
+# itself is deliberately read-only, and `aimee.api.remote_writes` cannot widen it.
+# Authority-managed identity-token coverage lives in run-write-tier-enforce-live.sh.
 #
 # Env: SERVER_URL (default https://localhost:8743), BEARER (default aimee-local-dev),
 #      CLIENT_CERT and CLIENT_KEY (the enrolled PEM files; both or neither).
@@ -59,7 +58,7 @@ store_body="$(curl -s -k "${IDENTITY[@]}" "${AUTH[@]}" "${JSON[@]}" -X POST \
 if [[ "$store_body" == *'"status":"ok"'* && "$store_body" == *'"id"'* ]]; then
   ok "store accepted ($store_body)"
 elif [[ "$store_body" == *forbidden* || "$store_body" == *"remote write"* || "$store_body" == *cap* ]]; then
-  bad "store REFUSED — enroll an mTLS client and set remote_writes=data (or configure a strict per-user grant): $store_body"
+  bad "store REFUSED — complete the first-user mTLS enrollment or configure a per-user grant: $store_body"
   echo; bold "==> Summary: ${PASS} passed, ${FAIL} failed"; exit 1
 else
   bad "store unexpected response: ${store_body:-<none>}"

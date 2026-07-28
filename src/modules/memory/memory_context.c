@@ -298,7 +298,7 @@ int memory_derive_facts(const char *query, int64_t *candidate_ids, int cand_coun
       return 0;
    memset(out, 0, sizeof(*out));
 
-   if (!cfg || !cfg->memory_derive_facts_enabled)
+   if (!cfg || !config_memory_derive_facts_enabled())
       return 0;
    if (!query || !candidate_ids || cand_count <= 0)
       return 0;

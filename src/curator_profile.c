@@ -83,24 +83,30 @@ curator_profile_t curator_profile_select(int vram_mb, const char *endpoint_url)
 
 /* ── config application ───────────────────────────────────────────────────── */
 
-int curator_profile_apply(curator_profile_t *profile, config_t *cfg)
+/* Persist a profile's curator settings.
+ *
+ * This took a config_t * and mutated it in place, leaving the caller to own the
+ * load and the save. Writing through the config module's setters means no
+ * caller needs the struct — and the settings are actually persisted rather than
+ * left in a caller's copy that may never be saved. */
+int curator_profile_apply(curator_profile_t *profile)
 {
-   if (!profile || !cfg)
+   if (!profile)
       return -1;
 
-   cfg->kb_curator_extract_docs_enabled = profile->docs_enabled;
-   cfg->kb_curator_extract_code_enabled = profile->code_enabled;
-   if (profile->extract_command[0])
-      snprintf(cfg->kb_curator_extract_command, sizeof(cfg->kb_curator_extract_command), "%s",
-               profile->extract_command);
-
-   /* If disabled, turn off both doc and code extraction. */
+   int docs = profile->docs_enabled;
+   int code = profile->code_enabled;
+   /* Disabled turns off both, whatever the profile's individual flags say. */
    if (profile->backend == CURATOR_BACKEND_DISABLED)
-   {
-      cfg->kb_curator_extract_docs_enabled = 0;
-      cfg->kb_curator_extract_code_enabled = 0;
-   }
+      docs = code = 0;
 
+   if (config_set_kb_curator_extract_docs_enabled(docs) != 0)
+      return -1;
+   if (config_set_kb_curator_extract_code_enabled(code) != 0)
+      return -1;
+   if (profile->extract_command[0] &&
+       config_set_kb_curator_extract_command(profile->extract_command) != 0)
+      return -1;
    return 0;
 }
 

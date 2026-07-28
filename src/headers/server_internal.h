@@ -6,6 +6,7 @@
 int handle_api_disable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_api_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_api_rotate_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_api_enroll_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_api_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* Attach the kb block to a server.health response (see server_api_status.c). */
 void server_health_add_kb(cJSON *resp);

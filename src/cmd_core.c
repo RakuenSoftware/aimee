@@ -892,9 +892,7 @@ void cmd_env(app_ctx_t *ctx, int argc, char **argv)
 
    if (argc < 1 || strcmp(argv[0], "detect") == 0)
    {
-      config_t db1_cfg;
-      config_load(&db1_cfg);
-      if (db1_init(db1_cfg.db1_path) != 0)
+      if (db1_init(config_db1_path()) != 0)
          fatal("env detect: could not initialize DB1");
       agent_introspect_env();
       /* Display results */
@@ -1014,9 +1012,7 @@ void cmd_notify(app_ctx_t *ctx, int argc, char **argv)
  */
 void cmd_clarify(app_ctx_t *ctx, int argc, char **argv)
 {
-   config_t db1_cfg;
-   config_load(&db1_cfg);
-   if (db1_init(db1_cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
       fatal("clarify: could not initialize DB1");
 
    if (argc == 0)

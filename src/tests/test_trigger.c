@@ -20,6 +20,21 @@ int config_load(config_t *cfg)
    cfg->module_memory = cfg->module_governance = cfg->module_delegates = cfg->module_workflows = -1;
    return 0;
 }
+
+/* Accessor stubs: the production seam moved from config_load to per-field
+ * accessors. module_workflows stays -1 (unspecified) exactly as the struct stub
+ * sets it — a 0 would read as user-DISABLED and wrongly gate trigger workflow
+ * dispatch, which is the same trap the comment above guards against.
+ * wfe_proposals_autoscan_enabled was left zeroed by the stub. */
+int config_module_workflows(void)
+{
+   return -1;
+}
+
+int config_wfe_proposals_autoscan_enabled(void)
+{
+   return 0;
+}
 /* Real (pure) resolver logic, mirrored so the stubbed link stays faithful to production. */
 int config_module_enabled(int config_tristate, int env_default)
 {

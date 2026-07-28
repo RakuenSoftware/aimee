@@ -302,8 +302,7 @@ static void memory_refresh_temporal_refs(int64_t memory_id, const char *key, con
 
 static void memory_refresh_negation_tokens(int64_t memory_id, const char *key, const char *content)
 {
-   config_t neg_cfg;
-   if (config_load(&neg_cfg) != 0 || !neg_cfg.memory_negation_enabled)
+   if (!config_memory_negation_enabled())
       return;
 
    /* Combine key + content for tokenisation */
@@ -445,9 +444,24 @@ static void memory_embed_http_url(const char *base, const char *path, char *out,
 int memory_embed_http_post(const char *base, const char *path, const char *body, char **resp)
 {
    char url[1024];
+   char auth[640];
+   const char *auth_header = NULL;
+   const char *token = getenv("AIMEE_LLM_AUTH_TOKEN");
+   const char *auth_required = getenv("AIMEE_LLM_AUTH_REQUIRED");
+   if (auth_required && strcmp(auth_required, "1") == 0 && (!token || !token[0]))
+      return -1;
+   if (token && token[0])
+   {
+      /* Managed tokens are capped at 512 bytes; this also rejects any longer
+       * external token instead of truncating an Authorization header. */
+      int n = snprintf(auth, sizeof(auth), "Authorization: Bearer %s", token);
+      if (n < 0 || (size_t)n >= sizeof(auth))
+         return -1;
+      auth_header = auth;
+   }
    memory_embed_http_url(base, path, url, sizeof(url));
    *resp = NULL;
-   int status = agent_http_post(url, NULL, body, resp, MEMORY_EMBED_HTTP_TIMEOUT_MS, NULL);
+   int status = agent_http_post(url, auth_header, body, resp, MEMORY_EMBED_HTTP_TIMEOUT_MS, NULL);
    if (status < 200 || status >= 300 || !*resp)
    {
       free(*resp);

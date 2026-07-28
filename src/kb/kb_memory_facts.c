@@ -362,7 +362,7 @@ static int mf_process_one(const config_t *cfg, const mf_job_t *job)
 
 int kb_memory_facts_drain(const config_t *cfg, int batch)
 {
-   if (!cfg || !cfg->typed_facts_enabled || batch <= 0)
+   if (!cfg || !config_typed_facts_enabled() || batch <= 0)
       return 0;
    if (!db2_conn())
       return 0;

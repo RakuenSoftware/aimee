@@ -1139,27 +1139,48 @@ int config_load_file(config_t *cfg)
 #if defined(__GNUC__)
    if (validate_toolsets && toolset_registry_init && toolset_registry_load_file)
    {
-      toolset_registry_t registry;
       char toolset_err[TOOLSET_ERROR_MAX] = "";
-      toolset_registry_init(&registry);
-      if (toolset_registry_load_file(&registry, path, toolset_err, sizeof(toolset_err)) != 0)
+      /* toolset_registry_t is large enough to add over a MiB to this function's
+       * frame after LTO. Config loads occur deep inside memory-query call chains,
+       * so a stack copy can exhaust the default 8 MiB worker stack. */
+      toolset_registry_t *registry = calloc(1, sizeof(*registry));
+      if (!registry)
       {
-         fprintf(stderr, "aimee: config validation: %s\n",
-                 toolset_err[0] ? toolset_err : "invalid toolset configuration");
+         fprintf(stderr, "aimee: config validation: out of memory loading toolsets\n");
          issues++;
+      }
+      else
+      {
+         toolset_registry_init(registry);
+         if (toolset_registry_load_file(registry, path, toolset_err, sizeof(toolset_err)) != 0)
+         {
+            fprintf(stderr, "aimee: config validation: %s\n",
+                    toolset_err[0] ? toolset_err : "invalid toolset configuration");
+            issues++;
+         }
+         free(registry);
       }
    }
 #else
    if (validate_toolsets)
    {
-      toolset_registry_t registry;
       char toolset_err[TOOLSET_ERROR_MAX] = "";
-      toolset_registry_init(&registry);
-      if (toolset_registry_load_file(&registry, path, toolset_err, sizeof(toolset_err)) != 0)
+      toolset_registry_t *registry = calloc(1, sizeof(*registry));
+      if (!registry)
       {
-         fprintf(stderr, "aimee: config validation: %s\n",
-                 toolset_err[0] ? toolset_err : "invalid toolset configuration");
+         fprintf(stderr, "aimee: config validation: out of memory loading toolsets\n");
          issues++;
+      }
+      else
+      {
+         toolset_registry_init(registry);
+         if (toolset_registry_load_file(registry, path, toolset_err, sizeof(toolset_err)) != 0)
+         {
+            fprintf(stderr, "aimee: config validation: %s\n",
+                    toolset_err[0] ? toolset_err : "invalid toolset configuration");
+            issues++;
+         }
+         free(registry);
       }
    }
 #endif
@@ -1861,6 +1882,71 @@ int config_snapshot_get(config_t *out)
    }
 }
 
+/* Read ONE field out of the live snapshot under a reader pin, without copying
+ * the whole ~750 KB struct.
+ *
+ * config_snapshot_get copies everything, which is what every accessor would
+ * otherwise pay per call. The pin protocol here is identical to that function's
+ * — seqlock validate, bounded reader admission, release-unpin — but the payload
+ * is memcpy(dst, base + offset, size) instead of a whole-struct assignment.
+ *
+ * Returns 0 on success, -1 when no snapshot is live (caller falls back to a
+ * cached load) or when reader admission is saturated. */
+static int config_snapshot_read_field(size_t offset, size_t size, void *dst)
+{
+   if (!dst || !atomic_load_explicit(&g_snap_inited, memory_order_acquire))
+      return -1;
+   for (;;)
+   {
+      unsigned s0 = atomic_load_explicit(&g_snap_seq, memory_order_acquire);
+      if (s0 & 1u)
+         continue;
+      unsigned act = atomic_load_explicit(&g_snap_active, memory_order_acquire);
+      unsigned state = atomic_load_explicit(&g_snap_state[act], memory_order_acquire);
+      for (;;)
+      {
+         if (state & CONFIG_SNAPSHOT_WRITER_RESERVED)
+            break;
+         if (state == CONFIG_SNAPSHOT_READER_MAX)
+            return -1;
+         if (atomic_compare_exchange_weak_explicit(&g_snap_state[act], &state, state + 1,
+                                                   memory_order_acquire, memory_order_relaxed))
+            break;
+      }
+      if (state & CONFIG_SNAPSHOT_WRITER_RESERVED)
+         continue;
+      unsigned s1 = atomic_load_explicit(&g_snap_seq, memory_order_acquire);
+      unsigned act1 = atomic_load_explicit(&g_snap_active, memory_order_acquire);
+      if (s0 != s1 || (s1 & 1u) || act != act1)
+      {
+         atomic_fetch_sub_explicit(&g_snap_state[act], 1, memory_order_release);
+         continue;
+      }
+      memcpy(dst, (const char *)&g_snap[act] + offset, size);
+      atomic_fetch_sub_explicit(&g_snap_state[act], 1, memory_order_release);
+      return 0;
+   }
+}
+
+/* Field read with a fallback: prefer the pinned snapshot; if none is live (early
+ * startup, or a tool that never called config_snapshot_init) fall back to a
+ * heap-loaded config so accessors work everywhere config_load worked. Heap, not
+ * stack — a 750 KB frame is what overflowed the stack in the memory-search
+ * path. Fails closed by leaving |dst| as the caller zeroed it. */
+int config_field_read(size_t offset, size_t size, void *dst)
+{
+   if (config_snapshot_read_field(offset, size, dst) == 0)
+      return 0;
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+      memcpy(dst, (const char *)cfg + offset, size);
+   free(cfg);
+   return rc;
+}
+
 int config_autonomy_lookup(const char *env_name, long *out)
 {
    if (!env_name || !out)
@@ -1996,4 +2082,182 @@ int config_reload_if_changed(void)
    last_ino = st.st_ino;
    seeded = 1;
    return config_reload();
+}
+
+/* ── opaque boolean accessors ────────────────────────────────────────────────
+ *
+ * Each of these existed only as a field read behind a caller-declared config_t.
+ * A caller that wants one boolean should not have to name the type, include its
+ * header, or put ~750 KB on the stack to get it. The load below is served from
+ * the config module's snapshot/mtime cache, so this is not a per-call reparse.
+ *
+ * Heap, not stack: these are called from paths that nest several frames deep,
+ * and a 750 KB frame is what overflowed the stack in the memory-search path. */
+static int config_flag(size_t offset)
+{
+   int v = 0; /* fail closed: an unreadable config must not enable a feature */
+   config_field_read(offset, sizeof(v), &v);
+   return v;
+}
+
+int config_audit_worm_enabled(void)
+{
+   return config_flag(offsetof(config_t, audit_worm_enabled));
+}
+
+int config_bandit_live_decision_enabled(void)
+{
+   return config_flag(offsetof(config_t, bandit_live_decision_enabled));
+}
+
+int config_css_style_graph_enabled(void)
+{
+   return config_flag(offsetof(config_t, css_style_graph_enabled));
+}
+
+int config_delegate_graph_context_enabled(void)
+{
+   return config_flag(offsetof(config_t, delegate_graph_context_enabled));
+}
+
+int config_drift_detect_shadow_enabled(void)
+{
+   return config_flag(offsetof(config_t, drift_detect_shadow_enabled));
+}
+
+int config_guardrails_blast_radius_advisory_enabled(void)
+{
+   return config_flag(offsetof(config_t, guardrails_blast_radius_advisory_enabled));
+}
+
+int config_ingress_usage_accounting_enabled(void)
+{
+   return config_flag(offsetof(config_t, ingress_usage_accounting_enabled));
+}
+
+int config_kb_pdf_vector_enabled(void)
+{
+   return config_flag(offsetof(config_t, kb_pdf_vector_enabled));
+}
+
+int config_memory_derive_facts_enabled(void)
+{
+   return config_flag(offsetof(config_t, memory_derive_facts_enabled));
+}
+
+int config_memory_routing_enabled(void)
+{
+   return config_flag(offsetof(config_t, memory_routing_enabled));
+}
+
+int config_transport_kb_pool_enabled(void)
+{
+   return config_flag(offsetof(config_t, transport_kb_pool_enabled));
+}
+
+int config_typed_facts_enabled(void)
+{
+   return config_flag(offsetof(config_t, typed_facts_enabled));
+}
+
+int config_wfe_live_forge_enabled(void)
+{
+   return config_flag(offsetof(config_t, wfe_live_forge_enabled));
+}
+
+/* Non-boolean opaque accessors. Same contract as config_flag: heap-loaded from
+ * the config module's cache, fail closed. */
+double config_memory_semantic_floor_scale(void)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return 0.0; /* caller treats <= 0 as "unset" and derives from dimension */
+   config_load(cfg);
+   double v = cfg->memory_semantic_floor_scale;
+   free(cfg);
+   return v;
+}
+
+int config_ingress_audit_async(void)
+{
+   return config_flag(offsetof(config_t, ingress_audit_async));
+}
+
+/* Opaque form: resolve the embedding command without the caller ever holding a
+ * config_t. config_t is ~750 KB, so a caller that only wants this one string was
+ * paying three quarters of a megabyte of stack for it — nested across the memory
+ * search path that overflowed an 8 MB stack. The load is cached inside the
+ * config module (config_load consults a snapshot/mtime cache), so this is not a
+ * per-call reparse.
+ *
+ * Returns a pointer into a function-local static, valid until the next call on
+ * this thread. Callers copy it if they need to keep it. */
+/* The RAW configured embedding command, with no resolution applied.
+ *
+ * config_embedding_command_current() answers "what should I embed with", which
+ * is never empty — it falls back to an endpoint or the builtin. Callers that
+ * need "did the operator configure an embedder at all" have to see the empty
+ * string, so they get the field itself. The generated accessor for this field
+ * is suppressed because the resolving function already owns the name. */
+const char *config_embedding_command_field(void)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, embedding_command), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+/* Copy ONE element of a config array out to the caller.
+ *
+ * The per-member accessors (config_cron_job_id(i), ...) suit a caller that
+ * wants one field. They do not suit one that passes the whole element onward —
+ * the trigger scheduler hands a trigger_rule_t to source callbacks, and the
+ * cron runner hands a cron_job_t to the executor. Those callers previously did
+ *   const cron_job_t *job = &cfg.cron_jobs[i];
+ * which required holding a config_t purely to reach the element.
+ *
+ * The ELEMENT types stay public on purpose: cron_job_t and trigger_rule_t are
+ * shared domain types (db1/cron_jobs.h uses cron_job_t with no config
+ * involved). config_t is the secret here, not them.
+ *
+ * Returns 0 and fills |out| on success; -1 for a bad index or unreadable
+ * config, leaving |out| untouched so a caller that ignores the return value
+ * gets its own zeroed struct rather than stale data. */
+int config_cron_job_at(int index, cron_job_t *out)
+{
+   if (!out || index < 0 || index >= CRON_JOBS_MAX)
+      return -1;
+   return config_field_read(offsetof(config_t, cron_jobs) + (size_t)index * sizeof(*out),
+                            sizeof(*out), out);
+}
+
+int config_trigger_rule_at(int index, trigger_rule_t *out)
+{
+   if (!out || index < 0 || index >= TRIGGER_RULES_MAX)
+      return -1;
+   return config_field_read(offsetof(config_t, trigger_rules) + (size_t)index * sizeof(*out),
+                            sizeof(*out), out);
+}
+
+int config_mcp_client_at(int index, config_mcp_client_t *out)
+{
+   if (!out || index < 0 || index >= CONFIG_MCP_MAX_CLIENTS)
+      return -1;
+   return config_field_read(offsetof(config_t, mcp_clients) + (size_t)index * sizeof(*out),
+                            sizeof(*out), out);
+}
+
+const char *config_embedding_command_current(const char *requested)
+{
+   if (requested && requested[0])
+      return requested;
+   static _Thread_local char cached[512];
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return "builtin"; /* allocation failure must not fabricate an embedder */
+   config_load(cfg);
+   snprintf(cached, sizeof(cached), "%s", config_embedding_command(cfg, NULL));
+   free(cfg);
+   return cached;
 }

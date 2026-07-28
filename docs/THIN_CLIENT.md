@@ -7,12 +7,19 @@ credentials, and model calls.
 ## Connect
 
 ```bash
-aimee remote set https://host:8743 <bootstrap-bearer>
+aimee remote set https://host:8743 <wizard-bearer>
 aimee remote status
 ```
 
-The enrollment path pins the server certificate and rotates the bootstrap bearer. Linux also
-enrolls a client mTLS certificate. Verify the printed fingerprint out of band.
+For the first user, copy this command from the setup wizard. The enrollment path pins the server
+certificate and Linux generates/enrolls a client mTLS certificate. The server binds that certificate
+to the authenticated wizard account with an explicit full grant. Verify the printed fingerprint out
+of band.
+
+For another client, copy the current primary bearer once, run `remote set`, then run
+`aimee remote enroll` on that client. Enrollment mints an additional bearer and keeps every
+existing client valid. `api.rotate_bearer` is deliberately different: it revokes the primary and
+all enrolled bearers, so use it only for an explicit revoke-all operation.
 
 Connection precedence is:
 
@@ -51,13 +58,13 @@ detected through size/hash metadata rather than accepted as one coherent file.
 
 ## Remote writes
 
-The shared bearer is read-only. In the default single-user deployment, a client certificate
-enrolled by this server may use its explicit `aimee.api.remote_writes` tier. `data` covers memory,
-document, and index writes. `full` also covers agent, delegate, runner, and workspace control.
+The bearer is read-only by itself. The setup wizard's first user receives a certificate-bound `full`
+grant when CSR enrollment completes; possession of only the bearer cannot exercise it. `full` covers
+memory, document, index, agent, delegate, runner, and workspace-control operations.
 
-Configuring the server ID, team ID, and management-JWKS trust bundle activates strict multi-user
-authorization. Remote writes then need a short-lived KB-signed identity and an exact
-server/team/subject grant; they never fall back to the deployment tier.
+Additional users use short-lived KB-signed identities and grants for the exact server, team, and
+subject. `data` is sufficient for memory, document, and index writes. The old
+`aimee.api.remote_writes` value is not an authorizer.
 
 ## Local CLI agents
 

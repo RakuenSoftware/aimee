@@ -819,28 +819,25 @@ int server_tls_init_default(void)
    char cert[MAX_PATH_LEN], key[MAX_PATH_LEN];
    snprintf(cert, sizeof(cert), "%s/tls/server.crt", config_default_dir());
    snprintf(key, sizeof(key), "%s/tls/server.key", config_default_dir());
-   config_t cfg;
-   config_load(&cfg);
-   int effective_mtls = pki_mtls_ramp_init(cfg.server_api_mtls);
+   int effective_mtls = pki_mtls_ramp_init(config_server_api_mtls());
    if (effective_mtls < 0)
       return -1;
    if (effective_mtls == 1)
       aimee_log(LOG_WARN, "server.tls",
                 "mTLS migration is optional: bearer-only clients remain accepted until the "
                 "durable roster is fully presented");
-   /* Secure-by-default: off/optional modes provision a self-signed server leaf
-    * rather than fall back to plaintext. Optional must do this so a fresh managed
-    * install can start the TLS listener used for initial client enrollment. In
-    * required mode the operator must supply the server identity deliberately;
-    * a missing leaf remains a startup failure rather than an implicit new pin. */
-   if (effective_mtls != 2 && pki_ensure_self_signed_server_cert(cert, key) != 0)
-      return -1;
+   /* Secure-by-default: a server identity certificate is required for every TLS
+    * mode, independently of whether the listener also requests client certs.
+    * Provision the stable self-signed identity on a fresh install rather than
+    * disabling HTTPS precisely when optional mTLS is enabled for enrollment.
+    * An operator-supplied cert at the same path remains authoritative. */
+   pki_ensure_self_signed_server_cert(cert, key);
    /* When mTLS is on, ensure aimee's client CA exists (create-or-load) and the
     * revocation snapshot is loaded BEFORE server_tls_init loads the client CA
     * file and the verify callback starts consulting the snapshot. */
    if (effective_mtls > 0 && pki_ca_ensure() != 0)
       return -1;
-   return server_tls_init(cert, key, effective_mtls, cfg.server_api_mtls_client_ca);
+   return server_tls_init(cert, key, effective_mtls, config_server_api_mtls_client_ca());
 }
 
 SSL *server_tls_begin(int fd)

@@ -351,6 +351,21 @@ int config_load(config_t *cfg)
    return 0;
 }
 
+/* Accessor stubs: the production seam moved from config_load to per-field
+ * accessors. These mirror exactly what the stub above produced —
+ * gateway_prevent_subagents tracks g_prevent, and pin_model (an int) was
+ * left zeroed —
+ * so the assertions below are unchanged. */
+int config_gateway_prevent_subagents(void)
+{
+   return g_prevent;
+}
+
+int config_gateway_pin_model(void)
+{
+   return 0;
+}
+
 /* Minimal guardrails_canonical_tool_name: maps Task/Agent/spawn_agent to
  * "Subagent" (matches the production canonicalization used by
  * gateway_policy.c via the real guardrails_orchestrator.o). Tests don't

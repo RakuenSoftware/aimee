@@ -186,16 +186,14 @@ int memory_auto_tag_workspace(int64_t memory_id, const char *key, const char *co
    char cwd[MAX_PATH_LEN];
    if (getcwd(cwd, sizeof(cwd)))
    {
-      config_t cfg;
-      config_load(&cfg);
-      for (int i = 0; i < cfg.workspace_count; i++)
+      for (int i = 0; i < config_workspace_count(); i++)
       {
-         size_t wlen = strlen(cfg.workspaces[i]);
-         if (wlen > 0 && strncmp(cwd, cfg.workspaces[i], wlen) == 0 &&
+         size_t wlen = strlen(config_workspaces(i));
+         if (wlen > 0 && strncmp(cwd, config_workspaces(i), wlen) == 0 &&
              (cwd[wlen] == '/' || cwd[wlen] == '\0'))
          {
-            const char *slash = strrchr(cfg.workspaces[i], '/');
-            const char *ws_name = slash ? slash + 1 : cfg.workspaces[i];
+            const char *slash = strrchr(config_workspaces(i), '/');
+            const char *ws_name = slash ? slash + 1 : config_workspaces(i);
             memory_tag_workspace(memory_id, ws_name);
             break;
          }

@@ -60,10 +60,14 @@ int kb_handle_memory_find_facts(int fd, cJSON *req)
    const kb_bandit_decision_point_t *ml_dp = kb_bandit_registry_get("kb_memory_retrieval_limit");
    if (!cJSON_IsNumber(limit_j) && ml_dp && ml_dp->n_arms > 0)
    {
-      config_t cfg;
-      config_load(&cfg);
-      if (cfg.bandit_live_decision_enabled)
+      if (config_bandit_live_decision_enabled())
       {
+         /* Still materialised here only because kb_bandit_sample takes a
+          * const config_t *. Removing this one means changing that signature —
+          * tracked as remaining debt by check-config-encapsulation.py rather
+          * than cascaded into this change. */
+         config_t cfg;
+         config_load(&cfg);
          /* Arms come from the registry (source of truth); each arm id is the
           * literal retrieval limit. */
          char ml_arms[KB_BANDIT_MAX_ARMS][KB_BANDIT_MAX_ARM_ID];

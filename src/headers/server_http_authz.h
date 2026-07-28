@@ -30,17 +30,8 @@ extern "C"
                                       server_identity_token_claims_t *claims,
                                       int *identity_present);
 
-   /* Select the tier used by the route gate. A configured per-user authority is
-    * always strict and caps a verified identity tier by the deployment tier.
-    * Before one exists, an authenticated mTLS client may use the explicitly
-    * configured deployment tier so the single-user quickstart remains usable and
-    * a bearer by itself never regains write authority. */
-   int server_http_select_write_tier(int is_tcp, int mtls_authenticated,
-                                     int per_user_authority_ready, int configured_tier,
-                                     int identity_tier, int identity_present);
-
-   /* Count one strict-mode refusal that the configured deployment tier would
-    * otherwise have allowed; surfaced as remote_writes.global_ignored. */
+   /* Count one request refused that the retired aimee.api.remote_writes would
+    * formerly have allowed; surfaced as remote_writes.global_ignored. */
    void server_http_note_global_ignored(void);
 
 #ifdef __cplusplus

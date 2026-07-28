@@ -1637,8 +1637,7 @@ char *delegate_inject_graph_context(const char *prompt, const char *cwd)
 {
    if (!prompt || !prompt[0])
       return NULL;
-   config_t cfg;
-   if (config_load(&cfg) != 0 || !cfg.delegate_graph_context_enabled)
+   if (!config_delegate_graph_context_enabled())
       return NULL;
 
    char paths[DELEGATE_DRIFT_MAX_PATHS][DELEGATE_DRIFT_PATH_MAX];

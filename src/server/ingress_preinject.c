@@ -472,20 +472,17 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       return NULL;
    if (!query || !query[0])
       return NULL;
-
-   config_t cfg;
-   config_load(&cfg);
    /* The envelope carries two independently-gated layers: the code/memory preview
     * block (ingress_preinject_enabled, aimed at coding agents) and the typed-fact
     * block. Typed facts are KB-OWNED (proposal §8): aimee-server does NOT read its
     * own typed_facts_enabled — it asks the KB (cached capability) so the KB is the
     * single source of truth. Build if EITHER layer is on. */
-   int preview_on = cfg.ingress_preinject_enabled;
+   int preview_on = config_ingress_preinject_enabled();
    int facts_on = kb_client_typed_facts_enabled();
    if (!preview_on && !facts_on)
       return NULL;
-   int configured_budget = cfg.ingress_preinject_assembly_budget > 0
-                               ? cfg.ingress_preinject_assembly_budget
+   int configured_budget = config_ingress_preinject_assembly_budget() > 0
+                               ? config_ingress_preinject_assembly_budget()
                                : INGRESS_DEFAULT_ASSEMBLY_BUDGET;
    size_t envelope_budget = (size_t)configured_budget;
    if (envelope_budget <= INGRESS_FOOTER_RESERVE_BYTES)
@@ -497,11 +494,12 @@ char *ingress_preinject_build(const char *query, int request_disabled)
     * a hit additionally requires a known matched line (PR1b enrichment) and a
     * snippet long enough to be worth folding — so it is fail-closed: no line ->
     * keep the snippet. */
-   int compress = cfg.ingress_compress_enabled;
+   int compress = config_ingress_compress_enabled();
    const request_context_t *rctx = request_context_get();
    if (rctx && rctx->compress_disabled)
       compress = 0;
-   int compress_min = cfg.ingress_compress_min_chars > 0 ? cfg.ingress_compress_min_chars : 80;
+   int compress_min =
+       config_ingress_compress_min_chars() > 0 ? config_ingress_compress_min_chars() : 80;
    const char *code_header =
        compress ? "recommended (code — expand via code_span_get):\n" : "recommended (code):\n";
 
@@ -602,7 +600,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
     * build call) we mint one here so the event is still reconstructible. This is
     * the dedicated single-writer foundation; P1.5 folds the emit into the
     * retrieval handlers with the idempotent two-writer upsert. */
-   if (cfg.kb_evidence_emit_enabled && (mem_n > 0 || n > 0))
+   if (config_kb_evidence_emit_enabled() && (mem_n > 0 || n > 0))
    {
       const char *tid = ingress_preinject_turn_id();
       char minted[40];
@@ -718,8 +716,7 @@ char *ingress_preinject_apply(const char *instructions, const char *envelope)
     * envelope. The choice lives here — not in the caller — so the gateway stage
     * stays config-free and every consumer links unchanged. Default off => prepend
     * (byte-identical to before). */
-   config_t cfg;
-   if (config_load(&cfg) == 0 && cfg.ingress_cache_placement_enabled)
+   if (config_ingress_cache_placement_enabled())
       return ingress_preinject_append(instructions, envelope);
 
    int env_blank = 1;

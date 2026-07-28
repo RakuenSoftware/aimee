@@ -1976,20 +1976,17 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
     * logged and stored but never affect msg_buf or rc. In "advisory" a block is downgraded
     * to a prompt; only "enforce" lets a block hard-block. */
    {
-      config_t scfg;
-      config_load(&scfg);
-      gsem_apply_strictness_arm(&scfg);
-      int gmode = guardrails_semantic_mode_parse(scfg.guardrails_semantic_mode);
-      if (gmode != GSEM_MODE_OFF && scfg.guardrails_semantic_command[0] &&
+      int gmode = guardrails_semantic_mode_parse(config_guardrails_semantic_mode());
+      if (gmode != GSEM_MODE_OFF && config_guardrails_semantic_command()[0] &&
           is_write_intent(tool_name, root))
       {
          gsem_input_t sin;
          gsem_output_t sout;
          gsem_build_input(tool_name, root, effective_cwd, mode, &sin);
-         gsem_assess(&sin, scfg.guardrails_semantic_command, &sout);
-         const char *action = gsem_policy(&sout, scfg.guardrails_semantic_warn_threshold,
-                                          scfg.guardrails_semantic_prompt_threshold,
-                                          scfg.guardrails_semantic_block_threshold);
+         gsem_assess(&sin, config_guardrails_semantic_command(), &sout);
+         const char *action =
+             gsem_policy(&sout, gsem_effective_warn_threshold(), gsem_effective_prompt_threshold(),
+                         gsem_effective_block_threshold());
          int dry_run = (gmode == GSEM_MODE_DRY_RUN);
          const char *final_action = action;
          /* Only the "enforce" mode lets a block through; dry_run/advisory downgrade it. */

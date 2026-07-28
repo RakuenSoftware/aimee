@@ -56,6 +56,9 @@ func (s *server) handleDeployStatus(w http.ResponseWriter, r *http.Request) {
 // payload is server-authored, not vault material).
 func (s *server) deployRelay(w http.ResponseWriter, st int, data []byte, err error) {
 	w.Header().Set("Content-Type", "application/json")
+	// POST /apply may carry the first user's enrollment bearer. Never let a
+	// browser, reverse proxy, or intermediary retain that one-time setup result.
+	w.Header().Set("Cache-Control", "no-store")
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "deploy: aimee-server unavailable")
 		return

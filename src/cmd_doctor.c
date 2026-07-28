@@ -242,7 +242,7 @@ static void check_server(check_result_t *r)
    r->status = CHECK_OK;
 }
 
-static void check_config(check_result_t *r, config_t *cfg)
+static void check_config(check_result_t *r)
 {
    r->name = "Config";
 
@@ -256,7 +256,7 @@ static void check_config(check_result_t *r, config_t *cfg)
       return;
    }
 
-   if (cfg->workspace_count == 0)
+   if (config_workspace_count() == 0)
    {
       r->status = CHECK_WARN;
       snprintf(r->message, sizeof(r->message), "no workspaces configured");
@@ -267,24 +267,24 @@ static void check_config(check_result_t *r, config_t *cfg)
 
    /* Verify workspace paths exist */
    int missing = 0;
-   for (int i = 0; i < cfg->workspace_count; i++)
+   for (int i = 0; i < config_workspace_count(); i++)
    {
-      if (stat(cfg->workspaces[i], &st) != 0 || !S_ISDIR(st.st_mode))
+      if (stat(config_workspaces(i), &st) != 0 || !S_ISDIR(st.st_mode))
          missing++;
    }
 
    if (missing > 0)
    {
       r->status = CHECK_WARN;
-      snprintf(r->message, sizeof(r->message), "%d workspace(s), %d missing", cfg->workspace_count,
-               missing);
+      snprintf(r->message, sizeof(r->message), "%d workspace(s), %d missing",
+               config_workspace_count(), missing);
       snprintf(r->remediation, sizeof(r->remediation),
                "Run 'aimee workspace list' and remove stale entries");
    }
    else
    {
       r->status = CHECK_OK;
-      snprintf(r->message, sizeof(r->message), "%d workspace(s)", cfg->workspace_count);
+      snprintf(r->message, sizeof(r->message), "%d workspace(s)", config_workspace_count());
    }
 }
 
@@ -430,7 +430,7 @@ static void check_hooks(check_result_t *r)
    }
 }
 
-static void check_mcp(check_result_t *r, config_t *cfg)
+static void check_mcp(check_result_t *r)
 {
    r->name = "MCP";
 
@@ -438,14 +438,14 @@ static void check_mcp(check_result_t *r, config_t *cfg)
    struct stat st;
    char path[MAX_PATH_LEN];
 
-   for (int i = 0; i < cfg->workspace_count; i++)
+   for (int i = 0; i < config_workspace_count(); i++)
    {
-      snprintf(path, sizeof(path), "%s/.mcp.json", cfg->workspaces[i]);
+      snprintf(path, sizeof(path), "%s/.mcp.json", config_workspaces(i));
       if (stat(path, &st) == 0)
          found++;
    }
 
-   if (cfg->workspace_count == 0)
+   if (config_workspace_count() == 0)
    {
       r->status = CHECK_WARN;
       snprintf(r->message, sizeof(r->message), "no workspaces to check");
@@ -461,7 +461,8 @@ static void check_mcp(check_result_t *r, config_t *cfg)
    else
    {
       r->status = CHECK_OK;
-      snprintf(r->message, sizeof(r->message), "%d/%d workspace(s)", found, cfg->workspace_count);
+      snprintf(r->message, sizeof(r->message), "%d/%d workspace(s)", found,
+               config_workspace_count());
    }
 }
 
@@ -975,13 +976,13 @@ char *doctor_checks_json(void)
    int n = 0;
    doctor_db2_session_t db2_session = check_database(&checks[n++], &cfg);
    check_server(&checks[n++]);
-   check_config(&checks[n++], &cfg);
+   check_config(&checks[n++]);
    check_agents(&checks[n++]);
    check_agent_tier_prices(&checks[n++]);
    check_hardware(&checks[n++]);
    check_provider_catalog(&checks[n++]);
    check_hooks(&checks[n++]);
-   check_mcp(&checks[n++], &cfg);
+   check_mcp(&checks[n++]);
    check_secrets(&checks[n++]);
    check_index(&checks[n++], &cfg, db2_session.ready);
    check_memory(&checks[n++], &cfg, db2_session.ready);
@@ -1107,13 +1108,13 @@ void cmd_doctor(app_ctx_t *ctx, int argc, char **argv)
    int n = 0;
    doctor_db2_session_t db2_session = check_database(&checks[n++], &cfg);
    check_server(&checks[n++]);
-   check_config(&checks[n++], &cfg);
+   check_config(&checks[n++]);
    check_agents(&checks[n++]);
    check_agent_tier_prices(&checks[n++]);
    check_hardware(&checks[n++]);
    check_provider_catalog(&checks[n++]);
    check_hooks(&checks[n++]);
-   check_mcp(&checks[n++], &cfg);
+   check_mcp(&checks[n++]);
    check_secrets(&checks[n++]);
    check_index(&checks[n++], &cfg, db2_session.ready);
    check_memory(&checks[n++], &cfg, db2_session.ready);

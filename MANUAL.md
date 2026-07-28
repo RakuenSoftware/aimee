@@ -299,14 +299,11 @@ copied table in this manual.
 `aimee remote set` stores the target in `~/.config/aimee/remote.conf`. That file is private to the
 user and opened without following symlinks.
 
-The shared bearer authorizes reads. In the default single-user deployment, an enrolled mTLS client
-may also use the explicit `aimee.api.remote_writes` tier; a bearer alone cannot. `data` covers
-memory, docs, and index ingestion. `full` also covers agent, delegate, runner, and workspace
-control.
-
-When a per-user authority is configured, remote writes instead need a short-lived KB-signed
-identity token and a grant for the exact `(server_id, team_id, subject)`. Strict mode activates
-automatically and does not fall back to the deployment tier.
+The shared bearer authorizes reads. The first wizard user's explicit `full` grant is bound to the
+mTLS certificate enrolled by `aimee remote set`; the bearer alone cannot exercise it. Additional
+users need a short-lived KB-signed identity token and a grant for the exact
+`(server_id, team_id, subject)`. `data` covers memory, docs, and index ingestion. `full` also covers
+agent, delegate, runner, and workspace control.
 
 The server must know `AIMEE_SERVER_ID`, `AIMEE_SERVER_TEAM_ID`, and the root-owned
 `AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE`. Grant changes are local-socket only:
@@ -316,8 +313,8 @@ aimee kb grant set --server <id> --team <n> --subject <subject> --tier data
 aimee kb grant list --server <id> --team <n>
 ```
 
-See [Upgrading](docs/UPGRADING.md#restore-remote-writes) for strict-mode subject forms and
-first-grant recovery.
+`aimee.api.remote_writes` remains readable for compatibility but no longer authorizes user writes.
+See [Upgrading](docs/UPGRADING.md#restore-remote-writes) for subject forms and first-grant recovery.
 
 Use `aimee remote clear` to return to the local Unix socket.
 

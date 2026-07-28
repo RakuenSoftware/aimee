@@ -1600,6 +1600,20 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /kb/ingest/status:
+    get:
+      summary: Knowledge-base ingest queue and worker status (proxied to aimee-kb)
+      responses:
+        "200":
+          description: Ingest queue, recent jobs, and worker slots
+          content:
+            application/json:
+              schema: { type: object }
+        "502":
+          description: Knowledge backend (aimee-kb) unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /kb/curator:
     get:
       summary: Curator LLM provider + queue status (proxied to aimee-kb)
@@ -2758,6 +2772,17 @@ paths:
       summary: Mint and hot-swap a fresh /v1 bearer (trust-on-first-use enrollment; retires the bootstrap token)
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Rotated, content: { application/json: { schema: { type: object } } } } }
+  /api/enroll_bearer:
+    post:
+      summary: Mint an ADDITIONAL /v1 bearer for one more client, leaving existing bearers valid
+      description: >
+        Pairs a new client without revoking anyone else. Prefer this over
+        /api/rotate_bearer, which replaces the single primary bearer and so
+        invalidates every already-paired client at once. Fails closed when the
+        enrolled-bearer limit is reached rather than evicting an in-use
+        credential. Returns the new token once.
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Enrolled, content: { application/json: { schema: { type: object } } } } }
   /api/disable:
     post:
       summary: Disable the HTTP API
@@ -5788,8 +5813,10 @@ paths:
       description: >
         Server-orchestrated deploy: run `docker compose up -d` for the managed
         services (aimee-kb + aimee-llm) the current wizard config selects,
-        on a background thread. Requires AIMEE_DEPLOY_ENABLED + a mounted Docker
-        socket. Capability: tool:execute.
+        on a background thread. Atomically claims the authenticated wizard user
+        as the first remote owner and returns that user's enrollment-only bearer;
+        CSR signing later binds its explicit full grant to mTLS. Requires
+        AIMEE_DEPLOY_ENABLED + a mounted Docker socket. Capability: tool:execute.
       responses:
         "200":
           description: Deploy started (or already running)
@@ -5800,6 +5827,18 @@ paths:
                 properties:
                   ok: { type: boolean }
                   status: { type: string, enum: [started, running] }
+                  enrollment:
+                    type: object
+                    required: [state, principal, tier, mtls, tls_port]
+                    properties:
+                      state: { type: string, enum: [ready, paired] }
+                      principal: { type: string, example: "webuser:aimee" }
+                      tier: { type: string, enum: [full] }
+                      mtls: { type: boolean }
+                      tls_port: { type: integer }
+                      bearer_token:
+                        type: string
+                        description: Present only while the first user's mTLS enrollment is pending.
         "403":
           description: Not a webchat user
           content:

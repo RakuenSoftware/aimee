@@ -30,21 +30,16 @@ Do not rely on a raw copy of a live SQLite main file. Take a consistent backup w
 - Move agent keys and OAuth tokens into the server vault.
 - Remove legacy client plaintext only after a successful provider probe.
 - Re-enroll each thin client. Verify the server fingerprint before accepting the pin.
-- For a multi-user authority deployment, give each user the required remote-write grant. Without
-  that authority, `remote_writes` applies only to clients enrolled by this server over mTLS; a
-  bearer alone remains read-only.
+- Confirm the first wizard owner completed its certificate-bound enrollment. Give each additional
+  user the required remote-write grant. The old global `remote_writes` value authorizes nothing.
 - Review mTLS revocation, org catalogs, budgets, rate limits, and egress policy.
 
 ## Restore remote writes
 
-The shared bearer is read-only after this upgrade. In a single-user deployment that has no
-per-user authority configured, `aimee.api.remote_writes=data|full` applies only to clients enrolled
-by this server over mTLS. This preserves the normal thin-client workflow without making a copied
-bearer a write credential.
-
-Configuring the per-user authority switches the server to strict mode automatically. In strict
-mode the deployment tier is only a ceiling: it never replaces a missing KB-signed user token, and
-refusals it would otherwise allow increment `remote_writes.global_ignored`.
+The shared bearer is read-only after this upgrade. The first wizard owner receives an explicit
+certificate-bound `full` grant during enrollment. Additional remote users need KB-signed identities
+and exact subject grants. `aimee.api.remote_writes=data|full` remains parsed, warns at startup, and
+increments `remote_writes.global_ignored`; it does not authorize a user write.
 
 Configure the server with `AIMEE_SERVER_ID`, `AIMEE_SERVER_TEAM_ID`,
 `AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE`, and the one-time `AIMEE_KB_CONN` enrollment string.

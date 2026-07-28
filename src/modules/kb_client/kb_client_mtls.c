@@ -12,7 +12,7 @@
 #include "kb_client_mtls.h"
 #include "kb_enroll.h" /* connection-string parse (for host/port) */
 #include "kb_pki.h"
-#include "kb_tls.h"    /* kb_tls_enroll / kb_tls_client_request */
+#include "kb_tls.h" /* kb_tls_enroll / kb_tls_client_request */
 #include "config.h"
 #include "cJSON.h"
 
@@ -112,9 +112,9 @@ static int identity_load(const kb_enroll_conn_t *connection, char *ca, size_t ca
    cJSON *jcert = j ? cJSON_GetObjectItemCaseSensitive(j, "cert") : NULL;
    cJSON *jkey = j ? cJSON_GetObjectItemCaseSensitive(j, "key") : NULL;
    int ok = parsed_all && cJSON_IsNumber(version) && version->valuedouble == 1 &&
-            cJSON_IsString(jca) &&
-            cJSON_IsString(jcert) && cJSON_IsString(jkey) && strlen(jca->valuestring) < ca_cap &&
-            strlen(jcert->valuestring) < cert_cap && strlen(jkey->valuestring) < key_cap &&
+            cJSON_IsString(jca) && cJSON_IsString(jcert) && cJSON_IsString(jkey) &&
+            strlen(jca->valuestring) < ca_cap && strlen(jcert->valuestring) < cert_cap &&
+            strlen(jkey->valuestring) < key_cap &&
             identity_valid(connection, jca->valuestring, jcert->valuestring, jkey->valuestring);
    if (ok)
    {
@@ -137,9 +137,8 @@ static int identity_save(const char *ca, const char *cert, const char *key)
    if (tn <= 0 || (size_t)tn >= sizeof(temporary))
       return -1;
    cJSON *j = cJSON_CreateObject();
-   if (!j || !cJSON_AddNumberToObject(j, "version", 1) ||
-       !cJSON_AddStringToObject(j, "ca", ca) || !cJSON_AddStringToObject(j, "cert", cert) ||
-       !cJSON_AddStringToObject(j, "key", key))
+   if (!j || !cJSON_AddNumberToObject(j, "version", 1) || !cJSON_AddStringToObject(j, "ca", ca) ||
+       !cJSON_AddStringToObject(j, "cert", cert) || !cJSON_AddStringToObject(j, "key", key))
    {
       cJSON_Delete(j);
       return -1;
@@ -277,13 +276,12 @@ static void pool_sync_enabled(int enabled)
 static void pool_config_reapplier(const config_t *old_cfg, const config_t *new_cfg)
 {
    (void)old_cfg;
-   pool_sync_enabled(new_cfg && new_cfg->transport_kb_pool_enabled);
+   pool_sync_enabled(new_cfg && config_transport_kb_pool_enabled());
 }
 
 void kb_client_mtls_pool_register_reload(void)
 {
-   config_t cfg;
-   pool_sync_enabled(config_snapshot_get(&cfg) == 0 && cfg.transport_kb_pool_enabled);
+   pool_sync_enabled(config_transport_kb_pool_enabled());
    config_reload_register_reapplier(pool_config_reapplier);
 }
 

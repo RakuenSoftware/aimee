@@ -156,13 +156,11 @@ int kb_curator_promote_entity_one(const kb_curator_extract_opts_t *opts)
    void *conn = db2_conn();
    if (!conn)
       return 0;
-
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.kb_curator_promote_entity_enabled)
+   if (!config_kb_curator_promote_entity_enabled())
       return 0;
-   int min_sources = cfg.kb_curator_promote_min_sources > 0 ? cfg.kb_curator_promote_min_sources
-                                                            : CURATOR_PROMOTE_DEFAULT_MIN_SOURCES;
+   int min_sources = config_kb_curator_promote_min_sources() > 0
+                         ? config_kb_curator_promote_min_sources()
+                         : CURATOR_PROMOTE_DEFAULT_MIN_SOURCES;
 
    char old_id[64] = "", scope_kind[64] = "", scope_id[128] = "";
    char *payload = NULL;

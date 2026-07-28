@@ -671,6 +671,33 @@ static void test_kb_docs_push_route_and_marshal(void)
    printf("  PASS: test_kb_docs_push_route_and_marshal\n");
 }
 
+static void test_kb_remote_status_routes(void)
+{
+   cli_v1_route_t route;
+   const char *verb = NULL;
+
+   char *health_lookup[] = {"health"};
+   assert(cli_v1_lookup("kb", 1, health_lookup, &route));
+   assert(strcmp(route.method, "kb.health") == 0);
+   assert(strcmp(cli_v1_route_for_method(route.method, &verb), "/v1/kb/status") == 0);
+   assert(strcmp(verb, "GET") == 0);
+
+   char *ingest_lookup[] = {"ingest", "status"};
+   assert(cli_v1_lookup("kb", 2, ingest_lookup, &route));
+   assert(strcmp(route.method, "kb.ingest.status") == 0);
+   assert(strcmp(cli_v1_route_for_method(route.method, &verb), "/v1/kb/ingest/status") == 0);
+   assert(strcmp(verb, "GET") == 0);
+
+   char *status_lookup[] = {"status", "release-e2e"};
+   assert(cli_v1_lookup("kb", 2, status_lookup, &route));
+   cJSON *req = marshal_request(route.method, 1, status_lookup + 1);
+   assert(req != NULL);
+   assert(strcmp(cJSON_GetObjectItem(req, "project")->valuestring, "release-e2e") == 0);
+   cJSON_Delete(req);
+
+   printf("  PASS: test_kb_remote_status_routes\n");
+}
+
 static cJSON *mcp_text_response(const char *text)
 {
    cJSON *resp = cJSON_CreateObject();
@@ -1714,6 +1741,7 @@ int main(void)
    test_memory_delete_and_supersede_routes();
    test_server_status_route_lookup();
    test_kb_docs_push_route_and_marshal();
+   test_kb_remote_status_routes();
    test_git_verify_failure_detection();
    test_git_verify_marshaled_with_session_id();
    test_get_help_route_marshaled();

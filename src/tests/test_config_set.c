@@ -72,21 +72,18 @@ int main(void)
    assert(strstr(y, "keep-me") && "an extra/unknown key must survive (patch, not rebuild)");
 
    /* And it loads back correctly, other fields intact. */
-   config_t cfg;
-   config_load(&cfg);
-   assert(strcmp(cfg.provider, "openai") == 0);
-   assert(strcmp(cfg.default_persona, "architect") == 0);
-   assert(cfg.max_iterations == 5);
+   assert(strcmp(config_provider(), "openai") == 0);
+   assert(strcmp(config_default_persona(), "architect") == 0);
+   assert(config_max_iterations() == 5);
 
    /* Typed writes + validation. */
    assert(config_set("autonomous", "true") == 0);
    assert(config_set("max_iterations", "12") == 0);
    assert(config_set("autonomous", "maybe") < 0 && "invalid bool rejected");
    assert(config_set("no_such_key_zzz", "x") < 0 && "unknown key rejected");
-   config_load(&cfg);
-   assert(cfg.autonomous == 1);
-   assert(cfg.max_iterations == 12);
-   assert(strcmp(cfg.provider, "openai") == 0 && "earlier write still present");
+   assert(config_autonomous() == 1);
+   assert(config_max_iterations() == 12);
+   assert(strcmp(config_provider(), "openai") == 0 && "earlier write still present");
 
    printf("  PASS: config_set is a surgical, key-preserving write\n");
    return 0;

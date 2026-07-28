@@ -105,6 +105,54 @@ extern "C"
    int server_http_authorize(int is_tcp, const char *bearer_cfg, const char *auth_header,
                              const char *api_key_header, int has_session_key);
 
+   /* JSON body for a server_http_authorize rejection (pure — unit-testable).
+    * |az| is that function's non-zero return. The 401 text carries the recovery
+    * path for a bearer rotation, which invalidates every already-paired client
+    * at once; clients echo this text verbatim, so it is the only guidance most
+    * operators will see. */
+   const char *server_http_auth_error_body(int az);
+
+   /* As server_http_authorize, but accepts any of |extra| alongside the primary
+    * bearer. This is what lets a client pair without revoking the credential
+    * every other client is already using. Compares every candidate regardless of
+    * an early match so timing does not reveal which token matched. */
+   int server_http_authorize_multi(int is_tcp, const char *bearer_cfg, const char *const *extra,
+                                   int extra_count, const char *auth_header,
+                                   const char *api_key_header, int has_session_key);
+
+   /* Publish the additional accepted bearers to the live listener. */
+   void server_http_set_bearer_extra(const char *const *bearers, int n);
+
+   /* How many additional bearers are currently accepted (diagnostics/tests). */
+   int server_http_enrolled_bearer_count(void);
+
+   /* server_http_authorize_multi against the live enrolled set. */
+   int server_http_authorize_enrolled(int is_tcp, const char *bearer_cfg, const char *auth_header,
+                                      const char *api_key_header, int has_session_key);
+   int server_http_authorize_enrolled_request(int is_tcp, const char *bearer_cfg,
+                                              const char *auth_header, const char *api_key_header,
+                                              int has_session_key, int *bootstrap_only);
+
+   /* Provision the authenticated setup-wizard user as the appliance's first
+    * remote owner.  The returned bearer is enrollment-only until /v1/cert/sign
+    * binds it to the client's CSR-produced mTLS certificate.  Returns 0 with a
+    * bearer ready, 1 when that owner is already paired, -2 when another user
+    * owns the appliance, or -1 on validation/storage/config failure. */
+   int server_http_first_user_bootstrap(const char *principal, char *bearer, size_t bearer_cap);
+
+   /* Complete and resolve the explicit first-user certificate grant. */
+   int server_http_first_user_bind_cert(const char *bearer, const char *cert_serial);
+   int server_http_first_user_cert_tier(const char *cert_serial, char *principal,
+                                        size_t principal_cap);
+   int server_http_first_user_apply_cert_grant(int mtls_authenticated, const char *cert_serial,
+                                               int *tier, char *principal, size_t principal_cap);
+
+   /* Synchronize the primary bearer with enrolled-bearer reads. Rotation clears
+    * enrolled credentials; startup preserves the extras just loaded from config. */
+   void server_http_update_primary_bearer(char *live, size_t live_sz, const char *bearer,
+                                          int revoke_enrolled);
+   void server_http_primary_bearer_snapshot(const char *live, char *out, size_t out_sz);
+
    /* Trust-on-first-use gate (pure — unit-testable). Returns 1 when an authorized
     * TCP request must be REFUSED because the live listener bearer is still the
     * one-time bootstrap default (AIMEE_BOOTSTRAP_BEARER) and the route is not the
@@ -112,7 +160,7 @@ extern "C"
     * never perform a real operation. Returns 0 (allow) for UDS, once the bearer
     * has been rotated (live_bearer != bootstrap), for the rotate_bearer route
     * itself, or when the operator pinned AIMEE_API_BEARER_TOKEN (TOFU opt-out). */
-   int server_http_bootstrap_gate(int is_tcp, const char *live_bearer, const char *method,
+   int server_http_bootstrap_gate(int is_tcp, int bootstrap_only, const char *method,
                                   const char *path);
 
    /* Fixed-window per-bearer rate limiter (pure — unit-testable). State is a
@@ -156,8 +204,10 @@ extern "C"
    /* Effective caps for a request after thin-client mTLS authentication. When
     * mTLS is enabled, bearer fallback is a query-only floor and a durable cert
     * gets the authenticated (but not full-trust) set. */
-   /* remote_writes.global_ignored: how many strict-mode requests were refused
-    * that the configured deployment tier would otherwise have allowed. */
+   /* remote_writes.global_ignored: how many requests were refused that the
+    * retired aimee.api.remote_writes would formerly have allowed. Lets an
+    * operator size the cutover's impact instead of inferring it from
+    * complaints. */
    uint64_t server_http_global_ignored_count(void);
 
    uint32_t server_http_effective_conn_caps(int is_tcp, const char *bearer, int remote_writes,
@@ -238,8 +288,8 @@ extern "C"
    /* Stop the listener and close the socket. Safe if not started. */
    void server_http_stop(void);
 
-   /* Hot-swap the live TCP/TLS bearer without a restart. Call only from a /v1
-    * route handler (serialized on the listener thread). NULL/empty clears it. */
+   /* Hot-swap the live TCP/TLS bearer without a restart and revoke every
+    * additionally-enrolled bearer. NULL/empty clears the primary. */
    void server_http_set_bearer(const char *bearer);
 
    /* Default HTTP socket path: <config_default_dir>/aimee-http.sock. Returns a

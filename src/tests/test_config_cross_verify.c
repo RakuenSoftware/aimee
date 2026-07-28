@@ -51,24 +51,21 @@ static char *slurp(void)
 
 int main(void)
 {
-   config_t cfg;
 
    /* New flat form parses. */
    fresh_home();
    put("cross_verify: true\nverify_cmd: /bin/check\nverify_role: reviewer\n");
-   config_load(&cfg);
-   assert(cfg.cross_verify == 1);
-   assert(strcmp(cfg.verify_cmd, "/bin/check") == 0);
-   assert(strcmp(cfg.verify_role, "reviewer") == 0);
+   assert(config_cross_verify() == 1);
+   assert(strcmp(config_verify_cmd(), "/bin/check") == 0);
+   assert(strcmp(config_verify_role(), "reviewer") == 0);
 
    /* Old object form still parses (back-compat). */
    fresh_home();
    put("cross_verify:\n  enabled: true\n  verify_cmd: /old/cmd\n  role: qa\n  prompt: hi\n");
-   config_load(&cfg);
-   assert(cfg.cross_verify == 1 && "old object form must still set cross_verify");
-   assert(strcmp(cfg.verify_cmd, "/old/cmd") == 0 && "old object verify_cmd back-compat");
-   assert(strcmp(cfg.verify_role, "qa") == 0);
-   assert(strcmp(cfg.verify_prompt, "hi") == 0);
+   assert(config_cross_verify() == 1 && "old object form must still set cross_verify");
+   assert(strcmp(config_verify_cmd(), "/old/cmd") == 0 && "old object verify_cmd back-compat");
+   assert(strcmp(config_verify_role(), "qa") == 0);
+   assert(strcmp(config_verify_prompt(), "hi") == 0);
 
    /* config_set writes the flat form and it round-trips. */
    fresh_home();
@@ -79,9 +76,8 @@ int main(void)
    assert(strstr(y, "cross_verify") && !strstr(y, "enabled") &&
           "config_set writes the flat cross_verify, not the object");
    assert(strstr(y, "claude") && "unrelated key preserved");
-   config_load(&cfg);
-   assert(cfg.cross_verify == 1);
-   assert(strcmp(cfg.verify_role, "security") == 0);
+   assert(config_cross_verify() == 1);
+   assert(strcmp(config_verify_role(), "security") == 0);
 
    printf("  PASS: cross_verify flat form + old-object back-compat + config_set\n");
    return 0;

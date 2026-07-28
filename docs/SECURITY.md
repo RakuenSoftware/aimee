@@ -58,20 +58,24 @@ boundary.
 `aimee remote set` pins the server certificate and rotates the bootstrap bearer. On Linux it also
 enrolls a client certificate. Verify the printed fingerprint out of band.
 
-The shared bearer is read-only. In a single-user deployment without a configured per-user
-authority, a client holding an mTLS certificate enrolled by this server may use the explicit
-deployment tier. `data` permits memory, document, and index writes. `full` also permits agent,
-delegate, runner, and workspace control.
+After bootstrap, `aimee remote enroll` adds a bounded per-client bearer without invalidating
+existing clients. A bearer rotation is an explicit revoke-all: it replaces the primary and clears
+every additionally enrolled bearer in persisted and live state.
 
-When the authority is configured, remote write authority instead comes from a short-lived,
-single-use, KB-signed identity token whose `(server, team, subject)` has a live grant.
+When `AIMEE_API_BEARER_TOKEN` supplies the primary, rotate that deployment secret and restart
+instead of calling the API rotation route. A changed deployment primary revokes enrolled bearers;
+an unchanged primary preserves them across an ordinary restart.
+
+The shared bearer is read-only. Remote write authority comes from a short-lived, single-use,
+KB-signed identity token whose `(server, team, subject)` has a live grant. `data` permits memory,
+document, and index writes. `full` also permits agent, delegate, runner, and workspace control.
 
 The server pins the signing authority through `AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE` and enforces its
 configured server and team IDs. Token replay, unknown keys, wrong audience/team, expired grants, and
 unavailable replay storage fail closed. Grant administration is local-Unix-socket only.
 
-In strict mode `aimee.api.remote_writes` is only a ceiling, and
-`remote_writes.global_ignored` counts requests that lacked usable per-user authority.
+`aimee.api.remote_writes` is still parsed so old configuration loads, but it no longer authorizes a
+user write. A non-off value produces a warning and the `remote_writes.global_ignored` diagnostic.
 
 Enrollment material in `remote.conf` is mode `0600`, opened without following symlinks. Do not copy
 one client's certificate to another machine. Revoke the old identity and enroll the replacement.

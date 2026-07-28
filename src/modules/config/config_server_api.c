@@ -1,8 +1,7 @@
-/* config_server_api.c: parse the aimee-server public HTTP API config
+/* config_server_api.c: own the aimee-server public HTTP API config
  * (aimee.api.*) — the optional localhost TCP listener + bearer for the /v1
  * surface, plus per-client transport (socket|http|auto). Split out of
- * config.c to keep that file within the line budget. Parse-only (no save
- * round-trip), mirroring kb.api.* handling. */
+ * config.c to keep that file within the line budget. */
 #include "aimee.h"
 #include "config.h"
 #include "server.h" /* SERVER_REMOTE_WRITES_* */
@@ -47,6 +46,25 @@ void config_parse_server_api(config_t *cfg, const cJSON *root)
          if (cJSON_IsString(item) && item->valuestring)
             strncpy(cfg->server_api_bearer_token, item->valuestring,
                     sizeof(cfg->server_api_bearer_token) - 1);
+
+         /* Additional accepted bearers. Pairing a new client must not revoke
+          * the credential every other client is already using. */
+         item = cJSON_GetObjectItemCaseSensitive(api, "bearer_tokens_extra");
+         if (cJSON_IsArray(item))
+         {
+            cfg->server_api_bearer_extra_count = 0;
+            cJSON *tok = NULL;
+            cJSON_ArrayForEach(tok, item)
+            {
+               if (cfg->server_api_bearer_extra_count >= AIMEE_API_BEARER_EXTRA_MAX)
+                  break;
+               if (!cJSON_IsString(tok) || !tok->valuestring || !tok->valuestring[0])
+                  continue;
+               snprintf(cfg->server_api_bearer_extra[cfg->server_api_bearer_extra_count],
+                        sizeof(cfg->server_api_bearer_extra[0]), "%s", tok->valuestring);
+               cfg->server_api_bearer_extra_count++;
+            }
+         }
 
          item = cJSON_GetObjectItemCaseSensitive(api, "rate_limit_per_min");
          if (cJSON_IsNumber(item))
@@ -122,7 +140,75 @@ void config_parse_server_api(config_t *cfg, const cJSON *root)
    const char *bearer_env = getenv("AIMEE_API_BEARER_TOKEN");
    if (bearer_env && bearer_env[0])
    {
+      /* Extras are credentials enrolled under the primary persisted beside
+       * them. A deployment-secret change is an out-of-band rotation and must
+       * revoke that old set; keeping it would make changing the secret fail to
+       * revoke the clients it was meant to replace. An unchanged env primary
+       * preserves enrollments across ordinary container restarts. */
+      if (!cfg->server_api_bearer_token[0] || strcmp(cfg->server_api_bearer_token, bearer_env) != 0)
+      {
+         memset(cfg->server_api_bearer_extra, 0, sizeof(cfg->server_api_bearer_extra));
+         cfg->server_api_bearer_extra_count = 0;
+      }
       strncpy(cfg->server_api_bearer_token, bearer_env, sizeof(cfg->server_api_bearer_token) - 1);
       cfg->server_api_bearer_token[sizeof(cfg->server_api_bearer_token) - 1] = '\0';
    }
+}
+
+int config_server_api_bearer_extra_snapshot(char out[][256], int max)
+{
+   if (!out || max <= 0)
+      return 0;
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   if (config_load(cfg) != 0)
+   {
+      free(cfg);
+      return -1;
+   }
+   int count = cfg->server_api_bearer_extra_count;
+   if (count < 0)
+      count = 0;
+   if (count > AIMEE_API_BEARER_EXTRA_MAX)
+      count = AIMEE_API_BEARER_EXTRA_MAX;
+   if (count > max)
+      count = max;
+   for (int i = 0; i < count; i++)
+      snprintf(out[i], sizeof(out[i]), "%s", cfg->server_api_bearer_extra[i]);
+   free(cfg);
+   return count;
+}
+
+int config_server_api_bearer_extra_append(const char *bearer)
+{
+   if (!bearer || !bearer[0] || strnlen(bearer, 65) >= 65)
+      return -1;
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   /* This is a read-modify-write, so bypass the live snapshot: the file may
+    * contain a newer autonomous/operator edit that has not reached the next
+    * reload tick yet. */
+   int rc = config_load_file(cfg);
+   if (rc == 0)
+   {
+      int count = cfg->server_api_bearer_extra_count;
+      if (count < 0 || count >= AIMEE_API_BEARER_EXTRA_MAX)
+         rc = -1;
+      else
+      {
+         snprintf(cfg->server_api_bearer_extra[count], sizeof(cfg->server_api_bearer_extra[count]),
+                  "%s", bearer);
+         cfg->server_api_bearer_extra_count = count + 1;
+         rc = config_save(cfg);
+         /* Enrollment returns a bearer that must authenticate immediately.
+          * Publish the durable write before the request returns instead of
+          * waiting for the server's one-second out-of-band reload tick. */
+         if (rc == 0 && config_reload() < 0)
+            rc = -1;
+      }
+   }
+   free(cfg);
+   return rc;
 }

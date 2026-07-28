@@ -84,33 +84,73 @@ static int write_text_file(const char *path, const char *content, mode_t mode)
    return 0;
 }
 
+/* Path to write into the user's GLOBAL client config (Claude Code hooks, MCP
+ * server command). Those files outlive whatever binary happens to be running,
+ * so the path must outlive it too.
+ *
+ * This used to return the running executable's own path whenever that binary was
+ * named `aimee`. Build a client in a throwaway worktree, run it once, and it
+ * rewrote ~/.claude/settings.json to point every hook at that worktree — then the
+ * worktree was deleted and EVERY hook in EVERY session began failing with
+ * "/bin/sh: 1: /home/.../aimee-<sha>/aimee: not found", in projects that had
+ * nothing to do with the build. A transient path must never be persisted into
+ * durable config.
+ *
+ * Split from the getenv/exe-path plumbing so the decision itself is testable:
+ * |installed| is the installed client (NULL/empty when absent) and |exe| is the
+ * running binary. Prefer the install; fall back to the running binary only when
+ * there is nothing installed to point at — the first-run bootstrap the exe path
+ * was there to serve. Returns 0 and fills |out| on success. */
+int client_integrations_pick_bin_path(const char *installed, const char *exe, char *out, size_t cap)
+{
+   if (!out || cap == 0)
+      return -1;
+   if (installed && installed[0])
+      return (size_t)snprintf(out, cap, "%s", installed) < cap ? 0 : -1;
+   if (exe && exe[0])
+      return (size_t)snprintf(out, cap, "%s", exe) < cap ? 0 : -1;
+   return -1;
+}
+
+/* The installed client, or NULL when there is none. */
+static const char *aimee_installed_bin_path(char *buf, size_t cap)
+{
+   const char *home = getenv("HOME");
+   if (!home || !home[0])
+      return NULL;
+   if ((size_t)snprintf(buf, cap, "%s/.local/bin/aimee", home) >= cap)
+      return NULL;
+   return access(buf, X_OK) == 0 ? buf : NULL;
+}
+
 static const char *resolved_aimee_bin_path(void)
 {
    static char path[MAX_PATH_LEN];
    if (path[0])
       return path;
 
-   if (platform_get_exe_path(path, sizeof(path)) == 0)
+   char installed_buf[MAX_PATH_LEN];
+   const char *installed = aimee_installed_bin_path(installed_buf, sizeof(installed_buf));
+
+   char exe[MAX_PATH_LEN] = "";
+   if (platform_get_exe_path(exe, sizeof(exe)) == 0)
    {
-      char *base = strrchr(path, '/');
-      base = base ? base + 1 : path;
-      if (strcmp(base, "aimee") == 0 || strcmp(base, "aimee.exe") == 0 ||
-          strcmp(base, "aimee-client") == 0 || strcmp(base, "aimee-client.exe") == 0)
-         return path;
+      char *base = strrchr(exe, '/');
+      base = base ? base + 1 : exe;
       if (strcmp(base, "aimee-server") == 0)
-      {
-         snprintf(base, sizeof(path) - (size_t)(base - path), "aimee");
-         return path;
-      }
-      if (strcmp(base, "aimee-server.exe") == 0)
-      {
-         snprintf(base, sizeof(path) - (size_t)(base - path), "aimee.exe");
-         return path;
-      }
+         snprintf(base, sizeof(exe) - (size_t)(base - exe), "aimee");
+      else if (strcmp(base, "aimee-server.exe") == 0)
+         snprintf(base, sizeof(exe) - (size_t)(base - exe), "aimee.exe");
+      else if (strcmp(base, "aimee") != 0 && strcmp(base, "aimee.exe") != 0 &&
+               strcmp(base, "aimee-client") != 0 && strcmp(base, "aimee-client.exe") != 0)
+         exe[0] = '\0'; /* not a client binary — not a usable fallback */
    }
 
-   path[0] = '\0';
+   if (client_integrations_pick_bin_path(installed, exe, path, sizeof(path)) == 0)
+      return path;
+
    const char *home = getenv("HOME");
+   path[0] = '\0';
    if (home)
       snprintf(path, sizeof(path), "%s/.local/bin/aimee", home);
    return path;

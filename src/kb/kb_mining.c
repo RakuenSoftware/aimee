@@ -282,9 +282,7 @@ static int propose_recurrence(const char *role, const char *failure_mode, int ev
     * an existing pending proposal rather than spamming new ones (and never produces
     * both a direct artifact and a proposal for one cluster). */
    {
-      config_t lcfg;
-      config_load(&lcfg);
-      if (lcfg.kb_mining_failure_learning_enabled)
+      if (config_kb_mining_failure_learning_enabled())
       {
          char target_key[256];
          snprintf(target_key, sizeof(target_key), "delegate_exit:%s:%s", role ? role : "",

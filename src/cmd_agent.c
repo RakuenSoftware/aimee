@@ -769,9 +769,7 @@ static void ag_parallel(app_ctx_t *ctx, int argc, char **argv)
 
 static void ag_stats(app_ctx_t *ctx, int argc, char **argv)
 {
-   config_t db1_cfg;
-   config_load(&db1_cfg);
-   if (db1_init(db1_cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
       fatal("agent stats: could not initialize DB1");
    const char *name = (argc >= 1) ? argv[0] : NULL;
    agent_stats_t stats[MAX_AGENTS];
@@ -1369,9 +1367,7 @@ void cmd_plans(app_ctx_t *ctx, int argc, char **argv)
 
    if (strcmp(argv[0], "list") == 0)
    {
-      config_t db1_cfg;
-      config_load(&db1_cfg);
-      if (db1_init(db1_cfg.db1_path) != 0)
+      if (db1_init(config_db1_path()) != 0)
          fatal("plans list: could not initialize DB1");
       plan_t plans[20];
       int count = db1_execution_plan_list(plans, 20);
@@ -1384,9 +1380,7 @@ void cmd_plans(app_ctx_t *ctx, int argc, char **argv)
    }
    else if (strcmp(argv[0], "show") == 0 && argc >= 2)
    {
-      config_t db1_cfg;
-      config_load(&db1_cfg);
-      if (db1_init(db1_cfg.db1_path) != 0)
+      if (db1_init(config_db1_path()) != 0)
          fatal("plans show: could not initialize DB1");
       int pid = atoi(argv[1]);
       plan_t plan;
@@ -1424,9 +1418,7 @@ void cmd_plans(app_ctx_t *ctx, int argc, char **argv)
    }
    else if (strcmp(argv[0], "verify") == 0 && argc >= 2)
    {
-      config_t db1_cfg;
-      config_load(&db1_cfg);
-      if (db1_init(db1_cfg.db1_path) != 0)
+      if (db1_init(config_db1_path()) != 0)
          fatal("plans verify: could not initialize DB1");
       int pid = atoi(argv[1]);
       plan_t plan;
@@ -1442,9 +1434,7 @@ void cmd_plans(app_ctx_t *ctx, int argc, char **argv)
    }
    else if (strcmp(argv[0], "replay") == 0 && argc >= 2)
    {
-      config_t db1_cfg;
-      config_load(&db1_cfg);
-      if (db1_init(db1_cfg.db1_path) != 0)
+      if (db1_init(config_db1_path()) != 0)
          fatal("plans replay: could not initialize DB1");
       int pid = atoi(argv[1]);
       plan_t plan;
@@ -1890,9 +1880,7 @@ void cmd_eval(app_ctx_t *ctx, int argc, char **argv)
          fatal("no agents configured");
 
       agent_http_init();
-      config_t db1_cfg;
-      config_load(&db1_cfg);
-      if (db1_init(db1_cfg.db1_path) != 0)
+      if (db1_init(config_db1_path()) != 0)
          fatal("eval run: could not initialize DB1");
       eval_result_t results[AGENT_MAX_EVAL_TASKS];
       int passes =
@@ -1920,9 +1908,7 @@ void cmd_eval(app_ctx_t *ctx, int argc, char **argv)
    }
    else if (strcmp(argv[0], "results") == 0)
    {
-      config_t db1_cfg;
-      config_load(&db1_cfg);
-      if (db1_init(db1_cfg.db1_path) != 0)
+      if (db1_init(config_db1_path()) != 0)
          fatal("eval results: could not initialize DB1");
       const char *suite_filter = (argc >= 2) ? argv[1] : NULL;
 

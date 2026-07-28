@@ -268,14 +268,10 @@ int server_http_authorize(int is_tcp, const char *bearer_cfg, const char *auth_h
    return 0;
 }
 
-int server_http_bootstrap_gate(int is_tcp, const char *live_bearer, const char *method,
-                               const char *path)
+int server_http_bootstrap_gate(int is_tcp, int bootstrap_only, const char *method, const char *path)
 {
-   if (!is_tcp || !live_bearer || strcmp(live_bearer, AIMEE_BOOTSTRAP_BEARER) != 0)
-      return 0; /* UDS, or already rotated to a strong token -> gate off */
-   const char *pin = getenv("AIMEE_API_BEARER_TOKEN");
-   if (pin && pin[0])
-      return 0; /* operator pinned the bearer -> opted out of TOFU */
+   if (!is_tcp || !bootstrap_only)
+      return 0;
    if (method && path && strcmp(method, "POST") == 0 && strcmp(path, "/v1/api/rotate_bearer") == 0)
       return 0; /* the one route the bootstrap may reach: mint the strong token */
    return 1;    /* refuse: enrollment required */
@@ -326,8 +322,8 @@ void server_http_api_status_report(int http_port, int bearer_configured, int rat
       SAR_APPEND("  rate limit:    unlimited\n");
 
    /* Per-user write authorization (0.3.0). The counter is surfaced here because
-    * a counter nobody can read is not a metric — an operator in strict mode needs
-    * to see how much traffic lacked a usable identity token.
+    * a counter nobody can read is not a metric — an operator mid-cutover needs
+    * to see how much traffic the retired global is no longer letting through.
     *
     * Whether AIMEE_SERVER_TEAM_ID is configured is deliberately NOT reported
     * here: that check lives in the db1-backed resolver, and reaching for it
@@ -336,8 +332,8 @@ void server_http_api_status_report(int http_port, int bearer_configured, int rat
     * "reads work but every write is denied" will actually be looking. */
    unsigned long long ignored = (unsigned long long)server_http_global_ignored_count();
    if (ignored)
-      SAR_APPEND("  remote_writes: strict per-user mode refused %llu request(s) that the "
-                 "deployment tier would otherwise have allowed "
+      SAR_APPEND("  remote_writes: aimee.api.remote_writes NO LONGER AUTHORIZES; %llu request(s) "
+                 "refused that it would formerly have allowed "
                  "(remote_writes.global_ignored)\n",
                  ignored);
 
@@ -1004,7 +1000,7 @@ static int g_management_tls_fd = -1; /* dedicated required-mTLS management liste
 static char g_uds_path[sizeof(((struct sockaddr_un *)0)->sun_path)] = "";
 static char g_bearer[256] = ""; /* configured TCP bearer (empty = none) */
 static int g_rate_limit = 0;    /* TCP requests / 60s (0 = unlimited) */
-int g_remote_writes = 0;        /* deployment ceiling; bootstrap mTLS tier before strict auth */
+int g_remote_writes = 0;        /* aimee.api.remote_writes: parsed, authorizes nothing */
 static server_http_rate_state_t g_rate_state = {0, 0};
 static pthread_mutex_t g_rate_lock = PTHREAD_MUTEX_INITIALIZER;
 /* guards g_rate_state across conns */
@@ -1020,15 +1016,11 @@ const char *server_http_default_path(void)
    return path;
 }
 
-/* Hot-swap the live TCP/TLS bearer without a restart. Callable only from a /v1
- * route handler (e.g. api.rotate_bearer), which runs on the single listener
- * thread that also reads g_bearer for authorization — so the write is serialized
- * against auth reads and needs no lock. NULL/empty clears the bearer. */
+/* Hot-swap the live TCP/TLS bearer without a restart. Rotation is a revoke-all
+ * operation, so it atomically clears every additionally-enrolled bearer too. */
 void server_http_set_bearer(const char *bearer)
 {
-   g_bearer[0] = '\0';
-   if (bearer && bearer[0])
-      snprintf(g_bearer, sizeof(g_bearer), "%s", bearer);
+   server_http_update_primary_bearer(g_bearer, sizeof(g_bearer), bearer, 1 /* revoke enrolled */);
 }
 
 /* Write the whole buffer. Returns the bytes written, or -1 on a write error
@@ -1610,37 +1602,44 @@ void handle_conn(int fd, int is_tcp, int is_management)
       LOG_INFO("server.http", "%s %s -> 401 (mtls required) req_id=%s", method, path, request_id);
       return;
    }
-   /* Resolve a strict per-user tier first. Verification has no side effects; a
-    * token's single-use jti is spent further down only once the request is known
-    * servable. A single-user deployment whose authority is not configured may
-    * instead use its explicit deployment tier, but only over an enrolled mTLS
-    * connection. Bearer-only traffic never receives this compatibility path. */
+   /* Per-user remote_writes (proposal §5): the process-global no longer
+    * authorizes anything — the tier comes from the caller's own kb-signed
+    * identity token, resolved here BEFORE capabilities are derived. Verification
+    * has no side effects; the token's single-use jti is spent further down, only
+    * once the request is known to be servable. UDS never reaches the gate at all
+    * (server_http_resolve_write_tier is a no-op when !is_tcp), so the local
+    * operator keeps full capability exactly as §7 requires. */
    server_identity_token_claims_t identity_claims;
    int identity_present = 0;
-   int identity_remote_writes = server_http_resolve_write_tier(
+   int effective_remote_writes = server_http_resolve_write_tier(
        is_tcp, buf, method, path, request_id, &identity_claims, &identity_present);
-   int effective_remote_writes = server_http_select_write_tier(
-       is_tcp, mtls_authenticated,
-       server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_READY, g_remote_writes,
-       identity_remote_writes, identity_present);
+   char first_user_principal[128] = "";
+   (void)server_http_first_user_apply_cert_grant(mtls_authenticated, rc_serial,
+                                                 &effective_remote_writes, first_user_principal,
+                                                 sizeof(first_user_principal));
+   char request_bearer[sizeof(g_bearer)];
+   server_http_primary_bearer_snapshot(g_bearer, request_bearer, sizeof(request_bearer));
    uint32_t effective_caps =
        management_authenticated
            ? 0
-           : server_http_effective_conn_caps(is_tcp, g_bearer, effective_remote_writes, mtls_mode,
-                                             mtls_authenticated);
-   effective_caps = server_http_enrollment_caps(effective_caps, is_tcp, mtls_authenticated,
-                                                server_conn_io_has_ssl(fd), g_bearer, method, path);
+           : server_http_effective_conn_caps(is_tcp, request_bearer, effective_remote_writes,
+                                             mtls_mode, mtls_authenticated);
+   effective_caps =
+       server_http_enrollment_caps(effective_caps, is_tcp, mtls_authenticated,
+                                   server_conn_io_has_ssl(fd), request_bearer, method, path);
    /* Establish the per-request context (#3) only after authenticating the
     * durable certificate, so downstream dispatch sees the same effective caps
     * as the outer route gate. */
    server_http_populate_request_context(fd, is_tcp, buf, request_id, method, path, effective_caps);
-
+   if (first_user_principal[0])
+      request_context_override_principal(first_user_principal);
    /* Authorize before reading the body: TCP requires either the durably valid
     * client certificate above or a valid bearer; UDS relies on permissions. */
    {
       char auth[512] = "";
       char api_key[512] = "";
       char skey[256] = "";
+      int bootstrap_only = 0;
       int has_auth = http_header(buf, "Authorization", auth, sizeof(auth));
       int has_api_key = http_header(buf, "x-api-key", api_key, sizeof(api_key));
       int has_skey = http_header(buf, "X-Aimee-Session-Key", skey, sizeof(skey));
@@ -1658,28 +1657,23 @@ void handle_conn(int fd, int is_tcp, int is_management)
       anthropic_http_capture_request_headers(buf); /* parity: per-request anthropic-* hdrs */
       int az = transport_authenticated
                    ? 0
-                   : server_http_authorize(is_tcp, g_bearer, has_auth ? auth : NULL,
-                                           has_api_key ? api_key : NULL, has_skey);
+                   : server_http_authorize_enrolled_request(
+                         is_tcp, g_bearer, has_auth ? auth : NULL, has_api_key ? api_key : NULL,
+                         has_skey, &bootstrap_only);
       if (az != 0)
       {
-         const char *msg = az == 401 ? "{\"error\":{\"message\":\"missing or invalid bearer "
-                                       "token\",\"type\":\"authentication_error\"}}"
-                                     : "{\"error\":{\"message\":\"this endpoint requires a "
-                                       "configured bearer token\",\"type\":\"server_error\"}}";
+         const char *msg = server_http_auth_error_body(az);
          send_response(fd, az, msg, request_id);
          LOG_INFO("server.http", "%s %s -> %d req_id=%s", method, path, az, request_id);
          return;
       }
 
-      /* Trust-on-first-use enforcement: while the live /v1 bearer is still the
-       * well-known image-seeded bootstrap, the ONLY route permitted on the TCP
-       * listener is rotating it to a strong per-deployment token. Auth already
-       * passed, so the caller presented the bootstrap; refuse every other route
-       * so the pre-set default can never perform a real operation — it exists
-       * solely to mint the real bearer, after which g_bearer no longer equals the
-       * bootstrap and this gate self-disables. Closes the "a network-published
-       * server keeps accepting the public default bearer" hole. */
-      if (!management_authenticated && server_http_bootstrap_gate(is_tcp, g_bearer, method, path))
+      /* The image-seeded recovery bearer is rotate-only. Classification above
+       * is based on the credential that authenticated this request, so an
+       * additive wizard enrollment bearer remains usable for CSR signing even
+       * while the unrelated recovery bearer is still configured as primary. */
+      if (!management_authenticated &&
+          server_http_bootstrap_gate(is_tcp, bootstrap_only, method, path))
       {
          send_response(fd, 401,
                        "{\"error\":{\"message\":\"the one-time bootstrap bearer must be rotated "
@@ -1715,26 +1709,24 @@ void handle_conn(int fd, int is_tcp, int is_management)
    if (is_tcp && !server_http_route_allowed_caps(is_tcp, effective_caps, method, path,
                                                  effective_remote_writes))
    {
-      /* Name the actual remedy for the active deployment shape. */
-      if (server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_READY)
-         send_response(fd, 403,
-                       "{\"error\":{\"message\":\"this endpoint requires capabilities beyond "
-                       "the presented token's scope. Strict per-user authorization is enabled; "
-                       "an operator grants the exact subject with `aimee kb grant set` (see "
-                       "docs/UPGRADING.md).\",\"type\":\"permission_error\"}}",
-                       request_id);
-      else
-         send_response(fd, 403,
-                       "{\"error\":{\"message\":\"this endpoint requires an enrolled mTLS "
-                       "client and a sufficient aimee.api.remote_writes tier; a bearer alone is "
-                       "read/query only. Re-run client enrollment and see docs/QUICKSTART.md.\","
-                       "\"type\":\"permission_error\"}}",
-                       request_id);
-      /* Count only strict-mode requests the deployment tier would otherwise
-       * allow, so the metric measures missing per-user authority rather than an
-       * unrelated transport refusal. */
-      if (server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_READY &&
-          g_remote_writes != SERVER_REMOTE_WRITES_OFF &&
+      /* Name the remedy. The bare "beyond the presented token's scope" left a
+       * caller with nowhere to go: following QUICKSTART end to end now lands here
+       * on the first kb write, and nothing on screen says a write-tier grant is
+       * what is missing or who issues it. The mechanism is already public
+       * (QUICKSTART 1.4, docs/UPGRADING.md), so pointing at it leaks nothing. */
+      send_response(fd, 403,
+                    "{\"error\":{\"message\":\"this endpoint requires capabilities beyond the "
+                    "presented token's scope. Over the network a bearer is read/query only "
+                    "until your subject holds a write-tier grant on this server; an operator "
+                    "issues one with `aimee kb grant set` (see docs/UPGRADING.md).\","
+                    "\"type\":\"permission_error\"}}",
+                    request_id);
+      /* Count the requests the retired global would formerly have allowed, so an
+       * operator can see exactly how much traffic the cutover is refusing
+       * instead of inferring it from complaints. Only counts denials the old
+       * global would have permitted - a request that fails for an unrelated
+       * reason is not attributable to this change. */
+      if (g_remote_writes != SERVER_REMOTE_WRITES_OFF &&
           server_http_route_allowed_caps(is_tcp, effective_caps, method, path, g_remote_writes))
          server_http_note_global_ignored();
       LOG_INFO("server.http", "%s %s -> 403 (caps) req_id=%s", method, path, request_id);
@@ -1763,20 +1755,17 @@ void handle_conn(int fd, int is_tcp, int is_management)
       }
    }
    OPENSSL_cleanse(&identity_claims, sizeof(identity_claims));
-
-   config_t transport_cfg;
-   config_load(&transport_cfg);
    char connection_header[128] = "";
    int keepalive_requested =
        server_conn_io_has_ssl(fd) && server_http_keepalive_route_eligible(path) &&
        http_header(buf, "Connection", connection_header, sizeof(connection_header)) &&
        strcasestr(connection_header, "keep-alive") != NULL &&
        strcasestr(connection_header, "close") == NULL;
-   if (transport_cfg.transport_server_keepalive_enabled && keepalive_requested)
+   if (config_transport_server_keepalive_enabled() && keepalive_requested)
       server_http_keepalive_set(1);
    char accept_encoding[128] = "";
    int gzip_allowed =
-       transport_cfg.transport_thinclient_gzip_enabled && server_http_gzip_route_eligible(path);
+       config_transport_thinclient_gzip_enabled() && server_http_gzip_route_eligible(path);
    server_http_gzip_set(
        gzip_allowed &&
        http_header(buf, "Accept-Encoding", accept_encoding, sizeof(accept_encoding)) &&
@@ -2030,9 +2019,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
        (strcmp(path, "/v1/chat/completions") == 0 || strcmp(path, "/v1/completions") == 0 ||
         strcmp(path, "/v1/responses") == 0))
    {
-      config_t evcfg;
-      config_load(&evcfg);
-      if (evcfg.kb_evidence_emit_enabled)
+      if (config_kb_evidence_emit_enabled())
       {
          char tid[40];
          ingress_preinject_mint_turn_id(tid, sizeof(tid));
@@ -2097,6 +2084,8 @@ void handle_conn(int fd, int is_tcp, int is_management)
     * loopback_rpc copies it into the synthesized conn. Cleared after the route so
     * a reused worker thread cannot leak it into the next request. */
    server_http_identity_capture(fd, is_tcp, buf);
+   if (first_user_principal[0])
+      server_http_identity_override_principal(first_user_principal);
    server_http_identity_set_query(query); /* cleared by server_http_identity_clear */
    int status = server_http_route(method, path, body, body_len, resp, SHTTP_RESP_MAX);
    g_rpc_conn_caps = CAPS_READ_ONLY;
@@ -2106,7 +2095,6 @@ void handle_conn(int fd, int is_tcp, int is_management)
    free(resp);
    free(body);
 }
-
 /* Per-connection worker: each accepted connection is handled on its own
  * detached thread, so a slow request (e.g. a synchronous chat completion) or an
  * SSE stream cannot block the accept loop, and independent /v1 requests run
@@ -2336,47 +2324,37 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
    snprintf(g_uds_path, sizeof(g_uds_path), "%s", addr.sun_path);
 
    /* Optional localhost TCP listener for OpenAI-style external tools. */
-   g_bearer[0] = '\0';
-   if (bearer_token && bearer_token[0])
-      snprintf(g_bearer, sizeof(g_bearer), "%s", bearer_token);
+   /* Startup preserves the enrolled set published from config before this call. */
+   server_http_update_primary_bearer(g_bearer, sizeof(g_bearer), bearer_token,
+                                     0 /* preserve enrolled */);
    g_rate_limit = rate_limit_per_min > 0 ? rate_limit_per_min : 0;
    g_remote_writes = remote_writes;
-   server_write_tier_config_state_t write_tier_config = server_write_tier_config_state();
+   /* aimee.api.remote_writes is still parsed so an existing config file loads,
+    * but it no longer authorizes anything: /v1 write authority now comes from
+    * the caller's kb-signed identity token. Say so once, loudly, at startup -
+    * an operator who upgraded with this set to data/full and did not notice
+    * would otherwise conclude the release simply broke writes. */
    if (g_remote_writes != SERVER_REMOTE_WRITES_OFF)
-   {
-      if (write_tier_config == SERVER_WRITE_TIER_CONFIG_READY)
-         LOG_WARN("server.http",
-                  "strict per-user remote-write authorization is enabled; the deployment tier "
-                  "does not replace a missing user identity token. Refusals it would otherwise "
-                  "allow are counted as remote_writes.global_ignored");
-      else
-         LOG_WARN("server.http",
-                  "per-user remote-write authority is not configured; enrolled mTLS clients use "
-                  "the explicit aimee.api.remote_writes tier. Bearer-only clients remain "
-                  "read/query-only");
-   }
-   switch (write_tier_config)
+      LOG_WARN("server.http",
+               "aimee.api.remote_writes is set but no longer authorizes writes; per-user grants "
+               "replace it (see docs/UPGRADING.md 0.3.0). Requests it would formerly have allowed "
+               "are counted as remote_writes.global_ignored");
+   switch (server_write_tier_config_state())
    {
    case SERVER_WRITE_TIER_CONFIG_NO_TEAM:
-      LOG_WARN("server.http",
-               "AIMEE_SERVER_TEAM_ID is unset or invalid: strict per-user authorization is "
-               "unavailable; enrolled mTLS clients may use the explicit deployment tier. "
-               "Bearer-only traffic remains read/query-only; run `aimee remote set` on a "
-               "client to enroll its certificate and enable configured writes");
+      LOG_ERROR("server.http",
+                "AIMEE_SERVER_TEAM_ID is unset or invalid: KB-issued write tokens are denied "
+                "with no_team_configured; a verified certificate-bound first owner is unaffected");
       break;
    case SERVER_WRITE_TIER_CONFIG_NO_SERVER_ID:
-      LOG_WARN("server.http",
-               "AIMEE_SERVER_ID is unset: strict per-user authorization is unavailable; "
-               "enrolled mTLS clients may use the explicit deployment tier. Bearer-only traffic "
-               "remains read/query-only; run `aimee remote set` on a client to enroll its "
-               "certificate and enable configured writes");
+      LOG_ERROR("server.http",
+                "AIMEE_SERVER_ID is unset: KB-issued write tokens are denied with invalid; "
+                "a verified certificate-bound first owner is unaffected");
       break;
    case SERVER_WRITE_TIER_CONFIG_NO_TRUST_BUNDLE:
-      LOG_WARN("server.http",
-               "AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE is unset: strict per-user authorization is "
-               "unavailable; enrolled mTLS clients may use the explicit deployment tier. "
-               "Bearer-only traffic remains read/query-only; run `aimee remote set` on a "
-               "client to enroll its certificate and enable configured writes");
+      LOG_ERROR("server.http",
+                "AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE is unset: KB-issued write tokens are denied "
+                "with invalid; a verified certificate-bound first owner is unaffected");
       break;
    case SERVER_WRITE_TIER_CONFIG_READY:
       break;

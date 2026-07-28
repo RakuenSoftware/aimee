@@ -1958,10 +1958,7 @@ int handle_identity_snapshot(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    if (platform_mkdir_p(out_dir, 0755) != 0)
       return server_send_error(conn, "identity snapshot: could not create output directory", NULL);
-
-   config_t db1_cfg;
-   config_load(&db1_cfg);
-   if (db1_init(db1_cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
       return server_send_error(conn, "identity snapshot: could not initialize DB1", NULL);
 
    cJSON *snap = identity_snapshot_build();

@@ -12,44 +12,28 @@
 # the server auto-provisions a self-signed cert at $AIMEE_HOME/tls/server.{crt,key}
 # on first start. Mount your own cert there to override.
 #
-# `bearer_token: aimee-local-dev` is a ONE-TIME BOOTSTRAP, not a standing
-# credential. The first thin client that connects (`aimee remote set <url>
-# aimee-local-dev`) automatically calls api.rotate_bearer, which mints a strong
-# random per-deployment bearer, hot-swaps it in, and persists it here — the
-# bootstrap token stops working the instant that happens. The exposure window is
-# only "deploy → first client enrolls". To skip the bootstrap entirely, pin your
-# own token out-of-band via the AIMEE_API_BEARER_TOKEN env (a secret store /
-# .gitignore'd per-host .env); an explicit env token disables the TOFU rotation.
+# `bearer_token: aimee-local-dev` remains a rotate-only recovery bootstrap, not a
+# standing credential. Normal managed setup does not expose it to the user: the
+# authenticated wizard mints an additive user-specific enrollment bearer, and
+# the client binds that identity to mTLS. To skip the recovery bootstrap
+# entirely, pin your own token via AIMEE_API_BEARER_TOKEN.
 aimee:
   api:
     http_port: 8740
     tls_port: 8743
+    # Request client certificates during first-run enrollment.  The durable
+    # roster starts empty, so bearer setup still works; after every enrolled
+    # certificate has been presented the server atomically promotes this lane
+    # to required mTLS.  Starting with mTLS disabled would make the wizard's
+    # certificate enrollment inert until an undocumented server restart.
+    mtls: optional
     bearer_token: "aimee-local-dev"
     rate_limit_per_min: 0
-    # Request the per-client certificate issued by `aimee remote set`. The
-    # managed image also enforces this through AIMEE_API_MTLS so an older
-    # persisted config is upgraded safely.
-    mtls: optional
-    # This image binds the TLS /v1 on 0.0.0.0 so a thin client drives it remotely,
-    # including delegates/roundtables/tools — which require remote_writes="full".
-    # The image also forces this via AIMEE_API_REMOTE_WRITES (Dockerfile.server) so
-    # it survives a fresh redeploy that reseeds this file. Trusted networks only
-    # (ships a known dev bearer); for any exposed deployment set your own bearer +
-    # TLS and lower this:
-    #   remote_writes: data   # data writes (memory/work/rules/skill), cap-gated
-    #   remote_writes: "off"  # TCP bearer is read/query/chat only
-    remote_writes: "full"
-
-    # Without strict per-user authority, remote_writes controls what an enrolled,
-    # verified mTLS client may do over the published port:
-    #   off    read/query/chat only (mutations are local-UDS-only)
-    #   data   + data writes (memory/work/rules/skill), capability-gated
-    #   full   + delegate/tool/roundtable (CAPS_ALL)
-    # Default `full` so the thin-client model works out of the box: a remote
-    # `aimee` client driving this server can run delegates and the roundtable
-    # after `aimee remote set` enrolls its client certificate. A bearer without
-    # that certificate remains read-only. OVERRIDE the bootstrap bearer and use
-    # a publicly trusted TLS leaf for any deployment exposed beyond a
+    # Compatibility field only: it no longer authorizes any caller. The wizard
+    # binds the first user's explicit full grant to mTLS; additional users use
+    # authority-managed grants. Keep this off to avoid a misleading legacy
+    # warning and `remote_writes.global_ignored` diagnostics.
+    remote_writes: "off"
 # Delegate roundtable / MoA ensemble, on by default. The panel is the seeded
 # agents.json roster; provider credentials live in the server-owned encrypted
 # vault (no keys are baked into the image or sent by a thin client per session).

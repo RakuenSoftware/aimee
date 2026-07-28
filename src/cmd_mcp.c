@@ -23,13 +23,13 @@ static const char *verdict_name(osv_verdict_t verdict)
    }
 }
 
-static int target_allowlisted(const config_t *cfg, const osv_target_t *target)
+static int target_allowlisted(const osv_target_t *target)
 {
    char key[256];
    snprintf(key, sizeof(key), "%s:%s", target->ecosystem, target->name);
-   for (int i = 0; i < cfg->mcp_osv_allow_count; i++)
+   for (int i = 0; i < config_mcp_osv_allow_count(); i++)
    {
-      if (strcmp(cfg->mcp_osv_allow[i], key) == 0)
+      if (strcmp(config_mcp_osv_allow(i), key) == 0)
          return 1;
    }
    return 0;
@@ -73,11 +73,9 @@ static void mcp_cmd_audit(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)argc;
    (void)argv;
-   config_t cfg;
-   config_load(&cfg);
-   if (db1_init(cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
    {
-      fprintf(stderr, "mcp audit: db1_init failed for %s\n", cfg.db1_path);
+      fprintf(stderr, "mcp audit: db1_init failed for %s\n", config_db1_path());
       return;
    }
 
@@ -86,9 +84,12 @@ static void mcp_cmd_audit(app_ctx_t *ctx, int argc, char **argv)
       printf("%-20s %-8s %-36s %-12s %-20s %s\n", "client", "eco", "package", "verdict",
              "checked_at", "advisories");
 
-   for (int i = 0; i < cfg.mcp_client_count; i++)
+   for (int i = 0; i < config_mcp_client_count(); i++)
    {
-      const config_mcp_client_t *client = &cfg.mcp_clients[i];
+      config_mcp_client_t client_buf;
+      if (config_mcp_client_at(i, &client_buf) != 0)
+         continue;
+      config_mcp_client_t *client = &client_buf;
       osv_target_t target;
       if (client_target(client, &target) != 0)
       {
@@ -117,18 +118,19 @@ static void mcp_cmd_recheck(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)ctx;
    const char *filter = argc >= 1 ? argv[0] : NULL;
-   config_t cfg;
-   config_load(&cfg);
-   if (db1_init(cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
    {
-      fprintf(stderr, "mcp recheck: db1_init failed for %s\n", cfg.db1_path);
+      fprintf(stderr, "mcp recheck: db1_init failed for %s\n", config_db1_path());
       return;
    }
 
    int checked = 0;
-   for (int i = 0; i < cfg.mcp_client_count; i++)
+   for (int i = 0; i < config_mcp_client_count(); i++)
    {
-      config_mcp_client_t *client = &cfg.mcp_clients[i];
+      config_mcp_client_t client_buf;
+      if (config_mcp_client_at(i, &client_buf) != 0)
+         continue;
+      config_mcp_client_t *client = &client_buf;
       if (filter && strcmp(filter, client->name) != 0)
          continue;
       osv_target_t target;
@@ -146,9 +148,8 @@ static void mcp_cmd_recheck(app_ctx_t *ctx, int argc, char **argv)
          (void)db1_mcp_osv_cache_upsert(target.ecosystem, target.name, target.version, "clean", "");
       const char *action = "allow";
       if (result.verdict == OSV_VERDICT_MALWARE)
-         action = target_allowlisted(&cfg, &target)
-                      ? "allow_allowlisted"
-                      : (cfg.mcp_osv_enforce ? "block" : "shadow_block");
+         action = target_allowlisted(&target) ? "allow_allowlisted"
+                                              : (cfg.mcp_osv_enforce ? "block" : "shadow_block");
       (void)db1_mcp_osv_audit(client->name, target.ecosystem, target.name, target.version, verdict,
                               action, result.advisory_ids);
       printf("%s: %s:%s %s%s%s\n", client->name, target.ecosystem, target.name, verdict,

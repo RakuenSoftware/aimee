@@ -83,10 +83,12 @@ SCRATCH="$(mktemp -d)"
 export AIMEE_HOME="$SCRATCH"
 mkdir -p "$AIMEE_HOME/.config/aimee"
 # Server config: move both /v1 listeners to the requested scratch ports. The
-# baked managed policy requests a client certificate and allows an enrolled
-# client to use its explicit deployment tier; a bearer alone remains read-only.
+# managed policy requests a client certificate and keeps the retired global
+# write switch off; the wizard creates the first user's explicit grant.
 sed "s/8740/${SERVER_PORT}/; s/8743/${SERVER_TLS_PORT}/; s/aimee-local-dev/${BEARER}/" \
     deploy/container/aimee-server.yaml > "$AIMEE_HOME/aimee.yaml"
+openssl rand -hex -out "$AIMEE_HOME/server.token" 32
+chmod 600 "$AIMEE_HOME/server.token"
 # kb config: the baked container config points sidecar commands at the in-image
 # /opt/aimee/scripts/ path; for a NATIVE local run rewrite them to the repo's
 # scripts/ so the kb can actually popen embed-remote.py etc.
@@ -114,6 +116,8 @@ if [[ -n "${AIMEE_E2E_EMBEDDER_URL:-}" ]]; then
   [[ -n "${AIMEE_EMBEDDING_DIM:-}" ]] && export AIMEE_EMBEDDING_DIM
 fi
 export AIMEE_SERVER_HTTP_BIND=1
+export AIMEE_DEPLOY_ENABLED=1
+export AIMEE_API_REMOTE_WRITES=off
 export AIMEE_DB1_URL="sqlite://${AIMEE_HOME}/aimee.db"
 
 kb_pid=""; server_pid=""
@@ -155,27 +159,41 @@ bold "==> Starting aimee-server"
 "$REPO/aimee-server" --socket="$AIMEE_HOME/aimee-server.sock" &
 server_pid=$!
 
-# Wait only for the TLS listener here. The bootstrap bearer can rotate itself but
-# cannot call ordinary health routes, so any real HTTP status proves readiness.
-bold "==> Waiting for the TLS listener (up to ${WAIT_SECONDS}s)"
+# The enrollment claim is issued over the server's operator UDS, while the client
+# uses the public TLS listener. Wait for both halves of that real wizard path.
+bold "==> Waiting for the operator socket and TLS listener (up to ${WAIT_SECONDS}s)"
 deadline=$((SECONDS + WAIT_SECONDS))
 while true; do
   status="$(curl -sk --max-time 3 -o /dev/null -w '%{http_code}' \
     "${SERVER_URL}/v1/health" 2>/dev/null || true)"
-  [[ "$status" != 000 ]] && break
+  [[ -S "$AIMEE_HOME/aimee-server.sock" && "$status" != 000 ]] && break
   if ! kill -0 "$server_pid" 2>/dev/null; then red "    aimee-server exited during startup"; exit 1; fi
-  if (( SECONDS >= deadline )); then red "    TLS listener did not start within ${WAIT_SECONDS}s"; exit 1; fi
+  if (( SECONDS >= deadline )); then red "    server listeners did not start within ${WAIT_SECONDS}s"; exit 1; fi
   sleep 2
 done
 
-# Exercise the same one-command setup as QUICKSTART: pin the leaf, rotate the
-# one-shot bearer, generate a local key, submit its CSR, and install the signed
-# client certificate. Keep client state separate from the scratch server home.
+# Exercise the same path as the setup UI: Deploy claims the immutable first
+# wizard user and returns an enrollment-only bearer. The displayed `remote set`
+# command then pins the leaf, generates a local key, submits its CSR, and installs
+# the signed client certificate. Keep client state separate from server state.
 CLIENT_HOME="$SCRATCH/client"
 mkdir -p "$CLIENT_HOME"
+IFS= read -r SERVER_TOKEN < "$AIMEE_HOME/server.token"
+bold "==> Claiming the first wizard user"
+deploy_status="$(curl -sS --unix-socket "$AIMEE_HOME/aimee-server.sock" \
+  -H "Authorization: Bearer $SERVER_TOKEN" -H 'X-Aimee-Webuser: local-stack-e2e' \
+  -H 'content-type: application/json' -X POST -d '{}' -o "$SCRATCH/deploy-apply.json" \
+  -w '%{http_code}' http://localhost/v1/deploy/apply)"
+[[ "$deploy_status" == 200 ]] || {
+  red "    Deploy returned HTTP $deploy_status"; sed -n '1,8p' "$SCRATCH/deploy-apply.json" >&2; exit 1
+}
+ENROLL_TOKEN="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["enrollment"]["bearer_token"])' \
+  "$SCRATCH/deploy-apply.json")"
+[[ ${#ENROLL_TOKEN} == 64 ]] || { red "    Deploy did not return an enrollment bearer"; exit 1; }
+
 bold "==> Enrolling the thin client"
-ENROLL_TOKEN="$BEARER"
-if ! AIMEE_HOME="$CLIENT_HOME" "$REPO/aimee" remote set "$SERVER_URL" "$ENROLL_TOKEN" \
+if ! AIMEE_HOME="$CLIENT_HOME" AIMEE_NO_CLIENT_INTEGRATIONS=1 \
+     "$REPO/aimee" remote set "$SERVER_URL" "$ENROLL_TOKEN" \
      >"$SCRATCH/remote-set.out" 2>"$SCRATCH/remote-set.err"; then
   red "    remote set failed"
   sed -n '1,8p' "$SCRATCH/remote-set.err" >&2
@@ -183,9 +201,6 @@ if ! AIMEE_HOME="$CLIENT_HOME" "$REPO/aimee" remote set "$SERVER_URL" "$ENROLL_T
 fi
 BEARER="$(sed -n '2p' "$CLIENT_HOME/remote.conf")"
 [[ -n "$BEARER" ]] || { red "    remote set did not persist a bearer"; exit 1; }
-if [[ "$ENROLL_TOKEN" == aimee-local-dev && "$BEARER" == "$ENROLL_TOKEN" ]]; then
-  red "    remote set did not rotate the one-shot bootstrap bearer"; exit 1
-fi
 AUTH=(-H "Authorization: Bearer ${BEARER}")
 CLIENT_CERT="$CLIENT_HOME/tls/client.crt"
 CLIENT_KEY="$CLIENT_HOME/tls/client.key"
@@ -193,9 +208,9 @@ CLIENT_KEY="$CLIENT_HOME/tls/client.key"
   red "    remote set did not install the client certificate"; exit 1
 }
 
-# Before the first client-certificate presentation can promote the one-client
-# roster to required mTLS, prove that the rotated bearer alone reaches the real
-# route gate and is denied there.
+# Before the first certificate presentation can promote the one-client roster to
+# required mTLS, prove the enrollment bearer alone reaches the route gate but has
+# no write authority.
 bearer_only_code="$(curl -sk --max-time 10 -o "$SCRATCH/bearer-only.json" -w '%{http_code}' \
   "${AUTH[@]}" -H 'content-type: application/json' -X POST \
   -d '{"session_id":"local-stack-e2e","key":"bearer-only","value":"deny","category":"general"}' \
@@ -204,14 +219,14 @@ bearer_only_code="$(curl -sk --max-time 10 -o "$SCRATCH/bearer-only.json" -w '%{
   red "    bearer-only write returned HTTP $bearer_only_code, expected 403"; exit 1
 }
 IDENTITY=(--cert "$CLIENT_CERT" --key "$CLIENT_KEY")
-green "    enrolled: installed an individual mTLS certificate; bearer-only write denied"
+green "    enrolled: bound the first-user grant to mTLS; bearer-only write denied"
 
 bold "==> Waiting for /v1/health"
 if curl -fksS --max-time 5 "${IDENTITY[@]}" "${AUTH[@]}" \
      "${SERVER_URL}/v1/health" >/dev/null 2>&1; then
   green "    server is up"
 else
-  red "    server up but /v1/health failed with rotated bearer"; exit 1
+  red "    server up but /v1/health failed with the enrolled client"; exit 1
 fi
 
 bold "==> Core contract"

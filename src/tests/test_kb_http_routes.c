@@ -1,5 +1,6 @@
 /* test_kb_http_routes.c: unit tests for kb_http_route() (Phase 1+5). */
 #include <assert.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1025,6 +1026,24 @@ int config_load(config_t *cfg)
    cfg->code_hybrid_rrf_k = 60.0;
    cfg->code_surprising_precision_floor = g_precision_floor;
    return 0;
+}
+
+/* Accessor stubs: the production seam moved from config_load to per-field
+ * accessors. These return exactly what the stub above puts in the struct, so
+ * the assertions below are unchanged. */
+int config_kb_curator_extract_docs_enabled(void)
+{
+   return 1;
+}
+
+int config_workspace_count(void)
+{
+   return 1;
+}
+
+const char *config_workspaces(int index)
+{
+   return index == 0 ? "/workspace" : "";
 }
 
 const char *config_embedding_command(const config_t *cfg, const char *requested)
@@ -5279,6 +5298,11 @@ static void test_http_listener_concurrent_requests(void)
 
 int main(void)
 {
+   /* Match kb_main's process contract. TLS readiness probes deliberately open
+    * and close sockets; under parallel suite load a server write can race that
+    * close, and the default SIGPIPE disposition would kill the fixture instead
+    * of letting OpenSSL report the failed connection. */
+   signal(SIGPIPE, SIG_IGN);
    printf("kb_http_routes: ");
 
    test_health();

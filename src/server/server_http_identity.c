@@ -187,6 +187,13 @@ const char *server_http_identity_principal(void)
    return tl_principal;
 }
 
+void server_http_identity_override_principal(const char *principal)
+{
+   if (!principal || !principal[0])
+      return;
+   snprintf(tl_principal, sizeof(tl_principal), "%s", principal);
+}
+
 void server_http_identity_apply(server_conn_t *conn)
 {
    if (!conn)
