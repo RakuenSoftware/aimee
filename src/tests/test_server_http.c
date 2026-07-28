@@ -5,6 +5,7 @@
 #include "http_content_encoding.h"
 #include "server.h" /* CAP_* / CAPS_* bits, server_capability_for_method */
 #include "server/server_mgmt_endpoint.h"
+#include "server/wfe_http_proxy.h"
 #include "agent_config.h"
 #include "cJSON.h"
 #include "openai_runs_store.h"
@@ -19,6 +20,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <sys/un.h>
+#include <sys/wait.h>
 
 int kb_client_mtls_management_jwks_fetch(void *ctx, char *out, size_t cap, size_t *len)
 {
@@ -243,9 +246,77 @@ static void submit_and_wait_op(const char *method)
    assert(status == OPENAI_RUN_COMPLETED);
 }
 
+static void test_wfe_http_proxy_round_trip(void)
+{
+   char temp[] = "/tmp/aimee-wfe-proxy-XXXXXX";
+   assert(mkdtemp(temp) != NULL);
+   char socket_path[sizeof(((struct sockaddr_un *)0)->sun_path)];
+   assert(snprintf(socket_path, sizeof(socket_path), "%s/wfe.sock", temp) > 0);
+
+   int listener = socket(AF_UNIX, SOCK_STREAM, 0);
+   assert(listener >= 0);
+   struct sockaddr_un addr = {.sun_family = AF_UNIX};
+   assert(snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", socket_path) > 0);
+   assert(bind(listener, (struct sockaddr *)&addr, sizeof(addr)) == 0);
+   assert(listen(listener, 1) == 0);
+
+   pid_t child = fork();
+   assert(child >= 0);
+   if (child == 0)
+   {
+      int client = accept(listener, NULL, NULL);
+      if (client < 0)
+         _exit(10);
+      char request[4096] = "";
+      size_t used = 0;
+      while (used + 1 < sizeof(request))
+      {
+         ssize_t got = read(client, request + used, sizeof(request) - used - 1);
+         if (got <= 0)
+            _exit(11);
+         used += (size_t)got;
+         request[used] = '\0';
+         if (strstr(request, "{\"proposal_md\":\"test\"}"))
+            break;
+      }
+      if (!strstr(request, "POST /v1/dev/submit?source=release-test HTTP/1.1\r\n") ||
+          !strstr(request, "Authorization: Bearer proxy-test-token\r\n") ||
+          !strstr(request, "X-Aimee-Webuser: webuser:release-test\r\n"))
+         _exit(12);
+      const char *response = "HTTP/1.1 202 Accepted\r\nContent-Type: application/json\r\n"
+                             "Content-Length: 30\r\nConnection: close\r\n\r\n"
+                             "{\"ok\":true,\"work_item_id\":\"w\"}";
+      if (write(client, response, strlen(response)) != (ssize_t)strlen(response))
+         _exit(13);
+      close(client);
+      close(listener);
+      _exit(0);
+   }
+
+   setenv("AIMEE_WFE_HTTP_SOCKET", socket_path, 1);
+   setenv("AIMEE_API_BEARER_TOKEN", "proxy-test-token", 1);
+   char response[256];
+   const char *body = "{\"proposal_md\":\"test\"}";
+   int status = wfe_http_proxy_request("POST", "/v1/dev/submit", "source=release-test", body,
+                                       (int)strlen(body), "webuser:release-test", response,
+                                       sizeof(response));
+   unsetenv("AIMEE_WFE_HTTP_SOCKET");
+   unsetenv("AIMEE_API_BEARER_TOKEN");
+   int child_status = 0;
+   assert(waitpid(child, &child_status, 0) == child);
+   assert(WIFEXITED(child_status) && WEXITSTATUS(child_status) == 0);
+   assert(status == 202);
+   assert(strcmp(response, "{\"ok\":true,\"work_item_id\":\"w\"}") == 0);
+   close(listener);
+   assert(unlink(socket_path) == 0);
+   assert(rmdir(temp) == 0);
+}
+
 int main(void)
 {
    printf("server_http: ");
+
+   test_wfe_http_proxy_round_trip();
 
    char home[PATH_MAX];
    snprintf(home, sizeof(home), "%s/aimee-shttp-XXXXXX", platform_tmpdir());
@@ -502,6 +573,17 @@ int main(void)
       assert(st == 404);
    }
 
+   /* Go owns workflow state, but the public C resource plane must forward to it.
+    * An absent private socket is a service outage, not a retired 410 endpoint. */
+   {
+      unsetenv("AIMEE_WFE_HTTP_SOCKET");
+      int st = server_http_route("POST", "/v1/dev/submit", "{}", 2, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "control plane is unavailable"));
+      st = server_http_route("GET", "/v1/workflow/items/wi_test", NULL, 0, resp, sizeof(resp));
+      assert(st == 503);
+   }
+
    /* --- GET /v1/personas lists built-ins --- */
    {
       int st = server_http_route("GET", "/v1/personas", NULL, 0, resp, sizeof(resp));
@@ -690,7 +772,12 @@ int main(void)
       st = server_http_route("GET", "/v1/kb/status", NULL, 0, resp, sizeof(resp));
       assert(st == 200);
       assert(strstr(resp, "\"epoch\":3")); /* stub body */
+      st = server_http_route("GET", "/v1/kb/status", "{\"project\":\"release-e2e\"}", 25, resp,
+                             sizeof(resp));
+      assert(st == 200 && strstr(resp, "release-e2e"));
       server_http_set_kb_status_provider(NULL);
+      st = server_http_route("GET", "/v1/kb/ingest/status", NULL, 0, resp, sizeof(resp));
+      assert(st == 200 && strstr(resp, "\"pending\":0"));
    }
 
    /* --- GET /v1/agents: 503 until a provider is wired, then emits --- */
@@ -2007,4 +2094,17 @@ char *kb_client_query_escape(const char *s)
 {
    (void)s;
    return NULL;
+}
+
+char *kb_client_project_status_json(const char *project)
+{
+   char buf[256];
+   snprintf(buf, sizeof(buf), "{\"project\":\"%s\",\"chunks\":7,\"vector_points\":7}",
+            project ? project : "");
+   return strdup(buf);
+}
+
+char *kb_client_ingest_status_json(void)
+{
+   return strdup("{\"queue\":{\"pending\":0,\"running\":0},\"workers\":{\"configured\":1}}");
 }
