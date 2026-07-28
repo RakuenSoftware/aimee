@@ -304,6 +304,15 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * aimee.api.{http_port,bearer_token} are configured). Best-effort: a bind
     * failure must not block the RPC server. */
    server_http_set_max_event_streams(cfg.server_api_max_event_streams);
+   /* Publish the additionally-accepted bearers BEFORE the listener binds, so a
+    * client enrolled in a previous run authorizes on its very first request
+    * rather than getting a 401 until something else republished them. */
+   {
+      const char *extra[AIMEE_API_BEARER_EXTRA_MAX];
+      for (int i = 0; i < cfg.server_api_bearer_extra_count; i++)
+         extra[i] = cfg.server_api_bearer_extra[i];
+      server_http_set_bearer_extra(extra, cfg.server_api_bearer_extra_count);
+   }
    cli_session_pty_set_forwarding(cfg.server_api_cli_session_forwarding);
    int http_start = server_http_start(
        NULL, cfg.server_api_http_port, cfg.server_api_tls_port, cfg.server_api_bearer_token,

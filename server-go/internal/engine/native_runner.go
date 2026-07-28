@@ -883,7 +883,7 @@ func roundtableStageGuidance(stage string) string {
 	case "plan":
 		return "This plan describes work that has not been implemented yet. Judge whether executing it would fulfill the request. For this plan stage only, the absence of already-completed edits is not drift; a substituted goal, scope, or deliverable is drift. Require concrete steps traceable to the request's acceptance criteria. A goal-only restatement can be aligned in direction but is incomplete and must receive a changes verdict with an actionable finding."
 	case "frozen_diff":
-		return "This frozen diff is the implemented deliverable. Required edits that are absent, or edits that substitute a different goal or deliverable, are drift and must fail closed."
+		return "This frozen diff is the implemented deliverable. Required edits that are absent, or edits that substitute a different goal or deliverable, are drift and must fail closed. A patch artifact does not normally contain command output or version-control metadata. Their absence from the patch is not evidence that tests, requested commands, or commits were omitted, so never create a blocking finding solely because the patch does not embed those logs or metadata. When a worktree is available, use its tools to verify a material operational requirement before declaring it unmet."
 	}
 	return "Unknown artifact stage. Apply the strictest rule: missing or substituted goals, scope, deliverables, or required work are blocking; ambiguity requires a changes verdict."
 }

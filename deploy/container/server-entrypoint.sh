@@ -130,6 +130,31 @@ done
 
 log() { printf '[server-entrypoint] %s\n' "$*"; }
 
+# Compose the one line an operator reads when the container comes down. Kept
+# pure (args in, string out, no globals) so it can be tested without a container.
+#
+# Two failures made a routine `docker stop` look like a crash:
+#   - the plane name was hardcoded to aimee-server, so a Go WFE exit was
+#     reported against the C server and the search started in the wrong process
+#   - runuser turns a caught SIGTERM into a plain exit 1 with the signal
+#     discarded, so "exited (status 1)" was indistinguishable from a real
+#     failure, and pointed at a core dump that is never written for exit(1)
+plane_exit_message() {
+    _pem_first=$1
+    _pem_status=$2
+    _pem_terminating=$3
+    case $_pem_first in
+        wfe) _pem_plane=aimee-wfe ;;
+        *) _pem_plane=aimee-server ;;
+    esac
+    if [ "$_pem_terminating" = 1 ]; then
+        printf '%s stopped on termination signal (status %s); shutting down webchat' \
+            "$_pem_plane" "$_pem_status"
+    else
+        printf '%s exited (status %s); shutting down webchat' "$_pem_plane" "$_pem_status"
+    fi
+}
+
 shutdown() {
     [ -n "$server_pid" ] && kill "$server_pid" 2>/dev/null || true
     [ -n "$wfe_pid" ] && kill "$wfe_pid" 2>/dev/null || true
@@ -142,7 +167,19 @@ shutdown() {
 	[ -n "$wfe_pid" ] && kill -KILL "$wfe_pid" 2>/dev/null || true
     webchat_stop
 }
-trap 'shutdown' TERM INT
+# A plane that is asked to stop reports the same exit 1 as a plane that broke:
+# runuser catches the signal, prints "Session terminated, killing shell...", and
+# exits 1 with the signal discarded. Without this flag the final log calls an
+# ordinary `docker stop` an "exited (status 1)" failure, which reads as a crash
+# and sends whoever is on call hunting a core dump that was never written.
+# Record that WE were signalled, so the exit line can say so.
+terminating=0
+on_signal() {
+    terminating=1
+    log "termination signal received; stopping both planes"
+    shutdown
+}
+trap 'on_signal' TERM INT
 
 # Browser UI (root, PAM). Supplementary — a webchat crash must not take the
 # container down; the server is the contract.
@@ -235,6 +272,6 @@ if [ -n "$wfe_pid" ]; then
 else
     if wait "$server_pid"; then status=0; else status=$?; fi
 fi
-log "aimee-server exited (status $status); shutting down webchat"
+log "$(plane_exit_message "${first:-}" "$status" "$terminating")"
 shutdown
 exit "$status"

@@ -14,6 +14,7 @@
 #include "hud.h"
 #include "log.h"
 #include "server.h"
+#include "server_http.h"
 #include "toolset.h"
 #include "platform_ipc.h"
 #include "platform_process.h"
@@ -84,6 +85,10 @@ static session_state_t g_saved_state;
 static int g_session_state_save_calls = 0;
 static session_state_t g_pre_tool_state;
 static int g_pre_tool_seen_state = 0;
+static int g_config_stateful = 0;
+static int g_config_reload_calls = 0;
+static config_t g_config_disk;
+static config_t g_config_snapshot;
 
 static char *read_all(int fd)
 {
@@ -1204,12 +1209,22 @@ char *shell_escape(const char *raw)
 
 int config_load(config_t *cfg)
 {
+   if (g_config_stateful)
+   {
+      *cfg = g_config_snapshot;
+      return 0;
+   }
    memset(cfg, 0, sizeof(*cfg));
    return 0;
 }
 
 int config_load_file(config_t *cfg)
 {
+   if (g_config_stateful)
+   {
+      *cfg = g_config_disk;
+      return 0;
+   }
    memset(cfg, 0, sizeof(*cfg));
    return 0;
 }
@@ -1218,11 +1233,18 @@ int config_load_file(config_t *cfg)
  * and on SIGHUP; stub it here (this test doesn't link the real config.o). */
 int config_reload(void)
 {
+   if (g_config_stateful)
+   {
+      g_config_snapshot = g_config_disk;
+      g_config_reload_calls++;
+   }
    return 0;
 }
 
 int config_save(const config_t *cfg)
 {
+   if (g_config_stateful)
+      g_config_disk = *cfg;
    (void)cfg;
    return 0;
 }
@@ -1906,6 +1928,57 @@ static void test_conn_update_events_null_evloop(void)
    printf("test_conn_update_events_null_evloop: PASS\n");
 }
 
+/* Regression: the server's config_load() is an immutable live snapshot. API
+ * credential mutations must instead start from the latest disk image and
+ * republish it, or a second sequential enrollment starts from zero extras and
+ * silently replaces the first one. */
+static void test_api_enroll_preserves_sequential_bearers(void)
+{
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+   conn->capabilities = CAP_SESSION_ADMIN;
+
+   memset(&g_config_disk, 0, sizeof(g_config_disk));
+   snprintf(g_config_disk.server_api_bearer_token, sizeof(g_config_disk.server_api_bearer_token),
+            "%s", "primary-test-bearer");
+   g_config_snapshot = g_config_disk;
+   g_config_reload_calls = 0;
+   g_config_stateful = 1;
+   server_http_set_bearer_extra(NULL, 0);
+
+   const char *request = "{\"method\":\"api.enroll_bearer\"}";
+   cJSON *first = dispatch_json(ctx, conn, request, strlen(request));
+   assert(strcmp(cJSON_GetObjectItem(first, "status")->valuestring, "ok") == 0);
+   assert(cJSON_GetObjectItem(first, "enrolled_count")->valueint == 1);
+   char first_bearer[256];
+   snprintf(first_bearer, sizeof(first_bearer), "%s",
+            cJSON_GetObjectItem(first, "bearer_token")->valuestring);
+   cJSON_Delete(first);
+
+   cJSON *second = dispatch_json(ctx, conn, request, strlen(request));
+   assert(strcmp(cJSON_GetObjectItem(second, "status")->valuestring, "ok") == 0);
+   assert(cJSON_GetObjectItem(second, "enrolled_count")->valueint == 2);
+   char second_bearer[256];
+   snprintf(second_bearer, sizeof(second_bearer), "%s",
+            cJSON_GetObjectItem(second, "bearer_token")->valuestring);
+   cJSON_Delete(second);
+
+   assert(strcmp(first_bearer, second_bearer) != 0);
+   assert(g_config_reload_calls == 2);
+   assert(g_config_disk.server_api_bearer_extra_count == 2);
+   assert(g_config_snapshot.server_api_bearer_extra_count == 2);
+   assert(strcmp(g_config_disk.server_api_bearer_extra[0], first_bearer) == 0);
+   assert(strcmp(g_config_disk.server_api_bearer_extra[1], second_bearer) == 0);
+   assert(server_http_enrolled_bearer_count() == 2);
+
+   server_http_set_bearer_extra(NULL, 0);
+   g_config_stateful = 0;
+   free(conn);
+   free(ctx);
+   printf("test_api_enroll_preserves_sequential_bearers: PASS\n");
+}
+
 /* session.brief_assemble (Proposal 1 Phase 1): the remote thin-client
  * SessionStart brief op. Asserts the response is the minimal versioned envelope
  * {schema_version:1, output} and that the assembled brief (here the stub's
@@ -1932,6 +2005,7 @@ int main(void)
    test_invalid_json();
    test_session_brief_assemble();
    test_conn_update_events_null_evloop();
+   test_api_enroll_preserves_sequential_bearers();
    test_missing_method();
    test_oversized_payload();
    test_large_delegate_payload_within_limit();

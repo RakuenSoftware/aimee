@@ -14,6 +14,11 @@ aimee remote status
 The enrollment path pins the server certificate and rotates the bootstrap bearer. Linux also
 enrolls a client mTLS certificate. Verify the printed fingerprint out of band.
 
+For another client, copy the current primary bearer once, run `remote set`, then run
+`aimee remote enroll` on that client. Enrollment mints an additional bearer and keeps every
+existing client valid. `api.rotate_bearer` is deliberately different: it revokes the primary and
+all enrolled bearers, so use it only for an explicit revoke-all operation.
+
 Connection precedence is:
 
 1. per-command transport flags;

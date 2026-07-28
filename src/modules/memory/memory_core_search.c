@@ -408,9 +408,8 @@ int memory_collect_chunk_matches(const char *query, int limit, memory_t *out, in
    if (!scratch)
       return count;
    int cap = 64;
-   config_t cm_cfg;
-   config_load(&cm_cfg);
-   const char *embed_cmd = config_embedding_command(&cm_cfg, NULL);
+   MEMORY_AUTOFREE config_t *cm_cfg = memory_config_load_heap();
+   const char *embed_cmd = config_embedding_command(cm_cfg, NULL);
    int got = memory_collect_memory_matches_via_vector(query, embed_cmd, limit, scratch, cap);
    for (int i = 0; i < got && count < max; i++)
       count = memory_append_unique(out, count, max, &scratch[i]);
@@ -437,9 +436,8 @@ int memory_collect_unit_matches(const char *query, int limit, memory_t *out, int
    if (!scratch)
       return count;
    int cap = 64;
-   config_t mc_cfg;
-   config_load(&mc_cfg);
-   const char *embed_cmd = config_embedding_command(&mc_cfg, NULL);
+   MEMORY_AUTOFREE config_t *mc_cfg = memory_config_load_heap();
+   const char *embed_cmd = config_embedding_command(mc_cfg, NULL);
    int got = memory_collect_unit_matches_via_vector(query, embed_cmd, limit, scratch, cap);
    for (int i = 0; i < got && count < max; i++)
       count = memory_append_unique(out, count, max, &scratch[i]);
