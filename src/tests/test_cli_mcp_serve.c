@@ -11,6 +11,10 @@
 
 static char g_last_mcp_call_cwd[4096];
 static char g_last_mcp_call_arg_cwd[4096];
+static int g_reverse_channel_starts;
+static int g_remote_active;
+static int g_remote_http_failures;
+static int g_remote_http_calls;
 
 const char *platform_home_dir(void)
 {
@@ -44,6 +48,7 @@ const char *cli_ensure_server_for_method(const char *method)
  * does not link; stub them so cli_mcp_serve.o resolves. */
 int cli_workspace_reverse_channel_start(void)
 {
+   g_reverse_channel_starts++;
    return 0;
 }
 void cli_workspace_reverse_channel_stop(void)
@@ -56,21 +61,21 @@ void cli_workspace_reverse_channel_stop(void)
  * stub them so cli_mcp_serve.o links standalone. */
 int cli_v1_has_remote_endpoint(void)
 {
-   return 0;
+   return g_remote_active;
 }
 char *cli_v1_client_endpoint(void)
 {
-   return NULL;
+   return strdup("https://aimee.test:8743");
 }
 char *cli_v1_client_bearer(void)
 {
-   return NULL;
+   return strdup("test-bearer");
 }
 const char *cli_v1_route_for_method(const char *method, const char **verb_out)
 {
-   (void)method;
-   (void)verb_out;
-   return NULL;
+   if (verb_out)
+      *verb_out = strcmp(method, "mcp.tools_list") == 0 ? "GET" : "POST";
+   return strcmp(method, "mcp.tools_list") == 0 ? "/v1/mcp/tools_list" : "/v1/mcp/call";
 }
 cJSON *cli_http_request(const char *endpoint, const char *method, const char *path,
                         const char *body_json, const char *bearer, int timeout_ms, int *http_status)
@@ -83,7 +88,13 @@ cJSON *cli_http_request(const char *endpoint, const char *method, const char *pa
    (void)timeout_ms;
    if (http_status)
       *http_status = 0;
-   return NULL;
+   g_remote_http_calls++;
+   if (g_remote_http_calls <= g_remote_http_failures)
+      return NULL;
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddArrayToObject(resp, "tools");
+   return resp;
 }
 
 int cli_connect(cli_conn_t *conn, const char *socket_path)
@@ -633,6 +644,7 @@ static void test_resources_read_unknown_uri(void)
 
 static void test_initialize(void)
 {
+   g_reverse_channel_starts = 0;
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "jsonrpc", "2.0");
    cJSON_AddNumberToObject(req, "id", 10);
@@ -665,6 +677,7 @@ static void test_initialize(void)
    assert(strstr(instructions->valuestring, "get_help") != NULL);
    assert(strstr(instructions->valuestring, "spawn_agent") != NULL);
    assert(strstr(instructions->valuestring, "delegate tool") != NULL);
+   assert(g_reverse_channel_starts == 0);
 
    cJSON_Delete(resp);
    cJSON_Delete(req);
@@ -682,9 +695,40 @@ static void test_tools_list(void)
    cJSON *result = cJSON_GetObjectItemCaseSensitive(resp, "result");
    assert(cJSON_IsObject(result));
    assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(result, "tools")));
+   assert(g_reverse_channel_starts == 0);
 
    cJSON_Delete(resp);
    cJSON_Delete(req);
+}
+
+static void test_remote_discovery_retries_are_safe(void)
+{
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "method", "mcp.tools_list");
+   g_remote_active = 1;
+   g_remote_http_calls = 0;
+   g_remote_http_failures = 2;
+
+   cJSON *resp = server_request(req, DEFAULT_TIMEOUT_MS);
+   assert(resp != NULL);
+   assert(g_remote_http_calls == 3);
+   cJSON_Delete(resp);
+   cJSON_Delete(req);
+
+   /* A POST can have executed before its response was lost, so it must never
+    * be replayed by the bridge. */
+   req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "method", "mcp.call");
+   g_remote_http_calls = 0;
+   g_remote_http_failures = 2;
+   resp = server_request(req, DEFAULT_TIMEOUT_MS);
+   assert(resp == NULL);
+   assert(g_remote_http_calls == 1);
+   cJSON_Delete(req);
+
+   g_remote_active = 0;
+   g_remote_http_calls = 0;
+   g_remote_http_failures = 0;
 }
 
 static void test_tools_list_preserves_server_error(void)
@@ -711,6 +755,7 @@ static void test_tools_list_preserves_server_error(void)
 
 static void test_tools_call_success(void)
 {
+   g_reverse_channel_starts = 0;
    g_last_mcp_call_cwd[0] = '\0';
    g_last_mcp_call_arg_cwd[0] = '\0';
 
@@ -737,6 +782,7 @@ static void test_tools_call_success(void)
    assert(getcwd(cwd, sizeof(cwd)) != NULL);
    assert(strcmp(g_last_mcp_call_cwd, cwd) == 0);
    assert(strcmp(g_last_mcp_call_arg_cwd, cwd) == 0);
+   assert(g_reverse_channel_starts == 1);
 
    cJSON_Delete(resp);
    cJSON_Delete(req);
@@ -996,6 +1042,7 @@ int main(void)
    test_initialize();
    test_tools_list();
    test_tools_list_preserves_server_error();
+   test_remote_discovery_retries_are_safe();
    test_tools_call_success();
    test_tools_call_server_error();
    test_tools_call_nested_http_error();
