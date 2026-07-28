@@ -1529,7 +1529,11 @@ typedef struct config
     *
     * Bounded so a compromised or looping enroller cannot grow the accepted set
     * without limit — past the cap, enrolment fails closed rather than evicting. */
-   char server_api_bearer_extra[AIMEE_API_BEARER_EXTRA_MAX][256];
+   /* 65 = 64 hex chars + NUL, the exact width server_api_mint_bearer emits.
+    * config_t is ~750 KB and is stack-allocated in hot paths, so every byte
+    * added here is multiplied across nested frames — sizing this generously
+    * would be paid for on the stack, not in the struct. */
+   char server_api_bearer_extra[AIMEE_API_BEARER_EXTRA_MAX][65];
    int server_api_bearer_extra_count;
    int server_api_rate_limit_per_min;
    /* server_api_max_event_streams: cap on concurrent SSE event streams

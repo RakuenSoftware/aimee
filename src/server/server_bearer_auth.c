@@ -18,7 +18,7 @@
  * dispatch-backed routes run on detached connection workers, so authorization,
  * enrollment and rotation genuinely execute concurrently. One lock protects
  * both this set and the primary bearer stored by server_http.c. */
-static char g_bearer_extra[AIMEE_API_BEARER_EXTRA_MAX][256];
+static char g_bearer_extra[AIMEE_API_BEARER_EXTRA_MAX][65];
 static int g_bearer_extra_count = 0;
 static pthread_mutex_t g_bearer_lock = PTHREAD_MUTEX_INITIALIZER;
 
