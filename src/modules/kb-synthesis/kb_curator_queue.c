@@ -226,15 +226,16 @@ void kb_curator_queue_counts(kb_curator_queue_counts_t *out)
    }
 
    /* code_unit pending/done from kb_code_unit_jobs. */
-   static const char *sql_code = "SELECT"
-                                 " COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),0),"
-                                 " COALESCE(SUM(CASE WHEN status='done' THEN 1 ELSE 0 END),0),"
-                                 " COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),0),"
-                                 /* One sample error, so the operator is told WHY rather than just
-                                  * how many. The message that mattered here was a connection
-                                  * refusal naming an address nobody recognised. */
-                                 " COALESCE(MAX(CASE WHEN status='failed' THEN last_error ELSE '' END),'')"
-                                 " FROM kb_code_unit_jobs";
+   static const char *sql_code =
+       "SELECT"
+       " COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),0),"
+       " COALESCE(SUM(CASE WHEN status='done' THEN 1 ELSE 0 END),0),"
+       " COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),0),"
+       /* One sample error, so the operator is told WHY rather than just
+        * how many. The message that mattered here was a connection
+        * refusal naming an address nobody recognised. */
+       " COALESCE(MAX(CASE WHEN status='failed' THEN last_error ELSE '' END),'')"
+       " FROM kb_code_unit_jobs";
    st = aimee_pg_prepare(conn, sql_code, err, sizeof(err));
    if (st)
    {
