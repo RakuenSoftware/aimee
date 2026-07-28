@@ -67,6 +67,13 @@ int code_resolve_current_snapshot(const char *root, code_source_snapshot_t *out)
  * The default ref itself is never classified as merged. */
 int code_source_ref_is_merged(const char *root, const char *source_ref);
 
+/* Determine whether `source_ref` is the branch currently checked out at `root`.
+ * Returns 1 when it is, 0 otherwise (including detached HEAD, which has no
+ * attached branch). Retirement uses this to leave live work alone: a branch
+ * created off the default and a branch fast-forward-merged into it are
+ * indistinguishable from refs alone, so the checkout is what tells them apart. */
+int code_source_ref_is_current_checkout(const char *root, const char *source_ref);
+
 /* Convenience wrapper over code_collect_files_cb that appends one
  * {"rel_path","content"} object per file to `files_arr`. Collects the whole
  * tree (no file-count cap); use when the caller pushes the result in one shot

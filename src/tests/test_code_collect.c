@@ -255,6 +255,47 @@ static void test_merged_ref_detection(void)
    printf("  test_merged_ref_detection: ok\n");
 }
 
+/* A branch created off the default and a branch fast-forward-merged into it both
+ * carry the default's tip, so retirement cannot tell them apart from refs alone.
+ * The checkout is the tiebreaker: whichever branch is attached is live work. */
+static void test_current_checkout_is_not_retired(void)
+{
+   make_root("current_checkout");
+   git("init -q -b main");
+   git("config user.email t@t");
+   git("config user.name t");
+   write_file("base.c", "int base(void){return 1;}");
+   git("add -A");
+   git("commit -qm base");
+
+   /* A brand-new branch has no commits of its own and so looks merged. */
+   git("checkout -q -b fresh");
+   assert(code_source_ref_is_merged(g_root, "fresh") == 1);
+   assert(code_source_ref_is_current_checkout(g_root, "fresh") == 1);
+
+   /* A merged branch the caller is no longer standing on is still retirable. */
+   write_file("fresh.c", "int fresh(void){return 1;}");
+   git("add -A");
+   git("commit -qm fresh");
+   git("checkout -q main");
+   git("merge -q --ff-only fresh");
+   assert(code_source_ref_is_merged(g_root, "fresh") == 1);
+   assert(code_source_ref_is_current_checkout(g_root, "fresh") == 0);
+
+   /* ...but once it is checked out again it is live work, merged or not. */
+   git("checkout -q fresh");
+   assert(code_source_ref_is_merged(g_root, "fresh") == 1);
+   assert(code_source_ref_is_current_checkout(g_root, "fresh") == 1);
+   assert(code_source_ref_is_current_checkout(g_root, "main") == 0);
+   assert(code_source_ref_is_current_checkout(g_root, "missing") == 0);
+
+   /* Detached HEAD has no attached branch, so nothing is the current checkout. */
+   git("checkout -q --detach");
+   assert(code_source_ref_is_current_checkout(g_root, "fresh") == 0);
+   assert(code_source_ref_is_current_checkout(g_root, "main") == 0);
+   printf("  test_current_checkout_is_not_retired: ok\n");
+}
+
 /* AIMEE_CODE_INDEX_SOURCE=worktree is the documented opt-in to index WIP. */
 static void test_worktree_optin(void)
 {
@@ -577,6 +618,7 @@ int main(void)
    test_current_branch_snapshot();
    test_missing_explicit_branch_fails_closed();
    test_merged_ref_detection();
+   test_current_checkout_is_not_retired();
    test_worktree_optin();
    test_clone_resolves_origin_head();
    test_no_default_branch_skips();

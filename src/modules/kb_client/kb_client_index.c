@@ -472,7 +472,15 @@ int kb_client_index_scan_ref(const char *name, const char *root, const char *sou
       code_source_snapshot_t snapshot;
       if (code_resolve_source_snapshot(root, source_ref, &snapshot) == 0)
       {
-         if (source_ref && source_ref[0] && code_source_ref_is_merged(root, source_ref) == 1)
+         /* Never retire the branch the caller is standing on. A freshly created
+          * branch and a fast-forward-merged one both have the default's tip, so
+          * "merged" alone would retire live work: the ref loses its generation
+          * and publication then refuses it ("ref retired before publication"),
+          * stranding the checkout with no source context and no way to rebuild
+          * one. An actively checked-out branch stays valid even when its tip is
+          * reachable from the default. */
+         if (source_ref && source_ref[0] && code_source_ref_is_merged(root, source_ref) == 1 &&
+             !code_source_ref_is_current_checkout(root, source_ref))
          {
             int rc = kb_client_index_retire_ref(name, snapshot.ref, "merged", -1, out);
             if (rc == 0 && out)

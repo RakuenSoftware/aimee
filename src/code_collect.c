@@ -384,6 +384,22 @@ int code_source_ref_is_merged(const char *root, const char *source_ref)
               : 0;
 }
 
+int code_source_ref_is_current_checkout(const char *root, const char *source_ref)
+{
+   if (!root || !root[0] || !source_ref || !source_ref[0])
+      return 0;
+   code_source_snapshot_t current, requested;
+   if (code_resolve_current_snapshot(root, &current) != 0)
+      return 0;
+   if (strcmp(current.ref, source_ref) == 0)
+      return 1;
+   /* The caller may pass a short name where the checkout resolved a full ref
+    * (or the reverse), so compare the resolved identities too. */
+   if (code_resolve_source_snapshot(root, source_ref, &requested) != 0)
+      return 0;
+   return strcmp(current.ref, requested.ref) == 0;
+}
+
 /* §6 live: the default branch's tree SHA — a content identity for "has the canonical
  * code moved?". Resolves the default ref (same chain as the collector) then
  * `git rev-parse <ref>^{tree}`. Returns 0 + the 40-hex SHA in `out`, or -1 if there's
