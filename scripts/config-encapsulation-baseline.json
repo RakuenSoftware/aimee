@@ -1,0 +1,958 @@
+{
+  "_note": "Ratchet baseline for check-config-encapsulation.py. config_t is a secret of the config module; these are the sites that still materialise it. Counts may only DECREASE. Migrate a file to config accessors, then rerun with --update-baseline.",
+  "files": {
+    "src/aimee_home.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/cmd_agent.c": {
+      "decls": 9,
+      "loads": 9
+    },
+    "src/cmd_agent_delegate.c": {
+      "decls": 6,
+      "loads": 6
+    },
+    "src/cmd_agent_delegate_status.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/cmd_agent_trace.c": {
+      "decls": 4,
+      "loads": 4
+    },
+    "src/cmd_core.c": {
+      "decls": 9,
+      "loads": 9
+    },
+    "src/cmd_data.c": {
+      "decls": 8,
+      "loads": 8
+    },
+    "src/cmd_diagnose.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/cmd_doctor.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/cmd_dogfood.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/cmd_hooks.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/cmd_identity.c": {
+      "decls": 4,
+      "loads": 4
+    },
+    "src/cmd_index.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/cmd_infra.c": {
+      "decls": 7,
+      "loads": 7
+    },
+    "src/cmd_kb.c": {
+      "decls": 4,
+      "loads": 4
+    },
+    "src/cmd_mcp.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/cmd_memory.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/cmd_memory_embed.c": {
+      "decls": 4,
+      "loads": 4
+    },
+    "src/cmd_memory_vector.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/cmd_provider.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/cmd_review.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/cmd_rewind.c": {
+      "decls": 5,
+      "loads": 5
+    },
+    "src/cmd_run.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/cmd_session_lifecycle.c": {
+      "decls": 9,
+      "loads": 9
+    },
+    "src/cmd_skill.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/cmd_trajectory.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/cmd_util.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/conversation_context.c": {
+      "decls": 5,
+      "loads": 5
+    },
+    "src/dashboard.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/db1/maintenance.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/db2/canonical_index.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/db2/cross_repo_deps.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/db2/css_migration.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/db2/css_render.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/db2/fact_ingest.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/db2/kb_audit_worm.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/db2/kb_payload.c": {
+      "decls": 3,
+      "loads": 3
+    },
+    "src/db2/kb_runtime_state.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/db2/kb_service_backend_memory.c": {
+      "decls": 4,
+      "loads": 4
+    },
+    "src/dogfood.c": {
+      "decls": 6,
+      "loads": 6
+    },
+    "src/index.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/kb/http/kb_http.c": {
+      "decls": 8,
+      "loads": 8
+    },
+    "src/kb/http/kb_http_code.c": {
+      "decls": 4,
+      "loads": 4
+    },
+    "src/kb/http/kb_http_console.c": {
+      "decls": 6,
+      "loads": 6
+    },
+    "src/kb/http/kb_http_ingest.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/kb/kb.c": {
+      "decls": 4,
+      "loads": 4
+    },
+    "src/kb/kb_blob_store.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/kb/kb_doc_pdf.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/kb/kb_ingest_workers.c": {
+      "decls": 5,
+      "loads": 7
+    },
+    "src/kb/kb_intel_payload.c": {
+      "decls": 4,
+      "loads": 4
+    },
+    "src/kb/kb_main.c": {
+      "decls": 4,
+      "loads": 4
+    },
+    "src/kb/kb_mining.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/kb/kb_reflection.c": {
+      "decls": 2,
+      "loads": 3
+    },
+    "src/kb/kb_service.c": {
+      "decls": 4,
+      "loads": 4
+    },
+    "src/kb/kb_service_agent.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/kb/kb_service_artifacts.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/kb/kb_service_code_embed.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/kb/kb_service_kb.c": {
+      "decls": 3,
+      "loads": 3
+    },
+    "src/kb/kb_service_memory.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/kb/kb_service_workers.c": {
+      "decls": 3,
+      "loads": 4
+    },
+    "src/modules/benchmarks/agent_eval.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/benchmarks/agent_eval_benchmarks.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/benchmarks/agent_eval_memory_support.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/modules/css/css_render_cmd.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/modules/delegates/delegate_prompt.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/delegates/delegate_sandbox_image.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/economizer/gateway_mutate_wire.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/modules/execution-policy/execution_policy.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/gateway/gateway_policy.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/modules/git/git_project.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/git/git_verify_ops.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/modules/git/mcp_git_query.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/guardrails/cmd_guardrails.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/guardrails/guardrails_action_audit.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/modules/guardrails/guardrails_blast_radius.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/guardrails/guardrails_orchestrator.c": {
+      "decls": 8,
+      "loads": 8
+    },
+    "src/modules/kb-synthesis/kb_curator_drain.c": {
+      "decls": 10,
+      "loads": 11
+    },
+    "src/modules/kb-synthesis/kb_curator_extract.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/kb-synthesis/kb_curator_index_claims.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/kb-synthesis/kb_curator_index_code_unit.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/kb-synthesis/kb_curator_index_narrative.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/kb-synthesis/kb_curator_link_artifacts.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/kb-synthesis/kb_curator_notify.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/kb-synthesis/kb_curator_promote.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/kb-synthesis/kb_curator_queue.c": {
+      "decls": 3,
+      "loads": 3
+    },
+    "src/modules/kb-synthesis/kb_curator_resolve_entities.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/kb-synthesis/kb_curator_synthesize.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/kb_client/kb_client_mtls.c": {
+      "decls": 1,
+      "loads": 0
+    },
+    "src/modules/learning/learning_implicit.c": {
+      "decls": 4,
+      "loads": 4
+    },
+    "src/modules/learning/learning_router.c": {
+      "decls": 4,
+      "loads": 4
+    },
+    "src/modules/lsp/lsp_manager.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/memory/memory_advanced.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/modules/memory/memory_assemble.c": {
+      "decls": 3,
+      "loads": 3
+    },
+    "src/modules/memory/memory_core_crud.c": {
+      "decls": 4,
+      "loads": 4
+    },
+    "src/modules/memory/memory_core_helpers.c": {
+      "decls": 9,
+      "loads": 9
+    },
+    "src/modules/memory/memory_core_helpers_b.c": {
+      "decls": 3,
+      "loads": 3
+    },
+    "src/modules/memory/memory_core_scope_embed.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/memory/memory_core_search.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/modules/memory/memory_core_search_b.c": {
+      "decls": 6,
+      "loads": 6
+    },
+    "src/modules/memory/memory_core_search_c.c": {
+      "decls": 13,
+      "loads": 13
+    },
+    "src/modules/memory/memory_logic.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/modules/roundtable/roundtable_preset.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/modules/sandbox/sandbox_learned.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/skills/skill_curator.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/tools/agent_tools.c": {
+      "decls": 3,
+      "loads": 3
+    },
+    "src/modules/tools/agent_tools_dispatch.c": {
+      "decls": 9,
+      "loads": 9
+    },
+    "src/modules/vault/vault_custody_tpm2.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/modules/workflows/wfe_live_forge.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/workflows/wfe_live_panel.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/workspace/workspace.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/modules/workspace/workspace_turn.c": {
+      "decls": 4,
+      "loads": 4
+    },
+    "src/payload_rewrite.c": {
+      "decls": 3,
+      "loads": 3
+    },
+    "src/posix/agent_max_turns.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/posix/agent_runtime.c": {
+      "decls": 4,
+      "loads": 4
+    },
+    "src/posix/server_compute.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/server/agent_bridge.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/server/agent_logging.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/server/agent_policy.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/server/agent_request_build.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/server/agent_runtime.c": {
+      "decls": 8,
+      "loads": 8
+    },
+    "src/server/agent_tools.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/server/aimee_ir_serve.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/server/anthropic_http.c": {
+      "decls": 4,
+      "loads": 4
+    },
+    "src/server/dashboard_server.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/server/deploy_apply.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/server/ingress_preinject.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/server/openai_chat.c": {
+      "decls": 5,
+      "loads": 5
+    },
+    "src/server/provider_cli_adapter.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/server/retrieval_outcome_bridge.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/server/s2_native_gate_hook.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/server/server.c": {
+      "decls": 7,
+      "loads": 7
+    },
+    "src/server/server_agent.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/server/server_api.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/server/server_api_status.c": {
+      "decls": 4,
+      "loads": 4
+    },
+    "src/server/server_compute.c": {
+      "decls": 6,
+      "loads": 6
+    },
+    "src/server/server_compute_async.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/server/server_config.c": {
+      "decls": 3,
+      "loads": 3
+    },
+    "src/server/server_coord_dispatcher.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/server/server_cron.c": {
+      "decls": 3,
+      "loads": 3
+    },
+    "src/server/server_http.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/server/server_http_config_routes.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/server/server_http_reqctx.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/server/server_jobs_aux.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/server/server_main.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/server/server_mcp.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/server/server_mcp_call_table.c": {
+      "decls": 4,
+      "loads": 4
+    },
+    "src/server/server_mcp_tools.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/server/server_mgmt_read_source.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/server/server_pipeline.c": {
+      "decls": 7,
+      "loads": 7
+    },
+    "src/server/server_runner_endpoints.c": {
+      "decls": 3,
+      "loads": 4
+    },
+    "src/server/server_skill.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/server/server_skill_jobs.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/server/server_state.c": {
+      "decls": 6,
+      "loads": 7
+    },
+    "src/server/server_sweep.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/server/server_tls.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/server/server_trigger.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/server/server_workflow_api.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/server/trigger_scheduler.c": {
+      "decls": 3,
+      "loads": 3
+    },
+    "src/server/web_search.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/server/wfe_roundtable_proxy.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/server_provider.c": {
+      "decls": 2,
+      "loads": 3
+    },
+    "src/tests/fuzz_corpus/seed.c": {
+      "decls": 1,
+      "loads": 0
+    },
+    "src/tests/support/ir_ingress_stubs.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/support/ir_seam_memory_stub.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/test_agent_caps.c": {
+      "decls": 12,
+      "loads": 0
+    },
+    "src/tests/test_agent_max_turns.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/test_anthropic_http.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/test_anthropic_http_p2c.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/test_anthropic_http_streaming_p2c.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/test_bandit.c": {
+      "decls": 3,
+      "loads": 0
+    },
+    "src/tests/test_bus_config_autonomy.c": {
+      "decls": 1,
+      "loads": 0
+    },
+    "src/tests/test_calibration.c": {
+      "decls": 4,
+      "loads": 0
+    },
+    "src/tests/test_cmd_config.c": {
+      "decls": 1,
+      "loads": 0
+    },
+    "src/tests/test_cmd_doctor.c": {
+      "decls": 6,
+      "loads": 6
+    },
+    "src/tests/test_cmd_onboard.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/tests/test_config.c": {
+      "decls": 99,
+      "loads": 86
+    },
+    "src/tests/test_config_cross_verify.c": {
+      "decls": 1,
+      "loads": 3
+    },
+    "src/tests/test_config_defaults_golden.c": {
+      "decls": 1,
+      "loads": 2
+    },
+    "src/tests/test_config_economizer.c": {
+      "decls": 12,
+      "loads": 9
+    },
+    "src/tests/test_config_flat_parse.c": {
+      "decls": 3,
+      "loads": 1
+    },
+    "src/tests/test_config_schema_derive.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/tests/test_config_set.c": {
+      "decls": 1,
+      "loads": 2
+    },
+    "src/tests/test_config_set_section.c": {
+      "decls": 2,
+      "loads": 2
+    },
+    "src/tests/test_config_snapshot.c": {
+      "decls": 11,
+      "loads": 4
+    },
+    "src/tests/test_config_snapshot_race.c": {
+      "decls": 3,
+      "loads": 0
+    },
+    "src/tests/test_config_surface.c": {
+      "decls": 0,
+      "loads": 2
+    },
+    "src/tests/test_cron_config.c": {
+      "decls": 3,
+      "loads": 0
+    },
+    "src/tests/test_cron_runtime.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/test_curator_code_unit.c": {
+      "decls": 1,
+      "loads": 2
+    },
+    "src/tests/test_curator_profile.c": {
+      "decls": 1,
+      "loads": 0
+    },
+    "src/tests/test_curator_queue.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/tests/test_curiosity.c": {
+      "decls": 1,
+      "loads": 0
+    },
+    "src/tests/test_delegate_ensemble.c": {
+      "decls": 13,
+      "loads": 0
+    },
+    "src/tests/test_delegate_sandbox_image.c": {
+      "decls": 3,
+      "loads": 3
+    },
+    "src/tests/test_demotion.c": {
+      "decls": 1,
+      "loads": 0
+    },
+    "src/tests/test_deploy_apply.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/test_features.c": {
+      "decls": 4,
+      "loads": 0
+    },
+    "src/tests/test_fidelity_check.c": {
+      "decls": 1,
+      "loads": 0
+    },
+    "src/tests/test_gateway_mutate_wire.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/test_gateway_p4_delegate.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/test_gateway_policy.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/test_guardrails.c": {
+      "decls": 2,
+      "loads": 1
+    },
+    "src/tests/test_guardrails_blast_radius.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/test_guardrails_computer_use.c": {
+      "decls": 1,
+      "loads": 0
+    },
+    "src/tests/test_gw_stage_memory.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/test_ingress_preinject.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/test_kb_curator_llm.c": {
+      "decls": 4,
+      "loads": 0
+    },
+    "src/tests/test_kb_curator_provider.c": {
+      "decls": 5,
+      "loads": 0
+    },
+    "src/tests/test_kb_http_ingest.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/test_kb_http_routes.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/test_kb_maintenance.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/tests/test_kb_mdl.c": {
+      "decls": 1,
+      "loads": 0
+    },
+    "src/tests/test_kb_reflection.c": {
+      "decls": 5,
+      "loads": 0
+    },
+    "src/tests/test_mcp_client_registry.c": {
+      "decls": 7,
+      "loads": 0
+    },
+    "src/tests/test_memory.c": {
+      "decls": 6,
+      "loads": 0
+    },
+    "src/tests/test_memory_advanced.c": {
+      "decls": 10,
+      "loads": 0
+    },
+    "src/tests/test_memory_lanes.c": {
+      "decls": 4,
+      "loads": 4
+    },
+    "src/tests/test_memory_retrieval_eval.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/tests/test_payload_rewrite.c": {
+      "decls": 3,
+      "loads": 3
+    },
+    "src/tests/test_planner.c": {
+      "decls": 4,
+      "loads": 0
+    },
+    "src/tests/test_prompts.c": {
+      "decls": 8,
+      "loads": 0
+    },
+    "src/tests/test_ranker_fit.c": {
+      "decls": 5,
+      "loads": 0
+    },
+    "src/tests/test_reasoning.c": {
+      "decls": 4,
+      "loads": 0
+    },
+    "src/tests/test_retrieval_outcome_bridge.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/test_roundtable_preset.c": {
+      "decls": 3,
+      "loads": 2
+    },
+    "src/tests/test_server_dispatch.c": {
+      "decls": 0,
+      "loads": 2
+    },
+    "src/tests/test_server_jobs_aux.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/test_server_management_tls.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/test_server_mgmt_read_source.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/test_token_audit_load.c": {
+      "decls": 1,
+      "loads": 1
+    },
+    "src/tests/test_tool_condense.c": {
+      "decls": 2,
+      "loads": 0
+    },
+    "src/tests/test_trigger.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/test_trigger_e2e.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/test_web_search_fusion.c": {
+      "decls": 0,
+      "loads": 1
+    },
+    "src/tests/test_workspace.c": {
+      "decls": 2,
+      "loads": 0
+    },
+    "src/tests/test_workspace_turn.c": {
+      "decls": 4,
+      "loads": 5
+    },
+    "src/workflow_learn.c": {
+      "decls": 1,
+      "loads": 1
+    }
+  },
+  "totals": {
+    "decls": 700,
+    "files": 237,
+    "loads": 605
+  }
+}

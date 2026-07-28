@@ -1825,6 +1825,10 @@ kb-target-isolation-check:
 entrypoint-exit-report-check:
 	@sh ../scripts/check-entrypoint-exit-report.sh
 
+config-encapsulation-check:
+	@python3 ../scripts/check-config-encapsulation.py
+	@python3 ../scripts/check-config-encapsulation.py --plant-test
+
 kb-container-packaging-check:
 	@python3 ../scripts/check-kb-container-packaging.py --root ..
 	@python3 ../scripts/check-kb-container-packaging.py --plant-test

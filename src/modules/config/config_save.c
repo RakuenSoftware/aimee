@@ -1408,6 +1408,29 @@ const char *config_guardrail_mode(const config_t *cfg)
    return MODE_APPROVE;
 }
 
+/* Opaque form: resolve the embedding command without the caller ever holding a
+ * config_t. config_t is ~750 KB, so a caller that only wants this one string was
+ * paying three quarters of a megabyte of stack for it — nested across the memory
+ * search path that overflowed an 8 MB stack. The load is cached inside the
+ * config module (config_load consults a snapshot/mtime cache), so this is not a
+ * per-call reparse.
+ *
+ * Returns a pointer into a function-local static, valid until the next call on
+ * this thread. Callers copy it if they need to keep it. */
+const char *config_embedding_command_current(const char *requested)
+{
+   if (requested && requested[0])
+      return requested;
+   static _Thread_local char cached[512];
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return "builtin"; /* allocation failure must not fabricate an embedder */
+   config_load(cfg);
+   snprintf(cached, sizeof(cached), "%s", config_embedding_command(cfg, NULL));
+   free(cfg);
+   return cached;
+}
+
 const char *config_embedding_command(const config_t *cfg, const char *requested)
 {
    if (requested && requested[0])

@@ -2252,6 +2252,12 @@ int config_sandbox_package_access_valid(const char *s);
  * is the single point of truth -- do not re-inline the ternary at call sites. */
 const char *config_embedding_command(const config_t *cfg, const char *requested);
 
+/* As config_embedding_command, but the caller never holds a config_t. Prefer
+ * this: materialising the ~750 KB struct to read one string is what overflowed
+ * the stack in the memory-search path. Result is valid until the next call on
+ * this thread. */
+const char *config_embedding_command_current(const char *requested);
+
 /* Disposition source labels for config reporting. */
 const char *config_disposition_source_name(config_disposition_source_t source);
 
