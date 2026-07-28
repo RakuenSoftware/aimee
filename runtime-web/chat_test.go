@@ -978,3 +978,45 @@ func TestHandleChatPrimarySetRejectsMissingFields(t *testing.T) {
 		t.Fatalf("expected 400, got %d body=%q", rr.Code, rr.Body.String())
 	}
 }
+
+// A chat mutation the SPA exposes but the backend has not built must SAY so.
+//
+// These three returned {"status":"ok"} unconditionally while the shipped UI
+// carries the controls that call them ("Rewind to here", "Rewinding…", "Branch
+// from current point"). A user clicked Rewind, saw the pending state resolve to
+// success, and their conversation was untouched — and the SPA's own "Rewind
+// failed" branch could never fire, because the stub always claimed to have
+// worked. No sockets here on purpose: the handlers answer without touching the
+// v1 transport, so this exercises them directly.
+func TestUnimplementedChatMutationsDoNotClaimSuccess(t *testing.T) {
+	s := &server{}
+	cases := []struct {
+		name string
+		h    http.HandlerFunc
+	}{
+		{"branch", s.handleChatBranch},
+		{"switch-thread", s.handleChatSwitchThread},
+		{"rewind", s.handleChatRewind},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			tc.h(rr, httptest.NewRequest(http.MethodPost, "/api/chat/"+tc.name,
+				strings.NewReader(`{}`)))
+
+			if rr.Code != http.StatusNotImplemented {
+				t.Fatalf("status = %d, want 501 (a mutation that does nothing must not report success)", rr.Code)
+			}
+			var body map[string]any
+			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+				t.Fatalf("response is not JSON: %v (%s)", err, rr.Body.String())
+			}
+			if _, ok := body["error"]; !ok {
+				t.Fatalf("no error field: %s", rr.Body.String())
+			}
+			if got, ok := body["status"]; ok && got == "ok" {
+				t.Fatalf("still reports status ok: %s", rr.Body.String())
+			}
+		})
+	}
+}
