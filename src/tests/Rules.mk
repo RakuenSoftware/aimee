@@ -677,8 +677,13 @@ unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	@# exporting AIMEE_HOME would OVERRIDE the many tests that set HOME themselves
 	@# to steer the config dir (e.g. test_session_brief). Exporting HOME leaves the
 	@# default safe while a test's own setenv still wins inside its process.
+	@# TMPDIR as well as HOME: platform_tmpdir() honours it, so the directories
+	@# tests create with platform_mkdtemp() land inside $$th and go with it on
+	@# EXIT. 64 of the 112 tests that make one never remove it, and they used to
+	@# pile up in /tmp across every run until tmpfs ran out of INODES (40k dirs,
+	@# 857k inodes, with 45GB still free) and nothing could create a file.
 	@th="$$(mktemp -d /tmp/aimee-unit-home.XXXXXX)"; \
-	export HOME="$$th"; unset AIMEE_HOME; \
+	export HOME="$$th" TMPDIR="$$th"; unset AIMEE_HOME; \
 	trap 'rm -rf "$$th"' EXIT; \
 	jobs="$(TEST_RUN_JOBS)"; \
 	if [ "$$jobs" -le 1 ]; then \
