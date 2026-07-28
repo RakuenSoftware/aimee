@@ -786,6 +786,42 @@ int main(void)
       server_http_set_notes_search_handler(NULL);
    }
 
+   /* --- server_http_auth_error_body: the 401 must carry a way out ---
+    *
+    * A bearer rotation invalidates every already-paired client at once, and the
+    * old body said only "missing or invalid bearer token" — indistinguishable
+    * from a typo, with no recovery path. Recovering meant knowing to read
+    * aimee.yaml inside the container. Clients echo this text verbatim, so if the
+    * remediation is not here, the operator never sees it anywhere. */
+   {
+      const char *b401 = server_http_auth_error_body(401);
+      assert(b401 != NULL);
+      /* still identifies the failure */
+      assert(strstr(b401, "missing or invalid bearer token") != NULL);
+      assert(strstr(b401, "\"type\":\"authentication_error\"") != NULL);
+      /* ...and now says how to recover: where the live token is, and the command */
+      assert(strstr(b401, "rotated") != NULL);
+      assert(strstr(b401, "aimee.api.bearer_token") != NULL);
+      assert(strstr(b401, "aimee remote set") != NULL);
+
+      /* The 503 case is a server misconfiguration, not a client credential
+       * problem — it must NOT tell the caller to go re-pair. */
+      const char *b503 = server_http_auth_error_body(503);
+      assert(b503 != NULL);
+      assert(strstr(b503, "requires a configured bearer token") != NULL);
+      assert(strstr(b503, "aimee remote set") == NULL);
+      assert(strcmp(b401, b503) != 0);
+
+      /* Both must be parseable JSON objects, since clients decode before display. */
+      cJSON *j401 = cJSON_Parse(b401);
+      assert(j401 != NULL);
+      cJSON_Delete(j401);
+      cJSON *j503 = cJSON_Parse(b503);
+      assert(j503 != NULL);
+      cJSON_Delete(j503);
+      printf("  PASS: auth_error_body carries rotation recovery path\n");
+   }
+
    /* --- server_http_authorize: UDS vs TCP + bearer + session-key rule --- */
    {
       /* UDS is always authorized regardless of token, when no session key. */
