@@ -142,19 +142,14 @@ log() { printf '[server-entrypoint] %s\n' "$*"; }
 plane_exit_message() {
     _pem_first=$1
     _pem_status=$2
+    _pem_terminating=$3
     case $_pem_first in
         wfe) _pem_plane=aimee-wfe ;;
         *) _pem_plane=aimee-server ;;
     esac
-    # Derive "signalled" from the status rather than a separate flag. wait
-    # reports 128+N for a signalled child, so the status already carries the
-    # fact; a parallel `terminating` flag was a second source of truth for the
-    # same thing and could contradict it — a plane failing on its own with
-    # exit 3 while the entrypoint happened to be stopping would have been
-    # reported as "stopped on termination signal (status 3)".
-    if [ "$_pem_status" -gt 128 ] 2>/dev/null; then
-        printf '%s stopped on signal %s (status %s); shutting down webchat' \
-            "$_pem_plane" "$((_pem_status - 128))" "$_pem_status"
+    if [ "$_pem_terminating" = 1 ]; then
+        printf '%s stopped on termination signal (status %s); shutting down webchat' \
+            "$_pem_plane" "$_pem_status"
     else
         printf '%s exited (status %s); shutting down webchat' "$_pem_plane" "$_pem_status"
     fi
@@ -172,7 +167,15 @@ shutdown() {
 	[ -n "$wfe_pid" ] && kill -KILL "$wfe_pid" 2>/dev/null || true
     webchat_stop
 }
+# A plane that is asked to stop reports the same exit 1 as a plane that broke:
+# runuser catches the signal, prints "Session terminated, killing shell...", and
+# exits 1 with the signal discarded. Without this flag the final log calls an
+# ordinary `docker stop` an "exited (status 1)" failure, which reads as a crash
+# and sends whoever is on call hunting a core dump that was never written.
+# Record that WE were signalled, so the exit line can say so.
+terminating=0
 on_signal() {
+    terminating=1
     log "termination signal received; stopping both planes"
     shutdown
 }
@@ -269,6 +272,6 @@ if [ -n "$wfe_pid" ]; then
 else
     if wait "$server_pid"; then status=0; else status=$?; fi
 fi
-log "$(plane_exit_message "${first:-}" "$status")"
+log "$(plane_exit_message "${first:-}" "$status" "$terminating")"
 shutdown
 exit "$status"
