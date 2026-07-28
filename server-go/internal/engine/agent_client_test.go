@@ -732,6 +732,48 @@ func TestHTTPAgentClientExpiresUnassignedPendingJob(t *testing.T) {
 	}
 }
 
+func TestHTTPAgentClientExpiresRoutedPendingJob(t *testing.T) {
+	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var cancellations atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 23})
+		case "/v1/delegate/status":
+			// Routing records agent_name before a worker takes the lease. A
+			// pending row is therefore still unassigned even with this field set.
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "pending", "agent_name": "codex"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
+		PollEvery: time.Millisecond, PendingTimeout: MinDelegatePendingTimeout,
+		CancelUnassigned: func(context.Context, int, string, time.Duration) (bool, error) {
+			cancellations.Add(1)
+			return true, nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review",
+		Delegate: "codex", WorkItemID: "wi_routed_pending", Stage: "gate", ExecutionVersion: "v1"}
+	if _, err := client.Delegate(t.Context(), request); err == nil || !errors.Is(err, ErrDelegateUnassignedExpired) {
+		t.Fatalf("routed pending job did not expire as unassigned: %v", err)
+	}
+	if cancellations.Load() != 1 {
+		t.Fatalf("cancellations=%d, want 1", cancellations.Load())
+	}
+	if _, _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
+		t.Fatal("expired routed pending job retained its durable mapping")
+	}
+}
+
 func TestHTTPAgentClientExpiresUnassignedRunningJob(t *testing.T) {
 	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
 	if err != nil {
