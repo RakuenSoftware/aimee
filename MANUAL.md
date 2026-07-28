@@ -299,9 +299,11 @@ copied table in this manual.
 `aimee remote set` stores the target in `~/.config/aimee/remote.conf`. That file is private to the
 user and opened without following symlinks.
 
-The shared bearer authorizes reads. A remote write needs a short-lived KB-signed identity token and
-a grant for the exact `(server_id, team_id, subject)`. `data` covers memory, docs, and index
-ingestion. `full` also covers agent, delegate, runner, and workspace control.
+The shared bearer authorizes reads. The first wizard user's explicit `full` grant is bound to the
+mTLS certificate enrolled by `aimee remote set`; the bearer alone cannot exercise it. Additional
+users need a short-lived KB-signed identity token and a grant for the exact
+`(server_id, team_id, subject)`. `data` covers memory, docs, and index ingestion. `full` also covers
+agent, delegate, runner, and workspace control.
 
 The server must know `AIMEE_SERVER_ID`, `AIMEE_SERVER_TEAM_ID`, and the root-owned
 `AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE`. Grant changes are local-socket only:

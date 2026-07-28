@@ -18,9 +18,12 @@ For local use, check the Unix socket, service manager, server log, and config-di
 
 ## Reads work; writes fail
 
-Check `AIMEE_SERVER_ID`, `AIMEE_SERVER_TEAM_ID`, the management-JWKS trust bundle, the exact subject
-spelling and grant tier, and the identity-token refusal reason. `aimee.api.remote_writes` cannot fix
-the denial. Use the structured `403` and request ID; do not widen every user to test one grant.
+Read the structured `403` first. For the first wizard user, confirm the Linux client completed mTLS
+enrollment with the exact command shown after Deploy; re-running Deploy as that same user is
+idempotent and shows the pairing state. For an additional PAM/OIDC user, check `AIMEE_SERVER_ID`,
+`AIMEE_SERVER_TEAM_ID`, the management-JWKS trust bundle, exact subject spelling, grant tier, and
+identity-token refusal reason. `aimee.api.remote_writes` cannot fix either denial. Do not widen every
+user to test one grant.
 
 ## KB is unavailable
 

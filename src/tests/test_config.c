@@ -2469,8 +2469,8 @@ int main(void)
       cJSON_Delete(root);
    }
 
-   /* AIMEE_API_BEARER_TOKEN env override (config_server_api.c): a deploy-supplied
-    * bearer wins over the config-file value and opts out of TOFU enrollment. */
+   /* Server API env overrides (config_server_api.c): deploy truth wins over an
+    * older persisted config. */
    {
       extern void config_parse_server_api(config_t * cfg, const cJSON *root);
       config_t c;
@@ -2502,6 +2502,17 @@ int main(void)
       snprintf(c.server_api_bearer_token, sizeof c.server_api_bearer_token, "file-value");
       config_parse_server_api(&c, root);
       assert(strcmp(c.server_api_bearer_token, "file-value") == 0);
+
+      platform_setenv("AIMEE_API_MTLS", "optional");
+      config_parse_server_api(&c, root);
+      assert(c.server_api_mtls == 1);
+      platform_setenv("AIMEE_API_MTLS", "required");
+      config_parse_server_api(&c, root);
+      assert(c.server_api_mtls == 2);
+      platform_setenv("AIMEE_API_MTLS", "off");
+      config_parse_server_api(&c, root);
+      assert(c.server_api_mtls == 0);
+      platform_unsetenv("AIMEE_API_MTLS");
 
       cJSON_Delete(root);
    }
