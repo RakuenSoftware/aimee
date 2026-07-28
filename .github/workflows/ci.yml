@@ -665,22 +665,38 @@ jobs:
           #  (1) bare `choco install mingw` flakes ~50% on the Chocolatey CDN;
           #  (2) the choco package's gcc path changes between versions (v15.2.0
           #      moved it), so a hardcoded `...\mingw64\bin` breaks.
-          # Prefer the MSYS2 mingw64 toolchain pre-installed on the runner image
-          # (no network); otherwise choco-install with retries and *discover* the
-          # gcc.exe location instead of hardcoding it.
+          # Prefer a complete pre-installed MSYS2 toolchain (no network). Runner
+          # images have moved between mingw64 and ucrt64, so probe both. If neither
+          # is complete, use MSYS2's own package manager before falling back to
+          # Chocolatey; a Chocolatey outage must not be the only installation path.
           function Find-MingwBin {
-            if (Test-Path "C:\msys64\mingw64\bin\gcc.exe") { return "C:\msys64\mingw64\bin" }
+            foreach ($candidate in @("C:\msys64\ucrt64\bin", "C:\msys64\mingw64\bin")) {
+              if ((Test-Path "$candidate\gcc.exe") -and
+                  (Test-Path "$candidate\mingw32-make.exe")) { return $candidate }
+            }
             $g = Get-ChildItem -Path "C:\ProgramData\chocolatey\lib\mingw","C:\ProgramData\mingw64" `
                    -Recurse -Filter gcc.exe -ErrorAction SilentlyContinue |
                  Where-Object { $_.FullName -match 'mingw64' } | Select-Object -First 1
-            if ($g) { return (Split-Path $g.FullName) }
+            if ($g) {
+              $candidate = Split-Path $g.FullName
+              if (Test-Path "$candidate\mingw32-make.exe") { return $candidate }
+            }
             return $null
           }
           $bin = Find-MingwBin
+          $pacman = "C:\msys64\usr\bin\pacman.exe"
+          if (-not $bin -and (Test-Path $pacman)) {
+            for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
+              & $pacman -Sy --noconfirm --needed `
+                mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make
+              if ($LASTEXITCODE -ne 0) { Start-Sleep (15 * ($i + 1)) }
+              $bin = Find-MingwBin
+            }
+          }
           if (-not $bin) {
             for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
               choco install mingw -y --no-progress
-              if ($LASTEXITCODE -ne 0) { Start-Sleep 15 }
+              if ($LASTEXITCODE -ne 0) { Start-Sleep (15 * ($i + 1)) }
               $bin = Find-MingwBin
             }
           }
@@ -729,11 +745,44 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install MinGW-w64
-        run: choco install mingw
-      - name: Add MinGW to PATH
-        shell: powershell
-        run: echo "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Set up MinGW-w64
+        shell: pwsh
+        run: |
+          function Find-MingwBin {
+            foreach ($candidate in @("C:\msys64\ucrt64\bin", "C:\msys64\mingw64\bin")) {
+              if ((Test-Path "$candidate\gcc.exe") -and
+                  (Test-Path "$candidate\mingw32-make.exe")) { return $candidate }
+            }
+            $g = Get-ChildItem -Path "C:\ProgramData\chocolatey\lib\mingw","C:\ProgramData\mingw64" `
+                   -Recurse -Filter gcc.exe -ErrorAction SilentlyContinue |
+                 Where-Object { $_.FullName -match 'mingw64' } | Select-Object -First 1
+            if ($g) {
+              $candidate = Split-Path $g.FullName
+              if (Test-Path "$candidate\mingw32-make.exe") { return $candidate }
+            }
+            return $null
+          }
+          $bin = Find-MingwBin
+          $pacman = "C:\msys64\usr\bin\pacman.exe"
+          if (-not $bin -and (Test-Path $pacman)) {
+            for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
+              & $pacman -Sy --noconfirm --needed `
+                mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make
+              if ($LASTEXITCODE -ne 0) { Start-Sleep (15 * ($i + 1)) }
+              $bin = Find-MingwBin
+            }
+          }
+          if (-not $bin) {
+            for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
+              choco install mingw -y --no-progress
+              if ($LASTEXITCODE -ne 0) { Start-Sleep (15 * ($i + 1)) }
+              $bin = Find-MingwBin
+            }
+          }
+          if (-not $bin) { Write-Error "MinGW gcc.exe and mingw32-make.exe not found"; exit 1 }
+          Write-Host "Using MinGW at $bin"
+          & "$bin\gcc.exe" --version
+          echo "$bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - name: Download SQLite amalgamation
         shell: powershell
         run: |

@@ -1,0 +1,96 @@
+{
+  "case_count": 10000,
+  "baseline_model_views": {
+    "ettin400m": {
+      "embedding": "excluded_reranker_only",
+      "reranking": "required_incumbent_control",
+      "synthesis": "excluded_reranker_only"
+    },
+    "ettin68m": {
+      "embedding": "excluded_reranker_only",
+      "reranking": "required_incumbent_control",
+      "synthesis": "excluded_reranker_only"
+    },
+    "gemma4_12b": {
+      "embedding": "required_native_width",
+      "reranking": "excluded_instruction_base_not_cross_encoder",
+      "synthesis": "required"
+    },
+    "gemma4_26b_a4b": {
+      "embedding": "required_native_width",
+      "reranking": "excluded_instruction_base_not_cross_encoder",
+      "synthesis": "required"
+    },
+    "gemma4_31b": {
+      "embedding": "required_native_width",
+      "reranking": "excluded_instruction_base_not_cross_encoder",
+      "synthesis": "required"
+    },
+    "gemma4_e2b": {
+      "embedding": "required_native_width",
+      "reranking": "excluded_instruction_base_not_cross_encoder",
+      "synthesis": "required"
+    },
+    "gemma4_e4b": {
+      "embedding": "required_native_width",
+      "reranking": "excluded_instruction_base_not_cross_encoder",
+      "synthesis": "required"
+    },
+    "qwen36_35b_a3b": {
+      "embedding": "required_native_width",
+      "reranking": "excluded_instruction_base_not_cross_encoder",
+      "synthesis": "required"
+    }
+  },
+  "deidentification": {
+    "credential_patterns": true,
+    "emails": true,
+    "home_usernames": true,
+    "ip_addresses": true,
+    "pem_blocks": true,
+    "source_ids_hashed": true
+  },
+  "files": {
+    "corpus.jsonl": {
+      "rows": 26473,
+      "sha256": "5b33a393aeb4f3ddfd774784fc3b705d473052bddabc40765d567f06bbfa94a1"
+    },
+    "embedding.jsonl": {
+      "rows": 10000,
+      "sha256": "c54b2642d1d6a01b6fd1fc55391ecbd428a7fb000221f6da31d352d5bd24e108"
+    },
+    "reranking.jsonl": {
+      "rows": 10000,
+      "sha256": "860d38d386c9bfbe0cbd792b746974fa56a5d0b43497ad8dac33fd3dfc06d919"
+    },
+    "synthesis.jsonl": {
+      "rows": 10000,
+      "sha256": "910cb84b7c22fe1064f56c69465b0d91416041c196f0399984b043dbdb6e997c"
+    }
+  },
+  "label_provenance": "silver: committed artifacts with kb_document citations",
+  "source": {
+    "access": "read_only_stream",
+    "case_snapshot_sha256": "327866c952fd00601b4179ae0a00ee50b39c1b1ad8729957e3dc54d2de79af9b",
+    "database": "aimee_shared",
+    "deployment": ".254",
+    "document_snapshot_sha256": "6f51302627c987ed2058ecb4c9c54862b3ea5df88b08f2416827f0627a5ddfbf",
+    "raw_rows_persisted": false
+  },
+  "strata": {
+    "claim": 2500,
+    "code_unit": 2500,
+    "doc_summary": 2000,
+    "entity": 1500,
+    "synthesis": 1500
+  },
+  "suite_version": "gemma4-ab-v1",
+  "training_exclusion": {
+    "keys": [
+      "suite_version",
+      "document_snapshot_sha256",
+      "case_snapshot_sha256"
+    ],
+    "required": true
+  }
+}

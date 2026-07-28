@@ -22,6 +22,7 @@ const method_policy_t method_registry[] = {
     {"api.status", CAP_SESSION_READ, "public /v1 API status"},
     {"api.enable", CAP_SESSION_ADMIN, "enable public /v1 API listener"},
     {"api.rotate_bearer", CAP_SESSION_ADMIN, "rotate the public /v1 API bearer"},
+    {"api.enroll_bearer", CAP_SESSION_ADMIN, "add a /v1 API bearer without revoking existing ones"},
     {"api.disable", CAP_SESSION_ADMIN, "disable public /v1 API listener"},
     {"init.run", CAP_TOOL_EXECUTE, "initialize local stores"},
     {"launch.run", CAP_TOOL_EXECUTE, "launch session"},
@@ -39,6 +40,8 @@ const method_policy_t method_registry[] = {
     {"trajectory.batch", CAP_DELEGATE, "trajectory batch generation"},
     /* Memory (exact before prefix) */
     {"memory.store", CAP_MEMORY_WRITE, "store memory"},
+    {"memory.delete", CAP_MEMORY_WRITE, "delete a memory"},
+    {"memory.supersede", CAP_MEMORY_WRITE, "supersede a memory"},
     {"memory.user_capture", CAP_MEMORY_WRITE, "capture per-user memory"},
     {"memory.*", CAP_MEMORY_READ, "memory operation"},
     /* Index (prefix) */

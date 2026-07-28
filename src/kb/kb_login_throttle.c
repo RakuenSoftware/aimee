@@ -12,7 +12,8 @@
 /* Fixed tables: bounded memory is the point, so an attacker cannot make kb
  * allocate by varying the username or the source address. Sized generously
  * relative to the number of distinct principals a kb sees in one window. */
-#define SLOTS 1024
+#define SLOTS       1024
+#define PROBE_LIMIT 8
 
 typedef struct
 {
@@ -131,43 +132,48 @@ static int clamp_retry(int64_t seconds)
 
 /* Find the slot for `key`, or a slot to use for it.
  *
- * On collision the two identities SHARE a slot rather than one evicting the
- * other. Eviction would be the bug: an attacker who could evict their own record
- * by hashing a few fresh usernames would clear their lockout at will. Sharing
- * errs toward over-throttling, which is the safe direction — it can cost an
- * innocent principal part of its budget, but it can never grant an attacker more
- * attempts than the budget allows.
+ * Probe a small, fixed number of slots instead of making the table directly
+ * mapped. A single random hash collision must not throttle an unrelated user;
+ * with one slot that happened in the live PAM test even though only two attempts
+ * had been charged. The probe is bounded, so hostile input still cannot turn a
+ * lookup into an unbounded scan. Existing records are never evicted: an attacker
+ * cannot clear a lockout by presenting colliding identities.
  *
- * Returns NULL only if every slot is occupied by a live record, which is the
- * fail-closed case the caller must treat as "refuse". */
+ * Returns NULL only if the whole probe set is occupied by live records, which is
+ * the fail-closed case the caller must treat as "refuse". */
 static slot_t *take_slot(slot_t *table, uint64_t key, int64_t now)
 {
-   size_t idx = (size_t)(key % SLOTS);
-   slot_t *s = &table[idx];
-   if (s->key == key)
+   size_t base = (size_t)(key % SLOTS);
+   slot_t *reusable = NULL;
+   for (size_t probe = 0; probe < PROBE_LIMIT; probe++)
    {
-      /* A record stamped in the FUTURE means the wall clock moved backwards after
-       * it was written. Reset it here, on the identity's own slot, not only on the
-       * claim path below -- a slot found by its own key never reaches expired(),
-       * so without this the record stays locked until real time catches up. */
-      if (now < s->window_start)
+      slot_t *s = &table[(base + probe) % SLOTS];
+      if (s->key == key)
       {
-         s->window_start = now;
-         s->locked_until = 0;
-         s->fails = 0;
+         /* A record stamped in the FUTURE means the wall clock moved backwards
+          * after it was written. Reset the identity's own slot here; a matched
+          * record never reaches expired(). */
+         if (now < s->window_start)
+         {
+            s->window_start = now;
+            s->locked_until = 0;
+            s->fails = 0;
+         }
+         return s;
       }
-      return s;
+      if (!reusable && (s->key == 0 || expired(s, now)))
+         reusable = s;
    }
-   if (s->key == 0 || expired(s, now))
+   if (reusable)
    {
       /* Free, or a spent record from another identity: reuse it, reset. */
-      s->key = key;
-      s->window_start = now;
-      s->locked_until = 0;
-      s->fails = 0;
-      return s;
+      reusable->key = key;
+      reusable->window_start = now;
+      reusable->locked_until = 0;
+      reusable->fails = 0;
+      return reusable;
    }
-   return NULL; /* live record for a different identity -> share nothing, fail closed */
+   return NULL; /* live probe set for other identities -> fail closed */
 }
 
 static int check_one(slot_t *table, uint64_t key, int64_t now)
@@ -178,11 +184,19 @@ static int check_one(slot_t *table, uint64_t key, int64_t now)
       /* The slot is held by a different, still-live identity. We cannot tell
        * whether THIS identity is over budget, and a throttle that guesses
        * "allowed" when it cannot answer is not a throttle. Refuse for the
-       * remainder of the occupant's window. */
-      slot_t *occ = &table[(size_t)(key % SLOTS)];
-      int64_t until = occ->locked_until > 0 ? occ->locked_until
-                                            : occ->window_start + KB_LOGIN_THROTTLE_WINDOW_SEC;
-      return clamp_retry(until - now);
+       * longest remaining wait in the saturated probe set. */
+      size_t base = (size_t)(key % SLOTS);
+      int retry = 1;
+      for (size_t probe = 0; probe < PROBE_LIMIT; probe++)
+      {
+         slot_t *occ = &table[(base + probe) % SLOTS];
+         int64_t until = occ->locked_until > 0 ? occ->locked_until
+                                               : occ->window_start + KB_LOGIN_THROTTLE_WINDOW_SEC;
+         int candidate = clamp_retry(until - now);
+         if (candidate > retry)
+            retry = candidate;
+      }
+      return retry;
    }
    if (now < s->locked_until)
       return clamp_retry(s->locked_until - now);
@@ -226,15 +240,20 @@ static void fail_one(slot_t *table, uint64_t key, int64_t now)
 
 static void clear_one(slot_t *table, uint64_t key)
 {
-   size_t idx = (size_t)(key % SLOTS);
-   slot_t *s = &table[idx];
-   if (s->key != key)
-      return; /* Another identity's record; clearing it would let an attacker
-               * reset a victim's state, or their own via a collision. */
-   s->key = 0;
-   s->window_start = 0;
-   s->locked_until = 0;
-   s->fails = 0;
+   size_t base = (size_t)(key % SLOTS);
+   for (size_t probe = 0; probe < PROBE_LIMIT; probe++)
+   {
+      slot_t *s = &table[(base + probe) % SLOTS];
+      if (s->key != key)
+         continue;
+      s->key = 0;
+      s->window_start = 0;
+      s->locked_until = 0;
+      s->fails = 0;
+      return;
+   }
+   /* No match: never clear a different identity's record. That would let an
+    * attacker reset a victim's state, or their own via a collision. */
 }
 
 /* An absent peer is ONE shared bucket, not an exemption: "we could not tell who

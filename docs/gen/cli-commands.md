@@ -566,7 +566,7 @@ Model provider profiles and catalogs.
 Subcommands:
 
 ```
-  list             List registered providers (--available, --json)
+  list             List configured providers (--all, --available, --json)
   show <name>      Show provider profile details
   models <name>    Fetch provider model catalog (--json)
   test <name>      Probe provider credentials and connectivity

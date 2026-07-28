@@ -149,6 +149,12 @@ type recordingAgents struct {
 	draftResponses []string
 }
 
+type fixedResponseAgents struct{ response string }
+
+func (a fixedResponseAgents) Delegate(context.Context, DelegateRequest) (DelegateResult, error) {
+	return DelegateResult{Response: a.response}, nil
+}
+
 type scriptedReviewAgents struct {
 	mu        sync.Mutex
 	responses []string
@@ -684,7 +690,7 @@ func TestRoundtableStageGuidanceCoversEverySupportedStage(t *testing.T) {
 	tests := map[string]string{
 		"intent":      "acceptance criteria faithfully capture",
 		"plan":        "goal-only restatement",
-		"frozen_diff": "Required edits that are absent",
+		"frozen_diff": "never create a blocking finding solely",
 	}
 	for stage, marker := range tests {
 		if normalized, ok := normalizeRoundtableStage(stage); !ok || normalized != stage || !strings.Contains(roundtableStageGuidance(normalized), marker) {
@@ -771,7 +777,7 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 		if request.Role == "review" && (!strings.Contains(request.Prompt, requestMarker) || strings.Contains(request.Prompt, "\n\nPROPOSAL:\n") || strings.Contains(request.Prompt, "complete proposal")) {
 			t.Fatal("roundtable did not frame the source as the original request")
 		}
-		if request.Role == "review" && (!strings.Contains(request.Prompt, "ARTIFACT STAGE: frozen_diff") || !strings.Contains(request.Prompt, "Required edits that are absent") || !strings.Contains(request.Prompt, "substitute a different goal or deliverable")) {
+		if request.Role == "review" && (!strings.Contains(request.Prompt, "ARTIFACT STAGE: frozen_diff") || !strings.Contains(request.Prompt, "Required edits that are absent") || !strings.Contains(request.Prompt, "substitute a different goal or deliverable") || !strings.Contains(request.Prompt, "patch does not embed those logs or metadata")) {
 			t.Fatal("roundtable did not make original-request alignment stage-aware")
 		}
 		if request.Persona == "security" && request.Delegate == "kimi" {
@@ -810,6 +816,21 @@ func TestDirectRoundtableReviewReturnsAndVerifiesRunArtifactIdentity(t *testing.
 		if !strings.Contains(request.Prompt, "DIRECT_ARTIFACT_MARKER") {
 			t.Fatalf("review request received another run's artifact: %+v", request)
 		}
+	}
+}
+
+func TestNativeRunnerSplitAcceptsManagedChangeIntentBinding(t *testing.T) {
+	runner := &NativeRunner{agents: fixedResponseAgents{response: `{"schema_version":1,"packets":[{"packet_id":"p1","summary":"implement feature","target_blocks":["implement"],"dependencies":[],"acceptance_criteria":["feature exists"]}]}`}}
+	intent := []byte(`{"schema_version":1,"status":"unconfirmed","summary":"implement feature","rationale":"proposal","acceptance_criteria":["feature exists"]}`)
+	result, err := runner.structured(context.Background(), StepRequest{
+		WorkItem: db1.WorkItem{Repo: "/repo"},
+		Inputs:   map[string]wfe.Artifact{"intent": {Type: "intent", Content: intent, Hash: wfe.Hash(intent)}},
+	}, "packets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StepAdvanced || result.ArtifactType != "plan" {
+		t.Fatalf("result=%+v", result)
 	}
 }
 

@@ -57,6 +57,8 @@ cJSON *marshal_kb_update(int argc, char **argv);
 cJSON *marshal_mcp_recheck(int argc, char **argv);
 cJSON *marshal_memory_benchmark(int argc, char **argv);
 cJSON *marshal_memory_get(int argc, char **argv);
+cJSON *marshal_memory_delete(int argc, char **argv);
+cJSON *marshal_memory_supersede(int argc, char **argv);
 cJSON *marshal_memory_list(int argc, char **argv);
 cJSON *marshal_memory_read(int argc, char **argv);
 cJSON *marshal_memory_recall(int argc, char **argv);

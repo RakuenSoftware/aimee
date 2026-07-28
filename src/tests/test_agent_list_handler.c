@@ -43,6 +43,21 @@ int server_send_error(void *conn, const char *message, const char *request_id)
    return 0;
 }
 
+/* The classified variant. handle_agent_probe's argument check calls this one, so
+ * the stub layer has to cover it too or the target does not link. Captured into
+ * the same buffer: these tests assert on the message, and the kind is asserted
+ * where it decides an HTTP status (runtime-web's TestRPCErrorStatus...). */
+char g_last_error_kind[64];
+int server_send_error_kind(void *conn, const char *kind, const char *message,
+                           const char *request_id)
+{
+   (void)conn;
+   (void)request_id;
+   snprintf(g_last_error_kind, sizeof(g_last_error_kind), "%s", kind ? kind : "");
+   snprintf(g_last_error, sizeof(g_last_error), "%s", message ? message : "");
+   return 0;
+}
+
 /* The real handler under test. Declared here to avoid dragging server.h. */
 int handle_agent_list(void *ctx, void *conn, cJSON *req);
 int handle_agent_probe(void *ctx, void *conn, cJSON *req);

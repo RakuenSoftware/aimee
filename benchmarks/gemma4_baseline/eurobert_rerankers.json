@@ -1,0 +1,112 @@
+{
+  "runtime": {
+    "execution": "native_cuda",
+    "python": "3.12",
+    "torch": {
+      "version": "2.7.1+cu128",
+      "index_url": "https://download.pytorch.org/whl/cu128",
+      "cuda": "12.8"
+    },
+    "platform": {
+      "os": "Ubuntu 24.04",
+      "cloud_image_sha256": "d1940f7d69d343355e183dff1e08a59852d32e7309baa7a4bad8365b11b005ac",
+      "gpu": "NVIDIA GeForce RTX 5080",
+      "nvidia_driver": "595.84"
+    },
+    "packages": {
+      "accelerate": "1.14.0",
+      "datasets": "5.0.0",
+      "safetensors": "0.8.0",
+      "sentence-transformers": "5.6.1",
+      "transformers": "5.14.1"
+    }
+  },
+  "training": {
+    "dataset": "cross-encoder/ettin-reranker-v1-data",
+    "dataset_revision": "7f07e8686db233d934eacde4bf47a9995f73811e",
+    "configs": [
+      "agnews",
+      "amazon_qa",
+      "arxiv_title_abstract",
+      "gooaq_qa",
+      "quora",
+      "stackexchange_qa",
+      "stackoverflow_title_body",
+      "rerank_fever",
+      "rerank_fiqa",
+      "rerank_hotpotqa",
+      "rerank_msmarco",
+      "rerank_nq",
+      "rerank_squadv2",
+      "rerank_trivia"
+    ],
+    "examples_per_config": 39000,
+    "selection": "equal per-config train prefixes at the pinned revision, then deterministic global shuffle",
+    "shuffle": true,
+    "loss": "MSELoss with identity activation over teacher scores",
+    "max_length": 512,
+    "per_device_batch_size": 4,
+    "gradient_accumulation_steps": 32,
+    "effective_batch_size": 128,
+    "epochs": 1,
+    "learning_rate": 0.000028,
+    "warmup_ratio": 0.1,
+    "weight_decay": 0.1,
+    "adam_beta1": 0.9,
+    "adam_beta2": 0.95,
+    "adam_epsilon": 0.00001,
+    "lr_scheduler_type": "linear",
+    "validation": {
+      "config": "quora",
+      "split": "validation[:5000]",
+      "selection": "pinned dataset validation split; never the frozen 10k benchmark",
+      "metric": "eval_loss",
+      "eval_steps": 500
+    },
+    "seed": 12,
+    "precision": "bf16",
+    "gradient_checkpointing": true
+  },
+  "serving": {
+    "port": 8920,
+    "max_length": 512,
+    "batch_size": 32,
+    "maximum_batch_wait_ms": 10,
+    "workers": 8,
+    "pairs_per_request": 4,
+    "query_char_cap": 512,
+    "candidate_char_cap": 1024
+  },
+  "models": [
+    {
+      "label": "eurobert210m_reranker",
+      "pretrained_label": "eurobert210m_pretrained",
+      "encoder_label": "eurobert210m_reranker_encoder",
+      "pretrained_encoder_label": "eurobert210m_pretrained_encoder",
+      "family": "EuroBERT",
+      "parameters": "210M",
+      "repository": "EuroBERT/EuroBERT-210m",
+      "revision": "39b51e15dd1f1a06f58b5cbf6a8a188cec60bd0e",
+      "expected_model_type": "eurobert",
+      "expected_hidden_size": 768,
+      "expected_layers": 12,
+      "classifier_pooling": "late",
+      "learning_rate": 0.000028
+    },
+    {
+      "label": "eurobert610m_reranker",
+      "pretrained_label": "eurobert610m_pretrained",
+      "encoder_label": "eurobert610m_reranker_encoder",
+      "pretrained_encoder_label": "eurobert610m_pretrained_encoder",
+      "family": "EuroBERT",
+      "parameters": "610M",
+      "repository": "EuroBERT/EuroBERT-610m",
+      "revision": "d9af784ed20db6c2096e335ec6a67dd4a219924c",
+      "expected_model_type": "eurobert",
+      "expected_hidden_size": 1152,
+      "expected_layers": 26,
+      "classifier_pooling": "late",
+      "learning_rate": 0.000015
+    }
+  ]
+}

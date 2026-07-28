@@ -58,6 +58,9 @@ services:
       retries: 5
     volumes:
       - aimee-managed-kb-home:/var/lib/aimee
+      # compose.server-managed owns this volume under the fixed `aimee` project.
+      # Sharing it read-only lets kb.build/update resolve server workspace paths.
+      - aimee-server-workspaces:/var/lib/aimee-workspaces:ro
 
   # The one LLM service, for every tier: a model-less image that pulls the tier
   # the wizard selected on first boot and persists it in the /models volume.
@@ -90,3 +93,6 @@ services:
 volumes:
   aimee-managed-kb-home:
   aimee-managed-llm-models:
+  aimee-server-workspaces:
+    external: true
+    name: aimee_aimee-server-workspaces

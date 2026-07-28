@@ -148,6 +148,8 @@ static const struct
     {"memory", "archive", "memory.archive", "memory.user_capture", NULL, 60000},
     {"memory", "list", "memory.list", NULL, "memories", 60000},
     {"memory", "get", "memory.get", NULL, NULL, 60000},
+    {"memory", "delete", "memory.delete", NULL, NULL, 60000},
+    {"memory", "supersede", "memory.supersede", NULL, NULL, 60000},
     {"memory", "show", "memory.get", NULL, NULL, 60000},
     {"memory", "read", "memory.read", NULL, NULL, 60000},
     {"memory", "stats", "memory.stats", NULL, NULL, 60000},
@@ -221,6 +223,7 @@ static const struct
     {"kb", "grant show", "kb.grant.show", NULL, "grants", 30000},
     {"kb", "ingest", "kb.ingest", NULL, NULL, 30000},
     {"kb", "ingest status", "kb.ingest.status", NULL, NULL, 0},
+    {"kb", "health", "kb.health", NULL, NULL, 0},
     {"kb", "status", "kb.status", NULL, NULL, 0},
     {"kb", "curator status", "kb.curator", NULL, NULL, 0},
     {"kb", "curator", "kb.curator", NULL, NULL, 0},
@@ -677,6 +680,43 @@ cJSON *marshal_memory_get(int argc, char **argv)
    cJSON *req = marshal_no_args("memory.get");
    if (argc > 0)
       cJSON_AddNumberToObject(req, "id", atoll(argv[0]));
+   return req;
+}
+
+cJSON *marshal_memory_delete(int argc, char **argv)
+{
+   cJSON *req = marshal_no_args("memory.delete");
+   if (argc > 0)
+      cJSON_AddNumberToObject(req, "id", atoll(argv[0]));
+   return req;
+}
+
+/* `aimee memory supersede <old_id> <new_content> [--confidence=N] [--session=S]`
+ * — mirrors mem_supersede()'s argument shape so the thin client and the
+ * server-host command take the same thing. */
+cJSON *marshal_memory_supersede(int argc, char **argv)
+{
+   cJSON *req = marshal_no_args("memory.supersede");
+   int positional = 0;
+   for (int i = 0; i < argc; i++)
+   {
+      if (strncmp(argv[i], "--confidence=", 13) == 0)
+         cJSON_AddNumberToObject(req, "confidence", atof(argv[i] + 13));
+      else if (strncmp(argv[i], "--session=", 10) == 0)
+         cJSON_AddStringToObject(req, "session_id", argv[i] + 10);
+      else if (argv[i][0] == '-')
+         continue;
+      else if (positional == 0)
+      {
+         cJSON_AddNumberToObject(req, "old_id", atoll(argv[i]));
+         positional++;
+      }
+      else if (positional == 1)
+      {
+         cJSON_AddStringToObject(req, "new_content", argv[i]);
+         positional++;
+      }
+   }
    return req;
 }
 
