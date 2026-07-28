@@ -1069,10 +1069,6 @@
       "decls": 3,
       "loads": 1
     },
-    "src/tests/test_server_management_tls.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/tests/test_server_mgmt_read_source.c": {
       "decls": 1,
       "loads": 1
@@ -1115,8 +1111,8 @@
     }
   },
   "totals": {
-    "decls": 960,
-    "files": 278,
-    "loads": 506
+    "decls": 959,
+    "files": 277,
+    "loads": 505
   }
 }
