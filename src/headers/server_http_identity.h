@@ -47,6 +47,10 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf);
  * capture and clear, i.e. during a route handler on the serving thread. */
 const char *server_http_identity_principal(void);
 
+/* Replace the transport-derived principal with a server-authoritative identity
+ * already bound to the verified client certificate. */
+void server_http_identity_override_principal(const char *principal);
+
 /* The in-flight request's inbound `aimee-session-id` header value and bearer token
  * (both "" when absent), for the economizer gateway-mutation session-key resolver.
  * Valid only during a route handler on the serving thread (same lifetime as the

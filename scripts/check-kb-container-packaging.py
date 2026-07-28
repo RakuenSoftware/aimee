@@ -372,6 +372,57 @@ def server_default_config_failures(text: str) -> list[str]:
     return []
 
 
+def managed_kb_llm_contract_failures(text: str) -> list[str]:
+    """Validate the wizard-managed KB-to-LLM identity and role contract."""
+    if yaml is None:
+        return ["PyYAML is required to validate the managed KB-to-LLM contract"]
+    try:
+        model = yaml.load(text, Loader=UniqueKeySafeLoader)
+    except yaml.YAMLError as exc:
+        return [f"invalid managed Compose YAML: {exc.__class__.__name__}"]
+    services = model.get("services") if isinstance(model, dict) else None
+    kb = services.get("aimee-kb") if isinstance(services, dict) else None
+    llm = services.get("aimee-llm") if isinstance(services, dict) else None
+    if not isinstance(kb, dict) or not isinstance(llm, dict):
+        return ["managed Compose must contain aimee-kb and aimee-llm services"]
+
+    failures: list[str] = []
+    kb_env = kb.get("environment")
+    llm_env = llm.get("environment")
+    if not isinstance(kb_env, dict) or not isinstance(llm_env, dict):
+        return ["managed KB and LLM environment must use mapping form"]
+
+    token_expr = "${AIMEE_LLM_AUTH_TOKEN:-}"
+    if kb_env.get("AIMEE_LLM_AUTH_TOKEN") != token_expr:
+        failures.append("managed KB must receive AIMEE_LLM_AUTH_TOKEN")
+    if kb_env.get("LLM_API_KEY") != token_expr:
+        failures.append("managed KB legacy curator token must alias AIMEE_LLM_AUTH_TOKEN")
+    if llm_env.get("AIMEE_LLM_AUTH_TOKEN") != token_expr:
+        failures.append("managed LLM must receive the same AIMEE_LLM_AUTH_TOKEN")
+    if llm_env.get("AIMEE_LLM_STRICT_BIND") != "1":
+        failures.append("managed LLM must fail closed with AIMEE_LLM_STRICT_BIND=1")
+    if kb_env.get("AIMEE_LLM_URL") != "${AIMEE_LLM_URL:-http://aimee-llm:8742}":
+        failures.append("managed KB must use the unified aimee-llm:8742 endpoint")
+    if kb_env.get("AIMEE_LLM_MODEL") != "${AIMEE_LLM_MODEL:-aimee-synth}":
+        failures.append("managed KB must receive the unified model label")
+    if llm_env.get("AIMEE_LLM_SYNTH_MODEL") != "${AIMEE_LLM_MODEL:-aimee-synth}":
+        failures.append("managed LLM synth model must match the KB model label")
+
+    for role in ("EMBED", "RERANK", "SYNTH"):
+        for setting, default in (("MODE", "local"), ("TIER", "cpu"), ("URL", "")):
+            key = f"AIMEE_LLM_{role}_{setting}"
+            expected = f"${{{key}:-{default}}}"
+            if llm_env.get(key) != expected:
+                failures.append(f"managed LLM must receive {key}")
+
+    dependency = kb.get("depends_on", {}).get("aimee-llm")
+    if not isinstance(dependency, dict) or dependency.get("condition") != "service_healthy":
+        failures.append("managed KB must wait for a healthy LLM")
+    if not isinstance(dependency, dict) or dependency.get("required") is not False:
+        failures.append("managed KB-to-LLM dependency must remain profile-safe")
+    return failures
+
+
 def check(root: Path) -> list[str]:
     failures: list[str] = []
     dockerfile = root / "Dockerfile"
@@ -447,7 +498,10 @@ def check(root: Path) -> list[str]:
     if not managed_compose.exists():
         failures.append("missing deploy/container/aimee-managed.compose.yaml")
     else:
-        for failure in kb_mtls_failures(read(managed_compose)):
+        managed_text = read(managed_compose)
+        for failure in kb_mtls_failures(managed_text):
+            failures.append(f"deploy/container/aimee-managed.compose.yaml {failure}")
+        for failure in managed_kb_llm_contract_failures(managed_text):
             failures.append(f"deploy/container/aimee-managed.compose.yaml {failure}")
 
     if not dockerignore.exists():
@@ -582,9 +636,31 @@ def plant_test() -> int:
         )
         (root / "deploy/container").mkdir(parents=True)
         (root / "deploy/container/aimee-managed.compose.yaml").write_text(
-            "services:\n  aimee-kb:\n    environment:\n"
+            "services:\n"
+            "  aimee-kb:\n"
+            "    environment:\n"
             "      AIMEE_KB_MTLS_HOST: 0.0.0.0\n"
-            '      AIMEE_KB_MTLS_PORT: "8745"\n',
+            '      AIMEE_KB_MTLS_PORT: "8745"\n'
+            "      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8742}\n"
+            "      AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}\n"
+            "      LLM_API_KEY: ${AIMEE_LLM_AUTH_TOKEN:-}\n"
+            "      AIMEE_LLM_MODEL: ${AIMEE_LLM_MODEL:-aimee-synth}\n"
+            "    depends_on:\n"
+            "      aimee-llm: { condition: service_healthy, required: false }\n"
+            "  aimee-llm:\n"
+            "    environment:\n"
+            "      AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}\n"
+            '      AIMEE_LLM_STRICT_BIND: "1"\n'
+            "      AIMEE_LLM_EMBED_MODE: ${AIMEE_LLM_EMBED_MODE:-local}\n"
+            "      AIMEE_LLM_EMBED_TIER: ${AIMEE_LLM_EMBED_TIER:-cpu}\n"
+            "      AIMEE_LLM_EMBED_URL: ${AIMEE_LLM_EMBED_URL:-}\n"
+            "      AIMEE_LLM_RERANK_MODE: ${AIMEE_LLM_RERANK_MODE:-local}\n"
+            "      AIMEE_LLM_RERANK_TIER: ${AIMEE_LLM_RERANK_TIER:-cpu}\n"
+            "      AIMEE_LLM_RERANK_URL: ${AIMEE_LLM_RERANK_URL:-}\n"
+            "      AIMEE_LLM_SYNTH_MODE: ${AIMEE_LLM_SYNTH_MODE:-local}\n"
+            "      AIMEE_LLM_SYNTH_TIER: ${AIMEE_LLM_SYNTH_TIER:-cpu}\n"
+            "      AIMEE_LLM_SYNTH_URL: ${AIMEE_LLM_SYNTH_URL:-}\n"
+            "      AIMEE_LLM_SYNTH_MODEL: ${AIMEE_LLM_MODEL:-aimee-synth}\n",
             encoding="utf-8",
         )
         (root / "deploy/container/aimee-server-remote-writes.yaml").write_text(

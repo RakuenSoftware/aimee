@@ -678,6 +678,8 @@ ENV_DESC = {
     "AIMEE_SOCK": ("Server runtime", "Sandbox helper socket path."),
     # Knowledge base
     "AIMEE_LLM_URL": ("Knowledge base (aimee-kb)", "One knob: base URL of the aimee-llm container the kb calls for embedding (/embed), reranking (/rerank) AND synthesis (curator Tier-A + Tier-B at {url}/v1). The kb runs no model itself. AIMEE_EMBEDDER_URL/AIMEE_RERANKER_URL override per service. See docs/KB_LLM_BACKENDS.md."),
+    "AIMEE_LLM_AUTH_TOKEN": ("Managed KB and inference", "Bearer service identity shared by aimee-kb and its aimee-llm gateway for embed, rerank, and synthesis requests. Wizard-managed deploys generate and persist a 256-bit value automatically. This is separate from user/server bearers."),
+    "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE": ("Managed KB and inference", "Explicit migration/adoption override for an existing wizard-managed LLM credential. Ordinary inherited AIMEE_LLM_AUTH_TOKEN is ignored by managed credential creation so stale child-service state cannot win. Must be a 32..512 character RFC 6750 b64token."),
     "AIMEE_LLM_MODEL": ("Knowledge base (aimee-kb)", "Model label sent to AIMEE_LLM_URL's chat endpoint (single-model gateways ignore it). Default 'aimee-synth'."),
     "AIMEE_EMBEDDER_URL": ("Knowledge base (aimee-kb)", "Embedder endpoint override (/embed, /embed_batch); takes precedence over AIMEE_LLM_URL for embedding."),
     "AIMEE_KB_API_URL": ("Knowledge base (aimee-kb)", "aimee-kb HTTP API base URL."),

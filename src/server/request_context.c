@@ -2,6 +2,7 @@
  * See request_context.h. Storage only — population lives in the HTTP front-end
  * (handle_conn), which is the one place that sees the socket and headers. */
 #include "request_context.h"
+#include <stdio.h>
 #include <string.h>
 
 static _Thread_local request_context_t g_req_ctx;
@@ -37,4 +38,12 @@ const char *request_context_idempotency_key(void)
 const char *request_context_principal(void)
 {
    return g_req_ctx_set ? g_req_ctx.principal : "";
+}
+
+void request_context_override_principal(const char *principal)
+{
+   if (!g_req_ctx_set || !principal || !principal[0])
+      return;
+   snprintf(g_req_ctx.principal, sizeof(g_req_ctx.principal), "%s", principal);
+   g_req_ctx.trusted = 1;
 }

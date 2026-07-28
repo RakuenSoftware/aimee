@@ -15,8 +15,12 @@
 #define _GNU_SOURCE 1
 
 #include <assert.h>
+#include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "config.h"
 #include "config_database.h"
@@ -24,6 +28,19 @@
 /* --- stubs for the config surface deploy_apply.c pulls in --- */
 
 static char g_stub_profiles[64] = "kb,llm";
+static char g_stub_random_hex = 'a';
+
+const char *aimee_home(void)
+{
+   return getenv("AIMEE_HOME");
+}
+
+int platform_random_hex(char *out, size_t hex_len)
+{
+   memset(out, g_stub_random_hex, hex_len);
+   out[hex_len] = '\0';
+   return 0;
+}
 
 int config_load(config_t *cfg)
 {
@@ -40,6 +57,114 @@ void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
 }
 
 #include "../server/deploy_apply.c"
+
+static const char *envp_value(char **envp, const char *key)
+{
+   size_t n = strlen(key);
+   for (size_t i = 0; envp && envp[i]; i++)
+      if (strncmp(envp[i], key, n) == 0 && envp[i][n] == '=')
+         return envp[i] + n + 1;
+   return NULL;
+}
+
+static int envp_key_count(char **envp, const char *key)
+{
+   int count = 0;
+   size_t n = strlen(key);
+   for (size_t i = 0; envp && envp[i]; i++)
+      if (strncmp(envp[i], key, n) == 0 && envp[i][n] == '=')
+         count++;
+   return count;
+}
+
+static void test_managed_llm_service_credential(void)
+{
+   char tmp[] = "/tmp/aimee-deploy-llm-token-XXXXXX";
+   assert(mkdtemp(tmp) != NULL);
+   assert(setenv("AIMEE_HOME", tmp, 1) == 0);
+   unsetenv("AIMEE_LLM_AUTH_TOKEN");
+   unsetenv("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
+   snprintf(g_stub_profiles, sizeof(g_stub_profiles), "kb,llm");
+
+   g_stub_random_hex = 'a';
+   int managed_llm = 0;
+   char **envp = build_deploy_envp(NULL, 0, &managed_llm);
+   assert(envp != NULL);
+   assert(managed_llm == 1);
+   const char *token = envp_value(envp, "AIMEE_LLM_AUTH_TOKEN");
+   assert(token != NULL && strlen(token) == 64);
+   for (size_t i = 0; i < 64; i++)
+      assert(token[i] == 'a');
+   assert(envp_key_count(envp, "AIMEE_LLM_AUTH_TOKEN") == 1);
+   assert(setenv("COMPOSE_PROFILES", "attacker-profile", 1) == 0);
+   free_envp(envp);
+   envp = build_deploy_envp(NULL, 0, NULL);
+   assert(strcmp(envp_value(envp, "COMPOSE_PROFILES"), "kb,llm") == 0);
+   assert(envp_key_count(envp, "COMPOSE_PROFILES") == 1);
+   free_envp(envp);
+
+   char path[PATH_MAX];
+   snprintf(path, sizeof(path), "%s/%s", tmp, DEPLOY_LLM_TOKEN_FILE);
+   struct stat st;
+   assert(stat(path, &st) == 0 && S_ISREG(st.st_mode));
+   assert((st.st_mode & 0777) == 0600);
+
+   /* Re-apply reads the persisted identity instead of silently rotating it. */
+   g_stub_random_hex = 'b';
+   envp = build_deploy_envp(NULL, 0, NULL);
+   token = envp_value(envp, "AIMEE_LLM_AUTH_TOKEN");
+   assert(token != NULL && token[0] == 'a');
+   free_envp(envp);
+
+   /* Inherited empty OR non-empty child state cannot shadow the managed file. */
+   assert(setenv("AIMEE_LLM_AUTH_TOKEN", "stale-inherited-service-token-1234", 1) == 0);
+   envp = build_deploy_envp(NULL, 0, NULL);
+   assert(envp_key_count(envp, "AIMEE_LLM_AUTH_TOKEN") == 1);
+   token = envp_value(envp, "AIMEE_LLM_AUTH_TOKEN");
+   assert(token != NULL && token[0] == 'a');
+   free_envp(envp);
+
+   /* A distinctly named, deliberate operator override wins exactly once. */
+   assert(setenv("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE", "operator-managed-service-token-1234",
+                 1) == 0);
+   envp = build_deploy_envp(NULL, 0, NULL);
+   assert(strcmp(envp_value(envp, "AIMEE_LLM_AUTH_TOKEN"), "operator-managed-service-token-1234") ==
+          0);
+   assert(envp_key_count(envp, "AIMEE_LLM_AUTH_TOKEN") == 1);
+   free_envp(envp);
+   assert(setenv("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE", "invalid token with spaces", 1) == 0);
+   assert(build_deploy_envp(NULL, 0, NULL) == NULL);
+   unsetenv("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
+
+   /* The persisted authority must remain private and cannot be a symlink. */
+   assert(chmod(path, 0644) == 0);
+   assert(build_deploy_envp(NULL, 0, NULL) == NULL);
+   assert(chmod(path, 0600) == 0);
+   char real_path[PATH_MAX];
+   snprintf(real_path, sizeof(real_path), "%s.real", path);
+   assert(rename(path, real_path) == 0);
+   assert(symlink(real_path, path) == 0);
+   assert(build_deploy_envp(NULL, 0, NULL) == NULL);
+   assert(unlink(path) == 0);
+   assert(rename(real_path, path) == 0);
+
+   /* No local LLM means no credential is invented or passed. */
+   unsetenv("AIMEE_LLM_AUTH_TOKEN");
+   snprintf(g_stub_profiles, sizeof(g_stub_profiles), "kb");
+   managed_llm = 1;
+   envp = build_deploy_envp(NULL, 0, &managed_llm);
+   assert(envp != NULL && envp_value(envp, "AIMEE_LLM_AUTH_TOKEN") == NULL);
+   assert(managed_llm == 0);
+   free_envp(envp);
+
+   assert(unlink(path) == 0);
+   assert(rmdir(tmp) == 0);
+   unsetenv("AIMEE_HOME");
+   unsetenv("COMPOSE_PROFILES");
+   unsetenv("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
+   snprintf(g_stub_profiles, sizeof(g_stub_profiles), "kb,llm");
+   printf("  managed kb -> llm credential is stable, private, and scoped ok\n");
+}
 
 /* --- the deploy argv itself --- */
 
@@ -70,6 +195,22 @@ static void test_deploy_argv_has_no_remove_orphans(void)
    assert(deploy_up_argv(file, tight, 6) == -1);
    assert(deploy_up_argv(file, NULL, 8) == -1);
    printf("  deploy argv omits --remove-orphans ok\n");
+}
+
+static void test_llm_probe_uses_kb_credential_without_host_secret(void)
+{
+   const char *argv[12];
+   int n = deploy_llm_probe_argv("/managed.yaml", argv, sizeof(argv) / sizeof(argv[0]));
+   assert(n == 10 && argv[n] == NULL);
+   assert(strcmp(argv[0], "docker") == 0 && strcmp(argv[1], "compose") == 0);
+   assert(strcmp(argv[3], "/managed.yaml") == 0 && strcmp(argv[4], "exec") == 0);
+   assert(strcmp(argv[6], "aimee-kb") == 0 && strcmp(argv[7], "sh") == 0);
+   assert(strstr(argv[9], "AIMEE_LLM_URL") != NULL);
+   assert(strstr(argv[9], "AIMEE_LLM_AUTH_TOKEN") != NULL);
+   assert(strstr(argv[9], "/auth/verify") != NULL);
+   assert(strstr(argv[9], "operator-managed-service-token") == NULL);
+   assert(deploy_llm_probe_argv("/managed.yaml", argv, 10) == -1);
+   printf("  deploy verifies the KB's authenticated LLM connection without host secret argv ok\n");
 }
 
 /* --- the legacy CPU container is retired by name --- */
@@ -118,7 +259,9 @@ static void test_compose_file_default(void)
 int main(void)
 {
    printf("test_deploy_apply\n");
+   test_managed_llm_service_credential();
    test_deploy_argv_has_no_remove_orphans();
+   test_llm_probe_uses_kb_credential_without_host_secret();
    test_retire_targets_legacy_cpu_container();
    test_compose_file_default();
    printf("test_deploy_apply: all passed\n");

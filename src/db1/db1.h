@@ -72,6 +72,7 @@ extern "C"
 #include "db1_trigger.h"
 #include "mcp_osv_cache.h"
 #include "server_management_jti.h"
+#include "remote_client_grant.h"
 
 #ifdef __cplusplus
 }

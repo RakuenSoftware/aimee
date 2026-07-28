@@ -45,6 +45,15 @@ services:
       # model). When no role is local (llm profile off) the operator points this at
       # an external endpoint; the kb fail-opens on embedding if it is unreachable.
       AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8742}
+      # Managed setup creates one persistent 256-bit service bearer and gives it
+      # to BOTH sides. This is not the wizard user's bearer: it is the KB's own
+      # identity for every embed, rerank, and synth request to its LLM.
+      AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
+      # Legacy curator sidecars consume the generic OpenAI-compatible name.
+      LLM_API_KEY: ${AIMEE_LLM_AUTH_TOKEN:-}
+      # One stable model label is shared with the unified gateway. The gateway is
+      # single-deployment/multi-role, so callers do not select arbitrary models.
+      AIMEE_LLM_MODEL: ${AIMEE_LLM_MODEL:-aimee-synth}
       AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
       # Internal-only mTLS lane used for server enrollment and signed management
       # JWKS refresh. It is reachable on the Compose network, not published.
@@ -56,6 +65,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    depends_on:
+      aimee-llm: { condition: service_healthy, required: false }
     volumes:
       - aimee-managed-kb-home:/var/lib/aimee
       # compose.server-managed owns this volume under the fixed `aimee` project.
@@ -79,7 +90,26 @@ services:
       # per-role AIMEE_LLM_*_TIER the wizard emits overrides this anyway. Guessing
       # a GPU tier here would download multi-GB weights a CPU box cannot serve.
       AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-cpu}
+      # The wizard emits the complete role contract. Modes decide whether this
+      # gateway starts a local role, proxies an external role URL, or gates it
+      # off; tiers select the local artifact/profile. Do not let the supervisor's
+      # all-local defaults silently replace the saved wizard choices.
+      AIMEE_LLM_EMBED_MODE: ${AIMEE_LLM_EMBED_MODE:-local}
+      AIMEE_LLM_EMBED_TIER: ${AIMEE_LLM_EMBED_TIER:-cpu}
+      AIMEE_LLM_EMBED_URL: ${AIMEE_LLM_EMBED_URL:-}
+      AIMEE_LLM_RERANK_MODE: ${AIMEE_LLM_RERANK_MODE:-local}
+      AIMEE_LLM_RERANK_TIER: ${AIMEE_LLM_RERANK_TIER:-cpu}
+      AIMEE_LLM_RERANK_URL: ${AIMEE_LLM_RERANK_URL:-}
+      AIMEE_LLM_SYNTH_MODE: ${AIMEE_LLM_SYNTH_MODE:-local}
+      AIMEE_LLM_SYNTH_TIER: ${AIMEE_LLM_SYNTH_TIER:-cpu}
+      AIMEE_LLM_SYNTH_URL: ${AIMEE_LLM_SYNTH_URL:-}
+      AIMEE_LLM_SYNTH_MODEL: ${AIMEE_LLM_MODEL:-aimee-synth}
+      # A local managed LLM is never allowed to start keyless. deploy_apply.c
+      # generates/persists this before Compose sees the service.
+      # Keep interpolation profile-safe: Compose expands inactive profiles too.
+      # An empty value still fails at gateway startup because STRICT_BIND is on.
       AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
+      AIMEE_LLM_STRICT_BIND: "1"
     volumes:
       - aimee-managed-llm-models:/models
     healthcheck:
