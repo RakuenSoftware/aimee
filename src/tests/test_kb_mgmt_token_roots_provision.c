@@ -346,6 +346,20 @@ static void test_fresh_final_export_and_integrity(void)
           KB_MGMT_ROOTS_FINAL);
    assert(bundle_len == original_len && !memcmp(bundle, original, original_len + 1));
 
+   /* The JWKS publisher consumes the bound publication HWM's one permitted
+    * CAS. A completed wizard must remain retryable after that irreversible
+    * step: roots are still fixed and exportable, while an unbound HWM at 2 is
+    * rejected below by the ordinary integrity checks. */
+   g_publication_hwm = 2;
+   memset(bundle, 0xa5, sizeof(bundle));
+   bundle_len = 999;
+   assert(kb_mgmt_token_roots_provision(&c, &callbacks, bundle, sizeof(bundle), &bundle_len) ==
+          KB_MGMT_ROOTS_FINAL);
+   assert(!bundle_len && zero(bundle, sizeof(bundle)));
+   assert(kb_mgmt_token_roots_export(&c, &callbacks, bundle, sizeof(bundle), &bundle_len) ==
+          KB_MGMT_ROOTS_FINAL);
+   assert(bundle_len == original_len && !memcmp(bundle, original, original_len + 1));
+
    kb_mgmt_publication_root_t saved_publication = db.publication;
    unsigned bind_count = db.publication_binds;
    memset(&db.publication, 0, sizeof(db.publication));
