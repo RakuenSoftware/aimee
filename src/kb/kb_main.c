@@ -781,8 +781,7 @@ static int kb_cmd_tenancy_init_db2(void)
    return 0;
 }
 
-static int kb_parse_unsigned(const char *text, unsigned long long max,
-                             unsigned long long *out)
+static int kb_parse_unsigned(const char *text, unsigned long long max, unsigned long long *out)
 {
    if (!text || !text[0] || !out)
       return -1;

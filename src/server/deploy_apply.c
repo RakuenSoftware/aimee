@@ -51,8 +51,7 @@ static int deploy_env_has_profile(const char *env, const char *profile)
       const char *word = p;
       while (p < end && *p != ',' && !isspace((unsigned char)*p))
          p++;
-      if ((size_t)(p - word) == strlen(profile) &&
-          memcmp(word, profile, strlen(profile)) == 0)
+      if ((size_t)(p - word) == strlen(profile) && memcmp(word, profile, strlen(profile)) == 0)
          return 1;
    }
    return 0;
@@ -511,8 +510,8 @@ static int deploy_llm_probe_argv(const char *file, const char **argv, size_t cap
  * directly, so no enrollment token or private key crosses host argv/stdout. */
 static int deploy_identity_bootstrap_argv(const char *file, const char **argv, size_t cap)
 {
-   const char *cmd[] = {"docker", "compose", "-f", file, "run", "--rm", "-T",
-                        "aimee-server-identity"};
+   const char *cmd[] = {"docker", "compose", "-f", file,
+                        "run",    "--rm",    "-T", "aimee-server-identity"};
    size_t n = sizeof(cmd) / sizeof(cmd[0]);
    if (!argv || !file || !file[0] || cap < n + 1)
       return -1;
@@ -540,8 +539,7 @@ static void *deploy_worker(void *arg)
    char env_err[256];
    int managed_llm = 0;
    int managed_identity = 0;
-   char **envp =
-       build_deploy_envp(env_err, sizeof(env_err), &managed_llm, &managed_identity);
+   char **envp = build_deploy_envp(env_err, sizeof(env_err), &managed_llm, &managed_identity);
 
    char out[DEPLOY_OUT_CAP];
    int code = -1;
@@ -562,10 +560,9 @@ static void *deploy_worker(void *arg)
          int identity_code = -1;
          char identity_out[1024] = "";
          if (deploy_identity_bootstrap_argv(file, identity_argv,
-                                            sizeof(identity_argv) /
-                                                sizeof(identity_argv[0])) < 0 ||
-             run_capture(identity_argv, envp, identity_out, sizeof(identity_out),
-                         &identity_code) != 0 ||
+                                            sizeof(identity_argv) / sizeof(identity_argv[0])) < 0 ||
+             run_capture(identity_argv, envp, identity_out, sizeof(identity_out), &identity_code) !=
+                 0 ||
              identity_code != 0)
          {
             code = identity_code == 0 ? -1 : identity_code;

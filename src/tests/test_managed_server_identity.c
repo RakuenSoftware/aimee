@@ -12,9 +12,8 @@ int main(void)
    assert(kb_pki_ca_generate(&ca) == 0);
 
    kb_managed_server_identity_t identity;
-   assert(kb_managed_server_identity_generate(&ca, "aimee-kb", 8745,
-                                               "https://aimee-server:8743", 7,
-                                               &identity) == 0);
+   assert(kb_managed_server_identity_generate(&ca, "aimee-kb", 8745, "https://aimee-server:8743", 7,
+                                              &identity) == 0);
    assert(strcmp(identity.state, "pending") == 0);
    assert(strncmp(identity.server_id, "managed-", 8) == 0);
    assert(strcmp(identity.client_csr_digest, identity.management_csr_digest) != 0);
@@ -25,8 +24,7 @@ int main(void)
    assert(kb_managed_server_identity_validate(&identity) == 1);
 
    char path[256];
-   snprintf(path, sizeof(path), "/tmp/aimee-managed-server-identity-%ld.json",
-            (long)getpid());
+   snprintf(path, sizeof(path), "/tmp/aimee-managed-server-identity-%ld.json", (long)getpid());
    unlink(path);
    assert(kb_managed_server_identity_save(path, geteuid(), &identity) == 0);
 

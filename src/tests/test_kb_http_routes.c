@@ -2984,7 +2984,8 @@ static void test_mtls_listener(void)
       cJSON_Delete(managed);
       assert(managed_json);
       identity_stream = fopen(identity_file, "w");
-      assert(identity_stream && fputs(managed_json, identity_stream) >= 0 && fclose(identity_stream) == 0);
+      assert(identity_stream && fputs(managed_json, identity_stream) >= 0 &&
+             fclose(identity_stream) == 0);
       free(managed_json);
       assert(chmod(identity_file, 0600) == 0);
       kb_client_mtls_reset_for_test();

@@ -65,8 +65,7 @@ static int identity_material_valid(const char *ca, const char *cert, const char 
 static int identity_matches_connection(const kb_enroll_conn_t *connection, const char *ca)
 {
    char fingerprint[KB_PKI_FP_HEX];
-   return connection && ca &&
-          kb_pki_ca_fingerprint(ca, fingerprint, sizeof(fingerprint)) == 0 &&
+   return connection && ca && kb_pki_ca_fingerprint(ca, fingerprint, sizeof(fingerprint)) == 0 &&
           strcasecmp(fingerprint, connection->ca_sha256) == 0;
 }
 
@@ -80,8 +79,7 @@ typedef struct
 } identity_metadata_t;
 
 static int identity_load(const kb_enroll_conn_t *connection, char *ca, size_t ca_cap, char *cert,
-                         size_t cert_cap, char *key, size_t key_cap,
-                         identity_metadata_t *metadata)
+                         size_t cert_cap, char *key, size_t key_cap, identity_metadata_t *metadata)
 {
    if (metadata)
       memset(metadata, 0, sizeof(*metadata));
@@ -148,10 +146,9 @@ static int identity_load(const kb_enroll_conn_t *connection, char *ca, size_t ca
    int endpoint_ok = is_v1 ? connection != NULL
                            : (!connection || (strcmp(connection->host, host->valuestring) == 0 &&
                                               connection->port == (int)port->valuedouble));
-   int ok = parsed_all && (is_v1 || is_v2) && endpoint_ok &&
-            cJSON_IsString(jca) && cJSON_IsString(jcert) && cJSON_IsString(jkey) &&
-            strlen(jca->valuestring) < ca_cap && strlen(jcert->valuestring) < cert_cap &&
-            strlen(jkey->valuestring) < key_cap &&
+   int ok = parsed_all && (is_v1 || is_v2) && endpoint_ok && cJSON_IsString(jca) &&
+            cJSON_IsString(jcert) && cJSON_IsString(jkey) && strlen(jca->valuestring) < ca_cap &&
+            strlen(jcert->valuestring) < cert_cap && strlen(jkey->valuestring) < key_cap &&
             (!connection || identity_matches_connection(connection, jca->valuestring)) &&
             identity_material_valid(jca->valuestring, jcert->valuestring, jkey->valuestring);
    if (ok)
@@ -497,9 +494,9 @@ int kb_client_mtls_configured(void)
       return 1;
    char ca[sizeof(g_ca)], cert[sizeof(g_cert)], key[sizeof(g_key)];
    identity_metadata_t metadata;
-   int configured = identity_load(NULL, ca, sizeof(ca), cert, sizeof(cert), key, sizeof(key),
-                                  &metadata) == 0 &&
-                    metadata.version == 2;
+   int configured =
+       identity_load(NULL, ca, sizeof(ca), cert, sizeof(cert), key, sizeof(key), &metadata) == 0 &&
+       metadata.version == 2;
    OPENSSL_cleanse(key, sizeof(key));
    return configured;
 }
@@ -513,10 +510,10 @@ int kb_client_mtls_managed_metadata(char *server_id_out, size_t server_id_cap,
       *team_id_out = 0;
    char ca[sizeof(g_ca)], cert[sizeof(g_cert)], key[sizeof(g_key)];
    identity_metadata_t metadata;
-   int ok = identity_load(NULL, ca, sizeof(ca), cert, sizeof(cert), key, sizeof(key), &metadata) ==
-                0 &&
-            metadata.version == 2 && server_id_out && server_id_cap > strlen(metadata.server_id) &&
-            team_id_out;
+   int ok =
+       identity_load(NULL, ca, sizeof(ca), cert, sizeof(cert), key, sizeof(key), &metadata) == 0 &&
+       metadata.version == 2 && server_id_out && server_id_cap > strlen(metadata.server_id) &&
+       team_id_out;
    OPENSSL_cleanse(key, sizeof(key));
    if (!ok)
       return 0;
@@ -543,8 +540,7 @@ static int ensure_enrolled(void)
    if (conn && conn[0] && kb_enroll_conn_string_parse(conn, &pc) == 0)
    {
       if (identity_load(&pc, g_ca, sizeof(g_ca), g_cert, sizeof(g_cert), g_key, sizeof(g_key),
-                        NULL) ==
-              0 ||
+                        NULL) == 0 ||
           (kb_tls_enroll(conn, g_ca, sizeof(g_ca), g_cert, sizeof(g_cert), g_key, sizeof(g_key)) ==
                0 &&
            identity_save(g_ca, g_cert, g_key) == 0))

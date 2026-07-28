@@ -22,8 +22,7 @@ static int lowercase_hex(const char *value, size_t n)
    if (!value || strlen(value) != n)
       return 0;
    for (size_t i = 0; i < n; i++)
-      if (!((value[i] >= '0' && value[i] <= '9') ||
-            (value[i] >= 'a' && value[i] <= 'f')))
+      if (!((value[i] >= '0' && value[i] <= '9') || (value[i] >= 'a' && value[i] <= 'f')))
          return 0;
    return 1;
 }
@@ -34,8 +33,7 @@ static int token(const char *value, size_t cap)
    if (!n || n > cap)
       return 0;
    for (size_t i = 0; i < n; i++)
-      if (!((value[i] >= 'A' && value[i] <= 'Z') ||
-            (value[i] >= 'a' && value[i] <= 'z') ||
+      if (!((value[i] >= 'A' && value[i] <= 'Z') || (value[i] >= 'a' && value[i] <= 'z') ||
             (value[i] >= '0' && value[i] <= '9') || strchr("._-", value[i])))
          return 0;
    return 1;
@@ -78,8 +76,7 @@ int kb_managed_server_identity_validate(const kb_managed_server_identity_t *iden
        !token(identity->host, 255) || identity->port < 1 || identity->port > 65535 ||
        !identity->endpoint[0] || strlen(identity->endpoint) >= sizeof(identity->endpoint) ||
        !token(identity->server_id, 127) || identity->team_id < 1 ||
-       !lowercase_hex(identity->operation, 32) ||
-       !lowercase_hex(identity->client_csr_digest, 64) ||
+       !lowercase_hex(identity->operation, 32) || !lowercase_hex(identity->client_csr_digest, 64) ||
        !lowercase_hex(identity->management_csr_digest, 64) || !identity->ca[0] ||
        kb_pki_csr_validate(identity->client_csr) != 0 ||
        kb_pki_csr_validate(identity->management_csr) != 0 || !identity->client_key[0] ||
@@ -112,9 +109,8 @@ int kb_managed_server_identity_generate(const kb_pki_ca_t *ca, const char *host,
    if (platform_random_hex(suffix, 32) || platform_random_hex(out->operation, 32) ||
        kb_pki_generate_csr("p5-server-client", out->client_csr, sizeof(out->client_csr),
                            out->client_key, sizeof(out->client_key)) ||
-       kb_pki_generate_csr("p5-server-management", out->management_csr,
-                           sizeof(out->management_csr), out->management_key,
-                           sizeof(out->management_key)) ||
+       kb_pki_generate_csr("p5-server-management", out->management_csr, sizeof(out->management_csr),
+                           out->management_key, sizeof(out->management_key)) ||
        digest_hex(out->client_csr, out->client_csr_digest) ||
        digest_hex(out->management_csr, out->management_csr_digest))
       goto failed;
@@ -133,17 +129,16 @@ failed:
    return -1;
 }
 
-int kb_managed_server_identity_issue(const kb_pki_ca_t *ca,
-                                     kb_managed_server_identity_t *identity)
+int kb_managed_server_identity_issue(const kb_pki_ca_t *ca, kb_managed_server_identity_t *identity)
 {
    if (!ca || !identity || strcmp(identity->state, "pending") ||
        !kb_managed_server_identity_validate(identity))
       return -1;
-   if (kb_pki_sign_server_role_csrs(
-           ca, identity->client_csr, "p5-server-client", identity->management_csr,
-           "p5-server-management", 60L * 60 * 24 * 90, identity->client_cert,
-           sizeof(identity->client_cert), identity->management_cert,
-           sizeof(identity->management_cert)) != 0)
+   if (kb_pki_sign_server_role_csrs(ca, identity->client_csr, "p5-server-client",
+                                    identity->management_csr, "p5-server-management",
+                                    60L * 60 * 24 * 90, identity->client_cert,
+                                    sizeof(identity->client_cert), identity->management_cert,
+                                    sizeof(identity->management_cert)) != 0)
       return -1;
    snprintf(identity->state, sizeof(identity->state), "issued");
    if (kb_managed_server_identity_validate(identity))

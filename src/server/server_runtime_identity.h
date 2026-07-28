@@ -14,8 +14,7 @@ typedef enum
 /* Resolve an explicit operator packet or the wizard-installed v2 identity.
  * Explicit fields never mix with managed fields: if either explicit field is
  * present, both must be valid. */
-server_runtime_identity_state_t server_runtime_identity_load(char *server_id,
-                                                             size_t server_id_cap,
+server_runtime_identity_state_t server_runtime_identity_load(char *server_id, size_t server_id_cap,
                                                              int64_t *team_id);
 
 /* Resolve only the stable server selector for registry/management operations

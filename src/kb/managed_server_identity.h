@@ -31,8 +31,7 @@ typedef struct
 int kb_managed_server_identity_generate(const kb_pki_ca_t *ca, const char *host, int port,
                                         const char *endpoint, int64_t team_id,
                                         kb_managed_server_identity_t *out);
-int kb_managed_server_identity_issue(const kb_pki_ca_t *ca,
-                                     kb_managed_server_identity_t *identity);
+int kb_managed_server_identity_issue(const kb_pki_ca_t *ca, kb_managed_server_identity_t *identity);
 int kb_managed_server_identity_validate(const kb_managed_server_identity_t *identity);
 int kb_managed_server_identity_load(const char *path, uid_t expected_owner,
                                     kb_managed_server_identity_t *out);

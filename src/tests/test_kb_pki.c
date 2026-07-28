@@ -512,10 +512,10 @@ static void test_generate_csr_pair(void)
    assert(kb_pki_csr_validate(client_csr) == 0);
    assert(kb_pki_csr_validate(management_csr) == 0);
    assert(strcmp(client_csr, management_csr) != 0);
-   assert(kb_pki_generate_csr("", client_csr, sizeof(client_csr), client_key,
-                              sizeof(client_key)) == -1);
-   assert(kb_pki_generate_csr("managed-client", client_csr, 8, client_key,
-                              sizeof(client_key)) == -1);
+   assert(kb_pki_generate_csr("", client_csr, sizeof(client_csr), client_key, sizeof(client_key)) ==
+          -1);
+   assert(kb_pki_generate_csr("managed-client", client_csr, 8, client_key, sizeof(client_key)) ==
+          -1);
    printf("  generate_csr_pair: ok\n");
 }
 

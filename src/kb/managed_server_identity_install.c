@@ -58,8 +58,7 @@ static int select_team(const kb_principal_t *owner, int64_t *team_id)
 }
 
 static int pending_registry(const kb_principal_t *owner,
-                            const kb_managed_server_identity_t *identity,
-                            char status[32])
+                            const kb_managed_server_identity_t *identity, char status[32])
 {
    db2_server_pending_t pending = {
        .operation = identity->operation,
@@ -83,12 +82,12 @@ static int pending_registry(const kb_principal_t *owner,
    return db2_tenant_scope_commit();
 }
 
-static int cert_identity(const char *cert, db2_server_cert_identity_t *out,
-                         char issuer[601], char serial[129], char fingerprint[65])
+static int cert_identity(const char *cert, db2_server_cert_identity_t *out, char issuer[601],
+                         char serial[129], char fingerprint[65])
 {
    char raw_serial[129];
-   if (!cert || !out || kb_pki_cert_metadata(cert, issuer, 601, raw_serial,
-                                              sizeof(raw_serial)) != 0 ||
+   if (!cert || !out ||
+       kb_pki_cert_metadata(cert, issuer, 601, raw_serial, sizeof(raw_serial)) != 0 ||
        kb_cert_serial_normalize(raw_serial, serial, 129) != 0 ||
        kb_pki_ca_fingerprint(cert, fingerprint, 65) != 0)
       return -1;
@@ -106,13 +105,13 @@ static int finalize_registry(const kb_principal_t *owner,
    char management_issuer[601], management_serial[129], management_fp[65];
    char status[32];
    if (cert_identity(identity->client_cert, &client, client_issuer, client_serial, client_fp) ||
-       cert_identity(identity->management_cert, &management, management_issuer,
-                     management_serial, management_fp) ||
+       cert_identity(identity->management_cert, &management, management_issuer, management_serial,
+                     management_fp) ||
        db2_tenant_scope_begin(owner, identity->team_id) != 0)
       return -1;
-   int rc = db2_server_registry_finalize(
-       identity->operation, identity->client_csr_digest, identity->management_csr_digest,
-       &client, &management, status, sizeof(status));
+   int rc = db2_server_registry_finalize(identity->operation, identity->client_csr_digest,
+                                         identity->management_csr_digest, &client, &management,
+                                         status, sizeof(status));
    if (rc != 0 || strcmp(status, "active") != 0)
    {
       db2_tenant_scope_rollback();
@@ -129,9 +128,8 @@ static int heartbeat_registry(const kb_principal_t *owner,
    if (cert_identity(identity->client_cert, &client, issuer, serial, fingerprint) ||
        db2_tenant_scope_begin(owner, identity->team_id) != 0)
       return -1;
-   int rc = db2_server_registry_heartbeat(identity->server_id, client.issuer,
-                                          client.serial_norm, client.fingerprint,
-                                          "identity-ready", "installer-v2");
+   int rc = db2_server_registry_heartbeat(identity->server_id, client.issuer, client.serial_norm,
+                                          client.fingerprint, "identity-ready", "installer-v2");
    if (rc != 0)
    {
       db2_tenant_scope_rollback();
@@ -145,13 +143,12 @@ static int paths_and_lock(const kb_managed_server_identity_install_options_t *op
 {
    struct stat st;
    if (!options || !options->server_home || options->server_home[0] != '/' ||
-       lstat(options->server_home, &st) != 0 || !S_ISDIR(st.st_mode) ||
-       S_ISLNK(st.st_mode))
+       lstat(options->server_home, &st) != 0 || !S_ISDIR(st.st_mode) || S_ISLNK(st.st_mode))
       return -1;
    char lock_path[4096];
    int a = snprintf(identity_path, 4096, "%s/kb-client-identity.json", options->server_home);
-   int b = snprintf(lock_path, sizeof(lock_path), "%s/.kb-client-identity.lock",
-                    options->server_home);
+   int b =
+       snprintf(lock_path, sizeof(lock_path), "%s/.kb-client-identity.lock", options->server_home);
    if (a <= 0 || a >= 4096 || b <= 0 || (size_t)b >= sizeof(lock_path))
       return -1;
    int fd = open(lock_path, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
@@ -165,8 +162,7 @@ static int paths_and_lock(const kb_managed_server_identity_install_options_t *op
    return 0;
 }
 
-int kb_managed_server_identity_install(
-    const kb_managed_server_identity_install_options_t *options)
+int kb_managed_server_identity_install(const kb_managed_server_identity_install_options_t *options)
 {
    if (!options || !options->host || !options->endpoint || options->port < 1 ||
        options->port > 65535 || (geteuid() != 0 && options->owner != geteuid()))
@@ -205,8 +201,8 @@ int kb_managed_server_identity_install(
          goto done;
       int64_t team_id = 0;
       if (select_team(&owner, &team_id) != 0 ||
-          kb_managed_server_identity_generate(&ca, options->host, options->port,
-                                               options->endpoint, team_id, &identity) != 0 ||
+          kb_managed_server_identity_generate(&ca, options->host, options->port, options->endpoint,
+                                              team_id, &identity) != 0 ||
           kb_managed_server_identity_save(identity_path, options->owner, &identity) != 0)
          goto done;
    }
@@ -233,8 +229,8 @@ int kb_managed_server_identity_install(
    if (heartbeat_registry(&owner, &identity) != 0)
       goto done;
 
-   printf("{\"state\":\"ready\",\"server_id\":\"%s\",\"team_id\":%lld}\n",
-          identity.server_id, (long long)identity.team_id);
+   printf("{\"state\":\"ready\",\"server_id\":\"%s\",\"team_id\":%lld}\n", identity.server_id,
+          (long long)identity.team_id);
    rc = 0;
 done:
    kb_managed_server_identity_clear(&identity);

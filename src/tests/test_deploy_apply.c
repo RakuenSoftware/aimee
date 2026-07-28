@@ -243,8 +243,7 @@ static void test_llm_probe_uses_kb_credential_without_host_secret(void)
 static void test_managed_identity_bootstrap_runs_inside_kb_without_secret_argv(void)
 {
    const char *argv[16];
-   int n = deploy_identity_bootstrap_argv("/managed.yaml", argv,
-                                          sizeof(argv) / sizeof(argv[0]));
+   int n = deploy_identity_bootstrap_argv("/managed.yaml", argv, sizeof(argv) / sizeof(argv[0]));
    assert(n > 0 && argv[n] == NULL);
    assert(strcmp(argv[0], "docker") == 0 && strcmp(argv[1], "compose") == 0);
    assert(strcmp(argv[3], "/managed.yaml") == 0 && strcmp(argv[4], "run") == 0);

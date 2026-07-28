@@ -32,8 +32,7 @@ static int team_id_valid(const char *value, int64_t *out)
    return 1;
 }
 
-server_runtime_identity_state_t server_runtime_identity_load(char *server_id,
-                                                             size_t server_id_cap,
+server_runtime_identity_state_t server_runtime_identity_load(char *server_id, size_t server_id_cap,
                                                              int64_t *team_id)
 {
    if (server_id && server_id_cap)
@@ -84,10 +83,8 @@ int server_runtime_server_id_load(char *server_id, size_t server_id_cap)
       return 0;
    long long managed_team = 0;
    char managed_server[128];
-   return kb_client_mtls_managed_metadata(managed_server, sizeof(managed_server),
-                                          &managed_team) &&
-                  managed_team > 0 &&
-                  server_id_valid(managed_server, server_id, server_id_cap)
+   return kb_client_mtls_managed_metadata(managed_server, sizeof(managed_server), &managed_team) &&
+                  managed_team > 0 && server_id_valid(managed_server, server_id, server_id_cap)
               ? 1
               : 0;
 }
