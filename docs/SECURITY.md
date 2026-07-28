@@ -58,6 +58,14 @@ boundary.
 `aimee remote set` pins the server certificate and rotates the bootstrap bearer. On Linux it also
 enrolls a client certificate. Verify the printed fingerprint out of band.
 
+After bootstrap, `aimee remote enroll` adds a bounded per-client bearer without invalidating
+existing clients. A bearer rotation is an explicit revoke-all: it replaces the primary and clears
+every additionally enrolled bearer in persisted and live state.
+
+When `AIMEE_API_BEARER_TOKEN` supplies the primary, rotate that deployment secret and restart
+instead of calling the API rotation route. A changed deployment primary revokes enrolled bearers;
+an unchanged primary preserves them across an ordinary restart.
+
 The shared bearer is read-only. Remote write authority comes from a short-lived, single-use,
 KB-signed identity token whose `(server, team, subject)` has a live grant. `data` permits memory,
 document, and index writes. `full` also permits agent, delegate, runner, and workspace control.
