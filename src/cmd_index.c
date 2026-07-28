@@ -494,10 +494,9 @@ static const char *resolve_workspace(int argc, char **argv, char *buf, size_t bu
       if (strcmp(argv[i], "--workspace") == 0)
          return argv[i + 1];
    }
-   config_t cfg;
-   if (config_load(&cfg) == 0 && cfg.workspace_count > 0)
+   if (config_workspace_count() > 0)
    {
-      snprintf(buf, buf_size, "%s", cfg.workspaces[0]);
+      snprintf(buf, buf_size, "%s", config_workspaces(0));
       return buf;
    }
    /* Fall back to cwd */

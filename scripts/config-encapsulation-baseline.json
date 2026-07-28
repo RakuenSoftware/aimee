@@ -9,10 +9,6 @@
       "decls": 5,
       "loads": 5
     },
-    "src/cmd_agent_delegate_status.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/cmd_core.c": {
       "decls": 9,
       "loads": 7
@@ -40,10 +36,6 @@
     "src/cmd_identity.c": {
       "decls": 3,
       "loads": 2
-    },
-    "src/cmd_index.c": {
-      "decls": 1,
-      "loads": 1
     },
     "src/cmd_infra.c": {
       "decls": 8,
@@ -97,15 +89,7 @@
       "decls": 2,
       "loads": 2
     },
-    "src/db2/css_migration.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/db2/kb_audit_worm.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/db2/kb_runtime_state.c": {
       "decls": 1,
       "loads": 1
     },
@@ -401,10 +385,6 @@
       "decls": 1,
       "loads": 1
     },
-    "src/modules/git/git_project.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/modules/git/git_verify_ops.c": {
       "decls": 2,
       "loads": 2
@@ -498,28 +478,28 @@
       "loads": 0
     },
     "src/modules/memory/memory_core_crud.c": {
-      "decls": 4,
-      "loads": 4
+      "decls": 3,
+      "loads": 3
     },
     "src/modules/memory/memory_core_helpers.c": {
       "decls": 13,
       "loads": 9
     },
     "src/modules/memory/memory_core_helpers_b.c": {
-      "decls": 3,
-      "loads": 3
+      "decls": 2,
+      "loads": 2
     },
     "src/modules/memory/memory_core_internal.h": {
       "decls": 5,
       "loads": 1
     },
     "src/modules/memory/memory_core_search_b.c": {
-      "decls": 6,
-      "loads": 4
+      "decls": 5,
+      "loads": 3
     },
     "src/modules/memory/memory_core_search_c.c": {
-      "decls": 7,
-      "loads": 3
+      "decls": 6,
+      "loads": 2
     },
     "src/modules/memory/memory_episodes.c": {
       "decls": 1,
@@ -629,17 +609,9 @@
       "decls": 5,
       "loads": 0
     },
-    "src/server/agent_bridge.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/server/agent_policy.c": {
       "decls": 2,
       "loads": 2
-    },
-    "src/server/agent_request_build.c": {
-      "decls": 1,
-      "loads": 1
     },
     "src/server/agent_route.c": {
       "decls": 3,
@@ -681,19 +653,11 @@
       "decls": 1,
       "loads": 0
     },
-    "src/server/ingress_preinject.c": {
-      "decls": 2,
-      "loads": 2
-    },
     "src/server/openai_chat.c": {
       "decls": 5,
       "loads": 5
     },
     "src/server/provider_cli_adapter.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/retrieval_outcome_bridge.c": {
       "decls": 1,
       "loads": 1
     },
@@ -710,16 +674,16 @@
       "loads": 2
     },
     "src/server/server_api.c": {
-      "decls": 2,
-      "loads": 2
+      "decls": 1,
+      "loads": 1
     },
     "src/server/server_api_status.c": {
       "decls": 6,
       "loads": 5
     },
     "src/server/server_compute.c": {
-      "decls": 7,
-      "loads": 6
+      "decls": 5,
+      "loads": 4
     },
     "src/server/server_compute_async.c": {
       "decls": 1,
@@ -737,10 +701,6 @@
       "decls": 5,
       "loads": 3
     },
-    "src/server/server_http_config_routes.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/server/server_http_reqctx.c": {
       "decls": 1,
       "loads": 1
@@ -756,10 +716,6 @@
     "src/server/server_mcp.c": {
       "decls": 2,
       "loads": 2
-    },
-    "src/server/server_mcp_call_table.c": {
-      "decls": 4,
-      "loads": 4
     },
     "src/server/server_mcp_tools.c": {
       "decls": 2,
@@ -1119,8 +1075,8 @@
     }
   },
   "totals": {
-    "decls": 961,
-    "files": 279,
-    "loads": 507
+    "decls": 939,
+    "files": 268,
+    "loads": 485
   }
 }

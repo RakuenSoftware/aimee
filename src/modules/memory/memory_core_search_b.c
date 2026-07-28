@@ -1055,9 +1055,7 @@ int memory_rerank_matches(const char *raw_query, memory_t *matches, int count, i
     * libpq. Complements the FTS candidate-generation lane (memory_negation_fts_tsv)
     * which widens RECALL at scale; this fixes RANKING. */
    {
-      config_t neg_cfg;
-      if (config_load(&neg_cfg) == 0 && neg_cfg.memory_negation_enabled &&
-          memory_query_polarity(raw_query) == POLARITY_NEGATIVE)
+      if (config_memory_negation_enabled() && memory_query_polarity(raw_query) == POLARITY_NEGATIVE)
       {
          char qneg[1024];
          int qn = extract_negation_tokens(raw_query, qneg, sizeof(qneg));

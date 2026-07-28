@@ -302,8 +302,7 @@ static void memory_refresh_temporal_refs(int64_t memory_id, const char *key, con
 
 static void memory_refresh_negation_tokens(int64_t memory_id, const char *key, const char *content)
 {
-   config_t neg_cfg;
-   if (config_load(&neg_cfg) != 0 || !neg_cfg.memory_negation_enabled)
+   if (!config_memory_negation_enabled())
       return;
 
    /* Combine key + content for tokenisation */

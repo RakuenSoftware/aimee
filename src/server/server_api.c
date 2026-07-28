@@ -194,8 +194,7 @@ static int memory_recall_handler(const char *body, char *resp, int cap)
     * never affects the recall response. Gated by the working-profile switch. */
    if (!session_start)
    {
-      config_t wp_cfg;
-      if (config_load(&wp_cfg) == 0 && wp_cfg.identity_working_profile_injection_enabled)
+      if (config_identity_working_profile_injection_enabled())
          (void)working_profile_autoobserve_from_feedback(jh->valuestring);
    }
 

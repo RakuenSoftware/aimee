@@ -307,11 +307,10 @@ int route_role_template_remove(const char *name, char *resp, int cap)
 /* The current active-preset name (config.roundtable_default), or "" if none. */
 static void rt_active_name(char *out, size_t out_n)
 {
-   config_t cfg;
    if (out && out_n)
       out[0] = '\0';
-   if (config_load(&cfg) == 0 && out && out_n)
-      snprintf(out, out_n, "%s", cfg.roundtable_default);
+   if (out && out_n)
+      snprintf(out, out_n, "%s", config_roundtable_default());
 }
 
 int route_roundtables_list(char *resp, int cap)
