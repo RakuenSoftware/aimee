@@ -840,6 +840,19 @@ int main(void)
       snprintf(hdr, sizeof(hdr), "Bearer %s", e1);
       assert(server_http_authorize_multi(1, primary, sparse, 3, hdr, NULL, 0) == 0);
 
+      /* Live publication preserves enrolled clients at startup, while explicit
+       * rotation revokes the entire old set atomically. */
+      char live[256] = "";
+      server_http_set_bearer_extra(extra, 2);
+      server_http_update_primary_bearer(live, sizeof(live), primary, 0);
+      assert(server_http_enrolled_bearer_count() == 2);
+      snprintf(hdr, sizeof(hdr), "Bearer %s", e1);
+      assert(server_http_authorize_enrolled(1, live, hdr, NULL, 0) == 0);
+      server_http_update_primary_bearer(live, sizeof(live), "rotated-primary", 1);
+      assert(server_http_enrolled_bearer_count() == 0);
+      assert(server_http_authorize_enrolled(1, live, hdr, NULL, 0) == 401);
+      assert(server_http_authorize_enrolled(1, live, "Bearer rotated-primary", NULL, 0) == 0);
+
       printf("  PASS: authorize_multi accepts every enrolled client, rejects the rest\n");
    }
 
@@ -857,7 +870,7 @@ int main(void)
       assert(strstr(b401, "missing or invalid bearer token") != NULL);
       assert(strstr(b401, "\"type\":\"authentication_error\"") != NULL);
       /* ...and now says how to recover: where the live token is, and the command */
-      assert(strstr(b401, "rotated") != NULL);
+      assert(strstr(b401, "rotation") != NULL);
       assert(strstr(b401, "aimee.api.bearer_token") != NULL);
       assert(strstr(b401, "aimee remote set") != NULL);
 
@@ -933,6 +946,8 @@ int main(void)
       assert((bootstrap_caps & CAP_DELEGATE) == 0);
       assert(server_http_route_allowed_caps(1, bootstrap_caps, "POST", "/v1/api/rotate_bearer",
                                             SERVER_REMOTE_WRITES_OFF) == 1);
+      assert(server_http_route_allowed_caps(1, CAPS_AUTHENTICATED, "POST", "/v1/api/enroll_bearer",
+                                            SERVER_REMOTE_WRITES_OFF) == 1);
       assert(server_http_route_allowed_caps(1, CAPS_READ_ONLY | CAP_DELEGATE, "POST",
                                             "/v1/cert/sign", SERVER_REMOTE_WRITES_OFF) == 1);
       assert((server_http_enrollment_caps(CAPS_READ_ONLY, 1, 0, 1, "deployment-token", "POST",
@@ -942,6 +957,12 @@ int main(void)
                                          "/v1/cert/sign") == CAPS_READ_ONLY);
       assert(server_http_enrollment_caps(CAPS_READ_ONLY, 1, 0, 1, "scope:read", "POST",
                                          "/v1/cert/sign") == CAPS_READ_ONLY);
+      assert((server_http_enrollment_caps(CAPS_READ_ONLY, 1, 0, 1, "deployment-token", "POST",
+                                          "/v1/api/enroll_bearer") &
+              CAP_SESSION_ADMIN) != 0);
+      /* The public bootstrap may rotate only; the outer bootstrap gate refuses
+       * additive enrollment even though the route is otherwise TCP-reachable. */
+      assert(server_http_bootstrap_gate(1, BOOT, "POST", "/v1/api/enroll_bearer") == 1);
    }
 
    /* --- P5-B3b dedicated management transport classification. The two
