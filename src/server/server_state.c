@@ -198,6 +198,63 @@ int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
  *
  * Gated on CAP_MEMORY_WRITE, so it follows the same write-tier grant rules as
  * memory.store rather than inventing its own. */
+/* Replace a memory with a corrected one, linking the two.
+ *
+ * This is the operation that should be reached for far more often than
+ * memory.delete, and it was equally unreachable over /v1: `aimee memory
+ * supersede` exists and works on the server host (cmd_memory.c), but the thin
+ * client routes through /v1 and there was no route, so a remote user could not
+ * say "this belief was replaced" — only store another one, or delete.
+ *
+ * That asymmetry matters because the store DEPENDS on the supersession chain.
+ * memory.list_superseded_keys and memory.fact_history walk it, so deleting a
+ * wrong memory instead of superseding it loses the answer to "why did it assert
+ * this in March" and destroys the negative examples effectiveness and
+ * evidence_strength are computed from. A corrected memory is signal; a deleted
+ * one is a hole.
+ *
+ * Same CAP_MEMORY_WRITE gate as store and delete. */
+int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+
+   cJSON *jold = cJSON_GetObjectItemCaseSensitive(req, "old_id");
+   cJSON *jnew = cJSON_GetObjectItemCaseSensitive(req, "new_content");
+   if (!cJSON_IsNumber(jold) || jold->valuedouble <= 0)
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.supersede requires a positive integer old_id", NULL);
+   if (!cJSON_IsString(jnew) || !jnew->valuestring[0])
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.supersede requires non-empty new_content", NULL);
+
+   cJSON *jconf = cJSON_GetObjectItemCaseSensitive(req, "confidence");
+   double conf = cJSON_IsNumber(jconf) ? jconf->valuedouble : 1.0;
+   cJSON *jsid = cJSON_GetObjectItemCaseSensitive(req, "session_id");
+   const char *sid = cJSON_IsString(jsid) ? jsid->valuestring : "";
+
+   memory_t mem;
+   if (kb_client_memory_supersede((int64_t)jold->valuedouble, jnew->valuestring, conf, sid, &mem) !=
+       0)
+      return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND,
+                                    "no such memory, or the knowledge service refused", NULL);
+
+   cJSON *resp = jo_ok();
+   cJSON *mj = memory_to_json(&mem);
+   if (mj)
+   {
+      cJSON *child = mj->child;
+      while (child)
+      {
+         cJSON *next = child->next;
+         cJSON_DetachItemViaPointer(mj, child);
+         cJSON_AddItemToObject(resp, child->string, child);
+         child = next;
+      }
+      cJSON_Delete(mj);
+   }
+   return server_send_ok(conn, resp);
+}
+
 int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
