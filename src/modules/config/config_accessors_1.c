@@ -18,6 +18,307 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
+int config_learning_proposal_ttl_days(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, learning_proposal_ttl_days), sizeof(v), &v);
+   return v;
+}
+
+int config_learning_max_commits_per_week(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, learning_max_commits_per_week), sizeof(v), &v);
+   return v;
+}
+
+int config_learning_synthesize_enabled(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, learning_synthesize_enabled), sizeof(v), &v);
+   return v;
+}
+
+int config_learning_synthesize_max_tokens(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, learning_synthesize_max_tokens), sizeof(v), &v);
+   return v;
+}
+
+int config_learning_synthesize_k(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, learning_synthesize_k), sizeof(v), &v);
+   return v;
+}
+
+int config_learning_implicit_citation_repair(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, learning_implicit_citation_repair), sizeof(v), &v);
+   return v;
+}
+
+int config_learning_implicit_citation_continuation(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, learning_implicit_citation_continuation), sizeof(v), &v);
+   return v;
+}
+
+int config_learning_implicit_repeat_question(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, learning_implicit_repeat_question), sizeof(v), &v);
+   return v;
+}
+
+int config_learning_implicit_repeated_correction(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, learning_implicit_repeated_correction), sizeof(v), &v);
+   return v;
+}
+
+int config_learning_implicit_workflow_repetition(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, learning_implicit_workflow_repetition), sizeof(v), &v);
+   return v;
+}
+
+int config_learning_implicit_retrieval_outcome(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, learning_implicit_retrieval_outcome), sizeof(v), &v);
+   return v;
+}
+
+int config_autonomous(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, autonomous), sizeof(v), &v);
+   return v;
+}
+
+int config_verify_enabled(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, verify_enabled), sizeof(v), &v);
+   return v;
+}
+
+int config_roundtable_replay_verify_enabled(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, roundtable_replay_verify_enabled), sizeof(v), &v);
+   return v;
+}
+
+int config_roundtable_require_evidence(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, roundtable_require_evidence), sizeof(v), &v);
+   return v;
+}
+
+int config_roundtable_chair_synthesis(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, roundtable_chair_synthesis), sizeof(v), &v);
+   return v;
+}
+
+int config_verify_cross_project(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, verify_cross_project), sizeof(v), &v);
+   return v;
+}
+
+int config_cross_verify(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, cross_verify), sizeof(v), &v);
+   return v;
+}
+
+int config_retry_max_attempts(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, retry_max_attempts), sizeof(v), &v);
+   return v;
+}
+
+int config_retry_base_ms(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, retry_base_ms), sizeof(v), &v);
+   return v;
+}
+
+int config_retry_max_ms(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, retry_max_ms), sizeof(v), &v);
+   return v;
+}
+
+int config_max_iterations(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, max_iterations), sizeof(v), &v);
+   return v;
+}
+
+int config_max_iterations_delegate(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, max_iterations_delegate), sizeof(v), &v);
+   return v;
+}
+
+int config_max_delegation_depth(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, max_delegation_depth), sizeof(v), &v);
+   return v;
+}
+
+int config_max_delegation_spawns(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, max_delegation_spawns), sizeof(v), &v);
+   return v;
+}
+
+int config_compute_threads(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, compute_threads), sizeof(v), &v);
+   return v;
+}
+
+int config_session_threads(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, session_threads), sizeof(v), &v);
+   return v;
+}
+
+int config_delegate_max_inflight(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, delegate_max_inflight), sizeof(v), &v);
+   return v;
+}
+
+int config_maximum_total_concurrent_agent_sessions(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, maximum_total_concurrent_agent_sessions), sizeof(v), &v);
+   return v;
+}
+
+int config_concurrency_default(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, concurrency_default), sizeof(v), &v);
+   return v;
+}
+
+int config_concurrency_per_model_count(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, concurrency_per_model_count), sizeof(v), &v);
+   return v;
+}
+
+int config_concurrency_per_provider_count(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, concurrency_per_provider_count), sizeof(v), &v);
+   return v;
+}
+
+int config_concurrency_preempt_enabled(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, concurrency_preempt_enabled), sizeof(v), &v);
+   return v;
+}
+
+int config_concurrency_preempt_single_slot_only(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, concurrency_preempt_single_slot_only), sizeof(v), &v);
+   return v;
+}
+
+int config_concurrency_preempt_requeue_max(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, concurrency_preempt_requeue_max), sizeof(v), &v);
+   return v;
+}
+
+int config_search_max_results(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, search_max_results), sizeof(v), &v);
+   return v;
+}
+
+int config_search_fetch_pages(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, search_fetch_pages), sizeof(v), &v);
+   return v;
+}
+
+int config_compact_enabled(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, compact_enabled), sizeof(v), &v);
+   return v;
+}
+
+int config_compact_threshold(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, compact_threshold), sizeof(v), &v);
+   return v;
+}
+
+int config_compact_head_bytes(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, compact_head_bytes), sizeof(v), &v);
+   return v;
+}
+
+int config_compact_tail_bytes(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, compact_tail_bytes), sizeof(v), &v);
+   return v;
+}
+
+int config_compact_per_tool_count(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, compact_per_tool_count), sizeof(v), &v);
+   return v;
+}
+
+int config_coord_closet_enabled(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, coord_closet_enabled), sizeof(v), &v);
+   return v;
+}
+
 int config_coord_closet_budget_bytes(void)
 {
    int v = 0;
@@ -515,6 +816,13 @@ int config_server_api_mtls(void)
    return v;
 }
 
+int config_server_api_bearer_extra_count(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, server_api_bearer_extra_count), sizeof(v), &v);
+   return v;
+}
+
 int config_server_api_rate_limit_per_min(void)
 {
    int v = 0;
@@ -589,614 +897,5 @@ double config_calibration_conformal_epsilon(void)
 {
    double v = 0;
    config_field_read(offsetof(config_t, calibration_conformal_epsilon), sizeof(v), &v);
-   return v;
-}
-
-double config_calibration_tau_memory_auto(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, calibration_tau_memory_auto), sizeof(v), &v);
-   return v;
-}
-
-double config_calibration_tau_memory_flag(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, calibration_tau_memory_flag), sizeof(v), &v);
-   return v;
-}
-
-double config_calibration_tau_working_profile_auto(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, calibration_tau_working_profile_auto), sizeof(v), &v);
-   return v;
-}
-
-double config_calibration_tau_working_profile_flag(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, calibration_tau_working_profile_flag), sizeof(v), &v);
-   return v;
-}
-
-int config_demotion_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, demotion_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_demotion_window(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, demotion_window), sizeof(v), &v);
-   return v;
-}
-
-double config_demotion_half_life_days(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, demotion_half_life_days), sizeof(v), &v);
-   return v;
-}
-
-int config_demotion_n_min(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, demotion_n_min), sizeof(v), &v);
-   return v;
-}
-
-double config_kb_fusion_static_alpha(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, kb_fusion_static_alpha), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_ranker_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_ranker_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_ranker_fit_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_ranker_fit_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_ranker_fit_min_groups(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_ranker_fit_min_groups), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_ranker_fit_bench_k(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_ranker_fit_bench_k), sizeof(v), &v);
-   return v;
-}
-
-int config_reasoning_row_budget(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, reasoning_row_budget), sizeof(v), &v);
-   return v;
-}
-
-int config_reasoning_time_limit_ms(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, reasoning_time_limit_ms), sizeof(v), &v);
-   return v;
-}
-
-double config_bandit_exploration_fraction(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, bandit_exploration_fraction), sizeof(v), &v);
-   return v;
-}
-
-double config_bandit_ipw_weight_cap(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, bandit_ipw_weight_cap), sizeof(v), &v);
-   return v;
-}
-
-int config_bandit_exploration_window_seconds(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, bandit_exploration_window_seconds), sizeof(v), &v);
-   return v;
-}
-
-int config_planner_budget_default(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, planner_budget_default), sizeof(v), &v);
-   return v;
-}
-
-double config_planner_exploration_constant(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, planner_exploration_constant), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_mdl_tiebreak_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_mdl_tiebreak_enabled), sizeof(v), &v);
-   return v;
-}
-
-double config_kb_mdl_bump_drift_alert(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, kb_mdl_bump_drift_alert), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_synthesize_n_attempts(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_synthesize_n_attempts), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_reflection_synthesis_shadow(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_reflection_synthesis_shadow), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_worker_count(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_worker_count), sizeof(v), &v);
-   return v;
-}
-
-int config_db2_connection_pool_size(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, db2_connection_pool_size), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_connection_workers(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_connection_workers), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_bg_ingest_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_bg_ingest_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_bg_ingest_interval_hours(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_bg_ingest_interval_hours), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_bg_watch_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_bg_watch_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_bg_watch_debounce_secs(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_bg_watch_debounce_secs), sizeof(v), &v);
-   return v;
-}
-
-double config_code_hybrid_weight_code(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, code_hybrid_weight_code), sizeof(v), &v);
-   return v;
-}
-
-double config_code_hybrid_weight_graph(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, code_hybrid_weight_graph), sizeof(v), &v);
-   return v;
-}
-
-double config_code_hybrid_weight_vector(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, code_hybrid_weight_vector), sizeof(v), &v);
-   return v;
-}
-
-double config_code_hybrid_weight_memory(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, code_hybrid_weight_memory), sizeof(v), &v);
-   return v;
-}
-
-double config_code_hybrid_rrf_k(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, code_hybrid_rrf_k), sizeof(v), &v);
-   return v;
-}
-
-int config_code_trust_actuation_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, code_trust_actuation_enabled), sizeof(v), &v);
-   return v;
-}
-
-double config_code_surprising_precision_floor(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, code_surprising_precision_floor), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_reembed_on_dim_change(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_reembed_on_dim_change), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_purge_fence_ttl_s(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_purge_fence_ttl_s), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_maintenance_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_maintenance_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_maintenance_interval_hours(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_maintenance_interval_hours), sizeof(v), &v);
-   return v;
-}
-
-double config_kb_maintenance_lambda(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, kb_maintenance_lambda), sizeof(v), &v);
-   return v;
-}
-
-double config_kb_maintenance_floor(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, kb_maintenance_floor), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_maintenance_min_age_days(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_maintenance_min_age_days), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_maintenance_orphan_days(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_maintenance_orphan_days), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_mining_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_mining_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_mining_min_poll_s(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_mining_min_poll_s), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_mining_failure_learning_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_mining_failure_learning_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_trigger_max_concurrent(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, trigger_max_concurrent), sizeof(v), &v);
-   return v;
-}
-
-int config_trigger_rule_count(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, trigger_rule_count), sizeof(v), &v);
-   return v;
-}
-
-int config_cron_job_count(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, cron_job_count), sizeof(v), &v);
-   return v;
-}
-
-int config_review_scheduler_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, review_scheduler_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_review_idle_trigger_minutes(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, review_idle_trigger_minutes), sizeof(v), &v);
-   return v;
-}
-
-int config_review_session_cooldown_hours(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, review_session_cooldown_hours), sizeof(v), &v);
-   return v;
-}
-
-int config_review_batch_cap(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, review_batch_cap), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_extract_docs_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_extract_docs_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_extract_code_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_extract_code_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_extract_code_workers(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_extract_code_workers), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_extract_docs_workers(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_extract_docs_workers), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_resolve_entities_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_resolve_entities_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_index_narrative_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_index_narrative_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_index_claims_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_index_claims_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_detect_contradictions_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_detect_contradictions_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_index_code_unit_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_index_code_unit_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_link_artifacts_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_link_artifacts_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_projection_graph_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_projection_graph_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_synthesize_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_synthesize_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_promote_entity_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_promote_entity_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_promote_min_sources(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_promote_min_sources), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_extract_max_tokens(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_extract_max_tokens), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_max_attempts(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_max_attempts), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_synthesize_k(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_synthesize_k), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_cross_repo_graph_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_cross_repo_graph_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_cross_repo_distinctiveness_v(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_cross_repo_distinctiveness_v), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_cross_repo_k(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_cross_repo_k), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_cross_repo_m(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_cross_repo_m), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_cross_repo_p_pct(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_cross_repo_p_pct), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_cross_repo_len_min(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_cross_repo_len_min), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_cross_repo_caller_collision_c(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_cross_repo_caller_collision_c), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_cross_repo_max_candidates(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_cross_repo_max_candidates), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_cross_repo_query_timeout_ms(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_cross_repo_query_timeout_ms), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_curator_cross_repo_review_queue_max(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_curator_cross_repo_review_queue_max), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_evidence_embed_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_evidence_embed_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_evidence_embed_batch(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_evidence_embed_batch), sizeof(v), &v);
-   return v;
-}
-
-int config_skills_review_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, skills_review_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_skills_review_nudge_interval(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, skills_review_nudge_interval), sizeof(v), &v);
    return v;
 }

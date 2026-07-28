@@ -73,6 +73,33 @@ int main(void)
    }
    checked += 3;
 
+   /* Setters must round-trip through the config file, not just through a
+    * buffer: read a value, change it, read it back, restore it. A setter that
+    * wrote somewhere the getter does not read would otherwise look like it
+    * worked. */
+   {
+      int before = config_memory_maintenance_trigger_secs();
+      int probe = before == 4242 ? 4243 : 4242;
+      if (config_set_memory_maintenance_trigger_secs(probe) == 0)
+      {
+         if (config_memory_maintenance_trigger_secs() != probe)
+         {
+            printf("setter did not round-trip: wrote %d, read %d\n", probe,
+                   config_memory_maintenance_trigger_secs());
+            return 1;
+         }
+         checked++;
+         config_set_memory_maintenance_trigger_secs(before);
+         if (config_memory_maintenance_trigger_secs() != before)
+         {
+            printf("restore failed: wanted %d, got %d\n", before,
+                   config_memory_maintenance_trigger_secs());
+            return 1;
+         }
+         checked++;
+      }
+   }
+
    printf("accessor parity: %d field(s) match the loaded struct\n", checked);
    free(cfg);
    return 0;

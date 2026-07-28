@@ -24,7 +24,7 @@ HDR = ROOT / "src" / "modules" / "config" / "config.h"
 # Sharded: line-check caps a file at 2500 lines and ~500 accessors overflow it.
 # Generated code is still code — the cap exists so no single file becomes
 # unreviewable, and a generator is not a reason to opt out.
-SHARDS = 3
+SHARDS = 8
 OUT_C = [ROOT / "src" / "modules" / "config" / f"config_accessors_{i}.c" for i in range(SHARDS)]
 OUT_H = ROOT / "src" / "modules" / "config" / "config_accessors.h"
 
@@ -129,6 +129,20 @@ def main():
         h.append(f"const char *config_{name}(void);")
     h.append("")
     h.append(
+        "/* Setters. Each is load-modify-save: the config module owns the struct,\n"
+        " * so a caller changing one value does not need to materialise it. Returns\n"
+        " * 0 on success, -1 if the config could not be read or written.\n"
+        " *\n"
+        " * A caller setting SEVERAL fields pays a save per call. That is the honest\n"
+        " * cost of not handing out the struct; batch changes belong behind a\n"
+        " * purpose-named config function rather than a loop of setters. */"
+    )
+    for _, name, ctype in scalars:
+        h.append(f"int config_set_{name}({ctype} value);")
+    for _, name, _arr in strings:
+        h.append(f"int config_set_{name}(const char *value);")
+    h.append("")
+    h.append(
         "/* char[][] fields: one row per call. Returns \"\" for an out-of-range\n"
         " * index, so a caller that loops past the count gets empty rather than\n"
         " * reading adjacent memory. Same thread-local lifetime as above. */"
@@ -189,6 +203,43 @@ def main():
             "                     sizeof(buf), buf);",
             "   buf[sizeof(buf) - 1] = 0;",
             "   return buf;",
+            "}",
+            "",
+        ])
+
+    for _, name, ctype in scalars:
+        blocks.append([
+            f"int config_set_{name}({ctype} value)",
+            "{",
+            "   config_t *cfg = calloc(1, sizeof(*cfg));",
+            "   if (!cfg)",
+            "      return -1;",
+            "   int rc = config_load(cfg);",
+            "   if (rc == 0)",
+            "   {",
+            f"      cfg->{name} = value;",
+            "      rc = config_save(cfg);",
+            "   }",
+            "   free(cfg);",
+            "   return rc;",
+            "}",
+            "",
+        ])
+    for _, name, arr in strings:
+        blocks.append([
+            f"int config_set_{name}(const char *value)",
+            "{",
+            "   config_t *cfg = calloc(1, sizeof(*cfg));",
+            "   if (!cfg)",
+            "      return -1;",
+            "   int rc = config_load(cfg);",
+            "   if (rc == 0)",
+            "   {",
+            f"      snprintf(cfg->{name}, sizeof(cfg->{name}), \"%s\", value ? value : \"\");",
+            "      rc = config_save(cfg);",
+            "   }",
+            "   free(cfg);",
+            "   return rc;",
             "}",
             "",
         ])
