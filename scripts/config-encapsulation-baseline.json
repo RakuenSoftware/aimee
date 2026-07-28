@@ -526,16 +526,16 @@
       "loads": 3
     },
     "src/modules/memory/memory_core_internal.h": {
-      "decls": 3,
-      "loads": 0
+      "decls": 5,
+      "loads": 1
     },
     "src/modules/memory/memory_core_search_b.c": {
-      "decls": 7,
-      "loads": 6
+      "decls": 6,
+      "loads": 4
     },
     "src/modules/memory/memory_core_search_c.c": {
-      "decls": 14,
-      "loads": 13
+      "decls": 7,
+      "loads": 3
     },
     "src/modules/memory/memory_episodes.c": {
       "decls": 1,
@@ -730,8 +730,8 @@
       "loads": 2
     },
     "src/server/server_api_status.c": {
-      "decls": 5,
-      "loads": 4
+      "decls": 6,
+      "loads": 5
     },
     "src/server/server_compute.c": {
       "decls": 7,
@@ -1042,7 +1042,7 @@
       "loads": 0
     },
     "src/tests/test_memory_advanced.c": {
-      "decls": 10,
+      "decls": 2,
       "loads": 0
     },
     "src/tests/test_memory_lanes.c": {
@@ -1143,8 +1143,8 @@
     }
   },
   "totals": {
-    "decls": 995,
+    "decls": 982,
     "files": 285,
-    "loads": 518
+    "loads": 508
   }
 }
