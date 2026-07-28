@@ -680,7 +680,7 @@ static cJSON *marshal_provider_set(int argc, char **argv)
 
 static cJSON *marshal_provider_list(int argc, char **argv)
 {
-   static const char *bool_flags[] = {"available", "json", NULL};
+   static const char *bool_flags[] = {"available", "all", "json", NULL};
    rpc_opts_t opts;
    rpc_parse(argc, argv, bool_flags, &opts);
    cJSON *req = marshal_no_args("provider.list");
@@ -688,6 +688,8 @@ static cJSON *marshal_provider_list(int argc, char **argv)
       return NULL;
    if (rpc_get(&opts, "available"))
       cJSON_AddTrueToObject(req, "available_only");
+   if (rpc_get(&opts, "all"))
+      cJSON_AddTrueToObject(req, "all");
    if (rpc_get(&opts, "json"))
       cJSON_AddTrueToObject(req, "json");
    return req;
