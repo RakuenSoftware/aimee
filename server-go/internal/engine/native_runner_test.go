@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -1821,5 +1822,242 @@ func TestReviewersAreToldBlockedIsAboutTheRequestNotTheArtifact(t *testing.T) {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("panel prompt lacks the blocked contract %q", want)
 		}
+	}
+}
+
+// conflictForge fails Merge with the exact payload the resource plane produced
+// in production while an unmergeable slice retried every 15 seconds.
+type conflictForge struct{}
+
+func (conflictForge) Push(context.Context, string, string, string) error { return nil }
+func (conflictForge) Open(context.Context, string, string, string, string, string) (PullRequest, error) {
+	return PullRequest{}, nil
+}
+func (conflictForge) CI(context.Context, string, string) (CIState, error) { return CIPassed, nil }
+func (conflictForge) Merge(context.Context, string, string, string) error {
+	return errors.New(`forge resource 400: {"error":"github API (pr merge, HTTP 405): ` +
+		`Pull Request has merge conflicts"}`)
+}
+
+// raceForge fails Merge with a lost race, which a retry wins.
+type raceForge struct{}
+
+func (raceForge) Push(context.Context, string, string, string) error { return nil }
+func (raceForge) Open(context.Context, string, string, string, string, string) (PullRequest, error) {
+	return PullRequest{}, nil
+}
+func (raceForge) CI(context.Context, string, string) (CIState, error) { return CIPassed, nil }
+func (raceForge) Merge(context.Context, string, string, string) error {
+	return errors.New("forge resource 405: Base branch was modified. Review and try the merge again.")
+}
+
+// The merge step must distinguish a terminal content conflict from a winnable
+// race. Every merge failure used to become StepPending/"merge_pending", which
+// the scheduler re-queues on a 15s backoff with no retry ceiling — so a slice
+// whose PR could never merge held the single active-root slot forever.
+func TestMergeStepFailsTerminallyOnConflictButStillPendsOnLostRace(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		forge       Forge
+		wantStatus  StepStatus
+		wantReason  string
+		wantDetails string
+	}{
+		{name: "content conflict is terminal", forge: conflictForge{},
+			wantStatus: StepFailed, wantReason: "", wantDetails: "merge conflict"},
+		{name: "lost race stays retryable", forge: raceForge{},
+			wantStatus: StepPending, wantReason: "merge_pending", wantDetails: "Base branch was modified"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			repo := filepath.Join(root, "repo")
+			git := func(dir string, args ...string) {
+				cmd := exec.Command("git", args...)
+				cmd.Dir = dir
+				cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=t@example",
+					"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=t@example")
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("git %v: %v: %s", args, err, out)
+				}
+			}
+			git(root, "init", repo)
+			if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("root\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			git(repo, "add", "README.md")
+			git(repo, "commit", "-m", "root")
+			// merge() resolves the slice worktree from its parent feature branch.
+			git(repo, "branch", "aimee/feat/wi_parent")
+
+			store, err := db1.Open(filepath.Join(root, "aimee.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			ctx := context.Background()
+			if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_parent", Repo: repo,
+				ProposalPath: "p", WorkflowName: "build-e2e", WorkflowVersion: "v", StartStage: "slices"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_parent.s0", Repo: repo,
+				ProposalPath: "p/slice", WorkflowName: "slice", WorkflowVersion: "v",
+				StartStage: "merge", ParentID: "wi_parent"}); err != nil {
+				t.Fatal(err)
+			}
+			worktrees, err := NewWorktreeManager(store, filepath.Join(root, "worktrees"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			item, err := store.WorkItem(ctx, "wi_parent.s0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			runner := &NativeRunner{db: store, worktrees: worktrees, forge: tc.forge}
+			result, err := runner.merge(ctx, StepRequest{WorkItem: item,
+				Inputs: map[string]wfe.Artifact{"pr": {Type: "pr",
+					Content: []byte(`{"ref":"https://github.com/acme/repo/pull/42"}`)}}})
+			if err != nil {
+				t.Fatalf("merge returned a hard error: %v", err)
+			}
+			if result.Status != tc.wantStatus {
+				t.Fatalf("status = %q, want %q (detail=%q)", result.Status, tc.wantStatus, result.Detail)
+			}
+			if result.PauseReason != tc.wantReason {
+				t.Fatalf("pause reason = %q, want %q", result.PauseReason, tc.wantReason)
+			}
+			if !strings.Contains(result.Detail, tc.wantDetails) {
+				t.Fatalf("detail %q does not mention %q", result.Detail, tc.wantDetails)
+			}
+		})
+	}
+}
+
+// A slice whose earlier attempt already committed the work must not be retried
+// forever. baseHead is HEAD at the start of the CURRENT attempt, so once a prior
+// attempt committed, a delegate that correctly finds nothing left to do leaves
+// head == baseHead and looked identical to one that did nothing at all. Observed
+// on wi_e51e37cf slice g0.0: two "wfe: impl" commits carrying the entire change,
+// and every redispatch reporting "no owned files changed". Ask the BRANCH whether
+// work exists, not the attempt.
+func TestBranchHasWorkOverBaseSeesCommitsFromEarlierAttempts(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	git := func(dir string, args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	git(root, "init", "-b", "trunk", repo)
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(repo, "add", "README")
+	git(repo, "commit", "-m", "init")
+	git(repo, "branch", "aimee/feat/wi_parent")
+	ctx := context.Background()
+
+	// Cut from the base with nothing done yet: the slice has produced no work.
+	git(repo, "checkout", "-q", "-b", "aimee/wi/slice", "aimee/feat/wi_parent")
+	if branchHasWorkOverBase(ctx, repo, "wi_parent") {
+		t.Fatal("a slice with no commits over its base must not count as work")
+	}
+
+	// An earlier attempt commits the implementation.
+	if err := os.WriteFile(filepath.Join(repo, "impl.txt"), []byte("done\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(repo, "add", "impl.txt")
+	git(repo, "commit", "-m", "wfe: impl")
+	if !branchHasWorkOverBase(ctx, repo, "wi_parent") {
+		t.Fatal("a slice carrying a commit over its base must count as work")
+	}
+
+	// No parent (a root item) is not a slice and must stay strict.
+	if branchHasWorkOverBase(ctx, repo, "") {
+		t.Fatal("an item with no parent must not be treated as having slice work")
+	}
+	// An unresolvable base must stay strict rather than excuse an empty slice.
+	if branchHasWorkOverBase(ctx, repo, "wi_does_not_exist") {
+		t.Fatal("an unresolved base must not count as work")
+	}
+}
+
+// The intended slice cycle is: cut a branch from the feature tip, do the work,
+// merge back into the feature branch, and let the NEXT slice start from the
+// updated tip. That merge happens through the FORGE, which advances the remote
+// feature branch -- nothing advances the local aimee/feat/<parent> ref. Reading it
+// locally therefore hands slice N+1 the state the run began with, and every slice
+// that already landed is invisible to it. Measured on wi_f96d4b18: local
+// e161dd34, remote da80f8e7, merged file absent locally.
+func TestFeatureBaseRefPrefersTheForgeAdvancedRemoteTip(t *testing.T) {
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin.git")
+	repo := filepath.Join(root, "repo")
+	git := func(dir string, args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	git(root, "init", "--bare", "-b", "trunk", origin)
+	git(root, "clone", origin, repo)
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(repo, "add", "README")
+	git(repo, "commit", "-m", "init")
+	git(repo, "push", "-u", "origin", "trunk")
+	git(repo, "branch", "aimee/feat/wi_parent")
+	git(repo, "push", "origin", "aimee/feat/wi_parent")
+
+	// Slice 0 lands through the forge: the REMOTE feature branch gains a commit
+	// while this clone's local ref deliberately stays behind.
+	landed := filepath.Join(root, "landed")
+	git(root, "clone", "-b", "aimee/feat/wi_parent", origin, landed)
+	if err := os.WriteFile(filepath.Join(landed, "slice0.txt"), []byte("landed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(landed, "add", "slice0.txt")
+	git(landed, "commit", "-m", "slice 0")
+	git(landed, "push", "origin", "aimee/feat/wi_parent")
+
+	ctx := context.Background()
+	base := featureBaseRef(ctx, repo, "wi_parent")
+	if base != "origin/aimee/feat/wi_parent" {
+		t.Fatalf("resolved base = %q, want the fetched remote tip", base)
+	}
+	// And it must actually carry slice 0's work, which the local ref does not.
+	if out, err := exec.Command("git", "-C", repo, "cat-file", "-e",
+		base+":slice0.txt").CombinedOutput(); err != nil {
+		t.Fatalf("resolved base is missing the landed slice: %v: %s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", repo, "cat-file", "-e",
+		"aimee/feat/wi_parent:slice0.txt").CombinedOutput(); err == nil {
+		t.Fatalf("local ref unexpectedly already carried the landed slice: %s", out)
+	}
+
+	// Integrating must now bring that landed work into the slice worktree.
+	git(repo, "checkout", "-q", "-b", "aimee/wi/slice1", "aimee/feat/wi_parent")
+	reason, err := integrateFeatureBase(ctx, repo, "wi_parent")
+	if err != nil || reason != "" {
+		t.Fatalf("integrate failed: reason=%q err=%v", reason, err)
+	}
+	if _, statErr := os.Stat(filepath.Join(repo, "slice0.txt")); statErr != nil {
+		t.Fatalf("next slice did not receive the landed work: %v", statErr)
+	}
+
+	// No parent is not a slice; an unknown parent must not resolve.
+	if featureBaseRef(ctx, repo, "") != "" {
+		t.Fatal("an item with no parent must not resolve a feature base")
+	}
+	if featureBaseRef(ctx, repo, "wi_missing") != "" {
+		t.Fatal("an unknown parent must not resolve a feature base")
 	}
 }

@@ -30,11 +30,18 @@ services:
     # Published image (built + pushed to ghcr on every merge to main): `docker
     # compose pull` fetches it; `up --build` rebuilds locally and tags it the same.
     # Override AIMEE_SERVER_IMAGE to pin a version or use a fork/registry.
-    image: ${AIMEE_SERVER_IMAGE:-ghcr.io/rakuensoftware/aimee-server:latest}
+    image: ${AIMEE_SERVER_IMAGE:-ghcr.io/rakuensoftware/aimee-server:${AIMEE_IMAGE_TAG:-latest}}
     # The server's worker threads need a 64 MB stack (the 8 MB container default
     # overflows during startup — matches systemd's LimitSTACK=67108864).
     ulimits:
       stack: 67108864
+    environment:
+      # Standalone can still use a remote kb identity authority. Empty values
+      # keep the server read-only until an operator provisions all prerequisites.
+      AIMEE_SERVER_ID: ${AIMEE_SERVER_ID:-}
+      AIMEE_SERVER_TEAM_ID: ${AIMEE_SERVER_TEAM_ID:-}
+      AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE: ${AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE:-/run/aimee/management/jwks-trust-bundle.json}
+      AIMEE_KB_CONN: ${AIMEE_KB_CONN:-}
     ports:
       # /v1 over native TLS on 8743 (plaintext 8740 is loopback-only, not published).
       - "8743:8743"
@@ -51,6 +58,7 @@ services:
       # Durable mirror-tier state (AIMEE_WORKSPACES_DIR): bare mirrors +
       # reconstructed worktrees, persisted across recreations on their own volume.
       - aimee-server-workspaces:/var/lib/aimee-workspaces
+      - ${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}:/run/aimee/management:ro
 
 volumes:
   aimee-server-home:

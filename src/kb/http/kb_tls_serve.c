@@ -119,6 +119,9 @@ static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, 
    char *p = line_end + 2;
    char *headers_end = buf + header_len - 2;
    int header_count = 0;
+   /* Start every request with no content type, so a request that sends none
+    * cannot inherit the previous one's on a reused connection. */
+   kb_reqctx_set_content_type("");
    while (p < headers_end && !(p[0] == '\r' && p[1] == '\n'))
    {
       if (++header_count > KB_TLS_HEADER_COUNT_MAX)
@@ -159,6 +162,20 @@ static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, 
             value = value * 10 + (size_t)(*q - '0');
          }
          content_len = value;
+      }
+      if (name_len == 12 && !strncasecmp(p, "Content-Type", 12))
+      {
+         /* Kept for the routes whose security depends on it (see kb_reqctx.h). */
+         char *v = colon + 1;
+         while (v < e && (*v == ' ' || *v == '\t'))
+            v++;
+         char ct[128];
+         size_t vlen = (size_t)(e - v);
+         if (vlen >= sizeof(ct))
+            vlen = sizeof(ct) - 1;
+         memcpy(ct, v, vlen);
+         ct[vlen] = '\0';
+         kb_reqctx_set_content_type(ct);
       }
       if (name_len == 10 && !strncasecmp(p, "Connection", 10) &&
           header_value_has_token(colon + 1, e, "close"))
@@ -324,8 +341,9 @@ static int mtls_renew(const char *scope_cn, const char *old_fp, const char *old_
       snprintf(resp, (size_t)cap, "{\"error\":\"renew failed: bad CSR\"}");
       return 400;
    }
-   char new_fp[KB_PKI_FP_HEX] = "", new_issuer[256] = "", raw_serial[128] = "";
-   char new_serial[128] = "";
+   char new_fp[KB_PKI_FP_HEX] = "", new_issuer[KB_PKI_ISSUER_MAX + 1] = "";
+   char raw_serial[KB_PKI_SERIAL_MAX + 1] = "";
+   char new_serial[KB_PKI_SERIAL_MAX + 1] = "";
    int metadata_ok = kb_pki_ca_fingerprint(cert, new_fp, sizeof(new_fp)) == 0 &&
                      kb_pki_cert_metadata(cert, new_issuer, sizeof(new_issuer), raw_serial,
                                           sizeof(raw_serial)) == 0 &&
@@ -475,7 +493,8 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
        * to an active enrollment. Unknown, revoked, and authority-error outcomes
        * all fail closed before routing; active use gets a debounced last-seen bump. */
       int cert_authority = 0;
-      char fp[65] = "", issuer[256] = "", serial[128] = "";
+      char fp[65] = "", issuer[KB_TLS_PEER_ISSUER_MAX + 1] = "";
+      char serial[KB_TLS_PEER_SERIAL_MAX + 1] = "";
       kb_principal_t transport;
       memset(&transport, 0, sizeof(transport));
       if (have_cert)
@@ -564,8 +583,7 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
             status = 405;
          }
          else
-            status = mtls_management_jwks(transport.issuer, transport.subject, fp, resp,
-                                          KB_TLS_RESP_MAX);
+            status = mtls_management_jwks(issuer, transport.subject, fp, resp, KB_TLS_RESP_MAX);
          if (status == 403 || status == 503)
             close_after_response = 1;
       }
@@ -580,8 +598,7 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
          }
          else
          {
-            status = mtls_renew(cn, fp, transport.issuer, transport.subject, body, resp,
-                                KB_TLS_RESP_MAX);
+            status = mtls_renew(cn, fp, issuer, transport.subject, body, resp, KB_TLS_RESP_MAX);
          }
       }
       else if (have_cert && strcmp(cpath, "/v1/server/heartbeat") == 0)
@@ -642,10 +659,10 @@ static SSL_CTX *g_mtls_ctx = NULL;
 
 #define KB_MTLS_CONNECTIONS_MAX   64
 #define KB_MTLS_QUEUE_CAP         64
-#define KB_MTLS_WORKER_STACK_SIZE (4 * 1024 * 1024)
+#define KB_MTLS_WORKER_STACK_SIZE (16 * 1024 * 1024)
 /* Request routes load config_t on the worker stack. Keep ample headroom for
- * route-local state and TLS/libpq frames; a 1 MiB worker stack crashed live
- * /v1/health requests because config_t alone is roughly 750 KiB. */
+ * route-local state and TLS/libpq frames; live memory queries exhausted 4 MiB
+ * once nested search and config frames were active concurrently. */
 _Static_assert(KB_MTLS_WORKER_STACK_SIZE >= sizeof(config_t) + 1024 * 1024,
                "kb mTLS worker stack must accommodate config_t plus route headroom");
 static pthread_t g_mtls_workers[KB_MTLS_CONNECTIONS_MAX];
@@ -679,6 +696,7 @@ static void *mtls_worker_thread(void *arg)
       int one = 1;
       (void)setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
       kb_tls_serve_conn(fd, g_mtls_ctx);
+      db2_lease_release_idle();
       close(fd);
       pthread_mutex_lock(&g_mtls_queue_mu);
       if (g_mtls_connections_live > 0)

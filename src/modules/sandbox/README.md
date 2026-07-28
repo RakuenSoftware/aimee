@@ -1,12 +1,10 @@
-# modules/sandbox
+# Sandbox module
 
-The **delegate-image / package-proxy** sandbox: `sandbox_learned.c` (learned
-toolchain image provisioning) and `sandbox_pkg_proxy[_core].c` (the package
-download proxy used while building delegate images).
+This module owns delegate image/toolchain provisioning and the mediated package proxy.
 
-This is deliberately **separate** from the *process-isolation* sandbox in
-`src/posix/sandbox.c` + `src/headers/sandbox.h` (`DEC_SANDBOX_H`,
-`SANDBOX_MODE_OFF/WORKSPACE_ONLY/ALLOWLIST` — the Linux user/mount-namespace
-jail). The two share the `sandbox_` name prefix but are unrelated concerns and
-must not be re-merged: the namespace jail is platform (`posix/`) tier, this
-module is the delegate-provisioning tier that consumes it.
+It does not own the Linux process-isolation jail. That boundary lives in the platform sandbox code
+and controls user/mount namespaces, workspace roots, and allowlists. Provisioning consumes that
+isolation contract; it must not duplicate or weaken it.
+
+Changes need package-policy, cache-integrity, no-network, no-credential, degraded-isolation audit,
+and cleanup tests.

@@ -3,6 +3,8 @@
 
 #include "kb_identity.h"
 
+#include "db2/management_intent_fields.h" /* db2_intent_bare_username (header-only) */
+
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
@@ -143,6 +145,24 @@ int kb_principal_from_cert(const char *cert_issuer, const char *cert_serial, con
    return 0;
 }
 
+int kb_principal_from_host_account(const char *username, kb_principal_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   if (!username || !out)
+      return -1;
+   /* The same predicate the identity tables' subject CHECK mirrors, plus the
+    * reserved name. Checked HERE and not only at the route: this constructor is
+    * what stamps authenticated = 1, and a principal that could not be a legal
+    * subject must not carry that stamp anywhere. */
+   if (!db2_intent_bare_username(username) || strcmp(username, "owner") == 0)
+      return -1;
+   out->kind = KB_PRIN_HOST;
+   snprintf(out->subject, sizeof(out->subject), "%s", username);
+   out->authenticated = 1;
+   return 0;
+}
+
 int kb_identity_key(const kb_principal_t *p, char *out, size_t cap)
 {
    if (!p || !out || cap == 0 || !p->authenticated)
@@ -170,6 +190,14 @@ int kb_identity_key(const kb_principal_t *p, char *out, size_t cap)
       return (n > 0 && (size_t)n < cap) ? 0 : -1;
    case KB_PRIN_OWNER:
       n = snprintf(out, cap, "owner");
+      return (n > 0 && (size_t)n < cap) ? 0 : -1;
+   case KB_PRIN_HOST:
+      /* The bare username, verbatim: no prefix and no encoding. The constructor
+       * has already restricted it to the grammar's bare form, which contains no
+       * character that would need escaping. */
+      if (!p->subject[0])
+         return -1;
+      n = snprintf(out, cap, "%s", p->subject);
       return (n > 0 && (size_t)n < cap) ? 0 : -1;
    default:
       return -1;

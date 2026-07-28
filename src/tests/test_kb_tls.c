@@ -29,8 +29,15 @@ static void *server_thread(void *a)
    SSL_set_fd(ssl, s->fd);
    if (SSL_accept(ssl) == 1)
    {
-      s->ok = 1;
-      kb_tls_peer_cn(ssl, s->peer_cn, sizeof(s->peer_cn));
+      char issuer[KB_TLS_PEER_ISSUER_MAX + 1] = "";
+      char serial[KB_TLS_PEER_SERIAL_MAX + 1] = "";
+      char tiny[2] = "x";
+      s->ok = kb_tls_peer_cn(ssl, s->peer_cn, sizeof(s->peer_cn)) == 0 &&
+              kb_tls_peer_issuer(ssl, issuer, sizeof(issuer)) == 0 && issuer[0] &&
+              kb_tls_peer_serial(ssl, serial, sizeof(serial)) == 0 && serial[0] &&
+              kb_tls_peer_cn(ssl, tiny, sizeof(tiny)) == -1 && tiny[0] == '\0' &&
+              kb_tls_peer_issuer(ssl, tiny, sizeof(tiny)) == -1 && tiny[0] == '\0' &&
+              kb_tls_peer_serial(ssl, tiny, sizeof(tiny)) == -1 && tiny[0] == '\0';
    }
    SSL_shutdown(ssl);
    SSL_free(ssl);

@@ -31,11 +31,10 @@ extern "C"
       strftime(buf, len, "%Y-%m-%dT%H:%M:%SZ", &tm_buf);
    }
 
-   /* Returns the module-private Postgres connection, or NULL if
-    * db2_init has not been called (or db2_shutdown has been called).
-    * Returns the calling thread's dedicated connection (opened via
-    * db2_thread_conn_open) if one has been established, otherwise the
-    * process-global connection. */
+   /* Returns the calling thread's Postgres connection, or NULL if DB2 is closed
+    * or a non-init thread cannot acquire its own connection. The process-global
+    * init connection is never shared across threads: libpq forbids concurrent
+    * use of one PGconn. */
    void *db2_conn(void);
 
    /* Bracket a unit of work so the thread's pooled connection is returned to the

@@ -141,14 +141,14 @@ static void test_mtls_client_identity(void)
 
    /* CN sanitization: valid charset accepted; spoofing/garbage refused. */
    char san[VAULT_PRINCIPAL_MAX];
-   assert(vault_principal_cert_sanitize("ci-runner_1.dev", san, sizeof(san)) == 1);
+   assert(vault_principal_name_sanitize("ci-runner_1.dev", san, sizeof(san)) == 1);
    assert(strcmp(san, "ci-runner_1.dev") == 0);
-   assert(vault_principal_cert_sanitize("uid:0", san, sizeof(san)) == 0); /* ':' refused */
-   assert(vault_principal_cert_sanitize("webuser:bob", san, sizeof(san)) == 0);
-   assert(vault_principal_cert_sanitize("a/b", san, sizeof(san)) == 0);       /* path traversal */
-   assert(vault_principal_cert_sanitize("a b", san, sizeof(san)) == 0);       /* whitespace */
-   assert(vault_principal_cert_sanitize("bad\nname", san, sizeof(san)) == 0); /* newline */
-   assert(vault_principal_cert_sanitize("", san, sizeof(san)) == 0);
+   assert(vault_principal_name_sanitize("uid:0", san, sizeof(san)) == 0); /* ':' refused */
+   assert(vault_principal_name_sanitize("webuser:bob", san, sizeof(san)) == 0);
+   assert(vault_principal_name_sanitize("a/b", san, sizeof(san)) == 0);       /* path traversal */
+   assert(vault_principal_name_sanitize("a b", san, sizeof(san)) == 0);       /* whitespace */
+   assert(vault_principal_name_sanitize("bad\nname", san, sizeof(san)) == 0); /* newline */
+   assert(vault_principal_name_sanitize("", san, sizeof(san)) == 0);
    assert(san[0] == '\0');
 
    /* A verified cert over TLS -> cert:<CN>, wins over a tokenless bearer/webuser. */
@@ -172,6 +172,97 @@ static void test_mtls_client_identity(void)
    printf("  PASS: test_mtls_client_identity\n");
 }
 
+/* The sanitize rule is ONE rule for every attacker-influenced name that becomes
+ * part of a principal. The cert CN was sanitized and the webuser name was not,
+ * for no stated reason; this asserts they now behave identically, case for case,
+ * so the two cannot diverge again without a test failing. */
+static void test_name_sanitize_is_one_rule(void)
+{
+   struct
+   {
+      const char *name;
+      int ok;
+      const char *why;
+   } cases[] = {
+       {"alice", 1, "an ordinary login name"},
+       {"ci-runner_1.dev", 1, "dashes, underscores and dots"},
+       {"A1", 1, "mixed case and digits"},
+       {"uid:0", 0, "':' would embed the namespace separator"},
+       {"webuser:bob", 0, "likewise a full principal form"},
+       {"a/b", 0, "'/' is a path separator"},
+       {"../etc/shadow", 0, "path traversal"},
+       {"a b", 0, "whitespace"},
+       {"bad\nname", 0, "a newline is a log-injection primitive"},
+       {"bad\tname", 0, "a tab is a control character"},
+       {"pipe|name", 0, "'|' is the vault AAD delimiter"},
+       {"machine$", 0, "a Samba machine account is outside the set (documented)"},
+       {"", 0, "empty"},
+   };
+
+   char san[VAULT_PRINCIPAL_MAX];
+   char cert_out[VAULT_PRINCIPAL_MAX], web_out[VAULT_PRINCIPAL_MAX];
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
+   {
+      const char *n = cases[i].name;
+      int expect = cases[i].ok;
+      assert(vault_principal_name_sanitize(n, san, sizeof(san)) == expect);
+      if (!expect)
+         assert(san[0] == '\0');
+
+      /* THE point: the cert path and the webuser path must reach the same verdict
+       * for the same name. Each keeps its own transport classification either way,
+       * so an unusable name costs the vault identity and nothing else. */
+      attested_transport_t ct =
+          vault_principal_resolve(1, 1, -1, NULL, 0, n[0] ? n : NULL, cert_out, sizeof(cert_out));
+      attested_transport_t wt =
+          vault_principal_resolve(1, 0, -1, n[0] ? n : NULL, 1, NULL, web_out, sizeof(web_out));
+
+      if (n[0])
+      {
+         assert(ct == ATTEST_MTLS_CLIENT);
+         assert(wt == ATTEST_WEBCHAT_TRUSTED);
+      }
+      if (expect)
+      {
+         char want_cert[VAULT_PRINCIPAL_MAX], want_web[VAULT_PRINCIPAL_MAX];
+         snprintf(want_cert, sizeof(want_cert), "cert:%s", n);
+         snprintf(want_web, sizeof(want_web), "webuser:%s", n);
+         assert(strcmp(cert_out, want_cert) == 0);
+         assert(strcmp(web_out, want_web) == 0);
+      }
+      else if (n[0])
+      {
+         /* Both refuse, and neither leaves a partial principal behind. */
+         assert(cert_out[0] == '\0');
+         assert(web_out[0] == '\0');
+      }
+   }
+
+   /* A name at the length limit is accepted; one over it is refused rather than
+    * truncated — two long names sharing a prefix must never collapse onto one
+    * principal and share a vault. */
+   char at_limit[VAULT_CERT_CN_MAX + 1];
+   memset(at_limit, 'a', VAULT_CERT_CN_MAX);
+   at_limit[VAULT_CERT_CN_MAX] = '\0';
+   assert(vault_principal_name_sanitize(at_limit, san, sizeof(san)) == 1);
+   char over_limit[VAULT_CERT_CN_MAX + 2];
+   memset(over_limit, 'a', VAULT_CERT_CN_MAX + 1);
+   over_limit[VAULT_CERT_CN_MAX + 1] = '\0';
+   assert(vault_principal_name_sanitize(over_limit, san, sizeof(san)) == 0);
+
+   /* Two distinct over-limit names both refused -> they cannot collide. */
+   char other_over[VAULT_CERT_CN_MAX + 2];
+   memset(other_over, 'b', VAULT_CERT_CN_MAX + 1);
+   other_over[VAULT_CERT_CN_MAX + 1] = '\0';
+   assert(vault_principal_resolve(1, 0, -1, over_limit, 1, NULL, web_out, sizeof(web_out)) ==
+          ATTEST_WEBCHAT_TRUSTED);
+   assert(web_out[0] == '\0');
+   assert(vault_principal_resolve(1, 0, -1, other_over, 1, NULL, cert_out, sizeof(cert_out)) ==
+          ATTEST_WEBCHAT_TRUSTED);
+   assert(cert_out[0] == '\0');
+   printf("  PASS: test_name_sanitize_is_one_rule\n");
+}
+
 int main(void)
 {
    test_uds_peer_uid_gets_principal();
@@ -183,6 +274,7 @@ int main(void)
    test_tls_bearer_attested_no_principal();
    test_short_buffer_fails_closed();
    test_mtls_client_identity();
+   test_name_sanitize_is_one_rule();
    printf("vault_principal: all tests passed\n");
    return 0;
 }

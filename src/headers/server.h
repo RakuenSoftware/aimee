@@ -8,6 +8,13 @@
 #include "compute_pool.h"
 #include "platform_event.h"
 #include "provider_catalog.h"
+
+/* True when `name` is a provider the chat path can resolve: a built-in CLI
+ * provider, a known adapter, or an agent in `acfg` (matched by name or by
+ * provider). Gates the durable primary write in handle_provider_set so a
+ * mistyped `aimee provider <word>` cannot brick every later chat turn.
+ * `acfg` may be NULL to check only the built-in/adapter sets. */
+int provider_name_settable(const char *name, const agent_config_t *acfg);
 #include "vault_principal.h"
 
 /* Forward declaration */
@@ -88,8 +95,19 @@ typedef struct cJSON cJSON;
  * only), so a mere authenticated bearer cannot tap live traffic. */
 #define CAP_SHADOW_ADMIN (1u << 17)
 
+/* Operator-level: administer per-user /v1 write-tier grants — who may write to which
+ * remote server. Deliberately OUTSIDE CAPS_AUTHENTICATED for the same reason as the two
+ * above, and the reason is sharper here: a bearer that could administer grants could grant
+ * ITSELF a higher tier, which would make the whole tier system decorative.
+ *
+ * This is defence in depth and not the primary control. The primary control is
+ * v1_route_requires_uds, which refuses these routes over TCP regardless of capability —
+ * necessary because a remote_writes=full bearer holds CAPS_ALL and would otherwise satisfy
+ * any capability check. kb then independently requires admin or team-lead authority. */
+#define CAP_GRANT_ADMIN (1u << 18)
+
 /* Composite capability sets */
-#define CAPS_ALL 0x3FFFFu
+#define CAPS_ALL 0x7FFFFu
 #define CAPS_READ_ONLY                                                                             \
    (CAP_CHAT | CAP_MEMORY_READ | CAP_RULES_READ | CAP_INDEX_READ | CAP_SESSION_READ |              \
     CAP_DASHBOARD_READ | CAP_DESCRIBE_READ)
@@ -249,6 +267,19 @@ server_ctx_t *server_active_ctx(void);
 /* Response helpers (shared across handler files) */
 int server_send_response(server_conn_t *conn, cJSON *resp);
 int server_send_error(server_conn_t *conn, const char *message, const char *request_id);
+
+/* Fault classes for server_send_error_kind. The dispatch envelope otherwise says
+ * only "error", which leaves anything mapping it to HTTP unable to separate a
+ * caller's mistake from a server-side failure — so runtime-web called all of
+ * them 502. Optional and additive: an unclassified error keeps the old
+ * behaviour. */
+#define SERVER_ERR_INVALID_ARGUMENT  "invalid_argument"  /* caller sent bad/missing input */
+#define SERVER_ERR_NOT_FOUND         "not_found"         /* named thing does not exist */
+#define SERVER_ERR_PERMISSION_DENIED "permission_denied" /* caller not allowed */
+#define SERVER_ERR_UNAVAILABLE       "unavailable"       /* a dependency is down */
+
+int server_send_error_kind(server_conn_t *conn, const char *kind, const char *message,
+                           const char *request_id);
 
 /* Declared from cJSON.h so the inline below needs no cJSON.h include here; the
  * real declaration is identical, so including both is harmless. */
@@ -466,6 +497,7 @@ cJSON *mcp_build_full_served_list(void);
 int handle_mcp_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_mcp_recheck(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_get_help(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 
 /* Record the served-call verdict from a sub-handler that returned early (same
  * thread as handle_mcp_call). See server_mcp.c. */

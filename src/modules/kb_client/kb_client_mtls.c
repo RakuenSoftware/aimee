@@ -3,21 +3,29 @@
  *
  * When AIMEE_KB_CONN holds an `aimee://` connection string, the server enrolls
  * once (kb_tls_enroll: TOFU-pin the CA by fingerprint, generate a keypair + CSR,
- * redeem the token for a client cert) and then routes its /v1 kb calls over
- * mutual TLS with that identity. Selected at the top of the kb_client v1
- * transport (kb_client.c) ahead of the HTTP-URL and Unix-socket transports. */
+ * redeem the token for a client cert), persists that identity atomically under
+ * AIMEE_HOME, and then routes its /v1 kb calls over mutual TLS. Persistence is
+ * mandatory because the enrollment token is single-use: keeping the certificate
+ * only in process memory makes the next container restart permanently lose KB.
+ * Selected at the top of the kb_client v1 transport (kb_client.c) ahead of the
+ * HTTP-URL and Unix-socket transports. */
 #include "kb_client_mtls.h"
 #include "kb_enroll.h" /* connection-string parse (for host/port) */
+#include "kb_pki.h"
 #include "kb_tls.h"    /* kb_tls_enroll / kb_tls_client_request */
 #include "config.h"
 #include "cJSON.h"
 
 #include <pthread.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <openssl/crypto.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 /* The enrolled identity, established once on first use. Immutable after init
  * (guarded by g_lock during enrollment), so request-time reads need no lock. */
@@ -28,6 +36,148 @@ static int g_port = 0;
 static char g_ca[8192];
 static char g_cert[8192];
 static char g_key[8192];
+static char g_identity_path_override[1024];
+
+#define KB_CLIENT_IDENTITY_MAX 32768
+
+static int identity_path(char *out, size_t cap)
+{
+   const char *base = config_default_dir();
+   int n = g_identity_path_override[0]
+               ? snprintf(out, cap, "%s", g_identity_path_override)
+               : snprintf(out, cap, "%s/kb-client-identity.json", base ? base : "");
+   return n > 0 && (size_t)n < cap && out[0] == '/' ? 0 : -1;
+}
+
+static int identity_valid(const kb_enroll_conn_t *connection, const char *ca, const char *cert,
+                          const char *key)
+{
+   char fingerprint[KB_PKI_FP_HEX];
+   if (!connection || !ca || !cert || !key || !ca[0] || !cert[0] || !key[0] ||
+       kb_pki_ca_fingerprint(ca, fingerprint, sizeof(fingerprint)) != 0 ||
+       strcasecmp(fingerprint, connection->ca_sha256) != 0 ||
+       kb_pki_verify_client_cert(ca, cert) != 1)
+      return 0;
+   SSL_CTX *ctx = kb_tls_client_ctx(ca, cert, key);
+   if (!ctx)
+      return 0;
+   SSL_CTX_free(ctx);
+   return kb_tls_cert_expires_within(cert, 0) == 0;
+}
+
+static int identity_load(const kb_enroll_conn_t *connection, char *ca, size_t ca_cap, char *cert,
+                         size_t cert_cap, char *key, size_t key_cap)
+{
+   char path[1024];
+   if (identity_path(path, sizeof(path)) != 0)
+      return -1;
+   int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+   struct stat st;
+   if (fd < 0 || fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_uid != geteuid() ||
+       st.st_nlink != 1 || (st.st_mode & (S_IRWXG | S_IRWXO)) || st.st_size < 1 ||
+       st.st_size >= KB_CLIENT_IDENTITY_MAX)
+   {
+      if (fd >= 0)
+         close(fd);
+      return -1;
+   }
+   char *raw = calloc(1, (size_t)st.st_size + 1);
+   size_t used = 0;
+   while (raw && used < (size_t)st.st_size)
+   {
+      ssize_t n = read(fd, raw + used, (size_t)st.st_size - used);
+      if (n <= 0)
+         break;
+      used += (size_t)n;
+   }
+   char extra = 0;
+   ssize_t trailing = raw ? read(fd, &extra, 1) : -1;
+   close(fd);
+   if (!raw || used != (size_t)st.st_size || trailing != 0 || memchr(raw, '\0', used))
+   {
+      if (raw)
+      {
+         OPENSSL_cleanse(raw, (size_t)st.st_size + 1);
+         free(raw);
+      }
+      return -1;
+   }
+   const char *parse_end = NULL;
+   cJSON *j = cJSON_ParseWithLengthOpts(raw, used + 1, &parse_end, 1);
+   int parsed_all = parse_end == raw + used;
+   OPENSSL_cleanse(raw, (size_t)st.st_size + 1);
+   free(raw);
+   cJSON *version = j ? cJSON_GetObjectItemCaseSensitive(j, "version") : NULL;
+   cJSON *jca = j ? cJSON_GetObjectItemCaseSensitive(j, "ca") : NULL;
+   cJSON *jcert = j ? cJSON_GetObjectItemCaseSensitive(j, "cert") : NULL;
+   cJSON *jkey = j ? cJSON_GetObjectItemCaseSensitive(j, "key") : NULL;
+   int ok = parsed_all && cJSON_IsNumber(version) && version->valuedouble == 1 &&
+            cJSON_IsString(jca) &&
+            cJSON_IsString(jcert) && cJSON_IsString(jkey) && strlen(jca->valuestring) < ca_cap &&
+            strlen(jcert->valuestring) < cert_cap && strlen(jkey->valuestring) < key_cap &&
+            identity_valid(connection, jca->valuestring, jcert->valuestring, jkey->valuestring);
+   if (ok)
+   {
+      snprintf(ca, ca_cap, "%s", jca->valuestring);
+      snprintf(cert, cert_cap, "%s", jcert->valuestring);
+      snprintf(key, key_cap, "%s", jkey->valuestring);
+   }
+   if (cJSON_IsString(jkey))
+      OPENSSL_cleanse(jkey->valuestring, strlen(jkey->valuestring));
+   cJSON_Delete(j);
+   return ok ? 0 : -1;
+}
+
+static int identity_save(const char *ca, const char *cert, const char *key)
+{
+   char path[1024], temporary[1080];
+   if (identity_path(path, sizeof(path)) != 0)
+      return -1;
+   int tn = snprintf(temporary, sizeof(temporary), "%s.tmp.%ld", path, (long)getpid());
+   if (tn <= 0 || (size_t)tn >= sizeof(temporary))
+      return -1;
+   cJSON *j = cJSON_CreateObject();
+   if (!j || !cJSON_AddNumberToObject(j, "version", 1) ||
+       !cJSON_AddStringToObject(j, "ca", ca) || !cJSON_AddStringToObject(j, "cert", cert) ||
+       !cJSON_AddStringToObject(j, "key", key))
+   {
+      cJSON_Delete(j);
+      return -1;
+   }
+   char *raw = cJSON_PrintUnformatted(j);
+   cJSON *jkey = cJSON_GetObjectItemCaseSensitive(j, "key");
+   if (cJSON_IsString(jkey))
+      OPENSSL_cleanse(jkey->valuestring, strlen(jkey->valuestring));
+   cJSON_Delete(j);
+   if (!raw)
+      return -1;
+   size_t length = strlen(raw);
+   (void)unlink(temporary);
+   int fd = open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+   size_t used = 0;
+   while (fd >= 0 && used < length)
+   {
+      ssize_t n = write(fd, raw + used, length - used);
+      if (n <= 0)
+         break;
+      used += (size_t)n;
+   }
+   int ok = fd >= 0 && used == length && fsync(fd) == 0 && fchmod(fd, 0600) == 0;
+   if (fd >= 0)
+   {
+      if (close(fd) != 0)
+         ok = 0;
+      fd = -1;
+   }
+   OPENSSL_cleanse(raw, length);
+   free(raw);
+   if (!ok || rename(temporary, path) != 0)
+   {
+      (void)unlink(temporary);
+      return -1;
+   }
+   return 0;
+}
 
 #define KB_POOL_TOTAL_MAX   8
 #define KB_POOL_IDLE_MAX    2
@@ -59,6 +209,35 @@ static unsigned long g_pool_resumed_total = 0;
 static int g_pool_enabled_last = -1;
 
 static void pool_close_entry_locked(kb_pool_entry_t *entry);
+
+void kb_client_mtls_reset_for_test(void)
+{
+   pthread_mutex_lock(&g_lock);
+   for (int i = 0; i < KB_POOL_TOTAL_MAX; i++)
+      if (g_pool[i].conn)
+         pool_close_entry_locked(&g_pool[i]);
+   SSL_CTX_free(g_pool_ctx);
+   g_pool_ctx = NULL;
+   SSL_SESSION_free(g_pool_session);
+   g_pool_session = NULL;
+   g_identity_generation++;
+   g_enrolled = 0;
+   g_host[0] = '\0';
+   g_port = 0;
+   g_ca[0] = '\0';
+   g_cert[0] = '\0';
+   OPENSSL_cleanse(g_key, sizeof(g_key));
+   pthread_cond_broadcast(&g_pool_cv);
+   pthread_mutex_unlock(&g_lock);
+}
+
+void kb_client_mtls_set_identity_path_for_test(const char *absolute_path)
+{
+   pthread_mutex_lock(&g_lock);
+   snprintf(g_identity_path_override, sizeof(g_identity_path_override), "%s",
+            absolute_path ? absolute_path : "");
+   pthread_mutex_unlock(&g_lock);
+}
 
 static int pool_feature_enabled(void)
 {
@@ -269,8 +448,10 @@ int kb_client_mtls_configured(void)
    return (c && c[0]) ? 1 : 0;
 }
 
-/* Enroll once: parse AIMEE_KB_CONN, then kb_tls_enroll into the static identity.
- * Returns 0 if enrolled (already or now), -1 on failure. */
+/* Load the durable identity or enroll once and persist it before use. The
+ * connection string remains configured after its token is consumed, so a
+ * restart can recover the certificate while still taking host/port + CA pin
+ * from the operator-supplied value. */
 static int ensure_enrolled(void)
 {
    int rc = -1;
@@ -282,13 +463,25 @@ static int ensure_enrolled(void)
    }
    const char *conn = getenv("AIMEE_KB_CONN");
    kb_enroll_conn_t pc;
-   if (conn && conn[0] && kb_enroll_conn_string_parse(conn, &pc) == 0 &&
-       kb_tls_enroll(conn, g_ca, sizeof(g_ca), g_cert, sizeof(g_cert), g_key, sizeof(g_key)) == 0)
+   if (conn && conn[0] && kb_enroll_conn_string_parse(conn, &pc) == 0)
    {
-      snprintf(g_host, sizeof(g_host), "%s", pc.host);
-      g_port = pc.port;
-      g_enrolled = 1;
-      rc = 0;
+      if (identity_load(&pc, g_ca, sizeof(g_ca), g_cert, sizeof(g_cert), g_key, sizeof(g_key)) ==
+              0 ||
+          (kb_tls_enroll(conn, g_ca, sizeof(g_ca), g_cert, sizeof(g_cert), g_key, sizeof(g_key)) ==
+               0 &&
+           identity_save(g_ca, g_cert, g_key) == 0))
+      {
+         snprintf(g_host, sizeof(g_host), "%s", pc.host);
+         g_port = pc.port;
+         g_enrolled = 1;
+         rc = 0;
+      }
+   }
+   if (rc != 0)
+   {
+      OPENSSL_cleanse(g_key, sizeof(g_key));
+      g_ca[0] = '\0';
+      g_cert[0] = '\0';
    }
    pthread_mutex_unlock(&g_lock);
    return rc;
@@ -306,15 +499,22 @@ static void maybe_renew(void)
       char nc[sizeof(g_cert)], nk[sizeof(g_key)];
       if (kb_tls_renew(g_host, g_port, g_ca, g_cert, g_key, nc, sizeof(nc), nk, sizeof(nk)) == 0)
       {
-         snprintf(g_cert, sizeof(g_cert), "%s", nc);
-         snprintf(g_key, sizeof(g_key), "%s", nk);
-         g_identity_generation++;
-         SSL_CTX_free(g_pool_ctx);
-         g_pool_ctx = NULL;
-         SSL_SESSION_free(g_pool_session);
-         g_pool_session = NULL;
-         pthread_cond_broadcast(&g_pool_cv);
+         /* Never switch the live process to an identity a restart would lose.
+          * The old cert remains usable through its existing validity window if
+          * storage is temporarily unavailable. */
+         if (identity_save(g_ca, nc, nk) == 0)
+         {
+            snprintf(g_cert, sizeof(g_cert), "%s", nc);
+            snprintf(g_key, sizeof(g_key), "%s", nk);
+            g_identity_generation++;
+            SSL_CTX_free(g_pool_ctx);
+            g_pool_ctx = NULL;
+            SSL_SESSION_free(g_pool_session);
+            g_pool_session = NULL;
+            pthread_cond_broadcast(&g_pool_cv);
+         }
       }
+      OPENSSL_cleanse(nk, sizeof(nk));
    }
    pthread_mutex_unlock(&g_lock);
 }

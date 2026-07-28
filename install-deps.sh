@@ -21,6 +21,22 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # shellcheck source=distro-detect.sh
 source "$SCRIPT_DIR/distro-detect.sh"
+
+# Run a command as the postgres superuser. `sudo -n -u postgres` only works when
+# sudo exists; as root (containers, cloud base images) there is no sudo, so use
+# runuser/su instead. Non-root without sudo already exited in detect_sudo.
+as_postgres() {
+    if [ "$(id -u)" -eq 0 ]; then
+        if command -v runuser &>/dev/null; then
+            runuser -u postgres -- "$@"
+        else
+            su -s /bin/sh postgres -c "$(printf '%q ' "$@")"
+        fi
+    else
+        sudo -n -u postgres "$@"
+    fi
+}
+
 detect_pkg_manager
 
 # Colors (if terminal supports them)
@@ -53,7 +69,7 @@ if [ "${#missing_deps[@]}" -gt 0 ]; then
         apt|dnf|yum)
             info "Installing missing packages: ${missing_pkgs[*]}"
             if [ "$PKG_MGR" = "apt" ]; then
-                sudo apt-get update -qq
+                $AIMEE_SUDO apt-get update -qq
             fi
             # shellcheck disable=SC2086
             $PKG_INSTALL "${missing_pkgs[@]}"
@@ -123,7 +139,7 @@ bootstrap_postgres() {
     if command -v systemctl >/dev/null 2>&1; then
         if ! systemctl is-active --quiet postgresql 2>/dev/null; then
             info "postgres: starting postgresql service"
-            sudo systemctl enable --now postgresql 2>/dev/null || \
+            $AIMEE_SUDO systemctl enable --now postgresql 2>/dev/null || \
                 warn "postgres: failed to start postgresql service via systemctl"
         fi
     elif command -v brew >/dev/null 2>&1 && brew services list 2>/dev/null | grep -q postgresql; then
@@ -143,14 +159,14 @@ bootstrap_postgres() {
 
     # Create database if missing. Try the user's own role first; on systems
     # where postgres-as-root is the only superuser path (apt-installed pg on
-    # Debian/Ubuntu) fall back to `sudo -u postgres`.
+    # Debian/Ubuntu) fall back to running as the postgres user.
     if ! psql -lqt 2>/dev/null | cut -d'|' -f1 | tr -d ' ' | grep -qx aimee_shared; then
         info "postgres: creating aimee_shared database"
         if ! createdb aimee_shared 2>/dev/null; then
             local user
             user="${USER:-$(id -un)}"
-            sudo -n -u postgres createuser --createdb "$user" 2>/dev/null || true
-            sudo -n -u postgres createdb -O "$user" aimee_shared 2>/dev/null || \
+            as_postgres createuser --createdb "$user" 2>/dev/null || true
+            as_postgres createdb -O "$user" aimee_shared 2>/dev/null || \
                 warn "postgres: createdb aimee_shared failed; create it manually"
         fi
     fi
@@ -161,7 +177,7 @@ bootstrap_postgres() {
         info "postgres: enabling pg_trgm extension on aimee_shared"
         psql -d aimee_shared -v ON_ERROR_STOP=1 \
              -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;' 2>/dev/null || \
-            sudo -n -u postgres psql -d aimee_shared -v ON_ERROR_STOP=1 \
+            as_postgres psql -d aimee_shared -v ON_ERROR_STOP=1 \
                  -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;' 2>/dev/null || \
             warn "postgres: failed to enable pg_trgm; install superuser must run \
 'CREATE EXTENSION pg_trgm;' on aimee_shared"
@@ -171,7 +187,7 @@ bootstrap_postgres() {
         info "postgres: enabling vector extension on aimee_shared"
         psql -d aimee_shared -v ON_ERROR_STOP=1 \
              -c 'CREATE EXTENSION IF NOT EXISTS vector;' 2>/dev/null || \
-            sudo -n -u postgres psql -d aimee_shared -v ON_ERROR_STOP=1 \
+            as_postgres psql -d aimee_shared -v ON_ERROR_STOP=1 \
                  -c 'CREATE EXTENSION IF NOT EXISTS vector;' 2>/dev/null || \
             warn "postgres: failed to enable vector; install superuser must run \
 'CREATE EXTENSION vector;' on aimee_shared"

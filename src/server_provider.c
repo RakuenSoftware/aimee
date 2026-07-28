@@ -150,20 +150,49 @@ static cJSON *server_provider_json(const model_provider_t *p)
    return obj;
 }
 
+/* Has the OPERATOR configured this provider, as opposed to aimee merely knowing
+ * it exists? A credential actually present is the only evidence of a deliberate
+ * choice. auth_type "none" (ollama, llama_native) is NOT evidence: those need no
+ * key, so they would report configured on a machine where nothing is installed
+ * or running. That is the difference between this and
+ * server_provider_has_credentials(), which answers "usable right now". */
+static int server_provider_is_configured(const model_provider_t *p)
+{
+   if (!p || !p->env_vars)
+      return 0;
+   for (int i = 0; p->env_vars[i]; i++)
+   {
+      const char *val = getenv(p->env_vars[i]);
+      if (val && val[0])
+         return 1;
+   }
+   return 0;
+}
+
 int handle_provider_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    int available_only = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "available_only"));
+   int show_all = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "all"));
    int json_output = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "json"));
    model_provider_t *providers[64];
    int n = model_provider_list(providers, 64);
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddBoolToObject(resp, "json", json_output);
+   cJSON_AddBoolToObject(resp, "all", show_all);
+   cJSON_AddBoolToObject(resp, "available_only", available_only);
    cJSON *arr = cJSON_CreateArray();
    for (int i = 0; i < n; i++)
    {
       if (available_only && !server_provider_has_credentials(providers[i]))
+         continue;
+      /* Default is what the operator CONFIGURED. This returned the whole
+       * built-in catalogue — seven entries, every one "[no key]" — which the
+       * client renders as a registration table, so a brand-new install looked
+       * pre-populated with providers nobody had chosen. Nothing was installed;
+       * they were names aimee knows. `--all` still shows that catalogue. */
+      if (!show_all && !available_only && !server_provider_is_configured(providers[i]))
          continue;
       cJSON_AddItemToArray(arr, server_provider_json(providers[i]));
    }
@@ -291,6 +320,16 @@ int handle_provider_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return rc;
 }
 
+/* Provider settability policy lives in server/provider_settable.c (pure, unit
+ * tested); this TU only loads the config and reports the error. */
+static int provider_name_resolvable(const char *name)
+{
+   agent_config_t acfg;
+   if (agent_load_config(&acfg) != 0)
+      return provider_name_settable(name, NULL);
+   return provider_name_settable(name, &acfg);
+}
+
 int handle_provider_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -300,6 +339,14 @@ int handle_provider_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *name = jname->valuestring;
    if (strlen(name) >= 16)
       return server_send_error(conn, "provider name too long (max 15 chars)", NULL);
+   if (!provider_name_resolvable(name))
+   {
+      char err[192];
+      snprintf(err, sizeof(err),
+               "unknown provider '%s': not a configured agent, adapter, or built-in provider",
+               name);
+      return server_send_error(conn, err, NULL);
+   }
    config_t cfg;
    config_load(&cfg);
    snprintf(cfg.provider, sizeof(cfg.provider), "%s", name);

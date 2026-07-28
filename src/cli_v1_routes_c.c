@@ -1963,6 +1963,19 @@ void pt_print_provider_list(const char *method, cJSON *resp)
    }
    else if (cJSON_IsArray(providers))
    {
+      /* An empty list is the normal state of a new install: nothing is
+       * configured until the operator configures it. Say that, rather than
+       * printing a bare header that reads like a broken query. */
+      if (cJSON_GetArraySize(providers) == 0)
+      {
+         if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(resp, "all")))
+            printf("no providers known\n");
+         else if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(resp, "available_only")))
+            printf("no providers available\n");
+         else
+            printf("no providers configured — `aimee provider list --all` shows what can be\n");
+         return;
+      }
       printf("%-20s  %-24s  %-10s  %s\n", "provider", "display", "auth", "status");
       cJSON *p;
       cJSON_ArrayForEach(p, providers)
@@ -2214,4 +2227,112 @@ void pt_print_roundtable_review(const char *method, cJSON *resp)
    if (cJSON_IsNumber(rounds))
       fprintf(stderr, "[roundtable: %d round(s)%s]\n", (int)rounds->valuedouble,
               cJSON_IsTrue(converged) ? ", converged" : "");
+}
+
+/* --- kb grant printers. These four commands succeeded but printed NOTHING in text
+ * mode; every outcome field was reachable only via --json. Two of them are
+ * safety-relevant, which is why this is not merely cosmetic: is_member=false means
+ * the grant does nothing at all until the subject joins the team, and a revoke
+ * leaves an already-issued token usable until it expires. Both are caveats on an
+ * operation that otherwise succeeded, so they go to stderr while the outcome goes
+ * to stdout.
+ *
+ * A missing boolean is NOT false here. The kb routes always emit these fields, so
+ * absence means the response was not the one we expect, and reporting "unchanged"
+ * or "not found" for it would turn a protocol fault into a confident false claim
+ * about authorization state. grant_flag returns -1 for that case and each printer
+ * tells the operator to confirm instead. --- */
+static int grant_flag(cJSON *resp, const char *key)
+{
+   cJSON *v = cJSON_GetObjectItemCaseSensitive(resp, key);
+   return cJSON_IsBool(v) ? (cJSON_IsTrue(v) ? 1 : 0) : -1;
+}
+
+void pt_print_grant_set(const char *method, cJSON *resp)
+{
+   (void)method;
+   int changed = grant_flag(resp, "changed");
+   int was_revoked = grant_flag(resp, "was_revoked");
+   int is_member = grant_flag(resp, "is_member");
+   /* Absent previous_tier means the grant did not exist. "created" and "changed
+    * from off" must not render alike, so this reads presence, not json_str's "". */
+   cJSON *prev = cJSON_GetObjectItemCaseSensitive(resp, "previous_tier");
+   int had_previous = cJSON_IsString(prev) && prev->valuestring[0];
+
+   if (changed < 0)
+   {
+      fprintf(stderr,
+              "aimee: grant set reported no outcome; run `aimee kb grant show` to confirm\n");
+      return;
+   }
+   if (!had_previous)
+      printf("grant created\n");
+   else if (changed > 0)
+      printf("grant changed from %s\n", prev->valuestring);
+   else
+      printf("grant unchanged (already %s)\n", prev->valuestring);
+
+   if (was_revoked > 0)
+      printf("a previous revocation for this subject was reinstated\n");
+   if (is_member == 0)
+      fprintf(stderr, "warning: the subject is not a member of this team; the grant has no "
+                      "effect until they join\n");
+   else if (is_member < 0)
+      fprintf(stderr, "warning: team membership was not reported; the grant has no effect "
+                      "unless the subject is a member\n");
+}
+
+void pt_print_grant_revoke(const char *method, cJSON *resp)
+{
+   (void)method;
+   int found = grant_flag(resp, "found");
+   if (found < 0)
+   {
+      fprintf(stderr, "aimee: revoke reported no outcome; run `aimee kb grant show` to confirm\n");
+      return;
+   }
+   if (found == 0)
+   {
+      printf("no grant existed for that subject; nothing to revoke\n");
+      return;
+   }
+   printf("grant revoked\n");
+   /* The operator cannot infer this and it is the difference between "access is gone"
+    * and "access is gone shortly". Tokens are checked against the grant at issue
+    * time, so one already in a client's hands outlives the revocation. */
+   fprintf(stderr, "note: a token issued before this revocation remains valid until it "
+                   "expires (up to 300s)\n");
+}
+
+void pt_print_grant_list(const char *method, cJSON *resp)
+{
+   (void)method;
+   cJSON *grants = cJSON_GetObjectItemCaseSensitive(resp, "grants");
+   if (!cJSON_IsArray(grants))
+   {
+      fprintf(stderr, "aimee: response contained no grant list\n");
+      return;
+   }
+   if (cJSON_GetArraySize(grants) == 0)
+   {
+      /* Said explicitly: printing nothing is what the missing formatter did, and it
+       * is indistinguishable from a broken command. */
+      printf("no write-tier grants\n");
+      return;
+   }
+   printf("%-40s  %-6s  %-20s  %s\n", "SUBJECT", "TIER", "GRANTED BY", "STATUS");
+   cJSON *g;
+   cJSON_ArrayForEach(g, grants)
+   {
+      cJSON *rev = cJSON_GetObjectItemCaseSensitive(g, "revoked_at");
+      if (cJSON_IsString(rev) && rev->valuestring[0])
+         printf("%-40s  %-6s  %-20s  revoked %s\n", json_str(g, "subject"), json_str(g, "tier"),
+                json_str(g, "granted_by"), rev->valuestring);
+      else
+         printf("%-40s  %-6s  %-20s  active since %s\n", json_str(g, "subject"),
+                json_str(g, "tier"), json_str(g, "granted_by"), json_str(g, "created_at"));
+   }
+   if (grant_flag(resp, "truncated") > 0)
+      fprintf(stderr, "warning: more grants exist than were returned; narrow the query with "
+                      "--subject\n");
 }

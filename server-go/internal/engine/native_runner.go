@@ -376,6 +376,10 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		}
 		prompt += "\n\nTDD: failing tests have already been authored in the worktree. Make them pass without weakening or deleting their assertions."
 	}
+	// acceptPartial is granted here on the contract that this block "is
+	// independently committed and verified by the Go native runner". Record the
+	// pre-delegate HEAD so that promise can actually be checked below.
+	baseHead, baseHeadErr := gitText(ctx, workdir, "rev-parse", "HEAD")
 	result, err := r.delegate(ctx, req, DelegateRequest{Role: "code", Persona: paramString(req.Node, "persona", "engineer"), Delegate: paramString(req.Node, "delegate", ""), Prompt: prompt, Workdir: workdir, Tools: true, acceptPartial: true})
 	if err != nil {
 		return StepResult{}, err
@@ -387,6 +391,33 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	}
 	if err := commitChanges(ctx, workdir, req.Node.ID); err != nil {
 		return StepResult{}, err
+	}
+	// A delegate that reported partial AND left no commit did not implement the
+	// task -- it said so itself. Advancing turns that into an empty diff at freeze,
+	// which reads as "the work is already in the base" and accepts the slice, so a
+	// run can reach done=N with no commits, no artifact and no PR. Only the partial
+	// case fails here: a completed delegate that legitimately had nothing to do is
+	// still the freeze no-op path.
+	if result.Partial && baseHeadErr == nil {
+		head, headErr := gitText(ctx, workdir, "rev-parse", "HEAD")
+		// baseHead is HEAD at the start of THIS attempt, so on a redispatch it
+		// already contains whatever earlier attempts committed. A delegate that
+		// correctly finds the work done then leaves no new commit and looks
+		// identical to one that did nothing at all -- and the slice retried until
+		// its wall cap, forever. Observed on wi_e51e37cf slice g0.0: two "wfe:
+		// impl" commits carrying the whole change, and every redispatch reporting
+		// "no owned files changed; result treated as incomplete".
+		//
+		// So only fail when the BRANCH carries no work either. Ask the branch, not
+		// this attempt.
+		if headErr == nil && head == baseHead && !branchHasWorkOverBase(ctx, workdir, req.WorkItem.ParentID) {
+			detail := strings.TrimSpace(result.Response)
+			if detail == "" {
+				detail = "delegate returned a partial result and produced no commit"
+			}
+			return StepResult{Status: StepChanges, Detail: safeDiagnostic(detail),
+				CostUSD: cost, CostUnknown: costUnknown}, nil
+		}
 	}
 	if !docs {
 		if err := r.verifier.Verify(ctx, workdir); err != nil {
@@ -496,11 +527,66 @@ func commitChanges(ctx context.Context, workdir, stage string) error {
 // clean worktree, and returns the park reason "base_integration_conflict" so the
 // slice surfaces distinctly instead of masquerading as convergence_no_progress or
 // poisoning the reused worktree.
+// branchHasWorkOverBase reports whether this slice's branch carries any commit
+// beyond the feature base it was cut from -- i.e. whether the slice has already
+// produced work, regardless of what the current attempt did.
+//
+// Answers false when the base cannot be resolved. That preserves the existing
+// stricter behaviour rather than letting an unresolved base excuse a genuinely
+// empty slice: an unverifiable claim of work is not work.
+func branchHasWorkOverBase(ctx context.Context, workdir, parentID string) bool {
+	if parentID == "" {
+		return false
+	}
+	// One definition of "the feature tip" for every consumer -- see featureBaseRef.
+	base := featureBaseRef(ctx, workdir, parentID)
+	if base == "" {
+		return false
+	}
+	count, err := gitText(ctx, workdir, "rev-list", "--count", base+"..HEAD")
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(count) != "" && strings.TrimSpace(count) != "0"
+}
+
+// featureBaseRef resolves the ref carrying the feature branch's real tip, or ""
+// when it cannot be resolved.
+//
+// A slice merges through the FORGE, which advances the remote feature branch.
+// Nothing advances the local aimee/feat/<parent> ref, so reading it locally hands
+// slice N+1 the state the run started with and every slice that already landed is
+// invisible. Measured on wi_f96d4b18: local e161dd34, remote da80f8e7, with the
+// merged file absent locally.
+//
+// #2023 fixed this for the base a slice worktree is CUT from. This is the second
+// consumer -- the merge that brings the feature branch INTO an existing slice --
+// and it had the same stale read, so the intended
+// "branch from the feature tip, merge back on completion" cycle only ever saw the
+// original tip. Fetch, then prefer the remote ref, falling back to the local one
+// when there is no remote (offline or a fresh repo).
+func featureBaseRef(ctx context.Context, workdir, parentID string) string {
+	if parentID == "" {
+		return ""
+	}
+	local := "aimee/feat/" + parentID
+	remote := "origin/" + local
+	_, _ = gitText(ctx, workdir, "fetch", "--quiet", "origin",
+		"+refs/heads/"+local+":refs/remotes/"+remote)
+	if _, err := gitText(ctx, workdir, "rev-parse", "--verify", "--quiet", remote+"^{commit}"); err == nil {
+		return remote
+	}
+	if _, err := gitText(ctx, workdir, "rev-parse", "--verify", "--quiet", local+"^{commit}"); err == nil {
+		return local
+	}
+	return ""
+}
+
 func integrateFeatureBase(ctx context.Context, workdir, parentID string) (string, error) {
-	base := "aimee/feat/" + parentID
+	base := featureBaseRef(ctx, workdir, parentID)
 	// The feature branch may not exist yet (first generation, before any slice has
 	// merged into it) — nothing to integrate.
-	if _, err := gitText(ctx, workdir, "rev-parse", "--verify", "--quiet", base+"^{commit}"); err != nil {
+	if base == "" {
 		return "", nil
 	}
 	// Already contains the base tip: merge would be a no-op.
@@ -1293,6 +1379,10 @@ func (r *NativeRunner) merge(ctx context.Context, req StepRequest) (StepResult, 
 		return StepResult{}, err
 	}
 	if err := r.forge.Merge(ctx, workdir, prRef, base); err != nil {
+		if mergeErrIsConflict(err) {
+			return StepResult{Status: StepFailed,
+				Detail: "merge conflict needs a content decision, no retry can resolve it: " + err.Error()}, nil
+		}
 		return StepResult{Status: StepPending, PauseReason: "merge_pending", Detail: err.Error()}, nil
 	}
 	return StepResult{Status: StepAdvanced, ArtifactType: "none", Artifact: "merged"}, nil

@@ -41,6 +41,7 @@
 #include "kb_client_mtls.h"
 #include "server_workflow_api.h" /* W7: /v1/workflow read+author handlers */
 #include "cJSON.h"
+#include "kb_client_grants.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
@@ -1320,6 +1321,9 @@ static void op_run_worker_run(void *arg)
       {
          if (cJSON_GetObjectItemCaseSensitive(parsed, "error"))
             ok = 0;
+         cJSON *dispatch_status = cJSON_GetObjectItemCaseSensitive(parsed, "status");
+         if (cJSON_IsString(dispatch_status) && strcmp(dispatch_status->valuestring, "error") == 0)
+            ok = 0;
          cJSON *cancelled = cJSON_GetObjectItemCaseSensitive(parsed, "cancelled");
          if (cJSON_IsTrue(cancelled))
             terminal_status = OPENAI_RUN_CANCELLED;
@@ -1765,6 +1769,18 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/dashboard/reminders", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ,
      rh_dashboard_reminders},
     {"GET", "/v1/kb/status", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_kb_status},
+    /* Write-tier grant administration. UDS-only via v1_route_requires_uds, which refuses
+     * these over TCP regardless of bearer, tier or capability; CAP_GRANT_ADMIN is defence in
+     * depth. Not given an `op` twin, because there is no NDJSON socket method for grant
+     * administration and inventing one would create a second reachable path to it. */
+    /* All three are POST, including the read. The thin client marshals a command's flags
+     * into a JSON BODY and has no per-method query-string builder, so a GET here would need
+     * a bespoke path builder for one route — and `aimee kb grant list` is the only caller.
+     * The body is also the better fit for a subject, which can contain ':' and '%'. */
+    {"POST", "/v1/grants/write-tier/set", NULL, RM_EXACT, NULL, CAP_GRANT_ADMIN, rh_grant_set},
+    {"POST", "/v1/grants/write-tier/revoke", NULL, RM_EXACT, NULL, CAP_GRANT_ADMIN,
+     rh_grant_revoke},
+    {"POST", "/v1/grants/write-tier/list", NULL, RM_EXACT, NULL, CAP_GRANT_ADMIN, rh_grant_list},
     {"GET", "/v1/kb/curator", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_kb_curator},
     {"GET", "/v1/agents", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_agents},
     {"GET", "/v1/roadmap", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_roadmap},
@@ -2027,6 +2043,7 @@ static const http_route_t g_v1_routes[] = {
      rh_dispatch_op},
     {"POST", "/v1/sessions/close", NULL, RM_EXACT, "session.close", 0, rh_dispatch_op},
     {"POST", "/v1/sessions/get", NULL, RM_EXACT, "session.get", 0, rh_dispatch_op},
+    {"POST", "/v1/sessions/list", NULL, RM_EXACT, "session.list", 0, rh_dispatch_op},
     {"POST", "/v1/sessions/brief", NULL, RM_EXACT, "session.brief", 0, rh_dispatch_op},
     {"GET", "/v1/sessions/presence", NULL, RM_EXACT, "session.presence", 0, rh_dispatch_op},
     {"POST", "/v1/toolsets/resolve", NULL, RM_EXACT, "toolset.resolve", 0, rh_dispatch_op},
@@ -2035,6 +2052,7 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/mcp/audit", NULL, RM_EXACT, "mcp.audit", 0, rh_dispatch_op},
     {"POST", "/v1/mcp/recheck", NULL, RM_EXACT, "mcp.recheck", 0, rh_dispatch_op},
     {"POST", "/v1/mcp/call", NULL, RM_EXACT, "mcp.call", 0, rh_dispatch_op},
+    {"POST", "/v1/help", NULL, RM_EXACT, "help.get", 0, rh_dispatch_op},
     {"POST", "/v1/workspaces/context", NULL, RM_EXACT, "workspace.context", 0, rh_dispatch_op},
     {"POST", "/v1/worktree/gc", NULL, RM_EXACT, "worktree.gc", 0, rh_dispatch_op},
     {"POST", "/v1/aux/test", NULL, RM_EXACT, "aux.test", 0, rh_dispatch_op},
@@ -2341,7 +2359,22 @@ uint32_t v1_route_caps_lookup(const char *method, const char *path)
  * rather than a per-row struct field — avoids a missing-initializer churn across
  * every existing read row under -Wextra. Add a data-write route's op here when
  * you add the row. */
+/* Data-plane writes. A route whose op is NOT here is invisible to the write-tier
+ * gate, so a caller holding only the shared bearer reaches it with no grant.
+ *
+ * index.ingest was missing, and the asymmetry was visible from a plain client on a
+ * clean install: POST /v1/memory/store -> 403 while POST /v1/index/ingest -> 200
+ * for the same caller, with kb then queueing curator work for the new project.
+ * Both the acceptance criteria and QUICKSTART call indexing a data-plane write
+ * needing at least `data`, so the omission was an oversight rather than a
+ * decision — the routes that ARE deliberately reachable without a tier live in
+ * v1_route_tcp_exempt (the workspace resource plane), and this was not one.
+ *
+ * Consequence, and it matches the documented contract: a remote
+ * `aimee workspace add` does registration (exempt) plus ingest, so the ingest half
+ * now needs a `data` grant while registration keeps working with none. */
 static const char *const g_v1_write_ops[] = {"memory.store",
+                                             "index.ingest",
                                              "work.add",
                                              "work.claim",
                                              "work.complete",

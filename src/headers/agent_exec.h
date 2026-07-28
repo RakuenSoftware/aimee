@@ -188,6 +188,11 @@ task_type_t task_type_classify(const char *prompt);
 /* Resolve the effective max-turns limit for an agent invocation.
  * Primary sessions (role == NULL) ignore agent->max_turns; only delegates cap. */
 int agent_resolve_max_turns(const agent_t *agent, const char *role);
+
+/* Map a routing role to the role a run is BUDGETED as: NULL (i.e. "primary,
+ * uncapped") for a primary turn, otherwise `role` unchanged. See the definition
+ * in posix/agent_max_turns.c. */
+const char *agent_budget_role(const char *role);
 const char *task_type_name(task_type_t type);
 
 /* Context assembly */

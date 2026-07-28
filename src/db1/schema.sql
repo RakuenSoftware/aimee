@@ -110,6 +110,44 @@ CREATE TABLE IF NOT EXISTS server_management_jti (
 );
 CREATE INDEX IF NOT EXISTS idx_server_management_jti_expiry
   ON server_management_jti(expires_at,jti);
+
+-- Replay store for the data-plane identity token (proposal
+-- per-user-remote-writes-authz.md §4/§9). A SIBLING of server_management_jti
+-- rather than a reuse of it: that table's peer_issuer / peer_serial /
+-- peer_fingerprint / request_sha256 columns are NOT NULL because a management
+-- token genuinely carries all four. An identity token carries none of them - it
+-- has no peer certificate and no request digest - so reusing the table would
+-- mean writing placeholder provenance into a security-audit table, or relaxing
+-- constraints that are the reason that table is trustworthy. Neither is
+-- acceptable, so the identity token gets its own shape: a tier instead of a
+-- capability, and no peer or request binding at all.
+--
+-- The jti floor is 8 rather than 16, matching what the server's identity
+-- verifier accepts (ascii_token 8..128).
+CREATE TABLE IF NOT EXISTS server_identity_jti (
+  jti TEXT PRIMARY KEY NOT NULL CHECK(
+    typeof(jti)='text' AND length(jti) BETWEEN 8 AND 128 AND instr(jti,char(0))=0 AND
+    jti NOT GLOB '*[^A-Za-z0-9._-]*'),
+  issuer TEXT NOT NULL CHECK(
+    typeof(issuer)='text' AND length(issuer) BETWEEN 1 AND 255 AND instr(issuer,char(0))=0 AND
+    issuer NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || ']*')),
+  kid TEXT NOT NULL CHECK(
+    typeof(kid)='text' AND length(kid) BETWEEN 1 AND 64 AND instr(kid,char(0))=0 AND
+    kid NOT GLOB '*[^A-Za-z0-9._-]*'),
+  audience TEXT NOT NULL CHECK(
+    typeof(audience)='text' AND length(audience) BETWEEN 1 AND 127 AND instr(audience,char(0))=0 AND
+    audience NOT GLOB '*[^A-Za-z0-9._-]*'),
+  subject TEXT NOT NULL CHECK(
+    typeof(subject)='text' AND length(subject) BETWEEN 1 AND 576 AND instr(subject,char(0))=0 AND
+    subject NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || ']*')),
+  team_id INTEGER NOT NULL CHECK(typeof(team_id)='integer' AND team_id > 0),
+  tier TEXT NOT NULL CHECK(typeof(tier)='text' AND tier IN ('off','data','full')),
+  issued_at INTEGER NOT NULL CHECK(typeof(issued_at)='integer' AND issued_at >= 0),
+  expires_at INTEGER NOT NULL CHECK(typeof(expires_at)='integer' AND expires_at > issued_at),
+  consumed_at INTEGER NOT NULL CHECK(typeof(consumed_at)='integer' AND consumed_at >= issued_at AND consumed_at < expires_at)
+);
+CREATE INDEX IF NOT EXISTS idx_server_identity_jti_expiry
+  ON server_identity_jti(expires_at,jti);
 CREATE TABLE IF NOT EXISTS server_management_jwks_cache (
   singleton INTEGER PRIMARY KEY CHECK(singleton=1),
   generation INTEGER NOT NULL CHECK(generation=1),
@@ -142,7 +180,7 @@ CREATE INDEX IF NOT EXISTS idx_trigger_runs_status ON trigger_runs(status);
 CREATE TABLE IF NOT EXISTS cron_jobs ( id TEXT PRIMARY KEY, schedule TEXT NOT NULL, mode TEXT NOT NULL CHECK (mode IN ('script','llm','hybrid')), script TEXT NOT NULL DEFAULT '', prompt TEXT NOT NULL DEFAULT '', skills_csv TEXT NOT NULL DEFAULT '', workdir TEXT NOT NULL DEFAULT '', deliver_target TEXT NOT NULL DEFAULT '', deliver_only_if_changed INTEGER NOT NULL DEFAULT 0, deliver_first_run_silent INTEGER NOT NULL DEFAULT 0, context_from TEXT NOT NULL DEFAULT '', when_context_contains TEXT NOT NULL DEFAULT '', pre_wake_gate INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1, next_run_at INTEGER DEFAULT 0, last_run_at INTEGER DEFAULT 0, last_run_status TEXT NOT NULL DEFAULT '', last_run_output_hash TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')));
 CREATE TABLE IF NOT EXISTS cron_job_runs ( id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL, started_at INTEGER NOT NULL DEFAULT (strftime('%s','now')), completed_at INTEGER DEFAULT 0, status TEXT NOT NULL DEFAULT '', silent INTEGER NOT NULL DEFAULT 0, delivered INTEGER NOT NULL DEFAULT 0, output TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '', output_hash TEXT NOT NULL DEFAULT '', FOREIGN KEY (job_id) REFERENCES cron_jobs(id));
 CREATE INDEX IF NOT EXISTS idx_cron_job_runs_job ON cron_job_runs(job_id, id DESC);
-CREATE TABLE IF NOT EXISTS execution_trace ( id INTEGER PRIMARY KEY AUTOINCREMENT, plan_id INTEGER NOT NULL DEFAULT 0, turn INTEGER NOT NULL DEFAULT 0, direction TEXT NOT NULL DEFAULT 'call', content TEXT NOT NULL DEFAULT '', tool_name TEXT NOT NULL DEFAULT '', tool_args TEXT NOT NULL DEFAULT '', tool_result TEXT NOT NULL DEFAULT '', context_hash TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS execution_trace ( id INTEGER PRIMARY KEY AUTOINCREMENT, plan_id INTEGER NOT NULL DEFAULT 0, session_id TEXT NOT NULL DEFAULT '', turn INTEGER NOT NULL DEFAULT 0, direction TEXT NOT NULL DEFAULT 'call', content TEXT NOT NULL DEFAULT '', tool_name TEXT NOT NULL DEFAULT '', tool_args TEXT NOT NULL DEFAULT '', tool_result TEXT NOT NULL DEFAULT '', context_hash TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS windows ( id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, seq INTEGER NOT NULL, summary TEXT NOT NULL DEFAULT '', tier TEXT NOT NULL DEFAULT 'raw', thread_id INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS window_terms ( window_id INTEGER NOT NULL REFERENCES windows(id) ON DELETE CASCADE, term TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS window_files ( window_id INTEGER NOT NULL REFERENCES windows(id) ON DELETE CASCADE, file_path TEXT NOT NULL);

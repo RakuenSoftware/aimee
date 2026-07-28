@@ -1,121 +1,131 @@
-# Upgrading aimee
+# Upgrading from v0.2.192
 
-Notable user-facing changes, newest first. Each entry says what changed, whether
-it can break an existing deployment, and what to do about it.
+Read [What's new](WHATS_NEW.md) first. This cycle changes deployment, storage, credentials, remote
+identity, workflows, and removed commands.
 
----
+## Before
 
-## 2026-07 — The `aimee-kb` image runs its own pgvector when you configure none
+1. Stop starting new workflows and wait for active writes to finish.
+2. Run `aimee audit checkpoint` and `aimee audit verify`.
+3. Back up the server config directory, DB1, workflow store, vault custody, TLS state, and audit
+   witness material.
+4. Dump DB2 with `pg_dump` or the KB export helper.
+5. Export old `work_queue` rows if you need them; the upgrade removes those tables.
+6. Record current compose files, image digests, environment, external endpoints, and volume names.
 
-**What changed.** The `aimee-kb` image now ships PostgreSQL 18 with the `pgvector`
-extension (18.4 + pgvector 0.8.5, from PGDG — the current stable major). If
-`AIMEE_DB2_URL` is **unset**, the container initialises and runs its own cluster
-under `$AIMEE_HOME/postgres`, reachable only over a local socket. If
-`AIMEE_DB2_URL` is **set**, nothing is started and the external server is used
-exactly as before — that path is fully supported and is still the right choice for
-a shared, backed-up, or managed database.
+Do not rely on a raw copy of a live SQLite main file. Take a consistent backup with its WAL state.
 
-**pgvectorscale** (StreamingDiskANN indexes) ships in the same image. There is no
-separate build or image variant: it costs about 1 MB, needs PostgreSQL 18 which the
-image now uses, and the kb already chooses the index type at **runtime** —
-`pgvec_vectorscale_available()` probes for the extension and falls back to HNSW with
-a warning when it is missing. Making it a build flag would have turned the index
-type into a property of which image you pulled. Configure the index type as you
-always have; nothing about the image selects it.
+## Deployment changes
 
-The image no longer bakes `AIMEE_DB2_URL=postgresql://aimee:aimee@postgres:5432/aimee_shared`.
-That default made "the operator configured nothing" indistinguishable from "use the
-sibling container", so the container could not tell when to run its own database —
-and a bare `docker run` inherited a `postgres` hostname that does not resolve.
+- Replace `aimee-combined` with the managed server or split stack.
+- New KB containers start private PostgreSQL when `AIMEE_DB2_URL` is unset.
+- The new compose topology does not import an older sibling PostgreSQL volume.
+- Keep the old database reachable and set `AIMEE_DB2_URL`, or dump and restore into the embedded
+  cluster.
+- Never use `docker compose down -v` until the new database has been verified and the backup has
+  been restored in a clean test.
 
-**Does this affect me?** Not if you use `compose.yaml`, `compose.server.yaml`, the
-SmoothNAS units, or `deploy/`. All of them already set `AIMEE_DB2_URL` explicitly,
-so they keep their own `postgres` service and their existing volume untouched.
-Nothing to do, and no data moves.
+## Identity and credentials
 
-You are affected only if you ran the `aimee-kb` image **without** setting
-`AIMEE_DB2_URL` and relied on the baked default to reach a container named
-`postgres`. Set it explicitly to keep that behaviour:
+- Move agent keys and OAuth tokens into the server vault.
+- Remove legacy client plaintext only after a successful provider probe.
+- Re-enroll each thin client. Verify the server fingerprint before accepting the pin.
+- Give each user the required remote-write grant. The old global `remote_writes` value authorizes
+  nothing.
+- Review mTLS revocation, org catalogs, budgets, rate limits, and egress policy.
 
+## Restore remote writes
+
+The shared bearer is read-only after this upgrade. `aimee.api.remote_writes=data|full` remains
+parsed, warns at startup, and increments `remote_writes.global_ignored`; it does not authorize a
+user write.
+
+Configure the server with `AIMEE_SERVER_ID`, `AIMEE_SERVER_TEAM_ID`,
+`AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE`, and the one-time `AIMEE_KB_CONN` enrollment string.
+Missing team configuration returns `no_team_configured`; missing or stale signing trust fails
+closed. The shipped server Compose files pass these values through from `.env`, leave their
+identity values empty, and mount
+`${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}:/run/aimee/management:ro`.
+
+A fresh embedded KB has no team. Create the first one through its private PostgreSQL socket:
+
+```bash
+KB_CONTAINER=$(docker ps --filter label=com.docker.compose.project=aimee \
+  --filter label=com.docker.compose.service=aimee-kb --format '{{.ID}}')
+docker exec \
+  -e 'AIMEE_DB2_URL=postgresql:///aimee_shared?host=/var/lib/aimee/run' \
+  "$KB_CONTAINER" aimee-kb team create default
 ```
-docker run -e AIMEE_DB2_URL=postgresql://aimee:aimee@postgres:5432/aimee_shared ...
+
+Enroll the server into the returned team, finalize the matching `kb_server_registry` row, publish
+the signed JWKS, and install the exported public bundle as `root:root 0644` under
+`server-management/jwks-trust-bundle.json`. The container runs as UID 1000, so a root-owned
+`0600` bundle cannot be read. The loader still rejects symlinks, extra hard links, a non-root
+owner, and all group/world write bits.
+
+Put all four values in `.env`, recreate the server container, and restart it once after the KB is
+ready. Successful enrollment atomically saves the mTLS certificate and private key at
+`$AIMEE_HOME/kb-client-identity.json` with owner-only mode `0600`. It does not save the one-time
+token, and it validates the stored identity against the connection string's CA pin on every restart.
+Startup logs name the missing input when a deployment remains read-only.
+
+Grants are keyed by server, team, and exact authenticated subject:
+
+| Subject | Form |
+| --- | --- |
+| PAM user | `alice` |
+| OIDC user | `oidc:<percent-encoded-issuer>:<sub>` |
+| mTLS identity | `cert:<issuer>:<serial>` |
+| local single-org operator | `owner` |
+
+Grant through the local Unix socket. These routes are never exposed to a remote bearer:
+
+```bash
+aimee kb grant set --server <server-id> --team <team-id> --subject <subject> --tier data
+aimee kb grant show --server <server-id> --team <team-id> --subject <subject>
+aimee kb grant list --server <server-id> --team <team-id> --include-revoked
+aimee kb grant revoke --server <server-id> --team <team-id> --subject <subject>
 ```
 
-**Why.** An unconfigured deployment previously had no working vector store, and the
-default pulled `pgvector/pgvector` from Docker Hub at run time — an anonymous pull,
-subject to a shared per-IP quota that fails as a hung connection rather than a clear
-error. Shipping the engine in the image removes a third-party registry from the
-production start path.
+`data` permits memory, document, and index writes. `full` also permits agent, delegate, runner, and
+workspace control. The first grant uses the local `owner` operator context with team `0`; the
+command's `--team` still names the target team. Interactive users obtain their write identity by
+the KB's configured PAM or OIDC login. Give unattended callers separate service subjects.
 
-**Moving to an external server.** The image ships `aimee-kb-db-export` for exactly
-this:
+Common refusal reasons are `absent`, `invalid`, `unknown_kid`, `wrong_team`,
+`no_team_configured`, `replay`, and `replay_unavailable`. Use the structured `403`, request ID, and
+server log. A grant for the wrong spelling is a grant for nobody.
 
+## Removed surfaces
+
+- `aimee chat`
+- `aimee work` and its routes/tools/tables
+- `aimee migrate v2`
+- generic `/v1/rpc`
+- the combined image
+- KB Unix-socket autostart
+- per-session credential push
+
+Update scripts to use named `/v1` routes, workflows/jobs, and browser/MCP/ACP/API chat surfaces.
+
+## After
+
+```bash
+aimee remote status
+aimee status
+aimee kb status
+aimee audit verify
+aimee memory store upgrade-smoke "write ok"
+aimee memory search "write ok"
 ```
-docker exec aimee-kb aimee-kb-db-export postgresql://user:pw@host:5432/aimee_shared
-docker exec aimee-kb aimee-kb-db-export --wipe postgresql://user:pw@host:5432/aimee_shared
-```
 
-It refuses to start if the target is unreachable or lacks the `vector` extension,
-dumps and restores, then compares the row count of every user table and **aborts
-leaving the internal data intact** if they differ. `--wipe` removes the internal
-data directory only after that comparison passed. Set `AIMEE_DB2_URL` to the target
-afterwards and the container stops starting its own cluster.
+Then:
 
----
+- ingest one small source tree and check caller lookup;
+- run one delegate probe and read its audit row;
+- validate a workflow and inspect the Go workflow service;
+- verify capture files are created and the event-bus drop counter is zero;
+- restart the stack once and confirm active state recovers cleanly;
+- restore the backup into a disposable deployment.
 
-## 2026-07 — The `plugin-loader` is removed
-
-**What changed.** aimee's built-in `plugin-loader` subsystem has been removed
-entirely. There is no longer a plugin discovery/registry/enable-disable
-mechanism inside aimee, and the endpoints, config keys, and CLI that drove it are
-gone. Extensibility in aimee is delivered through **hooks**, **MCP tools**, and
-**skills** (all documented in `MANUAL.md`) and, for maintainers, through
-first-class **modules** — not through a separate plugin loader.
-
-**Does this affect me?** Only if you actively used the plugin loader. Concretely,
-you are affected if any of these applied to your deployment:
-
-- you set `AIMEE_ENABLE_PROJECT_PLUGINS`;
-- you shipped a project-local plugin manifest or plugin directory for aimee to
-  discover;
-- you called the plugin HTTP routes — `GET /v1/plugins`, `POST /v1/plugins/enable`,
-  `POST /v1/plugins/disable`, or `GET /v1/dashboard/plugins`;
-- you scripted the plugin management subcommands.
-
-If none of those applied, this change is transparent — a normal upgrade needs no
-action.
-
-**What was removed.**
-
-| Removed | Replacement |
-|---|---|
-| `AIMEE_ENABLE_PROJECT_PLUGINS` env var | — (no equivalent; use a mechanism below) |
-| `GET /v1/plugins`, `POST /v1/plugins/{enable,disable}` | — (now `404`) |
-| `GET /v1/dashboard/plugins` | — (now `404`) |
-| Plugin discovery of project-local plugin manifests | MCP tools / hooks / skills |
-| Plugin management CLI | — |
-
-The `/v1/openapi.yaml` served by `aimee-server` no longer lists any plugin route,
-so generated clients pick the change up automatically.
-
-**What to do instead.** Pick the mechanism that matches what your plugin did:
-
-- **You added a tool the model could call.** Expose it over **MCP** and register
-  the MCP server with aimee. This is the supported way to add callable tools and
-  works with every client. See *§16 Skills and toolsets* and the MCP integration
-  notes in `MANUAL.md`.
-- **You intercepted or post-processed tool calls / injected context.** Use the
-  client **hooks** aimee already registers — `SessionStart`, `PreToolUse`,
-  `PostToolUse` — described under *Hooks* in `MANUAL.md`. These cover the
-  interception and context-injection cases the plugin `pre-LLM` hook was used for.
-- **You bundled reusable prompts/procedures.** Package them as a **skill**
-  (`AIMEE_BUNDLED_SKILLS_DIR` still overrides the bundled-skills location).
-- **You are a maintainer extending aimee's own binary.** Add a first-class
-  **module** under `src/modules/<id>/` with a `module.yaml` descriptor, rather
-  than a loadable plugin. See `docs/modules/` and `docs/refactor-baselines.md`.
-
-**Note on Codex.** The "local plugin" line for the Codex CLI in `MANUAL.md` /
-`docs/COMPATIBILITY.md` refers to *Codex's own* plugin mechanism, not aimee's
-plugin-loader, and is unaffected.
-
----
+Keep the old volumes read-only until these checks pass.

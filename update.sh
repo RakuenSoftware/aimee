@@ -7,11 +7,30 @@ set -euo pipefail
 # --- Parse flags ---
 TESTING=false
 FORCE=false
+
+usage() {
+    cat <<'USAGE'
+Usage: ./update.sh [--force|-f] [--testing]
+
+Pulls the latest source and rebuilds the shipped artifacts when they are stale,
+then restarts the services. By default it follows the branch this checkout is
+already on.
+
+  --force, -f  rebuild even when the sources have not changed
+  --help, -h   show this message
+  --testing    deprecated; forces the default update branch (main) and warns
+
+Set AIMEE_UPDATE_SOURCE_BRANCH (and AIMEE_UPDATE_SOURCE_URL) to update from a
+different branch or remote.
+USAGE
+}
+
 for arg in "$@"; do
     case "$arg" in
         --testing) TESTING=true ;;
         --force|-f) FORCE=true ;;
-        *) echo "Unknown flag: $arg"; exit 1 ;;
+        --help|-h) usage; exit 0 ;;
+        *) echo "Unknown flag: $arg" >&2; usage >&2; exit 1 ;;
     esac
 done
 

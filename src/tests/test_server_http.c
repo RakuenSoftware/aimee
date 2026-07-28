@@ -1134,6 +1134,12 @@ int main(void)
              server_capability_for_method("memory.recall"));
       assert(server_http_route_caps("POST", "/v1/chat/completions") ==
              server_capability_for_method("chat.send_stream"));
+      /* Help is a narrow read endpoint. Keep generic MCP execution privileged:
+       * the help handler force-selects get_help before dispatch. */
+      assert(server_http_route_caps("POST", "/v1/help") == CAP_SESSION_READ);
+      assert(server_http_route_caps("POST", "/v1/help") ==
+             server_capability_for_method("help.get"));
+      assert(server_http_route_caps("POST", "/v1/mcp/call") == CAP_TOOL_EXECUTE);
 
       /* Reads sit within the read-only set; compute requires CAP_CHAT. */
       assert((server_http_route_caps("GET", "/v1/rules") & ~CAPS_READ_ONLY) == 0);
@@ -1177,6 +1183,19 @@ int main(void)
        * registers/removes over TCP (gated by the write capability above). */
       assert(server_http_route_is_local_only("POST", "/v1/workspaces") == 0);
       assert(server_http_route_is_local_only("DELETE", "/v1/workspaces/%2Fp") == 0);
+
+      /* INDEXING IS A DATA-PLANE WRITE. It was absent from g_v1_write_ops, so the
+       * write-tier gate never saw it: on a clean install the same bearer got 403
+       * on /v1/memory/store and 200 on /v1/index/ingest, and kb queued curator
+       * work for the new project. Registration staying exempt while its ingest is
+       * gated is exactly what §1.4 and Parts 2-4 of QUICKSTART promise, so the
+       * pair is asserted together — they are easy to conflate, and conflating
+       * them is how the gap got in. */
+      assert(server_http_route_is_local_only("POST", "/v1/index/ingest") == 1);
+      /* The index READ family must stay ungated, or every query needs a grant. */
+      assert(server_http_route_is_local_only("POST", "/v1/index/find") == 0);
+      assert(server_http_route_is_local_only("POST", "/v1/index/deps") == 0);
+      assert(server_http_route_is_local_only("POST", "/v1/memory/search") == 0);
 
       /* Detached-runner reverse channel: tool:execute, TCP-reachable (the
        * serving client drives it remotely). An unscoped TCP bearer holds
@@ -1279,6 +1298,16 @@ int main(void)
       assert(server_http_route_caps("DELETE", "/v1/personas/alice") == CAP_SESSION_ADMIN);
       assert(server_http_route_caps("POST", "/v1/personas") == CAP_SESSION_ADMIN);
       assert(server_http_route_caps("GET", "/v1/role_templates") == CAP_SESSION_READ);
+      /* MCP startup is catalog introspection, not tool execution. Query-only
+       * remote clients must be able to complete tools/list; mcp.call remains
+       * separately gated by CAP_TOOL_EXECUTE. */
+      assert(server_capability_for_method("mcp.tools_list") == CAP_SESSION_READ);
+      assert(server_http_route_caps("GET", "/v1/mcp/tools_list") == CAP_SESSION_READ);
+      assert(server_http_route_allowed_caps(1, CAPS_READ_ONLY, "GET", "/v1/mcp/tools_list",
+                                            SERVER_REMOTE_WRITES_OFF) == 1);
+      assert(server_capability_for_method("mcp.call") == CAP_TOOL_EXECUTE);
+      assert(server_http_route_allowed_caps(1, CAPS_READ_ONLY, "POST", "/v1/mcp/call",
+                                            SERVER_REMOTE_WRITES_OFF) == 0);
       assert(server_http_route_caps("DELETE", "/v1/role_templates/qa") == CAP_SESSION_ADMIN);
       assert(server_http_route_caps("GET", "/v1/roundtables") == CAP_SESSION_READ);
       assert(server_http_route_caps("PUT", "/v1/roundtables/default") == CAP_SESSION_ADMIN);
@@ -1330,6 +1359,7 @@ int main(void)
       assert(server_http_route_caps("GET", "/v1/workflow/repo/file") == CAP_DASHBOARD_READ);
       /* Presence is session-scoped; the streaming routes carry caps too. */
       assert(server_http_route_caps("GET", "/v1/sessions") == CAP_SESSION_READ);
+      assert(server_http_route_caps("POST", "/v1/sessions/list") == CAP_SESSION_READ);
       assert(server_http_route_caps("POST", "/v1/sessions/s1/attach") == CAP_SESSION_READ);
       assert(server_http_route_caps("GET", "/v1/sessions/s1/events") == CAP_SESSION_READ);
       assert(server_http_route_caps("POST", "/v1/chat/stream") ==
@@ -1469,6 +1499,60 @@ int main(void)
       assert(server_http_route_allowed(1, "plain", "POST", "/v1/memory/search",
                                        SERVER_REMOTE_WRITES_DATA) == 1);
 
+      /* CAP_GRANT_ADMIN sits inside CAPS_ALL (so the UDS operator has it) and OUTSIDE
+       * CAPS_AUTHENTICATED (so a mere authenticated bearer does not), matching
+       * CAP_WORKFLOW_ADMIN and CAP_SHADOW_ADMIN. A bearer able to administer grants could
+       * grant ITSELF a higher tier, which is why it cannot be in the authenticated set. */
+      assert((CAPS_ALL & CAP_GRANT_ADMIN) == CAP_GRANT_ADMIN);
+      assert((CAPS_AUTHENTICATED & CAP_GRANT_ADMIN) == 0);
+      assert((CAPS_READ_ONLY & CAP_GRANT_ADMIN) == 0);
+
+      /* GRANT ADMINISTRATION IS UDS-ONLY, and nothing on the TCP side can reach it.
+       *
+       * This is the one property standing between a fully-trusted remote peer and the
+       * ability to widen its own access: a TCP bearer at remote_writes=full receives
+       * CAPS_ALL (asserted just below), so no capability and no tier distinguishes it from
+       * the local operator. If grant administration were reachable that way, anyone holding
+       * `full` could grant themselves `full` on any server in their team and the tier system
+       * would be decorative.
+       *
+       * Checked ahead of both the tier gate and the capability gate, so it cannot be
+       * satisfied by having enough of either. */
+      assert(v1_route_requires_uds("POST", "/v1/grants/write-tier") == 1);
+      assert(v1_route_requires_uds("POST", "/v1/grants/write-tier/revoke") == 1);
+      assert(v1_route_requires_uds("GET", "/v1/grants/write-tier") == 1);
+      /* A prefix, so a verb added later inherits the restriction instead of having to
+       * remember it. */
+      assert(v1_route_requires_uds("POST", "/v1/grants/write-tier/anything-future") == 1);
+      /* And it claims nothing it should not. */
+      assert(v1_route_requires_uds("POST", "/v1/memory/store") == 0);
+      assert(v1_route_requires_uds("GET", "/v1/kb/status") == 0);
+      /* A shorter path that merely shares a prefix must not be captured. */
+      assert(v1_route_requires_uds("GET", "/v1/grants") == 0);
+      assert(v1_route_requires_uds(NULL, "/v1/grants/write-tier") == 0);
+      assert(v1_route_requires_uds("POST", NULL) == 0);
+
+      /* Over TCP: refused at EVERY tier and with EVERY capability set, including CAPS_ALL
+       * — which is exactly what a remote_writes=full bearer holds. */
+      for (int tier = SERVER_REMOTE_WRITES_OFF; tier <= SERVER_REMOTE_WRITES_FULL; tier++)
+      {
+         assert(server_http_route_allowed_caps(1, CAPS_ALL, "POST", "/v1/grants/write-tier",
+                                               tier) == 0);
+         assert(server_http_route_allowed_caps(1, CAPS_ALL, "POST", "/v1/grants/write-tier/revoke",
+                                               tier) == 0);
+         assert(server_http_route_allowed_caps(1, CAPS_ALL, "GET", "/v1/grants/write-tier", tier) ==
+                0);
+         assert(server_http_route_allowed_caps(1, CAPS_AUTHENTICATED, "POST",
+                                               "/v1/grants/write-tier", tier) == 0);
+      }
+      /* Over UDS: permitted. The route is the local operator's, so it must not be
+       * unreachable everywhere — a check that refused both transports would look like
+       * this one passing. */
+      assert(server_http_route_allowed_caps(0, CAPS_ALL, "POST", "/v1/grants/write-tier",
+                                            SERVER_REMOTE_WRITES_OFF) == 1);
+      assert(server_http_route_allowed_caps(0, CAPS_ALL, "GET", "/v1/grants/write-tier",
+                                            SERVER_REMOTE_WRITES_OFF) == 1);
+
       /* conn caps by level: data keeps CAPS_AUTHENTICATED, full grants CAPS_ALL. */
       assert(server_http_conn_caps(1, "plain", SERVER_REMOTE_WRITES_OFF) == CAPS_AUTHENTICATED);
       assert(server_http_conn_caps(1, "plain", SERVER_REMOTE_WRITES_DATA) == CAPS_AUTHENTICATED);
@@ -1494,6 +1578,10 @@ int main(void)
                                             SERVER_REMOTE_WRITES_OFF) == 0);
       assert(server_http_route_allowed_caps(1, CAPS_AUTHENTICATED, "POST", "/v1/chat/completions",
                                             SERVER_REMOTE_WRITES_OFF) == 1);
+      assert(server_http_route_allowed_caps(1, CAPS_READ_ONLY, "POST", "/v1/help",
+                                            SERVER_REMOTE_WRITES_OFF) == 1);
+      assert(server_http_route_allowed_caps(1, CAPS_READ_ONLY, "POST", "/v1/mcp/call",
+                                            SERVER_REMOTE_WRITES_OFF) == 0);
 
       /* UDS is always full, independent of the level. */
       assert(server_http_conn_caps(0, NULL, SERVER_REMOTE_WRITES_OFF) == CAPS_ALL);
@@ -1812,12 +1900,17 @@ int main(void)
       server_http_gzip_set(0);
    }
 
-   /* Reusable connections accept one unambiguous HTTP/1.1 frame and reject
-    * duplicate lengths, transfer coding, obs-fold, and pipelining. */
+   /* Every data-plane request accepts one unambiguous HTTP/1.1 frame and
+    * rejects duplicate lengths, transfer coding, obs-fold, and pipelining. */
    {
       const char *valid = "GET /v1/health HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n";
+      const char *valid_no_length = "OPTIONS /v1/health HTTP/1.1\r\nHost: localhost\r\n\r\n";
       const char *partial =
           "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\n\r\n{}";
+      const char *route_oversize =
+          "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4194305\r\n\r\n";
+      const char *length_overflow = "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\n"
+                                    "Content-Length: 18446744073709551616\r\n\r\n";
       const char *duplicate =
           "POST /v1/responses HTTP/1.1\r\nContent-Length: 1\r\nContent-Length: 1\r\n\r\nx";
       const char *chunked =
@@ -1827,14 +1920,17 @@ int main(void)
       const char *folded = "GET /v1/health HTTP/1.1\r\n X-folded: bad\r\n\r\n";
       const char *pipelined =
           "GET /v1/health HTTP/1.1\r\nContent-Length: 0\r\n\r\nGET /v1/health HTTP/1.1\r\n\r\n";
-      assert(server_http_keepalive_framing_valid(valid, strlen(valid)) == 1);
-      assert(server_http_keepalive_framing_valid(partial, strlen(partial)) == 1);
-      assert(server_http_keepalive_framing_valid(duplicate, strlen(duplicate)) == 0);
-      assert(server_http_keepalive_framing_valid(chunked, strlen(chunked)) == 0);
-      assert(server_http_keepalive_framing_valid(conflicting_connection,
-                                                 strlen(conflicting_connection)) == 0);
-      assert(server_http_keepalive_framing_valid(folded, strlen(folded)) == 0);
-      assert(server_http_keepalive_framing_valid(pipelined, strlen(pipelined)) == 0);
+      assert(server_http_request_framing_valid(valid, strlen(valid)) == 1);
+      assert(server_http_request_framing_valid(valid_no_length, strlen(valid_no_length)) == 1);
+      assert(server_http_request_framing_valid(partial, strlen(partial)) == 1);
+      assert(server_http_request_framing_valid(route_oversize, strlen(route_oversize)) == 1);
+      assert(server_http_request_framing_valid(length_overflow, strlen(length_overflow)) == 0);
+      assert(server_http_request_framing_valid(duplicate, strlen(duplicate)) == 0);
+      assert(server_http_request_framing_valid(chunked, strlen(chunked)) == 0);
+      assert(server_http_request_framing_valid(conflicting_connection,
+                                               strlen(conflicting_connection)) == 0);
+      assert(server_http_request_framing_valid(folded, strlen(folded)) == 0);
+      assert(server_http_request_framing_valid(pipelined, strlen(pipelined)) == 0);
    }
 
    compute_pool_shutdown(&g_test_server_ctx.orchestration_pool);
@@ -1842,4 +1938,37 @@ int main(void)
    platform_test_rmrf(home);
    printf("OK\n");
    return 0;
+}
+
+/* The kb_client transport, stubbed. This test links the /v1 route table, which now
+ * references the grant handlers, and those call kb over HTTP. The test never invokes them —
+ * its concern is the route gate, not the handler bodies — so refusing stubs are both
+ * sufficient and the safer default: if a grant handler is ever reached from here by
+ * accident, it fails closed rather than proceeding against a fabricated kb.
+ *
+ * The handlers' own behaviour is covered by test_kb_client_grants.c (interpretation of kb's
+ * answers) and test_kb_http_grants.c (kb's side). */
+char *kb_client_v1_post_json(const char *path, cJSON *body, int timeout_ms, int *status_out)
+{
+   (void)path;
+   (void)body;
+   (void)timeout_ms;
+   if (status_out)
+      *status_out = 0;
+   return NULL;
+}
+
+char *kb_client_v1_get_json(const char *path, int timeout_ms, int *status_out)
+{
+   (void)path;
+   (void)timeout_ms;
+   if (status_out)
+      *status_out = 0;
+   return NULL;
+}
+
+char *kb_client_query_escape(const char *s)
+{
+   (void)s;
+   return NULL;
 }

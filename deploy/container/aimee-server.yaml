@@ -45,11 +45,10 @@ aimee:
     # without extra setup. The bearer token above is the trust boundary, so
     # OVERRIDE IT (and front with TLS) for any deployment exposed beyond a
 # Delegate roundtable / MoA ensemble, on by default. The panel is the seeded
-# agents.json roster; a thin client pushes the per-agent API keys per session
-# (no keys are baked in), so the roundtable works once a client has connected.
+# agents.json roster; provider credentials live in the server-owned encrypted
+# vault (no keys are baked into the image or sent by a thin client per session).
 ensemble:
   enabled: true
   # No reference_models pinned: the panel is built DYNAMICALLY from the enabled +
   # currently-available delegates (auto-seeded, then unkeyed/unhealthy ones are
   # dropped). Pin a list here (or via a workflow) only to override that default.
-

@@ -554,11 +554,15 @@ native_provider_http:
     * seats). Retrying with the identical tool contract can repeat forever and
     * discard an otherwise healthy panelist. Preserve tools for the normal run,
     * but make the one bounded degenerate-response retry a synthesis-only turn. */
-   int force_text_only_retry = 0;
    int tok = agent_request_max_tokens(agent, max_tokens);
-   int max_t = agent_resolve_max_turns(agent, role);
+   /* Turn-budget policy keys off the BUDGET role, not the routing role: the
+    * primary webchat turn is routed as "code" (server_compute.c) but must be
+    * budgeted as a primary session — uncapped, and never told its tool budget is
+    * exhausted. `budget_role` is NULL exactly when this is a primary turn. */
+   const char *budget_role = agent_budget_role(role);
+   int max_t = agent_resolve_max_turns(agent, budget_role);
    int initial_max_t = max_t;
-   int final_after_turns = delegate_final_after_turns_for_role(role);
+   int final_after_turns = delegate_final_after_turns_for_role(budget_role);
 
    /* Stuck detection state */
    char last_tool_sig[256] = {0};
@@ -589,7 +593,7 @@ native_provider_http:
    rtr_tracker_t rtr;
    memset(&rtr, 0, sizeof(rtr));
 
-   int mw_max_turns = role ? max_t : 0;
+   int mw_max_turns = budget_role ? max_t : 0;
    mw_pipeline_t mw_pipeline;
    mw_pipeline_cfgs_t mw_cfgs;
    mw_pipeline_build(&mw_pipeline, &mw_cfgs, &agent->middleware, mw_max_turns, agent->model);
@@ -641,7 +645,7 @@ native_provider_http:
          mw_ctx.tool_calls = total_calls;
          mw_ctx.consecutive_errors = consecutive_errors;
 
-         mw_pipeline_cfgs_set_max_turns(&mw_cfgs, role ? max_t : 0);
+         mw_pipeline_cfgs_set_max_turns(&mw_cfgs, budget_role ? max_t : 0);
          mw_result_t mw_res = mw_pipeline_run(&mw_pipeline, &mw_ctx);
 
          if (mw_res.action == MW_STOP)
@@ -719,14 +723,13 @@ native_provider_http:
 
       maybe_compact_before_request(&fb_agent, messages, (chatgpt || anthropic) ? sys : NULL);
 
-      /* Primary sessions (role == NULL) never close the tool budget — the user
-       * can always send another message.  Pass max_turns=0 so HARD never fires. */
-      liveness_final_response_mode_t final_mode =
-          liveness_final_response_mode(turn, role ? max_t : 0, total_calls, final_after_turns);
-      int final_instruction_turn =
-          force_text_only_retry || final_mode != LIVENESS_FINAL_RESPONSE_NONE;
-      int final_text_only_turn =
-          force_text_only_retry || !liveness_final_response_allows_tools(final_mode);
+      /* Primary sessions never close the tool budget — the user can always send
+       * another message.  budget_role is NULL for them (including the webchat
+       * turn, which is ROUTED as "code"), so max_turns=0 and HARD never fires. */
+      liveness_final_response_mode_t final_mode = liveness_final_response_mode(
+          turn, budget_role ? max_t : 0, total_calls, final_after_turns);
+      int final_instruction_turn = final_mode != LIVENESS_FINAL_RESPONSE_NONE;
+      int final_text_only_turn = !liveness_final_response_allows_tools(final_mode);
       /* A final-only turn cannot satisfy an evidence gate. Keep read-only tools
        * available until one actually succeeds; provider tool_choice is a request,
        * not an enforcement boundary, and some compatible endpoints ignore it. */
@@ -736,7 +739,6 @@ native_provider_http:
          final_instruction_turn = 0;
          final_text_only_turn = 0;
       }
-      force_text_only_retry = 0;
       if (final_instruction_turn && !final_instruction_added)
       {
          agent_session_append_final_instruction(messages);
@@ -1032,7 +1034,73 @@ native_provider_http:
          ir_primary =
              agent_ir_parse_responses(response_body, rescue_mode, &n_rescued, &parsed) == 0;
          if (!ir_primary)
+         {
+            /* An unparseable body used to become an indistinguishable "empty
+             * response": the turn reported no content and no tool calls, the
+             * body was freed, and nothing said whether the provider returned an
+             * error, an unknown event shape, or genuinely nothing. Every codex
+             * failure looked identical and could not be told apart from a model
+             * that simply said nothing. Log a bounded excerpt so the wire is
+             * recoverable from the log alone. */
+            LOG_WARN("agent", "delegate '%s': responses body did not parse; first %d bytes: %.400s",
+                     agent->name, (int)(response_body ? strlen(response_body) : 0),
+                     response_body ? response_body : "(null)");
             memset(&parsed, 0, sizeof(parsed));
+         }
+         else if (!parsed.content && parsed.call_count == 0)
+         {
+            /* Parsed cleanly yet carries neither text nor a tool call. The head
+             * of the stream says nothing useful here -- it is always
+             * response.created -- so report the SHAPE instead: which event types
+             * arrived, and the tail, where response.completed carries the final
+             * output array. That names the item types we are failing to extract
+             * rather than leaving it to be guessed. */
+            const char *b = response_body ? response_body : "";
+            size_t blen = strlen(b);
+            int n_item_done = 0, n_delta = 0, n_completed = 0, n_reasoning = 0, n_failed = 0;
+            for (const char *q = b; (q = strstr(q, "event: ")) != NULL; q++)
+            {
+               if (strncmp(q + 7, "response.output_item.done", 25) == 0)
+                  n_item_done++;
+               else if (strncmp(q + 7, "response.output_text.delta", 26) == 0)
+                  n_delta++;
+               else if (strncmp(q + 7, "response.completed", 18) == 0)
+                  n_completed++;
+               else if (strncmp(q + 7, "response.failed", 15) == 0)
+                  n_failed++;
+            }
+            for (const char *q = b; (q = strstr(q, "\"type\":\"reasoning\"")) != NULL; q++)
+               n_reasoning++;
+            /* Name the item types actually arriving: counting only "reasoning"
+             * left four items per turn unaccounted for once reasoning intent was
+             * declared. Collect the item.type of every output_item.done. */
+            char types[512] = "";
+            for (const char *q = b; (q = strstr(q, "event: response.output_item.done")) != NULL;
+                 q++)
+            {
+               const char *it = strstr(q, "\"item\":{");
+               if (!it)
+                  break;
+               const char *ty = strstr(it, "\"type\":\"");
+               if (!ty)
+                  continue;
+               ty += 8;
+               const char *end = strchr(ty, '"');
+               if (!end || end - ty > 40)
+                  continue;
+               char one[64];
+               snprintf(one, sizeof(one), "%.*s,", (int)(end - ty), ty);
+               if (strlen(types) + strlen(one) < sizeof(types) - 1)
+                  strcat(types, one);
+            }
+            const char *tail = blen > 600 ? b + blen - 600 : b;
+            LOG_WARN("agent",
+                     "delegate '%s': responses body parsed but yielded no content and no tool "
+                     "call; %zu bytes, events: output_item.done=%d output_text.delta=%d "
+                     "completed=%d failed=%d reasoning_items=%d; item_types=[%s]; tail: %.400s",
+                     agent->name, blen, n_item_done, n_delta, n_completed, n_failed, n_reasoning,
+                     types, tail);
+         }
       }
       else
       {
@@ -1291,9 +1359,8 @@ native_provider_http:
          {
             if (liveness_is_degenerate_response(parsed.content))
             {
-               if (total_calls == 0 &&
-                   agent_session_retry_degenerate_response(messages, &turn, &degenerate_retry_count,
-                                                           &force_text_only_retry))
+               if (total_calls == 0 && agent_session_retry_degenerate_response(
+                                           messages, &turn, &degenerate_retry_count))
                {
                   agent_free_parsed_response(&parsed);
                   continue;
@@ -1323,8 +1390,7 @@ native_provider_http:
              * reasoning-only content. The final-tool retry below is mutually
              * exclusive because it requires total_calls > 0. */
             if (total_calls == 0 &&
-                agent_session_retry_degenerate_response(messages, &turn, &degenerate_retry_count,
-                                                        &force_text_only_retry))
+                agent_session_retry_degenerate_response(messages, &turn, &degenerate_retry_count))
             {
                agent_free_parsed_response(&parsed);
                continue;

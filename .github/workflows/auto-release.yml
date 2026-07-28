@@ -1,9 +1,10 @@
 # Auto-release on every push to main.
 #
 # On each push to `main` (which, under the testing->main promote flow, is a
-# promote merge) this computes the next semver PATCH from the highest existing
-# `v*` tag, creates and pushes that tag, then cuts a full release by calling the
-# reusable build workflows:
+# promote merge) this uses a higher version declared in aimee_version.h (for a
+# planned major/minor release), otherwise computes the next semver PATCH from
+# the highest existing `v*` tag. It creates and pushes that tag, then cuts a
+# full release by calling the reusable build workflows:
 #   - release-thin-client.yml  -> aimee CLI binaries (Linux/macOS/Windows) on the GitHub Release
 #   - publish-images.yml       -> aimee-server / aimee-kb multi-arch images, tagged :<version> + :latest
 #
@@ -43,22 +44,36 @@ jobs:
         id: bump
         run: |
           latest=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+          declared=$(awk '$1 == "#define" && $2 == "AIMEE_VERSION" {gsub(/"/, "", $3); print $3; exit}' \
+            src/headers/aimee_version.h)
+          if ! [[ "$declared" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::invalid AIMEE_VERSION in src/headers/aimee_version.h: ${declared:-<empty>}"
+            exit 1
+          fi
           if [ -z "$latest" ]; then
-            next="0.0.1"
+            next="$declared"
           else
             v="${latest#v}"
             IFS='.' read -r major minor patch <<< "$v"
             # Guard against malformed tags; default missing components to 0.
             major=${major:-0}; minor=${minor:-0}; patch=${patch:-0}
-            patch=$((patch + 1))
-            next="${major}.${minor}.${patch}"
+            patch_next="${major}.${minor}.$((patch + 1))"
+            # The source declaration is a release floor. This permits an intentional
+            # major/minor promotion (for example 0.2.x -> 0.3.0), but an unchanged
+            # declaration after that release naturally resumes patch increments.
+            highest=$(printf '%s\n%s\n' "$v" "$declared" | sort -V | tail -n1)
+            if [ "$highest" = "$declared" ] && [ "$declared" != "$v" ]; then
+              next="$declared"
+            else
+              next="$patch_next"
+            fi
           fi
           if git rev-parse -q --verify "refs/tags/v${next}" >/dev/null; then
             echo "::error::tag v${next} already exists; aborting to avoid clobbering a release"
             exit 1
           fi
           echo "version=$next" >> "$GITHUB_OUTPUT"
-          echo "Next version: v${next} (from ${latest:-<none>})"
+          echo "Next version: v${next} (latest ${latest:-<none>}, declared v${declared})"
 
       - name: Create and push tag
         run: |

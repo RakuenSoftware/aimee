@@ -4,8 +4,14 @@
 numpy-guarded do_rerank test against a mocked encoder. No model, no network.
 """
 import importlib.util
+import io
+import json
 import os
+import threading
 import unittest
+import urllib.error
+import urllib.request
+from unittest import mock
 
 GW = os.path.join(os.path.dirname(__file__), "..", "aimee_llm_gateway.py")
 
@@ -15,6 +21,27 @@ def _gw():
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m
+
+
+class StartupEnvironment(unittest.TestCase):
+    def test_empty_stub_dimensions_use_default(self):
+        # Compose materializes optional unset values as empty strings. Importing
+        # the real-model gateway must not crash on int("").
+        with mock.patch.dict(os.environ,
+                             {"AIMEE_LLM_STUB_DIM": "", "EMBEDDER_STUB_DIM": ""}):
+            self.assertEqual(_gw().STUB_DIM, 1024)
+
+    def test_empty_primary_dimension_uses_embedder_fallback(self):
+        with mock.patch.dict(os.environ,
+                             {"AIMEE_LLM_STUB_DIM": "", "EMBEDDER_STUB_DIM": "2560"}):
+            self.assertEqual(_gw().STUB_DIM, 2560)
+
+    def test_empty_synth_discovery_values_use_defaults(self):
+        with mock.patch.dict(os.environ,
+                             {"AIMEE_LLM_SYNTH_SLOTS": "", "AIMEE_LLM_SYNTH_CTX": ""}):
+            gw = _gw()
+            self.assertEqual(gw.SYNTH_SLOTS, 1)
+            self.assertEqual(gw.SYNTH_CONTEXT, 32768)
 
 
 class BatchValidation(unittest.TestCase):
@@ -70,6 +97,24 @@ class HealthAggregation(unittest.TestCase):
 
     def test_down_when_any_configured_child_down(self):
         self.assertEqual(self.gw.health_state({"embed": True, "rerank": False}), "down")
+
+
+class Discovery(unittest.TestCase):
+    def setUp(self):
+        self.gw = _gw()
+
+    def test_openai_model_catalog_lists_synth_alias(self):
+        self.gw.STUB = True
+        catalog = self.gw.model_catalog()
+        self.assertEqual(catalog["object"], "list")
+        self.assertEqual(catalog["data"][0]["id"], "aimee-synth")
+
+    def test_slots_report_per_request_context(self):
+        self.gw.SYNTH_SLOTS = 4
+        self.gw.SYNTH_CONTEXT = 1024000
+        slots = self.gw.slot_catalog()
+        self.assertEqual(len(slots), 4)
+        self.assertTrue(all(slot["n_ctx"] == 256000 for slot in slots))
 
 
 class RerankHandler(unittest.TestCase):
@@ -168,6 +213,67 @@ class Synth(unittest.TestCase):
         out = self.gw.do_synth({"messages": [{"role": "user", "content": "hi"}], "stream": False})
         self.assertEqual(captured["url"], "http://synth:8083/v1/chat/completions")
         self.assertIn("choices", out)
+
+
+class ClientDisconnectHandling(unittest.TestCase):
+    def setUp(self):
+        self.gw = _gw()
+        self.gw.BIND = "127.0.0.1"
+        self.gw.PORT = 0
+        self.gw.STUB = True
+        self.server = self.gw.build_server()
+        self.addCleanup(self.server.server_close)
+
+    def handler(self, payload, write_error):
+        raw = json.dumps(payload).encode("utf-8")
+        handler = object.__new__(self.server.RequestHandlerClass)
+        handler.path = "/v1/chat/completions"
+        handler.headers = {"content-length": str(len(raw))}
+        handler.rfile = io.BytesIO(raw)
+        handler.wfile = mock.Mock()
+        handler.wfile.write.side_effect = write_error
+        handler.send_response = mock.Mock()
+        handler.send_header = mock.Mock()
+        handler.end_headers = mock.Mock()
+        return handler
+
+    def test_nonstream_disconnect_does_not_attempt_second_response(self):
+        for error in (BrokenPipeError(), ConnectionResetError()):
+            with self.subTest(error=type(error).__name__):
+                handler = self.handler({"messages": []}, error)
+                handler.do_POST()
+                handler.send_response.assert_called_once_with(200)
+                handler.wfile.write.assert_called_once()
+
+    def test_stream_disconnect_does_not_attempt_json_error(self):
+        handler = self.handler({"messages": [], "stream": True}, BrokenPipeError())
+        handler.do_POST()
+        handler.send_response.assert_called_once_with(200)
+        handler.wfile.write.assert_called_once()
+
+    def test_stream_disconnect_does_not_trip_upstream_breaker(self):
+        self.gw.STUB = False
+        self.gw.SYNTH_URL = "http://synth:8083"
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self, _size):
+                return b"data: first chunk\n\n"
+
+        with mock.patch.object(self.gw.urllib.request, "urlopen", return_value=Response()), \
+                mock.patch.object(self.gw._synth_breaker, "allow", return_value=True), \
+                mock.patch.object(self.gw._synth_breaker, "record") as record:
+            with self.assertRaises(self.gw.ClientDisconnected):
+                self.gw.do_synth_stream(
+                    {"messages": [], "stream": True},
+                    mock.Mock(side_effect=self.gw.ClientDisconnected()),
+                )
+        record.assert_not_called()
 
 
 class RoleHealth(unittest.TestCase):
@@ -272,6 +378,55 @@ class SynthDeviceLost(unittest.TestCase):
         with self.assertRaises(OSError):
             self.gw.do_synth({"messages": [{"role": "user", "content": "hi"}]})
         self.assertEqual(called, [])
+
+
+class MalformedBodyStatus(unittest.TestCase):
+    """A body the gateway cannot parse is the CALLER's error, not a fault here.
+
+    It used to fall through to the blanket handler and come back 500 "internal",
+    which tells an operator their inference gateway is broken when the request
+    was simply malformed — and invites a client to retry a permanent error
+    forever. Exercised over real HTTP because the bug lived in the request
+    handler, not in the pure functions the rest of this file covers.
+    """
+
+    def setUp(self):
+        # STUB so no upstream llama-server is needed for the well-formed case.
+        with mock.patch.dict(os.environ, {"AIMEE_LLM_STUB": "1", "AIMEE_LLM_PORT": "0"},
+                             clear=False):
+            self.gw = _gw()
+        self.srv = self.gw.build_server()
+        self.port = self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+
+    def _post(self, path, raw: bytes):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}{path}", data=raw,
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return resp.status, resp.read()
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read()
+
+    def test_malformed_json_is_400_not_500(self):
+        for path in ("/v1/chat/completions", "/embed_batch", "/rerank"):
+            for raw in (b"{not json", b"{", b"[1,", b'{"a":}'):
+                status, body = self._post(path, raw)
+                self.assertEqual(
+                    status, 400,
+                    f"{path} with {raw!r} returned {status}, body={body!r}")
+                self.assertEqual(json.loads(body)["error"]["code"], "bad_request")
+
+    def test_well_formed_body_still_succeeds(self):
+        status, _ = self._post(
+            "/v1/chat/completions",
+            json.dumps({"messages": [{"role": "user", "content": "hi"}]}).encode())
+        self.assertEqual(status, 200)
 
 
 if __name__ == "__main__":

@@ -145,17 +145,24 @@ ENV AIMEE_HOME=/var/lib/aimee
 # This used to default to postgresql://aimee:aimee@postgres:5432/aimee_shared,
 # which made "nothing configured" indistinguishable from "use the sibling
 # container" and left a bare `docker run` pointed at a host that does not exist.
-# compose.yaml and compose.server.yaml set AIMEE_DB2_URL explicitly, so stacks
-# using them keep their own postgres service exactly as before.
+# New-install Compose manifests leave AIMEE_DB2_URL unset so the KB owns this
+# internal cluster. Operators can still set the variable to select an external DB2.
 # No baked embedder/LLM endpoint defaults. The kb runs NO model runtime; it calls
 # an external aimee-llm container (CPU/GPU) or endpoint. Point it with ONE of:
 #   AIMEE_LLM_URL       unified container -> embed + rerank + synth (one knob)
 #   AIMEE_EMBEDDER_URL  pin the embedder (/embed) independently
 #   AIMEE_RERANKER_URL  pin the reranker (/rerank) independently
 #   LLM_ENDPOINT        Tier-A synth only (small-model interface)
-# Unset, embeddings fall back to the 384-dim builtin (test/shim only). The deploy
-# unit (compose / smoothnas plugin) sets these and brings up a default CPU
-# aimee-llm sibling when nothing is configured. (Old combined leftovers
+# One of these is REQUIRED. The seeded default config selects the remote embedder
+# sidecar, so with no endpoint set the DB2 dim probe fails and db2_init refuses to
+# initialise rather than record a wrong vector width (db2_init.c) -- the kb then
+# never binds its HTTP port. Verified on the shipped image with nothing else
+# configured: the embedded cluster comes up, the service does not.
+#
+# The 384-dim builtin embedder exists but is NOT reached in that state: it applies
+# only when no embed command is configured at all, and the baked config always
+# configures one. The deploy unit (compose / smoothnas plugin) sets these and
+# brings up a default CPU aimee-llm sibling, which is why this is invisible there. (Old combined leftovers
 # AIMEE_EMBEDDER_URL=embedder:8080 / LLM_ENDPOINT=llm:8080 were removed: on a
 # split deploy they silently pointed at non-existent services.)
 # Bind the /v1 HTTP API on 0.0.0.0 (not the 127.0.0.1 default), so the published

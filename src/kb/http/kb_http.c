@@ -27,6 +27,8 @@
 #include "kb_route_acl.h"
 #include "kb_http_console.h"
 #include "kb_http_accounts.h"
+#include "kb_http_bootstrap.h"
+#include <time.h>
 #include "kb_http_governance.h"
 #include "kb_http_insights.h"
 #include "kb_http_budget.h"
@@ -39,6 +41,7 @@
 #include "kb_identity.h"
 #include "kb_reqctx.h"
 #include "kb_http_models.h"
+#include "kb_http_grants.h"
 #include "kb_http_team.h"
 #include "kb/http/openapi_data.h"
 #include "db2/lifecycle.h"
@@ -53,27 +56,16 @@
 #include "db2/sketch.h"
 #include "kb.h"
 #include "kb_intel_payload.h"
+#include "kb/kb_login_throttle.h"
 #include "log.h"
 #include "workspace.h"
 #include "cJSON.h"
-#include <arpa/inet.h>
-#include <errno.h>
-#include <netinet/in.h>
-#include <pthread.h>
-#include <sys/socket.h>
 #include <unistd.h>
-#include <fcntl.h>
-#define KB_HTTP_BACKLOG  16
 #define KB_HTTP_READ_MAX 4096
 #define KB_HTTP_RESP_MAX (1024 * 1024)
 extern kb_service_ctx_t *g_kb_ctx;
 int kb_dispatch_action_json(const char *action, const char *body, int body_len, char *out_buf,
                             int out_cap);
-
-static pthread_t g_thread;
-static int g_listen_fd = -1;
-static volatile int g_running = 0;
-char g_bearer_token[256];
 
 /* ── response helpers ───────────────────────────────────────────────────── */
 
@@ -181,98 +173,6 @@ int kb_http_route(const char *method, const char *path, const char *auth_header,
 
    snprintf(out_buf, (size_t)out_cap, "{\"error\":\"not found\"}");
    return 404;
-}
-
-/* ── per-connection handler (implementation in kb_http_conn.c) ──────────── */
-void handle_connection(int fd);
-
-/* ── listener thread ─────────────────────────────────────────────────────── */
-
-static void *listener_thread(void *arg)
-{
-   (void)arg;
-   while (g_running)
-   {
-      struct sockaddr_in addr;
-      socklen_t addrlen = sizeof(addr);
-      int fd = accept(g_listen_fd, (struct sockaddr *)&addr, &addrlen);
-      if (fd < 0)
-      {
-         if (g_running)
-            LOG_WARN("kb_http", "accept failed: %s", strerror(errno));
-         break;
-      }
-      /* CLOEXEC: ingest spawns converter subprocesses (pandoc/pdftotext) that
-       * must not inherit the client connection — otherwise a slow/hung
-       * converter keeps the socket open after we close it. */
-      fcntl(fd, F_SETFD, FD_CLOEXEC);
-      handle_connection(fd);
-      close(fd);
-   }
-   return NULL;
-}
-
-/* ── public start/stop ───────────────────────────────────────────────────── */
-
-int kb_http_start(int port, const char *bearer_token)
-{
-   if (port <= 0)
-      return 0;
-
-   g_bearer_token[0] = '\0';
-   if (bearer_token && bearer_token[0])
-      snprintf(g_bearer_token, sizeof(g_bearer_token), "%s", bearer_token);
-
-   g_listen_fd = socket(AF_INET, SOCK_STREAM, 0);
-   if (g_listen_fd < 0)
-      return -1;
-   /* CLOEXEC: the ingest path forks converter subprocesses (pandoc/pdftotext);
-    * they must not inherit the listening socket, or a hung converter holds the
-    * port open and blocks the service from rebinding on restart. */
-   fcntl(g_listen_fd, F_SETFD, FD_CLOEXEC);
-   int opt = 1;
-   setsockopt(g_listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-   const char *b = getenv("AIMEE_KB_HTTP_BIND");
-   in_addr_t baddr = (b && b[0]) ? INADDR_ANY : INADDR_LOOPBACK;
-   struct sockaddr_in sa;
-   memset(&sa, 0, sizeof(sa));
-   sa.sin_family = AF_INET;
-   sa.sin_addr.s_addr = htonl(baddr);
-   sa.sin_port = htons((uint16_t)port);
-
-   if (bind(g_listen_fd, (struct sockaddr *)&sa, sizeof(sa)) < 0 ||
-       listen(g_listen_fd, KB_HTTP_BACKLOG) < 0)
-   {
-      close(g_listen_fd);
-      g_listen_fd = -1;
-      return -1;
-   }
-
-   g_running = 1;
-   if (pthread_create(&g_thread, NULL, listener_thread, NULL) != 0)
-   {
-      g_running = 0;
-      close(g_listen_fd);
-      g_listen_fd = -1;
-      return -1;
-   }
-
-   LOG_INFO("kb_http", "listening on %s:%d", baddr == INADDR_ANY ? "0.0.0.0" : "127.0.0.1", port);
-   return 0;
-}
-
-void kb_http_stop(void)
-{
-   if (!g_running)
-      return;
-   g_running = 0;
-   if (g_listen_fd >= 0)
-   {
-      shutdown(g_listen_fd, SHUT_RDWR);
-      close(g_listen_fd);
-      g_listen_fd = -1;
-   }
-   pthread_join(g_thread, NULL);
 }
 
 /* ── Phase 5 backend declarations ────────────────────────────────────────── */
@@ -676,61 +576,13 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
                      const char *auth_header, const char *bearer_token, const char *body,
                      int body_len, char *out_buf, int out_cap)
 {
-   /* The single-use enrollment token is the credential, so redeem precedes bearer
-    * auth. The caller supplies a CSR; its private key never leaves the client. */
-   if (strcmp(path, "/v1/enroll/redeem") == 0)
-   {
-      if (strcmp(method, "POST") != 0)
-      {
-         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
-         return 405;
-      }
-      cJSON *req = body ? cJSON_Parse(body) : NULL;
-      const cJSON *jtok = req ? cJSON_GetObjectItemCaseSensitive(req, "token") : NULL;
-      const cJSON *jcsr = req ? cJSON_GetObjectItemCaseSensitive(req, "csr") : NULL;
-      if (!cJSON_IsString(jtok) || !cJSON_IsString(jcsr))
-      {
-         cJSON_Delete(req);
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"bad request: token (string) and csr (PEM string) required\"}");
-         return 400;
-      }
-      char scope[KB_ENROLL_SCOPE_MAX];
-      char *cert = malloc(KB_PKI_CERT_PEM_MAX);
-      int rc = cert ? kb_enroll_redeem_csr(kb_default_config_dir(), jtok->valuestring,
-                                           jcsr->valuestring, 60L * 60 * 24 * 90, scope,
-                                           sizeof(scope), cert, KB_PKI_CERT_PEM_MAX)
-                    : -1;
-      cJSON_Delete(req);
-      if (rc != 0)
-      {
-         free(cert);
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"enrollment failed: invalid or used token, or bad CSR\"}");
-         return 401;
-      }
-      /* Persist the issuer/serial and mTLS certificate-DER SHA-256. Fail closed
-       * rather than release an authority the enrollment database cannot revoke. */
-      char fp[KB_PKI_FP_HEX] = "", issuer[256] = "", raw_serial[128] = "", serial[128] = "";
-      if (kb_pki_ca_fingerprint(cert, fp, sizeof(fp)) != 0 ||
-          kb_pki_cert_metadata(cert, issuer, sizeof(issuer), raw_serial, sizeof(raw_serial)) != 0 ||
-          kb_cert_serial_normalize(raw_serial, serial, sizeof(serial)) != 0 ||
-          db2_enrollment_insert(scope, fp, issuer, serial, "", 0, NULL) != 0)
-      {
-         free(cert);
-         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"enrollment persistence unavailable\"}");
-         return 503;
-      }
-      cJSON *resp = cJSON_CreateObject();
-      cJSON_AddStringToObject(resp, "client_cert", cert);
-      cJSON_AddStringToObject(resp, "scope", scope);
-      char *out = cJSON_PrintUnformatted(resp);
-      snprintf(out_buf, (size_t)out_cap, "%s", out ? out : "{}");
-      free(out);
-      cJSON_Delete(resp);
-      free(cert);
-      return 200;
-   }
+   /* Credential bootstrap, both pre-auth: the login surface is how a caller with
+    * no credential gets one (§3), and the enrollment token IS the credential.
+    * See kb_http_bootstrap.h. */
+   int br = kb_http_bootstrap_route(method, path, query_string, body, (int64_t)time(NULL), out_buf,
+                                    out_cap);
+   if (br >= 0)
+      return br;
 
    /* P9a telemetry scrape/ingest TOKEN path: the dedicated token authorizes GET
     * /v1/metrics + POST /v1/telemetry/metrics WITHOUT the kb bearer, so it runs
@@ -832,6 +684,12 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          return tr;
       tr = kb_http_servers_route_ex(method, path, query_string, body,
                                     body_len > 0 ? (size_t)body_len : 0, out_buf, out_cap);
+      if (tr >= 0)
+         return tr;
+      /* Write-tier grant administration (increment 5). Authorization is the DB layer's
+       * admin-or-team-lead check plus the server's UDS-only /v1 route; nothing is
+       * enforced here. See kb_http_grants.h. */
+      tr = kb_http_grants_route(method, path, query_string, body, out_buf, out_cap);
       if (tr >= 0)
          return tr;
    }
@@ -1780,7 +1638,8 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
                pgvec_kb_vector_delete_project(pname);
                db2_kb_file_index_delete_project(pname);
             }
-            db2_kb_ingest_queue_enqueue(pname, projects[i], workspace, force);
+            db2_kb_ingest_queue_enqueue(pname, projects[i], workspace, force,
+                                        DB2_KB_INGEST_PRIO_INTERACTIVE);
             total_queued++;
          }
       }
@@ -1800,7 +1659,8 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
                   pgvec_kb_vector_delete_project(pname);
                   db2_kb_file_index_delete_project(pname);
                }
-               db2_kb_ingest_queue_enqueue(pname, projects[i], cfg.workspaces[w], force);
+               db2_kb_ingest_queue_enqueue(pname, projects[i], cfg.workspaces[w], force,
+                                           DB2_KB_INGEST_PRIO_INTERACTIVE);
                total_queued++;
             }
          }

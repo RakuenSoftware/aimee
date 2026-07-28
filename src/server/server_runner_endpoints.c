@@ -176,6 +176,15 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (config_save(&cfg) != 0)
       return server_send_error(conn, "workspace: failed to save config", NULL);
 
+   /* Republish the live snapshot now instead of waiting for the server loop's
+    * config_reload_if_changed() tick. In the server, config_load() returns the
+    * snapshot rather than disk, so until that tick a `workspace list` issued right
+    * after this `workspace add` read a config without the new entry and reported
+    * "No workspaces configured" — intermittently, depending on where the write
+    * landed in the poll interval. Making the write read-your-writes consistent
+    * costs one reload on a rare path. */
+   (void)config_reload_if_changed();
+
    /* A `detached` workspace's root lives on the client; this server cannot
     * enumerate or read it, so we don't discover projects or kick a server-side
     * scan (which would read this host's filesystem). Ingestion is client-driven:
@@ -225,9 +234,35 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       kb_client_index_scan_result_t res;
       memset(&res, 0, sizeof(res));
       int rc = kb_client_index_scan(name, projects[i], 0, &res);
-      cJSON_AddBoolToObject(p, "indexed", rc == 0 && !res.skipped);
-      if (rc != 0 || res.skipped)
-         jo_add_str(p, "reason", res.reason[0] ? res.reason : "knowledge service unavailable");
+
+      /* A SCAN THAT VISITED NOTHING IS NOT AN INDEXED PROJECT. kb is handed a
+       * filesystem PATH here, and it may not be able to read it -- in the managed
+       * topology aimee-server and aimee-kb are separate containers with no shared
+       * volume, so a path that exists for the server is absent for kb. kb then
+       * walks an empty directory, finds no files, and answers success. rc == 0 and
+       * !skipped, so this reported `indexed: true` for a project where nothing was
+       * indexed at all: the user is told their repo is in the knowledge base,
+       * searches return nothing or another project's files, and no error is
+       * printed anywhere.
+       *
+       * `inspected` is the right test, not `files`: a project already indexed and
+       * unchanged legitimately reports files == 0 with inspected > 0, and calling
+       * that "not indexed" would be its own wrong answer. inspected == 0 means kb
+       * saw no files to consider, which is the failure this distinguishes. Older
+       * kb builds do not report inspected (documented as 0), so fall back to files
+       * rather than calling a working older kb broken. */
+      int ok = server_workspace_scan_indexed(rc, res.skipped, res.inspected, res.files);
+      cJSON_AddBoolToObject(p, "indexed", ok);
+      if (!ok)
+      {
+         if (rc != 0 || res.skipped)
+            jo_add_str(p, "reason", res.reason[0] ? res.reason : "knowledge service unavailable");
+         else
+            jo_add_str(p, "reason",
+                       "knowledge service saw no files at that path — it may not be able to "
+                       "read it (aimee-kb runs in its own container and does not share the "
+                       "server's filesystem)");
+      }
       cJSON_AddItemToArray(arr, p);
    }
    cJSON_AddNumberToObject(resp, "project_count", count);

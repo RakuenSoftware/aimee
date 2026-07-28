@@ -79,6 +79,19 @@ typedef struct
    size_t response_body_max;
    int connect_timeout_ms;
    int total_timeout_ms;
+   /* Deliver the response body even when the status is not 2xx.
+    *
+    * OFF BY DEFAULT, and that default is the right one: for ordinary egress an error
+    * body is attacker-influenced content nobody reads, so the parser discards it
+    * rather than buffering it.
+    *
+    * The exception is a protocol where the error body IS the protocol. RFC 6749 §5.2
+    * specifies the OAuth token endpoint's failure as a 400 carrying
+    * {"error":"invalid_grant", ...}; discarding it leaves a caller unable to tell "the
+    * IdP rejected this code" from "the IdP sent us something unparseable". Set only by
+    * the token exchange, and found to be necessary by running against a real
+    * identity provider — the discard silently made that distinction unreachable. */
+   int deliver_error_body;
 } kb_http_request_t;
 
 /* Pure request validation used by exchange and focused tests. */
@@ -88,6 +101,11 @@ kb_http_result_t kb_http_request_validate(const kb_http_request_t *request);
  * feed returns KB_HTTP_MORE until EOF, or a terminal error/abort. finish_eof succeeds only
  * after exact Content-Length or the complete zero-chunk + empty-trailer terminator. */
 typedef struct kb_http_response_parser kb_http_response_parser_t;
+/* Opt the parser into delivering a non-2xx body (see
+ * kb_http_request_t.deliver_error_body). Set by kb_http_tls_exchange from the
+ * request; exposed so the framing tests can exercise both settings without I/O. */
+void kb_http_response_parser_deliver_error_body(kb_http_response_parser_t *parser, int deliver);
+
 kb_http_result_t kb_http_response_parser_init(kb_http_response_parser_t **parser, size_t body_max,
                                               kb_http_headers_fn headers_cb,
                                               kb_http_body_fn body_cb, void *context);

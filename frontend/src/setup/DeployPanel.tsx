@@ -4,7 +4,7 @@ import { Button } from '@rakuensoftware/smoothgui';
 /* Setup-wizard summary panel — server-orchestrated deploy.
  *
  * When aimee-server runs with the Docker socket mounted (AIMEE_DEPLOY_ENABLED), it
- * can bring up the managed sibling services (postgres + aimee-kb + aimee-llm) from
+ * can bring up the managed sibling services (aimee-kb + aimee-llm) from
  * the wizard config via `docker compose up -d`. This panel drives that from the
  * finish screen: it checks whether orchestration is available (GET
  * /api/deploy/status → 503 when disabled), shows the current service states, and
@@ -183,7 +183,7 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
         </Button>
       </div>
       <div style={{ fontSize: 12, color: '#556', lineHeight: 1.5, marginBottom: svcs.length ? 8 : 0 }}>
-        aimee-server brings up postgres + aimee-kb + aimee-llm for you via Docker — no extra commands.
+        aimee-server brings up aimee-kb (including its database) + aimee-llm for you via Docker — no extra commands.
       </div>
 
       {svcs.length > 0 && (

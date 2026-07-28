@@ -41,8 +41,9 @@
 #include "server_pipeline.h" /* roundtable authoring pipeline (pipeline.*) */
 #include "commands.h"
 #include "agent.h"
-#include "agent_exec.h"     /* agent_audit_async_flush — drain audit queue at shutdown */
-#include "webuser_editor.h" /* webuser_editor_shutdown — reap editors at shutdown (WP-I) */
+#include "agent_exec.h"      /* agent_audit_async_flush — drain audit queue at shutdown */
+#include "webuser_editor.h"  /* webuser_editor_shutdown — reap editors at shutdown (WP-I) */
+#include "agent_admission.h" /* agent_admission_agent_active — route capacity probe */
 #include "agent_config.h"
 #include "provider_catalog.h"
 #include <aimee/delegates/delegate_credentials.h>
@@ -326,12 +327,7 @@ int server_send_response(server_conn_t *conn, cJSON *resp)
 
 int server_send_error(server_conn_t *conn, const char *message, const char *request_id)
 {
-   cJSON *resp = cJSON_CreateObject();
-   cJSON_AddStringToObject(resp, "status", "error");
-   cJSON_AddStringToObject(resp, "message", message);
-   if (request_id)
-      cJSON_AddStringToObject(resp, "request_id", request_id);
-   return server_send_ok(conn, resp);
+   return server_send_error_kind(conn, NULL, message, request_id);
 }
 
 /* --- Method handlers --- */
@@ -377,6 +373,7 @@ static int handle_server_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
    cJSON_AddNumberToObject(resp, "uptime", (double)(time(NULL) - ctx->start_time));
    cJSON_AddStringToObject(resp, "state", db1_is_initialized() ? "ok" : "unavailable");
    cJSON_AddNumberToObject(resp, "connections", ctx->conn_count);
+   server_health_add_kb(resp); /* kb block — see server_api_status.c */
    return server_send_ok(conn, resp);
 }
 
@@ -1376,7 +1373,6 @@ static int handle_memory_user_capture(server_ctx_t *ctx, server_conn_t *conn, cJ
       return server_send_error(conn, "kind and key are required", request_id);
    if (!content || !content[0])
       return server_send_error(conn, "content is required", request_id);
-
    if (db1_user_memory_upsert(kind, tier, key, content, 1.0, sid) != 0)
       return server_send_error(conn, "failed to store user memory", request_id);
 
@@ -1622,6 +1618,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"mcp.audit", handle_mcp_audit},
     {"mcp.recheck", handle_mcp_recheck},
     {"mcp.call", handle_mcp_call},
+    {"help.get", handle_get_help}, /* handler force-selects get_help */
     /* Triggers */
     {"trigger.fire", handle_trigger_fire},
     {"trigger.list", handle_trigger_list},
@@ -2347,6 +2344,8 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * delegates to itself, and an agent flagged "Primary Agent Only"
     * (agents.json `primary_only`) is never a delegation target. */
    agent_set_route_policy_filter(server_agent_route_policy_excluded);
+   /* Prefer a seat with a free slot over a saturated one (see agent_config.h). */
+   agent_set_route_capacity_probe(agent_admission_agent_active);
    LOG_INFO("server",
             "initialized (v%s, protocol %d, background=%d session=%d threads); /v1 HTTP "
             "surface owns the listeners",

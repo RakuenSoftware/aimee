@@ -114,7 +114,15 @@ int main(void)
       static config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       config_load(&cfg);
-      assert(strcmp(cfg.provider, "claude") == 0);
+      /* A fresh install has NO primary provider. It used to default to "claude",
+       * which pre-populated a provider nobody chose: the chat path synthesized a
+       * claude tmux-CLI agent for it and PINNED the turn to that agent, so on a
+       * machine with no claude CLI every turn died with "no agent available for
+       * role 'code'" while the operator's own agents sat there ineligible — and
+       * completing the setup wizard did not help, because the wizard writes
+       * agents.json's default_agent and this pin overrode it. Empty means "not
+       * chosen", which lets default_agent decide. */
+      assert(cfg.provider[0] == '\0');
       /* Capability routing defaults ON: routing enforces the packet's required
        * capabilities and minimum context window. Pinned explicitly so flipping
        * it is a deliberate, reviewed change rather than an accident — with it
@@ -2501,8 +2509,12 @@ int main(void)
       assert(strstr(env, "AIMEE_LLM_URL=http://aimee-llm:8742\n") != NULL);
       assert(strstr(env, "AIMEE_EMBEDDING_DIM") == NULL); /* local embed => unpinned/derived */
 
-      /* Local kb; all roles local at the CPU tier => the pre-baked llm-cpu profile
-       * (aimee-llm-cpu image), NOT the download "llm" profile. Same aimee-llm URL. */
+      /* Local kb; all roles local at the CPU tier => the SAME "llm" profile as a
+       * GPU tier. There is one LLM service now: aimee-llm is model-less and
+       * downloads whichever tier the roles ask for, so the tier no longer picks a
+       * different image (there used to be a pre-baked aimee-llm-cpu on its own
+       * mutually exclusive "llm-cpu" profile). The per-role tier still rides
+       * along in the env. */
       memset(&cfg, 0, sizeof(cfg));
       snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
       snprintf(cfg.llm_embed_backend, sizeof(cfg.llm_embed_backend), "local");
@@ -2510,16 +2522,19 @@ int main(void)
       snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "local");
       snprintf(cfg.llm_synth_tier, sizeof(cfg.llm_synth_tier), "cpu");
       config_emit_deploy_env(&cfg, env, sizeof(env));
-      assert(strstr(env, "COMPOSE_PROFILES=kb,llm-cpu\n") != NULL);
-      assert(strstr(env, "COMPOSE_PROFILES=kb,llm\n") == NULL); /* not the GPU profile */
+      assert(strstr(env, "COMPOSE_PROFILES=kb,llm\n") != NULL);
+      assert(strstr(env, "llm-cpu") == NULL); /* the second image is gone */
+      assert(strstr(env, "AIMEE_LLM_EMBED_TIER=cpu\n") != NULL);
+      assert(strstr(env, "AIMEE_LLM_SYNTH_TIER=cpu\n") != NULL);
       assert(strstr(env, "AIMEE_LLM_URL=http://aimee-llm:8742\n") != NULL);
 
-      /* A local role with an unset tier resolves to cpu, so it also takes llm-cpu. */
+      /* A local role with an unset tier takes the same profile. */
       memset(&cfg, 0, sizeof(cfg));
       snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
       snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "local");
       config_emit_deploy_env(&cfg, env, sizeof(env));
-      assert(strstr(env, "COMPOSE_PROFILES=kb,llm-cpu\n") != NULL);
+      assert(strstr(env, "COMPOSE_PROFILES=kb,llm\n") != NULL);
+      assert(strstr(env, "llm-cpu") == NULL);
 
       /* Remote kb: connect out, deploy nothing (no profiles, no llm env). */
       memset(&cfg, 0, sizeof(cfg));

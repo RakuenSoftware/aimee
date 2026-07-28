@@ -90,7 +90,7 @@ static void kbiw_enqueue_all(kb_service_ctx_t *ctx)
          char pws[256];
          workspace_repo_index_keys(projects[i], cfg.workspaces[w], pname, sizeof(pname), pws,
                                    sizeof(pws));
-         db2_kb_ingest_queue_enqueue(pname, projects[i], pws, 0);
+         db2_kb_ingest_queue_enqueue(pname, projects[i], pws, 0, DB2_KB_INGEST_PRIO_BULK);
          total++;
       }
    }
@@ -372,7 +372,7 @@ static void *kbiw_watch_thread(void *arg)
             char pws[256];
             workspace_repo_index_keys(watches[j].root, watches[j].workspace, pname, sizeof(pname),
                                       pws, sizeof(pws));
-            db2_kb_ingest_queue_enqueue(pname, watches[j].root, pws, 0);
+            db2_kb_ingest_queue_enqueue(pname, watches[j].root, pws, 0, DB2_KB_INGEST_PRIO_BULK);
             watches[j].last_queued = now;
             kb_worker_notify(ctx);
             break;
@@ -582,7 +582,12 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
           project, source_path, hash, ci, chunks[ci].heading_path, chunks[ci].line_start,
           chunks[ci].line_end, chunks[ci].content, chunks[ci].token_count);
       if (doc_ids[ci] < 0)
-         continue;
+      {
+         db2_kb_txn_rollback();
+         free(doc_ids);
+         free(chunks);
+         return -1;
+      }
       db2_kb_documents_link_neighbours(doc_ids[ci], prev_doc_id);
       prev_doc_id = doc_ids[ci];
    }

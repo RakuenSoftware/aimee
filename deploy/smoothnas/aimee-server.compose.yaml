@@ -6,7 +6,7 @@ name: aimee-server
 services:
   aimee-server:
     restart: unless-stopped
-    image: ${AIMEE_SERVER_IMAGE:-ghcr.io/rakuensoftware/aimee-server:latest}
+    image: ${AIMEE_SERVER_IMAGE:-ghcr.io/rakuensoftware/aimee-server:${AIMEE_IMAGE_TAG:-latest}}
     ulimits:
       stack: 67108864
     environment:

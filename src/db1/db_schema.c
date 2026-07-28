@@ -23,6 +23,10 @@ static void db1_run_migrations(sqlite3 *db)
    static const char *migrations[] = {
        "ALTER TABLE payload_rewrite_state ADD COLUMN consecutive_deferred_count"
        " INTEGER NOT NULL DEFAULT 0",
+       /* Concurrent delegates all wrote into one undifferentiated trace stream,
+        * so their turns interleaved and no row could be attributed to the job
+        * that produced it. Timing read off the mixed stream is meaningless. */
+       "ALTER TABLE execution_trace ADD COLUMN session_id TEXT NOT NULL DEFAULT ''",
        "ALTER TABLE eval_results ADD COLUMN ablation TEXT NOT NULL DEFAULT 'full'",
        "ALTER TABLE eval_results ADD COLUMN tool_call_failures INTEGER NOT NULL DEFAULT 0",
        "ALTER TABLE eval_results ADD COLUMN rescue_recoveries INTEGER NOT NULL DEFAULT 0",

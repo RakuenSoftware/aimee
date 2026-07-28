@@ -49,7 +49,9 @@ RERANK_SEP = "</s>"
 # exercises the real kb -> gateway contract (and the /embed,/rerank,/v1/chat
 # shapes) cheaply. Vectors are deterministic per-input so retrieval is stable.
 STUB = os.environ.get("AIMEE_LLM_STUB", "") not in ("", "0", "false")
-STUB_DIM = int(os.environ.get("AIMEE_LLM_STUB_DIM", os.environ.get("EMBEDDER_STUB_DIM", "1024")))
+STUB_DIM = int(os.environ.get("AIMEE_LLM_STUB_DIM")
+               or os.environ.get("EMBEDDER_STUB_DIM")
+               or "1024")
 
 
 def _stub_vec(text):
@@ -67,9 +69,23 @@ def _stub_vec(text):
 # synth configured (the role reports `gated`/unconfigured). Mode is informational here
 # (local = a baked llama-server; forward/external = an off-box upstream) — both just
 # proxy /v1/chat/completions to AIMEE_LLM_SYNTH_URL, which is why one code path serves
-# all three. Streaming is disabled in the first release (typed 400).
+# all three. Streaming is relayed verbatim for OpenAI-compatible clients.
 SYNTH_URL = os.environ.get("AIMEE_LLM_SYNTH_URL", "").rstrip("/")
 SYNTH_MODE = os.environ.get("AIMEE_LLM_SYNTH_MODE", "local")
+SYNTH_MODEL = os.environ.get("AIMEE_LLM_SYNTH_MODEL", "aimee-synth")
+
+
+def _positive_env_int(name, default):
+    """Compose commonly materializes unset optional values as empty strings."""
+    try:
+        value = int(os.environ.get(name, "") or default)
+    except ValueError:
+        value = default
+    return value if value > 0 else default
+
+
+SYNTH_SLOTS = _positive_env_int("AIMEE_LLM_SYNTH_SLOTS", 1)
+SYNTH_CONTEXT = _positive_env_int("AIMEE_LLM_SYNTH_CTX", 32768)
 
 # ---- §1a security: the gateway is privileged (it holds upstream creds + routes) ----
 # Bearer auth (constant-time). mTLS is the documented production posture; bearer-with-the
@@ -95,6 +111,10 @@ class GatewayError(Exception):
         super().__init__(message)
         self.status = status
         self.body = {"error": {"code": code, "message": message}}
+
+
+class ClientDisconnected(Exception):
+    """The downstream HTTP client closed its response socket."""
 
 
 # ---- §1a controls (pure; unit-tested without a model/network) ----
@@ -481,6 +501,9 @@ def do_synth_stream(body, write):
                     break
                 write(chunk)
                 total += len(chunk)
+    except ClientDisconnected:
+        # A downstream disconnect says nothing about synth upstream health.
+        raise
     except Exception as exc:
         _synth_breaker.record(False)
         if _is_synth_device_lost(exc):
@@ -526,6 +549,25 @@ def child_health():
     return out
 
 
+def model_catalog():
+    """OpenAI-compatible discovery for `aimee agent local` onboarding."""
+    available = STUB or bool(SYNTH_URL)
+    data = []
+    if available:
+        data.append({"id": SYNTH_MODEL, "object": "model", "owned_by": "aimee"})
+    return {"object": "list", "data": data}
+
+
+def slot_catalog():
+    """llama-server-compatible capacity discovery for the local-agent probe.
+
+    llama.cpp divides --ctx-size across --parallel slots, so report the usable
+    per-request window rather than the aggregate allocation.
+    """
+    per_slot_context = max(1, SYNTH_CONTEXT // SYNTH_SLOTS)
+    return [{"id": slot, "n_ctx": per_slot_context} for slot in range(SYNTH_SLOTS)]
+
+
 def build_server():
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -535,11 +577,18 @@ def build_server():
 
         def _send(self, code, payload):
             body = json.dumps(payload).encode("utf-8")
-            self.send_response(code)
-            self.send_header("content-type", "application/json")
-            self.send_header("content-length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.send_response(code)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                # A caller can disappear while synth is still generating (for
+                # example, when the KB is restarted).  There is no socket left on
+                # which to report another error, so finish the handler quietly.
+                return False
+            return True
 
         def _send_sse_head(self):
             """SSE headers. Sent BEFORE the first relayed byte; after this the status is
@@ -552,7 +601,11 @@ def build_server():
 
         def do_GET(self):
             path = self.path.rstrip("/")
-            if path == "/health":
+            if path == "/v1/models":
+                self._send(200, model_catalog())
+            elif path == "/slots":
+                self._send(200, slot_catalog())
+            elif path == "/health":
                 if STUB:
                     # Report the dim so the kb's embedder-autodim sizes the schema
                     # (the embed-remote.py --dim probe reads payload["dim"]).
@@ -603,11 +656,14 @@ def build_server():
                         started = []
 
                         def _w(b):
-                            if not started:
-                                self._send_sse_head()
-                                started.append(True)
-                            self.wfile.write(b)
-                            self.wfile.flush()
+                            try:
+                                if not started:
+                                    self._send_sse_head()
+                                    started.append(True)
+                                self.wfile.write(b)
+                                self.wfile.flush()
+                            except (BrokenPipeError, ConnectionResetError) as exc:
+                                raise ClientDisconnected from exc
 
                         n_out = do_synth_stream(req_body, _w)
                         audit("chat", scope, "ok", bytes_in=len(raw), bytes_out=n_out)
@@ -619,10 +675,24 @@ def build_server():
                         self._send(200, out)
                 else:
                     self._send(404, {"error": "not found"})
+            except ClientDisconnected:
+                # Streaming has already committed its status and the peer is gone.
+                # In particular, do not fall through and attempt a second 500 write.
+                return
             except GatewayError as ge:
                 if path == "/v1/chat/completions":
                     audit("chat", SCOPE_DEFAULT, "error", code=ge.body["error"]["code"])
                 self._send(ge.status, ge.body)
+            except json.JSONDecodeError as exc:
+                # A body this gateway cannot parse is the CALLER's error. It used to
+                # fall through to the blanket handler below and come back as 500
+                # "internal", which tells an operator their inference gateway broke
+                # when in fact the request was malformed — and makes a client's retry
+                # logic treat it as a transient server fault worth retrying, forever.
+                if path == "/v1/chat/completions":
+                    audit("chat", SCOPE_DEFAULT, "error", code="bad_request")
+                self._send(400, {"error": {"code": "bad_request",
+                                           "message": f"invalid JSON body: {exc}"}})
             except Exception as exc:  # noqa: BLE001
                 self._send(500, {"error": {"code": "internal", "message": str(exc)}})
 

@@ -203,6 +203,10 @@ typedef struct
 /* Returns 1 if a matching /v1 route was found, 0 otherwise.
  * Tries compound sub-commands first (e.g. "ingest status") before single ones. */
 int cli_v1_lookup(const char *cmd, int sub_argc, char **sub_argv, cli_v1_route_t *route);
+/* Comma-separated list of the subcommands registered for `cmd`; returns how many
+ * exist. Lets a failed lookup distinguish "unknown subcommand" from "this command
+ * has no /v1 route at all". */
+int cli_v1_subcommands(const char *cmd, char *out, size_t cap);
 
 /* Forward a CLI command to the server over its /v1 HTTP surface.
  * Returns 0 on success, >0 on application error, -1 on transport/protocol

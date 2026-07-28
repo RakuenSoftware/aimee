@@ -477,6 +477,12 @@ static cJSON *server_agent_to_json(const agent_t *ag)
    cJSON_AddBoolToObject(obj, "primary_only", ag->primary_only);
    cJSON_AddNumberToObject(obj, "max_turns", ag->max_turns);
    cJSON_AddNumberToObject(obj, "max_parallel", ag->max_parallel);
+   /* Live occupancy, so an out-of-process router (the Go WFE) can avoid seating
+    * an agent that is already at max_parallel. Omitted entirely when unknown --
+    * a consumer must not read "absent" as "idle". */
+   int active = agent_route_agent_active(ag->name);
+   if (active >= 0)
+      cJSON_AddNumberToObject(obj, "active_delegates", active);
    if (ag->middleware.context_window > 0)
       cJSON_AddNumberToObject(obj, "context_window", ag->middleware.context_window);
    cJSON *roles = cJSON_CreateArray();
@@ -663,7 +669,8 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char *argv[SERVER_AGENT_MAX_ARGS];
    int argc = server_agent_args(req, argv, (int)(sizeof(argv) / sizeof(argv[0])));
    if (argc < 3)
-      return server_send_error(conn, "usage: agent add <name> <endpoint> <model>", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "usage: agent add <name> <endpoint> <model>", NULL);
 
    opt_parsed_t opts;
    opt_parse(argc - 3, argv + 3, bool_flags, &opts);
@@ -1243,7 +1250,8 @@ int handle_agent_probe(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    opt_parse(argc, argv, bool_flags, &opts);
    const char *name = opt_pos(&opts, 0);
    if (!name || !name[0])
-      return server_send_error(conn, "agent.probe requires name", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "agent.probe requires name",
+                                    NULL);
 
    agent_config_t cfg;
    if (agent_load_config(&cfg) != 0)

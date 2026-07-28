@@ -6,18 +6,19 @@
 # operator directly; the server picks the services with COMPOSE_PROFILES, which
 # `aimee config deploy-env` derives from the wizard's page-2 config:
 #
-#   local kb, LLM external/off  -> COMPOSE_PROFILES=kb         -> postgres + aimee-kb
-#   local kb, a local GPU tier  -> COMPOSE_PROFILES=kb,llm     -> + aimee-llm (downloads)
-#   local kb, a local CPU tier  -> COMPOSE_PROFILES=kb,llm-cpu -> + aimee-llm-cpu (pre-baked)
-#   remote kb                   -> COMPOSE_PROFILES=            -> nothing (server connects out)
+#   local kb, LLM external/off  -> COMPOSE_PROFILES=kb      -> aimee-kb
+#   local kb, any local tier    -> COMPOSE_PROFILES=kb,llm  -> + aimee-llm (downloads)
+#   remote kb                   -> COMPOSE_PROFILES=         -> nothing (server connects out)
 #
-# The GPU (aimee-llm) and CPU (aimee-llm-cpu) LLM services are mutually exclusive —
-# config_emit_deploy_env picks exactly one profile — and BOTH answer to the network
-# host `aimee-llm` (the CPU service carries that alias), so aimee-server and aimee-kb
-# reach whichever is deployed at the same http://aimee-llm:8742.
+# ONE LLM service for every tier. aimee-llm is model-less and downloads whichever
+# tier the wizard selected (AIMEE_LLM_*_TIER) on first boot, cpu included. There
+# used to be a second, pre-baked aimee-llm-cpu image on a mutually exclusive
+# "llm-cpu" profile; it is gone. Two images meant every gateway change had to be
+# republished twice, and when the cpu one lagged it served a /health with no
+# `dim` — which the kb gates on — so the kb never went healthy on a fresh install.
 #
 # Every service joins the EXTERNAL `aimee` network that aimee-server is also on, so
-# the server reaches them by name (aimee-kb:8741, aimee-llm:8742, postgres:5432).
+# the server reaches them by name (aimee-kb:8741, aimee-llm:8742).
 # That network is created by compose.server-managed.yaml.
 
 networks:
@@ -26,27 +27,10 @@ networks:
     name: aimee
 
 services:
-  postgres:
-    profiles: ["kb"]
-    restart: unless-stopped
-    image: pgvector/pgvector:pg16
-    networks: [aimee]
-    environment:
-      POSTGRES_DB: aimee_shared
-      POSTGRES_USER: aimee
-      POSTGRES_PASSWORD: aimee
-    volumes:
-      - aimee-managed-postgres:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aimee -d aimee_shared"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   aimee-kb:
     profiles: ["kb"]
     restart: unless-stopped
-    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:latest}
+    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:${AIMEE_IMAGE_TAG:-latest}}
     networks: [aimee]
     # The kb's worker threads need a 64 MB stack (the 8 MB default SIGSEGVs on real
     # kb queries). Matches systemd's LimitSTACK=67108864.
@@ -54,16 +38,19 @@ services:
       stack: 67108864
     environment:
       AIMEE_HOME: /var/lib/aimee
-      AIMEE_DB2_URL: postgresql://aimee:aimee@postgres:5432/aimee_shared
+      # Empty by default: the KB image owns PostgreSQL + pgvector for a new
+      # install. Set AIMEE_DB2_URL explicitly only to keep/use an external DB2.
+      AIMEE_DB2_URL: ${AIMEE_DB2_URL:-}
       # embed + rerank + synth via the unified aimee-llm container (the kb runs no
       # model). When no role is local (llm profile off) the operator points this at
       # an external endpoint; the kb fail-opens on embedding if it is unreachable.
       AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8742}
       AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
+      # Internal-only mTLS lane used for server enrollment and signed management
+      # JWKS refresh. It is reachable on the Compose network, not published.
+      AIMEE_KB_MTLS_HOST: 0.0.0.0
+      AIMEE_KB_MTLS_PORT: "8745"
     command: ["--http-port=8741"]
-    depends_on:
-      postgres:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
       interval: 10s
@@ -72,20 +59,23 @@ services:
     volumes:
       - aimee-managed-kb-home:/var/lib/aimee
 
-  # GPU / download variant: model-less image, pulls its tier on first boot and
-  # persists it in the /models volume. Selected by COMPOSE_PROFILES=...,llm when a
-  # local role runs a GPU tier (small|mid|large).
+  # The one LLM service, for every tier: a model-less image that pulls the tier
+  # the wizard selected on first boot and persists it in the /models volume.
+  # Selected by COMPOSE_PROFILES=...,llm whenever any role is served locally.
   aimee-llm:
     profiles: ["llm"]
     restart: unless-stopped
-    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
+    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:${AIMEE_IMAGE_TAG:-latest}}
     networks: [aimee]
     environment:
       AIMEE_LLM_PORT: "8742"
       # GPU = AIMEE_LLM_TIER=small|mid|large + AIMEE_LLM_NGL=99 + /dev/dri
       # (deploy/compose/aimee.gpu.yaml). Models download on first boot.
       AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}
-      AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-small}
+      # cpu, not a GPU tier: this service now covers pure-CPU deploys too, and the
+      # per-role AIMEE_LLM_*_TIER the wizard emits overrides this anyway. Guessing
+      # a GPU tier here would download multi-GB weights a CPU box cannot serve.
+      AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-cpu}
       AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
     volumes:
       - aimee-managed-llm-models:/models
@@ -97,33 +87,6 @@ services:
       # Cold first boot downloads the tier's GGUFs before /health is OK.
       start_period: 1200s
 
-  # CPU / pre-baked variant: the cpu-tier GGUFs are baked into aimee-llm-cpu, so it
-  # serves offline with no first-boot download and NO /models volume (an empty bind
-  # would overlay/hide the baked models). Selected by COMPOSE_PROFILES=...,llm-cpu
-  # when the local stack has no GPU tier. Aliased to `aimee-llm` so aimee-server and
-  # aimee-kb reach it at the same http://aimee-llm:8742 the GPU variant uses. With
-  # aimee-server + aimee-kb this is the split-stack replacement for aimee-combined.
-  aimee-llm-cpu:
-    profiles: ["llm-cpu"]
-    restart: unless-stopped
-    image: ${AIMEE_LLM_CPU_IMAGE:-ghcr.io/rakuensoftware/aimee-llm-cpu:latest}
-    networks:
-      aimee:
-        aliases: [aimee-llm]
-    environment:
-      AIMEE_LLM_PORT: "8742"
-      AIMEE_LLM_NGL: "0"
-      # Must match the tier baked into the image; the supervisor finds the baked
-      # GGUFs + .ready markers and serves immediately, downloading nothing.
-      AIMEE_LLM_TIER: "cpu"
-      AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8742/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
 volumes:
-  aimee-managed-postgres:
   aimee-managed-kb-home:
   aimee-managed-llm-models:

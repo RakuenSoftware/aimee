@@ -17,6 +17,13 @@
 #ifndef DEC_DB2_POOL_H
 #define DEC_DB2_POOL_H 1
 
+/* The longest a lease may reasonably be held. The pool's reaper flags anything
+ * past this as stuck, and db_postgres.c bounds a statement by the same figure so
+ * the two cannot drift: a statement that outlived this would be reported stuck by
+ * a pool that had no way to stop it. Defined here because the pool owns the
+ * policy; db_postgres.c consumes it (header only — no link edge). */
+#define DB2_POOL_HOLD_CEILING_MS 300000
+
 #include <stddef.h>
 
 #ifdef __cplusplus

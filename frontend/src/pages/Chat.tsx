@@ -1430,10 +1430,6 @@ export default function Chat() {
   const tabsRef = useRef<TabData[]>(tabs);
   const activeIdxRef = useRef(activeIdx);
   const projectRootRef = useRef(projectRoot);
-  // Live `working` for the presence-event effect: lets turn_done decide whether
-  // THIS surface originated the turn (skip persist) or is merely observing a
-  // turn that ran/completed while detached (persist it into history).
-  const workingRef = useRef(working);
   // Live mirror of remoteTurnActive so sendMessage can synchronously tell whether
   // a server/foreign turn (e.g. a steer auto-continue) is in flight for the tab.
   const remoteTurnActiveRef = useRef(false);
@@ -1507,7 +1503,6 @@ export default function Chat() {
       if (!live.has(sid)) bgStreamsRef.current.delete(sid);
     }
   }, [tabs]);
-  useEffect(() => { workingRef.current = working; }, [working]);
   // Cancel any pending stream-flush timer on unmount.
   useEffect(() => () => { if (flushTimerRef.current !== null) window.clearTimeout(flushTimerRef.current); }, []);
 
@@ -1610,9 +1605,25 @@ export default function Chat() {
     const turnIdOf = (raw: string): string => {
       try { return (JSON.parse(raw) as { turn_id?: string }).turn_id || ''; } catch { return ''; }
     };
+    // Did THIS surface originate the turn? Read the send refs directly rather
+    // than the `working` render state: `working` is derived from workBySid
+    // (recomputeWorkCounts -> setWorkBySid -> re-render), so a ref synced to it
+    // in a useEffect lags the POST by a render + effect flush. turn_started
+    // routinely arrives inside that window, the surface's OWN turn was then
+    // classified as foreign, and turn_done appended a SECOND assistant message
+    // beside the one pollLiveTurn was already rendering — the doubled replies.
+    // activeSendAbortRefs is populated synchronously before the POST, so it is
+    // already accurate when the first ring event lands.
+    const hasLocalSendFor = (sid: string): boolean => {
+      for (const owner of activeSendAbortRefs.current.values())
+        if (owner === sid) return true;
+      for (const q of sendQueuesRef.current.values())
+        for (const it of q) if (it.originSid === sid) return true;
+      return false;
+    };
     es.addEventListener('turn_started', (ev: MessageEvent<string>) => {
       saveCursor(ev);
-      curTurnId = turnIdOf(ev.data); observed = ''; wasWorking = workingRef.current;
+      curTurnId = turnIdOf(ev.data); observed = ''; wasWorking = hasLocalSendFor(activeAimeeSid);
       // A steer continuation is server-initiated: render it even if this surface
       // still looks "working" from the just-cancelled turn's closing stream. Only
       // for the session this events stream is bound to (the one we steered).
@@ -1647,10 +1658,11 @@ export default function Chat() {
       const tid = turnIdOf(ev.data) || curTurnId; // turn_started always carries turn_id
       const text = observed;
       // Persist a turn observed-while-detached EXACTLY ONCE. Gates:
-      //  - wasWorking: snapshot at turn_started — THIS surface originated the turn
-      //    (its own send path stores the assistant message). This is the sole
-      //    "did I originate it" gate; a NEW local send mid-observation must NOT
-      //    drop a foreign turn, so the live workingRef is deliberately not used.
+      //  - wasWorking: snapshot at turn_started (see hasLocalSendFor) — THIS
+      //    surface originated the turn, and its own send path already renders and
+      //    stores the assistant message. This is the sole "did I originate it"
+      //    gate, and it is snapshotted, not re-read: a NEW local send mid-
+      //    observation must NOT make us drop a foreign turn.
       //  - cursor resume (above) means a fresh mount / auto-reconnect does NOT
       //    replay already-seen turns, so the ring no longer re-emits a completed
       //    turn. persistedTurnsRef (turn_id dedup) + the content-tail guard remain

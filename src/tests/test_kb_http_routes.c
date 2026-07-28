@@ -49,6 +49,9 @@ void db2_lease_begin(void)
 void db2_lease_end(void)
 {
 }
+void db2_lease_release_idle(void)
+{
+}
 int aimee_pg_exec(void *c, const char *s, char *e, size_t n)
 {
    (void)c;
@@ -1195,9 +1198,13 @@ int workspace_discover_projects(const char *root, int max_depth, char projects[]
    return g_discover_count;
 }
 
+/* Captured so a route test can assert the priority it enqueued at. */
+static int g_ingest_priority = -1;
+
 int db2_kb_ingest_queue_enqueue(const char *project, const char *root_path, const char *workspace,
-                                int force)
+                                int force, int priority)
 {
+   g_ingest_priority = priority;
    snprintf(g_ingest_project, sizeof(g_ingest_project), "%s", project);
    snprintf(g_ingest_root, sizeof(g_ingest_root), "%s", root_path);
    snprintf(g_ingest_workspace, sizeof(g_ingest_workspace), "%s", workspace);
@@ -1589,6 +1596,7 @@ static void test_capabilities(void)
 #include "db2/enrollments.h"
 #include "kb_identity.h"
 static int g_stub_revoked_calls = 0;
+static char g_stub_enrollment_expires_at[32];
 int kb_http_egress_route(const char *method, const char *path, const char *body, int body_len,
                          const kb_principal_t *transport, const char *fingerprint, char *out,
                          int out_cap)
@@ -1610,7 +1618,8 @@ int db2_enrollment_insert(const char *scope, const char *fingerprint, const char
    (void)fingerprint;
    (void)cert_issuer;
    (void)cert_serial_norm;
-   (void)expires_at;
+   snprintf(g_stub_enrollment_expires_at, sizeof(g_stub_enrollment_expires_at), "%s",
+            expires_at ? expires_at : "");
    (void)legacy;
    if (out_id)
       *out_id = 1;
@@ -2283,11 +2292,15 @@ static void test_enroll_redeem_route(void)
    cJSON_AddStringToObject(rj, "token", token);
    cJSON_AddStringToObject(rj, "csr", csr);
    char *rb = cJSON_PrintUnformatted(rj);
+   g_stub_enrollment_expires_at[0] = '\0';
    s = kb_http_route_ex("POST", "/v1/enroll/redeem", NULL, NULL, NULL, rb, (int)strlen(rb), buf,
                         sizeof(buf));
    assert(s == 200);
    assert(strstr(buf, "\"client_cert\"") && strstr(buf, "BEGIN CERTIFICATE"));
    assert(strstr(buf, "project:redeem"));
+   assert(strlen(g_stub_enrollment_expires_at) == 20);
+   assert(g_stub_enrollment_expires_at[4] == '-' && g_stub_enrollment_expires_at[10] == 'T' &&
+          g_stub_enrollment_expires_at[19] == 'Z');
 
    /* replaying the same (single-use) token -> 401. */
    s = kb_http_route_ex("POST", "/v1/enroll/redeem", NULL, NULL, NULL, rb, (int)strlen(rb), buf,
@@ -2837,6 +2850,11 @@ static void test_mtls_listener(void)
       char conn2[600];
       assert(kb_enroll_conn_string_build("localhost", port, fp, token2, conn2, sizeof(conn2)) > 0);
 
+      char identity_file[160];
+      snprintf(identity_file, sizeof(identity_file), "/tmp/aimee-kb-client-identity-%ld.json",
+               (long)getpid());
+      unlink(identity_file);
+      kb_client_mtls_set_identity_path_for_test(identity_file);
       setenv("AIMEE_KB_CONN", conn2, 1);
       setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "0", 1);
       assert(kb_client_mtls_configured() == 1);
@@ -2844,6 +2862,26 @@ static void test_mtls_listener(void)
       char *r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
       assert(st2 == 200);
       assert(r && strstr(r, "\"status\":\"ok\""));
+      free(r);
+      struct stat identity_stat;
+      assert(stat(identity_file, &identity_stat) == 0 && S_ISREG(identity_stat.st_mode));
+      assert((identity_stat.st_mode & 0777) == 0600 && identity_stat.st_uid == geteuid());
+      FILE *identity_stream = fopen(identity_file, "r");
+      assert(identity_stream);
+      char identity_json[32768];
+      size_t identity_n = fread(identity_json, 1, sizeof(identity_json) - 1, identity_stream);
+      assert(!ferror(identity_stream) && feof(identity_stream));
+      fclose(identity_stream);
+      identity_json[identity_n] = '\0';
+      assert(strstr(identity_json, "\"version\":1") && strstr(identity_json, "PRIVATE KEY"));
+      assert(strstr(identity_json, token2) == NULL); /* never persist the one-time credential */
+
+      /* Simulate a full server process restart. The enrollment token was spent
+       * by the first request, so this can pass only by validating and loading
+       * the owner-only identity file. */
+      kb_client_mtls_reset_for_test();
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      assert(st2 == 200 && r && strstr(r, "\"status\":\"ok\""));
       free(r);
       int pool_total = -1, pool_idle = -1, pool_busy = -1, pool_waiters = -1;
       unsigned long pool_exhausted = 1;
@@ -2908,7 +2946,9 @@ static void test_mtls_listener(void)
       assert(pool_total == 0 && pool_idle == 0);
       unsetenv("AIMEE_TRANSPORT_KB_POOL_ENABLED");
       unsetenv("AIMEE_KB_CONN");
+      kb_client_mtls_set_identity_path_for_test(NULL);
       assert(kb_client_mtls_configured() == 0);
+      unlink(identity_file);
       remove(store2);
    }
 
@@ -4222,6 +4262,10 @@ static void test_ingest_enqueue_ok(void)
    assert(strcmp(g_ingest_root, "/workspace/proj-alpha") == 0);
    assert(strcmp(g_ingest_workspace, "/workspace") == 0);
    assert(g_ingest_force == 1);
+   /* An HTTP ingest is a request someone is waiting on, so it must enqueue ABOVE
+    * the background sweep — otherwise it queues behind a whole reindex. */
+   assert(g_ingest_priority == DB2_KB_INGEST_PRIO_INTERACTIVE);
+   assert(g_ingest_priority > DB2_KB_INGEST_PRIO_BULK);
    assert(g_worker_notify_count == 1);
    assert(strstr(buf, "\"projects_queued\":1") != NULL);
 }
@@ -5170,6 +5214,69 @@ static void test_http_body_too_large_413(void)
    assert(strstr(resp, "request body too large"));
 }
 
+/* A slow upload must not monopolize the listener and prevent an independent
+ * health request from being accepted. This regresses the serial-listener bug
+ * where bursts beyond the listen backlog were dropped while one DB-backed
+ * request ran. */
+static int reserve_tcp_port(void)
+{
+   int fd = socket(AF_INET, SOCK_STREAM, 0);
+   assert(fd >= 0);
+   struct sockaddr_in sa;
+   memset(&sa, 0, sizeof(sa));
+   sa.sin_family = AF_INET;
+   sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+   sa.sin_port = 0;
+   assert(bind(fd, (struct sockaddr *)&sa, sizeof(sa)) == 0);
+   socklen_t n = sizeof(sa);
+   assert(getsockname(fd, (struct sockaddr *)&sa, &n) == 0);
+   int port = ntohs(sa.sin_port);
+   close(fd);
+   return port;
+}
+
+static int connect_local_port(int port)
+{
+   int fd = socket(AF_INET, SOCK_STREAM, 0);
+   assert(fd >= 0);
+   struct sockaddr_in sa;
+   memset(&sa, 0, sizeof(sa));
+   sa.sin_family = AF_INET;
+   sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+   sa.sin_port = htons((uint16_t)port);
+   assert(connect(fd, (struct sockaddr *)&sa, sizeof(sa)) == 0);
+   return fd;
+}
+
+static void test_http_listener_concurrent_requests(void)
+{
+   int port = reserve_tcp_port();
+   assert(kb_http_start(port, NULL) == 0);
+
+   int slow = connect_local_port(port);
+   const char *partial = "POST /v1/health HTTP/1.1\r\nContent-Length: 1\r\n\r\n";
+   assert(write(slow, partial, strlen(partial)) == (ssize_t)strlen(partial));
+
+   int fast = connect_local_port(port);
+   struct timeval tv = {.tv_sec = 2, .tv_usec = 0};
+   assert(setsockopt(fast, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == 0);
+   const char *health = "GET /v1/health HTTP/1.1\r\nContent-Length: 0\r\n\r\n";
+   assert(write(fast, health, strlen(health)) == (ssize_t)strlen(health));
+   char resp[2048];
+   int nr = (int)read(fast, resp, sizeof(resp) - 1);
+   assert(nr > 0);
+   resp[nr] = '\0';
+   assert(strstr(resp, "200 OK") != NULL);
+   close(fast);
+
+   assert(write(slow, "x", 1) == 1);
+   assert(setsockopt(slow, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == 0);
+   nr = (int)read(slow, resp, sizeof(resp) - 1);
+   assert(nr > 0);
+   close(slow);
+   kb_http_stop();
+}
+
 int main(void)
 {
    printf("kb_http_routes: ");
@@ -5195,6 +5302,7 @@ int main(void)
    test_mtls_serve();
    test_mtls_listener();
    test_http_body_too_large_413();
+   test_http_listener_concurrent_requests();
    test_bearer_auth_ok();
    test_bearer_auth_missing();
    test_bearer_auth_wrong();

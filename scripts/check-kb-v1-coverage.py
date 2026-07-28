@@ -136,6 +136,11 @@ ALLOWED_INTERNAL_CLIENT_HEADER_USERS = {
     "modules/kb_client/kb_client_pdf.c",
     "modules/kb_client/kb_client_code_graph.c",
     "modules/kb_client/kb_client_ws.c",
+    # Grant administration (per-user-remote-writes-authz increment 5). Uses the same
+    # post/get helpers as the index and docs clients above: the server cannot reach
+    # kb_write_tier_grant itself (it links neither DB2 nor libpq), so the operator CLI's
+    # grant commands have to travel over kb's /v1 like any other kb call.
+    "modules/kb_client/kb_client_grants.c",
     "tests/test_kb_client_docs.c",
     "tests/test_kb_client_search.c",
 }

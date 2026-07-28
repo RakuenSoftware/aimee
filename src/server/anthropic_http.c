@@ -455,6 +455,33 @@ static int messages_buffered(const char *body, char *resp, int cap)
       return write_error(resp, cap, 400, "invalid_request_error", "invalid JSON body", 0);
    model = jo_cstr(req, "model");
 
+   /* Reject the two shapes that otherwise HANG. The Anthropic Messages API requires
+    * max_tokens and a non-empty messages array; without them this request reached
+    * the provider path and never came back — an empty body, `{}`, `{"model":"x"}`
+    * and `{"messages":[]}` all sat forever instead of answering. A caller that omits
+    * a required field must get a 400, not an open socket.
+    *
+    * Validated here, before anything else is allocated, so the cleanup is just the
+    * parsed body — the same shape as the no-primary-agent branch below. This bounds
+    * the malformed-input case only; it does NOT put a deadline on the provider call
+    * itself, which is a separate concern. */
+   {
+      const cJSON *jmax = cJSON_GetObjectItemCaseSensitive(req, "max_tokens");
+      if (!cJSON_IsNumber(jmax) || jmax->valuedouble < 1)
+      {
+         cJSON_Delete(req);
+         return write_error(resp, cap, 400, "invalid_request_error",
+                            "max_tokens is required and must be a positive integer", 0);
+      }
+      const cJSON *jmsgs = cJSON_GetObjectItemCaseSensitive(req, "messages");
+      if (jmsgs && (!cJSON_IsArray(jmsgs) || cJSON_GetArraySize(jmsgs) == 0))
+      {
+         cJSON_Delete(req);
+         return write_error(resp, cap, 400, "invalid_request_error",
+                            "messages must be a non-empty array", 0);
+      }
+   }
+
    /* SHADOW (Slice 3): observe the IR round-trip on this live request. No-op unless
     * AIMEE_IR_SHADOW is set; never affects the response. */
    aimee_ir_shadow_observe_request(req, AIMEE_WIRE_ANTHROPIC);

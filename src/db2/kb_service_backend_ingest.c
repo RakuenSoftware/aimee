@@ -60,7 +60,7 @@ int db2_kb_ingest_queue_reset_running(void)
 }
 
 int db2_kb_ingest_queue_enqueue(const char *project, const char *root_path, const char *workspace,
-                                int force)
+                                int force, int priority)
 {
    void *conn = db2_conn();
    if (!conn || !project || !root_path)
@@ -73,10 +73,15 @@ int db2_kb_ingest_queue_enqueue(const char *project, const char *root_path, cons
    char err[KBS_ERRBUF] = "";
    aimee_pg_stmt_t *s =
        aimee_pg_prepare(conn,
-                        "INSERT INTO kb_ingest_queue (project, root_path, workspace, force)"
-                        " VALUES (?1, ?2, ?3, ?4)"
+                        "INSERT INTO kb_ingest_queue (project, root_path, workspace, force,"
+                        " priority) VALUES (?1, ?2, ?3, ?4, ?5)"
                         " ON CONFLICT (project) WHERE status IN ('pending', 'running')"
-                        " DO UPDATE SET force = GREATEST(EXCLUDED.force, kb_ingest_queue.force)",
+                        " DO UPDATE SET force = GREATEST(EXCLUDED.force, kb_ingest_queue.force),"
+                        /* Promote, never demote. A project already queued by the background
+                         * sweep must jump the queue when someone then asks for it directly —
+                         * otherwise the dedup would pin it at bulk priority and the waiting
+                         * caller gains nothing from asking. */
+                        " priority = GREATEST(EXCLUDED.priority, kb_ingest_queue.priority)",
                         err, sizeof(err));
    if (!s)
       return -1;
@@ -85,6 +90,7 @@ int db2_kb_ingest_queue_enqueue(const char *project, const char *root_path, cons
    aimee_pg_bind_text(s, "?2", root_path);
    aimee_pg_bind_text(s, "?3", ws);
    aimee_pg_bind_int(s, "?4", force);
+   aimee_pg_bind_int(s, "?5", priority);
    (void)aimee_pg_step(s, err, sizeof(err));
    int inserted = aimee_pg_stmt_changes(s);
    aimee_pg_finalize(s);
@@ -105,7 +111,10 @@ int db2_kb_ingest_queue_claim_next(db2_kb_ingest_job_t *out)
                         "UPDATE kb_ingest_queue SET status = 'running', started_at = pg_now_text()"
                         " WHERE id = ("
                         "   SELECT id FROM kb_ingest_queue WHERE status = 'pending'"
-                        "   ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
+                        /* priority first, then FIFO within a priority — so a bulk
+                         * reindex cannot starve work a caller is blocked on, and
+                         * equal-priority jobs keep their arrival order. */
+                        "   ORDER BY priority DESC, id LIMIT 1 FOR UPDATE SKIP LOCKED"
                         " ) RETURNING id, project, root_path, workspace, force",
                         err, sizeof(err));
    if (!s)
@@ -153,9 +162,9 @@ int db2_kb_ingest_queue_complete(int64_t job_id, int files_indexed, int chunks_a
    aimee_pg_bind_int(s, "?2", files_indexed);
    aimee_pg_bind_int(s, "?3", chunks_added);
    aimee_pg_bind_int(s, "?4", embeddings_added);
-   (void)aimee_pg_step(s, err, sizeof(err));
+   int step = aimee_pg_step(s, err, sizeof(err));
    aimee_pg_finalize(s);
-   return 0;
+   return step == AIMEE_PG_DONE ? 0 : -1;
 }
 
 int db2_kb_ingest_queue_fail(int64_t job_id, const char *error_message)
