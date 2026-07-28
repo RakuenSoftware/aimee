@@ -1907,6 +1907,10 @@ int main(void)
       const char *valid_no_length = "OPTIONS /v1/health HTTP/1.1\r\nHost: localhost\r\n\r\n";
       const char *partial =
           "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\n\r\n{}";
+      const char *route_oversize =
+          "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4194305\r\n\r\n";
+      const char *length_overflow = "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\n"
+                                    "Content-Length: 18446744073709551616\r\n\r\n";
       const char *duplicate =
           "POST /v1/responses HTTP/1.1\r\nContent-Length: 1\r\nContent-Length: 1\r\n\r\nx";
       const char *chunked =
@@ -1919,6 +1923,8 @@ int main(void)
       assert(server_http_request_framing_valid(valid, strlen(valid)) == 1);
       assert(server_http_request_framing_valid(valid_no_length, strlen(valid_no_length)) == 1);
       assert(server_http_request_framing_valid(partial, strlen(partial)) == 1);
+      assert(server_http_request_framing_valid(route_oversize, strlen(route_oversize)) == 1);
+      assert(server_http_request_framing_valid(length_overflow, strlen(length_overflow)) == 0);
       assert(server_http_request_framing_valid(duplicate, strlen(duplicate)) == 0);
       assert(server_http_request_framing_valid(chunked, strlen(chunked)) == 0);
       assert(server_http_request_framing_valid(conflicting_connection,

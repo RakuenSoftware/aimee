@@ -1,11 +1,10 @@
 #include "server_http_internal.h"
 #include "server.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
-
-#define REQUEST_BODY_MAX (4u * 1024u * 1024u)
 
 static int header_name_char(unsigned char c)
 {
@@ -108,7 +107,7 @@ int server_http_request_framing_valid(const char *request, size_t total)
             return 0;
          for (const char *q = value; q < end; q++)
          {
-            if (*q < '0' || *q > '9' || content_len > (REQUEST_BODY_MAX - (size_t)(*q - '0')) / 10)
+            if (*q < '0' || *q > '9' || content_len > (SIZE_MAX - (size_t)(*q - '0')) / 10)
                return 0;
             content_len = content_len * 10 + (size_t)(*q - '0');
          }
