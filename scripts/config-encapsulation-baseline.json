@@ -22,7 +22,7 @@
       "loads": 8
     },
     "src/cmd_doctor.c": {
-      "decls": 11,
+      "decls": 9,
       "loads": 2
     },
     "src/cmd_dogfood.c": {
@@ -54,7 +54,7 @@
       "loads": 4
     },
     "src/cmd_mcp.c": {
-      "decls": 3,
+      "decls": 2,
       "loads": 2
     },
     "src/cmd_memory.c": {
@@ -82,7 +82,7 @@
       "loads": 2
     },
     "src/cmd_session_lifecycle.c": {
-      "decls": 20,
+      "decls": 18,
       "loads": 8
     },
     "src/conversation_context.c": {
@@ -550,7 +550,7 @@
       "loads": 0
     },
     "src/modules/roundtable/delegate_ensemble.c": {
-      "decls": 24,
+      "decls": 18,
       "loads": 0
     },
     "src/modules/roundtable/delegate_ensemble.h": {
@@ -634,7 +634,7 @@
       "loads": 1
     },
     "src/server/agent_policy.c": {
-      "decls": 3,
+      "decls": 2,
       "loads": 2
     },
     "src/server/agent_request_build.c": {
@@ -762,7 +762,7 @@
       "loads": 4
     },
     "src/server/server_mcp_tools.c": {
-      "decls": 3,
+      "decls": 2,
       "loads": 2
     },
     "src/server/server_mgmt_read_source.c": {
@@ -770,7 +770,7 @@
       "loads": 1
     },
     "src/server/server_pipeline.c": {
-      "decls": 9,
+      "decls": 7,
       "loads": 7
     },
     "src/server/server_runner_endpoints.c": {
@@ -1119,7 +1119,7 @@
     }
   },
   "totals": {
-    "decls": 974,
+    "decls": 959,
     "files": 279,
     "loads": 507
   }

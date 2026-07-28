@@ -67,6 +67,12 @@
 #define CONFIG_CONCURRENCY_MAX_ENTRIES 16
 
 /* Max additional bearers (beyond the primary) a deployment may accept at once. */
+/* Capacity of the ensemble reference arrays. Exported as a named constant so a
+ * consumer can check its own limit against config's WITHOUT naming config_t:
+ * delegate_ensemble.c used to assert on sizeof(((config_t *)0)->...), which made
+ * the struct's layout part of its interface just to catch dimension drift. */
+#define CONFIG_ENSEMBLE_MAX_REFS 32
+
 #define AIMEE_API_BEARER_EXTRA_MAX 7
 
 typedef struct
@@ -2032,13 +2038,13 @@ typedef struct config
    /* First dim = ENSEMBLE_MAX_REFS (delegate_ensemble.h); a _Static_assert in
     * delegate_ensemble.c enforces they stay in sync. config.h can't include that
     * header (it would cycle), so the literal is kept here. */
-   char ensemble_reference_models[32][128];
+   char ensemble_reference_models[CONFIG_ENSEMBLE_MAX_REFS][128];
    int ensemble_reference_count;
    /* Optional per-participant review persona, paired by index with
     * ensemble_reference_models. Empty entries fall back to the engine's diverse
     * default lineup. Width = PERSONA_NAME_MAX (persona.h); first dim =
     * ENSEMBLE_MAX_REFS. */
-   char ensemble_reference_personas[32][64];
+   char ensemble_reference_personas[CONFIG_ENSEMBLE_MAX_REFS][64];
    int ensemble_reference_persona_count;
    char ensemble_aggregator[128];
    int ensemble_min_successful;

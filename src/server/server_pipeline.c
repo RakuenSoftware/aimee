@@ -154,7 +154,7 @@ static cJSON *build_digest(const rtp_run_t *run, const rtp_pass_t *latest, int h
 /* forward decls: defined later in the file. */
 void execute_gate_merge(int id, rtp_run_t *run, rtp_gate_t *gate, int gate_no, cJSON *req,
                         cJSON *resp);
-static int resolve_panel(const config_t *cfg, rtp_panel_t *out);
+static int resolve_panel(rtp_panel_t *out);
 static int maybe_ttl_abandon(int id, rtp_run_t *run);
 
 /* Open a human gate: record the gate (PR + expected head SHA as the merge-intent
@@ -325,7 +325,7 @@ int handle_pipeline_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * the loop runs (section 7): a mono-provider panel can converge on its own
     * blind spots, so its "converged" is weaker evidence. */
    rtp_panel_t panel;
-   if (resolve_panel(&cfg, &panel) == 0)
+   if (resolve_panel(&panel) == 0)
    {
       cJSON *pj = cJSON_AddObjectToObject(resp, "panel");
       cJSON_AddNumberToObject(pj, "requested", panel.requested);
@@ -847,7 +847,7 @@ static int submit_pass(server_conn_t *conn, rtp_run_t *run, const char *phase, c
 /* Resolve the ensemble panel to provider identity + min context budget (section
  * 7/#36). Returns 0 on success (fills out), -1 if a participant has an unknown
  * context window and no fallback is configured. */
-static int resolve_panel(const config_t *cfg, rtp_panel_t *out)
+static int resolve_panel(rtp_panel_t *out)
 {
    agent_config_t acfg;
    if (agent_load_config(&acfg) != 0)
@@ -856,12 +856,12 @@ static int resolve_panel(const config_t *cfg, rtp_panel_t *out)
       return 0; /* no registry -> treat as unresolved, caller decides */
    }
    rtp_participant_t parts[AIMEE_PANEL_MAX_PARTICIPANTS];
-   int n = cfg->ensemble_reference_count;
+   int n = config_ensemble_reference_count();
    if (n > AIMEE_PANEL_MAX_PARTICIPANTS)
       n = AIMEE_PANEL_MAX_PARTICIPANTS;
    for (int i = 0; i < n; i++)
    {
-      agent_t *ag = agent_find(&acfg, cfg->ensemble_reference_models[i]);
+      agent_t *ag = agent_find(&acfg, config_ensemble_reference_models(i));
       if (ag)
       {
          parts[i].provider = ag->provider;
@@ -875,7 +875,7 @@ static int resolve_panel(const config_t *cfg, rtp_panel_t *out)
          parts[i].context_tokens = 0;
       }
    }
-   int fallback = cfg->roundtable_pipeline_unknown_context_tokens;
+   int fallback = config_roundtable_pipeline_unknown_context_tokens();
    int rc = rtp_panel_summarize(parts, n, fallback, out);
    /* providers point into acfg, which is about to free; copy what we need first.
     * out only stores counts/min, not provider strings, so this is safe. */
@@ -1751,7 +1751,7 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (strcmp(mode, RTP_MODE_REVIEW) == 0 && artifact && artifact[0])
    {
       rtp_panel_t panel;
-      int prc = resolve_panel(&cfg, &panel);
+      int prc = resolve_panel(&panel);
       if (prc < 0)
       {
          free(captured_diff);
