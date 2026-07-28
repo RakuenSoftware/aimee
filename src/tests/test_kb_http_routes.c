@@ -999,6 +999,14 @@ int db2_source_ref_resolve_current(const char *repository_key, const char *sourc
 {
    if (!repository_key || !repository_key[0])
       return 0;
+   /* A repository that exists but has no published generation at all: the
+    * conflict must say so rather than naming a generation that isn't there. */
+   if (strcmp(repository_key, "repo-unpublished") == 0)
+   {
+      if (out)
+         memset(out, 0, sizeof(*out));
+      return 0;
+   }
    if (out)
    {
       memset(out, 0, sizeof(*out));
@@ -3190,6 +3198,21 @@ static void test_code_search_current_ref(void)
        NULL, NULL, NULL, 0, buf, sizeof(buf));
    assert(s == 409);
    assert(strstr(buf, "source_ref_not_current") != NULL);
+   /* Recovery is a write, so a read-only caller must be able to tell that it
+    * cannot self-heal, and must learn which generation is actually published. */
+   assert(strstr(buf, "\"recovery_requires_write\":true") != NULL);
+   assert(strstr(buf, "\"published\":true") != NULL);
+   assert(strstr(buf, "\"published_commit\":\"1111111111111111111111111111111111111111\"") !=
+          NULL);
+   assert(strstr(buf, "\"published_generation_id\":3") != NULL);
+
+   s = kb_http_route_ex(
+       "GET", "/v1/code/search",
+       "query=needle&repository_key=repo-unpublished&source_ref=feature%2Fkb", NULL, NULL, NULL, 0,
+       buf, sizeof(buf));
+   assert(s == 409);
+   assert(strstr(buf, "\"published\":false") != NULL);
+   assert(strstr(buf, "published_commit") == NULL);
 }
 
 static void test_code_callers_missing_symbol(void)

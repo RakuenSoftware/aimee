@@ -47,6 +47,33 @@ int code_scan_write_error(char *out_buf, int out_cap, const char *message)
    return 400;
 }
 
+/* The stale-generation conflict. Recovery is "publish the observed generation
+ * and retry", which is a write: a scoped read/query-only bearer cannot perform
+ * it and would otherwise retry an impossible request forever. Report whether a
+ * generation is published at all and, when one is, name it — so a caller that
+ * cannot publish can query the published snapshot explicitly with its staleness
+ * visible, or fail with an accurate reason instead of a bare conflict. */
+static int code_source_ref_conflict(char *out_buf, int out_cap, int published,
+                                    const db2_source_generation_t *generation)
+{
+   if (published && generation)
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"source ref is not current\","
+               "\"code\":\"source_ref_not_current\","
+               "\"recovery\":\"publish_generation\",\"recovery_requires_write\":true,"
+               "\"published\":true,\"published_ref\":\"%s\",\"published_commit\":\"%s\","
+               "\"published_generation_id\":%lld}",
+               generation->source_ref, generation->commit_sha,
+               (long long)generation->generation_id);
+   else
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"source ref is not current\","
+               "\"code\":\"source_ref_not_current\","
+               "\"recovery\":\"publish_generation\",\"recovery_requires_write\":true,"
+               "\"published\":false}");
+   return 409;
+}
+
 int code_method_not_allowed(char *out_buf, int out_cap)
 {
    snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
@@ -183,10 +210,8 @@ int handle_get_code_find(const char *query_string, char *out_buf, int out_cap)
       if (resolved == 0 || (source_commit[0] &&
                             strcmp(source_commit, resolved_generation.commit_sha) != 0))
       {
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"source ref is not current\","
-                  "\"code\":\"source_ref_not_current\"}");
-         return 409;
+         return code_source_ref_conflict(out_buf, out_cap, resolved == 1,
+                                         &resolved_generation);
       }
       snprintf(project_filter, sizeof(project_filter), "%s",
                resolved_generation.physical_project);
@@ -413,10 +438,8 @@ int handle_get_code_search(const char *query_string, char *out_buf, int out_cap)
       if (resolved == 0 ||
           (source_commit[0] && strcmp(source_commit, resolved_generation.commit_sha) != 0))
       {
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"source ref is not current\","
-                  "\"code\":\"source_ref_not_current\"}");
-         return 409;
+         return code_source_ref_conflict(out_buf, out_cap, resolved == 1,
+                                         &resolved_generation);
       }
       snprintf(project, sizeof(project), "%s", resolved_generation.physical_project);
    }
@@ -934,10 +957,8 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
       if (resolved == 0 ||
           (source_commit[0] && strcmp(source_commit, resolved_generation.commit_sha) != 0))
       {
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"source ref is not current\","
-                  "\"code\":\"source_ref_not_current\"}");
-         return 409;
+         return code_source_ref_conflict(out_buf, out_cap, resolved == 1,
+                                         &resolved_generation);
       }
       snprintf(project, sizeof(project), "%s", resolved_generation.physical_project);
    }
