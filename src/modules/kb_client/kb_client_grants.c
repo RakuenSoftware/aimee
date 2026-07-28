@@ -40,6 +40,11 @@ static kb_client_grant_result_t result_from_status(int status)
       return KB_CLIENT_GRANT_OK;
    case 400:
       return KB_CLIENT_GRANT_INVALID;
+   case 401:
+      /* kb answered, so it is neither unreachable nor unusable: it rejected this server's
+       * credential. Falling through to UNAVAILABLE sent operators to debug kb's health and
+       * the network while the actual fault — an unenrolled server — went unnamed. */
+      return KB_CLIENT_GRANT_UNAUTHENTICATED;
    case 403:
       return KB_CLIENT_GRANT_DENIED;
    case 405:
