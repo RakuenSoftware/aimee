@@ -26,6 +26,10 @@ aimee:
     tls_port: 8743
     bearer_token: "aimee-local-dev"
     rate_limit_per_min: 0
+    # Request the per-client certificate issued by `aimee remote set`. The
+    # managed image also enforces this through AIMEE_API_MTLS so an older
+    # persisted config is upgraded safely.
+    mtls: optional
     # This image binds the TLS /v1 on 0.0.0.0 so a thin client drives it remotely,
     # including delegates/roundtables/tools — which require remote_writes="full".
     # The image also forces this via AIMEE_API_REMOTE_WRITES (Dockerfile.server) so
@@ -36,14 +40,16 @@ aimee:
     #   remote_writes: "off"  # TCP bearer is read/query/chat only
     remote_writes: "full"
 
-    # remote_writes controls what a TCP bearer may do over the published port:
+    # Without strict per-user authority, remote_writes controls what an enrolled,
+    # verified mTLS client may do over the published port:
     #   off    read/query/chat only (mutations are local-UDS-only)
     #   data   + data writes (memory/work/rules/skill), capability-gated
     #   full   + delegate/tool/roundtable (CAPS_ALL)
     # Default `full` so the thin-client model works out of the box: a remote
     # `aimee` client driving this server can run delegates and the roundtable
-    # without extra setup. The bearer token above is the trust boundary, so
-    # OVERRIDE IT (and front with TLS) for any deployment exposed beyond a
+    # after `aimee remote set` enrolls its client certificate. A bearer without
+    # that certificate remains read-only. OVERRIDE the bootstrap bearer and use
+    # a publicly trusted TLS leaf for any deployment exposed beyond a
 # Delegate roundtable / MoA ensemble, on by default. The panel is the seeded
 # agents.json roster; provider credentials live in the server-owned encrypted
 # vault (no keys are baked into the image or sent by a thin client per session).

@@ -69,17 +69,23 @@ Download the binary for your platform from the latest GitHub release.
 ### Linux
 
 ```bash
-install -Dm755 aimee-linux-x86_64 ~/.local/bin/aimee
+mkdir -p ~/.local/bin
+curl -fL https://github.com/RakuenSoftware/aimee/releases/latest/download/aimee-linux-x86_64 \
+  -o ~/.local/bin/aimee
+chmod 755 ~/.local/bin/aimee
 export PATH="$PATH:$HOME/.local/bin"
 aimee version
 ```
 
-Use `aimee-linux-arm64` on ARM64.
+Use `aimee-linux-arm64` instead on ARM64.
 
 ### macOS
 
 ```bash
-install -m755 aimee-macos-universal ~/.local/bin/aimee
+mkdir -p ~/.local/bin
+curl -fL https://github.com/RakuenSoftware/aimee/releases/latest/download/aimee-macos-universal \
+  -o ~/.local/bin/aimee
+chmod 755 ~/.local/bin/aimee
 xattr -d com.apple.quarantine ~/.local/bin/aimee 2>/dev/null || true
 export PATH="$PATH:$HOME/.local/bin"
 aimee version
@@ -87,11 +93,17 @@ aimee version
 
 ### Windows
 
-Rename the download to `aimee.exe`, put it in a directory on `PATH`, then open a new PowerShell:
+In PowerShell, download the released client into a directory on your user `PATH`:
 
 ```powershell
+$bin = "$env:LOCALAPPDATA\aimee\bin"
+New-Item -ItemType Directory -Force $bin | Out-Null
+Invoke-WebRequest https://github.com/RakuenSoftware/aimee/releases/latest/download/aimee-windows-x86_64.exe -OutFile "$bin\aimee.exe"
+$env:Path = "$env:Path;$bin"
 aimee version
 ```
+
+Add that directory to your persistent user `PATH` before opening the next PowerShell.
 
 The client is DB-free. It does not need PostgreSQL, SQLite, the KB, or model libraries.
 
@@ -115,12 +127,14 @@ aimee remote status
 Verify the fingerprint against the server through a second channel. Do not accept an unexpected
 change. The bootstrap bearer stops authorizing ordinary routes after enrollment.
 
-For a self-signed certificate during local setup, set `AIMEE_TLS_INSECURE=1` only for the enrollment
-command. The stored fingerprint is the trust anchor after that. Do not leave insecure TLS enabled.
+Self-signed local servers need no insecure-mode flag: `remote set` pins the leaf and reports its
+fingerprint for verification.
 
-macOS uses Secure Transport and Windows uses Schannel. Automatic CSR enrollment is currently the
-Linux path; configure the client certificate explicitly on the other platforms when the server
-requires mTLS.
+The complete write-capable quickstart below currently requires the Linux client. macOS uses Secure
+Transport and Windows uses Schannel, but automatic CSR enrollment is not yet implemented on those
+two clients. They can connect while mTLS is optional, but remain read-only and will not connect once
+the server's enrolled-client roster promotes mTLS to required. Do not mistake a copied bearer for a
+client identity.
 
 ## 4. Verify the stack
 
@@ -130,80 +144,76 @@ aimee kb status    # detailed store, vector, ingest, and curator state
 aimee audit verify
 ```
 
-### Remote write setup
+### Write and agent access
 
-The rotated shared bearer authorizes reads only. Remote writes need a short-lived, KB-signed user
-identity and a grant keyed by `(server_id, team_id, subject)`. The server must also have these set:
+This section is write-capable on Linux; the macOS and Windows clients remain read-only until their
+automatic certificate-enrollment paths are implemented.
 
-- `AIMEE_SERVER_ID`;
-- `AIMEE_SERVER_TEAM_ID`;
-- `AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE`, pointing to the root-owned trust bundle for the KB signing
-  keys;
-- `AIMEE_KB_CONN`, the one-time `aimee://` enrollment string used to establish the server's mTLS
-  identity with the KB.
+There is no extra authority bootstrap in the single-user quickstart. The managed server image
+explicitly enables `remote_writes: full`, and `aimee remote set` enrolls the Linux client with its
+own mTLS certificate. The image requests that certificate automatically; no server-side TLS setting
+is required. Until a per-user authority is configured, that enrolled certificate may use
+the configured deployment tier. A copied bearer without a valid client certificate remains
+read/query-only.
 
-The shipped server Compose files pass these values through from `.env`, leave their identity
-values empty, and mount `${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}` read-only at
-`/run/aimee/management`. The empty configuration is deliberately read-only. It becomes
-write-capable only after the server is enrolled with the KB and the authority values are supplied.
-A local Unix-socket operator cannot be locked out.
-
-A fresh embedded KB has no team. Create the first team locally without exposing an HTTP admin route:
-
-```bash
-KB_CONTAINER=$(docker ps --filter label=com.docker.compose.project=aimee \
-  --filter label=com.docker.compose.service=aimee-kb --format '{{.ID}}')
-docker exec \
-  -e 'AIMEE_DB2_URL=postgresql:///aimee_shared?host=/var/lib/aimee/run' \
-  "$KB_CONTAINER" aimee-kb team create default
-```
-
-Use the returned numeric team id when the authority enrolls the server. After finalizing the matching
-server-registry row and publishing signed JWKS, install the exported public trust bundle and record
-the enrollment values:
-
-```bash
-sudo install -d -o root -g root -m 0755 server-management
-sudo install -o root -g root -m 0644 /path/from/authority/jwks-trust-bundle.json \
-  server-management/jwks-trust-bundle.json
-
-cat >>.env <<'EOF'
-AIMEE_SERVER_ID=YOUR_ENROLLED_SERVER_ID
-AIMEE_SERVER_TEAM_ID=YOUR_NUMERIC_TEAM_ID
-AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE=/run/aimee/management/jwks-trust-bundle.json
-AIMEE_KB_CONN=aimee://THE_ONE_TIME_ENROLLMENT_STRING
-EOF
-
-docker compose -f compose.server-managed.yaml up -d --force-recreate aimee-server
-```
-
-The bundle is public verification material. In the shipped container it must be root-owned and
-readable by server UID 1000, so use `0644`; group/world write bits, symlinks, extra hard links, and a
-non-root owner are rejected. On successful enrollment the certificate and key are atomically saved
-at `$AIMEE_HOME/kb-client-identity.json` with mode `0600`. The one-time token is never saved, and
-the identity is revalidated against its CA pin after every process restart.
-
-Grant administration is local-socket only. Run it on the server, using the exact subject returned by
-the user's PAM or OIDC login:
-
-```bash
-aimee kb grant set --server <server-id> --team <team-id> --subject <subject> --tier data
-aimee kb grant show --server <server-id> --team <team-id> --subject <subject>
-```
-
-Use `data` for memory, document, and index writes. Use `full` only for users who also need agent,
-delegate, runner, or workspace-control operations. See [Upgrading](UPGRADING.md#restore-remote-writes)
-for subject forms, first-grant recovery, and refusal reasons.
-
-After the grant and user login, test a durable write and read:
+Test a durable write and read:
 
 ```bash
 aimee memory store quickstart "Enrollment works"
 aimee memory search "Enrollment works"
 ```
 
-`aimee.api.remote_writes` is a retired global authorizer. It remains parsed for compatibility, but
-changing it does not make this write succeed.
+That is the complete write setup for the default managed deployment. `remote_writes: data` limits
+an enrolled client to data mutation; `off` makes the TCP service read-only.
+
+Multi-user deployments can opt into strict KB-signed per-user grants. Once `AIMEE_SERVER_ID`,
+`AIMEE_SERVER_TEAM_ID`, and the management JWKS trust bundle are configured, the compatibility
+path switches off automatically and every remote write requires a valid per-user identity token.
+That authority deployment is an operator workflow, not a quickstart prerequisite.
+
+#### Optional: strict multi-user authority
+
+Skip this subsection for the normal single-user setup. For a strict deployment:
+
+1. Create the first KB team through its private database socket:
+
+   ```bash
+   KB_CONTAINER=$(docker ps --filter label=com.docker.compose.project=aimee \
+     --filter label=com.docker.compose.service=aimee-kb --format '{{.ID}}')
+   docker exec \
+     -e 'AIMEE_DB2_URL=postgresql:///aimee_shared?host=/var/lib/aimee/run' \
+     "$KB_CONTAINER" aimee-kb team create default
+   ```
+
+2. Complete the authority enrollment for that numeric team. It produces the enrolled server ID,
+   one-use `AIMEE_KB_CONN`, and signed public JWKS trust bundle. Finalize the matching server-registry
+   row and publish the JWKS before enabling strict mode.
+
+3. Install the public bundle and configure all authority inputs together:
+
+   ```bash
+   sudo install -d -o root -g root -m 0755 server-management
+   sudo install -o root -g root -m 0644 /path/from/authority/jwks-trust-bundle.json \
+     server-management/jwks-trust-bundle.json
+   cat >>.env <<'EOF'
+   AIMEE_SERVER_ID=YOUR_ENROLLED_SERVER_ID
+   AIMEE_SERVER_TEAM_ID=YOUR_NUMERIC_TEAM_ID
+   AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE=/run/aimee/management/jwks-trust-bundle.json
+   AIMEE_KB_CONN=aimee://THE_ONE_TIME_ENROLLMENT_STRING
+   EOF
+   docker compose -f compose.server-managed.yaml up -d --force-recreate aimee-server
+   ```
+
+4. From the server's local Unix-socket client, grant the exact authenticated subject:
+
+   ```bash
+   aimee kb grant set --server <server-id> --team <team-id> --subject <subject> --tier data
+   aimee kb grant show --server <server-id> --team <team-id> --subject <subject>
+   ```
+
+Use `full` only for subjects that also need agent, delegate, runner, or workspace-control writes.
+Strict mode fails closed if its trust, identity-token, replay, or grant authority is unavailable.
+See [Upgrading](UPGRADING.md#restore-remote-writes) for subject forms and recovery details.
 
 ## 5. Add a workspace
 
@@ -220,9 +230,8 @@ aimee index find main
 The client uploads content to the server and KB. The remote server never reads `/path/to/project`
 directly.
 
-Workspace registration itself is bearer-gated and can succeed without a grant. Its index upload
-cannot: without `data`, `workspace add` reports the registered workspace, then exits non-zero after
-ingesting zero files. Run the index commands after the grant.
+Workspace registration and index upload both work after the client enrollment above. With strict
+per-user authorization enabled, the subject instead needs at least a `data` grant.
 
 > **Not available on the Windows thin client.** `workspace add` and `index scan` upload the working
 > tree over a POSIX-only path, so on Windows they refuse:

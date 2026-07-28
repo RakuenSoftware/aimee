@@ -326,8 +326,8 @@ void server_http_api_status_report(int http_port, int bearer_configured, int rat
       SAR_APPEND("  rate limit:    unlimited\n");
 
    /* Per-user write authorization (0.3.0). The counter is surfaced here because
-    * a counter nobody can read is not a metric — an operator mid-cutover needs
-    * to see how much traffic the retired global is no longer letting through.
+    * a counter nobody can read is not a metric — an operator in strict mode needs
+    * to see how much traffic lacked a usable identity token.
     *
     * Whether AIMEE_SERVER_TEAM_ID is configured is deliberately NOT reported
     * here: that check lives in the db1-backed resolver, and reaching for it
@@ -336,8 +336,8 @@ void server_http_api_status_report(int http_port, int bearer_configured, int rat
     * "reads work but every write is denied" will actually be looking. */
    unsigned long long ignored = (unsigned long long)server_http_global_ignored_count();
    if (ignored)
-      SAR_APPEND("  remote_writes: aimee.api.remote_writes NO LONGER AUTHORIZES; %llu request(s) "
-                 "refused that it would formerly have allowed "
+      SAR_APPEND("  remote_writes: strict per-user mode refused %llu request(s) that the "
+                 "deployment tier would otherwise have allowed "
                  "(remote_writes.global_ignored)\n",
                  ignored);
 
@@ -1004,7 +1004,7 @@ static int g_management_tls_fd = -1; /* dedicated required-mTLS management liste
 static char g_uds_path[sizeof(((struct sockaddr_un *)0)->sun_path)] = "";
 static char g_bearer[256] = ""; /* configured TCP bearer (empty = none) */
 static int g_rate_limit = 0;    /* TCP requests / 60s (0 = unlimited) */
-int g_remote_writes = 0;        /* aimee.api.remote_writes: parsed, authorizes nothing */
+int g_remote_writes = 0;        /* deployment ceiling; bootstrap mTLS tier before strict auth */
 static server_http_rate_state_t g_rate_state = {0, 0};
 static pthread_mutex_t g_rate_lock = PTHREAD_MUTEX_INITIALIZER;
 /* guards g_rate_state across conns */
@@ -1610,17 +1610,19 @@ void handle_conn(int fd, int is_tcp, int is_management)
       LOG_INFO("server.http", "%s %s -> 401 (mtls required) req_id=%s", method, path, request_id);
       return;
    }
-   /* Per-user remote_writes (proposal §5): the process-global no longer
-    * authorizes anything — the tier comes from the caller's own kb-signed
-    * identity token, resolved here BEFORE capabilities are derived. Verification
-    * has no side effects; the token's single-use jti is spent further down, only
-    * once the request is known to be servable. UDS never reaches the gate at all
-    * (server_http_resolve_write_tier is a no-op when !is_tcp), so the local
-    * operator keeps full capability exactly as §7 requires. */
+   /* Resolve a strict per-user tier first. Verification has no side effects; a
+    * token's single-use jti is spent further down only once the request is known
+    * servable. A single-user deployment whose authority is not configured may
+    * instead use its explicit deployment tier, but only over an enrolled mTLS
+    * connection. Bearer-only traffic never receives this compatibility path. */
    server_identity_token_claims_t identity_claims;
    int identity_present = 0;
-   int effective_remote_writes = server_http_resolve_write_tier(
+   int identity_remote_writes = server_http_resolve_write_tier(
        is_tcp, buf, method, path, request_id, &identity_claims, &identity_present);
+   int effective_remote_writes = server_http_select_write_tier(
+       is_tcp, mtls_authenticated,
+       server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_READY, g_remote_writes,
+       identity_remote_writes, identity_present);
    uint32_t effective_caps =
        management_authenticated
            ? 0
@@ -1713,24 +1715,26 @@ void handle_conn(int fd, int is_tcp, int is_management)
    if (is_tcp && !server_http_route_allowed_caps(is_tcp, effective_caps, method, path,
                                                  effective_remote_writes))
    {
-      /* Name the remedy. The bare "beyond the presented token's scope" left a
-       * caller with nowhere to go: following QUICKSTART end to end now lands here
-       * on the first kb write, and nothing on screen says a write-tier grant is
-       * what is missing or who issues it. The mechanism is already public
-       * (QUICKSTART 1.4, docs/UPGRADING.md), so pointing at it leaks nothing. */
-      send_response(fd, 403,
-                    "{\"error\":{\"message\":\"this endpoint requires capabilities beyond the "
-                    "presented token's scope. Over the network a bearer is read/query only "
-                    "until your subject holds a write-tier grant on this server; an operator "
-                    "issues one with `aimee kb grant set` (see docs/UPGRADING.md).\","
-                    "\"type\":\"permission_error\"}}",
-                    request_id);
-      /* Count the requests the retired global would formerly have allowed, so an
-       * operator can see exactly how much traffic the cutover is refusing
-       * instead of inferring it from complaints. Only counts denials the old
-       * global would have permitted - a request that fails for an unrelated
-       * reason is not attributable to this change. */
-      if (g_remote_writes != SERVER_REMOTE_WRITES_OFF &&
+      /* Name the actual remedy for the active deployment shape. */
+      if (server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_READY)
+         send_response(fd, 403,
+                       "{\"error\":{\"message\":\"this endpoint requires capabilities beyond "
+                       "the presented token's scope. Strict per-user authorization is enabled; "
+                       "an operator grants the exact subject with `aimee kb grant set` (see "
+                       "docs/UPGRADING.md).\",\"type\":\"permission_error\"}}",
+                       request_id);
+      else
+         send_response(fd, 403,
+                       "{\"error\":{\"message\":\"this endpoint requires an enrolled mTLS "
+                       "client and a sufficient aimee.api.remote_writes tier; a bearer alone is "
+                       "read/query only. Re-run client enrollment and see docs/QUICKSTART.md.\","
+                       "\"type\":\"permission_error\"}}",
+                       request_id);
+      /* Count only strict-mode requests the deployment tier would otherwise
+       * allow, so the metric measures missing per-user authority rather than an
+       * unrelated transport refusal. */
+      if (server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_READY &&
+          g_remote_writes != SERVER_REMOTE_WRITES_OFF &&
           server_http_route_allowed_caps(is_tcp, effective_caps, method, path, g_remote_writes))
          server_http_note_global_ignored();
       LOG_INFO("server.http", "%s %s -> 403 (caps) req_id=%s", method, path, request_id);
@@ -2337,32 +2341,42 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
       snprintf(g_bearer, sizeof(g_bearer), "%s", bearer_token);
    g_rate_limit = rate_limit_per_min > 0 ? rate_limit_per_min : 0;
    g_remote_writes = remote_writes;
-   /* aimee.api.remote_writes is still parsed so an existing config file loads,
-    * but it no longer authorizes anything: /v1 write authority now comes from
-    * the caller's kb-signed identity token. Say so once, loudly, at startup -
-    * an operator who upgraded with this set to data/full and did not notice
-    * would otherwise conclude the release simply broke writes. */
+   server_write_tier_config_state_t write_tier_config = server_write_tier_config_state();
    if (g_remote_writes != SERVER_REMOTE_WRITES_OFF)
-      LOG_WARN("server.http",
-               "aimee.api.remote_writes is set but no longer authorizes writes; per-user grants "
-               "replace it (see docs/UPGRADING.md 0.3.0). Requests it would formerly have allowed "
-               "are counted as remote_writes.global_ignored");
-   switch (server_write_tier_config_state())
+   {
+      if (write_tier_config == SERVER_WRITE_TIER_CONFIG_READY)
+         LOG_WARN("server.http",
+                  "strict per-user remote-write authorization is enabled; the deployment tier "
+                  "does not replace a missing user identity token. Refusals it would otherwise "
+                  "allow are counted as remote_writes.global_ignored");
+      else
+         LOG_WARN("server.http",
+                  "per-user remote-write authority is not configured; enrolled mTLS clients use "
+                  "the explicit aimee.api.remote_writes tier. Bearer-only clients remain "
+                  "read/query-only");
+   }
+   switch (write_tier_config)
    {
    case SERVER_WRITE_TIER_CONFIG_NO_TEAM:
-      LOG_ERROR("server.http",
-                "AIMEE_SERVER_TEAM_ID is unset or invalid: reads continue, but every /v1 write "
-                "will be denied with no_team_configured until it is set to this server's team id");
+      LOG_WARN("server.http",
+               "AIMEE_SERVER_TEAM_ID is unset or invalid: strict per-user authorization is "
+               "unavailable; enrolled mTLS clients may use the explicit deployment tier. "
+               "Bearer-only traffic remains read/query-only; run `aimee remote set` on a "
+               "client to enroll its certificate and enable configured writes");
       break;
    case SERVER_WRITE_TIER_CONFIG_NO_SERVER_ID:
-      LOG_ERROR("server.http",
-                "AIMEE_SERVER_ID is unset: reads continue, but every /v1 write will be denied "
-                "with invalid until it is set to this server's enrolled registry id");
+      LOG_WARN("server.http",
+               "AIMEE_SERVER_ID is unset: strict per-user authorization is unavailable; "
+               "enrolled mTLS clients may use the explicit deployment tier. Bearer-only traffic "
+               "remains read/query-only; run `aimee remote set` on a client to enroll its "
+               "certificate and enable configured writes");
       break;
    case SERVER_WRITE_TIER_CONFIG_NO_TRUST_BUNDLE:
-      LOG_ERROR("server.http",
-                "AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE is unset: reads continue, but every /v1 "
-                "write will be denied with invalid until the management trust bundle is mounted");
+      LOG_WARN("server.http",
+               "AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE is unset: strict per-user authorization is "
+               "unavailable; enrolled mTLS clients may use the explicit deployment tier. "
+               "Bearer-only traffic remains read/query-only; run `aimee remote set` on a "
+               "client to enroll its certificate and enable configured writes");
       break;
    case SERVER_WRITE_TIER_CONFIG_READY:
       break;

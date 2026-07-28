@@ -50,12 +50,20 @@ economizer: safe   # off | safe | aggressive
 ```yaml
 aimee:
   api:
+    mtls: optional       # off | optional | required
     remote_writes: off   # off | data | full
 ```
 
-This legacy value is still parsed so old files load. It no longer authorizes user `/v1` writes;
-non-off values warn and feed `remote_writes.global_ignored`. Configure server identity trust and
-per-user grants instead. See [Security](SECURITY.md#remote-access).
+Without a configured per-user authority, this tier applies only to clients holding an mTLS
+certificate enrolled by the server; a bearer alone remains read-only. Configuring server identity
+trust activates strict per-user grants, makes this value a ceiling rather than an authorizer, and
+feeds missing-authority refusals to `remote_writes.global_ignored`. See
+[Security](SECURITY.md#remote-access).
+
+The managed server image sets `AIMEE_API_MTLS=optional`, overriding older persisted configs so
+enrolled clients present their certificates. The durable presentation ramp promotes the listener
+to required after all active certificates have presented. Set the environment variable explicitly
+to `off` or `required` only when the deployment calls for it.
 
 ### Delegate isolation
 

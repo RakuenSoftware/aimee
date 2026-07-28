@@ -97,6 +97,22 @@ void config_parse_server_api(config_t *cfg, const cJSON *root)
          cfg->server_api_remote_writes = SERVER_REMOTE_WRITES_OFF;
    }
 
+   /* AIMEE_API_MTLS = off|optional|required lets the container image request
+    * client certificates even when an older persisted aimee.yaml predates the
+    * mTLS setting.  This is deploy truth for the same reason as
+    * AIMEE_API_REMOTE_WRITES: image upgrades must not leave an enrolled client
+    * silently operating as bearer-only. */
+   const char *mtls_env = getenv("AIMEE_API_MTLS");
+   if (mtls_env && mtls_env[0])
+   {
+      if (strcmp(mtls_env, "required") == 0)
+         cfg->server_api_mtls = 2;
+      else if (strcmp(mtls_env, "optional") == 0)
+         cfg->server_api_mtls = 1;
+      else if (strcmp(mtls_env, "off") == 0)
+         cfg->server_api_mtls = 0;
+   }
+
    /* AIMEE_API_BEARER_TOKEN pins the /v1 bearer from the environment (deploy
     * truth), overriding the config-file value even when it is absent / read-only
     * / reseeded — e.g. a containerized server fed the token from a secret store.

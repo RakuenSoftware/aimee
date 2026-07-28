@@ -1026,6 +1026,10 @@ endif
 integration-tests: $(BINARY) $(SERVER)
 	./tests/test_integration.sh
 	python3 ../scripts/test-thin-client-remote-exclusive.py $(BINARY)
+	../scripts/aimee-managed-remote-auth-e2e.sh
+
+managed-remote-auth-e2e-test: $(BINARY) $(SERVER)
+	../scripts/aimee-managed-remote-auth-e2e.sh
 
 init-migrate-service-test: $(BINARY) $(SERVER)
 	./tests/test_init_migrate_service.sh

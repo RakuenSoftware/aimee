@@ -11,14 +11,14 @@
  *   1. Connection capabilities — what the transport and credential grant
  *      (server_http_conn_caps / server_http_effective_conn_caps). UDS is the
  *      same-user trusted peer and gets CAPS_ALL.
- *   2. The per-user write tier — resolved from the caller's kb-signed identity
- *      token by server_http_resolve_write_tier (proposal
- *      per-user-remote-writes-authz.md §5). TCP only.
+ *   2. The write tier — a per-user kb-signed identity token when the authority is
+ *      configured, or the explicit deployment tier for an enrolled mTLS client
+ *      during single-user bootstrap. TCP only.
  *   3. The route gate — server_http_route_allowed_caps, which needs both the
  *      capability bitmask and that tier.
  *
- * The retired aimee.api.remote_writes counter lives here too, because the thing
- * it counts is a decision made in this file.
+ * The strict-cutover counter lives here too, because the thing it counts is a
+ * decision made in this file.
  */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE /* strncasecmp via strings.h, matching server_http.c */
@@ -183,8 +183,8 @@ int server_http_route_allowed(int is_tcp, const char *bearer, const char *method
        is_tcp, server_http_conn_caps(is_tcp, bearer, remote_writes), method, path, remote_writes);
 }
 
-/* remote_writes.global_ignored: requests refused that the retired
- * aimee.api.remote_writes would formerly have allowed. Request threads run
+/* remote_writes.global_ignored: requests strict per-user mode refused that the
+ * configured deployment tier would otherwise have allowed. Request threads run
  * concurrently, so it carries its own lock rather than racing on a plain
  * increment or borrowing an unrelated one. */
 static uint64_t g_remote_writes_global_ignored = 0;
@@ -203,6 +203,44 @@ uint64_t server_http_global_ignored_count(void)
    uint64_t value = g_remote_writes_global_ignored;
    pthread_mutex_unlock(&g_global_ignored_lock);
    return value;
+}
+
+int server_http_select_write_tier(int is_tcp, int mtls_authenticated,
+                                  int per_user_authority_ready, int configured_tier,
+                                  int identity_tier, int identity_present)
+{
+   if (!is_tcp)
+      return identity_tier;
+
+   /* A verified identity token supplies the user's tier, including tier=off.
+    * Strict authority also applies the deployment tier as a ceiling, so a full
+    * grant cannot bypass an operator's data-only posture. */
+   if (identity_present)
+   {
+      if (identity_tier < SERVER_REMOTE_WRITES_OFF ||
+          identity_tier > SERVER_REMOTE_WRITES_FULL)
+         return SERVER_REMOTE_WRITES_OFF;
+      if (!per_user_authority_ready)
+         return identity_tier;
+      if (configured_tier < SERVER_REMOTE_WRITES_OFF ||
+          configured_tier > SERVER_REMOTE_WRITES_FULL)
+         return SERVER_REMOTE_WRITES_OFF;
+      return identity_tier < configured_tier ? identity_tier : configured_tier;
+   }
+
+   /* Once authority configuration is present, an absent token must remain a
+    * denial rather than falling back to deployment-wide policy. Bearer-only
+    * traffic is likewise read-only before strict authority exists. */
+   if (per_user_authority_ready || !mtls_authenticated)
+      return SERVER_REMOTE_WRITES_OFF;
+
+   /* Compatibility is transport-bound, not bearer-bound: only a client whose
+    * certificate was issued by this server can inherit the configured tier. A
+    * bearer-only peer stays read/query-only. Refuse malformed internal values. */
+   if (configured_tier < SERVER_REMOTE_WRITES_OFF ||
+       configured_tier > SERVER_REMOTE_WRITES_FULL)
+      return SERVER_REMOTE_WRITES_OFF;
+   return configured_tier;
 }
 
 int server_http_resolve_write_tier(int is_tcp, const char *buf, const char *method,

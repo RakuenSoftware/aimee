@@ -51,12 +51,13 @@ detected through size/hash metadata rather than accepted as one coherent file.
 
 ## Remote writes
 
-The shared bearer is read-only. A remote write needs a short-lived KB-signed identity plus a grant
-for the exact server, team, and subject. `data` covers memory, document, and index writes. `full`
-also covers agent, delegate, runner, and workspace control.
+The shared bearer is read-only. In the default single-user deployment, a client certificate
+enrolled by this server may use its explicit `aimee.api.remote_writes` tier. `data` covers memory,
+document, and index writes. `full` also covers agent, delegate, runner, and workspace control.
 
-The server refuses every remote write until its server ID, team ID, and management-JWKS trust bundle
-are configured. The old `aimee.api.remote_writes` value is not an authorizer.
+Configuring the server ID, team ID, and management-JWKS trust bundle activates strict multi-user
+authorization. Remote writes then need a short-lived KB-signed identity and an exact
+server/team/subject grant; they never fall back to the deployment tier.
 
 ## Local CLI agents
 

@@ -646,7 +646,8 @@ ENV_DESC = {
     # Server runtime
     "AIMEE_SERVER_HTTP_BIND": ("Server runtime", "TCP bind address for the server `/v1` HTTP listener (else UDS-only)."),
     "AIMEE_SERVER_STARTUP_FD": ("Server runtime", "Inherited fd for startup-readiness signalling (service launch)."),
-    "AIMEE_API_REMOTE_WRITES": ("Server runtime", "Legacy value: `off`, `data`, or `full`. Still parsed, but no longer authorizes user writes; non-off values warn and feed `remote_writes.global_ignored`."),
+    "AIMEE_API_REMOTE_WRITES": ("Server runtime", "Deployment tier: `off`, `data`, or `full`. Without per-user authority it applies only to server-enrolled mTLS clients; with authority configured it is a ceiling and missing-identity refusals feed `remote_writes.global_ignored`."),
+    "AIMEE_API_MTLS": ("Server runtime", "Client-certificate mode: `off`, `optional`, or `required`. The managed server image defaults to `optional` so enrollment works before the durable roster promotes the listener to required."),
     "AIMEE_SEARCH_ALLOW_PRIVATE_ENDPOINT": (
         "Server runtime",
         "Permit the operator-configured search backend (`search.searxng_url`) to resolve to a "

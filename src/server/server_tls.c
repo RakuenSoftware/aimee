@@ -828,14 +828,13 @@ int server_tls_init_default(void)
       aimee_log(LOG_WARN, "server.tls",
                 "mTLS migration is optional: bearer-only clients remain accepted until the "
                 "durable roster is fully presented");
-   /* Secure-by-default: when a tls_port is configured but no cert exists, the
-    * server provisions a self-signed one rather than fall back to a plaintext
-    * listener (the remote path now REQUIRES TLS — plaintext /v1 is loopback-only).
-    * An operator-supplied cert at the same path is left untouched. mTLS still
-    * needs an operator-issued client CA, so this self-signed path is server-TLS
-    * only (mtls==0); when mTLS is required the operator must supply the cert. */
-   if (effective_mtls == 0)
-      pki_ensure_self_signed_server_cert(cert, key);
+   /* Secure-by-default: off/optional modes provision a self-signed server leaf
+    * rather than fall back to plaintext. Optional must do this so a fresh managed
+    * install can start the TLS listener used for initial client enrollment. In
+    * required mode the operator must supply the server identity deliberately;
+    * a missing leaf remains a startup failure rather than an implicit new pin. */
+   if (effective_mtls != 2 && pki_ensure_self_signed_server_cert(cert, key) != 0)
+      return -1;
    /* When mTLS is on, ensure aimee's client CA exists (create-or-load) and the
     * revocation snapshot is loaded BEFORE server_tls_init loads the client CA
     * file and the verify callback starts consulting the snapshot. */

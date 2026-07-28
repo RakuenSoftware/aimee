@@ -51,8 +51,11 @@ See [Event bus](EVENT_BUS.md).
 - The credential vault is the single server-side store for agent keys and OAuth tokens. Plaintext
   agent-key files and per-session credential pushes are retired.
 - mTLS enrollment issues an identity per thin client. Revocation is checked per request.
-- Remote user writes now require a KB-signed identity, server/team/JWKS trust, and an exact subject
-  grant. The old global `remote_writes` setting authorizes nothing.
+- Before a per-user authority is configured, only a server-enrolled mTLS client may use the
+  explicit deployment tier; a shared bearer permits reads. Configuring the authority switches
+  automatically to KB-signed identities, server/team/JWKS trust, and exact subject grants.
+- Fresh managed installs now provision their self-signed server leaf while mTLS enrollment is
+  optional. Explicit `mtls: required` deployments still refuse a missing operator-supplied leaf.
 - Organization catalogs add model allowlists, budgets, rates, spend reports, AWS Bedrock, and
   egress authority.
 - TPM 2, PKCS#11, KMS, reseal recovery, and external WORM witnesses are available for hardened
@@ -140,8 +143,8 @@ See [Event bus](EVENT_BUS.md).
   Settings now edits the allowlisted typed config instead of a copied subset.
 - Remote index and workspace operations upload content from the thin client. Claude CLI execution
   can stay on that client with its existing login and worktree.
-- The attention guard is inert unless enabled. Remote writes are fail-closed until identity trust
-  and per-user grants are configured.
+- The attention guard is inert unless enabled. A server-enrolled mTLS client can use the explicit
+  deployment write tier until strict per-user identity trust and grants are configured.
 
 ## Removed
 

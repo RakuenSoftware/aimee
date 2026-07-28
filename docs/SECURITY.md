@@ -58,16 +58,20 @@ boundary.
 `aimee remote set` pins the server certificate and rotates the bootstrap bearer. On Linux it also
 enrolls a client certificate. Verify the printed fingerprint out of band.
 
-The shared bearer is read-only. Remote write authority comes from a short-lived, single-use,
-KB-signed identity token whose `(server, team, subject)` has a live grant. `data` permits memory,
-document, and index writes. `full` also permits agent, delegate, runner, and workspace control.
+The shared bearer is read-only. In a single-user deployment without a configured per-user
+authority, a client holding an mTLS certificate enrolled by this server may use the explicit
+deployment tier. `data` permits memory, document, and index writes. `full` also permits agent,
+delegate, runner, and workspace control.
+
+When the authority is configured, remote write authority instead comes from a short-lived,
+single-use, KB-signed identity token whose `(server, team, subject)` has a live grant.
 
 The server pins the signing authority through `AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE` and enforces its
 configured server and team IDs. Token replay, unknown keys, wrong audience/team, expired grants, and
 unavailable replay storage fail closed. Grant administration is local-Unix-socket only.
 
-`aimee.api.remote_writes` is still parsed so old configuration loads, but it no longer authorizes a
-user write. A non-off value produces a warning and the `remote_writes.global_ignored` diagnostic.
+In strict mode `aimee.api.remote_writes` is only a ceiling, and
+`remote_writes.global_ignored` counts requests that lacked usable per-user authority.
 
 Enrollment material in `remote.conf` is mode `0600`, opened without following symlinks. Do not copy
 one client's certificate to another machine. Revoke the old identity and enroll the replacement.

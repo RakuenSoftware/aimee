@@ -18,9 +18,11 @@ For local use, check the Unix socket, service manager, server log, and config-di
 
 ## Reads work; writes fail
 
-Check `AIMEE_SERVER_ID`, `AIMEE_SERVER_TEAM_ID`, the management-JWKS trust bundle, the exact subject
-spelling and grant tier, and the identity-token refusal reason. `aimee.api.remote_writes` cannot fix
-the denial. Use the structured `403` and request ID; do not widen every user to test one grant.
+Read the structured `403` first. In the default single-user deployment, confirm the Linux client
+completed mTLS enrollment and the server's `aimee.api.remote_writes` tier is `data` or `full`; a
+bearer alone cannot write. In strict multi-user mode, check `AIMEE_SERVER_ID`,
+`AIMEE_SERVER_TEAM_ID`, the management-JWKS trust bundle, exact subject spelling, grant tier, and
+identity-token refusal reason. Do not widen every user to test one grant.
 
 ## KB is unavailable
 

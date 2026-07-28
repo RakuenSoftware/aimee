@@ -1,6 +1,7 @@
 /* test_server_http.c: unit tests for the aimee-server /v1 persona routes and
  * the per-session persona store (no socket I/O). */
 #include "server_http.h"
+#include "server_http_authz.h"
 #include "server_http_internal.h"
 #include "http_content_encoding.h"
 #include "server.h" /* CAP_* / CAPS_* bits, server_capability_for_method */
@@ -1582,6 +1583,36 @@ int main(void)
                                             SERVER_REMOTE_WRITES_OFF) == 1);
       assert(server_http_route_allowed_caps(1, CAPS_READ_ONLY, "POST", "/v1/mcp/call",
                                             SERVER_REMOTE_WRITES_OFF) == 0);
+
+      /* A single-user deployment remains usable only for an enrolled mTLS
+       * client. A bearer alone never inherits the deployment tier, and setting
+       * up the per-user authority makes a missing identity token strict again. */
+      assert(server_http_select_write_tier(1, 1, 0, SERVER_REMOTE_WRITES_FULL,
+                                           SERVER_REMOTE_WRITES_OFF, 0) ==
+             SERVER_REMOTE_WRITES_FULL);
+      assert(server_http_select_write_tier(1, 0, 0, SERVER_REMOTE_WRITES_FULL,
+                                           SERVER_REMOTE_WRITES_OFF, 0) ==
+             SERVER_REMOTE_WRITES_OFF);
+      assert(server_http_select_write_tier(1, 1, 1, SERVER_REMOTE_WRITES_FULL,
+                                           SERVER_REMOTE_WRITES_OFF, 0) ==
+             SERVER_REMOTE_WRITES_OFF);
+      assert(server_http_select_write_tier(1, 1, 0, SERVER_REMOTE_WRITES_FULL,
+                                           SERVER_REMOTE_WRITES_DATA, 1) ==
+             SERVER_REMOTE_WRITES_DATA);
+      assert(server_http_select_write_tier(1, 1, 0, SERVER_REMOTE_WRITES_OFF,
+                                           SERVER_REMOTE_WRITES_FULL, 1) ==
+             SERVER_REMOTE_WRITES_FULL);
+      assert(server_http_select_write_tier(1, 1, 1, SERVER_REMOTE_WRITES_DATA,
+                                           SERVER_REMOTE_WRITES_FULL, 1) ==
+             SERVER_REMOTE_WRITES_DATA);
+      assert(server_http_select_write_tier(1, 1, 1, SERVER_REMOTE_WRITES_FULL,
+                                           SERVER_REMOTE_WRITES_OFF, 1) ==
+             SERVER_REMOTE_WRITES_OFF);
+      assert(server_http_select_write_tier(0, 1, 0, SERVER_REMOTE_WRITES_FULL,
+                                           SERVER_REMOTE_WRITES_OFF, 0) ==
+             SERVER_REMOTE_WRITES_OFF);
+      assert(server_http_select_write_tier(1, 1, 0, 99, SERVER_REMOTE_WRITES_OFF, 0) ==
+             SERVER_REMOTE_WRITES_OFF);
 
       /* UDS is always full, independent of the level. */
       assert(server_http_conn_caps(0, NULL, SERVER_REMOTE_WRITES_OFF) == CAPS_ALL);

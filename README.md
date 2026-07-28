@@ -87,8 +87,10 @@ out of band. The bootstrap bearer stops working after the first enrollment.
 
 The client registers hooks and MCP with supported coding tools on first setup. Set
 `AIMEE_NO_CLIENT_INTEGRATIONS=1` to keep global tool configuration untouched. The shared bearer is
-read-only. Configure server identity trust and grant the user before running write or delegate
-commands; the [Quickstart](docs/QUICKSTART.md#remote-write-setup) covers it.
+read-only. In the default single-user deployment, the Linux client's enrolled mTLS certificate uses
+the managed deployment tier, so write and delegate commands need no second bootstrap. Multi-user
+deployments can enable strict per-user grants; the
+[Quickstart](docs/QUICKSTART.md#write-and-agent-access) covers both cases.
 
 ```bash
 aimee memory store myhost "PVE at 10.0.0.1"
