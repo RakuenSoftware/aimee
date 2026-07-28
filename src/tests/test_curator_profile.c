@@ -119,22 +119,23 @@ static void test_describe_nonempty(void)
 /* ---- 8. apply updates config fields ---- */
 static void test_apply_config(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-
+   /* apply now PERSISTS through the config module rather than editing a caller's
+    * struct, so the assertions read back through the accessors. The suite runs
+    * with HOME/TMPDIR pointed at a throwaway dir, so this writes to a scratch
+    * config, not the developer's. */
    curator_profile_t p = curator_profile_select(0, NULL);
-   assert(curator_profile_apply(&p, &cfg) == 0);
-   assert(cfg.kb_curator_extract_docs_enabled == 1);
-   assert(cfg.kb_curator_extract_code_enabled == 1);
-   assert(strstr(cfg.kb_curator_extract_command, "curator-extract") != NULL);
+   assert(curator_profile_apply(&p) == 0);
+   assert(config_kb_curator_extract_docs_enabled() == 1);
+   assert(config_kb_curator_extract_code_enabled() == 1);
+   assert(strstr(config_kb_curator_extract_command(), "curator-extract") != NULL);
 
    /* Disabled profile turns off extraction. */
    curator_profile_t dis;
    memset(&dis, 0, sizeof(dis));
    dis.backend = CURATOR_BACKEND_DISABLED;
-   assert(curator_profile_apply(&dis, &cfg) == 0);
-   assert(cfg.kb_curator_extract_docs_enabled == 0);
-   assert(cfg.kb_curator_extract_code_enabled == 0);
+   assert(curator_profile_apply(&dis) == 0);
+   assert(config_kb_curator_extract_docs_enabled() == 0);
+   assert(config_kb_curator_extract_code_enabled() == 0);
 
    printf("  apply_config: ok\n");
 }

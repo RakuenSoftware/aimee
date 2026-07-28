@@ -89,10 +89,6 @@
       "decls": 5,
       "loads": 5
     },
-    "src/curator_profile.c": {
-      "decls": 1,
-      "loads": 0
-    },
     "src/dashboard.c": {
       "decls": 2,
       "loads": 2
@@ -146,10 +142,6 @@
       "loads": 0
     },
     "src/headers/computer_use.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/headers/curator_profile.h": {
       "decls": 1,
       "loads": 0
     },
@@ -422,16 +414,8 @@
       "loads": 2
     },
     "src/modules/guardrails/guardrails_orchestrator.c": {
-      "decls": 8,
-      "loads": 8
-    },
-    "src/modules/guardrails/guardrails_semantic.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/modules/guardrails/guardrails_semantic.h": {
-      "decls": 1,
-      "loads": 0
+      "decls": 7,
+      "loads": 7
     },
     "src/modules/kb-synthesis/kb_curator_drain.c": {
       "decls": 13,
@@ -833,10 +817,6 @@
       "decls": 4,
       "loads": 0
     },
-    "src/tests/support/bench_perf_stubs.c": {
-      "decls": 1,
-      "loads": 0
-    },
     "src/tests/support/ir_ingress_stubs.c": {
       "decls": 2,
       "loads": 0
@@ -940,10 +920,6 @@
     "src/tests/test_curator_code_unit.c": {
       "decls": 1,
       "loads": 1
-    },
-    "src/tests/test_curator_profile.c": {
-      "decls": 1,
-      "loads": 0
     },
     "src/tests/test_curator_queue.c": {
       "decls": 1,
@@ -1143,8 +1119,8 @@
     }
   },
   "totals": {
-    "decls": 982,
-    "files": 285,
-    "loads": 508
+    "decls": 975,
+    "files": 279,
+    "loads": 507
   }
 }
