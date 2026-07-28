@@ -386,10 +386,12 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 			// when the status plane later fails so a retry cannot overlap the job.
 			return DelegateResult{}, delegateExecutionError(err, true, false, 0)
 		}
-		// Any nonterminal status without an assigned agent is not progress. The
-		// resource plane can mark a job running before admission assigns an agent,
-		// so status alone cannot end the unassigned lease.
-		assigned := strings.TrimSpace(status.Agent) != ""
+		// Any nonterminal status without a worker lease is not progress. The
+		// resource plane persists agent_name as soon as routing selects an agent,
+		// while the job is still pending; only its transition to running proves a
+		// worker actually started. Treating a routed pending job as assigned makes
+		// it immortal when capacity never admits it.
+		assigned := status.JobStatus == "running" && strings.TrimSpace(status.Agent) != ""
 		terminal := isTerminalDelegateStatus(status.JobStatus)
 		if !assigned && !terminal {
 			if unassignedSince.IsZero() {

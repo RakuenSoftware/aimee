@@ -220,6 +220,10 @@ ENV AIMEE_SERVER_HTTP_BIND=1
 # wizard user that grant is bound to the enrolled mTLS certificate. The legacy
 # setting remains parseable only so existing configurations still load.
 ENV AIMEE_API_REMOTE_WRITES=off
+# Request enrolled client certificates from the first connection even when a
+# persisted config predates this setting. Bootstrap remains reachable while the
+# listener is optional, then the durable roster promotes it to required mTLS.
+ENV AIMEE_API_MTLS=optional
 # Standalone by default: no kb configured. Point AIMEE_KB_API_URL at a running
 # aimee-kb (e.g. http://aimee-kb:8741) to enable the shared/vector features.
 # Mirror tier (workspace-resource-plane §3): the per-workspace bare mirrors +

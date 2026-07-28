@@ -50,12 +50,19 @@ economizer: safe   # off | safe | aggressive
 ```yaml
 aimee:
   api:
+    mtls: optional       # off | optional | required
     remote_writes: off   # off | data | full
 ```
 
-This legacy value is still parsed so old files load. It no longer authorizes user `/v1` writes;
-non-off values warn and feed `remote_writes.global_ignored`. Configure server identity trust and
-per-user grants instead. See [Security](SECURITY.md#remote-access).
+`remote_writes` is a legacy value retained so old files load. It no longer authorizes user `/v1`
+writes; non-off values warn and feed `remote_writes.global_ignored`. The first wizard user's grant
+is bound to its enrolled certificate, while additional users use server identity trust and per-user
+grants. See [Security](SECURITY.md#remote-access).
+
+The managed server image sets `AIMEE_API_MTLS=optional`, overriding older persisted configs so
+enrolled clients present their certificates. The durable presentation ramp promotes the listener
+to required after all active certificates have presented. Set the environment variable explicitly
+to `off` or `required` only when the deployment calls for it.
 
 ### Delegate isolation
 
