@@ -1,0 +1,65 @@
+{
+  "runtime": {
+    "container_image": "ghcr.io/rakuensoftware/aimee-llm@sha256:d5d4fa0b4f472490559e6e6c3fc5b2804e0fdd9b8d8bb89c72575558027d45df",
+    "llama_cpp_build": "b9775-be4a6a63e",
+    "quantization_policy": "Use the publisher's approximately four-bit artifact; no requantization. Gemma E2B/E4B are Q4_0 because their publisher does not provide Q4_K_M. Record this asymmetry when interpreting close results."
+  },
+  "models": [
+    {
+      "label": "gemma4_e2b",
+      "family": "gemma-4",
+      "parameters": "E2B",
+      "repository": "ggml-org/gemma-4-E2B-it-GGUF",
+      "revision": "b4243c156154b6dca9324415f8c7ccc098b4aed1",
+      "file": "gemma-4-E2B-it-Q4_0.gguf",
+      "bytes": 2841481184
+    },
+    {
+      "label": "gemma4_e4b",
+      "family": "gemma-4",
+      "parameters": "E4B",
+      "repository": "ggml-org/gemma-4-E4B-it-GGUF",
+      "revision": "b8093469224f83f5c38f691eb906c380e9e63114",
+      "file": "gemma-4-E4B-it-Q4_0.gguf",
+      "bytes": 4590807392
+    },
+    {
+      "label": "gemma4_12b",
+      "family": "gemma-4",
+      "parameters": "12B",
+      "repository": "unsloth/gemma-4-12B-it-qat-GGUF",
+      "revision": "9586f3257bc62bd179767241c7ec0f66bc2a314a",
+      "file": "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf",
+      "bytes": 6716355328,
+      "sha256": "cc9ff072e0a8203429ed854e6662c17a6c2bc1e5dca5b475dd4736caaacbc165"
+    },
+    {
+      "label": "gemma4_26b_a4b",
+      "family": "gemma-4",
+      "parameters": "26B-A4B",
+      "repository": "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
+      "revision": "02749a7b272109255a4c559a80894d3d9777574c",
+      "file": "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf",
+      "bytes": 14249045120,
+      "sha256": "dcf179a91153e3a7ece792e48ef872180d9d6ef9b7677f0a0bd3e83cfe624d5e"
+    },
+    {
+      "label": "gemma4_31b",
+      "family": "gemma-4",
+      "parameters": "31B",
+      "repository": "unsloth/gemma-4-31B-it-GGUF",
+      "revision": "c1ac76e99d5513b141e8adde7288b85c3f9c32ec",
+      "file": "gemma-4-31B-it-Q4_K_M.gguf",
+      "bytes": 18323733440
+    },
+    {
+      "label": "qwen36_35b_a3b",
+      "family": "qwen-3.6",
+      "parameters": "35B-A3B",
+      "repository": "unsloth/Qwen3.6-35B-A3B-GGUF",
+      "revision": "a483e9e6cbd595906af30beda3187c2663a1118c",
+      "file": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+      "bytes": 22134528992
+    }
+  ]
+}
