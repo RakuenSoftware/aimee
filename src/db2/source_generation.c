@@ -101,10 +101,13 @@ static int sg_load_generation(void *conn, int64_t generation_id,
 
 static int64_t sg_upsert_repository(void *conn, const char *key, const char *default_ref)
 {
+   /* Repositories are unique per tenant, so the conflict target is the full
+    * (team_id, repository_key) key. team_id stays 0 until the write path carries
+    * an authenticated team; the identity of the key is what matters here. */
    static const char *sql =
-       "INSERT INTO kb_source_repositories (repository_key, default_ref, updated_at)"
-       " VALUES (?1, ?2, pg_now_text())"
-       " ON CONFLICT (repository_key) DO UPDATE SET"
+       "INSERT INTO kb_source_repositories (repository_key, team_id, default_ref, updated_at)"
+       " VALUES (?1, 0, ?2, pg_now_text())"
+       " ON CONFLICT (team_id, repository_key) DO UPDATE SET"
        " default_ref = CASE WHEN EXCLUDED.default_ref = '' THEN kb_source_repositories.default_ref"
        "                    ELSE EXCLUDED.default_ref END, updated_at = pg_now_text()"
        " RETURNING id";

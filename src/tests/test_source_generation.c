@@ -263,6 +263,26 @@ int main(void)
    assert(db2_source_generation_get(g1.generation_id, &resolved) == 0);
    assert(scalar_int("SELECT COUNT(*) FROM kb_original_documents WHERE id>?1", 0) == 0);
 
+   /* Repository identity is per tenant. repository_key is derived from the
+    * repository itself, so two teams indexing the same upstream produce the same
+    * key; under a global unique constraint they would collide onto one row and
+    * share every snapshot, ref, and generation beneath it. */
+   {
+      char err[256] = "";
+      exec_ok("INSERT INTO kb_source_repositories(repository_key,team_id)"
+              " VALUES('github:shared/repo',1)");
+      exec_ok("INSERT INTO kb_source_repositories(repository_key,team_id)"
+              " VALUES('github:shared/repo',2)");
+      assert(scalar_int("SELECT COUNT(*) FROM kb_source_repositories"
+                        " WHERE repository_key='github:shared/repo' AND id>?1",
+                        0) == 2);
+      /* ...but the same key twice within one tenant is still one repository. */
+      assert(aimee_pg_exec(db2_conn(),
+                           "INSERT INTO kb_source_repositories(repository_key,team_id)"
+                           " VALUES('github:shared/repo',1)",
+                           err, sizeof(err)) != 0);
+   }
+
    exec_ok("PRAGMA foreign_keys=ON");
    db2_test_shim_close();
    puts("source-generation: all tests passed");
