@@ -521,6 +521,16 @@ int64_t db2_kb_documents_insert_chunk(const char *project, const char *file_path
    if (!conn)
       return -1;
 
+   /* Treat the DB adapter as the final UTF-8 trust boundary. Most ingest paths
+    * sanitize while chunking, but durable/replayed work can originate from
+    * older producers and Postgres rejects one malformed byte by aborting the
+    * entire transaction. Keep the caller's buffer immutable and bind only a
+    * validated copy. */
+   char *clean_content = strdup(content ? content : "");
+   if (!clean_content)
+      return -1;
+   (void)text_sanitize_utf8(clean_content);
+
    static const char *sql =
        "INSERT INTO kb_documents"
        " (project, file_path, file_hash, chunk_index, heading_path, line_start, line_end,"
@@ -530,7 +540,10 @@ int64_t db2_kb_documents_insert_chunk(const char *project, const char *file_path
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
+   {
+      free(clean_content);
       return -1;
+   }
    aimee_pg_bind_text(st, "?1", project ? project : "");
    aimee_pg_bind_text(st, "?2", file_path ? file_path : "");
    aimee_pg_bind_text(st, "?3", file_hash ? file_hash : "");
@@ -538,12 +551,13 @@ int64_t db2_kb_documents_insert_chunk(const char *project, const char *file_path
    aimee_pg_bind_text(st, "?5", heading_path ? heading_path : "");
    aimee_pg_bind_int(st, "?6", line_start);
    aimee_pg_bind_int(st, "?7", line_end);
-   aimee_pg_bind_text(st, "?8", content ? content : "");
+   aimee_pg_bind_text(st, "?8", clean_content);
    aimee_pg_bind_int(st, "?9", token_count);
    int64_t new_id = -1;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
       new_id = aimee_pg_column_int64(st, 0);
    aimee_pg_finalize(st);
+   free(clean_content);
    return new_id;
 }
 
@@ -596,6 +610,11 @@ int64_t db2_kb_documents_insert_chunk_pdf(const char *project, const char *file_
    if (!conn)
       return -1;
 
+   char *clean_content = strdup(content ? content : "");
+   if (!clean_content)
+      return -1;
+   (void)text_sanitize_utf8(clean_content);
+
    static const char *sql =
        "INSERT INTO kb_documents"
        " (project, file_path, file_hash, chunk_index, heading_path, line_start, line_end,"
@@ -606,7 +625,10 @@ int64_t db2_kb_documents_insert_chunk_pdf(const char *project, const char *file_
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
+   {
+      free(clean_content);
       return -1;
+   }
    aimee_pg_bind_text(st, "?1", project ? project : "");
    aimee_pg_bind_text(st, "?2", file_path ? file_path : "");
    aimee_pg_bind_text(st, "?3", file_hash ? file_hash : "");
@@ -614,7 +636,7 @@ int64_t db2_kb_documents_insert_chunk_pdf(const char *project, const char *file_
    aimee_pg_bind_text(st, "?5", heading_path ? heading_path : "");
    aimee_pg_bind_int(st, "?6", line_start);
    aimee_pg_bind_int(st, "?7", line_end);
-   aimee_pg_bind_text(st, "?8", content ? content : "");
+   aimee_pg_bind_text(st, "?8", clean_content);
    aimee_pg_bind_int(st, "?9", token_count);
    aimee_pg_bind_text(st, "?10", chunk_strategy ? chunk_strategy : "heading");
    aimee_pg_bind_int(st, "?11", page_start);
@@ -625,6 +647,7 @@ int64_t db2_kb_documents_insert_chunk_pdf(const char *project, const char *file_
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
       new_id = aimee_pg_column_int64(st, 0);
    aimee_pg_finalize(st);
+   free(clean_content);
    return new_id;
 }
 
