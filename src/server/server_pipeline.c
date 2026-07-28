@@ -101,15 +101,15 @@ static void env_from_ledger(const rtp_pass_t *p, const rtp_attempt_t *a, rtp_env
    e->artifact_present = (e->is_draft && a) ? a->envelope_valid : 0;
 }
 
-static void load_loop_cfg(const config_t *cfg, const rtp_run_t *run, rtp_loop_cfg_t *out)
+static void load_loop_cfg(const rtp_run_t *run, rtp_loop_cfg_t *out)
 {
-   out->done_bar = run->done_bar[0] ? run->done_bar : cfg->roundtable_pipeline_done_bar;
-   out->max_passes = cfg->roundtable_pipeline_max_passes;
-   out->max_attempts_per_pass = cfg->roundtable_pipeline_max_attempts_per_pass > 0
-                                    ? cfg->roundtable_pipeline_max_attempts_per_pass
+   out->done_bar = run->done_bar[0] ? run->done_bar : config_roundtable_pipeline_done_bar();
+   out->max_passes = config_roundtable_pipeline_max_passes();
+   out->max_attempts_per_pass = config_roundtable_pipeline_max_attempts_per_pass() > 0
+                                    ? config_roundtable_pipeline_max_attempts_per_pass()
                                     : 2;
-   out->max_phase_cost_usd = cfg->roundtable_pipeline_max_cost_usd;
-   out->max_total_cost_usd = cfg->roundtable_pipeline_max_total_cost_usd;
+   out->max_phase_cost_usd = config_roundtable_pipeline_max_cost_usd();
+   out->max_total_cost_usd = config_roundtable_pipeline_max_total_cost_usd();
 }
 
 static double phase_cost(const rtp_run_t *run, const char *phase)
@@ -155,7 +155,7 @@ static cJSON *build_digest(const rtp_run_t *run, const rtp_pass_t *latest, int h
 void execute_gate_merge(int id, rtp_run_t *run, rtp_gate_t *gate, int gate_no, cJSON *req,
                         cJSON *resp);
 static int resolve_panel(const config_t *cfg, rtp_panel_t *out);
-static int maybe_ttl_abandon(int id, rtp_run_t *run, const config_t *cfg);
+static int maybe_ttl_abandon(int id, rtp_run_t *run);
 
 /* Open a human gate: record the gate (PR + expected head SHA as the merge-intent
  * key), move to *_pending, and release re-creatable resources (#47) — the
@@ -355,7 +355,7 @@ int handle_pipeline_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    /* lazily enforce the unanswered-gate TTL when the run is observed (#47). */
    config_t scfg;
    if (config_load(&scfg) == 0)
-      maybe_ttl_abandon(id, &run, &scfg);
+      maybe_ttl_abandon(id, &run);
 
    const char *phase = phase_for_state(run.state);
    rtp_pass_t latest;
@@ -419,7 +419,7 @@ int handle_pipeline_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    {
       /* lazily enforce the unanswered-gate TTL on each observed run (#47). */
       if (have_cfg)
-         maybe_ttl_abandon(rows[i].id, &rows[i], &lcfg);
+         maybe_ttl_abandon(rows[i].id, &rows[i]);
       cJSON *o = cJSON_CreateObject();
       cJSON_AddNumberToObject(o, "pipeline_id", rows[i].id);
       cJSON_AddStringToObject(o, "state", rows[i].state);
@@ -1287,9 +1287,9 @@ static int draft_complete(server_conn_t *conn, rtp_run_t *run, rtp_pass_t *lates
 /* Unanswered-gate TTL (#47/#57): an awaiting-human *_pending gate older than the
  * configured TTL moves to abandoned with child-run stop — never an auto-pass,
  * and never applied to *_merge_pending. Returns 1 if it abandoned the run. */
-static int maybe_ttl_abandon(int id, rtp_run_t *run, const config_t *cfg)
+static int maybe_ttl_abandon(int id, rtp_run_t *run)
 {
-   if (cfg->roundtable_pipeline_gate_ttl_h <= 0)
+   if (config_roundtable_pipeline_gate_ttl_h() <= 0)
       return 0;
    int gate_no = 0;
    if (strcmp(run->state, RTP_STATE_GATE1_PENDING) == 0)
@@ -1298,7 +1298,7 @@ static int maybe_ttl_abandon(int id, rtp_run_t *run, const config_t *cfg)
       gate_no = 2;
    else
       return 0;
-   if (!rtp_gate_age_exceeds_hours(id, gate_no, cfg->roundtable_pipeline_gate_ttl_h))
+   if (!rtp_gate_age_exceeds_hours(id, gate_no, config_roundtable_pipeline_gate_ttl_h()))
       return 0;
    stop_inflight(id, RTP_PHASE_PROPOSAL);
    stop_inflight(id, RTP_PHASE_IMPL);
@@ -1501,7 +1501,7 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * doing anything else. Never applies to *_merge_pending (#57). */
    {
       config_t tcfg;
-      if (config_load(&tcfg) == 0 && maybe_ttl_abandon(id, &run, &tcfg))
+      if (config_load(&tcfg) == 0 && maybe_ttl_abandon(id, &run))
          return server_send_error(conn, "pipeline: gate TTL exceeded; pipeline abandoned", NULL);
    }
 
@@ -1606,7 +1606,7 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       env_from_ledger(&latest, hav_a ? &a : NULL, &env);
 
       rtp_loop_cfg_t lc;
-      load_loop_cfg(&cfg, &run, &lc);
+      load_loop_cfg(&run, &lc);
       rtp_loop_state_t ls = {latest.pass_no, hav_a ? a.attempt_no : 1, phase_cost(&run, phase),
                              run.total_cost_usd, run.accepted_question_count};
       rtp_action_t act = rtp_loop_decide(&lc, &ls, &env);
@@ -1804,7 +1804,7 @@ int handle_pipeline_gate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * expired *_pending gate is abandoned and can never be passed/merged, even by
     * an authorized caller invoking pipeline.gate directly. */
    config_t gcfg;
-   if (config_load(&gcfg) == 0 && maybe_ttl_abandon(id, &run, &gcfg))
+   if (config_load(&gcfg) == 0 && maybe_ttl_abandon(id, &run))
       return server_send_error(conn, "pipeline: gate TTL exceeded; pipeline abandoned (not passed)",
                                NULL);
 

@@ -2258,6 +2258,10 @@ const char *config_embedding_command(const config_t *cfg, const char *requested)
  * this thread. */
 const char *config_embedding_command_current(const char *requested);
 
+/* The raw configured value, empty when unset — unlike the resolving form
+ * above, which never returns empty. */
+const char *config_embedding_command_field(void);
+
 /* Opaque boolean accessors — read one flag without naming config_t.
  * Fail closed (0) when the config cannot be loaded. */
 int config_audit_worm_enabled(void);

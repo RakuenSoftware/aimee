@@ -11,7 +11,6 @@
 
 #include <stddef.h>
 
-#include "config.h"             /* config_t */
 #include "kb_curator_extract.h" /* kb_curator_extract_opts_t */
 
 /* Resource lane. Stages in different lanes are meant to run on independent
@@ -29,8 +28,9 @@ typedef struct
 {
    const char *name;  /* stable id (config/GUI key), e.g. "index_claims" */
    const char *label; /* human status label, e.g. "index claims" */
-   /* Enabled predicate; NULL => always on. Reads this stage's config flag. */
-   int (*enabled)(const config_t *cfg);
+   /* Enabled predicate; NULL => always on. Asks config for this stage's flag
+    * itself — the pipeline no longer threads a config_t through to it. */
+   int (*enabled)(void);
    /* Worker: process one unit. Returns 1=did work, 0=queue empty, <0=error. */
    int (*run)(const kb_curator_extract_opts_t *opts);
    /* Max units to run per pass; <=0 is treated as 1. Cheap stages (embed/SQL,
@@ -47,7 +47,7 @@ typedef struct
  * with the stage label before each unit. `lane_filter` < 0 runs every lane; otherwise only
  * stages whose lane matches (so a per-lane worker thread can drain just its lane). */
 int kb_curator_pipeline_run_pass(const kb_curator_stage_desc_t *stages, size_t n, int lane_filter,
-                                 const config_t *cfg, const kb_curator_extract_opts_t *opts,
+                                 const kb_curator_extract_opts_t *opts,
                                  void (*set_status)(const char *label));
 
 #endif /* DEC_KB_CURATOR_PIPELINE_H */

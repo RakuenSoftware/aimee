@@ -85,7 +85,7 @@
  * healed by the next successful rebuild), never a torn/partial table and never a
  * permissive no-route-accepts-all state (no-route demotes to LOW). A persistent
  * failure is surfaced via WARN so a wedged db2 / schema drift is observable. */
-static int kb_cross_repo_meta_rebuild(const config_t *cfg)
+static int kb_cross_repo_meta_rebuild(void)
 {
    int ids = db2_cross_repo_rebuild_identities();
    if (ids < 0)
@@ -112,9 +112,9 @@ static int kb_cross_repo_meta_rebuild(const config_t *cfg)
                 "build-dep rebuild failed; keeps last-known-good build deps this cycle");
       return -1;
    }
-   int bsym = db2_cross_repo_recompute_blocked_symbols(cfg->kb_curator_cross_repo_k,
-                                                       cfg->kb_curator_cross_repo_m,
-                                                       cfg->kb_curator_cross_repo_len_min);
+   int bsym = db2_cross_repo_recompute_blocked_symbols(config_kb_curator_cross_repo_k(),
+                                                       config_kb_curator_cross_repo_m(),
+                                                       config_kb_curator_cross_repo_len_min());
    aimee_log(
        LOG_INFO, "kb.cross_repo.meta",
        "rebuilt cross-repo metadata: identities=%d routes=%d build_deps=%d blocked_symbols=%d", ids,
@@ -156,7 +156,7 @@ static void kb_curator_projection_sweep(const config_t *cfg)
       aimee_log(LOG_INFO, "kb.graph.projection",
                 "published %lld edge(s) across %d changed project(s)", (long long)total, built);
    if (built > 0 && cfg->kb_curator_cross_repo_graph_enabled)
-      kb_cross_repo_meta_rebuild(cfg);
+      kb_cross_repo_meta_rebuild();
 }
 
 /* Curator pipeline registry: the ordered stages the drain flows work through,
@@ -166,45 +166,45 @@ static void kb_curator_projection_sweep(const config_t *cfg)
  * each pass so a freshly-extracted document's claims are indexed + contradiction-
  * checked promptly. Data-driven so a GUI can toggle/reorder and per-lane workers
  * can each drain one lane. */
-static int en_extract_docs(const config_t *c)
+static int en_extract_docs(void)
 {
-   return c->kb_curator_extract_docs_enabled;
+   return config_kb_curator_extract_docs_enabled();
 }
-static int en_extract_code(const config_t *c)
+static int en_extract_code(void)
 {
-   return c->kb_curator_extract_code_enabled;
+   return config_kb_curator_extract_code_enabled();
 }
-static int en_resolve_entities(const config_t *c)
+static int en_resolve_entities(void)
 {
-   return c->kb_curator_resolve_entities_enabled;
+   return config_kb_curator_resolve_entities_enabled();
 }
-static int en_index_narrative(const config_t *c)
+static int en_index_narrative(void)
 {
-   return c->kb_curator_index_narrative_enabled;
+   return config_kb_curator_index_narrative_enabled();
 }
-static int en_index_claims(const config_t *c)
+static int en_index_claims(void)
 {
-   return c->kb_curator_index_claims_enabled;
+   return config_kb_curator_index_claims_enabled();
 }
-static int en_detect_contradictions(const config_t *c)
+static int en_detect_contradictions(void)
 {
-   return c->kb_curator_detect_contradictions_enabled;
+   return config_kb_curator_detect_contradictions_enabled();
 }
-static int en_index_code_unit(const config_t *c)
+static int en_index_code_unit(void)
 {
-   return c->kb_curator_index_code_unit_enabled;
+   return config_kb_curator_index_code_unit_enabled();
 }
-static int en_link_artifacts(const config_t *c)
+static int en_link_artifacts(void)
 {
-   return c->kb_curator_link_artifacts_enabled;
+   return config_kb_curator_link_artifacts_enabled();
 }
-static int en_synthesize(const config_t *c)
+static int en_synthesize(void)
 {
-   return c->kb_curator_synthesize_enabled;
+   return config_kb_curator_synthesize_enabled();
 }
-static int en_promote_entity(const config_t *c)
+static int en_promote_entity(void)
 {
-   return c->kb_curator_promote_entity_enabled;
+   return config_kb_curator_promote_entity_enabled();
 }
 
 static void curator_set_status(const char *label)
@@ -223,13 +223,16 @@ static void curator_index_set_status(const char *label)
  * index-lane worker -- concurrent with GPU extraction -- and are toggleable like
  * any other stage. Each config_loads for the embedder command + project list (as
  * kb_curator_queue_docs_for_project does) and returns 1=did work / 0=idle. */
-static int en_embedder(const config_t *c)
+static int en_embedder(void)
 {
-   return c->embedding_command[0] != '\0';
+   /* config_embedding_command_current resolves request > config > env > builtin;
+    * this stage only cares whether an embedder is CONFIGURED, so read the raw
+    * field rather than the resolved value, which is never empty. */
+   return config_embedding_command_field()[0] != '\0';
 }
-static int en_evidence_embed(const config_t *c)
+static int en_evidence_embed(void)
 {
-   return c->kb_evidence_embed_enabled;
+   return config_kb_evidence_embed_enabled();
 }
 
 static int stage_embed_code(const kb_curator_extract_opts_t *opts)
@@ -769,7 +772,7 @@ static void *drain_thread_main(void *arg)
        * Cleared only on a successful (0-return) rebuild, so a failed attempt stays
        * pending and retries — the one-shot guarantee is the flag-clear here. */
       if (cross_repo_cold_start_pending && cfg.kb_curator_cross_repo_graph_enabled &&
-          kb_cross_repo_meta_rebuild(&cfg) == 0)
+          kb_cross_repo_meta_rebuild() == 0)
          cross_repo_cold_start_pending = 0;
 
       /* Governance decision revisit sweep — runs every poll (P1). Flips active
@@ -890,7 +893,7 @@ static void *drain_thread_main(void *arg)
          /* This (main) worker drives the LLM lane; the CPU index lane runs on its own
           * thread (kb_curator_index_lane_main) so indexing does not wait behind each
           * multi-second extraction. */
-         int r = kb_curator_pipeline_run_pass(ordered, nordered, KB_CURATOR_LANE_LLM, &cfg, &opts,
+         int r = kb_curator_pipeline_run_pass(ordered, nordered, KB_CURATOR_LANE_LLM, &opts,
                                               curator_set_status);
          if (r < 0)
          {
@@ -1022,7 +1025,7 @@ static void *kb_curator_index_lane_main(void *arg)
       while (!ctx->stop && drained < CURATOR_DRAIN_BATCH)
       {
          db2_lease_release_idle();
-         r = kb_curator_pipeline_run_pass(ordered, nordered, KB_CURATOR_LANE_INDEX, &cfg, &opts,
+         r = kb_curator_pipeline_run_pass(ordered, nordered, KB_CURATOR_LANE_INDEX, &opts,
                                           curator_index_set_status);
          if (r != 1)
             break; /* 0 = INDEX queues empty; <0 = a stage errored */

@@ -2171,6 +2171,22 @@ int config_ingress_audit_async(void)
  *
  * Returns a pointer into a function-local static, valid until the next call on
  * this thread. Callers copy it if they need to keep it. */
+/* The RAW configured embedding command, with no resolution applied.
+ *
+ * config_embedding_command_current() answers "what should I embed with", which
+ * is never empty — it falls back to an endpoint or the builtin. Callers that
+ * need "did the operator configure an embedder at all" have to see the empty
+ * string, so they get the field itself. The generated accessor for this field
+ * is suppressed because the resolving function already owns the name. */
+const char *config_embedding_command_field(void)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, embedding_command), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
 const char *config_embedding_command_current(const char *requested)
 {
    if (requested && requested[0])

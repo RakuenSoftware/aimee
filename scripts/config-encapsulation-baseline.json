@@ -434,7 +434,7 @@
       "loads": 0
     },
     "src/modules/kb-synthesis/kb_curator_drain.c": {
-      "decls": 26,
+      "decls": 13,
       "loads": 11
     },
     "src/modules/kb-synthesis/kb_curator_extract.c": {
@@ -471,14 +471,6 @@
     },
     "src/modules/kb-synthesis/kb_curator_llm.h": {
       "decls": 1,
-      "loads": 0
-    },
-    "src/modules/kb-synthesis/kb_curator_pipeline.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/modules/kb-synthesis/kb_curator_pipeline.h": {
-      "decls": 2,
       "loads": 0
     },
     "src/modules/kb-synthesis/kb_curator_resolve_entities.c": {
@@ -794,7 +786,7 @@
       "loads": 1
     },
     "src/server/server_pipeline.c": {
-      "decls": 12,
+      "decls": 9,
       "loads": 7
     },
     "src/server/server_runner_endpoints.c": {
@@ -948,10 +940,6 @@
     "src/tests/test_curator_code_unit.c": {
       "decls": 1,
       "loads": 1
-    },
-    "src/tests/test_curator_pipeline_sched.c": {
-      "decls": 2,
-      "loads": 0
     },
     "src/tests/test_curator_profile.c": {
       "decls": 1,
@@ -1155,8 +1143,8 @@
     }
   },
   "totals": {
-    "decls": 1016,
-    "files": 288,
+    "decls": 995,
+    "files": 285,
     "loads": 518
   }
 }
