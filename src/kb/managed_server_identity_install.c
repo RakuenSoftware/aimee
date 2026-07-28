@@ -71,6 +71,24 @@ static int select_team(const kb_principal_t *owner, int64_t *team_id)
    return db2_tenant_scope_commit();
 }
 
+static int ensure_owner_membership(const kb_principal_t *owner, int64_t team_id)
+{
+   char owner_key[576];
+   int64_t existing_default = 0;
+   if (!owner || team_id < 1 || kb_identity_key(owner, owner_key, sizeof(owner_key)) != 0 ||
+       db2_tenant_scope_begin(owner, 0) != 0)
+      return -1;
+   int rc = db2_membership_add(owner_key, team_id,
+                               db2_membership_default_team(owner_key, &existing_default) != 0,
+                               NULL);
+   if (rc != 0)
+   {
+      db2_tenant_scope_rollback();
+      return -1;
+   }
+   return db2_tenant_scope_commit();
+}
+
 static int pending_registry(const kb_principal_t *owner,
                             const kb_managed_server_identity_t *identity, char status[32])
 {
@@ -220,6 +238,14 @@ int kb_managed_server_identity_install(const kb_managed_server_identity_install_
           kb_managed_server_identity_save(identity_path, options->owner, &identity) != 0)
          goto done;
    }
+
+   /* Loading a pending identity is the normal crash-recovery path. Older
+    * managed installers could persist that file after creating the team but
+    * before enrolling the bootstrap owner, so repair the invariant after both
+    * load and generation. The insert is idempotent and does not change an
+    * existing default-team choice. */
+   if (ensure_owner_membership(&owner, identity.team_id) != 0)
+      goto done;
 
    if (strcmp(identity.state, "ready") != 0)
    {
