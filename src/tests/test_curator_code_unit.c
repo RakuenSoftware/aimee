@@ -17,6 +17,7 @@
 #include "cJSON.h"
 #include "config.h"
 #include "kb_curator_extract.h"
+#include "kb_curator_queue.h"
 #include "kb_curator_grounding.h"
 #include "kb_curator_sidecar.h"
 
@@ -670,6 +671,46 @@ static void test_pick_sidecar_command_resolution(void)
    printf("  PASS: test_pick_sidecar_command_resolution\n");
 }
 
+/* A job whose attempts are exhausted goes to status='failed' — which is neither
+ * 'pending' nor 'done'. The queue counters used to report only those two, so a
+ * curator that failed EVERY job read as pending=0 done=0: identical to an idle,
+ * healthy queue. Health said "ok" while indexing was dead.
+ *
+ * Assert the failing jobs are counted AND that a sample diagnostic comes back,
+ * because the count alone does not tell an operator what to fix. */
+static void test_queue_counts_surface_failures(void)
+{
+   db2_test_shim_open();
+   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   assert(db != NULL);
+
+   assert(sqlite3_exec(db,
+                       "INSERT INTO kb_code_unit_jobs (id,project,file_path,symbol,status,attempts,"
+                       "last_error) VALUES "
+                       "(9301,'p','a.c','fn_a','failed',3,'connect 10.0.0.9:8080: No route to "
+                       "host'),"
+                       "(9302,'p','b.c','fn_b','failed',3,'connect 10.0.0.9:8080: No route to "
+                       "host'),"
+                       "(9303,'p','c.c','fn_c','pending',0,'')",
+                       NULL, NULL, NULL) == SQLITE_OK);
+
+   kb_curator_queue_counts_t qc;
+   memset(&qc, 0, sizeof(qc));
+   kb_curator_queue_counts(&qc);
+
+   /* The two dead jobs are visible instead of vanishing between the buckets. */
+   assert(qc.code_unit_failing == 2);
+   assert(qc.code_unit_pending == 1);
+   assert(qc.code_unit_done == 0);
+
+   /* And the reason travels with the count. */
+   assert(strstr(qc.code_unit_last_error, "No route to host") != NULL);
+
+   db2_test_shim_close();
+   printf("  PASS: test_queue_counts_surface_failures (failed jobs counted, not silently dropped "
+          "between pending and done)\n");
+}
+
 int main(void)
 {
    printf("curator_code_unit:\n");
@@ -699,6 +740,7 @@ int main(void)
    test_sidecar_quoting_end_to_end();
    test_append_sidecar_error();
 
+   test_queue_counts_surface_failures();
    printf("ok\n");
    return 0;
 }
