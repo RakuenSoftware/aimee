@@ -1756,20 +1756,17 @@ void handle_conn(int fd, int is_tcp, int is_management)
       }
    }
    OPENSSL_cleanse(&identity_claims, sizeof(identity_claims));
-
-   config_t transport_cfg;
-   config_load(&transport_cfg);
    char connection_header[128] = "";
    int keepalive_requested =
        server_conn_io_has_ssl(fd) && server_http_keepalive_route_eligible(path) &&
        http_header(buf, "Connection", connection_header, sizeof(connection_header)) &&
        strcasestr(connection_header, "keep-alive") != NULL &&
        strcasestr(connection_header, "close") == NULL;
-   if (transport_cfg.transport_server_keepalive_enabled && keepalive_requested)
+   if (config_transport_server_keepalive_enabled() && keepalive_requested)
       server_http_keepalive_set(1);
    char accept_encoding[128] = "";
    int gzip_allowed =
-       transport_cfg.transport_thinclient_gzip_enabled && server_http_gzip_route_eligible(path);
+       config_transport_thinclient_gzip_enabled() && server_http_gzip_route_eligible(path);
    server_http_gzip_set(
        gzip_allowed &&
        http_header(buf, "Accept-Encoding", accept_encoding, sizeof(accept_encoding)) &&
@@ -2023,9 +2020,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
        (strcmp(path, "/v1/chat/completions") == 0 || strcmp(path, "/v1/completions") == 0 ||
         strcmp(path, "/v1/responses") == 0))
    {
-      config_t evcfg;
-      config_load(&evcfg);
-      if (evcfg.kb_evidence_emit_enabled)
+      if (config_kb_evidence_emit_enabled())
       {
          char tid[40];
          ingress_preinject_mint_turn_id(tid, sizeof(tid));

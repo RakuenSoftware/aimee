@@ -114,11 +114,28 @@ int web_egress_private_endpoint_allowed(void)
    return 0;
 }
 
-/* minimal stubs: the test drives the duckduckgo path only */
+/* minimal stubs: the test drives the duckduckgo path only.
+ *
+ * These replace a config_load stub that zeroed the whole struct. Returning 0
+ * from each accessor is the same contract — web_search falls back to its
+ * HTTP_RETRY_* defaults — but stubs one value per knob instead of requiring the
+ * test to know config_t's shape. */
 #include "config.h"
 int config_load(config_t *c)
 {
    memset(c, 0, sizeof(*c));
+   return 0;
+}
+int config_retry_max_attempts(void)
+{
+   return 0;
+}
+int config_retry_base_ms(void)
+{
+   return 0;
+}
+int config_retry_max_ms(void)
+{
    return 0;
 }
 int http_retry_post(const char *u, const char *a, const char *b, char **r, int t)

@@ -2,32 +2,24 @@
   "_note": "Ratchet baseline for check-config-encapsulation.py. config_t is a secret of the config module; these are the sites that still materialise it. Counts may only DECREASE. Migrate a file to config accessors, then rerun with --update-baseline.",
   "files": {
     "src/cmd_agent.c": {
-      "decls": 9,
-      "loads": 9
+      "decls": 2,
+      "loads": 2
     },
     "src/cmd_agent_delegate.c": {
-      "decls": 6,
-      "loads": 6
+      "decls": 5,
+      "loads": 5
     },
     "src/cmd_agent_delegate_status.c": {
       "decls": 1,
       "loads": 1
     },
-    "src/cmd_agent_trace.c": {
-      "decls": 4,
-      "loads": 4
-    },
     "src/cmd_core.c": {
-      "decls": 11,
-      "loads": 9
+      "decls": 9,
+      "loads": 7
     },
     "src/cmd_data.c": {
       "decls": 10,
       "loads": 8
-    },
-    "src/cmd_diagnose.c": {
-      "decls": 1,
-      "loads": 1
     },
     "src/cmd_doctor.c": {
       "decls": 11,
@@ -46,8 +38,8 @@
       "loads": 0
     },
     "src/cmd_identity.c": {
-      "decls": 5,
-      "loads": 4
+      "decls": 3,
+      "loads": 2
     },
     "src/cmd_index.c": {
       "decls": 1,
@@ -85,33 +77,13 @@
       "decls": 1,
       "loads": 1
     },
-    "src/cmd_review.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/cmd_rewind.c": {
-      "decls": 5,
-      "loads": 5
-    },
     "src/cmd_run.c": {
       "decls": 2,
       "loads": 2
     },
     "src/cmd_session_lifecycle.c": {
-      "decls": 21,
-      "loads": 9
-    },
-    "src/cmd_skill.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/cmd_trajectory.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/cmd_util.c": {
-      "decls": 1,
-      "loads": 1
+      "decls": 20,
+      "loads": 8
     },
     "src/conversation_context.c": {
       "decls": 5,
@@ -126,10 +98,6 @@
       "loads": 2
     },
     "src/db2/canonical_index.c": {
-      "decls": 2,
-      "loads": 2
-    },
-    "src/db2/cross_repo_deps.c": {
       "decls": 2,
       "loads": 2
     },
@@ -282,8 +250,8 @@
       "loads": 0
     },
     "src/kb/kb_mining.c": {
-      "decls": 2,
-      "loads": 2
+      "decls": 1,
+      "loads": 1
     },
     "src/kb/kb_ocr_sidecar.c": {
       "decls": 1,
@@ -441,10 +409,6 @@
       "decls": 1,
       "loads": 1
     },
-    "src/modules/gateway/gateway_policy.c": {
-      "decls": 2,
-      "loads": 2
-    },
     "src/modules/git/git_project.c": {
       "decls": 1,
       "loads": 1
@@ -454,10 +418,6 @@
       "loads": 2
     },
     "src/modules/git/mcp_git_query.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/guardrails/cmd_guardrails.c": {
       "decls": 1,
       "loads": 1
     },
@@ -517,10 +477,6 @@
       "decls": 1,
       "loads": 0
     },
-    "src/modules/kb-synthesis/kb_curator_notify.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/modules/kb-synthesis/kb_curator_pipeline.c": {
       "decls": 1,
       "loads": 0
@@ -528,14 +484,6 @@
     "src/modules/kb-synthesis/kb_curator_pipeline.h": {
       "decls": 2,
       "loads": 0
-    },
-    "src/modules/kb-synthesis/kb_curator_promote.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/kb-synthesis/kb_curator_queue.c": {
-      "decls": 3,
-      "loads": 3
     },
     "src/modules/kb-synthesis/kb_curator_resolve_entities.c": {
       "decls": 2,
@@ -566,8 +514,8 @@
       "loads": 2
     },
     "src/modules/memory/memory_assemble.c": {
-      "decls": 3,
-      "loads": 3
+      "decls": 1,
+      "loads": 1
     },
     "src/modules/memory/memory_context.c": {
       "decls": 1,
@@ -665,14 +613,6 @@
       "decls": 2,
       "loads": 0
     },
-    "src/modules/sandbox/sandbox_learned.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/skills/skill_curator.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/modules/tools/agent_tools.c": {
       "decls": 3,
       "loads": 3
@@ -705,13 +645,9 @@
       "decls": 3,
       "loads": 3
     },
-    "src/posix/agent_max_turns.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/posix/agent_runtime.c": {
-      "decls": 4,
-      "loads": 4
+      "decls": 3,
+      "loads": 3
     },
     "src/posix/cmd_hooks.c": {
       "decls": 1,
@@ -833,10 +769,6 @@
       "decls": 5,
       "loads": 3
     },
-    "src/server/server_http.c": {
-      "decls": 2,
-      "loads": 2
-    },
     "src/server/server_http_config_routes.c": {
       "decls": 1,
       "loads": 1
@@ -877,23 +809,15 @@
       "decls": 3,
       "loads": 3
     },
-    "src/server/server_skill.c": {
-      "decls": 2,
-      "loads": 2
-    },
     "src/server/server_skill_jobs.c": {
       "decls": 1,
       "loads": 1
     },
     "src/server/server_state.c": {
-      "decls": 6,
-      "loads": 6
+      "decls": 5,
+      "loads": 5
     },
     "src/server/server_sweep.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/server_tls.c": {
       "decls": 1,
       "loads": 1
     },
@@ -910,8 +834,8 @@
       "loads": 3
     },
     "src/server/web_search.c": {
-      "decls": 3,
-      "loads": 2
+      "decls": 2,
+      "loads": 1
     },
     "src/server/wfe_roundtable_proxy.c": {
       "decls": 1,
@@ -989,10 +913,6 @@
       "decls": 1,
       "loads": 1
     },
-    "src/tests/test_config_cross_verify.c": {
-      "decls": 1,
-      "loads": 3
-    },
     "src/tests/test_config_defaults_golden.c": {
       "decls": 1,
       "loads": 1
@@ -1008,10 +928,6 @@
     "src/tests/test_config_schema_derive.c": {
       "decls": 1,
       "loads": 1
-    },
-    "src/tests/test_config_set.c": {
-      "decls": 1,
-      "loads": 2
     },
     "src/tests/test_config_set_section.c": {
       "decls": 2,
@@ -1247,8 +1163,8 @@
     }
   },
   "totals": {
-    "decls": 1076,
-    "files": 311,
-    "loads": 581
+    "decls": 1021,
+    "files": 290,
+    "loads": 523
   }
 }

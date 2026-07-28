@@ -555,17 +555,15 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
    {
       const char *parent_env = getenv("AIMEE_PARENT_DELEGATION_ID");
       const char *depth_env = getenv("AIMEE_DELEGATE_DEPTH");
-      config_t dcfg;
-      config_load(&dcfg);
-      int known = db1_init(dcfg.db1_path) == 0;
+      int known = db1_init(config_db1_path()) == 0;
       int active = known ? db1_delegation_spawn_is_active(parent_env) : 0;
       if (delegate_chain_env_should_clear(depth_env, parent_env, known, active))
       {
          platform_setenv("AIMEE_PARENT_DELEGATION_ID", "");
          platform_setenv("AIMEE_DELEGATE_DEPTH", "");
       }
-      int max_depth = dcfg.max_delegation_depth > 0 ? dcfg.max_delegation_depth
-                                                    : CONFIG_DEFAULT_MAX_DELEGATION_DEPTH;
+      int max_depth = config_max_delegation_depth() > 0 ? config_max_delegation_depth()
+                                                        : CONFIG_DEFAULT_MAX_DELEGATION_DEPTH;
       char depth_err[256];
       if (delegate_check_chain_depth(max_depth, depth_err, sizeof(depth_err)) != 0)
       {

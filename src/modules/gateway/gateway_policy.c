@@ -38,16 +38,12 @@ int gateway_prevent_subagents_enabled(void)
 {
    if (g_delegates_available_provider && g_delegates_available_provider())
       return 1;
-   config_t cfg;
-   config_load(&cfg);
-   return cfg.gateway_prevent_subagents ? 1 : 0;
+   return config_gateway_prevent_subagents() ? 1 : 0;
 }
 
 static int pin_model_enabled(void)
 {
-   config_t cfg;
-   config_load(&cfg);
-   return cfg.gateway_pin_model ? 1 : 0;
+   return config_gateway_pin_model() ? 1 : 0;
 }
 
 /* A tool entry's name, regardless of API shape. */

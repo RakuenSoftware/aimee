@@ -295,14 +295,11 @@ static char *build_session_context(const char *client_cwd)
 
    {
       char cwd[MAX_PATH_LEN];
-      config_t skill_cfg;
       char *skill_index = NULL;
-      config_load(&skill_cfg);
-      if (skill_cfg.skills_dispatch_enabled)
+      if (config_skills_dispatch_enabled())
       {
          snprintf(cwd, sizeof(cwd), "%s", scope_cwd);
-         skill_index =
-             session_briefing_render_skill_index(cwd, skill_cfg.skills_dispatch_max_index);
+         skill_index = session_briefing_render_skill_index(cwd, config_skills_dispatch_max_index());
       }
       if (skill_index && skill_index[0])
       {

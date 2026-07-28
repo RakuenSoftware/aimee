@@ -129,16 +129,14 @@ static int review_skill_gate_allows(const cJSON *item, int operator_override)
    cJSON *jkind = cJSON_GetObjectItemCaseSensitive((cJSON *)item, "kind");
    if (!cJSON_IsString(jkind) || strcmp(jkind->valuestring, "skill_change") != 0)
       return 1;
-
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.skills_eval_gate_enabled)
+   if (!config_skills_eval_gate_enabled())
       return 1;
 
    cJSON *jpayload = cJSON_GetObjectItemCaseSensitive((cJSON *)item, "payload_json");
    const char *payload = cJSON_IsString(jpayload) ? jpayload->valuestring : "";
    char reason[256];
-   if (skill_change_eval_gate_allows(payload, cfg.skills_eval_threshold, reason, sizeof(reason)))
+   if (skill_change_eval_gate_allows(payload, config_skills_eval_threshold(), reason,
+                                     sizeof(reason)))
       return 1;
 
    if (operator_override)

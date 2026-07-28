@@ -55,8 +55,12 @@ int main(void)
    assert(saved_stderr >= 0);
    FILE *cap = freopen(errpath, "w", stderr);
    assert(cap);
+   /* Called for its SIDE EFFECT, not for values: config_load is what emits the
+    * unknown-key diagnostics this test captures from stderr below. The accessor
+    * assertions further down read the same load's result. */
    config_t cfg;
    config_load(&cfg);
+   (void)cfg;
    fflush(stderr);
    dup2(saved_stderr, STDERR_FILENO); /* restore real stderr */
    close(saved_stderr);
@@ -85,10 +89,10 @@ int main(void)
           "genuinely unknown keys must still be reported");
 
    /* And the flat values actually loaded. */
-   assert(strcmp(cfg.provider, "openai") == 0);
-   assert(cfg.autonomous == 1);
-   assert(cfg.max_iterations == 7);
-   assert(cfg.cross_verify == 1);
+   assert(strcmp(config_provider(), "openai") == 0);
+   assert(config_autonomous() == 1);
+   assert(config_max_iterations() == 7);
+   assert(config_cross_verify() == 1);
 
    printf("  PASS: flat keys validate from config_fields[]; unknown keys still caught\n");
    return 0;

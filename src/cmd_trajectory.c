@@ -39,10 +39,7 @@ static void trajectory_export_cmd(app_ctx_t *ctx, int argc, char **argv)
          return;
       }
    }
-
-   config_t cfg;
-   config_load(&cfg);
-   if (db1_init(cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
       fatal("trajectory: could not initialize DB1");
 
    char *json = NULL;
@@ -85,10 +82,7 @@ static void trajectory_batch_cmd(app_ctx_t *ctx, int argc, char **argv)
       trajectory_usage();
       return;
    }
-
-   config_t cfg;
-   config_load(&cfg);
-   if (db1_init(cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
       fatal("trajectory: could not initialize DB1");
    agent_config_t agents;
    if (agent_load_config(&agents) != 0)
