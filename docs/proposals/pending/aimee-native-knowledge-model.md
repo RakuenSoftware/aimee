@@ -1,4 +1,4 @@
-# Versioned knowledge sources and external representation integration
+# Aimee-native knowledge model: versioned sources and external representation integration
 
 Status: implementation in progress
 
@@ -57,6 +57,25 @@ tertiary descendants of the same source span count as one provenance root.
 `kb_evidence_lineage` is the cross-surface ledger for subject, tier, exact original, secondary parent,
 anchors, derivation identity, hashes, and generation. Specialized indexes retain their efficient
 layout, but no derived output is publishable without complete lineage.
+
+## Typed structural graph
+
+Graph construction is Aimee's responsibility, not the provider's. The runtime builds and versions
+typed layers over indexed nodes: syntax/symbol, call/dataflow, dependency/build, test/behavior,
+change/history, repository/provenance, document/evidence, and semantic-neighbor relations. Each edge
+is scoped to one snapshot and generation and carries the lineage required of its tier.
+
+The first seven layers are deterministic: they are derived from parsed source and recorded history,
+and they are reproducible from the same snapshot. The semantic-neighbor layer is vector-derived and
+therefore tertiary. A semantic edge never becomes a structural fact. It may expand a candidate set
+and it may explain why a candidate surfaced, but it cannot establish that a symbol is defined,
+called, built, tested, or superseded, and it cannot feed back into a first-pass representation.
+
+Because deterministic edges are computed before representations are requested, the runtime can offer
+each indexed node a relation-balanced context envelope without depending on the provider. Content
+representations are a function of source content and model version only; context representations
+carry a separate hash and may depend on typed neighbors, authority, validity, and snapshot. The two
+are stored and invalidated independently.
 
 ## Document identity
 
@@ -147,6 +166,31 @@ Document supersession follows the same selector/evidence split. Older original b
 historical evidence; derived chunks, vectors, and tertiary projections leave current retrieval after
 a newer version publishes.
 
+## Retrieval execution
+
+Query execution is ordered so that access and source scope constrain everything downstream:
+
+1. resolve caller access scope and the exact repository/ref/commit/generation being queried;
+2. assemble a bounded candidate union from exact lexical retrieval, any installed learned-sparse
+   leg, dense nearest neighbours, and typed structural graph expansion;
+3. rescore that union with the provider's latent signals where available;
+4. rerank a small final set with the provider's cross-encoder;
+5. apply deterministic authority, provenance deduplication, and freshness policy;
+6. escalate every surviving candidate to its primary version and exact anchors for presentation.
+
+Steps 3 and 4 are optional and reorder only within the union produced by steps 1 and 2. They cannot
+add a candidate that access, snapshot, or freshness policy excluded, and they cannot reorder around
+step 5, which always runs last and is independent of any learned signal.
+
+The reranking input is an evidence packet, not raw text: original document identity, secondary
+anchors, the graph path that produced the candidate, evidence tier, authority, valid and observed
+time, contradiction state, and freshness. Supplying that packet is a runtime obligation. A provider
+that cannot consume it degrades to the deterministic path rather than scoring without provenance.
+
+Exact lexical retrieval is always present in the union and is never gated on provider health. When
+the provider is absent, unhealthy, or incompatible, steps 3 and 4 are skipped and the deterministic
+path serves the query with its quality recorded, not silently degraded.
+
 ## External representation ABI
 
 The runtime representation record contains only integration metadata:
@@ -170,8 +214,12 @@ source, freshness, and evidence-authority policy. Deterministic authority enforc
    bounded generation pruning, and PDF supersession.
 2. Implemented: current-generation fencing across lexical, structural graph, vector, and memory
    retrieval while preserving explicit cross-project/history queries.
+   Both stages build clean and pass the repository unit-test suite, including
+   `unit-test-source-generation`, which covers snapshot/ref/generation identity and publication.
+   No provider is installed, so every claim above is verified against the deterministic path only.
 3. Next: define and test the versioned external representation ABI without importing private model
-   construction or training dependencies into Aimee.
+   construction or training dependencies into Aimee. The retrieval-execution ordering and evidence
+   packet above are the runtime side of that ABI and are specified but not yet exercised end to end.
 4. Shadow-write provider outputs and validate source reuse, context invalidation, isolation,
    provenance, and rollback.
 5. Gate provider-assisted retrieval against the existing deterministic fallback.
