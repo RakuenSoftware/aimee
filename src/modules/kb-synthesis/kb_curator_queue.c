@@ -27,10 +27,7 @@ int kb_curator_queue_docs_for_project(const char *project)
 {
    if (!project || !project[0])
       return 0;
-
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.kb_curator_extract_docs_enabled)
+   if (!config_kb_curator_extract_docs_enabled())
       return 0;
 
    void *conn = db2_conn();
@@ -83,10 +80,7 @@ int kb_curator_queue_code_unit(const char *project, const char *file_path, const
 {
    if (!project || !file_path || !symbol)
       return 0;
-
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.kb_curator_extract_code_enabled)
+   if (!config_kb_curator_extract_code_enabled())
       return 0;
 
    void *conn = db2_conn();
@@ -138,10 +132,7 @@ int kb_curator_queue_code_units_for_project(const char *project, const char *roo
 {
    if (!project || !project[0])
       return 0;
-
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.kb_curator_extract_code_enabled)
+   if (!config_kb_curator_extract_code_enabled())
       return 0;
 
    (void)root_path;

@@ -250,9 +250,7 @@ static void identity_working_profile_observe(app_ctx_t *ctx, int argc, char **ar
 
 static void identity_working_profile(app_ctx_t *ctx, int argc, char **argv)
 {
-   config_t db1_cfg;
-   config_load(&db1_cfg);
-   if (db1_init(db1_cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
       fatal("identity working-profile: could not initialize DB1");
 
    if (argc < 1)
@@ -315,10 +313,7 @@ static void identity_snapshot(app_ctx_t *ctx, int argc, char **argv)
    }
    if (platform_mkdir_p(out_dir, 0755) != 0)
       fatal("identity snapshot: could not create %s: %s", out_dir, strerror(errno));
-
-   config_t db1_cfg;
-   config_load(&db1_cfg);
-   if (db1_init(db1_cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
       fatal("identity snapshot: could not initialize DB1");
    cJSON *snap = identity_snapshot_build();
    if (!snap)

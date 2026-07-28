@@ -58,7 +58,7 @@ extern "C"
    /* Apply a curator_profile_t to config fields (does not write the INI
     * file — caller must call config_save or equivalent).
     * Returns 0 on success, -1 if cfg is NULL. */
-   int curator_profile_apply(curator_profile_t *profile, config_t *cfg);
+   int curator_profile_apply(curator_profile_t *profile);
 
    /* Detect hardware (calls hardware_probe_cached_or_detect) and select
     * the appropriate profile. Convenience wrapper over the two functions

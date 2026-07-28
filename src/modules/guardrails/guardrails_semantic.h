@@ -66,7 +66,12 @@ const char *gsem_policy(const gsem_output_t *out, double warn_t, double prompt_t
 
 /* Apply the promoted guardrail_strictness arm to semantic thresholds.
  * The default/balanced arm leaves config unchanged. */
-void gsem_apply_strictness_arm(config_t *cfg);
+/* Effective thresholds: configured value, clamped when the guardrail_strictness
+ * bandit arm is strict. Replaces gsem_apply_strictness_arm, which mutated a
+ * caller-owned config_t in place. */
+double gsem_effective_warn_threshold(void);
+double gsem_effective_prompt_threshold(void);
+double gsem_effective_block_threshold(void);
 
 /* Format the user-visible Phase 2 advisory warning for warn/prompt bands.
  * Returns 1 when |action| was formatted, 0 when no advisory applies. */

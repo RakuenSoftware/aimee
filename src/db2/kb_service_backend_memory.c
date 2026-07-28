@@ -1193,9 +1193,7 @@ cJSON *db2_kb_service_memory_insert_ex_json(const char *tier, const char *kind, 
     * synchronous fact work on the store hot path; the drain's pattern pass now
     * captures the high-precision triples the old inline call did. */
    {
-      config_t tf_cfg;
-      config_load(&tf_cfg);
-      if (tf_cfg.typed_facts_enabled && out.id > 0)
+      if (config_typed_facts_enabled() && out.id > 0)
          (void)db2_kb_async_enqueue("memory_facts", out.id, "memory");
    }
    cJSON *obj = kbs_memory_row_to_json(&out);
@@ -1271,9 +1269,7 @@ cJSON *db2_kb_service_memory_facts_json(const char *query)
    if (!resp)
       return NULL;
    char facts[2048] = "";
-   config_t cfg;
-   config_load(&cfg);
-   if (cfg.typed_facts_enabled && query && query[0])
+   if (config_typed_facts_enabled() && query && query[0])
       (void)db2_fact_recall_in_query(query, memory_pii_turn_requests_sensitive(query), facts,
                                      sizeof(facts));
    cJSON_AddStringToObject(resp, "status", "ok");

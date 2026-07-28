@@ -199,8 +199,7 @@ void agent_set_ingress_source(const char *source)
 
 int agent_ingress_accounting_enabled(void)
 {
-   config_t cfg;
-   return config_load(&cfg) == 0 && cfg.ingress_usage_accounting_enabled;
+   return config_ingress_usage_accounting_enabled();
 }
 
 void agent_record_token_audit(const agent_result_t *result, const char *role, const char *source)
@@ -267,9 +266,7 @@ void agent_record_token_audit_kind(const agent_result_t *result, const char *rol
    int async = 0;
    if (is_ingress)
    {
-      config_t gcfg;
-      if (config_load(&gcfg) == 0)
-         async = gcfg.ingress_audit_async;
+      async = config_ingress_audit_async();
    }
 
    token_usage_t usage = {

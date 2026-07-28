@@ -809,11 +809,9 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
    /* 4. Sort by score descending (default) or score_per_token (budget mode) */
 
    /* Check whether token-budget assembly is enabled in config. */
-   config_t assemble_cfg;
-   config_load(&assemble_cfg);
-   int budget_mode = assemble_cfg.memory_context_budget_enabled;
-   int token_budget = assemble_cfg.memory_context_budget_tokens > 0
-                          ? assemble_cfg.memory_context_budget_tokens
+   int budget_mode = config_memory_context_budget_enabled();
+   int token_budget = config_memory_context_budget_tokens() > 0
+                          ? config_memory_context_budget_tokens()
                           : 2048; /* default budget */
 
    if (cand_count > 1)
@@ -824,13 +822,13 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
     * attempt a fallback before assembling context. */
    int low_confidence_flag = 0; /* 1 = inject LOW marker into context */
    int answerability_withheld = 0;
-   if (assemble_cfg.memory_failure_detection_enabled || assemble_cfg.memory_abstain_enabled)
+   if (config_memory_failure_detection_enabled() || config_memory_abstain_enabled())
    {
       double threshold =
-          assemble_cfg.memory_abstain_enabled
-              ? (assemble_cfg.memory_abstain_gate > 0.0 ? assemble_cfg.memory_abstain_gate : 0.40)
-              : (assemble_cfg.memory_failure_detection_threshold > 0.0
-                     ? assemble_cfg.memory_failure_detection_threshold
+          config_memory_abstain_enabled()
+              ? (config_memory_abstain_gate() > 0.0 ? config_memory_abstain_gate() : 0.40)
+              : (config_memory_failure_detection_threshold() > 0.0
+                     ? config_memory_failure_detection_threshold()
                      : 0.35);
 
       retrieval_confidence_t rconf;
@@ -891,14 +889,14 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
       if (rconf.below_threshold)
       {
          low_confidence_flag = 1;
-         answerability_withheld = assemble_cfg.memory_abstain_enabled ? 1 : 0;
+         answerability_withheld = config_memory_abstain_enabled() ? 1 : 0;
          /* Record the failure; after threshold crossings, the
           * directives subsystem auto-creates a retrieval_failure
           * directive so future turns can ask the user to fill the
           * gap instead of silently flailing. Gated by the directives
           * toggle (default on); manually-created directives still
           * surface when it is off. */
-         if (assemble_cfg.memory_directives_enabled)
+         if (config_memory_directives_enabled())
          {
             char norm_hint[256];
             normalize_key(task_hint, norm_hint, sizeof(norm_hint));
@@ -1276,11 +1274,9 @@ char *memory_assemble_context_explain(const char *task_hint,
       *explain_count = 0;
 
    /* Load config to know budget settings */
-   config_t ecfg;
-   config_load(&ecfg);
-   int budget_mode = ecfg.memory_context_budget_enabled;
+   int budget_mode = config_memory_context_budget_enabled();
    int token_budget =
-       ecfg.memory_context_budget_tokens > 0 ? ecfg.memory_context_budget_tokens : 2048;
+       config_memory_context_budget_tokens() > 0 ? config_memory_context_budget_tokens() : 2048;
 
    if (metrics)
    {

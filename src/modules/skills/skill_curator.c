@@ -301,14 +301,12 @@ static int sc_save_consolidation(const cJSON *plan, const char *snapshot_path, i
 
 int skill_curator_maybe(void)
 {
-   config_t cfg;
-   config_load(&cfg);
 
    /* Disabled by default. */
-   if (cfg.skills_curator_interval_hours <= 0)
+   if (config_skills_curator_interval_hours() <= 0)
       return 0;
 
-   int interval_hours = cfg.skills_curator_interval_hours;
+   int interval_hours = config_skills_curator_interval_hours();
    if (interval_hours < SC_MIN_INTERVAL_HOURS)
       interval_hours = SC_MIN_INTERVAL_HOURS;
 

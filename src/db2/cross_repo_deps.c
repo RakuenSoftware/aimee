@@ -625,24 +625,21 @@ static int crd_compute_out(const char *project, const xrepo_deps_opts_t *opts,
    void *conn = db2_conn();
    if (!conn || !project || !opts || !out_edges || !out_n)
       return -1;
-
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.kb_curator_cross_repo_graph_enabled)
+   if (!config_kb_curator_cross_repo_graph_enabled())
       return 0; /* feature off: empty result, not an error */
 
-   xrepo_distinct_cfg_t dcfg = {.k = cfg.kb_curator_cross_repo_k,
-                                .m = cfg.kb_curator_cross_repo_m,
-                                .p_pct = cfg.kb_curator_cross_repo_p_pct,
-                                .len_min = cfg.kb_curator_cross_repo_len_min};
+   xrepo_distinct_cfg_t dcfg = {.k = config_kb_curator_cross_repo_k(),
+                                .m = config_kb_curator_cross_repo_m(),
+                                .p_pct = config_kb_curator_cross_repo_p_pct(),
+                                .len_min = config_kb_curator_cross_repo_len_min()};
    xrepo_mult_cfg_t mcfg = {.dom_share_pct = 90, .runnerup_share_pct = 5, .runnerup_abs = 2};
-   int cap =
-       opts->max_candidates > 0 ? opts->max_candidates : cfg.kb_curator_cross_repo_max_candidates;
+   int cap = opts->max_candidates > 0 ? opts->max_candidates
+                                      : config_kb_curator_cross_repo_max_candidates();
    /* --dry-run emits every confidence band (down to LOW) for offline inspection;
     * otherwise honor the requested min_tier (default MEDIUM). */
    xrepo_tier_t min_tier =
        opts->dry_run ? XREPO_TIER_LOW : (opts->min_tier ? opts->min_tier : XREPO_TIER_MEDIUM);
-   int collision_c = cfg.kb_curator_cross_repo_caller_collision_c;
+   int collision_c = config_kb_curator_cross_repo_caller_collision_c();
 
    desc_set_t descs;
    if (load_descs(conn, &descs) != 0)
@@ -745,11 +742,11 @@ static int crd_compute_out(const char *project, const xrepo_deps_opts_t *opts,
                     .collision_c = collision_c,
                     .min_tier = min_tier,
                     .repo_set_hash = repo_set_hash,
-                    .distinctiveness_v = cfg.kb_curator_cross_repo_distinctiveness_v,
+                    .distinctiveness_v = config_kb_curator_cross_repo_distinctiveness_v(),
                     .bsv = bsv,
                     .a_filecount = a_filecount,
                     .include_review = opts->dry_run ? 0 : opts->include_review,
-                    .queue_max = cfg.kb_curator_cross_repo_review_queue_max,
+                    .queue_max = config_kb_curator_cross_repo_review_queue_max(),
                     .dry_run = opts->dry_run,
                     .amb = opts->dry_run ? amb : NULL};
 
@@ -1082,11 +1079,8 @@ static int crd_compute_in(const char *target, const xrepo_deps_opts_t *opts, edg
       }
       aimee_pg_finalize(st);
    }
-
-   config_t cfg;
-   config_load(&cfg);
-   int cap =
-       opts->max_candidates > 0 ? opts->max_candidates : cfg.kb_curator_cross_repo_max_candidates;
+   int cap = opts->max_candidates > 0 ? opts->max_candidates
+                                      : config_kb_curator_cross_repo_max_candidates();
 
    /* Per-caller OUT, keeping only edges whose definer IS the target. Force the OUT
     * direction and suppress review-queue writes: a reverse query is a read, and its

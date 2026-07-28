@@ -23,13 +23,13 @@ static const char *verdict_name(osv_verdict_t verdict)
    }
 }
 
-static int target_allowlisted(const config_t *cfg, const osv_target_t *target)
+static int target_allowlisted(const osv_target_t *target)
 {
    char key[256];
    snprintf(key, sizeof(key), "%s:%s", target->ecosystem, target->name);
-   for (int i = 0; i < cfg->mcp_osv_allow_count; i++)
+   for (int i = 0; i < config_mcp_osv_allow_count(); i++)
    {
-      if (strcmp(cfg->mcp_osv_allow[i], key) == 0)
+      if (strcmp(config_mcp_osv_allow(i), key) == 0)
          return 1;
    }
    return 0;
@@ -146,9 +146,8 @@ static void mcp_cmd_recheck(app_ctx_t *ctx, int argc, char **argv)
          (void)db1_mcp_osv_cache_upsert(target.ecosystem, target.name, target.version, "clean", "");
       const char *action = "allow";
       if (result.verdict == OSV_VERDICT_MALWARE)
-         action = target_allowlisted(&cfg, &target)
-                      ? "allow_allowlisted"
-                      : (cfg.mcp_osv_enforce ? "block" : "shadow_block");
+         action = target_allowlisted(&target) ? "allow_allowlisted"
+                                              : (cfg.mcp_osv_enforce ? "block" : "shadow_block");
       (void)db1_mcp_osv_audit(client->name, target.ecosystem, target.name, target.version, verdict,
                               action, result.advisory_ids);
       printf("%s: %s:%s %s%s%s\n", client->name, target.ecosystem, target.name, verdict,

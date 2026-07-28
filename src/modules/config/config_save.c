@@ -13,6 +13,7 @@
 #include "yaml.h"
 #include <fcntl.h>
 #include <stdarg.h>
+#include <stddef.h> /* offsetof */
 #include <stdlib.h> /* getenv — AIMEE_EMBEDDER_URL default */
 #include <sys/stat.h>
 #include <unistd.h>

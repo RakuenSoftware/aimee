@@ -67,6 +67,12 @@
 #define CONFIG_CONCURRENCY_MAX_ENTRIES 16
 
 /* Max additional bearers (beyond the primary) a deployment may accept at once. */
+/* Capacity of the ensemble reference arrays. Exported as a named constant so a
+ * consumer can check its own limit against config's WITHOUT naming config_t:
+ * delegate_ensemble.c used to assert on sizeof(((config_t *)0)->...), which made
+ * the struct's layout part of its interface just to catch dimension drift. */
+#define CONFIG_ENSEMBLE_MAX_REFS 32
+
 #define AIMEE_API_BEARER_EXTRA_MAX 7
 
 typedef struct
@@ -2036,13 +2042,13 @@ typedef struct config
    /* First dim = ENSEMBLE_MAX_REFS (delegate_ensemble.h); a _Static_assert in
     * delegate_ensemble.c enforces they stay in sync. config.h can't include that
     * header (it would cycle), so the literal is kept here. */
-   char ensemble_reference_models[32][128];
+   char ensemble_reference_models[CONFIG_ENSEMBLE_MAX_REFS][128];
    int ensemble_reference_count;
    /* Optional per-participant review persona, paired by index with
     * ensemble_reference_models. Empty entries fall back to the engine's diverse
     * default lineup. Width = PERSONA_NAME_MAX (persona.h); first dim =
     * ENSEMBLE_MAX_REFS. */
-   char ensemble_reference_personas[32][64];
+   char ensemble_reference_personas[CONFIG_ENSEMBLE_MAX_REFS][64];
    int ensemble_reference_persona_count;
    char ensemble_aggregator[128];
    int ensemble_min_successful;
@@ -2272,6 +2278,34 @@ int config_sandbox_package_access_valid(const char *s);
  * is the single point of truth -- do not re-inline the ternary at call sites. */
 const char *config_embedding_command(const config_t *cfg, const char *requested);
 
+/* As config_embedding_command, but the caller never holds a config_t. Prefer
+ * this: materialising the ~750 KB struct to read one string is what overflowed
+ * the stack in the memory-search path. Result is valid until the next call on
+ * this thread. */
+const char *config_embedding_command_current(const char *requested);
+
+/* The raw configured value, empty when unset — unlike the resolving form
+ * above, which never returns empty. */
+const char *config_embedding_command_field(void);
+
+/* Opaque boolean accessors — read one flag without naming config_t.
+ * Fail closed (0) when the config cannot be loaded. */
+int config_audit_worm_enabled(void);
+int config_bandit_live_decision_enabled(void);
+int config_css_style_graph_enabled(void);
+int config_delegate_graph_context_enabled(void);
+int config_drift_detect_shadow_enabled(void);
+int config_guardrails_blast_radius_advisory_enabled(void);
+int config_ingress_usage_accounting_enabled(void);
+int config_kb_pdf_vector_enabled(void);
+int config_memory_derive_facts_enabled(void);
+int config_memory_routing_enabled(void);
+int config_transport_kb_pool_enabled(void);
+int config_typed_facts_enabled(void);
+int config_wfe_live_forge_enabled(void);
+double config_memory_semantic_floor_scale(void);
+int config_ingress_audit_async(void);
+
 /* Disposition source labels for config reporting. */
 const char *config_disposition_source_name(config_disposition_source_t source);
 
@@ -2295,5 +2329,9 @@ int session_id_override_active(void);
  * paths should call this at request entry to pick up rotations performed by
  * `aimee session-start` between requests. No-op when an override is active. */
 void session_id_refresh(void);
+
+/* Generated per-field accessors (src/gen_config_accessors.py). Callers outside
+ * the config module use these and never name config_t. */
+#include "config_accessors.h"
 
 #endif /* DEC_CONFIG_H */

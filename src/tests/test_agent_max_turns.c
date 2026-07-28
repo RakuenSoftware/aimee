@@ -24,6 +24,19 @@ int config_load(config_t *cfg)
    return 0;
 }
 
+/* Accessor stubs: the production seam moved from config_load to per-field
+ * accessors. Values match what this file's config_load stub produced, so the
+ * assertions below are unchanged. */
+int config_max_iterations(void)
+{
+   return g_max_iterations;
+}
+
+int config_max_iterations_delegate(void)
+{
+   return g_max_iterations_delegate;
+}
+
 static agent_t make_agent(int max_turns)
 {
    agent_t a;
