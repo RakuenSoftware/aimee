@@ -1,0 +1,42 @@
+{
+  "artifacts": {
+    "hardware_synthesis.json": {
+      "bytes": 635,
+      "sha256": "a046d9197ee7eb5da0166f9671e226205e4655a605e111bddc9f84f9e7c0f879"
+    },
+    "raw_gemma4_12b.jsonl": {
+      "bytes": 13162637,
+      "sha256": "d5299e3e1b5b59de80da0f0d8ef57fd4d2cb13c68d2621fdad7dc781a7139ee4"
+    },
+    "summary_gemma4_12b.json": {
+      "bytes": 3733,
+      "sha256": "d00141a350bc78083b6a932b2673f6a578ee39dc7510b8ffcb3ec5039ab46060"
+    }
+  },
+  "label": "gemma4_12b",
+  "latest_rows": 10000,
+  "metrics": {
+    "completion_tokens": 1109355,
+    "content_f1": 0.32791815589315215,
+    "decode_tokens_per_second": 2.4083886196262143,
+    "empty_rate": 0.0,
+    "latency_s": {
+      "p50": 42.39082690549549,
+      "p95": 91.83640359956766,
+      "p99": 135.57150414511213
+    },
+    "n": 10000,
+    "prompt_tokens": 4352506,
+    "prompt_tokens_per_second": 342.1982433397016,
+    "raw_parse_rate": 1.0,
+    "requests_retried": 3,
+    "required_field_recall": 0.9757285714285714,
+    "schema_valid_rate": 0.9996,
+    "success_rate": 1.0,
+    "truncated_rate": 0.0
+  },
+  "raw_rows": 10013,
+  "secret_scan": "pass",
+  "suite_manifest_sha256": "16d2c16add86052ff24be410699ab9452ee1a36252de6dba31ab5391de7ab81c",
+  "view": "synthesis"
+}

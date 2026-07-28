@@ -44,8 +44,12 @@ bad()  { red   "  FAIL  $*"; FAIL=$((FAIL + 1)); }
 #  - AIMEE_SERVER_URL/_TOKEN: the cross-platform thin client (incl. Windows),
 #    which has no config_load and reads the URL straight from the environment.
 host_port="${SERVER_URL#http://}"; host_port="${host_port#https://}"; host_port="${host_port%/}"
+case "$SERVER_URL" in
+  https://*) endpoint_scheme=tls ;;
+  *)         endpoint_scheme=tcp ;;
+esac
 export AIMEE_API_CLIENT_TRANSPORT=http
-export AIMEE_API_ENDPOINT="tcp:${host_port}"
+export AIMEE_API_ENDPOINT="${endpoint_scheme}:${host_port}"
 export AIMEE_API_BEARER="${BEARER}"
 export AIMEE_SERVER_URL="${SERVER_URL}"
 export AIMEE_SERVER_TOKEN="${BEARER}"

@@ -1,0 +1,27 @@
+{
+  "after_load": {
+    "gpu_busy_percent": 0,
+    "memavailable_bytes": 8528887808,
+    "swapfree_bytes": 3215269888,
+    "swaptotal_bytes": 4294963200,
+    "vram_total_bytes": 25753026560,
+    "vram_used_bytes": 812974080
+  },
+  "after_run": {
+    "gpu_busy_percent": 84,
+    "memavailable_bytes": 7109005312,
+    "swapfree_bytes": 3053867008,
+    "swaptotal_bytes": 4294963200,
+    "vram_total_bytes": 25753026560,
+    "vram_used_bytes": 825532416
+  },
+  "cold_load_seconds": 2.7558574930299073,
+  "load_profile": {
+    "context_tokens": 65536,
+    "logical_batch_tokens": 2048,
+    "pairs_per_request": 4,
+    "parallel_slots": 32,
+    "physical_batch_tokens": 2048,
+    "workers": 8
+  }
+}
