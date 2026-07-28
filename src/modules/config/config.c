@@ -1861,6 +1861,71 @@ int config_snapshot_get(config_t *out)
    }
 }
 
+/* Read ONE field out of the live snapshot under a reader pin, without copying
+ * the whole ~750 KB struct.
+ *
+ * config_snapshot_get copies everything, which is what every accessor would
+ * otherwise pay per call. The pin protocol here is identical to that function's
+ * — seqlock validate, bounded reader admission, release-unpin — but the payload
+ * is memcpy(dst, base + offset, size) instead of a whole-struct assignment.
+ *
+ * Returns 0 on success, -1 when no snapshot is live (caller falls back to a
+ * cached load) or when reader admission is saturated. */
+static int config_snapshot_read_field(size_t offset, size_t size, void *dst)
+{
+   if (!dst || !atomic_load_explicit(&g_snap_inited, memory_order_acquire))
+      return -1;
+   for (;;)
+   {
+      unsigned s0 = atomic_load_explicit(&g_snap_seq, memory_order_acquire);
+      if (s0 & 1u)
+         continue;
+      unsigned act = atomic_load_explicit(&g_snap_active, memory_order_acquire);
+      unsigned state = atomic_load_explicit(&g_snap_state[act], memory_order_acquire);
+      for (;;)
+      {
+         if (state & CONFIG_SNAPSHOT_WRITER_RESERVED)
+            break;
+         if (state == CONFIG_SNAPSHOT_READER_MAX)
+            return -1;
+         if (atomic_compare_exchange_weak_explicit(&g_snap_state[act], &state, state + 1,
+                                                   memory_order_acquire, memory_order_relaxed))
+            break;
+      }
+      if (state & CONFIG_SNAPSHOT_WRITER_RESERVED)
+         continue;
+      unsigned s1 = atomic_load_explicit(&g_snap_seq, memory_order_acquire);
+      unsigned act1 = atomic_load_explicit(&g_snap_active, memory_order_acquire);
+      if (s0 != s1 || (s1 & 1u) || act != act1)
+      {
+         atomic_fetch_sub_explicit(&g_snap_state[act], 1, memory_order_release);
+         continue;
+      }
+      memcpy(dst, (const char *)&g_snap[act] + offset, size);
+      atomic_fetch_sub_explicit(&g_snap_state[act], 1, memory_order_release);
+      return 0;
+   }
+}
+
+/* Field read with a fallback: prefer the pinned snapshot; if none is live (early
+ * startup, or a tool that never called config_snapshot_init) fall back to a
+ * heap-loaded config so accessors work everywhere config_load worked. Heap, not
+ * stack — a 750 KB frame is what overflowed the stack in the memory-search
+ * path. Fails closed by leaving |dst| as the caller zeroed it. */
+int config_field_read(size_t offset, size_t size, void *dst)
+{
+   if (config_snapshot_read_field(offset, size, dst) == 0)
+      return 0;
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+      memcpy(dst, (const char *)cfg + offset, size);
+   free(cfg);
+   return rc;
+}
+
 int config_autonomy_lookup(const char *env_name, long *out)
 {
    if (!env_name || !out)
@@ -2009,12 +2074,8 @@ int config_reload_if_changed(void)
  * and a 750 KB frame is what overflowed the stack in the memory-search path. */
 static int config_flag(size_t offset)
 {
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return 0; /* fail closed: an unreadable config must not enable a feature */
-   config_load(cfg);
-   int v = *(const int *)((const char *)cfg + offset);
-   free(cfg);
+   int v = 0; /* fail closed: an unreadable config must not enable a feature */
+   config_field_read(offset, sizeof(v), &v);
    return v;
 }
 

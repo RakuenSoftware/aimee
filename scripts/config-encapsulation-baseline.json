@@ -985,6 +985,10 @@
       "decls": 103,
       "loads": 86
     },
+    "src/tests/test_config_accessors.c": {
+      "decls": 1,
+      "loads": 1
+    },
     "src/tests/test_config_cross_verify.c": {
       "decls": 1,
       "loads": 3
@@ -1243,8 +1247,8 @@
     }
   },
   "totals": {
-    "decls": 1075,
-    "files": 310,
-    "loads": 580
+    "decls": 1076,
+    "files": 311,
+    "loads": 581
   }
 }

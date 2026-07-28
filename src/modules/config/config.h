@@ -2300,4 +2300,8 @@ int session_id_override_active(void);
  * `aimee session-start` between requests. No-op when an override is active. */
 void session_id_refresh(void);
 
+/* Generated per-field accessors (src/gen_config_accessors.py). Callers outside
+ * the config module use these and never name config_t. */
+#include "config_accessors.h"
+
 #endif /* DEC_CONFIG_H */
