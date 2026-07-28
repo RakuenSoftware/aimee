@@ -1486,6 +1486,13 @@ void handle_conn(int fd, int is_tcp, int is_management)
                              request_id, sizeof(request_id));
    }
 
+   /* Validate every data-plane HTTP/1.1 frame: ambiguous lengths or transfer
+    * coding are dangerous even when the connection will not be reused. */
+   if (!is_management && !server_http_request_framing_valid(buf, (size_t)total))
+   {
+      send_response(fd, 400, "{\"error\":\"invalid request framing\"}", request_id);
+      return;
+   }
    /* The management lane rejects malformed/ambiguous framing before peer
     * classification, so authorization results cannot become a parser oracle. */
    const char *management_header_end = is_management ? strstr(buf, "\r\n\r\n") : NULL;
@@ -1762,14 +1769,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
        strcasestr(connection_header, "keep-alive") != NULL &&
        strcasestr(connection_header, "close") == NULL;
    if (transport_cfg.transport_server_keepalive_enabled && keepalive_requested)
-   {
-      if (!server_http_keepalive_framing_valid(buf, (size_t)total))
-      {
-         send_response(fd, 400, "{\"error\":\"invalid keep-alive request framing\"}", request_id);
-         return;
-      }
       server_http_keepalive_set(1);
-   }
    char accept_encoding[128] = "";
    int gzip_allowed =
        transport_cfg.transport_thinclient_gzip_enabled && server_http_gzip_route_eligible(path);

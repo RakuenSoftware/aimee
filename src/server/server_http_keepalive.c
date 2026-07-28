@@ -5,7 +5,7 @@
 #include <string.h>
 #include <strings.h>
 
-#define KEEPALIVE_BODY_MAX (4u * 1024u * 1024u)
+#define REQUEST_BODY_MAX (4u * 1024u * 1024u)
 
 static int header_name_char(unsigned char c)
 {
@@ -52,9 +52,10 @@ uint32_t server_http_enrollment_caps(uint32_t caps, int is_tcp, int mtls_authent
    return caps;
 }
 
-/* Validate the framing boundary before allowing a second request on the same
- * TLS connection. The legacy one-shot parser remains unchanged for old peers. */
-int server_http_keepalive_framing_valid(const char *request, size_t total)
+/* Validate one unambiguous HTTP/1.1 message boundary before any data-plane
+ * request is authenticated or dispatched. It also makes a connection safe to
+ * reuse when keep-alive is enabled. */
+int server_http_request_framing_valid(const char *request, size_t total)
 {
    const char *head_end = strstr(request, "\r\n\r\n");
    if (!head_end)
@@ -107,15 +108,12 @@ int server_http_keepalive_framing_valid(const char *request, size_t total)
             return 0;
          for (const char *q = value; q < end; q++)
          {
-            if (*q < '0' || *q > '9' ||
-                content_len > (KEEPALIVE_BODY_MAX - (size_t)(*q - '0')) / 10)
+            if (*q < '0' || *q > '9' || content_len > (REQUEST_BODY_MAX - (size_t)(*q - '0')) / 10)
                return 0;
             content_len = content_len * 10 + (size_t)(*q - '0');
          }
       }
       p = end + 2;
    }
-   if (!have_cl && strcmp(method, "GET") && strcmp(method, "HEAD"))
-      return 0;
    return total <= head_len + content_len;
 }
