@@ -148,6 +148,7 @@ static const struct
     {"memory", "archive", "memory.archive", "memory.user_capture", NULL, 60000},
     {"memory", "list", "memory.list", NULL, "memories", 60000},
     {"memory", "get", "memory.get", NULL, NULL, 60000},
+    {"memory", "delete", "memory.delete", NULL, NULL, 60000},
     {"memory", "show", "memory.get", NULL, NULL, 60000},
     {"memory", "read", "memory.read", NULL, NULL, 60000},
     {"memory", "stats", "memory.stats", NULL, NULL, 60000},
@@ -675,6 +676,14 @@ cJSON *marshal_memory_list(int argc, char **argv)
 cJSON *marshal_memory_get(int argc, char **argv)
 {
    cJSON *req = marshal_no_args("memory.get");
+   if (argc > 0)
+      cJSON_AddNumberToObject(req, "id", atoll(argv[0]));
+   return req;
+}
+
+cJSON *marshal_memory_delete(int argc, char **argv)
+{
+   cJSON *req = marshal_no_args("memory.delete");
    if (argc > 0)
       cJSON_AddNumberToObject(req, "id", atoll(argv[0]));
    return req;

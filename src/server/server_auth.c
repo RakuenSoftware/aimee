@@ -39,6 +39,7 @@ const method_policy_t method_registry[] = {
     {"trajectory.batch", CAP_DELEGATE, "trajectory batch generation"},
     /* Memory (exact before prefix) */
     {"memory.store", CAP_MEMORY_WRITE, "store memory"},
+    {"memory.delete", CAP_MEMORY_WRITE, "delete a memory"},
     {"memory.user_capture", CAP_MEMORY_WRITE, "capture per-user memory"},
     {"memory.*", CAP_MEMORY_READ, "memory operation"},
     /* Index (prefix) */

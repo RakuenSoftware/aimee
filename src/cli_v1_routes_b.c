@@ -1282,6 +1282,7 @@ static const struct
     {"mcp.recheck", marshal_mcp_recheck},
     {"memory.archive", marshal_memory_archive},
     {"memory.benchmark", marshal_memory_benchmark},
+    {"memory.delete", marshal_memory_delete},
     {"memory.get", marshal_memory_get},
     {"memory.identity", marshal_memory_identity},
     {"memory.list", marshal_memory_list},

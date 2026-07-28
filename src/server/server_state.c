@@ -188,6 +188,36 @@ int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
+/* Remove one memory by id.
+ *
+ * The knowledge tier has always been able to do this: kb_service.c dispatches
+ * "memory.delete" to a handler that calls memory_delete(). Nothing above it ever
+ * exposed the capability, so the store was effectively write-once from every
+ * interface a user has — a memory stored by mistake (a secret, a typo, a test
+ * fixture written against a live deployment) could not be taken back.
+ *
+ * Gated on CAP_MEMORY_WRITE, so it follows the same write-tier grant rules as
+ * memory.store rather than inventing its own. */
+int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+
+   cJSON *jid = cJSON_GetObjectItemCaseSensitive(req, "id");
+   if (!cJSON_IsNumber(jid) || jid->valuedouble <= 0)
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.delete requires a positive integer id", NULL);
+
+   int64_t id = (int64_t)jid->valuedouble;
+   if (kb_client_memory_delete(id) != 0)
+      return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND,
+                                    "no such memory, or the knowledge service refused", NULL);
+
+   cJSON *resp = jo_ok();
+   cJSON_AddNumberToObject(resp, "id", (double)id);
+   cJSON_AddBoolToObject(resp, "deleted", 1);
+   return server_send_ok(conn, resp);
+}
+
 int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
