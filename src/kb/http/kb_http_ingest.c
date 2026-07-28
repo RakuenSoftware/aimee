@@ -10,7 +10,9 @@
 #include "kb_doc_hash.h"
 #include "kb_ingest_normalize.h"
 #include "db2/kb_docs.h"
+#include "db2/kb_payload.h"
 #include "config.h"
+#include "kb_blob_store.h"
 #include "kb_doc_pdf.h"
 #include "kb_ocr_sidecar.h"
 #include "cJSON.h"
@@ -209,8 +211,28 @@ int handle_post_docs(const char *body, int body_len, char *out_buf, int out_cap)
                      "{\"error\":\"pdf extraction failed\",\"code\":\"converter_error\"}");
             return 422;
          }
+         char original_sha[KB_DOC_HASH_HEX_LEN + 1];
+         if (kb_blob_store_put(file_content, (size_t)file_len, original_sha,
+                               sizeof(original_sha)) != 0)
+         {
+            free(xhtml);
+            snprintf(out_buf, (size_t)out_cap,
+                     "{\"error\":\"original PDF could not be preserved\"}");
+            return 503;
+         }
+         int64_t original_version_id = db2_kb_original_version_ensure(
+             scope, filename, "pdf", original_sha, file_len, "application/pdf", original_sha,
+             content_hash);
+         if (original_version_id <= 0)
+         {
+            free(xhtml);
+            snprintf(out_buf, (size_t)out_cap,
+                     "{\"error\":\"original PDF version could not be recorded\"}");
+            return 503;
+         }
          kb_pdf_ingest_stats_t st = {0};
-         int rc = kb_doc_pdf_ingest_xhtml(scope, filename, content_hash, xhtml, sclass, &st);
+         int rc = kb_doc_pdf_ingest_xhtml_version(scope, filename, content_hash, xhtml, sclass,
+                                                  original_version_id, &st);
          free(xhtml);
          if (rc < 0)
          {
@@ -229,9 +251,9 @@ int handle_post_docs(const char *body, int body_len, char *out_buf, int out_cap)
             const char *ocr_ep = kb_ocr_endpoint(&cfg);
             if (ocr_ep[0])
             {
-               int orc = kb_doc_pdf_ingest_ocr(scope, filename, content_hash, sclass,
-                                               (const unsigned char *)file_content, file_len,
-                                               ocr_ep, &st);
+               int orc = kb_doc_pdf_ingest_ocr_version(
+                   scope, filename, content_hash, sclass, (const unsigned char *)file_content,
+                   file_len, ocr_ep, original_version_id, &st);
                if (orc < 0)
                {
                   snprintf(out_buf, (size_t)out_cap, "{\"error\":\"db error\"}");

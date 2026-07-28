@@ -146,6 +146,115 @@ static void test_default_branch_is_canonical(void)
    printf("  test_default_branch_is_canonical: ok\n");
 }
 
+/* Any committed branch/ref can be selected without checkout, and its immutable
+ * identity accompanies the collected content. */
+static void test_explicit_branch_snapshot(void)
+{
+   make_root("explicit");
+   git("init -q -b main");
+   git("config user.email t@t");
+   git("config user.name t");
+   write_file("src/value.c", "int value(void){return 1;}");
+   git("add -A");
+   git("commit -qm main");
+   git("checkout -q -b feature/native-kb");
+   write_file("src/value.c", "int value(void){return 2;}");
+   write_file("src/feature.c", "int feature(void){return 1;}");
+   git("add -A");
+   git("commit -qm feature");
+   /* An uncommitted edit must not contaminate the committed branch snapshot. */
+   write_file("src/value.c", "UNCOMMITTED");
+
+   reset();
+   code_source_snapshot_t snapshot;
+   int n = code_collect_files_at_ref_cb(g_root, "feature/native-kb", rec_cb, NULL, &snapshot);
+   assert(n == 2);
+   assert(strcmp(content_of("src/value.c"), "int value(void){return 2;}") == 0);
+   assert(has("src/feature.c"));
+   assert(strcmp(snapshot.ref, "feature/native-kb") == 0);
+   assert(snapshot.commit_sha[0] && snapshot.tree_sha[0]);
+   assert(snapshot.is_default == 0);
+
+   code_source_snapshot_t main_snapshot;
+   assert(code_resolve_source_snapshot(g_root, "main", &main_snapshot) == 0);
+   assert(strcmp(snapshot.commit_sha, main_snapshot.commit_sha) != 0);
+   assert(strcmp(snapshot.tree_sha, main_snapshot.tree_sha) != 0);
+   printf("  test_explicit_branch_snapshot: ok\n");
+}
+
+static void test_current_branch_snapshot(void)
+{
+   make_root("current");
+   git("init -q -b main");
+   git("config user.email t@t");
+   git("config user.name t");
+   write_file("main.c", "int main_value(void){return 1;}");
+   git("add -A");
+   git("commit -qm main");
+   git("checkout -q -b feature/current");
+   write_file("feature.c", "int feature_value(void){return 2;}");
+   git("add -A");
+   git("commit -qm feature");
+
+   code_source_snapshot_t current, explicit_snapshot;
+   assert(code_resolve_current_snapshot(g_root, &current) == 0);
+   assert(code_resolve_source_snapshot(g_root, "feature/current", &explicit_snapshot) == 0);
+   assert(strcmp(current.ref, "feature/current") == 0);
+   assert(strcmp(current.commit_sha, explicit_snapshot.commit_sha) == 0);
+   assert(strcmp(current.tree_sha, explicit_snapshot.tree_sha) == 0);
+
+   git("checkout -q --detach");
+   memset(&current, 0x5a, sizeof(current));
+   assert(code_resolve_current_snapshot(g_root, &current) == -1);
+   assert(current.ref[0] == '\0' && current.commit_sha[0] == '\0');
+   printf("  test_current_branch_snapshot: ok\n");
+}
+
+static void test_missing_explicit_branch_fails_closed(void)
+{
+   make_root("missingref");
+   git("init -q -b main");
+   git("config user.email t@t");
+   git("config user.name t");
+   write_file("main.c", "int main(void){return 0;}");
+   git("add -A");
+   git("commit -qm main");
+
+   reset();
+   code_source_snapshot_t snapshot;
+   int n = code_collect_files_at_ref_cb(g_root, "does/not/exist", rec_cb, NULL, &snapshot);
+   assert(n == 0 && g_n == 0);
+   assert(snapshot.commit_sha[0] == '\0' && snapshot.tree_sha[0] == '\0');
+   printf("  test_missing_explicit_branch_fails_closed: ok\n");
+}
+
+static void test_merged_ref_detection(void)
+{
+   make_root("merged_ref");
+   git("init -q -b main");
+   git("config user.email t@t");
+   git("config user.name t");
+   write_file("base.c", "int base(void){return 1;}");
+   git("add -A");
+   git("commit -qm base");
+   git("checkout -q -b feature");
+   write_file("feature.c", "int feature(void){return 1;}");
+   git("add -A");
+   git("commit -qm feature");
+   assert(code_source_ref_is_merged(g_root, "feature") == 0);
+   git("checkout -q main");
+   git("merge -q --ff-only feature");
+   assert(code_source_ref_is_merged(g_root, "feature") == 1);
+   assert(code_source_ref_is_merged(g_root, "main") == 0);
+   git("checkout -q feature");
+   write_file("after.c", "int after(void){return 1;}");
+   git("add -A");
+   git("commit -qm after");
+   assert(code_source_ref_is_merged(g_root, "feature") == 0);
+   assert(code_source_ref_is_merged(g_root, "missing") == -1);
+   printf("  test_merged_ref_detection: ok\n");
+}
+
 /* AIMEE_CODE_INDEX_SOURCE=worktree is the documented opt-in to index WIP. */
 static void test_worktree_optin(void)
 {
@@ -375,7 +484,7 @@ static void test_install_branch_hook(void)
    char *body = read_file(hook);
    assert(body);
    assert(strstr(body, "installed by aimee"));
-   assert(strstr(body, "aimee index scan 'proj-alpha'"));
+   assert(strstr(body, "aimee index scan --current 'proj-alpha'"));
    assert(strstr(body, "&")); /* backgrounded */
    free(body);
 
@@ -388,9 +497,17 @@ static void test_install_branch_hook(void)
    char *cbody = read_file(co);
    assert(cbody);
    assert(strstr(cbody, "installed by aimee"));
-   assert(strstr(cbody, "aimee index scan 'proj-alpha'"));
+   assert(strstr(cbody, "aimee index scan --current 'proj-alpha'"));
    assert(strstr(cbody, "\"$3\" = \"1\"")); /* branch-switch gate */
    free(cbody);
+
+   /* post-commit keeps the active branch fresh after each new committed tip. */
+   char pc[2048];
+   snprintf(pc, sizeof(pc), "%s/.git/hooks/post-commit", g_root);
+   assert(stat(pc, &cst) == 0);
+   char *pcbody = read_file(pc);
+   assert(pcbody && strstr(pcbody, "aimee index scan --current 'proj-alpha'"));
+   free(pcbody);
 
    /* idempotent: re-installing our own hooks succeeds. */
    assert(code_index_install_branch_hook(g_root, "proj-alpha") == 0);
@@ -456,6 +573,10 @@ int main(void)
       return 0;
    }
    test_default_branch_is_canonical();
+   test_explicit_branch_snapshot();
+   test_current_branch_snapshot();
+   test_missing_explicit_branch_fails_closed();
+   test_merged_ref_detection();
    test_worktree_optin();
    test_clone_resolves_origin_head();
    test_no_default_branch_skips();

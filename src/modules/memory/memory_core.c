@@ -8,6 +8,9 @@
 #include "aimee.h"
 #include "memory_context_internal.h"
 #include "memory_rewrite_llm.h" /* weak in-process rewrite seam (KB build only) */
+#if !defined(AIMEE_DB2_DISABLED)
+#include "db2/memory_query.h"
+#endif
 
 #if defined(AIMEE_DB2_DISABLED)
 
@@ -708,3 +711,62 @@ memory_pagerank_runtime_stats_t s_memory_pagerank_stats;
  * The included fragments share this translation unit private state. */
 
 #endif /* AIMEE_DB2_DISABLED */
+
+/* Request-local committed-source visibility fence. General memories have no
+ * memory_source_contexts rows and remain shared; derived memories require an
+ * exact ref+commit+generation match. Defined in this always-linked core object
+ * so both the DB2-disabled server and KB build share one API. */
+static __thread char tl_memory_repository_key[512];
+static __thread char tl_memory_source_ref[1024];
+static __thread char tl_memory_source_commit[65];
+static __thread int64_t tl_memory_generation_id;
+
+void memory_source_context_set(const char *repository_key, const char *source_ref,
+                               const char *source_commit, int64_t generation_id)
+{
+   snprintf(tl_memory_repository_key, sizeof(tl_memory_repository_key), "%s",
+            repository_key ? repository_key : "");
+   snprintf(tl_memory_source_ref, sizeof(tl_memory_source_ref), "%s",
+            source_ref ? source_ref : "");
+   snprintf(tl_memory_source_commit, sizeof(tl_memory_source_commit), "%s",
+            source_commit ? source_commit : "");
+   tl_memory_generation_id = generation_id > 0 ? generation_id : 0;
+}
+
+void memory_source_context_clear(void)
+{
+   memset(tl_memory_repository_key, 0, sizeof(tl_memory_repository_key));
+   memset(tl_memory_source_ref, 0, sizeof(tl_memory_source_ref));
+   memset(tl_memory_source_commit, 0, sizeof(tl_memory_source_commit));
+   tl_memory_generation_id = 0;
+}
+
+int memory_source_context_visible(int64_t memory_id)
+{
+#if defined(AIMEE_DB2_DISABLED)
+   (void)memory_id;
+   return 1;
+#else
+   return db2_memory_source_context_visible(
+       memory_id, tl_memory_repository_key, tl_memory_source_ref, tl_memory_source_commit,
+       tl_memory_generation_id);
+#endif
+}
+
+int memory_source_context_link(int64_t memory_id, const char *repository_key,
+                               const char *source_ref, const char *source_commit,
+                               int64_t generation_id, const char *evidence_role)
+{
+#if defined(AIMEE_DB2_DISABLED)
+   (void)memory_id;
+   (void)repository_key;
+   (void)source_ref;
+   (void)source_commit;
+   (void)generation_id;
+   (void)evidence_role;
+   return -1;
+#else
+   return db2_memory_source_context_link(memory_id, repository_key, source_ref, source_commit,
+                                         generation_id, evidence_role);
+#endif
+}

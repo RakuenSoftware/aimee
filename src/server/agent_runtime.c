@@ -1467,20 +1467,27 @@ char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *n
                "file-content authority when it differs from indexed snippets.\n");
    ctx_appendf(buf, cap, &pos, "%s", prompt_principles_text(config_current_mode()));
 
+   char current_index_root[MAX_PATH_LEN] = "";
+   char current_repository_key[512] = "";
    char cwd_buf[MAX_PATH_LEN];
    const char *cwd = agent_context_cwd(cwd_buf, sizeof(cwd_buf));
    if (cwd && cwd[0])
    {
-      char root[MAX_PATH_LEN] = "";
       config_t ws_cfg;
-      if (config_load(&ws_cfg) != 0 || workspace_active_root(&ws_cfg, cwd, root, sizeof(root)) != 0)
-         snprintf(root, sizeof(root), "%s", cwd);
+      config_t *ws_cfgp = config_load(&ws_cfg) == 0 ? &ws_cfg : NULL;
+      if (workspace_active_root(ws_cfgp, cwd, current_index_root,
+                                sizeof(current_index_root)) != 0)
+         snprintf(current_index_root, sizeof(current_index_root), "%s", cwd);
+      char workspace_key[512] = "";
+      workspace_repo_index_keys(current_index_root, "", current_repository_key,
+                                sizeof(current_repository_key), workspace_key,
+                                sizeof(workspace_key));
       ctx_appendf(buf, cap, &pos,
                   "Workspace root: %s\n"
                   "Use paths relative to this workspace, or absolute paths under this exact "
                   "workspace root. Do not inspect sibling checkouts or parent repository paths "
                   "unless the user explicitly asks for them.\n",
-                  root);
+                  current_index_root);
    }
    ctx_appendf(buf, cap, &pos, "\n");
 
@@ -1561,7 +1568,8 @@ char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *n
    else if (!skip_kb_client)
    {
       /* Fallback: full context assembly (budget: architecture) */
-      char *ctx = kb_client_memory_assemble_context(NULL);
+      char *ctx = kb_client_memory_assemble_context_current(
+          NULL, current_index_root, current_repository_key, current_index_root);
       if (ctx && ctx[0])
       {
          size_t ctx_len = strlen(ctx);
@@ -1725,8 +1733,11 @@ char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *n
       {
          if (strlen(word) > 3)
          {
-            int found = kb_client_index_find(word, hits + total_hits, 16 - total_hits);
-            total_hits += found;
+            int found = kb_client_index_find_current(
+                current_repository_key, current_index_root, word, hits + total_hits,
+                16 - total_hits);
+            if (found > 0)
+               total_hits += found;
          }
          word = strtok_r(NULL, " \t\n,.;:!?()[]{}\"'", &saveptr);
       }

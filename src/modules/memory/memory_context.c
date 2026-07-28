@@ -806,6 +806,8 @@ static int recall_fill_from_rows(const db2_memory_cand_row_t *src_rows, int src_
    int n = 0;
    for (int i = 0; i < src_count && n < max_rows; i++)
    {
+      if (!memory_source_context_visible(src_rows[i].id))
+         continue;
       cJSON *row = cJSON_CreateObject();
       if (!row)
          break;

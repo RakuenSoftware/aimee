@@ -1288,6 +1288,22 @@ static const char *ci_find_like_sql = "SELECT p.name, f.path, t.line, t.kind"
                                       " p.name, f.path"
                                       " LIMIT ?2";
 
+static const char *ci_find_project_sql =
+    "SELECT p.name, f.path, t.line, t.kind FROM terms t"
+    " JOIN files f ON f.id=t.file_id JOIN projects p ON p.id=f.project_id"
+    " WHERE t.name=?1 AND p.name=?2 AND f.path NOT LIKE '.%'"
+    " AND f.path NOT LIKE '%/.%' AND p.root NOT LIKE '%/.%'"
+    " GROUP BY p.name,f.path,t.line,t.kind"
+    " ORDER BY CASE WHEN t.kind='definition' THEN 0 ELSE 1 END,p.name,f.path LIMIT ?3";
+
+static const char *ci_find_project_like_sql =
+    "SELECT p.name, f.path, t.line, t.kind FROM terms t"
+    " JOIN files f ON f.id=t.file_id JOIN projects p ON p.id=f.project_id"
+    " WHERE t.name LIKE ?1 ESCAPE '\\' AND p.name=?2 AND f.path NOT LIKE '.%'"
+    " AND f.path NOT LIKE '%/.%' AND p.root NOT LIKE '%/.%'"
+    " GROUP BY p.name,f.path,t.line,t.kind"
+    " ORDER BY CASE WHEN t.kind='definition' THEN 0 ELSE 1 END,p.name,f.path LIMIT ?3";
+
 static int ci_drain_term_hits(aimee_pg_stmt_t *st, term_hit_t *out, int max, char *err,
                               size_t errlen)
 {
@@ -1337,6 +1353,39 @@ int canonical_index_find(const char *identifier, term_hit_t *out, int max)
       aimee_pg_bind_int(st2, "?2", max);
       count = ci_drain_term_hits(st2, out, max, err, sizeof(err));
       aimee_pg_finalize(st2);
+   }
+   return count;
+}
+
+int canonical_index_find_project(const char *identifier, const char *project,
+                                 term_hit_t *out, int max)
+{
+   if (!identifier || !identifier[0] || !project || !project[0] || !out || max <= 0)
+      return 0;
+   void *conn = ci_conn();
+   if (!conn)
+      return -1;
+   char err[CI_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, ci_find_project_sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", identifier);
+   aimee_pg_bind_text(st, "?2", project);
+   aimee_pg_bind_int(st, "?3", max);
+   int count = ci_drain_term_hits(st, out, max, err, sizeof(err));
+   aimee_pg_finalize(st);
+   for (int tier = 0; count == 0 && tier < 2; tier++)
+   {
+      char pattern[512];
+      ci_make_like_pattern(identifier, tier == 1, 1, pattern, sizeof(pattern));
+      st = aimee_pg_prepare(conn, ci_find_project_like_sql, err, sizeof(err));
+      if (!st)
+         break;
+      aimee_pg_bind_text(st, "?1", pattern);
+      aimee_pg_bind_text(st, "?2", project);
+      aimee_pg_bind_int(st, "?3", max);
+      count = ci_drain_term_hits(st, out, max, err, sizeof(err));
+      aimee_pg_finalize(st);
    }
    return count;
 }

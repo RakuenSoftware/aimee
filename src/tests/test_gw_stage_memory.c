@@ -22,6 +22,30 @@
 #include "cJSON.h"
 #include "config.h"
 #include "kb_client.h"
+#include "workspace.h"
+
+const char *run_cmd_get_cwd(void)
+{
+   return NULL;
+}
+int workspace_active_root(const config_t *cfg, const char *cwd, char *out, size_t out_len)
+{
+   (void)cfg;
+   (void)cwd;
+   (void)out;
+   (void)out_len;
+   return -1;
+}
+void workspace_repo_index_keys(const char *root, const char *fallback_workspace, char *name_out,
+                               size_t name_len, char *ws_out, size_t ws_len)
+{
+   (void)root;
+   (void)fallback_workspace;
+   if (name_out && name_len)
+      name_out[0] = '\0';
+   if (ws_out && ws_len)
+      ws_out[0] = '\0';
+}
 
 /* When set, the recall stubs return nothing so ingress_preinject_build → NULL
  * (the "pre-injection off / recall empty" path). */
@@ -40,6 +64,13 @@ char *kb_client_memory_facts(const char *query)
 {
    (void)query;
    return NULL;
+}
+char *kb_client_memory_facts_current(const char *query, const char *repository_key,
+                                     const char *repository_root)
+{
+   (void)repository_key;
+   (void)repository_root;
+   return kb_client_memory_facts(query);
 }
 
 /* Typed-facts gate stub (typed_facts feature added this call to ingress_preinject.c;
@@ -63,6 +94,14 @@ int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t 
    out[0].parts.total = 0.88;
    return 1;
 }
+int kb_client_memory_diagnose_current(const char *query, int limit, memory_diagnostic_t *out,
+                                      int max, const char *repository_key,
+                                      const char *repository_root)
+{
+   (void)repository_key;
+   (void)repository_root;
+   return kb_client_memory_diagnose(query, limit, out, max);
+}
 int kb_client_index_code_search(const char *query, const char *project, code_search_hit_t *out,
                                 int max)
 {
@@ -74,6 +113,13 @@ int kb_client_index_code_search(const char *query, const char *project, code_sea
    snprintf(out[0].file_path, sizeof(out[0].file_path), "src/server/ingress_preinject.c");
    snprintf(out[0].snippet, sizeof(out[0].snippet), "builder emits a bounded context envelope");
    return 1;
+}
+int kb_client_index_code_search_current(const char *repository_key, const char *root,
+                                        const char *query, code_search_hit_t *out, int max)
+{
+   (void)repository_key;
+   (void)root;
+   return kb_client_index_code_search(query, NULL, out, max);
 }
 int config_load(config_t *cfg)
 {

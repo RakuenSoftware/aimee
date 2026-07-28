@@ -64,6 +64,10 @@ extern "C"
    int db2_kb_documents_get_stored_hash(const char *project, const char *file_path, char *out,
                                         size_t out_len);
 
+   /* Return the immutable original-version id linked by the current chunks for
+    * (project,file_path), or 0 when legacy/unlinked. Returns -1 on miss/error. */
+   int64_t db2_kb_documents_get_original_version(const char *project, const char *file_path);
+
    /* Return 1 when DB2 already has evidence or a file-index entry for
     * (project, file_hash), 0 when missing, -1 on SQL / connection error.
     * sample_path is optional and receives one matching path for diagnostics. */
@@ -125,6 +129,32 @@ extern "C"
     * id list returned by db2_kb_documents_list_chunk_ids_for_file. */
    void db2_kb_documents_delete_for_file(const char *project, const char *file_path);
 
+   /* Preserve one exact, immutable primary-evidence version before deriving any
+    * chunks. `original_blob_ref` names bytes already made durable in the KB's
+    * content-addressed blob store. Returns the existing/new version id, or -1.
+    * Repeating the same (project, source_uri, sha256) is idempotent. */
+   int64_t db2_kb_original_version_ensure(const char *project, const char *source_uri,
+                                          const char *source_kind,
+                                          const char *original_sha256,
+                                          int64_t original_byte_length,
+                                          const char *media_type,
+                                          const char *original_blob_ref,
+                                          const char *source_revision);
+
+   /* Advance a logical document only after its new derivation is complete.
+    * Call inside the transaction that installs the new chunks. */
+   int db2_kb_original_version_publish(int64_t version_id);
+
+   /* Current primary version for one logical document, or 0 when none has
+    * successfully published. Returns -1 on error. */
+   int64_t db2_kb_original_version_current(const char *project, const char *source_uri);
+
+   /* Test/observability lookup for an immutable evidence-lineage edge. Returns
+    * 1 on a matching path, 0 on miss, -1 on error. */
+   int db2_kb_evidence_lineage_exists(const char *subject_kind, const char *subject_id,
+                                      const char *evidence_tier,
+                                      int64_t original_version_id);
+
    /* INSERT a fresh kb_documents row with DELETE-then-INSERT semantics
     * (callers invoke db2_kb_documents_delete_for_file for the file
     * before inserting any chunks). updated_at is stamped to now.
@@ -133,6 +163,17 @@ extern "C"
                                          const char *file_hash, int chunk_index,
                                          const char *heading_path, int line_start, int line_end,
                                          const char *content, int token_count);
+
+   /* Evidence-aware chunk insert. The chunk is explicitly derived from an
+    * immutable original version and carries machine-readable source anchors.
+    * index_generation_id <= 0 leaves generation ownership NULL for legacy
+    * callers. */
+   int64_t db2_kb_documents_insert_chunk_evidence(
+       const char *project, const char *file_path, const char *file_hash, int chunk_index,
+       const char *heading_path, int line_start, int line_end, const char *content,
+       int token_count, int64_t document_version_id, const char *rendition_id,
+       const char *parser_version, const char *chunk_content_hash, const char *source_anchors_json,
+       int64_t index_generation_id);
 
    /* Set prev_chunk_id on doc_id and next_chunk_id on prev_id, linking
     * a freshly-inserted chunk to its predecessor. No-op when prev_id
@@ -149,6 +190,15 @@ extern "C"
                                              const char *chunk_strategy, int page_start,
                                              int page_end, const char *sensitivity_class,
                                              const char *quarantine_state);
+
+   /* PDF chunk derived from an exact immutable primary version. */
+   int64_t db2_kb_documents_insert_chunk_pdf_evidence(
+       const char *project, const char *file_path, const char *file_hash, int chunk_index,
+       const char *heading_path, int line_start, int line_end, const char *content,
+       int token_count, const char *chunk_strategy, int page_start, int page_end,
+       const char *sensitivity_class, const char *quarantine_state,
+       int64_t document_version_id, const char *rendition_id, const char *parser_version,
+       const char *chunk_content_hash, const char *source_anchors_json);
 
    /* structured-pdf Phase 1: insert one per-line coordinate region for a chunk.
     * bbox must already be normalized to [0,1] (top-left origin, per page).
@@ -316,8 +366,9 @@ extern "C"
     * separately by the reconciliation sweep (refcount-by-scan). Returns rows deleted, -1 err. */
    int db2_kb_doc_assets_delete_for_doc(const char *project, const char *document_key);
 
-   /* Reconciliation refcount: 1 if ANY kb_doc_assets row references blob_ref, else 0 (-1 err).
-    * A blob with no referrer is an orphan and may be unlinked. */
+   /* Reconciliation refcount: 1 if any asset OR immutable original version
+    * references blob_ref, else 0 (-1 err). A blob with no referrer is an
+    * orphan and may be unlinked. */
    int db2_kb_blob_ref_referenced(const char *blob_ref);
 
    /* §5 evidence escalation reads. All withhold quarantine_state='pending' (restricted)

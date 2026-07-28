@@ -10,6 +10,30 @@
 #include "config.h"
 #include "kb_client.h"
 #include "request_context.h"
+#include "workspace.h"
+
+const char *run_cmd_get_cwd(void)
+{
+   return NULL;
+}
+int workspace_active_root(const config_t *cfg, const char *cwd, char *out, size_t out_len)
+{
+   (void)cfg;
+   (void)cwd;
+   (void)out;
+   (void)out_len;
+   return -1;
+}
+void workspace_repo_index_keys(const char *root, const char *fallback_workspace, char *name_out,
+                               size_t name_len, char *ws_out, size_t ws_len)
+{
+   (void)root;
+   (void)fallback_workspace;
+   if (name_out && name_len)
+      name_out[0] = '\0';
+   if (ws_out && ws_len)
+      ws_out[0] = '\0';
+}
 
 /* The kb-backed builder (ingress_preinject_build) is out of scope here; these
  * stubs satisfy the linker so the test links only the pure helpers without
@@ -25,6 +49,13 @@ char *kb_client_memory_facts(const char *query)
 {
    (void)query;
    return NULL;
+}
+char *kb_client_memory_facts_current(const char *query, const char *repository_key,
+                                     const char *repository_root)
+{
+   (void)repository_key;
+   (void)repository_root;
+   return kb_client_memory_facts(query);
 }
 
 /* Typed-facts gate stub: off, so the builder's facts path stays inert here
@@ -57,6 +88,14 @@ int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t 
    out[1].parts.total = 0.44;
    return 2;
 }
+int kb_client_memory_diagnose_current(const char *query, int limit, memory_diagnostic_t *out,
+                                      int max, const char *repository_key,
+                                      const char *repository_root)
+{
+   (void)repository_key;
+   (void)repository_root;
+   return kb_client_memory_diagnose(query, limit, out, max);
+}
 /* Drives the compression lever in the build test below (config_load stub). */
 static int g_test_compress = 0;
 
@@ -84,6 +123,13 @@ int kb_client_index_code_search(const char *query, const char *project, code_sea
       snprintf(out[0].snippet, sizeof(out[0].snippet), "builder emits a bounded context envelope");
    }
    return 1;
+}
+int kb_client_index_code_search_current(const char *repository_key, const char *root,
+                                        const char *query, code_search_hit_t *out, int max)
+{
+   (void)repository_key;
+   (void)root;
+   return kb_client_index_code_search(query, NULL, out, max);
 }
 int config_load(config_t *cfg)
 {

@@ -21,12 +21,32 @@
 #include "aimee_home.h"
 #include "config.h"
 #include "workspace_provider.h"
+#include "workspace.h"
+#include "util.h"
 #include "dstr.h"
 #include "cJSON.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static int anchored_find_current(const char *identifier, term_hit_t *out, int max)
+{
+   char cwd_buf[MAX_PATH_LEN];
+   const char *cwd = run_cmd_get_cwd();
+   if ((!cwd || !cwd[0]) && getcwd(cwd_buf, sizeof(cwd_buf)))
+      cwd = cwd_buf;
+   char root[MAX_PATH_LEN] = "";
+   config_t cfg;
+   config_t *cfgp = config_load(&cfg) == 0 ? &cfg : NULL;
+   if (!cwd || workspace_active_root(cfgp, cwd, root, sizeof(root)) != 0)
+      return 0;
+   char repository_key[512] = "", workspace_key[512] = "";
+   workspace_repo_index_keys(root, "", repository_key, sizeof(repository_key), workspace_key,
+                             sizeof(workspace_key));
+   int n = kb_client_index_find_current(repository_key, root, identifier, out, max);
+   return n > 0 ? n : 0;
+}
 
 /* Read a workspace file into a malloc'd buffer with a cheap binary guard.
  * Returns 0 and sets out+len on success; -1 (and an error string via *errmsg,
@@ -157,7 +177,7 @@ char *tool_read_symbol(const char *symbol, const char *path)
    else
    {
       term_hit_t hits[16];
-      int nh = kb_client_index_find(symbol, hits, 16);
+      int nh = anchored_find_current(symbol, hits, 16);
       if (nh <= 0)
          return safe_strdup("error: symbol not found in the code index; pass 'path' to read from a "
                             "specific file");
@@ -258,7 +278,7 @@ char *tool_edit_symbol(const char *symbol, const char *path, const char *op, con
    else
    {
       term_hit_t hits[16];
-      int nh = kb_client_index_find(symbol, hits, 16);
+      int nh = anchored_find_current(symbol, hits, 16);
       if (nh <= 0)
          return safe_strdup("error: symbol not found in the code index; pass 'path' or a "
                             "fully-qualified name");

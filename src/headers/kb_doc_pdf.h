@@ -116,10 +116,22 @@ extern "C"
                          const kb_pdf_doc_t *doc, const char *sensitivity_class,
                          kb_pdf_ingest_stats_t *stats);
 
+   /* Exact-primary variant used by raw upload ingestion. Publication of
+    * original_version_id is atomic with replacing all derived chunks. */
+   int kb_doc_pdf_ingest_version(const char *project, const char *file_path,
+                                 const char *file_hash, const kb_pdf_doc_t *doc,
+                                 const char *sensitivity_class, int64_t original_version_id,
+                                 const char *rendition_id, const char *parser_version,
+                                 kb_pdf_ingest_stats_t *stats);
+
    /* Convenience: parse -> normalize -> ingest from raw bbox-layout XHTML. */
    int kb_doc_pdf_ingest_xhtml(const char *project, const char *file_path, const char *file_hash,
                                const char *xhtml, const char *sensitivity_class,
                                kb_pdf_ingest_stats_t *stats);
+   int kb_doc_pdf_ingest_xhtml_version(
+       const char *project, const char *file_path, const char *file_hash, const char *xhtml,
+       const char *sensitivity_class, int64_t original_version_id,
+       kb_pdf_ingest_stats_t *stats);
 
    /* Phase C: render each page of a PDF (raw bytes) to a PNG crop via the hardened pdftoppm
     * harness, store it in the content-addressed blob store, and insert a kb_doc_assets row
@@ -137,6 +149,10 @@ extern "C"
    int kb_doc_pdf_ingest_ocr(const char *project, const char *file_path, const char *file_hash,
                              const char *sensitivity_class, const unsigned char *pdf_bytes, int n,
                              const char *ocr_endpoint, kb_pdf_ingest_stats_t *stats);
+   int kb_doc_pdf_ingest_ocr_version(
+       const char *project, const char *file_path, const char *file_hash,
+       const char *sensitivity_class, const unsigned char *pdf_bytes, int n,
+       const char *ocr_endpoint, int64_t original_version_id, kb_pdf_ingest_stats_t *stats);
 
 /* The page-boundary chunk line cap (exposed for tests). */
 #define KB_PDF_MAX_CHUNK_LINES 100

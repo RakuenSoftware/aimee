@@ -31,15 +31,50 @@
 typedef int (*code_collect_file_cb)(const char *rel_path, const char *content, void *ctx);
 int code_collect_files_cb(const char *root, code_collect_file_cb cb, void *ctx);
 
+/* Immutable identity of the committed Git snapshot read by the collector.
+ * ref is the requested/resolved branch or ref; commit_sha identifies history,
+ * tree_sha identifies the exact path->blob manifest. is_default is true only
+ * when the caller omitted a ref and default-ref resolution selected it. */
+typedef struct
+{
+   char ref[1024];
+   char commit_sha[128];
+   char tree_sha[128];
+   int is_default;
+} code_source_snapshot_t;
+
+/* Resolve and read one explicit committed branch/ref without checking it out.
+ * requested_ref=NULL/empty selects the repository default. The working tree is
+ * never used as a fallback for an explicit ref. snapshot_out may be NULL.
+ * Returns the number of collected files, or 0 when the ref is unavailable. */
+int code_collect_files_at_ref_cb(const char *root, const char *requested_ref,
+                                 code_collect_file_cb cb, void *ctx,
+                                 code_source_snapshot_t *snapshot_out);
+
+/* Resolve a branch/ref to immutable commit+tree identities without collecting
+ * files. requested_ref=NULL/empty selects the default branch. */
+int code_resolve_source_snapshot(const char *root, const char *requested_ref,
+                                 code_source_snapshot_t *out);
+
+/* Resolve the branch actually checked out at `root`. Detached HEAD fails
+ * closed: callers that need detached-commit operation must opt into that exact
+ * commit explicitly rather than silently treating the repository default as
+ * the active source context. */
+int code_resolve_current_snapshot(const char *root, code_source_snapshot_t *out);
+
+/* Determine whether an explicit ref's tip is already reachable from the
+ * repository default tip. Returns 1 merged, 0 not merged, -1 unresolved/error.
+ * The default ref itself is never classified as merged. */
+int code_source_ref_is_merged(const char *root, const char *source_ref);
+
 /* Convenience wrapper over code_collect_files_cb that appends one
  * {"rel_path","content"} object per file to `files_arr`. Collects the whole
  * tree (no file-count cap); use when the caller pushes the result in one shot
  * and the tree is known-small. Returns the number of files appended. */
 int code_collect_files(const char *root, cJSON *files_arr);
 
-/* §6 live: resolve the default branch's tree SHA for `root` (0 + 40-hex in `out`,
- * or -1 if no resolvable default branch). `code_default_branch_changed` is the pure
- * gate deciding whether a stored vs current SHA warrants a re-index. */
+/* Compatibility default-branch tree resolver. New generation-aware callers
+ * should retain the full code_source_snapshot_t above. */
 int git_resolve_default_sha(const char *root, char *out, size_t outlen);
 int code_default_branch_changed(const char *stored_sha, const char *current_sha);
 /* 1 if AIMEE_CODE_INDEX_SOURCE=worktree (the index tracks WIP, so the default-branch

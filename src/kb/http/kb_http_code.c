@@ -4,6 +4,8 @@
 #include "kb_curator_queue.h"
 #include "cJSON.h"
 #include "db2/canonical_index.h"
+#include "db2/kb_payload.h"
+#include "db2/source_generation.h"
 #include "db2/cross_repo_classify.h" /* xrepo_tier_name */
 #include "db2/cross_repo_deps.h"     /* canonical_index_cross_repo_deps */
 #include "db2/cross_repo_review.h"   /* db2_cross_repo_review_list */
@@ -24,6 +26,8 @@
 #include "kb/kb_graph_analytics.h"
 #include "kb/kb_service_graph.h"
 #include "kb/kb_surprising_judge.h"
+#include "kb/kb_service_code_embed.h"
+#include "kb_blob_store.h"
 #include "kb/prompt_sanitizer.h" /* §1 render boundary: sanitize corpus-derived labels */
 #include <stdio.h>
 #include <string.h>
@@ -154,9 +158,39 @@ int handle_get_code_find(const char *query_string, char *out_buf, int out_cap)
 {
    char identifier[256] = "";
    char project_filter[256] = "";
+   char repository_key[512] = "";
+   char source_ref[1024] = "";
+   char source_commit[65] = "";
    if (!code_qparam(query_string, "identifier", identifier, sizeof(identifier)) || !identifier[0])
       return code_scan_write_error(out_buf, out_cap, "missing identifier");
    code_qparam(query_string, "project", project_filter, sizeof(project_filter));
+   code_qparam(query_string, "repository_key", repository_key, sizeof(repository_key));
+   code_qparam(query_string, "source_ref", source_ref, sizeof(source_ref));
+   code_qparam(query_string, "source_commit", source_commit, sizeof(source_commit));
+
+   db2_source_generation_t resolved_generation;
+   memset(&resolved_generation, 0, sizeof(resolved_generation));
+   if (repository_key[0])
+   {
+      int resolved = db2_source_ref_resolve_current(repository_key, source_ref,
+                                                    &resolved_generation);
+      if (resolved < 0)
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"source ref resolution unavailable\"}");
+         return 503;
+      }
+      if (resolved == 0 || (source_commit[0] &&
+                            strcmp(source_commit, resolved_generation.commit_sha) != 0))
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"source ref is not current\","
+                  "\"code\":\"source_ref_not_current\"}");
+         return 409;
+      }
+      snprintf(project_filter, sizeof(project_filter), "%s",
+               resolved_generation.physical_project);
+   }
 
    int max_r = 20;
    char max_r_s[16] = "";
@@ -173,7 +207,9 @@ int handle_get_code_find(const char *query_string, char *out_buf, int out_cap)
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"oom\"}");
       return 500;
    }
-   int n = canonical_index_find(identifier, hits, max_r);
+   int n = project_filter[0]
+               ? canonical_index_find_project(identifier, project_filter, hits, max_r)
+               : canonical_index_find(identifier, hits, max_r);
    if (n < 0)
    {
       free(hits);
@@ -201,6 +237,14 @@ int handle_get_code_find(const char *query_string, char *out_buf, int out_cap)
       cJSON_AddNumberToObject(hit, "line_end", hits[i].line_end);
       cJSON_AddStringToObject(hit, "kind", hits[i].kind);
       cJSON_AddItemToArray(arr, hit);
+   }
+   if (repository_key[0])
+   {
+      cJSON_AddStringToObject(resp, "repository_key", repository_key);
+      cJSON_AddStringToObject(resp, "source_ref", resolved_generation.source_ref);
+      cJSON_AddStringToObject(resp, "source_commit", resolved_generation.commit_sha);
+      cJSON_AddNumberToObject(resp, "generation_id",
+                             (double)resolved_generation.generation_id);
    }
    cJSON_AddNullToObject(resp, "next_cursor");
    char *json = cJSON_PrintUnformatted(resp);
@@ -344,9 +388,38 @@ int handle_get_code_search(const char *query_string, char *out_buf, int out_cap)
 {
    char query[512] = "";
    char project[256] = "";
+   char repository_key[512] = "";
+   char source_ref[1024] = "";
+   char source_commit[65] = "";
    if (!code_qparam(query_string, "query", query, sizeof(query)) || !query[0])
       return code_scan_write_error(out_buf, out_cap, "missing query");
    code_qparam(query_string, "project", project, sizeof(project));
+   code_qparam(query_string, "repository_key", repository_key, sizeof(repository_key));
+   code_qparam(query_string, "source_ref", source_ref, sizeof(source_ref));
+   code_qparam(query_string, "source_commit", source_commit, sizeof(source_commit));
+
+   db2_source_generation_t resolved_generation;
+   memset(&resolved_generation, 0, sizeof(resolved_generation));
+   if (repository_key[0])
+   {
+      int resolved = db2_source_ref_resolve_current(repository_key, source_ref,
+                                                    &resolved_generation);
+      if (resolved < 0)
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"source ref resolution unavailable\"}");
+         return 503;
+      }
+      if (resolved == 0 ||
+          (source_commit[0] && strcmp(source_commit, resolved_generation.commit_sha) != 0))
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"source ref is not current\","
+                  "\"code\":\"source_ref_not_current\"}");
+         return 409;
+      }
+      snprintf(project, sizeof(project), "%s", resolved_generation.physical_project);
+   }
 
    int max_r = 20;
    char max_r_s[16] = "";
@@ -384,6 +457,13 @@ int handle_get_code_search(const char *query_string, char *out_buf, int out_cap)
       return 500;
    }
    cJSON_AddStringToObject(resp, "status", "ok");
+   if (repository_key[0])
+   {
+      cJSON_AddStringToObject(resp, "repository_key", repository_key);
+      cJSON_AddStringToObject(resp, "source_ref", resolved_generation.source_ref);
+      cJSON_AddStringToObject(resp, "source_commit", resolved_generation.commit_sha);
+      cJSON_AddNumberToObject(resp, "generation_id", (double)resolved_generation.generation_id);
+   }
    cJSON *arr = cJSON_AddArrayToObject(resp, "hits");
    for (int i = 0; arr && i < n; i++)
    {
@@ -828,10 +908,39 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
    char query[512] = "";
    char symbol[256] = "";
    char project[256] = "";
+   char repository_key[512] = "";
+   char source_ref[1024] = "";
+   char source_commit[65] = "";
    if (!code_qparam(query_string, "query", query, sizeof(query)) || !query[0])
       return code_scan_write_error(out_buf, out_cap, "missing query");
    code_qparam(query_string, "symbol", symbol, sizeof(symbol));
    code_qparam(query_string, "project", project, sizeof(project));
+   code_qparam(query_string, "repository_key", repository_key, sizeof(repository_key));
+   code_qparam(query_string, "source_ref", source_ref, sizeof(source_ref));
+   code_qparam(query_string, "source_commit", source_commit, sizeof(source_commit));
+
+   db2_source_generation_t resolved_generation;
+   memset(&resolved_generation, 0, sizeof(resolved_generation));
+   if (repository_key[0])
+   {
+      int resolved = db2_source_ref_resolve_current(repository_key, source_ref,
+                                                    &resolved_generation);
+      if (resolved < 0)
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"source ref resolution unavailable\"}");
+         return 503;
+      }
+      if (resolved == 0 ||
+          (source_commit[0] && strcmp(source_commit, resolved_generation.commit_sha) != 0))
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"source ref is not current\","
+                  "\"code\":\"source_ref_not_current\"}");
+         return 409;
+      }
+      snprintf(project, sizeof(project), "%s", resolved_generation.physical_project);
+   }
    const char *proj = project[0] ? project : NULL;
 
    int max_r = 20;
@@ -1012,7 +1121,27 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
       nf = max_r;
 
    /* Memory "why" context (recorded reasoning, capped). */
+   if (repository_key[0])
+      memory_source_context_set(repository_key, resolved_generation.source_ref,
+                                resolved_generation.commit_sha,
+                                resolved_generation.generation_id);
+   else
+      memory_source_context_clear();
    int nm = db2_memory_find_facts_like(query, HYBRID_WHY_MAX, mems, HYBRID_PER_SIGNAL);
+   if (repository_key[0] && nm > 0)
+   {
+      int kept = 0;
+      for (int i = 0; i < nm; i++)
+      {
+         if (!memory_source_context_visible(mems[i].id))
+            continue;
+         if (kept != i)
+            mems[kept] = mems[i];
+         kept++;
+      }
+      nm = kept;
+   }
+   memory_source_context_clear();
    if (nm < 0)
       nm = 0;
    if (nm > HYBRID_WHY_MAX)
@@ -1040,6 +1169,13 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
       cJSON_AddStringToObject(resp, "symbol", symbol);
    if (project[0])
       cJSON_AddStringToObject(resp, "project", project);
+   if (repository_key[0])
+   {
+      cJSON_AddStringToObject(resp, "repository_key", repository_key);
+      cJSON_AddStringToObject(resp, "source_ref", resolved_generation.source_ref);
+      cJSON_AddStringToObject(resp, "source_commit", resolved_generation.commit_sha);
+      cJSON_AddNumberToObject(resp, "generation_id", (double)resolved_generation.generation_id);
+   }
 
    cJSON *results = cJSON_AddArrayToObject(resp, "results");
    for (int i = 0; results && i < nf; i++)
@@ -1779,6 +1915,288 @@ int handle_post_code_scan(const char *body, char *out_buf, int out_cap)
    cJSON *root = cJSON_Parse(body ? body : "{}");
    if (!root)
       return code_scan_write_error(out_buf, out_cap, "invalid json");
+
+   cJSON *action_j = cJSON_GetObjectItemCaseSensitive(root, "action");
+   const char *action = cJSON_IsString(action_j) ? action_j->valuestring : "";
+   if (action && action[0])
+   {
+      cJSON *resp = cJSON_CreateObject();
+      int status = 200;
+      if (!resp)
+      {
+         cJSON_Delete(root);
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"out of memory\"}");
+         return 503;
+      }
+
+      if (strcmp(action, "begin_generation") == 0)
+      {
+         cJSON *repo_j = cJSON_GetObjectItemCaseSensitive(root, "repository_key");
+         cJSON *ref_j = cJSON_GetObjectItemCaseSensitive(root, "source_ref");
+         cJSON *commit_j = cJSON_GetObjectItemCaseSensitive(root, "commit_sha");
+         cJSON *tree_j = cJSON_GetObjectItemCaseSensitive(root, "tree_sha");
+         cJSON *label_j = cJSON_GetObjectItemCaseSensitive(root, "root_path");
+         const char *repo = cJSON_IsString(repo_j) ? repo_j->valuestring : "";
+         const char *ref = cJSON_IsString(ref_j) ? ref_j->valuestring : "";
+         const char *commit = cJSON_IsString(commit_j) ? commit_j->valuestring : "";
+         const char *tree = cJSON_IsString(tree_j) ? tree_j->valuestring : "";
+         const char *label = cJSON_IsString(label_j) ? label_j->valuestring : "remote";
+         db2_source_generation_t generation;
+         if (!db2_is_initialized())
+         {
+            cJSON_AddStringToObject(resp, "status", "error");
+            cJSON_AddStringToObject(resp, "message", "knowledge service store unavailable");
+            status = 503;
+         }
+         else if (db2_source_generation_begin(repo, ref, code_scan_bool(root, "is_default", 0),
+                                              commit, tree, label, &generation) != 0)
+         {
+            cJSON_AddStringToObject(resp, "status", "error");
+            cJSON_AddStringToObject(resp, "message", "invalid or unavailable source generation");
+            status = 400;
+         }
+         else
+         {
+            cJSON_AddStringToObject(resp, "status", "ok");
+            cJSON_AddStringToObject(resp, "action", "begin_generation");
+            cJSON_AddNumberToObject(resp, "generation_id", (double)generation.generation_id);
+            cJSON_AddStringToObject(resp, "project", generation.physical_project);
+            cJSON_AddStringToObject(resp, "repository_key", generation.repository_key);
+            cJSON_AddStringToObject(resp, "source_ref", ref);
+            cJSON_AddStringToObject(resp, "commit_sha", generation.commit_sha);
+            cJSON_AddStringToObject(resp, "tree_sha", generation.tree_sha);
+            cJSON_AddStringToObject(resp, "generation_state", generation.state);
+            cJSON_AddBoolToObject(resp, "reused_snapshot", generation.reused_snapshot);
+            cJSON_AddBoolToObject(resp, "already_current", generation.already_current);
+            cJSON_AddBoolToObject(resp, "skipped", generation.already_current);
+         }
+      }
+      else if (strcmp(action, "retire_ref") == 0)
+      {
+         cJSON *repo_j = cJSON_GetObjectItemCaseSensitive(root, "repository_key");
+         cJSON *ref_j = cJSON_GetObjectItemCaseSensitive(root, "source_ref");
+         cJSON *reason_j = cJSON_GetObjectItemCaseSensitive(root, "reason");
+         cJSON *grace_j = cJSON_GetObjectItemCaseSensitive(root, "grace_seconds");
+         const char *repo = cJSON_IsString(repo_j) ? repo_j->valuestring : "";
+         const char *ref = cJSON_IsString(ref_j) ? ref_j->valuestring : "";
+         const char *reason = cJSON_IsString(reason_j) ? reason_j->valuestring : "";
+         int grace = cJSON_IsNumber(grace_j) ? grace_j->valueint : -1;
+         int retired = db2_source_ref_retire(repo, ref, reason, grace);
+         if (retired < 0)
+         {
+            cJSON_AddStringToObject(resp, "status", "error");
+            cJSON_AddStringToObject(resp, "message", "invalid source-ref retirement");
+            status = 400;
+         }
+         else if (retired == 0)
+         {
+            cJSON_AddStringToObject(resp, "status", "error");
+            cJSON_AddStringToObject(resp, "message", "source ref not found");
+            status = 404;
+         }
+         else
+         {
+            cJSON_AddStringToObject(resp, "status", "ok");
+            cJSON_AddStringToObject(resp, "action", "retire_ref");
+            cJSON_AddStringToObject(resp, "repository_key", repo);
+            cJSON_AddStringToObject(resp, "source_ref", ref);
+            cJSON_AddStringToObject(resp, "lifecycle_state", reason);
+            cJSON_AddBoolToObject(resp, "retrievable", 0);
+         }
+      }
+      else if (strcmp(action, "append_generation") == 0)
+      {
+         cJSON *generation_j = cJSON_GetObjectItemCaseSensitive(root, "generation_id");
+         cJSON *files_j = cJSON_GetObjectItemCaseSensitive(root, "files");
+         int64_t generation_id =
+             cJSON_IsNumber(generation_j) ? (int64_t)generation_j->valuedouble : 0;
+         db2_source_generation_t generation;
+         if (generation_id <= 0 || !cJSON_IsArray(files_j) ||
+             db2_source_generation_get(generation_id, &generation) != 1 ||
+             strcmp(generation.state, "staging") != 0)
+         {
+            cJSON_AddStringToObject(resp, "status", "error");
+            cJSON_AddStringToObject(resp, "message", "generation is not accepting source batches");
+            status = 409;
+         }
+         else
+         {
+            int n = cJSON_GetArraySize(files_j);
+            canonical_index_file_input_t *inputs =
+                calloc((size_t)(n > 0 ? n : 1), sizeof(*inputs));
+            int64_t *versions = calloc((size_t)(n > 0 ? n : 1), sizeof(*versions));
+            int valid = inputs && versions;
+            for (int i = 0; valid && i < n; i++)
+            {
+               cJSON *entry = cJSON_GetArrayItem(files_j, i);
+               cJSON *rel_j = cJSON_GetObjectItemCaseSensitive(entry, "rel_path");
+               cJSON *content_j = cJSON_GetObjectItemCaseSensitive(entry, "content");
+               if (!cJSON_IsString(rel_j) || !rel_j->valuestring[0] ||
+                   !cJSON_IsString(content_j))
+               {
+                  valid = 0;
+                  break;
+               }
+               inputs[i].rel_path = rel_j->valuestring;
+               inputs[i].content = content_j->valuestring;
+               char sha[65];
+               size_t content_len = strlen(inputs[i].content);
+               if (kb_blob_store_put(inputs[i].content, content_len, sha, sizeof(sha)) != 0)
+               {
+                  valid = 0;
+                  break;
+               }
+               versions[i] = db2_kb_original_version_ensure(
+                   generation.physical_project, inputs[i].rel_path, "git_blob", sha,
+                   (int64_t)content_len, "text/plain; charset=utf-8", sha,
+                   generation.commit_sha);
+               if (versions[i] <= 0)
+                  valid = 0;
+            }
+            int inspected = 0;
+            int files = valid ? canonical_index_scan_files(generation.physical_project, "remote",
+                                                           inputs, n, 1, &inspected)
+                              : -1;
+            if (files >= 0)
+            {
+               for (int i = 0; i < n; i++)
+                  if (db2_source_generation_link_file_evidence(
+                          generation_id, inputs[i].rel_path, versions[i]) < 0)
+                  {
+                     files = -1;
+                     break;
+                  }
+            }
+            free(versions);
+            free(inputs);
+            if (files < 0)
+            {
+               cJSON_AddStringToObject(resp, "status", "error");
+               cJSON_AddStringToObject(resp, "message",
+                                      "source batch could not be stored with primary lineage");
+               status = 503;
+            }
+            else
+            {
+               cJSON_AddStringToObject(resp, "status", "ok");
+               cJSON_AddStringToObject(resp, "action", "append_generation");
+               cJSON_AddNumberToObject(resp, "generation_id", (double)generation_id);
+               cJSON_AddNumberToObject(resp, "files", files);
+               cJSON_AddNumberToObject(resp, "inspected", inspected);
+            }
+         }
+      }
+      else if (strcmp(action, "finish_generation") == 0)
+      {
+         cJSON *generation_j = cJSON_GetObjectItemCaseSensitive(root, "generation_id");
+         cJSON *count_j = cJSON_GetObjectItemCaseSensitive(root, "expected_file_count");
+         cJSON *manifest_j = cJSON_GetObjectItemCaseSensitive(root, "source_manifest_hash");
+         int64_t generation_id =
+             cJSON_IsNumber(generation_j) ? (int64_t)generation_j->valuedouble : 0;
+         int64_t expected = cJSON_IsNumber(count_j) ? (int64_t)count_j->valuedouble : -1;
+         const char *manifest = cJSON_IsString(manifest_j) ? manifest_j->valuestring : "";
+         db2_source_generation_t generation;
+         int rc = db2_source_generation_get(generation_id, &generation);
+         if (rc != 1 || expected < 0 || expected > 1000000)
+         {
+            cJSON_AddStringToObject(resp, "status", "error");
+            cJSON_AddStringToObject(resp, "message", "invalid source-generation completion");
+            status = 400;
+         }
+         else if (strcmp(generation.state, "published") != 0)
+         {
+            rc = 0;
+            if (strcmp(generation.state, "staging") == 0)
+               rc = db2_source_generation_source_complete(generation_id, manifest, expected,
+                                                          &generation);
+            else if ((strcmp(generation.state, "encoding") == 0 ||
+                     strcmp(generation.state, "validating") == 0) &&
+                     (generation.expected_file_count != expected ||
+                      strcmp(generation.source_manifest_hash, manifest) != 0))
+               rc = -1; /* a retry may not change the already-validated manifest */
+            else if (strcmp(generation.state, "encoding") != 0 &&
+                     strcmp(generation.state, "validating") != 0)
+               rc = -1;
+
+            if (rc == 0 && strcmp(generation.state, "encoding") == 0)
+            {
+               kb_code_embed_result_t embed;
+               rc = kb_code_embed_refresh(generation.physical_project, "full_project", NULL, 0, 0,
+                                          expected > 0 ? (int)expected : 1, 0, &embed);
+               int covered =
+                   rc == 0 ? db2_source_generation_record_embedding_lineage(
+                                 generation_id, "configured-code-embedder")
+                           : -1;
+               if (covered < 0 ||
+                   db2_source_generation_model_complete(
+                       generation_id, expected, covered, "configured-code-embedder", "", "",
+                       &generation) != 0)
+                  rc = -1;
+            }
+            if (rc == 0 && strcmp(generation.state, "validating") == 0)
+            {
+               rc = db2_source_generation_publish(generation_id, &generation);
+               if (rc == -2)
+               {
+                  cJSON_AddStringToObject(resp, "status", "error");
+                  cJSON_AddStringToObject(resp, "message", "source ref moved before publication");
+                  cJSON_AddStringToObject(resp, "code", "source_ref_moved");
+                  status = 409;
+               }
+            }
+            if (rc != 0 && status == 200)
+            {
+               cJSON_AddStringToObject(resp, "status", "error");
+               cJSON_AddStringToObject(
+                   resp, "message",
+                   "generation validation failed; current branch evidence was not changed");
+               status = 503;
+            }
+         }
+
+         if (status == 200)
+         {
+            kb_curator_queue_code_units_for_project(generation.physical_project, "remote");
+            cJSON_AddStringToObject(resp, "status", "ok");
+            cJSON_AddStringToObject(resp, "action", "finish_generation");
+            cJSON_AddNumberToObject(resp, "generation_id", (double)generation.generation_id);
+            cJSON_AddStringToObject(resp, "project", generation.physical_project);
+            cJSON_AddStringToObject(resp, "repository_key", generation.repository_key);
+            cJSON_AddStringToObject(resp, "source_ref", generation.source_ref);
+            cJSON_AddStringToObject(resp, "commit_sha", generation.commit_sha);
+            cJSON_AddStringToObject(resp, "tree_sha", generation.tree_sha);
+            cJSON_AddStringToObject(resp, "generation_state", generation.state);
+            cJSON_AddNumberToObject(resp, "files", (double)generation.indexed_file_count);
+            cJSON_AddNumberToObject(resp, "model_subjects",
+                                   (double)generation.model_subject_count);
+            cJSON_AddBoolToObject(resp, "skipped", 0);
+         }
+      }
+      else
+      {
+         cJSON_AddStringToObject(resp, "status", "error");
+         cJSON_AddStringToObject(resp, "message", "unknown code scan action");
+         status = 400;
+      }
+
+      char *json = cJSON_PrintUnformatted(resp);
+      if (!json)
+      {
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"out of memory\"}");
+         status = 503;
+      }
+      else if (strlen(json) >= (size_t)out_cap)
+      {
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"response too large\"}");
+         status = 413;
+      }
+      else
+         snprintf(out_buf, (size_t)out_cap, "%s", json);
+      free(json);
+      cJSON_Delete(resp);
+      cJSON_Delete(root);
+      return status;
+   }
 
    cJSON *project_j = cJSON_GetObjectItemCaseSensitive(root, "project");
    const char *project = cJSON_IsString(project_j) ? project_j->valuestring : "";

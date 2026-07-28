@@ -19,13 +19,40 @@
 #include "kb_service_memory.h"
 #include "log.h"
 #include "memory_graph_fusion.h"
+#include "memory.h"
+#include "db2/source_generation.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 /* Defined in kb_service.c; non-static so this file can call them. */
 int kb_send_response(int fd, cJSON *resp);
 int kb_send_error(int fd, const char *message);
 int kb_reply_or_error(int fd, cJSON *resp, const char *err_msg);
+
+/* Install the exact current committed-source fence carried by a memory request.
+ * No repository_key means a general/unscoped request; source-fenced memories
+ * still fail closed in memory_source_context_visible. */
+static int memory_request_source_context_enter(cJSON *req)
+{
+   memory_source_context_clear();
+   cJSON *repo_j = cJSON_GetObjectItemCaseSensitive(req, "repository_key");
+   if (!cJSON_IsString(repo_j) || !repo_j->valuestring[0])
+      return 0;
+   cJSON *ref_j = cJSON_GetObjectItemCaseSensitive(req, "source_ref");
+   cJSON *commit_j = cJSON_GetObjectItemCaseSensitive(req, "source_commit");
+   if (!cJSON_IsString(ref_j) || !ref_j->valuestring[0] || !cJSON_IsString(commit_j) ||
+       !commit_j->valuestring[0])
+      return -1;
+   db2_source_generation_t generation;
+   int resolved = db2_source_ref_resolve_current(repo_j->valuestring, ref_j->valuestring,
+                                                 &generation);
+   if (resolved != 1 || strcmp(generation.commit_sha, commit_j->valuestring) != 0)
+      return -1;
+   memory_source_context_set(repo_j->valuestring, generation.source_ref, generation.commit_sha,
+                             generation.generation_id);
+   return 1;
+}
 
 int kb_handle_memory_find_facts(int fd, cJSON *req)
 {
@@ -33,6 +60,8 @@ int kb_handle_memory_find_facts(int fd, cJSON *req)
    cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
    if (!cJSON_IsString(query_j))
       return kb_send_error(fd, "memory.find_facts requires query");
+   if (memory_request_source_context_enter(req) < 0)
+      return kb_send_error(fd, "source ref is not current");
    int limit;
    if (cJSON_IsNumber(limit_j))
       limit = (int)limit_j->valuedouble;
@@ -91,6 +120,7 @@ int kb_handle_memory_find_facts(int fd, cJSON *req)
    memory_fusion_state_set(cJSON_IsString(fusion_j) ? fusion_j->valuestring : NULL);
    cJSON *resp = db2_kb_service_memory_find_facts_json(query_j->valuestring, limit);
    memory_fusion_state_clear();
+   memory_source_context_clear();
 
    /* Close the bandit loop: attribute an immediate recall-sufficiency reward to
     * the sampled decision so the arm posteriors update from live traffic. */
@@ -397,10 +427,13 @@ int kb_handle_memory_diagnose_scoped(int fd, cJSON *req)
    cJSON *l = cJSON_GetObjectItemCaseSensitive(req, "limit");
    if (!cJSON_IsString(q))
       return kb_send_error(fd, "missing query");
+   if (memory_request_source_context_enter(req) < 0)
+      return kb_send_error(fd, "source ref is not current");
    const char *st_s = (cJSON_IsString(st) && st->valuestring[0]) ? st->valuestring : NULL;
    const char *sv_s = (cJSON_IsString(sv) && sv->valuestring[0]) ? sv->valuestring : NULL;
    int limit = cJSON_IsNumber(l) ? (int)l->valuedouble : 10;
    cJSON *resp = db2_kb_service_memory_diagnose_scoped_json(q->valuestring, st_s, sv_s, limit);
+   memory_source_context_clear();
    return kb_reply_or_error(fd, resp, "failed to diagnose memory");
 }
 
@@ -423,11 +456,14 @@ int kb_handle_memory_find_facts_visible(int fd, cJSON *req)
    cJSON *l = cJSON_GetObjectItemCaseSensitive(req, "limit");
    if (!cJSON_IsString(q))
       return kb_send_error(fd, "missing query");
+   if (memory_request_source_context_enter(req) < 0)
+      return kb_send_error(fd, "source ref is not current");
    const char *workspace = (cJSON_IsString(ws) && ws->valuestring[0]) ? ws->valuestring : NULL;
    const char *project = (cJSON_IsString(pr) && pr->valuestring[0]) ? pr->valuestring : NULL;
    int limit = cJSON_IsNumber(l) ? (int)l->valuedouble : 20;
    cJSON *resp =
        db2_kb_service_memory_find_facts_visible_json(q->valuestring, workspace, project, limit);
+   memory_source_context_clear();
    return kb_reply_or_error(fd, resp, "failed to find visible facts");
 }
 
@@ -439,6 +475,8 @@ int kb_handle_memory_find_facts_scoped(int fd, cJSON *req)
    cJSON *l = cJSON_GetObjectItemCaseSensitive(req, "limit");
    if (!cJSON_IsString(q))
       return kb_send_error(fd, "missing query");
+   if (memory_request_source_context_enter(req) < 0)
+      return kb_send_error(fd, "source ref is not current");
    const char *scope_type = cJSON_IsString(st) ? st->valuestring : "";
    const char *scope_value = cJSON_IsString(sv) ? sv->valuestring : "";
    int limit = cJSON_IsNumber(l) ? (int)l->valuedouble : 20;
@@ -449,6 +487,7 @@ int kb_handle_memory_find_facts_scoped(int fd, cJSON *req)
    cJSON *resp =
        db2_kb_service_memory_find_facts_scoped_json(q->valuestring, scope_type, scope_value, limit);
    memory_fusion_state_clear();
+   memory_source_context_clear();
    return kb_reply_or_error(fd, resp, "failed to find scoped facts");
 }
 
@@ -490,9 +529,15 @@ int kb_handle_memory_search(int fd, cJSON *req)
 
 int kb_handle_memory_assemble_context(int fd, cJSON *req)
 {
+   if (memory_request_source_context_enter(req) < 0)
+      return kb_send_error(fd, "source ref is not current");
    cJSON *t_j = cJSON_GetObjectItemCaseSensitive(req, "task_hint");
+   cJSON *w_j = cJSON_GetObjectItemCaseSensitive(req, "workspace");
    const char *task = (cJSON_IsString(t_j) && t_j->valuestring[0]) ? t_j->valuestring : NULL;
-   cJSON *resp = db2_kb_service_memory_assemble_context_json(task);
+   const char *workspace =
+       (cJSON_IsString(w_j) && w_j->valuestring[0]) ? w_j->valuestring : NULL;
+   cJSON *resp = db2_kb_service_memory_assemble_context_json(task, workspace);
+   memory_source_context_clear();
    return kb_reply_or_error(fd, resp, "failed to assemble context");
 }
 
@@ -631,6 +676,8 @@ int kb_handle_memory_alerts(int fd, cJSON *req)
 
 int kb_handle_memory_recall(int fd, cJSON *req)
 {
+   if (memory_request_source_context_enter(req) < 0)
+      return kb_send_error(fd, "source ref is not current");
    cJSON *task_j = cJSON_GetObjectItemCaseSensitive(req, "task_hint");
    cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit_tokens");
    cJSON *start_j = cJSON_GetObjectItemCaseSensitive(req, "session_start");
@@ -644,6 +691,7 @@ int kb_handle_memory_recall(int fd, cJSON *req)
    memory_fusion_state_set(cJSON_IsString(fusion_j) ? fusion_j->valuestring : NULL);
    cJSON *resp = db2_kb_service_memory_recall_json(task_hint, limit_tokens, session_start);
    memory_fusion_state_clear();
+   memory_source_context_clear();
    return kb_reply_or_error(fd, resp, "failed to render memory recall");
 }
 
@@ -750,8 +798,11 @@ int kb_handle_memory_facts(int fd, cJSON *req)
    cJSON *query_j = cJSON_GetObjectItemCaseSensitive(req, "query");
    if (!cJSON_IsString(query_j))
       return kb_send_error(fd, "memory.facts requires query");
+   if (memory_request_source_context_enter(req) < 0)
+      return kb_send_error(fd, "source ref is not current");
 
    cJSON *resp = db2_kb_service_memory_facts_json(query_j->valuestring);
+   memory_source_context_clear();
    return kb_reply_or_error(fd, resp, "failed to recall facts");
 }
 
@@ -1193,11 +1244,14 @@ int kb_handle_memory_ask(int fd, cJSON *req)
    cJSON *sv_j = cJSON_GetObjectItemCaseSensitive(req, "scope_value");
    if (!cJSON_IsString(query_j))
       return kb_send_error(fd, "memory.ask requires query");
+   if (memory_request_source_context_enter(req) < 0)
+      return kb_send_error(fd, "source ref is not current");
    int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 5;
    const char *st = (cJSON_IsString(st_j) && st_j->valuestring[0]) ? st_j->valuestring : NULL;
    const char *sv = (cJSON_IsString(sv_j) && sv_j->valuestring[0]) ? sv_j->valuestring : NULL;
 
    cJSON *resp = db2_kb_service_memory_ask_json(query_j->valuestring, st, sv, limit);
+   memory_source_context_clear();
    return kb_reply_or_error(fd, resp, "failed to answer query");
 }
 

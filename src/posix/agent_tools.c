@@ -2020,7 +2020,28 @@ char *tool_code_search(const char *query, const char *project, int max_results)
    cJSON *arr = cJSON_CreateArray();
    int overlay_count = agent_source_append_overlay_code_hits(arr, query, project, max_results);
    int remaining = max_results - overlay_count;
-   int count = remaining > 0 ? kb_client_index_code_search(query, project, hits, remaining) : 0;
+   int count = 0;
+   if (remaining > 0 && project && project[0])
+      count = kb_client_index_code_search(query, project, hits, remaining);
+   else if (remaining > 0)
+   {
+      char cwd_buf[MAX_PATH_LEN];
+      const char *cwd = run_cmd_get_cwd();
+      if ((!cwd || !cwd[0]) && getcwd(cwd_buf, sizeof(cwd_buf)))
+         cwd = cwd_buf;
+      char root[MAX_PATH_LEN] = "";
+      config_t cfg;
+      config_t *cfgp = config_load(&cfg) == 0 ? &cfg : NULL;
+      if (cwd && workspace_active_root(cfgp, cwd, root, sizeof(root)) == 0)
+      {
+         char repository_key[512] = "", workspace_key[512] = "";
+         workspace_repo_index_keys(root, "", repository_key, sizeof(repository_key),
+                                   workspace_key, sizeof(workspace_key));
+         count = kb_client_index_code_search_current(repository_key, root, query, hits, remaining);
+      }
+   }
+   if (count < 0)
+      count = 0;
 
    for (int i = 0; i < count; i++)
    {

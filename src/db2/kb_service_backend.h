@@ -262,7 +262,8 @@ extern "C"
    cJSON *db2_kb_service_memory_effectiveness_stats_json(void);
    cJSON *db2_kb_service_memory_query_edges_json(const char *entity, int max);
    cJSON *db2_kb_service_memory_compact_windows_json(void);
-   cJSON *db2_kb_service_memory_assemble_context_json(const char *task_hint);
+   cJSON *db2_kb_service_memory_assemble_context_json(const char *task_hint,
+                                                       const char *workspace);
    cJSON *db2_kb_service_memory_search_json(const cJSON *clusters_arr, int limit);
    cJSON *db2_kb_service_memory_find_facts_visible_json(const char *query, const char *workspace,
                                                         const char *project, int limit);

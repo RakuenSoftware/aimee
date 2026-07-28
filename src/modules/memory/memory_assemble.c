@@ -238,6 +238,8 @@ static int append_scoped_section(char *buf, int pos, int cap, const char *header
 
    for (int i = 0; i < src_count && item_count < (int)(sizeof(items) / sizeof(items[0])); i++)
    {
+      if (!memory_source_context_visible(src_rows[i].id))
+         continue;
       int scope_rank = memory_scope_visibility_rank(src_rows[i].id, workspace, project);
       if (include_visible)
       {

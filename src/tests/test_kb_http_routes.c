@@ -133,6 +133,25 @@ typedef struct
 
 typedef struct
 {
+   int64_t repository_id, snapshot_id, generation_id, project_id;
+   char repository_key[512], source_ref[1024], commit_sha[65], tree_sha[65];
+   char physical_project[128], state[32], refresh_state[32], source_manifest_hash[65];
+   int64_t expected_file_count, indexed_file_count;
+   int64_t expected_model_subject_count, model_subject_count;
+   int is_default, reused_snapshot, already_current;
+} db2_source_generation_t;
+
+typedef struct
+{
+   int accepted;
+   char job_id[128], project[256], scope[64];
+   int64_t estimated_points, skipped_unchanged, embedded;
+   int dry_run;
+   char writer[64];
+} kb_code_embed_result_t;
+
+typedef struct
+{
    int rc;
    int64_t mem_pruned;
    int64_t mem_kept;
@@ -558,6 +577,15 @@ int canonical_index_find(const char *identifier, void *out, int max)
    return 1;
 }
 
+int canonical_index_find_project(const char *identifier, const char *project, void *out, int max)
+{
+   int n = canonical_index_find(identifier, out, max);
+   if (n > 0)
+      snprintf(((test_term_hit_t *)out)[0].project,
+               sizeof(((test_term_hit_t *)out)[0].project), "%s", project ? project : "");
+   return n;
+}
+
 typedef struct
 {
    char file[MAX_PATH_LEN];
@@ -645,12 +673,13 @@ int canonical_index_code_search(const char *query, const char *project, void *ou
    (void)enrich;
    assert(query);
    assert(out);
-   if (strcmp(query, "needle") != 0 || !project || strcmp(project, "proj-alpha") != 0)
+   if (strcmp(query, "needle") != 0 || !project ||
+       (strcmp(project, "proj-alpha") != 0 && strcmp(project, "generation:1:3") != 0))
       return 0;
    if (max < 1)
       return 0;
    test_code_search_hit_t *hits = (test_code_search_hit_t *)out;
-   snprintf(hits[0].project, sizeof(hits[0].project), "proj-alpha");
+   snprintf(hits[0].project, sizeof(hits[0].project), "%s", project);
    snprintf(hits[0].file_path, sizeof(hits[0].file_path), "src/search.c");
    snprintf(hits[0].snippet, sizeof(hits[0].snippet), "int needle(void) { return 1; }");
    hits[0].rank = 0.75;
@@ -915,6 +944,201 @@ int canonical_index_scan_files(const char *name, const char *root_label,
    if (inspected_out)
       *inspected_out = g_code_scan_files_inspected;
    return g_code_scan_files_rc;
+}
+
+static db2_source_generation_t g_source_generation;
+
+int db2_source_generation_begin(const char *repository_key, const char *source_ref,
+                                int is_default, const char *commit_sha, const char *tree_sha,
+                                const char *root_label, db2_source_generation_t *out)
+{
+   (void)root_label;
+   memset(&g_source_generation, 0, sizeof(g_source_generation));
+   g_source_generation.repository_id = 1;
+   g_source_generation.snapshot_id = 2;
+   g_source_generation.generation_id = 3;
+   g_source_generation.project_id = 4;
+   snprintf(g_source_generation.repository_key, sizeof(g_source_generation.repository_key), "%s",
+            repository_key ? repository_key : "");
+   snprintf(g_source_generation.source_ref, sizeof(g_source_generation.source_ref), "%s",
+            source_ref ? source_ref : "");
+   snprintf(g_source_generation.commit_sha, sizeof(g_source_generation.commit_sha), "%s",
+            commit_sha ? commit_sha : "");
+   snprintf(g_source_generation.tree_sha, sizeof(g_source_generation.tree_sha), "%s",
+            tree_sha ? tree_sha : "");
+   snprintf(g_source_generation.physical_project,
+            sizeof(g_source_generation.physical_project), "generation:1:3");
+   snprintf(g_source_generation.state, sizeof(g_source_generation.state), "staging");
+   g_source_generation.is_default = is_default;
+   if (out)
+      *out = g_source_generation;
+   return 0;
+}
+
+int db2_source_generation_get(int64_t generation_id, db2_source_generation_t *out)
+{
+   if (generation_id != g_source_generation.generation_id)
+      return 0;
+   if (out)
+      *out = g_source_generation;
+   return 1;
+}
+
+int db2_source_ref_retire(const char *repository_key, const char *source_ref,
+                          const char *reason, int grace_seconds)
+{
+   (void)grace_seconds;
+   return repository_key && repository_key[0] && source_ref && source_ref[0] && reason &&
+                  (strcmp(reason, "merged") == 0 || strcmp(reason, "deleted") == 0)
+              ? 1
+              : -1;
+}
+
+int db2_source_ref_resolve_current(const char *repository_key, const char *source_ref,
+                                   db2_source_generation_t *out)
+{
+   if (!repository_key || !repository_key[0])
+      return 0;
+   if (out)
+   {
+      memset(out, 0, sizeof(*out));
+      out->generation_id = 3;
+      snprintf(out->repository_key, sizeof(out->repository_key), "%s", repository_key);
+      snprintf(out->source_ref, sizeof(out->source_ref), "%s",
+               source_ref && source_ref[0] ? source_ref : "refs/heads/main");
+      snprintf(out->commit_sha, sizeof(out->commit_sha),
+               "1111111111111111111111111111111111111111");
+      snprintf(out->physical_project, sizeof(out->physical_project), "generation:1:3");
+   }
+   return 1;
+}
+
+void memory_source_context_set(const char *repository_key, const char *source_ref,
+                               const char *source_commit, int64_t generation_id)
+{
+   (void)repository_key;
+   (void)source_ref;
+   (void)source_commit;
+   (void)generation_id;
+}
+
+void memory_source_context_clear(void) {}
+
+int memory_source_context_visible(int64_t memory_id)
+{
+   (void)memory_id;
+   return 1;
+}
+
+int db2_source_generation_link_file_evidence(int64_t generation_id, const char *rel_path,
+                                             int64_t original_version_id)
+{
+   return generation_id == g_source_generation.generation_id && rel_path && rel_path[0] &&
+                  original_version_id > 0
+              ? 1
+              : -1;
+}
+
+int db2_source_generation_source_complete(int64_t generation_id,
+                                          const char *source_manifest_hash,
+                                          int64_t expected_file_count,
+                                          db2_source_generation_t *out)
+{
+   if (generation_id != g_source_generation.generation_id)
+      return -1;
+   snprintf(g_source_generation.state, sizeof(g_source_generation.state), "encoding");
+   snprintf(g_source_generation.source_manifest_hash,
+            sizeof(g_source_generation.source_manifest_hash), "%s", source_manifest_hash);
+   g_source_generation.expected_file_count = expected_file_count;
+   g_source_generation.indexed_file_count = expected_file_count;
+   if (out)
+      *out = g_source_generation;
+   return 0;
+}
+
+int db2_source_generation_record_embedding_lineage(int64_t generation_id, const char *model_id)
+{
+   (void)model_id;
+   return generation_id == g_source_generation.generation_id
+              ? (int)g_source_generation.expected_file_count
+              : -1;
+}
+
+int db2_source_generation_model_complete(int64_t generation_id,
+                                         int64_t expected_subject_count,
+                                         int64_t actual_subject_count, const char *model_id,
+                                         const char *checkpoint_hash,
+                                         const char *tokenizer_hash,
+                                         db2_source_generation_t *out)
+{
+   (void)model_id;
+   (void)checkpoint_hash;
+   (void)tokenizer_hash;
+   if (generation_id != g_source_generation.generation_id ||
+       actual_subject_count < expected_subject_count)
+      return -1;
+   snprintf(g_source_generation.state, sizeof(g_source_generation.state), "validating");
+   g_source_generation.expected_model_subject_count = expected_subject_count;
+   g_source_generation.model_subject_count = actual_subject_count;
+   if (out)
+      *out = g_source_generation;
+   return 0;
+}
+
+int db2_source_generation_publish(int64_t generation_id, db2_source_generation_t *out)
+{
+   if (generation_id != g_source_generation.generation_id)
+      return -1;
+   snprintf(g_source_generation.state, sizeof(g_source_generation.state), "published");
+   if (out)
+      *out = g_source_generation;
+   return 0;
+}
+
+int kb_blob_store_put(const void *bytes, size_t n, char *sha_out, size_t sha_cap)
+{
+   (void)bytes;
+   (void)n;
+   if (!sha_out || sha_cap < 65)
+      return -1;
+   memset(sha_out, 'a', 64);
+   sha_out[64] = '\0';
+   return 0;
+}
+
+int64_t db2_kb_original_version_ensure(const char *project, const char *source_uri,
+                                       const char *source_kind, const char *original_sha256,
+                                       int64_t original_byte_length, const char *media_type,
+                                       const char *original_blob_ref,
+                                       const char *source_revision)
+{
+   (void)project;
+   (void)source_uri;
+   (void)source_kind;
+   (void)original_sha256;
+   (void)original_byte_length;
+   (void)media_type;
+   (void)original_blob_ref;
+   (void)source_revision;
+   return 5;
+}
+
+int kb_code_embed_refresh(const char *project, const char *scope, const char **paths,
+                          int path_count, int batch_size, int max_points, int dry_run,
+                          kb_code_embed_result_t *out)
+{
+   (void)paths;
+   (void)path_count;
+   (void)batch_size;
+   (void)max_points;
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   out->accepted = 1;
+   out->dry_run = dry_run;
+   snprintf(out->project, sizeof(out->project), "%s", project ? project : "");
+   snprintf(out->scope, sizeof(out->scope), "%s", scope ? scope : "");
+   return 0;
 }
 
 int db2_kb_runtime_state_set_now(const char *key)
@@ -2947,6 +3171,27 @@ static void test_code_search_ok(void)
    assert(strstr(buf, "\"next_cursor\":null") != NULL);
 }
 
+static void test_code_search_current_ref(void)
+{
+   char buf[1024];
+   int s = kb_http_route_ex(
+       "GET", "/v1/code/search",
+       "query=needle&repository_key=repo-one&source_ref=feature%2Fkb&"
+       "source_commit=1111111111111111111111111111111111111111&max_results=4",
+       NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"project\":\"generation:1:3\"") != NULL);
+   assert(strstr(buf, "\"source_ref\":\"feature/kb\"") != NULL);
+   assert(strstr(buf, "\"generation_id\":3") != NULL);
+
+   s = kb_http_route_ex(
+       "GET", "/v1/code/search",
+       "query=needle&repository_key=repo-one&source_ref=feature%2Fkb&source_commit=stale",
+       NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 409);
+   assert(strstr(buf, "source_ref_not_current") != NULL);
+}
+
 static void test_code_callers_missing_symbol(void)
 {
    char buf[256];
@@ -3025,6 +3270,27 @@ static void test_code_hybrid_no_symbol(void)
    assert(strstr(buf, "\"file_path\":\"src/search.c\"") != NULL);
    assert(strstr(buf, "\"file_path\":\"src/caller.c\"") == NULL); /* no graph leg */
    assert(strstr(buf, "why needle exists") != NULL);
+}
+
+static void test_code_hybrid_current_ref(void)
+{
+   char buf[4096];
+   int s = kb_http_route_ex(
+       "GET", "/v1/code/hybrid",
+       "query=needle&repository_key=repo-one&source_ref=feature%2Fkb&"
+       "source_commit=1111111111111111111111111111111111111111&max_results=4",
+       NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"project\":\"generation:1:3\"") != NULL);
+   assert(strstr(buf, "\"repository_key\":\"repo-one\"") != NULL);
+   assert(strstr(buf, "\"source_ref\":\"feature/kb\"") != NULL);
+
+   s = kb_http_route_ex(
+       "GET", "/v1/code/hybrid",
+       "query=needle&repository_key=repo-one&source_ref=feature%2Fkb&source_commit=stale",
+       NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 409);
+   assert(strstr(buf, "source_ref_not_current") != NULL);
 }
 
 /* §5 vector leg: with a dim-matched embedder it fuses as a 3rd signal — a
@@ -4624,6 +4890,26 @@ static void test_code_find_ok(void)
    assert(strstr(buf, "\"kind\":\"function\"") != NULL);
 }
 
+static void test_code_find_current_ref(void)
+{
+   char buf[1024];
+   int s = kb_http_route_ex(
+       "GET", "/v1/code/find",
+       "identifier=foo&repository_key=repo-one&source_ref=feature%2Fkb&"
+       "source_commit=1111111111111111111111111111111111111111",
+       NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"project\":\"generation:1:3\"") != NULL);
+   assert(strstr(buf, "\"source_ref\":\"feature/kb\"") != NULL);
+
+   s = kb_http_route_ex(
+       "GET", "/v1/code/find",
+       "identifier=foo&repository_key=repo-one&source_ref=feature%2Fkb&source_commit=stale",
+       NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 409);
+   assert(strstr(buf, "source_ref_not_current") != NULL);
+}
+
 static void test_code_projects_wrong_method(void)
 {
    char buf[256];
@@ -4735,18 +5021,21 @@ int main(void)
    test_artifact_links_ok();
    test_code_find_missing_identifier();
    test_code_find_ok();
+   test_code_find_current_ref();
    test_code_projects_wrong_method();
    test_code_projects_ok();
    test_code_structure_missing_params();
    test_code_structure_ok();
    test_code_search_missing_query();
    test_code_search_ok();
+   test_code_search_current_ref();
    test_code_callers_missing_symbol();
    test_code_callers_ok();
    test_code_hybrid_ok();
    test_code_hybrid_memory_leg();
    test_code_hybrid_missing_query();
    test_code_hybrid_no_symbol();
+   test_code_hybrid_current_ref();
    test_code_hybrid_vector_ok();
    test_code_hybrid_vector_dim_mismatch_skips();
    test_code_graph_hubs_ok();

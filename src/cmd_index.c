@@ -27,12 +27,15 @@ static void idx_scan(app_ctx_t *ctx, int argc, char **argv)
 {
 
    int force = 0;
+   int current = 0;
    int pos_argc = 0;
    char *pos_argv[64];
    for (int i = 0; i < argc; i++)
    {
       if (strcmp(argv[i], "--force") == 0)
          force = 1;
+      else if (strcmp(argv[i], "--current") == 0)
+         current = 1;
       else if (pos_argc < 64)
          pos_argv[pos_argc++] = argv[i];
    }
@@ -66,7 +69,10 @@ static void idx_scan(app_ctx_t *ctx, int argc, char **argv)
             break;
          kb_client_index_scan_result_t one;
          memset(&one, 0, sizeof(one));
-         if (kb_client_index_scan(pos_argv[i], pos_argv[i + 1], force, &one) != 0)
+         int scan_rc = current ? kb_client_index_scan_current(pos_argv[i], pos_argv[i + 1], force,
+                                                              &one)
+                               : kb_client_index_scan(pos_argv[i], pos_argv[i + 1], force, &one);
+         if (scan_rc != 0)
          {
             if (verbose)
             {
@@ -314,12 +320,42 @@ static const char *idx_find_freshness(const char *file_path, const char **author
    return "canonical_index_unverified";
 }
 
+static int idx_current_physical_project(char *out, size_t cap)
+{
+   if (!out || cap == 0)
+      return -1;
+   out[0] = '\0';
+   char cwd[MAX_PATH_LEN] = "", root[MAX_PATH_LEN] = "";
+   if (!getcwd(cwd, sizeof(cwd)) ||
+       workspace_active_root(NULL, cwd, root, sizeof(root)) != 0)
+      return -1;
+   char repository_key[512] = "", workspace_key[512] = "";
+   workspace_repo_index_keys(root, "", repository_key, sizeof(repository_key), workspace_key,
+                             sizeof(workspace_key));
+   kb_client_index_scan_result_t scan;
+   if (!repository_key[0] ||
+       kb_client_index_scan_current(repository_key, root, 0, &scan) != 0 ||
+       !scan.physical_project[0])
+      return -1;
+   snprintf(out, cap, "%s", scan.physical_project);
+   return 0;
+}
+
 static void idx_find(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
       fatal("index find requires an identifier");
    term_hit_t hits[128];
-   int count = kb_client_index_find(argv[0], hits, 128);
+   int count = 0;
+   char cwd[MAX_PATH_LEN] = "", root[MAX_PATH_LEN] = "";
+   if (getcwd(cwd, sizeof(cwd)) && workspace_active_root(NULL, cwd, root, sizeof(root)) == 0)
+   {
+      char repository_key[512] = "", workspace_key[512] = "";
+      workspace_repo_index_keys(root, "", repository_key, sizeof(repository_key), workspace_key,
+                                sizeof(workspace_key));
+      int scoped = kb_client_index_find_current(repository_key, root, argv[0], hits, 128);
+      count = scoped > 0 ? scoped : 0;
+   }
    if (ctx->json_output)
    {
       cJSON *arr = cJSON_CreateArray();
@@ -368,16 +404,23 @@ static void idx_find(app_ctx_t *ctx, int argc, char **argv)
 
 static void idx_blast_radius(app_ctx_t *ctx, int argc, char **argv)
 {
-   if (argc < 2)
-      fatal("index blast-radius requires project and file");
+   if (argc < 1)
+      fatal("index blast-radius requires [project] file");
+   char current_project[128] = "";
+   const char *project = argc >= 2 ? argv[0] : NULL;
+   const char *file_path = argc >= 2 ? argv[1] : argv[0];
+   if (!project && idx_current_physical_project(current_project, sizeof(current_project)) == 0)
+      project = current_project;
+   if (!project)
+      fatal("index blast-radius could not resolve the current Git branch");
    blast_radius_t br;
-   if (kb_client_index_blast_radius(argv[0], argv[1], &br) != 0)
+   if (kb_client_index_blast_radius(project, file_path, &br) != 0)
    {
       if (!ctx->json_output)
          fprintf(stderr,
                  "aimee: knowledge service unavailable — cannot compute canonical blast radius\n");
       memset(&br, 0, sizeof(br));
-      snprintf(br.file, sizeof(br.file), "%s", argv[1]);
+      snprintf(br.file, sizeof(br.file), "%s", file_path);
    }
    if (ctx->json_output)
    {
@@ -412,10 +455,17 @@ static void idx_blast_radius(app_ctx_t *ctx, int argc, char **argv)
 
 static void idx_structure(app_ctx_t *ctx, int argc, char **argv)
 {
-   if (argc < 2)
-      fatal("index structure requires project and file");
+   if (argc < 1)
+      fatal("index structure requires [project] file");
+   char current_project[128] = "";
+   const char *project = argc >= 2 ? argv[0] : NULL;
+   const char *file_path = argc >= 2 ? argv[1] : argv[0];
+   if (!project && idx_current_physical_project(current_project, sizeof(current_project)) == 0)
+      project = current_project;
+   if (!project)
+      fatal("index structure could not resolve the current Git branch");
    definition_t defs[256];
-   int count = kb_client_index_structure(argv[0], argv[1], defs, 256);
+   int count = kb_client_index_structure(project, file_path, defs, 256);
    if (ctx->json_output)
    {
       cJSON *arr = cJSON_CreateArray();
@@ -434,7 +484,7 @@ static void idx_structure(app_ctx_t *ctx, int argc, char **argv)
    {
       if (count == 0)
       {
-         printf("No definitions found in %s/%s\n", argv[0], argv[1]);
+         printf("No definitions found in %s/%s\n", project, file_path);
          return;
       }
       for (int i = 0; i < count; i++)
@@ -448,7 +498,12 @@ static void idx_callers(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
       fatal("index callers requires a symbol name");
+   char current_project[128] = "";
    const char *project = argc >= 2 ? argv[1] : NULL;
+   if (!project && idx_current_physical_project(current_project, sizeof(current_project)) == 0)
+      project = current_project;
+   if (!project)
+      fatal("index callers could not resolve the current Git branch");
    caller_hit_t hits[128];
    int count = kb_client_index_find_callers(project, argv[0], hits, 128);
    if (ctx->json_output)

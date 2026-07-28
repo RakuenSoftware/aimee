@@ -23,6 +23,16 @@ const char *kb_blob_store_root(char *out, size_t cap);
  * (including the already-present dedup case), -1 on error. */
 int kb_blob_store_put(const void *bytes, size_t n, char *sha_out, size_t sha_cap);
 
+/* Stream an exact regular file into the same content-addressed store without a
+ * whole-file allocation. Symlinks are rejected. bytes_out may be NULL. The
+ * durability, atomicity, and dedup guarantees match kb_blob_store_put. */
+int kb_blob_store_put_file(const char *path, char *sha_out, size_t sha_cap,
+                           long long *bytes_out);
+
+/* Open a stored blob read-only for streaming derivation (for example,
+ * chunking the exact captured original). Returns an owned fd, or -1. */
+int kb_blob_store_open_readonly(const char *sha);
+
 /* Read the blob named by `sha` fully into a heap buffer (*out / *n_out; caller frees *out).
  * Returns 0 on success, -1 if absent or on error. `sha` must be a 64-char hex string. */
 int kb_blob_store_read(const char *sha, void **out, size_t *n_out);

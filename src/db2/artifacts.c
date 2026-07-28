@@ -534,6 +534,14 @@ int db2_artifact_touch(const char *id)
 
 int db2_artifact_cite(const char *artifact_id, const char *source_kind, const char *source_id)
 {
+   return db2_artifact_cite_evidence(artifact_id, source_kind, source_id, 0, 0, 0, 0, "[]");
+}
+
+int db2_artifact_cite_evidence(const char *artifact_id, const char *source_kind,
+                               const char *source_id, int span_start, int span_end,
+                               int64_t source_document_version_id, int64_t source_chunk_id,
+                               const char *source_anchors_json)
+{
    void *conn = db2_conn();
    if (!conn || !artifact_id || !source_kind || !source_id)
       return -1;
@@ -542,9 +550,18 @@ int db2_artifact_cite(const char *artifact_id, const char *source_kind, const ch
    aimee_pg_stmt_t *st =
        aimee_pg_prepare(conn,
                         "INSERT INTO artifact_citations"
-                        " (artifact_id, source_kind, source_id, span_start, span_end)"
-                        " VALUES (?1,?2,?3,0,0)"
-                        " ON CONFLICT DO NOTHING",
+                        " (artifact_id, source_kind, source_id, span_start, span_end,"
+                        "  source_document_version_id, source_chunk_id, source_anchors)"
+                        " VALUES (?1,?2,?3,?4,?5,?6,?7,?8)"
+                        " ON CONFLICT (artifact_id, source_kind, source_id, span_start, span_end)"
+                        " DO UPDATE SET"
+                        " source_document_version_id = COALESCE(EXCLUDED.source_document_version_id,"
+                        "                                      artifact_citations.source_document_version_id),"
+                        " source_chunk_id = COALESCE(EXCLUDED.source_chunk_id,"
+                        "                            artifact_citations.source_chunk_id),"
+                        " source_anchors = CASE WHEN EXCLUDED.source_anchors = '[]'"
+                        "                       THEN artifact_citations.source_anchors"
+                        "                       ELSE EXCLUDED.source_anchors END",
                         err, sizeof(err));
    if (!st)
       return -1;
@@ -552,6 +569,19 @@ int db2_artifact_cite(const char *artifact_id, const char *source_kind, const ch
    aimee_pg_bind_text(st, "?1", artifact_id);
    aimee_pg_bind_text(st, "?2", source_kind);
    aimee_pg_bind_text(st, "?3", source_id);
+   aimee_pg_bind_int(st, "?4", span_start);
+   aimee_pg_bind_int(st, "?5", span_end);
+   if (source_document_version_id > 0)
+      aimee_pg_bind_int64(st, "?6", source_document_version_id);
+   else
+      aimee_pg_bind_null(st, "?6");
+   if (source_chunk_id > 0)
+      aimee_pg_bind_int64(st, "?7", source_chunk_id);
+   else
+      aimee_pg_bind_null(st, "?7");
+   aimee_pg_bind_text(st, "?8", source_anchors_json && source_anchors_json[0]
+                                      ? source_anchors_json
+                                      : "[]");
 
    aimee_pg_step_t rc = aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);

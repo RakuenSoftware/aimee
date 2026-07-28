@@ -12,6 +12,8 @@
 #include "log.h"
 #include "request_context.h"
 #include "platform_random.h"
+#include "workspace.h"
+#include "util.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -19,6 +21,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 /* The standing exploration policy carried in every envelope. Kept short — it is
  * advice the model weighs, not a contract we can enforce over the wire. */
@@ -484,6 +487,21 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    int facts_on = kb_client_typed_facts_enabled();
    if (!preview_on && !facts_on)
       return NULL;
+   char current_root[MAX_PATH_LEN] = "", repository_key[512] = "";
+   char cwd_buf[MAX_PATH_LEN];
+   const char *cwd = run_cmd_get_cwd();
+   if ((!cwd || !cwd[0]) && getcwd(cwd_buf, sizeof(cwd_buf)))
+      cwd = cwd_buf;
+   int has_current_source =
+       cwd && workspace_active_root(&cfg, cwd, current_root, sizeof(current_root)) == 0;
+   if (has_current_source)
+   {
+      char workspace_key[512] = "";
+      workspace_repo_index_keys(current_root, "", repository_key, sizeof(repository_key),
+                                workspace_key, sizeof(workspace_key));
+      if (!repository_key[0])
+         has_current_source = 0;
+   }
    int configured_budget = cfg.ingress_preinject_assembly_budget > 0
                                ? cfg.ingress_preinject_assembly_budget
                                : INGRESS_DEFAULT_ASSEMBLY_BUDGET;
@@ -520,9 +538,16 @@ char *ingress_preinject_build(const char *query, int request_disabled)
     * many relevant files came back (no [0,1] rank is exposed by the search
     * path, so map the hit count into the tiering primitive). */
    code_search_hit_t hits[6];
-   int n = preview_on ? kb_client_index_code_search(query, NULL, hits,
-                                                    (int)(sizeof(hits) / sizeof(hits[0])))
-                      : 0;
+   int n = 0;
+   if (preview_on)
+      n = has_current_source
+              ? kb_client_index_code_search_current(
+                    repository_key, current_root, query, hits,
+                    (int)(sizeof(hits) / sizeof(hits[0])))
+              : kb_client_index_code_search(query, NULL, hits,
+                                            (int)(sizeof(hits) / sizeof(hits[0])));
+   if (n < 0)
+      n = 0;
    for (int i = 0; i < n; i++)
    {
       int fold = compress && hits[i].line > 0 && (int)strlen(hits[i].snippet) > compress_min;
@@ -550,7 +575,14 @@ char *ingress_preinject_build(const char *query, int request_disabled)
     * fetch next, not the whole memory body. The full row remains reachable via
     * the advertised memory:<id> handle and the memory_get MCP tool. */
    memory_diagnostic_t mems[5];
-   int mem_n = preview_on ? kb_client_memory_diagnose(query, 5, mems, 5) : 0;
+   int mem_n = 0;
+   if (preview_on)
+      mem_n = has_current_source
+                  ? kb_client_memory_diagnose_current(query, 5, mems, 5, repository_key,
+                                                      current_root)
+                  : kb_client_memory_diagnose(query, 5, mems, 5);
+   if (mem_n < 0)
+      mem_n = 0;
    for (int i = 0; i < mem_n; i++)
    {
       char *body = format_memory_preview_body(&mems[i], &headline_missing_count);
@@ -574,7 +606,11 @@ char *ingress_preinject_build(const char *query, int request_disabled)
     * having to call the get_context_block tool. Gated kb-side on
     * typed_facts_enabled (returns NULL when off or none), so this is a no-op
     * then. User-asserted facts are high-signal, so they lift confidence. */
-   char *facts = facts_on ? kb_client_memory_facts(query) : NULL;
+   char *facts = facts_on ? (has_current_source
+                                 ? kb_client_memory_facts_current(query, repository_key,
+                                                                  current_root)
+                                 : kb_client_memory_facts(query))
+                          : NULL;
    if (facts && facts[0])
    {
       dstr_t f;

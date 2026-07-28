@@ -413,6 +413,16 @@ int64_t memory_lineage_insert(const char *object_type, int64_t object_id, const 
  * Returns count written into out (up to max). */
 int memory_lineage_get(const char *object_type, int64_t object_id, memory_lineage_t *out, int max);
 
+/* Exact committed-source context for code/document-derived memories. General
+ * memories remain visible because they have no memory_source_contexts rows. */
+void memory_source_context_set(const char *repository_key, const char *source_ref,
+                               const char *source_commit, int64_t generation_id);
+void memory_source_context_clear(void);
+int memory_source_context_visible(int64_t memory_id);
+int memory_source_context_link(int64_t memory_id, const char *repository_key,
+                               const char *source_ref, const char *source_commit,
+                               int64_t generation_id, const char *evidence_role);
+
 /* Cite: show provenance chain for a memory ID in human-readable form. */
 void memory_cite(int64_t memory_id, int json_out);
 

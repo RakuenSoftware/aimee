@@ -24,6 +24,7 @@
 #include "kb_fusion.h"
 #include "kb_neardup.h"
 #include "memory.h"
+#include "kb_blob_store.h"
 #include "kb_doc_hash.h"
 #include "log.h"
 #include "dstr.h"
@@ -120,29 +121,29 @@ static int estimate_tokens(const char *text, size_t len)
    return (int)((len + 3) / 4);
 }
 
-/* Compute SHA-256-like hex digest of a file (using simple FNV-64 as a fast hash).
- * Not cryptographic — purely for change detection. */
-static void file_hash(const char *path, char *out, size_t out_len)
+/* Capture a filesystem source as immutable primary evidence. The durable blob
+ * is written first; its metadata row is then inserted under the same purge
+ * fence used by the derived index. A failed DB write leaves at most a harmless
+ * orphan for reconciliation. */
+static int64_t kb_capture_original_file(const char *project, const char *source_uri,
+                                        const char *path,
+                                        char sha_out[KB_DOC_HASH_HEX_LEN + 1])
 {
-   FILE *f = fopen(path, "rb");
-   if (!f)
+   long long bytes = 0;
+   if (kb_blob_store_put_file(path, sha_out, KB_DOC_HASH_HEX_LEN + 1, &bytes) != 0)
+      return -1;
+   if (kb_purge_fenced_txn_begin(project) != 1)
+      return -1;
+   int64_t version_id = db2_kb_original_version_ensure(
+       project, source_uri, "file", sha_out, (int64_t)bytes, "text/plain", sha_out, sha_out);
+   if (version_id <= 0)
    {
-      snprintf(out, out_len, "0000000000000000");
-      return;
+      db2_kb_txn_rollback();
+      return -1;
    }
-   uint64_t h = 14695981039346656037ULL;
-   unsigned char buf[4096];
-   size_t nr;
-   while ((nr = fread(buf, 1, sizeof(buf), f)) > 0)
-   {
-      for (size_t i = 0; i < nr; i++)
-      {
-         h ^= (uint64_t)buf[i];
-         h *= 1099511628211ULL;
-      }
-   }
-   fclose(f);
-   snprintf(out, out_len, "%016llx", (unsigned long long)h);
+   if (kb_purge_fenced_txn_commit() != 0)
+      return -1;
+   return version_id;
 }
 
 /* ------------------------------------------------------------------ */
@@ -546,16 +547,6 @@ int chunk_stream(FILE *f, text_chunk_t *chunks, int max_chunks)
    return n_chunks < max_chunks ? n_chunks : max_chunks;
 }
 
-static int chunk_file(const char *path, text_chunk_t *chunks, int max_chunks)
-{
-   FILE *f = fopen(path, "r");
-   if (!f)
-      return 0;
-   int n = chunk_stream(f, chunks, max_chunks);
-   fclose(f);
-   return n;
-}
-
 /* ------------------------------------------------------------------ */
 /* Database helpers                                                     */
 /* ------------------------------------------------------------------ */
@@ -844,7 +835,8 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
       if (stat(c->files[fi].path, &fst) == 0 &&
           db2_kb_file_index_get(c->project, c->files[fi].rel_path, findex_hash, sizeof(findex_hash),
                                 findex_ingested, sizeof(findex_ingested)) == 1 &&
-          findex_ingested[0])
+          findex_ingested[0] &&
+          db2_kb_documents_get_original_version(c->project, c->files[fi].rel_path) > 0)
       {
          struct tm tm_ingest;
          memset(&tm_ingest, 0, sizeof(tm_ingest));
@@ -858,8 +850,19 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
       }
    }
 
+   char original_sha[KB_DOC_HASH_HEX_LEN + 1] = "";
+   int64_t original_version_id =
+       kb_capture_original_file(c->project, c->files[fi].rel_path, c->files[fi].path, original_sha);
+   if (original_version_id <= 0)
+   {
+      LOG_WARN("kb_build", "project=%s path=%s: exact original capture failed; skipping",
+               c->project ? c->project : "?", c->files[fi].rel_path);
+      return;
+   }
+   /* Keep the legacy compact file_hash surface while deriving it from the
+    * authoritative exact SHA rather than a second, racy filesystem read. */
    char hash[32];
-   file_hash(c->files[fi].path, hash, sizeof(hash));
+   snprintf(hash, sizeof(hash), "%.16s", original_sha);
    uint64_t h64 = (uint64_t)strtoull(hash, NULL, 16);
 
    /* Check if file needs re-indexing */
@@ -869,7 +872,9 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
       if (db2_kb_documents_get_stored_hash(c->project, c->files[fi].rel_path, stored,
                                            sizeof(stored)) == 0)
       {
-         if (strcmp(stored, hash) == 0)
+         if (strcmp(stored, hash) == 0 &&
+             db2_kb_documents_get_original_version(c->project, c->files[fi].rel_path) ==
+                 original_version_id)
          {
             kb_file_index_upsert_fenced(c->project, c->files[fi].rel_path, hash, NULL);
             c->stats->files_skipped++;
@@ -907,7 +912,17 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
       return; /* purge fence: drop this file */
 
    /* Chunk the file */
-   int n_chunks = chunk_file(c->files[fi].path, c->chunks, MAX_CHUNKS_PER_FILE);
+   /* Derive chunks from the captured blob, not by reopening the mutable source
+    * path. This guarantees every chunk is evidence from the exact version it
+    * references even if the working file changes during indexing. */
+   int original_fd = kb_blob_store_open_readonly(original_sha);
+   FILE *original_stream = original_fd >= 0 ? fdopen(original_fd, "r") : NULL;
+   int n_chunks =
+       original_stream ? chunk_stream(original_stream, c->chunks, MAX_CHUNKS_PER_FILE) : 0;
+   if (original_stream)
+      fclose(original_stream);
+   else if (original_fd >= 0)
+      close(original_fd);
    if (n_chunks == 0)
       return;
 
@@ -979,17 +994,34 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
       return;
    }
    int64_t prev_doc_id = 0;
+   int insert_ok = 1;
    for (int ci = 0; ci < n_chunks; ci++)
    {
-      doc_ids[ci] = db2_kb_documents_insert_chunk(c->project, c->files[fi].rel_path, hash, ci,
-                                                  c->chunks[ci].heading_path,
-                                                  c->chunks[ci].line_start, c->chunks[ci].line_end,
-                                                  c->chunks[ci].content, c->chunks[ci].token_count);
+      char chunk_sha[KB_DOC_HASH_HEX_LEN + 1];
+      kb_doc_content_hash(c->chunks[ci].content, (int)strlen(c->chunks[ci].content), chunk_sha);
+      char anchors[160];
+      snprintf(anchors, sizeof(anchors),
+               "[{\"kind\":\"line_range\",\"line_start\":%d,\"line_end\":%d}]",
+               c->chunks[ci].line_start, c->chunks[ci].line_end);
+      doc_ids[ci] = db2_kb_documents_insert_chunk_evidence(
+          c->project, c->files[fi].rel_path, hash, ci, c->chunks[ci].heading_path,
+          c->chunks[ci].line_start, c->chunks[ci].line_end, c->chunks[ci].content,
+          c->chunks[ci].token_count, original_version_id, "source-text", "aimee-heading-v1",
+          chunk_sha, anchors, 0);
       if (doc_ids[ci] < 0)
-         continue;
+      {
+         insert_ok = 0;
+         break;
+      }
       db2_kb_documents_link_neighbours(doc_ids[ci], prev_doc_id);
       prev_doc_id = doc_ids[ci];
       c->stats->chunks_added++;
+   }
+   if (!insert_ok)
+   {
+      db2_kb_txn_rollback();
+      free(doc_ids);
+      return;
    }
    if (kb_purge_fenced_txn_commit() != 0)
    {

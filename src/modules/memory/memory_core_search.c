@@ -326,12 +326,24 @@ void memory_expand_synonyms(const char *query, char *out, size_t out_len)
 
 int memory_find_facts_like(const char *query, int limit, memory_t *out, int max)
 {
-   return db2_memory_find_facts_like(query, limit, out, max);
+   int n = db2_memory_find_facts_like(query, limit, out, max);
+   int kept = 0;
+   for (int i = 0; i < n; i++)
+   {
+      if (!memory_source_context_visible(out[i].id))
+         continue;
+      if (kept != i)
+         out[kept] = out[i];
+      kept++;
+   }
+   return n < 0 ? n : kept;
 }
 
 int memory_append_unique(memory_t *out, int count, int max, const memory_t *candidate)
 {
    if (!out || !candidate || count >= max)
+      return count;
+   if (!memory_source_context_visible(candidate->id))
       return count;
 
    for (int i = 0; i < count; i++)

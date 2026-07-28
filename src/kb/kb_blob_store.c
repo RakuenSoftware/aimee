@@ -9,6 +9,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <openssl/evp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -142,6 +143,132 @@ int kb_blob_store_put(const void *bytes, size_t n, char *sha_out, size_t sha_cap
    return 0;
 }
 
+int kb_blob_store_put_file(const char *path, char *sha_out, size_t sha_cap,
+                           long long *bytes_out)
+{
+   if (bytes_out)
+      *bytes_out = 0;
+   if (!path || !path[0] || !sha_out || sha_cap <= KB_DOC_HASH_HEX_LEN)
+      return -1;
+   sha_out[0] = '\0';
+
+   int src = open(path, O_RDONLY | O_NOFOLLOW);
+   if (src < 0)
+      return -1;
+   struct stat src_st;
+   if (fstat(src, &src_st) != 0 || !S_ISREG(src_st.st_mode) || src_st.st_size < 0)
+   {
+      close(src);
+      return -1;
+   }
+
+   char root[4096];
+   if (!kb_blob_store_root(root, sizeof(root)) || ensure_dir(root) != 0)
+   {
+      close(src);
+      return -1;
+   }
+   char tmp[4256];
+   snprintf(tmp, sizeof(tmp), "%s/.original.tmp.XXXXXX", root);
+   int dst = mkstemp(tmp);
+   if (dst < 0)
+   {
+      close(src);
+      return -1;
+   }
+   (void)fchmod(dst, 0600);
+
+   EVP_MD_CTX *md = EVP_MD_CTX_new();
+   unsigned char digest[EVP_MAX_MD_SIZE];
+   unsigned int digest_len = 0;
+   unsigned char buf[128 * 1024];
+   long long total = 0;
+   int ok = md && EVP_DigestInit_ex(md, EVP_sha256(), NULL) == 1;
+   while (ok)
+   {
+      ssize_t got = read(src, buf, sizeof(buf));
+      if (got < 0)
+      {
+         if (errno == EINTR)
+            continue;
+         ok = 0;
+         break;
+      }
+      if (got == 0)
+         break;
+      if (EVP_DigestUpdate(md, buf, (size_t)got) != 1)
+      {
+         ok = 0;
+         break;
+      }
+      size_t off = 0;
+      while (off < (size_t)got)
+      {
+         ssize_t put = write(dst, buf + off, (size_t)got - off);
+         if (put < 0)
+         {
+            if (errno == EINTR)
+               continue;
+            ok = 0;
+            break;
+         }
+         off += (size_t)put;
+      }
+      total += got;
+   }
+   if (ok && EVP_DigestFinal_ex(md, digest, &digest_len) != 1)
+      ok = 0;
+   EVP_MD_CTX_free(md);
+   close(src);
+   if (ok && fsync(dst) != 0)
+      ok = 0;
+   if (close(dst) != 0)
+      ok = 0;
+   if (!ok || digest_len != 32)
+   {
+      unlink(tmp);
+      return -1;
+   }
+
+   char sha[KB_DOC_HASH_HEX_LEN + 1];
+   for (unsigned int i = 0; i < digest_len; i++)
+      snprintf(sha + i * 2, 3, "%02x", digest[i]);
+   sha[KB_DOC_HASH_HEX_LEN] = '\0';
+
+   char shard[4128];
+   snprintf(shard, sizeof(shard), "%s/%c%c", root, sha[0], sha[1]);
+   if (ensure_dir(shard) != 0)
+   {
+      unlink(tmp);
+      return -1;
+   }
+   char final[4256];
+   if (blob_path(root, sha, final, sizeof(final)) != 0)
+   {
+      unlink(tmp);
+      return -1;
+   }
+   if (access(final, F_OK) == 0)
+      unlink(tmp);
+   else if (rename(tmp, final) != 0)
+   {
+      if (access(final, F_OK) == 0)
+         unlink(tmp); /* a byte-identical racing writer won */
+      else
+      {
+         unlink(tmp);
+         return -1;
+      }
+   }
+   else
+      fsync_dir(shard);
+
+   snprintf(sha_out, sha_cap, "%s", sha);
+   if (bytes_out)
+      *bytes_out = total;
+   return 0;
+}
+
 /* File size of a blob in bytes, or -1 if absent/error. Lets a caller reject an oversized blob
  * (open_asset's inline cap) WITHOUT first reading the whole thing into memory. */
 long long kb_blob_store_size(const char *sha)
@@ -215,6 +342,23 @@ int kb_blob_store_read(const char *sha, void **out, size_t *n_out)
    *out = buf;
    *n_out = sz;
    return 0;
+}
+
+int kb_blob_store_open_readonly(const char *sha)
+{
+   char root[4096], path[4256];
+   if (!kb_blob_store_root(root, sizeof(root)) || blob_path(root, sha, path, sizeof(path)) != 0)
+      return -1;
+   int fd = open(path, O_RDONLY | O_NOFOLLOW);
+   if (fd < 0)
+      return -1;
+   struct stat st;
+   if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode))
+   {
+      close(fd);
+      return -1;
+   }
+   return fd;
 }
 
 int kb_blob_store_unlink(const char *sha)

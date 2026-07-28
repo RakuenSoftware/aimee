@@ -21,6 +21,8 @@
 #include "mcp_git.h"
 #include "git_verify.h"
 #include "workspace_turn.h"
+#include "workspace.h"
+#include "util.h"
 #include "notes.h"
 #include "agent_coord.h"
 #include "agent_tasks.h"
@@ -54,6 +56,49 @@
 /* Per-call bundle passed to every handler: the request context plus the
  * out-param for tools that emit an MCP `structured` payload alongside text. */
 
+typedef struct
+{
+   char root[MAX_PATH_LEN];
+   char repository_key[512];
+   char physical_project[128];
+} mcph_current_source_t;
+
+/* Resolve the Git checkout belonging to this server thread. Omitted `project`
+ * means this source context, never "all indexed projects". Detached HEAD and
+ * non-workspace calls fail closed for code-derived retrieval; general memory
+ * remains available through the legacy unscoped request. */
+static int mcph_current_checkout(mcph_current_source_t *out)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   char cwd_buf[MAX_PATH_LEN];
+   const char *cwd = run_cmd_get_cwd();
+   if ((!cwd || !cwd[0]) && getcwd(cwd_buf, sizeof(cwd_buf)))
+      cwd = cwd_buf;
+   config_t cfg;
+   config_t *cfgp = config_load(&cfg) == 0 ? &cfg : NULL;
+   if (!cwd || workspace_active_root(cfgp, cwd, out->root, sizeof(out->root)) != 0)
+      return -1;
+   char workspace_key[512] = "";
+   workspace_repo_index_keys(out->root, "", out->repository_key,
+                             sizeof(out->repository_key), workspace_key,
+                             sizeof(workspace_key));
+   return out->repository_key[0] ? 0 : -1;
+}
+
+static int mcph_current_index_project(mcph_current_source_t *out)
+{
+   if (mcph_current_checkout(out) != 0)
+      return -1;
+   kb_client_index_scan_result_t scan;
+   if (kb_client_index_scan_current(out->repository_key, out->root, 0, &scan) != 0 ||
+       !scan.physical_project[0])
+      return -1;
+   snprintf(out->physical_project, sizeof(out->physical_project), "%s", scan.physical_project);
+   return 0;
+}
+
 /* ── thin wrappers: uniform signature over the existing tool_* helpers ─────── */
 
 static cJSON *mcph_get_help(struct mcp_call *c)
@@ -66,6 +111,9 @@ static cJSON *mcph_ast_grep_search(struct mcp_call *c)
 }
 static cJSON *mcph_search_memory(struct mcp_call *c)
 {
+   mcph_current_source_t source;
+   if (mcph_current_checkout(&source) == 0)
+      return tool_search_memory_current(c->jargs, source.repository_key, source.root);
    return tool_search_memory(c->jargs);
 }
 static cJSON *mcph_mutate(struct mcp_call *c)
@@ -74,6 +122,10 @@ static cJSON *mcph_mutate(struct mcp_call *c)
 }
 static cJSON *mcph_memory_ask(struct mcp_call *c)
 {
+   mcph_current_source_t source;
+   if (mcph_current_checkout(&source) == 0)
+      return tool_memory_ask_current(c->jargs, c->structured, source.repository_key,
+                                     source.root);
    return tool_memory_ask(c->jargs, c->structured);
 }
 static cJSON *mcph_search_graph(struct mcp_call *c)
@@ -271,7 +323,13 @@ static cJSON *mcph_memory_recall(struct mcp_call *c)
    if (cJSON_IsNumber(jl))
       limit_tokens = (int)jl->valuedouble;
    /* Graph-code fusion is always on for recall. */
-   char *envelope = kb_client_memory_recall_json_ex(task_hint, limit_tokens, session_start, "on");
+   mcph_current_source_t source;
+   char *envelope = mcph_current_checkout(&source) == 0
+                        ? kb_client_memory_recall_json_current(
+                              task_hint, limit_tokens, session_start, source.repository_key,
+                              source.root)
+                        : kb_client_memory_recall_json_ex(task_hint, limit_tokens, session_start,
+                                                         "on");
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    cJSON *recall = resp ? cJSON_GetObjectItemCaseSensitive(resp, "recall") : NULL;
@@ -706,6 +764,11 @@ static cJSON *mcph_index_find_callers(struct mcp_call *c)
       return text_content("error: index_find_callers requires 'symbol'");
    cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
    const char *project = cJSON_IsString(jp) ? jp->valuestring : NULL;
+   mcph_current_source_t source;
+   if ((!project || !project[0]) && mcph_current_index_project(&source) == 0)
+      project = source.physical_project;
+   if (!project || !project[0])
+      return text_content("error: index_find_callers could not resolve the current Git branch");
    const int max = 200;
    caller_hit_t *hits = calloc((size_t)max, sizeof(*hits));
    if (!hits)
@@ -740,6 +803,11 @@ static cJSON *mcph_index_structure(struct mcp_call *c)
       return text_content("error: index_structure requires 'file_path'");
    cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
    const char *project = cJSON_IsString(jp) ? jp->valuestring : NULL;
+   mcph_current_source_t source;
+   if ((!project || !project[0]) && mcph_current_index_project(&source) == 0)
+      project = source.physical_project;
+   if (!project || !project[0])
+      return text_content("error: index_structure could not resolve the current Git branch");
    const int max = 1000;
    definition_t *defs = calloc((size_t)max, sizeof(*defs));
    if (!defs)
@@ -809,6 +877,11 @@ static cJSON *mcph_index_blast_radius(struct mcp_call *c)
       return text_content("error: index_blast_radius requires 'file_path'");
    cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
    const char *project = cJSON_IsString(jp) ? jp->valuestring : NULL;
+   mcph_current_source_t source;
+   if ((!project || !project[0]) && mcph_current_index_project(&source) == 0)
+      project = source.physical_project;
+   if (!project || !project[0])
+      return text_content("error: index_blast_radius could not resolve the current Git branch");
    blast_radius_t *br = calloc(1, sizeof(*br));
    if (!br)
       return text_content("error: out of memory");
@@ -997,7 +1070,27 @@ static cJSON *mcph_index_hybrid(struct mcp_call *c)
    long long mr = 0;
    int max_results = pdf_arg_pos_int(c->jargs, "max_results", 100.0, &mr) ? (int)mr : 20;
    int status = -1;
-   char *json = kb_client_code_hybrid(jq->valuestring, symbol, project, max_results, &status);
+   char *json = NULL;
+   if (project && project[0])
+      json = kb_client_code_hybrid(jq->valuestring, symbol, project, max_results, &status);
+   else
+   {
+      char cwd_buf[MAX_PATH_LEN];
+      const char *cwd = run_cmd_get_cwd();
+      if ((!cwd || !cwd[0]) && getcwd(cwd_buf, sizeof(cwd_buf)))
+         cwd = cwd_buf;
+      char root[MAX_PATH_LEN] = "";
+      config_t cfg;
+      config_t *cfgp = config_load(&cfg) == 0 ? &cfg : NULL;
+      if (cwd && workspace_active_root(cfgp, cwd, root, sizeof(root)) == 0)
+      {
+         char repository_key[512] = "", workspace_key[512] = "";
+         workspace_repo_index_keys(root, "", repository_key, sizeof(repository_key),
+                                   workspace_key, sizeof(workspace_key));
+         json = kb_client_code_hybrid_current(jq->valuestring, symbol, repository_key, root,
+                                              max_results, &status);
+      }
+   }
    /* §3 live cite-capture (default off): observe the retrieved file paths for this
     * session so a re-cited source earns trust across turns. Best-effort; gated by the
     * same flag as the retrieval-side trust tie-break. */
@@ -1033,34 +1126,46 @@ static cJSON *mcph_index_hybrid(struct mcp_call *c)
 static cJSON *mcph_index_graph_hubs(struct mcp_call *c)
 {
    cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
-   if (!cJSON_IsString(jp) || !jp->valuestring[0])
-      return text_content("error: index_graph_hubs requires 'project'");
+   const char *project = cJSON_IsString(jp) ? jp->valuestring : NULL;
+   mcph_current_source_t source;
+   if ((!project || !project[0]) && mcph_current_index_project(&source) == 0)
+      project = source.physical_project;
+   if (!project || !project[0])
+      return text_content("error: index_graph_hubs could not resolve the current Git branch");
    long long mr = 0;
    int max_results = pdf_arg_pos_int(c->jargs, "max_results", 200.0, &mr) ? (int)mr : 20;
    int status = -1;
-   char *json = kb_client_code_graph_hubs(jp->valuestring, max_results, &status);
+   char *json = kb_client_code_graph_hubs(project, max_results, &status);
    return code_graph_passthrough(json, status, "index_graph_hubs");
 }
 
 static cJSON *mcph_index_graph_audit(struct mcp_call *c)
 {
    cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
-   if (!cJSON_IsString(jp) || !jp->valuestring[0])
-      return text_content("error: index_graph_audit requires 'project'");
+   const char *project = cJSON_IsString(jp) ? jp->valuestring : NULL;
+   mcph_current_source_t source;
+   if ((!project || !project[0]) && mcph_current_index_project(&source) == 0)
+      project = source.physical_project;
+   if (!project || !project[0])
+      return text_content("error: index_graph_audit could not resolve the current Git branch");
    long long mf = 0;
    int max_findings = pdf_arg_pos_int(c->jargs, "max_findings", 200.0, &mf) ? (int)mf : 20;
    int status = -1;
-   char *json = kb_client_code_graph_audit(jp->valuestring, max_findings, &status);
+   char *json = kb_client_code_graph_audit(project, max_findings, &status);
    return code_graph_passthrough(json, status, "index_graph_audit");
 }
 
 static cJSON *mcph_index_lessons(struct mcp_call *c)
 {
    cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
-   if (!cJSON_IsString(jp) || !jp->valuestring[0])
-      return text_content("error: index_lessons requires 'project'");
+   const char *project = cJSON_IsString(jp) ? jp->valuestring : NULL;
+   mcph_current_source_t source;
+   if ((!project || !project[0]) && mcph_current_index_project(&source) == 0)
+      project = source.physical_project;
+   if (!project || !project[0])
+      return text_content("error: index_lessons could not resolve the current Git branch");
    int status = -1;
-   char *json = kb_client_code_lessons(jp->valuestring, &status);
+   char *json = kb_client_code_lessons(project, &status);
    return code_graph_passthrough(json, status, "index_lessons");
 }
 
@@ -1087,28 +1192,36 @@ static cJSON *mcph_index_graph_node(struct mcp_call *c)
 {
    cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
    cJSON *jn = cJSON_GetObjectItemCaseSensitive(c->jargs, "node");
-   if (!cJSON_IsString(jp) || !jp->valuestring[0])
-      return text_content("error: index_graph_node requires 'project'");
    if (!cJSON_IsString(jn) || !jn->valuestring[0])
       return text_content("error: index_graph_node requires 'node'");
+   const char *project = cJSON_IsString(jp) ? jp->valuestring : NULL;
+   mcph_current_source_t source;
+   if ((!project || !project[0]) && mcph_current_index_project(&source) == 0)
+      project = source.physical_project;
+   if (!project || !project[0])
+      return text_content("error: index_graph_node could not resolve the current Git branch");
    long long mr = 0;
    int max_results = pdf_arg_pos_int(c->jargs, "max_results", 200.0, &mr) ? (int)mr : 50;
    int status = -1;
-   char *json = kb_client_code_graph_node(jp->valuestring, jn->valuestring, max_results, &status);
+   char *json = kb_client_code_graph_node(project, jn->valuestring, max_results, &status);
    return code_graph_passthrough(json, status, "index_graph_node");
 }
 
 static cJSON *mcph_index_graph_surprising(struct mcp_call *c)
 {
    cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
-   if (!cJSON_IsString(jp) || !jp->valuestring[0])
-      return text_content("error: index_graph_surprising requires 'project'");
+   const char *project = cJSON_IsString(jp) ? jp->valuestring : NULL;
+   mcph_current_source_t source;
+   if ((!project || !project[0]) && mcph_current_index_project(&source) == 0)
+      project = source.physical_project;
+   if (!project || !project[0])
+      return text_content("error: index_graph_surprising could not resolve the current Git branch");
    long long mr = 0;
    int max_results = pdf_arg_pos_int(c->jargs, "max_results", 200.0, &mr) ? (int)mr : 20;
    cJSON *jj = cJSON_GetObjectItemCaseSensitive(c->jargs, "judge");
    int judge = cJSON_IsTrue(jj) ? 1 : 0;
    int status = -1;
-   char *json = kb_client_code_graph_surprising(jp->valuestring, max_results, judge, &status);
+   char *json = kb_client_code_graph_surprising(project, max_results, judge, &status);
    return code_graph_passthrough(json, status, "index_graph_surprising");
 }
 
@@ -1218,10 +1331,9 @@ static cJSON *mcph_code_span_get(struct mcp_call *c)
 {
    cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
    cJSON *jf = cJSON_GetObjectItemCaseSensitive(c->jargs, "file_path");
-   if (!cJSON_IsString(jp) || !jp->valuestring[0])
-      return text_content("error: code_span_get requires 'project'");
    if (!cJSON_IsString(jf) || !jf->valuestring[0])
       return text_content("error: code_span_get requires 'file_path'");
+   const char *project = cJSON_IsString(jp) ? jp->valuestring : NULL;
 
    long long ls = 0, le = 0;
    int line_start = pdf_arg_pos_int(c->jargs, "line_start", 2000000000.0, &ls) ? (int)ls : 1;
@@ -1230,24 +1342,35 @@ static cJSON *mcph_code_span_get(struct mcp_call *c)
    /* Resolve the project's recorded root (the containment anchor). project_info_t
     * is ~4KB (root[MAX_PATH_LEN]), so heap-allocate the list rather than blow the
     * server-thread stack. */
-   const int max_projs = 256;
-   project_info_t *projs = calloc((size_t)max_projs, sizeof(*projs));
-   if (!projs)
-      return text_content("error: out of memory");
-   int np = kb_client_index_list(projs, max_projs);
-   if (np < 0)
-   {
-      free(projs);
-      return text_content("error: code index unavailable");
-   }
    char root[MAX_PATH_LEN] = "";
-   for (int i = 0; i < np; i++)
-      if (strcmp(projs[i].name, jp->valuestring) == 0 && projs[i].root[0])
+   mcph_current_source_t source;
+   if (!project || !project[0])
+   {
+      if (mcph_current_index_project(&source) != 0)
+         return text_content("error: code_span_get could not resolve the current Git branch");
+      project = source.physical_project;
+      snprintf(root, sizeof(root), "%s", source.root);
+   }
+   else
+   {
+      const int max_projs = 256;
+      project_info_t *projs = calloc((size_t)max_projs, sizeof(*projs));
+      if (!projs)
+         return text_content("error: out of memory");
+      int np = kb_client_index_list(projs, max_projs);
+      if (np < 0)
       {
-         snprintf(root, sizeof(root), "%s", projs[i].root);
-         break;
+         free(projs);
+         return text_content("error: code index unavailable");
       }
-   free(projs);
+      for (int i = 0; i < np; i++)
+         if (strcmp(projs[i].name, project) == 0 && projs[i].root[0])
+         {
+            snprintf(root, sizeof(root), "%s", projs[i].root);
+            break;
+         }
+      free(projs);
+   }
    if (!root[0])
       return text_content("error: unknown project (no indexed root)");
 
@@ -1256,7 +1379,7 @@ static cJSON *mcph_code_span_get(struct mcp_call *c)
    int max_lines = cfg.code_span_max_lines > 0 ? cfg.code_span_max_lines : 400;
 
    cJSON *result =
-       code_span_read(jp->valuestring, root, jf->valuestring, line_start, line_end, max_lines);
+       code_span_read(project, root, jf->valuestring, line_start, line_end, max_lines);
    if (!result)
       return text_content("error: out of memory");
    return json_result_content(result);

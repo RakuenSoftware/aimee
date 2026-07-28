@@ -22,10 +22,17 @@
 
 static int g_remote_mode = 0; /* controls kb_client_v1_base_url return */
 static char *g_last_path = NULL;
+static char *g_last_get_path = NULL;
 static char *g_last_body = NULL;
 static int g_post_calls = 0;
+static int g_get_calls = 0;
+static int g_get_stale_once = 0;
 static int g_files_pushed_total = 0; /* rel_path entries summed across calls */
 static size_t g_max_body_bytes = 0;  /* largest single request body seen */
+static int g_generation_mode = 0;
+static int g_begin_calls = 0, g_append_calls = 0, g_finish_calls = 0;
+static char g_generation_ref[1024], g_generation_commit[65], g_generation_tree[65];
+static char g_generation_file_path[4096], g_generation_file_content[4096];
 static const char *g_next_response =
     "{\"status\":\"ok\",\"skipped\":false,\"projects\":1,\"files\":0}";
 
@@ -49,16 +56,89 @@ char *kb_client_v1_post_json(const char *path, cJSON *body, int timeout_ms, int 
       g_files_pushed_total += cJSON_GetArraySize(files);
    if (status_out)
       *status_out = 200;
+   if (g_generation_mode && body)
+   {
+      cJSON *action = cJSON_GetObjectItemCaseSensitive(body, "action");
+      if (cJSON_IsString(action) && strcmp(action->valuestring, "begin_generation") == 0)
+      {
+         g_begin_calls++;
+         cJSON *ref = cJSON_GetObjectItemCaseSensitive(body, "source_ref");
+         cJSON *commit = cJSON_GetObjectItemCaseSensitive(body, "commit_sha");
+         cJSON *tree = cJSON_GetObjectItemCaseSensitive(body, "tree_sha");
+         snprintf(g_generation_ref, sizeof(g_generation_ref), "%s",
+                  cJSON_IsString(ref) ? ref->valuestring : "");
+         snprintf(g_generation_commit, sizeof(g_generation_commit), "%s",
+                  cJSON_IsString(commit) ? commit->valuestring : "");
+         snprintf(g_generation_tree, sizeof(g_generation_tree), "%s",
+                  cJSON_IsString(tree) ? tree->valuestring : "");
+         char response[2048];
+         snprintf(response, sizeof(response),
+                  "{\"status\":\"ok\",\"action\":\"begin_generation\","
+                  "\"generation_id\":77,\"project\":\"generation:1:77\","
+                  "\"repository_key\":\"repo-key\",\"source_ref\":\"%s\","
+                  "\"commit_sha\":\"%s\",\"tree_sha\":\"%s\","
+                  "\"generation_state\":\"staging\",\"already_current\":false}",
+                  g_generation_ref, g_generation_commit, g_generation_tree);
+         return strdup(response);
+      }
+      if (cJSON_IsString(action) && strcmp(action->valuestring, "append_generation") == 0)
+      {
+         g_append_calls++;
+         cJSON *batch = cJSON_GetObjectItemCaseSensitive(body, "files");
+         if (cJSON_IsArray(batch) && cJSON_GetArraySize(batch) > 0)
+         {
+            cJSON *entry = cJSON_GetArrayItem(batch, 0);
+            cJSON *rel = cJSON_GetObjectItemCaseSensitive(entry, "rel_path");
+            cJSON *content = cJSON_GetObjectItemCaseSensitive(entry, "content");
+            snprintf(g_generation_file_path, sizeof(g_generation_file_path), "%s",
+                     cJSON_IsString(rel) ? rel->valuestring : "");
+            snprintf(g_generation_file_content, sizeof(g_generation_file_content), "%s",
+                     cJSON_IsString(content) ? content->valuestring : "");
+         }
+         char response[256];
+         snprintf(response, sizeof(response),
+                  "{\"status\":\"ok\",\"action\":\"append_generation\","
+                  "\"generation_id\":77,\"files\":%d,\"inspected\":%d}",
+                  cJSON_IsArray(batch) ? cJSON_GetArraySize(batch) : 0,
+                  cJSON_IsArray(batch) ? cJSON_GetArraySize(batch) : 0);
+         return strdup(response);
+      }
+      if (cJSON_IsString(action) && strcmp(action->valuestring, "finish_generation") == 0)
+      {
+         g_finish_calls++;
+         cJSON *count = cJSON_GetObjectItemCaseSensitive(body, "expected_file_count");
+         char response[2048];
+         snprintf(response, sizeof(response),
+                  "{\"status\":\"ok\",\"action\":\"finish_generation\","
+                  "\"generation_id\":77,\"project\":\"generation:1:77\","
+                  "\"repository_key\":\"repo-key\",\"source_ref\":\"%s\","
+                  "\"commit_sha\":\"%s\",\"tree_sha\":\"%s\","
+                  "\"generation_state\":\"published\",\"files\":%d,"
+                  "\"model_subjects\":%d,\"skipped\":false}",
+                  g_generation_ref, g_generation_commit, g_generation_tree,
+                  cJSON_IsNumber(count) ? count->valueint : 0,
+                  cJSON_IsNumber(count) ? count->valueint : 0);
+         return strdup(response);
+      }
+   }
    return strdup(g_next_response);
 }
 
 char *kb_client_v1_get_json(const char *path, int timeout_ms, int *status_out)
 {
-   (void)path;
    (void)timeout_ms;
+   free(g_last_get_path);
+   g_last_get_path = strdup(path ? path : "");
+   g_get_calls++;
+   if (g_get_stale_once && g_get_calls == 1)
+   {
+      if (status_out)
+         *status_out = 409;
+      return NULL;
+   }
    if (status_out)
       *status_out = 200;
-   return strdup("{}");
+   return strdup("{\"status\":\"ok\"}");
 }
 
 char *kb_client_query_escape(const char *s)
@@ -69,13 +149,21 @@ char *kb_client_query_escape(const char *s)
 static void reset_stub(void)
 {
    free(g_last_path);
+   free(g_last_get_path);
    free(g_last_body);
    g_last_path = NULL;
+   g_last_get_path = NULL;
    g_last_body = NULL;
    g_post_calls = 0;
+   g_get_calls = 0;
+   g_get_stale_once = 0;
    g_files_pushed_total = 0;
    g_max_body_bytes = 0;
    g_remote_mode = 0;
+   g_generation_mode = 0;
+   g_begin_calls = g_append_calls = g_finish_calls = 0;
+   g_generation_ref[0] = g_generation_commit[0] = g_generation_tree[0] = '\0';
+   g_generation_file_path[0] = g_generation_file_content[0] = '\0';
 }
 
 /* ------------------------------------------------------------------ */
@@ -338,6 +426,93 @@ static void test_remote_mode_missing_args(void)
    reset_stub();
 }
 
+static void test_explicit_ref_uses_atomic_generation_protocol(void)
+{
+   reset_stub();
+   g_remote_mode = 1;
+   g_generation_mode = 1;
+   char tmpdir[] = "/tmp/aimee_idx_git_XXXXXX";
+   assert(mkdtemp(tmpdir) != NULL);
+
+   char cmd[8192], path[4096];
+   snprintf(cmd, sizeof(cmd),
+            "git -C '%s' init -q -b main && git -C '%s' config user.email t@t && "
+            "git -C '%s' config user.name t",
+            tmpdir, tmpdir, tmpdir);
+   assert(system(cmd) == 0);
+   snprintf(path, sizeof(path), "%s/value.c", tmpdir);
+   write_file(path, "int value(void){return 1;}\n", 27);
+   snprintf(cmd, sizeof(cmd), "git -C '%s' add -A && git -C '%s' commit -qm main", tmpdir,
+            tmpdir);
+   assert(system(cmd) == 0);
+   snprintf(cmd, sizeof(cmd), "git -C '%s' checkout -q -b feature", tmpdir);
+   assert(system(cmd) == 0);
+   write_file(path, "int value(void){return 2;}\n", 27);
+   snprintf(cmd, sizeof(cmd), "git -C '%s' add -A && git -C '%s' commit -qm feature", tmpdir,
+            tmpdir);
+   assert(system(cmd) == 0);
+   write_file(path, "UNCOMMITTED WIP MUST NOT INDEX\n", 30);
+
+   kb_client_index_scan_result_t res;
+   int rc = kb_client_index_scan_ref("repo-key", tmpdir, "feature", 0, &res);
+   assert(rc == 0);
+   assert(g_begin_calls == 1 && g_append_calls == 1 && g_finish_calls == 1);
+   assert(g_post_calls == 3);
+   assert(strcmp(g_generation_ref, "feature") == 0);
+   assert(strlen(g_generation_commit) == 40 && strlen(g_generation_tree) == 40);
+   assert(strcmp(g_generation_file_path, "value.c") == 0);
+   assert(strstr(g_generation_file_content, "return 2") != NULL);
+   assert(strstr(g_generation_file_content, "UNCOMMITTED") == NULL);
+   assert(res.generation_id == 77);
+   assert(strcmp(res.generation_state, "published") == 0);
+   assert(strcmp(res.physical_project, "generation:1:77") == 0);
+   assert(res.files == 1 && res.model_subjects == 1);
+
+   rmdir_r(tmpdir);
+   reset_stub();
+}
+
+static void test_current_hybrid_repairs_stale_generation_once(void)
+{
+   reset_stub();
+   g_remote_mode = 1;
+   g_generation_mode = 1;
+   g_get_stale_once = 1;
+   char tmpdir[] = "/tmp/aimee_hybrid_git_XXXXXX";
+   assert(mkdtemp(tmpdir) != NULL);
+
+   char cmd[8192], path[4096];
+   snprintf(cmd, sizeof(cmd),
+            "git -C '%s' init -q -b main && git -C '%s' config user.email t@t && "
+            "git -C '%s' config user.name t",
+            tmpdir, tmpdir, tmpdir);
+   assert(system(cmd) == 0);
+   snprintf(path, sizeof(path), "%s/value.c", tmpdir);
+   write_file(path, "int value(void){return 1;}\n", 27);
+   snprintf(cmd, sizeof(cmd), "git -C '%s' add -A && git -C '%s' commit -qm main && "
+                              "git -C '%s' checkout -qb feature",
+            tmpdir, tmpdir, tmpdir);
+   assert(system(cmd) == 0);
+
+   int status = -1;
+   char *json = kb_client_code_hybrid_current("needle", "value", "repo-key", tmpdir, 8,
+                                               &status);
+   assert(json != NULL);
+   assert(status == 200);
+   assert(g_get_calls == 2);
+   assert(g_begin_calls == 1 && g_append_calls == 1 && g_finish_calls == 1);
+   assert(g_last_get_path != NULL);
+   assert(strstr(g_last_get_path, "/v1/code/hybrid?query=needle&max_results=8") != NULL);
+   assert(strstr(g_last_get_path, "repository_key=repo-key") != NULL);
+   assert(strstr(g_last_get_path, "source_ref=feature") != NULL);
+   assert(strstr(g_last_get_path, "source_commit=") != NULL);
+   assert(strstr(g_last_get_path, "symbol=value") != NULL);
+   free(json);
+
+   rmdir_r(tmpdir);
+   reset_stub();
+}
+
 int main(void)
 {
    test_local_mode_no_files_array();
@@ -345,6 +520,8 @@ int main(void)
    test_remote_mode_empty_dir();
    test_remote_mode_batches_large_tree();
    test_remote_mode_missing_args();
+   test_explicit_ref_uses_atomic_generation_protocol();
+   test_current_hybrid_repairs_stale_generation_once();
    printf("kb_client_index_remote: all tests passed\n");
    return 0;
 }

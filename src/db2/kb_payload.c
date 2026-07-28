@@ -201,6 +201,29 @@ int db2_kb_documents_get_stored_hash(const char *project, const char *file_path,
    return rc;
 }
 
+int64_t db2_kb_documents_get_original_version(const char *project, const char *file_path)
+{
+   if (!project || !project[0] || !file_path || !file_path[0])
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   static const char *sql =
+       "SELECT document_version_id FROM kb_documents"
+       " WHERE project = ?1 AND file_path = ?2 LIMIT 1";
+   char err[KBP_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", project);
+   aimee_pg_bind_text(st, "?2", file_path);
+   int64_t version_id = -1;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      version_id = aimee_pg_column_int64(st, 0); /* SQL NULL maps to 0 */
+   aimee_pg_finalize(st);
+   return version_id;
+}
+
 int db2_kb_documents_hash_exists(const char *project, const char *file_hash, char *sample_path,
                                  size_t sample_path_len)
 {
@@ -501,9 +524,23 @@ void db2_kb_documents_delete_for_file(const char *project, const char *file_path
    if (!conn)
       return;
 
-   static const char *sql = "DELETE FROM kb_documents WHERE project = ?1 AND file_path = ?2";
    char err[KBP_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   static const char *lineage_sql =
+       "DELETE FROM kb_evidence_lineage WHERE"
+       " (subject_kind='kb_chunk' AND subject_id IN"
+       "   (SELECT CAST(id AS TEXT) FROM kb_documents WHERE project=?1 AND file_path=?2))"
+       " OR (parent_evidence_kind='kb_chunk' AND parent_evidence_id IN"
+       "   (SELECT CAST(id AS TEXT) FROM kb_documents WHERE project=?1 AND file_path=?2))";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, lineage_sql, err, sizeof(err));
+   if (!st)
+      return;
+   aimee_pg_bind_text(st, "?1", project);
+   aimee_pg_bind_text(st, "?2", file_path);
+   (void)aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+
+   static const char *sql = "DELETE FROM kb_documents WHERE project = ?1 AND file_path = ?2";
+   st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return;
    aimee_pg_bind_text(st, "?1", project);
@@ -512,10 +549,230 @@ void db2_kb_documents_delete_for_file(const char *project, const char *file_path
    aimee_pg_finalize(st);
 }
 
-int64_t db2_kb_documents_insert_chunk(const char *project, const char *file_path,
-                                      const char *file_hash, int chunk_index,
-                                      const char *heading_path, int line_start, int line_end,
-                                      const char *content, int token_count)
+int64_t db2_kb_original_version_ensure(const char *project, const char *source_uri,
+                                       const char *source_kind, const char *original_sha256,
+                                       int64_t original_byte_length, const char *media_type,
+                                       const char *original_blob_ref,
+                                       const char *source_revision)
+{
+   if (!project || !project[0] || !source_uri || !source_uri[0] || !original_sha256 ||
+       strlen(original_sha256) != 64 || !original_blob_ref || strlen(original_blob_ref) != 64 ||
+       original_byte_length < 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   char err[KBP_ERRBUF] = "";
+   static const char *doc_sql =
+       "INSERT INTO kb_original_documents (project, source_uri, source_kind)"
+       " VALUES (?1, ?2, ?3)"
+       " ON CONFLICT (project, source_uri) DO UPDATE"
+       " SET source_kind = kb_original_documents.source_kind RETURNING id";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, doc_sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", project);
+   aimee_pg_bind_text(st, "?2", source_uri);
+   aimee_pg_bind_text(st, "?3", source_kind && source_kind[0] ? source_kind : "file");
+   int64_t document_id = -1;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      document_id = aimee_pg_column_int64(st, 0);
+   aimee_pg_finalize(st);
+   if (document_id <= 0)
+      return -1;
+
+   /* DO NOTHING is intentional: kb_original_versions rejects every UPDATE,
+    * including a no-op conflict update. Select the immutable row on conflict. */
+   static const char *version_sql =
+       "INSERT INTO kb_original_versions"
+       " (document_id, original_sha256, original_byte_length, media_type, original_blob_ref,"
+       "  source_revision) VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
+       " ON CONFLICT (document_id, original_sha256) DO NOTHING RETURNING id";
+   st = aimee_pg_prepare(conn, version_sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int64(st, "?1", document_id);
+   aimee_pg_bind_text(st, "?2", original_sha256);
+   aimee_pg_bind_int64(st, "?3", original_byte_length);
+   aimee_pg_bind_text(st, "?4", media_type && media_type[0] ? media_type : "application/octet-stream");
+   aimee_pg_bind_text(st, "?5", original_blob_ref);
+   aimee_pg_bind_text(st, "?6", source_revision ? source_revision : "");
+   int64_t version_id = -1;
+   int rc = aimee_pg_step(st, err, sizeof(err));
+   if (rc == AIMEE_PG_ROW)
+      version_id = aimee_pg_column_int64(st, 0);
+   aimee_pg_finalize(st);
+   if (version_id <= 0 && rc != AIMEE_PG_DONE)
+      return -1;
+   if (version_id <= 0)
+   {
+      static const char *select_sql =
+          "SELECT id FROM kb_original_versions WHERE document_id = ?1 AND original_sha256 = ?2";
+      st = aimee_pg_prepare(conn, select_sql, err, sizeof(err));
+      if (!st)
+         return -1;
+      aimee_pg_bind_int64(st, "?1", document_id);
+      aimee_pg_bind_text(st, "?2", original_sha256);
+      if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+         version_id = aimee_pg_column_int64(st, 0);
+      aimee_pg_finalize(st);
+   }
+   if (version_id <= 0)
+      return -1;
+
+   st = aimee_pg_prepare(
+       conn,
+       "INSERT INTO kb_document_version_lifecycle(version_id,state,updated_at)"
+       " VALUES(?1,'captured',pg_now_text()) ON CONFLICT(version_id) DO NOTHING",
+       err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int64(st, "?1", version_id);
+   int lifecycle_ok = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE;
+   aimee_pg_finalize(st);
+   if (!lifecycle_ok)
+      return -1;
+   return version_id;
+}
+
+int db2_kb_original_version_publish(int64_t version_id)
+{
+   if (version_id <= 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[KBP_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn, "SELECT document_id FROM kb_original_versions WHERE id=?1", err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int64(st, "?1", version_id);
+   int64_t document_id = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      document_id = aimee_pg_column_int64(st, 0);
+   aimee_pg_finalize(st);
+   if (document_id <= 0)
+      return -1;
+
+   st = aimee_pg_prepare(
+       conn, "SELECT COALESCE(active_version_id,0) FROM kb_document_heads WHERE document_id=?1",
+       err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int64(st, "?1", document_id);
+   int64_t prior_version_id = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      prior_version_id = aimee_pg_column_int64(st, 0);
+   aimee_pg_finalize(st);
+
+   if (prior_version_id > 0 && prior_version_id != version_id)
+   {
+      st = aimee_pg_prepare(
+          conn,
+          "UPDATE kb_document_version_lifecycle SET state='superseded',"
+          " superseded_at=pg_now_text(),updated_at=pg_now_text() WHERE version_id=?1",
+          err, sizeof(err));
+      if (!st)
+         return -1;
+      aimee_pg_bind_int64(st, "?1", prior_version_id);
+      int ok = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE;
+      aimee_pg_finalize(st);
+      if (!ok)
+         return -1;
+   }
+
+   st = aimee_pg_prepare(
+       conn,
+       "INSERT INTO kb_document_heads(document_id,active_version_id,updated_at)"
+       " VALUES(?1,?2,pg_now_text()) ON CONFLICT(document_id) DO UPDATE SET"
+       " active_version_id=EXCLUDED.active_version_id,updated_at=pg_now_text()",
+       err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int64(st, "?1", document_id);
+   aimee_pg_bind_int64(st, "?2", version_id);
+   int ok = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE;
+   aimee_pg_finalize(st);
+   if (!ok)
+      return -1;
+
+   st = aimee_pg_prepare(
+       conn,
+       "UPDATE kb_document_version_lifecycle SET state='current',"
+       " predecessor_version_id=?1,published_at=CASE WHEN published_at=''"
+       " THEN pg_now_text() ELSE published_at END,superseded_at='',prune_after='',"
+       " failure_reason='',updated_at=pg_now_text() WHERE version_id=?2",
+       err, sizeof(err));
+   if (!st)
+      return -1;
+   if (prior_version_id > 0 && prior_version_id != version_id)
+      aimee_pg_bind_int64(st, "?1", prior_version_id);
+   else
+      aimee_pg_bind_null(st, "?1");
+   aimee_pg_bind_int64(st, "?2", version_id);
+   ok = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE &&
+        aimee_pg_stmt_changes(st) > 0;
+   aimee_pg_finalize(st);
+   return ok ? 1 : -1;
+}
+
+int64_t db2_kb_original_version_current(const char *project, const char *source_uri)
+{
+   if (!project || !project[0] || !source_uri || !source_uri[0])
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   static const char *sql =
+       "SELECT h.active_version_id FROM kb_original_documents d"
+       " JOIN kb_document_heads h ON h.document_id=d.id"
+       " WHERE d.project=?1 AND d.source_uri=?2";
+   char err[KBP_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", project);
+   aimee_pg_bind_text(st, "?2", source_uri);
+   int64_t version_id = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      version_id = aimee_pg_column_int64(st, 0);
+   aimee_pg_finalize(st);
+   return version_id;
+}
+
+int db2_kb_evidence_lineage_exists(const char *subject_kind, const char *subject_id,
+                                   const char *evidence_tier, int64_t original_version_id)
+{
+   if (!subject_kind || !subject_kind[0] || !subject_id || !subject_id[0] || !evidence_tier ||
+       !evidence_tier[0] || original_version_id <= 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   static const char *sql =
+       "SELECT 1 FROM kb_evidence_lineage WHERE subject_kind = ?1 AND subject_id = ?2"
+       " AND evidence_tier = ?3 AND original_version_id = ?4 LIMIT 1";
+   char err[KBP_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", subject_kind);
+   aimee_pg_bind_text(st, "?2", subject_id);
+   aimee_pg_bind_text(st, "?3", evidence_tier);
+   aimee_pg_bind_int64(st, "?4", original_version_id);
+   int found = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW ? 1 : 0;
+   aimee_pg_finalize(st);
+   return found;
+}
+
+int64_t db2_kb_documents_insert_chunk_evidence(
+    const char *project, const char *file_path, const char *file_hash, int chunk_index,
+    const char *heading_path, int line_start, int line_end, const char *content, int token_count,
+    int64_t document_version_id, const char *rendition_id, const char *parser_version,
+    const char *chunk_content_hash, const char *source_anchors_json,
+    int64_t index_generation_id)
 {
    void *conn = db2_conn();
    if (!conn)
@@ -524,9 +781,11 @@ int64_t db2_kb_documents_insert_chunk(const char *project, const char *file_path
    static const char *sql =
        "INSERT INTO kb_documents"
        " (project, file_path, file_hash, chunk_index, heading_path, line_start, line_end,"
-       "  content, token_count, updated_at)"
-       " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, pg_now_text())"
-       " RETURNING id";
+       "  content, token_count, document_version_id, rendition_id, parser_version,"
+       "  chunk_content_hash, source_anchors, evidence_authority, index_generation_id,"
+       "  updated_at)"
+       " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,"
+       "  'secondary_source_anchored_chunk', ?15, pg_now_text()) RETURNING id";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -540,11 +799,35 @@ int64_t db2_kb_documents_insert_chunk(const char *project, const char *file_path
    aimee_pg_bind_int(st, "?7", line_end);
    aimee_pg_bind_text(st, "?8", content ? content : "");
    aimee_pg_bind_int(st, "?9", token_count);
+   if (document_version_id > 0)
+      aimee_pg_bind_int64(st, "?10", document_version_id);
+   else
+      aimee_pg_bind_null(st, "?10");
+   aimee_pg_bind_text(st, "?11", rendition_id && rendition_id[0] ? rendition_id : "source-text");
+   aimee_pg_bind_text(st, "?12", parser_version && parser_version[0] ? parser_version : "legacy");
+   aimee_pg_bind_text(st, "?13", chunk_content_hash ? chunk_content_hash : "");
+   aimee_pg_bind_text(st, "?14", source_anchors_json && source_anchors_json[0]
+                                      ? source_anchors_json
+                                      : "[]");
+   if (index_generation_id > 0)
+      aimee_pg_bind_int64(st, "?15", index_generation_id);
+   else
+      aimee_pg_bind_null(st, "?15");
    int64_t new_id = -1;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
       new_id = aimee_pg_column_int64(st, 0);
    aimee_pg_finalize(st);
    return new_id;
+}
+
+int64_t db2_kb_documents_insert_chunk(const char *project, const char *file_path,
+                                      const char *file_hash, int chunk_index,
+                                      const char *heading_path, int line_start, int line_end,
+                                      const char *content, int token_count)
+{
+   return db2_kb_documents_insert_chunk_evidence(
+       project, file_path, file_hash, chunk_index, heading_path, line_start, line_end, content,
+       token_count, 0, "source-text", "legacy", "", "[]", 0);
 }
 
 void db2_kb_documents_link_neighbours(int64_t doc_id, int64_t prev_id)
@@ -584,13 +867,12 @@ void db2_kb_documents_link_neighbours(int64_t doc_id, int64_t prev_id)
  * PDF-specific columns in the same INSERT (doc_kind='pdf', the caller's
  * chunk_strategy — 'heading' or the 'page' fallback — and the page_start/page_end
  * span). Kept separate from the 9-arg insert so the markdown path is untouched. */
-int64_t db2_kb_documents_insert_chunk_pdf(const char *project, const char *file_path,
-                                          const char *file_hash, int chunk_index,
-                                          const char *heading_path, int line_start, int line_end,
-                                          const char *content, int token_count,
-                                          const char *chunk_strategy, int page_start, int page_end,
-                                          const char *sensitivity_class,
-                                          const char *quarantine_state)
+int64_t db2_kb_documents_insert_chunk_pdf_evidence(
+    const char *project, const char *file_path, const char *file_hash, int chunk_index,
+    const char *heading_path, int line_start, int line_end, const char *content, int token_count,
+    const char *chunk_strategy, int page_start, int page_end, const char *sensitivity_class,
+    const char *quarantine_state, int64_t document_version_id, const char *rendition_id,
+    const char *parser_version, const char *chunk_content_hash, const char *source_anchors_json)
 {
    void *conn = db2_conn();
    if (!conn)
@@ -600,8 +882,10 @@ int64_t db2_kb_documents_insert_chunk_pdf(const char *project, const char *file_
        "INSERT INTO kb_documents"
        " (project, file_path, file_hash, chunk_index, heading_path, line_start, line_end,"
        "  content, token_count, doc_kind, chunk_strategy, page_start, page_end,"
-       "  sensitivity_class, quarantine_state, updated_at)"
-       " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'pdf', ?10, ?11, ?12, ?13, ?14, pg_now_text())"
+       "  sensitivity_class, quarantine_state, document_version_id, rendition_id,"
+       "  parser_version, chunk_content_hash, source_anchors, evidence_authority, updated_at)"
+       " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'pdf', ?10, ?11, ?12, ?13, ?14,"
+       " ?15, ?16, ?17, ?18, ?19, 'secondary_source_anchored_chunk', pg_now_text())"
        " RETURNING id";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -621,11 +905,34 @@ int64_t db2_kb_documents_insert_chunk_pdf(const char *project, const char *file_
    aimee_pg_bind_int(st, "?12", page_end);
    aimee_pg_bind_text(st, "?13", sensitivity_class ? sensitivity_class : "");
    aimee_pg_bind_text(st, "?14", quarantine_state ? quarantine_state : "");
+   if (document_version_id > 0)
+      aimee_pg_bind_int64(st, "?15", document_version_id);
+   else
+      aimee_pg_bind_null(st, "?15");
+   aimee_pg_bind_text(st, "?16", rendition_id && rendition_id[0] ? rendition_id : "pdf-text");
+   aimee_pg_bind_text(st, "?17", parser_version && parser_version[0] ? parser_version : "legacy");
+   aimee_pg_bind_text(st, "?18", chunk_content_hash ? chunk_content_hash : "");
+   aimee_pg_bind_text(st, "?19",
+                      source_anchors_json && source_anchors_json[0] ? source_anchors_json : "[]");
    int64_t new_id = -1;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
       new_id = aimee_pg_column_int64(st, 0);
    aimee_pg_finalize(st);
    return new_id;
+}
+
+int64_t db2_kb_documents_insert_chunk_pdf(const char *project, const char *file_path,
+                                          const char *file_hash, int chunk_index,
+                                          const char *heading_path, int line_start, int line_end,
+                                          const char *content, int token_count,
+                                          const char *chunk_strategy, int page_start, int page_end,
+                                          const char *sensitivity_class,
+                                          const char *quarantine_state)
+{
+   return db2_kb_documents_insert_chunk_pdf_evidence(
+       project, file_path, file_hash, chunk_index, heading_path, line_start, line_end, content,
+       token_count, chunk_strategy, page_start, page_end, sensitivity_class, quarantine_state, 0,
+       "pdf-text", "legacy", "", "[]");
 }
 
 /* Thin transaction wrappers (work on both Postgres and the sqlite test shim) so a
@@ -1365,7 +1672,10 @@ int db2_kb_blob_ref_referenced(const char *blob_ref)
    void *conn = db2_conn();
    if (!conn)
       return -1;
-   static const char *sql = "SELECT 1 FROM kb_doc_assets WHERE blob_ref = ?1 LIMIT 1";
+   static const char *sql =
+       "SELECT 1 FROM kb_doc_assets WHERE blob_ref = ?1"
+       " UNION ALL"
+       " SELECT 1 FROM kb_original_versions WHERE original_blob_ref = ?1 LIMIT 1";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)

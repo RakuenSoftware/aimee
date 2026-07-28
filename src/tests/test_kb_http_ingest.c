@@ -153,9 +153,36 @@ int kb_pdf_exec_bbox_layout(const unsigned char *bytes, int n, char *out, int ou
 }
 static int g_ingest_called = 0;
 static char g_ingest_project[64], g_ingest_fp[256], g_ingest_hash[80], g_ingest_class[32];
-int kb_doc_pdf_ingest_xhtml(const char *project, const char *file_path, const char *file_hash,
-                            const char *xhtml, const char *sensitivity_class,
-                            kb_pdf_ingest_stats_t *stats)
+static int64_t g_ingest_version_id = 0;
+int kb_blob_store_put(const void *bytes, size_t n, char *sha_out, size_t sha_cap)
+{
+   (void)bytes;
+   (void)n;
+   if (!sha_out || sha_cap < 65)
+      return -1;
+   memset(sha_out, 'a', 64);
+   sha_out[64] = '\0';
+   return 0;
+}
+int64_t db2_kb_original_version_ensure(const char *project, const char *source_uri,
+                                       const char *source_kind, const char *original_sha256,
+                                       int64_t original_byte_length, const char *media_type,
+                                       const char *original_blob_ref,
+                                       const char *source_revision)
+{
+   (void)project;
+   (void)source_uri;
+   (void)source_kind;
+   (void)original_sha256;
+   (void)original_byte_length;
+   (void)media_type;
+   (void)original_blob_ref;
+   (void)source_revision;
+   return 91;
+}
+int kb_doc_pdf_ingest_xhtml_version(
+    const char *project, const char *file_path, const char *file_hash, const char *xhtml,
+    const char *sensitivity_class, int64_t original_version_id, kb_pdf_ingest_stats_t *stats)
 {
    (void)xhtml;
    g_ingest_called++;
@@ -164,6 +191,7 @@ int kb_doc_pdf_ingest_xhtml(const char *project, const char *file_path, const ch
    snprintf(g_ingest_hash, sizeof(g_ingest_hash), "%s", file_hash ? file_hash : "");
    snprintf(g_ingest_class, sizeof(g_ingest_class), "%s",
             sensitivity_class ? sensitivity_class : "");
+   g_ingest_version_id = original_version_id;
    if (stats)
    {
       stats->chunks = 2;
@@ -234,6 +262,7 @@ static void test_post_pdf_routed(void)
    assert(strcmp(g_ingest_class, "internal") == 0);
    assert(strcmp(g_ingest_fp, "r.pdf") == 0);
    assert(g_ingest_hash[0] != '\0');
+   assert(g_ingest_version_id == 91);
    assert(strstr(buf, "\"doc_kind\":\"pdf\"") != NULL);
 }
 

@@ -146,6 +146,16 @@ extern "C"
    void db2_memory_scope_tag_insert(int64_t memory_id, const char *scope_type,
                                     const char *scope_value);
 
+   /* Attach/query an exact committed-source fence for a code/document-derived
+    * memory. Memories with no source-context rows are general/shared. Once a
+    * row exists, visibility requires an exact current generation match. */
+   int db2_memory_source_context_link(int64_t memory_id, const char *repository_key,
+                                      const char *source_ref, const char *source_commit,
+                                      int64_t index_generation_id, const char *evidence_role);
+   int db2_memory_source_context_visible(int64_t memory_id, const char *repository_key,
+                                         const char *source_ref, const char *source_commit,
+                                         int64_t index_generation_id);
+
    /* INSERT OR IGNORE into memory_workspaces. Best-effort. */
    void db2_memory_workspace_tag_insert(int64_t memory_id, const char *workspace);
 

@@ -7,6 +7,7 @@
 #include "cJSON.h"
 #include "config.h"
 #include "db2/kb_payload.h"
+#include "db2/pgvec_transport.h"
 #include "kb_blob_store.h"
 #include "kb_doc_hash.h"
 #include "kb_ocr_sidecar.h"
@@ -963,9 +964,10 @@ int kb_doc_pdf_render_assets(const char *project, const char *file_path,
  * EXACT same kb_doc_pdf_ingest path as native text (citations work identically). Returns the
  * ingested chunk count (>0), 0 if no text was recognised on any page (caller falls back to
  * asset-only), or -1 on a DB error. */
-int kb_doc_pdf_ingest_ocr(const char *project, const char *file_path, const char *file_hash,
-                          const char *sensitivity_class, const unsigned char *pdf_bytes, int n,
-                          const char *ocr_endpoint, kb_pdf_ingest_stats_t *stats)
+int kb_doc_pdf_ingest_ocr_version(
+    const char *project, const char *file_path, const char *file_hash,
+    const char *sensitivity_class, const unsigned char *pdf_bytes, int n,
+    const char *ocr_endpoint, int64_t original_version_id, kb_pdf_ingest_stats_t *stats)
 {
    if (stats)
       memset(stats, 0, sizeof(*stats));
@@ -1035,11 +1037,21 @@ int kb_doc_pdf_ingest_ocr(const char *project, const char *file_path, const char
 
    int rc = 0;
    if (doc.n_pages > 0)
-      rc = kb_doc_pdf_ingest(project, file_path, file_hash, &doc, sensitivity_class, stats);
+      rc = kb_doc_pdf_ingest_version(project, file_path, file_hash, &doc, sensitivity_class,
+                                     original_version_id, "pdf-ocr-text", "ocr-sidecar-v1",
+                                     stats);
    if (rc > 0)
       LOG_INFO("kb_doc_pdf", "OCR ingested %d page(s) for %s", doc.n_pages, file_path);
    kb_pdf_free_doc(&doc);
    return rc;
+}
+
+int kb_doc_pdf_ingest_ocr(const char *project, const char *file_path, const char *file_hash,
+                          const char *sensitivity_class, const unsigned char *pdf_bytes, int n,
+                          const char *ocr_endpoint, kb_pdf_ingest_stats_t *stats)
+{
+   return kb_doc_pdf_ingest_ocr_version(project, file_path, file_hash, sensitivity_class,
+                                        pdf_bytes, n, ocr_endpoint, 0, stats);
 }
 
 /* Phase B: run the TSR sidecar over one chunk's (page's) regions and persist any recognised
@@ -1107,9 +1119,10 @@ static int kb_pdf_tsr_chunk(const char *file_path, const kb_pdf_chunk_t *c,
    return 1;
 }
 
-int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *file_hash,
-                      const kb_pdf_doc_t *doc, const char *sensitivity_class,
-                      kb_pdf_ingest_stats_t *stats)
+int kb_doc_pdf_ingest_version(const char *project, const char *file_path, const char *file_hash,
+                              const kb_pdf_doc_t *doc, const char *sensitivity_class,
+                              int64_t original_version_id, const char *rendition_id,
+                              const char *parser_version, kb_pdf_ingest_stats_t *stats)
 {
    if (stats)
       memset(stats, 0, sizeof(*stats));
@@ -1156,6 +1169,15 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
       return 0;
    }
 
+   /* Materialize prior vector ids before the atomic row replacement. Their
+    * vectors are deleted only after commit, so a rollback leaves the prior
+    * published version completely usable. */
+   int64_t *prior_chunk_ids = calloc(KB_PDF_MAX_PAGES, sizeof(*prior_chunk_ids));
+   int n_prior_chunk_ids = prior_chunk_ids
+                               ? db2_kb_documents_list_chunk_ids_for_file(
+                                     project, file_path, prior_chunk_ids, KB_PDF_MAX_PAGES)
+                               : 0;
+
    /* Per-chunk source-region ids, retained across commit so the post-commit TSR pass can link
     * cells back to their kb_doc_regions rows without re-querying. */
    int64_t **chunk_rids = NULL;
@@ -1182,6 +1204,7 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
     * never freed here, and `chunks` is built, consumed, and freed inside this function. */
    if (db2_kb_txn_begin() != 0)
    {
+      free(prior_chunk_ids);
       kb_pdf_free_chunks(chunks, n_chunks);
       return -1;
    }
@@ -1193,6 +1216,7 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
     * so a shared/deduped blob survives until its last referrer is gone. New crops are rendered +
     * inserted by the upload route after this. */
    (void)db2_kb_doc_assets_delete_for_doc(project, file_path);
+   (void)db2_curator_invalidate_doc(project, file_path);
    db2_kb_documents_delete_for_file(project, file_path); /* void; covered by the txn */
 
    int n_regions = 0;
@@ -1201,10 +1225,18 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
    for (int i = 0; i < n_chunks; i++)
    {
       kb_pdf_chunk_t *c = &chunks[i];
-      int64_t id = db2_kb_documents_insert_chunk_pdf(
+      char chunk_hash[KB_DOC_HASH_HEX_LEN + 1];
+      kb_doc_content_hash(c->content ? c->content : "",
+                          c->content ? (int)strlen(c->content) : 0, chunk_hash);
+      char source_anchors[160];
+      snprintf(source_anchors, sizeof(source_anchors),
+               "[{\"kind\":\"page_range\",\"page_start\":%d,\"page_end\":%d}]",
+               c->page_start, c->page_end);
+      int64_t id = db2_kb_documents_insert_chunk_pdf_evidence(
           project, file_path, file_hash, i, "" /* heading_path: Phase-1 page chunking */,
           c->line_start, c->line_end, c->content ? c->content : "", c->token_count,
-          "page" /* chunk_strategy */, c->page_start, c->page_end, sensitivity_class, quarantine);
+          "page" /* chunk_strategy */, c->page_start, c->page_end, sensitivity_class, quarantine,
+          original_version_id, rendition_id, parser_version, chunk_hash, source_anchors);
       if (id <= 0)
          goto fail;
       db2_kb_documents_link_neighbours(id, prev_id); /* void; covered by the txn */
@@ -1250,8 +1282,19 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
       prev_id = id;
    }
 
+   /* The head moves only after every new chunk, region, lineage row and job has
+    * been installed. This shares the surrounding transaction with the row
+    * replacement, so partial extraction never supersedes a good prior version. */
+   if (original_version_id > 0 && db2_kb_original_version_publish(original_version_id) != 1)
+      goto fail;
+
    if (db2_kb_txn_commit() != 0)
       goto fail;
+
+   for (int i = 0; i < n_prior_chunk_ids; i++)
+      (void)pgvec_kbpdf_delete(prior_chunk_ids[i]);
+   free(prior_chunk_ids);
+   prior_chunk_ids = NULL;
 
    /* Phase B: TSR runs HERE — after the text/regions are durably committed — so the sidecar
     * HTTP call never holds the ingest txn open, and a per-cell insert failure cannot roll back
@@ -1286,6 +1329,7 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
 
 fail:
    db2_kb_txn_rollback();
+   free(prior_chunk_ids);
    if (chunk_rids)
       for (int i = 0; i < n_chunks; i++)
          free(chunk_rids[i]);
@@ -1293,6 +1337,14 @@ fail:
    free(chunk_nrids);
    kb_pdf_free_chunks(chunks, n_chunks);
    return -1;
+}
+
+int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *file_hash,
+                      const kb_pdf_doc_t *doc, const char *sensitivity_class,
+                      kb_pdf_ingest_stats_t *stats)
+{
+   return kb_doc_pdf_ingest_version(project, file_path, file_hash, doc, sensitivity_class, 0,
+                                    "pdf-text", "legacy", stats);
 }
 
 int kb_doc_pdf_ingest_xhtml(const char *project, const char *file_path, const char *file_hash,
@@ -1304,6 +1356,21 @@ int kb_doc_pdf_ingest_xhtml(const char *project, const char *file_path, const ch
       return -1;
    kb_pdf_normalize(&doc);
    int rc = kb_doc_pdf_ingest(project, file_path, file_hash, &doc, sensitivity_class, stats);
+   kb_pdf_free_doc(&doc);
+   return rc;
+}
+
+int kb_doc_pdf_ingest_xhtml_version(
+    const char *project, const char *file_path, const char *file_hash, const char *xhtml,
+    const char *sensitivity_class, int64_t original_version_id, kb_pdf_ingest_stats_t *stats)
+{
+   kb_pdf_doc_t doc;
+   if (kb_pdf_parse_bbox_layout(xhtml, &doc) != 0)
+      return -1;
+   kb_pdf_normalize(&doc);
+   int rc = kb_doc_pdf_ingest_version(project, file_path, file_hash, &doc, sensitivity_class,
+                                      original_version_id, "pdf-native-text",
+                                      "poppler-bbox-v1", stats);
    kb_pdf_free_doc(&doc);
    return rc;
 }

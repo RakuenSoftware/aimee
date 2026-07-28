@@ -189,6 +189,69 @@ int kb_client_code_scan_push(const char *name, const char *root, int force, void
    return rc;
 }
 
+static int kb_client_generation_post(cJSON *req, kb_client_index_scan_result_t *out)
+{
+   if (!req)
+      return kb_client_index_scan_apply_response(NULL, out);
+   char *json =
+       kb_client_v1_post_json("/v1/code/scan", req, KB_CLIENT_INDEX_SCAN_TIMEOUT_MS, NULL);
+   cJSON_Delete(req);
+   if (!json)
+      return kb_client_index_scan_apply_response(NULL, out);
+   cJSON *resp = cJSON_Parse(json);
+   free(json);
+   int rc = kb_client_index_scan_apply_response(resp, out);
+   cJSON_Delete(resp);
+   return rc;
+}
+
+static int kb_client_generation_begin(const char *name, const char *root,
+                                      const code_source_snapshot_t *snapshot, int force,
+                                      kb_client_index_scan_result_t *out)
+{
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return kb_client_index_scan_apply_response(NULL, out);
+   cJSON_AddStringToObject(req, "action", "begin_generation");
+   cJSON_AddStringToObject(req, "repository_key", name);
+   cJSON_AddStringToObject(req, "source_ref", snapshot->ref);
+   cJSON_AddStringToObject(req, "commit_sha", snapshot->commit_sha);
+   cJSON_AddStringToObject(req, "tree_sha", snapshot->tree_sha);
+   cJSON_AddStringToObject(req, "root_path", root);
+   cJSON_AddBoolToObject(req, "is_default", snapshot->is_default);
+   if (force)
+      cJSON_AddBoolToObject(req, "force", 1);
+   return kb_client_generation_post(req, out);
+}
+
+static int kb_client_generation_append(int64_t generation_id, cJSON *files_arr,
+                                       kb_client_index_scan_result_t *out)
+{
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+   {
+      cJSON_Delete(files_arr);
+      return kb_client_index_scan_apply_response(NULL, out);
+   }
+   cJSON_AddStringToObject(req, "action", "append_generation");
+   cJSON_AddNumberToObject(req, "generation_id", (double)generation_id);
+   cJSON_AddItemToObject(req, "files", files_arr ? files_arr : cJSON_CreateArray());
+   return kb_client_generation_post(req, out);
+}
+
+static int kb_client_generation_finish(int64_t generation_id, const char *tree_sha,
+                                       int expected_files, kb_client_index_scan_result_t *out)
+{
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return kb_client_index_scan_apply_response(NULL, out);
+   cJSON_AddStringToObject(req, "action", "finish_generation");
+   cJSON_AddNumberToObject(req, "generation_id", (double)generation_id);
+   cJSON_AddStringToObject(req, "source_manifest_hash", tree_sha);
+   cJSON_AddNumberToObject(req, "expected_file_count", expected_files);
+   return kb_client_generation_post(req, out);
+}
+
 #ifdef AIMEE_POSIX
 /* Per-batch content budget for pushed-file scans. Batching keeps client
  * memory to ~one batch regardless of tree size, gives per-batch progress
@@ -207,6 +270,9 @@ typedef struct
    const char *name;
    const char *root;
    int force;
+   int generation_mode;
+   int64_t generation_id;
+   int total_files;
    cJSON *batch; /* current open batch, or NULL */
    size_t batch_bytes;
    int batches;   /* batches pushed */
@@ -230,7 +296,9 @@ static void kb_scan_push_flush(kb_scan_push_ctx_t *s)
    }
    kb_client_index_scan_result_t res;
    memset(&res, 0, sizeof(res));
-   int rc = kb_client_code_scan_push(s->name, s->root, s->force, s->batch, &res);
+   int rc = s->generation_mode
+                ? kb_client_generation_append(s->generation_id, s->batch, &res)
+                : kb_client_code_scan_push(s->name, s->root, s->force, s->batch, &res);
    s->batch = NULL;
    s->batch_bytes = 0;
    s->batches++;
@@ -239,6 +307,7 @@ static void kb_scan_push_flush(kb_scan_push_ctx_t *s)
       s->agg.projects = 1;
       s->agg.files += res.files;
       s->agg.inspected += res.inspected;
+      s->agg.generation_id = s->generation_id;
    }
    else
    {
@@ -271,9 +340,85 @@ static int kb_scan_push_collect_cb(const char *rel_path, const char *content, vo
    cJSON_AddStringToObject(entry, "content", content);
    cJSON_AddItemToArray(s->batch, entry);
    s->batch_bytes += flen;
+   s->total_files++;
    return 0;
 }
 #endif
+
+static int kb_client_index_scan_generation(const char *name, const char *root,
+                                           const code_source_snapshot_t *snapshot, int force,
+                                           kb_client_index_scan_result_t *out)
+{
+#ifdef AIMEE_POSIX
+   kb_client_index_scan_result_t begin;
+   memset(&begin, 0, sizeof(begin));
+   int rc = kb_client_generation_begin(name, root, snapshot, force, &begin);
+   if (rc != 0)
+   {
+      if (out)
+         *out = begin;
+      return rc;
+   }
+   if (begin.already_current)
+   {
+      begin.projects = 1;
+      begin.skipped = 1;
+      snprintf(begin.reason, sizeof(begin.reason), "unchanged");
+      if (out)
+         *out = begin;
+      return 0;
+   }
+
+   kb_scan_push_ctx_t s;
+   memset(&s, 0, sizeof(s));
+   s.name = name;
+   s.root = root;
+   s.force = force;
+   s.generation_mode = 1;
+   s.generation_id = begin.generation_id;
+   code_source_snapshot_t captured;
+   int collected = code_collect_files_at_ref_cb(root, snapshot->commit_sha,
+                                                kb_scan_push_collect_cb, &s, &captured);
+   kb_scan_push_flush(&s);
+   if (s.failed_rc != 0)
+   {
+      if (out)
+         *out = s.fail_res;
+      return s.failed_rc;
+   }
+   if (collected != s.total_files || strcmp(captured.commit_sha, snapshot->commit_sha) != 0 ||
+       strcmp(captured.tree_sha, snapshot->tree_sha) != 0)
+   {
+      if (out)
+      {
+         *out = begin;
+         out->skipped = 1;
+         snprintf(out->reason, sizeof(out->reason), "error");
+         snprintf(out->message, sizeof(out->message),
+                  "exact committed source snapshot could not be collected");
+      }
+      return -1;
+   }
+
+   kb_client_index_scan_result_t finished;
+   memset(&finished, 0, sizeof(finished));
+   rc = kb_client_generation_finish(begin.generation_id, snapshot->tree_sha, collected, &finished);
+   if (rc == 0)
+   {
+      finished.projects = 1;
+      finished.inspected = collected;
+   }
+   if (out)
+      *out = finished;
+   return rc;
+#else
+   (void)name;
+   (void)root;
+   (void)snapshot;
+   (void)force;
+   return kb_client_index_scan_apply_response(NULL, out);
+#endif
+}
 
 static int kb_client_index_scan_v1(const char *name, const char *root, int force,
                                    kb_client_index_scan_result_t *out)
@@ -314,13 +459,115 @@ static int kb_client_index_scan_v1(const char *name, const char *root, int force
    return kb_client_code_scan_push(name, root, force, NULL, out);
 }
 
-int kb_client_index_scan(const char *name, const char *root, int force,
-                         kb_client_index_scan_result_t *out)
+int kb_client_index_scan_ref(const char *name, const char *root, const char *source_ref, int force,
+                             kb_client_index_scan_result_t *out)
 {
    if (out)
       memset(out, 0, sizeof(*out));
 
+#ifdef AIMEE_POSIX
+   if (name && name[0] && root && root[0] &&
+       (!code_index_source_is_worktree() || (source_ref && source_ref[0])))
+   {
+      code_source_snapshot_t snapshot;
+      if (code_resolve_source_snapshot(root, source_ref, &snapshot) == 0)
+      {
+         if (source_ref && source_ref[0] && code_source_ref_is_merged(root, source_ref) == 1)
+         {
+            int rc = kb_client_index_retire_ref(name, snapshot.ref, "merged", -1, out);
+            if (rc == 0 && out)
+            {
+               out->skipped = 1;
+               snprintf(out->reason, sizeof(out->reason), "merged");
+               snprintf(out->message, sizeof(out->message),
+                        "source ref is merged into the default branch and was retired");
+            }
+            return rc;
+         }
+         return kb_client_index_scan_generation(name, root, &snapshot, force, out);
+      }
+      if (source_ref && source_ref[0])
+      {
+         kb_client_index_scan_result_t retired;
+         if (kb_client_index_retire_ref(name, source_ref, "deleted", -1, &retired) == 0)
+         {
+            if (out)
+            {
+               *out = retired;
+               out->skipped = 1;
+               snprintf(out->reason, sizeof(out->reason), "deleted");
+               snprintf(out->message, sizeof(out->message),
+                        "source ref is unavailable and was retired");
+            }
+            return 0;
+         }
+         if (out)
+         {
+            out->skipped = 1;
+            snprintf(out->reason, sizeof(out->reason), "error");
+            snprintf(out->message, sizeof(out->message), "requested source ref is unavailable");
+         }
+         return -1;
+      }
+   }
+#else
+   (void)source_ref;
+#endif
+
    return kb_client_index_scan_v1(name, root, force, out);
+}
+
+int kb_client_index_scan(const char *name, const char *root, int force,
+                         kb_client_index_scan_result_t *out)
+{
+   return kb_client_index_scan_ref(name, root, NULL, force, out);
+}
+
+int kb_client_index_scan_current(const char *name, const char *root, int force,
+                                 kb_client_index_scan_result_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+#ifdef AIMEE_POSIX
+   code_source_snapshot_t snapshot;
+   if (name && name[0] && root && root[0] &&
+       code_resolve_current_snapshot(root, &snapshot) == 0)
+      return kb_client_index_scan_generation(name, root, &snapshot, force, out);
+#else
+   (void)name;
+   (void)root;
+   (void)force;
+#endif
+   if (out)
+   {
+      out->skipped = 1;
+      snprintf(out->reason, sizeof(out->reason), "error");
+      snprintf(out->message, sizeof(out->message),
+               "current checkout is not an attached Git branch");
+   }
+   return -1;
+}
+
+int kb_client_index_retire_ref(const char *repository_key, const char *source_ref,
+                               const char *reason, int grace_seconds,
+                               kb_client_index_scan_result_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   if (!repository_key || !repository_key[0] || !source_ref || !source_ref[0] || !reason ||
+       (strcmp(reason, "merged") != 0 && strcmp(reason, "deleted") != 0) ||
+       grace_seconds < -1)
+      return kb_client_index_scan_apply_response(NULL, out);
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return kb_client_index_scan_apply_response(NULL, out);
+   cJSON_AddStringToObject(req, "action", "retire_ref");
+   cJSON_AddStringToObject(req, "repository_key", repository_key);
+   cJSON_AddStringToObject(req, "source_ref", source_ref);
+   cJSON_AddStringToObject(req, "reason", reason);
+   if (grace_seconds >= 0)
+      cJSON_AddNumberToObject(req, "grace_seconds", grace_seconds);
+   return kb_client_generation_post(req, out);
 }
 
 int kb_client_index_find(const char *identifier, term_hit_t *out, int max)
@@ -343,6 +590,83 @@ int kb_client_index_find(const char *identifier, term_hit_t *out, int max)
    int count = kb_index_find_parse(resp, out, max);
    cJSON_Delete(resp);
    return count;
+}
+
+int kb_client_index_find_ref(const char *repository_key, const char *source_ref,
+                             const char *source_commit, const char *identifier,
+                             term_hit_t *out, int max)
+{
+   if (!repository_key || !repository_key[0] || !source_ref || !source_ref[0] ||
+       !source_commit || !source_commit[0] || !identifier || !identifier[0] || !out || max <= 0)
+      return -1;
+   memset(out, 0, sizeof(*out) * (size_t)max);
+
+   char *encoded_identifier = kb_client_query_escape(identifier);
+   char *encoded_repository = kb_client_query_escape(repository_key);
+   char *encoded_ref = kb_client_query_escape(source_ref);
+   char *encoded_commit = kb_client_query_escape(source_commit);
+   if (!encoded_identifier || !encoded_repository || !encoded_ref || !encoded_commit)
+   {
+      free(encoded_identifier);
+      free(encoded_repository);
+      free(encoded_ref);
+      free(encoded_commit);
+      return -1;
+   }
+
+   char path[8192];
+   int path_len = snprintf(path, sizeof(path),
+                           "/v1/code/find?identifier=%s&max_results=%d&repository_key=%s"
+                           "&source_ref=%s&source_commit=%s",
+                           encoded_identifier, max, encoded_repository, encoded_ref,
+                           encoded_commit);
+   free(encoded_identifier);
+   free(encoded_repository);
+   free(encoded_ref);
+   free(encoded_commit);
+   if (path_len < 0 || (size_t)path_len >= sizeof(path))
+      return -1;
+
+   int http_status = -1;
+   char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, &http_status);
+   if (!json)
+      return http_status == 409 ? -2 : -1;
+   cJSON *resp = cJSON_Parse(json);
+   free(json);
+   int count = kb_index_find_parse(resp, out, max);
+   cJSON_Delete(resp);
+   return count;
+}
+
+int kb_client_index_find_current(const char *repository_key, const char *root,
+                                 const char *identifier, term_hit_t *out, int max)
+{
+#ifdef AIMEE_POSIX
+   code_source_snapshot_t snapshot;
+   if (!repository_key || !repository_key[0] || !root || !root[0] ||
+       code_resolve_current_snapshot(root, &snapshot) != 0)
+      return -1;
+
+   int found = kb_client_index_find_ref(repository_key, snapshot.ref, snapshot.commit_sha,
+                                        identifier, out, max);
+   if (found != -2)
+      return found;
+
+   /* A hook normally keeps this cheap path current. This synchronous repair is
+    * the correctness backstop for a newly checked-out/committed branch. */
+   kb_client_index_scan_result_t scan;
+   if (kb_client_index_scan_current(repository_key, root, 0, &scan) != 0)
+      return -1;
+   return kb_client_index_find_ref(repository_key, snapshot.ref, snapshot.commit_sha,
+                                   identifier, out, max);
+#else
+   (void)repository_key;
+   (void)root;
+   (void)identifier;
+   (void)out;
+   (void)max;
+   return -1;
+#endif
 }
 
 int kb_client_index_list(project_info_t *out, int max)
@@ -718,6 +1042,85 @@ int kb_client_index_code_search(const char *query, const char *project, code_sea
    int count = kb_index_code_search_parse(resp, out, max);
    cJSON_Delete(resp);
    return count;
+}
+
+int kb_client_index_code_search_ref(const char *repository_key, const char *source_ref,
+                                    const char *source_commit, const char *query,
+                                    code_search_hit_t *out, int max)
+{
+   if (!repository_key || !repository_key[0] || !source_ref || !source_ref[0] ||
+       !source_commit || !source_commit[0] || !query || !query[0] || !out || max <= 0)
+      return -1;
+   memset(out, 0, sizeof(*out) * (size_t)max);
+
+   char *query_q = kb_client_query_escape(query);
+   char *repo_q = kb_client_query_escape(repository_key);
+   char *ref_q = kb_client_query_escape(source_ref);
+   char *commit_q = kb_client_query_escape(source_commit);
+   if (!query_q || !repo_q || !ref_q || !commit_q)
+   {
+      free(query_q);
+      free(repo_q);
+      free(ref_q);
+      free(commit_q);
+      return -1;
+   }
+   size_t path_len = strlen(query_q) + strlen(repo_q) + strlen(ref_q) + strlen(commit_q) + 160;
+   char *path = malloc(path_len);
+   if (!path)
+   {
+      free(query_q);
+      free(repo_q);
+      free(ref_q);
+      free(commit_q);
+      return -1;
+   }
+   snprintf(path, path_len,
+            "/v1/code/search?query=%s&max_results=%d&repository_key=%s&source_ref=%s"
+            "&source_commit=%s",
+            query_q, max, repo_q, ref_q, commit_q);
+   free(query_q);
+   free(repo_q);
+   free(ref_q);
+   free(commit_q);
+
+   int http_status = -1;
+   char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, &http_status);
+   free(path);
+   if (!json)
+      return http_status == 409 ? -2 : -1;
+   cJSON *resp = cJSON_Parse(json);
+   free(json);
+   int count = kb_index_code_search_parse(resp, out, max);
+   cJSON_Delete(resp);
+   return count;
+}
+
+int kb_client_index_code_search_current(const char *repository_key, const char *root,
+                                        const char *query, code_search_hit_t *out, int max)
+{
+#ifdef AIMEE_POSIX
+   code_source_snapshot_t snapshot;
+   if (!repository_key || !repository_key[0] || !root || !root[0] ||
+       code_resolve_current_snapshot(root, &snapshot) != 0)
+      return -1;
+   int found = kb_client_index_code_search_ref(repository_key, snapshot.ref, snapshot.commit_sha,
+                                               query, out, max);
+   if (found != -2)
+      return found;
+   kb_client_index_scan_result_t scan;
+   if (kb_client_index_scan_current(repository_key, root, 0, &scan) != 0)
+      return -1;
+   return kb_client_index_code_search_ref(repository_key, snapshot.ref, snapshot.commit_sha,
+                                          query, out, max);
+#else
+   (void)repository_key;
+   (void)root;
+   (void)query;
+   (void)out;
+   (void)max;
+   return -1;
+#endif
 }
 
 int kb_client_index_find_callers(const char *project, const char *symbol, caller_hit_t *out,

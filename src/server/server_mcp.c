@@ -329,7 +329,8 @@ static void parse_filter_scope(cJSON *filter, const char **scope_type, const cha
    }
 }
 
-cJSON *tool_search_memory(cJSON *args)
+static cJSON *tool_search_memory_source(cJSON *args, const char *repository_key,
+                                        const char *repository_root)
 {
    cJSON *jq = cJSON_GetObjectItemCaseSensitive(args, "query");
    if (!cJSON_IsString(jq))
@@ -343,7 +344,11 @@ cJSON *tool_search_memory(cJSON *args)
    memory_t facts[20];
    /* Graph-code fusion is always on for recall. */
    int count;
-   if (scope_type && scope_type[0])
+   if (repository_key && repository_key[0] && repository_root && repository_root[0])
+      count = kb_client_memory_find_facts_current(
+          jq->valuestring, scope_type, scope_value, 20, facts, 20, repository_key,
+          repository_root);
+   else if (scope_type && scope_type[0])
       count = kb_client_memory_find_facts_scoped_ex(jq->valuestring, scope_type, scope_value, 20,
                                                     facts, 20, "on");
    else
@@ -364,6 +369,17 @@ cJSON *tool_search_memory(cJSON *args)
                            facts[i].tier, facts[i].kind, facts[i].content);
    }
    return text_content(buf);
+}
+
+cJSON *tool_search_memory(cJSON *args)
+{
+   return tool_search_memory_source(args, NULL, NULL);
+}
+
+cJSON *tool_search_memory_current(cJSON *args, const char *repository_key,
+                                  const char *repository_root)
+{
+   return tool_search_memory_source(args, repository_key, repository_root);
 }
 
 cJSON *tool_memory_mutate(cJSON *args)
@@ -451,7 +467,9 @@ cJSON *tool_memory_mutate(cJSON *args)
    return text_content(buf);
 }
 
-cJSON *tool_memory_ask(cJSON *args, cJSON **structured_out)
+static cJSON *tool_memory_ask_source(cJSON *args, cJSON **structured_out,
+                                     const char *repository_key,
+                                     const char *repository_root)
 {
    cJSON *jq = cJSON_GetObjectItemCaseSensitive(args, "query");
    cJSON *jl = cJSON_GetObjectItemCaseSensitive(args, "limit");
@@ -461,7 +479,11 @@ cJSON *tool_memory_ask(cJSON *args, cJSON **structured_out)
    memory_answer_result_t result;
    memset(&result, 0, sizeof(result));
    int limit = cJSON_IsNumber(jl) ? jl->valueint : 5;
-   if (kb_client_memory_ask(jq->valuestring, NULL, NULL, limit, &result) != 0)
+   int ask_rc = repository_key && repository_key[0] && repository_root && repository_root[0]
+                    ? kb_client_memory_ask_current(jq->valuestring, NULL, NULL, limit, &result,
+                                                   repository_key, repository_root)
+                    : kb_client_memory_ask(jq->valuestring, NULL, NULL, limit, &result);
+   if (ask_rc != 0)
       return text_content(result.error[0] ? result.error : "memory_ask failed");
 
    cJSON *structured = cJSON_CreateObject();
@@ -509,6 +531,17 @@ cJSON *tool_memory_ask(cJSON *args, cJSON **structured_out)
    else
       snprintf(summary, sizeof(summary), "%s", result.answer);
    return text_content(summary);
+}
+
+cJSON *tool_memory_ask(cJSON *args, cJSON **structured_out)
+{
+   return tool_memory_ask_source(args, structured_out, NULL, NULL);
+}
+
+cJSON *tool_memory_ask_current(cJSON *args, cJSON **structured_out,
+                               const char *repository_key, const char *repository_root)
+{
+   return tool_memory_ask_source(args, structured_out, repository_key, repository_root);
 }
 
 cJSON *tool_search_graph(cJSON *args)

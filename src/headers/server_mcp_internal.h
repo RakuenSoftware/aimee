@@ -53,6 +53,8 @@ cJSON *tool_list_hosts(void);
 cJSON *smcp_tool_list_notes(cJSON *args);
 cJSON *tool_list_prospective_memories(cJSON *args);
 cJSON *tool_memory_ask(cJSON *args, cJSON **structured_out);
+cJSON *tool_memory_ask_current(cJSON *args, cJSON **structured_out,
+                               const char *repository_key, const char *repository_root);
 cJSON *tool_memory_briefing(cJSON *args);
 cJSON *tool_memory_get(cJSON *args);
 cJSON *tool_memory_mutate(cJSON *args);
@@ -60,6 +62,8 @@ cJSON *tool_preview_blast_radius(cJSON *args);
 cJSON *tool_record_attempt(cJSON *args);
 cJSON *tool_search_graph(cJSON *args);
 cJSON *tool_search_memory(cJSON *args);
+cJSON *tool_search_memory_current(cJSON *args, const char *repository_key,
+                                  const char *repository_root);
 cJSON *smcp_tool_search_notes(cJSON *args);
 cJSON *tool_store_workflow(cJSON *args);
 cJSON *json_result_content(cJSON *result);
@@ -84,6 +88,8 @@ cJSON *tool_list_hosts(void);
 cJSON *smcp_tool_list_notes(cJSON *args);
 cJSON *tool_list_prospective_memories(cJSON *args);
 cJSON *tool_memory_ask(cJSON *args, cJSON **structured_out);
+cJSON *tool_memory_ask_current(cJSON *args, cJSON **structured_out,
+                               const char *repository_key, const char *repository_root);
 cJSON *tool_memory_briefing(cJSON *args);
 cJSON *tool_memory_get(cJSON *args);
 cJSON *tool_memory_mutate(cJSON *args);
@@ -91,6 +97,8 @@ cJSON *tool_preview_blast_radius(cJSON *args);
 cJSON *tool_record_attempt(cJSON *args);
 cJSON *tool_search_graph(cJSON *args);
 cJSON *tool_search_memory(cJSON *args);
+cJSON *tool_search_memory_current(cJSON *args, const char *repository_key,
+                                  const char *repository_root);
 cJSON *smcp_tool_search_notes(cJSON *args);
 cJSON *tool_store_workflow(cJSON *args);
 #endif

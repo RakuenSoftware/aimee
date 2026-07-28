@@ -20,6 +20,7 @@
 #include "cJSON.h"
 #include "memory_query.h" /* db2_memory_low_eff_row_t etc. */
 #include "tasks.h"
+#include "code_collect.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -365,9 +366,11 @@ static void kbc_memory_diagnostic_from_json(cJSON *j, memory_diagnostic_t *out)
    }
 }
 
-int kb_client_memory_diagnose_scoped(const char *query, const char *scope_type,
-                                     const char *scope_value, int limit, memory_diagnostic_t *out,
-                                     int max)
+static int kbc_memory_diagnose_source(const char *query, const char *scope_type,
+                                      const char *scope_value, int limit,
+                                      memory_diagnostic_t *out, int max,
+                                      const code_source_snapshot_t *snapshot,
+                                      const char *repository_key)
 {
    if (!query || !out || max <= 0)
       return 0;
@@ -379,6 +382,12 @@ int kb_client_memory_diagnose_scoped(const char *query, const char *scope_type,
       cJSON_AddStringToObject(req, "scope_value", scope_value);
    if (limit > 0)
       cJSON_AddNumberToObject(req, "limit", limit);
+   if (snapshot && repository_key && repository_key[0])
+   {
+      cJSON_AddStringToObject(req, "repository_key", repository_key);
+      cJSON_AddStringToObject(req, "source_ref", snapshot->ref);
+      cJSON_AddStringToObject(req, "source_commit", snapshot->commit_sha);
+   }
    char *json = kb_v1_action_request("memory.diagnose_scoped", req);
    if (!json)
       return -1;
@@ -406,6 +415,39 @@ int kb_client_memory_diagnose_scoped(const char *query, const char *scope_type,
    }
    cJSON_Delete(resp);
    return n;
+}
+
+int kb_client_memory_diagnose_scoped(const char *query, const char *scope_type,
+                                     const char *scope_value, int limit, memory_diagnostic_t *out,
+                                     int max)
+{
+   return kbc_memory_diagnose_source(query, scope_type, scope_value, limit, out, max, NULL, NULL);
+}
+
+int kb_client_memory_diagnose_current(const char *query, int limit, memory_diagnostic_t *out,
+                                      int max, const char *repository_key,
+                                      const char *repository_root)
+{
+#ifdef AIMEE_POSIX
+   if (!repository_key || !repository_key[0] || !repository_root || !repository_root[0])
+      return -1;
+   kb_client_index_scan_result_t scan;
+   if (kb_client_index_scan_current(repository_key, repository_root, 0, &scan) != 0)
+      return -1;
+   code_source_snapshot_t snapshot;
+   if (code_resolve_current_snapshot(repository_root, &snapshot) != 0)
+      return -1;
+   return kbc_memory_diagnose_source(query, NULL, NULL, limit, out, max, &snapshot,
+                                     repository_key);
+#else
+   (void)query;
+   (void)limit;
+   (void)out;
+   (void)max;
+   (void)repository_key;
+   (void)repository_root;
+   return -1;
+#endif
 }
 
 int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max)
@@ -489,6 +531,54 @@ int kb_client_memory_find_facts_scoped(const char *query, const char *scope_type
                                                 "on");
 }
 
+int kb_client_memory_find_facts_current(const char *query, const char *scope_type,
+                                        const char *scope_value, int limit, memory_t *out, int max,
+                                        const char *repository_key,
+                                        const char *repository_root)
+{
+#ifdef AIMEE_POSIX
+   if (!query || !out || max <= 0 || !repository_key || !repository_key[0] ||
+       !repository_root || !repository_root[0])
+      return -1;
+   kb_client_index_scan_result_t scan;
+   if (kb_client_index_scan_current(repository_key, repository_root, 0, &scan) != 0)
+      return -1;
+   code_source_snapshot_t snapshot;
+   if (code_resolve_current_snapshot(repository_root, &snapshot) != 0)
+      return -1;
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return -1;
+   cJSON_AddStringToObject(req, "query", query);
+   if (scope_type && scope_type[0])
+      cJSON_AddStringToObject(req, "scope_type", scope_type);
+   if (scope_value && scope_value[0])
+      cJSON_AddStringToObject(req, "scope_value", scope_value);
+   if (limit > 0)
+      cJSON_AddNumberToObject(req, "limit", limit);
+   cJSON_AddStringToObject(req, "graph_code_fusion_state", "on");
+   cJSON_AddStringToObject(req, "repository_key", repository_key);
+   cJSON_AddStringToObject(req, "source_ref", snapshot.ref);
+   cJSON_AddStringToObject(req, "source_commit", snapshot.commit_sha);
+   const char *action = (scope_type && scope_type[0]) ? "memory.find_facts_scoped"
+                                                      : "memory.find_facts";
+   char *json = kb_v1_action_request(action, req);
+   int n = kbc_facts_array_from_envelope(json, out, max);
+   free(json);
+   return n;
+#else
+   (void)query;
+   (void)scope_type;
+   (void)scope_value;
+   (void)limit;
+   (void)out;
+   (void)max;
+   (void)repository_key;
+   (void)repository_root;
+   return -1;
+#endif
+}
+
 int kb_client_memory_search(char **clusters, int cluster_count, int limit, search_result_t *out,
                             int max)
 {
@@ -566,11 +656,21 @@ int kb_client_memory_search(char **clusters, int cluster_count, int limit, searc
    return n;
 }
 
-char *kb_client_memory_assemble_context(const char *task_hint)
+static char *kb_client_memory_assemble_context_source(const char *task_hint, const char *workspace,
+                                                      const code_source_snapshot_t *snapshot,
+                                                      const char *repository_key)
 {
    cJSON *req = cJSON_CreateObject();
    if (task_hint && task_hint[0])
       cJSON_AddStringToObject(req, "task_hint", task_hint);
+   if (workspace && workspace[0])
+      cJSON_AddStringToObject(req, "workspace", workspace);
+   if (snapshot && repository_key && repository_key[0])
+   {
+      cJSON_AddStringToObject(req, "repository_key", repository_key);
+      cJSON_AddStringToObject(req, "source_ref", snapshot->ref);
+      cJSON_AddStringToObject(req, "source_commit", snapshot->commit_sha);
+   }
    char *json = kb_v1_action_request("memory.assemble_context", req);
    if (!json)
       return NULL;
@@ -585,6 +685,40 @@ char *kb_client_memory_assemble_context(const char *task_hint)
       out = strdup(body->valuestring);
    cJSON_Delete(resp);
    return out;
+}
+
+char *kb_client_memory_assemble_context_ws(const char *task_hint, const char *workspace)
+{
+   return kb_client_memory_assemble_context_source(task_hint, workspace, NULL, NULL);
+}
+
+char *kb_client_memory_assemble_context_current(const char *task_hint, const char *workspace,
+                                                const char *repository_key,
+                                                const char *repository_root)
+{
+#ifdef AIMEE_POSIX
+   if (!repository_key || !repository_key[0] || !repository_root || !repository_root[0])
+      return NULL;
+   kb_client_index_scan_result_t scan;
+   if (kb_client_index_scan_current(repository_key, repository_root, 0, &scan) != 0)
+      return NULL;
+   code_source_snapshot_t snapshot;
+   if (code_resolve_current_snapshot(repository_root, &snapshot) != 0)
+      return NULL;
+   return kb_client_memory_assemble_context_source(task_hint, workspace, &snapshot,
+                                                   repository_key);
+#else
+   (void)task_hint;
+   (void)workspace;
+   (void)repository_key;
+   (void)repository_root;
+   return NULL;
+#endif
+}
+
+char *kb_client_memory_assemble_context(const char *task_hint)
+{
+   return kb_client_memory_assemble_context_ws(task_hint, NULL);
 }
 
 int kb_client_memory_compact_windows(int *summary_count, int *fact_count)
@@ -992,8 +1126,11 @@ int64_t kb_client_memory_upsert_workflow(const char *workspace, const char *sign
  * every recall consumer (the /v1 endpoint AND the primary-agent pre-turn
  * injection) shares. The per-section merge logic lives in db1/user_memory.c
  * (db1_user_memory_merge_into_array) so it is unit-testable without kb. */
-char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, int session_start,
-                                      const char *graph_code_fusion_state)
+static char *kb_client_memory_recall_json_source(const char *task_hint, int limit_tokens,
+                                                 int session_start,
+                                                 const char *graph_code_fusion_state,
+                                                 const code_source_snapshot_t *snapshot,
+                                                 const char *repository_key)
 {
    cJSON *req = cJSON_CreateObject();
    if (task_hint && task_hint[0])
@@ -1005,6 +1142,12 @@ char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, i
    cJSON_AddStringToObject(
        req, "graph_code_fusion_state",
        (graph_code_fusion_state && graph_code_fusion_state[0]) ? graph_code_fusion_state : "off");
+   if (snapshot && repository_key && repository_key[0])
+   {
+      cJSON_AddStringToObject(req, "repository_key", repository_key);
+      cJSON_AddStringToObject(req, "source_ref", snapshot->ref);
+      cJSON_AddStringToObject(req, "source_commit", snapshot->commit_sha);
+   }
    char *j = kb_v1_action_request("memory.recall", req);
    if (!j)
       return NULL;
@@ -1036,6 +1179,38 @@ char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, i
       }
    }
    return j; /* parse/merge failed: return the kb bundle verbatim */
+}
+
+char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, int session_start,
+                                      const char *graph_code_fusion_state)
+{
+   return kb_client_memory_recall_json_source(task_hint, limit_tokens, session_start,
+                                              graph_code_fusion_state, NULL, NULL);
+}
+
+char *kb_client_memory_recall_json_current(const char *task_hint, int limit_tokens,
+                                           int session_start, const char *repository_key,
+                                           const char *repository_root)
+{
+#ifdef AIMEE_POSIX
+   if (!repository_key || !repository_key[0] || !repository_root || !repository_root[0])
+      return NULL;
+   kb_client_index_scan_result_t scan;
+   if (kb_client_index_scan_current(repository_key, repository_root, 0, &scan) != 0)
+      return NULL;
+   code_source_snapshot_t snapshot;
+   if (code_resolve_current_snapshot(repository_root, &snapshot) != 0)
+      return NULL;
+   return kb_client_memory_recall_json_source(task_hint, limit_tokens, session_start, "on",
+                                              &snapshot, repository_key);
+#else
+   (void)task_hint;
+   (void)limit_tokens;
+   (void)session_start;
+   (void)repository_key;
+   (void)repository_root;
+   return NULL;
+#endif
 }
 
 char *kb_client_memory_recall_json(const char *task_hint, int limit_tokens, int session_start)
@@ -1403,8 +1578,11 @@ int kb_client_memory_search_graph_as_of(const char *query, const char *as_of, in
    return n;
 }
 
-int kb_client_memory_ask(const char *query, const char *scope_type, const char *scope_value,
-                         int limit, memory_answer_result_t *out)
+static int kb_client_memory_ask_source(const char *query, const char *scope_type,
+                                       const char *scope_value, int limit,
+                                       memory_answer_result_t *out,
+                                       const code_source_snapshot_t *snapshot,
+                                       const char *repository_key)
 {
    if (!query || !out)
       return -1;
@@ -1418,6 +1596,12 @@ int kb_client_memory_ask(const char *query, const char *scope_type, const char *
       cJSON_AddStringToObject(req, "scope_value", scope_value);
    if (limit > 0)
       cJSON_AddNumberToObject(req, "limit", limit);
+   if (snapshot && repository_key && repository_key[0])
+   {
+      cJSON_AddStringToObject(req, "repository_key", repository_key);
+      cJSON_AddStringToObject(req, "source_ref", snapshot->ref);
+      cJSON_AddStringToObject(req, "source_commit", snapshot->commit_sha);
+   }
    char *json = kb_v1_action_request("memory.ask", req);
    if (!json)
       return -1;
@@ -1550,6 +1734,40 @@ int kb_client_memory_ask(const char *query, const char *scope_type, const char *
    return 0;
 }
 
+int kb_client_memory_ask(const char *query, const char *scope_type, const char *scope_value,
+                         int limit, memory_answer_result_t *out)
+{
+   return kb_client_memory_ask_source(query, scope_type, scope_value, limit, out, NULL, NULL);
+}
+
+int kb_client_memory_ask_current(const char *query, const char *scope_type,
+                                 const char *scope_value, int limit,
+                                 memory_answer_result_t *out, const char *repository_key,
+                                 const char *repository_root)
+{
+#ifdef AIMEE_POSIX
+   if (!repository_key || !repository_key[0] || !repository_root || !repository_root[0])
+      return -1;
+   kb_client_index_scan_result_t scan;
+   if (kb_client_index_scan_current(repository_key, repository_root, 0, &scan) != 0)
+      return -1;
+   code_source_snapshot_t snapshot;
+   if (code_resolve_current_snapshot(repository_root, &snapshot) != 0)
+      return -1;
+   return kb_client_memory_ask_source(query, scope_type, scope_value, limit, out, &snapshot,
+                                      repository_key);
+#else
+   (void)query;
+   (void)scope_type;
+   (void)scope_value;
+   (void)limit;
+   (void)out;
+   (void)repository_key;
+   (void)repository_root;
+   return -1;
+#endif
+}
+
 int kb_client_memory_get_episode(const char *episode_key, memory_episode_t *out)
 {
    if (!episode_key || !out)
@@ -1636,13 +1854,21 @@ char *kb_client_memory_context_block(const char *query, const char *block_type, 
    return out;
 }
 
-char *kb_client_memory_facts(const char *query)
+static char *kb_client_memory_facts_source(const char *query,
+                                           const code_source_snapshot_t *snapshot,
+                                           const char *repository_key)
 {
    if (!query || !query[0])
       return NULL;
 
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "query", query);
+   if (snapshot && repository_key && repository_key[0])
+   {
+      cJSON_AddStringToObject(req, "repository_key", repository_key);
+      cJSON_AddStringToObject(req, "source_ref", snapshot->ref);
+      cJSON_AddStringToObject(req, "source_commit", snapshot->commit_sha);
+   }
    char *json = kb_v1_action_request("memory.facts", req);
    if (!json)
       return NULL;
@@ -1660,6 +1886,32 @@ char *kb_client_memory_facts(const char *query)
       out = strdup(facts->valuestring);
    cJSON_Delete(resp);
    return out;
+}
+
+char *kb_client_memory_facts(const char *query)
+{
+   return kb_client_memory_facts_source(query, NULL, NULL);
+}
+
+char *kb_client_memory_facts_current(const char *query, const char *repository_key,
+                                     const char *repository_root)
+{
+#ifdef AIMEE_POSIX
+   if (!repository_key || !repository_key[0] || !repository_root || !repository_root[0])
+      return NULL;
+   kb_client_index_scan_result_t scan;
+   if (kb_client_index_scan_current(repository_key, repository_root, 0, &scan) != 0)
+      return NULL;
+   code_source_snapshot_t snapshot;
+   if (code_resolve_current_snapshot(repository_root, &snapshot) != 0)
+      return NULL;
+   return kb_client_memory_facts_source(query, &snapshot, repository_key);
+#else
+   (void)query;
+   (void)repository_key;
+   (void)repository_root;
+   return NULL;
+#endif
 }
 
 int kb_client_evidence_emit_retrieval_event_ex(const char *turn_id, const char *role,

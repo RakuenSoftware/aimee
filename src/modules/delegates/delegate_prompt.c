@@ -9,6 +9,7 @@
 #include "persona.h"
 #include "role_templates.h"
 #include "util.h"
+#include "workspace.h"
 #include <sys/stat.h>
 #include <ctype.h>
 #include <unistd.h>
@@ -711,7 +712,10 @@ int delegate_check_named_file_drift(const char *const *paths, int path_count, co
             if (stem[0])
             {
                term_hit_t idx_hits[8];
-               int nhits = kb_client_index_find(stem, idx_hits, 8);
+               char repository_key[512] = "", workspace_key[512] = "";
+               workspace_repo_index_keys(wt_path, "", repository_key, sizeof(repository_key),
+                                         workspace_key, sizeof(workspace_key));
+               int nhits = kb_client_index_find_current(repository_key, wt_path, stem, idx_hits, 8);
                if (nhits > 0)
                {
                   /* Index is reachable — check if any hit lives in this path. */
@@ -1521,8 +1525,40 @@ void delegate_apply_review_evidence_guard(const char *role, const char *repo_roo
    }
 }
 
-/* Build a ## Context block by searching the code index for terms in the delegate
- * prompt.  Queries kb_client_index_code_search with the first 240 chars of the
+typedef struct
+{
+   char root[MAX_PATH_LEN];
+   char repository_key[512];
+} delegate_current_source_t;
+
+static int delegate_current_source_resolve(const char *preferred_root,
+                                           delegate_current_source_t *out)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   const char *delegate_root = getenv("AIMEE_DELEGATE_WORKTREE_ROOT");
+   if (delegate_root && !delegate_root[0])
+      delegate_root = NULL;
+   const char *candidate = delegate_root ? delegate_root : preferred_root;
+   char cwd[MAX_PATH_LEN] = "";
+   if (!candidate)
+   {
+      if (!getcwd(cwd, sizeof(cwd)))
+         return -1;
+      candidate = cwd;
+   }
+   if (workspace_active_root(NULL, candidate, out->root, sizeof(out->root)) != 0)
+      return -1;
+   char workspace_key[512] = "";
+   workspace_repo_index_keys(out->root, "", out->repository_key,
+                             sizeof(out->repository_key), workspace_key,
+                             sizeof(workspace_key));
+   return out->repository_key[0] ? 0 : -1;
+}
+
+/* Build a ## Context block by searching the current checkout's generation for terms in the delegate
+ * prompt.  Queries kb_client_index_code_search_current with the first 240 chars of the
  * prompt and formats up to 6 hits as fenced code blocks.  Returns a
  * heap-allocated string to append to the system prompt, or NULL if the kb is
  * unreachable or the query yields nothing.  Caller must free. */
@@ -1534,8 +1570,12 @@ char *delegate_inject_code_context(const char *prompt)
    char query[256];
    snprintf(query, sizeof(query), "%s", prompt);
 
+   delegate_current_source_t source;
+   if (delegate_current_source_resolve(NULL, &source) != 0)
+      return NULL;
+
    code_search_hit_t hits[6];
-   int n = kb_client_index_code_search(query, NULL, hits, 6);
+   int n = kb_client_index_code_search_current(source.repository_key, source.root, query, hits, 6);
    if (n <= 0)
       return NULL;
 
@@ -1598,31 +1638,23 @@ static void graph_ctx_append_names(char *buf, int *pos, int *rem, char names[][M
    }
 }
 
-/* Resolve an abs path to its indexed project + relpath and fetch the structural
- * blast radius (call graph + projection edges). Returns 0 with *out filled on a
- * project match + successful fetch, -1 otherwise (FAIL-OPEN). Mirrors the §7
- * advisory's guardrails_blast_radius_for_abs_path, inlined here so delegate_prompt
- * stays decoupled from the guardrails object (it already links kb_client_index). */
-static int delegate_blast_radius_for_abs_path(const char *abs_path, blast_radius_t *out)
+/* Resolve an absolute path against the exact current worktree/generation and
+ * fetch its structural blast radius. The generation is supplied by the caller;
+ * we never select the first project that happens to share the same root. */
+static int delegate_blast_radius_for_abs_path(const char *abs_path, const char *root,
+                                              const char *project, blast_radius_t *out)
 {
-   if (!abs_path || !abs_path[0] || !out)
+   if (!abs_path || !abs_path[0] || !root || !root[0] || !project || !project[0] || !out)
       return -1;
-   project_info_t projects[32];
-   int pcount = kb_client_index_list(projects, 32);
-   for (int p = 0; p < pcount; p++)
-   {
-      size_t rlen = strlen(projects[p].root);
-      if (strncmp(abs_path, projects[p].root, rlen) == 0 &&
-          (abs_path[rlen] == '/' || abs_path[rlen] == '\0'))
-      {
-         const char *rel = abs_path + rlen;
-         if (*rel == '/')
-            rel++;
-         memset(out, 0, sizeof(*out));
-         return kb_client_index_blast_radius(projects[p].name, rel, out) == 0 ? 0 : -1;
-      }
-   }
-   return -1; /* no indexed project owns this path */
+   size_t rlen = strlen(root);
+   if (strncmp(abs_path, root, rlen) != 0 ||
+       (abs_path[rlen] != '/' && abs_path[rlen] != '\0'))
+      return -1;
+   const char *rel = abs_path + rlen;
+   if (*rel == '/')
+      rel++;
+   memset(out, 0, sizeof(*out));
+   return kb_client_index_blast_radius(project, rel, out) == 0 ? 0 : -1;
 }
 
 /* §7 graph-informed delegation: prepend a structural-context block — the callers
@@ -1646,6 +1678,14 @@ char *delegate_inject_graph_context(const char *prompt, const char *cwd)
    if (np <= 0)
       return NULL;
 
+   delegate_current_source_t source;
+   if (delegate_current_source_resolve(cwd, &source) != 0)
+      return NULL;
+   kb_client_index_scan_result_t scan;
+   if (kb_client_index_scan_current(source.repository_key, source.root, 0, &scan) != 0 ||
+       !scan.physical_project[0])
+      return NULL;
+
    char buf[4096];
    int pos = 0, rem = (int)sizeof(buf);
    int w = snprintf(buf + pos, (size_t)rem,
@@ -1662,13 +1702,13 @@ char *delegate_inject_graph_context(const char *prompt, const char *cwd)
    for (int i = 0; i < np && files_emitted < 6 && rem > 96; i++)
    {
       char abs[MAX_PATH_LEN];
-      if (paths[i][0] == '/' || !cwd || !cwd[0])
+      if (paths[i][0] == '/')
          snprintf(abs, sizeof(abs), "%s", paths[i]);
       else
-         snprintf(abs, sizeof(abs), "%s/%s", cwd, paths[i]);
+         snprintf(abs, sizeof(abs), "%s/%s", source.root, paths[i]);
 
       blast_radius_t br;
-      if (delegate_blast_radius_for_abs_path(abs, &br) != 0)
+      if (delegate_blast_radius_for_abs_path(abs, source.root, scan.physical_project, &br) != 0)
          continue; /* fail-open: path not indexed / kb down */
       if (br.dependent_count <= 0 && br.dependency_count <= 0)
          continue;

@@ -1151,12 +1151,13 @@ int memory_scope_matches(int64_t memory_id, const char *scope_type, const char *
 int memory_filter_scope(memory_t *matches, int count, const char *scope_type,
                         const char *scope_value)
 {
-   if (!scope_type || !scope_type[0] || !scope_value || !scope_value[0])
-      return count;
+   int filter_scope = scope_type && scope_type[0] && scope_value && scope_value[0];
    int kept = 0;
    for (int i = 0; i < count; i++)
    {
-      if (!memory_scope_matches(matches[i].id, scope_type, scope_value))
+      if (!memory_source_context_visible(matches[i].id))
+         continue;
+      if (filter_scope && !memory_scope_matches(matches[i].id, scope_type, scope_value))
          continue;
       if (kept != i)
          matches[kept] = matches[i];

@@ -11,6 +11,7 @@
  * caller-supplied query-string value is URL-escaped (mirrors kb_client_index.c). */
 #include "kb_client.h"
 #include "kb_client_internal.h"
+#include "code_collect.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -61,6 +62,78 @@ char *kb_client_code_hybrid(const char *query, const char *symbol, const char *p
    char *json = kb_client_v1_get_json(path, KB_CLIENT_CODE_GRAPH_READ_TIMEOUT_MS, status_out);
    free(path);
    return json;
+}
+
+char *kb_client_code_hybrid_current(const char *query, const char *symbol,
+                                    const char *repository_key, const char *repository_root,
+                                    int max_results, int *status_out)
+{
+   if (status_out)
+      *status_out = -1;
+#ifdef AIMEE_POSIX
+   code_source_snapshot_t snapshot;
+   if (!query || !query[0] || !repository_key || !repository_key[0] || !repository_root ||
+       !repository_root[0] || code_resolve_current_snapshot(repository_root, &snapshot) != 0)
+      return NULL;
+   char *query_q = kb_client_query_escape(query);
+   char *symbol_q = (symbol && symbol[0]) ? kb_client_query_escape(symbol) : NULL;
+   char *repo_q = kb_client_query_escape(repository_key);
+   char *ref_q = kb_client_query_escape(snapshot.ref);
+   char *commit_q = kb_client_query_escape(snapshot.commit_sha);
+   if (!query_q || !repo_q || !ref_q || !commit_q || ((symbol && symbol[0]) && !symbol_q))
+   {
+      free(query_q);
+      free(symbol_q);
+      free(repo_q);
+      free(ref_q);
+      free(commit_q);
+      return NULL;
+   }
+   size_t cap = strlen(query_q) + (symbol_q ? strlen(symbol_q) : 0) + strlen(repo_q) +
+                strlen(ref_q) + strlen(commit_q) + 192;
+   char *path = malloc(cap);
+   if (!path)
+   {
+      free(query_q);
+      free(symbol_q);
+      free(repo_q);
+      free(ref_q);
+      free(commit_q);
+      return NULL;
+   }
+   int off = snprintf(path, cap,
+                      "/v1/code/hybrid?query=%s&max_results=%d&repository_key=%s&source_ref=%s"
+                      "&source_commit=%s",
+                      query_q, max_results > 0 ? max_results : 1, repo_q, ref_q, commit_q);
+   if (symbol_q)
+      snprintf(path + off, cap - (size_t)off, "&symbol=%s", symbol_q);
+   free(query_q);
+   free(symbol_q);
+   free(repo_q);
+   free(ref_q);
+   free(commit_q);
+   int status = -1;
+   char *json = kb_client_v1_get_json(path, KB_CLIENT_CODE_GRAPH_READ_TIMEOUT_MS, &status);
+   if (status == 409)
+   {
+      free(json);
+      json = NULL;
+      kb_client_index_scan_result_t scan;
+      if (kb_client_index_scan_current(repository_key, repository_root, 0, &scan) == 0)
+         json = kb_client_v1_get_json(path, KB_CLIENT_CODE_GRAPH_READ_TIMEOUT_MS, &status);
+   }
+   if (status_out)
+      *status_out = status;
+   free(path);
+   return json;
+#else
+   (void)query;
+   (void)symbol;
+   (void)repository_key;
+   (void)repository_root;
+   (void)max_results;
+   return NULL;
+#endif
 }
 
 char *kb_client_code_graph_hubs(const char *project, int max_results, int *status_out)

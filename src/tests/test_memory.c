@@ -1127,6 +1127,29 @@ static void test_context_budget_prefers_project_scope_over_global_l5(void)
    else
       assert(platform_unsetenv("HOME") == 0);
 }
+
+static void test_memory_source_context_visibility(void)
+{
+   setup();
+   memory_t general, derived;
+   assert(memory_insert(TIER_L2, KIND_FACT, "general fact", "shared across branches", 0.9,
+                        "s1", &general) == 0);
+   assert(memory_insert(TIER_L2, KIND_FACT, "derived fact", "only on feature branch", 0.9,
+                        "s1", &derived) == 0);
+   const char *commit = "1111111111111111111111111111111111111111";
+   assert(memory_source_context_link(derived.id, "repo-one", "feature/kb", commit, 77,
+                                     "code_derived") == 0);
+
+   memory_source_context_clear();
+   assert(memory_source_context_visible(general.id) == 1);
+   assert(memory_source_context_visible(derived.id) == 0);
+   memory_source_context_set("repo-one", "feature/kb", "stale", 77);
+   assert(memory_source_context_visible(derived.id) == 0);
+   memory_source_context_set("repo-one", "feature/kb", commit, 77);
+   assert(memory_source_context_visible(derived.id) == 1);
+   memory_source_context_clear();
+   teardown();
+}
 static void test_memory_answer_query_adds_citations_when_enabled(void)
 {
    assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
@@ -2415,6 +2438,7 @@ int main(void)
    test_code_identifier_retrieval_handles_snake_and_camel();
    test_context_budget_prefers_project_l4_rule_over_long_global_l1();
    test_context_budget_prefers_project_scope_over_global_l5();
+   test_memory_source_context_visibility();
    test_rebuild_derived_indexes_populates_searchable_structures();
    test_rebuild_derived_indexes_assigns_memory_unit_kinds();
    test_memory_diagnose_reports_score_breakdown();

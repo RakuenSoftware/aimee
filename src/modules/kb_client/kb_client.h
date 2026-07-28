@@ -569,6 +569,9 @@ char *kb_client_memory_recall_json(const char *task_hint, int limit_tokens, int 
  * this _ex form lets the eval/benchmark harness force a different state. */
 char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, int session_start,
                                       const char *graph_code_fusion_state);
+char *kb_client_memory_recall_json_current(const char *task_hint, int limit_tokens,
+                                           int session_start, const char *repository_key,
+                                           const char *repository_root);
 
 /* Upsert a workflow:<workspace>:<signal_type> memory via aimee-kb.
  * Returns the new memory id (>0) or -1 on failure / kb unreachable.
@@ -658,6 +661,12 @@ int kb_client_memory_compact_windows(int *summary_count, int *fact_count);
  * markdown string (caller frees) or NULL on failure / kb unreachable.
  * Mirrors memory_assemble_context(). */
 char *kb_client_memory_assemble_context(const char *task_hint);
+/* Workspace-aware assembly keeps repository/project memory aligned with the
+ * active checkout while retaining global/general memories. */
+char *kb_client_memory_assemble_context_ws(const char *task_hint, const char *workspace);
+char *kb_client_memory_assemble_context_current(const char *task_hint, const char *workspace,
+                                                const char *repository_key,
+                                                const char *repository_root);
 
 /* Search conversation windows via aimee-kb.  Returns row count.
  * Mirrors memory_search(). */
@@ -676,6 +685,13 @@ int kb_client_memory_find_facts_scoped(const char *query, const char *scope_type
 int kb_client_memory_find_facts_scoped_ex(const char *query, const char *scope_type,
                                           const char *scope_value, int limit, memory_t *out,
                                           int max, const char *graph_code_fusion_state);
+/* Current-checkout variant: atomically ensures the attached ref is published,
+ * then applies its exact ref/commit/generation fence in addition to any memory
+ * workspace/project scope. */
+int kb_client_memory_find_facts_current(const char *query, const char *scope_type,
+                                        const char *scope_value, int limit, memory_t *out, int max,
+                                        const char *repository_key,
+                                        const char *repository_root);
 
 /* Export memories / decisions to a JSONL file via aimee-kb.  Returns
  * row count or -1.  Mirrors the wholesale-export flow used by
@@ -720,6 +736,9 @@ int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t 
 int kb_client_memory_diagnose_scoped(const char *query, const char *scope_type,
                                      const char *scope_value, int limit, memory_diagnostic_t *out,
                                      int max);
+int kb_client_memory_diagnose_current(const char *query, int limit, memory_diagnostic_t *out,
+                                      int max, const char *repository_key,
+                                      const char *repository_root);
 
 /* Explain how a specific memory matches a query via aimee-kb.
  * Returns 0 / -1.  Mirrors memory_explain_match(). */
@@ -825,6 +844,8 @@ char *kb_client_memory_context_block(const char *query, const char *block_type, 
  * unreachable or there are no facts. Cheaper than context_block (no memory
  * assembly); used by ingress_preinject to auto-inject known facts. */
 char *kb_client_memory_facts(const char *query);
+char *kb_client_memory_facts_current(const char *query, const char *repository_key,
+                                     const char *repository_root);
 
 /* Auditable-correctness P1: ask the KB to record a single per-turn
  * retrieval_event keyed by `turn_id` (a UUID), listing the int64 memory row ids
@@ -910,6 +931,10 @@ int kb_client_memory_get_episode(const char *episode_key, memory_episode_t *out)
  * memory_ask_query(). */
 int kb_client_memory_ask(const char *query, const char *scope_type, const char *scope_value,
                          int limit, memory_answer_result_t *out);
+int kb_client_memory_ask_current(const char *query, const char *scope_type,
+                                 const char *scope_value, int limit,
+                                 memory_answer_result_t *out, const char *repository_key,
+                                 const char *repository_root);
 
 /* Fetch learning proposals via the aimee-kb sidecar.  Sends
  * `learning.list_proposals` with {state, sink, limit} and returns the
@@ -1048,6 +1073,16 @@ typedef struct
    long retry_after;  /* seconds until cooldown ends (0 when not in cooldown) */
    char reason[32];   /* "busy" | "cooldown" | "no_kb" | "error" | "" */
    char message[256]; /* human-readable detail; populated when reason == "error" */
+   int64_t generation_id;
+   int model_subjects;
+   int reused_snapshot;
+   int already_current;
+   char repository_key[512];
+   char source_ref[1024];
+   char commit_sha[65];
+   char tree_sha[65];
+   char generation_state[32];
+   char physical_project[128];
 } kb_client_index_scan_result_t;
 
 /* Request a scan of one project, or all configured workspaces if both
@@ -1057,6 +1092,25 @@ typedef struct
  * = "error", out->message holds the kb-supplied detail). */
 int kb_client_index_scan(const char *name, const char *root, int force,
                          kb_client_index_scan_result_t *out);
+
+/* Index one explicit committed branch/ref. source_ref NULL/empty selects the
+ * repository default. Git sources use generation-safe begin/append/finish and
+ * read the exact commit without checkout; an invalid explicit ref fails closed. */
+int kb_client_index_scan_ref(const char *name, const char *root, const char *source_ref,
+                             int force, kb_client_index_scan_result_t *out);
+
+/* Publish the branch currently checked out at root. Unlike a lifecycle sweep,
+ * this never retires the ref merely because its present tip is reachable from
+ * default: an actively checked-out branch remains a valid retrieval context. */
+int kb_client_index_scan_current(const char *name, const char *root, int force,
+                                 kb_client_index_scan_result_t *out);
+
+/* Retire a known merged/deleted ref. Retrieval detaches immediately; physical
+ * generation data is collected asynchronously after the repository grace.
+ * grace_seconds=-1 selects the server policy. */
+int kb_client_index_retire_ref(const char *repository_key, const char *source_ref,
+                               const char *reason, int grace_seconds,
+                               kb_client_index_scan_result_t *out);
 
 /* Push a set of caller-supplied source files to aimee-kb for indexing,
  * bypassing server-side filesystem enumeration. `files_arr_v` is a cJSON array
@@ -1086,6 +1140,19 @@ void *kb_client_index_scan_format_response(int kb_rc, const kb_client_index_scan
 /* Find an identifier in the canonical index. Returns count of hits
  * written into `out` (capped at `max`), or 0 if kb is unreachable. */
 int kb_client_index_find(const char *identifier, term_hit_t *out, int max);
+
+/* Find inside one ref's currently published immutable generation. The commit
+ * is an optimistic freshness fence: -2 means the ref is absent/stale and -1
+ * means the service is unavailable; neither may fall back to another branch. */
+int kb_client_index_find_ref(const char *repository_key, const char *source_ref,
+                             const char *source_commit, const char *identifier,
+                             term_hit_t *out, int max);
+
+/* Resolve symbolic HEAD at root and query that exact branch+commit. If the
+ * generation is stale, publish it once and retry. Worktree edits remain the
+ * responsibility of the higher-authority branch overlay/source packet. */
+int kb_client_index_find_current(const char *repository_key, const char *root,
+                                 const char *identifier, term_hit_t *out, int max);
 
 /* List indexed projects. Returns count on success (0 = empty index),
  * or -1 if the knowledge service is unreachable. */
@@ -1142,6 +1209,11 @@ char *kb_client_repo_trust_json(const char *project, const char *trust, const ch
  * Mirrors index_code_search(). */
 int kb_client_index_code_search(const char *query, const char *project, code_search_hit_t *out,
                                 int max);
+int kb_client_index_code_search_ref(const char *repository_key, const char *source_ref,
+                                    const char *source_commit, const char *query,
+                                    code_search_hit_t *out, int max);
+int kb_client_index_code_search_current(const char *repository_key, const char *root,
+                                        const char *query, code_search_hit_t *out, int max);
 
 /* Structured-PDF evidence routes (/v1/pdf/...). Each returns the route's verbatim
  * citation JSON as a malloc'd string the caller frees, or NULL on a
@@ -1175,6 +1247,9 @@ char *kb_client_pdf_open_asset(const char *project, long long asset_id, int *sta
  * most-connected symbols (project required). */
 char *kb_client_code_hybrid(const char *query, const char *symbol, const char *project,
                             int max_results, int *status_out);
+char *kb_client_code_hybrid_current(const char *query, const char *symbol,
+                                    const char *repository_key, const char *repository_root,
+                                    int max_results, int *status_out);
 char *kb_client_code_graph_hubs(const char *project, int max_results, int *status_out);
 char *kb_client_code_graph_audit(const char *project, int max_findings, int *status_out);
 char *kb_client_code_lessons(const char *project, int *status_out);

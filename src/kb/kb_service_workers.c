@@ -24,6 +24,7 @@
 #include "db2/kb_service_backend.h"
 #include "db2/kb_maintenance.h"
 #include "kb_blob_reconcile.h"
+#include "kb_source_prune.h"
 #include "db2/kb_runtime_state.h"
 #include "log.h"
 #include "cJSON.h"
@@ -73,6 +74,7 @@ static void *kb_maintenance_timer_thread(void *arg)
       interval_secs = 86400;
 
    long elapsed = 0;
+   long source_prune_elapsed = 0;
    while (!g_maintenance_stop)
    {
       /* Drop any pool connection held from the last maintenance run so this
@@ -80,6 +82,17 @@ static void *kb_maintenance_timer_thread(void *arg)
       db2_lease_release_idle();
       sleep(1);
       elapsed++;
+      source_prune_elapsed++;
+      /* Ref retirement is a retrieval/lifecycle invariant, not optional memory
+       * maintenance. Run a small bounded sweep every minute; per-generation
+       * prune_after supplies the configurable retention grace. */
+      if (source_prune_elapsed >= 60)
+      {
+         source_prune_elapsed = 0;
+         int pruned = kb_source_prune_sweep(8);
+         if (pruned < 0)
+            aimee_log(LOG_WARN, "kb.source_prune", "scheduled source-generation sweep failed");
+      }
       if (elapsed < interval_secs)
          continue;
       elapsed = 0;

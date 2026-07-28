@@ -569,12 +569,13 @@ cJSON *db2_kb_service_memory_search_json(const cJSON *clusters_arr, int limit)
    return resp;
 }
 
-cJSON *db2_kb_service_memory_assemble_context_json(const char *task_hint)
+cJSON *db2_kb_service_memory_assemble_context_json(const char *task_hint, const char *workspace)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
-   char *body = memory_assemble_context(task_hint);
+   char *body = workspace && workspace[0] ? memory_assemble_context_ws(task_hint, workspace)
+                                          : memory_assemble_context(task_hint);
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddStringToObject(resp, "context", body ? body : "");
    free(body);

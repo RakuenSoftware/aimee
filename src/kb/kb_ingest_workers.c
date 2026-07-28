@@ -32,6 +32,7 @@
 #include "db2/db_postgres.h"
 #include "db2/lifecycle.h"
 #include "db2/pgvec_kb_service.h"
+#include "kb_blob_store.h"
 #include "kb_doc_hash.h"
 #include "memory.h"
 
@@ -542,9 +543,30 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
    char hash[KB_DOC_HASH_HEX_LEN + 1];
    kb_doc_content_hash_for_path(source_path, content, (int)len, hash);
 
+   /* The exact source bytes are primary evidence. Make them durable and
+    * register an immutable version before considering chunk replacement. The
+    * chunk/extraction hash above may intentionally ignore selected Markdown
+    * frontmatter, so it must never stand in for this exact hash. */
+   char original_sha[KB_DOC_HASH_HEX_LEN + 1] = "";
+   if (kb_blob_store_put(content, len, original_sha, sizeof(original_sha)) != 0)
+      return -1;
+   if (kb_purge_fenced_txn_begin(project) != 1)
+      return -1;
+   int64_t original_version_id = db2_kb_original_version_ensure(
+       project, source_path, "file", original_sha, (int64_t)len, "text/plain", original_sha,
+       original_sha);
+   if (original_version_id <= 0)
+   {
+      db2_kb_txn_rollback();
+      return -1;
+   }
+   if (kb_purge_fenced_txn_commit() != 0)
+      return -1;
+
    char stored[KB_DOC_HASH_HEX_LEN + 1] = "";
-   if (db2_kb_documents_get_stored_hash(project, source_path, stored, sizeof(stored)) == 1 &&
-       strcmp(stored, hash) == 0)
+   if (db2_kb_documents_get_stored_hash(project, source_path, stored, sizeof(stored)) == 0 &&
+       strcmp(stored, hash) == 0 &&
+       db2_kb_documents_get_original_version(project, source_path) == original_version_id)
       return 0; /* unchanged — already ingested */
 
    if (delete_file_chunks(project, source_path) != 0)
@@ -576,15 +598,33 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
       return -1; /* purge fence: drop this document */
    }
    int64_t prev_doc_id = 0;
+   int insert_ok = 1;
    for (int ci = 0; ci < n_chunks; ci++)
    {
-      doc_ids[ci] = db2_kb_documents_insert_chunk(
+      char chunk_sha[KB_DOC_HASH_HEX_LEN + 1];
+      kb_doc_content_hash(chunks[ci].content, (int)strlen(chunks[ci].content), chunk_sha);
+      char anchors[160];
+      snprintf(anchors, sizeof(anchors),
+               "[{\"kind\":\"line_range\",\"line_start\":%d,\"line_end\":%d}]",
+               chunks[ci].line_start, chunks[ci].line_end);
+      doc_ids[ci] = db2_kb_documents_insert_chunk_evidence(
           project, source_path, hash, ci, chunks[ci].heading_path, chunks[ci].line_start,
-          chunks[ci].line_end, chunks[ci].content, chunks[ci].token_count);
+          chunks[ci].line_end, chunks[ci].content, chunks[ci].token_count, original_version_id,
+          "source-text", "aimee-heading-v1", chunk_sha, anchors, 0);
       if (doc_ids[ci] < 0)
-         continue;
+      {
+         insert_ok = 0;
+         break;
+      }
       db2_kb_documents_link_neighbours(doc_ids[ci], prev_doc_id);
       prev_doc_id = doc_ids[ci];
+   }
+   if (!insert_ok)
+   {
+      db2_kb_txn_rollback();
+      free(doc_ids);
+      free(chunks);
+      return -1;
    }
    if (kb_purge_fenced_txn_commit() != 0)
    {

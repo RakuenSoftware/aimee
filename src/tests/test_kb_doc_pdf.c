@@ -11,6 +11,7 @@
 #include "aimee.h"
 #include "db2.h"
 #include "db2_test_shim.h"
+#include "../db2/artifacts.h"
 #include "../db2/db_postgres.h"
 #include "../db2/kb_payload.h"
 #include "kb_blob_reconcile.h"
@@ -179,6 +180,68 @@ static int count_rows(const char *sql)
       n = (int)aimee_pg_column_int64(st, 0);
    aimee_pg_finalize(st);
    return n;
+}
+
+static void assert_version_state(int64_t version_id, const char *expected)
+{
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(), "SELECT state FROM kb_document_version_lifecycle WHERE version_id=?1", err,
+       sizeof(err));
+   assert(st);
+   aimee_pg_bind_int64(st, "?1", version_id);
+   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
+   assert(strcmp(aimee_pg_column_text(st, 0), expected) == 0);
+   aimee_pg_finalize(st);
+}
+
+static void test_pdf_version_supersession(void)
+{
+   db2_test_shim_open();
+   char sha1[65], sha2[65];
+   memset(sha1, '1', 64);
+   memset(sha2, '2', 64);
+   sha1[64] = sha2[64] = '\0';
+   int64_t v1 = db2_kb_original_version_ensure("proj", "manual.pdf", "pdf", sha1, 100,
+                                               "application/pdf", sha1, "rev1");
+   assert(v1 > 0);
+   assert(db2_kb_original_version_current("proj", "manual.pdf") == 0);
+   kb_pdf_ingest_stats_t stats;
+   assert(kb_doc_pdf_ingest_xhtml_version("proj", "manual.pdf", "hash1", FIXTURE_2PAGE,
+                                          "internal", v1, &stats) == 2);
+   assert(db2_kb_original_version_current("proj", "manual.pdf") == v1);
+   assert_version_state(v1, "current");
+   assert(count_rows("SELECT COUNT(*) FROM kb_documents WHERE document_version_id IS NOT NULL") ==
+          2);
+   assert(count_rows("SELECT COUNT(*) FROM kb_documents WHERE source_anchors <> '[]'") == 2);
+   assert(count_rows("SELECT COUNT(*) FROM kb_evidence_lineage WHERE subject_kind='kb_chunk'") ==
+          2);
+
+   int64_t v2 = db2_kb_original_version_ensure("proj", "manual.pdf", "pdf", sha2, 120,
+                                               "application/pdf", sha2, "rev2");
+   assert(v2 > 0 && v2 != v1);
+   assert_version_state(v2, "captured");
+   /* A broken/empty derivation does not displace the last complete version. */
+   assert(kb_doc_pdf_ingest_xhtml_version("proj", "manual.pdf", "hash2", "<doc></doc>",
+                                          "internal", v2, &stats) == 0);
+   assert(db2_kb_original_version_current("proj", "manual.pdf") == v1);
+   assert_version_state(v1, "current");
+   assert_version_state(v2, "captured");
+
+   assert(kb_doc_pdf_ingest_xhtml_version("proj", "manual.pdf", "hash2", FIXTURE_2PAGE,
+                                          "internal", v2, &stats) == 2);
+   assert(db2_kb_original_version_current("proj", "manual.pdf") == v2);
+   assert_version_state(v1, "superseded");
+   assert_version_state(v2, "current");
+   assert(count_rows("SELECT COUNT(*) FROM kb_documents d JOIN kb_document_heads h"
+                     " ON h.active_version_id=d.document_version_id") == 2);
+   /* Superseded chunk/embedding lineage is removed with its derived index;
+    * immutable v1 primary evidence remains available for history. */
+   assert(count_rows("SELECT COUNT(*) FROM kb_original_versions") == 2);
+   assert(count_rows("SELECT COUNT(*) FROM kb_evidence_lineage WHERE subject_kind='kb_chunk'") ==
+          2);
+   db2_test_shim_close();
+   PASS("pdf_version_supersession");
 }
 
 static void test_ingest_shim(void)
@@ -779,6 +842,25 @@ static void test_blob_store(void)
    assert(kb_blob_store_put(data, strlen(data), sha2, sizeof(sha2)) == 0);
    assert(strcmp(sha, sha2) == 0);
 
+   /* The streaming path must produce the same content identity without a
+    * whole-file allocation, and expose the captured bytes for derivation. */
+   char input_path[1024];
+   snprintf(input_path, sizeof(input_path), "%s/original.txt", home);
+   FILE *input = fopen(input_path, "wb");
+   assert(input);
+   assert(fwrite(data, 1, strlen(data), input) == strlen(data));
+   assert(fclose(input) == 0);
+   long long streamed_bytes = -1;
+   char stream_sha[KB_DOC_HASH_HEX_LEN + 1] = "";
+   assert(kb_blob_store_put_file(input_path, stream_sha, sizeof(stream_sha), &streamed_bytes) == 0);
+   assert(strcmp(stream_sha, sha) == 0 && streamed_bytes == (long long)strlen(data));
+   int blob_fd = kb_blob_store_open_readonly(stream_sha);
+   assert(blob_fd >= 0);
+   char streamed[64] = "";
+   assert(read(blob_fd, streamed, sizeof(streamed)) == (ssize_t)strlen(data));
+   close(blob_fd);
+   assert(memcmp(streamed, data, strlen(data)) == 0);
+
    void *out = NULL;
    size_t n = 0;
    assert(kb_blob_store_read(sha, &out, &n) == 0);
@@ -816,6 +898,40 @@ static void test_pdf_assets_and_recon(void)
    db2_test_shim_open();
    kb_pdf_ingest_stats_t stats;
    assert(kb_doc_pdf_ingest_xhtml("proj", "vis.pdf", "h1", FIXTURE_2PAGE, "internal", &stats) == 2);
+
+   /* Primary originals are independent blob referrers. Chunks point to the
+    * immutable version and may later be replaced without reconstructing it. */
+   const char *original = "full exact source\nwith all evidence\n";
+   char original_sha[KB_DOC_HASH_HEX_LEN + 1] = "";
+   assert(kb_blob_store_put(original, strlen(original), original_sha, sizeof(original_sha)) == 0);
+   int64_t original_version = db2_kb_original_version_ensure(
+       "proj", "docs/original.txt", "file", original_sha, (int64_t)strlen(original), "text/plain",
+       original_sha, "commit:abc");
+   assert(original_version > 0);
+   assert(db2_kb_original_version_ensure("proj", "docs/original.txt", "file", original_sha,
+                                         (int64_t)strlen(original), "text/plain", original_sha,
+                                         "commit:abc") == original_version);
+   int64_t evidence_chunk = db2_kb_documents_insert_chunk_evidence(
+       "proj", "docs/original.txt", "semantic-hash", 0, "", 1, 2, "derived chunk", 3,
+       original_version, "source-text", "test-v1", original_sha,
+       "[{\"kind\":\"line_range\",\"line_start\":1,\"line_end\":2}]", 0);
+   assert(evidence_chunk > 0);
+   assert(db2_kb_documents_get_original_version("proj", "docs/original.txt") == original_version);
+   char chunk_id_text[32];
+   snprintf(chunk_id_text, sizeof(chunk_id_text), "%lld", (long long)evidence_chunk);
+   assert(db2_kb_evidence_lineage_exists("kb_chunk", chunk_id_text, "secondary",
+                                         original_version) == 1);
+
+   char artifact_id[37];
+   db2_artifact_gen_id(artifact_id, sizeof(artifact_id));
+   assert(db2_artifact_write(artifact_id, "summary", "proposed", "project", "proj", "test",
+                             0.9, "{\"summary\":\"derived interpretation\"}") == 0);
+   assert(db2_artifact_cite_evidence(
+              artifact_id, "kb_document", chunk_id_text, 1, 2, original_version, evidence_chunk,
+              "[{\"kind\":\"line_range\",\"line_start\":1,\"line_end\":2}]") == 0);
+   assert(db2_kb_evidence_lineage_exists("artifact", artifact_id, "tertiary",
+                                         original_version) == 1);
+   assert(db2_kb_blob_ref_referenced(original_sha) == 1);
 
    /* Store a crop blob + an asset row pointing at it (simulating a render). */
    const char *crop = "fake-png-bytes-AAAA";
@@ -871,7 +987,7 @@ static void test_pdf_assets_and_recon(void)
    assert(kb_blob_store_put("orphan-bytes", 12, orphan_sha, sizeof(orphan_sha)) == 0);
    int before = 0;
    kb_blob_store_foreach(count_visit, &before);
-   assert(before == 3); /* vis crop, secret crop, orphan */
+   assert(before == 4); /* primary original, vis crop, secret crop, orphan */
    kb_blob_recon_stats_t rst;
    assert(kb_blob_reconcile_run(0, 0, &rst) == 0);
    assert(rst.orphans_unlinked == 1);             /* only the unreferenced orphan */
@@ -884,6 +1000,7 @@ static void test_pdf_assets_and_recon(void)
    assert(db2_kb_doc_assets_list("proj", "vis.pdf", assets, 8) == 0); /* asset rows gone */
    assert(kb_blob_reconcile_run(0, 0, &rst) == 0);
    assert(kb_blob_store_exists(sha) == 0); /* now-unreferenced crop reclaimed */
+   assert(kb_blob_store_exists(original_sha) == 1); /* immutable primary evidence survives */
 
    /* render_assets degrades safely on non-PDF bytes (no pdftoppm crash, 0 assets). */
    assert(kb_doc_pdf_render_assets("proj", "vis.pdf", "internal",
@@ -984,6 +1101,7 @@ int main(void)
    test_chunk_line_cap();
    test_degraded_no_line_tags();
    test_ingest_shim();
+   test_pdf_version_supersession();
    test_search_chunks_shim();
    test_pdf_quarantine_admin();
    test_pdf_evidence_tools();

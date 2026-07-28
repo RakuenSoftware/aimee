@@ -11,6 +11,8 @@
 
 #include "cmd_agent_delegate_impl.h"
 #include "index.h"
+#include "kb_client.h"
+#include "workspace.h"
 
 /* ── stub: kb_client_index_code_search ──────────────────────────────────── */
 
@@ -26,6 +28,44 @@ int kb_client_index_code_search(const char *query, const char *project, code_sea
    for (int i = 0; i < n; i++)
       out[i] = g_stub_hits[i];
    return n;
+}
+
+int kb_client_index_code_search_current(const char *repository_key, const char *root,
+                                        const char *query, code_search_hit_t *out, int max)
+{
+   (void)repository_key;
+   (void)root;
+   return kb_client_index_code_search(query, NULL, out, max);
+}
+
+int kb_client_index_scan_current(const char *name, const char *root, int force,
+                                 kb_client_index_scan_result_t *out)
+{
+   (void)name;
+   (void)root;
+   (void)force;
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   snprintf(out->physical_project, sizeof(out->physical_project), "generation:1:3");
+   return 0;
+}
+
+int workspace_active_root(const config_t *cfg, const char *cwd, char *out, size_t out_len)
+{
+   (void)cfg;
+   (void)cwd;
+   snprintf(out, out_len, "/repo");
+   return 0;
+}
+
+void workspace_repo_index_keys(const char *root, const char *fallback_workspace, char *name_out,
+                               size_t name_len, char *ws_out, size_t ws_len)
+{
+   (void)root;
+   (void)fallback_workspace;
+   snprintf(name_out, name_len, "repo-key");
+   snprintf(ws_out, ws_len, "repo-key");
 }
 
 static void stub_hits_reset(void)

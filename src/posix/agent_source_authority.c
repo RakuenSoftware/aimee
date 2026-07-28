@@ -2,6 +2,7 @@
 #include "agent_tools.h"
 #include "agent_source_authority.h"
 #include "kb_client.h"
+#include "workspace.h"
 #include "platform_process.h"
 #include "util.h"
 #include "cJSON.h"
@@ -88,6 +89,21 @@ static const char *source_authority_root(void)
       return tl_sa_root[0] ? tl_sa_root : NULL;
    const char *root = getenv("AIMEE_DELEGATE_WORKTREE_ROOT");
    return root && root[0] ? root : NULL;
+}
+
+static int source_authority_index_find_current(const char *identifier, term_hit_t *out, int max)
+{
+   const char *root = source_authority_root();
+   char cwd[MAX_PATH_LEN];
+   if ((!root || !root[0]) && getcwd(cwd, sizeof(cwd)))
+      root = cwd;
+   if (!root || !root[0])
+      return 0;
+   char repository_key[512] = "", workspace_key[512] = "";
+   workspace_repo_index_keys(root, "", repository_key, sizeof(repository_key), workspace_key,
+                             sizeof(workspace_key));
+   int n = kb_client_index_find_current(repository_key, root, identifier, out, max);
+   return n > 0 ? n : 0;
 }
 
 /* Newline-joined source paths for the current delegate (TLS), or the env
@@ -329,7 +345,7 @@ char *tool_find_symbol(const char *identifier)
       return safe_strdup("error: missing identifier");
 
    term_hit_t hits[20];
-   int count = kb_client_index_find(identifier, hits, 20);
+   int count = source_authority_index_find_current(identifier, hits, 20);
    char buf[8192];
    int pos = 0;
 

@@ -89,6 +89,15 @@ extern "C"
     * Returns 0 on success, -1 on error.  Duplicate is silently ignored. */
    int db2_artifact_cite(const char *artifact_id, const char *source_kind, const char *source_id);
 
+   /* Evidence-hierarchy citation for a tertiary artifact. It records both the
+    * secondary source object and its exact immutable primary version/anchors;
+    * the database then materializes the tertiary lineage path. */
+   int db2_artifact_cite_evidence(const char *artifact_id, const char *source_kind,
+                                  const char *source_id, int span_start, int span_end,
+                                  int64_t source_document_version_id,
+                                  int64_t source_chunk_id,
+                                  const char *source_anchors_json);
+
    /* Add a directed link between two artifacts.
     * kind is one of: supersedes, supports, contradicts, implements,
     *                 resolved_by, mentions, corrects.

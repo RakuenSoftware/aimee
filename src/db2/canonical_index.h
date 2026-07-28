@@ -55,6 +55,10 @@ extern "C"
    /* Find an identifier across all projects. Returns count, or -1 on error. */
    int canonical_index_find(const char *identifier, term_hit_t *out, int max);
 
+   /* Identifier lookup constrained before LIMIT to one physical project. */
+   int canonical_index_find_project(const char *identifier, const char *project,
+                                    term_hit_t *out, int max);
+
    /* Compute blast radius for a file. Returns 0 on success, -1 on error. */
    int canonical_index_blast_radius(const char *project, const char *file_path,
                                     blast_radius_t *out);
