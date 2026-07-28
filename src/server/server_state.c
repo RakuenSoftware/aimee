@@ -32,6 +32,7 @@
 #include "agent_config.h"   /* agent_load_config / agent_find */
 #include "hardware_probe.h" /* hardware_probe_list_local/remote — host GPU inventory */
 #include <errno.h>
+#include <math.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -188,16 +189,18 @@ int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
-/* Remove one memory by id.
- *
- * The knowledge tier has always been able to do this: kb_service.c dispatches
- * "memory.delete" to a handler that calls memory_delete(). Nothing above it ever
- * exposed the capability, so the store was effectively write-once from every
- * interface a user has — a memory stored by mistake (a secret, a typo, a test
- * fixture written against a live deployment) could not be taken back.
- *
- * Gated on CAP_MEMORY_WRITE, so it follows the same write-tier grant rules as
- * memory.store rather than inventing its own. */
+/* cJSON stores numbers as doubles. Reject fractional and unrepresentable IDs
+ * instead of truncating them into a different memory's integer primary key. */
+static int memory_request_positive_id(cJSON *req, const char *field, int64_t *out)
+{
+   cJSON *item = cJSON_GetObjectItemCaseSensitive(req, field);
+   if (!cJSON_IsNumber(item) || !isfinite(item->valuedouble) || item->valuedouble <= 0.0 ||
+       item->valuedouble > 9007199254740991.0 || floor(item->valuedouble) != item->valuedouble)
+      return -1;
+   *out = (int64_t)item->valuedouble;
+   return 0;
+}
+
 /* Replace a memory with a corrected one, linking the two.
  *
  * This is the operation that should be reached for far more often than
@@ -218,9 +221,9 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
 
-   cJSON *jold = cJSON_GetObjectItemCaseSensitive(req, "old_id");
+   int64_t old_id = 0;
    cJSON *jnew = cJSON_GetObjectItemCaseSensitive(req, "new_content");
-   if (!cJSON_IsNumber(jold) || jold->valuedouble <= 0)
+   if (memory_request_positive_id(req, "old_id", &old_id) != 0)
       return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
                                     "memory.supersede requires a positive integer old_id", NULL);
    if (!cJSON_IsString(jnew) || !jnew->valuestring[0])
@@ -228,13 +231,19 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                                     "memory.supersede requires non-empty new_content", NULL);
 
    cJSON *jconf = cJSON_GetObjectItemCaseSensitive(req, "confidence");
+   if (jconf && (!cJSON_IsNumber(jconf) || !isfinite(jconf->valuedouble) ||
+                 jconf->valuedouble < 0.0 || jconf->valuedouble > 1.0))
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.supersede confidence must be between 0 and 1", NULL);
    double conf = cJSON_IsNumber(jconf) ? jconf->valuedouble : 1.0;
    cJSON *jsid = cJSON_GetObjectItemCaseSensitive(req, "session_id");
+   if (jsid && !cJSON_IsString(jsid))
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.supersede session_id must be a string", NULL);
    const char *sid = cJSON_IsString(jsid) ? jsid->valuestring : "";
 
    memory_t mem;
-   if (kb_client_memory_supersede((int64_t)jold->valuedouble, jnew->valuestring, conf, sid, &mem) !=
-       0)
+   if (kb_client_memory_supersede(old_id, jnew->valuestring, conf, sid, &mem) != 0)
       return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND,
                                     "no such memory, or the knowledge service refused", NULL);
 
@@ -255,16 +264,25 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
+/* Remove one memory by id.
+ *
+ * The knowledge tier has always been able to do this: kb_service.c dispatches
+ * "memory.delete" to a handler that calls memory_delete(). Nothing above it ever
+ * exposed the capability, so the store was effectively write-once from every
+ * interface a user has — a memory stored by mistake (a secret, a typo, a test
+ * fixture written against a live deployment) could not be taken back.
+ *
+ * Gated on CAP_MEMORY_WRITE, so it follows the same write-tier grant rules as
+ * memory.store rather than inventing its own. */
 int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
 
-   cJSON *jid = cJSON_GetObjectItemCaseSensitive(req, "id");
-   if (!cJSON_IsNumber(jid) || jid->valuedouble <= 0)
+   int64_t id = 0;
+   if (memory_request_positive_id(req, "id", &id) != 0)
       return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
                                     "memory.delete requires a positive integer id", NULL);
 
-   int64_t id = (int64_t)jid->valuedouble;
    if (kb_client_memory_delete(id) != 0)
       return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND,
                                     "no such memory, or the knowledge service refused", NULL);
