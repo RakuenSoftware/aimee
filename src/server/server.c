@@ -1458,6 +1458,8 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"memory.list", handle_memory_list},
     {"memory.stats", handle_memory_stats},
     {"memory.get", handle_memory_get},
+    {"memory.delete", handle_memory_delete},
+    {"memory.supersede", handle_memory_supersede},
     {"memory.read", handle_memory_read},
     {"memory.benchmark", handle_memory_benchmark},
     {"index.scan", handle_index_scan},
