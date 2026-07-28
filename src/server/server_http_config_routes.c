@@ -307,11 +307,10 @@ int route_role_template_remove(const char *name, char *resp, int cap)
 /* The current active-preset name (config.roundtable_default), or "" if none. */
 static void rt_active_name(char *out, size_t out_n)
 {
-   config_t cfg;
    if (out && out_n)
       out[0] = '\0';
-   if (config_load(&cfg) == 0 && out && out_n)
-      snprintf(out, out_n, "%s", cfg.roundtable_default);
+   if (out && out_n)
+      snprintf(out, out_n, "%s", config_roundtable_default());
 }
 
 int route_roundtables_list(char *resp, int cap)
@@ -951,8 +950,7 @@ int rh_deploy_apply(const route_req_t *rq, char *resp, int cap)
    if (rc < 0)
       return err_json(resp, cap, 500, "could not start the deploy");
 
-   config_t cfg;
-   config_load(&cfg);
+   int tls_port = config_server_api_tls_port();
    cJSON *out = cJSON_CreateObject();
    cJSON *pairing = out ? cJSON_AddObjectToObject(out, "enrollment") : NULL;
    if (!out || !pairing)
@@ -966,8 +964,7 @@ int rh_deploy_apply(const route_req_t *rq, char *resp, int cap)
    cJSON_AddStringToObject(pairing, "principal", principal);
    cJSON_AddStringToObject(pairing, "tier", "full");
    cJSON_AddBoolToObject(pairing, "mtls", 1);
-   cJSON_AddNumberToObject(pairing, "tls_port",
-                           cfg.server_api_tls_port > 0 ? cfg.server_api_tls_port : 8743);
+   cJSON_AddNumberToObject(pairing, "tls_port", tls_port > 0 ? tls_port : 8743);
    if (enrollment == 0)
       cJSON_AddStringToObject(pairing, "bearer_token", enrollment_bearer);
    return emit(resp, cap, out);

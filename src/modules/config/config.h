@@ -2131,6 +2131,11 @@ static inline int config_issue(const char *fmt, ...)
  * In strict mode, returns -1 on validation errors. */
 int config_load(config_t *cfg);
 
+/* Bounded enrolled-bearer operations owned by the config module. Callers get a
+ * coherent copy or append one token without naming or copying config_t. */
+int config_server_api_bearer_extra_snapshot(char out[][65], int max);
+int config_server_api_bearer_extra_append(const char *bearer);
+
 /* Live config snapshot (live-config-reload P1a) — a double-buffer + seqlock holding the
  * current config for immediate, push-driven reload. config_t is a flat POD, so reads are a
  * lock-free struct copy. Additive in P1a: not yet wired into config_load or a push trigger.

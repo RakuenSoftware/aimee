@@ -2177,13 +2177,9 @@ int main(void)
     * explicit full tier only after the CSR certificate is bound. */
    {
       assert(db1_init(":memory:") == 0);
-      config_t *cfg = calloc(1, sizeof(*cfg));
-      assert(cfg && config_load(cfg) == 0);
-      snprintf(cfg->server_api_bearer_token, sizeof(cfg->server_api_bearer_token), "primary");
-      cfg->server_api_mtls = 1;
-      cfg->server_api_bearer_extra_count = 0;
-      assert(config_save(cfg) == 0);
-      free(cfg);
+      assert(config_set_server_api_bearer_token("primary") == 0);
+      assert(config_set_server_api_mtls(1) == 0);
+      assert(config_set_server_api_bearer_extra_count(0) == 0);
 
       pthread_barrier_t barrier;
       pthread_t workers[2];
@@ -2202,11 +2198,8 @@ int main(void)
       char bearer[65], again[65], principal[128];
       snprintf(bearer, sizeof(bearer), "%s", attempts[0].bearer);
       assert(strlen(bearer) == 64 && server_http_enrolled_bearer_count() == 1);
-      cfg = calloc(1, sizeof(*cfg));
-      assert(cfg && config_load(cfg) == 0);
-      assert(cfg->server_api_bearer_extra_count == 1);
-      assert(strcmp(cfg->server_api_bearer_extra[0], bearer) == 0);
-      free(cfg);
+      assert(config_server_api_bearer_extra_count() == 1);
+      assert(strcmp(config_server_api_bearer_extra(0), bearer) == 0);
       assert(server_http_authorize_enrolled(1, "primary", NULL, bearer, 0) == 0);
       assert(server_http_first_user_bootstrap("webuser:alice", again, sizeof(again)) == 0);
       assert(strcmp(again, bearer) == 0); /* refresh is idempotent */

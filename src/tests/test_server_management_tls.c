@@ -31,6 +31,14 @@ int config_load(config_t *cfg)
    cfg->server_api_mtls = g_default_mtls_mode;
    return 0;
 }
+int config_server_api_mtls(void)
+{
+   return g_default_mtls_mode;
+}
+const char *config_server_api_mtls_client_ca(void)
+{
+   return "";
+}
 int pki_ca_ensure(void)
 {
    g_client_ca_ensure_calls++;
