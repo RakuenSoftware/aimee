@@ -425,6 +425,49 @@ static void test_claude_hooks_subagent_ban_gate(void)
    assert(hook_event_has_cmd(hooks, "PreToolUse", "attention-guard"));
    cJSON_Delete(root);
 
+   /* The path written into the user's GLOBAL config must be the INSTALLED
+    * client, never the binary that happened to run the wiring.
+    *
+    * Running a client built in a throwaway worktree used to rewrite
+    * ~/.claude/settings.json to that worktree path. When the worktree was
+    * deleted, every hook in every session failed with
+    *   /bin/sh: 1: /home/.../aimee-<sha>/aimee: not found
+    * in projects that had nothing to do with the build. Durable config must
+    * never capture a transient path.
+    *
+    * Asserted against the decision function directly: an end-to-end check
+    * cannot reach this, because the test binary is not named `aimee` and so
+    * takes the same fallback either way — it passes with the bug present. */
+   {
+      char out[512];
+      const char *installed = "/home/dev/.local/bin/aimee";
+      const char *worktree_exe = "/home/dev/dev/aimee-225c45f/aimee";
+
+      /* The regression: an install exists, so the transient path must lose. */
+      assert(client_integrations_pick_bin_path(installed, worktree_exe, out, sizeof(out)) == 0);
+      assert(strcmp(out, installed) == 0);
+
+      /* No install yet (first-run bootstrap) -> the running binary is all we
+       * have, and is still better than nothing. */
+      assert(client_integrations_pick_bin_path(NULL, worktree_exe, out, sizeof(out)) == 0);
+      assert(strcmp(out, worktree_exe) == 0);
+      assert(client_integrations_pick_bin_path("", worktree_exe, out, sizeof(out)) == 0);
+      assert(strcmp(out, worktree_exe) == 0);
+
+      /* Neither available -> fail rather than emit a half-formed command. */
+      assert(client_integrations_pick_bin_path(NULL, NULL, out, sizeof(out)) != 0);
+      assert(client_integrations_pick_bin_path("", "", out, sizeof(out)) != 0);
+
+      /* A path that would be truncated must fail, not be silently cut into a
+       * different (wrong, possibly existing) path. */
+      char tiny[8];
+      assert(client_integrations_pick_bin_path(installed, NULL, tiny, sizeof(tiny)) != 0);
+      assert(client_integrations_pick_bin_path(installed, NULL, out, 0) != 0);
+      assert(client_integrations_pick_bin_path(installed, NULL, NULL, sizeof(out)) != 0);
+
+      printf("  PASS: config records the installed client, not a transient build path\n");
+   }
+
    /* Delegates gone -> the SAME settings must have the guard + deny removed. */
    client_integrations_set_delegate_probe(stub_delegates_none);
    ensure_claude_code_hooks(settings_path);
