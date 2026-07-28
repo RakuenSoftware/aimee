@@ -3013,6 +3013,11 @@ paths:
       summary: Get a session
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Session, content: { application/json: { schema: { type: object } } } } }
+  /sessions/list:
+    post:
+      summary: List durable sessions
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Sessions, content: { application/json: { schema: { type: object } } } } }
   /sessions/brief:
     post:
       summary: Session startup brief

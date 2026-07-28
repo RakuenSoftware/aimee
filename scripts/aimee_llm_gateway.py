@@ -662,6 +662,16 @@ def build_server():
                 if path == "/v1/chat/completions":
                     audit("chat", SCOPE_DEFAULT, "error", code=ge.body["error"]["code"])
                 self._send(ge.status, ge.body)
+            except json.JSONDecodeError as exc:
+                # A body this gateway cannot parse is the CALLER's error. It used to
+                # fall through to the blanket handler below and come back as 500
+                # "internal", which tells an operator their inference gateway broke
+                # when in fact the request was malformed — and makes a client's retry
+                # logic treat it as a transient server fault worth retrying, forever.
+                if path == "/v1/chat/completions":
+                    audit("chat", SCOPE_DEFAULT, "error", code="bad_request")
+                self._send(400, {"error": {"code": "bad_request",
+                                           "message": f"invalid JSON body: {exc}"}})
             except Exception as exc:  # noqa: BLE001
                 self._send(500, {"error": {"code": "internal", "message": str(exc)}})
 

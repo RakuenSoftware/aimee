@@ -23,9 +23,12 @@ import json
 import os
 import sys
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _EXTRACT = os.path.join(_HERE, "..", "curator-extract.py")
+_SYNTHESIZE = os.path.join(_HERE, "..", "curator-synthesize.py")
 
 
 def _load():
@@ -39,6 +42,13 @@ def _load():
         pass
     finally:
         sys.argv = argv
+    return mod
+
+
+def _load_path(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
     return mod
 
 
@@ -82,6 +92,44 @@ class StripFencesTest(unittest.TestCase):
         resp = '{"status":"ok","artifacts":[{"payload":{"body_excerpt":"if (x) { y(\\"}\\"); }"}}]}'
         parsed = json.loads(self.mod.strip_fences(resp))
         self.assertIn("{", parsed["artifacts"][0]["payload"]["body_excerpt"])
+
+
+class CuratorTimeoutTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.extract = _load()
+        cls.synthesize = _load_path("curator_synthesize", _SYNTHESIZE)
+
+    def _assert_one_bounded_attempt(self, module):
+        completed = SimpleNamespace(returncode=0, stdout='{"status":"ok"}\n', stderr="")
+        with mock.patch.dict(os.environ, {"LLM_ENDPOINT": "http://llm.test/v1", "LLM_RETRIES": "9"}, clear=True):
+            with mock.patch.object(module.subprocess, "run", return_value=completed) as run:
+                output, error = module.call_llm("prompt", 128)
+        self.assertIsNone(error)
+        self.assertIn('"status":"ok"', output)
+        kwargs = run.call_args.kwargs
+        self.assertEqual(kwargs["timeout"], 290)
+        self.assertEqual(kwargs["env"]["LLM_TIMEOUT"], "285")
+        self.assertEqual(kwargs["env"]["LLM_RETRIES"], "0")
+
+    def test_extract_uses_one_bounded_attempt(self):
+        self._assert_one_bounded_attempt(self.extract)
+
+    def test_synthesize_uses_one_bounded_attempt(self):
+        self._assert_one_bounded_attempt(self.synthesize)
+
+    def test_operator_shorter_timeout_is_preserved(self):
+        completed = SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
+        with mock.patch.dict(
+            os.environ,
+            {"LLM_ENDPOINT": "http://llm.test/v1", "LLM_TIMEOUT": "60"},
+            clear=True,
+        ):
+            with mock.patch.object(self.extract.subprocess, "run", return_value=completed) as run:
+                output, error = self.extract.call_llm("prompt", 128)
+        self.assertEqual((output, error), ("ok", None))
+        self.assertEqual(run.call_args.kwargs["timeout"], 65)
+        self.assertEqual(run.call_args.kwargs["env"]["LLM_TIMEOUT"], "60")
 
 
 if __name__ == "__main__":

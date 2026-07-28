@@ -474,6 +474,10 @@ int chunk_stream(FILE *f, text_chunk_t *chunks, int max_chunks)
    while (fgets(line, sizeof(line), f) != NULL)
    {
       line_num++;
+      /* Repositories sometimes contain CP-1252 prose or otherwise malformed
+       * bytes in nominally textual files. Postgres TEXT is strict UTF-8; make
+       * the chunk boundary safe instead of aborting the whole file transaction. */
+      (void)text_sanitize_utf8(line);
       size_t line_len = strlen(line);
       int lvl = heading_level(line);
 
@@ -641,11 +645,19 @@ int kb_purge_fenced_txn_commit(void)
 int kb_file_index_upsert_fenced(const char *project, const char *file_path, const char *hash,
                                 const char *content)
 {
-   if (kb_purge_fenced_txn_begin(project) != 1)
+   char *clean_content = content ? strdup(content) : NULL;
+   if (content && !clean_content)
       return -1;
-   int rc = db2_kb_file_index_upsert(project, file_path, hash, content);
+   (void)text_sanitize_utf8(clean_content);
+   if (kb_purge_fenced_txn_begin(project) != 1)
+   {
+      free(clean_content);
+      return -1;
+   }
+   int rc = db2_kb_file_index_upsert(project, file_path, hash, clean_content);
    if (kb_purge_fenced_txn_commit() != 0)
       rc = -1;
+   free(clean_content);
    return rc;
 }
 
@@ -979,6 +991,7 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
       return;
    }
    int64_t prev_doc_id = 0;
+   int inserted = 0;
    for (int ci = 0; ci < n_chunks; ci++)
    {
       doc_ids[ci] = db2_kb_documents_insert_chunk(c->project, c->files[fi].rel_path, hash, ci,
@@ -986,16 +999,23 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
                                                   c->chunks[ci].line_start, c->chunks[ci].line_end,
                                                   c->chunks[ci].content, c->chunks[ci].token_count);
       if (doc_ids[ci] < 0)
-         continue;
+      {
+         LOG_WARN("kb_build", "project=%s path=%s: chunk %d insert failed; rolling back file",
+                  c->project ? c->project : "?", c->files[fi].rel_path, ci);
+         db2_kb_txn_rollback();
+         free(doc_ids);
+         return;
+      }
       db2_kb_documents_link_neighbours(doc_ids[ci], prev_doc_id);
       prev_doc_id = doc_ids[ci];
-      c->stats->chunks_added++;
+      inserted++;
    }
    if (kb_purge_fenced_txn_commit() != 0)
    {
       free(doc_ids);
       return;
    }
+   c->stats->chunks_added += inserted;
 
    /* Phase 2: embed each committed chunk (sync or async). */
    for (int ci = 0; ci < n_chunks; ci++)

@@ -435,22 +435,38 @@ func (s *server) handleChatThreads(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"threads":[],"active_id":0}`)
 }
 
+// notImplementedMutation answers a chat mutation that is not built yet.
+//
+// These three used to return {"status":"ok"} unconditionally. The SPA ships the
+// controls that call them — "Rewind to here", "Rewinding…", "Branch from current
+// point" — so a user clicked Rewind, watched the pending state resolve to
+// success, and nothing had happened to their conversation. The SPA even carries
+// a "Rewind failed" branch that could never fire, because the stub always
+// claimed to have worked.
+//
+// 501 is the honest answer for a route that exists but does nothing, and it
+// lights up the error path the UI already has. Silently reporting success on a
+// mutation the user can see is worse than an error: it costs them trust in every
+// other operation that DOES work.
+func notImplementedMutation(w http.ResponseWriter, feature string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotImplemented)
+	fmt.Fprintf(w, `{"error":%q}`, feature+" is not implemented yet")
+}
+
 // handleChatBranch is a stub for POST /api/chat/branch.
 func (s *server) handleChatBranch(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"status":"ok"}`)
+	notImplementedMutation(w, "conversation branching")
 }
 
 // handleChatSwitchThread is a stub for POST /api/chat/switch-thread.
 func (s *server) handleChatSwitchThread(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"status":"ok"}`)
+	notImplementedMutation(w, "switching threads")
 }
 
 // handleChatRewind is a stub for POST /api/chat/rewind.
 func (s *server) handleChatRewind(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"status":"ok"}`)
+	notImplementedMutation(w, "conversation rewind")
 }
 
 // requireAuth validates the session cookie. For API paths it returns 401 JSON;

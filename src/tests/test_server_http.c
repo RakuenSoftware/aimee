@@ -1298,6 +1298,16 @@ int main(void)
       assert(server_http_route_caps("DELETE", "/v1/personas/alice") == CAP_SESSION_ADMIN);
       assert(server_http_route_caps("POST", "/v1/personas") == CAP_SESSION_ADMIN);
       assert(server_http_route_caps("GET", "/v1/role_templates") == CAP_SESSION_READ);
+      /* MCP startup is catalog introspection, not tool execution. Query-only
+       * remote clients must be able to complete tools/list; mcp.call remains
+       * separately gated by CAP_TOOL_EXECUTE. */
+      assert(server_capability_for_method("mcp.tools_list") == CAP_SESSION_READ);
+      assert(server_http_route_caps("GET", "/v1/mcp/tools_list") == CAP_SESSION_READ);
+      assert(server_http_route_allowed_caps(1, CAPS_READ_ONLY, "GET", "/v1/mcp/tools_list",
+                                            SERVER_REMOTE_WRITES_OFF) == 1);
+      assert(server_capability_for_method("mcp.call") == CAP_TOOL_EXECUTE);
+      assert(server_http_route_allowed_caps(1, CAPS_READ_ONLY, "POST", "/v1/mcp/call",
+                                            SERVER_REMOTE_WRITES_OFF) == 0);
       assert(server_http_route_caps("DELETE", "/v1/role_templates/qa") == CAP_SESSION_ADMIN);
       assert(server_http_route_caps("GET", "/v1/roundtables") == CAP_SESSION_READ);
       assert(server_http_route_caps("PUT", "/v1/roundtables/default") == CAP_SESSION_ADMIN);
@@ -1349,6 +1359,7 @@ int main(void)
       assert(server_http_route_caps("GET", "/v1/workflow/repo/file") == CAP_DASHBOARD_READ);
       /* Presence is session-scoped; the streaming routes carry caps too. */
       assert(server_http_route_caps("GET", "/v1/sessions") == CAP_SESSION_READ);
+      assert(server_http_route_caps("POST", "/v1/sessions/list") == CAP_SESSION_READ);
       assert(server_http_route_caps("POST", "/v1/sessions/s1/attach") == CAP_SESSION_READ);
       assert(server_http_route_caps("GET", "/v1/sessions/s1/events") == CAP_SESSION_READ);
       assert(server_http_route_caps("POST", "/v1/chat/stream") ==
@@ -1889,12 +1900,17 @@ int main(void)
       server_http_gzip_set(0);
    }
 
-   /* Reusable connections accept one unambiguous HTTP/1.1 frame and reject
-    * duplicate lengths, transfer coding, obs-fold, and pipelining. */
+   /* Every data-plane request accepts one unambiguous HTTP/1.1 frame and
+    * rejects duplicate lengths, transfer coding, obs-fold, and pipelining. */
    {
       const char *valid = "GET /v1/health HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n";
+      const char *valid_no_length = "OPTIONS /v1/health HTTP/1.1\r\nHost: localhost\r\n\r\n";
       const char *partial =
           "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\n\r\n{}";
+      const char *route_oversize =
+          "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4194305\r\n\r\n";
+      const char *length_overflow = "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\n"
+                                    "Content-Length: 18446744073709551616\r\n\r\n";
       const char *duplicate =
           "POST /v1/responses HTTP/1.1\r\nContent-Length: 1\r\nContent-Length: 1\r\n\r\nx";
       const char *chunked =
@@ -1904,14 +1920,17 @@ int main(void)
       const char *folded = "GET /v1/health HTTP/1.1\r\n X-folded: bad\r\n\r\n";
       const char *pipelined =
           "GET /v1/health HTTP/1.1\r\nContent-Length: 0\r\n\r\nGET /v1/health HTTP/1.1\r\n\r\n";
-      assert(server_http_keepalive_framing_valid(valid, strlen(valid)) == 1);
-      assert(server_http_keepalive_framing_valid(partial, strlen(partial)) == 1);
-      assert(server_http_keepalive_framing_valid(duplicate, strlen(duplicate)) == 0);
-      assert(server_http_keepalive_framing_valid(chunked, strlen(chunked)) == 0);
-      assert(server_http_keepalive_framing_valid(conflicting_connection,
-                                                 strlen(conflicting_connection)) == 0);
-      assert(server_http_keepalive_framing_valid(folded, strlen(folded)) == 0);
-      assert(server_http_keepalive_framing_valid(pipelined, strlen(pipelined)) == 0);
+      assert(server_http_request_framing_valid(valid, strlen(valid)) == 1);
+      assert(server_http_request_framing_valid(valid_no_length, strlen(valid_no_length)) == 1);
+      assert(server_http_request_framing_valid(partial, strlen(partial)) == 1);
+      assert(server_http_request_framing_valid(route_oversize, strlen(route_oversize)) == 1);
+      assert(server_http_request_framing_valid(length_overflow, strlen(length_overflow)) == 0);
+      assert(server_http_request_framing_valid(duplicate, strlen(duplicate)) == 0);
+      assert(server_http_request_framing_valid(chunked, strlen(chunked)) == 0);
+      assert(server_http_request_framing_valid(conflicting_connection,
+                                               strlen(conflicting_connection)) == 0);
+      assert(server_http_request_framing_valid(folded, strlen(folded)) == 0);
+      assert(server_http_request_framing_valid(pipelined, strlen(pipelined)) == 0);
    }
 
    compute_pool_shutdown(&g_test_server_ctx.orchestration_pool);

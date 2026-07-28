@@ -336,6 +336,11 @@ static int mf_process_one(const config_t *cfg, const mf_job_t *job)
    char sys_prompt[2560];
    mf_build_system_prompt(sys_prompt, sizeof(sys_prompt));
 
+   /* The job row and source memory are already copied locally. Release the
+    * worker's lazy pool lease before the potentially multi-minute LLM call;
+    * retry/done writes below safely re-acquire it. */
+   db2_lease_release_idle();
+
    char err[MF_ERRBUF] = "";
    char *resp = kb_curator_llm_run(cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, sys_prompt, request_json,
                                    NULL, "", MF_LLM_OUT_CAP, err, sizeof(err));

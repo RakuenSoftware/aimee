@@ -1,10 +1,12 @@
 #include <assert.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "db_postgres.h"
 #include "db2.h"
 #include "db2_internal.h"
+#include "db2_pool.h"
 #include "db2/db_schema.h"  /* §2b: db2_dim_read_t / DB2_DIM_* for the dim-read stub */
 #include "../headers/log.h" /* log_level_t for the aimee_log stub below */
 #include <stdarg.h>
@@ -467,6 +469,30 @@ static void test_health_probe_fails_without_init_or_query_failure(void)
    assert(db2_health_probe(&schema_ok, &have_pg_trgm) == -1);
 }
 
+static void *acquire_from_worker(void *arg)
+{
+   *(void **)arg = db2_conn();
+   return NULL;
+}
+
+static void test_worker_acquire_failure_never_shares_init_connection(void)
+{
+   reset_mocks();
+   assert(db2_init("postgres://db2.test/aimee") == 0);
+
+   /* Simulate an unavailable pool and a failed overflow connection. Sharing the
+    * init thread's PGconn here corrupts libpq under concurrent load. */
+   db2_pool_shutdown();
+   g_fail_open = 1;
+   void *worker_conn = &g_fake_conn;
+   pthread_t worker;
+   assert(pthread_create(&worker, NULL, acquire_from_worker, &worker_conn) == 0);
+   pthread_join(worker, NULL);
+   assert(worker_conn == NULL);
+   assert(db2_conn() == &g_fake_conn); /* the owning init thread keeps its handle */
+   db2_shutdown();
+}
+
 int main(void)
 {
    test_init_shutdown_roundtrip();
@@ -478,6 +504,7 @@ int main(void)
    test_health_probe_reports_schema_and_extension();
    test_init_fails_without_pg_trgm();
    test_health_probe_fails_without_init_or_query_failure();
+   test_worker_acquire_failure_never_shares_init_connection();
    printf("db2: all tests passed\n");
    return 0;
 }

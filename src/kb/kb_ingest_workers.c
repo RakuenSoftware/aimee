@@ -582,7 +582,12 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
           project, source_path, hash, ci, chunks[ci].heading_path, chunks[ci].line_start,
           chunks[ci].line_end, chunks[ci].content, chunks[ci].token_count);
       if (doc_ids[ci] < 0)
-         continue;
+      {
+         db2_kb_txn_rollback();
+         free(doc_ids);
+         free(chunks);
+         return -1;
+      }
       db2_kb_documents_link_neighbours(doc_ids[ci], prev_doc_id);
       prev_doc_id = doc_ids[ci];
    }

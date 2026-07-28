@@ -4,8 +4,12 @@
 numpy-guarded do_rerank test against a mocked encoder. No model, no network.
 """
 import importlib.util
+import json
 import os
+import threading
 import unittest
+import urllib.error
+import urllib.request
 from unittest import mock
 
 GW = os.path.join(os.path.dirname(__file__), "..", "aimee_llm_gateway.py")
@@ -312,6 +316,55 @@ class SynthDeviceLost(unittest.TestCase):
         with self.assertRaises(OSError):
             self.gw.do_synth({"messages": [{"role": "user", "content": "hi"}]})
         self.assertEqual(called, [])
+
+
+class MalformedBodyStatus(unittest.TestCase):
+    """A body the gateway cannot parse is the CALLER's error, not a fault here.
+
+    It used to fall through to the blanket handler and come back 500 "internal",
+    which tells an operator their inference gateway is broken when the request
+    was simply malformed — and invites a client to retry a permanent error
+    forever. Exercised over real HTTP because the bug lived in the request
+    handler, not in the pure functions the rest of this file covers.
+    """
+
+    def setUp(self):
+        # STUB so no upstream llama-server is needed for the well-formed case.
+        with mock.patch.dict(os.environ, {"AIMEE_LLM_STUB": "1", "AIMEE_LLM_PORT": "0"},
+                             clear=False):
+            self.gw = _gw()
+        self.srv = self.gw.build_server()
+        self.port = self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+
+    def _post(self, path, raw: bytes):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}{path}", data=raw,
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return resp.status, resp.read()
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read()
+
+    def test_malformed_json_is_400_not_500(self):
+        for path in ("/v1/chat/completions", "/embed_batch", "/rerank"):
+            for raw in (b"{not json", b"{", b"[1,", b'{"a":}'):
+                status, body = self._post(path, raw)
+                self.assertEqual(
+                    status, 400,
+                    f"{path} with {raw!r} returned {status}, body={body!r}")
+                self.assertEqual(json.loads(body)["error"]["code"], "bad_request")
+
+    def test_well_formed_body_still_succeeds(self):
+        status, _ = self._post(
+            "/v1/chat/completions",
+            json.dumps({"messages": [{"role": "user", "content": "hi"}]}).encode())
+        self.assertEqual(status, 200)
 
 
 if __name__ == "__main__":

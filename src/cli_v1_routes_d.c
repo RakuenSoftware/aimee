@@ -709,6 +709,7 @@ static const struct
     {"session.close", "POST", "/v1/sessions/close"},
     {"session.create", "POST", "/v1/sessions/create"},
     {"session.get", "POST", "/v1/sessions/get"},
+    {"session.list", "POST", "/v1/sessions/list"},
     {"session.presence", "GET", "/v1/sessions/presence"},
     {"session.record_transcript", "POST", "/v1/sessions/record_transcript"},
     {"skill.archive", "POST", "/v1/skills/archive"},
@@ -804,7 +805,6 @@ const char *cli_v1_route_for_method(const char *method, const char **verb_out)
        {"runner.poll", "POST", "/v1/runner/poll"},
        {"runner.respond", "POST", "/v1/runner/respond"},
        /* Custom-handler routes whose response still matches the dispatch method. */
-       {"session.list", "GET", "/v1/sessions"},
        {"kb.search", "POST", "/v1/kb/search"},
        /* Write-tier grant administration. Bespoke handlers, so the generator cannot see
         * them; POST on all three because the thin client marshals flags into a body. The

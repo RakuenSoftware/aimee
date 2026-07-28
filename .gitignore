@@ -28,6 +28,7 @@ src/build/
 src/*.a
 src/server.log
 src/tests/unit-test-*
+src/tests/fuzz_kb_mgmt_token_authority_ipc
 src/tests/fuzz_server_mgmt_read_config
 /build/
 /build-*/

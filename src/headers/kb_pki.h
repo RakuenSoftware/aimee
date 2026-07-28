@@ -30,6 +30,8 @@ extern "C"
 #define KB_PKI_CERT_PEM_MAX 4096 /* PEM cert (RSA-2048) ~1.2 KB + slack */
 #define KB_PKI_KEY_PEM_MAX  4096 /* PEM PKCS#8 key (RSA-2048) ~1.7 KB + slack */
 #define KB_PKI_FP_HEX       65   /* sha256 lowercase hex (64) + NUL */
+#define KB_PKI_ISSUER_MAX   600  /* supported OpenSSL one-line issuer DN bytes */
+#define KB_PKI_SERIAL_MAX   128  /* supported uppercase-hex serial bytes */
 
    /* An internal CA: its self-signed certificate and private key, both PEM. */
    typedef struct

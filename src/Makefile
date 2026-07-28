@@ -1074,10 +1074,12 @@ BENCH_BASELINE = ../benchmarks/baseline.json
 BENCH_OBJS = $(OBJDIR)/tests/bench_perf.o $(OBJDIR)/modules/guardrails/guardrails.o $(OBJDIR)/file_safety.o \
              $(OBJDIR)/modules/workspace/workspace.o \
              $(OBJDIR)/modules/guardrails/guardrails_orchestrator.o $(OBJDIR)/modules/guardrails/guardrails_tdd.o $(OBJDIR)/modules/guardrails/guardrails_blast_radius.o \
-             $(OBJDIR)/server/agent_config.o $(OBJDIR)/cmd_describe.o \
+             $(OBJDIR)/server/agent_config.o $(OBJDIR)/server/agent_route.o $(OBJDIR)/cmd_describe.o \
+             $(OBJDIR)/server/computer_use.o \
              $(OBJDIR)/modules/git/git_verify.o $(OBJDIR)/modules/git/git_verify_config.o $(OBJDIR)/modules/git/git_verify_step.o $(OBJDIR)/branch_ownership.o \
-             $(OBJDIR)/tests/support/kb_client_test_stub.o \
-             $(AGENT_OBJS)
+             $(OBJDIR)/tests/support/kb_client_test_stub.o $(OBJDIR)/tests/support/mock_agent_http.o $(OBJDIR)/tests/support/bench_perf_stubs.o \
+             $(OBJDIR)/tests/support/model_provider_stub.o $(OBJDIR)/tests/support/provider_cli_adapter_stub.o \
+             $(OBJDIR)/tests/support/oauth_tokens_stub.o $(OBJDIR)/tests/support/vault_service_stub.o
 
 tests/bench-perf: $(BENCH_OBJS) $(TEST_DATA_OBJS)
 	$(CC) -o $@ $^ $(TEST_L_FLAGS)
@@ -1665,9 +1667,10 @@ clean:
 	       tests/unit-test-* tests/bench-perf tests/fuzz_extractors tests/fuzz_json_parse \
 	       tests/fuzz_config_load tests/fuzz_memory_search tests/fuzz_message_frame tests/fuzz_acl_parse \
 	       tests/fuzz_kb_workload_wire tests/fuzz_server_mgmt_token tests/fuzz_kb_mgmt_token \
+	       tests/fuzz_kb_mgmt_token_authority_ipc \
 	       tests/fuzz_kb_mgmt_jwks_publication \
 	       tests/fuzz_kb_mgmt_checkpoint tests/fuzz_kb_management_action \
-	       tests/fuzz_server_mgmt_action \
+	       tests/fuzz_server_mgmt_action tests/fuzz_server_mgmt_read_config \
 	       coverage.info coverage-report agent_help_data.h tool_prompts_data.h
 
 # Pinned clang-format version. Must match what CI installs so `make lint`

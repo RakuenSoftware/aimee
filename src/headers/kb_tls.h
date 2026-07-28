@@ -10,8 +10,12 @@
 #ifndef DEC_KB_TLS_H
 #define DEC_KB_TLS_H
 
+#include "kb_pki.h"
 #include <openssl/ssl.h>
 #include <stddef.h>
+
+#define KB_TLS_PEER_ISSUER_MAX KB_PKI_ISSUER_MAX
+#define KB_TLS_PEER_SERIAL_MAX KB_PKI_SERIAL_MAX
 
 #ifdef __cplusplus
 extern "C"
@@ -42,7 +46,7 @@ extern "C"
 
    /* Peer cert issuer DN + serial (uppercase hex) — the (issuer, serial) immutable
     * revocation-key inputs for a transport (cert:CN) principal (P1 I5). Return 0 on
-    * success, -1 if no peer cert / extraction fails. */
+    * success, -1 if no peer cert, extraction fails, or the value does not fit. */
    int kb_tls_peer_issuer(SSL *ssl, char *out, size_t cap);
    int kb_tls_peer_serial(SSL *ssl, char *out, size_t cap);
 

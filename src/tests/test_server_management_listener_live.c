@@ -68,6 +68,14 @@ static void set_management_env(int port, const char *cert, const char *key, cons
    assert(setenv("AIMEE_MGMT_STATUS_KEY_ID", "p5-live-key", 1) == 0);
    assert(setenv("AIMEE_MGMT_STATUS_PUBLIC_KEY",
                  "0000000000000000000000000000000000000000000000000000000000000000", 1) == 0);
+   assert(setenv("AIMEE_SERVER_MGMT_ISSUER", "https://kb.example.test/management", 1) == 0);
+   assert(setenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE", ca, 1) == 0);
+   assert(setenv("AIMEE_SERVER_MGMT_STATUS_ENDPOINT", "https://127.0.0.1:1", 1) == 0);
+   assert(setenv("AIMEE_SERVER_MGMT_STATUS_CA_FILE", ca, 1) == 0);
+   assert(setenv("AIMEE_SERVER_MGMT_STATUS_LEAF_PIN",
+                 "0000000000000000000000000000000000000000000000000000000000000000", 1) == 0);
+   assert(setenv("AIMEE_SERVER_MGMT_STATUS_CLIENT_CERT", cert, 1) == 0);
+   assert(setenv("AIMEE_SERVER_MGMT_STATUS_CLIENT_KEY", key, 1) == 0);
 }
 
 static int response_status(const char *response)
@@ -146,6 +154,14 @@ static int tcp_request(int port, const char *request)
 
 int main(void)
 {
+   /* Production requires root-owned checkpoint TLS material. Exercise the live
+    * listener when the test can create that material without weakening the
+    * ownership check; ordinary unprivileged unit runs cover the pure gates. */
+   if (geteuid() != 0)
+   {
+      puts("test_server_management_listener_live: SKIP (requires root-owned TLS fixtures)");
+      return 0;
+   }
    signal(SIGPIPE, SIG_IGN);
    char dir[] = "/tmp/aimee-mgmt-live-XXXXXX";
    assert(mkdtemp(dir));
@@ -216,12 +232,14 @@ int main(void)
        "Authorization: Bearer p5-data-bearer\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
    assert(tcp_request(data_port, data_cross_lane) == 401);
    server_http_stop();
+   assert(access(uds, F_OK) != 0);
 
    /* The process-lifetime context and listener lifecycle both support an exact
     * same-packet restart after all listener fds have drained. */
    assert(server_http_start(uds, data_port, 0, "p5-data-bearer", 0, 0) == 0);
    assert(tls_request(port, ca, client, clientkey, generic) == 403);
    server_http_stop();
+   assert(access(uds, F_OK) != 0);
 
    snprintf(cmd, sizeof(cmd), "rm -rf %s", dir);
    command(cmd);

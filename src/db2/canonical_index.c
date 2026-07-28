@@ -200,9 +200,10 @@ static int ci_file_modified_since(void *conn, int64_t project_id, const char *re
 
 /* ---- File body replacement (transactional) --------------------- */
 
-/* Returns 0 on success, -1 when the write was aborted at its commit point
- * because a purge fence is active for `project` (webchat-project-lifecycle
- * slice 2) — callers must stop the scan for that project. */
+/* Returns 0 on success, -1 when the transactional replacement fails or is
+ * aborted at its commit point by a purge fence. Callers must stop the scan for
+ * that project: continuing on the same Postgres connection after an aborted
+ * transaction would only turn the original error into misleading follow-ons. */
 static int ci_replace_file_data(void *conn, const char *project, int64_t file_id, const char *ext,
                                 const char *content)
 {
@@ -211,7 +212,7 @@ static int ci_replace_file_data(void *conn, const char *project, int64_t file_id
    if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
    {
       LOG_WARN(CI_LOG_TAG, "BEGIN failed: %s", err);
-      return 0;
+      return -1;
    }
 
    db2_exec_conn_int64(conn, "DELETE FROM file_exports WHERE file_id = ?1", file_id);
@@ -240,13 +241,22 @@ static int ci_replace_file_data(void *conn, const char *project, int64_t file_id
                            "INSERT INTO file_contents (file_id, content) VALUES (?1, ?2) "
                            "ON CONFLICT (file_id) DO UPDATE SET content = EXCLUDED.content",
                            err, sizeof(err));
-      if (st)
+      if (!st)
       {
-         aimee_pg_bind_int64(st, "?1", file_id);
-         aimee_pg_bind_text(st, "?2", content);
-         aimee_pg_step(st, err, sizeof(err));
-         aimee_pg_finalize(st);
+         LOG_WARN(CI_LOG_TAG, "file content prepare failed: %s", err);
+         aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+         return -1;
       }
+      aimee_pg_bind_int64(st, "?1", file_id);
+      aimee_pg_bind_text(st, "?2", content);
+      if (aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_DONE)
+      {
+         LOG_WARN(CI_LOG_TAG, "file content write failed: %s", err);
+         aimee_pg_finalize(st);
+         aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+         return -1;
+      }
+      aimee_pg_finalize(st);
    }
 
    /* Exports. */
@@ -397,6 +407,7 @@ static int ci_replace_file_data(void *conn, const char *project, int64_t file_id
    {
       LOG_WARN(CI_LOG_TAG, "COMMIT failed: %s", err);
       aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
    }
    return 0;
 }
@@ -1284,6 +1295,10 @@ int canonical_index_scan_project(const char *name, const char *root, int force, 
          free(list.paths[i]);
          continue;
       }
+      /* Source files are arbitrary bytes even when their extension is textual.
+       * Canonical indexing stores the complete body in a Postgres TEXT column
+       * and derives more rows from it, so normalize once before either path. */
+      (void)text_sanitize_utf8(content);
 
       int64_t file_id = ci_upsert_file(conn, project_id, rel, ts);
       if (file_id < 0)
@@ -1356,20 +1371,32 @@ int canonical_index_scan_files(const char *name, const char *root_label,
       if (!rel || !rel[0] || rel[0] == '/' || ci_path_ingest_excluded(rel) || !content)
          continue;
 
+      /* Remote/durable input is caller-owned. Keep it immutable while enforcing
+       * the same Postgres UTF-8 boundary as the filesystem scanner. */
+      char *clean_content = strdup(content);
+      if (!clean_content)
+         return -1;
+      (void)text_sanitize_utf8(clean_content);
+
       inspected++;
       int64_t file_id = ci_upsert_file(conn, project_id, rel, ts);
       if (file_id < 0)
+      {
+         free(clean_content);
          continue;
+      }
 
       const char *css_ext = ci_get_extension(rel);
-      if (ci_replace_file_data(conn, name, file_id, css_ext, content) != 0)
+      if (ci_replace_file_data(conn, name, file_id, css_ext, clean_content) != 0)
       {
          /* Purge fence: abort the whole scan for this project. */
+         free(clean_content);
          if (inspected_out)
             *inspected_out = inspected;
          return -1;
       }
-      ci_css_index_file(file_id, css_ext, content, css_on);
+      ci_css_index_file(file_id, css_ext, clean_content, css_on);
+      free(clean_content);
       scanned++;
    }
 
