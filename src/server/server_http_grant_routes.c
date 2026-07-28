@@ -68,6 +68,13 @@ static int grant_status(kb_client_grant_result_t rc, char *resp, int cap)
                       "authority, and the (server, team) pair must be registered");
    case KB_CLIENT_GRANT_BACKEND:
       return err_json(resp, cap, 503, "grant administration requires kb on the postgres backend");
+   case KB_CLIENT_GRANT_UNAUTHENTICATED:
+      /* Names the server's own missing enrollment. Reported as 502 rather than 401 so it is
+       * never read as the CALLER's credential being at fault: the caller reached this route
+       * over the local UDS, and it is this server that kb refused. */
+      return err_json(resp, cap, 502,
+                      "kb refused this server's credentials: it has no kb client identity. "
+                      "Complete the AIMEE_KB_CONN enrollment and restart the server");
    case KB_CLIENT_GRANT_UNAVAILABLE:
    default:
       return err_json(resp, cap, 503, "kb is unreachable; no grant was changed");

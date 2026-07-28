@@ -387,6 +387,9 @@ static void test_kb_failures_surface(void)
    } cases[] = {{KB_CLIENT_GRANT_DENIED, 403},
                 {KB_CLIENT_GRANT_BACKEND, 503},
                 {KB_CLIENT_GRANT_UNAVAILABLE, 503},
+                /* An unenrolled server must not read as an unreachable kb (503) nor as the
+                 * caller's own credential being refused (401). */
+                {KB_CLIENT_GRANT_UNAUTHENTICATED, 502},
                 {KB_CLIENT_GRANT_INVALID, 400}};
    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
    {

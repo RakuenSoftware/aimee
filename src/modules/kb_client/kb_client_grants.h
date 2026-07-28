@@ -36,7 +36,13 @@ extern "C"
       /* kb was unreachable, timed out, or answered something unusable. Deliberately NOT
        * merged with DENIED: reporting an unreachable kb as a refusal is a lie about
        * authority, and would have an operator editing grants that were never consulted. */
-      KB_CLIENT_GRANT_UNAVAILABLE
+      KB_CLIENT_GRANT_UNAVAILABLE,
+      /* kb answered 401: it is reachable and healthy, but THIS SERVER has no accepted
+       * credential for it — typically a missing or unconsumed AIMEE_KB_CONN enrollment, so
+       * $AIMEE_HOME/kb-client-identity.json was never written. Deliberately NOT merged with
+       * UNAVAILABLE: an operator told "kb is unreachable" checks the network and kb's
+       * health, both of which are fine, instead of enrolling the server. */
+      KB_CLIENT_GRANT_UNAUTHENTICATED
    } kb_client_grant_result_t;
 
    /* What a set replaced, as kb observed it atomically. */

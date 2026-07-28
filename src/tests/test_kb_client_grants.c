@@ -154,9 +154,10 @@ static void test_status_mapping(void)
       int status;
       kb_client_grant_result_t want;
    } cases[] = {
-       {400, KB_CLIENT_GRANT_INVALID},     {403, KB_CLIENT_GRANT_DENIED},
-       {405, KB_CLIENT_GRANT_INVALID},     {503, KB_CLIENT_GRANT_BACKEND},
-       {500, KB_CLIENT_GRANT_UNAVAILABLE}, {502, KB_CLIENT_GRANT_UNAVAILABLE},
+       {400, KB_CLIENT_GRANT_INVALID},     {401, KB_CLIENT_GRANT_UNAUTHENTICATED},
+       {403, KB_CLIENT_GRANT_DENIED},      {405, KB_CLIENT_GRANT_INVALID},
+       {503, KB_CLIENT_GRANT_BACKEND},     {500, KB_CLIENT_GRANT_UNAVAILABLE},
+       {502, KB_CLIENT_GRANT_UNAVAILABLE},
    };
    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
    {
