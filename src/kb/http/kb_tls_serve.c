@@ -37,8 +37,9 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 
-#define KB_TLS_REQ_MAX          (64 * 1024 + 1)
 #define KB_TLS_HEADER_MAX       (64 * 1024)
+#define KB_TLS_BODY_MAX         (1024 * 1024)
+#define KB_TLS_REQ_MAX          (KB_TLS_HEADER_MAX + KB_TLS_BODY_MAX + 1)
 #define KB_TLS_REQUEST_LINE_MAX 8192
 #define KB_TLS_URI_MAX          4096
 #define KB_TLS_HEADER_COUNT_MAX 64
@@ -185,7 +186,7 @@ static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, 
    int bodyless = !strcmp(method, "GET") || !strcmp(method, "HEAD");
    if ((bodyless && have_cl) || (!bodyless && !have_cl))
       return 400;
-   if (content_len > cap - header_len - 1)
+   if (content_len > KB_TLS_BODY_MAX || content_len > cap - header_len - 1)
       return 413;
    if (total > header_len + content_len)
       return 400;

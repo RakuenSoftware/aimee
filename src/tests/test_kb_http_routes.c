@@ -2529,7 +2529,7 @@ static void test_mtls_serve(void)
    assert(strstr(resp, "400 Bad Request"));
 
    /* Strict framing bounds fail before routing: at most 64 headers, a 4 KiB
-    * request target, and 64 KiB total request head+body. */
+    * request target, and a 1 MiB body. */
    char oversized_headers[8192];
    size_t oversized_len = (size_t)snprintf(oversized_headers, sizeof(oversized_headers),
                                            "GET /v1/health HTTP/1.1\r\nHost: kb\r\n");
@@ -2549,8 +2549,9 @@ static void test_mtls_serve(void)
    mtls_request(sctx, cctx, oversized_uri, resp, sizeof(resp));
    assert(strstr(resp, "400 Bad Request"));
 
-   mtls_request(sctx, cctx, "POST /v1/health HTTP/1.1\r\nHost: kb\r\nContent-Length: 65536\r\n\r\n",
-                resp, sizeof(resp));
+   mtls_request(sctx, cctx,
+                "POST /v1/health HTTP/1.1\r\nHost: kb\r\nContent-Length: 1048577\r\n\r\n", resp,
+                sizeof(resp));
    assert(strstr(resp, "413 Payload Too Large"));
 
    /* P5-A heartbeat carries immutable peer-certificate metadata to the primary
@@ -2764,6 +2765,30 @@ static void test_mtls_listener(void)
       fprintf(stderr, "high-level mTLS health status=%d body=%s\n", st, rbody);
    assert(st == 200);
    assert(strstr(rbody, "\"status\":\"ok\""));
+
+   /* Managed server identities carry ordinary data-plane calls over this same
+    * mTLS connection. A detached-workspace ingest batch is deliberately much
+    * larger than the old 64 KiB request buffer, so exercise the high-level
+    * client with a representative payload instead of accepting health-only
+    * connectivity as proof that indexing works. */
+   {
+      const size_t padding_len = 128 * 1024;
+      char *body = malloc(padding_len + 256);
+      assert(body);
+      int prefix = snprintf(body, padding_len + 256,
+                            "{\"server_id\":\"srv-large\",\"health\":\"ready\","
+                            "\"version\":\"test\",\"padding\":\"");
+      assert(prefix > 0);
+      memset(body + prefix, 'x', padding_len);
+      memcpy(body + prefix + padding_len, "\"}", 3);
+      assert(strlen(body) > 64 * 1024 && strlen(body) < 1024 * 1024);
+      g_test_registry_heartbeat_allow = 1;
+      assert(kb_tls_client_request("localhost", port, ca.cert_pem, ccert, ckey, "POST",
+                                   "/v1/server/heartbeat", body, rbody, sizeof(rbody), &st) == 0);
+      assert(st == 200 && strstr(rbody, "\"ok\":true"));
+      g_test_registry_heartbeat_allow = 0;
+      free(body);
+   }
 
    /* The reusable client primitive reads Content-Length exactly instead of
     * waiting for EOF, then safely carries a second request on the same TLS
