@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -138,7 +139,60 @@ func rpcError(msg map[string]json.RawMessage) error {
 	if errMsg == "" {
 		errMsg = status
 	}
+	if kind := rpcErrorKind(msg); kind != "" {
+		return &rpcFault{kind: kind, msg: errMsg}
+	}
 	return fmt.Errorf("server: %s", errMsg)
+}
+
+// rpcFault is a dispatch error the server classified. Plain errors stay plain,
+// so callers that only print the message are unaffected.
+type rpcFault struct {
+	kind string
+	msg  string
+}
+
+func (e *rpcFault) Error() string { return "server: " + e.msg }
+
+// Kind returns the server's fault class, or "" when it did not classify.
+func (e *rpcFault) Kind() string { return e.kind }
+
+func rpcErrorKind(msg map[string]json.RawMessage) string {
+	raw, ok := msg["kind"]
+	if !ok {
+		return ""
+	}
+	var kind string
+	_ = json.Unmarshal(raw, &kind)
+	return kind
+}
+
+// rpcErrorStatus maps a dispatch error onto an HTTP status.
+//
+// Everything used to become 502 Bad Gateway, so `agent add` with no arguments
+// answered "502: usage: agent add <name> <endpoint> <model>" — a usage message
+// delivered as an upstream failure, which misleads whoever reads the logs and
+// invites a client to retry a request that can never succeed.
+//
+// An UNCLASSIFIED error still maps to 502. That is deliberate: the server has
+// ~479 error sites and only some are audited, so guessing at the rest would
+// mislabel genuine server faults as the caller's mistake — the same error in
+// the opposite direction. Handlers opt in by sending a kind.
+func rpcErrorStatus(err error) int {
+	var fault *rpcFault
+	if errors.As(err, &fault) {
+		switch fault.Kind() {
+		case "invalid_argument":
+			return http.StatusBadRequest
+		case "not_found":
+			return http.StatusNotFound
+		case "permission_denied":
+			return http.StatusForbidden
+		case "unavailable":
+			return http.StatusServiceUnavailable
+		}
+	}
+	return http.StatusBadGateway
 }
 
 // socketCall sends a single-shot RPC and returns the parsed response.
