@@ -56,6 +56,55 @@ def existing_functions(text):
     return set(re.findall(r"\b(config_[a-z0-9_]+)\s*\(", text))
 
 
+STRUCT_ARRAYS = {
+    "mcp_clients": ("config_mcp_client_t", "CONFIG_MCP_MAX_CLIENTS", "mcp_client"),
+    "cron_jobs": ("cron_job_t", "CRON_JOBS_MAX", "cron_job"),
+    "trigger_rules": ("trigger_rule_t", "TRIGGER_RULES_MAX", "trigger_rule"),
+    "dispositions": ("config_disposition_t", "CONFIG_MAX_DISPOSITIONS", "disposition"),
+}
+
+
+def struct_fields(text, tname):
+    """Scalar and char[] members of a config element struct, at its top level."""
+    # Find the CLOSING `} tname;` then walk back to its matching brace. A
+    # non-greedy `typedef struct {(.*?)} tname;` starts at the FIRST typedef in
+    # the file and swallows every struct in between, which pulled a `key` member
+    # out of an unrelated type and generated an offsetof that does not compile.
+    close = re.search(r"\}\s*" + tname + r"\s*;", text)
+    if not close:
+        return []
+    depth, i = 0, close.start()
+    while i >= 0:
+        if text[i] == "}":
+            depth += 1
+        elif text[i] == "{":
+            depth -= 1
+            if depth == 0:
+                break
+        i -= 1
+    if i < 0:
+        return []
+    body = re.sub(r"/\*.*?\*/|//[^\n]*", "", text[i + 1:close.start()], flags=re.S)
+    out, depth = [], 0
+    for line in body.splitlines():
+        l = line.strip()
+        o, c = l.count("{"), l.count("}")
+        top = depth == 0 and o == 0
+        depth += o - c
+        if not top:
+            continue
+        fm = re.fullmatch(r"(int|long|double|float|size_t|time_t|char)\s+([a-z_][a-z0-9_]*)"
+                          r"\s*(\[[^\]]+\])?\s*;", l)
+        if not fm:
+            continue
+        base, name, arr = fm.groups()
+        if base == "char" and arr:
+            out.append(("string", name, arr))
+        elif base != "char" and not arr:
+            out.append(("scalar", name, base))
+    return out
+
+
 def members():
     text = HDR.read_text()
     taken = existing_functions(text)
@@ -243,6 +292,59 @@ def main():
             "}",
             "",
         ])
+
+    # Per-element accessors for the struct arrays. Without these, anything
+    # reading an MCP client or a cron job had to hold a config_t.
+    hdr_text = HDR.read_text()
+    struct_decls = []
+    for field, (tname, cap, prefix) in sorted(STRUCT_ARRAYS.items()):
+        for kind, mname, extra in struct_fields(hdr_text, tname):
+            fn = f"config_{prefix}_{mname}"
+            if kind == "string":
+                struct_decls.append(f"const char *{fn}(int index);")
+                blocks.append([
+                    f"const char *{fn}(int index)",
+                    "{",
+                    f"   static _Thread_local char buf[sizeof(((config_t *)0)->{field}[0].{mname})];",
+                    "   buf[0] = 0;",
+                    f"   if (index < 0 || index >= ({cap}))",
+                    "      return buf;",
+                    f"   config_field_read(offsetof(config_t, {field}) +",
+                    f"                         (size_t)index * sizeof(((config_t *)0)->{field}[0]) +",
+                    f"                         offsetof({tname}, {mname}),",
+                    "                     sizeof(buf), buf);",
+                    "   buf[sizeof(buf) - 1] = 0;",
+                    "   return buf;",
+                    "}",
+                    "",
+                ])
+            else:
+                struct_decls.append(f"{extra} {fn}(int index);")
+                blocks.append([
+                    f"{extra} {fn}(int index)",
+                    "{",
+                    f"   {extra} v = 0;",
+                    f"   if (index < 0 || index >= ({cap}))",
+                    "      return v;",
+                    f"   config_field_read(offsetof(config_t, {field}) +",
+                    f"                         (size_t)index * sizeof(((config_t *)0)->{field}[0]) +",
+                    f"                         offsetof({tname}, {mname}),",
+                    "                     sizeof(v), &v);",
+                    "   return v;",
+                    "}",
+                    "",
+                ])
+    if struct_decls:
+        hdr_lines = OUT_H.read_text().splitlines()
+        i = hdr_lines.index("#endif /* DEC_CONFIG_ACCESSORS_H */")
+        hdr_lines[i:i] = [
+            "",
+            "/* Struct-array elements: one member of one element per call. Bounds-checked",
+            " * like the char[][] accessors — an out-of-range index yields 0 or \"\".",
+            " * These exist so a caller reading an MCP client or a cron job does not have",
+            " * to hold a config_t to reach it. */",
+        ] + struct_decls + [""]
+        OUT_H.write_text("\n".join(hdr_lines) + "\n")
 
     # Shard whole accessor blocks, never mid-function: splitting on a line count
     # produced a file ending inside a function body and one starting with a bare

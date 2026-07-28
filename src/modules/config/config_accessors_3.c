@@ -18,87 +18,6 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
-const char *config_model_reasoning_effort(void)
-{
-   static _Thread_local char buf[32];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, model_reasoning_effort), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_openai_endpoint(void)
-{
-   static _Thread_local char buf[512];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, openai_endpoint), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_openai_model(void)
-{
-   static _Thread_local char buf[128];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, openai_model), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_openai_key_cmd(void)
-{
-   static _Thread_local char buf[512];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, openai_key_cmd), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_embedding_model(void)
-{
-   static _Thread_local char buf[128];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, embedding_model), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_embedding_endpoint(void)
-{
-   static _Thread_local char buf[512];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, embedding_endpoint), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_memory_weight_profile(void)
-{
-   static _Thread_local char buf[512];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, memory_weight_profile), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_memory_rerank_mode(void)
-{
-   static _Thread_local char buf[16];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, memory_rerank_mode), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_css_render_command(void)
-{
-   static _Thread_local char buf[512];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, css_render_command), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
 const char *config_vault_custody(void)
 {
    static _Thread_local char buf[16];
@@ -1183,4 +1102,172 @@ const char *config_mcp_osv_allow(int index)
                      buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
+}
+
+const char *config_computer_use_allowed_domains(int index)
+{
+   static _Thread_local char buf[128];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_COMPUTER_USE_MAX_DOMAINS))
+      return buf;
+   config_field_read(offsetof(config_t, computer_use_allowed_domains) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_server_api_bearer_extra(int index)
+{
+   static _Thread_local char buf[256];
+   buf[0] = 0;
+   if (index < 0 || index >= (AIMEE_API_BEARER_EXTRA_MAX))
+      return buf;
+   config_field_read(offsetof(config_t, server_api_bearer_extra) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_ensemble_reference_models(int index)
+{
+   static _Thread_local char buf[128];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_ENSEMBLE_MAX_REFS))
+      return buf;
+   config_field_read(offsetof(config_t, ensemble_reference_models) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_ensemble_reference_personas(int index)
+{
+   static _Thread_local char buf[64];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_ENSEMBLE_MAX_REFS))
+      return buf;
+   config_field_read(offsetof(config_t, ensemble_reference_personas) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+int config_set_db2_pool_size(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->db2_pool_size = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_workspace_count(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->workspace_count = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_subagent_ban_enabled(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->subagent_ban_enabled = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_embedding_dim(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->embedding_dim = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_memory_maintenance_trigger_inserts(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->memory_maintenance_trigger_inserts = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_memory_maintenance_trigger_secs(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->memory_maintenance_trigger_secs = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_memory_maintenance_enabled(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->memory_maintenance_enabled = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_memory_maintenance_interval_seconds(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->memory_maintenance_interval_seconds = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
 }

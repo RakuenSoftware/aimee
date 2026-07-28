@@ -1029,4 +1029,37 @@ const char *config_server_api_bearer_extra(int index);
 const char *config_ensemble_reference_models(int index);
 const char *config_ensemble_reference_personas(int index);
 
+/* Struct-array elements: one member of one element per call. Bounds-checked
+ * like the char[][] accessors — an out-of-range index yields 0 or "".
+ * These exist so a caller reading an MCP client or a cron job does not have
+ * to hold a config_t to reach it. */
+const char *config_cron_job_id(int index);
+const char *config_cron_job_schedule(int index);
+const char *config_cron_job_mode(int index);
+const char *config_cron_job_script(int index);
+const char *config_cron_job_prompt(int index);
+const char *config_cron_job_workdir(int index);
+const char *config_cron_job_context_from(int index);
+const char *config_cron_job_when_context_contains(int index);
+int config_cron_job_skill_count(int index);
+const char *config_cron_job_deliver_target(int index);
+int config_cron_job_deliver_only_if_changed(int index);
+int config_cron_job_deliver_first_run_silent(int index);
+int config_cron_job_pre_wake_gate(int index);
+int config_cron_job_enabled(int index);
+const char *config_disposition_name(int index);
+double config_disposition_value(int index);
+const char *config_mcp_client_name(int index);
+int config_mcp_client_command_count(int index);
+const char *config_mcp_client_cwd(int index);
+const char *config_mcp_client_url(int index);
+const char *config_mcp_client_bearer_token_env(int index);
+const char *config_trigger_rule_source(int index);
+const char *config_trigger_rule_event(int index);
+const char *config_trigger_rule_schedule(int index);
+const char *config_trigger_rule_pipeline_template(int index);
+const char *config_trigger_rule_workspace(int index);
+const char *config_trigger_rule_mode(int index);
+double config_trigger_rule_max_spend_usd(int index);
+
 #endif /* DEC_CONFIG_ACCESSORS_H */

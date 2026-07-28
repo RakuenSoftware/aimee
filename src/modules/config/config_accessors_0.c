@@ -900,3 +900,24 @@ int config_learning_router_enabled(void)
    config_field_read(offsetof(config_t, learning_router_enabled), sizeof(v), &v);
    return v;
 }
+
+int config_learning_proposal_ttl_days(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, learning_proposal_ttl_days), sizeof(v), &v);
+   return v;
+}
+
+int config_learning_max_commits_per_week(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, learning_max_commits_per_week), sizeof(v), &v);
+   return v;
+}
+
+int config_learning_synthesize_enabled(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, learning_synthesize_enabled), sizeof(v), &v);
+   return v;
+}

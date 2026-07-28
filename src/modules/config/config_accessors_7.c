@@ -18,328 +18,6 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
-int config_set_provider(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->provider, sizeof(cfg->provider), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_default_persona(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->default_persona, sizeof(cfg->default_persona), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_claude_model(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->claude_model, sizeof(cfg->claude_model), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_codex_model(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->codex_model, sizeof(cfg->codex_model), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_model_reasoning_effort(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->model_reasoning_effort, sizeof(cfg->model_reasoning_effort), "%s",
-               value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_openai_endpoint(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->openai_endpoint, sizeof(cfg->openai_endpoint), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_openai_model(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->openai_model, sizeof(cfg->openai_model), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_openai_key_cmd(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->openai_key_cmd, sizeof(cfg->openai_key_cmd), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_embedding_model(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->embedding_model, sizeof(cfg->embedding_model), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_embedding_endpoint(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->embedding_endpoint, sizeof(cfg->embedding_endpoint), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_weight_profile(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->memory_weight_profile, sizeof(cfg->memory_weight_profile), "%s",
-               value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_rerank_mode(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->memory_rerank_mode, sizeof(cfg->memory_rerank_mode), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_css_render_command(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->css_render_command, sizeof(cfg->css_render_command), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_vault_custody(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->vault_custody, sizeof(cfg->vault_custody), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_vault_tpm2_blob_path(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->vault_tpm2_blob_path, sizeof(cfg->vault_tpm2_blob_path), "%s",
-               value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_vault_tpm2_tcti(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->vault_tpm2_tcti, sizeof(cfg->vault_tpm2_tcti), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_vault_tpm2_nv_index(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->vault_tpm2_nv_index, sizeof(cfg->vault_tpm2_nv_index), "%s",
-               value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_coref_mode(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->memory_coref_mode, sizeof(cfg->memory_coref_mode), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_cognify_model(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->memory_cognify_model, sizeof(cfg->memory_cognify_model), "%s",
-               value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_cognify_command(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->memory_cognify_command, sizeof(cfg->memory_cognify_command), "%s",
-               value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_delegate_sandbox_image(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->delegate_sandbox_image, sizeof(cfg->delegate_sandbox_image), "%s",
-               value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
 int config_set_delegate_sandbox_package_access(const char *value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
@@ -1865,4 +1543,380 @@ int config_set_context_engine(const char *value)
    }
    free(cfg);
    return rc;
+}
+
+const char *config_cron_job_id(int index)
+{
+   static _Thread_local char buf[sizeof(((config_t *)0)->cron_jobs[0].id)];
+   buf[0] = 0;
+   if (index < 0 || index >= (CRON_JOBS_MAX))
+      return buf;
+   config_field_read(offsetof(config_t, cron_jobs) +
+                         (size_t)index * sizeof(((config_t *)0)->cron_jobs[0]) +
+                         offsetof(cron_job_t, id),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_cron_job_schedule(int index)
+{
+   static _Thread_local char buf[sizeof(((config_t *)0)->cron_jobs[0].schedule)];
+   buf[0] = 0;
+   if (index < 0 || index >= (CRON_JOBS_MAX))
+      return buf;
+   config_field_read(offsetof(config_t, cron_jobs) +
+                         (size_t)index * sizeof(((config_t *)0)->cron_jobs[0]) +
+                         offsetof(cron_job_t, schedule),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_cron_job_mode(int index)
+{
+   static _Thread_local char buf[sizeof(((config_t *)0)->cron_jobs[0].mode)];
+   buf[0] = 0;
+   if (index < 0 || index >= (CRON_JOBS_MAX))
+      return buf;
+   config_field_read(offsetof(config_t, cron_jobs) +
+                         (size_t)index * sizeof(((config_t *)0)->cron_jobs[0]) +
+                         offsetof(cron_job_t, mode),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_cron_job_script(int index)
+{
+   static _Thread_local char buf[sizeof(((config_t *)0)->cron_jobs[0].script)];
+   buf[0] = 0;
+   if (index < 0 || index >= (CRON_JOBS_MAX))
+      return buf;
+   config_field_read(offsetof(config_t, cron_jobs) +
+                         (size_t)index * sizeof(((config_t *)0)->cron_jobs[0]) +
+                         offsetof(cron_job_t, script),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_cron_job_prompt(int index)
+{
+   static _Thread_local char buf[sizeof(((config_t *)0)->cron_jobs[0].prompt)];
+   buf[0] = 0;
+   if (index < 0 || index >= (CRON_JOBS_MAX))
+      return buf;
+   config_field_read(offsetof(config_t, cron_jobs) +
+                         (size_t)index * sizeof(((config_t *)0)->cron_jobs[0]) +
+                         offsetof(cron_job_t, prompt),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_cron_job_workdir(int index)
+{
+   static _Thread_local char buf[sizeof(((config_t *)0)->cron_jobs[0].workdir)];
+   buf[0] = 0;
+   if (index < 0 || index >= (CRON_JOBS_MAX))
+      return buf;
+   config_field_read(offsetof(config_t, cron_jobs) +
+                         (size_t)index * sizeof(((config_t *)0)->cron_jobs[0]) +
+                         offsetof(cron_job_t, workdir),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_cron_job_context_from(int index)
+{
+   static _Thread_local char buf[sizeof(((config_t *)0)->cron_jobs[0].context_from)];
+   buf[0] = 0;
+   if (index < 0 || index >= (CRON_JOBS_MAX))
+      return buf;
+   config_field_read(offsetof(config_t, cron_jobs) +
+                         (size_t)index * sizeof(((config_t *)0)->cron_jobs[0]) +
+                         offsetof(cron_job_t, context_from),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_cron_job_when_context_contains(int index)
+{
+   static _Thread_local char buf[sizeof(((config_t *)0)->cron_jobs[0].when_context_contains)];
+   buf[0] = 0;
+   if (index < 0 || index >= (CRON_JOBS_MAX))
+      return buf;
+   config_field_read(offsetof(config_t, cron_jobs) +
+                         (size_t)index * sizeof(((config_t *)0)->cron_jobs[0]) +
+                         offsetof(cron_job_t, when_context_contains),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+int config_cron_job_skill_count(int index)
+{
+   int v = 0;
+   if (index < 0 || index >= (CRON_JOBS_MAX))
+      return v;
+   config_field_read(offsetof(config_t, cron_jobs) +
+                         (size_t)index * sizeof(((config_t *)0)->cron_jobs[0]) +
+                         offsetof(cron_job_t, skill_count),
+                     sizeof(v), &v);
+   return v;
+}
+
+const char *config_cron_job_deliver_target(int index)
+{
+   static _Thread_local char buf[sizeof(((config_t *)0)->cron_jobs[0].deliver_target)];
+   buf[0] = 0;
+   if (index < 0 || index >= (CRON_JOBS_MAX))
+      return buf;
+   config_field_read(offsetof(config_t, cron_jobs) +
+                         (size_t)index * sizeof(((config_t *)0)->cron_jobs[0]) +
+                         offsetof(cron_job_t, deliver_target),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+int config_cron_job_deliver_only_if_changed(int index)
+{
+   int v = 0;
+   if (index < 0 || index >= (CRON_JOBS_MAX))
+      return v;
+   config_field_read(offsetof(config_t, cron_jobs) +
+                         (size_t)index * sizeof(((config_t *)0)->cron_jobs[0]) +
+                         offsetof(cron_job_t, deliver_only_if_changed),
+                     sizeof(v), &v);
+   return v;
+}
+
+int config_cron_job_deliver_first_run_silent(int index)
+{
+   int v = 0;
+   if (index < 0 || index >= (CRON_JOBS_MAX))
+      return v;
+   config_field_read(offsetof(config_t, cron_jobs) +
+                         (size_t)index * sizeof(((config_t *)0)->cron_jobs[0]) +
+                         offsetof(cron_job_t, deliver_first_run_silent),
+                     sizeof(v), &v);
+   return v;
+}
+
+int config_cron_job_pre_wake_gate(int index)
+{
+   int v = 0;
+   if (index < 0 || index >= (CRON_JOBS_MAX))
+      return v;
+   config_field_read(offsetof(config_t, cron_jobs) +
+                         (size_t)index * sizeof(((config_t *)0)->cron_jobs[0]) +
+                         offsetof(cron_job_t, pre_wake_gate),
+                     sizeof(v), &v);
+   return v;
+}
+
+int config_cron_job_enabled(int index)
+{
+   int v = 0;
+   if (index < 0 || index >= (CRON_JOBS_MAX))
+      return v;
+   config_field_read(offsetof(config_t, cron_jobs) +
+                         (size_t)index * sizeof(((config_t *)0)->cron_jobs[0]) +
+                         offsetof(cron_job_t, enabled),
+                     sizeof(v), &v);
+   return v;
+}
+
+const char *config_disposition_name(int index)
+{
+   static _Thread_local char buf[sizeof(((config_t *)0)->dispositions[0].name)];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_MAX_DISPOSITIONS))
+      return buf;
+   config_field_read(offsetof(config_t, dispositions) +
+                         (size_t)index * sizeof(((config_t *)0)->dispositions[0]) +
+                         offsetof(config_disposition_t, name),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+double config_disposition_value(int index)
+{
+   double v = 0;
+   if (index < 0 || index >= (CONFIG_MAX_DISPOSITIONS))
+      return v;
+   config_field_read(offsetof(config_t, dispositions) +
+                         (size_t)index * sizeof(((config_t *)0)->dispositions[0]) +
+                         offsetof(config_disposition_t, value),
+                     sizeof(v), &v);
+   return v;
+}
+
+const char *config_mcp_client_name(int index)
+{
+   static _Thread_local char buf[sizeof(((config_t *)0)->mcp_clients[0].name)];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_MCP_MAX_CLIENTS))
+      return buf;
+   config_field_read(offsetof(config_t, mcp_clients) +
+                         (size_t)index * sizeof(((config_t *)0)->mcp_clients[0]) +
+                         offsetof(config_mcp_client_t, name),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+int config_mcp_client_command_count(int index)
+{
+   int v = 0;
+   if (index < 0 || index >= (CONFIG_MCP_MAX_CLIENTS))
+      return v;
+   config_field_read(offsetof(config_t, mcp_clients) +
+                         (size_t)index * sizeof(((config_t *)0)->mcp_clients[0]) +
+                         offsetof(config_mcp_client_t, command_count),
+                     sizeof(v), &v);
+   return v;
+}
+
+const char *config_mcp_client_cwd(int index)
+{
+   static _Thread_local char buf[sizeof(((config_t *)0)->mcp_clients[0].cwd)];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_MCP_MAX_CLIENTS))
+      return buf;
+   config_field_read(offsetof(config_t, mcp_clients) +
+                         (size_t)index * sizeof(((config_t *)0)->mcp_clients[0]) +
+                         offsetof(config_mcp_client_t, cwd),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_mcp_client_url(int index)
+{
+   static _Thread_local char buf[sizeof(((config_t *)0)->mcp_clients[0].url)];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_MCP_MAX_CLIENTS))
+      return buf;
+   config_field_read(offsetof(config_t, mcp_clients) +
+                         (size_t)index * sizeof(((config_t *)0)->mcp_clients[0]) +
+                         offsetof(config_mcp_client_t, url),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_mcp_client_bearer_token_env(int index)
+{
+   static _Thread_local char buf[sizeof(((config_t *)0)->mcp_clients[0].bearer_token_env)];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_MCP_MAX_CLIENTS))
+      return buf;
+   config_field_read(offsetof(config_t, mcp_clients) +
+                         (size_t)index * sizeof(((config_t *)0)->mcp_clients[0]) +
+                         offsetof(config_mcp_client_t, bearer_token_env),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_trigger_rule_source(int index)
+{
+   static _Thread_local char buf[sizeof(((config_t *)0)->trigger_rules[0].source)];
+   buf[0] = 0;
+   if (index < 0 || index >= (TRIGGER_RULES_MAX))
+      return buf;
+   config_field_read(offsetof(config_t, trigger_rules) +
+                         (size_t)index * sizeof(((config_t *)0)->trigger_rules[0]) +
+                         offsetof(trigger_rule_t, source),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_trigger_rule_event(int index)
+{
+   static _Thread_local char buf[sizeof(((config_t *)0)->trigger_rules[0].event)];
+   buf[0] = 0;
+   if (index < 0 || index >= (TRIGGER_RULES_MAX))
+      return buf;
+   config_field_read(offsetof(config_t, trigger_rules) +
+                         (size_t)index * sizeof(((config_t *)0)->trigger_rules[0]) +
+                         offsetof(trigger_rule_t, event),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_trigger_rule_schedule(int index)
+{
+   static _Thread_local char buf[sizeof(((config_t *)0)->trigger_rules[0].schedule)];
+   buf[0] = 0;
+   if (index < 0 || index >= (TRIGGER_RULES_MAX))
+      return buf;
+   config_field_read(offsetof(config_t, trigger_rules) +
+                         (size_t)index * sizeof(((config_t *)0)->trigger_rules[0]) +
+                         offsetof(trigger_rule_t, schedule),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_trigger_rule_pipeline_template(int index)
+{
+   static _Thread_local char buf[sizeof(((config_t *)0)->trigger_rules[0].pipeline_template)];
+   buf[0] = 0;
+   if (index < 0 || index >= (TRIGGER_RULES_MAX))
+      return buf;
+   config_field_read(offsetof(config_t, trigger_rules) +
+                         (size_t)index * sizeof(((config_t *)0)->trigger_rules[0]) +
+                         offsetof(trigger_rule_t, pipeline_template),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_trigger_rule_workspace(int index)
+{
+   static _Thread_local char buf[sizeof(((config_t *)0)->trigger_rules[0].workspace)];
+   buf[0] = 0;
+   if (index < 0 || index >= (TRIGGER_RULES_MAX))
+      return buf;
+   config_field_read(offsetof(config_t, trigger_rules) +
+                         (size_t)index * sizeof(((config_t *)0)->trigger_rules[0]) +
+                         offsetof(trigger_rule_t, workspace),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_trigger_rule_mode(int index)
+{
+   static _Thread_local char buf[sizeof(((config_t *)0)->trigger_rules[0].mode)];
+   buf[0] = 0;
+   if (index < 0 || index >= (TRIGGER_RULES_MAX))
+      return buf;
+   config_field_read(offsetof(config_t, trigger_rules) +
+                         (size_t)index * sizeof(((config_t *)0)->trigger_rules[0]) +
+                         offsetof(trigger_rule_t, mode),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+double config_trigger_rule_max_spend_usd(int index)
+{
+   double v = 0;
+   if (index < 0 || index >= (TRIGGER_RULES_MAX))
+      return v;
+   config_field_read(offsetof(config_t, trigger_rules) +
+                         (size_t)index * sizeof(((config_t *)0)->trigger_rules[0]) +
+                         offsetof(trigger_rule_t, max_spend_usd),
+                     sizeof(v), &v);
+   return v;
 }

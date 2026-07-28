@@ -100,6 +100,38 @@ int main(void)
       }
    }
 
+   /* Struct-array elements: the offsetof arithmetic (base + index*stride +
+    * member offset) is the part most likely to be silently wrong, so compare
+    * every slot against the struct and check the bounds guard. */
+   for (int i = 0; i < CONFIG_MCP_MAX_CLIENTS; i++)
+   {
+      if (strcmp(config_mcp_client_name(i), cfg->mcp_clients[i].name) != 0 ||
+          config_mcp_client_command_count(i) != cfg->mcp_clients[i].command_count)
+      {
+         printf("MISMATCH mcp_clients[%d]\n", i);
+         return 1;
+      }
+      checked += 2;
+   }
+   for (int i = 0; i < CRON_JOBS_MAX; i++)
+   {
+      if (strcmp(config_cron_job_id(i), cfg->cron_jobs[i].id) != 0 ||
+          config_cron_job_enabled(i) != cfg->cron_jobs[i].enabled)
+      {
+         printf("MISMATCH cron_jobs[%d]\n", i);
+         return 1;
+      }
+      checked += 2;
+   }
+   if (config_mcp_client_name(-1)[0] != 0 ||
+       config_mcp_client_name(CONFIG_MCP_MAX_CLIENTS)[0] != 0 || config_cron_job_enabled(-1) != 0 ||
+       config_cron_job_enabled(CRON_JOBS_MAX) != 0)
+   {
+      printf("struct-array bounds guard failed\n");
+      return 1;
+   }
+   checked += 4;
+
    printf("accessor parity: %d field(s) match the loaded struct\n", checked);
    free(cfg);
    return 0;
