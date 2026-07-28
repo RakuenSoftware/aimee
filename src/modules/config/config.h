@@ -66,6 +66,9 @@
 #define CONFIG_CONCURRENCY_KEY_LEN     128
 #define CONFIG_CONCURRENCY_MAX_ENTRIES 16
 
+/* Max additional bearers (beyond the primary) a deployment may accept at once. */
+#define AIMEE_API_BEARER_EXTRA_MAX 7
+
 typedef struct
 {
    char key[CONFIG_CONCURRENCY_KEY_LEN];
@@ -1515,6 +1518,19 @@ typedef struct config
    /* PEM bundle of the CA(s) that signed client certs. Empty => <config>/tls/client-ca.crt. */
    char server_api_mtls_client_ca[MAX_PATH_LEN];
    char server_api_bearer_token[256];
+   /* Additional bearers accepted alongside server_api_bearer_token.
+    *
+    * Enrolling a client used to be implemented AS rotating the single global
+    * bearer, so the second client to enrol silently evicted the first — every
+    * already-paired client started failing at the same instant with no way to
+    * tell that from a bad token. Pairing a new client is an additive operation
+    * and must not revoke anyone else's credential; rotation, which is the
+    * operation that SHOULD revoke, stays separate and explicit.
+    *
+    * Bounded so a compromised or looping enroller cannot grow the accepted set
+    * without limit — past the cap, enrolment fails closed rather than evicting. */
+   char server_api_bearer_extra[AIMEE_API_BEARER_EXTRA_MAX][256];
+   int server_api_bearer_extra_count;
    int server_api_rate_limit_per_min;
    /* server_api_max_event_streams: cap on concurrent SSE event streams
     * (/v1/sessions/{id}/events, /v1/chat/stream, /v1/runs/{id}/events), each of

@@ -131,6 +131,7 @@ static const struct
     {"kb.ingest", pt_print_kb_ingest},
     {"kb.docs.push", pt_print_kb_docs_push},
     {"kb.ingest.status", pt_print_kb_ingest_status},
+    {"kb.health", pt_print_kb_status},
     {"kb.status", pt_print_kb_status},
     {"workers", pt_print_workers},
     {"provider.list", pt_print_provider_list},
@@ -577,6 +578,7 @@ static const struct
     {"agent.stats", "GET", "/v1/agent/stats"},
     {"api.disable", "POST", "/v1/api/disable"},
     {"api.enable", "POST", "/v1/api/enable"},
+    {"api.enroll_bearer", "POST", "/v1/api/enroll_bearer"},
     {"api.rotate_bearer", "POST", "/v1/api/rotate_bearer"},
     {"api.status", "GET", "/v1/api/status"},
     {"attempt.list", "POST", "/v1/attempts/list"},
@@ -819,6 +821,8 @@ const char *cli_v1_route_for_method(const char *method, const char **verb_out)
         * has one definition. Only the METHOD differs, so the marshaller can require a
         * subject — without that separation, `show` with no subject silently lists everything. */
        {"kb.grant.show", "POST", "/v1/grants/write-tier/list"},
+       {"kb.health", "GET", "/v1/kb/status"},
+       {"kb.ingest.status", "GET", "/v1/kb/ingest/status"},
        {"kb.status", "GET", "/v1/kb/status"},
        {"kb.curator", "GET", "/v1/kb/curator"},
        {"memory.recall", "POST", "/v1/memory/recall"},

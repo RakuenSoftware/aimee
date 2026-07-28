@@ -1139,27 +1139,48 @@ int config_load_file(config_t *cfg)
 #if defined(__GNUC__)
    if (validate_toolsets && toolset_registry_init && toolset_registry_load_file)
    {
-      toolset_registry_t registry;
       char toolset_err[TOOLSET_ERROR_MAX] = "";
-      toolset_registry_init(&registry);
-      if (toolset_registry_load_file(&registry, path, toolset_err, sizeof(toolset_err)) != 0)
+      /* toolset_registry_t is large enough to add over a MiB to this function's
+       * frame after LTO. Config loads occur deep inside memory-query call chains,
+       * so a stack copy can exhaust the default 8 MiB worker stack. */
+      toolset_registry_t *registry = calloc(1, sizeof(*registry));
+      if (!registry)
       {
-         fprintf(stderr, "aimee: config validation: %s\n",
-                 toolset_err[0] ? toolset_err : "invalid toolset configuration");
+         fprintf(stderr, "aimee: config validation: out of memory loading toolsets\n");
          issues++;
+      }
+      else
+      {
+         toolset_registry_init(registry);
+         if (toolset_registry_load_file(registry, path, toolset_err, sizeof(toolset_err)) != 0)
+         {
+            fprintf(stderr, "aimee: config validation: %s\n",
+                    toolset_err[0] ? toolset_err : "invalid toolset configuration");
+            issues++;
+         }
+         free(registry);
       }
    }
 #else
    if (validate_toolsets)
    {
-      toolset_registry_t registry;
       char toolset_err[TOOLSET_ERROR_MAX] = "";
-      toolset_registry_init(&registry);
-      if (toolset_registry_load_file(&registry, path, toolset_err, sizeof(toolset_err)) != 0)
+      toolset_registry_t *registry = calloc(1, sizeof(*registry));
+      if (!registry)
       {
-         fprintf(stderr, "aimee: config validation: %s\n",
-                 toolset_err[0] ? toolset_err : "invalid toolset configuration");
+         fprintf(stderr, "aimee: config validation: out of memory loading toolsets\n");
          issues++;
+      }
+      else
+      {
+         toolset_registry_init(registry);
+         if (toolset_registry_load_file(registry, path, toolset_err, sizeof(toolset_err)) != 0)
+         {
+            fprintf(stderr, "aimee: config validation: %s\n",
+                    toolset_err[0] ? toolset_err : "invalid toolset configuration");
+            issues++;
+         }
+         free(registry);
       }
    }
 #endif

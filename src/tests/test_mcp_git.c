@@ -1437,6 +1437,34 @@ static void test_verify_load_config_prefers_check_linking_for_build(void)
    verify_test_teardown(tmpdir, fake_home);
 }
 
+/* A small repository may expose only `make test`. The generated test step must
+ * not depend on a build step that was never emitted, or the wave scheduler can
+ * never submit it and reports exit -1 before running the repository's tests. */
+static void test_verify_load_config_test_only_has_no_missing_build_dependency(void)
+{
+   char tmpdir[256], fake_home[256];
+   verify_test_setup_repo(tmpdir, sizeof(tmpdir), "aimee-test-verify-test-only");
+   verify_test_set_fake_home(fake_home, sizeof(fake_home));
+
+   char makefile_path[512];
+   snprintf(makefile_path, sizeof(makefile_path), "%s/Makefile", tmpdir);
+   FILE *f = fopen(makefile_path, "w");
+   assert(f != NULL);
+   fputs(".PHONY: test\n"
+         "test:\n"
+         "\t@echo tests\n",
+         f);
+   fclose(f);
+
+   verify_config_t cfg;
+   assert(verify_load_config(tmpdir, &cfg) == 0);
+   assert(cfg.count == 1);
+   assert(strcmp(cfg.steps[0].name, "test") == 0);
+   assert(cfg.steps[0].after[0] == '\0');
+
+   verify_test_teardown(tmpdir, fake_home);
+}
+
 static void test_verify_load_config_normalizes_build_integrity_order(void)
 {
    char tmpdir[256], fake_home[256];
@@ -2448,6 +2476,7 @@ int main(void)
    test_verify_load_config_emits_parallel_steps();
    test_verify_load_config_collapses_generated_pipeline_to_verify_local();
    test_verify_load_config_prefers_check_linking_for_build();
+   test_verify_load_config_test_only_has_no_missing_build_dependency();
    test_verify_load_config_normalizes_build_integrity_order();
    test_verify_load_config_falls_back_to_verify_local();
    test_verify_load_config_old_flat_format_ignored();

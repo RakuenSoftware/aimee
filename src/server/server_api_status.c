@@ -58,7 +58,9 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <pthread.h>
 #include <signal.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -126,6 +128,7 @@ int handle_api_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON_AddBoolToObject(resp, "enabled", http_port > 0);
    cJSON_AddNumberToObject(resp, "http_port", http_port);
    cJSON_AddBoolToObject(resp, "bearer_configured", bearer_configured);
+   cJSON_AddNumberToObject(resp, "enrolled_bearer_count", server_http_enrolled_bearer_count());
    cJSON_AddNumberToObject(resp, "rate_limit_per_min", rate_limit);
    cJSON_AddStringToObject(resp, "report", report);
    int rc = server_send_response(conn, resp);
@@ -135,6 +138,12 @@ int handle_api_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 #define API_DEFAULT_PORT       8910
 #define API_DEFAULT_RATE_LIMIT 60
+
+/* /v1 connections are handled concurrently. Serialize every aimee.api
+ * read-modify-save sequence in this file: otherwise two enrollments can select
+ * the same slot, or enable/disable can overwrite a just-enrolled credential
+ * with the stale snapshot it loaded before that enrollment completed. */
+static pthread_mutex_t g_api_bearer_mutation_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static int handle_api_error(server_conn_t *conn, const char *message)
 {
@@ -163,6 +172,7 @@ int handle_api_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
 
+   pthread_mutex_lock(&g_api_bearer_mutation_lock);
    config_t cfg;
    config_load(&cfg);
 
@@ -183,12 +193,19 @@ int handle_api_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (cfg.server_api_bearer_token[0] == '\0')
    {
       if (server_api_mint_bearer(&cfg) != 0)
+      {
+         pthread_mutex_unlock(&g_api_bearer_mutation_lock);
          return handle_api_error(conn, "failed to generate bearer token");
+      }
       generated = 1;
    }
 
    if (config_save(&cfg) != 0)
+   {
+      pthread_mutex_unlock(&g_api_bearer_mutation_lock);
       return handle_api_error(conn, "failed to persist aimee.api config");
+   }
+   pthread_mutex_unlock(&g_api_bearer_mutation_lock);
 
    char snippets[2048];
    server_http_api_status_report(cfg.server_api_http_port, 1, cfg.server_api_rate_limit_per_min,
@@ -237,22 +254,109 @@ int handle_api_rotate_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
    (void)req;
 
+   pthread_mutex_lock(&g_api_bearer_mutation_lock);
    config_t cfg;
    config_load(&cfg);
+   const char *managed_bearer = getenv("AIMEE_API_BEARER_TOKEN");
+   if (managed_bearer && managed_bearer[0])
+   {
+      pthread_mutex_unlock(&g_api_bearer_mutation_lock);
+      return handle_api_error(
+          conn, "bearer is managed by AIMEE_API_BEARER_TOKEN; rotate that deployment secret and "
+                "restart the server to revoke all clients");
+   }
    if (server_api_mint_bearer(&cfg) != 0)
+   {
+      pthread_mutex_unlock(&g_api_bearer_mutation_lock);
       return handle_api_error(conn, "failed to generate bearer token");
+   }
+   /* Rotation is the explicit revoke-all operation. Persist that revocation;
+    * otherwise the additional credentials would return after a restart. */
+   memset(cfg.server_api_bearer_extra, 0, sizeof(cfg.server_api_bearer_extra));
+   cfg.server_api_bearer_extra_count = 0;
    if (config_save(&cfg) != 0)
+   {
+      pthread_mutex_unlock(&g_api_bearer_mutation_lock);
       return handle_api_error(conn, "failed to persist aimee.api config");
+   }
 
-   /* Hot-swap the running listener's bearer. This handler runs on the single
-    * listener thread that also reads the bearer for authorization, so the swap
-    * is serialized against auth checks and needs no lock. After this returns the
-    * bootstrap token no longer authorizes anything. */
+   /* Hot-swap the running listener's primary and atomically clear its enrolled
+    * set. After this returns none of the previous credentials authorize. */
    server_http_set_bearer(cfg.server_api_bearer_token);
+   pthread_mutex_unlock(&g_api_bearer_mutation_lock);
 
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddStringToObject(resp, "bearer_token", cfg.server_api_bearer_token);
+   int rc = server_send_response(conn, resp);
+   cJSON_Delete(resp);
+   return rc;
+}
+
+/* api.enroll_bearer: mint a fresh bearer and ADD it to the accepted set, leaving
+ * the primary and every previously-enrolled token working.
+ *
+ * This exists because pairing a client used to be done with rotate_bearer, which
+ * replaces the single global bearer — so the second client to enrol silently
+ * evicted the first, and every already-paired client began failing at the same
+ * instant. Pairing is additive; revoking is rotate_bearer's job and stays
+ * separate, explicit, and unchanged.
+ *
+ * Fails closed at the cap rather than evicting the oldest: silently dropping a
+ * credential someone is still using is the exact failure this replaces.
+ * CAP_SESSION_ADMIN-gated, like api.enable and api.rotate_bearer. */
+int handle_api_enroll_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+
+   pthread_mutex_lock(&g_api_bearer_mutation_lock);
+   config_t cfg;
+   config_load(&cfg);
+
+   if (cfg.server_api_bearer_token[0] == '\0')
+   {
+      pthread_mutex_unlock(&g_api_bearer_mutation_lock);
+      return handle_api_error(conn, "no primary bearer configured; run api.enable first");
+   }
+   if (cfg.server_api_bearer_extra_count >= AIMEE_API_BEARER_EXTRA_MAX)
+   {
+      pthread_mutex_unlock(&g_api_bearer_mutation_lock);
+      return handle_api_error(conn, "enrolled bearer limit reached; perform an explicit revoke-all "
+                                    "with api.rotate_bearer before enrolling another client");
+   }
+
+   char minted[256];
+   if (platform_random_hex(minted, 64) != 0)
+   {
+      pthread_mutex_unlock(&g_api_bearer_mutation_lock);
+      return handle_api_error(conn, "failed to generate bearer token");
+   }
+
+   int slot = cfg.server_api_bearer_extra_count;
+   snprintf(cfg.server_api_bearer_extra[slot], sizeof(cfg.server_api_bearer_extra[0]), "%s",
+            minted);
+   cfg.server_api_bearer_extra_count = slot + 1;
+
+   if (config_save(&cfg) != 0)
+   {
+      pthread_mutex_unlock(&g_api_bearer_mutation_lock);
+      return handle_api_error(conn, "failed to persist aimee.api config");
+   }
+
+   /* Hot-swap so the new token authorizes immediately. The live auth layer has
+    * its own lock for concurrent connection workers. */
+   const char *extra[AIMEE_API_BEARER_EXTRA_MAX];
+   for (int i = 0; i < cfg.server_api_bearer_extra_count; i++)
+      extra[i] = cfg.server_api_bearer_extra[i];
+   server_http_set_bearer_extra(extra, cfg.server_api_bearer_extra_count);
+   pthread_mutex_unlock(&g_api_bearer_mutation_lock);
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "bearer_token", minted);
+   cJSON_AddNumberToObject(resp, "enrolled_count", cfg.server_api_bearer_extra_count);
+   cJSON_AddNumberToObject(resp, "enrolled_max", AIMEE_API_BEARER_EXTRA_MAX);
    int rc = server_send_response(conn, resp);
    cJSON_Delete(resp);
    return rc;
@@ -266,11 +370,16 @@ int handle_api_disable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
    (void)req;
 
+   pthread_mutex_lock(&g_api_bearer_mutation_lock);
    config_t cfg;
    config_load(&cfg);
    cfg.server_api_http_port = 0;
    if (config_save(&cfg) != 0)
+   {
+      pthread_mutex_unlock(&g_api_bearer_mutation_lock);
       return handle_api_error(conn, "failed to persist aimee.api config");
+   }
+   pthread_mutex_unlock(&g_api_bearer_mutation_lock);
 
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");

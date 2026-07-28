@@ -21,6 +21,13 @@ static void reset_db(void)
    db2_test_shim_open();
 }
 
+/* config_t is intentionally shared by these sequential cases. It is currently
+ * about 750 KiB; keeping ten block-scoped copies in this long main function made
+ * GCC reserve more than the default 8 MiB process stack and the optimized test
+ * binary segfaulted before reaching the later cases. Every user below clears it
+ * before use. */
+static config_t cfg;
+
 static void write_test_config(const char *yaml)
 {
    char dir[256], path[320];
@@ -465,7 +472,6 @@ int main(void)
 
    /* --- memory_cognify_unit: disabled when cognify.enabled=false --- */
    {
-      config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       cfg.memory_cognify_enabled = 0;
       memory_cognify_result_t result;
@@ -475,7 +481,6 @@ int main(void)
 
    /* --- memory_cognify_unit: disabled when command is empty --- */
    {
-      config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       cfg.memory_cognify_enabled = 1;
       cfg.memory_cognify_command[0] = '\0';
@@ -506,7 +511,6 @@ int main(void)
       fputs(fixture, fp);
       fclose(fp);
 
-      config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       cfg.memory_cognify_enabled = 1;
       snprintf(cfg.memory_cognify_command, sizeof(cfg.memory_cognify_command),
@@ -560,7 +564,6 @@ int main(void)
       fputs(fixture, fp);
       fclose(fp);
 
-      config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       cfg.memory_cognify_enabled = 1;
       snprintf(cfg.memory_cognify_command, sizeof(cfg.memory_cognify_command),
@@ -617,7 +620,6 @@ int main(void)
 
    /* --- memory_episode_card_generate: disabled when episode_summaries_enabled=0 --- */
    {
-      config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       cfg.memory_episode_summaries_enabled = 0;
       int64_t uid = memory_episode_card_generate("sess_test_disabled", &cfg);
@@ -626,7 +628,6 @@ int main(void)
 
    /* --- memory_episode_card_generate: disabled when cognify command is empty --- */
    {
-      config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       cfg.memory_episode_summaries_enabled = 1;
       cfg.memory_cognify_command[0] = '\0';
@@ -668,7 +669,6 @@ int main(void)
 
    /* --- memory_derive_facts: disabled path returns 0 --- */
    {
-      config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       cfg.memory_derive_facts_enabled = 0;
       memory_derived_facts_t dfacts;
@@ -680,7 +680,6 @@ int main(void)
 
    /* --- memory_derive_facts: enabled but empty candidates returns 0 --- */
    {
-      config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       cfg.memory_derive_facts_enabled = 1;
       memory_derived_facts_t dfacts;
@@ -813,7 +812,6 @@ int main(void)
    /* --- memory_cognify_drain with cognifier disabled --- */
    {
       /* When cognify_enabled=0, drain is a no-op but must not crash */
-      config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       /* disabled: memory_cognify_enabled = 0 */
       memory_cognify_queue_stats_t stats;
@@ -1985,7 +1983,7 @@ int main(void)
       assert(runs_total >= 2);
       assert(skips_total >= 1);
 
-      config_t cfg_off;
+      static config_t cfg_off;
       memset(&cfg_off, 0, sizeof(cfg_off));
       assert(memory_maintenance_maybe_run(&cfg_off, NULL) == 0);
    }
