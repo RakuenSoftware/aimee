@@ -260,10 +260,14 @@ func (s *Store) ForgetDelegateJobIfMatches(ctx context.Context, key string, jobI
 }
 
 // CancelUnassignedDelegateJob returns true only when this call atomically moves
-// an expired, nonterminal, unassigned job to cancelled. The C compatibility
-// worker can mark a row running before assignment, so status alone is not
-// admission. Its db1_agent_job_set_agent update is reciprocal (`WHERE id = ? AND
-// status != 'cancelled'`): whichever SQLite update wins prevents the other.
+// an expired job without a worker lease to cancelled. Routing may persist an
+// agent name while the row is still pending, so a pending row remains
+// unassigned regardless of agent_name. Once the worker moves it to running, a
+// non-empty agent_name proves assignment and protects it from this lease.
+//
+// Both worker transitions are reciprocal: taking the lease requires pending,
+// and assigning an agent rejects cancelled rows. Whichever SQLite update wins
+// prevents a later transition from reviving a cancelled job.
 func (s *Store) CancelUnassignedDelegateJob(ctx context.Context, jobID int, reason string, minAge time.Duration) (bool, error) {
 	if jobID <= 0 {
 		return false, errors.New("delegate job id is required")
@@ -278,8 +282,7 @@ SET status='cancelled',
     cancel_reason=?,
     updated_at=datetime('now')
 WHERE id=?
-  AND status IN ('pending','running')
-  AND trim(agent_name)=''
+  AND (status='pending' OR (status='running' AND trim(agent_name)=''))
   AND COALESCE(NULLIF(heartbeat_at,''),created_at) <= ?`, reason, jobID, cutoff)
 	if err != nil {
 		return false, fmt.Errorf("cancel unassigned delegate job: %w", err)
