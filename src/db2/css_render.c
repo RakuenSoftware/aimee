@@ -17,10 +17,9 @@
 
 static int cssr_enabled(void)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return 0;
-   return cfg.css_style_graph_enabled ? 1 : 0;
+   /* config_css_style_graph_enabled() fails closed on a load error, so the
+    * explicit load-and-check this replaced is redundant. */
+   return config_css_style_graph_enabled() ? 1 : 0;
 }
 
 static int phase_valid(const char *phase)

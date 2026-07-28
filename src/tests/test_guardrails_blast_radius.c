@@ -1,7 +1,7 @@
 /* test_guardrails_blast_radius.c: unit tests for the §7 structural blast-radius
  * advisory (proposal "code-graph intelligence" §7). Covers the pure formatter
  * (gate, listing, ellipsis, hub note, truncation-safety), the abs-path -> project
- * resolver, and the fail-open advisory gate. Hermetic: config_load + the two
+ * resolver, and the fail-open advisory gate. Hermetic: the config accessor + the two
  * kb_client_index_* calls are stubbed below, so no DB / sidecar is needed. */
 #include "guardrails_blast_radius.h"
 
@@ -17,7 +17,7 @@ static project_info_t g_projects[4];
 static int g_project_count = 0;
 static blast_radius_t g_blast;
 static int g_blast_rc = 0;       /* what kb_client_index_blast_radius returns */
-static int g_advisory_flag = 0;  /* what config_load reports for the §7 flag */
+static int g_advisory_flag = 0;  /* what the config accessor reports for the §7 flag */
 static char g_last_project[128]; /* project passed to the blast-radius fetch */
 static char g_last_rel[256];     /* relpath passed to the blast-radius fetch */
 
@@ -39,11 +39,12 @@ int kb_client_index_blast_radius(const char *project, const char *file_path, bla
    return 0;
 }
 
-int config_load(config_t *cfg)
+/* The gate now asks config for one boolean instead of loading a whole config_t,
+ * so the seam is the accessor. This is a smaller stub than the config_load it
+ * replaces: a bool in, a bool out, with no need to know the struct's shape. */
+int config_guardrails_blast_radius_advisory_enabled(void)
 {
-   memset(cfg, 0, sizeof(*cfg));
-   cfg->guardrails_blast_radius_advisory_enabled = g_advisory_flag;
-   return 0;
+   return g_advisory_flag;
 }
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */

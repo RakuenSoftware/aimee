@@ -1997,3 +1997,129 @@ int config_reload_if_changed(void)
    seeded = 1;
    return config_reload();
 }
+
+/* ── opaque boolean accessors ────────────────────────────────────────────────
+ *
+ * Each of these existed only as a field read behind a caller-declared config_t.
+ * A caller that wants one boolean should not have to name the type, include its
+ * header, or put ~750 KB on the stack to get it. The load below is served from
+ * the config module's snapshot/mtime cache, so this is not a per-call reparse.
+ *
+ * Heap, not stack: these are called from paths that nest several frames deep,
+ * and a 750 KB frame is what overflowed the stack in the memory-search path. */
+static int config_flag(size_t offset)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return 0; /* fail closed: an unreadable config must not enable a feature */
+   config_load(cfg);
+   int v = *(const int *)((const char *)cfg + offset);
+   free(cfg);
+   return v;
+}
+
+int config_audit_worm_enabled(void)
+{
+   return config_flag(offsetof(config_t, audit_worm_enabled));
+}
+
+int config_bandit_live_decision_enabled(void)
+{
+   return config_flag(offsetof(config_t, bandit_live_decision_enabled));
+}
+
+int config_css_style_graph_enabled(void)
+{
+   return config_flag(offsetof(config_t, css_style_graph_enabled));
+}
+
+int config_delegate_graph_context_enabled(void)
+{
+   return config_flag(offsetof(config_t, delegate_graph_context_enabled));
+}
+
+int config_drift_detect_shadow_enabled(void)
+{
+   return config_flag(offsetof(config_t, drift_detect_shadow_enabled));
+}
+
+int config_guardrails_blast_radius_advisory_enabled(void)
+{
+   return config_flag(offsetof(config_t, guardrails_blast_radius_advisory_enabled));
+}
+
+int config_ingress_usage_accounting_enabled(void)
+{
+   return config_flag(offsetof(config_t, ingress_usage_accounting_enabled));
+}
+
+int config_kb_pdf_vector_enabled(void)
+{
+   return config_flag(offsetof(config_t, kb_pdf_vector_enabled));
+}
+
+int config_memory_derive_facts_enabled(void)
+{
+   return config_flag(offsetof(config_t, memory_derive_facts_enabled));
+}
+
+int config_memory_routing_enabled(void)
+{
+   return config_flag(offsetof(config_t, memory_routing_enabled));
+}
+
+int config_transport_kb_pool_enabled(void)
+{
+   return config_flag(offsetof(config_t, transport_kb_pool_enabled));
+}
+
+int config_typed_facts_enabled(void)
+{
+   return config_flag(offsetof(config_t, typed_facts_enabled));
+}
+
+int config_wfe_live_forge_enabled(void)
+{
+   return config_flag(offsetof(config_t, wfe_live_forge_enabled));
+}
+
+/* Non-boolean opaque accessors. Same contract as config_flag: heap-loaded from
+ * the config module's cache, fail closed. */
+double config_memory_semantic_floor_scale(void)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return 0.0; /* caller treats <= 0 as "unset" and derives from dimension */
+   config_load(cfg);
+   double v = cfg->memory_semantic_floor_scale;
+   free(cfg);
+   return v;
+}
+
+int config_ingress_audit_async(void)
+{
+   return config_flag(offsetof(config_t, ingress_audit_async));
+}
+
+/* Opaque form: resolve the embedding command without the caller ever holding a
+ * config_t. config_t is ~750 KB, so a caller that only wants this one string was
+ * paying three quarters of a megabyte of stack for it — nested across the memory
+ * search path that overflowed an 8 MB stack. The load is cached inside the
+ * config module (config_load consults a snapshot/mtime cache), so this is not a
+ * per-call reparse.
+ *
+ * Returns a pointer into a function-local static, valid until the next call on
+ * this thread. Callers copy it if they need to keep it. */
+const char *config_embedding_command_current(const char *requested)
+{
+   if (requested && requested[0])
+      return requested;
+   static _Thread_local char cached[512];
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return "builtin"; /* allocation failure must not fabricate an embedder */
+   config_load(cfg);
+   snprintf(cached, sizeof(cached), "%s", config_embedding_command(cfg, NULL));
+   free(cfg);
+   return cached;
+}

@@ -144,8 +144,7 @@ static int forge_push_branch(const char *dir, const char *branch, const char *wh
  * A config_load failure reads as DISABLED (fail closed). */
 static int forge_on(void)
 {
-   config_t cfg;
-   return config_load(&cfg) == 0 && cfg.wfe_live_forge_enabled;
+   return config_wfe_live_forge_enabled();
 }
 
 /* A live forge op may proceed only if BOTH the operator switch is on AND the

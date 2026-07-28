@@ -2258,6 +2258,24 @@ const char *config_embedding_command(const config_t *cfg, const char *requested)
  * this thread. */
 const char *config_embedding_command_current(const char *requested);
 
+/* Opaque boolean accessors — read one flag without naming config_t.
+ * Fail closed (0) when the config cannot be loaded. */
+int config_audit_worm_enabled(void);
+int config_bandit_live_decision_enabled(void);
+int config_css_style_graph_enabled(void);
+int config_delegate_graph_context_enabled(void);
+int config_drift_detect_shadow_enabled(void);
+int config_guardrails_blast_radius_advisory_enabled(void);
+int config_ingress_usage_accounting_enabled(void);
+int config_kb_pdf_vector_enabled(void);
+int config_memory_derive_facts_enabled(void);
+int config_memory_routing_enabled(void);
+int config_transport_kb_pool_enabled(void);
+int config_typed_facts_enabled(void);
+int config_wfe_live_forge_enabled(void);
+double config_memory_semantic_floor_scale(void);
+int config_ingress_audit_async(void);
+
 /* Disposition source labels for config reporting. */
 const char *config_disposition_source_name(config_disposition_source_t source);
 

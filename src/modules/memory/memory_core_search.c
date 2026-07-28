@@ -541,9 +541,9 @@ static int memory_semantic_dim_ok(int qdim)
  * active embedding dimension. Returns a multiplier applied to every floor. */
 static double memory_semantic_floor_scale(void)
 {
-   config_t fs_cfg;
-   if (config_load(&fs_cfg) == 0 && fs_cfg.memory_semantic_floor_scale > 0.0)
-      return fs_cfg.memory_semantic_floor_scale;
+   double configured = config_memory_semantic_floor_scale();
+   if (configured > 0.0)
+      return configured;
    int dim = db2_embedding_dim();
    if (dim <= 384)
       return 1.0; /* 384-d builtin: the floors are calibrated for this range */
@@ -900,8 +900,7 @@ int memory_query_plan(const char *query, int limit, int hard_cap, memory_query_p
    memset(out, 0, sizeof(*out));
    out->shape = memory_query_shape(query, norm_query);
    {
-      config_t cfg;
-      if (config_load(&cfg) == 0 && !cfg.memory_routing_enabled)
+      if (!config_memory_routing_enabled())
          out->route = MEM_ROUTE_HYBRID;
       else
          out->route = memory_query_route(query, norm_query, out->shape);

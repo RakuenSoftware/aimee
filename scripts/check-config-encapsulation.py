@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""config_t is a secret of the config module. Nothing else should know its shape.
+"""config_t is a secret of the config module. NOTHING outside it may name the type.
+
+The target is ZERO mentions outside src/modules/config/ — not fewer, not only in
+headers, not "pointers are fine". A `const config_t *` parameter is a leak: the
+caller includes config.h, learns the struct's shape, and can dereference any of
+its 653 fields. Everything a caller needs comes from an accessor in the config
+module that takes no config_t.
+
+The baseline below is DEBT, not permission.
 
 Two facts make this a correctness problem, not a style preference:
 
@@ -12,11 +20,12 @@ Two facts make this a correctness problem, not a style preference:
     config_load_file. The struct is one small field away from breaking for
     whoever adds the next one.
 
-The fix is encapsulation: callers ask config for the value they need
-(config_kb_enabled(), config_embedding_command(), ...) and never materialise the
-struct. That is a large migration, so this check is a RATCHET rather than a
-gate: the existing sites are recorded as a baseline, no new ones may appear, and
-the baseline may only shrink. Migrate a file, run --update-baseline, commit.
+The fix is accessors: callers ask config for the value they need
+(config_kb_enabled(), config_embedding_command_current(), ...) and never name the
+type. That migration is large, so this check is a RATCHET rather than a gate:
+existing mentions are recorded as debt, no new ones may appear, and the number
+may only fall. Migrate a file, run --update-baseline, commit. Done means the
+baseline is empty and EXEMPT_PREFIXES is the only place config_t appears.
 
 Usage:
   check-config-encapsulation.py                 # enforce
@@ -39,8 +48,23 @@ BASELINE = os.path.join(ROOT, "scripts", "config-encapsulation-baseline.json")
 # since a 750 KB stack local is no safer in a test than in the server.
 EXEMPT_PREFIXES = ("src/modules/config/",)
 
-DECL = re.compile(r"^\s*(?:static\s+)?config_t\s+[a-z_][a-z0-9_]*\s*(?:\[[^\]]*\])?\s*;")
+# Every mention of the type is a leak, not just a stack declaration. A
+# `const config_t *cfg` parameter still forces the caller to include config.h,
+# still exposes all 653 fields to dereference, and still makes the struct's
+# shape part of the module's interface. Counting only `config_t x;` measured
+# the stack cost while missing the encapsulation break entirely — the pointer
+# form is the more common leak (464 of the mentions) and the harder one to
+# remove, because it is baked into signatures.
+TYPE = re.compile(r"\bconfig_t\b")
 LOAD = re.compile(r"\bconfig_load(?:_file)?\s*\(")
+
+
+COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
+
+
+def strip_comments(text):
+    """Blank out comments, preserving newlines so counts stay per-file honest."""
+    return COMMENT.sub(lambda m: "\n" * m.group(0).count("\n"), text)
 
 
 def source_files(root):
@@ -66,10 +90,14 @@ def scan(root):
                 lines = fh.readlines()
         except OSError:
             continue
-        decls = sum(1 for ln in lines if DECL.match(ln))
-        loads = sum(len(LOAD.findall(ln)) for ln in lines)
-        if decls or loads:
-            found[path] = {"decls": decls, "loads": loads}
+        # Strip comments first: naming the type while EXPLAINING why a site
+        # still holds one is not itself a leak, and counting it punishes the
+        # rationale that makes remaining debt reviewable.
+        code = strip_comments("".join(lines))
+        mentions = len(TYPE.findall(code))
+        loads = len(LOAD.findall(code))
+        if mentions or loads:
+            found[path] = {"decls": mentions, "loads": loads}
     return found
 
 
@@ -111,7 +139,7 @@ def enforce(root):
         allowed = base.get(path, {"decls": 0, "loads": 0})
         if counts["decls"] > allowed["decls"]:
             regressions.append(
-                f"{path}: {counts['decls']} config_t declaration(s), baseline allows "
+                f"{path}: {counts['decls']} config_t mention(s), baseline allows "
                 f"{allowed['decls']}"
             )
         if counts["loads"] > allowed["loads"]:
@@ -135,9 +163,10 @@ def enforce(root):
         for r in regressions:
             print(f"  {r}", file=sys.stderr)
         print(
-            "\n  config_t is ~750 KB and is stack-allocated by every one of these sites.\n"
-            "  Ask config for the value instead (a config_<thing>() accessor); add one to\n"
-            "  src/modules/config/ if it does not exist yet. See the header of this script.",
+            "\n  config_t is a secret of the config module. Naming the type at all —\n"
+            "  including as `const config_t *` — exposes its shape and its ~750 KB.\n"
+            "  Ask config for the value instead (a config_<thing>() accessor taking no\n"
+            "  config_t); add one to src/modules/config/ if it does not exist yet.",
             file=sys.stderr,
         )
         return 1
@@ -159,8 +188,8 @@ def enforce(root):
     total_d = sum(v["decls"] for v in found.values())
     total_l = sum(v["loads"] for v in found.values())
     print(
-        f"check-config-encapsulation: ok ({len(found)} file(s) still expose config_t: "
-        f"{total_d} declaration(s), {total_l} config_load() call(s); ratchet holding)"
+        f"check-config-encapsulation: ok ({len(found)} file(s) still name config_t: "
+        f"{total_d} mention(s), {total_l} config_load() call(s); ratchet holding)"
     )
     return 0
 
@@ -174,8 +203,11 @@ def plant_test(root):
         )
         planted = os.path.join(tmp, "src", "planted_config_leak.c")
         with open(planted, "w", encoding="utf-8") as fh:
+            # A POINTER parameter only — no declaration, no config_load. This is
+            # the case the first version of this check missed entirely.
             fh.write("#include \"config.h\"\n"
-                     "void planted(void)\n{\n   config_t cfg;\n   config_load(&cfg);\n}\n")
+                     "int planted(const config_t *cfg);\n"
+                     "int planted(const config_t *cfg)\n{\n   return cfg != 0;\n}\n")
         rc = subprocess.run(
             [sys.executable, os.path.join(tmp, "scripts", "check-config-encapsulation.py")],
             capture_output=True,
@@ -185,7 +217,7 @@ def plant_test(root):
         if rc.returncode == 0:
             print(
                 "check-config-encapsulation: PLANT TEST FAILED — a new config_t "
-                "declaration did not trip the check",
+                "POINTER PARAMETER did not trip the check",
                 file=sys.stderr,
             )
             return 1
@@ -196,7 +228,7 @@ def plant_test(root):
                 file=sys.stderr,
             )
             return 1
-    print("check-config-encapsulation: plant-test ok (a new leak is caught and named)")
+    print("check-config-encapsulation: plant-test ok (a pointer-only leak is caught and named)")
     return 0
 
 
