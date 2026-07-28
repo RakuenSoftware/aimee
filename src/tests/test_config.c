@@ -114,7 +114,15 @@ int main(void)
       static config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       config_load(&cfg);
-      assert(strcmp(cfg.provider, "claude") == 0);
+      /* A fresh install has NO primary provider. It used to default to "claude",
+       * which pre-populated a provider nobody chose: the chat path synthesized a
+       * claude tmux-CLI agent for it and PINNED the turn to that agent, so on a
+       * machine with no claude CLI every turn died with "no agent available for
+       * role 'code'" while the operator's own agents sat there ineligible — and
+       * completing the setup wizard did not help, because the wizard writes
+       * agents.json's default_agent and this pin overrode it. Empty means "not
+       * chosen", which lets default_agent decide. */
+      assert(cfg.provider[0] == '\0');
       /* Capability routing defaults ON: routing enforces the packet's required
        * capabilities and minimum context window. Pinned explicitly so flipping
        * it is a deliberate, reviewed change rather than an accident — with it
