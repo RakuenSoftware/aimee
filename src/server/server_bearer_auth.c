@@ -28,6 +28,10 @@
 static char g_bearer_extra[AIMEE_API_BEARER_EXTRA_MAX][65];
 static int g_bearer_extra_count = 0;
 static pthread_mutex_t g_bearer_lock = PTHREAD_MUTEX_INITIALIZER;
+/* The DB claim and config publication form one cross-store transaction. Serialize
+ * same-process wizard retries so an UNBOUND reader cannot mistake another
+ * worker's not-yet-published claim for crash residue and abandon it. */
+static pthread_mutex_t g_first_user_bootstrap_lock = PTHREAD_MUTEX_INITIALIZER;
 
 void server_http_set_bearer_extra(const char *const *bearers, int n)
 {
@@ -178,7 +182,7 @@ static int configured_bearer_for_hash(const config_t *cfg, const char *wanted, c
    return 0;
 }
 
-int server_http_first_user_bootstrap(const char *principal, char *bearer, size_t bearer_cap)
+static int first_user_bootstrap_locked(const char *principal, char *bearer, size_t bearer_cap)
 {
    if (bearer && bearer_cap)
       bearer[0] = '\0';
@@ -238,6 +242,14 @@ int server_http_first_user_bootstrap(const char *principal, char *bearer, size_t
    OPENSSL_cleanse(proposed, sizeof(proposed));
    OPENSSL_cleanse(proposed_hash, sizeof(proposed_hash));
    return 0;
+}
+
+int server_http_first_user_bootstrap(const char *principal, char *bearer, size_t bearer_cap)
+{
+   pthread_mutex_lock(&g_first_user_bootstrap_lock);
+   int result = first_user_bootstrap_locked(principal, bearer, bearer_cap);
+   pthread_mutex_unlock(&g_first_user_bootstrap_lock);
+   return result;
 }
 
 int server_http_first_user_bind_cert(const char *bearer, const char *cert_serial)

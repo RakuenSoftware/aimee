@@ -16,6 +16,7 @@
 #include "util.h"
 #include <netinet/in.h> /* INADDR_ANY / INADDR_LOOPBACK for the bind-policy test */
 #include <assert.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -24,6 +25,23 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+
+typedef struct
+{
+   pthread_barrier_t *barrier;
+   int result;
+   char bearer[65];
+} wizard_bootstrap_thread_t;
+
+static void *wizard_bootstrap_thread(void *arg)
+{
+   wizard_bootstrap_thread_t *thread = arg;
+   int barrier_result = pthread_barrier_wait(thread->barrier);
+   assert(barrier_result == 0 || barrier_result == PTHREAD_BARRIER_SERIAL_THREAD);
+   thread->result =
+       server_http_first_user_bootstrap("webuser:alice", thread->bearer, sizeof(thread->bearer));
+   return NULL;
+}
 
 int kb_client_mtls_management_jwks_fetch(void *ctx, char *out, size_t cap, size_t *len)
 {
@@ -1070,7 +1088,7 @@ int main(void)
               CAP_SESSION_ADMIN) != 0);
       /* The public bootstrap may rotate only; the outer bootstrap gate refuses
        * additive enrollment even though the route is otherwise TCP-reachable. */
-      assert(server_http_bootstrap_gate(1, BOOT, "POST", "/v1/api/enroll_bearer") == 1);
+      assert(server_http_bootstrap_gate(1, 1, "POST", "/v1/api/enroll_bearer") == 1);
    }
 
    /* --- P5-B3b dedicated management transport classification. The two
@@ -2167,8 +2185,22 @@ int main(void)
       assert(config_save(cfg) == 0);
       free(cfg);
 
+      pthread_barrier_t barrier;
+      pthread_t workers[2];
+      wizard_bootstrap_thread_t attempts[2] = {{.barrier = &barrier}, {.barrier = &barrier}};
+      assert(pthread_barrier_init(&barrier, NULL, 3) == 0);
+      assert(pthread_create(&workers[0], NULL, wizard_bootstrap_thread, &attempts[0]) == 0);
+      assert(pthread_create(&workers[1], NULL, wizard_bootstrap_thread, &attempts[1]) == 0);
+      int barrier_result = pthread_barrier_wait(&barrier);
+      assert(barrier_result == 0 || barrier_result == PTHREAD_BARRIER_SERIAL_THREAD);
+      assert(pthread_join(workers[0], NULL) == 0);
+      assert(pthread_join(workers[1], NULL) == 0);
+      assert(pthread_barrier_destroy(&barrier) == 0);
+      assert(attempts[0].result == 0 && attempts[1].result == 0);
+      assert(strcmp(attempts[0].bearer, attempts[1].bearer) == 0);
+
       char bearer[65], again[65], principal[128];
-      assert(server_http_first_user_bootstrap("webuser:alice", bearer, sizeof(bearer)) == 0);
+      snprintf(bearer, sizeof(bearer), "%s", attempts[0].bearer);
       assert(strlen(bearer) == 64 && server_http_enrolled_bearer_count() == 1);
       cfg = calloc(1, sizeof(*cfg));
       assert(cfg && config_load(cfg) == 0);
