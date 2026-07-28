@@ -86,6 +86,39 @@ int config_load(config_t *cfg)
    }
    return 0;
 }
+
+/* Accessor stubs: the production seam moved from config_load to per-field
+ * accessors. Values match what this file's config_load stub produced, so the
+ * assertions below are unchanged. */
+int config_ingress_cache_placement_enabled(void)
+{
+   return g_test_placement;
+}
+
+int config_ingress_compress_enabled(void)
+{
+   return 0;
+}
+
+int config_ingress_compress_min_chars(void)
+{
+   return 0;
+}
+
+int config_ingress_preinject_assembly_budget(void)
+{
+   return 1200;
+}
+
+int config_ingress_preinject_enabled(void)
+{
+   return 1;
+}
+
+int config_kb_evidence_emit_enabled(void)
+{
+   return 0;
+}
 const char *config_default_dir(void)
 {
    return "/tmp/aimee-test";

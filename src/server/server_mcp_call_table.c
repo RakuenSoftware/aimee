@@ -521,9 +521,8 @@ static cJSON *mcph_lsp_diagnostics(struct mcp_call *c)
    char ws_buf[MAX_PATH_LEN] = "";
    if (!workspace)
    {
-      config_t cfg;
-      if (config_load(&cfg) == 0 && cfg.workspace_count > 0)
-         snprintf(ws_buf, sizeof(ws_buf), "%s", cfg.workspaces[0]);
+      if (config_workspace_count() > 0)
+         snprintf(ws_buf, sizeof(ws_buf), "%s", config_workspaces(0));
       workspace = ws_buf[0] ? ws_buf : ".";
    }
 
@@ -574,9 +573,8 @@ static cJSON *mcph_lsp_definition_or_references(struct mcp_call *c)
    char ws_buf[MAX_PATH_LEN] = "";
    if (!workspace)
    {
-      config_t cfg;
-      if (config_load(&cfg) == 0 && cfg.workspace_count > 0)
-         snprintf(ws_buf, sizeof(ws_buf), "%s", cfg.workspaces[0]);
+      if (config_workspace_count() > 0)
+         snprintf(ws_buf, sizeof(ws_buf), "%s", config_workspaces(0));
       workspace = ws_buf[0] ? ws_buf : ".";
    }
 
@@ -1003,8 +1001,7 @@ static cJSON *mcph_index_hybrid(struct mcp_call *c)
     * same flag as the retrieval-side trust tie-break. */
    if (json && project && c->sid && c->sid[0])
    {
-      config_t ccfg;
-      if (config_load(&ccfg) == 0 && ccfg.code_trust_actuation_enabled)
+      if (config_code_trust_actuation_enabled())
       {
          cJSON *root = cJSON_Parse(json);
          cJSON *results = root ? cJSON_GetObjectItemCaseSensitive(root, "results") : NULL;
@@ -1250,10 +1247,7 @@ static cJSON *mcph_code_span_get(struct mcp_call *c)
    free(projs);
    if (!root[0])
       return text_content("error: unknown project (no indexed root)");
-
-   config_t cfg;
-   config_load(&cfg);
-   int max_lines = cfg.code_span_max_lines > 0 ? cfg.code_span_max_lines : 400;
+   int max_lines = config_code_span_max_lines() > 0 ? config_code_span_max_lines() : 400;
 
    cJSON *result =
        code_span_read(jp->valuestring, root, jf->valuestring, line_start, line_end, max_lines);

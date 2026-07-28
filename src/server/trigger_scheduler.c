@@ -559,8 +559,7 @@ static int trigger_file_run(const trigger_rule_t *rule, const char *artifact_pat
    snprintf(turn_id, sizeof(turn_id), "trigger-%s", rule->source);
    /* Resolve the workflows toggle from the config-store `modules.workflows` (canonical),
     * falling back to the deprecated env default; keeps gw_orch_workflows config-free. */
-   config_t wcfg;
-   int wtri = (config_load(&wcfg) == 0) ? wcfg.module_workflows : -1;
+   int wtri = config_module_workflows();
    int wf_enabled = config_module_enabled(wtri, gw_orch_workflows_enabled());
    if (gw_orch_workflows_run(&caps, turn_id, rule->pipeline_template, artifact_path, wf_enabled) !=
        0)
@@ -1127,12 +1126,12 @@ static void trigger_scheduler_fire_rule(const trigger_rule_t *rule)
              rule->pipeline_template, id, pipeline_buf);
 }
 
-static int config_has_cron_job(const config_t *cfg, const char *id)
+static int config_has_cron_job(const char *id)
 {
-   if (!cfg || !id || !id[0])
+   if (!id || !id[0])
       return 0;
-   for (int i = 0; i < cfg->cron_job_count && i < CRON_JOBS_MAX; i++)
-      if (strcmp(cfg->cron_jobs[i].id, id) == 0)
+   for (int i = 0; i < config_cron_job_count() && i < CRON_JOBS_MAX; i++)
+      if (strcmp(config_cron_job_id(i), id) == 0)
          return 1;
    return 0;
 }
@@ -1165,9 +1164,7 @@ static int proposals_due(const trigger_rule_t *rule, const struct tm *tm)
     * the flag true to opt back in to the every-pass autonomous scan. */
    if (rule && strcmp(rule->source, "proposals") == 0)
    {
-      config_t cfg;
-      config_load(&cfg);
-      return cfg.wfe_proposals_autoscan_enabled ? 1 : 0;
+      return config_wfe_proposals_autoscan_enabled() ? 1 : 0;
    }
    return 1; /* poll the repo every pass; per-proposal dedup makes re-scans idempotent */
 }
@@ -1364,8 +1361,6 @@ static void sched_tick_armed(time_t now, int max_concurrent)
 
 static void sched_tick(void)
 {
-   config_t cfg;
-   config_load(&cfg);
 
    time_t now = time(NULL);
    struct tm tm;
@@ -1373,9 +1368,12 @@ static void sched_tick(void)
    const char *engine = getenv("AIMEE_WFE_ENGINE");
    int go_wfe = engine && strcmp(engine, "go") == 0;
 
-   for (int i = 0; i < cfg.trigger_rule_count && i < TRIGGER_RULES_MAX; i++)
+   for (int i = 0; i < config_trigger_rule_count() && i < TRIGGER_RULES_MAX; i++)
    {
-      const trigger_rule_t *rule = &cfg.trigger_rules[i];
+      trigger_rule_t rule_buf;
+      if (config_trigger_rule_at(i, &rule_buf) != 0)
+         continue;
+      const trigger_rule_t *rule = &rule_buf;
       if (go_wfe)
          break; /* Go is the sole owner of every WFE admission source. */
       const trigger_source_t *src = trigger_source_find(rule->source);
@@ -1388,12 +1386,15 @@ static void sched_tick(void)
       if (now - g_last_fired[i] < 55)
          continue;
       g_last_fired[i] = now;
-      src->fire(rule, cfg.trigger_max_concurrent);
+      src->fire(rule, config_trigger_max_concurrent());
    }
 
-   for (int i = 0; i < cfg.cron_job_count && i < CRON_JOBS_MAX; i++)
+   for (int i = 0; i < config_cron_job_count() && i < CRON_JOBS_MAX; i++)
    {
-      const cron_job_t *job = &cfg.cron_jobs[i];
+      cron_job_t job_buf;
+      if (config_cron_job_at(i, &job_buf) != 0)
+         continue;
+      const cron_job_t *job = &job_buf;
       if (!job->enabled || !job->id[0] || !job->schedule[0])
          continue;
       int match = schedule_matches(job->schedule, &tm);
@@ -1412,7 +1413,7 @@ static void sched_tick(void)
    for (int i = 0; i < db_count && i < CRON_JOBS_MAX; i++)
    {
       const cron_job_t *job = &db_jobs[i];
-      if (config_has_cron_job(&cfg, job->id) || !job->enabled || !job->id[0] || !job->schedule[0])
+      if (config_has_cron_job(job->id) || !job->enabled || !job->id[0] || !job->schedule[0])
          continue;
       int match = schedule_matches(job->schedule, &tm);
       if (match != 1)
@@ -1428,10 +1429,10 @@ static void sched_tick(void)
    /* Armed workflows (triggers-as-blocks): saved workflows whose start node is
     * a trigger block file runs through the same plumbing as trigger_rules. */
    if (!go_wfe)
-      sched_tick_armed(now, cfg.trigger_max_concurrent);
+      sched_tick_armed(now, config_trigger_max_concurrent());
 
    /* Skill curator: idle-guarded; safe to call on every tick. */
-   if (cfg.skills_curator_enabled)
+   if (config_skills_curator_enabled())
       skill_curator_maybe();
 }
 

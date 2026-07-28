@@ -1051,14 +1051,13 @@ int memory_find_facts_visible(const char *query, const char *workspace, const ch
       }
    }
    {
-      config_t floor_cfg;
-      if (config_load(&floor_cfg) == 0 && floor_cfg.memory_recall_lanes_enabled)
+      if (config_memory_recall_lanes_enabled())
       {
          int eff =
              memory_apply_lane_floor(candidates, count, s_lane_summary_ids, s_lane_summary_count,
-                                     floor_cfg.memory_recall_lanes_floor_summary, reranked);
+                                     config_memory_recall_lanes_floor_summary(), reranked);
          memory_apply_lane_floor(candidates, count, s_lane_fact_ids, s_lane_fact_count,
-                                 floor_cfg.memory_recall_lanes_floor_fact, eff);
+                                 config_memory_recall_lanes_floor_fact(), eff);
       }
    }
    for (int i = 0; i < reranked; i++)

@@ -551,8 +551,7 @@ int memory_list(const char *tier, const char *kind, int limit, memory_t *out, in
     * and explicit kind/tier queries still see them — only the un-filtered
     * listing path filters. */
    int hide_archived = 0;
-   config_t cfg;
-   if (config_load(&cfg) == 0 && cfg.memory_lifecycle_enabled && cfg.memory_lifecycle_hide_archived)
+   if (config_memory_lifecycle_enabled() && config_memory_lifecycle_hide_archived())
       hide_archived = 1;
    return db2_memory_list(tier, kind, hide_archived, limit, out, max);
 }

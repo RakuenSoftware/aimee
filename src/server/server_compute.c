@@ -955,9 +955,7 @@ void delegate_worker(void *arg)
       if (!acp_command && tier_override < 0 && !(via_name && via_name[0]) &&
           !(provider_override && provider_override[0]) && !(model_override && model_override[0]))
       {
-         config_t dr_cfg;
-         config_load(&dr_cfg);
-         if (dr_cfg.bandit_live_decision_enabled)
+         if (config_bandit_live_decision_enabled())
          {
             static const char *const dr_arms[2] = {"cheapest", "premium"};
             if (kb_client_bandit_sample("delegate_routing", dr_arms, 2, dr_arm_id,
@@ -1786,12 +1784,11 @@ void delegate_worker(void *arg)
    if (dr_decision_id[0] && dr_arm_id[0])
    {
       double reward = rc == 0 ? 1.0 : 0.0;
-      config_t rcfg;
-      if (rc == 0 && config_load(&rcfg) == 0 && rcfg.cost_reward_enabled)
+      if (rc == 0 && config_cost_reward_enabled())
       {
          double dcost = db1_token_audit_cost_for_delegation(deleg_id);
-         reward = cost_shaped_reward(1, dcost, rcfg.cost_reward_lambda_pct,
-                                     rcfg.cost_reward_ref_usd_milli);
+         reward = cost_shaped_reward(1, dcost, config_cost_reward_lambda_pct(),
+                                     config_cost_reward_ref_usd_milli());
       }
       kb_client_bandit_close("delegate_routing", dr_decision_id, dr_arm_id, reward);
    }

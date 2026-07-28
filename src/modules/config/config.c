@@ -2208,6 +2208,46 @@ const char *config_embedding_command_field(void)
    return buf;
 }
 
+/* Copy ONE element of a config array out to the caller.
+ *
+ * The per-member accessors (config_cron_job_id(i), ...) suit a caller that
+ * wants one field. They do not suit one that passes the whole element onward —
+ * the trigger scheduler hands a trigger_rule_t to source callbacks, and the
+ * cron runner hands a cron_job_t to the executor. Those callers previously did
+ *   const cron_job_t *job = &cfg.cron_jobs[i];
+ * which required holding a config_t purely to reach the element.
+ *
+ * The ELEMENT types stay public on purpose: cron_job_t and trigger_rule_t are
+ * shared domain types (db1/cron_jobs.h uses cron_job_t with no config
+ * involved). config_t is the secret here, not them.
+ *
+ * Returns 0 and fills |out| on success; -1 for a bad index or unreadable
+ * config, leaving |out| untouched so a caller that ignores the return value
+ * gets its own zeroed struct rather than stale data. */
+int config_cron_job_at(int index, cron_job_t *out)
+{
+   if (!out || index < 0 || index >= CRON_JOBS_MAX)
+      return -1;
+   return config_field_read(offsetof(config_t, cron_jobs) + (size_t)index * sizeof(*out),
+                            sizeof(*out), out);
+}
+
+int config_trigger_rule_at(int index, trigger_rule_t *out)
+{
+   if (!out || index < 0 || index >= TRIGGER_RULES_MAX)
+      return -1;
+   return config_field_read(offsetof(config_t, trigger_rules) + (size_t)index * sizeof(*out),
+                            sizeof(*out), out);
+}
+
+int config_mcp_client_at(int index, config_mcp_client_t *out)
+{
+   if (!out || index < 0 || index >= CONFIG_MCP_MAX_CLIENTS)
+      return -1;
+   return config_field_read(offsetof(config_t, mcp_clients) + (size_t)index * sizeof(*out),
+                            sizeof(*out), out);
+}
+
 const char *config_embedding_command_current(const char *requested)
 {
    if (requested && requested[0])

@@ -299,10 +299,9 @@ cJSON *agent_build_request_anthropic(const agent_t *agent, cJSON *messages, cJSO
     * non-tools path. Default-off so the flag-rollout program can flip it
     * deliberately. The cache_min_chars floor is applied to the stable prefix
     * inside the helper, not the whole prompt. */
-   config_t cfg;
-   int cache_marking = (config_load(&cfg) == 0 && cfg.cache_shaping_enabled) ? 1 : 0;
+   int cache_marking = (config_cache_shaping_enabled()) ? 1 : 0;
    agent_anthropic_set_system(req, system_prompt, cache_marking,
-                              cache_marking ? cfg.cache_min_chars : 0);
+                              cache_marking ? config_cache_min_chars() : 0);
 
    if (safe_messages)
       cJSON_AddItemToObject(req, "messages", safe_messages);
