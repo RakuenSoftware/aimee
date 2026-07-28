@@ -1687,7 +1687,36 @@ CLANG_FORMAT ?= clang-format-19
 # Target-specific, so a standalone `make bus-blast-radius-check` stays strict.
 lint: BUS_BLAST_RADIUS_FLAGS := --allow-unbuilt
 
-lint: subject-corpus-check native-tool-parity-check inc-check line-check curator-sidecar-parse-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check proposal-reconcile-check dev-accept-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check p1-tenant-guard-check bus-blast-radius-check
+# Every gate runs, not just up to the first failure.
+#
+# This was `lint: <36 prerequisites>`, so make stopped at the first that failed.
+# A contributor fixes that one, sees lint pass, and ships — with every later gate
+# still unrun. It is quietly expensive: one change adding a /v1 route tripped
+# docs-gen-check; fixing that revealed server-api-conformance-check; fixing THAT
+# revealed cli-v1-routes-check. Three CI round-trips for a single omission that
+# one local run should have reported in full.
+#
+# Sequential and in the listed order, because some checks read files an earlier
+# one regenerates. BUS_BLAST_RADIUS_FLAGS is passed down explicitly: it is a
+# target-specific variable on `lint`, and target-specific variables do NOT cross
+# a recursive make, so bus-blast-radius-check would otherwise lose
+# --allow-unbuilt and start demanding the whole shipping set.
+LINT_CHECKS = subject-corpus-check native-tool-parity-check inc-check line-check curator-sidecar-parse-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check proposal-reconcile-check dev-accept-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check p1-tenant-guard-check bus-blast-radius-check
+
+lint:
+	@fail=""; n=0; \
+	for c in $(LINT_CHECKS); do \
+	  n=$$((n+1)); \
+	  $(MAKE) --no-print-directory BUS_BLAST_RADIUS_FLAGS='$(BUS_BLAST_RADIUS_FLAGS)' "$$c" \
+	    || fail="$$fail $$c"; \
+	done; \
+	if [ -n "$$fail" ]; then \
+	  echo; \
+	  echo "lint: FAILED —$$fail"; \
+	  echo "lint: all $$n checks ran; fix every one listed, not just the first."; \
+	  exit 1; \
+	fi; \
+	echo "lint: all $$n checks passed"
 
 # P1 (N1): every tenant-scoped db2 entrypoint must call db2_tenant_require_pg(),
 # so a new entry can never silently run without RLS on the SQLite shim.
