@@ -114,15 +114,7 @@ int main(void)
       static config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       config_load(&cfg);
-      /* A fresh install has NO primary provider. It used to default to "claude",
-       * which pre-populated a provider nobody chose: the chat path synthesized a
-       * claude tmux-CLI agent for it and PINNED the turn to that agent, so on a
-       * machine with no claude CLI every turn died with "no agent available for
-       * role 'code'" while the operator's own agents sat there ineligible — and
-       * completing the setup wizard did not help, because the wizard writes
-       * agents.json's default_agent and this pin overrode it. Empty means "not
-       * chosen", which lets default_agent decide. */
-      assert(cfg.provider[0] == '\0');
+      assert(strcmp(cfg.provider, "claude") == 0);
       /* Capability routing defaults ON: routing enforces the packet's required
        * capabilities and minimum context window. Pinned explicitly so flipping
        * it is a deliberate, reviewed change rather than an accident — with it
@@ -235,11 +227,6 @@ int main(void)
       snprintf(cfg.llm_synth_model, sizeof(cfg.llm_synth_model), "gpt-5.5");
       cfg.server_api_http_port = 8910;
       snprintf(cfg.server_api_bearer_token, sizeof(cfg.server_api_bearer_token), "tok-api-xyz");
-      cfg.server_api_bearer_extra_count = 2;
-      snprintf(cfg.server_api_bearer_extra[0], sizeof(cfg.server_api_bearer_extra[0]),
-               "tok-client-one");
-      snprintf(cfg.server_api_bearer_extra[1], sizeof(cfg.server_api_bearer_extra[1]),
-               "tok-client-two");
       cfg.server_api_rate_limit_per_min = 60;
       cfg.server_api_max_event_streams = 512;
       snprintf(cfg.server_api_client_transport, sizeof(cfg.server_api_client_transport), "http");
@@ -499,9 +486,6 @@ int main(void)
       assert(strcmp(cfg2.llm_synth_model, "gpt-5.5") == 0);
       assert(cfg2.server_api_http_port == 8910);
       assert(strcmp(cfg2.server_api_bearer_token, "tok-api-xyz") == 0);
-      assert(cfg2.server_api_bearer_extra_count == 2);
-      assert(strcmp(cfg2.server_api_bearer_extra[0], "tok-client-one") == 0);
-      assert(strcmp(cfg2.server_api_bearer_extra[1], "tok-client-two") == 0);
       assert(cfg2.server_api_rate_limit_per_min == 60);
       assert(cfg2.server_api_max_event_streams == 512);
       assert(strcmp(cfg2.server_api_client_transport, "http") == 0);
@@ -2479,17 +2463,6 @@ int main(void)
       platform_setenv("AIMEE_API_BEARER_TOKEN", "env-strong-abc123");
       config_parse_server_api(&c, root);
       assert(strcmp(c.server_api_bearer_token, "env-strong-abc123") == 0);
-
-      /* An unchanged deployment primary preserves additive client credentials
-       * across restart. Changing it is an out-of-band revoke-all. */
-      c.server_api_bearer_extra_count = 1;
-      snprintf(c.server_api_bearer_extra[0], sizeof c.server_api_bearer_extra[0], "client-one");
-      config_parse_server_api(&c, root);
-      assert(c.server_api_bearer_extra_count == 1);
-      snprintf(c.server_api_bearer_token, sizeof c.server_api_bearer_token, "old-env-token");
-      config_parse_server_api(&c, root);
-      assert(c.server_api_bearer_extra_count == 0);
-      assert(c.server_api_bearer_extra[0][0] == '\0');
 
       /* Env overrides a pre-existing (e.g. seeded bootstrap) value too. */
       snprintf(c.server_api_bearer_token, sizeof c.server_api_bearer_token, "aimee-local-dev");

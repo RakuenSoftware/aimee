@@ -55,20 +55,6 @@ else
     pass "Go is the exclusive WFE runtime owner"
 fi
 
-if grep -qF '[ -d "$AIMEE_HOME/workflows" ] && chown -R aimee:aimee "$AIMEE_HOME/workflows"' \
-    ../deploy/container/server-entrypoint.sh; then
-    pass "server entrypoint makes the workflow registry writable by the Go WFE"
-else
-    fail "server entrypoint leaves the workflow registry root-owned"
-fi
-
-if awk '/^FROM /{runtime=($0=="FROM debian:bookworm-slim"); found=0} runtime && /build-essential/{found=1} END{exit !found}' \
-    ../Dockerfile.server; then
-    pass "server runtime carries the baseline workflow verification toolchain"
-else
-    fail "server runtime cannot execute Make/C/C++ workflow verification"
-fi
-
 case "$MODE" in
     default) echo "build-integrity:" ;;
     --build-variants) echo "build-variants:" ;;
@@ -201,34 +187,6 @@ else
     fail "scripts reference missing make targets:$bad_script_targets"
 fi
 
-# The cross-platform smoke exports both modern URL and legacy endpoint forms.
-# Preserve the transport scheme: POSIX gives AIMEE_API_ENDPOINT precedence, so
-# mapping an https:// URL to tcp: makes a healthy TLS server look unreachable.
-smoke_tmp=$(mktemp -d "${TMPDIR:-/tmp}/aimee-smoke-endpoint.XXXXXX") || smoke_tmp=
-smoke_endpoints_ok=0
-if [ -n "$smoke_tmp" ]; then
-    printf '%s\n' '#!/bin/sh' 'test "${AIMEE_API_ENDPOINT:-}" = "${EXPECTED_ENDPOINT:?}"' \
-        > "$smoke_tmp/fake-aimee"
-    chmod +x "$smoke_tmp/fake-aimee"
-    smoke_endpoints_ok=1
-    for smoke_case in 'http://example.test:8740|tcp:example.test:8740' \
-                      'https://example.test:8743|tls:example.test:8743'; do
-        smoke_url=${smoke_case%%|*}
-        smoke_expected=${smoke_case#*|}
-        if ! AIMEE_BIN="$smoke_tmp/fake-aimee" SERVER_URL="$smoke_url" \
-             EXPECTED_ENDPOINT="$smoke_expected" FORCE_MODE=full \
-             bash ../scripts/aimee-thin-client-smoke.sh >/dev/null 2>&1; then
-            smoke_endpoints_ok=0
-        fi
-    done
-    rm -rf "$smoke_tmp"
-fi
-if [ "$smoke_endpoints_ok" = "1" ]; then
-    pass "thin-client smoke preserves HTTP/TLS endpoint schemes"
-else
-    fail "thin-client smoke endpoint scheme regression"
-fi
-
 # 7a. PreToolUse grep redirect hook must keep targeted file inspection unblocked.
 if python3 ../scripts/test-redirect-grep-hook.py >/dev/null 2>&1; then
     pass "redirect grep hook classifier"
@@ -249,11 +207,7 @@ fi
 
 hook_payload=$(printf '{"tool_name":"spawn_agent","tool_input":{"prompt":"x"},"cwd":"%s"}' "$(pwd)")
 set +e
-# Force the transport-failure path this regression exercises.  A developer may
-# already have a healthy local server; without an explicit unreachable target,
-# that server's policy response makes this test depend on host state.
-hook_out=$(printf '%s' "$hook_payload" |
-    AIMEE_HOOK_CLIENT=claude AIMEE_SERVER_URL=http://127.0.0.1:9 ../aimee hooks pre 2>/dev/null)
+hook_out=$(printf '%s' "$hook_payload" | AIMEE_HOOK_CLIENT=claude ../aimee hooks pre 2>/dev/null)
 hook_rc=$?
 set -e
 if [ "$hook_rc" -eq 0 ] &&
@@ -689,7 +643,6 @@ _check_existing_shipped_artifacts() {
     provider_help_rc=$?
     if [ "$provider_help_rc" -eq 0 ] &&
        grep -q "provider" <<< "$provider_help_output" &&
-       grep -q -- "--all" <<< "$provider_help_output" &&
        ! grep -q "Unknown command" <<< "$provider_help_output"; then
         pass "server-routed provider help is client-side"
     else
@@ -839,7 +792,6 @@ _group_integ() {
     provider_help_rc=$?
     if [ "$provider_help_rc" -eq 0 ] &&
        grep -q "provider" <<< "$provider_help_output" &&
-       grep -q -- "--all" <<< "$provider_help_output" &&
        ! grep -q "Unknown command" <<< "$provider_help_output"; then
         pass "server-routed provider help is client-side"
     else

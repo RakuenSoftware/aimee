@@ -669,8 +669,7 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char *argv[SERVER_AGENT_MAX_ARGS];
    int argc = server_agent_args(req, argv, (int)(sizeof(argv) / sizeof(argv[0])));
    if (argc < 3)
-      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
-                                    "usage: agent add <name> <endpoint> <model>", NULL);
+      return server_send_error(conn, "usage: agent add <name> <endpoint> <model>", NULL);
 
    opt_parsed_t opts;
    opt_parse(argc - 3, argv + 3, bool_flags, &opts);
@@ -1250,8 +1249,7 @@ int handle_agent_probe(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    opt_parse(argc, argv, bool_flags, &opts);
    const char *name = opt_pos(&opts, 0);
    if (!name || !name[0])
-      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "agent.probe requires name",
-                                    NULL);
+      return server_send_error(conn, "agent.probe requires name", NULL);
 
    agent_config_t cfg;
    if (agent_load_config(&cfg) != 0)

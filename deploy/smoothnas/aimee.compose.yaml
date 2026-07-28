@@ -74,7 +74,6 @@ services:
       retries: 5
     volumes:
       - aimee-kb-home:/var/lib/aimee
-      - aimee-server-workspaces:/var/lib/aimee-workspaces:ro
 
   aimee-server:
     restart: unless-stopped

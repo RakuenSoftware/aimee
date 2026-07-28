@@ -38,25 +38,6 @@ func TestChairmanSubmitsFinalApprovalAfterDeterministicSynthesis(t *testing.T) {
 	}
 }
 
-func TestChairmanReceivesFrozenDiffEvidenceContract(t *testing.T) {
-	req := chairmanRequest()
-	artifact := req.Inputs["src"]
-	artifact.Type = "frozen_diff"
-	req.Inputs["src"] = artifact
-	agents := &discussionTestAgents{respond: func(request DelegateRequest) (string, error) {
-		if !strings.Contains(request.Prompt, "patch does not embed those logs or metadata") ||
-			!strings.Contains(request.Prompt, "use its tools to verify a material operational requirement") {
-			t.Fatalf("chairman did not receive frozen-diff evidence contract: %s", request.Prompt)
-		}
-		return fmt.Sprintf(`{"run_id":%q,"artifact_hash":%q,"artifact_stage":"frozen_diff","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`, req.WorkItem.ID, artifact.Hash), nil
-	}}
-	runner := &NativeRunner{agents: agents}
-	analysis := discussionAnalysis("blocking")
-	if _, approvals, _, _, errText, _ := runner.runPanelChairman(context.Background(), req, roundtablecfg.Panel{ChairmanEnabled: true, Chairman: "codex"}, analysis, analysis.Feedback, 0, false, "frozen_diff"); errText != "" || approvals != len(analysis.Reports) {
-		t.Fatalf("chairman approval failed: approvals=%d err=%q", approvals, errText)
-	}
-}
-
 func TestChairmanChangesReceiveStableFinalIDs(t *testing.T) {
 	agents := &discussionTestAgents{respond: func(DelegateRequest) (string, error) {
 		return chairmanResponse(`"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"direction is right"},"verdict":"changes","findings":[{"id":"raw","severity":"foundational","location":"design","summary":"architecture cannot work","recommendation":"replace it"}]}`), nil

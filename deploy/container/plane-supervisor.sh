@@ -58,42 +58,13 @@ aimee_supervise_plane_pair() {
     if aimee_pid_is_live "$_aimee_peer_pid" "$_aimee_peer_born"; then
         kill -KILL "$_aimee_peer_pid" 2>/dev/null || true
     fi
-    # Reap the plane that exited FIRST with its status intact — that status is
-    # the entire diagnosis. `wait` yields 128+N for a signalled child, which is
-    # what distinguishes "someone stopped us" (143 = SIGTERM) and "the kernel
-    # killed us" (137 = SIGKILL/OOM) from "the process failed" (a small code).
-    # Discarding it with `|| true` made all three read as the same event.
-    #
-    # The PEER's status is deliberately dropped: we just killed it ourselves, so
-    # its code describes our own shutdown and says nothing about the failure.
-    if [ "$AIMEE_FIRST_EXIT" = server ]; then
-        if wait "$_aimee_server_pid" 2>/dev/null; then AIMEE_FIRST_STATUS=0; else
-            AIMEE_FIRST_STATUS=$?
-        fi
-        wait "$_aimee_wfe_pid" 2>/dev/null || true
-    else
-        if wait "$_aimee_wfe_pid" 2>/dev/null; then AIMEE_FIRST_STATUS=0; else
-            AIMEE_FIRST_STATUS=$?
-        fi
-        wait "$_aimee_server_pid" 2>/dev/null || true
-    fi
+    wait "$_aimee_server_pid" 2>/dev/null || true
+    wait "$_aimee_wfe_pid" 2>/dev/null || true
 }
 
 # Entrypoint-facing wrapper: supervision returning means one plane died, so the
 # two-plane unit must exit nonzero and let restartPolicy recreate both planes.
-#
-# It used to `return 1` unconditionally, which meant the reported status was a
-# constant rather than a measurement: a SIGKILL (137), an OOM, a clean stop
-# (143) and a genuine failure all surfaced as "exited (status 1)". That sent me
-# hunting a core dump for a container that had simply been stopped.
-#
-# Report the real status. Nonzero is still guaranteed for the restart contract:
-# a plane that exits 0 is still a failure of the unit, so 0 maps to 1.
 aimee_supervise_plane_unit() {
-    AIMEE_FIRST_STATUS=1
     aimee_supervise_plane_pair "$1" "$2"
-    if [ "$AIMEE_FIRST_STATUS" -eq 0 ]; then
-        AIMEE_FIRST_STATUS=1
-    fi
-    return "$AIMEE_FIRST_STATUS"
+    return 1
 }

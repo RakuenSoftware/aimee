@@ -70,77 +70,33 @@ static int provider_models_cached(model_provider_t *p, char ***models_out, int *
    return db1_model_catalog_get(p->name, models_out, n_out);
 }
 
-/* Has the OPERATOR configured this provider, as opposed to aimee merely knowing
- * it exists? A credential or an explicit `provider set` is evidence of a
- * deliberate choice. auth_type "none" alone (ollama, llama_native) is NOT:
- * those need no key, so they would otherwise report configured on a machine
- * where nothing is installed or running. */
-static int provider_is_configured(const model_provider_t *p, const char *selected_provider)
-{
-   if (!p)
-      return 0;
-   if (selected_provider && selected_provider[0] && strcmp(p->name, selected_provider) == 0)
-      return 1;
-   if (!p->env_vars)
-      return 0;
-   for (int i = 0; p->env_vars[i]; i++)
-   {
-      const char *val = getenv(p->env_vars[i]);
-      if (val && val[0])
-         return 1;
-   }
-   return 0;
-}
-
 static void provider_list(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)ctx;
-   int only_available = 0, show_all = 0;
+   int only_available = 0;
    for (int ai = 0; ai < argc; ai++)
    {
       if (strcmp(argv[ai], "--available") == 0)
          only_available = 1;
-      else if (strcmp(argv[ai], "--all") == 0)
-         show_all = 1;
    }
 
    model_provider_t *providers[64];
    int n = model_provider_list(providers, 64);
-   config_t cfg = {0};
-   (void)config_load(&cfg);
-
-   /* Default: only what the operator configured. This used to print the whole
-    * built-in catalogue — seven rows, every one "[no key]" — under a heading
-    * that reads like a registration table, so a brand-new install looked
-    * pre-populated with providers nobody had chosen. Nothing was installed or
-    * configured; they were just names aimee knows. `--all` shows that catalogue
-    * for anyone who wants to see what can be configured, and `--available`
-    * still answers the different question of what is usable right now
-    * (including the local, no-key providers). */
-   int shown = 0;
+   if (n == 0)
+   {
+      printf("no providers registered\n");
+      return;
+   }
    for (int i = 0; i < n; i++)
    {
       const model_provider_t *p = providers[i];
       int available = provider_has_credentials(p);
       if (only_available && !available)
          continue;
-      if (!show_all && !only_available && !provider_is_configured(p, cfg.provider))
-         continue;
       const char *key_var = provider_first_env_var(p);
       printf("%-20s  %-24s  %-10s  %s\n", p->name, p->display_name ? p->display_name : "",
              p->auth_type ? p->auth_type : "",
              key_var ? (available ? "[key set]" : "[no key]") : "[local]");
-      shown++;
-   }
-
-   if (shown == 0)
-   {
-      if (show_all)
-         printf("no providers known\n");
-      else if (only_available)
-         printf("no providers available\n");
-      else
-         printf("no providers configured — `aimee provider list --all` shows what can be\n");
    }
 }
 
@@ -291,8 +247,7 @@ static void provider_quota(app_ctx_t *ctx, int argc, char **argv)
 }
 
 static const subcmd_t provider_subcmds[] = {
-    {"list", "List configured providers (--all: every known one, --available: usable now)",
-     provider_list},
+    {"list", "List registered providers and key status", provider_list},
     {"show", "Show provider profile detail", provider_show},
     {"models", "Fetch live model catalog from provider", provider_models},
     {"test", "Probe provider connectivity", provider_test},

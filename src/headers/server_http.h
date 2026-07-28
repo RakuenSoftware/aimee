@@ -105,37 +105,6 @@ extern "C"
    int server_http_authorize(int is_tcp, const char *bearer_cfg, const char *auth_header,
                              const char *api_key_header, int has_session_key);
 
-   /* JSON body for a server_http_authorize rejection (pure — unit-testable).
-    * |az| is that function's non-zero return. The 401 text carries the recovery
-    * path for a bearer rotation, which invalidates every already-paired client
-    * at once; clients echo this text verbatim, so it is the only guidance most
-    * operators will see. */
-   const char *server_http_auth_error_body(int az);
-
-   /* As server_http_authorize, but accepts any of |extra| alongside the primary
-    * bearer. This is what lets a client pair without revoking the credential
-    * every other client is already using. Compares every candidate regardless of
-    * an early match so timing does not reveal which token matched. */
-   int server_http_authorize_multi(int is_tcp, const char *bearer_cfg, const char *const *extra,
-                                   int extra_count, const char *auth_header,
-                                   const char *api_key_header, int has_session_key);
-
-   /* Publish the additional accepted bearers to the live listener. */
-   void server_http_set_bearer_extra(const char *const *bearers, int n);
-
-   /* How many additional bearers are currently accepted (diagnostics/tests). */
-   int server_http_enrolled_bearer_count(void);
-
-   /* server_http_authorize_multi against the live enrolled set. */
-   int server_http_authorize_enrolled(int is_tcp, const char *bearer_cfg, const char *auth_header,
-                                      const char *api_key_header, int has_session_key);
-
-   /* Synchronize the primary bearer with enrolled-bearer reads. Rotation clears
-    * enrolled credentials; startup preserves the extras just loaded from config. */
-   void server_http_update_primary_bearer(char *live, size_t live_sz, const char *bearer,
-                                          int revoke_enrolled);
-   void server_http_primary_bearer_snapshot(const char *live, char *out, size_t out_sz);
-
    /* Trust-on-first-use gate (pure — unit-testable). Returns 1 when an authorized
     * TCP request must be REFUSED because the live listener bearer is still the
     * one-time bootstrap default (AIMEE_BOOTSTRAP_BEARER) and the route is not the
@@ -271,8 +240,8 @@ extern "C"
    /* Stop the listener and close the socket. Safe if not started. */
    void server_http_stop(void);
 
-   /* Hot-swap the live TCP/TLS bearer without a restart and revoke every
-    * additionally-enrolled bearer. NULL/empty clears the primary. */
+   /* Hot-swap the live TCP/TLS bearer without a restart. Call only from a /v1
+    * route handler (serialized on the listener thread). NULL/empty clears it. */
    void server_http_set_bearer(const char *bearer);
 
    /* Default HTTP socket path: <config_default_dir>/aimee-http.sock. Returns a

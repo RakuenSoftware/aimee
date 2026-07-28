@@ -23,26 +23,6 @@ static inline void memory_autofree_impl(void *p)
 }
 #define MEMORY_AUTOFREE __attribute__((cleanup(memory_autofree_impl)))
 
-/* config_t is intentionally feature-rich and currently around 750 KiB. Memory
- * retrieval is a deep call chain in which several stages read configuration;
- * automatic config_t copies at each stage can cumulatively exhaust the default
- * 8 MiB thread stack. Keep those snapshots on the heap and let MEMORY_AUTOFREE
- * handle every early return. A strict-validation error returns no snapshot;
- * callers then skip optional features or apply their explicit hard-coded
- * fallback. */
-static inline config_t *memory_config_load_heap(void)
-{
-   config_t *cfg = malloc(sizeof(*cfg));
-   if (!cfg)
-      return NULL;
-   if (config_load(cfg) != 0)
-   {
-      free(cfg);
-      return NULL;
-   }
-   return cfg;
-}
-
 /* memory_core real-branch shared types (moved from memory_core.c #else) */
 typedef enum
 {

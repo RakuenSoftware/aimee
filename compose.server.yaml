@@ -94,9 +94,6 @@ services:
       retries: 5
     volumes:
       - aimee-kb-home:/var/lib/aimee
-      # kb.build/update receive server workspace paths; mount the same durable
-      # workspace volume at the same path so those paths are actually readable.
-      - aimee-server-workspaces:/var/lib/aimee-workspaces:ro
 
   aimee-server:
     restart: unless-stopped

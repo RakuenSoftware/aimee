@@ -69,7 +69,7 @@ def _stub_vec(text):
 # synth configured (the role reports `gated`/unconfigured). Mode is informational here
 # (local = a baked llama-server; forward/external = an off-box upstream) — both just
 # proxy /v1/chat/completions to AIMEE_LLM_SYNTH_URL, which is why one code path serves
-# all three. Streaming is relayed verbatim for OpenAI-compatible clients.
+# all three. Streaming is disabled in the first release (typed 400).
 SYNTH_URL = os.environ.get("AIMEE_LLM_SYNTH_URL", "").rstrip("/")
 SYNTH_MODE = os.environ.get("AIMEE_LLM_SYNTH_MODE", "local")
 SYNTH_MODEL = os.environ.get("AIMEE_LLM_SYNTH_MODEL", "aimee-synth")
@@ -111,10 +111,6 @@ class GatewayError(Exception):
         super().__init__(message)
         self.status = status
         self.body = {"error": {"code": code, "message": message}}
-
-
-class ClientDisconnected(Exception):
-    """The downstream HTTP client closed its response socket."""
 
 
 # ---- §1a controls (pure; unit-tested without a model/network) ----
@@ -501,9 +497,6 @@ def do_synth_stream(body, write):
                     break
                 write(chunk)
                 total += len(chunk)
-    except ClientDisconnected:
-        # A downstream disconnect says nothing about synth upstream health.
-        raise
     except Exception as exc:
         _synth_breaker.record(False)
         if _is_synth_device_lost(exc):
@@ -577,18 +570,11 @@ def build_server():
 
         def _send(self, code, payload):
             body = json.dumps(payload).encode("utf-8")
-            try:
-                self.send_response(code)
-                self.send_header("content-type", "application/json")
-                self.send_header("content-length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-            except (BrokenPipeError, ConnectionResetError):
-                # A caller can disappear while synth is still generating (for
-                # example, when the KB is restarted).  There is no socket left on
-                # which to report another error, so finish the handler quietly.
-                return False
-            return True
+            self.send_response(code)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
         def _send_sse_head(self):
             """SSE headers. Sent BEFORE the first relayed byte; after this the status is
@@ -656,14 +642,11 @@ def build_server():
                         started = []
 
                         def _w(b):
-                            try:
-                                if not started:
-                                    self._send_sse_head()
-                                    started.append(True)
-                                self.wfile.write(b)
-                                self.wfile.flush()
-                            except (BrokenPipeError, ConnectionResetError) as exc:
-                                raise ClientDisconnected from exc
+                            if not started:
+                                self._send_sse_head()
+                                started.append(True)
+                            self.wfile.write(b)
+                            self.wfile.flush()
 
                         n_out = do_synth_stream(req_body, _w)
                         audit("chat", scope, "ok", bytes_in=len(raw), bytes_out=n_out)
@@ -675,10 +658,6 @@ def build_server():
                         self._send(200, out)
                 else:
                     self._send(404, {"error": "not found"})
-            except ClientDisconnected:
-                # Streaming has already committed its status and the peer is gone.
-                # In particular, do not fall through and attempt a second 500 write.
-                return
             except GatewayError as ge:
                 if path == "/v1/chat/completions":
                     audit("chat", SCOPE_DEFAULT, "error", code=ge.body["error"]["code"])

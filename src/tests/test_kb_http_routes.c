@@ -1,6 +1,5 @@
 /* test_kb_http_routes.c: unit tests for kb_http_route() (Phase 1+5). */
 #include <assert.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -5280,11 +5279,6 @@ static void test_http_listener_concurrent_requests(void)
 
 int main(void)
 {
-   /* Match kb_main's process contract. TLS readiness probes deliberately open
-    * and close sockets; under parallel suite load a server write can race that
-    * close, and the default SIGPIPE disposition would kill the fixture instead
-    * of letting OpenSSL report the failed connection. */
-   signal(SIGPIPE, SIG_IGN);
    printf("kb_http_routes: ");
 
    test_health();

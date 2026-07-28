@@ -104,8 +104,7 @@ static int v1_route_tcp_exempt(const char *method, const char *path)
    if (strcmp(path, "/v1/runner/poll") == 0 || strcmp(path, "/v1/runner/respond") == 0)
       return 1;
    if (strcmp(method, "POST") == 0 &&
-       (strcmp(path, "/v1/api/rotate_bearer") == 0 || strcmp(path, "/v1/api/enroll_bearer") == 0 ||
-        strcmp(path, "/v1/cert/sign") == 0))
+       (strcmp(path, "/v1/api/rotate_bearer") == 0 || strcmp(path, "/v1/cert/sign") == 0))
       return 1;
    if (strcmp(method, "POST") == 0 && strcmp(path, "/v1/workspaces") == 0) /* workspace.add */
       return 1;

@@ -204,14 +204,9 @@ void kb_curator_queue_counts(kb_curator_queue_counts_t *out)
 
    char err[CQ_ERRBUF] = "";
    /* extract_doc pending/done from kb_async_jobs (one scan). */
-   /* A terminally failed job is neither 'pending' nor 'done', so counting only
-    * those two made a curator that failed EVERY job indistinguishable from one
-    * with nothing to do. Do not key this on last_error alone: successful jobs do
-    * not currently clear a prior retry error, and would warn forever. */
    static const char *sql_doc = "SELECT"
                                 " COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),0),"
-                                " COALESCE(SUM(CASE WHEN status='done' THEN 1 ELSE 0 END),0),"
-                                " COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),0)"
+                                " COALESCE(SUM(CASE WHEN status='done' THEN 1 ELSE 0 END),0)"
                                 " FROM kb_async_jobs WHERE kind='extract_doc'";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql_doc, err, sizeof(err));
    if (st)
@@ -220,7 +215,6 @@ void kb_curator_queue_counts(kb_curator_queue_counts_t *out)
       {
          out->extract_pending = (int)aimee_pg_column_int64(st, 0);
          out->extract_done = (int)aimee_pg_column_int64(st, 1);
-         out->extract_failing = (int)aimee_pg_column_int64(st, 2);
       }
       aimee_pg_finalize(st);
    }
@@ -228,8 +222,7 @@ void kb_curator_queue_counts(kb_curator_queue_counts_t *out)
    /* code_unit pending/done from kb_code_unit_jobs. */
    static const char *sql_code = "SELECT"
                                  " COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),0),"
-                                 " COALESCE(SUM(CASE WHEN status='done' THEN 1 ELSE 0 END),0),"
-                                 " COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),0)"
+                                 " COALESCE(SUM(CASE WHEN status='done' THEN 1 ELSE 0 END),0)"
                                  " FROM kb_code_unit_jobs";
    st = aimee_pg_prepare(conn, sql_code, err, sizeof(err));
    if (st)
@@ -238,36 +231,6 @@ void kb_curator_queue_counts(kb_curator_queue_counts_t *out)
       {
          out->code_unit_pending = (int)aimee_pg_column_int64(st, 0);
          out->code_unit_done = (int)aimee_pg_column_int64(st, 1);
-         out->code_unit_failing = (int)aimee_pg_column_int64(st, 2);
-      }
-      aimee_pg_finalize(st);
-   }
-
-   /* Return the newest terminal failure across both curator queues. Selecting
-    * MAX(last_error) chose the lexicographically greatest message, not the most
-    * recent one, and looking only at code-unit jobs hid extract failures (the
-    * live release candidate currently has exactly that shape). Pending or done
-    * jobs may retain historical retry text, so status='failed' is mandatory. */
-   static const char *sql_last_error =
-       "SELECT last_error FROM ("
-       " SELECT last_error,updated_at,id,0 AS source_order FROM kb_async_jobs"
-       " WHERE kind='extract_doc' AND status='failed' AND last_error<>''"
-       " UNION ALL"
-       " SELECT last_error,updated_at,id,1 AS source_order FROM kb_code_unit_jobs"
-       " WHERE status='failed' AND last_error<>''"
-       ") curator_failures"
-       " ORDER BY updated_at DESC,id DESC,source_order DESC LIMIT 1";
-   st = aimee_pg_prepare(conn, sql_last_error, err, sizeof(err));
-   if (st)
-   {
-      if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-      {
-         const char *le = aimee_pg_column_text(st, 0);
-         if (le && le[0])
-         {
-            snprintf(out->last_error, sizeof(out->last_error), "%s", le);
-            out->last_error_len = (int)strlen(out->last_error);
-         }
       }
       aimee_pg_finalize(st);
    }

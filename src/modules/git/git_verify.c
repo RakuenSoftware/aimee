@@ -272,7 +272,6 @@ static int generate_project_yaml(const char *project_root, const char *output_pa
    dstr_append_str(&yaml, "  steps:\n");
 
    int emitted = 0;
-   int has_build = 0;
    int has_unit_tests = 0;
    if (make_output_has_target(out, "verify-local"))
    {
@@ -318,18 +317,11 @@ static int generate_project_yaml(const char *project_root, const char *output_pa
           * build-integrity also runs isolated make builds internally, so keep it
           * behind unit-tests when they exist; otherwise it can race with the
           * verify unit-test wave on generated build artifacts. */
-         if ((strcmp(target, "unit-tests") == 0 || strcmp(target, "test") == 0) && has_build)
+         if (strcmp(target, "unit-tests") == 0 || strcmp(target, "test") == 0)
             dstr_appendf(&yaml, "      after: build\n");
          else if (strcmp(target, "build-integrity") == 0)
-         {
-            if (has_unit_tests)
-               dstr_appendf(&yaml, "      after: unit-tests\n");
-            else if (has_build)
-               dstr_appendf(&yaml, "      after: build\n");
-         }
+            dstr_appendf(&yaml, "      after: %s\n", has_unit_tests ? "unit-tests" : "build");
 
-         if (strcmp(step_name, "build") == 0)
-            has_build = 1;
          if (strcmp(target, "unit-tests") == 0 || strcmp(target, "test") == 0)
             has_unit_tests = 1;
          emitted++;
