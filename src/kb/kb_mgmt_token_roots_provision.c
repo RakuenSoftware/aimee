@@ -866,8 +866,8 @@ static kb_mgmt_roots_result_t publication_step(const kb_mgmt_roots_config_t *c,
           CRYPTO_memcmp(p.identity_digest, c->publication_identity_digest, 32) ||
           !p.hwm1_attestation_len || p.hwm1_attestation_len > sizeof(p.hwm1_attestation) ||
           vault_hwm_verify(p.custody_key_id, 1, p.hwm1_attestation, p.hwm1_attestation_len) ||
-          (live == 1 && (p.hwm1_attestation_len != att_len ||
-                         CRYPTO_memcmp(p.hwm1_attestation, att, att_len))))
+          (live == 1 &&
+           (p.hwm1_attestation_len != att_len || CRYPTO_memcmp(p.hwm1_attestation, att, att_len))))
          rc = KB_MGMT_ROOTS_INTEGRITY;
    }
    else

@@ -57,11 +57,10 @@ static int select_team(const kb_principal_t *owner, int64_t *team_id)
     * with more than one team. */
    char owner_key[576];
    int64_t existing_default = 0;
-   if (rc == 0 &&
-       (kb_identity_key(owner, owner_key, sizeof(owner_key)) != 0 ||
-        db2_membership_add(owner_key, *team_id,
-                           db2_membership_default_team(owner_key, &existing_default) != 0,
-                           NULL) != 0))
+   if (rc == 0 && (kb_identity_key(owner, owner_key, sizeof(owner_key)) != 0 ||
+                   db2_membership_add(
+                       owner_key, *team_id,
+                       db2_membership_default_team(owner_key, &existing_default) != 0, NULL) != 0))
       rc = -1;
    if (rc != 0)
    {
@@ -78,9 +77,8 @@ static int ensure_owner_membership(const kb_principal_t *owner, int64_t team_id)
    if (!owner || team_id < 1 || kb_identity_key(owner, owner_key, sizeof(owner_key)) != 0 ||
        db2_tenant_scope_begin(owner, 0) != 0)
       return -1;
-   int rc = db2_membership_add(owner_key, team_id,
-                               db2_membership_default_team(owner_key, &existing_default) != 0,
-                               NULL);
+   int rc = db2_membership_add(
+       owner_key, team_id, db2_membership_default_team(owner_key, &existing_default) != 0, NULL);
    if (rc != 0)
    {
       db2_tenant_scope_rollback();
