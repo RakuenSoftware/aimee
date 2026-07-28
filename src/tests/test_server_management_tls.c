@@ -17,6 +17,10 @@
 
 /* Narrow link stubs: this test exercises only the dedicated context and exact
  * peer profile, never the generic config/roster path. */
+static int g_default_mtls_mode;
+static int g_server_cert_ensure_calls;
+static int g_client_ca_ensure_calls;
+
 const char *config_default_dir(void)
 {
    return "/nonexistent";
@@ -24,10 +28,12 @@ const char *config_default_dir(void)
 int config_load(config_t *cfg)
 {
    memset(cfg, 0, sizeof(*cfg));
+   cfg->server_api_mtls = g_default_mtls_mode;
    return 0;
 }
 int pki_ca_ensure(void)
 {
+   g_client_ca_ensure_calls++;
    return -1;
 }
 int pki_is_revoked(const char *serial)
@@ -41,8 +47,9 @@ int pki_mtls_ramp_init(int mode)
 }
 int pki_ensure_self_signed_server_cert(const char *cert, const char *key)
 {
-   (void)cert;
-   (void)key;
+   assert(strcmp(cert, "/nonexistent/tls/server.crt") == 0);
+   assert(strcmp(key, "/nonexistent/tls/server.key") == 0);
+   g_server_cert_ensure_calls++;
    return -1;
 }
 void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
@@ -128,6 +135,16 @@ static int present(const char *ca, const char *cert, const char *key)
 int main(void)
 {
    signal(SIGPIPE, SIG_IGN);
+
+   /* Fresh wizard installs use optional mTLS so the first bearer-authenticated
+    * client can enroll its certificate. That mode must still provision the
+    * server identity certificate needed to bring up HTTPS. Fail at the stubbed
+    * client-CA step so this assertion stays independent of filesystem fixtures. */
+   g_default_mtls_mode = 1;
+   assert(server_tls_init_default() == -1);
+   assert(g_server_cert_ensure_calls == 1);
+   assert(g_client_ca_ensure_calls == 1);
+
    char dir[] = "/tmp/aimee-mgmt-tls-XXXXXX";
    assert(mkdtemp(dir));
    char ca[256], cakey[256], server[256], serverkey[256], client[256], clientkey[256], dual[256],
