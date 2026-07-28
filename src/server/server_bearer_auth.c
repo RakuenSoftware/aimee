@@ -18,7 +18,7 @@
  * using. Written only from a /v1 route handler on the single listener thread
  * that also reads it for authorization, so the write is serialized against
  * auth reads and needs no lock — the same contract as g_bearer. */
-static char g_bearer_extra[AIMEE_API_BEARER_EXTRA_MAX][256];
+static char g_bearer_extra[AIMEE_API_BEARER_EXTRA_MAX][65];
 static int g_bearer_extra_count = 0;
 
 void server_http_set_bearer_extra(const char *const *bearers, int n)
