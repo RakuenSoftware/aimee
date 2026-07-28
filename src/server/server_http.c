@@ -311,7 +311,7 @@ void server_http_api_status_report(int http_port, int bearer_configured, int rat
       return;
    }
 
-   SAR_APPEND("  listener:      enabled on http://127.0.0.1:%d/v1\n", http_port);
+   SAR_APPEND("  listener:      enabled on server loopback at http://127.0.0.1:%d/v1\n", http_port);
    SAR_APPEND("  bearer token:  %s\n", bearer_configured
                                            ? "configured"
                                            : "NOT configured — set aimee.api.bearer_token "
@@ -344,6 +344,11 @@ void server_http_api_status_report(int http_port, int bearer_configured, int rat
    SAR_APPEND(
        "  Copilot \"Manage Models\" (OpenAI-compatible): http://127.0.0.1:%d/v1   model aimee\n",
        http_port);
+   SAR_APPEND("\nThe URLs above are reachable only on the server host. From another machine, "
+              "tunnel the port first:\n"
+              "  ssh -L %d:127.0.0.1:%d <server-host>\n"
+              "Then keep using http://127.0.0.1:%d/v1 on the client.\n",
+              http_port, http_port, http_port);
    SAR_APPEND("\nUse a project:-scoped bearer (scope:project:<id>:<secret>) so the editor can\n"
               "read and chat but cannot perform admin mutations.\n");
    buf[n - 1] = '\0';

@@ -107,11 +107,12 @@ static void test_https_set_restores_insecure_env(void)
    /* `remote set` forces strict verification (suspends AIMEE_TLS_INSECURE) so a
     * self-signed server is always pinned even when the env var is set. It must
     * RESTORE the caller's env afterward — never permanently clobber it. Use an
-    * unresolvable https host: trust can't be established, but config still
-    * persists and the env var must come back. (Regression for the auto-pin fix.) */
+    * unresolvable https host: trust can't be established, so setup must report
+    * failure even though the target remains persisted for a later `remote trust`.
+    * The env var must still come back. (Regression for the auto-pin fix.) */
    setenv("AIMEE_TLS_INSECURE", "1", 1);
    char *argv[] = {(char *)"set", (char *)"https://made-host.invalid:8799", (char *)"tok"};
-   assert(cli_remote_cmd(3, argv, 1) == 0); /* set always persists config */
+   assert(cli_remote_cmd(3, argv, 1) == 1);
    int is_https = 0;
    assert(aimee_client_remote_active_scheme(NULL, 0, &is_https) == 1);
    assert(is_https == 1); /* scheme reporting must not depend on requesting a description */

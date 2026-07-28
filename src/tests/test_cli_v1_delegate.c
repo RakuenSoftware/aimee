@@ -631,6 +631,27 @@ static void test_server_status_route_lookup(void)
    printf("  PASS: test_server_status_route_lookup\n");
 }
 
+static void test_agent_probe_failure_controls_exit_status(void)
+{
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddBoolToObject(resp, "model_available", 0);
+   cJSON_AddBoolToObject(resp, "execution_ok", 0);
+   assert(agent_probe_response_is_failure(resp) == 1);
+   cJSON_ReplaceItemInObject(resp, "execution_ok", cJSON_CreateTrue());
+   /* A successful execution wins over a hosted provider's unavailable /models. */
+   assert(agent_probe_response_is_failure(resp) == 0);
+   cJSON_DeleteItemFromObject(resp, "execution_ok");
+   assert(agent_probe_response_is_failure(resp) == 1); /* --no-run model probe */
+   cJSON_ReplaceItemInObject(resp, "model_available", cJSON_CreateTrue());
+   assert(agent_probe_response_is_failure(resp) == 0);
+   cJSON_Delete(resp);
+
+   resp = cJSON_CreateObject();
+   assert(agent_probe_response_is_failure(resp) == 0); /* old server compatibility */
+   cJSON_Delete(resp);
+   printf("  PASS: test_agent_probe_failure_controls_exit_status\n");
+}
+
 static void test_kb_docs_push_route_and_marshal(void)
 {
    cli_v1_route_t route;
@@ -1740,6 +1761,7 @@ int main(void)
    test_memory_stats_route();
    test_memory_delete_and_supersede_routes();
    test_server_status_route_lookup();
+   test_agent_probe_failure_controls_exit_status();
    test_kb_docs_push_route_and_marshal();
    test_kb_remote_status_routes();
    test_git_verify_failure_detection();
