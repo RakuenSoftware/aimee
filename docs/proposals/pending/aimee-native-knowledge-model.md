@@ -37,6 +37,14 @@ representation schema, output compatibility, health, and generation identity.
     never means an unbounded union of projects or branches. Detached HEAD fails closed.
 11. Deleted/merged refs and superseded document renditions leave current retrieval immediately.
     Immutable originals remain available only under the applicable historical-retention policy.
+    A ref that is the caller's attached checkout is live work and is never retired underneath it:
+    a branch created off the default and a branch fast-forward-merged into it are indistinguishable
+    from refs alone, so the checkout is what separates unstarted work from finished work.
+12. Every derived object inherits the access scope of the evidence it derives from and can never
+    widen it. Repository identity is scoped to a tenant, because a repository key is derived from
+    the repository itself and is therefore identical for two tenants indexing the same upstream.
+13. Recovery from a stale generation requires the authority to publish one. A caller without it is
+    told what is published instead of being asked to retry an action it cannot perform.
 
 ## Evidence authority and lineage
 
@@ -105,6 +113,13 @@ Every indexed path, symbol, edge, memory fence, and external representation is s
 and generation. Cross-branch queries are explicit unions. A single-branch query cannot leak another
 snapshot's candidates.
 
+Repository identity is also scoped to a tenant. `repository_key` is derived from the repository, so
+two tenants indexing the same upstream produce the same key; uniqueness is therefore per tenant and
+a repository row carries its owning team. Untenanted rows (team 0) are the single-tenant case.
+Database-layer enforcement of that boundary — row-level security on the source tables, and a write
+path that stamps the authenticated team rather than 0 — is outstanding; it depends on the request
+context carrying a team, which today it does not, and lands with the tenant tier's isolation gate.
+
 ## Current-checkout routing
 
 The attached checkout is resolved locally using Git's symbolic ref plus exact commit and tree. Aimee
@@ -145,6 +160,9 @@ does not allow stale evidence.
 1. Observe and preserve a new ref or document revision.
 2. Diff content identities against the prior published snapshot.
 3. Reuse safe parse/index/provider outputs for identical content and compatible artifact hashes.
+   Content representations may be reused on identical content alone. Context representations may
+   not: they depend on typed neighbours, authority, validity, and snapshot, so identical content
+   whose neighbourhood moved is context-invalidated and re-requested in step 6.
 4. Process added or changed units and tombstone removed units in staging.
 5. Rebuild deterministic structural relationships for the affected closure.
 6. Request compatible external representations for changed or context-invalidated subjects.
@@ -172,7 +190,8 @@ Query execution is ordered so that access and source scope constrain everything 
 
 1. resolve caller access scope and the exact repository/ref/commit/generation being queried;
 2. assemble a bounded candidate union from exact lexical retrieval, any installed learned-sparse
-   leg, dense nearest neighbours, and typed structural graph expansion;
+   leg, dense nearest neighbours, and typed structural graph expansion, under a per-leg candidate
+   budget and a total union ceiling, both configured rather than implied;
 3. rescore that union with the provider's latent signals where available;
 4. rerank a small final set with the provider's cross-encoder;
 5. apply deterministic authority, provenance deduplication, and freshness policy;
@@ -187,9 +206,16 @@ anchors, the graph path that produced the candidate, evidence tier, authority, v
 time, contradiction state, and freshness. Supplying that packet is a runtime obligation. A provider
 that cannot consume it degrades to the deterministic path rather than scoring without provenance.
 
+When a budget truncates a leg, the truncation is reported with the result rather than presented as
+exhaustive. A ranking stage that receives fewer candidates than it asked for is a recall change, and
+a caller cannot see that from the results alone.
+
 Exact lexical retrieval is always present in the union and is never gated on provider health. When
 the provider is absent, unhealthy, or incompatible, steps 3 and 4 are skipped and the deterministic
-path serves the query with its quality recorded, not silently degraded.
+path serves the query with its quality recorded, not silently degraded. The same obligation applies
+to the runtime's own context injectors: losing source context because no checkout resolved, or
+because no generation is current, is a degradation and is logged as one. It is never allowed to look
+like an ordinary empty result.
 
 ## External representation ABI
 
@@ -201,6 +227,16 @@ The runtime representation record contains only integration metadata:
 - content and context hashes;
 - opaque compatible dense, sparse, latent, or score payloads supported by the installed provider;
 - authority, valid time, observed time, freshness, provenance, and publication state.
+
+The provider is an untrusted input boundary, not a trusted subsystem. It is independently versioned
+and may be third-party, misconfigured, or compromised, so its output is validated before it is
+stored and again before it influences a result: declared schema and profile must match the installed
+contract, payload dimensions and lengths must match the declared schema, sizes and counts are
+bounded, and scores must be finite and within range. Output that fails validation is rejected and
+the subject falls back to the deterministic path; it is never stored, and a rejection is a health
+signal rather than a silent skip. A provider cannot widen access, assert provenance, introduce a
+subject the runtime did not ask about, or emit a structural claim — its influence is confined to
+ordering candidates the runtime already admitted.
 
 Existing specialized indexes remain the fallback during migration. New provider outputs are
 shadow-written first; production activation requires public runtime safety gates plus the provider's
