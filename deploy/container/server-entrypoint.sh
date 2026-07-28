@@ -104,6 +104,9 @@ seed_managed_defaults /opt/aimee/defaults/roundtables .json "$AIMEE_HOME/roundta
 chown aimee:aimee "$AIMEE_HOME" "${AIMEE_WORKSPACES_DIR:-/var/lib/aimee-workspaces}" 2>/dev/null || true
 [ -f "$AIMEE_HOME/aimee.yaml" ] && chown aimee:aimee "$AIMEE_HOME/aimee.yaml" 2>/dev/null || true
 [ -f "$AIMEE_HOME/agents.json" ] && chown aimee:aimee "$AIMEE_HOME/agents.json" 2>/dev/null || true
+# Seeded as root; the Go workflow engine creates its registry lock and immutable
+# definition snapshots here while running as the unprivileged aimee user.
+[ -d "$AIMEE_HOME/workflows" ] && chown -R aimee:aimee "$AIMEE_HOME/workflows" 2>/dev/null || true
 # Seeded as root; the server and its preset-editing API run as aimee.
 [ -d "$AIMEE_HOME/roundtables" ] && chown -R aimee:aimee "$AIMEE_HOME/roundtables" 2>/dev/null || true
 
