@@ -37,6 +37,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mount.h>
+#include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -580,9 +581,51 @@ static void bind_aimee_runtime_paths(const char *sandbox_root)
  *   3. pivot_root or chroot into it.
  * ---------------------------------------------------------------------- */
 
+/* Remove sandbox roots left behind by earlier runs.
+ *
+ * setup_mount_ns() mkdtemp()s /tmp/aimee-sandbox-XXXXXX in the HOST namespace,
+ * then mounts a tmpfs over it inside the child's new mount namespace. When the
+ * sandboxed process exits the namespace goes with it and the tmpfs unmounts —
+ * but the host-side directory stays. Nothing removes it: it is created in the
+ * child after fork, so the parent never learns the path, and sandbox_spawn()
+ * returns the pid without waiting, so there is no point in this module where
+ * the child is known to have exited.
+ *
+ * One empty directory leaks per sandboxed run. They accumulate: a development
+ * box had 477, part of a /tmp that had exhausted its inode table (857k inodes
+ * across 40k directories, with 45GB of space still free) — at which point
+ * nothing on the machine could create a file.
+ *
+ * Sweeping with rmdir is safe BY CONSTRUCTION and needs no age heuristic: a
+ * root that is still in use has a tmpfs mounted on it and rmdir fails EBUSY,
+ * and a root that is merely non-empty fails ENOTEMPTY. Only the leaked ones —
+ * unmounted and empty — can be removed, so a sweep can never disturb a running
+ * sandbox, including one owned by a different process or user. Errors are
+ * ignored for exactly that reason. */
+static void reap_stale_sandbox_roots(void)
+{
+   DIR *d = opendir("/tmp");
+   if (!d)
+      return;
+   struct dirent *e;
+   while ((e = readdir(d)) != NULL)
+   {
+      if (strncmp(e->d_name, "aimee-sandbox-", 14) != 0)
+         continue;
+      char path[SANDBOX_MAX_PATH_LEN];
+      int n = snprintf(path, sizeof(path), "/tmp/%s", e->d_name);
+      if (n > 0 && (size_t)n < sizeof(path))
+         (void)rmdir(path); /* EBUSY = in use, ENOTEMPTY = not ours to judge */
+   }
+   closedir(d);
+}
+
 static int setup_mount_ns(const sandbox_config_t *cfg, const char *workspace,
                           const char *read_only_path, const char *write_path)
 {
+   /* Clear roots orphaned by earlier runs before adding another. */
+   reap_stale_sandbox_roots();
+
    /* Create a private tmpfs to serve as the sandbox root */
    char sandbox_root[] = "/tmp/aimee-sandbox-XXXXXX";
    if (mkdtemp(sandbox_root) == NULL)
