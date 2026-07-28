@@ -1018,6 +1018,52 @@ static cJSON *cli_v1_send(const char *remote, const char *bearer, const char *ve
    return resp;
 }
 
+/* Extract the most specific cause carried by a terminal failed op-run. The
+ * returned pointer is owned by result/snapshot and remains valid until those
+ * objects are deleted. Kept separate so every error-envelope shape has a small
+ * regression-testable contract. */
+const char *cli_v1_run_failure_reason(cJSON *result, cJSON *snapshot)
+{
+   if (result)
+   {
+      cJSON *error = cJSON_GetObjectItemCaseSensitive(result, "error");
+      if (cJSON_IsString(error) && error->valuestring[0])
+         return error->valuestring;
+      if (cJSON_IsObject(error))
+      {
+         cJSON *message = cJSON_GetObjectItemCaseSensitive(error, "message");
+         if (cJSON_IsString(message) && message->valuestring[0])
+            return message->valuestring;
+      }
+
+      /* Dispatch handlers commonly return the ordinary error envelope
+       * {"status":"error","message":"..."}. The op-run worker correctly
+       * marks that as failed, so preserve the handler's useful cause. */
+      cJSON *result_status = cJSON_GetObjectItemCaseSensitive(result, "status");
+      cJSON *result_message = cJSON_GetObjectItemCaseSensitive(result, "message");
+      if (cJSON_IsString(result_status) && strcmp(result_status->valuestring, "error") == 0 &&
+          cJSON_IsString(result_message) && result_message->valuestring[0])
+         return result_message->valuestring;
+   }
+
+   if (snapshot)
+   {
+      cJSON *error = cJSON_GetObjectItemCaseSensitive(snapshot, "error");
+      if (cJSON_IsString(error) && error->valuestring[0])
+         return error->valuestring;
+      if (cJSON_IsObject(error))
+      {
+         cJSON *message = cJSON_GetObjectItemCaseSensitive(error, "message");
+         if (cJSON_IsString(message) && message->valuestring[0])
+            return message->valuestring;
+      }
+      cJSON *message = cJSON_GetObjectItemCaseSensitive(snapshot, "message");
+      if (cJSON_IsString(message) && message->valuestring[0])
+         return message->valuestring;
+   }
+   return NULL;
+}
+
 /* cli_v1_run_and_poll: POST an async (rh_dispatch_op_async) route, then poll
  * GET /v1/runs/{id} until the run is terminal and return its `result` — the raw
  * dispatch payload, matching the synchronous dispatch response shape, so the
@@ -1076,36 +1122,9 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
              * with exit status 0 when the run had actually failed, hiding the failure
              * from humans and scripts alike. Surface it as an error envelope instead,
              * carrying whatever the run recorded. */
-            const char *why = NULL;
             /* A failed run usually carries its reason inside `result` (e.g.
              * {"result":{"error":"rpc produced no response"}}), so look there first. */
-            if (result)
-            {
-               cJSON *re = cJSON_GetObjectItemCaseSensitive(result, "error");
-               if (cJSON_IsString(re) && re->valuestring[0])
-                  why = re->valuestring;
-               else if (cJSON_IsObject(re))
-               {
-                  cJSON *rm = cJSON_GetObjectItemCaseSensitive(re, "message");
-                  if (cJSON_IsString(rm) && rm->valuestring[0])
-                     why = rm->valuestring;
-               }
-            }
-            cJSON *e = why ? NULL : cJSON_GetObjectItemCaseSensitive(snap, "error");
-            if (cJSON_IsString(e) && e->valuestring[0])
-               why = e->valuestring;
-            else if (cJSON_IsObject(e))
-            {
-               cJSON *m = cJSON_GetObjectItemCaseSensitive(e, "message");
-               if (cJSON_IsString(m) && m->valuestring[0])
-                  why = m->valuestring;
-            }
-            if (!why)
-            {
-               cJSON *m = cJSON_GetObjectItemCaseSensitive(snap, "message");
-               if (cJSON_IsString(m) && m->valuestring[0])
-                  why = m->valuestring;
-            }
+            const char *why = cli_v1_run_failure_reason(result, snap);
             char msg[320];
             if (why)
                snprintf(msg, sizeof(msg), "%s", why);
