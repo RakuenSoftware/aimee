@@ -665,6 +665,31 @@ int kb_client_index_find(const char *identifier, term_hit_t *out, int max)
    return 0;
 }
 
+/* Current-checkout routing variant: no workspace is attached in this test, so
+ * the fenced lookup returns no hits exactly like its unfenced counterpart. */
+int kb_client_index_find_current(const char *repository_key, const char *root,
+                                 const char *identifier, term_hit_t *out, int max)
+{
+   (void)repository_key;
+   (void)root;
+   (void)identifier;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+/* Contract: always writes both outputs, never fails. */
+void workspace_repo_index_keys(const char *root, const char *fallback_workspace, char *name_out,
+                               size_t name_len, char *ws_out, size_t ws_len)
+{
+   (void)root;
+   (void)fallback_workspace;
+   if (name_out && name_len > 0)
+      name_out[0] = '\0';
+   if (ws_out && ws_len > 0)
+      ws_out[0] = '\0';
+}
+
 int main(void)
 {
    printf("test_delegate_context_shed:\n");

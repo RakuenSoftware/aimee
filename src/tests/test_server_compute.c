@@ -609,6 +609,62 @@ int kb_client_index_find(const char *identifier, term_hit_t *out, int max)
    (void)max;
    return 0;
 }
+
+/* Current-checkout routing variants: the delegate prompt resolves the attached
+ * ref/commit before asking the KB for code context. With no workspace and no
+ * indexed generation these no-op exactly like their unfenced counterparts. */
+int kb_client_index_scan_current(const char *name, const char *root, int force,
+                                 kb_client_index_scan_result_t *out)
+{
+   (void)name;
+   (void)root;
+   (void)force;
+   (void)out;
+   return -1;
+}
+
+int kb_client_index_find_current(const char *repository_key, const char *root,
+                                 const char *identifier, term_hit_t *out, int max)
+{
+   (void)repository_key;
+   (void)root;
+   (void)identifier;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int kb_client_index_code_search_current(const char *repository_key, const char *root,
+                                        const char *query, code_search_hit_t *out, int max)
+{
+   (void)repository_key;
+   (void)root;
+   (void)query;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+int workspace_active_root(const config_t *cfg, const char *cwd, char *out, size_t out_len)
+{
+   (void)cfg;
+   (void)cwd;
+   if (out && out_len > 0)
+      out[0] = '\0';
+   return -1;
+}
+
+/* Contract: always writes both outputs, never fails. */
+void workspace_repo_index_keys(const char *root, const char *fallback_workspace, char *name_out,
+                               size_t name_len, char *ws_out, size_t ws_len)
+{
+   (void)root;
+   (void)fallback_workspace;
+   if (name_out && name_len > 0)
+      name_out[0] = '\0';
+   if (ws_out && ws_len > 0)
+      ws_out[0] = '\0';
+}
 int worktree_create_sibling(const char *git_root, const char *sid, const char *work_name)
 {
    (void)git_root;
