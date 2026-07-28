@@ -690,7 +690,7 @@ func TestRoundtableStageGuidanceCoversEverySupportedStage(t *testing.T) {
 	tests := map[string]string{
 		"intent":      "acceptance criteria faithfully capture",
 		"plan":        "goal-only restatement",
-		"frozen_diff": "Required edits that are absent",
+		"frozen_diff": "never create a blocking finding solely",
 	}
 	for stage, marker := range tests {
 		if normalized, ok := normalizeRoundtableStage(stage); !ok || normalized != stage || !strings.Contains(roundtableStageGuidance(normalized), marker) {
@@ -777,7 +777,7 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 		if request.Role == "review" && (!strings.Contains(request.Prompt, requestMarker) || strings.Contains(request.Prompt, "\n\nPROPOSAL:\n") || strings.Contains(request.Prompt, "complete proposal")) {
 			t.Fatal("roundtable did not frame the source as the original request")
 		}
-		if request.Role == "review" && (!strings.Contains(request.Prompt, "ARTIFACT STAGE: frozen_diff") || !strings.Contains(request.Prompt, "Required edits that are absent") || !strings.Contains(request.Prompt, "substitute a different goal or deliverable")) {
+		if request.Role == "review" && (!strings.Contains(request.Prompt, "ARTIFACT STAGE: frozen_diff") || !strings.Contains(request.Prompt, "Required edits that are absent") || !strings.Contains(request.Prompt, "substitute a different goal or deliverable") || !strings.Contains(request.Prompt, "patch does not embed those logs or metadata")) {
 			t.Fatal("roundtable did not make original-request alignment stage-aware")
 		}
 		if request.Persona == "security" && request.Delegate == "kimi" {

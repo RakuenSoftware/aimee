@@ -141,8 +141,11 @@ int handle_api_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* /v1 connections are handled concurrently. Serialize every aimee.api
  * read-modify-save sequence in this file: otherwise two enrollments can select
- * the same slot, or enable/disable can overwrite a just-enrolled credential
- * with the stale snapshot it loaded before that enrollment completed. */
+ * the same slot, or enable/disable can overwrite a just-enrolled credential.
+ * Each mutation also reads DISK rather than config_load's immutable live
+ * snapshot. The snapshot is intentionally stable between reloads; using it for
+ * two back-to-back enrollments made the second overwrite the first on disk and
+ * in the live auth set. */
 static pthread_mutex_t g_api_bearer_mutation_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static int handle_api_error(server_conn_t *conn, const char *message)
@@ -174,7 +177,11 @@ int handle_api_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    pthread_mutex_lock(&g_api_bearer_mutation_lock);
    config_t cfg;
-   config_load(&cfg);
+   if (config_load_file(&cfg) != 0)
+   {
+      pthread_mutex_unlock(&g_api_bearer_mutation_lock);
+      return handle_api_error(conn, "failed to load aimee.api config");
+   }
 
    cJSON *jport = cJSON_GetObjectItemCaseSensitive(req, "port");
    if (cJSON_IsNumber(jport) && jport->valuedouble > 0)
@@ -205,6 +212,7 @@ int handle_api_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       pthread_mutex_unlock(&g_api_bearer_mutation_lock);
       return handle_api_error(conn, "failed to persist aimee.api config");
    }
+   (void)config_reload();
    pthread_mutex_unlock(&g_api_bearer_mutation_lock);
 
    char snippets[2048];
@@ -256,7 +264,11 @@ int handle_api_rotate_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    pthread_mutex_lock(&g_api_bearer_mutation_lock);
    config_t cfg;
-   config_load(&cfg);
+   if (config_load_file(&cfg) != 0)
+   {
+      pthread_mutex_unlock(&g_api_bearer_mutation_lock);
+      return handle_api_error(conn, "failed to load aimee.api config");
+   }
    const char *managed_bearer = getenv("AIMEE_API_BEARER_TOKEN");
    if (managed_bearer && managed_bearer[0])
    {
@@ -279,6 +291,7 @@ int handle_api_rotate_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       pthread_mutex_unlock(&g_api_bearer_mutation_lock);
       return handle_api_error(conn, "failed to persist aimee.api config");
    }
+   (void)config_reload();
 
    /* Hot-swap the running listener's primary and atomically clear its enrolled
     * set. After this returns none of the previous credentials authorize. */
@@ -312,7 +325,11 @@ int handle_api_enroll_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    pthread_mutex_lock(&g_api_bearer_mutation_lock);
    config_t cfg;
-   config_load(&cfg);
+   if (config_load_file(&cfg) != 0)
+   {
+      pthread_mutex_unlock(&g_api_bearer_mutation_lock);
+      return handle_api_error(conn, "failed to load aimee.api config");
+   }
 
    if (cfg.server_api_bearer_token[0] == '\0')
    {
@@ -343,6 +360,7 @@ int handle_api_enroll_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       pthread_mutex_unlock(&g_api_bearer_mutation_lock);
       return handle_api_error(conn, "failed to persist aimee.api config");
    }
+   (void)config_reload();
 
    /* Hot-swap so the new token authorizes immediately. The live auth layer has
     * its own lock for concurrent connection workers. */
@@ -372,13 +390,18 @@ int handle_api_disable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    pthread_mutex_lock(&g_api_bearer_mutation_lock);
    config_t cfg;
-   config_load(&cfg);
+   if (config_load_file(&cfg) != 0)
+   {
+      pthread_mutex_unlock(&g_api_bearer_mutation_lock);
+      return handle_api_error(conn, "failed to load aimee.api config");
+   }
    cfg.server_api_http_port = 0;
    if (config_save(&cfg) != 0)
    {
       pthread_mutex_unlock(&g_api_bearer_mutation_lock);
       return handle_api_error(conn, "failed to persist aimee.api config");
    }
+   (void)config_reload();
    pthread_mutex_unlock(&g_api_bearer_mutation_lock);
 
    cJSON *resp = cJSON_CreateObject();
