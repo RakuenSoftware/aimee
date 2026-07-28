@@ -47,6 +47,25 @@ def _run(script: str, env: dict[str, str], stdin: str) -> str:
     return proc.stdout
 
 
+def _run_missing_managed_auth(script: str, endpoint_key: str, url: str, stdin: str) -> None:
+    env = {
+        **os.environ,
+        endpoint_key: url,
+        "AIMEE_LLM_AUTH_REQUIRED": "1",
+        "AIMEE_LLM_AUTH_TOKEN": "",
+    }
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPTS / script)],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+    assert proc.returncode != 0, f"{script} accepted missing managed auth"
+    assert "AIMEE_LLM_AUTH_TOKEN is empty" in proc.stderr, proc.stderr
+
+
 def check_embed_remote() -> None:
     vector = [round(i * 0.001, 3) for i in range(384)]
     token = "kb-to-llm-test-token"
@@ -71,11 +90,16 @@ def check_embed_remote() -> None:
     try:
         out = _run(
             "embed-remote.py",
-            {"AIMEE_EMBEDDER_URL": url, "AIMEE_LLM_AUTH_TOKEN": token},
+            {
+                "AIMEE_EMBEDDER_URL": url,
+                "AIMEE_LLM_AUTH_TOKEN": token,
+                "AIMEE_LLM_AUTH_REQUIRED": "1",
+            },
             "hello world",
         )
         parsed = json.loads(out)
         assert isinstance(parsed, list) and len(parsed) == 384, f"got {len(parsed)} dims"
+        _run_missing_managed_auth("embed-remote.py", "AIMEE_EMBEDDER_URL", url, "hello")
     finally:
         server.shutdown()
     print("  embed-remote.py: ok")
@@ -104,10 +128,17 @@ def check_rerank_remote() -> None:
     try:
         out = _run(
             "rerank-remote.py",
-            {"AIMEE_RERANKER_URL": url, "AIMEE_LLM_AUTH_TOKEN": token},
+            {
+                "AIMEE_RERANKER_URL": url,
+                "AIMEE_LLM_AUTH_TOKEN": token,
+                "AIMEE_LLM_AUTH_REQUIRED": "1",
+            },
             '[["query", "candidate"]]',
         )
         assert json.loads(out) == [0.75]
+        _run_missing_managed_auth(
+            "rerank-remote.py", "AIMEE_RERANKER_URL", url, '[["query", "candidate"]]'
+        )
     finally:
         server.shutdown()
     print("  rerank-remote.py: ok")

@@ -93,6 +93,7 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
   const [applying, setApplying] = useState(false);
   const [err, setErr] = useState('');
   const [enrollment, setEnrollment] = useState<Enrollment | null>(null);
+  const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -177,6 +178,15 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
     }
   }
 
+  async function copyEnrollment(command: string) {
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopied(true);
+    } catch {
+      setErr('Could not copy automatically; select the command below and copy it manually.');
+    }
+  }
+
   if (kbMode !== 'local' || loading || !status) return null;
 
   // Orchestration off: hand the operator the one compose command instead.
@@ -239,7 +249,12 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
             locally, enrolls mTLS, and activates full write access for{' '}
             <code>{enrollment.principal}</code>.
           </div>
-          <pre style={pre}>{enrollmentCommand}</pre>
+          <div style={{ display: 'flex', alignItems: 'start', gap: 7 }}>
+            <pre style={{ ...pre, flex: 1 }}>{enrollmentCommand}</pre>
+            <Button onClick={() => copyEnrollment(enrollmentCommand)}>
+              {copied ? 'Copied' : 'Copy command'}
+            </Button>
+          </div>
           <div style={{ fontSize: 11.5, color: '#667', marginTop: 5 }}>
             The bearer alone cannot write; the full grant is bound to the enrolled client certificate.
           </div>

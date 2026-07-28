@@ -93,6 +93,10 @@ int kb_curator_provider_for_stage(const config_t *cfg, kb_curator_stage_t stage,
          base_url = synth_url;
          model = (env_model && env_model[0]) ? env_model : AIMEE_LLM_DEFAULT_MODEL;
          const char *service_token = getenv("AIMEE_LLM_AUTH_TOKEN");
+         const char *auth_required = getenv("AIMEE_LLM_AUTH_REQUIRED");
+         if (auth_required && strcmp(auth_required, "1") == 0 &&
+             (!service_token || !service_token[0]))
+            return 0; /* managed unified gateway must never receive a keyless request */
          api_key = (service_token && service_token[0]) ? service_token : "";
       }
       else if (kb_curator_stage_tier(stage) == KB_CURATOR_TIER_A)

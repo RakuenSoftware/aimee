@@ -139,7 +139,7 @@ void config_parse_server_api(config_t *cfg, const cJSON *root)
    }
 }
 
-int config_server_api_bearer_extra_snapshot(char out[][65], int max)
+int config_server_api_bearer_extra_snapshot(char out[][256], int max)
 {
    if (!out || max <= 0)
       return 0;

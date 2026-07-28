@@ -96,6 +96,8 @@ static void test_managed_llm_service_credential(void)
    for (size_t i = 0; i < 64; i++)
       assert(token[i] == 'a');
    assert(envp_key_count(envp, "AIMEE_LLM_AUTH_TOKEN") == 1);
+   assert(strcmp(envp_value(envp, "AIMEE_LLM_AUTH_REQUIRED"), "1") == 0);
+   assert(envp_key_count(envp, "AIMEE_LLM_AUTH_REQUIRED") == 1);
    assert(setenv("COMPOSE_PROFILES", "attacker-profile", 1) == 0);
    free_envp(envp);
    envp = build_deploy_envp(NULL, 0, NULL);
@@ -118,10 +120,13 @@ static void test_managed_llm_service_credential(void)
 
    /* Inherited empty OR non-empty child state cannot shadow the managed file. */
    assert(setenv("AIMEE_LLM_AUTH_TOKEN", "stale-inherited-service-token-1234", 1) == 0);
+   assert(setenv("AIMEE_LLM_AUTH_REQUIRED", "0", 1) == 0);
    envp = build_deploy_envp(NULL, 0, NULL);
    assert(envp_key_count(envp, "AIMEE_LLM_AUTH_TOKEN") == 1);
    token = envp_value(envp, "AIMEE_LLM_AUTH_TOKEN");
    assert(token != NULL && token[0] == 'a');
+   assert(strcmp(envp_value(envp, "AIMEE_LLM_AUTH_REQUIRED"), "1") == 0);
+   assert(envp_key_count(envp, "AIMEE_LLM_AUTH_REQUIRED") == 1);
    free_envp(envp);
 
    /* A distinctly named, deliberate operator override wins exactly once. */
@@ -150,10 +155,12 @@ static void test_managed_llm_service_credential(void)
 
    /* No local LLM means no credential is invented or passed. */
    unsetenv("AIMEE_LLM_AUTH_TOKEN");
+   unsetenv("AIMEE_LLM_AUTH_REQUIRED");
    snprintf(g_stub_profiles, sizeof(g_stub_profiles), "kb");
    managed_llm = 1;
    envp = build_deploy_envp(NULL, 0, &managed_llm);
    assert(envp != NULL && envp_value(envp, "AIMEE_LLM_AUTH_TOKEN") == NULL);
+   assert(envp_value(envp, "AIMEE_LLM_AUTH_REQUIRED") == NULL);
    assert(managed_llm == 0);
    free_envp(envp);
 

@@ -395,6 +395,10 @@ def managed_kb_llm_contract_failures(text: str) -> list[str]:
     token_expr = "${AIMEE_LLM_AUTH_TOKEN:-}"
     if kb_env.get("AIMEE_LLM_AUTH_TOKEN") != token_expr:
         failures.append("managed KB must receive AIMEE_LLM_AUTH_TOKEN")
+    if kb_env.get("AIMEE_LLM_AUTH_REQUIRED") != "${AIMEE_LLM_AUTH_REQUIRED:-0}":
+        failures.append(
+            "managed KB auth-required mode must follow the local-LLM deployment transaction"
+        )
     if kb_env.get("LLM_API_KEY") != token_expr:
         failures.append("managed KB legacy curator token must alias AIMEE_LLM_AUTH_TOKEN")
     if llm_env.get("AIMEE_LLM_AUTH_TOKEN") != token_expr:
@@ -407,6 +411,8 @@ def managed_kb_llm_contract_failures(text: str) -> list[str]:
         failures.append("managed KB must receive the unified model label")
     if llm_env.get("AIMEE_LLM_SYNTH_MODEL") != "${AIMEE_LLM_MODEL:-aimee-synth}":
         failures.append("managed LLM synth model must match the KB model label")
+    if llm_env.get("AIMEE_EMBEDDING_DIM") != "${AIMEE_EMBEDDING_DIM:-}":
+        failures.append("managed LLM must receive the KB embedding-dimension pin")
 
     for role in ("EMBED", "RERANK", "SYNTH"):
         for setting, default in (("MODE", "local"), ("TIER", "cpu"), ("URL", "")):
@@ -643,6 +649,7 @@ def plant_test() -> int:
             '      AIMEE_KB_MTLS_PORT: "8745"\n'
             "      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8742}\n"
             "      AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}\n"
+            "      AIMEE_LLM_AUTH_REQUIRED: ${AIMEE_LLM_AUTH_REQUIRED:-0}\n"
             "      LLM_API_KEY: ${AIMEE_LLM_AUTH_TOKEN:-}\n"
             "      AIMEE_LLM_MODEL: ${AIMEE_LLM_MODEL:-aimee-synth}\n"
             "    depends_on:\n"
@@ -660,7 +667,8 @@ def plant_test() -> int:
             "      AIMEE_LLM_SYNTH_MODE: ${AIMEE_LLM_SYNTH_MODE:-local}\n"
             "      AIMEE_LLM_SYNTH_TIER: ${AIMEE_LLM_SYNTH_TIER:-cpu}\n"
             "      AIMEE_LLM_SYNTH_URL: ${AIMEE_LLM_SYNTH_URL:-}\n"
-            "      AIMEE_LLM_SYNTH_MODEL: ${AIMEE_LLM_MODEL:-aimee-synth}\n",
+            "      AIMEE_LLM_SYNTH_MODEL: ${AIMEE_LLM_MODEL:-aimee-synth}\n"
+            "      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}\n",
             encoding="utf-8",
         )
         (root / "deploy/container/aimee-server-remote-writes.yaml").write_text(

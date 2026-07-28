@@ -240,7 +240,7 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out)
       if (*p == '\n')
          extra++;
 
-   char **envp = calloc(base + extra + (managed_llm ? 1 : 0) + 1, sizeof(char *));
+   char **envp = calloc(base + extra + (managed_llm ? 2 : 0) + 1, sizeof(char *));
    if (!envp)
    {
       if (err && err_cap)
@@ -254,7 +254,8 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out)
        * Do not leave an inherited empty/stale duplicate before it: getenv and
        * Compose are not required to choose the later duplicate. */
       if (deploy_env_overrides(env, *e) ||
-          (managed_llm && strncmp(*e, "AIMEE_LLM_AUTH_TOKEN=", 21) == 0))
+          (managed_llm && (strncmp(*e, "AIMEE_LLM_AUTH_TOKEN=", 21) == 0 ||
+                           strncmp(*e, "AIMEE_LLM_AUTH_REQUIRED=", 24) == 0)))
          continue;
       envp[n] = strdup(*e);
       if (!envp[n])
@@ -297,6 +298,13 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out)
       }
       snprintf(envp[n++], len + 1, "AIMEE_LLM_AUTH_TOKEN=%s", llm_token);
       memset(llm_token, 0, sizeof(llm_token));
+      envp[n] = strdup("AIMEE_LLM_AUTH_REQUIRED=1");
+      if (!envp[n])
+      {
+         free_envp(envp);
+         return NULL;
+      }
+      n++;
    }
    envp[n] = NULL;
    return envp;

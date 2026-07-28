@@ -1535,11 +1535,11 @@ typedef struct config
     *
     * Bounded so a compromised or looping enroller cannot grow the accepted set
     * without limit — past the cap, enrolment fails closed rather than evicting. */
-   /* 65 = 64 hex chars + NUL, the exact width server_api_mint_bearer emits.
-    * config_t is ~750 KB and is stack-allocated in hot paths, so every byte
-    * added here is multiplied across nested frames — sizing this generously
-    * would be paid for on the stack, not in the struct. */
-   char server_api_bearer_extra[AIMEE_API_BEARER_EXTRA_MAX][65];
+   /* Keep the existing configured-token width: deployments may already have
+    * manually supplied bearer_tokens_extra values longer than the 64-hex
+    * tokens minted by the enrollment API. Truncating them on upgrade would
+    * silently revoke those clients. */
+   char server_api_bearer_extra[AIMEE_API_BEARER_EXTRA_MAX][256];
    int server_api_bearer_extra_count;
    int server_api_rate_limit_per_min;
    /* server_api_max_event_streams: cap on concurrent SSE event streams
@@ -2133,7 +2133,7 @@ int config_load(config_t *cfg);
 
 /* Bounded enrolled-bearer operations owned by the config module. Callers get a
  * coherent copy or append one token without naming or copying config_t. */
-int config_server_api_bearer_extra_snapshot(char out[][65], int max);
+int config_server_api_bearer_extra_snapshot(char out[][256], int max);
 int config_server_api_bearer_extra_append(const char *bearer);
 
 /* Live config snapshot (live-config-reload P1a) — a double-buffer + seqlock holding the
