@@ -52,7 +52,7 @@ each pending proposal is eligible for a new run. The decisions are governed by f
    identity, which makes the proposal eligible for a new run on the next scan.
 4. **Admission cap queues eligible proposals.** The live trigger admission cap can queue an
    otherwise eligible proposal when the cap is reached on a given scan. The cap is edited in
-   **Edit Workflows → Run policy**; an otherwise eligible proposal that exceeds the cap is held
+   **Workflow Actions → Run policy**; an otherwise eligible proposal that exceeds the cap is held
    for a later scan instead of being admitted or rejected.
 5. **Cap-queued proposals stay eligible on later scans.** A proposal queued by the cap remains
    eligible on a later scan; the watcher does not require manual firing to retry a proposal that
