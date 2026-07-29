@@ -175,17 +175,18 @@ Record the certification as an auditable table with one row per attached check r
 The table must enumerate the actual check runs attached to the release SHA; a
 summary count or a link without the names and conclusions is insufficient.
 
-On the implementation pull request, verify that each configured pull-request
-event still starts CI for `main`, `testing`, and
-`feature/core-modularization`, and that `no-coauthor-trailers`, `bench-check`, and
-all other PR jobs continue under their existing conditions with unchanged
-conclusions. After merge to `testing`, record the resulting tip SHA, verify that
-GitHub Actions starts the `push` run without `workflow_dispatch`, and verify its
-head SHA exactly matches the tip. Query that SHA's check runs, enumerate every
-name and conclusion, confirm all push-applicable checks passed, and record
-`no-coauthor-trailers` and `bench-check` as skipped for the reasons above. The
-exact SHA, automatic workflow-run reference, and complete passed/skipped list
-are the release certification evidence.
+On the implementation pull request, verify that the existing `opened`,
+`synchronize`, `reopened`, and `edited` pull-request events still start CI for
+`main`, `testing`, and `feature/core-modularization`, and that
+`no-coauthor-trailers`, `bench-check`, and all other PR jobs continue under their
+existing conditions with unchanged conclusions. After merge to `testing`, record
+the resulting tip SHA, verify that GitHub Actions starts the `push` run without
+`workflow_dispatch`, and verify its head SHA exactly matches the tip. Query that
+SHA's check runs, enumerate every name and conclusion, confirm all
+push-applicable checks passed, and record `no-coauthor-trailers` and `bench-check`
+as skipped for the reasons above. The exact SHA, automatic workflow-run
+reference, and complete passed/skipped list are the release certification
+evidence.
 
 ## Acceptance
 
