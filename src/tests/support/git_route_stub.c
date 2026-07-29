@@ -207,6 +207,15 @@ int git_pr_create_via_api_ex(const char *principal, const char *repo_dir, const 
    return -1;
 }
 
+int git_pr_create_via_api_ex_draft(const char *principal, const char *repo_dir, const char *head,
+                                   const char *base, const char *title, const char *body, int draft,
+                                   char *out, size_t out_cap, char *err, size_t errlen)
+{
+   (void)draft;
+   return git_pr_create_via_api_ex(principal, repo_dir, head, base, title, body, out, out_cap, err,
+                                   errlen);
+}
+
 int git_pr_find_open_via_api(const char *principal, const char *repo_dir, const char *head,
                              const char *base, char *out, size_t out_cap, char *err, size_t errlen)
 {

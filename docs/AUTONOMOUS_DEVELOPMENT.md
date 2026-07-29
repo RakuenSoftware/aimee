@@ -29,8 +29,15 @@ Each slice gets a branch and worktree, implements one packet, verifies it, freez
 runs review before merge into the feature branch. New slices branch from the current merged feature
 tip.
 
-The final PR targets the forge's authoritative default branch. The default workflow opens it and
-stops; normal repository review controls the merge.
+The final PR targets the forge's authoritative default branch. The default workflow opens it as a
+draft and stops. Its title comes from the admitted proposal, and its body carries the original
+request, approved plan, changed-file summary, slice PRs, completed workflow gates, and explicit
+human-review instructions. Automation must not mark this PR ready, approve it, or merge it.
+
+Draft state makes the handoff explicit and prevents an ordinary accidental merge, but it is not a
+human identity system. A production deployment must also keep the workflow forge credential away
+from general-purpose agents and enforce the repository's human-review policy. If a human and an
+agent share the same writable GitHub identity, GitHub cannot prove which one performed an action.
 
 ## Persistence and recovery
 
@@ -98,6 +105,7 @@ Fields under `autonomy.*` tune these limits. Some load at workflow-process start
 - Remote workspace mutation requires full per-user write authority.
 - Tool and credential activity is audited through the event bus.
 - Autonomous mode cannot approve a human gate.
+- Autonomous mode cannot mark a final workflow PR ready or merge it.
 
 ## Observe
 

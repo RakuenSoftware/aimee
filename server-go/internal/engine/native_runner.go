@@ -1414,11 +1414,14 @@ func (r *NativeRunner) prOpen(ctx context.Context, req StepRequest) (StepResult,
 	default:
 		base = baseKind
 	}
-	title := paramString(req.Node, "title", "aimee: "+req.WorkItem.ID)
+	spec, err := r.pullRequestSpec(ctx, req, item, workdir, head, base)
+	if err != nil {
+		return StepResult{}, err
+	}
 	if err := r.ensureRunnable(ctx, item.ID); err != nil {
 		return StepResult{}, err
 	}
-	pr, err := r.forge.Open(ctx, item.Repo, workdir, head, base, title)
+	pr, err := r.forge.Open(ctx, item.Repo, workdir, head, base, spec)
 	if err != nil {
 		return StepResult{}, err
 	}
