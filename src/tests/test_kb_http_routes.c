@@ -2494,6 +2494,48 @@ static void test_mtls_serve(void)
    assert(strstr(resp, "\"status\":\"ok\""));
    assert(strstr(resp, "Connection: close"));
 
+   /* Scoped mTLS credentials must not acquire an owner actor merely because
+    * their certificate is valid. The grant handler therefore refuses this
+    * project certificate before it reaches the Postgres-only tenant gate. */
+   {
+      const char *grant =
+          "{\"server_id\":\"srv-a\",\"team_id\":1,\"subject\":\"owner\","
+          "\"tier\":\"full\",\"granted_by\":\"owner\"}";
+      char req[512];
+      snprintf(req, sizeof(req),
+               "POST /v1/write-tier-grants/set HTTP/1.1\r\nContent-Length: %zu\r\n"
+               "Connection: close\r\n\r\n%s",
+               strlen(grant), grant);
+      mtls_request(sctx, cctx, req, resp, sizeof(resp));
+      assert(strstr(resp, "401 Unauthorized"));
+      assert(strstr(resp, "authentication required"));
+   }
+
+   /* The wizard-managed server certificate is intentionally unscoped. It is
+    * the authenticated owner hop behind the server's UDS-only grant command,
+    * so it must reach the tenant gate as owner rather than arrive actor-less.
+    * This shim-backed test then returns 503 at the expected Postgres gate; 401
+    * would prove the mTLS-to-owner bridge regressed again. */
+   {
+      char owner_cert[KB_PKI_CERT_PEM_MAX], owner_key[KB_PKI_KEY_PEM_MAX];
+      assert(kb_pki_issue_client_cert(&ca, "p5-server-client", 3600, owner_cert,
+                                      sizeof(owner_cert), owner_key, sizeof(owner_key)) == 0);
+      SSL_CTX *owner_ctx = kb_tls_client_ctx(ca.cert_pem, owner_cert, owner_key);
+      assert(owner_ctx);
+      const char *grant =
+          "{\"server_id\":\"srv-a\",\"team_id\":1,\"subject\":\"owner\","
+          "\"tier\":\"full\",\"granted_by\":\"owner\"}";
+      char req[512];
+      snprintf(req, sizeof(req),
+               "POST /v1/write-tier-grants/set HTTP/1.1\r\nContent-Length: %zu\r\n"
+               "Connection: close\r\n\r\n%s",
+               strlen(grant), grant);
+      mtls_request(sctx, owner_ctx, req, resp, sizeof(resp));
+      assert(strstr(resp, "503 Service Unavailable"));
+      assert(!strstr(resp, "authentication required"));
+      SSL_CTX_free(owner_ctx);
+   }
+
    /* HTTP/1.1 stays reusable by default. The certificate authority is checked
     * again for request N+1, so revocation takes effect before its route runs. */
    {
