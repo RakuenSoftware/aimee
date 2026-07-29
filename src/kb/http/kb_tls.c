@@ -464,6 +464,20 @@ kb_tls_client_conn_t *kb_tls_client_conn_open_session(const char *host, int port
    return client_conn_open_owned_ctx(host, port, ctx, session);
 }
 
+int kb_tls_client_conn_set_timeout(kb_tls_client_conn_t *conn, int timeout_ms)
+{
+   if (!conn || conn->fd < 0 || timeout_ms <= 0)
+      return -1;
+   struct timeval timeout = {
+       .tv_sec = timeout_ms / 1000,
+       .tv_usec = (timeout_ms % 1000) * 1000,
+   };
+   if (setsockopt(conn->fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) != 0 ||
+       setsockopt(conn->fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) != 0)
+      return -1;
+   return 0;
+}
+
 int kb_tls_client_conn_session_reused(const kb_tls_client_conn_t *conn)
 {
    return conn && conn->ssl ? SSL_session_reused(conn->ssl) : 0;

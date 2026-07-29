@@ -268,7 +268,10 @@ void kb_curator_queue_docs_all_projects(int extract_docs_enabled)
 {
    if (!extract_docs_enabled)
       return;
-   project_info_t projects[128];
+   /* The autonomous project sweeps support ordinary multi-project servers and
+    * the 150-project standing benchmark.  The former 128-entry array silently
+    * omitted every later project forever. */
+   project_info_t projects[512];
    int np = index_list_projects(projects, (int)(sizeof(projects) / sizeof(projects[0])));
    for (int i = 0; i < np; i++)
       (void)kb_curator_queue_docs_for_project(projects[i].name);

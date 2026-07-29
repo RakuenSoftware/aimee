@@ -54,6 +54,14 @@
 /* Index lane (CPU) idle backoff. It loops hot while a backlog remains, so this only
  * paces polling once its queues are empty. */
 #define INDEX_LANE_POLL_SECS 2
+/* A real server can own more projects than the old 128-entry sweep arrays (the
+ * standing benchmark alone uses 150 isolated projects).  Keep the autonomous
+ * maintenance lane above that ordinary scale; explicit project builds do not
+ * depend on this sweep. */
+#define CURATOR_PROJECT_SWEEP_MAX 512
+/* Document embedding is a remote round-trip per chunk.  Bound one project's
+ * turn so an old backfill cannot hold the sole index lane for tens of minutes. */
+#define CURATOR_DOC_SWEEP_BATCH 8
 /* Max synthesis ops processed per poll — each is an LLM round-trip. */
 #define SYNTH_DRAIN_BATCH 4
 /* Max curator jobs (extract/synth/…) drained back-to-back per poll. The per-poll
@@ -138,8 +146,8 @@ static void kb_curator_projection_sweep(void)
 {
    if (!config_kb_curator_projection_graph_enabled())
       return;
-   project_info_t projects[128];
-   int np = index_list_projects(projects, 128);
+   project_info_t projects[CURATOR_PROJECT_SWEEP_MAX];
+   int np = index_list_projects(projects, CURATOR_PROJECT_SWEEP_MAX);
    int built = 0;
    int64_t total = 0;
    for (int i = 0; i < np; i++)
@@ -243,8 +251,8 @@ static int stage_embed_code(const kb_curator_extract_opts_t *opts)
    config_load(&cfg);
    if (!cfg.embedding_command[0])
       return 0;
-   project_info_t projects[128];
-   int np = index_list_projects(projects, 128);
+   project_info_t projects[CURATOR_PROJECT_SWEEP_MAX];
+   int np = index_list_projects(projects, CURATOR_PROJECT_SWEEP_MAX);
    int total = 0;
    for (int i = 0; i < np; i++)
    {
@@ -262,25 +270,31 @@ static int stage_embed_code(const kb_curator_extract_opts_t *opts)
 static int stage_ingest_docs(const kb_curator_extract_opts_t *opts)
 {
    (void)opts;
+   /* Only the index-lane thread calls this stage, so a function-local cursor is
+    * sufficient.  Rotating one bounded project per pass prevents an early large
+    * corpus from starving every later project in lexical name order. */
+   static size_t next_project = 0;
    config_t cfg;
    config_load(&cfg);
    if (!cfg.embedding_command[0])
       return 0;
-   project_info_t projects[128];
-   int np = index_list_projects(projects, 128);
+   project_info_t projects[CURATOR_PROJECT_SWEEP_MAX];
+   int np = index_list_projects(projects, CURATOR_PROJECT_SWEEP_MAX);
+   if (np <= 0)
+      return 0;
+   size_t selected = next_project % (size_t)np;
+   next_project = (selected + 1) % (size_t)np;
    int total = 0;
-   for (int i = 0; i < np; i++)
-   {
-      int e = kb_doc_refresh(projects[i].name, cfg.embedding_command, 200);
-      if (e > 0)
-         total += e;
-      int b = kb_doc_embed_backfill(projects[i].name, cfg.embedding_command, 200);
-      if (b > 0)
-         total += b;
-   }
+   int e = kb_doc_refresh(projects[selected].name, cfg.embedding_command, CURATOR_DOC_SWEEP_BATCH);
+   if (e > 0)
+      total += e;
+   int b = kb_doc_embed_backfill(projects[selected].name, cfg.embedding_command,
+                                 CURATOR_DOC_SWEEP_BATCH);
+   if (b > 0)
+      total += b;
    if (total > 0)
-      aimee_log(LOG_DEBUG, "kb.docs.ingest", "ingested %d doc chunk(s) across %d project(s)", total,
-                np);
+      aimee_log(LOG_DEBUG, "kb.docs.ingest", "ingested %d doc chunk(s) for project '%s'", total,
+                projects[selected].name);
    /* dim-change re-embed clears its maintenance marker once the backfill has caught
     * up (a pass that embedded nothing means every chunk has a vector). */
    if (total == 0 && db2_reembed_in_progress_get(NULL, NULL) == 1)
