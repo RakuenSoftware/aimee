@@ -207,6 +207,15 @@ void delegate_apply_max_turns_policy(agent_config_t *cfg, const char *role, int 
    for (int i = 0; i < cfg->agent_count; i++)
       cfg->agents[i].max_turns = max_turns;
 }
+void delegate_apply_max_turns_cap(agent_config_t *cfg, const char *role, int cap)
+{
+   (void)role;
+   if (!cfg || cap <= 0)
+      return;
+   for (int i = 0; i < cfg->agent_count; i++)
+      if (cfg->agents[i].max_turns <= 0 || cfg->agents[i].max_turns > cap)
+         cfg->agents[i].max_turns = cap;
+}
 char *role_template_build(const char *project_root, const char *role, const char *task,
                           const char *context)
 {

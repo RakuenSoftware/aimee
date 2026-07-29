@@ -39,6 +39,48 @@ static int mock_deleg_run(const char *workdir, const char *role, const char *pro
 }
 static const wfe_delegate_provider_t MOCK_DELEG = {mock_deleg_run};
 
+/* A completed write delegate that correctly finds the requested tree already
+ * satisfies the packet. The live bridge reports this distinctly from provider
+ * failure; this mock drives implement + document through that outcome. */
+static int g_noop_impl_calls;
+static int g_noop_doc_calls;
+static char g_noop_impl_prompt[8192];
+static int noop_stage_deleg_run(const char *workdir, const char *role, const char *prompt,
+                                const char *artifact_path, char out_commit_sha[64], char *err,
+                                size_t n)
+{
+   (void)workdir;
+   (void)role;
+   (void)err;
+   (void)n;
+   if (out_commit_sha)
+      out_commit_sha[0] = '\0';
+   if (artifact_path && artifact_path[0])
+   {
+      FILE *f = fopen(artifact_path, "wb");
+      assert(f);
+      const char *intent = "{\"schema_version\":1,\"status\":\"unconfirmed\",\"summary\":\"already "
+                           "satisfied\",\"rationale\":\"the current tree contains it\","
+                           "\"acceptance_criteria\":[\"verification passes\"]}";
+      assert(fwrite(intent, 1, strlen(intent), f) == strlen(intent));
+      fclose(f);
+      return WFE_DELEGATE_OK;
+   }
+   if (prompt && strstr(prompt, "Implement the approved plan"))
+   {
+      g_noop_impl_calls++;
+      snprintf(g_noop_impl_prompt, sizeof(g_noop_impl_prompt), "%s", prompt);
+      return WFE_DELEGATE_NO_CHANGE;
+   }
+   if (prompt && strstr(prompt, "Document the change"))
+   {
+      g_noop_doc_calls++;
+      return WFE_DELEGATE_NO_CHANGE;
+   }
+   return WFE_DELEGATE_ERROR;
+}
+static const wfe_delegate_provider_t NOOP_STAGE_DELEG = {noop_stage_deleg_run};
+
 /* ---- mock forge with open ---- */
 static int g_open_calls;
 static int g_open_rc; /* 0 success, -1 failure */
@@ -133,6 +175,22 @@ static const char *WF_TRUNK = "name: dst\nstart: au\nnodes:\n"
                               "  - id: pr\n    block: pr.open\n    in:\n      src: au.out\n"
                               "    params:\n      base: trunk\n";
 
+static const char *WF_NOOP = "name: noopwf\n"
+                             "start: scope\n"
+                             "nodes:\n"
+                             "  - id: scope\n"
+                             "    block: understand\n"
+                             "    next: impl\n"
+                             "  - id: impl\n"
+                             "    block: implement\n"
+                             "    in:\n"
+                             "      intent: scope.out\n"
+                             "    next: document\n"
+                             "  - id: document\n"
+                             "    block: document\n"
+                             "    in:\n"
+                             "      branch: impl.out\n";
+
 static int run_fresh(const char *suffix)
 {
    char id[80] = "", err[256] = "";
@@ -166,6 +224,11 @@ int main(void)
    f = fopen(p, "wb");
    assert(f);
    fputs(WF_TRUNK, f);
+   fclose(f);
+   snprintf(p, sizeof p, "%s/workflows/noopwf.yaml", home);
+   f = fopen(p, "wb");
+   assert(f);
+   fputs(WF_NOOP, f);
    fclose(f);
    setenv("AIMEE_HOME", home, 1);
    assert(db1_init(":memory:") == 0);
@@ -360,6 +423,71 @@ int main(void)
       assert(wfe_implement_verify_ok(".") == 0);
 
       wfe_set_verify_provider(NULL);
+   }
+
+   /* D1: a proven write no-op is not a provider failure. Even with persisted
+    * roundtable feedback, implement must reach the authoritative mechanical
+    * gate, and document must freeze the current tree so the downstream docs
+    * panel can judge it. This is the multi-slice case where another slice or an
+    * earlier retry already satisfied the corrective packet. */
+   {
+      assert(wfe_delegate_error_is_no_change(
+          "delegate code: no file changes detected; result treated as incomplete"));
+      assert(wfe_delegate_error_is_no_change(
+          "delegate code: no owned files changed; result treated as incomplete"));
+      assert(!wfe_delegate_error_is_no_change("provider connection failed"));
+
+      char repo[] = "/tmp/wfe_noop_repo_XXXXXX";
+      assert(wfe_test_mkdtemp(repo));
+      char cmd[800];
+      snprintf(cmd, sizeof cmd,
+               "git -C %s init -q -b testing && git -C %s -c user.email=t@t "
+               "-c user.name=t commit -q --allow-empty -m base",
+               repo, repo);
+      assert(system(cmd) == 0);
+
+      char proposal[300];
+      snprintf(proposal, sizeof proposal, "%s/noop-packet.md", home);
+      FILE *packet = fopen(proposal, "wb");
+      assert(packet);
+      fputs("The requested behavior and documentation are already present.\n", packet);
+      fclose(packet);
+
+      wfe_set_delegate_provider(&NOOP_STAGE_DELEG);
+      wfe_set_verify_provider(&MOCK_VERIFY);
+      g_verify_rc = 0;
+      snprintf(g_verdict, sizeof g_verdict, "{\"schema_version\":1,\"verdict\":\"passed\"}");
+      g_noop_impl_calls = g_noop_doc_calls = 0;
+      g_noop_impl_prompt[0] = '\0';
+
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("noopwf", repo, proposal, "interactive", id, err, sizeof err) ==
+             0);
+      assert(wfe_feedback_write(id, "## reviewer\nThe corrective packet may already be met.") == 0);
+      assert(wfe_engine_run(id, err, sizeof err) == 0);
+
+      db1_work_item_t wi;
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.state, "accepted") == 0);
+      assert(g_noop_impl_calls == 1);
+      assert(g_noop_doc_calls == 1);
+      assert(strstr(g_noop_impl_prompt, "corrective packet may already be met") != NULL);
+
+      db1_lifecycle_event_t *events = NULL;
+      int event_count = db1_lifecycle_event_list(id, &events);
+      int impl_noop = 0, doc_noop = 0;
+      for (int i = 0; i < event_count; i++)
+      {
+         if (strcmp(events[i].kind, "noop") == 0 && strcmp(events[i].stage, "impl") == 0)
+            impl_noop = 1;
+         if (strcmp(events[i].kind, "noop") == 0 && strcmp(events[i].stage, "document") == 0)
+            doc_noop = 1;
+      }
+      free(events);
+      assert(impl_noop && doc_noop);
+      wfe_feedback_clear(id);
+      wfe_set_verify_provider(NULL);
+      wfe_set_delegate_provider(&MOCK_DELEG);
    }
 
    /* D1b: TDD RED gate — after the test author commits, a genuine red must NOT

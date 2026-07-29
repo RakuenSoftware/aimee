@@ -109,3 +109,8 @@ bus consumer. See [Event bus](EVENT_BUS.md).
 
 See [Workflows](WORKFLOWS.md), [Workflow Actions](WORKFLOW_ACTIONS.md), and
 [Delegate sandbox](DELEGATE_SANDBOX.md).
+
+## Automatic proposal admission
+
+Automatic proposal admission follows the canonical contract in
+[Automatic proposal admission](wfe-autonomy-runbook.md#automatic-proposal-admission).

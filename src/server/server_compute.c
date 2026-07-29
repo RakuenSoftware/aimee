@@ -713,6 +713,7 @@ void delegate_worker(void *arg)
    cJSON *jbranch = cJSON_GetObjectItemCaseSensitive(req, "branch");
    cJSON *jtimeout = cJSON_GetObjectItemCaseSensitive(req, "timeout_ms");
    cJSON *jmaxturns = cJSON_GetObjectItemCaseSensitive(req, "max_turns");
+   cJSON *jmaxturnscap = cJSON_GetObjectItemCaseSensitive(req, "max_turns_cap");
    cJSON *jhandoff = cJSON_GetObjectItemCaseSensitive(req, "handoff_json");
    cJSON *jtools = cJSON_GetObjectItemCaseSensitive(req, "tools");
    cJSON *jprovided_target = cJSON_GetObjectItemCaseSensitive(req, "provided_target");
@@ -737,6 +738,9 @@ void delegate_worker(void *arg)
        (cJSON_IsString(jbranch) && jbranch->valuestring[0]) ? jbranch->valuestring : NULL;
    int timeout_ms = cJSON_IsNumber(jtimeout) ? (int)jtimeout->valuedouble : 0;
    int max_turns = cJSON_IsNumber(jmaxturns) ? (int)jmaxturns->valuedouble : -1;
+   int max_turns_cap = cJSON_IsNumber(jmaxturnscap) && jmaxturnscap->valuedouble > 0
+                           ? (int)jmaxturnscap->valuedouble
+                           : 0;
    int handoff_json = cJSON_IsTrue(jhandoff);
    /* Only the JSON boolean literal true opts out; absent, false, and malformed
     * values preserve automatic evidence grounding. */
@@ -1032,6 +1036,7 @@ void delegate_worker(void *arg)
       target_agent->timeout_ms =
           delegate_effective_timeout_ms(timeout_ms, target_agent->timeout_ms);
    delegate_apply_max_turns_policy(&acfg, role, max_turns);
+   delegate_apply_max_turns_cap(&acfg, role, max_turns_cap);
    if (cctx->background_job_id > 0 && target_agent)
       db1_agent_job_set_agent(cctx->background_job_id, target_agent->name);
    /* Resolve the credential (WP-C.1 vault-FIRST + WP-C.3 per-principal cooldown):

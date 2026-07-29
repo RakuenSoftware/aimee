@@ -622,9 +622,20 @@ static int node_bool(const wfe_node_t *node, const char *key)
  * the step's assigned agent (or "$random", or "" to route by role). out_cost (may
  * be NULL) receives the server-side wall-clock USD estimate for the turn (WP-5
  * budget). Returns:
- *   1  provider ran and succeeded,
- *   0  no provider installed (caller falls back to its fail-closed path),
- *  -1  provider ran and failed (caller should loop/retry). */
+ *   1  provider ran and changed the requested artifact/worktree,
+ *   0  no provider installed (caller falls back to its legacy path),
+ *  -1  provider ran and failed (caller should loop/retry),
+ *  -2  provider completed but proved the requested write was a no-op. */
+#define WFE_DISPATCH_NO_CHANGE (-2)
+
+int wfe_delegate_error_is_no_change(const char *error)
+{
+   if (!error || !strstr(error, "result treated as incomplete"))
+      return 0;
+   return strstr(error, "no file changes detected") != NULL ||
+          strstr(error, "no owned files changed") != NULL;
+}
+
 static int wfe_delegate_dispatch(const char *workdir, const char *role, const char *prompt,
                                  const char *artifact_path, char out_commit_sha[64],
                                  double *out_cost)
@@ -645,7 +656,11 @@ static int wfe_delegate_dispatch(const char *workdir, const char *role, const ch
       *out_cost = (ok0 && ok1) ? wfe_autonomy_cost_estimate((double)(t1.tv_sec - t0.tv_sec) +
                                                             (double)(t1.tv_nsec - t0.tv_nsec) / 1e9)
                                : 0.0;
-   return rc == 0 ? 1 : -1;
+   if (rc == WFE_DELEGATE_OK)
+      return 1;
+   if (rc == WFE_DELEGATE_NO_CHANGE)
+      return WFE_DISPATCH_NO_CHANGE;
+   return -1;
 }
 
 /* Attach the measured delegate cost to a result, so a turn's wall-clock cost is
@@ -1023,64 +1038,18 @@ static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
                   base_prompt, feedback);
       else
          snprintf(prompt, sizeof prompt, "%s", base_prompt);
-      /* Snapshot HEAD so a NO-OP dispatch is detectable below. */
-      char pre_head[64] = "";
-      {
-         const char *argv[] = {"git", "-C", wd, "rev-parse", "HEAD", NULL};
-         char *o = NULL;
-         if (git_capture(argv, &o) == 0 && o)
-         {
-            chomp(o);
-            snprintf(pre_head, sizeof pre_head, "%s", o);
-         }
-         free(o);
-      }
       int impl_rc = wfe_delegate_dispatch(wd, "engineer", prompt, NULL, commit, &cost);
-      /* A dispatch that reports no new work (impl_rc < 0 — e.g. the write-role
-       * delegate produced no diff, flagged by delegate_detect_noop_write) is a
-       * FAILED attempt on a roundtable on_fail RETRY (feedback present): looping
-       * re-dispatches a different agent rather than re-running the panel on an
-       * unchanged tree. On the FIRST pass (no feedback) the SAME no-diff dispatch
-       * instead means a PRIOR implement iteration already committed the work and
-       * advanced HEAD, but the slice looped back here (e.g. a transient verify
-       * failure); this delegate correctly finds nothing left to do. Do NOT loop on
-       * that — fall through to the mandatory verify below so a now-passing committed
-       * tree advances instead of spinning to the attempt cap. A genuine no-op with
-       * no committed work still fails verify there and loops, so unverified work is
-       * never advanced. (Without this, once any iteration commits the artifact every
-       * later delegate no-ops -> impl_rc < 0 -> the slice loops forever, never
-       * reaching the verify that would let the committed tree pass — observed live.) */
-      if (impl_rc < 0)
-      {
-         if (feedback[0])
-            return with_cost(wfe_step_looped(), cost);
-         db1_lifecycle_event_add(wfe_ctx_work_item(ctx), node->id, "loop", "engine",
-                                 "impl no-op dispatch (first pass): verifying committed tree", "",
-                                 cost);
-      }
-      /* A dispatch that changed NOTHING (reply-only, no tool edits, so the
-       * provider's add+commit no-opped and HEAD is unchanged) is a FAILED
-       * attempt, not an advance: freezing the identical tree re-runs verify and
-       * a full 4-seat panel on a diff the panel already rejected. Observed
-       * live: whole review rounds burned on byte-identical artifacts. Loop so
-       * the retry re-dispatches (a $random re-roll picks a different agent). */
-      if (pre_head[0] && commit[0] && strcmp(pre_head, commit) == 0 && feedback[0])
-      {
-         /* A no-op is a failed attempt only on a roundtable on_fail RETRY (feedback
-          * present): re-advancing the identical, already-rejected diff would re-run
-          * the 4-seat panel on a byte-identical artifact forever. On the FIRST pass
-          * (no feedback) a no-op instead means a PRIOR implement iteration already
-          * committed the work and advanced HEAD, but its mechanical verify failed
-          * transiently (e.g. the sandbox could not acquire a container) and looped
-          * back; this iteration's delegate correctly finds nothing left to do. Do
-          * NOT loop on that — fall through to the mandatory verify below so a
-          * now-passing committed tree can advance instead of spinning to the attempt
-          * cap. A genuine no-op with no committed work still fails verify there and
-          * loops, so this never advances unverified work. */
-         db1_lifecycle_event_add(wfe_ctx_work_item(ctx), node->id, "loop", "engine",
-                                 "impl no-op: delegate made no edits (post-review)", "", cost);
+      if (impl_rc == -1)
          return with_cost(wfe_step_looped(), cost);
-      }
+      /* NO_CHANGE is an outcome, not a failed execution. The packet may already
+       * be satisfied by an earlier slice or retry, including after a roundtable
+       * requested a correction that another slice landed. Let the mandatory
+       * mechanical and adversarial gates below decide. If the unchanged tree is
+       * still deficient, those gates fail and the engine retries as before. */
+      if (impl_rc == WFE_DISPATCH_NO_CHANGE)
+         db1_lifecycle_event_add(wfe_ctx_work_item(ctx), node->id, "noop", "engine",
+                                 "implement delegate made no changes; verifying current tree", "",
+                                 cost);
    }
 
    char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
@@ -1113,11 +1082,19 @@ static wfe_step_result_t exec_document(wfe_ctx *ctx, const wfe_node_t *node)
    resolve_workdir(ctx, wd, sizeof wd);
    char commit[64] = "";
    double cost = 0.0;
-   if (wfe_delegate_dispatch(wd, "engineer",
-                             "Document the change on the work-item branch (README/CHANGELOG/docs "
-                             "+ inline comments), then commit.",
-                             NULL, commit, &cost) < 0)
+   int doc_rc = wfe_delegate_dispatch(
+       wd, "engineer",
+       "Document the change on the work-item branch (README/CHANGELOG/docs + inline comments), "
+       "then commit.",
+       NULL, commit, &cost);
+   if (doc_rc == -1)
       return with_cost(wfe_step_looped(), cost);
+   /* Documentation can already be complete (especially after merged slices).
+    * Freeze the unchanged tree and let the downstream documentation roundtable
+    * judge completeness instead of requiring a meaningless edit. */
+   if (doc_rc == WFE_DISPATCH_NO_CHANGE)
+      db1_lifecycle_event_add(wfe_ctx_work_item(ctx), node->id, "noop", "engine",
+                              "document delegate made no changes; freezing current tree", "", cost);
    char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
    if (wfe_git_freeze(wd, "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
       return with_cost(wfe_step_failed_class(WFE_FAIL_CORRUPTION, 0), cost); /* worktree/git */
