@@ -242,6 +242,7 @@ int server_is_running(const char *socket_path);
  * scrub credential environment variables. No-op when no source is set; returns
  * the count provisioned. */
 int server_vault_bootstrap(void);
+int server_vault_bootstrap_prepare(void);
 /* Resolve a delegate name to its canonical agents.json name: returns 1 and
  * writes `canon` (NUL-terminated, capped at `cap`) when known, else 0. The
  * provisioning module calls this through an injected pointer so it carries no

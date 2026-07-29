@@ -6,24 +6,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
-	"os"
-	"path/filepath"
 	"strings"
 )
 
 func (s *server) openAIBearerOK(r *http.Request) bool {
-	if s == nil || s.cfg == nil || s.cfg.socketPath == "" {
-		return false
-	}
-	raw, err := os.ReadFile(filepath.Join(filepath.Dir(s.cfg.socketPath), "server.token"))
-	if err != nil {
-		return false
-	}
-	token := strings.TrimSpace(string(raw))
-	if token == "" {
-		return false
-	}
-	return r.Header.Get("Authorization") == "Bearer "+token
+	return s != nil && s.cfg != nil && s.cfg.socketPath != "" && s.sessionUsername(r) != ""
 }
 
 func (s *server) handleOpenAIModels(w http.ResponseWriter, r *http.Request) {
@@ -120,23 +107,11 @@ func (s *server) proxyV1(w http.ResponseWriter, r *http.Request, upstreamPath st
 			req.Header.Del("X-Aimee-Principal")
 			req.Header.Del("X-Aimee-Source")
 			req.Header.Del("X-Aimee-Session-Key")
-			if secret := strings.TrimSpace(os.Getenv("AIMEE_INGRESS_PROXY_SECRET")); secret != "" {
-				req.Header.Set("X-Aimee-Proxy-Authorization", secret)
+			if webUser != "" {
 				req.Header.Set("X-Aimee-Source", "webchat")
-				if webUser != "" {
-					// TRUSTED: server-validated webchat PAM session. Distinct users
-					// get distinct trusted principals/sessions.
-					req.Header.Set("X-Aimee-Principal", "webchat:"+webUser)
-					req.Header.Set("X-Aimee-Session-Key", "webchat:"+webUser)
-				} else {
-					// External shared-bearer client: a shared credential carries no
-					// per-client identity, so these requests are INTENTIONALLY
-					// attributed to the single trusted "webchat" service account
-					// (the stamped principal; no session key). Per-client distinction
-					// requires a webchat session (PAM user) or per-user tokens. See
-					// the proposal's webchat shared-bearer note.
-					req.Header.Set("X-Aimee-Principal", "webchat")
-				}
+				req.Header.Set("X-Aimee-Webuser", webUser)
+				req.Header.Set("X-Aimee-Principal", "webchat:"+webUser)
+				req.Header.Set("X-Aimee-Session-Key", "webchat:"+webUser)
 			}
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) {

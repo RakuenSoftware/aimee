@@ -46,6 +46,8 @@
 #include "webuser_editor.h"  /* webuser_editor_shutdown — reap editors at shutdown (WP-I) */
 #include "agent_admission.h" /* agent_admission_agent_active — route capacity probe */
 #include "agent_config.h"
+#include "vault_service.h"
+#include "vault_store.h"
 #include "provider_catalog.h"
 #include <aimee/delegates/delegate_credentials.h>
 #include <aimee/delegates/delegate_sandbox_image.h>
@@ -75,6 +77,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
+#include <openssl/crypto.h>
 
 /* Defined in server_main.c; set by the SIGHUP handler, observed by the main loop (P1b). */
 extern volatile sig_atomic_t g_config_reload_requested;
@@ -1979,6 +1982,67 @@ static int server_bootstrap_resolve_agent(const char *name, char *canon, size_t 
    return 1;
 }
 
+/* Canonicalize legacy agents.json credentials into the per-agent Vault slot.
+ * A $VAR is only a first-boot reference: vault_env_bootstrap_init() has already
+ * sealed and unset the environment value and populated the locked runtime cache,
+ * so agent_load_config resolves it without consulting getenv(). Once sealed in
+ * the agent slot the reference is removed too. An unresolved reference is safe
+ * to retain because it contains no credential and may be supplied on a later
+ * first boot. */
+static int server_migrate_agent_config_credentials(void)
+{
+   agent_config_t cfg;
+   if (agent_load_config(&cfg) != 0)
+   {
+      /* A pristine first boot may not have generated agents.json yet. There is
+       * nothing to migrate; a present but unreadable registry still fails
+       * closed because it may contain an unsealed credential. */
+      if (access(agent_config_path(), F_OK) != 0 && errno == ENOENT)
+         return 0;
+      return -1;
+   }
+
+   int changed = 0;
+   for (int i = 0; i < cfg.agent_count; i++)
+   {
+      agent_t *agent = &cfg.agents[i];
+      const int stored_literal = agent->api_key_disk[0] && agent->api_key_disk[0] != '$';
+      const int resolved_reference =
+          agent->api_key_disk[0] == '$' && agent->api_key[0] && agent->api_key[0] != '$';
+      if (!stored_literal && !resolved_reference)
+         continue;
+      if (!agent->name[0] || !agent->api_key[0])
+         return -1;
+
+      if (!vault_store_has_entry(VAULT_SERVER_PRINCIPAL, agent->name, VAULT_API_KEY_CRED) &&
+          vault_service_set_server(agent->name, VAULT_API_KEY_CRED, agent->api_key) != VAULT_OK)
+      {
+         OPENSSL_cleanse(&cfg, sizeof(cfg));
+         return -1;
+      }
+      OPENSSL_cleanse(agent->api_key, sizeof(agent->api_key));
+      OPENSSL_cleanse(agent->api_key_disk, sizeof(agent->api_key_disk));
+      changed = 1;
+   }
+
+   if (changed && agent_save_config(&cfg) != 0)
+   {
+      OPENSSL_cleanse(&cfg, sizeof(cfg));
+      return -1;
+   }
+   OPENSSL_cleanse(&cfg, sizeof(cfg));
+   return 0;
+}
+
+int server_vault_bootstrap_prepare(void)
+{
+   server_vault_bootstrap_set_resolver(server_bootstrap_resolve_agent);
+   int provisioned = server_vault_bootstrap();
+   if (provisioned < 0 || server_migrate_agent_config_credentials() != 0)
+      return -1;
+   return provisioned;
+}
+
 /* The shell-git gate (agent_tools.h): 1 = refuse this shell command, git belongs to
  * aimee. Lives here because the decision needs three things from three tiers that
  * the agent tool surface must not link — the config dial, the command classifier,
@@ -2219,8 +2283,13 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    server_seed_config_defaults();
    /* Credential environment variables are first-boot transport only. Seal them
     * before any capability posture checks or workers can consume them. */
-   server_vault_bootstrap_set_resolver(server_bootstrap_resolve_agent);
-   server_vault_bootstrap();
+   if (server_vault_bootstrap_prepare() < 0)
+   {
+      LOG_ERROR("server", "delegate credential Vault bootstrap failed");
+      close(fd);
+      platform_evloop_destroy(&ctx->evloop);
+      return -1;
+   }
    int compute_threads = aimee_resolve_compute_threads(cfg.compute_threads);
    int session_threads = aimee_resolve_session_threads(cfg.session_threads);
    /* Background (sessionless) delegates run on-demand, gated by the per-model

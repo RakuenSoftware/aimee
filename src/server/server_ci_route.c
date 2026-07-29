@@ -6,6 +6,7 @@
 #include "wfe_scheduler.h" /* wfe_scheduler_notify */
 #include "wfe_store.h"     /* db1_work_item_* / db1_lifecycle_event_* / by_pr_ref */
 #include "json_fluent.h"   /* jo_cstr */
+#include "runtime_secret.h"
 #include "cJSON.h"
 #include <openssl/hmac.h>
 #include <stdio.h>
@@ -41,8 +42,7 @@ static void ci_hmac_sha256_hex(const char *secret, const char *msg, char out_hex
  * (pr_ref, head_sha, status) is recorded once. status ∈ passed|failed|error|pending. */
 int rh_dev_ci_event(const route_req_t *rq, char *resp, int cap)
 {
-   const char *secret = getenv("AIMEE_CI_WEBHOOK_SECRET");
-   if (!secret || !secret[0])
+   if (!runtime_secret_has("AIMEE_CI_WEBHOOK_SECRET"))
    {
       snprintf(resp, cap,
                "{\"error\":\"ci-event webhook disabled: AIMEE_CI_WEBHOOK_SECRET unset\"}");
@@ -91,7 +91,15 @@ int rh_dev_ci_event(const route_req_t *rq, char *resp, int cap)
    char canon[512];
    snprintf(canon, sizeof canon, "%s|%s|%s", pr_ref, head_sha, status);
    char expect[65];
+   char secret[512];
+   if (!runtime_secret_get("AIMEE_CI_WEBHOOK_SECRET", secret, sizeof(secret)))
+   {
+      cJSON_Delete(body);
+      snprintf(resp, cap, "{\"error\":\"ci-event webhook unavailable\"}");
+      return 503;
+   }
    ci_hmac_sha256_hex(secret, canon, expect);
+   runtime_secret_wipe(secret, sizeof(secret));
    if (!expect[0] || !server_ct_equal(sig, expect))
    {
       cJSON_Delete(body);

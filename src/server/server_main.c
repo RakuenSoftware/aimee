@@ -35,6 +35,9 @@
 #include "headers/server_cli_oauth.h"
 #include "vault_server_key.h"
 #include "vault_service.h"        /* VAULT_SERVER_PRINCIPAL (rotation target) */
+#include "vault_env_bootstrap.h"  /* first-boot credential env -> Vault */
+#include "vault_config_bootstrap.h" /* legacy config credential -> Vault */
+#include "runtime_secret.h"       /* wipe Vault-sourced runtime cache at exit */
 #include "vault_audit_bridge.h"   /* route vault credential-access events onto the audit bus */
 #include "sandbox_audit_bridge.h" /* route sandbox degraded-isolation events onto the audit bus */
 #include "memory_audit_bridge.h"  /* route server-side memory mutations onto the audit bus */
@@ -172,6 +175,23 @@ static int run_server(const char *socket_path, log_level_t log_level)
    memory_audit_bridge_install();  /* route server-side memory mutations onto the audit bus */
    tool_completion_audit_bridge_install(); /* route tool-dispatch outcomes onto the audit bus */
 
+   /* Credential env vars are deployment bootstrap transport (for example a
+    * Kubernetes Secret), never runtime storage. Seal and unset them before any
+    * config or subsystem can read the process environment. */
+   if (vault_env_bootstrap_init() < 0)
+   {
+      startup_notify(notify_fd, "error: credential Vault bootstrap failed\n");
+      audit_log_close();
+      return 1;
+   }
+   if (vault_config_bootstrap_init() < 0)
+   {
+      startup_notify(notify_fd, "error: credential config Vault migration failed\n");
+      audit_log_close();
+      return 1;
+   }
+   (void)atexit(runtime_secret_clear);
+
    /* Activate the GitHub App installation-token provider for the server's forge
     * identity. Inert unless AIMEE_FORGE_APP_* is set (see forge_app_token.c). */
    forge_cred_register_app_token_provider(forge_app_token_configured, forge_app_token_get);
@@ -249,9 +269,8 @@ static int run_server(const char *socket_path, log_level_t log_level)
          platform_setenv("AIMEE_KB_API_URL", local_kb);
       }
    }
-   if (cfg.kb_client_bearer_token[0] &&
-       !(getenv("AIMEE_KB_API_BEARER_TOKEN") && getenv("AIMEE_KB_API_BEARER_TOKEN")[0]))
-      platform_setenv("AIMEE_KB_API_BEARER_TOKEN", cfg.kb_client_bearer_token);
+   /* KB bearer credentials are consumed through runtime_secret. Never export a
+    * config value back into the process environment. */
 
    /* Result cache + invalidation subscriber: a short-TTL LRU of kb read results
     * (AIMEE_KB_CACHE_TTL_S; off by default) flushed on the kb's /v1/events push,
@@ -360,6 +379,17 @@ static int run_server(const char *socket_path, log_level_t log_level)
 
 int main(int argc, char **argv)
 {
+   /* Container/POD entrypoints use this short-lived process to consume
+    * first-boot credential inputs before launching any long-lived process. */
+   if (argc >= 2 && strcmp(argv[1], "--bootstrap-vault-env") == 0)
+   {
+      if (vault_env_bootstrap_init() < 0 || server_vault_bootstrap_prepare() < 0 ||
+          vault_config_bootstrap_init() < 0)
+         return 1;
+      runtime_secret_clear();
+      return 0;
+   }
+
    /* Backwards compat: --run-command was the old server command-dispatch path.
     * Command work now needs typed server/kb RPCs and runs on the server's
     * in-process compute pool when it is long-running. */

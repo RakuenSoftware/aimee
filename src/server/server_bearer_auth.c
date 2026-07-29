@@ -18,6 +18,8 @@
 #include "config.h"
 #include "db1/remote_client_grant.h"
 #include "platform_random.h"
+#include "runtime_secret.h"
+#include "vault_config_bootstrap.h"
 #include "server.h"
 #include "server_http.h"
 
@@ -118,7 +120,6 @@ int server_http_authorize_enrolled_request(int is_tcp, const char *bearer_cfg,
    if (bootstrap_only && result == 0 && is_tcp && bearer_cfg &&
        strcmp(bearer_cfg, AIMEE_BOOTSTRAP_BEARER) == 0)
    {
-      const char *pin = getenv("AIMEE_API_BEARER_TOKEN");
       int primary_match =
           (auth_header && strncmp(auth_header, "Bearer ", 7) == 0 && auth_header[7] &&
            server_ct_equal(auth_header + 7, bearer_cfg)) ||
@@ -131,7 +132,8 @@ int server_http_authorize_enrolled_request(int is_tcp, const char *bearer_cfg,
          if (api_key_header && api_key_header[0])
             extra_match |= server_ct_equal(api_key_header, g_bearer_extra[i]);
       }
-      *bootstrap_only = primary_match && !extra_match && !(pin && pin[0]);
+      *bootstrap_only = primary_match && !extra_match &&
+                        !runtime_secret_has("AIMEE_API_BEARER_TOKEN");
    }
    pthread_mutex_unlock(&g_bearer_lock);
    return result;
@@ -252,7 +254,10 @@ static int first_user_bootstrap_locked(const char *principal, char *bearer, size
       goto done;
    }
 
-   if (config_server_api_bearer_extra_append(proposed) != 0)
+   char vault_name[96];
+   snprintf(vault_name, sizeof(vault_name), "AIMEE_API_BEARER_TOKEN_EXTRA_%d",
+            configured_count);
+   if (vault_runtime_secret_set(vault_name, proposed) != 0)
    {
       (void)db1_remote_client_abandon(proposed_hash);
       goto done;

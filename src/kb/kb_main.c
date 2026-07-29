@@ -47,6 +47,9 @@
 #include "db2/kb_audit_worm.h"
 #include "db2/vault_operator_status_runtime.h"
 #include "vault_server_key.h"       /* startup durable seal-epoch synchronization */
+#include "vault_env_bootstrap.h"    /* first-boot credential env -> Vault */
+#include "vault_config_bootstrap.h" /* legacy config credential -> Vault */
+#include "runtime_secret.h"         /* wipe Vault-sourced runtime cache at exit */
 #include "kb_memory_audit_bridge.h" /* record memory mutations on aimee-kb's own obs bus */
 #include "log.h"                    /* audit_log_open — KB memory-audit ledger */
 #include <signal.h>
@@ -1548,6 +1551,24 @@ static int kb_cmd_tenancy(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
+   /* The local file Vault is still bound here (before KB switches ordinary
+    * tenant Vault operations to Postgres), so it can break the DB credential
+    * bootstrap cycle and hydrate process memory without retaining env secrets. */
+   if (vault_env_bootstrap_init() < 0)
+   {
+      fputs("aimee-kb: credential Vault bootstrap failed\n", stderr);
+      return 1;
+   }
+   if (vault_config_bootstrap_init() < 0)
+   {
+      fputs("aimee-kb: credential config Vault migration failed\n", stderr);
+      return 1;
+   }
+   (void)atexit(runtime_secret_clear);
+
+   if (argc > 1 && strcmp(argv[1], "--bootstrap-vault-env") == 0)
+      return 0;
+
    /* Subcommands (must precede the daemon flag loop). */
    if (argc > 1 && strcmp(argv[1], "enroll") == 0)
       return kb_cmd_enroll(argc, argv);

@@ -2134,7 +2134,6 @@ int config_load(config_t *cfg);
 /* Bounded enrolled-bearer operations owned by the config module. Callers get a
  * coherent copy or append one token without naming or copying config_t. */
 int config_server_api_bearer_extra_snapshot(char out[][256], int max);
-int config_server_api_bearer_extra_append(const char *bearer);
 
 /* Live config snapshot (live-config-reload P1a) — a double-buffer + seqlock holding the
  * current config for immediate, push-driven reload. config_t is a flat POD, so reads are a
@@ -2172,6 +2171,13 @@ int config_autonomy_lookup(const char *env_name, long *out);
  * reflect the current on-disk file (e.g. config.set) so it never clobbers an external edit,
  * and internally by config_reload. Ordinary readers should use config_load. */
 int config_load_file(config_t *cfg);
+
+/* Credential fields are represented in config_t only for runtime compatibility;
+ * their writer is injected by the server/KB Vault bootstrap. With no writer
+ * installed, credential mutations fail closed instead of reaching aimee.yaml. */
+typedef int (*config_secret_writer_fn)(const char *name, const char *value);
+void config_secret_writer_set(config_secret_writer_fn writer);
+int config_secret_store(const char *name, const char *value);
 
 /* Economizer policy. SAFE permits only deterministic, mechanically lossless
  * transforms of fresh local content. AGGRESSIVE additionally permits the

@@ -1,9 +1,9 @@
 /* test_vault_bootstrap.c — boot-time delegate-vault provisioning (WP-A/B).
  *
  * Pins the behavior of server_vault_bootstrap(): it seals operator-supplied
- * delegate API keys (a JSON secrets file or AIMEE_DELEGATE_KEY_<AGENT> env vars)
+ * delegate API keys from AIMEE_DELEGATE_KEY_<AGENT> first-boot env vars
  * into the SERVER-principal vault autonomously, is idempotent + non-destructive,
- * skips unknown agents without failing, no-ops with no source, scrubs the env,
+ * fails closed for unknown agents, no-ops with no source, scrubs the env,
  * and never leaves a plaintext secret under $AIMEE_HOME.
  *
  * The module resolves agent names through an injected resolver, so this test
@@ -12,11 +12,15 @@
 #include "vault_service.h"
 #include "vault_store.h"
 #include "vault_kek_cache.h"
+#include "vault_env_bootstrap.h"
+#include "runtime_secret.h"
+#include <openssl/crypto.h>
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 static char g_root[256]; /* test sandbox: <root>/home is AIMEE_HOME */
@@ -40,14 +44,6 @@ static int fake_resolver(const char *name, char *canon, size_t cap)
    return 0;
 }
 
-static void write_file(const char *path, const char *content)
-{
-   FILE *f = fopen(path, "wb");
-   assert(f);
-   fputs(content, f);
-   fclose(f);
-}
-
 /* True if `needle` appears verbatim in any file under $AIMEE_HOME. */
 static int plaintext_under_home(const char *needle)
 {
@@ -56,52 +52,27 @@ static int plaintext_under_home(const char *needle)
    return system(cmd) == 0;
 }
 
-/* File source: known agent is sealed + resolves; unknown agent is skipped. */
-static void test_file_source(void)
-{
-   char secrets[400];
-   snprintf(secrets, sizeof(secrets), "%s/secrets.json", g_root); /* OUTSIDE home */
-   write_file(secrets, "{\"mistral\":\"sk-mistral-ALPHA\",\"ghostagent\":\"sk-nope\"}");
-   setenv("AIMEE_DELEGATE_SECRETS_FILE", secrets, 1);
-
-   int n = server_vault_bootstrap();
-   assert(n == 1); /* only mistral provisioned; ghostagent unknown */
-
-   assert(vault_store_has_entry(VAULT_SERVER_PRINCIPAL, "mistral", VAULT_API_KEY_CRED) == 1);
-   assert(vault_store_has_entry(VAULT_SERVER_PRINCIPAL, "ghostagent", VAULT_API_KEY_CRED) == 0);
-
-   char key[64] = "PRESET";
-   assert(vault_service_inject_api_key("", "mistral", key, sizeof(key), T0) == VAULT_OK);
-   assert(strcmp(key, "sk-mistral-ALPHA") == 0);
-
-   unlink(secrets);
-   unsetenv("AIMEE_DELEGATE_SECRETS_FILE");
-   printf("  PASS: test_file_source\n");
-}
-
 /* Re-running is non-destructive by default; the overwrite flag forces an update. */
 static void test_idempotent_and_overwrite(void)
 {
-   char secrets[400];
-   snprintf(secrets, sizeof(secrets), "%s/secrets2.json", g_root);
-   write_file(secrets, "{\"mistral\":\"sk-mistral-BETA\"}");
-   setenv("AIMEE_DELEGATE_SECRETS_FILE", secrets, 1);
+   setenv("AIMEE_DELEGATE_KEY_MISTRAL", "sk-mistral-ALPHA", 1);
+   assert(server_vault_bootstrap() == 1);
 
    /* Default: existing mistral cred is left untouched (provisioned count 0). */
+   setenv("AIMEE_DELEGATE_KEY_MISTRAL", "sk-mistral-BETA", 1);
    assert(server_vault_bootstrap() == 0);
    char key[64];
    assert(vault_service_inject_api_key("", "mistral", key, sizeof(key), T0) == VAULT_OK);
    assert(strcmp(key, "sk-mistral-ALPHA") == 0); /* unchanged */
 
    /* Overwrite flag: the cred is replaced. */
+   setenv("AIMEE_DELEGATE_KEY_MISTRAL", "sk-mistral-BETA", 1);
    setenv("AIMEE_DELEGATE_SECRETS_OVERWRITE", "1", 1);
    assert(server_vault_bootstrap() == 1);
    assert(vault_service_inject_api_key("", "mistral", key, sizeof(key), T0) == VAULT_OK);
    assert(strcmp(key, "sk-mistral-BETA") == 0);
 
    unsetenv("AIMEE_DELEGATE_SECRETS_OVERWRITE");
-   unlink(secrets);
-   unsetenv("AIMEE_DELEGATE_SECRETS_FILE");
    printf("  PASS: test_idempotent_and_overwrite\n");
 }
 
@@ -125,7 +96,7 @@ static void test_env_source(void)
 static void test_forge_env_source(void)
 {
    setenv("AIMEE_FORGE_TOKEN", "ghs-forge-DELTA", 1);
-   assert(server_vault_bootstrap() == 1);
+   assert(vault_env_bootstrap_init() == 1);
    assert(getenv("AIMEE_FORGE_TOKEN") == NULL);
 
    char token[64];
@@ -136,10 +107,52 @@ static void test_forge_env_source(void)
    printf("  PASS: test_forge_env_source\n");
 }
 
+static void test_generic_env_source(void)
+{
+   setenv("AIMEE_DB2_URL", "postgresql://user:db-password@db/aimee", 1);
+   assert(vault_env_bootstrap_init() == 1);
+   assert(getenv("AIMEE_DB2_URL") == NULL);
+   char value[128];
+   assert(runtime_secret_get("AIMEE_DB2_URL", value, sizeof(value)) == 1);
+   assert(strcmp(value, "postgresql://user:db-password@db/aimee") == 0);
+   runtime_secret_wipe(value, sizeof(value));
+   printf("  PASS: test_generic_env_source\n");
+}
+
+static void test_legacy_oauth_migration(void)
+{
+   char codex_dir[400], claude_dir[400], codex_path[480], claude_path[480];
+   snprintf(codex_dir, sizeof(codex_dir), "%s/.codex", g_home);
+   snprintf(claude_dir, sizeof(claude_dir), "%s/.claude", g_home);
+   assert(mkdir(codex_dir, 0700) == 0);
+   assert(mkdir(claude_dir, 0700) == 0);
+   snprintf(codex_path, sizeof(codex_path), "%s/auth.json", codex_dir);
+   snprintf(claude_path, sizeof(claude_path), "%s/.credentials.json", claude_dir);
+   FILE *f = fopen(codex_path, "wb");
+   assert(f != NULL);
+   fputs("{\"access_token\":\"legacy-codex-token\"}", f);
+   fclose(f);
+   f = fopen(claude_path, "wb");
+   assert(f != NULL);
+   fputs("{\"accessToken\":\"legacy-claude-token\"}", f);
+   fclose(f);
+
+   assert(server_vault_bootstrap() == 2);
+   char value[128];
+   assert(vault_service_get_server_principal("codex", "oauth", value, sizeof(value)) == VAULT_OK);
+   assert(strstr(value, "legacy-codex-token") != NULL);
+   OPENSSL_cleanse(value, sizeof(value));
+   assert(vault_service_get_server_principal("claude", "oauth", value, sizeof(value)) == VAULT_OK);
+   assert(strstr(value, "legacy-claude-token") != NULL);
+   OPENSSL_cleanse(value, sizeof(value));
+   assert(access(codex_path, F_OK) != 0);
+   assert(access(claude_path, F_OK) != 0);
+   printf("  PASS: test_legacy_oauth_migration\n");
+}
+
 /* No secret source configured -> no-op (and no crash). */
 static void test_no_source_noop(void)
 {
-   assert(getenv("AIMEE_DELEGATE_SECRETS_FILE") == NULL);
    assert(getenv("AIMEE_DELEGATE_KEY_CLAUDE") == NULL);
    assert(getenv("AIMEE_FORGE_TOKEN") == NULL);
    assert(server_vault_bootstrap() == 0);
@@ -154,6 +167,9 @@ static void test_no_plaintext_at_rest(void)
    assert(!plaintext_under_home("sk-mistral-BETA"));
    assert(!plaintext_under_home("sk-claude-GAMMA"));
    assert(!plaintext_under_home("ghs-forge-DELTA"));
+   assert(!plaintext_under_home("db-password"));
+   assert(!plaintext_under_home("legacy-codex-token"));
+   assert(!plaintext_under_home("legacy-claude-token"));
    printf("  PASS: test_no_plaintext_at_rest\n");
 }
 
@@ -168,14 +184,16 @@ int main(void)
    vault_kek_cache_clear();
    server_vault_bootstrap_set_resolver(fake_resolver);
 
-   test_file_source();
    test_idempotent_and_overwrite();
    test_env_source();
    test_forge_env_source();
+   test_generic_env_source();
+   test_legacy_oauth_migration();
    test_no_source_noop();
    test_no_plaintext_at_rest();
 
    vault_kek_cache_clear();
+   runtime_secret_clear();
    char rm[400];
    snprintf(rm, sizeof(rm), "rm -rf %s", g_root);
    (void)system(rm);

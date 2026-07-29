@@ -140,6 +140,23 @@ func (s *server) pendingBootstrapUsername() (string, bool) {
 	if username, ok := readGeneratedBootstrapUsername(s.setupAccountCredentials()); ok {
 		return username, true
 	}
+	// New images persist only the password verifier in the login registry, never
+	// the generated plaintext password. The generated username remains safe to
+	// identify by its rigid aimee-<12 hex> shape.
+	if data, err := os.ReadFile(s.setupAccountStore()); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			username, _, ok := strings.Cut(line, ":")
+			if !ok {
+				continue
+			}
+			suffix := strings.TrimPrefix(username, "aimee-")
+			if suffix != username && len(suffix) == 12 {
+				if _, err := hex.DecodeString(suffix); err == nil {
+					return username, true
+				}
+			}
+		}
+	}
 	if configuredWithKnownBootstrap() {
 		return defaultBootstrapUsername, true
 	}

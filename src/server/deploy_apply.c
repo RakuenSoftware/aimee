@@ -7,6 +7,8 @@
 #include "config.h"          /* config_t, config_load */
 #include "config_database.h" /* config_emit_deploy_env */
 #include "platform_random.h" /* 256-bit managed kb -> llm bearer */
+#include "runtime_secret.h"
+#include "vault_config_bootstrap.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -24,7 +26,7 @@ extern char **environ;
 
 #define DEPLOY_DEFAULT_COMPOSE "/opt/aimee/deploy/aimee-managed.compose.yaml"
 #define DEPLOY_OUT_CAP         8192 /* tail of compose output kept for the UI */
-#define DEPLOY_LLM_TOKEN_FILE  ".managed-kb-llm-token"
+#define DEPLOY_LLM_TOKEN_FILE  ".managed-kb-llm-token" /* legacy migration only */
 #define DEPLOY_LLM_TOKEN_HEX   64 /* 256-bit opaque bearer */
 
 /* Background-deploy state (one at a time; the wizard drives a single stack). */
@@ -75,10 +77,28 @@ static int deploy_llm_token_valid(const char *token)
    return 1;
 }
 
-/* Read or atomically create the stable service bearer shared only by the managed
- * aimee-kb and aimee-llm containers. The server's persistent AIMEE_HOME volume is
- * the authority for the credential, so a redeploy/restart does not silently
- * rotate one side away from the other. An explicit operator token wins. */
+static void deploy_remove_legacy_token_file(const char *path, off_t size)
+{
+   int fd = open(path, O_WRONLY | O_CLOEXEC | O_NOFOLLOW);
+   if (fd >= 0)
+   {
+      char zeros[256] = {0};
+      off_t left = size;
+      while (left > 0)
+      {
+         size_t chunk = left > (off_t)sizeof(zeros) ? sizeof(zeros) : (size_t)left;
+         if (write(fd, zeros, chunk) != (ssize_t)chunk)
+            break;
+         left -= (off_t)chunk;
+      }
+      (void)fsync(fd);
+      close(fd);
+   }
+   (void)unlink(path);
+}
+
+/* Resolve or mint the managed KB-to-LLM service bearer. Vault is the only
+ * durable authority; the old AIMEE_HOME file is consumed and erased once. */
 static int deploy_llm_token(char *out, size_t cap)
 {
    if (!out || cap < DEPLOY_LLM_TOKEN_HEX + 1)
@@ -86,14 +106,24 @@ static int deploy_llm_token(char *out, size_t cap)
    /* AIMEE_LLM_AUTH_TOKEN is the child credential and may be stale inherited
     * process state. It is deliberately ignored here. Operators who must adopt
     * an existing managed LLM use the distinct, explicit override variable. */
-   const char *configured = getenv("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
-   if (configured && configured[0])
+   char configured[513];
+   if (runtime_secret_get("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE", configured,
+                          sizeof(configured)))
    {
       if (!deploy_llm_token_valid(configured) || strlen(configured) >= cap)
+      {
+         runtime_secret_wipe(configured, sizeof(configured));
          return -1;
+      }
       snprintf(out, cap, "%s", configured);
-      return 0;
+      int rc = vault_runtime_secret_set("AIMEE_LLM_AUTH_TOKEN", configured);
+      runtime_secret_wipe(configured, sizeof(configured));
+      return rc;
    }
+   runtime_secret_wipe(configured, sizeof(configured));
+
+   if (runtime_secret_get("AIMEE_LLM_AUTH_TOKEN", out, cap))
+      return deploy_llm_token_valid(out) ? 0 : -1;
 
    const char *home = aimee_home();
    if (!home || !home[0])
@@ -119,7 +149,13 @@ static int deploy_llm_token(char *out, size_t cap)
       while (n > 0 && (out[n - 1] == '\n' || out[n - 1] == '\r'))
          n--;
       out[n] = '\0';
-      return deploy_llm_token_valid(out) ? 0 : -1;
+      if (!deploy_llm_token_valid(out) || vault_runtime_secret_set("AIMEE_LLM_AUTH_TOKEN", out) != 0)
+      {
+         runtime_secret_wipe(out, cap);
+         return -1;
+      }
+      deploy_remove_legacy_token_file(path, st.st_size);
+      return 0;
    }
    if (errno != ENOENT)
       return -1;
@@ -127,28 +163,13 @@ static int deploy_llm_token(char *out, size_t cap)
    char proposed[DEPLOY_LLM_TOKEN_HEX + 1];
    if (platform_random_hex(proposed, DEPLOY_LLM_TOKEN_HEX) != 0)
       return -1;
-   fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
-   if (fd < 0)
+   if (vault_runtime_secret_set("AIMEE_LLM_AUTH_TOKEN", proposed) != 0)
    {
-      /* Another deploy process may have won the create race. Re-enter through
-       * the validated read path rather than overwriting its credential. */
-      if (errno == EEXIST)
-         return deploy_llm_token(out, cap);
-      return -1;
-   }
-   size_t len = strlen(proposed);
-   ssize_t written = write(fd, proposed, len);
-   int ok = written == (ssize_t)len && fsync(fd) == 0 && fchmod(fd, 0600) == 0;
-   int saved = errno;
-   close(fd);
-   errno = saved;
-   if (!ok)
-   {
-      unlink(path);
+      runtime_secret_wipe(proposed, sizeof(proposed));
       return -1;
    }
    snprintf(out, cap, "%s", proposed);
-   memset(proposed, 0, sizeof(proposed));
+   runtime_secret_wipe(proposed, sizeof(proposed));
    return 0;
 }
 

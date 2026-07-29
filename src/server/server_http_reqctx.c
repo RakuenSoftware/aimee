@@ -10,6 +10,7 @@
 #include "server_http.h"
 #include "request_context.h"
 #include "config.h"
+#include "runtime_secret.h"
 #include <netinet/in.h> /* INADDR_ANY / INADDR_LOOPBACK */
 #include <stdio.h>
 #include <stdlib.h>
@@ -96,27 +97,31 @@ void server_http_populate_request_context(int fd, int is_tcp, const char *buf,
    if (ctx.peer_uid >= 0)
       snprintf(ctx.principal, sizeof(ctx.principal), "uid:%ld", ctx.peer_uid);
 
+   /* The root-owned webchat proxy is kernel-attested over the Unix socket. Root
+    * already controls the host/container, so a second shared secret adds only a
+    * plaintext credential to manage. TCP proxies still require a vaulted secret. */
+   if (!is_tcp && ctx.peer_uid == 0)
+      ctx.trusted = 1;
+
    /* A proxy is trusted to stamp identity only by presenting the shared secret.
-    * The secret comes from config, or the AIMEE_INGRESS_PROXY_SECRET environment
-    * variable — the latter so a co-located proxy that aimee-server launches (the
-    * webchat OpenAI proxy) inherits the same secret without a separate file. */
+    * Legacy config is accepted during migration; first-boot env input is read
+    * from the process-local Vault cache, never from the environment. */
    config_t cfg;
+   char vault_secret[160] = "";
    const char *secret = "";
    if (config_load(&cfg) == 0 && cfg.ingress_trusted_proxy_secret[0])
       secret = cfg.ingress_trusted_proxy_secret;
-   else
-   {
-      const char *env = getenv("AIMEE_INGRESS_PROXY_SECRET");
-      if (env && env[0])
-         secret = env;
-   }
-   if (secret[0])
+   else if (runtime_secret_get("AIMEE_INGRESS_PROXY_SECRET", vault_secret,
+                               sizeof(vault_secret)))
+      secret = vault_secret;
+   if (!ctx.trusted && secret[0])
    {
       char proxy_auth[160] = "";
       if (http_header(buf, "X-Aimee-Proxy-Authorization", proxy_auth, sizeof(proxy_auth)) &&
           reqctx_ct_equal(proxy_auth, secret))
          ctx.trusted = 1;
    }
+   runtime_secret_wipe(vault_secret, sizeof(vault_secret));
 
    /* The principal, source, AND session key are attribution identity that aimee
     * trusts onto the audit row, so they are honoured ONLY from a trusted proxy

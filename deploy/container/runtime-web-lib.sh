@@ -18,6 +18,7 @@ WEBCHAT_PORT="${AIMEE_WEBCHAT_PORT:-8443}"
 WEBCHAT_HOME="${AIMEE_HOME:-/var/lib/aimee}"
 WEBCHAT_SPA="${AIMEE_WEBCHAT_SPA:-/usr/local/share/aimee-runtime-web/index.html}"
 webchat_pid=""
+WEBCHAT_PREPARED=0
 
 webchat_log() { printf '[webchat] %s\n' "$*"; }
 
@@ -43,10 +44,8 @@ WEBCHAT_LOGIN_STORE="${WEBCHAT_HOME}/webchat/logins"
 # but this marker prevents a temporary generated login from returning after a
 # container recreate.
 WEBCHAT_BOOTSTRAP_REPLACED="${WEBCHAT_HOME}/webchat/bootstrap-replaced"
-# Root-only plaintext for the temporary login generated when neither primary
-# credential env var is set. Keeping it on AIMEE_HOME makes a recreate print the
-# SAME usable credential instead of silently rotating it. POST /api/setup/account
-# deletes it transactionally when the operator creates their permanent account.
+# Legacy path used only for one-time migration. New releases never persist a
+# plaintext bootstrap password.
 WEBCHAT_BOOTSTRAP_CREDENTIALS="${WEBCHAT_HOME}/webchat/bootstrap-credentials"
 
 # Record (or replace) the "user:hash" line for $1 in the durable store, reading the
@@ -161,17 +160,16 @@ webchat_generate_credentials() {
     [ -n "$wc_generated_user" ] || return 1
     wc_generated_pass="$(webchat_random_hex 32)" || return 1
 
-    _gc_dir="$(dirname "$WEBCHAT_BOOTSTRAP_CREDENTIALS")"
-    mkdir -p "$_gc_dir" || return 1
-    chmod 700 "$_gc_dir" 2>/dev/null || true
-    _gc_tmp="${WEBCHAT_BOOTSTRAP_CREDENTIALS}.tmp.$$"
-    if ! (umask 077 && printf 'username=%s\npassword=%s\n' \
-        "$wc_generated_user" "$wc_generated_pass" > "$_gc_tmp" &&
-        mv -f "$_gc_tmp" "$WEBCHAT_BOOTSTRAP_CREDENTIALS"); then
-        rm -f "$_gc_tmp"
-        return 1
+}
+
+webchat_remove_legacy_plaintext_credentials() {
+    [ -f "$WEBCHAT_BOOTSTRAP_CREDENTIALS" ] || return 0
+    if command -v shred >/dev/null 2>&1; then
+        shred -u -n 1 -z -- "$WEBCHAT_BOOTSTRAP_CREDENTIALS" 2>/dev/null ||
+            rm -f -- "$WEBCHAT_BOOTSTRAP_CREDENTIALS"
+    else
+        rm -f -- "$WEBCHAT_BOOTSTRAP_CREDENTIALS"
     fi
-    chmod 600 "$WEBCHAT_BOOTSTRAP_CREDENTIALS" 2>/dev/null || true
 }
 
 webchat_log_generated_credentials() {
@@ -297,7 +295,7 @@ webchat_bootstrap_user() {
                 return 1
             fi
             webchat_retire_login "$wc_generated_user" || return 1
-            rm -f "$WEBCHAT_BOOTSTRAP_CREDENTIALS" || return 1
+            webchat_remove_legacy_plaintext_credentials || return 1
         fi
         webchat_restore_logins
         if [ -n "$_wc_user" ]; then
@@ -321,7 +319,7 @@ webchat_bootstrap_user() {
                 return 1
             fi
             webchat_retire_login "$wc_generated_user" || return 1
-            rm -f "$WEBCHAT_BOOTSTRAP_CREDENTIALS" || return 1
+            webchat_remove_legacy_plaintext_credentials || return 1
         fi
         webchat_restore_logins
         webchat_provision_user "$_wc_user" "$_wc_pass" || return 1
@@ -334,12 +332,18 @@ webchat_bootstrap_user() {
             webchat_log "ERROR: generated bootstrap credential file is invalid; refusing to rotate an unknown login"
             return 1
         fi
+        webchat_remove_legacy_plaintext_credentials || return 1
+    elif [ -f "$WEBCHAT_LOGIN_STORE" ] && grep -Eq '^aimee-[0-9a-f]{12}:' "$WEBCHAT_LOGIN_STORE"; then
+        webchat_restore_logins
+        webchat_log "restored the existing temporary browser login; its password is never persisted or re-emitted"
+        webchat_bootstrap_extra_users
+        return 0
     else
         # Upgrade safety: retire the old published aimee login before creating
         # the first random credential on an existing persistent volume.
         webchat_retire_login "aimee" || return 1
         if ! webchat_generate_credentials; then
-            webchat_log "ERROR: could not generate and persist temporary browser credentials"
+            webchat_log "ERROR: could not generate temporary browser credentials"
             return 1
         fi
     fi
@@ -361,59 +365,41 @@ webchat_is_enabled() {
     esac
 }
 
-# Provision the webchat<->server shared trust secret. Both aimee-server (which
-# validates a webchat `X-Aimee-Webuser` assertion) and aimee-runtime-web (which sends
-# it, plus uses it as the legacy socket bearer) read $AIMEE_HOME/server.token.
-# Without it EVERY per-user vault/git/editor call fails closed ("aimee-server
-# unavailable" / "editor unavailable"), because webchat short-circuits before it
-# even reaches the server. Generate a strong random secret once, 0600, owned by
-# the aimee user so the privilege-dropped server can read it. Never clobber an
-# operator-provided token. Idempotent — safe to call on every start.
-webchat_ensure_server_token() {
-    _tok_path="${WEBCHAT_HOME}/server.token"
-    if [ -s "$_tok_path" ]; then
-        return 0
-    fi
-    mkdir -p "$WEBCHAT_HOME"
-    _tok=""
-    if command -v openssl >/dev/null 2>&1; then
-        _tok="$(openssl rand -hex 32 2>/dev/null)"
-    fi
-    if [ -z "$_tok" ] && [ -r /dev/urandom ]; then
-        _tok="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-    fi
-    if [ -z "$_tok" ]; then
-        webchat_log "WARNING: could not generate server.token (no openssl/urandom); per-user vault/git/editor will be unavailable"
-        return 0
-    fi
-    _umask_old="$(umask)"
-    umask 077
-    printf '%s\n' "$_tok" > "$_tok_path"
-    umask "$_umask_old"
-    # aimee-server runs as the unprivileged 'aimee' user and reads this file.
-    chown aimee:aimee "$_tok_path" 2>/dev/null || true
-    chmod 600 "$_tok_path" 2>/dev/null || true
-    webchat_log "generated server.token (webchat<->server trust for per-user vault/git/editor)"
-}
-
-# Launch aimee-runtime-web in the background (as root, for PAM). Self-signed TLS on
-# :8443 is auto-generated under AIMEE_HOME and persists on the data volume.
-webchat_start() {
+webchat_prepare() {
     # The browser UI ships ENABLED: it is a first-class surface, switched off only
     # when an operator sets AIMEE_RUNTIME_WEB_ENABLED=0. The server's /v1 API is the
     # machine contract; webchat is the human one.
     if ! webchat_is_enabled; then
         webchat_log "AIMEE_RUNTIME_WEB_ENABLED=0; browser UI disabled by operator"
+        WEBCHAT_PREPARED=1
         return 0
     fi
     # webchat is optional: images built with WITH_RUNTIME_WEB=0 ship no aimee-runtime-web
     # binary. Skip the browser UI rather than fail — the server is the contract.
     if ! command -v aimee-runtime-web >/dev/null 2>&1; then
         webchat_log "aimee-runtime-web not present (image built without WITH_RUNTIME_WEB); skipping browser UI"
+        WEBCHAT_PREPARED=1
         return 0
     fi
     webchat_bootstrap_user || return 1
-    webchat_ensure_server_token
+    # server.token was a plaintext shared credential. Local webchat identity is
+    # now attested by the kernel UDS peer instead; erase any legacy copy.
+    if [ -f "$WEBCHAT_HOME/server.token" ]; then
+        if command -v shred >/dev/null 2>&1; then
+            shred -u -n 1 -z -- "$WEBCHAT_HOME/server.token" 2>/dev/null || rm -f -- "$WEBCHAT_HOME/server.token"
+        else
+            rm -f -- "$WEBCHAT_HOME/server.token"
+        fi
+    fi
+    WEBCHAT_PREPARED=1
+}
+
+# Launch aimee-runtime-web in the background (as root, for PAM). Self-signed TLS on
+# :8443 is auto-generated under AIMEE_HOME and persists on the data volume.
+webchat_start() {
+    [ "$WEBCHAT_PREPARED" -eq 1 ] || webchat_prepare
+    webchat_is_enabled || return 0
+    command -v aimee-runtime-web >/dev/null 2>&1 || return 0
     # Operator-supplied TLS cert (PEM). A browser-trusted cert is required for the
     # in-app VSCode editor's webviews (the service worker won't register over an
     # untrusted cert). Without these, webchat self-signs (now with the host's IP +

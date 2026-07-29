@@ -30,6 +30,7 @@ set -e
 #    runtimes forbid raising it, in which case the compose ulimit / a host
 #    profile is still required.
 ulimit -s 65536 2>/dev/null || true
+ulimit -c 0 2>/dev/null || true
 
 # 2. Seed the baked default config if it is missing (fresh / bind-mounted
 #    volume). Never clobber an operator-provided config.
@@ -41,8 +42,21 @@ if [ ! -f "$cfg" ] && [ -f "$default" ]; then
     cp "$default" "$cfg"
 fi
 
+# Remember only whether an external database was requested. The URL itself is
+# sealed by the one-shot helper, then removed before any long-lived process.
+external_db=0
+[ -n "${AIMEE_DB2_URL:-}" ] && external_db=1
+aimee-kb --bootstrap-vault-env
+for _secret_name in $(env | sed -n 's/=.*//p'); do
+    case "$_secret_name" in
+        AIMEE_DB2_URL|AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE|*_TOKEN|*_SECRET|*_PASSWORD|*_PRIVATE_KEY|*_API_KEY|*_DSN)
+            unset "$_secret_name"
+            ;;
+    esac
+done
+
 # 3. Embedded DB2, only when the operator configured no external server.
-if [ -z "${AIMEE_DB2_URL:-}" ]; then
+if [ "$external_db" -eq 0 ]; then
     # PostgreSQL refuses to run as root, unconditionally. The image declares
     # USER aimee, so this only trips when a runtime overrides it (e.g. --user root
     # to work around bind-mount ownership). Say so, rather than letting initdb
