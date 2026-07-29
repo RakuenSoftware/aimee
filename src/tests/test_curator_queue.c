@@ -42,6 +42,12 @@ static void test_provider_unavailable_is_not_a_job_failure(void)
    assert(kb_curator_error_is_provider_unavailable(
        "{\"error\": {\"code\": \"provider_unavailable\", \"message\": \"synth upstream "
        "circuit is open\"}}"));
+   /* Exact timeout envelope emitted by llm-chat.py on a failed upstream
+    * request. Live regression: this used to spend attempt 3/3 and permanently
+    * fail the code-unit row even though the provider, not the row, was broken. */
+   assert(kb_curator_error_is_provider_unavailable(
+       "llm-chat.py exit 1: llm-chat: request to http://aimee-llm:8742/v1/chat/completions "
+       "failed after 1 tries: timed out"));
 
    /* A 4xx that is ABOUT the request, a malformed reply, and a missing document
     * are all real job failures: retrying them forever would be the poison-job
@@ -51,6 +57,7 @@ static void test_provider_unavailable_is_not_a_job_failure(void)
    assert(!kb_curator_error_is_provider_unavailable("sidecar returned non-JSON"));
    assert(!kb_curator_error_is_provider_unavailable("kb_documents row not found"));
    assert(!kb_curator_error_is_provider_unavailable("artifact write failed"));
+   assert(!kb_curator_error_is_provider_unavailable("local parser timed out"));
 
    /* Absent/empty error text must not be guessed into a retry. */
    assert(!kb_curator_error_is_provider_unavailable(NULL));

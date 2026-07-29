@@ -266,8 +266,15 @@ int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts)
                 serr);
       cJSON_Delete(cites);
       /* Stop this pass when the shared provider is unavailable. Treating this
-       * as an empty queue lets later LLM stages hit the same open circuit. */
-      return kb_curator_error_is_provider_unavailable(serr) ? -1 : 0;
+       * as an empty queue lets later LLM stages hit the same open circuit. Arm
+       * the process-wide gate here as well: this legacy sidecar path does not
+       * pass through kb_curator_llm_run(), which normally records the outage. */
+      if (kb_curator_error_is_provider_unavailable(serr))
+      {
+         kb_curator_provider_backoff_note();
+         return -1;
+      }
+      return 0;
    }
 
    /* Tolerate prose/fence-wrapped output: scan to the first object. */

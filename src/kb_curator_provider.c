@@ -27,6 +27,13 @@ int kb_curator_error_is_provider_unavailable(const char *error_msg)
 {
    if (!error_msg || !error_msg[0])
       return 0;
+   /* The bundled llm-chat.py reports transport timeouts as
+    * "request to <url> failed after ...: timed out", without an HTTP status.
+    * That is an availability failure, not evidence that this queue row is
+    * poisonous. Keep the match contextual so an arbitrary local sidecar that
+    * merely says "timed out" still consumes its normal attempt budget. */
+   int bundled_transport_timeout =
+       strstr(error_msg, "request to ") != NULL && strstr(error_msg, "timed out") != NULL;
    return strstr(error_msg, "provider HTTP 503") != NULL ||
           strstr(error_msg, "provider HTTP 429") != NULL ||
           strstr(error_msg, "provider HTTP -1") != NULL ||
@@ -34,7 +41,7 @@ int kb_curator_error_is_provider_unavailable(const char *error_msg)
           strstr(error_msg, "HTTP 429 from") != NULL ||
           strstr(error_msg, "\"code\": \"provider_unavailable\"") != NULL ||
           strstr(error_msg, "\"code\":\"provider_unavailable\"") != NULL ||
-          strstr(error_msg, "upstream circuit is open") != NULL;
+          strstr(error_msg, "upstream circuit is open") != NULL || bundled_transport_timeout;
 }
 
 int kb_curator_provider_backoff_active(void)
