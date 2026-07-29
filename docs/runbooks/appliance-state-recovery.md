@@ -8,6 +8,8 @@ Use this checklist on SmoothNAS/tierd appliances running the `aimee-server` plug
 - [ ] Confirm the appliance clock is correct, the tier-bound volume is mounted and writable, and Git credentials can read the canonical HTTPS repository.
 - [ ] Set the appliance API address and deployment-specific paths. Do not continue until every value is correct.
 
+`AIMEE_HOME` is the appliance state directory; `WORKSPACE` is the affected repository path on the tier-bound volume; `CANONICAL_URL` is its canonical HTTPS repository URL; and `DEFAULT_BRANCH` is the branch the appliance should track.
+
 ```sh
 export AIMEE_URL='http://127.0.0.1:8080'
 export AIMEE_HOME='/path/to/aimee-home'
@@ -42,6 +44,7 @@ test ! -e "$AIMEE_HOME/agents.json"
 ls -lht "$AIMEE_HOME"/agents.json.bak-*
 export AGENTS_BACKUP="$AIMEE_HOME/agents.json.bak-YYYYMMDD-HHMMSS"
 test -f "$AGENTS_BACKUP"
+test -s "$AGENTS_BACKUP"
 ls -l "$AGENTS_BACKUP"
 ```
 
