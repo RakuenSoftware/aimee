@@ -80,4 +80,4 @@ See [Workflows](WORKFLOWS.md) and [Autonomous development](AUTONOMOUS_DEVELOPMEN
 
 ## Automatic proposal admission
 
-See [Automatic proposal admission](wfe-autonomy-runbook.md#automatic-proposal-admission) for the five behaviors governing when the autonomous pending-proposal watcher makes a pending proposal eligible for a new run.
+The autonomous pending-proposal watcher decides when a pending proposal becomes eligible for a new run. For the authoritative behavior contract, see [Automatic proposal admission](wfe-autonomy-runbook.md#automatic-proposal-admission).
