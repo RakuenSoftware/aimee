@@ -410,8 +410,10 @@ static int run_capture(const char *const argv[], char **envp, char *out, size_t 
  * stops and removes the very container running the deploy. (docker compose
  * --dry-run reports "Container aimee-aimee-server-1 Stopping/Removing".)
  *
- * Removing a container that was never up is a no-op, so failures here are not
- * fatal to the deploy; the output is appended for the wizard to show. */
+ * Removing a container that was never up is non-fatal. Docker's daemon error for
+ * that expected case is deliberately not appended to the wizard output: it used
+ * to put "retired legacy ... No such container" above the real compose failure,
+ * making operators diagnose harmless cleanup instead of the actionable error. */
 
 /* The container the retirement targets. Named, not derived, because it is no
  * longer a compose service — nothing can regenerate this string for us. */
@@ -441,9 +443,10 @@ static void deploy_retire_stale_llm(char **envp, const char *file, char *out, si
       return;
    char buf[512];
    int code = -1;
-   if (run_capture(argv, envp, buf, sizeof(buf), &code) == 0 && code == 0 && buf[0] &&
+   if (run_capture(argv, envp, buf, sizeof(buf), &code) == 0 && code == 0 &&
        out_cap > strlen(out) + 1)
-      snprintf(out + strlen(out), out_cap - strlen(out), "retired legacy aimee-llm-cpu: %s", buf);
+      snprintf(out + strlen(out), out_cap - strlen(out),
+               "retired obsolete aimee-llm-cpu container\n");
 }
 
 /* Background worker: `docker compose -f <file> up -d`.

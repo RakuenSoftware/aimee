@@ -32,6 +32,7 @@ type server struct {
 	sessions *auth.SessionStore
 	rl       *auth.RateLimiter
 	users    *auth.UserManager
+	accounts setupAccountSystem
 	authH    *auth.Handler
 	spaCSP   string
 	loginCSP string
@@ -66,6 +67,7 @@ func run(cfg *config) error {
 		sessions: sessions,
 		rl:       rl,
 		users:    users,
+		accounts: osSetupAccountSystem{users: users},
 		authH:    authH,
 		spaCSP:   contentSecurityPolicy(spaHTML),
 		loginCSP: contentSecurityPolicy([]byte(loginHTML)),
@@ -244,6 +246,7 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/deploy/apply", s.requireAuth(s.handleDeployApply))
 	mux.HandleFunc("/api/deploy/status", s.requireAuth(s.handleDeployStatus))
 	mux.HandleFunc("/api/setup/appliance", s.requireAuth(s.handleSetupAppliance))
+	mux.HandleFunc("/api/setup/account", s.requireAuth(s.handleSetupAccount))
 
 	// Live endpoints backed by aimee-server socket
 	mux.HandleFunc("/api/agents", s.requireAuth(s.handleAgents))

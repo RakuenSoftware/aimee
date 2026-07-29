@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Picker } from '@rakuensoftware/smoothgui';
 import type { GitProjectsResponse } from '../setup/ownerUrl';
+import { notifySetupUpdated } from '../setup/setupState';
 
 /* ProjectPicker — a compact "select or clone a project" control embedded in each
  * tool tab. Each tab passes its own storageKey so its selected project persists
@@ -87,6 +88,7 @@ export default function ProjectPicker({ storageKey, onChange }: {
       setUrl(''); setToken(''); setCloneOpen(false);
       await load();
       if (d.name) select(d.name);
+      notifySetupUpdated();
     } finally { setBusy(false); }
   }
 

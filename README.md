@@ -62,8 +62,9 @@ cd aimee
 docker compose -f compose.server-managed.yaml up -d
 ```
 
-Open <https://localhost:8443> and sign in as `aimee` / `aimee-local-dev`. The wizard picks the
-primary agent, inference tier, git hosts, and workspaces. Its last step starts:
+Open <https://localhost:8443> and sign in as `aimee` / `aimee-local-dev`. The wizard first replaces
+that published development login with your persistent operator username and password, then picks
+the primary agent, inference tier, git hosts, and workspaces. Its last step starts:
 
 - `aimee-kb`, with private PostgreSQL 18, pgvector, and pgvectorscale inside the container;
 - `aimee-llm`, on CPU or GPU.
@@ -72,9 +73,9 @@ It also displays the one client-enrollment command for the signed-in first user.
 For a local inference tier, setup separately provisions an authenticated KB-to-LLM service identity;
 no inference credential needs to be copied from the browser.
 
-Change `AIMEE_WEBCHAT_USER` and `AIMEE_WEBCHAT_PASSWORD` before putting it on a network. The
-managed compose file mounts the Docker socket; that gives aimee-server control of the host Docker
-daemon. Use the regular split stack if you do not want that.
+Finish the wizard's account step before putting it on a network. The managed compose file mounts the
+Docker socket; that gives aimee-server control of the host Docker daemon. Use the regular split stack
+if you do not want that.
 
 Install the `aimee` release binary on your development machine, then copy the exact command shown by
 the wizard:

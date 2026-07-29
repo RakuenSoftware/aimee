@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// sameOriginVSCode is the cross-origin gate guarding the /vscode reverse proxy.
+// sameOriginRequest is the cross-origin gate guarding privileged browser requests.
 // A cookie alone is CSRF-able, so the proxy must reject any cross-origin request
 // and, for WebSocket upgrades (the editor terminal), refuse a missing Origin too
 // (browsers always send one on an upgrade). Same-origin iframe traffic — asset
@@ -69,8 +69,8 @@ func TestSameOriginVSCodeGate(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := mkReq(tc.method, tc.host, tc.origin, tc.tls_, tc.xfproto, tc.secFetch, tc.ws)
-			if got := sameOriginVSCode(r); got != tc.want {
-				t.Fatalf("sameOriginVSCode = %v, want %v", got, tc.want)
+			if got := sameOriginRequest(r); got != tc.want {
+				t.Fatalf("sameOriginRequest = %v, want %v", got, tc.want)
 			}
 		})
 	}

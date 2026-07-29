@@ -20,7 +20,11 @@ user:     aimee
 password: aimee-local-dev
 ```
 
-Run the setup wizard. Choose the primary agent, CPU or GPU inference, git accounts, and workspaces.
+The wizard first creates your operator username and password, disables the published development
+login, and moves the current browser session to the new account. The password hash and bootstrap
+retirement marker live on the persistent server volume, so `aimee / aimee-local-dev` does not return
+after an image update. Then choose the primary agent, CPU or GPU inference, git accounts, and
+workspaces.
 The final **Deploy** step starts:
 
 - `aimee-kb`, including private PostgreSQL 18, pgvector, and pgvectorscale;
@@ -55,8 +59,8 @@ to both containers, then the KB uses that credential for embedding, reranking, a
 automatic; do not copy the user's enrollment bearer into the LLM configuration. The managed LLM
 refuses to start if its service credential is missing.
 
-Change `AIMEE_WEBCHAT_USER` and `AIMEE_WEBCHAT_PASSWORD` before exposing this host. The defaults are
-for local setup only.
+Complete the account step before exposing the host. Deployments that inject a non-default
+`AIMEE_WEBCHAT_USER` and `AIMEE_WEBCHAT_PASSWORD` are already considered secured and skip that step.
 
 ### Choosing an image channel
 
