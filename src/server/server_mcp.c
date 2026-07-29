@@ -37,7 +37,7 @@
 #include "server_mcp_gateway.h"
 #include "server_http.h"
 #include "server_pipeline.h" /* handle_pipeline_* for the pipeline.* MCP tools */
-#include "wfe_roundtable_proxy.h"
+#include "server_mcp_roundtable.h"
 #include "headers/conversation_context.h"
 #include "headers/payload_rewrite.h"
 #include "headers/session_search_tool.h"
@@ -107,67 +107,29 @@ static int send_mcp_result_structured(server_conn_t *conn, cJSON *content, cJSON
    return server_send_ok(conn, resp);
 }
 
+static int send_roundtable_mcp_result(server_conn_t *conn, cJSON *result)
+{
+   cJSON *content = json_result_content(cJSON_Duplicate(result, 1));
+   return send_mcp_result_structured(conn, content, result);
+}
+
 static int handle_mcp_roundtable_review(server_conn_t *conn, cJSON *args)
 {
-   cJSON *diff = cJSON_GetObjectItemCaseSensitive(args, "diff");
-   if (!cJSON_IsString(diff) || !diff->valuestring || !diff->valuestring[0])
-      return server_send_error(conn, "roundtable_review requires 'diff'", NULL);
-   if (strlen(diff->valuestring) < 20)
-      return server_send_error(conn, "roundtable_review requires 'diff' of at least 20 characters",
-                               NULL);
+   char err[320] = "";
+   cJSON *run = mcp_roundtable_submit(args, conn->capabilities, err, sizeof(err));
+   return run ? send_roundtable_mcp_result(conn, run)
+              : server_send_error(conn, err[0] ? err : "roundtable submission failed", NULL);
+}
 
-   cJSON *body = cJSON_CreateObject();
-   if (!body)
-      return server_send_error(conn, "out of memory", NULL);
-   cJSON_AddStringToObject(body, "prompt", diff->valuestring);
-   cJSON_AddStringToObject(body, "mode", "review");
-   for (const char *const *field =
-            (const char *const[]){"original_request", "artifact_stage", "workdir", NULL};
-        *field; field++)
-   {
-      cJSON *value = cJSON_GetObjectItemCaseSensitive(args, *field);
-      if (!value)
-         continue;
-      if (!cJSON_IsString(value) || !value->valuestring || !value->valuestring[0])
-      {
-         cJSON_Delete(body);
-         return server_send_error(
-             conn, "roundtable_review evidence fields must be non-empty strings", NULL);
-      }
-      cJSON_AddStringToObject(body, *field, value->valuestring);
-   }
-   cJSON *brief = cJSON_GetObjectItemCaseSensitive(args, "brief");
-   if (brief)
-   {
-      if (!cJSON_IsObject(brief) && !cJSON_IsString(brief))
-      {
-         cJSON_Delete(body);
-         return server_send_error(conn, "roundtable_review 'brief' must be a string or object",
-                                  NULL);
-      }
-      cJSON *brief_copy = cJSON_Duplicate(brief, 1);
-      if (!brief_copy)
-      {
-         cJSON_Delete(body);
-         return server_send_error(conn, "out of memory", NULL);
-      }
-      cJSON_AddItemToObject(body, "brief", brief_copy);
-   }
-   cJSON *roundtable = cJSON_GetObjectItemCaseSensitive(args, "roundtable");
-   if (roundtable)
-   {
-      if (!cJSON_IsString(roundtable) || !roundtable->valuestring || !roundtable->valuestring[0])
-      {
-         cJSON_Delete(body);
-         return server_send_error(conn, "roundtable_review 'roundtable' must name a saved preset",
-                                  NULL);
-      }
-      cJSON_AddStringToObject(body, "roundtable", roundtable->valuestring);
-   }
-
-   int rc = wfe_roundtable_proxy(conn, body);
-   cJSON_Delete(body);
-   return rc;
+static int handle_mcp_roundtable_status(server_conn_t *conn, cJSON *args)
+{
+   uint32_t required = server_capability_for_method("roundtable.review");
+   if (required && conn && (conn->capabilities & required) == 0)
+      return server_send_error(conn, "forbidden: insufficient capabilities", NULL);
+   char err[320] = "";
+   cJSON *run = mcp_roundtable_status(args, err, sizeof(err));
+   return run ? send_roundtable_mcp_result(conn, run)
+              : server_send_error(conn, err[0] ? err : "roundtable status failed", NULL);
 }
 cJSON *tool_get_help(cJSON *args)
 {
@@ -1860,6 +1822,14 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    if (strcmp(tool, "roundtable_review") == 0)
    {
       int rc = handle_mcp_roundtable_review(conn, jargs);
+      if (owns_jargs)
+         cJSON_Delete(jargs);
+      return rc;
+   }
+
+   if (strcmp(tool, "roundtable_status") == 0)
+   {
+      int rc = handle_mcp_roundtable_status(conn, jargs);
       if (owns_jargs)
          cJSON_Delete(jargs);
       return rc;
