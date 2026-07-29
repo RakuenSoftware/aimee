@@ -113,11 +113,25 @@ each, exactly one relevant.
 |---|---:|---:|---:|---:|
 | no rerank (suite candidate order) | 0.2279 | — | 0 | — |
 | cross-encoder/ettin-reranker-68m (English, disqualified) | 0.2969 | +0.069 | 0.054 | 68M |
+| **BAAI/bge-reranker-v2-m3** | **0.6174** | **+0.390** | **0.120** | 568M |
 | Alibaba-NLP/gte-multilingual-reranker-base | *pending* | | | 306M |
-| BAAI/bge-reranker-v2-m3 | *pending* | | | 568M |
 | BAAI/bge-m3 late interaction | *pending* | | | 568M |
 
-Two readings already:
+### Replacing Ettin is a large quality upgrade, not just a compliance fix
+
+`bge-reranker-v2-m3` **more than doubles** the no-rerank baseline and beats the
+incumbent Ettin by **+0.32 NDCG**. The 68M English model was badly under-powered
+for separating 20 hard negatives; the multilingual requirement forced a change
+that turns out to be worth far more than the requirement itself.
+
+At **120 ms/query on GPU for 20 candidates x 512 tokens**, it is comfortably
+inside the 1s budget on a GPU tier.
+
+Note the tier spread for the identical config: **0.120s on an RTX 5080 vs 8.443s
+on CPU** — a factor of 70. Reranker choice is therefore genuinely tier-dependent,
+and the CPU tier cannot simply run the GPU tier's configuration.
+
+Two further readings:
 
 - **The baseline of 0.2279 is consistent with random ordering**, so this view's
   20 candidates are unsorted hard negatives. It is a clean *reranker-vs-reranker*
