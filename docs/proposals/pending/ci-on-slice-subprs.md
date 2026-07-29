@@ -1,6 +1,6 @@
 # Proposal: run CI on slice sub-PRs
 
-- **State:** pending — single slice.
+- **State:** approved — single slice.
 
 ## Problem
 
