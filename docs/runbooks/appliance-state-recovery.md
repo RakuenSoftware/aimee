@@ -68,6 +68,7 @@ API keys remain in the vault under the agent names and do not need to be re-ente
 date -Ins
 stat "$AIMEE_HOME/agents.json"
 old_mtime=$(stat -c %Y "$AIMEE_HOME/agents.json")
+sleep 1
 touch "$AIMEE_HOME/agents.json"
 new_mtime=$(stat -c %Y "$AIMEE_HOME/agents.json")
 printf 'old_mtime=%s new_mtime=%s\n' "$old_mtime" "$new_mtime"
@@ -94,7 +95,8 @@ printf 'WORKSPACE=%s\nCANONICAL_URL=%s\nDEFAULT_BRANCH=%s\n' \
   "$WORKSPACE" "$CANONICAL_URL" "$DEFAULT_BRANCH"
 WORKSPACE_PARENT=$(dirname "$WORKSPACE")
 test -d "$WORKSPACE_PARENT" && test -w "$WORKSPACE_PARENT"
-export TEST_CLONE=$(mktemp -d "$WORKSPACE_PARENT/.aimee-recovery.XXXXXX")
+TEST_CLONE=$(mktemp -d "$WORKSPACE_PARENT/.aimee-recovery.XXXXXX")
+export TEST_CLONE
 printf 'TEST_CLONE=%s\n' "$TEST_CLONE"
 test "$(stat -c %d "$WORKSPACE_PARENT")" = "$(stat -c %d "$TEST_CLONE")"
 ```
@@ -115,7 +117,8 @@ git -C "$TEST_CLONE/repository" ls-tree HEAD >/dev/null
 
 ```sh
 rm -rf "$TEST_CLONE"
-export DAMAGED_WORKSPACE="${WORKSPACE}.damaged-$(date +%Y%m%d-%H%M%S)"
+DAMAGED_WORKSPACE="${WORKSPACE}.damaged-$(date +%Y%m%d-%H%M%S)"
+export DAMAGED_WORKSPACE
 test -e "$WORKSPACE"
 mv "$WORKSPACE" "$DAMAGED_WORKSPACE"
 git clone --single-branch --branch "$DEFAULT_BRANCH" "$CANONICAL_URL" "$WORKSPACE"
@@ -136,8 +139,12 @@ git -C "$WORKSPACE" ls-tree HEAD >/dev/null
 - [ ] Resume or observe normal proposal polling and forge operations. Confirm new logs no longer repeat `ls-tree failed ... rc=128` or `resolve https origin: no origin remote` before deleting the retained damaged repository.
 
 ```sh
-journalctl --since '10 minutes ago' --no-pager | \
-  grep -E 'ls-tree failed.*rc=128|resolve https origin: no origin remote' || true
+if journalctl --since '10 minutes ago' --no-pager | \
+  grep -E 'ls-tree failed.*rc=128|resolve https origin: no origin remote'
+then
+  printf '%s\n' 'workspace Git errors are still recurring' >&2
+  false
+fi
 ```
 
 If either error recurs, retain both repositories and escalate. Do not attempt storage repair, migration, or automated recovery as part of this procedure.
