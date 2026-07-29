@@ -698,7 +698,11 @@ unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	@# output size — its own comment admits as much — but a short prefix costs
 	@# nothing and keeps this change from perturbing it.
 	@th="$$(mktemp -d /tmp/aut.XXXXXX)"; \
-	export HOME="$$th" TMPDIR="$$th"; \
+	@# The outer `aimee git verify` process holds the host-wide verifier lock
+	@# while this suite runs. A few white-box tests invoke handle_git_verify again;
+	@# give those nested test invocations their own lock instead of deadlocking on
+	@# their parent process, while still serializing them with one another.
+	export HOME="$$th" TMPDIR="$$th" AIMEE_VERIFY_LOCK_FILE="$$th/nested-verify.lock"; \
 	unset AIMEE_HOME AIMEE_API_REMOTE_WRITES AIMEE_API_MTLS AIMEE_API_BEARER_TOKEN \
 	  AIMEE_SERVER_HTTP_BIND AIMEE_WORKSPACES_DIR AIMEE_KB_API_URL \
 	  AIMEE_KB_API_BEARER_TOKEN AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET; \

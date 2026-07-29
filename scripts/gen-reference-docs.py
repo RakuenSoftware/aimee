@@ -816,6 +816,10 @@ ENV_DESC = {
     "AIMEE_DEFAULT_BRANCH": ("Workflow engine", "Override the target repo's real default branch (its trunk) that a `base:trunk` `branch.open`/`pr.open` resolves to; else read from `git origin/HEAD`. Distinct from `AIMEE_AUTONOMY_BASE` (the aimee integration branch). A final feature PR opens against this branch (open-only, never auto-merged)."),
     # Git verify / MCP
     "AIMEE_VERIFY_PARALLEL": ("Git verify / MCP", "Run `aimee git verify` steps in parallel."),
+    "AIMEE_VERIFY_LOCK_FILE": (
+        "Git verify / MCP",
+        "Override the host-wide file lock that serializes complete repository verification runs.",
+    ),
     "AIMEE_EXEC_PIPE_TIMEOUT_MS": (
         "Agents & delegates",
         "How long a sidecar subprocess (embed, rerank, cognify, rewrite, css render, "
