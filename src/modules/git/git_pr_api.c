@@ -344,6 +344,14 @@ int git_pr_create_via_api_ex(const char *principal, const char *repo_dir, const 
                              const char *base_in, const char *title, const char *body, char *out,
                              size_t out_cap, char *err, size_t errlen)
 {
+   return git_pr_create_via_api_ex_draft(principal, repo_dir, head_in, base_in, title, body, 0, out,
+                                         out_cap, err, errlen);
+}
+
+int git_pr_create_via_api_ex_draft(const char *principal, const char *repo_dir, const char *head_in,
+                                   const char *base_in, const char *title, const char *body,
+                                   int draft, char *out, size_t out_cap, char *err, size_t errlen)
+{
    if (out && out_cap)
       out[0] = '\0';
    if (err && errlen)
@@ -401,6 +409,7 @@ int git_pr_create_via_api_ex(const char *principal, const char *repo_dir, const 
    cJSON_AddStringToObject(j, "head", head);
    cJSON_AddStringToObject(j, "base", base);
    cJSON_AddStringToObject(j, "body", bclean ? bclean : "");
+   cJSON_AddBoolToObject(j, "draft", draft ? 1 : 0);
    free(bclean);
    char *jbody = cJSON_PrintUnformatted(j);
    cJSON_Delete(j);

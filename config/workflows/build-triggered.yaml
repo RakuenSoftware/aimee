@@ -147,6 +147,8 @@ nodes:
     in:
       branch: document.out
     next: final_pr
+  # Terminal human handoff: the feature->trunk PR is created as a draft. The
+  # workflow never marks it ready or merges it.
   - id: final_pr
     block: pr.open
     in:

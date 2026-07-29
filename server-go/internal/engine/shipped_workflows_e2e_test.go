@@ -101,7 +101,7 @@ func runExactShippedWorkflow(t *testing.T, workflowName, wantState, wantPause st
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner, err := NewNativeRunner(store, worktrees, &e2eAgents{}, passVerifier{}, artifacts, registry, e2eForge{})
+	runner, err := NewNativeRunner(store, worktrees, &e2eAgents{}, passVerifier{}, artifacts, registry, &e2eForge{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -47,6 +47,14 @@ int git_pr_create_via_api_ex(const char *principal, const char *repo_dir, const 
                              const char *base, const char *title, const char *body, char *out,
                              size_t out_cap, char *err, size_t errlen);
 
+/* Explicit-draft variant used by workflow handoffs. Final feature->trunk PRs
+ * are created as drafts so automation cannot accidentally merge them as soon
+ * as CI turns green; a human must perform the separately audited ready action.
+ * Slice->feature PRs pass draft=0 and retain their autonomous CI-gated path. */
+int git_pr_create_via_api_ex_draft(const char *principal, const char *repo_dir, const char *head,
+                                   const char *base, const char *title, const char *body, int draft,
+                                   char *out, size_t out_cap, char *err, size_t errlen);
+
 /* Find the existing open PR for an exact head/base pair. Returns 1 + URL,
  * 0 when absent, or -1 on API/validation failure. */
 int git_pr_find_open_via_api(const char *principal, const char *repo_dir, const char *head,

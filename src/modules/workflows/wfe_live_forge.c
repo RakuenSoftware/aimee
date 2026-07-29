@@ -411,8 +411,9 @@ static int live_open(const char *repo, const char *branch, const char *base, con
       return -1;
    /* git_pr_create_via_api_ex strips AI attribution from the body itself. */
    char url[512] = "", err[200] = "";
-   if (git_pr_create_via_api_ex(NULL, dir, branch, base, title ? title : "", body ? body : "", url,
-                                sizeof url, err, sizeof err) != 0)
+   int draft = wfe_base_is_protected(base);
+   if (git_pr_create_via_api_ex_draft(NULL, dir, branch, base, title ? title : "", body ? body : "",
+                                      draft, url, sizeof url, err, sizeof err) != 0)
    {
       aimee_log(LOG_WARN, "wfe-forge", "pr create for %s failed: %s", branch, err);
       return -1;

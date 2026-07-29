@@ -558,7 +558,8 @@ static int wfe_default_base(const char *principal, const char *repo, const char 
 
 static int wfe_forge_body_fields_valid(const cJSON *body)
 {
-   static const char *const allowed[] = {"op", "workdir", "head", "base", "title", "number", NULL};
+   static const char *const allowed[] = {"op",   "workdir", "head",   "base", "title",
+                                         "body", "draft",   "number", NULL};
    for (const cJSON *field = body ? body->child : NULL; field; field = field->next)
    {
       int index = -1;
@@ -573,7 +574,10 @@ static int wfe_forge_body_fields_valid(const cJSON *body)
       for (const cJSON *prior = body->child; prior != field; prior = prior->next)
          if (prior->string && strcmp(prior->string, field->string) == 0)
             return 0;
-      if ((index == 5 && !cJSON_IsNumber(field)) || (index != 5 && !cJSON_IsString(field)))
+      int valid_type = index == 7   ? cJSON_IsNumber(field)
+                       : index == 6 ? cJSON_IsBool(field)
+                                    : cJSON_IsString(field);
+      if (!valid_type)
          return 0;
    }
    return 1;
@@ -596,19 +600,25 @@ static int wfe_slice_ref_matches_workdir(const char *workdir, const char *prefix
 }
 
 static int wfe_forge_operation_valid(const char *op, const char *head, const char *base,
-                                     const char *title, const cJSON *jnumber, int number)
+                                     const char *title, const char *body, const cJSON *jdraft,
+                                     int draft, const cJSON *jnumber, int number)
 {
    int has_number = jnumber != NULL;
+   int has_draft = jdraft != NULL;
    if (has_number && (!cJSON_IsNumber(jnumber) || jnumber->valuedouble != (double)number))
       return 0;
    if (strcmp(op, "push") == 0)
-      return head && !base && !title && !has_number;
+      return head && !base && !title && !body && !has_draft && !has_number;
    if (strcmp(op, "open") == 0)
-      return head && base && title && title[0] && !has_number;
+   {
+      int final_head = head && strncmp(head, "aimee/feat/wi_", 14) == 0;
+      return head && base && title && title[0] && body && body[0] && has_draft &&
+             cJSON_IsBool(jdraft) && draft == final_head && !has_number;
+   }
    if (strcmp(op, "info") == 0 || strcmp(op, "ci") == 0)
-      return !head && !base && !title && has_number && number > 0;
+      return !head && !base && !title && !body && !has_draft && has_number && number > 0;
    if (strcmp(op, "merge") == 0)
-      return !head && base && !title && has_number && number > 0;
+      return !head && base && !title && !body && !has_draft && has_number && number > 0;
    return 0;
 }
 
@@ -627,12 +637,15 @@ int rh_internal_forge_execute(const route_req_t *rq, char *resp, int cap)
    const char *head = route_json_string(body, "head");
    const char *base = route_json_string(body, "base");
    const char *title = route_json_string(body, "title");
+   const char *pr_body = route_json_string(body, "body");
+   const cJSON *jdraft = body ? cJSON_GetObjectItemCaseSensitive(body, "draft") : NULL;
+   int draft = cJSON_IsTrue(jdraft) ? 1 : 0;
    const cJSON *jnumber = body ? cJSON_GetObjectItemCaseSensitive(body, "number") : NULL;
    int number = cJSON_IsNumber(jnumber) ? jnumber->valueint : 0;
    if (!body || !wfe_forge_body_fields_valid(body) || !op || !workdir_in ||
        (head && !wfe_ref_valid(head)) || (base && !wfe_ref_valid(base)) ||
-       (title && strlen(title) > 256) ||
-       !wfe_forge_operation_valid(op, head, base, title, jnumber, number))
+       (title && strlen(title) > 256) || (pr_body && strlen(pr_body) > 60000) ||
+       !wfe_forge_operation_valid(op, head, base, title, pr_body, jdraft, draft, jnumber, number))
    {
       cJSON_Delete(body);
       return err_json(resp, cap, 400, "invalid forge operation request");
@@ -685,9 +698,9 @@ int rh_internal_forge_execute(const route_req_t *rq, char *resp, int cap)
             int found = git_pr_find_open_via_api(principal, trusted_repo, head, base, url,
                                                  sizeof(url), err, sizeof(err));
             if (found == 0)
-               rc = git_pr_create_via_api_ex(principal, trusted_repo, head, base, title,
-                                             "Automated workflow output ready for human review.",
-                                             url, sizeof(url), err, sizeof(err));
+               rc = git_pr_create_via_api_ex_draft(principal, trusted_repo, head, base, title,
+                                                   pr_body, draft, url, sizeof(url), err,
+                                                   sizeof(err));
             else
                rc = found == 1 ? 0 : -1;
             if (rc == 0)
