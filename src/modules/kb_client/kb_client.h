@@ -18,6 +18,7 @@ typedef struct cJSON cJSON;
 typedef struct
 {
    int process_ok;          /* aimee-kb is running and responsive */
+   char version[128];       /* /v1/version, empty when an older kb omits it */
    int db2_ok;              /* DB2 schema present */
    int db2_kb_tables_ok;    /* kb_documents + kb_async_jobs present */
    int pgvec_ok;            /* pgvector extension loaded in DB2 */

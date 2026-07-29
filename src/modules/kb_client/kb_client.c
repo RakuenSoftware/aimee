@@ -311,6 +311,23 @@ int kb_client_health(kb_health_t *out)
    }
 
    cJSON_Delete(resp);
+
+   /* Health proves that the dependency is reachable; version proves which
+    * dependency answered. Keep this best-effort for compatibility with an
+    * older KB, but surface it whenever /v1/version is available so operators
+    * and benchmark harnesses can pin the complete distributed stack. */
+   int version_status = -1;
+   char *version_body =
+       kb_client_v1_get_json("/v1/version", CLIENT_DEFAULT_TIMEOUT_MS, &version_status);
+   cJSON *version_json = version_body ? cJSON_Parse(version_body) : NULL;
+   free(version_body);
+   cJSON *version = version_json ? cJSON_GetObjectItemCaseSensitive(version_json, "version") : NULL;
+   cJSON *service = version_json ? cJSON_GetObjectItemCaseSensitive(version_json, "service") : NULL;
+   if (version_status >= 200 && version_status < 300 && cJSON_IsString(version) &&
+       version->valuestring[0] && cJSON_IsString(service) &&
+       strcmp(service->valuestring, "aimee-kb") == 0)
+      snprintf(out->version, sizeof(out->version), "%s", version->valuestring);
+   cJSON_Delete(version_json);
    return 0;
 }
 
