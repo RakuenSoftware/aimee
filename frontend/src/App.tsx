@@ -142,6 +142,10 @@ function LogoutButton() {
     e.preventDefault();
     localStorage.removeItem('aimee_chat_tabs');
     localStorage.removeItem('aimee_active_chat_tab');
+    localStorage.removeItem('aimee_sessions');
+    localStorage.removeItem('aimee_active_session');
+    localStorage.removeItem('aimee_server_sessions_authoritative_v1');
+    localStorage.removeItem('aimee_sessions_owner');
     localStorage.removeItem('aimee_proposal_draft');
     fetch('/logout', {
       method: 'POST',

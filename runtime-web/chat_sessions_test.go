@@ -33,6 +33,43 @@ func asUser(r *http.Request, username string) *http.Request {
 	return withUser(r, username)
 }
 
+func TestApplyChatSessionMigrationsPromotesOnlyPreexistingLegacyRows(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE chat_sessions (
+		id TEXT PRIMARY KEY, username TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',
+		cwd TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, last_active TEXT NOT NULL
+	)`); err != nil {
+		t.Fatalf("old schema: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO chat_sessions
+		(id, username, created_at, last_active) VALUES
+		('legacy-provider-id', 'alice', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatalf("legacy row: %v", err)
+	}
+	if err := applyChatSessionMigrations(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	s := &server{db: db}
+	if got, err := s.chatSessionProviderID("alice", "legacy-provider-id"); err != nil || got != "legacy-provider-id" {
+		t.Fatalf("legacy runtime = %q, err=%v", got, err)
+	}
+
+	if err := s.touchChatSession("alice", "web-stable-id", "", "new chat"); err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	if err := applyChatSessionMigrations(db); err != nil {
+		t.Fatalf("repeat migrate: %v", err)
+	}
+	if got, err := s.chatSessionProviderID("alice", "web-stable-id"); err != nil || got != "" {
+		t.Fatalf("new stable id was misclassified as provider id: %q, err=%v", got, err)
+	}
+}
+
 func TestTouchAndListChatSessions(t *testing.T) {
 	s := newSessionTestServer(t)
 
@@ -112,6 +149,57 @@ func TestTouchChatSessionScopedByUser(t *testing.T) {
 	}
 }
 
+func TestChatSessionRestoresTranscriptAndProviderID(t *testing.T) {
+	s := newSessionTestServer(t)
+	if err := s.touchChatSession("alice", "stable-web-id", "/proj", "hello"); err != nil {
+		t.Fatalf("touch: %v", err)
+	}
+	if err := s.setChatSessionRuntime("alice", "stable-web-id", "provider-thread-7"); err != nil {
+		t.Fatalf("runtime: %v", err)
+	}
+	if err := s.appendChatMessage("alice", "stable-web-id", "user", "hello"); err != nil {
+		t.Fatalf("append user: %v", err)
+	}
+	if err := s.appendChatMessage("alice", "stable-web-id", "assistant", "hi back"); err != nil {
+		t.Fatalf("append assistant: %v", err)
+	}
+
+	cs, err := s.getChatSession("alice", "stable-web-id")
+	if err != nil || cs == nil {
+		t.Fatalf("get: %v %+v", err, cs)
+	}
+	if cs.ProviderSessionID != "provider-thread-7" {
+		t.Fatalf("provider session = %q", cs.ProviderSessionID)
+	}
+	if len(cs.Messages) != 2 || cs.Messages[0].Role != "user" || cs.Messages[0].Text != "hello" ||
+		cs.Messages[1].Role != "assistant" || cs.Messages[1].Text != "hi back" {
+		t.Fatalf("messages = %+v", cs.Messages)
+	}
+	if bob, err := s.getChatSession("bob", "stable-web-id"); err != nil || bob != nil {
+		t.Fatalf("bob read alice session: err=%v session=%+v", err, bob)
+	}
+}
+
+func TestSeedChatMessagesDoesNotOverwriteServerHistory(t *testing.T) {
+	s := newSessionTestServer(t)
+	_ = s.touchChatSession("alice", "sess-1", "", "server turn")
+	if err := s.seedChatMessages("alice", "sess-1", []chatMessage{
+		{Role: "user", Text: "legacy user"},
+		{Role: "assistant", Text: "legacy answer"},
+	}); err != nil {
+		t.Fatalf("initial seed: %v", err)
+	}
+	if err := s.seedChatMessages("alice", "sess-1", []chatMessage{
+		{Role: "user", Text: "stale overwrite"},
+	}); err != nil {
+		t.Fatalf("repeat seed: %v", err)
+	}
+	cs, _ := s.getChatSession("alice", "sess-1")
+	if cs == nil || len(cs.Messages) != 2 || cs.Messages[0].Text != "legacy user" {
+		t.Fatalf("server transcript overwritten: %+v", cs)
+	}
+}
+
 func TestHandleChatSessionsListReturnsUserSessions(t *testing.T) {
 	s := newSessionTestServer(t)
 	_ = s.touchChatSession("alice", "sess-1", "/a", "hello there")
@@ -175,6 +263,99 @@ func TestHandleChatSessionUpsertAndGet(t *testing.T) {
 	}
 }
 
+func TestHandleChatSessionUpsertSeedsCrossBrowserStateWithoutTrustingProviderID(t *testing.T) {
+	s := newSessionTestServer(t)
+	rr := httptest.NewRecorder()
+	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/session", strings.NewReader(
+		`{"id":"stable-id","title":"My chat","provider_session_id":"provider-id",`+
+			`"messages":[{"role":"user","text":"question"},{"role":"assistant","text":"answer"}]}`)), "alice")
+	s.handleChatSession(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", rr.Code, rr.Body.String())
+	}
+	var got chatSession
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.ID != "stable-id" || got.ProviderSessionID != "" || len(got.Messages) != 2 {
+		t.Fatalf("restorable session = %+v", got)
+	}
+}
+
+func TestHandleChatSessionUpsertTransfersServerTrustedLegacyAlias(t *testing.T) {
+	s := newSessionTestServer(t)
+	_ = s.touchChatSession("alice", "legacy-provider-id", "", "old chat")
+	_ = s.setChatSessionRuntime("alice", "legacy-provider-id", "legacy-provider-id")
+
+	rr := httptest.NewRecorder()
+	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/session", strings.NewReader(
+		`{"id":"web-stable-id","legacy_provider_alias_id":"legacy-provider-id",`+
+			`"messages":[{"role":"user","text":"old chat"}]}`)), "alice")
+	s.handleChatSession(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", rr.Code, rr.Body.String())
+	}
+	cs, err := s.getChatSession("alice", "web-stable-id")
+	if err != nil || cs == nil || cs.ProviderSessionID != "legacy-provider-id" || len(cs.Messages) != 1 {
+		t.Fatalf("transferred session: err=%v session=%+v", err, cs)
+	}
+}
+
+func TestHandleChatSessionUpsertRejectsUntrustedLegacyAlias(t *testing.T) {
+	s := newSessionTestServer(t)
+	_ = s.touchChatSession("alice", "unbound-alias", "", "old chat")
+
+	rr := httptest.NewRecorder()
+	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/session", strings.NewReader(
+		`{"id":"web-stable-id","legacy_provider_alias_id":"unbound-alias"}`)), "alice")
+	s.handleChatSession(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (%s)", rr.Code, rr.Body.String())
+	}
+	if got, err := s.chatSessionProviderID("alice", "web-stable-id"); err != nil || got != "" {
+		t.Fatalf("untrusted alias established runtime %q, err=%v", got, err)
+	}
+	if cs, err := s.getChatSession("alice", "web-stable-id"); err != nil || cs != nil {
+		t.Fatalf("rejected alias left a target row: err=%v session=%+v", err, cs)
+	}
+}
+
+func TestHandleChatSessionUpsertRejectsAnotherUsersLegacyAlias(t *testing.T) {
+	s := newSessionTestServer(t)
+	_ = s.touchChatSession("alice", "alice-provider-id", "", "alice chat")
+	_ = s.setChatSessionRuntime("alice", "alice-provider-id", "alice-provider-id")
+
+	rr := httptest.NewRecorder()
+	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/session", strings.NewReader(
+		`{"id":"bob-stable-id","legacy_provider_alias_id":"alice-provider-id"}`)), "bob")
+	s.handleChatSession(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (%s)", rr.Code, rr.Body.String())
+	}
+	if got, err := s.chatSessionProviderID("bob", "bob-stable-id"); err != nil || got != "" {
+		t.Fatalf("cross-user alias established runtime %q, err=%v", got, err)
+	}
+	if cs, err := s.getChatSession("bob", "bob-stable-id"); err != nil || cs != nil {
+		t.Fatalf("cross-user alias left a target row: err=%v session=%+v", err, cs)
+	}
+}
+
+func TestHandleChatSessionUpsertRejectsAnotherUsersID(t *testing.T) {
+	s := newSessionTestServer(t)
+	_ = s.touchChatSession("alice", "shared-id", "", "alice")
+	rr := httptest.NewRecorder()
+	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/session",
+		strings.NewReader(`{"id":"shared-id","title":"hijacked"}`)), "bob")
+	s.handleChatSession(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (%s)", rr.Code, rr.Body.String())
+	}
+	cs, _ := s.getChatSession("alice", "shared-id")
+	if cs == nil || cs.Title == "hijacked" {
+		t.Fatalf("alice session mutated: %+v", cs)
+	}
+}
+
 func TestHandleChatSessionRenameOverwritesTitle(t *testing.T) {
 	s := newSessionTestServer(t)
 	_ = s.touchChatSession("alice", "sess-1", "/a", "auto derived title")
@@ -195,6 +376,8 @@ func TestHandleChatSessionRenameOverwritesTitle(t *testing.T) {
 func TestHandleChatSessionDelete(t *testing.T) {
 	s := newSessionTestServer(t)
 	_ = s.touchChatSession("alice", "sess-1", "/a", "to be deleted")
+	_ = s.setChatSessionRuntime("alice", "sess-1", "provider-1")
+	_ = s.appendChatMessage("alice", "sess-1", "user", "to be deleted")
 
 	rr := httptest.NewRecorder()
 	req := asUser(httptest.NewRequest(http.MethodDelete, "/api/chat/session?sid=sess-1", nil), "alice")
@@ -204,6 +387,12 @@ func TestHandleChatSessionDelete(t *testing.T) {
 	}
 	if cs, _ := s.getChatSession("alice", "sess-1"); cs != nil {
 		t.Fatalf("session not deleted: %+v", cs)
+	}
+	var messages, runtime int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM chat_session_messages WHERE session_id = 'sess-1'`).Scan(&messages)
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM chat_session_runtime WHERE session_id = 'sess-1'`).Scan(&runtime)
+	if messages != 0 || runtime != 0 {
+		t.Fatalf("child state remains: messages=%d runtime=%d", messages, runtime)
 	}
 }
 
