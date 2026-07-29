@@ -4,7 +4,7 @@
 
 ## Problem
 
-`.github/workflows/ci.yml` triggers on:
+Before this proposal was implemented, `.github/workflows/ci.yml` triggered on:
 
 ```yaml
 on:
@@ -104,7 +104,8 @@ certified, rather than from the historical job count above.
 
 Established:
 
-- The trigger list contains no `push` (read from `ci.yml`).
+- Before implementation, the trigger list contained no `push` (read from
+  `ci.yml`).
 - `e161dd34` has 2 check runs, both image builds (API, quoted above).
 - The full gate on the tip *can* be dispatched manually: `workflow_dispatch` is
   configured, and doing so for `e161dd34` produced run `30223112295`.
@@ -162,6 +163,17 @@ runs, never from a fixed job count. CI gate checks must be present; image-build
 checks alone are not certification. Because the intentional skips remain, the
 result must not be described as a "full gate." A manually dispatched run cannot
 substitute for the automatic push run.
+
+Record the certification as an auditable table with one row per attached check run:
+
+| Evidence | Required value |
+| --- | --- |
+| Release commit | Exact full SHA |
+| Automatic CI run | Push-triggered workflow-run URL/ID and matching head SHA |
+| Check runs | Each check-run name, conclusion, and—when skipped—the skip reason |
+
+The table must enumerate the actual check runs attached to the release SHA; a
+summary count or a link without the names and conclusions is insufficient.
 
 On the implementation pull request, verify that each configured pull-request
 event still starts CI for `main`, `testing`, and
