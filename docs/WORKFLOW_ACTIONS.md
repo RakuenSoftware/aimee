@@ -80,4 +80,4 @@ See [Workflows](WORKFLOWS.md) and [Autonomous development](AUTONOMOUS_DEVELOPMEN
 
 ## Automatic proposal admission
 
-The rules that govern when a pending proposal becomes eligible for a new autonomous run are defined in [Automatic proposal admission](wfe-autonomy-runbook.md#automatic-proposal-admission) in the autonomy runbook; refer there for the authoritative contract.
+The five behaviors that govern when the autonomous pending-proposal watcher makes a pending proposal eligible for a new run are defined in [Automatic proposal admission](wfe-autonomy-runbook.md#automatic-proposal-admission).
