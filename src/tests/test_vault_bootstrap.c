@@ -120,11 +120,28 @@ static void test_env_source(void)
    printf("  PASS: test_env_source\n");
 }
 
+/* The server forge token is a first-boot input: it is sealed into its canonical
+ * server Vault slot and removed from the process environment. */
+static void test_forge_env_source(void)
+{
+   setenv("AIMEE_FORGE_TOKEN", "ghs-forge-DELTA", 1);
+   assert(server_vault_bootstrap() == 1);
+   assert(getenv("AIMEE_FORGE_TOKEN") == NULL);
+
+   char token[64];
+   assert(vault_service_get_server_principal("git", "forge_token", token, sizeof(token)) ==
+          VAULT_OK);
+   assert(strcmp(token, "ghs-forge-DELTA") == 0);
+   memset(token, 0, sizeof(token));
+   printf("  PASS: test_forge_env_source\n");
+}
+
 /* No secret source configured -> no-op (and no crash). */
 static void test_no_source_noop(void)
 {
    assert(getenv("AIMEE_DELEGATE_SECRETS_FILE") == NULL);
    assert(getenv("AIMEE_DELEGATE_KEY_CLAUDE") == NULL);
+   assert(getenv("AIMEE_FORGE_TOKEN") == NULL);
    assert(server_vault_bootstrap() == 0);
    printf("  PASS: test_no_source_noop\n");
 }
@@ -136,6 +153,7 @@ static void test_no_plaintext_at_rest(void)
    assert(!plaintext_under_home("sk-mistral-ALPHA"));
    assert(!plaintext_under_home("sk-mistral-BETA"));
    assert(!plaintext_under_home("sk-claude-GAMMA"));
+   assert(!plaintext_under_home("ghs-forge-DELTA"));
    printf("  PASS: test_no_plaintext_at_rest\n");
 }
 
@@ -153,6 +171,7 @@ int main(void)
    test_file_source();
    test_idempotent_and_overwrite();
    test_env_source();
+   test_forge_env_source();
    test_no_source_noop();
    test_no_plaintext_at_rest();
 

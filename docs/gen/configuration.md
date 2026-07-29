@@ -303,7 +303,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 222 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. Secrets and tokens should be supplied through the environment or credential vault, never committed.
+The binaries read 221 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. Secrets and tokens should be supplied through the environment or credential vault, never committed.
 
 ### Paths & assets
 
@@ -503,7 +503,6 @@ The binaries read 222 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_FORGE_APP_INSTALLATION_ID` | GitHub App installation id. |
 | `AIMEE_FORGE_APP_PRIVATE_KEY` | GitHub App private key (PEM or path). |
 | `AIMEE_FORGE_SCOPE` | Scope for the minted forge token. |
-| `AIMEE_FORGE_TOKEN` | Static forge access token (bypasses App auth). |
 
 ### Gateway (voice / webhooks / push)
 

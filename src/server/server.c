@@ -2217,6 +2217,10 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
                orphan_containers);
    /* Seed personas + role templates so config (not code) is the source of truth. */
    server_seed_config_defaults();
+   /* Credential environment variables are first-boot transport only. Seal them
+    * before any capability posture checks or workers can consume them. */
+   server_vault_bootstrap_set_resolver(server_bootstrap_resolve_agent);
+   server_vault_bootstrap();
    int compute_threads = aimee_resolve_compute_threads(cfg.compute_threads);
    int session_threads = aimee_resolve_session_threads(cfg.session_threads);
    /* Background (sessionless) delegates run on-demand, gated by the per-model
@@ -2387,11 +2391,6 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    /* Boot-time enforcement-posture signal for the primary-CLI-ingestor: makes an
     * "enabled but silently inert" misconfig (flag on, dial off) visible at startup. */
    primary_cli_ingestor_log_posture();
-   /* Provision the delegate vault from operator-supplied secrets before serving,
-    * so a freshly stood-up server's delegates/roundtables work without a manual
-    * `vault set`. No-op unless a secret source is configured. */
-   server_vault_bootstrap_set_resolver(server_bootstrap_resolve_agent);
-   server_vault_bootstrap();
    return 0;
 }
 int server_run(server_ctx_t *ctx)

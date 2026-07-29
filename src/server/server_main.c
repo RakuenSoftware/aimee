@@ -9,6 +9,7 @@
 #include "forge_credentials.h"
 #include "git_host_cred.h"
 #include "git_host_resolve.h"
+#include "git_forge_vault.h"
 #include "git_ops.h"
 #include "guardrails.h"
 #include "workspace.h"
@@ -174,6 +175,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
    /* Activate the GitHub App installation-token provider for the server's forge
     * identity. Inert unless AIMEE_FORGE_APP_* is set (see forge_app_token.c). */
    forge_cred_register_app_token_provider(forge_app_token_configured, forge_app_token_get);
+   forge_cred_register_static_token_provider(git_forge_vault_server_token);
 
    /* Wire the per-host git credential vault into the credential resolvers so git
     * clone/fetch/push/PR authenticate with the stored token for the repo's host

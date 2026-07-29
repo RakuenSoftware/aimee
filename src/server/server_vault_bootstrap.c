@@ -9,11 +9,13 @@
  * connection required. The result is that a new server provisions its own
  * delegates with zero manual `aimee vault set`.
  *
- * Secret sources (precedence, both optional):
+ * Secret sources (precedence, all optional):
  *   1. $AIMEE_DELEGATE_SECRETS_FILE — a JSON object { "<agent>": "<key>", ... }
  *      (the Docker-secret / bind-mount path).
  *   2. AIMEE_DELEGATE_KEY_<AGENT> environment variables (the env-only path;
  *      the suffix is lowercased and matched against agents.json).
+ *   3. AIMEE_FORGE_TOKEN — the server forge identity, stored as
+ *      (server, git, forge_token). This is first-boot input only.
  *
  * Safety properties:
  *   - No-op when neither source is set — existing deploys are unchanged.
@@ -22,8 +24,8 @@
  *     never silently reverts a rotated key.
  *   - A secret naming an agent absent from agents.json warns and is skipped; it
  *     never fails boot.
- *   - Secrets are never written to $AIMEE_HOME or logs; in-memory copies are
- *     OPENSSL_cleanse()d and AIMEE_DELEGATE_KEY_* env vars are unset after use.
+ *   - Secrets are never written in plaintext to $AIMEE_HOME or logs; in-memory
+ *     copies are OPENSSL_cleanse()d and credential env vars are unset after use.
  */
 #include "server.h"
 #include "vault_service.h"
@@ -50,6 +52,9 @@ void server_vault_bootstrap_set_resolver(aimee_agent_resolver_fn fn)
 #define VAULT_BOOTSTRAP_SECRETS_FILE_ENV "AIMEE_DELEGATE_SECRETS_FILE"
 #define VAULT_BOOTSTRAP_KEY_PREFIX       "AIMEE_DELEGATE_KEY_"
 #define VAULT_BOOTSTRAP_OVERWRITE_ENV    "AIMEE_DELEGATE_SECRETS_OVERWRITE"
+#define VAULT_BOOTSTRAP_FORGE_TOKEN_ENV  "AIMEE_FORGE_TOKEN"
+#define VAULT_BOOTSTRAP_FORGE_AGENT      "git"
+#define VAULT_BOOTSTRAP_FORGE_CRED       "forge_token"
 #define VAULT_BOOTSTRAP_MAX_FILE_BYTES   (1u << 20) /* 1 MB cap on the secrets file */
 #define VAULT_BOOTSTRAP_MAX_ENV_VARS     64
 
@@ -72,6 +77,27 @@ static int env_flag(const char *name)
 /* Seal one (agent, secret) under the server principal. The agent must exist in
  * agents.json; the canonical agent->name is what we key the vault by, so a
  * delegate resolves it later regardless of the source's casing. */
+static void provision_server_credential(const char *agent, const char *cred, const char *secret,
+                                        int overwrite, prov_counts_t *c)
+{
+   if (!agent || !agent[0] || !cred || !cred[0] || !secret || !secret[0])
+      return;
+   if (!overwrite && vault_store_has_entry(VAULT_SERVER_PRINCIPAL, agent, cred))
+   {
+      c->skipped++;
+      return;
+   }
+   vault_status_t st = vault_service_set_server(agent, cred, secret);
+   if (st == VAULT_OK)
+      c->provisioned++;
+   else
+   {
+      LOG_ERROR("vault.bootstrap", "failed to seal server credential %s/%s: %s", agent, cred,
+                vault_status_str(st));
+      c->failed++;
+   }
+}
+
 static void provision_one(const char *name, const char *secret, int overwrite, prov_counts_t *c)
 {
    if (!name || !name[0] || !secret || !secret[0])
@@ -84,23 +110,12 @@ static void provision_one(const char *name, const char *secret, int overwrite, p
       c->unknown++;
       return;
    }
-   if (!overwrite && vault_store_has_entry(VAULT_SERVER_PRINCIPAL, canon, VAULT_API_KEY_CRED))
-   {
-      c->skipped++;
-      return;
-   }
-   vault_status_t st = vault_service_set_server(canon, VAULT_API_KEY_CRED, secret);
-   if (st == VAULT_OK)
+   int before = c->provisioned;
+   provision_server_credential(canon, VAULT_API_KEY_CRED, secret, overwrite, c);
+   if (c->provisioned > before)
    {
       /* Agent name only — never the secret or a fingerprint of it. */
       LOG_INFO("vault.bootstrap", "provisioned server-vault api_key for agent '%s'", canon);
-      c->provisioned++;
-   }
-   else
-   {
-      LOG_ERROR("vault.bootstrap", "failed to seal api_key for agent '%s': %s", canon,
-                vault_status_str(st));
-      c->failed++;
    }
 }
 
@@ -208,6 +223,8 @@ int server_vault_bootstrap(void)
 {
    const char *file = getenv(VAULT_BOOTSTRAP_SECRETS_FILE_ENV);
    int have_file = file && file[0];
+   const char *forge_token = getenv(VAULT_BOOTSTRAP_FORGE_TOKEN_ENV);
+   int have_forge_token = forge_token && forge_token[0];
    int have_env = 0;
    {
       extern char **environ;
@@ -219,7 +236,7 @@ int server_vault_bootstrap(void)
             break;
          }
    }
-   if (!have_file && !have_env)
+   if (!have_file && !have_env && !have_forge_token)
       return 0; /* no secret source configured — nothing to do */
 
    int overwrite = env_flag(VAULT_BOOTSTRAP_OVERWRITE_ENV);
@@ -227,10 +244,15 @@ int server_vault_bootstrap(void)
    if (have_file)
       provision_from_file(file, overwrite, &c);
    provision_from_env(overwrite, &c);
+   if (have_forge_token)
+   {
+      provision_server_credential(VAULT_BOOTSTRAP_FORGE_AGENT, VAULT_BOOTSTRAP_FORGE_CRED,
+                                  forge_token, overwrite, &c);
+      unsetenv(VAULT_BOOTSTRAP_FORGE_TOKEN_ENV);
+   }
 
    if (c.provisioned || c.skipped || c.unknown || c.failed)
-      LOG_INFO("vault.bootstrap",
-               "delegate vault provisioning: provisioned=%d skipped=%d unknown=%d failed=%d",
+      LOG_INFO("vault.bootstrap", "vault bootstrap: provisioned=%d skipped=%d unknown=%d failed=%d",
                c.provisioned, c.skipped, c.unknown, c.failed);
    return c.provisioned;
 }

@@ -795,7 +795,7 @@ ENV_DESC = {
     "AIMEE_FORGE_APP_INSTALLATION_ID": ("Forge (GitHub App / tokens)", "GitHub App installation id."),
     "AIMEE_FORGE_APP_PRIVATE_KEY": ("Forge (GitHub App / tokens)", "GitHub App private key (PEM or path)."),
     "AIMEE_FORGE_SCOPE": ("Forge (GitHub App / tokens)", "Scope for the minted forge token."),
-    "AIMEE_FORGE_TOKEN": ("Forge (GitHub App / tokens)", "Static forge access token (bypasses App auth)."),
+    "AIMEE_FORGE_TOKEN": ("Forge (GitHub App / tokens)", "First-boot static forge token. aimee-server seals it into the server Vault and unsets it before serving; subsequent boots read only from Vault."),
     # Gateway
     "AIMEE_GATEWAY_NTFY_BASE_URL": ("Gateway (voice / webhooks / push)", "ntfy push base URL."),
     "AIMEE_GATEWAY_NTFY_TOKEN": ("Gateway (voice / webhooks / push)", "ntfy push token."),
