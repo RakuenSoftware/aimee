@@ -51,8 +51,8 @@ The autonomous pending-proposal watcher scans the watched branch on every poll a
 each pending proposal is eligible for a new run. The decisions are governed by five behaviors:
 
 1. **Identity derivation.** Pending-proposal identity is derived from the complete proposal file
-   bytes together with workflow and mode. The watched-branch commit is not part of the identity
-   and is therefore not sufficient on its own to identify a pending proposal.
+   bytes together with workflow and mode. The moving watched-branch commit is not part of
+   the identity, so commit SHA alone is not sufficient to identify a pending proposal.
 2. **No duplicate runs on branch-only advances.** Advancing the watched branch without changing the
    proposal bytes does not start a duplicate run. The watcher treats the unchanged bytes as the
    same pending proposal and leaves its prior run status intact.
@@ -60,7 +60,7 @@ each pending proposal is eligible for a new run. The decisions are governed by f
    identity, which makes the proposal eligible for a new run on the next scan.
 4. **Admission cap queues eligible proposals.** The live trigger admission cap can queue an
    otherwise eligible proposal when the cap is reached on a given scan. The cap is edited in
-   **Edit Workflows → Run policy**; an otherwise eligible proposal that exceeds the cap is held
+   **Workflows → Run policy**; an otherwise eligible proposal that exceeds the cap is held
    for a later scan instead of being admitted or rejected.
 5. **Cap-queued proposals stay eligible on later scans.** A proposal queued by the cap remains
    eligible on a later scan; the watcher does not require manual firing to retry a proposal that
