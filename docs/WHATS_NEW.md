@@ -75,7 +75,7 @@ See [Event bus](EVENT_BUS.md).
 
 ## Delegates and roundtables
 
-- New installs get a usable default delegate roster and roundtable instead of an empty shell.
+- New installs create their first agent in the wizard and ship one canonical default roundtable.
 - Delegates route by role and persona, then retry another viable agent unless a seat is pinned.
 - Roundtable seats run in parallel, can pin a model or choose randomly, and require repository
   evidence. A reasoning chair removes unsupported findings before the final result.

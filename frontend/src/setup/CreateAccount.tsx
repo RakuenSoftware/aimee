@@ -65,8 +65,8 @@ export default function CreateAccount({ onCreated }: { onCreated: (username: str
   return (
     <div style={{ display: 'grid', gap: 12, marginBottom: 8 }}>
       <div style={{ fontSize: 12.5, color: '#556', lineHeight: 1.5 }}>
-        Replace the published <code>aimee / aimee-local-dev</code> login before configuring this
-        instance. The new login is stored on the persistent volume and survives image updates.
+        Replace the temporary bootstrap login before configuring this instance. Its plaintext is
+        removed after this step; the new login is stored on the persistent volume and survives image updates.
       </div>
       <label>
         <div style={labelStyle}>Username</div>

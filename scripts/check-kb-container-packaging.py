@@ -433,11 +433,13 @@ def managed_kb_llm_contract_failures(text: str) -> list[str]:
             if llm_env.get(key) != expected:
                 failures.append(f"managed LLM must receive {key}")
 
-    dependency = kb.get("depends_on", {}).get("aimee-llm")
-    if not isinstance(dependency, dict) or dependency.get("condition") != "service_healthy":
-        failures.append("managed KB must wait for a healthy LLM")
-    if not isinstance(dependency, dict) or dependency.get("required") is not False:
-        failures.append("managed KB-to-LLM dependency must remain profile-safe")
+    depends_on = kb.get("depends_on")
+    if (isinstance(depends_on, dict) and "aimee-llm" in depends_on) or (
+        isinstance(depends_on, list) and "aimee-llm" in depends_on
+    ):
+        failures.append(
+            "managed KB must start independently of LLM model readiness"
+        )
     return failures
 
 
@@ -674,8 +676,6 @@ def plant_test() -> int:
             "      AIMEE_LLM_AUTH_REQUIRED: ${AIMEE_LLM_AUTH_REQUIRED:-0}\n"
             "      LLM_API_KEY: ${AIMEE_LLM_AUTH_TOKEN:-}\n"
             "      AIMEE_LLM_MODEL: ${AIMEE_LLM_MODEL:-aimee-synth}\n"
-            "    depends_on:\n"
-            "      aimee-llm: { condition: service_healthy, required: false }\n"
             "  aimee-llm:\n"
             "    environment:\n"
             "      AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}\n"
@@ -742,6 +742,23 @@ def plant_test() -> int:
                     file=sys.stderr,
                 )
                 return 1
+
+        managed_text = read(root / "deploy/container/aimee-managed.compose.yaml")
+        planted_dependency = managed_text.replace(
+            "  aimee-llm:\n",
+            "    depends_on:\n"
+            "      aimee-llm: { condition: service_healthy, required: false }\n"
+            "  aimee-llm:\n",
+            1,
+        )
+        if "managed KB must start independently of LLM model readiness" not in (
+            managed_kb_llm_contract_failures(planted_dependency)
+        ):
+            print(
+                "kb-container-packaging plant: missed KB-to-LLM startup dependency",
+                file=sys.stderr,
+            )
+            return 1
 
         if not server_default_config_failures(
             "aimee:\n  api:\n    remote_writes: data\n"

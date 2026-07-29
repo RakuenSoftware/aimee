@@ -15,9 +15,26 @@ import (
 )
 
 type fakeSetupAccounts struct {
-	users   map[string]string
-	locked  map[string]bool
-	lockErr error
+	users      map[string]string
+	locked     map[string]bool
+	lockErr    error
+	beforeLock func(username string)
+}
+
+const generatedBootstrapUsername = "aimee-012345abcdef"
+
+func writeGeneratedBootstrapCredentials(t *testing.T, s *server, username string) []byte {
+	t.Helper()
+	t.Setenv("AIMEE_WEBCHAT_USER", "")
+	t.Setenv("AIMEE_WEBCHAT_PASSWORD", "")
+	if err := os.MkdirAll(s.setupAccountDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte("username=" + username + "\npassword=" + strings.Repeat("a", 64) + "\n")
+	if err := os.WriteFile(s.setupAccountCredentials(), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return data
 }
 
 func (f *fakeSetupAccounts) Exists(username string) bool {
@@ -40,6 +57,9 @@ func (f *fakeSetupAccounts) ShadowHash(username string) (string, error) {
 }
 
 func (f *fakeSetupAccounts) Lock(username string) error {
+	if f.beforeLock != nil {
+		f.beforeLock(username)
+	}
 	if f.lockErr != nil {
 		return f.lockErr
 	}
@@ -156,6 +176,105 @@ func TestSetupAccountReplacesAndPersistsBootstrapLogin(t *testing.T) {
 	}
 	if status["complete"] != true || status["required"] != false || status["username"] != "virant" {
 		t.Fatalf("status = %#v", status)
+	}
+}
+
+func TestSetupAccountReplacesGeneratedBootstrapLogin(t *testing.T) {
+	s, fake := newSetupAccountTestServer(t)
+	writeGeneratedBootstrapCredentials(t, s, generatedBootstrapUsername)
+	fake.beforeLock = func(username string) {
+		if username != generatedBootstrapUsername {
+			t.Fatalf("locking %q, want generated bootstrap", username)
+		}
+		if _, err := os.Stat(s.setupAccountCredentials()); err != nil {
+			t.Fatalf("credentials removed before bootstrap lock: %v", err)
+		}
+	}
+	fake.users[generatedBootstrapUsername] = "$test$generated"
+	if err := os.WriteFile(s.setupAccountStore(), []byte(
+		generatedBootstrapUsername+":$test$generated\nother:$test$other\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldToken, err := s.sessions.CreateSession(generatedBootstrapUsername)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	status := s.setupAccountStatus()
+	if status["complete"] != false || status["required"] != true ||
+		status["username"] != generatedBootstrapUsername {
+		t.Fatalf("generated bootstrap status = %#v", status)
+	}
+
+	body := `{"username":"virant","password":"correct horse","password_confirmation":"correct horse"}`
+	req := withUser(httptest.NewRequest(http.MethodPost, "/api/setup/account",
+		strings.NewReader(body)), generatedBootstrapUsername)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr := httptest.NewRecorder()
+	s.handleSetupAccount(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("replace generated account: code=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !fake.locked[generatedBootstrapUsername] {
+		t.Fatalf("generated bootstrap was not locked: %#v", fake.locked)
+	}
+	if _, err := os.Stat(s.setupAccountCredentials()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("plaintext generated credentials survived replacement: %v", err)
+	}
+	stored, err := os.ReadFile(s.setupAccountStore())
+	if err != nil || strings.Contains(string(stored), generatedBootstrapUsername+":") ||
+		!strings.Contains(string(stored), "virant:$test$correct horse") {
+		t.Fatalf("login store=%q err=%v", stored, err)
+	}
+	if _, err := s.sessions.ValidateSession(oldToken); err == nil {
+		t.Fatal("generated bootstrap session remains valid")
+	}
+}
+
+func TestSetupAccountRollbackRestoresGeneratedCredentials(t *testing.T) {
+	s, fake := newSetupAccountTestServer(t)
+	originalCredentials := writeGeneratedBootstrapCredentials(t, s, generatedBootstrapUsername)
+	fake.users[generatedBootstrapUsername] = "$test$generated"
+	fake.lockErr = errors.New("lock failed")
+	originalStore := []byte(generatedBootstrapUsername + ":$test$generated\n")
+	if err := os.WriteFile(s.setupAccountStore(), originalStore, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	body := `{"username":"virant","password":"correct horse","password_confirmation":"correct horse"}`
+	req := withUser(httptest.NewRequest(http.MethodPost, "/api/setup/account",
+		strings.NewReader(body)), generatedBootstrapUsername)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr := httptest.NewRecorder()
+	s.handleSetupAccount(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("code=%d body=%s", rr.Code, rr.Body.String())
+	}
+	credentials, err := os.ReadFile(s.setupAccountCredentials())
+	if err != nil || string(credentials) != string(originalCredentials) {
+		t.Fatalf("generated credentials=%q err=%v", credentials, err)
+	}
+	stored, err := os.ReadFile(s.setupAccountStore())
+	if err != nil || string(stored) != string(originalStore) {
+		t.Fatalf("login store=%q err=%v", stored, err)
+	}
+}
+
+func TestReadGeneratedBootstrapUsernameRejectsMalformedFiles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bootstrap-credentials")
+	for _, data := range []string{
+		"username=aimee-short\npassword=" + strings.Repeat("a", 64) + "\n",
+		"username=" + generatedBootstrapUsername + "\npassword=not-hex\n",
+		"username=operator\npassword=" + strings.Repeat("a", 64) + "\n",
+		"username=" + generatedBootstrapUsername + "\nusername=aimee-fedcba654321\npassword=" + strings.Repeat("a", 64) + "\n",
+		"username=" + generatedBootstrapUsername + "\npassword=" + strings.Repeat("a", 64) + "\nunknown=value\n",
+	} {
+		if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if username, ok := readGeneratedBootstrapUsername(path); ok {
+			t.Fatalf("accepted malformed credential as %q: %q", username, data)
+		}
 	}
 }
 

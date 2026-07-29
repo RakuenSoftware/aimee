@@ -11,24 +11,31 @@ can start the KB and inference containers.
 git clone https://github.com/RakuenSoftware/aimee.git
 cd aimee
 docker compose -f compose.server-managed.yaml up -d
+docker compose -f compose.server-managed.yaml logs aimee-server
 ```
 
-Open <https://localhost:8443> and sign in with:
+On first boot, the server logs a strong random temporary browser login:
 
 ```text
-user:     aimee
-password: aimee-local-dev
+[webchat] generated temporary browser login (replace it in onboarding):
+[webchat]   username: aimee-<random>
+[webchat]   password: <random>
 ```
 
-The wizard first creates your operator username and password, disables the published development
-login, and moves the current browser session to the new account. The password hash and bootstrap
-retirement marker live on the persistent server volume, so `aimee / aimee-local-dev` does not return
-after an image update. Then choose the primary agent, CPU or GPU inference, git accounts, and
-workspaces.
+Open <https://localhost:8443> and sign in with that pair. It is persisted and printed again after a
+container recreation, so restarts do not silently rotate it. The wizard creates your operator
+username and password, disables and removes the temporary credential, and moves the current browser
+session to the new account. Then create the initial agent and choose CPU or GPU inference, git
+accounts, and workspaces.
 The final **Deploy** step starts:
 
 - `aimee-kb`, including private PostgreSQL 18, pgvector, and pgvectorscale;
 - `aimee-llm`, with the selected inference tier.
+
+The managed worker starts KB before LLM. It waits for KB health only where the identity one-shots
+require it; it does not wait for LLM model readiness. First-boot model downloads continue in the
+LLM container after the wizard reports that the stack containers are up, while KB initialization
+and CPU indexing proceed. Check `aimee-llm` status/logs if a download later fails.
 
 For a local managed KB, Deploy also runs two explicit one-shot jobs before it
 reports success:
@@ -59,8 +66,10 @@ to both containers, then the KB uses that credential for embedding, reranking, a
 automatic; do not copy the user's enrollment bearer into the LLM configuration. The managed LLM
 refuses to start if its service credential is missing.
 
-Complete the account step before exposing the host. Deployments that inject a non-default
-`AIMEE_WEBCHAT_USER` and `AIMEE_WEBCHAT_PASSWORD` are already considered secured and skip that step.
+Complete the account step before exposing the host. Deployments that inject both
+`AIMEE_WEBCHAT_USER` and `AIMEE_WEBCHAT_PASSWORD` use that explicit pair and skip account
+replacement. Set both or neither; a partial pair is rejected at startup. Supplied passwords are
+never printed in logs.
 
 ### Choosing an image channel
 
@@ -344,7 +353,8 @@ removed `aimee chat` TUI is not part of current builds.
 
 ## 7. Add delegates
 
-List the seeded roster:
+List the roster. A fresh install contains only the agent created in the wizard;
+add delegates explicitly when you want them:
 
 ```bash
 aimee agent list
@@ -353,7 +363,7 @@ aimee provider list --available
 
 Remote agent and delegate commands require a `full` grant, including `aimee agent list`.
 
-`ON` in the seeded roster means configured, not authenticated. Before probing or delegating, make
+`ON` in the roster means configured, not authenticated. Before probing or delegating, make
 sure `provider list --available` shows a provider you intend to use. Local providers need their
 endpoint registered; API or OAuth credentials belong in the server vault, not `agents.json` or the
 project:

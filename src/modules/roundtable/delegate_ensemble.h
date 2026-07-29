@@ -78,7 +78,7 @@ void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *ac
  * health-breaker DOWN) from the panel — runtime gate via
  * agent_is_available_for_routing, distinct from the authorization gate above.
  * Run after the seed + authorization filter so a configured-but-broken or
- * auto-seeded-but-unkeyed model never burns a seat and degrades the round. */
+ * configured-but-unkeyed model never burns a seat and degrades the round. */
 void ensemble_filter_panel_availability(config_t *cfg, const agent_config_t *acfg);
 
 /* Build the panel used only when no saved roundtable can be acquired. Legacy
@@ -90,8 +90,8 @@ void ensemble_fill_implicit_panel(config_t *cfg, const agent_config_t *acfg);
 /* Single C compatibility route while orchestration moves to Go. Resolve a
  * named/default saved preset as an exact panel, or construct the bounded
  * two-seat fallback when no preset exists. */
-int ensemble_prepare_runtime_panel(const char *requested, config_t *cfg,
-                                   const agent_config_t *acfg, char *err, size_t err_n);
+int ensemble_prepare_runtime_panel(const char *requested, config_t *cfg, const agent_config_t *acfg,
+                                   char *err, size_t err_n);
 
 /* Persona name for panelist `model_index`: a configured
  * ensemble.reference_personas[model_index] if set (any mode), else a mode default
