@@ -170,3 +170,18 @@ void delegate_apply_max_turns_policy(agent_config_t *cfg, const char *role, int 
          cfg->agents[i].max_turns = default_cap;
    }
 }
+
+void delegate_apply_max_turns_cap(agent_config_t *cfg, const char *role, int cap)
+{
+   if (!cfg || !role || !role[0] || cap <= 0)
+      return;
+
+   const char *canonical_role = delegate_role_canonicalize(role);
+   for (int i = 0; i < cfg->agent_count; i++)
+   {
+      if (!delegate_agent_supports_role(&cfg->agents[i], canonical_role))
+         continue;
+      if (cfg->agents[i].max_turns <= 0 || cfg->agents[i].max_turns > cap)
+         cfg->agents[i].max_turns = cap;
+   }
+}

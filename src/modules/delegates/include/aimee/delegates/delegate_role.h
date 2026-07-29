@@ -38,6 +38,11 @@ int delegate_final_after_turns_for_role(const char *role);
  * budget before returning useful signal. */
 void delegate_apply_max_turns_policy(agent_config_t *cfg, const char *role, int max_turns);
 
+/* Apply a per-invocation safety ceiling without raising a stricter agent/role
+ * limit. Unlike an explicit max_turns override, this converts unlimited
+ * (-1/0) to `cap` and clamps only eligible agents above it. */
+void delegate_apply_max_turns_cap(agent_config_t *cfg, const char *role, int cap);
+
 /* Canonicalize a delegate role name.  Returns the canonical name if role is
  * a known alias (e.g. "implement" -> "code"), otherwise returns role unchanged.
  * Never returns NULL.  The returned pointer is either role itself or a string

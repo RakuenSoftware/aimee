@@ -2020,6 +2020,12 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
                                           local.brief, local.context, results)
                    : run_round_parallel(acfg, cfg, task, artifact, peer_notes, local.mode, round,
                                         local.brief, local.context, results, panel_deadline_ms);
+      /* The parallel runner enforces the wall bound inside an in-flight provider
+       * call. Record that terminal fact immediately; a one-round panel otherwise
+       * exits before the loop-top deadline check and can look fully valid even
+       * though one or more seats were cancelled at the deadline. */
+      if (local.deadline_ms > 0 && monotonic_ms() - start_ms >= local.deadline_ms)
+         out->deadline_hit = 1;
       if (rc != 0)
       {
          for (int i = 0; i < ref_count; i++)

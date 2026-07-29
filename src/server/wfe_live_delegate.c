@@ -52,10 +52,11 @@
 /* Block (busy-poll) until a single-task coord job reaches a terminal state, then
  * hand back the delegate's result text. WFE runs on the autonomy scheduler
  * thread; the coord DISPATCHER runs the task on its own thread through the shared
- * delegate path, so this only waits — it never executes the delegate. Returns 0
- * and fills result_out on 'done'; -1 (+err) on 'failed'/'cancelled'/timeout. */
-static int wfe_coord_task_wait(int job_id, int task_id, char *result_out, size_t result_cap,
-                               char *err, size_t errlen)
+ * delegate path, so this only waits — it never executes the delegate. Returns
+ * OK and fills result_out on 'done', NO_CHANGE for the write-role detector's
+ * stable no-op outcome, or ERROR (+err) on other failures/cancellation/timeout. */
+static wfe_delegate_result_t wfe_coord_task_wait(int job_id, int task_id, char *result_out,
+                                                 size_t result_cap, char *err, size_t errlen)
 {
    (void)task_id;              /* the job holds exactly one task */
    const int max_polls = 1600; /* 1600 * 750ms ~= 20 min, matching the delegate timeout ceiling */
@@ -69,14 +70,16 @@ static int wfe_coord_task_wait(int job_id, int task_id, char *result_out, size_t
          {
             if (result_out && result_cap)
                snprintf(result_out, result_cap, "%s", task.result);
-            return 0;
+            return WFE_DELEGATE_OK;
          }
          if (strcmp(task.status, "failed") == 0 || strcmp(task.status, "cancelled") == 0)
          {
+            if (strcmp(task.status, "failed") == 0 && wfe_delegate_error_is_no_change(task.error))
+               return WFE_DELEGATE_NO_CHANGE;
             if (err && errlen)
                snprintf(err, errlen, "wfe delegate task %s: %s", task.status,
                         task.error[0] ? task.error : "no detail");
-            return -1;
+            return WFE_DELEGATE_ERROR;
          }
       }
       struct timespec ts = {0, 750L * 1000L * 1000L};
@@ -84,7 +87,7 @@ static int wfe_coord_task_wait(int job_id, int task_id, char *result_out, size_t
    }
    if (err && errlen)
       snprintf(err, errlen, "wfe delegate task timed out");
-   return -1;
+   return WFE_DELEGATE_ERROR;
 }
 
 /* The live delegate run. Contract per wfe_delegate_provider_t.
@@ -146,8 +149,17 @@ static int wfe_live_delegate_run(const char *workdir, const char *role, const ch
    }
 
    char result[DB1_COORD_RESULT_LEN] = "";
-   if (wfe_coord_task_wait(job_id, task_id, result, sizeof result, err, errlen) != 0)
-      return -1;
+   wfe_delegate_result_t task_result =
+       wfe_coord_task_wait(job_id, task_id, result, sizeof result, err, errlen);
+   if (task_result != WFE_DELEGATE_OK)
+   {
+      /* A timed-out/failed coord wait must not leave an admitted delegate
+       * running after the workflow has moved on. Cancellation is idempotent for
+       * an already-terminal job, and the agent loop observes it cooperatively. */
+      if (task_result == WFE_DELEGATE_ERROR)
+         db1_coord_job_cancel(job_id);
+      return task_result;
+   }
 
    /* A worktree-mutating (implement/decompose/tdd/document) delegate edits the
     * dedicated per-slice worktree in place; stage + commit its work here so the
@@ -449,10 +461,12 @@ static int wfe_live_judge_run(const char *workdir, const char *lens, char *out_v
    }
 
    char result[DB1_COORD_RESULT_LEN] = "";
-   int ok = wfe_coord_task_wait(job_id, task_id, result, sizeof result, NULL, 0);
+   wfe_delegate_result_t ok = wfe_coord_task_wait(job_id, task_id, result, sizeof result, NULL, 0);
+   if (ok == WFE_DELEGATE_ERROR)
+      db1_coord_job_cancel(job_id);
 
    int refuted = 1; /* fail-closed default */
-   if (ok == 0 && result[0])
+   if (ok == WFE_DELEGATE_OK && result[0])
    {
       /* Parse ONLY the LAST non-empty line as the verdict JSON (the delegate is told
        * to emit exactly one JSON line at the end). A substring scan of the whole
