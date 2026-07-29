@@ -1,6 +1,7 @@
-# Wizard-managed server identity gap
+# Wizard-managed server identity acceptance
 
-**Status:** reproduced against the rolling `:testing` deployment on 2026-07-28.
+**Status:** reproduced against the rolling `:testing` deployment on 2026-07-28;
+resolved and accepted through `35f62657` on 2026-07-29.
 
 ## Expected contract
 
@@ -17,7 +18,7 @@ registry row, a single-use server-to-KB mTLS enrollment, and the public JWKS tru
 material. Private keys and enrollment tokens must remain out of browser responses
 and logs.
 
-## Reproduction
+## Original reproduction
 
 Start `compose.server-managed.yaml` with rolling `:testing`, complete every page of
 the web GUI wizard, press Deploy, enroll the first Linux client with the command
@@ -37,9 +38,10 @@ The first-user flow succeeds, but the server workload is still unprovisioned:
 The KB is healthy and already contains indexed lexical data and vectors, so this
 is not a KB or embedding-service outage.
 
-## Code path
+## Original code path
 
-`POST /v1/deploy/apply` currently performs only two operations:
+At the reproduced revision, `POST /v1/deploy/apply` performed only two
+operations:
 
 1. `server_http_first_user_bootstrap()` creates/reuses the first browser user's
    enrollment bearer and eventual certificate-bound `full` grant;
@@ -95,3 +97,44 @@ After Deploy:
 This gate is also the setup prerequisite for the Ponytail reanalysis Aimee arm:
 benchmarking a manually repaired or half-installed deployment would not measure
 Aimee's minimum standard installation.
+
+## Resolution and final-head evidence
+
+The managed-v2 wizard now performs the workload-identity transaction after the
+KB is healthy and before Deploy succeeds. It creates and persists the server and
+team identity, client certificate/key, owner/full grant, and signed JWKS trust
+through the browser-driven deployment path. The runtime reads that protected
+`kb-client-identity.json`; empty legacy `AIMEE_SERVER_ID`,
+`AIMEE_SERVER_TEAM_ID`, and `AIMEE_KB_CONN` environment variables are expected
+for this mode and are not evidence of an incomplete install.
+
+The final benchmark acceptance deployment used these exact components:
+
+- server `0.2.195-1009-g35f62657`;
+- distributed KB `v0.2.195-1007-gb0e1f2c5`;
+- thin client `v0.2.195-1003-g627c1ffc`.
+
+The server reports both its own version and the distributed KB version. Its
+wizard-generated identity is ready, bound to the default team, certificate
+authenticated, and granted owner/full. The persistent server, store, vector
+index, and embedder all report healthy.
+
+A fresh per-project acceptance cycle registers a canonical checkout, uploads a
+forced index scan, and waits for `kb build --force` to finish both code and
+document embeddings. Before an agent is allowed to start, the gate requires:
+
+1. symbol lookup for the planted `end_of_month` helper;
+2. all three callers from billing, invoices, and reports;
+3. blast-radius output for `app/dates.py`;
+4. a project-scoped semantic hit for the planted README passage;
+5. identical pre-edit Git heads and complete manifests for the indexed and
+   execution checkouts; and
+6. a connected Aimee MCP server and tool inventory in the actual agent startup
+   event.
+
+The acceptance exercise exposed additional defects after initial enrollment:
+the wizard discarded the full mTLS grant, thin-client build returned before
+project embeddings completed, background document refresh could starve later
+projects, the distributed mTLS relay ignored caller timeouts, and server health
+did not identify the distributed KB build. Those defects are covered by the
+commits after `2d068b7a`; all are required for the benchmark-ready state above.

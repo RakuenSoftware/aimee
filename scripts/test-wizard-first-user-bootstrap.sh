@@ -87,11 +87,14 @@ PY
 e2e_bearer=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["enrollment"]["bearer_token"])' "$e2e_tmp/apply.json")
 
 # The pending bearer authenticates enrollment but has no write tier by itself.
-e2e_body='{"persona":"wizard bootstrap E2E","description":"certificate-bound write"}'
+# Use kb.build because CAP_INDEX_ADMIN sits outside CAPS_AUTHENTICATED: an
+# ordinary mutation such as persona PUT can pass without proving that the
+# certificate-bound `full` tier survived capability derivation.
+e2e_body='{}'
 curl --silent --show-error --cacert "$e2e_tmp/server/tls/server.crt" \
   -H "Authorization: Bearer $e2e_bearer" -H 'Content-Type: application/json' \
-  -X PUT -d "$e2e_body" -o "$e2e_tmp/bearer-write.json" -w '%{http_code}' \
-  "https://127.0.0.1:$e2e_tls_port/v1/personas/wizard-bootstrap-e2e" \
+  -X POST -d "$e2e_body" -o "$e2e_tmp/bearer-write.json" -w '%{http_code}' \
+  "https://127.0.0.1:$e2e_tls_port/v1/kb/build" \
   >"$e2e_tmp/bearer-write.status"
 [[ $(<"$e2e_tmp/bearer-write.status") == 403 ]]
 
@@ -111,8 +114,8 @@ PY
 curl --silent --show-error --cacert "$e2e_tmp/server/tls/server.crt" \
   --cert "$e2e_tmp/client/tls/client.crt" --key "$e2e_tmp/client/tls/client.key" \
   -H "Authorization: Bearer $e2e_bearer" -H 'Content-Type: application/json' \
-  -X PUT -d "$e2e_body" -o "$e2e_tmp/mtls-write.json" -w '%{http_code}' \
-  "https://127.0.0.1:$e2e_tls_port/v1/personas/wizard-bootstrap-e2e" \
+  -X POST -d "$e2e_body" -o "$e2e_tmp/mtls-write.json" -w '%{http_code}' \
+  "https://127.0.0.1:$e2e_tls_port/v1/kb/build" \
   >"$e2e_tmp/mtls-write.status"
 [[ $(<"$e2e_tmp/mtls-write.status") == 200 ]]
 

@@ -107,6 +107,8 @@ void server_health_add_kb(cJSON *resp)
    cJSON_AddBoolToObject(kbo, "vectors_ok", kb.pgvec_ok ? 1 : 0);
    cJSON_AddBoolToObject(kbo, "embed_configured", kb.embed_ok ? 1 : 0);
    cJSON_AddNumberToObject(kbo, "vectors", kb.pgvec_vectors);
+   if (kb.version[0])
+      cJSON_AddStringToObject(kbo, "version", kb.version);
 }
 
 int handle_api_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

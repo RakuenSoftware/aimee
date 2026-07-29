@@ -606,13 +606,17 @@ static void maybe_renew(void)
    pthread_mutex_unlock(&g_lock);
 }
 
-char *kb_client_mtls_request(const char *method, const char *path, const char *body,
-                             int *status_out)
+#define KB_CLIENT_MTLS_DEFAULT_TIMEOUT_MS 30000
+
+char *kb_client_mtls_request_timeout(const char *method, const char *path, const char *body,
+                                     int timeout_ms, int *status_out)
 {
    if (status_out)
       *status_out = -1;
    if (!method || !path || ensure_enrolled() != 0)
       return NULL;
+   if (timeout_ms <= 0)
+      timeout_ms = KB_CLIENT_MTLS_DEFAULT_TIMEOUT_MS;
    maybe_renew();
 
    size_t cap = 1u << 20; /* 1 MiB — covers kb /v1 responses (status/search/etc.) */
@@ -631,10 +635,13 @@ char *kb_client_mtls_request(const char *method, const char *path, const char *b
       port = g_port;
       pthread_mutex_unlock(&g_lock);
       int status = -1;
-      int rc = resp ? kb_tls_client_request_auth(host, port, ca, cert, key, method, path,
-                                                 (body && body[0]) ? body : NULL, NULL, resp, cap,
-                                                 &status)
-                    : -1;
+      int reusable = 0;
+      kb_tls_client_conn_t *conn = resp ? kb_tls_client_conn_open(host, port, ca, cert, key) : NULL;
+      int rc = conn && kb_tls_client_conn_set_timeout(conn, timeout_ms) == 0
+                   ? kb_tls_client_conn_request(conn, method, path, (body && body[0]) ? body : NULL,
+                                                NULL, 1, resp, cap, &status, &reusable)
+                   : -1;
+      kb_tls_client_conn_close(conn);
       if (status_out)
          *status_out = status;
       char *out = (rc == 0 && status >= 200 && status < 300) ? strdup(resp) : NULL;
@@ -652,14 +659,24 @@ char *kb_client_mtls_request(const char *method, const char *path, const char *b
    }
    int status = -1;
    int reusable = 0;
-   int rc = kb_tls_client_conn_request(entry->conn, method, path, (body && body[0]) ? body : NULL,
-                                       NULL, 0, resp, cap, &status, &reusable);
+   int rc =
+       kb_tls_client_conn_set_timeout(entry->conn, timeout_ms) == 0
+           ? kb_tls_client_conn_request(entry->conn, method, path, (body && body[0]) ? body : NULL,
+                                        NULL, 0, resp, cap, &status, &reusable)
+           : -1;
    pool_return(entry, rc == 0 && reusable);
    if (status_out)
       *status_out = status;
    char *out = (rc == 0 && status >= 200 && status < 300) ? strdup(resp) : NULL;
    free(resp);
    return out;
+}
+
+char *kb_client_mtls_request(const char *method, const char *path, const char *body,
+                             int *status_out)
+{
+   return kb_client_mtls_request_timeout(method, path, body, KB_CLIENT_MTLS_DEFAULT_TIMEOUT_MS,
+                                         status_out);
 }
 
 int kb_client_mtls_management_jwks(char *envelope_out, size_t envelope_cap, size_t *envelope_len)

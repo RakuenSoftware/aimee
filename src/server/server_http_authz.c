@@ -82,7 +82,13 @@ uint32_t server_http_effective_conn_caps(int is_tcp, const char *bearer, int rem
    if (!mtls_authenticated && bearer && strcmp(bearer, AIMEE_BOOTSTRAP_BEARER) == 0)
       return (CAPS_READ_ONLY & ~(uint32_t)CAP_CHAT) | CAP_SESSION_ADMIN;
    if (mtls_authenticated)
-      return CAPS_AUTHENTICATED;
+      /* `remote_writes` is the caller's verified per-user tier by this point,
+       * not the retired process-global switch. Preserve the ordinary mTLS
+       * authenticated floor for off/data, but a certificate-bound full grant
+       * must expose the same full capability set as any other verified full
+       * identity. Otherwise CAP_INDEX_ADMIN routes such as kb.build remain
+       * impossible even for the browser wizard's enrolled owner. */
+      return remote_writes >= SERVER_REMOTE_WRITES_FULL ? CAPS_ALL : CAPS_AUTHENTICATED;
    /* Optional-mode bearer fallback is deliberately weaker than a client cert:
     * query/session reads only, with no compute or mutation capability. */
    return CAPS_READ_ONLY & ~(uint32_t)CAP_CHAT;

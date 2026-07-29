@@ -22,10 +22,16 @@ static int health_get_handler(const char *url, const char *extra_headers, char *
 {
    (void)timeout_ms;
    assert(url);
-   assert(strcmp(url, "http://127.0.0.1:4010/v1/health") == 0);
    assert(extra_headers);
    assert(strcmp(extra_headers, "Authorization: Bearer test-token") == 0);
    g_get_seen++;
+   if (strcmp(url, "http://127.0.0.1:4010/v1/version") == 0)
+   {
+      if (response_buf)
+         *response_buf = strdup("{\"version\":\"v0.3.0-test\",\"service\":\"aimee-kb\"}");
+      return 200;
+   }
+   assert(strcmp(url, "http://127.0.0.1:4010/v1/health") == 0);
    if (response_buf)
       *response_buf = strdup("{\"status\":\"ok\",\"db2_ok\":true,"
                              "\"db2_kb_tables_ok\":true,\"pgvec_ok\":true,"
@@ -476,6 +482,7 @@ static void test_health_uses_v1_api_when_configured(void)
    kb_health_t health;
    assert(kb_client_health(&health) == 0);
    assert(health.process_ok == 1);
+   assert(strcmp(health.version, "v0.3.0-test") == 0);
    assert(health.db2_ok == 1);
    assert(health.db2_kb_tables_ok == 1);
    assert(health.pgvec_ok == 1);
@@ -495,7 +502,7 @@ static void test_health_uses_v1_api_when_configured(void)
    assert(strstr(health.warnings, "warn-a") != NULL);
    assert(strstr(health.warnings, "warn-b") != NULL);
 
-   assert(g_get_seen == 1);
+   assert(g_get_seen == 2);
    unsetenv("AIMEE_KB_API_URL");
    unsetenv("AIMEE_KB_API_BEARER_TOKEN");
    mock_agent_http_reset();
