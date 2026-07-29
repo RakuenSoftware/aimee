@@ -114,8 +114,57 @@ each, exactly one relevant.
 | no rerank (suite candidate order) | 0.2279 | — | 0 | — |
 | cross-encoder/ettin-reranker-68m (English, disqualified) | 0.2969 | +0.069 | 0.054 | 68M |
 | **BAAI/bge-reranker-v2-m3** | **0.6174** | **+0.390** | **0.120** | 568M |
-| Alibaba-NLP/gte-multilingual-reranker-base | *pending* | | | 306M |
+| **Alibaba-NLP/gte-multilingual-reranker-base** (ONNX) | **0.7178** | **+0.490** | see below | 306M |
+| Alibaba-NLP/gte-multilingual-reranker-base (torch) | *invalid* | | | 306M |
 | BAAI/bge-m3 late interaction | *pending* | | | 568M |
+
+> **The GTE torch path is broken and must not be used.** It returned
+> 0.2279124426038567 — the no-rerank baseline to sixteen decimal places, i.e.
+> constant scores and no reordering. This reproduces the failure already recorded
+> in `EMBEDDER_SELECTION.md` for GTE-derived models: disabling
+> `use_memory_efficient_attention`/`unpad_inputs` makes them run and return
+> garbage. **The ONNX export works correctly** (`degenerate_score_cases: 0`) and
+> is the only trustworthy path for this model.
+>
+> Caught only because reproducing the baseline *exactly* was too perfect to be
+> real. A merely plausible wrong number would have been reported as fact.
+
+### GTE is the best reranker measured — smaller and better
+
+At 20 candidates x 512 tokens, **gte-multilingual (306M) scores 0.7178 against
+bge-v2-m3's 0.6174 (568M)** — better quality from a model 1.9x smaller.
+
+Sample-size caveat, stated rather than buried: GTE was scored on 1,000 cases via
+ONNX on CPU; bge-v2-m3 on 10,000 via torch on GPU. The 0.10 gap is far larger
+than sampling noise at n=1,000, but the two are not perfectly matched runs.
+
+### Candidate count dominates truncation for QUALITY
+
+Measured at near-identical latency on CPU:
+
+| config | NDCG@10 | CPU s/query | fits 1s |
+|---|---:|---:|---|
+| 20 x 512 | **0.7178** | 4.097 | no (GPU only) |
+| **20 x 128** | **0.6116** | **0.731** | **yes** |
+| 10 x 256 | 0.3920 | 0.787 | yes |
+
+**20x128 scores 0.6116; 10x256 scores 0.3920 — a 0.22 collapse for the same
+cost.** The cause is a recall ceiling: with only 10 candidates, a relevant
+document at rank 11-20 is unreachable however good the reranker is.
+
+Combined with the latency curve, the two levers are asymmetric in *both*
+dimensions:
+
+| lever | latency effect | quality effect |
+|---|---|---|
+| truncate documents | **superlinear saving** | mild |
+| trim candidate list | linear saving | **severe** |
+
+> **Design rule: never trim the candidate list to save time. Truncate documents
+> instead.** Keep 20 candidates and cut tokens per document.
+
+**Recommended CPU-tier configuration: gte-multilingual-reranker-base, ONNX int8,
+20 candidates x 128 tokens — 0.6116 NDCG at 0.731s**, inside the 1s budget.
 
 ### Replacing Ettin is a large quality upgrade, not just a compliance fix
 
