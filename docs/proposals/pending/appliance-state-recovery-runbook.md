@@ -1,6 +1,6 @@
 # Proposal: appliance state-recovery runbook
 
-- **State:** pending — single slice, documentation only.
+- **State:** approved — single slice, documentation only.
 - **Author:** JBailes
 - **Charter roles:** Recall (operator orientation), Constrain-Verify (a checklist a human follows under incident pressure).
 
