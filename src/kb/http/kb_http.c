@@ -17,6 +17,7 @@
 #include "kb_http_search.h"
 #include "kb_curator_serve.h"
 #include "kb_service.h"
+#include "kb/kb_service_code_embed.h"
 #include "kb_service_kb.h"
 #include "db2/kb_service_backend.h"
 #include "db2/canonical_index.h"
@@ -1523,6 +1524,32 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"canonical index scan failed\"}");
          return 500;
       }
+
+      /* A thin client pushes source into the canonical index because this KB
+       * process cannot see the client's path.  `kb build` used to stop after the
+       * inaccessible filesystem scan above and report a misleading all-zero
+       * success, leaving the requested project behind the global curator backlog.
+       * Finish this project from its canonical DB2 copy now: code vectors and
+       * prose/document vectors are part of a completed build, not eventual
+       * side-effects of unrelated background sweeps. */
+      kb_code_embed_result_t code_embed;
+      memset(&code_embed, 0, sizeof(code_embed));
+      if (kb_code_embed_refresh(project, "changed_files", NULL, 0, 0, 0, 0, &code_embed) != 0 ||
+          code_embed.embedded + code_embed.skipped_unchanged < code_embed.estimated_points)
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"project code embedding refresh failed\"}");
+         return 503;
+      }
+      int doc_refreshed = kb_doc_refresh(project, embed_cmd, 200);
+      int doc_backfilled = kb_doc_embed_backfill(project, embed_cmd, 200);
+      if (doc_refreshed < 0 || doc_backfilled < 0)
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"project document embedding refresh failed\"}");
+         return 503;
+      }
+      stats.embeddings_added += (int)code_embed.embedded + doc_refreshed + doc_backfilled;
       db2_kb_runtime_state_set_now("last_ingest_at");
       kb_http_write_build_stats(out_buf, out_cap, project, &stats);
       return 200;

@@ -16,6 +16,7 @@
 #include "rel_types.h"              /* REL_TYPE_NAME_MAX for the db2_ontology_* stubs below */
 #include "config_fields.h"          /* config_field_t for the pipeline-console stubs below */
 #include "kb_service.h"
+#include "kb/kb_service_code_embed.h"
 #include "kb_bandit.h"
 #include "kb_service_backend.h"
 #include "kb_enroll.h"
@@ -778,6 +779,14 @@ static char g_kb_build_path[256];
 static char g_kb_build_project[256];
 static char g_kb_build_embed_cmd[64];
 static int g_kb_build_force;
+static int g_code_embed_refresh_rc;
+static int g_code_embed_estimated;
+static int g_code_embed_embedded;
+static int g_code_embed_skipped;
+static char g_code_embed_project[256];
+static int g_doc_refresh_rc;
+static int g_doc_backfill_rc;
+static char g_doc_refresh_project[256];
 static int g_kb_update_rc;
 static char g_kb_update_path[256];
 static char g_kb_update_project[256];
@@ -931,6 +940,40 @@ int kb_build(const char *root_path, const char *project, const char *embedding_c
       stats_out->embeddings_added = 5;
    }
    return g_kb_build_rc;
+}
+
+int kb_code_embed_refresh(const char *project, const char *scope, const char **paths,
+                          int path_count, int batch_size, int max_points, int dry_run,
+                          kb_code_embed_result_t *out)
+{
+   (void)scope;
+   (void)paths;
+   (void)path_count;
+   (void)batch_size;
+   (void)max_points;
+   (void)dry_run;
+   snprintf(g_code_embed_project, sizeof(g_code_embed_project), "%s", project);
+   memset(out, 0, sizeof(*out));
+   out->estimated_points = g_code_embed_estimated;
+   out->embedded = g_code_embed_embedded;
+   out->skipped_unchanged = g_code_embed_skipped;
+   return g_code_embed_refresh_rc;
+}
+
+int kb_doc_refresh(const char *project, const char *embedding_cmd, int max_docs)
+{
+   (void)embedding_cmd;
+   assert(max_docs == 200);
+   snprintf(g_doc_refresh_project, sizeof(g_doc_refresh_project), "%s", project);
+   return g_doc_refresh_rc;
+}
+
+int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int max_chunks)
+{
+   (void)embedding_cmd;
+   assert(max_chunks == 200);
+   assert(strcmp(g_doc_refresh_project, project) == 0);
+   return g_doc_backfill_rc;
 }
 
 int kb_update(const char *root_path, const char *project, const char *embedding_cmd,
@@ -4334,6 +4377,12 @@ static void test_code_build_ok(void)
    g_kb_build_rc = 0;
    g_code_scan_rc = 0;
    g_runtime_state_set_now = 0;
+   g_code_embed_refresh_rc = 0;
+   g_code_embed_estimated = 4;
+   g_code_embed_embedded = 3;
+   g_code_embed_skipped = 1;
+   g_doc_refresh_rc = 2;
+   g_doc_backfill_rc = 1;
    const char *body =
        "{\"path\":\"/tmp/kb\",\"project\":\"proj-alpha\",\"embedding_command\":\"embed-a\","
        "\"force\":true}";
@@ -4346,9 +4395,33 @@ static void test_code_build_ok(void)
    assert(strcmp(g_kb_build_project, "proj-alpha") == 0);
    assert(strcmp(g_kb_build_embed_cmd, "embed-a") == 0);
    assert(g_kb_build_force == 1);
+   assert(strcmp(g_code_embed_project, "proj-alpha") == 0);
+   assert(strcmp(g_doc_refresh_project, "proj-alpha") == 0);
    assert(g_runtime_state_set_now == 1);
    assert(strstr(buf, "\"files_scanned\":9") != NULL);
-   assert(strstr(buf, "\"embeddings_added\":5") != NULL);
+   assert(strstr(buf, "\"embeddings_added\":11") != NULL);
+}
+
+static void test_code_build_rejects_partial_project_embedding(void)
+{
+   char buf[1024];
+   g_db_initialized = 1;
+   g_pgvec_ensure_rc = 0;
+   g_kb_build_rc = 0;
+   g_code_scan_rc = 0;
+   g_code_embed_refresh_rc = 0;
+   g_code_embed_estimated = 4;
+   g_code_embed_embedded = 2;
+   g_code_embed_skipped = 1;
+   const char *body = "{\"path\":\"/client/repo\",\"project\":\"thin-client\"}";
+   int s = kb_http_route_ex("POST", "/v1/code/build", NULL, NULL, NULL, body, (int)strlen(body),
+                            buf, sizeof(buf));
+   assert(s == 503);
+   assert(strstr(buf, "project code embedding refresh failed") != NULL);
+
+   g_code_embed_estimated = 0;
+   g_code_embed_embedded = 0;
+   g_code_embed_skipped = 0;
 }
 
 static void test_code_update_ok(void)
@@ -5518,6 +5591,7 @@ int main(void)
    test_code_scan_pushed_files_rejects_invalid_item();
    test_code_scan_db_unavailable();
    test_code_build_ok();
+   test_code_build_rejects_partial_project_embedding();
    test_code_update_ok();
    test_ingest_enqueue_ok();
    test_ingest_status_ok();
