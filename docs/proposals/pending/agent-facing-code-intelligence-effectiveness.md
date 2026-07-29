@@ -1,6 +1,7 @@
 # Proposal: Agent-facing code intelligence effectiveness
 
-- **State:** ACCEPTED DESIGN — roundtable approved; proposal PR/merge gate pending
+- **State:** IN PROGRESS — accepted design; E0 complete; local-first amendment roundtable-approved
+  and PR pending (file remains pending until E1–E6 close)
 - **Author:** JBailes
 - **Date:** 2026-07-29
 - **Charter roles:** Recall, Rank-Fuse, Calibrate / Evaluate-Optimize, Enforce, Gate-Promote
@@ -17,16 +18,17 @@ Aimee already indexes symbols, calls, imports, embeddings, and memories. The mis
 another index. It is the path from a current coding task to a precise, current-project result that an
 agent can discover and use cheaply.
 
-We will make that path effective through six bounded changes:
+We will make that path effective through seven bounded changes:
 
 1. publish a truthful, searchable MCP surface for the capabilities installed guidance names;
-2. resolve every code query to one explicit project identity, with lifecycle controls for stale
+2. make the active project the protected head of every mixed-scope code and memory result set;
+3. resolve every code query to one explicit project identity, with lifecycle controls for stale
    generations;
-3. repair dependency and blast-radius matching across path and language import forms;
-4. add bounded task-conditioned code retrieval with confidence-based abstention to session/turn
+4. repair dependency and blast-radius matching across path and language import forms;
+5. add bounded task-conditioned code retrieval with confidence-based abstention to session/turn
    context assembly;
-5. make KB unavailability observable and recoverable without fabricating useful retrieval; and
-6. gate rollout on an attribution-safe benchmark that separates availability, tool adoption,
+6. make KB unavailability observable and recoverable without fabricating useful retrieval; and
+7. gate rollout on an attribution-safe benchmark that separates availability, tool adoption,
    retrieval quality, task quality, and total cost.
 
 The proposal does **not** claim that embeddings are ineffective. The measured failure is that the
@@ -143,17 +145,21 @@ We will keep readiness as an availability gate, but it cannot be the capability 
    authoritative for file contents and edits.
 2. **Scope is explicit.** Omitted project means the active workspace project, not every project.
    `scope: all` is an explicit opt-in and is labeled cross-project in output.
-3. **No false empty.** Unavailable, unauthorized, stale, abstained, and genuinely empty are distinct
+3. **Local results own the head.** Every ordered, mixed-scope code or memory result surface ranks
+   active-project evidence before active-workspace evidence, shared/global evidence, and explicitly
+   requested other-project evidence. Relevance orders results within each scope bucket. Broadening
+   scope may extend the tail but may not displace the local head before a result or token limit.
+4. **No false empty.** Unavailable, unauthorized, stale, abstained, and genuinely empty are distinct
    machine-readable outcomes.
-4. **No noisy fallback.** A failed project-scoped code lookup must not silently fall back to global
+5. **No noisy fallback.** A failed project-scoped code lookup must not silently fall back to global
    episodic memory.
-5. **Bounded injection.** Task-conditioned context has a token/result cap, provenance, freshness,
+6. **Bounded injection.** Task-conditioned context has a token/result cap, provenance, freshness,
    confidence, and an off switch. A low-confidence result injects nothing.
-6. **Fail open for coding, fail closed for claims.** KB failure cannot prevent local inspection and
+7. **Fail open for coding, fail closed for claims.** KB failure cannot prevent local inspection and
    editing, but the agent and benchmark may not report an Aimee-assisted success for that turn.
-7. **Lifecycle is recoverable.** Unregister, detach, tombstone, purge, and rescan are distinct. Purge
+8. **Lifecycle is recoverable.** Unregister, detach, tombstone, purge, and rescan are distinct. Purge
    requires an explicit target and confirmation/authority.
-8. **Tool names do not drift.** Generated help, MCP registry, discovery aliases, plugin prompt, and
+9. **Tool names do not drift.** Generated help, MCP registry, discovery aliases, plugin prompt, and
    installed skill derive from one capability descriptor or fail a generation check.
 
 Threats and failures include stale checkout namespaces, basename collisions, poisoned or unrelated
@@ -194,6 +200,34 @@ For the first slice:
 - expose project-scoped `find_symbol` and callers inputs; and
 - replace installed references to nonexistent `search_graph` with the canonical hybrid/context tool
   name, while retaining any compatibility alias that existing clients require.
+
+### 4.1a One local-first return policy for code and memory
+
+The request boundary resolves the active project and workspace once and propagates that context to
+the KB. Every ordered result-bearing surface consumes the same scope policy:
+
+1. active project;
+2. active workspace;
+3. shared or global;
+4. other projects only after an explicit `scope:"all"` request.
+
+This order applies to code symbol/search/caller results and to all memory retrieval surfaces,
+including fact search, answer evidence and citations, graph search and entity edges, episode search,
+recall/context assembly, and briefing sections. Relevance, freshness, and confidence continue to
+order candidates within a scope bucket. Exact-ID, exact-key, and explicit exact-scope retrieval are
+not mixed-scope rankings and therefore retain their direct semantics.
+
+Scope must constrain candidate selection before a per-request `LIMIT`, result cap, rerank cutoff, or
+token budget can exclude active-project evidence. Implementations may query scope buckets separately
+and merge them, or push a scope-rank expression into the backing query, but sorting a bounded global
+candidate pool after retrieval does not satisfy this contract. An explicit broader scope extends the
+tail; it never turns the local bucket into an ordinary relevance competitor.
+
+When active context cannot be resolved, code queries return `scope_required`. Memory queries may
+return shared/global evidence only when the response labels the missing active context; they may not
+silently expose another project's memory. The existing canonical memory visibility rank becomes the
+shared policy primitive, and each transport must carry request-local identity rather than derive it
+from the KB service process's working directory.
 
 ### 4.2 Stable project identity and lifecycle
 
@@ -380,6 +414,7 @@ the unmerged proposal branch.
 | --- | --- | --- |
 | E0 — reproducible red baselines | QA; no code dependency | checked-in fixtures for discovery mismatch, project duplicates, Python blast radius, irrelevant-memory abstention, and KB outage status |
 | E1 — truthful capability catalog | MCP/client integrations | direct/discoverable tools, project-aware schemas, generated guidance parity check, compatibility aliases |
+| E1-memory — local-first memory returns | MCP/server + memory retrieval; depends on E1 | request-local project/workspace propagation and protected local-first ordering for every ordered memory surface, with explicit-scope compatibility |
 | E2 — current-project identity | workspace + DB2 ingest; coordinates with content-push deltas | stable identity mapping, session inference, explicit all-project scope, duplicate suppression, detach/purge/gc contract |
 | E3 — graph resolution repair | DB2 code index/extractors; depends on E2 | normalized Python imports, dependency/caller merge, provenance/freshness, corpus regression |
 | E4 — task-conditioned retrieval | ingress + hybrid ranker + abstention; depends on E1/E2 | off/observe/on packet, no-answer path, bounded telemetry and automatic suppression |
@@ -401,6 +436,8 @@ E4 cannot default to `on` until E6 passes; code may ship in `observe`.
 - {id: 1, tier: mechanical, check: "generated integration test proves every tool name in installed Codex/Claude guidance is either directly listed or discoverable by those exact words, and its documented schema matches describe_tool"}
 - {id: 1a, tier: integration, check: "through the installed agent-facing MCP surface, discover blast radius using the documented words, invoke the returned canonical tool with active-project defaults, and receive the expected project-scoped preview"}
 - {id: 2, tier: mechanical, check: "find_symbol/callers/blast preview default to the active project; a fixture with 20 stale duplicate namespaces returns one current result, while scope=all returns labeled cross-project results"}
+- {id: 2a, tier: integration, check: "for fact search, answer evidence/citations, graph/entity/episode search, recall/context assembly, and briefings, more than one limit of equally relevant global or other-project candidates cannot crowd out active-project memory; returned mixed scopes are ordered project, workspace, shared/global, then explicit-all other projects"}
+- {id: 2b, tier: mechanical, check: "every agent-facing ordered memory route propagates request-local project/workspace context to the shared visibility policy; exact-ID/key and explicit exact-scope routes preserve direct compatibility semantics"}
 - {id: 3, tier: integration, check: "workspace move/re-add preserves stable project identity; unregister preserves data; detach hides it from current queries; purge dry-run names exact rows and explicit purge removes only that project"}
 - {id: 3a, tier: integration, check: "purge and mutating GC are refused when action audit cannot commit; success records principal, stable project, generation, timestamp, reason, target-manifest hash, and affected counts"}
 - {id: 4, tier: integration, check: "stock baseline returns no dependents for app/dates.py; fixed Python fixture returns billing.py, invoices.py, and reports.py with import provenance, plus its direct dependencies, with zero substring-collision false edges"}
@@ -459,3 +496,25 @@ residual proposal instead of declaring the intended effectiveness outcome comple
 - **Proposal PR / accepted implementation scope:** PR #2147 merged to `testing` as
   `5cdb681621c22938f6e7372ecc709e623408551e` after all 23 CI checks passed. The accepted scope is
   E0–E6 exactly as listed in §6; E0 branches first from that merge commit.
+- **E0 red-baseline slice:** PR #2148 merged to `testing` as
+  `352b4682205800ed41714ce7bdd53b4f081f81db` after all 24 CI checks passed. It preserves the five
+  untreated failure classes and checksummed representative evidence consumed by E1–E6.
+- **Local-first amendment round 1 — 2026-07-29 — changes requested, 3/3 participants, not
+  degraded.** The panel raised four blocking process/alignment findings because the proposal-only
+  artifact was reviewed against the full multi-PR implementation request. The policy itself received
+  no blocking technical finding. The ruling accepts the useful sequencing correction: this
+  amendment is the proposal gate required by §6, so its next review is explicitly scoped to that
+  gate; the dependent E1/E1-memory implementation receives a separate frozen-diff roundtable before
+  its
+  PR. The state line now also explains that `pending/` tracks incomplete E1–E6 delivery rather than
+  unaccepted base design. Roundtable run: `oprun_g6a69bd8011459d99_1785336494_91`.
+- **Local-first amendment round 2 — 2026-07-29 — APPROVED, 3/3 participants, not degraded.** The
+  panel approved the local-first scope hierarchy, pre-limit protection, compatibility boundary, and
+  acceptance gates with no blocking findings. Its sole suggestion was to make the memory-slice
+  suffix self-explanatory; `E1m` is renamed `E1-memory`, and the exact resulting diff is reconvened
+  before commit. Roundtable run: `oprun_g6a69bd8011459d99_1785336702_92`.
+- **Local-first amendment round 3 — 2026-07-29 — APPROVED and converged, 2/3 participants used,
+  degraded.** The final policy diff received no findings. One provider seat failed, but the chairman
+  and remaining seat completed and approved the artifact. Roundtable run:
+  `oprun_g6a69bd8011459d99_1785336851_93` (artifact
+  `c4b68b07f28c23817533b1c66a41bac88ea60c7b79c2181090babc184f728351`).
