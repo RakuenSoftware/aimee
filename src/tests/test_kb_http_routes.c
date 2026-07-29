@@ -2911,6 +2911,9 @@ static void test_mtls_listener(void)
    kb_tls_client_conn_t *session_one =
        kb_tls_client_conn_open_ctx("localhost", port, shared_client_ctx);
    assert(session_one);
+   assert(kb_tls_client_conn_set_timeout(NULL, 600000) == -1);
+   assert(kb_tls_client_conn_set_timeout(session_one, 0) == -1);
+   assert(kb_tls_client_conn_set_timeout(session_one, 600000) == 0);
    assert(kb_tls_client_conn_request(session_one, "GET", "/v1/health", NULL, NULL, 0, rbody,
                                      sizeof(rbody), &st, &reusable) == 0);
    assert(reusable == 1);
@@ -2993,7 +2996,7 @@ static void test_mtls_listener(void)
       setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "0", 1);
       assert(kb_client_mtls_configured() == 1);
       int st2 = -1;
-      char *r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      char *r = kb_client_mtls_request_timeout("GET", "/v1/health", NULL, 600000, &st2);
       assert(st2 == 200);
       assert(r && strstr(r, "\"status\":\"ok\""));
       free(r);
@@ -3025,7 +3028,7 @@ static void test_mtls_listener(void)
 
       /* The hot rollout flag opts this identity into reuse without a restart. */
       setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "1", 1);
-      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      r = kb_client_mtls_request_timeout("GET", "/v1/health", NULL, 600000, &st2);
       assert(st2 == 200 && r);
       free(r);
       g_test_registry_heartbeat_allow = 1;

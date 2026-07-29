@@ -112,6 +112,10 @@ extern "C"
    kb_tls_client_conn_t *kb_tls_client_conn_open_ctx(const char *host, int port, SSL_CTX *ctx);
    kb_tls_client_conn_t *kb_tls_client_conn_open_session(const char *host, int port, SSL_CTX *ctx,
                                                          SSL_SESSION *session);
+   /* Set the per-request socket I/O timeout on an open client connection. The
+    * default remains 30 seconds for callers that do not opt in; long-running
+    * relays (for example kb.build) must propagate their operation timeout. */
+   int kb_tls_client_conn_set_timeout(kb_tls_client_conn_t *conn, int timeout_ms);
    int kb_tls_client_conn_session_reused(const kb_tls_client_conn_t *conn);
    SSL_SESSION *kb_tls_client_conn_get1_session(const kb_tls_client_conn_t *conn);
    int kb_tls_client_conn_request(kb_tls_client_conn_t *conn, const char *method, const char *path,
