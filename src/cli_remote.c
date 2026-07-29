@@ -355,6 +355,18 @@ static int remote_health_ok(void)
    return ok;
 }
 
+/* A TLS peer can be reachable and verified while still rejecting the supplied
+ * bearer.  `remote set` is the quickstart's pairing command, so accepting a 401
+ * here creates a false-success setup that fails on the very next command. */
+static int remote_authorized_ok(void)
+{
+   int st = 0;
+   char *body = aimee_client_request("GET", "/v1/health", NULL, &st);
+   int ok = (body != NULL && st >= 200 && st < 400);
+   free(body);
+   return ok;
+}
+
 /* Trust-on-first-use pin: fetch |url|'s leaf cert (no verification), write it to
  * <aimee_home>/remote-ca.pem, and report its SHA-256 fingerprint so the operator
  * can confirm it out-of-band. aimee_tls_connect then verifies against it (chain +
@@ -554,6 +566,19 @@ static int remote_set(const char *url, const char *token, int json_output)
    }
    else if (verified && token && token[0] && remote_enroll_client_cert(json_output) == 0)
       mtls_enrolled = 1;
+
+   /* Trust establishment proves only that we reached the intended TLS peer.
+    * When the caller supplied a credential, also prove that the resulting
+    * bearer/certificate combination is authorized before reporting success.
+    * This still permits platforms without automatic mTLS enrollment while the
+    * server is optional-mTLS: a valid bearer makes the probe succeed. */
+   if (verified && token && token[0] && !remote_authorized_ok())
+   {
+      remote_set_failed = 1;
+      if (!json_output)
+         fprintf(stderr, "  auth: the server rejected the supplied credential; remote setup is not "
+                         "complete\n");
+   }
 
    if (json_output)
       printf("{\"ok\":%s,\"url\":\"%s\",\"token\":%s,\"pinned\":%s,\"verified\":%s,"

@@ -98,6 +98,27 @@ curl --silent --show-error --cacert "$e2e_tmp/server/tls/server.crt" \
   >"$e2e_tmp/bearer-write.status"
 [[ $(<"$e2e_tmp/bearer-write.status") == 403 ]]
 
+# Reaching and pinning the right TLS peer is not a successful setup when that
+# peer rejects the supplied credential. The command used to exit zero here and
+# leave `remote status` to reveal the 401 on the next invocation.
+mkdir -p "$e2e_tmp/invalid-client"
+set +e
+AIMEE_HOME="$e2e_tmp/invalid-client" AIMEE_NO_CLIENT_INTEGRATIONS=1 \
+  "$client_bin" --json remote set "https://127.0.0.1:$e2e_tls_port" invalid-bearer \
+  >"$e2e_tmp/invalid-remote-set.json"
+e2e_invalid_remote_rc=$?
+set -e
+[[ $e2e_invalid_remote_rc -ne 0 ]]
+python3 - "$e2e_tmp/invalid-remote-set.json" <<'PY'
+import json
+import pathlib
+import sys
+
+result = json.loads(pathlib.Path(sys.argv[1]).read_text())
+assert result["ok"] is False and result["verified"] is True
+assert result["mtls_enrolled"] is False
+PY
+
 AIMEE_HOME="$e2e_tmp/client" AIMEE_NO_CLIENT_INTEGRATIONS=1 \
   "$client_bin" --json remote set "https://127.0.0.1:$e2e_tls_port" "$e2e_bearer" \
   >"$e2e_tmp/remote-set.json"
