@@ -8,7 +8,6 @@
 
 #include <errno.h>
 #include <stdarg.h>
-#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,10 +30,8 @@ int wfe_roundtable_proxy(server_conn_t *conn, const cJSON *request)
 #include <sys/un.h>
 #include <unistd.h>
 
-#define GO_ROUNDTABLE_DEFAULT_DEADLINE_MS 600000
-#define GO_ROUNDTABLE_TRANSPORT_GRACE_MS  30000
-#define GO_ROUNDTABLE_SEND_TIMEOUT_SECS   30
-#define GO_ROUNDTABLE_MAX_RESPONSE        (16u * 1024u * 1024u)
+#define GO_ROUNDTABLE_SEND_TIMEOUT_SECS 30
+#define GO_ROUNDTABLE_MAX_RESPONSE      (16u * 1024u * 1024u)
 
 static int write_all(int fd, const char *data, size_t size)
 {
@@ -89,21 +86,33 @@ static char *decode_chunked(const char *body)
    return out;
 }
 
-static int roundtable_receive_timeout_ms(const cJSON *request)
+typedef struct
 {
+   int receive_timeout_ms;
+   char resolved[RT_PRESET_NAME_MAX];
+} roundtable_proxy_runtime_t;
+
+static roundtable_proxy_runtime_t roundtable_proxy_runtime(const cJSON *request)
+{
+   roundtable_proxy_runtime_t runtime = {
+       .receive_timeout_ms = wfe_roundtable_transport_timeout_ms(0, 0), .resolved = ""};
    config_t cfg;
-   int deadline_ms = GO_ROUNDTABLE_DEFAULT_DEADLINE_MS;
    if (config_load(&cfg) == 0)
    {
       cJSON *preset = cJSON_GetObjectItemCaseSensitive(request, "roundtable");
       const char *requested = cJSON_IsString(preset) ? preset->valuestring : NULL;
-      if (roundtable_preset_resolve_runtime(requested, &cfg, NULL, 0, NULL, 0) >= 0 &&
-          cfg.roundtable_deadline_ms > 0)
-         deadline_ms = cfg.roundtable_deadline_ms;
+      if (roundtable_preset_resolve_runtime(requested, &cfg, runtime.resolved,
+                                            sizeof(runtime.resolved), NULL, 0) > 0)
+      {
+         roundtable_preset_t acquired;
+         int chairman_enabled = roundtable_preset_load(runtime.resolved, &acquired) == 0
+                                    ? acquired.chairman_enabled
+                                    : 0;
+         runtime.receive_timeout_ms =
+             wfe_roundtable_transport_timeout_ms(cfg.roundtable_deadline_ms, chairman_enabled);
+      }
    }
-   if (deadline_ms > INT_MAX - GO_ROUNDTABLE_TRANSPORT_GRACE_MS)
-      return INT_MAX;
-   return deadline_ms + GO_ROUNDTABLE_TRANSPORT_GRACE_MS;
+   return runtime;
 }
 
 /* Report WHY the Go roundtable call produced no body. Every failure below used to
@@ -269,6 +278,7 @@ static char *post_go_roundtable(const char *body, int receive_timeout_ms, int *s
 
 int wfe_roundtable_proxy(server_conn_t *conn, const cJSON *request)
 {
+   roundtable_proxy_runtime_t runtime = roundtable_proxy_runtime(request);
    cJSON *payload = cJSON_CreateObject();
    cJSON *artifact = cJSON_GetObjectItemCaseSensitive(request, "artifact");
    cJSON *prompt = cJSON_GetObjectItemCaseSensitive(request, "prompt");
@@ -305,6 +315,11 @@ int wfe_roundtable_proxy(server_conn_t *conn, const cJSON *request)
    }
    if (cJSON_IsString(preset))
       cJSON_AddStringToObject(payload, "roundtable", preset->valuestring);
+   else if (runtime.resolved[0])
+      /* The Go store deliberately requires a named saved panel. Resolve the C
+       * configured/literal default once and forward that authority explicitly;
+       * otherwise the MCP schema's documented default can never reach Go. */
+      cJSON_AddStringToObject(payload, "roundtable", runtime.resolved);
    /* __run_id owns the asynchronous transport job. A caller-supplied run_id is
     * the review identity and must survive that transport wrapper unchanged. */
    if (cJSON_IsString(requested_run_id) && requested_run_id->valuestring[0])
@@ -322,8 +337,8 @@ int wfe_roundtable_proxy(server_conn_t *conn, const cJSON *request)
       return server_send_error(conn, "out of memory", NULL);
    int status = 0;
    char reason[320] = "";
-   char *body = post_go_roundtable(wire, roundtable_receive_timeout_ms(request), &status, reason,
-                                   sizeof(reason));
+   char *body =
+       post_go_roundtable(wire, runtime.receive_timeout_ms, &status, reason, sizeof(reason));
    free(wire);
    if (!body)
    {
