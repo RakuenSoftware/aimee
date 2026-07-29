@@ -236,8 +236,9 @@ COPY deploy/container/aimee-managed.compose.yaml /opt/aimee/deploy/aimee-managed
 
 ENV AIMEE_HOME=/var/lib/aimee
 # On-demand-installed OAuth CLI agents (claude-code / codex) global-install here,
-# on the persistent home volume, so the CLI binaries survive container recreate
-# (their OAuth tokens live under $AIMEE_HOME too: ~/.claude, ~/.codex).
+# on the persistent home volume, so the non-secret CLI binaries survive container
+# recreate. OAuth credentials live only in Vault; per-session compatibility files
+# are materialized beneath /run and removed with the session.
 ENV NPM_CONFIG_PREFIX=/var/lib/aimee/.npm-global
 ENV PATH=/var/lib/aimee/.npm-global/bin:/usr/local/go/bin:$PATH
 # A host can verify several workflow branches simultaneously. Bound each
