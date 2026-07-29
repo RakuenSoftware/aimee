@@ -1908,7 +1908,9 @@ static void test_roundtable_deadline_returns_best_so_far(void)
    memset(&opts, 0, sizeof(opts));
    opts.mode = ROUNDTABLE_DRAFT;
    opts.turns = ROUNDTABLE_PARALLEL;
-   opts.max_rounds = 3;
+   /* One round exercises the post-panel deadline capture: there is no next
+    * loop-top check to set deadline_hit for us. */
+   opts.max_rounds = 1;
    opts.deadline_ms = 1;
    roundtable_result_t result;
    int rc = delegate_roundtable_run(&acfg, &cfg, "draft until deadline", &opts, &result);
