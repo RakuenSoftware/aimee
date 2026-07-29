@@ -77,3 +77,7 @@ Fix the named condition, then use the offered action. Do not restart a new run m
 evidence from the first one.
 
 See [Workflows](WORKFLOWS.md) and [Autonomous development](AUTONOMOUS_DEVELOPMENT.md).
+
+## Automatic proposal admission
+
+The autonomous pending-proposal watcher decides when a pending proposal becomes eligible for a new run. For the authoritative behavior contract, see [Automatic proposal admission](wfe-autonomy-runbook.md#automatic-proposal-admission).
