@@ -352,7 +352,7 @@ func (r *NativeRunner) structured(ctx context.Context, req StepRequest, kind str
 		if source == "" {
 			return StepResult{}, errors.New("split requires an in.plan or in.intent artifact binding")
 		}
-		prompt = "Decompose the complete approved plan below. Return only JSON shaped {\"schema_version\":1,\"packets\":[{\"packet_id\":\"p1\",\"summary\":\"...\",\"target_blocks\":[\"implement\"],\"dependencies\":[],\"acceptance_criteria\":[\"...\"]}]}. Do not omit work or truncate content.\n\nPLAN:\n" + source
+		prompt = "Decompose the complete approved plan below. Return only JSON shaped {\"schema_version\":1,\"packets\":[{\"packet_id\":\"p1\",\"summary\":\"...\",\"target_blocks\":[\"implement\"],\"dependencies\":[],\"acceptance_criteria\":[\"...\"]}]}. Each summary becomes a pull request title: make it a concise reviewer-facing outcome that says what changes, not a process instruction such as inspect, only if necessary, or minimally update. Do not omit work or truncate content.\n\nPLAN:\n" + source
 		if req.Feedback != nil {
 			encoded, _ := json.Marshal(req.Feedback)
 			prompt += "\n\nACCEPTANCE FEEDBACK THAT THE NEW PACKETS MUST RESOLVE:\n" + string(encoded)
