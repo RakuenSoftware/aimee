@@ -1,6 +1,6 @@
 # Proposal: slices that each create the same file cannot merge after the first one lands
 
-- **State:** pending — single slice.
+- **State:** approved — single slice.
 
 ## Symptom
 
