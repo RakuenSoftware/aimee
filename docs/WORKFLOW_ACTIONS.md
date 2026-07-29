@@ -77,3 +77,7 @@ Fix the named condition, then use the offered action. Do not restart a new run m
 evidence from the first one.
 
 See [Workflows](WORKFLOWS.md) and [Autonomous development](AUTONOMOUS_DEVELOPMENT.md).
+
+## Automatic proposal admission
+
+The rules that govern when a pending proposal becomes eligible for a new autonomous run are defined in [Automatic proposal admission](wfe-autonomy-runbook.md#automatic-proposal-admission) in the autonomy runbook; refer there for the authoritative contract.
