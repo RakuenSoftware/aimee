@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "origin": {
+    "path": "/tmp/ptcodex/raw/aimee__t50_toposort__r1.jsonl",
+    "sha256": "277ad99445419c3511bad01fa015876b0d87f967d28dd875130d058de9e1523b",
+    "items": [
+      "item_7",
+      "item_14"
+    ]
+  },
+  "find_symbol": {
+    "arguments": {
+      "identifier": "install_order"
+    },
+    "status": "completed",
+    "matches": [
+      {
+        "file_path": "app/graph.py",
+        "line": 16,
+        "kind": "definition",
+        "project": "codex-t03-model-migration-r1-dbcb04e8"
+      },
+      {
+        "file_path": "app/graph.py",
+        "line": 16,
+        "kind": "definition",
+        "project": "codex-t09-root-cause-r1"
+      },
+      {
+        "file_path": "app/graph.py",
+        "line": 16,
+        "kind": "definition",
+        "project": "codex-t50-toposort-r1-31301348"
+      },
+      {
+        "file_path": "app/graph.py",
+        "line": 16,
+        "kind": "definition",
+        "project": "codex-t50-toposort-r1-ec3ead31"
+      },
+      {
+        "file_path": "app/graph.py",
+        "line": 16,
+        "kind": "definition",
+        "project": "fixture"
+      },
+      {
+        "file_path": "app/graph.py",
+        "line": 16,
+        "kind": "definition",
+        "project": "source"
+      }
+    ]
+  },
+  "find_tools": {
+    "arguments": {
+      "query": "blast radius",
+      "limit": 10
+    },
+    "status": "completed",
+    "result": {
+      "tools": [],
+      "count": 0,
+      "total": 0
+    }
+  }
+}
