@@ -38,6 +38,7 @@
 #include "server_mgmt_jwks_cache.h"
 #include "server_management_jti.h"
 #include "server_mgmt_audit.h"
+#include "server_runtime_identity.h"
 #include "kb_client_mtls.h"
 #include "server_workflow_api.h" /* W7: /v1/workflow read+author handlers */
 #include "wfe_http_proxy.h"      /* public workflow routes -> private Go control plane */
@@ -258,6 +259,11 @@ static int management_apply(void *ctx, const server_mgmt_action_t *a)
               : 1;
 }
 
+static const char *management_server_id(char out[128])
+{
+   return server_runtime_server_id_load(out, 128) ? out : NULL;
+}
+
 static int rh_management_action(const route_req_t *rq, char *resp, int cap)
 {
    if (server_http_management_action_begin() != 0)
@@ -266,7 +272,8 @@ static int rh_management_action(const route_req_t *rq, char *resp, int cap)
       return 500;
    }
    const server_tls_peer_cert_t *peer = server_http_identity_peer_cert();
-   const char *target = getenv("AIMEE_SERVER_ID");
+   char target_buf[128];
+   const char *target = management_server_id(target_buf);
    const char *issuer = getenv("AIMEE_SERVER_MGMT_ISSUER");
    const char *local_fp = server_http_identity_local_fingerprint();
    const char *jwt = server_http_identity_bearer();
@@ -354,7 +361,8 @@ static int rh_management_challenge_purpose(const route_req_t *rq, char *resp, in
 {
    (void)rq;
    const server_tls_peer_cert_t *peer = server_http_identity_peer_cert();
-   const char *target = getenv("AIMEE_SERVER_ID");
+   char target_buf[128];
+   const char *target = management_server_id(target_buf);
    if (!peer || !peer->management_profile || strcmp(peer->cn, "p5-kb-management") != 0)
       return err_json(resp, cap, 401, "management client certificate required");
    if (!target || !target[0])
@@ -419,7 +427,8 @@ static int rh_management_health(const route_req_t *rq, char *resp, int cap)
 {
    (void)rq;
    const server_tls_peer_cert_t *peer = server_http_identity_peer_cert();
-   const char *target = getenv("AIMEE_SERVER_ID");
+   char target_buf[128];
+   const char *target = management_server_id(target_buf);
    const char *key_id = getenv("AIMEE_MGMT_STATUS_KEY_ID");
    const char *key_hex = getenv("AIMEE_MGMT_STATUS_PUBLIC_KEY");
    const char *local_fp = server_http_identity_local_fingerprint();

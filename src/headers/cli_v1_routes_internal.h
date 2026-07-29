@@ -19,6 +19,7 @@ typedef struct
 } rpc_opts_t;
 int cli_v1_args_request_json(int argc, char **argv);
 void __attribute__((unused)) cli_v1_sleep_ms(int ms);
+const char *cli_v1_run_failure_reason(cJSON *result, cJSON *snapshot);
 int git_verify_response_is_failure(cJSON *resp);
 double json_double(cJSON *obj, const char *key, double def);
 int json_int(cJSON *obj, const char *key, int def);

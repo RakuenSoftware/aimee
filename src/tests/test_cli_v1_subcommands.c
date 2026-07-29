@@ -157,6 +157,22 @@ static void test_kb_status_reports_backlog_and_degradation(void)
    printf("  kb status surfaces backlog, failures, and degraded verdict\n");
 }
 
+/* Async dispatch preserves an ordinary handler error under run.result. The CLI
+ * must surface that useful cause instead of replacing it with the generic
+ * "run failed with no result". */
+static void test_run_failure_reports_dispatch_message(void)
+{
+   cJSON *result =
+       cJSON_Parse("{\"status\":\"error\",\"message\":\"knowledge service unavailable\"}");
+   cJSON *snapshot = cJSON_Parse("{\"status\":\"failed\"}");
+   assert(result && snapshot);
+   assert(strcmp(cli_v1_run_failure_reason(result, snapshot), "knowledge service unavailable") ==
+          0);
+   cJSON_Delete(result);
+   cJSON_Delete(snapshot);
+   printf("  async run preserves dispatch error message\n");
+}
+
 int main(void)
 {
    printf("test_cli_v1_subcommands\n");
@@ -166,6 +182,7 @@ int main(void)
    test_small_buffer_does_not_overflow();
    test_bare_and_matchany_rows_excluded();
    test_kb_status_reports_backlog_and_degradation();
+   test_run_failure_reports_dispatch_message();
    printf("test_cli_v1_subcommands: all passed\n");
    return 0;
 }

@@ -1018,6 +1018,52 @@ static cJSON *cli_v1_send(const char *remote, const char *bearer, const char *ve
    return resp;
 }
 
+/* Extract the most specific cause carried by a terminal failed op-run. The
+ * returned pointer is owned by result/snapshot and remains valid until those
+ * objects are deleted. Kept separate so every error-envelope shape has a small
+ * regression-testable contract. */
+const char *cli_v1_run_failure_reason(cJSON *result, cJSON *snapshot)
+{
+   if (result)
+   {
+      cJSON *error = cJSON_GetObjectItemCaseSensitive(result, "error");
+      if (cJSON_IsString(error) && error->valuestring[0])
+         return error->valuestring;
+      if (cJSON_IsObject(error))
+      {
+         cJSON *message = cJSON_GetObjectItemCaseSensitive(error, "message");
+         if (cJSON_IsString(message) && message->valuestring[0])
+            return message->valuestring;
+      }
+
+      /* Dispatch handlers commonly return the ordinary error envelope
+       * {"status":"error","message":"..."}. The op-run worker correctly
+       * marks that as failed, so preserve the handler's useful cause. */
+      cJSON *result_status = cJSON_GetObjectItemCaseSensitive(result, "status");
+      cJSON *result_message = cJSON_GetObjectItemCaseSensitive(result, "message");
+      if (cJSON_IsString(result_status) && strcmp(result_status->valuestring, "error") == 0 &&
+          cJSON_IsString(result_message) && result_message->valuestring[0])
+         return result_message->valuestring;
+   }
+
+   if (snapshot)
+   {
+      cJSON *error = cJSON_GetObjectItemCaseSensitive(snapshot, "error");
+      if (cJSON_IsString(error) && error->valuestring[0])
+         return error->valuestring;
+      if (cJSON_IsObject(error))
+      {
+         cJSON *message = cJSON_GetObjectItemCaseSensitive(error, "message");
+         if (cJSON_IsString(message) && message->valuestring[0])
+            return message->valuestring;
+      }
+      cJSON *message = cJSON_GetObjectItemCaseSensitive(snapshot, "message");
+      if (cJSON_IsString(message) && message->valuestring[0])
+         return message->valuestring;
+   }
+   return NULL;
+}
+
 /* cli_v1_run_and_poll: POST an async (rh_dispatch_op_async) route, then poll
  * GET /v1/runs/{id} until the run is terminal and return its `result` — the raw
  * dispatch payload, matching the synchronous dispatch response shape, so the
@@ -1076,36 +1122,9 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
              * with exit status 0 when the run had actually failed, hiding the failure
              * from humans and scripts alike. Surface it as an error envelope instead,
              * carrying whatever the run recorded. */
-            const char *why = NULL;
             /* A failed run usually carries its reason inside `result` (e.g.
              * {"result":{"error":"rpc produced no response"}}), so look there first. */
-            if (result)
-            {
-               cJSON *re = cJSON_GetObjectItemCaseSensitive(result, "error");
-               if (cJSON_IsString(re) && re->valuestring[0])
-                  why = re->valuestring;
-               else if (cJSON_IsObject(re))
-               {
-                  cJSON *rm = cJSON_GetObjectItemCaseSensitive(re, "message");
-                  if (cJSON_IsString(rm) && rm->valuestring[0])
-                     why = rm->valuestring;
-               }
-            }
-            cJSON *e = why ? NULL : cJSON_GetObjectItemCaseSensitive(snap, "error");
-            if (cJSON_IsString(e) && e->valuestring[0])
-               why = e->valuestring;
-            else if (cJSON_IsObject(e))
-            {
-               cJSON *m = cJSON_GetObjectItemCaseSensitive(e, "message");
-               if (cJSON_IsString(m) && m->valuestring[0])
-                  why = m->valuestring;
-            }
-            if (!why)
-            {
-               cJSON *m = cJSON_GetObjectItemCaseSensitive(snap, "message");
-               if (cJSON_IsString(m) && m->valuestring[0])
-                  why = m->valuestring;
-            }
+            const char *why = cli_v1_run_failure_reason(result, snap);
             char msg[320];
             if (why)
                snprintf(msg, sizeof(msg), "%s", why);
@@ -1147,6 +1166,48 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
  * only, so these helpers are no-ops on Windows (the reverse-channel serve path
  * still works there; client-push indexing does not). */
 #if defined(AIMEE_POSIX)
+
+/* Keep the thin-client push path aligned with the local/canonical scanners.
+ * Hidden-root projects are deliberately excluded from index reads and startup
+ * cleanup so temporary .aimee/.claude worktrees cannot pollute the shared code
+ * graph.  Accepting one here used to report a successful upload whose symbols
+ * were immediately invisible to list/find/callers. */
+static int cli_ws_root_has_hidden_component(const char *path)
+{
+   if (!path)
+      return 0;
+   const char *p = path;
+   while (*p == '/')
+      p++;
+   const char *start = p;
+   for (;;)
+   {
+      if (*p == '/' || *p == '\0')
+      {
+         if (p > start && start[0] == '.')
+            return 1;
+         if (*p == '\0')
+            return 0;
+         start = ++p;
+      }
+      else
+      {
+         p++;
+      }
+   }
+}
+
+static int cli_ws_reject_hidden_root(const char *abs_root)
+{
+   if (!cli_ws_root_has_hidden_component(abs_root))
+      return 0;
+   fprintf(stderr,
+           "aimee: refusing to index hidden root: %s\n"
+           "  Index the non-hidden canonical checkout instead. Temporary .aimee/.claude\n"
+           "  worktrees are intentionally excluded from the shared code index.\n",
+           abs_root);
+   return 1;
+}
 
 /* Pull the human-readable message out of an {"error":...} envelope (object or
  * string form); returns NULL when there is no error. */
@@ -1348,6 +1409,8 @@ static void ws_tree_ingest_cb(const char *repo_abs, void *ctx)
 
 static int cli_ws_ingest_tree(const char *remote, const char *bearer, const char *abs_root)
 {
+   if (cli_ws_reject_hidden_root(abs_root))
+      return 1;
    ws_tree_ctx_t t = {remote, bearer, 0, 0};
    code_collect_discover_repos(abs_root, ws_tree_ingest_cb, &t);
    if (t.count == 0)
@@ -1382,6 +1445,11 @@ int cli_workspace_add_remote(const char *path)
    if (!abs)
    {
       fprintf(stderr, "aimee: workspace: cannot resolve path '%s' on this host\n", path);
+      return 1;
+   }
+   if (cli_ws_reject_hidden_root(abs))
+   {
+      free(abs);
       return 1;
    }
 

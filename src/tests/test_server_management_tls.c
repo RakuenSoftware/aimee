@@ -89,17 +89,26 @@ typedef struct
 {
    int fd;
    int profile;
+   int management;
 } server_arg_t;
 
 static void *accept_one(void *opaque)
 {
    server_arg_t *arg = opaque;
-   SSL *ssl = server_tls_management_begin(arg->fd);
+   SSL *ssl = arg->management ? server_tls_management_begin(arg->fd) : server_tls_begin(arg->fd);
    if (ssl)
    {
-      server_tls_peer_cert_t peer;
-      assert(server_tls_peer_cert(ssl, &peer) == 1);
-      arg->profile = peer.management_profile;
+      if (arg->management)
+      {
+         server_tls_peer_cert_t peer;
+         assert(server_tls_peer_cert(ssl, &peer) == 1);
+         arg->profile = peer.management_profile;
+      }
+      else
+      {
+         char cn[257], serial[129];
+         arg->profile = server_tls_peer_identity(ssl, cn, sizeof(cn), serial, sizeof(serial));
+      }
       server_tls_end(arg->fd, ssl);
    }
    else
@@ -108,11 +117,11 @@ static void *accept_one(void *opaque)
    return NULL;
 }
 
-static int present(const char *ca, const char *cert, const char *key)
+static int present_on(const char *ca, const char *cert, const char *key, int management)
 {
    int sv[2];
    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
-   server_arg_t arg = {.fd = sv[0], .profile = -1};
+   server_arg_t arg = {.fd = sv[0], .profile = -1, .management = management};
    pthread_t thread;
    assert(pthread_create(&thread, NULL, accept_one, &arg) == 0);
 
@@ -134,6 +143,16 @@ static int present(const char *ca, const char *cert, const char *key)
    close(sv[1]);
    assert(pthread_join(thread, NULL) == 0);
    return arg.profile;
+}
+
+static int present(const char *ca, const char *cert, const char *key)
+{
+   return present_on(ca, cert, key, 1);
+}
+
+static int present_main(const char *ca, const char *cert, const char *key)
+{
+   return present_on(ca, cert, key, 0);
 }
 
 int main(void)
@@ -238,6 +257,14 @@ int main(void)
    assert(present(ca, client, clientkey) == 1);
    assert(present(ca, dual, dualkey) == 0);
    assert(present(ca, ca_client, ca_client_key) != 1);
+
+   /* The ordinary listener keeps the TLS handshake cert-optional even after
+    * durable posture reaches required. HTTP authorization then admits only the
+    * exact enrollment routes for a cert-less peer. The dedicated management
+    * listener assertions above remain hard-required at the transport layer. */
+   assert(server_tls_init(server, serverkey, 2, ca) == 0);
+   assert(server_tls_mtls_mode() == 2);
+   assert(present_main(ca, NULL, NULL) == 0);
 
    snprintf(cmd, sizeof(cmd), "cp %s %s && printf '\\n' >> %s", ca, other_ca, other_ca);
    command(cmd);

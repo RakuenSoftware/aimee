@@ -88,9 +88,11 @@ static void test_managed_llm_service_credential(void)
 
    g_stub_random_hex = 'a';
    int managed_llm = 0;
-   char **envp = build_deploy_envp(NULL, 0, &managed_llm);
+   int managed_identity = 0;
+   char **envp = build_deploy_envp(NULL, 0, &managed_llm, &managed_identity);
    assert(envp != NULL);
    assert(managed_llm == 1);
+   assert(managed_identity == 1);
    const char *token = envp_value(envp, "AIMEE_LLM_AUTH_TOKEN");
    assert(token != NULL && strlen(token) == 64);
    for (size_t i = 0; i < 64; i++)
@@ -100,7 +102,7 @@ static void test_managed_llm_service_credential(void)
    assert(envp_key_count(envp, "AIMEE_LLM_AUTH_REQUIRED") == 1);
    assert(setenv("COMPOSE_PROFILES", "attacker-profile", 1) == 0);
    free_envp(envp);
-   envp = build_deploy_envp(NULL, 0, NULL);
+   envp = build_deploy_envp(NULL, 0, NULL, NULL);
    assert(strcmp(envp_value(envp, "COMPOSE_PROFILES"), "kb,llm") == 0);
    assert(envp_key_count(envp, "COMPOSE_PROFILES") == 1);
    free_envp(envp);
@@ -113,7 +115,7 @@ static void test_managed_llm_service_credential(void)
 
    /* Re-apply reads the persisted identity instead of silently rotating it. */
    g_stub_random_hex = 'b';
-   envp = build_deploy_envp(NULL, 0, NULL);
+   envp = build_deploy_envp(NULL, 0, NULL, NULL);
    token = envp_value(envp, "AIMEE_LLM_AUTH_TOKEN");
    assert(token != NULL && token[0] == 'a');
    free_envp(envp);
@@ -121,7 +123,7 @@ static void test_managed_llm_service_credential(void)
    /* Inherited empty OR non-empty child state cannot shadow the managed file. */
    assert(setenv("AIMEE_LLM_AUTH_TOKEN", "stale-inherited-service-token-1234", 1) == 0);
    assert(setenv("AIMEE_LLM_AUTH_REQUIRED", "0", 1) == 0);
-   envp = build_deploy_envp(NULL, 0, NULL);
+   envp = build_deploy_envp(NULL, 0, NULL, NULL);
    assert(envp_key_count(envp, "AIMEE_LLM_AUTH_TOKEN") == 1);
    token = envp_value(envp, "AIMEE_LLM_AUTH_TOKEN");
    assert(token != NULL && token[0] == 'a');
@@ -132,24 +134,24 @@ static void test_managed_llm_service_credential(void)
    /* A distinctly named, deliberate operator override wins exactly once. */
    assert(setenv("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE", "operator-managed-service-token-1234",
                  1) == 0);
-   envp = build_deploy_envp(NULL, 0, NULL);
+   envp = build_deploy_envp(NULL, 0, NULL, NULL);
    assert(strcmp(envp_value(envp, "AIMEE_LLM_AUTH_TOKEN"), "operator-managed-service-token-1234") ==
           0);
    assert(envp_key_count(envp, "AIMEE_LLM_AUTH_TOKEN") == 1);
    free_envp(envp);
    assert(setenv("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE", "invalid token with spaces", 1) == 0);
-   assert(build_deploy_envp(NULL, 0, NULL) == NULL);
+   assert(build_deploy_envp(NULL, 0, NULL, NULL) == NULL);
    unsetenv("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
 
    /* The persisted authority must remain private and cannot be a symlink. */
    assert(chmod(path, 0644) == 0);
-   assert(build_deploy_envp(NULL, 0, NULL) == NULL);
+   assert(build_deploy_envp(NULL, 0, NULL, NULL) == NULL);
    assert(chmod(path, 0600) == 0);
    char real_path[PATH_MAX];
    snprintf(real_path, sizeof(real_path), "%s.real", path);
    assert(rename(path, real_path) == 0);
    assert(symlink(real_path, path) == 0);
-   assert(build_deploy_envp(NULL, 0, NULL) == NULL);
+   assert(build_deploy_envp(NULL, 0, NULL, NULL) == NULL);
    assert(unlink(path) == 0);
    assert(rename(real_path, path) == 0);
 
@@ -158,17 +160,33 @@ static void test_managed_llm_service_credential(void)
    unsetenv("AIMEE_LLM_AUTH_REQUIRED");
    snprintf(g_stub_profiles, sizeof(g_stub_profiles), "kb");
    managed_llm = 1;
-   envp = build_deploy_envp(NULL, 0, &managed_llm);
+   managed_identity = 0;
+   envp = build_deploy_envp(NULL, 0, &managed_llm, &managed_identity);
    assert(envp != NULL && envp_value(envp, "AIMEE_LLM_AUTH_TOKEN") == NULL);
    assert(envp_value(envp, "AIMEE_LLM_AUTH_REQUIRED") == NULL);
    assert(managed_llm == 0);
+   assert(managed_identity == 1);
    free_envp(envp);
+
+   /* A complete explicit packet wins; a partial packet is never mixed with a
+    * wizard-generated identity. */
+   assert(setenv("AIMEE_KB_CONN", "aimee://kb:8745?ca=sha256:x&enroll=x", 1) == 0);
+   assert(setenv("AIMEE_SERVER_ID", "operator-server", 1) == 0);
+   assert(setenv("AIMEE_SERVER_TEAM_ID", "7", 1) == 0);
+   envp = build_deploy_envp(NULL, 0, NULL, &managed_identity);
+   assert(envp != NULL && managed_identity == 0);
+   free_envp(envp);
+   unsetenv("AIMEE_SERVER_TEAM_ID");
+   assert(build_deploy_envp(NULL, 0, NULL, NULL) == NULL);
+   unsetenv("AIMEE_KB_CONN");
+   unsetenv("AIMEE_SERVER_ID");
 
    assert(unlink(path) == 0);
    assert(rmdir(tmp) == 0);
    unsetenv("AIMEE_HOME");
    unsetenv("COMPOSE_PROFILES");
    unsetenv("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
+   unsetenv("AIMEE_SERVER_TEAM_ID");
    snprintf(g_stub_profiles, sizeof(g_stub_profiles), "kb,llm");
    printf("  managed kb -> llm credential is stable, private, and scoped ok\n");
 }
@@ -220,6 +238,53 @@ static void test_llm_probe_uses_kb_credential_without_host_secret(void)
    printf("  deploy verifies the KB's authenticated LLM connection without host secret argv ok\n");
 }
 
+/* --- wizard-managed server workload identity --- */
+
+static void test_managed_identity_bootstrap_runs_inside_kb_without_secret_argv(void)
+{
+   const char *argv[16];
+   int n = deploy_identity_bootstrap_argv("/managed.yaml", argv, sizeof(argv) / sizeof(argv[0]));
+   assert(n > 0 && argv[n] == NULL);
+   assert(strcmp(argv[0], "docker") == 0 && strcmp(argv[1], "compose") == 0);
+   assert(strcmp(argv[3], "/managed.yaml") == 0 && strcmp(argv[4], "run") == 0);
+
+   int saw_bootstrap = 0;
+   for (int i = 0; i < n; i++)
+   {
+      assert(strstr(argv[i], "enroll=") == NULL);
+      assert(strstr(argv[i], "PRIVATE KEY") == NULL);
+      assert(strcmp(argv[i], "--no-deps") != 0);
+      if (strcmp(argv[i], "aimee-server-identity") == 0)
+         saw_bootstrap = 1;
+   }
+   assert(saw_bootstrap);
+   assert(deploy_identity_bootstrap_argv("/managed.yaml", argv, (size_t)n) == -1);
+   printf("  deploy invokes the KB-owned managed identity bootstrap without host secret argv ok\n");
+}
+
+static void test_managed_authority_bootstrap_is_isolated_and_secret_free(void)
+{
+   const char *argv[16];
+   int n = deploy_authority_bootstrap_argv("/managed.yaml", argv, sizeof(argv) / sizeof(argv[0]));
+   assert(n > 0 && argv[n] == NULL);
+   assert(strcmp(argv[0], "docker") == 0 && strcmp(argv[1], "compose") == 0);
+   assert(strcmp(argv[3], "/managed.yaml") == 0 && strcmp(argv[4], "run") == 0);
+
+   int saw_bootstrap = 0;
+   for (int i = 0; i < n; i++)
+   {
+      assert(strstr(argv[i], "PRIVATE KEY") == NULL);
+      assert(strstr(argv[i], "KMS_KEY") == NULL);
+      assert(strstr(argv[i], "postgresql://") == NULL);
+      assert(strcmp(argv[i], "--no-deps") != 0);
+      if (strcmp(argv[i], "aimee-authority-bootstrap") == 0)
+         saw_bootstrap = 1;
+   }
+   assert(saw_bootstrap);
+   assert(deploy_authority_bootstrap_argv("/managed.yaml", argv, (size_t)n) == -1);
+   printf("  deploy invokes isolated authority bootstrap without host secret argv ok\n");
+}
+
 /* --- the legacy CPU container is retired by name --- */
 
 static void test_retire_targets_legacy_cpu_container(void)
@@ -269,6 +334,8 @@ int main(void)
    test_managed_llm_service_credential();
    test_deploy_argv_has_no_remove_orphans();
    test_llm_probe_uses_kb_credential_without_host_secret();
+   test_managed_identity_bootstrap_runs_inside_kb_without_secret_argv();
+   test_managed_authority_bootstrap_is_isolated_and_secret_free();
    test_retire_targets_legacy_cpu_container();
    test_compose_file_default();
    printf("test_deploy_apply: all passed\n");

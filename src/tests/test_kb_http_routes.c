@@ -348,13 +348,14 @@ char *kb_service_ingest_status_json(void)
  * doc_id) mirrors what the ranked backend emits and what the handler's reshaper
  * parses. Default 0 keeps every other test on the empty-results path. */
 static int g_test_search_populated = 0;
+static char g_test_search_embedding[256];
 char *kb_search_json_ex(const char *p, const char *q, const char *e, int m, const char *f)
 {
    (void)p;
    (void)q;
-   (void)e;
    (void)m;
    (void)f;
+   snprintf(g_test_search_embedding, sizeof(g_test_search_embedding), "%s", e ? e : "");
    const char *src = g_test_search_populated
                          ? "{\"fusion_mode\":\"rrf\",\"results\":[{\"file_path\":\"docs/alpha.md\","
                            "\"content\":\"alpha excerpt body\",\"score\":0.875,\"doc_id\":4242}]}"
@@ -1052,6 +1053,12 @@ const char *config_embedding_command(const config_t *cfg, const char *requested)
       return requested;
    if (cfg && cfg->embedding_command[0])
       return cfg->embedding_command;
+   const char *url = getenv("AIMEE_EMBEDDER_URL");
+   if (url && url[0])
+      return url;
+   url = getenv("AIMEE_LLM_URL");
+   if (url && url[0])
+      return url;
    return "builtin";
 }
 
@@ -2487,6 +2494,46 @@ static void test_mtls_serve(void)
    assert(strstr(resp, "\"status\":\"ok\""));
    assert(strstr(resp, "Connection: close"));
 
+   /* Scoped mTLS credentials must not acquire an owner actor merely because
+    * their certificate is valid. The grant handler therefore refuses this
+    * project certificate before it reaches the Postgres-only tenant gate. */
+   {
+      const char *grant = "{\"server_id\":\"srv-a\",\"team_id\":1,\"subject\":\"owner\","
+                          "\"tier\":\"full\",\"granted_by\":\"owner\"}";
+      char req[512];
+      snprintf(req, sizeof(req),
+               "POST /v1/write-tier-grants/set HTTP/1.1\r\nContent-Length: %zu\r\n"
+               "Connection: close\r\n\r\n%s",
+               strlen(grant), grant);
+      mtls_request(sctx, cctx, req, resp, sizeof(resp));
+      assert(strstr(resp, "401 Unauthorized"));
+      assert(strstr(resp, "authentication required"));
+   }
+
+   /* The wizard-managed server certificate is intentionally unscoped. It is
+    * the authenticated owner hop behind the server's UDS-only grant command,
+    * so it must reach the tenant gate as owner rather than arrive actor-less.
+    * This shim-backed test then returns 503 at the expected Postgres gate; 401
+    * would prove the mTLS-to-owner bridge regressed again. */
+   {
+      char owner_cert[KB_PKI_CERT_PEM_MAX], owner_key[KB_PKI_KEY_PEM_MAX];
+      assert(kb_pki_issue_client_cert(&ca, "p5-server-client", 3600, owner_cert, sizeof(owner_cert),
+                                      owner_key, sizeof(owner_key)) == 0);
+      SSL_CTX *owner_ctx = kb_tls_client_ctx(ca.cert_pem, owner_cert, owner_key);
+      assert(owner_ctx);
+      const char *grant = "{\"server_id\":\"srv-a\",\"team_id\":1,\"subject\":\"owner\","
+                          "\"tier\":\"full\",\"granted_by\":\"owner\"}";
+      char req[512];
+      snprintf(req, sizeof(req),
+               "POST /v1/write-tier-grants/set HTTP/1.1\r\nContent-Length: %zu\r\n"
+               "Connection: close\r\n\r\n%s",
+               strlen(grant), grant);
+      mtls_request(sctx, owner_ctx, req, resp, sizeof(resp));
+      assert(strstr(resp, "503 Service Unavailable"));
+      assert(!strstr(resp, "authentication required"));
+      SSL_CTX_free(owner_ctx);
+   }
+
    /* HTTP/1.1 stays reusable by default. The certificate authority is checked
     * again for request N+1, so revocation takes effect before its route runs. */
    {
@@ -2529,7 +2576,7 @@ static void test_mtls_serve(void)
    assert(strstr(resp, "400 Bad Request"));
 
    /* Strict framing bounds fail before routing: at most 64 headers, a 4 KiB
-    * request target, and 64 KiB total request head+body. */
+    * request target, and a 1 MiB body. */
    char oversized_headers[8192];
    size_t oversized_len = (size_t)snprintf(oversized_headers, sizeof(oversized_headers),
                                            "GET /v1/health HTTP/1.1\r\nHost: kb\r\n");
@@ -2549,8 +2596,9 @@ static void test_mtls_serve(void)
    mtls_request(sctx, cctx, oversized_uri, resp, sizeof(resp));
    assert(strstr(resp, "400 Bad Request"));
 
-   mtls_request(sctx, cctx, "POST /v1/health HTTP/1.1\r\nHost: kb\r\nContent-Length: 65536\r\n\r\n",
-                resp, sizeof(resp));
+   mtls_request(sctx, cctx,
+                "POST /v1/health HTTP/1.1\r\nHost: kb\r\nContent-Length: 1048577\r\n\r\n", resp,
+                sizeof(resp));
    assert(strstr(resp, "413 Payload Too Large"));
 
    /* P5-A heartbeat carries immutable peer-certificate metadata to the primary
@@ -2765,6 +2813,30 @@ static void test_mtls_listener(void)
    assert(st == 200);
    assert(strstr(rbody, "\"status\":\"ok\""));
 
+   /* Managed server identities carry ordinary data-plane calls over this same
+    * mTLS connection. A detached-workspace ingest batch is deliberately much
+    * larger than the old 64 KiB request buffer, so exercise the high-level
+    * client with a representative payload instead of accepting health-only
+    * connectivity as proof that indexing works. */
+   {
+      const size_t padding_len = 128 * 1024;
+      char *body = malloc(padding_len + 256);
+      assert(body);
+      int prefix = snprintf(body, padding_len + 256,
+                            "{\"server_id\":\"srv-large\",\"health\":\"ready\","
+                            "\"version\":\"test\",\"padding\":\"");
+      assert(prefix > 0);
+      memset(body + prefix, 'x', padding_len);
+      memcpy(body + prefix + padding_len, "\"}", 3);
+      assert(strlen(body) > 64 * 1024 && strlen(body) < 1024 * 1024);
+      g_test_registry_heartbeat_allow = 1;
+      assert(kb_tls_client_request("localhost", port, ca.cert_pem, ccert, ckey, "POST",
+                                   "/v1/server/heartbeat", body, rbody, sizeof(rbody), &st) == 0);
+      assert(st == 200 && strstr(rbody, "\"ok\":true"));
+      g_test_registry_heartbeat_allow = 0;
+      free(body);
+   }
+
    /* The reusable client primitive reads Content-Length exactly instead of
     * waiting for EOF, then safely carries a second request on the same TLS
     * connection. */
@@ -2965,6 +3037,40 @@ static void test_mtls_listener(void)
       assert(pool_total == 0 && pool_idle == 0);
       unsetenv("AIMEE_TRANSPORT_KB_POOL_ENABLED");
       unsetenv("AIMEE_KB_CONN");
+
+      /* A wizard-managed v2 identity owns its endpoint and stable registry
+       * binding, so it remains configured with no one-time connection string
+       * in the process environment. */
+      cJSON *managed = cJSON_CreateObject();
+      assert(managed);
+      cJSON_AddNumberToObject(managed, "version", 2);
+      cJSON_AddStringToObject(managed, "state", "ready");
+      cJSON_AddStringToObject(managed, "host", "localhost");
+      cJSON_AddNumberToObject(managed, "port", port);
+      cJSON_AddStringToObject(managed, "server_id", "managed-server-test");
+      cJSON_AddNumberToObject(managed, "team_id", 42);
+      cJSON_AddStringToObject(managed, "ca", ca.cert_pem);
+      cJSON_AddStringToObject(managed, "cert", ccert);
+      cJSON_AddStringToObject(managed, "key", ckey);
+      char *managed_json = cJSON_PrintUnformatted(managed);
+      cJSON_Delete(managed);
+      assert(managed_json);
+      identity_stream = fopen(identity_file, "w");
+      assert(identity_stream && fputs(managed_json, identity_stream) >= 0 &&
+             fclose(identity_stream) == 0);
+      free(managed_json);
+      assert(chmod(identity_file, 0600) == 0);
+      kb_client_mtls_reset_for_test();
+      assert(kb_client_mtls_configured() == 1);
+      char managed_server[128];
+      long long managed_team = 0;
+      assert(kb_client_mtls_managed_metadata(managed_server, sizeof(managed_server),
+                                             &managed_team) == 1);
+      assert(strcmp(managed_server, "managed-server-test") == 0 && managed_team == 42);
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      assert(st2 == 200 && r && strstr(r, "\"status\":\"ok\""));
+      free(r);
+
       kb_client_mtls_set_identity_path_for_test(NULL);
       assert(kb_client_mtls_configured() == 0);
       unlink(identity_file);
@@ -4958,6 +5064,23 @@ static void test_search_ok(void)
    assert(strstr(buf, "\"fusion_mode_used\"") != NULL);
 }
 
+/* A managed KB normally has no raw embedding_command in aimee.yaml: the
+ * wizard supplies AIMEE_LLM_URL. Search must resolve that deployment default
+ * before entering the ranked backend, or it silently queries a 1024-dim corpus
+ * with the 384-dim builtin vector. */
+static void test_search_uses_managed_embedder(void)
+{
+   char buf[1024];
+   unsetenv("AIMEE_EMBEDDER_URL");
+   setenv("AIMEE_LLM_URL", "http://managed-llm:8742", 1);
+   g_test_search_embedding[0] = '\0';
+   int s = kb_http_route_ex("POST", "/v1/search", NULL, NULL, NULL, "{\"query\":\"foo\"}", 15, buf,
+                            sizeof(buf));
+   assert(s == 200);
+   assert(strcmp(g_test_search_embedding, "http://managed-llm:8742") == 0);
+   unsetenv("AIMEE_LLM_URL");
+}
+
 /* Producer->consumer contract: the /v1/search ranked handler and the kb_search
  * agent tool must agree on the response shape. A refactor once left the tool
  * unwrapping a top-level {"result"} field the endpoint never emits, so every
@@ -5336,6 +5459,7 @@ int main(void)
    test_curator_routes();
    test_invalidations_route();
    test_search_ok();
+   test_search_uses_managed_embedder();
    test_search_hits_tool_contract();
    test_search_503_while_reembed_in_progress();
    test_reembed_wrong_method();

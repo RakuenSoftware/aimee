@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MAKEFILE = ROOT / "src" / "Makefile"
 MAIN = ROOT / "src" / "kb" / "kb_mgmt_token_roots_provision_main.c"
 PRIVATE = {
+    "kb/kb_mgmt_offline_hardening.o",
     "kb/kb_mgmt_token_roots_provision_main.o",
     "kb/kb_mgmt_token_roots_provision.o",
     "db2/management_token_roots.o",

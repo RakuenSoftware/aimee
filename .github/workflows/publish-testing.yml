@@ -3,8 +3,8 @@
 # testing branch can be deployed/validated (e.g. on .254) WITHOUT promoting to
 # main.
 #
-# Builds the split images (aimee-server, aimee-kb) so a split compose stack (the
-# .254 layout: postgres + aimee-llm + aimee-kb + aimee-server) can pull `:testing`.
+# Builds the split images plus the isolated one-shot authority bootstrap so a
+# managed stack can pull a single coherent `:testing` channel.
 # Versioned + `:latest` publishing of the full image set
 # stays owned by main (auto-release.yml -> publish-images.yml). Keeping testing on
 # a `:testing` tag — never a version number — avoids confusing a tested-but-
@@ -30,6 +30,7 @@ on:
       - "webchat/**"
       - "Dockerfile"
       - "Dockerfile.server"
+      - "Dockerfile.authority-bootstrap"
       - ".github/workflows/publish-testing.yml"
   workflow_dispatch:
 
@@ -54,6 +55,7 @@ jobs:
         image:
           - { name: aimee-server,    dockerfile: Dockerfile.server }
           - { name: aimee-kb,        dockerfile: Dockerfile }
+          - { name: aimee-authority-bootstrap, dockerfile: Dockerfile.authority-bootstrap }
     steps:
       - uses: actions/checkout@v4
 

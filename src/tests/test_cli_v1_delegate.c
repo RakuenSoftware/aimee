@@ -43,6 +43,17 @@ static void test_delegate_max_turns_marshaled(void)
    printf("  PASS: test_delegate_max_turns_marshaled\n");
 }
 
+static void test_remote_workspace_hidden_roots_are_rejected(void)
+{
+   assert(cli_ws_root_has_hidden_component("/repo/.aimee/worktrees/session/main") == 1);
+   assert(cli_ws_root_has_hidden_component("/repo/.claude/worktrees/session") == 1);
+   assert(cli_ws_root_has_hidden_component("/tmp/.fixture") == 1);
+   assert(cli_ws_root_has_hidden_component("/repo.v1/worktrees/session") == 0);
+   assert(cli_ws_root_has_hidden_component("/repo/src/.generated/file.c") == 1);
+   assert(cli_ws_root_has_hidden_component("/repo/src/generated/file.c") == 0);
+   printf("  PASS: test_remote_workspace_hidden_roots_are_rejected\n");
+}
+
 static void test_delegate_tools_named_toolset_marshaled(void)
 {
    char *argv[] = {"execute", "--tools", "readonly",
@@ -1737,6 +1748,7 @@ static void test_grant_show_shares_the_list_renderer(void)
 int main(void)
 {
    printf("test_cli_v1_delegate\n");
+   test_remote_workspace_hidden_roots_are_rejected();
    test_delegate_context_file_folded_into_prompt();
    test_delegate_max_turns_marshaled();
    test_delegate_tools_named_toolset_marshaled();

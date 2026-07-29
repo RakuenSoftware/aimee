@@ -212,8 +212,9 @@ int handle_mcp_tools_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    }
 
    /* Presentation profile: shrink the initial tools/list for external MCP
-    * clients. Default "core" (lean) is lossless — find_tools/describe_tool reach
-    * the rest; set AIMEE_MCP_TOOL_PROFILE=full to present everything. Applied at
+    * clients. Default "core" (lean) remains complete — find_tools/describe_tool
+    * discover the rest and call_tool dispatches it; set AIMEE_MCP_TOOL_PROFILE=full
+    * to present everything. Applied at
     * the served-list choke point so mcp_build_tools_list() (and its golden test)
     * stays intact. */
    {

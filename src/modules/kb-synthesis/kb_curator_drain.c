@@ -29,6 +29,7 @@
 #include "kb_curator_promote.h"
 #include "kb_curator_custom.h"
 #include "kb_curator_pipeline.h"
+#include "kb_curator_provider.h"
 #include "kb_evidence_embed.h"
 #include "kb_memory_facts.h"
 #include "kb_learning_synth.h"
@@ -868,6 +869,16 @@ static void *drain_thread_main(void *arg)
       opts.max_tokens =
           cfg.kb_curator_extract_max_tokens > 0 ? cfg.kb_curator_extract_max_tokens : 2048;
       opts.max_attempts = cfg.kb_curator_max_attempts > 0 ? cfg.kb_curator_max_attempts : 3;
+
+      /* A provider outage is shared by every LLM stage. Per-row retry stamps do
+       * not help a large backlog: without this gate one pass simply advances to
+       * the next fresh row, then resolve/synthesize hit the same open circuit.
+       * The top-of-loop sleep polls the bounded process-wide cooldown. */
+      if (kb_curator_provider_backoff_active())
+      {
+         kb_background_clear("curator");
+         continue;
+      }
 
       /* Stage order for this poll: kb_curator_stage_order when set + valid, else
        * registry order (fail-safe). Built once per poll so an invalid order WARNs

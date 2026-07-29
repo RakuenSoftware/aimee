@@ -220,7 +220,7 @@ static void test_resolved_aimee_bin_path_fallback(void)
 
 /* --- Test ensure_claude_code_mcp: non-destructive merge behavior --- */
 
-static void test_claude_mcp_creates_fresh_settings(void)
+static void test_claude_mcp_creates_fresh_user_config(void)
 {
    char tmpdir[512];
    snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-claude-XXXXXX", platform_tmpdir());
@@ -235,19 +235,18 @@ static void test_claude_mcp_creates_fresh_settings(void)
    fclose(fp);
    chmod(fake_bin, 0755);
 
-   /* The function checks ~/.local/bin/aimee which may not exist
-    * in test environment. We test the JSON merge logic directly instead. */
-   char settings_path[512];
-   snprintf(settings_path, sizeof(settings_path), "%s/settings.json", tmpdir);
+   char config_path[512];
+   snprintf(config_path, sizeof(config_path), "%s/.claude.json", tmpdir);
 
    /* Write a settings file with existing data */
-   fp = fopen(settings_path, "w");
+   fp = fopen(config_path, "w");
    assert(fp != NULL);
    fputs("{\"existingKey\": true, \"mcpServers\": {\"other\": {\"command\": \"other-mcp\"}}}", fp);
    fclose(fp);
 
-   /* Simulate what ensure_claude_code_mcp does: merge aimee into mcpServers */
-   cJSON *root = read_json_file(settings_path);
+   ensure_claude_code_mcp_entry(config_path, fake_bin);
+
+   cJSON *root = read_json_file(config_path);
    assert(root != NULL);
    assert(cJSON_IsObject(root));
 
@@ -264,44 +263,17 @@ static void test_claude_mcp_creates_fresh_settings(void)
    assert(cJSON_IsString(other_cmd));
    assert(strcmp(other_cmd->valuestring, "other-mcp") == 0);
 
-   /* Add aimee server (simulating the merge) */
-   char aimee_bin[512];
-   const char *home = getenv("HOME");
-   if (home)
-      snprintf(aimee_bin, sizeof(aimee_bin), "%s/.local/bin/aimee", home);
-   else
-      snprintf(aimee_bin, sizeof(aimee_bin), "/aimee");
-   cJSON *aimee_server = cJSON_CreateObject();
-   cJSON_AddStringToObject(aimee_server, "command", aimee_bin);
-   cJSON_AddItemToObject(servers, "aimee", aimee_server);
-
-   /* Write back and re-read */
-   char *json_out = cJSON_Print(root);
-   assert(json_out != NULL);
-   fp = fopen(settings_path, "w");
-   fputs(json_out, fp);
-   fclose(fp);
-   free(json_out);
-   cJSON_Delete(root);
-
-   /* Re-read and verify everything was preserved */
-   root = read_json_file(settings_path);
-   assert(root != NULL);
-
-   existing = cJSON_GetObjectItem(root, "existingKey");
-   assert(existing != NULL && cJSON_IsTrue(existing));
-
-   servers = cJSON_GetObjectItem(root, "mcpServers");
-   assert(cJSON_IsObject(servers));
-
-   other = cJSON_GetObjectItem(servers, "other");
-   assert(cJSON_IsObject(other));
-
    cJSON *aimee = cJSON_GetObjectItem(servers, "aimee");
    assert(cJSON_IsObject(aimee));
    cJSON *cmd = cJSON_GetObjectItem(aimee, "command");
    assert(cJSON_IsString(cmd));
-   assert(strcmp(cmd->valuestring, aimee_bin) == 0);
+   assert(strcmp(cmd->valuestring, fake_bin) == 0);
+   cJSON *type = cJSON_GetObjectItem(aimee, "type");
+   assert(cJSON_IsString(type));
+   assert(strcmp(type->valuestring, "stdio") == 0);
+   cJSON *args = cJSON_GetObjectItem(aimee, "args");
+   assert(cJSON_IsArray(args));
+   assert(strcmp(cJSON_GetArrayItem(args, 0)->valuestring, "mcp-serve") == 0);
 
    cJSON_Delete(root);
 
@@ -1222,7 +1194,7 @@ int main(void)
    test_read_json_file_valid();
    test_read_json_file_invalid();
    test_resolved_aimee_bin_path_fallback();
-   test_claude_mcp_creates_fresh_settings();
+   test_claude_mcp_creates_fresh_user_config();
    test_claude_hooks_create_post_hook_on_fresh_settings();
    test_claude_hooks_patch_existing_matcher();
    test_claude_hooks_repoint_stale_command();

@@ -12,6 +12,7 @@
 #include "db1.h"
 #include "util.h" /* is_safe_id */
 #include "kb_client.h"
+#include "config.h"
 #include "dashboard.h"
 #include <aimee/protocols/mcp/mcp_tools.h>
 #include "agent_tools.h" /* agent_tools_emit_tool_completion — served tool-call outcome audit */
@@ -40,6 +41,7 @@
 #include "headers/conversation_context.h"
 #include "headers/payload_rewrite.h"
 #include "headers/session_search_tool.h"
+#include "td_search_render.h"
 #include "cJSON.h"
 #include <string.h>
 #include <strings.h>
@@ -939,6 +941,52 @@ cJSON *smcp_tool_find_symbol(cJSON *args)
    return text_content(buf);
 }
 
+static const char *smcp_search_project(cJSON *args)
+{
+   cJSON *project = cJSON_GetObjectItemCaseSensitive(args, "project");
+   if (cJSON_IsString(project) && project->valuestring[0])
+      return project->valuestring;
+   cJSON *cwd = cJSON_GetObjectItemCaseSensitive(args, "cwd");
+   if (!cJSON_IsString(cwd) || !cwd->valuestring[0])
+      return NULL;
+   const char *base = strrchr(cwd->valuestring, '/');
+   base = base ? base + 1 : cwd->valuestring;
+   return base[0] ? base : NULL;
+}
+
+cJSON *smcp_tool_search_docs(cJSON *args)
+{
+   cJSON *query = cJSON_GetObjectItemCaseSensitive(args, "query");
+   cJSON *jmax = cJSON_GetObjectItemCaseSensitive(args, "max_results");
+   if (!cJSON_IsString(query) || !query->valuestring[0])
+      return text_content("error: missing 'query' parameter");
+
+   int max_results = cJSON_IsNumber(jmax) ? jmax->valueint : 3;
+   if (max_results < 1)
+      max_results = 1;
+   if (max_results > 8)
+      max_results = 8;
+
+   /* The kb owns the corpus and its embedder.  Only override that embedder when
+    * the operator explicitly configured a command on this server; resolving an
+    * unset value to the 384-dim builtin can mismatch a remote kb's corpus. */
+   const char *embedding_command = config_embedding_command_field();
+   /* "builtin" is also the resolver's fallback value on a thin server. It is
+    * not evidence that the remote corpus was built with the 384-dim shim, so
+    * leave selection to the KB just as we do for an empty field. */
+   if (!embedding_command[0] || strcmp(embedding_command, "builtin") == 0)
+      embedding_command = NULL;
+   char *envelope = kb_client_search_json(smcp_search_project(args), query->valuestring,
+                                          embedding_command, max_results, NULL);
+   cJSON *response = envelope ? cJSON_Parse(envelope) : NULL;
+   free(envelope);
+   char *rendered = td_search_result_from_response(response, query->valuestring);
+   cJSON_Delete(response);
+   cJSON *content = text_content(rendered ? rendered : "error: knowledge search unavailable");
+   free(rendered);
+   return content;
+}
+
 cJSON *tool_preview_blast_radius(cJSON *args)
 {
    cJSON *jproj = cJSON_GetObjectItemCaseSensitive(args, "project");
@@ -1722,6 +1770,31 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    snprintf(g_served_tool, sizeof g_served_tool, "%s", tool); /* served audit identity */
    cJSON *content = NULL;
    cJSON *structured = NULL;
+
+   /* Schema-bound MCP hosts cannot call tools omitted from tools/list even when
+    * find_tools/describe_tool reveal their names and schemas. Resolve the
+    * advertised call_tool bridge before family demux and every policy/dispatch
+    * seam so the target tool receives the same authorization and audit path as
+    * a directly advertised call. */
+   {
+      const char *target = NULL;
+      cJSON *target_args = NULL;
+      int bridged = mcp_call_tool_demux(tool, jargs, &target, &target_args);
+      if (bridged < 0)
+      {
+         served_outcome("error", "bad_args");
+         if (owns_jargs)
+            cJSON_Delete(jargs);
+         return server_send_error(
+             conn, "call_tool requires a non-recursive 'name' and object 'arguments'", NULL);
+      }
+      if (bridged == 1)
+      {
+         tool = target;
+         jargs = target_args;
+         snprintf(g_served_tool, sizeof g_served_tool, "%s", tool);
+      }
+   }
 
    /* Family multiplex (P4): if `tool` is a collapsed family (pipeline/diagnose/
     * session/lsp/note/…), rewrite it to the legacy <family>_<command> name so all

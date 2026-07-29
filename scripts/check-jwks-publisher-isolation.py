@@ -16,7 +16,10 @@ PRIVATE = {
     "kb/kb_mgmt_jwks_publication.o",
     "db2/management_jwks_publication.o",
 }
-SHARED_OFFLINE = {"kb/kb_mgmt_token_roots_provision.o"}
+SHARED_OFFLINE = {
+    "kb/kb_mgmt_offline_hardening.o",
+    "kb/kb_mgmt_token_roots_provision.o",
+}
 REQUIRED = PRIVATE | SHARED_OFFLINE
 
 

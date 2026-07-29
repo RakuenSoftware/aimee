@@ -212,7 +212,8 @@ extern "C"
 
    uint32_t server_http_effective_conn_caps(int is_tcp, const char *bearer, int remote_writes,
                                             int mtls_mode, int mtls_authenticated);
-   int server_http_mtls_transport_allowed(int is_tcp, int mtls_mode, int mtls_authenticated);
+   int server_http_mtls_transport_allowed(int is_tcp, int mtls_mode, int mtls_authenticated,
+                                          const char *method, const char *path);
 
    /* Dedicated P5 management transport classifier. The management leaf is
     * authorized only for the nonce/status health pair; those routes never fall

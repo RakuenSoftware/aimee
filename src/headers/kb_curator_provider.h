@@ -65,6 +65,21 @@ extern "C"
    int kb_curator_provider_for_stage(const config_t *cfg, kb_curator_stage_t stage,
                                      provider_def_t *out);
 
+   /* True when an error means the configured provider would not serve work now
+    * (as opposed to rejecting one malformed job). Recognizes both the direct
+    * provider-client wording and the bundled llm-chat.py sidecar envelope. */
+   int kb_curator_error_is_provider_unavailable(const char *error_msg);
+
+   /* Process-wide outage gate shared by every curator LLM stage. A per-job
+    * next_attempt_at prevents one row from spinning, but it does not prevent a
+    * large queue from walking fresh rows while the provider circuit is open.
+    * note() applies a bounded exponential cooldown, active() lets workers avoid
+    * claiming during it, and recovered() resets the curve after a successful
+    * provider response. */
+   int kb_curator_provider_backoff_active(void);
+   void kb_curator_provider_backoff_note(void);
+   void kb_curator_provider_backoff_recovered(void);
+
 #ifdef __cplusplus
 }
 #endif

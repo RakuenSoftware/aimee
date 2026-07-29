@@ -225,10 +225,12 @@ static SSL_CTX *tls_build_ctx(const char *cert_path, const char *key_path, int m
    }
 
    /* mTLS: verify client certs against aimee's client CA. The chain is verified
-    * by OpenSSL (standard callback); the CN -> principal mapping + revocation
-    * happen later in the identity layer. `required` refuses a handshake with no
-    * client cert; `optional` requests one but allows bearer-only. A CA that won't
-    * load disables mTLS (logged) rather than silently accepting unverified certs. */
+    * by OpenSSL; the CN -> principal mapping + revocation happen later in the
+    * identity layer. Even application-required mode must allow a cert-less TLS
+    * handshake to reach the narrowly scoped bearer-authenticated enrollment
+    * routes. server_http_mtls_transport_allowed rejects every other cert-less
+    * request before bearer/capability dispatch. The dedicated management
+    * listener below remains transport-required mTLS. */
    if (mtls_mode > 0)
    {
       char ca[MAX_PATH_LEN];
@@ -246,12 +248,9 @@ static SSL_CTX *tls_build_ctx(const char *cert_path, const char *key_path, int m
       }
       else
       {
-         int vflags = SSL_VERIFY_PEER;
-         if (mtls_mode >= 2)
-            vflags |= SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
-         SSL_CTX_set_verify(ctx, vflags, mtls_verify_cb);
+         SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, mtls_verify_cb);
          aimee_log(LOG_INFO, "server.tls", "mTLS %s (client CA %s)",
-                   mtls_mode >= 2 ? "required" : "optional", ca);
+                   mtls_mode >= 2 ? "application-required" : "optional", ca);
       }
    }
 

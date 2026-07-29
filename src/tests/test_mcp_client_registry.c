@@ -455,13 +455,14 @@ static void test_osv_offline_cache_miss_allows(void)
  * built-in tool surface (name + sorted schema property keys + required), captured
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
-#define MCP_TOOLS_GOLDEN_COUNT 51
+#define MCP_TOOLS_GOLDEN_COUNT 52
 #define MCP_TOOLS_GOLDEN                                                                           \
    "ask_user {choices,question} req:question\n"                                                    \
    "ast_grep_search {lang,path,pattern} req:lang,pattern\n"                                        \
    "attempt {approach,command,filter,lesson,outcome,task_context} req:command\n"                   \
    "autopilot {action,job_id,pipeline_id,plan_depth,plan_id,task} req:action\n"                    \
    "background {action,command,cwd,id,tail_lines} req:action\n"                                    \
+   "call_tool {arguments,name} req:arguments,name\n"                                               \
    "clarify {answer,command,description,session_id} req:command\n"                                 \
    "dashboard_metrics {} req:\n"                                                                   \
    "delegate {branch,cwd,persona,prompt,role} req:persona,prompt,role\n"                           \
@@ -517,7 +518,7 @@ static void test_osv_offline_cache_miss_allows(void)
    "roadmap {command,roadmap_id} req:command\n"                                                    \
    "roundtable_review {artifact_stage,brief,diff,original_request,roundtable,workdir} req:diff\n"  \
    "rules {command,reason,text} req:command\n"                                                     \
-   "search_docs {max_results,query} req:query\n"                                                   \
+   "search_docs {max_results,project,query} req:query\n"                                           \
    "search_memory {filter,query} req:query\n"                                                      \
    "send_message {target,text} req:target,text\n"                                                  \
    "session {around_message_id,chain_id,command,include_sources,limit,query,session_id,window} "   \
@@ -613,16 +614,29 @@ static int profile_core_has(const char *n, const char *const *set)
 static void test_tool_profile_filter(void)
 {
    /* Mirror of MCP_CORE_TOOLS in mcp_tool_profile.c — kept in sync intentionally.
-    * Includes the P2 discovery meta-tools find_tools/describe_tool. */
-   static const char *const core[] = {
-       "get_help",        "find_tools",    "describe_tool", "search_docs",
-       "search_memory",   "memory_recall", "get_identity",  "find_symbol",
-       "ast_grep_search", "git",           "delegate",      "roundtable_review",
-       "ask_user",        "send_message",  "note",          NULL};
+    * Includes the P2 discovery meta-tools and schema-bound dispatch bridge. */
+   static const char *const core[] = {"get_help",
+                                      "find_tools",
+                                      "describe_tool",
+                                      "call_tool",
+                                      "search_docs",
+                                      "search_memory",
+                                      "memory_recall",
+                                      "get_identity",
+                                      "find_symbol",
+                                      "ast_grep_search",
+                                      "git",
+                                      "delegate",
+                                      "roundtable_review",
+                                      "ask_user",
+                                      "send_message",
+                                      "note",
+                                      NULL};
    int expect = 0;
    for (int i = 0; core[i]; i++)
       expect++;
    assert(profile_core_has("find_tools", core) && profile_core_has("describe_tool", core));
+   assert(profile_core_has("call_tool", core));
 
    /* Control the env so the default is deterministic across CI runners. */
    unsetenv("AIMEE_MCP_TOOL_PROFILE");
@@ -660,6 +674,36 @@ static void test_tool_profile_filter(void)
    t = mcp_build_tools_list();
    assert(mcp_filter_tools_for_profile(t, "lean") == full - expect);
    cJSON_Delete(t);
+}
+
+static void test_call_tool_demux(void)
+{
+   const char *target = NULL;
+   cJSON *target_args = NULL;
+   cJSON *wrapper = cJSON_CreateObject();
+   cJSON_AddStringToObject(wrapper, "name", "index");
+   cJSON *nested = cJSON_AddObjectToObject(wrapper, "arguments");
+   cJSON_AddStringToObject(nested, "command", "find_callers");
+   cJSON_AddStringToObject(nested, "symbol", "end_of_month");
+
+   assert(mcp_call_tool_demux("find_tools", wrapper, &target, &target_args) == 0);
+   assert(mcp_call_tool_demux("call_tool", wrapper, &target, &target_args) == 1);
+   assert(strcmp(target, "index") == 0);
+   assert(target_args == nested);
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(target_args, "symbol")->valuestring,
+                 "end_of_month") == 0);
+   cJSON_Delete(wrapper);
+
+   wrapper = cJSON_CreateObject();
+   cJSON_AddStringToObject(wrapper, "name", "call_tool");
+   cJSON_AddObjectToObject(wrapper, "arguments");
+   assert(mcp_call_tool_demux("call_tool", wrapper, &target, &target_args) == -1);
+   cJSON_Delete(wrapper);
+
+   wrapper = cJSON_CreateObject();
+   cJSON_AddStringToObject(wrapper, "name", "index");
+   assert(mcp_call_tool_demux("call_tool", wrapper, &target, &target_args) == -1);
+   cJSON_Delete(wrapper);
 }
 
 static int tools_have(cJSON *tools, const char *name)
@@ -721,6 +765,7 @@ int main(void)
    printf("test_mcp_client_registry\n");
    test_tools_list_surface();
    test_tool_profile_filter();
+   test_call_tool_demux();
    test_flat_list_keeps_family_members();
    test_boot_and_lazy_tools();
    test_install_target_filtering();

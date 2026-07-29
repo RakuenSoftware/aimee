@@ -26,6 +26,25 @@ The final **Deploy** step starts:
 - `aimee-kb`, including private PostgreSQL 18, pgvector, and pgvectorscale;
 - `aimee-llm`, with the selected inference tier.
 
+For a local managed KB, Deploy also runs two explicit one-shot jobs before it
+reports success:
+
+- an isolated authority bootstrap provisions the management-token and manifest
+  roots, publishes the signed generation-1 JWKS, and writes only the public
+  trust bundle into a root-owned volume mounted read-only by the server; and
+- the KB enrolls distinct server client/management certificates and writes the
+  resulting workload identity directly into the server's private volume.
+
+The offline provisioner and publisher are shipped in a separate image; they are
+not linked into or installed in the ordinary KB/server images. The default
+single-host authority is software-backed and appropriate to the local managed
+installation. Deployments requiring hardware custody should keep using an
+operator-managed authority/KMS and supply the explicit identity packet.
+The one-shot locks its address space when the runtime permits it. On an
+unprivileged container host that cannot raise `RLIMIT_MEMLOCK`, it proceeds only
+after verifying through `/proc/swaps` that the host has no active swap; otherwise
+Deploy fails closed.
+
 Deploy also claims the signed-in browser account as the first remote owner. It displays one
 `aimee remote set ...` command that provisions that user's bearer, mTLS certificate, and explicit
 `full` write grant. Keep that page open until you run the command in step 3.
@@ -194,8 +213,11 @@ not grant access.
 
 ### Additional users and authority-managed grants
 
-Skip this section for the first wizard user. Larger installations can add PAM/OIDC users with
-short-lived, KB-signed identities and grants keyed by `(server_id, team_id, subject)`. That path
+Skip this section for the first wizard user. The managed wizard now creates the
+default team, server workload identity, signed generation-1 JWKS, and public
+trust pin automatically. Larger or split installations can instead add
+PAM/OIDC users with short-lived, KB-signed identities and grants keyed by
+`(server_id, team_id, subject)`. An operator-managed version of that path
 requires:
 
 - `AIMEE_SERVER_ID`;
@@ -205,13 +227,14 @@ requires:
 - `AIMEE_KB_CONN`, the one-time `aimee://` enrollment string used to establish the server's mTLS
   identity with the KB.
 
-The shipped server Compose files pass these values through from `.env`, leave their identity values
-empty, and mount `${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}` read-only at
-`/run/aimee/management`. The empty authority configuration grants no additional users. The explicit
-certificate-bound first wizard owner remains available for bootstrap administration, and a local
+The shipped server Compose files pass explicit values through from `.env` when
+present. Without an explicit packet, the managed wizard uses its durable
+identity and read-only managed trust volumes. The explicit certificate-bound
+first wizard owner remains available for bootstrap administration, and a local
 Unix-socket operator cannot be locked out.
 
-A fresh embedded KB has no team. Create the first team locally without exposing an HTTP admin route:
+For a split/external authority, create the first team locally without exposing
+an HTTP admin route:
 
 ```bash
 KB_CONTAINER=$(docker ps --filter label=com.docker.compose.project=aimee \
