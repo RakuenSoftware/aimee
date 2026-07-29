@@ -1,7 +1,7 @@
 # Proposal: Agent-facing code intelligence effectiveness
 
-- **State:** ACCEPTED DESIGN / IMPLEMENTATION IN PROGRESS — proposal and E0 merged; local-first
-  amendment roundtable-approved and PR pending (file remains pending until E1–E6 close)
+- **State:** IN PROGRESS — accepted design; E0 complete; local-first amendment roundtable-approved
+  and PR pending (file remains pending until E1–E6 close)
 - **Author:** JBailes
 - **Date:** 2026-07-29
 - **Charter roles:** Recall, Rank-Fuse, Calibrate / Evaluate-Optimize, Enforce, Gate-Promote
