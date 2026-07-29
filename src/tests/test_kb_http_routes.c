@@ -348,13 +348,14 @@ char *kb_service_ingest_status_json(void)
  * doc_id) mirrors what the ranked backend emits and what the handler's reshaper
  * parses. Default 0 keeps every other test on the empty-results path. */
 static int g_test_search_populated = 0;
+static char g_test_search_embedding[256];
 char *kb_search_json_ex(const char *p, const char *q, const char *e, int m, const char *f)
 {
    (void)p;
    (void)q;
-   (void)e;
    (void)m;
    (void)f;
+   snprintf(g_test_search_embedding, sizeof(g_test_search_embedding), "%s", e ? e : "");
    const char *src = g_test_search_populated
                          ? "{\"fusion_mode\":\"rrf\",\"results\":[{\"file_path\":\"docs/alpha.md\","
                            "\"content\":\"alpha excerpt body\",\"score\":0.875,\"doc_id\":4242}]}"
@@ -1052,6 +1053,12 @@ const char *config_embedding_command(const config_t *cfg, const char *requested)
       return requested;
    if (cfg && cfg->embedding_command[0])
       return cfg->embedding_command;
+   const char *url = getenv("AIMEE_EMBEDDER_URL");
+   if (url && url[0])
+      return url;
+   url = getenv("AIMEE_LLM_URL");
+   if (url && url[0])
+      return url;
    return "builtin";
 }
 
@@ -5017,6 +5024,23 @@ static void test_search_ok(void)
    assert(strstr(buf, "\"fusion_mode_used\"") != NULL);
 }
 
+/* A managed KB normally has no raw embedding_command in aimee.yaml: the
+ * wizard supplies AIMEE_LLM_URL. Search must resolve that deployment default
+ * before entering the ranked backend, or it silently queries a 1024-dim corpus
+ * with the 384-dim builtin vector. */
+static void test_search_uses_managed_embedder(void)
+{
+   char buf[1024];
+   unsetenv("AIMEE_EMBEDDER_URL");
+   setenv("AIMEE_LLM_URL", "http://managed-llm:8742", 1);
+   g_test_search_embedding[0] = '\0';
+   int s = kb_http_route_ex("POST", "/v1/search", NULL, NULL, NULL, "{\"query\":\"foo\"}", 15, buf,
+                            sizeof(buf));
+   assert(s == 200);
+   assert(strcmp(g_test_search_embedding, "http://managed-llm:8742") == 0);
+   unsetenv("AIMEE_LLM_URL");
+}
+
 /* Producer->consumer contract: the /v1/search ranked handler and the kb_search
  * agent tool must agree on the response shape. A refactor once left the tool
  * unwrapping a top-level {"result"} field the endpoint never emits, so every
@@ -5395,6 +5419,7 @@ int main(void)
    test_curator_routes();
    test_invalidations_route();
    test_search_ok();
+   test_search_uses_managed_embedder();
    test_search_hits_tool_contract();
    test_search_503_while_reembed_in_progress();
    test_reembed_wrong_method();
