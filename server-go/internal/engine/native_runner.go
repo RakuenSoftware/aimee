@@ -1102,6 +1102,10 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 		if !echoOK || echoStage != artifactStage {
 			failures = append(failures, roundtablecfg.ParticipantFailure{Seat: o.seat.ordinal + 1, Persona: o.seat.persona, Category: "artifact_stage_mismatch", Detail: "reviewer did not evaluate artifact stage " + artifactStage})
 			feedback.Findings = append(feedback.Findings, wfe.Finding{ID: o.seat.persona + "-artifact-stage", Persona: o.seat.persona, Severity: "blocking", Summary: "reviewer did not evaluate the declared artifact stage", Recommendation: "review the artifact at stage " + artifactStage + " and echo that exact artifact_stage"})
+			// The response is unusable for quorum just like an identity mismatch.
+			// Keep the blocking finding as the fail-closed anti-injection signal,
+			// but do not also count a failed participant as a voter.
+			voters--
 			continue
 		}
 		// The stage echo is checked above and supersedes this: a seat that reviewed

@@ -421,7 +421,7 @@ func TestNativeRoundtableFailsClosedWhenReviewerEvaluatesWrongStage(t *testing.T
 			agents := &recordingAgents{reviewResponse: `{` + prefix + `"original_request_alignment":{"status":"aligned","summary":"looks related"},"verdict":"approve","findings":[]}`}
 			runner := &NativeRunner{agents: agents, roundtables: configuredTestRoundtable(t)}
 			feedback, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), StepRequest{}, []panelSeat{{persona: "qa"}}, "review", "hash", "plan", 1)
-			if unreachable != "" || approvals != 0 || voters != 1 || len(feedback.Findings) != 1 {
+			if unreachable != "" || approvals != 0 || voters != 0 || len(feedback.Findings) != 1 {
 				t.Fatalf("stage mismatch accounting: approvals=%d voters=%d unreachable=%q feedback=%+v", approvals, voters, unreachable, feedback)
 			}
 			finding := feedback.Findings[0]
@@ -463,7 +463,7 @@ func TestStageMismatchCannotBeOverriddenByAnotherApproval(t *testing.T) {
 	}}
 	runner := &NativeRunner{agents: agents, roundtables: configuredTestRoundtable(t)}
 	feedback, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), StepRequest{}, []panelSeat{{persona: "qa"}, {persona: "security"}}, "review", "hash", "plan", 1)
-	if unreachable != "" || approvals != 1 || voters != 2 || len(feedback.Findings) != 1 || !strings.HasSuffix(feedback.Findings[0].ID, "-artifact-stage") {
+	if unreachable != "" || approvals != 1 || voters != 1 || len(feedback.Findings) != 1 || !strings.HasSuffix(feedback.Findings[0].ID, "-artifact-stage") {
 		t.Fatalf("mixed-stage panel could approve: approvals=%d voters=%d unreachable=%q feedback=%+v", approvals, voters, unreachable, feedback)
 	}
 }
