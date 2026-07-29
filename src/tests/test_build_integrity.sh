@@ -62,6 +62,26 @@ else
     fail "server entrypoint leaves the workflow registry root-owned"
 fi
 
+# Upgraded persistent volumes can spend tens of seconds recovering WAL state
+# before the C resource socket appears.  The entrypoint must not kill a live
+# child at the old 15-second deadline, and the same-binary OAuth prewarm helper
+# must start only after the real server owns the persisted pid file.
+wfe_wait_tenths=$(sed -n 's/^WFE_SOCKET_WAIT_TENTHS="${AIMEE_WFE_SOCKET_WAIT_TENTHS:-\([0-9][0-9]*\)}"$/\1/p' \
+    ../deploy/container/server-entrypoint.sh)
+server_start_line=$(grep -nF 'log "starting aimee-server (socket=$SERVER_SOCK) as user aimee"' \
+    ../deploy/container/server-entrypoint.sh | cut -d: -f1)
+prewarm_line=$(grep -nF 'runuser -u aimee -- aimee-server --prewarm-cli-oauth' \
+    ../deploy/container/server-entrypoint.sh | cut -d: -f1)
+wfe_start_line=$(grep -nF 'log "starting Go WFE control plane (socket=$AIMEE_WFE_HTTP_SOCKET)"' \
+    ../deploy/container/server-entrypoint.sh | cut -d: -f1)
+if [ -n "$wfe_wait_tenths" ] && [ "$wfe_wait_tenths" -ge 1200 ] &&
+   [ -n "$server_start_line" ] && [ -n "$wfe_start_line" ] && [ -n "$prewarm_line" ] &&
+   [ "$server_start_line" -lt "$wfe_start_line" ] && [ "$wfe_start_line" -lt "$prewarm_line" ]; then
+    pass "server entrypoint tolerates volume recovery before launching same-binary helpers"
+else
+    fail "server entrypoint can time out recovery or let prewarm collide with a stale server pid"
+fi
+
 if awk '/^FROM /{runtime=($0=="FROM debian:bookworm-slim"); found=0} runtime && /build-essential/{found=1} END{exit !found}' \
     ../Dockerfile.server; then
     pass "server runtime carries the baseline workflow verification toolchain"
