@@ -7,7 +7,7 @@
  * server_mcp_call_table.inc. Kept out of mcp_tools.c (which is at its line
  * budget), and added to the catalog via mcp_build_tools_list -> here. Because
  * the P2 default presentation profile is "core", these are not shown upfront but
- * are discoverable via find_tools/describe_tool and callable by name. */
+ * are discoverable via find_tools/describe_tool and callable through call_tool. */
 #include "cJSON.h"
 #include "aimee/protocols/mcp/mcp_tools.h"
 #include "aimee_features.h"

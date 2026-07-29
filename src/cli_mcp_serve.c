@@ -321,7 +321,7 @@ static void handle_initialize(cJSON *id)
        "(e.g. get_help(\"work queue\")). The tools/list is a curated core set; the "
        "full catalog is larger — call find_tools(\"<keyword>\") to discover more "
        "tools and describe_tool(\"<name>\") for a tool's full input schema, then "
-       "call any discovered tool by name (it need not appear in tools/list). Do "
+       "call call_tool with that name and matching arguments. Do "
        "not use provider-native sub-agent tools such as spawn_agent or Agent; use "
        "the aimee delegate tool for delegated work.");
 

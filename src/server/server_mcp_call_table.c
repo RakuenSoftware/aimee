@@ -143,6 +143,10 @@ static cJSON *mcph_find_symbol(struct mcp_call *c)
 {
    return smcp_tool_find_symbol(c->jargs);
 }
+static cJSON *mcph_search_docs(struct mcp_call *c)
+{
+   return smcp_tool_search_docs(c->jargs);
+}
 static cJSON *mcph_preview_blast_radius(struct mcp_call *c)
 {
    return tool_preview_blast_radius(c->jargs);
@@ -1368,6 +1372,7 @@ static const struct
     {"get_host", mcph_get_host, NULL},
     {"list_hosts", mcph_list_hosts, NULL},
     {"find_symbol", mcph_find_symbol, NULL},
+    {"search_docs", mcph_search_docs, NULL},
     {"preview_blast_radius", mcph_preview_blast_radius, NULL},
     {"record_attempt", mcph_record_attempt, NULL},
     {"list_attempts", mcph_list_attempts, NULL},

@@ -37,6 +37,7 @@ cJSON *tool_complete_prospective_memory(cJSON *args);
 cJSON *smcp_tool_create_note(cJSON *args);
 cJSON *tool_create_prospective_memory(cJSON *args);
 cJSON *smcp_tool_find_symbol(cJSON *args);
+cJSON *smcp_tool_search_docs(cJSON *args);
 cJSON *tool_get_context_block(cJSON *args);
 cJSON *tool_get_entity(cJSON *args);
 cJSON *tool_get_entity_edges(cJSON *args);
