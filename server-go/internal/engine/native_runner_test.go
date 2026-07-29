@@ -510,6 +510,14 @@ func TestConfiguredRoundtableHonorsMinimumWhenASeatIsUnavailable(t *testing.T) {
 			if result.Roundtable == nil || !result.Roundtable.Degraded || result.Roundtable.ParticipantsTotal != 2 || result.Roundtable.ParticipantsUsed != tc.wantUsed || result.Roundtable.ParticipantsFailed != tc.wantFailed {
 				t.Fatalf("degraded participation was not preserved: %+v", result.Roundtable)
 			}
+			if len(result.Roundtable.ParticipantFailures) != tc.wantFailed {
+				t.Fatalf("participant failure diagnostics=%+v, want %d", result.Roundtable.ParticipantFailures, tc.wantFailed)
+			}
+			for _, failure := range result.Roundtable.ParticipantFailures {
+				if failure.Seat < 1 || failure.Persona == "" || failure.Category == "" || failure.Detail == "" {
+					t.Fatalf("incomplete participant failure diagnostic: %+v", failure)
+				}
+			}
 		})
 	}
 }
@@ -690,12 +698,40 @@ func TestRoundtableStageGuidanceCoversEverySupportedStage(t *testing.T) {
 	tests := map[string]string{
 		"intent":      "acceptance criteria faithfully capture",
 		"plan":        "goal-only restatement",
-		"frozen_diff": "never create a blocking finding solely",
+		"frozen_diff": "negative or unavailable lookup evidence",
 	}
 	for stage, marker := range tests {
 		if normalized, ok := normalizeRoundtableStage(stage); !ok || normalized != stage || !strings.Contains(roundtableStageGuidance(normalized), marker) {
 			t.Fatalf("stage %q lacks its guidance marker %q", stage, marker)
 		}
+	}
+}
+
+func TestRoundtableRepairPreservesNonBlockingApprovalFindings(t *testing.T) {
+	prompt := panelResponseRepairPrompt("run", "hash", "frozen_diff", "invalid")
+	if !strings.Contains(prompt, "may carry suggestion or nit findings") || !strings.Contains(prompt, `"verdict":"approve|changes|blocked"`) || strings.Contains(prompt, "approve only with an empty findings array") {
+		t.Fatalf("repair prompt contradicts the panel verdict contract: %s", prompt)
+	}
+}
+
+func TestPanelFailureCategoryPreservesActionableCause(t *testing.T) {
+	tests := []struct {
+		name      string
+		err       error
+		transport bool
+		want      string
+	}{
+		{name: "deadline", err: context.DeadlineExceeded, transport: true, want: "deadline"},
+		{name: "capacity", err: errors.New("[aimee_err=concurrency_limit]"), transport: true, want: "capacity_backpressure"},
+		{name: "terminal", err: fmt.Errorf("%w: failed", ErrDelegateTerminal), transport: true, want: "delegate_terminal"},
+		{name: "malformed", err: errors.New("invalid character"), want: "malformed_after_repair"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := panelFailureCategory(tc.err, tc.transport); got != tc.want {
+				t.Fatalf("panelFailureCategory()=%q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
