@@ -1,8 +1,10 @@
 /* server_tls.h: native TLS termination for aimee-server (native-TLS phase 1b).
  *
  * Plain server TLS — the server presents a cert+key; the client verifies the
- * server and authenticates with the bearer. No client certificate (not mTLS):
- * a TLS+bearer connection is the attested write path for the credential vault.
+ * server and authenticates with the bearer. The ordinary listener always lets
+ * a cert-less TLS handshake reach HTTP parsing so a new client can redeem its
+ * enrollment bearer; required-mTLS posture is enforced per request and permits
+ * only the exact enrollment routes without a verified client certificate.
  * Each TLS connection is handled by its own conn_worker thread, which owns the
  * SSL end to end (accept -> use -> SSL_free); SSE-offload is refused over TLS
  * (it dups the fd to a second thread that cannot share the SSL — phase 1c). */
@@ -30,10 +32,11 @@ extern "C"
    /* Build the process-wide server SSL_CTX from the cert + key PEM files. Returns
     * 0 on success, -1 on failure (logged). Idempotent (no-op once initialized).
     *
-    * mtls_mode: 0 = off (plain server TLS), 1 = optional (request a client cert
-    * but allow none), 2 = required (refuse a handshake without a valid client
-    * cert). When mtls_mode > 0 the SSL_CTX verifies client certs against
-    * client_ca_path (a PEM CA bundle); a load failure disables mTLS (logged). */
+    * mtls_mode: 0 = off (plain server TLS), 1 = optional, 2 = required by the
+    * HTTP authorization layer. Modes 1 and 2 both request a client certificate
+    * and validate any certificate presented against client_ca_path (a PEM CA
+    * bundle), while allowing a cert-less handshake solely so the HTTP layer can
+    * authorize enrollment. A CA load failure refuses the TLS context. */
    int server_tls_init(const char *cert_path, const char *key_path, int mtls_mode,
                        const char *client_ca_path);
 
@@ -77,7 +80,7 @@ extern "C"
     * startup configuration. */
    int server_tls_mtls_mode(void);
 
-   /* Build a fully validated required-mTLS context without publishing it. The
+   /* Build a fully validated application-required mTLS context without publishing it. The
     * caller may durably commit its posture and then pass the context to
     * server_tls_activate_required, whose pointer swap is infallible. NULL means
     * TLS is absent/already required, or validation failed. */

@@ -273,6 +273,34 @@ static void test_apply_max_turns_policy(void)
    printf("  PASS: test_apply_max_turns_policy\n");
 }
 
+static void test_apply_max_turns_cap(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.agent_count = 5;
+   for (int i = 0; i < 4; i++)
+   {
+      snprintf(cfg.agents[i].roles[0], sizeof(cfg.agents[i].roles[0]), "code");
+      cfg.agents[i].role_count = 1;
+   }
+   cfg.agents[0].max_turns = -1; /* inherited unlimited */
+   cfg.agents[1].max_turns = 0;  /* explicitly unlimited */
+   cfg.agents[2].max_turns = 20; /* stricter agent cap */
+   cfg.agents[3].max_turns = 200;
+   snprintf(cfg.agents[4].roles[0], sizeof(cfg.agents[4].roles[0]), "review");
+   cfg.agents[4].role_count = 1;
+   cfg.agents[4].max_turns = 200;
+
+   delegate_apply_max_turns_cap(&cfg, "code", 48);
+   assert(cfg.agents[0].max_turns == 48);
+   assert(cfg.agents[1].max_turns == 48);
+   assert(cfg.agents[2].max_turns == 20);
+   assert(cfg.agents[3].max_turns == 48);
+   assert(cfg.agents[4].max_turns == 200); /* ineligible role untouched */
+
+   printf("  PASS: test_apply_max_turns_cap\n");
+}
+
 static void test_auto_tools_policy(void)
 {
    assert(delegate_role_auto_tools_for_invocation("diagnose", -1, 0) == 1);
@@ -309,6 +337,7 @@ int main(void)
    test_culled_persona_roles_are_rejected();
    test_inspection_turn_policies();
    test_apply_max_turns_policy();
+   test_apply_max_turns_cap();
    test_auto_tools_policy();
    printf("All tests passed.\n");
    return 0;

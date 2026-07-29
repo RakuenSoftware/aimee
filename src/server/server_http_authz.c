@@ -88,9 +88,19 @@ uint32_t server_http_effective_conn_caps(int is_tcp, const char *bearer, int rem
    return CAPS_READ_ONLY & ~(uint32_t)CAP_CHAT;
 }
 
-int server_http_mtls_transport_allowed(int is_tcp, int mtls_mode, int mtls_authenticated)
+int server_http_mtls_transport_allowed(int is_tcp, int mtls_mode, int mtls_authenticated,
+                                       const char *method, const char *path)
 {
-   return !is_tcp || mtls_mode < 2 || mtls_authenticated;
+   if (!is_tcp || mtls_mode < 2 || mtls_authenticated)
+      return 1;
+   /* Required posture is enforced here instead of with
+    * SSL_VERIFY_FAIL_IF_NO_PEER_CERT so a new client can reach the enrollment
+    * handlers. These are transport exceptions only: the ordinary bearer,
+    * bootstrap, capability and single-use binding gates still run below. */
+   if (!method || !path || strcmp(method, "POST") != 0)
+      return 0;
+   return strcmp(path, "/v1/api/rotate_bearer") == 0 ||
+          strcmp(path, "/v1/api/enroll_bearer") == 0 || strcmp(path, "/v1/cert/sign") == 0;
 }
 
 /* Routes deliberately reachable over the TCP listener regardless of

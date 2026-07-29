@@ -37,8 +37,9 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 
-#define KB_TLS_REQ_MAX          (64 * 1024 + 1)
 #define KB_TLS_HEADER_MAX       (64 * 1024)
+#define KB_TLS_BODY_MAX         (1024 * 1024)
+#define KB_TLS_REQ_MAX          (KB_TLS_HEADER_MAX + KB_TLS_BODY_MAX + 1)
 #define KB_TLS_REQUEST_LINE_MAX 8192
 #define KB_TLS_URI_MAX          4096
 #define KB_TLS_HEADER_COUNT_MAX 64
@@ -185,7 +186,7 @@ static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, 
    int bodyless = !strcmp(method, "GET") || !strcmp(method, "HEAD");
    if ((bodyless && have_cl) || (!bodyless && !have_cl))
       return 400;
-   if (content_len > cap - header_len - 1)
+   if (content_len > KB_TLS_BODY_MAX || content_len > cap - header_len - 1)
       return 413;
    if (total > header_len + content_len)
       return 400;
@@ -479,13 +480,24 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
 
       /* Derive the caller's scope from the verified client certificate. A scoped
        * CN "<kind>:<id>" becomes a synthetic scoped credential the router enforces
-       * via verify-then-trust; "global"/owner (no ':') gets full access. */
+       * via verify-then-trust; "global"/owner (no ':') becomes an unscoped
+       * credential, which the router resolves to the owner actor.
+       *
+       * The unscoped half is load-bearing for the wizard's p5-server-client
+       * workload certificate. Leaving synth empty there let ordinary read routes
+       * through (they need no actor) but made every tenant/admin route fail 401,
+       * including the UDS-only `aimee kb grant set` bootstrap path. The certificate
+       * had already passed TLS verification and the primary enrollment lookup, so
+       * manufacture the same request-local verifier input for both scope shapes. */
       char cn[128] = "";
       char synth[160] = "", authhdr[180] = "";
       int have_cert = (kb_tls_peer_cn(ssl, cn, sizeof(cn)) == 0);
-      if (have_cert && strchr(cn, ':'))
+      if (have_cert)
       {
-         snprintf(synth, sizeof(synth), "scope:%s:m", cn);
+         if (strchr(cn, ':'))
+            snprintf(synth, sizeof(synth), "scope:%s:m", cn);
+         else
+            snprintf(synth, sizeof(synth), "mtls-owner");
          snprintf(authhdr, sizeof(authhdr), "Bearer %s", synth);
       }
 

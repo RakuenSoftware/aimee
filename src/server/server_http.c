@@ -1598,7 +1598,8 @@ void handle_conn(int fd, int is_tcp, int is_management)
     * bearer fallback merely because its handshake predated the context swap. */
    mtls_mode = server_tls_mtls_mode();
    int transport_authenticated = mtls_authenticated || management_authenticated;
-   if (!server_http_mtls_transport_allowed(is_tcp, mtls_mode, transport_authenticated))
+   if (!server_http_mtls_transport_allowed(is_tcp, mtls_mode, transport_authenticated, method,
+                                           path))
    {
       send_response(fd, 401,
                     "{\"error\":{\"message\":\"a valid client certificate is required\","

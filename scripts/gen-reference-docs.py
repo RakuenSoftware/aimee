@@ -682,6 +682,10 @@ ENV_DESC = {
     "AIMEE_LLM_AUTH_TOKEN": ("Managed KB and inference", "Bearer service identity shared by aimee-kb and its aimee-llm gateway for embed, rerank, and synthesis requests. Wizard-managed deploys generate and persist a 256-bit value automatically. This is separate from user/server bearers."),
     "AIMEE_LLM_AUTH_REQUIRED": ("Managed KB and inference", "Set to 1 on wizard-managed KBs so embed, rerank, and synthesis clients refuse to contact the unified LLM when its bearer service identity is missing."),
     "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE": ("Managed KB and inference", "Explicit migration/adoption override for an existing wizard-managed LLM credential. Ordinary inherited AIMEE_LLM_AUTH_TOKEN is ignored by managed credential creation so stale child-service state cannot win. Must be a 32..512 character RFC 6750 b64token."),
+    "AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK": (
+        "Managed KB and inference",
+        "Internal managed-authority switch: still attempts mlockall first, but when an unprivileged container cannot raise RLIMIT_MEMLOCK, permits the offline one-shot to continue only if the kernel reports no active swap. Operator-run custody tools leave this unset and retain mandatory mlockall.",
+    ),
     "AIMEE_LLM_MODEL": ("Knowledge base (aimee-kb)", "Model label sent to AIMEE_LLM_URL's chat endpoint (single-model gateways ignore it). Default 'aimee-synth'."),
     "AIMEE_EMBEDDER_URL": ("Knowledge base (aimee-kb)", "Embedder endpoint override (/embed, /embed_batch); takes precedence over AIMEE_LLM_URL for embedding."),
     "AIMEE_KB_API_URL": ("Knowledge base (aimee-kb)", "aimee-kb HTTP API base URL."),
@@ -698,7 +702,10 @@ ENV_DESC = {
         "and serves reads but denies every write with no_team_configured.",
     ),
     "AIMEE_KB_HTTP_BIND": ("Knowledge base (aimee-kb)", "aimee-kb HTTP listener bind address."),
-    "AIMEE_KB_MTLS_HOST": ("Knowledge base (aimee-kb)", "aimee-kb mTLS listener host."),
+    "AIMEE_KB_MTLS_HOST": (
+        "Knowledge base (aimee-kb)",
+        "Advertised mTLS hostname placed in the aimee-kb server certificate; the listener binds all interfaces.",
+    ),
     "AIMEE_KB_MTLS_PORT": ("Knowledge base (aimee-kb)", "aimee-kb mTLS listener port."),
     "AIMEE_KB_EMIT_ENROLL": ("Knowledge base (aimee-kb)", "Emit a client enrollment token on KB start."),
     "AIMEE_KB_EMIT_SCOPE": ("Knowledge base (aimee-kb)", "Scope for the emitted enrollment token."),

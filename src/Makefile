@@ -455,6 +455,7 @@ SERVER_SRCS = server/server_http_grant_routes.c modules/kb_client/kb_client_gran
               modules/workflows/wfe_engine.c modules/workflows/wfe_blocks.c modules/workflows/wfe_approval.c \
               modules/workflows/wfe_verdict.c modules/workflows/wfe_roundtable.c modules/workflows/wfe_autonomy.c \
               server/server_workflow_api.c
+SERVER_SRCS += server/server_runtime_identity.c
 SERVER_SRCS += server/server_write_tier.c server/server_write_tier_db1.c server/server_mgmt_token.c server/kb_verifier_server_stub.c kb/auth_oidc.c server/server_mgmt_audit.c server/server_mgmt_endpoint.c shared/management_read.c server/server_mgmt_read_endpoint.c server/server_mgmt_read_source.c server/server_mgmt_status.c server/server_mgmt_checkpoint_client.c kb/kb_mgmt_status.c kb/kb_mgmt_client.c kb/kb_mgmt_endpoint.c
 SERVER_SRCS += http_content_encoding.c server/server_http_keepalive.c
 SERVER_SRCS += modules/economizer/gateway_mutate_wire.c
@@ -500,6 +501,7 @@ SERVER_KB_CLIENT_OBJS = $(KB_CLIENT_OBJS)
 
 # --- KB Service ---
 KB_SRCS = kb/kb_main.c kb/kb_vault_policy.c kb/kb_witness_cadence.c kb/kb_witness_gate_state.c kb/kb_background.c kb/kb_service.c kb/kb_service_workers.c kb/kb_ingest_workers.c kb/kb_service_kb.c kb/kb_service_memory.c kb/kb_service_css.c kb/kb_service_agent.c kb/kb_service_graph.c kb/kb_graph_analytics.c kb/lessons_cite_tracker.c kb/lessons_capture.c kb/lessons_reflect.c kb/lessons_actuate.c kb/lessons_session_capture.c kb/prompt_sanitizer.c kb/kb_surprising_judge.c kb/kb_service_artifacts.c kb/kb_service_roadmap.c kb/kb_intel_payload.c kb/kb_bandit_registry.c kb/kb_reflection.c kb/kb_evidence_embed.c kb/kb_learning_synth.c kb/kb_learning_version.c kb/kb_mining.c kb/http/kb_http.c kb/http/kb_http_listener.c kb/http/kb_http_client.c kb/http/kb_tls.c kb/http/kb_tls_serve.c kb/http/kb_http_conn.c kb/http/kb_http_ws.c kb/http/kb_http_search.c kb/http/kb_route_acl.c kb/http/kb_ingress.c kb/http/kb_http_team.c kb/http/kb_http_models.c kb/http/kb_models_validate.c kb/http/kb_http_insights.c kb/http/kb_insights_util.c kb/http/kb_http_budget.c kb/http/kb_http_rate.c kb/http/kb_http_telemetry.c kb/http/kb_http_console.c kb/http/kb_http_accounts.c kb/http/kb_http_bootstrap.c kb/http/kb_http_identity_login.c kb/http/kb_http_grants.c kb/http/kb_http_governance.c kb/kb_scope.c kb/kb_identity_resolve.c kb/kb_oidc_jwks_fleet.c kb/kb_reqctx.c kb/http/kb_http_code.c kb/http/kb_http_code_graphfb.c kb/http/kb_http_pdf.c kb/http/kb_http_ingest.c kb/http/kb_http_jobs.c kb/kb_doc_hash.c kb/kb_doc_pdf.c kb/kb_tsr_sidecar.c kb/kb_blob_store.c kb/kb_blob_reconcile.c kb/kb_ocr_sidecar.c kb/http/kb_http_releases.c kb/http/kb_http_reflections.c kb/kb_ingest_normalize.c kb/kb_service_code_embed.c kb/kb_memory_embed.c kb/kb_memory_facts.c kb/memory_rewrite_llm.c kb/enroll.c kb/verifier.c kb/auth_oidc.c kb/kb_oidc_login.c kb/kb_oidc_login_store.c kb/kb_oidc_token_exchange.c kb/kb_oidc_token_exchange_post.c kb/pki.c modules/aws/aws_sigv4.c modules/aws/aws_sts.c modules/aws/bedrock_policy.c modules/aws/sts_cache.c modules/aws/aws_eventstream.c
+KB_SRCS += kb/managed_server_identity.c kb/managed_server_identity_install.c
 KB_SRCS += kb/kb_bedrock_egress.c kb/kb_egress_admission.c kb/kb_vault_key_use.c kb/kb_vault_protected_use.c kb/kb_vault_rewrap.c kb/kb_vault_rotation.c kb/kb_vault_rotation_ops.c kb/kb_mgmt_endpoint.c kb/kb_mgmt_client.c kb/kb_mgmt_token.c kb/kb_identity_token.c kb/kb_mgmt_status.c kb/http/kb_http_servers.c kb/http/kb_http_egress.c db2/org_token_audit.c
 KB_SRCS += kb/kb_workload_provider.c kb/kb_workload_helper_posix.c kb/kb_workload_wire.c \
            kb/kb_workload_proof.c kb/kb_workload_jwt.c
@@ -576,6 +578,7 @@ STATUS_PROVISIONER_PLATFORM_OBJS = $(filter %/platform_path.o,$(PLATFORM_BASIC_O
 # Offline, owner-only P5-C2 trust-root bootstrap/export tool. Keep this exact
 # closure out of every runtime target and installation surface.
 TOKEN_ROOTS_PROVISIONER_OBJS = $(OBJDIR)/kb/kb_mgmt_token_roots_provision_main.o \
+                               $(OBJDIR)/kb/kb_mgmt_offline_hardening.o \
                                $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o \
                                $(OBJDIR)/kb/kb_mgmt_token_public.o \
                                $(OBJDIR)/db2/management_token_roots.o \
@@ -590,6 +593,7 @@ TOKEN_ROOTS_PROVISIONER_VAULT_OBJS = $(OBJDIR)/kb/modules/vault/vault_crypto.o \
 # Offline, owner-only P5-C2b publisher.  This exact closure must remain absent
 # from online binaries, ordinary install targets, and the C2a provisioner.
 JWKS_PUBLISHER_OBJS = $(OBJDIR)/kb/kb_mgmt_jwks_publish_main.o \
+                      $(OBJDIR)/kb/kb_mgmt_offline_hardening.o \
                       $(OBJDIR)/kb/kb_mgmt_jwks_publication.o \
                       $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o \
                       $(OBJDIR)/kb/kb_mgmt_token_public.o \
@@ -772,7 +776,7 @@ GATEWAY_PLATFORM_OBJS = $(filter %/platform_process.o, $(PLATFORM_BASIC_OBJS))
 GATEWAY_OBJS = $(GATEWAY_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o $(GATEWAY_PLATFORM_OBJS)
 
 # All source files for linting (excluding vendored cJSON)
-ALL_SRCS = $(sort $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB2_PG_SRCS) $(DB2_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c kb/kb_mgmt_token_public.c db2/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c db2/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c db2/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) $(CMD_SRCS) \
+ALL_SRCS = $(sort $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB2_PG_SRCS) $(DB2_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c kb/kb_mgmt_token_public.c db2/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_offline_hardening.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c db2/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c db2/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) $(CMD_SRCS) \
            $(CLI_SRCS) $(SERVER_SRCS) $(KB_SRCS) $(KB_SYNTHESIS_SRCS) $(GATEWAY_SRCS) $(PLATFORM_SRCS) $(PLATFORM_AGENT_SRCS))
 LINT_SRCS = $(ALL_SRCS) kb/http/kb_http_resolver.c $(wildcard tests/test_*.c) $(wildcard tests/fuzz_*.c) $(wildcard tests/bench_*.c)
 

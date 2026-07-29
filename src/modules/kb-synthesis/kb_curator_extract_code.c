@@ -9,6 +9,7 @@
 
 #include "kb_curator_extract.h"
 #include "kb_curator_grounding.h"
+#include "kb_curator_provider.h"
 #include "kb_curator_sidecar.h" /* kb_curator_describe_wait_status */
 #include "aimee.h"
 #include "cJSON.h"
@@ -121,12 +122,47 @@ static void ccu_mark_done(int64_t job_id)
    aimee_pg_finalize(st);
 }
 
-static void ccu_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempts,
-                                   const char *error_msg)
+void kb_curator_mark_retry_provider_unavailable_code(int64_t job_id, int attempts,
+                                                     const char *error_msg)
 {
+   kb_curator_provider_backoff_note();
    void *conn = db2_conn();
    if (!conn)
       return;
+
+   char err[CCU_ERRBUF] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "UPDATE kb_code_unit_jobs"
+                        " SET status='pending', last_error=?1,"
+                        "     attempts=CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END,"
+                        "     next_attempt_at=?3, updated_at=pg_now_text()"
+                        " WHERE id=?2",
+                        err, sizeof(err));
+   if (!st)
+      return;
+   char errbuf[512];
+   snprintf(errbuf, sizeof(errbuf), "%s", error_msg ? error_msg : "provider unavailable");
+   char next_at[32];
+   kb_curator_next_attempt_at(attempts > 0 ? attempts : 1, next_at, sizeof(next_at));
+   aimee_pg_bind_text(st, "?1", errbuf);
+   aimee_pg_bind_int64(st, "?2", job_id);
+   aimee_pg_bind_text(st, "?3", next_at);
+   (void)aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+}
+
+static int ccu_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempts,
+                                  const char *error_msg)
+{
+   if (kb_curator_error_is_provider_unavailable(error_msg))
+   {
+      kb_curator_mark_retry_provider_unavailable_code(job_id, attempts, error_msg);
+      return 1;
+   }
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
 
    const char *new_status = (attempts >= max_attempts) ? "failed" : "pending";
    char err[CCU_ERRBUF] = "";
@@ -137,7 +173,7 @@ static void ccu_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempt
                                           " WHERE id=?3",
                                           err, sizeof(err));
    if (!st)
-      return;
+      return 0;
    char next_at[32];
    kb_curator_next_attempt_at(attempts, next_at, sizeof(next_at));
    aimee_pg_bind_text(st, "?4", next_at);
@@ -148,6 +184,7 @@ static void ccu_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempt
    aimee_pg_bind_int64(st, "?3", job_id);
    (void)aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
+   return 0;
 }
 
 /* Reclaim code-unit jobs orphaned in 'running'. The claim only ever selects
@@ -656,6 +693,9 @@ static int ccu_write_artifacts(const ccu_job_t *job, cJSON *artifacts_arr)
 
 int kb_curator_extract_code_unit_one(const kb_curator_extract_opts_t *opts)
 {
+   if (kb_curator_provider_backoff_active())
+      return 0;
+
    ccu_job_t job;
    memset(&job, 0, sizeof(job));
 
@@ -664,7 +704,10 @@ int kb_curator_extract_code_unit_one(const kb_curator_extract_opts_t *opts)
    ccu_reclaim_stale_running(opts ? opts->max_attempts : 1);
 
    if (!ccu_claim_job(&job))
+   {
+      kb_curator_provider_backoff_recovered();
       return 0; /* queue empty */
+   }
 
    aimee_log(LOG_DEBUG, "kb.curator.extract_code",
              "claimed extract_code_unit job %lld symbol '%s' in '%s'", (long long)job.job_id,
@@ -759,9 +802,14 @@ int kb_curator_extract_code_unit_one(const kb_curator_extract_opts_t *opts)
       aimee_log(LOG_WARN, "kb.curator.extract_code",
                 "sidecar failed for job %lld (attempt %d/%d): %s", (long long)job.job_id,
                 job.attempts, opts->max_attempts, sidecar_err);
-      ccu_mark_retry_or_fail(job.job_id, job.attempts, opts->max_attempts, sidecar_err);
-      return 1;
+      int provider_down =
+          ccu_mark_retry_or_fail(job.job_id, job.attempts, opts->max_attempts, sidecar_err);
+      if (!provider_down)
+         kb_curator_provider_backoff_recovered();
+      return provider_down ? -1 : 1;
    }
+
+   kb_curator_provider_backoff_recovered();
 
    cJSON *resp = cJSON_Parse(resp_str);
    free(resp_str);
@@ -782,9 +830,10 @@ int kb_curator_extract_code_unit_one(const kb_curator_extract_opts_t *opts)
       const char *errmsg = cJSON_IsString(err_j) ? err_j->valuestring : "sidecar status != ok";
       aimee_log(LOG_WARN, "kb.curator.extract_code", "sidecar error for job %lld: %s",
                 (long long)job.job_id, errmsg);
-      ccu_mark_retry_or_fail(job.job_id, job.attempts, opts->max_attempts, errmsg);
+      int provider_down =
+          ccu_mark_retry_or_fail(job.job_id, job.attempts, opts->max_attempts, errmsg);
       cJSON_Delete(resp);
-      return 1;
+      return provider_down ? -1 : 1;
    }
 
    cJSON *artifacts = cJSON_GetObjectItemCaseSensitive(resp, "artifacts");

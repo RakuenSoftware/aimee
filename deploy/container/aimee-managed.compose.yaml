@@ -60,8 +60,10 @@ services:
       AIMEE_LLM_MODEL: ${AIMEE_LLM_MODEL:-aimee-synth}
       AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
       # Internal-only mTLS lane used for server enrollment and signed management
-      # JWKS refresh. It is reachable on the Compose network, not published.
-      AIMEE_KB_MTLS_HOST: 0.0.0.0
+      # JWKS refresh. It is reachable on the Compose network, not published. The
+      # value is the certificate DNS identity; the listener still binds all
+      # container interfaces inside kb_mtls_start().
+      AIMEE_KB_MTLS_HOST: aimee-kb
       AIMEE_KB_MTLS_PORT: "8745"
     command: ["--http-port=8741"]
     healthcheck:
@@ -76,6 +78,57 @@ services:
       # compose.server-managed owns this volume under the fixed `aimee` project.
       # Sharing it read-only lets kb.build/update resolve server workspace paths.
       - aimee-server-workspaces:/var/lib/aimee-workspaces:ro
+
+  # Explicitly targeted by deploy_apply after the managed KB is healthy. Keeping
+  # this on its own profile prevents ordinary `compose up` from treating a
+  # one-shot enrollment job as a long-running sibling. It mounts both private
+  # volumes, so no key, enrollment token, or trust material crosses host argv.
+  aimee-server-identity:
+    profiles: ["identity-bootstrap"]
+    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:${AIMEE_IMAGE_TAG:-latest}}
+    user: "0:0"
+    networks: [aimee]
+    environment:
+      AIMEE_HOME: /var/lib/aimee
+      AIMEE_DB2_URL: postgresql:///aimee_shared?host=/var/lib/aimee/run&user=aimee
+    command:
+      - managed-server-identity
+      - install
+      - --server-home=/var/lib/aimee-server
+      - --host=aimee-kb
+      - --port=8745
+      - --endpoint=https://aimee-server:8743
+      - --uid=1000
+    depends_on:
+      aimee-kb: { condition: service_healthy }
+    volumes:
+      - aimee-managed-kb-home:/var/lib/aimee
+      - aimee-server-home:/var/lib/aimee-server
+
+  # Root custody and signed-JWKS publication stay out of both online images.
+  # The browser wizard explicitly runs this one-shot service before server
+  # enrollment. Its software-backed KMS state persists in a private volume; its
+  # only server-visible output is the public root-owned trust bundle below.
+  aimee-authority-bootstrap:
+    profiles: ["authority-bootstrap"]
+    image: ${AIMEE_AUTHORITY_BOOTSTRAP_IMAGE:-ghcr.io/rakuensoftware/aimee-authority-bootstrap:${AIMEE_IMAGE_TAG:-latest}}
+    user: "0:0"
+    network_mode: none
+    environment:
+      # The offline tools still attempt mlockall first. Unprivileged LXC cannot
+      # raise RLIMIT_MEMLOCK, so the managed one-shot may continue only after a
+      # fail-closed /proc/swaps check proves there is no active swap.
+      AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK: "1"
+    depends_on:
+      aimee-kb: { condition: service_healthy }
+    volumes:
+      - aimee-managed-kb-home:/var/lib/aimee-kb
+      - aimee-managed-authority-home:/var/lib/aimee-authority
+      # The provisioner clears its environment before private use. Its vault
+      # fallback therefore resolves here; this is the same private volume under
+      # a second fixed mount, never a host bind.
+      - aimee-managed-authority-home:/tmp/.config/aimee
+      - aimee-managed-jwks-trust:/run/aimee-trust
 
   # The one LLM service, for every tier: a model-less image that pulls the tier
   # the wizard selected on first boot and persists it in the /models volume.
@@ -130,6 +183,13 @@ services:
 volumes:
   aimee-managed-kb-home:
   aimee-managed-llm-models:
+  aimee-managed-authority-home:
   aimee-server-workspaces:
     external: true
     name: aimee_aimee-server-workspaces
+  aimee-server-home:
+    external: true
+    name: aimee_aimee-server-home
+  aimee-managed-jwks-trust:
+    external: true
+    name: aimee_aimee-managed-jwks-trust

@@ -499,6 +499,26 @@ static void test_role_csr_profiles(const kb_pki_ca_t *ca)
    printf("  role_csr_profiles: ok\n");
 }
 
+static void test_generate_csr_pair(void)
+{
+   char client_csr[KB_PKI_CSR_PEM_MAX], client_key[KB_PKI_KEY_PEM_MAX];
+   char management_csr[KB_PKI_CSR_PEM_MAX], management_key[KB_PKI_KEY_PEM_MAX];
+   assert(kb_pki_generate_csr("managed-client", client_csr, sizeof(client_csr), client_key,
+                              sizeof(client_key)) == 0);
+   assert(kb_pki_generate_csr("managed-management", management_csr, sizeof(management_csr),
+                              management_key, sizeof(management_key)) == 0);
+   assert(strstr(client_csr, "BEGIN CERTIFICATE REQUEST"));
+   assert(strstr(client_key, "BEGIN PRIVATE KEY"));
+   assert(kb_pki_csr_validate(client_csr) == 0);
+   assert(kb_pki_csr_validate(management_csr) == 0);
+   assert(strcmp(client_csr, management_csr) != 0);
+   assert(kb_pki_generate_csr("", client_csr, sizeof(client_csr), client_key, sizeof(client_key)) ==
+          -1);
+   assert(kb_pki_generate_csr("managed-client", client_csr, 8, client_key, sizeof(client_key)) ==
+          -1);
+   printf("  generate_csr_pair: ok\n");
+}
+
 static void test_server_cert(const kb_pki_ca_t *ca)
 {
    char cert[KB_PKI_CERT_PEM_MAX], key[KB_PKI_KEY_PEM_MAX];
@@ -551,6 +571,7 @@ int main(void)
    test_load_or_create();
    test_sign_csr(&ca);
    test_role_csr_profiles(&ca);
+   test_generate_csr_pair();
    test_server_cert(&ca);
    test_akid_present(&ca);
    test_strict_verify(&ca);

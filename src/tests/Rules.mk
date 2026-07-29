@@ -543,6 +543,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-verifier \
                $(TESTPREFIX)/unit-test-kb-auth-oidc \
                $(TESTPREFIX)/unit-test-kb-pki \
+               $(TESTPREFIX)/unit-test-managed-server-identity \
                $(TESTPREFIX)/unit-test-kb-tls \
                $(TESTPREFIX)/unit-test-kb-releases-db \
                $(TESTPREFIX)/unit-test-kb-ingest-format \
@@ -666,6 +667,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-identity-token-authority
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-token-authority-ipc
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-jwks-publication
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-mgmt-jwks-cache
+TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-offline-hardening
 unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	@# Point the run's HOME at a throwaway dir so a test that does NOT isolate its
 	@# own environment defaults to $$th/.config/aimee, never the developer's real
@@ -2105,7 +2107,8 @@ $(TESTPREFIX)/unit-test-server-identity-token: $(OBJDIR)/tests/test_server_ident
 
 $(TESTPREFIX)/unit-test-server-write-tier-db1: \
     $(OBJDIR)/tests/test_server_write_tier_db1.o \
-    $(OBJDIR)/server/server_write_tier_db1.o $(OBJDIR)/db1/server_identity_jti.o \
+    $(OBJDIR)/server/server_write_tier_db1.o $(OBJDIR)/server/server_runtime_identity.o \
+    $(OBJDIR)/db1/server_identity_jti.o \
     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -2223,6 +2226,11 @@ $(TESTPREFIX)/unit-test-server-mgmt-jwks-cache: \
     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o \
     $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-kb-mgmt-offline-hardening: \
+    $(OBJDIR)/tests/test_kb_mgmt_offline_hardening.o \
+    $(OBJDIR)/kb/kb_mgmt_offline_hardening.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-management-status-runtime: \
     $(OBJDIR)/tests/test_management_status_runtime.o \
@@ -4029,6 +4037,7 @@ $(TESTPREFIX)/unit-test-curator-code-unit: \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_queue.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_extract_code.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_extract.o \
+                                       $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_grounding.o \
                                        $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
@@ -5028,6 +5037,7 @@ $(TESTPREFIX)/unit-test-persona: $(OBJDIR)/tests/test_persona.o \
 $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                            $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_bearer_auth.o $(OBJDIR)/server/server_http_keepalive.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/wfe_http_proxy.o \
+                     $(OBJDIR)/server/server_runtime_identity.o \
                      $(OBJDIR)/server/server_http_grant_routes.o \
                      $(OBJDIR)/modules/kb_client/kb_client_grants.o $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/server_http_authz.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/tests/support/router_advise_stub.o $(OBJDIR)/modules/vault/vault_principal.o $(OBJDIR)/server/presence.o \
                            $(OBJDIR)/server/server_mgmt_status.o $(OBJDIR)/server/server_mgmt_endpoint.o $(OBJDIR)/shared/management_read.o $(OBJDIR)/server/server_mgmt_read_endpoint.o $(OBJDIR)/server/server_mgmt_read_source.o $(OBJDIR)/server/server_mgmt_audit.o $(OBJDIR)/server/server_mgmt_token.o $(OBJDIR)/kb/kb_mgmt_status.o $(OBJDIR)/kb/kb_mgmt_endpoint.o \
@@ -5542,6 +5552,18 @@ $(TESTPREFIX)/unit-test-kb-pki: $(OBJDIR)/tests/test_kb_pki.o \
                      $(OBJDIR)/kb/modules/vault/vault_crypto.o \
                      $(OBJDIR)/kb/modules/vault/vault_server_key.o \
                      $(OBJDIR)/kb/modules/vault/vault_store.o $(OBJDIR)/kb/modules/vault/vault_kek_check.o \
+                     $(OBJDIR)/kb/modules/vault/vault_kek_cache.o \
+                     $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-managed-server-identity: \
+                     $(OBJDIR)/tests/test_managed_server_identity.o \
+                     $(OBJDIR)/kb/managed_server_identity.o \
+                     $(OBJDIR)/kb/pki.o \
+                     $(OBJDIR)/kb/modules/vault/vault_crypto.o \
+                     $(OBJDIR)/kb/modules/vault/vault_server_key.o \
+                     $(OBJDIR)/kb/modules/vault/vault_store.o \
+                     $(OBJDIR)/kb/modules/vault/vault_kek_check.o \
                      $(OBJDIR)/kb/modules/vault/vault_kek_cache.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

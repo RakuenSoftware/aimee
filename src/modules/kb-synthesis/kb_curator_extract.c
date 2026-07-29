@@ -214,22 +214,6 @@ static void ce_mark_done(int64_t job_id)
    aimee_pg_finalize(st);
 }
 
-/* Is this failure the PROVIDER being unavailable, rather than anything about the
- * job? 503/429 and a -1 transport failure all mean "the upstream would not serve
- * this right now" — the document was never looked at, so the outcome carries no
- * information about whether it can be extracted.
- *
- * Matched on the message because that is what the call site has: provider_client
- * reports "provider HTTP %d" and the sidecar path forwards it verbatim. */
-int kb_curator_error_is_provider_unavailable(const char *error_msg)
-{
-   if (!error_msg || !error_msg[0])
-      return 0;
-   return strstr(error_msg, "provider HTTP 503") != NULL ||
-          strstr(error_msg, "provider HTTP 429") != NULL ||
-          strstr(error_msg, "provider HTTP -1") != NULL;
-}
-
 /* Requeue WITHOUT spending an attempt: undo the increment ce_claim_job applied,
  * and back off.
  *
@@ -246,6 +230,11 @@ int kb_curator_error_is_provider_unavailable(const char *error_msg)
  * retry load, and the operator sees the backlog in `aimee kb status`. */
 void kb_curator_mark_retry_provider_unavailable(int64_t job_id, int attempts, const char *error_msg)
 {
+   /* Arm the global gate even if the DB pool is the resource currently starved;
+    * otherwise a failed requeue lookup would let the next fresh row hammer the
+    * same open circuit immediately. The still-running row is reclaimed by the
+    * existing stale-lease path after restart/recovery. */
+   kb_curator_provider_backoff_note();
    void *conn = db2_conn();
    if (!conn)
       return;
@@ -274,17 +263,17 @@ void kb_curator_mark_retry_provider_unavailable(int64_t job_id, int attempts, co
    aimee_pg_finalize(st);
 }
 
-static void ce_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempts,
-                                  const char *error_msg)
+static int ce_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempts,
+                                 const char *error_msg)
 {
    if (kb_curator_error_is_provider_unavailable(error_msg))
    {
       kb_curator_mark_retry_provider_unavailable(job_id, attempts, error_msg);
-      return;
+      return 1;
    }
    void *conn = db2_conn();
    if (!conn)
-      return;
+      return 0;
 
    const char *new_status = (attempts >= max_attempts) ? "failed" : "pending";
    char err[CE_ERRBUF] = "";
@@ -295,7 +284,7 @@ static void ce_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempts
                                           " WHERE id = ?3",
                                           err, sizeof(err));
    if (!st)
-      return;
+      return 0;
    /* Back the retry off. A terminal 'failed' still gets a stamp — harmless, and
     * it keeps the column meaningful if the job is ever re-queued by hand. */
    char next_at[32];
@@ -308,6 +297,7 @@ static void ce_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempts
    aimee_pg_bind_int64(st, "?3", job_id);
    (void)aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
+   return 0;
 }
 
 /* Reclaim extract_doc jobs orphaned in 'running'. ce_claim_job only ever selects
@@ -532,6 +522,9 @@ static int ce_write_artifacts(const ce_job_t *job, cJSON *artifacts_arr)
 
 int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
 {
+   if (kb_curator_provider_backoff_active())
+      return 0;
+
    ce_job_t job;
    memset(&job, 0, sizeof(job));
 
@@ -540,7 +533,12 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
    ce_reclaim_stale_running(opts ? opts->max_attempts : 1);
 
    if (!ce_claim_job(&job))
+   {
+      /* A cooldown may have elapsed after this queue emptied. Do not carry its
+       * exponential history into an unrelated future outage. */
+      kb_curator_provider_backoff_recovered();
       return 0; /* queue empty */
+   }
 
    aimee_log(LOG_DEBUG, "kb.curator.extract",
              "claimed extract_doc job %lld for doc %lld project '%s'", (long long)job.job_id,
@@ -620,9 +618,14 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
    {
       aimee_log(LOG_WARN, "kb.curator.extract", "sidecar failed for job %lld (attempt %d/%d): %s",
                 (long long)job.job_id, job.attempts, opts->max_attempts, sidecar_err);
-      ce_mark_retry_or_fail(job.job_id, job.attempts, opts->max_attempts, sidecar_err);
-      return 1;
+      int provider_down =
+          ce_mark_retry_or_fail(job.job_id, job.attempts, opts->max_attempts, sidecar_err);
+      if (!provider_down)
+         kb_curator_provider_backoff_recovered();
+      return provider_down ? -1 : 1;
    }
+
+   kb_curator_provider_backoff_recovered();
 
    cJSON *resp = cJSON_Parse(resp_str);
    free(resp_str);
@@ -643,9 +646,10 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
       const char *errmsg = cJSON_IsString(err_j) ? err_j->valuestring : "sidecar status != ok";
       aimee_log(LOG_WARN, "kb.curator.extract", "sidecar error for job %lld: %s",
                 (long long)job.job_id, errmsg);
-      ce_mark_retry_or_fail(job.job_id, job.attempts, opts->max_attempts, errmsg);
+      int provider_down =
+          ce_mark_retry_or_fail(job.job_id, job.attempts, opts->max_attempts, errmsg);
       cJSON_Delete(resp);
-      return 1;
+      return provider_down ? -1 : 1;
    }
 
    cJSON *artifacts = cJSON_GetObjectItemCaseSensitive(resp, "artifacts");

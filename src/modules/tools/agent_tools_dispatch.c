@@ -1898,6 +1898,18 @@ extern void retrieval_outcome_bridge_note(const char *surface, const char *event
                                           const int64_t *ids, const char *const *snippets, int n)
     __attribute__((weak));
 
+static const char *td_search_project(cJSON *args, const char *dispatch_cwd)
+{
+   cJSON *project = cJSON_GetObjectItemCaseSensitive(args, "project");
+   if (cJSON_IsString(project) && project->valuestring[0])
+      return project->valuestring;
+   if (!dispatch_cwd || !dispatch_cwd[0])
+      return NULL;
+   const char *base = strrchr(dispatch_cwd, '/');
+   base = base ? base + 1 : dispatch_cwd;
+   return base[0] ? base : NULL;
+}
+
 static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_cwd,
                             const char *dispatch_sid, int timeout_ms)
 {
@@ -1913,8 +1925,12 @@ static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_
       config_t cfg;
       config_load(&cfg);
       int max = (mx && cJSON_IsNumber(mx)) ? mx->valueint : 3;
-      char *envelope = kb_client_search_json(NULL, q->valuestring,
-                                             config_embedding_command(&cfg, NULL), max, NULL);
+      /* Search with the kb's own embedder unless this server has an explicit
+       * override.  A resolved builtin here is 384-dimensional and can never
+       * query a remote kb corpus built with a production embedder. */
+      const char *embedding_command = cfg.embedding_command[0] ? cfg.embedding_command : NULL;
+      char *envelope = kb_client_search_json(td_search_project(args, dispatch_cwd), q->valuestring,
+                                             embedding_command, max, NULL);
       cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
       free(envelope);
 

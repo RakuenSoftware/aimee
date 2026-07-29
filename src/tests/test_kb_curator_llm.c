@@ -61,6 +61,7 @@ static int err_handler(const char *url, const char *auth_header, const char *bod
  * returns the response content (here the synthesis JSON). */
 static void test_provider_path(void)
 {
+   kb_curator_provider_backoff_recovered();
    mock_agent_http_reset();
    mock_agent_http_set_post_handler(ok_handler);
    g_seen_timeout_ms = 0;
@@ -81,6 +82,7 @@ static void test_provider_path(void)
    assert(strcmp(g_seen_url, "http://big/v1/chat/completions") == 0);
    assert(g_seen_timeout_ms == 300000);
    assert(g_post_calls == 1);
+   assert(!kb_curator_provider_backoff_active());
    /* system_prompt + request_json must reach the provider as message content. */
    assert(strstr(g_seen_body, "be-a-curator") != NULL);
    assert(strstr(g_seen_body, "\\\"topic\\\":\\\"t\\\"") != NULL || strstr(g_seen_body, "topic"));
@@ -94,6 +96,7 @@ static void test_provider_path(void)
  * overlapping generations running on the bundled model). */
 static void test_provider_network_error_is_single_attempt(void)
 {
+   kb_curator_provider_backoff_recovered();
    mock_agent_http_reset();
    mock_agent_http_set_post_handler(network_error_handler);
    g_post_calls = 0;
@@ -108,6 +111,8 @@ static void test_provider_network_error_is_single_attempt(void)
                                    err, sizeof(err));
    assert(resp == NULL);
    assert(g_post_calls == 1);
+   assert(kb_curator_provider_backoff_active());
+   kb_curator_provider_backoff_recovered();
    mock_agent_http_reset();
    printf("kb_curator_llm: network failure uses one durable-queue attempt ok\n");
 }
@@ -115,6 +120,7 @@ static void test_provider_network_error_is_single_attempt(void)
 /* Provider configured but the call fails -> NULL + reason, no crash/leak. */
 static void test_provider_error(void)
 {
+   kb_curator_provider_backoff_recovered();
    mock_agent_http_reset();
    mock_agent_http_set_post_handler(err_handler);
    config_t cfg;
@@ -128,6 +134,7 @@ static void test_provider_error(void)
                                    err, sizeof(err));
    assert(resp == NULL);
    assert(err[0] != '\0');
+   assert(!kb_curator_provider_backoff_active());
    mock_agent_http_reset();
    printf("kb_curator_llm: provider error -> NULL + reason ok\n");
 }

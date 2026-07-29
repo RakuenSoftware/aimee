@@ -2,14 +2,87 @@
 
 #include "kb_curator_provider.h"
 
+#include <pthread.h>
 #include <stdio.h>  /* snprintf — AIMEE_LLM_URL -> {base}/v1 */
 #include <stdlib.h> /* getenv */
 #include <string.h>
+#include <time.h>
 
 /* Model name sent to the unified aimee-llm gateway when none is configured. The
  * gateway serves a single baked model and ignores the request's model field, so
  * this is a label; an operator can override it with AIMEE_LLM_MODEL. */
 #define AIMEE_LLM_DEFAULT_MODEL "aimee-synth"
+
+/* An outage is global to the provider, not local to one queue row. Without a
+ * process-wide gate the per-row retry timestamp merely makes a large backlog
+ * advance to the next fresh row while the provider circuit is open. */
+#define KB_CURATOR_PROVIDER_BACKOFF_MIN_S 30
+#define KB_CURATOR_PROVIDER_BACKOFF_MAX_S 300
+
+static pthread_mutex_t provider_backoff_lock = PTHREAD_MUTEX_INITIALIZER;
+static time_t provider_backoff_until = 0;
+static unsigned int provider_backoff_failures = 0;
+
+int kb_curator_error_is_provider_unavailable(const char *error_msg)
+{
+   if (!error_msg || !error_msg[0])
+      return 0;
+   /* The bundled llm-chat.py reports transport timeouts as
+    * "request to <url> failed after ...: timed out", without an HTTP status.
+    * That is an availability failure, not evidence that this queue row is
+    * poisonous. Keep the match contextual so an arbitrary local sidecar that
+    * merely says "timed out" still consumes its normal attempt budget. */
+   int bundled_transport_timeout =
+       strstr(error_msg, "request to ") != NULL && strstr(error_msg, "timed out") != NULL;
+   return strstr(error_msg, "provider HTTP 503") != NULL ||
+          strstr(error_msg, "provider HTTP 429") != NULL ||
+          strstr(error_msg, "provider HTTP -1") != NULL ||
+          strstr(error_msg, "HTTP 503 from") != NULL ||
+          strstr(error_msg, "HTTP 429 from") != NULL ||
+          strstr(error_msg, "\"code\": \"provider_unavailable\"") != NULL ||
+          strstr(error_msg, "\"code\":\"provider_unavailable\"") != NULL ||
+          strstr(error_msg, "upstream circuit is open") != NULL || bundled_transport_timeout;
+}
+
+int kb_curator_provider_backoff_active(void)
+{
+   pthread_mutex_lock(&provider_backoff_lock);
+   int active = provider_backoff_until > time(NULL);
+   pthread_mutex_unlock(&provider_backoff_lock);
+   return active;
+}
+
+void kb_curator_provider_backoff_note(void)
+{
+   pthread_mutex_lock(&provider_backoff_lock);
+   time_t now = time(NULL);
+   /* Several workers can observe the same outage concurrently. They are one
+    * failure epoch, not several exponential steps; only a failed probe after a
+    * cooldown expires lengthens the next cooldown. */
+   if (provider_backoff_until > now)
+   {
+      pthread_mutex_unlock(&provider_backoff_lock);
+      return;
+   }
+   if (provider_backoff_failures < 32)
+      provider_backoff_failures++;
+   unsigned int shift = provider_backoff_failures > 1 ? provider_backoff_failures - 1 : 0;
+   if (shift > 4)
+      shift = 4;
+   int delay = KB_CURATOR_PROVIDER_BACKOFF_MIN_S << shift;
+   if (delay > KB_CURATOR_PROVIDER_BACKOFF_MAX_S)
+      delay = KB_CURATOR_PROVIDER_BACKOFF_MAX_S;
+   provider_backoff_until = now + delay;
+   pthread_mutex_unlock(&provider_backoff_lock);
+}
+
+void kb_curator_provider_backoff_recovered(void)
+{
+   pthread_mutex_lock(&provider_backoff_lock);
+   provider_backoff_until = 0;
+   provider_backoff_failures = 0;
+   pthread_mutex_unlock(&provider_backoff_lock);
+}
 
 kb_curator_tier_t kb_curator_stage_tier(kb_curator_stage_t stage)
 {

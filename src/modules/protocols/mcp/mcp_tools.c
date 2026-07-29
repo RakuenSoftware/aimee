@@ -1454,6 +1454,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(q, "type", "string");
       cJSON_AddStringToObject(q, "description",
                               "What you want to know about the project — a question or topic");
+      cJSON *proj = cJSON_AddObjectToObject(p, "project");
+      cJSON_AddStringToObject(proj, "type", "string");
+      cJSON_AddStringToObject(
+          proj, "description",
+          "Indexed project name. Defaults to the current workspace directory name.");
       cJSON *mx = cJSON_AddObjectToObject(p, "max_results");
       cJSON_AddStringToObject(mx, "type", "integer");
       cJSON_AddStringToObject(mx, "description", "Maximum passages to return (default 3, max 8)");

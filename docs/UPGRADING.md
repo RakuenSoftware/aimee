@@ -41,14 +41,22 @@ certificate-bound `full` grant during enrollment. Additional remote users need K
 and exact subject grants. `aimee.api.remote_writes=data|full` remains parsed, warns at startup, and
 increments `remote_writes.global_ignored`; it does not authorize a user write.
 
-Configure the server with `AIMEE_SERVER_ID`, `AIMEE_SERVER_TEAM_ID`,
-`AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE`, and the one-time `AIMEE_KB_CONN` enrollment string.
-Missing team configuration returns `no_team_configured`; missing or stale signing trust fails
-closed. The shipped server Compose files pass these values through from `.env`, leave their
-identity values empty, and mount
+Re-run the managed wizard's Deploy step to create the default team, server
+workload identity, signed generation-1 JWKS, and root-owned public trust volume.
+The one-shot authority image remains separate from the ordinary KB/server
+images, and the server mounts only its public output read-only.
+
+For a split or operator-managed authority, configure the server explicitly with
+`AIMEE_SERVER_ID`, `AIMEE_SERVER_TEAM_ID`,
+`AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE`, and the one-time `AIMEE_KB_CONN`
+enrollment string. A complete explicit packet wins over managed enrollment;
+partial packets fail closed. Missing team configuration returns
+`no_team_configured`; missing or stale signing trust fails closed. The shipped
+server Compose file retains the read-only operator mount at
 `${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}:/run/aimee/management:ro`.
 
-A fresh embedded KB has no team. Create the first one through its private PostgreSQL socket:
+For that explicit split path, create the first team through its private
+PostgreSQL socket:
 
 ```bash
 KB_CONTAINER=$(docker ps --filter label=com.docker.compose.project=aimee \

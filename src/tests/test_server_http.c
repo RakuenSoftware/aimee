@@ -53,6 +53,14 @@ int kb_client_mtls_management_jwks_fetch(void *ctx, char *out, size_t cap, size_
    return -1;
 }
 
+int kb_client_mtls_managed_metadata(char *server_id, size_t cap, long long *team_id)
+{
+   (void)server_id;
+   (void)cap;
+   (void)team_id;
+   return 0;
+}
+
 int audit_worm_append(const char *role, const char *principal, const char *action,
                       const char *resource, const char *verdict, const char *detail)
 {
@@ -1818,10 +1826,15 @@ int main(void)
              fallback);
       assert(server_http_effective_conn_caps(1, "plain", SERVER_REMOTE_WRITES_FULL, 1, 1) ==
              CAPS_AUTHENTICATED);
-      assert(server_http_mtls_transport_allowed(1, 1, 0) == 1);
-      assert(server_http_mtls_transport_allowed(1, 2, 0) == 0);
-      assert(server_http_mtls_transport_allowed(1, 2, 1) == 1);
-      assert(server_http_mtls_transport_allowed(0, 2, 0) == 1);
+      assert(server_http_mtls_transport_allowed(1, 1, 0, "GET", "/v1/config") == 1);
+      assert(server_http_mtls_transport_allowed(1, 2, 0, "GET", "/v1/config") == 0);
+      assert(server_http_mtls_transport_allowed(1, 2, 1, "GET", "/v1/config") == 1);
+      assert(server_http_mtls_transport_allowed(0, 2, 0, "GET", "/v1/config") == 1);
+      assert(server_http_mtls_transport_allowed(1, 2, 0, "POST", "/v1/cert/sign") == 1);
+      assert(server_http_mtls_transport_allowed(1, 2, 0, "POST", "/v1/api/enroll_bearer") == 1);
+      assert(server_http_mtls_transport_allowed(1, 2, 0, "POST", "/v1/api/rotate_bearer") == 1);
+      assert(server_http_mtls_transport_allowed(1, 2, 0, "GET", "/v1/cert/sign") == 0);
+      assert(server_http_mtls_transport_allowed(1, 2, 0, "POST", "/v1/cert/sign/extra") == 0);
       assert(server_http_route_allowed_caps(1, fallback, "POST", "/v1/memory/store",
                                             SERVER_REMOTE_WRITES_OFF) == 0);
       assert(server_http_route_allowed_caps(1, CAPS_AUTHENTICATED, "POST", "/v1/memory/store",

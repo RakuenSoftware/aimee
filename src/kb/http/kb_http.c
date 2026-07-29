@@ -1144,17 +1144,17 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          max_results = 100;
 
       /* Embed the query with the SAME embedder as the corpus. Passing NULL
-       * here falls back to "builtin", so a MiniLM-embedded corpus would be
-       * queried with a hash vector — an embedding mismatch that turns the
-       * fusion's vector arm into noise. Honour a body override, else the
-       * configured embedding_command. */
+       * here falls back to "builtin", so a corpus produced by the managed LLM
+       * would be queried with a 384-dimensional hash vector. Resolve the full
+       * deployment default (explicit command, AIMEE_EMBEDDER_URL, or
+       * AIMEE_LLM_URL), not just the raw config field. */
       char embed_cmd[256] = "";
       json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
       {
          config_t scfg;
-         if (config_load(&scfg) == 0 && scfg.embedding_command[0])
-            snprintf(embed_cmd, sizeof(embed_cmd), "%s", scfg.embedding_command);
+         if (config_load(&scfg) == 0)
+            snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command(&scfg, NULL));
       }
       char *raw =
           kb_search_json_ex(project[0] ? project : NULL, query, embed_cmd[0] ? embed_cmd : NULL,

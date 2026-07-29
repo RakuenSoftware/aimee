@@ -47,6 +47,16 @@ typedef enum
    WFE_MERGE_ERROR          /* forge error -> fail closed */
 } wfe_merge_result_t;
 
+typedef enum
+{
+   WFE_DELEGATE_ERROR = -1,
+   WFE_DELEGATE_OK = 0,
+   /* The delegate completed normally but the requested write was already
+    * satisfied, so it left the worktree unchanged. Producing blocks may pass
+    * the current tree to their authoritative gate instead of retrying blindly. */
+   WFE_DELEGATE_NO_CHANGE = 1
+} wfe_delegate_result_t;
+
 typedef struct
 {
    wfe_ci_status_t (*ci_status)(const char *repo, const char *pr_ref);
@@ -86,11 +96,18 @@ typedef struct
     * selection is the delegate system's routing decision (routed by `role` +
     * capabilities), not a per-step choice. If the block produces a file artifact,
     * `artifact_path` is its path (else NULL). On success returns 0 and, if a commit
-    * was made, fills out_commit_sha (else ""). Non-zero => the caller emits
-    * failed/looped, never a crash. */
+    * was made, fills out_commit_sha (else ""). Return WFE_DELEGATE_NO_CHANGE
+    * only when the delegate completed but the write-role no-op detector proved
+    * the worktree stayed unchanged; return WFE_DELEGATE_ERROR for transport,
+    * provider, or execution failures. */
    int (*run)(const char *workdir, const char *role, const char *prompt, const char *artifact_path,
               char out_commit_sha[64], char *err, size_t errlen);
 } wfe_delegate_provider_t;
+
+/* Classify the stable no-op diagnostics emitted by delegate_detect_noop_write.
+ * Kept here so the server bridge can preserve NO_CHANGE across the coord queue
+ * without treating unrelated delegate failures as acceptable no-ops. */
+int wfe_delegate_error_is_no_change(const char *error);
 
 /* Install a delegate provider (NULL restores the default fail-closed provider). */
 void wfe_set_delegate_provider(const wfe_delegate_provider_t *p);

@@ -249,6 +249,12 @@ int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts)
       return 0;
    }
 
+   /* The request is self-contained now. A model call can take minutes on the
+    * bundled CPU backend, so retaining this thread's DB2 pool member across it
+    * starves health/status traffic when other curator workers do the same. All
+    * writes below acquire their own lease lazily. */
+   db2_lease_release_idle();
+
    char serr[256];
    char *response = kb_curator_llm_run(
        &cfg, KB_CURATOR_STAGE_SYNTHESIZE, CURATOR_SYNTH_SYSTEM_PROMPT, request, NULL,
@@ -259,6 +265,15 @@ int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts)
       aimee_log(LOG_WARN, "kb.curator.synth", "synthesize sidecar failed for '%s' (%s)", topic_name,
                 serr);
       cJSON_Delete(cites);
+      /* Stop this pass when the shared provider is unavailable. Treating this
+       * as an empty queue lets later LLM stages hit the same open circuit. Arm
+       * the process-wide gate here as well: this legacy sidecar path does not
+       * pass through kb_curator_llm_run(), which normally records the outage. */
+      if (kb_curator_error_is_provider_unavailable(serr))
+      {
+         kb_curator_provider_backoff_note();
+         return -1;
+      }
       return 0;
    }
 

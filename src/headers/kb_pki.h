@@ -29,6 +29,7 @@ extern "C"
 
 #define KB_PKI_CERT_PEM_MAX 4096 /* PEM cert (RSA-2048) ~1.2 KB + slack */
 #define KB_PKI_KEY_PEM_MAX  4096 /* PEM PKCS#8 key (RSA-2048) ~1.7 KB + slack */
+#define KB_PKI_CSR_PEM_MAX  4096 /* PEM PKCS#10 request (RSA-2048) + slack */
 #define KB_PKI_FP_HEX       65   /* sha256 lowercase hex (64) + NUL */
 #define KB_PKI_ISSUER_MAX   600  /* supported OpenSSL one-line issuer DN bytes */
 #define KB_PKI_SERIAL_MAX   128  /* supported uppercase-hex serial bytes */
@@ -71,6 +72,12 @@ extern "C"
     * output may be NULL when the caller does not need it. */
    int kb_pki_cert_metadata(const char *cert_pem, char *issuer_out, size_t issuer_cap,
                             char *serial_out, size_t serial_cap);
+
+   /* Generate a fresh RSA-2048 private key and a self-signed PKCS#10 request.
+    * The authority replaces the CSR subject at issue time; this subject is a
+    * diagnostic label, not an authorization assertion. */
+   int kb_pki_generate_csr(const char *subject_cn, char *csr_pem_out, size_t csr_cap,
+                           char *key_pem_out, size_t key_cap);
 
    /* Issue a client certificate (RSA-2048) for `subject_cn`, signed by `ca`,
     * valid for `valid_secs` seconds from now (keyUsage digitalSignature,
