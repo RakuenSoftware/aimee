@@ -10,8 +10,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-
-	"github.com/RakuenSoftware/smoothgui/auth"
 )
 
 // pathWithin reports whether child is parent or a descendant of it (both cleaned).
@@ -133,26 +131,58 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	username := currentUser(r)
+	stableSID := strings.TrimSpace(req.AimeeSessionID)
+	providerSessionID := ""
+	// Bind the stable aimee session handle to the authenticated user before it
+	// crosses the trusted UDS boundary. A provider-native session event is a
+	// different id and must never replace this ownership key. The browser's
+	// claude_session_id field is retained for wire compatibility but is never a
+	// source of authority: resume metadata is loaded only from this user's
+	// server-side stable-session record.
+	if s.db != nil && stableSID != "" {
+		owned, exists, oerr := s.chatSessionOwned(username, stableSID)
+		if oerr != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to verify session")
+			return
+		}
+		if exists && !owned {
+			writeJSONError(w, http.StatusForbidden, "session belongs to another user")
+			return
+		}
+		if err := s.touchChatSession(username, stableSID, cwd, req.Message); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to persist session")
+			return
+		}
+		providerSessionID, err = s.chatSessionProviderID(username, stableSID)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to load session runtime")
+			return
+		}
+		if err := s.appendChatMessage(username, stableSID, "user", req.Message); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to persist message")
+			return
+		}
+	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
 	doneSent := false
-	// effectiveSID tracks the aimee conversation id for this turn: the one the
-	// SPA supplied, or the one aimee-server mints (delivered as a "session"
-	// event) for a brand-new tab. It is persisted against the logged-in user
-	// after the turn so the tab can be restored later.
-	effectiveSID := req.AimeeSessionID
+	var runtimePersistErr error
+	var assistantText strings.Builder
 	// Stream the chat over aimee-server's /v1 HTTP transport (native
 	// POST /v1/chat/stream); the legacy NDJSON socket helper (chatStream)
 	// remains available as a fallback.
-	err = chatStreamHTTP(r.Context(), s.cfg.socketPath, req.Message, req.AimeeSessionID,
-		req.ClaudeSessionID, cwd, req.AttachID, func(evt streamEvent) {
+	err = chatStreamHTTP(r.Context(), s.cfg.socketPath, req.Message, stableSID,
+		providerSessionID, cwd, req.AttachID, func(evt streamEvent) {
 			switch evt.Event {
 			case "turn_start":
 				sseWrite(w, "turn_start", map[string]any{})
 			case "text":
+				assistantText.WriteString(evt.Content)
 				sseWrite(w, "text", map[string]string{"content": evt.Content})
 			case "thinking":
 				sseWrite(w, "thinking", map[string]string{"content": evt.Content})
@@ -160,7 +190,19 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 				sseWrite(w, "turn_end", map[string]any{})
 			case "session":
 				if evt.ID != "" {
-					effectiveSID = evt.ID
+					// The streamed id is trusted server output. Bind it before
+					// exposing the session event (and therefore before `done`) so
+					// an immediately queued next turn cannot race into a fresh
+					// provider conversation.
+					if stableSID != "" {
+						if uerr := s.setChatSessionRuntime(username, stableSID, evt.ID); uerr != nil {
+							runtimePersistErr = uerr
+							log.Printf("aimee-webchat: persist runtime for %q: %v", stableSID, uerr)
+							sseWrite(w, "error", map[string]string{"message": "failed to persist session runtime"})
+							return
+						}
+					}
+					providerSessionID = evt.ID
 				}
 				sseWrite(w, "session", map[string]string{"id": evt.ID})
 			case "usage":
@@ -175,8 +217,10 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 					"usage_kind": kind,
 				})
 			case "done":
-				doneSent = true
-				sseWrite(w, "done", map[string]any{})
+				if runtimePersistErr == nil {
+					doneSent = true
+					sseWrite(w, "done", map[string]any{})
+				}
 			case "error":
 				msg := evt.Message
 				if msg == "" {
@@ -189,21 +233,23 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 			}
 		})
 
+	// Store the visible assistant turn and the provider-native resume id under
+	// the stable, user-owned aimee session id. This is best-effort because the
+	// response may already have streamed, but failures are visible in logs.
+	if stableSID != "" {
+		if text := assistantText.String(); text != "" {
+			if uerr := s.appendChatMessage(username, stableSID, "assistant", text); uerr != nil {
+				log.Printf("aimee-webchat: persist reply for %q: %v", stableSID, uerr)
+			}
+		}
+	}
 	if r.Context().Err() != nil {
 		return
-	}
-	// Record this tab's session against the logged-in user so it survives a
-	// browser/laptop crash and can be restored from /api/chat/threads. The
-	// conversation itself already lives on aimee-server; this only persists the
-	// ownership + lightweight metadata. Best-effort: a failure here must not
-	// break the chat response that already streamed.
-	if uerr := s.touchChatSession(currentUser(r), effectiveSID, cwd, req.Message); uerr != nil {
-		log.Printf("aimee-runtime-web: persist session %q: %v", effectiveSID, uerr)
 	}
 	if err != nil {
 		sseWrite(w, "error", map[string]string{"message": err.Error()})
 	}
-	if !doneSent {
+	if !doneSent && runtimePersistErr == nil {
 		sseWrite(w, "done", map[string]any{})
 	}
 }
@@ -505,9 +551,9 @@ func isAPIPath(path string) bool {
 	return len(path) >= 4 && path[:4] == "/api"
 }
 
-// handleMe returns the authenticated user's info.
+// handleMe returns the authenticated identity used to scope chat persistence
+// and browser-cache ownership. requireAuth injects this trusted value.
 func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
-	username := auth.GetUsername(r)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"username": username})
+	json.NewEncoder(w).Encode(map[string]string{"username": currentUser(r)})
 }
