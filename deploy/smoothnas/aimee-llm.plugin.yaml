@@ -11,7 +11,8 @@ metadata:
     downloaded to the models volume on first boot. Replaces the torch
     aimee-embedder + the standalone llama.cpp `llm` container. The aimee-kb plugin
     points AIMEE_EMBEDDER_URL at this service. GPU tier (.254): AIMEE_LLM_TIER=mid
-    → Qwen3-Embedding-4B (2560-dim) + ettin-reranker-400m + gemma-4-26B-A4B,
+    → nomic-embed-text-v2-moe (768-dim, as on every tier) + ettin-reranker-400m
+    + gemma-4-26B-A4B,
     offloaded to the AMD 7900 XTX via Vulkan/RADV (AIMEE_LLM_NGL=99).
   vendor: RakuenSoftware
   homepage: https://github.com/RakuenSoftware/aimee

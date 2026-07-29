@@ -5,10 +5,14 @@
 # MODEL-LESS by design: the image ships with NO GGUFs baked in. At container
 # start the supervisor resolves AIMEE_LLM_TIER and DOWNLOADS + configures that
 # tier's models into the /models volume (download-once, sha256-verified):
-#   (unset)/cpu  Qwen3-Embedding-0.6B + ettin-68m  + gemma-4-E4B      (dense, CPU)
-#   small        Qwen3-Embedding-4B   + ettin-400m + gemma-4-12B      (dense, GPU)
-#   mid          Qwen3-Embedding-4B   + ettin-400m + gemma-4-26B-A4B  (MoE, SLOTS=2)
+#   (unset)/cpu  nomic-embed-v2-moe + ettin-68m  + gemma-4-E4B      (dense, CPU)
+#   small        nomic-embed-v2-moe + ettin-400m + gemma-4-12B      (dense, GPU)
+#   mid          nomic-embed-v2-moe + ettin-400m + gemma-4-26B-A4B  (MoE, SLOTS=2)
 #   large        SAME 26B-A4B as mid but SLOTS=4 (32GB card)
+# The EMBEDDER IS THE SAME MODEL ON EVERY TIER (nomic-embed-text-v2-moe, 768-dim,
+# mean pooling); only GPU offload differs. That keeps the embedding dimension
+# uniform, so an index built under one tier is readable under another and moving
+# between CPU and GPU needs no re-embed. Only rerank + synth vary by tier.
 # One published image for every tier; the tier table lives in the supervisor.
 # Embed+synth are plain GGUF pulls from HF; the ettin reranker is a pre-converted
 # encoder GGUF + Dense head fetched from a GitHub release (the ST score head

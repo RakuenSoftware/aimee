@@ -54,11 +54,16 @@ static void db2_maybe_clear_sqlite_cache(sqlite3 *db)
 static void *g_conn = NULL;
 static char g_pg_url[512] = "";
 static pthread_mutex_t g_init_lock = PTHREAD_MUTEX_INITIALIZER;
-/* Embedding dimension for the DB2 halfvec columns (one embedder per deployment:
- * 1024 for pplx-0.6b, 2560 for pplx-4b). Set from the loaded config by the
- * server / aimee-kb startup via db2_set_embedding_dim() before db2_init(), so
- * this layer needs no config dependency. 0 = unset -> db2_embedding_dim()
- * reports the 1024 default (the default embedder is pplx-0.6b). */
+/* Embedding dimension for the DB2 halfvec columns (one embedder per deployment).
+ * The default embedder is nomic-embed-text-v2-moe at 768 on EVERY tier, so the
+ * dim no longer varies with the GPU/CPU tier the way the old Qwen3 ladder did
+ * (1024 for 0.6b, 2560 for 4b). Set from the loaded config by the server /
+ * aimee-kb startup via db2_set_embedding_dim() before db2_init(), so this layer
+ * needs no config dependency. 0 = unset -> db2_embedding_dim() reports the 768
+ * default. A deployment that predates the nomic cutover has its old dim RECORDED
+ * in kb_meta.schema_embedding_dim, and the recorded value outranks this default
+ * (§2a precedence: pinned > recorded > probed > default), so an existing corpus
+ * keeps working and is migrated deliberately via `aimee kb reembed`. */
 static int g_embed_dim = 0;
 
 /* §2a: whether the operator pinned the dim. When 0 (default) and nothing was
@@ -87,7 +92,7 @@ void db2_init_unlock(void)
 
 int db2_embedding_dim(void)
 {
-   return g_embed_dim > 0 ? g_embed_dim : 1024;
+   return g_embed_dim > 0 ? g_embed_dim : EMBED_DEFAULT_DIM;
 }
 
 void db2_set_embedding_dim_pinned(int pinned)

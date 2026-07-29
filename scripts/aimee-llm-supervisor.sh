@@ -58,20 +58,23 @@ RERANK_UBATCH="${AIMEE_LLM_RERANK_UBATCH:-512}"
 RERANK_CTX="${AIMEE_LLM_RERANK_CTX:-8192}"
 RERANK_PARALLEL="${AIMEE_LLM_RERANK_PARALLEL:-1}"
 
+# Every tier serves the SAME embedder — nomic-embed-text-v2-moe, 768-dim — so the
+# embedding dimension is uniform across cpu/small/mid/large and an index built on
+# one tier is readable by another. Tier selection is therefore a pure speed
+# decision (GPU offload) with no re-embed between tiers. Selected on the
+# frozen-ab-v1 suite (10,000 cases / 26,473 documents): 0.6058 NDCG@10 against
+# 0.5892 for the runner-up, winning both code and prose retrieval. The arch is
+# `nomic-bert-moe`, supported by the pinned llama.cpp LLAMA_TAG (b9775).
 embed_coords() {
   case "$EMBED_TIER" in
-    cpu)
-      EMBED_REPO="Qwen/Qwen3-Embedding-0.6B-GGUF"; EMBED_FILE="Qwen3-Embedding-0.6B-f16.gguf"
-      EMBED_REVISION="370f27d7550e0def9b39c1f16d3fbaa13aa67728"
-      EMBED_SHA256="421a27e58d165478cc7acb984a688c2aa41404968b0203e7cd743ece44c54340"
-      EMBED_NGL=0
-      ;;
-    small|mid|large)
-      EMBED_REPO="Qwen/Qwen3-Embedding-4B-GGUF"; EMBED_FILE="Qwen3-Embedding-4B-Q8_0.gguf"
-      EMBED_REVISION="main"; EMBED_SHA256=""; EMBED_NGL="$NGL"
-      ;;
+    cpu)             EMBED_NGL=0 ;;
+    small|mid|large) EMBED_NGL="$NGL" ;;
     *) echo "aimee-llm: invalid AIMEE_LLM_EMBED_TIER='$EMBED_TIER' (cpu, small, mid, large)" >&2; exit 1 ;;
   esac
+  EMBED_REPO="ggml-org/Nomic-Embed-Text-V2-GGUF"
+  EMBED_FILE="nomic-embed-text-v2-moe-q8_0.gguf"
+  EMBED_REVISION="498da4a128ed12a423efb6f9b0242dbac80209bf"
+  EMBED_SHA256="36c5817bc25f379e62021f49efde05b10ed3b0c93ab8059c43173a7a5de73565"
   EMBED_D="$MODELS_DIR/$EMBED_TIER"
 }
 rerank_coords() {
@@ -171,10 +174,17 @@ export AIMEE_LLM_SYNTH_CTX="$SYNTH_CTX"
 # can raise AIMEE_LLM_SYNTH_CACHE_RAM. The embedder already runs --cache-ram 0.
 SYNTH_CACHE_RAM="${AIMEE_LLM_SYNTH_CACHE_RAM:-2048}"
 
-# Gateway-facing model identity (all current tiers share the qwen3 embedder id +
-# last-token pooling — the gateway reads these for /health + the drift guard).
-export AIMEE_LLM_EMBED_MODEL="${AIMEE_LLM_EMBED_MODEL:-qwen3-embedding}"
-export AIMEE_LLM_EMBED_POOLING="${AIMEE_LLM_EMBED_POOLING:-last}"
+# Gateway-facing model identity (all tiers share the nomic embedder id + MEAN
+# pooling — the gateway reads these for /health + the drift guard).
+#
+# POOLING IS NOT COSMETIC. nomic-embed-text-v2-moe declares mean pooling in its
+# 1_Pooling/config.json, and the benchmark that selected it scored it with mean.
+# Serving it with `last` (the correct value for the previous Qwen3 embedder)
+# produces vectors that are wrong but well-formed: nothing errors, the dimension
+# still checks out, and retrieval quality silently collapses. Changing the
+# embedder means re-deriving this value from the model card, not inheriting it.
+export AIMEE_LLM_EMBED_MODEL="${AIMEE_LLM_EMBED_MODEL:-nomic-embed-text-v2-moe}"
+export AIMEE_LLM_EMBED_POOLING="${AIMEE_LLM_EMBED_POOLING:-mean}"
 # AIMEE_LLM_RERANK_HEAD is set per-mode in resolve_upstreams (local rerank only).
 POOL="$AIMEE_LLM_EMBED_POOLING"
 

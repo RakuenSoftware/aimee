@@ -39,7 +39,7 @@ import urllib.request
 EMBED_URL = os.environ.get("AIMEE_LLM_EMBED_URL", "http://127.0.0.1:8081").rstrip("/")
 RERANK_URL = os.environ.get("AIMEE_LLM_RERANK_URL", "http://127.0.0.1:8082").rstrip("/")
 RERANK_HEAD_DIR = os.environ.get("AIMEE_LLM_RERANK_HEAD", "")
-EMBED_MODEL = os.environ.get("AIMEE_LLM_EMBED_MODEL", "Qwen3-Embedding")
+EMBED_MODEL = os.environ.get("AIMEE_LLM_EMBED_MODEL", "nomic-embed-text-v2-moe")
 PORT = int(os.environ.get("AIMEE_LLM_PORT", "8080"))
 BATCH_CAP = int(os.environ.get("AIMEE_LLM_BATCH_CAP", "512"))
 RERANK_SEP = "</s>"

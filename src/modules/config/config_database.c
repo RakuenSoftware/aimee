@@ -62,8 +62,10 @@ int config_apply_db2_url_env_override(config_t *cfg)
 /* Effective embedding dimension: the AIMEE_EMBEDDING_DIM env override when set
  * and valid (1..EMBED_MAX_DIM), else cfg->embedding_dim. The env lets a
  * containerized deploy set the dim without a writable aimee.yaml — it must match
- * the running embedder model (1024 for pplx-embed-v1-0.6b, 2560 for the default
- * pplx-embed-v1-4b). Non-mutating so const callers can use it. */
+ * the running embedder model (768 for the default nomic-embed-text-v2-moe on
+ * every tier; 1024/2560 for the legacy pplx-embed 0.6b/4b). Normally it should be
+ * left UNSET so the dim is derived (pinned > recorded > probed); setting it is an
+ * operator pin. Non-mutating so const callers can use it. */
 int config_resolve_embedding_dim(const config_t *cfg)
 {
    int dim = cfg ? cfg->embedding_dim : 0;

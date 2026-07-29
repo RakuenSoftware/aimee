@@ -97,6 +97,13 @@
  * (inclusive) — native 4096 would be unindexable, so the 8b tier truncates to
  * 4000 in the embedding proxy (see unified-llm-container §"The 8B truncation"). */
 #define EMBED_MAX_DIM              4000
+
+/* The default embedder's output width, used when nothing is pinned, recorded or
+ * probed. nomic-embed-text-v2-moe is 768 on EVERY tier, so unlike the Qwen3
+ * ladder this default does not change with cpu-vs-gpu. Deployments predating the
+ * cutover keep their own dim via kb_meta.schema_embedding_dim, which outranks
+ * this (pinned > recorded > probed > default). */
+#define EMBED_DEFAULT_DIM          768
 #define EMBED_SIMILARITY_THRESHOLD 0.7
 #define EMBED_ALPHA                0.5 /* hybrid blend: alpha*lexical + (1-alpha)*embed */
 #define EMBED_MAX_OUTPUT           (EMBED_MAX_DIM * 16)

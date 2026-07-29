@@ -10,8 +10,9 @@
 #
 # Embedder wiring (the point of this manifest): AIMEE_EMBEDDER_URL points at the
 # aimee-llm gateway at http://10.100.0.1:8742 (the GPU 7900 XTX tier on .254 —
-# Qwen3-Embedding-4B, 2560-dim). The gateway preserves the /embed + /embed_batch
-# + /rerank contract, so the baked embed-remote.py / in-process http embedder is
+# nomic-embed-text-v2-moe, 768-dim, the same embedder every tier serves). The
+# gateway preserves the /embed + /embed_batch + /rerank contract, so the baked
+# embed-remote.py / in-process http embedder is
 # untouched. The kb sends NO bearer on the embed path (memory_embed_http_post
 # passes a NULL auth header), so the aimee-llm gateway MUST run with auth
 # disabled (AIMEE_LLM_AUTH_TOKEN empty) on the internal-only bridge — which is
@@ -57,10 +58,12 @@ services:
       #   - The gateway runs auth-off (empty AIMEE_LLM_AUTH_TOKEN) — the kb embed
       #     path sends no bearer.
       AIMEE_LLM_URL: http://10.100.0.1:8742
-      # Embedding dim is explicit. Default (unset) = 1024 (the CPU / 0.6B tier).
-      # This deploy uses the GPU 4B tier → set 2560. Changing it against a
-      # populated kb is a drop-and-rebuild re-embed (kb_meta drift guard).
-      AIMEE_EMBEDDING_DIM: "2560"
+      # Embedding dim is deliberately UNSET: every aimee-llm tier serves the same
+      # 768-dim nomic embedder, so there is nothing tier-specific to pin, and an
+      # empty value lets the kb derive the dim (pinned > recorded > probed). A kb
+      # populated before the nomic cutover keeps its RECORDED dim and is migrated
+      # deliberately with `aimee kb reembed`, not by editing this value.
+      AIMEE_EMBEDDING_DIM: ""
       # Bind /v1 on 0.0.0.0 so the published :8741 is reachable from the
       # aimee-server plugin across the bridge.
       AIMEE_KB_HTTP_BIND: "1"
@@ -95,9 +98,10 @@ services:
         default: http://10.100.0.1:8742
         description: >-
           One knob. The unified aimee-llm container the kb calls for embedding,
-          reranking and synthesis (Tier-A + Tier-B). CPU tier = Tier-A synth +
-          1024-dim embed; GPU tier = Tier-A+B synth + higher-dim embed (set
-          AIMEE_EMBEDDING_DIM=2560). Must run auth-off (the kb sends no bearer).
+          reranking and synthesis (Tier-A + Tier-B). CPU tier = Tier-A synth;
+          GPU tier = Tier-A+B synth. Both serve the SAME 768-dim embedder, so the
+          tier does not change the embedding dimension. Must run auth-off (the kb
+          sends no bearer).
       - key: AIMEE_EMBEDDER_URL
         type: string
         label: Embedder URL (override)
@@ -117,5 +121,8 @@ services:
         label: Embedding dimension
         default: ""
         description: >-
-          Embedding vector dim. Blank = 1024 (CPU / 0.6B tier). Set 2560 for the
-          GPU / 4B tier. Changing it against a populated kb forces a re-embed.
+          Embedding vector dim. LEAVE BLANK — the kb then derives it (a populated
+          kb uses its recorded dim; a fresh one probes the running embedder, which
+          reports 768 for the default nomic embedder on every tier). Setting a
+          value pins it and suppresses that derivation. Changing it against a
+          populated kb forces a re-embed.

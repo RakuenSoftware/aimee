@@ -2,11 +2,16 @@
 #
 #   docker compose -f deploy/compose/aimee.yaml -f deploy/compose/aimee.gpu.yaml up -d
 #
-# Runs the unified aimee-llm GPU tier (Qwen3-Embedding-4B / 2560-dim + gemma
-# synth, offloaded via Vulkan/RADV) and re-points the kb's embedding dim to 2560.
-# Passes the host AMD render path (/dev/dri) into the LLM container. Switching a
-# POPULATED kb between the CPU (1024) and GPU (2560) tier is a drop-and-rebuild
-# re-embed (the kb_meta drift guard refuses a stale mismatch).
+# Runs the unified aimee-llm GPU tier (gemma synth offloaded via Vulkan/RADV) and
+# passes the host AMD render path (/dev/dri) into the LLM container.
+#
+# The EMBEDDER IS UNCHANGED BY THIS OVERRIDE. Every tier serves
+# nomic-embed-text-v2-moe at 768-dim, so the GPU tier no longer re-points the kb's
+# embedding dim and switching a POPULATED kb between the CPU and GPU tier is NOT a
+# re-embed — the vectors stay valid because the dimension and the model are the
+# same. Only synth (and the reranker) change with the tier. This override
+# deliberately sets no AIMEE_EMBEDDING_DIM: leaving it unset lets the kb derive the
+# dim (pinned > recorded > probed), and pinning it would suppress that derivation.
 services:
   aimee-llm:
     # Kept in sync with the base file's profile so `-f aimee.yaml -f aimee.gpu.yaml`
@@ -17,7 +22,8 @@ services:
       AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-99}
       # GPU tier: pick the synth by AIMEE_LLM_TIER (small=12B / mid=26B-A4B SLOTS=2 /
       # large=26B-A4B SLOTS=4). small is the 16GB-safe default; the models download
-      # to /models on first boot. small/mid/large share the 2560-dim embedder.
+      # to /models on first boot. EVERY tier — including cpu — shares the same
+      # 768-dim nomic embedder, so the tier only selects synth/rerank.
       AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-small}
       # gemma-4-12b trains to 256K; the supervisor's default cap is a 16GB-safe 32K.
       # 128K is safe on the .254 card (RADV GFX1100 / 7900 XTX, 24560 MiB confirmed):
@@ -34,7 +40,3 @@ services:
       AIMEE_LLM_SYNTH_CTX: ${AIMEE_LLM_SYNTH_CTX:-131072}
     devices:
       - "/dev/dri:/dev/dri"
-
-  aimee-kb:
-    environment:
-      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-2560}
