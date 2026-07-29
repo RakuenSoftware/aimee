@@ -183,7 +183,9 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/chat/rewind", s.requireAuth(s.handleChatRewind))
 
 	// User/auth management (session required)
-	mux.HandleFunc("/api/auth/me", auth.RequireAuth(s.sessions, http.HandlerFunc(s.handleMe)).ServeHTTP)
+	// Use the same middleware/context as the account-scoped chat endpoints so
+	// cache ownership and persistence are always keyed by the same principal.
+	mux.HandleFunc("/api/auth/me", s.requireAuth(s.handleMe))
 	mux.HandleFunc("/api/auth/password", auth.RequireAuth(s.sessions, http.HandlerFunc(s.authH.ChangePassword)).ServeHTTP)
 	mux.HandleFunc("/api/users", auth.RequireAuth(s.sessions, http.HandlerFunc(s.authH.ListUsers)).ServeHTTP)
 

@@ -1124,6 +1124,8 @@ void *kb_client_index_scan_format_response(int kb_rc, const kb_client_index_scan
 /* Find an identifier in the canonical index. Returns count of hits
  * written into `out` (capped at `max`), or 0 if kb is unreachable. */
 int kb_client_index_find(const char *identifier, term_hit_t *out, int max);
+int kb_client_index_find_project(const char *project, const char *identifier, term_hit_t *out,
+                                 int max);
 
 /* List indexed projects. Returns count on success (0 = empty index),
  * or -1 if the knowledge service is unreachable. */
@@ -1242,5 +1244,13 @@ int kb_client_index_project_stats(const char *project, int *files_out, int *defs
 int kb_client_index_project_lang(const char *project, char *buf, size_t bufsz);
 
 int kb_client_canonical_index_scan(const char *project, const char *root_path, int force);
+
+/* Request-local active repository context for ordered memory RPCs.  The
+ * server sets this around one agent-facing call; legacy callers that do not
+ * set it retain their existing unscoped wire semantics. */
+void kb_client_memory_scope_context_set(const char *workspace, const char *project,
+                                        int include_all);
+void kb_client_memory_scope_context_clear(void);
+void kb_client_memory_scope_context_apply(cJSON *req);
 
 #endif /* DEC_KB_CLIENT_H */

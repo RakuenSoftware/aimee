@@ -42,6 +42,16 @@ int mcp_filter_tools_for_profile(cJSON *tools, const char *profile);
  * schema-bound MCP hosts. */
 void mcp_add_discovery_tools(cJSON *tools);
 
+/* Case-insensitive discovery matcher shared by find_tools and its contract
+ * tests. Empty queries match every descriptor. */
+int mcp_tool_matches_query(const cJSON *tool, const char *query);
+
+/* Resolve agent-facing code-search scope from MCP arguments. `project` wins;
+ * otherwise cwd's basename is the active indexed project id. The scope helper
+ * returns 0 for current/default, 1 for all, and -1 for invalid input. */
+const char *mcp_code_project_from_args(cJSON *args);
+int mcp_code_scope_all(cJSON *args);
+
 /* Resolve call_tool({name,arguments}) to the named tool and its argument object.
  * MCP hosts can only invoke schemas returned by tools/list, so this bridge is
  * what makes tools found through find_tools genuinely callable under the lean

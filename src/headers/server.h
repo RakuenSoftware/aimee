@@ -321,6 +321,10 @@ int handle_trajectory_batch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 
 /* State handlers (server_state.c) */
 int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+/* Resolve request-local project/workspace memory identity and activate it for
+ * subsequent kb_client memory calls on this worker thread. Returns 1 when the
+ * active identity is missing; caller must clear the client context. */
+int server_memory_scope_begin(cJSON *req);
 int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

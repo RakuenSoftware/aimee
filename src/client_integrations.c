@@ -1,5 +1,6 @@
 #include "client_constants.h"
 #include "client_integrations.h"
+#include "agent_code_capabilities.h"
 #include "aimee_home.h"
 #include "yaml.h"
 #include "platform_path.h"
@@ -229,12 +230,20 @@ static const char *codex_skill_markdown(void)
           "\n"
           "- Prefer local file inspection first for nearby code.\n"
           "- Use `search_memory` for stored project facts or prior decisions.\n"
-          "- Use `find_symbol` when the local search surface is missing indexed context.\n"
-          "- Use `preview_blast_radius` before broad multi-file edits.\n"
+          "- Use `" AIMEE_CODE_TOOL_FIND_SYMBOL
+          "` when the local search surface is missing indexed context.\n"
+          "- Use `" AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS "` before broad multi-file edits.\n"
           "- Do not call provider-native sub-agent tools such as `spawn_agent`; use "
           "the aimee `delegate` MCP tool for every delegated or parallel sub-task.\n"
           "- Use `delegate` only for bounded sub-tasks that materially advance the "
           "current work.\n";
+}
+
+static const char *codex_code_exploration_prompt(void)
+{
+   return "Explore the codebase through aimee's tools (" AIMEE_CODE_TOOL_FIND_SYMBOL
+          ", " AIMEE_CODE_TOOL_AST_GREP_SEARCH ", " AIMEE_CODE_TOOL_INDEX
+          " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID ") instead of raw grep/read";
 }
 
 static void ensure_codex_marketplace(const char *path)
@@ -742,8 +751,7 @@ static void ensure_codex_plugin_files(const char *home)
             "    \"termsOfServiceURL\": \"https://github.com/RakuenSoftware/aimee\",\n"
             "    \"defaultPrompt\": [\n"
             "      \"Search aimee memory before answering repo-specific questions\",\n"
-            "      \"Explore the codebase through aimee's tools (find_symbol, "
-            "ast_grep_search, search_graph) instead of raw grep/read\",\n"
+            "      \"%s\",\n"
             "      \"Preview the blast radius before editing multiple files\",\n"
             "      \"%s\",\n"
             "      \"Delegate bounded work through aimee delegate, not provider sub-agents\"\n"
@@ -752,7 +760,7 @@ static void ensure_codex_plugin_files(const char *home)
             "    \"screenshots\": []\n"
             "  }\n"
             "}\n",
-            AIMEE_VERSION, codex_delegate_policy_prompt());
+            AIMEE_VERSION, codex_code_exploration_prompt(), codex_delegate_policy_prompt());
 
    char compat_plugin_buf[4096];
    snprintf(compat_plugin_buf, sizeof(compat_plugin_buf),
@@ -788,8 +796,7 @@ static void ensure_codex_plugin_files(const char *home)
             "    \"termsOfServiceURL\": \"https://github.com/RakuenSoftware/aimee\",\n"
             "    \"defaultPrompt\": [\n"
             "      \"Search aimee memory before answering repo-specific questions\",\n"
-            "      \"Explore the codebase through aimee's tools (find_symbol, "
-            "ast_grep_search, search_graph) instead of raw grep/read\",\n"
+            "      \"%s\",\n"
             "      \"Preview the blast radius before editing multiple files\",\n"
             "      \"%s\",\n"
             "      \"Delegate bounded work through aimee delegate, not provider sub-agents\"\n"
@@ -798,7 +805,7 @@ static void ensure_codex_plugin_files(const char *home)
             "    \"screenshots\": []\n"
             "  }\n"
             "}\n",
-            AIMEE_VERSION, codex_delegate_policy_prompt());
+            AIMEE_VERSION, codex_code_exploration_prompt(), codex_delegate_policy_prompt());
 
    char mcp_buf[MAX_PATH_LEN + 256];
    format_mcp_json(mcp_buf, sizeof(mcp_buf), aimee_bin);
@@ -1339,7 +1346,8 @@ static void ensure_claude_code_commands(const char *home)
    write_text_file(path,
                    "Preview the blast radius of a multi-file edit before making changes.\n"
                    "\n"
-                   "Use the aimee MCP tool `preview_blast_radius` for: $ARGUMENTS\n"
+                   "Use the aimee MCP tool `" AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS
+                   "` for: $ARGUMENTS\n"
                    "\n"
                    "This shows which files and symbols would be affected by the change,\n"
                    "helping you understand the impact before editing.\n",

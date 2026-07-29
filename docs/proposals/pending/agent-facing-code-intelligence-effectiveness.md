@@ -1,7 +1,6 @@
 # Proposal: Agent-facing code intelligence effectiveness
 
-- **State:** IN PROGRESS — accepted design; E0 complete; local-first amendment roundtable-approved
-  and PR pending (file remains pending until E1–E6 close)
+- **State:** PENDING — E2–E6 remain; E0/E1 history and the current E1-memory slice are recorded below
 - **Author:** JBailes
 - **Date:** 2026-07-29
 - **Charter roles:** Recall, Rank-Fuse, Calibrate / Evaluate-Optimize, Enforce, Gate-Promote
@@ -518,3 +517,54 @@ residual proposal instead of declaring the intended effectiveness outcome comple
   and remaining seat completed and approved the artifact. Roundtable run:
   `oprun_g6a69bd8011459d99_1785336851_93` (artifact
   `c4b68b07f28c23817533b1c66a41bac88ea60c7b79c2181090babc184f728351`).
+- **Local-first amendment PR:** PR #2150 merged to `testing` as
+  `e9626cda560b7e9b1bbf96e48c05c94b62a72c8a` after all 23 CI checks passed. E1 applies the same
+  pre-limit rule to code discovery; E1-memory applies it to every ordered memory surface.
+- **E1 capability-catalog slice:** PR #2153 merged to `testing` as
+  `a8d3214c2d057fa95820e6acb60b788e403d7c68` after all 24 CI checks passed. The installed surface
+  now exposes and discovers the canonical code-intelligence tools and protects active-project code
+  discovery before limits.
+- **E1-memory implementation round 1 — 2026-07-29 — changes requested, 2/3 participants used,
+  degraded.** The review was explicitly ruled to be the E1-memory slice gate required by §6, not a
+  claim that E2–E6 were already complete. Three actionable findings were accepted: generic
+  conversation-window search did not carry request scope; briefing activity chose the newest
+  episode per session before applying scope; and the conflict-alert query had tightened a
+  compatibility `LEFT JOIN`. The frozen implementation was amended to propagate/suppress legacy
+  unscoped windows unless `scope:"all"` is explicit, choose the local-first episode within each
+  session, and preserve the left-join behavior. Roundtable run:
+  `roundtable-9a24b97397594ae1898ad222` (artifact
+  `efd100cf3bd976cacc403e13a9f358734e7b5243ef7194af412e36e0041c0d8a`).
+- **E1-memory implementation round 2 — 2026-07-29 — changes requested, 3/3 participants, not
+  degraded.** The blocking finding showed that the legacy session-scope `LIKE` fallback discarded
+  every `memory_workspaces` row before the canonical rank could recognize an active-workspace
+  memory. The prefilter is removed and an adversarial project-then-legacy-workspace assertion now
+  protects the two-row head. The panel's suggestions are also incorporated: scoped assembly's
+  deliberate omission of ID-less legacy `entity_edges` is documented as E2 migration debt, and the
+  MCP scope-begin helper now has a `void` contract that cannot be mistaken for an activation result.
+  Roundtable run: `oprun_g6a69bd8011459d99_1785345098_97` (artifact
+  `baeeae4567524c11409c8592e2b8711f29c35a9e9b69b38964b6a412e9573276`).
+- **E1-memory implementation round 3 — 2026-07-29 — APPROVED and converged, 3/3 participants,
+  not degraded.** The complete frozen implementation received no blocking findings. The panel's
+  two readability suggestions (the entity-profile SQL literal and qualified aliases) and one CLI
+  coverage nit (`memory.read --scope all`) are incorporated before the final exact-diff review.
+  Roundtable run: `oprun_g6a69bd8011459d99_1785345428_100` (artifact
+  `b88cc6a991d1c7deb682345ddccef4ca27fb7123f2dea434e8f808aac8aeb622`).
+- **E1-memory implementation round 4 — 2026-07-29 — changes requested, 3/3 participants, not
+  degraded.** One blocking finding exposed a real Postgres semantic-path parity gap: pgvector used
+  denormalized embedding scope columns and could discard a legacy workspace-only row before the
+  canonical rank saw it. Pgvector now resolves memory and offset unit points to their owning memory
+  and uses the same `memory_scopes`/`memory_workspaces` filter and rank as every SQL reader. The
+  companion link finding was disproved by the full build and source audit: `hook_scope_labels_for_cwd`
+  is exported by `cmd_hooks_scope.c`, declared in `cmd_hooks_scope.h`, included at the call site, and
+  already used by two older paths in that file. Roundtable run:
+  `oprun_g6a69bd8011459d99_1785346142_101` (artifact
+  `2b566a923d83201ec109ab4f413e47674afd3d5a436f68988a28b38e23a19bc6`).
+- **E1-memory implementation round 5 — 2026-07-29 — changes requested, 3/3 participants, not
+  degraded.** The reported MCP default-context gap was disproved by the installed stdio path:
+  `cli_mcp_serve` injects its real cwd into both the request envelope and tool arguments, and
+  `handle_mcp_call_inner` preserves that metadata before `mcp_memory_scope_begin` resolves the
+  repository identity. The existing search-memory proxy regression already exercised this exact
+  no-override call. The proof is made explicit in code and test comments, and `cwd` is now documented
+  in every ordered-memory MCP schema for direct clients that bypass the stdio proxy. Roundtable run:
+  `oprun_g6a69bd8011459d99_1785346763_103` (artifact
+  `5cd60248e8555ca6a24249a4ac4026a10350d3c5c7a1bf85c0698c9a31ca58e2`).

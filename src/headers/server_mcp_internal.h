@@ -49,12 +49,16 @@ cJSON *tool_job_start(cJSON *args);
 cJSON *tool_job_status(cJSON *args);
 cJSON *tool_list_attempts(cJSON *args);
 cJSON *tool_list_curiosity_items(cJSON *args);
-cJSON *tool_list_facts(void);
+cJSON *tool_list_facts(cJSON *args);
 cJSON *tool_list_hosts(void);
 cJSON *smcp_tool_list_notes(cJSON *args);
 cJSON *tool_list_prospective_memories(cJSON *args);
 cJSON *tool_memory_ask(cJSON *args, cJSON **structured_out);
 cJSON *tool_memory_briefing(cJSON *args);
+/* Always activates a request-local context; active_context_missing reports the
+ * safe shared/global-only fallback when project/workspace resolution fails. */
+void mcp_memory_scope_begin(cJSON *args, int *active_context_missing);
+void mcp_memory_scope_end(void);
 cJSON *tool_memory_get(cJSON *args);
 cJSON *tool_memory_mutate(cJSON *args);
 cJSON *tool_preview_blast_radius(cJSON *args);
@@ -80,7 +84,7 @@ cJSON *tool_job_start(cJSON *args);
 cJSON *tool_job_status(cJSON *args);
 cJSON *tool_list_attempts(cJSON *args);
 cJSON *tool_list_curiosity_items(cJSON *args);
-cJSON *tool_list_facts(void);
+cJSON *tool_list_facts(cJSON *args);
 cJSON *tool_list_hosts(void);
 cJSON *smcp_tool_list_notes(cJSON *args);
 cJSON *tool_list_prospective_memories(cJSON *args);

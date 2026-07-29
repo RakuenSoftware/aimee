@@ -8,8 +8,10 @@
  * everything. */
 #include "cJSON.h"
 #include <aimee/protocols/mcp/mcp_tools.h>
+#include "agent_code_capabilities.h"
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 /* Tier-0 "core" presentation profile (MCP-native tool names): the high-frequency
  * tools an external MCP client is shown when AIMEE_MCP_TOOL_PROFILE=core|lean
@@ -28,9 +30,10 @@ static const char *const MCP_CORE_TOOLS[] = {
     "search_memory",
     "memory_recall",
     "get_identity", /* grounding */
-    "find_symbol",
-    "ast_grep_search", /* code intel */
-    "git",             /* all git/gh ops via one multiplexed tool (command=...) */
+    AIMEE_CODE_TOOL_FIND_SYMBOL,
+    AIMEE_CODE_TOOL_AST_GREP_SEARCH,
+    AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS, /* direct adoption-critical code intel */
+    "git", /* all git/gh ops via one multiplexed tool (command=...) */
     "delegate",
     "roundtable_review", /* multi-agent */
     "roundtable_status", /* poll asynchronous roundtable_review */
@@ -132,6 +135,56 @@ void mcp_add_discovery_tools(cJSON *tools)
       cJSON_AddItemToObject(t, "inputSchema", s);
       cJSON_AddItemToArray(tools, t);
    }
+}
+
+static int mcp_ci_contains(const char *haystack, const char *needle)
+{
+   if (!needle || !needle[0])
+      return 1;
+   if (!haystack)
+      return 0;
+   size_t nlen = strlen(needle);
+   for (const char *h = haystack; *h; h++)
+      if (strncasecmp(h, needle, nlen) == 0)
+         return 1;
+   return 0;
+}
+
+int mcp_tool_matches_query(const cJSON *tool, const char *query)
+{
+   if (!tool)
+      return 0;
+   const cJSON *name = cJSON_GetObjectItemCaseSensitive(tool, "name");
+   const cJSON *description = cJSON_GetObjectItemCaseSensitive(tool, "description");
+   return mcp_ci_contains(cJSON_IsString(name) ? name->valuestring : NULL, query) ||
+          mcp_ci_contains(cJSON_IsString(description) ? description->valuestring : NULL, query);
+}
+
+const char *mcp_code_project_from_args(cJSON *args)
+{
+   cJSON *project = cJSON_GetObjectItemCaseSensitive(args, "project");
+   if (cJSON_IsString(project) && project->valuestring[0])
+      return project->valuestring;
+   cJSON *cwd = cJSON_GetObjectItemCaseSensitive(args, "cwd");
+   if (!cJSON_IsString(cwd) || !cwd->valuestring[0])
+      return NULL;
+   const char *base = strrchr(cwd->valuestring, '/');
+   base = base ? base + 1 : cwd->valuestring;
+   return base[0] ? base : NULL;
+}
+
+int mcp_code_scope_all(cJSON *args)
+{
+   cJSON *scope = cJSON_GetObjectItemCaseSensitive(args, "scope");
+   if (!scope)
+      return 0;
+   if (!cJSON_IsString(scope))
+      return -1;
+   if (!scope->valuestring[0] || strcmp(scope->valuestring, AIMEE_CODE_SCOPE_CURRENT) == 0)
+      return 0;
+   if (strcmp(scope->valuestring, AIMEE_CODE_SCOPE_ALL) == 0)
+      return 1;
+   return -1;
 }
 
 int mcp_call_tool_demux(const char *tool, cJSON *args, const char **out_tool, cJSON **out_args)

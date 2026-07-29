@@ -11,6 +11,10 @@
 
 static char g_last_mcp_call_cwd[4096];
 static char g_last_mcp_call_arg_cwd[4096];
+static char g_last_mcp_call_arg_project[4096];
+static char g_last_mcp_call_arg_workspace[4096];
+static char g_last_mcp_call_tool[128];
+static int g_last_mcp_call_paths_count;
 static int g_reverse_channel_starts;
 static int g_remote_active;
 static int g_remote_http_failures;
@@ -302,11 +306,24 @@ cJSON *cli_v1_dispatch_local(cJSON *request, int timeout_ms)
       cJSON *arguments = cJSON_GetObjectItemCaseSensitive(request, "arguments");
       cJSON *jarg_cwd =
           cJSON_IsObject(arguments) ? cJSON_GetObjectItemCaseSensitive(arguments, "cwd") : NULL;
+      cJSON *jarg_project =
+          cJSON_IsObject(arguments) ? cJSON_GetObjectItemCaseSensitive(arguments, "project") : NULL;
+      cJSON *jarg_workspace = cJSON_IsObject(arguments)
+                                  ? cJSON_GetObjectItemCaseSensitive(arguments, "workspace")
+                                  : NULL;
+      cJSON *jpaths =
+          cJSON_IsObject(arguments) ? cJSON_GetObjectItemCaseSensitive(arguments, "paths") : NULL;
 
+      snprintf(g_last_mcp_call_tool, sizeof(g_last_mcp_call_tool), "%s", tool);
       snprintf(g_last_mcp_call_cwd, sizeof(g_last_mcp_call_cwd), "%s",
                cJSON_IsString(jcwd) ? jcwd->valuestring : "");
       snprintf(g_last_mcp_call_arg_cwd, sizeof(g_last_mcp_call_arg_cwd), "%s",
                cJSON_IsString(jarg_cwd) ? jarg_cwd->valuestring : "");
+      snprintf(g_last_mcp_call_arg_project, sizeof(g_last_mcp_call_arg_project), "%s",
+               cJSON_IsString(jarg_project) ? jarg_project->valuestring : "");
+      snprintf(g_last_mcp_call_arg_workspace, sizeof(g_last_mcp_call_arg_workspace), "%s",
+               cJSON_IsString(jarg_workspace) ? jarg_workspace->valuestring : "");
+      g_last_mcp_call_paths_count = cJSON_IsArray(jpaths) ? cJSON_GetArraySize(jpaths) : 0;
 
       /* Simulate an error response for "fail_tool" */
       if (strcmp(tool, "fail_tool") == 0)
@@ -774,6 +791,11 @@ static void test_tools_call_success(void)
    cJSON_AddStringToObject(params, "name", "search_memory");
    cJSON *args = cJSON_AddObjectToObject(params, "arguments");
    cJSON_AddStringToObject(args, "query", "test");
+   /* The caller supplies no identity override. The stdio transport must attach
+    * its cwd both to the request envelope and the tool arguments. */
+   assert(cJSON_GetObjectItemCaseSensitive(args, "cwd") == NULL);
+   assert(cJSON_GetObjectItemCaseSensitive(args, "project") == NULL);
+   assert(cJSON_GetObjectItemCaseSensitive(args, "workspace") == NULL);
 
    cJSON *resp = capture_response(req);
    cJSON *result = cJSON_GetObjectItemCaseSensitive(resp, "result");
@@ -793,6 +815,70 @@ static void test_tools_call_success(void)
 
    cJSON_Delete(resp);
    cJSON_Delete(req);
+}
+
+static void test_tools_call_cwd_is_transport_owned(void)
+{
+   g_last_mcp_call_arg_cwd[0] = '\0';
+   g_last_mcp_call_arg_project[0] = '\0';
+   g_last_mcp_call_arg_workspace[0] = '\0';
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "jsonrpc", "2.0");
+   cJSON_AddNumberToObject(req, "id", 12.25);
+   cJSON_AddStringToObject(req, "method", "tools/call");
+   cJSON *params = cJSON_AddObjectToObject(req, "params");
+   cJSON_AddStringToObject(params, "name", "search_memory");
+   cJSON *args = cJSON_AddObjectToObject(params, "arguments");
+   cJSON_AddStringToObject(args, "query", "test");
+   cJSON_AddStringToObject(args, "cwd", "/tmp/model-spoofed-checkout");
+   cJSON_AddStringToObject(args, "project", "explicit-project");
+   cJSON_AddStringToObject(args, "workspace", "explicit-workspace");
+
+   cJSON *resp = capture_response(req);
+   char cwd[4096];
+   assert(getcwd(cwd, sizeof(cwd)) != NULL);
+   assert(strcmp(g_last_mcp_call_arg_cwd, cwd) == 0);
+   assert(strcmp(g_last_mcp_call_arg_project, "explicit-project") == 0);
+   assert(strcmp(g_last_mcp_call_arg_workspace, "explicit-workspace") == 0);
+
+   cJSON_Delete(resp);
+   cJSON_Delete(req);
+}
+
+/* Installed MCP smoke: the canonical blast-preview name and path-only schema
+ * survive the stdio proxy, which supplies cwd for the server's active-project
+ * default. This deliberately omits project. */
+static void test_tools_call_preview_blast_radius(void)
+{
+   g_last_mcp_call_tool[0] = '\0';
+   g_last_mcp_call_cwd[0] = '\0';
+   g_last_mcp_call_arg_cwd[0] = '\0';
+   g_last_mcp_call_paths_count = 0;
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "jsonrpc", "2.0");
+   cJSON_AddNumberToObject(req, "id", 12.5);
+   cJSON_AddStringToObject(req, "method", "tools/call");
+   cJSON *params = cJSON_AddObjectToObject(req, "params");
+   cJSON_AddStringToObject(params, "name", "preview_blast_radius");
+   cJSON *args = cJSON_AddObjectToObject(params, "arguments");
+   cJSON *paths = cJSON_AddArrayToObject(args, "paths");
+   cJSON_AddItemToArray(paths, cJSON_CreateString("src/server/server_mcp.c"));
+
+   cJSON *resp = capture_response(req);
+   assert(strcmp(g_last_mcp_call_tool, "preview_blast_radius") == 0);
+   assert(g_last_mcp_call_paths_count == 1);
+   char cwd[4096];
+   assert(getcwd(cwd, sizeof(cwd)) != NULL);
+   assert(strcmp(g_last_mcp_call_cwd, cwd) == 0);
+   assert(strcmp(g_last_mcp_call_arg_cwd, cwd) == 0);
+   cJSON *result = cJSON_GetObjectItemCaseSensitive(resp, "result");
+   assert(cJSON_IsObject(result));
+
+   cJSON_Delete(resp);
+   cJSON_Delete(req);
+   puts("  PASS: test_tools_call_preview_blast_radius");
 }
 
 static void test_tools_call_server_error(void)
@@ -1051,6 +1137,8 @@ int main(void)
    test_tools_list_preserves_server_error();
    test_remote_discovery_retries_are_safe();
    test_tools_call_success();
+   test_tools_call_cwd_is_transport_owned();
+   test_tools_call_preview_blast_radius();
    test_tools_call_server_error();
    test_tools_call_nested_http_error();
    test_tools_call_structured_content_passthrough();
