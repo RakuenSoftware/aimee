@@ -16,6 +16,7 @@
 #include "db2/entity_edges.h"
 #include "db2/memory_query.h"
 #include "db2/memory_relations.h"
+#include "db2/memory_scope_query.h"
 #include "db2/rules.h"
 #endif
 #include <ctype.h>
@@ -164,6 +165,16 @@ static int compare_scoped_section_item(const void *a, const void *b)
 static void memory_scope_labels_for_cwd(const char *workspace_hint, char *workspace_out,
                                         size_t workspace_len, char *project_out, size_t project_len)
 {
+   db2_memory_scope_context_t request_scope;
+   db2_memory_scope_context_get(&request_scope);
+   if (request_scope.active)
+   {
+      if (workspace_out && workspace_len > 0)
+         snprintf(workspace_out, workspace_len, "%s", request_scope.workspace);
+      if (project_out && project_len > 0)
+         snprintf(project_out, project_len, "%s", request_scope.project);
+      return;
+   }
    char cwd[MAX_PATH_LEN];
    const char *workspace = workspace_hint;
 
@@ -1093,6 +1104,13 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
 
 static int append_entity_relationships(char *buf, int pos, int cap)
 {
+   db2_memory_scope_context_t request_scope;
+   db2_memory_scope_context_get(&request_scope);
+   /* Legacy entity_edges rows have no canonical memory_id and therefore no
+    * project visibility tag. Do not inject that unscoped graph into a scoped
+    * request; task-aware memory_relations below remain available and scoped. */
+   if (request_scope.active)
+      return pos;
    /* Entity relationships from graph (top distinct triples by weight). */
    {
       edge_t edges[10];
@@ -1215,9 +1233,11 @@ static void check_artifact_staleness(void)
 char *memory_assemble_context(const char *task_hint)
 {
    int cap = MAX_CONTEXT_TOTAL + 256;
+   db2_memory_scope_context_t request_scope;
+   db2_memory_scope_context_get(&request_scope);
 
    /* Check context cache */
-   if (!getenv("AIMEE_NO_CACHE"))
+   if (!request_scope.active && !getenv("AIMEE_NO_CACHE"))
    {
       char hash[32];
       cache_input_hash(hash, sizeof(hash));
@@ -1247,7 +1267,7 @@ char *memory_assemble_context(const char *task_hint)
    buf[pos] = '\0';
 
    /* Store in context cache */
-   if (!getenv("AIMEE_NO_CACHE"))
+   if (!request_scope.active && !getenv("AIMEE_NO_CACHE"))
    {
       char hash[32];
       cache_input_hash(hash, sizeof(hash));

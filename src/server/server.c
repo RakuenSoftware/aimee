@@ -13,6 +13,7 @@
 #include "primary_cli_ingestor.h"
 #include "server.h"
 #include "server_mcp_internal.h" /* mcp_tool_register_native_surface */
+#include "kb_client.h"           /* request-local memory scope context */
 
 #include "agent_tools.h"     /* agent_tools_set_git_write_provider / _set_shell_git_gate */
 #include "git_cred_inject.h" /* git_cred_forge_configured — no aimee route, no restriction */
@@ -1337,14 +1338,15 @@ static int handle_session_brief_assemble(server_ctx_t *ctx, server_conn_t *conn,
    FILE *mem = open_memstream(&captured, &captured_len);
    if (!mem)
       return server_send_error(conn, "open_memstream failed", request_id);
-
+   int active_context_missing = server_memory_scope_begin(req);
    session_brief_emit(mem);
+   kb_client_memory_scope_context_clear();
    fflush(mem);
    fclose(mem);
-
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "schema_version", 1);
    cJSON_AddStringToObject(resp, "output", captured ? captured : "");
+   cJSON_AddBoolToObject(resp, "active_context_missing", active_context_missing);
    if (request_id)
       cJSON_AddStringToObject(resp, "request_id", request_id);
 

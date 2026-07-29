@@ -576,6 +576,39 @@ static void test_memory_stats_route(void)
    printf("  PASS: test_memory_stats_route\n");
 }
 
+static void test_ordered_memory_commands_marshal_active_scope(void)
+{
+   char cwd[4096];
+   assert(getcwd(cwd, sizeof(cwd)) != NULL);
+
+   char *search_argv[] = {"needle",       "--project", "project-id", "--workspace",
+                          "workspace-id", "--scope",   "all"};
+   cJSON *req = marshal_memory_search(7, search_argv);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "cwd")), cwd) == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "project")), "project-id") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "workspace")), "workspace-id") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "scope")), "all") == 0);
+   cJSON_Delete(req);
+
+   char *scope_argv[] = {"--scope", "all"};
+   req = marshal_memory_list(2, scope_argv);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "cwd")), cwd) == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "scope")), "all") == 0);
+   cJSON_Delete(req);
+
+   req = marshal_memory_read(2, scope_argv);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "cwd")), cwd) == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "scope")), "all") == 0);
+   cJSON_Delete(req);
+
+   char *recall_argv[] = {"release task"};
+   req = marshal_memory_recall(1, recall_argv);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "cwd")), cwd) == 0);
+   cJSON_Delete(req);
+
+   printf("  PASS: test_ordered_memory_commands_marshal_active_scope\n");
+}
+
 static void test_memory_delete_and_supersede_routes(void)
 {
    cli_v1_route_t route;
@@ -1771,6 +1804,7 @@ int main(void)
    test_model_routes_and_marshaling();
    test_memory_show_alias_route();
    test_memory_stats_route();
+   test_ordered_memory_commands_marshal_active_scope();
    test_memory_delete_and_supersede_routes();
    test_server_status_route_lookup();
    test_agent_probe_failure_controls_exit_status();

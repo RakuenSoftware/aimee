@@ -102,6 +102,7 @@ int kb_client_memory_list_session_scope_priority(memory_t *out, int max)
       return 0;
 
    cJSON *req = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(req);
    cJSON_AddNumberToObject(req, "max", max);
    char *json = kb_v1_action_request("memory.list_session_scope_priority", req);
    if (!json)
@@ -140,6 +141,7 @@ int kb_client_memory_list_session_scope_priority_like(const char *pattern, memor
       return 0;
 
    cJSON *req = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(req);
    cJSON_AddStringToObject(req, "pattern", pattern);
    cJSON_AddNumberToObject(req, "max", max);
    char *json = kb_v1_action_request("memory.list_session_scope_priority_like", req);
@@ -249,6 +251,7 @@ int kb_client_memory_search_facts_patterns_by_keyword(const char *keyword, memor
       return 0;
 
    cJSON *req = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(req);
    cJSON_AddStringToObject(req, "keyword", keyword);
    cJSON_AddNumberToObject(req, "max", max);
    char *json = kb_v1_action_request("memory.search_facts_patterns_by_keyword", req);

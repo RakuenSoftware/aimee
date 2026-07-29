@@ -48,6 +48,36 @@ int send_and_free(server_conn_t *conn, cJSON *resp)
 
 /* --- Memory handlers --- */
 
+int server_memory_scope_begin(cJSON *req)
+{
+   const char *cwd = jo_str(req, "cwd", NULL);
+   const char *project_arg = jo_str(req, "project", NULL);
+   const char *workspace_arg = jo_str(req, "workspace", NULL);
+   const char *scope_arg = jo_str(req, "scope", NULL);
+   char project[MAX_PATH_LEN] = "";
+   char workspace[MAX_PATH_LEN] = "";
+   if (project_arg)
+      snprintf(project, sizeof(project), "%s", project_arg);
+   if (workspace_arg)
+      snprintf(workspace, sizeof(workspace), "%s", workspace_arg);
+   if ((!project[0] || !workspace[0]) && cwd && cwd[0])
+   {
+      char resolved_project[MAX_PATH_LEN] = "";
+      char resolved_workspace[MAX_PATH_LEN] = "";
+      if (workspace_repo_identity(cwd, resolved_project, sizeof(resolved_project),
+                                  resolved_workspace, sizeof(resolved_workspace)) == 0)
+      {
+         if (!project[0])
+            snprintf(project, sizeof(project), "%s", resolved_project);
+         if (!workspace[0])
+            snprintf(workspace, sizeof(workspace), "%s", resolved_workspace);
+      }
+   }
+   kb_client_memory_scope_context_set(workspace, project,
+                                      scope_arg && strcmp(scope_arg, "all") == 0);
+   return (!workspace[0] && !project[0]) ? 1 : 0;
+}
+
 int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -84,19 +114,23 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       qpos += snprintf(query_buf + qpos, sizeof(query_buf) - qpos, "%s", clusters[i]);
    }
 
+   int active_context_missing = server_memory_scope_begin(req);
    /* Search stored facts; graph-code fusion is always on for recall. */
    memory_t facts[32];
    int fact_count = kb_client_memory_find_facts_ex(query_buf, limit, facts, 32, "on");
    if (fact_count < 0)
+   {
+      kb_client_memory_scope_context_clear();
       return server_send_error(conn,
                                "knowledge service search index unavailable; server-side "
                                "maintenance is required",
                                NULL);
+   }
 
    /* Search conversation windows */
    search_result_t results[32];
    int found = kb_client_memory_search(clusters, count, limit, results, 32);
-
+   kb_client_memory_scope_context_clear();
    cJSON *farr = cJSON_CreateArray();
    for (int i = 0; i < fact_count; i++)
       cJSON_AddItemToArray(farr, memory_to_json(&facts[i]));
@@ -115,6 +149,7 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *resp = jo_ok();
    cJSON_AddItemToObject(resp, "facts", farr);
    cJSON_AddItemToObject(resp, "windows", warr);
+   jo_add_bool(resp, "active_context_missing", active_context_missing);
    return send_and_free(conn, resp);
 }
 
@@ -154,21 +189,25 @@ int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *tier = jo_str(req, "tier", NULL);
    const char *kind = jo_str(req, "kind", NULL);
    int limit = jo_int(req, "limit", 20);
-
+   int active_context_missing = server_memory_scope_begin(req);
    memory_t results[64];
    int count = kb_client_memory_list(tier, kind, limit, results, 64);
    if (count < 0)
+   {
+      kb_client_memory_scope_context_clear();
       return server_send_error(conn,
                                "knowledge service unavailable; the memory store is unreachable "
                                "(server-side maintenance is required)",
                                NULL);
-
+   }
+   kb_client_memory_scope_context_clear();
    cJSON *arr = cJSON_CreateArray();
    for (int i = 0; i < count; i++)
       cJSON_AddItemToArray(arr, memory_to_json(&results[i]));
 
    cJSON *resp = jo_ok();
    cJSON_AddItemToObject(resp, "memories", arr);
+   jo_add_bool(resp, "active_context_missing", active_context_missing);
    return send_and_free(conn, resp);
 }
 
@@ -333,11 +372,12 @@ int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   (void)req;
-
+   int active_context_missing = server_memory_scope_begin(req);
    char *context = kb_client_memory_assemble_context(NULL);
+   kb_client_memory_scope_context_clear();
    cJSON *resp = jo_ok();
    jo_add_str(resp, "context", context ? context : "");
+   jo_add_bool(resp, "active_context_missing", active_context_missing);
    free(context);
    return send_and_free(conn, resp);
 }

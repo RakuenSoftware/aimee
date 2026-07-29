@@ -18,6 +18,7 @@
 #include "../db2/db2_internal.h"
 #include "../db2/lifecycle.h" /* db2_set_embedding_dim */
 #include "../db2/pgvec_transport.h"
+#include "../db2/pgvec_scope_query.h"
 #include "../db2/memory_vectors.h"
 #include "../db2/kb_vectors.h"
 #include "../db2/vector_verify.h"
@@ -219,6 +220,18 @@ static void test_scope_hints(void)
    printf("pgvec: scope hint set/clear OK\n");
 }
 
+static void test_memory_scope_sql_uses_canonical_owner_scope(void)
+{
+   const char *filter = PGVEC_MEMORY_SCOPE_FILTER_SQL;
+   const char *rank = PGVEC_MEMORY_SCOPE_RANK_SQL;
+   assert(strstr(filter, "memory_scopes") != NULL);
+   assert(strstr(filter, "memory_workspaces") != NULL);
+   assert(strstr(filter, "memory_units") != NULL);
+   assert(strstr(filter, "e.point_id - 1000000000000") != NULL);
+   assert(strstr(rank, "memory_workspaces") != NULL);
+   printf("pgvec: canonical memory owner scope SQL OK\n");
+}
+
 static void test_latency_snapshot(void)
 {
    int64_t total, count, maxv;
@@ -316,6 +329,7 @@ int main(void)
    test_search_graceful_on_no_db();
    test_scroll_graceful_on_no_db();
    test_scope_hints();
+   test_memory_scope_sql_uses_canonical_owner_scope();
    test_latency_snapshot();
    test_public_api_symbols();
    test_corpus_index_type_hnsw_default();

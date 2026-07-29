@@ -489,7 +489,7 @@ static void test_osv_offline_cache_miss_allows(void)
    "{action,async,auto,base,body,branch,command,count,depth,diff_stat,expected_head_sha,files,"    \
    "force,index,job_id,merge_method,message,mirror,mode,name,number,path,prune,rebase,ref,remote," \
    "source,staged,stat_only,state,title,url,wait} req:command\n"                                   \
-   "graph {command,entity,episode_key,limit,query} req:command\n"                                  \
+   "graph {command,cwd,entity,episode_key,limit,project,query,scope,workspace} req:command\n"      \
    "host {command,name} req:command\n"                                                             \
    "index "                                                                                        \
    "{command,file_path,judge,line_end,line_start,max_results,node,paths,project,query,scope,"      \
@@ -502,9 +502,9 @@ static void test_osv_offline_cache_miss_allows(void)
    "list_curiosity_items {limit,state} req:\n"                                                     \
    "lsp {col,command,file,line,workspace} req:command\n"                                           \
    "memory "                                                                                       \
-   "{command,confidence,content,dry_run,force,handle,id,key,kind,memory_id,modes,query,reason,"    \
-   "tier,verb} req:command\n"                                                                      \
-   "memory_recall {limit_tokens,session_start,task_hint} req:\n"                                   \
+   "{command,confidence,content,cwd,dry_run,force,handle,id,key,kind,memory_id,modes,project,"     \
+   "query,reason,scope,tier,verb,workspace} req:command\n"                                         \
+   "memory_recall {cwd,limit_tokens,project,scope,session_start,task_hint,workspace} req:\n"       \
    "note {command,content,limit,query,tag,tags,title} req:command\n"                               \
    "payload_rewrite_status {} req:\n"                                                              \
    "pdf_inspect_structure {document_key,project} req:document_key,project\n"                       \
@@ -521,13 +521,14 @@ static void test_osv_offline_cache_miss_allows(void)
    "prospective_memory "                                                                           \
    "{action_text,anchor_entity,anchor_file,command,id,limit,recurrence,state,trigger_text,valid_"  \
    "until} req:command\n"                                                                          \
-   "recall {block_type,command,limit,limit_tokens,query,since} req:command\n"                      \
+   "recall {block_type,command,cwd,limit,limit_tokens,project,query,scope,since,workspace} "       \
+   "req:command\n"                                                                                 \
    "roadmap {command,roadmap_id} req:command\n"                                                    \
    "roundtable_review {artifact_stage,brief,diff,original_request,roundtable,workdir} req:diff\n"  \
    "roundtable_status {run_id} req:run_id\n"                                                       \
    "rules {command,reason,text} req:command\n"                                                     \
    "search_docs {max_results,project,query} req:query\n"                                           \
-   "search_memory {filter,query} req:query\n"                                                      \
+   "search_memory {cwd,filter,project,query,scope,workspace} req:query\n"                          \
    "send_message {target,text} req:target,text\n"                                                  \
    "session {around_message_id,chain_id,command,include_sources,limit,query,session_id,window} "   \
    "req:command\n"                                                                                 \
