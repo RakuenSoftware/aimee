@@ -1851,7 +1851,7 @@ func TestReviewersAreToldBlockedIsAboutTheRequestNotTheArtifact(t *testing.T) {
 type conflictForge struct{}
 
 func (conflictForge) Push(context.Context, string, string, string) error { return nil }
-func (conflictForge) Open(context.Context, string, string, string, string, string) (PullRequest, error) {
+func (conflictForge) Open(context.Context, string, string, string, string, PullRequestSpec) (PullRequest, error) {
 	return PullRequest{}, nil
 }
 func (conflictForge) CI(context.Context, string, string) (CIState, error) { return CIPassed, nil }
@@ -1864,7 +1864,7 @@ func (conflictForge) Merge(context.Context, string, string, string) error {
 type raceForge struct{}
 
 func (raceForge) Push(context.Context, string, string, string) error { return nil }
-func (raceForge) Open(context.Context, string, string, string, string, string) (PullRequest, error) {
+func (raceForge) Open(context.Context, string, string, string, string, PullRequestSpec) (PullRequest, error) {
 	return PullRequest{}, nil
 }
 func (raceForge) CI(context.Context, string, string) (CIState, error) { return CIPassed, nil }

@@ -9,8 +9,8 @@
 #      freeze -> roundtable -> sub-PR -> GREEN CI -> merge into the feature branch)
 #   -> freeze + roundtable {acceptance: proposal completed? quality? missing tests?}  (loop)
 #   -> document + freeze + roundtable {documentation quality}  (loop) -> pushed to the feature branch
-#   -> PR (feature branch -> the repo's DEFAULT branch).  Opened, NOT merged: the workflow ends
-#      at the human-reviewed PR (review + merge happen out-of-band on the forge).
+#   -> draft PR (feature branch -> the repo's DEFAULT branch). Opened, never marked ready or merged:
+#      the workflow ends at the human handoff (review + merge happen out-of-band on the forge).
 #
 # The roundtable always sees the originating proposal alongside the artifact under
 # review (the engine supplies it from the run's proposal), so the plan gate, the
@@ -172,8 +172,8 @@ nodes:
       branch: document.out
     next: final_pr
   # Open the final PR: feature branch -> the repo's DEFAULT branch. Terminal: the
-  # workflow ends here. pr.open only OPENS the PR (base:trunk, never merged); a human
-  # reviews and merges it on the forge.
+  # workflow ends here. pr.open creates a DRAFT PR (base:trunk, never marked ready
+  # or merged); a human reviews, marks ready, and decides whether to merge on the forge.
   - id: final_pr
     block: pr.open
     in:
