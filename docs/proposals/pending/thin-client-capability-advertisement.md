@@ -64,10 +64,13 @@ governance policy distribution; it composes them.
    advertised together with the surface descriptors needed to present and invoke it — CLI verb,
    arguments, help, tier; MCP tool name and input schema; HTTP route; web surface — so a client that
    has never heard of a module can expose it.
-4. **The thin client is static.** A client binary ships no module knowledge and dispatches every
-   module surface generically from the projection. A client at version *N* correctly serves modules
-   shipped in a Runtime or Control Plane at version *N+k* within the compatibility window; only a
-   change to the core transport, registration, or handshake contract requires a client release.
+4. **The thin client is static and stateless.** A client binary ships no module knowledge and
+   dispatches every module surface generically from the projection. It holds the current projection
+   only in process memory while attached: it writes no projection, generation, capability state,
+   integration catalog, or module fact to disk, and a restarted client refetches before presenting a
+   surface. A client at version *N* correctly serves modules shipped in a Runtime or Control Plane at
+   version *N+k* within the compatibility window; only a change to the core transport, registration,
+   or handshake contract requires a client release.
 5. **A capability the effective set does not offer is never presented**, and invoking it returns a
    typed `capability_absent` — never a partial or silent success.
 
@@ -114,9 +117,13 @@ Runtime knows exists; it never learns whether a given capability originated in t
 modules or in a Control Plane, and must not depend on the distinction.
 
 **Client → consumer (re-advertisement).** The client projects the effective set into whatever
-consumes it, through that consumer's own protocol: the MCP `initialize` capability object and
-`listChanged` notification, the ACP capability handshake (`src/acp_registry/agent.json`), and the
-CLI/web surfaces. This is a projection of the received closure, not a locally-authored one.
+consumes it, through that consumer's own protocol: the MCP integration and `initialize` capability
+object, `listChanged` notification, the ACP capability handshake (`src/acp_registry/agent.json`), and
+the CLI/web surfaces. This is playback of the received closure, not a locally-authored catalog. If a
+consumer's standard integration API persists configuration, that persisted artifact is
+**consumer-owned output** reproduced from the current server projection; it is not an Aimee client
+cache, and the client neither consults it as authority nor retains a second copy. The next invocation
+still refetches from the Runtime. Consumer output therefore cannot make a thin client a state owner.
 
 ### Why registration is upward and not the reverse
 
@@ -460,6 +467,13 @@ them; it is not broken by their existence.
 
 **Compatibility rules that make version independence real:**
 
+0. **The view is ephemeral.** The declaration and returned projection live only for the attached
+   process. The client may retain them in memory to validate and forward calls during that attachment,
+   but must not persist them through a file, database, keychain, environment rewrite, or consumer
+   integration artifact. On restart it has no effective set until registration succeeds again.
+   Durable identity credentials and the operator-selected Runtime endpoint belong to the transport
+   bootstrap contract, not the capability/integration client, and must not be used to smuggle module
+   or surface state into the thin client.
 1. **Unknown keys are rejected everywhere except one designated place.** Ignoring an unknown field is
    safe exactly when the field cannot change what the client *does* — it is presentation metadata. It
    is unsafe when the field constrains validation, routing, authorization, or invocation, because
@@ -576,9 +590,9 @@ advertising a stale list.
 
 - **On registration.** The thin client already probes `GET /v1/health` and pins the Runtime cert when
   it attaches (`src/cli_remote.c:321`, `remote_pin_cert`/`remote_set`). Registration extends that
-  attach: the client presents its capability declaration and records the returned projection with its
-  `epoch`/`generation`. The Runtime registers with the Control Plane the same way at its own startup
-  and on reconnect.
+  attach: the client presents its capability declaration and holds the returned projection with its
+  `epoch`/`generation` only in process memory for the life of that attachment. The Runtime registers
+  with the Control Plane the same way at its own startup and on reconnect.
 - **On change — every network edge has a defined mechanism, not an optional one.** Each network
   registration edge (client→Runtime, Runtime→Control Plane) operates in exactly one of two modes,
   chosen at registration and reported in the projection so both ends know which is in force:
@@ -619,7 +633,7 @@ advertising a stale list.
   A registration that can establish neither mode is refused with a typed error rather than admitted
   in a mode where change would never arrive. A change to the closure, to any advertised state, or to
   any surface descriptor advances the affected scopes' `generation`. An `epoch` change (process
-  restart) forces a full refetch and drops the cached view.
+  restart) forces a full refetch and drops the in-memory view.
 - **Additions propagate, not only withdrawals.** Freshness expiry alone can only *withdraw* a
   capability the client already knows about; it can never reveal a capability that appeared after the
   last fetch. That is why revalidation is mandatory rather than a fallback: without it a client would
@@ -805,6 +819,11 @@ dependency, and a client never advertises one, for the same reason and through t
 12. **Topology is not projected downward.** A client-visible projection contains no field naming
     another service, its address, its health, or a capability's origin. Provenance and topological
     reason codes exist only in an authority's internal closure and on its upstream edge.
+13. **The thin client owns no durable capability or integration state.** Exiting the client destroys
+    its effective-set view; restarting with the same home/config presents no module CLI verb, MCP
+    integration, tool, route, help, schema, generation, or availability state until the Runtime
+    projection is fetched again. Consumer-owned configuration written through a consumer's standard
+    integration API is treated only as rendered output and is never read back as Aimee authority.
 
 ## Non-goals
 
@@ -910,6 +929,7 @@ The non-obvious ones, made concrete:
 - {id: 13, tier: mechanical, check: "scripts/check_projection_topology_nondisclosure.sh --client-visible-schema-has-no-provenance-field --path-level-not-schema-only --deny-list-applied-to response,headers,logs,traces,metrics-labels,audit --inject-provenance-fixture-and-assert-absent-from-every-emitted-artifact --client-visible-reason-enum dependency,stale,schema_too_old,policy --forbid-upstream-reason-codes-downward --forbid-service-name-address-or-health-field --assert-upstream-outage-projects-as-dependency --diff-client-projection-vs-internal-closure"}
 - {id: 14, tier: mechanical, check: "scripts/check_envelope_deadlines.sh --require-heartbeat-halfopen-reconnect-roundtrip-when-notified --assert-half-open-greater-than-heartbeat --assert-stale-greater-than-revalidate --recompute-hop-bound-and-reject-mismatch --assert-bound-includes-stalled-request-timeout --drop-connection-mid-request-fixture --assert-propagation-bound-equals-hop-plus-upstream-over-actual-topology --assert-stale-at-least-propagation-bound --control-plane-propagation-bound-equals-its-hop-bound --reject-malformed-envelope-fail-closed"}
 - {id: 15, tier: integration, check: "scripts/test_capability_absent_indistinguishability.sh --absent-vs-never-existed --assert-identical-status-404 --assert-identical-body-bytes --assert-no-id-echo --assert-no-reason-field --assert-no-varying-content-length --assert-no-capability-specific-header --assert-single-resolution-path-no-withheld-branch --distinguish-from-present-but-unavailable-record"}
+- {id: 16, tier: integration, check: "scripts/test_static_thin_client_state.sh --assert-no-projection-generation-capability-integration-or-module-state-persisted --scan-files-databases-keychains-env-and-consumer-output --restart-offline-presents-no-surface --restart-online-refetches-before-presenting --consumer-output-never-read-as-authority --transport-identity-and-endpoint-only-durable-exceptions"}
 ```
 
 ## Review status
@@ -919,14 +939,14 @@ suite roundtable and does not inherit the 2026-07-20 approvals; it must complete
 technical-writing, architecture, adversarial, and verification review before acceptance.
 
 It has been through **six roundtable verdicts** (revisions 1→7), and every genuine finding from each
-is resolved — see the revision history below. It is **paused before a clean pass**, not because it
-converged: the review panel is running degraded (the `codex` seat is out of quota until 2026-07-29,
-which destabilizes seat resolution), and the two most recent rounds produced malformed-verdict seat
+is resolved — see the revision history below. Revision 8 adds a governing stateless-client
+clarification after those verdicts and is not reviewed yet. Review had paused before a clean pass
+while the `codex` seat was out of quota; that quota reset on 2026-07-29, so the next step is a
+full-strength pass over revision 8. The two rounds before the pause produced malformed-verdict seat
 failures and two demonstrably false findings (a "truncated paragraph" that is intact, and a cited
-line number the panel gave as 675/702 that is 642/669 in both this branch and `origin/testing`). A
-zero-blocking result on a degraded panel would be weak evidence, so final convergence is deferred to
-a full-strength panel rather than pursued through further rounds now. The outstanding items at pause
-are non-blocking suggestions and nits, recorded for the next pass.
+line number the panel gave as 675/702 that is 642/669 in both this branch and `origin/testing`). The
+outstanding revision-7 items were non-blocking suggestions and nits; revision 8's new state-ownership
+boundary and check 16 must be reviewed as new normative content.
 
 It does not modify the suite taxonomy or any shared invariant. It does, however, add normative
 content beyond a pure projection, and review must treat these as new rather than inherited:
@@ -942,6 +962,16 @@ content beyond a pure projection, and review must treat these as new rather than
    authority computes and emits change signals.
 
 Revision history.
+
+*Revision 7 → 8* (governing clarification, not yet roundtable-reviewed): "static" still allowed an
+implementation to persist the returned projection and treat the client as a second state owner. The
+thin client is now explicitly stateless: it may hold the projection only in process memory while
+attached, must refetch before presenting a surface after restart, and may not persist capability,
+generation, integration, or module state. Server-projected MCP/CLI integration material written
+through a consumer's standard API is consumer-owned rendered output, never a client cache or an
+authority the client reads back. Truthfulness invariant 13 and binding check 16 make that boundary
+observable across files, databases, keychains, environment rewrites, consumer output, offline
+restart, and online refetch.
 
 *Revision 1 → 2* (roundtable run `…_1784821917_31`, 6 blocking + 1 foundational): the draft cited
 "invariants 1–4" as the suite dependency law, carried an undifferentiated `depends_on` that would
