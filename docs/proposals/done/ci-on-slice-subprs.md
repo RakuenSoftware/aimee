@@ -1,5 +1,7 @@
+# Proposal: run CI on slice sub-PRs
 
-- **State:** implemented — option 1 shipped in `ci.yml`.
+- **State:** implementation prepared — option 1 is present in `ci.yml`; rollout
+  remains blocked until the pre-enablement Q0 baseline is recorded.
 
 ## Problem
 
@@ -146,43 +148,52 @@ above that is real but unmeasured — option 2 remains available as a targeted
 remedy, and should be revisited with concurrency data in hand rather than
 adopted pre-emptively now.
 
-**Post-adoption measurement, with an explicit trigger for reconsidering.**
-Because concurrency is knowingly unquantified at decision time, adopting option 1
-carries an obligation to measure it afterwards rather than leave it open.
+**Rollout measurement and activation sequence.**
+Because concurrency is knowingly unquantified at decision time, option 1 must be
+activated only after the no-slice-CI queue baseline is recorded. The workflow
+change being present on this implementation branch is not, by itself, the
+activation boundary: for `pull_request`, GitHub evaluates the workflow from the
+pull request's base branch. Do not use a commit's author or committer time as a
+proxy for activation.
 
-The requested pre-enablement `Q0` sample was not captured before commit
-`968c804d` enabled slice CI. Do not invent that missing baseline or compare a
-post-adoption sample to an unspecified value. Replace it with a retrospective,
-mechanically comparable baseline from GitHub Actions: select the 10 completed
-`pull_request` runs of `ci.yml` whose base branch is not `aimee/feat/**` and whose
-`created_at` values are the latest before the `968c804d` commit time. For each
-run, calculate queue wait as the earliest job `started_at` minus the run
-`created_at`; `Q0` is the arithmetic median (the mean of the fifth and sixth
-ordered values) of those 10 waits. Record the commit time, run IDs, timestamps,
-per-run queue waits, API retrieval date, and resulting median in this proposal
-before evaluating the threshold below.
+Before a branch containing this trigger becomes the base of any slice sub-PR,
+capture `Q0` from 10 consecutive completed unrelated `pull_request` runs of
+`ci.yml` while no evaluated base branch contains the slice trigger. An unrelated
+run has a base branch other than `aimee/feat/**`. For each run, calculate queue
+wait as the earliest job `started_at` minus the run `created_at`; `Q0` is the
+arithmetic median (the mean of the fifth and sixth ordered values). Record the
+run IDs, timestamps, per-run waits, API retrieval date, and resulting median in
+this proposal. Do not activate slice CI until that record exists.
 
-For `Q1`, use the first 10 completed slice gates created after slice CI was
-enabled. Measure the queue wait of every unrelated `pull_request` `ci.yml` run
-(base branch not `aimee/feat/**`) created from the first slice gate's `created_at`
-through the last slice gate's `updated_at`, using the same earliest-job-start
-calculation and arithmetic-median rule; `Q1` is the median of those values. If
-the window contains fewer than 10 unrelated PR runs, extend its end to the
-creation time of the tenth subsequent unrelated PR run and use those 10 runs for
-`Q1`.
+After `Q0` is recorded, merge or otherwise deploy the trigger to the branch that
+will be the base of slice sub-PRs. Record the deployment event and its GitHub
+timestamp as the activation boundary. Confirm activation with the first slice
+sub-PR check run and record that run's ID and `created_at`; neither a local commit
+time nor the implementation PR's creation time is an acceptable substitute.
+
+For `Q1`, use the first 10 completed slice gates created at or after the recorded
+activation boundary. Measure the queue wait of every unrelated `pull_request`
+`ci.yml` run (base branch not `aimee/feat/**`) created from the first slice
+gate's `created_at` through the last slice gate's `updated_at`, using the same
+earliest-job-start calculation and arithmetic-median rule; `Q1` is the median of
+those values. If the window contains fewer than 10 unrelated PR runs, extend its
+end to the creation time of the tenth subsequent unrelated PR run and use those
+10 runs for `Q1`.
 
 For each slice gate, record its run ID, `created_at`, `updated_at`, total elapsed
-time, and an account-wide concurrency maximum `Cmax[i]`. The observation
-interval for `Cmax[i]` is that gate's half-open interval `[created_at,
-updated_at)`. Using credentials that can enumerate Actions across every
-repository owned by the account, query every workflow run whose lifetime
-overlaps that interval, not only runs in this repository, then retrieve every
-job attempt for those runs. Count each job execution (including every matrix
-expansion and rerun attempt) as active on `[started_at, completed_at)` and clip
-that interval to the slice-gate interval. Reconstruct the maximum with a sweep
+time, and an account-wide concurrency maximum `Cmax[i]`. Record one API
+observation cutoff after the gate's `updated_at`. The observation interval for
+`Cmax[i]` is the gate's half-open interval `[created_at, updated_at)`. Using
+credentials that can enumerate Actions across every repository owned by the
+account, query every workflow run whose lifetime overlaps that interval, not
+only runs in this repository, then retrieve every job attempt for those runs.
+Count each execution (including every matrix expansion and rerun attempt) from
+`started_at` to `completed_at`; if a started job has no `completed_at` at
+retrieval time, count it through the recorded observation cutoff. Clip that
+active interval to the slice-gate interval. Reconstruct the maximum with a sweep
 of the clipped interval endpoints, processing completion endpoints before start
 endpoints at an equal timestamp so the half-open convention is preserved.
-Queued or skipped jobs without both timestamps are not active.
+Queued or skipped jobs without `started_at` are not active.
 
 Preserve the raw API responses used for the calculation. Record the account
 identifier, API retrieval date, account plan and documented concurrent-job
@@ -234,11 +245,12 @@ If **option 2** is implemented instead:
 
 ## Implemented change
 
-`ci.yml` now includes `'aimee/feat/**'` in the existing `pull_request` branch
-filter. A pull request targeting a work-item feature branch therefore starts the
-same workflow as pull requests targeting `main`, `testing`, or
-`feature/core-modularization`. No job, matrix, permissions, event type, or
-workflow-engine CI semantics changed.
+`ci.yml` includes `'aimee/feat/**'` in the existing `pull_request` branch
+filter. Once deployed to a branch used as the base of a work-item slice sub-PR,
+that pull request starts the same workflow as pull requests targeting `main`,
+`testing`, or `feature/core-modularization`. The implementation is intentionally
+not activated until the pre-enablement `Q0` record required above is complete.
+No job, matrix, permissions, event type, or workflow-engine CI semantics changed.
 
 ## Verification
 
@@ -249,7 +261,8 @@ workflow-engine CI semantics changed.
    every job definition and every matrix expansion present in `ci.yml` at
    implementation time remains unchanged; do not use historical hard-coded job
    counts as the gate.
-3. Open or synchronize a test pull request targeting an `aimee/feat/<work-item>`
-   branch and confirm that all executions produced by the complete current
-   workflow report check runs. Confirm a feature-to-`testing` pull request still
-   produces that same complete gate.
+3. After recording `Q0` and deliberately activating the trigger, open or
+   synchronize a test pull request targeting an `aimee/feat/<work-item>` branch
+   and confirm that all executions produced by the complete current workflow
+   report check runs. Confirm a feature-to-`testing` pull request still produces
+   that same complete gate.
