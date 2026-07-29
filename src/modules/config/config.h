@@ -1809,7 +1809,7 @@ typedef struct config
     *   through the drain path (kb_doc_refresh) are curated too.
     * kb_curator_extract_code_enabled:  default ON. 1 = queue extract_code_unit jobs.
     * kb_curator_extract_command[512]:  sidecar command (default: scripts/curator-extract.py).
-    * kb_curator_extract_max_tokens:    max_tokens per job stdin payload (default 2048).
+    * kb_curator_extract_max_tokens:    max_tokens per curator completion (default 512).
     * kb_curator_max_attempts:          max drain attempts per job before marking failed (default
     * 3).
     */

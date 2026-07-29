@@ -3,6 +3,7 @@
  * fallback path is the unchanged kb_curator_sidecar_run and not re-tested here. */
 #include "kb_curator_llm.h"
 
+#include "cJSON.h"
 #include "config.h"
 #include "support/mock_agent_http.h"
 
@@ -72,6 +73,7 @@ static void test_provider_path(void)
    snprintf(cfg.kb_curator_tier_b_base_url, sizeof(cfg.kb_curator_tier_b_base_url),
             "http://big/v1");
    snprintf(cfg.kb_curator_tier_b_model, sizeof(cfg.kb_curator_tier_b_model), "big-32b");
+   cfg.kb_curator_extract_max_tokens = 137;
 
    char err[256];
    char *resp =
@@ -86,6 +88,11 @@ static void test_provider_path(void)
    /* system_prompt + request_json must reach the provider as message content. */
    assert(strstr(g_seen_body, "be-a-curator") != NULL);
    assert(strstr(g_seen_body, "\\\"topic\\\":\\\"t\\\"") != NULL || strstr(g_seen_body, "topic"));
+   cJSON *sent = cJSON_Parse(g_seen_body);
+   assert(sent != NULL);
+   cJSON *max_tokens = cJSON_GetObjectItemCaseSensitive(sent, "max_tokens");
+   assert(cJSON_IsNumber(max_tokens) && max_tokens->valueint == 137);
+   cJSON_Delete(sent);
    free(resp);
    mock_agent_http_reset();
    printf("kb_curator_llm: provider path (url + system + request in body) ok\n");
