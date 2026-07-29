@@ -706,8 +706,13 @@ static cJSON *mcph_index_find_callers(struct mcp_call *c)
    cJSON *js = cJSON_GetObjectItemCaseSensitive(c->jargs, "symbol");
    if (!cJSON_IsString(js) || !js->valuestring[0])
       return text_content("error: index_find_callers requires 'symbol'");
-   cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
-   const char *project = cJSON_IsString(jp) ? jp->valuestring : NULL;
+   int all_projects = mcp_code_scope_all(c->jargs);
+   if (all_projects < 0)
+      return text_content("error: scope must be 'current' or 'all'");
+   const char *project = all_projects ? NULL : mcp_code_project_from_args(c->jargs);
+   if (!all_projects && !project)
+      return text_content("error: no active project determined from cwd; pass 'project' or "
+                          "scope='all' explicitly");
    const int max = 200;
    caller_hit_t *hits = calloc((size_t)max, sizeof(*hits));
    if (!hits)

@@ -8,6 +8,7 @@
 #include "cJSON.h"
 #include "cli_attention_guard.h" /* attn_require_session_worktree, attn_session_isolation_blocked */
 #include "cmd_self_update.h"     /* aimee_self_update_notice */
+#include "agent_code_capabilities.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -599,8 +600,9 @@ int handle_user_prompt_submit(void)
       struct ss_sbuf ctx = {0};
       ss_add(&ctx, "<aimee-context>\n");
       ss_add(&ctx, b.p);
-      ss_add(&ctx, "explore-with: find_symbol, lsp_references, ast_grep_search, search_graph, "
-                   "get_context_block\n");
+      ss_add(&ctx, "explore-with: " AIMEE_CODE_TOOL_FIND_SYMBOL
+                   ", lsp_references, " AIMEE_CODE_TOOL_AST_GREP_SEARCH ", " AIMEE_CODE_TOOL_INDEX
+                   " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID ", get_context_block\n");
       ss_add(&ctx, "</aimee-context>");
 
       cJSON *out = cJSON_CreateObject();

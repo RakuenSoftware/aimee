@@ -509,6 +509,33 @@ int main(void)
       }
       assert(found_real);
 
+      /* Project scoping belongs inside the SQL query, before LIMIT. A globally earlier duplicate
+       * must not crowd the requested project's definition out of a one-row result set. */
+      char *crowd = malloc(PATH_MAX);
+      assert(crowd != NULL);
+      snprintf(crowd, PATH_MAX, "%s/aimee-test-index-crowd-XXXXXX", platform_tmpdir());
+      assert(platform_mkdtemp(crowd) != NULL);
+      char crowd_path[PATH_MAX];
+      snprintf(crowd_path, sizeof(crowd_path), "%s/duplicate.c", crowd);
+      FILE *crowd_file = fopen(crowd_path, "w");
+      assert(crowd_file != NULL);
+      fprintf(crowd_file, "void liveness_is_degenerate_response(void) {}\n");
+      fclose(crowd_file);
+      int crowd_inspected = 0;
+      assert(canonical_index_scan_project("aaa-crowd", crowd, 1, &crowd_inspected) == 1);
+      assert(crowd_inspected == 1);
+      count = canonical_index_find("liveness_is_degenerate_response", hits, 1);
+      assert(count == 1);
+      assert(strcmp(hits[0].project, "aaa-crowd") == 0);
+      count =
+          canonical_index_find_project("canonicalproj", "liveness_is_degenerate_response", hits, 1);
+      assert(count == 1);
+      assert(strcmp(hits[0].project, "canonicalproj") == 0);
+      char cleanup_cmd[PATH_MAX + 16];
+      snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", crowd);
+      (void)system(cleanup_cmd);
+      free(crowd);
+
       count = canonical_index_find("source_build_symbol", hits, 16);
       assert(count > 0);
 

@@ -42,6 +42,7 @@
 #include "headers/payload_rewrite.h"
 #include "headers/session_search_tool.h"
 #include "td_search_render.h"
+#include "agent_code_capabilities.h"
 #include "cJSON.h"
 #include <string.h>
 #include <strings.h>
@@ -876,19 +877,38 @@ cJSON *smcp_tool_find_symbol(cJSON *args)
    if (!cJSON_IsString(jid))
       return text_content("error: missing 'identifier' parameter");
 
+   int all_projects = mcp_code_scope_all(args);
+   if (all_projects < 0)
+      return text_content("error: scope must be 'current' or 'all'");
+   const char *project = all_projects ? NULL : mcp_code_project_from_args(args);
+   if (!all_projects && !project)
+      return text_content("error: no active project determined from cwd; pass 'project' or "
+                          "scope='all' explicitly");
+
    term_hit_t hits[20];
-   int count = kb_client_index_find(jid->valuestring, hits, 20);
+   int count = project ? kb_client_index_find_project(project, jid->valuestring, hits, 20)
+                       : kb_client_index_find(jid->valuestring, hits, 20);
+   if (count < 0)
+      return text_content("error: knowledge service symbol index unavailable");
+   int matched = 0;
+   for (int i = 0; i < count; i++)
+      if (!project || strcmp(hits[i].project, project) == 0)
+         matched++;
 
    char buf[4096];
    int pos = 0;
-   if (count == 0)
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "No symbol found for '%s'", jid->valuestring);
+   if (matched == 0)
+      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "No symbol found for '%s'%s%s%s",
+                        jid->valuestring, project ? " in project '" : "", project ? project : "",
+                        project ? "'" : "");
    else
    {
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "Found %d match(es) for '%s':\n\n", count,
+      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "Found %d match(es) for '%s':\n\n", matched,
                         jid->valuestring);
       for (int i = 0; i < count && pos < (int)sizeof(buf) - 256; i++)
       {
+         if (project && strcmp(hits[i].project, project) != 0)
+            continue;
          /* Show the body span (line-line_end) when known, so a `file::symbol`
           * read can fetch exactly that range; fall back to the start line. */
          if (hits[i].line_end > hits[i].line)
@@ -901,19 +921,6 @@ cJSON *smcp_tool_find_symbol(cJSON *args)
       }
    }
    return text_content(buf);
-}
-
-static const char *smcp_search_project(cJSON *args)
-{
-   cJSON *project = cJSON_GetObjectItemCaseSensitive(args, "project");
-   if (cJSON_IsString(project) && project->valuestring[0])
-      return project->valuestring;
-   cJSON *cwd = cJSON_GetObjectItemCaseSensitive(args, "cwd");
-   if (!cJSON_IsString(cwd) || !cwd->valuestring[0])
-      return NULL;
-   const char *base = strrchr(cwd->valuestring, '/');
-   base = base ? base + 1 : cwd->valuestring;
-   return base[0] ? base : NULL;
 }
 
 cJSON *smcp_tool_search_docs(cJSON *args)
@@ -938,7 +945,7 @@ cJSON *smcp_tool_search_docs(cJSON *args)
     * leave selection to the KB just as we do for an empty field. */
    if (!embedding_command[0] || strcmp(embedding_command, "builtin") == 0)
       embedding_command = NULL;
-   char *envelope = kb_client_search_json(smcp_search_project(args), query->valuestring,
+   char *envelope = kb_client_search_json(mcp_code_project_from_args(args), query->valuestring,
                                           embedding_command, max_results, NULL);
    cJSON *response = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
@@ -953,8 +960,15 @@ cJSON *tool_preview_blast_radius(cJSON *args)
 {
    cJSON *jproj = cJSON_GetObjectItemCaseSensitive(args, "project");
    cJSON *jpaths = cJSON_GetObjectItemCaseSensitive(args, "paths");
-   if (!cJSON_IsString(jproj) || !cJSON_IsArray(jpaths))
-      return text_content("error: missing 'project' or 'paths' parameter");
+   int all_projects = mcp_code_scope_all(args);
+   if (all_projects != 0)
+      return text_content(all_projects < 0 ? "error: scope must be 'current'"
+                                           : "error: blast preview requires one project");
+   const char *project = cJSON_IsString(jproj) && jproj->valuestring[0]
+                             ? jproj->valuestring
+                             : mcp_code_project_from_args(args);
+   if (!project || !cJSON_IsArray(jpaths))
+      return text_content("error: missing 'paths' or active project; pass 'project' explicitly");
 
    int cnt = cJSON_GetArraySize(jpaths);
    if (cnt < 1 || cnt > 100)
@@ -967,7 +981,7 @@ cJSON *tool_preview_blast_radius(cJSON *args)
       paths[i] = cJSON_IsString(item) ? item->valuestring : "";
    }
 
-   char *json = kb_client_index_blast_radius_preview_json(jproj->valuestring, paths, cnt);
+   char *json = kb_client_index_blast_radius_preview_json(project, paths, cnt);
    cJSON *content = text_content(
        json ? json : "{\"status\":\"error\",\"message\":\"knowledge service unavailable\"}");
    free(json);
@@ -1534,19 +1548,6 @@ cJSON *mcp_git_run_tool(const char *tool, cJSON *args, const char *sid)
  * the presentation profile) so a lean tools/list loses no reach: the model can
  * discover any tool's name + schema and then call it by name. Read-only; they
  * return MCP `content` like any other content-producing tool. */
-static int mcp_ci_contains(const char *haystack, const char *needle)
-{
-   if (!needle || !needle[0])
-      return 1; /* empty query matches everything */
-   if (!haystack)
-      return 0;
-   size_t nlen = strlen(needle);
-   for (const char *h = haystack; *h; h++)
-      if (strncasecmp(h, needle, nlen) == 0)
-         return 1;
-   return 0;
-}
-
 static cJSON *mcp_tool_find_tools(cJSON *args)
 {
    cJSON *jq = cJSON_GetObjectItemCaseSensitive(args, "query");
@@ -1567,7 +1568,7 @@ static cJSON *mcp_tool_find_tools(cJSON *args)
       cJSON *ds = cJSON_GetObjectItemCaseSensitive(t, "description");
       const char *name = cJSON_IsString(nm) ? nm->valuestring : "";
       const char *desc = cJSON_IsString(ds) ? ds->valuestring : "";
-      if (!mcp_ci_contains(name, q) && !mcp_ci_contains(desc, q))
+      if (!mcp_tool_matches_query(t, q))
          continue;
       total++;
       if (shown >= limit)
