@@ -110,26 +110,18 @@ void agent_set_route_degraded_filter(int (*fn)(const char *agent_name));
  * route to a client-only claude. */
 void agent_set_route_policy_filter(int (*fn)(const agent_t *agent));
 
-/* Optional route-time capacity probe: returns the number of slots CURRENTLY in
- * use by `agent_name`, or -1 when unknown/unconfigured. The server registers
- * agent_admission_agent_active; CLI and test builds leave it NULL.
+/* Optional authoritative route-time capacity probe. Return nonzero iff a NEW
+ * context for this exact agent/model/per-agent cap can atomically acquire from
+ * the current state. The server registers a wrapper around agent_admission_probe,
+ * which covers global, per-agent, and shared-model limits under the admission
+ * mutex. CLI and isolated test builds may leave it NULL (capacity unknown).
  *
- * Routing PREFERS agents with a free slot (active < max_parallel) over saturated
- * ones. Without it, routing and admission disagreed about "available": routing
- * checks health, policy and structure but not capacity, so it handed out agents
- * that were already at max_parallel, and admission then rejected them with
- * AGENT_RC_AT_LIMIT. Health could not close the gap, because being at-limit is
- * deliberately NOT recorded as a provider fault (see agent_fallback.c), so a
- * saturated agent is never marked DOWN and stays selectable forever.
- *
- * This only ever REORDERS preference — if every candidate is saturated, routing
- * falls back to the full set, so a populated pool can never be filtered down to
- * "no agent available", and blocking admission still waits for a slot. An
- * unknown answer (-1, or no probe) counts as "has capacity". */
-void agent_set_route_capacity_probe(int (*fn)(const char *agent_name));
-/* Live delegate occupancy for `agent_name`, or -1 when unknown. Lets the served
- * agent list publish occupancy to out-of-process routers (the Go WFE). */
-int agent_route_agent_active(const char *agent_name);
+ * Capacity is a hard routing boundary, not a preference and not provider health:
+ * a saturated candidate is excluded without changing fallback-health state. */
+void agent_set_route_capacity_probe(int (*fn)(const agent_t *agent));
+/* Current authoritative availability for this agent: 1 free, 0 saturated, -1
+ * unknown because no probe is registered. Used by /v1/agent/list for Go WFE. */
+int agent_route_agent_capacity(const agent_t *agent);
 
 /* Primary-turn marker for the delegate-policy filter. The PRIMARY chat turn
  * routes the provider-named agent through the same machinery as delegation

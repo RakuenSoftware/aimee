@@ -23,15 +23,15 @@ static void mk_agent(agent_t *a, const char *name, const char *role, int enabled
    snprintf(a->api_key, sizeof a->api_key, "sk-test-%s", name); /* literal -> routable */
 }
 
-/* Stub capacity probe: reports slots in use per agent name, or -1 for unknown. */
+/* Stub authoritative capacity verdict. */
 static int g_cap_full, g_cap_free;
-static int cap_probe(const char *agent_name)
+static int cap_probe(const agent_t *agent)
 {
-   if (agent_name && strcmp(agent_name, "full") == 0)
+   if (agent && strcmp(agent->name, "full") == 0)
       return g_cap_full;
-   if (agent_name && strcmp(agent_name, "free") == 0)
+   if (agent && strcmp(agent->name, "free") == 0)
       return g_cap_free;
-   return -1;
+   return 1;
 }
 
 int main(void)
@@ -121,35 +121,25 @@ int main(void)
 
    agent_set_route_capacity_probe(cap_probe);
    /* "full" is at its cap, "free" is idle: every draw must pick "free". */
-   g_cap_full = 3;
-   g_cap_free = 0;
+   g_cap_full = 0;
+   g_cap_free = 1;
    for (int i = 0; i < 40; i++)
    {
       assert(rt_resolve_seat_model(&ccfg, "$random", "review", NULL, 0, &idx) == RT_SEAT_OK);
       assert(idx == 1); /* never the saturated agent while a free one exists */
    }
 
-   /* Both saturated: PREFER must not become EXCLUDE. The seat still resolves —
-    * the caller gets an agent and blocking admission waits for a slot — rather
-    * than collapsing a populated roster into "no agent for role". */
-   g_cap_full = 3;
-   g_cap_free = 3;
-   assert(rt_resolve_seat_model(&ccfg, "$random", "review", NULL, 0, &idx) == RT_SEAT_OK);
-   assert(idx == 0 || idx == 1);
-
-   /* Unknown capacity (-1, i.e. controller unconfigured) must read as "has
-    * capacity", so an unconfigured build keeps the prior behaviour. */
-   g_cap_full = -1;
-   g_cap_free = -1;
-   assert(rt_resolve_seat_model(&ccfg, "$random", "review", NULL, 0, &idx) == RT_SEAT_OK);
-   assert(idx == 0 || idx == 1);
-
-   /* A pinned seat is unaffected by capacity: it resolves to that exact agent
-    * (no substitution) even when saturated — admission decides, not routing. */
-   g_cap_full = 3;
+   /* An initially all-saturated pool is not assigned or dispatched. */
+   g_cap_full = 0;
    g_cap_free = 0;
-   assert(rt_resolve_seat_model(&ccfg, "full", "review", NULL, 0, &idx) == RT_SEAT_OK);
-   assert(idx == 0);
+   assert(rt_resolve_seat_model(&ccfg, "$random", "review", NULL, 0, &idx) ==
+          RT_SEAT_RANDOM_EXHAUSTED);
+
+   /* Pinned seats also honor the authoritative admission boundary. */
+   g_cap_full = 0;
+   g_cap_free = 1;
+   assert(rt_resolve_seat_model(&ccfg, "full", "review", NULL, 0, &idx) ==
+          RT_SEAT_PINNED_UNAVAILABLE);
 
    agent_set_route_capacity_probe(NULL); /* leave the global clean for other tests */
 

@@ -928,7 +928,13 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 		}
 		rt := roundtableResult(&analysis.Feedback, false, false, analysis, len(seats), analysis.CostUSD)
 		rt.DeadlineHit = deadlineHit || errors.Is(roundtableCtx.Err(), context.DeadlineExceeded)
-		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: analysis.Unreachable, CostUSD: analysis.CostUSD, CostUnknown: analysis.CostUnknown, Roundtable: rt}, nil
+		pauseReason := "panel_unreachable"
+		if strings.Contains(analysis.Unreachable, "no_free_capacity:") {
+			pauseReason = "panel_no_free_capacity"
+		} else if strings.Contains(analysis.Unreachable, "deadline_expired_while_waiting:") {
+			pauseReason = "panel_admission_deadline"
+		}
+		return StepResult{Status: StepPending, PauseReason: pauseReason, Detail: analysis.Unreachable, CostUSD: analysis.CostUSD, CostUnknown: analysis.CostUnknown, Roundtable: rt}, nil
 	}
 	feedback, approvals, totalCost := analysis.Feedback, analysis.Approvals, analysis.CostUSD
 	totalCostUnknown := analysis.CostUnknown
@@ -1122,7 +1128,11 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 		costUnknown = costUnknown || o.costUnknown
 		if o.err != nil {
 			reason := "malformed_after_repair"
-			if o.transport {
+			if errors.Is(o.err, ErrNoFreeDelegateCapacity) {
+				reason = "no_free_capacity"
+			} else if errors.Is(o.err, context.DeadlineExceeded) || errors.Is(o.err, context.Canceled) {
+				reason = "deadline_expired_while_waiting"
+			} else if o.transport {
 				reason = "delegate_error"
 			}
 			if errors.Is(o.err, ErrDelegateReplayUnavailable) {

@@ -47,6 +47,8 @@ var schedulerTransientPauses = []transientPause{
 	{reason: "ci_pending", backoff: 15 * time.Second},
 	{reason: "merge_pending", backoff: 15 * time.Second},
 	{reason: "panel_unreachable", backoff: 60 * time.Second},
+	{reason: "panel_no_free_capacity", backoff: 30 * time.Second},
+	{reason: "panel_admission_deadline", backoff: 30 * time.Second},
 	{reason: "roundtable_discussion", backoff: 60 * time.Second},
 	{reason: "roundtable_chairman", backoff: 60 * time.Second},
 	// A generated slice rechecks the durable state of its declared predecessors.

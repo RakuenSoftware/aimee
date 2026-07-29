@@ -140,11 +140,41 @@ static int model_active_locked(const char *model)
    return c ? c->active : 0;
 }
 
-/* All three caps admit a NEW context for (agent, model, per_agent_max)? (g.lock held) */
+/* Return why a NEW context for (agent, model, per_agent_max) cannot start.
+ * Call with g.lock held. This is the single capacity predicate used by both
+ * non-mutating routing probes and atomic acquisition. */
+static agent_admit_capacity_t capacity_locked(const char *agent, const char *model,
+                                              int per_agent_max)
+{
+   if (!g.configured)
+      return AGENT_ADMIT_CAPACITY_INVALID;
+   if (g.global_active >= g.global_max)
+      return AGENT_ADMIT_CAPACITY_GLOBAL;
+   if (agent_active_locked(agent) >= per_agent_max)
+      return AGENT_ADMIT_CAPACITY_AGENT;
+   if (model_active_locked(model) >= model_limit_for(model))
+      return AGENT_ADMIT_CAPACITY_MODEL;
+   return AGENT_ADMIT_CAPACITY_AVAILABLE;
+}
+
 static int caps_admit_locked(const char *agent, const char *model, int per_agent_max)
 {
-   return g.global_active < g.global_max && agent_active_locked(agent) < per_agent_max &&
-          model_active_locked(model) < model_limit_for(model);
+   return capacity_locked(agent, model, per_agent_max) == AGENT_ADMIT_CAPACITY_AVAILABLE;
+}
+
+int agent_admission_probe(const char *agent, const char *model, int per_agent_max,
+                          agent_admit_capacity_t *reason)
+{
+   agent_admit_capacity_t result = AGENT_ADMIT_CAPACITY_INVALID;
+   if (agent && agent[0] && model && model[0] && per_agent_max > 0)
+   {
+      pthread_mutex_lock(&g.lock);
+      result = capacity_locked(agent, model, per_agent_max);
+      pthread_mutex_unlock(&g.lock);
+   }
+   if (reason)
+      *reason = result;
+   return result == AGENT_ADMIT_CAPACITY_AVAILABLE;
 }
 
 static admission_ctx_t *ctx_find_locked(const char *ctx_handle)

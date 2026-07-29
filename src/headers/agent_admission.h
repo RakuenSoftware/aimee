@@ -39,6 +39,15 @@ typedef enum
    AGENT_ADMIT_CANCELLED /* the caller's cancel callback fired while queued */
 } agent_admit_status_t;
 
+typedef enum
+{
+   AGENT_ADMIT_CAPACITY_AVAILABLE = 0,
+   AGENT_ADMIT_CAPACITY_GLOBAL,
+   AGENT_ADMIT_CAPACITY_AGENT,
+   AGENT_ADMIT_CAPACITY_MODEL,
+   AGENT_ADMIT_CAPACITY_INVALID
+} agent_admit_capacity_t;
+
 /* Polled (~every 100ms) while a turn is blocked waiting for a slot; return nonzero to
  * abandon the wait (e.g. the delegation was stopped). NULL means "never cancel". */
 typedef int (*agent_admit_cancel_fn)(const char *cancel_ctx);
@@ -76,6 +85,13 @@ void agent_admission_configure(int global_max, int default_model_limit,
 /* Acquire a slot for req. On success returns a non-NULL slot and sets *status = OK.
  * On any failure returns NULL and sets *status to the reason. `status` may be NULL. */
 agent_slot_t *agent_admission_acquire(const agent_admit_req_t *req, agent_admit_status_t *status);
+
+/* Non-mutating counterpart to acquire for routing/planning. It takes the same
+ * lock and evaluates the same three-cap predicate, returning the first blocking
+ * authority. A positive return means a new context can acquire from unchanged
+ * state; zero means capacity is exhausted or the request is invalid. */
+int agent_admission_probe(const char *agent, const char *model, int per_agent_max,
+                          agent_admit_capacity_t *reason);
 
 /* Release a slot obtained from acquire. Safe with NULL. Decrements the context's
  * refcount; the global/per-agent/per-model counts drop only when the context's last

@@ -124,6 +124,7 @@ var ErrDelegateUnassignedExpired = errors.New("unassigned delegate lease expired
 var ErrDelegateCancelUnacknowledged = errors.New("delegate cancellation was not acknowledged")
 var ErrDelegateNoJobID = errors.New("agent service returned no job id")
 var ErrDelegateTerminal = errors.New("delegate job reached a failed terminal state")
+var ErrNoFreeDelegateCapacity = errors.New("no free delegate capacity")
 
 // ErrDelegateReplayUnavailable is returned when a replay-only invocation cannot
 // find the durable delegate result it is required to reuse (e.g. the in-flight
@@ -500,23 +501,14 @@ type delegateCandidate struct {
 	Name, Provider, Model string
 	Roles, Personas       []string
 	MaxParallel           int
-	// ActiveDelegates is the agent's live occupancy as reported by the delegate
-	// service, or -1 when it did not report any. Unknown must behave as idle:
-	// this only orders and narrows candidates, so treating ignorance as "busy"
-	// would drop seats for a reason we cannot substantiate.
-	ActiveDelegates int
+	// AdmissionAvailable is the shipping admission controller's locked verdict
+	// across global, per-agent and shared-model limits. Nil means an older service
+	// did not expose the probe, so compatibility keeps the candidate routable.
+	AdmissionAvailable *bool
 }
 
-// freeSlots is how many more delegates this agent can take right now. Occupancy
-// the agent already carries counts against its cap, not just the seats being
-// assigned in this group -- a panel that ignores it seats a saturated agent and
-// the seat fails at admission with aimee_err=concurrency_limit.
-func (c delegateCandidate) freeSlots(groupUses int) int {
-	active := c.ActiveDelegates
-	if active < 0 {
-		active = 0
-	}
-	return c.MaxParallel - active - groupUses
+func (c delegateCandidate) hasCapacity(groupUses int) bool {
+	return (c.AdmissionAvailable == nil || *c.AdmissionAvailable) && groupUses < c.MaxParallel
 }
 
 func (c *HTTPAgentClient) planDelegateGroup(ctx context.Context, requests []DelegateRequest) ([]DelegateRequest, error) {
@@ -554,33 +546,28 @@ func (c *HTTPAgentClient) planDelegateGroup(ctx context.Context, requests []Dele
 		if !delegateSelectorUnbound(request.Delegate) || request.Participant != "" {
 			continue
 		}
-		// Prefer a seat that can actually start now, then fall back to the full
-		// eligible set. PREFER, never exclude: if every eligible agent is busy the
-		// seat is still filled and the dispatch is retried as capacity
-		// backpressure (isCapacityBackpressure), which is recoverable -- whereas
-		// refusing to route makes the whole panel unreachable, which is not.
+		// Capacity reported by the shipping admission controller is a hard
+		// eligibility boundary. Atomic acquisition remains authoritative, but an
+		// initially saturated pool must not be pinned and predictably dispatched.
 		best := -1
-		for _, freeOnly := range []bool{true, false} {
-			for j, candidate := range candidates {
-				if !matchesSelector(candidate.Roles, request.Role) || !matchesSelector(candidate.Personas, request.Persona) {
-					continue
-				}
-				if agentUses[candidate.Name] >= candidate.MaxParallel {
-					continue
-				}
-				if freeOnly && candidate.freeSlots(agentUses[candidate.Name]) < 1 {
-					continue
-				}
-				if best < 0 || candidateLess(candidate, candidates[best], providerUses, modelUses, agentUses) {
-					best = j
-				}
+		matched := false
+		for j, candidate := range candidates {
+			if !matchesSelector(candidate.Roles, request.Role) || !matchesSelector(candidate.Personas, request.Persona) {
+				continue
 			}
-			if best >= 0 {
-				break
+			matched = true
+			if !candidate.hasCapacity(agentUses[candidate.Name]) {
+				continue
+			}
+			if best < 0 || candidateLess(candidate, candidates[best], providerUses, modelUses, agentUses) {
+				best = j
 			}
 		}
+		if best < 0 && matched {
+			return nil, fmt.Errorf("%w: seat %d (%s/%s)", ErrNoFreeDelegateCapacity, i+1, request.Role, request.Persona)
+		}
 		if best < 0 {
-			return nil, fmt.Errorf("delegate service cannot fill seat %d (%s/%s) within enabled capacity", i+1, request.Role, request.Persona)
+			return nil, fmt.Errorf("delegate service cannot fill seat %d (%s/%s) from eligible agents", i+1, request.Role, request.Persona)
 		}
 		chosen := candidates[best]
 		request.Delegate = chosen.Name
@@ -630,18 +617,16 @@ func matchesSelector(values []string, wanted string) bool {
 func (c *HTTPAgentClient) delegateCandidates(ctx context.Context) ([]delegateCandidate, error) {
 	var response struct {
 		Agents []struct {
-			Name        string `json:"name"`
-			Provider    string `json:"provider"`
-			Model       string `json:"model"`
-			Enabled     bool   `json:"enabled"`
-			Available   *bool  `json:"delegate_available"`
-			PrimaryOnly bool   `json:"primary_only"`
-			MaxParallel int    `json:"max_parallel"`
-			// Absent when the delegate service cannot determine occupancy; a
-			// pointer so "absent" stays distinguishable from a reported zero.
-			ActiveDelegates *int     `json:"active_delegates"`
-			Roles           []string `json:"roles"`
-			Personas        []string `json:"personas"`
+			Name               string   `json:"name"`
+			Provider           string   `json:"provider"`
+			Model              string   `json:"model"`
+			Enabled            bool     `json:"enabled"`
+			Available          *bool    `json:"delegate_available"`
+			PrimaryOnly        bool     `json:"primary_only"`
+			MaxParallel        int      `json:"max_parallel"`
+			AdmissionAvailable *bool    `json:"admission_available"`
+			Roles              []string `json:"roles"`
+			Personas           []string `json:"personas"`
 		} `json:"agents"`
 	}
 	if err := c.doJSON(ctx, http.MethodGet, "/v1/agent/list", nil, &response); err != nil {
@@ -660,12 +645,9 @@ func (c *HTTPAgentClient) delegateCandidates(ctx context.Context) ([]delegateCan
 		if model == "" {
 			model = agent.Name
 		}
-		active := -1
-		if agent.ActiveDelegates != nil {
-			active = *agent.ActiveDelegates
-		}
 		candidates = append(candidates, delegateCandidate{Name: agent.Name, Provider: provider, Model: model,
-			Roles: agent.Roles, Personas: agent.Personas, MaxParallel: agent.MaxParallel, ActiveDelegates: active})
+			Roles: agent.Roles, Personas: agent.Personas, MaxParallel: agent.MaxParallel,
+			AdmissionAvailable: agent.AdmissionAvailable})
 	}
 	return candidates, nil
 }

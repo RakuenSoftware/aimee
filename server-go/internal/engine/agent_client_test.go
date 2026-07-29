@@ -1129,10 +1129,10 @@ func TestGroupRoutingSkipsAnAgentAlreadyAtItsConcurrencyLimit(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]any{
 				// Saturated by work outside this group.
 				{"name": "busy", "provider": "p1", "model": "m1", "enabled": true, "max_parallel": 3,
-					"active_delegates": 3, "roles": []string{"review"}, "personas": []string{"all"}},
+					"admission_available": false, "roles": []string{"review"}, "personas": []string{"all"}},
 				// Idle and equally eligible.
 				{"name": "idle", "provider": "p2", "model": "m2", "enabled": true, "max_parallel": 3,
-					"active_delegates": 0, "roles": []string{"review"}, "personas": []string{"all"}},
+					"admission_available": true, "roles": []string{"review"}, "personas": []string{"all"}},
 			}})
 		case "/v1/delegate/run":
 			var payload map[string]any
@@ -1165,31 +1165,21 @@ func TestGroupRoutingSkipsAnAgentAlreadyAtItsConcurrencyLimit(t *testing.T) {
 	}
 }
 
-// PREFER, never exclude: when every eligible agent is saturated the seat must
-// still be filled. Dispatch then fails as capacity backpressure, which the
-// engine retries -- refusing to route instead makes the panel unreachable,
-// which it does not recover from.
-func TestGroupRoutingStillFillsASeatWhenEveryAgentIsSaturated(t *testing.T) {
-	var mu sync.Mutex
-	var vias []string
+// An initially all-saturated eligible pool is a typed pre-dispatch outcome.
+func TestGroupRoutingReturnsNoFreeCapacityWithoutDispatch(t *testing.T) {
+	var dispatches int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/agent/list":
 			_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]any{
 				{"name": "busy-a", "provider": "p1", "model": "m1", "enabled": true, "max_parallel": 2,
-					"active_delegates": 2, "roles": []string{"review"}, "personas": []string{"all"}},
+					"admission_available": false, "roles": []string{"review"}, "personas": []string{"all"}},
 				{"name": "busy-b", "provider": "p2", "model": "m2", "enabled": true, "max_parallel": 2,
-					"active_delegates": 5, "roles": []string{"review"}, "personas": []string{"all"}},
+					"admission_available": false, "roles": []string{"review"}, "personas": []string{"all"}},
 			}})
 		case "/v1/delegate/run":
-			var payload map[string]any
-			_ = json.NewDecoder(r.Body).Decode(&payload)
-			mu.Lock()
-			vias = append(vias, fmt.Sprint(payload["via"]))
-			mu.Unlock()
-			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 1, "participant": "p"})
-		case "/v1/delegate/status":
-			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "ok"})
+			dispatches++
+			http.Error(w, "unexpected dispatch", http.StatusInternalServerError)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1199,13 +1189,14 @@ func TestGroupRoutingStillFillsASeatWhenEveryAgentIsSaturated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client.DelegateGroup(t.Context(), []DelegateRequest{
+	results := client.DelegateGroup(t.Context(), []DelegateRequest{
 		{Role: "review", Persona: "architect", Prompt: "review"},
 	})
-	mu.Lock()
-	defer mu.Unlock()
-	if len(vias) != 1 {
-		t.Fatalf("a saturated roster must still fill the seat, got dispatches %v", vias)
+	if len(results) != 1 || !errors.Is(results[0].Err, ErrNoFreeDelegateCapacity) {
+		t.Fatalf("result = %+v, want typed no-free-capacity", results)
+	}
+	if dispatches != 0 {
+		t.Fatalf("saturated pool dispatched %d jobs", dispatches)
 	}
 }
 

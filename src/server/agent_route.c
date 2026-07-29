@@ -152,46 +152,26 @@ void agent_set_route_policy_filter(int (*fn)(const agent_t *agent))
    g_route_policy_filter = fn;
 }
 
-/* Optional route-time capacity probe; see agent_set_route_capacity_probe. A hook,
- * like the health and policy filters above, so this unit keeps no link
- * dependency on the admission controller and filter-less builds (CLI / tests)
- * keep the prior behaviour. */
-static int (*g_route_capacity_probe)(const char *agent_name) = NULL;
+/* Optional authoritative route-time capacity probe. Hooked to admission by the
+ * shipping server while keeping this routing unit independently testable. */
+static int (*g_route_capacity_probe)(const agent_t *agent) = NULL;
 
-void agent_set_route_capacity_probe(int (*fn)(const char *agent_name))
+void agent_set_route_capacity_probe(int (*fn)(const agent_t *agent))
 {
    g_route_capacity_probe = fn;
 }
 
-/* How many delegates is this agent running right now, or -1 when that is not
- * knowable here (no probe registered, or the controller is unconfigured).
- *
- * Exposed so the agent list served over /v1 can publish live occupancy. The Go
- * WFE routes seats in a separate process and cannot call the in-process probe
- * above, so without this it can only see max_parallel and will happily seat an
- * agent that is already saturated — the seat then fails at admission with
- * AGENT_RC_AT_LIMIT. Keeps the same hook indirection, so this unit still has no
- * link dependency on the admission controller. */
-int agent_route_agent_active(const char *agent_name)
+int agent_route_agent_capacity(const agent_t *agent)
 {
-   if (!g_route_capacity_probe || !agent_name || !agent_name[0])
+   if (!g_route_capacity_probe || !agent)
       return -1;
-   return g_route_capacity_probe(agent_name);
+   return g_route_capacity_probe(agent) ? 1 : 0;
 }
 
-/* Does this agent have a free concurrency slot right now? Returns 1 when it
- * does, and ALSO when capacity is unknown — no probe registered, controller
- * unconfigured (-1), or an agent with no per-agent cap. Unknown must read as
- * "yes": this predicate only narrows a candidate set, so answering "no" on
- * ignorance would drop seats for a reason we cannot substantiate. */
 static int agent_has_free_slot(const agent_t *ag)
 {
-   if (!g_route_capacity_probe || !ag || !ag->name[0] || ag->max_parallel <= 0)
-      return 1;
-   int active = g_route_capacity_probe(ag->name);
-   if (active < 0)
-      return 1; /* unconfigured / unknown */
-   return active < ag->max_parallel;
+   int available = agent_route_agent_capacity(ag);
+   return available != 0; /* unknown keeps filter-less CLI/test builds routable */
 }
 
 /* See agent_config.h: marks the current thread's turn as PRIMARY (not
@@ -416,30 +396,17 @@ int delegate_pick_for_role(agent_config_t *cfg, const char *role, const char *co
    if (n == 0)
       return -1;
 
-   /* Prefer a seat that can actually start now. Eligibility above asks whether
-    * the agent is routable (health, policy, structure, credentials) but not
-    * whether it has a free concurrency slot, so a saturated agent stayed
-    * selectable and the seat failed at admission with AGENT_RC_AT_LIMIT. Health
-    * cannot close that gap: being at-limit is deliberately NOT recorded as a
-    * provider fault (agent_fallback.c), so such an agent is never marked DOWN.
-    * Live effect: roundtable seats drew a saturated agent, failed instantly, and
-    * a panel needing 2 of 3 seats was declared unreachable while other agents
-    * sat idle.
-    *
-    * PREFER, never exclude. If every eligible agent is saturated we fall back to
-    * the full eligible set, so this cannot turn a populated roster into "no
-    * agent for role" (-1) — the caller still gets a seat and blocking admission
-    * waits for a slot, exactly as before. It only stops us choosing a full agent
-    * over a free one. */
+   /* Capacity is authoritative eligibility, not a ranking hint. If this leaves
+    * no candidate the caller receives the no-free-capacity route outcome and
+    * must not dispatch a predictably failing turn. */
    int freeel[MAX_AGENTS];
    int nfree = 0;
    for (int i = 0; i < n; i++)
       if (agent_has_free_slot(&cfg->agents[elig[i]]))
          freeel[nfree++] = elig[i];
-
-   const int *pool = nfree > 0 ? freeel : elig;
-   int pool_n = nfree > 0 ? nfree : n;
-   return pool[delegate_role_rand() % (unsigned)pool_n];
+   if (nfree == 0)
+      return -1;
+   return freeel[delegate_role_rand() % (unsigned)nfree];
 }
 
 int agent_pick_named_for_role(agent_config_t *cfg, const char *name, const char *role)
@@ -454,7 +421,8 @@ int agent_pick_named_for_role(agent_config_t *cfg, const char *name, const char 
       /* Same eligibility triple delegate_pick_for_role applies — a pinned seat
        * resolves with NO substitution, so an agent that exists but is disabled,
        * lacks the role, or is unroutable reports -1 (caller fails the run). */
-      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
+      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag) ||
+          !agent_has_free_slot(ag))
          return -1;
       return i;
    }
@@ -482,7 +450,8 @@ static agent_t *agent_primary_turn_default(agent_config_t *cfg, const char *role
    if (!agent_routing_primary_turn() || !cfg->default_agent[0])
       return NULL;
    agent_t *ag = agent_find(cfg, cfg->default_agent);
-   if (!ag || !ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
+   if (!ag || !ag->enabled || !agent_supports_role(ag, role) ||
+       !agent_is_available_for_routing(ag) || !agent_has_free_slot(ag))
       return NULL;
 
    /* Session affinity outranks the default. A tmux agent holds a STATEFUL
@@ -533,7 +502,8 @@ agent_t *agent_route(agent_config_t *cfg, const char *role)
    for (int i = 0; i < cfg->agent_count; i++)
    {
       agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
+      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag) ||
+          !agent_has_free_slot(ag))
          continue;
       if (min_tier < 0 || ag->cost_tier < min_tier)
       {
@@ -552,7 +522,8 @@ agent_t *agent_route(agent_config_t *cfg, const char *role)
    for (int i = 0; i < cfg->agent_count; i++)
    {
       agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
+      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag) ||
+          !agent_has_free_slot(ag))
          continue;
       if (ag->cost_tier != min_tier)
          continue;
@@ -572,7 +543,8 @@ agent_t *agent_route_at_tier(agent_config_t *cfg, const char *role, int tier)
    for (int i = 0; i < cfg->agent_count; i++)
    {
       agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled || ag->cost_tier != tier || !agent_is_available_for_routing(ag))
+      if (!ag->enabled || ag->cost_tier != tier || !agent_is_available_for_routing(ag) ||
+          !agent_has_free_slot(ag))
          continue;
       if (role && !agent_supports_role(ag, role))
          continue;
@@ -904,7 +876,8 @@ static int agent_route_candidate_eligible(const agent_t *ag, const char *role,
                                           unsigned required_caps, int min_context,
                                           agent_scope_t scope)
 {
-   if (!ag || !ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
+   if (!ag || !ag->enabled || !agent_supports_role(ag, role) ||
+       !agent_is_available_for_routing(ag) || !agent_has_free_slot(ag))
       return 0;
    if (required_caps || min_context > 0)
       return agent_satisfies_required_caps(ag, required_caps, min_context, scope);

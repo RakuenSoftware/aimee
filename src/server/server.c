@@ -1932,6 +1932,11 @@ static int server_agent_route_is_degraded(const char *agent_name)
    return provider_catalog_get_health(agent_name) == CATALOG_HEALTH_DEGRADED;
 }
 
+static int server_agent_route_has_capacity(const agent_t *ag)
+{
+   return ag && agent_admission_probe(ag->name, ag->model, ag->max_parallel, NULL);
+}
+
 /* Route-time delegate-policy predicate (returns nonzero to EXCLUDE):
  * a per-agent "Primary Agent Only" choice (agents.json `primary_only`) excludes
  * the agent from ALL delegation. This is the SOLE per-agent gate: it replaced the
@@ -2349,8 +2354,8 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * delegates to itself, and an agent flagged "Primary Agent Only"
     * (agents.json `primary_only`) is never a delegation target. */
    agent_set_route_policy_filter(server_agent_route_policy_excluded);
-   /* Prefer a seat with a free slot over a saturated one (see agent_config.h). */
-   agent_set_route_capacity_probe(agent_admission_agent_active);
+   /* Admission's locked three-limit predicate is the shipping routing authority. */
+   agent_set_route_capacity_probe(server_agent_route_has_capacity);
    LOG_INFO("server",
             "initialized (v%s, protocol %d, background=%d session=%d threads); /v1 HTTP "
             "surface owns the listeners",
