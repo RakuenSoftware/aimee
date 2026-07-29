@@ -190,6 +190,51 @@ Two further readings:
   19 hard negatives only reaches 0.297. This sets realistic expectations for what
   any reranker can deliver on this corpus.
 
+## THE HEADLINE: reranking a strong dense ranking makes it WORSE
+
+Everything above measures reranking against the suite's **unsorted** candidate
+list. Production does not feed the reranker unsorted candidates — it feeds it the
+dense top-20. Measured end to end over the full corpus, 2,000 queries, reranked
+with bge-reranker-v2-m3:
+
+| embedder | dense only | + rerank 20x128 | + rerank 10x256 |
+|---|---:|---:|---:|
+| a25m | **0.5903** | 0.5206 (**-0.070**) | 0.5470 (-0.043) |
+| nomic + prefix | **0.6116** | 0.5246 (**-0.087**) | 0.5599 (-0.052) |
+
+**Reranking costs 0.07-0.09 NDCG.** It does not help; it actively degrades a
+ranking that a modern embedder already produced.
+
+The mechanism is visible in the numbers rather than inferred: bge-v2-m3's best
+score at these truncations is ~0.594, while dense retrieval alone reaches 0.612.
+**The reranker's ceiling is below the ranking it is being asked to improve**, so
+every reordering it makes is on average a step backwards.
+
+This also explains why the reranking view showed a huge gain (0.2279 -> 0.6174)
+and the pipeline shows a loss. Those are different questions:
+
+- **reranking view** — candidates arrive in random order, so a reranker adds
+  enormous value. It measures reranker *capability*.
+- **pipeline** — candidates arrive well-ordered, so the reranker only adds value
+  if it is *better than the embedder*. It measures reranker *usefulness*.
+
+Only the second is the production question, and it had never been run.
+
+### Historical note
+
+A previously cited figure had the Ettin reranker worth "4-5 points". That was
+measured against older, weaker embedders. Against a modern embedder there is
+nothing left for the reranker to add — which is exactly why that figure was
+correctly dismissed as irrelevant to this decision.
+
+### Open confound
+
+At the time of writing, the pipeline reranks with documents truncated to 128/256
+tokens while dense retrieval used 2,048. That handicap could account for some or
+all of the degradation. A full-length (20x512) pipeline run is in flight; until
+it reports, the correct statement is **"reranking at deployable truncations
+degrades results"**, not "reranking is useless".
+
 ## Late interaction — the structural option
 
 Cross-encoder cost is `candidates x tokens`, paid per query, uncacheable. Late
@@ -206,16 +251,36 @@ An earlier claim in this session put the saving at "~1000x". The honest figure i
 `bge-m3` were also the embedder, the query encode is shared with dense retrieval
 and the marginal cost of reranking approaches zero.**
 
-The real cost is storage:
+### Measured: bge-m3 multi-vector
 
-| config | per doc | per 1M docs |
-|---|---:|---:|
-| 512 tok x 128 dim, fp16 | 131 KB | ~131 GB |
-| 512 tok x 96 dim, int8 | 49 KB | ~49 GB |
-| ColBERT compression (PLAID / 2-bit) | ~8 KB | ~8 GB |
+800 cases, 20 candidates, on the reranking view.
 
-Measurement of bge-m3 multi-vector quality, and its index-vs-query cost split, is
-*pending*.
+| metric | value |
+|---|---:|
+| NDCG@10 | **0.7014** |
+| **Recall@10** | **0.946** |
+| Recall@5 | 0.855 |
+| **QUERY time** | **0.058s** (0.031 encode + 0.027 MaxSim) |
+| INDEX time | 0.0106 s/doc |
+| **Storage** | **743 KB/doc = 743 GB per million docs** |
+
+**Quality is excellent** — it beats the bge-v2-m3 cross-encoder (0.6174) outright
+and posts a 0.946 Recall@10, the highest of anything measured. Query cost is
+58 ms, well inside budget.
+
+**And if bge-m3 were also the embedder, the 31 ms query encode is shared with
+dense retrieval**, making the marginal cost of reranking just the 27 ms MaxSim.
+That is the architectural argument for late interaction, now measured.
+
+**Storage is the blocker.** 743 GB per million documents, because bge-m3 emits
+**1024-dimensional** token vectors (743 KB/doc over ~363 tokens). An earlier
+estimate on this page said ~131 GB/million; that assumed 128-dim ColBERT vectors
+and was wrong by 5.7x. Routes to viability, none yet measured:
+
+- a purpose-built ColBERT at 128 dim: ~8x smaller, ~93 GB/million
+- int8 quantisation of the token vectors: 2x
+- PLAID-style compression: reported ~16x
+- storing multi-vectors only for a hot subset of the corpus
 
 ## Environment
 
