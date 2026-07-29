@@ -52,6 +52,15 @@ char *kb_curator_llm_run(const config_t *cfg, kb_curator_stage_t stage, const ch
    provider_def_t def;
    if (cfg && kb_curator_provider_for_stage(cfg, stage, &def))
    {
+      /* The durable curator contract already carries one operator-controlled
+       * output budget (kb.curator.extract_max_tokens), and the legacy sidecar
+       * receives it in each job payload.  Apply the same budget to the direct
+       * provider path.  Without this, the managed gateway sends an unbounded
+       * generation to its single CPU synth slot: the curator times out after
+       * five minutes while llama-server keeps the slot occupied, starving
+       * subsequent curator and interactive requests. */
+      if (def.max_tokens <= 0 && cfg->kb_curator_extract_max_tokens > 0)
+         def.max_tokens = cfg->kb_curator_extract_max_tokens;
       /* Curator work is already retried by its durable job queue. Keep one
        * provider attempt bounded by the same five-minute ceiling as the legacy
        * sidecar instead of nesting the provider client's three retries. The old

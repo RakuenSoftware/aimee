@@ -26,9 +26,10 @@
 #include <time.h>
 #include <unistd.h>
 
-#define CE_ERRBUF 256
-#define CE_DOCBUF 65536
-#define CE_OUTBUF (256 * 1024)
+#define CE_ERRBUF                256
+#define CE_DOCBUF                65536
+#define CE_OUTBUF                (256 * 1024)
+#define CE_EXTRACT_MAX_ARTIFACTS 5
 
 /* A job left in 'running' longer than this lease was orphaned (worker crash/
  * restart or a wedged sidecar). Mirrors the code-unit stage's lease; both sit
@@ -41,13 +42,14 @@
  * provider (§2b). The legacy python sidecar carried its own prompt; the in-process
  * provider needs one here. The request JSON's `role`/`prompt_version` select the
  * extraction shape (engineering doc vs novel story); keep this generic and let the
- * request drive specifics. Grammar-constrained output is a future enhancement
- * (kb_curator_llm_run does not yet pass a JSON schema). Tune against the model. */
+ * request drive specifics. The shared response schema caps the artifact array so
+ * the bundled CPU model can close valid JSON inside the curator token budget. */
 #define CE_SYSTEM_PROMPT                                                                           \
    "You are a knowledge-base extractor. Read the JSON request (a document chunk "                  \
    "with a `role` and `input.content`) and emit the requested entities, claims, "                  \
    "and relations grounded only in that content. Respond with a single JSON "                      \
-   "object matching the request's role. Do not invent facts."
+   "object matching the request's role. Emit at most five artifacts, prioritize "                  \
+   "the most important facts, and keep every string concise. Do not invent facts."
 
 /* Engineer-mode extract_doc contract: names the exact artifact kinds + payload
  * fields (claim => subject/attribute/value, matching index_claims) so the provider
@@ -70,9 +72,8 @@
    "behavior\",\"text\":<full claim as one sentence>}\n"                                           \
    "- \"entity\": {\"name\":<canonical name>,\"entity_kind\":\"component|system|concept|protocol|" \
    "data_store|tool\",\"context\":<short phrase>}\n"                                               \
-   "Emit a claim for each distinct factual assertion and an entity for each named "                \
-   "system/component/"                                                                             \
-   "concept."
+   "Emit at most five artifacts total: exactly one doc_summary, then the most important claims "   \
+   "and entities. Keep the summary under 60 words and every other string under 20 words."
 
 /* Build the extract envelope json-schema (caller frees). provider_client wraps it
  * as response_format:{json_schema:{schema:<this>,strict}}. */
@@ -89,6 +90,7 @@ static cJSON *ce_build_extract_schema(void)
    cJSON_AddItemToObject(status, "enum", cJSON_CreateStringArray(ok_only, 1));
    cJSON *arts = cJSON_AddObjectToObject(props, "artifacts");
    cJSON_AddStringToObject(arts, "type", "array");
+   cJSON_AddNumberToObject(arts, "maxItems", CE_EXTRACT_MAX_ARTIFACTS);
    cJSON *items = cJSON_AddObjectToObject(arts, "items");
    cJSON_AddStringToObject(items, "type", "object");
    cJSON *iprops = cJSON_AddObjectToObject(items, "properties");
