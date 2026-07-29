@@ -27,7 +27,12 @@ case "$AIMEE_WFE_ENGINE" in
     *) printf '[server-entrypoint] fatal: WFE is Go-only; AIMEE_WFE_ENGINE must be go\n' >&2; exit 2 ;;
 esac
 export AIMEE_WFE_HTTP_SOCKET="${AIMEE_WFE_HTTP_SOCKET:-$AIMEE_HOME/aimee-wfe-http.sock}"
-WFE_SOCKET_WAIT_TENTHS="${AIMEE_WFE_SOCKET_WAIT_TENTHS:-150}"
+# Existing appliances may need to recover SQLite WAL state and refresh seeded
+# workflow definitions before the C resource socket appears.  A real upgraded
+# volume on the supported container path takes about 30 seconds, so the former
+# 15-second default killed a healthy startup and left the persisted pid file
+# behind.  Still fail early when the child exits, but allow bounded recovery.
+WFE_SOCKET_WAIT_TENTHS="${AIMEE_WFE_SOCKET_WAIT_TENTHS:-1200}"
 
 # The server's worker threads need a 64 MB stack; the 8 MB container default
 # overflows and SIGSEGVs on real queries. Raise the soft limit here (inherited
@@ -226,9 +231,6 @@ for _dsock in /var/run/docker.sock /run/docker.sock; do
     break
 done
 
-log "pre-warming server-hosted OAuth CLIs (background)"
-runuser -u aimee -- aimee-server --prewarm-cli-oauth >/dev/null 2>&1 &
-
 log "starting aimee-server (socket=$SERVER_SOCK) as user aimee"
 rm -f "$AIMEE_HOME/aimee-http.sock" "$AIMEE_WFE_HTTP_SOCKET"
 # runuser/PAM resets selected resource limits, including RLIMIT_CORE, after the
@@ -261,6 +263,13 @@ if [ "$AIMEE_WFE_ENGINE" = go ]; then
         "$AIMEE_HOME" "$AIMEE_WFE_HTTP_SOCKET" "$AIMEE_HOME/aimee.yaml" \
         "$AIMEE_HOME/workflows" "$AIMEE_HOME/aimee-http.sock" &
     wfe_pid=$!
+
+    # Start this only after the resource plane owns the current pid file.  On a
+    # restart, a stale persisted pid can be reused by the first child.  The
+    # prewarm command is also named `aimee-server`, so launching it first made
+    # the real server mistake that helper for an already-running server.
+    log "pre-warming server-hosted OAuth CLIs (background)"
+    runuser -u aimee -- aimee-server --prewarm-cli-oauth >/dev/null 2>&1 &
 fi
 
 if [ -n "$wfe_pid" ]; then
