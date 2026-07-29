@@ -50,16 +50,46 @@ AVX-512, 8 threads, Plex stopped). Min of 5 repeats.
 | 5 | 512 | 2,560 | 0.891s | 0.891s | yes |
 | 20 | 256 | 5,120 | 1.670s | 1.674s | no |
 | 10 | 512 | 5,120 | 1.899s | 1.906s | no |
+| 20 | 512 | 10,240 | 4.127s | — | no |
 
-**A 306M multilingual cross-encoder fits the CPU budget.** Not at 20x512, but
-comfortably at 20 candidates x 128 tokens, or 10 x 256.
+And `BAAI/bge-reranker-v2-m3` int8 (568M), same rig:
 
-**Latency is linear in total tokens at ~0.33 ms/token**, and depends on the
-*product* of candidates and truncation, not on either alone. That yields a
-design rule:
+| candidates | doc tokens | total | min | within 1s |
+|---:|---:|---:|---:|---|
+| 5 | 128 | 640 | 0.207s | yes |
+| 10 | 128 | 1,280 | 0.473s | yes |
+| 5 | 256 | 1,280 | 0.555s | yes |
+| 20 | 128 | 2,560 | 1.145s | no |
+| 10 | 256 | 2,560 | 1.313s | no |
+| 20 | 512 | 10,240 | 8.443s | no |
 
-> **The 1s CPU budget buys roughly 3,000 tokens.** Spend it as 20x150, 10x300,
-> or 6x512.
+**A 306M multilingual cross-encoder fits the CPU budget** at 20 candidates x 128
+tokens (0.708s) or 10 x 256 (0.780s). The 568M model fits only at 10x128
+(0.473s) or 5x256 (0.555s).
+
+### Cost per token is NOT constant — truncation beats trimming candidates
+
+| model | ms/token @128 | @256 | @512 |
+|---|---:|---:|---:|
+| gte-multilingual (306M) | 0.184 | 0.277 | 0.403 |
+| bge-v2-m3 (568M) | 0.323 | 0.447 | 0.824 |
+
+Per-token cost **rises with sequence length** (attention is quadratic in it), so
+the two levers are not equivalent:
+
+- **Truncating documents is superlinear.** 20x512 -> 20x128 is 4x fewer tokens
+  but **5.8x faster** (4.127s -> 0.708s), because each remaining token is also
+  cheaper.
+- **Cutting candidates is merely linear.** 20x128 -> 10x128 -> 5x128 gives
+  0.708 -> 0.305 -> 0.118s.
+
+> **Design rule: shorten documents before you shorten the candidate list.**
+> A 1s budget buys ~3,600 tokens at 128-token docs but only ~2,480 at 512-token
+> docs, on the 306M model.
+
+An earlier version of this page claimed latency was linear at a flat
+~0.33 ms/token. That was an artifact of averaging across the grid; the corrected
+figures are above.
 
 ### Correction to an earlier estimate
 
