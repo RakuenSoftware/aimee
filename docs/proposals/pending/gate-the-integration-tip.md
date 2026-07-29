@@ -1,6 +1,6 @@
 # Proposal: gate the integration branch tip, not only the PRs that build it
 
-- **State:** pending — single slice.
+- **State:** approved — single slice.
 
 ## Problem
 
