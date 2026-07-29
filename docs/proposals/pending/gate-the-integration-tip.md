@@ -164,16 +164,18 @@ checks alone are not certification. Because the intentional skips remain, the
 result must not be described as a "full gate." A manually dispatched run cannot
 substitute for the automatic push run.
 
-Record the certification as an auditable table with one row per attached check run:
+Record certification as auditable evidence that includes one row per attached
+check run:
 
 | Evidence | Required value |
 | --- | --- |
 | Release commit | Exact full SHA |
-| Automatic CI run | Push-triggered workflow-run URL/ID and matching head SHA |
-| Check runs | Each check-run name, conclusion, and—when skipped—the skip reason |
+| Automatic CI run | Successful push-triggered workflow-run URL/ID and matching head SHA |
+| Check run | One row per attached check-run name and conclusion; include the reason for each skipped check |
 
-The table must enumerate the actual check runs attached to the release SHA; a
-summary count or a link without the names and conclusions is insufficient.
+Repeat the check-run row until every check attached to the release SHA is
+enumerated. A summary count or a link without the names and conclusions is
+insufficient.
 
 On the implementation pull request, verify that the existing `opened`,
 `synchronize`, `reopened`, and `edited` pull-request events still start CI for
