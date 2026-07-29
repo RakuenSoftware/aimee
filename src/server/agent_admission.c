@@ -162,19 +162,48 @@ static int caps_admit_locked(const char *agent, const char *model, int per_agent
    return capacity_locked(agent, model, per_agent_max) == AGENT_ADMIT_CAPACITY_AVAILABLE;
 }
 
-int agent_admission_probe(const char *agent, const char *model, int per_agent_max,
-                          agent_admit_capacity_t *reason)
+int agent_admission_probe_info(const char *agent, const char *model, int per_agent_max,
+                               agent_admit_capacity_info_t *info)
 {
-   agent_admit_capacity_t result = AGENT_ADMIT_CAPACITY_INVALID;
+   agent_admit_capacity_info_t result = {
+       .reason = AGENT_ADMIT_CAPACITY_INVALID,
+       .available = 0,
+       .global_available = 0,
+       .agent_available = 0,
+       .model_available = 0,
+   };
    if (agent && agent[0] && model && model[0] && per_agent_max > 0)
    {
       pthread_mutex_lock(&g.lock);
-      result = capacity_locked(agent, model, per_agent_max);
+      result.reason = capacity_locked(agent, model, per_agent_max);
+      if (g.configured)
+      {
+         result.global_available = g.global_max - g.global_active;
+         result.agent_available = per_agent_max - agent_active_locked(agent);
+         result.model_available = model_limit_for(model) - model_active_locked(model);
+         result.available = result.global_available;
+         if (result.agent_available < result.available)
+            result.available = result.agent_available;
+         if (result.model_available < result.available)
+            result.available = result.model_available;
+         if (result.available < 0)
+            result.available = 0;
+      }
       pthread_mutex_unlock(&g.lock);
    }
+   if (info)
+      *info = result;
+   return result.reason == AGENT_ADMIT_CAPACITY_AVAILABLE;
+}
+
+int agent_admission_probe(const char *agent, const char *model, int per_agent_max,
+                          agent_admit_capacity_t *reason)
+{
+   agent_admit_capacity_info_t info;
+   int available = agent_admission_probe_info(agent, model, per_agent_max, &info);
    if (reason)
-      *reason = result;
-   return result == AGENT_ADMIT_CAPACITY_AVAILABLE;
+      *reason = info.reason;
+   return available;
 }
 
 static admission_ctx_t *ctx_find_locked(const char *ctx_handle)

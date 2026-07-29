@@ -501,14 +501,29 @@ type delegateCandidate struct {
 	Name, Provider, Model string
 	Roles, Personas       []string
 	MaxParallel           int
-	// AdmissionAvailable is the shipping admission controller's locked verdict
-	// across global, per-agent and shared-model limits. Nil means an older service
-	// did not expose the probe, so compatibility keeps the candidate routable.
-	AdmissionAvailable *bool
+	// Admission capacities are a single locked snapshot of the shipping
+	// admission controller's global, per-agent, and shared-model headroom. Nil
+	// means an older service did not expose the probe.
+	AdmissionCapacity       *int
+	AdmissionGlobalCapacity *int
+	AdmissionAgentCapacity  *int
+	AdmissionModelCapacity  *int
 }
 
-func (c delegateCandidate) hasCapacity(groupUses int) bool {
-	return (c.AdmissionAvailable == nil || *c.AdmissionAvailable) && groupUses < c.MaxParallel
+func (c delegateCandidate) hasCapacity(globalUses, modelUses, agentUses int) bool {
+	if c.AdmissionCapacity == nil {
+		return agentUses < c.MaxParallel
+	}
+	return globalUses < valueOr(c.AdmissionGlobalCapacity, *c.AdmissionCapacity) &&
+		modelUses < valueOr(c.AdmissionModelCapacity, *c.AdmissionCapacity) &&
+		agentUses < valueOr(c.AdmissionAgentCapacity, *c.AdmissionCapacity)
+}
+
+func valueOr(value *int, fallback int) int {
+	if value != nil {
+		return *value
+	}
+	return fallback
 }
 
 func (c *HTTPAgentClient) planDelegateGroup(ctx context.Context, requests []DelegateRequest) ([]DelegateRequest, error) {
@@ -528,6 +543,7 @@ func (c *HTTPAgentClient) planDelegateGroup(ctx context.Context, requests []Dele
 		return nil, fmt.Errorf("load delegate group eligibility: %w", err)
 	}
 	providerUses, modelUses, agentUses := map[string]int{}, map[string]int{}, map[string]int{}
+	globalUses := 0
 	for _, request := range planned {
 		if delegateSelectorUnbound(request.Delegate) || request.Participant != "" {
 			continue
@@ -537,6 +553,7 @@ func (c *HTTPAgentClient) planDelegateGroup(ctx context.Context, requests []Dele
 				providerUses[candidate.Provider]++
 				modelUses[candidate.Model]++
 				agentUses[candidate.Name]++
+				globalUses++
 				break
 			}
 		}
@@ -556,7 +573,7 @@ func (c *HTTPAgentClient) planDelegateGroup(ctx context.Context, requests []Dele
 				continue
 			}
 			matched = true
-			if !candidate.hasCapacity(agentUses[candidate.Name]) {
+			if !candidate.hasCapacity(globalUses, modelUses[candidate.Model], agentUses[candidate.Name]) {
 				continue
 			}
 			if best < 0 || candidateLess(candidate, candidates[best], providerUses, modelUses, agentUses) {
@@ -575,6 +592,7 @@ func (c *HTTPAgentClient) planDelegateGroup(ctx context.Context, requests []Dele
 		providerUses[chosen.Provider]++
 		modelUses[chosen.Model]++
 		agentUses[chosen.Name]++
+		globalUses++
 	}
 	return planned, nil
 }
@@ -617,16 +635,19 @@ func matchesSelector(values []string, wanted string) bool {
 func (c *HTTPAgentClient) delegateCandidates(ctx context.Context) ([]delegateCandidate, error) {
 	var response struct {
 		Agents []struct {
-			Name               string   `json:"name"`
-			Provider           string   `json:"provider"`
-			Model              string   `json:"model"`
-			Enabled            bool     `json:"enabled"`
-			Available          *bool    `json:"delegate_available"`
-			PrimaryOnly        bool     `json:"primary_only"`
-			MaxParallel        int      `json:"max_parallel"`
-			AdmissionAvailable *bool    `json:"admission_available"`
-			Roles              []string `json:"roles"`
-			Personas           []string `json:"personas"`
+			Name                    string   `json:"name"`
+			Provider                string   `json:"provider"`
+			Model                   string   `json:"model"`
+			Enabled                 bool     `json:"enabled"`
+			Available               *bool    `json:"delegate_available"`
+			PrimaryOnly             bool     `json:"primary_only"`
+			MaxParallel             int      `json:"max_parallel"`
+			AdmissionCapacity       *int     `json:"admission_capacity"`
+			AdmissionGlobalCapacity *int     `json:"admission_global_capacity"`
+			AdmissionAgentCapacity  *int     `json:"admission_agent_capacity"`
+			AdmissionModelCapacity  *int     `json:"admission_model_capacity"`
+			Roles                   []string `json:"roles"`
+			Personas                []string `json:"personas"`
 		} `json:"agents"`
 	}
 	if err := c.doJSON(ctx, http.MethodGet, "/v1/agent/list", nil, &response); err != nil {
@@ -647,7 +668,8 @@ func (c *HTTPAgentClient) delegateCandidates(ctx context.Context) ([]delegateCan
 		}
 		candidates = append(candidates, delegateCandidate{Name: agent.Name, Provider: provider, Model: model,
 			Roles: agent.Roles, Personas: agent.Personas, MaxParallel: agent.MaxParallel,
-			AdmissionAvailable: agent.AdmissionAvailable})
+			AdmissionCapacity: agent.AdmissionCapacity, AdmissionGlobalCapacity: agent.AdmissionGlobalCapacity,
+			AdmissionAgentCapacity: agent.AdmissionAgentCapacity, AdmissionModelCapacity: agent.AdmissionModelCapacity})
 	}
 	return candidates, nil
 }

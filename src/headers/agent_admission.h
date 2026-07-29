@@ -48,6 +48,15 @@ typedef enum
    AGENT_ADMIT_CAPACITY_INVALID
 } agent_admit_capacity_t;
 
+typedef struct
+{
+   agent_admit_capacity_t reason;
+   int available;
+   int global_available;
+   int agent_available;
+   int model_available;
+} agent_admit_capacity_info_t;
+
 /* Polled (~every 100ms) while a turn is blocked waiting for a slot; return nonzero to
  * abandon the wait (e.g. the delegation was stopped). NULL means "never cancel". */
 typedef int (*agent_admit_cancel_fn)(const char *cancel_ctx);
@@ -92,6 +101,11 @@ agent_slot_t *agent_admission_acquire(const agent_admit_req_t *req, agent_admit_
  * state; zero means capacity is exhausted or the request is invalid. */
 int agent_admission_probe(const char *agent, const char *model, int per_agent_max,
                           agent_admit_capacity_t *reason);
+
+/* Detailed form used by out-of-process planners. Headroom values are sampled
+ * under the same lock as acquisition; available is their minimum. */
+int agent_admission_probe_info(const char *agent, const char *model, int per_agent_max,
+                               agent_admit_capacity_info_t *info);
 
 /* Release a slot obtained from acquire. Safe with NULL. Decrements the context's
  * refcount; the global/per-agent/per-model counts drop only when the context's last

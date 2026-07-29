@@ -1129,10 +1129,10 @@ func TestGroupRoutingSkipsAnAgentAlreadyAtItsConcurrencyLimit(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]any{
 				// Saturated by work outside this group.
 				{"name": "busy", "provider": "p1", "model": "m1", "enabled": true, "max_parallel": 3,
-					"admission_available": false, "roles": []string{"review"}, "personas": []string{"all"}},
+					"admission_capacity": 0, "roles": []string{"review"}, "personas": []string{"all"}},
 				// Idle and equally eligible.
 				{"name": "idle", "provider": "p2", "model": "m2", "enabled": true, "max_parallel": 3,
-					"admission_available": true, "roles": []string{"review"}, "personas": []string{"all"}},
+					"admission_capacity": 3, "roles": []string{"review"}, "personas": []string{"all"}},
 			}})
 		case "/v1/delegate/run":
 			var payload map[string]any
@@ -1173,9 +1173,9 @@ func TestGroupRoutingReturnsNoFreeCapacityWithoutDispatch(t *testing.T) {
 		case "/v1/agent/list":
 			_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]any{
 				{"name": "busy-a", "provider": "p1", "model": "m1", "enabled": true, "max_parallel": 2,
-					"admission_available": false, "roles": []string{"review"}, "personas": []string{"all"}},
+					"admission_capacity": 0, "roles": []string{"review"}, "personas": []string{"all"}},
 				{"name": "busy-b", "provider": "p2", "model": "m2", "enabled": true, "max_parallel": 2,
-					"admission_available": false, "roles": []string{"review"}, "personas": []string{"all"}},
+					"admission_capacity": 0, "roles": []string{"review"}, "personas": []string{"all"}},
 			}})
 		case "/v1/delegate/run":
 			dispatches++
@@ -1197,6 +1197,43 @@ func TestGroupRoutingReturnsNoFreeCapacityWithoutDispatch(t *testing.T) {
 	}
 	if dispatches != 0 {
 		t.Fatalf("saturated pool dispatched %d jobs", dispatches)
+	}
+}
+
+func TestGroupRoutingDoesNotOverbookReportedSharedCapacity(t *testing.T) {
+	var dispatches int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/agent/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]any{
+				{"name": "shared-a", "provider": "p1", "model": "shared", "enabled": true, "max_parallel": 8,
+					"admission_capacity": 1, "admission_global_capacity": 8, "admission_agent_capacity": 8, "admission_model_capacity": 1, "roles": []string{"review"}, "personas": []string{"all"}},
+				{"name": "shared-b", "provider": "p2", "model": "shared", "enabled": true, "max_parallel": 8,
+					"admission_capacity": 1, "admission_global_capacity": 8, "admission_agent_capacity": 8, "admission_model_capacity": 1, "roles": []string{"review"}, "personas": []string{"all"}},
+			}})
+		case "/v1/delegate/run":
+			dispatches++
+			http.Error(w, "unexpected dispatch", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := client.DelegateGroup(t.Context(), []DelegateRequest{
+		{Role: "review", Persona: "architect", Prompt: "one"},
+		{Role: "review", Persona: "qa", Prompt: "two"},
+	})
+	for _, result := range results {
+		if !errors.Is(result.Err, ErrNoFreeDelegateCapacity) {
+			t.Fatalf("result = %+v, want typed no-free-capacity", results)
+		}
+	}
+	if dispatches != 0 {
+		t.Fatalf("partially plannable group dispatched %d jobs", dispatches)
 	}
 }
 

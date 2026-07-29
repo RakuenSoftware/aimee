@@ -123,21 +123,32 @@ static void test_probe_matches_acquire_without_mutation(void)
 {
    agent_admit_capacity_t why;
    agent_admit_status_t st;
+   agent_admit_capacity_info_t info;
    configure(2, 10);
    assert(agent_admission_probe("a", "m1", 1, &why) &&
           why == AGENT_ADMIT_CAPACITY_AVAILABLE);
    assert(agent_admission_global_active() == 0);
+   assert(agent_admission_probe_info("a", "m1", 1, &info));
+   assert(info.available == 1 && info.global_available == 2 && info.agent_available == 1 &&
+          info.model_available == 10);
+   assert(agent_admission_global_active() == 0); /* detailed probe is also non-mutating */
 
    agent_admit_req_t a = req("p1", "a", "m1", 1);
    agent_slot_t *sa = agent_admission_acquire(&a, &st);
    assert(sa && st == AGENT_ADMIT_OK);
    assert(!agent_admission_probe("a", "m2", 1, &why) && why == AGENT_ADMIT_CAPACITY_AGENT);
    assert(agent_admission_global_active() == 1);
+   assert(!agent_admission_probe_info("a", "m2", 1, &info));
+   assert(info.reason == AGENT_ADMIT_CAPACITY_AGENT && info.available == 0);
+   assert(agent_admission_global_active() == 1);
 
    agent_admit_req_t b = req("p2", "b", "m2", 2);
    agent_slot_t *sb = agent_admission_acquire(&b, &st);
    assert(sb && st == AGENT_ADMIT_OK);
    assert(!agent_admission_probe("c", "m3", 2, &why) && why == AGENT_ADMIT_CAPACITY_GLOBAL);
+   assert(agent_admission_global_active() == 2);
+   assert(!agent_admission_probe_info("c", "m3", 2, &info));
+   assert(info.reason == AGENT_ADMIT_CAPACITY_GLOBAL && info.available == 0);
    assert(agent_admission_global_active() == 2);
    agent_admission_release(sa);
    agent_admission_release(sb);
@@ -149,6 +160,9 @@ static void test_probe_matches_acquire_without_mutation(void)
    sa = agent_admission_acquire(&m, &st);
    assert(sa);
    assert(!agent_admission_probe("b", "shared", 2, &why) && why == AGENT_ADMIT_CAPACITY_MODEL);
+   assert(agent_admission_global_active() == 1);
+   assert(!agent_admission_probe_info("b", "shared", 2, &info));
+   assert(info.reason == AGENT_ADMIT_CAPACITY_MODEL && info.available == 0);
    assert(agent_admission_global_active() == 1);
    agent_admission_release(sa);
    printf("  PASS: probe_matches_acquire_without_mutation\n");

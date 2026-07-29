@@ -106,11 +106,8 @@ int main(void)
    assert(rt_resolve_seat_model(NULL, "agentA", "review", NULL, 0, &idx) == RT_SEAT_INVALID);
    assert(rt_resolve_seat_model(&cfg, "agentA", "review", NULL, 0, NULL) == RT_SEAT_INVALID);
 
-   /* --- a "$random" seat prefers an agent with a free concurrency slot ---
-    * Routing checks health/policy/structure but not capacity, so a saturated
-    * agent stayed selectable and the seat failed at admission with
-    * AGENT_RC_AT_LIMIT. Health cannot compensate: at-limit is deliberately never
-    * recorded as a provider fault, so the agent is never marked DOWN. */
+   /* A "$random" seat hard-excludes candidates rejected by the authoritative
+    * admission-capacity probe. Saturation remains distinct from provider health. */
    agent_config_t ccfg;
    memset(&ccfg, 0, sizeof ccfg);
    mk_agent(&ccfg.agents[0], "full", "review", 1);

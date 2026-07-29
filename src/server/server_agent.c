@@ -7,6 +7,7 @@
 #include "commands.h"
 #include "agent.h"
 #include "agent_adapter.h"
+#include "agent_admission.h"
 #include "model_registry.h"  /* model_capability_t, MODEL_PROVIDER_MAX */
 #include "agent_tier_lint.h" /* agent_resolved_price[_at_context] */
 #include "cJSON.h"
@@ -481,6 +482,16 @@ static cJSON *server_agent_to_json(const agent_t *ag)
    int capacity = agent_route_agent_capacity(ag);
    if (capacity >= 0)
       cJSON_AddBoolToObject(obj, "admission_available", capacity);
+
+   agent_admit_capacity_info_t capacity_info;
+   if (agent_admission_probe_info(ag->name, ag->model, ag->max_parallel, &capacity_info) ||
+       capacity_info.reason != AGENT_ADMIT_CAPACITY_INVALID)
+   {
+      cJSON_AddNumberToObject(obj, "admission_capacity", capacity_info.available);
+      cJSON_AddNumberToObject(obj, "admission_global_capacity", capacity_info.global_available);
+      cJSON_AddNumberToObject(obj, "admission_agent_capacity", capacity_info.agent_available);
+      cJSON_AddNumberToObject(obj, "admission_model_capacity", capacity_info.model_available);
+   }
    if (ag->middleware.context_window > 0)
       cJSON_AddNumberToObject(obj, "context_window", ag->middleware.context_window);
    cJSON *roles = cJSON_CreateArray();
