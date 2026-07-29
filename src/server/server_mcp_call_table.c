@@ -102,8 +102,7 @@ static cJSON *mcph_memory_get(struct mcp_call *c)
 }
 static cJSON *mcph_list_facts(struct mcp_call *c)
 {
-   (void)c;
-   return tool_list_facts();
+   return tool_list_facts(c->jargs);
 }
 static cJSON *mcph_memory_briefing(struct mcp_call *c)
 {
@@ -242,7 +241,10 @@ static cJSON *mcph_memory_alerts(struct mcp_call *c)
    cJSON *js = cJSON_GetObjectItemCaseSensitive(jargs, "since");
    if (cJSON_IsString(js) && js->valuestring[0])
       since = js->valuestring;
+   int active_context_missing = 0;
+   mcp_memory_scope_begin(jargs, &active_context_missing);
    char *envelope = kb_client_memory_alerts_json(since);
+   mcp_memory_scope_end();
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    cJSON *alerts = resp ? cJSON_GetObjectItemCaseSensitive(resp, "alerts") : NULL;
@@ -250,6 +252,8 @@ static cJSON *mcph_memory_alerts(struct mcp_call *c)
    if (alerts)
    {
       cJSON *detached = cJSON_DetachItemViaPointer(resp, alerts);
+      if (detached)
+         cJSON_AddBoolToObject(detached, "active_context_missing", active_context_missing);
       rendered = detached ? cJSON_PrintUnformatted(detached) : NULL;
       cJSON_Delete(detached);
    }
@@ -275,7 +279,10 @@ static cJSON *mcph_memory_recall(struct mcp_call *c)
    if (cJSON_IsNumber(jl))
       limit_tokens = (int)jl->valuedouble;
    /* Graph-code fusion is always on for recall. */
+   int active_context_missing = 0;
+   mcp_memory_scope_begin(jargs, &active_context_missing);
    char *envelope = kb_client_memory_recall_json_ex(task_hint, limit_tokens, session_start, "on");
+   mcp_memory_scope_end();
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    cJSON *recall = resp ? cJSON_GetObjectItemCaseSensitive(resp, "recall") : NULL;
@@ -283,6 +290,8 @@ static cJSON *mcph_memory_recall(struct mcp_call *c)
    if (recall)
    {
       cJSON *detached = cJSON_DetachItemViaPointer(resp, recall);
+      if (detached)
+         cJSON_AddBoolToObject(detached, "active_context_missing", active_context_missing);
       rendered = detached ? cJSON_PrintUnformatted(detached) : NULL;
       cJSON_Delete(detached);
    }

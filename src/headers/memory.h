@@ -557,6 +557,8 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
                              int limit, memory_t *out, int max);
 int memory_find_facts_visible(const char *query, const char *workspace, const char *project,
                               int limit, memory_t *out, int max);
+int memory_find_facts_visible_ex(const char *query, const char *workspace, const char *project,
+                                 int include_all, int limit, memory_t *out, int max);
 
 /* --- Conversation Scanning --- */
 int memory_scan_conversations(char dirs[][MAX_PATH_LEN], int dir_count);

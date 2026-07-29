@@ -29,10 +29,6 @@
       "decls": 2,
       "loads": 2
     },
-    "src/cmd_hooks_scope.c": {
-      "decls": 1,
-      "loads": 0
-    },
     "src/cmd_identity.c": {
       "decls": 3,
       "loads": 2
@@ -70,8 +66,8 @@
       "loads": 2
     },
     "src/cmd_session_lifecycle.c": {
-      "decls": 18,
-      "loads": 8
+      "decls": 16,
+      "loads": 6
     },
     "src/conversation_context.c": {
       "decls": 5,
@@ -111,10 +107,6 @@
     },
     "src/headers/cmd_hooks_platform.h": {
       "decls": 2,
-      "loads": 0
-    },
-    "src/headers/cmd_hooks_scope.h": {
-      "decls": 1,
       "loads": 0
     },
     "src/headers/commands.h": {
@@ -1059,8 +1051,8 @@
     }
   },
   "totals": {
-    "decls": 930,
-    "files": 264,
-    "loads": 477
+    "decls": 926,
+    "files": 262,
+    "loads": 475
   }
 }
