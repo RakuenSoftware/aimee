@@ -138,6 +138,93 @@ func TestEnsureMigratesLegacySliceWorktreeAfterReplayLosesDBPath(t *testing.T) {
 	}
 }
 
+func TestEnsureMigratesLegacySliceWhenIdenticalTargetRefAlreadyExists(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=t@example",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=t@example")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	run("init", "-b", "testing", repo)
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run("-C", repo, "add", "README")
+	run("-C", repo, "commit", "-m", "init")
+
+	id := "wi_parent.sa90502568a.g0.0"
+	legacy := legacySliceBranch(id)
+	target := "aimee/wi/" + id
+	run("-C", repo, "branch", legacy)
+	run("-C", repo, "branch", target)
+	trees := filepath.Join(root, "trees")
+	if err := os.MkdirAll(trees, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(trees, id)
+	run("-C", repo, "worktree", "add", "--lock", path, legacy)
+
+	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_parent", Repo: repo,
+		ProposalPath: "parent", WorkflowName: "build", StartStage: "slices"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: id, Repo: repo, ProposalPath: "p",
+		WorkflowName: "slice", StartStage: "freeze", ParentID: "wi_parent"}); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewWorktreeManager(store, trees)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, _ := store.WorkItem(ctx, id)
+	gotPath, gotBranch, err := manager.Ensure(ctx, item, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != path || gotBranch != target {
+		t.Fatalf("got path=%q branch=%q", gotPath, gotBranch)
+	}
+	actual, err := gitText(ctx, path, "branch", "--show-current")
+	if err != nil || actual != target {
+		t.Fatalf("renamed branch=%q err=%v", actual, err)
+	}
+}
+
+func TestRepoIntegrationBranchUsesAdmittedCheckoutNotOriginHEAD(t *testing.T) {
+	repo := t.TempDir()
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=t@example",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=t@example")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	run("init", "-b", "testing", repo)
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run("-C", repo, "add", "README")
+	run("-C", repo, "commit", "-m", "init")
+	run("-C", repo, "update-ref", "refs/remotes/origin/other", "HEAD")
+	run("-C", repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/other")
+
+	branch, err := repoIntegrationBranch(context.Background(), repo)
+	if err != nil || branch != "testing" {
+		t.Fatalf("integration branch=%q err=%v", branch, err)
+	}
+}
+
 // A slice merges through the forge, which advances the REMOTE feature branch and
 // leaves the local ref where the run started. A later slice branched from that
 // stale local ref gets a tree missing the work earlier slices already landed, so

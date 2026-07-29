@@ -1555,7 +1555,11 @@ func (r *NativeRunner) prOpen(ctx context.Context, req StepRequest) (StepResult,
 		}
 		base = "aimee/feat/" + item.ParentID
 	case "trunk", "default":
-		base, err = repoDefaultBranch(ctx, workdir)
+		// The root repository checkout is the proposal's admitted integration
+		// lane. It need not match origin/HEAD (testing versus main, or a
+		// deliberately pinned batch branch), and the forge resource plane
+		// enforces this same checkout-derived base independently.
+		base, err = repoIntegrationBranch(ctx, item.Repo)
 		if err != nil {
 			return StepResult{}, err
 		}

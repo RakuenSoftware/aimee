@@ -71,8 +71,18 @@ func (m *WorktreeManager) Ensure(ctx context.Context, item db1.WorkItem, feature
 			// this registered worktree and its commits. Rename that exact legacy
 			// branch in place; deleting/recreating the tree would discard work.
 			if legacySliceBranch(item.ID) == actual {
-				if _, existsErr := gitText(ctx, item.Repo, "rev-parse", "--verify", branch+"^{commit}"); existsErr == nil {
-					return "", "", fmt.Errorf("managed worktree uses legacy branch %q but target branch %q already exists", actual, branch)
+				if target, existsErr := gitText(ctx, item.Repo, "rev-parse", "--verify", branch+"^{commit}"); existsErr == nil {
+					legacy, legacyErr := gitText(ctx, candidate, "rev-parse", "HEAD^{commit}")
+					if legacyErr != nil || target != legacy {
+						return "", "", fmt.Errorf("managed worktree uses legacy branch %q but target branch %q has different work", actual, branch)
+					}
+					// A crash between branch creation and DB persistence can leave
+					// both names pointing at the same commit. Removing that unattached,
+					// identical alias is lossless; git refuses the deletion if another
+					// worktree has it checked out.
+					if _, deleteErr := gitText(ctx, item.Repo, "branch", "-D", branch); deleteErr != nil {
+						return "", "", fmt.Errorf("remove identical replay branch %q: %w", branch, deleteErr)
+					}
 				}
 				if _, renameErr := gitText(ctx, candidate, "branch", "-m", branch); renameErr != nil {
 					return "", "", fmt.Errorf("migrate legacy worktree branch: %w", renameErr)
@@ -193,6 +203,25 @@ func repoDefaultBranch(ctx context.Context, repo string) (string, error) {
 		return "", errors.New("repository default branch is invalid")
 	}
 	return ref, nil
+}
+
+// repoIntegrationBranch returns the branch whose checkout admitted the
+// proposal. A repository can deliberately run workflows against a non-default
+// integration lane (for example testing), while origin/HEAD points somewhere
+// else. Final PRs must target this checkout branch; the C forge boundary
+// independently resolves and enforces the same trusted value.
+func repoIntegrationBranch(ctx context.Context, repo string) (string, error) {
+	branch, err := gitText(ctx, repo, "branch", "--show-current")
+	if err != nil || branch == "" {
+		return "", errors.New("repository integration branch is unresolved")
+	}
+	if strings.HasPrefix(branch, "-") {
+		return "", errors.New("repository integration branch is invalid")
+	}
+	if _, err := gitText(ctx, repo, "check-ref-format", "--branch", branch); err != nil {
+		return "", errors.New("repository integration branch is invalid")
+	}
+	return branch, nil
 }
 
 func gitText(ctx context.Context, repo string, args ...string) (string, error) {
