@@ -18,6 +18,12 @@
 # The published image has AIMEE_DEPLOY_ENABLED unset — orchestration is off until
 # this file turns it on together with the socket mount.
 
+# The managed sibling compose references this stack's volumes by their canonical
+# aimee_* names. Pinning the project in the manifest is essential: setting
+# COMPOSE_PROJECT_NAME inside the server container does not affect the host-side
+# `docker compose up` that creates this first container.
+name: aimee
+
 # Shared network the server + every managed service join, so they resolve each
 # other by name (aimee-kb:8741, aimee-llm:8742). The managed compose
 # references this as `external` — it must exist, so define it here with a fixed name.

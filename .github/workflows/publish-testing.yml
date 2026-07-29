@@ -18,16 +18,16 @@ on:
     # Only rebuild when something that affects the image changes.
     paths:
       - "src/**"
-      # The Go WFE/API service is compiled into aimee-server. Go-only migration
-      # fixes must publish a deployable testing image just like C server changes.
+      # The Go WFE/API service and browser runtime are compiled into aimee-server.
+      # Go-only fixes must publish a deployable testing image just like C changes.
       - "server-go/**"
+      - "runtime-web/**"
       - "config/**"
       - "deploy/container/**"
       - "scripts/**"
       # The images bundle the webchat UI (frontend/ SPA + webchat/ Go server) —
       # see the frontend-build/webchat-build stages in Dockerfile.server.
       - "frontend/**"
-      - "webchat/**"
       - "Dockerfile"
       - "Dockerfile.server"
       - "Dockerfile.authority-bootstrap"

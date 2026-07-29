@@ -3,6 +3,7 @@ import { Panel, Button } from '@rakuensoftware/smoothgui';
 import ConnectHosts from '../setup/ConnectHosts';
 import { useSessions } from '../SessionContext';
 import { groupProjectsByOrg, parseOwnerOnly, repoAlreadyCloned, type CloneKbAnnotations, type GitProjectsResponse, type OwnerRef, type ProjectDetail, type ProjectDeleteResponse } from '../setup/ownerUrl';
+import { notifySetupUpdated } from '../setup/setupState';
 
 /* Git projects (webchat-git WP-F2). The page is focused on managing repos: it
  * lists the user's cloned projects, connects new ones, and runs per-project git
@@ -152,6 +153,7 @@ export default function Projects() {
         if (d.kb_indexed === false) notes.push(`not indexed in the knowledge base — ${d.kb_reason || 'knowledge service unavailable'}`);
         setCloneNotes(notes);
         await loadProjects(); await loadHosts(); setSelected(d.name || '');
+        notifySetupUpdated();
       }
     } finally { setBusy(false); }
   }
@@ -200,6 +202,7 @@ export default function Projects() {
       setOrgResults(d.results || []);
       setUrl('');
       await loadProjects();
+      notifySetupUpdated();
     } catch { setErr('aimee-server unavailable'); } finally { setBusy(false); }
   }
 
@@ -229,6 +232,7 @@ export default function Projects() {
         setNotice(`Deleted ${delRef} — ${kb}.`);
         closeDelete();
         await loadProjects();
+        notifySetupUpdated();
       } else if (r.status === 503) {
         // kb-first ordering aborted the delete: the clone is intact. Offer a
         // retry, or an explicit force (second click) that leaves the knowledge

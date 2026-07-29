@@ -38,6 +38,11 @@ WEBCHAT_GROUP="${AIMEE_WEBCHAT_GROUP:-aimee}"
 # start. $AIMEE_HOME IS a persistent volume, so the login survives reboots even when
 # the env that originally created it is no longer injected. Root-owned, 0600.
 WEBCHAT_LOGIN_STORE="${WEBCHAT_HOME}/webchat/logins"
+# Written by POST /api/setup/account after the onboarding wizard creates a real
+# operator login. The image still contains the unprivileged `aimee` service UID,
+# but this marker prevents the published development password from being applied
+# to that UID again after a container recreate.
+WEBCHAT_BOOTSTRAP_REPLACED="${WEBCHAT_HOME}/webchat/bootstrap-replaced"
 
 # Record (or replace) the "user:hash" line for $1 in the durable store, reading the
 # crypt hash straight from /etc/shadow so we persist the encrypted form, not the
@@ -68,9 +73,9 @@ webchat_persist_login() {
 # Recreate any persisted login that is missing from the container's PAM database,
 # restoring its exact crypt hash (chpasswd -e). Runs on every start BEFORE the
 # env-based bootstrap, so a fresh container rootfs regains every previously
-# provisioned account; the env bootstrap then still runs afterwards and can update
-# a password the operator changed. An account that already exists is left untouched
-# (only its group membership is re-asserted) — the live /etc/shadow wins.
+# provisioned account. The env bootstrap can update its password until onboarding
+# retires it. An account that already exists is left untouched (only its group
+# membership is re-asserted) — the live /etc/shadow wins.
 webchat_restore_logins() {
     [ -f "$WEBCHAT_LOGIN_STORE" ] || return 0
     getent group "$WEBCHAT_GROUP" >/dev/null 2>&1 || groupadd --system "$WEBCHAT_GROUP" || true
@@ -171,11 +176,14 @@ webchat_bootstrap_extra_users() {
 webchat_bootstrap_user() {
     # First bring back any account provisioned on an earlier boot — this is what
     # makes login survive a reboot/recreate when the runtime does not re-inject
-    # AIMEE_WEBCHAT_USER/PASSWORD. The env bootstrap below still runs and wins.
+    # AIMEE_WEBCHAT_USER/PASSWORD. The env bootstrap below wins until onboarding
+    # writes the retirement marker.
     webchat_restore_logins
     _wc_user="${AIMEE_WEBCHAT_USER:-}"
     _wc_pass="${AIMEE_WEBCHAT_PASSWORD:-}"
-    if [ -z "$_wc_user" ] || [ -z "$_wc_pass" ]; then
+    if [ -f "$WEBCHAT_BOOTSTRAP_REPLACED" ]; then
+        webchat_log "bootstrap login retired by onboarding; skipping AIMEE_WEBCHAT_USER/AIMEE_WEBCHAT_PASSWORD"
+    elif [ -z "$_wc_user" ] || [ -z "$_wc_pass" ]; then
         webchat_log "AIMEE_WEBCHAT_USER/AIMEE_WEBCHAT_PASSWORD unset; skipping primary login bootstrap (AIMEE_WEBCHAT_USERS may still provision accounts)"
     else
         webchat_provision_user "$_wc_user" "$_wc_pass"

@@ -89,7 +89,7 @@ func (s *server) handleVSCode(w http.ResponseWriter, r *http.Request) {
 	// helps but is not an explicit gate, so reject any cross-origin request here.
 	// The editor's own assets/XHR/WebSocket all originate from our same-origin
 	// iframe, so legitimate traffic always matches; only foreign origins are cut.
-	if !sameOriginVSCode(r) {
+	if !sameOriginRequest(r) {
 		http.Error(w, "cross-origin request rejected", http.StatusForbidden)
 		return
 	}
@@ -260,7 +260,8 @@ func hostNoDefaultPort(host, scheme string) string {
 	return net.JoinHostPort(h, p)
 }
 
-// sameOriginVSCode is the cross-origin gate for the /vscode proxy. The browser
+// sameOriginRequest is the cross-origin gate for privileged browser operations,
+// including the /vscode proxy and onboarding account replacement. The browser
 // reaches webchat at forwardedProto://r.Host; a request whose Origin resolves to
 // a different scheme+host+port is cross-origin and rejected. Scheme and host are
 // compared normalized (case-insensitive, default port stripped) so a same-origin
@@ -274,7 +275,7 @@ func hostNoDefaultPort(host, scheme string) string {
 // navigations, asset GETs) or when the browser explicitly marks it same-origin
 // via Sec-Fetch-Site, so a non-safe cross-origin call that omits Origin cannot
 // slip through.
-func sameOriginVSCode(r *http.Request) bool {
+func sameOriginRequest(r *http.Request) bool {
 	origin := strings.TrimSpace(r.Header.Get("Origin"))
 	if origin == "" {
 		if isWebSocketUpgrade(r) {
