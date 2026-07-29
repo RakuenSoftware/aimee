@@ -110,4 +110,6 @@ bus consumer. See [Event bus](EVENT_BUS.md).
 See [Workflows](WORKFLOWS.md), [Workflow Actions](WORKFLOW_ACTIONS.md), and
 [Delegate sandbox](DELEGATE_SANDBOX.md).
 
+## Automatic proposal admission
+
 Pending proposals are admitted by the autonomous watcher under the contract defined in the [automatic proposal admission](wfe-autonomy-runbook.md#automatic-proposal-admission) section of the autonomy runbook; see that section for the eligibility and behavior rules.
