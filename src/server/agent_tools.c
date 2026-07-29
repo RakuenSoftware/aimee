@@ -1252,6 +1252,8 @@ static cJSON *tp_search_docs(void)
    cJSON *props = cJSON_CreateObject();
    tp_prop(props, "query", "string",
            "What you want to know about the project — a question or topic");
+   tp_prop(props, "project", "string",
+           "Indexed project name. Defaults to the current workspace directory name.");
    tp_prop(props, "max_results", "integer", "Maximum passages to return (default 3, max 8)");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();

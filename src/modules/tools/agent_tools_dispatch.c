@@ -1898,6 +1898,18 @@ extern void retrieval_outcome_bridge_note(const char *surface, const char *event
                                           const int64_t *ids, const char *const *snippets, int n)
     __attribute__((weak));
 
+static const char *td_search_project(cJSON *args, const char *dispatch_cwd)
+{
+   cJSON *project = cJSON_GetObjectItemCaseSensitive(args, "project");
+   if (cJSON_IsString(project) && project->valuestring[0])
+      return project->valuestring;
+   if (!dispatch_cwd || !dispatch_cwd[0])
+      return NULL;
+   const char *base = strrchr(dispatch_cwd, '/');
+   base = base ? base + 1 : dispatch_cwd;
+   return base[0] ? base : NULL;
+}
+
 static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_cwd,
                             const char *dispatch_sid, int timeout_ms)
 {
@@ -1913,7 +1925,7 @@ static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_
       config_t cfg;
       config_load(&cfg);
       int max = (mx && cJSON_IsNumber(mx)) ? mx->valueint : 3;
-      char *envelope = kb_client_search_json(NULL, q->valuestring,
+      char *envelope = kb_client_search_json(td_search_project(args, dispatch_cwd), q->valuestring,
                                              config_embedding_command(&cfg, NULL), max, NULL);
       cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
       free(envelope);

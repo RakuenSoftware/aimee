@@ -941,6 +941,19 @@ cJSON *smcp_tool_find_symbol(cJSON *args)
    return text_content(buf);
 }
 
+static const char *smcp_search_project(cJSON *args)
+{
+   cJSON *project = cJSON_GetObjectItemCaseSensitive(args, "project");
+   if (cJSON_IsString(project) && project->valuestring[0])
+      return project->valuestring;
+   cJSON *cwd = cJSON_GetObjectItemCaseSensitive(args, "cwd");
+   if (!cJSON_IsString(cwd) || !cwd->valuestring[0])
+      return NULL;
+   const char *base = strrchr(cwd->valuestring, '/');
+   base = base ? base + 1 : cwd->valuestring;
+   return base[0] ? base : NULL;
+}
+
 cJSON *smcp_tool_search_docs(cJSON *args)
 {
    cJSON *query = cJSON_GetObjectItemCaseSensitive(args, "query");
@@ -954,8 +967,9 @@ cJSON *smcp_tool_search_docs(cJSON *args)
    if (max_results > 8)
       max_results = 8;
 
-   char *envelope = kb_client_search_json(
-       NULL, query->valuestring, config_embedding_command_current(NULL), max_results, NULL);
+   char *envelope =
+       kb_client_search_json(smcp_search_project(args), query->valuestring,
+                             config_embedding_command_current(NULL), max_results, NULL);
    cJSON *response = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    char *rendered = td_search_result_from_response(response, query->valuestring);

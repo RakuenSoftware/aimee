@@ -518,7 +518,7 @@ static void test_osv_offline_cache_miss_allows(void)
    "roadmap {command,roadmap_id} req:command\n"                                                    \
    "roundtable_review {artifact_stage,brief,diff,original_request,roundtable,workdir} req:diff\n"  \
    "rules {command,reason,text} req:command\n"                                                     \
-   "search_docs {max_results,query} req:query\n"                                                   \
+   "search_docs {max_results,project,query} req:query\n"                                           \
    "search_memory {filter,query} req:query\n"                                                      \
    "send_message {target,text} req:target,text\n"                                                  \
    "session {around_message_id,chain_id,command,include_sources,limit,query,session_id,window} "   \
