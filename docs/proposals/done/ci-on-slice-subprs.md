@@ -1,20 +1,20 @@
-# Proposal: run CI on slice sub-PRs
 
 - **State:** implemented — option 1 shipped in `ci.yml`.
 
 ## Problem
 
-The build-e2e workflow merges each slice through a sub-PR whose stated gate is
-"sub-PR -> GREEN CI -> merge into the feature branch". In practice no CI runs.
+Before option 1 was implemented, the build-e2e workflow merged each slice through
+a sub-PR whose stated gate was "sub-PR -> GREEN CI -> merge into the feature
+branch", but in practice no CI ran.
 
-`.github/workflows/ci.yml` triggers on:
+At that time, `.github/workflows/ci.yml` triggered on:
 
 ```yaml
 pull_request:
   branches: [main, testing, feature/core-modularization]
 ```
 
-Slice sub-PRs target `aimee/feat/<work_item_id>`, which is not in that list.
+Slice sub-PRs targeted `aimee/feat/<work_item_id>`, which was not in that list.
 Observed on PR #2011, opened and merged by the pipeline: `check-runs` total_count
 = 0. The engine correctly advanced — `wfe_live_forge.c` deliberately treats
 `GIT_PR_CI_NONE` as merge-permitting so an intermediate PR cannot park forever —
@@ -166,22 +166,47 @@ For `Q1`, use the first 10 completed slice gates created after slice CI was
 enabled. Measure the queue wait of every unrelated `pull_request` `ci.yml` run
 (base branch not `aimee/feat/**`) created from the first slice gate's `created_at`
 through the last slice gate's `updated_at`, using the same earliest-job-start
-calculation and arithmetic-median rule; `Q1` is the median of those values. Also
-record maximum concurrent job executions reached (`Cmax`) and total elapsed time
-of each slice gate. Preserve the run IDs and timestamps here so the sample can be
-reproduced from the Actions API. If the window contains fewer than 10 unrelated
-PR runs, extend its end to the creation time of the tenth subsequent unrelated
-PR run and use those 10 runs for `Q1`.
+calculation and arithmetic-median rule; `Q1` is the median of those values. If
+the window contains fewer than 10 unrelated PR runs, extend its end to the
+creation time of the tenth subsequent unrelated PR run and use those 10 runs for
+`Q1`.
+
+For each slice gate, record its run ID, `created_at`, `updated_at`, total elapsed
+time, and an account-wide concurrency maximum `Cmax[i]`. The observation
+interval for `Cmax[i]` is that gate's half-open interval `[created_at,
+updated_at)`. Using credentials that can enumerate Actions across every
+repository owned by the account, query every workflow run whose lifetime
+overlaps that interval, not only runs in this repository, then retrieve every
+job attempt for those runs. Count each job execution (including every matrix
+expansion and rerun attempt) as active on `[started_at, completed_at)` and clip
+that interval to the slice-gate interval. Reconstruct the maximum with a sweep
+of the clipped interval endpoints, processing completion endpoints before start
+endpoints at an equal timestamp so the half-open convention is preserved.
+Queued or skipped jobs without both timestamps are not active.
+
+Preserve the raw API responses used for the calculation. Record the account
+identifier, API retrieval date, account plan and documented concurrent-job
+ceiling, repository and run IDs queried, each job attempt's ID and timestamps,
+and the resulting ten `Cmax[i]` values so every maximum and overlap can be
+reproduced. If the credentials cannot enumerate every account-owned repository,
+the sample is incomplete and the concurrency criterion must not be evaluated.
+
+Record the ten results as one row per slice gate with columns for run ID,
+observation interval (`created_at`, `updated_at`), elapsed time, overlapping
+account-wide repository and run IDs, `Cmax[i]`, and whether `Cmax[i]` equals the
+recorded ceiling. The threshold count is the number of rows whose equality field
+is true.
 
 **Reconsider option 2 if any of these is true** (each mechanically checkable):
 
 - `Q1 >= Q0 + 2 minutes`; **or**
 - slice gate elapsed time exceeds **20 minutes** in **3 or more** of the 10 runs
   (against the measured ~10-minute standalone figure); **or**
-- `Cmax` reaches the account's documented concurrent-job ceiling in **2 or more**
-  of the 10 runs. (The ceiling must be read from the account's plan limits at
-  measurement time; it is not known here, which is precisely why it is recorded
-  rather than assumed.)
+- `Cmax[i]` reaches the account's documented concurrent-job ceiling for **2 or
+  more** of the 10 slice gates. Apply this threshold to the ten per-gate maxima,
+  not to one aggregate maximum. (The ceiling must be read from the account's
+  plan limits at measurement time; it is not known here, which is precisely why
+  it is recorded rather than assumed.)
 
 If none of the three fires across those 10 runs, close the question and record
 concurrency as measured and adequate.

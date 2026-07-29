@@ -45,7 +45,7 @@ settings exist precisely to close this gap. Neither is in use here: PRs merge
 against whatever base they were opened on.
 
 Note that this is the same class of hole as the slice sub-PR gap described in
-[ci-on-slice-subprs.md](ci-on-slice-subprs.md) — work merging through a gate
+[ci-on-slice-subprs.md](../done/ci-on-slice-subprs.md) — work merging through a gate
 that did not actually run. They are independent instances and can be fixed
 independently, but a fix for one does not address the other.
 
@@ -123,7 +123,7 @@ Assumed, NOT established:
 
 Option 1, and it should be uncontroversial: the repo is public, so the extra run
 costs no billed minutes (see the cost analysis in
-[ci-on-slice-subprs.md](ci-on-slice-subprs.md)), and it is a two-line change to
+[ci-on-slice-subprs.md](../done/ci-on-slice-subprs.md)), and it is a two-line change to
 an existing trigger block.
 
 Option 1 reports rather than prevents — a broken tip is found minutes after the
