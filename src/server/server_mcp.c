@@ -971,7 +971,10 @@ cJSON *smcp_tool_search_docs(cJSON *args)
     * the operator explicitly configured a command on this server; resolving an
     * unset value to the 384-dim builtin can mismatch a remote kb's corpus. */
    const char *embedding_command = config_embedding_command_field();
-   if (!embedding_command[0])
+   /* "builtin" is also the resolver's fallback value on a thin server. It is
+    * not evidence that the remote corpus was built with the 384-dim shim, so
+    * leave selection to the KB just as we do for an empty field. */
+   if (!embedding_command[0] || strcmp(embedding_command, "builtin") == 0)
       embedding_command = NULL;
    char *envelope = kb_client_search_json(smcp_search_project(args), query->valuestring,
                                           embedding_command, max_results, NULL);
