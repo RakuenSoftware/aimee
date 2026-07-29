@@ -881,7 +881,7 @@ static void *drain_thread_main(void *arg)
       snprintf(opts.extract_command, sizeof(opts.extract_command), "%s",
                cfg.kb_curator_extract_command);
       opts.max_tokens =
-          cfg.kb_curator_extract_max_tokens > 0 ? cfg.kb_curator_extract_max_tokens : 2048;
+          cfg.kb_curator_extract_max_tokens > 0 ? cfg.kb_curator_extract_max_tokens : 512;
       opts.max_attempts = cfg.kb_curator_max_attempts > 0 ? cfg.kb_curator_max_attempts : 3;
 
       /* A provider outage is shared by every LLM stage. Per-row retry stamps do
@@ -964,7 +964,7 @@ static void *kb_curator_code_worker_main(void *arg)
       snprintf(opts.extract_command, sizeof(opts.extract_command), "%s",
                cfg.kb_curator_extract_command);
       opts.max_tokens =
-          cfg.kb_curator_extract_max_tokens > 0 ? cfg.kb_curator_extract_max_tokens : 2048;
+          cfg.kb_curator_extract_max_tokens > 0 ? cfg.kb_curator_extract_max_tokens : 512;
       opts.max_attempts = cfg.kb_curator_max_attempts > 0 ? cfg.kb_curator_max_attempts : 3;
 
       int r = kb_curator_extract_code_unit_one(&opts);
@@ -1004,7 +1004,7 @@ static void *kb_curator_doc_worker_main(void *arg)
       snprintf(opts.extract_command, sizeof(opts.extract_command), "%s",
                cfg.kb_curator_extract_command);
       opts.max_tokens =
-          cfg.kb_curator_extract_max_tokens > 0 ? cfg.kb_curator_extract_max_tokens : 2048;
+          cfg.kb_curator_extract_max_tokens > 0 ? cfg.kb_curator_extract_max_tokens : 512;
       opts.max_attempts = cfg.kb_curator_max_attempts > 0 ? cfg.kb_curator_max_attempts : 3;
 
       int r = kb_curator_extract_one(&opts);
@@ -1033,7 +1033,7 @@ static void *kb_curator_index_lane_main(void *arg)
       snprintf(opts.extract_command, sizeof(opts.extract_command), "%s",
                cfg.kb_curator_extract_command);
       opts.max_tokens =
-          cfg.kb_curator_extract_max_tokens > 0 ? cfg.kb_curator_extract_max_tokens : 2048;
+          cfg.kb_curator_extract_max_tokens > 0 ? cfg.kb_curator_extract_max_tokens : 512;
       opts.max_attempts = cfg.kb_curator_max_attempts > 0 ? cfg.kb_curator_max_attempts : 3;
 
       /* Pure-DB2 projection-graph + cross-repo refresh once per poll, ahead of the
