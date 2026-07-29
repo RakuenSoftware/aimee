@@ -1170,7 +1170,7 @@ char *kb_client_v1_post_json(const char *path, cJSON *body, int timeout_ms, int 
    /* Distributed mode: route to the remote kb over mTLS (see get_json). */
    if (kb_client_mtls_configured())
    {
-      char *r = kb_client_mtls_request("POST", path, body_json, status_out);
+      char *r = kb_client_mtls_request_timeout("POST", path, body_json, timeout_ms, status_out);
       free(body_json);
       return r;
    }
@@ -1240,7 +1240,7 @@ char *kb_client_v1_get_json(const char *path, int timeout_ms, int *status_out)
    /* Distributed mode: a configured remote kb (AIMEE_KB_CONN) is reached over
     * mTLS with the enrollment-issued client cert, ahead of HTTP-URL / socket. */
    if (kb_client_mtls_configured())
-      return kb_client_mtls_request("GET", path, NULL, status_out);
+      return kb_client_mtls_request_timeout("GET", path, NULL, timeout_ms, status_out);
 
    char *url = kb_client_v1_url(path);
    if (url)

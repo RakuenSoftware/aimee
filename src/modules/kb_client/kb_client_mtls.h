@@ -27,6 +27,11 @@ int kb_client_mtls_managed_metadata(char *server_id_out, size_t server_id_cap,
  * method is "GET"/"POST"; body is NULL for GET. */
 char *kb_client_mtls_request(const char *method, const char *path, const char *body,
                              int *status_out);
+/* As above, but propagate the caller's operation timeout to the mTLS socket.
+ * This prevents the transport's 30-second default from truncating builds whose
+ * public operation contract allows several minutes. */
+char *kb_client_mtls_request_timeout(const char *method, const char *path, const char *body,
+                                     int timeout_ms, int *status_out);
 
 /* Fetch the exact bounded P5-C2c signed envelope.  Only an authenticated 200
  * response on the fixed route is accepted; output is cleared on every error. */
