@@ -27,56 +27,70 @@ also served without its instruction prefix. The cutover neither introduced nor
 worsened the gap; it is recorded now because the boundary was examined during
 that work.
 
-## Why this is NOT a correctness bug
+## This IS a correctness gap, and it is measured
 
-The selection benchmark
-([embedder-selection-frozen-ab-v1](../../validation/embedder-selection-frozen-ab-v1.md))
-scored **all 14 candidates prefix-free** — the harness's `--query-prefix` and
-`--doc-prefix` both defaulted to empty, and the result artifacts record no
-prefix. So prefix-free serving is exactly what reproduces the measured 0.6058
-NDCG@10. Production matches the benchmark.
+> **Correction (2026-07-29).** An earlier version of this proposal claimed the
+> selection benchmark scored all candidates prefix-free, and concluded that
+> prefix-free serving therefore reproduced the measurement. **That was wrong.**
+> The sweep runner gave **each model its own card-recommended prefix**
+> (`nomic → search_query:/search_document:`, `e5 → query:/passage:`,
+> `magibu → task: search result | query: …`, and `""` for models whose cards
+> define none, such as bekko-a25m). The conclusion below is reversed accordingly.
 
-Adding prefixes is therefore **plausible unmeasured upside, not a fix.** Nothing
-is currently broken relative to what was measured.
+The benchmark measured every model **with** its prefixes. aimee serves **without**
+them. So for any prefix-dependent model, the deployed system does **not** reproduce
+its benchmark score — the selection number is not the number production gets.
 
-## Why it still matters
+This was measured directly on the frozen-ab-v1 suite, same harness, same corpus,
+varying only the prefix:
 
-Uniform treatment is not neutral treatment. Models differ in how strongly they
-depend on their prefixes, so a prefix-free sweep understates prefix-dependent
-models by an *unequal* amount. The `aimee-encoder` selection document already
-records this caveat for bge-small and e5.
+| model | with card prefix | prefix-free (what aimee serves) | delta |
+|---|---:|---:|---:|
+| nomic-embed-text-v2-moe | 0.6058 | **0.5823** | **−0.0235** |
+| bekko-a25m (card defines none) | 0.5892 | 0.5909 | ±0 (nothing to strip) |
 
-Two consequences:
+**The consequence is decision-changing.** nomic's margin over a25m exists only
+*with* prefixes. Strip them — which is what the current code does — and the
+ordering inverts: 0.5823 against 0.5909. A model that needs no prefix carries its
+benchmark score into production intact; a prefix-dependent one does not.
 
-1. **The current default may be leaving quality on the table.** nomic is
-   prefix-dependent and won anyway, so its measured score is a floor.
-2. **The ranking itself carries a caveat.** A prefix-aware re-run could reorder
-   the candidates. This does not invalidate the decision — it bounds how much
-   confidence the ordering deserves.
+So this is not "upside we are leaving on the table". It is a **silent regression
+between what was measured and what is served**, and it is large enough to select
+the wrong model.
 
-## What must be measured before proposing an implementation
+## Why it stayed invisible
 
-1. Re-run `eval/frozen-ab-v1` for the top candidates **with** each model's
-   card-specified prefixes, against the existing prefix-free numbers. Same suite,
-   same manifest SHA, so the runs are directly comparable.
-2. Report per-`doc_kind` deltas, not just the aggregate — the prose and code
-   buckets may respond differently, and `cited_artifacts` is where the runner-up
-   already wins.
-3. Confirm whether the ranking of the top candidates changes at all.
+Nothing errors. The vectors are well-formed, correctly dimensioned, correctly
+pooled and correctly normalised — they are simply the vectors for a subtly
+different input than the one that was benchmarked. The same class of failure as
+the `AIMEE_LLM_EMBED_POOLING` default: silently wrong, not loudly broken.
 
-If the lift is not material, the correct outcome is to **record the measurement
-and change nothing**.
+## The decision this forces
+
+There are two coherent positions, and the embedder choice is downstream of which
+one is taken:
+
+1. **Implement prefix support**, then a prefix-dependent model can be deployed at
+   the score it was selected on.
+2. **Do not implement it**, and then only prefix-free models may be selected —
+   the selection must be re-ranked on prefix-free numbers, because those are the
+   ones production will deliver.
+
+What is *not* coherent is selecting on prefixed scores and serving prefix-free.
+That is the current state, and it is how a 0.6058-vs-0.5892 win became a
+0.5823-vs-0.5909 loss without anything appearing to go wrong.
 
 ## Migration cost, which is the real constraint
 
 Prefixes change every vector. Adopting them is not a config toggle — it is a
 **full re-embed** of the entire corpus, through the same double-gated dim-change
 machinery used for a dimension change (`aimee kb reembed` /
-`db2_dim_change_reset`), even though the dimension itself is unchanged at 768.
+`db2_dim_change_reset`), even though the dimension itself is unchanged.
 
-That asymmetry is the crux: the change is cheap to implement and expensive to
-deploy. It should not be undertaken on the expectation of a gain — only on a
-measured one.
+Note the asymmetry this creates in model selection: a model whose card defines no
+prefix (bekko-a25m) has no gap between benchmark and production and needs none of
+this machinery. That is a real, if unglamorous, architectural advantage, and it
+should be weighed alongside raw NDCG rather than treated as a tie-breaker.
 
 ## Non-goals
 

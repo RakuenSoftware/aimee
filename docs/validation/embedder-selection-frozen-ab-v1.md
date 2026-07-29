@@ -1,150 +1,133 @@
-# Embedder selection — frozen-ab-v1 (nomic-embed-text-v2-moe)
+# Embedder measurements — frozen-ab-v1 (2026-07-29)
 
-**Decision: `nomic-embed-text-v2-moe` is the base embedder on EVERY tier, at a
-uniform 768 dimensions.** It replaces the Qwen3-Embedding ladder (0.6B/1024-d on
-CPU, 4B/2560-d on GPU). Adopted 2026-07-29.
+> **STATUS: MEASUREMENTS COMPLETE, DECISION OPEN.** This page records what was
+> measured. It does **not** record a settled embedder choice: the leading option
+> depends on whether query/document prefix support is built, and that is an open
+> decision. See [The prefix fork](#the-prefix-fork).
+>
+> An earlier version of this page declared nomic-embed-text-v2-moe adopted. That
+> declaration was premature — it selected on a prefixed benchmark score while the
+> code ships prefix-free. The measurements below are sound; the conclusion drawn
+> from them was not.
 
-This supersedes [embedder-gate-scifact](embedder-gate-scifact.md) and
-[embedder-gate-locomo](embedder-gate-locomo.md) as the standing embedder
-decision. Both are retained as evidence.
+## Environment
 
-## Environment and commands
+- **Suite:** `eval/frozen-ab-v1` (`aimee-encoder`), manifest SHA-256
+  `16d2c16add86052ff24be410699ab9452ee1a36252de6dba31ab5391de7ab81c`.
+  10,000 cases ranked against all 26,473 corpus documents. The corpus is **not**
+  capped — capping inflates NDCG and is what produced the withdrawn SciFact
+  numbers in [embedder-gate-scifact](embedder-gate-scifact.md).
+- **Harness:** `scripts/eval_hf_embedder.py`, unmodified, except a `--pooling last`
+  option added for Qwen3 (validated: `padding_side=right`, index `mask.sum(1)-1`
+  resolves to the trailing `<|endoftext|>`, which is Qwen3-Embedding's readout).
+- **Hardware:** RTX 5080, bf16. CPU throughput separately on 16 pinned threads.
+- **aimee commit:** `a8d3214c`.
 
-- **Suite:** `eval/frozen-ab-v1` in the `aimee-encoder` repository, manifest
-  SHA-256 `16d2c16add86052ff24be410699ab9452ee1a36252de6dba31ab5391de7ab81c`.
-  10,000 embedding cases ranked against all 26,473 corpus documents.
-- **Environment:** CT 106 (`aimee-train`) on `.253`. Accuracy on an RTX 5080
-  (bf16); CPU throughput on 16 pinned threads (fp32). torch 2.11.0+cu128,
-  transformers 5.14.1, tokenizers 0.22.2.
-- **aimee commit at integration:** `a8d3214c`.
+## Results — every model at its best
 
-```bash
-# accuracy (GPU, full corpus)
-python scripts/eval_hf_embedder.py --model nomic-ai/nomic-embed-text-v2-moe \
-  --pooling mean --suite eval/frozen-ab-v1 --device cuda --max-tokens 2048 \
-  --trust-remote-code --output final-nomic.json
+Each model with its **own card-recommended prefix and native pooling**. This is
+the correct way to benchmark, and it is what the original sweep did.
 
-# CPU throughput
-python scripts/bench_cpu_throughput.py --model nomic-ai/nomic-embed-text-v2-moe \
-  --pooling mean --corpus eval/frozen-ab-v1/corpus.jsonl \
-  --texts 128 --latency-samples 12 --threads 16 --trust-remote-code
-```
+| model | NDCG@10 | R@10 | dim | **code** | prose | cited | vec/s (GPU) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **nomic-embed-text-v2-moe** | **0.6072** | 0.8007 | 768 | **0.8104** | 0.5157 | 0.6344 | 82.7 |
+| **Qwen3-Embedding-4B** | 0.6061 | **0.8100** | 2560 | 0.7394 | **0.5274** | 0.6988 | 26.4 |
+| **bekko-embedding-v1-a25m** | 0.5909 | 0.7816 | 384 | 0.7718 | 0.4841 | **0.7170** | **510.7** |
+| **Qwen3-Embedding-0.6B** | 0.5810 | 0.7765 | 1024 | 0.7325 | 0.4930 | 0.6804 | 113.1 |
 
-## Results
+Reproduction check: nomic re-measured at **0.6072** against a recorded 0.6058, and
+a25m at **0.5909** against 0.5892 — both within GPU noise. The suite is stable.
 
-14 candidates were measured. The decision came down to two:
+### What the table says
 
-| | nomic-embed-text-v2-moe | bekko-embedding-v1-a25m |
-|---|---:|---:|
-| **NDCG@10** | **0.6058** | 0.5892 |
-| MRR@10 | 0.5420 | — |
-| Recall@1 / @5 / @10 | 0.3833 / 0.7381 / **0.8007** | — / — / 0.7816 |
-| `code_unit_body` | **0.8086** | 0.7701 |
-| `prose` (60% of queries) | **0.5146** | 0.4819 |
-| `cited_artifacts` | 0.6325 | **0.7170** |
-| Output width | **768** | 384 |
-| Parameters | 475M | **123M** |
-| CPU throughput | 787 tok/s | **2,155 tok/s** |
-| Licence | Apache-2.0 | MIT |
+- **nomic and Qwen3-4B are tied** (0.6072 vs 0.6061 — a 0.0011 difference is
+  noise). 4B costs **3.3× the vector storage** and is **3.1× slower to embed**
+  for that tie.
+- **The Qwen3 ladder tops out at parity.** 0.6B → 4B is +0.025 for 6.7× the
+  parameters, arriving where a 475M model already sits. Scaling the family is a
+  more expensive route to the same score, not an upgrade path.
+- **nomic leads decisively on code** (+0.071 over 4B, +0.039 over a25m). aimee
+  embeds code as a first-class citizen (`code_embeddings`, and `intent_vec` /
+  `sig_vec` / `body_vec` per code unit), so this category is weighted heavily for
+  this workload.
+- **a25m is far the cheapest** — 510.7 vec/s on GPU (6.2× nomic, 19× 4B) and
+  2,155 tok/s on CPU.
 
-nomic wins overall, on code, and on the prose bucket that is 60% of the query
-mix. **a25m wins `cited_artifacts` decisively** and is 2.7× faster on CPU.
+## The prefix fork
 
-### The CPU cost was accepted deliberately
+**The benchmark applies per-model prefixes. aimee has no prefix plumbing.** So
+for a prefix-dependent model, the benchmark score is *not* the deployed score:
 
-787 tok/s (p50 967 ms per document, 16 threads) is 2.7× slower than a25m. That
-number was measured *before* the decision was confirmed, not discovered after
-it. It buys +2.8% NDCG, the two categories that dominate the query mix, and
-double the dimensional headroom against a corpus heading toward millions of
-documents — where 384 dimensions were expected to crowd, and could not be
-widened because a25m's 384 is native rather than a Matryoshka truncation.
+| model | with card prefix | prefix-free (what aimee serves today) | delta |
+|---|---:|---:|---:|
+| nomic-embed-text-v2-moe | 0.6072 | 0.5823 | **−0.0249** |
+| Qwen3-Embedding-0.6B | 0.5810 | 0.5275 | **−0.0535** |
+| bekko-a25m | 0.5909 | **0.5909** | none — its card defines no prefix |
 
-## What this changes architecturally
+This inverts the ranking. **On paper nomic leads; as the system is built today,
+a25m leads.** Two coherent positions follow, and the model choice is downstream
+of which is taken:
 
-**The embedding dimension is now uniform at 768 across every tier.** Previously
-the CPU tier ran 1024-d and the GPU tiers 2560-d, so an index built under one
-tier was unreadable under another and moving between them was a drop-and-rebuild
-re-embed. Tier selection is now a pure speed decision: the same GGUF, the same
-768-d vectors, differing only in GPU offload.
+1. **Build per-model prefix support** → nomic at 0.6072 is the best measured
+   option, with the largest code-retrieval margin.
+2. **Do not** → a25m at 0.5909 is the best option, and it needs no new machinery,
+   no prefix, no pooling special-case.
 
-Because of that, `AIMEE_EMBEDDING_DIM` is no longer set per-tier in the deploy
-files. It is left unset so the kb derives the dim (**pinned > recorded > probed >
-default**); setting it counts as an operator pin and suppresses that derivation.
+Selecting on column one and serving column two is the incoherent state, and it is
+what the current code does. See
+[embedder-query-document-prefixes](../proposals/pending/embedder-query-document-prefixes.md).
 
-## Serving
+Note prefix support must be **per model**, not a global setting: a25m takes none,
+nomic takes `search_query:`/`search_document:`, Qwen3 takes an instruction
+sentence containing a newline. Pooling is likewise per model (`mean` vs `last`).
 
-No new runtime. It serves through the existing llama.cpp Vulkan container:
+## Serving verification (nomic, llama.cpp)
 
-| | |
-|---|---|
-| Repo / file | `ggml-org/Nomic-Embed-Text-V2-GGUF` / `nomic-embed-text-v2-moe-q8_0.gguf` |
-| Revision | `498da4a128ed12a423efb6f9b0242dbac80209bf` |
-| SHA-256 | `36c5817bc25f379e62021f49efde05b10ed3b0c93ab8059c43173a7a5de73565` |
-| Architecture | `nomic-bert-moe` |
-| Pooling | **mean** |
+Verified end-to-end, not inferred:
 
-Two facts were verified rather than assumed before integration:
+- GGUF sha256 matches the pinned digest; `general.architecture = nomic-bert-moe`,
+  registered in the already-pinned `LLAMA_TAG=b9775` — no runtime bump needed.
+- Serves at **768-d, mean pooling, L2-normalised**, on both `-ngl 0` and `-ngl 99`.
+- Q8_0 vs bf16 agree at **cosine 0.999** uniformly across all length buckets
+  (0–2048 tokens), and cost only **−0.0037 NDCG** end-to-end. Q8_0 is fine.
+- `max_trained_positions = 2048` confirms 2048-token truncation is legitimate;
+  the tokenizer's `model_max_length: 512` is a tokenizer artifact, not a limit.
 
-- The GGUF header declares `general.architecture = nomic-bert-moe`, and
-  llama.cpp at the already-pinned `LLAMA_TAG=b9775` registers
-  `LLM_ARCH_NOMIC_BERT_MOE` (`src/llama-arch.cpp`). **No runtime bump is
-  required.**
-- The sentence-transformers pipeline is `Transformer → Pooling(mean) →
-  Normalize` with **no Dense head**, so a straight GGUF conversion captures the
-  whole model. (Contrast the Ettin reranker, whose score head does not survive
-  conversion and is shipped separately as `head.npz`.)
+### CPU throughput — corrected
 
-> **Pooling is not cosmetic.** nomic declares mean pooling. Serving it with
-> `last` — correct for the previous Qwen3 embedder and the prior default of
-> `AIMEE_LLM_EMBED_POOLING` — yields vectors that are wrong but well-formed:
-> nothing errors, the dimension still checks out, and retrieval quality silently
-> collapses. The default is now `mean`.
+| runtime | tok/s |
+|---|---:|
+| torch fp32 (the number the original decision used) | 787 |
+| **llama.cpp Q8_0, GPU made invisible** | **598** |
 
-## Migration
+nomic is **3.6× slower than a25m on CPU** (598 vs 2,155), not the 2.7× recorded.
+llama.cpp Q8_0 is *slower* than torch fp32 here, which is plausible for an MoE on
+CPU. An intermediate measurement of 4,278 tok/s was **GPU-contaminated** (`-ngl 0`
+is overridable by llama.cpp's auto-fit) and is withdrawn.
 
-Existing deployments are **not** migrated implicitly, and the cutover is
-fail-closed by construction. A populated kb keeps its recorded
-`kb_meta.schema_embedding_dim`, which outranks the new 768 default, so nothing
-silently re-points.
+## Corrections to earlier claims on this page
 
-Two independent guards sit in front of a corpus built by the old embedder:
+- ~~"Uniform 768-d across tiers is an architectural win."~~ **Overstated.** aimee
+  already handles per-deployment dimensions (`db2_embedding_dim_record_or_check`,
+  `db2_effective_dim`, `db2_dim_change_reset`), and `EMBED_MAX_DIM = 4000` with
+  the 8B's 4096→4000 truncation exists specifically to support a mixed ladder.
+  Uniformity saves a re-embed when switching tiers — a convenience, not a
+  correctness property.
+- ~~"The suite was scored prefix-free for all candidates."~~ **False.** Each model
+  received its card prefix.
+- ~~"2.7× slower on CPU."~~ **3.6×**, see above.
 
-- **Dimension guard** (`db2_embedding_dim_record_or_check`). Fires for every
-  deployment: a corpus recorded at 1024 or 2560 refuses a 768 embedder. This is
-  the one that will actually trigger in practice.
-- **Model-identity guard** (`db2_embedding_model_record_or_check`). Catches a
-  *same-dim* model swap, which the dimension guard cannot see. It is driven by
-  the kb-side `embedding_model` config, which **defaults to empty** — an empty
-  identity makes the guard a deliberate no-op, so it only engages for operators
-  who set it. Note this is a different value from the gateway's
-  `AIMEE_LLM_EMBED_MODEL`, which serves `/health` and does not feed the guard.
+## Caveats
 
-The deliberate path through both is the already-shipped dim-change reset —
-`aimee kb reembed` / `db2_dim_change_reset`, double-gated by
-`kb_reembed_on_dim_change` plus `--confirm`. It drops and recreates only the
-*derived* vector tables and re-queues their authoritative sources, so no source
-data is lost. See [unified-llm-cutover](../runbooks/unified-llm-cutover.md).
-
-Operators who pinned `embedding_model` to a Qwen3 identity must update it as part
-of the same maintenance window, or the identity guard will refuse after the
-re-embed.
-
-## Caveats — do not over-read
-
-- This is **embedder-isolated** retrieval. The full aimee pipeline adds reranking
-  and fusion, which can reorder these results. It is not the production cutover
-  number.
-- a25m beats nomic on `cited_artifacts` (0.7170 vs 0.6325). The decision trades
-  that category away for code and prose.
-- **The suite was scored prefix-free for all 14 candidates.** That is uniform
-  treatment but *not* neutral treatment — models differ in how much they depend
-  on their prefixes, so prefix-dependent models are understated by an unequal
-  amount. nomic specifies `search_query:` / `search_document:` and won anyway, so
-  0.6058 is a floor rather than a ceiling; the same is true to an unknown degree
-  for other candidates, so the **ranking carries a caveat even though the
-  treatment was even**. See
-  [embedder-query-document-prefixes](../proposals/pending/embedder-query-document-prefixes.md).
-- Q8_0 quantisation is used in serving, while the selection score was measured at
-  bf16 on GPU. Prior work found Q8 lossless for embedding on a comparable model
-  (4B-Q8 NDCG == 4B-f16), but that has **not** been re-measured for nomic.
-  Validation-pending.
+- Embedder-isolated retrieval. The full aimee pipeline adds reranking and fusion,
+  which can reorder these results.
+- **a25m cannot be baseline-gated.** It is ten days old with no published MTEB
+  numbers, so unlike nomic and Qwen3 there is no external result to check our
+  harness against. It did reproduce across two independent runs here, and the
+  suite is built from aimee's own corpus, but the external cross-check that
+  `embedder-gate-scifact` treats as standard practice is unavailable.
+- a25m's multilingual capability — its headline feature — is unmeasured by this
+  suite.
+- Qwen3 was run with its card's generic *"web search query"* instruction; a
+  corpus-tuned instruction was not tested. Qwen3-8B was not measured (prior
+  aimee-code data showed 4B→8B is +0.16, i.e. noise).
