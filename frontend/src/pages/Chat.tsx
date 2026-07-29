@@ -4,6 +4,7 @@ import { BootstrapBanner, DiffBlock, Message, RewindMarker, ThinkingBlock, ToolB
 import { renderWithMentions } from './chat/markdown';
 import ProjectPicker from '../components/ProjectPicker';
 import { useSessions } from '../SessionContext';
+import { reconcileSessionMessages } from '../sessionPersistence';
 
 /* ---- Types ---- */
 
@@ -236,9 +237,8 @@ function flushPendingTabs(): void {
   if (pendingTabsToPersist) writePendingTabs();
 }
 
-/* Conversation/tab persistence is local (localStorage) and mirrors the top
- * SessionContext, which owns the session/tab list. Each tab's aimeeSid still
- * ties to its server-side session state for continuity within a session. */
+/* localStorage is a fast cache. SessionContext reconciles it with the
+ * authenticated user's server-owned session list and transcript. */
 
 function rulesBannerDismissedKey(root: string): string {
   return root ? `${RULES_BANNER_DISMISSED_KEY}:${root}` : RULES_BANNER_DISMISSED_KEY;
@@ -303,9 +303,8 @@ interface ActiveStreamRefs {
   /* aimeeSid of the tab that owns this stream. Captured at send time so SSE
    * events (notably the provider `session` id) are applied to the originating
    * tab — never to whatever tab happens to be active when the event arrives.
-   * Without this, switching tabs mid-stream cross-writes the provider sid onto
-   * the wrong tab, and since claude_session_id outranks aimee_session_id on the
-   * server the two conversations then merge into one. */
+   * Without this, switching tabs mid-stream cross-writes provider metadata onto
+   * the wrong tab and corrupts the browser's restored-session cache. */
   originSid: string;
 }
 
@@ -1337,20 +1336,47 @@ export default function Chat() {
   const activeSessionId = activeSession?.id ?? '';
   const sessionProject = activeSession?.projectRoot ?? '';
 
-  // Keep one conversation tab per session: adopt an existing tab (preserving its
-  // messages/sids), migrate a legacy untagged tab, or create a fresh one.
+  // Keep one conversation tab per account-scoped session. Match both the UI id
+  // and stable aimee id so legacy browser-only tabs migrate without duplication.
   useEffect(() => {
     if (!sessions.length) return;
     setTabs(prev => {
       const byId = new Map(prev.filter(t => t.sessionId).map(t => [t.sessionId as string, t]));
+      const byAimeeId = new Map(prev.filter(t => t.aimeeSid).map(t => [t.aimeeSid, t]));
       const untagged = prev.filter(t => !t.sessionId);
       let u = 0;
       const next = sessions.map((s, i) => {
-        const existing = byId.get(s.id);
-        if (existing) return existing.title === s.name ? existing : { ...existing, title: s.name };
+        const existing = byId.get(s.id) ?? byAimeeId.get(s.aimeeSid);
+        if (existing) {
+          const messages = reconcileSessionMessages(existing.messages, s.messages);
+          if (existing.sessionId === s.id && existing.title === s.name &&
+              existing.aimeeSid === s.aimeeSid && messages === existing.messages &&
+              (!s.claudeSid || existing.sid === s.claudeSid)) return existing;
+          return {
+            ...existing,
+            sessionId: s.id,
+            title: s.name,
+            messages,
+            sid: s.claudeSid || existing.sid,
+            aimeeSid: s.aimeeSid,
+          };
+        }
         const adopt = untagged[u++];
-        if (adopt) return { ...adopt, sessionId: s.id, title: s.name };
-        return normalizeTab({ sessionId: s.id, title: s.name, messages: [], sid: '' }, i);
+        if (adopt) return {
+          ...adopt,
+          sessionId: s.id,
+          title: s.name,
+          messages: reconcileSessionMessages(adopt.messages, s.messages),
+          sid: s.claudeSid || adopt.sid,
+          aimeeSid: s.aimeeSid,
+        };
+        return normalizeTab({
+          sessionId: s.id,
+          title: s.name,
+          messages: s.messages,
+          sid: s.claudeSid,
+          aimeeSid: s.aimeeSid,
+        }, i);
       });
       // No-op if unchanged (avoid a render loop).
       if (next.length === prev.length && next.every((t, i) => t === prev[i])) return prev;
@@ -1525,9 +1551,9 @@ export default function Chat() {
     };
     // Always flush the coalesced tabs write when the page goes away or is hidden
     // — NOT just on beforeunload. bfcache navigation (back/forward) and OS
-    // background-kill on mobile don't fire beforeunload, and since the transcript
-    // restores SOLELY from localStorage, a dropped write shows up as a gap on
-    // reload. visibilitychange→hidden catches a backgrounded tab before a kill.
+    // background-kill on mobile don't fire beforeunload. Keeping this fast cache
+    // current also avoids waiting for a server refresh after bfcache navigation.
+    // visibilitychange→hidden catches a backgrounded tab before a kill.
     // Detach presence only on a GENUINE unload: a tab going to the background — or
     // entering bfcache (pagehide persisted=true, restored without re-mounting) —
     // is still an active session and must stay attached.
@@ -1755,9 +1781,8 @@ export default function Chat() {
     saveTabs(tabs);
   }, [tabs]);
 
-  /* (Server-session-as-tab-list restore was removed: the top SessionContext is
-   * now the source of truth for the session/tab list, mirrored locally. Each
-   * tab's aimeeSid still ties to its server-side session state.) */
+  /* SessionContext restores and refreshes the authenticated user's server-side
+   * session list; the reconciliation effect above maps it onto chat tabs. */
 
   useEffect(() => {
     if (activeIdx >= tabs.length) {
@@ -2081,6 +2106,28 @@ export default function Chat() {
     setStreamMsgs(msgs);
   }, [activeIdx]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A server refresh can hydrate the currently selected session without
+  // changing its tab index (the normal fresh-browser case). Load that account-
+  // scoped transcript directly; later local stream updates do not retrigger this
+  // effect because SessionContext's server snapshot is unchanged.
+  useEffect(() => {
+    const serverMessages = activeSession?.messages;
+    if (!serverMessages) return;
+    const tab = tabsRef.current.find(candidate => candidate.sessionId === activeSessionId);
+    // A non-empty shorter snapshot can be a focus refresh racing an active
+    // stream. An explicit empty transcript, however, is authoritative and must
+    // clear stale browser history restored from the local cache.
+    if (!tab || (serverMessages.length > 0 && serverMessages.length < tab.messages.length)) return;
+    if (sameTabMessages(tab.messages, serverMessages) &&
+        sameTabMessages(streamToTabMessages(streamMsgsRef.current), serverMessages)) return;
+    const hydrated = serverMessages.map(message => ({
+      id: nextId(), type: message.role, text: message.text,
+    }));
+    streamMsgsRef.current = hydrated;
+    renderedSidRef.current = tab.aimeeSid;
+    setStreamMsgs(hydrated);
+  }, [activeSessionId, activeSession?.messages, tabs[activeIdx]?.sessionId]);
+
   /* Save current tab messages back to tabs state */
   const saveTabMessages = useCallback((tabIndex: number, msgs: StreamMsg[]) => {
     const saved = streamToTabMessages(msgs);
@@ -2279,15 +2326,18 @@ export default function Chat() {
    * provider session (empty claude session id + new aimee session id) so the next
    * turn starts clean — no resume of a stale/gone session. */
   function clearChat() {
+    const nextAimeeSid = newAimeeSessionId();
     setStreamMsgs([]);
     setTabs(prev => {
       const next = [...prev];
       if (next[activeIdx]) {
-        next[activeIdx] = { ...next[activeIdx], sid: '', aimeeSid: newAimeeSessionId(), attachId: undefined, messages: [] };
+        next[activeIdx] = { ...next[activeIdx], sid: '', aimeeSid: nextAimeeSid, attachId: undefined, messages: [] };
       }
       return next;
     });
-    if (activeSession) patchSession(activeSession.id, { claudeSid: '', aimeeSid: '', attachId: '' });
+    if (activeSession) patchSession(activeSession.id, {
+      claudeSid: '', aimeeSid: nextAimeeSid, attachId: '', messages: [],
+    });
   }
 
   async function pauseWorkflow() {
@@ -2470,12 +2520,14 @@ export default function Chat() {
       (sendQueuesRef.current.get(activeSidForTitle)?.length ?? 0) > 0;
     if (!hasExistingMessages) {
       const title = text.substring(0, 30) + (text.length > 30 ? '…' : '');
+      const sessionId = tabsRef.current[idx]?.sessionId;
       setTabs(prev => {
         const next = [...prev];
         if (next[idx]) next[idx] = { ...next[idx], title };
         tabsRef.current = next;
         return next;
       });
+      if (sessionId) patchSession(sessionId, { name: title });
     }
 
     const userMsgId = nextId();
@@ -2579,7 +2631,6 @@ export default function Chat() {
         body: JSON.stringify({
           message: text,
           aimee_session_id: aimeeSid,
-          claude_session_id: activeTab?.sid ?? '',
           attach_id: attachId,
           cwd: projectRootRef.current,
         }),
@@ -2810,10 +2861,11 @@ export default function Chat() {
         const sid = String(data.id ?? '');
         // Apply the provider session id to the tab that OWNS this stream, located
         // by its stable aimeeSid — not activeIdxRef, which may have moved if the
-        // user switched tabs mid-turn. Cross-writing it merges two conversations
-        // because claude_session_id outranks aimee_session_id server-side.
+        // user switched tabs mid-turn. This is display/cache metadata only; the
+        // backend resumes from its authenticated server-side binding.
         const owner = streamRefs.originSid;
         if (owner) {
+          const sessionId = tabsRef.current.find(t => t.aimeeSid === owner)?.sessionId;
           setTabs(prev => {
             const idx = prev.findIndex(t => t.aimeeSid === owner);
             if (idx < 0) return prev;
@@ -2822,6 +2874,7 @@ export default function Chat() {
             tabsRef.current = next;
             return next;
           });
+          if (sessionId && sid) patchSession(sessionId, { claudeSid: sid });
         }
         break;
       }

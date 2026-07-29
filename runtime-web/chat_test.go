@@ -21,6 +21,18 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+type observingResponseRecorder struct {
+	*httptest.ResponseRecorder
+	onWrite func([]byte)
+}
+
+func (r *observingResponseRecorder) Write(p []byte) (int, error) {
+	if r.onWrite != nil {
+		r.onWrite(p)
+	}
+	return r.ResponseRecorder.Write(p)
+}
+
 func TestHandleChatInitRulesCreatesRulesFile(t *testing.T) {
 	tmp := t.TempDir()
 
@@ -423,6 +435,34 @@ func TestOpenAIProxyTrustedSessionStampsPAMUser(t *testing.T) {
 	}
 }
 
+func TestHandleMeReturnsAuthenticatedUsername(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	defer db.Close()
+	for _, migration := range auth.Migrations {
+		if _, err := db.Exec(migration); err != nil {
+			t.Fatalf("auth migration: %v", err)
+		}
+	}
+	store := auth.NewSessionStore(db, time.Hour)
+	token, err := store.CreateSession("alice")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	s := &server{sessions: store}
+	handler := s.requireAuth(s.handleMe)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	req.AddCookie(&http.Cookie{Name: "session", Value: token})
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK || strings.TrimSpace(rr.Body.String()) != `{"username":"alice"}` {
+		t.Fatalf("status=%d body=%q", rr.Code, rr.Body.String())
+	}
+}
+
 func TestOpenAIProxyNoSecretStampsNothing(t *testing.T) {
 	// Without the configured secret, the proxy must NOT stamp trusted identity —
 	// and must still strip any spoofed X-Aimee-* headers so nothing untrusted
@@ -647,6 +687,115 @@ func TestChatStreamHTTPReadsNDJSONEvents(t *testing.T) {
 	// the stream and is not delivered as an event.
 	if len(events) != 5 {
 		t.Fatalf("events = %v, want 5", events)
+	}
+}
+
+func TestHandleChatSendPersistsStableUserSession(t *testing.T) {
+	workspace := t.TempDir()
+	var forwardedProviderID string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/workspace/projects", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"root":%q}`, workspace)
+	})
+	mux.HandleFunc("/v1/chat/stream", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode stream request: %v", err)
+		}
+		forwardedProviderID = body["claude_session_id"]
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		fmt.Fprintln(w, `{"event":"turn_start"}`)
+		fmt.Fprintln(w, `{"event":"session","id":"provider-thread"}`)
+		fmt.Fprintln(w, `{"event":"text","content":"hello "}`)
+		fmt.Fprintln(w, `{"event":"text","content":"again"}`)
+		fmt.Fprintln(w, `{"event":"done"}`)
+		fmt.Fprintln(w, `{"status":"ok"}`)
+	})
+	cfg := startFakeV1(t, mux)
+	if err := os.WriteFile(filepath.Join(filepath.Dir(cfg.socketPath), "server.token"), []byte("test-token\n"), 0600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+	s := newSessionTestServer(t)
+	s.cfg = cfg
+
+	runtimeAtSessionEvent := ""
+	rr := &observingResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
+	rr.onWrite = func(p []byte) {
+		if strings.Contains(string(p), "event: session") {
+			runtimeAtSessionEvent, _ = s.chatSessionProviderID("alice", "stable-web-id")
+		}
+	}
+	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/send", strings.NewReader(
+		`{"aimee_session_id":"stable-web-id","claude_session_id":"attacker-thread","message":"question"}`)), "alice")
+	s.handleChatSend(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", rr.Code, rr.Body.String())
+	}
+
+	cs, err := s.getChatSession("alice", "stable-web-id")
+	if err != nil || cs == nil {
+		t.Fatalf("stable session missing: %v %+v", err, cs)
+	}
+	if cs.ProviderSessionID != "provider-thread" {
+		t.Fatalf("provider session = %q", cs.ProviderSessionID)
+	}
+	if forwardedProviderID != "" {
+		t.Fatalf("new session trusted client provider id %q", forwardedProviderID)
+	}
+	if runtimeAtSessionEvent != "provider-thread" {
+		t.Fatalf("runtime at browser session event = %q", runtimeAtSessionEvent)
+	}
+	if len(cs.Messages) != 2 || cs.Messages[0].Text != "question" || cs.Messages[1].Text != "hello again" {
+		t.Fatalf("messages = %+v", cs.Messages)
+	}
+	if wrong, _ := s.getChatSession("alice", "provider-thread"); wrong != nil {
+		t.Fatalf("provider id incorrectly became the stable key: %+v", wrong)
+	}
+}
+
+func TestHandleChatSendUsesOnlyServerBoundProviderSession(t *testing.T) {
+	workspace := t.TempDir()
+	var forwardedProviderID string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/workspace/projects", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"root":%q}`, workspace)
+	})
+	mux.HandleFunc("/v1/chat/stream", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode stream request: %v", err)
+		}
+		forwardedProviderID = body["claude_session_id"]
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		fmt.Fprintln(w, `{"event":"done"}`)
+		fmt.Fprintln(w, `{"status":"ok"}`)
+	})
+	cfg := startFakeV1(t, mux)
+	if err := os.WriteFile(filepath.Join(filepath.Dir(cfg.socketPath), "server.token"), []byte("test-token\n"), 0600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+	s := newSessionTestServer(t)
+	s.cfg = cfg
+	if err := s.touchChatSession("alice", "stable-web-id", workspace, "first turn"); err != nil {
+		t.Fatalf("touch: %v", err)
+	}
+	if err := s.setChatSessionRuntime("alice", "stable-web-id", "trusted-provider-thread"); err != nil {
+		t.Fatalf("runtime: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/send", strings.NewReader(
+		`{"aimee_session_id":"stable-web-id","claude_session_id":"attacker-thread","message":"continue"}`)), "alice")
+	s.handleChatSend(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", rr.Code, rr.Body.String())
+	}
+	if forwardedProviderID != "trusted-provider-thread" {
+		t.Fatalf("forwarded provider id = %q, want server-bound id", forwardedProviderID)
+	}
+	cs, err := s.getChatSession("alice", "stable-web-id")
+	if err != nil || cs == nil || cs.ProviderSessionID != "trusted-provider-thread" {
+		t.Fatalf("server runtime binding changed: err=%v session=%+v", err, cs)
 	}
 }
 
