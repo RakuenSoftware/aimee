@@ -255,6 +255,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-git-verify-contract \
                $(TESTPREFIX)/unit-test-cli-mcp-serve \
                $(TESTPREFIX)/unit-test-server-mcp-roundtable \
+               $(TESTPREFIX)/unit-test-wfe-roundtable-proxy \
                $(TESTPREFIX)/unit-test-cli-v1-delegate \
                $(TESTPREFIX)/unit-test-cli-server-compat \
                $(TESTPREFIX)/unit-test-platform-process \
@@ -1095,6 +1096,12 @@ $(TESTPREFIX)/unit-test-server-mcp-roundtable: \
                     $(OBJDIR)/tests/test_server_mcp_roundtable.o \
                     $(OBJDIR)/server/server_mcp_roundtable.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-wfe-roundtable-proxy: \
+                    $(OBJDIR)/tests/test_wfe_roundtable_proxy.o \
+                    $(OBJDIR)/server/wfe_roundtable_proxy.o \
+                    $(OBJDIR)/modules/roundtable/roundtable_preset.o $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # aimee_client.o resolves the remote-target accessors cli_v1_client_endpoint now
 # calls (it synthesizes a tcp: endpoint from a --server/AIMEE_SERVER_URL target).
