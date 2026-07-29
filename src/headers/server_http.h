@@ -202,8 +202,9 @@ extern "C"
    int roundtable_policy_config_key(const char *key);
 
    /* Effective caps for a request after thin-client mTLS authentication. When
-    * mTLS is enabled, bearer fallback is a query-only floor and a durable cert
-    * gets the authenticated (but not full-trust) set. */
+    * mTLS is enabled, bearer fallback is a query-only floor. A durable cert gets
+    * the authenticated set at off/data and CAPS_ALL only when its verified
+    * per-user write tier is full. */
    /* remote_writes.global_ignored: how many requests were refused that the
     * retired aimee.api.remote_writes would formerly have allowed. Lets an
     * operator size the cutover's impact instead of inferring it from
