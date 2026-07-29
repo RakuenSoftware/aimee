@@ -1,4 +1,6 @@
 #include "pgvec_transport.h"
+#include "memory_scope_query.h"
+#include "pgvec_scope_query.h"
 
 #include "../db2/db2_internal.h"
 #include "../db2/db_postgres.h"
@@ -542,18 +544,39 @@ int pgvec_memory_search(const float *vec, int dim, const char *record_type,
    if (!vec_text)
       return -1;
 
-   /* Build the WHERE clause.  record_type filter is always present.
-    * Scope filter is added only when workspace or project is non-empty.
-    * Kind IN filter is added only when n_kinds > 0. */
-   char where[1024] = "WHERE record_type = :record_type";
+   db2_memory_scope_context_t scope_ctx;
+   db2_memory_scope_context_get(&scope_ctx);
+   if (scope_ctx.active)
+   {
+      workspace = scope_ctx.workspace;
+      project = scope_ctx.project;
+   }
+
+   /* Build the WHERE clause. Active requests use the canonical memory scope
+    * tables, including legacy memory_workspaces rows, rather than stale
+    * denormalized embedding columns. Legacy direct callers without request
+    * context retain their existing column-filter behavior. */
+   char where[4096] = "WHERE e.record_type = :record_type";
    size_t wpos = strlen(where);
 
    int has_scope = (workspace && workspace[0]) || (project && project[0]);
-   if (has_scope)
+   if (scope_ctx.active)
    {
-      /* (primary_scope='global' OR workspace=:ws OR project=:pj) */
+      int nw = snprintf(where + wpos, sizeof(where) - wpos, "%s", PGVEC_MEMORY_SCOPE_FILTER_SQL);
+      if (nw < 0 || (size_t)nw >= sizeof(where) - wpos)
+      {
+         free(vec_text);
+         return -1;
+      }
+      wpos += (size_t)nw;
+   }
+   else if (has_scope)
+   {
+      /* Empty identity components are not wildcards: otherwise a project-only
+       * request would admit every row whose workspace column is empty. */
       snprintf(where + wpos, sizeof(where) - wpos,
-               " AND (primary_scope = 'global' OR workspace = :ws OR project = :pj)");
+               " AND (e.primary_scope = 'global' OR e.workspace = '_shared'"
+               " OR (:ws <> '' AND e.workspace = :ws) OR (:pj <> '' AND e.project = :pj))");
       wpos = strlen(where);
    }
 
@@ -563,7 +586,8 @@ int pgvec_memory_search(const float *vec, int dim, const char *record_type,
    if (kinds && n_kinds > 0)
    {
       size_t kpos = 0;
-      kpos += (size_t)snprintf(kinds_clause + kpos, sizeof(kinds_clause) - kpos, " AND kind IN (");
+      kpos +=
+          (size_t)snprintf(kinds_clause + kpos, sizeof(kinds_clause) - kpos, " AND e.kind IN (");
       for (int i = 0; i < n_kinds && kpos < sizeof(kinds_clause) - 4; i++)
       {
          if (!kinds[i] || !kinds[i][0])
@@ -583,13 +607,19 @@ int pgvec_memory_search(const float *vec, int dim, const char *record_type,
       kpos += (size_t)snprintf(kinds_clause + kpos, sizeof(kinds_clause) - kpos, ")");
    }
 
-   char sql[2048];
-   snprintf(sql, sizeof(sql),
-            "SELECT point_id, 1.0 - (embedding <=> :qvec::halfvec) AS score "
-            "FROM memory_embeddings %s%s "
-            "ORDER BY embedding <=> :qvec::halfvec "
-            "LIMIT :lim",
-            where, kinds_clause);
+   char sql[8192];
+   const char *scope_order = scope_ctx.active ? PGVEC_MEMORY_SCOPE_RANK_SQL " DESC, " : "";
+   int sql_len = snprintf(sql, sizeof(sql),
+                          "SELECT e.point_id, 1.0 - (embedding <=> :qvec::halfvec) AS score "
+                          "FROM memory_embeddings e %s%s "
+                          "ORDER BY %sembedding <=> :qvec::halfvec "
+                          "LIMIT :lim",
+                          where, kinds_clause, scope_order);
+   if (sql_len < 0 || (size_t)sql_len >= sizeof(sql))
+   {
+      free(vec_text);
+      return -1;
+   }
 
    char errbuf[256];
    aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
@@ -600,11 +630,13 @@ int pgvec_memory_search(const float *vec, int dim, const char *record_type,
    }
    aimee_pg_bind_text(stmt, "qvec", vec_text);
    aimee_pg_bind_text(stmt, "record_type", record_type);
-   if (has_scope)
+   if (!scope_ctx.active && has_scope)
    {
       aimee_pg_bind_text(stmt, "ws", workspace ? workspace : "");
       aimee_pg_bind_text(stmt, "pj", project ? project : "");
    }
+   if (scope_ctx.active)
+      db2_memory_scope_bind_current(stmt);
    aimee_pg_bind_int(stmt, "lim", limit > 0 ? limit : max);
 
    int64_t t0 = monotonic_us();

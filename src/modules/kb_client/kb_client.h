@@ -1245,4 +1245,12 @@ int kb_client_index_project_lang(const char *project, char *buf, size_t bufsz);
 
 int kb_client_canonical_index_scan(const char *project, const char *root_path, int force);
 
+/* Request-local active repository context for ordered memory RPCs.  The
+ * server sets this around one agent-facing call; legacy callers that do not
+ * set it retain their existing unscoped wire semantics. */
+void kb_client_memory_scope_context_set(const char *workspace, const char *project,
+                                        int include_all);
+void kb_client_memory_scope_context_clear(void);
+void kb_client_memory_scope_context_apply(cJSON *req);
+
 #endif /* DEC_KB_CLIENT_H */

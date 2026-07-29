@@ -10,15 +10,14 @@
  * callers can't drift. */
 
 #include <stddef.h>
-#include "config.h"
 
 struct cJSON;
 
 /* Resolve the workspace and project labels that apply to |cwd|.  Each may
  * come back as an empty string when no configured workspace contains |cwd|
  * or the project cannot be derived. */
-void hook_scope_labels_for_cwd(const config_t *cfg, const char *cwd, char *workspace_out,
-                               size_t workspace_len, char *project_out, size_t project_len);
+void hook_scope_labels_for_cwd(const char *cwd, char *workspace_out, size_t workspace_len,
+                               char *project_out, size_t project_len);
 
 /* Resolve the host/agent session id from a hook payload. SessionStart already
  * receives a host-provided session_id; PreToolUse/PostToolUse must use the same

@@ -1,4 +1,6 @@
 #include <assert.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -81,6 +83,63 @@ static void test_hook_payload_cwd_reads_nested_string(void)
    cJSON_Delete(json);
 }
 
+static void test_hook_scope_project_is_not_configured_workspace(void)
+{
+   char root[] = "/tmp/aimee-hook-scope-XXXXXX";
+   assert(mkdtemp(root) != NULL);
+
+   char config_dir[512];
+   char aimee_dir[512];
+   char config_path[512];
+   char workspace_root[512];
+   char project_root[512];
+   snprintf(config_dir, sizeof(config_dir), "%s/.config", root);
+   snprintf(aimee_dir, sizeof(aimee_dir), "%s/aimee", config_dir);
+   snprintf(config_path, sizeof(config_path), "%s/aimee.yaml", aimee_dir);
+   snprintf(workspace_root, sizeof(workspace_root), "%s/configured-workspace", root);
+   snprintf(project_root, sizeof(project_root), "%s/nested-project", workspace_root);
+   assert(mkdir(config_dir, 0700) == 0);
+   assert(mkdir(aimee_dir, 0700) == 0);
+   assert(mkdir(workspace_root, 0700) == 0);
+   assert(mkdir(project_root, 0700) == 0);
+
+   FILE *fp = fopen(config_path, "w");
+   assert(fp != NULL);
+   fprintf(fp, "workspaces:\n  - %s\n", workspace_root);
+   fclose(fp);
+
+   const char *old_home_env = getenv("HOME");
+   char *old_home = old_home_env ? strdup(old_home_env) : NULL;
+   const char *old_no_cache_env = getenv("AIMEE_NO_CACHE");
+   char *old_no_cache = old_no_cache_env ? strdup(old_no_cache_env) : NULL;
+   assert(setenv("HOME", root, 1) == 0);
+   assert(setenv("AIMEE_NO_CACHE", "1", 1) == 0);
+
+   char workspace[512];
+   char project[512];
+   hook_scope_labels_for_cwd(project_root, workspace, sizeof(workspace), project, sizeof(project));
+   assert(strcmp(workspace, "configured-workspace") == 0);
+   assert(strcmp(project, "nested-project") == 0);
+
+   if (old_home)
+      assert(setenv("HOME", old_home, 1) == 0);
+   else
+      assert(unsetenv("HOME") == 0);
+   if (old_no_cache)
+      assert(setenv("AIMEE_NO_CACHE", old_no_cache, 1) == 0);
+   else
+      assert(unsetenv("AIMEE_NO_CACHE") == 0);
+   free(old_home);
+   free(old_no_cache);
+
+   assert(unlink(config_path) == 0);
+   assert(rmdir(project_root) == 0);
+   assert(rmdir(workspace_root) == 0);
+   assert(rmdir(aimee_dir) == 0);
+   assert(rmdir(config_dir) == 0);
+   assert(rmdir(root) == 0);
+}
+
 int main(void)
 {
    printf("cmd_hooks_scope: ");
@@ -90,6 +149,7 @@ int main(void)
    test_hook_payload_cwd_prefers_top_level();
    test_hook_payload_cwd_reads_nested_object();
    test_hook_payload_cwd_reads_nested_string();
+   test_hook_scope_project_is_not_configured_workspace();
    printf("all tests passed\n");
    return 0;
 }
