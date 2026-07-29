@@ -82,6 +82,13 @@ static void test_codex_delegate_policy_is_explicit(void)
    assert(strstr(skill, "Do not call provider-native sub-agent tools") != NULL);
    assert(strstr(skill, "`spawn_agent`") != NULL);
    assert(strstr(skill, "`delegate` MCP tool") != NULL);
+
+   const char *code_prompt = codex_code_exploration_prompt();
+   assert(strstr(code_prompt, AIMEE_CODE_TOOL_FIND_SYMBOL) != NULL);
+   assert(strstr(code_prompt, AIMEE_CODE_TOOL_AST_GREP_SEARCH) != NULL);
+   assert(strstr(code_prompt, AIMEE_CODE_TOOL_INDEX) != NULL);
+   assert(strstr(code_prompt, AIMEE_CODE_INDEX_COMMAND_HYBRID) != NULL);
+   assert(strstr(code_prompt, "search_graph") == NULL);
 }
 
 static void test_mcp_config_uses_resolved_command(void)

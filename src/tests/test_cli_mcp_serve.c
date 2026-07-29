@@ -11,6 +11,8 @@
 
 static char g_last_mcp_call_cwd[4096];
 static char g_last_mcp_call_arg_cwd[4096];
+static char g_last_mcp_call_tool[128];
+static int g_last_mcp_call_paths_count;
 static int g_reverse_channel_starts;
 static int g_remote_active;
 static int g_remote_http_failures;
@@ -302,11 +304,15 @@ cJSON *cli_v1_dispatch_local(cJSON *request, int timeout_ms)
       cJSON *arguments = cJSON_GetObjectItemCaseSensitive(request, "arguments");
       cJSON *jarg_cwd =
           cJSON_IsObject(arguments) ? cJSON_GetObjectItemCaseSensitive(arguments, "cwd") : NULL;
+      cJSON *jpaths =
+          cJSON_IsObject(arguments) ? cJSON_GetObjectItemCaseSensitive(arguments, "paths") : NULL;
 
+      snprintf(g_last_mcp_call_tool, sizeof(g_last_mcp_call_tool), "%s", tool);
       snprintf(g_last_mcp_call_cwd, sizeof(g_last_mcp_call_cwd), "%s",
                cJSON_IsString(jcwd) ? jcwd->valuestring : "");
       snprintf(g_last_mcp_call_arg_cwd, sizeof(g_last_mcp_call_arg_cwd), "%s",
                cJSON_IsString(jarg_cwd) ? jarg_cwd->valuestring : "");
+      g_last_mcp_call_paths_count = cJSON_IsArray(jpaths) ? cJSON_GetArraySize(jpaths) : 0;
 
       /* Simulate an error response for "fail_tool" */
       if (strcmp(tool, "fail_tool") == 0)
@@ -795,6 +801,41 @@ static void test_tools_call_success(void)
    cJSON_Delete(req);
 }
 
+/* Installed MCP smoke: the canonical blast-preview name and path-only schema
+ * survive the stdio proxy, which supplies cwd for the server's active-project
+ * default. This deliberately omits project. */
+static void test_tools_call_preview_blast_radius(void)
+{
+   g_last_mcp_call_tool[0] = '\0';
+   g_last_mcp_call_cwd[0] = '\0';
+   g_last_mcp_call_arg_cwd[0] = '\0';
+   g_last_mcp_call_paths_count = 0;
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "jsonrpc", "2.0");
+   cJSON_AddNumberToObject(req, "id", 12.5);
+   cJSON_AddStringToObject(req, "method", "tools/call");
+   cJSON *params = cJSON_AddObjectToObject(req, "params");
+   cJSON_AddStringToObject(params, "name", "preview_blast_radius");
+   cJSON *args = cJSON_AddObjectToObject(params, "arguments");
+   cJSON *paths = cJSON_AddArrayToObject(args, "paths");
+   cJSON_AddItemToArray(paths, cJSON_CreateString("src/server/server_mcp.c"));
+
+   cJSON *resp = capture_response(req);
+   assert(strcmp(g_last_mcp_call_tool, "preview_blast_radius") == 0);
+   assert(g_last_mcp_call_paths_count == 1);
+   char cwd[4096];
+   assert(getcwd(cwd, sizeof(cwd)) != NULL);
+   assert(strcmp(g_last_mcp_call_cwd, cwd) == 0);
+   assert(strcmp(g_last_mcp_call_arg_cwd, cwd) == 0);
+   cJSON *result = cJSON_GetObjectItemCaseSensitive(resp, "result");
+   assert(cJSON_IsObject(result));
+
+   cJSON_Delete(resp);
+   cJSON_Delete(req);
+   puts("  PASS: test_tools_call_preview_blast_radius");
+}
+
 static void test_tools_call_server_error(void)
 {
    cJSON *req = cJSON_CreateObject();
@@ -1051,6 +1092,7 @@ int main(void)
    test_tools_list_preserves_server_error();
    test_remote_discovery_retries_are_safe();
    test_tools_call_success();
+   test_tools_call_preview_blast_radius();
    test_tools_call_server_error();
    test_tools_call_nested_http_error();
    test_tools_call_structured_content_passthrough();

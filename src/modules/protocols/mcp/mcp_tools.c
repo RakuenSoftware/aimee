@@ -6,6 +6,7 @@
 #include "mcp_tools_gateway.h"
 #include "session_search_tool.h"
 #include "log.h"
+#include "agent_code_capabilities.h"
 #include <stdio.h>
 #include <string.h>
 static int tools_array_has_name(cJSON *tools, const char *name)
@@ -544,14 +545,27 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(id, "type", "string");
       cJSON_AddStringToObject(id, "description",
                               "Symbol name to find (function, class, variable, etc.)");
+      cJSON *project = cJSON_AddObjectToObject(p, "project");
+      cJSON_AddStringToObject(project, "type", "string");
+      cJSON_AddStringToObject(project, "description",
+                              "Indexed project id. Optional; defaults from the MCP request cwd.");
+      cJSON *scope = cJSON_AddObjectToObject(p, "scope");
+      cJSON_AddStringToObject(scope, "type", "string");
+      cJSON *scope_values = cJSON_AddArrayToObject(scope, "enum");
+      cJSON_AddItemToArray(scope_values, cJSON_CreateString(AIMEE_CODE_SCOPE_CURRENT));
+      cJSON_AddItemToArray(scope_values, cJSON_CreateString(AIMEE_CODE_SCOPE_ALL));
+      cJSON_AddStringToObject(scope, "description",
+                              "Search the current project (default) or explicitly all projects.");
       cJSON *req = cJSON_CreateArray();
       cJSON_AddItemToArray(req, cJSON_CreateString("identifier"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, mcp_tool_new("find_symbol",
-                              "Find a code symbol (function, class, variable) across all "
-                              "indexed projects. Returns file path, line number, and kind.",
-                              s));
+          tools,
+          mcp_tool_new(AIMEE_CODE_TOOL_FIND_SYMBOL,
+                       "Find a code symbol (function, class, variable) in the active indexed "
+                       "project by default. Set scope=all for labeled cross-project results. "
+                       "Returns file path, line number, and kind.",
+                       s));
    }
 
    /* ast_grep_search */
@@ -580,7 +594,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
           tools,
-          mcp_tool_new("ast_grep_search",
+          mcp_tool_new(AIMEE_CODE_TOOL_AST_GREP_SEARCH,
                        "AST-aware structural code search using ast-grep. Finds code patterns "
                        "by structure rather than text, using meta-variables ($VAR, $$$). "
                        "More precise than regex for language-aware queries. "
@@ -790,15 +804,23 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(pi, "type", "string");
       cJSON_AddItemToObject(pp, "items", pi);
       cJSON_AddStringToObject(pp, "description", "File paths to preview blast radius for");
+      cJSON *scope = cJSON_AddObjectToObject(p, "scope");
+      cJSON_AddStringToObject(scope, "type", "string");
+      cJSON *scope_values = cJSON_AddArrayToObject(scope, "enum");
+      cJSON_AddItemToArray(scope_values, cJSON_CreateString(AIMEE_CODE_SCOPE_CURRENT));
+      cJSON_AddStringToObject(scope, "description",
+                              "Single-project preview scope; defaults to current. Cross-project "
+                              "scope=all is intentionally unsupported.");
       cJSON *req = cJSON_CreateArray();
-      cJSON_AddItemToArray(req, cJSON_CreateString("project"));
       cJSON_AddItemToArray(req, cJSON_CreateString("paths"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, mcp_tool_new("preview_blast_radius",
-                              "Preview the blast radius of proposed file changes before starting "
-                              "work. Returns affected files, severity, and warnings.",
-                              s));
+          tools,
+          mcp_tool_new(AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS,
+                       "Preview the blast radius of proposed file changes before starting work. "
+                       "The project defaults from the MCP request cwd. Returns affected files, "
+                       "severity, and warnings.",
+                       s));
    }
 
    /* delegate_reply */

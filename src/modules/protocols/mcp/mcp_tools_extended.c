@@ -11,6 +11,7 @@
 #include "cJSON.h"
 #include "aimee/protocols/mcp/mcp_tools.h"
 #include "aimee_features.h"
+#include "agent_code_capabilities.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -72,7 +73,10 @@ void mcp_add_extended_tools(cJSON *tools)
                 "Find call sites of a symbol across the indexed code: project, file, calling "
                 "function, line.");
    ext_prop(t, "symbol", "string", "Symbol / function name to find callers of.");
-   ext_prop(t, "project", "string", "Restrict to a project (optional; omit to search all).");
+   ext_prop(t, "project", "string",
+            "Indexed project id. Optional; defaults from the MCP request cwd.");
+   ext_prop(t, "scope", "string",
+            "Search the current project (default) or explicitly all projects.");
    ext_require(t, "symbol");
 
    t = ext_tool(tools, "index_structure",
@@ -303,15 +307,15 @@ static const struct fam_def MCP_FAMILIES[] = {
       {"definition", "lsp_definition"},
       {"references", "lsp_references"},
       {NULL, NULL}}},
-    {"index",
+    {AIMEE_CODE_TOOL_INDEX,
      "command",
      "Code-index navigation, hybrid retrieval, and graph analytics. Set 'command'.",
      {{"find_callers", "index_find_callers"},
       {"structure", "index_structure"},
       {"span", "code_span_get"},
       {"blast_radius", "index_blast_radius"},
-      {"preview", "preview_blast_radius"},
-      {"hybrid", "index_hybrid"},
+      {AIMEE_CODE_INDEX_COMMAND_PREVIEW, AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS},
+      {AIMEE_CODE_INDEX_COMMAND_HYBRID, "index_hybrid"},
       {"hubs", "index_graph_hubs"},
       {"audit", "index_graph_audit"},
       {"diff", "index_graph_diff"},
@@ -418,6 +422,24 @@ static cJSON *family_detach_member(cJSON *tools, const char *name)
    return NULL;
 }
 
+static cJSON *family_copy_member(cJSON *tools, const char *name)
+{
+   int n = cJSON_GetArraySize(tools);
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *t = cJSON_GetArrayItem(tools, i);
+      cJSON *nm = cJSON_GetObjectItemCaseSensitive(t, "name");
+      if (cJSON_IsString(nm) && strcmp(nm->valuestring, name) == 0)
+         return cJSON_Duplicate(t, 1);
+   }
+   return NULL;
+}
+
+static int family_member_retains_direct(const char *name)
+{
+   return strcmp(name, AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS) == 0;
+}
+
 void mcp_collapse_families(cJSON *tools)
 {
    if (!tools || !cJSON_IsArray(tools))
@@ -443,7 +465,8 @@ void mcp_collapse_families(cJSON *tools)
          if (cl < sizeof(clist))
             cl += (size_t)snprintf(clist + cl, sizeof(clist) - cl, "%s%s", cl ? ", " : "",
                                    m->command);
-         cJSON *mt = family_detach_member(tools, m->tool);
+         cJSON *mt = family_member_retains_direct(m->tool) ? family_copy_member(tools, m->tool)
+                                                           : family_detach_member(tools, m->tool);
          if (!mt)
             continue;
          found++;

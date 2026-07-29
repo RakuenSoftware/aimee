@@ -173,7 +173,8 @@ int handle_get_code_find(const char *query_string, char *out_buf, int out_cap)
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"oom\"}");
       return 500;
    }
-   int n = canonical_index_find(identifier, hits, max_r);
+   int n = project_filter[0] ? canonical_index_find_project(project_filter, identifier, hits, max_r)
+                             : canonical_index_find(identifier, hits, max_r);
    if (n < 0)
    {
       free(hits);

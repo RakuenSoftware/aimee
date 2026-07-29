@@ -14,6 +14,10 @@ This directory holds the attribution-safe red/green fixtures accepted by
 Each case preserves the untreated observation and the post-fix contract. Later slices reuse these
 same fixtures; they must not replace the red observation with a passing treatment result.
 
+Treatment records are additive. The first is
+[`docs/validation/agent-facing-code-intelligence-e1.md`](../../docs/validation/agent-facing-code-intelligence-e1.md),
+covering capability discovery, schemas, installed guidance, and active-project request defaults.
+
 Validate the checked-in structure without a live KB:
 
 ```bash

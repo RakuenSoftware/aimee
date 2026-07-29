@@ -1124,6 +1124,8 @@ void *kb_client_index_scan_format_response(int kb_rc, const kb_client_index_scan
 /* Find an identifier in the canonical index. Returns count of hits
  * written into `out` (capped at `max`), or 0 if kb is unreachable. */
 int kb_client_index_find(const char *identifier, term_hit_t *out, int max);
+int kb_client_index_find_project(const char *project, const char *identifier, term_hit_t *out,
+                                 int max);
 
 /* List indexed projects. Returns count on success (0 = empty index),
  * or -1 if the knowledge service is unreachable. */

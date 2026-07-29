@@ -1,7 +1,6 @@
 # Proposal: Agent-facing code intelligence effectiveness
 
-- **State:** IN PROGRESS — accepted design; E0 complete; local-first amendment roundtable-approved
-  and PR pending (file remains pending until E1–E6 close)
+- **State:** IN PROGRESS — E1 implementation underway; E1-memory–E6 remain
 - **Author:** JBailes
 - **Date:** 2026-07-29
 - **Charter roles:** Recall, Rank-Fuse, Calibrate / Evaluate-Optimize, Enforce, Gate-Promote
@@ -518,3 +517,6 @@ residual proposal instead of declaring the intended effectiveness outcome comple
   and remaining seat completed and approved the artifact. Roundtable run:
   `oprun_g6a69bd8011459d99_1785336851_93` (artifact
   `c4b68b07f28c23817533b1c66a41bac88ea60c7b79c2181090babc184f728351`).
+- **Local-first amendment PR:** PR #2150 merged to `testing` as
+  `e9626cda560b7e9b1bbf96e48c05c94b62a72c8a` after all 23 CI checks passed. E1 applies the same
+  pre-limit rule to code discovery; E1-memory applies it to every ordered memory surface.

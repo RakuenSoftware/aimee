@@ -323,7 +323,8 @@ int kb_client_index_scan(const char *name, const char *root, int force,
    return kb_client_index_scan_v1(name, root, force, out);
 }
 
-int kb_client_index_find(const char *identifier, term_hit_t *out, int max)
+int kb_client_index_find_project(const char *project, const char *identifier, term_hit_t *out,
+                                 int max)
 {
    if (!identifier || !identifier[0] || !out || max <= 0)
       return 0;
@@ -332,10 +333,30 @@ int kb_client_index_find(const char *identifier, term_hit_t *out, int max)
    char *encoded = kb_client_query_escape(identifier);
    if (!encoded)
       return 0;
-   char path[512];
-   snprintf(path, sizeof(path), "/v1/code/find?identifier=%s&max_results=%d", encoded, max);
+   char *encoded_project = NULL;
+   if (project && project[0])
+   {
+      encoded_project = kb_client_query_escape(project);
+      if (!encoded_project)
+      {
+         free(encoded);
+         return 0;
+      }
+   }
+   size_t path_len = strlen(encoded) + (encoded_project ? strlen(encoded_project) : 0) + 96;
+   char *path = malloc(path_len);
+   if (!path)
+   {
+      free(encoded_project);
+      free(encoded);
+      return 0;
+   }
+   snprintf(path, path_len, "/v1/code/find?identifier=%s&max_results=%d%s%s", encoded, max,
+            encoded_project ? "&project=" : "", encoded_project ? encoded_project : "");
+   free(encoded_project);
    free(encoded);
    char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, NULL);
+   free(path);
    if (!json)
       return 0;
    cJSON *resp = cJSON_Parse(json);
@@ -343,6 +364,11 @@ int kb_client_index_find(const char *identifier, term_hit_t *out, int max)
    int count = kb_index_find_parse(resp, out, max);
    cJSON_Delete(resp);
    return count;
+}
+
+int kb_client_index_find(const char *identifier, term_hit_t *out, int max)
+{
+   return kb_client_index_find_project(NULL, identifier, out, max);
 }
 
 int kb_client_index_list(project_info_t *out, int max)
