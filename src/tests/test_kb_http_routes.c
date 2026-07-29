@@ -610,6 +610,8 @@ typedef struct
    char kind[32];
 } test_term_hit_t;
 
+static char g_code_find_project[128];
+
 int canonical_index_find(const char *identifier, void *out, int max)
 {
    assert(identifier);
@@ -623,6 +625,12 @@ int canonical_index_find(const char *identifier, void *out, int max)
    hits[0].line_end = 20;
    snprintf(hits[0].kind, sizeof(hits[0].kind), "function");
    return 1;
+}
+
+int canonical_index_find_project(const char *project, const char *identifier, void *out, int max)
+{
+   snprintf(g_code_find_project, sizeof(g_code_find_project), "%s", project ? project : "");
+   return canonical_index_find(identifier, out, max);
 }
 
 typedef struct
@@ -5365,6 +5373,13 @@ static void test_code_find_ok(void)
    assert(strstr(buf, "\"file_path\":\"src/main.c\"") != NULL);
    assert(strstr(buf, "\"line\":12") != NULL);
    assert(strstr(buf, "\"kind\":\"function\"") != NULL);
+
+   g_code_find_project[0] = '\0';
+   s = kb_http_route_ex("GET", "/v1/code/find", "identifier=foo&project=proj-alpha", NULL, NULL,
+                        NULL, 0, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strcmp(g_code_find_project, "proj-alpha") == 0);
+   assert(strstr(buf, "\"project\":\"proj-alpha\"") != NULL);
 }
 
 static void test_code_projects_wrong_method(void)

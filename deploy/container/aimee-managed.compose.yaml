@@ -71,8 +71,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    depends_on:
-      aimee-llm: { condition: service_healthy, required: false }
     volumes:
       - aimee-managed-kb-home:/var/lib/aimee
       # compose.server-managed owns this volume under the fixed `aimee` project.
@@ -177,7 +175,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      # Cold first boot downloads the tier's GGUFs before /health is OK.
+      # Cold first boot downloads the tier's GGUFs before /health is OK. The
+      # wizard waits only for this container to start; readiness is asynchronous
+      # so KB initialization and CPU indexing proceed during the download.
       start_period: 1200s
 
 volumes:

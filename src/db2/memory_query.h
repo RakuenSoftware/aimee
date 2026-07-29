@@ -758,10 +758,9 @@ extern "C"
     * type) live in db2/memory_export.h to keep this file under the
     * line-check budget. */
 
-   /* Top-N L2 fact memories ordered by use_count DESC, confidence DESC.
-    * Fills only |key| and |content| on each row (other fields are
-    * zeroed); used by the session-briefing "Key Facts" panel. Returns
-    * rows written. */
+   /* Top-N L2 fact memories ordered by request scope, then use_count and
+    * confidence. Fills |id|, |key|, and |content| (other fields are zeroed);
+    * used by the session-briefing "Key Facts" panel. Returns rows written. */
    int db2_memory_top_l2_facts(memory_t *out, int max);
 
    /* L1/L2/L3 memories ordered by kind priority (workflow → decision →
@@ -771,11 +770,12 @@ extern "C"
     * own scope-rank filter on top. Returns rows written. */
    int db2_memory_list_session_scope_priority(memory_t *out, int max);
 
-   /* Same ordering as db2_memory_list_session_scope_priority but
-    * filtered to memories whose key OR content LIKE |pattern| AND
-    * which are NOT yet tagged in memory_workspaces. The session
-    * briefing uses this as a fallback when the canonical scoped query
-    * comes back empty. Returns rows written. */
+   /* Same scoped ordering as db2_memory_list_session_scope_priority but
+    * filtered to memories whose key OR content LIKE |pattern|. The session
+    * briefing uses this as a compatibility fallback and therefore retains
+    * legacy memory_workspaces rows. Guarded by
+    * test_local_first_applies_before_limits_across_memory_surfaces. Returns
+    * rows written. */
    int db2_memory_list_session_scope_priority_like(const char *pattern, memory_t *out, int max);
 
    /* Substring-keyword search over L2/L3/L5 fact/pattern memories.

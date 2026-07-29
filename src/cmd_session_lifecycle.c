@@ -240,6 +240,23 @@ static char *build_session_context(const char *client_cwd)
 
    session_context_resolve_cwd(client_cwd, scope_cwd, sizeof(scope_cwd));
 
+   /* Local SessionStart owns a concrete client cwd.  Carry its stable
+    * repository identity through every ordered memory reader used below.  The
+    * remote brief path passes NULL and establishes the same context at its
+    * server request boundary instead. */
+   int owns_memory_scope = 0;
+   if (client_cwd && client_cwd[0])
+   {
+      char memory_workspace[MAX_PATH_LEN] = "";
+      char memory_project[MAX_PATH_LEN] = "";
+      /* Exported by cmd_hooks_scope.c and declared in cmd_hooks_scope.h; use
+       * the same resolver as the existing hook/session paths below. */
+      hook_scope_labels_for_cwd(client_cwd, memory_workspace, sizeof(memory_workspace),
+                                memory_project, sizeof(memory_project));
+      kb_client_memory_scope_context_set(memory_workspace, memory_project, 0);
+      owns_memory_scope = 1;
+   }
+
    /* Principles and Aimee lookup hints lead the session context for primacy
     * bias, driven by the active persona. */
    ctx_appendf(buf, cap, &pos, "%s",
@@ -455,12 +472,10 @@ static char *build_session_context(const char *client_cwd)
    {
       if (scope_cwd[0])
       {
-         config_t app_cfg;
-         config_load(&app_cfg);
          char workspace_name[MAX_PATH_LEN];
          char project_name[MAX_PATH_LEN];
-         hook_scope_labels_for_cwd(&app_cfg, scope_cwd, workspace_name, sizeof(workspace_name),
-                                   project_name, sizeof(project_name));
+         hook_scope_labels_for_cwd(scope_cwd, workspace_name, sizeof(workspace_name), project_name,
+                                   sizeof(project_name));
 
          if ((project_name[0] || workspace_name[0]) && pos < cap - 512)
          {
@@ -539,12 +554,10 @@ static char *build_session_context(const char *client_cwd)
          char cwd[MAX_PATH_LEN];
          char workspace_name[MAX_PATH_LEN] = "";
          char project_name[MAX_PATH_LEN] = "";
-         config_t app_cfg;
-         config_load(&app_cfg);
          session_context_resolve_cwd(client_cwd, cwd, sizeof(cwd));
          if (cwd[0])
-            hook_scope_labels_for_cwd(&app_cfg, cwd, workspace_name, sizeof(workspace_name),
-                                      project_name, sizeof(project_name));
+            hook_scope_labels_for_cwd(cwd, workspace_name, sizeof(workspace_name), project_name,
+                                      sizeof(project_name));
          pos = session_append_scope_section(scope_rows, n_scope, buf, pos, cap, "# Shared Context",
                                             workspace_name[0] ? workspace_name : NULL,
                                             project_name[0] ? project_name : NULL, 1, 1, 5);
@@ -635,6 +648,8 @@ static char *build_session_context(const char *client_cwd)
    }
 
    persona_free(&persona);
+   if (owns_memory_scope)
+      kb_client_memory_scope_context_clear();
    buf[pos] = '\0';
    return buf;
 }

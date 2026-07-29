@@ -1500,6 +1500,8 @@ char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *n
 
    char cwd_buf[MAX_PATH_LEN];
    const char *cwd = agent_context_cwd(cwd_buf, sizeof(cwd_buf));
+   char memory_project[MAX_PATH_LEN] = "";
+   char memory_workspace[MAX_PATH_LEN] = "";
    if (cwd && cwd[0])
    {
       char root[MAX_PATH_LEN] = "";
@@ -1512,7 +1514,13 @@ char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *n
                   "workspace root. Do not inspect sibling checkouts or parent repository paths "
                   "unless the user explicitly asks for them.\n",
                   root);
+      (void)workspace_repo_identity(cwd, memory_project, sizeof(memory_project), memory_workspace,
+                                    sizeof(memory_workspace));
    }
+   /* Keep every ordered memory read in this context build on one request-local
+    * repository identity.  An unresolved cwd deliberately yields global/shared
+    * memory only rather than another project's rows. */
+   kb_client_memory_scope_context_set(memory_workspace, memory_project, 0);
    ctx_appendf(buf, cap, &pos, "\n");
 
    /* Custom prompt override */
@@ -2029,6 +2037,7 @@ char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *n
                agent->exec_system_prompt[0] ? agent->exec_system_prompt
                                             : default_exec_instructions);
 
+   kb_client_memory_scope_context_clear();
    return buf;
 }
 

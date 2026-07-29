@@ -53,14 +53,26 @@ export interface Svc {
   state: string;
 }
 
+export function serviceFailed(s: Svc): boolean {
+  return /\b(exited|dead|unhealthy|restarting)\b/i.test(s.state);
+}
+
+export function servicePending(s: Svc): boolean {
+  return /aimee-llm/i.test(s.name) && /\b(starting)\b/i.test(s.state) && !serviceFailed(s);
+}
+
 /* docker compose ps --format json emits either a JSON array or newline-delimited
  * objects, depending on the compose version. Parse defensively; return [] when the
  * shape is unrecognized (the raw output stays available in the log). */
 export function parsePs(ps: string): Svc[] {
-  const pick = (o: Record<string, unknown>): Svc => ({
-    name: String(o.Name ?? o.Service ?? ''),
-    state: String(o.State ?? o.Status ?? ''),
-  });
+  const pick = (o: Record<string, unknown>): Svc => {
+    const state = String(o.State ?? o.Status ?? '');
+    const health = String(o.Health ?? '');
+    return {
+      name: String(o.Name ?? o.Service ?? ''),
+      state: health && !state.toLowerCase().includes(health.toLowerCase()) ? `${state} (${health})` : state,
+    };
+  };
   const trimmed = ps.trim();
   if (!trimmed) return [];
   try {
@@ -96,12 +108,13 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const loadStatus = useCallback(async () => {
+  const loadStatus = useCallback(async (): Promise<DeployStatus | null> => {
     try {
       const r = await api('/api/deploy/status', { method: 'GET' });
       if (r.status === 503) {
-        setStatus({ enabled: false, running: false, last_exit: null, output: '', ps: '' });
-        return false;
+        const disabled = { enabled: false, running: false, last_exit: null, output: '', ps: '' };
+        setStatus(disabled);
+        return disabled;
       }
       const d = await r.json();
       if (r.ok) {
@@ -113,21 +126,26 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
           ps: String(d.ps ?? ''),
         };
         setStatus(s);
-        return s.running;
+        return s;
       }
     } catch {
       setStatus({ enabled: false, running: false, last_exit: null, output: '', ps: '' });
     }
-    return false;
+    return null;
   }, []);
 
-  // Poll while a deploy is running; stop once it settles.
+  // The worker stops after the LLM container starts, not after its model assets
+  // finish downloading. Keep monitoring a "starting" LLM without leaving the
+  // wizard in its blocking Deploying state, so a later container failure is
+  // surfaced while this finish screen remains open.
   const poll = useCallback(async () => {
-    const stillRunning = await loadStatus();
-    if (stillRunning) {
+    const current = await loadStatus();
+    if (current?.running) {
       timer.current = setTimeout(poll, 3000);
     } else {
       setApplying(false);
+      const services = parsePs(current?.ps ?? '');
+      if (services.some(servicePending)) timer.current = setTimeout(poll, 5000);
     }
   }, [loadStatus]);
 
@@ -137,10 +155,10 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
       return;
     }
     (async () => {
-      const running = await loadStatus();
+      const current = await loadStatus();
       setLoading(false);
-      if (running) {
-        setApplying(true);
+      if (current?.running || parsePs(current?.ps ?? '').some(servicePending)) {
+        setApplying(!!current?.running);
         timer.current = setTimeout(poll, 3000);
       }
     })();
@@ -150,6 +168,10 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
   }, [kbMode, loadStatus, poll]);
 
   async function deploy() {
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
     setErr('');
     setApplying(true);
     try {
@@ -203,7 +225,8 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
   }
 
   const svcs = parsePs(status.ps);
-  const settledOk = !status.running && status.last_exit === 0;
+  const failedSvcs = svcs.filter(serviceFailed);
+  const settledOk = !status.running && status.last_exit === 0 && failedSvcs.length === 0;
   const settledErr = !status.running && status.last_exit !== null && status.last_exit !== 0;
   const enrollmentCommand = enrollment?.bearer_token
     ? remoteSetCommand(window.location.hostname, enrollment.tls_port, enrollment.bearer_token)
@@ -228,7 +251,7 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
         <div style={{ display: 'grid', gap: 3, marginBottom: 8 }}>
           {svcs.map((s) => (
             <div key={s.name} style={{ display: 'flex', gap: 8, fontSize: 12.5 }}>
-              <span aria-hidden>{/running|up|healthy/i.test(s.state) ? '🟢' : '⚪'}</span>
+              <span aria-hidden>{serviceFailed(s) ? '🔴' : servicePending(s) ? '🟡' : /running|up|healthy/i.test(s.state) ? '🟢' : '⚪'}</span>
               <span style={{ fontFamily: 'monospace', minWidth: 130 }}>{s.name}</span>
               <span style={{ color: '#667' }}>{s.state}</span>
             </div>
@@ -236,9 +259,14 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
         </div>
       )}
 
-      {status.running && <div style={{ fontSize: 12, color: '#8a5a00' }}>⏳ Bringing services up (image pulls can take a few minutes)…</div>}
-      {settledOk && <div style={{ fontSize: 12, color: '#2c8f56' }}>✅ Stack is up.</div>}
+      {status.running && <div style={{ fontSize: 12, color: '#8a5a00' }}>⏳ Starting KB, then LLM (image pulls can take a few minutes)…</div>}
+      {settledOk && <div style={{ fontSize: 12, color: '#2c8f56' }}>
+        ✅ Stack containers are up. LLM model downloads may continue in the background.
+      </div>}
       {settledErr && <div style={{ fontSize: 12, color: '#c62828' }}>⛔ Deploy exited with code {status.last_exit}. See the log below.</div>}
+      {!settledErr && failedSvcs.length > 0 && <div style={{ fontSize: 12, color: '#c62828' }}>
+        ⛔ {failedSvcs.map((s) => s.name).join(', ')} failed after startup. Check its container logs.
+      </div>}
       {err && <div style={{ fontSize: 12, color: '#c62828' }}>{err}</div>}
 
       {enrollment?.state === 'ready' && enrollmentCommand && (

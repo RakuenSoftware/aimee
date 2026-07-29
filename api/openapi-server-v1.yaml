@@ -5184,23 +5184,27 @@ paths:
                     - { type: string, maxLength: 89, pattern: '^aimee/wi/wi_[A-Za-z0-9_]+\.s[0-9a-f]{10}\.g[0-9]+\.[0-9]+$' }
                 base: { type: string }
                 title: { type: string, minLength: 1, maxLength: 256 }
+                body: { type: string, minLength: 1, maxLength: 60000 }
+                draft:
+                  type: boolean
+                  description: Must be true for final feature-to-trunk handoffs and false for slice PRs.
                 number: { type: integer, minimum: 1 }
               oneOf:
                 - required: [head]
                   properties: { op: { enum: [push] } }
                   not:
-                    anyOf: [{ required: [base] }, { required: [title] }, { required: [number] }]
-                - required: [head, base, title]
+                    anyOf: [{ required: [base] }, { required: [title] }, { required: [body] }, { required: [draft] }, { required: [number] }]
+                - required: [head, base, title, body, draft]
                   properties: { op: { enum: [open] } }
                   not: { required: [number] }
                 - required: [number]
                   properties: { op: { enum: [info, ci] } }
                   not:
-                    anyOf: [{ required: [head] }, { required: [base] }, { required: [title] }]
+                    anyOf: [{ required: [head] }, { required: [base] }, { required: [title] }, { required: [body] }, { required: [draft] }]
                 - required: [base, number]
                   properties: { op: { enum: [merge] } }
                   not:
-                    anyOf: [{ required: [head] }, { required: [title] }]
+                    anyOf: [{ required: [head] }, { required: [title] }, { required: [body] }, { required: [draft] }]
       responses:
         "200":
           description: Mechanical forge operation completed

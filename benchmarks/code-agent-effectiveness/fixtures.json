@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "proposal": "docs/proposals/pending/agent-facing-code-intelligence-effectiveness.md",
+  "source_snapshot": {
+    "captured_at": "2026-07-29",
+    "harness_repository": "/home/virant/dev/ponytail-codex-benchmark",
+    "harness_branch": "agent/codex-benchmark-matrix",
+    "harness_commit": "a40fe3d6a58ac4e8b14aaf75320e83912f0bfc56",
+    "results_root": "battery/codex_results",
+    "results_file_count": 986,
+    "results_tree_manifest_sha256": "93f92f6697263c54696318f566b3b19ee5732de332f7a9a0ebdd199d12736a9b",
+    "raw_root": "/tmp/ptcodex/raw",
+    "raw_file_count": 194,
+    "raw_tree_manifest_sha256": "0441626841c736f4be2c404996ec4a734b5220d9491fbdba5d8cc46b79336133",
+    "complete_cells": 97,
+    "expected_cells": 600,
+    "incomplete": true,
+    "aimee_client_version": "v0.2.195-1003-g627c1ffc",
+    "aimee_server_version": "testing-8bc6aa5",
+    "aimee_kb_version": "vtesting-8bc6aa5"
+  },
+  "cases": [
+    {
+      "id": "tool-discovery-blast-radius",
+      "class": "tool_discovery",
+      "source": {
+        "path": "benchmarks/code-agent-effectiveness/evidence/t50-tool-and-scope.json",
+        "sha256": "3aa1cd3e2ed51f2a2e9518067d8a905e6d7eb8caa4f5428925e4450af8fe7089"
+      },
+      "request": {
+        "guidance_term": "preview_blast_radius",
+        "discovery_query": "blast radius"
+      },
+      "red_observation": {
+        "tools": [],
+        "count": 0
+      },
+      "green_contract": {
+        "canonical_tool": "preview_blast_radius",
+        "discoverable_by": [
+          "blast radius",
+          "preview"
+        ],
+        "required_inputs": [
+          "paths"
+        ],
+        "optional_inputs": [
+          "project"
+        ]
+      }
+    },
+    {
+      "id": "current-project-symbol-scope",
+      "class": "project_scope",
+      "source": {
+        "path": "benchmarks/code-agent-effectiveness/evidence/t50-tool-and-scope.json",
+        "sha256": "3aa1cd3e2ed51f2a2e9518067d8a905e6d7eb8caa4f5428925e4450af8fe7089"
+      },
+      "request": {
+        "identifier": "install_order",
+        "active_project": "codex-t50-toposort-r1-ec3ead31"
+      },
+      "red_observation": {
+        "match_count": 6,
+        "distinct_project_count": 6,
+        "projects": [
+          "codex-t03-model-migration-r1-dbcb04e8",
+          "codex-t09-root-cause-r1",
+          "codex-t50-toposort-r1-31301348",
+          "codex-t50-toposort-r1-ec3ead31",
+          "fixture",
+          "source"
+        ]
+      },
+      "green_contract": {
+        "default_scope": "current",
+        "match_count": 1,
+        "project": "codex-t50-toposort-r1-ec3ead31",
+        "all_scope_is_explicit": true
+      }
+    },
+    {
+      "id": "python-module-blast-radius",
+      "class": "python_blast_radius",
+      "source": {
+        "path": "benchmarks/code-agent-effectiveness/evidence/t06-readiness.json",
+        "sha256": "a17e5bb156a69572a5889b4335698199c465d6b859f40c9ebb847879ad17036a"
+      },
+      "request": {
+        "project": "codex-t06-semver-r1-a14c49e9",
+        "file": "app/dates.py",
+        "normalized_module": "app.dates"
+      },
+      "red_observation": {
+        "dependencies": [],
+        "dependents": []
+      },
+      "positive_control": {
+        "callers": [
+          "app/billing.py",
+          "app/invoices.py",
+          "app/reports.py"
+        ]
+      },
+      "green_contract": {
+        "dependents": [
+          "app/billing.py",
+          "app/invoices.py",
+          "app/reports.py"
+        ],
+        "provenance": "import",
+        "substring_collision_false_edges": 0
+      }
+    },
+    {
+      "id": "repository-memory-abstention",
+      "class": "retrieval_abstention",
+      "source": {
+        "path": "benchmarks/code-agent-effectiveness/evidence/t09-memory.json",
+        "sha256": "3c5067f6fea90b9e9288ef1d99d25859bd800dd589e96d91c2839cb76fb7c8cc"
+      },
+      "request": {
+        "query": "billing_period_days January month length billing bug conventions",
+        "project": "codex-t09-root-cause-r1"
+      },
+      "red_observation": {
+        "status": "ok",
+        "result_count": 4,
+        "result_entities": [
+          "delegate_codex_review_ok",
+          "delegate_codex_unknown_ok",
+          "delegate_minimax_review_fail",
+          "delegate_minimax_unknown_fail"
+        ],
+        "project_relevant_count": 0
+      },
+      "green_contract": {
+        "status": "abstained",
+        "injected_result_count": 0,
+        "global_memory_fallback": false
+      }
+    },
+    {
+      "id": "kb-outage-status",
+      "class": "kb_outage",
+      "source": {
+        "path": "benchmarks/code-agent-effectiveness/evidence/kb-outage.json",
+        "sha256": "3914b7bdafdda681f774873f327227ef212c8d3ffe569bf20b03a3bf19c548d0"
+      },
+      "request": {
+        "operation": "repository retrieval while the configured KB dependency is down"
+      },
+      "red_observation": {
+        "server_status": "ok",
+        "kb_status": "unreachable",
+        "experiment_stopped_at_cells": 97
+      },
+      "green_contract": {
+        "retrieval_status": "unavailable",
+        "must_not_report": "empty",
+        "local_work_continues": true,
+        "recovery_without_client_restart": true,
+        "benchmark_cell_status": "infrastructure-invalid"
+      }
+    }
+  ]
+}

@@ -10,12 +10,13 @@
  * the operator deploys ONE container (aimee-server) and the finished wizard spins
  * up the rest. The wizard's page-2 config is translated by config_emit_deploy_env
  * into the compose env (COMPOSE_PROFILES + AIMEE_LLM_* + AIMEE_KB_API_* …), and
- * this module runs `docker compose -f <managed-file> up -d` with that env against
- * the mounted socket.
+ * this module starts aimee-kb and then aimee-llm with ordered, detached Compose
+ * commands against the mounted socket.
  *
  * `up -d` may pull multi-GB images, so the apply runs on a BACKGROUND THREAD (the
  * HTTP listener is single-threaded and must not block for minutes). The wizard
- * kicks it off, then polls status. */
+ * kicks it off, then polls status. Model downloads happen inside aimee-llm after
+ * the container starts and are not a wizard-completion barrier. */
 
 /* 1 iff server-orchestrated deploy is enabled: AIMEE_DEPLOY_ENABLED=1 (the deploy
  * compose mounts the Docker socket + managed compose file and sets this). */
@@ -25,9 +26,9 @@ int deploy_apply_enabled(void);
  * default (/opt/aimee/deploy/aimee-managed.compose.yaml). Writes into out. */
 void deploy_apply_compose_file(char *out, size_t cap);
 
-/* Start a background `docker compose up -d` for the services the current config
- * selects. Returns 0 when a new deploy was started, 1 when one is already running
- * (no-op), -1 on failure to start the worker. Non-blocking. */
+/* Start a background ordered Compose deploy for the services the current config
+ * selects (KB before LLM). Returns 0 when a new deploy was started, 1 when one is
+ * already running (no-op), -1 on failure to start the worker. Non-blocking. */
 int deploy_apply_start(void);
 
 /* Snapshot the background deploy's state. `running` is 1 while the worker runs.

@@ -453,6 +453,18 @@ void session_brief_emit(FILE *out)
    if (out)
       fputs("STUB_BRIEF_CONTENT", out);
 }
+static int g_memory_scope_begin_calls = 0;
+static int g_memory_scope_clear_calls = 0;
+int server_memory_scope_begin(cJSON *req)
+{
+   (void)req;
+   g_memory_scope_begin_calls++;
+   return 0;
+}
+void kb_client_memory_scope_context_clear(void)
+{
+   g_memory_scope_clear_calls++;
+}
 /* memory.user_capture invokes db1_user_memory_upsert (db1/user_memory.c), not
  * linked here. Stub it so the dispatch table builds. */
 int db1_user_memory_upsert(const char *kind, const char *tier, const char *key, const char *content,
@@ -1988,12 +2000,16 @@ static void test_session_brief_assemble(void)
    server_ctx_t *ctx = calloc(1, sizeof(*ctx));
    server_conn_t *conn = calloc(1, sizeof(*conn));
    assert(ctx != NULL && conn != NULL);
+   g_memory_scope_begin_calls = 0;
+   g_memory_scope_clear_calls = 0;
    const char *msg = "{\"method\":\"session.brief_assemble\"}";
    cJSON *json = dispatch_json(ctx, conn, msg, strlen(msg));
    cJSON *sv = cJSON_GetObjectItem(json, "schema_version");
    cJSON *out = cJSON_GetObjectItem(json, "output");
    assert(cJSON_IsNumber(sv) && sv->valueint == 1);
    assert(cJSON_IsString(out) && strstr(out->valuestring, "STUB_BRIEF_CONTENT") != NULL);
+   assert(g_memory_scope_begin_calls == 1);
+   assert(g_memory_scope_clear_calls == 1);
    cJSON_Delete(json);
    free(conn);
    free(ctx);

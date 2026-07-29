@@ -13,6 +13,7 @@
 #include "working_profile.h" /* working_profile_autoobserve_from_feedback */
 #include "agent_config.h"
 #include "agent_types.h"
+#include "workspace.h"
 #include "cJSON.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -199,7 +200,33 @@ static int memory_recall_handler(const char *body, char *resp, int cap)
    }
 
    /* Graph-code fusion is always on for recall. */
+   char project[MAX_PATH_LEN] = "";
+   char workspace[MAX_PATH_LEN] = "";
+   const cJSON *jp = cJSON_GetObjectItemCaseSensitive(req, "project");
+   const cJSON *jw = cJSON_GetObjectItemCaseSensitive(req, "workspace");
+   const cJSON *jc = cJSON_GetObjectItemCaseSensitive(req, "cwd");
+   const cJSON *jscope = cJSON_GetObjectItemCaseSensitive(req, "scope");
+   int include_all = cJSON_IsString(jscope) && strcmp(jscope->valuestring, "all") == 0;
+   if (cJSON_IsString(jp))
+      snprintf(project, sizeof(project), "%s", jp->valuestring);
+   if (cJSON_IsString(jw))
+      snprintf(workspace, sizeof(workspace), "%s", jw->valuestring);
+   if ((!project[0] || !workspace[0]) && cJSON_IsString(jc) && jc->valuestring[0])
+   {
+      char resolved_project[MAX_PATH_LEN] = "";
+      char resolved_workspace[MAX_PATH_LEN] = "";
+      if (workspace_repo_identity(jc->valuestring, resolved_project, sizeof(resolved_project),
+                                  resolved_workspace, sizeof(resolved_workspace)) == 0)
+      {
+         if (!project[0])
+            snprintf(project, sizeof(project), "%s", resolved_project);
+         if (!workspace[0])
+            snprintf(workspace, sizeof(workspace), "%s", resolved_workspace);
+      }
+   }
+   kb_client_memory_scope_context_set(workspace, project, include_all);
    char *j = kb_client_memory_recall_json_ex(jh->valuestring, limit_tokens, session_start, "on");
+   kb_client_memory_scope_context_clear();
    cJSON_Delete(req);
    if (!j)
    {

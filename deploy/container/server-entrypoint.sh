@@ -56,20 +56,18 @@ if [ ! -f "$AIMEE_HOME/aimee.yaml" ] && [ -f /opt/aimee/defaults/aimee.yaml ]; t
     mkdir -p "$AIMEE_HOME"
     cp /opt/aimee/defaults/aimee.yaml "$AIMEE_HOME/aimee.yaml"
 fi
-# Seed the default delegate roster (definitions only; keys are client-held and
-# pushed per session) so delegates / the roundtable work out of the box. Never
-# clobber an operator's agents.json.
-if [ ! -f "$AIMEE_HOME/agents.json" ] && [ -f /opt/aimee/defaults/agents.json ]; then
-    mkdir -p "$AIMEE_HOME"
-    cp /opt/aimee/defaults/agents.json "$AIMEE_HOME/agents.json"
-fi
+# agents.json intentionally starts absent. The onboarding wizard requires the
+# operator to create the first agent; agent.add then creates the durable roster
+# containing only that selected agent. Never invent provider entries on boot.
 # Seed default dev-lifecycle workflows so autonomous development (default-on) can
 # resolve "build" out of the box. Shipped defaults are hash-tracked under
 # .seeded/<name>: a fresh install is seeded and its hash recorded; on later
 # starts an UNMODIFIED managed default (on-disk hash still equals the recorded
 # seed hash) is refreshed when the image ships a newer one. An operator-edited
 # default (hash diverged) or one of unknown provenance (no seed record and not
-# already equal to the shipped default) is never clobbered.
+# already equal to the shipped default) is never clobbered. A shipped default
+# removed by a newer image is retired only when its recorded hash proves the
+# operator never edited it.
 # seed_managed_defaults <source-dir> <glob-suffix> <dest-dir>
 seed_managed_defaults() {
     seed_src="$1"
@@ -101,6 +99,22 @@ seed_managed_defaults() {
             printf '%s\n' "$shipped" > "$rec"
         fi
     done
+    if command -v sha256sum >/dev/null 2>&1; then
+        for rec in "$seed_dst/.seeded/"*"$seed_ext"; do
+            [ -f "$rec" ] || continue
+            base=$(basename "$rec")
+            [ -f "$seed_src/$base" ] && continue
+            dst="$seed_dst/$base"
+            if [ ! -f "$dst" ]; then
+                rm -f -- "$rec"
+                continue
+            fi
+            disk=$(sha256sum "$dst" | cut -d' ' -f1)
+            if [ "$disk" = "$(cat "$rec")" ]; then
+                rm -f -- "$dst" "$rec"
+            fi
+        done
+    fi
 }
 seed_managed_defaults /opt/aimee/defaults/workflows .yaml "$AIMEE_HOME/workflows"
 # The roundtable presets those workflows name. Seeded on the same terms: a gate

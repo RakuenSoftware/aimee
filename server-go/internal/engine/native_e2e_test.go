@@ -83,18 +83,24 @@ func (r *transientGateRunner) Run(ctx context.Context, request StepRequest) (Ste
 	return r.next.Run(ctx, request)
 }
 
-type e2eForge struct{}
+type e2eForge struct {
+	mu    sync.Mutex
+	opens []PullRequestSpec
+}
 
-func (e2eForge) Push(ctx context.Context, _, workdir, branch string) error {
+func (*e2eForge) Push(ctx context.Context, _, workdir, branch string) error {
 	_, err := gitText(ctx, workdir, "push", "-u", "origin", branch)
 	return err
 }
 
-func (e2eForge) Open(_ context.Context, _ string, _ string, head, base, _ string) (PullRequest, error) {
+func (f *e2eForge) Open(_ context.Context, _ string, _ string, head, base string, spec PullRequestSpec) (PullRequest, error) {
+	f.mu.Lock()
+	f.opens = append(f.opens, spec)
+	f.mu.Unlock()
 	return PullRequest{Ref: "pr:" + head, URL: "pr:" + head, Head: head, Base: base}, nil
 }
-func (e2eForge) CI(context.Context, string, string) (CIState, error) { return CIPassed, nil }
-func (e2eForge) Merge(ctx context.Context, workdir, _ string, base string) error {
+func (*e2eForge) CI(context.Context, string, string) (CIState, error) { return CIPassed, nil }
+func (*e2eForge) Merge(ctx context.Context, workdir, _ string, base string) error {
 	_, err := gitText(ctx, workdir, "push", "origin", "HEAD:refs/heads/"+base)
 	return err
 }
@@ -266,7 +272,8 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner, err := NewNativeRunner(store, worktrees, &e2eAgents{}, passVerifier{}, artifacts, registry, e2eForge{})
+	forge := &e2eForge{}
+	runner, err := NewNativeRunner(store, worktrees, &e2eAgents{}, passVerifier{}, artifacts, registry, forge)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,6 +314,25 @@ nodes:
 			recoveringRunner.mu.Unlock()
 			if remainingFailures != 0 {
 				t.Fatalf("%d transient roundtable failures were not exercised", remainingFailures)
+			}
+			forge.mu.Lock()
+			opens := append([]PullRequestSpec(nil), forge.opens...)
+			forge.mu.Unlock()
+			if len(opens) != 2 {
+				t.Fatalf("opened %d PRs, want slice + final: %+v", len(opens), opens)
+			}
+			if opens[0].Draft || opens[0].Title != "Implement feature" {
+				t.Fatalf("slice handoff = %+v, want meaningful non-draft slice PR", opens[0])
+			}
+			final := opens[1]
+			if !final.Draft || final.Title != "Build feature" {
+				t.Fatalf("final handoff = %+v, want meaningful draft PR", final)
+			}
+			for _, marker := range []string{"## Human review boundary", "intentionally a draft",
+				"## Changes", "Original request", "Approved implementation plan", rootID} {
+				if !strings.Contains(final.Body, marker) {
+					t.Fatalf("final PR body missing %q:\n%s", marker, final.Body)
+				}
 			}
 			events, err := store.Events(context.Background(), rootID, 0, 1000)
 			if err != nil {

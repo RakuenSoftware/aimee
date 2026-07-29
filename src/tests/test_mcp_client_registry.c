@@ -9,6 +9,7 @@
 #include "mcp_osv_cache.h"
 #include "aimee/protocols/mcp/mcp_client_registry.h"
 #include "aimee/protocols/mcp/mcp_tools.h"
+#include "agent_code_capabilities.h"
 
 static const char *g_http_response;
 static int g_http_status = -1;
@@ -459,7 +460,7 @@ static void test_osv_offline_cache_miss_allows(void)
  * built-in tool surface (name + sorted schema property keys + required), captured
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
-#define MCP_TOOLS_GOLDEN_COUNT 53
+#define MCP_TOOLS_GOLDEN_COUNT 54
 #define MCP_TOOLS_GOLDEN                                                                           \
    "ask_user {choices,question} req:question\n"                                                    \
    "ast_grep_search {lang,path,pattern} req:lang,pattern\n"                                        \
@@ -480,7 +481,7 @@ static void test_osv_offline_cache_miss_allows(void)
    "epistemic_directive "                                                                          \
    "{anchor_entity,anchor_file,cause,command,id,limit,note,priority,question,resolution_memory_"   \
    "id,state,suppress,topic,valid_until} req:command\n"                                            \
-   "find_symbol {identifier} req:identifier\n"                                                     \
+   "find_symbol {identifier,project,scope} req:identifier\n"                                       \
    "find_tools {limit,query} req:\n"                                                               \
    "get_help {topic} req:\n"                                                                       \
    "get_identity {} req:\n"                                                                        \
@@ -488,10 +489,11 @@ static void test_osv_offline_cache_miss_allows(void)
    "{action,async,auto,base,body,branch,command,count,depth,diff_stat,expected_head_sha,files,"    \
    "force,index,job_id,merge_method,message,mirror,mode,name,number,path,prune,rebase,ref,remote," \
    "source,staged,stat_only,state,title,url,wait} req:command\n"                                   \
-   "graph {command,entity,episode_key,limit,query} req:command\n"                                  \
+   "graph {command,cwd,entity,episode_key,limit,project,query,scope,workspace} req:command\n"      \
    "host {command,name} req:command\n"                                                             \
    "index "                                                                                        \
-   "{command,file_path,judge,line_end,line_start,max_results,node,paths,project,query,symbol} "    \
+   "{command,file_path,judge,line_end,line_start,max_results,node,paths,project,query,scope,"      \
+   "symbol} "                                                                                      \
    "req:command\n"                                                                                 \
    "job {command,job_id,max_concurrent,plan_id} req:command\n"                                     \
    "learning "                                                                                     \
@@ -500,9 +502,9 @@ static void test_osv_offline_cache_miss_allows(void)
    "list_curiosity_items {limit,state} req:\n"                                                     \
    "lsp {col,command,file,line,workspace} req:command\n"                                           \
    "memory "                                                                                       \
-   "{command,confidence,content,dry_run,force,handle,id,key,kind,memory_id,modes,query,reason,"    \
-   "tier,verb} req:command\n"                                                                      \
-   "memory_recall {limit_tokens,session_start,task_hint} req:\n"                                   \
+   "{command,confidence,content,cwd,dry_run,force,handle,id,key,kind,memory_id,modes,project,"     \
+   "query,reason,scope,tier,verb,workspace} req:command\n"                                         \
+   "memory_recall {cwd,limit_tokens,project,scope,session_start,task_hint,workspace} req:\n"       \
    "note {command,content,limit,query,tag,tags,title} req:command\n"                               \
    "payload_rewrite_status {} req:\n"                                                              \
    "pdf_inspect_structure {document_key,project} req:document_key,project\n"                       \
@@ -515,16 +517,18 @@ static void test_osv_offline_cache_miss_allows(void)
    "pipeline "                                                                                     \
    "{artifact,base_branch,brief,command,done_bar,head_branch,idea,operator_principal,"             \
    "pipeline_id,questions,reason,remote,repo_root,state,verdict,worktree_path} req:command\n"      \
+   "preview_blast_radius {paths,project,scope} req:paths\n"                                        \
    "prospective_memory "                                                                           \
    "{action_text,anchor_entity,anchor_file,command,id,limit,recurrence,state,trigger_text,valid_"  \
    "until} req:command\n"                                                                          \
-   "recall {block_type,command,limit,limit_tokens,query,since} req:command\n"                      \
+   "recall {block_type,command,cwd,limit,limit_tokens,project,query,scope,since,workspace} "       \
+   "req:command\n"                                                                                 \
    "roadmap {command,roadmap_id} req:command\n"                                                    \
    "roundtable_review {artifact_stage,brief,diff,original_request,roundtable,workdir} req:diff\n"  \
    "roundtable_status {run_id} req:run_id\n"                                                       \
    "rules {command,reason,text} req:command\n"                                                     \
    "search_docs {max_results,project,query} req:query\n"                                           \
-   "search_memory {filter,query} req:query\n"                                                      \
+   "search_memory {cwd,filter,project,query,scope,workspace} req:query\n"                          \
    "send_message {target,text} req:target,text\n"                                                  \
    "session {around_message_id,chain_id,command,include_sources,limit,query,session_id,window} "   \
    "req:command\n"                                                                                 \
@@ -630,6 +634,7 @@ static void test_tool_profile_filter(void)
                                       "get_identity",
                                       "find_symbol",
                                       "ast_grep_search",
+                                      "preview_blast_radius",
                                       "git",
                                       "delegate",
                                       "roundtable_review",
@@ -724,6 +729,88 @@ static int tools_have(cJSON *tools, const char *name)
    return 0;
 }
 
+static cJSON *tools_get(cJSON *tools, const char *name)
+{
+   cJSON *t = NULL;
+   cJSON_ArrayForEach(t, tools)
+   {
+      cJSON *n = cJSON_GetObjectItemCaseSensitive(t, "name");
+      if (cJSON_IsString(n) && strcmp(n->valuestring, name) == 0)
+         return t;
+   }
+   return NULL;
+}
+
+static int schema_has_property(cJSON *tool, const char *name)
+{
+   cJSON *schema = cJSON_GetObjectItemCaseSensitive(tool, "inputSchema");
+   cJSON *properties = cJSON_GetObjectItemCaseSensitive(schema, "properties");
+   return cJSON_GetObjectItemCaseSensitive(properties, name) != NULL;
+}
+
+static int schema_requires(cJSON *tool, const char *name)
+{
+   cJSON *schema = cJSON_GetObjectItemCaseSensitive(tool, "inputSchema");
+   cJSON *required = cJSON_GetObjectItemCaseSensitive(schema, "required");
+   cJSON *item = NULL;
+   cJSON_ArrayForEach(item, required) if (cJSON_IsString(item) &&
+                                          strcmp(item->valuestring, name) == 0) return 1;
+   return 0;
+}
+
+/* E1 contract: the words installed guidance gives an agent must map to a direct
+ * lean tool, and every code-navigation schema must admit active-project defaults
+ * plus an explicit cross-project escape hatch. */
+static void test_agent_code_intelligence_contracts(void)
+{
+   cJSON *collapsed = mcp_build_tools_list();
+   cJSON *flat = mcp_build_tools_list_flat();
+
+   cJSON *preview = tools_get(collapsed, AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS);
+   assert(preview != NULL);
+   cJSON *description = cJSON_GetObjectItemCaseSensitive(preview, "description");
+   assert(cJSON_IsString(description));
+   assert(strstr(description->valuestring, "blast radius") != NULL);
+   assert(strstr(description->valuestring, "Preview") != NULL);
+   assert(mcp_tool_matches_query(preview, AIMEE_CODE_DISCOVERY_BLAST_RADIUS));
+   assert(mcp_tool_matches_query(preview, "BLAST RADIUS"));
+   assert(mcp_tool_matches_query(preview, AIMEE_CODE_DISCOVERY_PREVIEW));
+   assert(!mcp_tool_matches_query(preview, "unrelated memory query"));
+   assert(schema_has_property(preview, "project"));
+   assert(schema_has_property(preview, "scope"));
+   assert(schema_has_property(preview, "paths"));
+   assert(!schema_requires(preview, "project"));
+   assert(schema_requires(preview, "paths"));
+
+   cJSON *symbol = tools_get(collapsed, AIMEE_CODE_TOOL_FIND_SYMBOL);
+   assert(symbol != NULL);
+   assert(schema_has_property(symbol, "identifier"));
+   assert(schema_has_property(symbol, "project"));
+   assert(schema_has_property(symbol, "scope"));
+
+   cJSON *callers = tools_get(flat, "index_find_callers");
+   assert(callers != NULL);
+   assert(schema_has_property(callers, "project"));
+   assert(schema_has_property(callers, "scope"));
+
+   cJSON *args = cJSON_Parse("{\"cwd\":\"/work/aimee\"}");
+   assert(strcmp(mcp_code_project_from_args(args), "aimee") == 0);
+   assert(mcp_code_scope_all(args) == 0);
+   cJSON_AddStringToObject(args, "project", "explicit-project");
+   assert(strcmp(mcp_code_project_from_args(args), "explicit-project") == 0);
+   cJSON_AddStringToObject(args, "scope", "all");
+   assert(mcp_code_scope_all(args) == 1);
+   cJSON_ReplaceItemInObject(args, "scope", cJSON_CreateString(""));
+   assert(mcp_code_scope_all(args) == 0);
+   cJSON_ReplaceItemInObject(args, "scope", cJSON_CreateString("invalid"));
+   assert(mcp_code_scope_all(args) == -1);
+   cJSON_Delete(args);
+
+   cJSON_Delete(flat);
+   cJSON_Delete(collapsed);
+   printf("  PASS: agent_code_intelligence_contracts\n");
+}
+
 /* The flat list keeps family members; the collapsed one folds them away.
  *
  * mcp_collapse_families presents coherent families as ONE multiplexed tool
@@ -772,6 +859,7 @@ int main(void)
    test_tools_list_surface();
    test_tool_profile_filter();
    test_call_tool_demux();
+   test_agent_code_intelligence_contracts();
    test_flat_list_keeps_family_members();
    test_boot_and_lazy_tools();
    test_install_target_filtering();

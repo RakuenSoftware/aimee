@@ -225,6 +225,15 @@ static int index_get_handler(const char *url, const char *extra_headers, char **
          *response_buf = strdup("{\"hits\":[{\"project\":\"aimee\",\"file_path\":\"src/main.c\","
                                 "\"line\":12,\"kind\":\"function\"}],\"next_cursor\":null}");
    }
+   else if (g_route_case == 34)
+   {
+      assert(strcmp(url, "http://127.0.0.1:4010/v1/code/find?identifier=target%2Ffn%3F&"
+                         "max_results=2&project=aimee%20core%2Fkb%3F") == 0);
+      if (response_buf)
+         *response_buf = strdup("{\"hits\":[{\"project\":\"aimee core/kb?\","
+                                "\"file_path\":\"src/main.c\",\"line\":12,"
+                                "\"kind\":\"function\"}],\"next_cursor\":null}");
+   }
    else if (g_route_case == 22)
    {
       assert(strcmp(url, "http://127.0.0.1:4010/v1/code/projects?max_results=2") == 0);
@@ -749,6 +758,10 @@ static void test_index_reads_use_v1_api_when_configured(void)
    assert(hits[0].line == 12);
    assert(strcmp(hits[0].kind, "function") == 0);
 
+   g_route_case = 34;
+   assert(kb_client_index_find_project("aimee core/kb?", "target/fn?", hits, 2) == 1);
+   assert(strcmp(hits[0].project, "aimee core/kb?") == 0);
+
    g_route_case = 22;
    project_info_t projects[2];
    assert(kb_client_index_list(projects, 2) == 1);
@@ -809,7 +822,7 @@ static void test_index_reads_use_v1_api_when_configured(void)
    assert(strcmp(caller_hits[0].caller, "caller_fn") == 0);
    assert(caller_hits[0].line == 44);
 
-   assert(g_get_seen == 10);
+   assert(g_get_seen == 11);
    unsetenv("AIMEE_KB_API_URL");
    mock_agent_http_reset();
    g_route_case = 0;

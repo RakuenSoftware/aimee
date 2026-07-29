@@ -43,6 +43,10 @@ Depending on state, an authorized user can:
 - retry a recoverable parked step;
 - open the current artifact or forge link.
 
+For the default build, the terminal forge link is a draft PR with a proposal-derived title and a
+review body containing the request, plan, diff summary, slice PRs, and completed gates. Marking that
+PR ready and merging it are deliberately outside autonomous workflow actions.
+
 A gate decision is bound to the principal, node, and current artifact hash. If the artifact changes,
 the old decision cannot advance the run.
 
@@ -57,6 +61,10 @@ authorization grant; the owning service checks every request.
 
 Forge credentials stay in the server vault. The workflow process requests a narrow mechanical forge
 operation and never receives the secret.
+
+Do not expose a repository-write credential used for human review to autonomous or general-purpose
+agents. Draft state records the handoff, but a shared GitHub identity cannot distinguish a person
+from software using that person's token.
 
 ## Failure states
 

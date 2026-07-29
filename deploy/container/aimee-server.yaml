@@ -34,11 +34,17 @@ aimee:
     # authority-managed grants. Keep this off to avoid a misleading legacy
     # warning and `remote_writes.global_ignored` diagnostics.
     remote_writes: "off"
-# Delegate roundtable / MoA ensemble, on by default. The panel is the seeded
-# agents.json roster; provider credentials live in the server-owned encrypted
-# vault (no keys are baked into the image or sent by a thin client per session).
+# Delegate roundtable / MoA ensemble, on by default. The onboarding wizard creates
+# the initial agents.json roster; provider credentials live in the server-owned
+# encrypted vault (no keys are baked into the image or sent by a thin client per
+# session).
 ensemble:
   enabled: true
-  # No reference_models pinned: the panel is built DYNAMICALLY from the enabled +
-  # currently-available delegates (auto-seeded, then unkeyed/unhealthy ones are
-  # dropped). Pin a list here (or via a workflow) only to override that default.
+  # No reference_models pinned: the panel is built dynamically from the enabled,
+  # currently-available agents the operator configured. Pin a list here (or via a
+  # workflow) only to override that default.
+
+# The image ships one canonical preset. Naming it explicitly makes the API/UI
+# mark it as the default instead of relying on the resolver's implicit fallback.
+roundtable:
+  default: default

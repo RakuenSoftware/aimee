@@ -8,6 +8,7 @@
 #include "cJSON.h"
 #include "cli_attention_guard.h" /* attn_require_session_worktree, attn_session_isolation_blocked */
 #include "cmd_self_update.h"     /* aimee_self_update_notice */
+#include "agent_code_capabilities.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,6 +50,15 @@ static void ss_add(struct ss_sbuf *b, const char *s)
    memcpy(b->p + b->len, s, n);
    b->len += n;
    b->p[b->len] = '\0';
+}
+
+/* A remote or long-running daemon cannot infer the thin client's active
+ * checkout from its own process cwd. Carry it with every ordered memory read. */
+static void ss_add_memory_cwd(cJSON *body)
+{
+   char cwd[4096];
+   if (body && getcwd(cwd, sizeof(cwd)))
+      cJSON_AddStringToObject(body, "cwd", cwd);
 }
 
 /* Render one recall section ([{title,description}|{text}]) as markdown. */
@@ -329,9 +339,14 @@ static int handle_session_start_remote(const char *sid)
     * Rules + key facts) from session.brief_assemble. This is the primary
     * payload and the never-empty floor: the server always emits at least
     * persona principles, so a fresh session is never left with an empty brief
-    * (the pre-Phase-1 behaviour when recall was empty). The endpoint takes no
-    * input; send an empty object. */
-   cJSON *brief = ss_retry_post(endpoint, bearer, "/v1/session/brief_assemble", "{}");
+    * (the pre-Phase-1 behaviour when recall was empty). */
+   cJSON *brief_body = cJSON_CreateObject();
+   ss_add_memory_cwd(brief_body);
+   char *brief_body_s = cJSON_PrintUnformatted(brief_body);
+   cJSON_Delete(brief_body);
+   cJSON *brief = ss_retry_post(endpoint, bearer, "/v1/session/brief_assemble",
+                                brief_body_s ? brief_body_s : "{}");
+   free(brief_body_s);
    if (brief)
    {
       const char *out = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(brief, "output"));
@@ -346,6 +361,7 @@ static int handle_session_start_remote(const char *sid)
    cJSON *rbody = cJSON_CreateObject();
    cJSON_AddStringToObject(rbody, "task_hint", "session start");
    cJSON_AddBoolToObject(rbody, "session_start", 1);
+   ss_add_memory_cwd(rbody);
    char *rbody_s = cJSON_PrintUnformatted(rbody);
    cJSON_Delete(rbody);
    cJSON *resp = ss_retry_post(endpoint, bearer, "/v1/memory/recall", rbody_s);
@@ -570,6 +586,7 @@ int handle_user_prompt_submit(void)
    cJSON *body = cJSON_CreateObject();
    cJSON_AddStringToObject(body, "task_hint", prompt);
    cJSON_AddBoolToObject(body, "session_start", 0);
+   ss_add_memory_cwd(body);
    char *body_s = cJSON_PrintUnformatted(body);
    cJSON_Delete(body);
 
@@ -599,8 +616,9 @@ int handle_user_prompt_submit(void)
       struct ss_sbuf ctx = {0};
       ss_add(&ctx, "<aimee-context>\n");
       ss_add(&ctx, b.p);
-      ss_add(&ctx, "explore-with: find_symbol, lsp_references, ast_grep_search, search_graph, "
-                   "get_context_block\n");
+      ss_add(&ctx, "explore-with: " AIMEE_CODE_TOOL_FIND_SYMBOL
+                   ", lsp_references, " AIMEE_CODE_TOOL_AST_GREP_SEARCH ", " AIMEE_CODE_TOOL_INDEX
+                   " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID ", get_context_block\n");
       ss_add(&ctx, "</aimee-context>");
 
       cJSON *out = cJSON_CreateObject();
@@ -640,6 +658,7 @@ int handle_pre_compact(void)
    cJSON *body = cJSON_CreateObject();
    cJSON_AddStringToObject(body, "task_hint", "compaction re-prime");
    cJSON_AddBoolToObject(body, "session_start", 1);
+   ss_add_memory_cwd(body);
    char *body_s = cJSON_PrintUnformatted(body);
    cJSON_Delete(body);
 
