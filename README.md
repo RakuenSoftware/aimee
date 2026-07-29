@@ -60,14 +60,20 @@ Start one container. The browser wizard brings up the KB and inference services.
 git clone https://github.com/RakuenSoftware/aimee.git
 cd aimee
 docker compose -f compose.server-managed.yaml up -d
+docker compose -f compose.server-managed.yaml logs aimee-server
 ```
 
-Open <https://localhost:8443> and sign in as `aimee` / `aimee-local-dev`. The wizard first replaces
-that published development login with your persistent operator username and password, then picks
-the primary agent, inference tier, git hosts, and workspaces. Its last step starts:
+Unless both browser credential env vars were supplied, the logs print a random temporary username
+and password under `[webchat]`. Open <https://localhost:8443> and sign in with that pair. The wizard
+first replaces it with your persistent operator username and password, then creates the initial
+agent and picks the inference tier, git hosts, and workspaces. Its last step starts:
 
 - `aimee-kb`, with private PostgreSQL 18, pgvector, and pgvectorscale inside the container;
 - `aimee-llm`, on CPU or GPU.
+
+The managed deploy creates and starts KB before LLM. It does not wait for first-boot model downloads:
+KB database initialization and CPU indexing begin immediately while LLM readiness continues in the
+background. A failed LLM download remains visible in that container's status and logs.
 
 It also displays the one client-enrollment command for the signed-in first user.
 For a local inference tier, setup separately provisions an authenticated KB-to-LLM service identity;
@@ -76,6 +82,14 @@ no inference credential needs to be copied from the browser.
 Finish the wizard's account step before putting it on a network. The managed compose file mounts the
 Docker socket; that gives aimee-server control of the host Docker daemon. Use the regular split stack
 if you do not want that.
+
+To supply an operator-managed browser login instead, set both variables together; a partial pair is
+rejected at startup:
+
+```bash
+AIMEE_WEBCHAT_USER=admin AIMEE_WEBCHAT_PASSWORD='use-a-secret' \
+  docker compose -f compose.server-managed.yaml up -d
+```
 
 Install the `aimee` release binary on your development machine, then copy the exact command shown by
 the wizard:

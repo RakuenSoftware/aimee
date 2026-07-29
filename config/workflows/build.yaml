@@ -63,7 +63,7 @@ nodes:
     in:
       src: plan.out
     params:
-      roundtable: plan
+      roundtable: default
       panel:
         required:
           - security
@@ -115,7 +115,7 @@ nodes:
     in:
       src: accept_freeze.out
     params:
-      roundtable: acceptance
+      roundtable: default
       panel:
         required:
           - security
@@ -149,7 +149,7 @@ nodes:
     in:
       src: doc_freeze.out
     params:
-      roundtable: documentation
+      roundtable: default
       panel:
         required:
           - architect

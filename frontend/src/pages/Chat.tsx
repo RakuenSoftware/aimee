@@ -2900,7 +2900,9 @@ export default function Chat() {
       {/* The project belongs to the active SESSION (top tab); picking one here
           binds it to this session, and the agent runs with it as cwd. A Clear
           button resets this conversation (fresh provider session). */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      {/* Reserve the tutorial launcher's top-right corner. Without this padding,
+          its absolute "?" button sits directly over Clear and steals clicks. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingRight: 48, boxSizing: 'border-box' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <ProjectPicker
             key={activeSessionId}

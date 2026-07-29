@@ -204,12 +204,14 @@ static int deploy_env_overrides(const char *deploy_env, const char *inherited)
  * the deploy-env overrides any inherited value). Returns a NULL-terminated,
  * heap-owned array, or NULL on OOM / no config. */
 static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
-                                int *managed_identity_out)
+                                int *managed_kb_out, int *managed_identity_out)
 {
    if (err && err_cap)
       err[0] = '\0';
    if (managed_llm_out)
       *managed_llm_out = 0;
+   if (managed_kb_out)
+      *managed_kb_out = 0;
    if (managed_identity_out)
       *managed_identity_out = 0;
    config_t cfg;
@@ -241,6 +243,8 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
    }
    if (managed_llm_out)
       *managed_llm_out = managed_llm;
+   if (managed_kb_out)
+      *managed_kb_out = managed_kb;
    if (managed_identity_out)
       *managed_identity_out = managed_kb && explicit_parts == 0;
    if (managed_llm && deploy_llm_token(llm_token, sizeof(llm_token)) != 0)
@@ -449,7 +453,7 @@ static void deploy_retire_stale_llm(char **envp, const char *file, char *out, si
                "retired obsolete aimee-llm-cpu container\n");
 }
 
-/* Background worker: `docker compose -f <file> up -d`.
+/* Background worker: ordered `docker compose -f <file> up -d --no-deps SERVICE`.
  *
  * NO --remove-orphans, and this is not a style preference: it made the deploy
  * STOP THE SERVER RUNNING IT. aimee-server is started by compose.server-managed.yaml
@@ -471,36 +475,16 @@ static void deploy_retire_stale_llm(char **envp, const char *file, char *out, si
  * deploy_retire_stale_llm) — the one orphan the managed stack really can leave
  * behind, since the GPU and CPU services are mutually exclusive and both answer
  * to the network name `aimee-llm`. */
-/* Fill argv with the managed-deploy `up` command for `file` and NULL-terminate it.
- * Deliberately omits --remove-orphans, for the reason above. Returns the number of
- * arguments written, or -1 when cap is too small. Separated out so the command is
- * assertable in a test rather than inlined in the worker. */
-static int deploy_up_argv(const char *file, const char **argv, size_t cap)
+/* Fill argv with one ordered managed-service `up` command and NULL-terminate it.
+ * --no-deps is deliberate: the orchestrator starts aimee-kb first so its CPU-only
+ * initialization/indexing can run while aimee-llm downloads models. Deliberately
+ * omits --remove-orphans, for the reason above. */
+static int deploy_up_service_argv(const char *file, const char *service, const char **argv,
+                                  size_t cap)
 {
-   const char *cmd[] = {"docker", "compose", "-f", file, "up", "-d"};
+   const char *cmd[] = {"docker", "compose", "-f", file, "up", "-d", "--no-deps", service};
    size_t n = sizeof(cmd) / sizeof(cmd[0]);
-   if (!argv || cap < n + 1)
-      return -1;
-   for (size_t i = 0; i < n; i++)
-      argv[i] = cmd[i];
-   argv[n] = NULL;
-   return (int)n;
-}
-
-/* Verify from INSIDE aimee-kb that its configured endpoint and bearer are the
- * exact credentials accepted by aimee-llm. The token is expanded by the child
- * container's shell and never appears in the host argv or captured output. */
-static int deploy_llm_probe_argv(const char *file, const char **argv, size_t cap)
-{
-   static const char *probe = "test -n \"$AIMEE_LLM_URL\"; "
-                              "test -n \"$AIMEE_LLM_AUTH_TOKEN\"; "
-                              "curl -fsS -H \"Authorization: Bearer $AIMEE_LLM_AUTH_TOKEN\" "
-                              "-H 'Content-Type: application/json' -X POST --data '{}' "
-                              "\"${AIMEE_LLM_URL%/}/auth/verify\" >/dev/null";
-   const char *cmd[] = {"docker", "compose",  "-f", file,  "exec",
-                        "-T",     "aimee-kb", "sh", "-ec", probe};
-   size_t n = sizeof(cmd) / sizeof(cmd[0]);
-   if (!argv || cap < n + 1)
+   if (!argv || !file || !file[0] || !service || !service[0] || cap < n + 1)
       return -1;
    for (size_t i = 0; i < n; i++)
       argv[i] = cmd[i];
@@ -545,20 +529,12 @@ static void *deploy_worker(void *arg)
    (void)arg;
    char file[512];
    deploy_apply_compose_file(file, sizeof(file));
-   const char *argv[8];
-   if (deploy_up_argv(file, argv, sizeof(argv) / sizeof(argv[0])) < 0)
-   {
-      pthread_mutex_lock(&g_lock);
-      g_running = 0;
-      g_last_exit = -1;
-      snprintf(g_last_out, sizeof(g_last_out), "deploy: could not build the compose command\n");
-      pthread_mutex_unlock(&g_lock);
-      return NULL;
-   }
    char env_err[256];
    int managed_llm = 0;
+   int managed_kb = 0;
    int managed_identity = 0;
-   char **envp = build_deploy_envp(env_err, sizeof(env_err), &managed_llm, &managed_identity);
+   char **envp =
+       build_deploy_envp(env_err, sizeof(env_err), &managed_llm, &managed_kb, &managed_identity);
 
    char out[DEPLOY_OUT_CAP];
    int code = -1;
@@ -569,11 +545,44 @@ static void *deploy_worker(void *arg)
    {
       out[0] = '\0';
       deploy_retire_stale_llm(envp, file, out, sizeof(out));
-      size_t used = strlen(out);
-      if (run_capture(argv, envp, out + used, sizeof(out) - used, &code) != 0)
-         snprintf(out, sizeof(out),
-                  "deploy: failed to run `docker compose` (is docker on PATH?)\n");
-      else if (code == 0 && managed_identity)
+      code = 0;
+      size_t used = 0;
+
+      /* The server is already running this worker. Start KB next and LLM last.
+       * Model downloads continue inside the LLM container after this deploy
+       * finishes; KB initialization and CPU indexing do not wait for them. */
+      if (managed_kb)
+      {
+         const char *kb_argv[10];
+         used = strlen(out);
+         if (deploy_up_service_argv(file, "aimee-kb", kb_argv,
+                                    sizeof(kb_argv) / sizeof(kb_argv[0])) < 0 ||
+             run_capture(kb_argv, envp, out + used, sizeof(out) - used, &code) != 0)
+         {
+            code = -1;
+            snprintf(out, sizeof(out), "deploy: failed to start aimee-kb with `docker compose`\n");
+         }
+      }
+      if (code == 0 && managed_llm)
+      {
+         const char *llm_argv[10];
+         used = strlen(out);
+         if (deploy_up_service_argv(file, "aimee-llm", llm_argv,
+                                    sizeof(llm_argv) / sizeof(llm_argv[0])) < 0 ||
+             run_capture(llm_argv, envp, out + used, sizeof(out) - used, &code) != 0)
+         {
+            code = -1;
+            used = strlen(out);
+            if (used < sizeof(out) - 1)
+               snprintf(out + used, sizeof(out) - used,
+                        "deploy: failed to start aimee-llm with `docker compose`\n");
+         }
+      }
+      if (code == 0 && !managed_kb && !managed_llm)
+         snprintf(out + strlen(out), sizeof(out) - strlen(out),
+                  "deploy: no managed sibling services selected\n");
+
+      if (code == 0 && managed_identity)
       {
          const char *authority_argv[12];
          int authority_code = -1;
@@ -623,31 +632,6 @@ static void *deploy_worker(void *arg)
             if (used < sizeof(out) - 1)
                snprintf(out + used, sizeof(out) - used,
                         "deploy: managed server identity enrolled and verified\n");
-         }
-      }
-      if (code == 0 && managed_llm)
-      {
-         const char *probe_argv[12];
-         int probe_code = -1;
-         char probe_out[1024] = "";
-         if (deploy_llm_probe_argv(file, probe_argv, sizeof(probe_argv) / sizeof(probe_argv[0])) <
-                 0 ||
-             run_capture(probe_argv, envp, probe_out, sizeof(probe_out), &probe_code) != 0 ||
-             probe_code != 0)
-         {
-            code = probe_code == 0 ? -1 : probe_code;
-            used = strlen(out);
-            if (used < sizeof(out) - 1)
-               snprintf(out + used, sizeof(out) - used,
-                        "deploy: KB-to-LLM credential verification failed%s%s\n",
-                        probe_out[0] ? ": " : "", probe_out);
-         }
-         else
-         {
-            used = strlen(out);
-            if (used < sizeof(out) - 1)
-               snprintf(out + used, sizeof(out) - used,
-                        "deploy: authenticated KB-to-LLM connection verified\n");
          }
       }
    }
@@ -705,7 +689,7 @@ int deploy_apply_status(char *out, size_t out_cap, int *exit_code)
    const char *argv[] = {"docker", "compose", "-f", file, "ps", "-a", "--format", "json", NULL};
    /* Pass the deploy env (COMPOSE_PROFILES + COMPOSE_PROJECT_NAME) so `ps` scopes
     * to the same project/profiles the apply used; fall back to environ on OOM. */
-   char **envp = build_deploy_envp(NULL, 0, NULL, NULL);
+   char **envp = build_deploy_envp(NULL, 0, NULL, NULL, NULL);
    int rc = run_capture(argv, envp, out, out_cap, exit_code);
    free_envp(envp);
    return rc;

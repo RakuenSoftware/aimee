@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -78,12 +79,71 @@ func (s *server) setupAccountStore() string {
 	return filepath.Join(s.setupAccountDir(), "logins")
 }
 
+func (s *server) setupAccountCredentials() string {
+	return filepath.Join(s.setupAccountDir(), "bootstrap-credentials")
+}
+
 // configuredWithKnownBootstrap returns true only for the published development
 // credential. Operators who explicitly inject a different login do not need the
 // replacement step and must not have their account retired by it.
 func configuredWithKnownBootstrap() bool {
 	return os.Getenv("AIMEE_WEBCHAT_USER") == defaultBootstrapUsername &&
 		os.Getenv("AIMEE_WEBCHAT_PASSWORD") == defaultBootstrapPassword
+}
+
+// readGeneratedBootstrapUsername reads the root-only file written by the image
+// entrypoint when no explicit browser credential pair was supplied. Validate the
+// complete shape even though this endpoint needs only the username: a corrupt or
+// partially-written file must never authorize retirement of an unrelated user.
+func readGeneratedBootstrapUsername(path string) (string, bool) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	var username, password string
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(line, "username=") {
+			if username != "" {
+				return "", false
+			}
+			username = strings.TrimPrefix(line, "username=")
+			continue
+		}
+		if strings.HasPrefix(line, "password=") {
+			if password != "" {
+				return "", false
+			}
+			password = strings.TrimPrefix(line, "password=")
+			continue
+		}
+		if line != "" {
+			return "", false
+		}
+	}
+	suffix := strings.TrimPrefix(username, "aimee-")
+	if suffix == username || len(suffix) != 12 || len(password) != 64 {
+		return "", false
+	}
+	if _, err := hex.DecodeString(suffix); err != nil {
+		return "", false
+	}
+	if _, err := hex.DecodeString(password); err != nil {
+		return "", false
+	}
+	return username, true
+}
+
+// pendingBootstrapUsername identifies only credentials that onboarding owns and
+// may retire. Custom env credentials are operator-managed and skip replacement.
+// The legacy published pair remains recognized for rolling-upgrade safety.
+func (s *server) pendingBootstrapUsername() (string, bool) {
+	if username, ok := readGeneratedBootstrapUsername(s.setupAccountCredentials()); ok {
+		return username, true
+	}
+	if configuredWithKnownBootstrap() {
+		return defaultBootstrapUsername, true
+	}
+	return "", false
 }
 
 func readReplacementUsername(marker string) (string, bool) {
@@ -126,7 +186,8 @@ func writePrivateFile(path string, data []byte) error {
 // durableLoginReplacement rewrites the entrypoint-compatible username:crypt-hash
 // registry and records the bootstrap retirement marker. It returns a rollback
 // closure because the live account lock happens after persistence succeeds.
-func durableLoginReplacement(store, marker, oldUsername, newUsername, newHash string) (func(), error) {
+func durableLoginReplacement(store, marker, credentials, oldUsername, newUsername,
+	newHash string) (func(), error) {
 	originalStore, storeErr := os.ReadFile(store)
 	storeExisted := storeErr == nil
 	if storeErr != nil && !errors.Is(storeErr, os.ErrNotExist) {
@@ -136,6 +197,29 @@ func durableLoginReplacement(store, marker, oldUsername, newUsername, newHash st
 	markerExisted := markerErr == nil
 	if markerErr != nil && !errors.Is(markerErr, os.ErrNotExist) {
 		return nil, markerErr
+	}
+	originalCredentials, credentialsErr := os.ReadFile(credentials)
+	credentialsExisted := credentialsErr == nil
+	if credentialsErr != nil && !errors.Is(credentialsErr, os.ErrNotExist) {
+		return nil, credentialsErr
+	}
+
+	rollback := func() {
+		if storeExisted {
+			_ = writePrivateFile(store, originalStore)
+		} else {
+			_ = os.Remove(store)
+		}
+		if markerExisted {
+			_ = writePrivateFile(marker, originalMarker)
+		} else {
+			_ = os.Remove(marker)
+		}
+		if credentialsExisted {
+			_ = writePrivateFile(credentials, originalCredentials)
+		} else {
+			_ = os.Remove(credentials)
+		}
 	}
 
 	lines := make([]string, 0)
@@ -152,25 +236,12 @@ func durableLoginReplacement(store, marker, oldUsername, newUsername, newHash st
 		return nil, err
 	}
 	if err := writePrivateFile(marker, []byte(newUsername+"\n")); err != nil {
-		if storeExisted {
-			_ = writePrivateFile(store, originalStore)
-		} else {
-			_ = os.Remove(store)
-		}
+		rollback()
 		return nil, err
 	}
-
-	rollback := func() {
-		if storeExisted {
-			_ = writePrivateFile(store, originalStore)
-		} else {
-			_ = os.Remove(store)
-		}
-		if markerExisted {
-			_ = writePrivateFile(marker, originalMarker)
-		} else {
-			_ = os.Remove(marker)
-		}
+	if err := os.Remove(credentials); err != nil && !errors.Is(err, os.ErrNotExist) {
+		rollback()
+		return nil, err
 	}
 	return rollback, nil
 }
@@ -179,18 +250,19 @@ func (s *server) setupAccountStatus() map[string]any {
 	if username, ok := readReplacementUsername(s.setupAccountMarker()); ok {
 		return map[string]any{"complete": true, "required": false, "username": username}
 	}
-	if !configuredWithKnownBootstrap() {
+	bootstrapUsername, required := s.pendingBootstrapUsername()
+	if !required {
 		return map[string]any{"complete": true, "required": false, "username": currentConfiguredLogin()}
 	}
-	return map[string]any{"complete": false, "required": true, "username": defaultBootstrapUsername}
+	return map[string]any{"complete": false, "required": true, "username": bootstrapUsername}
 }
 
 func currentConfiguredLogin() string {
 	return strings.TrimSpace(os.Getenv("AIMEE_WEBCHAT_USER"))
 }
 
-// GET reports whether the published development login still needs replacement.
-// POST creates and persists the replacement account, locks the development login,
+// GET reports whether the temporary generated/legacy login still needs replacement.
+// POST creates and persists the replacement account, locks the temporary login,
 // invalidates its sessions, and moves this browser to a session for the new user.
 func (s *server) handleSetupAccount(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -209,12 +281,12 @@ func (s *server) handleSetupAccount(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusForbidden, "cross-origin account setup refused")
 		return
 	}
-	if _, complete := readReplacementUsername(s.setupAccountMarker()); complete ||
-		!configuredWithKnownBootstrap() {
+	bootstrapUsername, pending := s.pendingBootstrapUsername()
+	if _, complete := readReplacementUsername(s.setupAccountMarker()); complete || !pending {
 		writeJSONError(w, http.StatusConflict, "bootstrap account has already been replaced")
 		return
 	}
-	if currentUser(r) != defaultBootstrapUsername {
+	if currentUser(r) != bootstrapUsername {
 		writeJSONError(w, http.StatusForbidden, "sign in with the bootstrap account to replace it")
 		return
 	}
@@ -233,8 +305,8 @@ func (s *server) handleSetupAccount(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if req.Username == defaultBootstrapUsername {
-		writeJSONError(w, http.StatusBadRequest, "choose a username other than aimee")
+	if req.Username == bootstrapUsername {
+		writeJSONError(w, http.StatusBadRequest, "choose a username other than the bootstrap login")
 		return
 	}
 	if len(req.Password) < setupAccountMinPassword {
@@ -285,7 +357,7 @@ func (s *server) handleSetupAccount(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	rollback, err := durableLoginReplacement(s.setupAccountStore(), s.setupAccountMarker(),
-		defaultBootstrapUsername, req.Username, newHash)
+		s.setupAccountCredentials(), bootstrapUsername, req.Username, newHash)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "could not persist replacement account")
 		return
@@ -293,12 +365,12 @@ func (s *server) handleSetupAccount(w http.ResponseWriter, r *http.Request) {
 	// Invalidate every session authenticated with the published password before
 	// locking that login. A failure rolls durable state back while the PAM login
 	// still works, so the operator can sign in and retry.
-	if err := s.sessions.DeleteSessionsForUser(defaultBootstrapUsername); err != nil {
+	if err := s.sessions.DeleteSessionsForUser(bootstrapUsername); err != nil {
 		rollback()
 		writeJSONError(w, http.StatusInternalServerError, "could not invalidate bootstrap sessions")
 		return
 	}
-	if err := s.accounts.Lock(defaultBootstrapUsername); err != nil {
+	if err := s.accounts.Lock(bootstrapUsername); err != nil {
 		rollback()
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
