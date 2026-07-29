@@ -421,7 +421,7 @@ func TestNativeRoundtableFailsClosedWhenReviewerEvaluatesWrongStage(t *testing.T
 			agents := &recordingAgents{reviewResponse: `{` + prefix + `"original_request_alignment":{"status":"aligned","summary":"looks related"},"verdict":"approve","findings":[]}`}
 			runner := &NativeRunner{agents: agents, roundtables: configuredTestRoundtable(t)}
 			feedback, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), StepRequest{}, []panelSeat{{persona: "qa"}}, "review", "hash", "plan", 1)
-			if unreachable != "" || approvals != 0 || voters != 1 || len(feedback.Findings) != 1 {
+			if unreachable != "" || approvals != 0 || voters != 0 || len(feedback.Findings) != 1 {
 				t.Fatalf("stage mismatch accounting: approvals=%d voters=%d unreachable=%q feedback=%+v", approvals, voters, unreachable, feedback)
 			}
 			finding := feedback.Findings[0]
@@ -463,7 +463,7 @@ func TestStageMismatchCannotBeOverriddenByAnotherApproval(t *testing.T) {
 	}}
 	runner := &NativeRunner{agents: agents, roundtables: configuredTestRoundtable(t)}
 	feedback, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), StepRequest{}, []panelSeat{{persona: "qa"}, {persona: "security"}}, "review", "hash", "plan", 1)
-	if unreachable != "" || approvals != 1 || voters != 2 || len(feedback.Findings) != 1 || !strings.HasSuffix(feedback.Findings[0].ID, "-artifact-stage") {
+	if unreachable != "" || approvals != 1 || voters != 1 || len(feedback.Findings) != 1 || !strings.HasSuffix(feedback.Findings[0].ID, "-artifact-stage") {
 		t.Fatalf("mixed-stage panel could approve: approvals=%d voters=%d unreachable=%q feedback=%+v", approvals, voters, unreachable, feedback)
 	}
 }
@@ -509,6 +509,14 @@ func TestConfiguredRoundtableHonorsMinimumWhenASeatIsUnavailable(t *testing.T) {
 			}
 			if result.Roundtable == nil || !result.Roundtable.Degraded || result.Roundtable.ParticipantsTotal != 2 || result.Roundtable.ParticipantsUsed != tc.wantUsed || result.Roundtable.ParticipantsFailed != tc.wantFailed {
 				t.Fatalf("degraded participation was not preserved: %+v", result.Roundtable)
+			}
+			if len(result.Roundtable.ParticipantFailures) != tc.wantFailed {
+				t.Fatalf("participant failure diagnostics=%+v, want %d", result.Roundtable.ParticipantFailures, tc.wantFailed)
+			}
+			for _, failure := range result.Roundtable.ParticipantFailures {
+				if failure.Seat < 1 || failure.Persona == "" || failure.Category == "" || failure.Detail == "" {
+					t.Fatalf("incomplete participant failure diagnostic: %+v", failure)
+				}
 			}
 		})
 	}
@@ -690,12 +698,40 @@ func TestRoundtableStageGuidanceCoversEverySupportedStage(t *testing.T) {
 	tests := map[string]string{
 		"intent":      "acceptance criteria faithfully capture",
 		"plan":        "goal-only restatement",
-		"frozen_diff": "never create a blocking finding solely",
+		"frozen_diff": "negative or unavailable lookup evidence",
 	}
 	for stage, marker := range tests {
 		if normalized, ok := normalizeRoundtableStage(stage); !ok || normalized != stage || !strings.Contains(roundtableStageGuidance(normalized), marker) {
 			t.Fatalf("stage %q lacks its guidance marker %q", stage, marker)
 		}
+	}
+}
+
+func TestRoundtableRepairPreservesNonBlockingApprovalFindings(t *testing.T) {
+	prompt := panelResponseRepairPrompt("run", "hash", "frozen_diff", "invalid")
+	if !strings.Contains(prompt, "may carry suggestion or nit findings") || !strings.Contains(prompt, `"verdict":"approve|changes|blocked"`) || strings.Contains(prompt, "approve only with an empty findings array") {
+		t.Fatalf("repair prompt contradicts the panel verdict contract: %s", prompt)
+	}
+}
+
+func TestPanelFailureCategoryPreservesActionableCause(t *testing.T) {
+	tests := []struct {
+		name      string
+		err       error
+		transport bool
+		want      string
+	}{
+		{name: "deadline", err: context.DeadlineExceeded, transport: true, want: "deadline"},
+		{name: "capacity", err: errors.New("[aimee_err=concurrency_limit]"), transport: true, want: "capacity_backpressure"},
+		{name: "terminal", err: fmt.Errorf("%w: failed", ErrDelegateTerminal), transport: true, want: "delegate_terminal"},
+		{name: "malformed", err: errors.New("invalid character"), want: "malformed_after_repair"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := panelFailureCategory(tc.err, tc.transport); got != tc.want {
+				t.Fatalf("panelFailureCategory()=%q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
