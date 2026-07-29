@@ -1167,6 +1167,48 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
  * still works there; client-push indexing does not). */
 #if defined(AIMEE_POSIX)
 
+/* Keep the thin-client push path aligned with the local/canonical scanners.
+ * Hidden-root projects are deliberately excluded from index reads and startup
+ * cleanup so temporary .aimee/.claude worktrees cannot pollute the shared code
+ * graph.  Accepting one here used to report a successful upload whose symbols
+ * were immediately invisible to list/find/callers. */
+static int cli_ws_root_has_hidden_component(const char *path)
+{
+   if (!path)
+      return 0;
+   const char *p = path;
+   while (*p == '/')
+      p++;
+   const char *start = p;
+   for (;;)
+   {
+      if (*p == '/' || *p == '\0')
+      {
+         if (p > start && start[0] == '.')
+            return 1;
+         if (*p == '\0')
+            return 0;
+         start = ++p;
+      }
+      else
+      {
+         p++;
+      }
+   }
+}
+
+static int cli_ws_reject_hidden_root(const char *abs_root)
+{
+   if (!cli_ws_root_has_hidden_component(abs_root))
+      return 0;
+   fprintf(stderr,
+           "aimee: refusing to index hidden root: %s\n"
+           "  Index the non-hidden canonical checkout instead. Temporary .aimee/.claude\n"
+           "  worktrees are intentionally excluded from the shared code index.\n",
+           abs_root);
+   return 1;
+}
+
 /* Pull the human-readable message out of an {"error":...} envelope (object or
  * string form); returns NULL when there is no error. */
 static const char *cli_ws_err_message(cJSON *resp)
@@ -1367,6 +1409,8 @@ static void ws_tree_ingest_cb(const char *repo_abs, void *ctx)
 
 static int cli_ws_ingest_tree(const char *remote, const char *bearer, const char *abs_root)
 {
+   if (cli_ws_reject_hidden_root(abs_root))
+      return 1;
    ws_tree_ctx_t t = {remote, bearer, 0, 0};
    code_collect_discover_repos(abs_root, ws_tree_ingest_cb, &t);
    if (t.count == 0)
@@ -1401,6 +1445,11 @@ int cli_workspace_add_remote(const char *path)
    if (!abs)
    {
       fprintf(stderr, "aimee: workspace: cannot resolve path '%s' on this host\n", path);
+      return 1;
+   }
+   if (cli_ws_reject_hidden_root(abs))
+   {
+      free(abs);
       return 1;
    }
 

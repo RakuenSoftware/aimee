@@ -855,14 +855,16 @@ static cJSON *read_json_file(const char *path)
    return root;
 }
 
-static void ensure_claude_code_mcp(const char *settings_path)
+/* Merge Aimee into Claude Code's USER MCP registry (~/.claude.json).  Current
+ * Claude releases do not read mcpServers from ~/.claude/settings.json; that
+ * file is for settings/hooks.  Keeping the JSON merge separate from binary
+ * discovery makes the on-disk contract directly testable. */
+static void ensure_claude_code_mcp_entry(const char *config_path, const char *aimee_bin)
 {
-   const char *aimee_bin = resolved_aimee_bin_path();
-   struct stat st;
-   if (stat(aimee_bin, &st) != 0)
+   if (!config_path || !config_path[0] || !aimee_bin || !aimee_bin[0])
       return;
 
-   cJSON *root = read_json_file(settings_path);
+   cJSON *root = read_json_file(config_path);
    if (!cJSON_IsObject(root))
    {
       if (root)
@@ -879,7 +881,9 @@ static void ensure_claude_code_mcp(const char *settings_path)
       {
          cJSON *cmd = cJSON_GetObjectItemCaseSensitive(aimee, "command");
          cJSON *cmd_args = cJSON_GetObjectItemCaseSensitive(aimee, "args");
-         if (cJSON_IsString(cmd) && strcmp(cmd->valuestring, aimee_bin) == 0 &&
+         cJSON *type = cJSON_GetObjectItemCaseSensitive(aimee, "type");
+         if (cJSON_IsString(type) && strcmp(type->valuestring, "stdio") == 0 &&
+             cJSON_IsString(cmd) && strcmp(cmd->valuestring, aimee_bin) == 0 &&
              cJSON_IsArray(cmd_args) && cJSON_GetArraySize(cmd_args) == 1)
          {
             cJSON *arg0 = cJSON_GetArrayItem(cmd_args, 0);
@@ -906,8 +910,46 @@ static void ensure_claude_code_mcp(const char *settings_path)
       cJSON_DeleteItemFromObjectCaseSensitive(servers, "aimee");
 
    cJSON *aimee_server = create_aimee_mcp_server(aimee_bin);
+   cJSON_AddStringToObject(aimee_server, "type", "stdio");
    cJSON_AddItemToObject(servers, "aimee", aimee_server);
 
+   char *json = cJSON_Print(root);
+   if (json)
+   {
+      write_text_file(config_path, json, 0600);
+      free(json);
+   }
+   cJSON_Delete(root);
+}
+
+static void ensure_claude_code_mcp(const char *config_path)
+{
+   const char *aimee_bin = resolved_aimee_bin_path();
+   struct stat st;
+   if (stat(aimee_bin, &st) != 0)
+      return;
+   ensure_claude_code_mcp_entry(config_path, aimee_bin);
+}
+
+/* Remove only Aimee's obsolete settings.json registration after migrating it
+ * to ~/.claude.json.  Preserve unrelated keys and any other legacy entries. */
+static void remove_legacy_claude_settings_mcp(const char *settings_path)
+{
+   cJSON *root = read_json_file(settings_path);
+   if (!cJSON_IsObject(root))
+   {
+      cJSON_Delete(root);
+      return;
+   }
+   cJSON *servers = cJSON_GetObjectItemCaseSensitive(root, "mcpServers");
+   if (!cJSON_IsObject(servers) || !cJSON_GetObjectItemCaseSensitive(servers, "aimee"))
+   {
+      cJSON_Delete(root);
+      return;
+   }
+   cJSON_DeleteItemFromObjectCaseSensitive(servers, "aimee");
+   if (cJSON_GetArraySize(servers) == 0)
+      cJSON_DeleteItemFromObjectCaseSensitive(root, "mcpServers");
    char *json = cJSON_Print(root);
    if (json)
    {
@@ -1542,7 +1584,10 @@ static void ensure_claude_code_integration(const char *home)
 
    char settings_path[MAX_PATH_LEN];
    snprintf(settings_path, sizeof(settings_path), "%s/.claude/settings.json", home);
-   ensure_claude_code_mcp(settings_path);
+   char user_config_path[MAX_PATH_LEN];
+   snprintf(user_config_path, sizeof(user_config_path), "%s/.claude.json", home);
+   ensure_claude_code_mcp(user_config_path);
+   remove_legacy_claude_settings_mcp(settings_path);
    ensure_claude_code_hooks(settings_path);
    ensure_claude_code_env(settings_path);
    ensure_claude_code_commands(home);
