@@ -1,6 +1,6 @@
 # Proposal: run CI on slice sub-PRs
 
-- **State:** approved — single slice.
+- **State:** implemented — option 1 shipped in `ci.yml`.
 
 ## Problem
 
@@ -29,7 +29,8 @@ attribution to the slice that caused it.
 
 By direct observation:
 
-- `ci.yml`'s `pull_request.branches` list does not include `aimee/feat/**`.
+- Before this change, `ci.yml`'s `pull_request.branches` list did not include
+  `aimee/feat/**`.
 - PR #2011 merged with `check-runs` total_count = 0.
 - `GIT_PR_CI_NONE` is defined at `src/modules/git/git_pr_api.h:75`
   (`GIT_PR_CI_NONE = 0, /* no CI reported for the head commit */`), and
@@ -41,13 +42,12 @@ By direct observation:
   `"visibility":"PUBLIC"`). GitHub-hosted *standard* runners are free for public
   repositories; the per-OS billing multipliers (Linux 1x, Windows 2x, macOS 10x)
   apply to private-repo minute consumption, not here.
-- **Job structure:** `ci.yml` defines **15 jobs**. One of them, `e2e-docker`,
-  carries `matrix: topology: [T1, T2, T3]` and expands to 3 executions, giving
-  **17 job executions per run**. Every job targets `ubuntu-latest`,
-  `windows-latest` or `macos-latest` — all standard hosted runners, all free-tier
-  for this repo. The table below and the concurrency figures are stated in
-  *executions* (17), not definitions (15), since executions are what consume
-  runner slots.
+- **Job structure at measurement time:** the measured runs below had **15 job
+  definitions** and **17 executions** after the `e2e-docker` T1/T2/T3 matrix
+  expansion. These figures are a historical snapshot, not a verification
+  invariant: the workflow has gained jobs since the measurements were taken.
+  Verification of this trigger-only change must cover every job and every matrix
+  expansion present in `ci.yml` at verification time.
 
 ### Measured job durations
 
@@ -108,9 +108,11 @@ The real costs of adding slice CI are:
    setup overhead, which the job table does not capture. Consequently the saving
    from option 2 is **at most ~4 minutes per slice, and probably less**. Treat
    that as an indicative upper bound on the benefit, not a measured difference.
-2. **Runner concurrency.** A 5-slice run adds 5 x 17 = **85 job executions**
-   (17 executions per run, see Job structure above) competing for the account's
-   concurrent-job allowance against all other CI in flight. This is the one
+2. **Runner concurrency.** At measurement time, a 5-slice run added 5 x 17 =
+   **85 job executions** competing for the account's concurrent-job allowance
+   against all other CI in flight. This historical estimate scales with the
+   complete workflow and must be recalculated from the jobs and matrix expansions
+   present in `ci.yml` when capacity is evaluated. Runner concurrency is the one
    genuine scarcity, and it is **not quantified here**: the account's concurrency
    ceiling and its current utilisation were not measured. If slice CI is adopted
    and other PRs start queueing behind it, this is the cause to look at first.
@@ -188,3 +190,25 @@ If **option 2** is implemented instead:
 - An e2e-only or cross-slice regression is still expected to surface only at the
   final PR. This is an accepted limitation of option 2 specifically, and must be
   recorded as such so the weaker guarantee is not mistaken for the full gate.
+
+## Implemented change
+
+`ci.yml` now includes `'aimee/feat/**'` in the existing `pull_request` branch
+filter. A pull request targeting a work-item feature branch therefore starts the
+same workflow as pull requests targeting `main`, `testing`, or
+`feature/core-modularization`. No job, matrix, permissions, event type, or
+workflow-engine CI semantics changed.
+
+## Verification
+
+1. Parse `.github/workflows/ci.yml` and confirm the `pull_request.branches`
+   filter includes `aimee/feat/**` while retaining all previous target branches
+   and pull-request activity types.
+2. Compare the workflow before and after the implementation and confirm that
+   every job definition and every matrix expansion present in `ci.yml` at
+   implementation time remains unchanged; do not use historical hard-coded job
+   counts as the gate.
+3. Open or synchronize a test pull request targeting an `aimee/feat/<work-item>`
+   branch and confirm that all executions produced by the complete current
+   workflow report check runs. Confirm a feature-to-`testing` pull request still
+   produces that same complete gate.
