@@ -1,6 +1,6 @@
 # Proposal: the WFE rt_gate panel cannot seat under the engine's own load
 
-- **State:** pending — single slice.
+- **State:** approved — single slice.
 
 ## Symptom
 
