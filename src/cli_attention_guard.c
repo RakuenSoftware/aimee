@@ -17,6 +17,7 @@
 #include "cli_attention_guard.h"
 #include "cli_session_start.h" /* read_stdin */
 #include "aimee_home.h"
+#include "agent_code_capabilities.h"
 #include "platform_path.h"
 #include "cJSON.h"
 #include <ctype.h>
@@ -1059,8 +1060,9 @@ int handle_attention_guard(void)
          {
             fprintf(stderr,
                     "aimee attention-guard: this session has hit its raw-scan cap (%d). Aimee "
-                    "indexes this repo — explore through it instead: find_symbol, "
-                    "ast_grep_search, search_graph, or get_context_block. Raise "
+                    "indexes this repo — explore through it instead: " AIMEE_CODE_TOOL_FIND_SYMBOL
+                    ", " AIMEE_CODE_TOOL_AST_GREP_SEARCH ", " AIMEE_CODE_TOOL_INDEX
+                    " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID ", or get_context_block. Raise "
                     "ingress_max_raw_scans in aimee.yaml to raise or lift the cap.\n",
                     ingress_max_raw_scans);
             exit_code = 2;

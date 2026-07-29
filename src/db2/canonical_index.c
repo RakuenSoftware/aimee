@@ -1470,6 +1470,7 @@ static const char *ci_find_sql = "SELECT p.name, f.path, t.line, t.kind"
                                  " JOIN files f ON f.id = t.file_id"
                                  " JOIN projects p ON p.id = f.project_id"
                                  " WHERE t.name = ?1"
+                                 "   AND (?3 = '' OR p.name = ?3)"
                                  "   AND f.path NOT LIKE '.%'"
                                  "   AND f.path NOT LIKE '%/.%'"
                                  "   AND p.root NOT LIKE '%/.%'"
@@ -1483,6 +1484,7 @@ static const char *ci_find_like_sql = "SELECT p.name, f.path, t.line, t.kind"
                                       " JOIN files f ON f.id = t.file_id"
                                       " JOIN projects p ON p.id = f.project_id"
                                       " WHERE t.name LIKE ?1 ESCAPE '\\'"
+                                      "   AND (?3 = '' OR p.name = ?3)"
                                       "   AND f.path NOT LIKE '.%'"
                                       "   AND f.path NOT LIKE '%/.%'"
                                       "   AND p.root NOT LIKE '%/.%'"
@@ -1510,7 +1512,8 @@ static int ci_drain_term_hits(aimee_pg_stmt_t *st, term_hit_t *out, int max, cha
    return count;
 }
 
-int canonical_index_find(const char *identifier, term_hit_t *out, int max)
+int canonical_index_find_project(const char *project, const char *identifier, term_hit_t *out,
+                                 int max)
 {
    void *conn = ci_conn();
    if (!conn)
@@ -1522,6 +1525,7 @@ int canonical_index_find(const char *identifier, term_hit_t *out, int max)
       return -1;
    aimee_pg_bind_text(st, "?1", identifier);
    aimee_pg_bind_int(st, "?2", max);
+   aimee_pg_bind_text(st, "?3", project && project[0] ? project : "");
    int count = ci_drain_term_hits(st, out, max, err, sizeof(err));
    aimee_pg_finalize(st);
 
@@ -1538,10 +1542,16 @@ int canonical_index_find(const char *identifier, term_hit_t *out, int max)
          break;
       aimee_pg_bind_text(st2, "?1", pattern);
       aimee_pg_bind_int(st2, "?2", max);
+      aimee_pg_bind_text(st2, "?3", project && project[0] ? project : "");
       count = ci_drain_term_hits(st2, out, max, err, sizeof(err));
       aimee_pg_finalize(st2);
    }
    return count;
+}
+
+int canonical_index_find(const char *identifier, term_hit_t *out, int max)
+{
+   return canonical_index_find_project(NULL, identifier, out, max);
 }
 
 int canonical_index_blast_radius(const char *project, const char *file_path, blast_radius_t *out)

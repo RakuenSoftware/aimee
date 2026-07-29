@@ -360,7 +360,7 @@ static void test_budgeted_build_uses_memory_previews(void)
        "  - memory:102 fallback [L2/policy score=0.440 headline_missing=true]\n"
        "    > Fallback preview from content.\n"
        "context-budget: used_bytes=342 budget_bytes=1200 omitted_count=0 headline_missing_count=1\n"
-       "explore-with: find_symbol, lsp_references, ast_grep_search, search_graph, "
+       "explore-with: find_symbol, lsp_references, ast_grep_search, index command=hybrid, "
        "get_context_block, "
        "memory_get\n"
        "</aimee-context>";

@@ -12,6 +12,7 @@
 #include "log.h"
 #include "request_context.h"
 #include "platform_random.h"
+#include "agent_code_capabilities.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -22,8 +23,9 @@
 
 /* The standing exploration policy carried in every envelope. Kept short — it is
  * advice the model weighs, not a contract we can enforce over the wire. */
-#define INGRESS_EXPLORE_WITH                                                                       \
-   "find_symbol, lsp_references, ast_grep_search, search_graph, get_context_block, memory_get"
+static const char *const INGRESS_EXPLORE_WITH = AIMEE_CODE_TOOL_FIND_SYMBOL
+    ", lsp_references, " AIMEE_CODE_TOOL_AST_GREP_SEARCH ", " AIMEE_CODE_TOOL_INDEX
+    " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID ", get_context_block, memory_get";
 
 #define INGRESS_AUDIT_CONTEXT_FILE            "audit_context.txt"
 #define INGRESS_AUDIT_CONTEXT_MAX_AGE_SECONDS (6 * 60 * 60)
@@ -132,7 +134,9 @@ char *ingress_preinject_format_envelope(const char *context_block, const char *c
    dstr_append_str(&d, context_block);
    if (context_block[strlen(context_block) - 1] != '\n')
       dstr_append_str(&d, "\n");
-   dstr_append_str(&d, "explore-with: " INGRESS_EXPLORE_WITH "\n");
+   dstr_append_str(&d, "explore-with: ");
+   dstr_append_str(&d, INGRESS_EXPLORE_WITH);
+   dstr_append_str(&d, "\n");
    dstr_append_str(&d, "</aimee-context>");
    char *out = dstr_steal(&d);
    return out;
