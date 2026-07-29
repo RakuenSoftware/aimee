@@ -628,8 +628,9 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
           tools,
           mcp_tool_new(
               "roundtable_review",
-              "Review a supplied artifact with the configured Go roundtable. Every seat is an "
-              "ordinary delegate request; the result is returned after synthesis.",
+              "Start an asynchronous review of a supplied artifact with the configured Go "
+              "roundtable. Every seat is an ordinary delegate request. Returns a run_id "
+              "immediately; poll roundtable_status until synthesis completes.",
               cJSON_Parse("{\"type\":\"object\",\"properties\":{"
                           "\"diff\":{\"type\":\"string\",\"description\":\"Unified diff or code "
                           "under review.\",\"minLength\":20},"
@@ -651,6 +652,19 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                           "\"roundtable\":{\"type\":\"string\",\"description\":\"Saved "
                           "roundtable preset to use. Omit to use the configured default.\"}},"
                           "\"required\":[\"diff\"]}")));
+   }
+
+   /* roundtable_status */
+   {
+      cJSON_AddItemToArray(
+          tools,
+          mcp_tool_new(
+              "roundtable_status",
+              "Get an asynchronous roundtable review by run_id. Poll until status is completed, "
+              "failed, or cancelled; a completed snapshot contains the synthesized result.",
+              cJSON_Parse("{\"type\":\"object\",\"properties\":{\"run_id\":{\"type\":"
+                          "\"string\",\"description\":\"Run id returned by roundtable_review.\"}},"
+                          "\"required\":[\"run_id\"]}")));
    }
 
    /* mcp_tools_pipeline.inc: roundtable authoring pipeline (pipeline_*) MCP tool

@@ -278,6 +278,7 @@ static void test_namespaced_tools_and_dispatch(void)
    int saw_delegate_background_absent = 0;
    int saw_delegate_cwd = 0;
    int saw_delegate_status = 0;
+   int saw_roundtable_status = 0;
    int saw_job_family = 0;
    int saw_skill_manage = 0;
    int saw_skill_manage_cwd = 0;
@@ -289,6 +290,8 @@ static void test_namespaced_tools_and_dispatch(void)
          saw_namespaced = 1;
       if (cJSON_IsString(tool_name) && strcmp(tool_name->valuestring, "delegate_status") == 0)
          saw_delegate_status = 1;
+      if (cJSON_IsString(tool_name) && strcmp(tool_name->valuestring, "roundtable_status") == 0)
+         saw_roundtable_status = 1;
       /* job_start/job_status were collapsed into the `job` family (P4b); the
        * member description no longer appears standalone. Verify the family tool. */
       if (cJSON_IsString(tool_name) && strcmp(tool_name->valuestring, "job") == 0)
@@ -321,6 +324,7 @@ static void test_namespaced_tools_and_dispatch(void)
    assert(saw_delegate_background_absent);
    assert(saw_delegate_cwd);
    assert(saw_delegate_status);
+   assert(saw_roundtable_status);
    assert(saw_job_family);
    assert(saw_skill_manage);
    assert(saw_skill_manage_cwd);
@@ -455,7 +459,7 @@ static void test_osv_offline_cache_miss_allows(void)
  * built-in tool surface (name + sorted schema property keys + required), captured
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
-#define MCP_TOOLS_GOLDEN_COUNT 52
+#define MCP_TOOLS_GOLDEN_COUNT 53
 #define MCP_TOOLS_GOLDEN                                                                           \
    "ask_user {choices,question} req:question\n"                                                    \
    "ast_grep_search {lang,path,pattern} req:lang,pattern\n"                                        \
@@ -517,6 +521,7 @@ static void test_osv_offline_cache_miss_allows(void)
    "recall {block_type,command,limit,limit_tokens,query,since} req:command\n"                      \
    "roadmap {command,roadmap_id} req:command\n"                                                    \
    "roundtable_review {artifact_stage,brief,diff,original_request,roundtable,workdir} req:diff\n"  \
+   "roundtable_status {run_id} req:run_id\n"                                                       \
    "rules {command,reason,text} req:command\n"                                                     \
    "search_docs {max_results,project,query} req:query\n"                                           \
    "search_memory {filter,query} req:query\n"                                                      \
@@ -628,6 +633,7 @@ static void test_tool_profile_filter(void)
                                       "git",
                                       "delegate",
                                       "roundtable_review",
+                                      "roundtable_status",
                                       "ask_user",
                                       "send_message",
                                       "note",

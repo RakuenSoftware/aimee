@@ -33,6 +33,7 @@ static const char *const MCP_CORE_TOOLS[] = {
     "git",             /* all git/gh ops via one multiplexed tool (command=...) */
     "delegate",
     "roundtable_review", /* multi-agent */
+    "roundtable_status", /* poll asynchronous roundtable_review */
     "ask_user",
     "send_message", /* interaction */
     "note",         /* capture (note family: create/list/search) */
