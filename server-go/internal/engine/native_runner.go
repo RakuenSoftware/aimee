@@ -684,6 +684,9 @@ func commitChanges(ctx context.Context, workdir, stage string) error {
 	if _, err := gitText(ctx, workdir, "add", "-A"); err != nil {
 		return err
 	}
+	if err := validateStagedChanges(ctx, workdir); err != nil {
+		return err
+	}
 	cmd := exec.CommandContext(ctx, "git", "-C", workdir, "diff", "--cached", "--quiet")
 	if err := cmd.Run(); err == nil {
 		return nil
@@ -692,6 +695,60 @@ func commitChanges(ctx context.Context, workdir, stage string) error {
 	}
 	_, err := gitText(ctx, workdir, "-c", "user.name=aimee-wfe", "-c", "user.email=wfe@aimee.local", "commit", "-m", "wfe: "+stage)
 	return err
+}
+
+const maxDirectGitBlobBytes int64 = 100 * 1024 * 1024
+
+func isCoreDumpName(name string) bool {
+	base := filepath.Base(name)
+	if base == "core" {
+		return true
+	}
+	if !strings.HasPrefix(base, "core.") || len(base) == len("core.") {
+		return false
+	}
+	for _, r := range base[len("core."):] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// validateStagedChanges keeps process crash artifacts and forge-rejected giant
+// blobs out of autonomous commits. Core dumps are disposable products of a
+// failed verifier, never proposal output, so remove them. Other giant files are
+// preserved in the worktree but fail closed with an actionable diagnostic.
+func validateStagedChanges(ctx context.Context, workdir string) error {
+	cmd := exec.CommandContext(ctx, "git", "-C", workdir, "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("list staged paths: %s", strings.TrimSpace(string(out)))
+	}
+	for _, raw := range strings.Split(string(out), "\x00") {
+		if raw == "" {
+			continue
+		}
+		path := filepath.Join(workdir, filepath.FromSlash(raw))
+		info, statErr := os.Lstat(path)
+		if statErr != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		if isCoreDumpName(raw) {
+			if removeErr := os.Remove(path); removeErr != nil {
+				return fmt.Errorf("remove verifier core dump %s: %w", raw, removeErr)
+			}
+			if _, addErr := gitText(ctx, workdir, "add", "-A", "--", raw); addErr != nil {
+				return addErr
+			}
+			continue
+		}
+		if info.Size() > maxDirectGitBlobBytes {
+			_, _ = gitText(ctx, workdir, "reset", "-q", "HEAD", "--", raw)
+			return fmt.Errorf("refusing to commit %s: %d bytes exceeds GitHub's 100 MiB blob limit", raw, info.Size())
+		}
+	}
+	return nil
 }
 
 // integrateFeatureBase merges the parent feature branch (aimee/feat/<parentID>)

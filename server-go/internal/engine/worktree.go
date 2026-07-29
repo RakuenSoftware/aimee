@@ -48,16 +48,44 @@ func (m *WorktreeManager) Ensure(ctx context.Context, item db1.WorkItem, feature
 	if feature {
 		branch = "aimee/feat/" + item.ID
 	}
+	expected := filepath.Join(m.root, item.ID)
+	candidate := expected
 	if item.Worktree != "" {
-		expected := filepath.Join(m.root, item.ID)
-		abs, _ := filepath.Abs(item.Worktree)
-		if info, err := os.Stat(abs); err == nil && info.IsDir() && abs == expected {
-			top, topErr := gitText(ctx, abs, "rev-parse", "--show-toplevel")
-			actual, branchErr := gitText(ctx, abs, "rev-parse", "--abbrev-ref", "HEAD")
-			if topErr == nil && branchErr == nil && filepath.Clean(top) == abs && actual == branch {
-				return abs, branch, nil
+		candidate, _ = filepath.Abs(item.Worktree)
+	}
+	if info, err := os.Stat(candidate); err == nil && info.IsDir() && candidate == expected {
+		top, topErr := gitText(ctx, candidate, "rev-parse", "--show-toplevel")
+		actual, branchErr := gitText(ctx, candidate, "rev-parse", "--abbrev-ref", "HEAD")
+		if topErr == nil && branchErr == nil && filepath.Clean(top) == candidate {
+			if actual == branch {
+				if item.Worktree != candidate {
+					if err := m.db.SetWorktree(ctx, item.ID, candidate); err != nil {
+						return "", "", err
+					}
+				}
+				return candidate, branch, nil
+			}
+			// The former C engine named a generated slice
+			// <parent>-<slice-hash> while Go uses the durable child item ID. A
+			// crash/replay can lose the DB path after implementation but leave
+			// this registered worktree and its commits. Rename that exact legacy
+			// branch in place; deleting/recreating the tree would discard work.
+			if legacySliceBranch(item.ID) == actual {
+				if _, existsErr := gitText(ctx, item.Repo, "rev-parse", "--verify", branch+"^{commit}"); existsErr == nil {
+					return "", "", fmt.Errorf("managed worktree uses legacy branch %q but target branch %q already exists", actual, branch)
+				}
+				if _, renameErr := gitText(ctx, candidate, "branch", "-m", branch); renameErr != nil {
+					return "", "", fmt.Errorf("migrate legacy worktree branch: %w", renameErr)
+				}
+				if err := m.db.SetWorktree(ctx, item.ID, candidate); err != nil {
+					return "", "", err
+				}
+				return candidate, branch, nil
 			}
 		}
+		return "", "", fmt.Errorf("managed worktree path %q already exists with an unexpected repository or branch", candidate)
+	}
+	if item.Worktree != "" {
 		if err := m.db.SetWorktree(ctx, item.ID, ""); err != nil {
 			return "", "", err
 		}
@@ -69,7 +97,7 @@ func (m *WorktreeManager) Ensure(ctx context.Context, item db1.WorkItem, feature
 	if info, statErr := os.Stat(repo); statErr != nil || !info.IsDir() {
 		return "", "", errors.New("workflow repository is not a local directory")
 	}
-	path := filepath.Join(m.root, item.ID)
+	path := expected
 	base := "HEAD"
 	if feature {
 		trunk, trunkErr := repoDefaultBranch(ctx, repo)
@@ -113,6 +141,22 @@ func (m *WorktreeManager) Ensure(ctx context.Context, item db1.WorkItem, feature
 		return "", "", err
 	}
 	return path, branch, nil
+}
+
+func legacySliceBranch(id string) string {
+	slice := strings.Index(id, ".s")
+	if slice < 0 {
+		return ""
+	}
+	generation := strings.Index(id[slice+2:], ".g")
+	if generation < 0 {
+		return ""
+	}
+	suffix := id[slice+1 : slice+2+generation]
+	if suffix == "" {
+		return ""
+	}
+	return "aimee/wi/" + id[:slice] + "-" + suffix
 }
 
 func (m *WorktreeManager) Cleanup(ctx context.Context, item db1.WorkItem) error {

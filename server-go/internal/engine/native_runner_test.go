@@ -2098,6 +2098,63 @@ func TestBranchHasWorkOverBaseSeesCommitsFromEarlierAttempts(t *testing.T) {
 	}
 }
 
+func TestCommitChangesDropsCoreDumpAndRejectsGiantBlob(t *testing.T) {
+	repo := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return string(out)
+	}
+	run("init", "-b", "testing")
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("seed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "README")
+	run("commit", "-m", "seed")
+
+	if err := os.WriteFile(filepath.Join(repo, "impl.txt"), []byte("done\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "core.12345"), []byte("crash"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := commitChanges(context.Background(), repo, "impl"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "core.12345")); !os.IsNotExist(err) {
+		t.Fatalf("core dump survived autonomous commit: %v", err)
+	}
+	if tracked := strings.TrimSpace(run("ls-files", "core.12345")); tracked != "" {
+		t.Fatalf("core dump was committed: %q", tracked)
+	}
+
+	giant := filepath.Join(repo, "giant.bin")
+	f, err := os.OpenFile(giant, os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(maxDirectGitBlobBytes + 1); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	err = commitChanges(context.Background(), repo, "giant")
+	if err == nil || !strings.Contains(err.Error(), "100 MiB") {
+		t.Fatalf("giant blob error = %v", err)
+	}
+	if _, statErr := os.Stat(giant); statErr != nil {
+		t.Fatalf("rejected blob should remain for diagnosis: %v", statErr)
+	}
+}
+
 // The intended slice cycle is: cut a branch from the feature tip, do the work,
 // merge back into the feature branch, and let the NEXT slice start from the
 // updated tip. That merge happens through the FORGE, which advances the remote

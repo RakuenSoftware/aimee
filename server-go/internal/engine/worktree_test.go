@@ -62,6 +62,82 @@ func TestParentUsesFeatureWorktreeAndChildBranchesFromIt(t *testing.T) {
 	}
 }
 
+func TestEnsureMigratesLegacySliceWorktreeAfterReplayLosesDBPath(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=t@example",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=t@example")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	run("init", "-b", "testing", repo)
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run("-C", repo, "add", "README")
+	run("-C", repo, "commit", "-m", "init")
+
+	id := "wi_88955dcd207cfd11986175109e3effcc.sa90502568a.g0.0"
+	legacy := legacySliceBranch(id)
+	if legacy != "aimee/wi/wi_88955dcd207cfd11986175109e3effcc-sa90502568a" {
+		t.Fatalf("legacy branch=%q", legacy)
+	}
+	run("-C", repo, "branch", legacy)
+	trees := filepath.Join(root, "trees")
+	if err := os.MkdirAll(trees, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(trees, id)
+	run("-C", repo, "worktree", "add", "--lock", path, legacy)
+	if err := os.WriteFile(filepath.Join(path, "implemented.txt"), []byte("preserve me\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run("-C", path, "add", "implemented.txt")
+	run("-C", path, "commit", "-m", "implementation")
+
+	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_parent", Repo: repo,
+		ProposalPath: "parent", WorkflowName: "build", StartStage: "slices"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: id, Repo: repo, ProposalPath: "p",
+		WorkflowName: "slice", StartStage: "freeze", ParentID: "wi_parent"}); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewWorktreeManager(store, trees)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, _ := store.WorkItem(ctx, id)
+	gotPath, gotBranch, err := manager.Ensure(ctx, item, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantBranch := "aimee/wi/" + id
+	if gotPath != path || gotBranch != wantBranch {
+		t.Fatalf("got path=%q branch=%q", gotPath, gotBranch)
+	}
+	actual, err := gitText(ctx, path, "branch", "--show-current")
+	if err != nil || actual != wantBranch {
+		t.Fatalf("renamed branch=%q err=%v", actual, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(path, "implemented.txt")); err != nil || string(data) != "preserve me\n" {
+		t.Fatalf("implementation was not preserved: %q err=%v", data, err)
+	}
+	item, _ = store.WorkItem(ctx, id)
+	if item.Worktree != path {
+		t.Fatalf("persisted worktree=%q", item.Worktree)
+	}
+}
+
 // A slice merges through the forge, which advances the REMOTE feature branch and
 // leaves the local ref where the run started. A later slice branched from that
 // stale local ref gets a tree missing the work earlier slices already landed, so

@@ -547,12 +547,21 @@ static int wfe_managed_repo(const char *workdir_in, const char *head, char *work
    return 0;
 }
 
-static int wfe_default_base(const char *principal, const char *repo, const char *base, char *err,
-                            size_t errlen)
+/* A final WFE PR targets the branch on which the admitted repository was
+ * checked out (for example `testing`), not necessarily GitHub's repository
+ * default (`main`). Binding the base to this trusted checkout prevents an item
+ * from selecting an arbitrary remote branch while preserving non-default
+ * integration lanes. */
+static int wfe_managed_base(const char *repo, const char *base, char *err, size_t errlen)
 {
    char branch[256];
-   if (git_pr_default_branch_via_api(principal, repo, branch, sizeof(branch), err, errlen) != 0)
+   const char *branch_argv[] = {"git", "-C", repo, "rev-parse", "--abbrev-ref", "HEAD", NULL};
+   if (wfe_git_capture(repo, branch_argv, branch, sizeof(branch)) != 0 || !branch[0] ||
+       strcmp(branch, "HEAD") == 0)
+   {
+      snprintf(err, errlen, "cannot resolve managed integration branch");
       return -1;
+   }
    return strcmp(branch, base) == 0;
 }
 
@@ -682,7 +691,7 @@ int rh_internal_forge_execute(const route_req_t *rq, char *resp, int cap)
    {
       int base_ok = slice_head && wfe_slice_ref_matches_workdir(workdir, "aimee/feat/", 1, base);
       if (feature_head)
-         base_ok = wfe_default_base(principal, trusted_repo, base, err, sizeof(err));
+         base_ok = wfe_managed_base(trusted_repo, base, err, sizeof(err));
       if (base_ok == 0)
          snprintf(err, sizeof(err), "pull request base is outside the managed target");
       if (base_ok == 1)
