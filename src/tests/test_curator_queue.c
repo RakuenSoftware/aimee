@@ -12,6 +12,7 @@
 
 #include "aimee.h"
 #include "kb_curator_extract.h"
+#include "kb_curator_provider.h"
 #include "kb_curator_sidecar.h"
 #include "platform_test_util.h"
 #include "db2_test_shim.h"
@@ -35,6 +36,12 @@ static void test_provider_unavailable_is_not_a_job_failure(void)
    assert(kb_curator_error_is_provider_unavailable("provider HTTP 503"));
    assert(kb_curator_error_is_provider_unavailable("provider HTTP 429"));
    assert(kb_curator_error_is_provider_unavailable("provider HTTP -1"));
+   /* Exact text emitted by the bundled curator-extract.py -> llm-chat.py path. */
+   assert(kb_curator_error_is_provider_unavailable(
+       "llm-chat.py exit 1: llm-chat: HTTP 503 from http://aimee-llm:8742/v1/chat/completions"));
+   assert(kb_curator_error_is_provider_unavailable(
+       "{\"error\": {\"code\": \"provider_unavailable\", \"message\": \"synth upstream "
+       "circuit is open\"}}"));
 
    /* A 4xx that is ABOUT the request, a malformed reply, and a missing document
     * are all real job failures: retrying them forever would be the poison-job
@@ -49,6 +56,17 @@ static void test_provider_unavailable_is_not_a_job_failure(void)
    assert(!kb_curator_error_is_provider_unavailable(NULL));
    assert(!kb_curator_error_is_provider_unavailable(""));
    printf("  PASS: provider-unavailable is classified apart from job failure\n");
+}
+
+static void test_provider_outage_arms_global_backoff(void)
+{
+   kb_curator_provider_backoff_recovered();
+   assert(!kb_curator_provider_backoff_active());
+   kb_curator_provider_backoff_note();
+   assert(kb_curator_provider_backoff_active());
+   kb_curator_provider_backoff_recovered();
+   assert(!kb_curator_provider_backoff_active());
+   printf("  PASS: provider outage arms process-wide LLM-lane backoff\n");
 }
 
 static sqlite3 *open_db(void)
@@ -343,6 +361,7 @@ int main(void)
    test_retry_backoff_defers_reclaim(db);
    test_retry_backoff_ignores_fresh_jobs(db);
    test_provider_unavailable_is_not_a_job_failure();
+   test_provider_outage_arms_global_backoff();
    test_provider_outage_requeues(db);
 
    printf("test_curator_queue: all tests passed\n");

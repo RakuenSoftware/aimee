@@ -16,17 +16,16 @@ typedef struct
  * Returns 1 if a job was processed, 0 if queue is empty, -1 on hard error. */
 int kb_curator_extract_one(const kb_curator_extract_opts_t *opts);
 
-/* 1 when the failure means "the provider would not serve this right now"
- * (503/429/transport) rather than anything about the job itself. Such a failure
- * must not spend the job's attempt budget: the budget exists to stop a poison
- * job looping, and an upstream outage is not a poison job. Exposed for tests. */
-int kb_curator_error_is_provider_unavailable(const char *error_msg);
-
 /* Requeue a job the provider refused, WITHOUT spending an attempt: returns the
  * row to 'pending', gives back the increment ce_claim_job applied, and sets a
  * backoff. Exposed for tests. */
 void kb_curator_mark_retry_provider_unavailable(int64_t job_id, int attempts,
                                                 const char *error_msg);
+
+/* Code-unit analogue of the extract_doc requeue above. Kept public for the
+ * same reason: unit tests pin the durable queue transition directly. */
+void kb_curator_mark_retry_provider_unavailable_code(int64_t job_id, int attempts,
+                                                     const char *error_msg);
 
 /* Claim and process one pending extract_code_unit job from kb_code_unit_jobs.
  * Reads source file from the filesystem, invokes the sidecar with

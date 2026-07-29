@@ -19,6 +19,7 @@
 #include "kb_curator_extract.h"
 #include "kb_curator_queue.h"
 #include "kb_curator_grounding.h"
+#include "kb_curator_provider.h"
 #include "kb_curator_sidecar.h"
 
 /* The deep-curator code-extract gate is now ON by compiled default, but the
@@ -176,6 +177,33 @@ static void test_extract_code_unit_one_empty_queue(void)
 
    db2_test_shim_close();
    printf("  PASS: test_extract_code_unit_one_empty_queue\n");
+}
+
+static void test_provider_outage_requeues_code_unit(void)
+{
+   db2_test_shim_open();
+   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   assert(db != NULL);
+   assert(sqlite3_exec(db,
+                       "INSERT INTO kb_code_unit_jobs (id,project,file_path,symbol,status,attempts,"
+                       "claimed_by,claimed_at) VALUES (9602,'p','out.c','out_fn','running',3,"
+                       "'kb.curator.drain',datetime('now'))",
+                       NULL, NULL, NULL) == SQLITE_OK);
+
+   kb_curator_provider_backoff_recovered();
+   kb_curator_mark_retry_provider_unavailable_code(
+       9602, 3, "llm-chat.py exit 1: HTTP 503 from http://aimee-llm:8742/v1/chat/completions");
+
+   char buf[256];
+   assert(ccu_test_job_field(db, 9602, "status", buf, sizeof(buf)) == 0);
+   assert(strcmp(buf, "pending") == 0);
+   assert(ccu_test_job_field(db, 9602, "attempts", buf, sizeof(buf)) == 0);
+   assert(strcmp(buf, "2") == 0);
+   assert(kb_curator_provider_backoff_active());
+   kb_curator_provider_backoff_recovered();
+
+   db2_test_shim_close();
+   printf("  PASS: provider outage requeues code unit without spending attempt budget\n");
 }
 
 static void test_queue_dedup_via_conflict(void)
@@ -738,6 +766,7 @@ int main(void)
    test_queue_code_units_for_project_gate_off();
    test_queue_null_args();
    test_extract_code_unit_one_empty_queue();
+   test_provider_outage_requeues_code_unit();
    test_queue_dedup_via_conflict();
 
    test_grounding_side_effecting_predicate();

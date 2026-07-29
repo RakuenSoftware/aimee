@@ -76,6 +76,10 @@ char *kb_curator_llm_run(const config_t *cfg, kb_curator_stage_t stage, const ch
       if (rc != 0)
       {
          provider_completion_free(&out);
+         if (kb_curator_error_is_provider_unavailable(errbuf))
+            kb_curator_provider_backoff_note();
+         else
+            kb_curator_provider_backoff_recovered();
          return NULL; /* errbuf set by provider_client_complete */
       }
       char *content = out.content; /* transfer ownership to the caller */
@@ -83,12 +87,22 @@ char *kb_curator_llm_run(const config_t *cfg, kb_curator_stage_t stage, const ch
       provider_completion_free(&out);
       if (!content && errbuf && errlen)
          snprintf(errbuf, errlen, "provider returned empty content");
+      if (content)
+         kb_curator_provider_backoff_recovered();
       return content;
    }
 
    /* 2. Legacy sidecar command. */
    if (fallback_command && fallback_command[0])
-      return kb_curator_sidecar_run(fallback_command, request_json, out_cap, errbuf, errlen);
+   {
+      char *content =
+          kb_curator_sidecar_run(fallback_command, request_json, out_cap, errbuf, errlen);
+      if (content)
+         kb_curator_provider_backoff_recovered();
+      else if (kb_curator_error_is_provider_unavailable(errbuf))
+         kb_curator_provider_backoff_note();
+      return content;
+   }
 
    /* 3. Neither configured — the stage stays idle. */
    if (errbuf && errlen)
