@@ -2498,9 +2498,8 @@ static void test_mtls_serve(void)
     * their certificate is valid. The grant handler therefore refuses this
     * project certificate before it reaches the Postgres-only tenant gate. */
    {
-      const char *grant =
-          "{\"server_id\":\"srv-a\",\"team_id\":1,\"subject\":\"owner\","
-          "\"tier\":\"full\",\"granted_by\":\"owner\"}";
+      const char *grant = "{\"server_id\":\"srv-a\",\"team_id\":1,\"subject\":\"owner\","
+                          "\"tier\":\"full\",\"granted_by\":\"owner\"}";
       char req[512];
       snprintf(req, sizeof(req),
                "POST /v1/write-tier-grants/set HTTP/1.1\r\nContent-Length: %zu\r\n"
@@ -2518,13 +2517,12 @@ static void test_mtls_serve(void)
     * would prove the mTLS-to-owner bridge regressed again. */
    {
       char owner_cert[KB_PKI_CERT_PEM_MAX], owner_key[KB_PKI_KEY_PEM_MAX];
-      assert(kb_pki_issue_client_cert(&ca, "p5-server-client", 3600, owner_cert,
-                                      sizeof(owner_cert), owner_key, sizeof(owner_key)) == 0);
+      assert(kb_pki_issue_client_cert(&ca, "p5-server-client", 3600, owner_cert, sizeof(owner_cert),
+                                      owner_key, sizeof(owner_key)) == 0);
       SSL_CTX *owner_ctx = kb_tls_client_ctx(ca.cert_pem, owner_cert, owner_key);
       assert(owner_ctx);
-      const char *grant =
-          "{\"server_id\":\"srv-a\",\"team_id\":1,\"subject\":\"owner\","
-          "\"tier\":\"full\",\"granted_by\":\"owner\"}";
+      const char *grant = "{\"server_id\":\"srv-a\",\"team_id\":1,\"subject\":\"owner\","
+                          "\"tier\":\"full\",\"granted_by\":\"owner\"}";
       char req[512];
       snprintf(req, sizeof(req),
                "POST /v1/write-tier-grants/set HTTP/1.1\r\nContent-Length: %zu\r\n"
