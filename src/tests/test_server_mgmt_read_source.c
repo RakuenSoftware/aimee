@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include "server.h"
 #include "agent_config.h"
 #include "management_read.h"

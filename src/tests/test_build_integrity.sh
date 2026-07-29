@@ -82,11 +82,50 @@ else
     fail "server entrypoint can time out recovery or let prewarm collide with a stale server pid"
 fi
 
-if awk '/^FROM /{runtime=($0=="FROM debian:bookworm-slim"); found=0} runtime && /build-essential/{found=1} END{exit !found}' \
-    ../Dockerfile.server; then
-    pass "server runtime carries the baseline workflow verification toolchain"
+server_verify_deps="build-essential clang-format-19 libcurl4-openssl-dev libpam0g-dev libp11-kit-dev libpq-dev libsqlite3-dev libssl-dev libzstd-dev pkg-config postgresql-client python3 python3-yaml ripgrep zlib1g-dev"
+missing_server_verify_deps=""
+for dep in $server_verify_deps; do
+    if ! awk -v dep="$dep" '/^FROM /{runtime=($0=="FROM debian:bookworm-slim"); found=0} runtime && index($0, dep){found=1} END{exit !found}' \
+        ../Dockerfile.server; then
+        missing_server_verify_deps="$missing_server_verify_deps $dep"
+    fi
+done
+if [ -z "$missing_server_verify_deps" ] &&
+   grep -qF 'ARG VERIFY_PG_MAJOR=18' ../Dockerfile.server &&
+   grep -qF 'bookworm-pgdg main' ../Dockerfile.server &&
+   grep -qF 'COPY --from=wfe-build /usr/local/go/ /usr/local/go/' ../Dockerfile.server &&
+   grep -qF 'ENV PATH=/var/lib/aimee/.npm-global/bin:/usr/local/go/bin:$PATH' ../Dockerfile.server &&
+   grep -qF 'ENV AIMEE_VERIFY_MAKE_JOBS=2' ../Dockerfile.server &&
+   grep -qF 'ENV AIMEE_VERIFY_TEST_JOBS=2' ../Dockerfile.server; then
+    pass "server runtime carries the complete workflow verification toolchain"
 else
-    fail "server runtime cannot execute Make/C/C++ workflow verification"
+    fail "server runtime is missing workflow verification packages or Go 1.25:$missing_server_verify_deps"
+fi
+
+# `git verify` may invoke make with parallelism. The shipping-artifact build has
+# to finish before lint's bus blast-radius gate inspects those binaries, or a
+# healthy clean checkout fails nondeterministically on partial artifact coverage.
+if grep -qF 'verify-local: all' Makefile &&
+   sed -n '/^verify-local:/,/^[^[:space:]#].*:/p' Makefile | grep -qF '@$(MAKE) check-linking' &&
+   sed -n '/^verify-local:/,/^[^[:space:]#].*:/p' Makefile | grep -qF '@$(MAKE) lint' &&
+   ! grep -qE '^verify-local:.*lint' Makefile; then
+    pass "verify-local builds shipping artifacts before lint inspection"
+else
+    fail "verify-local can race lint against a partial shipping build"
+fi
+
+# Verification runs inside the server image, whose deployment posture is
+# expressed through AIMEE_* environment overrides. Those values are correct for
+# the live daemon but must not override config fixtures in repository unit tests.
+if sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk |
+   grep -qF 'unset AIMEE_HOME AIMEE_API_REMOTE_WRITES AIMEE_API_MTLS AIMEE_API_BEARER_TOKEN' &&
+   sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk |
+       grep -qF 'AIMEE_SERVER_HTTP_BIND AIMEE_WORKSPACES_DIR AIMEE_KB_API_URL' &&
+   sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk |
+       grep -qF 'AIMEE_KB_API_BEARER_TOKEN AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET'; then
+    pass "unit verification removes server deployment overrides"
+else
+    fail "unit verification inherits server deployment overrides"
 fi
 
 case "$MODE" in
@@ -144,6 +183,27 @@ if [ -z "$missing_tests" ]; then
     pass "all TEST_TARGETS have source files"
 else
     fail "missing test sources:$missing_tests"
+fi
+
+# GNU libc extensions used by tests must be requested before any system header.
+# Debian's compiler intentionally hides declarations such as memmem otherwise,
+# so keep the clean verifier from depending on ambient compiler flags.
+for src in $(grep -rl --include='*.c' '\bmemmem[[:space:]]*(' tests 2>/dev/null); do
+    feature_line=$(grep -n '^#define _GNU_SOURCE' "$src" | head -1 | cut -d: -f1)
+    include_line=$(grep -n '^#include' "$src" | head -1 | cut -d: -f1)
+    if [ -z "$feature_line" ] || [ -z "$include_line" ] || [ "$feature_line" -ge "$include_line" ]; then
+        fail "$src uses memmem without declaring _GNU_SOURCE before system headers"
+    fi
+done
+pass "memmem tests declare GNU extensions before system headers"
+
+# Debian Bookworm's supported SQLite predates the string_agg alias. DB2 reads
+# that run in both PostgreSQL and the SQLite test shim must not hide backend-
+# specific aggregate syntax in this shared artifact listing path.
+if ! grep -q '\bstring_agg[[:space:]]*(' db2/artifacts.c; then
+    pass "artifact proposal listing is portable across PostgreSQL and Bookworm SQLite"
+else
+    fail "artifact proposal listing depends on SQLite-unsupported string_agg"
 fi
 
 # 4. Rules.mk: TEST_TARGETS continuation lines (detect missing backslash)

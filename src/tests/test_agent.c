@@ -2227,6 +2227,14 @@ static void test_parent_write_guard_blocks_parent_writes(void)
    stdout_item = cJSON_GetObjectItem(json, "stdout");
    ec = cJSON_GetObjectItem(json, "exit_code");
    assert(stdout_item && cJSON_IsString(stdout_item));
+   if (!strstr(stdout_item->valuestring, "local-bin-index-ok"))
+   {
+      cJSON *stderr_item = cJSON_GetObjectItem(json, "stderr");
+      fprintf(stderr, "local-bin resolution output: stdout=%s stderr=%s exit=%d\n",
+              stdout_item->valuestring,
+              stderr_item && cJSON_IsString(stderr_item) ? stderr_item->valuestring : "<missing>",
+              ec && cJSON_IsNumber(ec) ? ec->valueint : -999);
+   }
    assert(strstr(stdout_item->valuestring, "local-bin-index-ok") != NULL);
    assert(ec && ec->valueint == 0);
    cJSON_Delete(json);

@@ -1,3 +1,10 @@
+/* web_read.c uses strcasestr, a GNU extension. This translation unit includes
+ * web_read.c directly, so feature selection must happen before any system
+ * header is loaded rather than inside the included source after <string.h>. */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 /* test_web_read_spans.c -- deterministic match-window extraction.
  *
  * The previous version of this file tested a chunker and three ranking

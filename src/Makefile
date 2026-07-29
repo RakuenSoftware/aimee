@@ -810,13 +810,23 @@ include tests/Rules.mk
 # available. This keeps lint in the enforced path while still running the
 # full unit suite before push/PR creation.
 #
-# Test-execution parallelism. The unit suite is ~200 separate binaries; running
-# them one at a time is the single biggest verify cost, so default to all cores.
-# Override with AIMEE_VERIFY_TEST_JOBS=1 to debug test-ordering flakiness. The
-# explicit value on the sub-make command line intentionally overrides any
-# TEST_RUN_JOBS inherited from a (possibly stale) auto-generated verify config.
-AIMEE_VERIFY_TEST_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 4)
-verify-local: lint check-linking
+# Test-execution parallelism. A workflow host can verify several slices at once,
+# so using every visible CPU per verifier multiplies into hundreds of competing
+# test processes and makes timing-sensitive tests fail under self-induced load.
+# Keep a conservative per-run default; operators can still raise it explicitly.
+# The command-line value intentionally overrides TEST_RUN_JOBS inherited from a
+# (possibly stale) auto-generated verify config.
+AIMEE_VERIFY_TEST_JOBS ?= 2
+
+# The complete shipping build must finish before lint inspects its artifacts.
+# Declaring lint and check-linking as sibling prerequisites lets a parallel outer
+# make run them together; using check-linking alone also omits the static
+# forwarder and resolver because they have no dynamic-link policy to inspect.
+# Keep the phases explicit and ordered: build the authoritative `all` set, check
+# dynamic-link boundaries, inspect every shipping artifact, then run the suite.
+verify-local: all
+	@$(MAKE) check-linking
+	@$(MAKE) lint
 	@$(MAKE) TEST_RUN_JOBS=$(AIMEE_VERIFY_TEST_JOBS) unit-tests
 	@echo "verify-local: ok"
 

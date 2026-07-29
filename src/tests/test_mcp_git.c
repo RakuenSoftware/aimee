@@ -1350,8 +1350,8 @@ static void test_verify_load_config_emits_parallel_steps(void)
    assert(cfg.count == 1);
    assert(strcmp(cfg.steps[0].name, "verify-local") == 0);
    assert(strstr(cfg.steps[0].run, "AIMEE_VERIFY_MAKE_JOBS") != NULL);
-   /* The generated step defaults the job counts to $(nproc) so a fresh install
-    * builds and runs the suite in parallel. */
+   /* Builds can use $(nproc), while tests use a bounded per-verifier default so
+    * concurrent workflow verification cannot multiply into host-wide overload. */
    assert(strstr(cfg.steps[0].run, "nproc") != NULL);
    assert(strstr(cfg.steps[0].run, "AIMEE_VERIFY_TEST_JOBS") != NULL);
 
@@ -1518,7 +1518,7 @@ static void test_verify_load_config_falls_back_to_verify_local(void)
    assert(strcmp(cfg.steps[0].name, "verify-local") == 0);
    assert(strcmp(cfg.steps[0].run,
                  "make -j${AIMEE_VERIFY_MAKE_JOBS:-$(nproc 2>/dev/null || echo 4)} "
-                 "AIMEE_VERIFY_TEST_JOBS=${AIMEE_VERIFY_TEST_JOBS:-$(nproc 2>/dev/null || echo 4)} "
+                 "AIMEE_VERIFY_TEST_JOBS=${AIMEE_VERIFY_TEST_JOBS:-2} "
                  "verify-local") == 0);
 
    verify_test_teardown(tmpdir, fake_home);

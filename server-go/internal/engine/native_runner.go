@@ -352,7 +352,37 @@ func (r *NativeRunner) structured(ctx context.Context, req StepRequest, kind str
 		if source == "" {
 			return StepResult{}, errors.New("split requires an in.plan or in.intent artifact binding")
 		}
-		prompt = "Decompose the complete approved plan below. Return only JSON shaped {\"schema_version\":1,\"packets\":[{\"packet_id\":\"p1\",\"summary\":\"...\",\"target_blocks\":[\"implement\"],\"dependencies\":[],\"acceptance_criteria\":[\"...\"]}]}. Each summary becomes a pull request title: make it a concise reviewer-facing outcome that says what changes, not a process instruction such as inspect, only if necessary, or minimally update. Do not omit work or truncate content.\n\nPLAN:\n" + source
+		if requestRequiresSingleSlice(req.Proposal) {
+			title, err := pullRequestTitle(req.Proposal)
+			if err != nil {
+				return StepResult{}, fmt.Errorf("single-slice request title: %w", err)
+			}
+			content, err := json.Marshal(map[string]any{
+				"schema_version": 1,
+				"packets": []map[string]any{{
+					"packet_id":     "p1",
+					"summary":       title,
+					"target_blocks": []string{"implement"},
+					"dependencies":  []string{},
+					"acceptance_criteria": []string{
+						"Implement the complete approved plan as one reviewable change.",
+						"Do not add deferred, post-adoption, or otherwise out-of-scope deliverables.",
+					},
+					"original_request": req.Proposal,
+					"approved_plan":    source,
+				}},
+			})
+			if err != nil {
+				return StepResult{}, err
+			}
+			return StepResult{Status: StepAdvanced, ArtifactType: "plan", Artifact: string(content)}, nil
+		}
+		prompt = "Decompose the complete approved plan into the smallest independent implementation packets that preserve the ORIGINAL REQUEST exactly. " +
+			"Return only JSON shaped {\"schema_version\":1,\"packets\":[{\"packet_id\":\"p1\",\"summary\":\"...\",\"target_blocks\":[\"implement\"],\"dependencies\":[],\"acceptance_criteria\":[\"...\"]}]}. " +
+			"Only create packets for repository changes that can be completed in this workflow run. Do not create packets for post-adoption measurements, future observation windows, operational follow-up, proposal bookkeeping, or manual verification. " +
+			"Tests and acceptance checks are criteria, not packets, unless the original request explicitly asks for a new reusable test artifact. Every packet must trace to an explicit requested deliverable; useful extra work is scope drift. " +
+			"Each summary becomes a pull request title: make it a concise reviewer-facing outcome that says what changes, not a process instruction such as inspect, only if necessary, or minimally update. Do not omit requested implementation work or truncate content.\n\n" +
+			"ORIGINAL REQUEST:\n" + req.Proposal + "\n\nAPPROVED PLAN:\n" + source
 		if req.Feedback != nil {
 			encoded, _ := json.Marshal(req.Feedback)
 			prompt += "\n\nACCEPTANCE FEEDBACK THAT THE NEW PACKETS MUST RESOLVE:\n" + string(encoded)
@@ -393,6 +423,18 @@ func (r *NativeRunner) structured(ctx context.Context, req StepRequest, kind str
 		typeName = "plan"
 	}
 	return StepResult{Status: StepAdvanced, ArtifactType: typeName, Artifact: string(content), CostUSD: cost, CostUnknown: costUnknown}, nil
+}
+
+func requestRequiresSingleSlice(request string) bool {
+	replacer := strings.NewReplacer("-", " ", "‑", " ", "–", " ", "—", " ", "_", " ")
+	for _, raw := range strings.Split(strings.ReplaceAll(request, "\r\n", "\n"), "\n") {
+		line := strings.ToLower(replacer.Replace(raw))
+		line = strings.Join(strings.Fields(line), " ")
+		if strings.Contains(line, "state:") && strings.Contains(line, "single slice") {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *NativeRunner) branchOpen(ctx context.Context, req StepRequest) (StepResult, error) {

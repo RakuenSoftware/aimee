@@ -698,8 +698,12 @@ unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	@# output size — its own comment admits as much — but a short prefix costs
 	@# nothing and keeps this change from perturbing it.
 	@th="$$(mktemp -d /tmp/aut.XXXXXX)"; \
-	export HOME="$$th" TMPDIR="$$th"; unset AIMEE_HOME; \
+	export HOME="$$th" TMPDIR="$$th"; \
+	unset AIMEE_HOME AIMEE_API_REMOTE_WRITES AIMEE_API_MTLS AIMEE_API_BEARER_TOKEN \
+	  AIMEE_SERVER_HTTP_BIND AIMEE_WORKSPACES_DIR AIMEE_KB_API_URL \
+	  AIMEE_KB_API_BEARER_TOKEN AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET; \
 	trap 'rm -rf "$$th"' EXIT; \
+	export AIMEE_TEST_FAILURE_DIR="$$th"; \
 	jobs="$(TEST_RUN_JOBS)"; \
 	if [ "$$jobs" -le 1 ]; then \
 	  for t in $(TEST_TARGETS); do \
@@ -712,8 +716,12 @@ unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	    [ "$$rc" -eq 0 ] || exit "$$rc"; \
 	  done; \
 	else \
-	  printf '%s\0' $(TEST_TARGETS) | \
-	    xargs -0 -n1 -P "$$jobs" sh -c 't="$$1"; log="$$(mktemp /tmp/aimee-test-run.XXXXXX)"; echo "  $$t"; "./$$t" >"$$log" 2>&1; rc="$$?"; cat "$$log"; rm -f "$$log"; if [ "$$rc" -ne 0 ]; then echo "FAILED: $$t" >&2; fi; exit "$$rc"' _ || exit 1; \
+	  if ! printf '%s\0' $(TEST_TARGETS) | \
+	    xargs -0 -n1 -P "$$jobs" sh -c 't="$$1"; log="$$(mktemp /tmp/aimee-test-run.XXXXXX)"; echo "  $$t"; "./$$t" >"$$log" 2>&1; rc="$$?"; cat "$$log"; rm -f "$$log"; if [ "$$rc" -ne 0 ]; then echo "FAILED: $$t" >&2; printf "FAILED: %s\\n" "$$t" >"$$AIMEE_TEST_FAILURE_DIR/failure.$$$$"; fi; exit "$$rc"' _; then \
+	    echo "Unit test failures:" >&2; \
+	    cat "$$th"/failure.* 2>/dev/null >&2 || true; \
+	    exit 1; \
+	  fi; \
 	fi
 	@echo "All tests passed."
 

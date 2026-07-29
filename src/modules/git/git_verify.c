@@ -206,14 +206,13 @@ static int append_verify_local_step(dstr_t *yaml, const char *make_subdir)
    if (make_subdir && make_subdir[0])
       dstr_appendf(yaml,
                    "      run: cd %s && make -j${AIMEE_VERIFY_MAKE_JOBS:-$(nproc 2>/dev/null || "
-                   "echo 4)} AIMEE_VERIFY_TEST_JOBS=${AIMEE_VERIFY_TEST_JOBS:-$(nproc 2>/dev/null "
-                   "|| echo 4)} verify-local\n",
+                   "echo 4)} AIMEE_VERIFY_TEST_JOBS=${AIMEE_VERIFY_TEST_JOBS:-2} verify-local\n",
                    make_subdir);
    else
-      dstr_appendf(
-          yaml, "      run: make -j${AIMEE_VERIFY_MAKE_JOBS:-$(nproc 2>/dev/null || echo 4)} "
-                "AIMEE_VERIFY_TEST_JOBS=${AIMEE_VERIFY_TEST_JOBS:-$(nproc 2>/dev/null || echo 4)} "
-                "verify-local\n");
+      dstr_appendf(yaml,
+                   "      run: make -j${AIMEE_VERIFY_MAKE_JOBS:-$(nproc 2>/dev/null || echo 4)} "
+                   "AIMEE_VERIFY_TEST_JOBS=${AIMEE_VERIFY_TEST_JOBS:-2} "
+                   "verify-local\n");
    return 1;
 }
 
@@ -299,9 +298,7 @@ static int generate_project_yaml(const char *project_root, const char *output_pa
          const int is_test_target =
              (strcmp(target, "unit-tests") == 0 || strcmp(target, "test") == 0);
          const char *test_jobs =
-             is_test_target
-                 ? " TEST_RUN_JOBS=${AIMEE_VERIFY_TEST_JOBS:-$(nproc 2>/dev/null || echo 4)}"
-                 : "";
+             is_test_target ? " TEST_RUN_JOBS=${AIMEE_VERIFY_TEST_JOBS:-2}" : "";
          if (make_subdir[0])
             dstr_appendf(&yaml,
                          "      run: cd %s && make "

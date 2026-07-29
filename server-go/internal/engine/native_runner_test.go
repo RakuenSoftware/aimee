@@ -834,6 +834,73 @@ func TestNativeRunnerSplitAcceptsManagedChangeIntentBinding(t *testing.T) {
 	}
 }
 
+func TestNativeRunnerSplitHonorsExplicitSingleSliceWithoutDelegating(t *testing.T) {
+	plan := "# Plan\n\nAdd the feature-branch trigger and change nothing else."
+	proposal := "# Proposal: run CI on slice sub-PRs\n\n- **State:** pending — single slice.\n\n## Recommendation\n\nAdd `aimee/feat/**` to the existing trigger."
+	runner := &NativeRunner{agents: noRosterAgents{}}
+	result, err := runner.structured(context.Background(), StepRequest{
+		WorkItem: db1.WorkItem{Repo: "/repo"},
+		Proposal: proposal,
+		Inputs: map[string]wfe.Artifact{"plan": {
+			Type: "plan", Content: []byte(plan), Hash: wfe.Hash([]byte(plan)),
+		}},
+	}, "packets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StepAdvanced || result.ArtifactType != "plan" {
+		t.Fatalf("result=%+v", result)
+	}
+	var packetPlan struct {
+		Packets []struct {
+			PacketID        string `json:"packet_id"`
+			Summary         string `json:"summary"`
+			OriginalRequest string `json:"original_request"`
+			ApprovedPlan    string `json:"approved_plan"`
+		} `json:"packets"`
+	}
+	if err := json.Unmarshal([]byte(result.Artifact), &packetPlan); err != nil {
+		t.Fatal(err)
+	}
+	if len(packetPlan.Packets) != 1 {
+		t.Fatalf("single-slice request produced %d packets: %s", len(packetPlan.Packets), result.Artifact)
+	}
+	packet := packetPlan.Packets[0]
+	if packet.PacketID != "p1" || packet.Summary != "Run CI on slice sub-PRs" ||
+		packet.OriginalRequest != proposal || packet.ApprovedPlan != plan {
+		t.Fatalf("single packet lost authoritative scope: %+v", packet)
+	}
+}
+
+func TestNativeRunnerSplitPromptCarriesOriginalRequestAndRejectsFollowUpPackets(t *testing.T) {
+	agents := &recordingAgents{draftResponses: []string{`{"schema_version":1,"packets":[{"packet_id":"p1","summary":"implement the requested change","target_blocks":["implement"],"dependencies":[],"acceptance_criteria":["requested change exists"]}]}`}}
+	runner := &NativeRunner{agents: agents}
+	plan := []byte("# Plan\n\nImplement the requested change.")
+	_, err := runner.structured(context.Background(), StepRequest{
+		WorkItem: db1.WorkItem{Repo: "/repo"},
+		Proposal: "# Proposal\n\nImplement only the requested change.",
+		Inputs: map[string]wfe.Artifact{"plan": {
+			Type: "plan", Content: plan, Hash: wfe.Hash(plan),
+		}},
+	}, "packets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agents.requests) != 1 {
+		t.Fatalf("delegate requests=%d, want 1", len(agents.requests))
+	}
+	prompt := agents.requests[0].Prompt
+	for _, required := range []string{
+		"ORIGINAL REQUEST", "Implement only the requested change.",
+		"APPROVED PLAN", "Only create packets for repository changes",
+		"post-adoption measurements", "acceptance checks are criteria, not packets",
+	} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("split prompt omitted %q:\n%s", required, prompt)
+		}
+	}
+}
+
 func TestDirectRoundtableRejectsStalePanelIdentityWithoutChairman(t *testing.T) {
 	agents := &recordingAgents{reviewResponse: `{"run_id":"another-run","artifact_hash":"stale-hash","artifact_stage":"frozen_diff","original_request_alignment":{"status":"aligned","summary":"looks right"},"verdict":"approve","findings":[]}`}
 	runner := &NativeRunner{agents: agents, roundtables: configuredTestRoundtable(t)}

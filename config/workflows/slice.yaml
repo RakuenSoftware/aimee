@@ -22,6 +22,11 @@ nodes:
     block: implement
     in:
       plan: scope.out
+    params:
+      # Verification or delegate failures get a small corrective window. A
+      # persistent environment failure must park for an operator, not burn the
+      # default twenty complete implementation turns.
+      max_rounds: 3
     next: freeze
     # A transient implement failure (delegate flub, failed verify) retries; a
     # looped node with no on_fail edge parks 'stuck' permanently.

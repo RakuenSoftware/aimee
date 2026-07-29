@@ -116,6 +116,26 @@ FROM code-server-stage-${WITH_VSCODE} AS code-server-stage
 
 FROM debian:bookworm-slim
 
+# Verification builds the KB sources too. They use PostgreSQL 17's asynchronous
+# cancellation API, while Debian bookworm ships libpq 15 headers. Add the
+# official PGDG repository and pin the verifier client/header family to the same
+# current major used by the KB image without changing the production runtime's
+# established Debian baseline.
+ARG VERIFY_PG_MAJOR=18
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && for attempt in 1 2 3 4 5; do \
+         curl -fsS --connect-timeout 10 --max-time 60 \
+           -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+           https://www.postgresql.org/media/keys/ACCC4CF8.asc && break; \
+         echo "pgdg key fetch failed (attempt ${attempt}/5); backing off"; sleep $((attempt * 5)); \
+       done \
+    && test -s /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list \
+    && rm -rf /var/lib/apt/lists/*
+
 # Runtime shared libs the server links: libsqlite3 (DB1), libssl/libcrypto
 # (crypto), libzstd + zlib (compression). The server reaches Postgres-backed DB2
 # only through aimee-kb, so it does not link libpq itself. curl is for the
@@ -123,33 +143,52 @@ FROM debian:bookworm-slim
 # co-located aimee-runtime-web browser login.
 #
 # The Go workflow engine runs repository verification after implementation.
-# Keep the baseline Make/C/C++ toolchain in the runtime image so automatic
-# Makefile discovery and ordinary native project verification do not fail merely
-# because the control-plane image was slimmed after its own build stage.
+# Keep the CI-equivalent native, Go, lint, and Python toolchain in the runtime
+# image so repository verification does not fail merely because the
+# control-plane image was slimmed after its own build stage.
 #
 # tmux + nodejs + npm are enablers for server-hosted OAuth CLI agents
 # (`aimee agent add claude-oauth` / `codex-oauth`): the vendor CLI is installed on
 # demand into the home-volume npm prefix (NPM_CONFIG_PREFIX below) and its OAuth
-# login runs in a server-side tmux session. nodejs is Debian bookworm's 18.x LTS
-# (claude-code and the codex CLI both support Node >= 18).
+# login runs in a server-side tmux session. The vendor CLIs support the current
+# Debian Node release (Node >= 18).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
         ca-certificates \
+        clang-format-19 \
         curl \
         git \
+        libcurl4-openssl-dev \
         libpam-modules \
         libpam0g \
+        libpam0g-dev \
+        libp11-kit-dev \
+        libpq-dev \
         libsqlite3-0 \
+        libsqlite3-dev \
         libssl3 \
+        libssl-dev \
         libzstd1 \
+        libzstd-dev \
         nodejs \
         npm \
         openssh-client \
+        pkg-config \
+        "postgresql-client-${VERIFY_PG_MAJOR}" \
+        python3 \
+        python3-yaml \
+        ripgrep \
         tini \
         tmux \
         zlib1g \
+        zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# `git verify` builds the repository's Go surfaces as well as its native ones.
+# Copy the exact Go toolchain used for the WFE build instead of installing
+# Debian bookworm's older golang-go package, which cannot load go 1.25 modules.
+COPY --from=wfe-build /usr/local/go/ /usr/local/go/
 
 # Docker CLI + compose plugin (static client binaries — no daemon). Lets
 # aimee-server orchestrate the managed sibling services (aimee-kb + aimee-llm)
@@ -200,7 +239,12 @@ ENV AIMEE_HOME=/var/lib/aimee
 # on the persistent home volume, so the CLI binaries survive container recreate
 # (their OAuth tokens live under $AIMEE_HOME too: ~/.claude, ~/.codex).
 ENV NPM_CONFIG_PREFIX=/var/lib/aimee/.npm-global
-ENV PATH=/var/lib/aimee/.npm-global/bin:$PATH
+ENV PATH=/var/lib/aimee/.npm-global/bin:/usr/local/go/bin:$PATH
+# A host can verify several workflow branches simultaneously. Bound each
+# verifier's native build and test fan-out so five workflows do not multiply the
+# visible CPU count into hundreds of competing compiler/test processes.
+ENV AIMEE_VERIFY_MAKE_JOBS=2
+ENV AIMEE_VERIFY_TEST_JOBS=2
 # claude-code self-updates on launch by default. In this npm-global-prefix layout
 # its updater reinstalls the package WITHOUT re-running the install.cjs postinstall
 # that fetches the platform-native binary, leaving an empty package dir and a
