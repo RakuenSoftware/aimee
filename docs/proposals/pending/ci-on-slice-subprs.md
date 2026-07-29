@@ -32,12 +32,11 @@ By direct observation:
 - Before this change, `ci.yml`'s `pull_request.branches` list did not include
   `aimee/feat/**`.
 - PR #2011 merged with `check-runs` total_count = 0.
-- `GIT_PR_CI_NONE` is defined at `src/modules/git/git_pr_api.h:75`
-  (`GIT_PR_CI_NONE = 0, /* no CI reported for the head commit */`), and
-  `src/modules/workflows/wfe_live_forge.c:197` handles that case with the
-  rationale recorded in the comment at line 201 — the engine "already treats
-  `GIT_PR_CI_NONE` as merge-permitting". This is verified design intent, cited to
-  file and line, not inferred from behaviour.
+- `GIT_PR_CI_NONE` is defined by the `git_pr_ci_t` enum in
+  `src/modules/git/git_pr_api.h`, and the `GIT_PR_CI_NONE` case in
+  `src/modules/workflows/wfe_live_forge.c` records why the engine treats no
+  reported CI as merge-permitting. This is verified design intent, cited to the
+  defining enum and handling case rather than inferred from behaviour.
 - **`RakuenSoftware/aimee` is a public repository** (`gh repo view`:
   `"visibility":"PUBLIC"`). GitHub-hosted *standard* runners are free for public
   repositories; the per-OS billing multipliers (Linux 1x, Windows 2x, macOS 10x)
@@ -149,17 +148,34 @@ adopted pre-emptively now.
 
 **Post-adoption measurement, with an explicit trigger for reconsidering.**
 Because concurrency is knowingly unquantified at decision time, adopting option 1
-carries an obligation to measure it afterwards rather than leave it open:
+carries an obligation to measure it afterwards rather than leave it open.
 
-Baseline first: before enabling slice CI, record the median queue wait of PR
-runs over 10 runs; call it `Q0`. Then, over the first 10 pipeline runs with slice
-CI enabled, record: maximum concurrent job executions reached (`Cmax`); median
-queue wait of *unrelated* PR runs (`Q1`); and total elapsed time of each slice
-gate.
+The requested pre-enablement `Q0` sample was not captured before commit
+`968c804d` enabled slice CI. Do not invent that missing baseline or compare a
+post-adoption sample to an unspecified value. Replace it with a retrospective,
+mechanically comparable baseline from GitHub Actions: select the 10 completed
+`pull_request` runs of `ci.yml` whose base branch is not `aimee/feat/**` and whose
+`created_at` values are the latest before the `968c804d` commit time. For each
+run, calculate queue wait as the earliest job `started_at` minus the run
+`created_at`; `Q0` is the arithmetic median (the mean of the fifth and sixth
+ordered values) of those 10 waits. Record the commit time, run IDs, timestamps,
+per-run queue waits, API retrieval date, and resulting median in this proposal
+before evaluating the threshold below.
+
+For `Q1`, use the first 10 completed slice gates created after slice CI was
+enabled. Measure the queue wait of every unrelated `pull_request` `ci.yml` run
+(base branch not `aimee/feat/**`) created from the first slice gate's `created_at`
+through the last slice gate's `updated_at`, using the same earliest-job-start
+calculation and arithmetic-median rule; `Q1` is the median of those values. Also
+record maximum concurrent job executions reached (`Cmax`) and total elapsed time
+of each slice gate. Preserve the run IDs and timestamps here so the sample can be
+reproduced from the Actions API. If the window contains fewer than 10 unrelated
+PR runs, extend its end to the creation time of the tenth subsequent unrelated
+PR run and use those 10 runs for `Q1`.
 
 **Reconsider option 2 if any of these is true** (each mechanically checkable):
 
-- `Q1 >= Q0 + 2 minutes`, measured as the median over those 10 runs; **or**
+- `Q1 >= Q0 + 2 minutes`; **or**
 - slice gate elapsed time exceeds **20 minutes** in **3 or more** of the 10 runs
   (against the measured ~10-minute standalone figure); **or**
 - `Cmax` reaches the account's documented concurrent-job ceiling in **2 or more**
