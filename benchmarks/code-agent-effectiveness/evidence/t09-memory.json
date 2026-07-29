@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "origin": {
+    "path": "/tmp/ptcodex/raw/aimee__t09_root_cause__r1.jsonl",
+    "sha256": "9820b7f90b34df7c226e36649a37debd21ba78eb92323a01ee487bcfdf3c0418",
+    "item": "item_6"
+  },
+  "tool": "search_memory",
+  "arguments": {
+    "query": "billing_period_days January month length billing bug conventions"
+  },
+  "status": "completed",
+  "reported_count": 4,
+  "results": [
+    {
+      "entity": "delegate_codex_review_ok",
+      "tier": "L1",
+      "kind": "episode",
+      "topic": "roundtable chairman review"
+    },
+    {
+      "entity": "delegate_codex_unknown_ok",
+      "tier": "L1",
+      "kind": "episode",
+      "topic": "roundtable chairman review"
+    },
+    {
+      "entity": "delegate_minimax_review_fail",
+      "tier": "L1",
+      "kind": "episode",
+      "topic": "cancelled roundtable review"
+    },
+    {
+      "entity": "delegate_minimax_unknown_fail",
+      "tier": "L1",
+      "kind": "episode",
+      "topic": "cancelled roundtable review"
+    }
+  ],
+  "active_project_relevant_count": 0
+}

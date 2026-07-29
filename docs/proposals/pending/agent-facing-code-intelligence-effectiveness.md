@@ -456,4 +456,6 @@ residual proposal instead of declaring the intended effectiveness outcome comple
 - **Round 3 — 2026-07-29 — APPROVED, 3/3 participants, no findings, not degraded.** The panel
   confirmed the benchmark-validity ruling, E0 ordering, E1 end-to-end adoption smoke, and the full
   accepted scope. Roundtable run: `roundtable-ea954d6d077d0cceaa0c143e`.
-- **Proposal PR / accepted implementation scope:** pending.
+- **Proposal PR / accepted implementation scope:** PR #2147 merged to `testing` as
+  `5cdb681621c22938f6e7372ecc709e623408551e` after all 23 CI checks passed. The accepted scope is
+  E0–E6 exactly as listed in §6; E0 branches first from that merge commit.
