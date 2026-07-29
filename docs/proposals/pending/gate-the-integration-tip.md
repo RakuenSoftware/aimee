@@ -4,7 +4,7 @@
 
 ## Problem
 
-`.github/workflows/ci.yml` triggers on:
+Before this proposal was implemented, `.github/workflows/ci.yml` triggered on:
 
 ```yaml
 on:
@@ -74,13 +74,12 @@ The two are not equivalent in importance:
   checked at integration level — which is exactly the class of problem this
   proposal exists to catch.
 
-Any option below that relies on the `push` event must therefore also decide what
-to do about `bench-check`: either relax its `if:` to run on the tip (and give it
-a meaningful baseline to compare against, which on a push is not the PR base),
-or accept explicitly that integration-level performance is ungated. This
-proposal does not resolve that; it is called out so the gap is not mistaken for
-coverage. Note that a green tip run means "15 of 17 jobs passed", and any
-release certification should say so rather than claiming a full gate.
+The approved option accepts that integration-level performance is ungated. A push
+has no PR base and therefore no meaningful benchmark baseline, so `bench-check`
+remains intentionally restricted to pull requests. This is a known, accepted
+integration-level performance coverage gap, not tip-gate coverage. The set of
+expected checks must be derived from the workflow at the exact commit being
+certified, rather than from the historical job count above.
 
 ## Options
 
@@ -105,7 +104,8 @@ release certification should say so rather than claiming a full gate.
 
 Established:
 
-- The trigger list contains no `push` (read from `ci.yml`).
+- Before implementation, the trigger list contained no `push` (read from
+  `ci.yml`).
 - `e161dd34` has 2 check runs, both image builds (API, quoted above).
 - The full gate on the tip *can* be dispatched manually: `workflow_dispatch` is
   configured, and doing so for `e161dd34` produced run `30223112295`.
@@ -135,16 +135,71 @@ a separate decision informed by how often option 1 actually goes red. If it
 never goes red over a meaningful number of merges, the stronger options are not
 worth their friction.
 
+## Approved implementation and release certification
+
+CI runs automatically on pushes to `main`, `testing`, and
+`feature/core-modularization`. The existing pull-request branch and event filters
+remain unchanged, as does `workflow_dispatch`.
+
+The two event-conditioned jobs remain intentionally PR-only:
+
+- `no-coauthor-trailers` requires the pull request's `base..head` commit range,
+  which does not exist for a push event.
+- `bench-check` requires a PR-base benchmark comparison. No push baseline is
+  defined, so its exclusion is a known, accepted integration-level performance
+  coverage gap. This change does not add such a baseline.
+
+Release certification must record:
+
+1. the exact release commit SHA;
+2. the successful, automatically push-triggered CI workflow run whose head SHA
+   exactly equals that release SHA;
+3. every check run attached to that exact commit, by name and conclusion; and
+4. the reason for every skipped check, including the two PR-only checks above.
+
+Every check applicable to the push event must pass. The expected check set must
+be derived from the workflow at the exact release commit and the resulting check
+runs, never from a fixed job count. CI gate checks must be present; image-build
+checks alone are not certification. Because the intentional skips remain, the
+result must not be described as a "full gate." A manually dispatched run cannot
+substitute for the automatic push run.
+
+Record certification as auditable evidence that includes one row per attached
+check run:
+
+| Evidence | Required value |
+| --- | --- |
+| Release commit | Exact full SHA |
+| Automatic CI run | Successful push-triggered workflow-run URL/ID and matching head SHA |
+| Check run | One row per attached check-run name and conclusion; include the reason for each skipped check |
+
+Repeat the check-run row until every check attached to the release SHA is
+enumerated. A summary count or a link without the names and conclusions is
+insufficient.
+
+On the implementation pull request, verify that the existing `opened`,
+`synchronize`, `reopened`, and `edited` pull-request events still start CI for
+`main`, `testing`, and `feature/core-modularization`, and that
+`no-coauthor-trailers`, `bench-check`, and all other PR jobs continue under their
+existing conditions with unchanged conclusions. After merge to `testing`, record
+the resulting tip SHA, verify that GitHub Actions starts the `push` run without
+`workflow_dispatch`, and verify its head SHA exactly matches the tip. Query that
+SHA's check runs, enumerate every name and conclusion, confirm all
+push-applicable checks passed, and record `no-coauthor-trailers` and `bench-check`
+as skipped for the reasons above. The exact SHA, automatic workflow-run
+reference, and complete passed/skipped list are the release certification
+evidence.
+
 ## Acceptance
 
-- A merge to `testing` produces a CI run against the resulting tip commit.
-- That run's check runs are visible on the tip commit
-  (`gh api repos/{owner}/{repo}/commits/<tip>/check-runs` returns the gate jobs,
-  not just the image builds).
-- A release can be certified by pointing at a green run on the exact commit
-  being released, with no manual `workflow_dispatch` step.
-- The certification states which jobs ran and which were skipped. A tip run that
-  skips `bench-check` is not described as a full gate.
-- `bench-check` on the tip is either enabled with a defined baseline, or its
-  absence is recorded as a known, accepted gap — not left to be discovered.
-- PR-triggered runs are unchanged.
+- A merge to `testing` produces an automatic CI `push` run against the resulting
+  tip commit, with no manual `workflow_dispatch` step.
+- That run's check runs are visible on the exact tip commit and include the CI
+  gate checks, not just image builds.
+- Certification records the exact tip SHA, automatic run reference, and complete
+  check-run names, conclusions, and skip reasons.
+- Every push-applicable check passes; intentional PR-only skips are not described
+  as a full gate.
+- The absent push benchmark baseline is explicitly retained as a known, accepted
+  integration-level performance coverage gap.
+- PR-triggered runs and job behavior are unchanged.

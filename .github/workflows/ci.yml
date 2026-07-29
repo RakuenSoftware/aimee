@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  push:
+    branches: [main, testing, feature/core-modularization]
   pull_request:
     branches: [main, testing, feature/core-modularization]
     # `edited` re-runs the gate when a PR title/body is edited after open, so
