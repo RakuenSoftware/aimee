@@ -62,6 +62,30 @@ func TestDefaultVerifyCommandUsesGitVerifyKeyValueSyntax(t *testing.T) {
 	}
 }
 
+func TestCommandVerifierSerializesAcrossInstances(t *testing.T) {
+	lockPath := filepath.Join(t.TempDir(), "verify.lock")
+	first := CommandVerifier{LockFile: lockPath}
+	second := CommandVerifier{LockFile: lockPath}
+
+	releaseFirst, err := first.acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	if _, err := second.acquire(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		releaseFirst()
+		t.Fatalf("second verifier lock error = %v, want deadline exceeded", err)
+	}
+	releaseFirst()
+
+	releaseSecond, err := second.acquire(context.Background())
+	if err != nil {
+		t.Fatalf("lock was not released: %v", err)
+	}
+	releaseSecond()
+}
+
 type temporaryFailureAgents struct {
 	mu       sync.Mutex
 	requests []DelegateRequest

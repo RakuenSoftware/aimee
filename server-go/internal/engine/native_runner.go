@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
@@ -22,7 +23,12 @@ type Verifier interface {
 	Verify(context.Context, string) error
 }
 
-type CommandVerifier struct{ Command []string }
+type CommandVerifier struct {
+	Command  []string
+	LockFile string
+}
+
+const defaultCommandVerifyLock = "aimee-wfe-command-verify.lock"
 
 func defaultVerifyCommand() []string {
 	// `git verify` is a key=value-style infrastructure command. Its machine
@@ -32,6 +38,12 @@ func defaultVerifyCommand() []string {
 }
 
 func (v CommandVerifier) Verify(ctx context.Context, workdir string) error {
+	release, err := v.acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	command := v.Command
 	if len(command) == 0 {
 		command = defaultVerifyCommand()
@@ -43,6 +55,43 @@ func (v CommandVerifier) Verify(ctx context.Context, workdir string) error {
 		return fmt.Errorf("verify failed: %s", strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+// acquire serializes repository-wide verification across workflow workers and
+// server processes on the same host. The C unit suite still contains tests that
+// bind process-global resources; independently isolated worktrees and HOME
+// directories are not enough to make several complete suites safe in parallel.
+// A file lock also releases automatically if the server crashes.
+func (v CommandVerifier) acquire(ctx context.Context) (func(), error) {
+	lockPath := strings.TrimSpace(v.LockFile)
+	if lockPath == "" {
+		lockPath = filepath.Join(os.TempDir(), defaultCommandVerifyLock)
+	}
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open verifier lock: %w", err)
+	}
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return func() {
+				_ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+				_ = lock.Close()
+			}, nil
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
+			_ = lock.Close()
+			return nil, fmt.Errorf("lock verifier: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			_ = lock.Close()
+			return nil, ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 type NativeRunner struct {
