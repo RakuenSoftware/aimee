@@ -15,9 +15,10 @@ import (
 )
 
 type fakeSetupAccounts struct {
-	users   map[string]string
-	locked  map[string]bool
-	lockErr error
+	users      map[string]string
+	locked     map[string]bool
+	lockErr    error
+	beforeLock func(username string)
 }
 
 const generatedBootstrapUsername = "aimee-012345abcdef"
@@ -56,6 +57,9 @@ func (f *fakeSetupAccounts) ShadowHash(username string) (string, error) {
 }
 
 func (f *fakeSetupAccounts) Lock(username string) error {
+	if f.beforeLock != nil {
+		f.beforeLock(username)
+	}
 	if f.lockErr != nil {
 		return f.lockErr
 	}
@@ -178,6 +182,14 @@ func TestSetupAccountReplacesAndPersistsBootstrapLogin(t *testing.T) {
 func TestSetupAccountReplacesGeneratedBootstrapLogin(t *testing.T) {
 	s, fake := newSetupAccountTestServer(t)
 	writeGeneratedBootstrapCredentials(t, s, generatedBootstrapUsername)
+	fake.beforeLock = func(username string) {
+		if username != generatedBootstrapUsername {
+			t.Fatalf("locking %q, want generated bootstrap", username)
+		}
+		if _, err := os.Stat(s.setupAccountCredentials()); err != nil {
+			t.Fatalf("credentials removed before bootstrap lock: %v", err)
+		}
+	}
 	fake.users[generatedBootstrapUsername] = "$test$generated"
 	if err := os.WriteFile(s.setupAccountStore(), []byte(
 		generatedBootstrapUsername+":$test$generated\nother:$test$other\n"), 0o600); err != nil {

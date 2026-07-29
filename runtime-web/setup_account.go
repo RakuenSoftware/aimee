@@ -184,9 +184,12 @@ func writePrivateFile(path string, data []byte) error {
 }
 
 // durableLoginReplacement rewrites the entrypoint-compatible username:crypt-hash
-// registry and records the bootstrap retirement marker. It returns a rollback
-// closure because the live account lock happens after persistence succeeds.
-func durableLoginReplacement(store, marker, credentials, oldUsername, newUsername,
+// registry and records the bootstrap retirement marker. It deliberately leaves
+// the generated credential file in place until the live account is locked: if
+// the process dies in between, the entrypoint can still identify and retire the
+// old account on restart. It returns a rollback closure because the live lock
+// happens after persistence succeeds.
+func durableLoginReplacement(store, marker, oldUsername, newUsername,
 	newHash string) (func(), error) {
 	originalStore, storeErr := os.ReadFile(store)
 	storeExisted := storeErr == nil
@@ -198,12 +201,6 @@ func durableLoginReplacement(store, marker, credentials, oldUsername, newUsernam
 	if markerErr != nil && !errors.Is(markerErr, os.ErrNotExist) {
 		return nil, markerErr
 	}
-	originalCredentials, credentialsErr := os.ReadFile(credentials)
-	credentialsExisted := credentialsErr == nil
-	if credentialsErr != nil && !errors.Is(credentialsErr, os.ErrNotExist) {
-		return nil, credentialsErr
-	}
-
 	rollback := func() {
 		if storeExisted {
 			_ = writePrivateFile(store, originalStore)
@@ -214,11 +211,6 @@ func durableLoginReplacement(store, marker, credentials, oldUsername, newUsernam
 			_ = writePrivateFile(marker, originalMarker)
 		} else {
 			_ = os.Remove(marker)
-		}
-		if credentialsExisted {
-			_ = writePrivateFile(credentials, originalCredentials)
-		} else {
-			_ = os.Remove(credentials)
 		}
 	}
 
@@ -236,10 +228,6 @@ func durableLoginReplacement(store, marker, credentials, oldUsername, newUsernam
 		return nil, err
 	}
 	if err := writePrivateFile(marker, []byte(newUsername+"\n")); err != nil {
-		rollback()
-		return nil, err
-	}
-	if err := os.Remove(credentials); err != nil && !errors.Is(err, os.ErrNotExist) {
 		rollback()
 		return nil, err
 	}
@@ -357,7 +345,7 @@ func (s *server) handleSetupAccount(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	rollback, err := durableLoginReplacement(s.setupAccountStore(), s.setupAccountMarker(),
-		s.setupAccountCredentials(), bootstrapUsername, req.Username, newHash)
+		bootstrapUsername, req.Username, newHash)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "could not persist replacement account")
 		return
@@ -374,6 +362,13 @@ func (s *server) handleSetupAccount(w http.ResponseWriter, r *http.Request) {
 		rollback()
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	// The old account is now unusable and the durable marker commits the
+	// replacement. Remove the recoverable plaintext last. A cleanup failure must
+	// not roll back the new user after the old one is locked; startup will see the
+	// marker plus credential file, lock the old account again, and retry removal.
+	if err := os.Remove(s.setupAccountCredentials()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintf(os.Stderr, "setup account: could not remove retired bootstrap credentials: %v\n", err)
 	}
 
 	http.SetCookie(w, &http.Cookie{
