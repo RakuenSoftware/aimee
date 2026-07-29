@@ -111,8 +111,7 @@ void server_http_populate_request_context(int fd, int is_tcp, const char *buf,
    const char *secret = "";
    if (config_load(&cfg) == 0 && cfg.ingress_trusted_proxy_secret[0])
       secret = cfg.ingress_trusted_proxy_secret;
-   else if (runtime_secret_get("AIMEE_INGRESS_PROXY_SECRET", vault_secret,
-                               sizeof(vault_secret)))
+   else if (runtime_secret_get("AIMEE_INGRESS_PROXY_SECRET", vault_secret, sizeof(vault_secret)))
       secret = vault_secret;
    if (!ctx.trusted && secret[0])
    {

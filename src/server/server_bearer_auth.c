@@ -132,8 +132,8 @@ int server_http_authorize_enrolled_request(int is_tcp, const char *bearer_cfg,
          if (api_key_header && api_key_header[0])
             extra_match |= server_ct_equal(api_key_header, g_bearer_extra[i]);
       }
-      *bootstrap_only = primary_match && !extra_match &&
-                        !runtime_secret_has("AIMEE_API_BEARER_TOKEN");
+      *bootstrap_only =
+          primary_match && !extra_match && !runtime_secret_has("AIMEE_API_BEARER_TOKEN");
    }
    pthread_mutex_unlock(&g_bearer_lock);
    return result;
@@ -255,8 +255,7 @@ static int first_user_bootstrap_locked(const char *principal, char *bearer, size
    }
 
    char vault_name[96];
-   snprintf(vault_name, sizeof(vault_name), "AIMEE_API_BEARER_TOKEN_EXTRA_%d",
-            configured_count);
+   snprintf(vault_name, sizeof(vault_name), "AIMEE_API_BEARER_TOKEN_EXTRA_%d", configured_count);
    if (vault_runtime_secret_set(vault_name, proposed) != 0)
    {
       (void)db1_remote_client_abandon(proposed_hash);

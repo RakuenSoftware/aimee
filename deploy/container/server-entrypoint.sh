@@ -36,6 +36,20 @@ ulimit -s 65536 2>/dev/null || true
 # authenticated. Never persist that memory in a core image.
 ulimit -c 0 2>/dev/null || true
 
+# An explicit Docker command is not an aimee first boot, so it must run before
+# image-only helpers are sourced. Never forward ambient credentials into that
+# unrelated process; normal server startup below seals them into Vault first.
+if [ "$#" -gt 0 ]; then
+    for _secret_name in $(env | sed -n 's/=.*//p'); do
+        case "$_secret_name" in
+            AIMEE_DELEGATE_KEY_*|AIMEE_DB2_URL|AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE|*_TOKEN|*_SECRET|*_PASSWORD|*_PRIVATE_KEY|*_API_KEY|*_DSN)
+                unset "$_secret_name"
+                ;;
+        esac
+    done
+    exec "$@"
+fi
+
 # Seed the baked default config into AIMEE_HOME if absent. The server reads its
 # /v1 listener settings (port + bearer) from $AIMEE_HOME/aimee.yaml; a
 # bind-mounted (empty) volume would otherwise leave the listener unconfigured.
@@ -161,12 +175,6 @@ for _secret_name in $(env | sed -n 's/=.*//p'); do
     esac
 done
 webchat_prepare
-
-# Preserve the command-override contract, but never pass bootstrap credentials
-# to an operator-supplied long-lived command.
-if [ "$#" -gt 0 ]; then
-    exec "$@"
-fi
 
 log() { printf '[server-entrypoint] %s\n' "$*"; }
 

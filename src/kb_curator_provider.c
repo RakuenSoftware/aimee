@@ -171,8 +171,7 @@ int kb_curator_provider_for_stage(const config_t *cfg, kb_curator_stage_t stage,
          int have_service_token =
              runtime_secret_get("AIMEE_LLM_AUTH_TOKEN", runtime_key, sizeof(runtime_key));
          const char *auth_required = getenv("AIMEE_LLM_AUTH_REQUIRED");
-         if (auth_required && strcmp(auth_required, "1") == 0 &&
-             !have_service_token)
+         if (auth_required && strcmp(auth_required, "1") == 0 && !have_service_token)
             return 0; /* managed unified gateway must never receive a keyless request */
          api_key = have_service_token ? runtime_key : "";
       }

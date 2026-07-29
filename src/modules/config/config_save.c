@@ -1298,8 +1298,8 @@ int config_save(const config_t *cfg)
     * is not silently dropped on the next save. config_server_api.c parses
     * these back from the same nested mapping. */
    if (cfg->server_api_http_port > 0 || cfg->server_api_tls_port > 0 || cfg->server_api_mtls > 0 ||
-       cfg->server_api_mtls_client_ca[0] ||
-       cfg->server_api_rate_limit_per_min > 0 || cfg->server_api_client_transport[0] ||
+       cfg->server_api_mtls_client_ca[0] || cfg->server_api_rate_limit_per_min > 0 ||
+       cfg->server_api_client_transport[0] ||
        cfg->server_api_remote_writes > SERVER_REMOTE_WRITES_OFF ||
        cfg->server_api_max_event_streams > 0 || cfg->server_api_cli_session_forwarding)
    {

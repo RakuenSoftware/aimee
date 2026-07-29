@@ -8,7 +8,7 @@
 #   2. automatically rotate the bootstrap to a fresh strong bearer
 #      (POST /v1/api/rotate_bearer),
 #   3. persist the NEW token to the client's remote.conf (never the bootstrap),
-#      while the server persists the same token in its aimee.yaml,
+#      while the server seals the same token in its encrypted Vault,
 #   4. enroll the client's mTLS identity and promote the server to required mTLS,
 #   5. leave every bearer-only client locked out, while the enrolled client
 #      remains usable and a SECOND fresh client cannot reuse the bootstrap.
@@ -75,19 +75,21 @@ trap cleanup EXIT
 ulimit -S -s 65536 || true # server worker threads need a 64 MB stack
 
 bold "==> Starting aimee-server (TLS :${TLS_PORT}, bootstrap bearer)"
-AIMEE_HOME="$SERVER_HOME" AIMEE_DB1_URL="sqlite://${SERVER_HOME}/aimee.db" \
-  AIMEE_SERVER_HTTP_BIND=1 "$AIMEE_SERVER_BIN" >"$SERVER_HOME/server.log" 2>&1 &
-server_pid=$!
-
-deadline=$((SECONDS + WAIT_SECONDS))
-until curl -sk --max-time 3 "https://127.0.0.1:${TLS_PORT}/v1/health" >/dev/null 2>&1; do
-  if (( SECONDS >= deadline )) || ! kill -0 "$server_pid" 2>/dev/null; then
-    red "server did not serve TLS /v1 within ${WAIT_SECONDS}s"
-    tail -20 "$SERVER_HOME/server.log" || true
-    exit 1
-  fi
-  sleep 1
-done
+start_server() {
+  AIMEE_HOME="$SERVER_HOME" AIMEE_DB1_URL="sqlite://${SERVER_HOME}/aimee.db" \
+    AIMEE_SERVER_HTTP_BIND=1 "$AIMEE_SERVER_BIN" >>"$SERVER_HOME/server.log" 2>&1 &
+  server_pid=$!
+  local deadline=$((SECONDS + WAIT_SECONDS))
+  until curl -sk --max-time 3 "https://127.0.0.1:${TLS_PORT}/v1/health" >/dev/null 2>&1; do
+    if (( SECONDS >= deadline )) || ! kill -0 "$server_pid" 2>/dev/null; then
+      red "server did not serve TLS /v1 within ${WAIT_SECONDS}s"
+      tail -20 "$SERVER_HOME/server.log" || true
+      exit 1
+    fi
+    sleep 1
+  done
+}
+start_server
 green "    TLS /v1 listener is up"
 
 URL="https://127.0.0.1:${TLS_PORT}"
@@ -115,15 +117,28 @@ else
   bad "remote.conf updated to a generated 256-bit bearer" "token: '${client_token:-<empty>}'"
 fi
 
-# The server must have persisted the SAME token (survives a restart).
-grep -q "bearer_token.*${client_token}" "$SERVER_HOME/aimee.yaml" \
-  && ok "server persisted the same bearer in its aimee.yaml" \
-  || bad "server persisted the same bearer in its aimee.yaml"
+# The server must authenticate with the new token without ever persisting it in
+# plaintext configuration. Its restart-survival contract is the encrypted Vault.
+if grep -Fq "$client_token" "$SERVER_HOME/aimee.yaml"; then
+  bad "server kept the generated bearer out of aimee.yaml" "plaintext token found"
+else
+  ok "server kept the generated bearer out of aimee.yaml (Vault-only)"
+fi
 
 # The adopted client transacts real work with the new token.
 AIMEE_HOME="$CLIENT_HOME" "$AIMEE_BIN" remote status >/dev/null 2>&1 \
   && ok "adopted client reaches /v1 with the new bearer" \
   || bad "adopted client reaches /v1 with the new bearer"
+
+# Restart from the same persistent home. The only server-side copy capable of
+# authenticating the client is now the encrypted Vault entry.
+kill "$server_pid" 2>/dev/null || true
+wait "$server_pid" 2>/dev/null || true
+server_pid=""
+start_server
+AIMEE_HOME="$CLIENT_HOME" "$AIMEE_BIN" remote status >/dev/null 2>&1 \
+  && ok "Vault-backed bearer and enrolled client survive server restart" \
+  || bad "Vault-backed bearer and enrolled client survive server restart"
 
 # --- mTLS promotion leaves every bare bearer locked out --------------------
 bold "==> Required mTLS rejects bearer-only requests after enrollment"

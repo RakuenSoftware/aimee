@@ -1594,6 +1594,13 @@ func (r *NativeRunner) prOpen(ctx context.Context, req StepRequest) (StepResult,
 	default:
 		base = baseKind
 	}
+	baseConflict, detail, err := refreshPullRequestBase(ctx, workdir, base)
+	if err != nil {
+		return StepResult{}, err
+	}
+	if baseConflict {
+		return StepResult{Status: StepPending, PauseReason: "base_integration_conflict", Detail: detail}, nil
+	}
 	spec, err := r.pullRequestSpec(ctx, req, item, workdir, head, base)
 	if err != nil {
 		return StepResult{}, err
@@ -1610,6 +1617,43 @@ func (r *NativeRunner) prOpen(ctx context.Context, req StepRequest) (StepResult,
 	}
 	encoded, _ := json.Marshal(pr)
 	return StepResult{Status: StepAdvanced, ArtifactType: "pr", Artifact: string(encoded), ContentHash: wfe.Hash(encoded)}, nil
+}
+
+// refreshPullRequestBase makes the PR contract describe the remote target that
+// the reviewer will actually merge into. A long-running workflow may have been
+// admitted from a checkout whose origin/<base> was hours behind; generating the
+// body from that stale ref both overstates the diff and hides integration
+// conflicts. Fetch the exact target ref, integrate it into the managed head,
+// and only then compute and publish the handoff.
+func refreshPullRequestBase(ctx context.Context, workdir, base string) (bool, string, error) {
+	if base == "" || strings.HasPrefix(base, "-") {
+		return false, "", fmt.Errorf("invalid pull request base %q", base)
+	}
+	if _, err := gitText(ctx, workdir, "check-ref-format", "--branch", base); err != nil {
+		return false, "", fmt.Errorf("invalid pull request base %q", base)
+	}
+	status, err := gitText(ctx, workdir, "status", "--porcelain")
+	if err != nil {
+		return false, "", err
+	}
+	if status != "" {
+		return false, "", errors.New("refuse pull request handoff from a dirty worktree")
+	}
+	baseRef := "refs/remotes/origin/" + base
+	refspec := "+refs/heads/" + base + ":" + baseRef
+	if _, err := gitText(ctx, workdir, "fetch", "--no-tags", "origin", refspec); err != nil {
+		return false, "", fmt.Errorf("refresh pull request base: %w", err)
+	}
+	if _, err := gitText(ctx, workdir, "-c", "user.name=aimee-wfe", "-c",
+		"user.email=wfe@aimee.local", "merge", "--no-edit", baseRef); err != nil {
+		lower := strings.ToLower(err.Error())
+		if strings.Contains(lower, "conflict") || strings.Contains(lower, "automatic merge failed") {
+			_, _ = gitText(ctx, workdir, "merge", "--abort")
+			return true, "remote base changed and conflicts with the assembled proposal; resolve the content conflict, then resume", nil
+		}
+		return false, "", fmt.Errorf("integrate pull request base: %w", err)
+	}
+	return false, "", nil
 }
 
 func (r *NativeRunner) gateCI(ctx context.Context, req StepRequest) (StepResult, error) {

@@ -29,16 +29,15 @@ else
    fail "server image must install and enter through tini"
 fi
 
-# A native crash must both produce evidence and cause the two-plane container
-# to restart. `tail --pid` deadlocks on a zombie child because the supervising
-# shell cannot reap that child until tail returns.
-if grep -qF 'aimee_enable_core_dumps' ../deploy/container/server-entrypoint.sh &&
-   grep -qF 'aimee_verify_core_dump' ../deploy/container/server-entrypoint.sh &&
-   grep -qF 'AIMEE_CORE_SELFTEST: "1"' ../deploy/smoothnas/aimee-server.plugin.yaml &&
-   sh tests/test_server_core_storage.sh; then
-    pass "server entrypoint enables and validates persistent core dumps"
+# Core images can contain request credentials. Disable them in the supervising
+# shell and independently in both unprivileged long-lived planes so runuser can
+# never re-enable credential-bearing crash persistence.
+if grep -qF 'ulimit -c 0' ../deploy/container/server-entrypoint.sh &&
+   [ "$(grep -cF "runuser -u aimee -- sh -c 'set -eu; ulimit -c 0" ../deploy/container/server-entrypoint.sh)" -eq 2 ] &&
+   ! grep -qF 'aimee_enable_core_dumps' ../deploy/container/server-entrypoint.sh; then
+    pass "server entrypoint disables credential-bearing core dumps in every plane"
 else
-    fail "server entrypoint leaves native crash core dumps disabled after runuser"
+    fail "server entrypoint can persist credential-bearing core dumps"
 fi
 if ! grep -qF 'tail -s 0.1 --pid=' ../deploy/container/server-entrypoint.sh &&
    sh tests/test_server_plane_supervisor.sh; then

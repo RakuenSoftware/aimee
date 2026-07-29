@@ -89,8 +89,7 @@ static int preload_vault(void)
              cache_slot(entries[i].cred, entries[i].agent, entries[i].cred) < 0)
             return -1;
       }
-      else if (strcmp(entries[i].agent, "git") == 0 &&
-               strcmp(entries[i].cred, "forge_token") == 0)
+      else if (strcmp(entries[i].agent, "git") == 0 && strcmp(entries[i].cred, "forge_token") == 0)
       {
          if (cache_slot("AIMEE_FORGE_TOKEN", entries[i].agent, entries[i].cred) < 0)
             return -1;

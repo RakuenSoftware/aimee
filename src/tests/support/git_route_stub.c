@@ -217,7 +217,8 @@ int git_pr_create_via_api_ex_draft(const char *principal, const char *repo_dir, 
 }
 
 int git_pr_find_open_via_api(const char *principal, const char *repo_dir, const char *head,
-                             const char *base, char *out, size_t out_cap, char *err, size_t errlen)
+                             const char *base, char *out, size_t out_cap, int *number_out,
+                             char *err, size_t errlen)
 {
    (void)principal;
    (void)repo_dir;
@@ -225,9 +226,24 @@ int git_pr_find_open_via_api(const char *principal, const char *repo_dir, const 
    (void)base;
    if (out && out_cap)
       out[0] = '\0';
+   if (number_out)
+      *number_out = 0;
    if (err && errlen)
       err[0] = '\0';
    return 0;
+}
+
+int git_pr_update_via_api(const char *principal, const char *repo_dir, int number,
+                          const char *title, const char *body, char *err, size_t errlen)
+{
+   (void)principal;
+   (void)repo_dir;
+   (void)number;
+   (void)title;
+   (void)body;
+   if (err && errlen)
+      snprintf(err, errlen, "stub");
+   return -1;
 }
 
 int git_pr_info_via_api(const char *principal, const char *repo_dir, int number, git_pr_info_t *out,

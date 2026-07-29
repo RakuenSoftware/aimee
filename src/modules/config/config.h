@@ -2176,8 +2176,15 @@ int config_load_file(config_t *cfg);
  * their writer is injected by the server/KB Vault bootstrap. With no writer
  * installed, credential mutations fail closed instead of reaching aimee.yaml. */
 typedef int (*config_secret_writer_fn)(const char *name, const char *value);
+typedef int (*config_secret_present_fn)(const char *name);
 void config_secret_writer_set(config_secret_writer_fn writer);
 int config_secret_store(const char *name, const char *value);
+/* Seal credential values found in an older aimee.yaml through `writer`, then
+ * remove them from the file. `present` lets the credential store remain
+ * authoritative during an idempotent retry. Returns 1 when the file was
+ * scrubbed, 0 when it contained no credentials, and -1 on any failure. */
+int config_migrate_legacy_credentials(config_secret_writer_fn writer,
+                                      config_secret_present_fn present);
 
 /* Economizer policy. SAFE permits only deterministic, mechanically lossless
  * transforms of fresh local content. AGGRESSIVE additionally permits the

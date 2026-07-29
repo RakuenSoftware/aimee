@@ -52,6 +52,80 @@ int config_secret_store(const char *name, const char *value)
    return g_secret_writer ? g_secret_writer(name, value ? value : "") : -1;
 }
 
+int config_migrate_legacy_credentials(config_secret_writer_fn writer,
+                                      config_secret_present_fn present)
+{
+   config_t cfg;
+   if (!writer || config_load_file(&cfg) != 0)
+      return -1;
+
+   /* These two historical fields represented the same effective credential.
+    * Refuse to choose between conflicting plaintext values unless Vault already
+    * has the authoritative value, in which case both copies are safe to scrub. */
+   if (cfg.kb_api_bearer_token[0] && cfg.kb_client_bearer_token[0] &&
+       strcmp(cfg.kb_api_bearer_token, cfg.kb_client_bearer_token) != 0 &&
+       (!present || !present("AIMEE_KB_API_BEARER_TOKEN")))
+   {
+      runtime_secret_wipe(&cfg, sizeof(cfg));
+      return -1;
+   }
+
+   int scrubbed = 0;
+   int failed = 0;
+#define MIGRATE_LEGACY_SECRET(name_, field_)                                                       \
+   do                                                                                              \
+   {                                                                                               \
+      if (cfg.field_[0])                                                                           \
+      {                                                                                            \
+         if ((!present || !present((name_))) && writer((name_), cfg.field_) != 0)                  \
+            failed = 1;                                                                            \
+         if (!failed)                                                                              \
+         {                                                                                         \
+            runtime_secret_wipe(cfg.field_, sizeof(cfg.field_));                                   \
+            scrubbed = 1;                                                                          \
+         }                                                                                         \
+      }                                                                                            \
+   } while (0)
+   MIGRATE_LEGACY_SECRET("AIMEE_DB2_URL", db2_url);
+   MIGRATE_LEGACY_SECRET("AIMEE_SEARCH_TAVILY_API_KEY", search_tavily_api_key);
+   MIGRATE_LEGACY_SECRET("AIMEE_PROXY_TOKEN", proxy_token);
+   MIGRATE_LEGACY_SECRET("AIMEE_INGRESS_PROXY_SECRET", ingress_trusted_proxy_secret);
+   MIGRATE_LEGACY_SECRET("AIMEE_KB_API_BEARER_TOKEN", kb_api_bearer_token);
+   MIGRATE_LEGACY_SECRET("AIMEE_TELEMETRY_METRICS_TOKEN", telemetry_metrics_token);
+   MIGRATE_LEGACY_SECRET("AIMEE_KB_API_BEARER_TOKEN", kb_client_bearer_token);
+   MIGRATE_LEGACY_SECRET("AIMEE_TRIGGER_AUTH_TOKEN", trigger_auth_token);
+   MIGRATE_LEGACY_SECRET("AIMEE_KB_CURATOR_PROVIDER_API_KEY", kb_curator_provider_api_key);
+   MIGRATE_LEGACY_SECRET("AIMEE_KB_CURATOR_TIER_B_API_KEY", kb_curator_tier_b_api_key);
+   MIGRATE_LEGACY_SECRET("AIMEE_API_BEARER_TOKEN", server_api_bearer_token);
+#undef MIGRATE_LEGACY_SECRET
+
+   for (int i = 0; i < AIMEE_API_BEARER_EXTRA_MAX && !failed; i++)
+   {
+      char name[96];
+      snprintf(name, sizeof(name), "AIMEE_API_BEARER_TOKEN_EXTRA_%d", i);
+      if (!cfg.server_api_bearer_extra[i][0])
+         continue;
+      if ((!present || !present(name)) && writer(name, cfg.server_api_bearer_extra[i]) != 0)
+      {
+         failed = 1;
+         break;
+      }
+      runtime_secret_wipe(cfg.server_api_bearer_extra[i], sizeof(cfg.server_api_bearer_extra[i]));
+      scrubbed = 1;
+   }
+   if (!failed && cfg.server_api_bearer_extra_count)
+   {
+      cfg.server_api_bearer_extra_count = 0;
+      scrubbed = 1;
+   }
+
+   int rc = failed ? -1 : scrubbed;
+   if (!failed && scrubbed && config_save(&cfg) != 0)
+      rc = -1;
+   runtime_secret_wipe(&cfg, sizeof(cfg));
+   return rc;
+}
+
 static __thread int g_session_id_drop;
 void session_id_refresh(void)
 {
@@ -1070,12 +1144,12 @@ static void config_apply_runtime_secrets(config_t *cfg)
 {
    if (!cfg)
       return;
-#define APPLY_RUNTIME_SECRET(name_, field_)                                                       \
+#define APPLY_RUNTIME_SECRET(name_, field_)                                                        \
    do                                                                                              \
    {                                                                                               \
       char _value[sizeof(cfg->field_)];                                                            \
       if (runtime_secret_get((name_), _value, sizeof(_value)))                                     \
-         snprintf(cfg->field_, sizeof(cfg->field_), "%s", _value);                                \
+         snprintf(cfg->field_, sizeof(cfg->field_), "%s", _value);                                 \
       runtime_secret_wipe(_value, sizeof(_value));                                                 \
    } while (0)
    APPLY_RUNTIME_SECRET("AIMEE_DB2_URL", db2_url);

@@ -1732,8 +1732,9 @@ void handle_conn(int fd, int is_tcp, int is_management)
        * instead of inferring it from complaints. Only counts denials the old
        * global would have permitted - a request that fails for an unrelated
        * reason is not attributable to this change. */
-      if (g_remote_writes != SERVER_REMOTE_WRITES_OFF &&
-          server_http_route_allowed_caps(is_tcp, effective_caps, method, path, g_remote_writes))
+      if (!management_authenticated &&
+          server_http_retired_global_would_allow(fd, is_tcp, request_bearer, g_remote_writes,
+                                                 mtls_mode, mtls_authenticated, method, path))
          server_http_note_global_ignored();
       LOG_INFO("server.http", "%s %s -> 403 (caps) req_id=%s", method, path, request_id);
       return;

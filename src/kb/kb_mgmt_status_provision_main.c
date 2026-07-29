@@ -408,8 +408,8 @@ int main(int argc, char **argv)
        !vault_store_has_entry(VAULT_SERVER_PRINCIPAL, "environment",
                               "AIMEE_KB_STATUS_PROVISION_DSN"))
    {
-      if (vault_service_set_server("environment", "AIMEE_KB_STATUS_PROVISION_DSN",
-                                   db_url_input) != VAULT_OK)
+      if (vault_service_set_server("environment", "AIMEE_KB_STATUS_PROVISION_DSN", db_url_input) !=
+          VAULT_OK)
       {
          unsetenv("AIMEE_KB_STATUS_PROVISION_DSN");
          fixed_error("configuration");

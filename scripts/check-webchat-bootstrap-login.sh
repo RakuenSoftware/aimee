@@ -38,22 +38,22 @@ chpasswd() {
 
 unset AIMEE_WEBCHAT_USER AIMEE_WEBCHAT_PASSWORD AIMEE_WEBCHAT_USERS
 first_log=$(webchat_bootstrap_user)
-[[ -f $WEBCHAT_BOOTSTRAP_CREDENTIALS ]]
-[[ $(stat -c '%a' "$WEBCHAT_BOOTSTRAP_CREDENTIALS") == 600 ]]
-generated_user=$(sed -n 's/^username=//p' "$WEBCHAT_BOOTSTRAP_CREDENTIALS")
-generated_pass=$(sed -n 's/^password=//p' "$WEBCHAT_BOOTSTRAP_CREDENTIALS")
+[[ ! -e $WEBCHAT_BOOTSTRAP_CREDENTIALS ]]
+generated_user=$(sed -n 's/^\[webchat\]   username: //p' <<<"$first_log")
+generated_pass=$(sed -n 's/^\[webchat\]   password: //p' <<<"$first_log")
 [[ $generated_user =~ ^aimee-[0-9a-f]{12}$ ]]
 [[ $generated_pass =~ ^[0-9a-f]{64}$ ]]
 grep -Fq "username: $generated_user" <<<"$first_log"
 grep -Fq "password: $generated_pass" <<<"$first_log"
 
-# A recreate reuses and reprints the same pair instead of rotating it.
+# A recreate restores the PAM verifier but never persisted or reprints the
+# generated plaintext password.
 second_log=$(webchat_bootstrap_user)
-grep -Fq "username: $generated_user" <<<"$second_log"
-grep -Fq "password: $generated_pass" <<<"$second_log"
-[[ $(sed -n 's/^username=//p' "$WEBCHAT_BOOTSTRAP_CREDENTIALS") == "$generated_user" ]]
+grep -Fq 'restored the existing temporary browser login' <<<"$second_log"
+! grep -Fq "$generated_pass" <<<"$second_log"
+[[ ! -e $WEBCHAT_BOOTSTRAP_CREDENTIALS ]]
 
-# Onboarding retirement removes the plaintext and no longer logs it.
+# Onboarding retirement keeps the plaintext absent and no longer logs it.
 mkdir -p "$(dirname "$WEBCHAT_BOOTSTRAP_REPLACED")"
 printf 'operator\n' > "$WEBCHAT_BOOTSTRAP_REPLACED"
 retired_log=$(webchat_bootstrap_user)

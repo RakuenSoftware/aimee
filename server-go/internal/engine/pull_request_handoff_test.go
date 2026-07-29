@@ -185,3 +185,55 @@ func TestFinalPullRequestHandoffExplainsProposalAndActualDiff(t *testing.T) {
 		t.Fatalf("workflow bookkeeping appears before the human handoff contract:\n%s", spec.Body)
 	}
 }
+
+func TestRefreshPullRequestBaseUsesCurrentRemoteTipBeforeHandoff(t *testing.T) {
+	root := t.TempDir()
+	bare := filepath.Join(root, "origin.git")
+	repo := filepath.Join(root, "repo")
+	updater := filepath.Join(root, "updater")
+	run := func(dir string, args ...string) string {
+		t.Helper()
+		command := exec.Command("git", args...)
+		command.Dir = dir
+		command.Env = append(os.Environ(), "GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=t@example.test",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=t@example.test")
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+		return strings.TrimSpace(string(output))
+	}
+	run(root, "init", "--bare", bare)
+	run(root, "clone", bare, repo)
+	run(repo, "checkout", "-b", "testing")
+	if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("initial\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run(repo, "add", "base.txt")
+	run(repo, "commit", "-m", "initial base")
+	run(repo, "push", "-u", "origin", "testing")
+	run(repo, "checkout", "-b", "aimee/feat/wi_refresh")
+	if err := os.WriteFile(filepath.Join(repo, "proposal.txt"), []byte("proposal\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run(repo, "add", "proposal.txt")
+	run(repo, "commit", "-m", "proposal change")
+
+	run(root, "clone", bare, updater)
+	run(updater, "checkout", "testing")
+	if err := os.WriteFile(filepath.Join(updater, "base.txt"), []byte("current remote\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run(updater, "add", "base.txt")
+	run(updater, "commit", "-m", "advance integration branch")
+	run(updater, "push", "origin", "testing")
+
+	conflict, detail, err := refreshPullRequestBase(t.Context(), repo, "testing")
+	if err != nil || conflict {
+		t.Fatalf("refreshPullRequestBase() = conflict %v, detail %q, err %v", conflict, detail, err)
+	}
+	run(repo, "merge-base", "--is-ancestor", "refs/remotes/origin/testing", "HEAD")
+	if changed := run(repo, "diff", "--name-only", "refs/remotes/origin/testing...HEAD"); changed != "proposal.txt" {
+		t.Fatalf("handoff diff includes stale-base noise: %q", changed)
+	}
+}

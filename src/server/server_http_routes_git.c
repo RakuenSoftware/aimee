@@ -704,14 +704,18 @@ int rh_internal_forge_execute(const route_req_t *rq, char *resp, int cap)
             free(push_out);
          if (rc == 0)
          {
+            int existing_number = 0;
             int found = git_pr_find_open_via_api(principal, trusted_repo, head, base, url,
-                                                 sizeof(url), err, sizeof(err));
+                                                 sizeof(url), &existing_number, err, sizeof(err));
             if (found == 0)
                rc = git_pr_create_via_api_ex_draft(principal, trusted_repo, head, base, title,
                                                    pr_body, draft, url, sizeof(url), err,
                                                    sizeof(err));
             else
-               rc = found == 1 ? 0 : -1;
+               rc = found == 1 && existing_number > 0
+                        ? git_pr_update_via_api(principal, trusted_repo, existing_number, title,
+                                                pr_body, err, sizeof(err))
+                        : -1;
             if (rc == 0)
                cJSON_AddStringToObject(out, "url", url);
          }

@@ -30,6 +30,7 @@
 #include "kb_identity_token.h" /* KB_IDENTITY_TOKEN_WIRE_MAX */
 #include "log.h"
 #include "server.h" /* CAP_* / CAPS_* */
+#include "server_conn_io.h"
 #include "server_write_tier.h"
 #include "server_write_tier_db1.h" /* the db1-backed verify/consume wrappers */
 
@@ -220,6 +221,19 @@ uint64_t server_http_global_ignored_count(void)
    uint64_t value = g_remote_writes_global_ignored;
    pthread_mutex_unlock(&g_global_ignored_lock);
    return value;
+}
+
+int server_http_retired_global_would_allow(int fd, int is_tcp, const char *bearer,
+                                           int remote_writes, int mtls_mode, int mtls_authenticated,
+                                           const char *method, const char *path)
+{
+   if (remote_writes == SERVER_REMOTE_WRITES_OFF)
+      return 0;
+   uint32_t caps = server_http_effective_conn_caps(is_tcp, bearer, remote_writes, mtls_mode,
+                                                   mtls_authenticated);
+   caps = server_http_enrollment_caps(caps, is_tcp, mtls_authenticated, server_conn_io_has_ssl(fd),
+                                      bearer, method, path);
+   return server_http_route_allowed_caps(is_tcp, caps, method, path, remote_writes);
 }
 
 int server_http_resolve_write_tier(int is_tcp, const char *buf, const char *method,

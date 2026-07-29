@@ -20,6 +20,24 @@
 void config_kb_curator_defaults(config_t *cfg);
 int config_parse_kb_curator(config_t *cfg, const cJSON *root);
 
+static char migrated_db2[256];
+static char migrated_api_bearer[256];
+
+static int capture_migrated_secret(const char *name, const char *value)
+{
+   if (strcmp(name, "AIMEE_DB2_URL") == 0)
+      snprintf(migrated_db2, sizeof(migrated_db2), "%s", value);
+   else if (strcmp(name, "AIMEE_API_BEARER_TOKEN") == 0)
+      snprintf(migrated_api_bearer, sizeof(migrated_api_bearer), "%s", value);
+   return 0;
+}
+
+static int no_migrated_secret_present(const char *name)
+{
+   (void)name;
+   return 0;
+}
+
 /* kb_curator preset: the tier drives the 12 stage gates, an explicit per-stage
  * gate still overrides, and "off" disables everything. Pure (no file I/O). */
 static void test_kb_curator_tier(void)
@@ -2053,6 +2071,36 @@ int main(void)
       unlink(cpath);
    }
 
+   /* Legacy credentials are handed to the injected Vault writer and removed
+    * from the file in the same migration. The config module owns its struct
+    * layout; the Vault adapter never reaches into config_t. */
+   {
+      char cpath[512];
+      snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
+      FILE *f = fopen(cpath, "w");
+      assert(f);
+      fprintf(f, "db2_url: postgresql://legacy-user:legacy-pass@db/aimee\n");
+      fprintf(f, "aimee:\n  api:\n    bearer_token: legacy-test-bearer\n");
+      fclose(f);
+      memset(migrated_db2, 0, sizeof(migrated_db2));
+      memset(migrated_api_bearer, 0, sizeof(migrated_api_bearer));
+      assert(config_migrate_legacy_credentials(capture_migrated_secret,
+                                               no_migrated_secret_present) == 1);
+      assert(strcmp(migrated_db2, "postgresql://legacy-user:legacy-pass@db/aimee") == 0);
+      assert(strcmp(migrated_api_bearer, "legacy-test-bearer") == 0);
+      f = fopen(cpath, "r");
+      assert(f);
+      char persisted[8192];
+      size_t persisted_len = fread(persisted, 1, sizeof(persisted) - 1, f);
+      persisted[persisted_len] = '\0';
+      fclose(f);
+      assert(strstr(persisted, "legacy-pass") == NULL);
+      assert(strstr(persisted, "legacy-test-bearer") == NULL);
+      runtime_secret_wipe(migrated_db2, sizeof(migrated_db2));
+      runtime_secret_wipe(migrated_api_bearer, sizeof(migrated_api_bearer));
+      unlink(cpath);
+   }
+
    {
       static config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
@@ -2269,9 +2317,8 @@ int main(void)
                "postgresql://aimee:aimee@10.0.0.9:5432/aimee_shared");
 
       /* Vault runtime value overrides the cached file value. */
-      assert(runtime_secret_store(
-                 "AIMEE_DB2_URL",
-                 "postgresql://aimee:aimee@10.0.0.16:5432/aimee_shared") == 0);
+      assert(runtime_secret_store("AIMEE_DB2_URL",
+                                  "postgresql://aimee:aimee@10.0.0.16:5432/aimee_shared") == 0);
       assert(config_apply_db2_url_env_override(&cfg) == 1);
       assert(strcmp(cfg.db2_url, "postgresql://aimee:aimee@10.0.0.16:5432/aimee_shared") == 0);
 

@@ -224,8 +224,7 @@ int handle_api_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    {
       if (server_api_mint_bearer(cfg.server_api_bearer_token,
                                  sizeof(cfg.server_api_bearer_token)) != 0 ||
-          vault_runtime_secret_set("AIMEE_API_BEARER_TOKEN",
-                                   cfg.server_api_bearer_token) != 0)
+          vault_runtime_secret_set("AIMEE_API_BEARER_TOKEN", cfg.server_api_bearer_token) != 0)
       {
          pthread_mutex_unlock(&g_api_bearer_mutation_lock);
          return handle_api_error(conn, "failed to generate bearer token");
@@ -295,8 +294,8 @@ int handle_api_rotate_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       pthread_mutex_unlock(&g_api_bearer_mutation_lock);
       return handle_api_error(conn, "failed to load aimee.api config");
    }
-   if (server_api_mint_bearer(cfg.server_api_bearer_token,
-                              sizeof(cfg.server_api_bearer_token)) != 0 ||
+   if (server_api_mint_bearer(cfg.server_api_bearer_token, sizeof(cfg.server_api_bearer_token)) !=
+           0 ||
        vault_runtime_secret_set("AIMEE_API_BEARER_TOKEN", cfg.server_api_bearer_token) != 0)
    {
       pthread_mutex_unlock(&g_api_bearer_mutation_lock);

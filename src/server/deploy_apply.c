@@ -25,9 +25,9 @@
 extern char **environ;
 
 #define DEPLOY_DEFAULT_COMPOSE "/opt/aimee/deploy/aimee-managed.compose.yaml"
-#define DEPLOY_OUT_CAP         8192 /* tail of compose output kept for the UI */
+#define DEPLOY_OUT_CAP         8192                    /* tail of compose output kept for the UI */
 #define DEPLOY_LLM_TOKEN_FILE  ".managed-kb-llm-token" /* legacy migration only */
-#define DEPLOY_LLM_TOKEN_HEX   64 /* 256-bit opaque bearer */
+#define DEPLOY_LLM_TOKEN_HEX   64                      /* 256-bit opaque bearer */
 
 /* Background-deploy state (one at a time; the wizard drives a single stack). */
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -107,8 +107,7 @@ static int deploy_llm_token(char *out, size_t cap)
     * process state. It is deliberately ignored here. Operators who must adopt
     * an existing managed LLM use the distinct, explicit override variable. */
    char configured[513];
-   if (runtime_secret_get("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE", configured,
-                          sizeof(configured)))
+   if (runtime_secret_get("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE", configured, sizeof(configured)))
    {
       if (!deploy_llm_token_valid(configured) || strlen(configured) >= cap)
       {
@@ -149,7 +148,8 @@ static int deploy_llm_token(char *out, size_t cap)
       while (n > 0 && (out[n - 1] == '\n' || out[n - 1] == '\r'))
          n--;
       out[n] = '\0';
-      if (!deploy_llm_token_valid(out) || vault_runtime_secret_set("AIMEE_LLM_AUTH_TOKEN", out) != 0)
+      if (!deploy_llm_token_valid(out) ||
+          vault_runtime_secret_set("AIMEE_LLM_AUTH_TOKEN", out) != 0)
       {
          runtime_secret_wipe(out, cap);
          return -1;

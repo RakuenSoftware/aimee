@@ -36,7 +36,7 @@ extern int agent_http_post(const char *url, const char *auth_header, const char 
 
 /* Cached installation token. Tokens are short-lived; the cache holds at most
  * one because a hub has a single App identity. */
-#define FORGE_APP_TOKEN_MAX 512
+#define FORGE_APP_TOKEN_MAX       512
 #define FORGE_APP_PRIVATE_KEY_MAX 4096
 
 /* --- JWT minting --------------------------------------------------------- */
@@ -218,9 +218,8 @@ int forge_app_token_configured(void)
 {
    const char *id = getenv("AIMEE_FORGE_APP_ID");
    const char *inst = getenv("AIMEE_FORGE_APP_INSTALLATION_ID");
-   return (id && id[0] && runtime_secret_has("AIMEE_FORGE_APP_PRIVATE_KEY") && inst && inst[0])
-              ? 1
-              : 0;
+   return (id && id[0] && runtime_secret_has("AIMEE_FORGE_APP_PRIVATE_KEY") && inst && inst[0]) ? 1
+                                                                                                : 0;
 }
 
 /* --- Token cache + mint -------------------------------------------------- */
