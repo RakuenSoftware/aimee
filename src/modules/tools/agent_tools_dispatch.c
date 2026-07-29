@@ -1925,8 +1925,12 @@ static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_
       config_t cfg;
       config_load(&cfg);
       int max = (mx && cJSON_IsNumber(mx)) ? mx->valueint : 3;
+      /* Search with the kb's own embedder unless this server has an explicit
+       * override.  A resolved builtin here is 384-dimensional and can never
+       * query a remote kb corpus built with a production embedder. */
+      const char *embedding_command = cfg.embedding_command[0] ? cfg.embedding_command : NULL;
       char *envelope = kb_client_search_json(td_search_project(args, dispatch_cwd), q->valuestring,
-                                             config_embedding_command(&cfg, NULL), max, NULL);
+                                             embedding_command, max, NULL);
       cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
       free(envelope);
 

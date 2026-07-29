@@ -967,9 +967,14 @@ cJSON *smcp_tool_search_docs(cJSON *args)
    if (max_results > 8)
       max_results = 8;
 
-   char *envelope =
-       kb_client_search_json(smcp_search_project(args), query->valuestring,
-                             config_embedding_command_current(NULL), max_results, NULL);
+   /* The kb owns the corpus and its embedder.  Only override that embedder when
+    * the operator explicitly configured a command on this server; resolving an
+    * unset value to the 384-dim builtin can mismatch a remote kb's corpus. */
+   const char *embedding_command = config_embedding_command_field();
+   if (!embedding_command[0])
+      embedding_command = NULL;
+   char *envelope = kb_client_search_json(smcp_search_project(args), query->valuestring,
+                                          embedding_command, max_results, NULL);
    cJSON *response = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    char *rendered = td_search_result_from_response(response, query->valuestring);
