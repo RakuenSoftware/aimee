@@ -336,8 +336,8 @@ static void test_session_isolation_decision(void)
       /* Staying inside a managed worktree is fine, cd or redirect. */
       assert(attn_bash_escapes_worktree(
                  "cd /home/u/repo/.claude/worktrees/w1/src && sed -i s/a/b/ f.c", wt) == 0);
-      assert(attn_bash_escapes_worktree(
-                 "echo hi > /home/u/repo/.aimee/worktrees/s1/main/f.c", wt) == 0);
+      assert(attn_bash_escapes_worktree("echo hi > /home/u/repo/.aimee/worktrees/s1/main/f.c",
+                                        wt) == 0);
       /* Relative work never leaves by construction. */
       assert(attn_bash_escapes_worktree("cd src && sed -i s/a/b/ f.c", wt) == 0);
 
@@ -352,7 +352,6 @@ static void test_session_isolation_decision(void)
       assert(attn_bash_escapes_worktree("rm -f /tmp/abcd /x", wt) == 1);
       assert(attn_bash_escapes_worktree("echo included > out.txt", wt) == 0);
    }
-
 
    /* Relative / no file_path -> cwd is authoritative. */
    assert(attn_session_isolation_blocked(ATTN_OP_SOFT, "src/x.c", wt_cwd, NULL) == 0);

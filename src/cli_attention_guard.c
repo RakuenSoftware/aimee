@@ -971,8 +971,8 @@ int attn_bash_escapes_worktree(const char *bash_cmd, const char *cwd)
     * Only verbs where every path argument is written: tee, truncate, touch, mkdir, rm,
     * shred, install, sed -i. Deliberately NOT cp/mv/rsync -- their first arguments are
     * SOURCES, and reading an outside file to write inside the worktree is legitimate. */
-   static const char *const target_verbs[] = {"tee",   "truncate", "touch",  "mkdir",
-                                              "rm",    "shred",    "install", NULL};
+   static const char *const target_verbs[] = {"tee", "truncate", "touch",   "mkdir",
+                                              "rm",  "shred",    "install", NULL};
    for (int i = 0; target_verbs[i]; i++)
    {
       if (!cmd_has_word_prefix(bash_cmd, target_verbs[i]) && !strstr(bash_cmd, target_verbs[i]))
@@ -990,9 +990,8 @@ int attn_bash_escapes_worktree(const char *bash_cmd, const char *cwd)
             {
                char path[2048];
                size_t n = 0;
-               while (a[n] && n + 1 < sizeof(path) && a[n] != ' ' && a[n] != '\t' &&
-                      a[n] != ';' && a[n] != '&' && a[n] != '|' && a[n] != '\'' &&
-                      a[n] != '"' && a[n] != '\n')
+               while (a[n] && n + 1 < sizeof(path) && a[n] != ' ' && a[n] != '\t' && a[n] != ';' &&
+                      a[n] != '&' && a[n] != '|' && a[n] != '\'' && a[n] != '"' && a[n] != '\n')
                {
                   path[n] = a[n];
                   n++;
@@ -1380,10 +1379,9 @@ int handle_attention_guard(void)
          char base[256], own[256], defbr[256];
          int reg_state = attn_registry_base_for(lin_target, base, sizeof(base), own, sizeof(own));
          attn_resolve_default_branch(lin_target, defbr, sizeof(defbr));
-         int parent_registered =
-             (base[0] && own[0] && strcmp(base, own) != 0)
-                 ? attn_registry_branch_is_registered(lin_target, base)
-                 : 0;
+         int parent_registered = (base[0] && own[0] && strcmp(base, own) != 0)
+                                     ? attn_registry_branch_is_registered(lin_target, base)
+                                     : 0;
          /* reg_state: 2 row found, 1 registry exists but no row, 0 no registry at all.
           *   0 -> the repo has never used managed worktrees; there is nothing to check
           *        against, and blocking would break every non-aimee checkout.
@@ -1404,8 +1402,9 @@ int handle_attention_guard(void)
                     "of `git worktree add` by hand.\n",
                     lin_target, own[0] ? own : "(unknown)", base[0] ? base : "(unregistered)",
                     defbr[0] ? defbr : "(unresolved)",
-                    base[0] ? "" : "No launcher registry row exists for it, so it was not created "
-                                   "by the launcher.");
+                    base[0] ? ""
+                            : "No launcher registry row exists for it, so it was not created "
+                              "by the launcher.");
             cJSON_Delete(hook);
             free(stdin_data);
             return 2;
