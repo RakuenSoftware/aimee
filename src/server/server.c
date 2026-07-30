@@ -1916,15 +1916,47 @@ static void server_pid_clear(const char *socket_path)
    unlink(pid_path);
 }
 
+static int server_agent_route_backend_reachable(const agent_t *ag);
+
 /* Exclude catalog-DOWN agents from routing without coupling agent_config.o to it. */
 static int server_agent_route_is_down(const char *agent_name)
 {
+   agent_config_t cfg;
+   if (agent_load_config(&cfg) == 0)
+   {
+      agent_t *ag = agent_find(&cfg, agent_name);
+      if (ag && !server_agent_route_backend_reachable(ag))
+         return 1;
+   }
    return provider_catalog_get_health(agent_name) == CATALOG_HEALTH_DOWN;
 }
 
 static int server_agent_route_is_degraded(const char *agent_name)
 {
    return provider_catalog_get_health(agent_name) == CATALOG_HEALTH_DEGRADED;
+}
+
+static int server_probe_endpoint(const char *endpoint)
+{
+   if (!endpoint || !endpoint[0] ||
+       (strncmp(endpoint, "http://", 7) != 0 && strncmp(endpoint, "https://", 8) != 0))
+      return 1;
+   char url[MAX_ENDPOINT_LEN + 16];
+   size_t len = strlen(endpoint);
+   snprintf(url, sizeof(url), "%s%smodels", endpoint, len && endpoint[len - 1] == '/' ? "" : "/");
+   char *body = NULL;
+   int status = agent_http_get(url, NULL, &body, 1500);
+   free(body);
+   return status >= 200 && status < 400;
+}
+
+static int server_agent_route_backend_reachable(const agent_t *ag)
+{
+   if (!ag || strcmp(ag->model, "aimee-synth") != 0)
+      return 1;
+   int reachable = server_probe_endpoint(ag->endpoint);
+   provider_catalog_record_endpoint_probe(ag->endpoint, reachable);
+   return reachable;
 }
 static int server_agent_route_has_capacity(const agent_t *ag)
 {
@@ -2349,6 +2381,10 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * delegates to itself, and an agent flagged "Primary Agent Only"
     * (agents.json `primary_only`) is never a delegation target. */
    agent_set_route_policy_filter(server_agent_route_policy_excluded);
+   agent_config_t provider_cfg;
+   if (agent_load_config(&provider_cfg) == 0)
+      provider_catalog_init(provider_cfg.agents, provider_cfg.agent_count);
+   agent_admission_ensure_configured();
    /* Admission's locked three-limit predicate is the shipping routing authority. */
    agent_set_route_capacity_probe(server_agent_route_has_capacity);
    LOG_INFO("server",

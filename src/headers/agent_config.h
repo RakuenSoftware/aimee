@@ -38,6 +38,10 @@ agent_t *agent_route_escalation_target(agent_config_t *cfg, const char *role, in
 agent_t *agent_route_with_caps_scoped(agent_config_t *cfg, const char *role,
                                       const config_t *sys_cfg, unsigned required_caps,
                                       int min_context, agent_scope_t scope);
+/* True when the same capability/scope route would succeed if capacity alone were bypassed. */
+int agent_route_with_caps_saturated(agent_config_t *cfg, const char *role,
+                                    const config_t *sys_cfg, unsigned required_caps,
+                                    int min_context, agent_scope_t scope);
 agent_t *agent_find(agent_config_t *cfg, const char *name);
 /* Select the default "primary" agent for ingress paths that don't name a model:
  * an explicitly configured default when it is enabled, else the first enabled

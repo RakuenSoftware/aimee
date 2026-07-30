@@ -1002,7 +1002,8 @@ void delegate_worker(void *arg)
    if (!target_agent)
    {
       char errmsg[256];
-      if (agent_route_role_saturated(&acfg, role))
+      if (agent_route_with_caps_saturated(&acfg, role, &route_cfg, required_caps, min_context,
+                                          scope))
       {
          snprintf(errmsg, sizeof(errmsg),
                   "no free capacity for role '%s' [aimee_err=no_free_capacity]", role);
@@ -1577,11 +1578,15 @@ void delegate_worker(void *arg)
          agent_tools_parent_write_guard_clear();
          parent_write_guard_active = 0;
       }
+      agent_route_set_capacity_wait(wait_for_admission);
+      agent_dispatch_set_fail_fast(!wait_for_admission);
       server_delegate_heartbeat_begin(cctx->background_job_id);
       rc = delegate_run_with_credential_retry(&acfg, target_agent, role, system_prompt, run_prompt,
                                               max_tokens, force_tools, delegate_allows_writes,
                                               leased_cred_name, sizeof(leased_cred_name),
                                               credential_state_path, &result);
+      agent_dispatch_set_fail_fast(0);
+      agent_route_set_capacity_wait(0);
       server_delegate_heartbeat_end();
    }
    delegate_run_ctx_restore(&run_ctx);

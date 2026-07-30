@@ -368,7 +368,7 @@ static void test_agent_routing_block_reason(void)
 
 static int route_capacity_probe(const agent_t *ag)
 {
-   return strcmp(ag->name, "saturated") != 0;
+   return strcmp(ag->name, "saturated") != 0 && strcmp(ag->name, "capable-saturated") != 0;
 }
 
 static void test_agent_route_capacity(void)
@@ -393,6 +393,17 @@ static void test_agent_route_capacity(void)
    agent_route_set_capacity_wait(1);
    assert(agent_route(&cfg, "review") == &cfg.agents[0]);
    agent_route_set_capacity_wait(0);
+   config_t sys_cfg;
+   memset(&sys_cfg, 0, sizeof(sys_cfg));
+   sys_cfg.model_meta_capability_routing = 1;
+   strcpy(cfg.agents[0].name, "capable-saturated");
+   cfg.agents[1].enabled = 1;
+   assert(agent_route_with_caps_scoped(&cfg, "review", &sys_cfg, 0, 0, AGENT_SCOPE_UNSET) ==
+          &cfg.agents[1]);
+   cfg.agents[1].enabled = 0;
+   assert(agent_route_with_caps_scoped(&cfg, "review", &sys_cfg, 0, 0, AGENT_SCOPE_UNSET) == NULL);
+   assert(agent_route_with_caps_saturated(&cfg, "review", &sys_cfg, 0, 0,
+                                          AGENT_SCOPE_UNSET));
    agent_set_route_capacity_probe(NULL);
 }
 

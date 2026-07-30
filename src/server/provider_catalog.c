@@ -287,6 +287,40 @@ void provider_catalog_record_failure(const char *agent_name, const char *failure
    pthread_mutex_unlock(&g_cat.lock);
 }
 
+static size_t endpoint_origin_len(const char *endpoint)
+{
+   if (!endpoint)
+      return 0;
+   const char *scheme = strstr(endpoint, "://");
+   const char *path = scheme ? strchr(scheme + 3, '/') : strchr(endpoint, '/');
+   return path ? (size_t)(path - endpoint) : strlen(endpoint);
+}
+
+void provider_catalog_record_endpoint_probe(const char *endpoint, int reachable)
+{
+   size_t origin_len = endpoint_origin_len(endpoint);
+   if (!origin_len)
+      return;
+   pthread_once(&g_cat_once, catalog_once_init);
+   char names[CATALOG_MAX_ENTRIES][MAX_AGENT_NAME];
+   int count = 0;
+   pthread_mutex_lock(&g_cat.lock);
+   for (int i = 0; i < g_cat.count; i++)
+   {
+      size_t entry_len = endpoint_origin_len(g_cat.entries[i].endpoint);
+      if (entry_len == origin_len && strncmp(g_cat.entries[i].endpoint, endpoint, origin_len) == 0)
+         snprintf(names[count++], sizeof(names[0]), "%s", g_cat.entries[i].agent_name);
+   }
+   pthread_mutex_unlock(&g_cat.lock);
+   for (int i = 0; i < count; i++)
+   {
+      if (reachable)
+         provider_catalog_record_success(names[i]);
+      else
+         provider_catalog_record_failure(names[i], "connectivity_probe");
+   }
+}
+
 int provider_catalog_cooldown_seconds(const char *agent_name)
 {
    if (!agent_name || !agent_name[0])

@@ -138,7 +138,7 @@ extern const char *delegation_active_id(void);
 /* Apply config -> the admission controller, re-applying only when the config file changes
  * (the acquire runs per turn, so this stays a cheap stat() on the hot path). Guarantees the
  * controller is configured before the first acquire, and picks up hot-reloaded limits. */
-static void admission_ensure_configured(void)
+void agent_admission_ensure_configured(void)
 {
    static long long applied_mtime = -1;
    static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
@@ -238,7 +238,7 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
       snprintf(out->error, sizeof(out->error), "agent_dispatch_one: use_tools requires network");
       return -1;
    }
-   admission_ensure_configured();
+   agent_admission_ensure_configured();
 
    /* Admission choke point: acquire a slot subject to the global, per-agent and
     * per-model caps (fail-closed — an unconfigured/invalid agent is rejected, never

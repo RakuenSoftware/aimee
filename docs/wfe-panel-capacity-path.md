@@ -31,11 +31,11 @@ identity through `DelegateGroup`; `runPanelAnalysis` translates those to
 therefore respectively `panel_no_free_capacity` or `panel_admission_deadline`,
 while ordinary eligibility and provider failures remain `panel_unreachable`.
 
-Backend reachability is not a second capacity signal. The production
-`aimee-synth` / `aimee-llm` failure and recovery path updates the existing route
-health state used by `src/server/agent_route.c`; while down, `local-gemma4` is
-excluded by the provider-health filter, and successful recovery restores normal
-eligibility.
+Backend reachability is not a capacity signal. Before routing `aimee-synth`, the
+server probes the configured model endpoint and feeds failure or recovery into the
+existing provider catalog. `src/server/agent_route.c` therefore excludes a DOWN
+`local-gemma4`, while a successful probe restores normal eligibility. There is no
+parallel backend-health state.
 
 
 Capacity evidence belongs in deterministic admission, routing, planner, race,

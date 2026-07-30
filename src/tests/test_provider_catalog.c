@@ -95,6 +95,19 @@ static agent_t make_agent(const char *name, const char *endpoint)
    return ag;
 }
 
+static void test_endpoint_probe_failure_and_recovery(void)
+{
+   reset_catalog();
+   agent_t ag = make_agent("local-gemma4", "http://aimee-llm:8742/v1");
+   provider_catalog_init(&ag, 1);
+   provider_catalog_record_endpoint_probe("http://aimee-llm:8742/embed", 0);
+   provider_catalog_record_endpoint_probe("http://aimee-llm:8742/embed", 0);
+   provider_catalog_record_endpoint_probe("http://aimee-llm:8742/embed", 0);
+   assert(provider_catalog_get_health("local-gemma4") == CATALOG_HEALTH_DOWN);
+   provider_catalog_record_endpoint_probe("http://aimee-llm:8742/embed", 1);
+   assert(provider_catalog_get_health("local-gemma4") == CATALOG_HEALTH_HEALTHY);
+}
+
 static void test_health_initial(void)
 {
    reset_catalog();
@@ -382,6 +395,7 @@ int main(void)
    test_health_half_opens_after_cooldown();
    test_persistent_failure_backs_off_further_than_a_blip();
    test_health_unknown_agent_is_healthy();
+   test_endpoint_probe_failure_and_recovery();
 
    test_locality_local_agent();
    test_locality_lan_agent();

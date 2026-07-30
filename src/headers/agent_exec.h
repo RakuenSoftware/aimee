@@ -40,6 +40,8 @@ void agent_run_force_no_tools(int on);
  * blocking, so a fan-out / fallback caller tries a different agent rather than queueing on
  * a busy one. Default off = block+queue (correct for a pinned single-agent turn). */
 void agent_dispatch_set_fail_fast(int on);
+/* Configure admission from the current server config before route probes run. */
+void agent_admission_ensure_configured(void);
 
 /* Like agent_run, but with an explicit sampling temperature. agent_run is the
  * thin wrapper that passes the historical 0.3 default, so its ~28 call sites are

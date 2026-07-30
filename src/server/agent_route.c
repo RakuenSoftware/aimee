@@ -735,7 +735,7 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
       {
          agent_t *ag = &cfg->agents[i];
          if (!ag->enabled || !agent_supports_role(ag, role) ||
-             !agent_is_available_for_routing(ag) || !agent_is_local(ag))
+             !agent_is_available_for_routing(ag) || !agent_has_free_slot(ag) || !agent_is_local(ag))
             continue;
          if (!agent_scope_admits(ag, scope))
             continue;
@@ -775,7 +775,7 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
          agent_t *ag = &cfg->agents[i];
          degraded_snapshot[i] = agent_is_degraded(ag);
          if (degraded_snapshot[i] || !ag->enabled || !agent_supports_role(ag, role) ||
-             !agent_is_available_for_routing(ag))
+             !agent_is_available_for_routing(ag) || !agent_has_free_slot(ag))
             continue;
          if (locals_only && !agent_is_local(ag))
             continue;
@@ -793,7 +793,8 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
    for (int i = 0; i < cfg->agent_count; i++)
    {
       agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
+      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag) ||
+          !agent_has_free_slot(ag))
          continue;
       if (locals_only && !agent_is_local(ag))
          continue;
@@ -829,7 +830,8 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
    for (int i = 0; i < cfg->agent_count; i++)
    {
       agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
+      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag) ||
+          !agent_has_free_slot(ag))
          continue;
       if (ag->cost_tier != min_tier)
          continue;
@@ -1022,6 +1024,20 @@ agent_t *agent_route_with_caps_scoped(agent_config_t *cfg, const char *role,
                    role ? role : "", required_caps, min_context, r->name);
    }
    return r;
+}
+
+int agent_route_with_caps_saturated(agent_config_t *cfg, const char *role,
+                                    const config_t *sys_cfg, unsigned required_caps,
+                                    int min_context, agent_scope_t scope)
+{
+   if (!cfg || !role || !role[0])
+      return 0;
+   int saved_wait = g_route_capacity_wait;
+   agent_route_set_capacity_wait(1);
+   agent_t *candidate =
+       agent_route_with_caps_scoped(cfg, role, sys_cfg, required_caps, min_context, scope);
+   agent_route_set_capacity_wait(saved_wait);
+   return candidate && agent_route_agent_capacity(candidate) == 0;
 }
 
 /* --- Exec role check --- */

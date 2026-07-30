@@ -100,6 +100,8 @@ void provider_catalog_record_success(const char *agent_name);
  * failure_class is an opaque tag ("rate_limit", "unavailable", etc.);
  * may be NULL or empty. */
 void provider_catalog_record_failure(const char *agent_name, const char *failure_class);
+/* Apply a direct backend connectivity probe to catalog entries sharing its endpoint origin. */
+void provider_catalog_record_endpoint_probe(const char *endpoint, int reachable);
 
 /* Query health state for a named agent.  Returns HEALTHY for unknown agents
  * so unknown names never block routing. */

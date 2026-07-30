@@ -414,6 +414,10 @@ void agent_route_set_capacity_wait(int on)
 {
    (void)on;
 }
+void agent_dispatch_set_fail_fast(int on)
+{
+   (void)on;
+}
 int agent_route_role_saturated(const agent_config_t *cfg, const char *role)
 {
    (void)cfg;
@@ -433,6 +437,19 @@ agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const conf
  * ignoring the argument: routing that silently admitted an over-scope seat is
  * exactly the bug this replaced, and a stub that drops the parameter could not
  * catch a regression to it. */
+int agent_route_with_caps_saturated(agent_config_t *cfg, const char *role,
+                                    const config_t *sys_cfg, unsigned required_caps,
+                                    int min_context, agent_scope_t scope)
+{
+   (void)cfg;
+   (void)role;
+   (void)sys_cfg;
+   (void)required_caps;
+   (void)min_context;
+   (void)scope;
+   return 0;
+}
+
 agent_t *agent_route_with_caps_scoped(agent_config_t *cfg, const char *role,
                                       const config_t *sys_cfg, unsigned required_caps,
                                       int min_context, agent_scope_t scope)
