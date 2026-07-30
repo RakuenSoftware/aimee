@@ -1131,10 +1131,18 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
    if (!norm_query[0])
       snprintf(norm_query, sizeof(norm_query), "%s", query);
 
+   db2_memory_scope_context_t request_scope;
+   db2_memory_scope_context_get(&request_scope);
+   int explicit_scope = scope_type && scope_type[0];
+   /* A promoted shortcut is a bounded global cache.  It cannot prove the hard
+    * visibility/order contract for an ambient or explicit scope, so only the
+    * legacy unscoped diagnostic route may use it. */
+   int allow_shortcut = !request_scope.active && !explicit_scope;
    int64_t shortcut_ids[8];
    int shortcut_promoted = 0;
-   int shortcut_n =
-       db2_retrieval_shortcut_lookup(norm_query, shortcut_ids, 8, &shortcut_promoted, NULL);
+   int shortcut_n = allow_shortcut ? db2_retrieval_shortcut_lookup(norm_query, shortcut_ids, 8,
+                                                                   &shortcut_promoted, NULL)
+                                   : 0;
    memory_t shortcut_matches[8];
    int shortcut_match_n = 0;
    if (shortcut_n > 0)
@@ -1145,8 +1153,12 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
    memory_t *matches = (memory_t *)calloc(64, sizeof(*matches));
    if (!matches)
       return -1;
-   int count = memory_find_facts_scoped(query, scope_type, scope_value, limit > 0 ? limit : 10,
-                                        matches, 64);
+   int count = request_scope.active && !explicit_scope
+                   ? memory_find_facts_visible_ex(query, request_scope.workspace,
+                                                  request_scope.project, request_scope.include_all,
+                                                  limit > 0 ? limit : 10, matches, 64)
+                   : memory_find_facts_scoped(query, scope_type, scope_value,
+                                              limit > 0 ? limit : 10, matches, 64);
    if (count < 0)
    {
       free(matches);
