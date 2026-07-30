@@ -1068,6 +1068,14 @@ static void test_status_format(void)
    assert(status.files > 0);
    assert(status.chunks > 0);
 
+   /* The operator-wide detailed health probe has no active project. It must
+    * aggregate current generations explicitly, never infer a checkout basename. */
+   memset(&status, 0, sizeof(status));
+   assert(db2_kb_service_collect_project_status(NULL, &status) == 0);
+   assert(status.project[0] == '\0');
+   assert(status.files > 0);
+   assert(status.chunks > 0);
+
    close_test_db();
    unlink(fpath);
    platform_test_rmrf(tmpdir);

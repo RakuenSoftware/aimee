@@ -662,7 +662,7 @@ int db2_kb_service_async_queue_drain(const char *embedding_cmd, int timeout_secs
 
 int db2_kb_service_collect_project_status(const char *project, db2_kb_service_project_status_t *out)
 {
-   if (!out || !project || !project[0])
+   if (!out)
       return -1;
 
    memset(out, 0, sizeof(*out));
@@ -681,7 +681,7 @@ int db2_kb_service_collect_project_status(const char *project, db2_kb_service_pr
                         "SELECT COUNT(*), COALESCE(SUM(token_count), 0),"
                         " COUNT(DISTINCT file_path)"
                         " FROM kb_documents d JOIN projects p ON p.name=d.project"
-                        " WHERE d.project=?1 AND p.lifecycle_state='current'"
+                        " WHERE (?1='' OR d.project=?1) AND p.lifecycle_state='current'"
                         " AND d.generation=p.current_generation",
                         err, sizeof(err));
    if (!stmt)
@@ -699,9 +699,10 @@ int db2_kb_service_collect_project_status(const char *project, db2_kb_service_pr
    stmt = aimee_pg_prepare(conn,
                            "SELECT COUNT(*) FROM vector_index_ops q"
                            " JOIN kb_documents d ON d.id = q.point_id"
-                           " WHERE d.project = ?1 AND q.collection = 'kb_chunks'"
-                           "   AND d.generation=(SELECT current_generation FROM projects"
-                           " WHERE name=d.project AND lifecycle_state='current')"
+                           " JOIN projects p ON p.name=d.project"
+                           " WHERE (?1='' OR d.project=?1) AND q.collection = 'kb_chunks'"
+                           "   AND p.lifecycle_state='current'"
+                           "   AND d.generation=p.current_generation"
                            "   AND q.status = 'ok'",
                            err, sizeof(err));
    if (!stmt)
