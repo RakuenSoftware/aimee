@@ -1243,6 +1243,137 @@ int handle_hosts_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
+/* Where the embedder registry lives, most-specific first. The wizard needs this list
+ * BEFORE anything is deployed, so it cannot come from a running gateway's /embedders —
+ * at page-2 time there may be no gateway at all. Reading the same file the gateway and
+ * supervisor read keeps one source of truth without requiring one to be up. */
+/* A registry field counts as SET only when it is a non-empty string: the entries use ""
+ * to mean "deliberately not declared", which is the difference between an embedder this
+ * deployment can host and one it can only reach. */
+static int embedders_field_set(cJSON *entry, const char *field)
+{
+   cJSON *v = cJSON_GetObjectItemCaseSensitive(entry, field);
+   return cJSON_IsString(v) && v->valuestring && v->valuestring[0];
+}
+
+static const char *EMBEDDER_REGISTRY_PATHS[] = {
+    "/opt/aimee/embedders.json", /* the image layout */
+    "scripts/embedders.json",    /* a source checkout */
+};
+
+static char *embedders_registry_read(void)
+{
+   const char *override = getenv("AIMEE_EMBEDDERS_FILE");
+   for (size_t i = 0; i < 1 + sizeof(EMBEDDER_REGISTRY_PATHS) / sizeof(*EMBEDDER_REGISTRY_PATHS);
+        i++)
+   {
+      const char *path = (i == 0) ? override : EMBEDDER_REGISTRY_PATHS[i - 1];
+      if (!path || !path[0])
+         continue;
+      FILE *f = fopen(path, "rb");
+      if (!f)
+         continue;
+      if (fseek(f, 0, SEEK_END) != 0)
+      {
+         fclose(f);
+         continue;
+      }
+      long size = ftell(f);
+      /* Bounded: this is a small hand-maintained descriptor, not user upload. */
+      if (size <= 0 || size > (1 << 20) || fseek(f, 0, SEEK_SET) != 0)
+      {
+         fclose(f);
+         continue;
+      }
+      char *buf = malloc((size_t)size + 1);
+      if (!buf)
+      {
+         fclose(f);
+         return NULL;
+      }
+      size_t got = fread(buf, 1, (size_t)size, f);
+      fclose(f);
+      buf[got] = '\0';
+      return buf;
+   }
+   return NULL;
+}
+
+/* embedders.list — the embedders this deployment can offer, for the setup wizard's
+ * page-2 picker. Read-only, and deliberately verbose: every field returned changes the
+ * vectors, so a picker that hid them would be inviting a silent re-embed.
+ *
+ * `local` says whether the supervisor can host the model itself. An entry without
+ * weight coordinates is still a complete declaration — it is one this deployment can
+ * only reach at an external endpoint — so the UI can offer it against a URL rather than
+ * pretending it does not exist. `dim` is what makes the choice consequential: switching
+ * between two embedders of different width rebuilds the pgvector columns. */
+int handle_embedders_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+
+   char *raw = embedders_registry_read();
+   if (!raw)
+      return server_send_error(conn, "embedder registry not found", NULL);
+   cJSON *doc = cJSON_Parse(raw);
+   free(raw);
+   if (!doc)
+      return server_send_error(conn, "embedder registry is not valid JSON", NULL);
+   cJSON *table = cJSON_GetObjectItemCaseSensitive(doc, "embedders");
+   if (!cJSON_IsObject(table))
+   {
+      cJSON_Delete(doc);
+      return server_send_error(conn, "embedder registry declares no embedders", NULL);
+   }
+
+   cJSON *resp = jo_ok();
+   cJSON *arr = cJSON_CreateArray();
+   cJSON *entry = NULL;
+   cJSON_ArrayForEach(entry, table)
+   {
+      if (!cJSON_IsObject(entry) || !entry->string)
+         continue;
+      cJSON *dim = cJSON_GetObjectItemCaseSensitive(entry, "dim");
+      cJSON *ctxlen = cJSON_GetObjectItemCaseSensitive(entry, "context");
+      cJSON *pooling = cJSON_GetObjectItemCaseSensitive(entry, "pooling");
+      cJSON *prefixes = cJSON_GetObjectItemCaseSensitive(entry, "prefixes");
+      cJSON *source = cJSON_GetObjectItemCaseSensitive(entry, "source");
+      const char *src = cJSON_IsString(source) && source->valuestring[0] ? source->valuestring
+                                                                        : "hf";
+
+      /* Locally servable == it declares where its weights come from, per source. */
+      int local = 0;
+      if (strcmp(src, "release") == 0)
+         local = embedders_field_set(entry, "release_tag") && embedders_field_set(entry, "file");
+      else
+         local = embedders_field_set(entry, "repo") && embedders_field_set(entry, "file") &&
+                 embedders_field_set(entry, "revision") && embedders_field_set(entry, "sha256");
+
+      int prefixed = 0;
+      if (cJSON_IsObject(prefixes))
+      {
+         cJSON *q = cJSON_GetObjectItemCaseSensitive(prefixes, "query");
+         cJSON *d = cJSON_GetObjectItemCaseSensitive(prefixes, "document");
+         prefixed = (cJSON_IsString(q) && q->valuestring[0]) ||
+                    (cJSON_IsString(d) && d->valuestring[0]);
+      }
+
+      cJSON *out = cJSON_CreateObject();
+      jo_add_str(out, "id", entry->string);
+      cJSON_AddNumberToObject(out, "dim", cJSON_IsNumber(dim) ? dim->valuedouble : 0);
+      cJSON_AddNumberToObject(out, "context", cJSON_IsNumber(ctxlen) ? ctxlen->valuedouble : 0);
+      jo_add_str(out, "pooling", cJSON_IsString(pooling) ? pooling->valuestring : "");
+      jo_add_str(out, "source", src);
+      cJSON_AddBoolToObject(out, "local", local);
+      cJSON_AddBoolToObject(out, "prefixed", prefixed);
+      cJSON_AddItemToArray(arr, out);
+   }
+   cJSON_Delete(doc);
+   cJSON_AddItemToObject(resp, "embedders", arr);
+   return send_and_free(conn, resp);
+}
+
 int handle_primary_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;

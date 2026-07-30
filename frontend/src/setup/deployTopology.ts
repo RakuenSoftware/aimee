@@ -31,6 +31,53 @@ export type Placement =
 
 export type KbMode = 'local' | 'remote';
 
+/** One selectable embedder, as GET /api/embedders reports it. Every field here changes
+ * the vectors, which is why the picker shows them rather than just a name. */
+export interface EmbedderChoice {
+  id: string;
+  dim: number;
+  context: number;
+  pooling: string;
+  source: string;
+  /** Whether this deployment can host the model itself. An entry without weight
+   * coordinates is still selectable — against an external endpoint. */
+  local: boolean;
+  prefixed: boolean;
+}
+
+/** What changing the embedder costs, so the UI can say it plainly instead of letting the
+ * kb refuse at next boot.
+ *
+ *   none            — nothing to do (first choice, or the same model again).
+ *   reembed         — same width, different vector space. Pooling and prefixes are part
+ *                     of the space, so the stored vectors are not comparable to new
+ *                     queries even though the columns fit. The kb's serving_id guard
+ *                     refuses to start until the corpus is rebuilt.
+ *   reembed+schema  — different width. The pgvector columns themselves must be rebuilt,
+ *                     on top of the re-embed.
+ *
+ * `current` empty means a fresh install: there is no corpus to invalidate, so the choice
+ * is free. That is the proxy this UI uses for "populated" — it cannot see row counts, and
+ * an embedder that was never recorded cannot have embedded anything. */
+export type EmbedderChangeImpact = 'none' | 'reembed' | 'reembed+schema';
+
+export function embedderChangeImpact(
+  current: string,
+  next: string,
+  catalog: EmbedderChoice[],
+): EmbedderChangeImpact {
+  const from = (current ?? '').trim();
+  const to = (next ?? '').trim();
+  if (!from || !to || from === to) return 'none';
+  const dimOf = (id: string) => catalog.find((e) => e.id === id)?.dim ?? 0;
+  const a = dimOf(from);
+  const b = dimOf(to);
+  // Unknown width on either side: assume the cheaper-to-state of the two costs rather
+  // than promising a schema rebuild we cannot confirm is needed.
+  if (a > 0 && b > 0 && a !== b) return 'reembed+schema';
+  return 'reembed';
+}
+
 /** Map a card's VRAM to the largest tier it can host. Documented sizing:
  * small≈16 GB, mid≈24 GB, large≈32 GB (deploy/compose/aimee.gpu.yaml). A little
  * headroom is allowed under each floor; a GPU smaller than `small` still labels
@@ -117,12 +164,20 @@ export function buildDesiredConfig(sel: DeploySelection): Record<string, string>
   for (const { role } of ROLES) {
     const p = sel.placements[role];
     Object.assign(out, placementToConfig(role, p));
-    if (role === 'embed' && p.backend === 'external') {
-      out.embedding_model = sel.embedModel.trim();
-      // embedding_dim is a CFG_INT key — only emit it when set, never a blank
-      // string (which would reach the int allowlist as '').
-      const dim = sel.embedDim.trim();
-      if (dim !== '') out.embedding_dim = dim;
+    if (role === 'embed') {
+      // The embedder identity is written for a LOCAL choice too, not just an external
+      // one: it is the registry key the gateway resolves pooling and prefixes from, and
+      // the value the kb records against its corpus. Leaving it blank locally is what
+      // made the vector-space guard a no-op.
+      if (sel.embedModel.trim() !== '') out.embedding_model = sel.embedModel.trim();
+      if (p.backend === 'external') {
+        // embedding_dim is a CFG_INT key — only emit it when set, never a blank
+        // string (which would reach the int allowlist as ''). For a LOCAL embedder the
+        // width is declared in the registry and derived by the kb (pinned > recorded >
+        // probed), so pinning it here would only create a second place to be wrong.
+        const dim = sel.embedDim.trim();
+        if (dim !== '') out.embedding_dim = dim;
+      }
     }
   }
   return out;

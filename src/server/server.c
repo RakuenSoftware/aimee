@@ -1529,6 +1529,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     /* Per-session primary agent selection */
     {"primary.set", handle_primary_set},
     {"hosts.list", handle_hosts_list},
+    {"embedders.list", handle_embedders_list},
     {"primary.get", handle_primary_get},
     {"primary.clear", handle_primary_clear},
     {"attempt.record", handle_attempt_record},

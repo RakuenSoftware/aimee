@@ -25,6 +25,39 @@ The configured dimension must equal the model output. DB2 records the dimension 
 vector columns and refuses startup on drift. Silent empty vector search is worse than a hard start
 failure.
 
+### Choosing an embedder
+
+The setup wizard's page-2 embedder picker lists what this deployment can serve, read from
+the same `scripts/embedders.json` the gateway and supervisor read (`GET /v1/embedders`).
+It runs before anything is deployed, so the list comes from the registry rather than from
+a running gateway.
+
+| | `nomic-embed-text-v2-moe` | `bekko-a25m` |
+| --- | ---: | ---: |
+| NDCG@10 (frozen-ab-v1) | **0.6075** | 0.5909 |
+| dimension | 768 | **384** |
+| prefixes | `search_query:` / `search_document:` | none |
+| relative CPU throughput | 82.7 | **510.7** |
+
+nomic is the default and the quality choice. bekko trades −0.0166 NDCG@10 for roughly 6x
+the CPU throughput and half the vector storage, needs no prefixes (so its benchmark number
+carries into production unchanged), and is the reasonable pick for a CPU-only box.
+
+Only embedders this deployment can host are offered for a local placement; an entry
+without weight coordinates is selectable against an external endpoint instead. Operators
+can add their own with `AIMEE_LLM_EMBEDDERS_EXTRA`, declaring the pooling, width, context
+and prefixes — nobody can infer those for you, and each one changes the vectors.
+
+**Changing the embedder is destructive.** The wizard requires a typed confirmation,
+because:
+
+- a different width (768 → 384) rebuilds the pgvector columns *and* re-embeds everything;
+- the same width with different pooling or prefixes still re-embeds everything, since
+  those define the vector space.
+
+The kb refuses to start until the corpus matches what the endpoint serves, so the choice
+is gated up front rather than discovered at the next boot.
+
 ### What defines the vector space
 
 Width is not identity. Pooling and the query/document prefixes change every vector while leaving

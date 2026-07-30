@@ -75,6 +75,7 @@ const method_policy_t method_registry[] = {
     {"audit.seal", CAP_TOOL_EXECUTE, "WORM audit seal snapshot"},
     {"audit.snapshot", CAP_TOOL_EXECUTE, "WORM audit metric snapshot"},
     {"hosts.list", CAP_DASHBOARD_READ, "host + GPU inventory"},
+    {"embedders.list", CAP_DASHBOARD_READ, "selectable embedder inventory"},
     {"lsp.*", CAP_DASHBOARD_READ, "lsp status"},
     /* Workspace. Reads (context/get/list) are index:read; register/remove
      * mutate the instance-scoped registry and a detached client performs them

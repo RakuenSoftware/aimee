@@ -378,6 +378,7 @@ int handle_wm_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_wm_context(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_primary_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_hosts_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_embedders_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_primary_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_primary_clear(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_attempt_record(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

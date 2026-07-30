@@ -755,6 +755,7 @@ ENV_DESC = {
     "AIMEE_MEMORY_MAINTENANCE_TRIGGER_SECS": ("Memory", "Seconds before a maintenance cycle triggers."),
     "AIMEE_MEMORY_PAGERANK_RELATIONS": ("Memory", "Relation types included in memory PageRank."),
     "AIMEE_MEMORY_RERANK_MODE": ("Memory", "Reranker mode."),
+    "AIMEE_EMBEDDERS_FILE": ("Knowledge base (aimee-kb)", "Path to the embedder registry the server reads for GET /v1/embedders (the setup wizard's embedder picker). Defaults to /opt/aimee/embedders.json, then scripts/embedders.json in a source checkout. The same file the aimee-llm gateway and supervisor read, so one declaration drives the picker, the provisioning and the serving flags."),
     "AIMEE_MEMORY_WEIGHT_PROFILE": ("Memory", "Recall scoring weight profile."),
     "AIMEE_NO_CACHE": ("Memory", "Disable the memory-assembly cache."),
     "AIMEE_CONTEXT_NO_KB": ("Memory", "Skip KB lookups during context assembly."),

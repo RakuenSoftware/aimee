@@ -12,8 +12,7 @@ import {
   ROLES,
   type Placement,
   type HostInfo,
-  type DeploySelection,
-} from './deployTopology';
+  type DeploySelection, embedderChangeImpact } from './deployTopology';
 
 /* The page-2 keys the server's /api/config/set allowlist accepts (mirrors
  * src/config_fields.c). Any key placementToConfig emits MUST be in here, or the
@@ -229,5 +228,75 @@ describe('buildDesiredConfig (the full save map)', () => {
       kb_client_bearer_token: 'secret',
     });
     expect(Object.keys(m).some((k) => k.startsWith('llm_'))).toBe(false);
+  });
+});
+
+/* The embedder picker's whole job is to state the cost of the choice before it is made,
+ * so these are the assertions that keep it honest. */
+describe('embedderChangeImpact', () => {
+  const catalog = [
+    { id: 'nomic-embed-text-v2-moe', dim: 768, context: 2048, pooling: 'mean', source: 'hf', local: true, prefixed: true },
+    { id: 'bekko-a25m', dim: 384, context: 8192, pooling: 'mean', source: 'release', local: true, prefixed: false },
+    { id: 'same-width-other', dim: 768, context: 512, pooling: 'last', source: 'hf', local: true, prefixed: false },
+  ];
+
+  it('a first choice costs nothing (no corpus to invalidate)', () => {
+    expect(embedderChangeImpact('', 'nomic-embed-text-v2-moe', catalog)).toBe('none');
+  });
+
+  it('re-selecting the same embedder costs nothing', () => {
+    expect(embedderChangeImpact('bekko-a25m', 'bekko-a25m', catalog)).toBe('none');
+  });
+
+  it('a width change needs the schema rebuilt as well as a re-embed', () => {
+    // The case the operator most needs warned about: 768 -> 384 rebuilds pgvector.
+    expect(embedderChangeImpact('nomic-embed-text-v2-moe', 'bekko-a25m', catalog))
+      .toBe('reembed+schema');
+    expect(embedderChangeImpact('bekko-a25m', 'nomic-embed-text-v2-moe', catalog))
+      .toBe('reembed+schema');
+  });
+
+  it('same width but a different model still needs a re-embed', () => {
+    // Width is not identity: pooling and prefixes are part of the vector space, and the
+    // kb refuses to start against a corpus embedded in another one.
+    expect(embedderChangeImpact('nomic-embed-text-v2-moe', 'same-width-other', catalog))
+      .toBe('reembed');
+  });
+
+  it('an unknown width does not promise a schema rebuild it cannot confirm', () => {
+    expect(embedderChangeImpact('nomic-embed-text-v2-moe', 'byo-unlisted', catalog))
+      .toBe('reembed');
+  });
+});
+
+describe('buildDesiredConfig writes the embedder identity for a LOCAL choice', () => {
+  it('local embed persists embedding_model and does NOT pin the dim', () => {
+    const m = buildDesiredConfig({
+      kbMode: 'local', kbUrl: '', kbBearer: '',
+      placements: {
+        embed: { backend: 'local', tier: 'cpu', host: 'box', gpu: '' },
+        synth: { backend: 'off' },
+      },
+      embedModel: 'bekko-a25m',
+      embedDim: '',
+    });
+    expect(m.embedding_model).toBe('bekko-a25m');
+    // The registry declares the width and the kb derives it; a second copy here is a
+    // second place to be wrong.
+    expect('embedding_dim' in m).toBe(false);
+  });
+
+  it('external embed still persists model + dim', () => {
+    const m = buildDesiredConfig({
+      kbMode: 'local', kbUrl: '', kbBearer: '',
+      placements: {
+        embed: { backend: 'external', endpoint: 'https://emb' },
+        synth: { backend: 'off' },
+      },
+      embedModel: 'my-qwen3-4b',
+      embedDim: '2560',
+    });
+    expect(m.embedding_model).toBe('my-qwen3-4b');
+    expect(m.embedding_dim).toBe('2560');
   });
 });

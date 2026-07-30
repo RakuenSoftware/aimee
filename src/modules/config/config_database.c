@@ -153,6 +153,11 @@ void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
       EMITF("AIMEE_LLM_EMBED_MODE=%s\n", deploy_role_mode(eb));
    if (strcmp(eb, "local") == 0 && cfg->llm_embed_tier[0])
       EMITF("AIMEE_LLM_EMBED_TIER=%s\n", cfg->llm_embed_tier);
+   /* The chosen embedder identity. Emitted for local AND external, because the gateway
+    * applies that model's pooling and prefixes either way — an external endpoint is a
+    * URL, not a different contract. Empty leaves the container on its own default. */
+   if (cfg->embedding_model[0])
+      EMITF("AIMEE_LLM_EMBED_MODEL=%s\n", cfg->embedding_model);
    if (strcmp(eb, "external") == 0 && cfg->embedding_endpoint[0])
       EMITF("AIMEE_LLM_EMBED_URL=%s\n", cfg->embedding_endpoint);
 

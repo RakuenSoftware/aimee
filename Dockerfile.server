@@ -195,6 +195,11 @@ RUN set -eux; \
 # AIMEE_DEPLOY_COMPOSE_FILE). Inert until AIMEE_DEPLOY_ENABLED=1 + a mounted socket.
 COPY deploy/container/aimee-managed.compose.yaml /opt/aimee/deploy/aimee-managed.compose.yaml
 
+# The embedder registry backs GET /v1/embedders — the setup wizard's page-2 picker.
+# The wizard runs BEFORE anything is deployed, so the list cannot come from a running
+# gateway; the server reads the same file the gateway and supervisor read.
+COPY scripts/embedders.json /opt/aimee/embedders.json
+
 ENV AIMEE_HOME=/var/lib/aimee
 # On-demand-installed OAuth CLI agents (claude-code / codex) global-install here,
 # on the persistent home volume, so the CLI binaries survive container recreate
