@@ -8,8 +8,7 @@
 # ONE model-less image now (aimee-llm): the tier (cpu/small/mid/large) is chosen
 # at RUNTIME via AIMEE_LLM_TIER and the models are downloaded on first boot, so
 # there are no baked GGUFs and no per-tier build matrix — a single small image
-# serves every tier. The pre-converted ettin rerank artifacts it fetches are
-# published separately by publish-rerank-artifacts.yml. This testing build is
+# serves every tier. This testing build is
 # amd64 only for speed (.254 is amd64); the release pipeline (publish-images.yml)
 # publishes the multi-arch amd64+arm64 manifest.
 name: Publish testing aimee-llm
@@ -20,7 +19,7 @@ on:
     paths:
       - "Dockerfile.aimee-llm"
       - "scripts/aimee_llm_gateway.py"
-      - "scripts/aimee_llm_rerank_head.py"
+      - "scripts/embedders.json"
       - "scripts/aimee-llm-supervisor.sh"
       - ".github/workflows/publish-llm-testing.yml"
   workflow_dispatch:
@@ -34,16 +33,7 @@ permissions:
   packages: write
 
 jobs:
-  # Ensure the rerank artifacts release exists BEFORE the image is published, so a
-  # container pulling :testing never crash-loops on a missing rerank fetch. Cheap +
-  # idempotent: only converts when the release is missing an asset (see the workflow).
-  rerank-artifacts:
-    permissions:
-      contents: write
-    uses: ./.github/workflows/publish-rerank-artifacts.yml
-
   build:
-    needs: rerank-artifacts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

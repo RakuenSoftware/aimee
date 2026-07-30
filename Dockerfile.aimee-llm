@@ -1,24 +1,21 @@
 # The unified aimee-llm container: one llama.cpp (Vulkan) runtime + the aimee-llm
-# gateway, serving embeddings, reranking, and synthesis. Replaces the torch
-# embedder + the standalone llama.cpp `llm` container.
+# gateway, serving embeddings and synthesis. Replaces the torch embedder + the
+# standalone llama.cpp `llm` container.
 #
 # MODEL-LESS by design: the image ships with NO GGUFs baked in. At container
 # start the supervisor resolves AIMEE_LLM_TIER and DOWNLOADS + configures that
 # tier's models into the /models volume (download-once, sha256-verified):
-#   (unset)/cpu  nomic-embed-v2-moe + ettin-68m  + gemma-4-E4B      (dense, CPU)
-#   small        nomic-embed-v2-moe + ettin-400m + gemma-4-12B      (dense, GPU)
-#   mid          nomic-embed-v2-moe + ettin-400m + gemma-4-26B-A4B  (MoE, SLOTS=2)
+#   (unset)/cpu  nomic-embed-v2-moe + gemma-4-E4B      (dense, CPU)
+#   small        nomic-embed-v2-moe + gemma-4-12B      (dense, GPU)
+#   mid          nomic-embed-v2-moe + gemma-4-26B-A4B  (MoE, SLOTS=2)
 #   large        SAME 26B-A4B as mid but SLOTS=4 (32GB card)
 # The EMBEDDER IS THE SAME MODEL ON EVERY TIER (nomic-embed-text-v2-moe, 768-dim,
 # mean pooling); only GPU offload differs. That keeps the embedding dimension
 # uniform, so an index built under one tier is readable under another and moving
-# between CPU and GPU needs no re-embed. Only rerank + synth vary by tier.
-# One published image for every tier; the tier table lives in the supervisor.
-# Embed+synth are plain GGUF pulls from HF; the ettin reranker is a pre-converted
-# encoder GGUF + Dense head fetched from a GitHub release (the ST score head
-# doesn't survive GGUF conversion — see benchmarks/results/unified-llm/
-# P2-serving-validation.md — so the gateway applies it; the conversion runs once
-# in .github/workflows/publish-rerank-artifacts.yml, not at build or run time).
+# between CPU and GPU needs no re-embed. Only synth varies by tier.
+# One published image for every tier; the synth tier table lives in the supervisor
+# and every per-embedder fact lives in scripts/embedders.json. Both roles are plain
+# GGUF pulls from HF, sha256-verified against pinned revisions.
 #
 # The llama.cpp binary is the VENDOR-AGNOSTIC Vulkan build (one binary for AMD/
 # Nvidia/Intel); GPU is selected at runtime by AIMEE_LLM_NGL (defaults 0 = CPU).
@@ -55,7 +52,9 @@ RUN set -eux; \
     rm /tmp/llama.tgz
 ENV LD_LIBRARY_PATH=/opt/llama/lib:/opt/llama PATH=/opt/llama:/opt/llama/bin:$PATH
 
-COPY scripts/aimee_llm_gateway.py scripts/aimee_llm_rerank_head.py /opt/aimee/
+# embedders.json is the gateway's registry AND the supervisor's coordinate source;
+# the gateway refuses to start without it, so it ships beside the gateway.
+COPY scripts/aimee_llm_gateway.py scripts/embedders.json /opt/aimee/
 COPY scripts/aimee-llm-supervisor.sh /opt/aimee/supervisor.sh
 # Create /models as a REAL directory (not just a VOLUME mountpoint): a bare
 # `VOLUME /models` on an otherwise-empty path leaves no directory layer, so any
@@ -67,17 +66,16 @@ RUN chmod +x /opt/aimee/supervisor.sh && mkdir -p /models
 # boot. Mount a volume so restarts (and tier switches) don't re-pull multi-GB models.
 VOLUME /models
 
-# Gateway + per-role serving wiring (the supervisor reads these; per-tier model
-# identity — embedder id, pooling, rerank head dir — is exported by the supervisor).
+# Gateway + per-role serving wiring (the supervisor reads these; the embedder's
+# identity, pooling and context are resolved from the registry by the supervisor).
 # Per-role backend is chosen at runtime (NOT baked, so they stay unset by default
 # and the supervisor can honor the legacy AIMEE_LLM_SYNTH_LOCAL=0 knob):
-#   AIMEE_LLM_EMBED_MODE  / AIMEE_LLM_RERANK_MODE / AIMEE_LLM_SYNTH_MODE = local|external|off
+#   AIMEE_LLM_EMBED_MODE / AIMEE_LLM_SYNTH_MODE = local|external|off
 # `local` (default) bakes+serves the tier's model; `external` forwards to the
 # operator-set AIMEE_LLM_<ROLE>_URL; `off` gates the role. A non-local role is
 # neither downloaded nor launched — only what is served locally is fetched.
 ENV AIMEE_LLM_PORT=8080 \
     AIMEE_LLM_EMBED_URL=http://127.0.0.1:8081 \
-    AIMEE_LLM_RERANK_URL=http://127.0.0.1:8082 \
     AIMEE_LLM_SYNTH_URL=http://127.0.0.1:8083 \
     AIMEE_LLM_NGL=0 \
     PYTHONPATH=/opt/aimee

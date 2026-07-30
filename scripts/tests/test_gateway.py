@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Unit tests for scripts/aimee_llm_gateway.py — the gateway's pure request logic
-(validation, caps, typed errors, health aggregation), stdlib-only, plus a
-numpy-guarded do_rerank test against a mocked encoder. No model, no network.
+(validation, caps, typed errors, health aggregation), stdlib-only. No model, no
+network.
 """
 import copy
 import importlib.util
@@ -95,40 +95,19 @@ class BatchValidation(unittest.TestCase):
         self.assertEqual(e.exception.body["error"]["code"], "batch_too_large")
 
 
-class RerankParse(unittest.TestCase):
-    def setUp(self):
-        self.gw = _gw()
-
-    def test_ok_coerces_str(self):
-        self.assertEqual(self.gw.parse_rerank_pairs([["q", 5]]), [("q", "5")])
-
-    def test_not_a_list(self):
-        with self.assertRaises(self.gw.GatewayError) as e:
-            self.gw.parse_rerank_pairs({"q": "c"})
-        self.assertEqual(e.exception.status, 400)
-
-    def test_bad_item_shape(self):
-        for bad in ([["q"]], [["q", "c", "x"]], ["flat"]):
-            with self.assertRaises(self.gw.GatewayError):
-                self.gw.parse_rerank_pairs(bad)
-
-    def test_empty(self):
-        self.assertEqual(self.gw.parse_rerank_pairs([]), [])
-
-
 class HealthAggregation(unittest.TestCase):
     def setUp(self):
         self.gw = _gw()
 
     def test_loading_when_nothing_configured(self):
-        self.assertEqual(self.gw.health_state({"embed": None, "rerank": None}), "loading")
+        self.assertEqual(self.gw.health_state({"embed": None, "synth": None}), "loading")
 
     def test_ok_when_all_up(self):
-        self.assertEqual(self.gw.health_state({"embed": True, "rerank": True}), "ok")
-        self.assertEqual(self.gw.health_state({"embed": True, "rerank": None}), "ok")
+        self.assertEqual(self.gw.health_state({"embed": True, "synth": True}), "ok")
+        self.assertEqual(self.gw.health_state({"embed": True, "synth": None}), "ok")
 
     def test_down_when_any_configured_child_down(self):
-        self.assertEqual(self.gw.health_state({"embed": True, "rerank": False}), "down")
+        self.assertEqual(self.gw.health_state({"embed": True, "synth": False}), "down")
 
 
 class Discovery(unittest.TestCase):
@@ -147,50 +126,6 @@ class Discovery(unittest.TestCase):
         slots = self.gw.slot_catalog()
         self.assertEqual(len(slots), 4)
         self.assertTrue(all(slot["n_ctx"] == 256000 for slot in slots))
-
-
-class RerankHandler(unittest.TestCase):
-    def setUp(self):
-        try:
-            import numpy  # noqa: F401
-        except ImportError:
-            self.skipTest("numpy required")
-        self.gw = _gw()
-
-    def test_do_rerank_aligned_to_input_order(self):
-        import numpy as np
-
-        head_dir = os.path.join(os.path.dirname(__file__), "..", "aimee_llm_rerank_head.py")
-        spec = importlib.util.spec_from_file_location("rerank_head", head_dir)
-        rh = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(rh)
-        # head: score == first component of GELU(v) (W2=I, no LN, W4 picks dim 0)
-        D = 4
-        W4 = np.zeros((1, D), np.float32)
-        W4[0, 0] = 1.0
-        self.gw._head = rh.EttinRerankHead(np.eye(D, dtype=np.float32), W4, None)
-        self.gw.RERANK_HEAD_DIR = "x"  # non-empty so the head isn't re-loaded
-
-        captured = {}
-
-        def fake_embed(base, texts):
-            captured["base"] = base
-            captured["texts"] = texts
-            # encode the candidate's "relevance" in the first component
-            vals = {"hot": 9.0, "cold": -3.0, "warm": 1.0}
-            return np.array([[vals[t.split("</s>")[1]], 0, 0, 0] for t in texts], np.float32)
-
-        self.gw._embeddings = fake_embed
-        scores = self.gw.do_rerank([["q", "hot"], ["q", "cold"], ["q", "warm"]])
-        # /rerank returns scores ALIGNED to input order (not sorted)
-        self.assertEqual(len(scores), 3)
-        self.assertGreater(scores[0], scores[2])  # hot > warm
-        self.assertGreater(scores[2], scores[1])  # warm > cold
-        self.assertEqual(captured["texts"], ["q</s>hot", "q</s>cold", "q</s>warm"])
-        self.assertEqual(captured["base"], self.gw.RERANK_URL)
-
-    def test_do_rerank_empty(self):
-        self.assertEqual(self.gw.do_rerank([]), [])
 
 
 class Synth(unittest.TestCase):
@@ -446,7 +381,7 @@ class MalformedBodyStatus(unittest.TestCase):
             return exc.code, exc.read()
 
     def test_malformed_json_is_400_not_500(self):
-        for path in ("/v1/chat/completions", "/embed_batch", "/rerank"):
+        for path in ("/v1/chat/completions", "/embed_batch"):
             for raw in (b"{not json", b"{", b"[1,", b'{"a":}'):
                 status, body = self._post(path, raw)
                 self.assertEqual(
@@ -541,7 +476,6 @@ class ManagedServiceAuth(unittest.TestCase):
         cases = (
             ("/embed", b"hello", "text/plain"),
             ("/embed_batch", ["hello", "world"], "application/json"),
-            ("/rerank", [["query", "candidate"]], "application/json"),
             (
                 "/v1/chat/completions",
                 {"messages": [{"role": "user", "content": "hello"}]},

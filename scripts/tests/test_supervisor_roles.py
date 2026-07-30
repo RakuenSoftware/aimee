@@ -121,10 +121,9 @@ class SupervisorRoleTest(unittest.TestCase):
         # The image path /opt/aimee/... doesn't exist in a checkout.
         env["AIMEE_LLM_GATEWAY"] = str(GATEWAY)
         env.pop("AIMEE_LLM_STUB", None)
-        for k in ("AIMEE_LLM_TIER", "AIMEE_LLM_EMBED_MODE", "AIMEE_LLM_RERANK_MODE",
+        for k in ("AIMEE_LLM_TIER", "AIMEE_LLM_EMBED_MODE",
                   "AIMEE_LLM_SYNTH_MODE", "AIMEE_LLM_SYNTH_LOCAL", "AIMEE_LLM_EMBED_URL",
-                  "AIMEE_LLM_RERANK_URL", "AIMEE_LLM_SYNTH_URL", "AIMEE_LLM_EMBED_TIER",
-                  "AIMEE_LLM_RERANK_TIER", "AIMEE_LLM_SYNTH_TIER",
+                  "AIMEE_LLM_SYNTH_URL", "AIMEE_LLM_EMBED_TIER", "AIMEE_LLM_SYNTH_TIER",
                   # An operator override in the ambient env would mask the registry.
                   "AIMEE_LLM_EMBED_MODEL", "AIMEE_LLM_EMBED_POOLING", "AIMEE_LLM_EMBED_CTX"):
             env.pop(k, None)
@@ -157,18 +156,16 @@ class SupervisorRoleTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertTrue(any(EMBED["EMBED_FILE"] in u for u in urls), urls)  # registry embed
         self.assertTrue(any("gemma-4-E4B" in u for u in urls), urls)      # cpu synth
-        self.assertTrue(any("rerank-ettin-68m" in u for u in urls), urls) # cpu rerank
-        self.assertEqual(set(self._launched(llama)), {"8081", "8082", "8083"})
+        self.assertEqual(set(self._launched(llama)), {"8081", "8083"})
         self.assertEqual(gw.get("AIMEE_LLM_EMBED_URL"), "http://127.0.0.1:8081")
         self.assertEqual(gw.get("AIMEE_LLM_SYNTH_URL"), "http://127.0.0.1:8083")
-        self.assertTrue(gw.get("AIMEE_LLM_RERANK_HEAD", "").endswith("cpu/rerank-head"))
 
     def test_completed_download_survives_resumer_failure(self):
         # A resumer may report non-zero when it sees an already-complete file left
         # by a process that died just before the ready marker was written. A valid
         # pinned artifact must still be accepted instead of restart-looping.
         proc, urls, llama, _gw = self.run_supervisor(
-            modes={"AIMEE_LLM_RERANK_MODE": "off", "AIMEE_LLM_SYNTH_MODE": "off"},
+            modes={"AIMEE_LLM_SYNTH_MODE": "off"},
             extra_env={"FETCH_FAIL_AFTER_WRITE": "1"})
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(len(urls), 1, urls)
@@ -182,7 +179,7 @@ class SupervisorRoleTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertFalse(any(EMBED["EMBED_FILE"] in u for u in urls), urls)
         self.assertTrue(any("gemma" in u.lower() for u in urls), urls)
-        self.assertEqual(set(self._launched(llama)), {"8082", "8083"})
+        self.assertEqual(set(self._launched(llama)), {"8083"})
         self.assertEqual(gw.get("AIMEE_LLM_EMBED_URL"), "http://ext-embed:9000")
 
     def test_synth_off_gates_the_role(self):
@@ -195,7 +192,6 @@ class SupervisorRoleTest(unittest.TestCase):
     def test_all_external_downloads_nothing_and_starts_no_server(self):
         proc, urls, llama, _gw = self.run_supervisor(modes={
             "AIMEE_LLM_EMBED_MODE": "external", "AIMEE_LLM_EMBED_URL": "http://e:1",
-            "AIMEE_LLM_RERANK_MODE": "external", "AIMEE_LLM_RERANK_URL": "http://r:2",
             "AIMEE_LLM_SYNTH_MODE": "external", "AIMEE_LLM_SYNTH_URL": "http://s:3",
         })
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -227,7 +223,6 @@ class SupervisorRoleTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertTrue(any(EMBED["EMBED_FILE"] in u for u in urls), urls)  # registry embed
         self.assertTrue(any("gemma-4-26B" in u for u in urls), urls)      # mid synth
-        self.assertTrue(any("rerank-ettin-400m" in u for u in urls), urls)
         launched = self._launched(llama)
         self.assertEqual(_ngl(launched["8081"]), "99")                    # gpu embed offloads
         self.assertIn("--parallel 2", launched["8083"])                   # mid => SLOTS=2
@@ -236,19 +231,16 @@ class SupervisorRoleTest(unittest.TestCase):
         # cpu embedder beside a gpu-large synth on the same instance.
         proc, urls, llama, gw = self.run_supervisor(modes={
             "AIMEE_LLM_EMBED_TIER": "cpu",
-            "AIMEE_LLM_RERANK_TIER": "cpu",
             "AIMEE_LLM_SYNTH_TIER": "large",
             "AIMEE_LLM_NGL": "99",
         })
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertTrue(any(EMBED["EMBED_FILE"] in u for u in urls), urls)  # registry embed
         self.assertTrue(any("gemma-4-26B" in u for u in urls), urls)      # large synth model
-        self.assertTrue(any("rerank-ettin-68m" in u for u in urls), urls)
         launched = self._launched(llama)
         self.assertEqual(_ngl(launched["8081"]), "0")                     # cpu embed: no offload
         self.assertEqual(_ngl(launched["8083"]), "99")                    # gpu synth: offload
         self.assertIn("--parallel 4", launched["8083"])                   # large => SLOTS=4
-        self.assertTrue(gw.get("AIMEE_LLM_RERANK_HEAD", "").endswith("cpu/rerank-head"))
 
     # ---- the embedder registry drives provisioning + serving flags ----------
     def test_serving_flags_come_from_the_registry(self):

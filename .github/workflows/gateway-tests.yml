@@ -1,6 +1,5 @@
-# Unit tests for the aimee-llm gateway's numpy components (the ettin reranker head).
-# Separate from the stdlib-only bench-smoke unittest step because these need numpy +
-# safetensors (present in the aimee-llm container; installed here for CI).
+# Unit tests for the aimee-llm gateway and the supervisor that launches it: request
+# validation, the embedder registry, and the role/tier decouple. Stdlib only.
 name: gateway-tests
 
 on:
@@ -8,7 +7,7 @@ on:
     paths:
       - 'scripts/aimee_llm_*.py'
       - 'scripts/aimee-llm-supervisor.sh'
-      - 'scripts/tests/test_rerank_head.py'
+      - 'scripts/embedders.json'
       - 'scripts/tests/test_gateway.py'
       - 'scripts/tests/test_gateway_security.py'
       - 'scripts/tests/test_supervisor_roles.py'
@@ -18,7 +17,7 @@ on:
     paths:
       - 'scripts/aimee_llm_*.py'
       - 'scripts/aimee-llm-supervisor.sh'
-      - 'scripts/tests/test_rerank_head.py'
+      - 'scripts/embedders.json'
       - 'scripts/tests/test_gateway.py'
       - 'scripts/tests/test_supervisor_roles.py'
 
@@ -30,11 +29,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install numpy + safetensors
-        run: pip install --quiet numpy safetensors
-      - name: Gateway unit tests (rerank head + request logic)
+      - name: Gateway unit tests (request logic + embedder registry)
         run: |
-          python -m unittest discover -s scripts/tests -p 'test_rerank_head.py' -v
           python -m unittest discover -s scripts/tests -p 'test_gateway.py' -v
           python -m unittest discover -s scripts/tests -p 'test_gateway_security.py' -v
       - name: Supervisor role-decouple test (stdlib only)

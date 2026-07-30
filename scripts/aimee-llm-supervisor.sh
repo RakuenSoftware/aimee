@@ -1,7 +1,7 @@
 #!/bin/bash
 # aimee-llm container supervisor: resolve each role's tier + backend mode, download
 # only what it serves locally on first boot (the image ships model-less), then
-# launch the per-role llama.cpp servers (embed, rerank-encoder, synth) and the
+# launch the per-role llama.cpp servers (embed, synth) and the
 # gateway. Each role is its own llama-server process so a crash is isolated to that
 # role; if any exits the supervisor tears the container down (the orchestrator
 # restarts it). A full s6-overlay (per-role restart) is the follow-up.
@@ -13,17 +13,15 @@
 #                                                      then cpu)
 # so ONE instance can serve, e.g., a cpu embedder beside a gpu-large synth. NGL is
 # forced 0 for a cpu-tier role and uses the deploy's AIMEE_LLM_NGL for a gpu one.
-# Per-role tier -> model coordinates (embed/rerank collapse small/mid/large -> gpu;
-# synth honors the full ladder):
-#   cpu    0.6B emb + ettin-68m  + gemma-4-E4B      (dense, CPU)
-#   small  4B emb   + ettin-400m + gemma-4-12B      (dense, GPU, FA+K8V4)
-#   mid    4B emb   + ettin-400m + gemma-4-26B-A4B  (MoE, GPU, FA+K8V4; SLOTS=2)
+# Per-role tier -> model coordinates (embed collapses small/mid/large -> gpu; synth
+# honors the full ladder):
+#   cpu    gemma-4-E4B      (dense, CPU)
+#   small  gemma-4-12B      (dense, GPU, FA+K8V4)
+#   mid    gemma-4-26B-A4B  (MoE, GPU, FA+K8V4; SLOTS=2)
 #   large  SAME 26B-A4B as mid but SLOTS=4 (32GB card → deploy 4×256K)
-# The resolvers below are the SINGLE source of truth (was Dockerfile ARGs + the
-# CI build matrix). Embed+synth are plain GGUF pulls from HF; the ettin reranker
-# is a pre-converted encoder GGUF + Dense head (head.npz) fetched from a GitHub
-# release (published by .github/workflows/publish-rerank-artifacts.yml) — the ST
-# score head doesn't survive GGUF conversion, so the gateway applies it.
+# The synth resolver below is the SINGLE source of truth for its coordinates (was
+# Dockerfile ARGs + the CI build matrix); the embedder's live in the registry. Both are
+# plain GGUF pulls from HF.
 set -u
 # The llama.cpp server binary. Overridable so the role-decouple test can shim it
 # (and so a custom install can point elsewhere); defaults to the image path.
@@ -35,8 +33,6 @@ MODELS_DIR="${AIMEE_LLM_MODELS_DIR:-/models}"
 # from a checkout rather than the image layout.
 PYTHON="${AIMEE_LLM_PYTHON:-python3}"
 GATEWAY="${AIMEE_LLM_GATEWAY:-/opt/aimee/aimee_llm_gateway.py}"
-# Base URL for the pre-converted ettin rerank artifacts (override for a mirror).
-RERANK_ASSET_BASE="${AIMEE_LLM_RERANK_ASSET_BASE:-https://github.com/RakuenSoftware/aimee/releases/download/rerank-artifacts-v1}"
 # Synth context window. The synth GGUF (gemma) trains to 256K, but a hardcoded
 # --ctx-size 8192 wasted that: large code symbols / doc chunks overran 8K and the
 # server returned HTTP 400, failing extraction entirely. The synth context defaults
@@ -44,24 +40,19 @@ RERANK_ASSET_BASE="${AIMEE_LLM_RERANK_ASSET_BASE:-https://github.com/RakuenSoftw
 # is known): cpu/small 32K, mid 256K (2 slots ×128K), large 1024K (4 slots ×256K).
 # KV cache scales with context and lives in VRAM under -ngl, so each tier's total is
 # sized to its target card. AIMEE_LLM_SYNTH_CTX overrides per deploy (e.g. a 24GB
-# card runs mid at 280000 = 4×70K). Embed/rerank inputs are small — they keep 8K.
+# card runs mid at 280000 = 4×70K). Embed inputs are small — see EMBED_CTX below.
 
 # ---- per-role tier -> model coordinates -------------------------------------
 # Each role's tier is chosen independently via AIMEE_LLM_<ROLE>_TIER, falling back
 # to the instance-wide AIMEE_LLM_TIER, then cpu. ONE aimee-llm instance serves all
 # of its local roles, each at its OWN tier — e.g. a cpu embedder beside a gpu-large
-# synth on the same box. Embed/rerank have only cpu-vs-gpu variants (small/mid/large
-# all resolve to the gpu model); synth honors the full size ladder. GPU offload is
+# synth on the same box. Embed has only cpu-vs-gpu variants (small/mid/large all
+# resolve to the gpu model); synth honors the full size ladder. GPU offload is
 # forced off for a cpu-tier role and uses $NGL for a gpu-tier one. Each role caches
 # its GGUFs under $MODELS_DIR/<its-tier>, so roles sharing a tier share a dir (and a
 # legacy all-in-one $MODELS_DIR/<tier> volume keeps working). Unknown tier fails fast.
 EMBED_TIER="${AIMEE_LLM_EMBED_TIER:-${AIMEE_LLM_TIER:-cpu}}"
-RERANK_TIER="${AIMEE_LLM_RERANK_TIER:-${AIMEE_LLM_TIER:-cpu}}"
 SYNTH_TIER="${AIMEE_LLM_SYNTH_TIER:-${AIMEE_LLM_TIER:-cpu}}"
-RERANK_BATCH="${AIMEE_LLM_RERANK_BATCH:-2048}"
-RERANK_UBATCH="${AIMEE_LLM_RERANK_UBATCH:-512}"
-RERANK_CTX="${AIMEE_LLM_RERANK_CTX:-8192}"
-RERANK_PARALLEL="${AIMEE_LLM_RERANK_PARALLEL:-1}"
 
 # The embedder is NOT resolved here. Every per-model fact — coordinates, pooling,
 # width, context, query/document prefixes — lives in scripts/embedders.json, and both
@@ -87,14 +78,6 @@ embed_coords() {
   descriptor="$("$PYTHON" "$GATEWAY" --embedder-descriptor "$AIMEE_LLM_EMBED_MODEL")" || exit 1
   eval "$descriptor"
   EMBED_D="$MODELS_DIR/$EMBED_TIER"
-}
-rerank_coords() {
-  case "$RERANK_TIER" in
-    cpu)             RERANK_SIZE="68m";  RERANK_NGL=0 ;;
-    small|mid|large) RERANK_SIZE="400m"; RERANK_NGL="$NGL" ;;
-    *) echo "aimee-llm: invalid AIMEE_LLM_RERANK_TIER='$RERANK_TIER' (cpu, small, mid, large)" >&2; exit 1 ;;
-  esac
-  RERANK_D="$MODELS_DIR/$RERANK_TIER"
 }
 synth_coords() {
   case "$SYNTH_TIER" in
@@ -133,7 +116,6 @@ synth_coords() {
 # gateway reads the same variable and resolves the same entry.
 export AIMEE_LLM_EMBED_MODEL="${AIMEE_LLM_EMBED_MODEL:-nomic-embed-text-v2-moe}"
 embed_coords
-rerank_coords
 synth_coords
 
 # Synth context: an explicit AIMEE_LLM_SYNTH_CTX wins; otherwise the tier default
@@ -150,7 +132,6 @@ SYNTH_CTX="${AIMEE_LLM_SYNTH_CTX:-$TIER_CTX}"
 # the gateway is a pure forwarder (the deploy layer normally skips deploying the
 # plugin at all in that case).
 EMBED_MODE="${AIMEE_LLM_EMBED_MODE:-local}"
-RERANK_MODE="${AIMEE_LLM_RERANK_MODE:-local}"
 SYNTH_MODE="${AIMEE_LLM_SYNTH_MODE:-local}"
 # Back-compat: the older AIMEE_LLM_SYNTH_LOCAL=0 knob means "external synth".
 if [ "${AIMEE_LLM_SYNTH_LOCAL:-1}" = "0" ] && [ -z "${AIMEE_LLM_SYNTH_MODE:-}" ]; then
@@ -163,7 +144,6 @@ validate_mode() { # env-name value
   esac
 }
 validate_mode AIMEE_LLM_EMBED_MODE "$EMBED_MODE"
-validate_mode AIMEE_LLM_RERANK_MODE "$RERANK_MODE"
 validate_mode AIMEE_LLM_SYNTH_MODE "$SYNTH_MODE"
 
 # Deploy-time overrides win over the synth tier default (operators set CTX/SLOTS per card).
@@ -199,7 +179,6 @@ SYNTH_CACHE_RAM="${AIMEE_LLM_SYNTH_CACHE_RAM:-2048}"
 # AIMEE_LLM_EMBED_POOLING still wins, for bisecting a suspected pooling bug without
 # editing the registry.
 export AIMEE_LLM_EMBED_POOLING="${AIMEE_LLM_EMBED_POOLING:-$EMBED_POOLING}"
-# AIMEE_LLM_RERANK_HEAD is set per-mode in resolve_upstreams (local rerank only).
 POOL="$AIMEE_LLM_EMBED_POOLING"
 # Embedder context, also from the registry. This was a hardcoded 8192 for every model,
 # which over-allocates for nomic (trained to 2048) and would silently exceed a model
@@ -256,15 +235,13 @@ fetch() {
 # download_models — fetch ONLY the roles served locally, each into its own tier's
 # cache dir ($MODELS_DIR/<role-tier>) and guarded by its own .<role>.ready marker,
 # so switching one role's tier/mode never re-pulls the others. Embed+synth pull
-# straight from HF; the rerank encoder+head come from the GH release, everything
-# sha256-verified where a checksum is known.
+# straight from HF, sha256-verified where a checksum is known.
 download_models() {
   # Migrate the legacy single all-roles marker: a volume provisioned before the
-  # per-role split has <dir>/.ready (all three fetched together at that tier).
+  # per-role split has <dir>/.ready (every role fetched together at that tier).
   # Honor it per role so an upgrade does not needlessly re-download multi-GB GGUFs.
   [ -f "$EMBED_D/.ready" ]  && touch "$EMBED_D/.embed.ready"
   [ -f "$SYNTH_D/.ready" ]  && touch "$SYNTH_D/.synth.ready"
-  [ -f "$RERANK_D/.ready" ] && touch "$RERANK_D/.rerank.ready"
 
   # Embedder GGUF (repo default branch) — local embed only.
   if [ "$EMBED_MODE" = "local" ] && [ ! -f "$EMBED_D/.embed.ready" ]; then
@@ -289,42 +266,15 @@ download_models() {
     touch "$SYNTH_D/.synth.ready"
   fi
 
-  # Pre-converted ettin rerank artifacts (encoder GGUF + Dense head npz) from the
-  # GH release, verified against its SHA256SUMS — local rerank only.
-  if [ "$RERANK_MODE" = "local" ] && [ ! -f "$RERANK_D/.rerank.ready" ]; then
-    echo "aimee-llm: fetching rerank tier '$RERANK_TIER' into $RERANK_D" >&2
-    mkdir -p "$RERANK_D/rerank-head" || return 1
-    local rr="rerank-ettin-${RERANK_SIZE}"
-    fetch "${RERANK_ASSET_BASE}/${rr}.gguf"     "$RERANK_D/rerank-encoder.gguf"   || return 1
-    fetch "${RERANK_ASSET_BASE}/${rr}.head.npz" "$RERANK_D/rerank-head/head.npz"  || return 1
-    if fetch "${RERANK_ASSET_BASE}/SHA256SUMS" "$RERANK_D/SHA256SUMS"; then
-      ( cd "$RERANK_D" \
-        && grep -E "  ${rr}\.gguf\$" SHA256SUMS | sed "s#${rr}\.gguf#rerank-encoder.gguf#" | sha256sum -c - \
-        && grep -E "  ${rr}\.head\.npz\$" SHA256SUMS | sed "s#${rr}\.head\.npz#rerank-head/head.npz#" | sha256sum -c - ) >&2 || {
-        echo "aimee-llm: rerank artifact sha256 MISMATCH — refusing to serve" >&2; return 1; }
-    else
-      echo "aimee-llm: WARNING — no SHA256SUMS for rerank artifacts (unverified)" >&2
-    fi
-    touch "$RERANK_D/.rerank.ready"
-  fi
-
-  echo "aimee-llm: model provisioning done (embed=$EMBED_MODE/$EMBED_TIER rerank=$RERANK_MODE/$RERANK_TIER synth=$SYNTH_MODE/$SYNTH_TIER)" >&2
+  echo "aimee-llm: model provisioning done (embed=$EMBED_MODE/$EMBED_TIER synth=$SYNTH_MODE/$SYNTH_TIER)" >&2
 }
 
 # resolve_upstreams — point the gateway's per-role upstream at the right place for
 # each mode: local => the baked llama-server; external => the operator's upstream
 # (must be set to a non-local base); off => empty so the gateway gates the role.
-# The rerank Dense head is applied locally by the gateway, so only a LOCAL rerank
-# encoder carries a head dir; external/off rerank clears it (gated).
 resolve_upstreams() {
   resolve_one EMBED  "$EMBED_MODE"  "http://127.0.0.1:8081"
-  resolve_one RERANK "$RERANK_MODE" "http://127.0.0.1:8082"
   resolve_one SYNTH  "$SYNTH_MODE"  "http://127.0.0.1:8083"
-  if [ "$RERANK_MODE" = "local" ]; then
-    export AIMEE_LLM_RERANK_HEAD="$RERANK_D/rerank-head"
-  else
-    export AIMEE_LLM_RERANK_HEAD=""
-  fi
 }
 resolve_one() { # ROLE MODE localurl
   local role="$1" mode="$2" localurl="$3" var="AIMEE_LLM_${1}_URL" cur
@@ -352,7 +302,7 @@ if [ "${AIMEE_LLM_DOWNLOAD_ONLY:-0}" = "1" ]; then
 fi
 
 # STUB mode (CI/dev): no GGUFs, no downloads, no llama-servers — the gateway serves
-# deterministic embed/rerank/synth. Lets e2e exercise the kb->gateway contract
+# deterministic embed/synth. Lets e2e exercise the kb->gateway contract
 # cheaply (and the image runs without any model fetch).
 case "${AIMEE_LLM_STUB:-}" in
   ""|0|false)
@@ -361,12 +311,6 @@ case "${AIMEE_LLM_STUB:-}" in
     if [ "$EMBED_MODE" = "local" ]; then
       start embed 8081 -ngl "$EMBED_NGL" -m "$EMBED_D/embed.gguf" --embeddings --pooling "$POOL" \
         --ctx-size "$EMBED_CTX" -ub 512 -np 1 --cache-ram 0 --no-cache-idle-slots
-    fi
-    # Reranker ENCODER: CLS pooling + flash-attn; the gateway applies the Dense head.
-    if [ "$RERANK_MODE" = "local" ]; then
-      start rerank 8082 -ngl "$RERANK_NGL" -m "$RERANK_D/rerank-encoder.gguf" --embeddings --pooling cls -fa on \
-        --ctx-size "$RERANK_CTX" -np "$RERANK_PARALLEL" -b "$RERANK_BATCH" -ub "$RERANK_UBATCH" \
-        --cache-ram 0 --no-cache-idle-slots
     fi
     # Synth: OpenAI-compatible /v1/chat/completions (grammar/JSON via --jinja). The
     # synth MODEL + its runtime profile come from the synth tier above; explicit

@@ -64,17 +64,9 @@ jobs:
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
-  # Ensure the rerank artifacts release exists BEFORE any image is published, so a
-  # container pulling :latest never crash-loops on a missing rerank fetch. Cheap +
-  # idempotent: only converts when the release is missing an asset (see the workflow).
-  rerank-artifacts:
-    permissions:
-      contents: write
-    uses: ./.github/workflows/publish-rerank-artifacts.yml
-
   # Build each image for each arch on a native runner; push by digest only.
   build:
-    needs: [prep, rerank-artifacts]
+    needs: prep
     strategy:
       fail-fast: false
       matrix:
@@ -83,12 +75,12 @@ jobs:
           - { name: aimee-kb,        dockerfile: Dockerfile }
           - { name: aimee-authority-bootstrap, dockerfile: Dockerfile.authority-bootstrap }
           - { name: aimee-embedder,  dockerfile: Dockerfile.embedder }
-          # Higher-fidelity alternate tier: same Dockerfile, 4b embedder + 1b reranker
+          # Higher-fidelity alternate tier: same Dockerfile, 4b embedder
           # baked in. Pair with embedding_dim: 2560 (see docs). Default (above) is
-          # the 0.6b embedder + 400m reranker.
-          - { name: aimee-embedder-4b, dockerfile: Dockerfile.embedder, embedder_arg: "EMBEDDER_MODEL=perplexity-ai/pplx-embed-v1-4b", reranker_arg: "RERANKER_MODEL=cross-encoder/ettin-reranker-1b-v1" }
+          # the 0.6b embedder.
+          - { name: aimee-embedder-4b, dockerfile: Dockerfile.embedder, embedder_arg: "EMBEDDER_MODEL=perplexity-ai/pplx-embed-v1-4b" }
           # The unified aimee-llm container (one Vulkan llama.cpp + the gateway serving
-          # embed+rerank+synth). MODEL-LESS: one image for every tier — the tier
+          # embed+synth). MODEL-LESS: one image for every tier — the tier
           # (cpu/small/mid/large) is chosen at RUNTIME via AIMEE_LLM_TIER and the models
           # are downloaded on first boot, so there are no baked GGUFs and no build-args.
           # Multi-arch: upstream llama.cpp ships x64 + arm64 Vulkan tarballs, mapped
@@ -149,7 +141,6 @@ jobs:
             AIMEE_VERSION=${{ needs.prep.outputs.version }}
             WITH_RUNTIME_WEB=1
             ${{ matrix.image.embedder_arg }}
-            ${{ matrix.image.reranker_arg }}
             ${{ matrix.image.extra_args }}
           outputs: type=image,name=ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=true
 

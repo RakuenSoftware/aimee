@@ -1,31 +1,25 @@
 #!/usr/bin/env python3
 """aimee-llm gateway — the retrieval surface of the unified llama.cpp container.
 
-Preserves the embedder-server contract (so embed-remote.py / rerank-remote.py / the kb
-config / AIMEE_EMBEDDER_URL are untouched):
+Preserves the embedder-server contract (so embed-remote.py / the kb config /
+AIMEE_EMBEDDER_URL are untouched):
 
   POST /embed        body = raw UTF-8 text                 -> JSON float array (dim)
   POST /embed_batch  body = JSON [text, ...]               -> JSON [[float,...], ...]
-  POST /rerank       body = JSON [[query, candidate], ...] -> JSON [float, ...]
-
-/embed and /embed_batch take an optional `?input_type=query|document` selecting which of
-the embedder's asymmetric prefixes to apply (see EMBED_PREFIXES). It rides in the query
-string because neither body has an envelope to extend — /embed's is raw text and
-/embed_batch's is a bare JSON array — so old clients keep working unchanged. Omitted
-means `document`, since every ingest path is a document and only queries need to opt in.
   POST /auth/verify  authenticated service-identity check (no model work)
   GET  /health       -> {"status": ok|loading|down, "model":..., "dim":N}
 
+/embed and /embed_batch take an optional `?input_type=query|document` selecting which of
+the embedder's asymmetric prefixes to apply (see scripts/embedders.json). It rides in the
+query string because neither body has an envelope to extend — /embed's is raw text and
+/embed_batch's is a bare JSON array — so old clients keep working unchanged. Omitted
+means `document`, since every ingest path is a document and only queries need to opt in.
+
 …but the backend is **llama.cpp**, not torch/sentence-transformers:
   - /embed[_batch] proxy to the embedder llama-server `/v1/embeddings`.
-  - /rerank embeds `query</s>candidate` on the ETTIN ENCODER llama-server `/v1/embeddings`
-    (CLS pooling) and applies the EttinRerankHead (the ST Dense head, numpy) — see
-    aimee_llm_rerank_head.py and benchmarks/results/unified-llm/P2-serving-validation.md.
 
 Config (env):
   AIMEE_LLM_EMBED_URL     embedder llama-server base (default http://127.0.0.1:8081)
-  AIMEE_LLM_RERANK_URL    ettin-encoder llama-server base (default http://127.0.0.1:8082)
-  AIMEE_LLM_RERANK_HEAD   dir with 2_Dense/3_LayerNorm/4_Dense safetensors (the head)
   AIMEE_LLM_EMBED_MODEL   embedder model id (for /health, the (model_id,dim) drift guard,
                           and the registry lookup — an id absent from the registry is
                           refused rather than served without prefixes)
@@ -34,7 +28,7 @@ Config (env):
   AIMEE_LLM_BATCH_CAP     /embed_batch max vectors per call (default 512 -> 413 on excess)
 
 The router/modes (local/forward/external) and synth (/v1/chat/completions) land in a
-follow-up; this module is the retrieval gateway + the validated rerank-head path.
+follow-up; this module is the retrieval gateway.
 """
 import hmac
 import json
@@ -48,12 +42,9 @@ import urllib.parse
 import urllib.request
 
 EMBED_URL = os.environ.get("AIMEE_LLM_EMBED_URL", "http://127.0.0.1:8081").rstrip("/")
-RERANK_URL = os.environ.get("AIMEE_LLM_RERANK_URL", "http://127.0.0.1:8082").rstrip("/")
-RERANK_HEAD_DIR = os.environ.get("AIMEE_LLM_RERANK_HEAD", "")
 EMBED_MODEL = os.environ.get("AIMEE_LLM_EMBED_MODEL", "nomic-embed-text-v2-moe")
 PORT = int(os.environ.get("AIMEE_LLM_PORT", "8080"))
 BATCH_CAP = int(os.environ.get("AIMEE_LLM_BATCH_CAP", "512"))
-RERANK_SEP = "</s>"
 
 # ---- the embedder registry ----
 # Everything that varies per embedder — coordinates, pooling, width, context, and the
@@ -185,10 +176,10 @@ def embed_prefix(input_type, model_id=None):
     """Return the prefix for `input_type` under the configured embedder."""
     return embedder_spec(model_id)["prefixes"][input_type]
 
-# CI/dev STUB mode: serve deterministic embed/rerank/synth with NO upstream
+# CI/dev STUB mode: serve deterministic embed/synth with NO upstream
 # llama-servers. The supervisor skips launching the per-role servers and the
 # image can be built without baking the multi-GB GGUFs (Dockerfile arg), so e2e
-# exercises the real kb -> gateway contract (and the /embed,/rerank,/v1/chat
+# exercises the real kb -> gateway contract (and the /embed,/v1/chat
 # shapes) cheaply. Vectors are deterministic per-input so retrieval is stable.
 STUB = os.environ.get("AIMEE_LLM_STUB", "") not in ("", "0", "false")
 
@@ -410,18 +401,6 @@ def validate_batch(texts, cap=BATCH_CAP):
     return texts
 
 
-def parse_rerank_pairs(obj):
-    """Validate a /rerank payload ([[query, candidate], ...]). Raises GatewayError(400)."""
-    if not isinstance(obj, list):
-        raise GatewayError(400, "bad_request", "rerank expects a JSON array of [query, candidate]")
-    pairs = []
-    for p in obj:
-        if not (isinstance(p, (list, tuple)) and len(p) == 2):
-            raise GatewayError(400, "bad_request", "each rerank item must be [query, candidate]")
-        pairs.append((str(p[0]), str(p[1])))
-    return pairs
-
-
 def health_state(child_oks):
     """Aggregate per-child readiness into the gateway status. `child_oks` maps role ->
     bool|None (None = not configured). ready iff every configured child is up."""
@@ -461,21 +440,7 @@ def _validate_embed_dim(vec):
     return vec
 
 
-# ---- handlers (call llama.cpp; the rerank head is the validated P2 path) ----
-
-_head = None
-
-
-def _rerank_head():
-    global _head
-    if _head is None:
-        if not RERANK_HEAD_DIR:
-            raise GatewayError(503, "rerank_unconfigured", "AIMEE_LLM_RERANK_HEAD is not set")
-        from aimee_llm_rerank_head import EttinRerankHead
-
-        _head = EttinRerankHead.from_dir(RERANK_HEAD_DIR)
-    return _head
-
+# ---- handlers (call llama.cpp) ----
 
 def do_embed(text, input_type=INPUT_TYPE_DEFAULT):
     # The prefix is resolved (and an unregistered embedder refused) in STUB mode too, so
@@ -499,22 +464,6 @@ def do_embed_batch(texts, input_type=INPUT_TYPE_DEFAULT):
     for vec in vecs:
         _validate_embed_dim(vec)
     return vecs
-
-
-def do_rerank(obj):
-    """[[query, candidate], ...] -> [score, ...] (aligned to input order). Embeds each
-    `query</s>candidate` on the ettin encoder and applies the Dense head."""
-    pairs = parse_rerank_pairs(obj)
-    if not pairs:
-        return []
-    if STUB:
-        # Deterministic per-pair score (stable ordering) without the encoder/head.
-        return [sum(_stub_vec(f"{q}{RERANK_SEP}{c}")[:8]) for q, c in pairs]
-    head = _rerank_head()
-    texts = [f"{q}{RERANK_SEP}{c}" for q, c in pairs]
-    vecs = _embeddings(RERANK_URL, texts)
-    scores = head.score(vecs)  # numpy array aligned to input order
-    return [float(s) for s in (scores if hasattr(scores, "__len__") else [scores])]
 
 
 _synth_breaker = CircuitBreaker()
@@ -706,12 +655,11 @@ def role_state(base, configured=True):
 
 
 def role_states():
-    """Per-role state for /health/{embed,rerank,synth}."""
+    """Per-role state for /health/{embed,synth}."""
     if STUB:
-        return {"embed": "ready", "rerank": "ready", "synth": "ready"}
+        return {"embed": "ready", "synth": "ready"}
     return {
         "embed": role_state(EMBED_URL),
-        "rerank": role_state(RERANK_URL, configured=bool(RERANK_HEAD_DIR)),
         "synth": role_state(SYNTH_URL, configured=bool(SYNTH_URL)),
     }
 
@@ -800,7 +748,7 @@ def build_server():
                         st = "loading"
                         payload["status"] = st
                 self._send(200 if st == "ok" else 503, payload)
-            elif path in ("/health/embed", "/health/rerank", "/health/synth"):
+            elif path in ("/health/embed", "/health/synth"):
                 role = path.rsplit("/", 1)[1]
                 st = role_states()[role]
                 # ready=200 so a probe can gate on a single role (the kb hits
@@ -838,8 +786,6 @@ def build_server():
                     self._send(200, do_embed(text, input_type))
                 elif path == "/embed_batch":
                     self._send(200, do_embed_batch(json.loads(raw or b"[]"), input_type))
-                elif path == "/rerank":
-                    self._send(200, do_rerank(json.loads(raw or b"[]")))
                 elif path == "/v1/chat/completions":
                     req_body = json.loads(raw or b"{}")
                     if isinstance(req_body, dict) and req_body.get("stream"):
@@ -937,7 +883,7 @@ def main():  # pragma: no cover
         audit("startup", SCOPE_DEFAULT, "warn", bind=BIND, auth="off",
               note="unauthenticated wildcard bind; deployment network is the boundary")
     srv = build_server()
-    sys.stderr.write(f"aimee-llm-gateway: {BIND}:{PORT} embed={EMBED_URL} rerank={RERANK_URL} "
+    sys.stderr.write(f"aimee-llm-gateway: {BIND}:{PORT} embed={EMBED_URL} "
                      f"auth={'on' if AUTH_TOKEN else 'off'}\n")
     sys.stderr.flush()
     srv.serve_forever()

@@ -149,9 +149,8 @@ ENV AIMEE_HOME=/var/lib/aimee
 # internal cluster. Operators can still set the variable to select an external DB2.
 # No baked embedder/LLM endpoint defaults. The kb runs NO model runtime; it calls
 # an external aimee-llm container (CPU/GPU) or endpoint. Point it with ONE of:
-#   AIMEE_LLM_URL       unified container -> embed + rerank + synth (one knob)
+#   AIMEE_LLM_URL       unified container -> embed + synth (one knob)
 #   AIMEE_EMBEDDER_URL  pin the embedder (/embed) independently
-#   AIMEE_RERANKER_URL  pin the reranker (/rerank) independently
 #   LLM_ENDPOINT        Tier-A synth only (small-model interface)
 # One of these is REQUIRED. The seeded default config selects the remote embedder
 # sidecar, so with no endpoint set the DB2 dim probe fails and db2_init refuses to
@@ -174,7 +173,7 @@ COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
 COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
 
 # Sidecar clients (the LLM/embedder access code the kb invokes via popen).
-COPY scripts/embed-remote.py scripts/rerank-remote.py scripts/llm-chat.py \
+COPY scripts/embed-remote.py scripts/llm-chat.py \
      scripts/learning-synthesize.py scripts/curator-extract.py scripts/llm-rewrite.py \
      scripts/guardrails-semantic.py /opt/aimee/scripts/
 # Baked default config: selects the sidecar commands (endpoints come from env).
