@@ -1929,8 +1929,10 @@ static int server_agent_route_is_degraded(const char *agent_name)
 
 static int server_agent_route_has_capacity(const agent_t *ag)
 {
-   return ag && agent_admission_probe(ag->name, ag->model[0] ? ag->model : ag->name,
-                                      ag->max_parallel, NULL);
+   return ag && agent_admission_probe(
+                    ag->name,
+                    ag->model[0] ? ag->model : AGENT_ADMISSION_DEFAULT_MODEL_KEY,
+                    ag->max_parallel, NULL);
 }
 
 /* Route-time delegate-policy predicate (returns nonzero to EXCLUDE):

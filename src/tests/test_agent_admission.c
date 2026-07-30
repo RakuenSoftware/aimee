@@ -167,6 +167,23 @@ static void test_probe_matches_acquire_without_mutation(void)
    printf("  PASS: probe_matches_acquire_without_mutation\n");
 }
 
+static void test_model_less_agents_share_default_key(void)
+{
+   configure(10, 1);
+   agent_admit_status_t st;
+   agent_admit_capacity_t why;
+   agent_admit_req_t a = req("default-a", "claude-a", AGENT_ADMISSION_DEFAULT_MODEL_KEY, 4);
+   agent_admit_req_t b = req("default-b", "claude-b", AGENT_ADMISSION_DEFAULT_MODEL_KEY, 4);
+   agent_slot_t *slot = agent_admission_acquire(&a, &st);
+   assert(slot && st == AGENT_ADMIT_OK);
+   assert(!agent_admission_probe(b.agent, b.model, b.per_agent_max, &why));
+   assert(why == AGENT_ADMIT_CAPACITY_MODEL);
+   assert(agent_admission_acquire(&b, &st) == NULL && st == AGENT_ADMIT_AT_LIMIT);
+   agent_admission_release(slot);
+   assert(agent_admission_probe(b.agent, b.model, b.per_agent_max, &why));
+   printf("  PASS: model_less_agents_share_default_key\n");
+}
+
 static void test_context_reuse(void)
 {
    configure(1, 100); /* global cap 1: only reuse of the SAME context can exceed it */
@@ -329,6 +346,7 @@ int main(void)
    test_fail_closed_bad_input();
    test_fail_closed_unconfigured();
    test_per_agent_cap();
+   test_model_less_agents_share_default_key();
    test_global_cap();
    test_per_model_cap();
    test_probe_matches_acquire_without_mutation();

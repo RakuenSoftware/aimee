@@ -259,9 +259,9 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 			return result, nil
 		}
 		capacityRace := errors.Is(err, ErrDelegateAtCapacity)
+		terminalRetry := errors.Is(err, ErrDelegateTerminal)
 		if (request.Delegate != "" && !request.routeSelected) || request.Participant != "" ||
-			(!capacityRace && !errors.Is(err, ErrDelegateTerminal)) ||
-			attempt+1 >= maxRouteAttempts || ctx.Err() != nil {
+			(!capacityRace && !terminalRetry) || ctx.Err() != nil {
 			if execution != nil && execution.Dispatched && !execution.CostKnown {
 				return result, &DelegateExecutionError{Err: err, Dispatched: true, CostKnown: false, CostUSD: totalCost}
 			}
@@ -270,15 +270,17 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 			}
 			return result, err
 		}
-		// The request remains unpinned. A distinct durable key forces a fresh
-		// generic delegate admission, whose router can select another currently
-		// eligible agent. No failed agent is persisted as an exclusion.
+		// A capacity race first gets bounded alternate-route attempts. If both
+		// snapshots race, the final attempt bypasses only the capacity preflight
+		// and enters C's existing cancellable admission waiter.
+		if capacityRace && !request.waitForAdmission && attempt+1 >= maxRouteAttempts-1 {
+			request.waitForAdmission = true
+		} else if attempt+1 >= maxRouteAttempts {
+			return result, err
+		}
 		request.RetryTag = fmt.Sprintf("route-retry:%d", attempt+1)
 		request.Delegate = ""
 		request.routeSelected = false
-		if capacityRace && attempt+2 == maxRouteAttempts {
-			request.waitForAdmission = true
-		}
 		if originalCostLimit > 0 {
 			request.MaxCostUSD = originalCostLimit - totalCost
 			if request.MaxCostUSD <= 0 {
@@ -479,10 +481,13 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 		}
 		select {
 		case <-ctx.Done():
-			// The remote resource-plane job outlives an HTTP poll unless it is
-			// explicitly cancelled. Wait for the cancellation acknowledgement so
-			// a wall-cap resume cannot overlap the old job in the same worktree.
-			_ = c.cancelRemoteAndForget(launched.JobID, key, ctx)
+			// Cancellation can terminate a job queued in the C admission waiter.
+			// Read the acknowledged terminal status before returning so that an
+			// admission deadline remains distinct from an execution deadline.
+			outcome := c.cancelRemoteOutcome(launched.JobID, key, ctx)
+			if request.waitForAdmission && errors.Is(outcome, ErrDelegateAdmissionWaitExpired) {
+				return DelegateResult{}, outcome
+			}
 			return DelegateResult{}, delegateExecutionError(ctx.Err(), true, false, 0)
 		case <-ticker.C:
 		}
@@ -724,7 +729,7 @@ func (c *HTTPAgentClient) delegateCandidates(ctx context.Context) ([]delegateCan
 			provider = agent.Name
 		}
 		if model == "" {
-			model = agent.Name
+			model = "__agent_default_model__"
 		}
 		candidates = append(candidates, delegateCandidate{Name: agent.Name, Provider: provider, Model: model,
 			Roles: agent.Roles, Personas: agent.Personas, MaxParallel: agent.MaxParallel,

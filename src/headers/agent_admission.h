@@ -28,6 +28,9 @@
 
 /* Default global ceiling when maximum_total_concurrent_agent_sessions is unset (0). */
 #define AGENT_ADMISSION_DEFAULT_GLOBAL_MAX 14
+/* Stable shared-model key for configured agents that omit an explicit model.
+ * Route probes and runtime acquisition must normalize to this same key. */
+#define AGENT_ADMISSION_DEFAULT_MODEL_KEY "__agent_default_model__"
 
 typedef struct agent_slot agent_slot_t;
 

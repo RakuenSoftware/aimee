@@ -182,9 +182,12 @@ void agent_dispatch_set_fail_fast(int on)
    tl_admission_fail_fast = on ? 1 : 0;
 }
 
-/* Abandon a queued turn if its delegation was stopped (cancel_ctx is the delegation id). */
+/* Abandon a queued turn when either its delegation or durable async job is stopped. */
 static int admission_cancel_poll(const char *deleg_id)
 {
+   int job_id = agent_get_durable_job_id();
+   if (job_id > 0 && db1_agent_job_is_cancelled(job_id))
+      return 1;
    return (deleg_id && deleg_id[0]) ? db1_delegation_spawn_is_stopped(deleg_id) : 0;
 }
 
@@ -243,12 +246,13 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
     * (tl_admission_fail_fast) gets a DISTINCT at-limit signal instead so it can pick a
     * different agent. Return BEFORE any health recording — saturation is a load signal,
     * not a provider fault. */
+   int durable_job_id = agent_get_durable_job_id();
    char admit_ctxbuf[192];
    const char *admit_deleg = delegation_active_id();
    agent_admit_req_t admit_req = {
        .ctx_handle = admission_ctx(ag, admit_ctxbuf, sizeof(admit_ctxbuf)),
        .agent = ag->name,
-       .model = ag->model[0] ? ag->model : ag->name,
+       .model = ag->model[0] ? ag->model : AGENT_ADMISSION_DEFAULT_MODEL_KEY,
        .per_agent_max = ag->max_parallel,
        .priority = (admit_deleg && admit_deleg[0]) ? AGENT_ADMIT_PRIORITY_BACKGROUND
                                                    : AGENT_ADMIT_PRIORITY_INTERACTIVE,
@@ -256,8 +260,16 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
        .cancel_fn = admission_cancel_poll,
        .cancel_ctx = (admit_deleg && admit_deleg[0]) ? admit_deleg : NULL,
    };
+   agent_admit_capacity_t initial_capacity;
+   int initially_free = agent_admission_probe(admit_req.agent, admit_req.model,
+                                              admit_req.per_agent_max, &initial_capacity);
+   if (!tl_admission_fail_fast && !initially_free &&
+       initial_capacity != AGENT_ADMIT_CAPACITY_INVALID && durable_job_id > 0)
+      db1_agent_job_update(durable_job_id, "running", 0, "[aimee_err=admission_wait_cancelled]");
    agent_admit_status_t admit_status = AGENT_ADMIT_INVALID;
    agent_slot_t *admit_slot = agent_admission_acquire(&admit_req, &admit_status);
+   if (admit_slot && durable_job_id > 0)
+      db1_agent_job_update(durable_job_id, "running", 0, "");
    if (!admit_slot)
    {
       snprintf(out->agent_name, MAX_AGENT_NAME, "%s", ag->name);
@@ -273,10 +285,6 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
                ag->max_parallel, aimee_err_slug(AIMEE_ERR_CONCURRENCY_LIMIT));
       return AGENT_RC_AT_LIMIT;
    }
-   /* The durable id is thread-local (agent_tasks.c), so overlapping workers
-    * cannot cross-attribute jobs. Persist only after admission: this agent is
-    * now actually being attempted, rather than merely considered or saturated. */
-   int durable_job_id = agent_get_durable_job_id();
    if (durable_job_id > 0)
       db1_agent_job_set_agent(durable_job_id, ag->name);
    int rc = use_tools ? agent_execute_with_tools_for_role(ag, net, role, system_prompt, user_prompt,

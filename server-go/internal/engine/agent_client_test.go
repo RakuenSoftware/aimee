@@ -1309,6 +1309,43 @@ func TestGroupRoutingRejectsSaturatedPinnedSeatWithoutDispatch(t *testing.T) {
 	}
 }
 
+func TestGroupRoutingSharesDefaultModelCapacityForModelLessAgents(t *testing.T) {
+	var dispatches int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/agent/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]any{
+				{"name": "claude-a", "provider": "claude", "enabled": true, "max_parallel": 4,
+					"admission_capacity": 1, "admission_global_capacity": 4, "admission_agent_capacity": 4, "admission_model_capacity": 1, "roles": []string{"review"}, "personas": []string{"all"}},
+				{"name": "claude-b", "provider": "claude", "enabled": true, "max_parallel": 4,
+					"admission_capacity": 1, "admission_global_capacity": 4, "admission_agent_capacity": 4, "admission_model_capacity": 1, "roles": []string{"review"}, "personas": []string{"all"}},
+			}})
+		case "/v1/delegate/run":
+			dispatches++
+			http.Error(w, "unexpected dispatch", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := client.DelegateGroup(t.Context(), []DelegateRequest{
+		{Role: "review", Persona: "qa", Prompt: "one"},
+		{Role: "review", Persona: "security", Prompt: "two"},
+	})
+	for _, result := range results {
+		if !errors.Is(result.Err, ErrNoFreeDelegateCapacity) {
+			t.Fatalf("results = %+v, want shared default-model saturation", results)
+		}
+	}
+	if dispatches != 0 {
+		t.Fatalf("model-less shared pool dispatched %d jobs", dispatches)
+	}
+}
+
 func TestDelegateRetriesAtomicCapacityRaceOnAnotherRoute(t *testing.T) {
 	var mu sync.Mutex
 	var vias []string
