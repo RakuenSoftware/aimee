@@ -3,6 +3,8 @@
 
 #include "kb_http_json.h"
 
+#include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -55,9 +57,27 @@ int kb_http_json_int(const char *body, const char *key, int default_val)
    const char *p = json_value_at(body, key);
    if (!p)
       return default_val;
-   if (*p < '0' || *p > '9')
+
+   /* A leading sign is part of the number. Testing p[0] against '0'..'9'
+    * rejected every negative, so the caller silently received its default and
+    * could not tell "-1 was sent" from "nothing was sent". */
+   const char *digits = p;
+   if (*digits == '-' || *digits == '+')
+      digits++;
+   if (*digits < '0' || *digits > '9')
       return default_val;
-   return atoi(p);
+
+   /* strtol rather than atoi: atoi on an out-of-range literal is undefined,
+    * and this parses untrusted request bodies. Saturate instead. */
+   errno = 0;
+   long v = strtol(p, NULL, 10);
+   if (errno == ERANGE)
+      return (v < 0) ? INT_MIN : INT_MAX;
+   if (v > INT_MAX)
+      return INT_MAX;
+   if (v < INT_MIN)
+      return INT_MIN;
+   return (int)v;
 }
 
 int kb_http_json_bool(const char *body, const char *key, int default_val)

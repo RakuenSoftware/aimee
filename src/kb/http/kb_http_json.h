@@ -21,8 +21,10 @@
 int kb_http_json_str(const char *body, const char *key, char *out, size_t out_cap);
 
 /* Read the integer value of `key`, or default_val when absent or not a
- * number. Callers are responsible for their own domain clamping -- this
- * reports what was sent, not what is acceptable. */
+ * number. Accepts a leading sign; an out-of-range literal saturates to
+ * INT_MIN/INT_MAX rather than invoking atoi's undefined behaviour. Callers
+ * are responsible for their own domain clamping -- this reports what was
+ * sent, not what is acceptable. */
 int kb_http_json_int(const char *body, const char *key, int default_val);
 
 /* Read the boolean value of `key`, or default_val when absent or not a

@@ -560,7 +560,8 @@ static int purge_body_parse(const char *body, char *project, size_t project_cap,
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing or invalid generation\"}");
       return -1;
    }
-   if (!kb_http_json_str(body, "purge_id", purge_id, purge_id_cap) || !purge_id[0] || strchr(purge_id, ' '))
+   if (!kb_http_json_str(body, "purge_id", purge_id, purge_id_cap) || !purge_id[0] ||
+       strchr(purge_id, ' '))
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing or invalid purge_id\"}");
       return -1;
