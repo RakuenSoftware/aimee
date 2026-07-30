@@ -138,6 +138,34 @@ it is its own tranche. Do the curator-provider chain first, then this falls out.
 and `test_curiosity.c` + `test_memory_advanced.c` both drive them with a hand-built `config_t`.
 `memory.h` is down to 4 `config_t` mentions from 7.
 
+### The curator-provider chain needs a design decision first (attempted, reverted)
+
+`kb_curator_provider_for_stage` looks like an easy six-field conversion. It is not, and the reason
+generalises to any function that fills a **borrowed-pointer struct** from config.
+
+`provider_def_t` (`provider_client.h:37`) holds `const char *base_url/model/api_key` — a borrowed
+view, documented as aliasing fields inside the caller's `config_t`. Convert the function to string
+accessors and those pointers now alias each accessor's `static _Thread_local` buffer instead. Every
+current *production* caller consumes its def immediately, so they are fine — but
+`test_kb_curator_provider.c` holds **two** defs at once (`&a` and `&b`) across ~30 assertions and
+compares tier-A against tier-B routing. Under accessors both defs alias the same buffers, so those
+comparisons silently stop testing anything.
+
+The fix is not to rewrite the test to match: it is to make `provider_def_t` **own** its strings
+(fixed char arrays), which removes the aliasing hazard for every caller. That changes a struct
+`provider_client` and all its producers/consumers share, so it is a reviewed design change, not a
+refactor tranche — and per the sequencing note it must not ride along with signature churn.
+
+Second, smaller blocker found the same way: `config_synth_chat_endpoint(cfg, …)` is a clean
+one-field conversion, but `unit-test-kb-curator-provider` links a deliberately minimal object set
+(`tests/Rules.mk:5320`), and reading that field through an accessor pulls `config_field_read` →
+`config.o` and its closure into a focused unit test. Decide whether these narrow test targets are
+allowed to link the accessor layer before converting functions they cover.
+
+Order to do this in: (1) make `provider_def_t` own its strings; (2) then convert
+`kb_curator_provider_for_stage` and `config_synth_chat_endpoint`; (3) then `memory_query_rewrite`
+falls out, since its only remaining tie to `config_t` is `memory_rewrite_llm_inproc`.
+
 ## Known hazards (phase C)
 
 - **Fail-open on read failure** — fixed for scalars via defaults. Audit whether any *string*
