@@ -1032,6 +1032,9 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_service.c
     ${AIMEE_SRC_DIR}/kb/kb_service_workers.c
     ${AIMEE_SRC_DIR}/kb/kb_ingest_workers.c
+    # kb_ingest_workers reconciles the webuser clone tree through
+    # ws_scope_webusers_base(); the kb target must link it.
+    ${AIMEE_SRC_DIR}/modules/workspace/workspace_scope.c
     ${AIMEE_SRC_DIR}/kb/kb_service_kb.c
     ${AIMEE_SRC_DIR}/kb/kb_identity_resolve.c
     ${AIMEE_SRC_DIR}/kb/kb_oidc_jwks_fleet.c
