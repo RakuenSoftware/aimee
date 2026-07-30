@@ -836,3 +836,8 @@ residual proposal instead of declaring the intended effectiveness outcome comple
   denominator, `retain-observe` decision, archived parent, and bounded residual proposal received no
   findings. Roundtable run: `oprun_g6a6b1ed93980fd5d_1785417816_29` (artifact
   `fa1a46d6eb522bc9e398a6df49a79e68aae728e07f2c399e137649eda2a2f1d1`).
+- **E6 evaluation and reconciliation slice:** PR #2180 merged to `testing` as
+  `6969b2bca56f7d1d278e0796ce1213f40c3bad51` after all 24 CI checks passed. E0–E6 are reconciled;
+  deterministic retrieval gates pass, paired-agent promotion does not, `observe` remains the
+  shipping default, and the exact remaining provider-backed matrix is bounded by the linked
+  residual proposal.
