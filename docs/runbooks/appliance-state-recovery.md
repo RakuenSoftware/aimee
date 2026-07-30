@@ -1,83 +1,79 @@
 # Appliance state recovery
 
 Use this checklist on SmoothNAS/tierd appliances running the `aimee-server`
-plugin. It restores existing state after a lost or stale agent registry, or
-after workspace Git metadata is damaged. It does not repair storage.
+plugin. It restores an agent registry or replaces damaged workspace Git
+metadata; it does not repair storage.
 
 Run commands as the account that owns the appliance state and workspace, not
-with `sudo`. Each block enables fail-closed shell behavior; stop at the first
-error. Authentication must come from the appliance's normal Vault-backed
-integration. Do not put tokens or API keys in these commands or environment
-variables.
+with `sudo`. Each block exits the shell at the first failed prerequisite. Stop
+at every `STOP` message. Use only the appliance's normal Vault-backed
+authentication; never put tokens in commands or environment variables.
 
-## Set and verify appliance paths
+## Set appliance paths
 
 ```sh
-set -eu
 export AIMEE_URL='http://127.0.0.1:8080'
 export AIMEE_HOME='/path/to/aimee-home'
+stop() { printf 'STOP: %s\n' "$1" >&2; exit 1; }
 
-test -d "$AIMEE_HOME"
-test "$AIMEE_HOME" != /
-test -w "$AIMEE_HOME"
+test -d "$AIMEE_HOME" && test "$AIMEE_HOME" != / &&
+  test -w "$AIMEE_HOME" || stop 'AIMEE_HOME is not a writable state directory'
 printf 'AIMEE_URL=%s\nAIMEE_HOME=%s\n' "$AIMEE_URL" "$AIMEE_HOME"
 ```
 
-If the API requires authentication, use the appliance's normal Vault-backed
-authorization mechanism with each `curl` command.
+Add the appliance's normal Vault-backed authorization option to each `curl`
+command when the API requires authentication.
 
 ## Missing `agents.json`
 
-**Symptom:** `GET /v1/agents` returns HTTP 502 with
-`agents backend unavailable`. Do not use `GET /v1/agent/list` as the
-diagnostic; it masks the failure as an empty array.
+**Symptom:** `GET /v1/agents` returns HTTP 502 with `agents backend
+unavailable`. Do not use `GET /v1/agent/list`; it masks failure as an empty
+array.
 
-- [ ] Confirm the failure and the missing file, select a sibling backup, restore
-  it without deleting the backup, and verify recovery.
+List the sibling backups, select a trustworthy one, and run:
 
 ```sh
-set -eu
-status=$(curl -sS -o /dev/null -w '%{http_code}' "$AIMEE_URL/v1/agents")
-test "$status" = 502
-test ! -e "$AIMEE_HOME/agents.json"
-
-ls -lht "$AIMEE_HOME"/agents.json.bak-*
+ls -lht "$AIMEE_HOME"/agents.json.bak-* || stop 'no registry backups found'
 export AGENTS_BACKUP="$AIMEE_HOME/agents.json.bak-YYYYMMDD-HHMMSS"
-test -f "$AGENTS_BACKUP"
-test -s "$AGENTS_BACKUP"
+status=$(curl -sS -o /dev/null -w '%{http_code}' "$AIMEE_URL/v1/agents") ||
+  stop 'agent diagnostic failed'
+
+test "$status" = 502 && test ! -e "$AIMEE_HOME/agents.json" &&
+  test -f "$AGENTS_BACKUP" && test -s "$AGENTS_BACKUP" ||
+  stop 'symptom, missing file, or selected backup is invalid'
 
 cp -p -- "$AGENTS_BACKUP" "$AIMEE_HOME/agents.json" &&
-  touch "$AIMEE_HOME/agents.json" &&
-  test -s "$AIMEE_HOME/agents.json"
-status=$(curl -sS -o /dev/null -w '%{http_code}' "$AIMEE_URL/v1/agents")
-test "$status" = 200
-curl -fsS "$AIMEE_URL/v1/agents"
+  touch "$AIMEE_HOME/agents.json" && test -s "$AIMEE_HOME/agents.json" ||
+  stop 'registry restoration failed'
+
+status=$(curl -sS -o /dev/null -w '%{http_code}' "$AIMEE_URL/v1/agents") ||
+  stop 'restored registry check failed'
+test "$status" = 200 || stop "restored registry returned HTTP $status"
+curl -fsS "$AIMEE_URL/v1/agents" || stop 'restored registry could not be read'
 ```
 
-API keys remain in Vault under the agent names. Restoring `agents.json` must
-not require re-entering or persisting credentials.
+The backup remains intact. API keys remain in Vault under the agent names and
+must not be re-entered or persisted.
 
 ## Stale `agents.json`
 
-**Symptom:** agent configuration appears absent although `agents.json` is
-present and valid, and its mtime is behind the appliance clock.
-
-- [ ] Verify the file and clock, touch the file to invalidate the
-  mtime+size+inode cache identity, and verify recovery.
+**Symptom:** agent configuration appears absent although `agents.json` is valid,
+and its mtime is behind the appliance clock.
 
 ```sh
-set -eu
-test -f "$AIMEE_HOME/agents.json"
-test -s "$AIMEE_HOME/agents.json"
-date -Ins
-old_mtime=$(stat -c %Y "$AIMEE_HOME/agents.json")
+test -f "$AIMEE_HOME/agents.json" && test -s "$AIMEE_HOME/agents.json" ||
+  stop 'agents.json is missing or empty'
+date -Ins || stop 'appliance clock check failed'
+old_mtime=$(stat -c %Y "$AIMEE_HOME/agents.json") || stop 'mtime check failed'
 sleep 1
-touch "$AIMEE_HOME/agents.json"
-new_mtime=$(stat -c %Y "$AIMEE_HOME/agents.json")
-test "$new_mtime" -gt "$old_mtime"
-status=$(curl -sS -o /dev/null -w '%{http_code}' "$AIMEE_URL/v1/agents")
-test "$status" = 200
-curl -fsS "$AIMEE_URL/v1/agents"
+touch "$AIMEE_HOME/agents.json" &&
+  test "$(stat -c %Y "$AIMEE_HOME/agents.json")" -gt "$old_mtime" ||
+  stop 'agents.json cache identity was not refreshed'
+
+status=$(curl -sS -o /dev/null -w '%{http_code}' "$AIMEE_URL/v1/agents") ||
+  stop 'refreshed registry check failed'
+test "$status" = 200 || stop "refreshed registry returned HTTP $status"
+curl -fsS "$AIMEE_URL/v1/agents" || stop 'refreshed registry could not be read'
 ```
 
 ## Corrupt or missing workspace Git metadata
@@ -85,86 +81,64 @@ curl -fsS "$AIMEE_URL/v1/agents"
 **Symptoms:** proposal polling reports `ls-tree failed ... rc=128`, and forge
 operations report `resolve https origin: no origin remote`.
 
-The replacement is staged and checked on the same volume before the damaged
-repository is moved. The remote's symbolic `HEAD` supplies the authoritative
-default branch; do not guess `main`.
-
-- [ ] Set the workspace and canonical HTTPS remote, resolve the default branch,
-  and stage a healthy single-branch clone beside the workspace.
+The block below obtains GitHub's authoritative `default_branch`, creates and
+checks a single-branch clone on the workspace volume, retains the damaged
+repository, and installs the checked clone. Do not guess `main`.
 
 ```sh
-set -eu
 export WORKSPACE='/path/on/tier-bound-volume/to/workspace'
 export CANONICAL_URL='https://github.com/owner/repository.git'
+WORKSPACE_PARENT=$(dirname "$WORKSPACE") || stop 'workspace parent lookup failed'
 
-test "${WORKSPACE#/}" != "$WORKSPACE"
-test "$WORKSPACE" != /
-test -e "$WORKSPACE"
-WORKSPACE_PARENT=$(dirname "$WORKSPACE")
-test "$WORKSPACE_PARENT" != /
-test -d "$WORKSPACE_PARENT"
-test -w "$WORKSPACE_PARENT"
-case "$CANONICAL_URL" in https://*) ;; *) false ;; esac
+test "${WORKSPACE#/}" != "$WORKSPACE" && test "$WORKSPACE" != / &&
+  test -e "$WORKSPACE" && test "$WORKSPACE_PARENT" != / &&
+  test -d "$WORKSPACE_PARENT" && test -w "$WORKSPACE_PARENT" ||
+  stop 'workspace path or parent is unsafe'
+case "$CANONICAL_URL" in
+  https://github.com/*/*.git) ;;
+  *) stop 'canonical GitHub HTTPS URL required' ;;
+esac
 
-remote_head=$(git ls-remote --symref "$CANONICAL_URL" HEAD)
-DEFAULT_BRANCH=$(printf '%s\n' "$remote_head" |
-  sed -n 's#^ref: refs/heads/\([^[:space:]]*\)[[:space:]]*HEAD$#\1#p')
-test -n "$DEFAULT_BRANCH"
-git ls-remote --exit-code "$CANONICAL_URL" \
-  "refs/heads/$DEFAULT_BRANCH" >/dev/null
+DEFAULT_BRANCH=$(gh repo view "$CANONICAL_URL" --json defaultBranchRef \
+  --jq '.defaultBranchRef.name') || stop 'GitHub default_branch lookup failed'
+test -n "$DEFAULT_BRANCH" &&
+  git ls-remote --exit-code "$CANONICAL_URL" \
+    "refs/heads/$DEFAULT_BRANCH" >/dev/null ||
+  stop 'authoritative default branch is not readable'
 
-STAGING=$(mktemp -d "$WORKSPACE_PARENT/.aimee-recovery.XXXXXX")
-test "$(stat -c %d "$WORKSPACE_PARENT")" = "$(stat -c %d "$STAGING")"
+STAGING=$(mktemp -d "$WORKSPACE_PARENT/.aimee-recovery.XXXXXX") ||
+  stop 'staging directory creation failed'
+test "$(stat -c %d "$WORKSPACE_PARENT")" = "$(stat -c %d "$STAGING")" ||
+  stop 'staging directory is not on the workspace volume'
 git clone --single-branch --branch "$DEFAULT_BRANCH" \
-  "$CANONICAL_URL" "$STAGING/repository"
+  "$CANONICAL_URL" "$STAGING/repository" || stop 'health clone failed'
 
-test "$(git -C "$STAGING/repository" remote get-url origin)" = "$CANONICAL_URL"
-test "$(git -C "$STAGING/repository" branch --show-current)" = "$DEFAULT_BRANCH"
-test "$(git -C "$STAGING/repository" rev-parse --abbrev-ref '@{upstream}')" = \
-  "origin/$DEFAULT_BRANCH"
-test -z "$(git -C "$STAGING/repository" status --porcelain)"
-git -C "$STAGING/repository" fsck --no-dangling
-git -C "$STAGING/repository" ls-tree HEAD >/dev/null
-```
+test "$(git -C "$STAGING/repository" remote get-url origin)" = "$CANONICAL_URL" &&
+  test "$(git -C "$STAGING/repository" branch --show-current)" = "$DEFAULT_BRANCH" &&
+  test "$(git -C "$STAGING/repository" rev-parse --abbrev-ref '@{upstream}')" = \
+    "origin/$DEFAULT_BRANCH" &&
+  test -z "$(git -C "$STAGING/repository" status --porcelain)" &&
+  git -C "$STAGING/repository" fsck --no-dangling &&
+  git -C "$STAGING/repository" ls-tree HEAD >/dev/null ||
+  stop 'health clone validation failed'
 
-- [ ] Only after the block above succeeds, retain the damaged repository and
-  install the staged clone. If the final move fails, the guarded rollback
-  restores the original workspace path.
-
-```sh
-set -eu
-test -d "$STAGING/repository/.git"
 DAMAGED_WORKSPACE="${WORKSPACE}.damaged-$(date +%Y%m%d-%H%M%S)"
-test ! -e "$DAMAGED_WORKSPACE"
+test ! -e "$DAMAGED_WORKSPACE" &&
+  mv -- "$WORKSPACE" "$DAMAGED_WORKSPACE" ||
+  stop 'damaged repository was not retained; clone not installed'
+mv -- "$STAGING/repository" "$WORKSPACE" ||
+  stop "install failed; damaged repository remains at $DAMAGED_WORKSPACE"
+rmdir -- "$STAGING" || stop 'staging directory cleanup failed'
 
-mv -- "$WORKSPACE" "$DAMAGED_WORKSPACE"
-if mv -- "$STAGING/repository" "$WORKSPACE"
-then
-  rmdir -- "$STAGING"
-else
-  if test ! -e "$WORKSPACE" && mv -- "$DAMAGED_WORKSPACE" "$WORKSPACE"
-  then
-    printf '%s\n' 'replacement failed; original workspace restored' >&2
-  else
-    printf 'replacement failed; retained repository remains at %s\n' \
-      "$DAMAGED_WORKSPACE" >&2
-  fi
-  false
-fi
-
-test "$(git -C "$WORKSPACE" remote get-url origin)" = "$CANONICAL_URL"
-test "$(git -C "$WORKSPACE" branch --show-current)" = "$DEFAULT_BRANCH"
-test "$(git -C "$WORKSPACE" rev-parse --abbrev-ref '@{upstream}')" = \
-  "origin/$DEFAULT_BRANCH"
-test -z "$(git -C "$WORKSPACE" status --porcelain)"
-git -C "$WORKSPACE" fsck --no-dangling
-git -C "$WORKSPACE" ls-tree HEAD >/dev/null
-printf 'damaged repository retained at %s\n' "$DAMAGED_WORKSPACE"
+test "$(git -C "$WORKSPACE" remote get-url origin)" = "$CANONICAL_URL" &&
+  test "$(git -C "$WORKSPACE" branch --show-current)" = "$DEFAULT_BRANCH" &&
+  test "$(git -C "$WORKSPACE" rev-parse --abbrev-ref '@{upstream}')" = \
+    "origin/$DEFAULT_BRANCH" || stop 'installed repository validation failed'
+printf 'default branch: %s\ndamaged repository retained at: %s\n' \
+  "$DEFAULT_BRANCH" "$DAMAGED_WORKSPACE"
 ```
 
-- [ ] Resume normal operation. If either Git error recurs, retain both
-  repositories and escalate. Do not trigger a proposal or forge workflow merely
-  as a recovery test because those workflows create external changes.
-
-Preserve `$DAMAGED_WORKSPACE` for manual disposition. Do not perform storage
-repair, migration, or automated recovery as part of this procedure.
+Resume normal operation. If either Git error recurs, retain both repositories
+and escalate. Do not trigger proposal or forge workflows as tests because they
+create external changes. Preserve `$DAMAGED_WORKSPACE` for manual disposition;
+do not perform storage repair, migration, or automated recovery here.
