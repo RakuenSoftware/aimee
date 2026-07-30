@@ -5,8 +5,10 @@ The shipping panel seat path starts in `server-go/internal/engine/agent_client.g
 primary-only, command-availability, policy, provider-health, and admission-capacity
 eligibility, and reserves the reported global, per-agent, and shared-model
 headroom across the group before any seat is dispatched. An eligible but
-initially saturated pool returns `ErrNoFreeDelegateCapacity` without pinning an
-agent or creating a job.
+initially saturated seat returns `ErrNoFreeDelegateCapacity` without pinning an
+agent or creating a job. Independently plannable seats still dispatch, so a
+three-seat panel with two available slots can reach a quorum of two instead of
+discarding all available capacity.
 
 The list is produced by `src/server/server_agent.c`. It exposes the locked,
 non-mutating probe in `src/server/agent_admission.c`; that probe and atomic
@@ -21,8 +23,9 @@ atomic acquisition immediately before execution. Fail-fast calls report
 variable and poll cancellation, bounded by the caller's panel context deadline.
 Every acquired `agent_slot_t` is released by runtime cleanup on success, error,
 timeout, or cancellation. `src/server/agent_fallback.c` explicitly excludes
-`AGENT_RC_AT_LIMIT` from provider-health accounting, so saturation never marks a
-provider unhealthy.
+`AGENT_RC_AT_LIMIT` from provider-failure classification, and
+`agent_dispatch_one` returns the typed refusal before its provider-health call,
+so saturation never marks a provider unhealthy.
 
 Go cancellation in `delegateOnce` cancels and forgets the remote job before
 returning. Seat errors retain typed capacity and context deadline/cancellation
@@ -36,7 +39,6 @@ server probes the configured model endpoint and feeds failure or recovery into t
 existing provider catalog. `src/server/agent_route.c` therefore excludes a DOWN
 `local-gemma4`, while a successful probe restores normal eligibility. There is no
 parallel backend-health state.
-
 
 Capacity evidence belongs in deterministic admission, routing, planner, race,
 and deadline tests. Repeated `build-e2e` runs are supporting operational evidence

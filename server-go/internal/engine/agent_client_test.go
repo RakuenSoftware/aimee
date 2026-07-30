@@ -1213,7 +1213,9 @@ func TestGroupRoutingDoesNotOverbookReportedSharedCapacity(t *testing.T) {
 			}})
 		case "/v1/delegate/run":
 			dispatches++
-			http.Error(w, "unexpected dispatch", http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": dispatches, "participant": "shared-seat"})
+		case "/v1/delegate/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "ok"})
 		default:
 			http.NotFound(w, r)
 		}
@@ -1227,13 +1229,19 @@ func TestGroupRoutingDoesNotOverbookReportedSharedCapacity(t *testing.T) {
 		{Role: "review", Persona: "architect", Prompt: "one"},
 		{Role: "review", Persona: "qa", Prompt: "two"},
 	})
+	succeeded, atCapacity := 0, 0
 	for _, result := range results {
-		if !errors.Is(result.Err, ErrNoFreeDelegateCapacity) {
-			t.Fatalf("result = %+v, want typed no-free-capacity", results)
+		switch {
+		case result.Err == nil:
+			succeeded++
+		case errors.Is(result.Err, ErrNoFreeDelegateCapacity):
+			atCapacity++
+		default:
+			t.Fatalf("unexpected group result: %+v", results)
 		}
 	}
-	if dispatches != 0 {
-		t.Fatalf("partially plannable group dispatched %d jobs", dispatches)
+	if dispatches != 1 || succeeded != 1 || atCapacity != 1 {
+		t.Fatalf("dispatches=%d succeeded=%d atCapacity=%d, results=%+v", dispatches, succeeded, atCapacity, results)
 	}
 }
 
@@ -1322,7 +1330,9 @@ func TestGroupRoutingSharesDefaultModelCapacityForModelLessAgents(t *testing.T) 
 			}})
 		case "/v1/delegate/run":
 			dispatches++
-			http.Error(w, "unexpected dispatch", http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": dispatches, "participant": "default-model-seat"})
+		case "/v1/delegate/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "ok"})
 		default:
 			http.NotFound(w, r)
 		}
@@ -1336,13 +1346,19 @@ func TestGroupRoutingSharesDefaultModelCapacityForModelLessAgents(t *testing.T) 
 		{Role: "review", Persona: "qa", Prompt: "one"},
 		{Role: "review", Persona: "security", Prompt: "two"},
 	})
+	succeeded, atCapacity := 0, 0
 	for _, result := range results {
-		if !errors.Is(result.Err, ErrNoFreeDelegateCapacity) {
-			t.Fatalf("results = %+v, want shared default-model saturation", results)
+		switch {
+		case result.Err == nil:
+			succeeded++
+		case errors.Is(result.Err, ErrNoFreeDelegateCapacity):
+			atCapacity++
+		default:
+			t.Fatalf("unexpected shared default-model result: %+v", results)
 		}
 	}
-	if dispatches != 0 {
-		t.Fatalf("model-less shared pool dispatched %d jobs", dispatches)
+	if dispatches != 1 || succeeded != 1 || atCapacity != 1 {
+		t.Fatalf("dispatches=%d succeeded=%d atCapacity=%d, results=%+v", dispatches, succeeded, atCapacity, results)
 	}
 }
 

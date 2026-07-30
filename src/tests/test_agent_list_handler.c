@@ -16,7 +16,10 @@
 #include "cJSON.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
+#include "agent_admission.h"
+#include "agent_config.h"
 #include "agent_exec.h"
+#include "provider_catalog.h"
 
 /* --- capture layer: stub the transport so we can read what the handler sent --- */
 
@@ -61,11 +64,13 @@ int server_send_error_kind(void *conn, const char *kind, const char *message,
 /* The real handler under test. Declared here to avoid dragging server.h. */
 int handle_agent_list(void *ctx, void *conn, cJSON *req);
 int handle_agent_probe(void *ctx, void *conn, cJSON *req);
+int server_agent_route_is_down(const char *agent_name);
+int server_agent_route_has_capacity(const agent_t *ag);
 
 /* Probe transport seams. This target intentionally links no production agent
  * transport: the handler's observable response and backend selection are under
  * test, while these stubs record the exact executor contract it chose. */
-static int g_cli_calls, g_http_calls, g_execute_failure;
+static int g_cli_calls, g_http_calls, g_execute_failure, g_models_status = 200;
 static agent_t g_executed_agent;
 
 void agent_http_init(void)
@@ -119,7 +124,14 @@ int agent_http_get(const char *url, const char *headers, char **response_buf, in
    (void)headers;
    (void)timeout_ms;
    if (strstr(url, "/models"))
+   {
+      if (g_models_status < 200 || g_models_status >= 400)
+      {
+         *response_buf = NULL;
+         return g_models_status;
+      }
       *response_buf = strdup("{\"data\":[{\"id\":\"http-model\"}]}");
+   }
    else if (strstr(url, "/slots"))
       *response_buf = strdup("{\"slots\":3,\"context_window\":8192}");
    else
@@ -156,6 +168,7 @@ static void reset_capture(void)
    g_last_response = NULL;
    g_last_error[0] = '\0';
    g_cli_calls = g_http_calls = g_execute_failure = 0;
+   g_models_status = 200;
    memset(&g_executed_agent, 0, sizeof(g_executed_agent));
 }
 
@@ -222,6 +235,63 @@ static void test_populated_config_lists_agents(void)
    cJSON *agents = cJSON_GetObjectItemCaseSensitive(g_last_response, "agents");
    assert(cJSON_IsArray(agents) && cJSON_GetArraySize(agents) == 1);
    printf("  PASS: a populated config lists its agents\n");
+}
+
+static void test_aimee_synth_route_tracks_real_endpoint_probe(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":[{\"name\":\"local-gemma4\",\"provider\":\"openai\","
+                "\"endpoint\":\"http://aimee-llm:8742/v1\",\"model\":\"aimee-synth\","
+                "\"auth_type\":\"none\",\"roles\":[\"review\"]}]}\n");
+   reset_capture();
+
+   agent_config_t cfg;
+   assert(agent_load_config(&cfg) == 0 && cfg.agent_count == 1);
+   provider_catalog_init(cfg.agents, cfg.agent_count);
+   agent_set_route_health_filter(server_agent_route_is_down);
+
+   /* Exercise the production route filter through its real /models probe. A
+    * refused connection excludes the backend immediately and also feeds the
+    * existing catalog's failure state; repeated routing never assigns it. */
+   g_models_status = -1;
+   for (int i = 0; i < 3; i++)
+      assert(agent_route(&cfg, "review") == NULL);
+   assert(provider_catalog_get_health("local-gemma4") == CATALOG_HEALTH_DOWN);
+
+   /* Restoring the same endpoint records recovery through that same path and
+    * makes the agent routable again without a parallel health authority. */
+   g_models_status = 200;
+   assert(agent_route(&cfg, "review") == &cfg.agents[0]);
+   assert(provider_catalog_get_health("local-gemma4") == CATALOG_HEALTH_HEALTHY);
+
+   /* Now saturate the actual admission controller and route through the
+    * server's production capacity callback. The atomic refusal remains a load
+    * outcome: it cannot mutate provider health, and release makes the same
+    * agent immediately routable again. */
+   cfg.agents[0].max_parallel = 1;
+   agent_admission_configure(4, 4, NULL, 0);
+   agent_admit_req_t held_req = {
+       .ctx_handle = "held-panel-seat",
+       .agent = cfg.agents[0].name,
+       .model = cfg.agents[0].model,
+       .per_agent_max = cfg.agents[0].max_parallel,
+       .flags = AGENT_ADMIT_NONBLOCKING,
+   };
+   agent_admit_status_t held_status = AGENT_ADMIT_INVALID;
+   agent_slot_t *held = agent_admission_acquire(&held_req, &held_status);
+   assert(held && held_status == AGENT_ADMIT_OK);
+   agent_set_route_capacity_probe(server_agent_route_has_capacity);
+   assert(agent_route(&cfg, "review") == NULL);
+   agent_admit_req_t raced_req = held_req;
+   raced_req.ctx_handle = "raced-panel-seat";
+   assert(agent_admission_acquire(&raced_req, &held_status) == NULL &&
+          held_status == AGENT_ADMIT_AT_LIMIT);
+   assert(provider_catalog_get_health("local-gemma4") == CATALOG_HEALTH_HEALTHY);
+   agent_admission_release(held);
+   assert(agent_route(&cfg, "review") == &cfg.agents[0]);
+   agent_set_route_capacity_probe(NULL);
+   agent_set_route_health_filter(NULL);
+   printf("  PASS: aimee-synth routing follows production endpoint failure and recovery\n");
 }
 
 /* primary_only survives parse -> agent_load_config -> server_agent_to_json (the
@@ -394,6 +464,7 @@ int main(void)
    test_load_failure_is_an_error_not_empty();
    test_empty_config_is_ok_with_empty_array();
    test_populated_config_lists_agents();
+   test_aimee_synth_route_tracks_real_endpoint_probe();
    test_primary_only_round_trips();
    test_cli_probe_uses_backend_executor_and_config_discovery();
    test_cli_probe_failure_and_no_run_are_observable();

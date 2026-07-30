@@ -528,18 +528,15 @@ func (c *HTTPAgentClient) CancelTerminalJobs(ctx context.Context) (int, error) {
 }
 
 func (c *HTTPAgentClient) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
-	planned, err := c.planDelegateGroup(ctx, requests)
-	if err != nil {
-		out := make([]DelegateGroupResult, len(requests))
-		for i := range out {
-			out[i].Err = err
-		}
-		return out
-	}
+	planned, planningErrors := c.planDelegateGroup(ctx, requests)
 	out := make([]DelegateGroupResult, len(requests))
 	var wg sync.WaitGroup
-	wg.Add(len(requests))
 	for i := range requests {
+		if planningErrors[i] != nil {
+			out[i].Err = planningErrors[i]
+			continue
+		}
+		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
 			result, err := c.Delegate(ctx, planned[i])
@@ -582,8 +579,9 @@ func valueOr(value *int, fallback int) int {
 	return fallback
 }
 
-func (c *HTTPAgentClient) planDelegateGroup(ctx context.Context, requests []DelegateRequest) ([]DelegateRequest, error) {
+func (c *HTTPAgentClient) planDelegateGroup(ctx context.Context, requests []DelegateRequest) ([]DelegateRequest, []error) {
 	planned := append([]DelegateRequest(nil), requests...)
+	planningErrors := make([]error, len(requests))
 	needsCapacityCheck := false
 	for _, request := range planned {
 		if request.Participant == "" {
@@ -592,11 +590,16 @@ func (c *HTTPAgentClient) planDelegateGroup(ctx context.Context, requests []Dele
 		}
 	}
 	if !needsCapacityCheck {
-		return planned, nil
+		return planned, planningErrors
 	}
 	candidates, err := c.delegateCandidates(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("load delegate group eligibility: %w", err)
+		for i := range planningErrors {
+			if planned[i].Participant == "" {
+				planningErrors[i] = fmt.Errorf("load delegate group eligibility: %w", err)
+			}
+		}
+		return planned, planningErrors
 	}
 	providerUses, modelUses, agentUses := map[string]int{}, map[string]int{}, map[string]int{}
 	globalUses := 0
@@ -611,7 +614,8 @@ func (c *HTTPAgentClient) planDelegateGroup(ctx context.Context, requests []Dele
 			}
 			found = true
 			if !candidate.hasCapacity(globalUses, modelUses[candidate.Model], agentUses[candidate.Name]) {
-				return nil, fmt.Errorf("%w: pinned seat %d (%s)", ErrNoFreeDelegateCapacity, i+1, request.Delegate)
+				planningErrors[i] = fmt.Errorf("%w: pinned seat %d (%s)", ErrNoFreeDelegateCapacity, i+1, request.Delegate)
+				break
 			}
 			providerUses[candidate.Provider]++
 			modelUses[candidate.Model]++
@@ -620,12 +624,12 @@ func (c *HTTPAgentClient) planDelegateGroup(ctx context.Context, requests []Dele
 			break
 		}
 		if !found {
-			return nil, fmt.Errorf("delegate service cannot fill pinned seat %d (%s)", i+1, request.Delegate)
+			planningErrors[i] = fmt.Errorf("delegate service cannot fill pinned seat %d (%s)", i+1, request.Delegate)
 		}
 	}
 	for i := range planned {
 		request := &planned[i]
-		if !delegateSelectorUnbound(request.Delegate) || request.Participant != "" {
+		if planningErrors[i] != nil || !delegateSelectorUnbound(request.Delegate) || request.Participant != "" {
 			continue
 		}
 		// Capacity reported by the shipping admission controller is a hard
@@ -646,10 +650,12 @@ func (c *HTTPAgentClient) planDelegateGroup(ctx context.Context, requests []Dele
 			}
 		}
 		if best < 0 && matched {
-			return nil, fmt.Errorf("%w: seat %d (%s/%s)", ErrNoFreeDelegateCapacity, i+1, request.Role, request.Persona)
+			planningErrors[i] = fmt.Errorf("%w: seat %d (%s/%s)", ErrNoFreeDelegateCapacity, i+1, request.Role, request.Persona)
+			continue
 		}
 		if best < 0 {
-			return nil, fmt.Errorf("delegate service cannot fill seat %d (%s/%s) from eligible agents", i+1, request.Role, request.Persona)
+			planningErrors[i] = fmt.Errorf("delegate service cannot fill seat %d (%s/%s) from eligible agents", i+1, request.Role, request.Persona)
+			continue
 		}
 		chosen := candidates[best]
 		request.Delegate = chosen.Name
@@ -659,7 +665,7 @@ func (c *HTTPAgentClient) planDelegateGroup(ctx context.Context, requests []Dele
 		agentUses[chosen.Name]++
 		globalUses++
 	}
-	return planned, nil
+	return planned, planningErrors
 }
 
 func delegateSelectorUnbound(selector string) bool {
