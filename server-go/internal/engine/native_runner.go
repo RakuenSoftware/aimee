@@ -107,7 +107,10 @@ type NativeRunner struct {
 
 func (r *NativeRunner) SetRoundtableStore(store *roundtablecfg.Store) { r.roundtables = store }
 
-const roundtableDelegateRole = "review"
+const (
+	roundtableDelegateRole        = "review"
+	roundtableDelegateMaxTurnsCap = 24
+)
 
 func (r *NativeRunner) delegate(ctx context.Context, step StepRequest, request DelegateRequest) (DelegateResult, error) {
 	request.WorkItemID = step.WorkItem.ID
@@ -1193,7 +1196,7 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 		// Repeated persona/agent specifications must not collide and reuse one
 		// remote result, so each capacity seat carries a distinct durable slot.
 		// Empty Delegate is deliberate: generic delegation resolves eligibility.
-		requests[i] = DelegateRequest{Role: roundtableDelegateRole, Persona: seat.persona, Delegate: seat.selector, Prompt: prompt, Workdir: req.WorkItem.Worktree, Tools: true, DurableSlot: panelSeatDurableSlot(req, panelRound, seat.ordinal), ArtifactStage: artifactStage, ArtifactHash: artifactHash, ProvidedTarget: true}
+		requests[i] = DelegateRequest{Role: roundtableDelegateRole, Persona: seat.persona, Delegate: seat.selector, Prompt: prompt, Workdir: req.WorkItem.Worktree, Tools: true, MaxTurnsCap: roundtableDelegateMaxTurnsCap, DurableSlot: panelSeatDurableSlot(req, panelRound, seat.ordinal), ArtifactStage: artifactStage, ArtifactHash: artifactHash, ProvidedTarget: true}
 	}
 	delegated := r.delegateGroup(ctx, req, requests)
 	outcomes := make([]outcome, len(seats))
@@ -1236,6 +1239,7 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 				// CLI-backed agents do not have an HTTP request URL; tools:false would
 				// incorrectly send their continuation through the simple HTTP path.
 				Tools:          true,
+				MaxTurnsCap:    roundtableDelegateMaxTurnsCap,
 				DurableSlot:    panelSeatDurableSlot(req, panelRound, seat.ordinal) + ":repair:1",
 				ArtifactStage:  artifactStage,
 				ArtifactHash:   artifactHash,

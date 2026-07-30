@@ -214,6 +214,35 @@ func TestHTTPAgentClientOmitsProvidedTargetByDefault(t *testing.T) {
 	}
 }
 
+func TestHTTPAgentClientForwardsMaxTurnsCap(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			if got := payload["max_turns_cap"]; got != float64(24) {
+				t.Errorf("max_turns_cap=%v payload=%v", got, payload)
+			}
+			if _, leaked := payload["MaxTurnsCap"]; leaked {
+				t.Errorf("Go-local field name leaked in payload: %v", payload)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 1})
+		case "/v1/delegate/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "complete", "participant": "delegate-job:1"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review artifact", MaxTurnsCap: 24}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestHTTPAgentClientGroupDelegatesEverySpecificationWithoutResolvingRandom(t *testing.T) {
 	var launches atomic.Int32
 	var mu sync.Mutex
