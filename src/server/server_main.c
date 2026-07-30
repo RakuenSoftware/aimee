@@ -38,21 +38,17 @@
 #include "vault_service.h"          /* VAULT_SERVER_PRINCIPAL (rotation target) */
 #include "vault_env_bootstrap.h"    /* first-boot credential env -> Vault */
 #include "vault_config_bootstrap.h" /* legacy config credential -> Vault */
+#include "vault_bootstrap_privilege.h"
 #include "runtime_secret.h"         /* wipe Vault-sourced runtime cache at exit */
 #include "vault_audit_bridge.h"     /* route vault credential-access events onto the audit bus */
 #include "sandbox_audit_bridge.h"   /* route sandbox degraded-isolation events onto the audit bus */
 #include "memory_audit_bridge.h"    /* route server-side memory mutations onto the audit bus */
 #include "tool_completion_audit_bridge.h" /* route tool-dispatch outcomes onto the audit bus */
 #include <aimee/audit/audit_replay.h> /* --audit-replay: inspect a governed-action capture file */
-#include <dirent.h>
-#include <fcntl.h>
-#include <grp.h>
-#include <pwd.h>
 #include <signal.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/stat.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -63,93 +59,6 @@ int platform_server_service_dispatch(const char *socket_path, log_level_t log_le
                                      int (*run_server_fn)(const char *, log_level_t));
 
 static server_ctx_t g_ctx;
-
-/* Older server images created AIMEE_HOME/.vault as root before starting the
- * unprivileged server, even though the files inside it belonged to `aimee`.
- * Vault writes are atomic rename operations, so those otherwise-readable
- * volumes cannot ingest first-boot or legacy config credentials after an
- * upgrade. Repair only that closed, flat Vault directory while this one-shot
- * bootstrap process is still privileged, then irrevocably drop to the runtime
- * account before reading or writing any credential. */
-static int bootstrap_repair_vault_owner(uid_t uid, gid_t gid)
-{
-   const char *base = config_default_dir();
-   char path[1280];
-   if (!base || !base[0] || (size_t)snprintf(path, sizeof(path), "%s/.vault", base) >= sizeof(path))
-      return -1;
-
-   int dir_fd = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-   if (dir_fd < 0)
-      return errno == ENOENT ? 0 : -1;
-
-   int rc = -1;
-   struct stat dir_st;
-   if (fstat(dir_fd, &dir_st) != 0 || !S_ISDIR(dir_st.st_mode) ||
-       (dir_st.st_uid != 0 && dir_st.st_uid != uid))
-      goto done;
-
-   int scan_fd = dup(dir_fd);
-   if (scan_fd < 0)
-      goto done;
-   DIR *dir = fdopendir(scan_fd);
-   if (!dir)
-   {
-      close(scan_fd);
-      goto done;
-   }
-
-   struct dirent *entry;
-   errno = 0;
-   while ((entry = readdir(dir)) != NULL)
-   {
-      if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
-         continue;
-      int fd = openat(dir_fd, entry->d_name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
-      struct stat st;
-      if (fd < 0 || fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) ||
-          (st.st_uid != 0 && st.st_uid != uid) || (st.st_uid == 0 && fchown(fd, uid, gid) != 0) ||
-          fchmod(fd, 0600) != 0)
-      {
-         if (fd >= 0)
-            close(fd);
-         closedir(dir);
-         goto done;
-      }
-      close(fd);
-   }
-   if (errno != 0)
-   {
-      closedir(dir);
-      goto done;
-   }
-   closedir(dir);
-
-   if (((dir_st.st_uid != uid || dir_st.st_gid != gid) && fchown(dir_fd, uid, gid) != 0) ||
-       fchmod(dir_fd, 0700) != 0)
-      goto done;
-   rc = 0;
-
-done:
-   close(dir_fd);
-   return rc;
-}
-
-static int bootstrap_run_as(const char *user)
-{
-   if (!user || !user[0])
-      return geteuid() == 0 ? -1 : 0;
-   struct passwd *pw = getpwnam(user);
-   if (!pw || pw->pw_uid == 0)
-      return -1;
-   uid_t uid = pw->pw_uid;
-   gid_t gid = pw->pw_gid;
-   if (geteuid() == uid)
-      return 0;
-   if (geteuid() != 0 || bootstrap_repair_vault_owner(uid, gid) != 0 ||
-       initgroups(user, gid) != 0 || setgid(gid) != 0 || setuid(uid) != 0)
-      return -1;
-   return geteuid() == uid && getegid() == gid ? 0 : -1;
-}
 
 /* Unified-presence outbound delivery: route a presence event (e.g. a delegate
  * completion) to a surface's persistent messaging target by reusing the
@@ -522,14 +431,12 @@ int main(int argc, char **argv)
    if (argc >= 2 && strcmp(argv[1], "--bootstrap-vault-env") == 0)
    {
       const char *drop_user = NULL;
-      if (argc == 4 && strcmp(argv[2], "--drop-user") == 0)
-         drop_user = argv[3];
-      else if (argc != 2)
+      if (vault_bootstrap_parse_args(argc, argv, &drop_user) != 0)
       {
          fprintf(stderr, "aimee-server: invalid Vault bootstrap arguments\n");
          return 1;
       }
-      if (bootstrap_run_as(drop_user) != 0)
+      if (vault_bootstrap_run_as(drop_user) != 0)
       {
          fprintf(stderr, "aimee-server: Vault bootstrap privilege drop failed\n");
          return 1;

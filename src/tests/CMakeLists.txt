@@ -81,6 +81,17 @@ set_tests_properties(test_git_oauth_device PROPERTIES
 # gh-CLI GitHub sign-in fallback. Exec/vault externals stubbed in the test
 # (never invoked by the pure functions under test). POSIX-only (<pty.h>).
 if(NOT WIN32)
+  add_executable(test_vault_bootstrap_privilege
+    test_vault_bootstrap_privilege.c
+    ../server/vault_bootstrap_privilege.c)
+  target_include_directories(test_vault_bootstrap_privilege PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config)
+  aimee_enable_test_asserts(test_vault_bootstrap_privilege)
+  add_test(NAME test_vault_bootstrap_privilege COMMAND test_vault_bootstrap_privilege)
+  set_tests_properties(test_vault_bootstrap_privilege PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
   add_executable(test_git_oauth_gh test_git_oauth_gh.c
     ../modules/git/git_oauth_gh.c)
   target_include_directories(test_git_oauth_gh PRIVATE
