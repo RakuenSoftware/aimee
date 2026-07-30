@@ -323,8 +323,35 @@ int kb_client_index_scan(const char *name, const char *root, int force,
    return kb_client_index_scan_v1(name, root, force, out);
 }
 
-int kb_client_index_find_project(const char *project, const char *identifier, term_hit_t *out,
-                                 int max)
+char *kb_client_index_project_lifecycle_json(const char *operation, const char *project,
+                                             const char *confirm_hash, const char *reason,
+                                             int retention_days, int *http_status)
+{
+   if (http_status)
+      *http_status = 0;
+   if (!operation || !operation[0] || !project || !project[0] ||
+       (strcmp(operation, "detach") != 0 && strcmp(operation, "purge") != 0 &&
+        strcmp(operation, "gc") != 0))
+      return NULL;
+   char path[96];
+   snprintf(path, sizeof(path), "/v1/code/project/%s", operation);
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return NULL;
+   cJSON_AddStringToObject(req, "project", project);
+   if (confirm_hash && confirm_hash[0])
+      cJSON_AddStringToObject(req, "confirm_hash", confirm_hash);
+   if (reason && reason[0])
+      cJSON_AddStringToObject(req, "reason", reason);
+   if (strcmp(operation, "gc") == 0)
+      cJSON_AddNumberToObject(req, "retention_days", retention_days);
+   char *json = kb_client_v1_post_json(path, req, KB_CLIENT_INDEX_READ_TIMEOUT_MS, http_status);
+   cJSON_Delete(req);
+   return json;
+}
+
+int kb_client_index_find_scoped(const char *project, int all_projects, const char *identifier,
+                                term_hit_t *out, int max)
 {
    if (!identifier || !identifier[0] || !out || max <= 0)
       return 0;
@@ -343,7 +370,7 @@ int kb_client_index_find_project(const char *project, const char *identifier, te
          return 0;
       }
    }
-   size_t path_len = strlen(encoded) + (encoded_project ? strlen(encoded_project) : 0) + 96;
+   size_t path_len = strlen(encoded) + (encoded_project ? strlen(encoded_project) : 0) + 112;
    char *path = malloc(path_len);
    if (!path)
    {
@@ -351,8 +378,9 @@ int kb_client_index_find_project(const char *project, const char *identifier, te
       free(encoded);
       return 0;
    }
-   snprintf(path, path_len, "/v1/code/find?identifier=%s&max_results=%d%s%s", encoded, max,
-            encoded_project ? "&project=" : "", encoded_project ? encoded_project : "");
+   snprintf(path, path_len, "/v1/code/find?identifier=%s&max_results=%d%s%s%s", encoded, max,
+            all_projects ? "&scope=all" : "", encoded_project ? "&project=" : "",
+            encoded_project ? encoded_project : "");
    free(encoded_project);
    free(encoded);
    char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, NULL);
@@ -366,9 +394,15 @@ int kb_client_index_find_project(const char *project, const char *identifier, te
    return count;
 }
 
+int kb_client_index_find_project(const char *project, const char *identifier, term_hit_t *out,
+                                 int max)
+{
+   return kb_client_index_find_scoped(project, 0, identifier, out, max);
+}
+
 int kb_client_index_find(const char *identifier, term_hit_t *out, int max)
 {
-   return kb_client_index_find_project(NULL, identifier, out, max);
+   return kb_client_index_find_scoped(NULL, 1, identifier, out, max);
 }
 
 int kb_client_index_list(project_info_t *out, int max)
@@ -706,8 +740,8 @@ int kb_client_index_project_lang(const char *project, char *buf, size_t bufsz)
    }
 }
 
-int kb_client_index_code_search(const char *query, const char *project, code_search_hit_t *out,
-                                int max)
+int kb_client_index_code_search_scoped(const char *query, const char *project, int all_projects,
+                                       code_search_hit_t *out, int max)
 {
    if (!query || !query[0] || !out || max <= 0)
       return 0;
@@ -721,8 +755,8 @@ int kb_client_index_code_search(const char *query, const char *project, code_sea
       free(project_q);
       return 0;
    }
-   size_t path_len = strlen("/v1/code/search?query=&max_results=&project=") + strlen(query_q) +
-                     (project_q ? strlen(project_q) : 0) + 32;
+   size_t path_len = strlen("/v1/code/search?query=&max_results=&scope=all&project=") +
+                     strlen(query_q) + (project_q ? strlen(project_q) : 0) + 32;
    char *path = malloc(path_len);
    if (!path)
    {
@@ -730,8 +764,9 @@ int kb_client_index_code_search(const char *query, const char *project, code_sea
       free(project_q);
       return 0;
    }
-   snprintf(path, path_len, "/v1/code/search?query=%s&max_results=%d%s%s", query_q, max,
-            project_q ? "&project=" : "", project_q ? project_q : "");
+   snprintf(path, path_len, "/v1/code/search?query=%s&max_results=%d%s%s%s", query_q, max,
+            all_projects ? "&scope=all" : "", project_q ? "&project=" : "",
+            project_q ? project_q : "");
    free(query_q);
    free(project_q);
 
@@ -746,8 +781,14 @@ int kb_client_index_code_search(const char *query, const char *project, code_sea
    return count;
 }
 
-int kb_client_index_find_callers(const char *project, const char *symbol, caller_hit_t *out,
-                                 int max)
+int kb_client_index_code_search(const char *query, const char *project, code_search_hit_t *out,
+                                int max)
+{
+   return kb_client_index_code_search_scoped(query, project, !project || !project[0], out, max);
+}
+
+int kb_client_index_find_callers_scoped(const char *project, int all_projects, const char *symbol,
+                                        caller_hit_t *out, int max)
 {
    if (!symbol || !symbol[0] || !out || max <= 0)
       return 0;
@@ -761,8 +802,8 @@ int kb_client_index_find_callers(const char *project, const char *symbol, caller
       free(project_q);
       return 0;
    }
-   size_t path_len = strlen("/v1/code/callers?symbol=&max_results=&project=") + strlen(symbol_q) +
-                     (project_q ? strlen(project_q) : 0) + 32;
+   size_t path_len = strlen("/v1/code/callers?symbol=&max_results=&scope=all&project=") +
+                     strlen(symbol_q) + (project_q ? strlen(project_q) : 0) + 32;
    char *path = malloc(path_len);
    if (!path)
    {
@@ -770,8 +811,9 @@ int kb_client_index_find_callers(const char *project, const char *symbol, caller
       free(project_q);
       return 0;
    }
-   snprintf(path, path_len, "/v1/code/callers?symbol=%s&max_results=%d%s%s", symbol_q, max,
-            project_q ? "&project=" : "", project_q ? project_q : "");
+   snprintf(path, path_len, "/v1/code/callers?symbol=%s&max_results=%d%s%s%s", symbol_q, max,
+            all_projects ? "&scope=all" : "", project_q ? "&project=" : "",
+            project_q ? project_q : "");
    free(symbol_q);
    free(project_q);
 
@@ -784,6 +826,12 @@ int kb_client_index_find_callers(const char *project, const char *symbol, caller
    int count = kb_index_find_callers_parse(resp, out, max);
    cJSON_Delete(resp);
    return count;
+}
+
+int kb_client_index_find_callers(const char *project, const char *symbol, caller_hit_t *out,
+                                 int max)
+{
+   return kb_client_index_find_callers_scoped(project, !project || !project[0], symbol, out, max);
 }
 
 /* S6: cross-repo dependency proxy. The kb response is rich (per-edge evidence +

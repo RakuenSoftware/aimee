@@ -984,19 +984,18 @@ cJSON *smcp_tool_find_symbol(cJSON *args)
    int all_projects = mcp_code_scope_all(args);
    if (all_projects < 0)
       return text_content("error: scope must be 'current' or 'all'");
-   const char *project = all_projects ? NULL : mcp_code_project_from_args(args);
+   const char *project = mcp_code_project_from_args(args);
    if (!all_projects && !project)
       return text_content("error: no active project determined from cwd; pass 'project' or "
                           "scope='all' explicitly");
 
    term_hit_t hits[20];
-   int count = project ? kb_client_index_find_project(project, jid->valuestring, hits, 20)
-                       : kb_client_index_find(jid->valuestring, hits, 20);
+   int count = kb_client_index_find_scoped(project, all_projects, jid->valuestring, hits, 20);
    if (count < 0)
       return text_content("error: knowledge service symbol index unavailable");
    int matched = 0;
    for (int i = 0; i < count; i++)
-      if (!project || strcmp(hits[i].project, project) == 0)
+      if (all_projects || !project || strcmp(hits[i].project, project) == 0)
          matched++;
 
    char buf[4096];
@@ -1011,7 +1010,7 @@ cJSON *smcp_tool_find_symbol(cJSON *args)
                         jid->valuestring);
       for (int i = 0; i < count && pos < (int)sizeof(buf) - 256; i++)
       {
-         if (project && strcmp(hits[i].project, project) != 0)
+         if (!all_projects && project && strcmp(hits[i].project, project) != 0)
             continue;
          /* Show the body span (line-line_end) when known, so a `file::symbol`
           * read can fetch exactly that range; fall back to the start line. */
@@ -1049,8 +1048,15 @@ cJSON *smcp_tool_search_docs(cJSON *args)
     * leave selection to the KB just as we do for an empty field. */
    if (!embedding_command[0] || strcmp(embedding_command, "builtin") == 0)
       embedding_command = NULL;
-   char *envelope = kb_client_search_json(mcp_code_project_from_args(args), query->valuestring,
-                                          embedding_command, max_results, NULL);
+   int all_projects = mcp_code_scope_all(args);
+   if (all_projects < 0)
+      return text_content("error: scope must be 'current' or 'all'");
+   const char *project = mcp_code_project_from_args(args);
+   if (!all_projects && !project)
+      return text_content("error: no active project determined from cwd; pass 'project' or "
+                          "scope='all' explicitly");
+   char *envelope = kb_client_search_json_scoped_ex(project, all_projects, query->valuestring,
+                                                    embedding_command, max_results, NULL, NULL);
    cJSON *response = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    char *rendered = td_search_result_from_response(response, query->valuestring);
@@ -1771,6 +1777,23 @@ void server_mcp_served_outcome(const char *verdict, const char *reason)
 
 static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 
+/* Resolve cwd transport metadata to the same stable project identity used by
+ * ingest.  Tool helpers must never fall back to a checkout basename: two moved
+ * or linked worktrees can share that label while representing different stable
+ * projects (or the reverse). */
+static void mcp_inject_active_project(cJSON *args)
+{
+   if (!cJSON_IsObject(args) || cJSON_GetObjectItemCaseSensitive(args, "project"))
+      return;
+   const cJSON *cwd = cJSON_GetObjectItemCaseSensitive(args, "cwd");
+   if (!cJSON_IsString(cwd) || !cwd->valuestring[0])
+      return;
+   char project[MAX_PATH_LEN] = "";
+   if (workspace_repo_identity(cwd->valuestring, project, sizeof(project), NULL, 0) == 0 &&
+       project[0])
+      cJSON_AddStringToObject(args, "project", project);
+}
+
 int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    g_served_verdict = "ok";
@@ -1832,6 +1855,7 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    if (cJSON_IsString(jcwd) && jcwd->valuestring[0] && cJSON_IsObject(jargs) &&
        !cJSON_GetObjectItemCaseSensitive(jargs, "cwd"))
       cJSON_AddStringToObject(jargs, "cwd", jcwd->valuestring);
+   mcp_inject_active_project(jargs);
 
    const char *tool = jtool->valuestring;
    snprintf(g_served_tool, sizeof g_served_tool, "%s", tool); /* served audit identity */
@@ -1859,6 +1883,10 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
       {
          tool = target;
          jargs = target_args;
+         if (cJSON_IsString(jcwd) && jcwd->valuestring[0] &&
+             !cJSON_GetObjectItemCaseSensitive(jargs, "cwd"))
+            cJSON_AddStringToObject(jargs, "cwd", jcwd->valuestring);
+         mcp_inject_active_project(jargs);
          snprintf(g_served_tool, sizeof g_served_tool, "%s", tool);
       }
    }

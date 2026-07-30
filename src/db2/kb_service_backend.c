@@ -57,18 +57,9 @@ static void db2_kb_resolve_project(const char *project, char *out, size_t out_le
 {
    if (!out || out_len == 0)
       return;
-
+   out[0] = '\0';
    if (project && project[0])
-   {
       snprintf(out, out_len, "%s", project);
-      return;
-   }
-
-   char path[MAX_PATH_LEN];
-   if (!getcwd(path, sizeof(path)))
-      path[0] = '\0';
-   const char *base = strrchr(path, '/');
-   snprintf(out, out_len, "%s", base ? base + 1 : path);
 }
 
 static const char *col_text_or_empty(aimee_pg_stmt_t *stmt, int col)
@@ -423,8 +414,12 @@ static int db2_kb_service_async_process_embed_raw(int64_t document_id, const cha
    }
 
    char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(
-       conn, "SELECT heading_path, content FROM kb_documents WHERE id = ?1", err, sizeof(err));
+   aimee_pg_stmt_t *stmt =
+       aimee_pg_prepare(conn,
+                        "SELECT d.heading_path,d.content FROM kb_documents d"
+                        " JOIN projects p ON p.name=d.project WHERE d.id=?1"
+                        " AND p.lifecycle_state='current' AND d.generation=p.current_generation",
+                        err, sizeof(err));
    if (!stmt)
    {
       snprintf(errbuf, errbuf_size, "prepare failed");
@@ -501,7 +496,8 @@ static int db2_kb_service_async_process_embed_pdf(int64_t document_id, const cha
    aimee_pg_stmt_t *stmt =
        aimee_pg_prepare(conn,
                         "SELECT heading_path, content, doc_kind, quarantine_state, project"
-                        " FROM kb_documents WHERE id = ?1",
+                        " FROM kb_documents d JOIN projects p ON p.name=d.project WHERE d.id=?1"
+                        " AND p.lifecycle_state='current' AND d.generation=p.current_generation",
                         err, sizeof(err));
    if (!stmt)
    {
@@ -666,7 +662,7 @@ int db2_kb_service_async_queue_drain(const char *embedding_cmd, int timeout_secs
 
 int db2_kb_service_collect_project_status(const char *project, db2_kb_service_project_status_t *out)
 {
-   if (!out)
+   if (!out || !project || !project[0])
       return -1;
 
    memset(out, 0, sizeof(*out));
@@ -680,11 +676,14 @@ int db2_kb_service_collect_project_status(const char *project, db2_kb_service_pr
       return -1;
 
    char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(conn,
-                                            "SELECT COUNT(*), COALESCE(SUM(token_count), 0),"
-                                            " COUNT(DISTINCT file_path)"
-                                            " FROM kb_documents WHERE project = ?1",
-                                            err, sizeof(err));
+   aimee_pg_stmt_t *stmt =
+       aimee_pg_prepare(conn,
+                        "SELECT COUNT(*), COALESCE(SUM(token_count), 0),"
+                        " COUNT(DISTINCT file_path)"
+                        " FROM kb_documents d JOIN projects p ON p.name=d.project"
+                        " WHERE d.project=?1 AND p.lifecycle_state='current'"
+                        " AND d.generation=p.current_generation",
+                        err, sizeof(err));
    if (!stmt)
       return -1;
 
@@ -701,6 +700,8 @@ int db2_kb_service_collect_project_status(const char *project, db2_kb_service_pr
                            "SELECT COUNT(*) FROM vector_index_ops q"
                            " JOIN kb_documents d ON d.id = q.point_id"
                            " WHERE d.project = ?1 AND q.collection = 'kb_chunks'"
+                           "   AND d.generation=(SELECT current_generation FROM projects"
+                           " WHERE name=d.project AND lifecycle_state='current')"
                            "   AND q.status = 'ok'",
                            err, sizeof(err));
    if (!stmt)
@@ -717,7 +718,7 @@ int db2_kb_service_collect_project_status(const char *project, db2_kb_service_pr
 int db2_kb_service_clear_project(const char *project)
 {
    void *conn = db2_conn();
-   if (!conn)
+   if (!conn || !project || !project[0])
       return -1;
 
    char proj[256];
@@ -752,6 +753,45 @@ int db2_kb_service_clear_project(const char *project)
       return -1;
 
    return deleted;
+}
+
+int db2_kb_service_clear_current_project(const char *project)
+{
+   void *conn = db2_conn();
+   if (!conn || !project || !project[0])
+      return -1;
+
+   char proj[256];
+   db2_kb_resolve_project(project, proj, sizeof(proj));
+   char err[KBS_ERRBUF] = "";
+   static const char *current_docs =
+       "SELECT d.id FROM kb_documents d JOIN projects p ON p.name=d.project"
+       " WHERE d.project=?1 AND p.lifecycle_state='current'"
+       " AND d.generation=p.current_generation";
+   char ops_sql[512];
+   snprintf(ops_sql, sizeof(ops_sql), "DELETE FROM vector_index_ops WHERE point_id IN (%s)",
+            current_docs);
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(conn, ops_sql, err, sizeof(err));
+   if (!stmt)
+      return -1;
+   aimee_pg_bind_text(stmt, "?1", proj);
+   aimee_pg_step_t rc = aimee_pg_step(stmt, err, sizeof(err));
+   aimee_pg_finalize(stmt);
+   if (rc != AIMEE_PG_DONE)
+      return -1;
+
+   stmt = aimee_pg_prepare(conn,
+                           "DELETE FROM kb_documents WHERE project=?1"
+                           " AND generation=(SELECT current_generation FROM projects"
+                           " WHERE name=?1 AND lifecycle_state='current')",
+                           err, sizeof(err));
+   if (!stmt)
+      return -1;
+   aimee_pg_bind_text(stmt, "?1", proj);
+   rc = aimee_pg_step(stmt, err, sizeof(err));
+   int deleted = aimee_pg_stmt_changes(stmt);
+   aimee_pg_finalize(stmt);
+   return rc == AIMEE_PG_DONE ? deleted : -1;
 }
 
 int db2_kb_service_collect_verify_snapshot(db2_kb_service_verify_snapshot_t *out)

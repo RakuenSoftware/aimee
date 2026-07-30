@@ -88,8 +88,13 @@ static void kbiw_enqueue_all(kb_service_ctx_t *ctx)
       {
          char pname[256];
          char pws[256];
-         workspace_repo_index_keys(projects[i], cfg.workspaces[w], pname, sizeof(pname), pws,
-                                   sizeof(pws));
+         if (workspace_repo_index_keys(projects[i], cfg.workspaces[w], pname, sizeof(pname), pws,
+                                       sizeof(pws)) != 0)
+         {
+            aimee_log(LOG_ERROR, "kb.ingest.identity",
+                      "skipping root='%s': no durable project identity", projects[i]);
+            continue;
+         }
          db2_kb_ingest_queue_enqueue(pname, projects[i], pws, 0, DB2_KB_INGEST_PRIO_BULK);
          total++;
       }
@@ -370,8 +375,13 @@ static void *kbiw_watch_thread(void *arg)
                break;
             char pname[256];
             char pws[256];
-            workspace_repo_index_keys(watches[j].root, watches[j].workspace, pname, sizeof(pname),
-                                      pws, sizeof(pws));
+            if (workspace_repo_index_keys(watches[j].root, watches[j].workspace, pname,
+                                          sizeof(pname), pws, sizeof(pws)) != 0)
+            {
+               aimee_log(LOG_ERROR, "kb.ingest.identity",
+                         "skipping root='%s': no durable project identity", watches[j].root);
+               break;
+            }
             db2_kb_ingest_queue_enqueue(pname, watches[j].root, pws, 0, DB2_KB_INGEST_PRIO_BULK);
             watches[j].last_queued = now;
             kb_worker_notify(ctx);
@@ -652,10 +662,13 @@ int kb_doc_refresh(const char *project, const char *embedding_cmd, int max_docs)
        " JOIN file_contents fc ON fc.file_id = f.id"
        " JOIN projects p ON f.project_id = p.id"
        " WHERE p.name = ?1"
+       "   AND p.lifecycle_state='current'"
+       "   AND f.generation=p.current_generation"
        "   AND (f.path LIKE '%.md' OR f.path LIKE '%.markdown' OR f.path LIKE '%.rst'"
        "        OR f.path LIKE '%.txt' OR f.path LIKE '%.adoc' OR f.path LIKE '%.org')"
        "   AND NOT EXISTS (SELECT 1 FROM kb_documents kd"
-       "                   WHERE kd.project = p.name AND kd.file_path = f.path)"
+       "                   WHERE kd.project=p.name AND kd.generation=p.current_generation"
+       "                     AND kd.file_path=f.path)"
        " LIMIT ?2";
 
    char err[256] = "";
@@ -724,8 +737,10 @@ int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int ma
       max_chunks = 200;
 
    static const char *sql =
-       "SELECT kd.id, kd.heading_path, kd.content FROM kb_documents kd"
-       " WHERE kd.project = ?1"
+       "SELECT kd.id,kd.heading_path,kd.content FROM kb_documents kd"
+       " JOIN projects p ON p.name=kd.project"
+       " WHERE kd.project=?1 AND p.lifecycle_state='current'"
+       "   AND kd.generation=p.current_generation"
        "   AND NOT EXISTS (SELECT 1 FROM kb_embeddings ke WHERE ke.point_id = kd.id)"
        " LIMIT ?2";
 

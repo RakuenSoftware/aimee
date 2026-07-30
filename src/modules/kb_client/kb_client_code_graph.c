@@ -18,8 +18,8 @@
 
 #define KB_CLIENT_CODE_GRAPH_READ_TIMEOUT_MS (8 * 1000)
 
-char *kb_client_code_hybrid(const char *query, const char *symbol, const char *project,
-                            int max_results, int *status_out)
+char *kb_client_code_hybrid_scoped(const char *query, const char *symbol, const char *project,
+                                   int all_projects, int max_results, int *status_out)
 {
    if (status_out)
       *status_out = -1;
@@ -39,8 +39,9 @@ char *kb_client_code_hybrid(const char *query, const char *symbol, const char *p
    if (max_results < 1)
       max_results = 1;
 
-   size_t cap = strlen("/v1/code/hybrid?query=&max_results=&symbol=&project=") + strlen(query_q) +
-                (symbol_q ? strlen(symbol_q) : 0) + (project_q ? strlen(project_q) : 0) + 32;
+   size_t cap = strlen("/v1/code/hybrid?query=&max_results=&symbol=&scope=all&project=") +
+                strlen(query_q) + (symbol_q ? strlen(symbol_q) : 0) +
+                (project_q ? strlen(project_q) : 0) + 32;
    char *path = malloc(cap);
    if (!path)
    {
@@ -52,6 +53,8 @@ char *kb_client_code_hybrid(const char *query, const char *symbol, const char *p
    int off = snprintf(path, cap, "/v1/code/hybrid?query=%s&max_results=%d", query_q, max_results);
    if (symbol_q)
       off += snprintf(path + off, cap - (size_t)off, "&symbol=%s", symbol_q);
+   if (all_projects)
+      off += snprintf(path + off, cap - (size_t)off, "&scope=all");
    if (project_q)
       snprintf(path + off, cap - (size_t)off, "&project=%s", project_q);
    free(query_q);
@@ -61,6 +64,13 @@ char *kb_client_code_hybrid(const char *query, const char *symbol, const char *p
    char *json = kb_client_v1_get_json(path, KB_CLIENT_CODE_GRAPH_READ_TIMEOUT_MS, status_out);
    free(path);
    return json;
+}
+
+char *kb_client_code_hybrid(const char *query, const char *symbol, const char *project,
+                            int max_results, int *status_out)
+{
+   return kb_client_code_hybrid_scoped(query, symbol, project, !project || !project[0],
+                                       max_results, status_out);
 }
 
 char *kb_client_code_graph_hubs(const char *project, int max_results, int *status_out)

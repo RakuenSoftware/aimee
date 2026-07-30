@@ -39,12 +39,14 @@ int db2_css_migration_enumerate(const char *project)
    /* One unit per component file that has class tokens, with coverage. Upsert so
     * a re-enumerate refreshes coverage without resetting an in-flight state. */
    static const char *sql =
-       "SELECT f.path, COUNT(*) AS total, SUM(CASE WHEN cs.resolved = 1 THEN 1 ELSE 0 END) AS res"
+       "SELECT f.path, COUNT(*) AS total, SUM(CASE WHEN cs.resolved = 1 THEN 1 ELSE 0 END) AS res,"
+       " p.current_generation"
        " FROM css_component_styles cs"
        " JOIN files f ON f.id = cs.component_file_id"
        " JOIN projects p ON p.id = f.project_id"
-       " WHERE p.name = ?1"
-       " GROUP BY f.path";
+       " WHERE p.name=?1 AND p.lifecycle_state='current'"
+       " AND f.generation=p.current_generation"
+       " GROUP BY f.path, p.current_generation";
    char err[CSSM_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -57,6 +59,7 @@ int db2_css_migration_enumerate(const char *project)
    {
       char path[MAX_PATH_LEN];
       int total, res;
+      int64_t generation;
    } row_t;
    enum
    {
@@ -75,6 +78,7 @@ int db2_css_migration_enumerate(const char *project)
       snprintf(rows[nrows].path, sizeof(rows[nrows].path), "%s", path ? path : "");
       rows[nrows].total = aimee_pg_column_int(st, 1);
       rows[nrows].res = aimee_pg_column_int(st, 2);
+      rows[nrows].generation = aimee_pg_column_int64(st, 3);
       nrows++;
    }
    aimee_pg_finalize(st);
@@ -82,11 +86,15 @@ int db2_css_migration_enumerate(const char *project)
    int rc = 0;
    for (int i = 0; i < nrows && rc == 0; i++)
    {
-      static const char *up = "INSERT INTO css_migration_units (project, unit_path, state, "
-                              "total_tokens, resolved_tokens)"
-                              " VALUES (?1, ?2, 'pending', ?3, ?4)"
-                              " ON CONFLICT(project, unit_path)"
-                              " DO UPDATE SET total_tokens = ?3, resolved_tokens = ?4";
+      static const char *up = "INSERT INTO css_migration_units"
+                              " (project, generation, unit_path, state, total_tokens,"
+                              " resolved_tokens)"
+                              " VALUES (?1, ?5, ?2, 'pending', ?3, ?4)"
+                              " ON CONFLICT(project, generation, unit_path)"
+                              " DO UPDATE SET state=css_migration_units.state,"
+                              " total_tokens = ?3, resolved_tokens = ?4,"
+                              " oracle_equivalent=css_migration_units.oracle_equivalent,"
+                              " note=css_migration_units.note";
       aimee_pg_stmt_t *su = aimee_pg_prepare(conn, up, err, sizeof(err));
       if (!su)
       {
@@ -97,6 +105,7 @@ int db2_css_migration_enumerate(const char *project)
       aimee_pg_bind_text(su, "?2", rows[i].path);
       aimee_pg_bind_int(su, "?3", rows[i].total);
       aimee_pg_bind_int(su, "?4", rows[i].res);
+      aimee_pg_bind_int64(su, "?5", rows[i].generation);
       if (aimee_pg_step(su, err, sizeof(err)) != AIMEE_PG_DONE)
          rc = -1;
       aimee_pg_finalize(su);
@@ -115,7 +124,9 @@ int db2_css_migration_set_state(const char *project, const char *unit_path, cons
       return -1;
    static const char *sql = "UPDATE css_migration_units"
                             " SET state = ?3, oracle_equivalent = ?4, note = ?5, updated_at = ?6"
-                            " WHERE project = ?1 AND unit_path = ?2";
+                            " WHERE project = ?1 AND unit_path = ?2"
+                            " AND generation=(SELECT current_generation FROM projects"
+                            "   WHERE name=?1 AND lifecycle_state='current')";
    char err[CSSM_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -142,10 +153,14 @@ int db2_css_migration_list(const char *project, const char *state_filter, css_mi
    int filt = (state_filter && state_filter[0]) ? 1 : 0;
    static const char *sql_all =
        "SELECT unit_path, state, total_tokens, resolved_tokens, oracle_equivalent, note"
-       " FROM css_migration_units WHERE project = ?1 ORDER BY unit_path LIMIT ?2";
+       " FROM css_migration_units u JOIN projects p ON p.name=u.project"
+       " WHERE u.project = ?1 AND p.lifecycle_state='current'"
+       " AND u.generation=p.current_generation ORDER BY unit_path LIMIT ?2";
    static const char *sql_filt =
        "SELECT unit_path, state, total_tokens, resolved_tokens, oracle_equivalent, note"
-       " FROM css_migration_units WHERE project = ?1 AND state = ?3 ORDER BY unit_path LIMIT ?2";
+       " FROM css_migration_units u JOIN projects p ON p.name=u.project"
+       " WHERE u.project = ?1 AND u.state = ?3 AND p.lifecycle_state='current'"
+       " AND u.generation=p.current_generation ORDER BY unit_path LIMIT ?2";
    char err[CSSM_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, filt ? sql_filt : sql_all, err, sizeof(err));
    if (!st)
@@ -199,19 +214,23 @@ int db2_css_migration_rules_doc(const char *exemplar_project, char *buf, size_t 
 
    int rules = cssm_count(conn,
                           "SELECT COUNT(*) FROM css_rules c JOIN files f ON f.id = c.file_id"
-                          " JOIN projects p ON p.id = f.project_id WHERE p.name = ?1",
+                          " JOIN projects p ON p.id=f.project_id WHERE p.name=?1"
+                          " AND p.lifecycle_state='current' AND f.generation=p.current_generation",
                           exemplar_project);
    int tokens =
        cssm_count(conn,
                   "SELECT COUNT(*) FROM css_declarations d JOIN css_rules c ON c.id = d.rule_id"
                   " JOIN files f ON f.id = c.file_id JOIN projects p ON p.id = f.project_id"
-                  " WHERE p.name = ?1 AND d.property LIKE '--%'",
+                  " WHERE p.name=?1 AND d.property LIKE '--%' AND p.lifecycle_state='current'"
+                  " AND f.generation=p.current_generation",
                   exemplar_project);
    /* BEM heuristic: presence of element/modifier delimiters in class selectors. */
    int bem = cssm_count(conn,
                         "SELECT COUNT(*) FROM css_rules c JOIN files f ON f.id = c.file_id"
                         " JOIN projects p ON p.id = f.project_id"
-                        " WHERE p.name = ?1 AND (c.selector LIKE '%\\_\\_%' ESCAPE '\\'"
+                        " WHERE p.name=?1 AND p.lifecycle_state='current'"
+                        " AND f.generation=p.current_generation"
+                        " AND (c.selector LIKE '%\\_\\_%' ESCAPE '\\'"
                         "   OR c.selector LIKE '%--%')",
                         exemplar_project);
    if (rules < 0)
@@ -262,7 +281,8 @@ int db2_css_migration_assert_conventions(const char *project, const char *now_is
 
    int rules = cssm_count(conn,
                           "SELECT COUNT(*) FROM css_rules c JOIN files f ON f.id = c.file_id"
-                          " JOIN projects p ON p.id = f.project_id WHERE p.name = ?1",
+                          " JOIN projects p ON p.id=f.project_id WHERE p.name=?1"
+                          " AND p.lifecycle_state='current' AND f.generation=p.current_generation",
                           project);
    if (rules <= 0)
       return rules < 0 ? -1 : 0; /* nothing indexed -> nothing to assert */
@@ -270,12 +290,15 @@ int db2_css_migration_assert_conventions(const char *project, const char *now_is
        cssm_count(conn,
                   "SELECT COUNT(*) FROM css_declarations d JOIN css_rules c ON c.id = d.rule_id"
                   " JOIN files f ON f.id = c.file_id JOIN projects p ON p.id = f.project_id"
-                  " WHERE p.name = ?1 AND d.property LIKE '--%'",
+                  " WHERE p.name=?1 AND d.property LIKE '--%' AND p.lifecycle_state='current'"
+                  " AND f.generation=p.current_generation",
                   project);
    int bem = cssm_count(conn,
                         "SELECT COUNT(*) FROM css_rules c JOIN files f ON f.id = c.file_id"
                         " JOIN projects p ON p.id = f.project_id"
-                        " WHERE p.name = ?1 AND (c.selector LIKE '%\\_\\_%' ESCAPE '\\'"
+                        " WHERE p.name=?1 AND p.lifecycle_state='current'"
+                        " AND f.generation=p.current_generation"
+                        " AND (c.selector LIKE '%\\_\\_%' ESCAPE '\\'"
                         "   OR c.selector LIKE '%--%')",
                         project);
 

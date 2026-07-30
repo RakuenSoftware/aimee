@@ -15,6 +15,7 @@
 static int g_post_seen = 0;
 static int g_get_seen = 0;
 static int g_route_case = 0;
+static int g_search_expect_all = 0;
 static char g_push_root[512];
 
 static int health_get_handler(const char *url, const char *extra_headers, char **response_buf,
@@ -86,7 +87,17 @@ static int search_post_handler(const char *url, const char *auth_header, const c
    cJSON *format = cJSON_GetObjectItemCaseSensitive(json, "format");
    cJSON *fusion = cJSON_GetObjectItemCaseSensitive(json, "fusion_mode");
 
-   assert(cJSON_IsString(project) && strcmp(project->valuestring, "aimee") == 0);
+   if (g_search_expect_all)
+   {
+      cJSON *scope = cJSON_GetObjectItemCaseSensitive(json, "scope");
+      if (g_search_expect_all == 1)
+         assert(project == NULL);
+      else
+         assert(cJSON_IsString(project) && strcmp(project->valuestring, "aimee") == 0);
+      assert(cJSON_IsString(scope) && strcmp(scope->valuestring, "all") == 0);
+   }
+   else
+      assert(cJSON_IsString(project) && strcmp(project->valuestring, "aimee") == 0);
    assert(cJSON_IsString(query) && strcmp(query->valuestring, "split kb") == 0);
    assert(cJSON_IsString(embedding) && strcmp(embedding->valuestring, "embed --json") == 0);
    assert(cJSON_IsNumber(max_results) && max_results->valueint == 7);
@@ -219,8 +230,8 @@ static int index_get_handler(const char *url, const char *extra_headers, char **
    g_get_seen++;
    if (g_route_case == 12)
    {
-      assert(strcmp(url, "http://127.0.0.1:4010/v1/code/find?identifier=app_start&max_results=3") ==
-             0);
+      assert(strcmp(url, "http://127.0.0.1:4010/v1/code/find?identifier=app_start&max_results=3&"
+                         "scope=all") == 0);
       if (response_buf)
          *response_buf = strdup("{\"hits\":[{\"project\":\"aimee\",\"file_path\":\"src/main.c\","
                                 "\"line\":12,\"kind\":\"function\"}],\"next_cursor\":null}");
@@ -229,6 +240,15 @@ static int index_get_handler(const char *url, const char *extra_headers, char **
    {
       assert(strcmp(url, "http://127.0.0.1:4010/v1/code/find?identifier=target%2Ffn%3F&"
                          "max_results=2&project=aimee%20core%2Fkb%3F") == 0);
+      if (response_buf)
+         *response_buf = strdup("{\"hits\":[{\"project\":\"aimee core/kb?\","
+                                "\"file_path\":\"src/main.c\",\"line\":12,"
+                                "\"kind\":\"function\"}],\"next_cursor\":null}");
+   }
+   else if (g_route_case == 35)
+   {
+      assert(strcmp(url, "http://127.0.0.1:4010/v1/code/find?identifier=target%2Ffn%3F&"
+                         "max_results=2&scope=all&project=aimee%20core%2Fkb%3F") == 0);
       if (response_buf)
          *response_buf = strdup("{\"hits\":[{\"project\":\"aimee core/kb?\","
                                 "\"file_path\":\"src/main.c\",\"line\":12,"
@@ -299,6 +319,20 @@ static int index_get_handler(const char *url, const char *extra_headers, char **
          *response_buf = strdup("{\"status\":\"ok\",\"hits\":[{\"project\":\"aimee core/kb?\","
                                 "\"file_path\":\"src/caller.c\",\"caller\":\"caller_fn\","
                                 "\"line\":44}],\"next_cursor\":null}");
+   }
+   else if (g_route_case == 36)
+   {
+      assert(strcmp(url, "http://127.0.0.1:4010/v1/code/search?query=split%20kb%2Findex%3F&"
+                         "max_results=2&scope=all&project=aimee%20core%2Fkb%3F") == 0);
+      if (response_buf)
+         *response_buf = strdup("{\"hits\":[]}");
+   }
+   else if (g_route_case == 37)
+   {
+      assert(strcmp(url, "http://127.0.0.1:4010/v1/code/callers?symbol=target%2Ffn%3F&"
+                         "max_results=2&scope=all&project=aimee%20core%2Fkb%3F") == 0);
+      if (response_buf)
+         *response_buf = strdup("{\"hits\":[]}");
    }
    else
    {
@@ -455,7 +489,17 @@ static void test_search_uses_v1_api_when_configured(void)
    assert(strstr(resp, "\"title\":\"hit\"") != NULL);
    free(resp);
 
-   assert(g_post_seen == 1);
+   g_search_expect_all = 1;
+   resp = kb_client_search_json_ex(NULL, "split kb", "embed --json", 7, "json", "rrf");
+   assert(resp && strstr(resp, "\"status\":\"ok\"") != NULL);
+   free(resp);
+   g_search_expect_all = 2;
+   resp = kb_client_search_json_scoped_ex("aimee", 1, "split kb", "embed --json", 7, "json", "rrf");
+   assert(resp && strstr(resp, "\"status\":\"ok\"") != NULL);
+   free(resp);
+   g_search_expect_all = 0;
+
+   assert(g_post_seen == 3);
    unsetenv("AIMEE_KB_API_URL");
    unsetenv("AIMEE_KB_API_BEARER_TOKEN");
    mock_agent_http_reset();
@@ -762,6 +806,9 @@ static void test_index_reads_use_v1_api_when_configured(void)
    assert(kb_client_index_find_project("aimee core/kb?", "target/fn?", hits, 2) == 1);
    assert(strcmp(hits[0].project, "aimee core/kb?") == 0);
 
+   g_route_case = 35;
+   assert(kb_client_index_find_scoped("aimee core/kb?", 1, "target/fn?", hits, 2) == 1);
+
    g_route_case = 22;
    project_info_t projects[2];
    assert(kb_client_index_list(projects, 2) == 1);
@@ -814,6 +861,10 @@ static void test_index_reads_use_v1_api_when_configured(void)
    assert(strcmp(search_hits[0].snippet, "split kb index") == 0);
    assert(search_hits[0].rank == 0.75);
 
+   g_route_case = 36;
+   assert(kb_client_index_code_search_scoped("split kb/index?", "aimee core/kb?", 1, search_hits,
+                                             2) == 0);
+
    g_route_case = 21;
    caller_hit_t caller_hits[2];
    assert(kb_client_index_find_callers("aimee core/kb?", "target/fn?", caller_hits, 2) == 1);
@@ -822,7 +873,11 @@ static void test_index_reads_use_v1_api_when_configured(void)
    assert(strcmp(caller_hits[0].caller, "caller_fn") == 0);
    assert(caller_hits[0].line == 44);
 
-   assert(g_get_seen == 11);
+   g_route_case = 37;
+   assert(kb_client_index_find_callers_scoped("aimee core/kb?", 1, "target/fn?", caller_hits, 2) ==
+          0);
+
+   assert(g_get_seen == 14);
    unsetenv("AIMEE_KB_API_URL");
    mock_agent_http_reset();
    g_route_case = 0;

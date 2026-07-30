@@ -527,7 +527,7 @@ static void test_osv_offline_cache_miss_allows(void)
    "roundtable_review {artifact_stage,brief,diff,original_request,roundtable,workdir} req:diff\n"  \
    "roundtable_status {run_id} req:run_id\n"                                                       \
    "rules {command,reason,text} req:command\n"                                                     \
-   "search_docs {max_results,project,query} req:query\n"                                           \
+   "search_docs {cwd,max_results,project,query,scope} req:query\n"                                 \
    "search_memory {cwd,filter,project,query,scope,workspace} req:query\n"                          \
    "send_message {target,text} req:target,text\n"                                                  \
    "session {around_message_id,chain_id,command,include_sources,limit,query,session_id,window} "   \
@@ -794,7 +794,9 @@ static void test_agent_code_intelligence_contracts(void)
    assert(schema_has_property(callers, "scope"));
 
    cJSON *args = cJSON_Parse("{\"cwd\":\"/work/aimee\"}");
-   assert(strcmp(mcp_code_project_from_args(args), "aimee") == 0);
+   /* cwd is resolved to a stable identity at the server dispatch boundary;
+    * this helper deliberately refuses the old basename fallback. */
+   assert(mcp_code_project_from_args(args) == NULL);
    assert(mcp_code_scope_all(args) == 0);
    cJSON_AddStringToObject(args, "project", "explicit-project");
    assert(strcmp(mcp_code_project_from_args(args), "explicit-project") == 0);

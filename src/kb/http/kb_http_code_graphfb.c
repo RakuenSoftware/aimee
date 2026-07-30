@@ -58,8 +58,10 @@ static const char *audit_safe(const char *in, sanitize_kind_t kind, char *buf, s
 int handle_get_code_graph_audit(const char *query_string, char *out_buf, int out_cap)
 {
    char project[256] = "";
-   if (!code_qparam(query_string, "project", project, sizeof(project)) || !project[0])
-      return code_scan_write_error(out_buf, out_cap, "missing project");
+   int scope_status =
+       code_request_project(query_string, project, sizeof(project), 0, NULL, out_buf, out_cap);
+   if (scope_status)
+      return scope_status;
 
    int max_f = 20;
    char mf[16] = "";
@@ -455,8 +457,10 @@ static int diff_write_gen_list_409(const char *project, char *out_buf, int out_c
 int handle_get_code_graph_diff(const char *query_string, char *out_buf, int out_cap)
 {
    char project[256] = "";
-   if (!code_qparam(query_string, "project", project, sizeof(project)) || !project[0])
-      return code_scan_write_error(out_buf, out_cap, "missing project");
+   int scope_status =
+       code_request_project(query_string, project, sizeof(project), 0, NULL, out_buf, out_cap);
+   if (scope_status)
+      return scope_status;
    char from_s[64] = "", to_s[64] = "", force_s[8] = "";
    if (!code_qparam(query_string, "from_gen", from_s, sizeof(from_s)) || !from_s[0])
       return code_scan_write_error(out_buf, out_cap, "missing from_gen (id or default_latest)");
@@ -732,8 +736,10 @@ int handle_get_code_graph_diff_route(const char *method, const char *query_strin
 int handle_get_code_lessons(const char *query_string, char *out_buf, int out_cap)
 {
    char project[256] = "";
-   if (!code_qparam(query_string, "project", project, sizeof(project)) || !project[0])
-      return code_scan_write_error(out_buf, out_cap, "missing project");
+   int scope_status =
+       code_request_project(query_string, project, sizeof(project), 0, NULL, out_buf, out_cap);
+   if (scope_status)
+      return scope_status;
    if (!db2_is_initialized())
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"knowledge service not initialized\"}");

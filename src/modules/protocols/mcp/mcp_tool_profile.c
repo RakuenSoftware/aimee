@@ -162,15 +162,14 @@ int mcp_tool_matches_query(const cJSON *tool, const char *query)
 
 const char *mcp_code_project_from_args(cJSON *args)
 {
-   cJSON *project = cJSON_GetObjectItemCaseSensitive(args, "project");
-   if (cJSON_IsString(project) && project->valuestring[0])
-      return project->valuestring;
-   cJSON *cwd = cJSON_GetObjectItemCaseSensitive(args, "cwd");
-   if (!cJSON_IsString(cwd) || !cwd->valuestring[0])
-      return NULL;
-   const char *base = strrchr(cwd->valuestring, '/');
-   base = base ? base + 1 : cwd->valuestring;
-   return base[0] ? base : NULL;
+   const cJSON *project = cJSON_GetObjectItemCaseSensitive(args, "project");
+   const char *explicit_project = cJSON_IsString(project) ? project->valuestring : NULL;
+   if (explicit_project && explicit_project[0])
+      return explicit_project;
+   /* The server request boundary resolves cwd to a stable identity before tool
+    * dispatch.  A bare basename here would recreate path-keyed project aliases
+    * and turn missing context into the wrong project. */
+   return NULL;
 }
 
 int mcp_code_scope_all(cJSON *args)

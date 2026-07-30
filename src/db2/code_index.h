@@ -23,6 +23,9 @@ extern "C"
    /* Total row count of the projects table. Returns 0 on miss / DB
     * unavailable. */
    int db2_code_index_project_count(void);
+   /* Current visible generation for a stable project id. Returns 0 when
+    * current, -2 when unknown/detached, -1 on storage error. */
+   int db2_code_index_project_current_generation(const char *name, int64_t *generation_out);
 
    /* Most recent scanned_at timestamp across all rows in the projects
     * table, written to |out| (NUL-terminated, ISO-8601). Returns 0 on
@@ -141,6 +144,11 @@ extern "C"
     * identical to before (ingress-compression P1b). */
    int db2_code_index_code_search(const char *query, const char *project, code_search_hit_t *out,
                                   int max, int enrich);
+   /* As above, but search every current project except |excluded_project|;
+    * exclusion happens in SQL before the result limit. */
+   int db2_code_index_code_search_excluding_project(const char *query,
+                                                    const char *excluded_project,
+                                                    code_search_hit_t *out, int max, int enrich);
 
 #ifdef __cplusplus
 }

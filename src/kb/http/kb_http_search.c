@@ -36,7 +36,8 @@ static void kbhs_excerpt(const char *payload_json, char *out, size_t out_cap)
    cJSON_Delete(pl);
 }
 
-int kb_http_search_facets(const char *body, char *out_buf, int out_cap)
+int kb_http_search_facets(const char *body, const char *project, int all_projects, char *out_buf,
+                          int out_cap)
 {
    cJSON *req = cJSON_Parse(body ? body : "");
    cJSON *filters = req ? cJSON_GetObjectItemCaseSensitive(req, "filters") : NULL;
@@ -65,12 +66,28 @@ int kb_http_search_facets(const char *body, char *out_buf, int out_cap)
        cJSON_IsNumber(rel) ? (int64_t)rel->valuedouble : db2_kb_release_get_active();
 
    db2_artifact_row_t *rows = calloc((size_t)fmax, sizeof(*rows));
-   int rn =
-       rows ? db2_artifact_filter_facets(release_id, cJSON_IsString(fk) ? fk->valuestring : NULL,
-                                         cJSON_IsString(fs) ? fs->valuestring : NULL,
-                                         cJSON_IsString(fpr) ? fpr->valuestring : NULL,
-                                         cJSON_IsString(fc) ? fc->valuestring : NULL, rows, fmax)
-            : -1;
+   int rn = -1;
+   if (rows)
+   {
+      const char *kind = cJSON_IsString(fk) ? fk->valuestring : NULL;
+      const char *status = cJSON_IsString(fs) ? fs->valuestring : NULL;
+      const char *priority = cJSON_IsString(fpr) ? fpr->valuestring : NULL;
+      const char *component = cJSON_IsString(fc) ? fc->valuestring : NULL;
+      if (all_projects && project && project[0])
+      {
+         rn = db2_artifact_filter_facets_scoped(release_id, project, NULL, kind, status, priority,
+                                                component, rows, fmax);
+         if (rn >= 0 && rn < fmax)
+         {
+            int tail = db2_artifact_filter_facets_scoped(release_id, NULL, project, kind, status,
+                                                         priority, component, rows + rn, fmax - rn);
+            rn = tail < 0 ? -1 : rn + tail;
+         }
+      }
+      else
+         rn = db2_artifact_filter_facets_scoped(release_id, all_projects ? NULL : project, NULL,
+                                                kind, status, priority, component, rows, fmax);
+   }
 
    cJSON *resp = cJSON_CreateObject();
    cJSON *hits = cJSON_AddArrayToObject(resp, "hits");
@@ -83,6 +100,8 @@ int kb_http_search_facets(const char *body, char *out_buf, int out_cap)
       cJSON_AddStringToObject(hit, "artifact_id", rows[i].id);
       cJSON_AddNumberToObject(hit, "score", 1.0);
       cJSON_AddStringToObject(hit, "kind", rows[i].kind);
+      cJSON_AddStringToObject(hit, "scope_kind", rows[i].scope_kind);
+      cJSON_AddStringToObject(hit, "scope_id", rows[i].scope_id);
       cJSON_AddStringToObject(hit, "excerpt", excerpt);
       cJSON_AddItemToObject(hit, "citations", cJSON_CreateArray());
       cJSON_AddItemToArray(hits, hit);

@@ -43,6 +43,7 @@
 typedef struct
 {
    int64_t job_id;
+   int64_t generation;
    char project[256];
    char file_path[1024];
    char symbol[256];
@@ -70,13 +71,23 @@ static int ccu_claim_job(ccu_job_t *out)
                             "     attempts=attempts+1,"
                             "     updated_at=pg_now_text()"
                             " WHERE id=("
-                            "   SELECT id FROM kb_code_unit_jobs"
-                            "   WHERE status='pending'"
+                            "   SELECT j.id FROM kb_code_unit_jobs j"
+                            "   WHERE j.status='pending'"
+                            "     AND EXISTS (SELECT 1 FROM projects p"
+                            "       JOIN files f ON f.project_id=p.id"
+                            "       JOIN terms t ON t.file_id=f.id"
+                            "       WHERE p.name=j.project"
+                            "         AND j.generation=p.current_generation"
+                            "         AND f.path=j.file_path"
+                            "         AND t.name=j.symbol"
+                            "         AND p.lifecycle_state='current'"
+                            "         AND f.generation=p.current_generation)"
                             /* Skip jobs still serving their retry backoff. */
                             "     AND (next_attempt_at='' OR next_attempt_at<=?1)"
                             "   ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
                             " )"
-                            " RETURNING id, project, file_path, symbol, kind, line, attempts";
+                            " RETURNING id, project, generation, file_path, symbol, kind, line,"
+                            " attempts";
 
    char err[CCU_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -91,15 +102,16 @@ static int ccu_claim_job(ccu_job_t *out)
    {
       out->job_id = aimee_pg_column_int64(st, 0);
       const char *proj = aimee_pg_column_text(st, 1);
-      const char *fp = aimee_pg_column_text(st, 2);
-      const char *sym = aimee_pg_column_text(st, 3);
-      const char *knd = aimee_pg_column_text(st, 4);
+      out->generation = aimee_pg_column_int64(st, 2);
+      const char *fp = aimee_pg_column_text(st, 3);
+      const char *sym = aimee_pg_column_text(st, 4);
+      const char *knd = aimee_pg_column_text(st, 5);
       snprintf(out->project, sizeof(out->project), "%s", proj ? proj : "");
       snprintf(out->file_path, sizeof(out->file_path), "%s", fp ? fp : "");
       snprintf(out->symbol, sizeof(out->symbol), "%s", sym ? sym : "");
       snprintf(out->kind, sizeof(out->kind), "%s", knd ? knd : "function");
-      out->line = aimee_pg_column_int(st, 5);
-      out->attempts = aimee_pg_column_int(st, 6);
+      out->line = aimee_pg_column_int(st, 6);
+      out->attempts = aimee_pg_column_int(st, 7);
       found = 1;
    }
    aimee_pg_finalize(st);
@@ -279,7 +291,8 @@ static void ccu_resolve_path(const char *project, const char *file_path, char *o
    {
       char err[CCU_ERRBUF] = "";
       aimee_pg_stmt_t *st = aimee_pg_prepare(
-          conn, "SELECT root FROM projects WHERE name=?1 LIMIT 1", err, sizeof(err));
+          conn, "SELECT root FROM projects WHERE name=?1 AND lifecycle_state='current' LIMIT 1",
+          err, sizeof(err));
       if (st)
       {
          aimee_pg_bind_text(st, "?1", project);
@@ -345,7 +358,9 @@ static char *ccu_read_body_db2(const char *project, const char *file_path, int l
                                           "SELECT fc.content FROM file_contents fc"
                                           " JOIN files f ON f.id = fc.file_id"
                                           " JOIN projects p ON p.id = f.project_id"
-                                          " WHERE p.name = ?1 AND f.path = ?2 LIMIT 1",
+                                          " WHERE p.name = ?1 AND f.path = ?2"
+                                          " AND p.lifecycle_state = 'current'"
+                                          " AND f.generation = p.current_generation LIMIT 1",
                                           err, sizeof(err));
    if (!st)
       return NULL;
@@ -561,7 +576,9 @@ static int ccu_payload_contradicts_structure(const ccu_job_t *job, const cJSON *
                             " FROM code_calls cc"
                             " JOIN files f ON cc.file_id = f.id"
                             " JOIN projects p ON f.project_id = p.id"
-                            " WHERE p.name = ?1 AND f.path = ?2 AND cc.caller = ?3";
+                            " WHERE p.name = ?1 AND f.path = ?2 AND cc.caller = ?3"
+                            " AND p.lifecycle_state = 'current'"
+                            " AND f.generation = p.current_generation";
 
    char err[CCU_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -633,6 +650,10 @@ static int ccu_write_artifacts(const ccu_job_t *job, cJSON *artifacts_arr)
             cJSON_AddStringToObject(pj, "def_kind", job->kind[0] ? job->kind : "function");
          if (!cJSON_GetObjectItemCaseSensitive(pj, "body_excerpt"))
             cJSON_AddStringToObject(pj, "body_excerpt", job->body_excerpt);
+         cJSON_DeleteItemFromObject(pj, "project");
+         cJSON_AddStringToObject(pj, "project", job->project);
+         cJSON_DeleteItemFromObject(pj, "generation");
+         cJSON_AddNumberToObject(pj, "generation", job->generation);
       }
 
       char *payload_str = payload_j ? cJSON_PrintUnformatted(payload_j) : NULL;

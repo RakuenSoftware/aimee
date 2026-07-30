@@ -58,7 +58,9 @@ int db2_css_render_snapshot_store(const char *project, const char *unit_path, co
 
    /* delete-then-insert upsert on (project, unit_path, phase). */
    static const char *del = "DELETE FROM css_render_snapshots"
-                            " WHERE project = ?1 AND unit_path = ?2 AND phase = ?3";
+                            " WHERE project = ?1 AND unit_path = ?2 AND phase = ?3"
+                            " AND generation=(SELECT current_generation FROM projects p"
+                            " WHERE p.name=?1 AND p.lifecycle_state='current')";
    aimee_pg_stmt_t *dst = aimee_pg_prepare(conn, del, err, sizeof(err));
    if (!dst)
       return -1;
@@ -71,8 +73,10 @@ int db2_css_render_snapshot_store(const char *project, const char *unit_path, co
       return -1;
 
    static const char *ins = "INSERT INTO css_render_snapshots"
-                            " (project, unit_path, phase, snapshot, content_hash, captured_at)"
-                            " VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
+                            " (project, generation, unit_path, phase, snapshot, content_hash,"
+                            " captured_at)"
+                            " SELECT ?1, p.current_generation, ?2, ?3, ?4, ?5, ?6"
+                            " FROM projects p WHERE p.name=?1 AND p.lifecycle_state='current'";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, ins, err, sizeof(err));
    if (!st)
       return -1;
@@ -82,7 +86,9 @@ int db2_css_render_snapshot_store(const char *project, const char *unit_path, co
    aimee_pg_bind_text(st, "?4", snapshot_json);
    aimee_pg_bind_text(st, "?5", hash);
    aimee_pg_bind_text(st, "?6", now_iso ? now_iso : "");
-   int rc = (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE) ? 1 : -1;
+   int rc = (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE && aimee_pg_stmt_changes(st) == 1)
+                ? 1
+                : -1;
    aimee_pg_finalize(st);
    return rc;
 }
@@ -97,8 +103,11 @@ int db2_css_render_snapshot_get(const char *project, const char *unit_path, cons
    void *conn = db2_conn();
    if (!conn)
       return -1;
-   static const char *sql = "SELECT snapshot FROM css_render_snapshots"
-                            " WHERE project = ?1 AND unit_path = ?2 AND phase = ?3";
+   static const char *sql = "SELECT s.snapshot FROM css_render_snapshots s"
+                            " JOIN projects p ON p.name=s.project"
+                            " WHERE s.project = ?1 AND s.unit_path = ?2 AND s.phase = ?3"
+                            " AND p.lifecycle_state='current'"
+                            " AND s.generation=p.current_generation";
    char err[CSSR_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -124,7 +133,9 @@ static void cssr_record_verdict(void *conn, const char *project, const char *uni
 {
    static const char *sql = "UPDATE css_migration_units"
                             " SET oracle_equivalent = ?3, note = ?4, updated_at = ?5"
-                            " WHERE project = ?1 AND unit_path = ?2";
+                            " WHERE project = ?1 AND unit_path = ?2"
+                            " AND generation=(SELECT current_generation FROM projects"
+                            "   WHERE name=?1 AND lifecycle_state='current')";
    char err[CSSR_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
