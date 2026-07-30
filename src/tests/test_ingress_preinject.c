@@ -311,6 +311,22 @@ static void test_format_task_context_strict_contract(void)
    memcpy(project, "foreign-projec", 14);
    assert(ingress_preinject_format_task_context(wrong, "active-project", NULL, NULL) == NULL);
    free(wrong);
+
+   char *high_code_confidence = strdup(ok);
+   char *code_confidence = strstr(high_code_confidence, "0.95");
+   assert(code_confidence != NULL);
+   code_confidence[0] = '1';
+   assert(ingress_preinject_format_task_context(high_code_confidence, "active-project", NULL,
+                                                NULL) == NULL);
+   free(high_code_confidence);
+
+   char *high_memory_confidence = strdup(ok);
+   char *memory_confidence = strstr(high_memory_confidence, "0.9,\"anchor\"");
+   assert(memory_confidence != NULL);
+   memory_confidence[0] = '1';
+   assert(ingress_preinject_format_task_context(high_memory_confidence, "active-project", NULL,
+                                                NULL) == NULL);
+   free(high_memory_confidence);
    printf("format_task_context_strict_contract OK\n");
 }
 

@@ -401,9 +401,9 @@ char *ingress_preinject_format_task_context(const char *json, const char *active
           !context_string_eq(row, "freshness", "current") ||
           !context_number_positive(row, "generation", &row_generation) ||
           row_generation != generation || !cJSON_IsTrue(accepted) || !cJSON_IsNumber(confidence) ||
-          confidence->valuedouble <= 0.0 || !cJSON_IsArray(provenance) ||
-          cJSON_GetArraySize(provenance) < 1 || !cJSON_IsObject(span) ||
-          !cJSON_IsNumber(line_start) || !cJSON_IsNumber(line_end) ||
+          confidence->valuedouble <= 0.0 || confidence->valuedouble > 1.0 ||
+          !cJSON_IsArray(provenance) || cJSON_GetArraySize(provenance) < 1 ||
+          !cJSON_IsObject(span) || !cJSON_IsNumber(line_start) || !cJSON_IsNumber(line_end) ||
           !context_string_eq(span, "kind", line_span ? "line" : "file") ||
           (line_span && line_end->valueint < line_start->valueint) ||
           (!line_span && (line_start->valueint != 0 || line_end->valueint != 0)))
@@ -472,7 +472,7 @@ char *ingress_preinject_format_task_context(const char *json, const char *active
           !context_string_eq(memory, "scope", "project") ||
           !context_string_eq(memory, "provenance", "memory") || !cJSON_IsNumber(memory_id) ||
           memory_id->valuedouble <= 0 || !cJSON_IsNumber(confidence) ||
-          confidence->valuedouble <= 0)
+          confidence->valuedouble <= 0 || confidence->valuedouble > 1.0)
       {
          dstr_free(&block);
          cJSON_Delete(root);

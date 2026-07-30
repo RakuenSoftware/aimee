@@ -728,3 +728,11 @@ residual proposal instead of declaring the intended effectiveness outcome comple
   follow-up but not a blocking gap in the E4 contract. Roundtable run:
   `oprun_g6a69bd8011459d99_1785391257_123` (artifact
   `743c03a1a1ec1191dbff96008f88cdb064ef51adda8fccc3634a1e9959f05852`).
+- **E4 final exact-diff review — 2026-07-30 — APPROVED and converged, 3/3 participants, not
+  degraded.** The panel confirmed the post-review schema and documentation cleanup with no blocking
+  findings. E4 immediately adopts its bounded-confidence suggestion: ingress now rejects code or
+  memory confidence outside `(0,1]`, with adversarial packet tests. Retrying a failed first-turn
+  retrieval on a related follow-up is assigned to E5's typed recovery policy; E4 continues to
+  suppress the failed packet and never widens recall. Roundtable run:
+  `oprun_g6a69bd8011459d99_1785391610_124` (artifact
+  `b8def8883da6a7e97997f223dad4d1c4b9ac1ea9f88b0a91e251e9c5c36b1a09`).
