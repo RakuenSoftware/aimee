@@ -207,9 +207,36 @@ per query — and **if bge-m3 were also the embedder the query encode is shared*
 leaving 27 ms of MaxSim as the true marginal cost. It would also supply the
 learned-sparse leg the architecture already anticipates, from one model.
 
-Storage is the blocker: 1024-dim token vectors. Unmeasured routes to viability:
-a 128-dim ColBERT (~8x smaller), int8 (2x), PLAID-style compression (~16x), or
-multi-vectors for a hot subset only.
+### Storage: bge-m3 is the problem, not late interaction
+
+Late interaction stores **one vector per token**, so the cost is
+`tokens x dims x bytes`. bge-m3 emits **1024-dim** vectors, which is 8x wider
+than a purpose-built ColBERT:
+
+| model | vectors/doc | dims | per doc | per million |
+|---|---:|---:|---:|---:|
+| bge-m3 (measured) | 363 | 1024 | 743 KB | **743 GB** |
+| colbert-xm (fp16) | 256 | 128 | 64 KB | **66 GB** |
+| colbert-xm (int8) | 256 | 128 | 32 KB | **33 GB** |
+| *(dense embedding, for scale)* | 1 | 768 | 1.5 KB | 1.5 GB |
+
+**bge-m3 multi-vector is not viable** — 743 GB per million, and it was already
+the slowest embedder measured (316 tok/s CPU). It loses on both axes.
+
+**colbert-xm is 11x smaller (22x at int8).** 33 GB per million is an ordinary
+index size, so late interaction is not inherently storage-prohibitive; that
+particular model was. An earlier version of this page framed 743 GB as the cost
+of the architecture, which was misleading.
+
+`antoinelouis/colbert-xm` (MIT, XLM-R, multilingual) is the **only** licence-clean
+multilingual ColBERT — answerai-colbert-small is English-only, and jina-colbert-v2
+and Reason-ModernColBERT are CC-BY-NC.
+
+**Open question against it:** its `doc_maxlen` is fixed at **256 tokens**, and we
+measured that reranking a dense-ordered list needs **512** to beat it (at 256 the
+cross-encoder lost 0.066-0.078). Whether late interaction has the same
+context-length sensitivity is unmeasured, and it is the thing to test before
+committing to this path.
 
 ---
 
