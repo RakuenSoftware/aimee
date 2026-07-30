@@ -362,9 +362,17 @@ int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          cJSON_Delete(mj);
       }
    }
-   else
+   else if (rc > 0)
    {
       resp = jo_err("memory not found");
+   }
+   else
+   {
+      char *typed = kb_client_last_result_json("memory lookup failed");
+      resp = typed ? cJSON_Parse(typed) : NULL;
+      free(typed);
+      if (!resp)
+         resp = jo_err("knowledge service unavailable");
    }
    return send_and_free(conn, resp);
 }

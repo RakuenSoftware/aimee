@@ -69,6 +69,18 @@ static void kbc_memory_add_scope_context(cJSON *req)
    kb_client_memory_scope_context_apply(req);
 }
 
+/* Single-record readers use 1 for a valid miss and -1 for an unavailable or
+ * malformed result. Keeping those outcomes distinct prevents callers from
+ * rendering a stale thread-local dependency status as a genuine not-found. */
+static int kbc_memory_single_miss(const cJSON *resp)
+{
+   const cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   const cJSON *message = cJSON_GetObjectItemCaseSensitive(resp, "message");
+   return (cJSON_IsString(status) && (strcmp(status->valuestring, "empty") == 0 ||
+                                      strcmp(status->valuestring, "not_found") == 0)) ||
+          (cJSON_IsString(message) && strstr(message->valuestring, "not found") != NULL);
+}
+
 void kbc_memory_row_from_json(cJSON *f, memory_t *m)
 {
    memset(m, 0, sizeof(*m));
@@ -1208,8 +1220,9 @@ int kb_client_memory_get(int64_t id, memory_t *out)
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
    if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
    {
+      int miss = kbc_memory_single_miss(resp);
       cJSON_Delete(resp);
-      return -1;
+      return miss ? 1 : -1;
    }
 
    cJSON *mem_j = cJSON_GetObjectItemCaseSensitive(resp, "memory");
@@ -1309,8 +1322,9 @@ int kb_client_memory_get_entity_profile(const char *entity, memory_entity_profil
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
    if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
    {
+      int miss = kbc_memory_single_miss(resp);
       cJSON_Delete(resp);
-      return -1;
+      return miss ? 1 : -1;
    }
    cJSON *prof = cJSON_GetObjectItemCaseSensitive(resp, "profile");
    if (!cJSON_IsObject(prof))
@@ -1631,8 +1645,9 @@ int kb_client_memory_get_episode(const char *episode_key, memory_episode_t *out)
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
    if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
    {
+      int miss = kbc_memory_single_miss(resp);
       cJSON_Delete(resp);
-      return -1;
+      return miss ? 1 : -1;
    }
    cJSON *ep = cJSON_GetObjectItemCaseSensitive(resp, "episode");
    if (!cJSON_IsObject(ep))

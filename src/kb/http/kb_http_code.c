@@ -1,4 +1,5 @@
 #include "kb_http_code.h"
+#include "kb_http_code_vector_status.h"
 #include "aimee.h"
 #include "config.h"
 #include "kb_curator_queue.h"
@@ -1163,6 +1164,7 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
     * simply empty and the route degrades to code+graph. w_vector<=0 disables it. */
    int nv = 0;
    int nvector = 0;
+   kb_code_vector_status_t vector_status = KB_CODE_VECTOR_STATUS_INITIALIZER;
    /* The vector API returns paths without owning projects. It is therefore safe
     * only with an active project, which is also the bucket queried here. */
    if (w_vector > 0.0 && project[0])
@@ -1172,8 +1174,10 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
       int qdim = memory_embed_text(query, embed_cmd, qvec, EMBED_MAX_DIM);
       if (qdim > 0 && qdim == db2_embedding_dim())
       {
-         nv = pgvec_code_search_paths(proj, qvec, qdim, HYBRID_PER_SIGNAL, (char *)vpaths,
-                                      (int)sizeof(vpaths[0]), vscores, HYBRID_PER_SIGNAL);
+         int vector_rc =
+             pgvec_code_search_paths(proj, qvec, qdim, HYBRID_PER_SIGNAL, (char *)vpaths,
+                                     (int)sizeof(vpaths[0]), vscores, HYBRID_PER_SIGNAL);
+         nv = vector_rc;
          if (nv < 0)
             nv = 0;
          for (int i = 0; i < nv; i++)
@@ -1185,9 +1189,12 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
             hybrid_candidate_key(id, vector_items[nvector].id, sizeof(vector_items[nvector].id));
             vector_items[nvector++].structural_weight = 0;
          }
+         kb_code_vector_status_store(&vector_status, vector_rc, nv);
       }
+      else
+         kb_code_vector_status_embed(&vector_status, embed_cmd, qdim, db2_embedding_dim(),
+                                     memory_embedder_last_result_unauthorized());
    }
-
    /* Signal D — cross-session memory / knowledge graph (§6 fusion). Symbol-anchored
     * like the graph leg: seed the symbol's entity node and walk its incident
     * knowledge-graph edges (built by the curator across sessions), resolving each
@@ -1318,6 +1325,7 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
       return 500;
    }
    cJSON_AddStringToObject(resp, "status", "ok");
+   kb_code_vector_status_add_json(resp, &vector_status);
    cJSON_AddStringToObject(resp, "query", query);
    if (symbol[0])
       cJSON_AddStringToObject(resp, "symbol", symbol);

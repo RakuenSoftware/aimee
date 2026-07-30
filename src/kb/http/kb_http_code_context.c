@@ -6,6 +6,7 @@
  * structural evidence leads, weak vector-only rows are rejected, and memory is
  * additive only after code evidence made the task answerable. */
 #include "kb_http_code.h"
+#include "kb_http_code_vector_status.h"
 #include "canonical_index.h"
 #include "code_index.h"
 #include "memory.h"
@@ -316,7 +317,61 @@ int handle_get_code_context(const char *query_string, char *out_buf, int out_cap
    }
 
    int answerable = cJSON_GetArraySize(results) > 0;
-   cJSON_AddStringToObject(response, "status", answerable ? "ok" : "no_answer");
+   const cJSON *vector_status = cJSON_GetObjectItemCaseSensitive(source, "vector_status");
+   if (!answerable && cJSON_IsString(vector_status) &&
+       (strcmp(vector_status->valuestring, "unavailable") == 0 ||
+        strcmp(vector_status->valuestring, "stale") == 0 ||
+        strcmp(vector_status->valuestring, "unauthorized") == 0))
+   {
+      const char *status = vector_status->valuestring;
+      int stale = strcmp(status, "stale") == 0;
+      int unauthorized = strcmp(status, "unauthorized") == 0;
+      const cJSON *vector_dependency =
+          cJSON_GetObjectItemCaseSensitive(source, "vector_dependency");
+      const char *dependency =
+          cJSON_IsString(vector_dependency) ? vector_dependency->valuestring : "embedder";
+      cJSON *failure = cJSON_CreateObject();
+      if (!failure)
+      {
+         cJSON_Delete(response);
+         cJSON_Delete(source);
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"status\":\"unavailable\",\"dependency\":\"embedder\","
+                  "\"retryable\":true,\"retry_after_ms\":%d}",
+                  KB_CODE_VECTOR_RETRY_AFTER_MS);
+         return 503;
+      }
+      cJSON_AddStringToObject(failure, "status", status);
+      cJSON_AddStringToObject(failure, "dependency", dependency);
+      cJSON_AddBoolToObject(failure, "retryable", !stale && !unauthorized);
+      if (!stale && !unauthorized)
+      {
+         const cJSON *retry_after =
+             cJSON_GetObjectItemCaseSensitive(source, "vector_retry_after_ms");
+         int retry_after_ms = cJSON_IsNumber(retry_after) && retry_after->valuedouble > 0
+                                  ? (int)retry_after->valuedouble
+                                  : KB_CODE_VECTOR_RETRY_AFTER_MS;
+         cJSON_AddNumberToObject(failure, "retry_after_ms", retry_after_ms);
+      }
+      cJSON_AddStringToObject(failure, "project", project);
+      cJSON_AddNumberToObject(failure, "generation", (double)generation);
+      const cJSON *observed_dim =
+          cJSON_GetObjectItemCaseSensitive(source, "vector_observed_dimension");
+      const cJSON *current_dim =
+          cJSON_GetObjectItemCaseSensitive(source, "vector_current_dimension");
+      if (cJSON_IsNumber(observed_dim))
+         cJSON_AddNumberToObject(failure, "observed_dimension", observed_dim->valuedouble);
+      if (cJSON_IsNumber(current_dim))
+         cJSON_AddNumberToObject(failure, "current_dimension", current_dim->valuedouble);
+      char *failure_json = cJSON_PrintUnformatted(failure);
+      snprintf(out_buf, (size_t)out_cap, "%s", failure_json ? failure_json : "{}");
+      free(failure_json);
+      cJSON_Delete(failure);
+      cJSON_Delete(response);
+      cJSON_Delete(source);
+      return stale ? 409 : (unauthorized ? 401 : 503);
+   }
+   cJSON_AddStringToObject(response, "status", answerable ? "ok" : "abstained");
    cJSON_AddNumberToObject(response, "item_count", accepted);
    cJSON *answerability = cJSON_AddObjectToObject(response, "answerability");
    cJSON_AddStringToObject(answerability, "decision", answerable ? "answerable" : "no_answer");

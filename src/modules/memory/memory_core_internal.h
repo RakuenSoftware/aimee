@@ -133,6 +133,8 @@ double memory_content_surprise(const char *session_id, const char *content);
 const char *memory_effective_embedding_cmd(const char *command);
 int memory_embed_command_is_http(const char *cmd);
 int memory_embed_http_post(const char *base, const char *path, const char *body, char **resp);
+int memory_embed_http_post_status(const char *base, const char *path, const char *body, char **resp,
+                                  int *status_out);
 int memory_embed_text_runtime(const char *text, const char *command, float *out, int max_dim);
 int memory_env_int(const char *name, int fallback, int min_value, int max_value);
 double memory_env_weight(const char *name, double fallback);

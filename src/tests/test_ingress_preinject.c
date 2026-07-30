@@ -15,6 +15,7 @@ static const char *g_context_mode = "observe";
 static int g_context_calls = 0;
 static int g_facts_enabled = 0;
 static int g_facts_calls = 0;
+static kb_client_result_status_t g_context_result = KB_CLIENT_RESULT_OK;
 
 /* The kb-backed builder (ingress_preinject_build) is out of scope here; these
  * stubs satisfy the linker so the test links only the pure helpers without
@@ -63,6 +64,12 @@ char *kb_client_code_context(const char *query, const char *symbol, const char *
    (void)symbol;
    assert(project && strcmp(project, "active-project") == 0);
    g_context_calls++;
+   if (g_context_result == KB_CLIENT_RESULT_UNAVAILABLE)
+   {
+      if (status_out)
+         *status_out = 503;
+      return NULL;
+   }
    if (status_out)
       *status_out = 200;
    return strdup("{\"status\":\"ok\",\"project\":\"active-project\",\"generation\":7,"
@@ -74,6 +81,10 @@ char *kb_client_code_context(const char *query, const char *symbol, const char *
                  "\"accepted\":true,\"provenance\":[\"code\"],"
                  "\"span\":{\"kind\":\"line\",\"line_start\":12,\"line_end\":12},"
                  "\"snippet\":\"int local_answer(void);\"}],\"why\":[]}");
+}
+kb_client_result_status_t kb_client_last_result_status(void)
+{
+   return g_context_result;
 }
 int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max)
 {
@@ -338,6 +349,7 @@ static void test_task_context_mode_and_first_turn_gate(void)
    g_facts_enabled = 1;
    g_facts_calls = 0;
    g_context_mode = "on";
+   g_context_result = KB_CLIENT_RESULT_OK;
 
    char *first = ingress_preinject_build("fix local resolver", 0);
    assert(first && strstr(first, "recommended (task-conditioned code") != NULL);
@@ -374,6 +386,32 @@ static void test_task_context_mode_and_first_turn_gate(void)
    g_facts_enabled = 0;
    g_context_mode = "observe";
    printf("task_context_mode_and_first_turn_gate OK\n");
+}
+
+static void test_unavailable_task_context_retries_after_recovery(void)
+{
+   ingress_preinject_task_state_reset();
+   ingress_preinject_set_session_id("session-recovery");
+   g_context_mode = "on";
+   g_context_calls = 0;
+   g_context_result = KB_CLIENT_RESULT_UNAVAILABLE;
+
+   char *outage = ingress_preinject_build("fix local resolver", 0);
+   assert(outage == NULL);
+   assert(g_context_calls == 1);
+
+   /* Same-task vocabulary is eligible again because unavailable is not an
+    * abstention/empty result. The KB breaker owns the actual retry rate. */
+   g_context_result = KB_CLIENT_RESULT_OK;
+   char *recovered = ingress_preinject_build("please fix the local resolver", 0);
+   assert(recovered && strstr(recovered, "task-conditioned code") != NULL);
+   free(recovered);
+   assert(g_context_calls == 2);
+
+   ingress_preinject_set_session_id(NULL);
+   g_context_mode = "observe";
+   g_context_result = KB_CLIENT_RESULT_OK;
+   printf("unavailable_task_context_retries_after_recovery OK\n");
 }
 
 static void test_query_from_messages(void)
@@ -666,6 +704,7 @@ int main(void)
    test_format_envelope();
    test_format_task_context_strict_contract();
    test_task_context_mode_and_first_turn_gate();
+   test_unavailable_task_context_retries_after_recovery();
    test_format_code_block();
    test_query_from_messages();
    test_apply();

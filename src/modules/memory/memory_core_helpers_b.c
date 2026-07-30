@@ -442,7 +442,8 @@ static void memory_embed_http_url(const char *base, const char *path, char *out,
 
 /* POST body to {base}{path}; on success returns 0 with the response body in
  * *resp (caller frees). Any transport error or non-2xx leaves *resp NULL. */
-int memory_embed_http_post(const char *base, const char *path, const char *body, char **resp)
+int memory_embed_http_post_status(const char *base, const char *path, const char *body, char **resp,
+                                  int *status_out)
 {
    char url[1024];
    char auth[640] = "";
@@ -450,8 +451,14 @@ int memory_embed_http_post(const char *base, const char *path, const char *body,
    const char *auth_header = NULL;
    int have_token = runtime_secret_get("AIMEE_LLM_AUTH_TOKEN", token, sizeof(token));
    const char *auth_required = getenv("AIMEE_LLM_AUTH_REQUIRED");
+   if (status_out)
+      *status_out = -1;
    if (auth_required && strcmp(auth_required, "1") == 0 && !have_token)
+   {
+      if (status_out)
+         *status_out = 401;
       return -1;
+   }
    if (have_token)
    {
       /* Managed tokens are capped at 512 bytes; this also rejects any longer
@@ -461,6 +468,8 @@ int memory_embed_http_post(const char *base, const char *path, const char *body,
       {
          runtime_secret_wipe(token, sizeof(token));
          runtime_secret_wipe(auth, sizeof(auth));
+         if (status_out)
+            *status_out = 401;
          return -1;
       }
       auth_header = auth;
@@ -468,6 +477,8 @@ int memory_embed_http_post(const char *base, const char *path, const char *body,
    memory_embed_http_url(base, path, url, sizeof(url));
    *resp = NULL;
    int status = agent_http_post(url, auth_header, body, resp, MEMORY_EMBED_HTTP_TIMEOUT_MS, NULL);
+   if (status_out)
+      *status_out = status;
    runtime_secret_wipe(token, sizeof(token));
    runtime_secret_wipe(auth, sizeof(auth));
    if (status < 200 || status >= 300 || !*resp)
@@ -477,6 +488,11 @@ int memory_embed_http_post(const char *base, const char *path, const char *body,
       return -1;
    }
    return 0;
+}
+
+int memory_embed_http_post(const char *base, const char *path, const char *body, char **resp)
+{
+   return memory_embed_http_post_status(base, path, body, resp, NULL);
 }
 
 typedef struct

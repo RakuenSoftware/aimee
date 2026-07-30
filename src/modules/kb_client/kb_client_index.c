@@ -49,9 +49,11 @@ static int kb_index_find_parse(cJSON *resp, term_hit_t *out, int max)
 static int kb_index_project_list_parse(cJSON *resp, project_info_t *out, int max)
 {
    if (!resp)
-      return 0;
+      return -1;
    int count = 0;
    cJSON *projects = cJSON_GetObjectItemCaseSensitive(resp, "projects");
+   if (!cJSON_IsArray(projects))
+      return -1;
    if (cJSON_IsArray(projects))
    {
       cJSON *p;
@@ -386,9 +388,11 @@ int kb_client_index_find_scoped(const char *project, int all_projects, const cha
    char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, NULL);
    free(path);
    if (!json)
-      return 0;
+      return -1;
    cJSON *resp = cJSON_Parse(json);
    free(json);
+   if (!resp)
+      return -1;
    int count = kb_index_find_parse(resp, out, max);
    cJSON_Delete(resp);
    return count;
@@ -716,11 +720,11 @@ int kb_client_index_structure(const char *project, const char *file_path, defini
    free(file_q);
    char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, NULL);
    if (!json)
-      return 0;
+      return -1;
    cJSON *resp = cJSON_Parse(json);
    free(json);
    if (!resp)
-      return 0;
+      return -1;
 
    int count = 0;
    cJSON *defs = cJSON_GetObjectItemCaseSensitive(resp, "definitions");
@@ -868,9 +872,11 @@ int kb_client_index_code_search_scoped(const char *query, const char *project, i
    char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, NULL);
    free(path);
    if (!json)
-      return 0;
+      return -1;
    cJSON *resp = cJSON_Parse(json);
    free(json);
+   if (!resp)
+      return -1;
    int count = kb_index_code_search_parse(resp, out, max);
    cJSON_Delete(resp);
    return count;
@@ -915,9 +921,11 @@ int kb_client_index_find_callers_scoped(const char *project, int all_projects, c
    char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, NULL);
    free(path);
    if (!json)
-      return 0;
+      return -1;
    cJSON *resp = cJSON_Parse(json);
    free(json);
+   if (!resp)
+      return -1;
    int count = kb_index_find_callers_parse(resp, out, max);
    cJSON_Delete(resp);
    return count;

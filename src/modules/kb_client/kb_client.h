@@ -38,6 +38,43 @@ typedef struct
    int maintenance_enabled;
 } kb_health_t;
 
+/* Every retrieval attempt has one of these six outcomes. The accessor is
+ * thread-local, so a concurrent request cannot overwrite another request's
+ * transport/result classification. Human-readable payloads remain compatible;
+ * callers that need to distinguish empty from outage read this typed result. */
+typedef enum
+{
+   KB_CLIENT_RESULT_OK = 0,
+   KB_CLIENT_RESULT_EMPTY,
+   KB_CLIENT_RESULT_ABSTAINED,
+   KB_CLIENT_RESULT_STALE,
+   KB_CLIENT_RESULT_UNAVAILABLE,
+   KB_CLIENT_RESULT_UNAUTHORIZED
+} kb_client_result_status_t;
+
+typedef struct
+{
+   char state[16]; /* closed | open | half_open */
+   unsigned failure_streak;
+   unsigned recovery_attempt;
+   int64_t retry_after_ms;
+   int64_t last_success_ms;
+   int64_t last_failure_ms;
+   uint64_t suppressed_calls;
+} kb_client_dependency_health_t;
+
+kb_client_result_status_t kb_client_last_result_status(void);
+const char *kb_client_result_status_name(kb_client_result_status_t status);
+int kb_client_result_status_retryable(kb_client_result_status_t status);
+/* Heap JSON for the current thread's last result, including dependency,
+ * retryability and breaker delay where applicable. Caller frees. */
+char *kb_client_last_result_json(const char *message);
+void kb_client_dependency_health(kb_client_dependency_health_t *out);
+
+/* Deterministic test seams; production passes NULL and uses the wall clock. */
+void kb_client_dependency_reset_for_tests(void);
+void kb_client_dependency_set_clock_for_tests(int64_t (*now_ms)(void));
+
 /* Query aimee-kb health.  Fills *out and returns 0 on success.  Returns -1
  * if aimee-kb is unreachable (out->process_ok == 0). */
 int kb_client_health(kb_health_t *out);
@@ -774,9 +811,8 @@ int kb_client_memory_explain_match(const char *query, int64_t memory_id, memory_
  * must split that flow across aimee-server and aimee-kb; do not add a client
  * or auxiliary process with both tiers linked. */
 
-/* Fetch a single memory row by id via aimee-kb.  Returns 0 on
- * success (out is filled) or -1 if kb is unreachable or the row is
- * missing.  Mirrors memory_get(). */
+/* Fetch a single memory row by id via aimee-kb. Returns 0 on success,
+ * 1 for a valid missing row, or -1 when the service/result is unavailable. */
 int kb_client_memory_get(int64_t id, memory_t *out);
 
 /* Insert a memory row via aimee-kb (the DB2 owner).  The full
@@ -923,9 +959,8 @@ char *kb_client_evidence_provenance_retrieval_event(const char *turn_id);
  * (malloc'd, caller frees; NULL on bad arg or kb error). */
 char *kb_client_evidence_fidelity_retrieval_event(const char *turn_id);
 
-/* Fetch the entity profile card via aimee-kb.  Returns 0 on success
- * (|out| filled) or -1 if kb is unreachable or the entity is missing.
- * Mirrors memory_get_entity_profile(). */
+/* Fetch the entity profile card via aimee-kb. Returns 0 on success,
+ * 1 for a valid missing entity, or -1 when the service/result is unavailable. */
 int kb_client_memory_get_entity_profile(const char *entity, memory_entity_profile_t *out);
 
 /* Fetch up to |max| graph edges for an entity via aimee-kb.  Returns
@@ -944,9 +979,8 @@ int kb_client_memory_search_graph(const char *query, int limit, memory_relation_
 int kb_client_memory_search_graph_as_of(const char *query, const char *as_of, int limit,
                                         memory_relation_t *out, int max);
 
-/* Fetch a single episode by key via aimee-kb.  Returns 0 on success
- * (out is filled) or -1 if kb is unreachable or the episode is
- * missing.  Mirrors memory_get_episode(). */
+/* Fetch a single episode by key via aimee-kb. Returns 0 on success,
+ * 1 for a valid missing episode, or -1 when the service/result is unavailable. */
 int kb_client_memory_get_episode(const char *episode_key, memory_episode_t *out);
 
 /* Run the memory Q&A pipeline via aimee-kb (the DB2 owner).  Returns
@@ -1135,8 +1169,8 @@ int kb_client_index_scan_apply_response(const void *resp, kb_client_index_scan_r
  * cJSON * (cast through void * to keep this header cJSON-free). */
 void *kb_client_index_scan_format_response(int kb_rc, const kb_client_index_scan_result_t *res);
 
-/* Find an identifier in the canonical index. Returns count of hits
- * written into `out` (capped at `max`), or 0 if kb is unreachable. */
+/* Find an identifier in the canonical index. Returns count of hits written
+ * into `out` (capped at `max`), or -1 if the KB is unavailable. */
 int kb_client_index_find(const char *identifier, term_hit_t *out, int max);
 int kb_client_index_find_project(const char *project, const char *identifier, term_hit_t *out,
                                  int max);
@@ -1166,8 +1200,8 @@ int kb_client_index_blast_radius(const char *project, const char *file_path, bla
 char *kb_client_index_blast_radius_preview_json(const char *project, char **paths, int path_count);
 
 /* List the structural definitions in a single file (function/struct/etc).
- * Returns count written into `out` (capped at `max`), or 0 if kb is
- * unreachable.  Mirrors index_structure(). */
+ * Returns count written into `out` (capped at `max`), or -1 if the KB is
+ * unavailable. Mirrors index_structure(). */
 int kb_client_index_structure(const char *project, const char *file_path, definition_t *out,
                               int max);
 
