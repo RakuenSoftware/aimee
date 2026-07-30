@@ -133,9 +133,40 @@ handed**:
 | **gte-multilingual-reranker-base** | **0.7178** | 0.6116 | **+0.106 — possibly** |
 
 bge-v2-m3 is at parity with dense retrieval, so it can only shuffle. GTE scores
-0.106 higher on capability and has **not** been tested in-pipeline, because its
-torch path is broken and the working ONNX path is CPU-only. That test is the
-outstanding item; until it runs, path C is undecided rather than dead.
+0.106 higher — and it was then tested in-pipeline.
+
+### Resolved: GTE improves the pipeline, but only at full document length
+
+600 cases, dense-ordered top-20, GTE via ONNX (`degenerate: 0`):
+
+| embedder | dense | + GTE 20x128 | + GTE 20x512 |
+|---|---:|---:|---:|
+| a25m | 0.5934 | 0.4976 (**-0.096**) | **0.6136 (+0.020)** |
+| nomic + prefix | 0.6092 | 0.5024 (**-0.107**) | **0.6172 (+0.008)** |
+
+**Reranking helps — at 512 tokens only.** At 128 tokens it is catastrophic. The
+helpful configuration costs **4.1s on CPU** (outside budget) and ~0.09s on GPU.
+
+**Correction to the design rule stated earlier in this campaign.** The rule
+"never trim the candidate list — truncate documents instead" was derived from the
+*unsorted* reranking view, where truncation cost only 0.023. Against a
+*dense-ordered* list truncation costs 0.10 and destroys the entire benefit.
+Beating an already-good ranking requires full document context; sorting a random
+list does not. The rule holds for reranker *capability* and is wrong for
+reranker *usefulness* — which is the production case.
+
+### A good reranker compresses the embedder gap
+
+| | dense | after GTE 20x512 |
+|---|---:|---:|
+| nomic minus a25m | **0.0158** | **0.0036** |
+
+Reranking removes 77% of the difference between the two embedders. With a
+reranker in the pipeline, a25m is within 0.004 of nomic while being 3.6x faster
+on CPU, half the vector width, and needing no prefix machinery at all.
+
+**This is the strongest argument in the campaign for a25m**, and it only appears
+when the embedder and reranker are measured together rather than separately.
 
 ### If a reranker is kept: how to configure it
 
@@ -184,25 +215,29 @@ multi-vectors for a hot subset only.
 
 ## 4. Paths forward
 
-**A. Simplest, ships today.** a25m embedder, no reranker. 0.5903 dense, no prefix
-work, no reranker machinery, 2,155 tok/s on CPU. Deletes the Ettin release
-pipeline outright. *Blocked on nothing.*
+**A. Ships today — a25m, no reranker.** 0.5903-0.5934 dense. No prefix work, no
+reranker machinery, 2,155 tok/s on CPU, 384-dim vectors. Deletes the Ettin
+release pipeline outright. *Blocked on nothing.*
 
-**B. Best measured quality on the current architecture.** nomic + per-model prefix
-support, no reranker. 0.6116 dense. *Blocked on building prefix plumbing and a
-full re-embed.*
+**B. a25m + GTE reranking on the GPU tier only.** 0.6136 — beats plain nomic
+dense (0.6116) using the *cheaper* embedder. GTE ONNX at 20x512, ~0.09s on GPU.
+CPU tier runs dense-only, because no rerank config is both affordable and
+beneficial there (20x512 is 4.1s; 20x128 loses 0.10). *Blocked on GPU ONNX
+serving; note this means CPU and GPU tiers return different rankings.*
 
-**C. Keep a reranker.** Only justified if the in-flight full-length run shows the
-degradation was a truncation artifact. Then: gte-multilingual ONNX int8 at
-20x128 on CPU, 20x512 on GPU. *Blocked on that result.*
+**C. nomic + per-model prefix support.** 0.6092-0.6116 dense, 0.6172 with GTE.
+The best absolute numbers, but the margin over (B) is 0.0036 once a reranker is
+present. *Blocked on building prefix plumbing and a full re-embed.*
 
-**D. Late interaction.** Best retrieval quality measured, and architecturally the
-cleanest fit for a sub-1s budget. *Blocked on a storage story — 743 GB/million is
-not shippable as configured.*
+**D. Late interaction.** Best retrieval quality measured (0.946 Recall@10) and
+architecturally the cleanest fit for a sub-1s budget. *Blocked on a storage
+story — 743 GB/million is not shippable as configured.*
 
-**Recommendation: A now, B next, D as the research track.** The reranker (C) is
-the weakest-supported option on current evidence, which is the opposite of where
-the evening started.
+**Recommendation: A now, B next, D as the research track.** (C) is hard to
+justify: it costs prefix plumbing and a full re-embed to buy 0.0036 over (B).
+
+The reranker is worth keeping — but only on GPU, only at full document length,
+and only with GTE. On CPU the evidence says do not rerank at all.
 
 ---
 
