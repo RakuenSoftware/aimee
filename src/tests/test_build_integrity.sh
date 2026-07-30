@@ -14,6 +14,13 @@ fail() { echo "  FAIL: $1"; FAIL=1; }
 # Stub only the short-lived bootstrap transport so this can run outside the
 # image; the explicit child proves it received no credential value.
 entrypoint_test_dir=$(mktemp -d /tmp/aimee-entrypoint.XXXXXX)
+cat >"$entrypoint_test_dir/aimee-server" <<'SH'
+#!/bin/sh
+[ -n "${ENTRYPOINT_TEST_API_KEY:-}" ] || exit 3
+[ "$*" = "--bootstrap-vault-env --drop-user aimee" ] || exit 4
+exit 0
+SH
+chmod +x "$entrypoint_test_dir/aimee-server"
 cat >"$entrypoint_test_dir/runuser" <<'SH'
 #!/bin/sh
 [ -n "${ENTRYPOINT_TEST_API_KEY:-}" ] || exit 3
@@ -95,7 +102,7 @@ fi
 # still needs a PID-1 subreaper. It must not start tini until after first-boot
 # credentials have been sealed and unset: an earlier tini permanently retains
 # the original container environment even when every child scrubs its copy.
-vault_bootstrap_line=$(grep -nF 'runuser -u aimee -- aimee-server --bootstrap-vault-env' \
+vault_bootstrap_line=$(grep -nF 'aimee-server --bootstrap-vault-env --drop-user aimee' \
     ../deploy/container/server-entrypoint.sh | cut -d: -f1)
 credential_unset_line=$(grep -nF 'unset "$_secret_name"' \
     ../deploy/container/server-entrypoint.sh | cut -d: -f1)

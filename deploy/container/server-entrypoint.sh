@@ -25,6 +25,12 @@ SERVER_SOCK="${AIMEE_SERVER_SOCK:-/var/lib/aimee/aimee-server.sock}"
 server_pid=""
 wfe_pid=""
 
+# The one-shot bootstrap begins with a narrowly scoped legacy-volume ownership
+# repair, then drops privileges before it touches credentials. Disable core
+# files in the supervising shell first so the privileged phase cannot persist
+# inherited first-boot secrets either.
+ulimit -c 0 2>/dev/null || true
+
 # Consume deployment credentials before invoking any unrelated child process.
 # Kubernetes/Docker environment injection is accepted only as first-boot
 # transport: the short-lived server seals it into Vault, then this PID removes
@@ -44,7 +50,7 @@ if [ -n "${AIMEE_SERVER_MGMT_TLS_KEY:-}" ] || [ -n "${AIMEE_SERVER_MGMT_STATUS_C
     printf '[server-entrypoint] fatal: management private-key files are forbidden; inject AIMEE_SERVER_MGMT_TLS_PRIVATE_KEY and AIMEE_SERVER_MGMT_STATUS_CLIENT_PRIVATE_KEY as first-boot Vault inputs\n' >&2
     exit 2
 fi
-runuser -u aimee -- aimee-server --bootstrap-vault-env
+aimee-server --bootstrap-vault-env --drop-user aimee
 _secret_names=$(runuser -u aimee -- aimee-server --list-credential-env-names)
 had_credential_env=0
 for _secret_name in $_secret_names; do
@@ -101,10 +107,6 @@ WFE_SOCKET_WAIT_TENTHS="${AIMEE_WFE_SOCKET_WAIT_TENTHS:-1200}"
 # overflows and SIGSEGVs on real queries. Raise the soft limit here (inherited
 # by the runuser child); hard limit is unlimited on typical hosts. Best-effort.
 ulimit -s 65536 2>/dev/null || true
-
-# Credential plaintext necessarily exists in process memory while a request is
-# authenticated. Never persist that memory in a core image.
-ulimit -c 0 2>/dev/null || true
 
 # Seed the baked default config into AIMEE_HOME if absent. It contains only the
 # public /v1 listener policy; API and TLS private credentials live in Vault. A
