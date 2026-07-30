@@ -1002,8 +1002,9 @@ void delegate_worker(void *arg)
    if (!target_agent)
    {
       char errmsg[256];
-      if (agent_route_with_caps_saturated(&acfg, role, &route_cfg, required_caps, min_context,
-                                          scope))
+      if (agent_route_with_caps_saturated(&acfg, role, required_caps, min_context, scope,
+                                          route_cfg.model_meta_capability_routing,
+                                          route_cfg.prefer_local_agents))
       {
          snprintf(errmsg, sizeof(errmsg),
                   "no free capacity for role '%s' [aimee_err=no_free_capacity]", role);

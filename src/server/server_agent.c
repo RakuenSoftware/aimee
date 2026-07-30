@@ -17,7 +17,8 @@
 #include "vault_capability.h" /* vault_agent_key_server_seal_allowed (agent-key server-vault gate) */
 #include "server_cli_oauth.h"     /* server-hosted OAuth CLI agent setup */
 #include "provider_cli_adapter.h" /* provider_cli_adapter_get: declared CLI caps */
-#include "config.h"               /* config_load / config_t */
+#include "provider_catalog.h"
+#include "config.h" /* config_load / config_t */
 #include <pthread.h>
 #include <string.h>
 #include <stdlib.h>
@@ -43,6 +44,48 @@ static void server_agent_http_init_once(void)
 static void server_agent_http_ensure(void)
 {
    pthread_once(&g_agent_http_once, server_agent_http_init_once);
+}
+
+static int server_agent_route_backend_reachable(const agent_t *ag)
+{
+   if (!ag || strcmp(ag->model, "aimee-synth") != 0)
+      return 1;
+   const char *endpoint = ag->endpoint;
+   if (!endpoint || !endpoint[0] ||
+       (strncmp(endpoint, "http://", 7) != 0 && strncmp(endpoint, "https://", 8) != 0))
+      return 1;
+   char url[MAX_ENDPOINT_LEN + 16];
+   size_t len = strlen(endpoint);
+   snprintf(url, sizeof(url), "%s%smodels", endpoint, len && endpoint[len - 1] == '/' ? "" : "/");
+   char *body = NULL;
+   int status = agent_http_get(url, NULL, &body, 1500);
+   free(body);
+   int reachable = status >= 200 && status < 400;
+   provider_catalog_record_endpoint_probe(endpoint, reachable);
+   return reachable;
+}
+
+int server_agent_route_is_down(const char *agent_name)
+{
+   agent_config_t cfg;
+   if (agent_load_config(&cfg) == 0)
+   {
+      agent_t *ag = agent_find(&cfg, agent_name);
+      if (ag && !server_agent_route_backend_reachable(ag))
+         return 1;
+   }
+   return provider_catalog_get_health(agent_name) == CATALOG_HEALTH_DOWN;
+}
+
+int server_agent_route_is_degraded(const char *agent_name)
+{
+   return provider_catalog_get_health(agent_name) == CATALOG_HEALTH_DEGRADED;
+}
+
+int server_agent_route_has_capacity(const agent_t *ag)
+{
+   const char *model = ag && ag->model[0] ? ag->model : AGENT_ADMISSION_DEFAULT_MODEL_KEY;
+   return ag && agent_admission_probe(ag->name, model, ag->max_parallel, NULL);
 }
 
 static char *server_agent_trim(char *s)

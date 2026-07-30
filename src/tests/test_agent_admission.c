@@ -416,7 +416,7 @@ static void run_nonblocking_race(int global_max, int model_max, int distinct_age
 
 static void test_synchronized_nonblocking_races_obey_all_limits(void)
 {
-   run_nonblocking_race(2, 100, 1, 1, 2);  /* per-agent limit is 3; global bites */
+   run_nonblocking_race(2, 100, 1, 1, 2);   /* per-agent limit is 3; global bites */
    run_nonblocking_race(100, 100, 0, 1, 3); /* shared agent limit bites */
    run_nonblocking_race(100, 2, 1, 0, 2);   /* shared-model limit bites */
    printf("  PASS: synchronized_nonblocking_races_obey_all_limits\n");

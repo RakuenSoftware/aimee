@@ -474,6 +474,9 @@ void server_compute_async_drain(void);
 cJSON *server_compute_async_json(server_ctx_t *ctx);
 
 /* Agent management handlers (server_agent.c) */
+int server_agent_route_is_down(const char *agent_name);
+int server_agent_route_is_degraded(const char *agent_name);
+int server_agent_route_has_capacity(const agent_t *ag);
 int handle_agent_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_local(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

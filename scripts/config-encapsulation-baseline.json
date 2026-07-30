@@ -602,7 +602,7 @@
       "loads": 2
     },
     "src/server/agent_route.c": {
-      "decls": 3,
+      "decls": 2,
       "loads": 0
     },
     "src/server/agent_runtime.c": {
@@ -1051,7 +1051,7 @@
     }
   },
   "totals": {
-    "decls": 926,
+    "decls": 925,
     "files": 262,
     "loads": 475
   }
