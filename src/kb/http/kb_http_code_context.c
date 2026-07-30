@@ -78,9 +78,9 @@ static cJSON *context_result_copy(const cJSON *row, const char *project, int64_t
    cJSON_AddNumberToObject(out, "confidence", confidence);
    cJSON_AddBoolToObject(out, "accepted", 1);
 
-   const char *copy_fields[] = {"score",       "signal_hits",  "structural_weight",
-                                "snippet",     "content_hash", "caller",
-                                "caller_line", "vector_score", NULL};
+   const char *copy_fields[] = {"score",   "signal_hits",  "structural_weight",
+                                "snippet", "content_hash", "vector_score",
+                                NULL};
    for (int i = 0; copy_fields[i]; i++)
    {
       const cJSON *value = cJSON_GetObjectItemCaseSensitive(row, copy_fields[i]);

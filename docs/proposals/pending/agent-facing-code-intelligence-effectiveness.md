@@ -716,3 +716,15 @@ residual proposal instead of declaring the intended effectiveness outcome comple
   the reconvened review binds this artifact to E4 without weakening the parent completion request.
   Roundtable run: `oprun_g6a69bd8011459d99_1785389737_122` (artifact
   `11776ad9f6708568dcc1dce374884b4cd164b2b3483438b06261beb39180462a`).
+- **E4 implementation round 2 — 2026-07-30 — APPROVED and converged, 3/3 participants, not
+  degraded.** The panel reported no blocking findings after the memory-only, explicit-anchor, and
+  generation-regression repairs. Its schema nit is adopted by removing redundant undocumented
+  top-level caller fields; the span remains the canonical symbol/line surface. The validation record
+  now distinguishes 85 routed KB endpoints from 92 OpenAPI operations, calls out the legacy hybrid
+  route's local-first memory tightening, and states the direct-handler compatibility boundary. The
+  eight-row memory read is deliberately a bounded pre-filter pool, not an emitted packet allowance:
+  kind, exact scope, grounding, and duplicate rejection run before the shared four-item output cap.
+  The resolver is covered through ingress behavior here; a standalone resolver fixture is a useful
+  follow-up but not a blocking gap in the E4 contract. Roundtable run:
+  `oprun_g6a69bd8011459d99_1785391257_123` (artifact
+  `743c03a1a1ec1191dbff96008f88cdb064ef51adda8fccc3634a1e9959f05852`).

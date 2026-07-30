@@ -32,6 +32,12 @@ The checked-in fixtures cover the full agent-facing path:
    order before their limit. Strict `on` mode also suppresses the legacy user/global typed-fact
    layer, so an abstained code packet cannot be replaced by global memory.
 
+The legacy `/v1/code/hybrid` route is intentionally tightened when a project is supplied: its
+memory leg now uses the same local-first visible reader instead of an unscoped fact lookup. Direct
+legacy KB handler callers that supply no ambient or explicit scope keep their prior compatibility
+semantics; the agent-facing ingress boundary is what resolves identity and refuses to issue those
+unscoped calls.
+
 ## Commands and results
 
 ```text
@@ -72,11 +78,11 @@ make -C src aimee-home-check
 git diff --check
 ```
 
-Both shipping binaries linked; API conformance found all 85 documented endpoints routed; method
-coverage passed; all 92 operations were present in all eight generated SDKs; the complete unit suite
-passed after classifying the new field in the exhaustive 225-entry config descriptor inventory; and
-formatting and diff checks passed. Hosted CI is recorded in the proposal acceptance record after the
-frozen-diff review and PR gate.
+Both shipping binaries linked; KB API conformance found its routed subset of all 85 documented
+endpoints present; method coverage passed; all 92 OpenAPI operations were present in all eight
+generated SDKs; the complete unit suite passed after classifying the new field in the exhaustive
+225-entry config descriptor inventory; and formatting and diff checks passed. Hosted CI is recorded
+in the proposal acceptance record after the frozen-diff review and PR gate.
 
 ## Boundary and rollout ruling
 
