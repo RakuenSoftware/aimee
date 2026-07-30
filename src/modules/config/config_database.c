@@ -1,5 +1,6 @@
 #include "aimee.h"
 #include "config_database.h"
+#include "config_embedding_dim.h" /* CONFIG_EMBEDDING_DIM_DEFAULT — the one declaration */
 #include "runtime_secret.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -60,13 +61,18 @@ int config_apply_db2_url_env_override(config_t *cfg)
    return 0;
 }
 
+int config_embedding_dim_default(void)
+{
+   return CONFIG_EMBEDDING_DIM_DEFAULT;
+}
+
 /* Effective embedding dimension: the AIMEE_EMBEDDING_DIM env override when set
  * and valid (1..EMBED_MAX_DIM), else cfg->embedding_dim. The env lets a
  * containerized deploy set the dim without a writable aimee.yaml — it must match
- * the running embedder model (EMBED_DEFAULT_DIM for the bundled one on
- * every tier; 1024/2560 for the legacy pplx-embed 0.6b/4b). Normally it should be
- * left UNSET so the dim is derived (pinned > recorded > probed); setting it is an
- * operator pin. Non-mutating so const callers can use it. */
+ * the running embedder model. Normally it should be left UNSET so the dim is
+ * derived (pinned > recorded > probed > default); setting it is an operator pin.
+ * Returns 0 for "nothing pinned" — see config_embedding_dim_effective() for a
+ * width you can use. Non-mutating so const callers can use it. */
 int config_resolve_embedding_dim(const config_t *cfg)
 {
    int dim = cfg ? cfg->embedding_dim : 0;
@@ -81,6 +87,32 @@ int config_resolve_embedding_dim(const config_t *cfg)
               EMBED_MAX_DIM, env);
    }
    return dim;
+}
+
+/* The width to embed and size columns with: the pin when there is one, else the
+ * declared default. Every caller that used to keep its own fallback literal calls
+ * this instead. */
+int config_embedding_dim_effective(const config_t *cfg)
+{
+   int dim = config_resolve_embedding_dim(cfg);
+   return dim > 0 ? dim : CONFIG_EMBEDDING_DIM_DEFAULT;
+}
+
+/* No-arg form, for callers that want the deployment's width and hold no config_t
+ * (the CLI doctor, reporting what it expects the embedder to return). Same answer
+ * as config_embedding_dim_effective against the loaded config. */
+int config_embedding_dim_current(void)
+{
+   int pinned = config_embedding_dim();
+   const char *env = getenv("AIMEE_EMBEDDING_DIM");
+   if (env && env[0])
+   {
+      char *end = NULL;
+      long v = strtol(env, &end, 10);
+      if (end && *end == '\0' && v >= 1 && v <= EMBED_MAX_DIM)
+         return (int)v;
+   }
+   return pinned > 0 ? pinned : CONFIG_EMBEDDING_DIM_DEFAULT;
 }
 
 /* §2a: pinned iff the resolved operator dim is positive. Keeping this defined in

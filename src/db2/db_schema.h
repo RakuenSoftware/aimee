@@ -21,13 +21,15 @@ extern "C"
 #endif
 
    /* Apply the consolidated Postgres schema to an already-open libpq
-    * connection (PGconn *, passed as void * so this header stays
-    * libpq-free). |embed_dim| is the deployment's configured embedding
-    * dimension (EMBED_DEFAULT_DIM for the bundled embedder; older
-    * deployments may record 1024/2560 from the retired Qwen3 ladder); the
-    * schema's halfvec embedding columns are created at that dimension. A value
-    * <= 0 or > EMBED_MAX_DIM falls back to EMBED_DEFAULT_DIM. Returns 0 on
-    * success, -1 on failure (writes to errbuf/errlen). */
+    * connection (PGconn *, passed as void * so this header stays libpq-free).
+    * |embed_dim| is the deployment's embedding width — from config, the single
+    * place it is declared (config_embedding_dim_effective) — and the schema's
+    * halfvec embedding columns are created at that dimension.
+    *
+    * A value <= 0 or > EMBED_MAX_DIM is an ERROR, not a fallback: this layer holds
+    * no width of its own, and substituting one would size a corpus for an embedder
+    * that is not the one running. Returns 0 on success, -1 on failure (writes to
+    * errbuf/errlen). */
    int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t errlen);
 
    /* embedder-runtime-fetch-autodim §2: record schema_embedding_dim in kb_meta on

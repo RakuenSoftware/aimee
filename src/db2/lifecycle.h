@@ -15,11 +15,21 @@ extern "C"
    int db2_init(const char *libpq_url);
 
    /* Set the embedding dimension used to create the DB2 halfvec embedding
-    * columns (one embedder per deployment: 1024 for pplx-0.6b, 2560 for
-    * pplx-4b). Call from startup — with the loaded config's embedding_dim —
-    * BEFORE db2_init() applies the schema, so this layer stays config-free.
-    * Unset/<=0 means the 1024 default. */
+    * columns (one embedder per deployment). Call from startup — with
+    * config_resolve_embedding_dim() — BEFORE db2_init() applies the schema, so
+    * this layer stays config-free. Unset/<=0 means "nothing pinned", which lets
+    * db2_init's §2a precedence fall through to the injected default. */
    void db2_set_embedding_dim(int dim);
+
+   /* Inject the DEFAULT width, from config_embedding_dim_default(). This layer
+    * holds no width literal of its own — the number is declared once, in config —
+    * so call this beside db2_set_embedding_dim before db2_init. Without it
+    * db2_embedding_dim() reports 0 and schema sizing fails loudly rather than
+    * guessing a width the running embedder may not produce. */
+   void db2_set_embedding_dim_default(int dim);
+
+   /* The effective width: the pinned dim when set, else the injected default.
+    * 0 means neither was supplied — treat as an error, never as a default. */
    int db2_embedding_dim(void);
 
    /* embedder-runtime-fetch-autodim §2a: mark whether the operator pinned the dim

@@ -806,13 +806,23 @@ int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t 
 
    /* The DB2 schema declares its halfvec embedding columns with the
     * __EMBED_DIM__ placeholder so a deployment can run an embedder of any
-    * supported width (the bundled embedder has one width; older
-    * deployments may still record the Qwen3 ladder's 1024/2560). Substitute the
-    * configured dimension here — the one place the schema is applied to
-    * Postgres. An out-of-range value falls back to the default embedder's
-    * dimension rather than emitting invalid DDL. */
+    * supported width. Substitute the configured dimension here — the one place
+    * the schema is applied to Postgres.
+    *
+    * An unusable width is an ERROR, not something to paper over: this layer holds
+    * no default (the width is declared once, in config, and reaches db2 via
+    * db2_set_embedding_dim_default). Silently substituting one here is how a
+    * corpus gets columns sized for an embedder that is not the one running. */
    if (embed_dim <= 0 || embed_dim > EMBED_MAX_DIM)
-      embed_dim = EMBED_DEFAULT_DIM;
+   {
+      if (errbuf && errlen)
+         snprintf(errbuf, errlen,
+                  "embedding dimension %d is unusable (expected 1..%d); the deployment's "
+                  "width was never supplied to the DB2 layer — check that startup calls "
+                  "db2_set_embedding_dim_default(config_embedding_dim_default())",
+                  embed_dim, EMBED_MAX_DIM);
+      return -1;
+   }
    char dimbuf[16];
    snprintf(dimbuf, sizeof(dimbuf), "%d", embed_dim);
 

@@ -99,13 +99,11 @@
  * 4000 in the embedding proxy (see unified-llm-container §"The 8B truncation"). */
 #define EMBED_MAX_DIM              4000
 
-/* The bundled embedder's output width, used when nothing is pinned, recorded or probed.
- * MUST match the shipped scripts/embedders.json entry: if a probe fails and this is
- * wider than what the embedder returns, the schema is sized too big and every insert is
- * refused; narrower and they do not fit. Deployments predating a change keep their own
- * dim via kb_meta.schema_embedding_dim, which outranks this
- * (pinned > recorded > probed > default). */
-#define EMBED_DEFAULT_DIM          384
+/* The embedding WIDTH is not declared here. It is a setting, so it lives in exactly
+ * one place — config (config_embedding_dim_default / config_embedding_dim_effective,
+ * src/modules/config/config_database.h). Layers that must not depend on config, like
+ * db2, have it injected at startup rather than keeping a copy. A #define here would be
+ * a second declaration that can disagree with the embedder actually running. */
 
 #define EMBED_SIMILARITY_THRESHOLD 0.7
 #define EMBED_ALPHA                0.5 /* hybrid blend: alpha*lexical + (1-alpha)*embed */

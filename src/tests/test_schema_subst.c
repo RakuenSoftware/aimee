@@ -11,19 +11,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "aimee.h" /* EMBED_DEFAULT_DIM — the fallback the unset/clamp paths use */
+#include "aimee.h" /* EMBED_MAX_DIM — the upper bound an unusable width is judged against */
 #include "db2/db_schema.h"
 #include "db2/db_postgres.h"
-
-/* The fallback dim is a build-time constant, so assert against it rather than a
- * literal: a future embedder swap moves the default and these tests must follow it
- * automatically instead of failing (as they did when it went 1024 -> 768). */
-static const char *default_halfvec(void)
-{
-   static char buf[32];
-   snprintf(buf, sizeof(buf), "halfvec(%d)", EMBED_DEFAULT_DIM);
-   return buf;
-}
 
 /* Capture the SQL db_apply_schema_postgres() hands to Postgres. */
 static char *g_captured_sql = NULL;
@@ -98,6 +88,21 @@ static const char *apply_with_dim(int dim)
    return g_captured_sql;
 }
 
+/* An unusable width must be REFUSED. Returns the error text the caller would see. */
+static const char *apply_with_dim_expect_refusal(int dim)
+{
+   static char err[512];
+   err[0] = '\0';
+   free(g_captured_sql);
+   g_captured_sql = NULL;
+   int rc = db_apply_schema_postgres(&g_fake_conn, dim, err, sizeof(err));
+   assert(rc == -1);
+   /* Nothing may be handed to Postgres: no DDL, valid or otherwise. */
+   assert(g_captured_sql == NULL);
+   assert(err[0] != '\0');
+   return err;
+}
+
 /* Every placeholder must be replaced — no token may survive into the DDL. */
 static void assert_fully_substituted(const char *sql)
 {
@@ -120,28 +125,27 @@ static void test_default_dim(void)
    assert_fully_substituted(sql);
 }
 
-/* dim <= 0 means "unset" — fall back to the EMBED_DEFAULT_DIM default rather than
- * emit invalid DDL like halfvec(0). */
-static void test_unset_falls_back_to_default(void)
+/* dim <= 0 means the deployment's width never reached this layer. That is an error,
+ * NOT a fallback: this layer declares no width (config does — see
+ * config_embedding_dim_effective), and inventing one here would size a corpus for
+ * an embedder that is not the one running. That exact substitution is how a kb
+ * ended up with 1024-wide columns while the bundled model returned 384. */
+static void test_unset_is_refused(void)
 {
-   const char *sql = apply_with_dim(0);
-   assert(strstr(sql, default_halfvec()) != NULL);
-   assert_fully_substituted(sql);
+   const char *err = apply_with_dim_expect_refusal(0);
+   assert(strstr(err, "unusable") != NULL);
 
-   sql = apply_with_dim(-5);
-   assert(strstr(sql, default_halfvec()) != NULL);
-   assert_fully_substituted(sql);
+   err = apply_with_dim_expect_refusal(-5);
+   assert(strstr(err, "unusable") != NULL);
 }
 
 /* A dimension beyond what the embedding buffers can hold (EMBED_MAX_DIM) is
- * clamped back to the default — a deployment misconfiguration must not produce
- * columns the code can never fill. */
-static void test_out_of_range_falls_back_to_default(void)
+ * refused for the same reason — a misconfiguration must not silently become
+ * columns of some other width. */
+static void test_out_of_range_is_refused(void)
 {
-   const char *sql = apply_with_dim(1000000);
-   assert(strstr(sql, default_halfvec()) != NULL);
-   assert(strstr(sql, "halfvec(1000000)") == NULL);
-   assert_fully_substituted(sql);
+   const char *err = apply_with_dim_expect_refusal(EMBED_MAX_DIM + 1);
+   assert(strstr(err, "unusable") != NULL);
 }
 
 /* The placeholder appears on multiple columns; substitution must replace all of
@@ -179,8 +183,8 @@ int main(void)
 {
    test_substitutes_explicit_dim();
    test_default_dim();
-   test_unset_falls_back_to_default();
-   test_out_of_range_falls_back_to_default();
+   test_unset_is_refused();
+   test_out_of_range_is_refused();
    test_all_columns_substituted();
    test_optional_runtime_role_is_guarded();
    free(g_captured_sql);

@@ -55,16 +55,27 @@ static void *g_conn = NULL;
 static char g_pg_url[512] = "";
 static pthread_mutex_t g_init_lock = PTHREAD_MUTEX_INITIALIZER;
 /* Embedding dimension for the DB2 halfvec columns (one embedder per deployment).
- * The bundled embedder has one width (EMBED_DEFAULT_DIM), so the
- * dim no longer varies with the GPU/CPU tier the way the old Qwen3 ladder did
- * (1024 for 0.6b, 2560 for 4b). Set from the loaded config by the server /
- * aimee-kb startup via db2_set_embedding_dim() before db2_init(), so this layer
- * needs no config dependency. 0 = unset -> db2_embedding_dim() reports the 768
- * default. A deployment that predates an embedder change has its old dim RECORDED
- * in kb_meta.schema_embedding_dim, and the recorded value outranks this default
- * (§2a precedence: pinned > recorded > probed > default), so an existing corpus
- * keeps working and is migrated deliberately via `aimee kb reembed`. */
+ * Set from the loaded config by the server / aimee-kb startup via
+ * db2_set_embedding_dim() before db2_init(), so this layer needs no config
+ * dependency. 0 = unset, which lets the §2a precedence (pinned > recorded >
+ * probed > default) fall through to the injected default below. A deployment that
+ * predates an embedder change has its old dim RECORDED in
+ * kb_meta.schema_embedding_dim, and the recorded value outranks the default, so an
+ * existing corpus keeps working and is migrated deliberately via `aimee kb reembed`. */
 static int g_embed_dim = 0;
+
+/* The default width, INJECTED from config (config_embedding_dim_default) at the
+ * same startup site that sets g_embed_dim. This layer deliberately holds no
+ * literal of its own: the width is declared once, in config, and a copy here
+ * could disagree with the embedder that is actually running. 0 = never injected,
+ * which db2_embedding_dim() reports as 0 so callers fail loudly instead of
+ * sizing columns from a guess. */
+static int g_embed_dim_default = 0;
+
+void db2_set_embedding_dim_default(int dim)
+{
+   g_embed_dim_default = dim > 0 ? dim : 0;
+}
 
 /* §2a: whether the operator pinned the dim. When 0 (default) and nothing was
  * pinned, db2_init prefers a recorded kb_meta.schema_embedding_dim over the
@@ -92,7 +103,7 @@ void db2_init_unlock(void)
 
 int db2_embedding_dim(void)
 {
-   return g_embed_dim > 0 ? g_embed_dim : EMBED_DEFAULT_DIM;
+   return g_embed_dim > 0 ? g_embed_dim : g_embed_dim_default;
 }
 
 void db2_set_embedding_dim_pinned(int pinned)

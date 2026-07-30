@@ -775,7 +775,8 @@ static int kb_cmd_tenancy_init_db2(void)
       fprintf(stderr, "aimee-kb: db2_url not configured (set AIMEE_DB2_URL or run `aimee init`)\n");
       return -1;
    }
-   db2_set_embedding_dim(cfg.embedding_dim > 0 ? cfg.embedding_dim : 1024);
+   db2_set_embedding_dim_default(config_embedding_dim_default());
+   db2_set_embedding_dim(config_embedding_dim_effective(&cfg));
    if (db2_init(cfg.db2_url) != 0)
    {
       fprintf(stderr, "aimee-kb: DB2 not reachable at %s\n", cfg.db2_url);
@@ -1782,6 +1783,7 @@ int main(int argc, char **argv)
     * halfvec embedding columns are created at the right size. AIMEE_EMBEDDING_DIM
     * overrides the configured value (containerized deploys without a writable
     * aimee.yaml). */
+   db2_set_embedding_dim_default(config_embedding_dim_default());
    db2_set_embedding_dim(config_resolve_embedding_dim(&kb_cfg));
    db2_set_embedding_dim_pinned(config_embedding_dim_is_pinned(&kb_cfg));
    /* unified-llm-container §2: activate the model-identity drift guard (the kb applies
