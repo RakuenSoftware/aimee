@@ -86,7 +86,7 @@ int worktree_apply_delegate_changes_checked(const char *delegate_wt, const char 
                                             char *parent_root, size_t parent_root_len, char *err,
                                             size_t err_len);
 void worktree_registry_record(const char *git_root, const char *wt_path, const char *branch,
-                              const char *sid, const char *work_name);
+                              const char *sid, const char *work_name, const char *base_branch);
 int worktree_find_branch_in_repo(const char *git_root, const char *branch, char *out_dir,
                                  size_t out_len);
 int worktree_find_branch_registered(const char *branch, char *out_dir, size_t out_len);

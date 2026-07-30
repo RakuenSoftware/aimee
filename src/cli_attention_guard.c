@@ -904,6 +904,55 @@ int attn_external_memory_blocked(attn_op_t op, const char *tool_name, const char
    return attn_path_is_external_agent_memory(norm);
 }
 
+/* ---- session BRANCH lineage enforcement ------------------------------------
+ *
+ * attn_path_in_managed_worktree above checks only that a path sits under a managed
+ * worktree directory. Its comment claimed those are "isolated worktrees on a branch off
+ * the default branch" -- but nothing verified the branch, so a worktree created by hand
+ * (`git worktree add -b x <arbitrary-commit>`) under .claude/worktrees/ satisfied the
+ * guard while being rooted on another session's branch. That is how a session ended up
+ * 115 commits behind the default branch, carrying ~18 commits of another agent's
+ * unmerged work it could not separate from its own.
+ *
+ * The rule being enforced:
+ *   PRIMARY  session branch must be cut from the DEFAULT branch.
+ *   DELEGATE session branch may be cut from its parent primary's branch.
+ *
+ * The base ref is read from the worktree registry, written by the launcher at creation
+ * time (workspace.c). It is deliberately NOT taken from the environment: this guard
+ * refuses env-var inputs on principle, because an LLM can set AIMEE_DELEGATE_DEPTH on
+ * any command and would simply declare itself a delegate to escape the primary rule.
+ * The registry is written by trusted code before the agent runs. */
+
+/* Pure decision (testable): 1 = BLOCK.
+ *  base_branch      the ref this worktree was cut from, "" if unknown/unregistered
+ *  default_branch   the repo's default branch, "" if unresolvable
+ *  base_is_registered  1 iff base_branch is itself a registered session branch,
+ *                      i.e. a legitimate delegate parent
+ * Unknown base blocks: a worktree with no registry row was not created by the launcher,
+ * which is exactly the hand-rolled case this exists to catch. Fail closed. */
+int attn_session_branch_blocked(const char *base_branch, const char *default_branch,
+                                int base_is_registered)
+{
+   if (!base_branch || !base_branch[0])
+      return 1; /* unregistered worktree -> not launcher-created -> block */
+   if (default_branch && default_branch[0] && strcmp(base_branch, default_branch) == 0)
+      return 0; /* primary rooted on the default branch */
+   /* Accept both "main" and "origin/main" spellings of the same default. */
+   if (default_branch && default_branch[0])
+   {
+      const char *slash = strrchr(default_branch, '/');
+      const char *bare = slash ? slash + 1 : default_branch;
+      const char *bslash = strrchr(base_branch, '/');
+      const char *bbare = bslash ? bslash + 1 : base_branch;
+      if (strcmp(bbare, bare) == 0)
+         return 0;
+   }
+   if (base_is_registered)
+      return 0; /* delegate rooted on a real parent session branch */
+   return 1;
+}
+
 /* Pure decision for the session-isolation guard (testable in isolation).
  * Returns 1 to BLOCK: a mutating op (SOFT/HARD) whose effective target is NOT
  * inside an aimee-managed worktree. Read / raw-scan ops are never blocked here.

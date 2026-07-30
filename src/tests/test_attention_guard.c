@@ -297,6 +297,63 @@ static void test_session_isolation_decision(void)
    assert(attn_session_isolation_blocked(ATTN_OP_SOFT, primary, primary_cwd, NULL) == 1);
    assert(attn_session_isolation_blocked(ATTN_OP_SOFT, primary, wt_cwd, NULL) == 1);
 
+   /* ---- branch lineage (attn_session_branch_blocked) ----
+    * The path check alone was the bug: a hand-made worktree under .claude/worktrees/
+    * passed it while sitting on a branch cut from another session's commit. */
+
+   /* Primary rooted on the default branch: allowed, in both spellings. */
+   assert(attn_session_branch_blocked("testing", "testing", 0) == 0);
+   assert(attn_session_branch_blocked("origin/testing", "testing", 0) == 0);
+   assert(attn_session_branch_blocked("testing", "origin/testing", 0) == 0);
+
+   /* Delegate rooted on a REGISTERED parent session branch: allowed. */
+   assert(attn_session_branch_blocked("aimee/session/parent-abc", "testing", 1) == 0);
+
+   /* The bug: rooted on another session's branch that is NOT its parent. */
+   assert(attn_session_branch_blocked("aimee/session/someone-else", "testing", 0) == 1);
+
+   /* Unregistered worktree -- no launcher row, so hand-rolled. Fail closed. */
+   assert(attn_session_branch_blocked("", "testing", 0) == 1);
+   assert(attn_session_branch_blocked(NULL, "testing", 0) == 1);
+
+   /* Unresolvable default branch must not silently allow an arbitrary base. */
+   assert(attn_session_branch_blocked("aimee/session/whatever", "", 0) == 1);
+   /* ...but a registered parent is still a legitimate delegate. */
+   assert(attn_session_branch_blocked("aimee/session/whatever", "", 1) == 0);
+
+   /* ---- Bash reaching outside the worktree (attn_bash_escapes_worktree) ----
+    * The observed bypass: cwd was a valid managed worktree, so the isolation check
+    * passed, while the command cd'd to the shared checkout and wrote there. */
+   {
+      const char *wt = "/home/u/repo/.claude/worktrees/w1";
+      /* THE BUG, verbatim in shape. */
+      assert(attn_bash_escapes_worktree("cd /home/u/repo && python3 - <<'EOF'\nx\nEOF", wt) == 1);
+      assert(attn_bash_escapes_worktree("cd /home/u/repo && sed -i s/a/b/ f.c", wt) == 1);
+      /* Redirect out. */
+      assert(attn_bash_escapes_worktree("echo hi > /home/u/repo/src/f.c", wt) == 1);
+      assert(attn_bash_escapes_worktree("tee /etc/thing < x", wt) == 1);
+
+      /* Staying inside a managed worktree is fine, cd or redirect. */
+      assert(attn_bash_escapes_worktree(
+                 "cd /home/u/repo/.claude/worktrees/w1/src && sed -i s/a/b/ f.c", wt) == 0);
+      assert(attn_bash_escapes_worktree(
+                 "echo hi > /home/u/repo/.aimee/worktrees/s1/main/f.c", wt) == 0);
+      /* Relative work never leaves by construction. */
+      assert(attn_bash_escapes_worktree("cd src && sed -i s/a/b/ f.c", wt) == 0);
+
+      /* Read-only commands are untouched even when they name outside paths. */
+      assert(attn_bash_escapes_worktree("cat /etc/hosts", wt) == 0);
+      assert(attn_bash_escapes_worktree("cd /home/u/repo && git log", wt) == 0);
+
+      /* Noise that must not false-positive: fd dups, /dev/null, a bare "cd". */
+      assert(attn_bash_escapes_worktree("make 2>&1 | tee out.log", wt) == 0);
+      assert(attn_bash_escapes_worktree("rm -f x > /dev/null 2>&1", wt) == 0);
+      /* "cd" as a substring of another word is not a chdir. */
+      assert(attn_bash_escapes_worktree("rm -f /tmp/abcd /x", wt) == 1);
+      assert(attn_bash_escapes_worktree("echo included > out.txt", wt) == 0);
+   }
+
+
    /* Relative / no file_path -> cwd is authoritative. */
    assert(attn_session_isolation_blocked(ATTN_OP_SOFT, "src/x.c", wt_cwd, NULL) == 0);
    assert(attn_session_isolation_blocked(ATTN_OP_SOFT, "src/x.c", primary_cwd, NULL) == 1);

@@ -939,7 +939,8 @@ static void worktree_registry_paths(const char *git_root, char *repo_path, size_
 }
 
 static void worktree_registry_append(const char *path, const char *git_root, const char *wt_path,
-                                     const char *branch, const char *sid, const char *work_name)
+                                     const char *branch, const char *sid, const char *work_name,
+                                     const char *base_branch)
 {
    if (!path || !path[0])
       return;
@@ -956,13 +957,19 @@ static void worktree_registry_append(const char *path, const char *git_root, con
    FILE *f = fopen(path, "a");
    if (!f)
       return;
-   fprintf(f, "%s\t%s\t%s\t%s\t%s\n", git_root ? git_root : "", wt_path ? wt_path : "",
-           branch ? branch : "", sid ? sid : "", work_name ? work_name : "");
+   /* base_branch is the 6th column: the ref this worktree's branch was cut from.
+    * The attention guard reads it to enforce that a PRIMARY session is rooted on the
+    * default branch and a DELEGATE on its parent's branch. It is written HERE, by the
+    * launcher, precisely because the guarded agent cannot forge it -- unlike an env var,
+    * which an LLM can set on any command. */
+   fprintf(f, "%s\t%s\t%s\t%s\t%s\t%s\n", git_root ? git_root : "", wt_path ? wt_path : "",
+           branch ? branch : "", sid ? sid : "", work_name ? work_name : "",
+           base_branch ? base_branch : "");
    fclose(f);
 }
 
 void worktree_registry_record(const char *git_root, const char *wt_path, const char *branch,
-                              const char *sid, const char *work_name)
+                              const char *sid, const char *work_name, const char *base_branch)
 {
    if (!git_root || !git_root[0] || !wt_path || !wt_path[0])
       return;
@@ -970,8 +977,8 @@ void worktree_registry_record(const char *git_root, const char *wt_path, const c
    char repo_path[MAX_PATH_LEN], global_path[MAX_PATH_LEN];
    worktree_registry_paths(git_root, repo_path, sizeof(repo_path), global_path,
                            sizeof(global_path));
-   worktree_registry_append(repo_path, git_root, wt_path, branch, sid, work_name);
-   worktree_registry_append(global_path, git_root, wt_path, branch, sid, work_name);
+   worktree_registry_append(repo_path, git_root, wt_path, branch, sid, work_name, base_branch);
+   worktree_registry_append(global_path, git_root, wt_path, branch, sid, work_name, base_branch);
 }
 
 static void worktree_registry_remove_from_file(const char *path, const char *wt_path)
@@ -1264,7 +1271,7 @@ static int worktree_create_sibling_at_ref(const char *git_root, const char *sid,
       struct stat git_st;
       if (stat(git_file, &git_st) == 0)
       {
-         worktree_registry_record(git_root, wt_path, branch_name, sid, work_name);
+         worktree_registry_record(git_root, wt_path, branch_name, sid, work_name, base_branch);
          return 0; /* already exists and valid */
       }
 
@@ -1313,7 +1320,7 @@ static int worktree_create_sibling_at_ref(const char *git_root, const char *sid,
    {
       fprintf(stderr, "aimee: created worktree at %s\n", wt_path);
       free(out);
-      worktree_registry_record(git_root, wt_path, branch_name, sid, work_name);
+      worktree_registry_record(git_root, wt_path, branch_name, sid, work_name, base_branch);
 
       /* Register branch ownership so other sessions can't write to it.
        * Use the main repo root (git_root), not the worktree path. */
@@ -1337,7 +1344,7 @@ static int worktree_create_sibling_at_ref(const char *git_root, const char *sid,
       {
          LOG_INFO("workspace", "worktree '%s' already present (creation race) - reusing", wt_path);
          free(out);
-         worktree_registry_record(git_root, wt_path, branch_name, sid, work_name);
+         worktree_registry_record(git_root, wt_path, branch_name, sid, work_name, base_branch);
          return 0;
       }
    }
@@ -1357,7 +1364,7 @@ static int worktree_create_sibling_at_ref(const char *git_root, const char *sid,
       fprintf(stderr, "aimee: created worktree at %s (reused branch %s)\n", wt_path, branch_name);
       free(out);
       free(out2);
-      worktree_registry_record(git_root, wt_path, branch_name, sid, work_name);
+      worktree_registry_record(git_root, wt_path, branch_name, sid, work_name, base_branch);
 #ifndef AIMEE_DB1_DISABLED
       mcp_git_branch_own_register(git_root, branch_name);
 #endif

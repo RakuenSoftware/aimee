@@ -788,7 +788,19 @@ LINT_SRCS = $(ALL_SRCS) kb/http/kb_http_resolver.c $(wildcard tests/test_*.c) $(
 # All object files for dependency tracking
 ALL_OBJS = $(CORE_OBJS) $(DB1_OBJS) $(DB2_PG_OBJS) $(DB2_OBJS) $(STATUS_AUTHORITY_OBJS) $(TOKEN_AUTHORITY_OBJS) $(STATUS_PROVISIONER_OBJS) $(TOKEN_ROOTS_PROVISIONER_OBJS) $(JWKS_PUBLISHER_OBJS) $(MCP_GIT_OBJS) $(DATA_OBJS) $(SERVER_DATA_OBJS) $(AGENT_OBJS) $(CMD_OBJS) \
            $(CLI_OBJS) $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(KB_OBJS) $(KB_SYNTHESIS_OBJS) $(GATEWAY_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(PLATFORM_OBJS) $(PLATFORM_AGENT_OBJS)
-DEPS = $(ALL_OBJS:.o=.d)
+# Header dependency tracking must cover EVERY object we compile, not just the ones
+# a hand-maintained *_OBJS variable happens to name. Objects reachable only as a
+# direct prerequisite of a test target (modules/memory/memory_core_search.o was one
+# of ~959) never appeared in ALL_OBJS, so their .d files were never included and
+# make had no reason to recompile them when a header changed. The result was silent:
+# a stale object built against an older struct layout links cleanly against fresh
+# ones and crashes at runtime on a field offset, and the test suite reports whatever
+# the mismatched binary happens to do.
+#
+# Discovering the .d files on disk makes coverage a property of what was compiled
+# rather than of bookkeeping. A first build has no .d files yet, which is correct --
+# nothing is stale when nothing exists.
+DEPS = $(ALL_OBJS:.o=.d) $(shell find $(OBJDIR) -name '*.d' 2>/dev/null)
 
 .PHONY: all clean install inc-check forge-cred-integration forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check proposal-reconcile-check dev-accept-check curator-sidecar-parse-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check p1-tenant-guard-check p1-rls-gate-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check gen-sdks sdk-parity-check v1-ws-test format unit-tests verify-local integration-tests wizard-bootstrap-e2e v1-third-party-test v1-sdk-smoke v1-ws-test init-migrate-service-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries kb
 

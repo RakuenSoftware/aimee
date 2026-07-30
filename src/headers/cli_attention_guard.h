@@ -74,6 +74,12 @@ int attn_session_isolation_blocked(attn_op_t op, const char *file_path, const ch
  * path it actually judged rather than assuming it was the cwd. */
 void attn_session_isolation_target(const char *file_path, const char *cwd, char *out, size_t outsz);
 
+/* 1 = BLOCK: this worktree's branch lineage is not permitted. A primary session must be
+ * cut from the default branch; a delegate may be cut from its parent's branch. An
+ * unregistered worktree (no launcher-written registry row) always blocks. */
+int attn_session_branch_blocked(const char *base_branch, const char *default_branch,
+                                int base_is_registered);
+
 /* External-memory decision (pure, testable). Returns 1 to BLOCK a tool call
  * that would WRITE an external file-based agent-memory store
  * (~/.claude/projects/<slug>/memory/...): a mutating file tool whose target

@@ -693,6 +693,49 @@ else
     fail "Makefile DB boundary regressions:$make_boundary_failures"
 fi
 
+# 7f-bis. Header dependency tracking must cover every compiled object.
+#
+# DEPS was $(ALL_OBJS:.o=.d). Objects reachable only as a direct prerequisite of a
+# test target were in no *_OBJS variable, so their .d files were never included:
+# ~959 of 2033 objects had NO header tracking. Editing a header then left them
+# stale, and a stale object built against an older struct layout links cleanly and
+# then crashes on a field offset at runtime. That is how unit-test-memory came to
+# segfault on a tree whose tests all "passed".
+#
+# Two assertions: the wiring is structurally correct, and -- when a build tree is
+# present -- it empirically covers every .d on disk.
+dep_failures=""
+deps_assign=$(grep -E '^DEPS[[:space:]]*=' "$makefile_file" || true)
+if [ -z "$deps_assign" ]; then
+    dep_failures="$dep_failures deps-unassigned"
+elif ! echo "$deps_assign" | grep -Fq '$(OBJDIR)'; then
+    # A purely variable-derived DEPS can only ever cover hand-listed objects.
+    dep_failures="$dep_failures deps-not-discovered-from-objdir"
+fi
+
+objdir=$(sed -n 's/^OBJDIR[[:space:]]*=[[:space:]]*\(.*\)$/\1/p' "$makefile_file" | head -1)
+[ -n "$objdir" ] || objdir="build/obj"
+if find "$objdir" -name '*.d' 2>/dev/null | grep -q .; then
+    printf 'print-%%:\n\t@echo $($%s)\n' '*' > /tmp/aimee_bi_print.mk 2>/dev/null ||
+        : # non-writable /tmp: the structural check above still stands
+    if [ -f /tmp/aimee_bi_print.mk ]; then
+        find "$objdir" -name '*.d' | sort -u > /tmp/aimee_bi_ondisk.txt
+        make -f "$makefile_file" -f /tmp/aimee_bi_print.mk print-DEPS 2>/dev/null |
+            tr ' ' '\n' | grep '\.d$' | sort -u > /tmp/aimee_bi_included.txt
+        uncovered=$(comm -13 /tmp/aimee_bi_included.txt /tmp/aimee_bi_ondisk.txt | wc -l)
+        if [ "$uncovered" -ne 0 ]; then
+            dep_failures="$dep_failures $uncovered-objects-without-header-tracking"
+        fi
+        rm -f /tmp/aimee_bi_print.mk /tmp/aimee_bi_ondisk.txt /tmp/aimee_bi_included.txt
+    fi
+fi
+
+if [ -z "$dep_failures" ]; then
+    pass "every compiled object has header dependency tracking"
+else
+    fail "header dependency tracking gaps:$dep_failures"
+fi
+
 # 7g. The KB service split must keep explicit module-boundary directories and
 # container packaging for the headless aimee-kb deployment shape.
 split_failures=""
