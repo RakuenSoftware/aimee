@@ -285,3 +285,92 @@ plausible number rather than an error.
 Every figure in this report therefore carries its provenance — model, precision,
 device, truncation, sample size, and harness — because on this evidence a number
 without provenance is not trustworthy.
+
+---
+
+# Addendum: hybrid retrieval (BM25 + RRF) — the largest effect measured
+
+Added 2026-07-30 after the reranker work concluded. Raw artifacts:
+`benchmarks/results/reranker-2026-07-29/hybrid-*.json`, `fusion-frontier-*.json`.
+
+## Result
+
+10,000 queries, full 26,473-document corpus, BM25 over aimee's existing lexical
+signal, fused by Reciprocal Rank Fusion with the dense leg.
+
+| pipeline | NDCG@10 | R@10 |
+| --- | ---: | ---: |
+| a25m dense | 0.5909 | 0.7816 |
+| nomic dense | 0.6075 | 0.8006 |
+| BM25 alone | 0.6213 | 0.8470 |
+| a25m + BM25 (RRF) | 0.6206 | 0.8642 |
+| **nomic + BM25 (RRF60)** | **0.6337** | 0.8668 |
+| **nomic + BM25 (RRF10)** | — | **0.9034** |
+
+**BM25 alone beats every dense embedder measured.** Fusion beats everything, and
+the embedder choice composes with it rather than competing — nomic+hybrid
+(0.6337) exceeds a25m+hybrid (0.6206) by roughly the same margin as their dense
+scores differ.
+
+## Why: the constraint was recall, not ordering
+
+| pool | contains the labelled document |
+| --- | ---: |
+| dense top-50 only | 0.8899 (nomic) / 0.8735 (a25m) |
+| **dense ∪ BM25 top-50** | **0.9739 / 0.9735** |
+
+Dense retrieval missed the target entirely for **11–13%** of queries. **No
+reranker can recover those** — which is precisely why 20 reranking
+configurations produced at best +0.0032. Reranking reorders a fixed pool;
+lexical fusion changes what is in the pool.
+
+A prediction was recorded before measuring: if the recall-ceiling explanation is
+right, Recall@10 should move more than NDCG@10. It did (+0.103 vs +0.026).
+
+## The top-1 tradeoff, and a variant with none
+
+Fusion improves recall but can cost top-1 precision, because RRF sees only rank
+position and discards score magnitude. This matters for any consumer that takes
+the first result rather than reading a whole context.
+
+| variant (nomic) | R@1 | R@10 | R@50 |
+| --- | ---: | ---: | ---: |
+| dense | 0.3875 | 0.8006 | 0.8899 |
+| bm25 | 0.3620 | 0.8470 | 0.9315 |
+| rrf60 | 0.3699 | 0.8668 | 0.9649 |
+| **rrf10** | 0.3769 | **0.9034** | 0.9649 |
+| **tiered** (dense owns rank 1) | **0.3875** | 0.8742 | 0.9649 |
+
+- **`rrf10` dominates `rrf60` on every metric.** The textbook `k=60` is simply
+  wrong for this corpus. Free quality from a constant.
+- **`tiered` has zero top-1 regression by construction** and still gains +0.074
+  R@10 — unconditionally safe where the consumer set is unknown.
+- `rrf10` buys a further +0.029 R@10 for −0.011 R@1.
+
+Note `tiered` is safe but **not optimal**: dense wins rank 1 only on average
+(0.3875 vs BM25's 0.3620), so forcing dense to own rank 1 forfeits the queries
+where BM25's top hit was correct.
+
+## Caveats
+
+- **The queries may be lexically derived from their documents.** Suite queries
+  read as document summaries with key terms appended, which flatters BM25.
+  Treat **BM25's absolute win as suspect** and the **+10 points of pool recall as
+  robust** — decorrelated retrieval finding different documents is far less
+  sensitive to phrasing.
+- **Labels are silver, one positive per query** out of 26,473 documents. R@1 of
+  0.3875 is *not* "correct 38% of the time"; retrieving a different but genuinely
+  relevant document scores as a miss. Relative comparisons hold (all methods saw
+  identical labels); absolute precision figures are pessimistic by an unknown
+  amount.
+- Score-fusion variants approximated dense scores from rank position, because
+  stage 1 persisted candidate ids but not scores. Those rows are indicative;
+  the RRF and tiered rows are exact.
+
+## Consequence for the roadmap
+
+Hybrid fusion delivered roughly **35x the best reranker result** using
+infrastructure that already exists (the FTS leg) and a constant nobody tuned.
+Combined with [learning-to-rank](../proposals/pending/learning-to-rank-from-interactions.md),
+which would learn that combination from real interactions instead of guessing it,
+this is where the remaining retrieval quality lives.
