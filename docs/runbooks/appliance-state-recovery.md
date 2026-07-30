@@ -5,24 +5,17 @@ Use this checklist on SmoothNAS/tierd appliances running the `aimee-server` plug
 ## Prerequisites
 
 - [ ] Log in as the account that owns the appliance state and workspace files. Do not run these commands as another account or with `sudo`.
-- [ ] Confirm the appliance clock is correct, the tier-bound volume is mounted and writable, and Git credentials can read the canonical HTTPS repository.
-- [ ] Set the appliance API address and deployment-specific paths. Do not continue until every value is correct.
+- [ ] Confirm the appliance clock is correct and the tier-bound volume containing appliance state is mounted and writable.
+- [ ] Set the appliance API address and state directory. Do not continue until both values are correct.
 
-`AIMEE_HOME` is the appliance state directory; `WORKSPACE` is the affected repository path on the tier-bound volume; `CANONICAL_URL` is its canonical HTTPS repository URL; and `DEFAULT_BRANCH` is the branch the appliance should track.
+`AIMEE_HOME` is the appliance state directory.
 
 ```sh
 export AIMEE_URL='http://127.0.0.1:8080'
 export AIMEE_HOME='/path/to/aimee-home'
-export WORKSPACE='/path/on/tier-bound-volume/to/workspace'
-export CANONICAL_URL='https://forge.example/owner/repository.git'
-export DEFAULT_BRANCH='main'
 
-printf 'AIMEE_HOME=%s\nWORKSPACE=%s\nCANONICAL_URL=%s\nDEFAULT_BRANCH=%s\n' \
-  "$AIMEE_HOME" "$WORKSPACE" "$CANONICAL_URL" "$DEFAULT_BRANCH"
+printf 'AIMEE_URL=%s\nAIMEE_HOME=%s\n' "$AIMEE_URL" "$AIMEE_HOME"
 test -d "$AIMEE_HOME"
-test "${WORKSPACE#/}" != "$WORKSPACE"
-case "$CANONICAL_URL" in https://*) ;; *) false ;; esac
-test -n "$DEFAULT_BRANCH"
 ```
 
 If the API requires authentication, add the appliance's normal authorization option to each `curl` command.
@@ -97,6 +90,23 @@ curl -i "$AIMEE_URL/v1/agents"
 
 Do not replace the workspace until a fresh clone has passed all checks on the same tier-bound volume.
 
+- [ ] Confirm Git credentials can read the canonical HTTPS repository, then set and validate the repository-specific values.
+
+`WORKSPACE` is the affected repository path on the tier-bound volume; `CANONICAL_URL` is its canonical HTTPS repository URL; and `DEFAULT_BRANCH` is the branch the appliance should track.
+
+```sh
+export WORKSPACE='/path/on/tier-bound-volume/to/workspace'
+export CANONICAL_URL='https://forge.example/owner/repository.git'
+export DEFAULT_BRANCH='main'
+
+printf 'WORKSPACE=%s\nCANONICAL_URL=%s\nDEFAULT_BRANCH=%s\n' \
+  "$WORKSPACE" "$CANONICAL_URL" "$DEFAULT_BRANCH"
+test "${WORKSPACE#/}" != "$WORKSPACE"
+case "$CANONICAL_URL" in https://*) ;; *) false ;; esac
+test -n "$DEFAULT_BRANCH"
+git ls-remote --exit-code "$CANONICAL_URL" "refs/heads/$DEFAULT_BRANCH" >/dev/null
+```
+
 - [ ] Recheck the configured values and establish a temporary path beside the workspace so the test uses the same volume.
 
 ```sh
@@ -138,9 +148,9 @@ then
   then
     printf 'damaged repository retained at %s\n' "$DAMAGED_WORKSPACE"
   else
-    # The workspace was confirmed absent immediately before git clone. Therefore,
-    # delete it only when the failed clone created a destination to remove.
-    if { test ! -e "$WORKSPACE" || { test -d "$WORKSPACE/.git" && rm -rf "$WORKSPACE"; }; } &&
+    # The workspace was confirmed absent immediately before git clone, so any
+    # destination now at that path was created by the failed clone.
+    if { test ! -e "$WORKSPACE" || rm -rf "$WORKSPACE"; } &&
        test -e "$DAMAGED_WORKSPACE" &&
        mv "$DAMAGED_WORKSPACE" "$WORKSPACE"
     then
@@ -168,13 +178,18 @@ git -C "$WORKSPACE" fsck --no-dangling
 git -C "$WORKSPACE" ls-tree HEAD >/dev/null
 ```
 
-- [ ] Capture the journal cursor after recovery, then resume or observe normal
-  proposal polling and forge operations. Confirm only messages emitted after
-  that cursor no longer report `ls-tree failed ... rc=128` or
-  `resolve https origin: no origin remote` before deleting the retained damaged
-  repository.
+- [ ] Select a pending recovery canary proposal whose normal pipeline reaches
+  `pr.open`. The command below must return a `work_item_id`; that response is the
+  affirmative marker that a post-recovery proposal poll ran `git ls-tree` and
+  filed the proposal. The canary pipeline opens a real PR, so use a proposal
+  approved for that purpose.
 
 ```sh
+export RECOVERY_PROPOSAL='recovery-canary.md'
+export RECOVERY_PIPELINE='build'
+test -n "$RECOVERY_PROPOSAL"
+test -n "$RECOVERY_PIPELINE"
+
 CURSOR_OUTPUT=$(journalctl --show-cursor -n 0 --no-pager) || {
   printf '%s\n' 'failed to capture recovery journal cursor' >&2
   false
@@ -182,10 +197,41 @@ CURSOR_OUTPUT=$(journalctl --show-cursor -n 0 --no-pager) || {
 RECOVERY_CURSOR=$(printf '%s\n' "$CURSOR_OUTPUT" | sed -n 's/^-- cursor: //p')
 test -n "$RECOVERY_CURSOR"
 
-# Resume or wait for at least one normal proposal poll and forge operation here.
+POLL_OUTPUT=$(aimee --json trigger fire \
+  --source proposals \
+  --proposal "$RECOVERY_PROPOSAL" \
+  --workspace "$WORKSPACE" \
+  --pipeline "$RECOVERY_PIPELINE") || {
+  printf '%s\n' 'recovery proposal poll failed' >&2
+  false
+}
+printf '%s\n' "$POLL_OUTPUT"
+printf '%s\n' "$POLL_OUTPUT" | grep -Eq '"work_item_id"[[:space:]]*:[[:space:]]*"[^"]+"'
+```
 
+- [ ] Wait for the canary to open its PR. The bounded follow below must capture
+  the post-cursor `wfe-forge` success marker; a timeout or an empty marker is a
+  failed check, not permission to delete the retained repository.
+
+```sh
+FORGE_SUCCESS=$(timeout 30m journalctl \
+  --after-cursor "$RECOVERY_CURSOR" --follow --no-pager | \
+  grep -m 1 -E 'wfe-forge.*opened PR #[0-9]+') || {
+  printf '%s\n' 'no post-recovery forge success marker observed within 30 minutes' >&2
+  false
+}
+test -n "$FORGE_SUCCESS"
+printf '%s\n' "$FORGE_SUCCESS"
+```
+
+- [ ] Only after both affirmative markers exist, inspect the complete
+  post-cursor journal and confirm neither workspace Git error recurred before
+  deleting the retained damaged repository.
+
+```sh
 if JOURNAL_OUTPUT=$(journalctl --after-cursor "$RECOVERY_CURSOR" --no-pager)
 then
+  test -n "$JOURNAL_OUTPUT"
   if printf '%s\n' "$JOURNAL_OUTPUT" | \
     grep -E 'ls-tree failed.*rc=128|resolve https origin: no origin remote'
   then
