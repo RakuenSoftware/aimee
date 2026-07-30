@@ -1,7 +1,10 @@
 # Handoff: nomic embedder + prefix support, and reranker removal
 
-- **State:** 🟡 **READY TO IMPLEMENT — not started.** Decisions are made and
-  evidence is recorded; this is the work order.
+- **State:** ✅ **DONE.** All three work items landed on `rewrite/go-server-wfe`:
+  prefix support (`8a925c322`, `7e1cce7d6`), the embedder registry that made the
+  swap modular (`98f72a58f`), and the reranker removal (`af6bb1f6e` serving side,
+  `a5d734205` kb side). Kept as the record of why; the evidence links below are
+  the durable part.
 - **Evidence:** [retrieval-stack-report](../../validation/retrieval-stack-report-2026-07-30.md),
   [reranker-and-pipeline](../../validation/reranker-and-pipeline-2026-07-29.md),
   raw artifacts in `benchmarks/results/reranker-2026-07-29/`.
@@ -9,6 +12,19 @@
   [embedder-query-document-prefixes](embedder-query-document-prefixes.md).
 
 ---
+
+## What landed beyond the work order
+
+Making the swap *modular* was added to the scope: every per-embedder fact —
+coordinates, pooling, width, context, prefixes — now lives in
+`scripts/embedders.json`, keyed by model identity. The gateway validates and loads
+it; the supervisor evals `--embedder-descriptor` instead of its own `case`
+statement. Switching embedders is one entry there plus `AIMEE_LLM_EMBED_MODEL`,
+and an unregistered or half-declared model refuses to boot rather than being
+served with inherited settings. Two silent failures found along the way: the
+embedder was served with a hardcoded `--ctx-size 8192` against nomic's 2048
+trained positions, and the query path's builtin fallback declared itself a
+document.
 
 ## The decisions
 
