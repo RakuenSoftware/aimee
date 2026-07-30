@@ -1,5 +1,8 @@
 # Troubleshooting
 
+For server/KB liveness, retrieval readiness, breaker diagnostics, queue depth, and
+safe dependency recovery, see [Retrieval readiness and recovery](runbooks/retrieval-readiness-and-recovery.md).
+
 Start at the first broken boundary.
 
 ```bash

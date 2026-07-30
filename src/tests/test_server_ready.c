@@ -30,46 +30,87 @@ void server_http_set_ready_provider(server_http_ready_fn fn)
    (void)fn;
 }
 
+void kb_client_dependency_health(kb_client_dependency_health_t *out)
+{
+   memset(out, 0, sizeof(*out));
+   snprintf(out->state, sizeof(out->state), "closed");
+}
+
 #define NOW 1000000L
 
 int main(void)
 {
    char resp[2048];
+   server_ready_diagnostics_t ok = {1, "", "closed", 0, 999000, "2026-07-30T00:00:00Z"};
+   server_ready_diagnostics_t failed = {0,    "kb_breaker", "open",
+                                        1200, 998000,       "2026-07-30T00:00:00Z"};
 
    /* Never sampled ⇒ unknown, not ready, and a null age rather than a
     * fabricated one. An unsampled server must never read as ready. */
    {
-      int st = server_ready_render(-1, -1, 0, NOW, 60, resp, sizeof(resp));
+      int st = server_ready_render(-1, -1, NULL, 0, NOW, 60, resp, sizeof(resp));
       assert(st == 503);
       assert(strstr(resp, "\"ready\":false"));
       assert(strstr(resp, "\"status\":\"unknown\""));
       assert(strstr(resp, "\"sampled_at\":null"));
       assert(strstr(resp, "\"age_seconds\":null"));
    }
+   {
+      int st = server_ready_render(1, 1, &failed, NOW - 5, NOW, 60, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "\"status\":\"degraded\""));
+      assert(strstr(resp, "\"kb\":\"ok\""));
+      assert(strstr(resp, "\"retrieval\":\"fail\""));
+      assert(strstr(resp, "\"failed_boundary\":\"kb_breaker\""));
+   }
+
+   /* Dependency text cannot break the JSON diagnostics object. */
+   {
+      server_ready_diagnostics_t escaped = ok;
+      escaped.last_ingest_at = "quote\" slash\\ newline\n";
+      int st = server_ready_render(1, 1, &escaped, NOW - 5, NOW, 60, resp, sizeof(resp));
+      assert(st == 200);
+      assert(strstr(resp, "quote\\\" slash\\\\ newline\\u000a"));
+   }
 
    /* Fresh sample, everything ok ⇒ ready. */
    {
-      int st = server_ready_render(1, 1, NOW - 5, NOW, 60, resp, sizeof(resp));
+      int st = server_ready_render(1, 1, &ok, NOW - 5, NOW, 60, resp, sizeof(resp));
       assert(st == 200);
       assert(strstr(resp, "\"ready\":true"));
       assert(strstr(resp, "\"status\":\"ok\""));
       assert(strstr(resp, "\"db1\":\"ok\""));
       assert(strstr(resp, "\"kb\":\"ok\""));
+      assert(strstr(resp, "\"retrieval\":\"ok\""));
+      assert(strstr(resp, "\"last_success_query_ms\":999000"));
       assert(strstr(resp, "\"age_seconds\":5"));
+   }
+
+   /* A fresh snapshot with missing diagnostics fails closed with valid,
+    * deterministic JSON rather than exposing uninitialized stack text. */
+   {
+      int st = server_ready_render(1, 1, NULL, NOW - 5, NOW, 60, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "\"retrieval\":\"unknown\""));
+      assert(strstr(resp, "\"failed_boundary\":\"\""));
+      assert(strstr(resp, "\"breaker_state\":\"\""));
+      assert(strstr(resp, "\"last_ingest_at\":\"\""));
    }
 
    /* One dependency down ⇒ not ready, degraded, and the failing dependency is
     * named rather than hidden behind a roll-up. */
    {
-      int st = server_ready_render(1, 0, NOW - 5, NOW, 60, resp, sizeof(resp));
+      int st = server_ready_render(1, 0, &failed, NOW - 5, NOW, 60, resp, sizeof(resp));
       assert(st == 503);
       assert(strstr(resp, "\"ready\":false"));
       assert(strstr(resp, "\"status\":\"degraded\""));
       assert(strstr(resp, "\"db1\":\"ok\""));
       assert(strstr(resp, "\"kb\":\"fail\""));
+      assert(strstr(resp, "\"breaker_state\":\"open\""));
+      assert(strstr(resp, "\"retry_after_ms\":1200"));
    }
    {
-      int st = server_ready_render(0, 1, NOW - 5, NOW, 60, resp, sizeof(resp));
+      int st = server_ready_render(0, 1, &ok, NOW - 5, NOW, 60, resp, sizeof(resp));
       assert(st == 503);
       assert(strstr(resp, "\"db1\":\"fail\""));
    }
@@ -77,7 +118,7 @@ int main(void)
    /* A stale snapshot degrades to unknown even when every dependency sampled
     * ok — a wedged sampler must not leave "ready" standing forever. */
    {
-      int st = server_ready_render(1, 1, NOW - 61, NOW, 60, resp, sizeof(resp));
+      int st = server_ready_render(1, 1, &ok, NOW - 61, NOW, 60, resp, sizeof(resp));
       assert(st == 503);
       assert(strstr(resp, "\"ready\":false"));
       assert(strstr(resp, "\"status\":\"unknown\""));
@@ -87,7 +128,7 @@ int main(void)
 
    /* Exactly at the bound is still fresh (the bound is inclusive). */
    {
-      int st = server_ready_render(1, 1, NOW - 60, NOW, 60, resp, sizeof(resp));
+      int st = server_ready_render(1, 1, &ok, NOW - 60, NOW, 60, resp, sizeof(resp));
       assert(st == 200);
       assert(strstr(resp, "\"ready\":true"));
    }
@@ -95,7 +136,7 @@ int main(void)
    /* A snapshot stamped in the future means the clock moved; the age is
     * meaningless, so fail closed rather than report a negative age as fresh. */
    {
-      int st = server_ready_render(1, 1, NOW + 30, NOW, 60, resp, sizeof(resp));
+      int st = server_ready_render(1, 1, &ok, NOW + 30, NOW, 60, resp, sizeof(resp));
       assert(st == 503);
       assert(strstr(resp, "\"status\":\"unknown\""));
    }

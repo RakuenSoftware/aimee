@@ -756,6 +756,18 @@ residual proposal instead of declaring the intended effectiveness outcome comple
   embedder/vector-store outage does not poison its transport breaker, local coding remains
   independent, and no agent-facing memory/index reader converts an outage into an empty result. Its
   frozen implementation diff receives a separate roundtable gate before PR.
+- **E5b deployment-readiness candidate:** server liveness remains independent of recoverable
+  dependency failure, while readiness now fails closed on the complete retrieval contract and
+  reports the failed boundary, E5a breaker state/retry delay, and last successful query/ingest.
+  Shipped Compose restart policy remains `unless-stopped` with liveness healthchecks; the operator
+  runbook pins separate readiness admission, queue diagnostics, evidence preservation, and safe
+  dependency-specific recovery. Its frozen implementation diff receives a separate roundtable gate
+  before PR.
+- **E5b final exact-diff review — 2026-07-30 — APPROVED and converged, 3/3 participants, not
+  degraded.** The final runbook, explicit dependency boundary, JSON-safe diagnostics, and
+  retrieval-only/null-diagnostics regressions received no findings. Roundtable run:
+  `oprun_g6a6b1ed93980fd5d_1785408651_7` (artifact
+  `0f0e27dbb596f737174e815004baf9a71b904127185a7af05809c747bdceb8e0`).
 - **E5a implementation round 1 — 2026-07-30 — changes requested, 3/3 participants, not
   degraded.** The implementation received no bounded-slice technical ruling because the review
   brief exposed the unfinished parent E5/E6 program. The next review explicitly binds the frozen
