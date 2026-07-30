@@ -1402,7 +1402,6 @@ int db2_demotion_profile_read(const char *memory_class, const char *scope_kind,
 int kb_bandit_sample(const char *decision_point, const char *context_json,
                      const char (*arm_ids)[KB_BANDIT_MAX_ARM_ID], int n_arms, char *decision_id_out)
 {
-   (void)cfg;
    (void)decision_point;
    (void)context_json;
    (void)arm_ids;
@@ -1411,10 +1410,9 @@ int kb_bandit_sample(const char *decision_point, const char *context_json,
       decision_id_out[0] = '\0';
    return -1;
 }
-int kb_bandit_reward(const config_t *cfg, const char *decision_point, const char *decision_id,
-                     const char *arm_id, double reward)
+int kb_bandit_reward(const char *decision_point, const char *decision_id, const char *arm_id,
+                     double reward)
 {
-   (void)cfg;
    (void)decision_point;
    (void)decision_id;
    (void)arm_id;

@@ -6210,9 +6210,13 @@ $(TESTPREFIX)/unit-test-guardrails-semantic: $(OBJDIR)/tests/test_guardrails_sem
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
 
+# Links the config closure rather than L_MINIMAL: computer_use_policy_from_config
+# reads its policy through the accessors now instead of taking a config_t, so the
+# minimal link can no longer resolve it.
 $(TESTPREFIX)/unit-test-guardrails-computer-use: $(OBJDIR)/tests/test_guardrails_computer_use.o \
-                     $(OBJDIR)/server/computer_use.o $(OBJDIR)/cJSON.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+                     $(OBJDIR)/server/computer_use.o \
+                     $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-osv-check: $(OBJDIR)/tests/test_osv_check.o \
                      $(OBJDIR)/server/osv_check.o \
