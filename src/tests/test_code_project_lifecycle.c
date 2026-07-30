@@ -201,7 +201,11 @@ static void test_manifest_confirmation_and_audit(void)
    assert(scalar("SELECT COUNT(*) FROM projects WHERE name='stable-project'") == 1);
    exec_ok("ALTER TABLE kb_audit_event_unavailable RENAME TO kb_audit_event");
 
-   assert(db2_code_project_purge_confirm("stable-project", hash, "tester", "cleanup\nline",
+   char escaped_reason[513];
+   memset(escaped_reason, '\n', sizeof(escaped_reason) - 1);
+   memcpy(escaped_reason, "cleanup", 7);
+   escaped_reason[sizeof(escaped_reason) - 1] = '\0';
+   assert(db2_code_project_purge_confirm("stable-project", hash, "tester", escaped_reason,
                                          &confirmed) == 0);
    assert(strcmp(confirmed.mode, "confirmed") == 0);
    assert(strcmp(confirmed.manifest_hash, hash) == 0);
@@ -221,7 +225,7 @@ static void test_manifest_confirmation_and_audit(void)
    assert(scalar("SELECT COUNT(*) FROM kb_audit_event WHERE action='code.index.purge'"
                  " AND actor_principal='tester' AND subject='stable-project'"
                  " AND detail LIKE '%manifest_hash%' AND detail LIKE '%generation%'"
-                 " AND detail LIKE '%cleanup\\u000aline%'") == 1);
+                 " AND detail LIKE '%cleanup\\u000a%' AND length(detail)>3000") == 1);
    exec_ok("ALTER TABLE code_projection_edges_unavailable RENAME TO code_projection_edges");
    exec_ok("ALTER TABLE code_projection_communities_unavailable"
            " RENAME TO code_projection_communities");

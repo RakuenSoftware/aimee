@@ -13,7 +13,9 @@
 #include <time.h>
 #include <openssl/evp.h>
 
-#define CPL_ERRBUF 256
+#define CPL_ERRBUF              256
+#define CPL_JSON_ESCAPED_CAP(n) ((n) * 6 + 1)
+#define CPL_AUDIT_DETAIL_CAP    16384
 
 typedef struct
 {
@@ -375,7 +377,7 @@ int db2_code_project_detach(const char *project, const char *principal, int64_t 
       goto rollback;
    char ts[32];
    now_utc(ts, sizeof(ts));
-   char actor[1152], subject[512], detail[2048];
+   char actor[CPL_JSON_ESCAPED_CAP(575)], subject[CPL_JSON_ESCAPED_CAP(255)], detail[8192];
    cpl_json_escape(actor, sizeof(actor), principal);
    cpl_json_escape(subject, sizeof(subject), project);
    snprintf(detail, sizeof(detail),
@@ -479,7 +481,8 @@ static void cpl_json_escape(char *out, size_t cap, const char *in)
 static void cpl_audit_detail(const code_project_manifest_t *m, const char *principal,
                              const char *reason, char *out, size_t cap)
 {
-   char actor[1152], project[512], why[1100], criteria[256], ts[32];
+   char actor[CPL_JSON_ESCAPED_CAP(575)], project[CPL_JSON_ESCAPED_CAP(255)],
+       why[CPL_JSON_ESCAPED_CAP(512)], criteria[CPL_JSON_ESCAPED_CAP(127)], ts[32];
    cpl_json_escape(actor, sizeof(actor), principal);
    cpl_json_escape(project, sizeof(project), m->project);
    cpl_json_escape(why, sizeof(why), reason);
@@ -553,7 +556,7 @@ int db2_code_project_purge_confirm(const char *project, const char *expected_has
       goto rollback;
    }
    snprintf(out->mode, sizeof(out->mode), "confirmed");
-   char detail[16384];
+   char detail[CPL_AUDIT_DETAIL_CAP];
    cpl_audit_detail(out, principal, reason, detail, sizeof(detail));
    if (db2_kb_audit_append_in_txn(conn, "operator", principal, "code.index.purge", project, "allow",
                                   detail) != 0)
@@ -668,7 +671,7 @@ int db2_code_project_gc_confirm(const char *project, int retention_days, const c
          goto rollback;
       return 0; /* non-mutating no-op needs no destructive-action audit */
    }
-   char detail[4096];
+   char detail[CPL_AUDIT_DETAIL_CAP];
    cpl_audit_detail(out, principal, reason, detail, sizeof(detail));
    if (db2_kb_audit_append_in_txn(conn, "operator", principal, "code.index.gc", project, "allow",
                                   detail) != 0)
