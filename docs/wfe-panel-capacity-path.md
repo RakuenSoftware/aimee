@@ -32,10 +32,12 @@ therefore respectively `panel_no_free_capacity` or `panel_admission_deadline`,
 while ordinary eligibility and provider failures remain `panel_unreachable`.
 
 Backend reachability is not a capacity signal. Before routing `aimee-synth`, the
-server probes the configured model endpoint and feeds failure or recovery into the
+shipping route-health callback performs the real bounded `/models` request against
+the configured endpoint and feeds that success or connection failure into the
 existing provider catalog. `src/server/agent_route.c` therefore excludes a DOWN
-`local-gemma4`, while a successful probe restores normal eligibility. There is no
-parallel backend-health state.
+`local-gemma4`; a later successful request through the same callback records
+recovery and restores normal eligibility. There is no parallel backend-health
+state.
 
 
 Capacity evidence belongs in deterministic admission, routing, planner, race,

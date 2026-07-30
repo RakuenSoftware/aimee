@@ -46,11 +46,8 @@ static void server_agent_http_ensure(void)
    pthread_once(&g_agent_http_once, server_agent_http_init_once);
 }
 
-static int server_agent_route_backend_reachable(const agent_t *ag)
+static int server_agent_probe_endpoint(const char *endpoint)
 {
-   if (!ag || strcmp(ag->model, "aimee-synth") != 0)
-      return 1;
-   const char *endpoint = ag->endpoint;
    if (!endpoint || !endpoint[0] ||
        (strncmp(endpoint, "http://", 7) != 0 && strncmp(endpoint, "https://", 8) != 0))
       return 1;
@@ -60,9 +57,21 @@ static int server_agent_route_backend_reachable(const agent_t *ag)
    char *body = NULL;
    int status = agent_http_get(url, NULL, &body, 1500);
    free(body);
-   int reachable = status >= 200 && status < 400;
+   return status >= 200 && status < 400;
+}
+
+static int server_agent_record_backend_probe(const char *endpoint)
+{
+   int reachable = server_agent_probe_endpoint(endpoint);
    provider_catalog_record_endpoint_probe(endpoint, reachable);
    return reachable;
+}
+
+static int server_agent_route_backend_reachable(const agent_t *ag)
+{
+   if (!ag || strcmp(ag->model, "aimee-synth") != 0)
+      return 1;
+   return server_agent_record_backend_probe(ag->endpoint);
 }
 
 int server_agent_route_is_down(const char *agent_name)
@@ -84,6 +93,7 @@ int server_agent_route_is_degraded(const char *agent_name)
 
 int server_agent_route_has_capacity(const agent_t *ag)
 {
+   agent_admission_ensure_configured();
    const char *model = ag && ag->model[0] ? ag->model : AGENT_ADMISSION_DEFAULT_MODEL_KEY;
    return ag && agent_admission_probe(ag->name, model, ag->max_parallel, NULL);
 }
@@ -521,6 +531,7 @@ static cJSON *server_agent_to_json(const agent_t *ag)
    cJSON_AddBoolToObject(obj, "primary_only", ag->primary_only);
    cJSON_AddNumberToObject(obj, "max_turns", ag->max_turns);
    cJSON_AddNumberToObject(obj, "max_parallel", ag->max_parallel);
+   agent_admission_ensure_configured();
    /* Authoritative three-limit availability for the out-of-process Go WFE. */
    int capacity = agent_route_agent_capacity(ag);
    if (capacity >= 0)
