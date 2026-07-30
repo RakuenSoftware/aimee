@@ -20,6 +20,41 @@ static void reset_state(void)
    unsetenv("AIMEE_SERVER_TOKEN");
 }
 
+static void test_help_arity_and_help_token_handling(void)
+{
+   reset_state();
+   char path[256];
+   snprintf(path, sizeof(path), "%s/remote.conf", g_home);
+   unlink(path);
+
+   char *set_help[] = {(char *)"set", (char *)"--help"};
+   assert(cli_remote_cmd(2, set_help, 1) == 0);
+   assert(access(path, F_OK) != 0);
+
+   char *status_help[] = {(char *)"status", (char *)"-h"};
+   assert(cli_remote_cmd(2, status_help, 1) == 0);
+   assert(access(path, F_OK) != 0);
+
+   char *too_many[] = {(char *)"set", (char *)"http://example.test:8740", (char *)"tok",
+                       (char *)"unexpected"};
+   assert(cli_remote_cmd(4, too_many, 1) == 2);
+   assert(access(path, F_OK) != 0);
+
+   char *token_named_help[] = {(char *)"set", (char *)"http://example.test:8740", (char *)"help"};
+   assert(cli_remote_cmd(3, token_named_help, 1) == 0);
+   assert(access(path, F_OK) == 0);
+   cli_remote_load_persisted();
+   char desc[128] = {0};
+   char token[128] = {0};
+   assert(aimee_client_remote_active(desc, sizeof(desc)) == 1);
+   assert(strcmp(desc, "example.test:8740") == 0);
+   assert(aimee_client_remote_token(token, sizeof(token)) == 1);
+   assert(strcmp(token, "help") == 0);
+   unlink(path);
+   reset_state();
+   PASS("remote help/arity is side-effect free and a token named help is preserved");
+}
+
 static void test_set_then_load(void)
 {
    reset_state();
@@ -130,6 +165,7 @@ int main(void)
    setenv("AIMEE_HOME", dir, 1);
 
    printf("test_cli_remote:\n");
+   test_help_arity_and_help_token_handling();
    test_set_then_load();
    test_env_wins_over_file();
    test_clear();

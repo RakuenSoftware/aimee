@@ -43,6 +43,164 @@ static void test_delegate_max_turns_marshaled(void)
    printf("  PASS: test_delegate_max_turns_marshaled\n");
 }
 
+static void test_json_error_envelopes_remain_structured(void)
+{
+   cJSON *deadline =
+       cJSON_Parse("{\"ok\":false,\"error\":\"panel deadline\",\"roundtable\":{"
+                   "\"participants_failed\":2,\"participant_failures\":[{\"seat\":1}]}}");
+   cJSON *dispatch = cJSON_Parse("{\"status\":\"error\",\"message\":\"queue full\"}");
+   cJSON *object_error =
+       cJSON_Parse("{\"error\":{\"message\":\"forbidden\",\"type\":\"permission_error\"}}");
+   cJSON *success = cJSON_Parse("{\"ok\":true,\"result\":{}}");
+   assert(deadline && dispatch && object_error && success);
+
+   assert(cli_v1_response_is_error(deadline, 503) == 1);
+   assert(cli_v1_response_is_error(dispatch, 200) == 1);
+   assert(cli_v1_response_is_error(object_error, 200) == 1);
+   assert(cli_v1_response_is_error(success, 200) == 0);
+
+   cJSON_Delete(deadline);
+   cJSON_Delete(dispatch);
+   cJSON_Delete(object_error);
+   cJSON_Delete(success);
+   printf("  PASS: test_json_error_envelopes_remain_structured\n");
+}
+
+/* Capture the exact post-transport production path, including ownership,
+ * stream selection, JSON shaping, and process return code. */
+static int finish_response_capture(const char *method, const char *json, int http_status,
+                                   int json_output, char *out, size_t out_cap, char *err,
+                                   size_t err_cap)
+{
+   cJSON *resp = cJSON_Parse(json);
+   assert(resp != NULL);
+   cli_v1_route_t route = {.method = method};
+
+   FILE *out_file = tmpfile(), *err_file = tmpfile();
+   assert(out_file != NULL && err_file != NULL);
+   int ofd = fileno(out_file), efd = fileno(err_file);
+   int old_out = dup(STDOUT_FILENO), old_err = dup(STDERR_FILENO);
+   assert(old_out >= 0 && old_err >= 0);
+   fflush(stdout);
+   fflush(stderr);
+   assert(dup2(ofd, STDOUT_FILENO) >= 0);
+   assert(dup2(efd, STDERR_FILENO) >= 0);
+
+   int rc = cli_v1_finish_response(&route, resp, http_status, json_output, 0, NULL);
+
+   fflush(stdout);
+   fflush(stderr);
+   assert(dup2(old_out, STDOUT_FILENO) >= 0);
+   assert(dup2(old_err, STDERR_FILENO) >= 0);
+   close(old_out);
+   close(old_err);
+
+   rewind(out_file);
+   size_t n = fread(out, 1, out_cap - 1, out_file);
+   out[n] = '\0';
+   rewind(err_file);
+   n = fread(err, 1, err_cap - 1, err_file);
+   err[n] = '\0';
+   fclose(out_file);
+   fclose(err_file);
+   return rc;
+}
+
+static void test_json_roundtable_failure_preserves_user_visible_envelope(void)
+{
+   char out[4096], err[2048];
+   int rc = finish_response_capture(
+       "roundtable.review",
+       "{\"status\":\"error\",\"error\":\"panel deadline\",\"message\":\"panel deadline\","
+       "\"roundtable\":{\"deadline_hit\":true,\"participant_failures\":[{\"seat\":1,"
+       "\"category\":\"deadline\"},{\"seat\":2,\"category\":\"deadline\"}]}}",
+       503, 1, out, sizeof(out), err, sizeof(err));
+
+   assert(rc == 1);
+   assert(err[0] == '\0');
+   cJSON *printed = cJSON_Parse(out);
+   assert(printed != NULL);
+   assert(strcmp(cJSON_GetObjectItem(printed, "status")->valuestring, "error") == 0);
+   cJSON *roundtable = cJSON_GetObjectItem(printed, "roundtable");
+   assert(cJSON_IsTrue(cJSON_GetObjectItem(roundtable, "deadline_hit")));
+   assert(cJSON_GetArraySize(cJSON_GetObjectItem(roundtable, "participant_failures")) == 2);
+   cJSON_Delete(printed);
+   printf("  PASS: test_json_roundtable_failure_preserves_user_visible_envelope\n");
+}
+
+static void test_human_roundtable_failure_uses_stderr(void)
+{
+   char out[2048], err[2048];
+   int rc = finish_response_capture(
+       "roundtable.review",
+       "{\"status\":\"error\",\"error\":\"panel deadline\",\"message\":\"panel deadline\","
+       "\"roundtable\":{\"deadline_hit\":true,\"participant_failures\":[{\"seat\":1}]}}",
+       503, 0, out, sizeof(out), err, sizeof(err));
+
+   assert(rc == 1);
+   assert(out[0] == '\0');
+   assert(strstr(err, "aimee: panel deadline") != NULL);
+   assert(strstr(err, "roundtable") == NULL);
+   printf("  PASS: test_human_roundtable_failure_uses_stderr\n");
+}
+
+static void test_success_with_string_error_remains_success(void)
+{
+   char out[2048], err[2048];
+   int rc = finish_response_capture(
+       "cron.run", "{\"status\":\"ok\",\"result\":\"completed\",\"error\":\"job stderr\"}", 200, 1,
+       out, sizeof(out), err, sizeof(err));
+
+   assert(rc == 0);
+   assert(err[0] == '\0');
+   cJSON *printed = cJSON_Parse(out);
+   assert(printed != NULL);
+   assert(cJSON_GetObjectItem(printed, "status") == NULL);
+   assert(strcmp(cJSON_GetObjectItem(printed, "error")->valuestring, "job stderr") == 0);
+   assert(strcmp(cJSON_GetObjectItem(printed, "result")->valuestring, "completed") == 0);
+   cJSON_Delete(printed);
+   printf("  PASS: test_success_with_string_error_remains_success\n");
+}
+
+static void test_failed_async_run_retains_structured_result(void)
+{
+   cJSON *snapshot = cJSON_Parse("{\"status\":\"failed\",\"message\":\"outer failure\"}");
+   cJSON *result = cJSON_Parse("{\"ok\":false,\"error\":\"panel deadline\",\"roundtable\":{"
+                               "\"deadline_hit\":true,\"participant_failures\":[{\"seat\":1,"
+                               "\"category\":\"deadline\"}]}}");
+   assert(snapshot && result);
+
+   cJSON *response = cli_v1_failed_run_response(result, snapshot);
+   assert(response == result);
+   assert(strcmp(cJSON_GetObjectItem(response, "status")->valuestring, "error") == 0);
+   assert(strcmp(cJSON_GetObjectItem(response, "message")->valuestring, "panel deadline") == 0);
+   cJSON *roundtable = cJSON_GetObjectItem(response, "roundtable");
+   assert(cJSON_IsTrue(cJSON_GetObjectItem(roundtable, "deadline_hit")));
+   assert(cJSON_GetArraySize(cJSON_GetObjectItem(roundtable, "participant_failures")) == 1);
+
+   cJSON_Delete(response);
+   cJSON_Delete(snapshot);
+   printf("  PASS: test_failed_async_run_retains_structured_result\n");
+}
+
+static void test_failed_async_run_synthesizes_legacy_envelope(void)
+{
+   cJSON *snapshot = cJSON_Parse("{\"status\":\"cancelled\"}");
+   cJSON *result = cJSON_CreateString("unstructured result");
+   assert(snapshot && result);
+
+   cJSON *response = cli_v1_failed_run_response(result, snapshot);
+   cJSON *error = cJSON_GetObjectItem(response, "error");
+   assert(cJSON_IsObject(error));
+   assert(strcmp(cJSON_GetObjectItem(error, "message")->valuestring,
+                 "run cancelled with no result") == 0);
+   assert(strcmp(cJSON_GetObjectItem(error, "type")->valuestring, "run_failed") == 0);
+
+   cJSON_Delete(response);
+   cJSON_Delete(snapshot);
+   printf("  PASS: test_failed_async_run_synthesizes_legacy_envelope\n");
+}
+
 static void test_remote_workspace_hidden_roots_are_rejected(void)
 {
    assert(cli_ws_root_has_hidden_component("/repo/.aimee/worktrees/session/main") == 1);
@@ -1842,6 +2000,12 @@ int main(void)
 {
    printf("test_cli_v1_delegate\n");
    test_remote_workspace_hidden_roots_are_rejected();
+   test_json_error_envelopes_remain_structured();
+   test_json_roundtable_failure_preserves_user_visible_envelope();
+   test_human_roundtable_failure_uses_stderr();
+   test_success_with_string_error_remains_success();
+   test_failed_async_run_retains_structured_result();
+   test_failed_async_run_synthesizes_legacy_envelope();
    test_delegate_context_file_folded_into_prompt();
    test_delegate_max_turns_marshaled();
    test_delegate_tools_named_toolset_marshaled();

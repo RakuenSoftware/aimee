@@ -25,7 +25,7 @@ func chairmanResponse(body string) string {
 func TestChairmanSubmitsFinalApprovalAfterDeterministicSynthesis(t *testing.T) {
 	wantHash := chairmanRequest().Inputs["src"].Hash
 	agents := &discussionTestAgents{respond: func(request DelegateRequest) (string, error) {
-		if request.Delegate != "codex" || request.Persona != "chairman" || !strings.Contains(request.DurableSlot, ":chairman") || !strings.Contains(request.Prompt, "BEGIN_CHAIRMAN_DATA") || !strings.Contains(request.Prompt, "plurality, format, or existence is never original-request drift") || !strings.Contains(request.Prompt, `"artifact_hash":"`+wantHash+`"`) {
+		if request.Delegate != "codex" || request.Persona != "chairman" || request.MaxTurnsCap != roundtableDelegateMaxTurnsCap || !strings.Contains(request.DurableSlot, ":chairman") || !strings.Contains(request.Prompt, "BEGIN_CHAIRMAN_DATA") || !strings.Contains(request.Prompt, "plurality, format, or existence is never original-request drift") || !strings.Contains(request.Prompt, `"artifact_hash":"`+wantHash+`"`) {
 			t.Fatalf("chairman request=%+v", request)
 		}
 		return chairmanResponse(`"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":" Approve ","findings":[]}`), nil

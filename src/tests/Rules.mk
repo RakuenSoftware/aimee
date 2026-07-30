@@ -1132,11 +1132,13 @@ $(TESTPREFIX)/unit-test-wfe-roundtable-proxy: \
 
 # aimee_client.o resolves the remote-target accessors cli_v1_client_endpoint now
 # calls (it synthesizes a tcp: endpoint from a --server/AIMEE_SERVER_URL target).
-# --gc-sections drops the rest of the transport, which this marshalling test
-# never calls.
+# platform_path.o backs the delegate --output branch reached by the shared
+# production response finisher that this test now calls directly.
+# --gc-sections still drops the rest of the transport closure that this
+# marshalling/response-contract test never invokes.
 $(TESTPREFIX)/unit-test-cli-v1-delegate: $(OBJDIR)/tests/test_cli_v1_delegate.o \
                                   $(OBJDIR)/cJSON.o $(OBJDIR)/posix/util.o $(OBJDIR)/aimee_client.o \
-                                  $(OBJDIR)/codex_auth.o
+                                  $(OBJDIR)/codex_auth.o $(OBJDIR)/posix/platform_path.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-cli-v1-subcommands: $(OBJDIR)/tests/test_cli_v1_subcommands.o \

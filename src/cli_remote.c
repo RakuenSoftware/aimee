@@ -636,6 +636,16 @@ static int remote_status(int json_output)
    return ok ? 0 : 1;
 }
 
+static int remote_help_flag(const char *arg)
+{
+   return arg && (strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0);
+}
+
+static void remote_usage(FILE *out)
+{
+   fprintf(out, "usage: aimee remote <set <url> [token] | enroll | trust | status | clear>\n");
+}
+
 /* Mint an additional bearer for the configured remote and adopt it without
  * invalidating other clients. */
 static int remote_enroll_cmd(int json_output)
@@ -662,9 +672,43 @@ static int remote_enroll_cmd(int json_output)
 
 int cli_remote_cmd(int argc, char **argv, int json_output)
 {
-   const char *sub = argc > 0 ? argv[0] : "status";
+   if (argc == 0)
+      /* Preserve the historical shorthand: bare `aimee remote` is status. */
+      return remote_status(json_output);
+
+   /* `remote` is dispatched before cli_main's generic help gate because it is
+    * the command that configures that transport. Handle help here before any
+    * subcommand can mutate remote.conf or contact a server. In particular,
+    * `aimee remote set --help` used to persist "--help" as the remote URL. */
+   if (strcmp(argv[0], "help") == 0)
+   {
+      remote_usage(stdout);
+      return 0;
+   }
+   for (int i = 0; i < argc; i++)
+   {
+      if (remote_help_flag(argv[i]))
+      {
+         remote_usage(stdout);
+         return 0;
+      }
+   }
+
+   const char *sub = argv[0];
    if (strcmp(sub, "set") == 0)
+   {
+      if (argc < 2 || argc > 3)
+      {
+         remote_usage(stderr);
+         return 2;
+      }
       return remote_set(argc > 1 ? argv[1] : NULL, argc > 2 ? argv[2] : NULL, json_output);
+   }
+   if (argc != 1)
+   {
+      remote_usage(stderr);
+      return 2;
+   }
    if (strcmp(sub, "clear") == 0)
       return remote_clear(json_output);
    if (strcmp(sub, "trust") == 0)
@@ -673,6 +717,6 @@ int cli_remote_cmd(int argc, char **argv, int json_output)
       return remote_enroll_cmd(json_output);
    if (strcmp(sub, "status") == 0)
       return remote_status(json_output);
-   fprintf(stderr, "usage: aimee remote <set <url> [token] | enroll | trust | status | clear>\n");
+   remote_usage(stderr);
    return 2;
 }

@@ -35,6 +35,9 @@ type DelegateRequest struct {
 	// MaxCostUSD is a positive per-call hard safety bound assigned by the
 	// workflow runner. The resource plane rejects or stops work that cannot fit.
 	MaxCostUSD float64
+	// MaxTurnsCap bounds a delegate without overriding a smaller role/agent cap.
+	// It is forwarded to the resource plane as max_turns_cap.
+	MaxTurnsCap int
 	// ReplayOnly forbids launching a replacement job when a lifecycle retry is
 	// consuming an already-billed durable result.
 	ReplayOnly bool
@@ -293,6 +296,9 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 	payload := map[string]any{"role": request.Role, "persona": request.Persona, "prompt": request.Prompt, "cwd": request.Workdir, "tools": request.Tools}
 	if request.MaxCostUSD > 0 {
 		payload["max_cost_usd"] = request.MaxCostUSD
+	}
+	if request.MaxTurnsCap > 0 {
+		payload["max_turns_cap"] = request.MaxTurnsCap
 	}
 	if request.ProvidedTarget {
 		payload["provided_target"] = true
