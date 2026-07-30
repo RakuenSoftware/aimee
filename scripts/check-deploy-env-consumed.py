@@ -33,6 +33,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+try:
+    import yaml
+except ImportError:  # pragma: no cover - matches check-kb-container-packaging.py
+    yaml = None
+
 EMITTER = Path("src/modules/config/config_database.c")
 
 # Emitted keys with no consumer yet, and why that is currently acceptable. Removing
@@ -147,7 +152,8 @@ def kb_env_failures(root: Path, emitted: list[str]) -> list[str]:
     nothing. So check the specific thing: the service that runs the reader must be
     given the key.
     """
-    import yaml  # local: only this rule needs it
+    if yaml is None:
+        return ["PyYAML is required to validate the aimee-kb service environment"]
 
     failures: list[str] = []
     needed = kb_read_keys(root, emitted)
