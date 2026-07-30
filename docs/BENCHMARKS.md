@@ -74,3 +74,8 @@ Code-intelligence matrix execution and resume semantics are documented in
 [`benchmarks/code-agent-effectiveness/README.md`](../benchmarks/code-agent-effectiveness/README.md).
 In particular, infrastructure failures are preserved but excluded from scoring, and
 named checkpoints are bound to one immutable run and plan to prevent result splicing.
+
+The E6 promotion harness is repository-owned and fail-closed. Its corpus, prompt fixture, raw result
+envelope, generated summary, and scorer are versioned together. Deterministic retrieval success
+alone cannot promote task context: missing or infrastructure-invalid paired agent cells are reported
+outside denominators and force `retain-observe`.

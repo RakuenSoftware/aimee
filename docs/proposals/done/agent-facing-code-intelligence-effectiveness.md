@@ -1,6 +1,6 @@
 # Proposal: Agent-facing code intelligence effectiveness
 
-- **State:** PENDING — E5–E6 remain; E0 through E4 history is recorded below
+- **State:** DONE — E0–E6 merged or reconciled; E6 retains `observe` and links bounded residual work
 - **Author:** JBailes
 - **Date:** 2026-07-29
 - **Charter roles:** Recall, Rank-Fuse, Calibrate / Evaluate-Optimize, Enforce, Gate-Promote
@@ -806,3 +806,33 @@ residual proposal instead of declaring the intended effectiveness outcome comple
   unauthorized without poisoning the transient-failure breaker. Adversarial fixtures cover each
   transport. Roundtable run: `oprun_g6a69bd8011459d99_1785399544_132` (artifact
   `0691c47bbc47d1854c00df172d01745bd29eab47956d43e22bca01fe3462d812`).
+- **E5a dependency-status slice:** PR #2176 merged to `testing` as
+  `ada6d21d9ac4461b9a144acdc1d8b5c1b43718c3` after all required checks passed. Typed dependency
+  outcomes, bounded breakers, truthful authorization/staleness metadata, and exact recovery probes
+  are the merged base for deployment and evaluation.
+- **E5c resumable-experiment slice:** PR #2179 merged to `testing` as
+  `930bbe995502c9f584d895f4900b0e3562582030`. The repository now owns durable named checkpoints,
+  byte-lossless attempt artifacts, infrastructure-invalid exclusions, and anti-splicing validation.
+- **E6 evaluation candidate:** the scorer, 16-case retrieval corpus, eight-task/four-arm coding
+  matrix, and prompt fixture v1 are pinned to the E5c merge. The deterministic retrieval layer
+  passes, but every provider-backed paired arm has zero eligible fresh cells. Promotion therefore
+  fails closed: `observe` remains the default, no historical artifacts are spliced, and the bounded
+  paired matrix is assigned to `agent-facing-code-intelligence-paired-evaluation.md`.
+- **E6 evaluation review round 1 — 2026-07-30 — changes requested, 3/3 participants, not
+  degraded.** Three blocking fail-closed gaps were accepted: a partial arm could count as complete,
+  a partial retrieval corpus could pass, and missing/unknown evidence could improve or disappear
+  from metrics. The scorer now requires exact corpus and arm/task coverage, explicit evidence
+  fields, unique known IDs, and complete eligible denominators before promotion. Roundtable run:
+  `oprun_g6a6b1ed93980fd5d_1785417195_27` (artifact
+  `96c46ab9ca452d5a1e04576dd196eab5704549743cc094df015667c1e684904f`).
+- **E6 evaluation review round 2 — 2026-07-30 — changes requested, 2/3 participants used,
+  degraded.** The exact coverage repairs passed, but eligible coding metrics still had presence-only
+  validation. The scorer now requires explicit booleans plus finite non-negative token, wall,
+  retrieval latency, and packet metrics, and bounded finite edge rates before scoring. Roundtable
+  run: `oprun_g6a6b1ed93980fd5d_1785417454_28` (artifact
+  `51d2314b8a2b98e8a2b59e23068097726bb898c0ae0695e40ba8d0f3eee0e792`).
+- **E6 evaluation review round 3 — 2026-07-30 — APPROVED and converged, 3/3 participants, not
+  degraded.** The complete fail-closed scorer, pinned corpus/results, truthful zero paired-agent
+  denominator, `retain-observe` decision, archived parent, and bounded residual proposal received no
+  findings. Roundtable run: `oprun_g6a6b1ed93980fd5d_1785417816_29` (artifact
+  `fa1a46d6eb522bc9e398a6df49a79e68aae728e07f2c399e137649eda2a2f1d1`).

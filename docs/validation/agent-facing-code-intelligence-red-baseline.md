@@ -2,7 +2,7 @@
 
 - **Captured:** 2026-07-29 UTC
 - **Aimee proposal:**
-  [`agent-facing-code-intelligence-effectiveness`](../proposals/pending/agent-facing-code-intelligence-effectiveness.md)
+  [`agent-facing-code-intelligence-effectiveness`](../proposals/done/agent-facing-code-intelligence-effectiveness.md)
 - **Harness checkout:** `/home/virant/dev/ponytail-codex-benchmark`
 - **Harness branch / commit:** `agent/codex-benchmark-matrix` /
   `a40fe3d6a58ac4e8b14aaf75320e83912f0bfc56`

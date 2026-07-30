@@ -1,0 +1,58 @@
+{
+  "coding": {
+    "ceiling": {
+      "eligible": 0,
+      "excluded": 8,
+      "median_total_wall_s": null,
+      "median_uncached_input_tokens": null,
+      "success_lcb95": null,
+      "success_rate": null
+    },
+    "observe": {
+      "eligible": 0,
+      "excluded": 8,
+      "median_total_wall_s": null,
+      "median_uncached_input_tokens": null,
+      "success_lcb95": null,
+      "success_rate": null
+    },
+    "on": {
+      "answerable_actuation_rate": null,
+      "eligible": 0,
+      "excluded": 8,
+      "median_total_wall_s": null,
+      "median_uncached_input_tokens": null,
+      "success_lcb95": null,
+      "success_rate": null
+    },
+    "standard": {
+      "eligible": 0,
+      "excluded": 8,
+      "median_total_wall_s": null,
+      "median_uncached_input_tokens": null,
+      "success_lcb95": null,
+      "success_rate": null
+    }
+  },
+  "paired_agent_gate_pass": false,
+  "pinned_commit": "930bbe995502c9f584d895f4900b0e3562582030",
+  "promotion_decision": "retain-observe",
+  "prompt_fixture": "prompts/e6-agent-task-v1.md",
+  "required_arms_complete": false,
+  "required_retrieval_complete": true,
+  "retrieval": {
+    "answerable_precision": 1.0,
+    "answerable_recall": 1.0,
+    "current_project_duplicate_rate": 0.0,
+    "eligible": 16,
+    "excluded": 0,
+    "packet_tokens_p95": 466.0,
+    "python_edge_precision": 1.0,
+    "python_edge_recall": 1.0,
+    "retrieval_latency_p95_s": 0.083,
+    "scope_leakage_rate": 0.0,
+    "unanswerable_abstention": 1.0
+  },
+  "retrieval_gate_pass": true,
+  "schema_version": 1
+}
