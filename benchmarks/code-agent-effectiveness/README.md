@@ -1,7 +1,7 @@
 # Agent-facing code-intelligence evaluation
 
 This directory holds the attribution-safe red/green fixtures accepted by
-[`agent-facing-code-intelligence-effectiveness`](../../docs/proposals/pending/agent-facing-code-intelligence-effectiveness.md).
+[`agent-facing-code-intelligence-effectiveness`](../../docs/proposals/done/agent-facing-code-intelligence-effectiveness.md).
 
 `fixtures.json` is deliberately small and product-facing. It records five distinct failure classes:
 
@@ -50,3 +50,17 @@ with `score_eligible:false` while preserving stdout, stderr, timing, and return 
 Invalid cells must not enter quality denominators and must be rerun as new attempts;
 the checkpoint does not advance past an invalid cell, and results from another run
 are never copied into a checkpoint.
+
+E6 adds a 16-case retrieval corpus, eight paired coding-task definitions, four predeclared arms,
+and a versioned agent prompt. Score a result envelope with:
+
+```bash
+python3 benchmarks/code-agent-effectiveness/e6_evaluate.py \
+  benchmarks/code-agent-effectiveness/results/e6-20260730.json
+```
+
+The scorer fails closed for promotion: all four coding arms need eligible fresh cells, the `on`
+arm needs at least 80% pre-edit packet actuation, and confidence/efficiency gates must pass. The
+first pinned E6 record passes deterministic retrieval but contains no eligible provider-backed
+paired cells, so it retains the shipping `observe` default and delegates that bounded experiment to
+the linked residual proposal.

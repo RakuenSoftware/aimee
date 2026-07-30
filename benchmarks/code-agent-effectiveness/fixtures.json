@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "proposal": "docs/proposals/pending/agent-facing-code-intelligence-effectiveness.md",
+  "proposal": "docs/proposals/done/agent-facing-code-intelligence-effectiveness.md",
   "source_snapshot": {
     "captured_at": "2026-07-29",
     "harness_repository": "/home/virant/dev/ponytail-codex-benchmark",
