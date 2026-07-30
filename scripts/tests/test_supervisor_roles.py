@@ -17,12 +17,32 @@ Invariants under test:
 import os
 import pathlib
 import re
+import shlex
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
 
 SUP = pathlib.Path(__file__).resolve().parents[1] / "aimee-llm-supervisor.sh"
+GATEWAY = pathlib.Path(__file__).resolve().parents[1] / "aimee_llm_gateway.py"
+REAL_PYTHON = sys.executable
+
+
+def _descriptor(model=None):
+    """The registry entry as the supervisor sees it. Read through the same descriptor
+    call rather than restating coordinates here — a test that hardcodes them is a second
+    copy of exactly the data scripts/embedders.json exists to centralise."""
+    argv = [REAL_PYTHON, str(GATEWAY), "--embedder-descriptor"] + ([model] if model else [])
+    out = subprocess.run(argv, capture_output=True, text=True, check=True).stdout
+    fields = {}
+    for line in out.splitlines():
+        key, _, value = line.partition("=")
+        fields[key] = shlex.split(value)[0] if value else ""
+    return fields
+
+
+EMBED = _descriptor()
 
 
 def _write(path, body):
@@ -57,9 +77,22 @@ def _make_shims(tmp):
         echo "$*" >> "{logdir}/llama.log"
         exec sleep 30 >/dev/null 2>&1
         """))
+    # python3 wears two hats here. Serving the gateway is shimmed (dump the env, exit,
+    # so the supervisor's `wait -n` returns) — but the same interpreter also answers
+    # `--embedder-descriptor`, which the supervisor evals for the embedder's coordinates,
+    # pooling and context. That call must run the REAL gateway: shimming it out would
+    # test a supervisor that resolves its embedder from nothing.
     _write(bindir / "python3", textwrap.dedent(f"""\
         #!/usr/bin/env bash
+        for arg in "$@"; do
+          if [ "$arg" = "--embedder-descriptor" ]; then exec {REAL_PYTHON} "$@"; fi
+        done
         env > "{logdir}/gateway_env.log"
+        # Grace period, not decoration. This shim exiting is what makes the supervisor's
+        # `wait -n` return, and the supervisor then kills its children — so exiting
+        # immediately races the just-forked llama shims before they append their argv,
+        # and a launch intermittently vanishes from llama.log. Outlive that write.
+        sleep 0.25
         exit 0
         """))
     _write(bindir / "sha256sum", "#!/usr/bin/env bash\ncat >/dev/null 2>&1 || true\nexit 0\n")
@@ -85,11 +118,15 @@ class SupervisorRoleTest(unittest.TestCase):
         env["AIMEE_LLM_LLAMA_BIN"] = str(bindir / "llama")
         env["AIMEE_LLM_MODELS_DIR"] = str(tmp / "models")
         env["AIMEE_LLM_NGL"] = "0"
+        # The image path /opt/aimee/... doesn't exist in a checkout.
+        env["AIMEE_LLM_GATEWAY"] = str(GATEWAY)
         env.pop("AIMEE_LLM_STUB", None)
         for k in ("AIMEE_LLM_TIER", "AIMEE_LLM_EMBED_MODE", "AIMEE_LLM_RERANK_MODE",
                   "AIMEE_LLM_SYNTH_MODE", "AIMEE_LLM_SYNTH_LOCAL", "AIMEE_LLM_EMBED_URL",
                   "AIMEE_LLM_RERANK_URL", "AIMEE_LLM_SYNTH_URL", "AIMEE_LLM_EMBED_TIER",
-                  "AIMEE_LLM_RERANK_TIER", "AIMEE_LLM_SYNTH_TIER"):
+                  "AIMEE_LLM_RERANK_TIER", "AIMEE_LLM_SYNTH_TIER",
+                  # An operator override in the ambient env would mask the registry.
+                  "AIMEE_LLM_EMBED_MODEL", "AIMEE_LLM_EMBED_POOLING", "AIMEE_LLM_EMBED_CTX"):
             env.pop(k, None)
         for k, v in (modes or {}).items():
             env[k] = v
@@ -118,7 +155,7 @@ class SupervisorRoleTest(unittest.TestCase):
     def test_all_local_downloads_and_launches_all(self):
         proc, urls, llama, gw = self.run_supervisor()
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertTrue(any("Embedding-0.6B" in u for u in urls), urls)   # cpu embed
+        self.assertTrue(any(EMBED["EMBED_FILE"] in u for u in urls), urls)  # registry embed
         self.assertTrue(any("gemma-4-E4B" in u for u in urls), urls)      # cpu synth
         self.assertTrue(any("rerank-ettin-68m" in u for u in urls), urls) # cpu rerank
         self.assertEqual(set(self._launched(llama)), {"8081", "8082", "8083"})
@@ -143,7 +180,7 @@ class SupervisorRoleTest(unittest.TestCase):
             modes={"AIMEE_LLM_EMBED_MODE": "external",
                    "AIMEE_LLM_EMBED_URL": "http://ext-embed:9000"})
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertFalse(any("Embedding" in u for u in urls), urls)
+        self.assertFalse(any(EMBED["EMBED_FILE"] in u for u in urls), urls)
         self.assertTrue(any("gemma" in u.lower() for u in urls), urls)
         self.assertEqual(set(self._launched(llama)), {"8082", "8083"})
         self.assertEqual(gw.get("AIMEE_LLM_EMBED_URL"), "http://ext-embed:9000")
@@ -188,7 +225,7 @@ class SupervisorRoleTest(unittest.TestCase):
         proc, urls, llama, _gw = self.run_supervisor(
             modes={"AIMEE_LLM_TIER": "mid", "AIMEE_LLM_NGL": "99"})
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertTrue(any("Embedding-4B" in u for u in urls), urls)     # gpu embed
+        self.assertTrue(any(EMBED["EMBED_FILE"] in u for u in urls), urls)  # registry embed
         self.assertTrue(any("gemma-4-26B" in u for u in urls), urls)      # mid synth
         self.assertTrue(any("rerank-ettin-400m" in u for u in urls), urls)
         launched = self._launched(llama)
@@ -204,7 +241,7 @@ class SupervisorRoleTest(unittest.TestCase):
             "AIMEE_LLM_NGL": "99",
         })
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertTrue(any("Embedding-0.6B" in u for u in urls), urls)   # cpu embed model
+        self.assertTrue(any(EMBED["EMBED_FILE"] in u for u in urls), urls)  # registry embed
         self.assertTrue(any("gemma-4-26B" in u for u in urls), urls)      # large synth model
         self.assertTrue(any("rerank-ettin-68m" in u for u in urls), urls)
         launched = self._launched(llama)
@@ -212,6 +249,47 @@ class SupervisorRoleTest(unittest.TestCase):
         self.assertEqual(_ngl(launched["8083"]), "99")                    # gpu synth: offload
         self.assertIn("--parallel 4", launched["8083"])                   # large => SLOTS=4
         self.assertTrue(gw.get("AIMEE_LLM_RERANK_HEAD", "").endswith("cpu/rerank-head"))
+
+    # ---- the embedder registry drives provisioning + serving flags ----------
+    def test_serving_flags_come_from_the_registry(self):
+        # pooling and context are the two silent failures: the wrong pooling yields
+        # well-formed wrong vectors, and a context past the model's trained positions
+        # embeds the tail to noise. Both must trace to the registry entry, not a default.
+        proc, _urls, llama, gw = self.run_supervisor()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        embed = self._launched(llama)["8081"]
+        self.assertIn(f"--pooling {EMBED['EMBED_POOLING']}", embed)
+        self.assertIn(f"--ctx-size {EMBED['EMBED_CONTEXT']}", embed)
+        self.assertEqual(gw.get("AIMEE_LLM_EMBED_POOLING"), EMBED["EMBED_POOLING"])
+        self.assertEqual(gw.get("AIMEE_LLM_EMBED_MODEL"), EMBED["EMBED_MODEL_KEY"])
+
+    def test_every_tier_serves_the_same_embedder(self):
+        # The uniform-dimension claim: tier is a GPU-offload decision only, so an index
+        # built on one tier stays readable on another. If tier ever reintroduced a
+        # per-tier model, this is the test that catches the silent re-embed requirement.
+        fetched = {}
+        for tier in ("cpu", "small", "mid", "large"):
+            proc, urls, _llama, _gw = self.run_supervisor(modes={"AIMEE_LLM_EMBED_TIER": tier})
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            fetched[tier] = [u for u in urls if EMBED["EMBED_FILE"] in u]
+        self.assertEqual(len({tuple(v) for v in fetched.values()}), 1, fetched)
+
+    def test_unregistered_embedder_aborts_the_boot(self):
+        proc, urls, llama, _gw = self.run_supervisor(
+            extra_env={"AIMEE_LLM_EMBED_MODEL": "some-unmeasured-model"})
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("is not in", proc.stderr)
+        self.assertEqual(urls, [], "nothing may be fetched for an unregistered embedder")
+        self.assertEqual(llama, [], llama)
+
+    def test_registered_but_unprovisioned_embedder_aborts_the_boot(self):
+        # An entry may exist for a model that was measured but never deployed; its
+        # coordinates are blank. Serving it must fail here, not in the middle of a fetch.
+        proc, urls, _llama, _gw = self.run_supervisor(
+            extra_env={"AIMEE_LLM_EMBED_MODEL": "bekko-a25m"})
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("cannot be served", proc.stderr)
+        self.assertEqual(urls, [], urls)
 
     def test_invalid_tier_rejected(self):
         proc, *_ = self.run_supervisor(modes={"AIMEE_LLM_SYNTH_TIER": "bogus"})

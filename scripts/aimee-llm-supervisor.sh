@@ -30,6 +30,11 @@ set -u
 LLAMA="${AIMEE_LLM_LLAMA_BIN:-/opt/llama/llama-server}"
 NGL="${AIMEE_LLM_NGL:-0}"
 MODELS_DIR="${AIMEE_LLM_MODELS_DIR:-/models}"
+# The gateway serves requests AND answers --embedder-descriptor for the registry lookup
+# below, so both uses resolve to one file. Overridable so the tests can run this script
+# from a checkout rather than the image layout.
+PYTHON="${AIMEE_LLM_PYTHON:-python3}"
+GATEWAY="${AIMEE_LLM_GATEWAY:-/opt/aimee/aimee_llm_gateway.py}"
 # Base URL for the pre-converted ettin rerank artifacts (override for a mirror).
 RERANK_ASSET_BASE="${AIMEE_LLM_RERANK_ASSET_BASE:-https://github.com/RakuenSoftware/aimee/releases/download/rerank-artifacts-v1}"
 # Synth context window. The synth GGUF (gemma) trains to 256K, but a hardcoded
@@ -58,23 +63,29 @@ RERANK_UBATCH="${AIMEE_LLM_RERANK_UBATCH:-512}"
 RERANK_CTX="${AIMEE_LLM_RERANK_CTX:-8192}"
 RERANK_PARALLEL="${AIMEE_LLM_RERANK_PARALLEL:-1}"
 
-# Every tier serves the SAME embedder — nomic-embed-text-v2-moe, 768-dim — so the
-# embedding dimension is uniform across cpu/small/mid/large and an index built on
-# one tier is readable by another. Tier selection is therefore a pure speed
-# decision (GPU offload) with no re-embed between tiers. Selected on the
-# frozen-ab-v1 suite (10,000 cases / 26,473 documents): 0.6058 NDCG@10 against
-# 0.5892 for the runner-up, winning both code and prose retrieval. The arch is
-# `nomic-bert-moe`, supported by the pinned llama.cpp LLAMA_TAG (b9775).
+# The embedder is NOT resolved here. Every per-model fact — coordinates, pooling,
+# width, context, query/document prefixes — lives in scripts/embedders.json, and both
+# this script and the gateway read that one file, so they cannot disagree about what is
+# being served. Switching embedders is one entry there plus AIMEE_LLM_EMBED_MODEL; it is
+# deliberately NOT an edit in three languages, which is how the pooling and prefix
+# regressions happened (both silent: well-formed vectors, no error, collapsed recall).
+#
+# Tier is orthogonal to model identity: every tier serves the SAME embedder, so the
+# dimension is uniform across cpu/small/mid/large and an index built on one tier is
+# readable by another. Tier is a pure GPU-offload decision with no re-embed between
+# tiers, and is the only thing this function still decides.
 embed_coords() {
   case "$EMBED_TIER" in
     cpu)             EMBED_NGL=0 ;;
     small|mid|large) EMBED_NGL="$NGL" ;;
     *) echo "aimee-llm: invalid AIMEE_LLM_EMBED_TIER='$EMBED_TIER' (cpu, small, mid, large)" >&2; exit 1 ;;
   esac
-  EMBED_REPO="ggml-org/Nomic-Embed-Text-V2-GGUF"
-  EMBED_FILE="nomic-embed-text-v2-moe-q8_0.gguf"
-  EMBED_REVISION="498da4a128ed12a423efb6f9b0242dbac80209bf"
-  EMBED_SHA256="36c5817bc25f379e62021f49efde05b10ed3b0c93ab8059c43173a7a5de73565"
+  # An unregistered model, or one whose coordinates are blank, aborts the boot: the
+  # descriptor exits non-zero having already explained itself on stderr. Serving the
+  # wrong pooling is undetectable later, so failing here is the cheap outcome.
+  local descriptor
+  descriptor="$("$PYTHON" "$GATEWAY" --embedder-descriptor "$AIMEE_LLM_EMBED_MODEL")" || exit 1
+  eval "$descriptor"
   EMBED_D="$MODELS_DIR/$EMBED_TIER"
 }
 rerank_coords() {
@@ -118,6 +129,9 @@ synth_coords() {
   esac
   SYNTH_D="$MODELS_DIR/$SYNTH_TIER"
 }
+# Model identity is chosen BEFORE the registry lookup, since it is the lookup key. The
+# gateway reads the same variable and resolves the same entry.
+export AIMEE_LLM_EMBED_MODEL="${AIMEE_LLM_EMBED_MODEL:-nomic-embed-text-v2-moe}"
 embed_coords
 rerank_coords
 synth_coords
@@ -174,19 +188,24 @@ export AIMEE_LLM_SYNTH_CTX="$SYNTH_CTX"
 # can raise AIMEE_LLM_SYNTH_CACHE_RAM. The embedder already runs --cache-ram 0.
 SYNTH_CACHE_RAM="${AIMEE_LLM_SYNTH_CACHE_RAM:-2048}"
 
-# Gateway-facing model identity (all tiers share the nomic embedder id + MEAN
-# pooling — the gateway reads these for /health + the drift guard).
+# Serving flags for the embedder: the registry decides, not a default here.
 #
-# POOLING IS NOT COSMETIC. nomic-embed-text-v2-moe declares mean pooling in its
-# 1_Pooling/config.json, and the benchmark that selected it scored it with mean.
-# Serving it with `last` (the correct value for the previous Qwen3 embedder)
-# produces vectors that are wrong but well-formed: nothing errors, the dimension
-# still checks out, and retrieval quality silently collapses. Changing the
-# embedder means re-deriving this value from the model card, not inheriting it.
-export AIMEE_LLM_EMBED_MODEL="${AIMEE_LLM_EMBED_MODEL:-nomic-embed-text-v2-moe}"
-export AIMEE_LLM_EMBED_POOLING="${AIMEE_LLM_EMBED_POOLING:-mean}"
+# POOLING IS NOT COSMETIC. Each embedder declares its pooling in its
+# 1_Pooling/config.json and is benchmarked with it; serving nomic with `last` (the
+# correct value for the previous Qwen3 embedder) produces vectors that are wrong but
+# well-formed — nothing errors, the dimension still checks out, and retrieval quality
+# silently collapses. That is exactly why this value now comes from the entry keyed by
+# model identity: a swap cannot inherit the previous model's pooling. An explicit
+# AIMEE_LLM_EMBED_POOLING still wins, for bisecting a suspected pooling bug without
+# editing the registry.
+export AIMEE_LLM_EMBED_POOLING="${AIMEE_LLM_EMBED_POOLING:-$EMBED_POOLING}"
 # AIMEE_LLM_RERANK_HEAD is set per-mode in resolve_upstreams (local rerank only).
 POOL="$AIMEE_LLM_EMBED_POOLING"
+# Embedder context, also from the registry. This was a hardcoded 8192 for every model,
+# which over-allocates for nomic (trained to 2048) and would silently exceed a model
+# trained shorter still — tokens past the trained positions embed to noise, with no
+# error. The registry records max_trained_positions per model, so serve that.
+EMBED_CTX="${AIMEE_LLM_EMBED_CTX:-$EMBED_CONTEXT}"
 
 pids=()
 
@@ -341,7 +360,7 @@ case "${AIMEE_LLM_STUB:-}" in
     # Embedder: one vector per input, no prompt-cache fragmentation (P2 flags).
     if [ "$EMBED_MODE" = "local" ]; then
       start embed 8081 -ngl "$EMBED_NGL" -m "$EMBED_D/embed.gguf" --embeddings --pooling "$POOL" \
-        --ctx-size 8192 -ub 512 -np 1 --cache-ram 0 --no-cache-idle-slots
+        --ctx-size "$EMBED_CTX" -ub 512 -np 1 --cache-ram 0 --no-cache-idle-slots
     fi
     # Reranker ENCODER: CLS pooling + flash-attn; the gateway applies the Dense head.
     if [ "$RERANK_MODE" = "local" ]; then
@@ -382,7 +401,7 @@ resolve_upstreams
 
 # Gateway (foreground-ish; backgrounded so we can reap any child exit).
 echo "aimee-llm: starting gateway on :${AIMEE_LLM_PORT:-8080}" >&2
-python3 /opt/aimee/aimee_llm_gateway.py >&2 &
+"$PYTHON" "$GATEWAY" >&2 &
 pids+=("$!")
 
 # If ANY supervised process exits, stop the rest and exit non-zero so the

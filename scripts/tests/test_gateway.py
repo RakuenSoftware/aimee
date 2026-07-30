@@ -3,11 +3,14 @@
 (validation, caps, typed errors, health aggregation), stdlib-only, plus a
 numpy-guarded do_rerank test against a mocked encoder. No model, no network.
 """
+import copy
 import importlib.util
 import io
 import json
 import os
+import shutil
 import socket
+import tempfile
 import threading
 import unittest
 import urllib.error
@@ -655,6 +658,101 @@ class EmbedPrefixes(unittest.TestCase):
         unknown = self._gw_with("some-unknown-embedder", AIMEE_LLM_STUB="1")
         with self.assertRaises(unknown.GatewayError):
             unknown.do_embed("hello")
+
+
+class EmbedderRegistry(unittest.TestCase):
+    """The registry file is the single place per-model facts live.
+
+    Its whole value is that a bad entry stops the gateway instead of producing
+    well-formed wrong vectors, so the failure modes are pinned here: a missing field is
+    not a default, and a broken file is not an empty registry.
+    """
+
+    VALID = {
+        "embedders": {
+            "some-model": {
+                "pooling": "mean",
+                "dim": 768,
+                "context": 2048,
+                "prefixes": {"query": "q: ", "document": "d: "},
+            }
+        }
+    }
+
+    def _written(self, document):
+        path = os.path.join(self.tmp, "embedders.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(document if isinstance(document, str) else json.dumps(document))
+        return path
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.gw = _gw()
+
+    def test_valid_registry_loads_and_normalises_keys(self):
+        registry = self.gw.load_embedders(self._written(self.VALID))
+        self.assertEqual(sorted(registry), ["some-model"])
+        self.assertEqual(registry["some-model"]["prefixes"]["query"], "q: ")
+
+    def test_shipped_registry_is_valid_and_covers_the_default_model(self):
+        # The default AIMEE_LLM_EMBED_MODEL must resolve, or every deployment that
+        # doesn't override it refuses to embed.
+        registry = self.gw.load_embedders()
+        self.assertIn(self.gw.embed_model_key(self.gw.EMBED_MODEL), registry)
+
+    def test_missing_required_field_is_refused(self):
+        for field in self.gw.EMBEDDER_REQUIRED_FIELDS:
+            document = copy.deepcopy(self.VALID)
+            del document["embedders"]["some-model"][field]
+            with self.assertRaises(self.gw.EmbedderRegistryError, msg=field) as caught:
+                self.gw.load_embedders(self._written(document))
+            self.assertIn(field, str(caught.exception))
+
+    def test_partial_or_extra_prefix_polarity_is_refused(self):
+        # Half a declaration is the dangerous case: it reads as intentional.
+        for prefixes in ({"query": "q: "}, {"document": "d: "}, {},
+                         {"query": "q: ", "document": "d: ", "passage": "p: "}):
+            document = copy.deepcopy(self.VALID)
+            document["embedders"]["some-model"]["prefixes"] = prefixes
+            with self.assertRaises(self.gw.EmbedderRegistryError, msg=repr(prefixes)):
+                self.gw.load_embedders(self._written(document))
+
+    def test_non_string_prefix_is_refused(self):
+        document = copy.deepcopy(self.VALID)
+        document["embedders"]["some-model"]["prefixes"]["query"] = None
+        with self.assertRaises(self.gw.EmbedderRegistryError):
+            self.gw.load_embedders(self._written(document))
+
+    def test_malformed_or_empty_file_is_refused(self):
+        for document in ("not json", "[]", '{"embedders": {}}', '{"embedders": []}',
+                         '{"embedders": {"m": "nope"}}'):
+            with self.assertRaises(self.gw.EmbedderRegistryError, msg=document):
+                self.gw.load_embedders(self._written(document))
+
+    def test_absent_file_is_refused(self):
+        with self.assertRaises(self.gw.EmbedderRegistryError):
+            self.gw.load_embedders(os.path.join(self.tmp, "does-not-exist.json"))
+
+    def test_broken_registry_refuses_to_serve_rather_than_serving_bare(self):
+        # Import must not raise (the process should report, not traceback), but every
+        # embed path must fail closed with the operator's error text.
+        path = self._written("not json")
+        with mock.patch.dict(os.environ, {"AIMEE_LLM_EMBEDDERS_FILE": path}):
+            gw = _gw()
+        self.assertIsNotNone(gw.EMBEDDERS_ERROR)
+        with self.assertRaises(gw.GatewayError) as caught:
+            gw.embed_prefix("query")
+        self.assertEqual(caught.exception.status, 503)
+        self.assertEqual(caught.exception.body["error"]["code"], "embedder_registry_invalid")
+
+    def test_broken_registry_refuses_startup(self):
+        path = self._written("not json")
+        with mock.patch.dict(os.environ, {"AIMEE_LLM_EMBEDDERS_FILE": path}):
+            gw = _gw()
+        with mock.patch.object(gw.sys, "stderr", io.StringIO()) as err:
+            self.assertEqual(gw.main(), 2)
+        self.assertIn("cannot read embedder registry", err.getvalue())
 
 
 class EmbedPrefixRouting(unittest.TestCase):

@@ -1,0 +1,80 @@
+{
+  "_comment": [
+    "The embedder registry: everything that varies from one embedder to the next, in",
+    "one place, keyed by model identity.",
+    "",
+    "WHY THIS FILE EXISTS. These facts used to be scattered across three files —",
+    "coordinates in aimee-llm-supervisor.sh's embed_coords(), pooling ~110 lines away in",
+    "the same script, prefixes in aimee_llm_gateway.py, the width in src/headers/aimee.h.",
+    "Two of them fail SILENTLY when wrong, and both have already gone wrong:",
+    "",
+    "  - pooling defaulted to `last`, correct for Qwen3 and wrong for nomic. Wrong",
+    "    pooling yields vectors that are correctly shaped, correctly normalised and",
+    "    simply wrong. Nothing errors; recall collapses.",
+    "  - prefixes were absent entirely, so nomic served at 0.5823 NDCG@10 instead of",
+    "    the 0.6075 it was selected on — below the runner-up it was chosen over.",
+    "",
+    "Switching embedders should be adding one entry here, not a scavenger hunt across",
+    "three languages. Anything that is per-model belongs in this file; anything derived",
+    "at runtime (the deployed dimension: pinned > recorded > probed) does not.",
+    "",
+    "EVERY FIELD IS REQUIRED, including empty prefixes. A model whose card defines no",
+    "prefixes declares that with empty strings — readers distinguish 'declared none'",
+    "from 'not registered', and refuse to serve the latter rather than guess.",
+    "",
+    "Derive these from the model card, never by copying the previous entry. `prefixes`",
+    "comes from the card's usage section, `pooling` from its 1_Pooling/config.json, and",
+    "`context` from max_trained_positions (NOT the tokenizer's model_max_length, which",
+    "is often a smaller artifact)."
+  ],
+
+  "embedders": {
+    "nomic-embed-text-v2-moe": {
+      "repo": "ggml-org/Nomic-Embed-Text-V2-GGUF",
+      "file": "nomic-embed-text-v2-moe-q8_0.gguf",
+      "revision": "498da4a128ed12a423efb6f9b0242dbac80209bf",
+      "sha256": "36c5817bc25f379e62021f49efde05b10ed3b0c93ab8059c43173a7a5de73565",
+      "arch": "nomic-bert-moe",
+      "pooling": "mean",
+      "dim": 768,
+      "context": 2048,
+      "prefixes": {
+        "query": "search_query: ",
+        "document": "search_document: "
+      },
+      "notes": [
+        "Selected on frozen-ab-v1 (10,000 cases / 26,473 documents) at 0.6075 NDCG@10",
+        "WITH these prefixes. Serving it without them measures 0.5823.",
+        "arch nomic-bert-moe is registered by the pinned llama.cpp LLAMA_TAG=b9775, so",
+        "serving it needs no runtime bump.",
+        "context 2048 is max_trained_positions; the tokenizer's model_max_length of 512",
+        "is an artifact, not a limit.",
+        "Q8_0 costs -0.0037 NDCG@10 against bf16, and ~3.6x a25m's CPU throughput",
+        "(598 vs 2,155 tok/s)."
+      ]
+    },
+
+    "bekko-a25m": {
+      "repo": "",
+      "file": "",
+      "revision": "",
+      "sha256": "",
+      "arch": "",
+      "pooling": "mean",
+      "dim": 768,
+      "context": 512,
+      "prefixes": {
+        "query": "",
+        "document": ""
+      },
+      "notes": [
+        "Not deployed — the measured runner-up (0.5909 NDCG@10), kept because it is the",
+        "worked example of a model whose card defines NO prefixes: the empty pair above",
+        "is a declaration, not a gap. Needing no prefixes means its benchmark score",
+        "carries into production unchanged, which is a real if unglamorous advantage.",
+        "Provisioning coordinates are blank because nothing fetches it; fill them in",
+        "before serving it."
+      ]
+    }
+  }
+}

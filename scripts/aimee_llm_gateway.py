@@ -27,8 +27,9 @@ Config (env):
   AIMEE_LLM_RERANK_URL    ettin-encoder llama-server base (default http://127.0.0.1:8082)
   AIMEE_LLM_RERANK_HEAD   dir with 2_Dense/3_LayerNorm/4_Dense safetensors (the head)
   AIMEE_LLM_EMBED_MODEL   embedder model id (for /health, the (model_id,dim) drift guard,
-                          and the EMBED_PREFIXES lookup — an id absent from that table is
+                          and the registry lookup — an id absent from the registry is
                           refused rather than served without prefixes)
+  AIMEE_LLM_EMBEDDERS_FILE  embedder registry path (default scripts/embedders.json)
   AIMEE_LLM_PORT          listen port (default 8080)
   AIMEE_LLM_BATCH_CAP     /embed_batch max vectors per call (default 512 -> 413 on excess)
 
@@ -38,6 +39,7 @@ follow-up; this module is the retrieval gateway + the validated rerank-head path
 import hmac
 import json
 import os
+import shlex
 import sys
 import threading
 import time
@@ -53,26 +55,67 @@ PORT = int(os.environ.get("AIMEE_LLM_PORT", "8080"))
 BATCH_CAP = int(os.environ.get("AIMEE_LLM_BATCH_CAP", "512"))
 RERANK_SEP = "</s>"
 
-# ---- per-model query/document prefixes ----
-# Retrieval embedders are trained asymmetrically: the query side and the document side
-# each get their own prefix, and serving without them is a silent quality regression
-# (measured: nomic 0.6075 NDCG@10 with its card prefixes vs 0.5823 prefix-free — large
-# enough to invert the model selection). See
-# docs/proposals/pending/embedder-query-document-prefixes.md.
+# ---- the embedder registry ----
+# Everything that varies per embedder — coordinates, pooling, width, context, and the
+# query/document prefixes — lives in ONE data file, scripts/embedders.json, keyed by
+# model identity. The supervisor reads the same file for provisioning and serving flags,
+# so switching embedders is one entry rather than edits scattered across a shell script,
+# this module and a C header. See that file's _comment for why.
 #
-# The table is keyed by MODEL IDENTITY, never a global setting, so swapping the embedder
-# cannot silently inherit the previous model's pair. That is the same failure class as
-# AIMEE_LLM_EMBED_POOLING, which defaulted to `last` (right for Qwen3, silently wrong for
-# nomic — well-formed vectors, no error, collapsed recall).
-#
-# An entry mapping to empty strings is a POSITIVE DECLARATION that the model's card
-# defines no prefixes; it is deliberately distinguishable from "not in the table", which
-# is refused rather than served bare. Add a model only with its card's documented pair.
-EMBED_PREFIXES = {
-    "nomic-embed-text-v2-moe": {"query": "search_query: ", "document": "search_document: "},
-    "bekko-a25m": {"query": "", "document": ""},
-}
+# Keying on identity is what stops a swap from silently inheriting the previous model's
+# settings — the failure AIMEE_LLM_EMBED_POOLING already demonstrated by defaulting to
+# `last` (right for Qwen3, silently wrong for nomic: well-formed vectors, no error,
+# collapsed recall).
+EMBEDDERS_FILE = os.environ.get("AIMEE_LLM_EMBEDDERS_FILE") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "embedders.json"
+)
 INPUT_TYPES = ("query", "document")
+# Fields every entry must declare. Absent means the operator has not thought about it,
+# which for pooling or prefixes is indistinguishable at runtime from thinking wrongly.
+EMBEDDER_REQUIRED_FIELDS = ("pooling", "dim", "context", "prefixes")
+# Additionally required to SERVE a model — the supervisor has to fetch a specific,
+# verifiable file. An entry may carry these blank (a measured model nobody deploys);
+# --embedder-descriptor refuses such an entry rather than let the fetch fail obscurely.
+EMBEDDER_PROVISION_FIELDS = ("repo", "file", "revision", "sha256")
+
+
+class EmbedderRegistryError(RuntimeError):
+    """The registry is missing or malformed — an operator error, surfaced at startup."""
+
+
+def load_embedders(path=None):
+    """Parse the registry into {normalised model id: spec}. Raises on anything malformed
+    rather than degrading, since every degraded mode here is silent downstream."""
+    path = path or EMBEDDERS_FILE
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            document = json.load(handle)
+    except (OSError, ValueError) as exc:
+        raise EmbedderRegistryError(f"cannot read embedder registry {path}: {exc}") from exc
+    if not isinstance(document, dict):
+        raise EmbedderRegistryError(f"{path}: top level must be an object")
+    table = document.get("embedders")
+    if not isinstance(table, dict) or not table:
+        raise EmbedderRegistryError(f"{path} declares no embedders")
+    registry = {}
+    for model_id, spec in table.items():
+        if not isinstance(spec, dict):
+            raise EmbedderRegistryError(f"{path}: entry {model_id!r} is not an object")
+        missing = [field for field in EMBEDDER_REQUIRED_FIELDS if field not in spec]
+        if missing:
+            raise EmbedderRegistryError(
+                f"{path}: entry {model_id!r} is missing {', '.join(missing)}"
+            )
+        prefixes = spec["prefixes"]
+        if not isinstance(prefixes, dict) or set(prefixes) != set(INPUT_TYPES):
+            raise EmbedderRegistryError(
+                f"{path}: entry {model_id!r} must declare prefixes for exactly "
+                f"{', '.join(INPUT_TYPES)} (empty strings if its card defines none)"
+            )
+        if not all(isinstance(prefixes[side], str) for side in INPUT_TYPES):
+            raise EmbedderRegistryError(f"{path}: entry {model_id!r} has a non-string prefix")
+        registry[embed_model_key(model_id)] = spec
+    return registry
 # Ingest is the overwhelming majority of embed traffic and every ingest path is a
 # document, so an omitted input_type means `document` and only the query paths opt in.
 # It must NOT mean "no prefix": defaulting to bare text is exactly the regression this
@@ -90,6 +133,19 @@ def embed_model_key(model_id):
     return (model_id or "").split("@", 1)[0].strip().lower()
 
 
+# Read once at import — the registry is deployment data, not request data. A malformed or
+# missing file is an operator error, so the failure is kept rather than swallowed and is
+# reported twice over: main() refuses to start on it, and any embed request answers 503
+# carrying the same message (which is what an already-running gateway would see if the
+# file were edited badly under it).
+try:
+    EMBEDDERS = load_embedders()
+    EMBEDDERS_ERROR = None
+except EmbedderRegistryError as exc:  # pragma: no cover - exercised via load_embedders
+    EMBEDDERS = {}
+    EMBEDDERS_ERROR = str(exc)
+
+
 def parse_input_type(value):
     """Validate a caller-supplied input_type. Raises GatewayError(400)."""
     if value is None or value == "":
@@ -103,24 +159,31 @@ def parse_input_type(value):
     return value
 
 
-def embed_prefix(input_type, model_id=None):
-    """Return the prefix for `input_type` under the configured embedder.
+def embedder_spec(model_id=None):
+    """Return the registry entry for the configured embedder.
 
-    Refuses (503) an embedder absent from the table rather than serving it bare or with
-    another model's prefixes — an unregistered model is an operator error we can detect,
-    and quietly embedding without prefixes is undetectable downstream.
+    Refuses (503) a model absent from the registry rather than serving it with empty or
+    inherited settings — an unregistered model is an operator error we can detect, while
+    quietly embedding with the wrong prefixes or pooling is undetectable downstream.
     """
+    if EMBEDDERS_ERROR is not None:
+        raise GatewayError(503, "embedder_registry_invalid", EMBEDDERS_ERROR)
     key = embed_model_key(EMBED_MODEL if model_id is None else model_id)
-    pair = EMBED_PREFIXES.get(key)
-    if pair is None:
+    spec = EMBEDDERS.get(key)
+    if spec is None:
         raise GatewayError(
             503,
             "embedder_unregistered",
-            f"embedder {key or '(unset)'} has no query/document prefix entry; add its "
-            "card's documented pair to EMBED_PREFIXES (an explicitly empty pair declares "
-            "a model that defines none)",
+            f"embedder {key or '(unset)'} is not in {EMBEDDERS_FILE}; add an entry "
+            "declaring its pooling, dim, context and prefixes (empty prefixes are a "
+            "valid declaration for a model whose card defines none)",
         )
-    return pair[input_type]
+    return spec
+
+
+def embed_prefix(input_type, model_id=None):
+    """Return the prefix for `input_type` under the configured embedder."""
+    return embedder_spec(model_id)["prefixes"][input_type]
 
 # CI/dev STUB mode: serve deterministic embed/rerank/synth with NO upstream
 # llama-servers. The supervisor skips launching the per-role servers and the
@@ -826,7 +889,49 @@ def build_server():
     return ThreadingHTTPServer((BIND, PORT), Handler)
 
 
+def embedder_descriptor_shell(model_id):
+    """Emit the configured embedder's registry entry as shell assignments.
+
+    This is how the supervisor stops carrying its own copy of the coordinates: it evals
+    this instead of a `case` statement, so the shell and the gateway cannot disagree
+    about which model, pooling or width is being served. Raises EmbedderRegistryError on
+    an unregistered model or one whose provisioning coordinates are blank — both are
+    operator errors that must stop the boot, not be papered over with a default.
+    """
+    registry = load_embedders()
+    key = embed_model_key(model_id)
+    spec = registry.get(key)
+    if spec is None:
+        raise EmbedderRegistryError(
+            f"embedder {key or '(unset)'} is not in {EMBEDDERS_FILE}; registered: "
+            f"{', '.join(sorted(registry)) or '(none)'}"
+        )
+    blank = [f for f in EMBEDDER_PROVISION_FIELDS if not str(spec.get(f, "")).strip()]
+    if blank:
+        raise EmbedderRegistryError(
+            f"embedder {key} cannot be served: {', '.join(blank)} "
+            f"{'is' if len(blank) == 1 else 'are'} blank in {EMBEDDERS_FILE}"
+        )
+    fields = {
+        "EMBED_MODEL_KEY": key,
+        "EMBED_REPO": spec["repo"],
+        "EMBED_FILE": spec["file"],
+        "EMBED_REVISION": spec["revision"],
+        "EMBED_SHA256": spec["sha256"],
+        "EMBED_POOLING": spec["pooling"],
+        "EMBED_DIM": spec["dim"],
+        "EMBED_CONTEXT": spec["context"],
+    }
+    return "".join(f"{name}={shlex.quote(str(value))}\n" for name, value in fields.items())
+
+
 def main():  # pragma: no cover
+    # Refuse to start on a broken registry. Serving embeddings with unknown pooling or
+    # prefixes is undetectable downstream, so a startup failure is the cheap outcome.
+    if EMBEDDERS_ERROR is not None:
+        sys.stderr.write(f"aimee-llm-gateway: {EMBEDDERS_ERROR}\n")
+        sys.stderr.flush()
+        return 2
     # §1a bind guard: refuse (strict) or warn on an unauthenticated wildcard bind.
     if validate_bind(BIND, AUTH_TOKEN, STRICT_BIND) == "warn":
         audit("startup", SCOPE_DEFAULT, "warn", bind=BIND, auth="off",
@@ -836,7 +941,25 @@ def main():  # pragma: no cover
                      f"auth={'on' if AUTH_TOKEN else 'off'}\n")
     sys.stderr.flush()
     srv.serve_forever()
+    return 0
+
+
+def cli(argv):  # pragma: no cover - thin argv dispatch, behaviour covered per-callee
+    """`--embedder-descriptor [model]` prints shell assignments for the supervisor to
+    eval; no arguments runs the gateway."""
+    if argv[:1] == ["--embedder-descriptor"]:
+        model = argv[1] if len(argv) > 1 else EMBED_MODEL
+        try:
+            sys.stdout.write(embedder_descriptor_shell(model))
+        except EmbedderRegistryError as exc:
+            sys.stderr.write(f"aimee-llm: {exc}\n")
+            return 2
+        return 0
+    if argv:
+        sys.stderr.write(f"aimee-llm: unknown arguments: {' '.join(argv)}\n")
+        return 2
+    return main()
 
 
 if __name__ == "__main__":  # pragma: no cover
-    main()
+    sys.exit(cli(sys.argv[1:]))
