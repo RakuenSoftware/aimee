@@ -22,7 +22,8 @@ Validation performed:
   dependents, one call-only dependent, merged provenance, exact dependencies, and unresolved-target
   failure;
 - route-gated cross-project coverage proving an identical un-routed distractor is excluded;
-- unique co-edit projection coverage with explicit `projection` provenance;
+- unique co-edit projection coverage with explicit `projection` provenance, including a combined
+  local-projection/cross-project fixture that proves every local edge precedes the external tail;
 - KB HTTP and client round-trip coverage for edge metadata;
 - successful `aimee-kb` and `aimee-blast-radius-eval` builds; and
 - the checked-in deterministic corpus updated to make exact identities, provenance, freshness, and

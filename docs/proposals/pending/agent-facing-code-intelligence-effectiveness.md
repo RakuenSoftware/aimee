@@ -667,3 +667,10 @@ residual proposal instead of declaring the intended effectiveness outcome comple
   duplicates, admits cross-project tails only through resolved structural routes, resolves legacy
   projection basenames uniquely, and emits provenance/confidence/project/generation/freshness for
   every edge. Its frozen implementation diff receives a separate roundtable gate before PR.
+- **E3 implementation round 1 — 2026-07-30 — changes requested, 3/3 participants, not
+  degraded.** All three seats found that local co-edit projection edges were appended after the
+  resolver's cross-project tail. A shared stable local-first partition now runs after additive
+  projections in both public blast-radius paths, and an adversarial fixture combines a local-only
+  projection with a route-gated external import and asserts that no local edge follows an external
+  edge. Roundtable run: `roundtable-5d582db9c64174793488f921` (artifact
+  `a309798e4843249ac313deecef3b9749cc318845c4b95498325216b374f3d4b1`).
