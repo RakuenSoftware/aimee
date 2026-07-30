@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -168,11 +169,11 @@ func pullRequestProposalDetails(request, title string) pullRequestProposal {
 	}
 
 	details := pullRequestProposal{
-		Goal:  markdownSection(request, "goal", "summary"),
+		Goal:  markdownSection(request, "goal", "summary", "problem"),
 		Scope: markdownSection(request, "scope"),
 	}
 	if details.Scope == "" {
-		details.Scope = markdownSection(request, "acceptance criteria")
+		details.Scope = markdownSection(request, "acceptance criteria", "acceptance")
 	}
 	if details.Goal == "" {
 		details.Goal = title
@@ -406,22 +407,42 @@ func markdownCode(value string) string {
 	return delimiter + value + delimiter
 }
 
+type diffHighlight struct {
+	markdown string
+	priority int
+	order    int
+}
+
+func diffHighlightPriority(path string) int {
+	path = filepath.ToSlash(path)
+	if strings.HasPrefix(path, "docs/proposals/") {
+		return 2
+	}
+	if strings.HasPrefix(path, "docs/") {
+		return 1
+	}
+	return 0
+}
+
 func parseDiffHighlights(diff string) []string {
-	var highlights []string
+	var candidates []diffHighlight
 	var path string
 	var removed, added []string
 	flush := func() {
-		if len(highlights) >= maxDiffHighlights {
-			removed, added = nil, nil
-			return
-		}
-		if path != "" && len(path) <= 300 && len(removed) == 1 && len(added) == 1 {
+		if path != "" && len(path) <= 300 && len(removed) == 1 && len(added) >= 1 && len(added) <= 4 {
 			before := strings.TrimSpace(removed[0])
-			after := strings.TrimSpace(added[0])
-			if before != "" && after != "" && len(before) <= 240 && len(after) <= 240 &&
-				!credentialBearingLine(before) && !credentialBearingLine(after) {
-				highlights = append(highlights, fmt.Sprintf("- `%s`: changed %s to %s.", path,
-					markdownCode(before), markdownCode(after)))
+			after := strings.TrimSpace(strings.Join(added, " "))
+			safe := !credentialBearingLine(before)
+			for _, line := range added {
+				safe = safe && !credentialBearingLine(line)
+			}
+			if before != "" && after != "" && len(before) <= 240 && len(after) <= 480 && safe {
+				candidates = append(candidates, diffHighlight{
+					markdown: fmt.Sprintf("- `%s`: changed %s to %s.", path,
+						markdownCode(before), markdownCode(after)),
+					priority: diffHighlightPriority(path),
+					order:    len(candidates),
+				})
 			}
 		}
 		removed, added = nil, nil
@@ -446,6 +467,20 @@ func parseDiffHighlights(diff string) []string {
 		}
 	}
 	flush()
+	sort.SliceStable(candidates, func(left, right int) bool {
+		if candidates[left].priority != candidates[right].priority {
+			return candidates[left].priority < candidates[right].priority
+		}
+		return candidates[left].order < candidates[right].order
+	})
+	count := len(candidates)
+	if count > maxDiffHighlights {
+		count = maxDiffHighlights
+	}
+	highlights := make([]string, 0, count)
+	for _, candidate := range candidates[:count] {
+		highlights = append(highlights, candidate.markdown)
+	}
 	return highlights
 }
 

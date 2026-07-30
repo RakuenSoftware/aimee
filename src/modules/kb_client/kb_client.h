@@ -1238,6 +1238,10 @@ char *kb_client_code_hybrid(const char *query, const char *symbol, const char *p
 char *kb_client_code_hybrid_scoped(const char *query, const char *symbol,
                                    const char *preferred_project, int all_projects, int max_results,
                                    int *status_out);
+/* Strict active-project task packet. The route fixes max_results=4 and its
+ * resident budget at 1200 tokens; project is required and never broadens. */
+char *kb_client_code_context(const char *query, const char *symbol, const char *project,
+                             int *status_out);
 char *kb_client_code_graph_hubs(const char *project, int max_results, int *status_out);
 char *kb_client_code_graph_audit(const char *project, int max_findings, int *status_out);
 char *kb_client_code_lessons(const char *project, int *status_out);
