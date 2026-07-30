@@ -404,6 +404,15 @@ static void test_agent_route_capacity(void)
    cfg.agents[1].max_scope = AGENT_SCOPE_BOUNDED;
    cfg.agents[0].max_scope = AGENT_SCOPE_BOUNDED;
    assert(!agent_route_with_caps_saturated(&cfg, "review", 0, 0, AGENT_SCOPE_WHOLE_TASK, 1, 0));
+   cfg.agents[0].max_scope = AGENT_SCOPE_UNSET;
+   strcpy(cfg.agents[0].name, "capable-saturated");
+   cfg.agents[0].tools_enabled = 0;
+   cfg.agents[1].enabled = 0;
+   assert(!agent_route_with_caps_saturated(&cfg, "review", MODEL_CAP_TOOLS, 0,
+                                            AGENT_SCOPE_UNSET, 1, 0));
+   cfg.agents[0].tools_enabled = 1;
+   assert(agent_route_with_caps_saturated(&cfg, "review", MODEL_CAP_TOOLS, 0,
+                                           AGENT_SCOPE_UNSET, 1, 0));
    cfg.agents[1].max_scope = AGENT_SCOPE_UNSET;
    cfg.agents[0].max_scope = AGENT_SCOPE_UNSET;
    agent_set_route_capacity_probe(NULL);
