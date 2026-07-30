@@ -150,6 +150,31 @@ fi
 
 # 3. Embedded DB2, only when the operator configured no external server.
 if [ "$external_db" -eq 0 ]; then
+    PGMAJOR="${AIMEE_DB2_PG_MAJOR:-18}"
+    # Overridable so the entrypoint's cluster handling is testable without a real
+    # PostgreSQL install; deployments never set it.
+    PGBIN="${AIMEE_DB2_PG_BIN:-/usr/lib/postgresql/$PGMAJOR/bin}"
+    PGDATA="$AIMEE_HOME/postgres"
+    PGSOCK="$AIMEE_HOME/run"
+    DB=aimee_shared
+    mkdir -p "$PGSOCK"
+
+    # A one-shot that SHARES the kb's volume finds the cluster already up, owned
+    # by the long-lived kb container -- the managed deploy's aimee-server-identity
+    # job is exactly this. Connect to that cluster instead of provisioning a
+    # second one over the same data directory.
+    #
+    # This has to precede the root check below: that job runs as root on purpose
+    # (it chowns the server identity it installs), and PostgreSQL forbids running
+    # the SERVER as root, not connecting to one as root. Refusing here failed
+    # managed server identity enrollment on every clean install.
+    if "$PGBIN/pg_isready" --host="$PGSOCK" --quiet 2>/dev/null; then
+        echo "aimee-kb: PostgreSQL already running on $PGSOCK; using it instead of" \
+             "starting a second cluster" >&2
+        start_embedder
+        exec aimee-kb "$@"
+    fi
+
     # PostgreSQL refuses to run as root, unconditionally. The image declares
     # USER aimee, so this only trips when a runtime overrides it (e.g. --user root
     # to work around bind-mount ownership). Say so, rather than letting initdb
@@ -160,12 +185,6 @@ if [ "$external_db" -eq 0 ]; then
         echo "  AIMEE_DB2_URL to an external PostgreSQL server to skip the internal one." >&2
         exit 1
     fi
-    PGMAJOR="${AIMEE_DB2_PG_MAJOR:-18}"
-    PGBIN="/usr/lib/postgresql/$PGMAJOR/bin"
-    PGDATA="$AIMEE_HOME/postgres"
-    PGSOCK="$AIMEE_HOME/run"
-    DB=aimee_shared
-    mkdir -p "$PGSOCK"
 
     if [ ! -f "$PGDATA/PG_VERSION" ]; then
         # initdb as the current (aimee) user, so that user is the cluster
