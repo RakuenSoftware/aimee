@@ -868,6 +868,156 @@ static int bash_cmd_can_write(const char *cmd)
    return 0;
 }
 
+/* Does a writing Bash command reach OUTSIDE every managed worktree?
+ *
+ * The isolation check judges the tool's file_path, or the cwd when there isn't one. For a
+ * Bash call that means it judges WHERE THE COMMAND STARTS, not what it touches -- so
+ * `cd /repo && python3 - <<EOF ...` passes while writing anywhere on disk. That is not
+ * hypothetical: it is how this guard was bypassed, from a session whose cwd was a
+ * perfectly good worktree.
+ *
+ * Two escape shapes are detected, both cheap and both literal:
+ *   1. `cd <abs>` / `pushd <abs>` to a directory outside a managed worktree -- the
+ *      observed bypass, and the one that relocates everything after it.
+ *   2. a redirect whose target is an absolute path outside a managed worktree.
+ *
+ * Only consulted when bash_cmd_can_write() already says the command mutates, so a
+ * read-only command naming absolute paths is untouched.
+ *
+ * LIMITS, stated plainly rather than implied: this does not parse shell. A path built
+ * from a variable, passed through an interpreter's own logic, or reached via a symlink
+ * will not be seen. It is defence in depth against the common and observed shapes, not a
+ * sandbox -- a determined agent can still get out, and the durable fix is executing tool
+ * calls under an OS-level write confinement rather than pattern-matching their text. */
+int attn_bash_escapes_worktree(const char *bash_cmd, const char *cwd)
+{
+   if (!bash_cmd || !bash_cmd[0])
+      return 0;
+   if (!bash_cmd_can_write(bash_cmd))
+      return 0;
+
+   /* ---- 1. cd / pushd to an absolute path ---- */
+   static const char *const chdirs[] = {"cd ", "pushd ", NULL};
+   for (int i = 0; chdirs[i]; i++)
+   {
+      const char *p = bash_cmd;
+      size_t toklen = strlen(chdirs[i]);
+      while ((p = strstr(p, chdirs[i])) != NULL)
+      {
+         /* Must start a command: beginning of string, or after ; && || | newline. */
+         int at_cmd_start = (p == bash_cmd);
+         if (!at_cmd_start)
+         {
+            const char *b = p - 1;
+            while (b > bash_cmd && (*b == ' ' || *b == '\t'))
+               b--;
+            at_cmd_start = (*b == ';' || *b == '&' || *b == '|' || *b == '\n' || *b == '(');
+         }
+         const char *arg = p + toklen;
+         p = arg;
+         if (!at_cmd_start)
+            continue;
+         while (*arg == ' ' || *arg == '\t' || *arg == '\'' || *arg == '"')
+            arg++;
+         if (*arg != '/')
+            continue; /* relative cd stays within the worktree by construction */
+         char path[2048];
+         size_t n = 0;
+         while (arg[n] && n + 1 < sizeof(path) && arg[n] != ' ' && arg[n] != '\t' &&
+                arg[n] != ';' && arg[n] != '&' && arg[n] != '|' && arg[n] != '\'' &&
+                arg[n] != '"' && arg[n] != '\n')
+         {
+            path[n] = arg[n];
+            n++;
+         }
+         path[n] = '\0';
+         char norm[2048];
+         attn_lexical_normalize(path, norm, sizeof(norm));
+         if (!attn_path_in_managed_worktree(norm))
+            return 1;
+      }
+   }
+
+   /* ---- 2. redirect target that is an absolute path ---- */
+   for (const char *q = strchr(bash_cmd, '>'); q; q = strchr(q + 1, '>'))
+   {
+      const char *t = q + 1;
+      if (*t == '>')
+         t++;
+      if (*t == '&')
+         continue; /* fd dup */
+      while (*t == ' ' || *t == '\t' || *t == '\'' || *t == '"')
+         t++;
+      if (*t != '/')
+         continue;
+      if (strncmp(t, "/dev/null", 9) == 0)
+         continue;
+      char path[2048];
+      size_t n = 0;
+      while (t[n] && n + 1 < sizeof(path) && t[n] != ' ' && t[n] != '\t' && t[n] != ';' &&
+             t[n] != '&' && t[n] != '|' && t[n] != '\'' && t[n] != '"' && t[n] != '\n')
+      {
+         path[n] = t[n];
+         n++;
+      }
+      path[n] = '\0';
+      char norm[2048];
+      attn_lexical_normalize(path, norm, sizeof(norm));
+      if (!attn_path_in_managed_worktree(norm) && !attn_path_is_harness_state(norm))
+         return 1;
+   }
+
+   /* ---- 3. absolute args to commands whose arguments ARE the write target ----
+    * Only verbs where every path argument is written: tee, truncate, touch, mkdir, rm,
+    * shred, install, sed -i. Deliberately NOT cp/mv/rsync -- their first arguments are
+    * SOURCES, and reading an outside file to write inside the worktree is legitimate. */
+   static const char *const target_verbs[] = {"tee", "truncate", "touch",   "mkdir",
+                                              "rm",  "shred",    "install", NULL};
+   for (int i = 0; target_verbs[i]; i++)
+   {
+      if (!cmd_has_word_prefix(bash_cmd, target_verbs[i]) && !strstr(bash_cmd, target_verbs[i]))
+         continue;
+      const char *p = strstr(bash_cmd, target_verbs[i]);
+      while (p)
+      {
+         /* Scan this segment's arguments up to the next command separator. */
+         const char *a = p + strlen(target_verbs[i]);
+         while (*a && *a != ';' && *a != '|' && *a != '\n' && !(*a == '&' && a[1] == '&'))
+         {
+            while (*a == ' ' || *a == '\t' || *a == '\'' || *a == '"')
+               a++;
+            if (*a == '/')
+            {
+               char path[2048];
+               size_t n = 0;
+               while (a[n] && n + 1 < sizeof(path) && a[n] != ' ' && a[n] != '\t' && a[n] != ';' &&
+                      a[n] != '&' && a[n] != '|' && a[n] != '\'' && a[n] != '"' && a[n] != '\n')
+               {
+                  path[n] = a[n];
+                  n++;
+               }
+               path[n] = '\0';
+               char norm[2048];
+               attn_lexical_normalize(path, norm, sizeof(norm));
+               if (strncmp(norm, "/dev/null", 9) != 0 && !attn_path_in_managed_worktree(norm) &&
+                   !attn_path_is_harness_state(norm))
+                  return 1;
+               a += n;
+               continue;
+            }
+            /* skip a non-absolute token */
+            while (*a && *a != ' ' && *a != '\t' && *a != ';' && *a != '|' && *a != '\n' &&
+                   !(*a == '&' && a[1] == '&'))
+               a++;
+         }
+         p = strstr(p + 1, target_verbs[i]);
+      }
+   }
+
+   (void)cwd;
+   return 0;
+}
+
 /* External-memory decision (pure, testable). Returns 1 to BLOCK a tool call
  * that would WRITE the harness's file-based agent-memory store — directly
  * (a mutating file tool whose target resolves into the store) or via a Bash
@@ -902,6 +1052,214 @@ int attn_external_memory_blocked(attn_op_t op, const char *tool_name, const char
    char norm[2048];
    attn_lexical_normalize(joined, norm, sizeof(norm));
    return attn_path_is_external_agent_memory(norm);
+}
+
+/* ---- session BRANCH lineage enforcement ------------------------------------
+ *
+ * attn_path_in_managed_worktree above checks only that a path sits under a managed
+ * worktree directory. Its comment claimed those are "isolated worktrees on a branch off
+ * the default branch" -- but nothing verified the branch, so a worktree created by hand
+ * (`git worktree add -b x <arbitrary-commit>`) under .claude/worktrees/ satisfied the
+ * guard while being rooted on another session's branch. That is how a session ended up
+ * 115 commits behind the default branch, carrying ~18 commits of another agent's
+ * unmerged work it could not separate from its own.
+ *
+ * The rule being enforced:
+ *   PRIMARY  session branch must be cut from the DEFAULT branch.
+ *   DELEGATE session branch may be cut from its parent primary's branch.
+ *
+ * The base ref is read from the worktree registry, written by the launcher at creation
+ * time (workspace.c). It is deliberately NOT taken from the environment: this guard
+ * refuses env-var inputs on principle, because an LLM can set AIMEE_DELEGATE_DEPTH on
+ * any command and would simply declare itself a delegate to escape the primary rule.
+ * The registry is written by trusted code before the agent runs. */
+
+/* Pure decision (testable): 1 = BLOCK.
+ *  base_branch      the ref this worktree was cut from, "" if unknown/unregistered
+ *  default_branch   the repo's default branch, "" if unresolvable
+ *  base_is_registered  1 iff base_branch is itself a registered session branch,
+ *                      i.e. a legitimate delegate parent
+ * Unknown base blocks: a worktree with no registry row was not created by the launcher,
+ * which is exactly the hand-rolled case this exists to catch. Fail closed. */
+int attn_session_branch_blocked(const char *base_branch, const char *default_branch,
+                                int base_is_registered)
+{
+   if (!base_branch || !base_branch[0])
+      return 1; /* unregistered worktree -> not launcher-created -> block */
+   if (default_branch && default_branch[0] && strcmp(base_branch, default_branch) == 0)
+      return 0; /* primary rooted on the default branch */
+   /* Accept both "main" and "origin/main" spellings of the same default. */
+   if (default_branch && default_branch[0])
+   {
+      const char *slash = strrchr(default_branch, '/');
+      const char *bare = slash ? slash + 1 : default_branch;
+      const char *bslash = strrchr(base_branch, '/');
+      const char *bbare = bslash ? bslash + 1 : base_branch;
+      if (strcmp(bbare, bare) == 0)
+         return 0;
+   }
+   if (base_is_registered)
+      return 0; /* delegate rooted on a real parent session branch */
+   return 1;
+}
+
+/* Resolve the repo's default branch for the checkout containing `norm`, e.g. "testing".
+ * Mirrors code_collect.c's chain: origin/HEAD, then the usual candidates. Returns the
+ * bare branch name (no "origin/" prefix) or "" when unresolvable. */
+static void attn_resolve_default_branch(const char *norm, char *out, size_t outlen)
+{
+   if (out && outlen)
+      out[0] = '\0';
+   if (!norm || !norm[0] || !out || !outlen)
+      return;
+   char cmd[2400];
+   snprintf(cmd, sizeof(cmd),
+            "git -C '%s' symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null", norm);
+   FILE *fp2 = popen(cmd, "r");
+   if (fp2)
+   {
+      if (fgets(out, (int)outlen, fp2))
+      {
+         size_t n = strlen(out);
+         while (n && (out[n - 1] == '\n' || out[n - 1] == '\r'))
+            out[--n] = '\0';
+      }
+      pclose(fp2);
+   }
+   if (out[0])
+   {
+      const char *slash = strrchr(out, '/');
+      if (slash)
+         memmove(out, slash + 1, strlen(slash + 1) + 1);
+      return;
+   }
+   snprintf(out, outlen, "%s", "main");
+}
+
+/* Read the launcher-written registry row for the worktree containing `norm`.
+ *
+ * Row format (workspace.c): repo \t worktree \t branch \t session_id \t work_name \t base.
+ * Returns 1 and fills base_out when a row's worktree path is a prefix of `norm`; 0 when
+ * no row matches, which the caller treats as "not launcher-created" and blocks.
+ *
+ * Reads the registry, never the environment: this guard refuses env-var inputs because
+ * the agent it guards can set any of them. */
+/* Returns: 2 = row found for this worktree, 1 = a registry exists but has no row for it,
+ * 0 = no registry file at all (repo has never used managed worktrees). */
+static int attn_registry_base_for(const char *norm, char *base_out, size_t base_len,
+                                  char *branch_out, size_t branch_len)
+{
+   if (base_out && base_len)
+      base_out[0] = '\0';
+   if (branch_out && branch_len)
+      branch_out[0] = '\0';
+   if (!norm || !norm[0])
+      return 0;
+
+   /* The registry lives at <repo>/.aimee/worktrees/registry.tsv. Walk up from the
+    * target until one is found, so this works from any depth inside a worktree. */
+   int saw_registry = 0;
+   char probe[2048];
+   snprintf(probe, sizeof(probe), "%s", norm);
+   for (int depth = 0; depth < 40; depth++)
+   {
+      char reg[2200];
+      snprintf(reg, sizeof(reg), "%s/.aimee/worktrees/registry.tsv", probe);
+      char *buf = NULL;
+      if (attn_read_file(reg, &buf) && buf)
+      {
+         int found = 0;
+         char *line = buf;
+         while (*line)
+         {
+            char *nl = strchr(line, '\n');
+            if (nl)
+               *nl = '\0';
+            /* fields: repo, worktree, branch, sid, work_name, base */
+            char *f[6] = {0};
+            int nf = 0;
+            char *p2 = line;
+            f[nf++] = p2;
+            while (nf < 6 && (p2 = strchr(p2, '\t')))
+            {
+               *p2++ = '\0';
+               f[nf++] = p2;
+            }
+            if (nf >= 2 && f[1] && f[1][0])
+            {
+               size_t wl = strlen(f[1]);
+               /* worktree path is a prefix of the target (exact dir or below it) */
+               if (strncmp(norm, f[1], wl) == 0 && (norm[wl] == '\0' || norm[wl] == '/'))
+               {
+                  if (base_out && base_len && nf >= 6 && f[5])
+                     snprintf(base_out, base_len, "%s", f[5]);
+                  if (branch_out && branch_len && nf >= 3 && f[2])
+                     snprintf(branch_out, branch_len, "%s", f[2]);
+                  found = 1;
+               }
+            }
+            if (!nl)
+               break;
+            line = nl + 1;
+         }
+         free(buf);
+         if (found)
+            return 2;
+         saw_registry = 1;
+      }
+      char *slash = strrchr(probe, '/');
+      if (!slash || slash == probe)
+         break;
+      *slash = '\0';
+   }
+   return saw_registry ? 1 : 0;
+}
+
+/* 1 iff `branch` appears as a registered session branch (column 3) anywhere in the
+ * registry reachable from `norm` -- i.e. a legitimate delegate parent. */
+static int attn_registry_branch_is_registered(const char *norm, const char *branch)
+{
+   if (!branch || !branch[0] || !norm || !norm[0])
+      return 0;
+   char probe[2048];
+   snprintf(probe, sizeof(probe), "%s", norm);
+   for (int depth = 0; depth < 40; depth++)
+   {
+      char reg[2200];
+      snprintf(reg, sizeof(reg), "%s/.aimee/worktrees/registry.tsv", probe);
+      char *buf = NULL;
+      if (attn_read_file(reg, &buf) && buf)
+      {
+         int hit = 0;
+         char *line = buf;
+         while (*line && !hit)
+         {
+            char *nl = strchr(line, '\n');
+            if (nl)
+               *nl = '\0';
+            char *t1 = strchr(line, '\t');
+            char *t2 = t1 ? strchr(t1 + 1, '\t') : NULL;
+            char *t3 = t2 ? strchr(t2 + 1, '\t') : NULL;
+            if (t2 && t3)
+            {
+               *t3 = '\0';
+               if (strcmp(t2 + 1, branch) == 0)
+                  hit = 1;
+            }
+            if (!nl)
+               break;
+            line = nl + 1;
+         }
+         free(buf);
+         if (hit)
+            return 1;
+      }
+      char *slash = strrchr(probe, '/');
+      if (!slash || slash == probe)
+         break;
+      *slash = '\0';
+   }
+   return 0;
 }
 
 /* Pure decision for the session-isolation guard (testable in isolation).
@@ -1009,6 +1367,66 @@ int handle_attention_guard(void)
          cwd[0] = '\0';
       const char *fp =
           ti ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ti, "file_path")) : NULL;
+      /* Branch lineage: being INSIDE a managed worktree is not enough. The worktree
+       * must have been created by the launcher (so a registry row exists) and rooted
+       * correctly -- a primary on the default branch, a delegate on its parent's.
+       * Checked before the path test so a correctly-located but wrongly-rooted
+       * worktree is still refused. */
+      char lin_target[2048];
+      attn_session_isolation_target(fp, cwd, lin_target, sizeof(lin_target));
+      if (attn_path_in_managed_worktree(lin_target))
+      {
+         char base[256], own[256], defbr[256];
+         int reg_state = attn_registry_base_for(lin_target, base, sizeof(base), own, sizeof(own));
+         attn_resolve_default_branch(lin_target, defbr, sizeof(defbr));
+         int parent_registered = (base[0] && own[0] && strcmp(base, own) != 0)
+                                     ? attn_registry_branch_is_registered(lin_target, base)
+                                     : 0;
+         /* reg_state: 2 row found, 1 registry exists but no row, 0 no registry at all.
+          *   0 -> the repo has never used managed worktrees; there is nothing to check
+          *        against, and blocking would break every non-aimee checkout.
+          *   2 with an EMPTY base -> a row written by an older launcher, before the base
+          *        column existed. Grandfathered: the launcher did create it, and blocking
+          *        would break every in-flight session the moment this ships.
+          * Only 1 (a managed repo where this worktree was never registered) and 2-with-a-
+          * base actually enforce. */
+         int enforce = (reg_state == 1) || (reg_state == 2 && base[0]);
+         if (enforce && attn_session_branch_blocked(base, defbr, parent_registered))
+         {
+            fprintf(stderr,
+                    "aimee attention-guard: refusing a mutating op — the worktree at '%s' is on "
+                    "branch '%s' rooted at '%s', which is neither the default branch ('%s') nor a "
+                    "registered parent session branch. A primary session must branch off the "
+                    "default branch; a delegate off its parent. %s Recreate the session worktree "
+                    "with the launcher (Claude Code: EnterWorktree; aimee: launch `aimee`) instead "
+                    "of `git worktree add` by hand.\n",
+                    lin_target, own[0] ? own : "(unknown)", base[0] ? base : "(unregistered)",
+                    defbr[0] ? defbr : "(unresolved)",
+                    base[0] ? ""
+                            : "No launcher registry row exists for it, so it was not created "
+                              "by the launcher.");
+            cJSON_Delete(hook);
+            free(stdin_data);
+            return 2;
+         }
+      }
+
+      /* Bash reaching out of the worktree: judged on the command text, because the
+       * isolation check below only sees the cwd for a Bash call. */
+      if (bash_cmd && bash_cmd[0] && attn_bash_escapes_worktree(bash_cmd, cwd))
+      {
+         fprintf(stderr,
+                 "aimee attention-guard: refusing a Bash command that writes outside this "
+                 "session's worktree. The command changes directory to, or redirects into, an "
+                 "absolute path that is not under .aimee/worktrees/ or .claude/worktrees/. The "
+                 "cwd being a valid worktree is not enough — what the command TOUCHES has to "
+                 "stay inside it. Do the work in the session worktree, or ask the operator to "
+                 "make the change.\n");
+         cJSON_Delete(hook);
+         free(stdin_data);
+         return 2;
+      }
+
       if (attn_session_isolation_blocked(op, fp, cwd, sid))
       {
          /* Name the path that was actually judged. When an absolute file_path is

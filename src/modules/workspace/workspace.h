@@ -86,7 +86,7 @@ int worktree_apply_delegate_changes_checked(const char *delegate_wt, const char 
                                             char *parent_root, size_t parent_root_len, char *err,
                                             size_t err_len);
 void worktree_registry_record(const char *git_root, const char *wt_path, const char *branch,
-                              const char *sid, const char *work_name);
+                              const char *sid, const char *work_name, const char *base_branch);
 int worktree_find_branch_in_repo(const char *git_root, const char *branch, char *out_dir,
                                  size_t out_len);
 int worktree_find_branch_registered(const char *branch, char *out_dir, size_t out_len);
@@ -97,7 +97,10 @@ const char *worktree_for_cwd(const session_state_t *state, const char *cwd);
  * Prefers the repository's DEFAULT branch (origin/HEAD), then local
  * main/master/trunk, then the current HEAD as a last resort. Writes result
  * into buf (at most buf_len bytes including NUL). */
-void worktree_detect_base_branch(const char *git_root, char *buf, size_t buf_len);
+/* Resolve the base ref for a new session worktree: the REMOTE default branch (e.g.
+ * "origin/testing"). Returns 0 and fills buf, or -1 with buf empty when no remote default
+ * is resolvable -- callers must then refuse to create the worktree rather than guess. */
+int worktree_detect_base_branch(const char *git_root, char *buf, size_t buf_len);
 
 /* Count active aimee-managed worktrees for git_root. */
 int count_active_worktrees_for_root(const char *git_root);

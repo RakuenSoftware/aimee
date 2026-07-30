@@ -410,6 +410,7 @@ const char *config_memory_coref_mode(void);
 const char *config_memory_cognify_model(void);
 const char *config_memory_cognify_command(void);
 const char *config_code_context_mode(void);
+const char *config_session_worktree_base(void);
 const char *config_delegate_sandbox_image(void);
 const char *config_delegate_sandbox_package_access(void);
 const char *config_kb_pdf_tier(void);
@@ -912,6 +913,7 @@ int config_set_memory_coref_mode(const char *value);
 int config_set_memory_cognify_model(const char *value);
 int config_set_memory_cognify_command(const char *value);
 int config_set_code_context_mode(const char *value);
+int config_set_session_worktree_base(const char *value);
 int config_set_delegate_sandbox_image(const char *value);
 int config_set_delegate_sandbox_package_access(const char *value);
 int config_set_kb_pdf_tier(const char *value);
@@ -1030,6 +1032,7 @@ const char *config_computer_use_allowed_domains(int index);
 const char *config_server_api_bearer_extra(int index);
 const char *config_ensemble_reference_models(int index);
 const char *config_ensemble_reference_personas(int index);
+
 
 /* Struct-array elements: one member of one element per call. Bounds-checked
  * like the char[][] accessors — an out-of-range index yields 0 or "".
