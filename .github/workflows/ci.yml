@@ -250,7 +250,23 @@ jobs:
           done
           echo "Postgres did not become ready in time"; docker logs aimee-pg || true; exit 1
       - name: Unit tests
-        run: cd src && make -j$(nproc) unit-tests build/obj/tests/p7-pkcs11-harness
+        run: |
+          # Runner image metadata is outside the repository's control. Install
+          # deterministic root-owned copies so the positive path exercises the
+          # production trust walk without depending on /usr/bin ownership/mode.
+          sudo install -d -o root -g root -m 0755 /run/aimee-test-helpers
+          for helper in cat env yes true; do
+            sudo install -o root -g root -m 0755 "$(command -v "$helper")" \
+              "/run/aimee-test-helpers/$helper"
+          done
+          sudo stat -Lc '%U:%G %a %n' /run/aimee-test-helpers \
+            /run/aimee-test-helpers/cat /run/aimee-test-helpers/env \
+            /run/aimee-test-helpers/yes /run/aimee-test-helpers/true
+          export AIMEE_TEST_TRUSTED_CAT=/run/aimee-test-helpers/cat
+          export AIMEE_TEST_TRUSTED_ENV=/run/aimee-test-helpers/env
+          export AIMEE_TEST_TRUSTED_YES=/run/aimee-test-helpers/yes
+          export AIMEE_TEST_TRUSTED_TRUE=/run/aimee-test-helpers/true
+          cd src && make -j$(nproc) unit-tests build/obj/tests/p7-pkcs11-harness
 
   # The data-plane identity mint, end to end, against a live Postgres and a live
   # signed-HWM KMS helper.

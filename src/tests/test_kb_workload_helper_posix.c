@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -13,6 +14,12 @@ static const char *find_native(const char *a, const char *b)
 {
    struct stat st;
    return stat(a, &st) == 0 ? a : b;
+}
+
+static const char *trusted_fixture(const char *variable, const char *a, const char *b)
+{
+   const char *fixture = getenv(variable);
+   return fixture && fixture[0] ? fixture : find_native(a, b);
 }
 
 int main(void)
@@ -34,7 +41,8 @@ int main(void)
               KB_WORKLOAD_HELPER_UNAVAILABLE &&
           fd == -1);
 
-   const char *cat = find_native("/usr/bin/cat", "/bin/cat");
+   const char *cat =
+       trusted_fixture("AIMEE_TEST_TRUSTED_CAT", "/usr/bin/cat", "/bin/cat");
    assert(kb_workload_helper_open(cat, &fd) == KB_WORKLOAD_HELPER_OK && fd > 2);
    static const unsigned char request[] = "descriptor-pinned duplex";
    unsigned char response[128];
@@ -58,7 +66,8 @@ int main(void)
    assert(pthread_sigmask(SIG_SETMASK, &old_mask, NULL) == 0);
    close(fd);
 
-   const char *env = find_native("/usr/bin/env", "/bin/env");
+   const char *env =
+       trusted_fixture("AIMEE_TEST_TRUSTED_ENV", "/usr/bin/env", "/bin/env");
    assert(kb_workload_helper_open(env, &fd) == KB_WORKLOAD_HELPER_OK);
    memset(response, 0xa5, sizeof(response));
    response_len = 99;
@@ -67,7 +76,8 @@ int main(void)
    assert(response_len == 0); /* explicit empty envp */
    close(fd);
 
-   const char *yes = find_native("/usr/bin/yes", "/bin/yes");
+   const char *yes =
+       trusted_fixture("AIMEE_TEST_TRUSTED_YES", "/usr/bin/yes", "/bin/yes");
    assert(kb_workload_helper_open(yes, &fd) == KB_WORKLOAD_HELPER_OK);
    memset(response, 0xa5, sizeof(response));
    response_len = 99;
@@ -81,7 +91,8 @@ int main(void)
    /* A helper that exits without reading must not deliver SIGPIPE to the KB.
     * A full-sized request ensures the nonblocking pipe cannot accept it all
     * before the child closes its read end. */
-   const char *true_path = find_native("/usr/bin/true", "/bin/true");
+   const char *true_path =
+       trusted_fixture("AIMEE_TEST_TRUSTED_TRUE", "/usr/bin/true", "/bin/true");
    assert(kb_workload_helper_open(true_path, &fd) == KB_WORKLOAD_HELPER_OK);
    unsigned char closed_request[KB_WORKLOAD_HELPER_FRAME_MAX];
    memset(closed_request, 0x5a, sizeof(closed_request));
