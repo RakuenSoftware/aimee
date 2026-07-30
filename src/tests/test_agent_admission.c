@@ -341,6 +341,87 @@ static void test_stress_peak_never_exceeds_cap(void)
    printf("  PASS: stress_peak_never_exceeds_cap (peak=%d, cap=%d)\n", s_peak, STRESS_CAP);
 }
 
+#define RACE_THREADS 12
+
+static pthread_mutex_t s_race_start_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t s_race_start_cond = PTHREAD_COND_INITIALIZER;
+static int s_race_ready;
+static int s_race_start;
+static int s_race_done;
+static pthread_mutex_t s_race_lock = PTHREAD_MUTEX_INITIALIZER;
+static int s_race_acquired;
+static int s_race_at_limit;
+static int s_race_distinct_agents;
+static int s_race_distinct_models;
+
+static void *nonblocking_race_worker(void *arg)
+{
+   long id = (long)arg;
+   char ctx[32], agent[32], model[32];
+   snprintf(ctx, sizeof(ctx), "race-%ld", id);
+   snprintf(agent, sizeof(agent), s_race_distinct_agents ? "agent-%ld" : "agent", id);
+   snprintf(model, sizeof(model), s_race_distinct_models ? "model-%ld" : "model", id);
+   agent_admit_req_t r = req(ctx, agent, model, 3);
+   agent_admit_status_t st;
+
+   pthread_mutex_lock(&s_race_start_lock);
+   s_race_ready++;
+   pthread_cond_broadcast(&s_race_start_cond);
+   while (!s_race_start)
+      pthread_cond_wait(&s_race_start_cond, &s_race_start_lock);
+   pthread_mutex_unlock(&s_race_start_lock);
+   agent_slot_t *slot = agent_admission_acquire(&r, &st);
+   pthread_mutex_lock(&s_race_lock);
+   if (slot)
+      s_race_acquired++;
+   else
+   {
+      assert(st == AGENT_ADMIT_AT_LIMIT);
+      s_race_at_limit++;
+   }
+   pthread_mutex_unlock(&s_race_lock);
+   pthread_mutex_lock(&s_race_start_lock);
+   s_race_done++;
+   pthread_cond_broadcast(&s_race_start_cond);
+   while (s_race_done < RACE_THREADS)
+      pthread_cond_wait(&s_race_start_cond, &s_race_start_lock);
+   pthread_mutex_unlock(&s_race_start_lock);
+   agent_admission_release(slot);
+   return NULL;
+}
+
+static void run_nonblocking_race(int global_max, int model_max, int distinct_agents,
+                                 int distinct_models, int expected_acquired)
+{
+   configure(global_max, model_max);
+   s_race_acquired = s_race_at_limit = 0;
+   s_race_ready = s_race_start = s_race_done = 0;
+   s_race_distinct_agents = distinct_agents;
+   s_race_distinct_models = distinct_models;
+   pthread_t threads[RACE_THREADS];
+   for (long i = 0; i < RACE_THREADS; i++)
+      assert(pthread_create(&threads[i], NULL, nonblocking_race_worker, (void *)i) == 0);
+   pthread_mutex_lock(&s_race_start_lock);
+   while (s_race_ready < RACE_THREADS)
+      pthread_cond_wait(&s_race_start_cond, &s_race_start_lock);
+   s_race_start = 1;
+   pthread_cond_broadcast(&s_race_start_cond);
+   pthread_mutex_unlock(&s_race_start_lock);
+   for (int i = 0; i < RACE_THREADS; i++)
+      pthread_join(threads[i], NULL);
+   assert(s_race_acquired == expected_acquired);
+   assert(s_race_at_limit == RACE_THREADS - expected_acquired);
+   assert(agent_admission_global_active() == 0);
+}
+
+static void test_synchronized_nonblocking_races_obey_all_limits(void)
+{
+   run_nonblocking_race(2, 100, 1, 1, 2);  /* per-agent limit is 3; global bites */
+   run_nonblocking_race(100, 100, 0, 1, 3); /* shared agent limit bites */
+   run_nonblocking_race(100, 2, 1, 0, 2);   /* shared-model limit bites */
+   printf("  PASS: synchronized_nonblocking_races_obey_all_limits\n");
+}
+
 int main(void)
 {
    test_fail_closed_bad_input();
@@ -355,6 +436,7 @@ int main(void)
    test_reap_idle_reclaims_wedged_slot();
    test_touch_protects_live_slot();
    test_stress_peak_never_exceeds_cap();
+   test_synchronized_nonblocking_races_obey_all_limits();
    printf("agent_admission: all tests passed\n");
    return 0;
 }
