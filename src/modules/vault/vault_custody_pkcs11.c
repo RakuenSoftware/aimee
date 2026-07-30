@@ -1,5 +1,7 @@
 #include "vault_custody_pkcs11.h"
 #include "vault_crypto.h"
+#include "runtime_secret.h"
+#include <openssl/crypto.h>
 #include <string.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -20,29 +22,49 @@ static int open_token(pk11_ctx *c)
    const char *mod = getenv("AIMEE_VAULT_PKCS11_MODULE");
    if (!mod || !*mod)
       mod = "/usr/lib/softhsm/libsofthsm2.so";
-   const char *pin = getenv("AIMEE_VAULT_PKCS11_PIN");
+   char pin[256] = "";
+   if (!runtime_secret_get("AIMEE_VAULT_PKCS11_PIN", pin, sizeof(pin)))
+      return -1;
    const char *slot_s = getenv("AIMEE_VAULT_PKCS11_SLOT");
    unsigned long slot = slot_s ? strtoul(slot_s, NULL, 10) : 0;
-   if (!pin || !*pin)
-      return -1;
    c->dl = dlopen(mod, RTLD_NOW | RTLD_LOCAL);
    if (!c->dl)
+   {
+      OPENSSL_cleanse(pin, sizeof(pin));
       return -1;
+   }
    CK_C_GetFunctionList get = (CK_C_GetFunctionList)dlsym(c->dl, "C_GetFunctionList");
    if (!get || get(&c->f) != CKR_OK)
+   {
+      OPENSSL_cleanse(pin, sizeof(pin));
       return -1;
+   }
    if (c->f->C_Initialize(NULL_PTR) != CKR_OK)
+   {
+      OPENSSL_cleanse(pin, sizeof(pin));
       return -1;
+   }
    CK_ULONG n = 8;
    CK_SLOT_ID slots[8];
    if (c->f->C_GetSlotList(CK_TRUE, slots, &n) != CKR_OK || !n)
+   {
+      OPENSSL_cleanse(pin, sizeof(pin));
       return -1;
+   }
    if (slot_s && slot >= n)
+   {
+      OPENSSL_cleanse(pin, sizeof(pin));
       return -1;
+   }
    slot = slot_s ? slots[slot] : slots[0];
    if (c->f->C_OpenSession(slot, CKF_SERIAL_SESSION | CKF_RW_SESSION, NULL, NULL, &c->s) != CKR_OK)
+   {
+      OPENSSL_cleanse(pin, sizeof(pin));
       return -1;
-   if (c->f->C_Login(c->s, CKU_USER, (CK_UTF8CHAR_PTR)pin, (CK_ULONG)strlen(pin)) != CKR_OK)
+   }
+   CK_RV login_rc = c->f->C_Login(c->s, CKU_USER, (CK_UTF8CHAR_PTR)pin, (CK_ULONG)strlen(pin));
+   OPENSSL_cleanse(pin, sizeof(pin));
+   if (login_rc != CKR_OK)
       return -1;
    c->sealed = 0;
    return 0;

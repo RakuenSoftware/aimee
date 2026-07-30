@@ -46,6 +46,8 @@ static int name_span_is_credential(const char *name, size_t len, int include_del
    if (len >= 19 && memcmp(name, "AIMEE_DELEGATE_KEY_", 19) == 0)
       return include_delegate;
    if ((len == strlen("AIMEE_DB2_URL") && memcmp(name, "AIMEE_DB2_URL", len) == 0) ||
+       (len == strlen("AIMEE_VAULT_PKCS11_PIN") &&
+        memcmp(name, "AIMEE_VAULT_PKCS11_PIN", len) == 0) ||
        (len == strlen("AIMEE_WEBCHAT_USER") && memcmp(name, "AIMEE_WEBCHAT_USER", len) == 0) ||
        (len == strlen("AIMEE_WEBCHAT_USERS") &&
         memcmp(name, "AIMEE_WEBCHAT_USERS", len) == 0) ||

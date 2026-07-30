@@ -34,7 +34,6 @@ func main() {
 	}
 	home := flag.String("home", homeDefault, "aimee state directory")
 	socket := flag.String("socket", "", "Unix socket path")
-	listen := flag.String("listen", "", "optional TCP listen address")
 	dbPath := flag.String("db", "", "DB1 SQLite path")
 	runnerURL := flag.String("runner-url", os.Getenv("AIMEE_WFE_RUNNER_URL"),
 		"typed WFE runner endpoint; empty keeps execution disabled")
@@ -44,19 +43,15 @@ func main() {
 		"agent resource-plane base URL used by the native Go WFE runner")
 	agentSocket := flag.String("agent-service-socket", os.Getenv("AIMEE_AGENT_SERVICE_SOCKET"),
 		"agent resource-plane Unix socket used by the native Go WFE runner")
-	agentBearer := flag.String("agent-service-bearer", os.Getenv("AIMEE_AGENT_SERVICE_BEARER"),
-		"optional bearer for the agent resource plane")
 	workflowDir := flag.String("workflow-dir", "", "workflow definition directory")
 	configPath := flag.String("config", "", "aimee.yaml path")
 	concurrency := flag.Int("workflow-concurrency", envInt("AIMEE_AUTONOMY_CONCURRENCY", 5),
 		"maximum concurrent work items across the whole WFE (total agent budget)")
-	bearerToken := flag.String("bearer-token", os.Getenv("AIMEE_API_BEARER_TOKEN"),
-		"bearer required by TCP and optional on Unix sockets")
 	flag.Parse()
 	if *dbPath == "" {
 		*dbPath = filepath.Join(*home, "aimee.db")
 	}
-	if *socket == "" && *listen == "" {
+	if *socket == "" {
 		*socket = filepath.Join(*home, "aimee-server.sock")
 	}
 	if *workflowDir == "" {
@@ -64,9 +59,6 @@ func main() {
 	}
 	if *configPath == "" {
 		*configPath = filepath.Join(*home, "aimee.yaml")
-	}
-	if *listen != "" && *bearerToken == "" {
-		log.Fatal("TCP listening requires --bearer-token or AIMEE_API_BEARER_TOKEN")
 	}
 	if err := os.MkdirAll(*home, 0o700); err != nil {
 		log.Fatalf("create aimee home: %v", err)
@@ -90,7 +82,10 @@ func main() {
 		log.Fatal(err)
 	}
 	handler.SetConfigStore(configStore)
-	server := &http.Server{Handler: api.RequireBearer(handler, *bearerToken), ReadHeaderTimeout: 15 * time.Second}
+	// The WFE control plane is deliberately Unix-socket-only. Credentials must
+	// never be carried in this long-lived process's argv or environment; the
+	// socket's ownership and 0600 mode are the authentication boundary.
+	server := &http.Server{Handler: handler, ReadHeaderTimeout: 15 * time.Second}
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	defer rootCancel()
 	var runner engine.Runner
@@ -105,7 +100,7 @@ func main() {
 		}
 	} else if *agentURL != "" || *agentSocket != "" {
 		agents, clientErr := engine.NewHTTPAgentClient(engine.AgentHTTPConfig{
-			BaseURL: *agentURL, UnixSocket: *agentSocket, Bearer: *agentBearer, Store: store,
+			BaseURL: *agentURL, UnixSocket: *agentSocket, Store: store,
 			PendingTimeoutSource: func() time.Duration {
 				return time.Duration(configStore.Int("autonomy.delegate_pending_secs", 120)) * time.Second
 			},
@@ -125,7 +120,7 @@ func main() {
 			log.Fatal(registryErr)
 		}
 		forge, forgeErr := engine.NewHTTPForge(engine.HTTPForgeConfig{
-			BaseURL: *agentURL, UnixSocket: *agentSocket, Bearer: *agentBearer,
+			BaseURL: *agentURL, UnixSocket: *agentSocket,
 		})
 		if forgeErr != nil {
 			log.Fatal(forgeErr)
@@ -221,18 +216,13 @@ func main() {
 		}()
 	}
 
-	var listener net.Listener
-	if *socket != "" {
-		if err := os.MkdirAll(filepath.Dir(*socket), 0o700); err != nil {
-			log.Fatal(err)
-		}
-		_ = os.Remove(*socket)
-		listener, err = net.Listen("unix", *socket)
-		if err == nil {
-			err = os.Chmod(*socket, 0o600)
-		}
-	} else {
-		listener, err = net.Listen("tcp", *listen)
+	if err := os.MkdirAll(filepath.Dir(*socket), 0o700); err != nil {
+		log.Fatal(err)
+	}
+	_ = os.Remove(*socket)
+	listener, err := net.Listen("unix", *socket)
+	if err == nil {
+		err = os.Chmod(*socket, 0o600)
 	}
 	if err != nil {
 		log.Fatal(err)

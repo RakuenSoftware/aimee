@@ -112,13 +112,18 @@ static void test_forge_env_source(void)
 static void test_generic_env_source(void)
 {
    setenv("AIMEE_DB2_URL", "postgresql://user:db-password@db/aimee", 1);
+   setenv("AIMEE_VAULT_PKCS11_PIN", "vaulted-hsm-pin", 1);
    assert(vault_env_has_credential_environment() == 1);
-   assert(vault_env_bootstrap_init() == 1);
+   assert(vault_env_bootstrap_init() == 2);
    assert(vault_env_has_credential_environment() == 0);
    assert(getenv("AIMEE_DB2_URL") == NULL);
+   assert(getenv("AIMEE_VAULT_PKCS11_PIN") == NULL);
    char value[128];
    assert(runtime_secret_get("AIMEE_DB2_URL", value, sizeof(value)) == 1);
    assert(strcmp(value, "postgresql://user:db-password@db/aimee") == 0);
+   runtime_secret_wipe(value, sizeof(value));
+   assert(runtime_secret_get("AIMEE_VAULT_PKCS11_PIN", value, sizeof(value)) == 1);
+   assert(strcmp(value, "vaulted-hsm-pin") == 0);
    runtime_secret_wipe(value, sizeof(value));
    printf("  PASS: test_generic_env_source\n");
 }
@@ -165,6 +170,7 @@ static void test_webchat_first_boot_env_source(void)
    assert(vault_env_name_is_credential("AIMEE_WEBCHAT_USERS") == 1);
    assert(vault_env_name_is_credential("AIMEE_AGENT_SERVICE_BEARER") == 1);
    assert(vault_env_name_is_credential("AIMEE_TLS_CLIENT_P12_PASS") == 1);
+   assert(vault_env_name_is_credential("AIMEE_VAULT_PKCS11_PIN") == 1);
    assert(vault_env_name_is_credential("AWS_SECRET_ACCESS_KEY") == 1);
    assert(vault_env_name_is_credential("GOOGLE_APPLICATION_CREDENTIALS") == 1);
    assert(vault_env_name_is_credential("DATABASE_URL") == 1);
