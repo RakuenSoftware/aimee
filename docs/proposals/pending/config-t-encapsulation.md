@@ -161,6 +161,25 @@ Two test hazards, both the pattern above:
 Both are non-vacuous: the curiosity case asserts run-then-skip, which only holds if
 `interval_seconds: 3600` is actually read back out of config.
 
+### Round 5 — memory_derive_facts, and memory.h reaches 1
+
+`memory_derive_facts` was the `kb_ranker` pattern again: it already read its one field through
+`config_memory_derive_facts_enabled()`, and kept the `config_t *` solely as a `!cfg` null guard.
+Pure dead weight. No caller ever passed NULL, so dropping it changes nothing observable.
+The `config_t` local feeding it in `memory_assemble.c` went with it.
+
+**Ratchet:** 858 -> 854 mentions, 455 -> 454 `config_load()`, 237 -> 234 files.
+
+**`memory.h` is down to 1 `config_t` mention** (from 7) — only `memory_query_rewrite`, which is
+blocked behind the curator-provider chain below.
+
+Best result of this round: `test_memory_advanced.c`'s **file-static `config_t` is deleted**. Its
+comment explained it existed because ten block-scoped ~750 KiB copies in one `main()` pushed GCC
+past the 8 MiB stack and segfaulted the optimized binary. With every case now writing its
+precondition to a config file and the code reading it back through accessors, the suite needs no
+`config_t` at all. That is the shape the whole proposal is aiming at: the workaround disappears
+rather than being managed.
+
 ### The curator-provider chain needs a design decision first (attempted, reverted)
 
 `kb_curator_provider_for_stage` looks like an easy six-field conversion. It is not, and the reason

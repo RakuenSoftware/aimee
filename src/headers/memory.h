@@ -767,7 +767,7 @@ memory_query_shape_t memory_classify_deriver_shape(const char *query);
  * Results are written into |out|.  Returns the number of derived facts, or 0
  * if the deriver is disabled / inapplicable. */
 int memory_derive_facts(const char *query, int64_t *candidate_ids, int cand_count,
-                        const config_t *cfg, memory_derived_facts_t *out);
+                        memory_derived_facts_t *out);
 
 /* Format |facts| as a compact JSON string (caller must free). */
 char *memory_derived_facts_to_json(const memory_derived_facts_t *facts);

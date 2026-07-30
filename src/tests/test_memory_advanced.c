@@ -21,12 +21,12 @@ static void reset_db(void)
    db2_test_shim_open();
 }
 
-/* config_t is intentionally shared by these sequential cases. It is currently
- * about 750 KiB; keeping ten block-scoped copies in this long main function made
- * GCC reserve more than the default 8 MiB process stack and the optimized test
- * binary segfaulted before reaching the later cases. Every user below clears it
- * before use. */
-static config_t cfg;
+/* The file-static config_t this suite used to share is gone. It existed because
+ * ten block-scoped ~750 KiB copies in this one long main() pushed GCC past the
+ * default 8 MiB stack and the optimized binary segfaulted before reaching the
+ * later cases. Every case now states its precondition through write_test_config()
+ * and the code under test reads it back via accessors, so no config_t is needed
+ * here at all — which is the outcome the encapsulation proposal is chasing. */
 
 static void write_test_config(const char *yaml)
 {
@@ -670,22 +670,20 @@ int main(void)
 
    /* --- memory_derive_facts: disabled path returns 0 --- */
    {
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_derive_facts_enabled = 0;
+      write_test_config("memory:\n  derive_facts:\n    enabled: false\n");
       memory_derived_facts_t dfacts;
       memset(&dfacts, 0, sizeof(dfacts));
       int64_t ids[1] = {1};
-      int n = memory_derive_facts("how many times?", ids, 1, &cfg, &dfacts);
+      int n = memory_derive_facts("how many times?", ids, 1, &dfacts);
       assert(n == 0);
    }
 
    /* --- memory_derive_facts: enabled but empty candidates returns 0 --- */
    {
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_derive_facts_enabled = 1;
+      write_test_config("memory:\n  derive_facts:\n    enabled: true\n");
       memory_derived_facts_t dfacts;
       memset(&dfacts, 0, sizeof(dfacts));
-      int n = memory_derive_facts("how many times?", NULL, 0, &cfg, &dfacts);
+      int n = memory_derive_facts("how many times?", NULL, 0, &dfacts);
       assert(n == 0);
    }
 

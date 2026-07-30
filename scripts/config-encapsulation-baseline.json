@@ -118,7 +118,7 @@
       "loads": 0
     },
     "src/headers/memory.h": {
-      "decls": 2,
+      "decls": 1,
       "loads": 0
     },
     "src/headers/prompts.h": {
@@ -380,14 +380,6 @@
     "src/modules/memory/memory_advanced.c": {
       "decls": 2,
       "loads": 2
-    },
-    "src/modules/memory/memory_assemble.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/memory/memory_context.c": {
-      "decls": 1,
-      "loads": 0
     },
     "src/modules/memory/memory_core.c": {
       "decls": 1,
@@ -853,10 +845,6 @@
       "decls": 5,
       "loads": 0
     },
-    "src/tests/test_memory_advanced.c": {
-      "decls": 1,
-      "loads": 0
-    },
     "src/tests/test_memory_lanes.c": {
       "decls": 4,
       "loads": 4
@@ -951,8 +939,8 @@
     }
   },
   "totals": {
-    "decls": 858,
-    "files": 237,
-    "loads": 455
+    "decls": 854,
+    "files": 234,
+    "loads": 454
   }
 }
