@@ -377,7 +377,7 @@ Responses:
 
 KB-owned configuration (console)
 
-Every config option aimee-kb owns — the embedder, the reranker, the synth
+Every config option aimee-kb owns — the embedder, the synth
 tier, and the knowledge base itself — with its current value, section, and
 whether it needs a kb restart. The split from aimee-server's own settings
 is by which binary reads the option (KB_SETTINGS in

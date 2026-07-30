@@ -10,7 +10,7 @@ It does not own DB1, workflow state, client paths, or model serving.
 - links libpq, never SQLite;
 - accepts typed `/v1` operations from server and authorized KB clients;
 - owns every DB2 transaction and background queue claim;
-- calls `aimee-llm` for embedding, reranking, and synthesis;
+- calls `aimee-llm` for embedding and synthesis;
 - publishes KB-side memory and tool audit through its own event bus;
 - treats scope as authorization, not a search filter applied after the query.
 

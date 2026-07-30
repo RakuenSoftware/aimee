@@ -63,7 +63,7 @@ done
 export EMBEDDER_STUB="${EMBEDDER_STUB:-1}"
 export EMBEDDER_STUB_DIM="${EMBEDDER_STUB_DIM:-2560}"
 export AIMEE_EMBEDDING_DIM="${AIMEE_EMBEDDING_DIM:-2560}"
-# Unified-llm topologies (T1 kb-only, T2 server+kb) now embed/rerank/synth against
+# Unified-llm topologies (T1 kb-only, T2 server+kb) now embed/synth against
 # the `aimee-llm` container instead of the torch `embedder`. CI builds the tiny
 # STUB image (no llama.cpp / GGUFs) and runs it in stub mode at the same dim, so
 # the kb -> gateway contract is exercised cheaply. (T3 standalone has no embedder.)

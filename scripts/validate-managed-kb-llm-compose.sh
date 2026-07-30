@@ -45,8 +45,6 @@ export AIMEE_LLM_AUTH_REQUIRED="1"
 export AIMEE_LLM_MODEL="validation-synth"
 export AIMEE_LLM_EMBED_MODE="local"
 export AIMEE_LLM_EMBED_TIER="mid"
-export AIMEE_LLM_RERANK_MODE="local"
-export AIMEE_LLM_RERANK_TIER="small"
 export AIMEE_LLM_SYNTH_MODE="local"
 export AIMEE_LLM_SYNTH_TIER="cpu"
 export AIMEE_EMBEDDING_DIM="1024"
@@ -70,7 +68,6 @@ echo "managed-kb-llm: checking propagated identity and role configuration"
   test "${#AIMEE_LLM_AUTH_TOKEN}" -eq 64
   test "$AIMEE_LLM_STRICT_BIND" = "1"
   test "$AIMEE_LLM_EMBED_MODE/$AIMEE_LLM_EMBED_TIER" = "local/mid"
-  test "$AIMEE_LLM_RERANK_MODE/$AIMEE_LLM_RERANK_TIER" = "local/small"
   test "$AIMEE_LLM_SYNTH_MODE/$AIMEE_LLM_SYNTH_TIER" = "local/cpu"
   test "$AIMEE_LLM_SYNTH_MODEL" = "validation-synth"
   test "$AIMEE_EMBEDDING_DIM" = "1024"
@@ -90,14 +87,12 @@ echo "managed-kb-llm: checking authenticated KB-to-LLM probe"
 '
 
 # Exercise the shipped KB clients, not just hand-written curl requests.
-echo "managed-kb-llm: checking embed, batch, rerank, and synth clients"
+echo "managed-kb-llm: checking embed, batch, and synth clients"
 "${compose[@]}" exec -T aimee-kb sh -ec '
   printf "managed identity embedding" | python3 /opt/aimee/scripts/embed-remote.py |
     python3 -c "import json,sys; assert len(json.load(sys.stdin)) == 1024"
   printf "[\"one\",\"two\"]" | python3 /opt/aimee/scripts/embed-remote.py |
     python3 -c "import json,sys; x=json.load(sys.stdin); assert len(x)==2 and all(len(v)==1024 for v in x)"
-  printf "[[\"q\",\"a\"],[\"q\",\"b\"]]" | python3 /opt/aimee/scripts/rerank-remote.py |
-    python3 -c "import json,sys; assert len(json.load(sys.stdin)) == 2"
   curl -fsS -X POST -H "Authorization: Bearer $AIMEE_LLM_AUTH_TOKEN" \
     -H "Content-Type: application/json" \
     -d "{\"model\":\"$AIMEE_LLM_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}" \
@@ -114,4 +109,4 @@ if docker run --rm --network none \
   exit 1
 fi
 
-echo "managed-kb-llm: PASS (credential, role config, embed, batch, rerank, synth, fail-closed bind)"
+echo "managed-kb-llm: PASS (credential, role config, embed, batch, synth, fail-closed bind)"

@@ -284,7 +284,7 @@ int platform_exec_pipe(const char *cmd, const char *input, size_t input_len, cha
    close(stdin_pipe[0]);
    close(stdout_pipe[1]);
 
-   /* A child that exits before draining its stdin (e.g. a rerank command that
+   /* A child that exits before draining its stdin (e.g. an embed command that
     * fails fast with a non-zero status) closes the read end, so our write() to it
     * raises SIGPIPE. With the default disposition that terminates THIS process --
     * turning a handled subprocess failure into a hard crash of the caller (seen as
@@ -328,7 +328,7 @@ int platform_exec_pipe(const char *cmd, const char *input, size_t input_len, cha
    /* Bounded read. An unbounded read() here blocks the CALLING THREAD forever
     * when the child hangs rather than exits -- a sidecar whose endpoint accepts
     * the connection and never answers, or a stalled DNS lookup. Every caller of
-    * this function is a sidecar in a request path (embed, rerank, cognify,
+    * this function is a sidecar in a request path (embed, cognify,
     * rewrite, css render, oauth token, guardrails), so a thread lost here is a
     * server thread lost for good.
     *

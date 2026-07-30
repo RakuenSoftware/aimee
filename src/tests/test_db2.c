@@ -117,17 +117,6 @@ int db2_embedding_model_record_or_check(void *pg_conn, const char *model_id, con
    return 0;
 }
 
-int db2_reranker_model_record(void *pg_conn, const char *model_id, const char *contract,
-                              char *errbuf, size_t errlen)
-{
-   (void)model_id;
-   (void)contract;
-   (void)errbuf;
-   (void)errlen;
-   assert(pg_conn == &g_fake_conn);
-   return 0;
-}
-
 void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
 {
    (void)level;

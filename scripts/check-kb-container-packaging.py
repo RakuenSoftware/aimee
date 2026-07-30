@@ -53,7 +53,7 @@ REQUIRED_COMPOSE_PATTERNS = {
     # external DB2 through its environment without editing the manifest.
     "db2-empty-default": r"(?m)^\s*AIMEE_DB2_URL:\s*\$\{AIMEE_DB2_URL:-\}\s*$",
     "kb-health": r"(?s)aimee-kb:.*healthcheck:.*http://127\.0\.0\.1:8741/v1/health",
-    # The unified aimee-llm container backs real embeddings/reranking/synthesis;
+    # The unified aimee-llm container backs real embeddings/synthesis;
     # the kb is pointed at it by AIMEE_LLM_URL (no model runs in the kb). The
     # legacy torch embedder is retained behind a profile for rollback.
     "llm-service": r"(?m)^\s{2}aimee-llm:",
@@ -426,7 +426,7 @@ def managed_kb_llm_contract_failures(text: str) -> list[str]:
     if llm_env.get("AIMEE_EMBEDDING_DIM") != "${AIMEE_EMBEDDING_DIM:-}":
         failures.append("managed LLM must receive the KB embedding-dimension pin")
 
-    for role in ("EMBED", "RERANK", "SYNTH"):
+    for role in ("EMBED", "SYNTH"):
         for setting, default in (("MODE", "local"), ("TIER", "cpu"), ("URL", "")):
             key = f"AIMEE_LLM_{role}_{setting}"
             expected = f"${{{key}:-{default}}}"
@@ -683,9 +683,6 @@ def plant_test() -> int:
             "      AIMEE_LLM_EMBED_MODE: ${AIMEE_LLM_EMBED_MODE:-local}\n"
             "      AIMEE_LLM_EMBED_TIER: ${AIMEE_LLM_EMBED_TIER:-cpu}\n"
             "      AIMEE_LLM_EMBED_URL: ${AIMEE_LLM_EMBED_URL:-}\n"
-            "      AIMEE_LLM_RERANK_MODE: ${AIMEE_LLM_RERANK_MODE:-local}\n"
-            "      AIMEE_LLM_RERANK_TIER: ${AIMEE_LLM_RERANK_TIER:-cpu}\n"
-            "      AIMEE_LLM_RERANK_URL: ${AIMEE_LLM_RERANK_URL:-}\n"
             "      AIMEE_LLM_SYNTH_MODE: ${AIMEE_LLM_SYNTH_MODE:-local}\n"
             "      AIMEE_LLM_SYNTH_TIER: ${AIMEE_LLM_SYNTH_TIER:-cpu}\n"
             "      AIMEE_LLM_SYNTH_URL: ${AIMEE_LLM_SYNTH_URL:-}\n"
