@@ -683,3 +683,10 @@ residual proposal instead of declaring the intended effectiveness outcome comple
   partial metadata; servers continue emitting legacy arrays additively for older consumers.
   Roundtable run: `roundtable-15472c66ae1dccd6620b4b97` (artifact
   `a8e925f87312534a4092416d4dec985621f5e0053be367bbab37d15b5be889fe`).
+- **E3 implementation round 3 — 2026-07-30 — APPROVED and converged, 2/3 participants used,
+  degraded.** The panel reported no blocking findings. E3 immediately adopts its schema-accuracy
+  suggestion by splitting dependent/path and dependency/identity OpenAPI edge types so the required
+  identity field matches the client validation contract. Its distinct CLI error-class suggestion is
+  assigned to the accepted E5 typed-status slice. Roundtable run:
+  `roundtable-a2953bf8d139a351d64af27d` (artifact
+  `ce370ec61931cdfb91c1e73417de930af801280d5a486ab2de9cd7adec98ae85`).

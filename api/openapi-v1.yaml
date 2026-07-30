@@ -622,16 +622,36 @@ components:
           type: string
           nullable: true
 
-    BlastRadiusEdge:
+    BlastRadiusDependentEdge:
       type: object
-      required: [provenance, confidence, project, generation, freshness]
+      required: [path, provenance, confidence, project, generation, freshness]
       properties:
         path:
           type: string
-          description: Dependent file path; present on dependent edges.
+          description: Dependent file path.
+        provenance:
+          type: string
+          description: Comma-separated structural evidence (`import`, `call`, `projection`, or `cross_repo`).
+        confidence:
+          type: string
+          enum: [high, medium, low]
+        project:
+          type: string
+        generation:
+          type: integer
+          format: int64
+          minimum: 1
+        freshness:
+          type: string
+          enum: [current]
+
+    BlastRadiusDependencyEdge:
+      type: object
+      required: [identity, provenance, confidence, project, generation, freshness]
+      properties:
         identity:
           type: string
-          description: Normalized import identity; present on dependency edges.
+          description: Normalized import identity.
         provenance:
           type: string
           description: Comma-separated structural evidence (`import`, `call`, `projection`, or `cross_repo`).
@@ -675,7 +695,7 @@ components:
         dependent_edges:
           type: array
           items:
-            $ref: "#/components/schemas/BlastRadiusEdge"
+            $ref: "#/components/schemas/BlastRadiusDependentEdge"
         dependencies:
           type: array
           items:
@@ -685,7 +705,7 @@ components:
         dependency_edges:
           type: array
           items:
-            $ref: "#/components/schemas/BlastRadiusEdge"
+            $ref: "#/components/schemas/BlastRadiusDependencyEdge"
 
     CodeScanRequest:
       type: object
