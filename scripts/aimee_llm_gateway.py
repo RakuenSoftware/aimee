@@ -7,6 +7,12 @@ config / AIMEE_EMBEDDER_URL are untouched):
   POST /embed        body = raw UTF-8 text                 -> JSON float array (dim)
   POST /embed_batch  body = JSON [text, ...]               -> JSON [[float,...], ...]
   POST /rerank       body = JSON [[query, candidate], ...] -> JSON [float, ...]
+
+/embed and /embed_batch take an optional `?input_type=query|document` selecting which of
+the embedder's asymmetric prefixes to apply (see EMBED_PREFIXES). It rides in the query
+string because neither body has an envelope to extend — /embed's is raw text and
+/embed_batch's is a bare JSON array — so old clients keep working unchanged. Omitted
+means `document`, since every ingest path is a document and only queries need to opt in.
   POST /auth/verify  authenticated service-identity check (no model work)
   GET  /health       -> {"status": ok|loading|down, "model":..., "dim":N}
 
@@ -20,7 +26,9 @@ Config (env):
   AIMEE_LLM_EMBED_URL     embedder llama-server base (default http://127.0.0.1:8081)
   AIMEE_LLM_RERANK_URL    ettin-encoder llama-server base (default http://127.0.0.1:8082)
   AIMEE_LLM_RERANK_HEAD   dir with 2_Dense/3_LayerNorm/4_Dense safetensors (the head)
-  AIMEE_LLM_EMBED_MODEL   embedder model id (for /health + the (model_id,dim) drift guard)
+  AIMEE_LLM_EMBED_MODEL   embedder model id (for /health, the (model_id,dim) drift guard,
+                          and the EMBED_PREFIXES lookup — an id absent from that table is
+                          refused rather than served without prefixes)
   AIMEE_LLM_PORT          listen port (default 8080)
   AIMEE_LLM_BATCH_CAP     /embed_batch max vectors per call (default 512 -> 413 on excess)
 
@@ -34,6 +42,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 EMBED_URL = os.environ.get("AIMEE_LLM_EMBED_URL", "http://127.0.0.1:8081").rstrip("/")
@@ -43,6 +52,75 @@ EMBED_MODEL = os.environ.get("AIMEE_LLM_EMBED_MODEL", "nomic-embed-text-v2-moe")
 PORT = int(os.environ.get("AIMEE_LLM_PORT", "8080"))
 BATCH_CAP = int(os.environ.get("AIMEE_LLM_BATCH_CAP", "512"))
 RERANK_SEP = "</s>"
+
+# ---- per-model query/document prefixes ----
+# Retrieval embedders are trained asymmetrically: the query side and the document side
+# each get their own prefix, and serving without them is a silent quality regression
+# (measured: nomic 0.6075 NDCG@10 with its card prefixes vs 0.5823 prefix-free — large
+# enough to invert the model selection). See
+# docs/proposals/pending/embedder-query-document-prefixes.md.
+#
+# The table is keyed by MODEL IDENTITY, never a global setting, so swapping the embedder
+# cannot silently inherit the previous model's pair. That is the same failure class as
+# AIMEE_LLM_EMBED_POOLING, which defaulted to `last` (right for Qwen3, silently wrong for
+# nomic — well-formed vectors, no error, collapsed recall).
+#
+# An entry mapping to empty strings is a POSITIVE DECLARATION that the model's card
+# defines no prefixes; it is deliberately distinguishable from "not in the table", which
+# is refused rather than served bare. Add a model only with its card's documented pair.
+EMBED_PREFIXES = {
+    "nomic-embed-text-v2-moe": {"query": "search_query: ", "document": "search_document: "},
+    "bekko-a25m": {"query": "", "document": ""},
+}
+INPUT_TYPES = ("query", "document")
+# Ingest is the overwhelming majority of embed traffic and every ingest path is a
+# document, so an omitted input_type means `document` and only the query paths opt in.
+# It must NOT mean "no prefix": defaulting to bare text is exactly the regression this
+# table exists to prevent.
+INPUT_TYPE_DEFAULT = "document"
+
+
+def embed_model_key(model_id):
+    """Normalise a model id to its prefix-table key.
+
+    Model ids carry deployment decoration — a `@v1` revision suffix (as the db2 model
+    records use) or case differences — none of which change which prefixes the model
+    was trained with.
+    """
+    return (model_id or "").split("@", 1)[0].strip().lower()
+
+
+def parse_input_type(value):
+    """Validate a caller-supplied input_type. Raises GatewayError(400)."""
+    if value is None or value == "":
+        return INPUT_TYPE_DEFAULT
+    if value not in INPUT_TYPES:
+        raise GatewayError(
+            400,
+            "bad_request",
+            f"input_type must be one of {', '.join(INPUT_TYPES)} (got {value!r})",
+        )
+    return value
+
+
+def embed_prefix(input_type, model_id=None):
+    """Return the prefix for `input_type` under the configured embedder.
+
+    Refuses (503) an embedder absent from the table rather than serving it bare or with
+    another model's prefixes — an unregistered model is an operator error we can detect,
+    and quietly embedding without prefixes is undetectable downstream.
+    """
+    key = embed_model_key(EMBED_MODEL if model_id is None else model_id)
+    pair = EMBED_PREFIXES.get(key)
+    if pair is None:
+        raise GatewayError(
+            503,
+            "embedder_unregistered",
+            f"embedder {key or '(unset)'} has no query/document prefix entry; add its "
+            "card's documented pair to EMBED_PREFIXES (an explicitly empty pair declares "
+            "a model that defines none)",
+        )
+    return pair[input_type]
 
 # CI/dev STUB mode: serve deterministic embed/rerank/synth with NO upstream
 # llama-servers. The supervisor skips launching the per-role servers and the
@@ -336,20 +414,25 @@ def _rerank_head():
     return _head
 
 
-def do_embed(text):
+def do_embed(text, input_type=INPUT_TYPE_DEFAULT):
+    # The prefix is resolved (and an unregistered embedder refused) in STUB mode too, so
+    # e2e exercises the same seam the real path takes rather than a laxer one.
+    prefixed = embed_prefix(input_type) + text
     if STUB:
-        vec = _stub_vec(text)
+        vec = _stub_vec(prefixed)
     else:
-        vec = _embeddings(EMBED_URL, text)
+        vec = _embeddings(EMBED_URL, prefixed)
     return _validate_embed_dim(vec)
 
 
-def do_embed_batch(texts):
+def do_embed_batch(texts, input_type=INPUT_TYPE_DEFAULT):
     validate_batch(texts)
+    prefix = embed_prefix(input_type)
+    prefixed = [prefix + t for t in texts]
     if STUB:
-        vecs = [_stub_vec(t) for t in texts]
+        vecs = [_stub_vec(t) for t in prefixed]
     else:
-        vecs = _embeddings(EMBED_URL, list(texts)) if texts else []
+        vecs = _embeddings(EMBED_URL, prefixed) if prefixed else []
     for vec in vecs:
         _validate_embed_dim(vec)
     return vecs
@@ -664,8 +747,14 @@ def build_server():
                 self._send(404, {"error": "not found"})
 
         def do_POST(self):
-            path = self.path.rstrip("/")
+            # input_type rides in the query string: /embed's body is raw UTF-8 text with
+            # no envelope to extend, and /embed_batch's is a bare JSON array, so neither
+            # body can carry it without breaking the existing wire contract.
+            split = urllib.parse.urlsplit(self.path)
+            path = split.path.rstrip("/")
+            query = urllib.parse.parse_qs(split.query)
             try:
+                input_type = parse_input_type((query.get("input_type") or [None])[0])
                 # §1a: every work request is authenticated; the scope is DERIVED from the
                 # identity (a caller-supplied X-Aimee-Scope is rejected). Authenticate
                 # before reading the body so an untrusted bridge peer cannot hold a
@@ -683,9 +772,9 @@ def build_server():
                     text = raw.decode("utf-8", errors="replace")
                     if not text.strip():
                         raise GatewayError(400, "bad_request", "empty input")
-                    self._send(200, do_embed(text))
+                    self._send(200, do_embed(text, input_type))
                 elif path == "/embed_batch":
-                    self._send(200, do_embed_batch(json.loads(raw or b"[]")))
+                    self._send(200, do_embed_batch(json.loads(raw or b"[]"), input_type))
                 elif path == "/rerank":
                     self._send(200, do_rerank(json.loads(raw or b"[]")))
                 elif path == "/v1/chat/completions":

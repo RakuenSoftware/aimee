@@ -560,5 +560,157 @@ class ManagedServiceAuth(unittest.TestCase):
                 self.assertEqual(status, 200)
 
 
+class EmbedPrefixes(unittest.TestCase):
+    """Per-model query/document prefixes at the embed boundary.
+
+    Retrieval embedders are trained asymmetrically. Serving nomic without its card
+    prefixes measured 0.5823 NDCG@10 against 0.6075 with them — a regression large
+    enough to invert which model wins the selection, and invisible at runtime because
+    the vectors stay well-formed. These tests pin the two properties that make the
+    failure detectable: the prefix depends on the declared polarity, and an embedder
+    nobody has declared prefixes for is refused rather than served bare.
+    """
+
+    def _gw_with(self, model, **env):
+        env["AIMEE_LLM_EMBED_MODEL"] = model
+        with mock.patch.dict(os.environ, env, clear=False):
+            return _gw()
+
+    def _capture(self, gw):
+        """Record exactly what text reaches the embedder."""
+        sent = []
+
+        def fake_embeddings(base_url, inputs):
+            sent.append(inputs)
+            if isinstance(inputs, str):
+                return [0.1, 0.2]
+            return [[0.1, 0.2] for _ in inputs]
+
+        gw._embeddings = fake_embeddings
+        return sent
+
+    def test_document_and_query_get_their_own_prefix(self):
+        gw = self._gw_with("nomic-embed-text-v2-moe")
+        sent = self._capture(gw)
+        gw.do_embed("hello", "document")
+        gw.do_embed("hello", "query")
+        self.assertEqual(sent, ["search_document: hello", "search_query: hello"])
+
+    def test_omitted_input_type_is_document_not_bare(self):
+        # The whole bug being fixed is bare text reaching a prefix-dependent model,
+        # so the default must be a real polarity rather than "no prefix".
+        gw = self._gw_with("nomic-embed-text-v2-moe")
+        sent = self._capture(gw)
+        gw.do_embed("hello")
+        self.assertEqual(sent, ["search_document: hello"])
+
+    def test_batch_prefixes_every_input(self):
+        gw = self._gw_with("nomic-embed-text-v2-moe")
+        sent = self._capture(gw)
+        gw.do_embed_batch(["a", "b"], "query")
+        self.assertEqual(sent, [["search_query: a", "search_query: b"]])
+
+    def test_unregistered_embedder_is_refused(self):
+        gw = self._gw_with("some-unknown-embedder")
+        self._capture(gw)
+        for call in (lambda: gw.do_embed("hello"),
+                     lambda: gw.do_embed_batch(["hello"])):
+            with self.assertRaises(gw.GatewayError) as caught:
+                call()
+            self.assertEqual(caught.exception.status, 503)
+            self.assertEqual(caught.exception.body["error"]["code"], "embedder_unregistered")
+
+    def test_declared_empty_prefixes_are_served_bare(self):
+        # bekko-a25m's card defines no prefixes. That is a positive declaration and
+        # must be distinguishable from an unregistered model.
+        gw = self._gw_with("bekko-a25m")
+        sent = self._capture(gw)
+        gw.do_embed("hello", "query")
+        gw.do_embed("hello", "document")
+        self.assertEqual(sent, ["hello", "hello"])
+
+    def test_model_id_decoration_still_resolves(self):
+        # db2 model records carry an @revision suffix; casing varies between the HF
+        # repo name and the config. Neither changes the trained prefixes.
+        for model in ("nomic-embed-text-v2-moe@v1", "Nomic-Embed-Text-V2-MoE"):
+            gw = self._gw_with(model)
+            sent = self._capture(gw)
+            gw.do_embed("hello", "query")
+            self.assertEqual(sent, ["search_query: hello"], f"for {model!r}")
+
+    def test_bad_input_type_is_a_client_error(self):
+        gw = self._gw_with("nomic-embed-text-v2-moe")
+        for bad in ("passage", "QUERY", "doc", "0"):
+            with self.assertRaises(gw.GatewayError) as caught:
+                gw.parse_input_type(bad)
+            self.assertEqual(caught.exception.status, 400)
+        self.assertEqual(gw.parse_input_type(None), "document")
+        self.assertEqual(gw.parse_input_type(""), "document")
+
+    def test_stub_mode_applies_prefixes_and_still_refuses(self):
+        # STUB must exercise the same seam, or e2e passes against a laxer contract
+        # than production runs.
+        gw = self._gw_with("nomic-embed-text-v2-moe", AIMEE_LLM_STUB="1")
+        self.assertNotEqual(gw.do_embed("hello", "query"), gw.do_embed("hello", "document"))
+        unknown = self._gw_with("some-unknown-embedder", AIMEE_LLM_STUB="1")
+        with self.assertRaises(unknown.GatewayError):
+            unknown.do_embed("hello")
+
+
+class EmbedPrefixRouting(unittest.TestCase):
+    """input_type travels over real HTTP in the query string.
+
+    /embed's body is raw text and /embed_batch's is a bare JSON array, so neither can
+    carry the field without breaking the existing contract. Covered over HTTP because
+    the request handler splits the query string itself.
+    """
+
+    def setUp(self):
+        with mock.patch.dict(os.environ,
+                             {"AIMEE_LLM_STUB": "1", "AIMEE_LLM_PORT": "0",
+                              "AIMEE_LLM_EMBED_MODEL": "nomic-embed-text-v2-moe"},
+                             clear=False):
+            self.gw = _gw()
+        self.srv = self.gw.build_server()
+        self.port = self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+
+    def _post(self, path, raw: bytes):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}{path}", data=raw,
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read())
+
+    def test_query_and_document_differ_over_http(self):
+        _, as_query = self._post("/embed?input_type=query", b"hello")
+        _, as_doc = self._post("/embed?input_type=document", b"hello")
+        _, defaulted = self._post("/embed", b"hello")
+        self.assertNotEqual(as_query, as_doc)
+        self.assertEqual(as_doc, defaulted, "omitted input_type must mean document")
+
+    def test_batch_honours_input_type_over_http(self):
+        _, as_query = self._post("/embed_batch?input_type=query", json.dumps(["hello"]).encode())
+        _, as_doc = self._post("/embed_batch?input_type=document", json.dumps(["hello"]).encode())
+        self.assertNotEqual(as_query, as_doc)
+
+    def test_unknown_input_type_is_400_over_http(self):
+        status, body = self._post("/embed?input_type=passage", b"hello")
+        self.assertEqual(status, 400)
+        self.assertEqual(body["error"]["code"], "bad_request")
+
+    def test_query_string_does_not_break_route_matching(self):
+        # path matching must strip the query string, or /embed?x=1 would 404.
+        status, _ = self._post("/embed?input_type=document", b"hello")
+        self.assertEqual(status, 200)
+
+
 if __name__ == "__main__":
     unittest.main()
