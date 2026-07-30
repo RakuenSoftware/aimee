@@ -344,7 +344,7 @@ if [ -n "$smoke_tmp" ]; then
         smoke_url=${smoke_case%%|*}
         smoke_expected=${smoke_case#*|}
         if ! AIMEE_BIN="$smoke_tmp/fake-aimee" SERVER_URL="$smoke_url" \
-             EXPECTED_ENDPOINT="$smoke_expected" FORCE_MODE=full \
+             EXPECTED_ENDPOINT="$smoke_expected" FORCE_MODE=full BEARER=test-only \
              bash ../scripts/aimee-thin-client-smoke.sh >/dev/null 2>&1; then
             smoke_endpoints_ok=0
         fi

@@ -12,11 +12,9 @@
 set -eu
 
 vault_bootstrapped=0
-webchat_prepared=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --aimee-internal-vault-bootstrapped) vault_bootstrapped=1; shift ;;
-        --aimee-internal-webchat-prepared) webchat_prepared=1; shift ;;
         *) break ;;
     esac
 done
@@ -52,6 +50,21 @@ for _secret_name in $_secret_names; do
     unset "$_secret_name"
 done
 
+# Legacy credential files are a migration source, never runtime storage. Seal
+# and erase them even for a Docker command override; an internal restart marker
+# supplied by an external caller must not be able to bypass this boundary.
+runtime_web_lib=/usr/local/bin/runtime-web-lib.sh
+if [ ! -r "$runtime_web_lib" ]; then
+    entrypoint_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+    runtime_web_lib="$entrypoint_dir/runtime-web-lib.sh"
+fi
+[ -r "$runtime_web_lib" ] || {
+    printf '[server-entrypoint] fatal: runtime-web credential migration helper is unavailable\n' >&2
+    exit 2
+}
+. "$runtime_web_lib"
+webchat_migrate_legacy_credentials
+
 # An explicit Docker command is unrelated to normal server startup. It still
 # follows Vault ingestion above and receives a credential-free environment.
 if [ "$#" -gt 0 ]; then
@@ -61,10 +74,8 @@ if [ "$vault_bootstrapped" -eq 0 ]; then
     # Migrate any legacy browser credential files only after first-boot env
     # values have been sealed and scrubbed. The new web service authenticates
     # against fixed Vault records and never materializes a PAM verifier.
-    . /usr/local/bin/runtime-web-lib.sh
     webchat_prepare
-    exec /usr/bin/tini -- aimee-server-entrypoint \
-        --aimee-internal-vault-bootstrapped --aimee-internal-webchat-prepared
+    exec /usr/bin/tini -- aimee-server-entrypoint --aimee-internal-vault-bootstrapped
 fi
 
 export AIMEE_WFE_ENGINE="${AIMEE_WFE_ENGINE:-go}"
@@ -194,14 +205,9 @@ for cli_dir in .codex .claude .config .npm-global; do
     [ -e "$AIMEE_HOME/$cli_dir" ] && chown -R aimee:aimee "$AIMEE_HOME/$cli_dir" 2>/dev/null || true
 done
 
-. /usr/local/bin/runtime-web-lib.sh
 . /usr/local/bin/plane-supervisor.sh
 
-if [ "$webchat_prepared" -eq 1 ]; then
-    WEBCHAT_PREPARED=1
-else
-    webchat_prepare
-fi
+webchat_prepare
 
 log() { printf '[server-entrypoint] %s\n' "$*"; }
 
