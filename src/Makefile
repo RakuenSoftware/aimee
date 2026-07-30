@@ -775,7 +775,8 @@ GATEWAY_SRCS = cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes
                shutdown_forensics.c
 GATEWAY_PLATFORM_OBJS = $(filter %/platform_process.o, $(PLATFORM_BASIC_OBJS))
 # cJSON uses a special build rule (strips -Werror); reference it separately.
-GATEWAY_OBJS = $(GATEWAY_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o $(GATEWAY_PLATFORM_OBJS)
+GATEWAY_OBJS = $(GATEWAY_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o \
+               $(OBJDIR)/modules/vault/runtime_secret.o $(GATEWAY_PLATFORM_OBJS)
 
 # All source files for linting (excluding vendored cJSON)
 ALL_SRCS = $(sort $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB2_PG_SRCS) $(DB2_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c kb/kb_mgmt_token_public.c db2/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_offline_hardening.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c db2/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c db2/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) $(CMD_SRCS) \
