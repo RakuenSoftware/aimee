@@ -250,8 +250,8 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
    const int managed_llm = deploy_env_has_profile(env, "llm");
    const int managed_kb = deploy_env_has_profile(env, "kb");
    char explicit_conn[4096];
-   int have_explicit_conn = runtime_secret_get("AIMEE_KB_CONN", explicit_conn,
-                                               sizeof(explicit_conn));
+   int have_explicit_conn =
+       runtime_secret_get("AIMEE_KB_CONN", explicit_conn, sizeof(explicit_conn));
    const char *explicit_id = getenv("AIMEE_SERVER_ID");
    const char *explicit_team = getenv("AIMEE_SERVER_TEAM_ID");
    const int explicit_parts = (have_explicit_conn ? 1 : 0) +
@@ -566,9 +566,12 @@ static int deploy_up_service_argv(const char *file, const char *service, const c
  * only the pipe carries the first-boot value. */
 static int deploy_kb_vault_bootstrap_argv(const char *file, const char **argv, size_t cap)
 {
-   const char *cmd[] = {"docker", "compose", "-f", file, "run", "--rm", "-T", "--no-deps",
-                        "--entrypoint", "/usr/local/bin/aimee-kb", "aimee-kb",
-                        "--bootstrap-vault-stdin"};
+   const char *cmd[] = {"docker",       "compose",
+                        "-f",           file,
+                        "run",          "--rm",
+                        "-T",           "--no-deps",
+                        "--entrypoint", "/usr/local/bin/aimee-kb",
+                        "aimee-kb",     "--bootstrap-vault-stdin"};
    size_t n = sizeof(cmd) / sizeof(cmd[0]);
    if (!argv || !file || !file[0] || cap < n + 1)
       return -1;
@@ -650,8 +653,8 @@ static void *deploy_worker(void *arg)
       {
          const char *token = deploy_env_value(envp, "AIMEE_LLM_AUTH_TOKEN");
          char record[sizeof("AIMEE_LLM_AUTH_TOKEN=") + 512];
-         int record_len = token ? snprintf(record, sizeof(record), "AIMEE_LLM_AUTH_TOKEN=%s", token)
-                                : -1;
+         int record_len =
+             token ? snprintf(record, sizeof(record), "AIMEE_LLM_AUTH_TOKEN=%s", token) : -1;
          const char *bootstrap_argv[16];
          int bootstrap_code = -1;
          used = strlen(out);

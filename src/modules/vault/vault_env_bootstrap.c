@@ -175,8 +175,7 @@ int vault_env_import_stream(FILE *input)
       if (eq && name_span_is_credential(record, name_len, 1))
       {
          if (name_len == 0 || name_len >= ENV_NAME_MAX ||
-             !env_name_is_identifier(record, name_len) ||
-             imported_count >= ENV_BOOTSTRAP_MAX)
+             !env_name_is_identifier(record, name_len) || imported_count >= ENV_BOOTSTRAP_MAX)
          {
             failed = 1;
             break;

@@ -1560,7 +1560,7 @@ int main(int argc, char **argv)
     * Vault but may not become the long-lived KB. The bootstrap helper itself is
     * already short-lived and therefore does not need to re-exec. */
    if (!(argc > 1 && (strcmp(argv[1], "--bootstrap-vault-env") == 0 ||
-                     strcmp(argv[1], "--bootstrap-vault-stdin") == 0)))
+                      strcmp(argv[1], "--bootstrap-vault-stdin") == 0)))
    {
       int credential_env = vault_env_has_credential_environment();
       if (credential_env < 0)
@@ -1618,7 +1618,7 @@ int main(int argc, char **argv)
    (void)atexit(runtime_secret_clear);
 
    if (argc > 1 && (strcmp(argv[1], "--bootstrap-vault-env") == 0 ||
-                   strcmp(argv[1], "--bootstrap-vault-stdin") == 0))
+                    strcmp(argv[1], "--bootstrap-vault-stdin") == 0))
       return 0;
 
    /* Entrypoint decision probe: presence only, never the DB credential. A KB
@@ -1630,11 +1630,11 @@ int main(int argc, char **argv)
       int present = runtime_secret_get("AIMEE_DB2_URL", db2_url, sizeof(db2_url));
       char embedded[4096];
       const char *home = aimee_home();
-      int n = home ? snprintf(embedded, sizeof(embedded),
-                              "postgresql:///aimee_shared?host=%s/run", home)
+      int n = home ? snprintf(embedded, sizeof(embedded), "postgresql:///aimee_shared?host=%s/run",
+                              home)
                    : -1;
-      int external = present &&
-                     (n <= 0 || (size_t)n >= sizeof(embedded) || strcmp(db2_url, embedded) != 0);
+      int external =
+          present && (n <= 0 || (size_t)n >= sizeof(embedded) || strcmp(db2_url, embedded) != 0);
       runtime_secret_wipe(db2_url, sizeof(db2_url));
       runtime_secret_wipe(embedded, sizeof(embedded));
       return external ? 0 : 1;

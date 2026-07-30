@@ -207,8 +207,7 @@ static void test_managed_llm_service_credential(void)
 
    /* A complete explicit packet wins; a partial packet is never mixed with a
     * wizard-generated identity. */
-   assert(runtime_secret_store("AIMEE_KB_CONN",
-                               "aimee://kb:8745?ca=sha256:x&enroll=x") == 0);
+   assert(runtime_secret_store("AIMEE_KB_CONN", "aimee://kb:8745?ca=sha256:x&enroll=x") == 0);
    assert(setenv("AIMEE_SERVER_ID", "operator-server", 1) == 0);
    assert(setenv("AIMEE_SERVER_TEAM_ID", "7", 1) == 0);
    envp = build_deploy_envp(NULL, 0, NULL, NULL, &managed_identity);
@@ -270,8 +269,7 @@ static void test_deploy_argv_is_orderable_and_has_no_remove_orphans(void)
 static void test_managed_kb_credential_bootstrap_is_stdin_only(void)
 {
    const char *argv[16];
-   int n = deploy_kb_vault_bootstrap_argv("/managed.yaml", argv,
-                                          sizeof(argv) / sizeof(argv[0]));
+   int n = deploy_kb_vault_bootstrap_argv("/managed.yaml", argv, sizeof(argv) / sizeof(argv[0]));
    assert(n > 0 && argv[n] == NULL);
    assert(strcmp(argv[0], "docker") == 0 && strcmp(argv[1], "compose") == 0);
    assert(strcmp(argv[3], "/managed.yaml") == 0 && strcmp(argv[4], "run") == 0);

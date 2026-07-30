@@ -208,9 +208,8 @@ static void test_webchat_first_boot_env_source(void)
 
 static void test_streamed_first_boot_source(void)
 {
-   static const unsigned char records[] =
-       "AIMEE_STREAM_API_KEY=stream-only-secret\0"
-       "AIMEE_STREAM_MODE=non-secret-setting\0";
+   static const unsigned char records[] = "AIMEE_STREAM_API_KEY=stream-only-secret\0"
+                                          "AIMEE_STREAM_MODE=non-secret-setting\0";
    FILE *input = tmpfile();
    assert(input != NULL);
    assert(fwrite(records, 1, sizeof(records) - 1, input) == sizeof(records) - 1);
