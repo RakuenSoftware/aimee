@@ -110,7 +110,9 @@ int main(void)
    (void)observed_closed_pipe;
    close(fd);
 
-   assert(kb_workload_checked_root_file_open("/etc/hosts", 0, &fd) == KB_WORKLOAD_HELPER_OK);
+   const char *root_file =
+       trusted_fixture("AIMEE_TEST_TRUSTED_ROOT_FILE", "/etc/hosts", "/etc/hosts");
+   assert(kb_workload_checked_root_file_open(root_file, 0, &fd) == KB_WORKLOAD_HELPER_OK);
    close(fd);
    memset(response, 0xa5, sizeof(response));
    response_len = 99;
