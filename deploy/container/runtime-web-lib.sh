@@ -15,7 +15,12 @@ WEBCHAT_LOGIN_GROUP="${AIMEE_WEBCHAT_LOGIN_GROUP:-aimee-webchat}"
 webchat_pid=""
 WEBCHAT_PREPARED=0
 
-webchat_log() { printf '[webchat] %s\n' "$*"; }
+# Diagnostics go to stderr, never stdout. The entrypoint execs an arbitrary
+# command override (`docker run ... sh -c ...`), and anything this library prints
+# to stdout is prepended to that command's own output — corrupting it for any
+# caller capturing it. Container runtimes collect both streams as logs, so this
+# costs nothing operationally.
+webchat_log() { printf '[webchat] %s\n' "$*" >&2; }
 
 webchat_is_enabled() {
     case "$(printf '%s' "${AIMEE_RUNTIME_WEB_ENABLED:-1}" | tr 'A-Z' 'a-z')" in
@@ -166,12 +171,15 @@ webchat_provision_login() {
 # currently signed in with — provisioning only the explicit pair and then
 # deleting the generated file would destroy a working login. Both become PAM
 # accounts; the wizard retires the generated one when it is replaced.
+# Never fatal, for the reason spelled out in webchat_generate_bootstrap_login:
+# the entrypoint calls this unguarded under `set -eu`, so a failure here would
+# take the container down instead of leaving it up without a browser login.
 webchat_provision_bootstrap_account() {
-    webchat_provision_login "${AIMEE_WEBCHAT_USER:-}" "${AIMEE_WEBCHAT_PASSWORD:-}" || return 1
+    webchat_provision_login "${AIMEE_WEBCHAT_USER:-}" "${AIMEE_WEBCHAT_PASSWORD:-}" || true
     if webchat_read_generated_credentials; then
-        webchat_provision_login "$wc_generated_user" "$wc_generated_pass" || return 1
+        webchat_provision_login "$wc_generated_user" "$wc_generated_pass" || true
     fi
-    webchat_generate_bootstrap_login || return 1
+    webchat_generate_bootstrap_login || true
     return 0
 }
 
@@ -215,17 +223,24 @@ webchat_generate_bootstrap_login() {
     if [ "${#_gen_user}" -ne 18 ] || [ "${#_gen_pass}" -ne 64 ]; then
         webchat_log "ERROR: could not draw a first-boot dashboard credential"
         _gen_user="" _gen_pass=""
-        return 1
+        return 0
     fi
     if ! webchat_provision_login "$_gen_user" "$_gen_pass"; then
+        # NOT fatal. The entrypoint runs under `set -eu` and does not guard this
+        # call, so returning non-zero here aborts the whole container — a host
+        # without useradd/groupadd would stop booting rather than merely lacking
+        # a dashboard login. Say so loudly and carry on degraded.
+        webchat_log "ERROR: could not provision a first-boot dashboard login; the"
+        webchat_log "browser UI will have no account until one is supplied via"
+        webchat_log "AIMEE_WEBCHAT_USER/AIMEE_WEBCHAT_PASSWORD."
         _gen_user="" _gen_pass=""
-        return 1
+        return 0
     fi
     mkdir -p "$(dirname "$WEBCHAT_BOOTSTRAP_USER")" 2>/dev/null || true
     printf 'generated:%s\n' "$_gen_user" > "$WEBCHAT_BOOTSTRAP_USER" 2>/dev/null || {
         webchat_log "ERROR: could not record the generated first-boot login"
         _gen_user="" _gen_pass=""
-        return 1
+        return 0
     }
     # 0644, not 0600: the C server runs as `aimee` and resolves the appliance
     # administrator from this marker. Unreadable, its gate falls back to "admin"

@@ -89,7 +89,7 @@ test-only-key-material
 printf 'username=%s\npassword=%s\n' "$legacy_user" "$legacy_pass" > "$WEBCHAT_BOOTSTRAP_CREDENTIALS"
 printf '%s\n' "$legacy_key" > "$WEBCHAT_LEGACY_TLS_KEY"
 
-migration_log=$(webchat_migrate_legacy_credentials)
+migration_log=$(webchat_migrate_legacy_credentials 2>&1)
 # The plaintext bootstrap file is removed once its account exists; the TLS key is
 # sealed. No login record reaches the Vault (the fake would have failed above).
 [[ ! -e $WEBCHAT_BOOTSTRAP_CREDENTIALS ]]
@@ -107,7 +107,7 @@ done
 # operator-assisted recovery; it is never silently deleted.
 printf 'not-a-valid-record\n' > "$WEBCHAT_BOOTSTRAP_CREDENTIALS"
 set +e
-corrupt_log=$(webchat_migrate_legacy_credentials)
+corrupt_log=$(webchat_migrate_legacy_credentials 2>&1)
 corrupt_rc=$?
 set -e
 [[ $corrupt_rc -ne 0 ]]
@@ -117,7 +117,7 @@ grep -Fq 'invalid' <<<"$corrupt_log"
 # Headless mode still performs custody migration before it disables the UI.
 find "$AIMEE_HOME/webchat" -type f -delete
 export AIMEE_RUNTIME_WEB_ENABLED=0
-disabled_log=$(webchat_prepare)
+disabled_log=$(webchat_prepare 2>&1)
 grep -Fq 'browser UI disabled' <<<"$disabled_log"
 
 # --- first-boot login generation -------------------------------------------
@@ -188,6 +188,24 @@ unset AIMEE_WEBCHAT_USER AIMEE_WEBCHAT_PASSWORD
 
 echo "webchat-vault-migration-check: first-boot generation ok"
 
+# --- stdout stays clean ------------------------------------------------------
+#
+# server-entrypoint.sh sources this library and then execs whatever command the
+# operator passed (`docker run ... sh -c '...'`). Anything the library prints to
+# stdout is prepended to that command's output. That is how the build-integrity
+# credential-override check broke: the provisioning diagnostics landed in the
+# captured output alongside the child's, so it no longer read as "unset".
+# Diagnostics belong on stderr; container runtimes collect both as logs anyway.
+rm -rf "$AIMEE_HOME/webchat"; mkdir -p "$AIMEE_HOME/webchat"
+stray_stdout=$(webchat_provision_bootstrap_account 2>/dev/null) || true
+if [[ -n $stray_stdout ]]; then
+  echo "webchat-vault-migration-check: provisioning wrote to stdout, which corrupts" >&2
+  echo "  an entrypoint command override. Route it through webchat_log (stderr):" >&2
+  printf '%s\n' "$stray_stdout" >&2
+  exit 1
+fi
+
+echo "webchat-vault-migration-check: stdout clean"
 
 echo "webchat-vault-migration-check: ok"
 
