@@ -222,6 +222,19 @@ int main(void)
    assert(db2_embedder_serving_record_or_check(conn, "nomic/bbbb", err, sizeof err) == -1);
    assert(db2_embedder_serving_record_or_check(NULL, "nomic/aaaa", err, sizeof err) == -1);
 
+   /* The builtin lexical embedder declares an identity too, and switching off it must be
+    * caught. This was the one transition nothing could see: the builtin is 384-dim and so
+    * is the bundled model, so the dim guard is silent, and while the builtin reported NO
+    * identity the guard simply recorded the model's fresh over a lexically-embedded
+    * corpus. */
+   err[0] = '\0';
+   assert(aimee_pg_exec(conn, "DELETE FROM kb_meta WHERE key = 'schema_embedder_serving_id'", err,
+                        sizeof err) == 0);
+   assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);
+   assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);
+   assert(db2_embedder_serving_record_or_check(conn, "bekko-a25m/abcd", err, sizeof err) == -1);
+   assert(strstr(err, "builtin/lexical-v1") != NULL && strstr(err, "bekko-a25m/abcd") != NULL);
+
    /* NULL conn -> -1. */
    assert(db2_embedding_model_record_or_check(NULL, "x", NULL, err, sizeof err) == -1);
 

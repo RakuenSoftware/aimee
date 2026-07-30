@@ -86,8 +86,10 @@ There is deliberately no compat list here, unlike the model-identity guard: two 
 to agree by measuring cosine, but a changed prefix pair is definitionally a different space. Two
 limits worth knowing:
 
-- An endpoint that reports no `serving_id` (a legacy embedder, or a gateway predating the field)
-  leaves the guard inactive rather than refusing, so upgrades do not strand existing deployments.
+- An endpoint that reports no `serving_id` (a legacy or third-party embedder) leaves the guard
+  inactive rather than refusing, so upgrades do not strand existing deployments. The **builtin**
+  lexical embedder does declare one (`builtin/lexical-v1`) because it shares the bundled model's
+  384 width — without an identity, switching between the two would be invisible to both guards.
 - A corpus embedded before the guard existed adopts the current identity on its first start, because
   it is indistinguishable from a fresh one. If such a corpus was built while prefixes were disabled,
   re-embed it once by hand — the guard cannot detect drift it never recorded a baseline for.

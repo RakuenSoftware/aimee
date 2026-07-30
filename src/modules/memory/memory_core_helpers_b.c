@@ -492,7 +492,21 @@ int memory_embed_serving_id(const char *command, char *out, size_t out_len)
    if (!command || !command[0])
       return 0;
    if (strcmp(command, "builtin") == 0)
-      return 0; /* the lexical embedder has no endpoint and no prefixes */
+   {
+      /* The builtin lexical embedder DOES have a vector space, and it needs an identity
+       * for the same reason the model-backed ones do. Reporting none left the one
+       * transition nothing could catch: a corpus embedded lexically and then queried with
+       * the bundled model shares its 384 width, so the dim guard is silent, and with no
+       * recorded identity the serving_id guard recorded the model's fresh and mixed the
+       * two spaces without a word.
+       *
+       * It is a deterministic feature hash over tokens and bigrams, so the space is fixed
+       * by the code rather than by any file: hence a constant, and hence the VERSION.
+       * BUMP IT whenever memory_embed_text_builtin's hashing, weighting or width changes —
+       * that is a different space, and an unbumped identity would claim otherwise. */
+      snprintf(out, out_len, "builtin/lexical-v1");
+      return 0;
+   }
    if (!memory_embed_command_is_http(command))
    {
       /* A SIDECAR command (the shipped container's embed-remote.py) owns endpoint
