@@ -237,7 +237,16 @@ if [ "$external_db" -eq 0 ]; then
     # its own user name and fail with "DB2 not reachable". Vault holds this value
     # for every sharer, and the entrypoint scrubs AIMEE_DB2_URL from the
     # environment before exec, so their own compose-supplied DSN cannot fix it.
-    AIMEE_DB2_URL="postgresql:///$DB?host=$PGSOCK&user=$(id -un)" aimee-kb --bootstrap-vault-env
+    # Fall back to the bare DSN if the runtime has no passwd entry for this uid:
+    # an empty user= is worse than none, and libpq's default is right whenever
+    # every reader runs as this same user anyway.
+    cluster_owner=$(id -un 2>/dev/null || true)
+    if [ -n "$cluster_owner" ]; then
+        embedded_dsn="postgresql:///$DB?host=$PGSOCK&user=$cluster_owner"
+    else
+        embedded_dsn="postgresql:///$DB?host=$PGSOCK"
+    fi
+    AIMEE_DB2_URL="$embedded_dsn" aimee-kb --bootstrap-vault-env
 
     start_embedder
 
