@@ -420,6 +420,7 @@ int kb_client_memory_diagnose_scoped(const char *query, const char *scope_type,
    if (!query || !out || max <= 0)
       return 0;
    cJSON *req = cJSON_CreateObject();
+   kbc_memory_add_scope_context(req);
    cJSON_AddStringToObject(req, "query", query);
    if (scope_type && scope_type[0])
       cJSON_AddStringToObject(req, "scope_type", scope_type);
@@ -1704,6 +1705,7 @@ char *kb_client_memory_facts(const char *query)
       return NULL;
 
    cJSON *req = cJSON_CreateObject();
+   kbc_memory_add_scope_context(req);
    cJSON_AddStringToObject(req, "query", query);
    char *json = kb_v1_action_request("memory.facts", req);
    if (!json)
