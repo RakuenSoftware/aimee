@@ -1,7 +1,7 @@
 services:
-  # LEGACY torch embedder. Retired from the default topology by the unified-llm
-  # cutover — the kb now embeds/reranks/synthesizes against the `aimee-llm`
-  # container (below) via AIMEE_LLM_URL. Kept behind a profile for rollback /
+  # LEGACY torch embedder, retired from the default topology: the kb embeds
+  # in-container now (bekko-a25m, weights baked into the aimee-kb image), so
+  # there is no embedding service to run. Kept behind a profile for rollback /
   # comparison: `docker compose --profile legacy-embedder up` (and point the kb
   # back with AIMEE_EMBEDDER_URL=http://embedder:8080).
   embedder:
@@ -55,18 +55,20 @@ services:
       AIMEE_HOME: /var/lib/aimee
       # External DB2 credentials are streamed into the KB Vault by the
       # disposable Compose helper; never persist them in Config.Env.
-      # One knob: embed (/embed) + rerank (/rerank) + synth (curator Tier-A & B,
-      # at {url}/v1) all via the unified aimee-llm container. The kb runs no model.
-      # Override AIMEE_EMBEDDER_URL / AIMEE_RERANKER_URL to pin a service elsewhere.
+      # SYNTH ONLY (curator Tier-A & B, at {url}/v1) and deliberately defaulted
+      # empty: the aimee-llm container is retired, so any default would point
+      # every deploy at a dead host. Embedding does not read this — set
+      # AIMEE_EMBEDDER_URL to embed against an external endpoint instead of
+      # the bundled in-container model.
       AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
-      # Embedding dim — empty = config default 1024 (CPU tier); set 2560 for the
-      # GPU 4B tier (changing it against a populated kb forces a re-embed).
+      # Embedding dim — empty = config default 384 (bundled bekko-a25m). Only set
+      # it for an external embedder of a different width; changing it against a
+      # populated kb forces a re-embed, and the dim guard will refuse until you do.
       AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
     # aimee-kb serves /v1 over HTTP only; the legacy --socket transport was retired (#2747).
     command: ["--http-port=8741"]
     ports:
       - "127.0.0.1:8741:8741"
-    depends_on:
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
       interval: 10s

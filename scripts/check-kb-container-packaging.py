@@ -431,8 +431,57 @@ def managed_kb_llm_contract_failures(text: str) -> list[str]:
     return failures
 
 
+# Every Compose file this repo ships. Structural mistakes must be caught in all of
+# them, not just the two the packaging rules inspect in detail.
+SHIPPED_COMPOSE_FILES = (
+    "compose.yaml",
+    "compose.server.yaml",
+    "compose.server-managed.yaml",
+    "compose.server-standalone.yaml",
+    "deploy/compose/aimee.yaml",
+    "deploy/container/aimee-managed.compose.yaml",
+    "deploy/container/aimee-server.yaml",
+    "deploy/smoothnas/aimee.compose.yaml",
+)
+
+
+def empty_key_failures(text: str) -> list[str]:
+    """Catch a service key that is present but null.
+
+    Deleting the last entry under a block key (`depends_on:` losing its only
+    service, say) leaves the key behind holding None. That is still valid YAML,
+    so a parse test passes — but Compose rejects it ("depends_on must be a
+    array") and the whole topology fails to start. `docker compose config` finds
+    it; this repo's lint has no docker, so the shape is asserted directly.
+    """
+    if yaml is None:
+        return ["PyYAML is required to validate Compose service shape"]
+    try:
+        model = yaml.load(text, Loader=UniqueKeySafeLoader)
+    except yaml.YAMLError as exc:
+        return [f"invalid Compose YAML: {exc.__class__.__name__}"]
+    services = model.get("services") if isinstance(model, dict) else None
+    if not isinstance(services, dict):
+        return []
+    failures: list[str] = []
+    for name, service in services.items():
+        if not isinstance(service, dict):
+            continue
+        for key, value in service.items():
+            if value is None:
+                failures.append(
+                    f"{name}.{key} is present but empty — remove the key or give it a value"
+                )
+    return failures
+
+
 def check(root: Path) -> list[str]:
     failures: list[str] = []
+    for rel in SHIPPED_COMPOSE_FILES:
+        path = root / rel
+        if path.exists():
+            for failure in empty_key_failures(read(path)):
+                failures.append(f"{rel} {failure}")
     dockerfile = root / "Dockerfile"
     compose = root / "compose.yaml"
     server_compose = root / "compose.server.yaml"
@@ -815,6 +864,21 @@ def plant_test() -> int:
             if not kb_publication_failures(planted):
                 print(f"kb-container-packaging plant: missed network_mode {static_mode}", file=sys.stderr)
                 return 1
+
+        # A block key left holding None after its last entry was deleted: valid
+        # YAML, rejected by Compose at startup ("depends_on must be a array").
+        planted_empty = safe_compose.replace(
+            "    healthcheck:\n", "    depends_on:\n    healthcheck:\n", 1
+        )
+        if not any(
+            "depends_on is present but empty" in failure
+            for failure in empty_key_failures(planted_empty)
+        ):
+            print(
+                "kb-container-packaging plant: missed present-but-empty service key",
+                file=sys.stderr,
+            )
+            return 1
 
         # Any non-empty default is rejected now, including the retired container's own
         # host:port — there is nothing listening there to point a deploy at.

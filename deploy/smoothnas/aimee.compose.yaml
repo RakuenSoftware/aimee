@@ -39,7 +39,6 @@ services:
     command: ["--http-port=8741"]
     ports:
       - "8741:8741"
-    depends_on:
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
       interval: 10s
