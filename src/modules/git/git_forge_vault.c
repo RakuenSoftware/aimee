@@ -29,3 +29,16 @@ int git_forge_vault_sshkey(const char *principal, char *out, size_t out_len)
 {
    return read_cred(principal, GIT_FORGE_SSHKEY_CRED, out, out_len);
 }
+
+int git_forge_vault_server_token(char *out, size_t out_len)
+{
+   if (out && out_len)
+      out[0] = '\0';
+   vault_status_t st = vault_service_get_server_principal(GIT_FORGE_VAULT_AGENT,
+                                                          GIT_FORGE_TOKEN_CRED, out, out_len);
+   if (st == VAULT_OK)
+      return 1;
+   if (st == VAULT_NO_ENTRY)
+      return 0;
+   return -1;
+}

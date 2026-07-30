@@ -218,11 +218,17 @@ extern "C"
     * are bound to that release — only artifacts citing a `kb_document` in the
     * release (via release_docs) are returned; release_id <= 0 means no release
     * binding. The result is precision-exact: every returned row satisfies every
-    * supplied facet. Writes up to `max` rows into out; returns the count
+    * supplied facet. When `project` is non-empty, only artifacts scoped to
+    * that stable project id are eligible; NULL explicitly searches all
+    * projects. Writes up to `max` rows into out; returns the count
     * (>= 0), or -1 on error. */
-   int db2_artifact_filter_facets(int64_t release_id, const char *kind, const char *status,
-                                  const char *priority, const char *component,
-                                  db2_artifact_row_t *out, int max);
+   int db2_artifact_filter_facets(int64_t release_id, const char *project, const char *kind,
+                                   const char *status, const char *priority, const char *component,
+                                   db2_artifact_row_t *out, int max);
+   int db2_artifact_filter_facets_scoped(int64_t release_id, const char *project,
+                                         const char *exclude_project, const char *kind,
+                                         const char *status, const char *priority,
+                                         const char *component, db2_artifact_row_t *out, int max);
 
    /* Read outgoing links from one artifact.
     * Returns count written into out (>= 0), or -1 on error. */

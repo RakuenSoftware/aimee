@@ -10,22 +10,19 @@ can start the KB and inference containers.
 ```bash
 git clone https://github.com/RakuenSoftware/aimee.git
 cd aimee
+export AIMEE_WEBCHAT_USER=operator
+read -rsp 'Initial webchat password: ' AIMEE_WEBCHAT_PASSWORD && echo
+export AIMEE_WEBCHAT_PASSWORD
 docker compose -f compose.server-managed.yaml up -d
+unset AIMEE_WEBCHAT_PASSWORD
 docker compose -f compose.server-managed.yaml logs aimee-server
 ```
 
-On first boot, the server logs a strong random temporary browser login:
-
-```text
-[webchat] generated temporary browser login (replace it in onboarding):
-[webchat]   username: aimee-<random>
-[webchat]   password: <random>
-```
-
-Open <https://localhost:8443> and sign in with that pair. It is persisted and printed again after a
-container recreation, so restarts do not silently rotate it. The wizard creates your operator
-username and password, disables and removes the temporary credential, and moves the current browser
-session to the new account. Then create the initial agent and choose CPU or GPU inference, git
+Open <https://localhost:8443> and sign in with that pair. The variables are first-boot transport,
+not runtime configuration: the entrypoint immediately encrypts them into the server Vault, removes
+them from its inherited environment, and only then starts long-lived services. Authentication reads
+only fixed Vault records through one-shot pipes; no password, verifier, session bearer, or TLS private
+key is written to the data volume or container logs. Then create the initial agent and choose CPU or GPU inference, git
 accounts, and workspaces.
 The final **Deploy** step starts:
 
@@ -68,8 +65,9 @@ refuses to start if its service credential is missing.
 
 Complete the account step before exposing the host. Deployments that inject both
 `AIMEE_WEBCHAT_USER` and `AIMEE_WEBCHAT_PASSWORD` use that explicit pair and skip account
-replacement. Set both or neither; a partial pair is rejected at startup. Supplied passwords are
-never printed in logs.
+replacement. When the browser UI is enabled, set both on first boot; a missing or partial pair is
+rejected instead of generating a credential in logs. Supplied values are sealed into Vault and
+scrubbed before services start.
 
 ### Choosing an image channel
 

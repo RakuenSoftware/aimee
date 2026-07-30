@@ -660,6 +660,73 @@ int main(void)
       assert(branch_exists(repo, "feat/ahead")); /* unmerged branch preserved */
    }
 
+   /* --- stable project identity: explicit manifest ids win; local UUIDs
+    *     survive checkout moves and are shared by linked git worktrees. --- */
+   {
+      char explicit_root[512], manifest[640], project[256], workspace[256];
+      snprintf(explicit_root, sizeof(explicit_root), "%s/identity-explicit", tmpdir);
+      assert(mkdir(explicit_root, 0755) == 0);
+      snprintf(manifest, sizeof(manifest), "%s/aimee.workspace.yaml", explicit_root);
+      write_text_file(manifest, "id: billing-api\n");
+      assert(workspace_repo_identity(explicit_root, project, sizeof(project), workspace,
+                                     sizeof(workspace)) == 0);
+      assert(strcmp(project, "billing-api") == 0);
+      assert(strcmp(workspace, "billing-api") == 0);
+      char tiny[4] = "x";
+      assert(workspace_repo_identity(explicit_root, tiny, sizeof(tiny), NULL, 0) != 0);
+      assert(tiny[0] == '\0');
+
+      char invalid_root[512], invalid_manifest[640], invalid_id[256] = "sentinel";
+      snprintf(invalid_root, sizeof(invalid_root), "%s/identity-invalid", tmpdir);
+      assert(mkdir(invalid_root, 0755) == 0);
+      snprintf(invalid_manifest, sizeof(invalid_manifest), "%s/aimee.workspace.yaml", invalid_root);
+      write_text_file(invalid_manifest, "id: invalid identity with spaces\n");
+      assert(workspace_repo_identity(invalid_root, invalid_id, sizeof(invalid_id), NULL, 0) != 0);
+      assert(invalid_id[0] == '\0');
+
+      char local_a[512], local_b[512], first[256], second[256], sidecar[640];
+      snprintf(local_a, sizeof(local_a), "%s/identity-local-a", tmpdir);
+      snprintf(local_b, sizeof(local_b), "%s/identity-local-b", tmpdir);
+      assert(mkdir(local_a, 0755) == 0);
+      assert(workspace_repo_identity(local_a, first, sizeof(first), NULL, 0) == 0);
+      assert(strncmp(first, "local:", 6) == 0 && strlen(first) == 42);
+      snprintf(sidecar, sizeof(sidecar), "%s/.aimee/project-id", local_a);
+      struct stat sidecar_st;
+      assert(stat(sidecar, &sidecar_st) == 0);
+      assert((sidecar_st.st_mode & 0777) == 0600);
+      assert(rename(local_a, local_b) == 0);
+      assert(workspace_repo_identity(local_b, second, sizeof(second), NULL, 0) == 0);
+      assert(strcmp(first, second) == 0);
+
+      char repo[512], wt[512], seed[640], cmd[2048], main_id[256], wt_id[256];
+      snprintf(repo, sizeof(repo), "%s/identity-git", tmpdir);
+      snprintf(wt, sizeof(wt), "%s/identity-git-wt", tmpdir);
+      init_real_git_repo(repo);
+      snprintf(seed, sizeof(seed), "%s/seed.txt", repo);
+      write_text_file(seed, "seed\n");
+      snprintf(cmd, sizeof(cmd), "git -C '%s' add seed.txt && git -C '%s' commit -q -m seed", repo,
+               repo);
+      assert(system(cmd) == 0);
+      assert(workspace_repo_identity(repo, main_id, sizeof(main_id), NULL, 0) == 0);
+      assert(strncmp(main_id, "local:", 6) == 0);
+      snprintf(cmd, sizeof(cmd), "git -C '%s' worktree add -q -b identity-wt '%s'", repo, wt);
+      assert(system(cmd) == 0);
+      assert(workspace_repo_identity(wt, wt_id, sizeof(wt_id), NULL, 0) == 0);
+      assert(strcmp(main_id, wt_id) == 0);
+      snprintf(cmd, sizeof(cmd), "git -C '%s' worktree remove -f '%s'", repo, wt);
+      assert(system(cmd) == 0);
+
+      /* Index keys never degrade to a checkout basename when persistence is
+       * impossible: that would create a second logical project silently. */
+      char missing[512], missing_project[256] = "sentinel", missing_workspace[256] = "sentinel";
+      snprintf(missing, sizeof(missing), "%s/no-such-parent/repo", tmpdir);
+      assert(workspace_repo_index_keys(missing, "legacy-workspace", missing_project,
+                                       sizeof(missing_project), missing_workspace,
+                                       sizeof(missing_workspace)) != 0);
+      assert(missing_project[0] == '\0');
+      assert(missing_workspace[0] == '\0');
+   }
+
    /* Cleanup */
    remove_tree(tmpdir);
 

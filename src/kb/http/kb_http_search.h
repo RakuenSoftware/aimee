@@ -13,7 +13,8 @@ extern "C"
     * search response into out_buf, and return the HTTP status (200, or 503 on
     * allocation/backend failure). Returns -1 when no filters are present, so
     * the caller falls through to the default ranked search path. */
-   int kb_http_search_facets(const char *body, char *out_buf, int out_cap);
+   int kb_http_search_facets(const char *body, const char *preferred_project, int all_projects,
+                             char *out_buf, int out_cap);
 
 #ifdef __cplusplus
 }

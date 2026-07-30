@@ -89,7 +89,7 @@ static void rh_clone_kb_scan(const char *pname, const char *dest, cJSON *out)
 
 /* POST /v1/workspace/clone {url, name?} — clone a repo as a project under the
  * calling webchat user's scoped workspace (webchat-git WP-D). The caller
- * principal comes from the attested identity (server.token-gated X-Aimee-Webuser),
+ * principal comes from the attested identity (root-UDS-gated X-Aimee-Webuser),
  * NOT the body — a user can only clone into their own tree. Credentials are
  * injected from the user's sealed vault (WP-C); never accepted in the body. */
 int rh_workspace_clone(const route_req_t *rq, char *resp, int cap)
@@ -547,12 +547,21 @@ static int wfe_managed_repo(const char *workdir_in, const char *head, char *work
    return 0;
 }
 
-static int wfe_default_base(const char *principal, const char *repo, const char *base, char *err,
-                            size_t errlen)
+/* A final WFE PR targets the branch on which the admitted repository was
+ * checked out (for example `testing`), not necessarily GitHub's repository
+ * default (`main`). Binding the base to this trusted checkout prevents an item
+ * from selecting an arbitrary remote branch while preserving non-default
+ * integration lanes. */
+static int wfe_managed_base(const char *repo, const char *base, char *err, size_t errlen)
 {
    char branch[256];
-   if (git_pr_default_branch_via_api(principal, repo, branch, sizeof(branch), err, errlen) != 0)
+   const char *branch_argv[] = {"git", "-C", repo, "rev-parse", "--abbrev-ref", "HEAD", NULL};
+   if (wfe_git_capture(repo, branch_argv, branch, sizeof(branch)) != 0 || !branch[0] ||
+       strcmp(branch, "HEAD") == 0)
+   {
+      snprintf(err, errlen, "cannot resolve managed integration branch");
       return -1;
+   }
    return strcmp(branch, base) == 0;
 }
 
@@ -682,7 +691,7 @@ int rh_internal_forge_execute(const route_req_t *rq, char *resp, int cap)
    {
       int base_ok = slice_head && wfe_slice_ref_matches_workdir(workdir, "aimee/feat/", 1, base);
       if (feature_head)
-         base_ok = wfe_default_base(principal, trusted_repo, base, err, sizeof(err));
+         base_ok = wfe_managed_base(trusted_repo, base, err, sizeof(err));
       if (base_ok == 0)
          snprintf(err, sizeof(err), "pull request base is outside the managed target");
       if (base_ok == 1)
@@ -695,14 +704,18 @@ int rh_internal_forge_execute(const route_req_t *rq, char *resp, int cap)
             free(push_out);
          if (rc == 0)
          {
+            int existing_number = 0;
             int found = git_pr_find_open_via_api(principal, trusted_repo, head, base, url,
-                                                 sizeof(url), err, sizeof(err));
+                                                 sizeof(url), &existing_number, err, sizeof(err));
             if (found == 0)
                rc = git_pr_create_via_api_ex_draft(principal, trusted_repo, head, base, title,
                                                    pr_body, draft, url, sizeof(url), err,
                                                    sizeof(err));
             else
-               rc = found == 1 ? 0 : -1;
+               rc = found == 1 && existing_number > 0
+                        ? git_pr_update_via_api(principal, trusted_repo, existing_number, title,
+                                                pr_body, err, sizeof(err))
+                        : -1;
             if (rc == 0)
                cJSON_AddStringToObject(out, "url", url);
          }

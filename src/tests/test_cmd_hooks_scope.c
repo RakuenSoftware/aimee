@@ -93,11 +93,13 @@ static void test_hook_scope_project_is_not_configured_workspace(void)
    char config_path[512];
    char workspace_root[512];
    char project_root[512];
+   char manifest_path[512];
    snprintf(config_dir, sizeof(config_dir), "%s/.config", root);
    snprintf(aimee_dir, sizeof(aimee_dir), "%s/aimee", config_dir);
    snprintf(config_path, sizeof(config_path), "%s/aimee.yaml", aimee_dir);
    snprintf(workspace_root, sizeof(workspace_root), "%s/configured-workspace", root);
    snprintf(project_root, sizeof(project_root), "%s/nested-project", workspace_root);
+   snprintf(manifest_path, sizeof(manifest_path), "%s/aimee.workspace.yaml", project_root);
    assert(mkdir(config_dir, 0700) == 0);
    assert(mkdir(aimee_dir, 0700) == 0);
    assert(mkdir(workspace_root, 0700) == 0);
@@ -106,6 +108,10 @@ static void test_hook_scope_project_is_not_configured_workspace(void)
    FILE *fp = fopen(config_path, "w");
    assert(fp != NULL);
    fprintf(fp, "workspaces:\n  - %s\n", workspace_root);
+   fclose(fp);
+   fp = fopen(manifest_path, "w");
+   assert(fp != NULL);
+   fputs("id: stable-hook-project\n", fp);
    fclose(fp);
 
    const char *old_home_env = getenv("HOME");
@@ -119,7 +125,7 @@ static void test_hook_scope_project_is_not_configured_workspace(void)
    char project[512];
    hook_scope_labels_for_cwd(project_root, workspace, sizeof(workspace), project, sizeof(project));
    assert(strcmp(workspace, "configured-workspace") == 0);
-   assert(strcmp(project, "nested-project") == 0);
+   assert(strcmp(project, "stable-hook-project") == 0);
 
    if (old_home)
       assert(setenv("HOME", old_home, 1) == 0);
@@ -132,6 +138,7 @@ static void test_hook_scope_project_is_not_configured_workspace(void)
    free(old_home);
    free(old_no_cache);
 
+   assert(unlink(manifest_path) == 0);
    assert(unlink(config_path) == 0);
    assert(rmdir(project_root) == 0);
    assert(rmdir(workspace_root) == 0);

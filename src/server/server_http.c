@@ -16,6 +16,7 @@
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
 #include "server_tls.h"     /* native TLS termination (phase 1b) */
+#include "runtime_secret.h" /* Vault-sourced management private keys */
 #include "server_mgmt_checkpoint_client.h"
 #include "pki.h"                       /* P8a per-request durable cert revocation/expiry re-check */
 #include "workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
@@ -268,15 +269,6 @@ int server_http_authorize(int is_tcp, const char *bearer_cfg, const char *auth_h
    return 0;
 }
 
-int server_http_bootstrap_gate(int is_tcp, int bootstrap_only, const char *method, const char *path)
-{
-   if (!is_tcp || !bootstrap_only)
-      return 0;
-   if (method && path && strcmp(method, "POST") == 0 && strcmp(path, "/v1/api/rotate_bearer") == 0)
-      return 0; /* the one route the bootstrap may reach: mint the strong token */
-   return 1;    /* refuse: enrollment required */
-}
-
 /* The declarative /v1 route registry (server_http_routes.inc, included below)
  * is the single source of truth for dispatch, per-route capabilities, and the
  * OpenAPI path inventory. server_http_route_caps and server_http_route are thin
@@ -300,12 +292,8 @@ void server_http_api_status_report(int http_port, int bearer_configured, int rat
    {
       SAR_APPEND("  listener:      disabled (aimee.api.http_port unset)\n\n");
       SAR_APPEND("To use aimee as a model in VS Code (Continue/Cline/Roo/Copilot BYOK),\n"
-                 "enable the loopback listener in ~/.config/aimee/aimee.yaml:\n"
-                 "  aimee:\n"
-                 "    api:\n"
-                 "      http_port: 8910\n"
-                 "      bearer_token: \"<generated-secret>\"\n"
-                 "      rate_limit_per_min: 60\n"
+                 "run `aimee api enable`. The trusted local socket generates and seals the\n"
+                 "bearer directly into Vault; no credential is written to aimee.yaml.\n"
                  "Then re-run `aimee api status` for ready-to-paste provider snippets.\n");
       buf[n - 1] = '\0';
       return;
@@ -314,7 +302,7 @@ void server_http_api_status_report(int http_port, int bearer_configured, int rat
    SAR_APPEND("  listener:      enabled on server loopback at http://127.0.0.1:%d/v1\n", http_port);
    SAR_APPEND("  bearer token:  %s\n", bearer_configured
                                            ? "configured"
-                                           : "NOT configured — set aimee.api.bearer_token "
+                                           : "NOT configured — run `aimee api enable` locally "
                                              "(the listener refuses to bind without it)");
    if (rate_limit_per_min > 0)
       SAR_APPEND("  rate limit:    %d req/min\n", rate_limit_per_min);
@@ -331,7 +319,8 @@ void server_http_api_status_report(int http_port, int bearer_configured, int rat
     * naming the variable at startup, which is where an operator diagnosing
     * "reads work but every write is denied" will actually be looking. */
    unsigned long long ignored = (unsigned long long)server_http_global_ignored_count();
-   if (ignored)
+   int retired_setting = server_http_remote_writes();
+   if (ignored || retired_setting != SERVER_REMOTE_WRITES_OFF)
       SAR_APPEND("  remote_writes: aimee.api.remote_writes NO LONGER AUTHORIZES; %llu request(s) "
                  "refused that it would formerly have allowed "
                  "(remote_writes.global_ignored)\n",
@@ -1645,7 +1634,6 @@ void handle_conn(int fd, int is_tcp, int is_management)
       char auth[512] = "";
       char api_key[512] = "";
       char skey[256] = "";
-      int bootstrap_only = 0;
       int has_auth = http_header(buf, "Authorization", auth, sizeof(auth));
       int has_api_key = http_header(buf, "x-api-key", api_key, sizeof(api_key));
       int has_skey = http_header(buf, "X-Aimee-Session-Key", skey, sizeof(skey));
@@ -1663,31 +1651,13 @@ void handle_conn(int fd, int is_tcp, int is_management)
       anthropic_http_capture_request_headers(buf); /* parity: per-request anthropic-* hdrs */
       int az = transport_authenticated
                    ? 0
-                   : server_http_authorize_enrolled_request(
-                         is_tcp, g_bearer, has_auth ? auth : NULL, has_api_key ? api_key : NULL,
-                         has_skey, &bootstrap_only);
+                   : server_http_authorize_enrolled(is_tcp, g_bearer, has_auth ? auth : NULL,
+                                                    has_api_key ? api_key : NULL, has_skey);
       if (az != 0)
       {
          const char *msg = server_http_auth_error_body(az);
          send_response(fd, az, msg, request_id);
          LOG_INFO("server.http", "%s %s -> %d req_id=%s", method, path, az, request_id);
-         return;
-      }
-
-      /* The image-seeded recovery bearer is rotate-only. Classification above
-       * is based on the credential that authenticated this request, so an
-       * additive wizard enrollment bearer remains usable for CSR signing even
-       * while the unrelated recovery bearer is still configured as primary. */
-      if (!management_authenticated &&
-          server_http_bootstrap_gate(is_tcp, bootstrap_only, method, path))
-      {
-         send_response(fd, 401,
-                       "{\"error\":{\"message\":\"the one-time bootstrap bearer must be rotated "
-                       "before use: POST /v1/api/rotate_bearer (aimee remote enroll)\",\"type\":"
-                       "\"enrollment_required\"}}",
-                       request_id);
-         LOG_INFO("server.http", "%s %s -> 401 (enrollment_required) req_id=%s", method, path,
-                  request_id);
          return;
       }
    }
@@ -1732,8 +1702,9 @@ void handle_conn(int fd, int is_tcp, int is_management)
        * instead of inferring it from complaints. Only counts denials the old
        * global would have permitted - a request that fails for an unrelated
        * reason is not attributable to this change. */
-      if (g_remote_writes != SERVER_REMOTE_WRITES_OFF &&
-          server_http_route_allowed_caps(is_tcp, effective_caps, method, path, g_remote_writes))
+      if (!management_authenticated &&
+          server_http_retired_global_would_allow(fd, is_tcp, request_bearer, g_remote_writes,
+                                                 mtls_mode, mtls_authenticated, method, path))
          server_http_note_global_ignored();
       LOG_INFO("server.http", "%s %s -> 403 (caps) req_id=%s", method, path, request_id);
       return;
@@ -2086,7 +2057,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
     * per-method capability. Reset to the read-only default afterward. */
    g_rpc_conn_caps = effective_caps;
    /* WP-C.0 hop 1 of 3: capture the attested vault identity (kernel UDS peer uid,
-    * or a server.token-gated webuser assertion) into thread-locals, live until
+    * or a root-UDS-gated webuser assertion) into thread-locals, live until
     * loopback_rpc copies it into the synthesized conn. Cleared after the route so
     * a reused worker thread cannot leak it into the next request. */
    server_http_identity_capture(fd, is_tcp, buf);
@@ -2294,9 +2265,15 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
       pthread_mutex_unlock(&g_listener_lifecycle_lock);
       return SERVER_HTTP_START_MGMT_FATAL;
    }
-   if (management.enabled &&
-       (!server_http_management_checkpoint_files_valid(&management) ||
-        server_tls_management_init(management.cert, management.key, management.client_ca) != 0))
+   char management_tls_key[4096] = "";
+   int management_tls_ok = !management.enabled;
+   if (management.enabled && server_http_management_checkpoint_files_valid(&management) &&
+       runtime_secret_get(management.key, management_tls_key, sizeof(management_tls_key)) &&
+       server_tls_management_init_vault(management.cert, management_tls_key,
+                                        management.client_ca) == 0)
+      management_tls_ok = 1;
+   runtime_secret_wipe(management_tls_key, sizeof(management_tls_key));
+   if (!management_tls_ok)
    {
       server_http_management_set_error("management TLS certificate/key/CA");
       LOG_ERROR("server.http", "dedicated management TLS configuration is not loadable");
@@ -2369,9 +2346,8 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
    g_rate_state.count = 0;
    g_tcp_fd = tcp_listen(tcp_port, bearer_token, 0 /* plaintext: loopback only */);
 
-   /* Optional native-TLS listener (phase 1b): terminate TLS in-process from
-    * <config>/tls/server.{crt,key}. A TLS+bearer conn is the vault's attested
-    * write path. */
+   /* Optional native-TLS listener (phase 1b). A TLS+bearer connection is the
+    * vault's attested write path. */
    if (tls_port > 0)
    {
       if (server_tls_init_default() == 0)

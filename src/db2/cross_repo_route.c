@@ -40,7 +40,9 @@ static const char *const SQL_MODULE_ROUTES =
                         "ci.value") " || '::%' ESCAPE '\\') "
                                     /* cf.vendored = 0: a vendored caller file is the
                                      * dep's code, not the host's (recall §3). */
-                                    "WHERE ci.project <> pc.name AND cf.vendored = 0 AND ("
+                                    "WHERE ci.project <> pc.name AND cf.vendored = 0 "
+                                    "AND pc.lifecycle_state='current' "
+                                    "AND cf.generation=pc.current_generation AND ("
                                     "  (cf.language = 'go' AND ci.kind = 'gomod') "
                                     "  OR (cf.language = 'rust' AND ci.kind = 'crate') "
                                     "  OR (cf.language IN ('js', 'ts') AND ci.kind = 'npm') "
@@ -112,11 +114,14 @@ static const char *const SQL_HEADER_ROUTES =
      * must not generate routes attributed to the host (recall §3, mirrors the
      * definer-side fd.vendored = 0 and the originated-vendored exclusion). */
     "WHERE cf.language IN ('c', 'cpp') AND cf.vendored = 0 AND fd.vendored = 0 "
+    "  AND pc.lifecycle_state='current' AND pd.lifecycle_state='current' "
+    "  AND cf.generation=pc.current_generation AND fd.generation=pd.current_generation "
     "  AND pd.name <> pc.name "
     /* §2 header IDF: drop ubiquitous (>=4 non-vendored repos) include specifiers. */
     "  AND (SELECT COUNT(DISTINCT fx.project_id) FROM files fx "
     "       WHERE (fx.path = imp.name OR fx.path LIKE '%/' || " ESC("imp.name") " ESCAPE '\\') "
-    "         AND fx.vendored = 0) < 4 "
+    "         AND fx.vendored = 0 AND fx.generation=(SELECT current_generation FROM projects px "
+    "           WHERE px.id=fx.project_id AND px.lifecycle_state='current')) < 4 "
     /* H5 generated/build-header reject. */
     "  AND " NOTGEN("config.h") " AND " NOTGEN("config.hpp") " "
     "  AND " NOTGEN("version.h") " AND " NOTGEN("version.hpp") " "
@@ -131,6 +136,7 @@ static const char *const SQL_HEADER_ROUTES =
      * vendors a lib still routes to the canonical definer (H2 then prefers it). */
     "  AND (imp.is_system = 1 OR NOT EXISTS (SELECT 1 FROM files fl "
     "       WHERE fl.project_id = cf.project_id AND fl.vendored = 0 "
+    "         AND fl.generation=pc.current_generation "
     "         AND (fl.path = imp.name OR fl.path LIKE '%/' || " ESC("imp.name") " ESCAPE '\\'))) "
     "ON CONFLICT (caller_project, definer_project, kind, evidence) DO NOTHING";
 /* clang-format on */

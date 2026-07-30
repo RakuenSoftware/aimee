@@ -44,7 +44,7 @@ uint32_t server_http_enrollment_caps(uint32_t caps, int is_tcp, int mtls_authent
    /* An unscoped deployment bearer over verified native TLS may sign exactly
     * the CSR needed to leave optional-mTLS migration, or enroll an additional
     * client bearer without requiring a write-tier grant first. Route handlers
-    * still enforce their own operation and bootstrap remains rotate-only. */
+    * still enforce their own operation. */
    if (is_tcp && !mtls_authenticated && native_tls && bearer && bearer[0] &&
        strncmp(bearer, "scope:", 6) != 0 && method && path && strcmp(method, "POST") == 0)
    {

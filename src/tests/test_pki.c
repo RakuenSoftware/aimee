@@ -6,6 +6,7 @@
 #include "db1.h"          /* db1_init / db1_shutdown */
 #include "db1_internal.h" /* db1_conn — direct durable UPDATE for the P8a tests */
 #include <sqlite3.h>
+#include <openssl/crypto.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
@@ -330,17 +331,24 @@ int main(void)
    assert(cn[0] != '\0'); /* 4. no operator identity -> gethostname() fallback */
    printf("pki: stable CN resolution ok\n");
 
-   /* End-to-end: an existing cert is AUTHORITATIVE. Once provisioned it is kept
-    * verbatim across boots — and, critically, even when AIMEE_TLS_EXTRA_SAN or the
-    * hostname later changes. The server never recreates it, so a container recreate
-    * (fresh gethostname()) cannot rotate the cert out from under a TOFU-pinned
-    * client. A fresh cert is minted ONLY when none exists. */
+   /* End-to-end: the public cert is durable while its private key exists only in
+    * Vault. Existing plaintext key files are one-way migration inputs and are
+    * securely removed after their key pair is verified. */
    char crtp[512], keyp[512];
    snprintf(crtp, sizeof(crtp), "%s/tls/server.crt", home);
    snprintf(keyp, sizeof(keyp), "%s/tls/server.key", home);
    unsetenv("AIMEE_TLS_CN");
    setenv("AIMEE_TLS_EXTRA_SAN", "192.168.1.254,smoothnas", 1);
+   /* An orphaned legacy key has no certificate to authenticate it. It must be
+    * erased before a new Vault identity is created, never carried forward. */
+   FILE *orphan_key = fopen(keyp, "wb");
+   assert(orphan_key);
+   assert(fputs("orphaned-secret", orphan_key) >= 0 && fclose(orphan_key) == 0);
    assert(pki_ensure_self_signed_server_cert(crtp, keyp) == 0);
+   assert(access(keyp, F_OK) != 0); /* fresh installs never emit a key file */
+   char vault_server_key[4000];
+   assert(pki_server_tls_key_load(vault_server_key, sizeof(vault_server_key)) == 0);
+   assert(strstr(vault_server_key, "PRIVATE KEY") != NULL);
    char c1[8192];
    long n1 = slurp(crtp, c1, sizeof(c1));
    assert(n1 > 0);
@@ -348,6 +356,14 @@ int main(void)
    char c2[8192];
    long n2 = slurp(crtp, c2, sizeof(c2));
    assert(n1 == n2 && memcmp(c1, c2, (size_t)n1) == 0); /* kept verbatim */
+   /* Simulate an old image reintroducing the same matching key file: the next
+    * boot verifies it against both Vault and the cert, then erases it. */
+   FILE *legacy_key = fopen(keyp, "wb");
+   assert(legacy_key);
+   assert(fputs(vault_server_key, legacy_key) >= 0 && fclose(legacy_key) == 0);
+   assert(pki_ensure_self_signed_server_cert(crtp, keyp) == 0);
+   assert(access(keyp, F_OK) != 0);
+   OPENSSL_cleanse(vault_server_key, sizeof(vault_server_key));
    /* An identity change — as a container recreate or an operator SAN edit would
     * present — must NOT rotate an existing cert. This is the core guarantee. */
    setenv("AIMEE_TLS_EXTRA_SAN", "10.0.0.9,othername", 1);
@@ -356,16 +372,16 @@ int main(void)
    char c3[8192];
    long n3 = slurp(crtp, c3, sizeof(c3));
    assert(n1 == n3 && memcmp(c1, c3, (size_t)n1) == 0); /* STILL kept: never recreated */
-   /* Only an absent cert triggers provisioning: delete it and a fresh one appears. */
-   assert(unlink(crtp) == 0 && unlink(keyp) == 0);
+   /* Only an absent public cert triggers explicit identity rotation. */
+   assert(unlink(crtp) == 0);
    assert(pki_ensure_self_signed_server_cert(crtp, keyp) == 0);
    char c4[8192];
    long n4 = slurp(crtp, c4, sizeof(c4));
    assert(n4 > 0 && !(n1 == n4 && memcmp(c1, c4, (size_t)n1) == 0)); /* minted when absent */
    unsetenv("AIMEE_TLS_EXTRA_SAN");
    unsetenv("AIMEE_TLS_CN");
-   printf("pki: existing server cert authoritative (kept across identity change; minted only when "
-          "absent) ok\n");
+   assert(access(keyp, F_OK) != 0);
+   printf("pki: server TLS private key is Vault-only; legacy key migration + rotation ok\n");
 
    /* P8c durable optional->required ramp. Isolate the authoritative roster by
     * retiring all earlier test certs before initializing the singleton. */

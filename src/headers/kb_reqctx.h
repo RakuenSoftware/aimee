@@ -22,6 +22,13 @@ extern "C"
    /* The current actor, or NULL if none set / unauthenticated. */
    const kb_principal_t *kb_reqctx_actor(void);
 
+   /* Verified credential scope for the current request.  Unlike actor identity,
+    * scoped service credentials deliberately have no actor principal, but code
+    * reads still need their authenticated project scope to resolve an omitted
+    * project without falling back to every indexed repository. */
+   void kb_reqctx_set_verified_scope(const char *kind, const char *id);
+   int kb_reqctx_verified_scope(const char **kind, const char **id);
+
    /* The request's Content-Type header, for the handful of routes whose SECURITY
     * depends on it rather than merely their parsing. Set by the connection layer
     * before routing and cleared after; "" when the request carried none.

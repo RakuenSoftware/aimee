@@ -38,6 +38,7 @@
 #include <aimee/delegates/delegate_credentials.h>
 #include "model_registry.h"
 #include "model_provider.h"
+#include "runtime_secret.h"
 #include "model_registry.h"
 #include "db1.h"
 #include "token_audit.h"
@@ -83,8 +84,7 @@ static int server_provider_has_credentials(const model_provider_t *p)
       return 0;
    for (int i = 0; p->env_vars[i]; i++)
    {
-      const char *val = getenv(p->env_vars[i]);
-      if (val && val[0])
+      if (runtime_secret_has(p->env_vars[i]))
          return 1;
    }
    return 0;
@@ -166,8 +166,7 @@ static int server_provider_is_configured(const model_provider_t *p, const char *
       return 0;
    for (int i = 0; p->env_vars[i]; i++)
    {
-      const char *val = getenv(p->env_vars[i]);
-      if (val && val[0])
+      if (runtime_secret_has(p->env_vars[i]))
          return 1;
    }
    return 0;

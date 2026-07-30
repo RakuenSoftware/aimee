@@ -59,8 +59,7 @@ static int script_env_name_allowed(const char *name)
       return 0;
    if (!script_env_name_valid(name))
       return 0;
-   if (strcmp(name, "AIMEE_RPC_SOCKET") == 0 || strcmp(name, "AIMEE_SESSION_ID") == 0 ||
-       strcmp(name, "AIMEE_TASK_ID") == 0)
+   if (strcmp(name, "AIMEE_SESSION_ID") == 0 || strcmp(name, "AIMEE_TASK_ID") == 0)
       return 1;
    return strcmp(name, "PATH") == 0 || strcmp(name, "HOME") == 0 || strcmp(name, "USER") == 0 ||
           strcmp(name, "LANG") == 0 || strcmp(name, "TERM") == 0 || strncmp(name, "LC_", 3) == 0;
@@ -68,10 +67,8 @@ static int script_env_name_allowed(const char *name)
 
 static int script_env_name_allowed_extra(const char *name)
 {
-   if (!name || !name[0])
+   if (name && strncmp(name, "AIMEE_RPC_", 10) == 0)
       return 0;
-   if (strcmp(name, "AIMEE_RPC_TOKEN") == 0)
-      return 1;
    return script_env_name_valid(name);
 }
 
@@ -267,9 +264,7 @@ char *tool_execute_script(const char *language, const char *body, int timeout_se
    snprintf(pythonpath_env, sizeof(pythonpath_env), "%s%s%s", rpc.stub_dir,
             parent_pythonpath && parent_pythonpath[0] ? ":" : "",
             parent_pythonpath && parent_pythonpath[0] ? parent_pythonpath : "");
-   if (script_env_add(&envp, &count, &cap, "AIMEE_RPC_SOCKET", rpc.socket_path) != 0 ||
-       script_env_add(&envp, &count, &cap, "AIMEE_RPC_TOKEN", rpc.token) != 0 ||
-       script_env_add(&envp, &count, &cap, "PATH", path_env) != 0 ||
+   if (script_env_add(&envp, &count, &cap, "PATH", path_env) != 0 ||
        script_env_add(&envp, &count, &cap, "PYTHONPATH", pythonpath_env) != 0)
    {
       script_rpc_cleanup(&rpc);

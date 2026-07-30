@@ -139,13 +139,18 @@ int kb_handle_ingest(int fd, cJSON *req)
       {
          char pname[256];
          char pws[256];
-         workspace_repo_index_keys(projects[i], ws_j->valuestring, pname, sizeof(pname), pws,
-                                   sizeof(pws));
+         if (workspace_repo_index_keys(projects[i], ws_j->valuestring, pname, sizeof(pname), pws,
+                                       sizeof(pws)) != 0)
+         {
+            aimee_log(LOG_ERROR, "kb.ingest.identity",
+                      "skipping root='%s': no durable project identity", projects[i]);
+            continue;
+         }
          if (force)
          {
-            db2_kb_service_clear_project(pname);
-            pgvec_kb_vector_delete_project(pname);
-            db2_kb_file_index_delete_project(pname);
+            pgvec_kb_vector_delete_current_project(pname);
+            db2_kb_service_clear_current_project(pname);
+            db2_kb_file_index_delete_current_project(pname);
          }
          db2_kb_ingest_queue_enqueue(pname, projects[i], pws, force,
                                      DB2_KB_INGEST_PRIO_INTERACTIVE);
@@ -162,13 +167,18 @@ int kb_handle_ingest(int fd, cJSON *req)
          {
             char pname[256];
             char pws[256];
-            workspace_repo_index_keys(projects[i], cfg.workspaces[w], pname, sizeof(pname), pws,
-                                      sizeof(pws));
+            if (workspace_repo_index_keys(projects[i], cfg.workspaces[w], pname, sizeof(pname), pws,
+                                          sizeof(pws)) != 0)
+            {
+               aimee_log(LOG_ERROR, "kb.ingest.identity",
+                         "skipping root='%s': no durable project identity", projects[i]);
+               continue;
+            }
             if (force)
             {
-               db2_kb_service_clear_project(pname);
-               pgvec_kb_vector_delete_project(pname);
-               db2_kb_file_index_delete_project(pname);
+               pgvec_kb_vector_delete_current_project(pname);
+               db2_kb_service_clear_current_project(pname);
+               db2_kb_file_index_delete_current_project(pname);
             }
             db2_kb_ingest_queue_enqueue(pname, projects[i], pws, force,
                                         DB2_KB_INGEST_PRIO_INTERACTIVE);

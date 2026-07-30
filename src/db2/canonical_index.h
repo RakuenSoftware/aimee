@@ -59,6 +59,10 @@ extern "C"
     * before its LIMIT, so unrelated namespaces cannot crowd out current-project hits. */
    int canonical_index_find_project(const char *project, const char *identifier, term_hit_t *out,
                                     int max);
+   /* Search all current projects except |excluded_project|. The exclusion is
+    * applied before LIMIT so a local-heavy corpus cannot crowd out the tail. */
+   int canonical_index_find_excluding_project(const char *excluded_project,
+                                              const char *identifier, term_hit_t *out, int max);
 
    /* Compute blast radius for a file. Returns 0 on success, -1 on error. */
    int canonical_index_blast_radius(const char *project, const char *file_path,
@@ -71,6 +75,9 @@ extern "C"
    /* Find all callers of a symbol within a project. Returns count. */
    int canonical_index_find_callers(const char *project, const char *symbol, caller_hit_t *out,
                                     int max);
+   int canonical_index_find_callers_excluding_project(const char *excluded_project,
+                                                      const char *symbol, caller_hit_t *out,
+                                                      int max);
 
    /* Full-text code search across file_contents. |project| may be NULL/empty
     * to search all indexed projects. Returns count of hits, or -1 on error.
@@ -78,6 +85,9 @@ extern "C"
     * 0 keeps the query/cost identical to before. */
    int canonical_index_code_search(const char *query, const char *project, code_search_hit_t *out,
                                    int max, int enrich);
+   int canonical_index_code_search_excluding_project(const char *query,
+                                                     const char *excluded_project,
+                                                     code_search_hit_t *out, int max, int enrich);
 
    /* Count indexed files and definition-kind terms for the project
     * named |project|. Either out pointer may be NULL. Both counts

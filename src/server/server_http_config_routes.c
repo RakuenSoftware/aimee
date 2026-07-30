@@ -381,7 +381,7 @@ int route_roundtable_show(const char *name, char *resp, int cap)
  * configuration. CAP_SESSION_ADMIN alone is insufficient because every local
  * UDS peer receives CAPS_ALL. Require the separately attested browser operator
  * identity as well: X-Aimee-Webuser is accepted only when authenticated with
- * server.token by server_http_identity_capture(), and only the appliance's
+ * root UDS peer by server_http_identity_capture(), and only the appliance's
  * bootstrap administrator may mutate global policy. A shell/delegate/agent
  * using the UDS is attributed as uid:<n> and therefore remains read-only. */
 int route_roundtable_mutation_authorized(const char *principal)

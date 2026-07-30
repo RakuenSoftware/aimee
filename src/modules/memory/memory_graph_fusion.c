@@ -268,7 +268,10 @@ int memory_graph_point_id_to_node_key(int64_t point_id, char *node_key, size_t c
    void *conn = db2_conn();
    if (!conn)
       return -1;
-   static const char *sql = "SELECT node_key FROM code_embeddings WHERE point_id = ?1";
+   static const char *sql = "SELECT ce.node_key FROM code_embeddings ce"
+                            " JOIN projects p ON p.name=ce.project WHERE ce.point_id=?1"
+                            " AND p.lifecycle_state='current'"
+                            " AND ce.generation=p.current_generation";
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)

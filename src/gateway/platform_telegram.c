@@ -6,6 +6,7 @@
 #include "agent_exec.h"
 #include "log.h"
 #include "delivery_target.h"
+#include "runtime_secret.h"
 
 #include <cJSON.h>
 #include <pthread.h>
@@ -58,8 +59,8 @@ static int tg_check_config(platform_adapter_t *self, char *err_out, size_t err_l
       return -1;
    }
 
-   const char *token = getenv(ENV_TOKEN);
-   if (!token || strlen(token) == 0)
+   char token[sizeof(ctx->token)] = "";
+   if (!runtime_secret_get(ENV_TOKEN, token, sizeof(token)))
    {
       if (err_out && err_len > 0)
          snprintf(err_out, err_len, "AIMEE_GATEWAY_TELEGRAM_TOKEN is not set");
@@ -71,10 +72,12 @@ static int tg_check_config(platform_adapter_t *self, char *err_out, size_t err_l
    {
       if (err_out && err_len > 0)
          snprintf(err_out, err_len, "AIMEE_GATEWAY_TELEGRAM_ALLOWED_USERS is not set");
+      runtime_secret_wipe(token, sizeof(token));
       return -1;
    }
 
    snprintf(ctx->token, sizeof(ctx->token), "%s", token);
+   runtime_secret_wipe(token, sizeof(token));
    snprintf(ctx->allowed_users, sizeof(ctx->allowed_users), "%s", allowed);
    return 0;
 }
@@ -343,6 +346,7 @@ static void tg_shutdown(platform_adapter_t *self)
    telegram_ctx_t *ctx = (telegram_ctx_t *)self->user;
    ctx->stop = 1;
    pthread_join(ctx->poller, NULL);
+   runtime_secret_wipe(ctx->token, sizeof(ctx->token));
    self->enabled = 0;
 }
 

@@ -21,17 +21,26 @@ static void test_implements(void)
    db2_test_shim_open();
    sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
    assert(db != NULL);
+   seed(db, "INSERT INTO projects (id,name,root,scanned_at,current_generation)"
+            " VALUES (1,'p','/p','t',2)");
    seed(db, "INSERT INTO artifacts (id,kind,state,payload) VALUES"
             " ('e1','entity','committed','{\"name\":\"pgvector\"}'),"
-            " ('cu','code_unit','committed','{\"summary\":\"vector store\"}')");
-   seed(db, "INSERT INTO artifact_links (from_id,to_id,kind) VALUES ('cu','e1','mentions')");
+            " ('cu-old','code_unit','committed',"
+            "  '{\"summary\":\"stale vector store\",\"generation\":1}'),"
+            " ('cu','code_unit','committed',"
+            "  '{\"summary\":\"vector store\",\"generation\":2}')");
+   seed(db, "UPDATE artifacts SET scope_kind='project',scope_id='p'"
+            " WHERE id IN ('cu-old','cu')");
+   seed(db, "INSERT INTO artifact_links (from_id,to_id,kind) VALUES"
+            " ('cu-old','e1','mentions'),('cu','e1','mentions')");
    seed(db, "INSERT INTO artifact_citations (artifact_id,source_kind,source_id)"
-            " VALUES ('cu','kb_file','src/v.c')");
+            " VALUES ('cu-old','kb_file','src/old.c'),('cu','kb_file','src/v.c')");
 
    char buf[4096];
    int n = kb_curator_implements_json("pgvector", buf, sizeof(buf));
    assert(n == 1);
    assert(strstr(buf, "\"cu\"") && strstr(buf, "src/v.c") && strstr(buf, "vector store"));
+   assert(strstr(buf, "cu-old") == NULL && strstr(buf, "src/old.c") == NULL);
    /* unknown topic → empty list, count 0 */
    assert(kb_curator_implements_json("nope", buf, sizeof(buf)) == 0);
    db2_test_shim_close();

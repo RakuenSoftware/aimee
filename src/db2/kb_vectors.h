@@ -10,7 +10,11 @@ int pgvec_kb_vector_upsert_document_batch(const int64_t *doc_ids, const float *v
                                           const char *const *payloads, int count);
 int pgvec_kb_vector_delete_point(int64_t point_id);
 int pgvec_kb_vector_delete_project(const char *project);
+int pgvec_kb_vector_delete_current_project(const char *project);
 int pgvec_kb_vector_search_project(const char *project, const float *vec, int dim, int limit,
                                    int64_t *ids, double *scores, int max);
+int pgvec_kb_vector_search_scoped(const char *project, const char *exclude_project,
+                                  const float *vec, int dim, int limit, int64_t *ids,
+                                  double *scores, int max);
 
 #endif /* DEC_DB2_KB_VECTORS_H */

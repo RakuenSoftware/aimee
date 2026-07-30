@@ -50,7 +50,9 @@ int64_t db2_css_graph_resolve_file(const char *project, const char *file_path)
       return -1;
    static const char *sql = "SELECT f.id FROM files f"
                             " JOIN projects p ON p.id = f.project_id"
-                            " WHERE p.name = ?1 AND f.path = ?2";
+                            " WHERE p.name = ?1 AND f.path = ?2"
+                            " AND p.lifecycle_state = 'current'"
+                            " AND f.generation = p.current_generation";
    char err[CSSG_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -166,6 +168,8 @@ int db2_css_graph_rules_by_selector(const char *selector, css_rule_hit_t *out, i
                             " JOIN files f ON f.id = c.file_id"
                             " JOIN projects p ON p.id = f.project_id"
                             " WHERE c.selector = ?1"
+                            " AND p.lifecycle_state = 'current'"
+                            " AND f.generation = p.current_generation"
                             " ORDER BY p.name, f.path, c.line"
                             " LIMIT ?2";
    char err[CSSG_ERRBUF] = "";
@@ -211,6 +215,8 @@ int db2_css_graph_declarations_by_property(const char *property, css_decl_hit_t 
                             " JOIN files f ON f.id = c.file_id"
                             " JOIN projects p ON p.id = f.project_id"
                             " WHERE d.property = ?1"
+                            " AND p.lifecycle_state = 'current'"
+                            " AND f.generation = p.current_generation"
                             " ORDER BY p.name, f.path, c.line"
                             " LIMIT ?2";
    char err[CSSG_ERRBUF] = "";
@@ -262,6 +268,8 @@ int db2_css_graph_duplicate_declarations(const char *project_filter, css_dup_dec
                                 " JOIN css_rules c ON c.id = d.rule_id"
                                 " JOIN files f ON f.id = c.file_id"
                                 " JOIN projects p ON p.id = f.project_id"
+                                " WHERE p.lifecycle_state = 'current'"
+                                " AND f.generation = p.current_generation"
                                 " GROUP BY f.id, p.name, f.path, d.property, d.value"
                                 " HAVING COUNT(*) > 1"
                                 " ORDER BY cnt DESC, f.path"
@@ -271,7 +279,8 @@ int db2_css_graph_duplicate_declarations(const char *project_filter, css_dup_dec
                                  " JOIN css_rules c ON c.id = d.rule_id"
                                  " JOIN files f ON f.id = c.file_id"
                                  " JOIN projects p ON p.id = f.project_id"
-                                 " WHERE p.name = ?2"
+                                 " WHERE p.name = ?2 AND p.lifecycle_state = 'current'"
+                                 " AND f.generation = p.current_generation"
                                  " GROUP BY f.id, p.name, f.path, d.property, d.value"
                                  " HAVING COUNT(*) > 1"
                                  " ORDER BY cnt DESC, f.path"
@@ -315,6 +324,8 @@ int db2_css_graph_duplicate_selectors(const char *project_filter, css_dup_select
                                 " FROM css_rules c"
                                 " JOIN files f ON f.id = c.file_id"
                                 " JOIN projects p ON p.id = f.project_id"
+                                " WHERE p.lifecycle_state = 'current'"
+                                " AND f.generation = p.current_generation"
                                 " GROUP BY f.id, p.name, f.path, c.selector"
                                 " HAVING COUNT(*) > 1"
                                 " ORDER BY cnt DESC, f.path"
@@ -323,7 +334,8 @@ int db2_css_graph_duplicate_selectors(const char *project_filter, css_dup_select
                                  " FROM css_rules c"
                                  " JOIN files f ON f.id = c.file_id"
                                  " JOIN projects p ON p.id = f.project_id"
-                                 " WHERE p.name = ?2"
+                                 " WHERE p.name = ?2 AND p.lifecycle_state = 'current'"
+                                 " AND f.generation = p.current_generation"
                                  " GROUP BY f.id, p.name, f.path, c.selector"
                                  " HAVING COUNT(*) > 1"
                                  " ORDER BY cnt DESC, f.path"
@@ -372,7 +384,8 @@ int db2_css_graph_specificity_conflicts(const char *project_filter, css_spec_con
        " JOIN css_rules c2 ON c2.id = d2.rule_id"
        " JOIN files f ON f.id = c1.file_id"
        " JOIN projects p ON p.id = f.project_id"
-       " WHERE c1.file_id = c2.file_id AND c1.id <> c2.id"
+       " WHERE p.lifecycle_state = 'current' AND f.generation = p.current_generation"
+       "   AND c1.file_id = c2.file_id AND c1.id <> c2.id"
        "   AND c2.line > c1.line"
        "   AND c1.spec_uncertain = 0 AND c2.spec_uncertain = 0"
        "   AND c1.selector <> c2.selector"
@@ -385,7 +398,8 @@ int db2_css_graph_specificity_conflicts(const char *project_filter, css_spec_con
        " JOIN css_rules c2 ON c2.id = d2.rule_id"
        " JOIN files f ON f.id = c1.file_id"
        " JOIN projects p ON p.id = f.project_id"
-       " WHERE c1.file_id = c2.file_id AND c1.id <> c2.id"
+       " WHERE p.lifecycle_state = 'current' AND f.generation = p.current_generation"
+       "   AND c1.file_id = c2.file_id AND c1.id <> c2.id"
        "   AND c2.line > c1.line"
        "   AND c1.spec_uncertain = 0 AND c2.spec_uncertain = 0"
        "   AND c1.selector <> c2.selector"
@@ -449,7 +463,11 @@ int db2_css_component_resolve(int64_t component_file_id, const char (*tokens)[CS
 
       /* match a simple class rule of the same selector, anywhere in the index */
       int64_t rule_id = -1;
-      static const char *q = "SELECT id FROM css_rules WHERE selector = ?1 LIMIT 1";
+      static const char *q = "SELECT c.id FROM css_rules c"
+                             " JOIN files f ON f.id = c.file_id"
+                             " JOIN projects p ON p.id = f.project_id"
+                             " WHERE c.selector = ?1 AND p.lifecycle_state = 'current'"
+                             " AND f.generation = p.current_generation LIMIT 1";
       aimee_pg_stmt_t *sq = aimee_pg_prepare(conn, q, err, sizeof(err));
       if (!sq)
       {
@@ -500,13 +518,16 @@ int db2_css_component_unresolved(const char *project_filter, css_unresolved_hit_
                                 " FROM css_component_styles cs"
                                 " JOIN files f ON f.id = cs.component_file_id"
                                 " JOIN projects p ON p.id = f.project_id"
-                                " WHERE cs.resolved = 0"
+                                " WHERE cs.resolved = 0 AND p.lifecycle_state = 'current'"
+                                " AND f.generation = p.current_generation"
                                 " ORDER BY f.path, cs.class_token LIMIT ?1";
    static const char *sql_filt = "SELECT DISTINCT p.name, f.path, cs.class_token"
                                  " FROM css_component_styles cs"
                                  " JOIN files f ON f.id = cs.component_file_id"
                                  " JOIN projects p ON p.id = f.project_id"
                                  " WHERE cs.resolved = 0 AND p.name = ?2"
+                                 " AND p.lifecycle_state = 'current'"
+                                 " AND f.generation = p.current_generation"
                                  " ORDER BY f.path, cs.class_token LIMIT ?1";
    char err[CSSG_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, filt ? sql_filt : sql_all, err, sizeof(err));
@@ -543,6 +564,7 @@ int db2_css_component_unresolved(const char *project_filter, css_unresolved_hit_
    " AND c.spec_uncertain = 0"                                                                     \
    " AND NOT EXISTS (SELECT 1 FROM css_component_styles cs JOIN files cf"                          \
    "   ON cf.id = cs.component_file_id WHERE cf.project_id = f.project_id AND cs.resolved = 1"     \
+   "   AND cf.generation = f.generation"                                                           \
    "   AND ('.' || cs.class_token) = c.selector)"
 
 int db2_css_dead_rules(const char *project_filter, css_dead_rule_hit_t *out, int max)
@@ -557,13 +579,16 @@ int db2_css_dead_rules(const char *project_filter, css_dead_rule_hit_t *out, int
                                 " FROM css_rules c"
                                 " JOIN files f ON f.id = c.file_id"
                                 " JOIN projects p ON p.id = f.project_id"
-                                " WHERE" CSS_DEAD_RULE_WHERE " ORDER BY f.path, c.line LIMIT ?1";
-   static const char *sql_filt =
-       "SELECT p.name, f.path, c.selector, c.line"
-       " FROM css_rules c"
-       " JOIN files f ON f.id = c.file_id"
-       " JOIN projects p ON p.id = f.project_id"
-       " WHERE p.name = ?2 AND" CSS_DEAD_RULE_WHERE " ORDER BY f.path, c.line LIMIT ?1";
+                                " WHERE p.lifecycle_state = 'current'"
+                                " AND f.generation = p.current_generation AND" CSS_DEAD_RULE_WHERE
+                                " ORDER BY f.path, c.line LIMIT ?1";
+   static const char *sql_filt = "SELECT p.name, f.path, c.selector, c.line"
+                                 " FROM css_rules c"
+                                 " JOIN files f ON f.id = c.file_id"
+                                 " JOIN projects p ON p.id = f.project_id"
+                                 " WHERE p.name = ?2 AND p.lifecycle_state = 'current'"
+                                 " AND f.generation = p.current_generation AND" CSS_DEAD_RULE_WHERE
+                                 " ORDER BY f.path, c.line LIMIT ?1";
    char err[CSSG_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, filt ? sql_filt : sql_all, err, sizeof(err));
    if (!st)

@@ -1165,10 +1165,10 @@ char *delegate_build_validation_bundle(const char *cwd)
  * (--prompt-file / --prompt-stdin), e.g. a diff for an external code review. The
  * target is the provided content — NOT the delegate host's working directory, which
  * may be absent, on a different branch, or carry unrelated changes. For surrounding
- * context the reviewer explores the DEFAULT BRANCH through aimee's own index/memory
- * (code_search, find_symbol, search_memory, search_docs), which are branch-indexed
- * and always available, rather than filesystem/git tools against a worktree it does
- * not have. Returned string is heap-owned. */
+ * context the reviewer may explore the DEFAULT BRANCH through aimee's own
+ * index/memory (code_search, find_symbol, search_memory, search_docs). Those
+ * services are useful positive context when available, but a failed, stale, or
+ * empty lookup cannot prove absence. Returned string is heap-owned. */
 static char *delegate_build_provided_target_block(void)
 {
    return strdup(
@@ -1181,10 +1181,14 @@ static char *delegate_build_provided_target_block(void)
        "stale, or unrelated, and is not the review target.\n"
        "explore_via_aimee: to inspect surrounding code, callers, or prior context on the DEFAULT "
        "BRANCH, use aimee's own capabilities — code_search and find_symbol (branch-indexed code), "
-       "search_memory and search_docs (project memory/knowledge). These reflect the committed "
-       "default branch and are always available; prefer them over any filesystem tool.\n"
-       "absence_claims: only assert something is missing if a code_search/find_symbol query for "
-       "it returned no results; cite that query. Never infer absence from an unreadable worktree.\n"
+       "search_memory and search_docs (project memory/knowledge). When available and current, "
+       "positive results provide surrounding default-branch context; never assume the service is "
+       "available, complete, or fresh.\n"
+       "absence_claims: a no-match, unavailable, failed, stale, or incomplete code_search / "
+       "find_symbol / memory result is NOT proof that anything is absent. Assert absence only from "
+       "affirmative authoritative evidence that covers the relevant current source or complete "
+       "registration/call-site set. Otherwise omit the claim; uncertainty may be a non-blocking "
+       "suggestion, never a blocker. Never infer absence from an unreadable worktree.\n"
        "---\n");
 }
 

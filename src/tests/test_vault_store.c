@@ -56,6 +56,35 @@ static void test_set_get_roundtrip(void)
    printf("  PASS: test_set_get_roundtrip\n");
 }
 
+/* OAuth documents and SSH private keys are opaque credentials and can exceed a
+ * small API-token buffer. They must still fit in Vault so migration never has
+ * to retain a plaintext file merely because the credential is structured. */
+static void test_structured_credential_roundtrip(void)
+{
+   const char *principal = "uid:structured";
+   uint8_t salt[VAULT_SALT_LEN];
+   assert(vault_store_get_or_create_salt(principal, salt) == 0);
+   uint8_t kek[VAULT_KEK_LEN];
+   make_kek(kek, 71);
+
+   const size_t len = 8192;
+   char *secret = malloc(len + 1);
+   char *out = malloc(len + 1);
+   assert(secret && out);
+   memset(secret, 'x', len);
+   secret[0] = '{';
+   secret[len - 1] = '}';
+   secret[len] = '\0';
+   assert(vault_store_set(principal, kek, "codex", "oauth", secret) == 0);
+   assert(vault_store_get(principal, kek, "codex", "oauth", out, len + 1) == 0);
+   assert(memcmp(out, secret, len + 1) == 0);
+   memset(secret, 0, len + 1);
+   memset(out, 0, len + 1);
+   free(secret);
+   free(out);
+   printf("  PASS: test_structured_credential_roundtrip\n");
+}
+
 static void test_at_rest_is_ciphertext_only(void)
 {
    const char *principal = "uid:1000";
@@ -463,6 +492,7 @@ int main(void)
    setenv("AIMEE_HOME", g_home, 1);
 
    test_set_get_roundtrip();
+   test_structured_credential_roundtrip();
    test_at_rest_is_ciphertext_only();
    test_wrong_kek_fails_closed();
    test_no_entry_vs_error();

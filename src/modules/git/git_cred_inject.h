@@ -31,7 +31,7 @@
  *      is the built-in server vault (server principal, server-wrap), keyed by
  *      host so one server can talk to many forges (github/gitlab/gitea/...).
  *   3. webuser vault   — the `principal`'s own vaulted personal forge token.
- *   4. server identity — a GitHub App installation token, else AIMEE_FORGE_TOKEN.
+ *   4. server identity — a GitHub App installation token, else a server-Vault token.
  * The `principal`'s vaulted SSH key is also loaded into the in-memory ssh-agent
  * (SSH_AUTH_SOCK) when present, independent of the token above.
  *

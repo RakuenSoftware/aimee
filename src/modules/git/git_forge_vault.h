@@ -34,4 +34,8 @@ int git_forge_vault_token(const char *principal, char *out, size_t out_len);
 /* As above for the SSH private key (PEM). Same return contract. */
 int git_forge_vault_sshkey(const char *principal, char *out, size_t out_len);
 
+/* Read the server's own static forge token from the server-principal vault.
+ * Same 1/0/-1 contract as the per-principal accessors. */
+int git_forge_vault_server_token(char *out, size_t out_len);
+
 #endif /* GIT_FORGE_VAULT_H */

@@ -13,6 +13,16 @@
 #include "platform_test_util.h"
 
 static char g_home[512];
+static int g_secret_writes;
+static int g_secret_was_configured;
+
+static int test_secret_writer(const char *name, const char *value)
+{
+   assert(name && strcmp(name, "AIMEE_DB2_URL") == 0);
+   g_secret_writes++;
+   g_secret_was_configured = value && value[0] ? 1 : 0;
+   return 0;
+}
 
 static void set_home(void)
 {
@@ -85,6 +95,14 @@ int main(void)
    assert(config_max_iterations() == 12);
    assert(strcmp(config_provider(), "openai") == 0 && "earlier write still present");
 
-   printf("  PASS: config_set is a surgical, key-preserving write\n");
+   /* Credential-shaped fields bypass the YAML document entirely. */
+   config_secret_writer_set(test_secret_writer);
+   assert(config_set("db2_url", "postgres://user:never-write-me@example/db") == 0);
+   assert(g_secret_writes == 1 && g_secret_was_configured == 1);
+   y = read_yaml();
+   assert(strstr(y, "never-write-me") == NULL);
+   assert(strstr(y, "db2_url") == NULL);
+
+   printf("  PASS: config_set preserves ordinary keys and sends credentials only to Vault\n");
    return 0;
 }

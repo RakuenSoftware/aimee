@@ -10,6 +10,7 @@
 #include "kb_paths.h"
 #include "platform_ipc.h"
 #include "platform_path.h"
+#include "runtime_secret.h"
 #include "cJSON.h"
 #include <ctype.h>
 #include <errno.h>
@@ -1169,10 +1170,12 @@ static const char *kb_client_v1_auth_header(char *buf, size_t buf_len)
 {
    /* The HTTP API can run without auth; include a bearer header only when the
     * operator provides the matching client-side token. */
-   const char *token = getenv("AIMEE_KB_API_BEARER_TOKEN");
-   if (!token || !token[0] || !buf || buf_len == 0)
+   char token[512];
+   if (!buf || buf_len == 0 ||
+       !runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", token, sizeof(token)))
       return NULL;
    snprintf(buf, buf_len, "Authorization: Bearer %s", token);
+   runtime_secret_wipe(token, sizeof(token));
    return buf;
 }
 
@@ -1290,6 +1293,15 @@ char *kb_client_search_json_ex(const char *project, const char *query,
                                const char *embedding_command, int max_results, const char *format,
                                const char *fusion_mode_override)
 {
+   return kb_client_search_json_scoped_ex(project, !project || !project[0], query,
+                                          embedding_command, max_results, format,
+                                          fusion_mode_override);
+}
+
+char *kb_client_search_json_scoped_ex(const char *project, int all_projects, const char *query,
+                                      const char *embedding_command, int max_results,
+                                      const char *format, const char *fusion_mode_override)
+{
    if (!query || !query[0])
       return kb_error_json("kb.search requires query");
 
@@ -1299,8 +1311,8 @@ char *kb_client_search_json_ex(const char *project, const char *query,
     * unless AIMEE_KB_CACHE_TTL_S (or config) enables it. */
    char cache_key[480];
    int have_key =
-       snprintf(cache_key, sizeof(cache_key), "search|%s|%d|%s|%s|%s", query, max_results,
-                project ? project : "", format ? format : "",
+       snprintf(cache_key, sizeof(cache_key), "search|%s|%d|%s|%d|%s|%s", query, max_results,
+                project ? project : "", all_projects, format ? format : "",
                 fusion_mode_override ? fusion_mode_override : "") < (int)sizeof(cache_key);
    if (have_key)
    {
@@ -1314,6 +1326,11 @@ char *kb_client_search_json_ex(const char *project, const char *query,
       return kb_error_json("out of memory");
    if (project && project[0])
       cJSON_AddStringToObject(body, "project", project);
+   if (all_projects)
+      /* NULL is an intentional all-project call at this internal boundary.
+       * Public request surfaces must resolve an active project first; spelling
+       * this out prevents the KB from treating an omitted scope as global. */
+      cJSON_AddStringToObject(body, "scope", "all");
    cJSON_AddStringToObject(body, "query", query);
    if (embedding_command && embedding_command[0])
       cJSON_AddStringToObject(body, "embedding_command", embedding_command);

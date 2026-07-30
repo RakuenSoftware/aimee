@@ -11,6 +11,15 @@
 static pthread_key_t g_key;
 static pthread_once_t g_once = PTHREAD_ONCE_INIT;
 
+typedef struct
+{
+   char kind[32];
+   char id[128];
+} kb_reqctx_scope_t;
+
+static pthread_key_t g_scope_key;
+static pthread_once_t g_scope_once = PTHREAD_ONCE_INIT;
+
 static void free_actor(void *p)
 {
    free(p);
@@ -18,6 +27,11 @@ static void free_actor(void *p)
 static void key_init(void)
 {
    pthread_key_create(&g_key, free_actor);
+}
+
+static void scope_key_init(void)
+{
+   pthread_key_create(&g_scope_key, free);
 }
 
 void kb_reqctx_set_actor(const kb_principal_t *actor)
@@ -43,6 +57,10 @@ void kb_reqctx_clear(void)
    kb_principal_t *slot = (kb_principal_t *)pthread_getspecific(g_key);
    if (slot)
       memset(slot, 0, sizeof(*slot));
+   pthread_once(&g_scope_once, scope_key_init);
+   kb_reqctx_scope_t *scope = (kb_reqctx_scope_t *)pthread_getspecific(g_scope_key);
+   if (scope)
+      memset(scope, 0, sizeof(*scope));
 }
 
 const kb_principal_t *kb_reqctx_actor(void)
@@ -52,6 +70,34 @@ const kb_principal_t *kb_reqctx_actor(void)
    if (slot && slot->authenticated)
       return slot;
    return NULL;
+}
+
+void kb_reqctx_set_verified_scope(const char *kind, const char *id)
+{
+   pthread_once(&g_scope_once, scope_key_init);
+   kb_reqctx_scope_t *scope = (kb_reqctx_scope_t *)pthread_getspecific(g_scope_key);
+   if (!scope)
+   {
+      scope = (kb_reqctx_scope_t *)calloc(1, sizeof(*scope));
+      if (!scope)
+         return;
+      pthread_setspecific(g_scope_key, scope);
+   }
+   snprintf(scope->kind, sizeof(scope->kind), "%s", kind ? kind : "");
+   snprintf(scope->id, sizeof(scope->id), "%s", id ? id : "");
+}
+
+int kb_reqctx_verified_scope(const char **kind, const char **id)
+{
+   pthread_once(&g_scope_once, scope_key_init);
+   const kb_reqctx_scope_t *scope = (const kb_reqctx_scope_t *)pthread_getspecific(g_scope_key);
+   if (!scope || !scope->kind[0] || !scope->id[0])
+      return 0;
+   if (kind)
+      *kind = scope->kind;
+   if (id)
+      *id = scope->id;
+   return 1;
 }
 
 /* Its own thread-local, not a field on the actor slot: the content type is known

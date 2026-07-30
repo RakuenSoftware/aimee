@@ -86,7 +86,8 @@ int db2_cross_repo_distinct_stats(const char *symbol, const char *caller_repo,
    if (cr_scalar(conn,
                  "SELECT COUNT(DISTINCT p.id) FROM code_calls cc "
                  "JOIN files f ON f.id = cc.file_id JOIN projects p ON p.id = f.project_id "
-                 "WHERE cc.callee = ?1 AND p.trust = 'trusted'",
+                 "WHERE cc.callee=?1 AND p.trust='trusted' AND p.lifecycle_state='current'"
+                 " AND f.generation=p.current_generation",
                  symbol, NULL, &v) != 0)
       return -1;
    out->callee_repo_count = (int)v;
@@ -97,7 +98,8 @@ int db2_cross_repo_distinct_stats(const char *symbol, const char *caller_repo,
    if (cr_scalar(conn,
                  "SELECT COUNT(DISTINCT p.id) FROM terms t "
                  "JOIN files f ON f.id = t.file_id JOIN projects p ON p.id = f.project_id "
-                 "WHERE t.name = ?1 AND t.kind = 'definition' AND p.trust = 'trusted'",
+                 "WHERE t.name=?1 AND t.kind='definition' AND p.trust='trusted'"
+                 " AND p.lifecycle_state='current' AND f.generation=p.current_generation",
                  symbol, NULL, &v) != 0)
       return -1;
    out->definer_repo_count = (int)v;
@@ -107,12 +109,14 @@ int db2_cross_repo_distinct_stats(const char *symbol, const char *caller_repo,
    if (cr_scalar(conn,
                  "SELECT COUNT(DISTINCT f.id) FROM code_calls cc "
                  "JOIN files f ON f.id = cc.file_id JOIN projects p ON p.id = f.project_id "
-                 "WHERE p.name = ?1 AND cc.callee = ?2",
+                 "WHERE p.name=?1 AND cc.callee=?2 AND p.lifecycle_state='current'"
+                 " AND f.generation=p.current_generation",
                  caller_repo, symbol, &num) != 0)
       return -1;
    if (cr_scalar(conn,
                  "SELECT COUNT(*) FROM files f JOIN projects p ON p.id = f.project_id "
-                 "WHERE p.name = ?1",
+                 "WHERE p.name=?1 AND p.lifecycle_state='current'"
+                 " AND f.generation=p.current_generation",
                  caller_repo, NULL, &denom) != 0)
       return -1;
    out->caller_file_pct = denom > 0 ? (int)((num * 100) / denom) : 0;
@@ -181,12 +185,15 @@ int db2_cross_repo_recompute_blocked_symbols(int k, int m, int len_min)
           "SELECT name, '', 'frequency', ?3 FROM ("
           "  SELECT cc.callee AS name FROM code_calls cc "
           "    JOIN files f ON f.id = cc.file_id JOIN projects p ON p.id = f.project_id "
-          "    WHERE p.trust = 'trusted' AND length(cc.callee) >= ?4 "
+          "    WHERE p.trust='trusted' AND p.lifecycle_state='current'"
+          "      AND f.generation=p.current_generation AND length(cc.callee) >= ?4 "
           "    GROUP BY cc.callee HAVING COUNT(DISTINCT p.id) >= ?1 "
           "  UNION "
           "  SELECT t.name AS name FROM terms t "
           "    JOIN files f ON f.id = t.file_id JOIN projects p ON p.id = f.project_id "
-          "    WHERE p.trust = 'trusted' AND t.kind = 'definition' AND length(t.name) >= ?4 "
+          "    WHERE p.trust='trusted' AND p.lifecycle_state='current'"
+          "      AND f.generation=p.current_generation"
+          "      AND t.kind='definition' AND length(t.name)>=?4 "
           "    GROUP BY t.name HAVING COUNT(DISTINCT p.id) >= ?2"
           ") q",
           err, sizeof(err));
@@ -275,19 +282,22 @@ int db2_cross_repo_repo_symbol_hash(const char *project, char *out, size_t cap)
    if (cr_hash_query(conn,
                      "SELECT t.name || '|' || t.kind FROM terms t "
                      "JOIN files f ON f.id = t.file_id JOIN projects p ON p.id = f.project_id "
-                     "WHERE p.name = ?1 ORDER BY 1",
+                     "WHERE p.name=?1 AND p.lifecycle_state='current'"
+                     " AND f.generation=p.current_generation ORDER BY 1",
                      project, &h) != 0)
       return -1;
    if (cr_hash_query(conn,
                      "SELECT 'E:' || e.name FROM file_exports e "
                      "JOIN files f ON f.id = e.file_id JOIN projects p ON p.id = f.project_id "
-                     "WHERE p.name = ?1 ORDER BY 1",
+                     "WHERE p.name=?1 AND p.lifecycle_state='current'"
+                     " AND f.generation=p.current_generation ORDER BY 1",
                      project, &h) != 0)
       return -1;
    if (cr_hash_query(conn,
                      "SELECT 'I:' || i.name FROM file_imports i "
                      "JOIN files f ON f.id = i.file_id JOIN projects p ON p.id = f.project_id "
-                     "WHERE p.name = ?1 ORDER BY 1",
+                     "WHERE p.name=?1 AND p.lifecycle_state='current'"
+                     " AND f.generation=p.current_generation ORDER BY 1",
                      project, &h) != 0)
       return -1;
    snprintf(out, cap, "%016llx", (unsigned long long)h);
@@ -300,8 +310,10 @@ int db2_cross_repo_repo_set_hash(char *out, size_t cap)
    if (!conn || !out || cap < 17)
       return -1;
    char err[CR_ERRBUF] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn, "SELECT name, trust FROM projects ORDER BY name", err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
+                                          "SELECT name,trust FROM projects"
+                                          " WHERE lifecycle_state='current' ORDER BY name",
+                                          err, sizeof(err));
    if (!st)
       return -1;
    uint64_t h = fnv1a_init();

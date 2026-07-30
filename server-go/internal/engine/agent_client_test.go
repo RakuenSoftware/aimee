@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -1109,6 +1110,99 @@ func TestHTTPAgentClientRequiresAuthenticationOffLoopback(t *testing.T) {
 	}
 	if _, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: "https://resource-plane.example", Bearer: "token"}); err != nil {
 		t.Fatalf("authenticated remote agent service rejected: %v", err)
+	}
+}
+
+func TestHTTPAgentClientReroutesGroupSeatAfterAdmissionBackpressure(t *testing.T) {
+	var mu sync.Mutex
+	var vias []string
+	var launches atomic.Int32
+	transport := agentRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			via, _ := payload["via"].(string)
+			mu.Lock()
+			vias = append(vias, via)
+			mu.Unlock()
+			if launches.Add(1) == 1 {
+				return agentHTTPResponse(http.StatusServiceUnavailable, `{"error":"agent at capacity [aimee_err=concurrency_limit]"}`), nil
+			}
+			return agentHTTPResponse(http.StatusOK, `{"job_id":41,"participant":"seat-41"}`), nil
+		case "/v1/delegate/status":
+			return agentHTTPResponse(http.StatusOK, `{"job_status":"done","agent_name":"idle","result":"reviewed","cost_known":true}`), nil
+		default:
+			return agentHTTPResponse(http.StatusNotFound, `{}`), nil
+		}
+	})
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: "http://127.0.0.1", PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.client.Transport = transport
+	result, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review", Delegate: "busy", routeSelected: true})
+	if err != nil || result.Response != "reviewed" || result.Participant != "seat-41" {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(vias) != 2 || vias[0] != "busy" || vias[1] != "" {
+		t.Fatalf("capacity retry did not return the group seat to generic routing: %v", vias)
+	}
+}
+
+func TestHTTPAgentClientDoesNotRerouteOperatorPinAfterAdmissionBackpressure(t *testing.T) {
+	var launches atomic.Int32
+	transport := agentRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/v1/delegate/run" {
+			return agentHTTPResponse(http.StatusNotFound, `{}`), nil
+		}
+		launches.Add(1)
+		return agentHTTPResponse(http.StatusServiceUnavailable, `{"error":"agent at capacity [aimee_err=concurrency_limit]"}`), nil
+	})
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: "http://127.0.0.1", PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.client.Transport = transport
+	_, err = client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review", Delegate: "operator-pinned"})
+	if err == nil || !isCapacityBackpressure(err) || launches.Load() != 1 {
+		t.Fatalf("operator pin was rerouted: launches=%d err=%v", launches.Load(), err)
+	}
+}
+
+type agentRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f agentRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+func agentHTTPResponse(status int, body string) *http.Response {
+	return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}
+}
+
+func TestDelegateRouteRetryPolicy(t *testing.T) {
+	capacity := errors.New("agent at capacity [aimee_err=concurrency_limit]")
+	terminal := fmt.Errorf("%w: provider failed", ErrDelegateTerminal)
+	tests := []struct {
+		name    string
+		request DelegateRequest
+		err     error
+		want    bool
+	}{
+		{name: "group capacity race", request: DelegateRequest{Delegate: "busy", routeSelected: true}, err: capacity, want: true},
+		{name: "group terminal failure", request: DelegateRequest{Delegate: "failed", routeSelected: true}, err: terminal, want: true},
+		{name: "operator pin", request: DelegateRequest{Delegate: "pinned"}, err: capacity},
+		{name: "participant continuation", request: DelegateRequest{Participant: "opaque"}, err: terminal},
+		{name: "ordinary transport failure", request: DelegateRequest{}, err: errors.New("connection reset")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := delegateRouteRetryable(tc.request, tc.err); got != tc.want {
+				t.Fatalf("delegateRouteRetryable()=%v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
