@@ -3661,6 +3661,8 @@ int db2_cross_repo_recompute_blocked_symbols(int k, int m, int len_min)
  * (g_vec_enabled=0 -> memory_embed_text returns 0 -> the leg is skipped), so the
  * existing hybrid tests are unaffected; test_code_hybrid_vector_ok flips it on. */
 static int g_vec_enabled = 0;
+static int g_vec_search_unavailable = 0;
+static int g_vec_unauthorized = 0;
 int memory_embed_text(const char *text, const char *command, float *out, int max_dim)
 {
    (void)text;
@@ -3675,6 +3677,10 @@ int memory_embed_text(const char *text, const char *command, float *out, int max
       out[i] = 0.01f * (float)(i % 7);
    return d;
 }
+int memory_embedder_last_result_unauthorized(void)
+{
+   return g_vec_unauthorized;
+}
 int pgvec_code_search_paths(const char *project, const float *vec, int dim, int limit, char *paths,
                             int path_cap, double *scores, int max)
 {
@@ -3682,6 +3688,8 @@ int pgvec_code_search_paths(const char *project, const float *vec, int dim, int 
    (void)vec;
    (void)dim;
    (void)limit;
+   if (g_vec_search_unavailable)
+      return -1;
    if (!g_vec_enabled || !paths || path_cap <= 0 || !scores || max < 2)
       return 0;
    /* Two hits: src/search.c OVERLAPS the lexical leg (-> 2-signal consensus) and
@@ -4071,6 +4079,7 @@ static void test_code_hybrid_vector_ok(void)
    g_vec_enabled = 0;
    g_test_embedding_dim = 1024;
    assert(s == 200);
+   assert(strstr(buf, "\"vector_status\":\"ok\"") != NULL);
    /* The vector-only file appears, labeled and carrying its vector score. */
    assert(strstr(buf, "\"file_path\":\"src/semantic.c\"") != NULL);
    assert(strstr(buf, "\"vector\"") != NULL);
@@ -4090,8 +4099,45 @@ static void test_code_hybrid_vector_dim_mismatch_skips(void)
                             NULL, 0, buf, sizeof(buf));
    g_vec_enabled = 0;
    assert(s == 200);
+   assert(strstr(buf, "\"vector_status\":\"stale\"") != NULL);
    assert(strstr(buf, "\"file_path\":\"src/search.c\"") != NULL);   /* lexical still works */
    assert(strstr(buf, "\"file_path\":\"src/semantic.c\"") == NULL); /* vector leg skipped */
+}
+
+static void test_code_context_vector_store_outage_is_not_empty(void)
+{
+   g_test_embedding_dim = 2560;
+   g_vec_enabled = 1;
+   g_vec_search_unavailable = 1;
+   char buf[4096];
+   int s =
+       kb_http_route_ex("GET", "/v1/code/context", "query=definitely-unrelated&project=proj-alpha",
+                        NULL, NULL, NULL, 0, buf, sizeof(buf));
+   g_vec_search_unavailable = 0;
+   g_vec_enabled = 0;
+   g_test_embedding_dim = 1024;
+   assert(s == 503);
+   assert(strstr(buf, "\"status\":\"unavailable\"") != NULL);
+   assert(strstr(buf, "\"dependency\":\"vector_store\"") != NULL);
+   assert(strstr(buf, "\"retry_after_ms\":1000") != NULL);
+   assert(strstr(buf, "no_answer") == NULL);
+}
+
+static void test_code_context_dimension_mismatch_is_stale(void)
+{
+   g_test_embedding_dim = 1024;
+   g_vec_enabled = 1;
+   char buf[4096];
+   int s =
+       kb_http_route_ex("GET", "/v1/code/context", "query=definitely-unrelated&project=proj-alpha",
+                        NULL, NULL, NULL, 0, buf, sizeof(buf));
+   g_vec_enabled = 0;
+   assert(s == 409);
+   assert(strstr(buf, "\"status\":\"stale\"") != NULL);
+   assert(strstr(buf, "\"dependency\":\"embedder\"") != NULL);
+   assert(strstr(buf, "\"observed_dimension\":2560") != NULL);
+   assert(strstr(buf, "\"current_dimension\":1024") != NULL);
+   assert(strstr(buf, "\"retryable\":false") != NULL);
 }
 
 static void test_code_context_bounded_current_project(void)
@@ -4134,10 +4180,46 @@ static void test_code_context_no_answer_is_explicit(void)
        kb_http_route_ex("GET", "/v1/code/context", "query=definitely-unrelated&project=proj-alpha",
                         NULL, NULL, NULL, 0, buf, sizeof(buf));
    assert(s == 200);
-   assert(strstr(buf, "\"status\":\"no_answer\"") != NULL);
+   assert(strstr(buf, "\"status\":\"abstained\"") != NULL);
    assert(strstr(buf, "\"decision\":\"no_answer\"") != NULL);
    assert(strstr(buf, "\"results\":[]") != NULL);
    assert(strstr(buf, "\"why\":[]") != NULL);
+}
+
+static void test_code_context_embedder_outage_is_not_no_answer(void)
+{
+   char buf[2048];
+   assert(setenv("AIMEE_EMBEDDER_URL", "http://embedder-down", 1) == 0);
+   g_vec_enabled = 0;
+   int s =
+       kb_http_route_ex("GET", "/v1/code/context", "query=definitely-unrelated&project=proj-alpha",
+                        NULL, NULL, NULL, 0, buf, sizeof(buf));
+   unsetenv("AIMEE_EMBEDDER_URL");
+   assert(s == 503);
+   assert(strstr(buf, "\"status\":\"unavailable\"") != NULL);
+   assert(strstr(buf, "\"dependency\":\"embedder\"") != NULL);
+   assert(strstr(buf, "\"retryable\":true") != NULL);
+   assert(strstr(buf, "\"retry_after_ms\":1000") != NULL);
+   assert(strstr(buf, "no_answer") == NULL);
+}
+
+static void test_code_context_embedder_auth_is_unauthorized(void)
+{
+   char buf[2048];
+   assert(setenv("AIMEE_EMBEDDER_URL", "http://embedder-auth", 1) == 0);
+   g_vec_enabled = 0;
+   g_vec_unauthorized = 1;
+   int s =
+       kb_http_route_ex("GET", "/v1/code/context", "query=definitely-unrelated&project=proj-alpha",
+                        NULL, NULL, NULL, 0, buf, sizeof(buf));
+   g_vec_unauthorized = 0;
+   unsetenv("AIMEE_EMBEDDER_URL");
+   assert(s == 401);
+   assert(strstr(buf, "\"status\":\"unauthorized\"") != NULL);
+   assert(strstr(buf, "\"dependency\":\"embedder\"") != NULL);
+   assert(strstr(buf, "\"retryable\":false") != NULL);
+   assert(strstr(buf, "retry_after_ms") == NULL);
+   assert(strstr(buf, "no_answer") == NULL);
 }
 
 static void test_code_context_does_not_substitute_global_memory(void)
@@ -6134,8 +6216,12 @@ int main(void)
    test_code_hybrid_no_symbol();
    test_code_hybrid_vector_ok();
    test_code_hybrid_vector_dim_mismatch_skips();
+   test_code_context_vector_store_outage_is_not_empty();
+   test_code_context_dimension_mismatch_is_stale();
    test_code_context_bounded_current_project();
    test_code_context_no_answer_is_explicit();
+   test_code_context_embedder_outage_is_not_no_answer();
+   test_code_context_embedder_auth_is_unauthorized();
    test_code_context_does_not_substitute_global_memory();
    test_code_context_requires_verified_memory_anchor();
    test_code_graph_hubs_ok();

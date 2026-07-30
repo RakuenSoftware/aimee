@@ -95,6 +95,29 @@ cJSON *json_result_content(cJSON *result)
    free(rendered);
    return content;
 }
+
+static cJSON *kb_last_result_content(const char *message)
+{
+   char *json = kb_client_last_result_json(message);
+   cJSON *content = text_content(json ? json : "{\"status\":\"unavailable\"}");
+   free(json);
+   return content;
+}
+
+static cJSON *kb_empty_result_content(const char *message)
+{
+   cJSON *obj = cJSON_CreateObject();
+   if (!obj)
+      return text_content("{\"status\":\"empty\",\"retryable\":false}");
+   cJSON_AddStringToObject(obj, "status", "empty");
+   cJSON_AddBoolToObject(obj, "retryable", 0);
+   cJSON_AddStringToObject(obj, "message", message ? message : "no result");
+   char *json = cJSON_PrintUnformatted(obj);
+   cJSON_Delete(obj);
+   cJSON *content = text_content(json ? json : "{\"status\":\"empty\"}");
+   free(json);
+   return content;
+}
 static int send_mcp_result(server_conn_t *conn, cJSON *content)
 {
    cJSON *resp = jo_ok();
@@ -335,8 +358,7 @@ cJSON *tool_search_memory(cJSON *args)
       mcp_memory_scope_end();
    }
    if (count < 0)
-      return text_content("error: knowledge service search index unavailable; server-side "
-                          "maintenance is required");
+      return kb_last_result_content("knowledge service memory search failed");
 
    char buf[8192];
    int pos = 0;
@@ -456,11 +478,12 @@ cJSON *tool_memory_ask(cJSON *args, cJSON **structured_out)
    int ask_rc = kb_client_memory_ask(jq->valuestring, NULL, NULL, limit, &result);
    mcp_memory_scope_end();
    if (ask_rc != 0)
-      return text_content(result.error[0] ? result.error : "memory_ask failed");
+      return kb_last_result_content(result.error[0] ? result.error : "memory_ask failed");
 
    cJSON *structured = cJSON_CreateObject();
    if (!structured)
       return text_content("error: out of memory");
+   cJSON_AddStringToObject(structured, "status", result.no_answer ? "abstained" : "ok");
    cJSON_AddStringToObject(structured, "query", jq->valuestring);
    cJSON_AddStringToObject(structured, "answer", result.answer);
    cJSON_AddNumberToObject(structured, "confidence", result.confidence);
@@ -520,8 +543,7 @@ cJSON *tool_search_graph(cJSON *args)
    int count = kb_client_memory_search_graph(jq->valuestring, limit, rels, 20);
    mcp_memory_scope_end();
    if (count < 0)
-      return text_content("error: knowledge service unavailable; the memory store is unreachable "
-                          "(server-side maintenance is required)");
+      return kb_last_result_content("knowledge service memory graph search failed");
 
    char buf[8192];
    int pos = 0;
@@ -550,8 +572,11 @@ cJSON *tool_get_episode(cJSON *args)
       return text_content("error: missing 'episode_key' parameter");
 
    memory_episode_t episode;
-   if (kb_client_memory_get_episode(jk->valuestring, &episode) != 0)
-      return text_content("No episode found.");
+   int episode_rc = kb_client_memory_get_episode(jk->valuestring, &episode);
+   if (episode_rc > 0)
+      return kb_empty_result_content("memory episode not found");
+   if (episode_rc < 0)
+      return kb_last_result_content("memory episode lookup returned no result");
 
    char buf[4096];
    snprintf(buf, sizeof(buf), "Episode: %s\nSession: %s\nTime: %s\nMemory ID: %lld\n\n%s",
@@ -572,8 +597,10 @@ cJSON *tool_get_entity(cJSON *args)
    mcp_memory_scope_begin(args, &active_context_missing);
    int profile_rc = kb_client_memory_get_entity_profile(je->valuestring, &profile);
    mcp_memory_scope_end();
-   if (profile_rc != 0)
-      return text_content("No entity profile found.");
+   if (profile_rc > 0)
+      return kb_empty_result_content("memory entity profile not found");
+   if (profile_rc < 0)
+      return kb_last_result_content("memory entity profile lookup returned no result");
 
    char buf[4096];
    int pos = 0;
@@ -604,8 +631,7 @@ cJSON *tool_get_entity_edges(cJSON *args)
    int count = kb_client_memory_get_entity_edges(je->valuestring, limit, rels, 20);
    mcp_memory_scope_end();
    if (count < 0)
-      return text_content("error: knowledge service unavailable; the memory store is unreachable "
-                          "(server-side maintenance is required)");
+      return kb_last_result_content("knowledge service entity-edge lookup failed");
 
    char buf[8192];
    int pos = 0;
@@ -641,7 +667,7 @@ cJSON *tool_get_context_block(cJSON *args)
    char *ctx = kb_client_memory_context_block(jq->valuestring, block_type, limit);
    mcp_memory_scope_end();
    if (!ctx)
-      return text_content("No context block available.");
+      return kb_last_result_content("memory context block returned no result");
    char *rendered = ctx;
    if (active_context_missing)
    {
@@ -679,8 +705,11 @@ cJSON *tool_memory_get(cJSON *args)
       return text_content("error: missing memory id or memory:<id> handle");
 
    memory_t m;
-   if (kb_client_memory_get(id, &m) != 0)
-      return text_content("No memory found.");
+   int memory_rc = kb_client_memory_get(id, &m);
+   if (memory_rc > 0)
+      return kb_empty_result_content("memory not found");
+   if (memory_rc < 0)
+      return kb_last_result_content("memory lookup returned no result");
 
    dstr_t d;
    dstr_init(&d);
@@ -706,8 +735,7 @@ cJSON *tool_list_facts(cJSON *args)
    int count = kb_client_memory_list(TIER_L2, KIND_FACT, 64, facts, 64);
    mcp_memory_scope_end();
    if (count < 0)
-      return text_content("error: knowledge service unavailable; the memory store is unreachable "
-                          "(server-side maintenance is required)");
+      return kb_last_result_content("knowledge service fact list failed");
 
    char buf[8192];
    int pos = 0;
@@ -739,7 +767,7 @@ cJSON *tool_memory_briefing(cJSON *args)
    cJSON *bundle = kb_client_memory_briefing(limit_tokens);
    mcp_memory_scope_end();
    if (!bundle)
-      return text_content("error: memory_briefing failed");
+      return kb_last_result_content("memory briefing failed");
    cJSON_AddBoolToObject(bundle, "active_context_missing", active_context_missing);
 
    char *rendered = cJSON_PrintUnformatted(bundle);
@@ -793,7 +821,7 @@ cJSON *tool_list_curiosity_items(cJSON *args)
     * the agent expects, so we forward it as the tool result. */
    char *json = kb_client_curiosity_list_json(state, limit);
    if (!json)
-      return text_content("error: knowledge service unavailable for curiosity list");
+      return kb_last_result_content("knowledge service curiosity list failed");
    cJSON *content = text_content(json);
    free(json);
    return content;
@@ -880,7 +908,8 @@ cJSON *tool_list_prospective_memories(cJSON *args)
       cJSON_Delete(detached);
    }
    cJSON_Delete(resp);
-   cJSON *content = text_content(rendered ? rendered : "[]");
+   cJSON *content = rendered ? text_content(rendered)
+                             : kb_last_result_content("prospective memory list returned no result");
    free(rendered);
    return content;
 }
@@ -992,7 +1021,7 @@ cJSON *smcp_tool_find_symbol(cJSON *args)
    term_hit_t hits[20];
    int count = kb_client_index_find_scoped(project, all_projects, jid->valuestring, hits, 20);
    if (count < 0)
-      return text_content("error: knowledge service symbol index unavailable");
+      return kb_last_result_content("knowledge service symbol index unavailable");
    int matched = 0;
    for (int i = 0; i < count; i++)
       if (all_projects || !project || strcmp(hits[i].project, project) == 0)
@@ -1092,8 +1121,8 @@ cJSON *tool_preview_blast_radius(cJSON *args)
    }
 
    char *json = kb_client_index_blast_radius_preview_json(project, paths, cnt);
-   cJSON *content = text_content(
-       json ? json : "{\"status\":\"error\",\"message\":\"knowledge service unavailable\"}");
+   cJSON *content =
+       json ? text_content(json) : kb_last_result_content("knowledge service unavailable");
    free(json);
    return content;
 }

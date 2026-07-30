@@ -74,6 +74,10 @@ char *kb_client_code_context(const char *query, const char *symbol, const char *
       *status_out = 503;
    return NULL;
 }
+kb_client_result_status_t kb_client_last_result_status(void)
+{
+   return KB_CLIENT_RESULT_OK;
+}
 int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max)
 {
    (void)query;

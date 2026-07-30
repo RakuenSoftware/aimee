@@ -32,6 +32,9 @@ char *kb_client_mtls_request(const char *method, const char *path, const char *b
  * public operation contract allows several minutes. */
 char *kb_client_mtls_request_timeout(const char *method, const char *path, const char *body,
                                      int timeout_ms, int *status_out);
+char *kb_client_mtls_request_timeout_with_type(const char *method, const char *path,
+                                               const char *body, const char *content_type,
+                                               int timeout_ms, int *status_out);
 
 /* Fetch the exact bounded P5-C2c signed envelope.  Only an authenticated 200
  * response on the fixed route is accepted; output is cleared on every error. */

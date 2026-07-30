@@ -76,9 +76,15 @@ when it is linked to accepted code. Every code item carries project, path, gener
 provenance, and a line-or-file span.
 
 A query without sufficient current-project code evidence returns HTTP 200 with
-`status: no_answer`, empty `results`, and empty `why`. It does not substitute global episodic
+`status: abstained`, an `answerability.decision` of `no_answer`, empty `results`, and empty `why`.
+It does not substitute global episodic
 memory. The same local-first policy applies to the older hybrid memory annotations: project memory
 is selected before workspace/shared memory and broad scope is never implicit.
+
+Hybrid code responses always include `vector_status`: `disabled`, `ok`, `empty`, `stale`,
+`unavailable`, or `unauthorized`. When the vector leg is stale, unavailable, or unauthorized,
+dependency and dimension/retryability metadata are included; lexical and graph results remain usable
+when they independently answer the query.
 
 Ingress rollout is controlled by `code_context_mode`:
 
@@ -88,8 +94,30 @@ Ingress rollout is controlled by `code_context_mode`:
 - `on` injects a packet only on the first turn of a session task or a low-overlap task change.
 
 `on` does not repeat context for an ordinary follow-up and does not broaden after `no_answer` or an
-unavailable KB. If the request working directory cannot resolve a durable active-project identity,
-agent ingress suppresses code and memory recall rather than issuing an unscoped query.
+unavailable KB. An unavailable first/new-task lookup rearms only its exact session/project marker,
+so a related follow-up can use the dependency breaker's single recovery probe; successful,
+genuinely empty, stale, and abstained results remain consumed. If the request working directory
+cannot resolve a durable active-project identity, agent ingress suppresses code and memory recall
+rather than issuing an unscoped query.
+
+## Dependency status and recovery
+
+Agent-facing retrieval preserves six outcomes: `ok`, `empty`, `abstained`, `stale`, `unavailable`,
+and `unauthorized`. `empty` is emitted only after a valid response; an outage or malformed response
+is never converted to an empty list. Stale results carry the observed/current generation or vector
+dimension when available. Unavailable results name the failed dependency, say whether retry is
+safe, and include a bounded retry delay.
+
+The server-side KB client and the KB-side external embedder each use a process-local circuit
+breaker. Three consecutive transient failures open it with bounded exponential backoff and jitter.
+Calls during the delay are suppressed, then exactly one half-open recovery probe is admitted.
+Success closes the breaker without restarting the client. A reachable KB reporting its own
+embedder or vector-store outage does not open the KB transport breaker, so unrelated KB operations
+remain usable. Built-in local embeddings bypass the external dependency breaker.
+
+Local inspection, editing, and tests do not depend on KB recovery. Clients may fall back to those
+local operations on `unavailable`, but must not silently retry without a bound or report an
+Aimee-assisted result for the failed turn.
 
 ## Audits
 

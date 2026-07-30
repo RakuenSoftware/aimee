@@ -19,6 +19,14 @@ static int send_and_free(server_conn_t *conn, cJSON *resp)
    return server_send_ok(conn, resp);
 }
 
+static cJSON *kb_last_result_object(const char *message)
+{
+   char *json = kb_client_last_result_json(message);
+   cJSON *result = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   return result ? result : jo_err(message);
+}
+
 int handle_index_find(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -57,8 +65,12 @@ int handle_index_find(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    term_hit_t hits[128];
    int count = kb_client_index_find_scoped(project, all_projects, identifier, hits, 128);
+   if (count < 0)
+      return send_and_free(conn,
+                           kb_last_result_object("knowledge service symbol index unavailable"));
 
    cJSON *resp = jo_ok();
+   cJSON_AddStringToObject(resp, "result_status", count > 0 ? "ok" : "empty");
    cJSON *arr = cJSON_AddArrayToObject(resp, "hits");
    for (int i = 0; i < count; i++)
    {
@@ -79,8 +91,12 @@ int handle_index_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    project_info_t projects[128];
    int count = kb_client_index_list(projects, 128);
+   if (count < 0)
+      return send_and_free(conn,
+                           kb_last_result_object("knowledge service project index unavailable"));
 
    cJSON *resp = jo_ok();
+   cJSON_AddStringToObject(resp, "result_status", count > 0 ? "ok" : "empty");
    cJSON *arr = cJSON_AddArrayToObject(resp, "projects");
    for (int i = 0; i < count; i++)
    {
@@ -117,6 +133,7 @@ int handle_index_blast_radius(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    if (rc == 0)
    {
       resp = jo_ok();
+      cJSON_AddStringToObject(resp, "result_status", "ok");
       jo_add_str(resp, "file", br.file);
 
       cJSON *deps = cJSON_CreateArray();
@@ -130,9 +147,7 @@ int handle_index_blast_radius(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
       cJSON_AddItemToObject(resp, "dependents", depts);
    }
    else
-   {
-      resp = jo_err("blast radius lookup failed (knowledge service unavailable)");
-   }
+      resp = kb_last_result_object("blast radius lookup failed");
    return send_and_free(conn, resp);
 }
 
@@ -153,7 +168,11 @@ int handle_index_structure(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    }
    definition_t defs[256];
    int count = kb_client_index_structure(project, file_path, defs, 256);
+   if (count < 0)
+      return send_and_free(conn,
+                           kb_last_result_object("knowledge service structure index unavailable"));
    cJSON *resp = jo_ok();
+   cJSON_AddStringToObject(resp, "result_status", count > 0 ? "ok" : "empty");
    cJSON *arr = cJSON_AddArrayToObject(resp, "definitions");
    for (int i = 0; i < count; i++)
    {
@@ -202,8 +221,12 @@ int handle_index_find_callers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    caller_hit_t hits[128];
    int count = kb_client_index_find_callers_scoped(project, scope && strcmp(scope, "all") == 0,
                                                    symbol, hits, 128);
+   if (count < 0)
+      return send_and_free(conn,
+                           kb_last_result_object("knowledge service caller index unavailable"));
 
    cJSON *resp = jo_ok();
+   cJSON_AddStringToObject(resp, "result_status", count > 0 ? "ok" : "empty");
    cJSON *arr = cJSON_AddArrayToObject(resp, "hits");
    for (int i = 0; i < count; i++)
    {

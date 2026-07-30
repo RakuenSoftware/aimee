@@ -122,6 +122,14 @@ extern "C"
                                   const char *body, const char *authorization, int close_after,
                                   char *resp_out, size_t resp_cap, int *status_out,
                                   int *reusable_out);
+   /* As above, but preserve an explicit caller-owned Content-Type header for
+    * non-JSON bodies such as documentation multipart uploads. NULL selects the
+    * existing application/json default. */
+   int kb_tls_client_conn_request_with_type(kb_tls_client_conn_t *conn, const char *method,
+                                            const char *path, const char *body,
+                                            const char *authorization, const char *content_type,
+                                            int close_after, char *resp_out, size_t resp_cap,
+                                            int *status_out, int *reusable_out);
    void kb_tls_client_conn_close(kb_tls_client_conn_t *conn);
 
    /* TOFU bootstrap: fetch the kb's CA certificate from GET /v1/enroll/ca and
