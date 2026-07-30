@@ -335,3 +335,43 @@ func (s *server) handleSetupAccount(w http.ResponseWriter, r *http.Request) {
 		"complete": true, "required": false, "username": req.Username,
 	})
 }
+
+// adminUsername resolves the appliance administrator: the account that replaced
+// the generated bootstrap login, or — before that replacement — the bootstrap
+// account itself.
+//
+// The policy gates used to compare against the literal name "admin". That is the
+// one account guaranteed NOT to be the administrator on a set-up appliance: the
+// documented flow is to replace the generated bootstrap login with an operator
+// account, after which "admin" names nothing in particular. An operator who
+// completed setup as, say, `virant` was therefore locked out of every roundtable
+// and workflow policy mutation on their own appliance, with the browser
+// reporting only "administrator access required".
+//
+// Falls back to "admin" when no record exists at all, which preserves the
+// previous behaviour for an appliance that has neither marker.
+func (s *server) adminUsername() string {
+	// The gate this backs runs on every policy mutation, including paths whose
+	// callers hold no config (setupAccountDir dereferences cfg). Never panic a
+	// request on the way to a deny.
+	if s == nil || s.cfg == nil {
+		return "admin"
+	}
+	if username, ok := readReplacementUsername(s.setupAccountMarker()); ok {
+		return username
+	}
+	if username, ok := s.pendingBootstrapUsername(); ok {
+		return username
+	}
+	if _, username, ok := readBootstrapUser(s.setupAccountBootstrapUser()); ok && username != "" {
+		return username
+	}
+	return "admin"
+}
+
+// isAdmin reports whether the authenticated browser identity is the appliance
+// administrator. requireAuth injects the username, so it is already trusted.
+func (s *server) isAdmin(r *http.Request) bool {
+	user := currentUser(r)
+	return user != "" && user == s.adminUsername()
+}

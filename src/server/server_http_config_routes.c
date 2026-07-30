@@ -25,6 +25,7 @@
 #include "role_templates.h"
 #include "util.h" /* safe_strdup, aimee_base64_* */
 #include "cli_session_pty.h"
+#include "aimee_home.h"
 #include "config.h"
 #include "prompts.h"
 #include <aimee/delegates/delegate_role.h>
@@ -307,10 +308,20 @@ int route_role_template_remove(const char *name, char *resp, int cap)
 /* The current active-preset name (config.roundtable_default), or "" if none. */
 static void rt_active_name(char *out, size_t out_n)
 {
-   if (out && out_n)
-      out[0] = '\0';
-   if (out && out_n)
-      snprintf(out, out_n, "%s", config_roundtable_default());
+   if (!out || !out_n)
+      return;
+   out[0] = '\0';
+   snprintf(out, out_n, "%s", config_roundtable_default());
+   if (out[0])
+      return;
+   /* An unset roundtable.default does NOT mean "no active panel":
+    * roundtable_preset_resolve_runtime falls back to the preset literally named
+    * "default", which is the one the image seeds. Reporting "" here made the tab
+    * show no preset as active even though reviews were resolving through it, so
+    * report the same name resolution would actually pick. */
+   roundtable_preset_t p;
+   if (roundtable_preset_load("default", &p) == 0)
+      snprintf(out, out_n, "default");
 }
 
 int route_roundtables_list(char *resp, int cap)
@@ -384,9 +395,69 @@ int route_roundtable_show(const char *name, char *resp, int cap)
  * root UDS peer by server_http_identity_capture(), and only the appliance's
  * bootstrap administrator may mutate global policy. A shell/delegate/agent
  * using the UDS is attributed as uid:<n> and therefore remains read-only. */
+/* Resolve the appliance administrator's webuser name into `out`.
+ *
+ * This gate used to hardcode "admin", which is the one account guaranteed NOT to
+ * be the administrator on a set-up appliance: the documented flow replaces the
+ * generated bootstrap login with an operator account, and runtime-web records
+ * that account in <home>/webchat/bootstrap-replaced. An operator who completed
+ * setup as any other name was locked out of every roundtable policy mutation on
+ * their own appliance. Read the same records runtime-web's adminUsername() does,
+ * in the same order, so the two layers cannot disagree — a mismatch would let the
+ * browser offer an action the server then refuses. */
+static void roundtable_admin_webuser(char *out, size_t out_n)
+{
+   if (!out || !out_n)
+      return;
+   out[0] = '\0';
+   /* aimee_home() rather than config_default_dir(): the same directory (that
+    * wrapper just adds a /tmp fallback), but it does not drag the config module
+    * into every translation unit that links this file. */
+   const char *home = aimee_home();
+   if (!home || !home[0])
+   {
+      snprintf(out, out_n, "admin");
+      return;
+   }
+   const char *dirs[] = {"bootstrap-replaced", "bootstrap-user"};
+   for (size_t i = 0; i < sizeof(dirs) / sizeof(dirs[0]); i++)
+   {
+      char path[RT_PRESET_PATH_MAX];
+      snprintf(path, sizeof(path), "%s/webchat/%s", home, dirs[i]);
+      FILE *f = fopen(path, "r");
+      if (!f)
+         continue;
+      char line[256] = "";
+      if (!fgets(line, sizeof(line), f))
+      {
+         fclose(f);
+         continue;
+      }
+      fclose(f);
+      line[strcspn(line, "\r\n")] = '\0';
+      /* bootstrap-user is "<explicit|generated>:<name>"; bootstrap-replaced is a
+       * bare name. Take whatever follows the first ':' when one is present. */
+      const char *name = strchr(line, ':');
+      name = name ? name + 1 : line;
+      while (*name == ' ')
+         name++;
+      if (*name)
+      {
+         snprintf(out, out_n, "%s", name);
+         return;
+      }
+   }
+   /* No record at all: keep the previous behaviour rather than opening the gate. */
+   snprintf(out, out_n, "admin");
+}
+
 int route_roundtable_mutation_authorized(const char *principal)
 {
-   return principal && strcmp(principal, "webuser:admin") == 0;
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return 0;
+   char admin[128];
+   roundtable_admin_webuser(admin, sizeof(admin));
+   return admin[0] && strcmp(principal + 8, admin) == 0;
 }
 
 int roundtable_policy_config_key(const char *key)
