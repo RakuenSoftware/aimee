@@ -116,3 +116,18 @@ Evidence checksums:
 - plan: `b46b5693ebe05c2e48a24ae1d263d9468ce7da823250adb4d8b450b9fef44af0`;
 - tracked provider result: `cb552a748c89d47105a673ad0c3513afffb23126883719794aef8b87ed1dc957`;
 - tracked provider summary: `8048ec252e3a3c5679e90303d71b6fed588b6213c20c5520b7d3b05c1322d94d`.
+
+## Provider completion review and merge
+
+Acceptance run `oprun_g6a6b1ed93980fd5d_1785424107_32` approved the initial provider artifact and
+identified portability/durability suggestions. Run `oprun_g6a6b1ed93980fd5d_1785424352_33` then
+blocked an implicit retrieval-record commit mismatch. The collector and scorer were changed to fail
+closed unless reuse carries an explicit operator attestation, with regression coverage. Corrected run
+`oprun_g6a6b1ed93980fd5d_1785424759_34` approved the artifact, and final exact-diff run
+`oprun_g6a6b1ed93980fd5d_1785425041_35` approved artifact
+`db9a11ec81de2015b4bdbc43f374be1dc9a2ba10a8068997ccc2faa7eb93ea9e` with 3/3 participants,
+no failures, and no blocking findings.
+
+PR #2183 merged the provider evidence, default promotion, completed residual proposal, and operator
+documentation to `testing` as merge commit
+`e4bcba9034ce095a1752aa3037f5b214480ff669` after all 24 GitHub checks passed.
