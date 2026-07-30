@@ -101,29 +101,48 @@ static int embedder_probe_run(int *out_dim, int budget_ms, char *err, size_t err
    }
 }
 
-/* Ask the endpoint which VECTOR SPACE it serves and hand it to the db2 guard.
+/* db2_embedder_serving_probe_fn: ask the endpoint which VECTOR SPACE it serves.
  *
- * Best-effort by design. A gateway that is down, old, or not reporting the field
- * leaves the identity empty, which makes the guard a no-op — the same posture the dim
- * probe takes, and the reason a cold start against an unreachable embedder still
- * boots. The cost of missing the guard once is a delayed mismatch; the cost of
- * refusing to boot on an unanswered probe is an appliance that will not start. */
-static void embedder_probe_publish_serving_id(const char *embed_command)
+ * POLLS, because the in-container embedder is a sibling process the entrypoint starts
+ * beside the kb: it is reliably not serving yet when the kb boots, and a one-shot probe
+ * therefore failed on every cold start and left the guard inactive — the hole the guard
+ * exists to close. Retries only a TRANSPORT failure; a reachable endpoint that reports no
+ * identity returns empty immediately (a legacy embedder, guard stays inactive by design,
+ * and retrying that would just delay every such boot).
+ *
+ * The budget is modest on purpose. db2_init calls this after the dim probe has already
+ * waited for readiness, so in practice the first read succeeds; the window only covers a
+ * restart where no dim probe runs because the dim is already recorded. Exhausting it
+ * leaves the guard inactive for this start rather than holding the kb down. */
+#define SERVING_PROBE_BUDGET_MS 60000
+#define SERVING_PROBE_INTERVAL_MS 2000
+
+static int embedder_probe_serving_id(char *out, size_t out_len, char *err, size_t errlen)
 {
-   char serving_id[160] = "";
-   if (memory_embed_serving_id(embed_command, serving_id, sizeof(serving_id)) != 0)
+   if (!out || out_len == 0)
+      return -1;
+   out[0] = '\0';
+   long start = probe_mono_ms();
+   for (;;)
    {
-      LOG_WARN("db2", "embedder serving-identity probe unreachable; vector-space guard inactive "
-                      "for this start");
-      return;
+      if (memory_embed_serving_id(g_embed_cmd, out, out_len) == 0)
+      {
+         if (out[0])
+            LOG_INFO("db2", "embedder serving identity: %s", out);
+         else
+            LOG_INFO("db2", "embedder reports no serving identity; vector-space guard inactive");
+         return 0;
+      }
+      if ((int)(probe_mono_ms() - start) >= SERVING_PROBE_BUDGET_MS)
+      {
+         if (err && errlen)
+            snprintf(err, errlen, "embedder unreachable within %dms (cmd=%s)",
+                     SERVING_PROBE_BUDGET_MS, g_embed_cmd[0] ? g_embed_cmd : "(unset)");
+         return -1;
+      }
+      struct timespec ts = {SERVING_PROBE_INTERVAL_MS / 1000, 0};
+      nanosleep(&ts, NULL);
    }
-   if (!serving_id[0])
-   {
-      LOG_INFO("db2", "embedder reports no serving identity; vector-space guard inactive");
-      return;
-   }
-   db2_set_embedder_serving_id(serving_id);
-   LOG_INFO("db2", "embedder serving identity: %s", serving_id);
 }
 
 void embedder_probe_register(const char *embed_command)
@@ -134,7 +153,9 @@ void embedder_probe_register(const char *embed_command)
       return;
    }
    snprintf(g_embed_cmd, sizeof(g_embed_cmd), "%s", embed_command);
-   embedder_probe_publish_serving_id(embed_command);
+   /* Registered, not called: the identity is fetched inside db2_init, once the embedder
+    * has had the dim probe's patience applied to it. */
+   db2_set_embedder_serving_probe(embedder_probe_serving_id);
    const char *env = getenv("AIMEE_DIM_PROBE_BUDGET_MS");
    if (env && env[0])
    {
@@ -148,5 +169,9 @@ void embedder_probe_register(const char *embed_command)
 void embedder_probe_unregister(void)
 {
    db2_set_embedder_probe(NULL);
+   /* Both seams point at this translation unit's statics, so both have to go before
+    * db2_shutdown — leaving one registered would hand db2 a callback over a cleared
+    * g_embed_cmd. */
+   db2_set_embedder_serving_probe(NULL);
    g_embed_cmd[0] = '\0';
 }

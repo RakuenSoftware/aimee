@@ -115,10 +115,25 @@ extern "C"
    void db2_set_embedder_model_id(const char *model_id);
    const char *db2_embedder_model_id(void);
    /* The serving endpoint's vector-space identity, PROBED from its /health rather than
-    * read from config: pooling and prefixes are properties of what the gateway applies,
+    * read from config: pooling and prefixes are properties of what the embedder applies,
     * not of what the kb was told. Empty -> the guard is a no-op. */
    void db2_set_embedder_serving_id(const char *serving_id);
    const char *db2_embedder_serving_id(void);
+
+   /* Fetch the identity AT THE POINT OF USE instead of before db2_init.
+    *
+    * The in-container embedder is a sibling process the entrypoint launches next to the
+    * kb, so it is reliably NOT serving yet when the kb starts. Publishing the identity up
+    * front therefore failed on every cold boot and left the guard inactive — the exact
+    * hole it exists to close. db2_init calls this just before the guard, by which point
+    * the dim probe has already waited for the embedder to be ready.
+    *
+    * Returns 0 on success, writing the identity (possibly EMPTY, meaning "this endpoint
+    * reports none" — a legacy embedder, which must leave the guard inactive rather than
+    * refuse). Non-zero means unreachable. */
+   typedef int (*db2_embedder_serving_probe_fn)(char *out, size_t out_len, char *err,
+                                                size_t errlen);
+   void db2_set_embedder_serving_probe(db2_embedder_serving_probe_fn fn);
    void db2_set_embedding_compat(const char *compat_csv);
    const char *db2_embedding_compat(void);
 

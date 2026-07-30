@@ -153,6 +153,12 @@ static char g_embedder_model_id[160] = "";
 /* The serving endpoint's vector-space identity, probed (not configured) — see
  * db2_set_embedder_serving_id. Empty leaves the guard a no-op. */
 static char g_embedder_serving_id[160] = "";
+static db2_embedder_serving_probe_fn g_embedder_serving_probe = NULL;
+
+void db2_set_embedder_serving_probe(db2_embedder_serving_probe_fn fn)
+{
+   g_embedder_serving_probe = fn;
+}
 static char g_embedding_compat[1024] = ""; /* CSV of "old_id->new_id" transitions */
 
 void db2_set_embedder_model_id(const char *model_id)
@@ -904,6 +910,20 @@ int db2_init(const char *libpq_url)
     * the identity is unset (the legacy torch embedder reports none), so existing
     * deployments are unaffected; it activates when the unified container supplies
     * the identity via the setter. */
+   /* Ask for the serving identity here, not at startup: the embedder runs beside the kb
+    * and is not up yet when the kb boots. An unreachable probe leaves the identity empty,
+    * which makes the guard a no-op for this start rather than blocking the boot. */
+   if (!g_embedder_serving_id[0] && g_embedder_serving_probe)
+   {
+      char sid[160] = "";
+      char perr[192] = "";
+      if (g_embedder_serving_probe(sid, sizeof(sid), perr, sizeof(perr)) == 0)
+         db2_set_embedder_serving_id(sid);
+      else
+         fprintf(stderr, "aimee: embedder serving-identity probe failed (%s); vector-space "
+                         "guard inactive for this start\n",
+                 perr[0] ? perr : "unreachable");
+   }
    if (db2_embedding_model_record_or_check(conn, g_embedder_model_id, g_embedding_compat, errbuf,
                                            sizeof(errbuf)) != 0 ||
        db2_embedder_serving_record_or_check(conn, g_embedder_serving_id, errbuf, sizeof(errbuf)) !=
@@ -1164,6 +1184,7 @@ void db2_shutdown(void)
    g_dim_probe_budget_ms = 120000;
    g_embedder_model_id[0] = '\0';
    g_embedder_serving_id[0] = '\0';
+   g_embedder_serving_probe = NULL;
    g_embedding_compat[0] = '\0';
    pthread_mutex_unlock(&g_init_lock);
 }
