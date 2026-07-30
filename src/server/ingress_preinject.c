@@ -183,6 +183,25 @@ static int ingress_preinject_first_task_turn(const char *session, const char *pr
    return fetch;
 }
 
+/* A first/new-task marker is claimed before retrieval so concurrent turns do
+ * not duplicate packets. If that one retrieval never reached the dependency,
+ * remove only its exact session/project marker: a related follow-up may then
+ * use the breaker's single recovery probe without restarting the client. */
+static void ingress_preinject_rearm_unavailable(const char *session, const char *project)
+{
+   if (!session || !session[0] || !project || !project[0])
+      return;
+   pthread_mutex_lock(&g_task_sessions_mu);
+   for (int i = 0; i < INGRESS_TASK_SESSION_SLOTS; i++)
+      if (strcmp(g_task_sessions[i].session, session) == 0 &&
+          strcmp(g_task_sessions[i].project, project) == 0)
+      {
+         memset(&g_task_sessions[i], 0, sizeof(g_task_sessions[i]));
+         break;
+      }
+   pthread_mutex_unlock(&g_task_sessions_mu);
+}
+
 static long ingress_elapsed_ms(const struct timespec *start, const struct timespec *end)
 {
    return (long)(end->tv_sec - start->tv_sec) * 1000L +
@@ -828,6 +847,8 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       clock_gettime(CLOCK_MONOTONIC, &context_started);
       char *context_json = kb_client_code_context(query, NULL, active_project, &context_status);
       clock_gettime(CLOCK_MONOTONIC, &context_finished);
+      if (kb_client_last_result_status() == KB_CLIENT_RESULT_UNAVAILABLE)
+         ingress_preinject_rearm_unavailable(g_session_id, active_project);
       long context_latency_ms = ingress_elapsed_ms(&context_started, &context_finished);
       if (context_json && context_status == 200)
          task_packet = ingress_preinject_format_task_context(context_json, active_project,

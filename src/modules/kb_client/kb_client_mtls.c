@@ -608,8 +608,9 @@ static void maybe_renew(void)
 
 #define KB_CLIENT_MTLS_DEFAULT_TIMEOUT_MS 30000
 
-char *kb_client_mtls_request_timeout(const char *method, const char *path, const char *body,
-                                     int timeout_ms, int *status_out)
+char *kb_client_mtls_request_timeout_with_type(const char *method, const char *path,
+                                               const char *body, const char *content_type,
+                                               int timeout_ms, int *status_out)
 {
    if (status_out)
       *status_out = -1;
@@ -638,8 +639,9 @@ char *kb_client_mtls_request_timeout(const char *method, const char *path, const
       int reusable = 0;
       kb_tls_client_conn_t *conn = resp ? kb_tls_client_conn_open(host, port, ca, cert, key) : NULL;
       int rc = conn && kb_tls_client_conn_set_timeout(conn, timeout_ms) == 0
-                   ? kb_tls_client_conn_request(conn, method, path, (body && body[0]) ? body : NULL,
-                                                NULL, 1, resp, cap, &status, &reusable)
+                   ? kb_tls_client_conn_request_with_type(
+                         conn, method, path, (body && body[0]) ? body : NULL, NULL, content_type, 1,
+                         resp, cap, &status, &reusable)
                    : -1;
       kb_tls_client_conn_close(conn);
       if (status_out)
@@ -659,17 +661,24 @@ char *kb_client_mtls_request_timeout(const char *method, const char *path, const
    }
    int status = -1;
    int reusable = 0;
-   int rc =
-       kb_tls_client_conn_set_timeout(entry->conn, timeout_ms) == 0
-           ? kb_tls_client_conn_request(entry->conn, method, path, (body && body[0]) ? body : NULL,
-                                        NULL, 0, resp, cap, &status, &reusable)
-           : -1;
+   int rc = kb_tls_client_conn_set_timeout(entry->conn, timeout_ms) == 0
+                ? kb_tls_client_conn_request_with_type(
+                      entry->conn, method, path, (body && body[0]) ? body : NULL, NULL,
+                      content_type, 0, resp, cap, &status, &reusable)
+                : -1;
    pool_return(entry, rc == 0 && reusable);
    if (status_out)
       *status_out = status;
    char *out = (rc == 0 && status >= 200 && status < 300) ? strdup(resp) : NULL;
    free(resp);
    return out;
+}
+
+char *kb_client_mtls_request_timeout(const char *method, const char *path, const char *body,
+                                     int timeout_ms, int *status_out)
+{
+   return kb_client_mtls_request_timeout_with_type(method, path, body, NULL, timeout_ms,
+                                                   status_out);
 }
 
 char *kb_client_mtls_request(const char *method, const char *path, const char *body,

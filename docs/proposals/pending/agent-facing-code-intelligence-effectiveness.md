@@ -1,6 +1,6 @@
 # Proposal: Agent-facing code intelligence effectiveness
 
-- **State:** PENDING — E4–E6 remain; E0 through E3 history is recorded below
+- **State:** PENDING — E5–E6 remain; E0 through E4 history is recorded below
 - **Author:** JBailes
 - **Date:** 2026-07-29
 - **Charter roles:** Recall, Rank-Fuse, Calibrate / Evaluate-Optimize, Enforce, Gate-Promote
@@ -745,3 +745,37 @@ residual proposal instead of declaring the intended effectiveness outcome comple
   failures rather than speculative widening. Named policy constants are a readability follow-up.
   Roundtable run: `oprun_g6a69bd8011459d99_1785391948_125` (artifact
   `abdfa92e2489d4c73cdb05c18ec067fb8463296c5ed45eb376fe66bb70e986ac`).
+- **E4 task-conditioned retrieval slice:** PR #2171 merged to `testing` as
+  `7a8a20753c37eba57fefdbe91fd256b2b81e0f91` after all 24 CI checks passed. Strict current-project
+  context, explicit abstention, bounded observe/on ingress, complete provenance, and automatic
+  suppression are now the base for E5–E6; `observe` remains the shipping default.
+- **E5a dependency-status candidate:** the implementation adds exact `ok|empty|abstained|stale|
+  unavailable|unauthorized` classification, independent KB-transport and external-embedder circuit
+  breakers, bounded exponential jitter, one half-open recovery probe, dependency-specific outage
+  metadata, and exact session/project retry after an unavailable first-turn lookup. A reachable KB's
+  embedder/vector-store outage does not poison its transport breaker, local coding remains
+  independent, and no agent-facing memory/index reader converts an outage into an empty result. Its
+  frozen implementation diff receives a separate roundtable gate before PR.
+- **E5a implementation round 1 — 2026-07-30 — changes requested, 3/3 participants, not
+  degraded.** The implementation received no bounded-slice technical ruling because the review
+  brief exposed the unfinished parent E5/E6 program. The next review explicitly binds the frozen
+  diff to E5a as the independently mergeable slice required by §6. Roundtable run:
+  `oprun_g6a69bd8011459d99_1785396259_129`.
+- **E5a implementation round 2 — 2026-07-30 — changes requested, 2/3 participants used,
+  degraded.** The scoped review found that the status envelope omitted a concrete bounded retry
+  delay and that vector-dimension staleness evidence was lost across the KB client boundary. E5a now
+  carries both contracts end to end with regressions. Roundtable run:
+  `oprun_g6a69bd8011459d99_1785396774_130`.
+- **E5a implementation round 3 — 2026-07-30 — changes requested, 3/3 participants, not
+  degraded.** Four remaining boundary findings were accepted: valid no-answer is `abstained`, retry
+  delays have a one-second floor, an exact memory miss remains distinct from transport failure, and
+  vector-status documentation applies unconditionally. The fixtures and docs now enforce all four.
+  Roundtable run: `oprun_g6a69bd8011459d99_1785397781_131`.
+- **E5a implementation round 4 — 2026-07-30 — changes requested, 2/3 participants used,
+  degraded.** The panel found three concrete non-2xx/parser gaps: mTLS GET/POST bodies could bypass
+  HTTP status rejection, a malformed project-list object could become an empty list, and external
+  embedder 401/403 could become transient unavailability. E5a now preserves the typed mTLS status
+  while rejecting its body, requires a real `projects` array, and returns non-retryable embedder
+  unauthorized without poisoning the transient-failure breaker. Adversarial fixtures cover each
+  transport. Roundtable run: `oprun_g6a69bd8011459d99_1785399544_132` (artifact
+  `0691c47bbc47d1854c00df172d01745bd29eab47956d43e22bca01fe3462d812`).
