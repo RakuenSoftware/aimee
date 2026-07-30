@@ -228,10 +228,41 @@ SKIP = [
     "*.bin", "*.h5", "*.msgpack", "*.tflite", "*.ckpt",  # duplicate/legacy formats
     "*.gguf",                                          # not this runtime either
 ]
+def code_repos(snapshot_dir):
+    """Repos holding this model's custom modelling code, from config.json auto_map.
+
+    A trust_remote_code model does not necessarily carry its own code: nomic's auto_map
+    points every class at `nomic-ai/nomic-bert-2048`, a SEPARATE repo. Downloading only
+    the weights leaves the loader reaching for the Hub at first use, which fails closed
+    under HF_HUB_OFFLINE — the whole point of baking. So follow the references.
+    """
+    import os
+    out = set()
+    cfg = os.path.join(snapshot_dir, "config.json")
+    if not os.path.exists(cfg):
+        return out
+    with open(cfg, encoding="utf-8") as handle:
+        auto_map = (json.load(handle).get("auto_map") or {})
+    for target in auto_map.values():
+        if isinstance(target, str) and "--" in target:
+            out.add(target.split("--", 1)[0])
+        elif isinstance(target, (list, tuple)):
+            for item in target:
+                if isinstance(item, str) and "--" in item:
+                    out.add(item.split("--", 1)[0])
+    return out
+
+
 for name, spec in table.items():
     repo, revision = spec["repo"], spec.get("revision") or "main"
     print(f"baking {name}: {repo}@{revision}", flush=True)
-    snapshot_download(repo, revision=revision, ignore_patterns=SKIP)
+    local = snapshot_download(repo, revision=revision, ignore_patterns=SKIP)
+    # Code repos are referenced by name only — auto_map carries no revision — so these
+    # take the default branch. That is a looser pin than the weights get; a model whose
+    # code must be pinned needs its auto_map repo added to the registry explicitly.
+    for code_repo in sorted(code_repos(local)):
+        print(f"  + code: {code_repo}", flush=True)
+        snapshot_download(code_repo, allow_patterns=["*.py", "*.json", "*.txt"])
 PYBAKE
 
 # Sidecar clients (the LLM access code the kb invokes via popen).
