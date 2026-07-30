@@ -27,7 +27,7 @@ TG=${TG:-64}
 MODELS="
 ibm-granite/granite-4.0-350m-GGUF:Q8_0
 Qwen/Qwen3-0.6B-GGUF:Q8_0
-ggml-org/SmolLM2-360M-Instruct-Q8_0-GGUF:Q8_0
+HuggingFaceTB/SmolLM2-360M-Instruct-GGUF:Q8_0
 Qwen/Qwen3-1.7B-GGUF:Q8_0
 LiquidAI/LFM2-350M-Extract-GGUF:Q8_0
 unsloth/LFM2.5-230M-GGUF:Q8_0
