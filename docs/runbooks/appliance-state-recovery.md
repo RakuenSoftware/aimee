@@ -122,7 +122,7 @@ git -C "$TEST_CLONE/repository" fsck --no-dangling
 git -C "$TEST_CLONE/repository" ls-tree HEAD >/dev/null
 ```
 
-- [ ] Only after every test above succeeds, remove the temporary clone, move the damaged repository aside without deleting it, and clone into the original path.
+- [ ] Only after every test above succeeds, remove the temporary clone, move the damaged repository aside without deleting it, and clone into the original path. If this final clone fails, remove its incomplete destination and immediately restore the retained repository to the configured workspace path.
 
 ```sh
 rm -rf "$TEST_CLONE"
@@ -130,8 +130,15 @@ DAMAGED_WORKSPACE="${WORKSPACE}.damaged-$(date +%Y%m%d-%H%M%S)"
 export DAMAGED_WORKSPACE
 test -e "$WORKSPACE"
 mv "$WORKSPACE" "$DAMAGED_WORKSPACE"
-git clone --single-branch --branch "$DEFAULT_BRANCH" "$CANONICAL_URL" "$WORKSPACE"
-printf 'damaged repository retained at %s\n' "$DAMAGED_WORKSPACE"
+if git clone --single-branch --branch "$DEFAULT_BRANCH" "$CANONICAL_URL" "$WORKSPACE"
+then
+  printf 'damaged repository retained at %s\n' "$DAMAGED_WORKSPACE"
+else
+  rm -rf "$WORKSPACE"
+  mv "$DAMAGED_WORKSPACE" "$WORKSPACE"
+  printf '%s\n' 'clone failed; retained repository restored to workspace path' >&2
+  false
+fi
 ```
 
 - [ ] Verify the replacement repository.
@@ -152,16 +159,25 @@ git -C "$WORKSPACE" ls-tree HEAD >/dev/null
   repository.
 
 ```sh
-RECOVERY_CURSOR=$(journalctl --show-cursor -n 0 --no-pager | \
-  sed -n 's/^-- cursor: //p')
+CURSOR_OUTPUT=$(journalctl --show-cursor -n 0 --no-pager) || {
+  printf '%s\n' 'failed to capture recovery journal cursor' >&2
+  false
+}
+RECOVERY_CURSOR=$(printf '%s\n' "$CURSOR_OUTPUT" | sed -n 's/^-- cursor: //p')
 test -n "$RECOVERY_CURSOR"
 
 # Resume or wait for at least one normal proposal poll and forge operation here.
 
-if journalctl --after-cursor "$RECOVERY_CURSOR" --no-pager | \
-  grep -E 'ls-tree failed.*rc=128|resolve https origin: no origin remote'
+if JOURNAL_OUTPUT=$(journalctl --after-cursor "$RECOVERY_CURSOR" --no-pager)
 then
-  printf '%s\n' 'workspace Git errors are still recurring' >&2
+  if printf '%s\n' "$JOURNAL_OUTPUT" | \
+    grep -E 'ls-tree failed.*rc=128|resolve https origin: no origin remote'
+  then
+    printf '%s\n' 'workspace Git errors are still recurring' >&2
+    false
+  fi
+else
+  printf '%s\n' 'failed to read the post-recovery journal' >&2
   false
 fi
 ```
