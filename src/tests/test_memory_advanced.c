@@ -1919,12 +1919,25 @@ int main(void)
       assert(surfaced_total >= 1);
    }
 
-   /* --- scheduled maintenance: run/skip/dry-run/summary shape --- */
+   /* --- scheduled maintenance: run/skip/dry-run/summary shape ---
+    *
+    * These cases used to pass cfg == NULL, which the runner read as "every
+    * optional sub-pass off, default cadence". It reads live config now, so that
+    * precondition has to be written down instead of implied by a null pointer —
+    * otherwise the block inherits whatever the previous case last wrote. */
    {
       reset_db();
+      write_test_config("memory_maintenance:\n"
+                        "  summarize_enabled: false\n"
+                        "memory:\n"
+                        "  profile_cards:\n"
+                        "    enabled: false\n"
+                        "  improve:\n"
+                        "    dedupe_enabled: false\n"
+                        "    summarise_enabled: false\n");
 
       memory_maintenance_summary_t s1;
-      assert(memory_maintenance_run(NULL, 0, 0, 0, &s1) == 0);
+      assert(memory_maintenance_run(0, 0, 0, &s1) == 0);
       assert(s1.skipped == 0);
       assert(s1.dry_run == 0);
       assert(s1.modes_run != 0);
@@ -1932,13 +1945,13 @@ int main(void)
 
       /* Second immediate run: idle guard fires. */
       memory_maintenance_summary_t s2;
-      assert(memory_maintenance_run(NULL, 0, 0, 0, &s2) == 0);
+      assert(memory_maintenance_run(0, 0, 0, &s2) == 0);
       assert(s2.skipped == 1);
       assert(s2.promoted == 0 && s2.demoted == 0 && s2.expired == 0);
 
       /* Force bypasses the guard. */
       memory_maintenance_summary_t s3;
-      assert(memory_maintenance_run(NULL, 0, 1, 0, &s3) == 0);
+      assert(memory_maintenance_run(0, 1, 0, &s3) == 0);
       assert(s3.skipped == 0);
 
       /* Dry-run: no mutation even with a past-TTL pending row. */
@@ -1950,7 +1963,7 @@ int main(void)
                            " ttl_at = '2020-01-01 00:00:00' WHERE key = 'maint:pending'",
                            err, sizeof(err)) == 0);
       memory_maintenance_summary_t dry;
-      assert(memory_maintenance_run(NULL, MEMORY_MAINTENANCE_MODE_PRUNE, 1, 1, &dry) == 0);
+      assert(memory_maintenance_run(MEMORY_MAINTENANCE_MODE_PRUNE, 1, 1, &dry) == 0);
       assert(dry.dry_run == 1);
       assert(dry.lifecycle_archived == 0);
       memory_lifecycle_counts_t cts;
@@ -1959,7 +1972,7 @@ int main(void)
 
       /* Live prune commits and the row archives. */
       memory_maintenance_summary_t live;
-      assert(memory_maintenance_run(NULL, MEMORY_MAINTENANCE_MODE_PRUNE, 1, 0, &live) == 0);
+      assert(memory_maintenance_run(MEMORY_MAINTENANCE_MODE_PRUNE, 1, 0, &live) == 0);
       assert(live.lifecycle_archived >= 1);
       assert(memory_lifecycle_counts(&cts) == 0);
       assert(cts.archived >= 1);
@@ -1983,9 +1996,9 @@ int main(void)
       assert(runs_total >= 2);
       assert(skips_total >= 1);
 
-      static config_t cfg_off;
-      memset(&cfg_off, 0, sizeof(cfg_off));
-      assert(memory_maintenance_maybe_run(&cfg_off, NULL) == 0);
+      /* maybe_run is gated on memory_maintenance.enabled; say so in config. */
+      write_test_config("memory_maintenance:\n  enabled: false\n");
+      assert(memory_maintenance_maybe_run(NULL) == 0);
    }
 
    db2_test_shim_close();

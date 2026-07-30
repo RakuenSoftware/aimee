@@ -82,8 +82,8 @@
       "loads": 1
     },
     "src/db2/kb_service_backend_memory.c": {
-      "decls": 2,
-      "loads": 2
+      "decls": 1,
+      "loads": 1
     },
     "src/dogfood.c": {
       "decls": 8,
@@ -118,7 +118,7 @@
       "loads": 0
     },
     "src/headers/memory.h": {
-      "decls": 4,
+      "decls": 2,
       "loads": 0
     },
     "src/headers/prompts.h": {
@@ -420,10 +420,6 @@
     "src/modules/memory/memory_logic.c": {
       "decls": 2,
       "loads": 2
-    },
-    "src/modules/memory/memory_maintenance.c": {
-      "decls": 6,
-      "loads": 0
     },
     "src/modules/memory/memory_rewrite_llm.h": {
       "decls": 1,
@@ -773,10 +769,6 @@
       "decls": 1,
       "loads": 0
     },
-    "src/tests/test_curiosity.c": {
-      "decls": 1,
-      "loads": 0
-    },
     "src/tests/test_delegate_ensemble.c": {
       "decls": 50,
       "loads": 0
@@ -862,7 +854,7 @@
       "loads": 0
     },
     "src/tests/test_memory_advanced.c": {
-      "decls": 2,
+      "decls": 1,
       "loads": 0
     },
     "src/tests/test_memory_lanes.c": {
@@ -959,8 +951,8 @@
     }
   },
   "totals": {
-    "decls": 869,
-    "files": 239,
-    "loads": 456
+    "decls": 858,
+    "files": 237,
+    "loads": 455
   }
 }

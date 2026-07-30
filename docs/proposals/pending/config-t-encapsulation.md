@@ -138,6 +138,29 @@ it is its own tranche. Do the curator-provider chain first, then this falls out.
 and `test_curiosity.c` + `test_memory_advanced.c` both drive them with a hand-built `config_t`.
 `memory.h` is down to 4 `config_t` mentions from 7.
 
+### Round 4 — the memory maintenance pair
+
+`memory_maintenance_run` and `memory_maintenance_maybe_run` (plus their two `#ifdef` stub variants
+and the file-static helpers `mm_interval_secs` / `mm_should_skip`) no longer take a `config_t`;
+`memory_maintenance.c` names it nowhere now. One more dead `config_t` local deleted in
+`kb_service_backend_memory.c` — `config_load`ed purely to feed the call.
+
+**Ratchet:** 869 -> 858 mentions, 456 -> 455 `config_load()`, 239 -> 237 files.
+`memory.h` is down to **2** `config_t` mentions from 7.
+
+Two test hazards, both the pattern above:
+
+- `test_curiosity.c` had **no config isolation at all** — no `AIMEE_HOME`, no temp `HOME`. It only
+  survived because the `unit-tests` target exports a throwaway `HOME` for the whole run. That is the
+  "none does today is luck, not a boundary" case the Makefile comment calls out. It now has its own
+  `write_test_config()`.
+- `test_memory_advanced.c` drove the runner with `cfg == NULL`, which the old code read as "every
+  optional sub-pass off, default cadence". A null pointer cannot express that once the runner reads
+  live config, so the block writes those flags off explicitly.
+
+Both are non-vacuous: the curiosity case asserts run-then-skip, which only holds if
+`interval_seconds: 3600` is actually read back out of config.
+
 ### The curator-provider chain needs a design decision first (attempted, reverted)
 
 `kb_curator_provider_for_stage` looks like an easy six-field conversion. It is not, and the reason

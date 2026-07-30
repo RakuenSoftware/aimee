@@ -885,11 +885,8 @@ cJSON *db2_kb_service_memory_maintenance_run_json(unsigned int modes, int force,
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_load(&cfg);
    memory_maintenance_summary_t summary;
-   memory_maintenance_run(&cfg, modes, force, dry_run, &summary);
+   memory_maintenance_run(modes, force, dry_run, &summary);
    cJSON *summary_j = memory_maintenance_summary_to_json(&summary);
    cJSON_AddStringToObject(resp, "status", "ok");
    if (summary_j)

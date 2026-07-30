@@ -1651,13 +1651,13 @@ typedef struct
  * `dry_run` is 1 no mutations run and summary.dry_run is set.  `cfg` is
  * optional; pass NULL for hardwired defaults.  Returns 0 on success
  * (even when skipped), -1 on error. */
-int memory_maintenance_run(const config_t *cfg, unsigned int modes, int force, int dry_run,
+int memory_maintenance_run(unsigned int modes, int force, int dry_run,
                            memory_maintenance_summary_t *summary);
 
 /* Scheduler entry point: run a cycle when `interval_seconds` has
  * elapsed since the last run (or when no previous run exists).  Cheap
  * no-op when not yet due.  Returns 1 if a cycle ran, 0 if skipped. */
-int memory_maintenance_maybe_run(const config_t *cfg, memory_maintenance_summary_t *summary_out);
+int memory_maintenance_maybe_run(memory_maintenance_summary_t *summary_out);
 
 /* Fetch the last-persisted maintenance summary (for the dashboard
  * card).  Returns 0 if a record exists, -1 otherwise. */
