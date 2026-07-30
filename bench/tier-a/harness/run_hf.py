@@ -100,6 +100,9 @@ def main():
                     help="disable the KV cache. Needed for granite-4.0-350m, where "
                          "transformers selects a hybrid Mamba cache the non-hybrid "
                          "checkpoint cannot satisfy. Slower, identical outputs.")
+    ap.add_argument("--repetition-penalty", type=float, default=None,
+                    help="DIAGNOSTIC: production sets none. Used only to test "
+                         "whether a model's repetition loop is rescuable.")
     ap.add_argument("--conf-fixed-prompt", action="store_true",
                     help="ABLATION: send the production prompt with the schema "
                          "example's confidence literal raised from 0.0 to 0.9. "
@@ -135,6 +138,8 @@ def main():
                     do_sample=False,
                     use_cache=not args.no_kv_cache,
                     pad_token_id=tok.pad_token_id or tok.eos_token_id,
+                    **({"repetition_penalty": args.repetition_penalty}
+                       if args.repetition_penalty else {}),
                 )
             if args.device == "cuda":
                 torch.cuda.synchronize()
