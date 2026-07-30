@@ -1006,7 +1006,7 @@ static int g_management_tls_fd = -1; /* dedicated required-mTLS management liste
 static char g_uds_path[sizeof(((struct sockaddr_un *)0)->sun_path)] = "";
 static char g_bearer[256] = ""; /* configured TCP bearer (empty = none) */
 static int g_rate_limit = 0;    /* TCP requests / 60s (0 = unlimited) */
-
+int g_remote_writes = 0;        /* aimee.api.remote_writes: parsed, authorizes nothing */
 static server_http_rate_state_t g_rate_state = {0, 0};
 static pthread_mutex_t g_rate_lock = PTHREAD_MUTEX_INITIALIZER;
 /* guards g_rate_state across conns */
@@ -1733,9 +1733,9 @@ void handle_conn(int fd, int is_tcp, int is_management)
        * instead of inferring it from complaints. Only counts denials the old
        * global would have permitted - a request that fails for an unrelated
        * reason is not attributable to this change. */
-      if (!management_authenticated && server_http_retired_global_would_allow(
-                                           fd, is_tcp, request_bearer, server_http_remote_writes(),
-                                           mtls_mode, mtls_authenticated, method, path))
+      if (!management_authenticated &&
+          server_http_retired_global_would_allow(fd, is_tcp, request_bearer, g_remote_writes,
+                                                 mtls_mode, mtls_authenticated, method, path))
          server_http_note_global_ignored();
       LOG_INFO("server.http", "%s %s -> 403 (caps) req_id=%s", method, path, request_id);
       return;
@@ -2336,13 +2336,13 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
    server_http_update_primary_bearer(g_bearer, sizeof(g_bearer), bearer_token,
                                      0 /* preserve enrolled */);
    g_rate_limit = rate_limit_per_min > 0 ? rate_limit_per_min : 0;
-   server_http_set_retired_remote_writes(remote_writes);
+   g_remote_writes = remote_writes;
    /* aimee.api.remote_writes is still parsed so an existing config file loads,
     * but it no longer authorizes anything: /v1 write authority now comes from
     * the caller's kb-signed identity token. Say so once, loudly, at startup -
     * an operator who upgraded with this set to data/full and did not notice
     * would otherwise conclude the release simply broke writes. */
-   if (remote_writes != SERVER_REMOTE_WRITES_OFF)
+   if (g_remote_writes != SERVER_REMOTE_WRITES_OFF)
       LOG_WARN("server.http",
                "aimee.api.remote_writes is set but no longer authorizes writes; per-user grants "
                "replace it (see docs/UPGRADING.md 0.3.0). Requests it would formerly have allowed "

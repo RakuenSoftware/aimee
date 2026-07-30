@@ -28,6 +28,8 @@
 #include <sys/un.h>
 #include <sys/wait.h>
 
+extern int g_remote_writes;
+
 typedef struct
 {
    pthread_barrier_t *barrier;
@@ -1976,6 +1978,15 @@ int main(void)
       assert(strstr(report, "60 req/min"));
       /* Recommends a project-scoped bearer for the editor. */
       assert(strstr(report, "scope:project:<id>:<secret>"));
+
+      /* A configured retired global is visible before the first refusal. The
+       * live rig uses this as proof that its full-mode server actually started
+       * with the value it intends to exercise. It still grants no authority. */
+      g_remote_writes = SERVER_REMOTE_WRITES_FULL;
+      server_http_api_status_report(8910, 1, 60, report, sizeof(report));
+      assert(strstr(report, "aimee.api.remote_writes NO LONGER AUTHORIZES"));
+      assert(strstr(report, "remote_writes.global_ignored"));
+      g_remote_writes = SERVER_REMOTE_WRITES_OFF;
 
       /* Missing bearer is called out (the listener refuses to bind without it). */
       server_http_api_status_report(8910, 0, 0, report, sizeof(report));

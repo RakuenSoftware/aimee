@@ -2161,10 +2161,6 @@ int config_reload_if_changed(void);
 typedef void (*config_reapplier_fn)(const config_t *old_cfg, const config_t *new_cfg);
 void config_reload_register_reapplier(config_reapplier_fn fn);
 
-/* Shape-free subscription for the retired API write setting's diagnostic
- * mirror. The callback runs under the reload writer lock and must be quick. */
-void config_server_api_remote_writes_on_reload(void (*fn)(int value));
-
 /* Live autonomy.* accessor (thread-safe) for wfe: for an AIMEE_AUTONOMY_* env NAME that maps
  * to a config field, write the effective value to *out and return 1 — preferring an operator-
  * exported env var, else the live config snapshot. Returns 0 for a non-config autonomy var

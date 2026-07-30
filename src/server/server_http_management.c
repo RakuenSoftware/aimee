@@ -8,7 +8,6 @@
 #include <errno.h>
 #include <netinet/in.h>
 #include <pthread.h>
-#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,16 +20,11 @@ static unsigned g_management_action_active;
 /* Direct route unit tests run without a listener. A real listener start resets
  * this state, while stop closes the gate before it tears down any dependency. */
 static int g_management_action_stopping;
-static atomic_int g_retired_remote_writes = ATOMIC_VAR_INIT(0);
+extern int g_remote_writes;
 
 int server_http_remote_writes(void)
 {
-   return atomic_load_explicit(&g_retired_remote_writes, memory_order_relaxed);
-}
-
-void server_http_set_retired_remote_writes(int value)
-{
-   atomic_store_explicit(&g_retired_remote_writes, value, memory_order_relaxed);
+   return g_remote_writes;
 }
 
 int server_http_management_action_begin(void)
