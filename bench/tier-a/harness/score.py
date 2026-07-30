@@ -91,13 +91,17 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--gold", required=True)
     ap.add_argument("--pred", required=True)
+    ap.add_argument("--pred-key", default="pred",
+                    help="'pred' scores what production would commit (confidence "
+                         "floor applied); 'pred_nofloor' scores the same extraction "
+                         "with MF_CONF_FLOOR lifted.")
     ap.add_argument("--json-out")
     args = ap.parse_args()
 
     gold_rows = [json.loads(l) for l in open(args.gold) if l.strip()]
     pred_rows = [json.loads(l) for l in open(args.pred) if l.strip()]
     gold = load_triples(gold_rows, "gold")
-    pred = load_triples(pred_rows, "pred")
+    pred = load_triples(pred_rows, args.pred_key)
     cat = {r["id"]: r["category"] for r in gold_rows}
     pmeta = {r["id"]: r for r in pred_rows}
 
@@ -127,23 +131,37 @@ def main():
 
     # Over-extraction: notes whose gold is the empty list. Any triple here is a
     # false positive that the write gate would then have to catch.
+    #
+    # Abstention is counted only over notes where the model actually emitted the
+    # {"facts":[...]} shape. A model that returns valid JSON of the wrong shape
+    # commits nothing in production, but it has not decided the note is factless —
+    # crediting that as abstention would make a broken model look maximally
+    # precise. Both denominators are reported so the distinction stays visible.
     empty_ids = [i for i, g in gold.items() if not g]
     spurious = sum(len(pred.get(i, [])) for i in empty_ids)
-    clean = sum(1 for i in empty_ids if not pred.get(i))
+    on_schema = [i for i in empty_ids if pmeta.get(i, {}).get("schema_ok")]
+    clean = sum(1 for i in on_schema if not pred.get(i))
     report["over_extraction"] = {
         "empty_gold_notes": len(empty_ids),
+        "on_schema_empty_gold_notes": len(on_schema),
         "notes_correctly_empty": clean,
-        "abstention_rate": round(clean / len(empty_ids), 4) if empty_ids else None,
+        "abstention_rate_on_schema": round(clean / len(on_schema), 4) if on_schema else None,
         "spurious_triples": spurious,
     }
 
-    # Operational health: did we get parseable JSON, and did it respect the ontology?
+    # Operational health: did we get parseable JSON of the right shape, and did it
+    # respect the ontology?
     ok = sum(1 for r in pred_rows if r.get("parse_ok"))
+    schema = sum(1 for r in pred_rows if r.get("schema_ok"))
     rels = [t["relation"] for ts in pred.values() for t in ts]
     report["output_health"] = {
         "notes": len(pred_rows),
         "json_parse_ok": ok,
         "json_parse_rate": round(ok / len(pred_rows), 4) if pred_rows else 0.0,
+        "schema_ok": schema,
+        "schema_rate": round(schema / len(pred_rows), 4) if pred_rows else 0.0,
+        "malformed_facts": sum(r.get("malformed_facts", 0) for r in pred_rows),
+        "dropped_by_conf_floor": sum(r.get("dropped_by_conf_floor", 0) for r in pred_rows),
         "predicted_triples": len(rels),
         "in_seed_ontology": round(sum(1 for r in rels if r in seed) / len(rels), 4) if rels else None,
         "catch_all_relations": sum(1 for r in rels if r in {"other", "unknown", "misc"}),
@@ -163,6 +181,7 @@ def main():
             "max": max(toks),
         }
     report["model"] = pmeta[pred_rows[0]["id"]].get("model") if pred_rows else None
+    report["scored_key"] = args.pred_key
 
     out = json.dumps(report, indent=2)
     print(out)
