@@ -41,21 +41,21 @@ extern "C"
       uint32_t bind_addr;
       char bind[16];
       char cert[SERVER_HTTP_MGMT_PATH_MAX];
-      char key[SERVER_HTTP_MGMT_PATH_MAX];
+      char key[SERVER_HTTP_MGMT_PATH_MAX]; /* Vault runtime-secret name, never a path */
       char client_ca[SERVER_HTTP_MGMT_PATH_MAX];
       char status_endpoint[SERVER_HTTP_MGMT_PATH_MAX];
       char status_ca[SERVER_HTTP_MGMT_PATH_MAX];
       char status_leaf_pin[65];
       char status_secondary_leaf_pin[65];
       char status_client_cert[SERVER_HTTP_MGMT_PATH_MAX];
-      char status_client_key[SERVER_HTTP_MGMT_PATH_MAX];
+      char status_client_key[SERVER_HTTP_MGMT_PATH_MAX]; /* Vault runtime-secret name */
       char status_key_id[65];
       char status_public_key[65];
    } server_http_management_config_t;
 
-   /* Parse the all-or-none dedicated-management listener environment packet.
-    * Returns 0 for a valid disabled or enabled packet, -1 for partial/malformed
-    * configuration. No file is opened here; TLS initialization owns that check. */
+   /* Parse the all-or-none dedicated-management packet. Public paths/metadata
+    * come from env; both private keys must already have been ingested into the
+    * process-local Vault cache. Legacy private-key path variables are rejected. */
    int server_http_management_config_from_env(server_http_management_config_t *out);
    const char *server_http_management_last_error(void);
 
@@ -152,16 +152,6 @@ extern "C"
    void server_http_update_primary_bearer(char *live, size_t live_sz, const char *bearer,
                                           int revoke_enrolled);
    void server_http_primary_bearer_snapshot(const char *live, char *out, size_t out_sz);
-
-   /* Trust-on-first-use gate (pure — unit-testable). Returns 1 when an authorized
-    * TCP request must be REFUSED because the live listener bearer is still the
-    * one-time bootstrap default (AIMEE_BOOTSTRAP_BEARER) and the route is not the
-    * rotation endpoint — so the pre-set bearer can only mint the strong token and
-    * never perform a real operation. Returns 0 (allow) for UDS, once the bearer
-    * has been rotated (live_bearer != bootstrap), for the rotate_bearer route
-    * itself, or when the operator pinned AIMEE_API_BEARER_TOKEN (TOFU opt-out). */
-   int server_http_bootstrap_gate(int is_tcp, int bootstrap_only, const char *method,
-                                  const char *path);
 
    /* Fixed-window per-bearer rate limiter (pure — unit-testable). State is a
     * single 60s window the caller owns. limit_per_min <= 0 disables limiting

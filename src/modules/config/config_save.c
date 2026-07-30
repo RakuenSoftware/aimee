@@ -173,11 +173,9 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
       }
    }
 
-   /* proxy_url / proxy_token (top-level strings) */
+   /* proxy_url is non-secret. proxy_token lives only in Vault. */
    if (cfg->proxy_url[0])
       cJSON_AddStringToObject(root, "proxy_url", cfg->proxy_url);
-   if (cfg->proxy_token[0])
-      cJSON_AddStringToObject(root, "proxy_token", cfg->proxy_token);
 
    /* max_background_processes (top-level int; 0 = auto/unset) */
    if (cfg->max_background_processes > 0)
@@ -204,7 +202,7 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
 
    /* search.* (web-search backend config) */
    if (cfg->search_backend[0] || cfg->search_max_results > 0 || cfg->search_searxng_url[0] ||
-       cfg->search_tavily_api_key[0] || cfg->search_backends[0] || cfg->search_fetch_pages >= 0)
+       cfg->search_backends[0] || cfg->search_fetch_pages >= 0)
    {
       cJSON *sr = cJSON_AddObjectToObject(root, "search");
       if (sr)
@@ -215,8 +213,6 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
             cJSON_AddNumberToObject(sr, "max_results", cfg->search_max_results);
          if (cfg->search_searxng_url[0])
             cJSON_AddStringToObject(sr, "searxng_url", cfg->search_searxng_url);
-         if (cfg->search_tavily_api_key[0])
-            cJSON_AddStringToObject(sr, "tavily_api_key", cfg->search_tavily_api_key);
          if (cfg->search_backends[0])
             cJSON_AddStringToObject(sr, "backends", cfg->search_backends);
          if (cfg->search_fetch_pages >= 0)
@@ -375,12 +371,8 @@ int config_save(const config_t *cfg)
 
    if (cfg->db1_path[0] && strcmp(cfg->db1_path, config_save_default_db1_path()) != 0)
       cJSON_AddStringToObject(root, "db1_path", cfg->db1_path);
-   if (cfg->db2_url[0])
-      cJSON_AddStringToObject(root, "db2_url", cfg->db2_url);
    if (cfg->kb_client_url[0])
       cJSON_AddStringToObject(root, "kb_client_url", cfg->kb_client_url);
-   if (cfg->kb_client_bearer_token[0])
-      cJSON_AddStringToObject(root, "kb_client_bearer_token", cfg->kb_client_bearer_token);
 
    /* Setup-wizard page-2 backend record: save each non-empty string field from a
     * compact table (mirrors the parse table in config.c). */
@@ -556,15 +548,12 @@ int config_save(const config_t *cfg)
       cJSON_AddNumberToObject(csh, "min_chars", cfg->cache_min_chars);
    }
    /* usage_accounting + audit_async are default-on: persist only an opt-out of either. */
-   if (!cfg->ingress_usage_accounting_enabled || !cfg->ingress_audit_async ||
-       cfg->ingress_trusted_proxy_secret[0])
+   if (!cfg->ingress_usage_accounting_enabled || !cfg->ingress_audit_async)
    {
       cJSON *ing = cJSON_AddObjectToObject(root, "ingress");
       cJSON_AddBoolToObject(ing, "usage_accounting_enabled",
                             cfg->ingress_usage_accounting_enabled ? 1 : 0);
       cJSON_AddBoolToObject(ing, "audit_async", cfg->ingress_audit_async ? 1 : 0);
-      if (cfg->ingress_trusted_proxy_secret[0])
-         cJSON_AddStringToObject(ing, "trusted_proxy_secret", cfg->ingress_trusted_proxy_secret);
    }
    int gsem_mode = guardrails_semantic_mode_parse(cfg->guardrails_semantic_mode);
    if (gsem_mode != GSEM_MODE_OFF || cfg->guardrails_semantic_command[0] ||
@@ -1309,8 +1298,8 @@ int config_save(const config_t *cfg)
     * is not silently dropped on the next save. config_server_api.c parses
     * these back from the same nested mapping. */
    if (cfg->server_api_http_port > 0 || cfg->server_api_tls_port > 0 || cfg->server_api_mtls > 0 ||
-       cfg->server_api_mtls_client_ca[0] || cfg->server_api_bearer_token[0] ||
-       cfg->server_api_rate_limit_per_min > 0 || cfg->server_api_client_transport[0] ||
+       cfg->server_api_mtls_client_ca[0] || cfg->server_api_rate_limit_per_min > 0 ||
+       cfg->server_api_client_transport[0] ||
        cfg->server_api_remote_writes > SERVER_REMOTE_WRITES_OFF ||
        cfg->server_api_max_event_streams > 0 || cfg->server_api_cli_session_forwarding)
    {
@@ -1325,14 +1314,6 @@ int config_save(const config_t *cfg)
                                  cfg->server_api_mtls >= 2 ? "required" : "optional");
       if (cfg->server_api_mtls_client_ca[0])
          cJSON_AddStringToObject(api_obj, "mtls_client_ca", cfg->server_api_mtls_client_ca);
-      if (cfg->server_api_bearer_token[0])
-         cJSON_AddStringToObject(api_obj, "bearer_token", cfg->server_api_bearer_token);
-      if (cfg->server_api_bearer_extra_count > 0)
-      {
-         cJSON *extra = cJSON_AddArrayToObject(api_obj, "bearer_tokens_extra");
-         for (int i = 0; extra && i < cfg->server_api_bearer_extra_count; i++)
-            cJSON_AddItemToArray(extra, cJSON_CreateString(cfg->server_api_bearer_extra[i]));
-      }
       if (cfg->server_api_rate_limit_per_min > 0)
          cJSON_AddNumberToObject(api_obj, "rate_limit_per_min", cfg->server_api_rate_limit_per_min);
       if (cfg->server_api_max_event_streams > 0)
@@ -1611,6 +1592,14 @@ int config_set(const char *key, const char *value)
    const config_field_t *f = config_field_lookup(key);
    if (!f)
       return -1; /* unknown key */
+   const char *secret_name = config_field_secret_name(f);
+   if (secret_name)
+   {
+      /* Credential compatibility fields are process-memory views of Vault
+       * records, never YAML settings. The injected writer updates Vault and the
+       * locked runtime cache atomically; absent initialization fails closed. */
+      return config_secret_store(secret_name, value);
+   }
    cJSON *node = config_set_value_node(f, value);
    if (!node)
       return -1; /* invalid value for the field's type */

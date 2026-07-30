@@ -69,6 +69,28 @@ static kb_workload_helper_result_t open_failure(int error)
    }
 }
 
+/* Reject malformed path spellings before opening even `/`. Besides making the
+ * checked walk easier to audit, this keeps an invalid path's result independent
+ * of transient descriptor pressure: `/usr//bin/cat` is invalid even when the
+ * process cannot currently acquire a directory descriptor. */
+static int canonical_absolute_path(const char *path)
+{
+   if (!path || path[0] != '/' || path[1] == 0 || strnlen(path, PATH_MAX) == PATH_MAX)
+      return 0;
+   const char *component = path + 1;
+   for (;;)
+   {
+      const char *slash = strchr(component, '/');
+      size_t length = slash ? (size_t)(slash - component) : strlen(component);
+      if (!length || length > NAME_MAX || (length == 1 && component[0] == '.') ||
+          (length == 2 && component[0] == '.' && component[1] == '.'))
+         return 0;
+      if (!slash)
+         return 1;
+      component = slash + 1;
+   }
+}
+
 static int native_elf(int fd)
 {
    unsigned char ident[EI_NIDENT];
@@ -118,8 +140,8 @@ kb_workload_helper_result_t kb_workload_checked_root_file_open(const char *path,
 {
    if (fd_out)
       *fd_out = -1;
-   if (!path || !fd_out || (require_exec_elf != 0 && require_exec_elf != 1) || path[0] != '/' ||
-       path[1] == 0 || strnlen(path, PATH_MAX) == PATH_MAX)
+   if (!fd_out || (require_exec_elf != 0 && require_exec_elf != 1) ||
+       !canonical_absolute_path(path))
       return KB_WORKLOAD_HELPER_INVALID;
 #if !defined(__linux__)
    return KB_WORKLOAD_HELPER_DISABLED;

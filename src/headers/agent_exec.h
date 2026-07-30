@@ -357,6 +357,8 @@ int agent_http_get_pinned(const char *url, const char *pinned_ip, const char *ex
                           char **response_buf, int timeout_ms);
 int agent_http_put(const char *url, const char *auth_header, const char *body, char **response_buf,
                    int timeout_ms, const char *extra_headers);
+int agent_http_patch(const char *url, const char *auth_header, const char *body,
+                     char **response_buf, int timeout_ms, const char *extra_headers);
 int agent_http_post(const char *url, const char *auth_header, const char *body, char **response_buf,
                     int timeout_ms, const char *extra_headers);
 /* Exact-length JSON POST used by immutable provider-wire snapshots. Unlike the

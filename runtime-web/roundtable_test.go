@@ -3,8 +3,6 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -65,10 +63,6 @@ func TestRoundtableAdministratorMutationsCarryAttestedIdentity(t *testing.T) {
 				_, _ = w.Write([]byte(`{"ok":true}`))
 			})
 			cfg := startFakeV1(t, mux)
-			if err := os.WriteFile(filepath.Join(filepath.Dir(cfg.socketPath), "server.token"),
-				[]byte("roundtable-secret\n"), 0600); err != nil {
-				t.Fatalf("write server.token: %v", err)
-			}
 			s := &server{cfg: cfg}
 			req := withUser(httptest.NewRequest(tc.method, tc.apiPath, strings.NewReader(tc.body)), "admin")
 			rr := httptest.NewRecorder()
@@ -80,7 +74,7 @@ func TestRoundtableAdministratorMutationsCarryAttestedIdentity(t *testing.T) {
 			if rr.Code != http.StatusOK {
 				t.Fatalf("code=%d body=%q, want 200", rr.Code, rr.Body.String())
 			}
-			if gotMethod != tc.method || gotWebuser != "admin" || gotAuthorization != "Bearer roundtable-secret" {
+			if gotMethod != tc.method || gotWebuser != "admin" || gotAuthorization != "" {
 				t.Fatalf("forwarded method=%q webuser=%q auth=%q", gotMethod, gotWebuser, gotAuthorization)
 			}
 		})

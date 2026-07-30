@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -24,6 +23,29 @@ import (
 type observingResponseRecorder struct {
 	*httptest.ResponseRecorder
 	onWrite func([]byte)
+}
+
+func addWebSession(t *testing.T, s *server, req *http.Request, username string) {
+	t.Helper()
+	if s.sessions == nil {
+		db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "sessions.db"))
+		if err != nil {
+			t.Fatalf("open session db: %v", err)
+		}
+		for _, migration := range auth.Migrations {
+			if _, err := db.Exec(migration); err != nil {
+				db.Close()
+				t.Fatalf("auth migration: %v", err)
+			}
+		}
+		s.sessions = auth.NewSessionStore(db, time.Hour)
+		t.Cleanup(func() { db.Close() })
+	}
+	token, err := s.sessions.CreateSession(username)
+	if err != nil {
+		t.Fatalf("create web session: %v", err)
+	}
+	req.AddCookie(&http.Cookie{Name: "session", Value: token})
 }
 
 func (r *observingResponseRecorder) Write(p []byte) (int, error) {
@@ -109,12 +131,8 @@ func TestHandleChatProjectsIncludesCurrentRoot(t *testing.T) {
 	}
 }
 
-func TestHandleOpenAIModelsRequiresBearerToken(t *testing.T) {
+func TestHandleOpenAIModelsRequiresWebSession(t *testing.T) {
 	tmp := t.TempDir()
-	tokenPath := filepath.Join(tmp, "server.token")
-	if err := os.WriteFile(tokenPath, []byte("test-token\n"), 0600); err != nil {
-		t.Fatalf("write token: %v", err)
-	}
 
 	s := &server{cfg: &config{socketPath: filepath.Join(tmp, "aimee.sock")}}
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
@@ -135,14 +153,9 @@ func TestHandleOpenAIModelsRequiresBearerToken(t *testing.T) {
 
 func TestHandleOpenAIModelsReturnsOpenAICompatibleList(t *testing.T) {
 	tmp := t.TempDir()
-	tokenPath := filepath.Join(tmp, "server.token")
-	if err := os.WriteFile(tokenPath, []byte("test-token\n"), 0600); err != nil {
-		t.Fatalf("write token: %v", err)
-	}
-
 	s := &server{cfg: &config{socketPath: filepath.Join(tmp, "aimee.sock")}}
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	req.Header.Set("Authorization", "Bearer test-token")
+	addWebSession(t, s, req, "alice")
 	rr := httptest.NewRecorder()
 	s.handleOpenAIModels(rr, req)
 	if rr.Code != http.StatusOK {
@@ -254,16 +267,10 @@ func TestHandleOpenAIModelsProxiesV1Models(t *testing.T) {
 			`{"id":"minimax","object":"model","owned_by":"aimee"}]}`)
 	})
 	cfg := startFakeV1(t, mux)
-	// The OpenAI surface still requires the webchat bearer (server.token lives
-	// alongside the socket).
-	tokenPath := filepath.Join(filepath.Dir(cfg.socketPath), "server.token")
-	if err := os.WriteFile(tokenPath, []byte("test-token\n"), 0600); err != nil {
-		t.Fatalf("write token: %v", err)
-	}
 	s := &server{cfg: cfg}
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	req.Header.Set("Authorization", "Bearer test-token")
+	addWebSession(t, s, req, "alice")
 	rr := httptest.NewRecorder()
 	s.handleOpenAIModels(rr, req)
 	if rr.Code != http.StatusOK {
@@ -277,16 +284,12 @@ func TestHandleOpenAIModelsProxiesV1Models(t *testing.T) {
 	}
 }
 
-// openAIChatServer wires a fake /v1/chat/completions and a webchat bearer.
+// openAIChatServer wires a fake /v1/chat/completions endpoint.
 func openAIChatServer(t *testing.T, handler http.HandlerFunc) *server {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/chat/completions", handler)
 	cfg := startFakeV1(t, mux)
-	tokenPath := filepath.Join(filepath.Dir(cfg.socketPath), "server.token")
-	if err := os.WriteFile(tokenPath, []byte("test-token\n"), 0600); err != nil {
-		t.Fatalf("write token: %v", err)
-	}
 	return &server{cfg: cfg}
 }
 
@@ -317,7 +320,7 @@ func TestHandleOpenAIChatCompletionsProxiesV1(t *testing.T) {
 
 	body := `{"model":"aimee","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
-	req.Header.Set("Authorization", "Bearer test-token")
+	addWebSession(t, s, req, "alice")
 	rr := httptest.NewRecorder()
 	s.handleOpenAIChatCompletions(rr, req)
 
@@ -339,12 +342,8 @@ func TestHandleOpenAIChatCompletionsProxiesV1(t *testing.T) {
 }
 
 func TestOpenAIProxyStampsTrustedMetadata(t *testing.T) {
-	// External shared-bearer client (no webchat session): the proxy must STRIP any
-	// client-supplied X-Aimee-* identity and stamp its own trusted metadata —
-	// principal/source = the constant "webchat" service account + the proxy secret.
-	// No session key is stamped (the client-supplied `user` field is NOT used for
-	// attribution, so a client cannot choose its own audit identity).
-	t.Setenv("AIMEE_INGRESS_PROXY_SECRET", "topsecret")
+	// A validated web session stamps its server-derived identity while every
+	// client-supplied identity/auth header is stripped.
 
 	var gotPrincipal, gotSource, gotProxyAuth, gotSession string
 	s := openAIChatServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -358,7 +357,7 @@ func TestOpenAIProxyStampsTrustedMetadata(t *testing.T) {
 
 	body := `{"model":"aimee","user":"bob","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
-	req.Header.Set("Authorization", "Bearer test-token")
+	addWebSession(t, s, req, "alice")
 	req.Header.Set("X-Aimee-Principal", "victim") // spoof attempt — must be stripped
 	req.Header.Set("X-Aimee-Proxy-Authorization", "forged")
 	req.Header.Set("X-Aimee-Session-Key", "spoofed-session") // spoof — must be stripped
@@ -368,17 +367,17 @@ func TestOpenAIProxyStampsTrustedMetadata(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}
-	if gotPrincipal != "webchat" {
-		t.Fatalf("principal = %q, want trusted constant \"webchat\" (spoof must be stripped)", gotPrincipal)
+	if gotPrincipal != "webchat:alice" {
+		t.Fatalf("principal = %q, want trusted session identity", gotPrincipal)
 	}
 	if gotSource != "webchat" {
 		t.Fatalf("source = %q, want \"webchat\"", gotSource)
 	}
-	if gotProxyAuth != "topsecret" {
-		t.Fatalf("proxy auth = %q, want the configured secret (forged must be replaced)", gotProxyAuth)
+	if gotProxyAuth != "" {
+		t.Fatalf("proxy auth = %q, want empty (UDS peer attestation needs no secret)", gotProxyAuth)
 	}
-	if gotSession != "" {
-		t.Fatalf("session key = %q, want empty (client-supplied user/session not used)", gotSession)
+	if gotSession != "webchat:alice" {
+		t.Fatalf("session key = %q, want trusted session identity", gotSession)
 	}
 }
 
@@ -463,11 +462,7 @@ func TestHandleMeReturnsAuthenticatedUsername(t *testing.T) {
 	}
 }
 
-func TestOpenAIProxyNoSecretStampsNothing(t *testing.T) {
-	// Without the configured secret, the proxy must NOT stamp trusted identity —
-	// and must still strip any spoofed X-Aimee-* headers so nothing untrusted
-	// reaches aimee-server.
-	t.Setenv("AIMEE_INGRESS_PROXY_SECRET", "")
+func TestOpenAIProxyNeedsNoSharedSecret(t *testing.T) {
 
 	var gotPrincipal, gotProxyAuth string
 	s := openAIChatServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -479,7 +474,7 @@ func TestOpenAIProxyNoSecretStampsNothing(t *testing.T) {
 
 	body := `{"model":"aimee","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
-	req.Header.Set("Authorization", "Bearer test-token")
+	addWebSession(t, s, req, "bob")
 	req.Header.Set("X-Aimee-Principal", "victim")
 	rr := httptest.NewRecorder()
 	s.handleOpenAIChatCompletions(rr, req)
@@ -487,8 +482,8 @@ func TestOpenAIProxyNoSecretStampsNothing(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d", rr.Code)
 	}
-	if gotPrincipal != "" {
-		t.Fatalf("principal = %q, want empty (no secret -> no stamp, spoof stripped)", gotPrincipal)
+	if gotPrincipal != "webchat:bob" {
+		t.Fatalf("principal = %q, want kernel-attested webchat identity", gotPrincipal)
 	}
 	if gotProxyAuth != "" {
 		t.Fatalf("proxy auth = %q, want empty", gotProxyAuth)
@@ -506,7 +501,7 @@ func TestHandleOpenAIChatCompletionsStreamsSSE(t *testing.T) {
 
 	body := `{"model":"aimee","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
-	req.Header.Set("Authorization", "Bearer test-token")
+	addWebSession(t, s, req, "alice")
 	rr := httptest.NewRecorder()
 	s.handleOpenAIChatCompletions(rr, req)
 
@@ -525,117 +520,6 @@ func TestHandleOpenAIChatCompletionsStreamsSSE(t *testing.T) {
 func TestResolveProjectRootRejectsRelativePath(t *testing.T) {
 	if _, err := resolveProjectRoot("relative/path"); err == nil {
 		t.Fatal("expected relative project path to fail")
-	}
-}
-
-func TestSocketRecvParsesFinalLineWithoutNewline(t *testing.T) {
-	sc := &socketConn{
-		rd: bufio.NewReader(strings.NewReader(`{"event":"text","content":"192.168.0.83"}`)),
-	}
-	msg, err := sc.recv()
-	if err != nil {
-		t.Fatalf("recv: %v", err)
-	}
-	var content string
-	if err := json.Unmarshal(msg["content"], &content); err != nil {
-		t.Fatalf("decode content: %v", err)
-	}
-	if content != "192.168.0.83" {
-		t.Fatalf("content = %q", content)
-	}
-	if _, err := sc.recv(); err != io.EOF {
-		t.Fatalf("second recv err = %v, want EOF", err)
-	}
-}
-
-func TestChatStreamSendsAimeeSessionID(t *testing.T) {
-	tmp := t.TempDir()
-	socketPath := filepath.Join(tmp, "aimee.sock")
-	if err := os.WriteFile(filepath.Join(tmp, "server.token"), []byte("test-token\n"), 0600); err != nil {
-		t.Fatalf("write token: %v", err)
-	}
-
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("listen unix: %v", err)
-	}
-	defer ln.Close()
-
-	reqCh := make(chan map[string]string, 1)
-	errCh := make(chan error, 1)
-	go func() {
-		conn, err := ln.Accept()
-		if err != nil {
-			errCh <- err
-			return
-		}
-		defer conn.Close()
-		rd := bufio.NewReader(conn)
-
-		authLine, err := rd.ReadString('\n')
-		if err != nil {
-			errCh <- err
-			return
-		}
-		var auth map[string]string
-		if err := json.Unmarshal([]byte(authLine), &auth); err != nil {
-			errCh <- err
-			return
-		}
-		if auth["method"] != "auth" || auth["token"] != "test-token" {
-			errCh <- fmt.Errorf("unexpected auth request: %+v", auth)
-			return
-		}
-		if _, err := fmt.Fprintln(conn, `{"status":"ok"}`); err != nil {
-			errCh <- err
-			return
-		}
-
-		reqLine, err := rd.ReadString('\n')
-		if err != nil {
-			errCh <- err
-			return
-		}
-		var req map[string]string
-		if err := json.Unmarshal([]byte(reqLine), &req); err != nil {
-			errCh <- err
-			return
-		}
-		reqCh <- req
-		fmt.Fprintln(conn, `{"event":"session","id":"provider-thread"}`)
-		fmt.Fprintln(conn, `{"event":"done"}`)
-		fmt.Fprintln(conn, `{"status":"ok"}`)
-		errCh <- nil
-	}()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	var gotSessionEvent bool
-	err = chatStream(ctx, socketPath, "hello", "web-stable-session", "provider-thread", tmp, func(evt streamEvent) {
-		if evt.Event == "session" && evt.ID == "provider-thread" {
-			gotSessionEvent = true
-		}
-	})
-	if err != nil {
-		t.Fatalf("chatStream: %v", err)
-	}
-
-	select {
-	case req := <-reqCh:
-		if req["aimee_session_id"] != "web-stable-session" {
-			t.Fatalf("aimee_session_id = %q", req["aimee_session_id"])
-		}
-		if req["claude_session_id"] != "provider-thread" {
-			t.Fatalf("claude_session_id = %q", req["claude_session_id"])
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for chat request")
-	}
-	if !gotSessionEvent {
-		t.Fatal("expected provider session event")
-	}
-	if err := <-errCh; err != nil {
-		t.Fatalf("mock server: %v", err)
 	}
 }
 
@@ -712,9 +596,6 @@ func TestHandleChatSendPersistsStableUserSession(t *testing.T) {
 		fmt.Fprintln(w, `{"status":"ok"}`)
 	})
 	cfg := startFakeV1(t, mux)
-	if err := os.WriteFile(filepath.Join(filepath.Dir(cfg.socketPath), "server.token"), []byte("test-token\n"), 0600); err != nil {
-		t.Fatalf("write token: %v", err)
-	}
 	s := newSessionTestServer(t)
 	s.cfg = cfg
 
@@ -771,9 +652,6 @@ func TestHandleChatSendUsesOnlyServerBoundProviderSession(t *testing.T) {
 		fmt.Fprintln(w, `{"status":"ok"}`)
 	})
 	cfg := startFakeV1(t, mux)
-	if err := os.WriteFile(filepath.Join(filepath.Dir(cfg.socketPath), "server.token"), []byte("test-token\n"), 0600); err != nil {
-		t.Fatalf("write token: %v", err)
-	}
 	s := newSessionTestServer(t)
 	s.cfg = cfg
 	if err := s.touchChatSession("alice", "stable-web-id", workspace, "first turn"); err != nil {

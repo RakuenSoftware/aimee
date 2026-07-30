@@ -6,6 +6,7 @@
 #include "kb_client_internal.h"
 #include "support/mock_agent_http.h"
 #include "cJSON.h"
+#include "runtime_secret.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -524,7 +525,7 @@ static void test_search_uses_v1_api_when_configured(void)
    mock_agent_http_reset();
    mock_agent_http_set_post_handler(search_post_handler);
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010/", 1) == 0);
-   assert(setenv("AIMEE_KB_API_BEARER_TOKEN", "test-token", 1) == 0);
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "test-token") == 0);
 
    char *resp = kb_client_search_json_ex("aimee", "split kb", "embed --json", 7, "json", "rrf");
    assert(resp);
@@ -544,7 +545,7 @@ static void test_search_uses_v1_api_when_configured(void)
 
    assert(g_post_seen == 3);
    unsetenv("AIMEE_KB_API_URL");
-   unsetenv("AIMEE_KB_API_BEARER_TOKEN");
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
    mock_agent_http_reset();
 }
 
@@ -554,7 +555,7 @@ static void test_search_v1_reports_http_status(void)
    mock_agent_http_reset();
    mock_agent_http_set_post_handler(rejecting_post_handler);
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010", 1) == 0);
-   unsetenv("AIMEE_KB_API_BEARER_TOKEN");
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
 
    char *resp = kb_client_search_json_ex("aimee", "split kb", NULL, 7, "json", NULL);
    assert(resp);
@@ -573,7 +574,7 @@ static void test_health_uses_v1_api_when_configured(void)
    mock_agent_http_reset();
    mock_agent_http_set_get_handler(health_get_handler);
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010/", 1) == 0);
-   assert(setenv("AIMEE_KB_API_BEARER_TOKEN", "test-token", 1) == 0);
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "test-token") == 0);
 
    kb_health_t health;
    assert(kb_client_health(&health) == 0);
@@ -600,7 +601,7 @@ static void test_health_uses_v1_api_when_configured(void)
 
    assert(g_get_seen == 2);
    unsetenv("AIMEE_KB_API_URL");
-   unsetenv("AIMEE_KB_API_BEARER_TOKEN");
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
    mock_agent_http_reset();
 }
 
@@ -610,7 +611,7 @@ static void test_status_uses_v1_api_when_configured(void)
    mock_agent_http_reset();
    mock_agent_http_set_get_handler(status_get_handler);
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010/", 1) == 0);
-   assert(setenv("AIMEE_KB_API_BEARER_TOKEN", "test-token", 1) == 0);
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "test-token") == 0);
 
    char *status = kb_client_project_status_json("aimee core/kb?");
    assert(status);
@@ -621,7 +622,7 @@ static void test_status_uses_v1_api_when_configured(void)
 
    assert(g_get_seen == 1);
    unsetenv("AIMEE_KB_API_URL");
-   unsetenv("AIMEE_KB_API_BEARER_TOKEN");
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
    mock_agent_http_reset();
 }
 
@@ -631,7 +632,7 @@ static void test_maintenance_uses_v1_api_when_configured(void)
    mock_agent_http_reset();
    mock_agent_http_set_post_handler(maintenance_post_handler);
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010", 1) == 0);
-   unsetenv("AIMEE_KB_API_BEARER_TOKEN");
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
 
    g_route_case = 1;
    char *repair = kb_client_repair_json("/repo", "aimee", "embed");
@@ -672,7 +673,7 @@ static void test_queue_status_uses_v1_api_when_configured(void)
    mock_agent_http_reset();
    mock_agent_http_set_get_handler(queue_get_handler);
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010", 1) == 0);
-   assert(setenv("AIMEE_KB_API_BEARER_TOKEN", "queue-token", 1) == 0);
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "queue-token") == 0);
 
    char *status = kb_client_queue_status_json();
    assert(status);
@@ -681,7 +682,7 @@ static void test_queue_status_uses_v1_api_when_configured(void)
 
    assert(g_get_seen == 1);
    unsetenv("AIMEE_KB_API_URL");
-   unsetenv("AIMEE_KB_API_BEARER_TOKEN");
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
    mock_agent_http_reset();
 }
 
@@ -691,7 +692,7 @@ static void test_job_status_uses_v1_api_when_configured(void)
    mock_agent_http_reset();
    mock_agent_http_set_get_handler(job_get_handler);
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010", 1) == 0);
-   assert(setenv("AIMEE_KB_API_BEARER_TOKEN", "queue-token", 1) == 0);
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "queue-token") == 0);
 
    char *status = kb_client_job_status_json(42);
    assert(status);
@@ -700,7 +701,7 @@ static void test_job_status_uses_v1_api_when_configured(void)
 
    assert(g_get_seen == 1);
    unsetenv("AIMEE_KB_API_URL");
-   unsetenv("AIMEE_KB_API_BEARER_TOKEN");
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
    mock_agent_http_reset();
 }
 
@@ -710,7 +711,7 @@ static void test_build_update_ingest_use_v1_api_when_configured(void)
    mock_agent_http_reset();
    mock_agent_http_set_post_handler(maintenance_post_handler);
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010", 1) == 0);
-   unsetenv("AIMEE_KB_API_BEARER_TOKEN");
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
    snprintf(g_push_root, sizeof(g_push_root), "/repo");
 
    g_route_case = 6;
@@ -745,7 +746,7 @@ static void test_ingest_status_uses_v1_api_when_configured(void)
    mock_agent_http_reset();
    mock_agent_http_set_get_handler(ingest_status_get_handler);
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010", 1) == 0);
-   assert(setenv("AIMEE_KB_API_BEARER_TOKEN", "queue-token", 1) == 0);
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "queue-token") == 0);
 
    char *status = kb_client_ingest_status_json();
    assert(status);
@@ -754,7 +755,7 @@ static void test_ingest_status_uses_v1_api_when_configured(void)
 
    assert(g_get_seen == 1);
    unsetenv("AIMEE_KB_API_URL");
-   unsetenv("AIMEE_KB_API_BEARER_TOKEN");
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
    mock_agent_http_reset();
 }
 
@@ -762,7 +763,7 @@ static void test_workers_uses_v1_api_when_configured(void)
 {
    g_get_seen = 0;
    setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010", 1);
-   setenv("AIMEE_KB_API_BEARER_TOKEN", "queue-token", 1);
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "queue-token") == 0);
    mock_agent_http_set_get_handler(workers_get_handler);
 
    char *status = kb_client_workers_json();
@@ -772,7 +773,7 @@ static void test_workers_uses_v1_api_when_configured(void)
 
    assert(g_get_seen == 1);
    unsetenv("AIMEE_KB_API_URL");
-   unsetenv("AIMEE_KB_API_BEARER_TOKEN");
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
    mock_agent_http_reset();
 }
 
@@ -782,7 +783,7 @@ static void test_intelligence_readiness_uses_v1_api_when_configured(void)
    mock_agent_http_reset();
    mock_agent_http_set_get_handler(intelligence_get_handler);
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010", 1) == 0);
-   assert(setenv("AIMEE_KB_API_BEARER_TOKEN", "intel-token", 1) == 0);
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "intel-token") == 0);
 
    g_route_case = 30;
    char *calibrate = kb_client_calibrate_readiness_json();
@@ -804,7 +805,7 @@ static void test_intelligence_readiness_uses_v1_api_when_configured(void)
 
    assert(g_get_seen == 3);
    unsetenv("AIMEE_KB_API_URL");
-   unsetenv("AIMEE_KB_API_BEARER_TOKEN");
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
    mock_agent_http_reset();
    g_route_case = 0;
 }
@@ -815,7 +816,7 @@ static void test_action_wrappers_use_v1_api_when_configured(void)
    mock_agent_http_reset();
    mock_agent_http_set_post_handler(maintenance_post_handler);
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010", 1) == 0);
-   unsetenv("AIMEE_KB_API_BEARER_TOKEN");
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
 
    g_route_case = 33;
    char *resp = kb_client_memory_directive_sweep_expired_json();
@@ -835,7 +836,7 @@ static void test_index_reads_use_v1_api_when_configured(void)
    mock_agent_http_reset();
    mock_agent_http_set_get_handler(index_get_handler);
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010", 1) == 0);
-   unsetenv("AIMEE_KB_API_BEARER_TOKEN");
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
 
    g_route_case = 12;
    term_hit_t hits[3];
@@ -941,7 +942,7 @@ static void test_index_scan_uses_v1_api_when_configured(void)
    mock_agent_http_reset();
    mock_agent_http_set_post_handler(maintenance_post_handler);
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010", 1) == 0);
-   unsetenv("AIMEE_KB_API_BEARER_TOKEN");
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
 
    g_route_case = 17;
    kb_client_index_scan_result_t res;

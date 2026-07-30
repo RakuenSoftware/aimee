@@ -300,7 +300,7 @@ MCP_GIT_SRCS = modules/git/mcp_git_query.c modules/git/mcp_git_write.c modules/g
 MCP_GIT_OBJS = $(MCP_GIT_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Layer 0: Foundation (db, config, util, text, render, log, platform, cJSON) ---
-CORE_SRCS = db1/db.c db1/db_schema.c modules/config/config.c modules/config/config_sections.c modules/config/config_database.c modules/config/config_learning.c modules/config/config_memory.c modules/config/config_charter.c modules/config/config_trigger.c modules/config/config_kb_maintenance.c modules/config/config_kb_curator.c modules/config/config_server_api.c modules/config/config_skills.c modules/config/config_save.c modules/config/config_mode.c modules/config/config_fields.c modules/config/config_accessors_0.c modules/config/config_accessors_1.c modules/config/config_accessors_2.c modules/config/config_accessors_3.c modules/config/config_accessors_4.c modules/config/config_accessors_5.c modules/config/config_accessors_6.c modules/config/config_accessors_7.c toolset.c util.c util_url.c kb/kb_identity.c modules/git/forge_credentials.c forge_app_token.c modules/workspace/workspace_mirror.c report_enrichment.c modules/audit/audit_action.c modules/audit/audit_worm.c modules/audit/audit_worm_chain.c modules/audit/audit_ledger.c delivery_target.c text.c render.c markdown.c json_fluent.c code_audit_graph.c log.c shutdown_forensics.c dstr.c rrf.c yaml.c diff.c anchor_snapshot.c edit_anchored.c code_outline.c sse_parser.c \
+CORE_SRCS = db1/db.c db1/db_schema.c modules/config/config.c modules/config/config_sections.c modules/config/config_database.c modules/config/config_learning.c modules/config/config_memory.c modules/config/config_charter.c modules/config/config_trigger.c modules/config/config_kb_maintenance.c modules/config/config_kb_curator.c modules/config/config_server_api.c modules/config/config_skills.c modules/config/config_save.c modules/config/config_mode.c modules/config/config_fields.c modules/config/config_accessors_0.c modules/config/config_accessors_1.c modules/config/config_accessors_2.c modules/config/config_accessors_3.c modules/config/config_accessors_4.c modules/config/config_accessors_5.c modules/config/config_accessors_6.c modules/config/config_accessors_7.c toolset.c util.c util_url.c kb/kb_identity.c modules/git/forge_credentials.c forge_app_token.c modules/vault/runtime_secret.c modules/workspace/workspace_mirror.c report_enrichment.c modules/audit/audit_action.c modules/audit/audit_worm.c modules/audit/audit_worm_chain.c modules/audit/audit_ledger.c delivery_target.c text.c render.c markdown.c json_fluent.c code_audit_graph.c log.c shutdown_forensics.c dstr.c rrf.c yaml.c diff.c anchor_snapshot.c edit_anchored.c code_outline.c sse_parser.c \
             aimee_home.c shared/kb_paths.c provider_client.c kb_curator_provider.c \
             compact.c modules/economizer/economizer_proof.c modules/economizer/economizer_wire_snapshot.c modules/economizer/economizer_openai.c modules/economizer/economizer_anthropic.c modules/economizer/economizer_json.c modules/economizer/economizer_provenance.c modules/economizer/economizer_dispatch_lease.c modules/economizer/coord_closet.c modules/economizer/fold_budget.c modules/economizer/context_fold.c modules/economizer/context_reduce.c modules/economizer/tool_condense.c modules/economizer/fold_register.c modules/economizer/fold_recall.c modules/economizer/task_rail.c modules/economizer/episode_seal.c platform_random.c slop_detect.c proxy_bootstrap.c reasoning_cap.c \
             client_integrations.c modules/protocols/mcp/mcp_tools.c modules/protocols/mcp/mcp_tool_profile.c modules/protocols/mcp/mcp_tools_extended.c modules/protocols/mcp/mcp_skill_tools.c modules/protocols/mcp/mcp_tools_gateway.c events.c \
@@ -340,7 +340,7 @@ DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/%.o)
 # rides DB2_SRCS -> KB_DB2_OBJS and never enters aimee-server (the server links no
 # DB2_OBJS). The dual-compile is intentional: one crypto core, two persistence backends.
 VAULT_CORE_SRCS = modules/vault/vault_witness_record.c modules/vault/vault_witness_merkle.c modules/vault/vault_witness_checkpoint.c modules/vault/vault_witness_export.c modules/vault/vault_witness_verify.c modules/vault/vault_witness_offline.c modules/vault/vault_witness_proof.c modules/vault/vault_witness_signer.c modules/vault/vault_witness_signer_kek.c \
-  modules/vault/vault_crypto.c modules/vault/vault_kek_check.c modules/vault/vault_reseal_receipt.c modules/vault/vault_hwm.c modules/vault/vault_principal.c \
+  modules/vault/vault_crypto.c modules/vault/vault_kek_check.c modules/vault/vault_reseal_receipt.c modules/vault/vault_hwm.c modules/vault/vault_principal.c modules/vault/vault_env_bootstrap.c modules/vault/vault_config_bootstrap.c \
                   modules/vault/vault_kek_cache.c modules/vault/vault_store.c \
                   modules/vault/vault_service.c modules/vault/vault_server_key.c \
                   modules/vault/vault_custody_mock.c modules/vault/vault_custody_tpm2.c modules/vault/vault_custody_pkcs11.c modules/vault/vault_custody_kms.c \
@@ -451,7 +451,7 @@ SERVER_SRCS = server/server_http_grant_routes.c modules/kb_client/kb_client_gran
               server/agent_admission.c server/provider_catalog.c \
               server/dashboard_server.c hud.c cmd_identity.c prompts.c persona.c modules/roundtable/roundtable_preset.c modules/roundtable/roundtable_seat_resolve.c working_profile.c \
               modules/delegates/delegate_role.c modules/delegates/delegate_depth.c modules/delegates/delegate_prompt.c modules/delegates/delegate_ephemeral_ws.c modules/delegates/delegate_run_phases.c modules/delegates/delegate_routing.c modules/delegates/delegate_launch.c modules/delegates/delegate_source_authority.c modules/delegates/delegate_economics.c modules/delegates/delegate_credentials.c modules/delegates/delegate_credential_retry.c modules/delegates/delegate_patch_coordinator.c modules/roundtable/delegate_ensemble.c modules/roundtable/delegate_ensemble_review.c server/evidence_replay.c modules/roundtable/roundtable_activation.c modules/roundtable/roundtable_verify.c server/sweep_exclude.c server/sweep_score.c server/sweep_scope.c server/sweep_parse.c server/server_sweep.c modules/delegates/delegate_checkout.c cmd_init.c \
-              server/trigger_scheduler.c server/server_trigger.c server/server_cron.c server/server_trajectory.c server/server_config.c modules/vault/vault_principal.c modules/vault/vault_crypto.c modules/vault/vault_kek_check.c modules/vault/vault_kek_cache.c modules/vault/vault_server_key.c modules/vault/vault_store.c modules/vault/vault_service.c modules/git/git_forge_vault.c modules/git/git_cred_inject.c modules/git/git_host_resolve.c modules/git/git_ssh_agent.c modules/git/git_project.c server/ws_registry.c modules/git/git_ops.c modules/git/git_host_cred.c modules/git/git_org_repos.c modules/git/git_oauth_github.c modules/git/git_oauth_gh.c modules/git/git_oauth_device.c server/deploy_apply.c modules/git/git_pr_api.c modules/git/git_pr_ci_grade.c modules/webuser/webuser_editor.c modules/vault/vault_capability.c server/server_vault.c server/server_vault_bootstrap.c server/pki.c server/server_cert.c \
+              server/trigger_scheduler.c server/server_trigger.c server/server_cron.c server/server_trajectory.c server/server_config.c modules/vault/vault_principal.c modules/vault/vault_crypto.c modules/vault/vault_kek_check.c modules/vault/vault_kek_cache.c modules/vault/vault_server_key.c modules/vault/vault_store.c modules/vault/vault_service.c modules/vault/vault_env_bootstrap.c modules/vault/vault_config_bootstrap.c modules/git/git_forge_vault.c modules/git/git_cred_inject.c modules/git/git_host_resolve.c modules/git/git_ssh_agent.c modules/git/git_project.c server/ws_registry.c modules/git/git_ops.c modules/git/git_host_cred.c modules/git/git_org_repos.c modules/git/git_oauth_github.c modules/git/git_oauth_gh.c modules/git/git_oauth_device.c server/deploy_apply.c modules/git/git_pr_api.c modules/git/git_pr_ci_grade.c modules/webuser/webuser_editor.c modules/vault/vault_capability.c server/server_vault.c server/server_vault_bootstrap.c server/server_vault_agent_migration.c server/pki.c server/server_cert.c \
               modules/workflows/wfe_engine.c modules/workflows/wfe_blocks.c modules/workflows/wfe_approval.c \
               modules/workflows/wfe_verdict.c modules/workflows/wfe_roundtable.c modules/workflows/wfe_autonomy.c \
               server/server_workflow_api.c
@@ -573,7 +573,9 @@ STATUS_PROVISIONER_VAULT_OBJS = $(OBJDIR)/kb/modules/vault/vault_crypto.o \
                                 $(OBJDIR)/kb/modules/vault/vault_kek_cache.o \
                                 $(OBJDIR)/kb/modules/vault/vault_server_key.o \
                                 $(OBJDIR)/kb/modules/vault/vault_custody_kms.o \
-                                $(OBJDIR)/kb/modules/vault/vault_store.o
+                                $(OBJDIR)/kb/modules/vault/vault_store.o \
+                                $(OBJDIR)/kb/modules/vault/vault_service.o \
+                                $(OBJDIR)/kb/modules/vault/vault_principal.o
 STATUS_PROVISIONER_PLATFORM_OBJS = $(filter %/platform_path.o,$(PLATFORM_BASIC_OBJS))
 # Offline, owner-only P5-C2 trust-root bootstrap/export tool. Keep this exact
 # closure out of every runtime target and installation surface.
@@ -773,7 +775,8 @@ GATEWAY_SRCS = cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes
                shutdown_forensics.c
 GATEWAY_PLATFORM_OBJS = $(filter %/platform_process.o, $(PLATFORM_BASIC_OBJS))
 # cJSON uses a special build rule (strips -Werror); reference it separately.
-GATEWAY_OBJS = $(GATEWAY_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o $(GATEWAY_PLATFORM_OBJS)
+GATEWAY_OBJS = $(GATEWAY_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o \
+               $(OBJDIR)/modules/vault/runtime_secret.o $(GATEWAY_PLATFORM_OBJS)
 
 # All source files for linting (excluding vendored cJSON)
 ALL_SRCS = $(sort $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB2_PG_SRCS) $(DB2_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c kb/kb_mgmt_token_public.c db2/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_offline_hardening.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c db2/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c db2/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) $(CMD_SRCS) \
@@ -810,13 +813,23 @@ include tests/Rules.mk
 # available. This keeps lint in the enforced path while still running the
 # full unit suite before push/PR creation.
 #
-# Test-execution parallelism. The unit suite is ~200 separate binaries; running
-# them one at a time is the single biggest verify cost, so default to all cores.
-# Override with AIMEE_VERIFY_TEST_JOBS=1 to debug test-ordering flakiness. The
-# explicit value on the sub-make command line intentionally overrides any
-# TEST_RUN_JOBS inherited from a (possibly stale) auto-generated verify config.
-AIMEE_VERIFY_TEST_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 4)
-verify-local: lint check-linking
+# Test-execution parallelism. A workflow host can verify several slices at once,
+# so using every visible CPU per verifier multiplies into hundreds of competing
+# test processes and makes timing-sensitive tests fail under self-induced load.
+# Keep a conservative per-run default; operators can still raise it explicitly.
+# The command-line value intentionally overrides TEST_RUN_JOBS inherited from a
+# (possibly stale) auto-generated verify config.
+AIMEE_VERIFY_TEST_JOBS ?= 2
+
+# The complete shipping build must finish before lint inspects its artifacts.
+# Declaring lint and check-linking as sibling prerequisites lets a parallel outer
+# make run them together; using check-linking alone also omits the static
+# forwarder and resolver because they have no dynamic-link policy to inspect.
+# Keep the phases explicit and ordered: build the authoritative `all` set, check
+# dynamic-link boundaries, inspect every shipping artifact, then run the suite.
+verify-local: all
+	@$(MAKE) check-linking
+	@$(MAKE) lint
 	@$(MAKE) TEST_RUN_JOBS=$(AIMEE_VERIFY_TEST_JOBS) unit-tests
 	@echo "verify-local: ok"
 

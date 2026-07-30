@@ -44,6 +44,23 @@ SCALARS = {
     "uint32_t": "uint32_t",
 }
 
+# These config_t members remain as process-memory compatibility fields, but
+# their generated setters must write exclusively to Vault. The environment-form
+# name is the canonical Vault/runtime-cache key.
+SECRET_FIELDS = {
+    "db2_url": "AIMEE_DB2_URL",
+    "search_tavily_api_key": "AIMEE_SEARCH_TAVILY_API_KEY",
+    "proxy_token": "AIMEE_PROXY_TOKEN",
+    "ingress_trusted_proxy_secret": "AIMEE_INGRESS_PROXY_SECRET",
+    "kb_api_bearer_token": "AIMEE_KB_API_BEARER_TOKEN",
+    "telemetry_metrics_token": "AIMEE_TELEMETRY_METRICS_TOKEN",
+    "kb_client_bearer_token": "AIMEE_KB_API_BEARER_TOKEN",
+    "server_api_bearer_token": "AIMEE_API_BEARER_TOKEN",
+    "trigger_auth_token": "AIMEE_TRIGGER_AUTH_TOKEN",
+    "kb_curator_provider_api_key": "AIMEE_KB_CURATOR_PROVIDER_API_KEY",
+    "kb_curator_tier_b_api_key": "AIMEE_KB_CURATOR_TIER_B_API_KEY",
+}
+
 
 def existing_functions(text):
     """Names already declared as functions in config.h.
@@ -275,6 +292,15 @@ def main():
             "",
         ])
     for _, name, arr in strings:
+        if name in SECRET_FIELDS:
+            blocks.append([
+                f"int config_set_{name}(const char *value)",
+                "{",
+                f'   return config_secret_store("{SECRET_FIELDS[name]}", value);',
+                "}",
+                "",
+            ])
+            continue
         blocks.append([
             f"int config_set_{name}(const char *value)",
             "{",
@@ -356,7 +382,7 @@ def main():
         lines = list(preamble)
         for b in chunk:
             lines += b
-        path.write_text("\n".join(lines) + "\n")
+        path.write_text("\n".join(lines).rstrip("\n") + "\n")
 
     print(
         f"gen_config_accessors: wrote {len(scalars)} scalar + {len(strings)} string "

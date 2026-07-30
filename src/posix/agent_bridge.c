@@ -1422,6 +1422,38 @@ int agent_http_put(const char *url, const char *auth_header, const char *body, c
    return status;
 }
 
+int agent_http_patch(const char *url, const char *auth_header, const char *body,
+                     char **response_buf, int timeout_ms, const char *extra_headers)
+{
+   *response_buf = NULL;
+
+   parsed_url_t pu;
+   if (parse_url(url, &pu) < 0)
+      return -1;
+
+   http_conn_t conn;
+   if (conn_open(&conn, &pu, timeout_ms) < 0)
+      return -1;
+
+   if (send_request(&conn, "PATCH", &pu, "Content-Type: application/json", auth_header,
+                    extra_headers, "aimee/1.0", body, body ? strlen(body) : 0) < 0)
+   {
+      conn_close(&conn);
+      return -1;
+   }
+
+   size_t resp_len = 0;
+   int status = http_read_response(&conn, response_buf, &resp_len);
+   conn_close(&conn);
+   if (status < 0)
+   {
+      free(*response_buf);
+      *response_buf = NULL;
+      aimee_log(LOG_ERROR, "agent_http", "PATCH request failed");
+   }
+   return status;
+}
+
 int agent_http_post_form(const char *url, const char *body, char **response_buf, int timeout_ms)
 {
    *response_buf = NULL;

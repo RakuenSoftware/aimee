@@ -77,7 +77,7 @@ nodes:
       # is re-authored -> gate again). The engine's default cap parked runs after
       # a handful of rounds; honest refinement loops need more headroom before
       # escalating to a human.
-      max_rounds: 24
+      max_rounds: 6
       focus: does this implementation plan fully satisfy the proposal/request?
     on_pass: split
     on_fail: plan
@@ -100,6 +100,9 @@ nodes:
       feature: feature.out
     params:
       workflow: slice
+      # A terminal child may justify one regenerated packet set, but a broken
+      # verifier or unsatisfiable packet must not manufacture 20 generations.
+      max_rounds: 3
     next: accept_freeze
     on_fail: split
   # Freeze the assembled feature branch for the acceptance review.

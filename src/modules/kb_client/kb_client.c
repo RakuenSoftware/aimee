@@ -10,6 +10,7 @@
 #include "kb_paths.h"
 #include "platform_ipc.h"
 #include "platform_path.h"
+#include "runtime_secret.h"
 #include "cJSON.h"
 #include <ctype.h>
 #include <errno.h>
@@ -1169,10 +1170,12 @@ static const char *kb_client_v1_auth_header(char *buf, size_t buf_len)
 {
    /* The HTTP API can run without auth; include a bearer header only when the
     * operator provides the matching client-side token. */
-   const char *token = getenv("AIMEE_KB_API_BEARER_TOKEN");
-   if (!token || !token[0] || !buf || buf_len == 0)
+   char token[512];
+   if (!buf || buf_len == 0 ||
+       !runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", token, sizeof(token)))
       return NULL;
    snprintf(buf, buf_len, "Authorization: Bearer %s", token);
+   runtime_secret_wipe(token, sizeof(token));
    return buf;
 }
 

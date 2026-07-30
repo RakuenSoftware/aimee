@@ -34,8 +34,8 @@
       "loads": 2
     },
     "src/cmd_infra.c": {
-      "decls": 8,
-      "loads": 6
+      "decls": 7,
+      "loads": 5
     },
     "src/cmd_kb.c": {
       "decls": 4,
@@ -667,7 +667,7 @@
     },
     "src/server/server_api_status.c": {
       "decls": 6,
-      "loads": 5
+      "loads": 3
     },
     "src/server/server_compute.c": {
       "decls": 5,
@@ -1051,8 +1051,8 @@
     }
   },
   "totals": {
-    "decls": 926,
+    "decls": 925,
     "files": 262,
-    "loads": 475
+    "loads": 472
   }
 }

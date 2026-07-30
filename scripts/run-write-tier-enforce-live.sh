@@ -263,8 +263,20 @@ else fail "replayed   -> $second (expected a refusal; the jti was already spent)
 # by actually flipping it to the most permissive value and re-running the two
 # outcomes that define the feature.
 step "The retired global authorizer changes no outcome"
-sed -i 's/    remote_writes: off/    remote_writes: full/' "$AIMEE_HOME/aimee.yaml"
+# The Vault migration canonicalizes aimee.yaml before this point and omits a
+# default-valued `remote_writes: off` line. A sed replacement therefore became
+# a silent no-op while the test claimed it had flipped the setting. Use the
+# documented deployment override so the live server is unambiguously at full;
+# config parsing/round-tripping is covered by unit-test-config.
+export AIMEE_API_REMOTE_WRITES=full
 live_env_restart_server full
+sock=$(ls "$AIMEE_HOME"/*.sock 2>/dev/null | head -1)
+curl -s --unix-socket "$sock" "http://localhost/v1/api/status" \
+  -o "$work/pre-refusal-status" 2>/dev/null
+if ! grep -q 'aimee.api.remote_writes NO LONGER AUTHORIZES' \
+      "$work/pre-refusal-status" 2>/dev/null; then
+  fail "running server did not start with AIMEE_API_REMOTE_WRITES=full"
+fi
 code=$(call POST "$STORE" "$(mint off)" "$store_body")
 if [ "$code" = "403" ]; then pass "remote_writes=full + tier=off  -> 403 (the global does not widen)"
 else fail "remote_writes=full + tier=off  -> $code (expected 403; the global is retired)"; fi
@@ -282,7 +294,6 @@ else fail "remote_writes=full + tier=data  -> $code (expected 2xx)"; fi
 # retired global WOULD have allowed -- so the counter must now be non-zero.
 # Read over UDS: /v1/api/status is a read, and this asserts the operator-visible
 # surface rather than a counter reachable only from inside the process.
-sock=$(ls "$AIMEE_HOME"/*.sock 2>/dev/null | head -1)
 if [ -n "$sock" ] && [ -S "$sock" ]; then
   curl -s --unix-socket "$sock" "http://localhost/v1/api/status" -o "$work/apistatus" 2>/dev/null
   if grep -q 'global_ignored' "$work/apistatus" 2>/dev/null; then

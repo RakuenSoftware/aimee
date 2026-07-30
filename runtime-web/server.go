@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -9,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"database/sql"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
@@ -24,16 +26,13 @@ import (
 	"github.com/RakuenSoftware/smoothgui/auth"
 )
 
-const pamService = "aimee-runtime-web"
-
 type server struct {
 	cfg      *config
 	db       *sql.DB
-	sessions *auth.SessionStore
+	sessions sessionStore
 	rl       *auth.RateLimiter
-	users    *auth.UserManager
 	accounts setupAccountSystem
-	authH    *auth.Handler
+	identity webchatIdentityStore
 	spaCSP   string
 	loginCSP string
 }
@@ -56,19 +55,27 @@ func run(cfg *config) error {
 		return fmt.Errorf("chat session migrations: %w", err)
 	}
 
-	sessions := auth.NewSessionStore(db, 24*time.Hour)
+	vault := &commandWebchatVault{}
+	identities := newVaultAccounts(vault, filepath.Join(filepath.Dir(cfg.dbPath), "webchat", "bootstrap-replaced"))
+	if names, err := identities.List(); err != nil || len(names) == 0 {
+		if err == nil {
+			err = errors.New("no webchat login exists in Vault")
+		}
+		return fmt.Errorf("Vault webchat accounts: %w", err)
+	}
+	sessions, err := newSignedSessionStore(db, vault, 24*time.Hour)
+	if err != nil {
+		return fmt.Errorf("Vault session store: %w", err)
+	}
 	rl := auth.NewRateLimiter(db, 10, 15*time.Minute)
-	users := auth.NewUserManager("aimee")
-	authH := auth.NewHandler(pamService, sessions, rl, users)
 
 	s := &server{
 		cfg:      cfg,
 		db:       db,
 		sessions: sessions,
 		rl:       rl,
-		users:    users,
-		accounts: osSetupAccountSystem{users: users},
-		authH:    authH,
+		accounts: identities,
+		identity: identities,
 		spaCSP:   contentSecurityPolicy(spaHTML),
 		loginCSP: contentSecurityPolicy([]byte(loginHTML)),
 	}
@@ -84,14 +91,9 @@ func run(cfg *config) error {
 		return http.ListenAndServe(addr, handler)
 	}
 
-	cert, key, err := ensureTLSCert(cfg)
+	tlsCert, err := ensureTLSCertificate(cfg, vault)
 	if err != nil {
 		return fmt.Errorf("tls: %w", err)
-	}
-
-	tlsCert, err := tls.LoadX509KeyPair(cert, key)
-	if err != nil {
-		return fmt.Errorf("load cert: %w", err)
 	}
 
 	tlsCfg := &tls.Config{
@@ -114,7 +116,7 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/login", s.handleLogin)
 	mux.HandleFunc("/logout", s.handleLogout)
 	mux.HandleFunc("/api/auth/login", s.handleAuthLogin)
-	mux.HandleFunc("/api/auth/logout", s.authH.Logout)
+	mux.HandleFunc("/api/auth/logout", s.handleAuthLogout)
 	mux.HandleFunc("/v1/model", s.handleOpenAIModels)
 	mux.HandleFunc("/v1/models", s.handleOpenAIModels)
 	// OpenAI inference surface, proxied to aimee-server's real /v1 endpoints
@@ -186,8 +188,8 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	// Use the same middleware/context as the account-scoped chat endpoints so
 	// cache ownership and persistence are always keyed by the same principal.
 	mux.HandleFunc("/api/auth/me", s.requireAuth(s.handleMe))
-	mux.HandleFunc("/api/auth/password", auth.RequireAuth(s.sessions, http.HandlerFunc(s.authH.ChangePassword)).ServeHTTP)
-	mux.HandleFunc("/api/users", auth.RequireAuth(s.sessions, http.HandlerFunc(s.authH.ListUsers)).ServeHTTP)
+	mux.HandleFunc("/api/auth/password", s.requireAuth(s.handleAuthPassword))
+	mux.HandleFunc("/api/users", s.requireAuth(s.handleUsers))
 
 	// Aggregate dashboard endpoint — all panels in one server round-trip
 	mux.HandleFunc("/api/dashboard", s.requireAuth(s.handleDashboardAll))
@@ -214,8 +216,8 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/proposal/draft", s.requireAuth(s.handleProposalDraft))
 
 	// Credential vault (WP-C.2c): the user re-presents their login password to
-	// unlock; calls carry the server.token bearer + X-Aimee-Webuser so
-	// aimee-server resolves this user's webuser: vault.
+	// unlock; the root-owned UDS peer plus X-Aimee-Webuser lets aimee-server
+	// resolve this user's webuser: vault without a shared bearer.
 	mux.HandleFunc("/api/vault/unlock", s.requireAuth(s.handleVaultUnlock))
 	mux.HandleFunc("/api/vault/password", s.requireAuth(s.handleVaultPassword))
 	mux.HandleFunc("/api/vault/credentials", s.requireAuth(s.handleVaultCredentials))
@@ -342,25 +344,83 @@ func openDB(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
-func ensureTLSCert(cfg *config) (cert, key string, err error) {
-	if cfg.certFile != "" && cfg.keyFile != "" {
-		return cfg.certFile, cfg.keyFile, nil
+func ensureTLSCertificate(cfg *config, vault webchatVaultStore) (tls.Certificate, error) {
+	if cfg.keyFile != "" {
+		return tls.Certificate{}, errors.New("TLS private-key files are unsupported; import the key into Vault")
+	}
+	certPath := cfg.certFile
+	if certPath == "" {
+		certPath = filepath.Join(filepath.Dir(cfg.dbPath), "webchat.crt")
 	}
 
-	dir := filepath.Dir(cfg.dbPath)
-	certPath := filepath.Join(dir, "webchat.crt")
-	keyPath := filepath.Join(dir, "webchat.key")
-
-	if _, err := os.Stat(certPath); err == nil {
-		if _, err := os.Stat(keyPath); err == nil {
-			return certPath, keyPath, nil
+	snap, err := vault.Snapshot()
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	keyPEM := []byte(snap.TLSKey)
+	if len(keyPEM) == 0 {
+		priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			return tls.Certificate{}, err
+		}
+		der, err := x509.MarshalECPrivateKey(priv)
+		if err != nil {
+			return tls.Certificate{}, err
+		}
+		keyPEM = pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der})
+		if err := vault.Seal("tls_key", keyPEM); err != nil {
+			wipeBytes(keyPEM)
+			return tls.Certificate{}, err
 		}
 	}
-
-	if err := generateSelfSignedCert(certPath, keyPath); err != nil {
-		return "", "", err
+	defer wipeBytes(keyPEM)
+	signer, err := parseTLSPrivateKey(keyPEM)
+	if err != nil {
+		return tls.Certificate{}, err
 	}
-	return certPath, keyPath, nil
+
+	certPEM, readErr := os.ReadFile(certPath)
+	if readErr == nil {
+		if pair, err := tls.X509KeyPair(certPEM, keyPEM); err == nil {
+			return pair, nil
+		}
+	}
+	certPEM, err = generateSelfSignedCert(signer)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	if err := os.MkdirAll(filepath.Dir(certPath), 0o700); err != nil {
+		return tls.Certificate{}, err
+	}
+	if err := os.WriteFile(certPath, certPEM, 0o644); err != nil {
+		return tls.Certificate{}, err
+	}
+	return tls.X509KeyPair(certPEM, keyPEM)
+}
+
+func wipeBytes(value []byte) {
+	for i := range value {
+		value[i] = 0
+	}
+}
+
+func parseTLSPrivateKey(keyPEM []byte) (crypto.Signer, error) {
+	block, _ := pem.Decode(keyPEM)
+	if block == nil {
+		return nil, errors.New("invalid Vault TLS private key")
+	}
+	if key, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+		if signer, ok := key.(crypto.Signer); ok {
+			return signer, nil
+		}
+	}
+	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	return nil, errors.New("unsupported Vault TLS private key")
 }
 
 // certSANs builds the Subject Alternative Names for the auto-generated cert so
@@ -417,12 +477,7 @@ func certSANs() (dnsNames []string, ipAddrs []net.IP) {
 	return dnsNames, ipAddrs
 }
 
-func generateSelfSignedCert(certPath, keyPath string) error {
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return err
-	}
-
+func generateSelfSignedCert(priv crypto.Signer) ([]byte, error) {
 	dnsNames, ipAddrs := certSANs()
 
 	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
@@ -439,28 +494,9 @@ func generateSelfSignedCert(certPath, keyPath string) error {
 		IPAddresses:           ipAddrs,
 	}
 
-	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &priv.PublicKey, priv)
+	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, priv.Public(), priv)
 	if err != nil {
-		return err
+		return nil, err
 	}
-
-	cf, err := os.OpenFile(certPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	defer cf.Close()
-	if err := pem.Encode(cf, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); err != nil {
-		return err
-	}
-
-	kf, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	defer kf.Close()
-	privDER, err := x509.MarshalECPrivateKey(priv)
-	if err != nil {
-		return err
-	}
-	return pem.Encode(kf, &pem.Block{Type: "EC PRIVATE KEY", Bytes: privDER})
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}), nil
 }

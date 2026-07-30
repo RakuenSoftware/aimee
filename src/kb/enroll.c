@@ -2,10 +2,11 @@
  * single-use enrollment tokens and the `aimee://` connection string. See
  * kb_enroll.h. (distributed-mode-auth proposal, Phase 1.)
  *
- * Tokens are 256-bit opaque random values, base64url-encoded; only sha256(token)
- * is ever stored. Token checks are constant-time; enrollment tokens are
- * single-use. */
+ * Tokens are 256-bit opaque random values, base64url-encoded. Only sha256(token)
+ * enters the single-use registry, and that registry is encrypted in Vault; the
+ * named path is an empty cross-process lock inode. Token checks are constant-time. */
 #include "kb_enroll.h"
+#include "vault_service.h"
 #include "kb_pki.h"     /* internal CA: load-or-create + fingerprint */
 #include "oauth_pkce.h" /* oauth_pkce_base64url_encode */
 #include "platform_random.h"
@@ -265,10 +266,124 @@ void kb_enroll_registry_reset(void)
    pthread_mutex_unlock(&g_registry_lock);
 }
 
-/* --- file-backed single-use enrollment-token store ---
- * Each record is one line: "<sha256hex>\t<consumed 0|1>\t<scope>\n". Every call
- * opens, flock()s, mutates, and closes the file, so the store is process-shared
- * and survives a restart (proposal invariant 3). Only the token hash is stored. */
+/* --- Vault-backed single-use enrollment-token store ---
+ * Each encrypted Vault record contains lines of
+ * "<sha256hex>\t<consumed 0|1>\t<scope>\n". `path` now names only an empty flock
+ * coordination inode; hashing it namespaces deployments in the shared server
+ * Vault. An older plaintext hash file is ingested under that lock and securely
+ * truncated before the operation succeeds. A token verifier is credential
+ * material, so even its one-way hash must never persist outside Vault. */
+
+#define KB_ENROLL_VAULT_AGENT        "kb-enrollment"
+#define KB_ENROLL_VAULT_REGISTRY_MAX (1024 * 1024)
+
+static int enroll_vault_cred(const char *path, char out[80])
+{
+   char hash[KB_ENROLL_HASH_HEX];
+   if (kb_enroll_token_hash(path, hash, sizeof(hash)) != 0)
+      return -1;
+   int n = snprintf(out, 80, "registry_%s", hash);
+   return n > 0 && n < 80 ? 0 : -1;
+}
+
+static int clear_legacy_store(int fd, off_t size)
+{
+   if (size <= 0)
+      return 0;
+   unsigned char zeros[4096] = {0};
+   off_t off = 0;
+   while (off < size)
+   {
+      size_t n = (size - off) < (off_t)sizeof(zeros) ? (size_t)(size - off) : sizeof(zeros);
+      ssize_t wrote = pwrite(fd, zeros, n, off);
+      if (wrote <= 0)
+         return -1;
+      off += wrote;
+   }
+   if (fsync(fd) != 0 || ftruncate(fd, 0) != 0 || fsync(fd) != 0)
+      return -1;
+   return 0;
+}
+
+static int load_enroll_registry(int fd, const char *cred, char **out, size_t *len,
+                                off_t *legacy_size)
+{
+   *out = calloc(1, KB_ENROLL_VAULT_REGISTRY_MAX + 1);
+   if (!*out)
+      return -1;
+   vault_status_t st = vault_service_get_server_principal(KB_ENROLL_VAULT_AGENT, cred, *out,
+                                                          KB_ENROLL_VAULT_REGISTRY_MAX + 1);
+   if (st == VAULT_OK)
+   {
+      *len = strlen(*out);
+      *legacy_size = lseek(fd, 0, SEEK_END);
+      if (*legacy_size < 0)
+         return -1;
+      return 0;
+   }
+   if (st != VAULT_NO_ENTRY)
+      return -1;
+
+   off_t size = lseek(fd, 0, SEEK_END);
+   if (size < 0 || size > KB_ENROLL_VAULT_REGISTRY_MAX || lseek(fd, 0, SEEK_SET) != 0)
+      return -1;
+   *legacy_size = size;
+   size_t got = 0;
+   while (got < (size_t)size)
+   {
+      ssize_t n = read(fd, *out + got, (size_t)size - got);
+      if (n < 0 && errno == EINTR)
+         continue;
+      if (n <= 0)
+         return -1;
+      got += (size_t)n;
+   }
+   (*out)[got] = '\0';
+   *len = got;
+   return 0;
+}
+
+static int save_enroll_registry(int fd, const char *cred, char *registry, size_t len,
+                                off_t legacy_size)
+{
+   if (len >= KB_ENROLL_VAULT_REGISTRY_MAX || registry[len] != '\0')
+      return -1;
+   if (vault_service_set_server(KB_ENROLL_VAULT_AGENT, cred, registry) != VAULT_OK)
+      return -1;
+   return clear_legacy_store(fd, legacy_size);
+}
+
+int kb_enroll_store_migrate(const char *path)
+{
+   if (!path || !path[0])
+      return -1;
+   int fd = open(path, O_RDWR);
+   if (fd < 0)
+      return errno == ENOENT ? 0 : -1;
+   int rc = -1;
+   if (flock(fd, LOCK_EX) == 0)
+   {
+      char cred[80], *registry = NULL;
+      size_t registry_len = 0;
+      off_t legacy_size = 0;
+      if (enroll_vault_cred(path, cred) == 0 &&
+          load_enroll_registry(fd, cred, &registry, &registry_len, &legacy_size) == 0)
+      {
+         if (legacy_size == 0 ||
+             (registry_len > 0 &&
+              save_enroll_registry(fd, cred, registry, registry_len, legacy_size) == 0))
+            rc = 0;
+      }
+      if (registry)
+      {
+         OPENSSL_cleanse(registry, KB_ENROLL_VAULT_REGISTRY_MAX + 1);
+         free(registry);
+      }
+      flock(fd, LOCK_UN);
+   }
+   close(fd);
+   return rc;
+}
 
 int kb_enroll_store_issue(const char *path, const char *scope, char *out, size_t cap)
 {
@@ -281,22 +396,39 @@ int kb_enroll_store_issue(const char *path, const char *scope, char *out, size_t
    if (strlen(scope) >= KB_ENROLL_SCOPE_MAX || strchr(scope, '\t') || strchr(scope, '\n'))
       return -1;
 
-   char tok[KB_ENROLL_TOKEN_MAX], hash[KB_ENROLL_HASH_HEX];
+   char tok[KB_ENROLL_TOKEN_MAX], hash[KB_ENROLL_HASH_HEX], cred[80];
    if (kb_enroll_token_generate(tok, sizeof(tok)) < 0)
       return -1;
    if (kb_enroll_token_hash(tok, hash, sizeof(hash)) != 0)
       return -1;
+   if (enroll_vault_cred(path, cred) != 0)
+      return -1;
 
-   int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0600);
+   int fd = open(path, O_RDWR | O_CREAT, 0600);
    if (fd < 0)
       return -1;
    int rc = -1;
    if (flock(fd, LOCK_EX) == 0)
    {
+      char *registry = NULL;
+      size_t registry_len = 0;
+      off_t legacy_size = 0;
       char line[64 + 4 + KB_ENROLL_SCOPE_MAX];
       int n = snprintf(line, sizeof(line), "%s\t0\t%s\n", hash, scope);
-      if (n > 0 && (size_t)n < sizeof(line) && write(fd, line, (size_t)n) == (ssize_t)n)
-         rc = 0;
+      if (n > 0 && (size_t)n < sizeof(line) &&
+          load_enroll_registry(fd, cred, &registry, &registry_len, &legacy_size) == 0 &&
+          registry_len + (size_t)n < KB_ENROLL_VAULT_REGISTRY_MAX)
+      {
+         memcpy(registry + registry_len, line, (size_t)n + 1);
+         registry_len += (size_t)n;
+         if (save_enroll_registry(fd, cred, registry, registry_len, legacy_size) == 0)
+            rc = 0;
+      }
+      if (registry)
+      {
+         OPENSSL_cleanse(registry, KB_ENROLL_VAULT_REGISTRY_MAX + 1);
+         free(registry);
+      }
       flock(fd, LOCK_UN);
    }
    close(fd);
@@ -316,11 +448,13 @@ int kb_enroll_store_consume(const char *path, const char *token, char *scope_out
 {
    if (!path || !path[0] || !token)
       return 0;
-   char hash[KB_ENROLL_HASH_HEX];
+   char hash[KB_ENROLL_HASH_HEX], cred[80];
    if (kb_enroll_token_hash(token, hash, sizeof(hash)) != 0)
       return 0;
+   if (enroll_vault_cred(path, cred) != 0)
+      return 0;
 
-   int fd = open(path, O_RDWR);
+   int fd = open(path, O_RDWR | O_CREAT, 0600);
    if (fd < 0)
       return 0; /* no store -> nothing to consume */
 
@@ -332,28 +466,10 @@ int kb_enroll_store_consume(const char *path, const char *token, char *scope_out
       return 0;
    }
 
-   /* Slurp the whole (small) file. */
-   off_t size = lseek(fd, 0, SEEK_END);
-   if (size < 0 || lseek(fd, 0, SEEK_SET) != 0)
+   size_t registry_len = 0;
+   off_t legacy_size = 0;
+   if (load_enroll_registry(fd, cred, &buf, &registry_len, &legacy_size) != 0)
       goto done;
-   buf = malloc((size_t)size + 1);
-   if (!buf)
-      goto done;
-   ssize_t got = 0;
-   while (got < size)
-   {
-      ssize_t r = read(fd, buf + got, (size_t)(size - got));
-      if (r < 0)
-      {
-         if (errno == EINTR)
-            continue;
-         goto done;
-      }
-      if (r == 0)
-         break;
-      got += r;
-   }
-   buf[got] = '\0';
 
    /* Find the first matching, unconsumed record; flip its consumed flag. The
     * line layout is fixed: 64 hex chars, '\t', the consumed flag, '\t', scope. */
@@ -379,21 +495,23 @@ int kb_enroll_store_consume(const char *path, const char *token, char *scope_out
                memcpy(scope_out, scope, copy);
                scope_out[copy] = '\0';
             }
-            /* Mark consumed by flipping the single flag byte ('0'->'1') in place
-             * at its known file offset. A one-byte pwrite is far safer than a
-             * truncate-and-rewrite: it can never corrupt the store or drop the
-             * other records, even on a crash mid-write. */
-            off_t flag_off = (off_t)(line - buf) + 65;
-            if (pwrite(fd, "1", 1, flag_off) == 1)
+            line[65] = '1';
+            if (save_enroll_registry(fd, cred, buf, registry_len, legacy_size) == 0)
                result = 1;
             break;
          }
       }
       line = nl ? nl + 1 : NULL;
    }
+   if (!result && legacy_size > 0)
+      (void)save_enroll_registry(fd, cred, buf, registry_len, legacy_size);
 
 done:
-   free(buf);
+   if (buf)
+   {
+      OPENSSL_cleanse(buf, KB_ENROLL_VAULT_REGISTRY_MAX + 1);
+      free(buf);
+   }
    flock(fd, LOCK_UN);
    close(fd);
    return result;

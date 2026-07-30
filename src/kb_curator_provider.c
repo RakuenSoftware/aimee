@@ -1,6 +1,7 @@
 /* kb_curator_provider.c: stage -> configured curator LLM provider. See header. */
 
 #include "kb_curator_provider.h"
+#include "runtime_secret.h"
 
 #include <pthread.h>
 #include <stdio.h>  /* snprintf — AIMEE_LLM_URL -> {base}/v1 */
@@ -150,6 +151,8 @@ int kb_curator_provider_for_stage(const config_t *cfg, kb_curator_stage_t stage,
     * A config provider for the tier (checked above) still wins. Whole-provider
     * fallback: base+model+key move as a unit. */
    static __thread char synth_url[512];
+   static __thread char runtime_key[512];
+   runtime_secret_wipe(runtime_key, sizeof(runtime_key));
    if (!base_url[0])
    {
       const char *llm_url = getenv("AIMEE_LLM_URL");
@@ -165,12 +168,12 @@ int kb_curator_provider_for_stage(const config_t *cfg, kb_curator_stage_t stage,
          const char *env_model = getenv("AIMEE_LLM_MODEL");
          base_url = synth_url;
          model = (env_model && env_model[0]) ? env_model : AIMEE_LLM_DEFAULT_MODEL;
-         const char *service_token = getenv("AIMEE_LLM_AUTH_TOKEN");
+         int have_service_token =
+             runtime_secret_get("AIMEE_LLM_AUTH_TOKEN", runtime_key, sizeof(runtime_key));
          const char *auth_required = getenv("AIMEE_LLM_AUTH_REQUIRED");
-         if (auth_required && strcmp(auth_required, "1") == 0 &&
-             (!service_token || !service_token[0]))
+         if (auth_required && strcmp(auth_required, "1") == 0 && !have_service_token)
             return 0; /* managed unified gateway must never receive a keyless request */
-         api_key = (service_token && service_token[0]) ? service_token : "";
+         api_key = have_service_token ? runtime_key : "";
       }
       else if (kb_curator_stage_tier(stage) == KB_CURATOR_TIER_A)
       {
@@ -178,10 +181,10 @@ int kb_curator_provider_for_stage(const config_t *cfg, kb_curator_stage_t stage,
          if (!env_ep || !env_ep[0])
             return 0; /* neither config nor env — the stage stays idle */
          const char *env_model = getenv("LLM_MODEL");
-         const char *env_key = getenv("LLM_API_KEY");
+         (void)runtime_secret_get("LLM_API_KEY", runtime_key, sizeof(runtime_key));
          base_url = env_ep;
          model = (env_model && env_model[0]) ? env_model : "";
-         api_key = (env_key && env_key[0]) ? env_key : "";
+         api_key = runtime_key;
       }
       else
       {

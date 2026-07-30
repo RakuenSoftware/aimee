@@ -3,8 +3,6 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -50,10 +48,6 @@ func TestWorkflowItemsLifecycleRouting(t *testing.T) {
 				w.Write([]byte(`{"status":"ok"}`))
 			})
 			cfg := startFakeV1(t, mux)
-			if err := os.WriteFile(filepath.Join(filepath.Dir(cfg.socketPath), "server.token"),
-				[]byte("sekret-token\n"), 0600); err != nil {
-				t.Fatalf("write server.token: %v", err)
-			}
 			s := &server{cfg: cfg}
 
 			req := withUser(httptest.NewRequest(tc.method, tc.apiPath, nil), "alice")
@@ -104,10 +98,6 @@ func TestWorkflowItemsSliceIDRouting(t *testing.T) {
 				w.Write([]byte(`{"status":"ok"}`))
 			})
 			cfg := startFakeV1(t, mux)
-			if err := os.WriteFile(filepath.Join(filepath.Dir(cfg.socketPath), "server.token"),
-				[]byte("sekret-token\n"), 0600); err != nil {
-				t.Fatalf("write server.token: %v", err)
-			}
 			s := &server{cfg: cfg}
 			var body []byte
 			if tc.method == http.MethodPost {

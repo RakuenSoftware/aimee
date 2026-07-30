@@ -26,7 +26,7 @@
 #   AIMEE_EMBEDDER_URL  embedder endpoint        (full mode; optional)
 #   SERVER_PORT   server loopback HTTP port       (default 8740)
 #   SERVER_TLS_PORT server TLS /v1 port           (default SERVER_PORT + 3)
-#   BEARER        server bearer token            (default aimee-local-dev)
+#   BEARER        server first-boot bearer        (default random per run)
 #   WAIT_SECONDS  health wait budget             (default 90)
 #
 # Exit code: 0 = all checks passed.
@@ -36,7 +36,7 @@ set -euo pipefail
 MODE="${MODE:-full}"
 SERVER_PORT="${SERVER_PORT:-8740}"
 SERVER_TLS_PORT="${SERVER_TLS_PORT:-$((SERVER_PORT + 3))}"
-BEARER="${BEARER:-aimee-local-dev}"
+BEARER="${BEARER:-$(openssl rand -hex 32)}"
 KB_URL="${KB_URL:-http://localhost:8741}"
 WAIT_SECONDS="${WAIT_SECONDS:-90}"
 
@@ -84,11 +84,10 @@ export AIMEE_HOME="$SCRATCH"
 mkdir -p "$AIMEE_HOME/.config/aimee"
 # Server config: move both /v1 listeners to the requested scratch ports. The
 # managed policy requests a client certificate and keeps the retired global
-# write switch off; the wizard creates the first user's explicit grant.
-sed "s/8740/${SERVER_PORT}/; s/8743/${SERVER_TLS_PORT}/; s/aimee-local-dev/${BEARER}/" \
+# write switch off; the wizard creates the first user's explicit grant. The
+# bearer is injected only into the server's first-boot process below.
+sed "s/8740/${SERVER_PORT}/; s/8743/${SERVER_TLS_PORT}/" \
     deploy/container/aimee-server.yaml > "$AIMEE_HOME/aimee.yaml"
-openssl rand -hex -out "$AIMEE_HOME/server.token" 32
-chmod 600 "$AIMEE_HOME/server.token"
 # kb config: the baked container config points sidecar commands at the in-image
 # /opt/aimee/scripts/ path; for a NATIVE local run rewrite them to the repo's
 # scripts/ so the kb can actually popen embed-remote.py etc.
@@ -156,7 +155,8 @@ else
 fi
 
 bold "==> Starting aimee-server"
-"$REPO/aimee-server" --socket="$AIMEE_HOME/aimee-server.sock" &
+AIMEE_API_BEARER_TOKEN="$BEARER" \
+  "$REPO/aimee-server" --socket="$AIMEE_HOME/aimee-server.sock" &
 server_pid=$!
 
 # The enrollment claim is issued over the server's operator UDS, while the client
@@ -178,10 +178,9 @@ done
 # the signed client certificate. Keep client state separate from server state.
 CLIENT_HOME="$SCRATCH/client"
 mkdir -p "$CLIENT_HOME"
-IFS= read -r SERVER_TOKEN < "$AIMEE_HOME/server.token"
 bold "==> Claiming the first wizard user"
 deploy_status="$(curl -sS --unix-socket "$AIMEE_HOME/aimee-server.sock" \
-  -H "Authorization: Bearer $SERVER_TOKEN" -H 'X-Aimee-Webuser: local-stack-e2e' \
+  -H 'X-Aimee-Webuser: local-stack-e2e' \
   -H 'content-type: application/json' -X POST -d '{}' -o "$SCRATCH/deploy-apply.json" \
   -w '%{http_code}' http://localhost/v1/deploy/apply)"
 [[ "$deploy_status" == 200 ]] || {

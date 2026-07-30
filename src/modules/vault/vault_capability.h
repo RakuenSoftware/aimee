@@ -56,7 +56,7 @@ extern "C"
     * performs), so this needs NO vault:write:server grant — deliberately WIDER than
     * vault_capability_server_write_allowed, which still gates the arbitrary-cred
     * `vault set --server`. Returns 1 for native-TLS bearer, mTLS client,
-    * server.token-trusted webchat, and local UDS; 0 for plaintext TCP bearer (D2b:
+    * root-UDS-trusted webchat, and local UDS; 0 for plaintext TCP bearer (D2b:
     * never mint a server credential over an unencrypted channel) and un-attested. */
    int vault_agent_key_server_seal_allowed(attested_transport_t transport);
 

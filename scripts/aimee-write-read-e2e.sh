@@ -16,14 +16,18 @@
 # itself is deliberately read-only, and `aimee.api.remote_writes` cannot widen it.
 # Authority-managed identity-token coverage lives in run-write-tier-enforce-live.sh.
 #
-# Env: SERVER_URL (default https://localhost:8743), BEARER (default aimee-local-dev),
+# Env: SERVER_URL (default https://localhost:8743), BEARER (required),
 #      CLIENT_CERT and CLIENT_KEY (the enrolled PEM files; both or neither).
 # Exit code: 0 = the sentinel round-tripped through store→list→search.
 
 set -uo pipefail
 
 SERVER_URL="${SERVER_URL:-https://localhost:8743}"
-BEARER="${BEARER:-aimee-local-dev}"
+BEARER="${BEARER:-}"
+if [[ -z "$BEARER" ]]; then
+  echo "BEARER is required" >&2
+  exit 2
+fi
 AUTH=(-H "Authorization: Bearer ${BEARER}")
 JSON=(-H 'content-type: application/json')
 IDENTITY=()

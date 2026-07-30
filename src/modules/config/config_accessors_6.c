@@ -1625,17 +1625,7 @@ int config_set_db1_path(const char *value)
 
 int config_set_db2_url(const char *value)
 {
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->db2_url, sizeof(cfg->db2_url), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
+   return config_secret_store("AIMEE_DB2_URL", value);
 }
 
 int config_set_provider(const char *value)

@@ -45,9 +45,11 @@ services:
       AIMEE_HOME: /var/lib/aimee
       AIMEE_DB1_URL: sqlite:///var/lib/aimee/aimee.db
       AIMEE_SERVER_HTTP_BIND: "1"
-      # Browser webchat (the wizard lives here). Set both vars for an explicit
-      # PAM login; omit both to generate one and print it in container logs.
-      AIMEE_RUNTIME_WEB_ENABLED: "1"
+      # Browser webchat (the wizard lives here). Both values are required on a
+      # fresh boot. The entrypoint seals them into Vault and scrubs its env before
+      # starting webchat/server/WFE; no credential is generated into logs.
+      AIMEE_RUNTIME_WEB_ENABLED: ${AIMEE_RUNTIME_WEB_ENABLED:-1}
+      AIMEE_API_BEARER_TOKEN: ${AIMEE_API_BEARER_TOKEN:-}
       AIMEE_WEBCHAT_USER: ${AIMEE_WEBCHAT_USER:-}
       AIMEE_WEBCHAT_PASSWORD: ${AIMEE_WEBCHAT_PASSWORD:-}
       # Reach the managed kb by name on the shared network once it is up.
@@ -86,12 +88,11 @@ services:
       AIMEE_AUTHORITY_BOOTSTRAP_IMAGE: ${AIMEE_AUTHORITY_BOOTSTRAP_IMAGE:-ghcr.io/rakuensoftware/aimee-authority-bootstrap:${AIMEE_IMAGE_TAG:-latest}}
       AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-cpu}
       AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}
-      # Optional operator-supplied KB -> LLM service bearer. When omitted, the
-      # wizard generates a stable 256-bit credential in the server volume and
-      # supplies it only to the managed KB and LLM containers.
+      # Optional first-boot transport for a KB -> LLM service bearer. When
+      # omitted, the wizard generates a stable 256-bit credential in Vault.
       # Deliberate migration/adoption only. Ordinary AIMEE_LLM_AUTH_TOKEN is a
       # child-service variable and is ignored by server-side credential creation
-      # so stale inherited state cannot override the managed private file.
+      # so stale inherited state cannot override the Vault record.
       AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE: ${AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE:-}
       # "Sign in with OAuth" client IDs (public; see oauth_defaults.h). Set the
       # GitHub client ID + secret for the seamless "click → GitHub → back, logged
