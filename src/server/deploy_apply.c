@@ -225,6 +225,11 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
    config_emit_deploy_env(&cfg, env, sizeof(env));
 
    char llm_token[513] = "";
+   /* Currently always 0: config_emit_deploy_env stopped emitting the "llm" profile when
+    * the aimee-llm container was retired, so no managed inference service is deployed and
+    * no KB-to-LLM credential is minted. The mechanism is kept (and still covered by
+    * test_deploy_apply against a stub profile) because synthesis has not been resolved
+    * yet — whatever serves it may well be a managed service again. */
    const int managed_llm = deploy_env_has_profile(env, "llm");
    const int managed_kb = deploy_env_has_profile(env, "kb");
    const char *explicit_conn = getenv("AIMEE_KB_CONN");

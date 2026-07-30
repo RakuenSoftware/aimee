@@ -1,6 +1,7 @@
 # Inference tiers
 
-One `aimee-llm` image serves embedding and synthesis. `AIMEE_LLM_TIER` selects the model
+Synthesis runs against an external OpenAI-compatible endpoint; the knowledge base embeds
+in-container and needs no inference service. The tiers below describe the synth model
 set and concurrency at runtime.
 
 | Tier | Intended host | Embedding width | Synthesis shape |

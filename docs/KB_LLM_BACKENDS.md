@@ -24,7 +24,7 @@ The managed contract is explicit:
 
 | Consumer | Configuration received | Request surface |
 | --- | --- | --- |
-| `aimee-kb` | `AIMEE_LLM_URL=http://aimee-llm:8742`, `AIMEE_LLM_AUTH_TOKEN`, `AIMEE_LLM_MODEL` (default `aimee-synth`), and an optional pinned `AIMEE_EMBEDDING_DIM` | `/embed`, `/embed_batch`, `/v1/chat/completions`, `/auth/verify` |
+| `aimee-kb` | `AIMEE_LLM_URL` (synth only, no default), `AIMEE_LLM_AUTH_TOKEN`, `AIMEE_LLM_MODEL` (default `aimee-synth`). Embedding is in-container; `AIMEE_EMBEDDER_URL` overrides it with an external endpoint | `/v1/chat/completions` on the synth endpoint |
 | `aimee-llm` | the same `AIMEE_LLM_AUTH_TOKEN`; `AIMEE_LLM_{EMBED,SYNTH}_{MODE,TIER,URL}`; `AIMEE_LLM_SYNTH_MODEL`; optional `AIMEE_EMBEDDING_DIM`; and the runtime GPU settings | serves a local role, proxies its configured external URL, or rejects an `off` role; rejects an embedding-dimension mismatch when pinned |
 | legacy KB curator sidecars | `LLM_API_KEY` aliasing the same service bearer | the unified gateway's OpenAI-compatible `/v1` surface |
 

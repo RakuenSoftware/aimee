@@ -45,7 +45,7 @@ carries into production unchanged), and is the reasonable pick for a CPU-only bo
 
 Only embedders this deployment can host are offered for a local placement; an entry
 without weight coordinates is selectable against an external endpoint instead. Operators
-can add their own with `AIMEE_LLM_EMBEDDERS_EXTRA`, declaring the pooling, width, context
+can add their own with `EMBEDDERS_EXTRA`, declaring the pooling, width, context
 and prefixes — nobody can infer those for you, and each one changes the vectors.
 
 **Changing the embedder is destructive.** The wizard requires a typed confirmation,
