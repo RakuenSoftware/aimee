@@ -413,6 +413,34 @@ static void test_percent_encoded_uri_keys_are_recognised(void)
    printf("  PASS: percent-encoded URI query keys are recognised as the options they are\n");
 }
 
+/* statement_timeout bounds a STATEMENT. A unit of work that opens a transaction
+ * and then stalls before its next statement is invisible to it and holds its
+ * pool member indefinitely — measured at ~4.5 hours against a 5-minute ceiling
+ * with statement_timeout correctly set the whole time. The idle bound is what
+ * makes Postgres end that backend so the lease comes back without a restart. */
+static void test_idle_in_transaction_bound(void)
+{
+   unsetenv("AIMEE_DB2_IDLE_IN_TRANSACTION_TIMEOUT_MS");
+   must(db2_pg_idle_in_transaction_timeout_ms() == DB2_POOL_HOLD_CEILING_MS,
+        "idle bound defaults to the pool hold ceiling");
+
+   setenv("AIMEE_DB2_IDLE_IN_TRANSACTION_TIMEOUT_MS", "45000", 1);
+   must(db2_pg_idle_in_transaction_timeout_ms() == 45000, "idle override honoured");
+
+   /* Exactly "0" is the documented opt-out; every malformed spelling must fall
+    * back to the bound rather than silently removing it. */
+   setenv("AIMEE_DB2_IDLE_IN_TRANSACTION_TIMEOUT_MS", "0", 1);
+   must(db2_pg_idle_in_transaction_timeout_ms() == 0, "exactly 0 disables");
+   const char *bad[] = {"00", "-0", " 0", "+0", "007", "4294967296", "abc", ""};
+   for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
+   {
+      setenv("AIMEE_DB2_IDLE_IN_TRANSACTION_TIMEOUT_MS", bad[i], 1);
+      must(db2_pg_idle_in_transaction_timeout_ms() == DB2_POOL_HOLD_CEILING_MS,
+           "a malformed idle bound falls back rather than unbounding");
+   }
+   unsetenv("AIMEE_DB2_IDLE_IN_TRANSACTION_TIMEOUT_MS");
+}
+
 int main(void)
 {
    printf("test_db2_conn_bounds:\n");
@@ -428,6 +456,7 @@ int main(void)
    test_no_room_fails_rather_than_dropping_the_bounds();
    test_an_out_of_range_override_falls_back();
    test_option_detection_matches_whole_keys();
+   test_idle_in_transaction_bound();
    test_quoted_values_cannot_suppress_the_bounds();
    test_every_form_parses_as_libpq_intends();
    test_newline_separated_options_are_seen();

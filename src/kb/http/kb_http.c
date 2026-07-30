@@ -5,6 +5,7 @@
 #include "aimee.h"
 #include "config.h"
 #include "config_database.h" /* §2c: config_resolve_embedding_dim / is_pinned */
+#include "db2_pool.h"        /* db2_pool_stats — health reports pool starvation */
 #include "lifecycle.h"       /* §2c: db2_dim_change_reset / db2_probe_embedder_dim */
 #include "kb_curator_queue.h"
 #include "kb_http.h"
@@ -128,6 +129,34 @@ void send_response(int fd, int status, const char *body)
 
 /* ── public route logic (also called by unit tests) ─────────────────────── */
 
+/* Health has to be able to say "I am sick".
+ *
+ * This endpoint returned a bare {"status":"ok"} unconditionally, so a kb whose
+ * connection pool had been leaking for three hours reported ok on the one port
+ * that still answered — 1096 failed health checks later, the only symptom
+ * visible from outside was a TIMEOUT, which reads as a hung box rather than a
+ * diagnosed fault. Report the pool, and fail the check when it is starved: every
+ * member stuck past its ceiling with callers queued is a lease leak this process
+ * cannot fix in place (the pool refuses to reclaim a live lease, and rightly).
+ *
+ * Non-2xx is the point. The container HEALTHCHECK is `curl -fsS`, so degraded
+ * here is what finally makes Docker's unhealthy state mean something. It fires
+ * before the pool reaper gives up and exits, so the softer signal comes first.
+ *
+ * Writes the pool object into `buf`; returns 1 when starved. */
+static int kb_health_pool_json(char *buf, size_t cap)
+{
+   int size = 0, in_use = 0, waiters = 0;
+   long grants = 0, timeouts = 0, stuck = 0, poisoned = 0;
+   db2_pool_stats(&size, &in_use, &waiters, &grants, &timeouts, &stuck, &poisoned);
+   int starved = (size > 0 && in_use == size && waiters > 0);
+   snprintf(buf, cap,
+            "\"pool\":{\"size\":%d,\"in_use\":%d,\"waiters\":%d,\"lease_timeouts\":%ld,"
+            "\"stuck\":%ld,\"poisoned\":%ld}",
+            size, in_use, waiters, timeouts, stuck, poisoned);
+   return starved;
+}
+
 int kb_http_route(const char *method, const char *path, const char *auth_header,
                   const char *bearer_token, char *out_buf, int out_cap)
 {
@@ -153,8 +182,11 @@ int kb_http_route(const char *method, const char *path, const char *auth_header,
 
    if (strcmp(path, "/v1/health") == 0)
    {
-      snprintf(out_buf, (size_t)out_cap, "{\"status\":\"ok\"}");
-      return 200;
+      char pool[256] = "";
+      int starved = kb_health_pool_json(pool, sizeof(pool));
+      snprintf(out_buf, (size_t)out_cap, "{\"status\":\"%s\",%s}", starved ? "degraded" : "ok",
+               pool);
+      return starved ? 503 : 200;
    }
 
    if (strcmp(path, "/v1/version") == 0)

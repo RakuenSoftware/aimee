@@ -154,7 +154,13 @@ extern "C"
     * the pool between units (instead of held for the thread's life). Re-entrant
     * (refcounted). db2_conn() lazily leases one if none is held; an unbracketed
     * lazy lease is returned when the thread exits. */
-   void db2_lease_begin(void);
+   /* See db2.h: the db2_lease_begin macro records the caller's file:line. */
+   void db2_lease_begin_at(const char *site);
+#ifndef db2_lease_begin
+#define DB2_LEASE_STRINGIFY_(x) #x
+#define DB2_LEASE_SITE_(f, l)   f ":" DB2_LEASE_STRINGIFY_(l)
+#define db2_lease_begin()       db2_lease_begin_at(DB2_LEASE_SITE_(__FILE__, __LINE__))
+#endif
    void db2_lease_end(void);
 
    int db2_fork_conn_url(char *out, size_t cap);

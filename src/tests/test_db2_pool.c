@@ -248,6 +248,171 @@ static void test_reaper_detects_stuck_lease(void)
    db2_pool_shutdown();
 }
 
+/* --- unrecoverable starvation -------------------------------------------- */
+
+static char g_starved_reason[256];
+static int g_starved_calls;
+static void record_starved(const char *reason)
+{
+   g_starved_calls++;
+   snprintf(g_starved_reason, sizeof(g_starved_reason), "%s", reason ? reason : "");
+}
+
+/* A pool whose every member is stuck past the ceiling WITH callers queued behind
+ * them cannot recover: this pool deliberately never reclaims a live lease, so no
+ * later sweep improves anything. Measured in production as 1096 consecutive
+ * failed health checks over three hours with every member held ~4.5h past a
+ * 5-minute ceiling. The process must give up so a restart policy can fix it. */
+static void *starve_waiter(void *arg)
+{
+   (void)arg;
+   /* Queues behind the exhausted pool; this is the waiter the policy requires. */
+   void *c = db2_pool_lease(3000);
+   if (c)
+      db2_pool_return(c);
+   return NULL;
+}
+
+static void test_starved_pool_gives_up_so_it_can_be_restarted(void)
+{
+   install_mock();
+   char e[128] = "";
+   assert(db2_pool_init("mock://x", 2, e, sizeof(e)) == 0);
+   db2_pool_set_test_ceiling_ms(50);
+   db2_pool_set_test_starved_action(record_starved);
+   g_starved_calls = 0;
+   g_starved_reason[0] = '\0';
+
+   void *a = db2_pool_lease(1000), *b = db2_pool_lease(1000);
+   assert(a && b); /* every member leased, and never returned */
+   usleep(120 * 1000);
+
+   pthread_t w;
+   assert(pthread_create(&w, NULL, starve_waiter, NULL) == 0);
+   usleep(150 * 1000); /* let the waiter queue */
+
+   /* One sweep is not enough: a single unlucky sample must not restart a kb. */
+   for (int i = 0; i < DB2_POOL_STARVED_SWEEPS - 1; i++)
+   {
+      (void)db2_pool_reaper_sweep();
+      assert(g_starved_calls == 0);
+   }
+   (void)db2_pool_reaper_sweep();
+   assert(g_starved_calls == 1);
+   assert(strstr(g_starved_reason, "lease leak") != NULL);
+
+   pthread_join(w, NULL);
+   db2_pool_return(a);
+   db2_pool_return(b);
+   db2_pool_set_test_starved_action(NULL);
+   db2_pool_shutdown();
+}
+
+/* A fully-leased pool with NOBODY waiting is a busy kb, not a stuck one, and a
+ * busy kb must never be restarted underneath its users. */
+static void test_busy_pool_is_not_treated_as_starved(void)
+{
+   install_mock();
+   char e[128] = "";
+   assert(db2_pool_init("mock://x", 2, e, sizeof(e)) == 0);
+   db2_pool_set_test_ceiling_ms(50);
+   db2_pool_set_test_starved_action(record_starved);
+   g_starved_calls = 0;
+
+   void *a = db2_pool_lease(1000), *b = db2_pool_lease(1000);
+   assert(a && b);
+   usleep(120 * 1000); /* past the ceiling, but no waiters */
+
+   for (int i = 0; i < DB2_POOL_STARVED_SWEEPS + 2; i++)
+      (void)db2_pool_reaper_sweep();
+   assert(g_starved_calls == 0);
+
+   db2_pool_return(a);
+   db2_pool_return(b);
+   db2_pool_set_test_starved_action(NULL);
+   db2_pool_shutdown();
+}
+
+/* And the counter resets: a pool that recovers between sweeps must not carry
+ * partial credit toward a later restart. */
+static void test_starvation_streak_resets_on_recovery(void)
+{
+   install_mock();
+   char e[128] = "";
+   assert(db2_pool_init("mock://x", 2, e, sizeof(e)) == 0);
+   db2_pool_set_test_ceiling_ms(50);
+   db2_pool_set_test_starved_action(record_starved);
+   g_starved_calls = 0;
+
+   void *a = db2_pool_lease(1000), *b = db2_pool_lease(1000);
+   assert(a && b);
+   usleep(120 * 1000);
+   pthread_t w;
+   assert(pthread_create(&w, NULL, starve_waiter, NULL) == 0);
+   usleep(150 * 1000);
+   (void)db2_pool_reaper_sweep(); /* one starved sweep observed */
+
+   db2_pool_return(a); /* the leak clears; the waiter is served */
+   pthread_join(w, NULL);
+   (void)db2_pool_reaper_sweep(); /* healthy -> streak resets */
+
+   /* Starve again: it must take a FULL streak, not one more sweep. */
+   a = db2_pool_lease(1000);
+   assert(a);
+   usleep(120 * 1000);
+   pthread_t w2;
+   assert(pthread_create(&w2, NULL, starve_waiter, NULL) == 0);
+   usleep(150 * 1000);
+   for (int i = 0; i < DB2_POOL_STARVED_SWEEPS - 1; i++)
+   {
+      (void)db2_pool_reaper_sweep();
+      assert(g_starved_calls == 0);
+   }
+   (void)db2_pool_reaper_sweep();
+   assert(g_starved_calls == 1);
+
+   pthread_join(w2, NULL);
+   db2_pool_return(a);
+   db2_pool_return(b);
+   db2_pool_set_test_starved_action(NULL);
+   db2_pool_shutdown();
+}
+
+/* A stuck lease has to be actionable. "member 3 leased 4.5h" names no code, and
+ * the leak that wedged a kb for three hours could not be located from it. The
+ * pool records the db2_lease_begin call site so the reaper reports WHO. */
+static void test_stuck_lease_reports_its_call_site(void)
+{
+   install_mock();
+   char e[128] = "";
+   assert(db2_pool_init("mock://x", 2, e, sizeof(e)) == 0);
+   db2_pool_set_test_ceiling_ms(50);
+
+   void *a = db2_pool_lease(1000);
+   assert(a);
+   db2_pool_note_lease_site(a, "kb_ingest_workers.c:221");
+   usleep(120 * 1000);
+   assert(db2_pool_reaper_sweep() == 1);
+
+   /* An unattributed lease still sweeps rather than crashing the reaper. */
+   void *b = db2_pool_lease(1000);
+   assert(b);
+   usleep(120 * 1000);
+   assert(db2_pool_reaper_sweep() == 2);
+
+   /* Returning and re-leasing must not carry the old attribution forward, or a
+    * later leak would be blamed on innocent code. */
+   db2_pool_return(a);
+   void *c = db2_pool_lease(1000);
+   assert(c);
+   usleep(120 * 1000);
+   assert(db2_pool_reaper_sweep() == 2);
+
+   db2_pool_return(b);
+   db2_pool_return(c);
+   db2_pool_shutdown();
+}
+
 int main(void)
 {
    test_lease_return_basic();
@@ -256,6 +421,10 @@ int main(void)
    test_poison_on_reset_fail();
    test_explicit_discard_never_reuses_uncertain_connection();
    test_reaper_detects_stuck_lease();
+   test_stuck_lease_reports_its_call_site();
+   test_starved_pool_gives_up_so_it_can_be_restarted();
+   test_busy_pool_is_not_treated_as_starved();
+   test_starvation_streak_resets_on_recovery();
    printf("db2_pool: all tests passed\n");
    return 0;
 }

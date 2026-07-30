@@ -769,6 +769,18 @@ ENV_DESC = {
         "out-of-range falls back to the default and never to unlimited, so no typo can "
         "silently remove the bound.",
     ),
+    "AIMEE_DB2_IDLE_IN_TRANSACTION_TIMEOUT_MS": (
+        "Database & vectors",
+        "Per-connection `idle_in_transaction_session_timeout` in ms, defaulting to the "
+        "same pool stuck-lease ceiling (`DB2_POOL_HOLD_CEILING_MS`, 300000). "
+        "`statement_timeout` bounds a STATEMENT, so a unit of work that opens a "
+        "transaction and then stalls before its next statement is invisible to it and "
+        "holds its pool member indefinitely — measured at ~4.5 hours against a "
+        "five-minute ceiling. Postgres ends such a backend itself, so the stalled thread "
+        "unwinds and the lease is returned without a restart. Same value grammar as "
+        "`AIMEE_DB2_STATEMENT_TIMEOUT_MS`; exactly `0` opts out, independently of the "
+        "statement bound.",
+    ),
     "AIMEE_EMBEDDING_DIM": ("Database & vectors", "Embedding dimension (drives halfvec column sizing)."),
     "AIMEE_PGVEC_SLOW_QUERY_MS": ("Database & vectors", "Slow-query log threshold (ms) for the pgvector transport."),
     # Memory

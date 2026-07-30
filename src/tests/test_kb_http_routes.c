@@ -48,7 +48,9 @@ void *db2_conn(void)
 {
    return NULL;
 }
-void db2_lease_begin(void)
+/* The real symbol is db2_lease_begin_at; db2_lease_begin is a macro in db2.h
+ * that records the caller's file:line for stuck-lease attribution. */
+void db2_lease_begin_at(const char *site)
 {
 }
 void db2_lease_end(void)
@@ -56,6 +58,27 @@ void db2_lease_end(void)
 }
 void db2_lease_release_idle(void)
 {
+}
+/* /v1/health reports pool starvation, so the route layer now reads the pool.
+ * A route test wants no real DB2: report an idle pool so health stays "ok" and
+ * the route assertions are about routing, not pool state. */
+void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
+                    long *stuck, long *poisoned)
+{
+   if (size)
+      *size = 0;
+   if (in_use)
+      *in_use = 0;
+   if (waiters)
+      *waiters = 0;
+   if (lease_grants)
+      *lease_grants = 0;
+   if (lease_timeouts)
+      *lease_timeouts = 0;
+   if (stuck)
+      *stuck = 0;
+   if (poisoned)
+      *poisoned = 0;
 }
 
 static int code_project_manifest_stub(const char *project, code_project_manifest_t *out)

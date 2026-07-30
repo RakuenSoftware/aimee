@@ -321,6 +321,10 @@ typedef struct
 
 static int g_pool_size = 16; /* set via db2_set_pool_size before db2_init */
 static __thread int g_lease_depth = 0;
+/* Call site of the OUTERMOST db2_lease_begin on this thread, so a lease held
+ * past the pool's ceiling can be reported as the code that took it. Always a
+ * string literal from the macro in db2.h; never freed. */
+static __thread const char *g_lease_site = NULL;
 
 void db2_set_pool_size(int size)
 {
@@ -526,6 +530,8 @@ static void *db2_thread_acquire(void)
    {
       conn = db2_pool_lease(0); /* bounded; NULL on exhaustion */
       pooled = (conn != NULL);
+      if (conn && g_lease_site)
+         db2_pool_note_lease_site(conn, g_lease_site);
    }
    if (!conn)
    {
@@ -582,7 +588,7 @@ void *db2_conn(void)
    return db2_thread_acquire();
 }
 
-void db2_lease_begin(void)
+void db2_lease_begin_at(const char *site)
 {
    pthread_once(&g_thread_conn_key_once, thread_conn_key_init);
    /* The init thread is never pooled. */
@@ -590,6 +596,9 @@ void db2_lease_begin(void)
       return;
    if (g_lease_depth++ == 0)
    {
+      /* Outermost scope owns the attribution: a nested begin is served by the
+       * same connection, so the first caller is the one that must release it. */
+      g_lease_site = site;
       db2_thread_lease_t *L = (db2_thread_lease_t *)pthread_getspecific(g_thread_conn_key);
       if (!L || !L->conn)
          (void)db2_thread_acquire(); /* eager lease for the unit of work */

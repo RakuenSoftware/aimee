@@ -24,6 +24,19 @@
  * policy; db_postgres.c consumes it (header only — no link edge). */
 #define DB2_POOL_HOLD_CEILING_MS 300000
 
+/* Exit status used when the pool proves unrecoverably starved and the process
+ * gives up so a restart policy can recover it. Distinct from a crash so an
+ * operator (and the entrypoint's exit reporter) can tell the two apart. */
+#define DB2_POOL_STARVED_EXIT_CODE 92
+
+/* Consecutive sweeps of total starvation before the process gives up on itself.
+ * At the 30s sweep interval this is ~2 minutes of EVERY member stuck with
+ * callers waiting — far beyond any real unit of work, and past the point where
+ * the ceiling (which is itself 5 minutes) has already been exceeded by all of
+ * them. Deliberately several sweeps rather than one: a single sweep that
+ * happens to catch every member mid-hand-off must not restart a healthy kb. */
+#define DB2_POOL_STARVED_SWEEPS 4
+
 #include <stddef.h>
 
 #ifdef __cplusplus
@@ -85,7 +98,17 @@ extern "C"
                               void (*close_fn)(void *), int (*reset_fn)(void *));
 
    /* Test seam: lower the stuck-lease ceiling so a sweep can flag in ms. */
+   /* Record which db2_lease_begin call site holds `conn`, so a stuck lease is
+    * reported as a code location rather than a member index. */
+   void db2_pool_note_lease_site(void *conn, const char *site);
+
    void db2_pool_set_test_ceiling_ms(int ceiling_ms);
+
+   /* Test seam for the unrecoverable-starvation policy. Production leaves this
+    * NULL and the process exits with DB2_POOL_STARVED_EXIT_CODE; a test installs
+    * a recorder so the decision is observable without killing the runner.
+    * Passing NULL restores the production behaviour. */
+   void db2_pool_set_test_starved_action(void (*action)(const char *reason));
 
 #ifdef __cplusplus
 }

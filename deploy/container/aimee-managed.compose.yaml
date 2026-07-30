@@ -65,6 +65,13 @@ services:
       # container interfaces inside kb_mtls_start().
       AIMEE_KB_MTLS_HOST: aimee-kb
       AIMEE_KB_MTLS_PORT: "8745"
+      # The server's workspace tree is mounted below at /var/lib/aimee-workspaces,
+      # but the webuser-root convention resolves to <AIMEE_HOME>/workspaces unless
+      # this is set -- i.e. /var/lib/aimee/workspaces, which does not exist here.
+      # Without it the background ingest reconciler cannot find GUI-cloned repos,
+      # so a repo whose one best-effort scan was lost stays out of the index for
+      # good. Must match the mount path below.
+      AIMEE_WORKSPACES_DIR: /var/lib/aimee-workspaces
     command: ["--http-port=8741"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
