@@ -1999,6 +1999,35 @@ func (raceForge) Merge(context.Context, string, string, string) error {
 	return errors.New("forge resource 405: Base branch was modified. Review and try the merge again.")
 }
 
+// A final/root PR is a human handoff, never an autonomous workflow step. Keep
+// this guard independent of workflow YAML so no definition change can grant the
+// engine authority to merge into the repository base.
+func TestMergeStepRejectsRootFinalPR(t *testing.T) {
+	root := t.TempDir()
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_root", Repo: root,
+		ProposalPath: "p", WorkflowName: "build-e2e", WorkflowVersion: "v",
+		StartStage: "merge"}); err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.WorkItem(ctx, "wi_root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &NativeRunner{db: store, forge: conflictForge{}}
+	_, err = runner.merge(ctx, StepRequest{WorkItem: item,
+		Inputs: map[string]wfe.Artifact{"pr": {Type: "pr",
+			Content: []byte(`{"ref":"https://github.com/acme/repo/pull/42"}`)}}})
+	if err == nil || !strings.Contains(err.Error(), "only for a slice") {
+		t.Fatalf("root merge error = %v, want autonomous slice-only rejection", err)
+	}
+}
+
 // The merge step must distinguish a terminal content conflict from a winnable
 // race. Every merge failure used to become StepPending/"merge_pending", which
 // the scheduler re-queues on a 15s backoff with no retry ceiling — so a slice
