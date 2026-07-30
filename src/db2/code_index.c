@@ -588,6 +588,37 @@ int db2_code_index_blast_radius(const char *project, const char *file_path, blas
    return 0;
 }
 
+void db2_code_index_blast_radius_local_first(const char *project, blast_radius_t *out)
+{
+   if (!project || !project[0] || !out || out->dependent_count < 2)
+      return;
+
+   int first_external = -1;
+   for (int i = 0; i < out->dependent_count; i++)
+   {
+      const int local = strcmp(out->dependent_meta[i].project, project) == 0;
+      if (!local)
+      {
+         if (first_external < 0)
+            first_external = i;
+         continue;
+      }
+      if (first_external < 0)
+         continue;
+
+      char path[MAX_PATH_LEN];
+      blast_edge_meta_t meta = out->dependent_meta[i];
+      memcpy(path, out->dependents[i], sizeof(path));
+      memmove(&out->dependents[first_external + 1], &out->dependents[first_external],
+              (size_t)(i - first_external) * sizeof(out->dependents[0]));
+      memmove(&out->dependent_meta[first_external + 1], &out->dependent_meta[first_external],
+              (size_t)(i - first_external) * sizeof(out->dependent_meta[0]));
+      memcpy(out->dependents[first_external], path, sizeof(path));
+      out->dependent_meta[first_external] = meta;
+      first_external++;
+   }
+}
+
 int db2_code_index_unique_file_basename(const char *project, const char *basename, char *out,
                                         size_t out_cap)
 {

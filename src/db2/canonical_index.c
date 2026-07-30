@@ -1661,6 +1661,8 @@ int canonical_index_blast_radius(const char *project, const char *file_path, bla
       }
    }
 
+   db2_code_index_blast_radius_local_first(project, out);
+
    return 0;
 }
 

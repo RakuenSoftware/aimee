@@ -8,6 +8,7 @@
 #include "db.h"
 #include "db2.h"
 #include "canonical_index.h"
+#include "entity_edges.h"
 #include "db2_test_shim.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
@@ -688,6 +689,7 @@ int main(void)
           {"app/reports.py",
            "import app.dates\n\ndef report():\n    return billing_period_days()\n"},
           {"app/caller_only.py", "def preview():\n    return billing_period_days()\n"},
+          {"app/forecast.py", "def forecast():\n    return 30\n"},
           {"app/collision.py", "import app.dates_extra\n"},
       };
       int inspected = 0;
@@ -718,6 +720,15 @@ int main(void)
       assert(br.dependency_count == 1);
       assert(strcmp(br.dependencies[0], "app.calendar") == 0);
 
+      /* Projection-only local edges must still sort before the route-gated
+       * cross-project tail. Four bumps clear the projection weight gate. */
+      for (int bump = 0; bump < 4; bump++)
+      {
+         int added = 0;
+         assert(db2_entity_edge_upsert("dates.py", "co_edited", "forecast.py", 0, 0, 0, 0,
+                                       &added) == 0);
+      }
+
       canonical_index_file_input_t routed[] = {
           {"client/report.py", "import app.dates\n\ndef remote_report():\n    return 1\n"}};
       assert(canonical_index_scan_files("python-consumer", "/consumer", routed, 1, 1, &inspected) >=
@@ -735,9 +746,24 @@ int main(void)
                  sql_err, sizeof(sql_err)) == 0);
       assert(canonical_index_blast_radius("python-blast", "app/dates.py", &br) == 0);
       int found_cross = 0;
+      int found_projection = 0;
+      int seen_external = 0;
       for (int i = 0; i < br.dependent_count; i++)
       {
          assert(strcmp(br.dependents[i], "client/noise.py") != 0);
+         if (strcmp(br.dependent_meta[i].project, "python-blast") == 0)
+         {
+            assert(!seen_external);
+            if (strcmp(br.dependents[i], "app/forecast.py") == 0)
+            {
+               found_projection = 1;
+               assert(strstr(br.dependent_meta[i].provenance, "projection"));
+            }
+         }
+         else
+         {
+            seen_external = 1;
+         }
          if (strcmp(br.dependents[i], "client/report.py") == 0)
          {
             found_cross = 1;
@@ -746,6 +772,7 @@ int main(void)
             assert(strcmp(br.dependent_meta[i].confidence, "high") == 0);
          }
       }
+      assert(found_projection);
       assert(found_cross);
       memset(&br, 0, sizeof(br));
       assert(canonical_index_blast_radius("python-blast", "app/missing.py", &br) != 0);

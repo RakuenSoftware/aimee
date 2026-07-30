@@ -1044,6 +1044,8 @@ int index_blast_radius(const char *project, const char *file_path, blast_radius_
       }
    }
 
+   db2_code_index_blast_radius_local_first(project, out);
+
    return 0;
 #endif
 }

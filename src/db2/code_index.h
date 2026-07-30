@@ -46,6 +46,10 @@ extern "C"
     * Returns -1 unless the target resolves in the current generation. */
    int db2_code_index_blast_radius(const char *project, const char *file_path, blast_radius_t *out);
 
+   /* Stable-partition dependent edges so every active-project edge precedes
+    * every cross-project tail. Call after additive local projections. */
+   void db2_code_index_blast_radius_local_first(const char *project, blast_radius_t *out);
+
    /* Resolve basename to a current-generation file only when exactly one file
     * in project has that basename. Used to make projection edges authoritative. */
    int db2_code_index_unique_file_basename(const char *project, const char *basename, char *out,
