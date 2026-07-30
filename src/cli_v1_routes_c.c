@@ -114,6 +114,22 @@ static void print_agent_list(cJSON *resp)
              cJSON_IsString(model) ? model->valuestring : "",
              cJSON_IsString(endpoint) ? endpoint->valuestring : "",
              cJSON_IsTrue(tools) ? " [tools]" : "");
+      /* Roles decide what each agent may be dispatched for, and `aimee delegate
+       * --list-roles` is routed to this very method — so omitting them left that
+       * flag printing a roster with no roles in it, and left an operator no way
+       * to see the role set `agent roles` had just rewritten. */
+      cJSON *roles = cJSON_GetObjectItemCaseSensitive(ag, "roles");
+      if (cJSON_IsArray(roles) && cJSON_GetArraySize(roles) > 0)
+      {
+         printf("                 roles:");
+         cJSON *role;
+         cJSON_ArrayForEach(role, roles)
+         {
+            if (cJSON_IsString(role) && role->valuestring[0])
+               printf(" %s", role->valuestring);
+         }
+         printf("\n");
+      }
    }
 }
 
@@ -150,6 +166,30 @@ static void print_agent_remove(cJSON *resp)
 static void print_agent_enabled(cJSON *resp, int enabled)
 {
    printf("Delegate '%s' %s.\n", json_str(resp, "name"), enabled ? "enabled" : "disabled");
+}
+
+/* Report the string array the server stored under `key` (roles / personas).
+ * agent.roles and agent.personas are WRITES: with no csv the server resets the
+ * agent to its default set, so the operator must see the resulting list to know
+ * what was dropped. Both used to share the agent.enable printer, which named the
+ * wrong operation and showed none of it. */
+static void print_agent_string_list(cJSON *resp, const char *key, const char *label)
+{
+   printf("Delegate '%s' %s set to:", json_str(resp, "name"), label);
+   cJSON *arr = cJSON_GetObjectItemCaseSensitive(resp, key);
+   int printed = 0;
+   cJSON *item = NULL;
+   cJSON_ArrayForEach(item, arr)
+   {
+      if (cJSON_IsString(item) && item->valuestring[0])
+      {
+         printf(" %s", item->valuestring);
+         printed++;
+      }
+   }
+   if (!printed)
+      printf(" (none)");
+   printf("\n");
 }
 
 static void print_agent_probe(cJSON *resp)
@@ -1242,6 +1282,14 @@ void pt_print_agent_enable(const char *method, cJSON *resp)
 void pt_print_agent_disable(const char *method, cJSON *resp)
 {
    print_agent_enabled(resp, 0);
+}
+void pt_print_agent_roles(const char *method, cJSON *resp)
+{
+   print_agent_string_list(resp, "roles", "roles");
+}
+void pt_print_agent_personas(const char *method, cJSON *resp)
+{
+   print_agent_string_list(resp, "personas", "personas");
 }
 void pt_print_agent_probe(const char *method, cJSON *resp)
 {
