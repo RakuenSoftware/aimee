@@ -216,11 +216,25 @@ func (s *server) setupAccountStatus() map[string]any {
 func (s *server) handleSetupAccount(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method == http.MethodGet {
+		// Under OIDC there is no local account to replace, so the wizard must not
+		// show the step at all rather than offering an action POST would refuse.
+		if s.authMode.oidc(r.Context()) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"complete": true, "required": false, "managed_by": authModeOIDC,
+			})
+			return
+		}
 		_ = json.NewEncoder(w).Encode(s.setupAccountStatus())
 		return
 	}
 	if r.Method != http.MethodPost {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	// Replacing the bootstrap login creates a LOCAL account. Under OIDC the
+	// identity provider owns accounts, so there is nothing here to create and a
+	// local one would be a way in that bypasses the IdP's policy.
+	if s.requireLocalAccounts(w, r) {
 		return
 	}
 	// This mutation changes a Vault-held login. SameSite=Strict already
