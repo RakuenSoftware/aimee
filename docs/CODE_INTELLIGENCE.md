@@ -66,6 +66,31 @@ Text and vector matches find names and concepts. The call/import/dependency grap
 neighbors. Memory links add prior decisions and known constraints. Fusion keeps the evidence for each
 signal so a client can explain the result.
 
+## Task-conditioned context
+
+`GET /v1/code/context` is the strict, bounded ingress contract over the hybrid ranker. It requires
+one active project, reads only its current generation, returns at most four code-plus-memory items,
+and caps the rendered packet at 1,200 tokens. Exact lexical and structural evidence leads. A
+vector-only result must clear the quality floor, and exact active-project memory is appended only
+when it is linked to accepted code. Every code item carries project, path, generation, freshness, confidence,
+provenance, and a line-or-file span.
+
+A query without sufficient current-project code evidence returns HTTP 200 with
+`status: no_answer`, empty `results`, and empty `why`. It does not substitute global episodic
+memory. The same local-first policy applies to the older hybrid memory annotations: project memory
+is selected before workspace/shared memory and broad scope is never implicit.
+
+Ingress rollout is controlled by `code_context_mode`:
+
+- `off` uses only the existing project-local preview path;
+- `observe` (the shipping default) retrieves and validates the packet, records its decision, and
+  preserves existing model-visible bytes; and
+- `on` injects a packet only on the first turn of a session task or a low-overlap task change.
+
+`on` does not repeat context for an ordinary follow-up and does not broaden after `no_answer` or an
+unavailable KB. If the request working directory cannot resolve a durable active-project identity,
+agent ingress suppresses code and memory recall rather than issuing an unscoped query.
+
 ## Audits
 
 ```bash

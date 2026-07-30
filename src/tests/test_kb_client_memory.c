@@ -139,6 +139,7 @@ static void test_readers_distinguish_unreachable_from_empty(void)
 static void test_ordered_readers_propagate_active_project_context(void)
 {
    memory_t mems[8];
+   memory_diagnostic_t diagnostics[2];
    memory_relation_t relations[8];
    memory_entity_profile_t profile;
    memory_answer_result_t answer;
@@ -169,12 +170,15 @@ static void test_ordered_readers_propagate_active_project_context(void)
    (void)kb_client_memory_ask("q", NULL, NULL, 8, &answer);
    json = kb_client_memory_context_block("q", "general", 8);
    free(json);
+   (void)kb_client_memory_diagnose("q", 2, diagnostics, 2);
+   json = kb_client_memory_facts("q");
+   free(json);
    (void)kb_client_memory_top_l2_facts(mems, 8);
    (void)kb_client_memory_list_session_scope_priority(mems, 8);
    (void)kb_client_memory_list_session_scope_priority_like("%q%", mems, 8);
 
    kb_client_memory_scope_context_clear();
-   assert(scoped_request_count == 18);
+   assert(scoped_request_count == 20);
    mock_agent_http_reset();
    printf("  PASS: test_ordered_readers_propagate_active_project_context\n");
 }

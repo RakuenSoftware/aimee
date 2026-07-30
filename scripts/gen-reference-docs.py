@@ -256,6 +256,9 @@ CFG_KEY_DESC = {
     "ingress_preinject_assembly_budget": "Token budget for ingress context pre-injection.",
     "ingress_preinject_enabled": "Enable `<aimee-context>` pre-injection on ingress "
     "(memory/code preview envelope on primary ingress turns; default on).",
+    "code_context_mode": "Task-conditioned code packet rollout mode: `off` disables packet "
+    "retrieval, `observe` retrieves and validates without changing model-visible bytes, and `on` "
+    "injects a bounded current-project packet on first/new-task turns (default `observe`).",
     "ingress_preinject_anthropic_enabled": "Inject the `<aimee-context>` envelope on the "
     "Anthropic-native /v1/messages passthrough too (default off).",
     "ingress_compress_enabled": "Enable ingress envelope compression: span-enrich code hits and "
