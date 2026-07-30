@@ -34,6 +34,42 @@ else
     fail "server entrypoint bypassed Vault ingestion or leaked a credential to an override"
 fi
 
+# The KB entrypoint can remain PID 1 while supervising its embedded PostgreSQL,
+# so it must replace its process image after scrubbing inherited credentials.
+# Use the external-DB lane to avoid starting PostgreSQL while proving that both
+# the injected DB URL and an unrelated credential are absent in the final KB.
+kb_entrypoint_test_dir=$(mktemp -d /tmp/aimee-kb-entrypoint.XXXXXX)
+cat >"$kb_entrypoint_test_dir/aimee-kb" <<'SH'
+#!/bin/sh
+case "${1:-}" in
+    --bootstrap-vault-env) exit 0 ;;
+    --list-credential-env-names)
+        [ -n "${AIMEE_DB2_URL:-}" ] && printf '%s\n' AIMEE_DB2_URL
+        [ -n "${ENTRYPOINT_TEST_API_KEY:-}" ] && printf '%s\n' ENTRYPOINT_TEST_API_KEY
+        exit 0
+        ;;
+esac
+if [ -n "${AIMEE_DB2_URL:-}" ]; then
+    printf '%s\n' dirty-db-url
+elif [ -n "${ENTRYPOINT_TEST_API_KEY:-}" ]; then
+    printf '%s\n' dirty-api-key
+else
+    printf '%s\n' clean
+fi
+SH
+chmod +x "$kb_entrypoint_test_dir/aimee-kb"
+kb_entrypoint_output=$(env -i PATH="$kb_entrypoint_test_dir:/usr/bin:/bin" \
+    AIMEE_HOME="$kb_entrypoint_test_dir/home" \
+    AIMEE_DB2_URL=postgresql://external.invalid/aimee \
+    ENTRYPOINT_TEST_API_KEY=first-boot-only \
+    sh ../deploy/container/aimee-kb-entrypoint.sh 2>&1)
+rm -rf "$kb_entrypoint_test_dir"
+if [ "$kb_entrypoint_output" = "clean" ]; then
+    pass "KB entrypoint clean-reexec removes inherited first-boot credentials"
+else
+    fail "KB entrypoint left first-boot credentials in its long-lived process image ($kb_entrypoint_output)"
+fi
+
 # The server image intentionally supervises multiple long-lived planes, so it
 # still needs a PID-1 subreaper. It must not start tini until after first-boot
 # credentials have been sealed and unset: an earlier tini permanently retains
@@ -63,19 +99,27 @@ fi
 # config, initialize PostgreSQL, or pipe environment values through text tools
 # before the Vault bootstrap and parent-environment scrub have completed.
 kb_vault_bootstrap_line=$(grep -nF 'aimee-kb --bootstrap-vault-env' \
-    ../deploy/container/aimee-kb-entrypoint.sh | cut -d: -f1)
+    ../deploy/container/aimee-kb-entrypoint.sh | head -1 | cut -d: -f1)
 kb_credential_unset_line=$(grep -nF 'unset "$_secret_name"' \
     ../deploy/container/aimee-kb-entrypoint.sh | cut -d: -f1)
+kb_clean_reexec_first=$(grep -nF 'exec /bin/sh "$0" --aimee-internal-vault-bootstrapped-' \
+    ../deploy/container/aimee-kb-entrypoint.sh | head -1 | cut -d: -f1)
+kb_clean_reexec_last=$(grep -nF 'exec /bin/sh "$0" --aimee-internal-vault-bootstrapped-' \
+    ../deploy/container/aimee-kb-entrypoint.sh | tail -1 | cut -d: -f1)
 kb_first_unrelated_child_line=$(grep -nF 'mkdir -p "$AIMEE_HOME"' \
     ../deploy/container/aimee-kb-entrypoint.sh | head -1 | cut -d: -f1)
 if [ -n "$kb_vault_bootstrap_line" ] && [ -n "$kb_credential_unset_line" ] &&
+   [ -n "$kb_clean_reexec_first" ] && [ -n "$kb_clean_reexec_last" ] &&
    [ -n "$kb_first_unrelated_child_line" ] &&
    [ "$kb_vault_bootstrap_line" -lt "$kb_credential_unset_line" ] &&
+   [ "$kb_credential_unset_line" -lt "$kb_clean_reexec_first" ] &&
+   [ "$kb_clean_reexec_last" -lt "$kb_first_unrelated_child_line" ] &&
    [ "$kb_credential_unset_line" -lt "$kb_first_unrelated_child_line" ] &&
+   ! grep -qF 'export AIMEE_DB2_URL' ../deploy/container/aimee-kb-entrypoint.sh &&
    ! grep -qF 'env | sed' ../deploy/container/aimee-kb-entrypoint.sh; then
-    pass "KB image Vault-ingests and scrubs before any unrelated child"
+    pass "KB image Vault-ingests, scrubs, and re-execs before any unrelated child"
 else
-    fail "KB image must seal and scrub credentials before spawning unrelated children"
+    fail "KB image must seal, scrub, and clean-reexec before spawning unrelated children"
 fi
 
 # Core images can contain request credentials. Disable them in the supervising
