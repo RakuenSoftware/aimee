@@ -118,10 +118,68 @@ interaction — the cost profile proves the architecture works. But it is the on
 licence-clean multilingual ColBERT available, so the architecture currently has
 no viable candidate for us.
 
+## The thing we should have measured first
+
+At this point we had spent a night on the component that reorders results, and
+none on the component that *chooses* them. So we added a second retrieval leg —
+BM25 over the lexical signal our KB already indexes — and fused it with the dense
+leg by Reciprocal Rank Fusion.
+
+| pipeline | NDCG@10 | Recall@10 |
+| --- | ---: | ---: |
+| a25m dense | 0.5909 | 0.7816 |
+| nomic dense | 0.6075 | 0.8006 |
+| BM25 alone | 0.6213 | 0.8470 |
+| a25m + BM25 (RRF) | 0.6206 | 0.8642 |
+| **nomic + BM25 (RRF, k=60)** | **0.6337** | 0.8668 |
+| **nomic + BM25 (RRF, k=10)** | — | **0.9034** |
+
+**BM25 alone beat every dense embedder we had spent the night choosing between.**
+Fusion beat everything. And the embedder choice *composes* with fusion rather
+than competing with it — nomic+hybrid leads a25m+hybrid by roughly the margin
+their dense scores differ by.
+
+The reason is visible in the pool:
+
+| pool | contains the labelled document |
+| --- | ---: |
+| dense top-50 only | 0.8899 |
+| **dense ∪ BM25 top-50** | **0.9739** |
+
+Dense retrieval missed the target entirely for **11–13%** of queries. **No
+reranker can recover those.** Reranking reorders a fixed pool; adding a
+decorrelated retriever changes what is in the pool. That is the whole story of
+why twenty reranking configurations bought us at most +0.0032: we had been
+optimising the ordering of a candidate set whose real problem was its membership.
+
+We recorded the prediction before measuring — if the recall-ceiling explanation
+was right, Recall@10 should move more than NDCG@10. It did — **+0.0662 against
++0.0262** in the same configuration, a factor of 2.5.
+
+Two details worth stealing. **The textbook RRF constant `k=60` is wrong for this
+corpus** — `k=10` dominates it on every metric, which is free quality from a
+constant nobody tunes. And fusion can cost top-1 precision, because RRF sees rank
+position and discards score magnitude; a `tiered` variant that lets the dense leg
+own rank 1 has **zero top-1 regression by construction** and still gains +0.074
+Recall@10.
+
+One caveat we can't yet rule out: our suite's queries read like document
+summaries with key terms appended, which flatters BM25. So treat **BM25's
+absolute win as suspect** and the **+10 points of pool recall as robust** — two
+retrievers finding different documents is far less sensitive to phrasing than one
+retriever matching words.
+
 ## The result
 
-Across **ten** reranking configurations, exactly one beat dense retrieval: GTE at
-depth 50, by **+0.0032**, for 143 ms per query on GPU and unaffordable on CPU.
+Across **twenty** reranking configurations spanning two embedders, exactly one
+beat dense retrieval: GTE at depth 50, by **+0.0032 NDCG@10**, for 143 ms per
+query on GPU and unaffordable on CPU.
+
+The hybrid retrieval we bolted on at the end, using infrastructure that already
+existed, was worth **+0.0262 NDCG@10 and +0.0662 Recall@10** in the same
+configuration — **8×** the reranker on the metric they share, plus a recall gain
+the reranker cannot produce at all. Tuning the fusion constant pushes recall to
++0.1028.
 
 So we deleted the reranker. That removes a GGUF conversion pipeline, a separate
 score-head artifact, a release workflow, and an entire serving component — and
@@ -164,3 +222,18 @@ None of these threw an error. Each produced a plausible number.
 mode is silent-wrong, not loud-wrong.** Record provenance — model, precision,
 device, truncation, sample size, harness — for every figure. A number without it
 is not evidence.
+
+We can vouch for that last sentence, because we tripped over it while writing
+this post. nomic's prefixed score appears in our own notes as 0.6058, 0.6072 and
+0.6075 — three independent runs of the same suite, agreeing within its documented
+noise — and one of our handoff documents had quietly computed a delta between two
+of them. Harmless here. But it is the identical shape to every bug above: a
+plausible number, no error, and provenance that had stopped travelling alongside
+the figure.
+
+And the second lesson, which cost us the most: **we spent the night improving the
+ordering of a candidate set whose problem was its membership.** Reranking was the
+component we were asked about, so it was the component we measured. The question
+worth asking first is not "is my ranking in the right order?" but "is the right
+document in the list at all?" For 11–13% of our queries it simply wasn't, and no
+amount of reordering was ever going to find it.
