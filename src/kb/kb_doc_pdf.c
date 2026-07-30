@@ -946,8 +946,8 @@ int kb_doc_pdf_render_assets(const char *project, const char *file_path,
       if (kb_blob_store_put(png, (size_t)png_len, sha, sizeof(sha)) == 0)
       {
          /* Full-page crop: bbox is the whole page [0,1]. kind='page'. */
-         if (db2_kb_doc_asset_insert(file_path, page, 0.0, 0.0, 1.0, 1.0, "page", "", "image/png",
-                                     sha, sensitivity_class) > 0)
+         if (db2_kb_doc_asset_insert(project, file_path, page, 0.0, 0.0, 1.0, 1.0, "page", "",
+                                     "image/png", sha, sensitivity_class) > 0)
             created++;
       }
       free(png);

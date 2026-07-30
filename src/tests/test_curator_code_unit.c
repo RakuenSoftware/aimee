@@ -336,7 +336,9 @@ static void run_extract_scenario(const char *side_effects_json, const char *call
    char sql[2048];
    snprintf(sql, sizeof(sql),
             "INSERT INTO projects (id, name, root, scanned_at) VALUES (1,'testproj','/repo','t');"
-            "INSERT INTO files (id, project_id, path, scanned_at) VALUES (1,1,'%s','t');",
+            "INSERT INTO files (id, project_id, path, scanned_at) VALUES (1,1,'%s','t');"
+            "INSERT INTO terms (file_id,name,kind,line)"
+            " VALUES (1,'target_fn','definition',1);",
             src_path);
    assert(sqlite3_exec(db, sql, NULL, NULL, NULL) == SQLITE_OK);
    if (callee)
@@ -439,6 +441,7 @@ static void test_extract_reads_body_from_db2_when_file_absent(void)
        "INSERT INTO projects (id, name, root, scanned_at)"
        " VALUES (1,'testproj','/nonexistent-root-xyzzy','t');"
        "INSERT INTO files (id, project_id, path, scanned_at) VALUES (1,1,'src/foo.c','t');"
+       "INSERT INTO terms (file_id,name,kind,line) VALUES (1,'target_fn','definition',1);"
        "INSERT INTO file_contents (file_id, content)"
        " VALUES (1,'int target_fn(void) { return 0; }\n');"
        "INSERT INTO kb_code_unit_jobs (project, file_path, symbol, kind, line)"
@@ -712,6 +715,14 @@ static void test_queue_counts_surface_failures(void)
    sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
    assert(db != NULL);
 
+   assert(sqlite3_exec(db, "INSERT INTO projects (name,root,scanned_at) VALUES ('p','/p','t')",
+                       NULL, NULL, NULL) == SQLITE_OK);
+   assert(sqlite3_exec(db,
+                       "INSERT INTO kb_documents"
+                       " (id,project,file_path,file_hash,chunk_index,content) VALUES"
+                       " (9305,'p','a.md','h1',0,'a'),(9306,'p','b.md','h2',0,'b')",
+                       NULL, NULL, NULL) == SQLITE_OK);
+
    assert(sqlite3_exec(db,
                        "INSERT INTO kb_code_unit_jobs (id,project,file_path,symbol,status,attempts,"
                        "last_error,updated_at) VALUES "
@@ -753,6 +764,35 @@ static void test_queue_counts_surface_failures(void)
           "between pending and done)\n");
 }
 
+static void test_stale_generation_job_is_not_claimed(void)
+{
+   db2_test_shim_open();
+   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   assert(db != NULL);
+   assert(sqlite3_exec(db,
+                       "INSERT INTO projects"
+                       " (id,name,root,scanned_at,current_generation)"
+                       " VALUES (1,'p','/p','t',2);"
+                       "INSERT INTO files"
+                       " (id,project_id,generation,path,scanned_at)"
+                       " VALUES (1,1,2,'same.c','t');"
+                       "INSERT INTO terms (file_id,name,kind,line)"
+                       " VALUES (1,'same_fn','definition',1);"
+                       "INSERT INTO kb_code_unit_jobs"
+                       " (project,generation,file_path,symbol,status)"
+                       " VALUES ('p',1,'same.c','same_fn','pending')",
+                       NULL, NULL, NULL) == SQLITE_OK);
+
+   kb_curator_extract_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.max_attempts = 3;
+   opts.max_tokens = 256;
+   assert(kb_curator_extract_code_unit_one(&opts) == 0);
+
+   db2_test_shim_close();
+   printf("  PASS: stale-generation code-unit job is not claimed for a re-added path\n");
+}
+
 int main(void)
 {
    printf("curator_code_unit:\n");
@@ -784,6 +824,7 @@ int main(void)
    test_append_sidecar_error();
 
    test_queue_counts_surface_failures();
+   test_stale_generation_job_is_not_claimed();
    printf("ok\n");
    return 0;
 }

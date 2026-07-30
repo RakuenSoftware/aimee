@@ -914,7 +914,67 @@ static void test_index_find_callers_json_flag_not_project(void)
    assert(strcmp(cJSON_GetObjectItem(req2, "project")->valuestring, "myproj") == 0);
    cJSON_Delete(req2);
 
+   /* Scope survives proxy marshalling and is never consumed as the optional
+    * project positional.  cwd lets the server resolve scope=current. */
+   char *argv3[] = {"helper_double", "--scope", "all", "--json"};
+   cJSON *req3 = marshal_index_find_callers(4, argv3);
+   assert(req3 != NULL);
+   assert(strcmp(cJSON_GetObjectItem(req3, "scope")->valuestring, "all") == 0);
+   assert(cJSON_GetObjectItem(req3, "project") == NULL);
+   assert(cJSON_IsString(cJSON_GetObjectItem(req3, "cwd")));
+   cJSON_Delete(req3);
+
    printf("  PASS: test_index_find_callers_json_flag_not_project\n");
+}
+
+static void test_index_current_project_proxy_context(void)
+{
+   char *find_argv[] = {"workspace_repo_identity", "--scope", "current", "--json"};
+   cJSON *find = marshal_index_find(4, find_argv);
+   assert(find != NULL);
+   assert(strcmp(cJSON_GetObjectItem(find, "identifier")->valuestring, "workspace_repo_identity") ==
+          0);
+   assert(strcmp(cJSON_GetObjectItem(find, "scope")->valuestring, "current") == 0);
+   assert(cJSON_IsString(cJSON_GetObjectItem(find, "cwd")));
+   cJSON_Delete(find);
+
+   char *file_argv[] = {"src/index.c", "--json"};
+   cJSON *structure = marshal_index_structure(2, file_argv);
+   assert(structure != NULL);
+   assert(strcmp(cJSON_GetObjectItem(structure, "file_path")->valuestring, "src/index.c") == 0);
+   assert(cJSON_GetObjectItem(structure, "project") == NULL);
+   assert(cJSON_IsString(cJSON_GetObjectItem(structure, "cwd")));
+   cJSON_Delete(structure);
+
+   char *legacy_argv[] = {"legacy-project", "src/index.c"};
+   cJSON *blast = marshal_index_blast_radius(2, legacy_argv);
+   assert(blast != NULL);
+   assert(strcmp(cJSON_GetObjectItem(blast, "project")->valuestring, "legacy-project") == 0);
+   assert(strcmp(cJSON_GetObjectItem(blast, "file_path")->valuestring, "src/index.c") == 0);
+   cJSON_Delete(blast);
+
+   printf("  PASS: test_index_current_project_proxy_context\n");
+}
+
+static void test_kb_search_proxy_context(void)
+{
+   char *current_argv[] = {"stable identity", "--scope", "current"};
+   cJSON *current = marshal_kb_search(3, current_argv);
+   assert(current != NULL);
+   assert(strcmp(cJSON_GetObjectItem(current, "method")->valuestring, "kb.search") == 0);
+   assert(strcmp(cJSON_GetObjectItem(current, "scope")->valuestring, "current") == 0);
+   assert(cJSON_IsString(cJSON_GetObjectItem(current, "cwd")));
+   assert(cJSON_GetObjectItem(current, "project") == NULL);
+   cJSON_Delete(current);
+
+   char *all_argv[] = {"stable identity", "--scope", "all"};
+   cJSON *all = marshal_kb_search(3, all_argv);
+   assert(all != NULL);
+   assert(strcmp(cJSON_GetObjectItem(all, "scope")->valuestring, "all") == 0);
+   assert(cJSON_GetObjectItem(all, "project") == NULL);
+   cJSON_Delete(all);
+
+   printf("  PASS: test_kb_search_proxy_context\n");
 }
 
 static void test_trigger_routes_lookup(void)
@@ -1827,6 +1887,8 @@ int main(void)
    test_grant_list_truncation_is_surfaced();
    test_grant_show_shares_the_list_renderer();
    test_index_find_callers_json_flag_not_project();
+   test_index_current_project_proxy_context();
+   test_kb_search_proxy_context();
    test_trigger_routes_lookup();
    test_dogfood_routes_and_marshaling();
    test_eval_routes_and_marshaling();

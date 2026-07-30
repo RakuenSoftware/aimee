@@ -1898,16 +1898,17 @@ extern void retrieval_outcome_bridge_note(const char *surface, const char *event
                                           const int64_t *ids, const char *const *snippets, int n)
     __attribute__((weak));
 
-static const char *td_search_project(cJSON *args, const char *dispatch_cwd)
+static const char *td_search_project(cJSON *args, const char *dispatch_cwd, char *resolved,
+                                     size_t resolved_cap)
 {
    cJSON *project = cJSON_GetObjectItemCaseSensitive(args, "project");
    if (cJSON_IsString(project) && project->valuestring[0])
       return project->valuestring;
    if (!dispatch_cwd || !dispatch_cwd[0])
       return NULL;
-   const char *base = strrchr(dispatch_cwd, '/');
-   base = base ? base + 1 : dispatch_cwd;
-   return base[0] ? base : NULL;
+   return workspace_repo_identity(dispatch_cwd, resolved, resolved_cap, NULL, 0) == 0 && resolved[0]
+              ? resolved
+              : NULL;
 }
 
 static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_cwd,
@@ -1925,12 +1926,23 @@ static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_
       config_t cfg;
       config_load(&cfg);
       int max = (mx && cJSON_IsNumber(mx)) ? mx->valueint : 3;
+      cJSON *jscope = cJSON_GetObjectItemCaseSensitive(args, "scope");
+      if (jscope && (!cJSON_IsString(jscope) || (strcmp(jscope->valuestring, "current") != 0 &&
+                                                 strcmp(jscope->valuestring, "all") != 0)))
+         return safe_strdup("error: scope must be 'current' or 'all'");
+      int all_projects = cJSON_IsString(jscope) && strcmp(jscope->valuestring, "all") == 0;
+      char resolved_project[MAX_PATH_LEN] = "";
+      const char *project =
+          td_search_project(args, dispatch_cwd, resolved_project, sizeof(resolved_project));
+      if (!all_projects && !project)
+         return safe_strdup(
+             "error: no active project determined from cwd; pass project or scope='all'");
       /* Search with the kb's own embedder unless this server has an explicit
        * override.  A resolved builtin here is 384-dimensional and can never
        * query a remote kb corpus built with a production embedder. */
       const char *embedding_command = cfg.embedding_command[0] ? cfg.embedding_command : NULL;
-      char *envelope = kb_client_search_json(td_search_project(args, dispatch_cwd), q->valuestring,
-                                             embedding_command, max, NULL);
+      char *envelope = kb_client_search_json_scoped_ex(project, all_projects, q->valuestring,
+                                                       embedding_command, max, NULL, NULL);
       cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
       free(envelope);
 

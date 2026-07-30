@@ -95,13 +95,6 @@ void hook_scope_labels_for_cwd(const char *cwd, char *workspace_out, size_t work
    if (!cwd || !cwd[0])
       return;
 
-   /* Path-independent repository identity, kept consistent with the recall side
-    * (memory_scope_labels_for_cwd) so scope tags written here match on lookup
-    * across clones/machines. Falls through to the legacy workspace/basename
-    * labels below when cwd is not inside a resolvable git repo. */
-   if (workspace_repo_identity(cwd, project_out, project_len, workspace_out, workspace_len) == 0)
-      return;
-
    char configured_root[MAX_PATH_LEN] = {0};
    size_t configured_root_len = 0;
    int workspace_count = config_workspace_count();
@@ -116,6 +109,30 @@ void hook_scope_labels_for_cwd(const char *cwd, char *workspace_out, size_t work
          snprintf(configured_root, sizeof(configured_root), "%s", configured_workspace);
          configured_root_len = wlen;
       }
+   }
+
+   /* Path-independent project identity, kept consistent with the recall side
+    * (memory_scope_labels_for_cwd) so scope tags written here match on lookup
+    * across clones/machines. A configured workspace remains the visibility
+    * parent; it must not be replaced by the repository identity. */
+   char repo_project[MAX_PATH_LEN];
+   char repo_workspace[MAX_PATH_LEN];
+   if (workspace_repo_identity(cwd, repo_project, sizeof(repo_project), repo_workspace,
+                               sizeof(repo_workspace)) == 0)
+   {
+      if (workspace_out && workspace_len > 0)
+      {
+         if (configured_root[0])
+         {
+            const char *slash = strrchr(configured_root, '/');
+            snprintf(workspace_out, workspace_len, "%s", slash ? slash + 1 : configured_root);
+         }
+         else
+            snprintf(workspace_out, workspace_len, "%s", repo_workspace);
+      }
+      if (project_out && project_len > 0)
+         snprintf(project_out, project_len, "%s", repo_project);
+      return;
    }
 
    if (workspace_out && workspace_len > 0 && configured_root[0])

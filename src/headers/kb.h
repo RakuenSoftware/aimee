@@ -144,6 +144,9 @@ char *kb_search_json(const char *project, const char *query, const char *embeddi
  * fusion_mode_override: "rrf" | "static_alpha" | "dynamic_alpha"; NULL = use config. */
 char *kb_search_json_ex(const char *project, const char *query, const char *embedding_cmd,
                         int max_results, const char *fusion_mode_override);
+char *kb_search_json_scoped_ex(const char *preferred_project, int all_projects,
+                               const char *query, const char *embedding_cmd, int max_results,
+                               const char *fusion_mode_override);
 
 /* Resolve the project name: if project is non-NULL/non-empty, use it.
  * Otherwise derive from the basename of root_path (or cwd). */

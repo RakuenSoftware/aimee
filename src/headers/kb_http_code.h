@@ -8,9 +8,14 @@
 int code_scan_write_error(char *out_buf, int out_cap, const char *message);
 int code_method_not_allowed(char *out_buf, int out_cap);
 int code_qparam(const char *qs, const char *key, char *out, int outsz);
+int code_request_project(const char *query_string, char *project, size_t project_cap,
+                         int allow_all, int *all_projects, char *out_buf, int out_cap);
 
 int handle_post_code_scan(const char *body, char *out_buf, int out_cap);
 int handle_post_code_scan_route(const char *method, const char *body, char *out_buf, int out_cap);
+int handle_post_code_project_lifecycle_route(const char *method, const char *operation,
+                                             const char *body, char *out_buf, int out_cap,
+                                             int owner);
 int handle_post_code_repo_trust(const char *body, char *out_buf, int out_cap, int owner);
 int handle_post_code_repo_trust_route(const char *method, const char *body, char *out_buf,
                                       int out_cap, int owner);

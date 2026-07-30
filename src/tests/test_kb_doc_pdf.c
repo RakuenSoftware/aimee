@@ -13,6 +13,7 @@
 #include "db2_test_shim.h"
 #include "../db2/db_postgres.h"
 #include "../db2/kb_payload.h"
+#include "../db2/code_index.h"
 #include "kb_blob_reconcile.h"
 #include "kb_blob_store.h"
 #include "kb_doc_hash.h"
@@ -23,6 +24,13 @@
 #include "support/mock_agent_http.h"
 
 #define PASS(name) printf("  PASS: %s\n", (name))
+
+static void open_pdf_test_db(void)
+{
+   db2_test_shim_open();
+   assert(db2_code_index_project_upsert("proj", "/test/pdf/proj") > 0);
+   assert(db2_code_index_project_upsert("other", "/test/pdf/other") > 0);
+}
 
 /* A minimal two-page bbox-layout fixture: page 1 has two lines, page 2 one line.
  * Coords are raw points; page boxes are 600x800. */
@@ -183,7 +191,7 @@ static int count_rows(const char *sql)
 
 static void test_ingest_shim(void)
 {
-   db2_test_shim_open();
+   open_pdf_test_db();
 
    kb_pdf_ingest_stats_t stats;
    int rc =
@@ -255,7 +263,7 @@ static void test_ingest_shim(void)
  * (the chokepoint kb_fetch_doc_row uses to keep PDFs out of plain search). */
 static void test_search_chunks_shim(void)
 {
-   db2_test_shim_open();
+   open_pdf_test_db();
 
    kb_pdf_ingest_stats_t stats;
    assert(kb_doc_pdf_ingest_xhtml("proj", "report.pdf", "h1", FIXTURE_2PAGE, "internal", &stats) ==
@@ -337,7 +345,7 @@ static void test_search_chunks_shim(void)
 /* §6 quarantine admin: a restricted PDF is withheld until confirmed; reject purges it. */
 static void test_pdf_quarantine_admin(void)
 {
-   db2_test_shim_open();
+   open_pdf_test_db();
    kb_pdf_ingest_stats_t stats;
    char buf[1024];
    db2_kb_pdf_chunk_t chunks[8];
@@ -402,7 +410,7 @@ static void test_pdf_quarantine_admin(void)
  * withholding on each. */
 static void test_pdf_evidence_tools(void)
 {
-   db2_test_shim_open();
+   open_pdf_test_db();
    kb_pdf_ingest_stats_t stats;
    char buf[8192];
    assert(kb_doc_pdf_ingest_xhtml("proj", "report.pdf", "h1", FIXTURE_2PAGE, "internal", &stats) ==
@@ -488,7 +496,7 @@ static void test_pdf_vector_enqueue_and_answerability(void)
    setenv("AIMEE_NO_CACHE", "1", 1); /* bypass the config mtime cache so the yaml is re-read */
    write_vector_config(home);
 
-   db2_test_shim_open();
+   open_pdf_test_db();
 
    kb_pdf_ingest_stats_t stats;
    /* Internal (non-pending) doc → both chunks enqueue an embed_pdf job. */
@@ -614,7 +622,7 @@ static int64_t first_region_id(const char *document_key)
 
 static void test_pdf_table_cells(void)
 {
-   db2_test_shim_open();
+   open_pdf_test_db();
 
    kb_pdf_ingest_stats_t stats;
    assert(kb_doc_pdf_ingest_xhtml("proj", "report.pdf", "h1", FIXTURE_2PAGE, "internal", &stats) ==
@@ -729,7 +737,7 @@ static void test_pdf_tsr_ingest(void)
    write_tsr_config(home);
    mock_agent_http_set_post_handler(tsr_ingest_mock);
 
-   db2_test_shim_open();
+   open_pdf_test_db();
 
    kb_pdf_ingest_stats_t stats;
    /* 2-page fixture → TSR called per page; each page yields 1 cell at line_index 0. */
@@ -813,7 +821,7 @@ static void test_pdf_assets_and_recon(void)
    setenv("AIMEE_HOME", home, 1);
    setenv("AIMEE_NO_CACHE", "1", 1);
 
-   db2_test_shim_open();
+   open_pdf_test_db();
    kb_pdf_ingest_stats_t stats;
    assert(kb_doc_pdf_ingest_xhtml("proj", "vis.pdf", "h1", FIXTURE_2PAGE, "internal", &stats) == 2);
 
@@ -821,8 +829,8 @@ static void test_pdf_assets_and_recon(void)
    const char *crop = "fake-png-bytes-AAAA";
    char sha[KB_DOC_HASH_HEX_LEN + 1] = "";
    assert(kb_blob_store_put(crop, strlen(crop), sha, sizeof(sha)) == 0);
-   int aid = db2_kb_doc_asset_insert("vis.pdf", 1, 0, 0, 1, 1, "page", "Figure 1", "image/png", sha,
-                                     "internal");
+   int aid = db2_kb_doc_asset_insert("proj", "vis.pdf", 1, 0, 0, 1, 1, "page", "Figure 1",
+                                     "image/png", sha, "internal");
    assert(aid > 0);
 
    /* open resolves id → blob_ref under the live ACL; foreign project denied. */
@@ -840,13 +848,37 @@ static void test_pdf_assets_and_recon(void)
    assert(an == 1 && assets[0].id == aid && strcmp(assets[0].kind, "page") == 0);
    assert(db2_kb_doc_assets_list("proj", "ghost.pdf", assets, 8) == 0); /* foreign doc */
 
+   /* Ambiguous legacy rows that the migration could not bind stay invisible.
+    * A shared document_key is not proof that an unowned asset belongs to either
+    * project. */
+   assert(kb_doc_pdf_ingest_xhtml("other", "vis.pdf", "h-other", FIXTURE_2PAGE, "internal",
+                                  &stats) == 2);
+   char err[256] = "";
+   assert(aimee_pg_exec(db2_conn(),
+                        "INSERT INTO kb_doc_assets(project,document_key,page_no,blob_ref)"
+                        " VALUES('','vis.pdf',99,'legacy-unowned')",
+                        err, sizeof(err)) == 0);
+   int64_t legacy_id = 0;
+   aimee_pg_stmt_t *legacy =
+       aimee_pg_prepare(db2_conn(), "SELECT id FROM kb_doc_assets WHERE blob_ref='legacy-unowned'",
+                        err, sizeof(err));
+   assert(legacy);
+   assert(aimee_pg_step(legacy, err, sizeof(err)) == AIMEE_PG_ROW);
+   legacy_id = aimee_pg_column_int64(legacy, 0);
+   aimee_pg_finalize(legacy);
+   assert(legacy_id > 0);
+   assert(db2_kb_doc_asset_open("proj", legacy_id, br, sizeof(br), ct, sizeof(ct)) == 0);
+   assert(db2_kb_doc_asset_open("other", legacy_id, br, sizeof(br), ct, sizeof(ct)) == 0);
+   assert(db2_kb_doc_assets_list("proj", "vis.pdf", assets, 8) == 1);
+   assert(db2_kb_doc_assets_list("other", "vis.pdf", assets, 8) == 0);
+
    /* Withheld: a restricted doc's assets are gated off. */
    assert(kb_doc_pdf_ingest_xhtml("proj", "sec.pdf", "h2", FIXTURE_2PAGE, "restricted", &stats) ==
           2);
    char sha2[KB_DOC_HASH_HEX_LEN + 1] = "";
    assert(kb_blob_store_put("secret-crop", 11, sha2, sizeof(sha2)) == 0);
-   int said = db2_kb_doc_asset_insert("sec.pdf", 1, 0, 0, 1, 1, "page", "", "image/png", sha2,
-                                      "restricted");
+   int said = db2_kb_doc_asset_insert("proj", "sec.pdf", 1, 0, 0, 1, 1, "page", "", "image/png",
+                                      sha2, "restricted");
    assert(said > 0);
    assert(db2_kb_doc_asset_open("proj", said, br, sizeof(br), ct, sizeof(ct)) == 0); /* withheld */
    assert(db2_kb_doc_assets_list("proj", "sec.pdf", assets, 8) == 0);
@@ -955,7 +987,7 @@ static void test_ocr_sidecar_client(void)
 
 static void test_ocr_ingest_degradation(void)
 {
-   db2_test_shim_open();
+   open_pdf_test_db();
    kb_pdf_ingest_stats_t st;
    /* No endpoint → no-op (0). */
    assert(kb_doc_pdf_ingest_ocr("proj", "scan.pdf", "h1", "internal",

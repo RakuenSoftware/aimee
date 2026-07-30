@@ -64,9 +64,15 @@ static void idx_scan(app_ctx_t *ctx, int argc, char **argv)
       {
          if (i + 1 >= pos_argc)
             break;
+         char stable_project[512], stable_workspace[512];
+         if (workspace_repo_index_keys(pos_argv[i + 1], NULL, stable_project,
+                                       sizeof(stable_project), stable_workspace,
+                                       sizeof(stable_workspace)) != 0)
+            fatal("cannot read or persist a stable project identity for %s", pos_argv[i + 1]);
+         const char *project = stable_project;
          kb_client_index_scan_result_t one;
          memset(&one, 0, sizeof(one));
-         if (kb_client_index_scan(pos_argv[i], pos_argv[i + 1], force, &one) != 0)
+         if (kb_client_index_scan(project, pos_argv[i + 1], force, &one) != 0)
          {
             if (verbose)
             {
@@ -118,6 +124,125 @@ static void idx_scan(app_ctx_t *ctx, int argc, char **argv)
 
    if (ctx->json_output)
       emit_ok_ctx(ctx->json_fields, ctx->response_profile);
+}
+
+static int idx_lifecycle_emit(app_ctx_t *ctx, const char *operation, const char *project,
+                              const char *json, int http_status)
+{
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   if (!resp)
+   {
+      if (ctx->json_output)
+      {
+         resp = cJSON_CreateObject();
+         cJSON_AddStringToObject(resp, "status", "unavailable");
+         cJSON_AddNumberToObject(resp, "http_status", http_status);
+         cJSON_AddStringToObject(resp, "operation", operation);
+         cJSON_AddStringToObject(resp, "project", project);
+         emit_json_ctx(resp, ctx->json_fields, ctx->response_profile);
+      }
+      else
+         fprintf(stderr, "aimee index %s: knowledge service returned HTTP %d\n", operation,
+                 http_status);
+      return 0;
+   }
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   int ok = http_status >= 200 && http_status < 300 && cJSON_IsString(status) &&
+            strcmp(status->valuestring, "ok") == 0;
+   if (ctx->json_output)
+   {
+      emit_json_ctx(resp, ctx->json_fields, ctx->response_profile);
+      return ok;
+   }
+   if (!ok)
+   {
+      fprintf(stderr, "aimee index %s: %s\n", operation, json ? json : "invalid response");
+      cJSON_Delete(resp);
+      return 0;
+   }
+   cJSON *mode = cJSON_GetObjectItemCaseSensitive(resp, "mode");
+   cJSON *hash = cJSON_GetObjectItemCaseSensitive(resp, "manifest_hash");
+   cJSON *generation = cJSON_GetObjectItemCaseSensitive(resp, "generation");
+   cJSON *total = cJSON_GetObjectItemCaseSensitive(resp, "total_rows");
+   cJSON *state = cJSON_GetObjectItemCaseSensitive(resp, "state");
+   if (cJSON_IsString(state))
+      printf("%s generation %lld is %s\n", project,
+             cJSON_IsNumber(generation) ? (long long)generation->valuedouble : 0,
+             state->valuestring);
+   else
+   {
+      printf("%s %s: %lld row(s), generation %lld, manifest %s\n", operation,
+             cJSON_IsString(mode) ? mode->valuestring : "result",
+             cJSON_IsNumber(total) ? (long long)total->valuedouble : 0,
+             cJSON_IsNumber(generation) ? (long long)generation->valuedouble : 0,
+             cJSON_IsString(hash) ? hash->valuestring : "");
+      if (cJSON_IsString(mode) && strcmp(mode->valuestring, "dry_run") == 0 && cJSON_IsString(hash))
+         printf("  confirm: aimee index %s %s --confirm %s --reason '<reason>'\n", operation,
+                project, hash->valuestring);
+   }
+   cJSON_Delete(resp);
+   return 1;
+}
+
+static void idx_detach(app_ctx_t *ctx, int argc, char **argv)
+{
+   if (argc < 1)
+      fatal("index detach requires a stable project id");
+   int status = 0;
+   char *json = kb_client_index_project_lifecycle_json("detach", argv[0], NULL, NULL, 30, &status);
+   int ok = idx_lifecycle_emit(ctx, "detach", argv[0], json, status);
+   free(json);
+   if (!ok)
+      fatal("index detach failed");
+}
+
+static void idx_lifecycle_mutation(app_ctx_t *ctx, const char *operation, int argc, char **argv)
+{
+   const char *project = NULL;
+   const char *confirm = NULL;
+   const char *reason = NULL;
+   int retention_days = 30;
+   for (int i = 0; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--confirm") == 0 && i + 1 < argc)
+         confirm = argv[++i];
+      else if (strcmp(argv[i], "--reason") == 0 && i + 1 < argc)
+         reason = argv[++i];
+      else if (strcmp(argv[i], "--retention-days") == 0 && i + 1 < argc)
+         retention_days = atoi(argv[++i]);
+      else if (argv[i][0] != '-' && !project)
+         project = argv[i];
+   }
+   char active[256] = "";
+   if (!project && strcmp(operation, "gc") == 0)
+   {
+      char cwd[MAX_PATH_LEN];
+      if (getcwd(cwd, sizeof(cwd)) &&
+          workspace_repo_identity(cwd, active, sizeof(active), NULL, 0) == 0)
+         project = active;
+   }
+   if (!project)
+      fatal(strcmp(operation, "purge") == 0 ? "index purge requires a stable project id"
+                                            : "index gc requires an active or explicit project");
+   if (confirm && (!reason || !reason[0]))
+      fatal("confirmed index lifecycle mutations require --reason");
+   int status = 0;
+   char *json = kb_client_index_project_lifecycle_json(operation, project, confirm, reason,
+                                                       retention_days, &status);
+   int ok = idx_lifecycle_emit(ctx, operation, project, json, status);
+   free(json);
+   if (!ok)
+      fatal("index %s failed", operation);
+}
+
+static void idx_purge(app_ctx_t *ctx, int argc, char **argv)
+{
+   idx_lifecycle_mutation(ctx, "purge", argc, argv);
+}
+
+static void idx_gc(app_ctx_t *ctx, int argc, char **argv)
+{
+   idx_lifecycle_mutation(ctx, "gc", argc, argv);
 }
 
 static void idx_overview(app_ctx_t *ctx, int argc, char **argv)
@@ -238,6 +363,15 @@ static int idx_source_authority_enabled(void)
    return enabled && enabled[0] && strcmp(enabled, "0") != 0;
 }
 
+static int idx_active_project(char *out, size_t cap)
+{
+   char cwd[MAX_PATH_LEN];
+   if (!out || cap == 0 || !getcwd(cwd, sizeof(cwd)))
+      return -1;
+   out[0] = '\0';
+   return workspace_repo_identity(cwd, out, cap, NULL, 0);
+}
+
 static int idx_source_path_matches(const char *source_path, const char *hit_path)
 {
    if (!source_path || !source_path[0] || !hit_path || !hit_path[0])
@@ -318,8 +452,11 @@ static void idx_find(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
       fatal("index find requires an identifier");
+   int all = argc >= 3 && strcmp(argv[1], "--scope") == 0 && strcmp(argv[2], "all") == 0;
+   char project[256] = "";
+   (void)idx_active_project(project, sizeof(project));
    term_hit_t hits[128];
-   int count = kb_client_index_find(argv[0], hits, 128);
+   int count = kb_client_index_find_scoped(project, all, argv[0], hits, 128);
    if (ctx->json_output)
    {
       cJSON *arr = cJSON_CreateArray();
@@ -368,16 +505,31 @@ static void idx_find(app_ctx_t *ctx, int argc, char **argv)
 
 static void idx_blast_radius(app_ctx_t *ctx, int argc, char **argv)
 {
-   if (argc < 2)
-      fatal("index blast-radius requires project and file");
+   if (argc < 1)
+      fatal("index blast-radius requires a file");
+   char active[256] = "";
+   const char *project = NULL;
+   const char *file_path = NULL;
+   if (argc >= 2)
+   {
+      project = argv[0];
+      file_path = argv[1];
+   }
+   else if (idx_active_project(active, sizeof(active)) == 0)
+   {
+      project = active;
+      file_path = argv[0];
+   }
+   if (!project)
+      fatal("index blast-radius requires an active or explicit project");
    blast_radius_t br;
-   if (kb_client_index_blast_radius(argv[0], argv[1], &br) != 0)
+   if (kb_client_index_blast_radius(project, file_path, &br) != 0)
    {
       if (!ctx->json_output)
          fprintf(stderr,
                  "aimee: knowledge service unavailable — cannot compute canonical blast radius\n");
       memset(&br, 0, sizeof(br));
-      snprintf(br.file, sizeof(br.file), "%s", argv[1]);
+      snprintf(br.file, sizeof(br.file), "%s", file_path);
    }
    if (ctx->json_output)
    {
@@ -412,10 +564,25 @@ static void idx_blast_radius(app_ctx_t *ctx, int argc, char **argv)
 
 static void idx_structure(app_ctx_t *ctx, int argc, char **argv)
 {
-   if (argc < 2)
-      fatal("index structure requires project and file");
+   if (argc < 1)
+      fatal("index structure requires a file");
+   char active[256] = "";
+   const char *project = NULL;
+   const char *file_path = NULL;
+   if (argc >= 2)
+   {
+      project = argv[0];
+      file_path = argv[1];
+   }
+   else if (idx_active_project(active, sizeof(active)) == 0)
+   {
+      project = active;
+      file_path = argv[0];
+   }
+   if (!project)
+      fatal("index structure requires an active or explicit project");
    definition_t defs[256];
-   int count = kb_client_index_structure(argv[0], argv[1], defs, 256);
+   int count = kb_client_index_structure(project, file_path, defs, 256);
    if (ctx->json_output)
    {
       cJSON *arr = cJSON_CreateArray();
@@ -434,7 +601,7 @@ static void idx_structure(app_ctx_t *ctx, int argc, char **argv)
    {
       if (count == 0)
       {
-         printf("No definitions found in %s/%s\n", argv[0], argv[1]);
+         printf("No definitions found in %s/%s\n", project, file_path);
          return;
       }
       for (int i = 0; i < count; i++)
@@ -448,9 +615,21 @@ static void idx_callers(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
       fatal("index callers requires a symbol name");
-   const char *project = argc >= 2 ? argv[1] : NULL;
+   char active[256] = "";
+   int all = 0;
+   const char *project = NULL;
+   if (argc >= 2 && strcmp(argv[1], "--scope") == 0)
+   {
+      if (argc < 3 || (strcmp(argv[2], "all") != 0 && strcmp(argv[2], "current") != 0))
+         fatal("index callers --scope must be current or all");
+      all = strcmp(argv[2], "all") == 0;
+   }
+   else if (argc >= 2)
+      project = argv[1];
+   if (!project && idx_active_project(active, sizeof(active)) == 0)
+      project = active;
    caller_hit_t hits[128];
-   int count = kb_client_index_find_callers(project, argv[0], hits, 128);
+   int count = kb_client_index_find_callers_scoped(project, all, argv[0], hits, 128);
    if (ctx->json_output)
    {
       cJSON *arr = cJSON_CreateArray();
@@ -731,6 +910,9 @@ static void idx_lsp_rename(app_ctx_t *ctx, int argc, char **argv)
 
 static const subcmd_t index_subcmds[] = {
     {"scan", "Scan a project directory for indexing", idx_scan},
+    {"detach", "Hide a project generation without deleting it", idx_detach},
+    {"purge", "Dry-run or confirm an audited project purge", idx_purge},
+    {"gc", "Retire stale checkout aliases and detached generations", idx_gc},
     {"overview", "List all indexed projects", idx_overview},
     {"find", "Find definitions/references by identifier", idx_find},
     {"blast-radius", "Show files affected by changes to a file", idx_blast_radius},

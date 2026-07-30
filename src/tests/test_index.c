@@ -531,6 +531,24 @@ int main(void)
           canonical_index_find_project("canonicalproj", "liveness_is_degenerate_response", hits, 1);
       assert(count == 1);
       assert(strcmp(hits[0].project, "canonicalproj") == 0);
+      count = canonical_index_find_excluding_project("aaa-crowd", "liveness_is_degenerate_response",
+                                                     hits, 1);
+      assert(count == 1);
+      assert(strcmp(hits[0].project, "canonicalproj") == 0);
+      count = canonical_index_find_excluding_project("canonicalproj",
+                                                     "liveness_is_degenerate_response", hits, 1);
+      assert(count == 1);
+      assert(strcmp(hits[0].project, "aaa-crowd") == 0);
+
+      code_search_hit_t search_hits[1];
+      count =
+          canonical_index_code_search_excluding_project("liveness", "aaa-crowd", search_hits, 1, 0);
+      assert(count == 1);
+      assert(strcmp(search_hits[0].project, "canonicalproj") == 0);
+      count = canonical_index_code_search_excluding_project("liveness", "canonicalproj",
+                                                            search_hits, 1, 0);
+      assert(count == 1);
+      assert(strcmp(search_hits[0].project, "aaa-crowd") == 0);
       char cleanup_cmd[PATH_MAX + 16];
       snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", crowd);
       (void)system(cleanup_cmd);
