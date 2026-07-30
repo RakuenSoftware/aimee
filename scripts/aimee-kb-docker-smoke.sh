@@ -3,7 +3,8 @@
 # aimee-kb-docker-smoke.sh — prove an aimee-kb Docker container fully spins up
 # and is usable.
 #
-# Brings up the compose.yaml stack (self-contained aimee-kb + aimee-llm), waits for
+# Brings up the compose.yaml stack (self-contained aimee-kb; it embeds in-container,
+# so there is no separate inference service), waits for
 # the kb to report healthy, then exercises the live /v1 surface end to end:
 #
 #   1. /v1/health              — HTTP API is up
@@ -11,10 +12,11 @@
 #   3. /v1/version             — build identifies itself
 #   4. /v1/capabilities        — capability manifest serves
 #   5. POST /v1/search         — DB2-backed query path works (empty result is OK)
-#   6. embedder /embed         — real embedding round-trip (in-network)
+#   6. embedder /embed         — real embedding round-trip (in-container)
+#   7. no dim refusal          — the vectors fit the columns the kb built
 #
-# The embedder port is not published by compose.yaml, so its checks run inside
-# the kb container via `docker compose exec` (the kb image ships curl).
+# The embedder listens on loopback INSIDE the kb container, so its checks run via
+# `docker compose exec` (the kb image ships curl).
 #
 # Usage:
 #   scripts/aimee-kb-docker-smoke.sh            # assume stack already up on :8741
@@ -35,12 +37,19 @@ KB_URL="${KB_URL:-http://localhost:8741}"
 COMPOSE_FILE="${COMPOSE_FILE:-compose.yaml}"
 WAIT_SECONDS="${WAIT_SECONDS:-300}"
 
-# Smoke tests validate the retrieval pipeline, not a specific model. Default to
-# the light tier (0.6b embedder/1024-dim) so `up --build` is fast and fits CI
-# runners; the shipped default is the 4b. Override any.
-: "${EMBEDDER_MODEL:=perplexity-ai/pplx-embed-v1-0.6b}"
-: "${AIMEE_EMBEDDING_DIM:=1024}"
-export EMBEDDER_MODEL AIMEE_EMBEDDING_DIM
+# The kb embeds in-container from weights baked into the image, so there is no tier
+# to pick and nothing to download. Select the bundled model (the image pre-selects
+# nothing) and let AIMEE_EMBEDDING_DIM default from config so the schema width and
+# the model's output width come from one source.
+: "${EMBEDDER_MODEL:=bekko-a25m}"
+export EMBEDDER_MODEL
+# The width is NOT asserted against a number here. It is a setting, so it has one
+# home — config, inside the deployment — and a copy in this script would be a second
+# declaration that can disagree. What this smoke can check without duplicating it is
+# the property that matters: the vectors the embedder returns must fit the columns the
+# kb built, which the dim guard enforces at insert time. So the checks below drive a
+# real embed + search and then assert the kb logged no dim refusal.
+
 DO_UP=0
 DO_DOWN=0
 
@@ -138,31 +147,46 @@ check "POST memory.find_facts (fusion)" '"facts"' -X POST -H 'content-type: appl
                                                -d '{"query":"docker smoke test","limit":3,"graph_code_fusion_state":"on"}' \
                                                "${KB_URL}/v1/actions/memory.find_facts"
 
-bold "==> Embed backend round-trip (in-network, via the kb container)"
-# Unified topology: the kb embeds against the aimee-llm container (AIMEE_LLM_URL,
-# /embed). Legacy topology: the torch embedder service (AIMEE_EMBEDDER_URL). Probe
-# whichever backend this compose project runs.
-emb_backend=""
-if "${DC[@]}" ps --format '{{.Service}}' 2>/dev/null | grep -qx aimee-llm; then
-  emb_backend='${AIMEE_LLM_URL:-http://aimee-llm:8080}/embed'
-elif "${DC[@]}" ps --format '{{.Service}}' 2>/dev/null | grep -qx embedder; then
-  emb_backend='${AIMEE_EMBEDDER_URL:-http://embedder:8080}/embed'
-fi
-if [[ -n "$emb_backend" ]]; then
-  if emb="$("${DC[@]}" exec -T aimee-kb sh -c \
-        "printf 'aimee docker smoke test' | curl -fsS --max-time 30 -X POST \
-           --data-binary @- \"$emb_backend\"" 2>/dev/null)" \
-     && [[ "$emb" == \[* ]]; then
-    dims="$(($(printf '%s' "$emb" | tr -cd ',' | wc -c) + 1))"
-    green "  PASS  /embed returned a ${dims}-dim vector"
-    PASS=$((PASS + 1))
-  else
-    red   "  FAIL  /embed round-trip"
-    printf '        got: %s\n' "${emb:-<no response>}"
+bold "==> Embed backend round-trip (in-container, inside the kb container)"
+# The embedder is a process INSIDE aimee-kb now, not a service beside it: the
+# entrypoint starts it on loopback and exports AIMEE_EMBEDDER_URL to point at it.
+# So the probe asks the kb container to embed against its own configured backend,
+# which is the same variable an external endpoint would set — one code path.
+#
+# This must not skip. The old version looked for an `aimee-llm` or `embedder`
+# service and skipped when it found neither; with both retired that skip would be
+# unconditional, and a skipped check reads as a pass. If EMBEDDER_MODEL selected a
+# model, a working round-trip is mandatory.
+emb_url="$("${DC[@]}" exec -T aimee-kb sh -c 'printf "%s" "${AIMEE_EMBEDDER_URL:-}"' 2>/dev/null || true)"
+if [[ -z "$emb_url" ]]; then
+  red   "  FAIL  kb reports no AIMEE_EMBEDDER_URL despite EMBEDDER_MODEL=${EMBEDDER_MODEL}"
+  printf '        the entrypoint should have started the bundled model and exported it\n'
+  FAIL=$((FAIL + 1))
+elif emb="$("${DC[@]}" exec -T aimee-kb sh -c \
+      "printf 'aimee docker smoke test' | curl -fsS --max-time 60 -X POST \
+         --data-binary @- \"\${AIMEE_EMBEDDER_URL}/embed\"" 2>/dev/null)" \
+   && [[ "$emb" == \[* ]]; then
+  dims="$(($(printf '%s' "$emb" | tr -cd ',' | wc -c) + 1))"
+  green "  PASS  /embed returned a ${dims}-dim vector (${EMBEDDER_MODEL})"
+  PASS=$((PASS + 1))
+
+  # The width is only correct if the kb can STORE it. A mismatch between the
+  # embedder's output and the schema's columns shows up as the dim guard refusing
+  # the upsert — which is silent in the API response, so read the kb's log. This is
+  # what a bad default did in practice: columns sized 1024, vectors 384, and every
+  # insert refused while /v1/search still answered 200 with an empty result.
+  if "${DC[@]}" logs aimee-kb 2>&1 | grep -qiE "dim mismatch|refusing upsert|vector-space"; then
+    red   "  FAIL  kb refused vectors — embedder width disagrees with the schema"
+    "${DC[@]}" logs aimee-kb 2>&1 | grep -iE "dim mismatch|refusing upsert|vector-space" | tail -3
     FAIL=$((FAIL + 1))
+  else
+    green "  PASS  kb stored embeddings with no dim/vector-space refusal"
+    PASS=$((PASS + 1))
   fi
 else
-  printf '  SKIP  no embed backend service in this compose project\n'
+  red   "  FAIL  /embed round-trip against ${emb_url}"
+  printf '        got: %s\n' "${emb:-<no response>}"
+  FAIL=$((FAIL + 1))
 fi
 
 echo

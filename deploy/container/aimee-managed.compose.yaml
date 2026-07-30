@@ -6,19 +6,18 @@
 # operator directly; the server picks the services with COMPOSE_PROFILES, which
 # `aimee config deploy-env` derives from the wizard's page-2 config:
 #
-#   local kb, LLM external/off  -> COMPOSE_PROFILES=kb      -> aimee-kb
-#   local kb, any local tier    -> COMPOSE_PROFILES=kb,llm  -> + aimee-llm (downloads)
-#   remote kb                   -> COMPOSE_PROFILES=         -> nothing (server connects out)
+#   local kb   -> COMPOSE_PROFILES=kb  -> aimee-kb
+#   remote kb  -> COMPOSE_PROFILES=    -> nothing (the server connects out)
 #
-# ONE LLM service for every tier. aimee-llm is model-less and downloads whichever
-# tier the wizard selected (AIMEE_LLM_*_TIER) on first boot, cpu included. There
-# used to be a second, pre-baked aimee-llm-cpu image on a mutually exclusive
-# "llm-cpu" profile; it is gone. Two images meant every gateway change had to be
-# republished twice, and when the cpu one lagged it served a /health with no
-# `dim` — which the kb gates on — so the kb never went healthy on a fresh install.
+# NO INFERENCE SERVICE. aimee-llm is retired: the kb embeds in-container from
+# weights baked into its image (bekko-a25m, 384-dim), so embedding needs no
+# sibling container and no download. A deployment that needs a wider embedder
+# points AIMEE_EMBEDDER_URL at an external endpoint instead. Synthesis is the
+# only remaining LLM role and it is external-only for now (AIMEE_LLM_URL,
+# defaulted empty) — a local synth tier is the next piece of work.
 #
 # Every service joins the EXTERNAL `aimee` network that aimee-server is also on, so
-# the server reaches them by name (aimee-kb:8741, aimee-llm:8742).
+# the server reaches them by name (aimee-kb:8741).
 # That network is created by compose.server-managed.yaml.
 
 networks:
