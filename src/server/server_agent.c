@@ -93,7 +93,6 @@ int server_agent_route_is_degraded(const char *agent_name)
 
 int server_agent_route_has_capacity(const agent_t *ag)
 {
-   agent_admission_ensure_configured();
    const char *model = ag && ag->model[0] ? ag->model : AGENT_ADMISSION_DEFAULT_MODEL_KEY;
    return ag && agent_admission_probe(ag->name, model, ag->max_parallel, NULL);
 }
@@ -531,7 +530,6 @@ static cJSON *server_agent_to_json(const agent_t *ag)
    cJSON_AddBoolToObject(obj, "primary_only", ag->primary_only);
    cJSON_AddNumberToObject(obj, "max_turns", ag->max_turns);
    cJSON_AddNumberToObject(obj, "max_parallel", ag->max_parallel);
-   agent_admission_ensure_configured();
    /* Authoritative three-limit availability for the out-of-process Go WFE. */
    int capacity = agent_route_agent_capacity(ag);
    if (capacity >= 0)
