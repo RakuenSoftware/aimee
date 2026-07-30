@@ -889,9 +889,13 @@ resource_failure:
  * strange bound, it silently removes the bound entirely — the exact outcome this
  * function exists to make impossible. errno must be inspected because strtol
  * saturates at LONG_MAX/LONG_MIN rather than reporting failure in its return. */
-static int db2_pg_timeout_ms_env(const char *var, int fallback)
+/* Takes the RAW value, not the variable name: the reference-doc generator scans
+ * for literal getenv("AIMEE_*") calls, so hiding the lookup behind a parameter
+ * makes the variable invisible to it — which silently dropped a documented
+ * variable from docs/gen the first time this was extracted. Each wrapper keeps
+ * its own getenv literal; the validation stays shared. */
+static int db2_pg_timeout_ms_parse(const char *raw, int fallback)
 {
-   const char *raw = getenv(var);
    if (!raw || !raw[0])
       return fallback;
 
@@ -926,13 +930,14 @@ static int db2_pg_timeout_ms_env(const char *var, int fallback)
 
 int db2_pg_statement_timeout_ms(void)
 {
-   return db2_pg_timeout_ms_env("AIMEE_DB2_STATEMENT_TIMEOUT_MS", DB2_DEFAULT_STATEMENT_TIMEOUT_MS);
+   return db2_pg_timeout_ms_parse(getenv("AIMEE_DB2_STATEMENT_TIMEOUT_MS"),
+                                  DB2_DEFAULT_STATEMENT_TIMEOUT_MS);
 }
 
 int db2_pg_idle_in_transaction_timeout_ms(void)
 {
-   return db2_pg_timeout_ms_env("AIMEE_DB2_IDLE_IN_TRANSACTION_TIMEOUT_MS",
-                                DB2_DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT_MS);
+   return db2_pg_timeout_ms_parse(getenv("AIMEE_DB2_IDLE_IN_TRANSACTION_TIMEOUT_MS"),
+                                  DB2_DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT_MS);
 }
 
 /* PQconnectdb accepts EITHER a keyword/value string ("host=db user=aimee") OR a
