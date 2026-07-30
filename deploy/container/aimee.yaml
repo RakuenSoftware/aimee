@@ -1,15 +1,19 @@
 # Default aimee-kb container configuration (baked into the image at
 # $AIMEE_HOME/aimee.yaml).
 #
-# The entrypoint resolves the unified AIMEE_LLM_URL endpoint for embedding,
-# and synthesis. This file selects the bundled sidecar commands.
+# Embedding is IN-CONTAINER: the entrypoint starts embedder-server.py on loopback
+# with weights baked into this image, so a fresh container embeds with no download and
+# no network. An http(s) embedding_command is the kb's in-process transport, so there is
+# no popen per embed either. Point it elsewhere to use an external embedder instead.
 #
-# Embedding works out of the box through the `aimee-llm` gateway. LLM-dependent
-# passes fail closed (their operations are marked failed) if that endpoint is
-# unavailable.
+# Synthesis still resolves an external endpoint (AIMEE_LLM_URL / LLM_ENDPOINT);
+# LLM-dependent passes fail closed if that is unavailable.
+embedding_command: "http://127.0.0.1:8760"
 
-# Real semantic embeddings via the unified inference gateway.
-embedding_command: "python3 /opt/aimee/scripts/embed-remote.py"
+# Which registered embedder to serve (scripts/embedders.json). The setup wizard writes
+# this; changing it re-embeds the corpus, which the kb enforces via the recorded
+# serving identity.
+embedding_model: "nomic-embed-text-v2-moe"
 
 learning:
   synthesize:

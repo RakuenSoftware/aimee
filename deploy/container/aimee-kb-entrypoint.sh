@@ -24,6 +24,37 @@
 # 3. DB2. An unset AIMEE_DB2_URL means the operator configured no database, so
 #    run the in-image PostgreSQL 18 + pgvector cluster. Any value in
 #    AIMEE_DB2_URL selects an external server and nothing is started here.
+# ---- in-container embedder ---------------------------------------------------
+# The kb embeds itself: no embedder sidecar, no aimee-llm hop. Weights are baked into
+# the image, so this starts instantly and needs no network.
+#
+# BEST-EFFORT ON PURPOSE. A failed embedder must not stop the kb from booting: the kb
+# already degrades honestly when embedding is unavailable (dense retrieval is skipped and
+# says so), whereas an entrypoint that refuses to start takes the whole knowledge base
+# down with it. The failure is loud in the log and visible on the embedder's /health.
+#
+# An operator who points embedding_command at an external endpoint gets that instead;
+# this only serves the loopback default.
+start_embedder() {
+    venv="${EMBEDDER_VENV:-/opt/aimee/embedder-venv}"
+    server=/opt/aimee/scripts/embedder-server.py
+    if [ ! -x "$venv/bin/python" ] || [ ! -f "$server" ]; then
+        echo "aimee-kb: no in-container embedder in this image; relying on a configured endpoint" >&2
+        return 0
+    fi
+    # The model to serve comes from config (the wizard writes embedding_model); the env
+    # override exists for a one-off without editing config.
+    if [ -z "${EMBEDDER_MODEL:-}" ]; then
+        EMBEDDER_MODEL="$(aimee-kb config get embedding_model 2>/dev/null | tr -d '"'"'\r\n'"'"')"
+        export EMBEDDER_MODEL
+    fi
+    : "${EMBEDDER_PORT:=8760}"
+    export EMBEDDER_PORT
+    echo "aimee-kb: starting in-container embedder (${EMBEDDER_MODEL:-default}) on :$EMBEDDER_PORT" >&2
+    "$venv/bin/python" "$server" >&2 &
+    embedder_pid=$!
+}
+
 set -e
 
 # 1. Stack rlimit (64 MB == 65536 KiB == 67108864 bytes). Best-effort: some
@@ -104,6 +135,8 @@ if [ -z "${AIMEE_DB2_URL:-}" ]; then
     AIMEE_DB2_URL="postgresql:///$DB?host=$PGSOCK"
     export AIMEE_DB2_URL
 
+    start_embedder
+
     # Not exec: the trap above has to outlive the kb so the cluster shuts down
     # cleanly. Forward the stop signal so the kb still gets its own shutdown.
     aimee-kb "$@" &
@@ -160,4 +193,5 @@ if [ -z "${AIMEE_DB2_URL:-}" ]; then
     exit "$rc"
 fi
 
+start_embedder
 exec aimee-kb "$@"

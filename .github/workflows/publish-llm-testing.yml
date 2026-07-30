@@ -33,14 +33,7 @@ permissions:
   packages: write
 
 jobs:
-  # The release the bekko embedder is fetched from must exist before the image ships.
-  embedder-artifacts:
-    permissions:
-      contents: write
-    uses: ./.github/workflows/publish-embedder-artifacts.yml
-
   build:
-    needs: embedder-artifacts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

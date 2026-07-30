@@ -1,29 +1,42 @@
 #!/usr/bin/env python3
-"""embedder-server.py: persistent embedding service.
+"""embedder-server.py: the aimee-kb container's in-container embedder.
 
-A long-lived HTTP service that loads the sentence-transformers model ONCE and
-serves embeddings over HTTP, so the aimee-kb container can embed without paying
-a multi-second model reload on every call. The thin embed-remote.py client in the
-kb image talks to this service; this service holds the model.
+Runs INSIDE the kb container on loopback, holding the model resident so the kb
+embeds without a per-call reload and without leaving the container. There is no
+separate embedder or aimee-llm service on this path any more: the weights are baked
+into the kb image and this process serves them.
 
-Default model: perplexity-ai/pplx-embed-v1-4b (2560-dim, Qwen3-based,
-retrieval-optimized, prefix-free); the lighter pplx-embed-v1-0.6b (1024-dim) is
-the alternate tier. The reported dimension is whatever the loaded model produces
-— it MUST match config embedding_dim and the schema vector(N) columns, or vector
-inserts fail.
+WHY IT OWNS THE PREFIXES. The kb declares only POLARITY — query or document — and
+the prefix belonging to each model is deployment data, not caller data. Whatever sits
+closest to the model has to apply it, because a prefix-dependent embedder served bare
+is a silent quality regression: nomic measures 0.5823 NDCG@10 without its card
+prefixes against 0.6075 with them, no error either way. That used to be the aimee-llm
+gateway's job; with the embedder in-container it is this file's, reading the same
+scripts/embedders.json everything else reads.
 
 Endpoints:
-  POST /embed   body = raw UTF-8 text                 -> JSON float array (model dim)
-  GET  /health                                         -> {"status":"ok","model":...,"dim":N}
+  POST /embed        raw UTF-8 text          -> JSON float array (model dim)
+  POST /embed_batch  JSON [text, ...]        -> JSON [[float, ...], ...]
+  GET  /health       -> {"status":..., "model":..., "dim":N, "serving_id":...}
+
+Both embed endpoints take `?input_type=query|document`; omitted means `document`,
+since every ingest path is a document and only queries need to opt in. It rides in the
+query string because neither body has an envelope to extend.
+
+`serving_id` is the identity of the VECTOR SPACE being served — the model plus a
+digest over its pooling and prefix pair. The kb records it against its corpus and
+refuses to start when it changes, because a pooling or prefix change rewrites every
+vector while leaving both the width and the model name alone.
 
 Config (env):
   EMBEDDER_PORT     listen port (default 8080)
-  EMBEDDER_MODEL    sentence-transformers model id (default pplx-embed-v1-4b)
+  EMBEDDER_MODEL    registry id of the embedder to serve (see EMBEDDERS_FILE)
+  EMBEDDERS_FILE    registry path (default /opt/aimee/embedders.json)
+  EMBEDDERS_EXTRA   operator overlay merged over it
   EMBEDDER_THREADS  torch intra-op threads (default min(8, ncpu))
-  EMBEDDER_QUANTIZE fp32 (default) | int8 (torch dynamic; ~3.3x faster, drifts —
-                    pair with the 4b deep tier; see below)
+  EMBEDDER_QUANTIZE fp32 (default) | int8 (torch dynamic; ~3.3x faster, drifts)
 
-Dependencies: pip install "sentence-transformers>=3.3" "transformers>=5.2" einops
+Dependencies: torch, "sentence-transformers>=3.3", "transformers>=5.2", einops
 """
 
 import json
@@ -32,7 +45,120 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-MODEL_NAME = os.environ.get("EMBEDDER_MODEL", "perplexity-ai/pplx-embed-v1-4b")
+# ---- the embedder registry ----
+# The same file the kb and the setup wizard read. Every per-model fact that changes the
+# vectors lives there — pooling, width, context, prefixes — keyed by model identity, so a
+# swap cannot silently inherit the previous model's settings. That failure has happened
+# twice here: pooling defaulted to `last` (right for Qwen3, wrong for nomic) and prefixes
+# were absent entirely.
+EMBEDDERS_FILE = os.environ.get("EMBEDDERS_FILE", "/opt/aimee/embedders.json")
+EMBEDDERS_EXTRA = os.environ.get("EMBEDDERS_EXTRA", "")
+INPUT_TYPES = ("query", "document")
+# Ingest is the overwhelming majority of embed traffic and every ingest path is a
+# document, so an omitted input_type means `document`. It must NOT mean "no prefix":
+# defaulting to bare text is exactly the regression the registry exists to prevent.
+INPUT_TYPE_DEFAULT = "document"
+EMBEDDER_REQUIRED_FIELDS = ("repo", "revision", "pooling", "dim", "context", "prefixes")
+
+
+class RegistryError(RuntimeError):
+    """The registry is missing or malformed — an operator error, surfaced at startup."""
+
+
+def _load_registry_file(path):
+    with open(path, "r", encoding="utf-8") as handle:
+        document = json.load(handle)
+    if not isinstance(document, dict):
+        raise RegistryError(f"{path}: top level must be an object")
+    table = document.get("embedders")
+    if not isinstance(table, dict) or not table:
+        raise RegistryError(f"{path} declares no embedders")
+    out = {}
+    for model_id, spec in table.items():
+        if not isinstance(spec, dict):
+            raise RegistryError(f"{path}: entry {model_id!r} is not an object")
+        missing = [f for f in EMBEDDER_REQUIRED_FIELDS if f not in spec]
+        if missing:
+            raise RegistryError(f"{path}: entry {model_id!r} is missing {', '.join(missing)}")
+        prefixes = spec["prefixes"]
+        if not isinstance(prefixes, dict) or set(prefixes) != set(INPUT_TYPES):
+            raise RegistryError(
+                f"{path}: entry {model_id!r} must declare prefixes for exactly "
+                f"{', '.join(INPUT_TYPES)} (empty strings if its card defines none)"
+            )
+        if not all(isinstance(prefixes[side], str) for side in INPUT_TYPES):
+            raise RegistryError(f"{path}: entry {model_id!r} has a non-string prefix")
+        out[model_key(model_id)] = spec
+    return out
+
+
+def model_key(model_id):
+    """Normalise an id to its registry key. Ids carry deployment decoration — an @rev
+    suffix (as the db2 model records use) or case differences — none of which change
+    which prefixes the model was trained with."""
+    return (model_id or "").split("@", 1)[0].strip().lower()
+
+
+def load_registry():
+    """Parse the registry, applying the operator overlay over it. Raises rather than
+    degrading: every degraded mode here is silent downstream."""
+    try:
+        registry = _load_registry_file(EMBEDDERS_FILE)
+    except (OSError, ValueError) as exc:
+        raise RegistryError(f"cannot read embedder registry {EMBEDDERS_FILE}: {exc}") from exc
+    if EMBEDDERS_EXTRA:
+        try:
+            registry.update(_load_registry_file(EMBEDDERS_EXTRA))
+        except (OSError, ValueError) as exc:
+            raise RegistryError(f"cannot read embedder overlay {EMBEDDERS_EXTRA}: {exc}") from exc
+    return registry
+
+
+EMBEDDER_ID = model_key(os.environ.get("EMBEDDER_MODEL", "nomic-embed-text-v2-moe"))
+try:
+    REGISTRY = load_registry()
+    REGISTRY_ERROR = None
+except RegistryError as exc:
+    REGISTRY = {}
+    REGISTRY_ERROR = str(exc)
+
+SPEC = REGISTRY.get(EMBEDDER_ID)
+# The repo id sentence-transformers loads. Refusing an unregistered model is the point:
+# serving it would mean guessing its pooling and prefixes.
+MODEL_NAME = str(SPEC["repo"]) if SPEC else ""
+MODEL_REVISION = str(SPEC.get("revision") or "main") if SPEC else "main"
+
+
+def prefix_for(input_type):
+    """The prefix for `input_type` under the configured embedder."""
+    return SPEC["prefixes"][input_type] if SPEC else ""
+
+
+def serving_id():
+    """Identity of the vector space served: model + digest over pooling and prefixes.
+
+    A dim is not enough and a model name is not enough — pooling and prefixes change
+    every vector while leaving both alone. Empty when the model is unregistered, so the
+    kb's guard stays a no-op rather than refusing on a value that was never meaningful.
+    """
+    if not SPEC:
+        return ""
+    import hashlib
+
+    material = "\x00".join((
+        EMBEDDER_ID,
+        str(SPEC["pooling"]),
+        SPEC["prefixes"]["query"],
+        SPEC["prefixes"]["document"],
+    ))
+    return f"{EMBEDDER_ID}/{hashlib.sha256(material.encode('utf-8')).hexdigest()[:16]}"
+
+
+def parse_input_type(value):
+    """Validate a caller-supplied input_type, or None when it is not one of ours."""
+    if value is None or value == "":
+        return INPUT_TYPE_DEFAULT
+    return value if value in INPUT_TYPES else None
 PORT = int(os.environ.get("EMBEDDER_PORT", "8080"))
 # CPU serving tuning. A single short embed does not scale past ~8 intra-op
 # threads — on a 32-core host pplx-embed-0.6b is 269ms at 32 threads but 189ms at
@@ -80,7 +206,9 @@ def load_model():
     torch.set_num_threads(EMBEDDER_THREADS)
     # trust_remote_code: the Qwen3-based embedders (pplx-embed, gte-Qwen2) ship
     # custom modelling code on the Hub.
-    _model = SentenceTransformer(MODEL_NAME, trust_remote_code=True)
+    # revision pinned from the registry: the weights are baked at build time, and a
+    # floating ref would let an image rebuild change the vector space silently.
+    _model = SentenceTransformer(MODEL_NAME, revision=MODEL_REVISION, trust_remote_code=True)
     _dim = _model.get_sentence_embedding_dimension() or 0  # read before quantizing
     if EMBEDDER_QUANTIZE == "int8":
         import torch.ao.quantization as ao_q
@@ -113,10 +241,29 @@ def _stub_embed(text):
     return [x / norm for x in out]
 
 
+def _refuse_reason():
+    """Why this process cannot serve, or None. Refusing beats guessing: an unregistered
+    model has no declared pooling or prefixes, and serving it bare is undetectable
+    downstream."""
+    if REGISTRY_ERROR:
+        return REGISTRY_ERROR
+    if not SPEC:
+        return (f"embedder {EMBEDDER_ID or '(unset)'} is not in {EMBEDDERS_FILE}; registered: "
+                f"{', '.join(sorted(REGISTRY)) or '(none)'}")
+    return None
+
+
 def _background_load():
     """Fetch (cold volume) + load the model off the request path: once it loads,
     /health flips to "ok" and /embed serves."""
     global _load_status, _load_error, _dim
+    reason = _refuse_reason()
+    if reason:
+        _load_error = reason
+        _load_status = "error"
+        sys.stderr.write(f"embedder-server: {reason}\n")
+        sys.stderr.flush()
+        return
     if EMBEDDER_STUB:
         _dim = STUB_DIM
         _load_status = "ok"
@@ -135,22 +282,27 @@ def _background_load():
     sys.stderr.flush()
 
 
-def embed(text: str):
+def embed(text: str, input_type=INPUT_TYPE_DEFAULT):
+    # The prefix is applied here, closest to the model, and in STUB mode too — an e2e
+    # that skipped it would exercise a laxer contract than production.
+    prefixed = prefix_for(input_type) + text
     if EMBEDDER_STUB:
-        return _stub_embed(text)
-    vec = _model.encode(text, normalize_embeddings=True)
+        return _stub_embed(prefixed)
+    vec = _model.encode(prefixed, normalize_embeddings=True)
     return vec.tolist()
 
 
-def embed_batch(texts):
+def embed_batch(texts, input_type=INPUT_TYPE_DEFAULT):
     """Embed a list of texts in one batched model.encode() call — one HTTP
     round-trip and one batched inference instead of N separate /embed calls.
     Returns a list of float vectors aligned 1:1 with `texts`."""
+    prefix = prefix_for(input_type)
+    prefixed = [prefix + t for t in texts]
     if EMBEDDER_STUB:
-        return [_stub_embed(t) for t in texts]
-    if not texts:
+        return [_stub_embed(t) for t in prefixed]
+    if not prefixed:
         return []
-    vecs = _model.encode(list(texts), normalize_embeddings=True)
+    vecs = _model.encode(prefixed, normalize_embeddings=True)
     return [v.tolist() for v in vecs]
 
 
@@ -174,18 +326,36 @@ class Handler(BaseHTTPRequestHandler):
             # so it is never a placeholder.
             payload = {
                 "status": _load_status,
-                "model": MODEL_NAME,
+                "model": EMBEDDER_ID or MODEL_NAME,
+                "repo": MODEL_NAME,
                 "dim": _dim,
                 "quantize": EMBEDDER_QUANTIZE,
             }
-            if _load_status == "error":
+            # Registry data, not a measurement, so it is answerable while the model
+            # loads — the kb reads it before it can embed anything.
+            sid = serving_id()
+            if sid:
+                payload["serving_id"] = sid
+            if REGISTRY_ERROR:
+                payload["error"] = REGISTRY_ERROR
+            elif _load_status == "error":
                 payload["error"] = _load_error
             self._send(200 if _load_status == "ok" else 503, payload)
         else:
             self._send(404, {"error": "not found"})
 
     def do_POST(self):
-        path = self.path.rstrip("/")
+        split = self.path.split("?", 1)
+        path = split[0].rstrip("/")
+        raw_type = ""
+        if len(split) == 2:
+            for part in split[1].split("&"):
+                if part.startswith("input_type="):
+                    raw_type = part[len("input_type="):]
+        input_type = parse_input_type(raw_type)
+        if input_type is None:
+            self._send(400, {"error": f"input_type must be one of {', '.join(INPUT_TYPES)}"})
+            return
         if path not in ("/embed", "/embed_batch"):
             self._send(404, {"error": "not found"})
             return
@@ -202,7 +372,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(texts, list):
                     self._send(400, {"error": "embed_batch expects a JSON array of strings"})
                     return
-                self._send(200, embed_batch(texts))
+                self._send(200, embed_batch(texts, input_type))
             except Exception as exc:  # noqa: BLE001
                 self._send(500, {"error": str(exc)})
             return
@@ -211,7 +381,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": "empty input"})
             return
         try:
-            self._send(200, embed(text))
+            self._send(200, embed(text, input_type))
         except Exception as exc:  # noqa: BLE001
             self._send(500, {"error": str(exc)})
 

@@ -90,19 +90,45 @@ RUN mkdir -p "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib" \
 # PostgreSQL 17 symbols the kb was linked against (PGDG's libpq 18 does).
 FROM debian:trixie-slim
 
-# python3 (stdlib only) runs the sidecar clients the kb popens: embed-remote.py
-# (-> embedder service), llm-chat.py + learning-synthesize.py + curator-extract.py
-# (-> LLM endpoint). No torch here — the model lives in the embedder service.
+# python3 runs the sidecar clients the kb popens (llm-chat.py,
+# learning-synthesize.py, curator-extract.py -> LLM endpoint) AND the in-container
+# embedder below, which needs pip to install torch.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
+        libgomp1 \
         libpq5 \
         libssl3 \
         libzstd1 \
         python3 \
+        python3-pip \
+        python3-venv \
         zlib1g \
     && rm -rf /var/lib/apt/lists/*
+
+# ---- the in-container embedder ------------------------------------------------
+# The kb embeds ITSELF now. There is no embedder sidecar and no aimee-llm hop on the
+# retrieval path: embedder-server.py runs on loopback inside this container with the
+# weights BAKED IN, so a fresh container embeds immediately with no model download and
+# no network at all.
+#
+# This deliberately reverses the split the unified-llm cutover introduced. That design
+# bought a model-less kb image at the cost of a second container, a supervisor role, a
+# gateway, an HTTP hop and a per-role env matrix — all to serve an embedder small enough
+# to bake. With the reranker gone (measured negative) the only thing left on that path
+# was embedding, so the container is retired and its per-model facts move back to the one
+# place that reads them: scripts/embedders.json.
+#
+# CPU-only torch: the CUDA wheels are ~2GB of accelerator runtime this image never uses.
+ENV EMBEDDER_VENV=/opt/aimee/embedder-venv
+RUN python3 -m venv "$EMBEDDER_VENV" \
+    && "$EMBEDDER_VENV/bin/pip" install --no-cache-dir --quiet \
+        --index-url https://download.pytorch.org/whl/cpu torch \
+    && "$EMBEDDER_VENV/bin/pip" install --no-cache-dir --quiet \
+        "sentence-transformers>=3.3" "transformers>=5.2" einops \
+    && find "$EMBEDDER_VENV" -name '__pycache__' -type d -prune -exec rm -rf {} + \
+    && rm -rf /root/.cache/pip
 
 # DB2 engine, from PGDG rather than Debian: trixie ships PostgreSQL 17 with
 # pgvector 0.8.0, and its pgvector hard-depends on postgresql-17-jit-llvm, which
@@ -172,7 +198,31 @@ RUN useradd --system --home-dir /var/lib/aimee --create-home --shell /usr/sbin/n
 COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
 COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
 
-# Sidecar clients (the LLM/embedder access code the kb invokes via popen).
+# The embedder registry: every per-model fact that changes the vectors (pooling, width,
+# context, prefixes), keyed by model identity. Read by the in-container embedder to know
+# what to load and which prefixes to apply, and by the server for the wizard's picker.
+COPY scripts/embedders.json /opt/aimee/embedders.json
+COPY scripts/embedder-server.py /opt/aimee/scripts/embedder-server.py
+
+# Bake the weights for EVERY registered embedder, so switching between them in the
+# wizard is a restart rather than a download, and an air-gapped install works. Each is
+# small enough to justify that: nomic ~1.9GB fp32, bekko ~0.5GB. Pinned to the registry's
+# revision — a floating ref would let a rebuild change the vector space silently.
+ENV HF_HOME=/opt/aimee/models \
+    HF_HUB_OFFLINE=1
+RUN --mount=type=cache,target=/root/.cache/huggingface \
+    HF_HUB_OFFLINE=0 "$EMBEDDER_VENV/bin/python" - <<'PYBAKE'
+import json
+from huggingface_hub import snapshot_download
+with open("/opt/aimee/embedders.json", encoding="utf-8") as handle:
+    table = json.load(handle)["embedders"]
+for name, spec in table.items():
+    repo, revision = spec["repo"], spec.get("revision") or "main"
+    print(f"baking {name}: {repo}@{revision}", flush=True)
+    snapshot_download(repo, revision=revision)
+PYBAKE
+
+# Sidecar clients (the LLM access code the kb invokes via popen).
 COPY scripts/embed-remote.py scripts/llm-chat.py \
      scripts/learning-synthesize.py scripts/curator-extract.py scripts/llm-rewrite.py \
      scripts/guardrails-semantic.py /opt/aimee/scripts/

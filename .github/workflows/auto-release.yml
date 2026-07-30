@@ -94,11 +94,8 @@ jobs:
   images:
     needs: version
     uses: ./.github/workflows/publish-images.yml
-    # contents: write (not read) because publish-images.yml nests
-    # publish-embedder-artifacts.yml, which creates/uploads the embedder release. A
-    # nested reusable workflow cannot request more than the caller grants.
     permissions:
-      contents: write
+      contents: read
       packages: write
     with:
       version: ${{ needs.version.outputs.version }}

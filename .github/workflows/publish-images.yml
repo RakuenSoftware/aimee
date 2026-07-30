@@ -64,17 +64,9 @@ jobs:
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
-  # The bekko embedder GGUF has no Hub source, so the release must exist before any
-  # image is published or a container selecting it crash-loops on a missing fetch.
-  # Idempotent: seconds when the release is already complete.
-  embedder-artifacts:
-    permissions:
-      contents: write
-    uses: ./.github/workflows/publish-embedder-artifacts.yml
-
   # Build each image for each arch on a native runner; push by digest only.
   build:
-    needs: [prep, embedder-artifacts]
+    needs: prep
     strategy:
       fail-fast: false
       matrix:
