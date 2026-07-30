@@ -47,8 +47,10 @@ int main(void)
    {
       char path[512];
       snprintf(path, sizeof(path), "%s/%s", tmpdir, WORKSPACE_MANIFEST_FILENAME);
-      const char *yaml = "repos:\n"
-                         "  - url: https://github.com/example/myrepo.git\n"
+      const char *yaml = "id: example-workspace\n"
+                         "repos:\n"
+                         "  - id: stable-myrepo\n"
+                         "    url: https://github.com/example/myrepo.git\n"
                          "    path: ./repos/myrepo\n"
                          "  - url: https://github.com/example/other.git\n";
       assert(write_file(path, yaml) == 0);
@@ -56,10 +58,13 @@ int main(void)
       workspace_manifest_t m;
       int rc = workspace_manifest_load(tmpdir, &m);
       assert(rc == 0);
+      assert(strcmp(m.id, "example-workspace") == 0);
       assert(m.repo_count == 2);
+      assert(strcmp(m.repos[0].id, "stable-myrepo") == 0);
       assert(strcmp(m.repos[0].url, "https://github.com/example/myrepo.git") == 0);
       assert(strcmp(m.repos[0].path, "./repos/myrepo") == 0);
       assert(strcmp(m.repos[1].url, "https://github.com/example/other.git") == 0);
+      assert(m.repos[1].id[0] == '\0');
       assert(m.repos[1].path[0] == '\0');
       assert(m.dep_cmd_count == 0);
       assert(m.secret_count == 0);
@@ -167,6 +172,37 @@ int main(void)
       assert(strstr(m.dep_cmds[0].cmd, "lodash") != NULL);
       assert(strstr(m.dep_cmds[0].cmd, "express") != NULL);
 
+      unlink(path);
+   }
+
+   /* --- stable ids are strict and unique (never silently ignored) --- */
+   {
+      char path[512];
+      snprintf(path, sizeof(path), "%s/%s", tmpdir, WORKSPACE_MANIFEST_FILENAME);
+      assert(write_file(path, "id: invalid identity\n") == 0);
+      workspace_manifest_t m;
+      assert(workspace_manifest_load(tmpdir, &m) == -2);
+
+      const char *duplicate = "repos:\n"
+                              "  - id: shared-id\n"
+                              "    url: https://example.test/a.git\n"
+                              "  - id: shared-id\n"
+                              "    url: https://example.test/b.git\n";
+      assert(write_file(path, duplicate) == 0);
+      assert(workspace_manifest_load(tmpdir, &m) == -2);
+
+      const char *identified_without_url = "repos:\n  - id: stable-but-incomplete\n";
+      assert(write_file(path, identified_without_url) == 0);
+      assert(workspace_manifest_load(tmpdir, &m) == -2);
+
+      const char *invalid_skipped_id = "repos:\n"
+                                       "  - id: invalid identity\n"
+                                       "    path: ./missing-url\n";
+      assert(write_file(path, invalid_skipped_id) == 0);
+      assert(workspace_manifest_load(tmpdir, &m) == -2);
+
+      assert(write_file(path, "id: 42\n") == 0);
+      assert(workspace_manifest_load(tmpdir, &m) == -2);
       unlink(path);
    }
 

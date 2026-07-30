@@ -105,6 +105,7 @@ typedef struct
 {
    int64_t job_id;
    int64_t document_id;
+   int64_t generation;
    char project[256];
    int attempts;
    char file_path[1024];
@@ -129,6 +130,11 @@ static int ce_claim_job(ce_job_t *out)
                             " WHERE id = ("
                             "   SELECT id FROM kb_async_jobs"
                             "   WHERE kind = 'extract_doc' AND status = 'pending'"
+                            "     AND EXISTS (SELECT 1 FROM kb_documents d"
+                            "       JOIN projects p ON p.name=d.project"
+                            "       WHERE d.id=kb_async_jobs.document_id"
+                            "         AND p.lifecycle_state='current'"
+                            "         AND d.generation=p.current_generation)"
                             /* Skip jobs still serving their retry backoff. '' is
                              * "never failed" and must always be claimable. */
                             "     AND (next_attempt_at = '' OR next_attempt_at <= ?1)"
@@ -168,8 +174,11 @@ static int ce_fetch_document(ce_job_t *job)
     * queue (the enqueue in kb_curator_queue.c already excludes doc_kind='pdf'). PDF content
     * must never become a searchable derived artifact outside the access-gated search_chunks
     * path — `doc_kind <> 'pdf'` here guarantees the extractor never reads it. */
-   static const char *sql = "SELECT file_path, heading_path, content"
-                            " FROM kb_documents WHERE id = ?1 AND doc_kind <> 'pdf'";
+   static const char *sql = "SELECT d.file_path,d.heading_path,d.content,d.generation"
+                            " FROM kb_documents d JOIN projects p ON p.name=d.project"
+                            " WHERE d.id=?1 AND d.doc_kind<>'pdf'"
+                            " AND p.lifecycle_state='current'"
+                            " AND d.generation=p.current_generation";
 
    char err[CE_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -194,6 +203,7 @@ static int ce_fetch_document(ce_job_t *job)
       text_trim_partial_utf8(job->heading_path);
       snprintf(job->content, sizeof(job->content), "%s", ct ? ct : "");
       text_trim_partial_utf8(job->content);
+      job->generation = aimee_pg_column_int64(st, 3);
       found = 1;
    }
    aimee_pg_finalize(st);
@@ -462,6 +472,14 @@ static int ce_write_artifacts(const ce_job_t *job, cJSON *artifacts_arr)
          continue;
 
       double confidence = cJSON_IsNumber(conf_j) ? conf_j->valuedouble : 0.80;
+      if (cJSON_IsObject(payload_j))
+      {
+         cJSON *payload = (cJSON *)payload_j;
+         cJSON_DeleteItemFromObject(payload, "project");
+         cJSON_AddStringToObject(payload, "project", job->project);
+         cJSON_DeleteItemFromObject(payload, "generation");
+         cJSON_AddNumberToObject(payload, "generation", job->generation);
+      }
       char *payload_str = payload_j ? cJSON_PrintUnformatted(payload_j) : NULL;
 
       char id_buf[64];

@@ -115,6 +115,11 @@ static cJSON *build_fact_array(const char *scope_kind, const char *scope_id)
    st = aimee_pg_prepare(conn,
                          "SELECT source, relation, target, weight::text, valid_from, valid_until"
                          "  FROM entity_edges"
+                         " WHERE COALESCE(edge_origin,'') <> 'code_projection' OR EXISTS ("
+                         " SELECT 1 FROM code_projection_generations g"
+                         " JOIN projects p ON p.name=g.project"
+                         " WHERE g.id=entity_edges.projection_generation_id"
+                         " AND g.state='visible' AND p.lifecycle_state='current')"
                          " LIMIT 4000",
                          err, sizeof(err));
    if (st)

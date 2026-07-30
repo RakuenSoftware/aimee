@@ -9,6 +9,7 @@
 #include "oauth_defaults.h"  /* AIMEE_DEFAULT_GITHUB_OAUTH_CLIENT_ID */
 #include "oauth_pkce.h"      /* oauth_pkce_base64url_encode — state token */
 #include "platform_random.h" /* platform_random_bytes — CSRF state */
+#include "runtime_secret.h"  /* first-boot env secret, hydrated from Vault */
 #include "vault_service.h"   /* store the client_id/secret server-side */
 
 #include <pthread.h>
@@ -91,9 +92,8 @@ int git_oauth_github_get_client_id(char *out, size_t out_len)
    return get_client_id(out, out_len);
 }
 
-/* Resolve the client SECRET: the vault-stored value (set from the UI), else the
- * AIMEE_GITHUB_OAUTH_CLIENT_SECRET env. No built-in default — a secret must never
- * ship in a distributed image. Returns 1 + fills buf, or 0. */
+/* Resolve the client secret from its canonical UI-managed Vault slot, else the
+ * first-boot environment slot already hydrated from Vault. */
 static int get_client_secret(char *buf, size_t cap)
 {
    if (buf && cap)
@@ -104,12 +104,8 @@ static int get_client_secret(char *buf, size_t cap)
            VAULT_OK &&
        buf[0])
       return 1;
-   const char *env = getenv("AIMEE_GITHUB_OAUTH_CLIENT_SECRET");
-   if (env && env[0])
-   {
-      snprintf(buf, cap, "%s", env);
+   if (runtime_secret_get("AIMEE_GITHUB_OAUTH_CLIENT_SECRET", buf, cap))
       return 1;
-   }
    buf[0] = '\0';
    return 0;
 }

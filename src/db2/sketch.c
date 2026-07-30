@@ -138,7 +138,9 @@ static void lsh_band_hash_text(const sketch_minhash_t *sig, int band, char *out,
 
 static int lsh_bucket_delete_file(void *conn, const char *project, const char *file_path)
 {
-   static const char *sql = "DELETE FROM kb_lsh_buckets WHERE project = ?1 AND file_path = ?2";
+   static const char *sql = "DELETE FROM kb_lsh_buckets WHERE project=?1 AND file_path=?2"
+                            " AND generation=(SELECT current_generation FROM projects"
+                            " WHERE name=?1 AND lifecycle_state='current')";
    char err[SK_ERR] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -156,10 +158,11 @@ static int lsh_bucket_refresh(void *conn, const char *project, const char *file_
    if (lsh_bucket_delete_file(conn, project, file_path) != 0)
       return -1;
    static const char *sql =
-       "INSERT INTO kb_lsh_buckets (project, band, band_hash, file_path, updated_at)"
-       " VALUES (?1, ?2, ?3, ?4, pg_now_text())"
-       " ON CONFLICT (project, band, band_hash, file_path) DO UPDATE"
-       " SET updated_at = pg_now_text()";
+       "INSERT INTO kb_lsh_buckets (project,generation,band,band_hash,file_path,updated_at)"
+       " VALUES (?1,(SELECT current_generation FROM projects"
+       " WHERE name=?1 AND lifecycle_state='current'),?2,?3,?4,pg_now_text())"
+       " ON CONFLICT (project, generation, band, band_hash, file_path) DO UPDATE"
+       " SET updated_at=pg_now_text()";
    for (int band = 0; band < SKETCH_LSH_BANDS; band++)
    {
       char hash_text[32];
@@ -188,13 +191,14 @@ int db2_sketch_minhash_signature_upsert(const char *project, const char *file_pa
    void *conn = db2_conn();
    if (!conn)
       return -1;
-   static const char *sql =
-       "INSERT INTO kb_minhash_signatures"
-       " (project, file_path, file_hash, signature_bytes, updated_at)"
-       " VALUES (?1, ?2, ?3, ?4, pg_now_text())"
-       " ON CONFLICT (project, file_path) DO UPDATE"
-       " SET file_hash = EXCLUDED.file_hash, signature_bytes = EXCLUDED.signature_bytes,"
-       "     updated_at = pg_now_text()";
+   static const char *sql = "INSERT INTO kb_minhash_signatures"
+                            " (project,generation,file_path,file_hash,signature_bytes,updated_at)"
+                            " VALUES (?1,(SELECT current_generation FROM projects"
+                            " WHERE name=?1 AND lifecycle_state='current'),?2,?3,?4,pg_now_text())"
+                            " ON CONFLICT (project, generation, file_path) DO UPDATE"
+                            " SET file_hash=EXCLUDED.file_hash,"
+                            "     signature_bytes=EXCLUDED.signature_bytes,"
+                            "     updated_at = pg_now_text()";
    char err[SK_ERR] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -237,8 +241,9 @@ int db2_sketch_minhash_signature_get(const char *project, const char *file_path,
    if (!conn)
       return -1;
    static const char *sql =
-       "SELECT file_path, file_hash, signature_bytes FROM kb_minhash_signatures"
-       " WHERE project = ?1 AND file_path = ?2";
+       "SELECT s.file_path,s.file_hash,s.signature_bytes FROM kb_minhash_signatures s"
+       " JOIN projects p ON p.name=s.project WHERE s.project=?1 AND s.file_path=?2"
+       " AND p.lifecycle_state='current' AND s.generation=p.current_generation";
    char err[SK_ERR] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -259,8 +264,9 @@ int db2_sketch_minhash_signature_delete(const char *project, const char *file_pa
    void *conn = db2_conn();
    if (!conn)
       return -1;
-   static const char *sql =
-       "DELETE FROM kb_minhash_signatures WHERE project = ?1 AND file_path = ?2";
+   static const char *sql = "DELETE FROM kb_minhash_signatures WHERE project=?1 AND file_path=?2"
+                            " AND generation=(SELECT current_generation FROM projects"
+                            " WHERE name=?1 AND lifecycle_state='current')";
    char err[SK_ERR] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -281,7 +287,9 @@ int db2_sketch_minhash_signature_delete_project(const char *project)
    void *conn = db2_conn();
    if (!conn)
       return -1;
-   static const char *sql = "DELETE FROM kb_minhash_signatures WHERE project = ?1";
+   static const char *sql = "DELETE FROM kb_minhash_signatures WHERE project=?1"
+                            " AND generation=(SELECT current_generation FROM projects"
+                            " WHERE name=?1 AND lifecycle_state='current')";
    char err[SK_ERR] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -291,7 +299,11 @@ int db2_sketch_minhash_signature_delete_project(const char *project)
    aimee_pg_finalize(st);
    if (rc == AIMEE_PG_ERR)
       return -1;
-   st = aimee_pg_prepare(conn, "DELETE FROM kb_lsh_buckets WHERE project = ?1", err, sizeof(err));
+   st = aimee_pg_prepare(conn,
+                         "DELETE FROM kb_lsh_buckets WHERE project=?1"
+                         " AND generation=(SELECT current_generation FROM projects"
+                         " WHERE name=?1 AND lifecycle_state='current')",
+                         err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", project);
@@ -309,8 +321,10 @@ int db2_sketch_minhash_signature_list(const char *project, db2_sketch_minhash_ro
    if (!conn)
       return 0;
    static const char *sql =
-       "SELECT file_path, file_hash, signature_bytes FROM kb_minhash_signatures"
-       " WHERE project = ?1 ORDER BY updated_at DESC LIMIT ?2";
+       "SELECT s.file_path,s.file_hash,s.signature_bytes FROM kb_minhash_signatures s"
+       " JOIN projects p ON p.name=s.project WHERE s.project=?1"
+       " AND p.lifecycle_state='current' AND s.generation=p.current_generation"
+       " ORDER BY s.updated_at DESC LIMIT ?2";
    char err[SK_ERR] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -346,8 +360,10 @@ int db2_sketch_minhash_candidate_list(const char *project, const sketch_minhash_
    static const char *sql =
        "SELECT s.file_path, s.file_hash, s.signature_bytes"
        " FROM kb_lsh_buckets b"
-       " JOIN kb_minhash_signatures s ON s.project = b.project AND s.file_path = b.file_path"
-       " WHERE b.project = ?1 AND b.band = ?2 AND b.band_hash = ?3"
+       " JOIN kb_minhash_signatures s ON s.project=b.project AND s.generation=b.generation"
+       " AND s.file_path=b.file_path JOIN projects p ON p.name=b.project"
+       " WHERE b.project=?1 AND b.band=?2 AND b.band_hash=?3"
+       " AND p.lifecycle_state='current' AND b.generation=p.current_generation"
        " ORDER BY s.updated_at DESC LIMIT ?4";
    int n = 0;
    for (int band = 0; band < SKETCH_LSH_BANDS && n < max_rows; band++)

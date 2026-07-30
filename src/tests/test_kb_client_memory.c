@@ -12,6 +12,7 @@
 #endif
 
 #include "kb_client.h"
+#include "runtime_secret.h"
 #include "db1/user_memory.h"
 #include "support/mock_agent_http.h"
 #include "cJSON.h"
@@ -195,14 +196,14 @@ int main(void)
    /* A configured kb URL routes kb_client_v1_post_json through agent_http_post
     * (mocked) rather than the unix-socket / spawn path. */
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010/", 1) == 0);
-   assert(setenv("AIMEE_KB_API_BEARER_TOKEN", "test-token", 1) == 0);
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "test-token") == 0);
 
    test_readers_distinguish_unreachable_from_empty();
    test_ordered_readers_propagate_active_project_context();
    test_explicit_scope_overrides_ambient_context();
 
    unsetenv("AIMEE_KB_API_URL");
-   unsetenv("AIMEE_KB_API_BEARER_TOKEN");
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
    printf("test_kb_client_memory: ok\n");
    return 0;
 }

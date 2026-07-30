@@ -239,6 +239,70 @@ func boundedText(value string, maxBytes int, suffix string) string {
 	return strings.TrimSpace(value[:cut]) + suffix
 }
 
+func credentialBearingLine(value string) bool {
+	lower := strings.ToLower(value)
+	normalized := strings.NewReplacer("-", "_", ".", "_", " ", "_").Replace(lower)
+	markers := []string{
+		"password", "passphrase", "private_key", "api_key", "secret", "token",
+		"bearer", "credential", "database_url", "dsn",
+	}
+	credentialName := false
+	for _, marker := range markers {
+		if strings.Contains(normalized, marker) {
+			credentialName = true
+			break
+		}
+	}
+	assignment := strings.Contains(value, "=") || strings.Contains(value, ":")
+	if credentialName && assignment {
+		return true
+	}
+	if strings.Contains(lower, "authorization") && strings.Contains(lower, "bearer ") {
+		return true
+	}
+	for _, prefix := range []string{"sk-", "ghp_", "github_pat_", "xoxb-", "xoxp-"} {
+		if index := strings.Index(lower, prefix); index >= 0 && len(value)-index >= len(prefix)+16 {
+			return true
+		}
+	}
+	if index := strings.Index(value, "AKIA"); index >= 0 && len(value)-index >= 20 {
+		return true
+	}
+	return false
+}
+
+// redactPullRequestMarkdown prevents the handoff itself from becoming a second
+// credential store. Proposals and plans are operator/agent-authored input, and
+// representative diff lines come from arbitrary repository content; all three
+// must be treated as untrusted before GitHub persists the generated body.
+func redactPullRequestMarkdown(value string) string {
+	lines := strings.Split(strings.ReplaceAll(value, "\r\n", "\n"), "\n")
+	redacted := make([]string, 0, len(lines))
+	inPrivateKey := false
+	for _, line := range lines {
+		upper := strings.ToUpper(line)
+		if strings.Contains(upper, "-----BEGIN ") && strings.Contains(upper, "PRIVATE KEY-----") {
+			if !inPrivateKey {
+				redacted = append(redacted, "[REDACTED PRIVATE KEY — supply through Vault first boot]")
+			}
+			inPrivateKey = true
+			continue
+		}
+		if inPrivateKey {
+			if strings.Contains(upper, "-----END ") && strings.Contains(upper, "PRIVATE KEY-----") {
+				inPrivateKey = false
+			}
+			continue
+		}
+		if credentialBearingLine(line) {
+			redacted = append(redacted, "[REDACTED CREDENTIAL — supply through Vault first boot]")
+			continue
+		}
+		redacted = append(redacted, line)
+	}
+	return strings.Join(redacted, "\n")
+}
+
 func reviewProposalPath(item db1.WorkItem) string {
 	path := filepath.ToSlash(strings.TrimSpace(item.SourcePath))
 	if path == "" || filepath.IsAbs(path) || strings.HasPrefix(path, "../") {
@@ -354,7 +418,8 @@ func parseDiffHighlights(diff string) []string {
 		if path != "" && len(path) <= 300 && len(removed) == 1 && len(added) == 1 {
 			before := strings.TrimSpace(removed[0])
 			after := strings.TrimSpace(added[0])
-			if before != "" && after != "" && len(before) <= 240 && len(after) <= 240 {
+			if before != "" && after != "" && len(before) <= 240 && len(after) <= 240 &&
+				!credentialBearingLine(before) && !credentialBearingLine(after) {
 				highlights = append(highlights, fmt.Sprintf("- `%s`: changed %s to %s.", path,
 					markdownCode(before), markdownCode(after)))
 			}
@@ -444,10 +509,10 @@ func (r *NativeRunner) pullRequestSpec(ctx context.Context, req StepRequest, ite
 	} else {
 		body.WriteString("## Slice outcome\n\n")
 	}
-	body.WriteString(boundedMarkdown(details.Goal, 3_000))
+	body.WriteString(boundedMarkdown(redactPullRequestMarkdown(details.Goal), 3_000))
 	body.WriteString("\n\n## What changed\n\n")
 	if strings.TrimSpace(details.Scope) != "" {
-		body.WriteString(boundedMarkdown(details.Scope, 8_000))
+		body.WriteString(boundedMarkdown(redactPullRequestMarkdown(details.Scope), 8_000))
 		body.WriteString("\n\n")
 	}
 	body.WriteString("### Files in this PR\n\n")
@@ -505,12 +570,12 @@ func (r *NativeRunner) pullRequestSpec(ctx context.Context, req StepRequest, ite
 	fmt.Fprintf(&body, "\n- Work item: `%s`\n- Branches: `%s` → `%s`\n\n</details>\n", item.ID, head, base)
 
 	body.WriteString("\n<details>\n<summary>Original request</summary>\n\n")
-	body.WriteString(boundedMarkdown(req.Proposal, maxRequestBodyBytes))
+	body.WriteString(boundedMarkdown(redactPullRequestMarkdown(req.Proposal), maxRequestBodyBytes))
 	body.WriteString("\n\n</details>\n")
 
 	if draft {
 		body.WriteString("\n<details>\n<summary>Approved implementation plan</summary>\n\n")
-		body.WriteString(boundedMarkdown(string(approvedPlan), maxPlanBodyBytes))
+		body.WriteString(boundedMarkdown(redactPullRequestMarkdown(string(approvedPlan)), maxPlanBodyBytes))
 		body.WriteString("\n\n</details>\n")
 	}
 

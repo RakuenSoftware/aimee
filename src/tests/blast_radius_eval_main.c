@@ -88,6 +88,16 @@ static void load_fixture(cJSON *fx)
                   im->valuestring, proj, path);
          xexec(sql);
       }
+      cJSON *call = NULL;
+      cJSON_ArrayForEach(call, cJSON_GetObjectItem(file, "calls"))
+      {
+         snprintf(sql, sizeof(sql),
+                  "INSERT INTO code_calls(file_id,caller,callee,line) SELECT f.id,'fixture','%s',1 "
+                  "FROM files f JOIN projects p ON p.id=f.project_id "
+                  "WHERE p.name='%s' AND f.path='%s'",
+                  call->valuestring, proj, path);
+         xexec(sql);
+      }
    }
 }
 
@@ -164,13 +174,43 @@ int main(int argc, char **argv)
             const char *edited = cJSON_GetStringValue(cJSON_GetObjectItem(c, "edited"));
             blast_radius_t br;
             memset(&br, 0, sizeof(br));
-            db2_code_index_blast_radius(proj, edited, &br);
+            int rc = db2_code_index_blast_radius(proj, edited, &br);
+            int expect_error = cJSON_IsTrue(cJSON_GetObjectItem(c, "expected_error"));
+            if (expect_error)
+            {
+               int ok = rc != 0 && br.dependent_count == 0 && br.dependency_count == 0;
+               printf("  [%s] %s: unresolved=%s\n", proj, edited, ok ? "correct" : "WRONG");
+               cases++;
+               if (!ok)
+                  fail++;
+               continue;
+            }
             int before_fn = dep_fn, before_fp = dep_fp;
             score_set(br.dependents, br.dependent_count,
                       cJSON_GetObjectItem(c, "expected_dependents"), &dep_tp, &dep_fp, &dep_fn);
             score_set(br.dependencies, br.dependency_count,
                       cJSON_GetObjectItem(c, "expected_dependencies"), &dic_tp, &dic_fp, &dic_fn);
-            int cfail = (dep_fn > before_fn); /* any missed dependent = recall miss */
+            int cfail = rc != 0 || !br.resolved || strcmp(br.project, proj) != 0 ||
+                        br.generation < 1 || strcmp(br.freshness, "current") != 0 ||
+                        (dep_fn > before_fn);
+            cJSON *expected_provenance = cJSON_GetObjectItem(c, "expected_provenance");
+            cJSON *edge = NULL;
+            cJSON_ArrayForEach(edge, expected_provenance)
+            {
+               int matched = 0;
+               for (int i = 0; i < br.dependent_count; i++)
+                  if (edge->string && strcmp(br.dependents[i], edge->string) == 0 &&
+                      strstr(br.dependent_meta[i].provenance, edge->valuestring) &&
+                      strcmp(br.dependent_meta[i].freshness, "current") == 0 &&
+                      br.dependent_meta[i].generation >= 1)
+                     matched = 1;
+               if (!matched)
+                  cfail = 1;
+            }
+            for (int i = 0; i < br.dependency_count; i++)
+               if (strcmp(br.dependency_meta[i].provenance, "import") != 0 ||
+                   strcmp(br.dependency_meta[i].freshness, "current") != 0)
+                  cfail = 1;
             printf("  [%s] %s: dependents=%d deps=%d%s\n", proj, edited, br.dependent_count,
                    br.dependency_count,
                    cfail ? "  <-- MISSED a dependent" : (dep_fp > before_fp ? "  (spurious)" : ""));

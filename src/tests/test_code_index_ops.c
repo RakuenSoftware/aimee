@@ -27,6 +27,24 @@ static int file_count_path(const char *project, const char *path)
    return n;
 }
 
+static int file_count_path_generation(const char *project, const char *path, int generation)
+{
+   char e[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(),
+                        "SELECT count(*) FROM files f JOIN projects p ON p.id=f.project_id"
+                        " WHERE p.name=?1 AND f.path=?2 AND f.generation=?3",
+                        e, sizeof e);
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", project);
+   aimee_pg_bind_text(st, "?2", path);
+   aimee_pg_bind_int(st, "?3", generation);
+   int n = (aimee_pg_step(st, e, sizeof e) == AIMEE_PG_ROW) ? aimee_pg_column_int(st, 0) : -1;
+   aimee_pg_finalize(st);
+   return n;
+}
+
 int main(void)
 {
    db2_test_shim_open();
@@ -232,6 +250,30 @@ int main(void)
             assert(file_count_path(projs[pj], purged[i]) == 0);
       }
       printf("  hidden-path purges spare clean .gitmodules, drop the rest (recall §2.2) OK\n");
+   }
+
+   /* Startup sanitation is a current-view repair, not lifecycle GC. Retained
+    * generations must survive even when the same hidden path is polluted in the
+    * active generation. */
+   {
+      void *conn = db2_conn();
+      char e[256] = "";
+      assert(aimee_pg_exec(conn,
+                           "INSERT INTO projects(name,root,scanned_at,current_generation)"
+                           " VALUES('historical-hidden','/x','x',2)",
+                           e, sizeof e) == 0);
+      assert(aimee_pg_exec(conn,
+                           "INSERT INTO files(project_id,generation,path,hash,scanned_at) VALUES"
+                           " ((SELECT id FROM projects WHERE name='historical-hidden'),1,"
+                           " '.hidden.c','old','t'),"
+                           " ((SELECT id FROM projects WHERE name='historical-hidden'),2,"
+                           " '.hidden.c','new','t')",
+                           e, sizeof e) == 0);
+      (void)db2_code_index_purge_hidden_pollution();
+      assert(file_count_path_generation("historical-hidden", ".hidden.c", 1) == 1);
+      assert(file_count_path_generation("historical-hidden", ".hidden.c", 2) == 0);
+      assert(file_count_path("historical-hidden", ".hidden.c") == 1);
+      printf("  startup hidden cleanup preserves retained generations OK\n");
    }
 
    db2_test_shim_close();

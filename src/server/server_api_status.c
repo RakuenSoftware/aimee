@@ -12,6 +12,8 @@
 #include "kb_client.h"             /* kb_client_health */
 #include "json_fluent.h"           /* jo_ok */
 #include "memory_redirect.h"       /* memory_redirect_classify / _bash_targets / _rematerialize */
+#include "runtime_secret.h"
+#include "vault_config_bootstrap.h"
 #include "server.h"
 #include "turn_registry.h"
 #include "server_http.h" /* server_http_api_status_report */
@@ -163,9 +165,28 @@ static int handle_api_error(server_conn_t *conn, const char *message)
 /* Mint a fresh 256-bit (64 hex-char) /v1 bearer into cfg->server_api_bearer_token.
  * Returns 0 on success, -1 if the RNG failed. Shared by api.enable (mint-if-empty)
  * and api.rotate_bearer (mint-unconditionally). */
-static int server_api_mint_bearer(config_t *cfg)
+static int server_api_mint_bearer(char *out, size_t out_cap)
 {
-   return platform_random_hex(cfg->server_api_bearer_token, 64) == 0 ? 0 : -1;
+   return out && out_cap >= 65 && platform_random_hex(out, 64) == 0 ? 0 : -1;
+}
+
+static int server_api_load_mutable(config_t *cfg)
+{
+   if (!cfg || config_load_file(cfg) != 0)
+      return -1;
+   (void)runtime_secret_get("AIMEE_API_BEARER_TOKEN", cfg->server_api_bearer_token,
+                            sizeof(cfg->server_api_bearer_token));
+   cfg->server_api_bearer_extra_count = 0;
+   for (int i = 0; i < AIMEE_API_BEARER_EXTRA_MAX; i++)
+   {
+      char name[96];
+      snprintf(name, sizeof(name), "AIMEE_API_BEARER_TOKEN_EXTRA_%d", i);
+      if (!runtime_secret_get(name, cfg->server_api_bearer_extra[i],
+                              sizeof(cfg->server_api_bearer_extra[i])))
+         break;
+      cfg->server_api_bearer_extra_count++;
+   }
+   return 0;
 }
 
 /* api.enable: turn on the loopback /v1 listener. Picks a default port and rate
@@ -179,7 +200,7 @@ int handle_api_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    pthread_mutex_lock(&g_api_bearer_mutation_lock);
    config_t cfg;
-   if (config_load_file(&cfg) != 0)
+   if (server_api_load_mutable(&cfg) != 0)
    {
       pthread_mutex_unlock(&g_api_bearer_mutation_lock);
       return handle_api_error(conn, "failed to load aimee.api config");
@@ -201,7 +222,9 @@ int handle_api_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    int generated = 0;
    if (cfg.server_api_bearer_token[0] == '\0')
    {
-      if (server_api_mint_bearer(&cfg) != 0)
+      if (server_api_mint_bearer(cfg.server_api_bearer_token,
+                                 sizeof(cfg.server_api_bearer_token)) != 0 ||
+          vault_runtime_secret_set("AIMEE_API_BEARER_TOKEN", cfg.server_api_bearer_token) != 0)
       {
          pthread_mutex_unlock(&g_api_bearer_mutation_lock);
          return handle_api_error(conn, "failed to generate bearer token");
@@ -251,14 +274,10 @@ int handle_api_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return rc;
 }
 
-/* api.rotate_bearer: mint a FRESH /v1 bearer unconditionally (replacing any
- * existing one — e.g. the image-seeded `aimee-local-dev` bootstrap), persist it,
- * and HOT-SWAP the live listener so the new token authorizes immediately and the
- * old one stops working at once — no restart, no dual-validity window. This is
- * the server side of trust-on-first-use enrollment: a thin client connects once
- * with the bootstrap bearer and calls this to obtain its strong per-deployment
- * token, which it then uses exclusively. CAP_SESSION_ADMIN-gated (same as
- * api.enable); reveals the new token once to the authorized caller. */
+/* api.rotate_bearer: mint a fresh /v1 primary, persist it in Vault, and HOT-SWAP
+ * the live listener so the old primary and all additive enrollments stop working
+ * at once. CAP_SESSION_ADMIN-gated (same as api.enable); reveals the replacement
+ * once to the authorized caller. */
 int handle_api_rotate_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -266,26 +285,30 @@ int handle_api_rotate_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    pthread_mutex_lock(&g_api_bearer_mutation_lock);
    config_t cfg;
-   if (config_load_file(&cfg) != 0)
+   if (server_api_load_mutable(&cfg) != 0)
    {
       pthread_mutex_unlock(&g_api_bearer_mutation_lock);
       return handle_api_error(conn, "failed to load aimee.api config");
    }
-   const char *managed_bearer = getenv("AIMEE_API_BEARER_TOKEN");
-   if (managed_bearer && managed_bearer[0])
-   {
-      pthread_mutex_unlock(&g_api_bearer_mutation_lock);
-      return handle_api_error(
-          conn, "bearer is managed by AIMEE_API_BEARER_TOKEN; rotate that deployment secret and "
-                "restart the server to revoke all clients");
-   }
-   if (server_api_mint_bearer(&cfg) != 0)
+   if (server_api_mint_bearer(cfg.server_api_bearer_token, sizeof(cfg.server_api_bearer_token)) !=
+           0 ||
+       vault_runtime_secret_set("AIMEE_API_BEARER_TOKEN", cfg.server_api_bearer_token) != 0)
    {
       pthread_mutex_unlock(&g_api_bearer_mutation_lock);
       return handle_api_error(conn, "failed to generate bearer token");
    }
    /* Rotation is the explicit revoke-all operation. Persist that revocation;
     * otherwise the additional credentials would return after a restart. */
+   for (int i = 0; i < AIMEE_API_BEARER_EXTRA_MAX; i++)
+   {
+      char name[96];
+      snprintf(name, sizeof(name), "AIMEE_API_BEARER_TOKEN_EXTRA_%d", i);
+      if (vault_runtime_secret_delete(name) != 0)
+      {
+         pthread_mutex_unlock(&g_api_bearer_mutation_lock);
+         return handle_api_error(conn, "failed to revoke enrolled bearer from Vault");
+      }
+   }
    memset(cfg.server_api_bearer_extra, 0, sizeof(cfg.server_api_bearer_extra));
    cfg.server_api_bearer_extra_count = 0;
    if (config_save(&cfg) != 0)
@@ -327,7 +350,7 @@ int handle_api_enroll_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    pthread_mutex_lock(&g_api_bearer_mutation_lock);
    config_t cfg;
-   if (config_load_file(&cfg) != 0)
+   if (server_api_load_mutable(&cfg) != 0)
    {
       pthread_mutex_unlock(&g_api_bearer_mutation_lock);
       return handle_api_error(conn, "failed to load aimee.api config");
@@ -353,6 +376,14 @@ int handle_api_enroll_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    }
 
    int slot = cfg.server_api_bearer_extra_count;
+   char vault_name[96];
+   snprintf(vault_name, sizeof(vault_name), "AIMEE_API_BEARER_TOKEN_EXTRA_%d", slot);
+   if (vault_runtime_secret_set(vault_name, minted) != 0)
+   {
+      runtime_secret_wipe(minted, sizeof(minted));
+      pthread_mutex_unlock(&g_api_bearer_mutation_lock);
+      return handle_api_error(conn, "failed to store enrolled bearer in Vault");
+   }
    snprintf(cfg.server_api_bearer_extra[slot], sizeof(cfg.server_api_bearer_extra[0]), "%s",
             minted);
    cfg.server_api_bearer_extra_count = slot + 1;

@@ -13,8 +13,9 @@
 #include "td_search_render.h"       /* consumer side of the /v1/search contract test */
 #include "kb/kb_surprising_judge.h" /* §4 judge stub seam (kb_surprising_verdict_t) */
 #include "db2/lifecycle.h"          /* §2c: db2_reembed_* / db2_dim_change_reset stub types */
-#include "rel_types.h"              /* REL_TYPE_NAME_MAX for the db2_ontology_* stubs below */
-#include "config_fields.h"          /* config_field_t for the pipeline-console stubs below */
+#include "db2/code_project_lifecycle.h"
+#include "rel_types.h"     /* REL_TYPE_NAME_MAX for the db2_ontology_* stubs below */
+#include "config_fields.h" /* config_field_t for the pipeline-console stubs below */
 #include "kb_service.h"
 #include "kb/kb_service_code_embed.h"
 #include "kb_bandit.h"
@@ -53,6 +54,70 @@ void db2_lease_end(void)
 }
 void db2_lease_release_idle(void)
 {
+}
+
+static int code_project_manifest_stub(const char *project, code_project_manifest_t *out)
+{
+   if (!project || !project[0] || !out)
+      return CODE_PROJECT_LIFECYCLE_ERROR;
+   memset(out, 0, sizeof(*out));
+   snprintf(out->project, sizeof(out->project), "%s", project);
+   out->generation = 2;
+   snprintf(out->mode, sizeof(out->mode), "dry_run");
+   snprintf(out->targets[0].table, sizeof(out->targets[0].table), "code_files");
+   out->targets[0].rows = 3;
+   out->target_count = 1;
+   out->total_rows = 3;
+   snprintf(out->manifest_hash, sizeof(out->manifest_hash), "sha256:test");
+   return 0;
+}
+
+static char g_lifecycle_audit_principal[576];
+
+int db2_code_project_detach(const char *project, const char *principal, int64_t *generation_out)
+{
+   if (!project || !project[0])
+      return CODE_PROJECT_LIFECYCLE_ERROR;
+   snprintf(g_lifecycle_audit_principal, sizeof(g_lifecycle_audit_principal), "%s",
+            principal ? principal : "");
+   if (generation_out)
+      *generation_out = 2;
+   return 0;
+}
+
+int db2_code_project_purge_manifest(const char *project, code_project_manifest_t *out)
+{
+   return code_project_manifest_stub(project, out);
+}
+
+int db2_code_project_gc_manifest(const char *project, int retention_days,
+                                 code_project_manifest_t *out)
+{
+   (void)retention_days;
+   return code_project_manifest_stub(project, out);
+}
+
+int db2_code_project_purge_confirm(const char *project, const char *expected_hash,
+                                   const char *principal, const char *reason,
+                                   code_project_manifest_t *out)
+{
+   snprintf(g_lifecycle_audit_principal, sizeof(g_lifecycle_audit_principal), "%s",
+            principal ? principal : "");
+   (void)reason;
+   if (!expected_hash || strcmp(expected_hash, "sha256:test") != 0)
+      return CODE_PROJECT_LIFECYCLE_HASH_MISMATCH;
+   int rc = code_project_manifest_stub(project, out);
+   if (rc == 0)
+      snprintf(out->mode, sizeof(out->mode), "confirmed");
+   return rc;
+}
+
+int db2_code_project_gc_confirm(const char *project, int retention_days, const char *expected_hash,
+                                const char *principal, const char *reason,
+                                code_project_manifest_t *out)
+{
+   (void)retention_days;
+   return db2_code_project_purge_confirm(project, expected_hash, principal, reason, out);
 }
 int aimee_pg_exec(void *c, const char *s, char *e, size_t n)
 {
@@ -349,6 +414,7 @@ char *kb_service_ingest_status_json(void)
  * doc_id) mirrors what the ranked backend emits and what the handler's reshaper
  * parses. Default 0 keeps every other test on the empty-results path. */
 static int g_test_search_populated = 0;
+static int g_test_search_scoped_all = 0;
 static char g_test_search_embedding[256];
 char *kb_search_json_ex(const char *p, const char *q, const char *e, int m, const char *f)
 {
@@ -358,13 +424,31 @@ char *kb_search_json_ex(const char *p, const char *q, const char *e, int m, cons
    (void)f;
    snprintf(g_test_search_embedding, sizeof(g_test_search_embedding), "%s", e ? e : "");
    const char *src = g_test_search_populated
-                         ? "{\"fusion_mode\":\"rrf\",\"results\":[{\"file_path\":\"docs/alpha.md\","
+                         ? "{\"fusion_mode\":\"rrf\",\"results\":[{\"project\":\"proj-alpha\","
+                           "\"file_path\":\"docs/alpha.md\","
                            "\"content\":\"alpha excerpt body\",\"score\":0.875,\"doc_id\":4242}]}"
                          : "{\"fusion_mode\":\"rrf\",\"results\":[]}";
    char *r = malloc(strlen(src) + 1);
    if (r)
       strcpy(r, src);
    return r;
+}
+
+char *kb_search_json_scoped_ex(const char *p, int all, const char *q, const char *e, int m,
+                               const char *f)
+{
+   if (g_test_search_scoped_all)
+   {
+      assert(p && strcmp(p, "proj-alpha") == 0);
+      assert(all == 1);
+      const char *src = "{\"fusion_mode\":\"rrf\",\"results\":["
+                        "{\"project\":\"proj-alpha\",\"file_path\":\"local/first.md\","
+                        "\"content\":\"local result\",\"score\":0.4,\"doc_id\":1},"
+                        "{\"project\":\"proj-other\",\"file_path\":\"other/high.md\","
+                        "\"content\":\"other result\",\"score\":0.99,\"doc_id\":2}]}";
+      return strdup(src);
+   }
+   return kb_search_json_ex(p, q, e, m, f);
 }
 
 int kb_curator_implements_json(const char *topic, char *out, size_t out_cap)
@@ -534,13 +618,21 @@ cJSON *kb_curator_presets_json(void)
 {
    return cJSON_CreateArray();
 }
-static const config_field_t g_stub_field = {"stub", 0, 0, 0, CFG_BOOL, RELOAD_HOT, FGROUP_RUNTIME};
+static const config_field_t g_stub_field = {"stub",         0,   0, 0, CFG_BOOL, RELOAD_HOT,
+                                            FGROUP_RUNTIME, NULL};
+static const config_field_t g_stub_secret_field = {
+    "kb_api_bearer_token",      0, 1, 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME,
+    "AIMEE_KB_API_BEARER_TOKEN"};
+static int g_stub_secret_configured;
+static int g_stub_secret_store_calls;
 const config_field_t *config_field_lookup(const char *key)
 {
    /* Only the keys the pipeline route may touch resolve; anything else is
     * "unknown" so the route's own allowlist is what is under test. */
    if (!key)
       return NULL;
+   if (strcmp(key, "kb_api_bearer_token") == 0)
+      return &g_stub_secret_field;
    if (strncmp(key, "kb_curator_", 11) == 0 || strcmp(key, "kb_evidence_embed_enabled") == 0)
       return &g_stub_field;
    /* The KB-owned settings surface (KB_SETTINGS) plus the server-owned keys the
@@ -553,11 +645,23 @@ const config_field_t *config_field_lookup(const char *key)
       return &g_stub_field;
    return NULL;
 }
-cJSON *config_field_value_json(const config_t *cfg, const config_field_t *f)
+const char *config_field_secret_name(const config_field_t *f)
+{
+   return f ? f->secret_name : NULL;
+}
+cJSON *config_field_public_value_json(const config_t *cfg, const config_field_t *f)
 {
    (void)cfg;
-   (void)f;
+   if (config_field_secret_name(f))
+      return cJSON_CreateBool(g_stub_secret_configured);
    return cJSON_CreateBool(0);
+}
+int config_secret_store(const char *name, const char *value)
+{
+   assert(name && strcmp(name, "AIMEE_KB_API_BEARER_TOKEN") == 0);
+   g_stub_secret_store_calls++;
+   g_stub_secret_configured = value && value[0] ? 1 : 0;
+   return 0;
 }
 int config_field_set_value(config_t *cfg, const config_field_t *f, const char *value)
 {
@@ -611,6 +715,8 @@ typedef struct
 } test_term_hit_t;
 
 static char g_code_find_project[128];
+static int g_code_local_first_fixture;
+static int g_code_hybrid_path_collision_fixture;
 
 int canonical_index_find(const char *identifier, void *out, int max)
 {
@@ -619,6 +725,15 @@ int canonical_index_find(const char *identifier, void *out, int max)
    if (strcmp(identifier, "foo") != 0 || max < 1)
       return 0;
    test_term_hit_t *hits = (test_term_hit_t *)out;
+   if (g_code_local_first_fixture)
+   {
+      snprintf(hits[0].project, sizeof(hits[0].project), "proj-other");
+      snprintf(hits[0].file_path, sizeof(hits[0].file_path), "other/high.c");
+      hits[0].line = 1;
+      hits[0].line_end = 2;
+      snprintf(hits[0].kind, sizeof(hits[0].kind), "function");
+      return 1;
+   }
    snprintf(hits[0].project, sizeof(hits[0].project), "proj-alpha");
    snprintf(hits[0].file_path, sizeof(hits[0].file_path), "src/main.c");
    hits[0].line = 12;
@@ -630,8 +745,44 @@ int canonical_index_find(const char *identifier, void *out, int max)
 int canonical_index_find_project(const char *project, const char *identifier, void *out, int max)
 {
    snprintf(g_code_find_project, sizeof(g_code_find_project), "%s", project ? project : "");
+   if (g_code_local_first_fixture && project && strcmp(project, "proj-alpha") == 0 && max > 0)
+   {
+      test_term_hit_t *hits = (test_term_hit_t *)out;
+      memset(&hits[0], 0, sizeof(hits[0]));
+      snprintf(hits[0].project, sizeof(hits[0].project), "proj-alpha");
+      snprintf(hits[0].file_path, sizeof(hits[0].file_path), "local/first.c");
+      hits[0].line = 7;
+      hits[0].line_end = 9;
+      snprintf(hits[0].kind, sizeof(hits[0].kind), "function");
+      return 1;
+   }
    return canonical_index_find(identifier, out, max);
 }
+
+int canonical_index_find_excluding_project(const char *excluded_project, const char *identifier,
+                                           void *out, int max)
+{
+   assert(excluded_project && strcmp(excluded_project, "proj-alpha") == 0);
+   return canonical_index_find(identifier, out, max);
+}
+
+int db2_code_index_project_current_generation(const char *project, int64_t *generation_out)
+{
+   if (!project || !project[0])
+      return -2;
+   if (generation_out)
+      *generation_out = 2;
+   return 0;
+}
+
+typedef struct
+{
+   char provenance[48];
+   char confidence[16];
+   char project[128];
+   long long generation;
+   char freshness[16];
+} test_blast_meta_t;
 
 typedef struct
 {
@@ -640,6 +791,12 @@ typedef struct
    int dependent_count;
    char dependencies[64][MAX_PATH_LEN];
    int dependency_count;
+   char project[128];
+   long long generation;
+   char freshness[16];
+   int resolved;
+   test_blast_meta_t dependent_meta[64];
+   test_blast_meta_t dependency_meta[64];
 } test_blast_radius_t;
 
 int canonical_index_blast_radius(const char *project, const char *file_path, void *out)
@@ -655,6 +812,16 @@ int canonical_index_blast_radius(const char *project, const char *file_path, voi
    br->dependent_count = 1;
    snprintf(br->dependencies[0], sizeof(br->dependencies[0]), "src/lib.c");
    br->dependency_count = 1;
+   snprintf(br->project, sizeof(br->project), "proj-alpha");
+   br->generation = 9;
+   snprintf(br->freshness, sizeof(br->freshness), "current");
+   br->resolved = 1;
+   snprintf(br->dependent_meta[0].provenance, sizeof(br->dependent_meta[0].provenance), "import");
+   snprintf(br->dependent_meta[0].confidence, sizeof(br->dependent_meta[0].confidence), "high");
+   snprintf(br->dependent_meta[0].project, sizeof(br->dependent_meta[0].project), "proj-alpha");
+   br->dependent_meta[0].generation = 9;
+   snprintf(br->dependent_meta[0].freshness, sizeof(br->dependent_meta[0].freshness), "current");
+   br->dependency_meta[0] = br->dependent_meta[0];
    return 0;
 }
 
@@ -720,17 +887,44 @@ int canonical_index_code_search(const char *query, const char *project, void *ou
    (void)enrich;
    assert(query);
    assert(out);
-   if (strcmp(query, "needle") != 0 || !project || strcmp(project, "proj-alpha") != 0)
+   if (strcmp(query, "needle") != 0)
       return 0;
    if (max < 1)
       return 0;
    test_code_search_hit_t *hits = (test_code_search_hit_t *)out;
+   if (g_code_hybrid_path_collision_fixture)
+   {
+      snprintf(hits[0].project, sizeof(hits[0].project), "%s",
+               project ? "proj-alpha" : "proj-other");
+      snprintf(hits[0].file_path, sizeof(hits[0].file_path), "src/main.c");
+      snprintf(hits[0].snippet, sizeof(hits[0].snippet), "%s",
+               project ? "local main" : "other main");
+      hits[0].rank = project ? 0.5 : 0.9;
+      return 1;
+   }
+   if (g_code_local_first_fixture && !project)
+   {
+      snprintf(hits[0].project, sizeof(hits[0].project), "proj-other");
+      snprintf(hits[0].file_path, sizeof(hits[0].file_path), "other/high.c");
+      snprintf(hits[0].snippet, sizeof(hits[0].snippet), "other ranked first");
+      hits[0].rank = 0.99;
+      return 1;
+   }
+   if (!project || strcmp(project, "proj-alpha") != 0)
+      return 0;
    snprintf(hits[0].project, sizeof(hits[0].project), "proj-alpha");
    snprintf(hits[0].file_path, sizeof(hits[0].file_path), "src/search.c");
    snprintf(hits[0].snippet, sizeof(hits[0].snippet), "int needle(void) { return 1; }");
    hits[0].rank = 0.75;
    snprintf(hits[0].content_hash, sizeof(hits[0].content_hash), "deadbeefcafe");
    return 1;
+}
+
+int canonical_index_code_search_excluding_project(const char *query, const char *excluded_project,
+                                                  void *out, int max, int enrich)
+{
+   assert(excluded_project && strcmp(excluded_project, "proj-alpha") == 0);
+   return canonical_index_code_search(query, NULL, out, max, enrich);
 }
 
 /* canonical_index_find_callers stub lives in the _code.inc (line-count limit). */
@@ -1275,6 +1469,17 @@ int workspace_discover_projects(const char *root, int max_depth, char projects[]
    return g_discover_count;
 }
 
+int workspace_repo_index_keys(const char *root, const char *fallback_workspace, char *name_out,
+                              size_t name_len, char *ws_out, size_t ws_len)
+{
+   (void)root;
+   if (!name_out || name_len == 0 || !ws_out || ws_len == 0)
+      return -1;
+   snprintf(name_out, name_len, "proj-alpha");
+   snprintf(ws_out, ws_len, "%s", fallback_workspace ? fallback_workspace : "");
+   return 0;
+}
+
 /* Captured so a route test can assert the priority it enqueued at. */
 static int g_ingest_priority = -1;
 
@@ -1407,10 +1612,20 @@ int pgvec_kb_vector_delete_project(const char *project)
    return 0;
 }
 
+int pgvec_kb_vector_delete_current_project(const char *project)
+{
+   return pgvec_kb_vector_delete_project(project);
+}
+
 int db2_kb_file_index_delete_project(const char *project)
 {
    (void)project;
    return 0;
+}
+
+int db2_kb_file_index_delete_current_project(const char *project)
+{
+   return db2_kb_file_index_delete_project(project);
 }
 
 /* ── slice-2 purge-route stubs: fence store + fan-out delete primitives ── */
@@ -1550,6 +1765,11 @@ int db2_kb_service_clear_project(const char *project)
 {
    snprintf(g_clear_project, sizeof(g_clear_project), "%s", project);
    return g_clear_deleted;
+}
+
+int db2_kb_service_clear_current_project(const char *project)
+{
+   return db2_kb_service_clear_project(project);
 }
 
 int db2_kb_service_memory_record_exists(int64_t record_id)
@@ -2143,6 +2363,8 @@ static void test_console_pipeline(void)
 
 static void test_console_settings(void)
 {
+   g_stub_secret_configured = 0;
+   g_stub_secret_store_calls = 0;
    /* GET reports the KB-owned fields, each with a section and a restart flag. */
    char buf[65536];
    int status =
@@ -2157,6 +2379,9 @@ static void test_console_settings(void)
    /* aimee-server's own keys must NOT appear on the kb's settings surface. */
    assert(strstr(buf, "\"kb_client_url\"") == NULL);
    assert(strstr(buf, "\"provider\"") == NULL);
+   /* Vault-backed settings expose only configured state, never a credential. */
+   assert(strstr(buf, "\"kb_api_bearer_token\"") != NULL);
+   assert(strstr(buf, "\"secret\":true") != NULL);
 
    char b2[1024];
    assert(kb_http_route_ex("POST", "/v1/console/settings", NULL, NULL, NULL, "{}", 2, b2,
@@ -2175,6 +2400,21 @@ static void test_console_settings(void)
    const char *ok_body = "{\"key\":\"kb_mining_enabled\",\"value\":true}";
    assert(kb_http_route_ex("POST", "/v1/console/settings/config", NULL, NULL, NULL, ok_body,
                            (int)strlen(ok_body), b2, sizeof(b2)) == 200);
+   const char *secret_literal = "do-not-echo-kb-secret";
+   char secret_body[256];
+   snprintf(secret_body, sizeof(secret_body), "{\"key\":\"kb_api_bearer_token\",\"value\":\"%s\"}",
+            secret_literal);
+   assert(kb_http_route_ex("POST", "/v1/console/settings/config", NULL, NULL, NULL, secret_body,
+                           (int)strlen(secret_body), b2, sizeof(b2)) == 200);
+   assert(g_stub_secret_store_calls == 1 && g_stub_secret_configured == 1);
+   assert(strstr(b2, secret_literal) == NULL);
+   assert(strstr(b2, "\"value\":true") != NULL);
+   assert(strstr(b2, "\"secret\":true") != NULL);
+
+   status =
+       kb_http_route_ex("GET", "/v1/console/settings", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(status == 200);
+   assert(strstr(buf, secret_literal) == NULL);
    /* A key the SERVER owns is refused here, even though it is a real config key
     * and starts with kb_ — the split is by which binary reads it. */
    const char *server_key = "{\"key\":\"kb_client_url\",\"value\":\"https://kb.example\"}";
@@ -3280,16 +3520,33 @@ int canonical_index_find_callers(const char *project, const char *symbol, void *
 {
    assert(symbol);
    assert(out);
-   if (strcmp(symbol, "target_fn") != 0 || !project || strcmp(project, "proj-alpha") != 0)
+   if (strcmp(symbol, "target_fn") != 0)
       return 0;
    if (max < 1)
       return 0;
    test_caller_hit_t *hits = (test_caller_hit_t *)out;
+   if (g_code_local_first_fixture && !project)
+   {
+      snprintf(hits[0].project, sizeof(hits[0].project), "proj-other");
+      snprintf(hits[0].file_path, sizeof(hits[0].file_path), "other/caller.c");
+      snprintf(hits[0].caller, sizeof(hits[0].caller), "other_caller");
+      hits[0].line = 2;
+      return 1;
+   }
+   if (!project || strcmp(project, "proj-alpha") != 0)
+      return 0;
    snprintf(hits[0].project, sizeof(hits[0].project), "proj-alpha");
    snprintf(hits[0].file_path, sizeof(hits[0].file_path), "src/caller.c");
    snprintf(hits[0].caller, sizeof(hits[0].caller), "caller_fn");
    hits[0].line = 44;
    return 1;
+}
+
+int canonical_index_find_callers_excluding_project(const char *excluded_project, const char *symbol,
+                                                   void *out, int max)
+{
+   assert(excluded_project && strcmp(excluded_project, "proj-alpha") == 0);
+   return canonical_index_find_callers(NULL, symbol, out, max);
 }
 
 /* Cross-repo dependency stubs (S5): kb_http.o's route table keeps
@@ -3670,6 +3927,38 @@ static void test_code_callers_ok(void)
    assert(strstr(buf, "\"next_cursor\":null") != NULL);
 }
 
+static void test_code_scope_all_keeps_active_project_first(void)
+{
+   char buf[4096];
+   g_code_local_first_fixture = 1;
+
+   int s = kb_http_route_ex("GET", "/v1/code/find",
+                            "identifier=foo&scope=all&project=proj-alpha&max_results=2", NULL, NULL,
+                            NULL, 0, buf, sizeof(buf));
+   assert(s == 200);
+   const char *local = strstr(buf, "local/first.c");
+   const char *other = strstr(buf, "other/high.c");
+   assert(local && other && local < other);
+
+   s = kb_http_route_ex("GET", "/v1/code/search",
+                        "query=needle&scope=all&project=proj-alpha&max_results=2", NULL, NULL, NULL,
+                        0, buf, sizeof(buf));
+   assert(s == 200);
+   local = strstr(buf, "src/search.c");
+   other = strstr(buf, "other/high.c");
+   assert(local && other && local < other);
+
+   s = kb_http_route_ex("GET", "/v1/code/callers",
+                        "symbol=target_fn&scope=all&project=proj-alpha&max_results=2", NULL, NULL,
+                        NULL, 0, buf, sizeof(buf));
+   assert(s == 200);
+   local = strstr(buf, "src/caller.c");
+   other = strstr(buf, "other/caller.c");
+   assert(local && other && local < other);
+
+   g_code_local_first_fixture = 0;
+}
+
 /* §5 hybrid retrieval: fuse lexical-code + graph-callers (RRF) + memory "why". */
 static void test_code_hybrid_ok(void)
 {
@@ -3704,6 +3993,23 @@ static void test_code_hybrid_memory_leg(void)
    assert(s == 200);
    assert(strstr(buf, "\"file_path\":\"src/design_notes.c\"") != NULL);
    assert(strstr(buf, "\"signals\":[\"memory\"]") != NULL);
+}
+
+static void test_code_hybrid_keeps_same_path_projects_distinct(void)
+{
+   char buf[4096];
+   g_code_hybrid_path_collision_fixture = 1;
+   int s = kb_http_route_ex("GET", "/v1/code/hybrid",
+                            "query=needle&scope=all&project=proj-alpha&max_results=2", NULL, NULL,
+                            NULL, 0, buf, sizeof(buf));
+   g_code_hybrid_path_collision_fixture = 0;
+   assert(s == 200);
+   const char *local = strstr(buf, "\"project\":\"proj-alpha\"");
+   const char *other = strstr(buf, "\"project\":\"proj-other\"");
+   assert(local && other && local < other);
+   const char *first_path = strstr(buf, "\"file_path\":\"src/main.c\"");
+   assert(first_path != NULL);
+   assert(strstr(first_path + 1, "\"file_path\":\"src/main.c\"") != NULL);
 }
 
 static void test_code_hybrid_missing_query(void)
@@ -3769,8 +4075,8 @@ static void test_code_project_stats_missing_project(void)
    char buf[256];
    int s =
        kb_http_route_ex("GET", "/v1/code/project-stats", "", NULL, NULL, NULL, 0, buf, sizeof(buf));
-   assert(s == 400);
-   assert(strstr(buf, "missing project") != NULL);
+   assert(s == 409);
+   assert(strstr(buf, "scope_required") != NULL);
 }
 
 /* §4 graph analytics: hub/degree-centrality ranking over the projection graph. */
@@ -3799,12 +4105,12 @@ static void test_code_graph_hubs_missing_project(void)
    char buf[256];
    int s =
        kb_http_route_ex("GET", "/v1/code/graph/hubs", "", NULL, NULL, NULL, 0, buf, sizeof(buf));
-   assert(s == 400);
-   assert(strstr(buf, "missing project") != NULL);
+   assert(s == 409);
+   assert(strstr(buf, "scope_required") != NULL);
 }
 
 /* §3b lessons route: an empty ledger (the stub returns no rows) renders the
- * honesty gate, not invented lessons; a missing project 400s. */
+ * honesty gate, not invented lessons; a missing active project is explicit. */
 static void test_code_lessons_empty(void)
 {
    char buf[1024];
@@ -3820,8 +4126,8 @@ static void test_code_lessons_missing_project(void)
 {
    char buf[256];
    int s = kb_http_route_ex("GET", "/v1/code/lessons", "", NULL, NULL, NULL, 0, buf, sizeof(buf));
-   assert(s == 400);
-   assert(strstr(buf, "missing project") != NULL);
+   assert(s == 409);
+   assert(strstr(buf, "scope_required") != NULL);
 }
 
 /* §6 memory-fusion leg stubs. The real db2_entity_edge_explain_t / db2_entity_node_t
@@ -4007,8 +4313,8 @@ static void test_code_graph_surprising_missing_project(void)
    char buf[256];
    int s = kb_http_route_ex("GET", "/v1/code/graph/surprising", "", NULL, NULL, NULL, 0, buf,
                             sizeof(buf));
-   assert(s == 400);
-   assert(strstr(buf, "missing project") != NULL);
+   assert(s == 409);
+   assert(strstr(buf, "scope_required") != NULL);
 }
 
 /* judge=true runs the §4 confirmation: the stubbed judge confirms the first link, so
@@ -4075,8 +4381,8 @@ static void test_code_graph_node_missing_params(void)
    assert(s == 400);
    assert(strstr(buf, "missing node") != NULL);
    s = kb_http_route_ex("GET", "/v1/code/graph", "node=hub", NULL, NULL, NULL, 0, buf, sizeof(buf));
-   assert(s == 400);
-   assert(strstr(buf, "missing project") != NULL);
+   assert(s == 409);
+   assert(strstr(buf, "scope_required") != NULL);
 }
 
 static void test_code_project_stats_ok(void)
@@ -4113,7 +4419,8 @@ static void test_blast_radius_missing_params(void)
    char buf[256];
    int s = kb_http_route_ex("GET", "/v1/code/blast-radius", NULL, NULL, NULL, NULL, 0, buf,
                             sizeof(buf));
-   assert(s == 400);
+   assert(s == 409);
+   assert(strstr(buf, "scope_required") != NULL);
 }
 
 static void test_blast_radius_not_found(void)
@@ -4126,7 +4433,7 @@ static void test_blast_radius_not_found(void)
 
 static void test_blast_radius_ok(void)
 {
-   char buf[512];
+   char buf[2048];
    int s =
        kb_http_route_ex("GET", "/v1/code/blast-radius", "project=proj-alpha&file_path=src/main.c",
                         NULL, NULL, NULL, 0, buf, sizeof(buf));
@@ -4138,6 +4445,11 @@ static void test_blast_radius_ok(void)
    assert(strstr(buf, "\"dependencies\"") != NULL);
    assert(strstr(buf, "\"src/lib.c\"") != NULL);
    assert(strstr(buf, "\"dependency_count\":1") != NULL);
+   assert(strstr(buf, "\"resolved\":true") != NULL);
+   assert(strstr(buf, "\"generation\":9") != NULL);
+   assert(strstr(buf, "\"dependent_edges\"") != NULL);
+   assert(strstr(buf, "\"provenance\":\"import\"") != NULL);
+   assert(strstr(buf, "\"freshness\":\"current\"") != NULL);
 }
 
 /* §6 live-idempotency stubs: the scan route gates the git re-walk on the default-
@@ -4311,6 +4623,60 @@ static void test_code_scan_ok(void)
    assert(strcmp(g_code_scan_root_path, "/tmp/repo") == 0);
    assert(g_code_scan_force == 1);
    assert(g_curator_code_queued == 1);
+}
+
+static void test_code_project_lifecycle_routes(void)
+{
+   const char *owner = "owner-secret";
+   const char *owner_auth = "Bearer owner-secret";
+   char buf[2048];
+   const char *dry = "{\"project\":\"proj-alpha\"}";
+   int s = kb_http_route_ex("POST", "/v1/code/project/purge", NULL, owner_auth, owner, dry,
+                            (int)strlen(dry), buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"mode\":\"dry_run\"") != NULL);
+   assert(strstr(buf, "\"manifest_hash\":\"sha256:test\"") != NULL);
+   assert(strstr(buf, "\"code_files\":3") != NULL);
+
+   const char *confirm = "{\"project\":\"proj-alpha\",\"confirm_hash\":\"sha256:test\","
+                         "\"principal\":\"forged-body-actor\",\"reason\":\"approved cleanup\"}";
+   g_lifecycle_audit_principal[0] = '\0';
+   s = kb_http_route_ex("POST", "/v1/code/project/purge", NULL, owner_auth, owner, confirm,
+                        (int)strlen(confirm), buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"mode\":\"confirmed\"") != NULL);
+   assert(strcmp(g_lifecycle_audit_principal, "owner") == 0);
+
+   g_lifecycle_audit_principal[0] = '\0';
+   s = kb_http_route_ex("POST", "/v1/code/project/detach", NULL, owner_auth, owner, dry,
+                        (int)strlen(dry), buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"state\":\"detached\"") != NULL);
+   assert(strcmp(g_lifecycle_audit_principal, "owner") == 0);
+
+   char oversized_project[257];
+   memset(oversized_project, 'p', sizeof(oversized_project) - 1);
+   oversized_project[sizeof(oversized_project) - 1] = '\0';
+   char oversized_body[320];
+   snprintf(oversized_body, sizeof(oversized_body), "{\"project\":\"%s\"}", oversized_project);
+   s = kb_http_route_ex("POST", "/v1/code/project/purge", NULL, owner_auth, owner, oversized_body,
+                        (int)strlen(oversized_body), buf, sizeof(buf));
+   assert(s == 400);
+   assert(strstr(buf, "project must be at most 255 characters") != NULL);
+
+   /* Auth-off mode has no verified actor and must not permit anonymous lifecycle
+    * operations, including dry runs that reveal an exact destructive manifest. */
+   s = kb_http_route_ex("POST", "/v1/code/project/purge", NULL, NULL, NULL, dry, (int)strlen(dry),
+                        buf, sizeof(buf));
+   assert(s == 403);
+   assert(strstr(buf, "owner credential") != NULL);
+
+   const char *scoped = "scope:project:proj-alpha:secret";
+   s = kb_http_route_ex("POST", "/v1/code/project/detach", NULL,
+                        "Bearer scope:project:proj-alpha:secret", scoped, dry, (int)strlen(dry),
+                        buf, sizeof(buf));
+   assert(s == 403);
+   assert(strstr(buf, "owner credential") != NULL);
 }
 
 static void test_code_scan_missing_root_path(void)
@@ -4962,6 +5328,24 @@ static void test_scope_token_secret_auth(void)
                            sizeof(buf)) == 401);
 }
 
+static void test_scope_token_resolves_current_code_project(void)
+{
+   const char *tok = "scope:project:alpha:s3cr3t";
+   const char *auth = "Bearer scope:project:alpha:s3cr3t";
+   char buf[1024];
+
+   g_code_find_project[0] = '\0';
+   int s = kb_http_route_ex("GET", "/v1/code/find", "identifier=foo", auth, tok, NULL, 0, buf,
+                            sizeof(buf));
+   assert(s == 200);
+   assert(strcmp(g_code_find_project, "alpha") == 0);
+
+   s = kb_http_route_ex("GET", "/v1/code/find", "identifier=foo&scope=all", auth, tok, NULL, 0, buf,
+                        sizeof(buf));
+   assert(s == 403);
+   assert(strstr(buf, "scoped credential cannot request all projects") != NULL);
+}
+
 static void test_scope_admin_token_full_access(void)
 {
    /* An unscoped (admin) token reaches any scope. */
@@ -5096,13 +5480,15 @@ static void test_feedback_in_session_ok(void)
 static void test_search_facet_filter(void)
 {
    char buf[2048];
-   const char *body = "{\"query\":\"three db\",\"filters\":{\"status\":\"done\","
-                      "\"component\":\"pgvector\",\"kind\":\"doc_summary\"}}";
+   const char *body =
+       "{\"query\":\"three db\",\"project\":\"proj-alpha\",\"filters\":{\"status\":\"done\","
+       "\"component\":\"pgvector\",\"kind\":\"doc_summary\"}}";
    int s = kb_http_route_ex("POST", "/v1/search", NULL, NULL, NULL, body, (int)strlen(body), buf,
                             sizeof(buf));
    assert(s == 200);
    assert(strstr(buf, "\"fusion_mode_used\":\"facet\"") != NULL);
    assert(strstr(buf, "\"artifact_id\":\"art-facet-1\"") != NULL);
+   assert(strstr(buf, "\"project\":\"proj-alpha\"") != NULL);
    assert(strstr(buf, "\"kind\":\"doc_summary\"") != NULL);
    assert(strstr(buf, "\"total_hits\":1") != NULL);
    /* Bound to the active release by default (stub returns 7) and cites it. */
@@ -5113,7 +5499,8 @@ static void test_search_facet_filter(void)
 static void test_search_facet_all_releases(void)
 {
    char buf[2048];
-   const char *body = "{\"query\":\"q\",\"release_id\":0,\"filters\":{\"kind\":\"doc_summary\"}}";
+   const char *body = "{\"query\":\"q\",\"scope\":\"all\",\"release_id\":0,\"filters\":{\"kind\":"
+                      "\"doc_summary\"}}";
    int s = kb_http_route_ex("POST", "/v1/search", NULL, NULL, NULL, body, (int)strlen(body), buf,
                             sizeof(buf));
    assert(s == 200);
@@ -5121,11 +5508,27 @@ static void test_search_facet_all_releases(void)
    assert(strstr(buf, "\"release_id\":null") != NULL);
 }
 
+static void test_search_facet_scope_all_keeps_active_project_first(void)
+{
+   char buf[2048];
+   const char *body =
+       "{\"query\":\"q\",\"project\":\"proj-alpha\",\"scope\":\"all\",\"max_results\":2,"
+       "\"filters\":{\"kind\":\"doc_summary\"}}";
+   int s = kb_http_route_ex("POST", "/v1/search", NULL, NULL, NULL, body, (int)strlen(body), buf,
+                            sizeof(buf));
+   assert(s == 200);
+   const char *local = strstr(buf, "\"scope_id\":\"proj-alpha\"");
+   const char *other = strstr(buf, "\"scope_id\":\"proj-other\"");
+   assert(local && other && local < other);
+   assert(strstr(buf, "\"project\":\"proj-alpha\"") != NULL);
+   assert(strstr(buf, "\"project\":\"proj-other\"") != NULL);
+}
+
 /* POST /v1/search without filters keeps the existing non-facet search path. */
 static void test_search_no_filters_not_facet(void)
 {
    char buf[2048];
-   const char *body = "{\"query\":\"three db\"}";
+   const char *body = "{\"query\":\"three db\",\"project\":\"proj-alpha\"}";
    int s = kb_http_route_ex("POST", "/v1/search", NULL, NULL, NULL, body, (int)strlen(body), buf,
                             sizeof(buf));
    assert(s == 200);
@@ -5141,11 +5544,35 @@ static void test_search_no_filters_not_facet(void)
 static void test_search_ok(void)
 {
    char buf[1024];
-   int s = kb_http_route_ex("POST", "/v1/search", NULL, NULL, NULL, "{\"query\":\"foo\"}", 15, buf,
-                            sizeof(buf));
+   const char *unscoped = "{\"query\":\"foo\"}";
+   int s = kb_http_route_ex("POST", "/v1/search", NULL, NULL, NULL, unscoped, (int)strlen(unscoped),
+                            buf, sizeof(buf));
+   assert(s == 409);
+   assert(strstr(buf, "scope_required") != NULL);
+
+   const char *body = "{\"query\":\"foo\",\"project\":\"proj-alpha\"}";
+   s = kb_http_route_ex("POST", "/v1/search", NULL, NULL, NULL, body, (int)strlen(body), buf,
+                        sizeof(buf));
    assert(s == 200);
    assert(strstr(buf, "\"hits\"") != NULL);
    assert(strstr(buf, "\"fusion_mode_used\"") != NULL);
+}
+
+static void test_search_scope_all_keeps_active_project_first(void)
+{
+   char buf[2048];
+   g_test_search_scoped_all = 1;
+   const char *body =
+       "{\"query\":\"foo\",\"scope\":\"all\",\"project\":\"proj-alpha\",\"max_results\":2}";
+   int s = kb_http_route_ex("POST", "/v1/search", NULL, NULL, NULL, body, (int)strlen(body), buf,
+                            sizeof(buf));
+   g_test_search_scoped_all = 0;
+   assert(s == 200);
+   const char *local = strstr(buf, "local/first.md");
+   const char *other = strstr(buf, "other/high.md");
+   assert(local && other && local < other);
+   assert(strstr(buf, "\"project\":\"proj-alpha\"") != NULL);
+   assert(strstr(buf, "\"project\":\"proj-other\"") != NULL);
 }
 
 /* A managed KB normally has no raw embedding_command in aimee.yaml: the
@@ -5158,7 +5585,8 @@ static void test_search_uses_managed_embedder(void)
    unsetenv("AIMEE_EMBEDDER_URL");
    setenv("AIMEE_LLM_URL", "http://managed-llm:8742", 1);
    g_test_search_embedding[0] = '\0';
-   int s = kb_http_route_ex("POST", "/v1/search", NULL, NULL, NULL, "{\"query\":\"foo\"}", 15, buf,
+   const char *body = "{\"query\":\"foo\",\"project\":\"proj-alpha\"}";
+   int s = kb_http_route_ex("POST", "/v1/search", NULL, NULL, NULL, body, (int)strlen(body), buf,
                             sizeof(buf));
    assert(s == 200);
    assert(strcmp(g_test_search_embedding, "http://managed-llm:8742") == 0);
@@ -5178,7 +5606,8 @@ static void test_search_hits_tool_contract(void)
 {
    char buf[2048];
    g_test_search_populated = 1;
-   int s = kb_http_route_ex("POST", "/v1/search", NULL, NULL, NULL, "{\"query\":\"foo\"}", 15, buf,
+   const char *body = "{\"query\":\"foo\",\"project\":\"proj-alpha\"}";
+   int s = kb_http_route_ex("POST", "/v1/search", NULL, NULL, NULL, body, (int)strlen(body), buf,
                             sizeof(buf));
    g_test_search_populated = 0;
    assert(s == 200);
@@ -5367,6 +5796,11 @@ static void test_code_find_ok(void)
    char buf[512];
    int s = kb_http_route_ex("GET", "/v1/code/find", "identifier=foo", NULL, NULL, NULL, 0, buf,
                             sizeof(buf));
+   assert(s == 409);
+   assert(strstr(buf, "scope_required") != NULL);
+
+   s = kb_http_route_ex("GET", "/v1/code/find", "identifier=foo&scope=all", NULL, NULL, NULL, 0,
+                        buf, sizeof(buf));
    assert(s == 200);
    assert(strstr(buf, "\"hits\"") != NULL);
    assert(strstr(buf, "\"project\":\"proj-alpha\"") != NULL);
@@ -5380,6 +5814,28 @@ static void test_code_find_ok(void)
    assert(s == 200);
    assert(strcmp(g_code_find_project, "proj-alpha") == 0);
    assert(strstr(buf, "\"project\":\"proj-alpha\"") != NULL);
+
+   s = kb_http_route_ex("GET", "/v1/code/find", "identifier=foo&project=proj-alpha&generation=1",
+                        NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 409);
+   assert(strstr(buf, "stale_generation") != NULL);
+   assert(strstr(buf, "\"current_generation\":2") != NULL);
+
+   s = kb_http_route_ex("GET", "/v1/code/find", "identifier=foo&project=proj-alpha&generation=2",
+                        NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 200);
+
+   s = kb_http_route_ex("GET", "/v1/code/find",
+                        "identifier=foo&project=proj-alpha&scope=all&generation=1", NULL, NULL,
+                        NULL, 0, buf, sizeof(buf));
+   assert(s == 409);
+   assert(strstr(buf, "stale_generation") != NULL);
+   assert(strstr(buf, "\"current_generation\":2") != NULL);
+
+   s = kb_http_route_ex("GET", "/v1/code/find",
+                        "identifier=foo&project=proj-alpha&scope=all&generation=2", NULL, NULL,
+                        NULL, 0, buf, sizeof(buf));
+   assert(s == 200);
 }
 
 static void test_code_projects_wrong_method(void)
@@ -5407,8 +5863,8 @@ static void test_code_structure_missing_params(void)
 {
    char buf[256];
    int s = kb_http_route_ex("GET", "/v1/code/structure", "", NULL, NULL, NULL, 0, buf, sizeof(buf));
-   assert(s == 400);
-   assert(strstr(buf, "missing project") != NULL);
+   assert(s == 409);
+   assert(strstr(buf, "scope_required") != NULL);
 }
 /* handle_connection (plain-HTTP listener): a Content-Length over
  * KB_HTTP_BODY_MAX must be rejected up front with 413 — never silently
@@ -5550,6 +6006,7 @@ int main(void)
    test_curator_routes();
    test_invalidations_route();
    test_search_ok();
+   test_search_scope_all_keeps_active_project_first();
    test_search_uses_managed_embedder();
    test_search_hits_tool_contract();
    test_search_503_while_reembed_in_progress();
@@ -5573,8 +6030,10 @@ int main(void)
    test_code_search_ok();
    test_code_callers_missing_symbol();
    test_code_callers_ok();
+   test_code_scope_all_keeps_active_project_first();
    test_code_hybrid_ok();
    test_code_hybrid_memory_leg();
+   test_code_hybrid_keeps_same_path_projects_distinct();
    test_code_hybrid_missing_query();
    test_code_hybrid_no_symbol();
    test_code_hybrid_vector_ok();
@@ -5600,6 +6059,7 @@ int main(void)
    test_blast_radius_not_found();
    test_blast_radius_ok();
    test_code_scan_ok();
+   test_code_project_lifecycle_routes();
    test_code_scan_skips_unchanged_branch();
    test_code_scan_runs_on_branch_move();
    test_code_scan_worktree_ignores_sha();
@@ -5658,10 +6118,12 @@ int main(void)
 
    test_scope_token_cross_scope_denied();
    test_scope_token_secret_auth();
+   test_scope_token_resolves_current_code_project();
    test_scope_admin_token_full_access();
 
    test_search_facet_filter();
    test_search_facet_all_releases();
+   test_search_facet_scope_all_keeps_active_project_first();
    test_search_no_filters_not_facet();
 
    printf("ok\n");

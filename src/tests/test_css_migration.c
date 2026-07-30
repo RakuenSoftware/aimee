@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <sqlite3.h>
 
 #include "aimee.h"
 #include "config.h"
@@ -121,6 +122,13 @@ int main(void)
    /* idempotent re-assert: same conventions, still 2 (UNCHANGED counts) */
    assert(db2_css_migration_assert_conventions("mig", "2026-01-03T00:00:00Z") == 2);
    assert(db2_typed_fact_recall("mig", "naming_convention", tf, 8) == 1);
+
+   /* Operational migration state is generation-scoped: a re-added checkout
+    * cannot inherit the prior generation's verified unit. */
+   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   assert(sqlite3_exec(db, "UPDATE projects SET current_generation=2 WHERE name='mig'", NULL, NULL,
+                       NULL) == SQLITE_OK);
+   assert(db2_css_migration_list("mig", NULL, units, 16) == 0);
 
    db2_test_shim_close();
    printf("css_migration: all tests passed\n");

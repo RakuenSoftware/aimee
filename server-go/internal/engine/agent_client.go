@@ -252,8 +252,7 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 			result.CostUnknown = result.CostUnknown || costUnknown
 			return result, nil
 		}
-		if (request.Delegate != "" && !request.routeSelected) || request.Participant != "" ||
-			!errors.Is(err, ErrDelegateTerminal) ||
+		if !delegateRouteRetryable(request, err) ||
 			attempt+1 >= maxRouteAttempts || ctx.Err() != nil {
 			if execution != nil && execution.Dispatched && !execution.CostKnown {
 				return result, &DelegateExecutionError{Err: err, Dispatched: true, CostKnown: false, CostUSD: totalCost}
@@ -265,7 +264,9 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 		}
 		// The request remains unpinned. A distinct durable key forces a fresh
 		// generic delegate admission, whose router can select another currently
-		// eligible agent. No failed agent is persisted as an exclusion.
+		// eligible agent. This includes admission backpressure: planDelegateGroup
+		// may race with live occupancy, and the admission rejection is the
+		// authoritative signal. No failed agent is persisted as an exclusion.
 		request.RetryTag = fmt.Sprintf("route-retry:%d", attempt+1)
 		request.Delegate = ""
 		request.routeSelected = false
@@ -276,6 +277,13 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 			}
 		}
 	}
+}
+
+func delegateRouteRetryable(request DelegateRequest, err error) bool {
+	if err == nil || (request.Delegate != "" && !request.routeSelected) || request.Participant != "" {
+		return false
+	}
+	return errors.Is(err, ErrDelegateTerminal) || isCapacityBackpressure(err)
 }
 
 func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequest) (DelegateResult, error) {

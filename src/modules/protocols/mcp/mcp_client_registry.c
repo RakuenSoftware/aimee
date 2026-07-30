@@ -9,6 +9,7 @@
 #include "mcp_osv_cache.h"
 #include "osv_check.h"
 #include "platform.h"
+#include "runtime_secret.h"
 
 #ifdef AIMEE_POSIX
 #include <pthread.h>
@@ -238,10 +239,11 @@ static int registry_start_client(const config_t *cfg, const config_mcp_client_t 
    }
    else if (client->transport == CONFIG_MCP_TRANSPORT_SSE)
    {
-      const char *bearer = NULL;
+      char bearer[4096] = "";
       if (client->bearer_token_env[0])
-         bearer = getenv(client->bearer_token_env);
-      transport = mcp_transport_sse_open(client->url, bearer);
+         (void)runtime_secret_get(client->bearer_token_env, bearer, sizeof(bearer));
+      transport = mcp_transport_sse_open(client->url, bearer[0] ? bearer : NULL);
+      runtime_secret_wipe(bearer, sizeof(bearer));
    }
 
    if (!transport)

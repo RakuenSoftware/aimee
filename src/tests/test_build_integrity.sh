@@ -9,36 +9,128 @@ FAIL=0
 pass() { echo "  PASS: $1"; }
 fail() { echo "  FAIL: $1"; FAIL=1; }
 
-# The server image entrypoint must honor Docker's explicit command override.
-# Run it outside the image: dispatch must happen before any image-only bootstrap.
-entrypoint_output=$(sh ../deploy/container/server-entrypoint.sh \
-    printf '%s\n' entrypoint-command-override 2>/dev/null)
-if [ "$entrypoint_output" = "entrypoint-command-override" ]; then
-    pass "server entrypoint honors explicit command override"
+# The server image entrypoint must honor Docker's explicit command override, but
+# even an override must first consume credential env into Vault and scrub it.
+# Stub only the short-lived bootstrap transport so this can run outside the
+# image; the explicit child proves it received no credential value.
+entrypoint_test_dir=$(mktemp -d /tmp/aimee-entrypoint.XXXXXX)
+cat >"$entrypoint_test_dir/runuser" <<'SH'
+#!/bin/sh
+[ -n "${ENTRYPOINT_TEST_API_KEY:-}" ] || exit 3
+case "$*" in
+    *--list-credential-env-names*) printf '%s\n' ENTRYPOINT_TEST_API_KEY ;;
+esac
+exit 0
+SH
+chmod +x "$entrypoint_test_dir/runuser"
+entrypoint_output=$(env -i PATH="$entrypoint_test_dir:/usr/bin:/bin" \
+    AIMEE_HOME="$entrypoint_test_dir/home" ENTRYPOINT_TEST_API_KEY=first-boot-only \
+    sh ../deploy/container/server-entrypoint.sh sh -c \
+    'printf "%s\n" "${ENTRYPOINT_TEST_API_KEY-unset}"' 2>/dev/null)
+rm -rf "$entrypoint_test_dir"
+if [ "$entrypoint_output" = "unset" ]; then
+    pass "server entrypoint Vault-ingests and scrubs before an explicit command override"
 else
-    fail "server entrypoint ignored explicit command override"
+    fail "server entrypoint bypassed Vault ingestion or leaked a credential to an override"
 fi
 
-# The server image intentionally supervises multiple long-lived planes. Its
-# entrypoint shell therefore cannot be PID 1: orphaned git/agent grandchildren
-# would accumulate as zombies until the appliance could no longer fork.
+# The KB entrypoint can remain PID 1 while supervising its embedded PostgreSQL,
+# so it must replace its process image after scrubbing inherited credentials.
+# Use the external-DB lane to avoid starting PostgreSQL while proving that both
+# the injected DB URL and an unrelated credential are absent in the final KB.
+kb_entrypoint_test_dir=$(mktemp -d /tmp/aimee-kb-entrypoint.XXXXXX)
+cat >"$kb_entrypoint_test_dir/aimee-kb" <<'SH'
+#!/bin/sh
+case "${1:-}" in
+    --bootstrap-vault-env) exit 0 ;;
+    --list-credential-env-names)
+        [ -n "${AIMEE_DB2_URL:-}" ] && printf '%s\n' AIMEE_DB2_URL
+        [ -n "${ENTRYPOINT_TEST_API_KEY:-}" ] && printf '%s\n' ENTRYPOINT_TEST_API_KEY
+        exit 0
+        ;;
+esac
+if [ -n "${AIMEE_DB2_URL:-}" ]; then
+    printf '%s\n' dirty-db-url
+elif [ -n "${ENTRYPOINT_TEST_API_KEY:-}" ]; then
+    printf '%s\n' dirty-api-key
+else
+    printf '%s\n' clean
+fi
+SH
+chmod +x "$kb_entrypoint_test_dir/aimee-kb"
+kb_entrypoint_output=$(env -i PATH="$kb_entrypoint_test_dir:/usr/bin:/bin" \
+    AIMEE_HOME="$kb_entrypoint_test_dir/home" \
+    AIMEE_DB2_URL=postgresql://external.invalid/aimee \
+    ENTRYPOINT_TEST_API_KEY=first-boot-only \
+    sh ../deploy/container/aimee-kb-entrypoint.sh 2>&1)
+rm -rf "$kb_entrypoint_test_dir"
+if [ "$kb_entrypoint_output" = "clean" ]; then
+    pass "KB entrypoint clean-reexec removes inherited first-boot credentials"
+else
+    fail "KB entrypoint left first-boot credentials in its long-lived process image ($kb_entrypoint_output)"
+fi
+
+# The server image intentionally supervises multiple long-lived planes, so it
+# still needs a PID-1 subreaper. It must not start tini until after first-boot
+# credentials have been sealed and unset: an earlier tini permanently retains
+# the original container environment even when every child scrubs its copy.
+vault_bootstrap_line=$(grep -nF 'runuser -u aimee -- aimee-server --bootstrap-vault-env' \
+    ../deploy/container/server-entrypoint.sh | cut -d: -f1)
+credential_unset_line=$(grep -nF 'unset "$_secret_name"' \
+    ../deploy/container/server-entrypoint.sh | cut -d: -f1)
+tini_exec_line=$(grep -nF 'exec /usr/bin/tini -- aimee-server-entrypoint --aimee-internal-vault-bootstrapped' \
+    ../deploy/container/server-entrypoint.sh | cut -d: -f1)
+first_unrelated_child_line=$(grep -nF 'mkdir -p "$AIMEE_HOME"' \
+    ../deploy/container/server-entrypoint.sh | head -1 | cut -d: -f1)
 if grep -qE '^[[:space:]]+tini \\' ../Dockerfile.server &&
-   grep -qF 'ENTRYPOINT ["/usr/bin/tini", "--", "aimee-server-entrypoint"]' ../Dockerfile.server; then
-    pass "server image uses a PID 1 subreaper"
+   grep -qF 'ENTRYPOINT ["aimee-server-entrypoint"]' ../Dockerfile.server &&
+   [ -n "$vault_bootstrap_line" ] && [ -n "$credential_unset_line" ] &&
+   [ -n "$tini_exec_line" ] && [ -n "$first_unrelated_child_line" ] &&
+   [ "$vault_bootstrap_line" -lt "$credential_unset_line" ] &&
+   [ "$credential_unset_line" -lt "$tini_exec_line" ] &&
+   [ "$credential_unset_line" -lt "$first_unrelated_child_line" ] &&
+   ! grep -qF 'env | sed' ../deploy/container/server-entrypoint.sh; then
+    pass "server image Vault-ingests and scrubs before any unrelated child or PID 1 subreaper"
 else
-   fail "server image must install and enter through tini"
+   fail "server image must seal and scrub credentials before spawning unrelated children"
 fi
 
-# A native crash must both produce evidence and cause the two-plane container
-# to restart. `tail --pid` deadlocks on a zombie child because the supervising
-# shell cannot reap that child until tail returns.
-if grep -qF 'aimee_enable_core_dumps' ../deploy/container/server-entrypoint.sh &&
-   grep -qF 'aimee_verify_core_dump' ../deploy/container/server-entrypoint.sh &&
-   grep -qF 'AIMEE_CORE_SELFTEST: "1"' ../deploy/smoothnas/aimee-server.plugin.yaml &&
-   sh tests/test_server_core_storage.sh; then
-    pass "server entrypoint enables and validates persistent core dumps"
+# The KB entrypoint has the same invariant. In particular, it must not seed a
+# config, initialize PostgreSQL, or pipe environment values through text tools
+# before the Vault bootstrap and parent-environment scrub have completed.
+kb_vault_bootstrap_line=$(grep -nF 'aimee-kb --bootstrap-vault-env' \
+    ../deploy/container/aimee-kb-entrypoint.sh | head -1 | cut -d: -f1)
+kb_credential_unset_line=$(grep -nF 'unset "$_secret_name"' \
+    ../deploy/container/aimee-kb-entrypoint.sh | cut -d: -f1)
+kb_clean_reexec_first=$(grep -nF 'exec /bin/sh "$0" --aimee-internal-vault-bootstrapped-' \
+    ../deploy/container/aimee-kb-entrypoint.sh | head -1 | cut -d: -f1)
+kb_clean_reexec_last=$(grep -nF 'exec /bin/sh "$0" --aimee-internal-vault-bootstrapped-' \
+    ../deploy/container/aimee-kb-entrypoint.sh | tail -1 | cut -d: -f1)
+kb_first_unrelated_child_line=$(grep -nF 'mkdir -p "$AIMEE_HOME"' \
+    ../deploy/container/aimee-kb-entrypoint.sh | head -1 | cut -d: -f1)
+if [ -n "$kb_vault_bootstrap_line" ] && [ -n "$kb_credential_unset_line" ] &&
+   [ -n "$kb_clean_reexec_first" ] && [ -n "$kb_clean_reexec_last" ] &&
+   [ -n "$kb_first_unrelated_child_line" ] &&
+   [ "$kb_vault_bootstrap_line" -lt "$kb_credential_unset_line" ] &&
+   [ "$kb_credential_unset_line" -lt "$kb_clean_reexec_first" ] &&
+   [ "$kb_clean_reexec_last" -lt "$kb_first_unrelated_child_line" ] &&
+   [ "$kb_credential_unset_line" -lt "$kb_first_unrelated_child_line" ] &&
+   ! grep -qF 'export AIMEE_DB2_URL' ../deploy/container/aimee-kb-entrypoint.sh &&
+   ! grep -qF 'env | sed' ../deploy/container/aimee-kb-entrypoint.sh; then
+    pass "KB image Vault-ingests, scrubs, and re-execs before any unrelated child"
 else
-    fail "server entrypoint leaves native crash core dumps disabled after runuser"
+    fail "KB image must seal, scrub, and clean-reexec before spawning unrelated children"
+fi
+
+# Core images can contain request credentials. Disable them in the supervising
+# shell and independently in both unprivileged long-lived planes so runuser can
+# never re-enable credential-bearing crash persistence.
+if grep -qF 'ulimit -c 0' ../deploy/container/server-entrypoint.sh &&
+   [ "$(grep -cF "runuser -u aimee -- sh -c 'set -eu; ulimit -c 0" ../deploy/container/server-entrypoint.sh)" -eq 2 ] &&
+   ! grep -qF 'aimee_enable_core_dumps' ../deploy/container/server-entrypoint.sh; then
+    pass "server entrypoint disables credential-bearing core dumps in every plane"
+else
+    fail "server entrypoint can persist credential-bearing core dumps"
 fi
 if ! grep -qF 'tail -s 0.1 --pid=' ../deploy/container/server-entrypoint.sh &&
    sh tests/test_server_plane_supervisor.sh; then
@@ -296,7 +388,7 @@ if [ -n "$smoke_tmp" ]; then
         smoke_url=${smoke_case%%|*}
         smoke_expected=${smoke_case#*|}
         if ! AIMEE_BIN="$smoke_tmp/fake-aimee" SERVER_URL="$smoke_url" \
-             EXPECTED_ENDPOINT="$smoke_expected" FORCE_MODE=full \
+             EXPECTED_ENDPOINT="$smoke_expected" FORCE_MODE=full BEARER=test-only \
              bash ../scripts/aimee-thin-client-smoke.sh >/dev/null 2>&1; then
             smoke_endpoints_ok=0
         fi

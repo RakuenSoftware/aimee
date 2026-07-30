@@ -5,6 +5,7 @@
 #include "aimee.h"
 #include "config.h"
 #include "server.h" /* SERVER_REMOTE_WRITES_* */
+#include "runtime_secret.h"
 #include "cJSON.h"
 #include <stdlib.h>
 #include <string.h>
@@ -131,14 +132,12 @@ void config_parse_server_api(config_t *cfg, const cJSON *root)
          cfg->server_api_mtls = 0;
    }
 
-   /* AIMEE_API_BEARER_TOKEN pins the /v1 bearer from the environment (deploy
-    * truth), overriding the config-file value even when it is absent / read-only
-    * / reseeded — e.g. a containerized server fed the token from a secret store.
-    * Providing an explicit token also opts OUT of trust-on-first-use enrollment:
-    * the operator is managing the bearer, so the client's bootstrap rotation is
-    * moot (the seeded `aimee-local-dev` bootstrap is never in effect). */
-   const char *bearer_env = getenv("AIMEE_API_BEARER_TOKEN");
-   if (bearer_env && bearer_env[0])
+   /* AIMEE_API_BEARER_TOKEN is read only from its hydrated first-boot Vault
+    * slot, overriding any legacy config-file value after migration. Providing
+    * an explicit token opts out of trust-on-first-use rotation because the
+    * operator is managing that primary credential. */
+   char bearer_env[sizeof(cfg->server_api_bearer_token)];
+   if (runtime_secret_get("AIMEE_API_BEARER_TOKEN", bearer_env, sizeof(bearer_env)))
    {
       /* Extras are credentials enrolled under the primary persisted beside
        * them. A deployment-secret change is an out-of-band rotation and must
@@ -153,6 +152,7 @@ void config_parse_server_api(config_t *cfg, const cJSON *root)
       strncpy(cfg->server_api_bearer_token, bearer_env, sizeof(cfg->server_api_bearer_token) - 1);
       cfg->server_api_bearer_token[sizeof(cfg->server_api_bearer_token) - 1] = '\0';
    }
+   runtime_secret_wipe(bearer_env, sizeof(bearer_env));
 }
 
 int config_server_api_bearer_extra_snapshot(char out[][256], int max)
@@ -178,37 +178,4 @@ int config_server_api_bearer_extra_snapshot(char out[][256], int max)
       snprintf(out[i], sizeof(out[i]), "%s", cfg->server_api_bearer_extra[i]);
    free(cfg);
    return count;
-}
-
-int config_server_api_bearer_extra_append(const char *bearer)
-{
-   if (!bearer || !bearer[0] || strnlen(bearer, 65) >= 65)
-      return -1;
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   /* This is a read-modify-write, so bypass the live snapshot: the file may
-    * contain a newer autonomous/operator edit that has not reached the next
-    * reload tick yet. */
-   int rc = config_load_file(cfg);
-   if (rc == 0)
-   {
-      int count = cfg->server_api_bearer_extra_count;
-      if (count < 0 || count >= AIMEE_API_BEARER_EXTRA_MAX)
-         rc = -1;
-      else
-      {
-         snprintf(cfg->server_api_bearer_extra[count], sizeof(cfg->server_api_bearer_extra[count]),
-                  "%s", bearer);
-         cfg->server_api_bearer_extra_count = count + 1;
-         rc = config_save(cfg);
-         /* Enrollment returns a bearer that must authenticate immediately.
-          * Publish the durable write before the request returns instead of
-          * waiting for the server's one-second out-of-band reload tick. */
-         if (rc == 0 && config_reload() < 0)
-            rc = -1;
-      }
-   }
-   free(cfg);
-   return rc;
 }

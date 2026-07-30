@@ -56,6 +56,12 @@ int pki_ensure_self_signed_server_cert(const char *cert, const char *key)
    g_server_cert_ensure_calls++;
    return -1;
 }
+int pki_server_tls_key_load(char *out, size_t cap)
+{
+   if (out && cap)
+      out[0] = '\0';
+   return -1;
+}
 void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
 {
    (void)level;
@@ -83,6 +89,15 @@ static void write_text(const char *path, const char *text)
 static void command(const char *cmd)
 {
    assert(system(cmd) == 0);
+}
+
+static void read_text(const char *path, char *out, size_t cap)
+{
+   FILE *f = fopen(path, "rb");
+   assert(f && cap > 1);
+   size_t n = fread(out, 1, cap - 1, f);
+   assert(!ferror(f) && feof(f) && fclose(f) == 0);
+   out[n] = '\0';
 }
 
 typedef struct
@@ -251,8 +266,11 @@ int main(void)
    assert(server_tls_management_init(linkpath, serverkey, ca) == -1);
    assert(server_tls_management_init(ca_server, ca_server_key, ca) == -1);
    assert(server_tls_management_init(server, ca_server_key, ca) == -1);
-   assert(server_tls_management_init(server, serverkey, ca) == 0);
-   assert(server_tls_management_init(server, serverkey, ca) == 0);
+   char server_key_pem[8192];
+   read_text(serverkey, server_key_pem, sizeof(server_key_pem));
+   assert(server_tls_management_init_vault(server, server_key_pem, ca) == 0);
+   assert(server_tls_management_init_vault(server, server_key_pem, ca) == 0);
+   OPENSSL_cleanse(server_key_pem, sizeof(server_key_pem));
    assert(present(ca, NULL, NULL) == -2);
    assert(present(ca, client, clientkey) == 1);
    assert(present(ca, dual, dualkey) == 0);

@@ -19,6 +19,7 @@
 /* A single repository entry declared in the manifest. */
 typedef struct
 {
+   char id[256]; /* optional stable project identity */
    char url[512];
    char path[MAX_PATH_LEN]; /* relative clone destination; empty = derive from URL */
 } manifest_repo_t;
@@ -38,6 +39,11 @@ typedef struct
 
 typedef struct
 {
+   /* Optional stable identity for a single-project workspace. Repository
+    * entries may override it with their own id when the manifest has more
+    * than one repo. */
+   char id[256];
+
    manifest_repo_t repos[MANIFEST_MAX_REPOS];
    int repo_count;
 

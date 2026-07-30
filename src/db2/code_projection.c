@@ -46,9 +46,10 @@ int64_t db2_code_projection_generation_create(const char *project)
    /* Stamp the aimee build that produced this generation (graph-feedback S2), so
     * the snapshot-diff route can refuse to compare across extractor versions. */
    static const char *sql =
-       "INSERT INTO code_projection_generations (project, state, started_at,"
-       " extractor_version, pipeline_version)"
-       " VALUES (?1, 'pending', to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'), ?2, ?2)"
+       "INSERT INTO code_projection_generations (project,state,started_at,"
+       " extractor_version,pipeline_version)"
+       " SELECT p.name,'pending',to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'),?2,?2"
+       " FROM projects p WHERE p.name=?1 AND p.lifecycle_state='current'"
        " RETURNING id";
    char err[CP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -71,16 +72,23 @@ int db2_code_projection_generation_publish(int64_t gen_id, const char *project)
    if (!conn)
       return -1;
    char err[CP_ERRBUF] = "";
+   if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
+      return -1;
 
-   /* Supersede the current visible generation (if any). */
+   /* Supersede and publish atomically: a stale/mismatched generation must not
+    * remove the project's last visible graph. */
    static const char *supersede_sql = "UPDATE code_projection_generations"
                                       " SET state = 'superseded'"
                                       " WHERE project = ?1 AND state = 'visible'";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, supersede_sql, err, sizeof(err));
    if (!st)
-      return -1;
+      goto rollback;
    aimee_pg_bind_text(st, "?1", project);
-   aimee_pg_step(st, err, sizeof(err));
+   if (aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_DONE)
+   {
+      aimee_pg_finalize(st);
+      goto rollback;
+   }
    aimee_pg_finalize(st);
 
    /* Flip our generation from pending to visible. */
@@ -88,33 +96,47 @@ int db2_code_projection_generation_publish(int64_t gen_id, const char *project)
        "UPDATE code_projection_generations"
        " SET state = 'visible',"
        "     visible_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')"
-       " WHERE id = ?1 AND state = 'pending'";
+       " WHERE id=?1 AND project=?2 AND state='pending'"
+       " AND EXISTS (SELECT 1 FROM projects p"
+       " WHERE p.name=code_projection_generations.project"
+       " AND p.lifecycle_state='current')";
    st = aimee_pg_prepare(conn, publish_sql, err, sizeof(err));
    if (!st)
-      return -1;
+      goto rollback;
    aimee_pg_bind_int64(st, "?1", gen_id);
+   aimee_pg_bind_text(st, "?2", project);
    int rc = aimee_pg_step(st, err, sizeof(err));
+   int published = aimee_pg_stmt_changes(st);
    aimee_pg_finalize(st);
-   if (rc != AIMEE_PG_DONE)
-      return -1;
+   if (rc != AIMEE_PG_DONE || published != 1)
+      goto rollback;
 
    /* Stamp projection_generation_id on entity_edges for this generation. */
-   static const char *stamp_sql = "UPDATE entity_edges e"
-                                  " SET projection_generation_id = ?1"
-                                  " FROM code_projection_edges cpe"
-                                  " WHERE cpe.generation_id = ?2"
-                                  "   AND e.source = cpe.source"
-                                  "   AND e.relation = cpe.relation"
-                                  "   AND e.target = cpe.target"
-                                  "   AND e.edge_origin = 'code_projection'";
+   static const char *stamp_sql =
+       "UPDATE entity_edges SET projection_generation_id=?1"
+       " WHERE edge_origin='code_projection' AND EXISTS ("
+       " SELECT 1 FROM code_projection_edges cpe WHERE cpe.generation_id=?2"
+       " AND cpe.source=entity_edges.source AND cpe.relation=entity_edges.relation"
+       " AND cpe.target=entity_edges.target)";
    st = aimee_pg_prepare(conn, stamp_sql, err, sizeof(err));
    if (!st)
-      return -1;
+      goto rollback;
    aimee_pg_bind_int64(st, "?1", gen_id);
    aimee_pg_bind_int64(st, "?2", gen_id);
-   aimee_pg_step(st, err, sizeof(err));
+   if (aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_DONE)
+   {
+      aimee_pg_finalize(st);
+      goto rollback;
+   }
    aimee_pg_finalize(st);
+   if (aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
+      goto rollback;
    return 0;
+
+rollback:
+   if (aimee_pg_in_transaction(conn))
+      aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+   return -1;
 }
 
 int db2_code_projection_generation_abort(int64_t gen_id, const char *error_msg)
@@ -147,8 +169,10 @@ int64_t db2_code_projection_visible_id(const char *project)
    void *conn = db2_conn();
    if (!conn)
       return -1;
-   static const char *sql = "SELECT id FROM code_projection_generations"
-                            " WHERE project = ?1 AND state = 'visible'";
+   static const char *sql = "SELECT g.id FROM code_projection_generations g"
+                            " JOIN projects p ON p.name=g.project"
+                            " WHERE g.project=?1 AND g.state='visible'"
+                            " AND p.lifecycle_state='current'";
    char err[CP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -174,7 +198,9 @@ int db2_code_projection_list_edges(const char *project, code_projection_edge_t *
    static const char *sql = "SELECT cpe.source, cpe.relation, cpe.target"
                             " FROM code_projection_edges cpe"
                             " JOIN code_projection_generations g ON g.id = cpe.generation_id"
-                            " WHERE cpe.project = ?1 AND g.state = 'visible'"
+                            " JOIN projects p ON p.name=g.project"
+                            " WHERE cpe.project=?1 AND g.state='visible'"
+                            " AND p.lifecycle_state='current'"
                             " ORDER BY cpe.source, cpe.target"
                             " LIMIT ?2";
    char err[CP_ERRBUF] = "";
@@ -415,7 +441,8 @@ int db2_code_projection_project_fingerprint(const char *project, char *out, size
     * project hashes md5('') deterministically (built once, then skipped). */
    static const char *sql =
        "SELECT md5(coalesce(string_agg(f.path || ':' || f.hash, E'\\n' ORDER BY f.path), ''))"
-       " FROM files f JOIN projects p ON f.project_id = p.id WHERE p.name = ?1";
+       " FROM files f JOIN projects p ON f.project_id=p.id WHERE p.name=?1"
+       " AND p.lifecycle_state='current' AND f.generation=p.current_generation";
    char err[CP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -462,8 +489,10 @@ int db2_code_projection_visible_source_hash(const char *project, char *out, size
    void *conn = db2_conn();
    if (!conn)
       return -1;
-   static const char *sql = "SELECT source_hash FROM code_projection_generations"
-                            " WHERE project = ?1 AND state = 'visible'";
+   static const char *sql = "SELECT g.source_hash FROM code_projection_generations g"
+                            " JOIN projects p ON p.name=g.project"
+                            " WHERE g.project=?1 AND g.state='visible'"
+                            " AND p.lifecycle_state='current'";
    char err[CP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -632,7 +661,8 @@ int64_t db2_code_projection_sync_project(const char *project, int64_t gen_id)
    char err[CP_ERRBUF] = "";
 
    /* Fetch project id. */
-   static const char *proj_sql = "SELECT id FROM projects WHERE name = ?1 LIMIT 1";
+   static const char *proj_sql = "SELECT id FROM projects"
+                                 " WHERE name=?1 AND lifecycle_state='current' LIMIT 1";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, proj_sql, err, sizeof(err));
    if (!st)
       return -1;
@@ -650,7 +680,10 @@ int64_t db2_code_projection_sync_project(const char *project, int64_t gen_id)
       return -1;
 
    /* --- Iterate files: emit contains + per-file edges --- */
-   static const char *files_sql = "SELECT id, path FROM files WHERE project_id = ?1 ORDER BY id";
+   static const char *files_sql =
+       "SELECT f.id,f.path FROM files f JOIN projects p ON p.id=f.project_id"
+       " WHERE f.project_id=?1 AND p.lifecycle_state='current'"
+       " AND f.generation=p.current_generation ORDER BY f.id";
    st = aimee_pg_prepare(conn, files_sql, err, sizeof(err));
    if (!st)
       return -1;

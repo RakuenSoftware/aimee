@@ -9,7 +9,9 @@
 #include <string.h>
 #include <time.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <unistd.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <pthread.h>
 #include <ctype.h>
@@ -38,6 +40,54 @@ static cJSON *mcp_text(const char *text)
    cJSON_AddStringToObject(item, "text", text);
    cJSON_AddItemToArray(arr, item);
    return arr;
+}
+
+/* Full repository verification is not safe to overlap yet: some native tests
+ * still bind process-global resources even when their worktrees, HOME, and
+ * TMPDIR are isolated. Coordinate every CLI and MCP invocation through one
+ * host lock. flock is tied to the open file description, so a crash releases
+ * the lock automatically; O_CLOEXEC prevents verification children from
+ * extending its lifetime. */
+static int verify_global_lock_acquire(volatile int *cancel_requested)
+{
+   const char *configured = getenv("AIMEE_VERIFY_LOCK_FILE");
+   const char *path = (configured && configured[0]) ? configured : "/tmp/aimee-git-verify.lock";
+   int fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+   if (fd < 0)
+      return -1;
+
+   for (;;)
+   {
+      if (flock(fd, LOCK_EX | LOCK_NB) == 0)
+         return fd;
+      if (errno != EWOULDBLOCK && errno != EAGAIN)
+      {
+         close(fd);
+         return -1;
+      }
+      if (cancel_requested && *cancel_requested)
+      {
+         close(fd);
+         return -2;
+      }
+      struct timespec pause = {.tv_sec = 0, .tv_nsec = 100000000L};
+      while (nanosleep(&pause, &pause) != 0 && errno == EINTR)
+      {
+         if (cancel_requested && *cancel_requested)
+         {
+            close(fd);
+            return -2;
+         }
+      }
+   }
+}
+
+static void verify_global_lock_release(int fd)
+{
+   if (fd < 0)
+      return;
+   (void)flock(fd, LOCK_UN);
+   (void)close(fd);
 }
 
 /* --- Config loading ---
@@ -666,6 +716,23 @@ static int verify_max_parallel_threads(void);
 static void verify_run_waves_on_pool(compute_pool_t *external_pool, verify_config_t *cfg,
                                      verify_thread_ctx_t *contexts, const char *pre_hash)
 {
+   volatile int *cancel_requested =
+       (cfg->count > 0 && contexts) ? contexts[0].cancel_requested : NULL;
+   int global_lock_fd = verify_global_lock_acquire(cancel_requested);
+   if (global_lock_fd < 0)
+   {
+      const char *detail = (global_lock_fd == -2)
+                               ? "verify: cancelled while waiting for the global verifier lock\n"
+                               : "verify: could not acquire the global verifier lock\n";
+      for (int i = 0; i < cfg->count; i++)
+      {
+         contexts[i].rc = -1;
+         free(contexts[i].output);
+         contexts[i].output = safe_strdup(detail);
+      }
+      return;
+   }
+
    compute_pool_t local_pool;
    compute_pool_t *pool = external_pool;
    int owns_pool = 0;
@@ -676,6 +743,7 @@ static void verify_run_waves_on_pool(compute_pool_t *external_pool, verify_confi
       if (compute_pool_init(&local_pool, max_parallel) != 0)
       {
          verify_run_inline(cfg, contexts);
+         verify_global_lock_release(global_lock_fd);
          return;
       }
       compute_pool_register_secondary(&local_pool, "verify");
@@ -810,6 +878,7 @@ static void verify_run_waves_on_pool(compute_pool_t *external_pool, verify_confi
    }
    pthread_mutex_destroy(&mutex);
    pthread_cond_destroy(&cond);
+   verify_global_lock_release(global_lock_fd);
 }
 
 void verify_run_waves(verify_config_t *cfg, verify_thread_ctx_t *contexts)
@@ -983,6 +1052,7 @@ typedef struct
    verify_job_t *job;
    compute_pool_t *pool;
    int owns_pool;
+   int global_lock_fd;
    pthread_mutex_t mutex;
    pthread_cond_t cond;
    int done; /* set by finalize for sync path */
@@ -1106,6 +1176,32 @@ static void verify_coordinator_fn(void *arg)
 
    compute_pool_set_job(POOL_JOB_VERIFY, "coordinator");
 
+   if (state->global_lock_fd < 0)
+   {
+      int fd = verify_global_lock_acquire(state->job ? &state->job->cancel_requested : NULL);
+      if (fd < 0)
+      {
+         pthread_mutex_lock(&state->mutex);
+         const char *detail = (fd == -2)
+                                  ? "verify: cancelled while waiting for the global verifier lock\n"
+                                  : "verify: could not acquire the global verifier lock\n";
+         for (int i = 0; i < state->cfg.count; i++)
+         {
+            if (state->step_state[i] != 0)
+               continue;
+            state->contexts[i].rc = -1;
+            state->contexts[i].output = safe_strdup(detail);
+            state->step_state[i] = 2;
+            state->remaining--;
+         }
+         pthread_mutex_unlock(&state->mutex);
+         compute_pool_clear_job();
+         verify_coord_finalize(state);
+         return;
+      }
+      state->global_lock_fd = fd;
+   }
+
    pthread_mutex_lock(&state->mutex);
 
    int any_running = 0;
@@ -1221,6 +1317,9 @@ static void verify_coordinator_fn(void *arg)
 static void verify_coord_finalize(verify_coord_state_t *state)
 {
    const char *bg_root = state->project_root[0] ? state->project_root : NULL;
+
+   verify_global_lock_release(state->global_lock_fd);
+   state->global_lock_fd = -1;
 
    if (state->is_async)
    {
@@ -1654,6 +1753,7 @@ cJSON *handle_git_verify(server_ctx_t *server_ctx, cJSON *args, const char *sess
       coord->job = job;
       coord->pool = verify_pool;
       coord->owns_pool = 1;
+      coord->global_lock_fd = -1;
       coord->remaining = cfg.count;
       if (session_id && session_id[0])
          snprintf(coord->session_id, sizeof(coord->session_id), "%s", session_id);

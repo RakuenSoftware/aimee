@@ -1,6 +1,6 @@
 # Proposal: Agent-facing code intelligence effectiveness
 
-- **State:** PENDING — E2–E6 remain; E0/E1 history and the current E1-memory slice are recorded below
+- **State:** PENDING — E3–E6 remain; E0 through E2 history is recorded below
 - **Author:** JBailes
 - **Date:** 2026-07-29
 - **Charter roles:** Recall, Rank-Fuse, Calibrate / Evaluate-Optimize, Enforce, Gate-Promote
@@ -568,3 +568,130 @@ residual proposal instead of declaring the intended effectiveness outcome comple
   in every ordered-memory MCP schema for direct clients that bypass the stdio proxy. Roundtable run:
   `oprun_g6a69bd8011459d99_1785346763_103` (artifact
   `5cd60248e8555ca6a24249a4ac4026a10350d3c5c7a1bf85c0698c9a31ca58e2`).
+- **E1-memory local-first slice:** PR #2154 merged to `testing` as
+  `ea612958c51b3a0541d950db1578350911740255` after all 23 CI checks passed. Every ordered memory
+  reader now protects active-project and active-workspace evidence before relevance limits, while
+  cross-project memory requires explicit `scope:"all"`.
+- **E2 current-project identity candidate:** the implementation resolves a stable project from an
+  explicit manifest ID, canonical forge identity, or persisted UUID; tracks checkout aliases and
+  current generations; applies the same active-project default to code and knowledge retrieval; and
+  gives detach, purge, and garbage collection exact-row confirmation manifests with verified audit
+  attribution. Its frozen implementation diff receives a separate roundtable gate before PR.
+- **E2 implementation round 1 — 2026-07-29 — changes requested, 3/3 participants, not degraded.**
+  The panel caught two lifecycle defects: an ordinary active-checkout move incorrectly advanced the
+  index generation, and the confirmation digest omitted its purge/GC operation discriminator. Moves
+  now update aliases within the current generation, only a detached-project re-add advances it, and
+  the digest and audit detail bind the operation. Regression coverage exercises move, detach,
+  re-add, purge, and GC. The remaining findings arose because this intermediate E2 gate was submitted
+  against the parent E0–E6 completion request rather than the accepted per-slice contract in §6; the
+  reconvened review binds E2 as one mergeable step without claiming E3–E6 completion. Roundtable run:
+  `roundtable-2e22a253e6ceac8fd078c4b3` (artifact
+  `4933bdea264174938331ec34fc32a71312db7f9a43a8d498798cde21816457b9`).
+- **E2 implementation round 2 — 2026-07-29 — changes requested, 3/3 participants, not degraded.**
+  The panel found six boundary defects: all-project code queries applied their limit before the
+  active-project preference; detach lacked verified WORM attribution; SQLite upgrades omitted the
+  lifecycle tables and backfill; lifecycle CLI failures could exit successfully; PDF reads admitted
+  unowned legacy rows; and malformed identified manifest entries could bypass ID validation. All six
+  are accepted. The resulting fixes split active and excluding-tail candidate selection before
+  limits across code, hybrid, ranked knowledge/document, and facet searches; make detach audit part
+  of the same transaction; complete the compatibility migration; make lifecycle CLI errors nonzero;
+  require exact PDF ownership; and fail closed on malformed explicit identities. Adversarial tests
+  cover each boundary and the active-project-plus-`scope=all` transport shape. Roundtable run:
+  `roundtable-d0acffc5106da13670646e30` (artifact
+  `c71fd48c08c2a3bd78daa9c0cd9fc88c2310987816f7854009d37b73f5e1d74d`).
+- **E2 implementation round 3 — 2026-07-29 — changes requested, 3/3 participants, not degraded.**
+  The panel found two remaining request-boundary gaps: direct agent `search_docs` discarded the
+  active project when `scope=all`, and code HTTP returned before checking a supplied preferred
+  project's generation in that mode. Both are accepted: direct dispatch now uses the scoped client
+  with the resolved project retained, and `project` plus `scope=all` validates its generation before
+  retrieval. The third reported item was an index-visibility false positive: all five named
+  PostgreSQL adapter helpers are declared and implemented in `db_postgres`, are already used by
+  older DB2 modules, and both the shipping link gate and lifecycle test pass. Roundtable run:
+  `roundtable-2393706c135262f501a9f1f8` (artifact
+  `dad606e0f396399e8a78bcb8bf8ab0cdf6cfb21d3cd97dd5ccf9309e9df3915d`).
+- **E2 implementation round 4 — 2026-07-29 — changes requested, 3/3 participants, not degraded.**
+  The panel found that source rows were generation-keyed but several derived code/knowledge paths
+  still overwrote or returned retired data. E2 now stamps and fences code embeddings, knowledge
+  documents/assets/indexes, sketch buckets, curator work and artifacts, CSS migration/render state,
+  and code projections; current-only force rebuild and startup sanitation preserve retained history,
+  while exact manifest GC removes it deliberately. SQLite and PostgreSQL migrations make the
+  derived uniqueness keys generation-aware, and adversarial fixtures retain the same logical key in
+  two generations. Roundtable run: `roundtable-ff7f94ff43b4ec6dfff2882d` (artifact
+  `55d334d8fd023d50826f89594f5c0deaa6a1ec01d87491cff9e8162dfa759619`).
+- **E2 implementation round 5 — 2026-07-30 — changes requested, 3/3 participants, not degraded.**
+  The sole reported blocker was disproved by the shipping build: the two
+  `kb_search_json_scoped_ex` definitions are the mutually exclusive disabled and enabled arms of the
+  file-level `#if AIMEE_DB2_DISABLED` guard. A comment now makes that compatibility layout explicit;
+  no runtime behavior changed. Roundtable run: `roundtable-f779252e71a67116c2192e2d` (artifact
+  `dbe4f9d3c9318296ae0bec683456de31b6599ec9862746920dfdbdf07747fc40`).
+- **E2 implementation round 6 — 2026-07-30 — changes requested, 2/3 participants used,
+  degraded.** One finding exposed a real all-project hybrid-search defect: reciprocal-rank fusion
+  keyed candidates only by path, so identical paths in different projects collapsed and inherited
+  the active-project label. Candidates are now interned and fused by exact project plus path, with
+  an adversarial same-path fixture. The implementation also adopts the panel's stricter expression
+  of the already-correct local-first bound: other-project symbol, text, and caller tails are excluded
+  in SQL before their remaining-slot limit is applied. The two other claims were disproved: direct
+  MCP code dispatch returns an explicit `project` argument (covered by the registry contract test),
+  and the disabled/enabled search definitions remain preprocessor-exclusive. Roundtable run:
+  `roundtable-b9a43c6c69927ce42470d6ff` (artifact
+  `f7b8b9f8f1a65c34f02ba83537e6c276c9e5b72a950125289ca07ce1404b501d`).
+- **E2 implementation round 7 — 2026-07-30 — changes requested, 3/3 participants, not degraded.**
+  The exact full-diff call exceeded the MCP response deadline, but its completed durable synthesis
+  was recovered as job 212. Its repeated blocking claim was disproved again: the helper returns a
+  nonempty explicit project, the registry regression calls it and compares the returned value, and
+  only the forbidden cwd-basename fallback returns `NULL`; that positive branch is now entirely
+  visible in the diff. All five nonblocking hardening findings are accepted: lifecycle audit JSON
+  preserves control bytes as Unicode escapes, the client no longer serializes an ignored principal,
+  overlong project IDs fail at the HTTP boundary, in-transaction WORM appends assert transaction
+  state, and purge tolerates absent legacy projection tables. Roundtable run:
+  `roundtable-6e5200896cabbc1215616c18` (artifact
+  `e2ccf65bd32da0a6a91aa6008d3f0450906f21c4de9d99a97fc3d17467abca59`).
+- **E2 implementation round 8 — 2026-07-30 — changes requested, 1/3 participants used,
+  degraded.** Two seats failed before review, but the surviving reviewer identified ambiguous SQL
+  placeholder construction when artifact facets combined project, kind, and release filters. The
+  release is safely inlined and the previous kind/project bindings were already distinct; E2 still
+  adopts explicit monotonic parameter allocation so later predicates cannot reuse a slot. Combined
+  release-plus-kind-plus-project regressions prove both positive projects and a mismatched kind.
+  Roundtable run: `roundtable-d6b5adead972ca968a7132e5` (artifact
+  `068609efd696a07bdd62a7cceaeb02ff97cc8298b4c1f703348f107de936635c`).
+- **E2 final exact-diff review — 2026-07-30 — APPROVED and converged, 3/3 participants, not
+  degraded.** The final operator-health and explicit-scope smoke repairs received no blocking
+  findings. Roundtable run: `roundtable-0b8300caa27872843d839e63` (artifact
+  `96a646d79a1169a6f0d810b879f4db3ea4eaed6af66b9e286319a1f574161da6`).
+- **E2 current-project identity slice:** PR #2161 merged to `testing` as
+  `a70ebc23e1facd0cc199fbfacd2c13e2a38b1dca` after all 23 CI checks passed. Stable identity,
+  active-project-first code/knowledge/memory ordering, generation fencing, explicit all-project
+  scope, and audited detach/purge/GC are now the base for E3–E6.
+- **E3 graph-resolution candidate:** the implementation replaces path-substring blast matching
+  with exact normalized Python module identities, merges unique-symbol call edges without
+  duplicates, admits cross-project tails only through resolved structural routes, resolves legacy
+  projection basenames uniquely, and emits provenance/confidence/project/generation/freshness for
+  every edge. Its frozen implementation diff receives a separate roundtable gate before PR.
+- **E3 implementation round 1 — 2026-07-30 — changes requested, 3/3 participants, not
+  degraded.** All three seats found that local co-edit projection edges were appended after the
+  resolver's cross-project tail. A shared stable local-first partition now runs after additive
+  projections in both public blast-radius paths, and an adversarial fixture combines a local-only
+  projection with a route-gated external import and asserts that no local edge follows an external
+  edge. Roundtable run: `roundtable-5d582db9c64174793488f921` (artifact
+  `a309798e4843249ac313deecef3b9749cc318845c4b95498325216b374f3d4b1`).
+- **E3 implementation round 2 — 2026-07-30 — changes requested, 3/3 participants, not
+  degraded.** The corrected local-first ordering was accepted. The synthesis repeated a projection
+  capacity concern that was already bounded by both loop conditions; E3 nevertheless adds the same
+  guard at each insertion site so the invariant survives future loop refactors. A valid finding
+  showed that the client accepted legacy-only arrays with empty metadata. New E3 clients now require
+  resolved top-level identity plus complete structured edge arrays and fail closed on legacy-only or
+  partial metadata; servers continue emitting legacy arrays additively for older consumers.
+  Roundtable run: `roundtable-15472c66ae1dccd6620b4b97` (artifact
+  `a8e925f87312534a4092416d4dec985621f5e0053be367bbab37d15b5be889fe`).
+- **E3 implementation round 3 — 2026-07-30 — APPROVED and converged, 2/3 participants used,
+  degraded.** The panel reported no blocking findings. E3 immediately adopts its schema-accuracy
+  suggestion by splitting dependent/path and dependency/identity OpenAPI edge types so the required
+  identity field matches the client validation contract. Its distinct CLI error-class suggestion is
+  assigned to the accepted E5 typed-status slice. Roundtable run:
+  `roundtable-a2953bf8d139a351d64af27d` (artifact
+  `ce370ec61931cdfb91c1e73417de930af801280d5a486ab2de9cd7adec98ae85`).
+- **E3 final exact-diff review — 2026-07-30 — APPROVED and converged, 2/3 participants used,
+  degraded.** The schema-aligned frozen diff received no findings; the chairman confirmed the
+  earlier ordering, capacity, complete-metadata, exact-resolution, route-gating, and concrete edge
+  identity findings remain closed. Roundtable run: `roundtable-327db1be95dc7e7c3abd2035`
+  (artifact `ebe90912dc8e54a133c45453fd1c8b376c0c5845954acf66fe37134f1e0b17e4`).

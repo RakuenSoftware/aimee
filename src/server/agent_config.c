@@ -1,11 +1,11 @@
 /* agent_config.c: config loading/saving, agent routing, role checking, auth resolution */
 #include "aimee.h"
-#include "aimee_home.h" /* aimee_home() — honors AIMEE_HOME (appliance has no HOME) */
 #include "util.h"
 #include "agent_config.h"
 #include "agent_config_internal.h"
 #include "vault_principal.h" /* VAULT_PRINCIPAL_MAX for the per-turn vault principal */
-#include "vault_service.h"   /* vault_service_* : the permanent credential store (P4) */
+#include "runtime_secret.h"
+#include "vault_service.h" /* vault_service_* : the permanent credential store (P4) */
 #include "model_registry.h"
 #include "model_provider.h"
 #include "platform_path.h"
@@ -13,6 +13,7 @@
 #include "oauth_flow.h" /* oauth_token_store/get : vault-backed auto-refreshing codex token */
 #include "cJSON.h"
 #include "json_fluent.h"
+#include <openssl/crypto.h>
 #include <ctype.h>
 #include <math.h>
 #include <pthread.h>
@@ -58,50 +59,7 @@ const char *agent_config_path(void)
    return path;
 }
 
-/* --- Env var expansion --- */
-
-static int agent_expand_env_from_vibe_dotenv(const char *name, char *dst, size_t dst_len)
-{
-   const char *home = getenv("HOME");
-   if (!name || !name[0] || !home || !home[0])
-      return 0;
-
-   char path[MAX_PATH_LEN];
-   snprintf(path, sizeof(path), "%s/.vibe/.env", home);
-
-   FILE *f = fopen(path, "r");
-   if (!f)
-      return 0;
-
-   char line[MAX_API_KEY_LEN + 128];
-   size_t name_len = strlen(name);
-   int found = 0;
-   while (fgets(line, sizeof(line), f))
-   {
-      char *p = line;
-      if (strncmp(p, "export ", 7) == 0)
-         p += 7;
-      if (strncmp(p, name, name_len) != 0 || p[name_len] != '=')
-         continue;
-
-      char *val = p + name_len + 1;
-      size_t len = strlen(val);
-      while (len > 0 && (val[len - 1] == '\n' || val[len - 1] == '\r'))
-         val[--len] = '\0';
-      if (len >= 2 &&
-          ((val[0] == '"' && val[len - 1] == '"') || (val[0] == '\'' && val[len - 1] == '\'')))
-      {
-         val[len - 1] = '\0';
-         val++;
-      }
-      snprintf(dst, dst_len, "%s", val);
-      found = 1;
-      break;
-   }
-
-   fclose(f);
-   return found;
-}
+/* --- First-boot environment references ---------------------------------- */
 
 void agent_expand_env(const char *src, char *dst, size_t dst_len)
 {
@@ -113,14 +71,13 @@ void agent_expand_env(const char *src, char *dst, size_t dst_len)
 
    if (src[0] == '$')
    {
-      const char *val = getenv(src + 1);
-      if (val)
-      {
-         snprintf(dst, dst_len, "%s", val);
+      /* Credential environment variables are consumed and unset before config
+       * loading. The only runtime view is the locked-memory cache hydrated from
+       * Vault; dotenv and direct getenv fallbacks are intentionally forbidden. */
+      if (runtime_secret_get(src + 1, dst, dst_len))
          return;
-      }
-      if (agent_expand_env_from_vibe_dotenv(src + 1, dst, dst_len))
-         return;
+      dst[0] = '\0';
+      return;
    }
 
    snprintf(dst, dst_len, "%s", src);
@@ -680,11 +637,12 @@ static int agent_provider_env_value(const char *provider, char *dst, size_t dst_
       return 0;
    for (int i = 0; envs[i]; i++)
    {
-      const char *value = getenv(envs[i]);
-      if (value && value[0])
+      char value[MAX_API_KEY_LEN];
+      if (runtime_secret_get(envs[i], value, sizeof(value)) && value[0])
       {
          if (dst && dst_len > 0)
             snprintf(dst, dst_len, "%s", value);
+         runtime_secret_wipe(value, sizeof(value));
          return 1;
       }
    }
@@ -714,9 +672,12 @@ int agent_has_resolvable_credentials(const agent_t *agent)
    }
    for (int i = 0; i < agent->credential_count; i++)
    {
-      const char *value = getenv(agent->credentials[i].api_key_env);
-      if (value && value[0])
+      char value[MAX_API_KEY_LEN];
+      if (runtime_secret_get(agent->credentials[i].api_key_env, value, sizeof(value)) && value[0])
+      {
+         runtime_secret_wipe(value, sizeof(value));
          return 1;
+      }
    }
    return agent_provider_env_value(agent->provider, NULL, 0);
 }
@@ -1723,12 +1684,14 @@ int agent_save_config(const agent_config_t *cfg)
       JSON_ADD_STR(a, "name", ag->name);
       JSON_ADD_STR(a, "endpoint", ag->endpoint);
       JSON_ADD_STR(a, "model", ag->model);
-      /* Persist the on-disk reference form ($VAR), never a resolved secret. Falls
-       * back to api_key for in-memory agents (e.g. `agent add $VAR`, which stores
-       * the unexpanded reference there); literal secrets belong in the vault. */
+      /* Persist references only. A literal API key is a credential and therefore
+       * belongs in Vault, never agents.json. In-memory callers may still put a
+       * $VAR reference in api_key; first boot resolves that from the locked
+       * Vault-backed runtime cache and the server migration canonicalizes it to
+       * the per-agent Vault slot. */
       {
          const char *disk_key = ag->api_key_disk[0] ? ag->api_key_disk : ag->api_key;
-         if (disk_key[0])
+         if (disk_key[0] == '$' && disk_key[1])
             JSON_ADD_STR(a, "api_key", disk_key);
       }
       if (ag->auth_cmd[0])
@@ -2065,38 +2028,17 @@ static long codex_jwt_exp(const char *jwt)
    return exp;
 }
 
-/* Read access_token + refresh_token from a codex auth.json (top-level keys or the
- * `tokens.{}` object). Returns 0 only when BOTH are present (a refresh_token is
- * required to manage the token in aimee's store). */
-static int codex_read_oauth_pair(const char *path, char *access, size_t an, char *refresh,
-                                 size_t rn)
+/* Parse access_token + refresh_token from codex auth JSON (top-level keys or
+ * `tokens.{}`). Returns 0 only when both are present: a refresh token is
+ * required to manage the credential in AIMEE's Vault-backed OAuth store. */
+static int codex_parse_oauth_pair(const char *data, char *access, size_t an, char *refresh,
+                                  size_t rn)
 {
    if (access && an)
       access[0] = '\0';
    if (refresh && rn)
       refresh[0] = '\0';
-   FILE *f = fopen(path, "rb");
-   if (!f)
-      return -1;
-   fseek(f, 0, SEEK_END);
-   long sz = ftell(f);
-   if (sz <= 0 || sz > 1024 * 1024)
-   {
-      fclose(f);
-      return -1;
-   }
-   rewind(f);
-   char *data = malloc((size_t)sz + 1);
-   if (!data)
-   {
-      fclose(f);
-      return -1;
-   }
-   size_t nread = fread(data, 1, (size_t)sz, f);
-   fclose(f);
-   data[nread] = '\0';
    cJSON *root = cJSON_Parse(data);
-   free(data);
    if (!root)
       return -1;
    cJSON *at = cJSON_GetObjectItemCaseSensitive(root, "access_token");
@@ -2121,11 +2063,11 @@ static int codex_read_oauth_pair(const char *path, char *access, size_t an, char
 }
 
 /* Vault-backed, auto-refreshing codex bearer. On first use, bootstrap aimee's
- * oauth store (server-sealed vault) from the codex CLI's auth.json; thereafter
+ * oauth store from the server-sealed, opaque codex OAuth document; thereafter
  * oauth_token_get() returns a token, refreshing via the stored refresh_token
  * against OpenAI's token endpoint whenever it is within the skew of expiry —
- * without ever rewriting the CLI's shared auth.json. Returns 0 + a bearer in
- * |buf|; -1 to fall back to the legacy on-disk read. */
+ * without reading or rewriting a persistent auth.json. Returns 0 + a bearer in
+ * |buf|; -1 when Vault has no usable OAuth document. */
 static int codex_oauth_vault_token(char *buf, size_t len)
 {
    for (int tries = 0; tries < 2; tries++)
@@ -2136,35 +2078,14 @@ static int codex_oauth_vault_token(char *buf, size_t len)
          return 0;
       if (tries > 0)
          break; /* bootstrapped already and still no token -> give up */
-      /* Bootstrap (or re-bootstrap after a failed refresh) from the on-disk auth. */
-      char path[MAX_PATH_LEN], access[MAX_API_KEY_LEN] = "", refresh[1024] = "";
-      int got = 0;
-      snprintf(path, sizeof(path), "%s/codex-auth.json", config_default_dir());
-      if (codex_read_oauth_pair(path, access, sizeof(access), refresh, sizeof(refresh)) == 0)
-         got = 1;
-      /* aimee's canonical home (honors AIMEE_HOME) — on an appliance the process
-       * has AIMEE_HOME set but no HOME, so the on-disk codex auth at
-       * <AIMEE_HOME>/.codex/auth.json is invisible to the HOME-only lookup below.
-       * This server-wide on-disk read (not a per-request vault principal) is
-       * deliberate: the /v1 ingress resolves creds here for BOTH the buffered and
-       * streaming paths, and the streaming ingress has no captured per-request
-       * identity, so a vault-principal approach could not cover streaming codex.
-       * The raw HOME branch below is kept for AIMEE_PROFILE setups, where
-       * aimee_home() points at the profile dir rather than the real ~/.codex. */
-      const char *ahome = aimee_home();
-      if (!got && ahome && ahome[0])
-      {
-         snprintf(path, sizeof(path), "%s/.codex/auth.json", ahome);
-         if (codex_read_oauth_pair(path, access, sizeof(access), refresh, sizeof(refresh)) == 0)
-            got = 1;
-      }
-      const char *home = getenv("HOME");
-      if (!got && home && home[0])
-      {
-         snprintf(path, sizeof(path), "%s/.codex/auth.json", home);
-         if (codex_read_oauth_pair(path, access, sizeof(access), refresh, sizeof(refresh)) == 0)
-            got = 1;
-      }
+      /* Bootstrap (or re-bootstrap after a rejected refresh) from the opaque
+       * vendor document stored in Vault by the login/legacy-migration path. */
+      char access[MAX_API_KEY_LEN] = "", refresh[1024] = "", document[64 * 1024];
+      vault_status_t vst =
+          vault_service_get_server_principal("codex", "oauth", document, sizeof(document));
+      int got = vst == VAULT_OK && codex_parse_oauth_pair(document, access, sizeof(access), refresh,
+                                                          sizeof(refresh)) == 0;
+      OPENSSL_cleanse(document, sizeof(document));
       if (!got)
          return -1;
       oauth_token_response_t resp;
@@ -2173,92 +2094,15 @@ static int codex_oauth_vault_token(char *buf, size_t len)
       snprintf(resp.refresh_token, sizeof(resp.refresh_token), "%s", refresh);
       resp.expires_at = codex_jwt_exp(access); /* 0 = unknown (no proactive refresh) */
       if (oauth_token_store(CODEX_OAUTH_STORE, &resp) != 0)
+      {
+         OPENSSL_cleanse(access, sizeof(access));
+         OPENSSL_cleanse(refresh, sizeof(refresh));
          return -1;
+      }
+      OPENSSL_cleanse(access, sizeof(access));
+      OPENSSL_cleanse(refresh, sizeof(refresh));
       /* loop: oauth_token_get now serves the vaulted token (refreshing if stale). */
    }
-   return -1;
-}
-
-static int agent_read_codex_oauth_token_from_path(const char *path, char *token, size_t token_len)
-{
-   if (!path || !path[0] || !token || token_len == 0)
-      return -1;
-   token[0] = '\0';
-
-   FILE *f = fopen(path, "rb");
-   if (!f)
-      return -1;
-   if (fseek(f, 0, SEEK_END) != 0)
-   {
-      fclose(f);
-      return -1;
-   }
-   long sz = ftell(f);
-   if (sz <= 0 || sz > 1024 * 1024)
-   {
-      fclose(f);
-      return -1;
-   }
-   rewind(f);
-
-   char *data = malloc((size_t)sz + 1);
-   if (!data)
-   {
-      fclose(f);
-      return -1;
-   }
-   size_t nread = fread(data, 1, (size_t)sz, f);
-   fclose(f);
-   data[nread] = '\0';
-
-   cJSON *root = cJSON_Parse(data);
-   free(data);
-   if (!root)
-      return -1;
-
-   cJSON *access = cJSON_GetObjectItem(root, "access_token");
-   if (!access)
-   {
-      cJSON *tokens = cJSON_GetObjectItem(root, "tokens");
-      if (tokens && cJSON_IsObject(tokens))
-         access = cJSON_GetObjectItem(tokens, "access_token");
-   }
-   if (access && cJSON_IsString(access) && access->valuestring[0])
-      snprintf(token, token_len, "%s", access->valuestring);
-   cJSON_Delete(root);
-
-   return token[0] ? 0 : -1;
-}
-
-static int agent_read_codex_oauth_token(char *token, size_t token_len)
-{
-   if (!token || token_len == 0)
-      return -1;
-   token[0] = '\0';
-
-   char path[MAX_PATH_LEN];
-   snprintf(path, sizeof(path), "%s/codex-auth.json", config_default_dir());
-   if (agent_read_codex_oauth_token_from_path(path, token, token_len) == 0)
-      return 0;
-
-   /* aimee's canonical home (honors AIMEE_HOME) — see codex_oauth_vault_token:
-    * an appliance sets AIMEE_HOME but not HOME, hiding <AIMEE_HOME>/.codex. */
-   const char *ahome = aimee_home();
-   if (ahome && ahome[0])
-   {
-      snprintf(path, sizeof(path), "%s/.codex/auth.json", ahome);
-      if (agent_read_codex_oauth_token_from_path(path, token, token_len) == 0)
-         return 0;
-   }
-
-   const char *home = getenv("HOME");
-   if (home && home[0])
-   {
-      snprintf(path, sizeof(path), "%s/.codex/auth.json", home);
-      if (agent_read_codex_oauth_token_from_path(path, token, token_len) == 0)
-         return 0;
-   }
-
    return -1;
 }
 
@@ -2277,8 +2121,7 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
    if (strcmp(auth_type, "codex-oauth") == 0)
    {
       /* Codex OAuth token, in precedence: per-turn token (set by the vault delegate
-       * path) > the permanent VAULT (turn principal, then server principal) >
-       * server-side file (legacy on-disk codex auth). */
+       * path) > the permanent Vault (turn principal, then server principal). */
       if (g_request_codex_token[0])
       {
          snprintf(buf, buf_len, "Authorization: Bearer %s", g_request_codex_token);
@@ -2290,27 +2133,21 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
          snprintf(buf, buf_len, "Authorization: Bearer %s", token);
          return 0;
       }
-      /* Vault-backed, auto-refreshing token (bootstrapped from the codex auth.json):
-       * preferred over the raw on-disk read so an expired access token self-heals
-       * via the stored refresh_token instead of 401ing. */
+      /* Vault-backed, auto-refreshing token bootstrapped from the opaque codex
+       * OAuth document already ingested by login or boot migration. */
       if (codex_oauth_vault_token(token, sizeof(token)) == 0)
       {
          snprintf(buf, buf_len, "Authorization: Bearer %s", token);
          return 0;
       }
-      if (agent_read_codex_oauth_token(token, sizeof(token)) != 0)
-      {
-         /* No usable codex token. If a prior refresh was rejected by the IdP, the
-          * refresh token is dead and the server cannot recover on its own — give
-          * the operator the exact remedy instead of a generic provider 401 (D6). */
-         if (oauth_token_reauth_required(CODEX_OAUTH_STORE))
-            snprintf(g_request_auth_error, sizeof(g_request_auth_error),
-                     "codex re-auth required: the stored OAuth refresh token was rejected — run "
-                     "`aimee codex reauth` to re-authenticate");
-         return -1;
-      }
-      snprintf(buf, buf_len, "Authorization: Bearer %s", token);
-      return 0;
+      /* No usable codex token. If a prior refresh was rejected by the IdP, the
+       * refresh token is dead and the server cannot recover on its own — give
+       * the operator the exact remedy instead of a generic provider 401 (D6). */
+      if (oauth_token_reauth_required(CODEX_OAUTH_STORE))
+         snprintf(g_request_auth_error, sizeof(g_request_auth_error),
+                  "codex re-auth required: the stored OAuth refresh token was rejected — run "
+                  "`aimee codex reauth` to re-authenticate");
+      return -1;
    }
 
    if (strcmp(auth_type, "oauth") == 0 && agent->auth_cmd[0])

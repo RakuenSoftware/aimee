@@ -218,6 +218,163 @@ static void test_db2_sqlite_rewrap_failure_provenance_migration(void)
    sqlite3_close(db);
 }
 
+static void test_db2_sqlite_project_lifecycle_migration(void)
+{
+   sqlite3 *db = NULL;
+   assert(sqlite3_open(":memory:", &db) == SQLITE_OK);
+   db1_apply_pragmas(db, DB_MODE_CLI);
+   assert(
+       sqlite3_exec(db,
+                    "CREATE TABLE projects (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    " name TEXT NOT NULL UNIQUE, root TEXT NOT NULL,"
+                    " workspace TEXT NOT NULL DEFAULT '', scanned_at TEXT NOT NULL,"
+                    " trust TEXT NOT NULL DEFAULT 'trusted');"
+                    "INSERT INTO projects(name,root,scanned_at)"
+                    " VALUES('legacy-project','/checkout/legacy','2026-01-01T00:00:00Z');"
+                    "CREATE TABLE files (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    " project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,"
+                    " path TEXT NOT NULL,purpose TEXT NOT NULL DEFAULT '',"
+                    " hash TEXT NOT NULL DEFAULT '',scanned_at TEXT NOT NULL,"
+                    " language TEXT NOT NULL DEFAULT '',vendored INTEGER NOT NULL DEFAULT 0,"
+                    " UNIQUE(project_id,path));"
+                    "CREATE TABLE terms (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    " file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,"
+                    " name TEXT NOT NULL,kind TEXT NOT NULL DEFAULT '',"
+                    " def_kind TEXT NOT NULL DEFAULT '',line INTEGER NOT NULL DEFAULT 0,"
+                    " line_end INTEGER NOT NULL DEFAULT 0);"
+                    "INSERT INTO files(project_id,path,scanned_at)"
+                    " SELECT id,'src/legacy.c','2026-01-01T00:00:00Z' FROM projects;"
+                    "INSERT INTO terms(file_id,name,kind,line)"
+                    " SELECT id,'legacy_symbol','definition',1 FROM files;"
+                    "CREATE TABLE kb_file_index (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    " project TEXT NOT NULL,file_path TEXT NOT NULL,file_hash TEXT NOT NULL,"
+                    " ingested_at TEXT NOT NULL DEFAULT(datetime('now')),content TEXT,"
+                    " UNIQUE(project,file_path));"
+                    "INSERT INTO kb_file_index(project,file_path,file_hash)"
+                    " VALUES('legacy-project','docs/same.md','old');"
+                    "CREATE TABLE kb_code_unit_jobs (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    " project TEXT NOT NULL DEFAULT '',file_path TEXT NOT NULL DEFAULT '',"
+                    " symbol TEXT NOT NULL DEFAULT '',kind TEXT NOT NULL DEFAULT 'function',"
+                    " line INTEGER NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'pending',"
+                    " attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT NOT NULL DEFAULT '',"
+                    " claimed_by TEXT NOT NULL DEFAULT '',claimed_at TEXT NOT NULL DEFAULT '',"
+                    " created_at TEXT NOT NULL DEFAULT(datetime('now')),"
+                    " updated_at TEXT NOT NULL DEFAULT(datetime('now')),"
+                    " UNIQUE(project,file_path,symbol));"
+                    "INSERT INTO kb_code_unit_jobs(project,file_path,symbol)"
+                    " VALUES('legacy-project','src/legacy.c','legacy_symbol');"
+                    "CREATE TABLE kb_minhash_signatures (project TEXT NOT NULL,"
+                    " file_path TEXT NOT NULL,file_hash TEXT NOT NULL DEFAULT '',"
+                    " signature_bytes BLOB NOT NULL,"
+                    " updated_at TEXT NOT NULL DEFAULT(datetime('now')),"
+                    " PRIMARY KEY(project,file_path));"
+                    "INSERT INTO kb_minhash_signatures(project,file_path,signature_bytes)"
+                    " VALUES('legacy-project','docs/same.md',x'01');"
+                    "CREATE TABLE kb_lsh_buckets (project TEXT NOT NULL,band INTEGER NOT NULL,"
+                    " band_hash TEXT NOT NULL,file_path TEXT NOT NULL,"
+                    " updated_at TEXT NOT NULL DEFAULT(datetime('now')),"
+                    " PRIMARY KEY(project,band,band_hash,file_path));"
+                    "INSERT INTO kb_lsh_buckets(project,band,band_hash,file_path)"
+                    " VALUES('legacy-project',0,'same','docs/same.md');"
+                    "CREATE TABLE css_migration_units (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    " project TEXT NOT NULL DEFAULT '',unit_path TEXT NOT NULL DEFAULT '',"
+                    " state TEXT NOT NULL DEFAULT 'pending',total_tokens INTEGER NOT NULL"
+                    " DEFAULT 0,resolved_tokens INTEGER NOT NULL DEFAULT 0,"
+                    " oracle_equivalent INTEGER NOT NULL DEFAULT -1,note TEXT NOT NULL"
+                    " DEFAULT '',updated_at TEXT NOT NULL DEFAULT '',"
+                    " UNIQUE(project,unit_path));"
+                    "INSERT INTO css_migration_units(project,unit_path)"
+                    " VALUES('legacy-project','src/Legacy.tsx');"
+                    "CREATE TABLE css_render_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    " project TEXT NOT NULL DEFAULT '',unit_path TEXT NOT NULL DEFAULT '',"
+                    " phase TEXT NOT NULL DEFAULT '',snapshot TEXT NOT NULL DEFAULT '',"
+                    " content_hash TEXT NOT NULL DEFAULT '',captured_at TEXT NOT NULL DEFAULT '',"
+                    " UNIQUE(project,unit_path,phase));"
+                    "INSERT INTO css_render_snapshots(project,unit_path,phase,snapshot)"
+                    " VALUES('legacy-project','src/Legacy.tsx','before','old')",
+                    NULL, NULL, NULL) == SQLITE_OK);
+
+   char err[512] = {0};
+   assert(db2_apply_schema_sqlite_shim(db, err, sizeof(err)) == 0);
+   assert(sqlite_column_exists(db, "projects", "lifecycle_state"));
+   assert(sqlite_column_exists(db, "projects", "current_generation"));
+   assert(sqlite_column_exists(db, "files", "generation"));
+
+   sqlite3_stmt *stmt = NULL;
+   assert(sqlite3_prepare_v2(db,
+                             "SELECT COUNT(*) FROM code_project_generations g"
+                             " JOIN projects p ON p.id=g.project_id"
+                             " WHERE p.name='legacy-project' AND g.generation=1"
+                             " AND g.state='current' AND g.root='/checkout/legacy'",
+                             -1, &stmt, NULL) == SQLITE_OK);
+   assert(sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_int(stmt, 0) == 1);
+   sqlite3_finalize(stmt);
+   assert(sqlite3_prepare_v2(db,
+                             "SELECT COUNT(*) FROM files f JOIN terms t ON t.file_id=f.id"
+                             " WHERE f.generation=1 AND t.name='legacy_symbol'",
+                             -1, &stmt, NULL) == SQLITE_OK);
+   assert(sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_int(stmt, 0) == 1);
+   sqlite3_finalize(stmt);
+   assert(sqlite3_exec(db,
+                       "UPDATE projects SET current_generation=2 WHERE name='legacy-project';"
+                       "UPDATE code_project_generations SET state='superseded'"
+                       " WHERE project_id=(SELECT id FROM projects WHERE name='legacy-project');"
+                       "INSERT INTO code_project_generations"
+                       " (project_id,generation,root,state,created_at)"
+                       " SELECT id,2,root,'current',scanned_at FROM projects"
+                       " WHERE name='legacy-project';"
+                       "INSERT INTO files(project_id,generation,path,scanned_at)"
+                       " SELECT id,2,'src/legacy.c','2026-01-02T00:00:00Z' FROM projects"
+                       " WHERE name='legacy-project';"
+                       "INSERT INTO kb_file_index(project,generation,file_path,file_hash)"
+                       " VALUES('legacy-project',2,'docs/same.md','new');"
+                       "INSERT INTO kb_code_unit_jobs(project,generation,file_path,symbol)"
+                       " VALUES('legacy-project',2,'src/legacy.c','legacy_symbol');"
+                       "INSERT INTO kb_minhash_signatures(project,generation,file_path,"
+                       " signature_bytes) VALUES('legacy-project',2,'docs/same.md',x'02');"
+                       "INSERT INTO kb_lsh_buckets(project,generation,band,band_hash,file_path)"
+                       " VALUES('legacy-project',2,0,'same','docs/same.md');"
+                       "INSERT INTO css_migration_units(project,generation,unit_path)"
+                       " VALUES('legacy-project',2,'src/Legacy.tsx');"
+                       "INSERT INTO css_render_snapshots(project,generation,unit_path,phase,"
+                       " snapshot) VALUES('legacy-project',2,'src/Legacy.tsx','before','new')",
+                       NULL, NULL, NULL) == SQLITE_OK);
+   assert(sqlite3_prepare_v2(db,
+                             "SELECT COUNT(*) FROM files f JOIN projects p ON p.id=f.project_id"
+                             " WHERE p.name='legacy-project'",
+                             -1, &stmt, NULL) == SQLITE_OK);
+   assert(sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_int(stmt, 0) == 2);
+   sqlite3_finalize(stmt);
+   static const char *derived_tables[] = {"kb_file_index",         "kb_code_unit_jobs",
+                                          "kb_minhash_signatures", "kb_lsh_buckets",
+                                          "css_migration_units",   "css_render_snapshots"};
+   for (size_t i = 0; i < sizeof(derived_tables) / sizeof(derived_tables[0]); i++)
+   {
+      char sql[160];
+      snprintf(sql, sizeof(sql), "SELECT COUNT(*) FROM %s WHERE project='legacy-project'",
+               derived_tables[i]);
+      assert(sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK);
+      assert(sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_int(stmt, 0) == 2);
+      sqlite3_finalize(stmt);
+   }
+   assert(sqlite3_prepare_v2(db,
+                             "SELECT COUNT(*) FROM code_project_aliases a"
+                             " JOIN projects p ON p.id=a.project_id"
+                             " WHERE p.name='legacy-project' AND a.alias='/checkout/legacy'"
+                             " AND a.is_current=1",
+                             -1, &stmt, NULL) == SQLITE_OK);
+   assert(sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_int(stmt, 0) == 1);
+   sqlite3_finalize(stmt);
+
+   /* Reapplying is idempotent and does not duplicate either lifecycle row. */
+   assert(db2_apply_schema_sqlite_shim(db, err, sizeof(err)) == 0);
+   assert(sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM code_project_generations", -1, &stmt,
+                             NULL) == SQLITE_OK);
+   assert(sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_int(stmt, 0) == 2);
+   sqlite3_finalize(stmt);
+   sqlite3_close(db);
+}
+
 static void test_db2_sqlite_management_status_key_shape(void)
 {
    static const char *registry[] = {"singleton", "custody_key_id", "wire_key_id", "enabled",
@@ -852,6 +1009,7 @@ int main(void)
    test_key_tables_exist();
    test_db2_sqlite_code_embeddings_body_hash_migration();
    test_db2_sqlite_rewrap_failure_provenance_migration();
+   test_db2_sqlite_project_lifecycle_migration();
    test_db2_sqlite_management_status_key_shape();
    test_trigger_run_change_counts();
    test_cron_job_history_round_trip();

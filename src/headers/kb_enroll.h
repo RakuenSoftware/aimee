@@ -9,7 +9,7 @@
  * persistence (proposal invariant 3) is a follow-up.
  *
  * Security model: tokens are 256-bit opaque random values, base64url-encoded;
- * aimee-kb stores ONLY sha256(token) + metadata, never the cleartext. Token
+ * aimee-kb stores ONLY sha256(token) + metadata in Vault, never the cleartext. Token
  * checks are constant-time. Enrollment tokens are single-use (replay-rejected). */
 #ifndef DEC_KB_ENROLL_H
 #define DEC_KB_ENROLL_H
@@ -79,16 +79,18 @@ extern "C"
    /* Drop all registry entries (test helper / shutdown). */
    void kb_enroll_registry_reset(void);
 
-   /* --- File-backed single-use enrollment-token store (persistent + process-
-    *     shared; complements the in-memory registry above). Each call opens,
-    *     flock()s, mutates, and closes a small text file at `path`, so a token
-    *     minted by one process (e.g. `aimee-kb enroll`) is redeemable by the
-    *     running server, and tokens survive a restart (proposal invariant 3).
-    *     Only sha256(token) is stored, never the cleartext. File format: one
-    *     record per line, "<sha256hex>\t<consumed 0|1>\t<scope>\n". --- */
+   /* --- Vault-backed single-use enrollment-token store (persistent + process-
+    *     shared). `path` identifies an empty flock inode; its hash namespaces an
+    *     encrypted server-Vault record, so a token minted by `aimee-kb enroll`
+    *     is redeemable by the daemon and survives restart without leaving its
+    *     verifier outside Vault. Legacy text records are migrated in place. --- */
+
+   /* Ingest an existing legacy hash registry into Vault and securely truncate
+    * its file. Missing path is a successful no-op. */
+   int kb_enroll_store_migrate(const char *path);
 
    /* Issue a fresh enrollment token bound to `scope`, appending
-    * sha256(token)+scope (unconsumed) to the store at `path` (created mode 0600
+    * sha256(token)+scope (unconsumed) to the Vault record coordinated by `path`
     * if absent). Returns the cleartext token in out[cap] (cap >=
     * KB_ENROLL_TOKEN_MAX). Returns 0 on success, -1 on error (RNG / I/O / a
     * scope containing a tab or newline / oversized scope). */
@@ -106,7 +108,8 @@ extern "C"
 
    /* Mint an enrollment under `data_dir`: load-or-create the internal CA in
     * <data_dir>/kb-ca (so it persists across restarts), issue a fresh single-use
-    * enrollment token bound to `scope` into <data_dir>/kb-enroll-tokens, and
+    * enrollment token bound to `scope` into the Vault-backed registry coordinated
+    * by the empty <data_dir>/kb-enroll-tokens lock inode, and
     * build the `aimee://<host>:<port>?ca=sha256:<fp>&enroll=<token>` connection
     * string (the value an operator hands a client) into out[cap]. The CA
     * fingerprint pins the CA for TOFU. Returns 0 on success, -1 on error (bad

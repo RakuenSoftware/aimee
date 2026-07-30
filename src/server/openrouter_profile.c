@@ -1,5 +1,6 @@
 /* openrouter_profile.c: model_provider_t profile for OpenRouter. */
 #include "model_provider.h"
+#include "runtime_secret.h"
 #include "aimee.h"
 #include "agent_exec.h"
 #include "cJSON.h"
@@ -35,8 +36,8 @@ static int openrouter_fetch_models(model_provider_t *p, char ***models_out, int 
    *models_out = NULL;
    *n_out = 0;
 
-   const char *key = getenv("OPENROUTER_API_KEY");
-   if (!key || !key[0])
+   char key[384];
+   if (!runtime_secret_get("OPENROUTER_API_KEY", key, sizeof(key)))
       return -1;
 
    char auth_header[512];
@@ -44,6 +45,8 @@ static int openrouter_fetch_models(model_provider_t *p, char ***models_out, int 
 
    char *body = NULL;
    int status = agent_http_get("https://openrouter.ai/api/v1/models", auth_header, &body, 15000);
+   runtime_secret_wipe(key, sizeof(key));
+   runtime_secret_wipe(auth_header, sizeof(auth_header));
    if (status != 200 || !body)
    {
       free(body);

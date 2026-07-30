@@ -34,8 +34,14 @@ static int count(sqlite3 *db, const char *sql)
 
 static void seed_corpus(sqlite3 *db)
 {
-   seed(db, "INSERT INTO kb_documents (project,file_path,file_hash,chunk_index,content)"
-            " VALUES ('p','f.md','h',0,'text')");
+   seed(db,
+        "INSERT INTO projects (name,root,workspace,scanned_at,lifecycle_state,current_generation)"
+        " VALUES ('p','/repo/p','/repo','now','current',2)");
+   seed(db, "INSERT INTO kb_documents (project,generation,file_path,file_hash,chunk_index,content)"
+            " VALUES ('p',2,'f.md','h',0,'text')");
+   /* Retained history must not be replayed when the current prompt changes. */
+   seed(db, "INSERT INTO kb_documents (project,generation,file_path,file_hash,chunk_index,content)"
+            " VALUES ('p',1,'old.md','old-h',0,'old text')");
    seed(db, "INSERT INTO artifacts (id,kind,state,payload)"
             " VALUES ('ds','doc_summary','committed','{\"summary\":\"x\"}')");
 }
@@ -57,6 +63,7 @@ int main(void)
    assert(kb_curator_version_replay("p2", "m1", &r) == 0);
    assert(r.prompt_bumped == 1 && r.model_bumped == 0);
    assert(r.docs_reextracted >= 1);
+   assert(r.docs_reextracted == 1);
    assert(count(db, "SELECT COUNT(*) FROM kb_async_jobs"
                     " WHERE kind='extract_doc' AND status='pending'") >= 1);
    assert(count(db, "SELECT COUNT(*) FROM artifacts WHERE id='ds' AND state='committed'") == 1);

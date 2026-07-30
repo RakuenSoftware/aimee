@@ -1530,7 +1530,15 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(proj, "type", "string");
       cJSON_AddStringToObject(
           proj, "description",
-          "Indexed project name. Defaults to the current workspace directory name.");
+          "Stable indexed project ID. Defaults to the active project resolved from cwd.");
+      cJSON *scope = cJSON_AddObjectToObject(p, "scope");
+      cJSON_AddStringToObject(scope, "type", "string");
+      cJSON_AddStringToObject(scope, "description",
+                              "current (default) or all for explicit cross-project search");
+      cJSON *cwd = cJSON_AddObjectToObject(p, "cwd");
+      cJSON_AddStringToObject(cwd, "type", "string");
+      cJSON_AddStringToObject(cwd, "description",
+                              "Workspace path used to resolve the active project");
       cJSON *mx = cJSON_AddObjectToObject(p, "max_results");
       cJSON_AddStringToObject(mx, "type", "integer");
       cJSON_AddStringToObject(mx, "description", "Maximum passages to return (default 3, max 8)");

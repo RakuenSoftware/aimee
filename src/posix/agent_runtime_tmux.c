@@ -120,32 +120,41 @@ static int cli_session_execute_inner(const agent_t *agent, const agent_network_t
    if (is_claude)
       cli_session_prepare_claude(cwd, autonomous);
 
-   /* Concurrency isolation for claude DELEGATE seats: several roundtable/impl
-    * seats run at once, and they otherwise share one $HOME -> one ~/.claude.json
-    * and ~/.claude runtime tree, which claude-code writes non-atomically the whole
-    * turn. Concurrent seats then corrupt/block each other and wedge to the CLI
-    * timeout. Give each delegate seat its own HOME (OAuth token + settings shared
-    * by symlink; the rest per-turn) by prefixing the launched command. The primary
-    * interactive session is single, so it keeps the shared HOME. Best-effort: a
-    * failed mint leaves cli_cmd untouched (shared HOME, prior behavior). */
+   /* Runtime isolation for OAuth CLI delegate seats. Claude needs it for
+    * concurrency correctness; both vendors need it so Vault credentials are
+    * materialized only beneath /run for the lifetime of one tmux seat, never in
+    * persistent HOME. The primary interactive session is outside this server-
+    * hosted delegate path. */
    char cli_cmd_home[CLI_SESSION_CMD_MAX];
    /* Hoisted so the minted path survives past this block to be handed to the
     * session after create (empty = no isolated home was minted). */
    char iso_home[PATH_MAX];
    iso_home[0] = '\0';
-   if (is_claude && deleg)
+   if (deleg && (is_claude || is_codex))
    {
-      if (cli_session_isolated_claude_home(cwd, iso_home, sizeof(iso_home)) == 0)
+      int isolated = is_claude ? cli_session_isolated_claude_home(cwd, iso_home, sizeof(iso_home))
+                               : cli_session_isolated_codex_home(iso_home, sizeof(iso_home));
+      if (isolated != 0)
       {
-         int n = snprintf(cli_cmd_home, sizeof(cli_cmd_home), "HOME='%s' %s", iso_home, cli_cmd);
-         if (n > 0 && n < (int)sizeof(cli_cmd_home))
-            cli_cmd = cli_cmd_home;
+         snprintf(out->error, sizeof(out->error),
+                  "%s OAuth credential is unavailable from Vault for an isolated delegate",
+                  is_codex ? "codex" : "claude");
+         return -1;
       }
+      int n = is_codex
+                  ? snprintf(cli_cmd_home, sizeof(cli_cmd_home),
+                             "HOME='%s' CODEX_HOME='%s/.codex' %s", iso_home, iso_home, cli_cmd)
+                  : snprintf(cli_cmd_home, sizeof(cli_cmd_home), "HOME='%s' %s", iso_home, cli_cmd);
+      if (n <= 0 || n >= (int)sizeof(cli_cmd_home))
+      {
+         cli_session_t cleanup = {0};
+         cli_session_set_isolated_home(&cleanup, iso_home);
+         cli_session_destroy(&cleanup);
+         snprintf(out->error, sizeof(out->error), "isolated OAuth CLI command is too long");
+         return -1;
+      }
+      cli_cmd = cli_cmd_home;
    }
-   /* codex is not per-session isolated; refresh its shared token file from the
-    * vault (single source of truth) so a re-auth takes effect before this launch. */
-   if (is_codex && deleg)
-      (void)cli_session_materialize_codex_oauth();
 
    /* Prefix the launched CLI command with a per-session AIMEE_SESSION_ID assignment
     * (`AIMEE_SESSION_ID=<sid> <cli_cmd>` run by `/bin/sh -c`) so the PreToolUse hook
@@ -185,6 +194,12 @@ static int cli_session_execute_inner(const agent_t *agent, const agent_network_t
    free(sess_name);
    if (rc != 0)
    {
+      if (iso_home[0])
+      {
+         cli_session_t cleanup = {0};
+         cli_session_set_isolated_home(&cleanup, iso_home);
+         cli_session_destroy(&cleanup);
+      }
       snprintf(out->error, sizeof(out->error), "failed to create tmux session for %s", agent->name);
       return -1;
    }

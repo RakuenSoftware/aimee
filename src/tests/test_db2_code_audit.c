@@ -79,7 +79,7 @@ aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, 
    st->limit = 1000000;
    if (strstr(sql, "FROM entity_edges"))
       st->kind = FAKE_STMT_EDGES;
-   else if (strstr(sql, "FROM code_embeddings a JOIN LATERAL"))
+   else if (strstr(sql, "FROM code_embeddings a JOIN projects"))
       st->kind = FAKE_STMT_NEAR_CLONES;
    else if (strstr(sql, "FROM code_embeddings"))
       st->kind = FAKE_STMT_CLONES;

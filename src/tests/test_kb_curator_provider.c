@@ -1,5 +1,6 @@
 /* test_kb_curator_provider.c: stage->provider resolution (curator-llm-backend §2). */
 #include "kb_curator_provider.h"
+#include "runtime_secret.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -15,7 +16,7 @@ static void clear_llm_env(void)
    unsetenv("LLM_API_KEY");
    unsetenv("AIMEE_LLM_URL");
    unsetenv("AIMEE_LLM_MODEL");
-   unsetenv("AIMEE_LLM_AUTH_TOKEN");
+   runtime_secret_remove("AIMEE_LLM_AUTH_TOKEN");
    unsetenv("AIMEE_LLM_AUTH_REQUIRED");
 }
 
@@ -160,15 +161,15 @@ static void test_aimee_llm_url(void)
    assert(strcmp(b.model, "aimee-synth") == 0);
 
    /* A managed KB authenticates every synth request with its service identity. */
-   setenv("AIMEE_LLM_AUTH_TOKEN", "kb-to-llm-service-token", 1);
+   assert(runtime_secret_store("AIMEE_LLM_AUTH_TOKEN", "kb-to-llm-service-token") == 0);
    assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
    assert(b.api_key && strcmp(b.api_key, "kb-to-llm-service-token") == 0);
 
    /* Managed mode must not silently downgrade the unified gateway to keyless. */
-   unsetenv("AIMEE_LLM_AUTH_TOKEN");
+   runtime_secret_remove("AIMEE_LLM_AUTH_TOKEN");
    setenv("AIMEE_LLM_AUTH_REQUIRED", "1", 1);
    assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 0);
-   setenv("AIMEE_LLM_AUTH_TOKEN", "kb-to-llm-service-token", 1);
+   assert(runtime_secret_store("AIMEE_LLM_AUTH_TOKEN", "kb-to-llm-service-token") == 0);
    assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
 
    /* Trailing slash and an already-/v1 URL both normalize to exactly one /v1. */

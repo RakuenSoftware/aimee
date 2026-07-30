@@ -30,6 +30,45 @@
 #define AUDIT_COHESION_MIN_SIZE 8
 #define AUDIT_UNVERIFIED_MIN    3 /* >= this many inferred-provenance incident edges */
 
+void code_blast_radius_json_fields(cJSON *response, const blast_radius_t *blast)
+{
+   cJSON_AddStringToObject(response, "file", blast->file);
+   cJSON_AddStringToObject(response, "project", blast->project);
+   cJSON_AddNumberToObject(response, "generation", (double)blast->generation);
+   cJSON_AddStringToObject(response, "freshness", blast->freshness);
+   cJSON_AddBoolToObject(response, "resolved", blast->resolved);
+   cJSON *dependents = cJSON_AddArrayToObject(response, "dependents");
+   cJSON *dependent_edges = cJSON_AddArrayToObject(response, "dependent_edges");
+   for (int i = 0; i < blast->dependent_count; i++)
+   {
+      cJSON_AddItemToArray(dependents, cJSON_CreateString(blast->dependents[i]));
+      cJSON *edge = cJSON_CreateObject();
+      cJSON_AddStringToObject(edge, "path", blast->dependents[i]);
+      cJSON_AddStringToObject(edge, "provenance", blast->dependent_meta[i].provenance);
+      cJSON_AddStringToObject(edge, "confidence", blast->dependent_meta[i].confidence);
+      cJSON_AddStringToObject(edge, "project", blast->dependent_meta[i].project);
+      cJSON_AddNumberToObject(edge, "generation", (double)blast->dependent_meta[i].generation);
+      cJSON_AddStringToObject(edge, "freshness", blast->dependent_meta[i].freshness);
+      cJSON_AddItemToArray(dependent_edges, edge);
+   }
+   cJSON_AddNumberToObject(response, "dependent_count", blast->dependent_count);
+   cJSON *dependencies = cJSON_AddArrayToObject(response, "dependencies");
+   cJSON *dependency_edges = cJSON_AddArrayToObject(response, "dependency_edges");
+   for (int i = 0; i < blast->dependency_count; i++)
+   {
+      cJSON_AddItemToArray(dependencies, cJSON_CreateString(blast->dependencies[i]));
+      cJSON *edge = cJSON_CreateObject();
+      cJSON_AddStringToObject(edge, "identity", blast->dependencies[i]);
+      cJSON_AddStringToObject(edge, "provenance", blast->dependency_meta[i].provenance);
+      cJSON_AddStringToObject(edge, "confidence", blast->dependency_meta[i].confidence);
+      cJSON_AddStringToObject(edge, "project", blast->dependency_meta[i].project);
+      cJSON_AddNumberToObject(edge, "generation", (double)blast->dependency_meta[i].generation);
+      cJSON_AddStringToObject(edge, "freshness", blast->dependency_meta[i].freshness);
+      cJSON_AddItemToArray(dependency_edges, edge);
+   }
+   cJSON_AddNumberToObject(response, "dependency_count", blast->dependency_count);
+}
+
 /* FNV-1a 32-bit over a string → 8 hex chars. Deterministic stable id for the
  * §1↔§3 finding-outcome loop (a finding's id must not drift run-to-run). */
 static void audit_finding_id(const char *prefix, const char *key, char *out, size_t out_len)
@@ -58,8 +97,10 @@ static const char *audit_safe(const char *in, sanitize_kind_t kind, char *buf, s
 int handle_get_code_graph_audit(const char *query_string, char *out_buf, int out_cap)
 {
    char project[256] = "";
-   if (!code_qparam(query_string, "project", project, sizeof(project)) || !project[0])
-      return code_scan_write_error(out_buf, out_cap, "missing project");
+   int scope_status =
+       code_request_project(query_string, project, sizeof(project), 0, NULL, out_buf, out_cap);
+   if (scope_status)
+      return scope_status;
 
    int max_f = 20;
    char mf[16] = "";
@@ -455,8 +496,10 @@ static int diff_write_gen_list_409(const char *project, char *out_buf, int out_c
 int handle_get_code_graph_diff(const char *query_string, char *out_buf, int out_cap)
 {
    char project[256] = "";
-   if (!code_qparam(query_string, "project", project, sizeof(project)) || !project[0])
-      return code_scan_write_error(out_buf, out_cap, "missing project");
+   int scope_status =
+       code_request_project(query_string, project, sizeof(project), 0, NULL, out_buf, out_cap);
+   if (scope_status)
+      return scope_status;
    char from_s[64] = "", to_s[64] = "", force_s[8] = "";
    if (!code_qparam(query_string, "from_gen", from_s, sizeof(from_s)) || !from_s[0])
       return code_scan_write_error(out_buf, out_cap, "missing from_gen (id or default_latest)");
@@ -732,8 +775,10 @@ int handle_get_code_graph_diff_route(const char *method, const char *query_strin
 int handle_get_code_lessons(const char *query_string, char *out_buf, int out_cap)
 {
    char project[256] = "";
-   if (!code_qparam(query_string, "project", project, sizeof(project)) || !project[0])
-      return code_scan_write_error(out_buf, out_cap, "missing project");
+   int scope_status =
+       code_request_project(query_string, project, sizeof(project), 0, NULL, out_buf, out_cap);
+   if (scope_status)
+      return scope_status;
    if (!db2_is_initialized())
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"knowledge service not initialized\"}");

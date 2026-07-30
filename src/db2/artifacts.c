@@ -891,9 +891,18 @@ static int payload_field_eq(const cJSON *payload, const char *key, const char *w
    return cJSON_IsString(j) && strcasecmp(j->valuestring, want) == 0;
 }
 
-int db2_artifact_filter_facets(int64_t release_id, const char *kind, const char *status,
-                               const char *priority, const char *component, db2_artifact_row_t *out,
-                               int max)
+int db2_artifact_filter_facets(int64_t release_id, const char *project, const char *kind,
+                               const char *status, const char *priority, const char *component,
+                               db2_artifact_row_t *out, int max)
+{
+   return db2_artifact_filter_facets_scoped(release_id, project, NULL, kind, status, priority,
+                                            component, out, max);
+}
+
+int db2_artifact_filter_facets_scoped(int64_t release_id, const char *project,
+                                      const char *exclude_project, const char *kind,
+                                      const char *status, const char *priority,
+                                      const char *component, db2_artifact_row_t *out, int max)
 {
    if (!out || max <= 0)
       return -1;
@@ -910,28 +919,65 @@ int db2_artifact_filter_facets(int64_t release_id, const char *kind, const char 
     * every supplied facet (and, when release_id > 0, is cited by a kb_document
     * in that release). */
    char sql[1024];
+   int next_param = 1;
+   int kind_param = 0;
+   int project_param = 0;
    int p = snprintf(sql, sizeof(sql),
                     "SELECT id, kind, state, scope_kind, scope_id, confidence, payload,"
                     " COALESCE(NULLIF(committed_at, ''), created_at)"
                     " FROM artifacts WHERE state IN ('proposed','committed')");
    if (kind && kind[0])
-      p += snprintf(sql + p, sizeof(sql) - (size_t)p, " AND kind = ?1");
+   {
+      kind_param = next_param++;
+      p += snprintf(sql + p, sizeof(sql) - (size_t)p, " AND kind = ?%d", kind_param);
+   }
+   if (project && project[0])
+   {
+      project_param = next_param++;
+      p += snprintf(sql + p, sizeof(sql) - (size_t)p,
+                    " AND scope_kind = 'project' AND scope_id = ?%d", project_param);
+   }
+   else if (exclude_project && exclude_project[0])
+   {
+      project_param = next_param++;
+      p += snprintf(sql + p, sizeof(sql) - (size_t)p,
+                    " AND NOT (scope_kind = 'project' AND scope_id = ?%d)", project_param);
+   }
    if (release_id > 0)
       /* release_id is a trusted int64 (never user text); inline it so the
-       * optional kind ?1 binding keeps a stable parameter index. */
+       * remaining optional text filters can use monotonic parameter indexes. */
       p += snprintf(sql + p, sizeof(sql) - (size_t)p,
                     " AND id IN (SELECT c.artifact_id FROM artifact_citations c"
                     " JOIN release_docs rd ON CAST(rd.doc_id AS TEXT) = c.source_id"
                     " WHERE c.source_kind = 'kb_document' AND rd.release_id = %lld)",
                     (long long)release_id);
-   p += snprintf(sql + p, sizeof(sql) - (size_t)p, " ORDER BY id LIMIT 2000");
+   if (!project && exclude_project && exclude_project[0])
+      p += snprintf(sql + p, sizeof(sql) - (size_t)p,
+                    " ORDER BY CASE WHEN scope_kind IN ('shared','global') THEN 0 "
+                    "WHEN scope_kind = 'project' THEN 1 ELSE 2 END, id LIMIT 2000");
+   else
+      p += snprintf(sql + p, sizeof(sql) - (size_t)p, " ORDER BY id LIMIT 2000");
 
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return -1;
-   if (kind && kind[0])
-      aimee_pg_bind_text(st, "?1", kind);
+   char param[16];
+   if (kind_param)
+   {
+      snprintf(param, sizeof(param), "?%d", kind_param);
+      aimee_pg_bind_text(st, param, kind);
+   }
+   if (project && project[0])
+   {
+      snprintf(param, sizeof(param), "?%d", project_param);
+      aimee_pg_bind_text(st, param, project);
+   }
+   else if (exclude_project && exclude_project[0])
+   {
+      snprintf(param, sizeof(param), "?%d", project_param);
+      aimee_pg_bind_text(st, param, exclude_project);
+   }
 
    int n = 0;
    while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)

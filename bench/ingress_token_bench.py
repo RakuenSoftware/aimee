@@ -84,7 +84,9 @@ def run(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
     # The aimee codex model provider authenticates with the loopback bearer; the
     # provider block sets env_key = "AIMEE_API_KEY". Fall back to the remote
     # bearer if AIMEE_API_KEY is unset.
-    env.setdefault("AIMEE_API_KEY", os.environ.get("AIMEE_BEARER", "aimee-local-dev"))
+    bearer = os.environ.get("AIMEE_BEARER")
+    if bearer and "AIMEE_API_KEY" not in env:
+        env["AIMEE_API_KEY"] = bearer
     return subprocess.run(cmd, cwd=str(cwd) if cwd else None, text=True,
                           capture_output=True, env=env)
 

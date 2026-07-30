@@ -1520,8 +1520,8 @@ void config_parse_kb_section2(config_t *cfg, cJSON *root)
 {
    cJSON *item = NULL;
 
-   /* telemetry.metrics_token (P9a): the SHA-256 hex of the /v1/metrics +
-    * /v1/telemetry/metrics scrape/ingest token (never the plaintext). */
+   /* Legacy telemetry.metrics_token is parsed only for the boot migration. Its
+    * SHA-256 verifier is credential material and runtime custody is Vault-only. */
    cJSON *telemetry = cJSON_GetObjectItemCaseSensitive(root, "telemetry");
    if (cJSON_IsObject(telemetry))
    {

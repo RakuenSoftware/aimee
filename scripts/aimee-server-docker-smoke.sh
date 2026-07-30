@@ -26,7 +26,8 @@
 # Env:
 #   SERVER_URL    base URL of the server /v1 API  (default https://localhost:8743)
 #   KB_URL        base URL of the kb /v1 API      (default http://localhost:8741)
-#   BEARER        server bearer token             (default aimee-local-dev)
+#   BEARER        server bearer token (required for an existing stack; generated
+#                 and supplied as a first-boot secret when --up is used)
 #   COMPOSE_FILE  compose file(s), space-separated (default compose.server.yaml);
 #                 list several to layer an override, e.g. to remap host ports
 #                 on a host where 8740/8741 are already taken
@@ -38,7 +39,7 @@ set -euo pipefail
 
 SERVER_URL="${SERVER_URL:-https://localhost:8743}"
 KB_URL="${KB_URL:-http://localhost:8741}"
-BEARER="${BEARER:-aimee-local-dev}"
+BEARER="${BEARER:-}"
 COMPOSE_FILE="${COMPOSE_FILE:-compose.server.yaml}"
 WAIT_SECONDS="${WAIT_SECONDS:-300}"
 
@@ -60,6 +61,18 @@ for arg in "$@"; do
     *) echo "unknown arg: $arg" >&2; exit 2 ;;
   esac
 done
+
+if [[ -z "$BEARER" ]]; then
+  if [[ "$DO_UP" == 1 ]]; then
+    BEARER="$(openssl rand -hex 32)"
+  else
+    echo "BEARER is required when testing an already-running stack" >&2
+    exit 2
+  fi
+fi
+if [[ "$DO_UP" == 1 ]]; then
+  export AIMEE_API_BEARER_TOKEN="$BEARER"
+fi
 
 cd "$(dirname "$0")/.."
 
@@ -132,23 +145,6 @@ if [[ "$DO_UP" == 1 ]]; then
   done
 fi
 
-# Bootstrap-bearer enrollment. The image seeds `aimee-local-dev`, which the server
-# now honours ONLY for POST /v1/api/rotate_bearer (trust-on-first-use enrollment).
-# Rotate once to the strong per-deployment bearer and use it for every check below
-# — exactly what a real client's first connect does. Skips when an operator pinned
-# a non-bootstrap BEARER.
-if [[ "$BEARER" == "aimee-local-dev" ]]; then
-  bold "==> Enrolling: rotate the one-time bootstrap bearer"
-  rotated="$(curl -fsS -k --max-time 20 "${AUTH[@]}" -X POST "${SERVER_URL}/v1/api/rotate_bearer" -d '{}' 2>/dev/null \
-             | sed -n 's/.*"bearer_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
-  if [[ -n "$rotated" ]]; then
-    BEARER="$rotated"; AUTH=(-H "Authorization: Bearer ${BEARER}")
-    green "    enrolled: bootstrap bearer rotated to a strong per-deployment token"
-  else
-    red "    FAIL  enrollment: could not rotate the bootstrap bearer"; FAIL=$((FAIL + 1))
-  fi
-fi
-
 bold "==> Server-native surface at ${SERVER_URL}"
 check "GET /v1/health"   '"service":"aimee-server"' "${SERVER_URL}/v1/health"
 check "GET /v1/version"  'version'                  "${SERVER_URL}/v1/version"
@@ -159,7 +155,7 @@ bold "==> Cross-container: server -> kb (proves AIMEE_KB_API_URL wiring)"
 check "GET /v1/kb/status -> kb"  '"vector"'  "${SERVER_URL}/v1/kb/status"
 # /v1/kb/search proxies to the kb's ranked search (query -> embed -> pgvector).
 check "POST /v1/kb/search -> kb" '"hits"'   -X POST -H 'content-type: application/json' \
-                                            -d '{"query":"docker smoke test","max_results":3}' \
+                                            -d '{"query":"docker smoke test","scope":"all","max_results":3}' \
                                             "${SERVER_URL}/v1/kb/search"
 
 bold "==> Auth is enforced"

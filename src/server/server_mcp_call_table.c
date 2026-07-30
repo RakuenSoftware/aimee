@@ -718,7 +718,7 @@ static cJSON *mcph_index_find_callers(struct mcp_call *c)
    int all_projects = mcp_code_scope_all(c->jargs);
    if (all_projects < 0)
       return text_content("error: scope must be 'current' or 'all'");
-   const char *project = all_projects ? NULL : mcp_code_project_from_args(c->jargs);
+   const char *project = mcp_code_project_from_args(c->jargs);
    if (!all_projects && !project)
       return text_content("error: no active project determined from cwd; pass 'project' or "
                           "scope='all' explicitly");
@@ -726,7 +726,7 @@ static cJSON *mcph_index_find_callers(struct mcp_call *c)
    caller_hit_t *hits = calloc((size_t)max, sizeof(*hits));
    if (!hits)
       return text_content("error: out of memory");
-   int n = kb_client_index_find_callers(project, js->valuestring, hits, max);
+   int n = kb_client_index_find_callers_scoped(project, all_projects, js->valuestring, hits, max);
    if (n < 0)
    {
       free(hits);
@@ -754,8 +754,13 @@ static cJSON *mcph_index_structure(struct mcp_call *c)
    cJSON *jf = cJSON_GetObjectItemCaseSensitive(c->jargs, "file_path");
    if (!cJSON_IsString(jf) || !jf->valuestring[0])
       return text_content("error: index_structure requires 'file_path'");
-   cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
-   const char *project = cJSON_IsString(jp) ? jp->valuestring : NULL;
+   int all_projects = mcp_code_scope_all(c->jargs);
+   if (all_projects != 0)
+      return text_content(all_projects < 0 ? "error: scope must be 'current'"
+                                           : "error: index_structure requires one project");
+   const char *project = mcp_code_project_from_args(c->jargs);
+   if (!project)
+      return text_content("error: no active project determined from cwd; pass 'project'");
    const int max = 1000;
    definition_t *defs = calloc((size_t)max, sizeof(*defs));
    if (!defs)
@@ -823,8 +828,13 @@ static cJSON *mcph_index_blast_radius(struct mcp_call *c)
    cJSON *jf = cJSON_GetObjectItemCaseSensitive(c->jargs, "file_path");
    if (!cJSON_IsString(jf) || !jf->valuestring[0])
       return text_content("error: index_blast_radius requires 'file_path'");
-   cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
-   const char *project = cJSON_IsString(jp) ? jp->valuestring : NULL;
+   int all_projects = mcp_code_scope_all(c->jargs);
+   if (all_projects != 0)
+      return text_content(all_projects < 0 ? "error: scope must be 'current'"
+                                           : "error: index_blast_radius requires one project");
+   const char *project = mcp_code_project_from_args(c->jargs);
+   if (!project)
+      return text_content("error: no active project determined from cwd; pass 'project'");
    blast_radius_t *br = calloc(1, sizeof(*br));
    if (!br)
       return text_content("error: out of memory");
@@ -1007,13 +1017,19 @@ static cJSON *mcph_index_hybrid(struct mcp_call *c)
    if (!cJSON_IsString(jq) || !jq->valuestring[0])
       return text_content("error: index_hybrid requires 'query'");
    cJSON *js = cJSON_GetObjectItemCaseSensitive(c->jargs, "symbol");
-   cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
    const char *symbol = cJSON_IsString(js) ? js->valuestring : NULL;
-   const char *project = cJSON_IsString(jp) ? jp->valuestring : NULL;
+   int all_projects = mcp_code_scope_all(c->jargs);
+   if (all_projects < 0)
+      return text_content("error: scope must be 'current' or 'all'");
+   const char *project = mcp_code_project_from_args(c->jargs);
+   if (!all_projects && !project)
+      return text_content("error: no active project determined from cwd; pass 'project' or "
+                          "scope='all' explicitly");
    long long mr = 0;
    int max_results = pdf_arg_pos_int(c->jargs, "max_results", 100.0, &mr) ? (int)mr : 20;
    int status = -1;
-   char *json = kb_client_code_hybrid(jq->valuestring, symbol, project, max_results, &status);
+   char *json = kb_client_code_hybrid_scoped(jq->valuestring, symbol, project, all_projects,
+                                             max_results, &status);
    /* §3 live cite-capture (default off): observe the retrieved file paths for this
     * session so a re-cited source earns trust across turns. Best-effort; gated by the
     * same flag as the retrieval-side trust tie-break. */
