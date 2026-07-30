@@ -130,9 +130,11 @@ static void test_manifest_confirmation_and_audit(void)
    assert(db2_kb_audit_append_in_txn(db2_conn(), "operator", "tester", "misuse", "project", "deny",
                                      "{}") == -1);
    exec_ok("INSERT INTO kb_documents(project,file_path,file_hash,chunk_index,content)"
-           " VALUES('stable-project','docs/a.pdf','h',0,'chunk')");
+           " VALUES('stable-project','docs/a.pdf','h',0,'chunk'),"
+           " ('stable-project','docs/a.pdf','h',1,'legacy chunk')");
    exec_ok("INSERT INTO vector_index_ops(point_id,collection)"
-           " SELECT id,'kb_embeddings' FROM kb_documents WHERE project='stable-project'");
+           " SELECT id,CASE WHEN chunk_index=1 THEN 'kb_chunks' ELSE 'kb_embeddings' END"
+           " FROM kb_documents WHERE project='stable-project'");
    exec_ok("INSERT INTO kb_doc_assets(project,document_key,page_no,blob_ref)"
            " VALUES('stable-project','docs/a.pdf',1,'blob-a'),"
            " ('other-project','docs/a.pdf',1,'blob-other')");
@@ -151,7 +153,7 @@ static void test_manifest_confirmation_and_audit(void)
    assert(target_rows(&dry, "projects") == 1);
    assert(target_rows(&dry, "files") == 2);
    assert(target_rows(&dry, "terms") == 2);
-   assert(target_rows(&dry, "vector_index_ops") == 1);
+   assert(target_rows(&dry, "vector_index_ops") == 2);
    assert(target_rows(&dry, "kb_doc_assets") == 1);
    assert(target_rows(&dry, "kb_runtime_state") == 1);
    assert(target_rows(&dry, "curator_code_unit_vectors") == 1);
@@ -202,6 +204,7 @@ static void test_manifest_confirmation_and_audit(void)
    assert(db2_code_project_purge_confirm("stable-project", hash, "tester", "cleanup\nline",
                                          &confirmed) == 0);
    assert(strcmp(confirmed.mode, "confirmed") == 0);
+   assert(strcmp(confirmed.manifest_hash, hash) == 0);
    assert(scalar("SELECT COUNT(*) FROM projects WHERE name='stable-project'") == 0);
    assert(scalar("SELECT COUNT(*) FROM projects WHERE name='other-project'") == 1);
    assert(scalar("SELECT COUNT(*) FROM vector_index_ops") == 0);
@@ -298,6 +301,8 @@ static void test_gc_audit(void)
    exec_ok("ALTER TABLE kb_audit_event_unavailable RENAME TO kb_audit_event");
 
    assert(db2_code_project_gc_confirm("gc-project", 30, hash, "tester", "retention", &done) == 0);
+   assert(strcmp(done.mode, "confirmed") == 0);
+   assert(strcmp(done.manifest_hash, hash) == 0);
    assert(scalar("SELECT COUNT(*) FROM code_project_aliases WHERE project_id="
                  " (SELECT id FROM projects WHERE name='gc-project')") == 1);
    assert(scalar("SELECT COUNT(*) FROM code_project_generations WHERE project_id="

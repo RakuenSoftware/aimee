@@ -115,7 +115,7 @@ static const cpl_target_spec_t PURGE_TARGETS[] = {
     {"kb_ingest_queue", "project=?1", 0},
     {"kb_file_index", "project=?1", 0},
     {"vector_index_ops",
-     "memory_id IS NULL AND collection IN ('kb_embeddings','kb_pdf_embeddings')"
+     "memory_id IS NULL AND collection IN ('kb_chunks','kb_embeddings','kb_pdf_embeddings')"
      " AND point_id IN (SELECT id FROM kb_documents WHERE project=?1)",
      0},
     {"kb_doc_assets", "project=?1", 0},
@@ -308,8 +308,10 @@ static int cpl_hash_manifest(code_project_manifest_t *out)
    if (cpl_digest_text(digest, out->operation) != 0 || cpl_digest_text(digest, "\n") != 0 ||
        cpl_digest_text(digest, out->project) != 0)
       goto fail;
-   snprintf(line, sizeof(line), "\n%lld\n%s\n%s\n", (long long)out->generation, out->mode,
-            out->criteria);
+   /* Mode is response/audit state, not target identity.  Excluding it keeps the
+    * dry-run authorization hash identical to the confirmed response while the
+    * selected rows, operation, generation, and criteria remain unchanged. */
+   snprintf(line, sizeof(line), "\n%lld\n%s\n", (long long)out->generation, out->criteria);
    if (cpl_digest_text(digest, line) != 0)
       goto fail;
    for (int i = 0; i < out->target_count; i++)
