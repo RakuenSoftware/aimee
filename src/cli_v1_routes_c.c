@@ -175,7 +175,11 @@ static void print_agent_enabled(cJSON *resp, int enabled)
  * wrong operation and showed none of it. */
 static void print_agent_string_list(cJSON *resp, const char *key, const char *label)
 {
-   printf("Delegate '%s' %s set to:", json_str(resp, "name"), label);
+   /* Both commands report on a bare `<name>` and mutate with a csv, so the wording
+    * has to follow which one happened — "set to" on a read would claim a write
+    * that did not occur. */
+   int read_only = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(resp, "read_only"));
+   printf("Delegate '%s' %s%s:", json_str(resp, "name"), label, read_only ? "" : " set to");
    cJSON *arr = cJSON_GetObjectItemCaseSensitive(resp, key);
    int printed = 0;
    cJSON *item = NULL;

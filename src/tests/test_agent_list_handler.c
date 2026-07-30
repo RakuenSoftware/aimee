@@ -61,6 +61,8 @@ int server_send_error_kind(void *conn, const char *kind, const char *message,
 /* The real handler under test. Declared here to avoid dragging server.h. */
 int handle_agent_list(void *ctx, void *conn, cJSON *req);
 int handle_agent_probe(void *ctx, void *conn, cJSON *req);
+int handle_agent_roles(void *ctx, void *conn, cJSON *req);
+int handle_agent_personas(void *ctx, void *conn, cJSON *req);
 
 /* Probe transport seams. This target intentionally links no production agent
  * transport: the handler's observable response and backend selection are under
@@ -388,6 +390,112 @@ static void test_list_exposes_catalog_identity_and_pricing(void)
    printf("  PASS: list exposes catalog identity and pricing\n");
 }
 
+/* Read the roles array off the captured response. */
+static int response_has_role(const char *role)
+{
+   cJSON *roles = cJSON_GetObjectItemCaseSensitive(g_last_response, "roles");
+   cJSON *item = NULL;
+   cJSON_ArrayForEach(item, roles) if (cJSON_IsString(item) &&
+                                       strcmp(item->valuestring, role) == 0) return 1;
+   return 0;
+}
+
+static cJSON *args_request(const char *a, const char *b)
+{
+   cJSON *req = cJSON_CreateObject();
+   cJSON *args = cJSON_AddArrayToObject(req, "args");
+   cJSON_AddItemToArray(args, cJSON_CreateString(a));
+   if (b)
+      cJSON_AddItemToArray(args, cJSON_CreateString(b));
+   return req;
+}
+
+/* `agent roles <name>` with no csv reads as a query and was the only way to ask
+ * what an agent's roles were — but it RESET the agent to the default list,
+ * silently dropping every role outside it (notably the `all` wildcard). Run
+ * against a live appliance it destroyed operator configuration with no output
+ * saying so. Omitting the csv must now report and write nothing; a reset has to
+ * be named explicitly. */
+static void test_roles_without_csv_reports_and_does_not_write(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":[{\"name\":\"a1\",\"provider\":\"anthropic\",\"model\":\"m\","
+                "\"roles\":[\"code\",\"diagnose\",\"all\"]}]}\n");
+   reset_capture();
+
+   cJSON *req = args_request("a1", NULL);
+   assert(handle_agent_roles(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+
+   assert(g_last_error[0] == '\0');
+   assert(g_last_response != NULL);
+   /* Reported verbatim... */
+   assert(response_has_role("code"));
+   assert(response_has_role("diagnose"));
+   assert(response_has_role("all"));
+   /* ...and NOT replaced by the default set. */
+   assert(!response_has_role("summarize"));
+
+   /* Nothing was persisted: re-reading still shows the operator's roles. */
+   reset_capture();
+   assert(handle_agent_list(NULL, NULL, NULL) == 0);
+   cJSON *agents = cJSON_GetObjectItemCaseSensitive(g_last_response, "agents");
+   cJSON *a1 = cJSON_GetArrayItem(agents, 0);
+   cJSON *roles = cJSON_GetObjectItemCaseSensitive(a1, "roles");
+   assert(cJSON_GetArraySize(roles) == 3);
+   printf("  PASS: agent roles with no csv reports and does not write\n");
+}
+
+/* An explicit csv still sets, and `--reset` still restores the default set. */
+static void test_roles_csv_sets_and_reset_restores_defaults(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":[{\"name\":\"a1\",\"provider\":\"anthropic\",\"model\":\"m\","
+                "\"roles\":[\"code\"]}]}\n");
+   reset_capture();
+
+   cJSON *req = args_request("a1", "review,validate,all");
+   assert(handle_agent_roles(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+   assert(g_last_error[0] == '\0');
+   assert(response_has_role("review") && response_has_role("validate") && response_has_role("all"));
+   assert(!response_has_role("code"));
+
+   reset_capture();
+   req = args_request("a1", "--reset");
+   assert(handle_agent_roles(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+   assert(g_last_error[0] == '\0');
+   assert(response_has_role("summarize") && response_has_role("code"));
+   /* --reset is the default set, which does not include the wildcard. */
+   assert(!response_has_role("all"));
+   printf("  PASS: agent roles csv sets, --reset restores defaults\n");
+}
+
+static void test_personas_without_csv_reports_and_does_not_write(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":[{\"name\":\"a1\",\"provider\":\"anthropic\",\"model\":\"m\","
+                "\"roles\":[\"code\"],\"personas\":[\"engineer\",\"qa\"]}]}\n");
+   reset_capture();
+
+   cJSON *req = args_request("a1", NULL);
+   assert(handle_agent_personas(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+
+   assert(g_last_error[0] == '\0');
+   cJSON *personas = cJSON_GetObjectItemCaseSensitive(g_last_response, "personas");
+   assert(cJSON_GetArraySize(personas) == 2);
+
+   /* Not flattened to ["all"] on disk either. */
+   reset_capture();
+   assert(handle_agent_list(NULL, NULL, NULL) == 0);
+   cJSON *agents = cJSON_GetObjectItemCaseSensitive(g_last_response, "agents");
+   cJSON *a1 = cJSON_GetArrayItem(agents, 0);
+   assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(a1, "personas")) == 2);
+   printf("  PASS: agent personas with no csv reports and does not write\n");
+}
+
 int main(void)
 {
    printf("agent_list_handler:\n");
@@ -400,6 +508,9 @@ int main(void)
    test_unknown_backend_fails_closed();
    test_http_probe_preserves_discovery_and_plain_execution();
    test_list_exposes_catalog_identity_and_pricing();
+   test_roles_without_csv_reports_and_does_not_write();
+   test_roles_csv_sets_and_reset_restores_defaults();
+   test_personas_without_csv_reports_and_does_not_write();
    printf("all agent_list_handler tests passed\n");
    return 0;
 }

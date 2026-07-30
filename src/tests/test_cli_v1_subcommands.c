@@ -212,7 +212,26 @@ static void test_agent_roles_printer_reports_roles(void)
    assert(strstr(out, "all") != NULL);
    /* ...and the operation must not be misreported as an enable. */
    assert(strstr(out, "enabled") == NULL);
+   /* A csv-bearing call mutated, so "set to" is accurate here. */
+   assert(strstr(out, "set to") != NULL);
    printf("  agent.roles prints the stored roles, not \"enabled\"\n");
+}
+
+/* A bare `agent roles <name>` only reports. Saying "set to" would claim a write
+ * that did not happen — the same class of mistake as reporting it as "enabled". */
+static void test_agent_roles_printer_read_is_not_reported_as_a_write(void)
+{
+   static const char *payload = "{\"name\":\"codex\",\"read_only\":true,"
+                                "\"roles\":[\"code\",\"diagnose\",\"all\"]}";
+   char out[1024] = "";
+   capture_printer(pt_print_agent_roles, "agent.roles", payload, out, sizeof(out));
+
+   assert(strstr(out, "codex") != NULL);
+   assert(strstr(out, "diagnose") != NULL);
+   assert(strstr(out, "all") != NULL);
+   assert(strstr(out, "set to") == NULL);
+   assert(strstr(out, "enabled") == NULL);
+   printf("  agent.roles read does not claim a write\n");
 }
 
 static void test_agent_personas_printer_reports_personas(void)
@@ -276,6 +295,7 @@ int main(void)
    test_kb_status_reports_backlog_and_degradation();
    test_agent_list_printer_shows_roles();
    test_agent_roles_printer_reports_roles();
+   test_agent_roles_printer_read_is_not_reported_as_a_write();
    test_agent_personas_printer_reports_personas();
    test_run_failure_reports_dispatch_message();
    printf("test_cli_v1_subcommands: all passed\n");
