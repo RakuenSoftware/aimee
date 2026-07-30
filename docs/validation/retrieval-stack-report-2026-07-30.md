@@ -1,0 +1,204 @@
+# Retrieval stack: measurements and paths forward
+
+**2026-07-29/30.** Synthesis of an overnight measurement campaign on embedders,
+rerankers, and the query-latency budget. Supporting detail in
+[embedder-selection-frozen-ab-v1](embedder-selection-frozen-ab-v1.md) and
+[reranker-and-pipeline](reranker-and-pipeline-2026-07-29.md); raw artifacts in
+[`benchmarks/results/reranker-2026-07-29/`](../../benchmarks/results/reranker-2026-07-29/).
+
+---
+
+## Executive summary
+
+1. **The reranker may not be earning its place.** Against a dense-ordered top-20
+   — what production actually feeds it — reranking *costs* 0.07-0.09 NDCG. The
+   reranker's ceiling sits below what a modern embedder already achieves.
+2. **The embedder choice is worth less than it appeared.** a25m and nomic differ
+   by 0.016-0.021 NDCG. The reranking question is an order of magnitude larger.
+3. **nomic's advantage is conditional on work that does not exist.** Its lead
+   requires query/document prefixes; aimee has no prefix plumbing, and without it
+   a25m leads.
+4. **The current reranker is disqualified on multilingual grounds** and, if a
+   reranker is kept at all, better options exist that are also simpler to ship.
+5. **Late interaction posts the best retrieval quality measured** (0.946
+   Recall@10) but costs 743 GB per million documents as configured.
+
+---
+
+## 1. Embedders
+
+Each model with its own card prefix and native pooling — every model at its best.
+
+| model | NDCG@10 | R@10 | dim | code | prose | cited | GPU vec/s |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **nomic-embed-text-v2-moe** | **0.6072** | 0.8007 | 768 | **0.8104** | 0.5157 | 0.6344 | 82.7 |
+| Qwen3-Embedding-4B | 0.6061 | **0.8100** | 2560 | 0.7394 | **0.5274** | 0.6988 | 26.4 |
+| bekko-embedding-v1-a25m | 0.5909 | 0.7816 | 384 | 0.7718 | 0.4841 | **0.7170** | **510.7** |
+| Qwen3-Embedding-0.6B | 0.5810 | 0.7765 | 1024 | 0.7325 | 0.4930 | 113.1 |
+
+**Qwen3 is out.** 0.6B is the weakest thing measured; 4B ties nomic while costing
+3.3x the vector storage and embedding 3.1x slower. The ladder tops out at parity
+with a 475M model, so "we can offer 4B and 8B" buys a more expensive route to the
+same place.
+
+### The prefix problem decides between the remaining two
+
+The suite scores each model **with** its card prefix. aimee serves **without**
+one. For a prefix-dependent model those are different numbers:
+
+| model | with prefix | prefix-free (what ships today) |
+|---|---:|---:|
+| nomic-v2-moe | 0.6072 | 0.5823 |
+| Qwen3-0.6B | 0.5810 | 0.5275 |
+| **a25m** | **0.5909** | **0.5909** (its card defines none) |
+
+**On paper nomic leads. As the system is built, a25m leads.** Two coherent
+positions:
+
+- **build per-model prefix support** -> nomic at 0.6072, largest code margin
+- **do not** -> a25m at 0.5909, needing no new machinery at all
+
+Selecting on the first column while serving the second is the incoherent option,
+and it is what the repository currently does.
+
+### Costs beyond quality
+
+| | a25m | nomic-v2-moe |
+|---|---|---|
+| CPU throughput | **2,155 tok/s** | 598 tok/s (**3.6x slower**) |
+| Vector width | 384 | 768 |
+| Prefix machinery | none needed | required, plus a full re-embed to adopt |
+| Maturity | 10 days old, no published baselines | 18 months, MTEB-checkable |
+| Author track record | 54 models, 272k downloads, active since 2024 | established |
+
+---
+
+## 2. Rerankers
+
+### The incumbent is disqualified
+
+`cross-encoder/ettin-reranker-*` is **English-only** (`language: ['en']`), while
+every candidate embedder is multilingual. It must be replaced or removed.
+
+### Capability, measured on unsorted candidates
+
+| reranker | NDCG@10 | GPU s/query | params |
+|---|---:|---:|---:|
+| **gte-multilingual-reranker-base** (ONNX) | **0.7178** | see below | 306M |
+| BAAI/bge-reranker-v2-m3 | 0.6174 | 0.120 | 568M |
+| ettin-reranker-68m (disqualified) | 0.2969 | 0.054 | 68M |
+| no rerank | 0.2279 | 0 | — |
+
+GTE is the best reranker measured and is **1.9x smaller** than the runner-up.
+Both replacements are `seq-cls`, so they convert to GGUF whole and delete the
+`head.npz` + `publish-rerank-artifacts.yml` machinery Ettin requires.
+
+> **The GTE torch path is broken** — it returns constant scores (it reproduced
+> the no-rerank baseline to sixteen decimal places). Only the **ONNX** export is
+> usable. This bug silently corrupted two experiments before it was caught.
+
+### Usefulness, measured on dense-ordered candidates — the production question
+
+| embedder | dense only | + rerank 20x128 | + rerank 10x256 |
+|---|---:|---:|---:|
+| a25m | **0.5903** | 0.5206 (-0.070) | 0.5470 (-0.043) |
+| nomic + prefix | **0.6116** | 0.5246 (-0.087) | 0.5599 (-0.052) |
+
+**Reranking degrades a ranking a modern embedder already produced.** The
+reranker's best score at these truncations (~0.594) is below dense retrieval's
+0.612, so its reorderings are on average backwards.
+
+The two tables are not in conflict — they answer different questions. Capability
+(can it sort a random list?) is not usefulness (can it beat the embedder?). Only
+the second is the production question, and it had never been run.
+
+*A full-length 20x512 pipeline run is in flight to rule out truncation as the
+cause. Until it lands the claim is "reranking at deployable truncations degrades
+results", not "reranking is useless".*
+
+### If a reranker is kept: how to configure it
+
+Latency is superlinear in document length but only linear in candidate count,
+while **quality depends overwhelmingly on candidate count**:
+
+| bge-v2-m3 config | NDCG@10 | GPU s/q | CPU s/q |
+|---|---:|---:|---:|
+| 20 x 512 | 0.6174 | 0.091 | 8.44 |
+| **20 x 128** | **0.5944** | **0.033** | **1.15** |
+| 10 x 256 | 0.3541 | 0.027 | 1.31 |
+| 5 x 256 | 0.2081 | 0.018 | 0.56 |
+
+Cutting 512->128 tokens costs 0.023 NDCG. Cutting 20->10 candidates costs
+**0.24**. Five candidates (0.208) scores *below not reranking at all* (0.228).
+
+> **Design rule: never trim the candidate list to save time — truncate documents.**
+
+**CPU-viable recommendation if a reranker is kept:** gte-multilingual, ONNX int8,
+**20 candidates x 128 tokens — 0.6116 NDCG at 0.731s**, inside the 1s budget.
+
+---
+
+## 3. Late interaction
+
+`bge-m3` multi-vector (ColBERT), 800 cases:
+
+| metric | value |
+|---|---:|
+| NDCG@10 | 0.7014 |
+| **Recall@10** | **0.946** (best measured) |
+| Query time | 0.058s (0.031 encode + 0.027 MaxSim) |
+| Index time | 0.0106 s/doc |
+| Storage | **743 GB per million docs** |
+
+Its cost profile matches the constraint exactly — heavy at index time, trivial
+per query — and **if bge-m3 were also the embedder the query encode is shared**,
+leaving 27 ms of MaxSim as the true marginal cost. It would also supply the
+learned-sparse leg the architecture already anticipates, from one model.
+
+Storage is the blocker: 1024-dim token vectors. Unmeasured routes to viability:
+a 128-dim ColBERT (~8x smaller), int8 (2x), PLAID-style compression (~16x), or
+multi-vectors for a hot subset only.
+
+---
+
+## 4. Paths forward
+
+**A. Simplest, ships today.** a25m embedder, no reranker. 0.5903 dense, no prefix
+work, no reranker machinery, 2,155 tok/s on CPU. Deletes the Ettin release
+pipeline outright. *Blocked on nothing.*
+
+**B. Best measured quality on the current architecture.** nomic + per-model prefix
+support, no reranker. 0.6116 dense. *Blocked on building prefix plumbing and a
+full re-embed.*
+
+**C. Keep a reranker.** Only justified if the in-flight full-length run shows the
+degradation was a truncation artifact. Then: gte-multilingual ONNX int8 at
+20x128 on CPU, 20x512 on GPU. *Blocked on that result.*
+
+**D. Late interaction.** Best retrieval quality measured, and architecturally the
+cleanest fit for a sub-1s budget. *Blocked on a storage story — 743 GB/million is
+not shippable as configured.*
+
+**Recommendation: A now, B next, D as the research track.** The reranker (C) is
+the weakest-supported option on current evidence, which is the opposite of where
+the evening started.
+
+---
+
+## 5. Method note
+
+Six substantive claims made during this campaign were wrong and corrected by
+measurement — the harness discrepancy (it was a prefix flag), CPU rerank
+feasibility (10x pessimistic), the late-interaction speedup (3x optimistic),
+latency linearity, late-interaction storage (5.7x optimistic), and the value of
+uniform embedding dimensions.
+
+The dominant failure mode on this stack is **silent-wrong, not loud-wrong**: a
+pooling default that produces well-formed bad vectors, a prefix flag that changes
+a score by 0.025, an `-ngl 0` that auto-fit overrides, a reranker that returns
+constant scores, a `-np 4` that quarters the context window. Each produced a
+plausible number rather than an error.
+
+Every figure in this report therefore carries its provenance — model, precision,
+device, truncation, sample size, and harness — because on this evidence a number
+without provenance is not trustworthy.
