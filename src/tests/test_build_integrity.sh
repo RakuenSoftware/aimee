@@ -48,6 +48,14 @@ fi
 # Stub only the short-lived bootstrap transport so this can run outside the
 # image; the explicit child proves it received no credential value.
 entrypoint_test_dir=$(mktemp -d /tmp/aimee-entrypoint.XXXXXX)
+cat >"$entrypoint_test_dir/aimee-server" <<'SH'
+#!/bin/sh
+[ -n "${ENTRYPOINT_TEST_API_KEY:-}" ] || exit 3
+[ "$*" = "--bootstrap-vault-env --drop-user aimee" ] || exit 4
+[ -z "${ENTRYPOINT_TEST_BOOTSTRAP_FAIL:-}" ] || exit 9
+exit 0
+SH
+chmod +x "$entrypoint_test_dir/aimee-server"
 cat >"$entrypoint_test_dir/runuser" <<'SH'
 #!/bin/sh
 [ -n "${ENTRYPOINT_TEST_API_KEY:-}" ] || exit 3
@@ -61,11 +69,21 @@ entrypoint_output=$(env -i PATH="$entrypoint_test_dir:/usr/bin:/bin" \
     AIMEE_HOME="$entrypoint_test_dir/home" ENTRYPOINT_TEST_API_KEY=first-boot-only \
     sh ../deploy/container/server-entrypoint.sh sh -c \
     'printf "%s\n" "${ENTRYPOINT_TEST_API_KEY-unset}"' 2>/dev/null)
-rm -rf "$entrypoint_test_dir"
 if [ "$entrypoint_output" = "unset" ]; then
     pass "server entrypoint Vault-ingests and scrubs before an explicit command override"
 else
     fail "server entrypoint bypassed Vault ingestion or leaked a credential to an override"
+fi
+entrypoint_fail_output=$(env -i PATH="$entrypoint_test_dir:/usr/bin:/bin" \
+    AIMEE_HOME="$entrypoint_test_dir/home" ENTRYPOINT_TEST_API_KEY=first-boot-only \
+    ENTRYPOINT_TEST_BOOTSTRAP_FAIL=1 \
+    sh ../deploy/container/server-entrypoint.sh sh -c 'printf "%s\n" child-started' 2>/dev/null)
+entrypoint_fail_rc=$?
+rm -rf "$entrypoint_test_dir"
+if [ "$entrypoint_fail_rc" -ne 0 ] && [ -z "$entrypoint_fail_output" ]; then
+    pass "server entrypoint aborts before children when Vault bootstrap fails"
+else
+    fail "server entrypoint continued after Vault bootstrap failure"
 fi
 
 # The KB entrypoint can remain PID 1 while supervising its embedded PostgreSQL,
@@ -130,7 +148,7 @@ fi
 # still needs a PID-1 subreaper. It must not start tini until after first-boot
 # credentials have been sealed and unset: an earlier tini permanently retains
 # the original container environment even when every child scrubs its copy.
-vault_bootstrap_line=$(grep -nF 'runuser -u aimee -- aimee-server --bootstrap-vault-env' \
+vault_bootstrap_line=$(grep -nF 'aimee-server --bootstrap-vault-env --drop-user aimee' \
     ../deploy/container/server-entrypoint.sh | cut -d: -f1)
 credential_unset_line=$(grep -nF 'unset "$_secret_name"' \
     ../deploy/container/server-entrypoint.sh | cut -d: -f1)
