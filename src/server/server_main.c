@@ -39,10 +39,10 @@
 #include "vault_env_bootstrap.h"    /* first-boot credential env -> Vault */
 #include "vault_config_bootstrap.h" /* legacy config credential -> Vault */
 #include "vault_bootstrap_privilege.h"
-#include "runtime_secret.h"         /* wipe Vault-sourced runtime cache at exit */
-#include "vault_audit_bridge.h"     /* route vault credential-access events onto the audit bus */
-#include "sandbox_audit_bridge.h"   /* route sandbox degraded-isolation events onto the audit bus */
-#include "memory_audit_bridge.h"    /* route server-side memory mutations onto the audit bus */
+#include "runtime_secret.h"       /* wipe Vault-sourced runtime cache at exit */
+#include "vault_audit_bridge.h"   /* route vault credential-access events onto the audit bus */
+#include "sandbox_audit_bridge.h" /* route sandbox degraded-isolation events onto the audit bus */
+#include "memory_audit_bridge.h"  /* route server-side memory mutations onto the audit bus */
 #include "tool_completion_audit_bridge.h" /* route tool-dispatch outcomes onto the audit bus */
 #include <aimee/audit/audit_replay.h> /* --audit-replay: inspect a governed-action capture file */
 #include <signal.h>

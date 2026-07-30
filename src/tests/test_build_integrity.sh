@@ -18,6 +18,7 @@ cat >"$entrypoint_test_dir/aimee-server" <<'SH'
 #!/bin/sh
 [ -n "${ENTRYPOINT_TEST_API_KEY:-}" ] || exit 3
 [ "$*" = "--bootstrap-vault-env --drop-user aimee" ] || exit 4
+[ -z "${ENTRYPOINT_TEST_BOOTSTRAP_FAIL:-}" ] || exit 9
 exit 0
 SH
 chmod +x "$entrypoint_test_dir/aimee-server"
@@ -34,11 +35,21 @@ entrypoint_output=$(env -i PATH="$entrypoint_test_dir:/usr/bin:/bin" \
     AIMEE_HOME="$entrypoint_test_dir/home" ENTRYPOINT_TEST_API_KEY=first-boot-only \
     sh ../deploy/container/server-entrypoint.sh sh -c \
     'printf "%s\n" "${ENTRYPOINT_TEST_API_KEY-unset}"' 2>/dev/null)
-rm -rf "$entrypoint_test_dir"
 if [ "$entrypoint_output" = "unset" ]; then
     pass "server entrypoint Vault-ingests and scrubs before an explicit command override"
 else
     fail "server entrypoint bypassed Vault ingestion or leaked a credential to an override"
+fi
+entrypoint_fail_output=$(env -i PATH="$entrypoint_test_dir:/usr/bin:/bin" \
+    AIMEE_HOME="$entrypoint_test_dir/home" ENTRYPOINT_TEST_API_KEY=first-boot-only \
+    ENTRYPOINT_TEST_BOOTSTRAP_FAIL=1 \
+    sh ../deploy/container/server-entrypoint.sh sh -c 'printf "%s\n" child-started' 2>/dev/null)
+entrypoint_fail_rc=$?
+rm -rf "$entrypoint_test_dir"
+if [ "$entrypoint_fail_rc" -ne 0 ] && [ -z "$entrypoint_fail_output" ]; then
+    pass "server entrypoint aborts before children when Vault bootstrap fails"
+else
+    fail "server entrypoint continued after Vault bootstrap failure"
 fi
 
 # The KB entrypoint can remain PID 1 while supervising its embedded PostgreSQL,

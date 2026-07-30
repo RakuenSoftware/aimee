@@ -77,6 +77,8 @@ static void test_missing_and_idempotent(void)
    new_home(home);
    assert(vault_bootstrap_repair_owner_at(home, geteuid(), getegid()) == 0);
    make_vault(home, vault);
+   assert(vault_bootstrap_repair_owner_at(home, geteuid(), getegid()) == 0);
+   assert_mode_owner(vault, 0700, geteuid(), getegid());
    path_join(file, sizeof(file), vault, "server.key");
    write_file(file);
    assert(chmod(vault, 0755) == 0);
@@ -86,6 +88,12 @@ static void test_missing_and_idempotent(void)
    assert(vault_bootstrap_repair_owner_at(home, geteuid(), getegid()) == 0);
    assert(unlink(file) == 0 && rmdir(vault) == 0 && rmdir(home) == 0);
    puts("  PASS: absent Vault is a no-op; repair is mode-safe and idempotent");
+}
+
+static void test_missing_user_fails_closed(void)
+{
+   assert(vault_bootstrap_run_as("aimee-test-user-that-must-not-exist-7c42") == -1);
+   puts("  PASS: nonexistent drop user fails closed");
 }
 
 static void test_symlinks_fail_closed(void)
@@ -102,6 +110,7 @@ static void test_symlinks_fail_closed(void)
    write_file(target);
    assert(symlink(target, child) == 0);
    assert(vault_bootstrap_repair_owner_at(home, geteuid(), getegid()) == -1);
+   assert(chmod(vault, 0700) == 0);
    assert(unlink(child) == 0 && unlink(target) == 0 && rmdir(vault) == 0 && rmdir(home) == 0);
    puts("  PASS: Vault and child symlinks fail closed");
 }
@@ -114,10 +123,12 @@ static void test_nonregular_children_fail_without_blocking(void)
    path_join(child, sizeof(child), vault, "nested");
    assert(mkdir(child, 0700) == 0);
    assert(vault_bootstrap_repair_owner_at(home, geteuid(), getegid()) == -1);
+   assert(chmod(vault, 0700) == 0);
    assert(rmdir(child) == 0);
    path_join(child, sizeof(child), vault, "pipe");
    assert(mkfifo(child, 0600) == 0);
    assert(vault_bootstrap_repair_owner_at(home, geteuid(), getegid()) == -1);
+   assert(chmod(vault, 0700) == 0);
    assert(unlink(child) == 0 && rmdir(vault) == 0 && rmdir(home) == 0);
    puts("  PASS: directories and FIFOs fail closed without stalling bootstrap");
 }
@@ -179,14 +190,52 @@ static void test_real_root_owner_repair_and_drop(void)
    puts("  PASS: root-owned Vault repair precedes an irrevocable uid/gid drop");
 }
 
+static void test_multichild_validation_precedes_mutation(void)
+{
+   if (geteuid() != 0)
+   {
+      puts("  SKIP: multi-child foreign-owner rollback path (requires root fixture)");
+      return;
+   }
+   struct passwd *pw = getpwnam("nobody");
+   if (!pw || pw->pw_uid == 0 || pw->pw_uid == 2)
+   {
+      puts("  SKIP: multi-child foreign-owner rollback path (no suitable nobody account)");
+      return;
+   }
+
+   char home[128], vault[160], first[192], second[192], foreign[192];
+   new_home(home);
+   make_vault(home, vault);
+   path_join(first, sizeof(first), vault, "a-valid");
+   path_join(second, sizeof(second), vault, "b-valid");
+   path_join(foreign, sizeof(foreign), vault, "z-foreign");
+   write_file(first);
+   write_file(second);
+   write_file(foreign);
+   assert(chown(foreign, 2, 2) == 0);
+
+   assert(vault_bootstrap_repair_owner_at(home, pw->pw_uid, pw->pw_gid) == -1);
+   assert_mode_owner(first, 0644, 0, 0);
+   assert_mode_owner(second, 0644, 0, 0);
+   assert_mode_owner(foreign, 0644, 2, 2);
+   assert_mode_owner(vault, 0500, 0, 0); /* unsafe directory stays quarantined */
+
+   assert(unlink(first) == 0 && unlink(second) == 0 && unlink(foreign) == 0);
+   assert(rmdir(vault) == 0 && rmdir(home) == 0);
+   puts("  PASS: multi-child validation completes before mutation");
+}
+
 int main(void)
 {
    test_parse_args();
    test_missing_and_idempotent();
+   test_missing_user_fails_closed();
    test_symlinks_fail_closed();
    test_nonregular_children_fail_without_blocking();
    test_unexpected_owner_fails_closed();
    test_real_root_owner_repair_and_drop();
+   test_multichild_validation_precedes_mutation();
    puts("vault bootstrap privilege tests: all passed");
    return 0;
 }

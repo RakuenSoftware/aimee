@@ -11,14 +11,12 @@
 
 int vault_bootstrap_parse_args(int argc, char **argv, const char **drop_user)
 {
-   if (!argv || !drop_user || argc < 2 || !argv[1] ||
-       strcmp(argv[1], "--bootstrap-vault-env") != 0)
+   if (!argv || !drop_user || argc < 2 || !argv[1] || strcmp(argv[1], "--bootstrap-vault-env") != 0)
       return -1;
    *drop_user = NULL;
    if (argc == 2)
       return 0;
-   if (argc == 4 && argv[2] && argv[3] && argv[3][0] &&
-       strcmp(argv[2], "--drop-user") == 0)
+   if (argc == 4 && argv[2] && argv[3] && argv[3][0] && strcmp(argv[2], "--drop-user") == 0)
    {
       *drop_user = argv[3];
       return 0;
@@ -75,21 +73,24 @@ int vault_bootstrap_repair_owner_at(const char *home, uid_t uid, gid_t gid)
    int *files = NULL;
    size_t file_count = 0;
    size_t file_cap = 0;
+   DIR *dir = NULL;
    struct stat dir_st;
    if (fstat(dir_fd, &dir_st) != 0 || !S_ISDIR(dir_st.st_mode) ||
        (dir_st.st_uid != 0 && dir_st.st_uid != uid))
       goto done;
 
-   /* fdopendir owns its descriptor, so retain dir_fd for pinned openat calls. */
-   int scan_fd = dup(dir_fd);
-   if (scan_fd < 0)
+   /* Quiesce the legacy directory while still privileged. This blocks the
+    * target uid from adding or replacing an entry after validation; on any
+    * failure the directory deliberately remains read-only/quarantined. */
+   if (fchmod(dir_fd, 0500) != 0)
       goto done;
-   DIR *dir = fdopendir(scan_fd);
+   dir = fdopendir(dir_fd);
    if (!dir)
-   {
-      close(scan_fd);
       goto done;
-   }
+   dir_fd = -1; /* fdopendir owns the descriptor after a successful call. */
+   int vault_fd = dirfd(dir);
+   if (vault_fd < 0)
+      goto done;
 
    for (;;)
    {
@@ -98,26 +99,21 @@ int vault_bootstrap_repair_owner_at(const char *home, uid_t uid, gid_t gid)
       if (!entry)
       {
          if (errno != 0)
-         {
-            closedir(dir);
             goto done;
-         }
          break;
       }
       if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
          continue;
 
-      /* O_NONBLOCK prevents a hostile FIFO from stalling privileged startup.
-       * The returned fd pins the inode: rename cannot redirect later changes. */
-      int fd = openat(dir_fd, entry->d_name,
-                      O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+      /* Defense in depth: a FIFO cannot stall privileged startup. The returned
+       * fd pins the inode, so rename cannot redirect later changes. */
+      int fd = openat(vault_fd, entry->d_name, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
       struct stat st;
       if (fd < 0 || fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) ||
           (st.st_uid != 0 && st.st_uid != uid))
       {
          if (fd >= 0)
             close(fd);
-         closedir(dir);
          goto done;
       }
       if (file_count == file_cap)
@@ -126,14 +122,12 @@ int vault_bootstrap_repair_owner_at(const char *home, uid_t uid, gid_t gid)
          if (next_cap < file_cap || next_cap > SIZE_MAX / sizeof(*files))
          {
             close(fd);
-            closedir(dir);
             goto done;
          }
          int *next = realloc(files, next_cap * sizeof(*files));
          if (!next)
          {
             close(fd);
-            closedir(dir);
             goto done;
          }
          files = next;
@@ -141,27 +135,38 @@ int vault_bootstrap_repair_owner_at(const char *home, uid_t uid, gid_t gid)
       }
       files[file_count++] = fd;
    }
-   closedir(dir);
 
-   /* Validate and pin every child before mutating any of them. */
+   /* Revalidate every pinned inode and the directory before mutating any
+    * ownership or file mode. A later I/O failure remains fail-closed because
+    * the directory stays quarantined at 0500 and the caller aborts startup. */
+   if (fstat(vault_fd, &dir_st) != 0 || !S_ISDIR(dir_st.st_mode) ||
+       (dir_st.st_uid != 0 && dir_st.st_uid != uid))
+      goto done;
    for (size_t i = 0; i < file_count; i++)
    {
       struct stat st;
-      if (fstat(files[i], &st) != 0 || !S_ISREG(st.st_mode) ||
-          (st.st_uid != 0 && st.st_uid != uid) ||
-          (st.st_uid == 0 && fchown(files[i], uid, gid) != 0) ||
+      if (fstat(files[i], &st) != 0 || !S_ISREG(st.st_mode) || (st.st_uid != 0 && st.st_uid != uid))
+         goto done;
+   }
+
+   for (size_t i = 0; i < file_count; i++)
+   {
+      struct stat st;
+      if (fstat(files[i], &st) != 0 || (st.st_uid == 0 && fchown(files[i], uid, gid) != 0) ||
           fchmod(files[i], 0600) != 0)
          goto done;
    }
-   if (((dir_st.st_uid != uid || dir_st.st_gid != gid) &&
-        fchown(dir_fd, uid, gid) != 0) ||
-       fchmod(dir_fd, 0700) != 0)
+   if (((dir_st.st_uid != uid || dir_st.st_gid != gid) && fchown(vault_fd, uid, gid) != 0) ||
+       fchmod(vault_fd, 0700) != 0)
       goto done;
    rc = 0;
 
 done:
    close_files(files, file_count);
-   close(dir_fd);
+   if (dir)
+      closedir(dir);
+   else if (dir_fd >= 0)
+      close(dir_fd);
    return rc;
 }
 
@@ -174,8 +179,8 @@ int vault_bootstrap_run_as(const char *user)
    struct passwd *pw = getpwnam(user);
    if (!pw)
    {
-      fprintf(stderr, "aimee-server: bootstrap user '%s' lookup failed: %s\n",
-              user, strerror(errno ? errno : ENOENT));
+      fprintf(stderr, "aimee-server: bootstrap user '%s' lookup failed: %s\n", user,
+              strerror(errno ? errno : ENOENT));
       return -1;
    }
    if (pw->pw_uid == 0)
@@ -186,7 +191,13 @@ int vault_bootstrap_run_as(const char *user)
    uid_t uid = pw->pw_uid;
    gid_t gid = pw->pw_gid;
    if (geteuid() == uid)
-      return getegid() == gid ? 0 : -1;
+   {
+      if (getegid() == gid)
+         return 0;
+      fprintf(stderr, "aimee-server: bootstrap user '%s' has gid %lu, expected %lu\n", user,
+              (unsigned long)getegid(), (unsigned long)gid);
+      return -1;
+   }
    if (geteuid() != 0)
    {
       fprintf(stderr, "aimee-server: cannot drop from uid %lu to bootstrap user '%s'\n",

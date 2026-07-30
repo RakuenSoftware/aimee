@@ -50,7 +50,10 @@ if [ -n "${AIMEE_SERVER_MGMT_TLS_KEY:-}" ] || [ -n "${AIMEE_SERVER_MGMT_STATUS_C
     printf '[server-entrypoint] fatal: management private-key files are forbidden; inject AIMEE_SERVER_MGMT_TLS_PRIVATE_KEY and AIMEE_SERVER_MGMT_STATUS_CLIENT_PRIVATE_KEY as first-boot Vault inputs\n' >&2
     exit 2
 fi
-aimee-server --bootstrap-vault-env --drop-user aimee
+if ! aimee-server --bootstrap-vault-env --drop-user aimee; then
+    printf '[server-entrypoint] fatal: Vault bootstrap failed; refusing to start child processes\n' >&2
+    exit 1
+fi
 _secret_names=$(runuser -u aimee -- aimee-server --list-credential-env-names)
 had_credential_env=0
 for _secret_name in $_secret_names; do
