@@ -3,7 +3,6 @@
 #ifndef DEC_KB_DEMOTE_H
 #define DEC_KB_DEMOTE_H 1
 
-#include "config.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -15,7 +14,7 @@ extern "C"
     * lifecycle transitions are applied to memory rows.
     * Returns the number of demotion_profile artifacts written (>= 0), or -1 on
     * fatal error. Returns 0 immediately when demotion_enabled == 0. */
-   int kb_demote_run(const config_t *cfg);
+   int kb_demote_run(void);
 
 #ifdef __cplusplus
 }

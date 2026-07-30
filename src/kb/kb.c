@@ -1754,7 +1754,7 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
             char fm_arms[KB_BANDIT_MAX_ARMS][KB_BANDIT_MAX_ARM_ID];
             for (int i = 0; i < fm_dp->n_arms; i++)
                snprintf(fm_arms[i], KB_BANDIT_MAX_ARM_ID, "%s", fm_dp->arms[i]);
-            int a = kb_bandit_sample(&fusion_cfg, fm_dp->id, NULL, fm_arms, fm_dp->n_arms,
+            int a = kb_bandit_sample(fm_dp->id, NULL, fm_arms, fm_dp->n_arms,
                                      fm_decision_id);
             if (a >= 0 && a < fm_dp->n_arms)
                snprintf(fm_arm_id, sizeof(fm_arm_id), "%s", fm_arms[a]);
@@ -1907,7 +1907,7 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
             ids[i] = merged[i].doc_id;
 
          int n_ranked =
-             kb_ranker_rerank_with_sketch(&kb_cfg, ids, lex_s, dense_s, age_s, sketch_features,
+             kb_ranker_rerank_with_sketch(ids, lex_s, dense_s, age_s, sketch_features,
                                           n_results, ranked_ids, ranked_scores);
          if (n_ranked == n_results)
          {
@@ -1934,12 +1934,12 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
       }
 
       /* Drift detection in shadow mode. */
-      if (cfg_ok && kb_cfg.drift_detect_shadow_enabled && n_results > 0)
+      if (n_results > 0) /* kb_detect_observe applies the shadow gate itself */
       {
          double sum = 0.0;
          for (int i = 0; i < n_results; i++)
             sum += merged[i].dense_score;
-         kb_detect_observe(&kb_cfg, sum / n_results, n_results);
+         kb_detect_observe(sum / n_results, n_results);
       }
    }
 #endif
@@ -1952,7 +1952,7 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
    if (fm_dp && fm_decision_id[0] && fm_arm_id[0])
    {
       double reward = kb_bandit_recall_sufficiency_reward(n_results, max_results);
-      kb_bandit_reward(NULL, fm_dp->id, fm_decision_id, fm_arm_id, reward);
+      kb_bandit_reward(fm_dp->id, fm_decision_id, fm_arm_id, reward);
    }
    return NULL;
 }

@@ -6,8 +6,6 @@
 #ifndef AIMEE_KB_TSR_SIDECAR_H
 #define AIMEE_KB_TSR_SIDECAR_H
 
-#include "config.h"
-
 typedef struct
 {
    int row;
@@ -19,10 +17,6 @@ typedef struct
    char relation[128];
    char object[512];
 } kb_tsr_cell_t;
-
-/* Resolved TSR endpoint URL: cfg->tsr_command, else $AIMEE_TSR_URL, else "" (disabled).
- * Mirrors config_embedding_command's resolution order. */
-const char *kb_tsr_endpoint(const config_t *cfg);
 
 /* Recognise table structure for one page's regions.
  *   page_json : a JSON array of regions, e.g.

@@ -226,7 +226,7 @@ int handle_post_docs(const char *body, int body_len, char *out_buf, int out_cap)
           * accepted as if text-indexed. */
          if (st.regions == 0 && cfg.kb_pdf_ocr_enabled)
          {
-            const char *ocr_ep = kb_ocr_endpoint(&cfg);
+            const char *ocr_ep = config_ocr_endpoint();
             if (ocr_ep[0])
             {
                int orc = kb_doc_pdf_ingest_ocr(scope, filename, content_hash, sclass,

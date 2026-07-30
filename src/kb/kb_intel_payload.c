@@ -419,10 +419,8 @@ cJSON *kb_intel_bandit_sample_response(const char *body_json, int body_len)
    cJSON *ctx = cJSON_GetObjectItem(body, "context");
    char *ctx_str = (ctx && cJSON_IsObject(ctx)) ? cJSON_PrintUnformatted(ctx) : NULL;
 
-   config_t cfg;
-   config_load(&cfg);
    char decision_id[KB_BANDIT_MAX_DECISION] = {0};
-   int idx = (na >= 1) ? kb_bandit_sample(&cfg, dp, ctx_str, arm_ids, na, decision_id) : -1;
+   int idx = (na >= 1) ? kb_bandit_sample(dp, ctx_str, arm_ids, na, decision_id) : -1;
    free(ctx_str);
    cJSON_Delete(body);
 
@@ -469,9 +467,7 @@ cJSON *kb_intel_bandit_close_response(const char *body_json, int body_len)
    if (reward > 1.0)
       reward = 1.0;
 
-   config_t cfg;
-   config_load(&cfg);
-   int rc = kb_bandit_reward(&cfg, dp, did, arm, reward);
+   int rc = kb_bandit_reward(dp, did, arm, reward);
    cJSON_Delete(body);
 
    cJSON *resp = cJSON_CreateObject();

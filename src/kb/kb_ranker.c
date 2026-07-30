@@ -42,21 +42,20 @@ static double score_candidate(double lex, double dense, double age_days,
           g_weights.w_sketch_distinct * sketch_distinct;
 }
 
-int kb_ranker_rerank(const config_t *cfg, const int64_t *doc_ids, const double *lex_scores,
+int kb_ranker_rerank(const int64_t *doc_ids, const double *lex_scores,
                      const double *dense_scores, const double *age_days, int n, int64_t *ranked_out,
                      double *scores_out)
 {
-   return kb_ranker_rerank_with_sketch(cfg, doc_ids, lex_scores, dense_scores, age_days, NULL, n,
+   return kb_ranker_rerank_with_sketch(doc_ids, lex_scores, dense_scores, age_days, NULL, n,
                                        ranked_out, scores_out);
 }
 
-int kb_ranker_rerank_with_sketch(const config_t *cfg, const int64_t *doc_ids,
+int kb_ranker_rerank_with_sketch(const int64_t *doc_ids,
                                  const double *lex_scores, const double *dense_scores,
                                  const double *age_days,
                                  const kb_sketch_features_t *sketch_features, int n,
                                  int64_t *ranked_out, double *scores_out)
 {
-   (void)cfg;
    if (n <= 0 || !doc_ids || !lex_scores || !dense_scores || !age_days || !ranked_out)
       return 0;
    if (!g_weights.loaded)

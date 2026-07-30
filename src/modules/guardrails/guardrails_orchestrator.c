@@ -809,17 +809,14 @@ static int git_checkout_under_configured_workspace(const char *git_root)
    if (!git_root || !git_root[0])
       return 0;
 
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return 0;
-
    char resolved_root[MAX_PATH_LEN];
    const char *root = realpath(git_root, resolved_root) ? resolved_root : git_root;
-   for (int i = 0; i < cfg.workspace_count; i++)
+   int workspace_count = config_workspace_count();
+   for (int i = 0; i < workspace_count; i++)
    {
       char resolved_ws[MAX_PATH_LEN];
-      const char *ws = cfg.workspaces[i];
-      if (!ws[0])
+      const char *ws = config_workspaces(i);
+      if (!ws || !ws[0])
          continue;
       if (realpath(ws, resolved_ws))
          ws = resolved_ws;
@@ -899,17 +896,18 @@ static int cwd_is_detached_workspace(const char *cwd)
                   cwd[1] == ':' && (cwd[2] == '\\' || cwd[2] == '/'));
    if (cwd[0] != '/' && !win_abs)
       return 0;
-   config_t cfg;
-   config_load(&cfg);
-   for (int i = 0; i < cfg.workspace_count; i++)
+   int workspace_count = config_workspace_count();
+   for (int i = 0; i < workspace_count; i++)
    {
-      const char *ws = cfg.workspaces[i];
+      /* Distinct accessors, so both thread-local buffers stay valid together. */
+      const char *ws = config_workspaces(i);
+      const char *provider = config_workspace_providers(i);
       size_t len = ws ? strlen(ws) : 0;
-      if (len == 0 || cfg.workspace_providers[i][0] == '\0')
+      if (len == 0 || !provider || provider[0] == '\0')
          continue;
       int inside =
           strncmp(cwd, ws, len) == 0 && (cwd[len] == '/' || cwd[len] == '\\' || cwd[len] == '\0');
-      if (inside && strcmp(cfg.workspace_providers[i], "detached") == 0)
+      if (inside && strcmp(provider, "detached") == 0)
          return 1;
    }
    return 0;
@@ -1032,9 +1030,7 @@ static int skill_dispatch_find_symbols_advisory(session_state_t *state, const ch
    if (!state || !bash_looks_like_symbol_search(command))
       return 0;
 
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.skills_dispatch_advisory)
+   if (!config_skills_dispatch_advisory())
       return 0;
 
    if (state->skill_find_symbols_advisory_sent)
@@ -1057,9 +1053,7 @@ static int skill_dispatch_trigger_advisory(session_state_t *state, const char *p
    if (!state || !skill_name || !tool_name || !sent_flag || !message)
       return 0;
 
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.skills_dispatch_advisory || *sent_flag)
+   if (!config_skills_dispatch_advisory() || *sent_flag)
       return 0;
 
    if (!skill_trigger_matches(project_root, skill_name, tool_name, subject))
@@ -1213,10 +1207,8 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
 
    if (computer_use_is_tool_name(tool_name))
    {
-      config_t cfg;
-      config_load(&cfg);
       computer_use_policy_t policy;
-      computer_use_policy_from_config(&cfg, &policy);
+      computer_use_policy_from_config(&policy);
       computer_use_decision_t decision = COMPUTER_USE_DECISION_ALLOW;
       char reason[256] = "";
       if (computer_use_classify(&policy, tool_name, input_json, &decision, reason,
@@ -1618,8 +1610,10 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
     * switch across the harness guard, the gateway strip, and this path. */
    if (is_subagent_tool(tool_name))
    {
-      config_t sub_cfg;
-      if (config_load(&sub_cfg) == 0 && !sub_cfg.subagent_ban_enabled)
+      /* Fail-CLOSED on a config-load failure: config_field_read falls back to the field's
+       * declared default (subagent_ban_enabled defaults ON), so a broken config bans
+       * rather than admits provider-native sub-agents. */
+      if (!config_subagent_ban_enabled())
       {
          cJSON_Delete(root);
          return 0; /* operator opted out: allow provider-native sub-agents */
@@ -1641,7 +1635,7 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
     * Third+ match of the same pattern: block the tool call.
     * Set AIMEE_ANTIPATTERNS_BYPASS=1 to skip the check entirely (escape hatch
     * for sessions where a stored pattern is misfiring). */
-   if (!getenv("AIMEE_ANTIPATTERNS_BYPASS"))
+   if (!config_antipatterns_bypass())
    {
       anti_pattern_t matches[4];
       const char *file_str = (fp && cJSON_IsString(fp)) ? fp->valuestring : NULL;

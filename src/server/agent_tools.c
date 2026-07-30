@@ -327,10 +327,8 @@ static void append_federated_kb_tools(cJSON *tools, int openai_format,
 
 static void append_remote_tools(cJSON *tools, int openai_format)
 {
-   config_t cfg;
-   config_load(&cfg);
    computer_use_policy_t cu_policy;
-   computer_use_policy_from_config(&cfg, &cu_policy);
+   computer_use_policy_from_config(&cu_policy);
 
    cJSON *remote_tools = mcp_client_registry_build_namespaced_tools(1000);
    if (cJSON_IsArray(remote_tools))

@@ -69,14 +69,19 @@ static void build_profile_payload(const char *kind, const double *scores, int n,
             kind, m, n_candidates, p10, p25, p50, p75, p90);
 }
 
-int kb_demote_run(const config_t *cfg)
+int kb_demote_run(void)
 {
-   if (!cfg || cfg->demotion_enabled == 0)
+   int demotion_enabled = config_demotion_enabled();
+   if (demotion_enabled == 0)
       return 0;
 
+   /* Read once: these feed a per-candidate loop, and one pinned read each is the point. */
+   int n_min = config_demotion_n_min();
+   int window = config_demotion_window();
+   double half_life_days = config_demotion_half_life_days();
+
    db2_demotion_candidate_t candidates[DEMOTE_MAX_CANDIDATES];
-   int n_candidates =
-       db2_demotion_candidates(cfg->demotion_n_min, candidates, DEMOTE_MAX_CANDIDATES);
+   int n_candidates = db2_demotion_candidates(n_min, candidates, DEMOTE_MAX_CANDIDATES);
    if (n_candidates <= 0)
       return 0;
 
@@ -95,8 +100,7 @@ int kb_demote_run(const config_t *cfg)
    int n_scored = 0;
    for (int i = 0; i < n_candidates; i++)
    {
-      double score = db2_demotion_score(candidates[i].row_id, cfg->demotion_window,
-                                        cfg->demotion_half_life_days, cfg->demotion_n_min);
+      double score = db2_demotion_score(candidates[i].row_id, window, half_life_days, n_min);
       if (isnan(score))
          continue;
 
@@ -166,7 +170,7 @@ int kb_demote_run(const config_t *cfg)
    /* Phase 2: live demotion — apply demotions for rows below class p10.
     * Only fires at demotion_enabled >= 2. */
    int demoted = 0;
-   if (cfg->demotion_enabled >= 2)
+   if (demotion_enabled >= 2)
    {
       for (int i = 0; i < n_scored; i++)
       {

@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <sys/stat.h>
 #include "config.h"
 
 int main(void)
@@ -133,6 +135,76 @@ int main(void)
    checked += 4;
 
    printf("accessor parity: %d field(s) match the loaded struct\n", checked);
+
+   /* A read that FAILS must yield the field's DECLARED DEFAULT, not a zero seed.
+    * config_field_read used to copy only when config_load returned 0, so every accessor
+    * answered 0 on a failure — inverting every default-ON dial. For subagent_ban_enabled
+    * (default ON) that turned a fail-closed guard fail-OPEN precisely when config was
+    * broken.
+    *
+    * A merely MISSING file does not exercise this: config_load_file returns 0 ("defaults
+    * are fine"). The reachable failure is strict mode + a validation error, which returns
+    * -1 from config_load_file with defaults applied and field parsing not yet reached. */
+   {
+      char tmpl[] = "/tmp/aimee-accessor-default-XXXXXX";
+      const char *dir = mkdtemp(tmpl);
+      assert(dir);
+      char cfgdir[512], cfgpath[600];
+      snprintf(cfgdir, sizeof cfgdir, "%s/.config", dir);
+      mkdir(cfgdir, 0755);
+      snprintf(cfgdir, sizeof cfgdir, "%s/.config/aimee", dir);
+      mkdir(cfgdir, 0755);
+      snprintf(cfgpath, sizeof cfgpath, "%s/aimee.yaml", cfgdir);
+      FILE *f = fopen(cfgpath, "w");
+      assert(f);
+      /* A type error the schema rejects -> issues > 0 -> strict mode aborts the load. */
+      fputs("memory:\n  citations:\n    mode: 12345\n", f);
+      fclose(f);
+
+      /* The config path derives from HOME (AIMEE_HOME must be unset), as in test_config.c. */
+      char *saved_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
+      char *saved_ahome = getenv("AIMEE_HOME") ? strdup(getenv("AIMEE_HOME")) : NULL;
+      setenv("HOME", dir, 1);
+      unsetenv("AIMEE_HOME");
+      setenv("AIMEE_NO_CACHE", "1", 1); /* defeat the mtime/ino config cache */
+      int saved_strict = g_config_strict;
+      g_config_strict = 1;
+
+      int ban = config_subagent_ban_enabled();
+      int git = config_require_aimee_git();
+      int wt = config_require_session_worktree();
+
+      g_config_strict = saved_strict;
+      unsetenv("AIMEE_NO_CACHE");
+      if (saved_home)
+      {
+         setenv("HOME", saved_home, 1);
+         free(saved_home);
+      }
+      else
+         unsetenv("HOME");
+      if (saved_ahome)
+      {
+         setenv("AIMEE_HOME", saved_ahome, 1);
+         free(saved_ahome);
+      }
+      unlink(cfgpath);
+      rmdir(cfgdir);
+      snprintf(cfgdir, sizeof cfgdir, "%s/.config", dir);
+      rmdir(cfgdir);
+      rmdir(dir);
+
+      if (ban != 1 || git != 1 || wt != 1)
+      {
+         printf("fail-open regression: a default-ON enforcement dial read as 0 when "
+                "config_load failed (subagent_ban=%d require_aimee_git=%d "
+                "require_session_worktree=%d); all three default ON\n",
+                ban, git, wt);
+         return 1;
+      }
+      printf("accessor defaults: default-ON dials stay ON when config_load fails\n");
+   }
+
    free(cfg);
    return 0;
 }

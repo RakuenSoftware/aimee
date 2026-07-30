@@ -5,7 +5,6 @@
 #ifndef DEC_KB_DETECT_H
 #define DEC_KB_DETECT_H 1
 
-#include "config.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -18,7 +17,7 @@ extern "C"
     * In shadow mode (drift_detect_shadow_enabled == 1), emits a drift_signal
     * artifact when the score distribution shifts significantly.
     * Returns 0 on success, -1 on error. */
-   int kb_detect_observe(const config_t *cfg, double mean_dense_score, int n_candidates);
+   int kb_detect_observe(double mean_dense_score, int n_candidates);
 
 #ifdef __cplusplus
 }

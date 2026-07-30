@@ -1399,7 +1399,7 @@ int db2_demotion_profile_read(const char *memory_class, const char *scope_kind,
 
 /* kb_intel_payload's bandit.sample/close builders call these (kb_bandit.o unlinked):
  * stub sample as "disabled", reward as a no-op success. */
-int kb_bandit_sample(const config_t *cfg, const char *decision_point, const char *context_json,
+int kb_bandit_sample(const char *decision_point, const char *context_json,
                      const char (*arm_ids)[KB_BANDIT_MAX_ARM_ID], int n_arms, char *decision_id_out)
 {
    (void)cfg;

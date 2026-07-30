@@ -1138,7 +1138,7 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
     * a slow/failing sidecar never holds the txn open or poisons it (best-effort, the page
     * stays text-only on failure). tsr_attempted drives the per-document tsr_state marker
     * (ran | no_table | '' when off/absent). */
-   const char *tsr_ep = (cfg_ok && pdf_cfg.kb_pdf_tsr_enabled) ? kb_tsr_endpoint(&pdf_cfg) : "";
+   const char *tsr_ep = (cfg_ok && pdf_cfg.kb_pdf_tsr_enabled) ? config_tsr_endpoint() : "";
    int tsr_attempted = (tsr_ep[0] != '\0');
    int tsr_found_table = 0;
 

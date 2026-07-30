@@ -216,13 +216,15 @@ CFG_KEY_DESC = {
     "without git/gh credentials. Note the env strip also drops SSH_AUTH_SOCK (no agent-backed "
     "SSH to any host) and neuters the global/system git config (default on).",
     "delegate_sandbox": "Run a delegate's shell and file ops INSIDE its own container "
-    "(via the `docker` delegate backend) instead of in-process in aimee-server. Off (the "
-    "default) a delegate's `bash`/read/write/list run with aimee-server's filesystem and "
-    "environment. This is not yet a full sandbox on its own: the container still has a "
-    "network, so `require_aimee_git` and the credential strip remain the live boundary. The "
-    "delegate image must carry whatever the work needs (a toolchain, or `verify` fails). The "
-    "server logs OFF/INERT/ARMED at boot, probing `docker version` — check it, because an "
-    "unreachable daemon means every delegate runs on the host (default off).",
+    "(via the `docker` delegate backend) instead of in-process in aimee-server. On by "
+    "default; set `delegate_sandbox: false` to opt out, and a delegate's `bash`/read/write/"
+    "list then run with aimee-server's filesystem and environment. This is not yet a full "
+    "sandbox on its own: the container still has a network, so `require_aimee_git` and the "
+    "credential strip remain the live boundary. The delegate image must carry whatever the "
+    "work needs (a toolchain, or `verify` fails). The server logs OFF/INERT/ARMED at boot, "
+    "probing `docker version` — check it, because an unreachable daemon means every delegate "
+    "runs on the host; set `delegate_sandbox_require_isolation` to refuse rather than fall "
+    "back to un-isolated host execution.",
     "delegate_sandbox_package_access": "Runtime package-access policy for a `--network none` "
     "delegate sandbox. aimee always performs and logs the fetch (the delegate holds no outside "
     "socket); this selects how much: `proxy` (default) proxies package-manager fetches to any "

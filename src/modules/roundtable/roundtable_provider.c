@@ -28,10 +28,10 @@ static const aimee_panel_provider_t provider = {
     .release = provider_release,
 };
 
-int roundtable_provider_configure(const config_t *cfg)
+int roundtable_provider_configure(void)
 {
-   int enabled = cfg ? roundtable_module_enabled(cfg) : 0;
-   roundtable_runtime_configure(enabled ? cfg : NULL);
+   roundtable_runtime_configure();
+   int enabled = roundtable_module_enabled();
    if (!enabled)
    {
       if (aimee_panel_provider_available())

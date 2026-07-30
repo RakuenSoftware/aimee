@@ -667,6 +667,11 @@ static void config_set_defaults(config_t *cfg)
 
    /* Defaults */
    snprintf(cfg->db1_path, sizeof(cfg->db1_path), "%s", config_default_db1_path());
+   /* Default-ON: a delegate's shell and file ops run inside its own container rather
+    * than in-process with aimee-server's filesystem and environment. Non-flat (the
+    * parse below carries an env override), so the default lives here, not in
+    * config_flat_defaults[]. */
+   cfg->delegate_sandbox = 1;
    snprintf(cfg->delegate_sandbox_package_access, sizeof(cfg->delegate_sandbox_package_access),
             "proxy");
    cfg->compact_enabled = 1; /* default on; set before no-config early returns */
@@ -1389,10 +1394,10 @@ int config_load_file(config_t *cfg)
 
    /* Default-on; parse the explicit opt-out so `subagent_ban_enabled: false` loads. */
 
-   /* Delegate sandbox: default 0 (off) from the zeroed config_t, so only an
-    * explicit `delegate_sandbox: true` turns it on. A deploy that cannot easily
-    * write aimee.yaml (e.g. a container image whose config is baked) can enable
-    * it with AIMEE_DELEGATE_SANDBOX=1 in the environment — the env wins. */
+   /* Delegate sandbox: default 1 (on) from config_set_defaults, so an unconfigured
+    * install isolates delegates; only an explicit `delegate_sandbox: false` opts out.
+    * A deploy that cannot easily write aimee.yaml (e.g. a container image whose config
+    * is baked) can flip it with AIMEE_DELEGATE_SANDBOX=0/1 — the env wins. */
    item = cJSON_GetObjectItemCaseSensitive(root, "delegate_sandbox");
    if (cJSON_IsBool(item))
       cfg->delegate_sandbox = cJSON_IsTrue(item);
@@ -2039,8 +2044,16 @@ int config_field_read(size_t offset, size_t size, void *dst)
    if (!cfg)
       return -1;
    int rc = config_load(cfg);
-   if (rc == 0)
-      memcpy(dst, (const char *)cfg + offset, size);
+   /* Copy even when config_load FAILED. config_load_file applies config_set_defaults
+    * before it can return an error, so cfg holds each field's declared default — and the
+    * default is the only honest answer for a field we could not read.
+    *
+    * Copying only on rc == 0 made every generated accessor return its zero seed on a load
+    * failure, which silently INVERTS every default-ON dial: config_subagent_ban_enabled()
+    * would report "ban disabled", turning a fail-closed guard fail-open exactly when
+    * config is broken. Callers that must distinguish "read failed" from "value is 0"
+    * still have rc. */
+   memcpy(dst, (const char *)cfg + offset, size);
    free(cfg);
    return rc;
 }
@@ -2105,6 +2118,80 @@ int config_autonomy_lookup(const char *env_name, long *out)
       return 1;
    }
    return 0;
+}
+
+/* Structured-PDF sidecar endpoints. Config first, then the deployment env var, else ""
+ * (feature off). The env var is how a compose/container deployment points the KB at a
+ * sidecar it just started; the config key is the operator's persistent choice, so an
+ * explicitly configured command outranks it. (Deliberately the OPPOSITE precedence to
+ * config_embedding_command, which documents why the running embedder's announcement must
+ * win there.) Lives here so no KB caller reads the environment. */
+static const char *config_sidecar_endpoint(size_t offset, size_t size, const char *env_name,
+                                           char *buf, size_t buflen)
+{
+   buf[0] = '\0';
+   config_field_read(offset, size, buf);
+   buf[buflen - 1] = '\0';
+   if (buf[0])
+      return buf;
+   const char *env = getenv(env_name);
+   if (env && env[0])
+   {
+      snprintf(buf, buflen, "%s", env);
+      return buf;
+   }
+   buf[0] = '\0';
+   return buf;
+}
+
+const char *config_tsr_endpoint(void)
+{
+   static _Thread_local char buf[1024];
+   return config_sidecar_endpoint(offsetof(config_t, tsr_command),
+                                  sizeof(((config_t *)0)->tsr_command), "AIMEE_TSR_URL", buf,
+                                  sizeof(buf));
+}
+
+const char *config_ocr_endpoint(void)
+{
+   static _Thread_local char buf[1024];
+   return config_sidecar_endpoint(offsetof(config_t, ocr_command),
+                                  sizeof(((config_t *)0)->ocr_command), "AIMEE_OCR_URL", buf,
+                                  sizeof(buf));
+}
+
+int config_module_roundtable_enabled(void)
+{
+   /* Moved out of roundtable_activation.c, which read this env var itself and took a
+    * config_t to reach the tristate. Same truthy/falsey set and the same warn-then-off
+    * behavior for an unrecognized value. */
+   int env_default = 0;
+   const char *v = getenv("AIMEE_MODULE_ROUNDTABLE");
+   if (v && v[0])
+   {
+      if (strcasecmp(v, "1") == 0 || strcasecmp(v, "true") == 0 || strcasecmp(v, "on") == 0 ||
+          strcasecmp(v, "yes") == 0)
+         env_default = 1;
+      else if (strcasecmp(v, "0") == 0 || strcasecmp(v, "false") == 0 ||
+               strcasecmp(v, "off") == 0 || strcasecmp(v, "no") == 0)
+         env_default = 0;
+      else
+         fprintf(stderr, "aimee: invalid AIMEE_MODULE_ROUNDTABLE value; defaulting off\n");
+   }
+   int tristate = -1;
+   config_field_read(offsetof(config_t, module_roundtable),
+                     sizeof(((config_t *)0)->module_roundtable), &tristate);
+   return config_module_enabled(tristate, env_default);
+}
+
+int config_antipatterns_bypass(void)
+{
+   /* See config.h for why this stays env-only. Value-checked and fail-closed. */
+   const char *v = getenv("AIMEE_ANTIPATTERNS_BYPASS");
+   if (!v || !v[0])
+      return 0;
+   return strcasecmp(v, "1") == 0 || strcasecmp(v, "true") == 0 || strcasecmp(v, "on") == 0 ||
+          strcasecmp(v, "yes") == 0;
 }
 
 int config_reload(void)

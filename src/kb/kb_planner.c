@@ -33,20 +33,22 @@ static int run_sidecar(const char *cmd, const char *request_json, char **out_jso
    return 0;
 }
 
-int kb_planner_search(const config_t *cfg, const char *request_json, char **out_json,
+int kb_planner_search(const char *request_json, char **out_json,
                       size_t *out_len)
 {
-   if (!cfg || !cfg->planner_search_command[0])
+   const char *cmd = config_planner_search_command();
+   if (!cmd || !cmd[0])
       return -1;
-   return run_sidecar(cfg->planner_search_command, request_json, out_json, out_len);
+   return run_sidecar(cmd, request_json, out_json, out_len);
 }
 
-int kb_planner_validate(const config_t *cfg, const char *request_json, char **out_json,
+int kb_planner_validate(const char *request_json, char **out_json,
                         size_t *out_len)
 {
-   if (!cfg || !cfg->constraint_solver_command[0])
+   const char *cmd = config_constraint_solver_command();
+   if (!cmd || !cmd[0])
       return -1;
-   return run_sidecar(cfg->constraint_solver_command, request_json, out_json, out_len);
+   return run_sidecar(cmd, request_json, out_json, out_len);
 }
 
 int kb_planner_artifact_write(const char *kind, const char *scope_id, const char *payload,

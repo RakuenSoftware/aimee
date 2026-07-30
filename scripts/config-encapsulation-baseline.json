@@ -113,23 +113,11 @@
       "decls": 1,
       "loads": 0
     },
-    "src/headers/computer_use.h": {
-      "decls": 1,
-      "loads": 0
-    },
     "src/headers/fidelity_check.h": {
       "decls": 1,
       "loads": 0
     },
     "src/headers/kb_curator_provider.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/headers/kb_ocr_sidecar.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/headers/kb_tsr_sidecar.h": {
       "decls": 1,
       "loads": 0
     },
@@ -169,24 +157,12 @@
       "decls": 4,
       "loads": 4
     },
-    "src/kb/kb_bandit.c": {
-      "decls": 2,
-      "loads": 0
-    },
     "src/kb/kb_blob_store.c": {
       "decls": 1,
       "loads": 1
     },
     "src/kb/kb_calibrate.c": {
       "decls": 3,
-      "loads": 0
-    },
-    "src/kb/kb_demote.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/kb/kb_detect.c": {
-      "decls": 1,
       "loads": 0
     },
     "src/kb/kb_doc_pdf.c": {
@@ -198,8 +174,8 @@
       "loads": 7
     },
     "src/kb/kb_intel_payload.c": {
-      "decls": 4,
-      "loads": 4
+      "decls": 2,
+      "loads": 2
     },
     "src/kb/kb_main.c": {
       "decls": 5,
@@ -216,18 +192,6 @@
     "src/kb/kb_mining.c": {
       "decls": 1,
       "loads": 1
-    },
-    "src/kb/kb_ocr_sidecar.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/kb/kb_planner.c": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/kb/kb_ranker.c": {
-      "decls": 2,
-      "loads": 0
     },
     "src/kb/kb_ranker_fit.c": {
       "decls": 1,
@@ -246,8 +210,8 @@
       "loads": 4
     },
     "src/kb/kb_service_agent.c": {
-      "decls": 2,
-      "loads": 2
+      "decls": 1,
+      "loads": 1
     },
     "src/kb/kb_service_artifacts.c": {
       "decls": 1,
@@ -261,10 +225,6 @@
       "decls": 5,
       "loads": 3
     },
-    "src/kb/kb_service_memory.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/kb/kb_service_workers.c": {
       "decls": 3,
       "loads": 4
@@ -277,16 +237,8 @@
       "decls": 1,
       "loads": 0
     },
-    "src/kb/kb_tsr_sidecar.c": {
-      "decls": 1,
-      "loads": 0
-    },
     "src/kb/memory_rewrite_llm.c": {
       "decls": 1,
-      "loads": 0
-    },
-    "src/kb_bandit.h": {
-      "decls": 2,
       "loads": 0
     },
     "src/kb_calibrate.h": {
@@ -295,22 +247,6 @@
     },
     "src/kb_curator_provider.c": {
       "decls": 1,
-      "loads": 0
-    },
-    "src/kb_demote.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/kb_detect.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/kb_planner.h": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/kb_ranker.h": {
-      "decls": 2,
       "loads": 0
     },
     "src/kb_ranker_fit.h": {
@@ -369,10 +305,6 @@
       "decls": 2,
       "loads": 0
     },
-    "src/modules/execution-policy/execution_policy.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/modules/git/git_verify_ops.c": {
       "decls": 2,
       "loads": 2
@@ -382,8 +314,8 @@
       "loads": 2
     },
     "src/modules/guardrails/guardrails_orchestrator.c": {
-      "decls": 7,
-      "loads": 7
+      "decls": 1,
+      "loads": 1
     },
     "src/modules/kb-synthesis/kb_curator_drain.c": {
       "decls": 12,
@@ -525,14 +457,6 @@
       "decls": 10,
       "loads": 0
     },
-    "src/modules/roundtable/roundtable_activation.c": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/modules/roundtable/roundtable_activation.h": {
-      "decls": 3,
-      "loads": 0
-    },
     "src/modules/roundtable/roundtable_preset.c": {
       "decls": 4,
       "loads": 2
@@ -542,7 +466,7 @@
       "loads": 0
     },
     "src/modules/roundtable/roundtable_provider.c": {
-      "decls": 3,
+      "decls": 2,
       "loads": 0
     },
     "src/modules/routing/routing.c": {
@@ -610,8 +534,8 @@
       "loads": 8
     },
     "src/server/agent_tools.c": {
-      "decls": 2,
-      "loads": 2
+      "decls": 1,
+      "loads": 1
     },
     "src/server/aimee_ir_serve.c": {
       "decls": 1,
@@ -623,10 +547,6 @@
     },
     "src/server/aux_router.c": {
       "decls": 2,
-      "loads": 0
-    },
-    "src/server/computer_use.c": {
-      "decls": 1,
       "loads": 0
     },
     "src/server/dashboard_server.c": {
@@ -782,7 +702,7 @@
       "loads": 1
     },
     "src/tests/test_bandit.c": {
-      "decls": 3,
+      "decls": 1,
       "loads": 0
     },
     "src/tests/test_bus_config_autonomy.c": {
@@ -930,7 +850,7 @@
       "loads": 1
     },
     "src/tests/test_kb_http_routes.c": {
-      "decls": 11,
+      "decls": 10,
       "loads": 1
     },
     "src/tests/test_kb_maintenance.c": {
@@ -974,7 +894,7 @@
       "loads": 3
     },
     "src/tests/test_planner.c": {
-      "decls": 4,
+      "decls": 2,
       "loads": 0
     },
     "src/tests/test_prompts.c": {
@@ -1051,8 +971,8 @@
     }
   },
   "totals": {
-    "decls": 922,
-    "files": 262,
-    "loads": 470
+    "decls": 877,
+    "files": 242,
+    "loads": 458
   }
 }

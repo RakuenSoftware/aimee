@@ -182,7 +182,17 @@ def main():
     )
 
     h = [banner, "#ifndef DEC_CONFIG_ACCESSORS_H", "#define DEC_CONFIG_ACCESSORS_H 1", ""]
-    h.append("/* Scalars. Return 0 when no config can be read (fail closed). */")
+    # Self-contained: int64_t appears in these signatures, and a caller that includes
+    # only this header (the point of the accessor surface) must not have to include
+    # config.h first to get it.
+    h.append("#include <stdint.h>")
+    h.append("")
+    h.append(
+        "/* Scalars. When config cannot be read, an accessor returns the field's DECLARED\n"
+        " * DEFAULT (config_field_read copies the defaults config_set_defaults applied), NOT\n"
+        " * zero. Returning 0 would INVERT every default-ON dial — reporting a fail-closed\n"
+        " * guard as disabled exactly when config is broken. */"
+    )
     for _, name, ctype in scalars:
         h.append(f"{ctype} config_{name}(void);")
     h.append("")

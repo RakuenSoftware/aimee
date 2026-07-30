@@ -10,7 +10,12 @@
 #ifndef DEC_CONFIG_ACCESSORS_H
 #define DEC_CONFIG_ACCESSORS_H 1
 
-/* Scalars. Return 0 when no config can be read (fail closed). */
+#include <stdint.h>
+
+/* Scalars. When config cannot be read, an accessor returns the field's DECLARED
+ * DEFAULT (config_field_read copies the defaults config_set_defaults applied), NOT
+ * zero. Returning 0 would INVERT every default-ON dial — reporting a fail-closed
+ * guard as disabled exactly when config is broken. */
 int config_db2_pool_size(void);
 int config_workspace_count(void);
 int config_subagent_ban_enabled(void);

@@ -1179,9 +1179,10 @@ typedef struct config
     * are unaffected until an operator writes the `modules:` block.
     * CONTRIBUTORS: do not resolve module enablement inline at a wire site. For legacy gateway-stage
     * modules, call config_module_enabled(cfg->module_X, <module env predicate>). For roundtable,
-    * call the owner-provided roundtable_module_enabled(cfg), which applies modules.roundtable,
-    * then AIMEE_MODULE_ROUNDTABLE, then the descriptor default. Keeping resolution behind one owner
-    * API leaves one place for a future FORCE tier. */
+    * call config_module_roundtable_enabled(), which applies modules.roundtable, then
+    * AIMEE_MODULE_ROUNDTABLE, then the descriptor default — and, per the config_t encapsulation
+    * rule, reads the env var HERE so the roundtable module holds neither a config_t nor a getenv.
+    * Keeping resolution behind one owner API leaves one place for a future FORCE tier. */
    int module_memory;
    int module_governance;
    int module_delegates;
@@ -2181,6 +2182,29 @@ void config_reload_register_reapplier(config_reapplier_fn fn);
  * (e.g. MAX_TURNS) so the caller falls back to its own getenv default. Replaces the unsafe
  * setenv env-bridge for live reload: no cross-thread setenv, wfe reads the seqlock snapshot. */
 int config_autonomy_lookup(const char *env_name, long *out);
+
+/* Anti-pattern guardrail escape hatch. Deliberately env-only and NOT a config key, on the
+ * web_egress doctrine (src/posix/web_egress.c): a switch that DISABLES a guard must require
+ * touching the deployment, not the running config, because config.set is reachable from
+ * inside the running system. Config still owns the read, so no consumer calls getenv.
+ *
+ * Returns 1 only for an explicitly truthy AIMEE_ANTIPATTERNS_BYPASS (1/true/on/yes, any
+ * case). This is VALUE-checked, not presence-checked: the guard previously tested
+ * `!getenv(...)`, so `AIMEE_ANTIPATTERNS_BYPASS=0` disabled the anti-pattern check — the
+ * opposite of what setting 0 means. Unrecognized values fail CLOSED (guard stays on). */
+int config_antipatterns_bypass(void);
+
+/* Structured-PDF sidecar endpoints: the config key (tsr_command / ocr_command) if set, else
+ * the deployment env var (AIMEE_TSR_URL / AIMEE_OCR_URL), else "" meaning the feature is off.
+ * Config owns the precedence so no KB caller reads the environment. Returns a thread-local
+ * buffer valid until the next call to the SAME accessor on this thread; never NULL. */
+const char *config_tsr_endpoint(void);
+const char *config_ocr_endpoint(void);
+
+/* Effective roundtable-module activation: the modules.roundtable tristate resolved against
+ * AIMEE_MODULE_ROUNDTABLE via config_module_enabled. Config owns the env read (an invalid
+ * value warns and defaults off) so the roundtable module holds no config_t and no getenv. */
+int config_module_roundtable_enabled(void);
 /* Force a read from DISK, bypassing the live snapshot. Use for a read-modify-save that must
  * reflect the current on-disk file (e.g. config.set) so it never clobbers an external edit,
  * and internally by config_reload. Ordinary readers should use config_load. */
