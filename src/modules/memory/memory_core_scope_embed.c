@@ -9,6 +9,7 @@
  * (was memory_core_scope_embed.inc, textually included only to stay under the
  * line-check ceiling). Cross-TU declarations live in the module header. */
 #include "aimee.h"
+#include "config_database.h" /* config_embedding_dim_current — the one width declaration */
 #include "memory_context_internal.h"
 #include "memory_rewrite_llm.h" /* weak in-process rewrite seam (KB build only) */
 #include <math.h>
@@ -373,7 +374,12 @@ static int memory_embed_text_builtin(const char *text, float *out, int max_dim)
 {
    if (!text || !out || max_dim <= 0)
       return 0;
-   int dim = max_dim < 384 ? max_dim : 384;
+   /* The builtin serves before an embedder is selected, so its vectors land in the
+    * same columns the schema was sized for. Take that width from config — the one
+    * place it is declared — rather than repeating a number here, which is how the
+    * builtin and the schema could end up disagreeing. */
+   int width = config_embedding_dim_current();
+   int dim = max_dim < width ? max_dim : width;
    for (int i = 0; i < dim; i++)
       out[i] = 0.0f;
 
@@ -431,8 +437,16 @@ static int memory_embed_text_builtin(const char *text, float *out, int max_dim)
    return dim;
 }
 
+/* Names the polarity for the gateway's per-model prefix lookup. The gateway owns the
+ * prefixes themselves; we only say which side this text is. */
+const char *memory_embed_input_type_name(embed_input_type_t input_type)
+{
+   return input_type == EMBED_INPUT_QUERY ? "query" : "document";
+}
+
 /* Run embedding command: pipes text on stdin, reads JSON float array from stdout. */
-int memory_embed_text(const char *text, const char *command, float *out, int max_dim)
+int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
+                      float *out, int max_dim)
 {
    if (!text || !out || max_dim <= 0)
    {
@@ -440,6 +454,7 @@ int memory_embed_text(const char *text, const char *command, float *out, int max
       return 0;
    }
 
+   /* The builtin embedder is lexical feature hashing — it has no prefixes to apply. */
    if (!command || !command[0] || strcmp(command, "builtin") == 0)
    {
       int dim = memory_embed_text_builtin(text, out, max_dim);
@@ -460,9 +475,14 @@ int memory_embed_text(const char *text, const char *command, float *out, int max
    size_t buf_len = 0;
    if (memory_embed_command_is_http(command))
    {
-      /* In-process HTTP embed: POST raw text to {base}/embed, no fork. */
+      /* In-process HTTP embed: POST raw text to {base}/embed, no fork. The polarity
+       * rides in the query string because the body is the raw text itself; the status is
+       * captured for the embedder health/breaker tracking. */
+      char path[64];
+      snprintf(path, sizeof(path), "/embed?input_type=%s",
+               memory_embed_input_type_name(input_type));
       int http_status = -1;
-      if (memory_embed_http_post_status(command, "/embed", text, &buf, &http_status) != 0 || !buf)
+      if (memory_embed_http_post_status(command, path, text, &buf, &http_status) != 0 || !buf)
       {
          aimee_log(LOG_WARN, "memory", "embedding HTTP request failed");
          free(buf);
@@ -564,7 +584,7 @@ int memory_embed(int64_t memory_id, const char *command)
 
    float vec[EMBED_MAX_DIM];
    const char *model = (command && command[0]) ? command : "builtin";
-   int dim = memory_embed_text(text, model, vec, EMBED_MAX_DIM);
+   int dim = memory_embed_text(text, model, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
    if (dim <= 0)
       return -1;
 

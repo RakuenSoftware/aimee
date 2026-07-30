@@ -311,7 +311,8 @@ static int kb_handle_memory_verify(int fd, cJSON *req)
    (void)db2_kb_service_collect_verify_snapshot(&db2_snapshot);
 
    float probe_vec[EMBED_MAX_DIM];
-   int embedder_dim = memory_embed_text("probe", embed_cmd, probe_vec, EMBED_MAX_DIM);
+   int embedder_dim =
+       memory_embed_text("probe", embed_cmd, EMBED_INPUT_DOCUMENT, probe_vec, EMBED_MAX_DIM);
 
    int timings_trials = 0;
    int64_t timings_total_us = 0;
@@ -324,7 +325,7 @@ static int kb_handle_memory_verify(int fd, cJSON *req)
          float qvec[EMBED_MAX_DIM];
          char probe[64];
          snprintf(probe, sizeof(probe), "probe query %d", i);
-         int qdim = memory_embed_text(probe, "builtin", qvec, EMBED_MAX_DIM);
+         int qdim = memory_embed_text(probe, "builtin", EMBED_INPUT_QUERY, qvec, EMBED_MAX_DIM);
          if (qdim <= 0)
             continue;
          int64_t ids[8];

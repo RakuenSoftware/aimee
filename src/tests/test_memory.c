@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <math.h>
 #include "aimee.h"
+#include "config_database.h" /* config_embedding_dim_current — the one width declaration */
 #include "db.h"
 #include "db1.h"
 #include "db2.h"
@@ -1678,14 +1679,17 @@ static void test_memory_embed_records_embedder_version(void)
    FILE *fp = fopen(cfgpath, "w");
    assert(fp != NULL);
    fprintf(fp, "embedding_command: builtin\n"
-               "embedding_model: nomic-embed-text-v1.5\n"
+               "embedding_model: some-external-embedder\n"
                "embedding_dim: 768\n");
    fclose(fp);
 
    setup();
-   /* This test embeds with the builtin embedder, which emits 384-dim vectors;
-    * align the active dim so the upsert dim guard accepts them. */
-   db2_set_embedding_dim(384);
+   /* The builtin fills the DEPLOYMENT's width (config is the single place that is
+    * declared), not a width of its own — so the active dim comes from the same
+    * config this test just wrote (embedding_dim: 768) rather than a literal here.
+    * Pinning a different number would make the test contradict its own config and
+    * assert a coupling that no longer exists. */
+   db2_set_embedding_dim(config_embedding_dim_current());
    memory_t mem;
    assert(memory_insert(TIER_L2, KIND_FACT, "embed-version", "test content", 0.9, "", &mem) == 0);
    assert(memory_embed(mem.id, "builtin") == 0);
@@ -2547,10 +2551,10 @@ int main(void)
       memory_embedder_dependency_reset_for_tests();
       memory_embedder_dependency_set_clock_for_tests(embedder_test_clock);
       g_embedder_now_ms = 100000;
-      int dim = memory_embed_text("test", "", vec, 4);
+      int dim = memory_embed_text("test", "", EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 4);
 
-      dim = memory_embed_text("test", NULL, vec, 4);
+      dim = memory_embed_text("test", NULL, EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 4);
    }
 
@@ -2566,7 +2570,7 @@ int main(void)
       mock_agent_http_reset();
       mock_agent_http_set_post_handler(embedder_unauthorized_post);
       memory_embedder_dependency_reset_for_tests();
-      int dim = memory_embed_text("ignored", "http://embedder", vec, 4);
+      int dim = memory_embed_text("ignored", "http://embedder", EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 0);
       assert(memory_embedder_last_result_unauthorized());
       memory_embedder_health_t auth_health;
@@ -2580,7 +2584,8 @@ int main(void)
        * proving the float32 contract end-to-end through platform_exec_pipe. */
       for (int i = 0; i < 4; i++)
          vec[i] = -99.0f;
-      dim = memory_embed_text("ignored", "printf '[0.5, 0.25, 0.125, 0.0625]'", vec, 4);
+      dim = memory_embed_text("ignored", "printf '[0.5, 0.25, 0.125, 0.0625]'",
+                              EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 4);
       assert(fabs(vec[0] - 0.5) < 1e-6 && fabs(vec[1] - 0.25) < 1e-6);
       assert(fabs(vec[2] - 0.125) < 1e-6 && fabs(vec[3] - 0.0625) < 1e-6);
@@ -2589,21 +2594,21 @@ int main(void)
        * corruption): dim is 0 and the sentinel survives. */
       for (int i = 0; i < 4; i++)
          vec[i] = -99.0f;
-      dim = memory_embed_text("ignored", "sh -c 'exit 1'", vec, 4);
+      dim = memory_embed_text("ignored", "sh -c 'exit 1'", EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 0);
       assert(vec[0] == -99.0f);
 
       /* A missing sidecar binary (sh exit 127) is a failure, not a corruption. */
       for (int i = 0; i < 4; i++)
          vec[i] = -99.0f;
-      dim = memory_embed_text("ignored", "/nonexistent/embedder-xyz", vec, 4);
+      dim = memory_embed_text("ignored", "/nonexistent/embedder-xyz", EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 0);
       assert(vec[0] == -99.0f);
 
       /* Non-JSON stdout is rejected, again without touching the vector. */
       for (int i = 0; i < 4; i++)
          vec[i] = -99.0f;
-      dim = memory_embed_text("ignored", "printf 'not json at all'", vec, 4);
+      dim = memory_embed_text("ignored", "printf 'not json at all'", EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 0);
       assert(vec[0] == -99.0f);
 
@@ -2614,7 +2619,7 @@ int main(void)
       memory_embedder_health(&health);
       assert(strcmp(health.state, "open") == 0);
       assert(health.retry_after_ms >= 1000 && health.retry_after_ms <= 1250);
-      dim = memory_embed_text("ignored", "printf '[1, 0, 0, 0]'", vec, 4);
+      dim = memory_embed_text("ignored", "printf '[1, 0, 0, 0]'", EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 0);
       memory_embedder_health(&health);
       assert(health.suppressed_calls == 1);
@@ -2624,14 +2629,14 @@ int main(void)
        * old transport outage recovered. Preserve unauthorized and close the
        * transient breaker so the next call is not misreported as unavailable. */
       mock_agent_http_set_post_handler(embedder_unauthorized_post);
-      dim = memory_embed_text("ignored", "http://embedder", vec, 4);
+      dim = memory_embed_text("ignored", "http://embedder", EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 0);
       assert(memory_embedder_last_result_unauthorized());
       memory_embedder_health(&health);
       assert(strcmp(health.state, "closed") == 0 && health.failure_streak == 0);
       mock_agent_http_reset();
 
-      dim = memory_embed_text("ignored", "printf '[1, 0, 0, 0]'", vec, 4);
+      dim = memory_embed_text("ignored", "printf '[1, 0, 0, 0]'", EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 4);
       memory_embedder_health(&health);
       assert(strcmp(health.state, "closed") == 0 && health.available == 1);
@@ -2785,60 +2790,23 @@ int main(void)
       }
    }
 
-   /* --- cross_encoder: score_parts initialises cross_encoder to 0 --- */
-   {
-      memory_score_parts_t parts;
-      memset(&parts, 0, sizeof(parts));
-      assert(parts.cross_encoder == 0.0);
-   }
-
-   /* --- cross_encoder: score_parts survives memset --- */
-   {
-      memory_score_parts_t parts;
-      memset(&parts, 0, sizeof(parts));
-      parts.lexical = 1.5;
-      parts.semantic = 0.8;
-      parts.cross_encoder = 0.92;
-      parts.total = 3.22;
-      assert(parts.cross_encoder >= 0.91 && parts.cross_encoder <= 0.93);
-   }
-
-   /* --- memory_score_parts_t: new explain fields (hybrid_total,
-    *     blended_total, rerank_mix) exist and round-trip --- *
+   /* --- memory_score_parts_t: the explain fields round-trip --- *
     *
-    * The proposal's acceptance criterion calls for `aimee memory search
-    * --explain` to surface hybrid vs rerank vs blended scores so operators
-    * can see the rerank contribution per candidate.  These fields land
-    * on the score_parts struct; the JSON serializer (in cmd_memory_embed.c)
-    * is conditional so non-reranked pipelines stay byte-identical to the
-    * pre-change JSON. */
+    * `aimee memory search --explain` surfaces the hybrid score alongside the final
+    * total per candidate. The JSON serializer (cmd_memory_embed.c) emits them only
+    * when non-zero, so an unscored pipeline stays byte-identical. */
    {
       memory_score_parts_t parts;
       memset(&parts, 0, sizeof(parts));
-      /* Baseline: all three default to 0.0. */
       assert(parts.hybrid_total == 0.0);
       assert(parts.blended_total == 0.0);
-      assert(parts.rerank_mix == 0.0);
 
-      /* Simulated rerank: fields round-trip. */
-      parts.cross_encoder = 0.92;
       parts.hybrid_total = 4.1;
       parts.blended_total = 5.3;
-      parts.rerank_mix = 0.7;
       parts.total = parts.blended_total;
       assert(parts.hybrid_total == 4.1);
       assert(parts.blended_total == 5.3);
-      assert(parts.rerank_mix == 0.7);
       assert(parts.total == parts.blended_total);
-   }
-
-   /* --- memory_rerank_enabled: defaults to 0 (disabled) --- */
-   {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      assert(cfg.memory_rerank_enabled == 0);
-      assert(cfg.memory_rerank_command[0] == '\0');
-      assert(cfg.memory_rerank_top_k == 0);
    }
 
    /* --- memory_query_expansion_mode: empty means lexical (default) --- */
@@ -2849,7 +2817,7 @@ int main(void)
       assert(strcmp(cfg.memory_query_expansion_mode, "semantic") != 0);
    }
 
-   /* --- memory_find_facts_scoped: returns results (smoke test for reranker path) --- */
+   /* --- memory_find_facts_scoped: returns results --- */
    {
       setup();
       memory_t m1, m2, m3;

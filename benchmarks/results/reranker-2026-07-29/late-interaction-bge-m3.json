@@ -1,0 +1,17 @@
+{
+  "model": "BAAI/bge-m3 (ColBERT multi-vector, late interaction)",
+  "cases_scored": 800,
+  "candidates_per_case": 20,
+  "ndcg_at_10": 0.7014135858847389,
+  "mrr_at_10": 0.6217976190476184,
+  "recall_at_1": 0.43125,
+  "recall_at_5": 0.855,
+  "recall_at_10": 0.94625,
+  "INDEX_seconds_total": 103.28563796496019,
+  "INDEX_seconds_per_doc": 0.010604274945067781,
+  "QUERY_seconds_per_query": 0.05793438046472147,
+  "  query_encode_s": 0.030882723273098236,
+  "  maxsim_s": 0.027051657191623234,
+  "storage_bytes_per_doc": 743251.1605749486,
+  "storage_GB_per_million_docs": 743.2511605749486
+}

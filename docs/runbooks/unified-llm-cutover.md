@@ -1,7 +1,9 @@
 # Cut over to `aimee-llm`
 
-This maintenance operation moves embedding, reranking, and synthesis to the unified inference
-service. A model or embedding-width change requires controlled corpus re-embedding.
+This maintenance operation moves embedding and synthesis to the unified inference
+service. A model, pooling, prefix, or embedding-width change requires controlled corpus
+re-embedding; the KB enforces the first three through the `/health` `serving_id` guard and the
+last through the recorded dimension (docs/retrieval-stack.md).
 
 ## Gate in staging
 
@@ -41,7 +43,7 @@ Deleting rows alone does not change a PostgreSQL vector column's dimension.
 - every vector has the new dimension and no NaN/all-zero value;
 - sampled source IDs map to the correct vector rows;
 - baseline recall stays above the quality gate;
-- reranking and synthesis identify the intended models;
+- synthesis identifies the intended model;
 - a killed inference child produces explicit degradation and recovery;
 - queue backlog drains after restart;
 - latency and resident memory remain within the tier budget.

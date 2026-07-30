@@ -77,13 +77,10 @@ services:
       # Passed through to the managed services when a role is placed local (tier,
       # images). ONE LLM image serves every tier — it is model-less and downloads
       # what the wizard selected — so there is no separate CPU image to override.
-      AIMEE_LLM_IMAGE: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:${AIMEE_IMAGE_TAG:-latest}}
       AIMEE_KB_IMAGE: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:${AIMEE_IMAGE_TAG:-latest}}
       # Separate one-shot image containing the offline root provisioner and JWKS
       # publisher. These binaries never enter the ordinary KB/server images.
       AIMEE_AUTHORITY_BOOTSTRAP_IMAGE: ${AIMEE_AUTHORITY_BOOTSTRAP_IMAGE:-ghcr.io/rakuensoftware/aimee-authority-bootstrap:${AIMEE_IMAGE_TAG:-latest}}
-      AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-cpu}
-      AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}
       # A managed-LLM adoption credential, when needed, uses the same disposable
       # Vault bootstrap stream before this long-lived container is created.
       # "Sign in with OAuth" client IDs (public; see oauth_defaults.h). Set the

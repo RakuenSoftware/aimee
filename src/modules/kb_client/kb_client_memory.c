@@ -416,10 +416,8 @@ static void kbc_memory_diagnostic_from_json(cJSON *j, memory_diagnostic_t *out)
       PICK(salience);
       PICK(surprise);
       PICK(pagerank);
-      PICK(cross_encoder);
       PICK(hybrid_total);
       PICK(blended_total);
-      PICK(rerank_mix);
       PICK(total);
 #undef PICK
    }

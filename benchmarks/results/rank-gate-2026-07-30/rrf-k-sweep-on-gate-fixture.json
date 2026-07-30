@@ -1,0 +1,27 @@
+{
+  "what": "rrf_k sweep over the shipped ranker promotion-gate fixture",
+  "why": "Establish whether the fixture that gates ranker promotion can detect the fusion effect the 2026-07-29/30 retrieval campaign identified as the largest available win.",
+  "fixture": "benchmarks/rank/kb_hybrid/queries.json",
+  "fixture_shape": {
+    "n_queries": 5,
+    "candidates_per_query": [3, 3, 2, 4, 3]
+  },
+  "ndcg_cutoff": 5,
+  "sweep": {
+    "1":   {"ndcg@5": 0.7000, "mrr": 0.6667, "p@5": 0.28},
+    "5":   {"ndcg@5": 0.7000, "mrr": 0.6667, "p@5": 0.28},
+    "10":  {"ndcg@5": 0.7000, "mrr": 0.6667, "p@5": 0.28},
+    "20":  {"ndcg@5": 0.7000, "mrr": 0.6667, "p@5": 0.28},
+    "60":  {"ndcg@5": 0.7000, "mrr": 0.6667, "p@5": 0.28},
+    "120": {"ndcg@5": 0.7000, "mrr": 0.6667, "p@5": 0.28}
+  },
+  "finding": "rrf_k is completely inert. Every candidate appears in both retrieval legs (2-4 candidates per query), so pool recall is 1.0 by construction and the rank-discount constant cannot reorder anything.",
+  "consequence": "This fixture was RANK_FIT_DEFAULT_BENCHMARK in src/kb/kb_ranker_fit.c with RANK_FIT_LIFT_EPSILON=1e-6. It could not detect a fusion regression and could not distinguish the rrf_k=10 vs rrf_k=60 effect the 10k-query campaign measured. Any model whose mean NDCG@5 rose by one part in a million was promoted to production.",
+  "resolution": "Gate rewritten 2026-07-30: minimum query count (RANK_FIT_MIN_BENCH_QUERIES=30, else 'benchmark_underpowered'), lift epsilon raised to 1e-3, and a paired per-query win/loss majority now required. See docs/proposals/pending/learning-to-rank-from-interactions.md.",
+  "replay_tool_reproduction": {
+    "tool": "tools/rank_replay.py",
+    "note": "Confirms tool and fixture are intact and match the committed baseline_result.json; the fixture is simply too small to measure ranking quality.",
+    "mode_rrf":    {"ndcg@5": 0.7000, "mrr": 0.6667, "p@5": 0.28, "baseline_delta_ndcg@5": 0.0, "decision": "no_rollout"},
+    "mode_linear": {"ndcg@5": 0.8000, "mrr": 0.8000, "p@5": 0.28, "baseline_delta_ndcg@5": 0.1, "decision": "rollout"}
+  }
+}

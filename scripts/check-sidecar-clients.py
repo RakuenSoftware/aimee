@@ -47,6 +47,21 @@ def _run(script: str, env: dict[str, str], stdin: str) -> str:
     return proc.stdout
 
 
+def _run_args(script: str, env: dict[str, str], args: list[str]) -> str:
+    """Run a sidecar with argv flags and no stdin (the probe form the kb execs)."""
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPTS / script), *args],
+        capture_output=True,
+        text=True,
+        env={**os.environ, **env},
+        timeout=30,
+    )
+    if proc.returncode != 0:
+        raise AssertionError(f"{script} {' '.join(args)} exited {proc.returncode}: "
+                             f"{proc.stderr[:300]}")
+    return proc.stdout
+
+
 def _run_missing_managed_auth(script: str, endpoint_key: str, url: str, stdin: str) -> None:
     env = {
         **os.environ,
@@ -105,43 +120,54 @@ def check_embed_remote() -> None:
     print("  embed-remote.py: ok")
 
 
-def check_rerank_remote() -> None:
-    token = "kb-to-llm-test-token"
+def check_embed_remote_serving_id() -> None:
+    """--serving-id is a load-bearing contract, not a convenience.
 
-    class RerankStub(BaseHTTPRequestHandler):
-        def log_message(self, *a):
+    The kb's vector-space guard cannot GET /health itself in the shipped container — it
+    reaches the gateway through this script — so it execs `--serving-id` and treats the
+    result as the identity to record against the corpus. Three behaviours matter, and
+    each of them was a bug at some point:
+      - a reported identity is printed verbatim (the guard compares it as a string);
+      - an endpoint that reports NO identity exits 0 with empty output, so the guard
+        stays a no-op instead of refusing on a value the endpoint never had;
+      - it does not require status=ok, because the identity is registry data and must be
+        answerable while the model is still loading.
+    """
+    state = {"status": "ok", "serving_id": "bekko-a25m/8721341054416418"}
+
+    class HealthStub(BaseHTTPRequestHandler):
+        def log_message(self, *a):  # quiet
             pass
 
-        def do_POST(self):
-            assert self.path.rstrip("/") == "/rerank", self.path
-            assert self.headers.get("authorization") == f"Bearer {token}"
-            length = int(self.headers.get("content-length", "0") or "0")
-            pairs = json.loads(self.rfile.read(length))
-            body = json.dumps([0.75 for _ in pairs]).encode()
-            self.send_response(200)
+        def do_GET(self):
+            assert self.path.rstrip("/") == "/health", self.path
+            payload = {k: v for k, v in state.items() if v is not None}
+            body = json.dumps(payload).encode()
+            self.send_response(200 if state["status"] == "ok" else 503)
             self.send_header("content-type", "application/json")
             self.send_header("content-length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
 
-    server, url = _serve(RerankStub)
+    server, url = _serve(HealthStub)
     try:
-        out = _run(
-            "rerank-remote.py",
-            {
-                "AIMEE_RERANKER_URL": url,
-                "AIMEE_LLM_AUTH_TOKEN": token,
-                "AIMEE_LLM_AUTH_REQUIRED": "1",
-            },
-            '[["query", "candidate"]]',
-        )
-        assert json.loads(out) == [0.75]
-        _run_missing_managed_auth(
-            "rerank-remote.py", "AIMEE_RERANKER_URL", url, '[["query", "candidate"]]'
-        )
+        env = {"AIMEE_EMBEDDER_URL": url}
+        out = _run_args("embed-remote.py", env, ["--serving-id"])
+        assert out.strip() == state["serving_id"], repr(out)
+
+        # Still loading: the identity is registry data, so it must answer anyway.
+        state["status"] = "loading"
+        out = _run_args("embed-remote.py", env, ["--serving-id"])
+        assert out.strip() == "bekko-a25m/8721341054416418", repr(out)
+
+        # An endpoint predating the field: empty output, exit 0 -> guard inactive.
+        state["status"] = "ok"
+        state["serving_id"] = None
+        out = _run_args("embed-remote.py", env, ["--serving-id"])
+        assert out.strip() == "", repr(out)
     finally:
         server.shutdown()
-    print("  rerank-remote.py: ok")
+    print("  embed-remote.py --serving-id: ok")
 
 
 def check_llm_chat() -> None:
@@ -285,7 +311,7 @@ def check_no_baked_endpoint_defaults() -> None:
 def main() -> int:
     print("sidecar-clients:")
     check_embed_remote()
-    check_rerank_remote()
+    check_embed_remote_serving_id()
     check_llm_chat()
     check_llm_chat_reasoning_split()
     check_no_baked_endpoint_defaults()

@@ -1,6 +1,7 @@
 # Inference tiers
 
-One `aimee-llm` image serves embedding, reranking, and synthesis. `AIMEE_LLM_TIER` selects the model
+Synthesis runs against an external OpenAI-compatible endpoint; the knowledge base embeds
+in-container and needs no inference service. The tiers below describe the synth model
 set and concurrency at runtime.
 
 | Tier | Intended host | Embedding width | Synthesis shape |
@@ -49,6 +50,6 @@ under the expected mixed load.
 ## CPU and GPU separation
 
 Cheap lexical/index work stays in PostgreSQL and KB workers. Model work goes to `aimee-llm`. GPU
-tiers use the larger embedder and reranker; the retrieval pipeline itself does not change.
+tiers use the larger synth model; the retrieval pipeline itself does not change.
 
 See [KB inference backends](KB_LLM_BACKENDS.md) and [Retrieval stack](retrieval-stack.md).

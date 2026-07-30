@@ -1,7 +1,7 @@
 services:
-  # LEGACY torch embedder. Retired from the default topology by the unified-llm
-  # cutover — the kb now embeds/reranks/synthesizes against the `aimee-llm`
-  # container (below) via AIMEE_LLM_URL. Kept behind a profile for rollback /
+  # LEGACY torch embedder, retired from the default topology: the kb embeds
+  # in-container now (bekko-a25m, weights baked into the aimee-kb image), so
+  # there is no embedding service to run. Kept behind a profile for rollback /
   # comparison: `docker compose --profile legacy-embedder up` (and point the kb
   # back with AIMEE_EMBEDDER_URL=http://embedder:8080).
   embedder:
@@ -55,25 +55,26 @@ services:
       AIMEE_HOME: /var/lib/aimee
       # External DB2 credentials are streamed into the KB Vault by the
       # disposable Compose helper; never persist them in Config.Env.
-      # One knob: embed (/embed) + rerank (/rerank) + synth (curator Tier-A & B,
-      # at {url}/v1) all via the unified aimee-llm container. The kb runs no model.
-      # Override AIMEE_EMBEDDER_URL / AIMEE_RERANKER_URL to pin a service elsewhere.
-      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8080}
-      # Embedding dim — empty = config default 1024 (CPU tier); set 2560 for the
-      # GPU 4B tier (changing it against a populated kb forces a re-embed).
+      # SYNTH ONLY (curator Tier-A & B, at {url}/v1) and deliberately defaulted
+      # empty: the aimee-llm container is retired, so any default would point
+      # every deploy at a dead host. Embedding does not read this — set
+      # AIMEE_EMBEDDER_URL to embed against an external endpoint instead of
+      # the bundled in-container model.
+      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
+      # The wizard's embedder choice, and the endpoint for an external one. The kb
+      # MUST receive both: `aimee config deploy-env` emits them, and without them
+      # reaching the container the entrypoint sees no selection, starts nothing, and
+      # the builtin serves forever — the wizard's embedder silently never runs.
+      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
+      AIMEE_EMBEDDER_URL: ${AIMEE_EMBEDDER_URL:-}
+      # Embedding dim — empty = config default 384 (bundled bekko-a25m). Only set
+      # it for an external embedder of a different width; changing it against a
+      # populated kb forces a re-embed, and the dim guard will refuse until you do.
       AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
     # aimee-kb serves /v1 over HTTP only; the legacy --socket transport was retired (#2747).
     command: ["--http-port=8741"]
     ports:
       - "127.0.0.1:8741:8741"
-    depends_on:
-      # required:false so the kb starts even when the aimee-llm service is not in
-      # the active profile set (all-external / remote-kb): it fail-opens on
-      # embedding until an LLM is reachable. When the `llm` profile IS on, it
-      # still waits for aimee-llm to be healthy first.
-      aimee-llm:
-        condition: service_healthy
-        required: false
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
       interval: 10s
@@ -147,47 +148,6 @@ services:
       timeout: 5s
       retries: 5
       # Long: the cold first boot downloads the multi-GB GGUF before /health is OK.
-      start_period: 1200s
-
-  # Unified llama.cpp+Vulkan container: one model-less image serving embed + rerank
-  # + synth behind the gateway (the /embed,/embed_batch,/rerank,/v1/chat/completions
-  # contract). The kb's single LLM backend (DEFAULT now — the unified-llm cutover;
-  # the legacy embedder/llm services moved behind profiles). The tier is chosen at
-  # runtime via AIMEE_LLM_TIER (unset ≡ cpu) and the models download to the /models
-  # volume on first boot; GPU = AIMEE_LLM_TIER=small|mid|large + AIMEE_LLM_NGL=99 +
-  # a /dev/dri device (see deploy/compose/aimee.gpu.yaml). Internal only — the kb
-  # reaches it at aimee-llm:8080. Auth-off (the kb sends no bearer).
-  # CI/dev: AIMEE_LLM_DOCKERFILE=Dockerfile.aimee-llm-stub + AIMEE_LLM_STUB=1
-  # builds a tiny python-only stub (no llama.cpp / GGUFs) — see e2e-matrix.sh.
-  aimee-llm:
-    restart: unless-stopped
-    # Profile-gated: brought up only when the page-2 config puts a role local (the
-    # translation `aimee config deploy-env` emits COMPOSE_PROFILES=...,llm). An
-    # all-external / remote-kb stack never starts it. CI opts it in via
-    # COMPOSE_PROFILES=llm (see e2e-matrix.sh) to exercise the kb->gateway contract.
-    profiles: ["llm"]
-    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:${AIMEE_IMAGE_TAG:-latest}}
-    build:
-      context: .
-      dockerfile: ${AIMEE_LLM_DOCKERFILE:-Dockerfile.aimee-llm}
-    environment:
-      AIMEE_LLM_PORT: "8080"
-      AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}
-      AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-cpu}
-      AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
-      # CI/dev stub (off in prod): deterministic embed/rerank/synth, no models.
-      AIMEE_LLM_STUB: ${AIMEE_LLM_STUB:-}
-      AIMEE_LLM_STUB_DIM: ${AIMEE_LLM_STUB_DIM:-}
-    volumes:
-      # Persist the downloaded per-tier GGUFs so restarts don't re-fetch.
-      - aimee-llm-models:/models
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      # Cold first boot downloads the tier's models; the /models volume makes later
-      # boots fast. STUB mode skips the download and flips healthy quickly.
       start_period: 1200s
 
 volumes:

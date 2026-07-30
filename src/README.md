@@ -12,7 +12,7 @@ boundaries and the [manual](../MANUAL.md) for use.
 | `aimee-kb` | C11 | DB2, memory, documents, code graph, retrieval, curation |
 | `aimee-wfe` | Go | workflow definitions, lifecycle, artifacts, scheduler, worktrees, forge |
 | `aimee-runtime-web` | Go | authenticated browser proxy and UI service |
-| `aimee-llm` | container service | embedding, reranking, and synthesis inference |
+| `aimee-llm` | container service | embedding and synthesis inference |
 
 The server image supervises `aimee-server` and `aimee-wfe` as peers. Workflow lifecycle has one
 writer: Go. The C server supplies typed agent, credential, policy, and forge resources; it does not

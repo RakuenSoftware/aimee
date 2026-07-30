@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (87)
+## CLI-settable keys (85)
 
 The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys are still `aimee config set`-able but are filed into their own subsections below (and hidden from the Settings surface by default).
 
@@ -89,8 +89,6 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `memory_coref_mode` | string | Coreference-resolution mode for memory. |
 | `memory_negation_enabled` | bool | Detect/handle negation in memory. |
 | `memory_query_expansion_mode` | string | Query-expansion mode. |
-| `memory_rerank_command` | string | External reranker command. |
-| `memory_rerank_enabled` | bool | Enable cross-encoder reranking of recall. |
 | `memory_rerank_mode` | string | Reranker mode. |
 | `memory_rewrite_command` | string | External query-rewrite command. |
 | `memory_rewrite_enabled` | bool | Enable query rewriting for recall. |
@@ -116,21 +114,13 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `wfe_live_forge_enabled` | bool | Gate for the autonomous live forge (default-ON). When off, the forge provider is not registered and every forge op fails closed, so an autonomous run can never open or merge a real PR. Even on, each op re-checks this flag and the merge-target rail. |
 | `wfe_proposals_autoscan_enabled` | bool | Automatically scan watched proposal directories; off requires explicit trigger.fire. |
 
-### Deploy-time keys (15)
+### Deploy-time keys (7)
 
 Consumed once by `config_emit_deploy_env` to stand up the aimee-llm container (`aimee config deploy-env`); not read at runtime. Set at deploy, not tuned day-to-day.
 
 | Key | Type | Description |
 |-----|------|-------------|
 | `llm_embed_backend` | string | Deploy-time embedding backend: local or external. |
-| `llm_embed_gpu` | string | Deploy-time GPU selector for the local embedding backend. |
-| `llm_embed_host` | string | Deploy-time host selector for the local embedding backend. |
-| `llm_embed_tier` | string | Deploy-time local embedding tier: cpu, small, mid, or large. |
-| `llm_rerank_backend` | string | Deploy-time reranking backend: local, external, or off. |
-| `llm_rerank_endpoint` | string | External reranking endpoint used when the rerank backend is external. |
-| `llm_rerank_gpu` | string | Deploy-time GPU selector for the local reranking backend. |
-| `llm_rerank_host` | string | Deploy-time host selector for the local reranking backend. |
-| `llm_rerank_tier` | string | Deploy-time local reranking tier. |
 | `llm_synth_backend` | string | Deploy-time synthesis backend: local, external, or off. |
 | `llm_synth_endpoint` | string | External synthesis endpoint used when the synth backend is external. |
 | `llm_synth_gpu` | string | Deploy-time GPU selector for the local synthesis backend. |
@@ -138,7 +128,7 @@ Consumed once by `config_emit_deploy_env` to stand up the aimee-llm container (`
 | `llm_synth_model` | string | Model label sent to the configured synthesis endpoint. |
 | `llm_synth_tier` | string | Deploy-time local synthesis tier: cpu, small, mid, or large. |
 
-### Advanced tuning keys (79)
+### Advanced tuning keys (78)
 
 Expert scalars with sensible defaults; settable in the config file but off the everyday surface.
 
@@ -213,7 +203,6 @@ Expert scalars with sensible defaults; settable in the config file but off the e
 | `memory_profile_cards_min_obs` | int | Min observations before a profile card forms. |
 | `memory_profile_cards_stale_secs` | int | Profile-card staleness (seconds). |
 | `memory_query_expansion_k` | int | Number of expanded queries for recall. |
-| `memory_rerank_top_k` | int | Top-K candidates to rerank. |
 | `memory_rewrite_decompose` | bool | Decompose queries during rewrite. |
 | `memory_rewrite_hyde` | bool | Use HyDE (hypothetical-document) rewrite. |
 | `memory_rewrite_max_subqueries` | int | Max sub-queries produced by rewrite. |
@@ -238,7 +227,7 @@ Internal dogfood/QA knobs; not part of the user surface.
 | `dogfood_inline_tagging` | bool | Inline-tag dogfood events during the session. |
 | `dogfood_log_dir` | string | Directory for dogfood logs. |
 
-## Config-file sections (54)
+## Config-file sections (53)
 
 Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the section parsers in `src/config*.c`; a key shown as a bare name that is itself a nested object is noted in the section description (see *Coverage & limitations*).
 
@@ -269,12 +258,11 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`lsp_servers`** — _LSP server definitions (array of objects)._ Keys: `args`, `command`, `extensions`, `name`
 - **`mcp`** — _MCP integration (e.g. OSV)._ Keys: `osv`
 - **`mcp_clients`** — _MCP client connections (array of objects)._ Keys: `bearer_token_env`, `command`, `cwd`, `install`, `name`, `transport`, `url`
-- **`memory`** — _Memory subsystem; most children (recall, rerank, lifecycle, …) are nested objects with their own keys._ Keys: `abstain`, `aggregation`, `bm25_weight`, `briefing`, `citations`, `cognify`, `context_budget`, `coref`, `derive_facts`, `directives`, `dispositions`, `episode_summaries`, `failure_detection`, `fetch_budget`, `hard_negative_log`, `improve`, `lifecycle`, `pagerank`, `profile_cards`, `prospective`, `recall`, `rewrite`, `routing`, `salience`, `scenes`, `semantic_floor_scale`, `semantic_weight`
+- **`memory`** — _Memory subsystem; most children (recall, lifecycle, …) are nested objects with their own keys._ Keys: `abstain`, `aggregation`, `bm25_weight`, `briefing`, `citations`, `cognify`, `context_budget`, `coref`, `derive_facts`, `directives`, `dispositions`, `episode_summaries`, `failure_detection`, `fetch_budget`, `hard_negative_log`, `improve`, `lifecycle`, `pagerank`, `profile_cards`, `prospective`, `recall`, `rewrite`, `routing`, `salience`, `scenes`, `semantic_floor_scale`, `semantic_weight`
 - **`memory_maintenance`** — _Memory maintenance scheduling._ Keys: `enabled`, `interval_seconds`, `summarize_enabled`, `trigger_inserts`, `trigger_secs`
 - **`memory_negation`** — _Negation handling in memory._ Keys: `enabled`
 - **`memory_query_expansion`** — _Recall query expansion._ Keys: `k`, `mode`
 - **`memory_recall_lanes`** — _Per-lane recall floors / caps._ Keys: `enabled`, `fact_kinds`, `floor_fact`, `floor_summary`, `k_fact`, `k_summary`, `summary_kinds`
-- **`memory_rerank`** — _Recall reranking._ Keys: `command`, `enabled`, `mix`, `top_k`
 - **`memory_rewrite`** — _Recall query rewriting._ Keys: `command`, `decompose`, `enabled`, `hyde`, `max_subqueries`
 - **`memory_window`** — _Memory-window neighbour expansion._ Keys: `radius`
 - **`model_meta`** — _Model metadata + capability routing._ Keys: `capability_routing`, `refresh_minutes`
@@ -305,7 +293,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 225 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 226 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -406,6 +394,7 @@ The binaries read 225 `AIMEE_*` environment variables (scanned from `getenv()` i
 | Variable | Description |
 |----------|-------------|
 | `AIMEE_CODE_INDEX_SOURCE` | Source label recorded for code-index ingestion. |
+| `AIMEE_EMBEDDERS_FILE` | Path to the embedder registry the server reads for GET /v1/embedders (the setup wizard's embedder picker). Defaults to /opt/aimee/embedders.json, then scripts/embedders.json in a source checkout. The same file the in-container embedder reads, so one declaration drives the picker, the loading and the serving flags. |
 | `AIMEE_EMBEDDER_URL` | Embedder endpoint override (/embed, /embed_batch); takes precedence over AIMEE_LLM_URL for embedding. |
 | `AIMEE_KB_API_CA_BUNDLE` | CA bundle path for verifying the aimee-kb TLS certificate. |
 | `AIMEE_KB_API_URL` | aimee-kb HTTP API base URL. |
@@ -444,7 +433,7 @@ The binaries read 225 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_KB_VAULT_OPERATOR_ENABLED` | Enable the dedicated KB vault-operator runtime. |
 | `AIMEE_KB_VAULT_ORCHESTRATOR_URL` | Operator-configured vault orchestrator endpoint. |
 | `AIMEE_LLM_MODEL` | Model label sent to AIMEE_LLM_URL's chat endpoint (single-model gateways ignore it). Default 'aimee-synth'. |
-| `AIMEE_LLM_URL` | One knob: base URL of the aimee-llm container the kb calls for embedding (/embed), reranking (/rerank) AND synthesis (curator Tier-A + Tier-B at {url}/v1). The kb runs no model itself. AIMEE_EMBEDDER_URL/AIMEE_RERANKER_URL override per service. See docs/KB_LLM_BACKENDS.md. |
+| `AIMEE_LLM_URL` | Synthesis endpoint (curator Tier-A + Tier-B at {url}/v1). No longer selects an embedder: the kb embeds in-container, and AIMEE_EMBEDDER_URL points at an external embedder. See docs/KB_LLM_BACKENDS.md. |
 | `AIMEE_OCR_URL` | Structured-PDF OCR sidecar endpoint. |
 | `AIMEE_SERVER_ID` | Registry identity used by the server mTLS heartbeat. |
 | `AIMEE_SERVER_TEAM_ID` | The team this server serves, from the same registry row as AIMEE_SERVER_ID. Required for per-user /v1 write authorization: unset, the server still starts and serves reads but denies every write with no_team_configured. |
@@ -476,7 +465,6 @@ The binaries read 225 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_MEMORY_MAINTENANCE_TRIGGER_INSERTS` | Inserts before a maintenance cycle triggers. |
 | `AIMEE_MEMORY_MAINTENANCE_TRIGGER_SECS` | Seconds before a maintenance cycle triggers. |
 | `AIMEE_MEMORY_PAGERANK_RELATIONS` | Relation types included in memory PageRank. |
-| `AIMEE_MEMORY_RERANK_FORCE_OFF` | Force the cross-encoder reranker off. |
 | `AIMEE_MEMORY_RERANK_MODE` | Reranker mode. |
 | `AIMEE_MEMORY_WEIGHT_PROFILE` | Recall scoring weight profile. |
 | `AIMEE_NO_CACHE` | Disable the memory-assembly cache. |
@@ -601,13 +589,14 @@ The binaries read 225 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 | Variable | Description |
 |----------|-------------|
-| `AIMEE_EXEC_PIPE_TIMEOUT_MS` | How long a sidecar subprocess (embed, rerank, cognify, rewrite, css render, oauth token, guardrails) may run before it is killed, in ms. Default 120000. Bounds the pathological case, not normal latency: an unbounded wait here parks the calling request thread permanently when a sidecar hangs instead of exiting, which has taken a kb offline while it still accepted connections. On expiry the child's whole process GROUP is killed, because the immediate child is /bin/sh and the work is its child. |
+| `AIMEE_EXEC_PIPE_TIMEOUT_MS` | How long a sidecar subprocess (embed, cognify, rewrite, css render, oauth token, guardrails) may run before it is killed, in ms. Default 120000. Bounds the pathological case, not normal latency: an unbounded wait here parks the calling request thread permanently when a sidecar hangs instead of exiting, which has taken a kb offline while it still accepted connections. On expiry the child's whole process GROUP is killed, because the immediate child is /bin/sh and the work is its child. |
 
 ### Managed KB and inference
 
 | Variable | Description |
 |----------|-------------|
-| `AIMEE_LLM_AUTH_REQUIRED` | Set to 1 on wizard-managed KBs so embed, rerank, and synthesis clients refuse to contact the unified LLM when its bearer service identity is missing. |
+| `AIMEE_LLM_AUTH_REQUIRED` | Set to 1 on wizard-managed KBs so synthesis clients refuse to contact the LLM when its bearer service identity is missing. |
+| `AIMEE_LLM_AUTH_TOKEN` | First-boot transport for the bearer service identity shared by aimee-kb and its aimee-llm gateway. aimee-kb synchronously seals it into Vault, scrubs the environment, and cleanly re-execs before serving; wizard-managed deploys generate the 256-bit value in Vault. This is separate from user/server bearers. |
 | `AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE` | Explicit first-boot migration/adoption transport for an existing wizard-managed LLM credential. aimee-server seals it into Vault and scrubs the environment before normal startup. Ordinary inherited AIMEE_LLM_AUTH_TOKEN is ignored by managed credential creation so stale child-service state cannot win. Must be a 32..512 character RFC 6750 b64token. |
 | `AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK` | Internal managed-authority switch: still attempts mlockall first, but when an unprivileged container cannot raise RLIMIT_MEMLOCK, permits the offline one-shot to continue only if the kernel reports no active swap. Operator-run custody tools leave this unset and retain mandatory mlockall. |
 

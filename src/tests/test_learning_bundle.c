@@ -18,16 +18,19 @@
 
 #include "artifacts.h"
 #include "evidence_vectors.h"
+#include "embed_input_type.h" /* the memory_embed_text stub's polarity argument */
 #include "db2_test_shim.h"
 #include "learning_bundle.h"
 
 /* Stub embedder: query vector is the unit basis e0 = [1,0,0,...]. Cosine with a
  * stored [v0,v1,0,...] is then v0 / sqrt(v0^2 + v1^2), so we can hand-pick the
  * ordering by choosing each evidence vector's first two components. */
-int memory_embed_text(const char *text, const char *command, float *out, int max_dim)
+int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
+                      float *out, int max_dim)
 {
    (void)text;
    (void)command;
+   (void)input_type;
    int dim = 384 < max_dim ? 384 : max_dim;
    for (int i = 0; i < dim; i++)
       out[i] = 0.0f;

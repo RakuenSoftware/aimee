@@ -194,6 +194,37 @@ static void test_aimee_llm_url(void)
    assert(strcmp(a.base_url, "http://pinned:9000/v1") == 0);
 
    clear_llm_env();
+   memset(&cfg, 0, sizeof(cfg));
+   snprintf(cfg.llm_synth_endpoint, sizeof(cfg.llm_synth_endpoint), "http://synth.internal:9100");
+
+   /* The configured field alone resolves both tiers — no env var involved. */
+   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 1);
+   assert(strcmp(a.base_url, "http://synth.internal:9100/v1") == 0);
+   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
+   assert(strcmp(b.base_url, "http://synth.internal:9100/v1") == 0);
+
+   /* The same normalization applies to the field, not just the env var. */
+   snprintf(cfg.llm_synth_endpoint, sizeof(cfg.llm_synth_endpoint),
+            "http://synth.internal:9100/v1/");
+   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
+   assert(strcmp(b.base_url, "http://synth.internal:9100/v1") == 0);
+
+   /* AIMEE_LLM_URL outranks the stored field: a containerized deploy sets the
+    * environment, not a writable aimee.yaml. */
+   snprintf(cfg.llm_synth_endpoint, sizeof(cfg.llm_synth_endpoint), "http://from-config:9100");
+   setenv("AIMEE_LLM_URL", "http://from-env:8742", 1);
+   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
+   assert(strcmp(b.base_url, "http://from-env:8742/v1") == 0);
+
+   /* A value that names nothing must not resolve to a bare "/v1". */
+   unsetenv("AIMEE_LLM_URL");
+   snprintf(cfg.llm_synth_endpoint, sizeof(cfg.llm_synth_endpoint), "///");
+   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 0);
+
+   clear_llm_env();
+   printf("kb_curator_provider: synth endpoint resolves from config ok\n");
+
+   clear_llm_env();
    printf("kb_curator_provider: AIMEE_LLM_URL drives both tiers ok\n");
 }
 
