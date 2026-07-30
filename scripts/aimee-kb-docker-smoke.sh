@@ -149,27 +149,44 @@ check "POST memory.find_facts (fusion)" '"facts"' -X POST -H 'content-type: appl
 
 bold "==> Embed backend round-trip (in-container, inside the kb container)"
 # The embedder is a process INSIDE aimee-kb now, not a service beside it: the
-# entrypoint starts it on loopback and exports AIMEE_EMBEDDER_URL to point at it.
-# So the probe asks the kb container to embed against its own configured backend,
-# which is the same variable an external endpoint would set — one code path.
+# entrypoint starts it on loopback, exports AIMEE_EMBEDDER_URL, and execs the kb.
 #
-# This must not skip. The old version looked for an `aimee-llm` or `embedder`
-# service and skipped when it found neither; with both retired that skip would be
-# unconditional, and a skipped check reads as a pass. If EMBEDDER_MODEL selected a
-# model, a working round-trip is mandatory.
-emb_url="$("${DC[@]}" exec -T aimee-kb sh -c 'printf "%s" "${AIMEE_EMBEDDER_URL:-}"' 2>/dev/null || true)"
+# So read PID 1's environment, NOT `compose exec`'s. `compose exec` spawns a fresh
+# process from the container's CONFIGURED environment (image ENV + the compose
+# `environment:` block) and never sees a variable the entrypoint exported at runtime.
+# Once AIMEE_EMBEDDER_URL is declared in compose with an empty default — which it must
+# be, so an operator can point the kb at an external endpoint — `compose exec` reads it
+# as "" no matter what the entrypoint did. That made this check fail against a kb that
+# was embedding correctly. /proc/1/environ is the kb process the entrypoint exec'd into,
+# which is the only place the effective value exists.
+#
+# This must not skip. The old version looked for an `aimee-llm` or `embedder` service
+# and skipped when it found neither; with both retired that skip would be
+# unconditional, and a skipped check reads as a pass.
+emb_url="$("${DC[@]}" exec -T aimee-kb sh -c \
+  "tr '\\0' '\\n' </proc/1/environ | sed -n 's/^AIMEE_EMBEDDER_URL=//p' | head -1" 2>/dev/null || true)"
 if [[ -z "$emb_url" ]]; then
-  red   "  FAIL  kb reports no AIMEE_EMBEDDER_URL despite EMBEDDER_MODEL=${EMBEDDER_MODEL}"
+  red   "  FAIL  the kb process has no AIMEE_EMBEDDER_URL despite EMBEDDER_MODEL=${EMBEDDER_MODEL}"
   printf '        the entrypoint should have started the bundled model and exported it\n'
+  printf '        kb env (embedder-related):\n'
+  "${DC[@]}" exec -T aimee-kb sh -c \
+    "tr '\\0' '\\n' </proc/1/environ | grep -E 'EMBEDDER|EMBEDDING' || echo '        (none)'" 2>/dev/null || true
+  "${DC[@]}" logs aimee-kb 2>&1 | grep -iE "embedder" | tail -5 || true
   FAIL=$((FAIL + 1))
 elif emb="$("${DC[@]}" exec -T aimee-kb sh -c \
       "printf 'aimee docker smoke test' | curl -fsS --max-time 60 -X POST \
-         --data-binary @- \"\${AIMEE_EMBEDDER_URL}/embed\"" 2>/dev/null)" \
+         --data-binary @- \"${emb_url}/embed\"" 2>/dev/null)" \
    && [[ "$emb" == \[* ]]; then
   dims="$(($(printf '%s' "$emb" | tr -cd ',' | wc -c) + 1))"
-  green "  PASS  /embed returned a ${dims}-dim vector (${EMBEDDER_MODEL})"
+  green "  PASS  /embed returned a ${dims}-dim vector (${EMBEDDER_MODEL}, via ${emb_url})"
   PASS=$((PASS + 1))
+else
+  red   "  FAIL  /embed round-trip against ${emb_url}"
+  printf '        got: %s\n' "${emb:-<no response>}"
+  FAIL=$((FAIL + 1))
+fi
 
+if [[ -n "$emb_url" ]]; then
   # The width is only correct if the kb can STORE it. A mismatch between the
   # embedder's output and the schema's columns shows up as the dim guard refusing
   # the upsert — which is silent in the API response, so read the kb's log. This is
@@ -183,10 +200,6 @@ elif emb="$("${DC[@]}" exec -T aimee-kb sh -c \
     green "  PASS  kb stored embeddings with no dim/vector-space refusal"
     PASS=$((PASS + 1))
   fi
-else
-  red   "  FAIL  /embed round-trip against ${emb_url}"
-  printf '        got: %s\n' "${emb:-<no response>}"
-  FAIL=$((FAIL + 1))
 fi
 
 echo
