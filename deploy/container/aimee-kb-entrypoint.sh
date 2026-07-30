@@ -229,7 +229,15 @@ if [ "$external_db" -eq 0 ]; then
     # libpq reads a directory-valued host as a socket path. Even this local,
     # passwordless DSN follows the credential-shaped config contract: give it
     # to a disposable bootstrap helper, then let the KB load it from Vault.
-    AIMEE_DB2_URL="postgresql:///$DB?host=$PGSOCK" aimee-kb --bootstrap-vault-env
+    #
+    # Name the role explicitly. initdb made THIS user the cluster superuser, and
+    # this DSN is sealed into a Vault on a volume other containers share: a
+    # sharer running as a different OS user (the managed deploy's root
+    # aimee-server-identity job) would otherwise have libpq default the role to
+    # its own user name and fail with "DB2 not reachable". Vault holds this value
+    # for every sharer, and the entrypoint scrubs AIMEE_DB2_URL from the
+    # environment before exec, so their own compose-supplied DSN cannot fix it.
+    AIMEE_DB2_URL="postgresql:///$DB?host=$PGSOCK&user=$(id -un)" aimee-kb --bootstrap-vault-env
 
     start_embedder
 
