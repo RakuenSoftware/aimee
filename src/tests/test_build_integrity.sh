@@ -43,6 +43,17 @@ else
     fail "Docker smoke bypasses the disposable Vault bootstrap contract"
 fi
 
+# Debian installs runuser under /usr/sbin. The disposable helper overrides the
+# image entrypoint, so its path must match the runtime image exactly.
+if grep -qF -- '--entrypoint /usr/sbin/runuser aimee-server' \
+        ../scripts/aimee-compose-vault-bootstrap.sh &&
+   ! grep -qF -- '--entrypoint /usr/bin/runuser' \
+        ../scripts/aimee-compose-vault-bootstrap.sh; then
+    pass "server Vault bootstrap uses the runtime image's runuser path"
+else
+    fail "server Vault bootstrap points at a missing runuser binary"
+fi
+
 # The server image entrypoint must honor Docker's explicit command override, but
 # even an override must first consume credential env into Vault and scrub it.
 # Stub only the short-lived bootstrap transport so this can run outside the

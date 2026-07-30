@@ -35,7 +35,7 @@ compose() {
 bootstrap_server() {
     printf '%s\n' 'Sealing server first-boot credentials into Vault (values are not logged or stored in container metadata).'
     env -0 | compose run --rm --no-deps -T \
-        --entrypoint /usr/bin/runuser aimee-server \
+        --entrypoint /usr/sbin/runuser aimee-server \
         -u aimee -- /usr/local/bin/aimee-server --bootstrap-vault-stdin
 }
 
