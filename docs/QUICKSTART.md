@@ -66,8 +66,21 @@ refuses to start if its service credential is missing.
 Complete the account step before exposing the host. Deployments that inject both
 `AIMEE_WEBCHAT_USER` and `AIMEE_WEBCHAT_PASSWORD` use that explicit pair and skip account
 replacement. When the browser UI is enabled, set both on first boot; a missing or partial pair is
-rejected instead of generating a credential in logs. Supplied values are sealed into Vault and
-scrubbed before services start.
+rejected instead of generating a credential in logs.
+
+The browser login is a **local PAM account**, not an aimee credential. First boot provisions the
+supplied (or generated) pair as a real system account in the `aimee-webchat` group and authenticates
+it through the `aimee` PAM service, the same stack SmoothNAS uses and the same one a KB means when
+`/v1/identity/auth-mode` reports `pam`. The plaintext first-boot value is removed once that account
+exists. Only accounts in that group are dashboard logins: the container's own system users are never
+accepted, and the dashboard cannot see or modify them.
+
+The Vault holds aimee's own secrets — the session key, TLS material, provider credentials. A host
+password is not one of those and is never sealed into it.
+
+When the appliance is connected to a KB that reports `oidc`, the identity provider owns accounts and
+the wizard's account step disappears; local account creation is refused. Dashboard login itself
+remains PAM in this release — the OIDC login flow arrives in 0.4.0.
 
 ### Choosing an image channel
 

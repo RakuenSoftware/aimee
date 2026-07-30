@@ -19,8 +19,9 @@ const (
 	setupAccountMinPassword  = 8
 )
 
-// setupAccountSystem isolates Vault account mutations so the onboarding
-// transaction remains unit-testable without a live server Vault.
+// setupAccountSystem isolates account mutations so the onboarding transaction
+// remains unit-testable without provisioning real system accounts. Backed by
+// local PAM accounts (pamAccounts), scoped to the managed login group.
 type setupAccountSystem interface {
 	Exists(username string) bool
 	Create(username, password string) error
@@ -175,7 +176,7 @@ func writePrivateFile(path string, data []byte) error {
 }
 
 // writeReplacementMarker commits only non-secret account state. The password is
-// written to the encrypted server Vault first; this marker makes that account
+// created as a local PAM account first; this marker makes that account
 // authoritative. It returns a rollback closure for failures before the old
 // sessions have been invalidated.
 func writeReplacementMarker(marker, newUsername string) (func(), error) {
@@ -237,7 +238,7 @@ func (s *server) handleSetupAccount(w http.ResponseWriter, r *http.Request) {
 	if s.requireLocalAccounts(w, r) {
 		return
 	}
-	// This mutation changes a Vault-held login. SameSite=Strict already
+	// This mutation creates a local login. SameSite=Strict already
 	// protects the session cookie in browsers; keep an explicit origin gate here
 	// as defense in depth for the highest-impact onboarding request.
 	if !sameOriginRequest(r) {
@@ -317,7 +318,7 @@ func (s *server) handleSetupAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Invalidate every session authenticated with the bootstrap password. The
-	// marker has already made that Vault record ineligible for new logins.
+	// marker has already made the retired account ineligible for new logins.
 	if err := s.sessions.DeleteSessionsForUser(bootstrapUsername); err != nil {
 		rollback()
 		writeJSONError(w, http.StatusInternalServerError, "could not invalidate bootstrap sessions")
