@@ -1,0 +1,59 @@
+{
+  "coding": {
+    "ceiling": {
+      "eligible": 8,
+      "excluded": 0,
+      "median_total_wall_s": 66.17616917550004,
+      "median_uncached_input_tokens": 29423.5,
+      "success_lcb95": 0.3057423946026273,
+      "success_rate": 0.625
+    },
+    "observe": {
+      "eligible": 8,
+      "excluded": 0,
+      "median_total_wall_s": 70.42507613550151,
+      "median_uncached_input_tokens": 21448.0,
+      "success_lcb95": 0.3057423946026273,
+      "success_rate": 0.625
+    },
+    "on": {
+      "answerable_actuation_rate": 1.0,
+      "eligible": 8,
+      "excluded": 0,
+      "median_total_wall_s": 67.60892274500111,
+      "median_uncached_input_tokens": 34009.0,
+      "success_lcb95": 0.40927543031016894,
+      "success_rate": 0.75
+    },
+    "standard": {
+      "eligible": 8,
+      "excluded": 0,
+      "median_total_wall_s": 78.24268757049686,
+      "median_uncached_input_tokens": 33626.0,
+      "success_lcb95": 0.3057423946026273,
+      "success_rate": 0.625
+    }
+  },
+  "paired_agent_gate_pass": true,
+  "pinned_commit": "aa8c40e9d75449774c9b0b630bb8f1037efb8097",
+  "promotion_decision": "promote-on",
+  "prompt_fixture": "prompts/e6-agent-task-v1.md",
+  "required_arms_complete": true,
+  "required_retrieval_complete": true,
+  "retrieval": {
+    "answerable_precision": 1.0,
+    "answerable_recall": 1.0,
+    "current_project_duplicate_rate": 0.0,
+    "eligible": 16,
+    "excluded": 0,
+    "packet_tokens_p95": 466.0,
+    "python_edge_precision": 1.0,
+    "python_edge_recall": 1.0,
+    "retrieval_latency_p95_s": 0.083,
+    "scope_leakage_rate": 0.0,
+    "unanswerable_abstention": 1.0
+  },
+  "retrieval_gate_pass": true,
+  "retrieval_pinned_commit": "930bbe995502c9f584d895f4900b0e3562582030",
+  "schema_version": 1
+}

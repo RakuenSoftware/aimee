@@ -64,3 +64,25 @@ arm needs at least 80% pre-edit packet actuation, and confidence/efficiency gate
 first pinned E6 record passes deterministic retrieval but contains no eligible provider-backed
 paired cells, so it retains the shipping `observe` default and delegates that bounded experiment to
 the linked residual proposal.
+
+The fresh follow-up is `results/e6-20260730-provider.json`, produced from the complete immutable
+`e6-provider-plan.json`; its generated summary is `results/e6-20260730-provider-summary.json`.
+All 32 cells are eligible and the scorer returns `promote-on`. Raw streams, patches, and checkpoint
+evidence remain at the exact durable locations recorded in the E6 validation report.
+
+Regenerate and audit that promotion verdict with the committed fail-closed scorer:
+
+```bash
+python3 benchmarks/code-agent-effectiveness/e6_evaluate.py \
+  benchmarks/code-agent-effectiveness/results/e6-20260730-provider.json \
+  --output benchmarks/code-agent-effectiveness/results/e6-20260730-provider-summary.json
+```
+
+The committed provider plan is an immutable manifest of the original operator environment, so its
+absolute runner/artifact paths are evidence rather than a portable launch configuration. Regenerate
+the plan to replay elsewhere. The provider runner is trusted-operator-only: it copies provider auth
+into the disposable Codex home and passes both approval/sandbox and hook-trust bypass flags. A cell
+can therefore exercise the operator account and network for its process lifetime; captured streams
+and patches audit the disposable workspace, not every external side effect. Run it only on an
+authorized isolated host with scoped credentials. `AIMEE_E6_CODEX`, `AIMEE_E6_CODEX_AUTH`, and
+`AIMEE_E6_FIXTURE_HARNESS` override the recorded operator defaults.

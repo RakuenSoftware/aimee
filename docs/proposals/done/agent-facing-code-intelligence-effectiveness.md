@@ -841,3 +841,8 @@ residual proposal instead of declaring the intended effectiveness outcome comple
   deterministic retrieval gates pass, paired-agent promotion does not, `observe` remains the
   shipping default, and the exact remaining provider-backed matrix is bounded by the linked
   residual proposal.
+- **Provider-backed promotion completion:** the residual 8-task × 4-arm matrix ran from merged
+  `aa8c40e9d75449774c9b0b630bb8f1037efb8097` with 32/32 eligible cells. `on` improved task success
+  from 5/8 to 6/8, improved median wall by 13.59%, consumed packets in 8/8 answerable cells, and
+  passed the confidence, latency, and packet bounds. The accepted default is therefore promoted
+  from `observe` to `on`; both rollback modes remain supported.

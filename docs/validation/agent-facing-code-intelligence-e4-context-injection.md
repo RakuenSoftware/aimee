@@ -22,7 +22,8 @@ The checked-in fixtures cover the full agent-facing path:
 6. The ingress formatter rejects wrong-project, stale, incomplete, oversized, or malformed packets,
    escapes resident text, and caps the rendered packet at 4,800 bytes (the initial 1,200-token
    budget).
-7. `code_context_mode=observe` is the default and changes no model-visible bytes. `on` injects only
+7. At E4 delivery, `code_context_mode=observe` was the default and changed no model-visible bytes.
+   E6 subsequently promoted `on`; `on` injects only
    on the first/new-task turn for an identified session; a related follow-up receives no repeated
    packet. Failed freshness, latency, availability, or answerability gates suppress `on` to
    observation/no packet rather than widening recall.

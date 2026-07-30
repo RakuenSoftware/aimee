@@ -1,0 +1,458 @@
+{
+  "cells": [
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "on",
+        "--task",
+        "c04",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/on-c04"
+      ],
+      "id": "on-c04",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "standard",
+        "--task",
+        "c04",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/standard-c04"
+      ],
+      "id": "standard-c04",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "ceiling",
+        "--task",
+        "c04",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/ceiling-c04"
+      ],
+      "id": "ceiling-c04",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "observe",
+        "--task",
+        "c04",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/observe-c04"
+      ],
+      "id": "observe-c04",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "on",
+        "--task",
+        "c06",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/on-c06"
+      ],
+      "id": "on-c06",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "ceiling",
+        "--task",
+        "c06",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/ceiling-c06"
+      ],
+      "id": "ceiling-c06",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "observe",
+        "--task",
+        "c06",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/observe-c06"
+      ],
+      "id": "observe-c06",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "standard",
+        "--task",
+        "c06",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/standard-c06"
+      ],
+      "id": "standard-c06",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "standard",
+        "--task",
+        "c07",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/standard-c07"
+      ],
+      "id": "standard-c07",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "observe",
+        "--task",
+        "c07",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/observe-c07"
+      ],
+      "id": "observe-c07",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "on",
+        "--task",
+        "c07",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/on-c07"
+      ],
+      "id": "on-c07",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "ceiling",
+        "--task",
+        "c07",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/ceiling-c07"
+      ],
+      "id": "ceiling-c07",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "ceiling",
+        "--task",
+        "c01",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/ceiling-c01"
+      ],
+      "id": "ceiling-c01",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "observe",
+        "--task",
+        "c01",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/observe-c01"
+      ],
+      "id": "observe-c01",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "standard",
+        "--task",
+        "c01",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/standard-c01"
+      ],
+      "id": "standard-c01",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "on",
+        "--task",
+        "c01",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/on-c01"
+      ],
+      "id": "on-c01",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "observe",
+        "--task",
+        "c02",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/observe-c02"
+      ],
+      "id": "observe-c02",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "ceiling",
+        "--task",
+        "c02",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/ceiling-c02"
+      ],
+      "id": "ceiling-c02",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "standard",
+        "--task",
+        "c02",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/standard-c02"
+      ],
+      "id": "standard-c02",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "on",
+        "--task",
+        "c02",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/on-c02"
+      ],
+      "id": "on-c02",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "standard",
+        "--task",
+        "c05",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/standard-c05"
+      ],
+      "id": "standard-c05",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "on",
+        "--task",
+        "c05",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/on-c05"
+      ],
+      "id": "on-c05",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "observe",
+        "--task",
+        "c05",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/observe-c05"
+      ],
+      "id": "observe-c05",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "ceiling",
+        "--task",
+        "c05",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/ceiling-c05"
+      ],
+      "id": "ceiling-c05",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "ceiling",
+        "--task",
+        "c08",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/ceiling-c08"
+      ],
+      "id": "ceiling-c08",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "observe",
+        "--task",
+        "c08",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/observe-c08"
+      ],
+      "id": "observe-c08",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "standard",
+        "--task",
+        "c08",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/standard-c08"
+      ],
+      "id": "standard-c08",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "on",
+        "--task",
+        "c08",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/on-c08"
+      ],
+      "id": "on-c08",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "standard",
+        "--task",
+        "c03",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/standard-c03"
+      ],
+      "id": "standard-c03",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "ceiling",
+        "--task",
+        "c03",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/ceiling-c03"
+      ],
+      "id": "ceiling-c03",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "on",
+        "--task",
+        "c03",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/on-c03"
+      ],
+      "id": "on-c03",
+      "timeout_seconds": 960
+    },
+    {
+      "command": [
+        "python3",
+        "/home/virant/dev/aimee-indexing-paired-evaluation/benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+        "--arm",
+        "observe",
+        "--task",
+        "c03",
+        "--artifacts",
+        "/home/virant/.local/share/aimee/e6-paired-aa8-20260730-v2/cell-artifacts/observe-c03"
+      ],
+      "id": "observe-c03",
+      "timeout_seconds": 960
+    }
+  ],
+  "model": "gpt-5.6-sol",
+  "pinned_commit": "aa8c40e9d75449774c9b0b630bb8f1037efb8097",
+  "prompt_fixture": "prompts/e6-agent-task-v1.md",
+  "reasoning": "medium",
+  "schedule_seed": 20260730,
+  "schema_version": 1
+}
