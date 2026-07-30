@@ -5,7 +5,9 @@ import { isRestartKey } from './wizardSteps';
 import {
   ROLES,
   embedderChangeImpact,
+  rolePlaceable,
   type EmbedderChoice,
+  type Tier,
   type Role,
   type Placement,
   type HostInfo,
@@ -89,7 +91,6 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
     synth: { optionId: 'cpu', endpoint: '' },
   });
   const [embedModel, setEmbedModel] = useState('');
-  const [embedDim, setEmbedDim] = useState('');
   const [embedders, setEmbedders] = useState<EmbedderChoice[]>([]);
   /** The embedder already recorded in config. Empty on a fresh install, which is what
    * makes the first choice free and every later change a confirmed one. */
@@ -109,7 +110,6 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
       setHosts(h);
       setEmbedModel(String(c.embedding_model ?? ''));
       setEmbedModelSaved(String(c.embedding_model ?? ''));
-      setEmbedDim(c.embedding_dim == null ? '' : String(c.embedding_dim));
 
       // Seed the host from any local role that names one, else the local host.
       // Fall back to an AVAILABLE host if the recorded one is no longer in the
@@ -139,11 +139,16 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
   }, [fetchImpl]);
 
   const host = useMemo(() => hosts.find((h) => h.name === hostName), [hosts, hostName]);
-  const options = useMemo(() => placementOptions(host), [host]);
+  // Placement options for the roles that HAVE a placement. The embedder is asked for by
+  // model, not by location, so it never reads this list.
+  const options = useMemo(() => placementOptions(host, 'synth'), [host]);
 
   // Resolve a role's UI selection to a concrete Placement (host-aware).
   const resolvePlacement = useCallback(
     (role: Role): Placement => {
+      // The embedder runs inside the knowledge base. There is nothing to place, so the
+      // wizard does not ask — it only asks WHICH embedder.
+      if (!rolePlaceable(role)) return { backend: 'local', tier: '' as Tier, host: '', gpu: '' };
       const ui = roleUi[role];
       if (ui.optionId === 'external') return { backend: 'external', endpoint: ui.endpoint.trim() };
       const opt = options.find((o) => o.id === ui.optionId) ?? options[0];
@@ -207,7 +212,7 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
       kbBearer: '',
       placements: { embed: resolvePlacement('embed'), synth: resolvePlacement('synth') },
       embedModel,
-      embedDim,
+      embedDim: '',
     });
 
     // Persist only what changed (mirrors SetupWizard.saveStep); abort + Toast on
@@ -271,23 +276,21 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
             <div key={role} style={roleCard}>
               <div style={{ fontSize: 13.5, fontWeight: 700 }}>{label}</div>
               <div style={{ fontSize: 11.5, color: '#778', marginBottom: 4 }}>{blurb}</div>
-              <select style={input} value={ui.optionId} onChange={(e) => setRole(role, { optionId: e.target.value })}>
-                {options.map((o) => (
-                  <option key={o.id} value={o.id}>{o.label}</option>
-                ))}
-              </select>
-              {ui.optionId === 'external' && (
-                <input style={{ ...input, marginTop: 6 }} value={ui.endpoint}
-                  onChange={(e) => setRole(role, { endpoint: e.target.value })}
-                  placeholder={role === 'embed' ? 'https://embedder.example/v1' : 'https://llm.example/v1'} />
+              {rolePlaceable(role) && (
+                <>
+                  <select style={input} value={ui.optionId} onChange={(e) => setRole(role, { optionId: e.target.value })}>
+                    {options.map((o) => (
+                      <option key={o.id} value={o.id}>{o.label}</option>
+                    ))}
+                  </select>
+                  {ui.optionId === 'external' && (
+                    <input style={{ ...input, marginTop: 6 }} value={ui.endpoint}
+                      onChange={(e) => setRole(role, { endpoint: e.target.value })}
+                      placeholder="https://llm.example/v1" />
+                  )}
+                </>
               )}
-              {role === 'embed' && ui.optionId === 'external' && (
-                <div style={{ display: 'grid', gap: 6, marginTop: 6 }}>
-                  <input style={input} value={embedModel} onChange={(e) => setEmbedModel(e.target.value)} placeholder="embedding model" />
-                  <input style={input} value={embedDim} onChange={(e) => setEmbedDim(e.target.value)} placeholder="embedding dim (e.g. 1024)" inputMode="numeric" />
-                </div>
-              )}
-              {role === 'embed' && ui.optionId !== 'external' && ui.optionId !== 'off' && (
+              {role === 'embed' && (
                 <div style={{ display: 'grid', gap: 4, marginTop: 6 }}>
                   {localEmbedders.length > 0 ? (
                     <>

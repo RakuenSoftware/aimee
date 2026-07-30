@@ -102,8 +102,14 @@ export interface RoleKeys {
   endpoint: string;
 }
 
-/** Whether this role names a container the operator has to place. Only synth does:
- * "local" for the embedder means in-container, which needs no host and no tier. */
+/** Whether this role's runtime offers the operator a placement choice IN THIS BUILD.
+ *
+ * Not a law about the role — a statement about what ships. Today the embedder runs as a
+ * CPU process inside the kb container, so there is exactly one place it can be and no
+ * tier or GPU to choose; synth runs in its own container and does have a placement. If a
+ * GPU-served embedder arrives, this flips for `embed` and its llm_embed_host/_gpu/_tier
+ * keys come back with it — predicate and schema move together, which is why they read
+ * from the same place. */
 export function rolePlaceable(role: Role): boolean {
   return role !== 'embed';
 }
@@ -252,7 +258,25 @@ export interface PlacementOption {
 /** Build the per-role option list for the selected host: CPU, one per GPU (tier
  * derived from VRAM), and External. `gpu:<index>` placements carry the host name
  * so all local roles pin to the single shared container's host. */
-export function placementOptions(host: HostInfo | undefined): PlacementOption[] {
+/** The placements a role can be given on this host.
+ *
+ * ROLE-AWARE ON PURPOSE, because the roles do not share a runtime. The embedder used to
+ * read the synth list, which let an operator pick "GPU 0" for a model served inside the
+ * knowledge base: the choice looked real and wrote nothing. The fix is not "embedders
+ * have no placements" — a GPU-served embedder would be a perfectly good option to add
+ * here later — it is that every option a role is OFFERED has to be an option that role
+ * can actually be given. deployTopology.test.ts asserts exactly that for every role, so
+ * adding a GPU embedder means adding an entry here and the guard keeps holding. */
+export function placementOptions(host: HostInfo | undefined, role?: Role): PlacementOption[] {
+  if (role && !rolePlaceable(role)) {
+    return [
+      {
+        id: 'in-container',
+        label: 'In the knowledge base',
+        placement: { backend: 'local', tier: '' as Tier, host: '', gpu: '' },
+      },
+    ];
+  }
   const opts: PlacementOption[] = [
     { id: 'cpu', label: 'CPU', placement: { backend: 'local', tier: 'cpu', host: host?.name ?? '', gpu: '' } },
   ];

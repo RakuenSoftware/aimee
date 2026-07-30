@@ -12,7 +12,10 @@ import {
   ROLES,
   type Placement,
   type HostInfo,
-  type DeploySelection, embedderChangeImpact } from './deployTopology';
+  type DeploySelection,
+  embedderChangeImpact,
+  rolePlaceable,
+} from './deployTopology';
 
 /* The page-2 keys the server's /api/config/set allowlist accepts (mirrors
  * src/config_fields.c). Any key placementToConfig emits MUST be in here, or the
@@ -303,5 +306,59 @@ describe('buildDesiredConfig writes the embedder identity for a LOCAL choice', (
     });
     expect(m.embedding_model).toBe('my-qwen3-4b');
     expect(m.embedding_dim).toBe('2560');
+  });
+});
+
+/* Every option a role is OFFERED must be an option that role can actually be GIVEN.
+ *
+ * This is the bug class, stated once so it cannot come back in a new form. The embedder
+ * shared the synth placement list, so the UI offered "GPU 0" for a model served inside the
+ * kb: selectable, plausible, and it wrote nothing. The guard is deliberately NOT "the
+ * embedder has no GPU option" — a GPU-served embedder is a reasonable thing to add later.
+ * It is that whatever is offered round-trips into config and back, which stays true however
+ * the runtimes change. Add a placement to any role and this test covers it for free; offer
+ * one that writes nothing and it fails. */
+describe('every offered placement is a real placement', () => {
+  const hosts: (HostInfo | undefined)[] = [
+    undefined,
+    { name: 'box', kind: 'local', gpus: [] },
+    { name: 'box', kind: 'local', gpus: [{ index: 0, name: 'RTX 5080', vram_mb: 16384 }] },
+  ];
+
+  for (const role of ROLES.map((r) => r.role)) {
+    for (const [i, host] of hosts.entries()) {
+      it(`${role} options are all writable (host ${i})`, () => {
+        const opts = placementOptions(host, role);
+        expect(opts.length).toBeGreaterThan(0);
+        const allowed = new Set(ALL_ROLE_KEYS);
+        for (const opt of opts) {
+          const written = placementToConfig(role, opt.placement);
+          // Nothing may write a key outside the page-2 allowlist...
+          for (const key of Object.keys(written)) expect(allowed.has(key)).toBe(true);
+          // ...and the selection must survive a save/load cycle, which is what catches an
+          // option whose distinguishing fields are silently dropped.
+          expect(configToPlacement(written, role)).toEqual(opt.placement);
+        }
+        // Option ids must be unique, or the <select> cannot represent them all.
+        expect(new Set(opts.map((o) => o.id)).size).toBe(opts.length);
+      });
+    }
+  }
+
+  it('a role with no placement choice still offers exactly one, not zero', () => {
+    // Zero options would render an empty <select> and resolve to undefined.
+    for (const role of ROLES.map((r) => r.role)) {
+      if (rolePlaceable(role)) continue;
+      expect(placementOptions(undefined, role)).toHaveLength(1);
+    }
+  });
+
+  it('ALL_ROLE_KEYS never names a key the config schema does not have', () => {
+    // These three were removed with the aimee-llm container. If a GPU embedder brings
+    // them back, roleKeys and the C config schema have to regain them together — this
+    // fails loudly if only the UI side moves.
+    for (const gone of ['llm_embed_host', 'llm_embed_gpu', 'llm_embed_tier']) {
+      expect(ALL_ROLE_KEYS).not.toContain(gone);
+    }
   });
 });

@@ -83,6 +83,24 @@ describe('DeployTopology embedder picker', () => {
     expect(values).not.toContain('external-only');
   });
 
+  it('offers NO placement for the embedder, only the model', async () => {
+    // Regression: the embed role used to render the shared placement select, so an
+    // operator could pick "GPU 0" for something that runs inside the kb. The choice
+    // looked real and wrote nothing, which is worse than not offering it.
+    await renderPage({});
+    const selects = Array.from(document.querySelectorAll('select'));
+    const embedderValues = Array.from(embedderSelect().options).map((o) => o.value);
+    expect(embedderValues).toContain('nomic-embed-text-v2-moe');
+    // No select anywhere may offer a tier/GPU option to the embedder card.
+    const placementOptions = selects
+      .filter((sel) => sel !== embedderSelect())
+      .flatMap((sel) => Array.from(sel.options).map((o) => o.value));
+    expect(placementOptions).not.toContain('gpu:0');
+    // Exactly one select carries the embedder ids, and it is the picker.
+    expect(selects.filter((sel) => Array.from(sel.options).some((o) => o.value === 'bekko-a25m')))
+      .toHaveLength(1);
+  });
+
   it('shows the width and context, because they decide the cost of the choice', async () => {
     await renderPage({});
     const labels = Array.from(embedderSelect().options).map((o) => o.textContent || '');
