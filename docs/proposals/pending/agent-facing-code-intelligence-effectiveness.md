@@ -1,6 +1,6 @@
 # Proposal: Agent-facing code intelligence effectiveness
 
-- **State:** PENDING — E3–E6 remain; E0 through E2 history is recorded below
+- **State:** PENDING — E4–E6 remain; E0 through E3 history is recorded below
 - **Author:** JBailes
 - **Date:** 2026-07-29
 - **Charter roles:** Recall, Rank-Fuse, Calibrate / Evaluate-Optimize, Enforce, Gate-Promote
@@ -695,3 +695,53 @@ residual proposal instead of declaring the intended effectiveness outcome comple
   earlier ordering, capacity, complete-metadata, exact-resolution, route-gating, and concrete edge
   identity findings remain closed. Roundtable run: `roundtable-327db1be95dc7e7c3abd2035`
   (artifact `ebe90912dc8e54a133c45453fd1c8b376c0c5845954acf66fe37134f1e0b17e4`).
+- **E3 graph-resolution slice:** PR #2162 merged to `testing` as
+  `fdc64b4abf3db262ea33efd0812b4208c654f57d` after all 25 CI checks passed. Exact normalized Python
+  module resolution, deduplicated call/import/projection edges, current-generation provenance, and
+  stable local-first graph ordering are now the base for E4–E6.
+- **E4 task-conditioned retrieval candidate:** the implementation adds a strict
+  `/v1/code/context` contract over hybrid RRF, exact active-project memory gating, explicit
+  `no_answer`, a four-item/1,200-token packet, complete current-generation provenance, and
+  `off|observe|on` first/new-task ingress behavior. `observe` remains the shipping default;
+  unavailable, slow, stale, or incomplete evidence automatically suppresses model-visible packet
+  injection and never widens to global memory. Its frozen implementation diff receives a separate
+  roundtable gate before PR.
+- **E4 implementation round 1 — 2026-07-30 — changes requested, 3/3 participants, not
+  degraded.** Two concrete findings closed real grounding gaps: memory-only hybrid rows no longer
+  count as answerable code, and explanatory project memory now requires an explicit path or symbol
+  relationship to one accepted code result. The reported missing generation fence was already
+  enforced by the shared `code_request_project` boundary; E4 adds stale/current route regressions so
+  that inherited contract is visible in this slice. Three whole-program findings assessed E4 as if
+  it claimed E5/E6 completion; the accepted delivery table requires one reviewed PR per slice, so
+  the reconvened review binds this artifact to E4 without weakening the parent completion request.
+  Roundtable run: `oprun_g6a69bd8011459d99_1785389737_122` (artifact
+  `11776ad9f6708568dcc1dce374884b4cd164b2b3483438b06261beb39180462a`).
+- **E4 implementation round 2 — 2026-07-30 — APPROVED and converged, 3/3 participants, not
+  degraded.** The panel reported no blocking findings after the memory-only, explicit-anchor, and
+  generation-regression repairs. Its schema nit is adopted by removing redundant undocumented
+  top-level caller fields; the span remains the canonical symbol/line surface. The validation record
+  now distinguishes 85 routed KB endpoints from 92 OpenAPI operations, calls out the legacy hybrid
+  route's local-first memory tightening, and states the direct-handler compatibility boundary. The
+  eight-row memory read is deliberately a bounded pre-filter pool, not an emitted packet allowance:
+  kind, exact scope, grounding, and duplicate rejection run before the shared four-item output cap.
+  The resolver is covered through ingress behavior here; a standalone resolver fixture is a useful
+  follow-up but not a blocking gap in the E4 contract. Roundtable run:
+  `oprun_g6a69bd8011459d99_1785391257_123` (artifact
+  `743c03a1a1ec1191dbff96008f88cdb064ef51adda8fccc3634a1e9959f05852`).
+- **E4 final exact-diff review — 2026-07-30 — APPROVED and converged, 3/3 participants, not
+  degraded.** The panel confirmed the post-review schema and documentation cleanup with no blocking
+  findings. E4 immediately adopts its bounded-confidence suggestion: ingress now rejects code or
+  memory confidence outside `(0,1]`, with adversarial packet tests. Retrying a failed first-turn
+  retrieval on a related follow-up is assigned to E5's typed recovery policy; E4 continues to
+  suppress the failed packet and never widens recall. Roundtable run:
+  `oprun_g6a69bd8011459d99_1785391610_124` (artifact
+  `b8def8883da6a7e97997f223dad4d1c4b9ac1ea9f88b0a91e251e9c5c36b1a09`).
+- **E4 confidence-amended exact-diff review — 2026-07-30 — APPROVED and converged, 3/3
+  participants, not degraded.** The panel approved the confidence-bounded artifact with no blocking
+  findings. Its remaining suggestions do not change the accepted contract: `scope=project` is the
+  normative memory field while numeric rank remains diagnostic; the hybrid HTTP boundary has no
+  durable workspace identity to forward; redundant ambient fields are ignored when an explicit
+  scope is present; and token-heuristic/duplicate-check refinements require observed evaluation
+  failures rather than speculative widening. Named policy constants are a readability follow-up.
+  Roundtable run: `oprun_g6a69bd8011459d99_1785391948_125` (artifact
+  `abdfa92e2489d4c73cdb05c18ec067fb8463296c5ed45eb376fe66bb70e986ac`).

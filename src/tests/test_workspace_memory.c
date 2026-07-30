@@ -541,6 +541,10 @@ static void test_local_first_applies_before_limits_across_memory_surfaces(void)
    assert(facts[0].id == local.id);
    assert(facts[1].id == workspace_mem.id);
 
+   memory_diagnostic_t diagnostics[2];
+   count = memory_diagnose("crowdout routing needle", 1, diagnostics, 2);
+   assert(count == 1 && diagnostics[0].memory.id == local.id);
+
    db2_memory_cand_row_t candidates[2];
    count = db2_memory_list_candidates(DB2_MEM_CAND_PRIMARY, candidates, 1);
    assert(count == 1 && candidates[0].id == local.id);

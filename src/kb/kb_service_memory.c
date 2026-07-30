@@ -436,7 +436,10 @@ int kb_handle_memory_diagnose_scoped(int fd, cJSON *req)
    const char *st_s = (cJSON_IsString(st) && st->valuestring[0]) ? st->valuestring : NULL;
    const char *sv_s = (cJSON_IsString(sv) && sv->valuestring[0]) ? sv->valuestring : NULL;
    int limit = cJSON_IsNumber(l) ? (int)l->valuedouble : 10;
+   int missing = 0;
+   int scope_active = (!st_s && !sv_s) ? kb_memory_scope_begin(req, 0, &missing) : 0;
    cJSON *resp = db2_kb_service_memory_diagnose_scoped_json(q->valuestring, st_s, sv_s, limit);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to diagnose memory");
 }
 
@@ -811,7 +814,10 @@ int kb_handle_memory_facts(int fd, cJSON *req)
    if (!cJSON_IsString(query_j))
       return kb_send_error(fd, "memory.facts requires query");
 
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_facts_json(query_j->valuestring);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to recall facts");
 }
 
