@@ -1,6 +1,10 @@
 name: CI
 
 on:
+  # Re-run the gate on each integration tip; PR checks alone only cover the
+  # merge preview that existed when the PR ran.
+  push:
+    branches: [main, testing, feature/core-modularization]
   pull_request:
     branches: [main, testing, feature/core-modularization, 'aimee/feat/**']
     # Slice sub-PRs target aimee/feat/<work-item-id>; include them so each slice
