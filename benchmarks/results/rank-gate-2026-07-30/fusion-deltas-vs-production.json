@@ -1,0 +1,47 @@
+{
+  "what": "Cached fusion-frontier recall re-tabulated against the PRODUCTION baseline instead of dense-only.",
+  "why": "Every prior table in the campaign compared fusion variants to dense-only retrieval. Production does not serve dense-only: src/kb/kb.c ships kb_fusion_mode='rrf' with RRF_K=60 and 50 candidates per leg, which is exactly the 'rrf60' row. Comparing to dense overstates what a change would deliver and hides which variants regress.",
+  "source_artifacts": [
+    "benchmarks/results/reranker-2026-07-29/fusion-frontier-nomic.json",
+    "benchmarks/results/reranker-2026-07-29/fusion-frontier-a25m.json"
+  ],
+  "production_config": {
+    "file": "src/kb/kb.c",
+    "RRF_K": 60,
+    "MAX_LEXICAL_RESULTS": 50,
+    "MAX_VEC_RESULTS": 50,
+    "kb_fusion_mode_default": "rrf",
+    "equivalent_row": "rrf60"
+  },
+  "note": "This is a re-tabulation of cached measurements, not a new measurement run. No embedding or retrieval was re-executed.",
+  "deltas_vs_rrf60": {
+    "nomic": {
+      "dense":    {"R@1": 0.0176,  "R@10": -0.0662, "R@50": -0.0750},
+      "bm25":     {"R@1": -0.0079, "R@10": -0.0198, "R@50": -0.0334},
+      "rrf10":    {"R@1": 0.0070,  "R@10": 0.0366,  "R@50": 0.0000},
+      "tiered":   {"R@1": 0.0176,  "R@10": 0.0074,  "R@50": 0.0000},
+      "score50":  {"R@1": 0.0064,  "R@10": 0.0277,  "R@50": -0.0028}
+    },
+    "a25m": {
+      "dense":    {"R@1": 0.0172,  "R@10": -0.0826, "R@50": -0.0916},
+      "bm25":     {"R@1": -0.0019, "R@10": -0.0172, "R@50": -0.0336},
+      "rrf10":    {"R@1": 0.0070,  "R@10": 0.0342,  "R@50": 0.0000},
+      "tiered":   {"R@1": 0.0172,  "R@10": 0.0074,  "R@50": 0.0000},
+      "score50":  {"R@1": -0.0004, "R@10": 0.0239,  "R@50": -0.0017}
+    }
+  },
+  "findings": [
+    "rrf10 is a strict Pareto improvement over production: nothing regresses on either embedder, and the R@1 delta is identically +0.0070 for both. Against production there is no top-1 cost to protect against - a framing error in earlier summaries, which described 'tiered' as the safe version of rrf10.",
+    "tiered and rrf10 are a genuine tradeoff, not a safety ladder. tiered takes 2.5x rrf10's R@1 gain (+0.0176 vs +0.0070) but a fifth of its R@10 gain (+0.0074 vs +0.0366). tiered's R@1 equals dense's exactly, by construction.",
+    "score-fusion variants (score50) are dominated by rrf10 on every metric and additionally regress R@50. The campaign flagged these rows as indicative rather than exact, because stage 1 persisted candidate ids but not scores."
+  ],
+  "unmeasured_and_worth_measuring": {
+    "variant": "tiered ordering at rank 1 with rrf_k=10 for ranks 2+",
+    "rationale": "Plausibly captures dense's R@1 (tiered's strength) and most of rrf10's R@10 gain. Never measured; the two were only evaluated as alternatives.",
+    "blocked_on": "Requires re-running the dense leg over eval/frozen-ab-v1 (26,473 docs + 10,000 queries). The per-query candidate lists from the original run were not persisted, and the host running this analysis has no GPU and no cached nomic weights. Needs the campaign's RTX 5080 environment."
+  },
+  "standing_caveats_from_the_campaign": [
+    "Suite queries appear lexically derived from their documents, which flatters BM25. rrf_k=10 sharpens the rank discount on both legs symmetrically, but if BM25's top-rank quality is what the suite inflates, k=10 amplifies that artifact. Direction of the effect is safe; magnitude is uncertain.",
+    "Labels are silver with one positive per query out of 26,473 documents. Absolute R@1 is not interpretable as accuracy; relative comparisons hold because all methods saw identical labels."
+  ]
+}

@@ -1,11 +1,49 @@
 # Proposal: learning-to-rank the retrieval stack from real interactions
 
-- **State:** 🟡 **PENDING — problem and design sketched, not started.** Written
-  2026-07-30 out of the retrieval measurement campaign
+- **State:** 🟡 **PENDING — but far less of this is greenfield than the original
+  draft assumed.** Written 2026-07-30 out of the retrieval measurement campaign
   ([retrieval-stack-report](../../validation/retrieval-stack-report-2026-07-30.md)).
 - **Owner:** unassigned.
-- **Depends on:** `kb_bandit` (decision points, reward recording, IPW replay),
-  the FTS lexical leg, and a retrieval-logging schema that does not yet exist.
+- **Depends on:** `kb_bandit` (decision points, reward recording, IPW replay) and
+  the FTS lexical leg.
+
+> ## ⚠️ Correction, 2026-07-30 — most of this is already built
+>
+> This proposal was drafted without auditing the tree, and it materially
+> understates what exists. The serving path, the label channel, the fitter, and the
+> promotion gate are all in-tree and shipped as
+> [kb-hybrid-outcome-wiring](../done/kb-hybrid-outcome-wiring.md) (2026-07-26).
+> Corrections to specific claims below:
+>
+> | Draft claim | Reality |
+> | --- | --- |
+> | "a retrieval-logging schema that does not yet exist" | `kb_ranker_emit_event` → `retrieval_event`; `kb_ranker_outcome_write` → `ranker_outcome` |
+> | dense similarity "available today: **no** — rank is kept, score is discarded" | **Wrong.** `kb_result_t.dense_score`/`.lex_score` are carried through fusion (`src/kb/kb.c:1256`) and persisted by `kb_features_upsert_with_sketch` (`src/kb/kb.c:1859`). The score-discard problem was in the *benchmark harness's* stage-1 artifacts, not in production. |
+> | "prior citation count for the doc — needs logging" | outcome verdicts exist per `(event, doc)`; what is missing is aggregation, not capture |
+> | S3 "train and evaluate offline" | `src/kb/kb_ranker_fit.c` + the `scripts/rank-fit.py` sidecar, pointwise **and** pairwise objectives |
+> | S5 "gated rollout" | `model_write_proposed` → benchmark gate → `kb_ranker_model_commit` |
+> | "Not an online-learning system in the first slices" | already true: `kb_service_workers.c` runs the fit periodically, offline |
+>
+> **What is actually missing**, and it is much narrower than five slices:
+>
+> 1. `learning_implicit_retrieval_outcome` defaults **off**
+>    (`src/modules/config/config_fields.c:297`), so no labels accumulate.
+> 2. Capture is wired only into the agent search tool
+>    (`src/modules/tools/agent_tools_dispatch.c:1957`) and is capped at **8 docs**
+>    of a pool that can hold 100 — so only the head of the ranking is ever labelled.
+> 3. IPW propensity logging is unimplemented; the fitter already consumes the
+>    weight. (Item 1 of the done proposal's own remaining-work list.)
+> 4. ~~The promotion gate was a 5-query fixture with a 1e-6 lift epsilon.~~
+>    **Fixed 2026-07-30** — the gate now requires a minimum query count, a
+>    shippable mean lift, and a paired per-query win/loss majority. See
+>    [the gate section](#the-promotion-gate-fixed-2026-07-30).
+>
+> The feature set is live and is narrower than the ~20 features imagined below:
+> `dense.cos`, `lex.cos`, `temp.recency`, `sketch.frequency_kind_scope`,
+> `sketch.distinct_sources_hll` (`FEATURE_KEYS` in `kb_ranker_fit.c`).
+>
+> **Read the sections below as design rationale, not as a work plan.** The
+> remaining work is a config change, a cap, and IPW — not a build.
 
 ## Problem
 
@@ -169,6 +207,60 @@ metric regression.
   nearly free, so it is the honest baseline — not untuned RRF.
 - Should ranking be per-tenant, or global with tenant features?
 - Does exploration cost enough answer quality to matter to users?
+
+## The promotion gate (fixed 2026-07-30)
+
+The gate that authorises a fitted model into production was the weakest link in the
+whole stack, and it was measured rather than assumed.
+
+**What it was.** `kb_ranker_fit_run` scored candidate and incumbent weights on a
+fixture and committed if `ndcg_cand > ndcg_incumbent + 1e-6`. The default fixture is
+`benchmarks/rank/kb_hybrid/queries.json`: **5 queries, 2–4 candidates each**. The
+gate's own unit tests used a **1-query** fixture.
+
+**Why that could not work.** A sweep of `rrf_k` over that fixture moves nothing:
+
+| rrf_k | 1 | 5 | 10 | 20 | 60 | 120 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| NDCG@5 | 0.7000 | 0.7000 | 0.7000 | 0.7000 | 0.7000 | 0.7000 |
+
+Every candidate appears in both legs, so pool recall is 1.0 by construction and the
+fusion constant cannot reorder anything. The fixture is blind to the largest effect
+the measurement campaign found. And at 1e-6, "beats the incumbent" meant "is not
+bit-identical to the incumbent" — on a 5-query fixture NDCG@5 is quantised, so one
+query's reordering promoted a model.
+
+**What it is now.** Three conditions, all required, all recorded in the
+`benchmark_trace` artifact:
+
+1. **`n_queries >= 30`** (`RANK_FIT_MIN_BENCH_QUERIES`) — otherwise
+   `benchmark_underpowered`, and the model is held `proposed`. An underpowered gate
+   fails closed: it cannot detect a regression, so it must not authorise one.
+2. **mean lift > `1e-3`** (was `1e-6`) — below any effect worth shipping, but far
+   above the floating-point noise the old value actually measured.
+3. **paired win/loss majority** — candidate and incumbent score the *same* query
+   before moving on, and `wins > losses` is required. A mean alone cannot separate
+   "better on most queries" from "much better on one and worse on the rest"; the
+   latter is what overfitting a small fixture looks like. Failing only this
+   condition reports `no_paired_majority`, distinct from `no_lift`.
+
+The trace now also records `n_queries`, `wins`, `losses`, `ties`, `min_queries`, and
+`lift_epsilon`, so a reader can tell a decision backed by a real fixture from one
+backed by five hand-authored queries. The previous payload could not express the
+difference.
+
+**Consequence, deliberately accepted.** The shipped default fixture now refuses
+every promotion. That is the honest state: there is no real gate fixture in-tree, and
+the previous behaviour was not "gating" but "promoting with a rationalisation".
+`kb_ranker_enabled` defaults off, so nothing in production changes. Supplying a real
+held-out fixture via `kb_ranker_fit_benchmark` is now a prerequisite for the ranker,
+which is the correct ordering.
+
+**Tests.** `test_ranker_fit.c` gained `gate_refuses_underpowered_benchmark` (a model
+that wins its single query outright is still refused — refusal is on power, not
+merit) and `gate_refuses_minority_gain` (+0.0998 mean NDCG from 12 wins against 20
+losses is refused). The two pre-existing gate tests were moved off the 1-query
+fixture onto a generated 32-query one, so they now exercise the real gate.
 
 ## Prior art in-tree
 
