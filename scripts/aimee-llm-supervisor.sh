@@ -74,8 +74,12 @@ embed_coords() {
   # An unregistered model, or one whose coordinates are blank, aborts the boot: the
   # descriptor exits non-zero having already explained itself on stderr. Serving the
   # wrong pooling is undetectable later, so failing here is the cheap outcome.
+  # The mode decides how much the entry must declare: only a LOCAL embedder is
+  # fetched, so only a local one needs provisioning coordinates. An external endpoint
+  # still needs its pooling and prefixes, which is why the lookup happens either way.
   local descriptor
-  descriptor="$("$PYTHON" "$GATEWAY" --embedder-descriptor "$AIMEE_LLM_EMBED_MODEL")" || exit 1
+  descriptor="$("$PYTHON" "$GATEWAY" --embedder-descriptor "$AIMEE_LLM_EMBED_MODEL" \
+                --mode="$EMBED_MODE")" || exit 1
   eval "$descriptor"
   EMBED_D="$MODELS_DIR/$EMBED_TIER"
 }
@@ -113,8 +117,11 @@ synth_coords() {
   SYNTH_D="$MODELS_DIR/$SYNTH_TIER"
 }
 # Model identity is chosen BEFORE the registry lookup, since it is the lookup key. The
-# gateway reads the same variable and resolves the same entry.
+# gateway reads the same variable and resolves the same entry. The embed MODE is resolved
+# here too (ahead of the other roles below) because it decides whether the entry must
+# carry provisioning coordinates.
 export AIMEE_LLM_EMBED_MODEL="${AIMEE_LLM_EMBED_MODEL:-nomic-embed-text-v2-moe}"
+EMBED_MODE="${AIMEE_LLM_EMBED_MODE:-local}"
 embed_coords
 synth_coords
 
@@ -130,8 +137,7 @@ SYNTH_CTX="${AIMEE_LLM_SYNTH_CTX:-$TIER_CTX}"
 # launched: the plugin fetches and serves ONLY the roles it hosts. When every
 # role is external/off the supervisor pulls nothing and starts no llama-server —
 # the gateway is a pure forwarder (the deploy layer normally skips deploying the
-# plugin at all in that case).
-EMBED_MODE="${AIMEE_LLM_EMBED_MODE:-local}"
+# plugin at all in that case). EMBED_MODE is resolved earlier, above embed_coords.
 SYNTH_MODE="${AIMEE_LLM_SYNTH_MODE:-local}"
 # Back-compat: the older AIMEE_LLM_SYNTH_LOCAL=0 knob means "external synth".
 if [ "${AIMEE_LLM_SYNTH_LOCAL:-1}" = "0" ] && [ -z "${AIMEE_LLM_SYNTH_MODE:-}" ]; then

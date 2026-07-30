@@ -6,6 +6,7 @@ AIMEE_EMBEDDER_URL are untouched):
 
   POST /embed        body = raw UTF-8 text                 -> JSON float array (dim)
   POST /embed_batch  body = JSON [text, ...]               -> JSON [[float,...], ...]
+  GET  /embedders    -> the registry as a choosable list (see embedder_catalog())
   POST /auth/verify  authenticated service-identity check (no model work)
   GET  /health       -> {"status": ok|loading|down, "model":..., "dim":N,
                          "serving_id":...}  (see serving_id())
@@ -25,6 +26,7 @@ Config (env):
                           and the registry lookup — an id absent from the registry is
                           refused rather than served without prefixes)
   AIMEE_LLM_EMBEDDERS_FILE  embedder registry path (default scripts/embedders.json)
+  AIMEE_LLM_EMBEDDERS_EXTRA operator overlay merged over it (add your own embedder)
   AIMEE_LLM_PORT          listen port (default 8080)
   AIMEE_LLM_BATCH_CAP     /embed_batch max vectors per call (default 512 -> 413 on excess)
 
@@ -61,6 +63,12 @@ BATCH_CAP = int(os.environ.get("AIMEE_LLM_BATCH_CAP", "512"))
 EMBEDDERS_FILE = os.environ.get("AIMEE_LLM_EMBEDDERS_FILE") or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "embedders.json"
 )
+# Operator-declared embedders, merged OVER the shipped file by model key. This is how a
+# deployment brings its own — an externally hosted Qwen3-4B, a model we have never
+# measured — without editing a file that the next image update replaces. Same schema and
+# same validation: declaring an embedder means declaring its pooling, width, context and
+# prefixes, because those are exactly what nobody can infer for you.
+EMBEDDERS_EXTRA_FILE = os.environ.get("AIMEE_LLM_EMBEDDERS_EXTRA", "")
 INPUT_TYPES = ("query", "document")
 # Fields every entry must declare. Absent means the operator has not thought about it,
 # which for pooling or prefixes is indistinguishable at runtime from thinking wrongly.
@@ -75,10 +83,24 @@ class EmbedderRegistryError(RuntimeError):
     """The registry is missing or malformed — an operator error, surfaced at startup."""
 
 
-def load_embedders(path=None):
+def load_embedders(path=None, extra_path=None):
     """Parse the registry into {normalised model id: spec}. Raises on anything malformed
-    rather than degrading, since every degraded mode here is silent downstream."""
-    path = path or EMBEDDERS_FILE
+    rather than degrading, since every degraded mode here is silent downstream.
+
+    `extra_path` (AIMEE_LLM_EMBEDDERS_EXTRA) is an operator overlay merged over the
+    shipped file by model key: it may add models or replace shipped ones. A missing
+    overlay path is an error, not a shrug — an operator who set the variable meant to
+    add an embedder, and silently serving the shipped set instead is how you end up
+    embedding with settings nobody chose."""
+    base = _load_embedders_file(path or EMBEDDERS_FILE)
+    overlay = extra_path if extra_path is not None else EMBEDDERS_EXTRA_FILE
+    if overlay:
+        base.update(_load_embedders_file(overlay))
+    return base
+
+
+def _load_embedders_file(path):
+    """Validate and parse one registry file into {normalised model id: spec}."""
     try:
         with open(path, "r", encoding="utf-8") as handle:
             document = json.load(handle)
@@ -108,6 +130,18 @@ def load_embedders(path=None):
             raise EmbedderRegistryError(f"{path}: entry {model_id!r} has a non-string prefix")
         registry[embed_model_key(model_id)] = spec
     return registry
+
+
+def embedder_is_locally_servable(spec):
+    """Whether the supervisor can FETCH and serve this model itself.
+
+    Provisioning coordinates are only needed to pull a GGUF. An entry without them is
+    still a complete embedder declaration — it is simply one this deployment does not
+    host, which is exactly the shape of an external endpoint (AIMEE_LLM_EMBED_MODE=
+    external) or of a model we measured but never deployed. Its pooling and prefixes
+    still matter, because the gateway applies them to text on the way to whatever serves
+    it."""
+    return all(str(spec.get(field, "")).strip() for field in EMBEDDER_PROVISION_FIELDS)
 # Ingest is the overwhelming majority of embed traffic and every ingest path is a
 # document, so an omitted input_type means `document` and only the query paths opt in.
 # It must NOT mean "no prefix": defaulting to bare text is exactly the regression this
@@ -176,6 +210,31 @@ def embedder_spec(model_id=None):
 def embed_prefix(input_type, model_id=None):
     """Return the prefix for `input_type` under the configured embedder."""
     return embedder_spec(model_id)["prefixes"][input_type]
+
+
+def embedder_catalog():
+    """The registry as a choosable list, for the setup UI and `--list-embedders`.
+
+    Exposed because an operator picking an embedder needs to see what the deployment
+    actually knows about — including the entries their own overlay added — and because
+    every field here changes the vectors, so a picker that hides them is a picker that
+    invites a silent re-embed. `local` says whether this deployment can host the model
+    itself; an entry with local=false is selectable only against an external endpoint.
+    """
+    out = []
+    for key in sorted(EMBEDDERS):
+        spec = EMBEDDERS[key]
+        out.append({
+            "id": key,
+            "dim": spec["dim"],
+            "context": spec["context"],
+            "pooling": spec["pooling"],
+            "prefixed": bool(spec["prefixes"]["query"] or spec["prefixes"]["document"]),
+            "local": embedder_is_locally_servable(spec),
+            "serving_id": serving_id(key),
+            "active": key == embed_model_key(EMBED_MODEL),
+        })
+    return {"object": "list", "data": out}
 
 
 def serving_id(model_id=None):
@@ -467,13 +526,33 @@ def embed_dim():
 
 
 def _validate_embed_dim(vec):
-    """Enforce an optional wizard/operator pin; otherwise preserve native dim."""
+    """Enforce the operator pin AND the registry's declared width.
+
+    The pin (AIMEE_EMBEDDING_DIM) is the deployment's schema width. The registry `dim` is
+    the operator's claim about the MODEL, and it matters most for a bring-your-own entry:
+    declaring 2560 for an endpoint that actually returns 1024 is a typo whose only other
+    symptom is vectors written at the wrong width. Both are cheap to check per call and
+    neither can be inferred, so a disagreement is refused rather than reconciled.
+    """
     if EXPECTED_EMBED_DIM is not None and len(vec) != EXPECTED_EMBED_DIM:
         raise GatewayError(
             503,
             "embedding_dim_mismatch",
             f"embedder returned {len(vec)} dimensions; expected {EXPECTED_EMBED_DIM}",
         )
+    if not STUB:
+        try:
+            declared = int(embedder_spec()["dim"])
+        except (GatewayError, KeyError, TypeError, ValueError):
+            declared = 0
+        if declared > 0 and len(vec) != declared:
+            raise GatewayError(
+                503,
+                "embedding_dim_mismatch",
+                f"embedder {embed_model_key(EMBED_MODEL)} returned {len(vec)} dimensions but "
+                f"its registry entry declares {declared}; fix the entry's dim or point "
+                f"AIMEE_LLM_EMBED_MODEL at the model actually being served",
+            )
     return vec
 
 
@@ -796,6 +875,10 @@ def build_server():
                         st = "loading"
                         payload["status"] = st
                 self._send(200 if st == "ok" else 503, payload)
+            elif path == "/embedders":
+                # Discovery for the setup UI: which embedders this deployment knows,
+                # which it can host, and what each would do to the vectors.
+                self._send(200, embedder_catalog())
             elif path in ("/health/embed", "/health/synth"):
                 role = path.rsplit("/", 1)[1]
                 st = role_states()[role]
@@ -883,7 +966,7 @@ def build_server():
     return ThreadingHTTPServer((BIND, PORT), Handler)
 
 
-def embedder_descriptor_shell(model_id):
+def embedder_descriptor_shell(model_id, mode="local"):
     """Emit the configured embedder's registry entry as shell assignments.
 
     This is how the supervisor stops carrying its own copy of the coordinates: it evals
@@ -891,6 +974,12 @@ def embedder_descriptor_shell(model_id):
     about which model, pooling or width is being served. Raises EmbedderRegistryError on
     an unregistered model or one whose provisioning coordinates are blank — both are
     operator errors that must stop the boot, not be papered over with a default.
+
+    `mode` is the role's backend. Provisioning coordinates are demanded only for a LOCAL
+    embedder, because only a local one is fetched: an external endpoint is a URL the
+    operator runs, so its entry needs pooling, width, context and prefixes and nothing
+    else. That asymmetry is what lets a deployment serve a model we have never packaged
+    — its own Qwen3-4B, say — while still declaring the settings that decide its vectors.
     """
     registry = load_embedders()
     key = embed_model_key(model_id)
@@ -900,18 +989,20 @@ def embedder_descriptor_shell(model_id):
             f"embedder {key or '(unset)'} is not in {EMBEDDERS_FILE}; registered: "
             f"{', '.join(sorted(registry)) or '(none)'}"
         )
-    blank = [f for f in EMBEDDER_PROVISION_FIELDS if not str(spec.get(f, "")).strip()]
-    if blank:
+    if mode == "local" and not embedder_is_locally_servable(spec):
+        blank = [f for f in EMBEDDER_PROVISION_FIELDS if not str(spec.get(f, "")).strip()]
         raise EmbedderRegistryError(
-            f"embedder {key} cannot be served: {', '.join(blank)} "
-            f"{'is' if len(blank) == 1 else 'are'} blank in {EMBEDDERS_FILE}"
+            f"embedder {key} cannot be served locally: {', '.join(blank)} "
+            f"{'is' if len(blank) == 1 else 'are'} blank. Fill in the coordinates to host "
+            f"it, or set AIMEE_LLM_EMBED_MODE=external and point AIMEE_LLM_EMBED_URL at an "
+            f"endpoint that serves it."
         )
     fields = {
         "EMBED_MODEL_KEY": key,
-        "EMBED_REPO": spec["repo"],
-        "EMBED_FILE": spec["file"],
-        "EMBED_REVISION": spec["revision"],
-        "EMBED_SHA256": spec["sha256"],
+        "EMBED_REPO": spec.get("repo", ""),
+        "EMBED_FILE": spec.get("file", ""),
+        "EMBED_REVISION": spec.get("revision", ""),
+        "EMBED_SHA256": spec.get("sha256", ""),
         "EMBED_POOLING": spec["pooling"],
         "EMBED_DIM": spec["dim"],
         "EMBED_CONTEXT": spec["context"],
@@ -939,12 +1030,18 @@ def main():  # pragma: no cover
 
 
 def cli(argv):  # pragma: no cover - thin argv dispatch, behaviour covered per-callee
-    """`--embedder-descriptor [model]` prints shell assignments for the supervisor to
-    eval; no arguments runs the gateway."""
+    """`--embedder-descriptor [model] [--mode=local|external]` prints shell assignments
+    for the supervisor to eval; `--list-embedders` prints the registry as JSON; no
+    arguments runs the gateway."""
+    if argv[:1] == ["--list-embedders"]:
+        sys.stdout.write(json.dumps(embedder_catalog(), indent=2) + "\n")
+        return 0
     if argv[:1] == ["--embedder-descriptor"]:
-        model = argv[1] if len(argv) > 1 else EMBED_MODEL
+        rest = [a for a in argv[1:] if not a.startswith("--mode=")]
+        modes = [a.split("=", 1)[1] for a in argv[1:] if a.startswith("--mode=")]
+        model = rest[0] if rest else EMBED_MODEL
         try:
-            sys.stdout.write(embedder_descriptor_shell(model))
+            sys.stdout.write(embedder_descriptor_shell(model, modes[0] if modes else "local"))
         except EmbedderRegistryError as exc:
             sys.stderr.write(f"aimee-llm: {exc}\n")
             return 2

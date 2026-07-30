@@ -514,14 +514,23 @@ class EmbedPrefixes(unittest.TestCase):
             return _gw()
 
     def _capture(self, gw):
-        """Record exactly what text reaches the embedder."""
+        """Record exactly what text reaches the embedder.
+
+        The fake returns vectors at the registry's declared width: the gateway refuses a
+        width that disagrees with the entry, so a 2-element stand-in would be rejected
+        before these assertions ran.
+        """
         sent = []
+        try:
+            width = int(gw.embedder_spec()["dim"])
+        except Exception:  # noqa: BLE001 - unregistered model: width is never reached
+            width = 768
 
         def fake_embeddings(base_url, inputs):
             sent.append(inputs)
             if isinstance(inputs, str):
-                return [0.1, 0.2]
-            return [[0.1, 0.2] for _ in inputs]
+                return [0.1] * width
+            return [[0.1] * width for _ in inputs]
 
         gw._embeddings = fake_embeddings
         return sent
@@ -687,6 +696,106 @@ class EmbedderRegistry(unittest.TestCase):
         with mock.patch.object(gw.sys, "stderr", io.StringIO()) as err:
             self.assertEqual(gw.main(), 2)
         self.assertIn("cannot read embedder registry", err.getvalue())
+
+
+class BringYourOwnEmbedder(unittest.TestCase):
+    """An operator can declare an embedder this build has never packaged.
+
+    The point is that a deployment running its own endpoint — a Qwen3-4B nobody here
+    measured — is a first-class case, not a fork. What it may NOT do is skip declaring
+    what decides its vectors, so the overlay carries the same required fields and the
+    same refusals as the shipped file.
+    """
+
+    OVERLAY = {
+        "embedders": {
+            "my-qwen3-4b": {
+                "pooling": "last",
+                "dim": 2560,
+                "context": 32768,
+                "prefixes": {"query": "Instruct: retrieve\nQuery: ", "document": ""},
+            }
+        }
+    }
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def _overlay(self, document):
+        path = os.path.join(self.tmp, "extra.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(document if isinstance(document, str) else json.dumps(document))
+        return path
+
+    def _gw(self, **env):
+        with mock.patch.dict(os.environ, env, clear=False):
+            return _gw()
+
+    def test_overlay_adds_a_model_without_touching_the_shipped_file(self):
+        gw = self._gw(AIMEE_LLM_EMBEDDERS_EXTRA=self._overlay(self.OVERLAY),
+                      AIMEE_LLM_EMBED_MODEL="my-qwen3-4b")
+        self.assertIn("my-qwen3-4b", gw.EMBEDDERS)
+        self.assertIn("nomic-embed-text-v2-moe", gw.EMBEDDERS)  # shipped set survives
+        self.assertEqual(gw.embed_prefix("query"), "Instruct: retrieve\nQuery: ")
+        self.assertEqual(gw.embed_prefix("document"), "")
+
+    def test_overlay_replaces_a_shipped_entry(self):
+        document = copy.deepcopy(self.OVERLAY)
+        document["embedders"]["nomic-embed-text-v2-moe"] = {
+            "pooling": "mean", "dim": 768, "context": 2048,
+            "prefixes": {"query": "patched: ", "document": "patched: "},
+        }
+        gw = self._gw(AIMEE_LLM_EMBEDDERS_EXTRA=self._overlay(document))
+        self.assertEqual(gw.embed_prefix("query", "nomic-embed-text-v2-moe"), "patched: ")
+
+    def test_overlay_is_validated_like_the_shipped_file(self):
+        document = copy.deepcopy(self.OVERLAY)
+        del document["embedders"]["my-qwen3-4b"]["pooling"]
+        # One module instance: each _gw() import defines its OWN exception class, so a
+        # type raised by one is not the type caught from another.
+        gw = self._gw()
+        with self.assertRaises(gw.EmbedderRegistryError):
+            gw.load_embedders(extra_path=self._overlay(document))
+
+    def test_a_missing_overlay_is_an_error_not_a_shrug(self):
+        # Silently serving the shipped set would embed with settings nobody chose.
+        gw = self._gw(AIMEE_LLM_EMBEDDERS_EXTRA=os.path.join(self.tmp, "nope.json"))
+        self.assertIsNotNone(gw.EMBEDDERS_ERROR)
+
+    def test_external_only_entry_needs_no_provisioning_coordinates(self):
+        # Nothing is fetched for an external endpoint, so demanding a repo/sha there
+        # would block the whole bring-your-own case.
+        gw = self._gw(AIMEE_LLM_EMBEDDERS_EXTRA=self._overlay(self.OVERLAY))
+        shell = gw.embedder_descriptor_shell("my-qwen3-4b", mode="external")
+        self.assertIn("EMBED_DIM=2560", shell)
+        self.assertIn("EMBED_POOLING=last", shell)
+        with self.assertRaises(gw.EmbedderRegistryError) as caught:
+            gw.embedder_descriptor_shell("my-qwen3-4b", mode="local")
+        self.assertIn("cannot be served locally", str(caught.exception))
+
+    def test_a_wrong_declared_dim_is_refused_not_written(self):
+        # The bring-your-own failure mode: a typo'd width whose only other symptom is
+        # vectors stored at the wrong size.
+        gw = self._gw(AIMEE_LLM_EMBEDDERS_EXTRA=self._overlay(self.OVERLAY),
+                      AIMEE_LLM_EMBED_MODEL="my-qwen3-4b")
+        gw._embeddings = lambda base, inputs: [0.1] * 1024  # endpoint really serves 1024
+        with self.assertRaises(gw.GatewayError) as caught:
+            gw.do_embed("hello")
+        self.assertEqual(caught.exception.status, 503)
+        self.assertEqual(caught.exception.body["error"]["code"], "embedding_dim_mismatch")
+        self.assertIn("declares 2560", caught.exception.body["error"]["message"])
+
+    def test_catalog_lists_choices_with_what_changes_the_vectors(self):
+        gw = self._gw(AIMEE_LLM_EMBEDDERS_EXTRA=self._overlay(self.OVERLAY))
+        by_id = {e["id"]: e for e in gw.embedder_catalog()["data"]}
+        self.assertEqual(by_id["my-qwen3-4b"]["dim"], 2560)
+        self.assertFalse(by_id["my-qwen3-4b"]["local"])   # no coordinates -> external only
+        self.assertTrue(by_id["nomic-embed-text-v2-moe"]["local"])
+        self.assertTrue(by_id["my-qwen3-4b"]["prefixed"])
+        self.assertFalse(by_id["bekko-a25m"]["prefixed"])  # its card defines none
+        # Distinct spaces must get distinct identities, or a swap goes ungated.
+        self.assertEqual(len({e["serving_id"] for e in by_id.values()}), len(by_id))
 
 
 class ServingIdentity(unittest.TestCase):
