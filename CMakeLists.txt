@@ -835,6 +835,9 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_main.c
     ${AIMEE_SRC_DIR}/cli_agent_setup.c
     ${AIMEE_SRC_DIR}/cli_session_start.c
+    # cli_session_start renders the degraded-dependency notice from here; the
+    # CLI links it directly, so it must be listed in BOTH build systems.
+    ${AIMEE_SRC_DIR}/session_degraded_notice.c
     # Thin-client self-update (cli_main dispatch + cli_session_start drift notice
     # both call these; the CLI does not link aimee-cmd, so they build in here).
     ${AIMEE_SRC_DIR}/cmd_self_update.c
