@@ -2123,6 +2123,19 @@ int config_reload(void)
       pthread_mutex_unlock(&g_snap_wlock);
       return -1; /* parse failure -> keep the running snapshot */
    }
+   /* The published snapshot must equal what config_load() returns, and config_load
+    * is config_load_file + this. Without it a reload publishes a snapshot with every
+    * Vault-only secret blanked, because config_load_file may serve the process cache
+    * and skip the parse that rehydrates them.
+    *
+    * That is not hypothetical: the server mints the API primary bearer AFTER its
+    * first config_load, so the cache still holds the pre-mint config. The 1s
+    * config_reload_if_changed tick then republished that stale copy over the good
+    * snapshot seeded by config_snapshot_init, leaving server_api_bearer_token empty
+    * and failing first-user bootstrap on every clean install (the wizard's Deploy
+    * step returned 500). Applied before the token so an unchanged reload stays a
+    * no-op rather than churning the snapshot. */
+   config_apply_runtime_secrets(&fresh);
    uint64_t tok = config_snapshot_token(&fresh);
    if (atomic_load_explicit(&g_snap_inited, memory_order_acquire) && tok == g_snap_token)
    {
