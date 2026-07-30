@@ -63,11 +63,17 @@ API keys remain in the vault under the agent names and do not need to be re-ente
 
 ## Stale `agents.json`
 
-**Distinguishing symptom:** `GET /v1/agents` succeeds but returns agent state older than the current `agents.json` contents.
+**Distinguishing symptom:** agent configuration appears absent even though
+`$AIMEE_HOME/agents.json` is present and valid, and the file's mtime is in the
+past relative to the appliance clock.
 
-- [ ] Compare the appliance clock with the file timestamp, record the old timestamp, touch the file, and confirm its timestamp changed.
+- [ ] Confirm the file is present and non-empty, compare the appliance clock with
+  its timestamp, record the old timestamp, touch the file, and confirm its
+  timestamp changed.
 
 ```sh
+test -f "$AIMEE_HOME/agents.json"
+test -s "$AIMEE_HOME/agents.json"
 date -Ins
 stat "$AIMEE_HOME/agents.json"
 old_mtime=$(stat -c %Y "$AIMEE_HOME/agents.json")
@@ -139,10 +145,20 @@ git -C "$WORKSPACE" fsck --no-dangling
 git -C "$WORKSPACE" ls-tree HEAD >/dev/null
 ```
 
-- [ ] Resume or observe normal proposal polling and forge operations. Confirm new logs no longer repeat `ls-tree failed ... rc=128` or `resolve https origin: no origin remote` before deleting the retained damaged repository.
+- [ ] Capture the journal cursor after recovery, then resume or observe normal
+  proposal polling and forge operations. Confirm only messages emitted after
+  that cursor no longer report `ls-tree failed ... rc=128` or
+  `resolve https origin: no origin remote` before deleting the retained damaged
+  repository.
 
 ```sh
-if journalctl --since '10 minutes ago' --no-pager | \
+RECOVERY_CURSOR=$(journalctl --show-cursor -n 0 --no-pager | \
+  sed -n 's/^-- cursor: //p')
+test -n "$RECOVERY_CURSOR"
+
+# Resume or wait for at least one normal proposal poll and forge operation here.
+
+if journalctl --after-cursor "$RECOVERY_CURSOR" --no-pager | \
   grep -E 'ls-tree failed.*rc=128|resolve https origin: no origin remote'
 then
   printf '%s\n' 'workspace Git errors are still recurring' >&2
