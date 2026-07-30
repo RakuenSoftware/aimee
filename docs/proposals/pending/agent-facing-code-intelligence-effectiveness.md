@@ -736,3 +736,12 @@ residual proposal instead of declaring the intended effectiveness outcome comple
   suppress the failed packet and never widens recall. Roundtable run:
   `oprun_g6a69bd8011459d99_1785391610_124` (artifact
   `b8def8883da6a7e97997f223dad4d1c4b9ac1ea9f88b0a91e251e9c5c36b1a09`).
+- **E4 confidence-amended exact-diff review — 2026-07-30 — APPROVED and converged, 3/3
+  participants, not degraded.** The panel approved the confidence-bounded artifact with no blocking
+  findings. Its remaining suggestions do not change the accepted contract: `scope=project` is the
+  normative memory field while numeric rank remains diagnostic; the hybrid HTTP boundary has no
+  durable workspace identity to forward; redundant ambient fields are ignored when an explicit
+  scope is present; and token-heuristic/duplicate-check refinements require observed evaluation
+  failures rather than speculative widening. Named policy constants are a readability follow-up.
+  Roundtable run: `oprun_g6a69bd8011459d99_1785391948_125` (artifact
+  `abdfa92e2489d4c73cdb05c18ec067fb8463296c5ed45eb376fe66bb70e986ac`).
