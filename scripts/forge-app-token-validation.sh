@@ -32,7 +32,7 @@
 #
 # HOW TO RUN:
 #   export AIMEE_FORGE_APP_ID=123456
-#   export AIMEE_FORGE_APP_PRIVATE_KEY=/path/to/app-private-key.pem   # path or PEM
+#   export AIMEE_FORGE_APP_PRIVATE_KEY='-----BEGIN PRIVATE KEY-----...' # PEM text
 #   export AIMEE_FORGE_APP_INSTALLATION_ID=987654
 #   export FORGE_VALIDATION_REPO=youruser/throwaway-repo             # App installed here
 #   # optional:
@@ -65,8 +65,7 @@ It is opt-in and NEVER part of verify/CI. Set the required env to run it.
 
 REQUIRED:
   AIMEE_FORGE_APP_ID               the GitHub App's numeric App ID
-  AIMEE_FORGE_APP_PRIVATE_KEY      the App's RSA private key — a PATH to a .pem
-                                   file, OR the PEM contents inline
+  AIMEE_FORGE_APP_PRIVATE_KEY      the App's RSA private-key PEM contents inline
   AIMEE_FORGE_APP_INSTALLATION_ID  the installation id (App installed on the repo)
   FORGE_VALIDATION_REPO            a THROWAWAY owner/repo the App is installed on
 
@@ -106,20 +105,11 @@ APP_ID="$AIMEE_FORGE_APP_ID"
 INSTALL_ID="$AIMEE_FORGE_APP_INSTALLATION_ID"
 REPO="$FORGE_VALIDATION_REPO"
 
-# Resolve the private key to a path. If the env var is a readable file, use it
-# in place (never copy creds to a temp file). If it is inline PEM, write it to a
-# 0600 temp file that the cleanup trap shreds. We track which so cleanup is safe.
-KEY_PATH=""
-KEY_IS_TEMP=0
-if [ -f "$AIMEE_FORGE_APP_PRIVATE_KEY" ]; then
-   KEY_PATH="$AIMEE_FORGE_APP_PRIVATE_KEY"
-elif printf '%s' "$AIMEE_FORGE_APP_PRIVATE_KEY" | grep -q 'BEGIN .*PRIVATE KEY'; then
-   KEY_PATH="$(mktemp /tmp/forge_app_key.XXXXXX)"
-   KEY_IS_TEMP=1
-   chmod 600 "$KEY_PATH"
-   printf '%s\n' "$AIMEE_FORGE_APP_PRIVATE_KEY" >"$KEY_PATH"
-else
-   printf 'forge-app-token-validation: AIMEE_FORGE_APP_PRIVATE_KEY is neither a readable file nor inline PEM\n' >&2
+# Match the service's first-boot contract: the key is inline PEM, never a path.
+# OpenSSL receives it over an anonymous pipe on fd 3, so validation creates no
+# credential file even transiently.
+if ! printf '%s' "$AIMEE_FORGE_APP_PRIVATE_KEY" | grep -q 'BEGIN .*PRIVATE KEY'; then
+   printf 'forge-app-token-validation: AIMEE_FORGE_APP_PRIVATE_KEY must contain inline PEM\n' >&2
    exit 2
 fi
 
@@ -130,9 +120,6 @@ CREATED_PR=""       # set to a PR number/url if we open one
 cleanup() {
    local rc=$?
    set +e
-   if [ "$KEY_IS_TEMP" -eq 1 ] && [ -n "$KEY_PATH" ] && [ -f "$KEY_PATH" ]; then
-      if command -v shred >/dev/null 2>&1; then shred -u "$KEY_PATH" 2>/dev/null; else rm -f "$KEY_PATH"; fi
-   fi
    if command -v gh >/dev/null 2>&1; then
       if [ -n "$CREATED_PR" ]; then
          gh pr close "$CREATED_PR" --repo "$REPO" --delete-branch >/dev/null 2>&1 || true
@@ -142,7 +129,7 @@ cleanup() {
       fi
    fi
    # scrub token vars from this shell's memory (best effort)
-   unset TOKEN TOKEN2 JWT 2>/dev/null || true
+   unset TOKEN TOKEN2 JWT AIMEE_FORGE_APP_PRIVATE_KEY 2>/dev/null || true
    exit "$rc"
 }
 trap cleanup EXIT INT TERM
@@ -162,7 +149,10 @@ mint_installation_token() {
    header='{"alg":"RS256","typ":"JWT"}'
    payload="$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' "$iat" "$exp" "$APP_ID")"
    signing_input="$(printf '%s' "$header" | b64url).$(printf '%s' "$payload" | b64url)"
-   sig="$(printf '%s' "$signing_input" | openssl dgst -sha256 -sign "$KEY_PATH" -binary | b64url)"
+   sig="$(printf '%s' "$signing_input" |
+      openssl dgst -sha256 -sign /dev/fd/3 -binary \
+         3< <(printf '%s\n' "$AIMEE_FORGE_APP_PRIVATE_KEY") |
+      b64url)"
    jwt="$signing_input.$sig"
 
    resp="$(curl -sS --fail-with-body \

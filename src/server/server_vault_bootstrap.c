@@ -26,11 +26,13 @@
  *     copies are OPENSSL_cleanse()d and credential env vars are unset after use.
  */
 #include "server.h"
+#include "config.h"
 #include "vault_service.h"
 #include "vault_store.h"
 #include "log.h"
 #include <openssl/crypto.h>
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -201,11 +203,17 @@ static int remove_legacy_secret_file(const char *path)
 /* Older images let vendor CLIs retain OAuth JSON under persistent HOME. Seal
  * those opaque documents into the same slots used by the current login flow,
  * then remove them before normal startup. */
-static void migrate_legacy_oauth_path(const char *agent, const char *path, prov_counts_t *c)
+static void migrate_legacy_oauth_path(const char *agent, const char *cred, const char *path,
+                                      prov_counts_t *c)
 {
+   int failed_before = c->failed;
    int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
    if (fd < 0)
+   {
+      if (errno != ENOENT)
+         c->failed++;
       return;
+   }
    struct stat st;
    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0 ||
        st.st_size >= VAULT_BOOTSTRAP_OAUTH_MAX)
@@ -233,14 +241,96 @@ static void migrate_legacy_oauth_path(const char *agent, const char *path, prov_
    secret[used] = '\0';
    if (used != (size_t)st.st_size)
       c->failed++;
-   else if (!vault_store_has_entry(VAULT_SERVER_PRINCIPAL, agent, "oauth"))
-      provision_server_credential(agent, "oauth", secret, 0, c);
    else
+   {
+      while (used > 0 && (secret[used - 1] == '\n' || secret[used - 1] == '\r'))
+         secret[--used] = '\0';
+      if (used == 0)
+         c->failed++;
+   }
+   if (c->failed == failed_before &&
+       !vault_store_has_entry(VAULT_SERVER_PRINCIPAL, agent, cred))
+      provision_server_credential(agent, cred, secret, 0, c);
+   else if (c->failed == failed_before)
       c->skipped++;
 
    OPENSSL_cleanse(secret, (size_t)st.st_size + 1);
    free(secret);
-   if (!c->failed && remove_legacy_secret_file(path) != 0)
+   if (c->failed == failed_before && remove_legacy_secret_file(path) != 0)
+      c->failed++;
+}
+
+/* Older OAuth support also used db1/secrets, whose container fallback is one
+ * plaintext file per `oauth.<client>.<field>` under config_output_dir(). Sweep
+ * every such file at boot, including orphaned clients no longer present in the
+ * MCP registry. An unfamiliar oauth.* file fails startup instead of guessing
+ * whether it is safe to retain or delete. */
+static void migrate_legacy_db1_oauth(prov_counts_t *c)
+{
+   static const struct
+   {
+      const char *suffix;
+      const char *cred;
+   } fields[] = {
+       {".access_token", "oauth_access_token"},
+       {".refresh_token", "oauth_refresh_token"},
+       {".expires_at", "oauth_expires_at"},
+       {".reauth_required", "oauth_reauth_required"},
+   };
+   const char *dir_path = config_output_dir();
+   DIR *dir = opendir(dir_path);
+   if (!dir)
+   {
+      if (errno != ENOENT)
+         c->failed++;
+      return;
+   }
+   int read_error = 0;
+   for (;;)
+   {
+      errno = 0;
+      struct dirent *entry = readdir(dir);
+      if (!entry)
+      {
+         read_error = errno;
+         break;
+      }
+      const char *name = entry->d_name;
+      static const char prefix[] = "oauth.";
+      if (strncmp(name, prefix, sizeof(prefix) - 1) != 0)
+         continue;
+      size_t name_len = strlen(name);
+      const char *cred = NULL;
+      size_t client_len = 0;
+      for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++)
+      {
+         size_t suffix_len = strlen(fields[i].suffix);
+         if (name_len > sizeof(prefix) - 1 + suffix_len &&
+             strcmp(name + name_len - suffix_len, fields[i].suffix) == 0)
+         {
+            cred = fields[i].cred;
+            client_len = name_len - (sizeof(prefix) - 1) - suffix_len;
+            break;
+         }
+      }
+      if (!cred || client_len == 0 || client_len >= 128)
+      {
+         c->failed++;
+         continue;
+      }
+      char client[128];
+      memcpy(client, name + sizeof(prefix) - 1, client_len);
+      client[client_len] = '\0';
+      char path[1024];
+      int path_len = snprintf(path, sizeof(path), "%s/%s", dir_path, name);
+      if (path_len <= 0 || (size_t)path_len >= sizeof(path))
+      {
+         c->failed++;
+         continue;
+      }
+      migrate_legacy_oauth_path(client, cred, path, c);
+   }
+   if (read_error != 0 || closedir(dir) != 0)
       c->failed++;
 }
 
@@ -253,11 +343,12 @@ static void migrate_legacy_oauth(prov_counts_t *c)
       return;
    char path[1024];
    if ((size_t)snprintf(path, sizeof(path), "%s/codex-auth.json", home) < sizeof(path))
-      migrate_legacy_oauth_path("codex", path, c);
+      migrate_legacy_oauth_path("codex", "oauth", path, c);
    if ((size_t)snprintf(path, sizeof(path), "%s/.codex/auth.json", home) < sizeof(path))
-      migrate_legacy_oauth_path("codex", path, c);
+      migrate_legacy_oauth_path("codex", "oauth", path, c);
    if ((size_t)snprintf(path, sizeof(path), "%s/.claude/.credentials.json", home) < sizeof(path))
-      migrate_legacy_oauth_path("claude", path, c);
+      migrate_legacy_oauth_path("claude", "oauth", path, c);
+   migrate_legacy_db1_oauth(c);
 }
 
 int server_vault_bootstrap(void)

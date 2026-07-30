@@ -9,6 +9,8 @@
  * The module resolves agent names through an injected resolver, so this test
  * provides a trivial one and needs no agent-config link. */
 #include "server.h"
+#include "config.h"
+#include "oauth_flow.h"
 #include "vault_service.h"
 #include "vault_store.h"
 #include "vault_kek_cache.h"
@@ -262,6 +264,38 @@ static void test_legacy_oauth_migration(void)
    printf("  PASS: test_legacy_oauth_migration\n");
 }
 
+static void test_legacy_db1_oauth_migration(void)
+{
+   const char *client = "retired-mcp";
+   char access_name[256], refresh_name[256], access_path[512], refresh_path[512];
+   snprintf(access_name, sizeof(access_name), OAUTH_KEY_ACCESS_TOKEN, client);
+   snprintf(refresh_name, sizeof(refresh_name), OAUTH_KEY_REFRESH_TOKEN, client);
+   snprintf(access_path, sizeof(access_path), "%s/%s", config_output_dir(), access_name);
+   snprintf(refresh_path, sizeof(refresh_path), "%s/%s", config_output_dir(), refresh_name);
+   FILE *f = fopen(access_path, "wb");
+   assert(f != NULL);
+   fputs("legacy-db1-access-token\n", f);
+   fclose(f);
+   f = fopen(refresh_path, "wb");
+   assert(f != NULL);
+   fputs("legacy-db1-refresh-token\n", f);
+   fclose(f);
+
+   assert(server_vault_bootstrap() == 2);
+   char value[128];
+   assert(vault_service_get_server_principal(client, "oauth_access_token", value,
+                                             sizeof(value)) == VAULT_OK);
+   assert(strcmp(value, "legacy-db1-access-token") == 0);
+   OPENSSL_cleanse(value, sizeof(value));
+   assert(vault_service_get_server_principal(client, "oauth_refresh_token", value,
+                                             sizeof(value)) == VAULT_OK);
+   assert(strcmp(value, "legacy-db1-refresh-token") == 0);
+   OPENSSL_cleanse(value, sizeof(value));
+   assert(access(access_path, F_OK) != 0);
+   assert(access(refresh_path, F_OK) != 0);
+   printf("  PASS: test_legacy_db1_oauth_migration\n");
+}
+
 /* No secret source configured -> no-op (and no crash). */
 static void test_no_source_noop(void)
 {
@@ -282,6 +316,8 @@ static void test_no_plaintext_at_rest(void)
    assert(!plaintext_under_home("db-password"));
    assert(!plaintext_under_home("legacy-codex-token"));
    assert(!plaintext_under_home("legacy-claude-token"));
+   assert(!plaintext_under_home("legacy-db1-access-token"));
+   assert(!plaintext_under_home("legacy-db1-refresh-token"));
    assert(!plaintext_under_home("must-live-only-in-kb-vault"));
    assert(!plaintext_under_home("vault-only-browser-password"));
    assert(!plaintext_under_home("extra-password"));
@@ -312,6 +348,7 @@ int main(void)
    test_oversized_credential_name_fails_closed();
    test_kb_ingests_delegate_shaped_env_generically();
    test_legacy_oauth_migration();
+   test_legacy_db1_oauth_migration();
    test_no_source_noop();
    test_no_plaintext_at_rest();
 

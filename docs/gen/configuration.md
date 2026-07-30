@@ -303,7 +303,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 219 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 223 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -383,6 +383,7 @@ The binaries read 219 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_VAULT_KMS_KEY_ID` | External KMS key identifier used for vault wrapping. |
 | `AIMEE_VAULT_PKCS11_LABEL` | PKCS#11 object label used for vault custody. |
 | `AIMEE_VAULT_PKCS11_MODULE` | Path to the PKCS#11 provider module. |
+| `AIMEE_VAULT_PKCS11_PIN` | PKCS#11 user PIN accepted only as first-boot transport; it is synchronously sealed into Vault, scrubbed from the environment, and loaded from Vault only when the HSM session opens. |
 | `AIMEE_VAULT_PKCS11_SLOT` | PKCS#11 slot identifier used for vault custody. |
 | `AIMEE_VAULT_TPM2_BLOB_PATH` | Path to the sealed TPM 2 vault-key blob. |
 | `AIMEE_VAULT_TPM2_NV_INDEX` | TPM 2 NV index used for anti-rollback state. |
@@ -505,7 +506,9 @@ The binaries read 219 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_FORGE_API_BASE` | Forge API base URL. |
 | `AIMEE_FORGE_APP_ID` | GitHub App id for minting forge tokens. |
 | `AIMEE_FORGE_APP_INSTALLATION_ID` | GitHub App installation id. |
+| `AIMEE_FORGE_APP_PRIVATE_KEY` | GitHub App private-key PEM accepted only as first-boot transport; it is sealed into Vault and filesystem paths are rejected. |
 | `AIMEE_FORGE_SCOPE` | Scope for the minted forge token. |
+| `AIMEE_FORGE_TOKEN` | First-boot static forge token. aimee-server seals it into the server Vault and unsets it before serving; subsequent boots read only from Vault. |
 
 ### Gateway (voice / webhooks / push)
 
@@ -602,6 +605,7 @@ The binaries read 219 `AIMEE_*` environment variables (scanned from `getenv()` i
 | Variable | Description |
 |----------|-------------|
 | `AIMEE_LLM_AUTH_REQUIRED` | Set to 1 on wizard-managed KBs so embed, rerank, and synthesis clients refuse to contact the unified LLM when its bearer service identity is missing. |
+| `AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE` | Explicit first-boot migration/adoption transport for an existing wizard-managed LLM credential. aimee-server seals it into Vault and scrubs the environment before normal startup. Ordinary inherited AIMEE_LLM_AUTH_TOKEN is ignored by managed credential creation so stale child-service state cannot win. Must be a 32..512 character RFC 6750 b64token. |
 | `AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK` | Internal managed-authority switch: still attempts mlockall first, but when an unprivileged container cannot raise RLIMIT_MEMLOCK, permits the offline one-shot to continue only if the kernel reports no active swap. Operator-run custody tools leave this unset and retain mandatory mlockall. |
 
 ## External & provider environment

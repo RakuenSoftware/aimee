@@ -608,9 +608,13 @@ ENV_RE = re.compile(r'(?:getenv|copy_env)\(\s*"(AIMEE_[A-Z0-9_]+)"')
 # not read through individual getenv() calls. Keep their deployment contract in
 # the generated reference anyway.
 ENV_DYNAMIC = {
+    "AIMEE_FORGE_APP_PRIVATE_KEY",
+    "AIMEE_FORGE_TOKEN",
+    "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE",
     "AIMEE_SERVER_TLS_PRIVATE_KEY",
     "AIMEE_SERVER_MGMT_TLS_PRIVATE_KEY",
     "AIMEE_SERVER_MGMT_STATUS_CLIENT_PRIVATE_KEY",
+    "AIMEE_VAULT_PKCS11_PIN",
     "AIMEE_WEBCHAT_USER",
     "AIMEE_WEBCHAT_PASSWORD",
     "AIMEE_WEBCHAT_USERS",
@@ -806,7 +810,7 @@ ENV_DESC = {
     "AIMEE_FORGE_API_BASE": ("Forge (GitHub App / tokens)", "Forge API base URL."),
     "AIMEE_FORGE_APP_ID": ("Forge (GitHub App / tokens)", "GitHub App id for minting forge tokens."),
     "AIMEE_FORGE_APP_INSTALLATION_ID": ("Forge (GitHub App / tokens)", "GitHub App installation id."),
-    "AIMEE_FORGE_APP_PRIVATE_KEY": ("Forge (GitHub App / tokens)", "GitHub App private key (PEM or path)."),
+    "AIMEE_FORGE_APP_PRIVATE_KEY": ("Forge (GitHub App / tokens)", "GitHub App private-key PEM accepted only as first-boot transport; it is sealed into Vault and filesystem paths are rejected."),
     "AIMEE_FORGE_SCOPE": ("Forge (GitHub App / tokens)", "Scope for the minted forge token."),
     "AIMEE_FORGE_TOKEN": ("Forge (GitHub App / tokens)", "First-boot static forge token. aimee-server seals it into the server Vault and unsets it before serving; subsequent boots read only from Vault."),
     # Gateway

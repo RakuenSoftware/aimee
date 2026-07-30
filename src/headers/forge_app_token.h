@@ -9,8 +9,10 @@
  * Additive + env-gated: when AIMEE_FORGE_APP_* is unset, this layer is inert
  * and the raw AIMEE_FORGE_TOKEN behavior is unchanged.
  *
- * Required env:  AIMEE_FORGE_APP_ID, AIMEE_FORGE_APP_PRIVATE_KEY (PEM text or a
- *                path to a .pem), AIMEE_FORGE_APP_INSTALLATION_ID.
+ * First boot:   AIMEE_FORGE_APP_PRIVATE_KEY contains PEM text. Startup seals it
+ *               into Vault and removes it from the environment before serving;
+ *               filesystem paths are rejected.
+ * Runtime env:  AIMEE_FORGE_APP_ID, AIMEE_FORGE_APP_INSTALLATION_ID.
  * Optional env:  AIMEE_FORGE_API_BASE (default https://api.github.com; set to a
  *                GHE base or, in tests, a local mock endpoint).
  *
