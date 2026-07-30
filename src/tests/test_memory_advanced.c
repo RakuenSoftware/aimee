@@ -472,20 +472,17 @@ int main(void)
 
    /* --- memory_cognify_unit: disabled when cognify.enabled=false --- */
    {
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_cognify_enabled = 0;
+      write_test_config("memory:\n  cognify:\n    enabled: false\n");
       memory_cognify_result_t result;
-      int rc = memory_cognify_unit(1, "some text", &cfg, &result);
+      int rc = memory_cognify_unit(1, "some text", &result);
       assert(rc == -1);
    }
 
    /* --- memory_cognify_unit: disabled when command is empty --- */
    {
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_cognify_enabled = 1;
-      cfg.memory_cognify_command[0] = '\0';
+      write_test_config("memory:\n  cognify:\n    enabled: true\n");
       memory_cognify_result_t result;
-      int rc = memory_cognify_unit(1, "some text", &cfg, &result);
+      int rc = memory_cognify_unit(1, "some text", &result);
       assert(rc == -1);
    }
 
@@ -511,13 +508,14 @@ int main(void)
       fputs(fixture, fp);
       fclose(fp);
 
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_cognify_enabled = 1;
-      snprintf(cfg.memory_cognify_command, sizeof(cfg.memory_cognify_command),
-               "cat > /dev/null; cat %s", path);
+      char yaml[512];
+      snprintf(yaml, sizeof(yaml),
+               "memory:\n  cognify:\n    enabled: true\n    command: \"cat > /dev/null; cat %s\"\n",
+               path);
+      write_test_config(yaml);
 
       memory_cognify_result_t result;
-      int rc = memory_cognify_unit(src.id, "user prefers terse replies", &cfg, &result);
+      int rc = memory_cognify_unit(src.id, "user prefers terse replies", &result);
       assert(rc == 0);
       assert(strcmp(result.memory_kind, "procedural") == 0);
 
@@ -564,13 +562,14 @@ int main(void)
       fputs(fixture, fp);
       fclose(fp);
 
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_cognify_enabled = 1;
-      snprintf(cfg.memory_cognify_command, sizeof(cfg.memory_cognify_command),
-               "cat > /dev/null; cat %s", path);
+      char yaml[512];
+      snprintf(yaml, sizeof(yaml),
+               "memory:\n  cognify:\n    enabled: true\n    command: \"cat > /dev/null; cat %s\"\n",
+               path);
+      write_test_config(yaml);
 
       memory_cognify_result_t result;
-      assert(memory_cognify_unit(src.id, "server port is 5432", &cfg, &result) == 0);
+      assert(memory_cognify_unit(src.id, "server port is 5432", &result) == 0);
       assert(strcmp(result.memory_kind, "semantic") == 0);
 
       rule_t rule;
@@ -618,20 +617,22 @@ int main(void)
       assert(memory_episode_card_parse(json, &card) != 0);
    }
 
-   /* --- memory_episode_card_generate: disabled when episode_summaries_enabled=0 --- */
+   /* --- memory_episode_card_generate: disabled when episode_summaries_enabled=0 ---
+    *
+    * These two cases used to zero a local config_t to express "disabled". Now that
+    * the function reads live config, the precondition has to be written to the
+    * config file the test owns — otherwise the case silently reads whatever the
+    * developer's real aimee.yaml says and stops testing the disabled path. */
    {
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_episode_summaries_enabled = 0;
-      int64_t uid = memory_episode_card_generate("sess_test_disabled", &cfg);
+      write_test_config("memory:\n  episode_summaries:\n    enabled: false\n");
+      int64_t uid = memory_episode_card_generate("sess_test_disabled");
       assert(uid == 0);
    }
 
    /* --- memory_episode_card_generate: disabled when cognify command is empty --- */
    {
-      memset(&cfg, 0, sizeof(cfg));
-      cfg.memory_episode_summaries_enabled = 1;
-      cfg.memory_cognify_command[0] = '\0';
-      int64_t uid = memory_episode_card_generate("sess_test_nocmd", &cfg);
+      write_test_config("memory:\n  episode_summaries:\n    enabled: true\n");
+      int64_t uid = memory_episode_card_generate("sess_test_nocmd");
       assert(uid == 0);
    }
 
@@ -811,11 +812,10 @@ int main(void)
 
    /* --- memory_cognify_drain with cognifier disabled --- */
    {
-      /* When cognify_enabled=0, drain is a no-op but must not crash */
-      memset(&cfg, 0, sizeof(cfg));
-      /* disabled: memory_cognify_enabled = 0 */
+      /* When cognify is disabled, drain is a no-op but must not crash */
+      write_test_config("memory:\n  cognify:\n    enabled: false\n");
       memory_cognify_queue_stats_t stats;
-      int rc = memory_cognify_drain(&cfg, 0, &stats);
+      int rc = memory_cognify_drain(0, &stats);
       assert(rc == 0);
       /* pending jobs remain because we can't actually run cognifier in tests */
    }

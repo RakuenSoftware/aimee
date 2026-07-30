@@ -1030,10 +1030,7 @@ void mem_cognify(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
 
-   /* Load config */
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.memory_cognify_enabled)
+   if (!config_memory_cognify_enabled())
    {
       fprintf(stderr,
               "error: cognification disabled (set memory.cognify.enabled=true in config)\n");
@@ -1041,7 +1038,7 @@ void mem_cognify(app_ctx_t *ctx, int argc, char **argv)
    }
 
    memory_cognify_result_t result;
-   int rc = memory_cognify_unit(unit_id, m.content, &cfg, &result);
+   int rc = memory_cognify_unit(unit_id, m.content, &result);
    if (rc != 0)
    {
       fprintf(stderr, "error: cognification failed for unit %lld\n", (long long)unit_id);
@@ -1114,15 +1111,13 @@ void mem_episode(app_ctx_t *ctx, int argc, char **argv)
 
    if (do_generate)
    {
-      config_t cfg;
-      config_load(&cfg);
-      if (!cfg.memory_episode_summaries_enabled)
+      if (!config_memory_episode_summaries_enabled())
       {
          fprintf(stderr, "error: episode summaries disabled"
                          " (set memory.episode_summaries.enabled=true in config)\n");
          return;
       }
-      int64_t uid = memory_episode_card_generate(session_id, &cfg);
+      int64_t uid = memory_episode_card_generate(session_id);
       if (uid <= 0)
       {
          fprintf(stderr, "error: episode card generation failed for session '%s'\n", session_id);

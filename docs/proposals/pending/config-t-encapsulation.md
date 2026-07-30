@@ -113,6 +113,31 @@ developer's real `aimee.yaml` and fails wherever that key happens to be set. Pin
 Watch for `mkdtemp` on a `static char[]` template — it rewrites the `XXXXXX` in place, so a second
 call fails. Re-`snprintf` the template each time.
 
+### Round 3 — the memory.h cognify/episode group
+
+Converted: `memory_cognify_unit`, `memory_cognify_drain`, `memory_episode_card_generate`.
+`memory_cognify_drain` held its `cfg` purely to hand to `memory_cognify_unit`, so it fell out for
+free once that one changed. Two more dead `config_t` locals deleted in `cmd_memory_vector.c`, each
+a ~750 KB frame `config_load`ed to read a single boolean for an error message.
+
+**Ratchet:** 877 -> 869 mentions, 458 -> 456 `config_load()`, 242 -> 239 files.
+
+Six test cases in `test_memory_advanced.c` were the hand-built-`config_t` hazard above. They now
+call the file's existing `write_test_config()` helper so the precondition is written to the config
+file the test owns. Note this works because that binary never calls `config_snapshot_init`, so each
+accessor falls through to a fresh `config_load()` from `AIMEE_HOME` — a test binary that DOES pin a
+snapshot would need `config_reload()` instead. The two fixture-command cases are the useful check
+that this is real: they assert `rc == 0` and match `memory_kind`, which only holds if the command
+was genuinely read back out of config.
+
+**Blocked, not done — `memory_query_rewrite`.** It reads five own fields (fine), but also passes
+`cfg` to `memory_rewrite_llm_inproc`, which passes it to `kb_curator_provider_for_stage`
+(`kb_curator_provider.c:116`). That has 6 call sites plus a test that hand-builds a `config_t`, so
+it is its own tranche. Do the curator-provider chain first, then this falls out.
+`memory_maintenance_run` / `memory_maintenance_maybe_run` also remain: two `#ifdef` variants each,
+and `test_curiosity.c` + `test_memory_advanced.c` both drive them with a hand-built `config_t`.
+`memory.h` is down to 4 `config_t` mentions from 7.
+
 ## Known hazards (phase C)
 
 - **Fail-open on read failure** — fixed for scalars via defaults. Audit whether any *string*

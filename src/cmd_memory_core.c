@@ -577,7 +577,7 @@ void mem_drain(app_ctx_t *ctx, int argc, char **argv)
    memory_cognify_queue_stats_t cog_stats;
    memset(&cog_stats, 0, sizeof(cog_stats));
    if (s_mem_cfg.memory_cognify_enabled && s_mem_cfg.memory_cognify_command[0])
-      (void)memory_cognify_drain(&s_mem_cfg, timeout, &cog_stats);
+      (void)memory_cognify_drain(timeout, &cog_stats);
 
    if (ctx->json_output)
    {

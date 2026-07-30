@@ -1123,12 +1123,11 @@ typedef struct
    int coref_count;
 } memory_cognify_result_t;
 
-/* Call the configured cognifier command (cfg->memory_cognify_command) with the
+/* Call the configured cognifier command (memory.cognify.command) with the
  * given memory text and write extracted triples into memory_relations and
  * claims as new memories.  Returns 0 on success, -1 on error or if cognification
  * is disabled.  When db is non-NULL, extracted relations are persisted. */
-int memory_cognify_unit(int64_t memory_id, const char *text, const config_t *cfg,
-                        memory_cognify_result_t *out);
+int memory_cognify_unit(int64_t memory_id, const char *text, memory_cognify_result_t *out);
 
 /* Parse a raw JSON string (as returned by the cognifier command) into a
  * memory_cognify_result_t.  Returns 0 on success, -1 on parse error. */
@@ -1155,7 +1154,7 @@ int memory_cognify_queue_status(memory_cognify_queue_stats_t *out);
  * before being marked 'failed'.  Writes aggregate stats to *out (if non-NULL).
  * timeout_secs: stop after this many seconds (0 = run until queue empty).
  * Returns 0 on success, -1 on fatal error. */
-int memory_cognify_drain(const config_t *cfg, int timeout_secs, memory_cognify_queue_stats_t *out);
+int memory_cognify_drain(int timeout_secs, memory_cognify_queue_stats_t *out);
 
 /* --- Per-Session Episode Cards --- */
 
@@ -1176,7 +1175,7 @@ typedef struct
  * succeeds the card is stored as a memory_unit with is_episode_card=1 and
  * REL_SUMMARISES edges pointing to each constituent memory.
  * Returns the new memory_unit id on success, 0 on error or if disabled. */
-int64_t memory_episode_card_generate(const char *source_session, const config_t *cfg);
+int64_t memory_episode_card_generate(const char *source_session);
 
 /* Parse a raw episode-card JSON string into a memory_episode_card_t.
  * Returns 0 on success, -1 on parse error or missing title. */

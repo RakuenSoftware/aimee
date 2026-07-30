@@ -53,10 +53,6 @@
       "decls": 1,
       "loads": 0
     },
-    "src/cmd_memory_vector.c": {
-      "decls": 2,
-      "loads": 2
-    },
     "src/cmd_provider.c": {
       "decls": 1,
       "loads": 1
@@ -122,7 +118,7 @@
       "loads": 0
     },
     "src/headers/memory.h": {
-      "decls": 7,
+      "decls": 4,
       "loads": 0
     },
     "src/headers/prompts.h": {
@@ -420,14 +416,6 @@
     "src/modules/memory/memory_core_search_c.c": {
       "decls": 6,
       "loads": 2
-    },
-    "src/modules/memory/memory_episodes.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/modules/memory/memory_improve.c": {
-      "decls": 2,
-      "loads": 0
     },
     "src/modules/memory/memory_logic.c": {
       "decls": 2,
@@ -971,8 +959,8 @@
     }
   },
   "totals": {
-    "decls": 877,
-    "files": 242,
-    "loads": 458
+    "decls": 869,
+    "files": 239,
+    "loads": 456
   }
 }
