@@ -47,6 +47,11 @@ services:
       stack: 67108864
     environment:
       AIMEE_HOME: /var/lib/aimee
+      # Must match the read-only workspaces mount below. Without it the
+      # webuser-root convention resolves to <AIMEE_HOME>/workspaces, which does
+      # not exist in this container, and the background ingest reconciler cannot
+      # find GUI-cloned repos.
+      AIMEE_WORKSPACES_DIR: /var/lib/aimee-workspaces
       # External DB2 credentials are streamed into the KB Vault by the
       # disposable Compose helper; never persist them in Config.Env.
       # One knob: embed + rerank + synth all via the aimee-llm container.

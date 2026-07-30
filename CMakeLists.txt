@@ -835,6 +835,9 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_main.c
     ${AIMEE_SRC_DIR}/cli_agent_setup.c
     ${AIMEE_SRC_DIR}/cli_session_start.c
+    # cli_session_start renders the degraded-dependency notice from here; the
+    # CLI links it directly, so it must be listed in BOTH build systems.
+    ${AIMEE_SRC_DIR}/session_degraded_notice.c
     # Thin-client self-update (cli_main dispatch + cli_session_start drift notice
     # both call these; the CLI does not link aimee-cmd, so they build in here).
     ${AIMEE_SRC_DIR}/cmd_self_update.c
@@ -1029,6 +1032,9 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_service.c
     ${AIMEE_SRC_DIR}/kb/kb_service_workers.c
     ${AIMEE_SRC_DIR}/kb/kb_ingest_workers.c
+    # kb_ingest_workers reconciles the webuser clone tree through
+    # ws_scope_webusers_base(); the kb target must link it.
+    ${AIMEE_SRC_DIR}/modules/workspace/workspace_scope.c
     ${AIMEE_SRC_DIR}/kb/kb_service_kb.c
     ${AIMEE_SRC_DIR}/kb/kb_identity_resolve.c
     ${AIMEE_SRC_DIR}/kb/kb_oidc_jwks_fleet.c
