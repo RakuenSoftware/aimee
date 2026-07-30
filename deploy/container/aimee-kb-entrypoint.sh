@@ -45,15 +45,13 @@
 #
 # Starting is best-effort: the kb degrades honestly when embedding is unavailable, whereas
 # an entrypoint that refuses takes the whole knowledge base down with it.
+# Ask the binary, never the file. This used to parse aimee.yaml with a sed regex, which
+# hardcoded the config paths and assumed a top-level `embedding_model:` key — a second
+# reader of a setting config owns. It worked only because config_save happens to write
+# the key at root, and it failed SILENTLY: an unparsed key reads as "nothing selected",
+# so the builtin serves forever and nothing says why.
 read_cfg_embedding_model() {
-    for _cfg in "${AIMEE_HOME:-/var/lib/aimee}/.config/aimee/aimee.yaml" \
-                /opt/aimee/defaults/aimee.yaml; do
-        [ -f "$_cfg" ] || continue
-        _m=$(sed -n 's/^embedding_model:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' \
-             "$_cfg" | head -1)
-        [ -n "$_m" ] && { printf '%s' "$_m"; return 0; }
-    done
-    return 0
+    aimee-kb --print-embedding-model 2>/dev/null || true
 }
 
 start_embedder() {

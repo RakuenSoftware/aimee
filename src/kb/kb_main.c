@@ -1640,6 +1640,20 @@ int main(int argc, char **argv)
       runtime_secret_wipe(embedded, sizeof(embedded));
       return external ? 0 : 1;
    }
+   /* The entrypoint's selection query. It used to parse aimee.yaml with a sed regex —
+    * a second reader of a setting, hardcoding the file paths and assuming the key sits
+    * at the top level. It worked only because config_save happens to write it there,
+    * and its failure was silent: an unparsed key reads as "no embedder selected", the
+    * builtin serves forever, and nothing says so. Ask config instead, which is the
+    * only thing that knows where the value lives and how it is spelled. */
+   if (argc == 2 && strcmp(argv[1], "--print-embedding-model") == 0)
+   {
+      const char *model = config_embedding_model();
+      if (!model || !model[0])
+         return 1; /* nothing selected — the caller starts no embedder */
+      printf("%s\n", model);
+      return 0;
+   }
    if (argc == 2 && strcmp(argv[1], "--vault-llm-auth-configured") == 0)
    {
       char token[513];

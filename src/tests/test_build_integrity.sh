@@ -110,6 +110,11 @@ case "${1:-}" in
         exit 0
         ;;
     --vault-db2-external) exit 0 ;;
+    # The entrypoint asks the binary which embedder is selected instead of parsing
+    # aimee.yaml. Exit 1 = nothing selected, so this stub starts no embedder; without
+    # the case the stub would fall through and print "clean", which the entrypoint
+    # would take as a MODEL NAME.
+    --print-embedding-model) exit 1 ;;
     --list-credential-env-names)
         [ -n "${AIMEE_DB2_URL:-}" ] && printf '%s\n' AIMEE_DB2_URL
         [ -n "${ENTRYPOINT_TEST_API_KEY:-}" ] && printf '%s\n' ENTRYPOINT_TEST_API_KEY
