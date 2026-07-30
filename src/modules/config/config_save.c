@@ -1382,16 +1382,15 @@ const char *config_embedding_command(const config_t *cfg, const char *requested)
 {
    if (requested && requested[0])
       return requested;
-   /* AIMEE_EMBEDDER_URL OUTRANKS the stored command.
+   /* This is the ONE place an embedder address is resolved. Precedence, and why:
     *
-    * It has to, now that the shipped config names the in-container embedder
-    * (http://127.0.0.1:8760) rather than a sidecar script. When the config value was a
-    * script, the env var was read INSIDE that script, so an operator pointing at an
-    * external embedder worked; with a URL in config, checking config first made the
-    * variable dead — the kb kept embedding locally while its schema was sized for the
-    * external endpoint. Env before config also matches how the deploy layer expresses
-    * the wizard's choice: `aimee config deploy-env` emits AIMEE_EMBEDDER_URL for an
-    * external embedder.
+    * AIMEE_EMBEDDER_URL OUTRANKS the stored command, because the env var is how the
+    * RUNNING embedder announces itself. The shipped config pre-selects nothing (first
+    * boot leaves the choice to the wizard), and when the entrypoint does start the
+    * bundled in-container model it exports AIMEE_EMBEDDER_URL pointing at it — so the
+    * bundled model and an operator's external endpoint arrive by the same route and
+    * obey one rule. Checking config first would make the variable dead and let the kb
+    * embed locally while its schema was sized for the external endpoint.
     *
     * memory_embed_text speaks http:// directly, so this costs no fork and no python.
     *
@@ -1403,8 +1402,9 @@ const char *config_embedding_command(const config_t *cfg, const char *requested)
       return env;
    if (cfg && cfg->embedding_command[0])
       return cfg->embedding_command;
-   /* Nothing configured at all: the 384-dim lexical builtin, correct for an
-    * unconfigured shim/test setup. */
+   /* Nothing selected at all: the lexical builtin, which fills the deployment's
+    * configured width (config is the single place that is declared). Correct for a
+    * first boot before the wizard runs, and for an unconfigured shim/test setup. */
    return "builtin";
 }
 

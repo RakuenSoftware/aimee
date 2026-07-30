@@ -138,11 +138,18 @@ int kb_curator_provider_for_stage(const config_t *cfg, kb_curator_stage_t stage,
 
    /* Env fallback when a tier has no config provider, in precedence order:
     *
-    *  1. AIMEE_LLM_URL — the single "point me at the unified aimee-llm container"
-    *     knob. It is the operator explicitly designating one CAPABLE container
-    *     for the whole LLM surface, so it drives BOTH tiers via that container's
-    *     OpenAI chat endpoint ({AIMEE_LLM_URL}/v1). This is the only env fallback
-    *     Tier-B accepts — see (2).
+    *  1. AIMEE_LLM_URL — the operator designating one capable SYNTHESIS endpoint.
+    *     It no longer names a co-deployed container: aimee-llm is retired and the
+    *     kb embeds in-container, so this is synthesis-only and external-only, and
+    *     it drives BOTH tiers via that endpoint's OpenAI chat API
+    *     ({AIMEE_LLM_URL}/v1). It is the only env fallback Tier-B accepts — see (2).
+    *
+    *     NOTE: this resolution still reads the environment directly rather than
+    *     going through config, so the synth address does not yet have config as its
+    *     single source of truth the way the embedder address does
+    *     (config_embedding_command) and the embedding width does
+    *     (config_embedding_dim_*). Centralizing it belongs with the synth work,
+    *     because it also owns the fail-closed auth rule below.
     *  2. LLM_ENDPOINT — TIER-A ONLY. It is the small-model interface (the
     *     zero-config CPU sibling points Tier-A here); letting a small model serve
     *     the reasoning stages is the weak-model-poisons-the-graph case the tier
@@ -158,7 +165,7 @@ int kb_curator_provider_for_stage(const config_t *cfg, kb_curator_stage_t stage,
       const char *llm_url = getenv("AIMEE_LLM_URL");
       if (llm_url && llm_url[0])
       {
-         /* AIMEE_LLM_URL is the container base (no /v1); derive the chat endpoint
+         /* AIMEE_LLM_URL is the endpoint base (no /v1); derive the chat endpoint
           * unless the operator already included it. */
          size_t n = strlen(llm_url);
          while (n > 0 && llm_url[n - 1] == '/')
