@@ -30,7 +30,6 @@
 #include "kb_identity_token.h" /* KB_IDENTITY_TOKEN_WIRE_MAX */
 #include "log.h"
 #include "server.h" /* CAP_* / CAPS_* */
-#include "server_conn_io.h"
 #include "server_write_tier.h"
 #include "server_write_tier_db1.h" /* the db1-backed verify/consume wrappers */
 
@@ -227,13 +226,16 @@ int server_http_retired_global_would_allow(int fd, int is_tcp, const char *beare
                                            int remote_writes, int mtls_mode, int mtls_authenticated,
                                            const char *method, const char *path)
 {
+   (void)fd;
+   (void)mtls_mode;
+   (void)mtls_authenticated;
    if (remote_writes == SERVER_REMOTE_WRITES_OFF)
       return 0;
-   uint32_t caps = server_http_effective_conn_caps(is_tcp, bearer, remote_writes, mtls_mode,
-                                                   mtls_authenticated);
-   caps = server_http_enrollment_caps(caps, is_tcp, mtls_authenticated, server_conn_io_has_ssl(fd),
-                                      bearer, method, path);
-   return server_http_route_allowed_caps(is_tcp, caps, method, path, remote_writes);
+   /* Reconstruct the retired switch itself, not the request's current mTLS-
+    * narrowed capability set. The old global authorizer derived both its caps
+    * and its route tier from remote_writes; using current effective caps makes
+    * the observability counter disappear in optional-mTLS bearer fallback. */
+   return server_http_route_allowed(is_tcp, bearer, method, path, remote_writes);
 }
 
 int server_http_resolve_write_tier(int is_tcp, const char *buf, const char *method,

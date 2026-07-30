@@ -8,6 +8,7 @@
  * link the real object / their own file-local stubs instead and must NOT also
  * link this TU. */
 #include "vault_service.h"
+#include "runtime_secret.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -81,4 +82,18 @@ vault_status_t vault_service_delete(const char *principal, const char *agent, co
    (void)agent;
    (void)cred;
    return VAULT_OK;
+}
+
+/* Tests using this keyless Vault double still exercise the production facade's
+ * process-cache contract. Persistence is intentionally represented by the
+ * in-memory cache; encrypted-store behavior has its own Vault unit tests. */
+int vault_runtime_secret_set(const char *name, const char *value)
+{
+   return runtime_secret_store(name, value);
+}
+
+int vault_runtime_secret_delete(const char *name)
+{
+   runtime_secret_remove(name);
+   return 0;
 }

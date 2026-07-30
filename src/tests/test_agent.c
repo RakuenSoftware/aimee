@@ -197,7 +197,8 @@ static void test_agent_save_never_serializes_literal_key(void)
    n = fread(json, 1, sizeof(json) - 1, f);
    fclose(f);
    json[n] = '\0';
-   assert(strstr(json, "\"api_key\":\"$FIRST_BOOT_KEY\"") != NULL);
+   assert(strstr(json, "$FIRST_BOOT_KEY") != NULL);
+   assert(strstr(json, "literal-must-not-land") == NULL);
 }
 
 static void test_agent_has_role(void)
@@ -3177,6 +3178,15 @@ static void test_agent_config_cache_detects_same_mtime_rewrite(void)
  * fopen("w") that a failed/interrupted write left at zero bytes. */
 static void test_agent_config_deletion_guard(void)
 {
+   const char *old_home = getenv("HOME");
+   const char *old_aimee_home = getenv("AIMEE_HOME");
+   char saved_home[MAX_PATH_LEN] = "";
+   char saved_aimee_home[MAX_PATH_LEN] = "";
+   if (old_home)
+      snprintf(saved_home, sizeof(saved_home), "%s", old_home);
+   if (old_aimee_home)
+      snprintf(saved_aimee_home, sizeof(saved_aimee_home), "%s", old_aimee_home);
+
    char home[MAX_PATH_LEN];
    snprintf(home, sizeof(home), "%s/aimee-guard-XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(home) != NULL);
@@ -3225,9 +3235,15 @@ static void test_agent_config_deletion_guard(void)
       assert(system(cmd) != 0);
    }
 
-   char rm[MAX_PATH_LEN + 16];
-   snprintf(rm, sizeof(rm), "rm -rf %s", home);
-   (void)system(rm);
+   if (old_home)
+      assert(platform_setenv("HOME", saved_home) == 0);
+   else
+      assert(platform_unsetenv("HOME") == 0);
+   if (old_aimee_home)
+      assert(platform_setenv("AIMEE_HOME", saved_aimee_home) == 0);
+   else
+      assert(platform_unsetenv("AIMEE_HOME") == 0);
+   platform_test_rmrf(home);
    printf("  PASS: agent_config_deletion_guard\n");
 }
 

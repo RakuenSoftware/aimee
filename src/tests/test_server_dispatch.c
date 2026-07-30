@@ -16,6 +16,8 @@
 #include "server.h"
 #include "server_http.h"
 #include "toolset.h"
+#include "runtime_secret.h"
+#include "vault_config_bootstrap.h"
 #include "platform_ipc.h"
 #include "platform_process.h"
 
@@ -1256,7 +1258,14 @@ int config_reload(void)
 int config_save(const config_t *cfg)
 {
    if (g_config_stateful)
+   {
       g_config_disk = *cfg;
+      memset(g_config_disk.server_api_bearer_token, 0,
+             sizeof(g_config_disk.server_api_bearer_token));
+      memset(g_config_disk.server_api_bearer_extra, 0,
+             sizeof(g_config_disk.server_api_bearer_extra));
+      g_config_disk.server_api_bearer_extra_count = 0;
+   }
    (void)cfg;
    return 0;
 }
@@ -1952,8 +1961,7 @@ static void test_api_enroll_preserves_sequential_bearers(void)
    conn->capabilities = CAP_SESSION_ADMIN;
 
    memset(&g_config_disk, 0, sizeof(g_config_disk));
-   snprintf(g_config_disk.server_api_bearer_token, sizeof(g_config_disk.server_api_bearer_token),
-            "%s", "primary-test-bearer");
+   assert(vault_runtime_secret_set("AIMEE_API_BEARER_TOKEN", "primary-test-bearer") == 0);
    g_config_snapshot = g_config_disk;
    g_config_reload_calls = 0;
    g_config_stateful = 1;
@@ -1978,13 +1986,20 @@ static void test_api_enroll_preserves_sequential_bearers(void)
 
    assert(strcmp(first_bearer, second_bearer) != 0);
    assert(g_config_reload_calls == 2);
-   assert(g_config_disk.server_api_bearer_extra_count == 2);
-   assert(g_config_snapshot.server_api_bearer_extra_count == 2);
-   assert(strcmp(g_config_disk.server_api_bearer_extra[0], first_bearer) == 0);
-   assert(strcmp(g_config_disk.server_api_bearer_extra[1], second_bearer) == 0);
+   assert(g_config_disk.server_api_bearer_token[0] == '\0');
+   assert(g_config_disk.server_api_bearer_extra_count == 0);
+   assert(g_config_snapshot.server_api_bearer_extra_count == 0);
+   char stored[256];
+   assert(runtime_secret_get("AIMEE_API_BEARER_TOKEN_EXTRA_0", stored, sizeof(stored)) == 1);
+   assert(strcmp(stored, first_bearer) == 0);
+   assert(runtime_secret_get("AIMEE_API_BEARER_TOKEN_EXTRA_1", stored, sizeof(stored)) == 1);
+   assert(strcmp(stored, second_bearer) == 0);
    assert(server_http_enrolled_bearer_count() == 2);
 
    server_http_set_bearer_extra(NULL, 0);
+   assert(vault_runtime_secret_delete("AIMEE_API_BEARER_TOKEN") == 0);
+   assert(vault_runtime_secret_delete("AIMEE_API_BEARER_TOKEN_EXTRA_0") == 0);
+   assert(vault_runtime_secret_delete("AIMEE_API_BEARER_TOKEN_EXTRA_1") == 0);
    g_config_stateful = 0;
    free(conn);
    free(ctx);

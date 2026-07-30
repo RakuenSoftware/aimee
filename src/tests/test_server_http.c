@@ -1,7 +1,9 @@
 /* test_server_http.c: unit tests for the aimee-server /v1 persona routes and
  * the per-session persona store (no socket I/O). */
 #include "server_http.h"
+#include "server_http_authz.h"
 #include "server_http_internal.h"
+#include "runtime_secret.h"
 #include "http_content_encoding.h"
 #include "server.h" /* CAP_* / CAPS_* bits, server_capability_for_method */
 #include "server/server_mgmt_endpoint.h"
@@ -329,14 +331,14 @@ static void test_wfe_http_proxy_round_trip(void)
    }
 
    setenv("AIMEE_WFE_HTTP_SOCKET", socket_path, 1);
-   setenv("AIMEE_API_BEARER_TOKEN", "proxy-test-token", 1);
+   assert(runtime_secret_store("AIMEE_API_BEARER_TOKEN", "proxy-test-token") == 0);
    char response[256];
    const char *body = "{\"proposal_md\":\"test\"}";
    int status = wfe_http_proxy_request("POST", "/v1/dev/submit", "source=release-test", body,
                                        (int)strlen(body), "webuser:release-test", response,
                                        sizeof(response));
    unsetenv("AIMEE_WFE_HTTP_SOCKET");
-   unsetenv("AIMEE_API_BEARER_TOKEN");
+   runtime_secret_remove("AIMEE_API_BEARER_TOKEN");
    int child_status = 0;
    assert(waitpid(child, &child_status, 0) == child);
    assert(WIFEXITED(child_status) && WEXITSTATUS(child_status) == 0);
@@ -1057,7 +1059,7 @@ int main(void)
    /* --- server_http_bootstrap_gate: the one-time bootstrap bearer may ONLY
     *     rotate itself; every other TCP route is refused until it is rotated. --- */
    {
-      unsetenv("AIMEE_API_BEARER_TOKEN"); /* TOFU active */
+      runtime_secret_remove("AIMEE_API_BEARER_TOKEN"); /* TOFU active */
       const char *BOOT = "aimee-local-dev";
       const char *enrolled[] = {"wizard-user-token"};
       server_http_set_bearer_extra(enrolled, 1);
@@ -1079,11 +1081,11 @@ int main(void)
       /* Once rotated to a strong bearer, the gate is off for every route. */
       assert(server_http_bootstrap_gate(1, 0, "GET", "/v1/config") == 0);
       /* Operator-pinned bearer opts out of TOFU even if it equals the bootstrap. */
-      setenv("AIMEE_API_BEARER_TOKEN", BOOT, 1);
+      assert(runtime_secret_store("AIMEE_API_BEARER_TOKEN", BOOT) == 0);
       assert(server_http_authorize_enrolled_request(1, BOOT, "Bearer aimee-local-dev", NULL, 0,
                                                     &bootstrap_only) == 0);
       assert(bootstrap_only == 0);
-      unsetenv("AIMEE_API_BEARER_TOKEN");
+      runtime_secret_remove("AIMEE_API_BEARER_TOKEN");
       server_http_set_bearer_extra(NULL, 0);
 
       uint32_t bootstrap_caps =
@@ -1824,6 +1826,13 @@ int main(void)
       uint32_t fallback = CAPS_READ_ONLY & ~(uint32_t)CAP_CHAT;
       assert(server_http_effective_conn_caps(1, "plain", SERVER_REMOTE_WRITES_FULL, 1, 0) ==
              fallback);
+      /* The cutover metric reconstructs the retired global switch. It must not
+       * reuse today's optional-mTLS fallback caps or the denied write vanishes
+       * from remote_writes.global_ignored. */
+      assert(server_http_retired_global_would_allow(-1, 1, "plain", SERVER_REMOTE_WRITES_FULL, 1, 0,
+                                                    "POST", "/v1/memory/store") == 1);
+      assert(server_http_retired_global_would_allow(-1, 1, "plain", SERVER_REMOTE_WRITES_OFF, 1, 0,
+                                                    "POST", "/v1/memory/store") == 0);
       assert(server_http_effective_conn_caps(1, "plain", SERVER_REMOTE_WRITES_OFF, 1, 1) ==
              CAPS_AUTHENTICATED);
       assert(server_http_effective_conn_caps(1, "plain", SERVER_REMOTE_WRITES_DATA, 1, 1) ==
@@ -2211,9 +2220,14 @@ int main(void)
     * explicit full tier only after the CSR certificate is bound. */
    {
       assert(db1_init(":memory:") == 0);
-      assert(config_set_server_api_bearer_token("primary") == 0);
+      assert(runtime_secret_store("AIMEE_API_BEARER_TOKEN", "primary") == 0);
       assert(config_set_server_api_mtls(1) == 0);
-      assert(config_set_server_api_bearer_extra_count(0) == 0);
+      for (int i = 0; i < AIMEE_API_BEARER_EXTRA_MAX; i++)
+      {
+         char name[96];
+         snprintf(name, sizeof(name), "AIMEE_API_BEARER_TOKEN_EXTRA_%d", i);
+         runtime_secret_remove(name);
+      }
 
       pthread_barrier_t barrier;
       pthread_t workers[2];
@@ -2253,6 +2267,8 @@ int main(void)
       assert(effective_tier == SERVER_REMOTE_WRITES_FULL);
       assert(strcmp(principal, "webuser:alice") == 0);
       assert(server_http_first_user_bootstrap("webuser:alice", again, sizeof(again)) == 1);
+      runtime_secret_remove("AIMEE_API_BEARER_TOKEN");
+      runtime_secret_remove("AIMEE_API_BEARER_TOKEN_EXTRA_0");
       db1_shutdown();
    }
 

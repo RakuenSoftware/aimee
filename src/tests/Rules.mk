@@ -697,11 +697,11 @@ unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	@# the preserved tail and the assertion failed. That test is fragile about
 	@# output size — its own comment admits as much — but a short prefix costs
 	@# nothing and keeps this change from perturbing it.
-	@th="$$(mktemp -d /tmp/aut.XXXXXX)"; \
 	@# The outer `aimee git verify` process holds the host-wide verifier lock
 	@# while this suite runs. A few white-box tests invoke handle_git_verify again;
 	@# give those nested test invocations their own lock instead of deadlocking on
 	@# their parent process, while still serializing them with one another.
+	@th="$$(mktemp -d /tmp/aut.XXXXXX)"; \
 	export HOME="$$th" TMPDIR="$$th" AIMEE_VERIFY_LOCK_FILE="$$th/nested-verify.lock"; \
 	unset AIMEE_HOME AIMEE_API_REMOTE_WRITES AIMEE_API_MTLS AIMEE_API_BEARER_TOKEN \
 	  AIMEE_SERVER_HTTP_BIND AIMEE_WORKSPACES_DIR AIMEE_KB_API_URL \
@@ -1621,6 +1621,7 @@ $(TESTPREFIX)/unit-test-dashboard: $(OBJDIR)/tests/test_dashboard.o \
                           $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/modules/config/config_accessors_0.o $(OBJDIR)/modules/config/config_accessors_1.o $(OBJDIR)/modules/config/config_accessors_2.o $(OBJDIR)/modules/config/config_accessors_3.o $(OBJDIR)/modules/config/config_accessors_4.o $(OBJDIR)/modules/config/config_accessors_5.o $(OBJDIR)/modules/config/config_accessors_6.o $(OBJDIR)/modules/config/config_accessors_7.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o \
                           $(OBJDIR)/yaml.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o \
                           $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/dstr.o \
+                          $(OBJDIR)/modules/vault/runtime_secret.o \
                           $(OBJDIR)/tests/support/mock_agent_http.o \
                           $(OBJDIR)/aimee_home.o $(OBJDIR)/shared/kb_paths.o \
                           $(OBJDIR)/platform_random.o $(OBJDIR)/log.o $(OBJDIR)/cJSON.o \
@@ -1656,6 +1657,7 @@ $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o 
 	                                $(OBJDIR)/server/server_hooks.o $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_bearer_auth.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/server_http_authz.o $(OBJDIR)/modules/vault/vault_principal.o \
 	                                $(OBJDIR)/tests/support/workflow_api_stub.o \
 	                                $(OBJDIR)/tests/support/vault_handlers_stub.o \
+	                                $(OBJDIR)/modules/vault/runtime_secret.o \
 	                                $(OBJDIR)/tests/support/toolset_stub.o \
 	                                $(OBJDIR)/cJSON.o $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
 	                                $(OBJDIR)/db1/model_catalog.o \
@@ -6310,3 +6312,23 @@ $(TESTPREFIX)/unit-test-config-cross-verify: $(OBJDIR)/tests/test_config_cross_v
 
 $(TESTPREFIX)/unit-test-config-set-section: $(OBJDIR)/tests/test_config_set_section.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Runtime credentials are a low-level process service used by config and client
+# code. Keep every standard unit binary link-complete even when a narrow test
+# enumerates those objects instead of using TEST_CORE_OBJS; LTO removes the
+# cache from binaries that do not reference it.
+TEST_KB_RUNTIME_TARGETS = \
+  $(TESTPREFIX)/unit-test-kb-audit-worm-pg \
+  $(TESTPREFIX)/unit-test-kb-bedrock-live \
+  $(TESTPREFIX)/unit-test-kb-p2b-egress-live \
+  $(TESTPREFIX)/unit-test-kb-vault-key-use-live \
+  $(TESTPREFIX)/unit-test-kb-vault-rotation-live \
+  $(TESTPREFIX)/unit-test-kb-vault-rotation-ops-live \
+  $(TESTPREFIX)/unit-test-vault-pg \
+  $(TESTPREFIX)/unit-test-witness-canary-pg \
+  $(TESTPREFIX)/unit-test-witness-checkpoint-produce-pg \
+  $(TESTPREFIX)/unit-test-witness-emit-pg \
+  $(TESTPREFIX)/unit-test-witness-recovery-pg \
+  $(TESTPREFIX)/unit-test-witness-tamper-pg
+$(filter-out $(TEST_KB_RUNTIME_TARGETS),$(TEST_TARGETS)): \
+  $(OBJDIR)/modules/vault/runtime_secret.o
