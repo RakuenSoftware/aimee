@@ -61,6 +61,7 @@
 #include "log.h"
 #include "workspace.h"
 #include "cJSON.h"
+#include "kb_http_json.h"
 #include <unistd.h>
 #define KB_HTTP_READ_MAX 4096
 #define KB_HTTP_RESP_MAX (1024 * 1024)
@@ -315,37 +316,6 @@ static int qparam(const char *qs, const char *key, char *out, size_t out_cap)
 static int json_body_error(char *out_buf, int out_cap, int status, const char *message);
 
 /* Extract a JSON string field value from body into out. */
-static int json_str(const char *body, const char *key, char *out, size_t out_cap)
-{
-   if (!body || !out_cap)
-      return 0;
-   out[0] = '\0';
-   char needle[128];
-   snprintf(needle, sizeof(needle), "\"%s\"", key);
-   const char *p = strstr(body, needle);
-   if (!p)
-      return 0;
-   p += strlen(needle);
-   while (*p == ' ' || *p == '\t')
-      p++;
-   if (*p != ':')
-      return 0;
-   p++;
-   while (*p == ' ' || *p == '\t')
-      p++;
-   if (*p != '"')
-      return 0;
-   p++;
-   size_t i = 0;
-   while (*p && *p != '"' && i + 1 < out_cap)
-   {
-      if (*p == '\\' && *(p + 1))
-         p++;
-      out[i++] = *p++;
-   }
-   out[i] = '\0';
-   return 1;
-}
 
 /* Resolve POST /v1/search scope before either the facet or ranked branch.
  * Omission is local/current, never all: a verified project credential can
@@ -423,51 +393,7 @@ static int kb_search_project_scope(const char *body, char *project, size_t proje
 }
 
 /* Extract a JSON integer field from body. Returns default_val if not found. */
-static int json_int(const char *body, const char *key, int default_val)
-{
-   if (!body)
-      return default_val;
-   char needle[128];
-   snprintf(needle, sizeof(needle), "\"%s\"", key);
-   const char *p = strstr(body, needle);
-   if (!p)
-      return default_val;
-   p += strlen(needle);
-   while (*p == ' ' || *p == '\t')
-      p++;
-   if (*p != ':')
-      return default_val;
-   p++;
-   while (*p == ' ' || *p == '\t')
-      p++;
-   if (*p < '0' || *p > '9')
-      return default_val;
-   return atoi(p);
-}
 
-static int json_bool(const char *body, const char *key, int default_val)
-{
-   if (!body)
-      return default_val;
-   char needle[128];
-   snprintf(needle, sizeof(needle), "\"%s\"", key);
-   const char *p = strstr(body, needle);
-   if (!p)
-      return default_val;
-   p += strlen(needle);
-   while (*p == ' ' || *p == '\t')
-      p++;
-   if (*p != ':')
-      return default_val;
-   p++;
-   while (*p == ' ' || *p == '\t')
-      p++;
-   if (strncmp(p, "true", 4) == 0)
-      return 1;
-   if (strncmp(p, "false", 5) == 0)
-      return 0;
-   return default_val;
-}
 static int json_body_error(char *out_buf, int out_cap, int status, const char *message)
 {
    snprintf(out_buf, (size_t)out_cap, "{\"error\":\"%s\"}", message);
@@ -623,18 +549,18 @@ static int purge_body_parse(const char *body, char *project, size_t project_cap,
                             char *out_buf, int out_cap)
 {
    project[0] = generation[0] = purge_id[0] = '\0';
-   if (!json_str(body, "project", project, project_cap) || !project[0])
+   if (!kb_http_json_str(body, "project", project, project_cap) || !project[0])
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing project\"}");
       return -1;
    }
-   if (!json_str(body, "generation", generation, generation_cap) || !generation[0] ||
+   if (!kb_http_json_str(body, "generation", generation, generation_cap) || !generation[0] ||
        strchr(generation, ' '))
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing or invalid generation\"}");
       return -1;
    }
-   if (!json_str(body, "purge_id", purge_id, purge_id_cap) || !purge_id[0] || strchr(purge_id, ' '))
+   if (!kb_http_json_str(body, "purge_id", purge_id, purge_id_cap) || !purge_id[0] || strchr(purge_id, ' '))
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing or invalid purge_id\"}");
       return -1;
@@ -1044,7 +970,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          return 405;
       }
       char topic[256] = "";
-      if (!json_str(body, "topic", topic, sizeof(topic)) || !topic[0])
+      if (!kb_http_json_str(body, "topic", topic, sizeof(topic)) || !topic[0])
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing topic\"}");
          return 400;
@@ -1066,7 +992,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          return 405;
       }
       char topic[256] = "";
-      if (!json_str(body, "topic", topic, sizeof(topic)) || !topic[0])
+      if (!kb_http_json_str(body, "topic", topic, sizeof(topic)) || !topic[0])
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing topic\"}");
          return 400;
@@ -1093,10 +1019,10 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       /* Escape hatch: force-clear a stuck reembed_in_progress marker (non-destructive, resumes
        * search; available even when reembed_on_dim_change is off). 409 on dim mismatch unless
        * force. */
-      if (json_bool(body, "clear_maintenance", 0))
+      if (kb_http_json_bool(body, "clear_maintenance", 0))
       {
          int was = 0, recorded = 0, running = 0;
-         int cforce = json_bool(body, "force", 0);
+         int cforce = kb_http_json_bool(body, "force", 0);
          int rc = db2_reembed_clear_maintenance(cforce, &was, &recorded, &running);
          char msg[160] = "";
          if (rc == -1)
@@ -1121,13 +1047,13 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
                   "attended dim-change reset\"}");
          return 403;
       }
-      int confirm = json_bool(body, "confirm", 0);
-      int force = json_bool(body, "force", 0);
-      int dry = json_bool(body, "dry_run", 0) || !confirm; /* no confirm => dry-run */
+      int confirm = kb_http_json_bool(body, "confirm", 0);
+      int force = kb_http_json_bool(body, "force", 0);
+      int dry = kb_http_json_bool(body, "dry_run", 0) || !confirm; /* no confirm => dry-run */
       /* Target precedence: explicit operator target_dim (authoritative, bypasses the
        * probe) > operator pin > the embedder's CURRENT dim via probe (after a model
        * swap, db2_embedding_dim() still reports the old/recorded value). */
-      int target = json_int(body, "target_dim", 0);
+      int target = kb_http_json_int(body, "target_dim", 0);
       if (target <= 0)
       {
          if (config_embedding_dim_is_pinned(&rcfg))
@@ -1172,7 +1098,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
          return 405;
       }
-      int limit = json_int(body, "limit", 20);
+      int limit = kb_http_json_int(body, "limit", 20);
       if (kb_curator_contradictions_json(limit, out_buf, out_cap) < 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"contradictions unavailable\"}");
@@ -1199,7 +1125,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          return 503;
       }
       char query[512] = "";
-      if (!json_str(body, "query", query, sizeof(query)) || !query[0])
+      if (!kb_http_json_str(body, "query", query, sizeof(query)) || !query[0])
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing query\"}");
          return 400;
@@ -1223,8 +1149,8 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       }
 
       char fusion_mode[64] = "";
-      json_str(body, "fusion_mode", fusion_mode, sizeof(fusion_mode));
-      int max_results = json_int(body, "max_results", 10);
+      kb_http_json_str(body, "fusion_mode", fusion_mode, sizeof(fusion_mode));
+      int max_results = kb_http_json_int(body, "max_results", 10);
       if (max_results < 1)
          max_results = 1;
       if (max_results > 100)
@@ -1236,7 +1162,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
        * deployment default (explicit command, AIMEE_EMBEDDER_URL, or
        * AIMEE_LLM_URL), not just the raw config field. */
       char embed_cmd[256] = "";
-      json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
+      kb_http_json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
       {
          config_t scfg;
@@ -1253,7 +1179,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       }
 
       char used_mode[64] = "rrf";
-      json_str(raw, "fusion_mode", used_mode, sizeof(used_mode));
+      kb_http_json_str(raw, "fusion_mode", used_mode, sizeof(used_mode));
 
       int pos = 0;
       pos = js_appendf(out_buf, pos, out_cap, "{\"hits\":[");
@@ -1580,24 +1506,24 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       char kb_path[MAX_PATH_LEN] = "";
       char project[128] = "";
       char embed_cmd[256] = "";
-      if (!json_str(body, "path", kb_path, sizeof(kb_path)) || !kb_path[0])
+      if (!kb_http_json_str(body, "path", kb_path, sizeof(kb_path)) || !kb_path[0])
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing path\"}");
          return 400;
       }
-      if (!json_str(body, "project", project, sizeof(project)) || !project[0])
+      if (!kb_http_json_str(body, "project", project, sizeof(project)) || !project[0])
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing project\"}");
          return 400;
       }
-      (void)json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
+      (void)kb_http_json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
       {
          config_t embed_cfg;
          config_load(&embed_cfg);
          snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command(&embed_cfg, NULL));
       }
-      int force = json_bool(body, "force", 0);
+      int force = kb_http_json_bool(body, "force", 0);
 
       if (!db2_is_initialized())
       {
@@ -1671,17 +1597,17 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       char kb_path[MAX_PATH_LEN] = "";
       char project[128] = "";
       char embed_cmd[256] = "";
-      if (!json_str(body, "path", kb_path, sizeof(kb_path)) || !kb_path[0])
+      if (!kb_http_json_str(body, "path", kb_path, sizeof(kb_path)) || !kb_path[0])
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing path\"}");
          return 400;
       }
-      if (!json_str(body, "project", project, sizeof(project)) || !project[0])
+      if (!kb_http_json_str(body, "project", project, sizeof(project)) || !project[0])
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing project\"}");
          return 400;
       }
-      (void)json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
+      (void)kb_http_json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
       {
          config_t embed_cfg;
@@ -1749,8 +1675,8 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       }
 
       char workspace[MAX_PATH_LEN] = "";
-      (void)json_str(body, "workspace", workspace, sizeof(workspace));
-      int force = json_bool(body, "force", 0);
+      (void)kb_http_json_str(body, "workspace", workspace, sizeof(workspace));
+      int force = kb_http_json_bool(body, "force", 0);
       int use_all = !workspace[0] || strcmp(workspace, "all") == 0;
 
       char(*projects)[MAX_PATH_LEN] = calloc(MAX_DISCOVERED_PROJECTS, MAX_PATH_LEN);
@@ -1909,7 +1835,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
          return 405;
       }
-      int limit = json_int(body, "limit", 0);
+      int limit = kb_http_json_int(body, "limit", 0);
       if (limit < 0)
          limit = 0;
       db2_corpus_pipeline_stats_t stats;
@@ -1930,14 +1856,14 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          return 405;
       }
       char embed_cmd[256] = "";
-      (void)json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
+      (void)kb_http_json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
       {
          config_t embed_cfg;
          config_load(&embed_cfg);
          snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command(&embed_cfg, NULL));
       }
-      int timeout = json_int(body, "timeout", 0);
+      int timeout = kb_http_json_int(body, "timeout", 0);
       if (timeout < 0)
          timeout = 0;
 
@@ -1968,17 +1894,17 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       char kb_path[4096] = "";
       char project[256] = "";
       char embed_cmd[256] = "";
-      if (!json_str(body, "path", kb_path, sizeof(kb_path)) || !kb_path[0])
+      if (!kb_http_json_str(body, "path", kb_path, sizeof(kb_path)) || !kb_path[0])
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing path\"}");
          return 400;
       }
-      if (!json_str(body, "project", project, sizeof(project)) || !project[0])
+      if (!kb_http_json_str(body, "project", project, sizeof(project)) || !project[0])
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing project\"}");
          return 400;
       }
-      (void)json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
+      (void)kb_http_json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
       {
          config_t embed_cfg;
@@ -2024,7 +1950,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
          return 405;
       }
-      int dry_run = json_bool(body, "dry_run", 0);
+      int dry_run = kb_http_json_bool(body, "dry_run", 0);
       pgvec_kb_service_reconcile_result_t reconcile;
       memset(&reconcile, 0, sizeof(reconcile));
       if (pgvec_kb_service_reconcile_orphans(db2_kb_service_memory_record_exists,
@@ -2052,7 +1978,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          return 405;
       }
       char project[256] = "";
-      if (!json_str(body, "project", project, sizeof(project)) || !project[0])
+      if (!kb_http_json_str(body, "project", project, sizeof(project)) || !project[0])
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing project\"}");
          return 400;
@@ -2086,7 +2012,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       if (purge_body_parse(body, project, sizeof(project), generation, sizeof(generation), purge_id,
                            sizeof(purge_id), out_buf, out_cap) != 0)
          return 400;
-      int takeover = json_bool(body, "takeover", 0);
+      int takeover = kb_http_json_bool(body, "takeover", 0);
 
       /* Atomic read-decide-write: one transaction takes the project advisory
        * guard, inspects the identity row FOR UPDATE, refuses a LIVE foreign
@@ -2289,12 +2215,12 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          return 405;
       }
       char query[512] = "";
-      if (!json_str(body, "query", query, sizeof(query)) || !query[0])
+      if (!kb_http_json_str(body, "query", query, sizeof(query)) || !query[0])
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing query\"}");
          return 400;
       }
-      int limit = json_int(body, "limit", 10);
+      int limit = kb_http_json_int(body, "limit", 10);
       if (limit < 1)
          limit = 1;
       if (limit > 50)
