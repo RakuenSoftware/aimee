@@ -6,16 +6,19 @@
 # operator directly; the server picks the services with COMPOSE_PROFILES, which
 # `aimee config deploy-env` derives from the wizard's page-2 config:
 #
-#   local kb   -> COMPOSE_PROFILES=kb   -> aimee-kb
-#   remote kb  -> COMPOSE_PROFILES=      -> nothing (server connects out)
+#   local kb, LLM external/off  -> COMPOSE_PROFILES=kb      -> aimee-kb
+#   local kb, any local tier    -> COMPOSE_PROFILES=kb,llm  -> + aimee-llm (downloads)
+#   remote kb                   -> COMPOSE_PROFILES=         -> nothing (server connects out)
 #
-# There is no inference service here any more. The kb embeds IN-CONTAINER from
-# weights baked into its image, and the reranker is gone (it measured negative), so
-# nothing is left for a separate LLM container to serve on the retrieval path.
-# Synthesis resolves an external endpoint via AIMEE_LLM_URL.
+# ONE LLM service for every tier. aimee-llm is model-less and downloads whichever
+# tier the wizard selected (AIMEE_LLM_*_TIER) on first boot, cpu included. There
+# used to be a second, pre-baked aimee-llm-cpu image on a mutually exclusive
+# "llm-cpu" profile; it is gone. Two images meant every gateway change had to be
+# republished twice, and when the cpu one lagged it served a /health with no
+# `dim` — which the kb gates on — so the kb never went healthy on a fresh install.
 #
 # Every service joins the EXTERNAL `aimee` network that aimee-server is also on, so
-# the server reaches it by name (aimee-kb:8741).
+# the server reaches them by name (aimee-kb:8741, aimee-llm:8742).
 # That network is created by compose.server-managed.yaml.
 
 networks:
@@ -35,23 +38,18 @@ services:
       stack: 67108864
     environment:
       AIMEE_HOME: /var/lib/aimee
-      # Empty by default: the KB image owns PostgreSQL + pgvector for a new
-      # install. Set AIMEE_DB2_URL explicitly only to keep/use an external DB2.
-      AIMEE_DB2_URL: ${AIMEE_DB2_URL:-}
-      # synth via an external endpoint (the kb embeds in-container and runs no
+      # DB credentials, if any, are held only in the KB Vault.
+      # embed + rerank + synth via the unified aimee-llm container (the kb runs no
       # model). When no role is local (llm profile off) the operator points this at
       # an external endpoint; the kb fail-opens on embedding if it is unreachable.
       AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
-      # Managed setup creates one persistent 256-bit service bearer and gives it
-      # to BOTH sides. This is not the wizard user's bearer: it is the KB's own
-      # identity for every embed and synth request to its LLM.
-      AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
+      # Managed setup streams the LLM bearer into the KB Vault through a
+      # disposable --rm helper before this long-lived container is created.
       # Managed clients must never downgrade to keyless requests if credential
       # injection is broken. Standalone/external deployments remain compatible
       # unless they opt into this invariant themselves.
       AIMEE_LLM_AUTH_REQUIRED: ${AIMEE_LLM_AUTH_REQUIRED:-0}
-      # Legacy curator sidecars consume the generic OpenAI-compatible name.
-      LLM_API_KEY: ${AIMEE_LLM_AUTH_TOKEN:-}
+      # Curator access resolves the same AIMEE_LLM_AUTH_TOKEN from Vault.
       # One stable model label is shared with the unified gateway. The gateway is
       # single-deployment/multi-role, so callers do not select arbitrary models.
       AIMEE_LLM_MODEL: ${AIMEE_LLM_MODEL:-aimee-synth}

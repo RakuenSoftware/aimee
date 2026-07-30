@@ -11,6 +11,16 @@
 
 extern char **environ;
 
+static const char *g_static_token;
+
+static int static_token_get(char *out, size_t cap)
+{
+   if (!g_static_token || !out || cap == 0 || strlen(g_static_token) >= cap)
+      return 0;
+   snprintf(out, cap, "%s", g_static_token);
+   return 1;
+}
+
 static int env_has(char **envp, const char *prefix, const char *want_suffix)
 {
    for (int i = 0; envp && envp[i]; i++)
@@ -115,7 +125,7 @@ int main(void)
    forge_cred_revoke_all();
    assert(forge_cred_count() == 0);
 
-   /* --- server-held forge identity (§6): env-sourced, for instance-held
+   /* --- server-held forge identity (§6): vault-sourced, for instance-held
     * workspaces driven by a surface that supplies no token. --- */
    {
       unsetenv("AIMEE_FORGE_TOKEN");
@@ -126,8 +136,13 @@ int main(void)
       assert(st[0] == '\0' && ss[0] == '\0');
       assert(forge_cred_build_server_env(environ, "/opt/aimee/git-askpass") == NULL);
 
-      /* configured → identity + default scope "workspace" */
-      setenv("AIMEE_FORGE_TOKEN", "ghs_serverApp", 1);
+      /* A raw credential env is never a runtime source. */
+      setenv("AIMEE_FORGE_TOKEN", "must-not-be-consumed", 1);
+      assert(forge_cred_server_identity(st, sizeof(st), ss, sizeof(ss)) == 0);
+
+      /* A registered vault provider supplies the identity + default scope. */
+      g_static_token = "ghs_serverApp";
+      forge_cred_register_static_token_provider(static_token_get);
       assert(forge_cred_server_identity(st, sizeof(st), ss, sizeof(ss)) == 1);
       assert(strcmp(st, "ghs_serverApp") == 0);
       assert(strcmp(ss, "workspace") == 0);
@@ -144,6 +159,7 @@ int main(void)
       assert(env_has(envp, "GIT_ASKPASS=", "/opt/aimee/git-askpass"));
       forge_cred_free_env(envp);
 
+      g_static_token = NULL;
       unsetenv("AIMEE_FORGE_TOKEN");
       unsetenv("AIMEE_FORGE_SCOPE");
    }

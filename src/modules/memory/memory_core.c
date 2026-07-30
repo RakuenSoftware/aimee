@@ -640,6 +640,28 @@ int memory_embed_text(const char *text, const char *command, embed_input_type_t 
    return 0;
 }
 
+void memory_embedder_health(memory_embedder_health_t *out)
+{
+   if (!out)
+      return;
+   memset(out, 0, sizeof(*out));
+   snprintf(out->state, sizeof(out->state), "%s", "unavailable");
+}
+
+int memory_embedder_last_result_unauthorized(void)
+{
+   return 0;
+}
+
+void memory_embedder_dependency_reset_for_tests(void)
+{
+}
+
+void memory_embedder_dependency_set_clock_for_tests(int64_t (*now_ms)(void))
+{
+   (void)now_ms;
+}
+
 double cosine_similarity(const float *a, const float *b, int dim)
 {
    double dot = 0.0;

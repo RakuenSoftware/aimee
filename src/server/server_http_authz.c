@@ -79,8 +79,6 @@ uint32_t server_http_effective_conn_caps(int is_tcp, const char *bearer, int rem
 {
    if (!is_tcp || mtls_mode <= 0)
       return server_http_conn_caps(is_tcp, bearer, remote_writes);
-   if (!mtls_authenticated && bearer && strcmp(bearer, AIMEE_BOOTSTRAP_BEARER) == 0)
-      return (CAPS_READ_ONLY & ~(uint32_t)CAP_CHAT) | CAP_SESSION_ADMIN;
    if (mtls_authenticated)
       /* `remote_writes` is the caller's verified per-user tier by this point,
        * not the retired process-global switch. Preserve the ordinary mTLS
@@ -220,6 +218,22 @@ uint64_t server_http_global_ignored_count(void)
    uint64_t value = g_remote_writes_global_ignored;
    pthread_mutex_unlock(&g_global_ignored_lock);
    return value;
+}
+
+int server_http_retired_global_would_allow(int fd, int is_tcp, const char *bearer,
+                                           int remote_writes, int mtls_mode, int mtls_authenticated,
+                                           const char *method, const char *path)
+{
+   (void)fd;
+   (void)mtls_mode;
+   (void)mtls_authenticated;
+   if (remote_writes == SERVER_REMOTE_WRITES_OFF)
+      return 0;
+   /* Reconstruct the retired switch itself, not the request's current mTLS-
+    * narrowed capability set. The old global authorizer derived both its caps
+    * and its route tier from remote_writes; using current effective caps makes
+    * the observability counter disappear in optional-mTLS bearer fallback. */
+   return server_http_route_allowed(is_tcp, bearer, method, path, remote_writes);
 }
 
 int server_http_resolve_write_tier(int is_tcp, const char *buf, const char *method,

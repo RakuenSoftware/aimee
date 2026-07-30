@@ -66,7 +66,7 @@ vault_status_t vault_service_unlock(const char *principal, attested_transport_t 
 
 /* Unlock the `webuser:` vault (WP-C.2): derive the KEK from the login password
  * via scrypt and cache it. Requires an ATTEST_WEBCHAT_TRUSTED principal (the
- * webchat backend's server.token-gated assertion) with a non-empty principal and
+ * webchat backend's root-UDS-gated assertion) with a non-empty principal and
  * password — refused on any other transport (VAULT_ERR_TRANSPORT). The caller
  * must OPENSSL_cleanse `password`. */
 vault_status_t vault_service_unlock_password(const char *principal, attested_transport_t transport,

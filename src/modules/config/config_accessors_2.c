@@ -917,4 +917,3 @@ const char *config_openai_model(void)
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }
-

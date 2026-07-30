@@ -13,6 +13,20 @@
 #include "cJSON.h"
 #include "cli_session.h"
 
+static char g_claude_vault_oauth[512];
+static char g_codex_vault_oauth[512];
+
+int cli_oauth_vault_materialize_get(const char *agent, char *out, size_t out_len)
+{
+   const char *value = strcmp(agent, "claude") == 0  ? g_claude_vault_oauth
+                       : strcmp(agent, "codex") == 0 ? g_codex_vault_oauth
+                                                     : "";
+   if (!value[0] || !out || out_len == 0)
+      return 1;
+   snprintf(out, out_len, "%s", value);
+   return 0;
+}
+
 /* --- cli_session_recv timeout tests ---
  *
  * recv() shells out to `tmux has-session` / `tmux capture-pane`. We stub tmux
@@ -1015,25 +1029,20 @@ static void test_prepare_claude_nonautonomous_skips_bypass_seed(void)
    }
 }
 
-/* Per-session claude HOME isolation: a fresh HOME with the OAuth token symlinked
- * from the shared home and ~/.claude.json seeded from it; missing credentials
- * fall back (-1) so a seat is never launched unauthenticated. */
+/* Per-session claude HOME isolation: the Vault credential is materialized as a
+ * regular 0600 file beneath the runtime tier, never linked from persistent HOME. */
 static void test_isolated_claude_home(void)
 {
    char shared[128];
    snprintf(shared, sizeof(shared), "/tmp/aimee-iso-%d", (int)getpid());
-   char cdir[192], creds[288], json[288], settings[288];
+   char runtime[160], cdir[192], json[288], settings[288];
+   snprintf(runtime, sizeof(runtime), "/tmp/aimee-iso-runtime-%d", (int)getpid());
    snprintf(cdir, sizeof(cdir), "%s/.claude", shared);
    mkdir(shared, 0700);
    mkdir(cdir, 0700);
-   snprintf(creds, sizeof(creds), "%s/.credentials.json", cdir);
    snprintf(json, sizeof(json), "%s/.claude.json", shared);
    snprintf(settings, sizeof(settings), "%s/settings.json", cdir);
-   FILE *f = fopen(creds, "w");
-   assert(f);
-   fputs("{\"token\":\"x\"}", f);
-   fclose(f);
-   f = fopen(json, "w");
+   FILE *f = fopen(json, "w");
    assert(f);
    fputs("{\"oauthAccount\":{\"id\":\"a\"}}", f);
    fclose(f);
@@ -1042,15 +1051,20 @@ static void test_isolated_claude_home(void)
    fputs("{}", f);
    fclose(f);
    setenv("HOME", shared, 1);
+   setenv("AIMEE_OAUTH_RUNTIME_DIR", runtime, 1);
+   snprintf(g_claude_vault_oauth, sizeof(g_claude_vault_oauth), "{\"token\":\"vault-x\"}");
 
    char home[PATH_MAX];
    assert(cli_session_isolated_claude_home("/w/d", home, sizeof(home)) == 0);
-   assert(strncmp(home, shared, strlen(shared)) == 0); /* under the shared home */
+   assert(strncmp(home, runtime, strlen(runtime)) == 0);
 
    struct stat st;
    char p[512];
    snprintf(p, sizeof(p), "%s/.claude/.credentials.json", home);
-   assert(lstat(p, &st) == 0 && S_ISLNK(st.st_mode)); /* creds SHARED via symlink */
+   assert(lstat(p, &st) == 0 && S_ISREG(st.st_mode) && (st.st_mode & 0777) == 0600);
+   char *credential = slurp(p);
+   assert(credential && strstr(credential, "vault-x"));
+   free(credential);
    snprintf(p, sizeof(p), "%s/.claude.json", home);
    assert(stat(p, &st) == 0 && st.st_size > 0); /* per-session json seeded */
    FILE *rf = fopen(p, "r");
@@ -1061,16 +1075,15 @@ static void test_isolated_claude_home(void)
    assert(strstr(buf, "oauthAccount") && strstr(buf, "hasCompletedOnboarding"));
    assert(strstr(buf, "/w/d")); /* trust seeded for the worktree */
 
-   /* No credentials in the shared home -> fall back to shared HOME (-1). */
-   unlink(creds);
+   /* No credential in Vault -> fail closed rather than fall back to HOME. */
+   g_claude_vault_oauth[0] = '\0';
    char home2[PATH_MAX];
    assert(cli_session_isolated_claude_home("/w/d", home2, sizeof(home2)) == -1);
    printf("  PASS: test_isolated_claude_home\n");
 }
 
-/* cli_session_destroy reclaims the minted isolated HOME so homes track the
- * delegate lifecycle instead of lingering until the 1h age sweep. Also pins the
- * FTW_PHYS safety: the SHARED credential the home symlinks to must survive. */
+/* cli_session_destroy reclaims the runtime-only HOME so homes track the delegate
+ * lifecycle instead of lingering until the 1h age sweep. */
 static void test_isolated_home_reclaimed_on_destroy(void)
 {
    char shared[128];
@@ -1090,6 +1103,10 @@ static void test_isolated_home_reclaimed_on_destroy(void)
    fputs("{\"oauthAccount\":{\"id\":\"a\"}}", f);
    fclose(f);
    setenv("HOME", shared, 1);
+   char runtime[160];
+   snprintf(runtime, sizeof(runtime), "/tmp/aimee-isorm-runtime-%d", (int)getpid());
+   setenv("AIMEE_OAUTH_RUNTIME_DIR", runtime, 1);
+   snprintf(g_claude_vault_oauth, sizeof(g_claude_vault_oauth), "{\"token\":\"vault-y\"}");
 
    char home[PATH_MAX];
    assert(cli_session_isolated_claude_home("/w/d", home, sizeof(home)) == 0);
@@ -1106,7 +1123,7 @@ static void test_isolated_home_reclaimed_on_destroy(void)
 
    assert(stat(home, &st) != 0);                    /* the whole home tree is gone */
    assert(s.iso_home == NULL);                      /* handle freed + cleared */
-   assert(stat(creds, &st) == 0 && st.st_size > 0); /* shared credential untouched */
+   assert(stat(creds, &st) == 0 && st.st_size > 0); /* unrelated persistent file untouched */
 
    /* Idempotent / safe on a session with no isolated home. */
    cli_session_t s2;
@@ -1120,10 +1137,51 @@ static void test_isolated_home_reclaimed_on_destroy(void)
    printf("  PASS: test_isolated_home_reclaimed_on_destroy\n");
 }
 
+static void test_isolated_codex_home(void)
+{
+   char shared[160], runtime[180], codex_dir[220], config[280];
+   snprintf(shared, sizeof(shared), "/tmp/aimee-codex-shared-%d", (int)getpid());
+   snprintf(runtime, sizeof(runtime), "/tmp/aimee-codex-runtime-%d", (int)getpid());
+   snprintf(codex_dir, sizeof(codex_dir), "%s/.codex", shared);
+   assert(mkdir(shared, 0700) == 0);
+   assert(mkdir(codex_dir, 0700) == 0);
+   snprintf(config, sizeof(config), "%s/config.toml", codex_dir);
+   FILE *f = fopen(config, "wb");
+   assert(f != NULL);
+   fputs("model = \"test\"\n", f);
+   fclose(f);
+   setenv("HOME", shared, 1);
+   setenv("AIMEE_OAUTH_RUNTIME_DIR", runtime, 1);
+   snprintf(g_codex_vault_oauth, sizeof(g_codex_vault_oauth),
+            "{\"tokens\":{\"access_token\":\"vault-codex\"}}");
+
+   char home[PATH_MAX], path[PATH_MAX];
+   assert(cli_session_isolated_codex_home(home, sizeof(home)) == 0);
+   assert(strncmp(home, runtime, strlen(runtime)) == 0);
+   struct stat st;
+   snprintf(path, sizeof(path), "%s/.codex/auth.json", home);
+   assert(lstat(path, &st) == 0 && S_ISREG(st.st_mode) && (st.st_mode & 0777) == 0600);
+   snprintf(path, sizeof(path), "%s/.codex/config.toml", home);
+   assert(lstat(path, &st) == 0 && S_ISLNK(st.st_mode));
+
+   cli_session_t cleanup = {0};
+   cli_session_set_isolated_home(&cleanup, home);
+   cli_session_destroy(&cleanup);
+   assert(access(home, F_OK) != 0);
+
+   g_codex_vault_oauth[0] = '\0';
+   assert(cli_session_isolated_codex_home(home, sizeof(home)) == -1);
+   unlink(config);
+   rmdir(codex_dir);
+   rmdir(shared);
+   printf("  PASS: test_isolated_codex_home\n");
+}
+
 int main(void)
 {
    test_isolated_claude_home();
    test_isolated_home_reclaimed_on_destroy();
+   test_isolated_codex_home();
 
    printf("test_resolve_cwd_existing_used... ");
    test_resolve_cwd_existing_used();

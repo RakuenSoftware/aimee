@@ -135,6 +135,15 @@ const char *config_memory_cognify_command(void)
    return buf;
 }
 
+const char *config_code_context_mode(void)
+{
+   static _Thread_local char buf[16];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, code_context_mode), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
 const char *config_delegate_sandbox_image(void)
 {
    static _Thread_local char buf[256];
@@ -1229,19 +1238,3 @@ int config_set_memory_maintenance_enabled(int value)
    free(cfg);
    return rc;
 }
-
-int config_set_memory_maintenance_interval_seconds(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_maintenance_interval_seconds = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-

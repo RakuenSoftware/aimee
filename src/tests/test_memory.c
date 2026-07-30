@@ -23,11 +23,31 @@
 #include "../db2/memory_payload.h" /* db2_memory_provenance_by_id (auditable-correctness P2) */
 #include "../db2/demotion.h"       /* retrieval_event write/read (auditable-correctness P2) */
 #include "../db2/code_index_ops.h" /* db2_code_file_hash (auditable-correctness P1.5) */
+#include "support/mock_agent_http.h"
 
 int memory_demote_from_failures(void);
 
 static char g_db_path[512];
 static char g_suite_home[512];
+static int64_t g_embedder_now_ms = 100000;
+
+static int64_t embedder_test_clock(void)
+{
+   return g_embedder_now_ms;
+}
+
+static int embedder_unauthorized_post(const char *url, const char *auth_header, const char *body,
+                                      char **response_buf, int timeout_ms,
+                                      const char *extra_headers)
+{
+   (void)url;
+   (void)auth_header;
+   (void)body;
+   (void)timeout_ms;
+   (void)extra_headers;
+   *response_buf = strdup("{\"status\":\"unauthorized\"}");
+   return 403;
+}
 
 static void memory_test_ensure_env(void)
 {
@@ -2524,6 +2544,9 @@ int main(void)
    /* --- deterministic builtin embedding fallback --- */
    {
       float vec[4];
+      memory_embedder_dependency_reset_for_tests();
+      memory_embedder_dependency_set_clock_for_tests(embedder_test_clock);
+      g_embedder_now_ms = 100000;
       int dim = memory_embed_text("test", "", EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 4);
 
@@ -2538,11 +2561,27 @@ int main(void)
    {
       float vec[4];
 
+      /* A reachable external embedder's auth refusal is non-retryable and
+       * remains distinct from transport unavailability. */
+      mock_agent_http_reset();
+      mock_agent_http_set_post_handler(embedder_unauthorized_post);
+      memory_embedder_dependency_reset_for_tests();
+      int dim = memory_embed_text("ignored", "http://embedder", EMBED_INPUT_DOCUMENT, vec, 4);
+      assert(dim == 0);
+      assert(memory_embedder_last_result_unauthorized());
+      memory_embedder_health_t auth_health;
+      memory_embedder_health(&auth_health);
+      assert(strcmp(auth_health.state, "closed") == 0);
+      assert(auth_health.failure_streak == 0);
+      mock_agent_http_reset();
+      memory_embedder_dependency_reset_for_tests();
+
       /* A well-behaved sidecar emitting a JSON float array is parsed verbatim,
        * proving the float32 contract end-to-end through platform_exec_pipe. */
       for (int i = 0; i < 4; i++)
          vec[i] = -99.0f;
-      int dim = memory_embed_text("ignored", "printf '[0.5, 0.25, 0.125, 0.0625]'", EMBED_INPUT_DOCUMENT, vec, 4);
+      dim = memory_embed_text("ignored", "printf '[0.5, 0.25, 0.125, 0.0625]'",
+                              EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 4);
       assert(fabs(vec[0] - 0.5) < 1e-6 && fabs(vec[1] - 0.25) < 1e-6);
       assert(fabs(vec[2] - 0.125) < 1e-6 && fabs(vec[3] - 0.0625) < 1e-6);
@@ -2568,6 +2607,37 @@ int main(void)
       dim = memory_embed_text("ignored", "printf 'not json at all'", EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 0);
       assert(vec[0] == -99.0f);
+
+      /* Three consecutive failures open the breaker. A good dependency is not
+       * hammered until the bounded delay expires, then one successful probe
+       * closes it without restarting this process. */
+      memory_embedder_health_t health;
+      memory_embedder_health(&health);
+      assert(strcmp(health.state, "open") == 0);
+      assert(health.retry_after_ms >= 1000 && health.retry_after_ms <= 1250);
+      dim = memory_embed_text("ignored", "printf '[1, 0, 0, 0]'", EMBED_INPUT_DOCUMENT, vec, 4);
+      assert(dim == 0);
+      memory_embedder_health(&health);
+      assert(health.suppressed_calls == 1);
+      g_embedder_now_ms += health.retry_after_ms;
+
+      /* A half-open probe that reaches the embedder but is refused proves the
+       * old transport outage recovered. Preserve unauthorized and close the
+       * transient breaker so the next call is not misreported as unavailable. */
+      mock_agent_http_set_post_handler(embedder_unauthorized_post);
+      dim = memory_embed_text("ignored", "http://embedder", EMBED_INPUT_DOCUMENT, vec, 4);
+      assert(dim == 0);
+      assert(memory_embedder_last_result_unauthorized());
+      memory_embedder_health(&health);
+      assert(strcmp(health.state, "closed") == 0 && health.failure_streak == 0);
+      mock_agent_http_reset();
+
+      dim = memory_embed_text("ignored", "printf '[1, 0, 0, 0]'", EMBED_INPUT_DOCUMENT, vec, 4);
+      assert(dim == 4);
+      memory_embedder_health(&health);
+      assert(strcmp(health.state, "closed") == 0 && health.available == 1);
+      memory_embedder_dependency_set_clock_for_tests(NULL);
+      memory_embedder_dependency_reset_for_tests();
    }
 
    /* --- kind_lifecycle_load: returns correct defaults for all 8 kinds --- */

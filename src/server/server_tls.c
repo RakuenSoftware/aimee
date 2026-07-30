@@ -126,6 +126,30 @@ static int capture_pem(const char *path, captured_pem_t *out)
    return 0;
 }
 
+static int capture_pem_value(const char *value, captured_pem_t *out)
+{
+   if (!value || !value[0] || !out)
+      return -1;
+   size_t len = strlen(value);
+   if (len > MANAGEMENT_PEM_MAX)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   unsigned char *bytes = malloc(len + 1);
+   if (!bytes)
+      return -1;
+   memcpy(bytes, value, len + 1);
+   unsigned int hash_len = 0;
+   if (EVP_Digest(bytes, len, out->hash, &hash_len, EVP_sha256(), NULL) != 1 || hash_len != 32)
+   {
+      OPENSSL_cleanse(bytes, len + 1);
+      free(bytes);
+      return -1;
+   }
+   out->bytes = bytes;
+   out->len = len;
+   return 0;
+}
+
 /* mTLS verify callback: OpenSSL has already checked the chain/validity
  * (preverify_ok). Additionally reject a revoked leaf (depth 0) by consulting the
  * in-memory revocation snapshot — no DB query in the handshake path. */
@@ -187,6 +211,16 @@ static int alpn_select_cb(SSL *ssl, const unsigned char **out, unsigned char *ou
    return SSL_TLSEXT_ERR_OK;
 }
 
+static int ctx_use_private_key_pem(SSL_CTX *ctx, const char *pem)
+{
+   BIO *bio = pem ? BIO_new_mem_buf(pem, -1) : NULL;
+   EVP_PKEY *key = bio ? PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL) : NULL;
+   int ok = key && SSL_CTX_use_PrivateKey(ctx, key) == 1;
+   EVP_PKEY_free(key);
+   BIO_free(bio);
+   return ok ? 0 : -1;
+}
+
 /* Build a fresh SSL_CTX from the given cert/key/mtls settings, WITHOUT touching g_ctx.
  * Returns the ctx (caller owns) or NULL on any load failure — so both init and a live reload
  * validate-or-keep: a bad cert never disturbs the running listener. */
@@ -205,21 +239,22 @@ static SSL_CTX *tls_build_ctx(const char *cert_path, const char *key_path, int m
    /* Advertise HTTP/1.1 over ALPN so ALPN-strict clients (e.g. Codex) don't
     * fall back to HTTP/2 on this HTTP/1.1-only server. */
    SSL_CTX_set_alpn_select_cb(ctx, alpn_select_cb, NULL);
-   /* The private key authenticates the server; warn loudly if it is readable by
-    * group/other (defense-in-depth — the operator should 0600 it). */
-   struct stat kst;
-   if (stat(key_path, &kst) == 0 && (kst.st_mode & 077))
-      aimee_log(LOG_WARN, "server.tls",
-                "TLS private key %s is group/world-readable (mode %o) — "
-                "restrict it to 0600",
-                key_path, kst.st_mode & 0777);
+   int key_ok = 0;
+   if (key_path && key_path[0])
+      key_ok = SSL_CTX_use_PrivateKey_file(ctx, key_path, SSL_FILETYPE_PEM) == 1;
+   else
+   {
+      char key_pem[4096] = "";
+      key_ok = pki_server_tls_key_load(key_pem, sizeof(key_pem)) == 0 &&
+               ctx_use_private_key_pem(ctx, key_pem) == 0;
+      OPENSSL_cleanse(key_pem, sizeof(key_pem));
+   }
 
-   if (SSL_CTX_use_certificate_chain_file(ctx, cert_path) != 1 ||
-       SSL_CTX_use_PrivateKey_file(ctx, key_path, SSL_FILETYPE_PEM) != 1 ||
+   if (SSL_CTX_use_certificate_chain_file(ctx, cert_path) != 1 || !key_ok ||
        SSL_CTX_check_private_key(ctx) != 1)
    {
-      aimee_log(LOG_WARN, "server.tls", "failed to load TLS cert/key (%s, %s): %s", cert_path,
-                key_path, ERR_error_string(ERR_get_error(), NULL));
+      aimee_log(LOG_WARN, "server.tls", "failed to load TLS cert/Vault key (%s): %s", cert_path,
+                ERR_error_string(ERR_get_error(), NULL));
       SSL_CTX_free(ctx);
       return NULL;
    }
@@ -399,46 +434,40 @@ static SSL_CTX *management_build_ctx(const captured_pem_t *cert, const captured_
    return ctx;
 }
 
-int server_tls_management_init(const char *cert_path, const char *key_path,
-                               const char *client_ca_path)
+static int management_init_captured(const captured_pem_t *cert, const captured_pem_t *key,
+                                    const captured_pem_t *ca)
 {
-   captured_pem_t cert = {0}, key = {0}, ca = {0};
    int rc = -1;
-   if (capture_pem(cert_path, &cert) != 0 || capture_pem(key_path, &key) != 0 ||
-       capture_pem(client_ca_path, &ca) != 0)
-      goto done;
-
    pthread_mutex_lock(&g_management_ctx_mu);
    if (g_management_ctx)
    {
-      int same = CRYPTO_memcmp(cert.hash, g_management_cert_hash, 32) == 0 &&
-                 CRYPTO_memcmp(key.hash, g_management_key_hash, 32) == 0 &&
-                 CRYPTO_memcmp(ca.hash, g_management_ca_hash, 32) == 0;
+      int same = CRYPTO_memcmp(cert->hash, g_management_cert_hash, 32) == 0 &&
+                 CRYPTO_memcmp(key->hash, g_management_key_hash, 32) == 0 &&
+                 CRYPTO_memcmp(ca->hash, g_management_ca_hash, 32) == 0;
       pthread_mutex_unlock(&g_management_ctx_mu);
-      rc = same ? 0 : -1;
-      goto done;
+      return same ? 0 : -1;
    }
    pthread_mutex_unlock(&g_management_ctx_mu);
 
-   SSL_CTX *candidate = management_build_ctx(&cert, &key, &ca);
+   SSL_CTX *candidate = management_build_ctx(cert, key, ca);
    if (!candidate)
-      goto done;
+      return -1;
 
    pthread_mutex_lock(&g_management_ctx_mu);
    if (!g_management_ctx)
    {
       g_management_ctx = candidate;
       candidate = NULL;
-      memcpy(g_management_cert_hash, cert.hash, 32);
-      memcpy(g_management_key_hash, key.hash, 32);
-      memcpy(g_management_ca_hash, ca.hash, 32);
+      memcpy(g_management_cert_hash, cert->hash, 32);
+      memcpy(g_management_key_hash, key->hash, 32);
+      memcpy(g_management_ca_hash, ca->hash, 32);
       rc = 0;
    }
    else
    {
-      rc = CRYPTO_memcmp(cert.hash, g_management_cert_hash, 32) == 0 &&
-                   CRYPTO_memcmp(key.hash, g_management_key_hash, 32) == 0 &&
-                   CRYPTO_memcmp(ca.hash, g_management_ca_hash, 32) == 0
+      rc = CRYPTO_memcmp(cert->hash, g_management_cert_hash, 32) == 0 &&
+                   CRYPTO_memcmp(key->hash, g_management_key_hash, 32) == 0 &&
+                   CRYPTO_memcmp(ca->hash, g_management_ca_hash, 32) == 0
                ? 0
                : -1;
    }
@@ -446,7 +475,17 @@ int server_tls_management_init(const char *cert_path, const char *key_path,
    SSL_CTX_free(candidate);
    if (rc == 0)
       aimee_log(LOG_INFO, "server.tls", "dedicated management mTLS enabled");
-done:
+   return rc;
+}
+
+int server_tls_management_init(const char *cert_path, const char *key_path,
+                               const char *client_ca_path)
+{
+   captured_pem_t cert = {0}, key = {0}, ca = {0};
+   int rc = -1;
+   if (capture_pem(cert_path, &cert) == 0 && capture_pem(key_path, &key) == 0 &&
+       capture_pem(client_ca_path, &ca) == 0)
+      rc = management_init_captured(&cert, &key, &ca);
    captured_pem_clear(&ca);
    captured_pem_clear(&key);
    captured_pem_clear(&cert);
@@ -455,10 +494,26 @@ done:
    return rc;
 }
 
+int server_tls_management_init_vault(const char *cert_path, const char *key_pem,
+                                     const char *client_ca_path)
+{
+   captured_pem_t cert = {0}, key = {0}, ca = {0};
+   int rc = -1;
+   if (capture_pem(cert_path, &cert) == 0 && capture_pem_value(key_pem, &key) == 0 &&
+       capture_pem(client_ca_path, &ca) == 0)
+      rc = management_init_captured(&cert, &key, &ca);
+   captured_pem_clear(&ca);
+   captured_pem_clear(&key);
+   captured_pem_clear(&cert);
+   if (rc != 0)
+      aimee_log(LOG_WARN, "server.tls", "dedicated management Vault TLS initialization failed");
+   return rc;
+}
+
 int server_tls_init(const char *cert_path, const char *key_path, int mtls_mode,
                     const char *client_ca_path)
 {
-   if (!cert_path || !cert_path[0] || !key_path || !key_path[0])
+   if (!cert_path || !cert_path[0])
       return -1;
    pthread_mutex_lock(&g_ctx_mu);
    if (g_ctx)
@@ -475,7 +530,7 @@ int server_tls_init(const char *cert_path, const char *key_path, int mtls_mode,
    g_ctx = ctx;
    /* remember the paths so a SIGHUP reload can re-read the same files */
    int t1 = snprintf(g_cert_path, sizeof g_cert_path, "%s", cert_path);
-   int t2 = snprintf(g_key_path, sizeof g_key_path, "%s", key_path);
+   int t2 = snprintf(g_key_path, sizeof g_key_path, "%s", key_path ? key_path : "");
    snprintf(g_client_ca_path, sizeof g_client_ca_path, "%s", client_ca_path ? client_ca_path : "");
    g_mtls_mode = mtls_mode;
    if (t1 >= (int)sizeof g_cert_path || t2 >= (int)sizeof g_key_path)
@@ -506,7 +561,7 @@ int server_tls_reload(void)
 
    /* Build the replacement OUTSIDE the lock (file I/O). Validate-or-keep: a cert that fails to
     * load leaves the running listener on the current cert (never a broken TLS endpoint). */
-   SSL_CTX *nctx = tls_build_ctx(cert, key, mtls, ca[0] ? ca : NULL);
+   SSL_CTX *nctx = tls_build_ctx(cert, key[0] ? key : NULL, mtls, ca[0] ? ca : NULL);
    if (!nctx)
    {
       aimee_log(LOG_WARN, "server.tls",
@@ -551,7 +606,7 @@ SSL_CTX *server_tls_prepare_required(void)
    snprintf(key, sizeof(key), "%s", g_key_path);
    snprintf(ca, sizeof(ca), "%s", g_client_ca_path);
    pthread_mutex_unlock(&g_ctx_mu);
-   SSL_CTX *prepared = tls_build_ctx(cert, key, 2, ca[0] ? ca : NULL);
+   SSL_CTX *prepared = tls_build_ctx(cert, key[0] ? key : NULL, 2, ca[0] ? ca : NULL);
    if (!prepared)
       pthread_mutex_unlock(&g_transition_mu);
    return prepared;
@@ -836,7 +891,7 @@ int server_tls_init_default(void)
     * file and the verify callback starts consulting the snapshot. */
    if (effective_mtls > 0 && pki_ca_ensure() != 0)
       return -1;
-   return server_tls_init(cert, key, effective_mtls, config_server_api_mtls_client_ca());
+   return server_tls_init(cert, NULL, effective_mtls, config_server_api_mtls_client_ca());
 }
 
 SSL *server_tls_begin(int fd)

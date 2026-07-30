@@ -36,8 +36,6 @@ typedef struct cJSON cJSON;
 #define SERVER_READ_BUF_SIZE   65536              /* initial per-connection read buffer */
 #define SERVER_WRITE_BUF_SIZE  262144             /* 256KB */
 #define SERVER_DEFAULT_SOCKET  "aimee.sock"
-#define SERVER_TOKEN_FILE      "server.token"
-#define SERVER_TOKEN_LEN       64 /* 64 hex bytes = 32 raw bytes */
 /* Listen backlog: number of connections the kernel will queue between
  * accept() calls. When the queue is full, new connect() calls fail with
  * ECONNREFUSED — observable as "aimee: server unavailable" from CLI
@@ -184,7 +182,7 @@ typedef struct
     * is live and propagated across the loopback_rpc fake-conn boundary. The
     * vault principal ("uid:<n>" / "webuser:<name>" / "" when un-attested) is the
     * single security key for the vault file + KEK cache — derived from the
-    * kernel-attested peer_uid or the server.token-gated webuser assertion, NEVER
+    * kernel-attested peer_uid or root-UDS-gated webuser assertion, NEVER
     * a client-supplied session_id. Empty principal => no vault (fail-closed). */
    attested_transport_t attested_transport;
    char vault_principal[VAULT_PRINCIPAL_MAX];
@@ -206,7 +204,6 @@ typedef struct
    int listen_fd;
    platform_evloop_t evloop;
    char socket_path[4096];
-   char token[SERVER_TOKEN_LEN * 2 + 1]; /* hex string */
    server_conn_t conns[SERVER_MAX_CONNECTIONS];
    int conn_count;
    pthread_mutex_t conns_mutex; /* serialises slot allocation/free and conn_count */
@@ -237,11 +234,12 @@ int server_run(server_ctx_t *ctx);
 /* True if an aimee-server instance is already running for `socket_path` (pid-file
  * + liveness check). Used by the offline --rotate-master-key guard (D13 F2). */
 int server_is_running(const char *socket_path);
-/* Boot-time delegate-vault provisioning: seal operator-supplied delegate API
- * keys ($AIMEE_DELEGATE_SECRETS_FILE / AIMEE_DELEGATE_KEY_<AGENT>) into the
- * server-principal vault so a fresh server's delegates work with no manual
- * `vault set`. No-op when no source is set; returns the count provisioned. */
+/* Boot-time credential provisioning: seal operator-supplied delegate API keys
+ * and the first-boot AIMEE_FORGE_TOKEN into the server-principal Vault, then
+ * scrub credential environment variables. No-op when no source is set; returns
+ * the count provisioned. */
 int server_vault_bootstrap(void);
+int server_vault_bootstrap_prepare(void);
 /* Resolve a delegate name to its canonical agents.json name: returns 1 and
  * writes `canon` (NUL-terminated, capped at `cap`) when known, else 0. The
  * provisioning module calls this through an injected pointer so it carries no
@@ -321,6 +319,10 @@ int handle_trajectory_batch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 
 /* State handlers (server_state.c) */
 int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+/* Resolve request-local project/workspace memory identity and activate it for
+ * subsequent kb_client memory calls on this worker thread. Returns 1 when the
+ * active identity is missing; caller must clear the client context. */
+int server_memory_scope_begin(cJSON *req);
 int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

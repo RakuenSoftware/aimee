@@ -4,19 +4,15 @@
 # Enables the server's inbound /v1 HTTP API. The listener binds only when BOTH a
 # port and a bearer token are configured (src/server/server_http.c). The image
 # sets AIMEE_SERVER_HTTP_BIND=1 so the TLS listener binds 0.0.0.0 (the published
-# container port); the bearer below is still required on every request.
+# container port); a Vault-held bearer is still required on every request.
 #
 # Plaintext /v1 (http_port) is LOOPBACK-ONLY by design — the server refuses to
 # bind it on a non-loopback interface so the bearer + credentials can never cross
 # the wire in cleartext. Remote thin clients MUST use the TLS listener (tls_port);
-# the server auto-provisions a self-signed cert at $AIMEE_HOME/tls/server.{crt,key}
-# on first start. Mount your own cert there to override.
-#
-# `bearer_token: aimee-local-dev` remains a rotate-only recovery bootstrap, not a
-# standing credential. Normal managed setup does not expose it to the user: the
-# authenticated wizard mints an additive user-specific enrollment bearer, and
-# the client binds that identity to mTLS. To skip the recovery bootstrap
-# entirely, pin your own token via AIMEE_API_BEARER_TOKEN.
+# the server writes only the self-signed public cert at
+# $AIMEE_HOME/tls/server.crt and seals its private key in Vault. The API primary
+# is likewise minted directly into Vault unless AIMEE_API_BEARER_TOKEN supplies
+# an operator-known first-boot value.
 aimee:
   api:
     http_port: 8740
@@ -27,7 +23,6 @@ aimee:
     # to required mTLS.  Starting with mTLS disabled would make the wizard's
     # certificate enrollment inert until an undocumented server restart.
     mtls: optional
-    bearer_token: "aimee-local-dev"
     rate_limit_per_min: 0
     # Compatibility field only: it no longer authorizes any caller. The wizard
     # binds the first user's explicit full grant to mTLS; additional users use

@@ -13,6 +13,8 @@
 #include "request_context.h"
 #include "platform_random.h"
 #include "agent_code_capabilities.h"
+#include <ctype.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -74,6 +76,20 @@ const char *ingress_preinject_turn_id(void)
 
 static __thread char g_session_id[64] = "";
 
+#define INGRESS_TASK_SESSION_SLOTS 64
+
+typedef struct
+{
+   char session[64];
+   char project[256];
+   uint64_t token_bits;
+   uint64_t used_at;
+} ingress_task_session_t;
+
+static ingress_task_session_t g_task_sessions[INGRESS_TASK_SESSION_SLOTS];
+static pthread_mutex_t g_task_sessions_mu = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t g_task_sessions_clock;
+
 void ingress_preinject_set_session_id(const char *session_id)
 {
    if (session_id && session_id[0])
@@ -85,6 +101,111 @@ void ingress_preinject_set_session_id(const char *session_id)
 const char *ingress_preinject_session_id(void)
 {
    return g_session_id;
+}
+
+void ingress_preinject_task_state_reset(void)
+{
+   pthread_mutex_lock(&g_task_sessions_mu);
+   memset(g_task_sessions, 0, sizeof(g_task_sessions));
+   g_task_sessions_clock = 0;
+   pthread_mutex_unlock(&g_task_sessions_mu);
+}
+
+static uint64_t ingress_task_token_bits(const char *query)
+{
+   uint64_t bits = 0;
+   const unsigned char *p = (const unsigned char *)(query ? query : "");
+   while (*p)
+   {
+      while (*p && !isalnum(*p) && *p != '_')
+         p++;
+      uint64_t h = 1469598103934665603ULL;
+      int n = 0;
+      while (*p && (isalnum(*p) || *p == '_'))
+      {
+         h ^= (uint64_t)tolower(*p++);
+         h *= 1099511628211ULL;
+         n++;
+      }
+      if (n >= 2)
+         bits |= 1ULL << (h & 63U);
+   }
+   return bits ? bits : 1ULL;
+}
+
+static int ingress_preinject_first_task_turn(const char *session, const char *project,
+                                             const char *query)
+{
+   if (!session || !session[0] || !project || !project[0])
+      return 0;
+   uint64_t bits = ingress_task_token_bits(query);
+   int fetch = 0;
+   pthread_mutex_lock(&g_task_sessions_mu);
+   int slot = -1;
+   int oldest = 0;
+   for (int i = 0; i < INGRESS_TASK_SESSION_SLOTS; i++)
+   {
+      if (!g_task_sessions[i].session[0])
+      {
+         if (slot < 0)
+            slot = i;
+         continue;
+      }
+      if (strcmp(g_task_sessions[i].session, session) == 0 &&
+          strcmp(g_task_sessions[i].project, project) == 0)
+      {
+         slot = i;
+         break;
+      }
+      if (g_task_sessions[i].used_at < g_task_sessions[oldest].used_at)
+         oldest = i;
+   }
+   if (slot < 0)
+      slot = oldest;
+   ingress_task_session_t *state = &g_task_sessions[slot];
+   if (!state->session[0] || strcmp(state->session, session) != 0 ||
+       strcmp(state->project, project) != 0)
+      fetch = 1;
+   else
+   {
+      unsigned common = (unsigned)__builtin_popcountll(state->token_bits & bits);
+      unsigned total = (unsigned)__builtin_popcountll(state->token_bits | bits);
+      /* A low-overlap turn is a new task. Follow-ups usually retain at least a
+       * third of their salient vocabulary; the bounded bitset intentionally
+       * errs toward observing rather than injecting on every wording change. */
+      fetch = total == 0 || (common * 3U < total);
+   }
+   snprintf(state->session, sizeof(state->session), "%s", session);
+   snprintf(state->project, sizeof(state->project), "%s", project);
+   state->token_bits = bits;
+   state->used_at = ++g_task_sessions_clock;
+   pthread_mutex_unlock(&g_task_sessions_mu);
+   return fetch;
+}
+
+/* A first/new-task marker is claimed before retrieval so concurrent turns do
+ * not duplicate packets. If that one retrieval never reached the dependency,
+ * remove only its exact session/project marker: a related follow-up may then
+ * use the breaker's single recovery probe without restarting the client. */
+static void ingress_preinject_rearm_unavailable(const char *session, const char *project)
+{
+   if (!session || !session[0] || !project || !project[0])
+      return;
+   pthread_mutex_lock(&g_task_sessions_mu);
+   for (int i = 0; i < INGRESS_TASK_SESSION_SLOTS; i++)
+      if (strcmp(g_task_sessions[i].session, session) == 0 &&
+          strcmp(g_task_sessions[i].project, project) == 0)
+      {
+         memset(&g_task_sessions[i], 0, sizeof(g_task_sessions[i]));
+         break;
+      }
+   pthread_mutex_unlock(&g_task_sessions_mu);
+}
+
+static long ingress_elapsed_ms(const struct timespec *start, const struct timespec *end)
+{
+   return (long)(end->tv_sec - start->tv_sec) * 1000L +
+          (long)(end->tv_nsec - start->tv_nsec) / 1000000L;
 }
 
 /* A stable, non-reversible fingerprint of the turn query (FNV-1a 64-bit, hex).
@@ -210,6 +331,208 @@ static void append_single_line_escaped(dstr_t *d, const char *s, size_t max_char
       }
       prev_space = (c == ' ');
    }
+}
+
+static int context_string_eq(const cJSON *object, const char *field, const char *expected)
+{
+   const cJSON *value = cJSON_GetObjectItemCaseSensitive(object, field);
+   return cJSON_IsString(value) && value->valuestring && strcmp(value->valuestring, expected) == 0;
+}
+
+static int context_number_positive(const cJSON *object, const char *field, long long *out)
+{
+   const cJSON *value = cJSON_GetObjectItemCaseSensitive(object, field);
+   if (!cJSON_IsNumber(value) || value->valuedouble <= 0)
+      return 0;
+   if (out)
+      *out = (long long)value->valuedouble;
+   return 1;
+}
+
+static int context_number_eq(const cJSON *object, const char *field, int expected)
+{
+   const cJSON *value = cJSON_GetObjectItemCaseSensitive(object, field);
+   return cJSON_IsNumber(value) && value->valuedouble == (double)expected;
+}
+
+static int context_provenance_allowed(const char *value)
+{
+   return value && (strcmp(value, "code") == 0 || strcmp(value, "graph") == 0 ||
+                    strcmp(value, "vector") == 0 || strcmp(value, "memory") == 0);
+}
+
+char *ingress_preinject_format_task_context(const char *json, const char *active_project,
+                                            int *item_count_out, double *confidence_out)
+{
+   if (item_count_out)
+      *item_count_out = 0;
+   if (confidence_out)
+      *confidence_out = 0.0;
+   if (!json || !active_project || !active_project[0])
+      return NULL;
+
+   cJSON *root = cJSON_Parse(json);
+   long long generation = 0;
+   const cJSON *answerability =
+       root ? cJSON_GetObjectItemCaseSensitive(root, "answerability") : NULL;
+   const cJSON *results = root ? cJSON_GetObjectItemCaseSensitive(root, "results") : NULL;
+   const cJSON *why = root ? cJSON_GetObjectItemCaseSensitive(root, "why") : NULL;
+   if (!root || !context_string_eq(root, "status", "ok") ||
+       !context_string_eq(root, "project", active_project) ||
+       !context_string_eq(root, "freshness", "current") ||
+       !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "resolved")) ||
+       !context_number_positive(root, "generation", &generation) ||
+       !cJSON_IsObject(answerability) ||
+       !context_string_eq(answerability, "decision", "answerable") || !cJSON_IsArray(results) ||
+       !cJSON_IsArray(why) || cJSON_GetArraySize(results) < 1 || cJSON_GetArraySize(results) > 4 ||
+       cJSON_GetArraySize(results) + cJSON_GetArraySize(why) > 4 ||
+       !context_number_eq(root, "max_results", 4) || !context_number_eq(root, "max_tokens", 1200) ||
+       !context_number_eq(root, "item_count",
+                          cJSON_GetArraySize(results) + cJSON_GetArraySize(why)))
+   {
+      cJSON_Delete(root);
+      return NULL;
+   }
+
+   dstr_t block;
+   dstr_init(&block);
+   dstr_append_str(&block, "recommended (task-conditioned code; project=");
+   append_single_line_escaped(&block, active_project, 512);
+   dstr_appendf(&block, "; generation=%lld):\n", generation);
+   int kept = 0;
+   double top = 0.0;
+   const cJSON *row = NULL;
+   cJSON_ArrayForEach(row, results)
+   {
+      const cJSON *path = cJSON_GetObjectItemCaseSensitive(row, "file_path");
+      const cJSON *confidence = cJSON_GetObjectItemCaseSensitive(row, "confidence");
+      const cJSON *accepted = cJSON_GetObjectItemCaseSensitive(row, "accepted");
+      const cJSON *provenance = cJSON_GetObjectItemCaseSensitive(row, "provenance");
+      const cJSON *span = cJSON_GetObjectItemCaseSensitive(row, "span");
+      long long row_generation = 0;
+      const cJSON *line_start =
+          cJSON_IsObject(span) ? cJSON_GetObjectItemCaseSensitive(span, "line_start") : NULL;
+      const cJSON *line_end =
+          cJSON_IsObject(span) ? cJSON_GetObjectItemCaseSensitive(span, "line_end") : NULL;
+      int line_span = cJSON_IsNumber(line_start) && line_start->valueint > 0;
+      if (!cJSON_IsString(path) || !path->valuestring[0] ||
+          !context_string_eq(row, "project", active_project) ||
+          !context_string_eq(row, "freshness", "current") ||
+          !context_number_positive(row, "generation", &row_generation) ||
+          row_generation != generation || !cJSON_IsTrue(accepted) || !cJSON_IsNumber(confidence) ||
+          confidence->valuedouble <= 0.0 || confidence->valuedouble > 1.0 ||
+          !cJSON_IsArray(provenance) || cJSON_GetArraySize(provenance) < 1 ||
+          !cJSON_IsObject(span) || !cJSON_IsNumber(line_start) || !cJSON_IsNumber(line_end) ||
+          !context_string_eq(span, "kind", line_span ? "line" : "file") ||
+          (line_span && line_end->valueint < line_start->valueint) ||
+          (!line_span && (line_start->valueint != 0 || line_end->valueint != 0)))
+      {
+         dstr_free(&block);
+         cJSON_Delete(root);
+         return NULL;
+      }
+
+      dstr_t item;
+      dstr_init(&item);
+      dstr_append_str(&item, "  - ");
+      append_single_line_escaped(&item, path->valuestring, 512);
+      if (line_span)
+         dstr_appendf(&item, ":%d", line_start->valueint);
+      dstr_appendf(&item, " [confidence=%.2f; provenance=", confidence->valuedouble);
+      const cJSON *signal = NULL;
+      int signal_i = 0;
+      cJSON_ArrayForEach(signal, provenance)
+      {
+         if (!cJSON_IsString(signal) || !context_provenance_allowed(signal->valuestring))
+         {
+            dstr_free(&item);
+            dstr_free(&block);
+            cJSON_Delete(root);
+            return NULL;
+         }
+         if (signal_i++)
+            dstr_append_char(&item, ',');
+         append_single_line_escaped(&item, signal->valuestring, 32);
+      }
+      dstr_append_str(&item, "]\n");
+      const cJSON *snippet = cJSON_GetObjectItemCaseSensitive(row, "snippet");
+      if (cJSON_IsString(snippet) && snippet->valuestring[0])
+      {
+         dstr_append_str(&item, "    > ");
+         append_single_line_escaped(&item, snippet->valuestring, 480);
+         dstr_append_char(&item, '\n');
+      }
+      if (dstr_len(&block) + dstr_len(&item) > 4800)
+      {
+         dstr_free(&item);
+         break;
+      }
+      dstr_append(&block, dstr_cstr(&item), dstr_len(&item));
+      dstr_free(&item);
+      kept++;
+      if (confidence->valuedouble > top)
+         top = confidence->valuedouble;
+   }
+
+   const cJSON *memory = NULL;
+   cJSON_ArrayForEach(memory, why)
+   {
+      if (kept >= 4)
+         break;
+      const cJSON *anchor = cJSON_GetObjectItemCaseSensitive(memory, "anchor");
+      const cJSON *content = cJSON_GetObjectItemCaseSensitive(memory, "content");
+      const cJSON *confidence = cJSON_GetObjectItemCaseSensitive(memory, "confidence");
+      const cJSON *memory_id = cJSON_GetObjectItemCaseSensitive(memory, "memory_id");
+      long long anchor_generation = 0;
+      if (!cJSON_IsObject(anchor) || !context_string_eq(anchor, "project", active_project) ||
+          !context_string_eq(anchor, "freshness", "current") ||
+          !context_number_positive(anchor, "generation", &anchor_generation) ||
+          anchor_generation != generation || !cJSON_IsString(content) || !content->valuestring[0] ||
+          !context_string_eq(memory, "scope", "project") ||
+          !context_string_eq(memory, "provenance", "memory") || !cJSON_IsNumber(memory_id) ||
+          memory_id->valuedouble <= 0 || !cJSON_IsNumber(confidence) ||
+          confidence->valuedouble <= 0 || confidence->valuedouble > 1.0)
+      {
+         dstr_free(&block);
+         cJSON_Delete(root);
+         return NULL;
+      }
+      dstr_t item;
+      dstr_init(&item);
+      dstr_appendf(&item, "  - memory[project; confidence=%.2f] anchored to ",
+                   confidence->valuedouble);
+      const cJSON *anchor_path = cJSON_GetObjectItemCaseSensitive(anchor, "file_path");
+      if (!cJSON_IsString(anchor_path) || !anchor_path->valuestring[0])
+      {
+         dstr_free(&item);
+         dstr_free(&block);
+         cJSON_Delete(root);
+         return NULL;
+      }
+      append_single_line_escaped(&item, anchor_path->valuestring, 256);
+      dstr_append_str(&item, ": ");
+      append_single_line_escaped(&item, content->valuestring, 320);
+      dstr_append_char(&item, '\n');
+      if (dstr_len(&block) + dstr_len(&item) > 4800)
+      {
+         dstr_free(&item);
+         break;
+      }
+      dstr_append(&block, dstr_cstr(&item), dstr_len(&item));
+      dstr_free(&item);
+      kept++;
+   }
+   cJSON_Delete(root);
+   if (kept == 0)
+   {
+      dstr_free(&block);
+      return NULL;
+   }
+   if (item_count_out)
+      *item_count_out = kept;
+   if (confidence_out)
+      *confidence_out = top;
+   return dstr_steal(&block);
 }
 
 char *ingress_render_block(const ingress_entry_t *entries, int count, size_t envelope_budget,
@@ -481,16 +804,88 @@ char *ingress_preinject_build(const char *query, int request_disabled)
     * block. Typed facts are KB-OWNED (proposal §8): aimee-server does NOT read its
     * own typed_facts_enabled — it asks the KB (cached capability) so the KB is the
     * single source of truth. Build if EITHER layer is on. */
-   int preview_on = config_ingress_preinject_enabled();
-   int facts_on = kb_client_typed_facts_enabled();
+   int preview_configured = config_ingress_preinject_enabled();
+   int facts_configured = kb_client_typed_facts_enabled();
+   char active_workspace[512] = "";
+   char active_project[512] = "";
+   int active_scope =
+       ingress_preinject_resolve_active_scope(active_workspace, sizeof(active_workspace),
+                                              active_project, sizeof(active_project)) == 0;
+   /* Agent ingress is deliberately fail-closed without an active repository:
+    * neither code nor memory may silently broaden to global recall. */
+   int preview_on = preview_configured && active_scope;
+   int facts_on = facts_configured && active_scope;
+
+   const char *mode_name = config_code_context_mode();
+   int context_mode = 1; /* invalid/blank values fail safely to observe */
+   if (mode_name && strcmp(mode_name, "off") == 0)
+      context_mode = 0;
+   else if (mode_name && strcmp(mode_name, "on") == 0)
+      context_mode = 2;
+   else if (mode_name && mode_name[0] && strcmp(mode_name, "observe") != 0)
+      LOG_WARN("ingress-context", "invalid code_context_mode=%s; using observe", mode_name);
+
+   /* Strict `on` packets may contain only validated current-project evidence.
+    * Typed facts are user/global evidence today, so they remain available in
+    * off/observe but cannot become a silent fallback when strict retrieval
+    * abstains or is unavailable. */
+   if (context_mode == 2)
+      facts_on = 0;
    if (!preview_on && !facts_on)
       return NULL;
+
+   kb_client_memory_scope_context_set(active_workspace, active_project, 0);
+   int first_task_turn = preview_on && context_mode != 0 &&
+                         ingress_preinject_first_task_turn(g_session_id, active_project, query);
+   char *task_packet = NULL;
+   int task_items = 0;
+   double task_confidence = 0.0;
+   int context_status = -1;
+   if (first_task_turn)
+   {
+      struct timespec context_started, context_finished;
+      clock_gettime(CLOCK_MONOTONIC, &context_started);
+      char *context_json = kb_client_code_context(query, NULL, active_project, &context_status);
+      clock_gettime(CLOCK_MONOTONIC, &context_finished);
+      if (kb_client_last_result_status() == KB_CLIENT_RESULT_UNAVAILABLE)
+         ingress_preinject_rearm_unavailable(g_session_id, active_project);
+      long context_latency_ms = ingress_elapsed_ms(&context_started, &context_finished);
+      if (context_json && context_status == 200)
+         task_packet = ingress_preinject_format_task_context(context_json, active_project,
+                                                             &task_items, &task_confidence);
+      if (context_latency_ms > 2000)
+      {
+         free(task_packet);
+         task_packet = NULL;
+         task_items = 0;
+      }
+      const char *effective_mode = context_mode == 2 && task_packet ? "on" : "observe";
+      LOG_INFO("ingress-context",
+               "mode=%s effective=%s project=%s status=%d latency_ms=%ld decision=%s items=%d "
+               "visible=%d",
+               context_mode == 2 ? "on" : "observe", effective_mode, active_project, context_status,
+               context_latency_ms, task_packet ? "answerable" : "suppressed", task_items,
+               context_mode == 2 && task_packet != NULL);
+      free(context_json);
+      if (context_mode == 1)
+      {
+         free(task_packet);
+         task_packet = NULL; /* observe changes telemetry, never model-visible bytes */
+      }
+   }
+   /* `on` is task-packet-only: no weak/global legacy substitution on a
+    * no_answer/unavailable turn, and no repeated packet on same-task followups. */
+   int legacy_preview_on = preview_on && context_mode != 2;
    int configured_budget = config_ingress_preinject_assembly_budget() > 0
                                ? config_ingress_preinject_assembly_budget()
                                : INGRESS_DEFAULT_ASSEMBLY_BUDGET;
    size_t envelope_budget = (size_t)configured_budget;
    if (envelope_budget <= INGRESS_FOOTER_RESERVE_BYTES)
+   {
+      free(task_packet);
+      kb_client_memory_scope_context_clear();
       return NULL;
+   }
    /* P1b lossy code fold (ingress-compression §1.2/§1.3): when enabled, a code
     * hit's snippet is replaced by a compact `file:line` reference recovered via
     * code_span_get. Gated by config and a per-request X-Aimee-Compress:0 opt-out
@@ -509,12 +904,23 @@ char *ingress_preinject_build(const char *query, int request_disabled)
 
    /* P0 Envelope IR: gather each source into a typed entry, then render the block
     * from the list. CAP = 6 code + 5 memory + 1 facts + 1 audit. */
-   ingress_entry_t entries[6 + 5 + 1 + 1];
+   ingress_entry_t entries[1 + 6 + 5 + 1 + 1];
    int k = 0;
    double score = 0.0;
    int headline_missing_count = 0;
    int folded_count = 0;
    long folded_saved = 0;
+
+   if (task_packet)
+   {
+      entries[k].kind = ING_SRC_CODE;
+      entries[k].transform = ING_XF_NONE;
+      entries[k].header = "";
+      entries[k].preview = task_packet;
+      task_packet = NULL;
+      k++;
+      score = task_confidence;
+   }
 
    /* Primary signal: code search over the turn query. The code index is the
     * richest source, so recommended code files lead the envelope; the agent
@@ -522,9 +928,9 @@ char *ingress_preinject_build(const char *query, int request_disabled)
     * many relevant files came back (no [0,1] rank is exposed by the search
     * path, so map the hit count into the tiering primitive). */
    code_search_hit_t hits[6];
-   int n = preview_on ? kb_client_index_code_search(query, NULL, hits,
-                                                    (int)(sizeof(hits) / sizeof(hits[0])))
-                      : 0;
+   int n = legacy_preview_on ? kb_client_index_code_search(query, active_project, hits,
+                                                           (int)(sizeof(hits) / sizeof(hits[0])))
+                             : 0;
    for (int i = 0; i < n; i++)
    {
       int fold = compress && hits[i].line > 0 && (int)strlen(hits[i].snippet) > compress_min;
@@ -552,7 +958,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
     * fetch next, not the whole memory body. The full row remains reachable via
     * the advertised memory:<id> handle and the memory_get MCP tool. */
    memory_diagnostic_t mems[5];
-   int mem_n = preview_on ? kb_client_memory_diagnose(query, 5, mems, 5) : 0;
+   int mem_n = legacy_preview_on ? kb_client_memory_diagnose(query, 5, mems, 5) : 0;
    for (int i = 0; i < mem_n; i++)
    {
       char *body = format_memory_preview_body(&mems[i], &headline_missing_count);
@@ -670,7 +1076,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       }
    }
 
-   char *audit = preview_on ? ingress_preinject_read_audit_context() : NULL;
+   char *audit = legacy_preview_on ? ingress_preinject_read_audit_context() : NULL;
    if (audit && audit[0])
    {
       dstr_t a;
@@ -688,6 +1094,9 @@ char *ingress_preinject_build(const char *query, int request_disabled)
          score = 0.4;
    }
    free(audit);
+
+   /* The request-local scope must never leak through a reused worker thread. */
+   kb_client_memory_scope_context_clear();
 
    /* Render the resident block from the typed entry list, then release the
     * per-entry previews (the renderer copies what it keeps). */

@@ -1,8 +1,14 @@
 name: CI
 
 on:
-  pull_request:
+  # Re-run the gate on each integration tip; PR checks alone only cover the
+  # merge preview that existed when the PR ran.
+  push:
     branches: [main, testing, feature/core-modularization]
+  pull_request:
+    branches: [main, testing, feature/core-modularization, 'aimee/feat/**']
+    # Slice sub-PRs target aimee/feat/<work-item-id>; include them so each slice
+    # must pass the same complete gate as the final feature PR.
     # `edited` re-runs the gate when a PR title/body is edited after open, so
     # attribution can't be added post-hoc without failing CI.
     types: [opened, synchronize, reopened, edited]
@@ -244,7 +250,29 @@ jobs:
           done
           echo "Postgres did not become ready in time"; docker logs aimee-pg || true; exit 1
       - name: Unit tests
-        run: cd src && make -j$(nproc) unit-tests build/obj/tests/p7-pkcs11-harness
+        run: |
+          # Runner image metadata is outside the repository's control. Install
+          # deterministic root-owned copies so the positive path exercises the
+          # production trust walk without depending on /usr/bin ownership/mode.
+          sudo install -d -o root -g root -m 0755 /run/aimee-test-helpers
+          for helper in cat env yes true; do
+            sudo install -o root -g root -m 0755 "$(type -P "$helper")" \
+              "/run/aimee-test-helpers/$helper"
+          done
+          sudo stat -Lc '%U:%G %a %n' /run/aimee-test-helpers \
+            /run/aimee-test-helpers/cat /run/aimee-test-helpers/env \
+            /run/aimee-test-helpers/yes /run/aimee-test-helpers/true
+          printf '%s\n' 'deterministic root-owned test fixture' | \
+            sudo tee /run/aimee-test-helpers/root-file >/dev/null
+          sudo chown root:root /run/aimee-test-helpers/root-file
+          sudo chmod 0644 /run/aimee-test-helpers/root-file
+          sudo stat -Lc '%U:%G %a %n' /run/aimee-test-helpers/root-file
+          export AIMEE_TEST_TRUSTED_CAT=/run/aimee-test-helpers/cat
+          export AIMEE_TEST_TRUSTED_ENV=/run/aimee-test-helpers/env
+          export AIMEE_TEST_TRUSTED_YES=/run/aimee-test-helpers/yes
+          export AIMEE_TEST_TRUSTED_TRUE=/run/aimee-test-helpers/true
+          export AIMEE_TEST_TRUSTED_ROOT_FILE=/run/aimee-test-helpers/root-file
+          cd src && make -j$(nproc) unit-tests build/obj/tests/p7-pkcs11-harness
 
   # The data-plane identity mint, end to end, against a live Postgres and a live
   # signed-HWM KMS helper.

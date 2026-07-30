@@ -18,6 +18,21 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
+int config_set_learning_implicit_retrieval_outcome(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->learning_implicit_retrieval_outcome = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
 int config_set_autonomous(int value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
@@ -1892,19 +1907,3 @@ int config_set_kb_ranker_enabled(int value)
    free(cfg);
    return rc;
 }
-
-int config_set_kb_ranker_fit_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->kb_ranker_fit_enabled = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-

@@ -1,9 +1,9 @@
 services:
-  # LEGACY torch embedder, retired from the default topology: the kb now embeds
-  # IN-CONTAINER from baked weights, so no embedding service is deployed at all.
-  # Kept behind a profile for rollback / comparison:
-  # `docker compose --profile legacy-embedder up` (and point the kb back with
-  # AIMEE_EMBEDDER_URL=http://embedder:8080).
+  # LEGACY torch embedder. Retired from the default topology by the unified-llm
+  # cutover — the kb now embeds/reranks/synthesizes against the `aimee-llm`
+  # container (below) via AIMEE_LLM_URL. Kept behind a profile for rollback /
+  # comparison: `docker compose --profile legacy-embedder up` (and point the kb
+  # back with AIMEE_EMBEDDER_URL=http://embedder:8080).
   embedder:
     restart: unless-stopped
     profiles: ["legacy-embedder"]
@@ -15,12 +15,14 @@ services:
       dockerfile: Dockerfile.embedder
       args:
         EMBEDDER_MODEL: ${EMBEDDER_MODEL:-perplexity-ai/pplx-embed-v1-0.6b}
-    # Tier is a RUNTIME choice now: the model is fetched at startup into the
-    # volume (not baked), so EMBEDDER_MODEL selects the tier with no rebuild.
-    # Light tier: EMBEDDER_MODEL=...-0.6b, AIMEE_EMBEDDING_DIM=1024 on the kb
-    # (the 4b is 2560).
+        RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ettin-reranker-400m-v1}
+    # Tier is a RUNTIME choice now: the models are fetched at startup into the
+    # volume (not baked), so EMBEDDER_MODEL / RERANKER_MODEL select the tier with
+    # no rebuild. Light tier: EMBEDDER_MODEL=...-0.6b, RERANKER_MODEL=...-400m-v1,
+    # AIMEE_EMBEDDING_DIM=1024 on the kb (the 4b is 2560).
     environment:
       EMBEDDER_MODEL: ${EMBEDDER_MODEL:-perplexity-ai/pplx-embed-v1-0.6b}
+      RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ettin-reranker-400m-v1}
       # CI stub embedder (off in prod): e2e sets these to serve fixed-dim
       # vectors with no model download. EMBEDDER_STUB_DIM matches the schema dim.
       EMBEDDER_STUB: ${EMBEDDER_STUB:-}
@@ -51,26 +53,20 @@ services:
       stack: 67108864
     environment:
       AIMEE_HOME: /var/lib/aimee
-      # Empty by default: the KB image owns PostgreSQL + pgvector for a new
-      # install. Set AIMEE_DB2_URL explicitly only to keep/use an external DB2.
-      AIMEE_DB2_URL: ${AIMEE_DB2_URL:-}
-      # EMBEDDING IS IN-CONTAINER: the kb serves its own embedder on loopback from
-      # weights baked into the image, so nothing needs configuring for retrieval to
-      # work. Set AIMEE_EMBEDDER_URL only to use an external embedder instead.
-      #
-      # AIMEE_LLM_URL is now SYNTH ONLY (curator Tier-A & B at {url}/v1) and has no
-      # default: the bundled aimee-llm container is gone, so point this at whatever
-      # OpenAI-compatible endpoint should do synthesis. LLM-dependent passes fail
-      # closed until it is set; retrieval does not depend on it.
+      # External DB2 credentials are streamed into the KB Vault by the
+      # disposable Compose helper; never persist them in Config.Env.
+      # One knob: embed (/embed) + rerank (/rerank) + synth (curator Tier-A & B,
+      # at {url}/v1) all via the unified aimee-llm container. The kb runs no model.
+      # Override AIMEE_EMBEDDER_URL / AIMEE_RERANKER_URL to pin a service elsewhere.
       AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
-      # Embedding dim — leave EMPTY. The kb derives it from the selected embedder
-      # (pinned > recorded > probed); pinning it here only adds a second place to be
-      # wrong, and a change against a populated kb forces a re-embed.
+      # Embedding dim — empty = config default 1024 (CPU tier); set 2560 for the
+      # GPU 4B tier (changing it against a populated kb forces a re-embed).
       AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
     # aimee-kb serves /v1 over HTTP only; the legacy --socket transport was retired (#2747).
     command: ["--http-port=8741"]
     ports:
       - "127.0.0.1:8741:8741"
+    depends_on:
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
       interval: 10s

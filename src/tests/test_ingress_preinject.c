@@ -11,6 +11,12 @@
 #include "kb_client.h"
 #include "request_context.h"
 
+static const char *g_context_mode = "observe";
+static int g_context_calls = 0;
+static int g_facts_enabled = 0;
+static int g_facts_calls = 0;
+static kb_client_result_status_t g_context_result = KB_CLIENT_RESULT_OK;
+
 /* The kb-backed builder (ingress_preinject_build) is out of scope here; these
  * stubs satisfy the linker so the test links only the pure helpers without
  * dragging in the kb client / config-load object graph. */
@@ -24,7 +30,8 @@ char *kb_client_memory_context_block(const char *query, const char *block_type, 
 char *kb_client_memory_facts(const char *query)
 {
    (void)query;
-   return NULL;
+   g_facts_calls++;
+   return strdup("- global preference: never substitute for project evidence\n");
 }
 
 /* Typed-facts gate stub: off, so the builder's facts path stays inert here
@@ -32,7 +39,52 @@ char *kb_client_memory_facts(const char *query)
  * this call with the typed_facts feature; the test link needs the symbol. */
 int kb_client_typed_facts_enabled(void)
 {
+   return g_facts_enabled;
+}
+int ingress_preinject_resolve_active_scope(char *workspace, size_t workspace_len, char *project,
+                                           size_t project_len)
+{
+   snprintf(workspace, workspace_len, "active-workspace");
+   snprintf(project, project_len, "active-project");
    return 0;
+}
+void kb_client_memory_scope_context_set(const char *workspace, const char *project, int include_all)
+{
+   (void)workspace;
+   (void)project;
+   assert(include_all == 0);
+}
+void kb_client_memory_scope_context_clear(void)
+{
+}
+char *kb_client_code_context(const char *query, const char *symbol, const char *project,
+                             int *status_out)
+{
+   assert(query && query[0]);
+   (void)symbol;
+   assert(project && strcmp(project, "active-project") == 0);
+   g_context_calls++;
+   if (g_context_result == KB_CLIENT_RESULT_UNAVAILABLE)
+   {
+      if (status_out)
+         *status_out = 503;
+      return NULL;
+   }
+   if (status_out)
+      *status_out = 200;
+   return strdup("{\"status\":\"ok\",\"project\":\"active-project\",\"generation\":7,"
+                 "\"freshness\":\"current\",\"resolved\":true,"
+                 "\"max_results\":4,\"max_tokens\":1200,\"item_count\":1,"
+                 "\"answerability\":{\"decision\":\"answerable\"},\"results\":[{"
+                 "\"project\":\"active-project\",\"file_path\":\"src/local.c\","
+                 "\"generation\":7,\"freshness\":\"current\",\"confidence\":0.95,"
+                 "\"accepted\":true,\"provenance\":[\"code\"],"
+                 "\"span\":{\"kind\":\"line\",\"line_start\":12,\"line_end\":12},"
+                 "\"snippet\":\"int local_answer(void);\"}],\"why\":[]}");
+}
+kb_client_result_status_t kb_client_last_result_status(void)
+{
+   return g_context_result;
 }
 int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max)
 {
@@ -107,6 +159,11 @@ int config_load(config_t *cfg)
 int config_ingress_preinject_enabled(void)
 {
    return 1;
+}
+
+const char *config_code_context_mode(void)
+{
+   return g_context_mode;
 }
 
 int config_ingress_preinject_assembly_budget(void)
@@ -226,6 +283,135 @@ static void test_format_envelope(void)
    assert(e2 && strstr(e2, "confidence=\"low\"") != NULL);
    free(e2);
    printf("format_envelope OK\n");
+}
+
+static void test_format_task_context_strict_contract(void)
+{
+   const char *ok = "{\"status\":\"ok\",\"project\":\"active-project\",\"generation\":7,"
+                    "\"freshness\":\"current\",\"resolved\":true,"
+                    "\"max_results\":4,\"max_tokens\":1200,\"item_count\":2,"
+                    "\"answerability\":{\"decision\":\"answerable\"},\"results\":[{"
+                    "\"project\":\"active-project\",\"file_path\":\"src/local.c\","
+                    "\"generation\":7,\"freshness\":\"current\",\"confidence\":0.95,"
+                    "\"accepted\":true,\"provenance\":[\"code\",\"graph\"],"
+                    "\"span\":{\"kind\":\"line\",\"line_start\":12,\"line_end\":12},"
+                    "\"snippet\":\"int local_answer(void);\"}],\"why\":[{"
+                    "\"memory_id\":9,\"content\":\"Use the local resolver.\","
+                    "\"scope\":\"project\",\"provenance\":\"memory\","
+                    "\"confidence\":0.9,\"anchor\":{\"project\":\"active-project\","
+                    "\"file_path\":\"src/local.c\",\"generation\":7,"
+                    "\"freshness\":\"current\"}}]}";
+   int count = 0;
+   double confidence = 0.0;
+   char *packet = ingress_preinject_format_task_context(ok, "active-project", &count, &confidence);
+   assert(packet && count == 2 && confidence == 0.95);
+   assert(strstr(packet, "task-conditioned code; project=active-project; generation=7") != NULL);
+   assert(strstr(packet, "src/local.c:12") != NULL);
+   assert(strstr(packet, "provenance=code,graph") != NULL);
+   assert(strstr(packet, "memory[project") != NULL);
+   free(packet);
+
+   const char *no_answer =
+       "{\"status\":\"no_answer\",\"project\":\"active-project\",\"generation\":7,"
+       "\"freshness\":\"current\",\"resolved\":true,"
+       "\"answerability\":{\"decision\":\"no_answer\"},\"results\":[],\"why\":[]}";
+   assert(ingress_preinject_format_task_context(no_answer, "active-project", NULL, NULL) == NULL);
+
+   char *wrong = strdup(ok);
+   char *project = strstr(wrong, "active-project");
+   memcpy(project, "foreign-projec", 14);
+   assert(ingress_preinject_format_task_context(wrong, "active-project", NULL, NULL) == NULL);
+   free(wrong);
+
+   char *high_code_confidence = strdup(ok);
+   char *code_confidence = strstr(high_code_confidence, "0.95");
+   assert(code_confidence != NULL);
+   code_confidence[0] = '1';
+   assert(ingress_preinject_format_task_context(high_code_confidence, "active-project", NULL,
+                                                NULL) == NULL);
+   free(high_code_confidence);
+
+   char *high_memory_confidence = strdup(ok);
+   char *memory_confidence = strstr(high_memory_confidence, "0.9,\"anchor\"");
+   assert(memory_confidence != NULL);
+   memory_confidence[0] = '1';
+   assert(ingress_preinject_format_task_context(high_memory_confidence, "active-project", NULL,
+                                                NULL) == NULL);
+   free(high_memory_confidence);
+   printf("format_task_context_strict_contract OK\n");
+}
+
+static void test_task_context_mode_and_first_turn_gate(void)
+{
+   ingress_preinject_task_state_reset();
+   ingress_preinject_set_session_id("session-task-1");
+   g_context_calls = 0;
+   g_facts_enabled = 1;
+   g_facts_calls = 0;
+   g_context_mode = "on";
+   g_context_result = KB_CLIENT_RESULT_OK;
+
+   char *first = ingress_preinject_build("fix local resolver", 0);
+   assert(first && strstr(first, "recommended (task-conditioned code") != NULL);
+   assert(strstr(first, "src/local.c:12") != NULL);
+   assert(strstr(first, "memory previews") == NULL);
+   assert(strstr(first, "global preference") == NULL);
+   assert(g_facts_calls == 0);
+   free(first);
+   assert(g_context_calls == 1);
+
+   /* Related vocabulary remains the same task: no repeated packet and no
+    * fallback to the legacy/global preview while the strict mode is on. */
+   char *followup = ingress_preinject_build("please fix the local resolver", 0);
+   assert(followup == NULL);
+   assert(g_context_calls == 1);
+
+   char *next = ingress_preinject_build("document billing retry policy", 0);
+   assert(next && strstr(next, "task-conditioned code") != NULL);
+   free(next);
+   assert(g_context_calls == 2);
+
+   /* Observe retrieves and validates the packet but preserves the existing
+    * project-local preview bytes. */
+   ingress_preinject_task_state_reset();
+   g_context_mode = "observe";
+   char *observed = ingress_preinject_build("fix local resolver", 0);
+   assert(observed && strstr(observed, "recommended (code):") != NULL);
+   assert(strstr(observed, "task-conditioned code") == NULL);
+   assert(strstr(observed, "global preference") != NULL);
+   free(observed);
+   assert(g_context_calls == 3);
+
+   ingress_preinject_set_session_id(NULL);
+   g_facts_enabled = 0;
+   g_context_mode = "observe";
+   printf("task_context_mode_and_first_turn_gate OK\n");
+}
+
+static void test_unavailable_task_context_retries_after_recovery(void)
+{
+   ingress_preinject_task_state_reset();
+   ingress_preinject_set_session_id("session-recovery");
+   g_context_mode = "on";
+   g_context_calls = 0;
+   g_context_result = KB_CLIENT_RESULT_UNAVAILABLE;
+
+   char *outage = ingress_preinject_build("fix local resolver", 0);
+   assert(outage == NULL);
+   assert(g_context_calls == 1);
+
+   /* Same-task vocabulary is eligible again because unavailable is not an
+    * abstention/empty result. The KB breaker owns the actual retry rate. */
+   g_context_result = KB_CLIENT_RESULT_OK;
+   char *recovered = ingress_preinject_build("please fix the local resolver", 0);
+   assert(recovered && strstr(recovered, "task-conditioned code") != NULL);
+   free(recovered);
+   assert(g_context_calls == 2);
+
+   ingress_preinject_set_session_id(NULL);
+   g_context_mode = "observe";
+   g_context_result = KB_CLIENT_RESULT_OK;
+   printf("unavailable_task_context_retries_after_recovery OK\n");
 }
 
 static void test_query_from_messages(void)
@@ -516,6 +702,9 @@ int main(void)
    printf("ingress_preinject: ");
    test_confidence_tiers();
    test_format_envelope();
+   test_format_task_context_strict_contract();
+   test_task_context_mode_and_first_turn_gate();
+   test_unavailable_task_context_retries_after_recovery();
    test_format_code_block();
    test_query_from_messages();
    test_apply();

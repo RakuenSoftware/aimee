@@ -899,4 +899,3 @@ double config_calibration_tau_working_profile_auto(void)
    config_field_read(offsetof(config_t, calibration_tau_working_profile_auto), sizeof(v), &v);
    return v;
 }
-

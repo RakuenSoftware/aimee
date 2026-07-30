@@ -146,14 +146,50 @@ int db2_server_registry_heartbeat(const char *server_id, const char *issuer, con
  * Linking the real ones instead would pull the vault and the TLS client into a
  * routing test — and kb_oidc_token_exchange_post lives in its own translation
  * unit specifically so that is avoidable. */
+typedef struct
+{
+   char cred[96];
+   char *registry;
+} test_enroll_vault_record_t;
+
+static test_enroll_vault_record_t g_test_enroll_vault[8];
+
 vault_status_t vault_service_get_server_principal(const char *agent, const char *cred, char *out,
                                                   size_t cap)
 {
-   (void)agent;
-   (void)cred;
    if (out && cap)
       out[0] = '\0';
+   if (agent && cred && strcmp(agent, "kb-enrollment") == 0)
+      for (size_t i = 0; i < sizeof(g_test_enroll_vault) / sizeof(g_test_enroll_vault[0]); i++)
+         if (g_test_enroll_vault[i].registry && strcmp(g_test_enroll_vault[i].cred, cred) == 0)
+         {
+            if (!out || strlen(g_test_enroll_vault[i].registry) >= cap)
+               return VAULT_ERR_BADARG;
+            snprintf(out, cap, "%s", g_test_enroll_vault[i].registry);
+            return VAULT_OK;
+         }
    return VAULT_NO_ENTRY;
+}
+
+vault_status_t vault_service_set_server(const char *agent, const char *cred, const char *secret)
+{
+   if (!agent || !cred || !secret || strcmp(agent, "kb-enrollment") != 0)
+      return VAULT_ERR_BADARG;
+   test_enroll_vault_record_t *slot = NULL;
+   for (size_t i = 0; i < sizeof(g_test_enroll_vault) / sizeof(g_test_enroll_vault[0]); i++)
+      if (g_test_enroll_vault[i].registry && strcmp(g_test_enroll_vault[i].cred, cred) == 0)
+         slot = &g_test_enroll_vault[i];
+      else if (!slot && !g_test_enroll_vault[i].registry)
+         slot = &g_test_enroll_vault[i];
+   if (!slot)
+      return VAULT_ERR_IO;
+   char *copy = strdup(secret);
+   if (!copy)
+      return VAULT_ERR_IO;
+   free(slot->registry);
+   slot->registry = copy;
+   snprintf(slot->cred, sizeof(slot->cred), "%s", cred);
+   return VAULT_OK;
 }
 
 kb_oidc_token_exchange_result_t

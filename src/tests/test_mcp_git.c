@@ -1350,8 +1350,8 @@ static void test_verify_load_config_emits_parallel_steps(void)
    assert(cfg.count == 1);
    assert(strcmp(cfg.steps[0].name, "verify-local") == 0);
    assert(strstr(cfg.steps[0].run, "AIMEE_VERIFY_MAKE_JOBS") != NULL);
-   /* The generated step defaults the job counts to $(nproc) so a fresh install
-    * builds and runs the suite in parallel. */
+   /* Builds can use $(nproc), while tests use a bounded per-verifier default so
+    * concurrent workflow verification cannot multiply into host-wide overload. */
    assert(strstr(cfg.steps[0].run, "nproc") != NULL);
    assert(strstr(cfg.steps[0].run, "AIMEE_VERIFY_TEST_JOBS") != NULL);
 
@@ -1518,7 +1518,7 @@ static void test_verify_load_config_falls_back_to_verify_local(void)
    assert(strcmp(cfg.steps[0].name, "verify-local") == 0);
    assert(strcmp(cfg.steps[0].run,
                  "make -j${AIMEE_VERIFY_MAKE_JOBS:-$(nproc 2>/dev/null || echo 4)} "
-                 "AIMEE_VERIFY_TEST_JOBS=${AIMEE_VERIFY_TEST_JOBS:-$(nproc 2>/dev/null || echo 4)} "
+                 "AIMEE_VERIFY_TEST_JOBS=${AIMEE_VERIFY_TEST_JOBS:-2} "
                  "verify-local") == 0);
 
    verify_test_teardown(tmpdir, fake_home);
@@ -2262,6 +2262,59 @@ static void *run_sync_verify_thread(void *arg)
    return NULL;
 }
 
+static void test_git_verify_serializes_across_sessions(void)
+{
+   char tmpdir[256];
+   verify_test_setup_repo(tmpdir, sizeof(tmpdir), "aimee-test-verify-global-lock");
+
+   char marker[512], overlap[512], yaml[2048];
+   snprintf(marker, sizeof(marker), "%s/verify-running", tmpdir);
+   snprintf(overlap, sizeof(overlap), "%s/verify-overlapped", tmpdir);
+   snprintf(yaml, sizeof(yaml),
+            "verify:\n"
+            "  enforce: true\n"
+            "  steps:\n"
+            "    - name: exclusive\n"
+            "      run: if mkdir '%s'; then sleep 0.4; rmdir '%s'; else echo overlap > '%s'; "
+            "exit 1; fi\n",
+            marker, marker, overlap);
+   char fake_home[256];
+   verify_test_write_yaml(tmpdir, fake_home, sizeof(fake_home), yaml);
+
+   char dirty[512];
+   snprintf(dirty, sizeof(dirty), "%s/dirty", tmpdir);
+   FILE *f = fopen(dirty, "w");
+   assert(f != NULL);
+   fputs("force both runs past the clean-tree cache\n", f);
+   fclose(f);
+
+   char saved_cwd[4096];
+   assert(getcwd(saved_cwd, sizeof(saved_cwd)) != NULL);
+   assert(chdir(tmpdir) == 0);
+
+   sync_verify_thread_t first = {.session_id = "sid-global-lock-a", .resp = NULL};
+   sync_verify_thread_t second = {.session_id = "sid-global-lock-b", .resp = NULL};
+   pthread_t first_tid, second_tid;
+   assert(pthread_create(&first_tid, NULL, run_sync_verify_thread, &first) == 0);
+   struct stat st;
+   for (int i = 0; i < 200 && stat(marker, &st) != 0; i++)
+      usleep(10000);
+   assert(stat(marker, &st) == 0);
+   assert(pthread_create(&second_tid, NULL, run_sync_verify_thread, &second) == 0);
+
+   assert(pthread_join(first_tid, NULL) == 0);
+   assert(pthread_join(second_tid, NULL) == 0);
+   assert(first.resp != NULL && second.resp != NULL);
+   assert(strstr(get_mcp_text(first.resp), "PASS") != NULL);
+   assert(strstr(get_mcp_text(second.resp), "PASS") != NULL);
+   assert(access(overlap, F_OK) != 0);
+   cJSON_Delete(first.resp);
+   cJSON_Delete(second.resp);
+
+   assert(chdir(saved_cwd) == 0);
+   verify_test_teardown(tmpdir, fake_home);
+}
+
 static void test_git_verify_sync_cancelled_by_session_close(void)
 {
    char tmpdir[256];
@@ -2466,6 +2519,7 @@ int main(void)
    test_git_verify_async_does_not_starve_server_pool();
    test_git_verify_async_rejects_same_session_overlap();
    test_git_verify_async_reaps_finished_jobs();
+   test_git_verify_serializes_across_sessions();
    test_git_verify_sync_cancelled_by_session_close();
    test_git_verify_sync_rejects_same_session_overlap();
 

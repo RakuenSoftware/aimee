@@ -5,6 +5,7 @@
 #define _GNU_SOURCE
 #endif
 #include "memory_core_internal.h"
+#include "db2/memory_scope_query.h"
 /* memory_core_search.c: split from memory_core.c into a real translation unit
  * (was memory_core_search.inc, textually included only to stay under the
  * line-check ceiling). Cross-TU declarations live in the module header. */
@@ -1099,10 +1100,14 @@ int memory_find_facts_visible_lexical_fallback(const char *query, const char *wo
 
    int kept = 0;
    int scope_rank[64];
+   db2_memory_scope_context_t scope_context;
+   db2_memory_scope_context_get(&scope_context);
    for (int i = 0; i < count; i++)
    {
-      int rank = memory_scope_visibility_rank(scratch[i].id, workspace, project);
-      if (rank <= 0)
+      int rank = scope_context.active
+                     ? db2_memory_scope_context_rank(scratch[i].id)
+                     : memory_scope_visibility_rank(scratch[i].id, workspace, project);
+      if (rank <= 0 && !(scope_context.active && scope_context.include_all))
          continue;
       if (kept != i)
          scratch[kept] = scratch[i];

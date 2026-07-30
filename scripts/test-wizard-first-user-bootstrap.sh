@@ -2,6 +2,11 @@
 # Fresh-install proof for the setup wizard's first remote administrator.
 set -euo pipefail
 
+if [[ $(id -u) -ne 0 ]]; then
+  echo "wizard-bootstrap-e2e: SKIP (root is required to exercise root-owned UDS webuser attestation)"
+  exit 0
+fi
+
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 server_bin="$repo_dir/aimee-server"
 client_bin="$repo_dir/aimee"
@@ -26,7 +31,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-mkdir -p "$e2e_tmp/server/tls" "$e2e_tmp/client"
+mkdir -p "$e2e_tmp/server" "$e2e_tmp/client"
 e2e_tls_port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 python3 - "$e2e_tmp/server/aimee.yaml" "$e2e_tls_port" <<'PY'
 import pathlib
@@ -40,16 +45,9 @@ path.write_text(
     "    http_port: 0\n"
     f"    tls_port: {port}\n"
     "    mtls: optional\n"
-    "    bearer_token: aimee-local-dev\n"
     "    remote_writes: off\n"
 )
 PY
-openssl rand -hex -out "$e2e_tmp/server/server.token" 32
-chmod 600 "$e2e_tmp/server/server.token"
-openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 2 -subj /CN=127.0.0.1 \
-  -keyout "$e2e_tmp/server/tls/server.key" -out "$e2e_tmp/server/tls/server.crt" \
-  >/dev/null 2>&1
-chmod 600 "$e2e_tmp/server/tls/server.key"
 
 AIMEE_HOME="$e2e_tmp/server" AIMEE_DEPLOY_ENABLED=1 AIMEE_API_REMOTE_WRITES=off \
   "$server_bin" --foreground --log-level=debug >"$e2e_tmp/server.stdout" 2>&1 &
@@ -64,10 +62,12 @@ done
   echo "wizard-bootstrap-e2e: server UDS did not start" >&2
   exit 1
 }
+[[ ! -e "$e2e_tmp/server/tls/server.key" ]]
+[[ ! -e "$e2e_tmp/server/server.token" ]]
+! grep -Eq 'bearer(_token)?:' "$e2e_tmp/server/aimee.yaml"
 
-IFS= read -r e2e_server_token < "$e2e_tmp/server/server.token"
 curl --silent --show-error --unix-socket "$e2e_tmp/server/aimee-http.sock" \
-  -H "Authorization: Bearer $e2e_server_token" -H 'X-Aimee-Webuser: alice' \
+  -H 'X-Aimee-Webuser: alice' \
   -H 'Content-Type: application/json' -X POST -d '{}' \
   -o "$e2e_tmp/apply.json" -w '%{http_code}' http://localhost/v1/deploy/apply \
   >"$e2e_tmp/apply.status"
@@ -142,11 +142,11 @@ curl --silent --show-error --cacert "$e2e_tmp/server/tls/server.crt" \
 
 # Re-entry is idempotent for alice and cannot transfer ownership to bob.
 curl --silent --show-error --unix-socket "$e2e_tmp/server/aimee-http.sock" \
-  -H "Authorization: Bearer $e2e_server_token" -H 'X-Aimee-Webuser: alice' \
+  -H 'X-Aimee-Webuser: alice' \
   -H 'Content-Type: application/json' -X POST -d '{}' -o "$e2e_tmp/reapply.json" \
   -w '%{http_code}' http://localhost/v1/deploy/apply >"$e2e_tmp/reapply.status"
 curl --silent --show-error --unix-socket "$e2e_tmp/server/aimee-http.sock" \
-  -H "Authorization: Bearer $e2e_server_token" -H 'X-Aimee-Webuser: bob' \
+  -H 'X-Aimee-Webuser: bob' \
   -H 'Content-Type: application/json' -X POST -d '{}' -o "$e2e_tmp/bob.json" \
   -w '%{http_code}' http://localhost/v1/deploy/apply >"$e2e_tmp/bob.status"
 python3 - "$e2e_tmp/server/aimee.db" "$e2e_tmp/reapply.status" "$e2e_tmp/reapply.json" \
@@ -177,7 +177,7 @@ PY
 # certificate that was valid moments ago loses the bound grant immediately.
 e2e_serial=$(openssl x509 -in "$e2e_tmp/client/tls/client.crt" -noout -serial | cut -d= -f2)
 curl --silent --show-error --unix-socket "$e2e_tmp/server/aimee-http.sock" \
-  -H "Authorization: Bearer $e2e_server_token" -H 'Content-Type: application/json' \
+  -H 'Content-Type: application/json' \
   -X POST -d "{\"serial\":\"$e2e_serial\"}" -o "$e2e_tmp/revoke.json" \
   -w '%{http_code}' http://localhost/v1/cert/revoke >"$e2e_tmp/revoke.status"
 [[ $(<"$e2e_tmp/revoke.status") == 200 ]]

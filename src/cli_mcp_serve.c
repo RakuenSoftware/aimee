@@ -242,8 +242,17 @@ static cJSON *forward_to_server(const char *tool, cJSON *args, int timeout_ms)
    cJSON *arguments = args ? cJSON_Duplicate(args, 1) : cJSON_CreateObject();
    if (!arguments)
       arguments = cJSON_CreateObject();
-   if (cwd[0] && cJSON_IsObject(arguments) && !cJSON_GetObjectItemCaseSensitive(arguments, "cwd"))
+   /* cwd is transport identity, not a value the model must invent. This makes
+    * ordinary no-override memory and code-intelligence calls local-first even
+    * when the long-running server has a different process cwd. The transport
+    * value is authoritative: a model-supplied cwd must not retarget an ordered
+    * read to another checkout. Explicit project/workspace selectors remain
+    * untouched. */
+   if (cwd[0] && cJSON_IsObject(arguments))
+   {
+      cJSON_DeleteItemFromObjectCaseSensitive(arguments, "cwd");
       cJSON_AddStringToObject(arguments, "cwd", cwd);
+   }
    cJSON_AddItemToObject(req, "arguments", arguments);
 
    cJSON *resp = server_request(req, timeout_ms);

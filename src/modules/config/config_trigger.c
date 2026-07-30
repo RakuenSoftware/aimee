@@ -314,14 +314,12 @@ void config_save_trigger(const config_t *cfg, cJSON *root)
    if (!cfg || !root)
       return;
 
-   /* trigger.{auth_token,max_concurrent} (default max_concurrent = 2) */
-   if (cfg->trigger_auth_token[0] || cfg->trigger_max_concurrent != 2)
+   /* trigger.auth_token is Vault-only; only non-secret settings are emitted. */
+   if (cfg->trigger_max_concurrent != 2)
    {
       cJSON *t = cJSON_AddObjectToObject(root, "trigger");
       if (t)
       {
-         if (cfg->trigger_auth_token[0])
-            cJSON_AddStringToObject(t, "auth_token", cfg->trigger_auth_token);
          cJSON_AddNumberToObject(t, "max_concurrent", cfg->trigger_max_concurrent);
       }
    }

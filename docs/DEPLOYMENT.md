@@ -23,7 +23,17 @@ the safer default when the server must not control Docker.
 
 ## External PostgreSQL
 
-Set `AIMEE_DB2_URL` for the KB. The operator owns:
+Use `AIMEE_DB2_URL` only as first-boot input, seal it into the KB Vault with a
+disposable container, then remove it before creating the long-lived service:
+
+```bash
+export AIMEE_DB2_URL='postgresql://...'
+./scripts/aimee-compose-vault-bootstrap.sh -f compose.yaml kb
+unset AIMEE_DB2_URL
+docker compose -f compose.yaml up -d
+```
+
+The operator owns:
 
 - PostgreSQL availability and backups;
 - TLS and service identity;
@@ -31,7 +41,9 @@ Set `AIMEE_DB2_URL` for the KB. The operator owns:
 - connection limits and latency;
 - migration and restore testing.
 
-Only `aimee-kb` receives DB2 credentials.
+No long-lived server or KB container stores DB2 credentials in `Config.Env`.
+The disposable `--rm` bootstrap streams first-boot values over stdin, seals
+them synchronously, and exits before the service is created.
 
 ## Inference
 
@@ -79,7 +91,8 @@ named volumes.
 - grant remote users individually and review revoked rows;
 - use the split stack if the Docker socket is not required;
 - keep delegates networkless by default;
-- move provider, git, database, and witness secrets into their owning vault/secret manager;
+- stream first-boot provider, git, database, and witness secrets into their owning Vault, then
+  recreate/start long-lived services without credential environment mappings;
 - ship WORM evidence to an off-host witness when host compromise is in scope;
 - alert on failed health, audit verification, witness lag, bus drops, database pressure, and agent
   reaping.

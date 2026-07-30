@@ -16,6 +16,8 @@
 #include "server.h"
 #include "server_http.h"
 #include "toolset.h"
+#include "runtime_secret.h"
+#include "vault_config_bootstrap.h"
 #include "platform_ipc.h"
 #include "platform_process.h"
 
@@ -87,6 +89,8 @@ static session_state_t g_pre_tool_state;
 static int g_pre_tool_seen_state = 0;
 static int g_config_stateful = 0;
 static int g_config_reload_calls = 0;
+static int g_config_secret_store_calls = 0;
+static int g_config_secret_store_configured = 0;
 static config_t g_config_disk;
 static config_t g_config_snapshot;
 
@@ -452,6 +456,18 @@ void session_brief_emit(FILE *out)
 {
    if (out)
       fputs("STUB_BRIEF_CONTENT", out);
+}
+static int g_memory_scope_begin_calls = 0;
+static int g_memory_scope_clear_calls = 0;
+int server_memory_scope_begin(cJSON *req)
+{
+   (void)req;
+   g_memory_scope_begin_calls++;
+   return 0;
+}
+void kb_client_memory_scope_context_clear(void)
+{
+   g_memory_scope_clear_calls++;
 }
 /* memory.user_capture invokes db1_user_memory_upsert (db1/user_memory.c), not
  * linked here. Stub it so the dispatch table builds. */
@@ -1248,8 +1264,23 @@ int config_reload(void)
 int config_save(const config_t *cfg)
 {
    if (g_config_stateful)
+   {
       g_config_disk = *cfg;
+      memset(g_config_disk.server_api_bearer_token, 0,
+             sizeof(g_config_disk.server_api_bearer_token));
+      memset(g_config_disk.server_api_bearer_extra, 0,
+             sizeof(g_config_disk.server_api_bearer_extra));
+      g_config_disk.server_api_bearer_extra_count = 0;
+   }
    (void)cfg;
+   return 0;
+}
+
+int config_secret_store(const char *name, const char *value)
+{
+   assert(name && strcmp(name, "AIMEE_KB_API_BEARER_TOKEN") == 0);
+   g_config_secret_store_calls++;
+   g_config_secret_store_configured = value && value[0] ? 1 : 0;
    return 0;
 }
 
@@ -1932,6 +1963,56 @@ static void test_conn_update_events_null_evloop(void)
    printf("test_conn_update_events_null_evloop: PASS\n");
 }
 
+/* Generic config RPCs may report whether a Vault record is configured, but
+ * must never return the credential or route its mutation through aimee.yaml. */
+static void test_config_secret_redaction_and_vault_write(void)
+{
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+   conn->capabilities = CAP_SESSION_ADMIN;
+
+   memset(&g_config_snapshot, 0, sizeof(g_config_snapshot));
+   memset(&g_config_disk, 0, sizeof(g_config_disk));
+   snprintf(g_config_snapshot.kb_api_bearer_token, sizeof(g_config_snapshot.kb_api_bearer_token),
+            "%s", "never-echo-config-secret");
+   g_config_stateful = 1;
+   g_config_reload_calls = 0;
+   g_config_secret_store_calls = 0;
+   g_config_secret_store_configured = 0;
+
+   const char *get_req = "{\"method\":\"config.get\",\"key\":\"kb_api_bearer_token\"}";
+   cJSON *got = dispatch_json(ctx, conn, get_req, strlen(get_req));
+   cJSON *value = cJSON_GetObjectItemCaseSensitive(got, "value");
+   cJSON *secret = cJSON_GetObjectItemCaseSensitive(got, "secret");
+   assert(cJSON_IsBool(value) && cJSON_IsTrue(value));
+   assert(cJSON_IsBool(secret) && cJSON_IsTrue(secret));
+   char *serialized = cJSON_PrintUnformatted(got);
+   assert(serialized && strstr(serialized, "never-echo-config-secret") == NULL);
+   free(serialized);
+   cJSON_Delete(got);
+
+   const char *set_req = "{\"method\":\"config.set\",\"key\":\"kb_api_bearer_token\","
+                         "\"value\":\"never-echo-new-secret\"}";
+   cJSON *set = dispatch_json(ctx, conn, set_req, strlen(set_req));
+   assert(g_config_secret_store_calls == 1 && g_config_secret_store_configured == 1);
+   value = cJSON_GetObjectItemCaseSensitive(set, "value");
+   secret = cJSON_GetObjectItemCaseSensitive(set, "secret");
+   assert(cJSON_IsBool(value) && cJSON_IsTrue(value));
+   assert(cJSON_IsBool(secret) && cJSON_IsTrue(secret));
+   serialized = cJSON_PrintUnformatted(set);
+   assert(serialized && strstr(serialized, "never-echo-new-secret") == NULL);
+   free(serialized);
+   cJSON_Delete(set);
+   assert(g_config_reload_calls == 0);
+   assert(g_config_disk.kb_api_bearer_token[0] == '\0');
+
+   g_config_stateful = 0;
+   free(conn);
+   free(ctx);
+   printf("test_config_secret_redaction_and_vault_write: PASS\n");
+}
+
 /* Regression: the server's config_load() is an immutable live snapshot. API
  * credential mutations must instead start from the latest disk image and
  * republish it, or a second sequential enrollment starts from zero extras and
@@ -1944,8 +2025,7 @@ static void test_api_enroll_preserves_sequential_bearers(void)
    conn->capabilities = CAP_SESSION_ADMIN;
 
    memset(&g_config_disk, 0, sizeof(g_config_disk));
-   snprintf(g_config_disk.server_api_bearer_token, sizeof(g_config_disk.server_api_bearer_token),
-            "%s", "primary-test-bearer");
+   assert(vault_runtime_secret_set("AIMEE_API_BEARER_TOKEN", "primary-test-bearer") == 0);
    g_config_snapshot = g_config_disk;
    g_config_reload_calls = 0;
    g_config_stateful = 1;
@@ -1970,13 +2050,20 @@ static void test_api_enroll_preserves_sequential_bearers(void)
 
    assert(strcmp(first_bearer, second_bearer) != 0);
    assert(g_config_reload_calls == 2);
-   assert(g_config_disk.server_api_bearer_extra_count == 2);
-   assert(g_config_snapshot.server_api_bearer_extra_count == 2);
-   assert(strcmp(g_config_disk.server_api_bearer_extra[0], first_bearer) == 0);
-   assert(strcmp(g_config_disk.server_api_bearer_extra[1], second_bearer) == 0);
+   assert(g_config_disk.server_api_bearer_token[0] == '\0');
+   assert(g_config_disk.server_api_bearer_extra_count == 0);
+   assert(g_config_snapshot.server_api_bearer_extra_count == 0);
+   char stored[256];
+   assert(runtime_secret_get("AIMEE_API_BEARER_TOKEN_EXTRA_0", stored, sizeof(stored)) == 1);
+   assert(strcmp(stored, first_bearer) == 0);
+   assert(runtime_secret_get("AIMEE_API_BEARER_TOKEN_EXTRA_1", stored, sizeof(stored)) == 1);
+   assert(strcmp(stored, second_bearer) == 0);
    assert(server_http_enrolled_bearer_count() == 2);
 
    server_http_set_bearer_extra(NULL, 0);
+   assert(vault_runtime_secret_delete("AIMEE_API_BEARER_TOKEN") == 0);
+   assert(vault_runtime_secret_delete("AIMEE_API_BEARER_TOKEN_EXTRA_0") == 0);
+   assert(vault_runtime_secret_delete("AIMEE_API_BEARER_TOKEN_EXTRA_1") == 0);
    g_config_stateful = 0;
    free(conn);
    free(ctx);
@@ -1992,12 +2079,16 @@ static void test_session_brief_assemble(void)
    server_ctx_t *ctx = calloc(1, sizeof(*ctx));
    server_conn_t *conn = calloc(1, sizeof(*conn));
    assert(ctx != NULL && conn != NULL);
+   g_memory_scope_begin_calls = 0;
+   g_memory_scope_clear_calls = 0;
    const char *msg = "{\"method\":\"session.brief_assemble\"}";
    cJSON *json = dispatch_json(ctx, conn, msg, strlen(msg));
    cJSON *sv = cJSON_GetObjectItem(json, "schema_version");
    cJSON *out = cJSON_GetObjectItem(json, "output");
    assert(cJSON_IsNumber(sv) && sv->valueint == 1);
    assert(cJSON_IsString(out) && strstr(out->valuestring, "STUB_BRIEF_CONTENT") != NULL);
+   assert(g_memory_scope_begin_calls == 1);
+   assert(g_memory_scope_clear_calls == 1);
    cJSON_Delete(json);
    free(conn);
    free(ctx);
@@ -2009,6 +2100,7 @@ int main(void)
    test_invalid_json();
    test_session_brief_assemble();
    test_conn_update_events_null_evloop();
+   test_config_secret_redaction_and_vault_write();
    test_api_enroll_preserves_sequential_bearers();
    test_missing_method();
    test_oversized_payload();

@@ -54,6 +54,14 @@
 /* Per-call bundle passed to every handler: the request context plus the
  * out-param for tools that emit an MCP `structured` payload alongside text. */
 
+static cJSON *mcph_kb_last_result(const char *message)
+{
+   char *json = kb_client_last_result_json(message);
+   cJSON *content = text_content(json ? json : "{\"status\":\"unavailable\"}");
+   free(json);
+   return content;
+}
+
 /* ── thin wrappers: uniform signature over the existing tool_* helpers ─────── */
 
 static cJSON *mcph_get_help(struct mcp_call *c)
@@ -102,8 +110,7 @@ static cJSON *mcph_memory_get(struct mcp_call *c)
 }
 static cJSON *mcph_list_facts(struct mcp_call *c)
 {
-   (void)c;
-   return tool_list_facts();
+   return tool_list_facts(c->jargs);
 }
 static cJSON *mcph_memory_briefing(struct mcp_call *c)
 {
@@ -242,7 +249,10 @@ static cJSON *mcph_memory_alerts(struct mcp_call *c)
    cJSON *js = cJSON_GetObjectItemCaseSensitive(jargs, "since");
    if (cJSON_IsString(js) && js->valuestring[0])
       since = js->valuestring;
+   int active_context_missing = 0;
+   mcp_memory_scope_begin(jargs, &active_context_missing);
    char *envelope = kb_client_memory_alerts_json(since);
+   mcp_memory_scope_end();
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    cJSON *alerts = resp ? cJSON_GetObjectItemCaseSensitive(resp, "alerts") : NULL;
@@ -250,11 +260,14 @@ static cJSON *mcph_memory_alerts(struct mcp_call *c)
    if (alerts)
    {
       cJSON *detached = cJSON_DetachItemViaPointer(resp, alerts);
+      if (detached)
+         cJSON_AddBoolToObject(detached, "active_context_missing", active_context_missing);
       rendered = detached ? cJSON_PrintUnformatted(detached) : NULL;
       cJSON_Delete(detached);
    }
    cJSON_Delete(resp);
-   cJSON *content = rendered ? text_content(rendered) : text_content("error: memory_alerts failed");
+   cJSON *content =
+       rendered ? text_content(rendered) : mcph_kb_last_result("memory alerts returned no result");
    free(rendered);
    return content;
 }
@@ -275,7 +288,10 @@ static cJSON *mcph_memory_recall(struct mcp_call *c)
    if (cJSON_IsNumber(jl))
       limit_tokens = (int)jl->valuedouble;
    /* Graph-code fusion is always on for recall. */
+   int active_context_missing = 0;
+   mcp_memory_scope_begin(jargs, &active_context_missing);
    char *envelope = kb_client_memory_recall_json_ex(task_hint, limit_tokens, session_start, "on");
+   mcp_memory_scope_end();
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    cJSON *recall = resp ? cJSON_GetObjectItemCaseSensitive(resp, "recall") : NULL;
@@ -283,13 +299,15 @@ static cJSON *mcph_memory_recall(struct mcp_call *c)
    if (recall)
    {
       cJSON *detached = cJSON_DetachItemViaPointer(resp, recall);
+      if (detached)
+         cJSON_AddBoolToObject(detached, "active_context_missing", active_context_missing);
       rendered = detached ? cJSON_PrintUnformatted(detached) : NULL;
       cJSON_Delete(detached);
    }
    cJSON_Delete(resp);
    cJSON *content;
    if (!rendered)
-      content = text_content("error: memory_recall failed");
+      content = mcph_kb_last_result("memory recall returned no result");
    else
    {
       content = text_content(rendered);
@@ -329,7 +347,8 @@ static cJSON *mcph_list_epistemic_directives(struct mcp_call *c)
       cJSON_Delete(detached);
    }
    cJSON_Delete(resp);
-   cJSON *content = rendered ? text_content(rendered) : text_content("[]");
+   cJSON *content = rendered ? text_content(rendered)
+                             : mcph_kb_last_result("epistemic directive list returned no result");
    free(rendered);
    return content;
 }
@@ -709,7 +728,7 @@ static cJSON *mcph_index_find_callers(struct mcp_call *c)
    int all_projects = mcp_code_scope_all(c->jargs);
    if (all_projects < 0)
       return text_content("error: scope must be 'current' or 'all'");
-   const char *project = all_projects ? NULL : mcp_code_project_from_args(c->jargs);
+   const char *project = mcp_code_project_from_args(c->jargs);
    if (!all_projects && !project)
       return text_content("error: no active project determined from cwd; pass 'project' or "
                           "scope='all' explicitly");
@@ -717,13 +736,14 @@ static cJSON *mcph_index_find_callers(struct mcp_call *c)
    caller_hit_t *hits = calloc((size_t)max, sizeof(*hits));
    if (!hits)
       return text_content("error: out of memory");
-   int n = kb_client_index_find_callers(project, js->valuestring, hits, max);
+   int n = kb_client_index_find_callers_scoped(project, all_projects, js->valuestring, hits, max);
    if (n < 0)
    {
       free(hits);
-      return text_content("error: index_find_callers failed");
+      return mcph_kb_last_result("index_find_callers failed");
    }
    cJSON *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(result, "status", n > 0 ? "ok" : "empty");
    cJSON *arr = cJSON_AddArrayToObject(result, "callers");
    for (int i = 0; i < n; i++)
    {
@@ -745,8 +765,13 @@ static cJSON *mcph_index_structure(struct mcp_call *c)
    cJSON *jf = cJSON_GetObjectItemCaseSensitive(c->jargs, "file_path");
    if (!cJSON_IsString(jf) || !jf->valuestring[0])
       return text_content("error: index_structure requires 'file_path'");
-   cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
-   const char *project = cJSON_IsString(jp) ? jp->valuestring : NULL;
+   int all_projects = mcp_code_scope_all(c->jargs);
+   if (all_projects != 0)
+      return text_content(all_projects < 0 ? "error: scope must be 'current'"
+                                           : "error: index_structure requires one project");
+   const char *project = mcp_code_project_from_args(c->jargs);
+   if (!project)
+      return text_content("error: no active project determined from cwd; pass 'project'");
    const int max = 1000;
    definition_t *defs = calloc((size_t)max, sizeof(*defs));
    if (!defs)
@@ -755,9 +780,10 @@ static cJSON *mcph_index_structure(struct mcp_call *c)
    if (n < 0)
    {
       free(defs);
-      return text_content("error: index_structure failed");
+      return mcph_kb_last_result("index_structure failed");
    }
    cJSON *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(result, "status", n > 0 ? "ok" : "empty");
    cJSON *arr = cJSON_AddArrayToObject(result, "definitions");
    for (int i = 0; i < n; i++)
    {
@@ -783,8 +809,9 @@ static cJSON *mcph_memory_explain_match(struct mcp_call *c)
    memory_diagnostic_t diag;
    memset(&diag, 0, sizeof(diag));
    if (kb_client_memory_explain_match(jq->valuestring, (int64_t)jid->valuedouble, &diag) != 0)
-      return text_content("error: memory_explain_match failed");
+      return mcph_kb_last_result("memory match explanation returned no result");
    cJSON *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(result, "status", "ok");
    cJSON *m = cJSON_AddObjectToObject(result, "memory");
    cJSON_AddNumberToObject(m, "id", (double)diag.memory.id);
    cJSON_AddStringToObject(m, "tier", diag.memory.tier);
@@ -813,17 +840,23 @@ static cJSON *mcph_index_blast_radius(struct mcp_call *c)
    cJSON *jf = cJSON_GetObjectItemCaseSensitive(c->jargs, "file_path");
    if (!cJSON_IsString(jf) || !jf->valuestring[0])
       return text_content("error: index_blast_radius requires 'file_path'");
-   cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
-   const char *project = cJSON_IsString(jp) ? jp->valuestring : NULL;
+   int all_projects = mcp_code_scope_all(c->jargs);
+   if (all_projects != 0)
+      return text_content(all_projects < 0 ? "error: scope must be 'current'"
+                                           : "error: index_blast_radius requires one project");
+   const char *project = mcp_code_project_from_args(c->jargs);
+   if (!project)
+      return text_content("error: no active project determined from cwd; pass 'project'");
    blast_radius_t *br = calloc(1, sizeof(*br));
    if (!br)
       return text_content("error: out of memory");
    if (kb_client_index_blast_radius(project, jf->valuestring, br) < 0)
    {
       free(br);
-      return text_content("error: index_blast_radius failed");
+      return mcph_kb_last_result("index_blast_radius failed");
    }
    cJSON *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(result, "status", "ok");
    cJSON_AddStringToObject(result, "file", br->file);
    cJSON *deps = cJSON_AddArrayToObject(result, "dependents");
    for (int i = 0; i < br->dependent_count && i < 64; i++)
@@ -850,9 +883,10 @@ static cJSON *mcph_memory_provenance(struct mcp_call *c)
    if (n < 0)
    {
       free(ents);
-      return text_content("error: memory_provenance failed");
+      return mcph_kb_last_result("memory provenance returned no result");
    }
    cJSON *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(result, "status", n > 0 ? "ok" : "empty");
    cJSON *arr = cJSON_AddArrayToObject(result, "provenance");
    for (int i = 0; i < n; i++)
    {
@@ -884,9 +918,10 @@ static cJSON *mcph_memory_fact_history(struct mcp_call *c)
    if (n < 0)
    {
       free(mems);
-      return text_content("error: memory_fact_history failed");
+      return mcph_kb_last_result("memory fact history returned no result");
    }
    cJSON *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(result, "status", n > 0 ? "ok" : "empty");
    cJSON *arr = cJSON_AddArrayToObject(result, "history");
    for (int i = 0; i < n; i++)
    {
@@ -997,13 +1032,19 @@ static cJSON *mcph_index_hybrid(struct mcp_call *c)
    if (!cJSON_IsString(jq) || !jq->valuestring[0])
       return text_content("error: index_hybrid requires 'query'");
    cJSON *js = cJSON_GetObjectItemCaseSensitive(c->jargs, "symbol");
-   cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
    const char *symbol = cJSON_IsString(js) ? js->valuestring : NULL;
-   const char *project = cJSON_IsString(jp) ? jp->valuestring : NULL;
+   int all_projects = mcp_code_scope_all(c->jargs);
+   if (all_projects < 0)
+      return text_content("error: scope must be 'current' or 'all'");
+   const char *project = mcp_code_project_from_args(c->jargs);
+   if (!all_projects && !project)
+      return text_content("error: no active project determined from cwd; pass 'project' or "
+                          "scope='all' explicitly");
    long long mr = 0;
    int max_results = pdf_arg_pos_int(c->jargs, "max_results", 100.0, &mr) ? (int)mr : 20;
    int status = -1;
-   char *json = kb_client_code_hybrid(jq->valuestring, symbol, project, max_results, &status);
+   char *json = kb_client_code_hybrid_scoped(jq->valuestring, symbol, project, all_projects,
+                                             max_results, &status);
    /* §3 live cite-capture (default off): observe the retrieved file paths for this
     * session so a re-cited source earns trust across turns. Best-effort; gated by the
     * same flag as the retrieval-side trust tie-break. */

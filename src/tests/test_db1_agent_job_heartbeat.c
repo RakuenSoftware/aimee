@@ -14,12 +14,13 @@
  *      is still "fresh" (a long bash should not idle-time-out). */
 
 #include <assert.h>
+#include <pthread.h>
+#include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <sqlite3.h>
 
 #include "agent_jobs.h"
 #include "agent_log.h"
@@ -591,6 +592,76 @@ static void test_routed_agent_name_survives_status_reads(void)
    printf("  PASS: test_routed_agent_name_survives_status_reads\n");
 }
 
+typedef struct lease_race
+{
+   int job;
+   pthread_mutex_t *mutex;
+   pthread_cond_t *cond;
+   int *ready;
+   int *go;
+   int result;
+} lease_race_t;
+
+static void *claim_same_delegate_job(void *opaque)
+{
+   lease_race_t *race = (lease_race_t *)opaque;
+   pthread_mutex_lock(race->mutex);
+   (*race->ready)++;
+   pthread_cond_broadcast(race->cond);
+   while (!*race->go)
+      pthread_cond_wait(race->cond, race->mutex);
+   pthread_mutex_unlock(race->mutex);
+   race->result = db1_agent_job_take_lease(race->job, "concurrent-worker");
+   return NULL;
+}
+
+static void test_concurrent_lease_claim_has_exactly_one_winner(void)
+{
+   enum
+   {
+      claimers = 32
+   };
+   setup_db();
+   int job = db1_agent_job_create("review", "concurrent lease regression", "agent", "owner");
+   assert(job > 0);
+
+   pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+   pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+   int ready = 0, go = 0;
+   pthread_t threads[claimers];
+   lease_race_t races[claimers];
+   for (int i = 0; i < claimers; i++)
+   {
+      races[i] = (lease_race_t){
+          .job = job, .mutex = &mutex, .cond = &cond, .ready = &ready, .go = &go, .result = -1};
+      assert(pthread_create(&threads[i], NULL, claim_same_delegate_job, &races[i]) == 0);
+   }
+   pthread_mutex_lock(&mutex);
+   while (ready != claimers)
+      pthread_cond_wait(&cond, &mutex);
+   go = 1;
+   pthread_cond_broadcast(&cond);
+   pthread_mutex_unlock(&mutex);
+
+   int winners = 0;
+   for (int i = 0; i < claimers; i++)
+   {
+      pthread_join(threads[i], NULL);
+      if (races[i].result == 0)
+         winners++;
+   }
+   assert(winners == 1);
+   db1_agent_job_t row;
+   assert(db1_agent_job_get(job, &row) == 0);
+   assert(strcmp(row.status, "running") == 0);
+   db1_agent_job_free(&row);
+
+   pthread_cond_destroy(&cond);
+   pthread_mutex_destroy(&mutex);
+   teardown_db();
+   printf("  PASS: test_concurrent_lease_claim_has_exactly_one_winner\n");
+}
+
 int main(void)
 {
    printf("db1_agent_job_heartbeat:\n");
@@ -613,6 +684,7 @@ int main(void)
    test_failed_update_does_not_overwrite_cancelled();
    test_status_reads_do_not_run_global_agent_name_backfill();
    test_routed_agent_name_survives_status_reads();
+   test_concurrent_lease_claim_has_exactly_one_winner();
    printf("ok\n");
    return 0;
 }

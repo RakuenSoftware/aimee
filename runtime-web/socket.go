@@ -10,7 +10,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -22,102 +21,6 @@ const socketCallTimeout = 10 * time.Second
 // org clone (up to 100 repos) — both far longer than a normal socket call.
 const cloneTimeout = 2 * time.Minute
 const cloneOrgTimeout = 5 * time.Minute
-const chatReconnectTimeout = 30 * time.Second
-const chatReconnectStep = 250 * time.Millisecond
-
-// socketConn is a single newline-delimited-JSON connection to aimee-server.
-type socketConn struct {
-	conn net.Conn
-	rd   *bufio.Reader
-}
-
-func dialAimee(ctx context.Context, socketPath string) (*socketConn, error) {
-	d := net.Dialer{}
-	c, err := d.DialContext(ctx, "unix", socketPath)
-	if err != nil {
-		return nil, fmt.Errorf("connect %s: %w", socketPath, err)
-	}
-	return &socketConn{conn: c, rd: bufio.NewReaderSize(c, 256*1024)}, nil
-}
-
-func dialAimeeRecovering(ctx context.Context, socketPath string) (*socketConn, error) {
-	deadline := time.Now().Add(chatReconnectTimeout)
-	backoff := chatReconnectStep
-	var lastErr error
-	for {
-		sc, err := dialAimee(ctx, socketPath)
-		if err == nil {
-			if authErr := sc.authenticate(socketPath); authErr == nil {
-				return sc, nil
-			} else {
-				lastErr = fmt.Errorf("auth: %w", authErr)
-				sc.close()
-			}
-		} else {
-			lastErr = err
-		}
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		if time.Now().After(deadline) {
-			if lastErr == nil {
-				lastErr = fmt.Errorf("aimee-server unavailable")
-			}
-			return nil, lastErr
-		}
-		timer := time.NewTimer(backoff)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return nil, ctx.Err()
-		case <-timer.C:
-		}
-		if backoff < time.Second {
-			backoff *= 2
-		}
-	}
-}
-
-func (s *socketConn) send(v any) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	b = append(b, '\n')
-	_, err = s.conn.Write(b)
-	return err
-}
-
-func (s *socketConn) recv() (map[string]json.RawMessage, error) {
-	line, err := s.rd.ReadString('\n')
-	if err != nil {
-		if err != io.EOF || strings.TrimSpace(line) == "" {
-			return nil, err
-		}
-	}
-	line = strings.TrimSpace(line)
-	var msg map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(line), &msg); err != nil {
-		return nil, fmt.Errorf("parse: %w", err)
-	}
-	return msg, nil
-}
-
-func (s *socketConn) close() {
-	s.conn.Close()
-}
-
-func (s *socketConn) closeOnContext(ctx context.Context) func() {
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			s.close()
-		case <-done:
-		}
-	}()
-	return func() { close(done) }
-}
 
 func rpcError(msg map[string]json.RawMessage) error {
 	var status string
@@ -196,65 +99,6 @@ func rpcErrorStatus(err error) int {
 }
 
 // socketCall sends a single-shot RPC and returns the parsed response.
-func socketCall(socketPath string, req map[string]any) (map[string]json.RawMessage, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), socketCallTimeout)
-	defer cancel()
-	return socketCallContext(ctx, socketPath, req)
-}
-
-func socketCallContext(ctx context.Context, socketPath string, req map[string]any) (map[string]json.RawMessage, error) {
-	sc, err := dialAimee(ctx, socketPath)
-	if err != nil {
-		return nil, err
-	}
-	defer sc.close()
-	stop := sc.closeOnContext(ctx)
-	defer stop()
-
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = sc.conn.SetDeadline(deadline)
-	}
-
-	if err := sc.authenticate(socketPath); err != nil {
-		return nil, fmt.Errorf("auth: %w", err)
-	}
-	if err := sc.send(req); err != nil {
-		return nil, fmt.Errorf("send: %w", err)
-	}
-	msg, err := sc.recv()
-	if err != nil {
-		return nil, fmt.Errorf("recv: %w", err)
-	}
-	if err := rpcError(msg); err != nil {
-		return nil, err
-	}
-	return msg, nil
-}
-
-// authenticate reads server.token from ~/.config/aimee/ and sends auth.
-func (s *socketConn) authenticate(socketPath string) error {
-	dir := filepath.Dir(socketPath)
-	tokenPath := filepath.Join(dir, "server.token")
-	raw, err := os.ReadFile(tokenPath)
-	if err != nil {
-		return fmt.Errorf("read token %s: %w", tokenPath, err)
-	}
-	token := strings.TrimSpace(string(raw))
-
-	if err := s.send(map[string]string{"method": "auth", "token": token}); err != nil {
-		return err
-	}
-	resp, err := s.recv()
-	if err != nil {
-		return fmt.Errorf("auth response: %w", err)
-	}
-	var status string
-	if err := json.Unmarshal(resp["status"], &status); err != nil || status != "ok" {
-		return fmt.Errorf("auth rejected")
-	}
-	return nil
-}
-
 // streamEvent is one NDJSON line from a streaming aimee-server response.
 type streamEvent struct {
 	Event string `json:"event"`
@@ -275,62 +119,11 @@ type streamEvent struct {
 	Kind string `json:"kind,omitempty"`
 }
 
-// chatStream sends chat.send_stream and calls cb for each intermediate event.
-// Returns the final status or error.
-func chatStream(ctx context.Context, socketPath, message, aimeeSessionID, claudeSessionID, cwd string, cb func(streamEvent)) error {
-	sc, err := dialAimeeRecovering(ctx, socketPath)
-	if err != nil {
-		return err
-	}
-	defer sc.close()
-	stop := sc.closeOnContext(ctx)
-	defer stop()
-
-	req := map[string]string{
-		"method":            "chat.send_stream",
-		"message":           message,
-		"claude_session_id": claudeSessionID,
-	}
-	if aimeeSessionID != "" {
-		req["aimee_session_id"] = aimeeSessionID
-	}
-	if cwd != "" {
-		req["cwd"] = cwd
-	}
-	if err := sc.send(req); err != nil {
-		return fmt.Errorf("send: %w", err)
-	}
-
-	for {
-		msg, err := sc.recv()
-		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			return fmt.Errorf("recv: %w", err)
-		}
-
-		// Final message has "status" field.
-		if _, ok := msg["status"]; ok {
-			if err := rpcError(msg); err != nil {
-				return err
-			}
-			return nil
-		}
-
-		// Intermediate event.
-		var evt streamEvent
-		b, _ := json.Marshal(msg)
-		json.Unmarshal(b, &evt)
-		cb(evt)
-	}
-}
-
-// chatStreamHTTP is chatStream over the /v1 HTTP transport: it POSTs to
+// chatStreamHTTP POSTs to
 // aimee-server's native POST /v1/chat/stream over the Unix socket and reads the
 // newline-delimited JSON event stream (application/x-ndjson), calling cb for each
-// intermediate event. Same event shape as the NDJSON socket path, so callers are
-// unchanged. The aimee-http.sock lives alongside the legacy RPC socket.
+// intermediate event. The public config still calls its historical socket field
+// `socketPath`; the HTTP UDS lives beside that path.
 func chatStreamHTTP(ctx context.Context, socketPath, message, aimeeSessionID, claudeSessionID, cwd, attachID string, cb func(streamEvent)) error {
 	sock := filepath.Join(filepath.Dir(socketPath), "aimee-http.sock")
 

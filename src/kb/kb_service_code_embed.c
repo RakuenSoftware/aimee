@@ -294,18 +294,21 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
    char err[CE_ERRBUF] = "";
 
    /* Get project id. */
-   static const char *proj_sql = "SELECT id, root FROM projects WHERE name = ?1 LIMIT 1";
+   static const char *proj_sql = "SELECT id, root, current_generation FROM projects"
+                                 " WHERE name = ?1 AND lifecycle_state='current' LIMIT 1";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, proj_sql, err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", project);
    int64_t proj_id = -1;
+   int64_t generation = 0;
    char project_root[512] = "";
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
       proj_id = aimee_pg_column_int64(st, 0);
       const char *root = aimee_pg_column_text(st, 1);
       snprintf(project_root, sizeof(project_root), "%s", root ? root : "");
+      generation = aimee_pg_column_int64(st, 2);
    }
    aimee_pg_finalize(st);
    if (proj_id < 0)
@@ -334,11 +337,12 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
          sc_dim = 1024;
       static const char *sig_sql = "SELECT count(*), coalesce(md5(string_agg(id::text || ':' || "
                                    "hash, ',' ORDER BY id)), '') "
-                                   "FROM files WHERE project_id = ?1";
+                                   "FROM files WHERE project_id = ?1 AND generation = ?2";
       aimee_pg_stmt_t *sst = aimee_pg_prepare(conn, sig_sql, err, sizeof(err));
       if (sst)
       {
          aimee_pg_bind_int64(sst, "?1", proj_id);
+         aimee_pg_bind_int64(sst, "?2", generation);
          if (aimee_pg_step(sst, err, sizeof(err)) == AIMEE_PG_ROW)
          {
             int64_t fcount = aimee_pg_column_int64(sst, 0);
@@ -365,11 +369,13 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
    }
 
    /* Collect files to embed. */
-   static const char *files_sql = "SELECT id, path, hash FROM files WHERE project_id = ?1";
+   static const char *files_sql =
+       "SELECT id, path, hash FROM files WHERE project_id = ?1 AND generation = ?2";
    st = aimee_pg_prepare(conn, files_sql, err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_int64(st, "?1", proj_id);
+   aimee_pg_bind_int64(st, "?2", generation);
 
    typedef struct
    {

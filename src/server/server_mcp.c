@@ -19,6 +19,7 @@
 #include "mcp_git.h"
 #include "git_verify.h"
 #include "workspace_turn.h"
+#include "workspace.h"
 #include "notes.h"
 #include "agent_coord.h"
 #include "agent_tasks.h"
@@ -92,6 +93,29 @@ cJSON *json_result_content(cJSON *result)
    cJSON_Delete(result);
    cJSON *content = rendered ? text_content(rendered) : text_content("{}");
    free(rendered);
+   return content;
+}
+
+static cJSON *kb_last_result_content(const char *message)
+{
+   char *json = kb_client_last_result_json(message);
+   cJSON *content = text_content(json ? json : "{\"status\":\"unavailable\"}");
+   free(json);
+   return content;
+}
+
+static cJSON *kb_empty_result_content(const char *message)
+{
+   cJSON *obj = cJSON_CreateObject();
+   if (!obj)
+      return text_content("{\"status\":\"empty\",\"retryable\":false}");
+   cJSON_AddStringToObject(obj, "status", "empty");
+   cJSON_AddBoolToObject(obj, "retryable", 0);
+   cJSON_AddStringToObject(obj, "message", message ? message : "no result");
+   char *json = cJSON_PrintUnformatted(obj);
+   cJSON_Delete(obj);
+   cJSON *content = text_content(json ? json : "{\"status\":\"empty\"}");
+   free(json);
    return content;
 }
 static int send_mcp_result(server_conn_t *conn, cJSON *content)
@@ -270,6 +294,45 @@ static void parse_filter_scope(cJSON *filter, const char **scope_type, const cha
    }
 }
 
+void mcp_memory_scope_begin(cJSON *args, int *active_context_missing)
+{
+   char workspace[MAX_PATH_LEN] = "";
+   char project[MAX_PATH_LEN] = "";
+   cJSON *jworkspace = cJSON_GetObjectItemCaseSensitive(args, "workspace");
+   cJSON *jproject = cJSON_GetObjectItemCaseSensitive(args, "project");
+   /* Normal MCP calls receive cwd as transport metadata from cli_mcp_serve and
+    * handle_mcp_call_inner. Direct clients can supply the documented cwd
+    * argument or explicit project/workspace overrides. */
+   cJSON *jcwd = cJSON_GetObjectItemCaseSensitive(args, "cwd");
+   if (cJSON_IsString(jworkspace) && jworkspace->valuestring[0])
+      snprintf(workspace, sizeof(workspace), "%s", jworkspace->valuestring);
+   if (cJSON_IsString(jproject) && jproject->valuestring[0])
+      snprintf(project, sizeof(project), "%s", jproject->valuestring);
+   if ((!workspace[0] || !project[0]) && cJSON_IsString(jcwd) && jcwd->valuestring[0])
+   {
+      char resolved_workspace[MAX_PATH_LEN] = "";
+      char resolved_project[MAX_PATH_LEN] = "";
+      if (workspace_repo_identity(jcwd->valuestring, resolved_project, sizeof(resolved_project),
+                                  resolved_workspace, sizeof(resolved_workspace)) == 0)
+      {
+         if (!workspace[0])
+            snprintf(workspace, sizeof(workspace), "%s", resolved_workspace);
+         if (!project[0])
+            snprintf(project, sizeof(project), "%s", resolved_project);
+      }
+   }
+   cJSON *jscope = cJSON_GetObjectItemCaseSensitive(args, "scope");
+   int include_all = cJSON_IsString(jscope) && strcmp(jscope->valuestring, "all") == 0;
+   if (active_context_missing)
+      *active_context_missing = (!workspace[0] && !project[0]) ? 1 : 0;
+   kb_client_memory_scope_context_set(workspace, project, include_all);
+}
+
+void mcp_memory_scope_end(void)
+{
+   kb_client_memory_scope_context_clear();
+}
+
 cJSON *tool_search_memory(cJSON *args)
 {
    cJSON *jq = cJSON_GetObjectItemCaseSensitive(args, "query");
@@ -284,17 +347,25 @@ cJSON *tool_search_memory(cJSON *args)
    memory_t facts[20];
    /* Graph-code fusion is always on for recall. */
    int count;
+   int active_context_missing = 0;
    if (scope_type && scope_type[0])
       count = kb_client_memory_find_facts_scoped_ex(jq->valuestring, scope_type, scope_value, 20,
                                                     facts, 20, "on");
    else
-      count = kb_client_memory_find_facts_ex(jq->valuestring, 20, facts, 20, "on");
+   {
+      mcp_memory_scope_begin(args, &active_context_missing);
+      count = kb_client_memory_find_facts_visible(jq->valuestring, NULL, NULL, 20, facts, 20);
+      mcp_memory_scope_end();
+   }
    if (count < 0)
-      return text_content("error: knowledge service search index unavailable; server-side "
-                          "maintenance is required");
+      return kb_last_result_content("knowledge service memory search failed");
 
    char buf[8192];
    int pos = 0;
+   if (active_context_missing)
+      pos = mcp_appendf(buf, pos, (int)sizeof(buf),
+                        "Active project context is unavailable; showing shared/global memory "
+                        "only.\n\n");
    if (count == 0)
       pos = mcp_appendf(buf, pos, (int)sizeof(buf), "No facts found for '%s'", jq->valuestring);
    else
@@ -402,18 +473,24 @@ cJSON *tool_memory_ask(cJSON *args, cJSON **structured_out)
    memory_answer_result_t result;
    memset(&result, 0, sizeof(result));
    int limit = cJSON_IsNumber(jl) ? jl->valueint : 5;
-   if (kb_client_memory_ask(jq->valuestring, NULL, NULL, limit, &result) != 0)
-      return text_content(result.error[0] ? result.error : "memory_ask failed");
+   int active_context_missing = 0;
+   mcp_memory_scope_begin(args, &active_context_missing);
+   int ask_rc = kb_client_memory_ask(jq->valuestring, NULL, NULL, limit, &result);
+   mcp_memory_scope_end();
+   if (ask_rc != 0)
+      return kb_last_result_content(result.error[0] ? result.error : "memory_ask failed");
 
    cJSON *structured = cJSON_CreateObject();
    if (!structured)
       return text_content("error: out of memory");
+   cJSON_AddStringToObject(structured, "status", result.no_answer ? "abstained" : "ok");
    cJSON_AddStringToObject(structured, "query", jq->valuestring);
    cJSON_AddStringToObject(structured, "answer", result.answer);
    cJSON_AddNumberToObject(structured, "confidence", result.confidence);
    cJSON_AddStringToObject(structured, "evidence_mode", result.evidence_mode);
    cJSON_AddBoolToObject(structured, "no_answer", result.no_answer);
    cJSON_AddBoolToObject(structured, "low_confidence", result.low_confidence);
+   cJSON_AddBoolToObject(structured, "active_context_missing", active_context_missing);
    cJSON *trace = cJSON_AddObjectToObject(structured, "evidence_trace");
    if (trace)
    {
@@ -461,13 +538,19 @@ cJSON *tool_search_graph(cJSON *args)
 
    int limit = cJSON_IsNumber(jl) ? jl->valueint : 10;
    memory_relation_t rels[20];
+   int active_context_missing = 0;
+   mcp_memory_scope_begin(args, &active_context_missing);
    int count = kb_client_memory_search_graph(jq->valuestring, limit, rels, 20);
+   mcp_memory_scope_end();
    if (count < 0)
-      return text_content("error: knowledge service unavailable; the memory store is unreachable "
-                          "(server-side maintenance is required)");
+      return kb_last_result_content("knowledge service memory graph search failed");
 
    char buf[8192];
    int pos = 0;
+   if (active_context_missing)
+      pos = mcp_appendf(buf, pos, (int)sizeof(buf),
+                        "Active project context is unavailable; showing shared/global memory "
+                        "only.\n\n");
    if (count == 0)
       pos = mcp_appendf(buf, pos, (int)sizeof(buf), "No graph relations found for '%s'",
                         jq->valuestring);
@@ -489,8 +572,11 @@ cJSON *tool_get_episode(cJSON *args)
       return text_content("error: missing 'episode_key' parameter");
 
    memory_episode_t episode;
-   if (kb_client_memory_get_episode(jk->valuestring, &episode) != 0)
-      return text_content("No episode found.");
+   int episode_rc = kb_client_memory_get_episode(jk->valuestring, &episode);
+   if (episode_rc > 0)
+      return kb_empty_result_content("memory episode not found");
+   if (episode_rc < 0)
+      return kb_last_result_content("memory episode lookup returned no result");
 
    char buf[4096];
    snprintf(buf, sizeof(buf), "Episode: %s\nSession: %s\nTime: %s\nMemory ID: %lld\n\n%s",
@@ -507,11 +593,21 @@ cJSON *tool_get_entity(cJSON *args)
       return text_content("error: missing 'entity' parameter");
 
    memory_entity_profile_t profile;
-   if (kb_client_memory_get_entity_profile(je->valuestring, &profile) != 0)
-      return text_content("No entity profile found.");
+   int active_context_missing = 0;
+   mcp_memory_scope_begin(args, &active_context_missing);
+   int profile_rc = kb_client_memory_get_entity_profile(je->valuestring, &profile);
+   mcp_memory_scope_end();
+   if (profile_rc > 0)
+      return kb_empty_result_content("memory entity profile not found");
+   if (profile_rc < 0)
+      return kb_last_result_content("memory entity profile lookup returned no result");
 
    char buf[4096];
    int pos = 0;
+   if (active_context_missing)
+      pos = mcp_appendf(buf, pos, (int)sizeof(buf),
+                        "Active project context is unavailable; showing shared/global memory "
+                        "only.\n\n");
    pos = mcp_appendf(buf, pos, (int)sizeof(buf), "Entity: %s\nMentions: %d\nRelations: %d\n",
                      profile.entity, profile.mention_count, profile.relation_count);
    if (profile.latest_episode[0])
@@ -530,13 +626,19 @@ cJSON *tool_get_entity_edges(cJSON *args)
 
    int limit = cJSON_IsNumber(jl) ? jl->valueint : 10;
    memory_relation_t rels[20];
+   int active_context_missing = 0;
+   mcp_memory_scope_begin(args, &active_context_missing);
    int count = kb_client_memory_get_entity_edges(je->valuestring, limit, rels, 20);
+   mcp_memory_scope_end();
    if (count < 0)
-      return text_content("error: knowledge service unavailable; the memory store is unreachable "
-                          "(server-side maintenance is required)");
+      return kb_last_result_content("knowledge service entity-edge lookup failed");
 
    char buf[8192];
    int pos = 0;
+   if (active_context_missing)
+      pos = mcp_appendf(buf, pos, (int)sizeof(buf),
+                        "Active project context is unavailable; showing shared/global memory "
+                        "only.\n\n");
    if (count == 0)
       pos +=
           snprintf(buf + pos, sizeof(buf) - pos, "No edges found for entity '%s'", je->valuestring);
@@ -560,10 +662,27 @@ cJSON *tool_get_context_block(cJSON *args)
 
    const char *block_type = cJSON_IsString(jb) ? jb->valuestring : "general";
    int limit = cJSON_IsNumber(jl) ? jl->valueint : 5;
+   int active_context_missing = 0;
+   mcp_memory_scope_begin(args, &active_context_missing);
    char *ctx = kb_client_memory_context_block(jq->valuestring, block_type, limit);
+   mcp_memory_scope_end();
    if (!ctx)
-      return text_content("No context block available.");
-   cJSON *result = text_content(ctx);
+      return kb_last_result_content("memory context block returned no result");
+   char *rendered = ctx;
+   if (active_context_missing)
+   {
+      size_t need = strlen(ctx) + 96;
+      rendered = malloc(need);
+      if (rendered)
+         snprintf(rendered, need,
+                  "Active project context is unavailable; showing shared/global memory only.\n\n%s",
+                  ctx);
+      else
+         rendered = ctx;
+   }
+   cJSON *result = text_content(rendered);
+   if (rendered != ctx)
+      free(rendered);
    free(ctx);
    return result;
 }
@@ -586,8 +705,11 @@ cJSON *tool_memory_get(cJSON *args)
       return text_content("error: missing memory id or memory:<id> handle");
 
    memory_t m;
-   if (kb_client_memory_get(id, &m) != 0)
-      return text_content("No memory found.");
+   int memory_rc = kb_client_memory_get(id, &m);
+   if (memory_rc > 0)
+      return kb_empty_result_content("memory not found");
+   if (memory_rc < 0)
+      return kb_last_result_content("memory lookup returned no result");
 
    dstr_t d;
    dstr_init(&d);
@@ -605,16 +727,22 @@ cJSON *tool_memory_get(cJSON *args)
    return result;
 }
 
-cJSON *tool_list_facts(void)
+cJSON *tool_list_facts(cJSON *args)
 {
    memory_t facts[64];
+   int active_context_missing = 0;
+   mcp_memory_scope_begin(args, &active_context_missing);
    int count = kb_client_memory_list(TIER_L2, KIND_FACT, 64, facts, 64);
+   mcp_memory_scope_end();
    if (count < 0)
-      return text_content("error: knowledge service unavailable; the memory store is unreachable "
-                          "(server-side maintenance is required)");
+      return kb_last_result_content("knowledge service fact list failed");
 
    char buf[8192];
    int pos = 0;
+   if (active_context_missing)
+      pos = mcp_appendf(buf, pos, (int)sizeof(buf),
+                        "Active project context is unavailable; showing shared/global memory "
+                        "only.\n\n");
    if (count == 0)
       pos = mcp_appendf(buf, pos, (int)sizeof(buf), "No L2 facts stored.");
    else
@@ -634,9 +762,13 @@ cJSON *tool_memory_briefing(cJSON *args)
    if (cJSON_IsNumber(jlimit))
       limit_tokens = (int)jlimit->valuedouble;
 
+   int active_context_missing = 0;
+   mcp_memory_scope_begin(args, &active_context_missing);
    cJSON *bundle = kb_client_memory_briefing(limit_tokens);
+   mcp_memory_scope_end();
    if (!bundle)
-      return text_content("error: memory_briefing failed");
+      return kb_last_result_content("memory briefing failed");
+   cJSON_AddBoolToObject(bundle, "active_context_missing", active_context_missing);
 
    char *rendered = cJSON_PrintUnformatted(bundle);
    cJSON_Delete(bundle);
@@ -689,7 +821,7 @@ cJSON *tool_list_curiosity_items(cJSON *args)
     * the agent expects, so we forward it as the tool result. */
    char *json = kb_client_curiosity_list_json(state, limit);
    if (!json)
-      return text_content("error: knowledge service unavailable for curiosity list");
+      return kb_last_result_content("knowledge service curiosity list failed");
    cJSON *content = text_content(json);
    free(json);
    return content;
@@ -776,7 +908,8 @@ cJSON *tool_list_prospective_memories(cJSON *args)
       cJSON_Delete(detached);
    }
    cJSON_Delete(resp);
-   cJSON *content = text_content(rendered ? rendered : "[]");
+   cJSON *content = rendered ? text_content(rendered)
+                             : kb_last_result_content("prospective memory list returned no result");
    free(rendered);
    return content;
 }
@@ -880,19 +1013,18 @@ cJSON *smcp_tool_find_symbol(cJSON *args)
    int all_projects = mcp_code_scope_all(args);
    if (all_projects < 0)
       return text_content("error: scope must be 'current' or 'all'");
-   const char *project = all_projects ? NULL : mcp_code_project_from_args(args);
+   const char *project = mcp_code_project_from_args(args);
    if (!all_projects && !project)
       return text_content("error: no active project determined from cwd; pass 'project' or "
                           "scope='all' explicitly");
 
    term_hit_t hits[20];
-   int count = project ? kb_client_index_find_project(project, jid->valuestring, hits, 20)
-                       : kb_client_index_find(jid->valuestring, hits, 20);
+   int count = kb_client_index_find_scoped(project, all_projects, jid->valuestring, hits, 20);
    if (count < 0)
-      return text_content("error: knowledge service symbol index unavailable");
+      return kb_last_result_content("knowledge service symbol index unavailable");
    int matched = 0;
    for (int i = 0; i < count; i++)
-      if (!project || strcmp(hits[i].project, project) == 0)
+      if (all_projects || !project || strcmp(hits[i].project, project) == 0)
          matched++;
 
    char buf[4096];
@@ -907,7 +1039,7 @@ cJSON *smcp_tool_find_symbol(cJSON *args)
                         jid->valuestring);
       for (int i = 0; i < count && pos < (int)sizeof(buf) - 256; i++)
       {
-         if (project && strcmp(hits[i].project, project) != 0)
+         if (!all_projects && project && strcmp(hits[i].project, project) != 0)
             continue;
          /* Show the body span (line-line_end) when known, so a `file::symbol`
           * read can fetch exactly that range; fall back to the start line. */
@@ -945,8 +1077,15 @@ cJSON *smcp_tool_search_docs(cJSON *args)
     * leave selection to the KB just as we do for an empty field. */
    if (!embedding_command[0] || strcmp(embedding_command, "builtin") == 0)
       embedding_command = NULL;
-   char *envelope = kb_client_search_json(mcp_code_project_from_args(args), query->valuestring,
-                                          embedding_command, max_results, NULL);
+   int all_projects = mcp_code_scope_all(args);
+   if (all_projects < 0)
+      return text_content("error: scope must be 'current' or 'all'");
+   const char *project = mcp_code_project_from_args(args);
+   if (!all_projects && !project)
+      return text_content("error: no active project determined from cwd; pass 'project' or "
+                          "scope='all' explicitly");
+   char *envelope = kb_client_search_json_scoped_ex(project, all_projects, query->valuestring,
+                                                    embedding_command, max_results, NULL, NULL);
    cJSON *response = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    char *rendered = td_search_result_from_response(response, query->valuestring);
@@ -982,8 +1121,8 @@ cJSON *tool_preview_blast_radius(cJSON *args)
    }
 
    char *json = kb_client_index_blast_radius_preview_json(project, paths, cnt);
-   cJSON *content = text_content(
-       json ? json : "{\"status\":\"error\",\"message\":\"knowledge service unavailable\"}");
+   cJSON *content =
+       json ? text_content(json) : kb_last_result_content("knowledge service unavailable");
    free(json);
    return content;
 }
@@ -1667,6 +1806,23 @@ void server_mcp_served_outcome(const char *verdict, const char *reason)
 
 static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 
+/* Resolve cwd transport metadata to the same stable project identity used by
+ * ingest.  Tool helpers must never fall back to a checkout basename: two moved
+ * or linked worktrees can share that label while representing different stable
+ * projects (or the reverse). */
+static void mcp_inject_active_project(cJSON *args)
+{
+   if (!cJSON_IsObject(args) || cJSON_GetObjectItemCaseSensitive(args, "project"))
+      return;
+   const cJSON *cwd = cJSON_GetObjectItemCaseSensitive(args, "cwd");
+   if (!cJSON_IsString(cwd) || !cwd->valuestring[0])
+      return;
+   char project[MAX_PATH_LEN] = "";
+   if (workspace_repo_identity(cwd->valuestring, project, sizeof(project), NULL, 0) == 0 &&
+       project[0])
+      cJSON_AddStringToObject(args, "project", project);
+}
+
 int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    g_served_verdict = "ok";
@@ -1728,6 +1884,7 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    if (cJSON_IsString(jcwd) && jcwd->valuestring[0] && cJSON_IsObject(jargs) &&
        !cJSON_GetObjectItemCaseSensitive(jargs, "cwd"))
       cJSON_AddStringToObject(jargs, "cwd", jcwd->valuestring);
+   mcp_inject_active_project(jargs);
 
    const char *tool = jtool->valuestring;
    snprintf(g_served_tool, sizeof g_served_tool, "%s", tool); /* served audit identity */
@@ -1755,6 +1912,10 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
       {
          tool = target;
          jargs = target_args;
+         if (cJSON_IsString(jcwd) && jcwd->valuestring[0] &&
+             !cJSON_GetObjectItemCaseSensitive(jargs, "cwd"))
+            cJSON_AddStringToObject(jargs, "cwd", jcwd->valuestring);
+         mcp_inject_active_project(jargs);
          snprintf(g_served_tool, sizeof g_served_tool, "%s", tool);
       }
    }

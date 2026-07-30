@@ -1,5 +1,6 @@
 #include "aimee.h"
 #include "config_database.h"
+#include "runtime_secret.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,10 +20,8 @@ void config_parse_database(config_t *cfg, cJSON *root)
    if (cJSON_IsString(url))
       snprintf(cfg->db2_url, sizeof(cfg->db2_url), "%s", url->valuestring);
 
-   /* Remote aimee-kb client pointer (set when this host uses a remote kb
-    * instead of a local sidecar). aimee-server exports these into its env at
-    * startup; the AIMEE_KB_API_URL / AIMEE_KB_API_BEARER_TOKEN env vars still
-    * win when present. */
+   /* Remote aimee-kb client pointer. Legacy bearer values are parsed only so
+    * the boot migration can seal and remove them; runtime auth comes from Vault. */
    cJSON *kb_url = cJSON_GetObjectItemCaseSensitive(root, "kb_client_url");
    if (cJSON_IsString(kb_url))
       snprintf(cfg->kb_client_url, sizeof(cfg->kb_client_url), "%s", kb_url->valuestring);
@@ -50,12 +49,14 @@ int config_apply_db2_url_env_override(config_t *cfg)
 {
    if (!cfg)
       return 0;
-   const char *env_url = getenv("AIMEE_DB2_URL");
-   if (env_url && env_url[0])
+   char env_url[sizeof(cfg->db2_url)];
+   if (runtime_secret_get("AIMEE_DB2_URL", env_url, sizeof(env_url)))
    {
       snprintf(cfg->db2_url, sizeof(cfg->db2_url), "%s", env_url);
+      runtime_secret_wipe(env_url, sizeof(env_url));
       return 1;
    }
+   runtime_secret_wipe(env_url, sizeof(env_url));
    return 0;
 }
 
@@ -136,8 +137,6 @@ void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
    {
       if (cfg->kb_client_url[0])
          EMITF("AIMEE_KB_API_URL=%s\n", cfg->kb_client_url);
-      if (cfg->kb_client_bearer_token[0])
-         EMITF("AIMEE_KB_API_BEARER_TOKEN=%s\n", cfg->kb_client_bearer_token);
       return; /* connect to the existing kb; nothing else is deployed */
    }
 

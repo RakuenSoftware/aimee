@@ -8,6 +8,7 @@
 #include "kb_client_internal.h"
 #include "kb_client_ws.h"
 #include "log.h"
+#include "runtime_secret.h"
 
 #include <errno.h>
 #include <netdb.h>
@@ -183,19 +184,23 @@ static int ws_open(const char *base_url, ws_conn_t *c)
    char key[32] = {0};
    EVP_EncodeBlock((unsigned char *)key, rnd, sizeof(rnd));
 
-   const char *tok = getenv("AIMEE_KB_API_BEARER_TOKEN");
+   char tok[512] = "";
+   (void)runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", tok, sizeof(tok));
    char req[768];
    int rn = snprintf(req, sizeof(req),
                      "GET /v1/events HTTP/1.1\r\nHost: %s:%d\r\n"
                      "Upgrade: websocket\r\nConnection: Upgrade\r\n"
                      "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n%s%s%s\r\n",
-                     host, port, key, tok && tok[0] ? "Authorization: Bearer " : "",
-                     tok && tok[0] ? tok : "", tok && tok[0] ? "\r\n" : "");
+                     host, port, key, tok[0] ? "Authorization: Bearer " : "", tok[0] ? tok : "",
+                     tok[0] ? "\r\n" : "");
+   runtime_secret_wipe(tok, sizeof(tok));
    if (conn_write(c, req, rn) != rn)
    {
+      runtime_secret_wipe(req, sizeof(req));
       conn_close(c);
       return -1;
    }
+   runtime_secret_wipe(req, sizeof(req));
 
    /* Read the handshake response headers; require 101. */
    char buf[1024];

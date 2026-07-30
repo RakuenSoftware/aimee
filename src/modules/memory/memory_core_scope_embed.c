@@ -36,11 +36,70 @@
 #include "agent_exec.h" /* agent_http_post: in-process HTTP embedding (no fork) */
 #include "cJSON.h"
 #include "dogfood.h"
+#include "dependency_breaker.h"
 #include <ctype.h>
 #include <math.h>
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
+
+static dependency_breaker_t g_embedder_dependency = DEPENDENCY_BREAKER_INITIALIZER;
+static int64_t (*g_embedder_dependency_clock)(void);
+#if defined(_MSC_VER)
+static __declspec(thread) int g_embedder_last_unauthorized;
+#else
+static _Thread_local int g_embedder_last_unauthorized;
+#endif
+
+static int64_t memory_embedder_now_ms(void)
+{
+   if (g_embedder_dependency_clock)
+      return g_embedder_dependency_clock();
+   return (int64_t)time(NULL) * 1000;
+}
+
+void memory_embedder_health(memory_embedder_health_t *out)
+{
+   if (!out)
+      return;
+   memset(out, 0, sizeof(*out));
+   dependency_breaker_snapshot_t snap;
+   dependency_breaker_snapshot(&g_embedder_dependency, memory_embedder_now_ms(), &snap);
+   const char *state =
+       !snap.open ? "closed"
+                  : (snap.probe_inflight || snap.retry_after_ms == 0 ? "half_open" : "open");
+   snprintf(out->state, sizeof(out->state), "%s", state);
+   out->available = !snap.open;
+   out->failure_streak = snap.failure_streak;
+   out->recovery_attempt = snap.open_count;
+   out->retry_after_ms = snap.retry_after_ms;
+   out->last_success_ms = snap.last_success_ms;
+   out->last_failure_ms = snap.last_failure_ms;
+   out->suppressed_calls = snap.suppressed_calls;
+}
+
+int memory_embedder_last_result_unauthorized(void)
+{
+   return g_embedder_last_unauthorized;
+}
+
+void memory_embedder_dependency_reset_for_tests(void)
+{
+   dependency_breaker_reset(&g_embedder_dependency);
+   g_embedder_last_unauthorized = 0;
+}
+
+void memory_embedder_dependency_set_clock_for_tests(int64_t (*now_ms)(void))
+{
+   g_embedder_dependency_clock = now_ms;
+}
+
+static void memory_embedder_failure(void)
+{
+   dependency_breaker_report_failure(
+       &g_embedder_dependency, memory_embedder_now_ms(), DEPENDENCY_BREAKER_DEFAULT_THRESHOLD,
+       DEPENDENCY_BREAKER_DEFAULT_BASE_MS, DEPENDENCY_BREAKER_DEFAULT_MAX_MS);
+}
 
 const char *memory_scope_level_name(memory_scope_level_t level)
 {
@@ -384,25 +443,55 @@ int memory_embed_text(const char *text, const char *command, embed_input_type_t 
                       float *out, int max_dim)
 {
    if (!text || !out || max_dim <= 0)
+   {
+      g_embedder_last_unauthorized = 0;
       return 0;
+   }
 
    /* The builtin embedder is lexical feature hashing — it has no prefixes to apply. */
    if (!command || !command[0] || strcmp(command, "builtin") == 0)
-      return memory_embed_text_builtin(text, out, max_dim);
+   {
+      int dim = memory_embed_text_builtin(text, out, max_dim);
+      g_embedder_last_unauthorized = 0;
+      return dim;
+   }
+
+   int64_t retry_after_ms = 0;
+   if (!dependency_breaker_allow(&g_embedder_dependency, memory_embedder_now_ms(), &retry_after_ms))
+   {
+      g_embedder_last_unauthorized = 0;
+      aimee_log(LOG_WARN, "memory", "embedding dependency unavailable; retry after %lld ms",
+                (long long)retry_after_ms);
+      return 0;
+   }
 
    char *buf = NULL;
    size_t buf_len = 0;
    if (memory_embed_command_is_http(command))
    {
       /* In-process HTTP embed: POST raw text to {base}/embed, no fork. The polarity
-       * rides in the query string because the body is the raw text itself. */
+       * rides in the query string because the body is the raw text itself; the status is
+       * captured for the embedder health/breaker tracking. */
       char path[64];
       snprintf(path, sizeof(path), "/embed?input_type=%s",
                memory_embed_input_type_name(input_type));
-      if (memory_embed_http_post(command, path, text, &buf) != 0 || !buf)
+      int http_status = -1;
+      if (memory_embed_http_post_status(command, path, text, &buf, &http_status) != 0 || !buf)
       {
          aimee_log(LOG_WARN, "memory", "embedding HTTP request failed");
          free(buf);
+         if (http_status == 401 || http_status == 403)
+         {
+            /* Authentication failures prove the service is reachable and are
+             * non-retryable. Close any earlier transient outage: leaving a
+             * half-open breaker open would turn the next authorization result
+             * back into unavailable even though this probe reached the service. */
+            g_embedder_last_unauthorized = 1;
+            dependency_breaker_report_success(&g_embedder_dependency, memory_embedder_now_ms());
+            return 0;
+         }
+         g_embedder_last_unauthorized = 0;
+         memory_embedder_failure();
          return 0;
       }
       buf_len = strlen(buf);
@@ -414,12 +503,16 @@ int memory_embed_text(const char *text, const char *command, embed_input_type_t 
       {
          aimee_log(LOG_WARN, "memory", "embedding command failed (exit %d)", rc);
          free(buf);
+         g_embedder_last_unauthorized = 0;
+         memory_embedder_failure();
          return 0;
       }
    }
    if (!buf || buf_len == 0)
    {
       free(buf);
+      g_embedder_last_unauthorized = 0;
+      memory_embedder_failure();
       return 0;
    }
 
@@ -430,6 +523,8 @@ int memory_embed_text(const char *text, const char *command, embed_input_type_t 
    {
       cJSON_Delete(arr);
       aimee_log(LOG_WARN, "memory", "embedding command returned invalid JSON");
+      g_embedder_last_unauthorized = 0;
+      memory_embedder_failure();
       return 0;
    }
 
@@ -454,6 +549,16 @@ int memory_embed_text(const char *text, const char *command, embed_input_type_t 
                 "embedding truncated: model emitted %d dims > EMBED_MAX_DIM %d; recall degraded "
                 "-- raise EMBED_MAX_DIM and re-embed",
                 emitted, max_dim);
+   if (dim > 0)
+   {
+      g_embedder_last_unauthorized = 0;
+      dependency_breaker_report_success(&g_embedder_dependency, memory_embedder_now_ms());
+   }
+   else
+   {
+      g_embedder_last_unauthorized = 0;
+      memory_embedder_failure();
+   }
    return dim;
 }
 

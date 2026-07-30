@@ -6,12 +6,12 @@
 /* vault_principal: the attested identity that keys the per-user credential vault
  * (WP-C). The *vault principal* — "uid:<peer_uid>" for a kernel-attested local
  * UDS peer, or "webuser:<username>" for a webchat user asserted under the
- * server.token trust boundary — is the SINGLE security key for both the vault
- * file (ownership) and the KEK cache. It is NEVER derived from a client-supplied
+ * root-owned webchat UDS trust boundary — is the SINGLE security key for both
+ * the vault file (ownership) and the KEK cache. It is NEVER derived from a client-supplied
  * session_id or the proxy-overridable audit principal.
  *
  * WP-C.0 captures the attested transport + resolves this principal while the
- * connection is live (SO_PEERCRED + the server.token-gated X-Aimee-Webuser
+ * connection is live (SO_PEERCRED + root-UDS-gated X-Aimee-Webuser
  * header), then threads it across the closed-connection boundary
  * (handle_conn thread-locals -> loopback_rpc fake conn -> compute_ctx_t) so the
  * detached delegate worker can reach the right vault. The crypto core that
@@ -26,8 +26,7 @@ typedef enum
    ATTEST_TCP_BEARER, /* plaintext network conn authorized by bearer; no OS-user attestation and no
                          confidential channel -> no server-principal writes (D2b) */
    ATTEST_UDS_PEERCRED,    /* local UDS conn, kernel-attested peer uid -> uid:<n> principal */
-   ATTEST_WEBCHAT_TRUSTED, /* webchat backend asserting webuser:<name> under server.token (WP-C.2)
-                            */
+   ATTEST_WEBCHAT_TRUSTED, /* root UDS webchat asserting webuser:<name> (WP-C.2) */
    ATTEST_TLS_BEARER,      /* native-TLS conn authorized by bearer: the bearer over a confidential
                               channel is the operator's authority -> server-principal writes allowed
                               (native-TLS provisioning); no per-user principal (uses VAULT_SERVER) */
@@ -77,16 +76,15 @@ int vault_principal_name_sanitize(const char *name, char *out, size_t out_len);
  *   is_tcp           - 1 for the network listener, 0 for the local UDS socket.
  *   peer_uid         - SO_PEERCRED uid for a UDS peer, or -1 when unavailable/TCP.
  *   webuser          - the X-Aimee-Webuser header value, or NULL/"" if absent.
- *   webuser_token_ok - 1 iff the request also presented the valid server.token
- *                      bearer (the secret only the webchat backend holds).
+ *   webuser_attested - 1 iff the root-owned UDS peer attests the webchat request.
  *
  * Writes the principal string into out (out[0]=='\0' when there is NO vault
  * identity) and returns the attested transport classification:
- *   - webuser asserted WITH a valid token  -> ATTEST_WEBCHAT_TRUSTED, "webuser:<name>"
+ *   - webuser asserted by root UDS peer    -> ATTEST_WEBCHAT_TRUSTED, "webuser:<name>"
  *     (principal EMPTY if the name fails vault_principal_name_sanitize — the
  *     classification is kept so gating still sees a webchat hop, exactly as the
  *     cert path keeps ATTEST_MTLS_CLIENT for an unsanitizable CN)
- *   - webuser asserted WITHOUT a valid token (spoof) -> classification per the
+ *   - webuser asserted without root UDS attestation (spoof) -> classification per the
  *     underlying transport, principal EMPTY (the assertion is refused, not honored)
  *   - plain UDS peer with uid > 0           -> ATTEST_UDS_PEERCRED,    "uid:<n>"
  *   - UDS peer with uid 0 or unknown        -> ATTEST_UDS_PEERCRED,    "" (no uid:0)
@@ -96,7 +94,7 @@ int vault_principal_name_sanitize(const char *name, char *out, size_t out_len);
  * threading hop, or loopback's memset) reads as uid 0, so treating it as a real
  * principal would collapse to acting as root. out must be >= VAULT_PRINCIPAL_MAX. */
 attested_transport_t vault_principal_resolve(int is_tcp, int is_tls, long peer_uid,
-                                             const char *webuser, int webuser_token_ok,
+                                             const char *webuser, int webuser_attested,
                                              const char *cert_cn, char *out, size_t out_len);
 
 #endif /* DEC_VAULT_PRINCIPAL_H */

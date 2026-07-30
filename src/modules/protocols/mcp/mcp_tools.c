@@ -20,6 +20,31 @@ static int tools_array_has_name(cJSON *tools, const char *name)
    }
    return 0;
 }
+
+static void mcp_add_memory_scope_properties(cJSON *properties)
+{
+   cJSON *scope = cJSON_AddObjectToObject(properties, "scope");
+   cJSON_AddStringToObject(scope, "type", "string");
+   cJSON_AddStringToObject(
+       scope, "description",
+       "current (default) returns active project, workspace, then shared/global memory; all "
+       "explicitly appends other projects at the tail");
+   cJSON *scope_values = cJSON_AddArrayToObject(scope, "enum");
+   cJSON_AddItemToArray(scope_values, cJSON_CreateString("current"));
+   cJSON_AddItemToArray(scope_values, cJSON_CreateString("all"));
+   cJSON *project = cJSON_AddObjectToObject(properties, "project");
+   cJSON_AddStringToObject(project, "type", "string");
+   cJSON_AddStringToObject(project, "description", "Explicit active project identity override");
+   cJSON *workspace = cJSON_AddObjectToObject(properties, "workspace");
+   cJSON_AddStringToObject(workspace, "type", "string");
+   cJSON_AddStringToObject(workspace, "description", "Explicit active workspace identity override");
+   cJSON *cwd = cJSON_AddObjectToObject(properties, "cwd");
+   cJSON_AddStringToObject(cwd, "type", "string");
+   cJSON_AddStringToObject(
+       cwd, "description",
+       "Active checkout path. The MCP stdio proxy injects this automatically; direct clients may "
+       "supply it when project/workspace overrides are unavailable.");
+}
 static void add_session_context_tools(cJSON *tools)
 {
    cJSON_AddItemToArray(tools, session_search_mcp_tool());
@@ -94,7 +119,9 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(f, "type", "object");
       cJSON_AddStringToObject(f, "description",
                               "Canonical scope/filter: {scope:{workspace,project,session},"
-                              "filters:{tier[],kind[],entity[]}}. Omit to search all scopes.");
+                              "filters:{tier[],kind[],entity[]}}. Explicit values retain exact "
+                              "scope semantics; otherwise active-project local-first applies.");
+      mcp_add_memory_scope_properties(p);
       cJSON *req = cJSON_CreateArray();
       cJSON_AddItemToArray(req, cJSON_CreateString("query"));
       cJSON_AddItemToObject(s, "required", req);
@@ -117,6 +144,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *l = cJSON_AddObjectToObject(p, "limit");
       cJSON_AddStringToObject(l, "type", "integer");
       cJSON_AddStringToObject(l, "description", "Maximum number of graph relations to return");
+      mcp_add_memory_scope_properties(p);
       cJSON *req = cJSON_CreateArray();
       cJSON_AddItemToArray(req, cJSON_CreateString("query"));
       cJSON_AddItemToObject(s, "required", req);
@@ -150,6 +178,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *q = cJSON_AddObjectToObject(p, "entity");
       cJSON_AddStringToObject(q, "type", "string");
       cJSON_AddStringToObject(q, "description", "Entity name to inspect in aimee memory");
+      mcp_add_memory_scope_properties(p);
       cJSON *req = cJSON_CreateArray();
       cJSON_AddItemToArray(req, cJSON_CreateString("entity"));
       cJSON_AddItemToObject(s, "required", req);
@@ -170,6 +199,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *l = cJSON_AddObjectToObject(p, "limit");
       cJSON_AddStringToObject(l, "type", "integer");
       cJSON_AddStringToObject(l, "description", "Maximum number of edges to return");
+      mcp_add_memory_scope_properties(p);
       cJSON *req = cJSON_CreateArray();
       cJSON_AddItemToArray(req, cJSON_CreateString("entity"));
       cJSON_AddItemToObject(s, "required", req);
@@ -192,6 +222,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *l = cJSON_AddObjectToObject(p, "limit");
       cJSON_AddStringToObject(l, "type", "integer");
       cJSON_AddStringToObject(l, "description", "Maximum items to include in the block");
+      mcp_add_memory_scope_properties(p);
       cJSON *req = cJSON_CreateArray();
       cJSON_AddItemToArray(req, cJSON_CreateString("query"));
       cJSON_AddItemToObject(s, "required", req);
@@ -219,10 +250,13 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
    {
       cJSON *s = cJSON_CreateObject();
       cJSON_AddStringToObject(s, "type", "object");
-      cJSON_AddObjectToObject(s, "properties");
+      cJSON *p = cJSON_AddObjectToObject(s, "properties");
+      mcp_add_memory_scope_properties(p);
       cJSON_AddItemToArray(
           tools, mcp_tool_new("list_facts",
-                              "List all stored facts in aimee's long-term memory (L2 tier).", s));
+                              "List active-project, workspace, then shared/global facts in "
+                              "aimee's long-term memory (L2 tier).",
+                              s));
    }
 
    /* memory_briefing */
@@ -235,6 +269,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(l, "description",
                               "Approximate character/token budget for the returned bundle "
                               "(default 1500). Lower sections are truncated first.");
+      mcp_add_memory_scope_properties(p);
       cJSON_AddItemToArray(
           tools, mcp_tool_new("memory_briefing",
                               "Return a deterministic start-of-session context bundle: "
@@ -391,6 +426,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(lt, "description",
                               "Character/token budget for the rendered bundle. 0 = default "
                               "(1800 session, 600 per-turn).");
+      mcp_add_memory_scope_properties(p);
       cJSON_AddItemToArray(
           tools, mcp_tool_new("memory_recall",
                               "Return a six-section proactive-recall bundle (identity, "
@@ -1494,7 +1530,15 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(proj, "type", "string");
       cJSON_AddStringToObject(
           proj, "description",
-          "Indexed project name. Defaults to the current workspace directory name.");
+          "Stable indexed project ID. Defaults to the active project resolved from cwd.");
+      cJSON *scope = cJSON_AddObjectToObject(p, "scope");
+      cJSON_AddStringToObject(scope, "type", "string");
+      cJSON_AddStringToObject(scope, "description",
+                              "current (default) or all for explicit cross-project search");
+      cJSON *cwd = cJSON_AddObjectToObject(p, "cwd");
+      cJSON_AddStringToObject(cwd, "type", "string");
+      cJSON_AddStringToObject(cwd, "description",
+                              "Workspace path used to resolve the active project");
       cJSON *mx = cJSON_AddObjectToObject(p, "max_results");
       cJSON_AddStringToObject(mx, "type", "integer");
       cJSON_AddStringToObject(mx, "description", "Maximum passages to return (default 3, max 8)");

@@ -91,8 +91,14 @@ cleanup() {
 trap cleanup EXIT
 
 if [[ "$DO_UP" == 1 ]]; then
-  bold "==> Building + starting the stack ($COMPOSE_FILE)"
-  "${DC[@]}" up -d --build
+  bold "==> Building + Vault-bootstrapping + starting the stack ($COMPOSE_FILE)"
+  "${DC[@]}" build
+  # Port-remap overrides do not affect the persistent Vault volume. Bootstrap
+  # against the base file so the disposable helper seals first-boot values
+  # before any long-lived service is created.
+  bootstrap_compose="${COMPOSE_FILE%% *}"
+  scripts/aimee-compose-vault-bootstrap.sh -f "$bootstrap_compose" kb
+  "${DC[@]}" up -d --no-build
 
   bold "==> Waiting up to ${WAIT_SECONDS}s for aimee-kb to report healthy"
   deadline=$((SECONDS + WAIT_SECONDS))
@@ -120,7 +126,7 @@ check "/v1/capabilities"          'capab'      "${KB_URL}/v1/capabilities"
 # empty "hits" array on a fresh DB is still a well-formed pass and proves the
 # schema is applied and the query path executes.
 check "POST /v1/search"           '"hits"'     -X POST -H 'content-type: application/json' \
-                                               -d '{"query":"docker smoke test","max_results":3}' \
+                                               -d '{"query":"docker smoke test","scope":"all","max_results":3}' \
                                                "${KB_URL}/v1/search"
 
 # memory.find_facts with graph-code fusion ON is the deepest-stack worker path

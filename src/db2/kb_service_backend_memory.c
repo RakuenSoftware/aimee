@@ -17,6 +17,7 @@
 #include "memory_export.h"
 #include "memory_payload.h"
 #include "memory_query.h"
+#include "memory_scope_query.h"
 #include "session_briefing.h"
 #include "tasks.h"
 
@@ -71,7 +72,12 @@ cJSON *db2_kb_service_memory_find_facts_json(const char *query, int limit)
    }
 
    memory_t facts[64];
-   int n = memory_find_facts(query ? query : "", limit, facts, 64);
+   db2_memory_scope_context_t scope;
+   db2_memory_scope_context_get(&scope);
+   int n = scope.active
+               ? memory_find_facts_visible_ex(query ? query : "", scope.workspace, scope.project,
+                                              scope.include_all, limit, facts, 64)
+               : memory_find_facts(query ? query : "", limit, facts, 64);
    if (n < 0)
    {
       cJSON_AddStringToObject(resp, "status", "error");

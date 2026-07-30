@@ -12,6 +12,7 @@
 #include "db2/bandit.h"
 #include "db2/demotion.h" /* db2_demotion_retrieval_event_write_turn (auditable-correctness P1) */
 #include "db2/memory_payload.h" /* db2_memory_provenance_by_id (auditable-correctness P2) */
+#include "db2/memory_scope_query.h"
 #include "db2/fidelity.h"       /* db2_fidelity_report_by_turn (auditable-correctness P3) */
 #include "db2/code_index_ops.h" /* db2_code_file_hash (auditable-correctness P1.5 code provenance) */
 #include "kb_bandit.h"
@@ -26,6 +27,31 @@
 int kb_send_response(int fd, cJSON *resp);
 int kb_send_error(int fd, const char *message);
 int kb_reply_or_error(int fd, cJSON *resp, const char *err_msg);
+
+static int kb_memory_scope_begin(cJSON *req, int force, int *missing_out)
+{
+   cJSON *enabled_j = cJSON_GetObjectItemCaseSensitive(req, "scope_context");
+   if (!force && !(cJSON_IsBool(enabled_j) && cJSON_IsTrue(enabled_j)))
+      return 0;
+   cJSON *workspace_j = cJSON_GetObjectItemCaseSensitive(req, "workspace");
+   cJSON *project_j = cJSON_GetObjectItemCaseSensitive(req, "project");
+   cJSON *all_j = cJSON_GetObjectItemCaseSensitive(req, "include_all");
+   const char *workspace = cJSON_IsString(workspace_j) ? workspace_j->valuestring : "";
+   const char *project = cJSON_IsString(project_j) ? project_j->valuestring : "";
+   int include_all = cJSON_IsBool(all_j) && cJSON_IsTrue(all_j);
+   db2_memory_scope_context_set(workspace, project, include_all);
+   if (missing_out)
+      *missing_out = (!workspace[0] && !project[0]) ? 1 : 0;
+   return 1;
+}
+
+static void kb_memory_scope_end(cJSON *resp, int active, int missing)
+{
+   if (active && resp)
+      cJSON_AddBoolToObject(resp, "active_context_missing", missing ? 1 : 0);
+   if (active)
+      db2_memory_scope_context_clear();
+}
 
 int kb_handle_memory_find_facts(int fd, cJSON *req)
 {
@@ -93,7 +119,10 @@ int kb_handle_memory_find_facts(int fd, cJSON *req)
     * order unchanged. Thread-local, so concurrent kb workers don't interfere. */
    cJSON *fusion_j = cJSON_GetObjectItemCaseSensitive(req, "graph_code_fusion_state");
    memory_fusion_state_set(cJSON_IsString(fusion_j) ? fusion_j->valuestring : NULL);
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_find_facts_json(query_j->valuestring, limit);
+   kb_memory_scope_end(resp, scope_active, missing);
    memory_fusion_state_clear();
 
    /* Close the bandit loop: attribute an immediate recall-sufficiency reward to
@@ -119,7 +148,10 @@ int kb_handle_memory_list(int fd, cJSON *req)
        (cJSON_IsString(kind_j) && kind_j->valuestring[0]) ? kind_j->valuestring : NULL;
    int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 20;
 
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_list_json(tier, kind, limit);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to list memories");
 }
 
@@ -404,7 +436,10 @@ int kb_handle_memory_diagnose_scoped(int fd, cJSON *req)
    const char *st_s = (cJSON_IsString(st) && st->valuestring[0]) ? st->valuestring : NULL;
    const char *sv_s = (cJSON_IsString(sv) && sv->valuestring[0]) ? sv->valuestring : NULL;
    int limit = cJSON_IsNumber(l) ? (int)l->valuedouble : 10;
+   int missing = 0;
+   int scope_active = (!st_s && !sv_s) ? kb_memory_scope_begin(req, 0, &missing) : 0;
    cJSON *resp = db2_kb_service_memory_diagnose_scoped_json(q->valuestring, st_s, sv_s, limit);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to diagnose memory");
 }
 
@@ -430,8 +465,11 @@ int kb_handle_memory_find_facts_visible(int fd, cJSON *req)
    const char *workspace = (cJSON_IsString(ws) && ws->valuestring[0]) ? ws->valuestring : NULL;
    const char *project = (cJSON_IsString(pr) && pr->valuestring[0]) ? pr->valuestring : NULL;
    int limit = cJSON_IsNumber(l) ? (int)l->valuedouble : 20;
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 1, &missing);
    cJSON *resp =
        db2_kb_service_memory_find_facts_visible_json(q->valuestring, workspace, project, limit);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to find visible facts");
 }
 
@@ -488,7 +526,10 @@ int kb_handle_memory_search(int fd, cJSON *req)
    cJSON *clusters_j = cJSON_GetObjectItemCaseSensitive(req, "clusters");
    cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
    int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 10;
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_search_json(clusters_j, limit);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to search memory windows");
 }
 
@@ -496,7 +537,10 @@ int kb_handle_memory_assemble_context(int fd, cJSON *req)
 {
    cJSON *t_j = cJSON_GetObjectItemCaseSensitive(req, "task_hint");
    const char *task = (cJSON_IsString(t_j) && t_j->valuestring[0]) ? t_j->valuestring : NULL;
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_assemble_context_json(task);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to assemble context");
 }
 
@@ -629,7 +673,10 @@ int kb_handle_memory_alerts(int fd, cJSON *req)
    cJSON *since_j = cJSON_GetObjectItemCaseSensitive(req, "since");
    const char *since =
        (cJSON_IsString(since_j) && since_j->valuestring[0]) ? since_j->valuestring : NULL;
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_alerts_json(since);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to render memory alerts");
 }
 
@@ -646,7 +693,10 @@ int kb_handle_memory_recall(int fd, cJSON *req)
     * sections retrieve through the fusion-aware ranking path). Thread-local. */
    cJSON *fusion_j = cJSON_GetObjectItemCaseSensitive(req, "graph_code_fusion_state");
    memory_fusion_state_set(cJSON_IsString(fusion_j) ? fusion_j->valuestring : NULL);
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_recall_json(task_hint, limit_tokens, session_start);
+   kb_memory_scope_end(resp, scope_active, missing);
    memory_fusion_state_clear();
    return kb_reply_or_error(fd, resp, "failed to render memory recall");
 }
@@ -704,7 +754,10 @@ int kb_handle_memory_top_l2_facts(int fd, cJSON *req)
 {
    cJSON *max_j = cJSON_GetObjectItemCaseSensitive(req, "max");
    int max = cJSON_IsNumber(max_j) ? (int)max_j->valuedouble : 5;
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_top_l2_facts_json(max);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to load top L2 facts");
 }
 
@@ -731,7 +784,10 @@ int kb_handle_memory_briefing(int fd, cJSON *req)
    cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit_tokens");
    int limit_tokens = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 0;
 
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_briefing_json(limit_tokens);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to build memory briefing");
 }
 
@@ -745,7 +801,10 @@ int kb_handle_memory_context_block(int fd, cJSON *req)
    const char *block_type = cJSON_IsString(block_j) ? block_j->valuestring : NULL;
    int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 5;
 
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_context_block_json(query_j->valuestring, block_type, limit);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to build context block");
 }
 
@@ -755,7 +814,10 @@ int kb_handle_memory_facts(int fd, cJSON *req)
    if (!cJSON_IsString(query_j))
       return kb_send_error(fd, "memory.facts requires query");
 
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_facts_json(query_j->valuestring);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to recall facts");
 }
 
@@ -1135,7 +1197,10 @@ int kb_handle_memory_entity_profile(int fd, cJSON *req)
    if (!cJSON_IsString(entity_j))
       return kb_send_error(fd, "memory.entity_profile requires entity");
 
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_entity_profile_json(entity_j->valuestring);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to fetch entity profile");
 }
 
@@ -1147,7 +1212,10 @@ int kb_handle_memory_entity_edges(int fd, cJSON *req)
       return kb_send_error(fd, "memory.entity_edges requires entity");
    int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 10;
 
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_entity_edges_json(entity_j->valuestring, limit);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to fetch entity edges");
 }
 
@@ -1159,7 +1227,10 @@ int kb_handle_memory_search_graph(int fd, cJSON *req)
       return kb_send_error(fd, "memory.search_graph requires query");
    int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 10;
 
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_search_graph_json(query_j->valuestring, limit);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to search memory graph");
 }
 
@@ -1174,8 +1245,11 @@ int kb_handle_memory_search_graph_as_of(int fd, cJSON *req)
       return kb_send_error(fd, "memory.search_graph_as_of requires as_of");
    int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 10;
 
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_search_graph_as_of_json(query_j->valuestring,
                                                                as_of_j->valuestring, limit);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to search memory graph as-of");
 }
 
@@ -1201,7 +1275,10 @@ int kb_handle_memory_ask(int fd, cJSON *req)
    const char *st = (cJSON_IsString(st_j) && st_j->valuestring[0]) ? st_j->valuestring : NULL;
    const char *sv = (cJSON_IsString(sv_j) && sv_j->valuestring[0]) ? sv_j->valuestring : NULL;
 
+   int missing = 0;
+   int scope_active = (!st && !sv) ? kb_memory_scope_begin(req, 0, &missing) : 0;
    cJSON *resp = db2_kb_service_memory_ask_json(query_j->valuestring, st, sv, limit);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to answer query");
 }
 
@@ -1225,8 +1302,11 @@ int kb_handle_memory_search_facts_patterns_by_keyword(int fd, cJSON *req)
       return kb_send_error(fd, "memory.search_facts_patterns_by_keyword requires keyword");
    int max = cJSON_IsNumber(max_j) ? (int)max_j->valuedouble : 5;
 
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp =
        db2_kb_service_memory_search_facts_patterns_by_keyword_json(kw_j->valuestring, max);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to search facts/patterns");
 }
 
@@ -1263,7 +1343,10 @@ int kb_handle_memory_list_session_scope_priority(int fd, cJSON *req)
    cJSON *max_j = cJSON_GetObjectItemCaseSensitive(req, "max");
    int max = cJSON_IsNumber(max_j) ? (int)max_j->valuedouble : 24;
 
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_list_session_scope_priority_json(max);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to list session-scope memories");
 }
 
@@ -1325,8 +1408,11 @@ int kb_handle_memory_list_session_scope_priority_like(int fd, cJSON *req)
       return kb_send_error(fd, "memory.list_session_scope_priority_like requires pattern");
    int max = cJSON_IsNumber(max_j) ? (int)max_j->valuedouble : 5;
 
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp =
        db2_kb_service_memory_list_session_scope_priority_like_json(pat_j->valuestring, max);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to list session-scope memories (like)");
 }
 

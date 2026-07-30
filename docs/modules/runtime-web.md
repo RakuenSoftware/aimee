@@ -59,7 +59,7 @@ and avoid duplicating canonical application data in the web tier.
 
 ## Security and privacy
 
-The web proxy's attested `ATTEST_WEBCHAT_TRUSTED` principal, PAM/login boundary, TLS, CSRF, session
+The web proxy's attested `ATTEST_WEBCHAT_TRUSTED` principal, Vault/login boundary, TLS, CSRF, session
 cookies, origin handling, and server token are security-sensitive. The GUI cannot elevate a browser
 identity, bypass core `execution-policy`, or read vault secrets for display. OAuth tokens used by Git
 remain Git/vault data; they do not make the Runtime web module an OIDC provider or governance owner.

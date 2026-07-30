@@ -1,6 +1,6 @@
 # Proposal: Agent-facing code intelligence effectiveness
 
-- **State:** IN PROGRESS — E1 implementation underway; E1-memory–E6 remain
+- **State:** DONE — E0–E6 merged or reconciled; E6 retains `observe` and links bounded residual work
 - **Author:** JBailes
 - **Date:** 2026-07-29
 - **Charter roles:** Recall, Rank-Fuse, Calibrate / Evaluate-Optimize, Enforce, Gate-Promote
@@ -520,3 +520,324 @@ residual proposal instead of declaring the intended effectiveness outcome comple
 - **Local-first amendment PR:** PR #2150 merged to `testing` as
   `e9626cda560b7e9b1bbf96e48c05c94b62a72c8a` after all 23 CI checks passed. E1 applies the same
   pre-limit rule to code discovery; E1-memory applies it to every ordered memory surface.
+- **E1 capability-catalog slice:** PR #2153 merged to `testing` as
+  `a8d3214c2d057fa95820e6acb60b788e403d7c68` after all 24 CI checks passed. The installed surface
+  now exposes and discovers the canonical code-intelligence tools and protects active-project code
+  discovery before limits.
+- **E1-memory implementation round 1 — 2026-07-29 — changes requested, 2/3 participants used,
+  degraded.** The review was explicitly ruled to be the E1-memory slice gate required by §6, not a
+  claim that E2–E6 were already complete. Three actionable findings were accepted: generic
+  conversation-window search did not carry request scope; briefing activity chose the newest
+  episode per session before applying scope; and the conflict-alert query had tightened a
+  compatibility `LEFT JOIN`. The frozen implementation was amended to propagate/suppress legacy
+  unscoped windows unless `scope:"all"` is explicit, choose the local-first episode within each
+  session, and preserve the left-join behavior. Roundtable run:
+  `roundtable-9a24b97397594ae1898ad222` (artifact
+  `efd100cf3bd976cacc403e13a9f358734e7b5243ef7194af412e36e0041c0d8a`).
+- **E1-memory implementation round 2 — 2026-07-29 — changes requested, 3/3 participants, not
+  degraded.** The blocking finding showed that the legacy session-scope `LIKE` fallback discarded
+  every `memory_workspaces` row before the canonical rank could recognize an active-workspace
+  memory. The prefilter is removed and an adversarial project-then-legacy-workspace assertion now
+  protects the two-row head. The panel's suggestions are also incorporated: scoped assembly's
+  deliberate omission of ID-less legacy `entity_edges` is documented as E2 migration debt, and the
+  MCP scope-begin helper now has a `void` contract that cannot be mistaken for an activation result.
+  Roundtable run: `oprun_g6a69bd8011459d99_1785345098_97` (artifact
+  `baeeae4567524c11409c8592e2b8711f29c35a9e9b69b38964b6a412e9573276`).
+- **E1-memory implementation round 3 — 2026-07-29 — APPROVED and converged, 3/3 participants,
+  not degraded.** The complete frozen implementation received no blocking findings. The panel's
+  two readability suggestions (the entity-profile SQL literal and qualified aliases) and one CLI
+  coverage nit (`memory.read --scope all`) are incorporated before the final exact-diff review.
+  Roundtable run: `oprun_g6a69bd8011459d99_1785345428_100` (artifact
+  `b88cc6a991d1c7deb682345ddccef4ca27fb7123f2dea434e8f808aac8aeb622`).
+- **E1-memory implementation round 4 — 2026-07-29 — changes requested, 3/3 participants, not
+  degraded.** One blocking finding exposed a real Postgres semantic-path parity gap: pgvector used
+  denormalized embedding scope columns and could discard a legacy workspace-only row before the
+  canonical rank saw it. Pgvector now resolves memory and offset unit points to their owning memory
+  and uses the same `memory_scopes`/`memory_workspaces` filter and rank as every SQL reader. The
+  companion link finding was disproved by the full build and source audit: `hook_scope_labels_for_cwd`
+  is exported by `cmd_hooks_scope.c`, declared in `cmd_hooks_scope.h`, included at the call site, and
+  already used by two older paths in that file. Roundtable run:
+  `oprun_g6a69bd8011459d99_1785346142_101` (artifact
+  `2b566a923d83201ec109ab4f413e47674afd3d5a436f68988a28b38e23a19bc6`).
+- **E1-memory implementation round 5 — 2026-07-29 — changes requested, 3/3 participants, not
+  degraded.** The reported MCP default-context gap was disproved by the installed stdio path:
+  `cli_mcp_serve` injects its real cwd into both the request envelope and tool arguments, and
+  `handle_mcp_call_inner` preserves that metadata before `mcp_memory_scope_begin` resolves the
+  repository identity. The existing search-memory proxy regression already exercised this exact
+  no-override call. The proof is made explicit in code and test comments, and `cwd` is now documented
+  in every ordered-memory MCP schema for direct clients that bypass the stdio proxy. Roundtable run:
+  `oprun_g6a69bd8011459d99_1785346763_103` (artifact
+  `5cd60248e8555ca6a24249a4ac4026a10350d3c5c7a1bf85c0698c9a31ca58e2`).
+- **E1-memory local-first slice:** PR #2154 merged to `testing` as
+  `ea612958c51b3a0541d950db1578350911740255` after all 23 CI checks passed. Every ordered memory
+  reader now protects active-project and active-workspace evidence before relevance limits, while
+  cross-project memory requires explicit `scope:"all"`.
+- **E2 current-project identity candidate:** the implementation resolves a stable project from an
+  explicit manifest ID, canonical forge identity, or persisted UUID; tracks checkout aliases and
+  current generations; applies the same active-project default to code and knowledge retrieval; and
+  gives detach, purge, and garbage collection exact-row confirmation manifests with verified audit
+  attribution. Its frozen implementation diff receives a separate roundtable gate before PR.
+- **E2 implementation round 1 — 2026-07-29 — changes requested, 3/3 participants, not degraded.**
+  The panel caught two lifecycle defects: an ordinary active-checkout move incorrectly advanced the
+  index generation, and the confirmation digest omitted its purge/GC operation discriminator. Moves
+  now update aliases within the current generation, only a detached-project re-add advances it, and
+  the digest and audit detail bind the operation. Regression coverage exercises move, detach,
+  re-add, purge, and GC. The remaining findings arose because this intermediate E2 gate was submitted
+  against the parent E0–E6 completion request rather than the accepted per-slice contract in §6; the
+  reconvened review binds E2 as one mergeable step without claiming E3–E6 completion. Roundtable run:
+  `roundtable-2e22a253e6ceac8fd078c4b3` (artifact
+  `4933bdea264174938331ec34fc32a71312db7f9a43a8d498798cde21816457b9`).
+- **E2 implementation round 2 — 2026-07-29 — changes requested, 3/3 participants, not degraded.**
+  The panel found six boundary defects: all-project code queries applied their limit before the
+  active-project preference; detach lacked verified WORM attribution; SQLite upgrades omitted the
+  lifecycle tables and backfill; lifecycle CLI failures could exit successfully; PDF reads admitted
+  unowned legacy rows; and malformed identified manifest entries could bypass ID validation. All six
+  are accepted. The resulting fixes split active and excluding-tail candidate selection before
+  limits across code, hybrid, ranked knowledge/document, and facet searches; make detach audit part
+  of the same transaction; complete the compatibility migration; make lifecycle CLI errors nonzero;
+  require exact PDF ownership; and fail closed on malformed explicit identities. Adversarial tests
+  cover each boundary and the active-project-plus-`scope=all` transport shape. Roundtable run:
+  `roundtable-d0acffc5106da13670646e30` (artifact
+  `c71fd48c08c2a3bd78daa9c0cd9fc88c2310987816f7854009d37b73f5e1d74d`).
+- **E2 implementation round 3 — 2026-07-29 — changes requested, 3/3 participants, not degraded.**
+  The panel found two remaining request-boundary gaps: direct agent `search_docs` discarded the
+  active project when `scope=all`, and code HTTP returned before checking a supplied preferred
+  project's generation in that mode. Both are accepted: direct dispatch now uses the scoped client
+  with the resolved project retained, and `project` plus `scope=all` validates its generation before
+  retrieval. The third reported item was an index-visibility false positive: all five named
+  PostgreSQL adapter helpers are declared and implemented in `db_postgres`, are already used by
+  older DB2 modules, and both the shipping link gate and lifecycle test pass. Roundtable run:
+  `roundtable-2393706c135262f501a9f1f8` (artifact
+  `dad606e0f396399e8a78bcb8bf8ab0cdf6cfb21d3cd97dd5ccf9309e9df3915d`).
+- **E2 implementation round 4 — 2026-07-29 — changes requested, 3/3 participants, not degraded.**
+  The panel found that source rows were generation-keyed but several derived code/knowledge paths
+  still overwrote or returned retired data. E2 now stamps and fences code embeddings, knowledge
+  documents/assets/indexes, sketch buckets, curator work and artifacts, CSS migration/render state,
+  and code projections; current-only force rebuild and startup sanitation preserve retained history,
+  while exact manifest GC removes it deliberately. SQLite and PostgreSQL migrations make the
+  derived uniqueness keys generation-aware, and adversarial fixtures retain the same logical key in
+  two generations. Roundtable run: `roundtable-ff7f94ff43b4ec6dfff2882d` (artifact
+  `55d334d8fd023d50826f89594f5c0deaa6a1ec01d87491cff9e8162dfa759619`).
+- **E2 implementation round 5 — 2026-07-30 — changes requested, 3/3 participants, not degraded.**
+  The sole reported blocker was disproved by the shipping build: the two
+  `kb_search_json_scoped_ex` definitions are the mutually exclusive disabled and enabled arms of the
+  file-level `#if AIMEE_DB2_DISABLED` guard. A comment now makes that compatibility layout explicit;
+  no runtime behavior changed. Roundtable run: `roundtable-f779252e71a67116c2192e2d` (artifact
+  `dbe4f9d3c9318296ae0bec683456de31b6599ec9862746920dfdbdf07747fc40`).
+- **E2 implementation round 6 — 2026-07-30 — changes requested, 2/3 participants used,
+  degraded.** One finding exposed a real all-project hybrid-search defect: reciprocal-rank fusion
+  keyed candidates only by path, so identical paths in different projects collapsed and inherited
+  the active-project label. Candidates are now interned and fused by exact project plus path, with
+  an adversarial same-path fixture. The implementation also adopts the panel's stricter expression
+  of the already-correct local-first bound: other-project symbol, text, and caller tails are excluded
+  in SQL before their remaining-slot limit is applied. The two other claims were disproved: direct
+  MCP code dispatch returns an explicit `project` argument (covered by the registry contract test),
+  and the disabled/enabled search definitions remain preprocessor-exclusive. Roundtable run:
+  `roundtable-b9a43c6c69927ce42470d6ff` (artifact
+  `f7b8b9f8f1a65c34f02ba83537e6c276c9e5b72a950125289ca07ce1404b501d`).
+- **E2 implementation round 7 — 2026-07-30 — changes requested, 3/3 participants, not degraded.**
+  The exact full-diff call exceeded the MCP response deadline, but its completed durable synthesis
+  was recovered as job 212. Its repeated blocking claim was disproved again: the helper returns a
+  nonempty explicit project, the registry regression calls it and compares the returned value, and
+  only the forbidden cwd-basename fallback returns `NULL`; that positive branch is now entirely
+  visible in the diff. All five nonblocking hardening findings are accepted: lifecycle audit JSON
+  preserves control bytes as Unicode escapes, the client no longer serializes an ignored principal,
+  overlong project IDs fail at the HTTP boundary, in-transaction WORM appends assert transaction
+  state, and purge tolerates absent legacy projection tables. Roundtable run:
+  `roundtable-6e5200896cabbc1215616c18` (artifact
+  `e2ccf65bd32da0a6a91aa6008d3f0450906f21c4de9d99a97fc3d17467abca59`).
+- **E2 implementation round 8 — 2026-07-30 — changes requested, 1/3 participants used,
+  degraded.** Two seats failed before review, but the surviving reviewer identified ambiguous SQL
+  placeholder construction when artifact facets combined project, kind, and release filters. The
+  release is safely inlined and the previous kind/project bindings were already distinct; E2 still
+  adopts explicit monotonic parameter allocation so later predicates cannot reuse a slot. Combined
+  release-plus-kind-plus-project regressions prove both positive projects and a mismatched kind.
+  Roundtable run: `roundtable-d6b5adead972ca968a7132e5` (artifact
+  `068609efd696a07bdd62a7cceaeb02ff97cc8298b4c1f703348f107de936635c`).
+- **E2 final exact-diff review — 2026-07-30 — APPROVED and converged, 3/3 participants, not
+  degraded.** The final operator-health and explicit-scope smoke repairs received no blocking
+  findings. Roundtable run: `roundtable-0b8300caa27872843d839e63` (artifact
+  `96a646d79a1169a6f0d810b879f4db3ea4eaed6af66b9e286319a1f574161da6`).
+- **E2 current-project identity slice:** PR #2161 merged to `testing` as
+  `a70ebc23e1facd0cc199fbfacd2c13e2a38b1dca` after all 23 CI checks passed. Stable identity,
+  active-project-first code/knowledge/memory ordering, generation fencing, explicit all-project
+  scope, and audited detach/purge/GC are now the base for E3–E6.
+- **E3 graph-resolution candidate:** the implementation replaces path-substring blast matching
+  with exact normalized Python module identities, merges unique-symbol call edges without
+  duplicates, admits cross-project tails only through resolved structural routes, resolves legacy
+  projection basenames uniquely, and emits provenance/confidence/project/generation/freshness for
+  every edge. Its frozen implementation diff receives a separate roundtable gate before PR.
+- **E3 implementation round 1 — 2026-07-30 — changes requested, 3/3 participants, not
+  degraded.** All three seats found that local co-edit projection edges were appended after the
+  resolver's cross-project tail. A shared stable local-first partition now runs after additive
+  projections in both public blast-radius paths, and an adversarial fixture combines a local-only
+  projection with a route-gated external import and asserts that no local edge follows an external
+  edge. Roundtable run: `roundtable-5d582db9c64174793488f921` (artifact
+  `a309798e4843249ac313deecef3b9749cc318845c4b95498325216b374f3d4b1`).
+- **E3 implementation round 2 — 2026-07-30 — changes requested, 3/3 participants, not
+  degraded.** The corrected local-first ordering was accepted. The synthesis repeated a projection
+  capacity concern that was already bounded by both loop conditions; E3 nevertheless adds the same
+  guard at each insertion site so the invariant survives future loop refactors. A valid finding
+  showed that the client accepted legacy-only arrays with empty metadata. New E3 clients now require
+  resolved top-level identity plus complete structured edge arrays and fail closed on legacy-only or
+  partial metadata; servers continue emitting legacy arrays additively for older consumers.
+  Roundtable run: `roundtable-15472c66ae1dccd6620b4b97` (artifact
+  `a8e925f87312534a4092416d4dec985621f5e0053be367bbab37d15b5be889fe`).
+- **E3 implementation round 3 — 2026-07-30 — APPROVED and converged, 2/3 participants used,
+  degraded.** The panel reported no blocking findings. E3 immediately adopts its schema-accuracy
+  suggestion by splitting dependent/path and dependency/identity OpenAPI edge types so the required
+  identity field matches the client validation contract. Its distinct CLI error-class suggestion is
+  assigned to the accepted E5 typed-status slice. Roundtable run:
+  `roundtable-a2953bf8d139a351d64af27d` (artifact
+  `ce370ec61931cdfb91c1e73417de930af801280d5a486ab2de9cd7adec98ae85`).
+- **E3 final exact-diff review — 2026-07-30 — APPROVED and converged, 2/3 participants used,
+  degraded.** The schema-aligned frozen diff received no findings; the chairman confirmed the
+  earlier ordering, capacity, complete-metadata, exact-resolution, route-gating, and concrete edge
+  identity findings remain closed. Roundtable run: `roundtable-327db1be95dc7e7c3abd2035`
+  (artifact `ebe90912dc8e54a133c45453fd1c8b376c0c5845954acf66fe37134f1e0b17e4`).
+- **E3 graph-resolution slice:** PR #2162 merged to `testing` as
+  `fdc64b4abf3db262ea33efd0812b4208c654f57d` after all 25 CI checks passed. Exact normalized Python
+  module resolution, deduplicated call/import/projection edges, current-generation provenance, and
+  stable local-first graph ordering are now the base for E4–E6.
+- **E4 task-conditioned retrieval candidate:** the implementation adds a strict
+  `/v1/code/context` contract over hybrid RRF, exact active-project memory gating, explicit
+  `no_answer`, a four-item/1,200-token packet, complete current-generation provenance, and
+  `off|observe|on` first/new-task ingress behavior. `observe` remains the shipping default;
+  unavailable, slow, stale, or incomplete evidence automatically suppresses model-visible packet
+  injection and never widens to global memory. Its frozen implementation diff receives a separate
+  roundtable gate before PR.
+- **E4 implementation round 1 — 2026-07-30 — changes requested, 3/3 participants, not
+  degraded.** Two concrete findings closed real grounding gaps: memory-only hybrid rows no longer
+  count as answerable code, and explanatory project memory now requires an explicit path or symbol
+  relationship to one accepted code result. The reported missing generation fence was already
+  enforced by the shared `code_request_project` boundary; E4 adds stale/current route regressions so
+  that inherited contract is visible in this slice. Three whole-program findings assessed E4 as if
+  it claimed E5/E6 completion; the accepted delivery table requires one reviewed PR per slice, so
+  the reconvened review binds this artifact to E4 without weakening the parent completion request.
+  Roundtable run: `oprun_g6a69bd8011459d99_1785389737_122` (artifact
+  `11776ad9f6708568dcc1dce374884b4cd164b2b3483438b06261beb39180462a`).
+- **E4 implementation round 2 — 2026-07-30 — APPROVED and converged, 3/3 participants, not
+  degraded.** The panel reported no blocking findings after the memory-only, explicit-anchor, and
+  generation-regression repairs. Its schema nit is adopted by removing redundant undocumented
+  top-level caller fields; the span remains the canonical symbol/line surface. The validation record
+  now distinguishes 85 routed KB endpoints from 92 OpenAPI operations, calls out the legacy hybrid
+  route's local-first memory tightening, and states the direct-handler compatibility boundary. The
+  eight-row memory read is deliberately a bounded pre-filter pool, not an emitted packet allowance:
+  kind, exact scope, grounding, and duplicate rejection run before the shared four-item output cap.
+  The resolver is covered through ingress behavior here; a standalone resolver fixture is a useful
+  follow-up but not a blocking gap in the E4 contract. Roundtable run:
+  `oprun_g6a69bd8011459d99_1785391257_123` (artifact
+  `743c03a1a1ec1191dbff96008f88cdb064ef51adda8fccc3634a1e9959f05852`).
+- **E4 final exact-diff review — 2026-07-30 — APPROVED and converged, 3/3 participants, not
+  degraded.** The panel confirmed the post-review schema and documentation cleanup with no blocking
+  findings. E4 immediately adopts its bounded-confidence suggestion: ingress now rejects code or
+  memory confidence outside `(0,1]`, with adversarial packet tests. Retrying a failed first-turn
+  retrieval on a related follow-up is assigned to E5's typed recovery policy; E4 continues to
+  suppress the failed packet and never widens recall. Roundtable run:
+  `oprun_g6a69bd8011459d99_1785391610_124` (artifact
+  `b8def8883da6a7e97997f223dad4d1c4b9ac1ea9f88b0a91e251e9c5c36b1a09`).
+- **E4 confidence-amended exact-diff review — 2026-07-30 — APPROVED and converged, 3/3
+  participants, not degraded.** The panel approved the confidence-bounded artifact with no blocking
+  findings. Its remaining suggestions do not change the accepted contract: `scope=project` is the
+  normative memory field while numeric rank remains diagnostic; the hybrid HTTP boundary has no
+  durable workspace identity to forward; redundant ambient fields are ignored when an explicit
+  scope is present; and token-heuristic/duplicate-check refinements require observed evaluation
+  failures rather than speculative widening. Named policy constants are a readability follow-up.
+  Roundtable run: `oprun_g6a69bd8011459d99_1785391948_125` (artifact
+  `abdfa92e2489d4c73cdb05c18ec067fb8463296c5ed45eb376fe66bb70e986ac`).
+- **E4 task-conditioned retrieval slice:** PR #2171 merged to `testing` as
+  `7a8a20753c37eba57fefdbe91fd256b2b81e0f91` after all 24 CI checks passed. Strict current-project
+  context, explicit abstention, bounded observe/on ingress, complete provenance, and automatic
+  suppression are now the base for E5–E6; `observe` remains the shipping default.
+- **E5a dependency-status candidate:** the implementation adds exact `ok|empty|abstained|stale|
+  unavailable|unauthorized` classification, independent KB-transport and external-embedder circuit
+  breakers, bounded exponential jitter, one half-open recovery probe, dependency-specific outage
+  metadata, and exact session/project retry after an unavailable first-turn lookup. A reachable KB's
+  embedder/vector-store outage does not poison its transport breaker, local coding remains
+  independent, and no agent-facing memory/index reader converts an outage into an empty result. Its
+  frozen implementation diff receives a separate roundtable gate before PR.
+- **E5b deployment-readiness candidate:** server liveness remains independent of recoverable
+  dependency failure, while readiness now fails closed on the complete retrieval contract and
+  reports the failed boundary, E5a breaker state/retry delay, and last successful query/ingest.
+  Shipped Compose restart policy remains `unless-stopped` with liveness healthchecks; the operator
+  runbook pins separate readiness admission, queue diagnostics, evidence preservation, and safe
+  dependency-specific recovery. Its frozen implementation diff receives a separate roundtable gate
+  before PR.
+- **E5b final exact-diff review — 2026-07-30 — APPROVED and converged, 3/3 participants, not
+  degraded.** The final runbook, explicit dependency boundary, JSON-safe diagnostics, and
+  retrieval-only/null-diagnostics regressions received no findings. Roundtable run:
+  `oprun_g6a6b1ed93980fd5d_1785408651_7` (artifact
+  `0f0e27dbb596f737174e815004baf9a71b904127185a7af05809c747bdceb8e0`).
+- **E5b deployment and runbook slice:** PR #2177 merged to `testing` as
+  `456444cad5a1f4b8e8595ae91e5c3923f4cef468` after all 23 CI checks passed. Liveness remains
+  restart-safe during recoverable outages; readiness now enforces the retrieval contract with
+  bounded dependency diagnostics and a safe recovery runbook.
+- **E5c resumable-experiment candidate:** a repository-owned runner binds one immutable plan,
+  run ID, and named checkpoint; writes every cell attempt before checkpoint advancement; preserves
+  stdout/stderr/timing/return code; marks failed infrastructure `score_eligible:false`; refuses
+  overwrite and cross-run checkpoint provenance; and resumes only unfinished cells. Its frozen
+  implementation diff receives a separate roundtable gate before PR.
+- **E5c final exact-diff review — 2026-07-30 — APPROVED and converged, 3/3 participants, not
+  degraded.** The final runner provides byte-lossless, digest-bound attempt evidence, durable
+  checkpoint ordering, strict plain-path/provenance/plan validation, infrastructure-invalid score
+  exclusion, and non-splicing named resume. Roundtable run:
+  `oprun_g6a6b1ed93980fd5d_1785414928_21` (artifact
+  `50dd19a6189e0cb0173910380ac9c054d4733da567603dd39db3277a18d1dfce`).
+- **E5a implementation round 1 — 2026-07-30 — changes requested, 3/3 participants, not
+  degraded.** The implementation received no bounded-slice technical ruling because the review
+  brief exposed the unfinished parent E5/E6 program. The next review explicitly binds the frozen
+  diff to E5a as the independently mergeable slice required by §6. Roundtable run:
+  `oprun_g6a69bd8011459d99_1785396259_129`.
+- **E5a implementation round 2 — 2026-07-30 — changes requested, 2/3 participants used,
+  degraded.** The scoped review found that the status envelope omitted a concrete bounded retry
+  delay and that vector-dimension staleness evidence was lost across the KB client boundary. E5a now
+  carries both contracts end to end with regressions. Roundtable run:
+  `oprun_g6a69bd8011459d99_1785396774_130`.
+- **E5a implementation round 3 — 2026-07-30 — changes requested, 3/3 participants, not
+  degraded.** Four remaining boundary findings were accepted: valid no-answer is `abstained`, retry
+  delays have a one-second floor, an exact memory miss remains distinct from transport failure, and
+  vector-status documentation applies unconditionally. The fixtures and docs now enforce all four.
+  Roundtable run: `oprun_g6a69bd8011459d99_1785397781_131`.
+- **E5a implementation round 4 — 2026-07-30 — changes requested, 2/3 participants used,
+  degraded.** The panel found three concrete non-2xx/parser gaps: mTLS GET/POST bodies could bypass
+  HTTP status rejection, a malformed project-list object could become an empty list, and external
+  embedder 401/403 could become transient unavailability. E5a now preserves the typed mTLS status
+  while rejecting its body, requires a real `projects` array, and returns non-retryable embedder
+  unauthorized without poisoning the transient-failure breaker. Adversarial fixtures cover each
+  transport. Roundtable run: `oprun_g6a69bd8011459d99_1785399544_132` (artifact
+  `0691c47bbc47d1854c00df172d01745bd29eab47956d43e22bca01fe3462d812`).
+- **E5a dependency-status slice:** PR #2176 merged to `testing` as
+  `ada6d21d9ac4461b9a144acdc1d8b5c1b43718c3` after all required checks passed. Typed dependency
+  outcomes, bounded breakers, truthful authorization/staleness metadata, and exact recovery probes
+  are the merged base for deployment and evaluation.
+- **E5c resumable-experiment slice:** PR #2179 merged to `testing` as
+  `930bbe995502c9f584d895f4900b0e3562582030`. The repository now owns durable named checkpoints,
+  byte-lossless attempt artifacts, infrastructure-invalid exclusions, and anti-splicing validation.
+- **E6 evaluation candidate:** the scorer, 16-case retrieval corpus, eight-task/four-arm coding
+  matrix, and prompt fixture v1 are pinned to the E5c merge. The deterministic retrieval layer
+  passes, but every provider-backed paired arm has zero eligible fresh cells. Promotion therefore
+  fails closed: `observe` remains the default, no historical artifacts are spliced, and the bounded
+  paired matrix is assigned to `agent-facing-code-intelligence-paired-evaluation.md`.
+- **E6 evaluation review round 1 — 2026-07-30 — changes requested, 3/3 participants, not
+  degraded.** Three blocking fail-closed gaps were accepted: a partial arm could count as complete,
+  a partial retrieval corpus could pass, and missing/unknown evidence could improve or disappear
+  from metrics. The scorer now requires exact corpus and arm/task coverage, explicit evidence
+  fields, unique known IDs, and complete eligible denominators before promotion. Roundtable run:
+  `oprun_g6a6b1ed93980fd5d_1785417195_27` (artifact
+  `96c46ab9ca452d5a1e04576dd196eab5704549743cc094df015667c1e684904f`).
+- **E6 evaluation review round 2 — 2026-07-30 — changes requested, 2/3 participants used,
+  degraded.** The exact coverage repairs passed, but eligible coding metrics still had presence-only
+  validation. The scorer now requires explicit booleans plus finite non-negative token, wall,
+  retrieval latency, and packet metrics, and bounded finite edge rates before scoring. Roundtable
+  run: `oprun_g6a6b1ed93980fd5d_1785417454_28` (artifact
+  `51d2314b8a2b98e8a2b59e23068097726bb898c0ae0695e40ba8d0f3eee0e792`).
+- **E6 evaluation review round 3 — 2026-07-30 — APPROVED and converged, 3/3 participants, not
+  degraded.** The complete fail-closed scorer, pinned corpus/results, truthful zero paired-agent
+  denominator, `retain-observe` decision, archived parent, and bounded residual proposal received no
+  findings. Roundtable run: `oprun_g6a6b1ed93980fd5d_1785417816_29` (artifact
+  `fa1a46d6eb522bc9e398a6df49a79e68aae728e07f2c399e137649eda2a2f1d1`).
+- **E6 evaluation and reconciliation slice:** PR #2180 merged to `testing` as
+  `6969b2bca56f7d1d278e0796ce1213f40c3bad51` after all 24 CI checks passed. E0–E6 are reconciled;
+  deterministic retrieval gates pass, paired-agent promotion does not, `observe` remains the
+  shipping default, and the exact remaining provider-backed matrix is bounded by the linked
+  residual proposal.

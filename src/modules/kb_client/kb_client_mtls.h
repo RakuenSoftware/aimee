@@ -9,7 +9,7 @@
 
 #define KB_CLIENT_ERR_POOL_EXHAUSTED (-2)
 
-/* 1 when AIMEE_KB_CONN holds an aimee:// connection string (a remote kb), else 0.
+/* 1 when Vault holds an AIMEE_KB_CONN aimee:// connection string (a remote kb), else 0.
  * The string supplies the stable endpoint + CA pin after its one-time token has
  * established an owner-only identity under AIMEE_HOME. */
 int kb_client_mtls_configured(void);
@@ -32,6 +32,9 @@ char *kb_client_mtls_request(const char *method, const char *path, const char *b
  * public operation contract allows several minutes. */
 char *kb_client_mtls_request_timeout(const char *method, const char *path, const char *body,
                                      int timeout_ms, int *status_out);
+char *kb_client_mtls_request_timeout_with_type(const char *method, const char *path,
+                                               const char *body, const char *content_type,
+                                               int timeout_ms, int *status_out);
 
 /* Fetch the exact bounded P5-C2c signed envelope.  Only an authenticated 200
  * response on the fixed route is accepted; output is cleared on every error. */

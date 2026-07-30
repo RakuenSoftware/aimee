@@ -48,13 +48,9 @@ REQUIRED_COMPOSE_PATTERNS = {
     "kb-service": r"(?m)^\s{2}aimee-kb:",
     "kb-build-context": r"(?s)aimee-kb:.*build:.*context:\s*\.",
     "aimee-home-env": r"(?s)aimee-kb:.*AIMEE_HOME:\s*/var/lib/aimee",
-    # Empty is the new-install contract: the image entrypoint starts its bundled
-    # PostgreSQL. The interpolation still lets an existing deployment opt into an
-    # external DB2 through its environment without editing the manifest.
-    "db2-empty-default": r"(?m)^\s*AIMEE_DB2_URL:\s*\$\{AIMEE_DB2_URL:-\}\s*$",
     "kb-health": r"(?s)aimee-kb:.*healthcheck:.*http://127\.0\.0\.1:8741/v1/health",
-    # The legacy torch embedder is retained behind a profile for rollback. There is no
-    # inference service in the default topology: the kb embeds in-container.
+    # No inference service in the default topology: the kb embeds in-container. The
+    # legacy torch embedder is retained behind a profile for rollback.
     "embedder-service": r"(?m)^\s{2}embedder:",
     # AIMEE_LLM_URL is SYNTH ONLY now and must carry no default — the container it used
     # to name is gone, so a default would point every deploy at a dead host.
@@ -73,7 +69,6 @@ SERVER_IDENTITY_ENV = {
         "${AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE:-"
         "/run/aimee/management/jwks-trust-bundle.json}"
     ),
-    "AIMEE_KB_CONN": "${AIMEE_KB_CONN:-}",
 }
 SERVER_MANAGEMENT_MOUNT = (
     "${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}:/run/aimee/management:ro"
@@ -215,7 +210,7 @@ def kb_publication_failures(text: str) -> list[str]:
     missing_services = required_services - set(services)
     if missing_services:
         failures.append("missing required services: " + ", ".join(sorted(missing_services)))
-    # The retired container must not come back by accident: the kb embeds itself, and a
+    # The retired container must not return by accident: the kb embeds itself, and a
     # resurrected service would race it for the embedding role.
     if "aimee-llm" in services:
         failures.append("aimee-llm is retired; the kb embeds in-container")
@@ -230,8 +225,8 @@ def kb_publication_failures(text: str) -> list[str]:
     else:
         if environment.get("AIMEE_HOME") != "/var/lib/aimee":
             failures.append("aimee-kb AIMEE_HOME must be exactly /var/lib/aimee")
-        if environment.get("AIMEE_DB2_URL") != "${AIMEE_DB2_URL:-}":
-            failures.append("aimee-kb AIMEE_DB2_URL must have an exact empty new-install default")
+        if "AIMEE_DB2_URL" in environment:
+            failures.append("aimee-kb must load DB2 credentials from Vault, not Config.Env")
         if environment.get("AIMEE_LLM_URL") != "${AIMEE_LLM_URL:-}":
             failures.append(
                 "aimee-kb AIMEE_LLM_URL must have an empty default (synth only; the "
@@ -411,27 +406,28 @@ def managed_kb_llm_contract_failures(text: str) -> list[str]:
     if not isinstance(kb_env, dict):
         return ["managed KB environment must use mapping form"]
 
-    # The service identity survives the container retirement: it still authenticates the
-    # kb to whatever endpoint does synthesis.
     token_expr = "${AIMEE_LLM_AUTH_TOKEN:-}"
-    if kb_env.get("AIMEE_LLM_AUTH_TOKEN") != token_expr:
-        failures.append("managed KB must receive AIMEE_LLM_AUTH_TOKEN")
+    if "AIMEE_LLM_AUTH_TOKEN" in kb_env:
+        failures.append("managed KB LLM bearer must be loaded from Vault, not Config.Env")
     if kb_env.get("AIMEE_LLM_AUTH_REQUIRED") != "${AIMEE_LLM_AUTH_REQUIRED:-0}":
         failures.append(
-            "managed KB auth-required mode must follow the deployment transaction"
+            "managed KB auth-required mode must follow the local-LLM deployment transaction"
         )
-    if kb_env.get("LLM_API_KEY") != token_expr:
-        failures.append("managed KB legacy curator token must alias AIMEE_LLM_AUTH_TOKEN")
-    # Synth only, and no default: the container that used to answer here is gone.
+    if "LLM_API_KEY" in kb_env:
+        failures.append("managed KB legacy curator token must not be stored in Config.Env")
     if kb_env.get("AIMEE_LLM_URL") != "${AIMEE_LLM_URL:-}":
         failures.append("managed KB AIMEE_LLM_URL must have an empty default (synth only)")
-    if kb_env.get("AIMEE_LLM_MODEL") != "${AIMEE_LLM_MODEL:-aimee-synth}":
-        failures.append("managed KB must receive the synth model label")
-    # Nothing may hand the kb a per-role embedder container knob any more.
     for key in kb_env:
         if str(key).startswith("AIMEE_LLM_EMBED_"):
             failures.append(f"managed KB must not receive {key}; the embedder is in-container")
+    if kb_env.get("AIMEE_LLM_MODEL") != "${AIMEE_LLM_MODEL:-aimee-synth}":
+        failures.append("managed KB must receive the unified model label")
 
+    for role in ("EMBED", "RERANK", "SYNTH"):
+        for setting, default in (("MODE", "local"), ("TIER", "cpu"), ("URL", "")):
+            key = f"AIMEE_LLM_{role}_{setting}"
+            expected = f"${{{key}:-{default}}}"
+        
     depends_on = kb.get("depends_on")
     if (isinstance(depends_on, dict) and "aimee-llm" in depends_on) or (
         isinstance(depends_on, list) and "aimee-llm" in depends_on
@@ -560,7 +556,6 @@ def plant_test() -> int:
             "Dockerfile contains forbidden server-binary",
             "compose.yaml missing kb-build-context",
             "compose.yaml missing aimee-home-env",
-            "compose.yaml missing db2-empty-default",
             "compose.yaml missing kb-health",
             "compose.yaml missing llm-service",
             "compose.yaml missing embedder-service",
@@ -614,7 +609,6 @@ def plant_test() -> int:
                     "      dockerfile: Dockerfile",
                     "    environment:",
                     "      AIMEE_HOME: /var/lib/aimee",
-                    "      AIMEE_DB2_URL: ${AIMEE_DB2_URL:-}",
                     "      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8080}",
                     "      AIMEE_KB_MTLS_HOST: aimee-kb",
                     '      AIMEE_KB_MTLS_PORT: "8745"',
@@ -635,7 +629,6 @@ def plant_test() -> int:
                 "      AIMEE_SERVER_TEAM_ID: ${AIMEE_SERVER_TEAM_ID:-}",
                 "      AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE: "
                 "${AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE:-/run/aimee/management/jwks-trust-bundle.json}",
-                "      AIMEE_KB_CONN: ${AIMEE_KB_CONN:-}",
                 "    volumes:",
                 "      - ${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}:/run/aimee/management:ro",
                 "",
@@ -669,9 +662,7 @@ def plant_test() -> int:
             "      AIMEE_KB_MTLS_HOST: aimee-kb\n"
             '      AIMEE_KB_MTLS_PORT: "8745"\n'
             "      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8742}\n"
-            "      AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}\n"
             "      AIMEE_LLM_AUTH_REQUIRED: ${AIMEE_LLM_AUTH_REQUIRED:-0}\n"
-            "      LLM_API_KEY: ${AIMEE_LLM_AUTH_TOKEN:-}\n"
             "      AIMEE_LLM_MODEL: ${AIMEE_LLM_MODEL:-aimee-synth}\n"
             "  aimee-llm:\n"
             "    environment:\n"
@@ -680,6 +671,9 @@ def plant_test() -> int:
             "      AIMEE_LLM_EMBED_MODE: ${AIMEE_LLM_EMBED_MODE:-local}\n"
             "      AIMEE_LLM_EMBED_TIER: ${AIMEE_LLM_EMBED_TIER:-cpu}\n"
             "      AIMEE_LLM_EMBED_URL: ${AIMEE_LLM_EMBED_URL:-}\n"
+            "      AIMEE_LLM_RERANK_MODE: ${AIMEE_LLM_RERANK_MODE:-local}\n"
+            "      AIMEE_LLM_RERANK_TIER: ${AIMEE_LLM_RERANK_TIER:-cpu}\n"
+            "      AIMEE_LLM_RERANK_URL: ${AIMEE_LLM_RERANK_URL:-}\n"
             "      AIMEE_LLM_SYNTH_MODE: ${AIMEE_LLM_SYNTH_MODE:-local}\n"
             "      AIMEE_LLM_SYNTH_TIER: ${AIMEE_LLM_SYNTH_TIER:-cpu}\n"
             "      AIMEE_LLM_SYNTH_URL: ${AIMEE_LLM_SYNTH_URL:-}\n"
@@ -713,7 +707,6 @@ def plant_test() -> int:
             "      AIMEE_SERVER_TEAM_ID: ${AIMEE_SERVER_TEAM_ID:-}\n",
             "      AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE: "
             "${AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE:-/run/aimee/managed-trust/jwks-trust-bundle.json}\n",
-            "      AIMEE_KB_CONN: ${AIMEE_KB_CONN:-}\n",
             "      - ${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}:"
             "/run/aimee/management:ro\n",
             "      - aimee-managed-jwks-trust:/run/aimee/managed-trust:ro\n",

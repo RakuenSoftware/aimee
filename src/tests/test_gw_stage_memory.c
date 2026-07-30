@@ -48,6 +48,36 @@ int kb_client_typed_facts_enabled(void)
 {
    return 0;
 }
+int ingress_preinject_resolve_active_scope(char *workspace, size_t workspace_len, char *project,
+                                           size_t project_len)
+{
+   snprintf(workspace, workspace_len, "active-workspace");
+   snprintf(project, project_len, "active-project");
+   return 0;
+}
+void kb_client_memory_scope_context_set(const char *workspace, const char *project, int include_all)
+{
+   (void)workspace;
+   (void)project;
+   assert(include_all == 0);
+}
+void kb_client_memory_scope_context_clear(void)
+{
+}
+char *kb_client_code_context(const char *query, const char *symbol, const char *project,
+                             int *status_out)
+{
+   (void)query;
+   (void)symbol;
+   (void)project;
+   if (status_out)
+      *status_out = 503;
+   return NULL;
+}
+kb_client_result_status_t kb_client_last_result_status(void)
+{
+   return KB_CLIENT_RESULT_OK;
+}
 int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max)
 {
    (void)query;
@@ -113,6 +143,11 @@ int config_ingress_preinject_assembly_budget(void)
 int config_ingress_preinject_enabled(void)
 {
    return 1;
+}
+
+const char *config_code_context_mode(void)
+{
+   return "observe";
 }
 
 int config_kb_evidence_emit_enabled(void)

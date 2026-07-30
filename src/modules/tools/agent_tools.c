@@ -116,6 +116,20 @@ static void bash_prepare_child_path(void)
    char path_buf[8192];
    const char *old_path = getenv("PATH");
    snprintf(path_buf, sizeof(path_buf), "%s", old_path ? old_path : "");
+   /* Add fallbacks from lowest to highest priority because the helper prepends.
+    * Directories already present in the caller's PATH are never moved, so an
+    * explicit caller choice still wins. A user install must precede the image's
+    * /usr/local/bin fallback; otherwise container verification invokes the
+    * bundled client instead of $HOME/.local/bin/aimee. */
+   bash_prepend_path_dir(path_buf, sizeof(path_buf), "/usr/local/bin");
+   const char *home = getenv("HOME");
+   if (home && home[0])
+   {
+      char local_bin[MAX_PATH_LEN];
+      int hn = snprintf(local_bin, sizeof(local_bin), "%s/.local/bin", home);
+      if (hn > 0 && (size_t)hn < sizeof(local_bin))
+         bash_prepend_path_dir(path_buf, sizeof(path_buf), local_bin);
+   }
    char exe[MAX_PATH_LEN];
    ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
    if (n > 0)
@@ -128,15 +142,6 @@ static void bash_prepare_child_path(void)
          bash_prepend_path_dir(path_buf, sizeof(path_buf), exe);
       }
    }
-   const char *home = getenv("HOME");
-   if (home && home[0])
-   {
-      char local_bin[MAX_PATH_LEN];
-      int hn = snprintf(local_bin, sizeof(local_bin), "%s/.local/bin", home);
-      if (hn > 0 && (size_t)hn < sizeof(local_bin))
-         bash_prepend_path_dir(path_buf, sizeof(path_buf), local_bin);
-   }
-   bash_prepend_path_dir(path_buf, sizeof(path_buf), "/usr/local/bin");
    if (path_buf[0])
       setenv("PATH", path_buf, 1);
 }

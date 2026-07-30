@@ -167,7 +167,7 @@ func (r *NativeRunner) runDiscussionCycle(ctx context.Context, req StepRequest, 
 	}
 	requests := make([]DelegateRequest, len(reports))
 	for i, report := range reports {
-		requests[i] = DelegateRequest{Role: roundtableDelegateRole, Persona: report.Seat.persona, Participant: report.Seat.participant, Prompt: prompt, Workdir: req.WorkItem.Worktree, Tools: true, DurableSlot: panelDiscussionDurableSlot(req, cycle, report.Seat.ordinal), ArtifactStage: artifactStage, ArtifactHash: artifactHash, ProvidedTarget: true}
+		requests[i] = DelegateRequest{Role: roundtableDelegateRole, Persona: report.Seat.persona, Participant: report.Seat.participant, Prompt: prompt, Workdir: req.WorkItem.Worktree, Tools: true, MaxTurnsCap: roundtableDelegateMaxTurnsCap, DurableSlot: panelDiscussionDurableSlot(req, cycle, report.Seat.ordinal), ArtifactStage: artifactStage, ArtifactHash: artifactHash, ProvidedTarget: true}
 	}
 	delegated := r.delegateGroup(ctx, req, requests)
 	outcomes := make([]outcome, len(delegated))

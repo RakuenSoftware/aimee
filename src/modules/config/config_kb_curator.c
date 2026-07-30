@@ -544,8 +544,7 @@ void config_save_kb_curator(const config_t *cfg, cJSON *root)
        cfg->kb_curator_extract_max_tokens != 512 || cfg->kb_curator_max_attempts != 3 ||
        cfg->kb_curator_synthesize_k != 8 || cfg->kb_curator_promote_min_sources != 3 ||
        cfg->kb_curator_provider_base_url[0] || cfg->kb_curator_provider_model[0] ||
-       cfg->kb_curator_provider_api_key[0] || cfg->kb_curator_tier_b_base_url[0] ||
-       cfg->kb_curator_tier_b_model[0] || cfg->kb_curator_tier_b_api_key[0];
+       cfg->kb_curator_tier_b_base_url[0] || cfg->kb_curator_tier_b_model[0];
    int cross_repo_nondefault =
        !cfg->kb_curator_cross_repo_graph_enabled ||
        cfg->kb_curator_cross_repo_distinctiveness_v != 1 || cfg->kb_curator_cross_repo_k != 5 ||
@@ -671,9 +670,9 @@ void config_save_kb_curator(const config_t *cfg, cJSON *root)
          if (cfg->kb_curator_max_attempts != 3)
             cJSON_AddNumberToObject(cur, "max_attempts", cfg->kb_curator_max_attempts);
          kb_curator_save_provider(cur, "provider", cfg->kb_curator_provider_base_url,
-                                  cfg->kb_curator_provider_model, cfg->kb_curator_provider_api_key);
+                                  cfg->kb_curator_provider_model, "");
          kb_curator_save_provider(cur, "tier_b", cfg->kb_curator_tier_b_base_url,
-                                  cfg->kb_curator_tier_b_model, cfg->kb_curator_tier_b_api_key);
+                                  cfg->kb_curator_tier_b_model, "");
       }
    }
 

@@ -13,6 +13,7 @@
 #include "working_profile.h" /* working_profile_autoobserve_from_feedback */
 #include "agent_config.h"
 #include "agent_types.h"
+#include "workspace.h"
 #include "cJSON.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -108,7 +109,7 @@ static char *agents_provider(void)
    return s;
 }
 
-/* POST /v1/kb/search: parse {query, project?, max_results?, format?} and run a
+/* POST /v1/kb/search: parse {query, project?|cwd?|scope, max_results?, format?} and run a
  * knowledge search via aimee-kb. Returns the kb_client JSON envelope verbatim;
  * 400 on a missing query, 502 when aimee-kb is unreachable. */
 static int kb_search_handler(const char *body, char *resp, int cap)
@@ -124,7 +125,41 @@ static int kb_search_handler(const char *body, char *resp, int cap)
    }
 
    const cJSON *jp = cJSON_GetObjectItemCaseSensitive(req, "project");
+   const cJSON *jc = cJSON_GetObjectItemCaseSensitive(req, "cwd");
+   const cJSON *js = cJSON_GetObjectItemCaseSensitive(req, "scope");
+   const char *scope = cJSON_IsString(js) ? js->valuestring : "current";
+   char resolved_project[MAX_PATH_LEN] = "";
    const char *project = (cJSON_IsString(jp) && jp->valuestring[0]) ? jp->valuestring : NULL;
+   int all_projects = strcmp(scope, "all") == 0;
+   if ((js && !cJSON_IsString(js)) || (strcmp(scope, "current") != 0 && strcmp(scope, "all") != 0))
+   {
+      cJSON_Delete(req);
+      snprintf(resp, (size_t)cap,
+               "{\"error\":{\"message\":\"scope must be current or all\","
+               "\"type\":\"invalid_scope\"}}");
+      return 400;
+   }
+   if (all_projects)
+   {
+      if (!project && cJSON_IsString(jc) && jc->valuestring[0] &&
+          workspace_repo_identity(jc->valuestring, resolved_project, sizeof(resolved_project), NULL,
+                                  0) == 0)
+         project = resolved_project;
+   }
+   else if (!project)
+   {
+      if (!cJSON_IsString(jc) || !jc->valuestring[0] ||
+          workspace_repo_identity(jc->valuestring, resolved_project, sizeof(resolved_project), NULL,
+                                  0) != 0)
+      {
+         cJSON_Delete(req);
+         snprintf(resp, (size_t)cap,
+                  "{\"error\":{\"message\":\"no active project; pass project, cwd, or "
+                  "scope=all\",\"type\":\"scope_required\"}}");
+         return 409;
+      }
+      project = resolved_project;
+   }
    const cJSON *jm = cJSON_GetObjectItemCaseSensitive(req, "max_results");
    int max_results = (cJSON_IsNumber(jm) && jm->valuedouble >= 1.0 && jm->valuedouble <= 100.0)
                          ? (int)jm->valuedouble
@@ -145,7 +180,8 @@ static int kb_search_handler(const char *body, char *resp, int cap)
    config_load(&cfg);
    const char *emb = cfg.embedding_command[0] ? cfg.embedding_command : NULL;
 
-   char *j = kb_client_search_json(project, jq->valuestring, emb, max_results, format);
+   char *j = kb_client_search_json_scoped_ex(project, all_projects, jq->valuestring, emb,
+                                             max_results, format, NULL);
    cJSON_Delete(req);
    if (!j)
    {
@@ -199,7 +235,33 @@ static int memory_recall_handler(const char *body, char *resp, int cap)
    }
 
    /* Graph-code fusion is always on for recall. */
+   char project[MAX_PATH_LEN] = "";
+   char workspace[MAX_PATH_LEN] = "";
+   const cJSON *jp = cJSON_GetObjectItemCaseSensitive(req, "project");
+   const cJSON *jw = cJSON_GetObjectItemCaseSensitive(req, "workspace");
+   const cJSON *jc = cJSON_GetObjectItemCaseSensitive(req, "cwd");
+   const cJSON *jscope = cJSON_GetObjectItemCaseSensitive(req, "scope");
+   int include_all = cJSON_IsString(jscope) && strcmp(jscope->valuestring, "all") == 0;
+   if (cJSON_IsString(jp))
+      snprintf(project, sizeof(project), "%s", jp->valuestring);
+   if (cJSON_IsString(jw))
+      snprintf(workspace, sizeof(workspace), "%s", jw->valuestring);
+   if ((!project[0] || !workspace[0]) && cJSON_IsString(jc) && jc->valuestring[0])
+   {
+      char resolved_project[MAX_PATH_LEN] = "";
+      char resolved_workspace[MAX_PATH_LEN] = "";
+      if (workspace_repo_identity(jc->valuestring, resolved_project, sizeof(resolved_project),
+                                  resolved_workspace, sizeof(resolved_workspace)) == 0)
+      {
+         if (!project[0])
+            snprintf(project, sizeof(project), "%s", resolved_project);
+         if (!workspace[0])
+            snprintf(workspace, sizeof(workspace), "%s", resolved_workspace);
+      }
+   }
+   kb_client_memory_scope_context_set(workspace, project, include_all);
    char *j = kb_client_memory_recall_json_ex(jh->valuestring, limit_tokens, session_start, "on");
+   kb_client_memory_scope_context_clear();
    cJSON_Delete(req);
    if (!j)
    {

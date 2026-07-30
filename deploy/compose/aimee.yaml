@@ -1,15 +1,15 @@
-# aimee stack via docker-compose (self-contained aimee-kb +
+# aimee split stack via docker-compose (aimee-llm + self-contained aimee-kb +
 # aimee-server). Runs on Docker or any Docker-API daemon (e.g. LXC2Docker).
 #
 #   docker compose -f deploy/compose/aimee.yaml up -d                 # CPU LLM
 #   docker compose -f deploy/compose/aimee.yaml -f deploy/compose/aimee.gpu.yaml up -d   # GPU LLM
 #
-# The kb embeds IN-CONTAINER from baked weights, so no embedding service is
-# deployed. Synthesis still resolves an external endpoint via AIMEE_LLM_URL (see
-# docs/KB_LLM_BACKENDS.md);
-# this base uses the CPU tier. Layer aimee.gpu.yaml for the GPU tier (/dev/dri
-# passthrough); both serve the same 768-dim embedder, so switching tiers needs no
-# re-embed. Server /v1 on :8740, kb /v1 on :8741, webchat on :8443.
+# The kb runs NO model — it calls the aimee-llm container for embedding,
+# reranking and synthesis via AIMEE_LLM_URL (the one knob; see
+# docs/KB_LLM_BACKENDS.md). aimee-llm is the unified Vulkan llama.cpp container;
+# this base uses the CPU tier (1024-dim). Layer aimee.gpu.yaml for the GPU tier
+# (2560-dim + /dev/dri passthrough). Server /v1 on :8740, kb /v1 on :8741,
+# webchat on :8443.
 name: aimee
 services:
   aimee-kb:
@@ -19,23 +19,17 @@ services:
       stack: 67108864
     environment:
       AIMEE_HOME: /var/lib/aimee
-      # Empty by default: the KB image owns PostgreSQL + pgvector for a new
-      # install. Set AIMEE_DB2_URL explicitly only to keep/use an external DB2.
-      AIMEE_DB2_URL: ${AIMEE_DB2_URL:-}
-      # Synth only — the kb embeds in-container. No default: point this at an
-      # OpenAI-compatible endpoint to enable the LLM-dependent passes.
+      # External DB2 credentials are streamed into the KB Vault by the
+      # disposable Compose helper; never persist them in Config.Env.
+      # One knob: embed + rerank + synth all via the aimee-llm container.
       AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
-      # Embedding dim — deliberately UNSET. Every tier serves the same 768-dim
-      # nomic embedder, so there is nothing tier-specific to pin, and leaving it
-      # empty lets the kb derive the dim (pinned > recorded > probed). Setting it
-      # counts as an operator pin and suppresses that derivation, which is what
-      # an existing corpus relies on to keep serving its recorded dim.
-      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
+      # Embedding dim — CPU tier default 1024; the GPU override sets 2560.
+      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-1024}
       AIMEE_KB_HTTP_BIND: "1"
       # The curator synth sidecar (curator-extract.py) reads LLM_ENDPOINT, NOT
       # AIMEE_LLM_URL — without it the sidecar exits 256 and code-unit synthesis
-      # never drains. Point it at the same synth endpoint's /v1.
-      LLM_ENDPOINT: ${LLM_ENDPOINT:-}
+      # never drains. Point it at the same aimee-llm gateway (/v1).
+      LLM_ENDPOINT: ${LLM_ENDPOINT:-http://aimee-llm:8742/v1}
       LLM_MODEL: ${LLM_MODEL:-aimee-synth}
     command: ["--http-port=8741"]
     ports:
@@ -60,9 +54,9 @@ services:
       AIMEE_DB1_URL: sqlite:///var/lib/aimee/aimee.db
       AIMEE_KB_API_URL: http://aimee-kb:8741
       AIMEE_SERVER_HTTP_BIND: "1"
-      AIMEE_RUNTIME_WEB_ENABLED: "1"
-      AIMEE_WEBCHAT_USER: ${AIMEE_WEBCHAT_USER:-}
-      AIMEE_WEBCHAT_PASSWORD: ${AIMEE_WEBCHAT_PASSWORD:-}
+      AIMEE_RUNTIME_WEB_ENABLED: ${AIMEE_RUNTIME_WEB_ENABLED:-1}
+      # First-boot credentials are streamed into Vault before `up`; this
+      # long-lived service environment is deliberately credential-free.
     ports:
       # 8740 (plaintext /v1) is loopback-only in the server; do NOT publish it.
       # Remote thin clients use the TLS /v1 on 8743 (https://, self-signed cert

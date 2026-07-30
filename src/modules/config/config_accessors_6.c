@@ -18,6 +18,21 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
+int config_set_kb_ranker_fit_enabled(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->kb_ranker_fit_enabled = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
 int config_set_kb_ranker_fit_min_groups(int value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
@@ -1670,17 +1685,7 @@ int config_set_db1_path(const char *value)
 
 int config_set_db2_url(const char *value)
 {
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->db2_url, sizeof(cfg->db2_url), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
+   return config_secret_store("AIMEE_DB2_URL", value);
 }
 
 int config_set_provider(const char *value)
@@ -1892,19 +1897,3 @@ int config_set_vault_custody(const char *value)
    free(cfg);
    return rc;
 }
-
-int config_set_vault_tpm2_blob_path(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->vault_tpm2_blob_path, sizeof(cfg->vault_tpm2_blob_path), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-

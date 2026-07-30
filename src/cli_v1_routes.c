@@ -529,6 +529,24 @@ cJSON *marshal_curator_contradictions(int argc, char **argv)
    return req;
 }
 
+/* Every ordered memory command carries the thin client's identity to the
+ * server.  Explicit project/workspace values are useful for detached clients;
+ * cwd is the normal active-project source and is never resolved on the KB
+ * service host. */
+static void marshal_add_memory_scope(cJSON *req, const rpc_opts_t *opts)
+{
+   const char *v;
+   if ((v = rpc_get(opts, "project")))
+      cJSON_AddStringToObject(req, "project", v);
+   if ((v = rpc_get(opts, "workspace")))
+      cJSON_AddStringToObject(req, "workspace", v);
+   if ((v = rpc_get(opts, "scope")))
+      cJSON_AddStringToObject(req, "scope", v);
+   char cwd[4096];
+   if (getcwd(cwd, sizeof(cwd)))
+      cJSON_AddStringToObject(req, "cwd", cwd);
+}
+
 cJSON *marshal_memory_search(int argc, char **argv)
 {
    rpc_opts_t opts;
@@ -541,6 +559,7 @@ cJSON *marshal_memory_search(int argc, char **argv)
       cJSON_AddItemToArray(kw, cJSON_CreateString(opts.positional[i]));
    cJSON_AddItemToObject(req, "keywords", kw);
    cJSON_AddNumberToObject(req, "limit", rpc_get_int(&opts, "limit", 10));
+   marshal_add_memory_scope(req, &opts);
    return req;
 }
 
@@ -566,6 +585,7 @@ cJSON *marshal_memory_recall(int argc, char **argv)
    int lt = rpc_get_int(&opts, "limit-tokens", 0);
    if (lt > 0)
       cJSON_AddNumberToObject(req, "limit_tokens", lt);
+   marshal_add_memory_scope(req, &opts);
    return req;
 }
 
@@ -672,6 +692,7 @@ cJSON *marshal_memory_list(int argc, char **argv)
    if ((v = rpc_get(&opts, "kind")))
       cJSON_AddStringToObject(req, "kind", v);
    cJSON_AddNumberToObject(req, "limit", rpc_get_int(&opts, "limit", 20));
+   marshal_add_memory_scope(req, &opts);
    return req;
 }
 
@@ -722,9 +743,10 @@ cJSON *marshal_memory_supersede(int argc, char **argv)
 
 cJSON *marshal_memory_read(int argc, char **argv)
 {
-   (void)argc;
-   (void)argv;
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, NULL, &opts);
    cJSON *req = marshal_no_args("memory.read");
+   marshal_add_memory_scope(req, &opts);
    return req;
 }
 
@@ -793,9 +815,19 @@ cJSON *marshal_index_scan(int argc, char **argv)
 
 cJSON *marshal_index_find(int argc, char **argv)
 {
+   static const char *bools[] = {"json", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bools, &opts);
+
    cJSON *req = marshal_no_args("index.find");
-   if (argc > 0)
-      cJSON_AddStringToObject(req, "identifier", argv[0]);
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "identifier", opts.positional[0]);
+   const char *scope = rpc_get(&opts, "scope");
+   if (scope)
+      cJSON_AddStringToObject(req, "scope", scope);
+   char cwd[4096];
+   if (getcwd(cwd, sizeof(cwd)))
+      cJSON_AddStringToObject(req, "cwd", cwd);
    return req;
 }
 
@@ -809,13 +841,22 @@ cJSON *marshal_index_list(int argc, char **argv)
 
 static cJSON *marshal_index_file_request(const char *method, int argc, char **argv)
 {
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "method", method);
-   cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
-   if (argc > 0)
-      cJSON_AddStringToObject(req, "project", argv[0]);
-   if (argc > 1)
-      cJSON_AddStringToObject(req, "file_path", argv[1]);
+   static const char *bools[] = {"json", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bools, &opts);
+
+   cJSON *req = marshal_no_args(method);
+   if (opts.pos_count > 1)
+   {
+      /* Compatibility: the historic form was <project> <file>. */
+      cJSON_AddStringToObject(req, "project", opts.positional[0]);
+      cJSON_AddStringToObject(req, "file_path", opts.positional[1]);
+   }
+   else if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "file_path", opts.positional[0]);
+   char cwd[4096];
+   if (getcwd(cwd, sizeof(cwd)))
+      cJSON_AddStringToObject(req, "cwd", cwd);
    return req;
 }
 
@@ -845,6 +886,12 @@ cJSON *marshal_index_find_callers(int argc, char **argv)
       cJSON_AddStringToObject(req, "symbol", opts.positional[0]);
    if (opts.pos_count > 1)
       cJSON_AddStringToObject(req, "project", opts.positional[1]);
+   const char *scope = rpc_get(&opts, "scope");
+   if (scope)
+      cJSON_AddStringToObject(req, "scope", scope);
+   char cwd[4096];
+   if (getcwd(cwd, sizeof(cwd)))
+      cJSON_AddStringToObject(req, "cwd", cwd);
    return req;
 }
 
@@ -1267,6 +1314,11 @@ cJSON *marshal_kb_search(int argc, char **argv)
    const char *v;
    if ((v = rpc_get(&opts, "project")))
       cJSON_AddStringToObject(req, "project", v);
+   if ((v = rpc_get(&opts, "scope")))
+      cJSON_AddStringToObject(req, "scope", v);
+   char cwd[4096];
+   if (getcwd(cwd, sizeof(cwd)))
+      cJSON_AddStringToObject(req, "cwd", cwd);
    cJSON_AddNumberToObject(req, "max_results", rpc_get_int(&opts, "max", 10));
    if ((v = rpc_get(&opts, "fusion-mode")))
       cJSON_AddStringToObject(req, "fusion_mode", v);

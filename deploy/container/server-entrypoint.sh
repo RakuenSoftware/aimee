@@ -1,26 +1,98 @@
 #!/bin/sh
 # Entrypoint for the aimee-server image with the co-located webchat browser UI.
 #
-# Runs as root so it can bootstrap the PAM login user and run aimee-runtime-web
-# (which needs /etc/shadow access for pam_unix). aimee-server itself is dropped
-# to the unprivileged "aimee" user. Lifecycle follows the SERVER: when it exits,
+# Runs as root only for one-time legacy credential erasure and child supervision.
+# Webchat retains root solely as the kernel-attested UDS identity trusted by the
+# server; aimee-server runs as the unprivileged "aimee" user. Lifecycle follows
+# the SERVER: when it exits,
 # webchat is torn down and the container exits with the server's status;
 # SIGTERM/SIGINT are forwarded to both so `docker stop` is clean.
 #
 # POSIX sh (the image has no bash). Endpoints/DB come from the environment.
 set -eu
 
-# Preserve the container runtime's command-override contract.  The image has no
-# default CMD, so arguments here are an operator-supplied command (for example,
-# `aimee-server --version`) and must replace the managed server lifecycle below.
-if [ "$#" -gt 0 ]; then
-    exec "$@"
-fi
+vault_bootstrapped=0
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --aimee-internal-vault-bootstrapped) vault_bootstrapped=1; shift ;;
+        *) break ;;
+    esac
+done
 
 AIMEE_HOME="${AIMEE_HOME:-/var/lib/aimee}"
+export AIMEE_HOME
 SERVER_SOCK="${AIMEE_SERVER_SOCK:-/var/lib/aimee/aimee-server.sock}"
 server_pid=""
 wfe_pid=""
+
+# The one-shot bootstrap begins with a narrowly scoped legacy-volume ownership
+# repair, then drops privileges before it touches credentials. Disable core
+# files in the supervising shell first so the privileged phase cannot persist
+# inherited first-boot secrets either.
+ulimit -c 0 2>/dev/null || true
+
+# Consume deployment credentials before invoking any unrelated child process.
+# Kubernetes/Docker environment injection is accepted only as first-boot
+# transport: the short-lived server seals it into Vault, then this PID removes
+# every credential-shaped variable before it starts tini, an explicit command,
+# bootstrap helpers, webchat, the C server, or the Go WFE. The internal second
+# pass is intentionally idempotent so an externally supplied sentinel cannot
+# bypass ingestion.
+if [ -n "${AIMEE_DELEGATE_SECRETS_FILE:-}" ]; then
+    printf '[server-entrypoint] fatal: AIMEE_DELEGATE_SECRETS_FILE is unsupported; use first-boot AIMEE_DELEGATE_KEY_<AGENT> variables\n' >&2
+    exit 2
+fi
+if [ -n "${AIMEE_WEBCHAT_TLS_KEY:-}" ]; then
+    printf '[server-entrypoint] fatal: AIMEE_WEBCHAT_TLS_KEY files are forbidden; TLS private keys must be imported into Vault\n' >&2
+    exit 2
+fi
+if [ -n "${AIMEE_SERVER_MGMT_TLS_KEY:-}" ] || [ -n "${AIMEE_SERVER_MGMT_STATUS_CLIENT_KEY:-}" ]; then
+    printf '[server-entrypoint] fatal: management private-key files are forbidden; inject AIMEE_SERVER_MGMT_TLS_PRIVATE_KEY and AIMEE_SERVER_MGMT_STATUS_CLIENT_PRIVATE_KEY as first-boot Vault inputs\n' >&2
+    exit 2
+fi
+if ! aimee-server --bootstrap-vault-env --drop-user aimee; then
+    printf '[server-entrypoint] fatal: Vault bootstrap failed; refusing to start child processes\n' >&2
+    exit 1
+fi
+_secret_names=$(runuser -u aimee -- aimee-server --list-credential-env-names)
+had_credential_env=0
+for _secret_name in $_secret_names; do
+    eval "_secret_was_set=\${${_secret_name}+x}"
+    [ "$_secret_was_set" = x ] && had_credential_env=1
+    unset "$_secret_name"
+done
+unset _secret_was_set
+
+# Legacy credential files are a migration source, never runtime storage. Seal
+# and erase them even for a Docker command override; an internal restart marker
+# supplied by an external caller must not be able to bypass this boundary.
+runtime_web_lib=/usr/local/bin/runtime-web-lib.sh
+if [ ! -r "$runtime_web_lib" ]; then
+    entrypoint_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+    runtime_web_lib="$entrypoint_dir/runtime-web-lib.sh"
+fi
+[ -r "$runtime_web_lib" ] || {
+    printf '[server-entrypoint] fatal: runtime-web credential migration helper is unavailable\n' >&2
+    exit 2
+}
+. "$runtime_web_lib"
+webchat_migrate_legacy_credentials
+
+# An explicit Docker command is unrelated to normal server startup. It still
+# follows Vault ingestion above and receives a credential-free environment.
+if [ "$#" -gt 0 ]; then
+    exec "$@"
+fi
+if [ "$vault_bootstrapped" -eq 0 ] || [ "$had_credential_env" -eq 1 ]; then
+    # Migrate any legacy browser credential files only after first-boot env
+    # values have been sealed and scrubbed. The new web service authenticates
+    # against fixed Vault records and never materializes a PAM verifier. Force
+    # a clean process image whenever this invocation inherited credentials,
+    # even if an external caller supplied the internal marker.
+    webchat_prepare
+    exec /usr/bin/tini -- aimee-server-entrypoint --aimee-internal-vault-bootstrapped
+fi
+
 export AIMEE_WFE_ENGINE="${AIMEE_WFE_ENGINE:-go}"
 case "$AIMEE_WFE_ENGINE" in
     go) ;;
@@ -39,16 +111,8 @@ WFE_SOCKET_WAIT_TENTHS="${AIMEE_WFE_SOCKET_WAIT_TENTHS:-1200}"
 # by the runuser child); hard limit is unlimited on typical hosts. Best-effort.
 ulimit -s 65536 2>/dev/null || true
 
-# Preserve post-mortem evidence when the temporary C resource plane crashes.
-# Required appliance profiles fail closed if either the resource limit or the
-# storage policy cannot guarantee it; other runtimes stay warning-compatible.
-. /usr/local/bin/core-storage.sh
-if ! aimee_enable_core_dumps || ! aimee_prepare_core_storage; then
-    exit 1
-fi
-
-# Seed the baked default config into AIMEE_HOME if absent. The server reads its
-# /v1 listener settings (port + bearer) from $AIMEE_HOME/aimee.yaml; a
+# Seed the baked default config into AIMEE_HOME if absent. It contains only the
+# public /v1 listener policy; API and TLS private credentials live in Vault. A
 # bind-mounted (empty) volume would otherwise leave the listener unconfigured.
 # Never clobber an operator's config. Done as root, then owned by aimee so it
 # can read/rewrite it. On smoothfs tiers ownership is forced to 1000 regardless.
@@ -129,23 +193,32 @@ chown aimee:aimee "$AIMEE_HOME" "${AIMEE_WORKSPACES_DIR:-/var/lib/aimee-workspac
 # Seeded as root; the server and its preset-editing API run as aimee.
 [ -d "$AIMEE_HOME/roundtables" ] && chown -R aimee:aimee "$AIMEE_HOME/roundtables" 2>/dev/null || true
 
-# The server-hosted OAuth CLIs (claude/codex) and their npm prefix live under the
-# aimee home and MUST be writable by the unprivileged 'aimee' user that runs the
-# login: codex writes auth.json into $CODEX_HOME ($AIMEE_HOME/.codex) and claude
-# into $AIMEE_HOME/.claude on a successful device/browser login. If one of those
-# dirs is root-owned (e.g. left behind by a root `docker exec ... codex login`),
-# the CLI's token write fails and the login process exits WITHOUT persisting,
-# surfacing to the operator only as "<vendor> login session ended without
-# authenticating". Force them (and the npm install prefix) to the aimee user at
-# boot so both `aimee agent setup codex-oauth` and `claude-oauth` can persist.
-# Best-effort + only touches dirs that exist; the auth/config dirs are tiny and
-# the npm prefix is chowned in place (cheap relative to the install it backs).
+# Vendor OAuth CLIs require a HOME-like directory while completing their device
+# flow. Keep that short-lived transport on /run (container tmpfs), never on the
+# persistent AIMEE_HOME volume. The server seals the result in Vault and removes
+# the transport file before reporting authentication complete.
+AIMEE_OAUTH_RUNTIME_DIR="${AIMEE_OAUTH_RUNTIME_DIR:-/run/aimee/oauth-login}"
+case "$AIMEE_OAUTH_RUNTIME_DIR" in
+    /*) ;;
+    *) printf '[server-entrypoint] fatal: AIMEE_OAUTH_RUNTIME_DIR must be absolute\n' >&2; exit 2 ;;
+esac
+mkdir -p "$AIMEE_OAUTH_RUNTIME_DIR"
+chown aimee:aimee "$AIMEE_OAUTH_RUNTIME_DIR"
+chmod 0700 "$AIMEE_OAUTH_RUNTIME_DIR"
+export AIMEE_OAUTH_RUNTIME_DIR
+
+# The non-secret OAuth CLI installation lives under AIMEE_HOME. Historical
+# images also wrote credentials beneath .codex/.claude; leave those directories
+# readable by the unprivileged server so its one-time migration can seal and
+# delete them. New login credentials are written only to AIMEE_OAUTH_RUNTIME_DIR.
+# Best-effort + only touches directories that already exist.
 for cli_dir in .codex .claude .config .npm-global; do
     [ -e "$AIMEE_HOME/$cli_dir" ] && chown -R aimee:aimee "$AIMEE_HOME/$cli_dir" 2>/dev/null || true
 done
 
-. /usr/local/bin/runtime-web-lib.sh
 . /usr/local/bin/plane-supervisor.sh
+
+webchat_prepare
 
 log() { printf '[server-entrypoint] %s\n' "$*"; }
 
@@ -200,21 +273,11 @@ on_signal() {
 }
 trap 'on_signal' TERM INT
 
-# Browser UI (root, PAM). Supplementary — a webchat crash must not take the
-# container down; the server is the contract.
+# Browser UI is the kernel-attested root UDS peer and obtains only fixed Vault
+# records through short-lived helpers dropped to the Vault owner. Its inherited
+# environment is credential-free.
 webchat_start
 
-# Delegate-vault auto-provisioning. aimee-server seals operator-supplied delegate
-# API keys into its server-principal vault at startup, so a fresh deploy's
-# delegates/roundtables work with no manual `aimee vault set`. The source comes
-# from the environment, which runuser preserves into the aimee-server child:
-#   - AIMEE_DELEGATE_SECRETS_FILE=/run/secrets/aimee-delegates.json
-#       a JSON object {"<agent>":"<api-key>", ...}. Mount it readable by the
-#       container's "aimee" user (the server reads it after dropping privileges).
-#   - AIMEE_DELEGATE_KEY_<AGENT>=<api-key>   (env-only convenience; agent name
-#       lowercased, e.g. AIMEE_DELEGATE_KEY_MISTRAL).
-# Non-destructive by default; set AIMEE_DELEGATE_SECRETS_OVERWRITE=1 to replace an
-# existing vaulted key. Secrets are never written to AIMEE_HOME or logs.
 # Pre-warm the server-hosted OAuth CLIs (claude/codex) in the BACKGROUND so the
 # first `aimee agent setup *-oauth` is instant instead of waiting on (or timing
 # out against) a cold `npm i -g` — the failure mode on a freshly-deployed,
@@ -247,10 +310,7 @@ done
 
 log "starting aimee-server (socket=$SERVER_SOCK) as user aimee"
 rm -f "$AIMEE_HOME/aimee-http.sock" "$AIMEE_WFE_HTTP_SOCKET"
-# runuser/PAM resets selected resource limits, including RLIMIT_CORE, after the
-# parent entrypoint configured them. Raise the soft limit again as the final
-# unprivileged child operation so the actual server process inherits it.
-runuser -u aimee -- sh -c 'set -eu; . /usr/local/bin/core-storage.sh; aimee_enable_core_dumps; aimee_verify_core_dump; exec aimee-server --socket="$1"' sh "$SERVER_SOCK" &
+runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; exec aimee-server --socket="$1"' sh "$SERVER_SOCK" &
 server_pid=$!
 
 if [ "$AIMEE_WFE_ENGINE" = go ]; then
@@ -273,7 +333,7 @@ if [ "$AIMEE_WFE_ENGINE" = go ]; then
         exit 1
     fi
     log "starting Go WFE control plane (socket=$AIMEE_WFE_HTTP_SOCKET)"
-    runuser -u aimee -- sh -c 'set -eu; . /usr/local/bin/core-storage.sh; aimee_enable_core_dumps; exec aimee-wfe --home "$1" --socket "$2" --config "$3" --workflow-dir "$4" --agent-service-socket "$5"' sh \
+    runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; exec aimee-wfe --home "$1" --socket "$2" --config "$3" --workflow-dir "$4" --agent-service-socket "$5"' sh \
         "$AIMEE_HOME" "$AIMEE_WFE_HTTP_SOCKET" "$AIMEE_HOME/aimee.yaml" \
         "$AIMEE_HOME/workflows" "$AIMEE_HOME/aimee-http.sock" &
     wfe_pid=$!

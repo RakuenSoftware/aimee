@@ -388,10 +388,11 @@ int db2_is_ephemeral(void)
    return v;
 }
 
-static int db2_query_flag(const char *sql, const char *param_name, const char *param_value)
+static int db2_query_flag(void *conn, const char *sql, const char *param_name,
+                          const char *param_value)
 {
    char errbuf[256] = "";
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(g_conn, sql, errbuf, sizeof(errbuf));
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(conn, sql, errbuf, sizeof(errbuf));
    if (!stmt)
       return -1;
 
@@ -1026,13 +1027,19 @@ int db2_health_probe(int *schema_ok, int *have_pg_trgm)
    if (have_pg_trgm)
       *have_pg_trgm = 0;
 
-   if (!g_conn)
+   /* Health endpoints run on worker threads while the init thread performs
+    * periodic maintenance. Never bypass db2_conn() here: sharing g_conn with
+    * the checkpoint transaction lets concurrent libpq calls exchange results
+    * and can leave the owner connection transaction-aborted. */
+   void *conn = db2_conn();
+   if (!conn)
       return -1;
 
-   if (aimee_pg_exec(g_conn, "SELECT 1", errbuf, sizeof(errbuf)) != 0)
+   if (aimee_pg_exec(conn, "SELECT 1", errbuf, sizeof(errbuf)) != 0)
       return -1;
 
-   int schema_present = db2_query_flag("SELECT 1 FROM information_schema.tables "
+   int schema_present = db2_query_flag(conn,
+                                       "SELECT 1 FROM information_schema.tables "
                                        "WHERE table_schema = current_schema() AND table_name = :t",
                                        "t", "memories");
    if (schema_present < 0)
@@ -1050,7 +1057,7 @@ int db2_health_probe(int *schema_ok, int *have_pg_trgm)
       ext_present = 1;
    else
       ext_present =
-          db2_query_flag("SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'", NULL, NULL);
+          db2_query_flag(conn, "SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'", NULL, NULL);
    if (ext_present < 0)
       return -1;
    if (have_pg_trgm)
@@ -1063,12 +1070,15 @@ int db2_kb_health_probe(int *kb_tables_ok)
 {
    if (kb_tables_ok)
       *kb_tables_ok = 0;
-   if (!g_conn)
+   void *conn = db2_conn();
+   if (!conn)
       return -1;
-   int docs_ok = db2_query_flag("SELECT 1 FROM information_schema.tables "
+   int docs_ok = db2_query_flag(conn,
+                                "SELECT 1 FROM information_schema.tables "
                                 "WHERE table_schema = current_schema() AND table_name = :t",
                                 "t", "kb_documents");
-   int jobs_ok = db2_query_flag("SELECT 1 FROM information_schema.tables "
+   int jobs_ok = db2_query_flag(conn,
+                                "SELECT 1 FROM information_schema.tables "
                                 "WHERE table_schema = current_schema() AND table_name = :t",
                                 "t", "kb_async_jobs");
    if (docs_ok < 0 || jobs_ok < 0)
@@ -1094,7 +1104,8 @@ int db2_pg_stat_summary(int *active_conns, int *max_conns, int *is_replica,
    if (replica_lag_bytes)
       *replica_lag_bytes = -1;
 
-   if (!g_conn)
+   void *conn = db2_conn();
+   if (!conn)
       return -1;
 
    if (aimee_pg_is_shim())
@@ -1105,7 +1116,7 @@ int db2_pg_stat_summary(int *active_conns, int *max_conns, int *is_replica,
 
    if (active_conns)
    {
-      st = aimee_pg_prepare(g_conn,
+      st = aimee_pg_prepare(conn,
                             "SELECT count(*)::int FROM pg_stat_activity "
                             "WHERE datname = current_database()",
                             errbuf, sizeof(errbuf));
@@ -1119,7 +1130,7 @@ int db2_pg_stat_summary(int *active_conns, int *max_conns, int *is_replica,
 
    if (max_conns)
    {
-      st = aimee_pg_prepare(g_conn, "SELECT current_setting('max_connections')::int", errbuf,
+      st = aimee_pg_prepare(conn, "SELECT current_setting('max_connections')::int", errbuf,
                             sizeof(errbuf));
       if (st)
       {
@@ -1131,7 +1142,7 @@ int db2_pg_stat_summary(int *active_conns, int *max_conns, int *is_replica,
 
    if (is_replica)
    {
-      st = aimee_pg_prepare(g_conn, "SELECT pg_is_in_recovery()::int", errbuf, sizeof(errbuf));
+      st = aimee_pg_prepare(conn, "SELECT pg_is_in_recovery()::int", errbuf, sizeof(errbuf));
       if (st)
       {
          if (aimee_pg_step(st, errbuf, sizeof(errbuf)) == AIMEE_PG_ROW)
@@ -1145,7 +1156,7 @@ int db2_pg_stat_summary(int *active_conns, int *max_conns, int *is_replica,
    if (replica_lag_bytes && is_replica && *is_replica == 1)
    {
       st = aimee_pg_prepare(
-          g_conn,
+          conn,
           "SELECT COALESCE("
           "  pg_wal_lsn_diff(pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn()), 0)::bigint",
           errbuf, sizeof(errbuf));

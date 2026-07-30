@@ -15,9 +15,28 @@
 #include "aimee_home.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
+#include "runtime_secret.h"
 
 void config_kb_curator_defaults(config_t *cfg);
 int config_parse_kb_curator(config_t *cfg, const cJSON *root);
+
+static char migrated_db2[256];
+static char migrated_api_bearer[256];
+
+static int capture_migrated_secret(const char *name, const char *value)
+{
+   if (strcmp(name, "AIMEE_DB2_URL") == 0)
+      snprintf(migrated_db2, sizeof(migrated_db2), "%s", value);
+   else if (strcmp(name, "AIMEE_API_BEARER_TOKEN") == 0)
+      snprintf(migrated_api_bearer, sizeof(migrated_api_bearer), "%s", value);
+   return 0;
+}
+
+static int no_migrated_secret_present(const char *name)
+{
+   (void)name;
+   return 0;
+}
 
 /* kb_curator preset: the tier drives the 12 stage gates, an explicit per-stage
  * gate still overrides, and "off" disables everything. Pure (no file I/O). */
@@ -484,7 +503,9 @@ int main(void)
       assert(strcmp(cfg2.codex_model, "gpt-5.4") == 0);
       assert(strcmp(cfg2.model_reasoning_effort, "high") == 0);
       assert(strcmp(cfg2.memory_rerank_mode, "slow") == 0);
-      assert(strcmp(cfg2.kb_client_bearer_token, "tok-abc123") == 0);
+      /* Credential fields never round-trip through aimee.yaml. They are
+       * hydrated by the Vault bootstrap in production. */
+      assert(cfg2.kb_client_bearer_token[0] == '\0');
       /* Setup-wizard page-2 backend record survives save/load. */
       assert(strcmp(cfg2.kb_mode, "local") == 0);
       assert(strcmp(cfg2.llm_embed_backend, "local") == 0);
@@ -492,11 +513,9 @@ int main(void)
       assert(strcmp(cfg2.llm_synth_endpoint, "https://api.example/v1") == 0);
       assert(strcmp(cfg2.llm_synth_model, "gpt-5.5") == 0);
       assert(cfg2.server_api_http_port == 8910);
-      assert(strcmp(cfg2.server_api_bearer_token, "tok-api-xyz") == 0);
-      assert(cfg2.server_api_bearer_extra_count == 2);
-      assert(strcmp(cfg2.server_api_bearer_extra[0], "tok-client-one") == 0);
-      assert(strlen(cfg2.server_api_bearer_extra[1]) == 180);
-      assert(strspn(cfg2.server_api_bearer_extra[1], "x") == 180);
+      assert(cfg2.server_api_bearer_token[0] == '\0');
+      assert(cfg2.server_api_bearer_extra_count == 0);
+      assert(cfg2.server_api_bearer_extra[0][0] == '\0');
       assert(cfg2.server_api_rate_limit_per_min == 60);
       assert(cfg2.server_api_max_event_streams == 512);
       assert(strcmp(cfg2.server_api_client_transport, "http") == 0);
@@ -584,7 +603,7 @@ int main(void)
       assert(strcmp(cfg2.kb_curator_provider_model, "gemma-4-e4b") == 0);
       assert(strcmp(cfg2.kb_curator_tier_b_base_url, "https://api.big/v1") == 0);
       assert(strcmp(cfg2.kb_curator_tier_b_model, "big-32b") == 0);
-      assert(strcmp(cfg2.kb_curator_tier_b_api_key, "sk-secret") == 0);
+      assert(cfg2.kb_curator_tier_b_api_key[0] == '\0');
       assert(cfg2.kb_evidence_embed_enabled == 0);
       assert(cfg2.kb_curator_cross_repo_graph_enabled == 0);
       assert(cfg2.kb_curator_cross_repo_distinctiveness_v == 3);
@@ -638,7 +657,7 @@ int main(void)
       assert(cfg2.identity_working_profile_injection_fields_count == 1 &&
              strcmp(cfg2.identity_working_profile_injection_fields[0], "tone") == 0);
       /* regression: trigger/cron (arrays of nested structs) used to be dropped on save. */
-      assert(strcmp(cfg2.trigger_auth_token, "trig-tok") == 0 && cfg2.trigger_max_concurrent == 4);
+      assert(cfg2.trigger_auth_token[0] == '\0' && cfg2.trigger_max_concurrent == 4);
       assert(cfg2.trigger_rule_count == 1);
       assert(strcmp(cfg2.trigger_rules[0].source, "github-webhook") == 0);
       assert(strcmp(cfg2.trigger_rules[0].event, "push:main") == 0);
@@ -658,7 +677,7 @@ int main(void)
       assert(cfg2.cron_jobs[0].deliver_only_if_changed == 1);
       /* regression: niche scalar + auxiliary sections used to be dropped on save. */
       assert(strcmp(cfg2.proxy_url, "http://proxy:3128") == 0);
-      assert(strcmp(cfg2.proxy_token, "ptok") == 0);
+      assert(cfg2.proxy_token[0] == '\0');
       assert(cfg2.max_background_processes == 9);
       assert(cfg2.model_meta_refresh_minutes == 15 && cfg2.model_meta_capability_routing == 0);
       assert(strcmp(cfg2.search_backend, "searxng") == 0 && cfg2.search_max_results == 7);
@@ -2005,6 +2024,36 @@ int main(void)
       unlink(cpath);
    }
 
+   /* Legacy credentials are handed to the injected Vault writer and removed
+    * from the file in the same migration. The config module owns its struct
+    * layout; the Vault adapter never reaches into config_t. */
+   {
+      char cpath[512];
+      snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
+      FILE *f = fopen(cpath, "w");
+      assert(f);
+      fprintf(f, "db2_url: postgresql://legacy-user:legacy-pass@db/aimee\n");
+      fprintf(f, "aimee:\n  api:\n    bearer_token: legacy-test-bearer\n");
+      fclose(f);
+      memset(migrated_db2, 0, sizeof(migrated_db2));
+      memset(migrated_api_bearer, 0, sizeof(migrated_api_bearer));
+      assert(config_migrate_legacy_credentials(capture_migrated_secret,
+                                               no_migrated_secret_present) == 1);
+      assert(strcmp(migrated_db2, "postgresql://legacy-user:legacy-pass@db/aimee") == 0);
+      assert(strcmp(migrated_api_bearer, "legacy-test-bearer") == 0);
+      f = fopen(cpath, "r");
+      assert(f);
+      char persisted[8192];
+      size_t persisted_len = fread(persisted, 1, sizeof(persisted) - 1, f);
+      persisted[persisted_len] = '\0';
+      fclose(f);
+      assert(strstr(persisted, "legacy-pass") == NULL);
+      assert(strstr(persisted, "legacy-test-bearer") == NULL);
+      runtime_secret_wipe(migrated_db2, sizeof(migrated_db2));
+      runtime_secret_wipe(migrated_api_bearer, sizeof(migrated_api_bearer));
+      unlink(cpath);
+   }
+
    {
       static config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
@@ -2015,9 +2064,10 @@ int main(void)
 
       static config_t cfg2;
       memset(&cfg2, 0, sizeof(cfg2));
+      platform_setenv("AIMEE_NO_CACHE", "1");
+      assert(config_load_file(&cfg2) == 0);
       platform_unsetenv("AIMEE_NO_CACHE");
-      assert(config_load(&cfg2) == 0);
-      assert(strcmp(cfg2.db2_url, "postgres:///aimee_shared") == 0);
+      assert(cfg2.db2_url[0] == '\0');
       assert(cfg2.db2_pool_size == 16);
 
       char cpath[512];
@@ -2209,44 +2259,34 @@ int main(void)
          platform_unsetenv("AIMEE_MODE");
    }
 
-   /* --- AIMEE_DB2_URL env overrides a cached config-file db2_url ---
+   /* --- Vault-hydrated AIMEE_DB2_URL overrides a cached config-file db2_url ---
     * Regression for the kb IP-drift outage: when Postgres is recreated on a new
     * bridge IP the runtime injects the current address via AIMEE_DB2_URL, which
     * must win over the stale value persisted in aimee.yaml. */
    {
-      char *old = getenv("AIMEE_DB2_URL");
-      char *saved = old ? strdup(old) : NULL;
-
       config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       snprintf(cfg.db2_url, sizeof(cfg.db2_url),
                "postgresql://aimee:aimee@10.0.0.9:5432/aimee_shared");
 
-      /* env set -> overrides the cached file value, returns 1 (applied) */
-      platform_setenv("AIMEE_DB2_URL", "postgresql://aimee:aimee@10.0.0.16:5432/aimee_shared");
+      /* Vault runtime value overrides the cached file value. */
+      assert(runtime_secret_store("AIMEE_DB2_URL",
+                                  "postgresql://aimee:aimee@10.0.0.16:5432/aimee_shared") == 0);
       assert(config_apply_db2_url_env_override(&cfg) == 1);
       assert(strcmp(cfg.db2_url, "postgresql://aimee:aimee@10.0.0.16:5432/aimee_shared") == 0);
 
-      /* env unset -> leaves the existing value untouched, returns 0 */
-      platform_unsetenv("AIMEE_DB2_URL");
+      runtime_secret_remove("AIMEE_DB2_URL");
       assert(config_apply_db2_url_env_override(&cfg) == 0);
       assert(strcmp(cfg.db2_url, "postgresql://aimee:aimee@10.0.0.16:5432/aimee_shared") == 0);
 
-      /* empty env -> treated as unset, returns 0 */
-      platform_setenv("AIMEE_DB2_URL", "");
+      /* No runtime credential leaves the existing value untouched. */
       assert(config_apply_db2_url_env_override(&cfg) == 0);
       assert(strcmp(cfg.db2_url, "postgresql://aimee:aimee@10.0.0.16:5432/aimee_shared") == 0);
 
       /* NULL cfg -> no crash, returns 0 */
       assert(config_apply_db2_url_env_override(NULL) == 0);
 
-      if (saved)
-      {
-         platform_setenv("AIMEE_DB2_URL", saved);
-         free(saved);
-      }
-      else
-         platform_unsetenv("AIMEE_DB2_URL");
+      runtime_secret_remove("AIMEE_DB2_URL");
    }
 
    /* learning.review.* config parser (idle-reflection scheduler knobs). */
@@ -2430,7 +2470,7 @@ int main(void)
       memset(&c, 0, sizeof c);
       cJSON *root = cJSON_CreateObject(); /* no "api" block: env is the only source */
 
-      platform_setenv("AIMEE_API_BEARER_TOKEN", "env-strong-abc123");
+      assert(runtime_secret_store("AIMEE_API_BEARER_TOKEN", "env-strong-abc123") == 0);
       config_parse_server_api(&c, root);
       assert(strcmp(c.server_api_bearer_token, "env-strong-abc123") == 0);
 
@@ -2446,12 +2486,13 @@ int main(void)
       assert(c.server_api_bearer_extra[0][0] == '\0');
 
       /* Env overrides a pre-existing (e.g. seeded bootstrap) value too. */
-      snprintf(c.server_api_bearer_token, sizeof c.server_api_bearer_token, "aimee-local-dev");
+      snprintf(c.server_api_bearer_token, sizeof c.server_api_bearer_token,
+               "unit-test-legacy-primary");
       config_parse_server_api(&c, root);
       assert(strcmp(c.server_api_bearer_token, "env-strong-abc123") == 0);
 
       /* Without the env, the existing value is left untouched. */
-      platform_unsetenv("AIMEE_API_BEARER_TOKEN");
+      runtime_secret_remove("AIMEE_API_BEARER_TOKEN");
       snprintf(c.server_api_bearer_token, sizeof c.server_api_bearer_token, "file-value");
       config_parse_server_api(&c, root);
       assert(strcmp(c.server_api_bearer_token, "file-value") == 0);
@@ -2514,7 +2555,7 @@ int main(void)
       config_emit_deploy_env(&cfg, env, sizeof(env));
       assert(strstr(env, "COMPOSE_PROFILES=\n") != NULL);
       assert(strstr(env, "AIMEE_KB_API_URL=https://kb.remote:4010\n") != NULL);
-      assert(strstr(env, "AIMEE_KB_API_BEARER_TOKEN=tok-x\n") != NULL);
+      assert(strstr(env, "AIMEE_KB_API_BEARER_TOKEN=") == NULL);
       assert(strstr(env, "AIMEE_LLM_") == NULL);
       assert(strstr(env, "EMBEDDER_MODEL") == NULL);
 

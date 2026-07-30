@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,32 +39,47 @@ func TestShippedWorkflowDefinitionsRunWithNativeEngine(t *testing.T) {
 	}
 }
 
+func TestShippedAutonomousWorkflowRetriesAreBounded(t *testing.T) {
+	registry, err := wfe.NewRegistry(copyShippedWorkflowDefinitions(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks := []struct {
+		workflow, node string
+		max            int
+	}{
+		{workflow: "build", node: "plan_gate", max: 6},
+		{workflow: "build", node: "slices", max: 3},
+		{workflow: "build-triggered", node: "plan_gate", max: 6},
+		{workflow: "build-triggered", node: "slices", max: 3},
+		{workflow: "slice", node: "impl", max: 3},
+	}
+	for _, check := range checks {
+		definition, err := registry.Pin(check.workflow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var found *wfe.Node
+		for i := range definition.Nodes {
+			if definition.Nodes[i].ID == check.node {
+				found = &definition.Nodes[i]
+				break
+			}
+		}
+		if found == nil {
+			t.Fatalf("workflow %s has no node %s", check.workflow, check.node)
+		}
+		if got := maxIterations(*found); got > check.max {
+			t.Errorf("workflow %s node %s retries %d times, want at most %d", check.workflow, check.node, got, check.max)
+		}
+	}
+}
+
 func runExactShippedWorkflow(t *testing.T, workflowName, wantState, wantPause string) {
 	t.Helper()
 	root := t.TempDir()
 	repo := newShippedWorkflowRepo(t, root)
-	workflowDir := filepath.Join(root, "workflows")
-	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	_, thisFile, _, _ := runtime.Caller(0)
-	shippedDir := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "config", "workflows")
-	entries, err := os.ReadDir(shippedDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".yaml" {
-			continue
-		}
-		content, readErr := os.ReadFile(filepath.Join(shippedDir, entry.Name()))
-		if readErr != nil {
-			t.Fatal(readErr)
-		}
-		if writeErr := os.WriteFile(filepath.Join(workflowDir, entry.Name()), content, 0o600); writeErr != nil {
-			t.Fatal(writeErr)
-		}
-	}
+	workflowDir := copyShippedWorkflowDefinitions(t)
 	registry, err := wfe.NewRegistry(workflowDir)
 	if err != nil {
 		t.Fatal(err)
@@ -166,6 +182,34 @@ func runExactShippedWorkflow(t *testing.T, workflowName, wantState, wantPause st
 			t.Fatalf("trigger proposal was not archived: %v", err)
 		}
 	}
+}
+
+func copyShippedWorkflowDefinitions(t *testing.T) string {
+	t.Helper()
+	workflowDir := filepath.Join(t.TempDir(), "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, thisFile, _, _ := runtime.Caller(0)
+	shippedDir := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "config", "workflows")
+	entries, err := os.ReadDir(shippedDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		base := strings.TrimSuffix(entry.Name(), ".yaml")
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".yaml" || strings.LastIndex(base, ".v") >= 0 {
+			continue
+		}
+		content, readErr := os.ReadFile(filepath.Join(shippedDir, entry.Name()))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if writeErr := os.WriteFile(filepath.Join(workflowDir, entry.Name()), content, 0o600); writeErr != nil {
+			t.Fatal(writeErr)
+		}
+	}
+	return workflowDir
 }
 
 func shippedRoundtableStore(t *testing.T) *roundtablecfg.Store {

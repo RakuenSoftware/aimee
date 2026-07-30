@@ -3,10 +3,12 @@
 
 #include "deploy_apply.h"
 
-#include "aimee_home.h"      /* persistent managed service credential */
+#include "aimee_home.h"      /* one-shot legacy credential migration path */
 #include "config.h"          /* config_t, config_load */
 #include "config_database.h" /* config_emit_deploy_env */
 #include "platform_random.h" /* 256-bit managed kb -> llm bearer */
+#include "runtime_secret.h"
+#include "vault_config_bootstrap.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -17,15 +19,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 extern char **environ;
 
 #define DEPLOY_DEFAULT_COMPOSE "/opt/aimee/deploy/aimee-managed.compose.yaml"
-#define DEPLOY_OUT_CAP         8192 /* tail of compose output kept for the UI */
-#define DEPLOY_LLM_TOKEN_FILE  ".managed-kb-llm-token"
-#define DEPLOY_LLM_TOKEN_HEX   64 /* 256-bit opaque bearer */
+#define DEPLOY_OUT_CAP         8192                    /* tail of compose output kept for the UI */
+#define DEPLOY_LLM_TOKEN_FILE  ".managed-kb-llm-token" /* legacy migration only */
+#define DEPLOY_LLM_TOKEN_HEX   64                      /* 256-bit opaque bearer */
 
 /* Background-deploy state (one at a time; the wizard drives a single stack). */
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -75,10 +78,28 @@ static int deploy_llm_token_valid(const char *token)
    return 1;
 }
 
-/* Read or atomically create the stable service bearer shared only by the managed
- * aimee-kb and aimee-llm containers. The server's persistent AIMEE_HOME volume is
- * the authority for the credential, so a redeploy/restart does not silently
- * rotate one side away from the other. An explicit operator token wins. */
+static void deploy_remove_legacy_token_file(const char *path, off_t size)
+{
+   int fd = open(path, O_WRONLY | O_CLOEXEC | O_NOFOLLOW);
+   if (fd >= 0)
+   {
+      char zeros[256] = {0};
+      off_t left = size;
+      while (left > 0)
+      {
+         size_t chunk = left > (off_t)sizeof(zeros) ? sizeof(zeros) : (size_t)left;
+         if (write(fd, zeros, chunk) != (ssize_t)chunk)
+            break;
+         left -= (off_t)chunk;
+      }
+      (void)fsync(fd);
+      close(fd);
+   }
+   (void)unlink(path);
+}
+
+/* Resolve or mint the managed KB-to-LLM service bearer. Vault is the only
+ * durable authority; the old AIMEE_HOME file is consumed and erased once. */
 static int deploy_llm_token(char *out, size_t cap)
 {
    if (!out || cap < DEPLOY_LLM_TOKEN_HEX + 1)
@@ -86,14 +107,23 @@ static int deploy_llm_token(char *out, size_t cap)
    /* AIMEE_LLM_AUTH_TOKEN is the child credential and may be stale inherited
     * process state. It is deliberately ignored here. Operators who must adopt
     * an existing managed LLM use the distinct, explicit override variable. */
-   const char *configured = getenv("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
-   if (configured && configured[0])
+   char configured[513];
+   if (runtime_secret_get("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE", configured, sizeof(configured)))
    {
       if (!deploy_llm_token_valid(configured) || strlen(configured) >= cap)
+      {
+         runtime_secret_wipe(configured, sizeof(configured));
          return -1;
+      }
       snprintf(out, cap, "%s", configured);
-      return 0;
+      int rc = vault_runtime_secret_set("AIMEE_LLM_AUTH_TOKEN", configured);
+      runtime_secret_wipe(configured, sizeof(configured));
+      return rc;
    }
+   runtime_secret_wipe(configured, sizeof(configured));
+
+   if (runtime_secret_get("AIMEE_LLM_AUTH_TOKEN", out, cap))
+      return deploy_llm_token_valid(out) ? 0 : -1;
 
    const char *home = aimee_home();
    if (!home || !home[0])
@@ -119,7 +149,14 @@ static int deploy_llm_token(char *out, size_t cap)
       while (n > 0 && (out[n - 1] == '\n' || out[n - 1] == '\r'))
          n--;
       out[n] = '\0';
-      return deploy_llm_token_valid(out) ? 0 : -1;
+      if (!deploy_llm_token_valid(out) ||
+          vault_runtime_secret_set("AIMEE_LLM_AUTH_TOKEN", out) != 0)
+      {
+         runtime_secret_wipe(out, cap);
+         return -1;
+      }
+      deploy_remove_legacy_token_file(path, st.st_size);
+      return 0;
    }
    if (errno != ENOENT)
       return -1;
@@ -127,28 +164,13 @@ static int deploy_llm_token(char *out, size_t cap)
    char proposed[DEPLOY_LLM_TOKEN_HEX + 1];
    if (platform_random_hex(proposed, DEPLOY_LLM_TOKEN_HEX) != 0)
       return -1;
-   fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
-   if (fd < 0)
+   if (vault_runtime_secret_set("AIMEE_LLM_AUTH_TOKEN", proposed) != 0)
    {
-      /* Another deploy process may have won the create race. Re-enter through
-       * the validated read path rather than overwriting its credential. */
-      if (errno == EEXIST)
-         return deploy_llm_token(out, cap);
-      return -1;
-   }
-   size_t len = strlen(proposed);
-   ssize_t written = write(fd, proposed, len);
-   int ok = written == (ssize_t)len && fsync(fd) == 0 && fchmod(fd, 0600) == 0;
-   int saved = errno;
-   close(fd);
-   errno = saved;
-   if (!ok)
-   {
-      unlink(path);
+      runtime_secret_wipe(proposed, sizeof(proposed));
       return -1;
    }
    snprintf(out, cap, "%s", proposed);
-   memset(proposed, 0, sizeof(proposed));
+   runtime_secret_wipe(proposed, sizeof(proposed));
    return 0;
 }
 
@@ -232,12 +254,15 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
     * yet — whatever serves it may well be a managed service again. */
    const int managed_llm = deploy_env_has_profile(env, "llm");
    const int managed_kb = deploy_env_has_profile(env, "kb");
-   const char *explicit_conn = getenv("AIMEE_KB_CONN");
+   char explicit_conn[4096];
+   int have_explicit_conn =
+       runtime_secret_get("AIMEE_KB_CONN", explicit_conn, sizeof(explicit_conn));
    const char *explicit_id = getenv("AIMEE_SERVER_ID");
    const char *explicit_team = getenv("AIMEE_SERVER_TEAM_ID");
-   const int explicit_parts = (explicit_conn && explicit_conn[0] ? 1 : 0) +
+   const int explicit_parts = (have_explicit_conn ? 1 : 0) +
                               (explicit_id && explicit_id[0] ? 1 : 0) +
                               (explicit_team && explicit_team[0] ? 1 : 0);
+   runtime_secret_wipe(explicit_conn, sizeof(explicit_conn));
    if (managed_kb && explicit_parts != 0 && explicit_parts != 3)
    {
       if (err && err_cap)
@@ -256,8 +281,8 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
    {
       if (err && err_cap)
          snprintf(err, err_cap,
-                  "could not create/read the managed KB-to-LLM credential under AIMEE_HOME "
-                  "(the file must be regular, private, and readable by aimee-server)");
+                  "could not load or create the managed KB-to-LLM credential in Vault "
+                  "(a legacy private file is accepted only for one-shot migration)");
       return NULL; /* fail closed: never launch a keyless managed LLM */
    }
 
@@ -345,8 +370,8 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
  * stdout+stderr into out (truncated to out_cap). *exit_code gets the child's exit
  * status (-1 if it did not exit normally). Returns 0 on success, -1 on
  * fork/pipe/wait failure. envp may be NULL (inherit environ). */
-static int run_capture(const char *const argv[], char **envp, char *out, size_t out_cap,
-                       int *exit_code)
+static int run_capture_input(const char *const argv[], char **envp, const void *input,
+                             size_t input_len, char *out, size_t out_cap, int *exit_code)
 {
    if (out && out_cap)
       out[0] = '\0';
@@ -356,12 +381,24 @@ static int run_capture(const char *const argv[], char **envp, char *out, size_t 
    int pipefd[2];
    if (pipe(pipefd) != 0)
       return -1;
+   int inputfd[2] = {-1, -1};
+   if (input && (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, inputfd) != 0))
+   {
+      close(pipefd[0]);
+      close(pipefd[1]);
+      return -1;
+   }
 
    pid_t pid = fork();
    if (pid < 0)
    {
       close(pipefd[0]);
       close(pipefd[1]);
+      if (inputfd[0] >= 0)
+      {
+         close(inputfd[0]);
+         close(inputfd[1]);
+      }
       return -1;
    }
    if (pid == 0)
@@ -371,6 +408,12 @@ static int run_capture(const char *const argv[], char **envp, char *out, size_t 
       dup2(pipefd[1], STDOUT_FILENO);
       dup2(pipefd[1], STDERR_FILENO);
       close(pipefd[1]);
+      if (inputfd[0] >= 0)
+      {
+         close(inputfd[1]);
+         dup2(inputfd[0], STDIN_FILENO);
+         close(inputfd[0]);
+      }
       if (envp)
          execvpe("docker", (char *const *)argv, envp);
       else
@@ -379,6 +422,26 @@ static int run_capture(const char *const argv[], char **envp, char *out, size_t 
    }
 
    close(pipefd[1]);
+   if (inputfd[0] >= 0)
+   {
+      close(inputfd[0]);
+      const unsigned char *p = input;
+      size_t sent = 0;
+      while (sent < input_len)
+      {
+         ssize_t n = send(inputfd[1], p + sent, input_len - sent, MSG_NOSIGNAL);
+         if (n <= 0)
+            break;
+         sent += (size_t)n;
+      }
+      close(inputfd[1]);
+      if (sent != input_len)
+      {
+         close(pipefd[0]);
+         (void)waitpid(pid, NULL, 0);
+         return -1;
+      }
+   }
    size_t len = 0;
    char buf[1024];
    ssize_t r;
@@ -403,6 +466,12 @@ static int run_capture(const char *const argv[], char **envp, char *out, size_t 
    if (exit_code)
       *exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
    return 0;
+}
+
+static int run_capture(const char *const argv[], char **envp, char *out, size_t out_cap,
+                       int *exit_code)
+{
+   return run_capture_input(argv, envp, NULL, 0, out, out_cap, exit_code);
 }
 
 /* Retire the pre-baked aimee-llm-cpu container left over from an older install.
@@ -497,6 +566,35 @@ static int deploy_up_service_argv(const char *file, const char *service, const c
    return (int)n;
 }
 
+/* Bootstrap the managed KB's LLM service bearer over stdin before creating the
+ * long-lived KB container. The one-shot is --rm and its Config.Env is clean;
+ * only the pipe carries the first-boot value. */
+static int deploy_kb_vault_bootstrap_argv(const char *file, const char **argv, size_t cap)
+{
+   const char *cmd[] = {"docker",       "compose",
+                        "-f",           file,
+                        "run",          "--rm",
+                        "-T",           "--no-deps",
+                        "--entrypoint", "/usr/local/bin/aimee-kb",
+                        "aimee-kb",     "--bootstrap-vault-stdin"};
+   size_t n = sizeof(cmd) / sizeof(cmd[0]);
+   if (!argv || !file || !file[0] || cap < n + 1)
+      return -1;
+   for (size_t i = 0; i < n; i++)
+      argv[i] = cmd[i];
+   argv[n] = NULL;
+   return (int)n;
+}
+
+static const char *deploy_env_value(char **envp, const char *name)
+{
+   size_t len = name ? strlen(name) : 0;
+   for (size_t i = 0; envp && envp[i]; i++)
+      if (strncmp(envp[i], name, len) == 0 && envp[i][len] == '=')
+         return envp[i] + len + 1;
+   return NULL;
+}
+
 /* Run the one-shot managed identity installer after the KB is healthy. The
  * service mounts both private named volumes and writes the server identity
  * directly, so no enrollment token or private key crosses host argv/stdout. */
@@ -556,7 +654,31 @@ static void *deploy_worker(void *arg)
       /* The server is already running this worker. Start KB next and LLM last.
        * Model downloads continue inside the LLM container after this deploy
        * finishes; KB initialization and CPU indexing do not wait for them. */
-      if (managed_kb)
+      if (managed_kb && managed_llm)
+      {
+         const char *token = deploy_env_value(envp, "AIMEE_LLM_AUTH_TOKEN");
+         char record[sizeof("AIMEE_LLM_AUTH_TOKEN=") + 512];
+         int record_len =
+             token ? snprintf(record, sizeof(record), "AIMEE_LLM_AUTH_TOKEN=%s", token) : -1;
+         const char *bootstrap_argv[16];
+         int bootstrap_code = -1;
+         used = strlen(out);
+         if (record_len <= 0 || (size_t)record_len >= sizeof(record) ||
+             deploy_kb_vault_bootstrap_argv(
+                 file, bootstrap_argv, sizeof(bootstrap_argv) / sizeof(bootstrap_argv[0])) < 0 ||
+             run_capture_input(bootstrap_argv, envp, record, (size_t)record_len + 1, out + used,
+                               sizeof(out) - used, &bootstrap_code) != 0 ||
+             bootstrap_code != 0)
+         {
+            code = bootstrap_code == 0 ? -1 : bootstrap_code;
+            used = strlen(out);
+            if (used < sizeof(out) - 1)
+               snprintf(out + used, sizeof(out) - used,
+                        "deploy: failed to seal the managed LLM credential into the KB Vault\n");
+         }
+         memset(record, 0, sizeof(record));
+      }
+      if (code == 0 && managed_kb)
       {
          const char *kb_argv[10];
          used = strlen(out);

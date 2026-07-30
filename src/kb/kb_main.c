@@ -1,4 +1,5 @@
 #include "aimee.h"
+#include "aimee_home.h"
 #include "agent_exec.h"
 #include "config.h"
 #include "config_database.h"
@@ -47,6 +48,9 @@
 #include "db2/kb_audit_worm.h"
 #include "db2/vault_operator_status_runtime.h"
 #include "vault_server_key.h"       /* startup durable seal-epoch synchronization */
+#include "vault_env_bootstrap.h"    /* first-boot credential env -> Vault */
+#include "vault_config_bootstrap.h" /* legacy config credential -> Vault */
+#include "runtime_secret.h"         /* wipe Vault-sourced runtime cache at exit */
 #include "kb_memory_audit_bridge.h" /* record memory mutations on aimee-kb's own obs bus */
 #include "log.h"                    /* audit_log_open — KB memory-audit ledger */
 #include <signal.h>
@@ -691,8 +695,7 @@ static int kb_cmd_enroll(int argc, char **argv)
    char conn[1024];
    if (kb_enroll_mint(kb_default_config_dir(), host, port, scope, conn, sizeof(conn)) != 0)
    {
-      fprintf(stderr, "aimee-kb enroll: failed to mint enrollment (check CA / token store under "
-                      "the kb config dir)\n");
+      fprintf(stderr, "aimee-kb enroll: failed to mint enrollment (check CA and Vault custody)\n");
       return 1;
    }
    puts(conn);
@@ -1548,6 +1551,102 @@ static int kb_cmd_tenancy(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
+   if (argc > 1 && strcmp(argv[1], "--list-credential-env-names") == 0)
+      return vault_env_print_credential_names() == 0 ? 0 : 1;
+
+   /* A native launch follows the same disposable first-boot boundary as the
+    * container entrypoint. unsetenv() alone can leave inherited bytes visible
+    * in /proc/<pid>/environ, so a credential-bearing process may seal into
+    * Vault but may not become the long-lived KB. The bootstrap helper itself is
+    * already short-lived and therefore does not need to re-exec. */
+   if (!(argc > 1 && (strcmp(argv[1], "--bootstrap-vault-env") == 0 ||
+                      strcmp(argv[1], "--bootstrap-vault-stdin") == 0)))
+   {
+      int credential_env = vault_env_has_credential_environment();
+      if (credential_env < 0)
+      {
+         fputs("aimee-kb: malformed credential environment name\n", stderr);
+         return 1;
+      }
+      if (credential_env > 0)
+      {
+         if (vault_env_bootstrap_init_all() < 0 || vault_env_has_credential_environment() != 0)
+         {
+            runtime_secret_clear();
+            fputs("aimee-kb: first-boot credential Vault bootstrap failed\n", stderr);
+            return 1;
+         }
+         runtime_secret_clear();
+         execvp(argv[0], argv);
+         fprintf(stderr, "aimee-kb: clean-environment re-exec failed: %s\n", strerror(errno));
+         return 1;
+      }
+   }
+
+   /* The local file Vault is still bound here (before KB switches ordinary
+    * tenant Vault operations to Postgres), so it can break the DB credential
+    * bootstrap cycle and hydrate process memory without retaining env secrets. */
+   if (vault_env_bootstrap_init_all() < 0)
+   {
+      fputs("aimee-kb: credential Vault bootstrap failed\n", stderr);
+      return 1;
+   }
+   if (argc == 2 && strcmp(argv[1], "--bootstrap-vault-stdin") == 0 &&
+       (vault_env_import_stream(stdin) < 0 || vault_env_bootstrap_init_all() < 0 ||
+        vault_env_has_credential_environment() != 0))
+   {
+      runtime_secret_clear();
+      fputs("aimee-kb: streamed credential Vault bootstrap failed\n", stderr);
+      return 1;
+   }
+   if (vault_config_bootstrap_init() < 0)
+   {
+      fputs("aimee-kb: credential config Vault migration failed\n", stderr);
+      return 1;
+   }
+   {
+      char legacy_enroll[1024];
+      int n = snprintf(legacy_enroll, sizeof(legacy_enroll), "%s/kb-enroll-tokens",
+                       kb_default_config_dir());
+      if (n <= 0 || (size_t)n >= sizeof(legacy_enroll) ||
+          kb_enroll_store_migrate(legacy_enroll) != 0)
+      {
+         fputs("aimee-kb: enrollment credential Vault migration failed\n", stderr);
+         return 1;
+      }
+   }
+   (void)atexit(runtime_secret_clear);
+
+   if (argc > 1 && (strcmp(argv[1], "--bootstrap-vault-env") == 0 ||
+                    strcmp(argv[1], "--bootstrap-vault-stdin") == 0))
+      return 0;
+
+   /* Entrypoint decision probe: presence only, never the DB credential. A KB
+    * restarted without first-boot environment metadata must still select the
+    * external database whose URL is held exclusively in Vault. */
+   if (argc == 2 && strcmp(argv[1], "--vault-db2-external") == 0)
+   {
+      char db2_url[4096];
+      int present = runtime_secret_get("AIMEE_DB2_URL", db2_url, sizeof(db2_url));
+      char embedded[4096];
+      const char *home = aimee_home();
+      int n = home ? snprintf(embedded, sizeof(embedded), "postgresql:///aimee_shared?host=%s/run",
+                              home)
+                   : -1;
+      int external =
+          present && (n <= 0 || (size_t)n >= sizeof(embedded) || strcmp(db2_url, embedded) != 0);
+      runtime_secret_wipe(db2_url, sizeof(db2_url));
+      runtime_secret_wipe(embedded, sizeof(embedded));
+      return external ? 0 : 1;
+   }
+   if (argc == 2 && strcmp(argv[1], "--vault-llm-auth-configured") == 0)
+   {
+      char token[513];
+      int present = runtime_secret_get("AIMEE_LLM_AUTH_TOKEN", token, sizeof(token));
+      runtime_secret_wipe(token, sizeof(token));
+      return present ? 0 : 1;
+   }
+
    /* Subcommands (must precede the daemon flag loop). */
    if (argc > 1 && strcmp(argv[1], "enroll") == 0)
       return kb_cmd_enroll(argc, argv);

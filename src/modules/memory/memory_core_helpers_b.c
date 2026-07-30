@@ -5,6 +5,7 @@
 #define _GNU_SOURCE
 #endif
 #include "memory_core_internal.h"
+#include "runtime_secret.h"
 /* memory_core_helpers.c: split from memory_core.c into a real translation unit
  * (was memory_core_helpers.inc, textually included only to stay under the
  * line-check ceiling). Cross-TU declarations live in the module header. */
@@ -441,27 +442,45 @@ static void memory_embed_http_url(const char *base, const char *path, char *out,
 
 /* POST body to {base}{path}; on success returns 0 with the response body in
  * *resp (caller frees). Any transport error or non-2xx leaves *resp NULL. */
-int memory_embed_http_post(const char *base, const char *path, const char *body, char **resp)
+int memory_embed_http_post_status(const char *base, const char *path, const char *body, char **resp,
+                                  int *status_out)
 {
    char url[1024];
-   char auth[640];
+   char auth[640] = "";
+   char token[512] = "";
    const char *auth_header = NULL;
-   const char *token = getenv("AIMEE_LLM_AUTH_TOKEN");
+   int have_token = runtime_secret_get("AIMEE_LLM_AUTH_TOKEN", token, sizeof(token));
    const char *auth_required = getenv("AIMEE_LLM_AUTH_REQUIRED");
-   if (auth_required && strcmp(auth_required, "1") == 0 && (!token || !token[0]))
+   if (status_out)
+      *status_out = -1;
+   if (auth_required && strcmp(auth_required, "1") == 0 && !have_token)
+   {
+      if (status_out)
+         *status_out = 401;
       return -1;
-   if (token && token[0])
+   }
+   if (have_token)
    {
       /* Managed tokens are capped at 512 bytes; this also rejects any longer
        * external token instead of truncating an Authorization header. */
       int n = snprintf(auth, sizeof(auth), "Authorization: Bearer %s", token);
       if (n < 0 || (size_t)n >= sizeof(auth))
+      {
+         runtime_secret_wipe(token, sizeof(token));
+         runtime_secret_wipe(auth, sizeof(auth));
+         if (status_out)
+            *status_out = 401;
          return -1;
+      }
       auth_header = auth;
    }
    memory_embed_http_url(base, path, url, sizeof(url));
    *resp = NULL;
    int status = agent_http_post(url, auth_header, body, resp, MEMORY_EMBED_HTTP_TIMEOUT_MS, NULL);
+   if (status_out)
+      *status_out = status;
+   runtime_secret_wipe(token, sizeof(token));
+   runtime_secret_wipe(auth, sizeof(auth));
    if (status < 200 || status >= 300 || !*resp)
    {
       free(*resp);
@@ -469,6 +488,11 @@ int memory_embed_http_post(const char *base, const char *path, const char *body,
       return -1;
    }
    return 0;
+}
+
+int memory_embed_http_post(const char *base, const char *path, const char *body, char **resp)
+{
+   return memory_embed_http_post_status(base, path, body, resp, NULL);
 }
 
 /* Read the embedder's vector-space identity from its /health `serving_id`.

@@ -140,17 +140,6 @@ func (s *server) handleSPA(w http.ResponseWriter, r *http.Request) {
 	w.Write(spaHTML)
 }
 
-// handleAuthLogin delegates JSON login to the SmoothGUI handler and sets a
-// secure cookie appropriate for this server's TLS mode.
-func (s *server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
-	// Wrap the response writer to intercept the Set-Cookie header so we can
-	// rewrite Secure based on our TLS setting.
-	if !s.cfg.tlsEnabled() {
-		w = &insecureCookieWriter{ResponseWriter: w}
-	}
-	s.authH.Login(w, r)
-}
-
 // insecureCookieWriter strips the Secure flag from Set-Cookie when TLS is off.
 // Both WriteHeader and Write are overridden because net/http's implicit
 // WriteHeader(200) (triggered by the first Write call) bypasses the interface

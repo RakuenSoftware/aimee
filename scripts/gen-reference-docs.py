@@ -107,7 +107,7 @@ CFG_KEY_DESC = {
     "audit_action_enabled": "Publish governed tool-action audit rows (default on); disabling it creates an audit coverage gap.",
     "code_trust_actuation_enabled": "Use earned code-graph trust lessons only as an equal-score retrieval tiebreak (default off).",
     "guardrails_semantic_mode": "Semantic guardrail mode: off, dry_run, advisory, or enforce.",
-    "kb_client_bearer_token": "Server-to-KB bearer token; secret, restart required.",
+    "kb_client_bearer_token": "Vault-backed server-to-KB bearer; reads are redacted; restart required.",
     "kb_client_url": "Remote aimee-kb API base URL used by aimee-server; restart required.",
     "kb_curator_extract_code_workers": "Parallel curator code-extraction workers, bounded to the synthesis service slot count.",
     "kb_curator_extract_docs_workers": "Parallel curator document-extraction workers, bounded to the synthesis service slot count.",
@@ -119,9 +119,6 @@ CFG_KEY_DESC = {
     "wfe_proposals_autoscan_enabled": "Automatically scan watched proposal directories; off requires explicit trigger.fire.",
 
     "llm_embed_backend": "Deploy-time embedding backend: local or external.",
-    "llm_embed_gpu": "Deploy-time GPU selector for the local embedding backend.",
-    "llm_embed_host": "Deploy-time host selector for the local embedding backend.",
-    "llm_embed_tier": "Deploy-time local embedding tier: cpu, small, mid, or large.",
     "llm_synth_backend": "Deploy-time synthesis backend: local, external, or off.",
     "llm_synth_endpoint": "External synthesis endpoint used when the synth backend is external.",
     "llm_synth_gpu": "Deploy-time GPU selector for the local synthesis backend.",
@@ -164,7 +161,7 @@ CFG_KEY_DESC = {
     "css_style_graph_enabled": "Enable the CSS migration assistant's style-graph write path during indexing.",
     "code_cochange_git_enabled": "Mine git history at `index scan` time into co_edited edges (files that change together in a commit), which blast radius already reads. Incremental and idempotent via a per-project HEAD marker; bulk commits (>25 code files) are skipped. Default on.",
     "css_render_command": "Render backend for the #4-full computed-style oracle: a command reading {html,css} JSON on stdin and writing a computed-style snapshot JSON on stdout (run an isolated headless-browser sidecar).",
-    "db2_url": "DB2 connection URL (aimee's vector / knowledge-base store).",
+    "db2_url": "Vault-backed DB2 connection URL; reads are redacted and writes bypass YAML.",
     "dedup_enabled": "Deduplicate near-identical responses.",
     "dedup_window_seconds": "Window (seconds) for response dedup.",
     "dogfood_autolabel_continuation": "Auto-label continuation turns for dogfood capture.",
@@ -251,6 +248,9 @@ CFG_KEY_DESC = {
     "ingress_preinject_assembly_budget": "Token budget for ingress context pre-injection.",
     "ingress_preinject_enabled": "Enable `<aimee-context>` pre-injection on ingress "
     "(memory/code preview envelope on primary ingress turns; default on).",
+    "code_context_mode": "Task-conditioned code packet rollout mode: `off` disables packet "
+    "retrieval, `observe` retrieves and validates without changing model-visible bytes, and `on` "
+    "injects a bounded current-project packet on first/new-task turns (default `observe`).",
     "ingress_preinject_anthropic_enabled": "Inject the `<aimee-context>` envelope on the "
     "Anthropic-native /v1/messages passthrough too (default off).",
     "ingress_compress_enabled": "Enable ingress envelope compression: span-enrich code hits and "
@@ -262,11 +262,11 @@ CFG_KEY_DESC = {
     "file:line reference (default 80).",
     "ingress_cache_placement_enabled": "Append the <aimee-context> envelope after the stable "
     "instructions prefix (not before) so provider prefix caches survive (default on).",
-    "ingress_trusted_proxy_secret": "Shared secret authenticating a trusted ingress proxy.",
+    "ingress_trusted_proxy_secret": "Vault-backed shared secret for a trusted ingress proxy; reads are redacted.",
     "ingress_usage_accounting_enabled": "Account token usage on ingress requests.",
     "integrity_dry_run": "Run integrity checks without enforcing.",
     "integrity_enabled": "Enable the integrity gate.",
-    "kb_api_bearer_token": "Bearer token for the aimee-kb API.",
+    "kb_api_bearer_token": "Vault-backed bearer for the aimee-kb API; reads expose configured state only.",
     "kb_api_http_port": "HTTP port the aimee-kb API listens on.",
     "kb_evidence_emit_enabled": "Emit evidence records from KB ingest.",
     "kb_fusion_mode": "KB retrieval fusion mode: rrf (default), static_alpha, or dynamic_alpha.",
@@ -595,6 +595,24 @@ def render_config(fields, sections, flat):
 # not silently omitted from generated reference docs.
 ENV_RE = re.compile(r'(?:getenv|copy_env)\(\s*"(AIMEE_[A-Z0-9_]+)"')
 
+# Credential names consumed by the generic first-boot sealer are intentionally
+# not read through individual getenv() calls. Keep their deployment contract in
+# the generated reference anyway.
+ENV_DYNAMIC = {
+    "AIMEE_FORGE_APP_PRIVATE_KEY",
+    "AIMEE_FORGE_TOKEN",
+    "AIMEE_KB_CONN",
+    "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE",
+    "AIMEE_SERVER_TLS_PRIVATE_KEY",
+    "AIMEE_SERVER_MGMT_TLS_PRIVATE_KEY",
+    "AIMEE_SERVER_MGMT_STATUS_CLIENT_PRIVATE_KEY",
+    "AIMEE_VAULT_PKCS11_PIN",
+    "AIMEE_WEBCHAT_USER",
+    "AIMEE_WEBCHAT_PASSWORD",
+    "AIMEE_WEBCHAT_USERS",
+    "AIMEE_VAULT_ENV_OVERWRITE",
+}
+
 # group order controls section order in the doc
 ENV_GROUP_ORDER = [
     "Paths & assets", "Client & session", "Server runtime", "Knowledge base (aimee-kb)",
@@ -656,11 +674,11 @@ ENV_DESC = {
     "AIMEE_WEBCHAT_EDITOR_IDLE_SECS": ("Server runtime", "Idle timeout in seconds before a per-webuser code-server editor is reaped. Default 1800 (30 min); positive values are clamped to [60, 604800]; 0 disables idle reaping; malformed/negative/overflow values fall back to the default. An actively-open editor is kept alive by the proxy keepalive, so it is not reaped mid-session."),
     "AIMEE_WEBCHAT_EDITOR_UID": ("Server runtime", "Dedicated service user the per-webuser code-server drops to (defence in depth; only honoured when aimee-server runs as root)."),
     "AIMEE_GITHUB_OAUTH_CLIENT_ID": ("Server runtime", "Client ID of a GitHub OAuth App for the webchat \"Sign in with GitHub\" button; populates the github.com git credential. Public. Overrides the built-in default baked in via oauth_defaults.h."),
-    "AIMEE_GITHUB_OAUTH_CLIENT_SECRET": ("Server runtime", "Client secret of the GitHub OAuth App. Enables browser redirect sign-in; without it the button falls back to the device-code flow. Secret — set per deployment, never baked into an image."),
+    "AIMEE_GITHUB_OAUTH_CLIENT_SECRET": ("Server runtime", "First-boot transport for the GitHub OAuth App client secret. The entrypoint synchronously seals it into Vault and scrubs the environment before aimee-server starts; startup fails closed if custody cannot be established. Enables browser redirect sign-in; without it the button falls back to the device-code flow."),
     "AIMEE_GITLAB_OAUTH_CLIENT_ID": ("Server runtime", "Client ID of a GitLab OAuth application (device flow enabled) for the webchat \"Sign in with GitLab\" button on gitlab.com. Public. Overrides the built-in default baked in via oauth_defaults.h."),
     "AIMEE_DEPLOY_ENABLED": ("Server runtime", "Set to 1 to enable the server-orchestrated deploy: the setup wizard runs `docker compose up -d` for the managed sibling services (aimee-kb + aimee-llm) via a mounted Docker socket. Off unless the deploy compose sets it."),
     "AIMEE_DEPLOY_COMPOSE_FILE": ("Server runtime", "Path to the managed compose file the server-orchestrated deploy runs (default /opt/aimee/deploy/aimee-managed.compose.yaml)."),
-    "AIMEE_INGRESS_PROXY_SECRET": ("Server runtime", "Shared secret authenticating a trusted ingress proxy's identity headers."),
+    "AIMEE_INGRESS_PROXY_SECRET": ("Server runtime", "First-boot transport for the shared secret authenticating trusted ingress identity headers. It is sealed into Vault and removed from the environment before the long-lived server starts."),
     "AIMEE_PARALLEL_MAX": ("Server runtime", "Maximum parallel agent fan-out."),
     "AIMEE_BACKGROUND_THREADS": ("Server runtime", "Background worker thread count."),
     "AIMEE_COMPUTE_THREADS": ("Server runtime", "Compute-pool thread count."),
@@ -669,10 +687,10 @@ ENV_DESC = {
     "AIMEE_WORKTREE_GC_DAYS": ("Server runtime", "Age threshold (days) for worktree GC."),
     "AIMEE_SOCK": ("Server runtime", "Sandbox helper socket path."),
     # Knowledge base
-    "AIMEE_LLM_URL": ("Knowledge base (aimee-kb)", "One knob: base URL of the aimee-llm container the kb calls for embedding (/embed) AND synthesis (curator Tier-A + Tier-B at {url}/v1). The kb runs no model itself. AIMEE_EMBEDDER_URL overrides the embedder. See docs/KB_LLM_BACKENDS.md."),
-    "AIMEE_LLM_AUTH_TOKEN": ("Managed KB and inference", "Bearer service identity shared by aimee-kb and its aimee-llm gateway for embed and synthesis requests. Wizard-managed deploys generate and persist a 256-bit value automatically. This is separate from user/server bearers."),
-    "AIMEE_LLM_AUTH_REQUIRED": ("Managed KB and inference", "Set to 1 on wizard-managed KBs so embed and synthesis clients refuse to contact the unified LLM when its bearer service identity is missing."),
-    "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE": ("Managed KB and inference", "Explicit migration/adoption override for an existing wizard-managed LLM credential. Ordinary inherited AIMEE_LLM_AUTH_TOKEN is ignored by managed credential creation so stale child-service state cannot win. Must be a 32..512 character RFC 6750 b64token."),
+    "AIMEE_LLM_URL": ("Knowledge base (aimee-kb)", "Synthesis endpoint (curator Tier-A + Tier-B at {url}/v1). No longer selects an embedder: the kb embeds in-container, and AIMEE_EMBEDDER_URL points at an external embedder. See docs/KB_LLM_BACKENDS.md."),
+    "AIMEE_LLM_AUTH_TOKEN": ("Managed KB and inference", "First-boot transport for the bearer service identity shared by aimee-kb and its aimee-llm gateway. aimee-kb synchronously seals it into Vault, scrubs the environment, and cleanly re-execs before serving; wizard-managed deploys generate the 256-bit value in Vault. This is separate from user/server bearers."),
+    "AIMEE_LLM_AUTH_REQUIRED": ("Managed KB and inference", "Set to 1 on wizard-managed KBs so synthesis clients refuse to contact the LLM when its bearer service identity is missing."),
+    "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE": ("Managed KB and inference", "Explicit first-boot migration/adoption transport for an existing wizard-managed LLM credential. aimee-server seals it into Vault and scrubs the environment before normal startup. Ordinary inherited AIMEE_LLM_AUTH_TOKEN is ignored by managed credential creation so stale child-service state cannot win. Must be a 32..512 character RFC 6750 b64token."),
     "AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK": (
         "Managed KB and inference",
         "Internal managed-authority switch: still attempts mlockall first, but when an unprivileged container cannot raise RLIMIT_MEMLOCK, permits the offline one-shot to continue only if the kernel reports no active swap. Operator-run custody tools leave this unset and retain mandatory mlockall.",
@@ -680,10 +698,13 @@ ENV_DESC = {
     "AIMEE_LLM_MODEL": ("Knowledge base (aimee-kb)", "Model label sent to AIMEE_LLM_URL's chat endpoint (single-model gateways ignore it). Default 'aimee-synth'."),
     "AIMEE_EMBEDDER_URL": ("Knowledge base (aimee-kb)", "Embedder endpoint override (/embed, /embed_batch); takes precedence over AIMEE_LLM_URL for embedding."),
     "AIMEE_KB_API_URL": ("Knowledge base (aimee-kb)", "aimee-kb HTTP API base URL."),
-    "AIMEE_KB_API_BEARER_TOKEN": ("Knowledge base (aimee-kb)", "Bearer token for the aimee-kb API."),
+    "AIMEE_KB_API_BEARER_TOKEN": ("Knowledge base (aimee-kb)", "First-boot transport for the aimee-kb API bearer token. Server and KB bootstrap paths seal it into Vault and remove it from the environment before long-lived service startup."),
     "AIMEE_KB_API_CA_BUNDLE": ("Knowledge base (aimee-kb)", "CA bundle path for verifying the aimee-kb TLS certificate."),
     "AIMEE_KB_CACHE_TTL_S": ("Knowledge base (aimee-kb)", "KB client cache TTL (seconds)."),
-    "AIMEE_KB_CONN": ("Knowledge base (aimee-kb)", "KB connection string (mTLS transport)."),
+    "AIMEE_KB_CONN": (
+        "Knowledge base (aimee-kb)",
+        "First-boot KB connection string; sealed into the server Vault before long-lived startup.",
+    ),
     "AIMEE_TRANSPORT_KB_POOL_ENABLED": ("Knowledge base (aimee-kb)", "Override server-to-KB mTLS connection pooling. The config default is on; set to 0 for one-shot connections."),
     "AIMEE_SERVER_ID": ("Knowledge base (aimee-kb)", "Registry identity used by the server mTLS heartbeat."),
     "AIMEE_SERVER_TEAM_ID": (
@@ -755,7 +776,7 @@ ENV_DESC = {
     "AIMEE_MEMORY_MAINTENANCE_TRIGGER_SECS": ("Memory", "Seconds before a maintenance cycle triggers."),
     "AIMEE_MEMORY_PAGERANK_RELATIONS": ("Memory", "Relation types included in memory PageRank."),
     "AIMEE_MEMORY_RERANK_MODE": ("Memory", "Reranker mode."),
-    "AIMEE_EMBEDDERS_FILE": ("Knowledge base (aimee-kb)", "Path to the embedder registry the server reads for GET /v1/embedders (the setup wizard's embedder picker). Defaults to /opt/aimee/embedders.json, then scripts/embedders.json in a source checkout. The same file the aimee-llm gateway and supervisor read, so one declaration drives the picker, the provisioning and the serving flags."),
+    "AIMEE_EMBEDDERS_FILE": ("Knowledge base (aimee-kb)", "Path to the embedder registry the server reads for GET /v1/embedders (the setup wizard's embedder picker). Defaults to /opt/aimee/embedders.json, then scripts/embedders.json in a source checkout. The same file the in-container embedder reads, so one declaration drives the picker, the loading and the serving flags."),
     "AIMEE_MEMORY_WEIGHT_PROFILE": ("Memory", "Recall scoring weight profile."),
     "AIMEE_NO_CACHE": ("Memory", "Disable the memory-assembly cache."),
     "AIMEE_CONTEXT_NO_KB": ("Memory", "Skip KB lookups during context assembly."),
@@ -784,9 +805,9 @@ ENV_DESC = {
     "AIMEE_FORGE_API_BASE": ("Forge (GitHub App / tokens)", "Forge API base URL."),
     "AIMEE_FORGE_APP_ID": ("Forge (GitHub App / tokens)", "GitHub App id for minting forge tokens."),
     "AIMEE_FORGE_APP_INSTALLATION_ID": ("Forge (GitHub App / tokens)", "GitHub App installation id."),
-    "AIMEE_FORGE_APP_PRIVATE_KEY": ("Forge (GitHub App / tokens)", "GitHub App private key (PEM or path)."),
+    "AIMEE_FORGE_APP_PRIVATE_KEY": ("Forge (GitHub App / tokens)", "GitHub App private-key PEM accepted only as first-boot transport; it is sealed into Vault and filesystem paths are rejected."),
     "AIMEE_FORGE_SCOPE": ("Forge (GitHub App / tokens)", "Scope for the minted forge token."),
-    "AIMEE_FORGE_TOKEN": ("Forge (GitHub App / tokens)", "Static forge access token (bypasses App auth)."),
+    "AIMEE_FORGE_TOKEN": ("Forge (GitHub App / tokens)", "First-boot static forge token. aimee-server seals it into the server Vault and unsets it before serving; subsequent boots read only from Vault."),
     # Gateway
     "AIMEE_GATEWAY_NTFY_BASE_URL": ("Gateway (voice / webhooks / push)", "ntfy push base URL."),
     "AIMEE_GATEWAY_NTFY_TOKEN": ("Gateway (voice / webhooks / push)", "ntfy push token."),
@@ -807,6 +828,10 @@ ENV_DESC = {
     "AIMEE_DEFAULT_BRANCH": ("Workflow engine", "Override the target repo's real default branch (its trunk) that a `base:trunk` `branch.open`/`pr.open` resolves to; else read from `git origin/HEAD`. Distinct from `AIMEE_AUTONOMY_BASE` (the aimee integration branch). A final feature PR opens against this branch (open-only, never auto-merged)."),
     # Git verify / MCP
     "AIMEE_VERIFY_PARALLEL": ("Git verify / MCP", "Run `aimee git verify` steps in parallel."),
+    "AIMEE_VERIFY_LOCK_FILE": (
+        "Git verify / MCP",
+        "Override the host-wide file lock that serializes complete repository verification runs.",
+    ),
     "AIMEE_EXEC_PIPE_TIMEOUT_MS": (
         "Agents & delegates",
         "How long a sidecar subprocess (embed, cognify, rewrite, css render, "
@@ -831,7 +856,16 @@ ENV_DESC = {
     "AIMEE_ANTIPATTERNS_BYPASS": ("Diagnostics & misc", "Bypass the guardrail antipattern checks."),
     "AIMEE_LOG_LEVEL": ("Diagnostics & misc", "Log level: `error` | `warn` | `info` | `debug`."),
     "AIMEE_ALLOW_MAIN_CHECKOUT": ("Delegates & backends", "Allow an explicitly authorized delegate path to use the main checkout instead of a managed worktree."),
-    "AIMEE_API_BEARER_TOKEN": ("Server runtime", "Bearer token for the public server API listener; secret."),
+    "AIMEE_API_BEARER_TOKEN": ("Server runtime", "Optional first-boot bearer for the public server API listener. It is synchronously sealed into Vault and removed from the process environment before services start; when omitted, the server mints a random Vault-only primary."),
+    "AIMEE_SERVER_TLS_PRIVATE_KEY": ("Server runtime", "Optional PEM private-key content for first boot. The key is synchronously sealed into Vault and the environment is scrubbed; only the public server certificate may remain on disk."),
+    "AIMEE_SERVER_MGMT_TLS_PRIVATE_KEY": ("Server runtime", "PEM private-key content for the management listener, accepted only as first-boot transport and synchronously sealed into Vault before the server starts."),
+    "AIMEE_SERVER_MGMT_STATUS_CLIENT_PRIVATE_KEY": ("Server runtime", "PEM private-key content for the management-status client, accepted only as first-boot transport and synchronously sealed into Vault before the server starts."),
+    "AIMEE_SERVER_MGMT_TLS_KEY": ("Server runtime", "Forbidden legacy private-key file setting. Startup rejects it; use AIMEE_SERVER_MGMT_TLS_PRIVATE_KEY as first-boot Vault input."),
+    "AIMEE_SERVER_MGMT_STATUS_CLIENT_KEY": ("Server runtime", "Forbidden legacy private-key file setting. Startup rejects it; use AIMEE_SERVER_MGMT_STATUS_CLIENT_PRIVATE_KEY as first-boot Vault input."),
+    "AIMEE_WEBCHAT_USER": ("Server runtime", "Optional first-boot webchat username paired with AIMEE_WEBCHAT_PASSWORD. The bootstrap record is sealed into Vault and removed from the environment before runtime-web starts."),
+    "AIMEE_WEBCHAT_PASSWORD": ("Server runtime", "Optional first-boot webchat password paired with AIMEE_WEBCHAT_USER. The bootstrap record is sealed into Vault and removed from the environment before runtime-web starts."),
+    "AIMEE_WEBCHAT_USERS": ("Server runtime", "Optional first-boot webchat account registry. It is sealed into Vault and removed from the environment before runtime-web starts."),
+    "AIMEE_VAULT_ENV_OVERWRITE": ("Server runtime", "First-boot control flag allowing supplied credential values to replace existing Vault records. It is not itself a credential."),
     "AIMEE_AUTONOMY_BASE": ("Workflow engine", "Integration branch used by autonomous workflow work; distinct from the repository default branch."),
     "AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL": ("Workflow engine", "Maximum active autonomous work items for one authenticated principal."),
     "AIMEE_AUTONOMY_MAX_USD": ("Workflow engine", "Default USD ceiling for an autonomous work item; 0 disables this default ceiling."),
@@ -876,6 +910,7 @@ ENV_DESC = {
     "AIMEE_MGMT_STATUS_PUBLIC_KEY": ("Server runtime", "Hex-encoded Ed25519 key used to verify management-status staples."),
     "AIMEE_MODULE_ROUNDTABLE": ("Server runtime", "Enable the optional roundtable module; invalid values fail closed to off."),
     "AIMEE_OCR_URL": ("Knowledge base (aimee-kb)", "Structured-PDF OCR sidecar endpoint."),
+    "AIMEE_OAUTH_RUNTIME_DIR": ("Paths & assets", "Private directory for transient OAuth callback/session state; it must not be used for durable credentials."),
     "AIMEE_ORCH_DELEGATES": ("Workflow engine", "Enable delegate resource use by the orchestration plane."),
     "AIMEE_ORCH_WORKFLOWS": ("Workflow engine", "Enable workflow orchestration surfaces."),
     "AIMEE_PANEL_SEAT_WAIT_SECS": ("Workflow engine", "Maximum wait for a roundtable seat to acquire an eligible agent."),
@@ -900,7 +935,7 @@ ENV_DESC = {
     "AIMEE_VAULT_KMS_KEY_ID": ("Server runtime", "External KMS key identifier used for vault wrapping."),
     "AIMEE_VAULT_PKCS11_LABEL": ("Server runtime", "PKCS#11 object label used for vault custody."),
     "AIMEE_VAULT_PKCS11_MODULE": ("Server runtime", "Path to the PKCS#11 provider module."),
-    "AIMEE_VAULT_PKCS11_PIN": ("Server runtime", "PKCS#11 user PIN; secret."),
+    "AIMEE_VAULT_PKCS11_PIN": ("Server runtime", "PKCS#11 user PIN accepted only as first-boot transport; it is synchronously sealed into Vault, scrubbed from the environment, and loaded from Vault only when the HSM session opens."),
     "AIMEE_VAULT_PKCS11_SLOT": ("Server runtime", "PKCS#11 slot identifier used for vault custody."),
     "AIMEE_VAULT_TPM2_BLOB_PATH": ("Server runtime", "Path to the sealed TPM 2 vault-key blob."),
     "AIMEE_VAULT_TPM2_NV_INDEX": ("Server runtime", "TPM 2 NV index used for anti-rollback state."),
@@ -925,19 +960,23 @@ def parse_env_vars():
             continue
         for m in ENV_RE.finditer(f.read_text(encoding="utf-8", errors="ignore")):
             found.add(m.group(1))
-    return found
+    return found | ENV_DYNAMIC
 
 
 def render_env(found):
     out = ["## Environment variables",
            "",
            f"The binaries read {len(found)} `AIMEE_*` environment variables (scanned "
-           "from `getenv()` in `src/`, excluding tests). Depending on the setting, these "
+           "from `getenv()` in `src/`, excluding tests, plus the generic first-boot "
+           "credential inputs). Depending on the setting, these "
            "variables either override config-store values or provide fallbacks when no "
            "explicit config value is present. Module-activation variables use fallback "
            "semantics; deployment and runtime wiring variables commonly override stored "
-           "values. Secrets and tokens should be supplied through the environment or "
-           "credential vault, never committed.",
+           "values. A credential may enter through an environment variable only as "
+           "first-boot transport (for example, a Kubernetes Secret): startup seals it "
+           "into Vault, scrubs the environment, verifies custody, and fails closed before "
+           "any long-lived service starts. Credentials are never runtime environment or "
+           "config-file storage.",
            ""]
     by_group = {}
     undocumented = []
@@ -1047,9 +1086,9 @@ def render_external_env(found):
            "",
            "Standard and third-party environment variables aimee honors (scanned "
            "non-`AIMEE_*` `getenv()` reads, plus provider keys resolved via "
-           "`api_key_env`). Provider API keys are credentials — prefer the credential "
-           "vault; the env var is the per-provider fallback and its name is "
-           "overridable per agent via `api_key_env`. Standard OS variables (`HOME`, "
+           "`api_key_env`). Provider API keys are credentials: their environment variable "
+           "names are overridable per agent, but values are accepted only as first-boot "
+           "transport, sealed into Vault, and scrubbed before services start. Standard OS variables (`HOME`, "
            "`PATH`, `TMPDIR`, `XDG_*`, …) are used for their usual purposes and are "
            "not aimee configuration.",
            ""]

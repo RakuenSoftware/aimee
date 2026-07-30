@@ -4,17 +4,16 @@
 # Enables the server's inbound /v1 HTTP API. The listener binds only when BOTH a
 # port and a bearer token are configured (src/server/server_http.c). The image
 # sets AIMEE_SERVER_HTTP_BIND=1 so the TLS listener binds 0.0.0.0 (the published
-# container port); the bearer below is still required on every request.
+# container port); a Vault-held bearer is still required on every request.
 #
 # Plaintext /v1 (http_port) is LOOPBACK-ONLY by design; remote thin clients use
-# the TLS listener (tls_port), with a self-signed cert auto-provisioned under
-# $AIMEE_HOME/tls. This token is a development default — override it for any real
-# deployment by mounting your own aimee.yaml over /var/lib/aimee/aimee.yaml.
+# the TLS listener (tls_port). The public cert is auto-provisioned under
+# $AIMEE_HOME/tls while its private key and the random API primary stay in Vault.
+# Supply AIMEE_API_BEARER_TOKEN only as an operator-known first-boot input.
 aimee:
   api:
     http_port: 8740
     tls_port: 8743
-    bearer_token: "aimee-local-dev"
     rate_limit_per_min: 0
     # Retained only so older configuration files still parse. This setting no
     # longer authorizes writes; remote write authority comes from each caller's

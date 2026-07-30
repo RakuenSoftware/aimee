@@ -34,6 +34,13 @@ extern "C"
     * formerly have allowed; surfaced as remote_writes.global_ignored. */
    void server_http_note_global_ignored(void);
 
+   /* Reconstruct the capability set the retired process-global setting would
+    * have supplied, for observability only. */
+   int server_http_retired_global_would_allow(int fd, int is_tcp, const char *bearer,
+                                              int remote_writes, int mtls_mode,
+                                              int mtls_authenticated, const char *method,
+                                              const char *path);
+
 #ifdef __cplusplus
 }
 #endif

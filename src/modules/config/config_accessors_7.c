@@ -18,6 +18,21 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
+int config_set_vault_tpm2_blob_path(const char *value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      snprintf(cfg->vault_tpm2_blob_path, sizeof(cfg->vault_tpm2_blob_path), "%s", value ? value : "");
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
 int config_set_vault_tpm2_tcti(const char *value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
@@ -87,6 +102,21 @@ int config_set_memory_cognify_command(const char *value)
    if (rc == 0)
    {
       snprintf(cfg->memory_cognify_command, sizeof(cfg->memory_cognify_command), "%s", value ? value : "");
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_code_context_mode(const char *value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      snprintf(cfg->code_context_mode, sizeof(cfg->code_context_mode), "%s", value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -425,17 +455,7 @@ int config_set_search_searxng_url(const char *value)
 
 int config_set_search_tavily_api_key(const char *value)
 {
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->search_tavily_api_key, sizeof(cfg->search_tavily_api_key), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
+   return config_secret_store("AIMEE_SEARCH_TAVILY_API_KEY", value);
 }
 
 int config_set_search_backends(const char *value)
@@ -590,32 +610,12 @@ int config_set_proxy_url(const char *value)
 
 int config_set_proxy_token(const char *value)
 {
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->proxy_token, sizeof(cfg->proxy_token), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
+   return config_secret_store("AIMEE_PROXY_TOKEN", value);
 }
 
 int config_set_ingress_trusted_proxy_secret(const char *value)
 {
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->ingress_trusted_proxy_secret, sizeof(cfg->ingress_trusted_proxy_secret), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
+   return config_secret_store("AIMEE_INGRESS_PROXY_SECRET", value);
 }
 
 int config_set_guardrails_semantic_mode(const char *value)
@@ -650,32 +650,12 @@ int config_set_guardrails_semantic_command(const char *value)
 
 int config_set_kb_api_bearer_token(const char *value)
 {
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->kb_api_bearer_token, sizeof(cfg->kb_api_bearer_token), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
+   return config_secret_store("AIMEE_KB_API_BEARER_TOKEN", value);
 }
 
 int config_set_telemetry_metrics_token(const char *value)
 {
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->telemetry_metrics_token, sizeof(cfg->telemetry_metrics_token), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
+   return config_secret_store("AIMEE_TELEMETRY_METRICS_TOKEN", value);
 }
 
 int config_set_kb_client_url(const char *value)
@@ -695,17 +675,7 @@ int config_set_kb_client_url(const char *value)
 
 int config_set_kb_client_bearer_token(const char *value)
 {
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->kb_client_bearer_token, sizeof(cfg->kb_client_bearer_token), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
+   return config_secret_store("AIMEE_KB_API_BEARER_TOKEN", value);
 }
 
 int config_set_kb_mode(const char *value)
@@ -845,17 +815,7 @@ int config_set_server_api_mtls_client_ca(const char *value)
 
 int config_set_server_api_bearer_token(const char *value)
 {
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->server_api_bearer_token, sizeof(cfg->server_api_bearer_token), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
+   return config_secret_store("AIMEE_API_BEARER_TOKEN", value);
 }
 
 int config_set_server_api_client_transport(const char *value)
@@ -1070,17 +1030,7 @@ int config_set_kb_synthesize_command(const char *value)
 
 int config_set_trigger_auth_token(const char *value)
 {
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->trigger_auth_token, sizeof(cfg->trigger_auth_token), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
+   return config_secret_store("AIMEE_TRIGGER_AUTH_TOKEN", value);
 }
 
 int config_set_kb_curator_tier(const char *value)
@@ -1235,17 +1185,7 @@ int config_set_kb_curator_provider_model(const char *value)
 
 int config_set_kb_curator_provider_api_key(const char *value)
 {
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->kb_curator_provider_api_key, sizeof(cfg->kb_curator_provider_api_key), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
+   return config_secret_store("AIMEE_KB_CURATOR_PROVIDER_API_KEY", value);
 }
 
 int config_set_kb_curator_tier_b_base_url(const char *value)
@@ -1280,17 +1220,7 @@ int config_set_kb_curator_tier_b_model(const char *value)
 
 int config_set_kb_curator_tier_b_api_key(const char *value)
 {
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->kb_curator_tier_b_api_key, sizeof(cfg->kb_curator_tier_b_api_key), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
+   return config_secret_store("AIMEE_KB_CURATOR_TIER_B_API_KEY", value);
 }
 
 int config_set_kb_curator_judge_command(const char *value)
@@ -1818,4 +1748,3 @@ double config_trigger_rule_max_spend_usd(int index)
                      sizeof(v), &v);
    return v;
 }
-

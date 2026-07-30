@@ -29,17 +29,13 @@
       "decls": 2,
       "loads": 2
     },
-    "src/cmd_hooks_scope.c": {
-      "decls": 1,
-      "loads": 0
-    },
     "src/cmd_identity.c": {
       "decls": 3,
       "loads": 2
     },
     "src/cmd_infra.c": {
-      "decls": 8,
-      "loads": 6
+      "decls": 7,
+      "loads": 5
     },
     "src/cmd_kb.c": {
       "decls": 4,
@@ -70,8 +66,8 @@
       "loads": 2
     },
     "src/cmd_session_lifecycle.c": {
-      "decls": 18,
-      "loads": 8
+      "decls": 16,
+      "loads": 6
     },
     "src/conversation_context.c": {
       "decls": 5,
@@ -111,10 +107,6 @@
     },
     "src/headers/cmd_hooks_platform.h": {
       "decls": 2,
-      "loads": 0
-    },
-    "src/headers/cmd_hooks_scope.h": {
-      "decls": 1,
       "loads": 0
     },
     "src/headers/commands.h": {
@@ -675,7 +667,7 @@
     },
     "src/server/server_api_status.c": {
       "decls": 6,
-      "loads": 5
+      "loads": 3
     },
     "src/server/server_compute.c": {
       "decls": 5,
@@ -1059,8 +1051,8 @@
     }
   },
   "totals": {
-    "decls": 930,
-    "files": 264,
-    "loads": 477
+    "decls": 925,
+    "files": 262,
+    "loads": 472
   }
 }

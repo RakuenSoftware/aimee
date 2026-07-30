@@ -52,6 +52,15 @@ static void ss_add(struct ss_sbuf *b, const char *s)
    b->p[b->len] = '\0';
 }
 
+/* A remote or long-running daemon cannot infer the thin client's active
+ * checkout from its own process cwd. Carry it with every ordered memory read. */
+static void ss_add_memory_cwd(cJSON *body)
+{
+   char cwd[4096];
+   if (body && getcwd(cwd, sizeof(cwd)))
+      cJSON_AddStringToObject(body, "cwd", cwd);
+}
+
 /* Render one recall section ([{title,description}|{text}]) as markdown. */
 static void ss_render_section(struct ss_sbuf *b, const char *title, cJSON *arr)
 {
@@ -330,9 +339,14 @@ static int handle_session_start_remote(const char *sid)
     * Rules + key facts) from session.brief_assemble. This is the primary
     * payload and the never-empty floor: the server always emits at least
     * persona principles, so a fresh session is never left with an empty brief
-    * (the pre-Phase-1 behaviour when recall was empty). The endpoint takes no
-    * input; send an empty object. */
-   cJSON *brief = ss_retry_post(endpoint, bearer, "/v1/session/brief_assemble", "{}");
+    * (the pre-Phase-1 behaviour when recall was empty). */
+   cJSON *brief_body = cJSON_CreateObject();
+   ss_add_memory_cwd(brief_body);
+   char *brief_body_s = cJSON_PrintUnformatted(brief_body);
+   cJSON_Delete(brief_body);
+   cJSON *brief = ss_retry_post(endpoint, bearer, "/v1/session/brief_assemble",
+                                brief_body_s ? brief_body_s : "{}");
+   free(brief_body_s);
    if (brief)
    {
       const char *out = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(brief, "output"));
@@ -347,6 +361,7 @@ static int handle_session_start_remote(const char *sid)
    cJSON *rbody = cJSON_CreateObject();
    cJSON_AddStringToObject(rbody, "task_hint", "session start");
    cJSON_AddBoolToObject(rbody, "session_start", 1);
+   ss_add_memory_cwd(rbody);
    char *rbody_s = cJSON_PrintUnformatted(rbody);
    cJSON_Delete(rbody);
    cJSON *resp = ss_retry_post(endpoint, bearer, "/v1/memory/recall", rbody_s);
@@ -571,6 +586,7 @@ int handle_user_prompt_submit(void)
    cJSON *body = cJSON_CreateObject();
    cJSON_AddStringToObject(body, "task_hint", prompt);
    cJSON_AddBoolToObject(body, "session_start", 0);
+   ss_add_memory_cwd(body);
    char *body_s = cJSON_PrintUnformatted(body);
    cJSON_Delete(body);
 
@@ -642,6 +658,7 @@ int handle_pre_compact(void)
    cJSON *body = cJSON_CreateObject();
    cJSON_AddStringToObject(body, "task_hint", "compaction re-prime");
    cJSON_AddBoolToObject(body, "session_start", 1);
+   ss_add_memory_cwd(body);
    char *body_s = cJSON_PrintUnformatted(body);
    cJSON_Delete(body);
 

@@ -3,16 +3,13 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// The unlock handler must reach aimee-server's /v1/vault/unlock carrying BOTH
-// the server.token bearer AND X-Aimee-Webuser (the trust headers aimee-server
-// requires to resolve the webuser: vault), plus the password body.
-func TestVaultUnlockSendsWebuserAndBearer(t *testing.T) {
+// The unlock handler reaches aimee-server over the kernel-attested UDS carrying
+// X-Aimee-Webuser and no shared bearer, plus the password body.
+func TestVaultUnlockSendsWebuserWithoutBearer(t *testing.T) {
 	var gotAuth, gotWebuser, gotBody string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/vault/unlock", func(w http.ResponseWriter, r *http.Request) {
@@ -25,10 +22,6 @@ func TestVaultUnlockSendsWebuserAndBearer(t *testing.T) {
 		w.Write([]byte(`{"status":"ok","principal":"webuser:alice"}`))
 	})
 	cfg := startFakeV1(t, mux)
-	if err := os.WriteFile(filepath.Join(filepath.Dir(cfg.socketPath), "server.token"),
-		[]byte("sekret-token\n"), 0600); err != nil {
-		t.Fatalf("write server.token: %v", err)
-	}
 	s := &server{cfg: cfg}
 
 	req := withUser(httptest.NewRequest(http.MethodPost, "/api/vault/unlock",
@@ -39,8 +32,8 @@ func TestVaultUnlockSendsWebuserAndBearer(t *testing.T) {
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"status":"ok"`) {
 		t.Fatalf("unlock: code=%d body=%q", rr.Code, rr.Body.String())
 	}
-	if gotAuth != "Bearer sekret-token" {
-		t.Fatalf("Authorization = %q, want Bearer sekret-token", gotAuth)
+	if gotAuth != "" {
+		t.Fatalf("Authorization = %q, want empty", gotAuth)
 	}
 	if gotWebuser != "alice" {
 		t.Fatalf("X-Aimee-Webuser = %q, want alice", gotWebuser)
@@ -50,16 +43,14 @@ func TestVaultUnlockSendsWebuserAndBearer(t *testing.T) {
 	}
 }
 
-// Fail-closed: with no server.token the backend must NOT call aimee-server and
-// must return an auth error (no webuser assertion is sent without the secret).
-func TestVaultUnlockFailsClosedWithoutServerToken(t *testing.T) {
+func TestVaultUnlockNeedsNoSharedToken(t *testing.T) {
 	called := false
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/vault/unlock", func(w http.ResponseWriter, r *http.Request) {
 		called = true
 		w.Write([]byte(`{"status":"ok"}`))
 	})
-	cfg := startFakeV1(t, mux) // note: no server.token written
+	cfg := startFakeV1(t, mux)
 	s := &server{cfg: cfg}
 
 	req := withUser(httptest.NewRequest(http.MethodPost, "/api/vault/unlock",
@@ -67,11 +58,11 @@ func TestVaultUnlockFailsClosedWithoutServerToken(t *testing.T) {
 	rr := httptest.NewRecorder()
 	s.handleVaultUnlock(rr, req)
 
-	if called {
-		t.Fatalf("aimee-server was called without a server.token (should fail closed)")
+	if !called {
+		t.Fatal("aimee-server was not called over the trusted Unix socket")
 	}
-	if rr.Code == http.StatusOK {
-		t.Fatalf("expected a non-200 fail-closed status, got 200: %q", rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %q", rr.Code, rr.Body.String())
 	}
 }
 
@@ -87,10 +78,6 @@ func TestVaultResponsesNeverLeakSecrets(t *testing.T) {
 		w.Write([]byte(`{"status":"ok","kek":"RAWKEKLEAK","root_key":"sk-LEAKED3"}`))
 	})
 	cfg := startFakeV1(t, mux)
-	if err := os.WriteFile(filepath.Join(filepath.Dir(cfg.socketPath), "server.token"),
-		[]byte("tok\n"), 0600); err != nil {
-		t.Fatalf("write server.token: %v", err)
-	}
 	s := &server{cfg: cfg}
 
 	// list must surface only names.
@@ -134,10 +121,6 @@ func TestVaultCredentialsRoutesByMethod(t *testing.T) {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 	cfg := startFakeV1(t, mux)
-	if err := os.WriteFile(filepath.Join(filepath.Dir(cfg.socketPath), "server.token"),
-		[]byte("tok\n"), 0600); err != nil {
-		t.Fatalf("write server.token: %v", err)
-	}
 	s := &server{cfg: cfg}
 
 	do := func(method, body string) int {

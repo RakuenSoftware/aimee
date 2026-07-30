@@ -99,9 +99,15 @@ func TestSetupAccountRollsBackDurableStateWhenLockFails(t *testing.T) {
 
 func newSetupAccountTestServer(t *testing.T) (*server, *fakeSetupAccounts) {
 	t.Helper()
-	t.Setenv("AIMEE_WEBCHAT_USER", defaultBootstrapUsername)
-	t.Setenv("AIMEE_WEBCHAT_PASSWORD", defaultBootstrapPassword)
 	dbPath := filepath.Join(t.TempDir(), "webchat.db")
+	bootstrapDir := filepath.Join(filepath.Dir(dbPath), "webchat")
+	if err := os.MkdirAll(bootstrapDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bootstrapDir, "bootstrap-user"),
+		[]byte("generated:"+defaultBootstrapUsername+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	db, err := openDB(dbPath)
 	if err != nil {
 		t.Fatal(err)
@@ -111,8 +117,25 @@ func newSetupAccountTestServer(t *testing.T) (*server, *fakeSetupAccounts) {
 		users:  map[string]string{defaultBootstrapUsername: "$test$bootstrap"},
 		locked: map[string]bool{},
 	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/vault/set_server", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Agent  string `json:"agent"`
+			Cred   string `json:"cred"`
+			Secret string `json:"secret"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil ||
+			body.Agent != "webchat-login" || body.Cred != "replacement_hash" {
+			http.Error(w, `{"error":"bad vault write"}`, http.StatusBadRequest)
+			return
+		}
+		w.Write([]byte(`{"status":"ok"}`))
+	})
+	cfg := startFakeV1(t, mux)
+	cfg.port = 8443
+	cfg.dbPath = dbPath
 	s := &server{
-		cfg:      &config{port: 8443, dbPath: dbPath},
+		cfg:      cfg,
 		db:       db,
 		sessions: auth.NewSessionStore(db, time.Hour),
 		accounts: fake,
@@ -145,12 +168,12 @@ func TestSetupAccountReplacesAndPersistsBootstrapLogin(t *testing.T) {
 		t.Fatalf("replacement user/lock not applied: users=%v locked=%v", fake.users, fake.locked)
 	}
 	stored, err := os.ReadFile(s.setupAccountStore())
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || !strings.Contains(string(stored), "aimee:$test$bootstrap") ||
+		strings.Contains(string(stored), "virant:$test$correct horse") {
+		t.Fatalf("legacy login store was used for new verifier persistence: %q err=%v", stored, err)
 	}
-	if strings.Contains(string(stored), "aimee:") || !strings.Contains(string(stored), "virant:$test$correct horse") ||
-		!strings.Contains(string(stored), "other:$test$other") {
-		t.Fatalf("unexpected durable login store: %q", stored)
+	if fake.users["virant"] != "$test$correct horse" {
+		t.Fatalf("replacement was not committed through the Vault account abstraction")
 	}
 	marker, err := os.ReadFile(s.setupAccountMarker())
 	if err != nil || strings.TrimSpace(string(marker)) != "virant" {
@@ -222,9 +245,12 @@ func TestSetupAccountReplacesGeneratedBootstrapLogin(t *testing.T) {
 		t.Fatalf("plaintext generated credentials survived replacement: %v", err)
 	}
 	stored, err := os.ReadFile(s.setupAccountStore())
-	if err != nil || strings.Contains(string(stored), generatedBootstrapUsername+":") ||
-		!strings.Contains(string(stored), "virant:$test$correct horse") {
-		t.Fatalf("login store=%q err=%v", stored, err)
+	if err != nil || !strings.Contains(string(stored), generatedBootstrapUsername+":") ||
+		strings.Contains(string(stored), "virant:$test$correct horse") {
+		t.Fatalf("legacy login store was modified: %q err=%v", stored, err)
+	}
+	if fake.users["virant"] != "$test$correct horse" {
+		t.Fatalf("replacement was not committed through the Vault account abstraction")
 	}
 	if _, err := s.sessions.ValidateSession(oldToken); err == nil {
 		t.Fatal("generated bootstrap session remains valid")
@@ -322,6 +348,12 @@ func TestSetupAccountIsCompleteForOperatorConfiguredLogin(t *testing.T) {
 	s, _ := newSetupAccountTestServer(t)
 	t.Setenv("AIMEE_WEBCHAT_USER", "operator")
 	t.Setenv("AIMEE_WEBCHAT_PASSWORD", "not-the-published-default")
+	if err := os.MkdirAll(s.setupAccountDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(s.setupAccountBootstrapUser(), []byte("explicit:operator\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	rr := httptest.NewRecorder()
 	s.handleSetupAccount(rr, withUser(httptest.NewRequest(http.MethodGet, "/api/setup/account", nil), "operator"))
 	var status map[string]any

@@ -28,8 +28,8 @@
 static pthread_mutex_t g_vault_write_mu = PTHREAD_MUTEX_INITIALIZER;
 
 #define VAULT_FILE_VERSION 1
-#define VAULT_SECRET_MAX   4096 /* max credential plaintext length */
-#define VAULT_AAD_MAX      320  /* "principal|agent|cred" (160 + 64 + 64 + seps) */
+#define VAULT_SECRET_MAX   (64 * 1024) /* opaque OAuth docs and SSH credentials */
+#define VAULT_AAD_MAX      320         /* "principal|agent|cred" (160 + 64 + 64 + seps) */
 
 /* Detach + free the (agent,cred) entry from the creds array if present. */
 static void remove_cred(cJSON *creds, cJSON *entry)

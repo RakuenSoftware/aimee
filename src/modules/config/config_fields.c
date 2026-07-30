@@ -17,7 +17,7 @@
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 const config_field_t config_fields[] = {
     {"db2_url", offsetof(config_t, db2_url), sizeof(((config_t *)0)->db2_url), 0, CFG_STRING,
-     RELOAD_RESTART}, /* the postgres pool is opened at startup */
+     RELOAD_RESTART, FGROUP_RUNTIME, "AIMEE_DB2_URL"}, /* the postgres pool is opened at startup */
     {"provider", offsetof(config_t, provider), sizeof(((config_t *)0)->provider), 0, CFG_STRING},
     {"default_persona", offsetof(config_t, default_persona),
      sizeof(((config_t *)0)->default_persona), 0, CFG_STRING},
@@ -47,7 +47,8 @@ const config_field_t config_fields[] = {
     {"kb_client_url", offsetof(config_t, kb_client_url), sizeof(((config_t *)0)->kb_client_url), 0,
      CFG_STRING, RELOAD_RESTART},
     {"kb_client_bearer_token", offsetof(config_t, kb_client_bearer_token),
-     sizeof(((config_t *)0)->kb_client_bearer_token), 0, CFG_STRING, RELOAD_RESTART},
+     sizeof(((config_t *)0)->kb_client_bearer_token), 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME,
+     "AIMEE_KB_API_BEARER_TOKEN"},
     {"llm_embed_backend", offsetof(config_t, llm_embed_backend),
      sizeof(((config_t *)0)->llm_embed_backend), 0, CFG_STRING, RELOAD_RESTART, FGROUP_DEPLOY},
     {"llm_synth_backend", offsetof(config_t, llm_synth_backend),
@@ -70,6 +71,8 @@ const config_field_t config_fields[] = {
      sizeof(((config_t *)0)->memory_rerank_mode), 0, CFG_STRING},
     {"ingress_preinject_enabled", offsetof(config_t, ingress_preinject_enabled), sizeof(int), 0,
      CFG_BOOL},
+    {"code_context_mode", offsetof(config_t, code_context_mode),
+     sizeof(((config_t *)0)->code_context_mode), 0, CFG_STRING, RELOAD_HOT, FGROUP_ADVANCED},
     {"ingress_preinject_anthropic_enabled", offsetof(config_t, ingress_preinject_anthropic_enabled),
      sizeof(int), 0, CFG_BOOL, RELOAD_HOT, FGROUP_ADVANCED},
     {"ingress_compress_enabled", offsetof(config_t, ingress_compress_enabled), sizeof(int), 0,
@@ -305,7 +308,8 @@ const config_field_t config_fields[] = {
      sizeof(int), 0, CFG_BOOL, RELOAD_HOT, FGROUP_ADVANCED},
     {"ingress_audit_async", offsetof(config_t, ingress_audit_async), sizeof(int), 0, CFG_BOOL},
     {"ingress_trusted_proxy_secret", offsetof(config_t, ingress_trusted_proxy_secret),
-     sizeof(((config_t *)0)->ingress_trusted_proxy_secret), 0, CFG_STRING},
+     sizeof(((config_t *)0)->ingress_trusted_proxy_secret), 0, CFG_STRING, RELOAD_HOT,
+     FGROUP_RUNTIME, "AIMEE_INGRESS_PROXY_SECRET"},
     {"dedup_window_seconds", offsetof(config_t, dedup_window_seconds), sizeof(int), 0, CFG_INT},
     {"cache_min_chars", offsetof(config_t, cache_min_chars), sizeof(int), 0, CFG_INT, RELOAD_HOT,
      FGROUP_ADVANCED},
@@ -325,9 +329,11 @@ const config_field_t config_fields[] = {
     {"kb_api_http_port", offsetof(config_t, kb_api_http_port), sizeof(int), 0, CFG_INT,
      RELOAD_RESTART},
     {"kb_api_bearer_token", offsetof(config_t, kb_api_bearer_token),
-     sizeof(((config_t *)0)->kb_api_bearer_token), 0, CFG_STRING, RELOAD_RESTART},
+     sizeof(((config_t *)0)->kb_api_bearer_token), 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME,
+     "AIMEE_KB_API_BEARER_TOKEN"},
     {"telemetry.metrics_token", offsetof(config_t, telemetry_metrics_token),
-     sizeof(((config_t *)0)->telemetry_metrics_token), 0, CFG_STRING, RELOAD_RESTART},
+     sizeof(((config_t *)0)->telemetry_metrics_token), 0, CFG_STRING, RELOAD_RESTART,
+     FGROUP_RUNTIME, "AIMEE_TELEMETRY_METRICS_TOKEN"},
     {"kb_mining_enabled", offsetof(config_t, kb_mining_enabled), sizeof(int), 0, CFG_BOOL},
     {"kb_mining_min_poll_s", offsetof(config_t, kb_mining_min_poll_s), sizeof(int), 0, CFG_INT,
      RELOAD_HOT, FGROUP_ADVANCED},
@@ -495,6 +501,21 @@ cJSON *config_field_value_json(const config_t *cfg, const config_field_t *f)
    return cJSON_CreateString(base);
 }
 
+const char *config_field_secret_name(const config_field_t *f)
+{
+   return f ? f->secret_name : NULL;
+}
+
+cJSON *config_field_public_value_json(const config_t *cfg, const config_field_t *f)
+{
+   if (!cfg || !f)
+      return cJSON_CreateNull();
+   if (!config_field_secret_name(f))
+      return config_field_value_json(cfg, f);
+   const char *base = (const char *)cfg + f->offset;
+   return cJSON_CreateBool(base[0] ? 1 : 0);
+}
+
 int config_field_set_value(config_t *cfg, const config_field_t *f, const char *value)
 {
    if (!cfg || !f || !value)
@@ -568,6 +589,7 @@ static const struct
     {"kb_client_bearer_token", ""},
     {"memory_rerank_mode", ""},
     {"ingress_preinject_enabled", "true"},
+    {"code_context_mode", "observe"},
     {"ingress_preinject_anthropic_enabled", "false"},
     {"ingress_compress_enabled", "true"},
     {"gateway_prevent_subagents", "false"},

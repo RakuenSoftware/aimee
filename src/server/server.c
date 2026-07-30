@@ -13,6 +13,7 @@
 #include "primary_cli_ingestor.h"
 #include "server.h"
 #include "server_mcp_internal.h" /* mcp_tool_register_native_surface */
+#include "kb_client.h"           /* request-local memory scope context */
 
 #include "agent_tools.h"     /* agent_tools_set_git_write_provider / _set_shell_git_gate */
 #include "git_cred_inject.h" /* git_cred_forge_configured — no aimee route, no restriction */
@@ -1337,14 +1338,15 @@ static int handle_session_brief_assemble(server_ctx_t *ctx, server_conn_t *conn,
    FILE *mem = open_memstream(&captured, &captured_len);
    if (!mem)
       return server_send_error(conn, "open_memstream failed", request_id);
-
+   int active_context_missing = server_memory_scope_begin(req);
    session_brief_emit(mem);
+   kb_client_memory_scope_context_clear();
    fflush(mem);
    fclose(mem);
-
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "schema_version", 1);
    cJSON_AddStringToObject(resp, "output", captured ? captured : "");
+   cJSON_AddBoolToObject(resp, "active_context_missing", active_context_missing);
    if (request_id)
       cJSON_AddStringToObject(resp, "request_id", request_id);
 
@@ -1963,21 +1965,6 @@ static int server_agent_route_policy_excluded(const agent_t *ag)
    return 0;
 }
 
-/* Production agent-name resolver for the vault bootstrap: validate against
- * agents.json and return the canonical agent name. agent_load_config is cached,
- * so the per-secret calls are cheap. */
-static int server_bootstrap_resolve_agent(const char *name, char *canon, size_t cap)
-{
-   agent_config_t cfg;
-   if (agent_load_config(&cfg) != 0)
-      return 0;
-   agent_t *a = agent_find(&cfg, name);
-   if (!a)
-      return 0;
-   snprintf(canon, cap, "%s", a->name);
-   return 1;
-}
-
 /* The shell-git gate (agent_tools.h): 1 = refuse this shell command, git belongs to
  * aimee. Lives here because the decision needs three things from three tiers that
  * the agent tool surface must not link — the config dial, the command classifier,
@@ -2216,6 +2203,15 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
                orphan_containers);
    /* Seed personas + role templates so config (not code) is the source of truth. */
    server_seed_config_defaults();
+   /* Credential environment variables are first-boot transport only. Seal them
+    * before any capability posture checks or workers can consume them. */
+   if (server_vault_bootstrap_prepare() < 0)
+   {
+      LOG_ERROR("server", "delegate credential Vault bootstrap failed");
+      close(fd);
+      platform_evloop_destroy(&ctx->evloop);
+      return -1;
+   }
    int compute_threads = aimee_resolve_compute_threads(cfg.compute_threads);
    int session_threads = aimee_resolve_session_threads(cfg.session_threads);
    /* Background (sessionless) delegates run on-demand, gated by the per-model
@@ -2386,11 +2382,6 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    /* Boot-time enforcement-posture signal for the primary-CLI-ingestor: makes an
     * "enabled but silently inert" misconfig (flag on, dial off) visible at startup. */
    primary_cli_ingestor_log_posture();
-   /* Provision the delegate vault from operator-supplied secrets before serving,
-    * so a freshly stood-up server's delegates/roundtables work without a manual
-    * `vault set`. No-op unless a secret source is configured. */
-   server_vault_bootstrap_set_resolver(server_bootstrap_resolve_agent);
-   server_vault_bootstrap();
    return 0;
 }
 int server_run(server_ctx_t *ctx)

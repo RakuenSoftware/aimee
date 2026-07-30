@@ -25,6 +25,62 @@
 #include <stdlib.h>
 #include <string.h>
 
+static __thread int s_kbc_memory_scope_active;
+static __thread int s_kbc_memory_scope_all;
+static __thread char s_kbc_memory_workspace[512];
+static __thread char s_kbc_memory_project[512];
+
+void kb_client_memory_scope_context_set(const char *workspace, const char *project, int include_all)
+{
+   s_kbc_memory_scope_active = 1;
+   s_kbc_memory_scope_all = include_all ? 1 : 0;
+   snprintf(s_kbc_memory_workspace, sizeof(s_kbc_memory_workspace), "%s",
+            workspace ? workspace : "");
+   snprintf(s_kbc_memory_project, sizeof(s_kbc_memory_project), "%s", project ? project : "");
+}
+
+void kb_client_memory_scope_context_clear(void)
+{
+   s_kbc_memory_scope_active = 0;
+   s_kbc_memory_scope_all = 0;
+   s_kbc_memory_workspace[0] = '\0';
+   s_kbc_memory_project[0] = '\0';
+}
+
+void kb_client_memory_scope_context_apply(cJSON *req)
+{
+   if (!req || !s_kbc_memory_scope_active)
+      return;
+   /* Preserve an explicit per-operation value.  Besides making this helper
+    * idempotent, that keeps exact caller scope from becoming an ambiguous
+    * duplicate JSON key when an ambient agent request context also exists. */
+   if (!cJSON_GetObjectItemCaseSensitive(req, "scope_context"))
+      cJSON_AddBoolToObject(req, "scope_context", 1);
+   if (!cJSON_GetObjectItemCaseSensitive(req, "include_all"))
+      cJSON_AddBoolToObject(req, "include_all", s_kbc_memory_scope_all);
+   if (s_kbc_memory_workspace[0] && !cJSON_GetObjectItemCaseSensitive(req, "workspace"))
+      cJSON_AddStringToObject(req, "workspace", s_kbc_memory_workspace);
+   if (s_kbc_memory_project[0] && !cJSON_GetObjectItemCaseSensitive(req, "project"))
+      cJSON_AddStringToObject(req, "project", s_kbc_memory_project);
+}
+
+static void kbc_memory_add_scope_context(cJSON *req)
+{
+   kb_client_memory_scope_context_apply(req);
+}
+
+/* Single-record readers use 1 for a valid miss and -1 for an unavailable or
+ * malformed result. Keeping those outcomes distinct prevents callers from
+ * rendering a stale thread-local dependency status as a genuine not-found. */
+static int kbc_memory_single_miss(const cJSON *resp)
+{
+   const cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   const cJSON *message = cJSON_GetObjectItemCaseSensitive(resp, "message");
+   return (cJSON_IsString(status) && (strcmp(status->valuestring, "empty") == 0 ||
+                                      strcmp(status->valuestring, "not_found") == 0)) ||
+          (cJSON_IsString(message) && strstr(message->valuestring, "not found") != NULL);
+}
+
 void kbc_memory_row_from_json(cJSON *f, memory_t *m)
 {
    memset(m, 0, sizeof(*m));
@@ -75,6 +131,7 @@ int kb_client_memory_find_facts(const char *query, int limit, memory_t *out, int
       return -1;
 
    cJSON *req = cJSON_CreateObject();
+   kbc_memory_add_scope_context(req);
    cJSON_AddStringToObject(req, "query", query);
    if (limit > 0)
       cJSON_AddNumberToObject(req, "limit", limit);
@@ -121,6 +178,7 @@ int kb_client_memory_find_facts_ex(const char *query, int limit, memory_t *out, 
       return -1;
 
    cJSON *req = cJSON_CreateObject();
+   kbc_memory_add_scope_context(req);
    cJSON_AddStringToObject(req, "query", query);
    if (limit > 0)
       cJSON_AddNumberToObject(req, "limit", limit);
@@ -168,6 +226,7 @@ int kb_client_memory_list(const char *tier, const char *kind, int limit, memory_
       return 0;
 
    cJSON *req = cJSON_CreateObject();
+   kbc_memory_add_scope_context(req);
    if (tier && tier[0])
       cJSON_AddStringToObject(req, "tier", tier);
    if (kind && kind[0])
@@ -240,6 +299,7 @@ char *kb_client_memory_maintenance_run_json(unsigned int modes, int force, int d
 char *kb_client_memory_alerts_json(const char *since)
 {
    cJSON *req = cJSON_CreateObject();
+   kbc_memory_add_scope_context(req);
    if (since && since[0])
       cJSON_AddStringToObject(req, "since", since);
    return kb_v1_action_request("memory.alerts", req);
@@ -370,6 +430,7 @@ int kb_client_memory_diagnose_scoped(const char *query, const char *scope_type,
    if (!query || !out || max <= 0)
       return 0;
    cJSON *req = cJSON_CreateObject();
+   kbc_memory_add_scope_context(req);
    cJSON_AddStringToObject(req, "query", query);
    if (scope_type && scope_type[0])
       cJSON_AddStringToObject(req, "scope_type", scope_type);
@@ -444,11 +505,13 @@ int kb_client_memory_find_facts_visible(const char *query, const char *workspace
    if (!query || !out || max <= 0)
       return 0;
    cJSON *req = cJSON_CreateObject();
+   cJSON_AddBoolToObject(req, "scope_context", 1);
    cJSON_AddStringToObject(req, "query", query);
    if (workspace && workspace[0])
       cJSON_AddStringToObject(req, "workspace", workspace);
    if (project && project[0])
       cJSON_AddStringToObject(req, "project", project);
+   kbc_memory_add_scope_context(req);
    if (limit > 0)
       cJSON_AddNumberToObject(req, "limit", limit);
    char *json = kb_v1_action_request("memory.find_facts_visible", req);
@@ -493,6 +556,7 @@ int kb_client_memory_search(char **clusters, int cluster_count, int limit, searc
    if (!out || max <= 0)
       return 0;
    cJSON *req = cJSON_CreateObject();
+   kbc_memory_add_scope_context(req);
    cJSON *arr = cJSON_AddArrayToObject(req, "clusters");
    for (int i = 0; i < cluster_count; i++)
       if (clusters[i] && clusters[i][0])
@@ -567,6 +631,7 @@ int kb_client_memory_search(char **clusters, int cluster_count, int limit, searc
 char *kb_client_memory_assemble_context(const char *task_hint)
 {
    cJSON *req = cJSON_CreateObject();
+   kbc_memory_add_scope_context(req);
    if (task_hint && task_hint[0])
       cJSON_AddStringToObject(req, "task_hint", task_hint);
    char *json = kb_v1_action_request("memory.assemble_context", req);
@@ -995,6 +1060,7 @@ char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, i
                                       const char *graph_code_fusion_state)
 {
    cJSON *req = cJSON_CreateObject();
+   kbc_memory_add_scope_context(req);
    if (task_hint && task_hint[0])
       cJSON_AddStringToObject(req, "task_hint", task_hint);
    if (limit_tokens > 0)
@@ -1057,6 +1123,7 @@ int kb_client_memory_top_l2_facts(memory_t *out, int max)
    if (!out || max <= 0)
       return 0;
    cJSON *req = cJSON_CreateObject();
+   kbc_memory_add_scope_context(req);
    cJSON_AddNumberToObject(req, "max", max);
    char *json = kb_v1_action_request("memory.top_l2_facts", req);
    if (!json)
@@ -1151,8 +1218,9 @@ int kb_client_memory_get(int64_t id, memory_t *out)
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
    if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
    {
+      int miss = kbc_memory_single_miss(resp);
       cJSON_Delete(resp);
-      return -1;
+      return miss ? 1 : -1;
    }
 
    cJSON *mem_j = cJSON_GetObjectItemCaseSensitive(resp, "memory");
@@ -1169,6 +1237,7 @@ int kb_client_memory_get(int64_t id, memory_t *out)
 cJSON *kb_client_memory_briefing(int limit_tokens)
 {
    cJSON *req = cJSON_CreateObject();
+   kbc_memory_add_scope_context(req);
    if (limit_tokens > 0)
       cJSON_AddNumberToObject(req, "limit_tokens", limit_tokens);
    char *json = kb_v1_action_request("memory.briefing", req);
@@ -1237,6 +1306,7 @@ int kb_client_memory_get_entity_profile(const char *entity, memory_entity_profil
       return -1;
 
    cJSON *req = cJSON_CreateObject();
+   kbc_memory_add_scope_context(req);
    cJSON_AddStringToObject(req, "entity", entity);
    char *json = kb_v1_action_request("memory.entity_profile", req);
    if (!json)
@@ -1250,8 +1320,9 @@ int kb_client_memory_get_entity_profile(const char *entity, memory_entity_profil
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
    if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
    {
+      int miss = kbc_memory_single_miss(resp);
       cJSON_Delete(resp);
-      return -1;
+      return miss ? 1 : -1;
    }
    cJSON *prof = cJSON_GetObjectItemCaseSensitive(resp, "profile");
    if (!cJSON_IsObject(prof))
@@ -1286,6 +1357,7 @@ int kb_client_memory_get_entity_edges(const char *entity, int limit, memory_rela
       return 0;
 
    cJSON *req = cJSON_CreateObject();
+   kbc_memory_add_scope_context(req);
    cJSON_AddStringToObject(req, "entity", entity);
    if (limit > 0)
       cJSON_AddNumberToObject(req, "limit", limit);
@@ -1326,6 +1398,7 @@ int kb_client_memory_search_graph(const char *query, int limit, memory_relation_
       return 0;
 
    cJSON *req = cJSON_CreateObject();
+   kbc_memory_add_scope_context(req);
    cJSON_AddStringToObject(req, "query", query);
    if (limit > 0)
       cJSON_AddNumberToObject(req, "limit", limit);
@@ -1367,6 +1440,7 @@ int kb_client_memory_search_graph_as_of(const char *query, const char *as_of, in
       return 0;
 
    cJSON *req = cJSON_CreateObject();
+   kbc_memory_add_scope_context(req);
    cJSON_AddStringToObject(req, "query", query);
    cJSON_AddStringToObject(req, "as_of", as_of);
    if (limit > 0)
@@ -1410,6 +1484,7 @@ int kb_client_memory_ask(const char *query, const char *scope_type, const char *
    memset(out, 0, sizeof(*out));
 
    cJSON *req = cJSON_CreateObject();
+   kbc_memory_add_scope_context(req);
    cJSON_AddStringToObject(req, "query", query);
    if (scope_type && scope_type[0])
       cJSON_AddStringToObject(req, "scope_type", scope_type);
@@ -1568,8 +1643,9 @@ int kb_client_memory_get_episode(const char *episode_key, memory_episode_t *out)
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
    if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
    {
+      int miss = kbc_memory_single_miss(resp);
       cJSON_Delete(resp);
-      return -1;
+      return miss ? 1 : -1;
    }
    cJSON *ep = cJSON_GetObjectItemCaseSensitive(resp, "episode");
    if (!cJSON_IsObject(ep))
@@ -1609,6 +1685,7 @@ char *kb_client_memory_context_block(const char *query, const char *block_type, 
       return NULL;
 
    cJSON *req = cJSON_CreateObject();
+   kbc_memory_add_scope_context(req);
    cJSON_AddStringToObject(req, "query", query);
    if (block_type && block_type[0])
       cJSON_AddStringToObject(req, "block_type", block_type);
@@ -1641,6 +1718,7 @@ char *kb_client_memory_facts(const char *query)
       return NULL;
 
    cJSON *req = cJSON_CreateObject();
+   kbc_memory_add_scope_context(req);
    cJSON_AddStringToObject(req, "query", query);
    char *json = kb_v1_action_request("memory.facts", req);
    if (!json)

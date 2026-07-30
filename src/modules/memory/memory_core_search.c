@@ -5,6 +5,7 @@
 #define _GNU_SOURCE
 #endif
 #include "memory_core_internal.h"
+#include "db2/memory_scope_query.h"
 /* memory_core_search.c: split from memory_core.c into a real translation unit
  * (was memory_core_search.inc, textually included only to stay under the
  * line-check ceiling). Cross-TU declarations live in the module header. */
@@ -92,6 +93,14 @@ static int memory_search_impl(char **clusters, int cluster_count, int limit, sea
       limit = 20;
    if (limit > max)
       limit = max;
+
+   /* Legacy conversation windows have no project/workspace identity.  A
+    * current-scope request must not mistake those unscoped rows for local
+    * memory. Explicit all-project scope preserves the compatibility route. */
+   db2_memory_scope_context_t request_scope;
+   db2_memory_scope_context_get(&request_scope);
+   if (request_scope.active && !request_scope.include_all)
+      return 0;
 
    /* Parse cluster terms and load stopwords */
    char *all_terms[256];

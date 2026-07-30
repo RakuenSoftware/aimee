@@ -79,6 +79,9 @@ export AIMEE_LLM_DOCKERFILE="${AIMEE_LLM_DOCKERFILE:-Dockerfile.aimee-llm-stub}"
 # blow the runner's disk/time. Selecting only `llm` overrides the committed .env's
 # curator-llm default. T3 (standalone) has no aimee-llm service, so this is a no-op there.
 export COMPOSE_PROFILES="${COMPOSE_PROFILES:-llm}"
+# These topology smokes exercise the machine APIs, not browser authentication.
+# Disable webchat instead of inventing a credential fixture outside Vault.
+export AIMEE_RUNTIME_WEB_ENABLED="${AIMEE_RUNTIME_WEB_ENABLED:-0}"
 
 bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
 selected() { case ",$ONLY," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }

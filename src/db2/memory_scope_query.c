@@ -3,13 +3,70 @@
 
 #include "../headers/aimee.h" /* memory_t */
 #include "memory_query.h"
+#include "memory_scope_query.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
 
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 
 #define MSQ_ERRBUF 256
+
+static __thread db2_memory_scope_context_t s_memory_scope_context;
+
+void db2_memory_scope_context_set(const char *workspace, const char *project, int include_all)
+{
+   memset(&s_memory_scope_context, 0, sizeof(s_memory_scope_context));
+   s_memory_scope_context.active = 1;
+   s_memory_scope_context.include_all = include_all ? 1 : 0;
+   snprintf(s_memory_scope_context.workspace, sizeof(s_memory_scope_context.workspace), "%s",
+            workspace ? workspace : "");
+   snprintf(s_memory_scope_context.project, sizeof(s_memory_scope_context.project), "%s",
+            project ? project : "");
+}
+
+void db2_memory_scope_context_clear(void)
+{
+   memset(&s_memory_scope_context, 0, sizeof(s_memory_scope_context));
+}
+
+void db2_memory_scope_context_get(db2_memory_scope_context_t *out)
+{
+   if (out)
+      *out = s_memory_scope_context;
+}
+
+int db2_memory_scope_context_rank(int64_t memory_id)
+{
+   if (!s_memory_scope_context.active)
+      return 0;
+   if (s_memory_scope_context.project[0] &&
+       db2_memory_scope_matches(memory_id, "project", s_memory_scope_context.project))
+      return 3;
+   if (s_memory_scope_context.workspace[0] &&
+       (db2_memory_scope_matches(memory_id, "workspace", s_memory_scope_context.workspace) ||
+        db2_memory_workspace_matches(memory_id, s_memory_scope_context.workspace)))
+      return 2;
+   if (db2_memory_scope_matches(memory_id, "global", "_global") ||
+       db2_memory_scope_matches(memory_id, "workspace", "_shared") ||
+       (!db2_memory_has_scope_type(memory_id, "global") &&
+        !db2_memory_has_scope_type(memory_id, "workspace") &&
+        !db2_memory_has_scope_type(memory_id, "project") &&
+        !db2_memory_has_any_workspace_tag(memory_id)))
+      return 1;
+   return 0;
+}
+
+void db2_memory_scope_bind_current(aimee_pg_stmt_t *st)
+{
+   if (!st)
+      return;
+   aimee_pg_bind_int(st, "?101", s_memory_scope_context.active ? 1 : 0);
+   aimee_pg_bind_int(st, "?102", s_memory_scope_context.include_all ? 1 : 0);
+   aimee_pg_bind_text(st, "?103", s_memory_scope_context.workspace);
+   aimee_pg_bind_text(st, "?104", s_memory_scope_context.project);
+}
 
 int db2_memory_scope_matches(int64_t memory_id, const char *scope_type, const char *scope_value)
 {

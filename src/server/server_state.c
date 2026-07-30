@@ -49,6 +49,36 @@ int send_and_free(server_conn_t *conn, cJSON *resp)
 
 /* --- Memory handlers --- */
 
+int server_memory_scope_begin(cJSON *req)
+{
+   const char *cwd = jo_str(req, "cwd", NULL);
+   const char *project_arg = jo_str(req, "project", NULL);
+   const char *workspace_arg = jo_str(req, "workspace", NULL);
+   const char *scope_arg = jo_str(req, "scope", NULL);
+   char project[MAX_PATH_LEN] = "";
+   char workspace[MAX_PATH_LEN] = "";
+   if (project_arg)
+      snprintf(project, sizeof(project), "%s", project_arg);
+   if (workspace_arg)
+      snprintf(workspace, sizeof(workspace), "%s", workspace_arg);
+   if ((!project[0] || !workspace[0]) && cwd && cwd[0])
+   {
+      char resolved_project[MAX_PATH_LEN] = "";
+      char resolved_workspace[MAX_PATH_LEN] = "";
+      if (workspace_repo_identity(cwd, resolved_project, sizeof(resolved_project),
+                                  resolved_workspace, sizeof(resolved_workspace)) == 0)
+      {
+         if (!project[0])
+            snprintf(project, sizeof(project), "%s", resolved_project);
+         if (!workspace[0])
+            snprintf(workspace, sizeof(workspace), "%s", resolved_workspace);
+      }
+   }
+   kb_client_memory_scope_context_set(workspace, project,
+                                      scope_arg && strcmp(scope_arg, "all") == 0);
+   return (!workspace[0] && !project[0]) ? 1 : 0;
+}
+
 int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -85,19 +115,23 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       qpos += snprintf(query_buf + qpos, sizeof(query_buf) - qpos, "%s", clusters[i]);
    }
 
+   int active_context_missing = server_memory_scope_begin(req);
    /* Search stored facts; graph-code fusion is always on for recall. */
    memory_t facts[32];
    int fact_count = kb_client_memory_find_facts_ex(query_buf, limit, facts, 32, "on");
    if (fact_count < 0)
+   {
+      kb_client_memory_scope_context_clear();
       return server_send_error(conn,
                                "knowledge service search index unavailable; server-side "
                                "maintenance is required",
                                NULL);
+   }
 
    /* Search conversation windows */
    search_result_t results[32];
    int found = kb_client_memory_search(clusters, count, limit, results, 32);
-
+   kb_client_memory_scope_context_clear();
    cJSON *farr = cJSON_CreateArray();
    for (int i = 0; i < fact_count; i++)
       cJSON_AddItemToArray(farr, memory_to_json(&facts[i]));
@@ -116,6 +150,7 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *resp = jo_ok();
    cJSON_AddItemToObject(resp, "facts", farr);
    cJSON_AddItemToObject(resp, "windows", warr);
+   jo_add_bool(resp, "active_context_missing", active_context_missing);
    return send_and_free(conn, resp);
 }
 
@@ -155,21 +190,25 @@ int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *tier = jo_str(req, "tier", NULL);
    const char *kind = jo_str(req, "kind", NULL);
    int limit = jo_int(req, "limit", 20);
-
+   int active_context_missing = server_memory_scope_begin(req);
    memory_t results[64];
    int count = kb_client_memory_list(tier, kind, limit, results, 64);
    if (count < 0)
+   {
+      kb_client_memory_scope_context_clear();
       return server_send_error(conn,
                                "knowledge service unavailable; the memory store is unreachable "
                                "(server-side maintenance is required)",
                                NULL);
-
+   }
+   kb_client_memory_scope_context_clear();
    cJSON *arr = cJSON_CreateArray();
    for (int i = 0; i < count; i++)
       cJSON_AddItemToArray(arr, memory_to_json(&results[i]));
 
    cJSON *resp = jo_ok();
    cJSON_AddItemToObject(resp, "memories", arr);
+   jo_add_bool(resp, "active_context_missing", active_context_missing);
    return send_and_free(conn, resp);
 }
 
@@ -324,9 +363,17 @@ int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          cJSON_Delete(mj);
       }
    }
-   else
+   else if (rc > 0)
    {
       resp = jo_err("memory not found");
+   }
+   else
+   {
+      char *typed = kb_client_last_result_json("memory lookup failed");
+      resp = typed ? cJSON_Parse(typed) : NULL;
+      free(typed);
+      if (!resp)
+         resp = jo_err("knowledge service unavailable");
    }
    return send_and_free(conn, resp);
 }
@@ -334,11 +381,12 @@ int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   (void)req;
-
+   int active_context_missing = server_memory_scope_begin(req);
    char *context = kb_client_memory_assemble_context(NULL);
+   kb_client_memory_scope_context_clear();
    cJSON *resp = jo_ok();
    jo_add_str(resp, "context", context ? context : "");
+   jo_add_bool(resp, "active_context_missing", active_context_missing);
    free(context);
    return send_and_free(conn, resp);
 }
@@ -369,135 +417,7 @@ int handle_index_scan(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
-int handle_index_find(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-
-   const char *identifier;
-   if (jo_need_str(req, "identifier", &identifier) < 0 || !identifier[0])
-      return server_send_error(conn, "missing identifier", NULL);
-
-   term_hit_t hits[128];
-   int count = kb_client_index_find(identifier, hits, 128);
-
-   cJSON *resp = jo_ok();
-   cJSON *arr = cJSON_AddArrayToObject(resp, "hits");
-   for (int i = 0; i < count; i++)
-   {
-      cJSON *h = cJSON_CreateObject();
-      jo_add_str(h, "project", hits[i].project);
-      jo_add_str(h, "file_path", hits[i].file_path);
-      cJSON_AddNumberToObject(h, "line", hits[i].line);
-      jo_add_str(h, "kind", hits[i].kind);
-      cJSON_AddItemToArray(arr, h);
-   }
-   return send_and_free(conn, resp);
-}
-
-int handle_index_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-   (void)req;
-
-   project_info_t projects[128];
-   int count = kb_client_index_list(projects, 128);
-
-   cJSON *resp = jo_ok();
-   cJSON *arr = cJSON_AddArrayToObject(resp, "projects");
-   for (int i = 0; i < count; i++)
-   {
-      cJSON *p = cJSON_CreateObject();
-      jo_add_str(p, "name", projects[i].name);
-      jo_add_str(p, "root", projects[i].root);
-      jo_add_str(p, "scanned_at", projects[i].scanned_at);
-      cJSON_AddItemToArray(arr, p);
-   }
-   return send_and_free(conn, resp);
-}
-
-int handle_index_blast_radius(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-
-   const char *project, *file_path;
-   if (jo_need_str(req, "project", &project) < 0 || jo_need_str(req, "file_path", &file_path) < 0)
-      return server_send_error(conn, "missing project or file_path", NULL);
-
-   blast_radius_t br;
-   int rc = kb_client_index_blast_radius(project, file_path, &br);
-
-   cJSON *resp;
-   if (rc == 0)
-   {
-      resp = jo_ok();
-      jo_add_str(resp, "file", br.file);
-
-      cJSON *deps = cJSON_CreateArray();
-      for (int i = 0; i < br.dependency_count; i++)
-         cJSON_AddItemToArray(deps, cJSON_CreateString(br.dependencies[i]));
-      cJSON_AddItemToObject(resp, "dependencies", deps);
-
-      cJSON *depts = cJSON_CreateArray();
-      for (int i = 0; i < br.dependent_count; i++)
-         cJSON_AddItemToArray(depts, cJSON_CreateString(br.dependents[i]));
-      cJSON_AddItemToObject(resp, "dependents", depts);
-   }
-   else
-   {
-      resp = jo_err("blast radius lookup failed (knowledge service unavailable)");
-   }
-   return send_and_free(conn, resp);
-}
-
-int handle_index_structure(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-   const char *project, *file_path;
-   if (jo_need_str(req, "project", &project) < 0 || jo_need_str(req, "file_path", &file_path) < 0)
-      return server_send_error(conn, "missing project or file_path", NULL);
-   definition_t defs[256];
-   int count = kb_client_index_structure(project, file_path, defs, 256);
-   cJSON *resp = jo_ok();
-   cJSON *arr = cJSON_AddArrayToObject(resp, "definitions");
-   for (int i = 0; i < count; i++)
-   {
-      cJSON *d = cJSON_CreateObject();
-      jo_add_str(d, "name", defs[i].name);
-      jo_add_str(d, "kind", defs[i].kind);
-      cJSON_AddNumberToObject(d, "line", defs[i].line);
-      /* Span-propagation parity (#33): emit line_end like the KB/MCP routes do. */
-      if (defs[i].line_end)
-         cJSON_AddNumberToObject(d, "line_end", defs[i].line_end);
-      cJSON_AddItemToArray(arr, d);
-   }
-   return send_and_free(conn, resp);
-}
-
-int handle_index_find_callers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-
-   const char *symbol;
-   if (jo_need_str(req, "symbol", &symbol) < 0 || !symbol[0])
-      return server_send_error(conn, "missing symbol", NULL);
-   const char *project = jo_str(req, "project", NULL);
-
-   caller_hit_t hits[128];
-   int count = kb_client_index_find_callers(project, symbol, hits, 128);
-
-   cJSON *resp = jo_ok();
-   cJSON *arr = cJSON_AddArrayToObject(resp, "hits");
-   for (int i = 0; i < count; i++)
-   {
-      cJSON *h = cJSON_CreateObject();
-      jo_add_str(h, "project", hits[i].project);
-      jo_add_str(h, "file_path", hits[i].file_path);
-      jo_add_str(h, "caller", hits[i].caller);
-      cJSON_AddNumberToObject(h, "line", hits[i].line);
-      cJSON_AddItemToArray(arr, h);
-   }
-   return send_and_free(conn, resp);
-}
+/* Agent-facing code-index query handlers live in server_state_index.c. */
 
 /* --- Graph code-projection handlers --- */
 
@@ -589,13 +509,34 @@ int handle_kb_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
 
    const char *query = jo_str(req, "query", "");
+   char project_buf[MAX_PATH_LEN] = "";
    const char *project = jo_str(req, "project", NULL);
+   const char *scope = jo_str(req, "scope", NULL);
+   if (scope && strcmp(scope, "current") != 0 && strcmp(scope, "all") != 0)
+      return server_send_error(conn, "kb.search scope must be current or all", NULL);
+   if (scope && strcmp(scope, "all") == 0)
+   {
+      if (!project || !project[0])
+      {
+         const char *cwd = jo_str(req, "cwd", NULL);
+         if (cwd && workspace_repo_identity(cwd, project_buf, sizeof(project_buf), NULL, 0) == 0)
+            project = project_buf;
+      }
+   }
+   else if (!project || !project[0])
+   {
+      const char *cwd = jo_str(req, "cwd", NULL);
+      if (!cwd || workspace_repo_identity(cwd, project_buf, sizeof(project_buf), NULL, 0) != 0)
+         return server_send_error(
+             conn, "scope_required: no active project; pass --scope all explicitly", NULL);
+      project = project_buf;
+   }
    int max_results = jo_int(req, "max_results", 10);
    const char *fusion_mode = jo_str(req, "fusion_mode", NULL);
    const char *embed_cmd = jo_str(req, "embedding_command", NULL);
 
-   char *json =
-       kb_client_search_json_ex(project, query, embed_cmd, max_results, "json", fusion_mode);
+   char *json = kb_client_search_json_scoped_ex(project, scope && strcmp(scope, "all") == 0, query,
+                                                embed_cmd, max_results, "json", fusion_mode);
    cJSON *resp = json ? cJSON_Parse(json) : NULL;
    free(json);
    if (!resp)

@@ -38,6 +38,43 @@ typedef struct
    int maintenance_enabled;
 } kb_health_t;
 
+/* Every retrieval attempt has one of these six outcomes. The accessor is
+ * thread-local, so a concurrent request cannot overwrite another request's
+ * transport/result classification. Human-readable payloads remain compatible;
+ * callers that need to distinguish empty from outage read this typed result. */
+typedef enum
+{
+   KB_CLIENT_RESULT_OK = 0,
+   KB_CLIENT_RESULT_EMPTY,
+   KB_CLIENT_RESULT_ABSTAINED,
+   KB_CLIENT_RESULT_STALE,
+   KB_CLIENT_RESULT_UNAVAILABLE,
+   KB_CLIENT_RESULT_UNAUTHORIZED
+} kb_client_result_status_t;
+
+typedef struct
+{
+   char state[16]; /* closed | open | half_open */
+   unsigned failure_streak;
+   unsigned recovery_attempt;
+   int64_t retry_after_ms;
+   int64_t last_success_ms;
+   int64_t last_failure_ms;
+   uint64_t suppressed_calls;
+} kb_client_dependency_health_t;
+
+kb_client_result_status_t kb_client_last_result_status(void);
+const char *kb_client_result_status_name(kb_client_result_status_t status);
+int kb_client_result_status_retryable(kb_client_result_status_t status);
+/* Heap JSON for the current thread's last result, including dependency,
+ * retryability and breaker delay where applicable. Caller frees. */
+char *kb_client_last_result_json(const char *message);
+void kb_client_dependency_health(kb_client_dependency_health_t *out);
+
+/* Deterministic test seams; production passes NULL and uses the wall clock. */
+void kb_client_dependency_reset_for_tests(void);
+void kb_client_dependency_set_clock_for_tests(int64_t (*now_ms)(void));
+
 /* Query aimee-kb health.  Fills *out and returns 0 on success.  Returns -1
  * if aimee-kb is unreachable (out->process_ok == 0). */
 int kb_client_health(kb_health_t *out);
@@ -124,9 +161,10 @@ char *kb_client_purge_cancel_json(const char *project, const char *generation,
  * resp["result"] and is either the plain-text or JSON search output
  * depending on `format`.  On any failure the returned JSON has
  * {"status":"error","message":"..."}. */
-/* Search KB documents via aimee-kb.  |project| may be NULL or empty
- * to search across all projects (the agent search_docs tool calls
- * it that way).  |format| selects "text" (default) or "json"
+/* Search KB documents via aimee-kb.  |project| may be NULL or empty only for
+ * an intentional all-project internal call; the client sends scope=all
+ * explicitly. Agent-facing surfaces resolve the active project before here.
+ * |format| selects "text" (default) or "json"
  * formatting of the result body.  Returns a heap-allocated JSON
  * envelope (caller frees). */
 char *kb_client_search_json(const char *project, const char *query, const char *embedding_command,
@@ -140,6 +178,12 @@ char *kb_client_curator_contradictions_json(int limit);
 char *kb_client_search_json_ex(const char *project, const char *query,
                                const char *embedding_command, int max_results, const char *format,
                                const char *fusion_mode_override);
+/* Explicit-scope variant. When all_projects is true, preferred_project is the
+ * active-project head bucket and the remaining corpus may extend the tail. */
+char *kb_client_search_json_scoped_ex(const char *preferred_project, int all_projects,
+                                      const char *query, const char *embedding_command,
+                                      int max_results, const char *format,
+                                      const char *fusion_mode_override);
 
 /* Run a KB build via aimee-kb's public /v1/code/build endpoint and returns
  * the heap-allocated JSON response (caller frees).  Long-running for large
@@ -767,9 +811,8 @@ int kb_client_memory_explain_match(const char *query, int64_t memory_id, memory_
  * must split that flow across aimee-server and aimee-kb; do not add a client
  * or auxiliary process with both tiers linked. */
 
-/* Fetch a single memory row by id via aimee-kb.  Returns 0 on
- * success (out is filled) or -1 if kb is unreachable or the row is
- * missing.  Mirrors memory_get(). */
+/* Fetch a single memory row by id via aimee-kb. Returns 0 on success,
+ * 1 for a valid missing row, or -1 when the service/result is unavailable. */
 int kb_client_memory_get(int64_t id, memory_t *out);
 
 /* Insert a memory row via aimee-kb (the DB2 owner).  The full
@@ -916,9 +959,8 @@ char *kb_client_evidence_provenance_retrieval_event(const char *turn_id);
  * (malloc'd, caller frees; NULL on bad arg or kb error). */
 char *kb_client_evidence_fidelity_retrieval_event(const char *turn_id);
 
-/* Fetch the entity profile card via aimee-kb.  Returns 0 on success
- * (|out| filled) or -1 if kb is unreachable or the entity is missing.
- * Mirrors memory_get_entity_profile(). */
+/* Fetch the entity profile card via aimee-kb. Returns 0 on success,
+ * 1 for a valid missing entity, or -1 when the service/result is unavailable. */
 int kb_client_memory_get_entity_profile(const char *entity, memory_entity_profile_t *out);
 
 /* Fetch up to |max| graph edges for an entity via aimee-kb.  Returns
@@ -937,9 +979,8 @@ int kb_client_memory_search_graph(const char *query, int limit, memory_relation_
 int kb_client_memory_search_graph_as_of(const char *query, const char *as_of, int limit,
                                         memory_relation_t *out, int max);
 
-/* Fetch a single episode by key via aimee-kb.  Returns 0 on success
- * (out is filled) or -1 if kb is unreachable or the episode is
- * missing.  Mirrors memory_get_episode(). */
+/* Fetch a single episode by key via aimee-kb. Returns 0 on success,
+ * 1 for a valid missing episode, or -1 when the service/result is unavailable. */
 int kb_client_memory_get_episode(const char *episode_key, memory_episode_t *out);
 
 /* Run the memory Q&A pipeline via aimee-kb (the DB2 owner).  Returns
@@ -1096,6 +1137,13 @@ typedef struct
 int kb_client_index_scan(const char *name, const char *root, int force,
                          kb_client_index_scan_result_t *out);
 
+/* Stable project lifecycle. operation is detach|purge|gc. Empty confirm_hash
+ * performs a read-only dry-run for purge/gc. Returns the raw JSON body (caller
+ * frees) and writes the HTTP status when requested. */
+char *kb_client_index_project_lifecycle_json(const char *operation, const char *project,
+                                             const char *confirm_hash, const char *reason,
+                                             int retention_days, int *http_status);
+
 /* Push a set of caller-supplied source files to aimee-kb for indexing,
  * bypassing server-side filesystem enumeration. `files_arr_v` is a cJSON array
  * of {"rel_path","content"} objects (typed void * to keep this header
@@ -1121,11 +1169,13 @@ int kb_client_index_scan_apply_response(const void *resp, kb_client_index_scan_r
  * cJSON * (cast through void * to keep this header cJSON-free). */
 void *kb_client_index_scan_format_response(int kb_rc, const kb_client_index_scan_result_t *res);
 
-/* Find an identifier in the canonical index. Returns count of hits
- * written into `out` (capped at `max`), or 0 if kb is unreachable. */
+/* Find an identifier in the canonical index. Returns count of hits written
+ * into `out` (capped at `max`), or -1 if the KB is unavailable. */
 int kb_client_index_find(const char *identifier, term_hit_t *out, int max);
 int kb_client_index_find_project(const char *project, const char *identifier, term_hit_t *out,
                                  int max);
+int kb_client_index_find_scoped(const char *preferred_project, int all_projects,
+                                const char *identifier, term_hit_t *out, int max);
 
 /* List indexed projects. Returns count on success (0 = empty index),
  * or -1 if the knowledge service is unreachable. */
@@ -1150,8 +1200,8 @@ int kb_client_index_blast_radius(const char *project, const char *file_path, bla
 char *kb_client_index_blast_radius_preview_json(const char *project, char **paths, int path_count);
 
 /* List the structural definitions in a single file (function/struct/etc).
- * Returns count written into `out` (capped at `max`), or 0 if kb is
- * unreachable.  Mirrors index_structure(). */
+ * Returns count written into `out` (capped at `max`), or -1 if the KB is
+ * unavailable. Mirrors index_structure(). */
 int kb_client_index_structure(const char *project, const char *file_path, definition_t *out,
                               int max);
 
@@ -1160,6 +1210,8 @@ int kb_client_index_structure(const char *project, const char *file_path, defini
  * Uses /v1 over remote HTTP or local UDS. Mirrors index_find_callers(). */
 int kb_client_index_find_callers(const char *project, const char *symbol, caller_hit_t *out,
                                  int max);
+int kb_client_index_find_callers_scoped(const char *preferred_project, int all_projects,
+                                        const char *symbol, caller_hit_t *out, int max);
 
 /* S6: cross-repo dependency edges for `project` (required). `direction`
  * (out|in|both), `min_tier` (high|medium|tentative) may be NULL/empty for the kb
@@ -1182,6 +1234,8 @@ char *kb_client_repo_trust_json(const char *project, const char *trust, const ch
  * Mirrors index_code_search(). */
 int kb_client_index_code_search(const char *query, const char *project, code_search_hit_t *out,
                                 int max);
+int kb_client_index_code_search_scoped(const char *query, const char *preferred_project,
+                                       int all_projects, code_search_hit_t *out, int max);
 
 /* Structured-PDF evidence routes (/v1/pdf/...). Each returns the route's verbatim
  * citation JSON as a malloc'd string the caller frees, or NULL on a
@@ -1215,6 +1269,13 @@ char *kb_client_pdf_open_asset(const char *project, long long asset_id, int *sta
  * most-connected symbols (project required). */
 char *kb_client_code_hybrid(const char *query, const char *symbol, const char *project,
                             int max_results, int *status_out);
+char *kb_client_code_hybrid_scoped(const char *query, const char *symbol,
+                                   const char *preferred_project, int all_projects, int max_results,
+                                   int *status_out);
+/* Strict active-project task packet. The route fixes max_results=4 and its
+ * resident budget at 1200 tokens; project is required and never broadens. */
+char *kb_client_code_context(const char *query, const char *symbol, const char *project,
+                             int *status_out);
 char *kb_client_code_graph_hubs(const char *project, int max_results, int *status_out);
 char *kb_client_code_graph_audit(const char *project, int max_findings, int *status_out);
 char *kb_client_code_lessons(const char *project, int *status_out);
@@ -1244,5 +1305,13 @@ int kb_client_index_project_stats(const char *project, int *files_out, int *defs
 int kb_client_index_project_lang(const char *project, char *buf, size_t bufsz);
 
 int kb_client_canonical_index_scan(const char *project, const char *root_path, int force);
+
+/* Request-local active repository context for ordered memory RPCs.  The
+ * server sets this around one agent-facing call; legacy callers that do not
+ * set it retain their existing unscoped wire semantics. */
+void kb_client_memory_scope_context_set(const char *workspace, const char *project,
+                                        int include_all);
+void kb_client_memory_scope_context_clear(void);
+void kb_client_memory_scope_context_apply(cJSON *req);
 
 #endif /* DEC_KB_CLIENT_H */

@@ -5,16 +5,9 @@ import (
 	"fmt"
 	"log"
 	"os"
-
-	"github.com/RakuenSoftware/smoothgui/auth"
 )
 
 func main() {
-	// PAM helper subprocess: aimee-runtime-web __pam_auth <service> <username>
-	if len(os.Args) > 1 && os.Args[1] == "__pam_auth" {
-		os.Exit(auth.RunPAMHelper(os.Args[2:]))
-	}
-
 	port := flag.Int("port", 8443, "HTTPS listen port (use 8080 for plain HTTP)")
 	certFile := flag.String("cert", "", "TLS certificate file (PEM); auto-generated if empty")
 	keyFile := flag.String("key", "", "TLS key file (PEM); auto-generated if empty")

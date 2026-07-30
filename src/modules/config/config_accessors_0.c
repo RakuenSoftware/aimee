@@ -899,4 +899,3 @@ int config_learning_synthesize_enabled(void)
    config_field_read(offsetof(config_t, learning_synthesize_enabled), sizeof(v), &v);
    return v;
 }
-

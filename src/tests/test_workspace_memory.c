@@ -12,6 +12,11 @@
 #include "../db2/db2_internal.h"
 #include "../db2/db_postgres.h"
 #include "../db2/lifecycle.h"
+#include "../db2/memory_briefing.h"
+#include "../db2/memory_lifecycle.h"
+#include "../db2/memory_query.h"
+#include "../db2/memory_relations.h"
+#include "../db2/memory_scope_query.h"
 
 static char tmpdir[64];
 
@@ -46,6 +51,19 @@ static int count_for_key(const char *sql, const char *key)
    return v;
 }
 
+static void insert_memory_entity(int64_t memory_id, const char *entity)
+{
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(), "INSERT INTO memory_entities(memory_id, entity) VALUES (?1, ?2)", err,
+       sizeof(err));
+   assert(st != NULL);
+   assert(aimee_pg_bind_int64(st, "?1", memory_id) == 0);
+   assert(aimee_pg_bind_text(st, "?2", entity) == 0);
+   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE);
+   aimee_pg_finalize(st);
+}
+
 static void setup(void)
 {
    /* Isolate from real config so auto_tag_workspace doesn't pick up cwd workspaces */
@@ -54,10 +72,12 @@ static void setup(void)
    platform_setenv("HOME", tmpdir);
 
    db2_test_shim_open();
+   db2_memory_scope_context_clear();
 }
 
 static void teardown(void)
 {
+   db2_memory_scope_context_clear();
    db2_test_shim_close();
    char cmd[256];
    snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);
@@ -414,6 +434,171 @@ static void test_visible_retrieval_prefers_narrower_scope(void)
    teardown();
 }
 
+static void test_local_first_applies_before_limits_across_memory_surfaces(void)
+{
+   setup();
+   memory_t local, workspace_mem, global, other;
+   memory_insert(TIER_L2, KIND_FACT, "identity:local-crowdout",
+                 "crowdout routing needle belongs to the active project", 0.10, "local-session",
+                 &local);
+   assert(memory_tag_project(local.id, "active-project") == 0);
+   assert(db2_memory_episode_insert(local.id, "local-crowdout-episode",
+                                    "crowdout episode from active project", "local-session",
+                                    "2026-07-29") > 0);
+   insert_memory_entity(local.id, "LocalCrowdEntity");
+   db2_memory_relation_upsert_full(local.id, 0, "CrowdEntity", "owned_by", "ActiveProject",
+                                   "crowdout relation from active project", "", "", 0.10);
+
+   memory_insert(TIER_L2, KIND_FACT, "identity:workspace-crowdout",
+                 "crowdout routing needle belongs to the active workspace", 0.20,
+                 "workspace-session", &workspace_mem);
+   /* Preserve compatibility with rows written before memory_scopes became the
+    * canonical tag table: the legacy workspace table alone must rank second. */
+   db2_memory_workspace_tag_insert(workspace_mem.id, "active-workspace");
+
+   /* Both buckets exceed every one-row request below. Their much higher
+    * relevance/confidence and later insertion order reproduce the old failure:
+    * a global LIMIT first would permanently discard the active-project row. */
+   for (int i = 0; i < 12; i++)
+   {
+      char key[64];
+      char content[160];
+      snprintf(key, sizeof(key), "identity:global-crowdout-%02d", i);
+      snprintf(content, sizeof(content), "crowdout routing needle global distractor %02d", i);
+      memory_insert(TIER_L2, KIND_FACT, key, content, 0.99, "global-session", &global);
+      assert(memory_tag_global(global.id) == 0);
+      insert_memory_entity(global.id, "GlobalCrowdEntity");
+      db2_memory_relation_upsert_full(global.id, 0, "CrowdEntity", "owned_by", "Global",
+                                      "crowdout relation global distractor", "", "", 0.99);
+
+      snprintf(key, sizeof(key), "identity:other-crowdout-%02d", i);
+      snprintf(content, sizeof(content), "crowdout routing needle other project distractor %02d",
+               i);
+      memory_insert(TIER_L2, KIND_FACT, key, content, 0.99, "other-session", &other);
+      assert(memory_tag_project(other.id, "other-project") == 0);
+      insert_memory_entity(other.id, "OtherCrowdEntity");
+      db2_memory_relation_upsert_full(other.id, 0, "CrowdEntity", "owned_by", "OtherProject",
+                                      "crowdout relation other project distractor", "", "", 0.99);
+   }
+   /* A newer global episode in the same session must not become that
+    * session's representative ahead of the older active-project episode. */
+   assert(db2_memory_episode_insert(global.id, "global-same-session-episode",
+                                    "crowdout newer global episode in local session",
+                                    "local-session", "2026-07-30") > 0);
+
+   memory_t facts[64];
+   db2_memory_scope_context_set("active-workspace", "active-project", 0);
+   assert(db2_memory_scope_context_rank(local.id) == 3);
+   assert(db2_memory_scope_context_rank(workspace_mem.id) == 2);
+   int direct_count = db2_memory_find_facts_like("crowdout routing needle", 2, facts, 64);
+   assert(direct_count == 2);
+   assert(facts[0].id == local.id);
+   assert(facts[1].id == workspace_mem.id);
+   db2_memory_scope_context_clear();
+   int count = memory_find_facts_visible_ex("crowdout routing needle", "active-workspace",
+                                            "active-project", 0, 1, facts, 64);
+   assert(count == 1);
+   assert(facts[0].id == local.id);
+
+   /* Explicit all preserves the same bucket order but makes other projects
+    * visible at the tail. */
+   count = memory_find_facts_visible_ex("crowdout routing needle", "active-workspace",
+                                        "active-project", 1, 64, facts, 64);
+   assert(count > 1);
+   assert(facts[0].id == local.id);
+   assert(facts[1].id == workspace_mem.id);
+   int saw_other = 0;
+   for (int i = 0; i < count; i++)
+      if (facts[i].id == other.id)
+         saw_other = 1;
+   assert(saw_other);
+
+   /* With no active identity, only shared/global memory is returned. */
+   count = memory_find_facts_visible_ex("crowdout routing needle", NULL, NULL, 0, 64, facts, 64);
+   assert(count > 0);
+   for (int i = 0; i < count; i++)
+   {
+      assert(facts[i].id != local.id);
+      assert(facts[i].id != workspace_mem.id);
+      assert(memory_scope_visibility_rank(facts[i].id, NULL, NULL) == 1);
+   }
+
+   db2_memory_scope_context_set("active-workspace", "active-project", 0);
+
+   /* Ordered SQL readers used by list, context/recall, briefing, episodes,
+    * graph, entity, and answer evidence all apply scope before LIMIT. */
+   count = db2_memory_list(TIER_L2, KIND_FACT, 1, 1, facts, 64);
+   assert(count == 1 && facts[0].id == local.id);
+
+   count = db2_memory_top_l2_facts(facts, 1);
+   assert(count == 1 && facts[0].id == local.id);
+
+   count = db2_memory_list_session_scope_priority(facts, 1);
+   assert(count == 1 && facts[0].id == local.id);
+
+   count = db2_memory_list_session_scope_priority_like("%crowdout routing needle%", facts, 2);
+   assert(count == 2);
+   assert(facts[0].id == local.id);
+   assert(facts[1].id == workspace_mem.id);
+
+   memory_diagnostic_t diagnostics[2];
+   count = memory_diagnose("crowdout routing needle", 1, diagnostics, 2);
+   assert(count == 1 && diagnostics[0].memory.id == local.id);
+
+   db2_memory_cand_row_t candidates[2];
+   count = db2_memory_list_candidates(DB2_MEM_CAND_PRIMARY, candidates, 1);
+   assert(count == 1 && candidates[0].id == local.id);
+
+   db2_memory_cand_row_t recall[2];
+   count = db2_memory_list_recall_section(DB2_MEM_RECALL_IDENTITY, recall, 1);
+   assert(count == 1 && recall[0].id == local.id);
+
+   db2_memory_briefing_fact_t briefing[2];
+   count = db2_memory_briefing_list_key_facts(briefing, 1);
+   assert(count == 1 && briefing[0].memory_id == local.id);
+
+   db2_memory_briefing_activity_t activity[2];
+   count = db2_memory_briefing_list_recent_activity(activity, 1);
+   assert(count == 1 && strcmp(activity[0].session_id, "local-session") == 0);
+   assert(strstr(activity[0].summary, "active project") != NULL);
+
+   db2_memory_briefing_entity_t entities[2];
+   count = db2_memory_briefing_list_active_entities(entities, 1);
+   assert(count == 1);
+   assert(strcmp(entities[0].name, "GlobalCrowdEntity") != 0);
+   assert(strcmp(entities[0].name, "OtherCrowdEntity") != 0);
+
+   memory_episode_t episodes[2];
+   count = db2_memory_episodes_search("crowdout", 1, episodes, 2);
+   assert(count == 1 && episodes[0].memory_id == local.id);
+
+   memory_relation_t relations[2];
+   count = db2_memory_relations_search("CrowdEntity", 1, relations, 2);
+   assert(count == 1 && relations[0].memory_id == local.id);
+   count = db2_memory_relations_for_entity("CrowdEntity", 1, relations, 2);
+   assert(count == 1 && relations[0].memory_id == local.id);
+   count = db2_memory_relations_search_as_of("CrowdEntity", "2026-07-29", 1, relations, 2);
+   assert(count == 1 && relations[0].memory_id == local.id);
+   count = db2_memory_relations_supporting("CrowdEntity", 1, relations, 2);
+   assert(count == 1 && relations[0].memory_id == local.id);
+
+   char *ctx = memory_assemble_context(NULL);
+   assert(ctx != NULL);
+   assert(strstr(ctx, "belongs to the active project") != NULL);
+   assert(strstr(ctx, "other project distractor") == NULL);
+   free(ctx);
+
+   assert(db2_memory_lifecycle_update_state(local.id, "superseded", NULL) == 0);
+   assert(db2_memory_lifecycle_update_state(workspace_mem.id, "superseded", NULL) == 0);
+   assert(db2_memory_lifecycle_update_state(global.id, "superseded", NULL) == 0);
+   assert(db2_memory_lifecycle_update_state(other.id, "superseded", NULL) == 0);
+   db2_memory_lifecycle_superseded_t superseded[2];
+   count = db2_memory_lifecycle_list_newly_superseded(NULL, superseded, 1);
+   assert(count == 1 && superseded[0].memory_id == local.id);
+
+   teardown();
+}
+
 static void test_collect_scopes_defaults_legacy_rows_to_global(void)
 {
    setup();
@@ -617,6 +802,7 @@ int main(void)
    test_auto_tag_shared_keywords();
    test_scoped_retrieval_filters_results();
    test_visible_retrieval_prefers_narrower_scope();
+   test_local_first_applies_before_limits_across_memory_surfaces();
    test_collect_scopes_defaults_legacy_rows_to_global();
    test_ws_context_prefers_project_scope_when_available();
    test_api_memory_stats_includes_scope_counts();

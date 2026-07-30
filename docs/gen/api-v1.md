@@ -2,7 +2,7 @@
 
 > Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. Do not edit by hand; run `make docs-gen` to regenerate.
 
-Total endpoints: 88
+Total endpoints: 92
 
 ## Endpoints
 
@@ -118,15 +118,18 @@ Blast-radius computation for a file
 
 | Name | In | Required | Type | Description |
 |------|----|----------|------|-------------|
-| `project` | query | yes | string |  |
+| `project` | query | no | string | Stable project identity. Defaults to the authenticated active project. |
+| `generation` | query | no | integer | Optional observed current generation; stale observations fail closed. |
 | `file_path` | query | no | string |  |
 
 Responses:
 
-- `200` — Blast radius
+- `200` — Current-generation blast radius with provenance-bearing edges
 - `400` — Missing required parameters
 - `401` — Unauthorized
-- `404` — File not found in index
+- `404` — Project is detached/unknown or the file is not indexed
+- `409` — Active project is required or the observed generation is stale
+- `503` — Canonical index unavailable
 
 ### `POST /v1/code/build`
 
@@ -148,7 +151,9 @@ Call sites for a symbol in the canonical code index
 | Name | In | Required | Type | Description |
 |------|----|----------|------|-------------|
 | `symbol` | query | yes | string |  |
-| `project` | query | no | string |  |
+| `project` | query | no | string | Stable project identity. Defaults to the authenticated active project. |
+| `scope` | query | no | string (current, all) | Cross-project lookup requires `all`; send `project` too to protect that active project's candidates before the result limit. |
+| `generation` | query | no | integer | Optional observed current generation; stale observations fail closed. |
 | `max_results` | query | no | integer |  |
 
 Responses:
@@ -156,6 +161,32 @@ Responses:
 - `200` — Caller results
 - `400` — Missing symbol parameter
 - `401` — Unauthorized
+- `403` — Scoped credentials cannot request all projects
+- `404` — Project is unknown or detached
+- `409` — Active project is required or the observed generation is stale
+- `503` — Canonical index unavailable
+
+### `GET /v1/code/context`
+
+Bounded task-conditioned context for the active project
+
+Reuses hybrid RRF retrieval but returns only current-generation evidence for one active project. Exact lexical and structural evidence leads; vector-only evidence must clear the quality floor. Memory is additive, locally ordered, and anchored to accepted code. A weak query returns HTTP 200 with status `no_answer`, empty results, and empty why rather than broadening to global memory.
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `query` | query | yes | string |  |
+| `symbol` | query | no | string |  |
+| `project` | query | yes | string | Stable identity of the authenticated active project; cross-project scope is forbidden. |
+| `generation` | query | no | integer | Optional observed current generation; stale observations fail closed. |
+| `max_results` | query | no | integer | Accepted for client compatibility and clamped to the fixed packet maximum of four. |
+
+Responses:
+
+- `200` — Answerable bounded packet or explicit no_answer
+- `400` — Missing or invalid query
+- `401` — Unauthorized
+- `404` — Project is unknown, detached, or has no current generation
+- `409` — Active project is required or the observed generation is stale
 - `503` — Canonical index unavailable
 
 ### `GET /v1/code/cross-repo-deps`
@@ -185,7 +216,9 @@ Symbol/identifier lookup across the canonical index
 | Name | In | Required | Type | Description |
 |------|----|----------|------|-------------|
 | `identifier` | query | yes | string |  |
-| `project` | query | no | string |  |
+| `project` | query | no | string | Stable project identity. Defaults to the authenticated active project. |
+| `scope` | query | no | string (current, all) | Cross-project lookup requires `all`; send `project` too to protect that active project's candidates before the result limit. |
+| `generation` | query | no | integer | Optional observed current generation; stale observations fail closed. |
 | `max_results` | query | no | integer |  |
 
 Responses:
@@ -193,6 +226,10 @@ Responses:
 - `200` — Code find results
 - `400` — Missing identifier parameter
 - `401` — Unauthorized
+- `403` — Scoped credentials cannot request all projects
+- `404` — Project is unknown or detached
+- `409` — Active project is required or the observed generation is stale
+- `503` — Canonical index unavailable
 
 ### `GET /v1/code/project-stats`
 
@@ -208,6 +245,59 @@ Responses:
 - `400` — Missing required parameters
 - `401` — Unauthorized
 - `503` — Canonical index unavailable
+
+### `POST /v1/code/project/detach`
+
+Detach the current generation of a stable project
+
+Marks the project and its current generation detached so default/current queries no longer return it. Data is retained for audit and later re-add or explicit purge. Requires an authenticated unscoped owner credential.
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Project generation detached
+- `400` — Invalid request
+- `403` — Verified unscoped owner principal required
+- `404` — Project not found
+- `405` — Method not allowed
+- `503` — Canonical index unavailable
+
+### `POST /v1/code/project/gc`
+
+Dry-run or confirm detached-generation garbage collection
+
+Omit `confirm_hash` for a read-only manifest. To delete expired detached generations and aliases, repeat the request with the exact SHA-256 hash and a reason. The manifest binds the retention policy and UTC cutoff as well as exact physical target fingerprints. Requires an authenticated unscoped owner credential.
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Dry-run or confirmed garbage-collection manifest
+- `400` — Invalid request or confirmed operation without a reason
+- `403` — Verified unscoped owner principal required
+- `404` — Project not found
+- `405` — Method not allowed
+- `409` — Target manifest changed; run the dry run again
+- `503` — Audit or canonical-index operation failed
+
+### `POST /v1/code/project/purge`
+
+Dry-run or confirm exact deletion of one stable project
+
+Omit `confirm_hash` for a read-only manifest. To delete, repeat the request with that exact SHA-256 hash and a reason. Confirmation fails if any target row changed, and audit failure blocks mutation. Requires an authenticated unscoped owner credential.
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Dry-run or confirmed purge manifest
+- `400` — Invalid request or confirmed operation without a reason
+- `403` — Verified unscoped owner principal required
+- `404` — Project not found
+- `405` — Method not allowed
+- `409` — Target manifest changed; run the dry run again
+- `503` — Audit or canonical-index operation failed
 
 ### `GET /v1/code/projects`
 
@@ -260,7 +350,9 @@ Full-text code search across indexed file contents
 | Name | In | Required | Type | Description |
 |------|----|----------|------|-------------|
 | `query` | query | yes | string |  |
-| `project` | query | no | string |  |
+| `project` | query | no | string | Stable project identity. Defaults to the authenticated active project. |
+| `scope` | query | no | string (current, all) | Cross-project search requires `all`; send `project` too to protect that active project's candidates before the result limit. |
+| `generation` | query | no | integer | Optional observed current generation; stale observations fail closed. |
 | `max_results` | query | no | integer |  |
 
 Responses:
@@ -268,6 +360,9 @@ Responses:
 - `200` — Code search results
 - `400` — Missing query parameter
 - `401` — Unauthorized
+- `403` — Scoped credentials cannot request all projects
+- `404` — Project is unknown or detached
+- `409` — Active project is required or the observed generation is stale
 - `503` — Canonical index unavailable
 
 ### `GET /v1/code/structure`
@@ -276,7 +371,8 @@ Definitions for a file in the canonical code index
 
 | Name | In | Required | Type | Description |
 |------|----|----------|------|-------------|
-| `project` | query | yes | string |  |
+| `project` | query | no | string | Stable project identity. Defaults to the authenticated active project. |
+| `generation` | query | no | integer | Optional observed current generation; stale observations fail closed. |
 | `file_path` | query | yes | string |  |
 | `max_results` | query | no | integer |  |
 
@@ -285,6 +381,8 @@ Responses:
 - `200` — File definitions
 - `400` — Missing required parameters
 - `401` — Unauthorized
+- `404` — Project is unknown or detached
+- `409` — Active project is required or the observed generation is stale
 - `503` — Canonical index unavailable
 
 ### `POST /v1/code/update`
@@ -1061,13 +1159,17 @@ Responses:
 
 Hybrid knowledge search
 
+Searches the authenticated active project by default. A request without an active project fails with `scope_required`; deliberate cross-project retrieval requires `scope: all`. Send the active `project` together with `scope: all` to reserve the result head for local evidence while allowing labeled cross-project results in the tail.
+
 Request body (`application/json`).
 
 Responses:
 
 - `200` — Search results
-- `400` — Bad request (missing query)
+- `400` — Bad request (missing query or invalid scope)
 - `401` — Unauthorized
+- `403` — Scoped credentials cannot request all projects
+- `409` — No active project is available (`scope_required`)
 
 ### `GET /v1/servers`
 

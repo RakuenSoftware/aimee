@@ -20,6 +20,7 @@
 #include "db2/feature_rows.h"
 #include "db2/memory_promotion.h"
 #include "db2/memory_query.h"
+#include "db2/memory_scope_query.h"
 #include "memory_graph_fusion.h"
 #include "kb_mdl.h"
 #include "db2/memory_relations.h"
@@ -942,15 +943,51 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
    return reranked;
 }
 
-int memory_find_facts_visible(const char *query, const char *workspace, const char *project,
-                              int limit, memory_t *out, int max)
+static void memory_sort_scope_buckets(memory_t *matches, int count, int *scope_rank)
+{
+   for (int i = 0; i < count; i++)
+      scope_rank[i] = db2_memory_scope_context_rank(matches[i].id);
+   /* Stable insertion sort: relevance ordering from the reranker is retained
+    * inside each hard visibility bucket. */
+   for (int i = 1; i < count; i++)
+   {
+      memory_t current = matches[i];
+      int current_rank = scope_rank[i];
+      int j = i;
+      while (j > 0 && scope_rank[j - 1] < current_rank)
+      {
+         matches[j] = matches[j - 1];
+         scope_rank[j] = scope_rank[j - 1];
+         j--;
+      }
+      matches[j] = current;
+      scope_rank[j] = current_rank;
+   }
+}
+
+int memory_find_facts_visible_ex(const char *query, const char *workspace, const char *project,
+                                 int include_all, int limit, memory_t *out, int max)
 {
    if (!query || !query[0])
       return 0;
+   db2_memory_scope_context_t previous_scope;
+   db2_memory_scope_context_get(&previous_scope);
+   if (previous_scope.active)
+      include_all = previous_scope.include_all;
+   db2_memory_scope_context_set(workspace, project, include_all);
    /* Fresh query-embedding memo for this recall (see memory_find_facts_scoped). */
    memory_query_embed_cache_reset();
    if (!memory_vector_ready())
-      return memory_find_facts_visible_lexical_fallback(query, workspace, project, limit, out, max);
+   {
+      int fallback =
+          memory_find_facts_visible_lexical_fallback(query, workspace, project, limit, out, max);
+      if (previous_scope.active)
+         db2_memory_scope_context_set(previous_scope.workspace, previous_scope.project,
+                                      previous_scope.include_all);
+      else
+         db2_memory_scope_context_clear();
+      return fallback;
+   }
    if (limit <= 0)
       limit = 20;
    if (limit > max)
@@ -998,6 +1035,11 @@ int memory_find_facts_visible(const char *query, const char *workspace, const ch
    if (!candidates)
    {
       pgvec_memory_vector_scope_hint_clear();
+      if (previous_scope.active)
+         db2_memory_scope_context_set(previous_scope.workspace, previous_scope.project,
+                                      previous_scope.include_all);
+      else
+         db2_memory_scope_context_clear();
       return -1;
    }
    int scope_rank[MEMORY_RERANK_BUFFER];
@@ -1008,13 +1050,18 @@ int memory_find_facts_visible(const char *query, const char *workspace, const ch
    if (count < 0)
    {
       pgvec_memory_vector_scope_hint_clear();
+      if (previous_scope.active)
+         db2_memory_scope_context_set(previous_scope.workspace, previous_scope.project,
+                                      previous_scope.include_all);
+      else
+         db2_memory_scope_context_clear();
       return -1;
    }
    int kept = 0;
    for (int i = 0; i < count; i++)
    {
-      int rank = memory_scope_visibility_rank(candidates[i].id, workspace, project);
-      if (rank <= 0)
+      int rank = db2_memory_scope_context_rank(candidates[i].id);
+      if (rank <= 0 && !include_all)
          continue;
       if (kept != i)
          candidates[kept] = candidates[i];
@@ -1022,47 +1069,47 @@ int memory_find_facts_visible(const char *query, const char *workspace, const ch
       kept++;
    }
    count = kept;
-   int reranked =
-       memory_rerank_matches(query, candidates, count, limit, semantic_ids, semantic_scores,
+   /* Rerank the full retained pool. memory_rerank_matches sorts all `count`
+    * rows even when its return value is capped, so passing the request limit
+    * here would truncate before the mandatory local-first bucket order. */
+   int ranked_count =
+       memory_rerank_matches(query, candidates, count, count, semantic_ids, semantic_scores,
                              semantic_hit_count, source_stats, source_stats_count);
+   memory_sort_scope_buckets(candidates, ranked_count, scope_rank);
+   int reranked = ranked_count < limit ? ranked_count : limit;
    if (reranked > max)
       reranked = max;
-   for (int i = 0; i < reranked; i++)
-      scope_rank[i] = memory_scope_visibility_rank(candidates[i].id, workspace, project);
-   for (int i = 0; i < reranked - 1; i++)
-   {
-      int best = i;
-      for (int j = i + 1; j < reranked; j++)
-      {
-         if (scope_rank[j] > scope_rank[best])
-            best = j;
-      }
-      if (best != i)
-      {
-         memory_t tmp_mem = candidates[i];
-         int tmp_rank = scope_rank[i];
-         candidates[i] = candidates[best];
-         scope_rank[i] = scope_rank[best];
-         candidates[best] = tmp_mem;
-         scope_rank[best] = tmp_rank;
-      }
-   }
    {
       if (config_memory_recall_lanes_enabled())
       {
-         int eff =
-             memory_apply_lane_floor(candidates, count, s_lane_summary_ids, s_lane_summary_count,
-                                     config_memory_recall_lanes_floor_summary(), reranked);
-         memory_apply_lane_floor(candidates, count, s_lane_fact_ids, s_lane_fact_count,
+         int eff = memory_apply_lane_floor(candidates, ranked_count, s_lane_summary_ids,
+                                           s_lane_summary_count,
+                                           config_memory_recall_lanes_floor_summary(), reranked);
+         memory_apply_lane_floor(candidates, ranked_count, s_lane_fact_ids, s_lane_fact_count,
                                  config_memory_recall_lanes_floor_fact(), eff);
       }
    }
+   /* Lane floors may promote a summary/fact after the first bucket pass.
+    * Re-apply the hard scope order last so relevance features can only move
+    * candidates within their scope bucket. */
+   memory_sort_scope_buckets(candidates, ranked_count, scope_rank);
    for (int i = 0; i < reranked; i++)
       out[i] = candidates[i];
    clock_gettime(CLOCK_MONOTONIC, &ts1);
    memory_record_query_plan_metrics(&plan, memory_query_elapsed_ms(&ts0, &ts1));
    pgvec_memory_vector_scope_hint_clear();
+   if (previous_scope.active)
+      db2_memory_scope_context_set(previous_scope.workspace, previous_scope.project,
+                                   previous_scope.include_all);
+   else
+      db2_memory_scope_context_clear();
    return reranked;
+}
+
+int memory_find_facts_visible(const char *query, const char *workspace, const char *project,
+                              int limit, memory_t *out, int max)
+{
+   return memory_find_facts_visible_ex(query, workspace, project, 0, limit, out, max);
 }
 
 int memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max)
@@ -1081,10 +1128,18 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
    if (!norm_query[0])
       snprintf(norm_query, sizeof(norm_query), "%s", query);
 
+   db2_memory_scope_context_t request_scope;
+   db2_memory_scope_context_get(&request_scope);
+   int explicit_scope = scope_type && scope_type[0];
+   /* A promoted shortcut is a bounded global cache.  It cannot prove the hard
+    * visibility/order contract for an ambient or explicit scope, so only the
+    * legacy unscoped diagnostic route may use it. */
+   int allow_shortcut = !request_scope.active && !explicit_scope;
    int64_t shortcut_ids[8];
    int shortcut_promoted = 0;
-   int shortcut_n =
-       db2_retrieval_shortcut_lookup(norm_query, shortcut_ids, 8, &shortcut_promoted, NULL);
+   int shortcut_n = allow_shortcut ? db2_retrieval_shortcut_lookup(norm_query, shortcut_ids, 8,
+                                                                   &shortcut_promoted, NULL)
+                                   : 0;
    memory_t shortcut_matches[8];
    int shortcut_match_n = 0;
    if (shortcut_n > 0)
@@ -1095,8 +1150,12 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
    memory_t *matches = (memory_t *)calloc(64, sizeof(*matches));
    if (!matches)
       return -1;
-   int count = memory_find_facts_scoped(query, scope_type, scope_value, limit > 0 ? limit : 10,
-                                        matches, 64);
+   int count = request_scope.active && !explicit_scope
+                   ? memory_find_facts_visible_ex(query, request_scope.workspace,
+                                                  request_scope.project, request_scope.include_all,
+                                                  limit > 0 ? limit : 10, matches, 64)
+                   : memory_find_facts_scoped(query, scope_type, scope_value,
+                                              limit > 0 ? limit : 10, matches, 64);
    if (count < 0)
    {
       free(matches);
@@ -1717,8 +1776,16 @@ int memory_ask_query_scoped(const char *query, const char *scope_type, const cha
    }
 
    memory_t matches[8];
-   int count =
-       memory_find_facts_scoped(query, scope_type, scope_value, limit > 0 ? limit : 5, matches, 8);
+   db2_memory_scope_context_t request_scope;
+   db2_memory_scope_context_get(&request_scope);
+   int count;
+   if (request_scope.active && (!scope_type || !scope_type[0]))
+      count = memory_find_facts_visible_ex(query, request_scope.workspace, request_scope.project,
+                                           request_scope.include_all, limit > 0 ? limit : 5,
+                                           matches, 8);
+   else
+      count = memory_find_facts_scoped(query, scope_type, scope_value, limit > 0 ? limit : 5,
+                                       matches, 8);
    if (count < 0)
    {
       snprintf(out->error, sizeof(out->error),
@@ -1780,7 +1847,11 @@ int memory_ask_query_scoped(const char *query, const char *scope_type, const cha
    {
       memory_runtime_state_increment("memory.citation.reprompted", 1);
       memory_t reprompt_matches[8];
-      int reprompt_count = memory_find_facts(query, 5, reprompt_matches, 8);
+      int reprompt_count =
+          request_scope.active
+              ? memory_find_facts_visible_ex(query, request_scope.workspace, request_scope.project,
+                                             request_scope.include_all, 5, reprompt_matches, 8)
+              : memory_find_facts(query, 5, reprompt_matches, 8);
       if (reprompt_count < 0)
       {
          snprintf(out->error, sizeof(out->error),

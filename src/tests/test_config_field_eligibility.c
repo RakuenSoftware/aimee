@@ -56,6 +56,7 @@ static const elig_row_t g_eligibility[] = {
     {"memory_coref_window", 0},
     {"memory_rerank_mode", 1},
     {"ingress_preinject_enabled", 1},
+    {"code_context_mode", 1},
     {"ingress_preinject_anthropic_enabled", 1},
     {"ingress_compress_enabled", 1},
     {"ingress_cache_placement_enabled", 0},

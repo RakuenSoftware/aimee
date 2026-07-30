@@ -5,6 +5,7 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "cli_session.h"
+#include "platform_path.h"
 #include "util.h"
 #include "workspace_provider.h"
 #include <dirent.h>
@@ -214,6 +215,28 @@ static const char *cli_claude_home(void)
       return h;
    h = getenv("AIMEE_HOME");
    return (h && h[0]) ? h : "/var/lib/aimee";
+}
+
+/* Runtime-only root for vendor credential materialization. The container sets
+ * AIMEE_OAUTH_RUNTIME_DIR to /run/aimee/oauth-login (tmpfs); local processes use
+ * XDG_RUNTIME_DIR or a per-uid /tmp fallback. Persistent AIMEE_HOME is never a
+ * candidate. */
+static int cli_runtime_vendor_base(const char *vendor, char *out, size_t n)
+{
+   const char *base = getenv("AIMEE_OAUTH_RUNTIME_DIR");
+   int written;
+   if (base && base[0] == '/')
+      written = snprintf(out, n, "%s/sessions/%s", base, vendor);
+   else if ((base = getenv("XDG_RUNTIME_DIR")) && base[0] == '/')
+      written = snprintf(out, n, "%s/aimee/oauth-sessions/%s", base, vendor);
+   else
+      written = snprintf(out, n, "/tmp/aimee-runtime-%lu/oauth-sessions/%s",
+                         (unsigned long)getuid(), vendor);
+   if (written < 0 || (size_t)written >= n)
+      return -1;
+   if (platform_mkdir_p(out, 0700) != 0 && access(out, F_OK) != 0)
+      return -1;
+   return chmod(out, 0700);
 }
 
 /* Read an entire file into a malloc'd NUL-terminated string (caller frees), or
@@ -467,9 +490,8 @@ int cli_session_isolated_claude_home(const char *work_dir, char *home_out, size_
    const char *shared = cli_claude_home();
 
    char base[PATH_MAX];
-   if ((size_t)snprintf(base, sizeof(base), "%s/.claude-homes", shared) >= sizeof(base))
+   if (cli_runtime_vendor_base("claude", base, sizeof(base)) != 0)
       return -1;
-   mkdir(base, 0700); /* ignore EEXIST */
    cli_claude_homes_sweep(base);
 
    char home[PATH_MAX];
@@ -504,15 +526,7 @@ int cli_session_isolated_claude_home(const char *work_dir, char *home_out, size_
       (void)chmod(dst, 0600);
    }
    else
-   {
-      /* Legacy fallback: no vaulted token yet (pre-migration) — symlink the shared
-       * plaintext token. symlink() happily links to a missing target, so verify it
-       * exists first; a dangling link would launch an unauthenticated seat. */
-      if ((size_t)snprintf(src, sizeof(src), "%s/.claude/.credentials.json", shared) >= sizeof(src))
-         return -1;
-      if (access(src, R_OK) != 0 || symlink(src, dst) != 0)
-         return -1;
-   }
+      return -1;
    if ((size_t)snprintf(src, sizeof(src), "%s/.claude/settings.json", shared) < sizeof(src) &&
        (size_t)snprintf(dst, sizeof(dst), "%s/settings.json", cdir) < sizeof(dst))
       (void)symlink(src, dst); /* helpful, not fatal */
@@ -558,32 +572,63 @@ int cli_session_isolated_claude_home(const char *work_dir, char *home_out, size_
    return 0;
 }
 
-/* Materialize the codex OAuth token from the VAULT into the shared codex home
- * (<home>/.codex/auth.json) before a codex delegate launches. codex delegates are
- * not per-session isolated (unlike claude), so they read the shared file; refresh
- * it from the vault (single source of truth) each launch so a re-auth takes effect
- * without a stale plaintext file. Best-effort: returns 0 on success or when the
- * vault has no codex token yet (legacy: the existing file, if any, is left as-is),
- * -1 only on a write failure. Written 0600 under a 0700 .codex dir. */
-int cli_session_materialize_codex_oauth(void)
+/* Mint a runtime-only HOME/CODEX_HOME for one codex delegate. The credential is
+ * materialized from Vault under /run and the entire tree is removed when the
+ * tmux seat exits. Non-secret shared codex configuration is linked explicitly;
+ * auth.json is never read from or written to persistent HOME. */
+int cli_session_isolated_codex_home(char *home_out, size_t home_out_sz)
 {
-   char cred[8192];
-   if (cli_oauth_vault_materialize_get("codex", cred, sizeof(cred)) != 0 || !cred[0])
-      return 0; /* no vaulted codex token — leave any legacy file untouched */
-   const char *home = cli_claude_home(); /* process HOME (vendor-agnostic) */
+   if (!home_out || home_out_sz == 0)
+      return -1;
+   home_out[0] = '\0';
+   char base[PATH_MAX];
+   if (cli_runtime_vendor_base("codex", base, sizeof(base)) != 0)
+      return -1;
+   cli_claude_homes_sweep(base);
+
+   char home[PATH_MAX];
+   if ((size_t)snprintf(home, sizeof(home), "%s/s.XXXXXX", base) >= sizeof(home) ||
+       mkdtemp(home) == NULL)
+      return -1;
    char dir[PATH_MAX], dst[PATH_MAX];
    if ((size_t)snprintf(dir, sizeof(dir), "%s/.codex", home) >= sizeof(dir) ||
+       mkdir(dir, 0700) != 0 ||
        (size_t)snprintf(dst, sizeof(dst), "%s/auth.json", dir) >= sizeof(dst))
    {
-      memset(cred, 0, sizeof(cred));
+      cli_rmrf(home);
       return -1;
    }
-   mkdir(dir, 0700); /* ignore EEXIST */
+
+   char cred[8192];
+   if (cli_oauth_vault_materialize_get("codex", cred, sizeof(cred)) != 0 || !cred[0])
+   {
+      memset(cred, 0, sizeof(cred));
+      cli_rmrf(home);
+      return -1;
+   }
    int wrote = cli_write_file_atomic(dst, cred) == 0;
    memset(cred, 0, sizeof(cred));
    if (!wrote)
+   {
+      cli_rmrf(home);
       return -1;
+   }
    (void)chmod(dst, 0600);
+
+   const char *shared = cli_claude_home();
+   static const char *const entries[] = {"config.toml", "AGENTS.md", "skills",
+                                         "rules",       "prompts",   NULL};
+   for (int i = 0; entries[i]; i++)
+   {
+      char src[PATH_MAX], link_path[PATH_MAX];
+      if ((size_t)snprintf(src, sizeof(src), "%s/.codex/%s", shared, entries[i]) >= sizeof(src) ||
+          (size_t)snprintf(link_path, sizeof(link_path), "%s/%s", dir, entries[i]) >=
+              sizeof(link_path))
+         continue;
+      if (access(src, F_OK) == 0)
+         (void)symlink(src, link_path);
+   }
+   snprintf(home_out, home_out_sz, "%s", home);
    return 0;
 }
 

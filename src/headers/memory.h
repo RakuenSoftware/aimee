@@ -555,6 +555,8 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
                              int limit, memory_t *out, int max);
 int memory_find_facts_visible(const char *query, const char *workspace, const char *project,
                               int limit, memory_t *out, int max);
+int memory_find_facts_visible_ex(const char *query, const char *workspace, const char *project,
+                                 int include_all, int limit, memory_t *out, int max);
 
 /* --- Conversation Scanning --- */
 int memory_scan_conversations(char dirs[][MAX_PATH_LEN], int dir_count);
@@ -959,6 +961,23 @@ int memory_embed(int64_t memory_id, const char *command);
  * retrieval quality and raises no error. */
 int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
                       float *out, int max_dim);
+
+typedef struct
+{
+   char state[16]; /* closed | open | half_open */
+   int available;
+   unsigned failure_streak;
+   unsigned recovery_attempt;
+   int64_t retry_after_ms;
+   int64_t last_success_ms;
+   int64_t last_failure_ms;
+   uint64_t suppressed_calls;
+} memory_embedder_health_t;
+
+void memory_embedder_health(memory_embedder_health_t *out);
+int memory_embedder_last_result_unauthorized(void);
+void memory_embedder_dependency_reset_for_tests(void);
+void memory_embedder_dependency_set_clock_for_tests(int64_t (*now_ms)(void));
 double cosine_similarity(const float *a, const float *b, int dim);
 
 /* Test hooks for the per-recall query-embedding memo (memory_core_helpers.inc).

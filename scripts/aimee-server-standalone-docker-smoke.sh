@@ -17,15 +17,16 @@
 #   scripts/aimee-server-standalone-docker-smoke.sh --up        # build + up first
 #   scripts/aimee-server-standalone-docker-smoke.sh --up --down # tear down after
 #
-# Env: SERVER_URL (default https://localhost:8743), BEARER (default aimee-local-dev),
-#      COMPOSE_FILE (default compose.server-standalone.yaml), WAIT_SECONDS (300).
+# Env: SERVER_URL (default https://localhost:8743), BEARER (required for an
+#      existing stack; generated as a first-boot secret with --up), COMPOSE_FILE
+#      (default compose.server-standalone.yaml), WAIT_SECONDS (300).
 #
 # Exit code: 0 = all checks passed.
 
 set -euo pipefail
 
 SERVER_URL="${SERVER_URL:-https://localhost:8743}"
-BEARER="${BEARER:-aimee-local-dev}"
+BEARER="${BEARER:-}"
 COMPOSE_FILE="${COMPOSE_FILE:-compose.server-standalone.yaml}"
 WAIT_SECONDS="${WAIT_SECONDS:-300}"
 DO_UP=0
@@ -39,6 +40,18 @@ for arg in "$@"; do
     *) echo "unknown arg: $arg" >&2; exit 2 ;;
   esac
 done
+
+if [[ -z "$BEARER" ]]; then
+  if [[ "$DO_UP" == 1 ]]; then
+    BEARER="$(openssl rand -hex 32)"
+  else
+    echo "BEARER is required when testing an already-running stack" >&2
+    exit 2
+  fi
+fi
+if [[ "$DO_UP" == 1 ]]; then
+  export AIMEE_API_BEARER_TOKEN="$BEARER"
+fi
 
 cd "$(dirname "$0")/.."
 
@@ -79,8 +92,13 @@ cleanup() { [[ "$DO_DOWN" == 1 ]] && { bold "==> Tearing down (--down)"; "${DC[@
 trap cleanup EXIT
 
 if [[ "$DO_UP" == 1 ]]; then
-  bold "==> Building + starting standalone server ($COMPOSE_FILE)"
-  "${DC[@]}" up -d --build
+  bold "==> Building + Vault-bootstrapping + starting standalone server ($COMPOSE_FILE)"
+  "${DC[@]}" build
+  # Port-remap overrides do not affect the persistent Vault volume. Bootstrap
+  # against the base file before creating the long-lived server container.
+  bootstrap_compose="${COMPOSE_FILE%% *}"
+  scripts/aimee-compose-vault-bootstrap.sh -f "$bootstrap_compose" server
+  "${DC[@]}" up -d --no-build
   bold "==> Waiting up to ${WAIT_SECONDS}s for aimee-server to report healthy"
   deadline=$((SECONDS + WAIT_SECONDS))
   while true; do
@@ -92,21 +110,6 @@ if [[ "$DO_UP" == 1 ]]; then
     fi
     sleep 3
   done
-fi
-
-# Bootstrap-bearer enrollment: the image seeds `aimee-local-dev`, which the server
-# now honours ONLY for POST /v1/api/rotate_bearer. Rotate once to the strong token
-# and use it for every check below (mirrors a real client's first connect).
-if [[ "$BEARER" == "aimee-local-dev" ]]; then
-  bold "==> Enrolling: rotate the one-time bootstrap bearer"
-  rotated="$(curl -fsS -k --max-time 20 "${AUTH[@]}" -X POST "${SERVER_URL}/v1/api/rotate_bearer" -d '{}' 2>/dev/null \
-             | sed -n 's/.*"bearer_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
-  if [[ -n "$rotated" ]]; then
-    BEARER="$rotated"; AUTH=(-H "Authorization: Bearer ${BEARER}")
-    green "    enrolled: bootstrap bearer rotated to a strong per-deployment token"
-  else
-    red "    FAIL  enrollment: could not rotate the bootstrap bearer"; FAIL=$((FAIL + 1))
-  fi
 fi
 
 bold "==> Server-native DB1 surface at ${SERVER_URL}"

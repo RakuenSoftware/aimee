@@ -10,6 +10,8 @@
 #include "kb_paths.h"
 #include "platform_ipc.h"
 #include "platform_path.h"
+#include "runtime_secret.h"
+#include "dependency_breaker.h"
 #include "cJSON.h"
 #include <ctype.h>
 #include <errno.h>
@@ -18,12 +20,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #ifdef AIMEE_POSIX
 #include <poll.h>
 #include <pthread.h>
 #include <sys/file.h>
 #include <sys/wait.h>
-#include <time.h>
 #include <unistd.h>
 #endif
 
@@ -47,6 +49,331 @@ __attribute__((weak)) char *kb_client_mtls_request(const char *method, const cha
    if (status_out)
       *status_out = -1;
    return NULL;
+}
+
+static dependency_breaker_t g_kb_dependency = DEPENDENCY_BREAKER_INITIALIZER;
+static int64_t (*g_kb_dependency_clock)(void);
+#if defined(_MSC_VER)
+static __declspec(thread) kb_client_result_status_t g_kb_last_result = KB_CLIENT_RESULT_UNAVAILABLE;
+static __declspec(thread) char g_kb_last_dependency[32] = "kb";
+static __declspec(thread) int64_t g_kb_last_observed_generation;
+static __declspec(thread) int64_t g_kb_last_current_generation;
+static __declspec(thread) int64_t g_kb_last_observed_dimension;
+static __declspec(thread) int64_t g_kb_last_current_dimension;
+static __declspec(thread) int64_t g_kb_last_retry_after_ms;
+#else
+static _Thread_local kb_client_result_status_t g_kb_last_result = KB_CLIENT_RESULT_UNAVAILABLE;
+static _Thread_local char g_kb_last_dependency[32] = "kb";
+static _Thread_local int64_t g_kb_last_observed_generation;
+static _Thread_local int64_t g_kb_last_current_generation;
+static _Thread_local int64_t g_kb_last_observed_dimension;
+static _Thread_local int64_t g_kb_last_current_dimension;
+static _Thread_local int64_t g_kb_last_retry_after_ms;
+#endif
+
+static int64_t kb_dependency_now_ms(void)
+{
+   if (g_kb_dependency_clock)
+      return g_kb_dependency_clock();
+   return (int64_t)time(NULL) * 1000;
+}
+
+kb_client_result_status_t kb_client_last_result_status(void)
+{
+   return g_kb_last_result;
+}
+
+const char *kb_client_result_status_name(kb_client_result_status_t status)
+{
+   switch (status)
+   {
+   case KB_CLIENT_RESULT_OK:
+      return "ok";
+   case KB_CLIENT_RESULT_EMPTY:
+      return "empty";
+   case KB_CLIENT_RESULT_ABSTAINED:
+      return "abstained";
+   case KB_CLIENT_RESULT_STALE:
+      return "stale";
+   case KB_CLIENT_RESULT_UNAUTHORIZED:
+      return "unauthorized";
+   default:
+      return "unavailable";
+   }
+}
+
+int kb_client_result_status_retryable(kb_client_result_status_t status)
+{
+   return status == KB_CLIENT_RESULT_UNAVAILABLE;
+}
+
+void kb_client_dependency_health(kb_client_dependency_health_t *out)
+{
+   if (!out)
+      return;
+   memset(out, 0, sizeof(*out));
+   dependency_breaker_snapshot_t snap;
+   dependency_breaker_snapshot(&g_kb_dependency, kb_dependency_now_ms(), &snap);
+   const char *state =
+       !snap.open ? "closed"
+                  : (snap.probe_inflight || snap.retry_after_ms == 0 ? "half_open" : "open");
+   snprintf(out->state, sizeof(out->state), "%s", state);
+   out->failure_streak = snap.failure_streak;
+   out->recovery_attempt = snap.open_count;
+   out->retry_after_ms = snap.retry_after_ms;
+   out->last_success_ms = snap.last_success_ms;
+   out->last_failure_ms = snap.last_failure_ms;
+   out->suppressed_calls = snap.suppressed_calls;
+}
+
+void kb_client_dependency_reset_for_tests(void)
+{
+   dependency_breaker_reset(&g_kb_dependency);
+   g_kb_last_result = KB_CLIENT_RESULT_UNAVAILABLE;
+   snprintf(g_kb_last_dependency, sizeof(g_kb_last_dependency), "%s", "kb");
+   g_kb_last_observed_generation = 0;
+   g_kb_last_current_generation = 0;
+   g_kb_last_observed_dimension = 0;
+   g_kb_last_current_dimension = 0;
+   g_kb_last_retry_after_ms = 0;
+}
+
+void kb_client_dependency_set_clock_for_tests(int64_t (*now_ms)(void))
+{
+   g_kb_dependency_clock = now_ms;
+}
+
+static int kb_json_primary_empty(const cJSON *root, const char *path)
+{
+   const char *field = NULL;
+   if (path && strcmp(path, "/v1/search") == 0)
+      field = "result";
+   else if (path && (strstr(path, "/v1/code/find?") || strstr(path, "/v1/code/callers?") ||
+                     strstr(path, "/v1/code/search?")))
+      field = "hits";
+   else if (path && strstr(path, "/v1/code/structure?"))
+      field = "definitions";
+   else if (path && strstr(path, "/v1/code/context?"))
+      field = "results";
+   else if (path && strstr(path, "/v1/code/projects?"))
+      field = "projects";
+   if (field)
+   {
+      const cJSON *value = cJSON_GetObjectItemCaseSensitive(root, field);
+      return (cJSON_IsArray(value) && cJSON_GetArraySize(value) == 0) ||
+             (cJSON_IsString(value) && !value->valuestring[0]);
+   }
+
+   /* RPC actions share one transport path, so classify only known top-level
+    * primary result fields. Auxiliary arrays (warnings, citations, trace data)
+    * are deliberately absent: an empty auxiliary list cannot make a successful
+    * answer empty. */
+   static const char *const primary_fields[] = {
+       "facts",        "memories",    "results",    "relations", "edges",
+       "prospectives", "directives",  "provenance", "history",   "items",
+       "episodes",     "definitions", "hits",       "projects",  NULL,
+   };
+   int saw_primary_array = 0;
+   for (int i = 0; primary_fields[i]; i++)
+   {
+      const cJSON *value = cJSON_GetObjectItemCaseSensitive(root, primary_fields[i]);
+      if (cJSON_IsArray(value))
+      {
+         saw_primary_array = 1;
+         if (cJSON_GetArraySize(value) > 0)
+            return 0;
+      }
+   }
+   if (saw_primary_array)
+      return 1;
+   const cJSON *facts = cJSON_GetObjectItemCaseSensitive(root, "facts");
+   return cJSON_IsString(facts) && !facts->valuestring[0];
+}
+
+static kb_client_result_status_t kb_classify_json_result(const char *path, const char *json,
+                                                         int *valid_out)
+{
+   if (valid_out)
+      *valid_out = 0;
+   cJSON *root = json ? cJSON_Parse(json) : NULL;
+   if (!root)
+      return KB_CLIENT_RESULT_UNAVAILABLE;
+   if (valid_out)
+      *valid_out = 1;
+   if (cJSON_IsArray(root))
+   {
+      kb_client_result_status_t result =
+          cJSON_GetArraySize(root) == 0 ? KB_CLIENT_RESULT_EMPTY : KB_CLIENT_RESULT_OK;
+      cJSON_Delete(root);
+      return result;
+   }
+
+   const cJSON *status = cJSON_GetObjectItemCaseSensitive(root, "status");
+   const cJSON *summary = cJSON_GetObjectItemCaseSensitive(root, "summary_status");
+   const cJSON *freshness = cJSON_GetObjectItemCaseSensitive(root, "freshness");
+   const cJSON *error = cJSON_GetObjectItemCaseSensitive(root, "error");
+   const cJSON *message = cJSON_GetObjectItemCaseSensitive(root, "message");
+   const cJSON *no_answer = cJSON_GetObjectItemCaseSensitive(root, "no_answer");
+   const char *name = cJSON_IsString(status) ? status->valuestring : NULL;
+   if (cJSON_IsString(summary) && strcmp(summary->valuestring, "unavailable") == 0)
+      name = "unavailable";
+   if (cJSON_IsObject(error))
+   {
+      const cJSON *type = cJSON_GetObjectItemCaseSensitive(error, "type");
+      if (cJSON_IsString(type) && strcmp(type->valuestring, "project_not_current") == 0)
+         name = "stale";
+   }
+
+   kb_client_result_status_t result = KB_CLIENT_RESULT_OK;
+   if ((cJSON_IsBool(no_answer) && cJSON_IsTrue(no_answer)) ||
+       (name && (strcmp(name, "no_answer") == 0 || strcmp(name, "abstained") == 0)))
+      result = KB_CLIENT_RESULT_ABSTAINED;
+   else if ((name && (strcmp(name, "empty") == 0 || strcmp(name, "not_found") == 0)) ||
+            (name && strcmp(name, "error") == 0 && cJSON_IsString(message) &&
+             strstr(message->valuestring, "not found")))
+      result = KB_CLIENT_RESULT_EMPTY;
+   else if (name && strcmp(name, "stale") == 0)
+      result = KB_CLIENT_RESULT_STALE;
+   else if (name && strcmp(name, "unauthorized") == 0)
+      result = KB_CLIENT_RESULT_UNAUTHORIZED;
+   else if (name && (strcmp(name, "unavailable") == 0 || strcmp(name, "error") == 0))
+      result = KB_CLIENT_RESULT_UNAVAILABLE;
+   else if (cJSON_IsString(freshness) && strcmp(freshness->valuestring, "current") != 0)
+      result = KB_CLIENT_RESULT_STALE;
+   else if (kb_json_primary_empty(root, path))
+      result = KB_CLIENT_RESULT_EMPTY;
+   cJSON_Delete(root);
+   return result;
+}
+
+static int kb_transport_begin(int *status_out)
+{
+   if (status_out)
+      *status_out = -1;
+   g_kb_last_result = KB_CLIENT_RESULT_UNAVAILABLE;
+   snprintf(g_kb_last_dependency, sizeof(g_kb_last_dependency), "%s", "kb");
+   g_kb_last_observed_generation = 0;
+   g_kb_last_current_generation = 0;
+   g_kb_last_observed_dimension = 0;
+   g_kb_last_current_dimension = 0;
+   g_kb_last_retry_after_ms = 0;
+   int64_t retry_after = 0;
+   if (dependency_breaker_allow(&g_kb_dependency, kb_dependency_now_ms(), &retry_after))
+      return 1;
+   if (status_out)
+      *status_out = 503;
+   return 0;
+}
+
+static void kb_capture_result_metadata(const char *response)
+{
+   cJSON *root = response ? cJSON_Parse(response) : NULL;
+   if (!root)
+      return;
+   const cJSON *dependency = cJSON_GetObjectItemCaseSensitive(root, "dependency");
+   const cJSON *observed = cJSON_GetObjectItemCaseSensitive(root, "observed_generation");
+   const cJSON *current = cJSON_GetObjectItemCaseSensitive(root, "current_generation");
+   const cJSON *observed_dimension = cJSON_GetObjectItemCaseSensitive(root, "observed_dimension");
+   const cJSON *current_dimension = cJSON_GetObjectItemCaseSensitive(root, "current_dimension");
+   const cJSON *retry_after = cJSON_GetObjectItemCaseSensitive(root, "retry_after_ms");
+   if (cJSON_IsString(dependency) && dependency->valuestring[0])
+      snprintf(g_kb_last_dependency, sizeof(g_kb_last_dependency), "%s", dependency->valuestring);
+   if (cJSON_IsNumber(observed))
+      g_kb_last_observed_generation = (int64_t)observed->valuedouble;
+   if (cJSON_IsNumber(current))
+      g_kb_last_current_generation = (int64_t)current->valuedouble;
+   if (cJSON_IsNumber(observed_dimension))
+      g_kb_last_observed_dimension = (int64_t)observed_dimension->valuedouble;
+   if (cJSON_IsNumber(current_dimension))
+      g_kb_last_current_dimension = (int64_t)current_dimension->valuedouble;
+   if (cJSON_IsNumber(retry_after) && retry_after->valuedouble > 0)
+      g_kb_last_retry_after_ms = (int64_t)retry_after->valuedouble;
+   cJSON_Delete(root);
+}
+
+static void kb_transport_complete(const char *path, const char *response, int http_status)
+{
+   int64_t now_ms = kb_dependency_now_ms();
+   int valid = 0;
+   kb_client_result_status_t classified = kb_classify_json_result(path, response, &valid);
+   if (valid)
+      kb_capture_result_metadata(response);
+   if (http_status == 401 || http_status == 403)
+   {
+      dependency_breaker_report_success(&g_kb_dependency, now_ms);
+      g_kb_last_result = KB_CLIENT_RESULT_UNAUTHORIZED;
+      return;
+   }
+   if (valid && classified == KB_CLIENT_RESULT_UNAVAILABLE &&
+       strcmp(g_kb_last_dependency, "kb") != 0)
+   {
+      /* The KB is reachable and truthfully reported one of its own optional
+       * dependencies. Keep that typed outage from suppressing unrelated KB
+       * operations through the transport breaker. */
+      dependency_breaker_report_success(&g_kb_dependency, now_ms);
+      g_kb_last_result = classified;
+      return;
+   }
+   if (http_status >= 200 && http_status < 300 && response && valid)
+   {
+      /* A typed unavailable body means the KB answered but one of its own
+       * dependencies did not; do not trip the KB transport breaker. */
+      dependency_breaker_report_success(&g_kb_dependency, now_ms);
+      g_kb_last_result = classified;
+      return;
+   }
+   if (http_status >= 400 && http_status < 500 && http_status != 408 && http_status != 425 &&
+       http_status != 429)
+   {
+      dependency_breaker_report_success(&g_kb_dependency, now_ms);
+      g_kb_last_result = valid ? classified : KB_CLIENT_RESULT_UNAVAILABLE;
+      return;
+   }
+   dependency_breaker_report_failure(&g_kb_dependency, now_ms, DEPENDENCY_BREAKER_DEFAULT_THRESHOLD,
+                                     DEPENDENCY_BREAKER_DEFAULT_BASE_MS,
+                                     DEPENDENCY_BREAKER_DEFAULT_MAX_MS);
+   g_kb_last_result = KB_CLIENT_RESULT_UNAVAILABLE;
+}
+
+static char *kb_typed_error_json(kb_client_result_status_t status, const char *message)
+{
+   cJSON *obj = cJSON_CreateObject();
+   if (!obj)
+      return strdup("{\"status\":\"unavailable\"}");
+   cJSON_AddStringToObject(obj, "status", kb_client_result_status_name(status));
+   cJSON_AddBoolToObject(obj, "retryable", kb_client_result_status_retryable(status));
+   if (status == KB_CLIENT_RESULT_UNAVAILABLE || status == KB_CLIENT_RESULT_STALE)
+      cJSON_AddStringToObject(obj, "dependency",
+                              g_kb_last_dependency[0] ? g_kb_last_dependency : "kb");
+   if (status == KB_CLIENT_RESULT_UNAVAILABLE)
+   {
+      kb_client_dependency_health_t health;
+      kb_client_dependency_health(&health);
+      int64_t retry_after_ms =
+          g_kb_last_retry_after_ms > 0 ? g_kb_last_retry_after_ms : health.retry_after_ms;
+      if (retry_after_ms <= 0)
+         retry_after_ms = DEPENDENCY_BREAKER_DEFAULT_BASE_MS;
+      if (retry_after_ms > DEPENDENCY_BREAKER_DEFAULT_MAX_MS)
+         retry_after_ms = DEPENDENCY_BREAKER_DEFAULT_MAX_MS;
+      cJSON_AddNumberToObject(obj, "retry_after_ms", (double)retry_after_ms);
+   }
+   if (status == KB_CLIENT_RESULT_STALE && g_kb_last_observed_generation > 0)
+      cJSON_AddNumberToObject(obj, "observed_generation", (double)g_kb_last_observed_generation);
+   if (status == KB_CLIENT_RESULT_STALE && g_kb_last_current_generation > 0)
+      cJSON_AddNumberToObject(obj, "current_generation", (double)g_kb_last_current_generation);
+   if (status == KB_CLIENT_RESULT_STALE && g_kb_last_observed_dimension > 0)
+      cJSON_AddNumberToObject(obj, "observed_dimension", (double)g_kb_last_observed_dimension);
+   if (status == KB_CLIENT_RESULT_STALE && g_kb_last_current_dimension > 0)
+      cJSON_AddNumberToObject(obj, "current_dimension", (double)g_kb_last_current_dimension);
+   cJSON_AddStringToObject(obj, "message", message ? message : "knowledge service unavailable");
+   char *json = cJSON_PrintUnformatted(obj);
+   cJSON_Delete(obj);
+   return json ? json : strdup("{\"status\":\"unavailable\"}");
+}
+
+char *kb_client_last_result_json(const char *message)
+{
+   return kb_typed_error_json(kb_client_last_result_status(), message);
 }
 
 static char *kb_v1_action_request_timeout(const char *action, cJSON *req, int timeout_ms,
@@ -81,17 +408,17 @@ char *kb_client_query_escape(const char *s)
 
 static char *kb_status_unavailable_json(const char *message)
 {
-   cJSON *obj = cJSON_CreateObject();
+   char *json = kb_typed_error_json(KB_CLIENT_RESULT_UNAVAILABLE, message);
+   cJSON *obj = json ? cJSON_Parse(json) : NULL;
+   free(json);
    if (!obj)
-      return strdup("{}");
-   cJSON_AddStringToObject(obj, "status", "error");
+      return strdup("{\"status\":\"unavailable\"}");
    cJSON_AddStringToObject(obj, "summary_status", "unavailable");
    cJSON_AddStringToObject(obj, "owner", "knowledge-service");
    cJSON_AddBoolToObject(obj, "available", 0);
-   cJSON_AddStringToObject(obj, "message", message ? message : "knowledge service unavailable");
-   char *json = cJSON_PrintUnformatted(obj);
+   json = cJSON_PrintUnformatted(obj);
    cJSON_Delete(obj);
-   return json ? json : strdup("{}");
+   return json ? json : strdup("{\"status\":\"unavailable\"}");
 }
 
 static char *kb_vector_unavailable_json(const char *message)
@@ -113,7 +440,10 @@ int kb_client_is_live(void)
    /* A configured remote endpoint owns its own reachability/timeout, so treat
     * it as "live" and let the actual call apply its timeout rather than probing
     * twice here. */
-   return kb_client_v1_base_url() != NULL;
+   kb_client_dependency_health_t health;
+   kb_client_dependency_health(&health);
+   return (kb_client_v1_base_url() != NULL || kb_client_mtls_configured()) &&
+          strcmp(health.state, "open") != 0;
 }
 
 char *kb_client_health_json(void)
@@ -781,9 +1111,10 @@ static char *kb_v1_action_request_timeout(const char *action, cJSON *req, int ti
       char msg[160];
       snprintf(msg, sizeof(msg), "knowledge service action %s returned HTTP %d", action,
                http_status);
-      return error_json(msg);
+      return kb_typed_error_json(kb_client_last_result_status(), msg);
    }
-   return error_json("knowledge service action did not respond");
+   return kb_typed_error_json(kb_client_last_result_status(),
+                              "knowledge service action did not respond");
 }
 
 /* Shared with kb_client_memory.c — keep external linkage. */
@@ -1169,26 +1500,39 @@ static const char *kb_client_v1_auth_header(char *buf, size_t buf_len)
 {
    /* The HTTP API can run without auth; include a bearer header only when the
     * operator provides the matching client-side token. */
-   const char *token = getenv("AIMEE_KB_API_BEARER_TOKEN");
-   if (!token || !token[0] || !buf || buf_len == 0)
+   char token[512];
+   if (!buf || buf_len == 0 ||
+       !runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", token, sizeof(token)))
       return NULL;
    snprintf(buf, buf_len, "Authorization: Bearer %s", token);
+   runtime_secret_wipe(token, sizeof(token));
    return buf;
 }
 
 char *kb_client_v1_post_json(const char *path, cJSON *body, int timeout_ms, int *status_out)
 {
-   if (status_out)
-      *status_out = -1;
+   if (!kb_transport_begin(status_out))
+      return NULL;
    char *body_json = body ? cJSON_PrintUnformatted(body) : strdup("{}");
    if (!body_json)
+   {
+      dependency_breaker_cancel_probe(&g_kb_dependency);
       return NULL;
+   }
 
    /* Distributed mode: route to the remote kb over mTLS (see get_json). */
    if (kb_client_mtls_configured())
    {
-      char *r = kb_client_mtls_request_timeout("POST", path, body_json, timeout_ms, status_out);
+      int local_status = -1;
+      int *wire_status = status_out ? status_out : &local_status;
+      char *r = kb_client_mtls_request_timeout("POST", path, body_json, timeout_ms, wire_status);
+      kb_transport_complete(path, r, *wire_status);
       free(body_json);
+      if (*wire_status < 200 || *wire_status >= 300 || !r)
+      {
+         free(r);
+         return NULL;
+      }
       return r;
    }
 
@@ -1201,6 +1545,7 @@ char *kb_client_v1_post_json(const char *path, cJSON *body, int timeout_ms, int 
                                    &response, timeout_ms, NULL);
       if (status_out)
          *status_out = status;
+      kb_transport_complete(path, response, status);
       free(body_json);
       free(url);
       if (status < 200 || status >= 300 || !response)
@@ -1212,6 +1557,7 @@ char *kb_client_v1_post_json(const char *path, cJSON *body, int timeout_ms, int 
    }
 
    free(body_json);
+   kb_transport_complete(path, NULL, -1);
    return NULL;
 }
 
@@ -1224,8 +1570,23 @@ char *kb_client_v1_post_body(const char *path, const char *body, int timeout_ms,
 char *kb_client_v1_post_body_with_type(const char *path, const char *body, const char *content_type,
                                        int timeout_ms, int *status_out)
 {
-   if (status_out)
-      *status_out = -1;
+   if (!kb_transport_begin(status_out))
+      return NULL;
+
+   if (kb_client_mtls_configured())
+   {
+      int local_status = -1;
+      int *wire_status = status_out ? status_out : &local_status;
+      char *r = kb_client_mtls_request_timeout_with_type("POST", path, body, content_type,
+                                                         timeout_ms, wire_status);
+      kb_transport_complete(path, r, *wire_status);
+      if (*wire_status < 200 || *wire_status >= 300 || !r)
+      {
+         free(r);
+         return NULL;
+      }
+      return r;
+   }
 
    char *url = kb_client_v1_url(path);
    if (url)
@@ -1237,6 +1598,7 @@ char *kb_client_v1_post_body_with_type(const char *path, const char *body, const
                                        content_type, body ? body : "", &response, timeout_ms, NULL);
       if (status_out)
          *status_out = status;
+      kb_transport_complete(path, response, status);
       free(url);
       if (status < 200 || status >= 300 || !response)
       {
@@ -1246,18 +1608,30 @@ char *kb_client_v1_post_body_with_type(const char *path, const char *body, const
       return response;
    }
 
+   kb_transport_complete(path, NULL, -1);
    return NULL;
 }
 
 char *kb_client_v1_get_json(const char *path, int timeout_ms, int *status_out)
 {
-   if (status_out)
-      *status_out = -1;
+   if (!kb_transport_begin(status_out))
+      return NULL;
 
    /* Distributed mode: a configured remote kb (AIMEE_KB_CONN) is reached over
     * mTLS with the enrollment-issued client cert, ahead of HTTP-URL / socket. */
    if (kb_client_mtls_configured())
-      return kb_client_mtls_request_timeout("GET", path, NULL, timeout_ms, status_out);
+   {
+      int local_status = -1;
+      int *wire_status = status_out ? status_out : &local_status;
+      char *r = kb_client_mtls_request_timeout("GET", path, NULL, timeout_ms, wire_status);
+      kb_transport_complete(path, r, *wire_status);
+      if (*wire_status < 200 || *wire_status >= 300 || !r)
+      {
+         free(r);
+         return NULL;
+      }
+      return r;
+   }
 
    char *url = kb_client_v1_url(path);
    if (url)
@@ -1268,6 +1642,7 @@ char *kb_client_v1_get_json(const char *path, int timeout_ms, int *status_out)
           agent_http_get(url, kb_client_v1_auth_header(auth, sizeof(auth)), &response, timeout_ms);
       if (status_out)
          *status_out = status;
+      kb_transport_complete(path, response, status);
       free(url);
       if (status < 200 || status >= 300 || !response)
       {
@@ -1277,6 +1652,7 @@ char *kb_client_v1_get_json(const char *path, int timeout_ms, int *status_out)
       return response;
    }
 
+   kb_transport_complete(path, NULL, -1);
    return NULL;
 }
 
@@ -1290,6 +1666,15 @@ char *kb_client_search_json_ex(const char *project, const char *query,
                                const char *embedding_command, int max_results, const char *format,
                                const char *fusion_mode_override)
 {
+   return kb_client_search_json_scoped_ex(project, !project || !project[0], query,
+                                          embedding_command, max_results, format,
+                                          fusion_mode_override);
+}
+
+char *kb_client_search_json_scoped_ex(const char *project, int all_projects, const char *query,
+                                      const char *embedding_command, int max_results,
+                                      const char *format, const char *fusion_mode_override)
+{
    if (!query || !query[0])
       return kb_error_json("kb.search requires query");
 
@@ -1299,14 +1684,20 @@ char *kb_client_search_json_ex(const char *project, const char *query,
     * unless AIMEE_KB_CACHE_TTL_S (or config) enables it. */
    char cache_key[480];
    int have_key =
-       snprintf(cache_key, sizeof(cache_key), "search|%s|%d|%s|%s|%s", query, max_results,
-                project ? project : "", format ? format : "",
+       snprintf(cache_key, sizeof(cache_key), "search|%s|%d|%s|%d|%s|%s", query, max_results,
+                project ? project : "", all_projects, format ? format : "",
                 fusion_mode_override ? fusion_mode_override : "") < (int)sizeof(cache_key);
    if (have_key)
    {
       char *cached = kb_cache_get(cache_key);
       if (cached)
+      {
+         int valid = 0;
+         g_kb_last_result = kb_classify_json_result("/v1/search", cached, &valid);
+         if (!valid)
+            g_kb_last_result = KB_CLIENT_RESULT_UNAVAILABLE;
          return cached;
+      }
    }
 
    cJSON *body = cJSON_CreateObject();
@@ -1314,6 +1705,11 @@ char *kb_client_search_json_ex(const char *project, const char *query,
       return kb_error_json("out of memory");
    if (project && project[0])
       cJSON_AddStringToObject(body, "project", project);
+   if (all_projects)
+      /* NULL is an intentional all-project call at this internal boundary.
+       * Public request surfaces must resolve an active project first; spelling
+       * this out prevents the KB from treating an omitted scope as global. */
+      cJSON_AddStringToObject(body, "scope", "all");
    cJSON_AddStringToObject(body, "query", query);
    if (embedding_command && embedding_command[0])
       cJSON_AddStringToObject(body, "embedding_command", embedding_command);
@@ -1336,9 +1732,10 @@ char *kb_client_search_json_ex(const char *project, const char *query,
    {
       char msg[128];
       snprintf(msg, sizeof(msg), "knowledge service /v1/search returned HTTP %d", http_status);
-      return kb_error_json(msg);
+      return kb_typed_error_json(kb_client_last_result_status(), msg);
    }
-   return kb_error_json("knowledge service /v1/search did not respond");
+   return kb_typed_error_json(kb_client_last_result_status(),
+                              "knowledge service /v1/search did not respond");
 }
 
 char *kb_client_curator_implements_json(const char *topic)

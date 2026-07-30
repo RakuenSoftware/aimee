@@ -23,6 +23,9 @@ extern "C"
    /* Total row count of the projects table. Returns 0 on miss / DB
     * unavailable. */
    int db2_code_index_project_count(void);
+   /* Current visible generation for a stable project id. Returns 0 when
+    * current, -2 when unknown/detached, -1 on storage error. */
+   int db2_code_index_project_current_generation(const char *name, int64_t *generation_out);
 
    /* Most recent scanned_at timestamp across all rows in the projects
     * table, written to |out| (NUL-terminated, ISO-8601). Returns 0 on
@@ -36,15 +39,21 @@ extern "C"
     * (>=0) on success, -1 on DB / connection error. */
    int db2_code_index_term_find(const char *identifier, term_hit_t *out, int max);
 
-   /* Fill out->dependents and out->dependencies for the given
-    * (project, file_path) by reading file_exports and file_imports.
-    * out->file is left untouched (caller stamps it). The caller
-    * is responsible for memset()ing |out| beforehand. Returns 0 on
-    * success, -1 on DB / connection / project-not-found error. The
-    * file may exist in projects without a row in `files` (never
-    * scanned) — in that case dependent_count and dependency_count
-    * stay 0 and the call still returns 0. */
+   /* Fill exact current-generation structural edges for (project,file_path).
+    * Import identities are language-normalized; direct callers and resolved
+    * cross-repo routes are merged without path-only deduplication. Every edge
+    * carries provenance/confidence/project/generation/freshness metadata.
+    * Returns -1 unless the target resolves in the current generation. */
    int db2_code_index_blast_radius(const char *project, const char *file_path, blast_radius_t *out);
+
+   /* Stable-partition dependent edges so every active-project edge precedes
+    * every cross-project tail. Call after additive local projections. */
+   void db2_code_index_blast_radius_local_first(const char *project, blast_radius_t *out);
+
+   /* Resolve basename to a current-generation file only when exactly one file
+    * in project has that basename. Used to make projection edges authoritative. */
+   int db2_code_index_unique_file_basename(const char *project, const char *basename, char *out,
+                                           size_t out_cap);
 
    /* List terms with kind='definition' for the (project, file_path),
     * ordered by line. Capped at |max|. Returns count (>=0) on
@@ -141,6 +150,10 @@ extern "C"
     * identical to before (ingress-compression P1b). */
    int db2_code_index_code_search(const char *query, const char *project, code_search_hit_t *out,
                                   int max, int enrich);
+   /* As above, but search every current project except |excluded_project|;
+    * exclusion happens in SQL before the result limit. */
+   int db2_code_index_code_search_excluding_project(const char *query, const char *excluded_project,
+                                                    code_search_hit_t *out, int max, int enrich);
 
 #ifdef __cplusplus
 }

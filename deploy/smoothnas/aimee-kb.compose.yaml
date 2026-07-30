@@ -1,7 +1,7 @@
 # aimee-kb — SmoothNAS compose-native plugin (split topology): the shared/vector
 # KB (DB2 + pgvector) with PostgreSQL inside the KB image. The LLM is EXTERNAL —
-# set AIMEE_LLM_URL to a synth endpoint
-# (the kb embeds in-container). (A compose plugin has its own
+# set AIMEE_LLM_URL to the host
+# running the aimee-llm plugin (its published :8742). (A compose plugin has its own
 # project network, so cross-plugin comms use host-published ports, not the runtime
 # bridge the manifest used.) Migrated from aimee-kb.plugin.yaml.
 name: aimee-kb
@@ -13,13 +13,10 @@ services:
       stack: 67108864
     environment:
       AIMEE_HOME: /var/lib/aimee
-      AIMEE_DB2_URL: ${AIMEE_DB2_URL:-}
-      # Synth endpoint (OpenAI-compatible). The kb embeds in-container, so this is
-      # only needed for the LLM-dependent passes.
+      # External DB2 credentials are streamed into Vault before `up`.
+      # EXTERNAL aimee-llm plugin — set to the host running it, e.g. http://192.168.0.254:8742
       AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
-      # Unset: the kb derives the dim (pinned > recorded > probed). Every tier
-      # serves the same 768-dim embedder, so there is nothing tier-specific to pin.
-      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
+      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-2560}
       AIMEE_KB_HTTP_BIND: "1"
     command: ["--http-port=8741"]
     ports:

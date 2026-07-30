@@ -1,6 +1,7 @@
 /* db2/memory_lifecycle.c: memory lifecycle SQL primitives — Postgres via libpq. */
 
 #include "memory_lifecycle.h"
+#include "memory_scope_query.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
 
@@ -8,7 +9,11 @@
 #include <stdio.h>
 #include <string.h>
 
-#define ML_ERRBUF 256
+#define ML_ERRBUF            256
+#define ML_CONFLICT_A_FILTER DB2_MEMORY_SCOPE_FILTER_SQL("ma.id")
+#define ML_CONFLICT_B_FILTER DB2_MEMORY_SCOPE_FILTER_SQL("mb.id")
+#define ML_CONFLICT_A_RANK   DB2_MEMORY_SCOPE_RANK_SQL("ma.id")
+#define ML_CONFLICT_B_RANK   DB2_MEMORY_SCOPE_RANK_SQL("mb.id")
 
 int db2_memory_lifecycle_get_state(int64_t memory_id, char *out, size_t out_len)
 {
@@ -164,22 +169,26 @@ int db2_memory_lifecycle_list_stale_pending(db2_memory_lifecycle_stale_t *out, i
        "created_at::timestamp)/86400.0) AS REAL) AS age_days,"
        "       CAST((EXTRACT(EPOCH FROM ttl_at::timestamp)/86400.0 - EXTRACT(EPOCH FROM "
        "created_at::timestamp)/86400.0) AS REAL) AS window_days"
-       "  FROM memories"
+       "  FROM memories m"
        " WHERE lifecycle_state = 'pending' AND ttl_at != ''"
        "   AND EXTRACT(EPOCH FROM ttl_at::timestamp)/86400.0 > EXTRACT(EPOCH FROM "
        "created_at::timestamp)/86400.0"
        "   AND (EXTRACT(EPOCH FROM 'now'::timestamp)/86400.0 - EXTRACT(EPOCH FROM "
        "created_at::timestamp)/86400.0) >="
        "       0.8 * (EXTRACT(EPOCH FROM ttl_at::timestamp)/86400.0 - EXTRACT(EPOCH FROM "
-       "created_at::timestamp)/86400.0)"
-       " ORDER BY EXTRACT(EPOCH FROM 'now'::timestamp)/86400.0 - EXTRACT(EPOCH FROM "
-       "created_at::timestamp)/86400.0 DESC"
-       " LIMIT ?1";
+       "created_at::timestamp)/86400.0)" DB2_MEMORY_SCOPE_FILTER_SQL(
+           "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, EXTRACT(EPOCH FROM "
+                                                                  "'now'::timestamp)/86400.0 - "
+                                                                  "EXTRACT(EPOCH FROM "
+                                                                  "created_at::timestamp)/86400.0 "
+                                                                  "DESC"
+                                                                  " LIMIT ?1";
    char err[ML_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return 0;
    aimee_pg_bind_int(st, "?1", max);
+   db2_memory_scope_bind_current(st);
 
    int n = 0;
    while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
@@ -206,19 +215,25 @@ int db2_memory_lifecycle_list_unresolved_contradictions(db2_memory_lifecycle_con
    if (!conn)
       return 0;
 
+   /* The result exposes both memories' keys and content, so both sides must be
+    * visible in current scope. A partial/orphan conflict is suppressed rather
+    * than leaking the out-of-scope side; explicit all retains it when both rows
+    * still exist. E2 owns an orphan-safe alert representation. */
    static const char *sql = "SELECT c.id, c.memory_a, c.memory_b, c.detected_at,"
                             "       ma.key, ma.content, mb.key, mb.content"
                             "  FROM memory_conflicts c"
                             "  LEFT JOIN memories ma ON ma.id = c.memory_a"
                             "  LEFT JOIN memories mb ON mb.id = c.memory_b"
-                            " WHERE c.resolved = 0"
-                            " ORDER BY c.detected_at DESC"
-                            " LIMIT ?1";
+                            " WHERE c.resolved = 0" ML_CONFLICT_A_FILTER ML_CONFLICT_B_FILTER
+                            " ORDER BY CASE WHEN " ML_CONFLICT_A_RANK " > " ML_CONFLICT_B_RANK
+                            " THEN " ML_CONFLICT_A_RANK " ELSE " ML_CONFLICT_B_RANK " END DESC,"
+                            " c.detected_at DESC LIMIT ?1";
    char err[ML_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return 0;
    aimee_pg_bind_int(st, "?1", max);
+   db2_memory_scope_bind_current(st);
 
    int n = 0;
    while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
@@ -250,25 +265,30 @@ int db2_memory_lifecycle_list_newly_superseded(const char *since,
    aimee_pg_stmt_t *st = NULL;
    if (since && since[0])
    {
-      static const char *sql_s = "SELECT id, key, content, updated_at FROM memories"
-                                 " WHERE lifecycle_state = 'superseded' AND updated_at >= ?1"
-                                 " ORDER BY updated_at DESC LIMIT ?2";
+      static const char *sql_s =
+          "SELECT m.id, m.key, m.content, m.updated_at FROM memories m"
+          " WHERE m.lifecycle_state = 'superseded' AND m.updated_at >= "
+          "?1" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+              "m.id") " DESC, m.updated_at DESC LIMIT ?2";
       st = aimee_pg_prepare(conn, sql_s, err, sizeof(err));
       if (!st)
          return 0;
       aimee_pg_bind_text(st, "?1", since);
       aimee_pg_bind_int(st, "?2", max);
+      db2_memory_scope_bind_current(st);
    }
    else
    {
       static const char *sql_d =
-          "SELECT id, key, content, updated_at FROM memories"
-          " WHERE lifecycle_state = 'superseded' AND updated_at >= pg_now_text('-7 days')"
-          " ORDER BY updated_at DESC LIMIT ?1";
+          "SELECT m.id, m.key, m.content, m.updated_at FROM memories m"
+          " WHERE m.lifecycle_state = 'superseded' AND m.updated_at >= pg_now_text('-7 "
+          "days')" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+              "m.id") " DESC, m.updated_at DESC LIMIT ?1";
       st = aimee_pg_prepare(conn, sql_d, err, sizeof(err));
       if (!st)
          return 0;
       aimee_pg_bind_int(st, "?1", max);
+      db2_memory_scope_bind_current(st);
    }
 
    int n = 0;

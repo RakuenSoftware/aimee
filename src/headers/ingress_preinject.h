@@ -163,4 +163,20 @@ const char *ingress_preinject_turn_id(void);
 void ingress_preinject_set_session_id(const char *session_id);
 const char *ingress_preinject_session_id(void);
 
+/* Resolve the current request's thread-local working directory to the same
+ * canonical identities used by code indexing and scoped memory. Returns 0 only
+ * when an active project is known; callers must not fall back to global recall. */
+int ingress_preinject_resolve_active_scope(char *workspace, size_t workspace_len, char *project,
+                                           size_t project_len);
+
+/* Validate and render a strict /v1/code/context response into a compact task
+ * packet. Returns NULL on no_answer, stale/mismatched/incomplete provenance, or
+ * when no complete item fits the 1200-token resident budget. */
+char *ingress_preinject_format_task_context(const char *json, const char *active_project,
+                                            int *item_count_out, double *confidence_out);
+
+/* Forget bounded first-task session state. Production does not need to call
+ * this; it exists so tests and controlled reloads can start deterministically. */
+void ingress_preinject_task_state_reset(void);
+
 #endif /* DEC_INGRESS_PREINJECT_H */

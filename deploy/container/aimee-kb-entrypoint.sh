@@ -91,14 +91,58 @@ start_embedder() {
 
 set -e
 
+# Kubernetes/Docker credential environment is first-boot transport only. Record
+# the non-secret external-DB decision, seal every credential-shaped value into
+# Vault, and scrub this PID's inherited copy before any unrelated child process.
+vault_bootstrapped=0
+external_db=0
+case "${1:-}" in
+    --aimee-internal-vault-bootstrapped-external-db)
+        vault_bootstrapped=1
+        external_db=1
+        shift
+        ;;
+    --aimee-internal-vault-bootstrapped-embedded-db)
+        vault_bootstrapped=1
+        shift
+        ;;
+esac
+: "${AIMEE_HOME:=/var/lib/aimee}"
+export AIMEE_HOME
+[ -n "${AIMEE_DB2_URL:-}" ] && external_db=1
+aimee-kb --bootstrap-vault-env
+_secret_names=$(aimee-kb --list-credential-env-names)
+had_credential_env=0
+for _secret_name in $_secret_names; do
+    eval "_secret_was_set=\${${_secret_name}+x}"
+    [ "$_secret_was_set" = x ] && had_credential_env=1
+    unset "$_secret_name"
+done
+unset _secret_was_set
+# Container metadata is deliberately credential-free after the disposable
+# bootstrap. Resolve the DB topology from Vault without printing the URL. The
+# fixed probe distinguishes the entrypoint's own embedded socket DSN from an
+# operator-supplied external connection string.
+if aimee-kb --vault-db2-external; then
+    external_db=1
+else
+    external_db=0
+fi
+if [ "$vault_bootstrapped" -eq 0 ] || [ "$had_credential_env" -eq 1 ]; then
+    if [ "$external_db" -eq 1 ]; then
+        exec /bin/sh "$0" --aimee-internal-vault-bootstrapped-external-db "$@"
+    fi
+    exec /bin/sh "$0" --aimee-internal-vault-bootstrapped-embedded-db "$@"
+fi
+
 # 1. Stack rlimit (64 MB == 65536 KiB == 67108864 bytes). Best-effort: some
 #    runtimes forbid raising it, in which case the compose ulimit / a host
 #    profile is still required.
 ulimit -s 65536 2>/dev/null || true
+ulimit -c 0 2>/dev/null || true
 
 # 2. Seed the baked default config if it is missing (fresh / bind-mounted
 #    volume). Never clobber an operator-provided config.
-: "${AIMEE_HOME:=/var/lib/aimee}"
 cfg="$AIMEE_HOME/aimee.yaml"
 default="/opt/aimee/defaults/aimee.yaml"
 if [ ! -f "$cfg" ] && [ -f "$default" ]; then
@@ -107,7 +151,7 @@ if [ ! -f "$cfg" ] && [ -f "$default" ]; then
 fi
 
 # 3. Embedded DB2, only when the operator configured no external server.
-if [ -z "${AIMEE_DB2_URL:-}" ]; then
+if [ "$external_db" -eq 0 ]; then
     # PostgreSQL refuses to run as root, unconditionally. The image declares
     # USER aimee, so this only trips when a runtime overrides it (e.g. --user root
     # to work around bind-mount ownership). Say so, rather than letting initdb
@@ -165,9 +209,10 @@ if [ -z "${AIMEE_DB2_URL:-}" ]; then
             --command="CREATE EXTENSION IF NOT EXISTS vectorscale" >/dev/null
     fi
 
-    # libpq reads a directory-valued host as a socket path.
-    AIMEE_DB2_URL="postgresql:///$DB?host=$PGSOCK"
-    export AIMEE_DB2_URL
+    # libpq reads a directory-valued host as a socket path. Even this local,
+    # passwordless DSN follows the credential-shaped config contract: give it
+    # to a disposable bootstrap helper, then let the KB load it from Vault.
+    AIMEE_DB2_URL="postgresql:///$DB?host=$PGSOCK" aimee-kb --bootstrap-vault-env
 
     start_embedder
 

@@ -54,6 +54,9 @@ void proc_cleanup_all(void)
 #include <pthread.h>
 #include <poll.h>
 #include <signal.h>
+#ifdef __linux__
+#include <sys/syscall.h>
+#endif
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -350,6 +353,10 @@ int proc_start(const char *command, const char *cwd, char *errbuf, size_t errbuf
       return -1;
    }
 
+   long child_fd_limit = sysconf(_SC_OPEN_MAX);
+   if (child_fd_limit < 3)
+      child_fd_limit = 1024;
+
    pid_t pid = fork();
    if (pid < 0)
    {
@@ -373,12 +380,15 @@ int proc_start(const char *command, const char *cwd, char *errbuf, size_t errbuf
       dup2(stdout_pipe[1], STDOUT_FILENO);
       dup2(stderr_pipe[1], STDERR_FILENO);
 
-      /* Close all other fds */
-      int maxfd = (int)sysconf(_SC_OPEN_MAX);
-      if (maxfd < 3)
-         maxfd = 1024;
-      for (int fd = 3; fd < maxfd; fd++)
-         close(fd);
+      /* Docker commonly grants a 1,048,576 descriptor ceiling. Walking that
+       * entire range before every exec makes even `echo` take hundreds of
+       * milliseconds. Use the kernel's constant-time range close when present;
+       * the pre-fork limit feeds the portable, async-signal-safe fallback. */
+#if defined(__linux__) && defined(SYS_close_range)
+      if (syscall(SYS_close_range, 3u, ~0u, 0u) != 0)
+#endif
+         for (long fd = 3; fd < child_fd_limit; fd++)
+            close((int)fd);
 
       execl("/bin/sh", "sh", "-c", command, (char *)NULL);
       _exit(127);

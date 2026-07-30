@@ -322,6 +322,19 @@ static void test_provider_outage_requeues(sqlite3 *db)
    printf("  PASS: provider outage requeues at attempt limit without spending budget\n");
 }
 
+static void test_only_current_document_generation_queues(sqlite3 *db)
+{
+   int before = jobs(db);
+   seed(db, "UPDATE projects SET current_generation=2 WHERE name='p'");
+   seed(db, "INSERT INTO kb_documents"
+            " (project,generation,file_path,file_hash,chunk_index,content,doc_kind) VALUES"
+            " ('p',1,'stale.md','stale',0,'old',''),"
+            " ('p',2,'current.md','current',0,'new','')");
+   (void)kb_curator_queue_docs_for_project("p");
+   assert(jobs(db) == before + 1);
+   printf("  PASS: only current-generation documents enter the curator queue\n");
+}
+
 int main(void)
 {
    /* Deterministic config: HOME with no aimee.yaml -> config_load (called inside
@@ -332,6 +345,11 @@ int main(void)
 
    printf("test_curator_queue:\n");
    sqlite3 *db = open_db();
+
+   /* Curator work is generation-fenced: queued documents are eligible only
+    * while their stable project and generation are current. */
+   seed(db, "INSERT INTO projects (name,root,scanned_at)"
+            " VALUES ('p','/p','2026-01-01 00:00:00')");
 
    test_polymorphic_async_subject(db);
 
@@ -370,6 +388,7 @@ int main(void)
    test_provider_unavailable_is_not_a_job_failure();
    test_provider_outage_arms_global_backoff();
    test_provider_outage_requeues(db);
+   test_only_current_document_generation_queues(db);
 
    printf("test_curator_queue: all tests passed\n");
    return 0;

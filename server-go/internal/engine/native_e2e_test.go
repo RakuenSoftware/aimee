@@ -329,7 +329,8 @@ nodes:
 				t.Fatalf("final handoff = %+v, want meaningful draft PR", final)
 			}
 			for _, marker := range []string{"## Human review boundary", "intentionally a draft",
-				"## Changes", "Original request", "Approved implementation plan", rootID} {
+				"## What this proposal does", "## What changed", "Original request",
+				"Approved implementation plan", rootID} {
 				if !strings.Contains(final.Body, marker) {
 					t.Fatalf("final PR body missing %q:\n%s", marker, final.Body)
 				}
