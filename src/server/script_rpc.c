@@ -305,14 +305,14 @@ static int script_rpc_write_stubs(script_rpc_server_t *srv)
                          "  echo 'usage: aimee tool <name> [json-args]' >&2; exit 2\n"
                          "fi\n"
                          "tool=\"$2\"; shift 2; args=\"${*:-{}}\"\n"
-                         "AIMEE_TOOL_NAME=\"$tool\" AIMEE_TOOL_ARGS=\"$args\" python3 - <<'PY'\n"
-                         "import json, os\n"
+                         "printf '%s\\0%s' \"$tool\" \"$args\" | python3 -c '\n"
+                         "import json, sys\n"
                          "import aimee_tools\n"
-                         "tool = os.environ['AIMEE_TOOL_NAME']\n"
-                         "_raw = os.environ.get('AIMEE_TOOL_ARGS', '{}').strip()\n"
-                         "args = json.JSONDecoder().raw_decode(_raw)[0]\n"
-                         "print(json.dumps(aimee_tools.call(tool, args), separators=(',', ':')))\n"
-                         "PY\n";
+                         "tool_raw, args_raw = sys.stdin.buffer.read().split(b\"\\0\", 1)\n"
+                         "tool = tool_raw.decode()\n"
+                         "args = json.JSONDecoder().raw_decode(args_raw.decode().strip())[0]\n"
+                         "print(json.dumps(aimee_tools.call(tool, args), separators=(\",\", \":\")))\n"
+                         "'\n";
    return script_rpc_write_file(sh, sh_body, 0700);
 }
 
