@@ -111,6 +111,54 @@ func TestPullRequestHandoffRedactsCredentialMaterial(t *testing.T) {
 	}
 }
 
+func TestPullRequestProposalDetailsFallsBackToProblemAndAcceptance(t *testing.T) {
+	request := `# Proposal: run checks for slices
+
+## Problem
+
+Slice pull requests currently merge without any CI check runs.
+
+## Acceptance
+
+- Pull requests targeting the feature namespace run the complete gate.`
+	details := pullRequestProposalDetails(request, "Run checks for slices")
+	if details.Goal != "Slice pull requests currently merge without any CI check runs." {
+		t.Fatalf("goal = %q", details.Goal)
+	}
+	if !strings.Contains(details.Scope, "targeting the feature namespace") {
+		t.Fatalf("scope = %q", details.Scope)
+	}
+}
+
+func TestDiffHighlightsLeadWithSubstantiveMultilineEdit(t *testing.T) {
+	diff := strings.Join([]string{
+		"diff --git a/docs/proposals/done/example.md b/docs/proposals/done/example.md",
+		"+++ b/docs/proposals/done/example.md",
+		"@@ -1 +1 @@",
+		"-[related](example.md)",
+		"+[related](../done/example.md)",
+		"diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml",
+		"+++ b/.github/workflows/ci.yml",
+		"@@ -8 +8,3 @@",
+		"-    branches: [main, testing]",
+		"+    branches: [main, testing, 'aimee/feat/**']",
+		"+    # Slice pull requests use the complete gate.",
+		"+    # No separate job definitions are needed.",
+		"",
+	}, "\n")
+	highlights := parseDiffHighlights(diff)
+	if len(highlights) != 2 {
+		t.Fatalf("highlights = %#v", highlights)
+	}
+	if !strings.Contains(highlights[0], ".github/workflows/ci.yml") ||
+		!strings.Contains(highlights[0], "aimee/feat/**") {
+		t.Fatalf("substantive workflow edit did not lead: %#v", highlights)
+	}
+	if !strings.Contains(highlights[1], "docs/proposals/done/example.md") {
+		t.Fatalf("proposal housekeeping highlight missing: %#v", highlights)
+	}
+}
+
 func TestFinalPullRequestHandoffExplainsProposalAndActualDiff(t *testing.T) {
 	root := t.TempDir()
 	repo := filepath.Join(root, "repo")
