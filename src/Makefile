@@ -1527,7 +1527,15 @@ $(OBJDIR)/kb/kb_http.o $(OBJDIR)/kb/http/kb_http.o $(OBJDIR)/kb/http/kb_http_con
 server/openapi_server_data.h: ../api/openapi-server-v1.yaml gen_openapi_server.py
 	python3 gen_openapi_server.py $@
 
-$(OBJDIR)/server/server_http.o: server/openapi_server_data.h
+OPENAPI_SERVER_OBJS := \
+	$(OBJDIR)/server/server_http.o \
+	$(OBJDIR)/server/server_http_config_routes.o \
+	$(OBJDIR)/server/server_http_conn_worker.o \
+	$(OBJDIR)/server/server_http_response.o \
+	$(OBJDIR)/server/server_http_routes.o \
+	$(OBJDIR)/server/server_http_sse.o
+
+$(OPENAPI_SERVER_OBJS): server/openapi_server_data.h
 
 # Generate the Markdown API reference under docs/gen/ from the OpenAPI spec.
 # The output is committed; regenerating on an unchanged spec is a no-op.
