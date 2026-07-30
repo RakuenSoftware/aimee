@@ -125,8 +125,7 @@ static void test_probe_matches_acquire_without_mutation(void)
    agent_admit_status_t st;
    agent_admit_capacity_info_t info;
    configure(2, 10);
-   assert(agent_admission_probe("a", "m1", 1, &why) &&
-          why == AGENT_ADMIT_CAPACITY_AVAILABLE);
+   assert(agent_admission_probe("a", "m1", 1, &why) && why == AGENT_ADMIT_CAPACITY_AVAILABLE);
    assert(agent_admission_global_active() == 0);
    assert(agent_admission_probe_info("a", "m1", 1, &info));
    assert(info.available == 1 && info.global_available == 2 && info.agent_available == 1 &&

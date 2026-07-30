@@ -1916,17 +1916,12 @@ static void server_pid_clear(const char *socket_path)
    unlink(pid_path);
 }
 
-/* Route-time health predicate: exclude agents the provider catalog has marked
- * DOWN (3+ consecutive failures) from new delegate/agent routing. Registered
- * via agent_set_route_health_filter so agent_config.o needs no link dependency
- * on the catalog. Returns nonzero to exclude. */
+/* Exclude catalog-DOWN agents from routing without coupling agent_config.o to it. */
 static int server_agent_route_is_down(const char *agent_name)
 {
    return provider_catalog_get_health(agent_name) == CATALOG_HEALTH_DOWN;
 }
 
-/* Route-time DEGRADED predicate (nonzero when degraded): a half-opened breaker
- * or intermittent failures. Not excluded - routing only PREFERS a healthy peer. */
 static int server_agent_route_is_degraded(const char *agent_name)
 {
    return provider_catalog_get_health(agent_name) == CATALOG_HEALTH_DEGRADED;

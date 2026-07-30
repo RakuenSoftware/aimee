@@ -1741,6 +1741,7 @@ $(TESTPREFIX)/unit-test-server-compute: $(OBJDIR)/tests/test_server_compute.o $(
 
 $(TESTPREFIX)/unit-test-agent-list-handler: $(OBJDIR)/tests/test_agent_list_handler.o \
                                $(OBJDIR)/server/server_agent.o $(OBJDIR)/server/agent_config.o $(OBJDIR)/server/agent_route.o \
+                               $(OBJDIR)/server/agent_admission.o \
                                $(OBJDIR)/agent_tier_lint.o \
                                $(OBJDIR)/server/model_provider.o $(OBJDIR)/server/openai_profile.o \
                                $(OBJDIR)/server/anthropic_profile.o $(OBJDIR)/server/minimax_profile.o \
