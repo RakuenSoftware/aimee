@@ -47,6 +47,16 @@ Sidecars read bounded input from stdin, emit the exact documented output on stdo
 stderr, time out, and fail with an explicit degraded result. They do not become hidden storage or
 policy owners.
 
+## Container Vault bootstrap
+
+`aimee-compose-vault-bootstrap.sh -f COMPOSE_FILE {server|kb|all}` is the
+operator path for first-boot credentials. It streams the current environment
+over stdin to a disposable `docker compose run --rm` helper. The helper imports
+only credential-shaped names into the owning Vault, verifies that no credential
+environment remains, and exits. Unset the host inputs before starting the
+long-lived services; their Compose definitions intentionally contain no
+credential mappings.
+
 ## Adding a script
 
 - state cwd, inputs, outputs, exit codes, network use, and destructive behavior in the header;

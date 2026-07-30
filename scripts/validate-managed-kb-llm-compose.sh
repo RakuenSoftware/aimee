@@ -54,18 +54,22 @@ export AIMEE_VALIDATION_ROOT="$root"
 
 compose=(docker compose -f "$root/deploy/container/aimee-managed.compose.yaml" -f "$override")
 "${compose[@]}" config --quiet
+env -0 | "${compose[@]}" run --rm --no-deps -T \
+  --entrypoint /usr/local/bin/aimee-kb aimee-kb --bootstrap-vault-stdin
 "${compose[@]}" up -d --wait --wait-timeout 240
 
-# Both services must receive the same identity and the exact saved role/model
-# choices. Compare inside the containers without printing the bearer.
+# The KB must load the identity from Vault with no credential-shaped Config.Env;
+# the LLM receives the same deployment identity as its own auth boundary.
 echo "managed-kb-llm: checking propagated identity and role configuration"
 "${compose[@]}" exec -T aimee-kb sh -ec '
-  test "${#AIMEE_LLM_AUTH_TOKEN}" -eq 64
+  ! env | grep -q "^AIMEE_LLM_AUTH_TOKEN="
+  ! env | grep -q "^LLM_API_KEY="
   test "$AIMEE_LLM_AUTH_REQUIRED" = "1"
   test "$AIMEE_LLM_URL" = "http://aimee-llm:8742"
   test "$AIMEE_LLM_MODEL" = "validation-synth"
-  test "$LLM_API_KEY" = "$AIMEE_LLM_AUTH_TOKEN"
 '
+"${compose[@]}" exec -T aimee-kb \
+  /usr/local/bin/aimee-kb --vault-llm-auth-configured
 "${compose[@]}" exec -T aimee-llm sh -ec '
   test "${#AIMEE_LLM_AUTH_TOKEN}" -eq 64
   test "$AIMEE_LLM_STRICT_BIND" = "1"
@@ -76,7 +80,8 @@ echo "managed-kb-llm: checking propagated identity and role configuration"
   test "$AIMEE_EMBEDDING_DIM" = "1024"
 '
 
-# Missing and incorrect credentials fail; the KB's actual environment succeeds.
+# Missing and incorrect credentials fail. A short-lived stdin-only curl proves
+# the deployment identity matches without recreating a credential environment.
 echo "managed-kb-llm: checking authenticated KB-to-LLM probe"
 "${compose[@]}" exec -T aimee-kb sh -ec '
   code=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "$AIMEE_LLM_URL/auth/verify")
@@ -84,26 +89,26 @@ echo "managed-kb-llm: checking authenticated KB-to-LLM probe"
   code=$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
     -H "Authorization: Bearer wrong" "$AIMEE_LLM_URL/auth/verify")
   test "$code" = 401
-  curl -fsS -X POST -H "Authorization: Bearer $AIMEE_LLM_AUTH_TOKEN" \
-    "$AIMEE_LLM_URL/auth/verify" |
-    python3 -c "import json,sys; x=json.load(sys.stdin); assert x.get(\"status\")==\"ok\" and x.get(\"scope\")==\"curator\""
 '
+vault_curl() {
+  printf 'header = "Authorization: Bearer %s"\n' "$token" |
+    "${compose[@]}" exec -T aimee-kb curl -K - "$@"
+}
+vault_curl -fsS -X POST http://aimee-llm:8742/auth/verify |
+  python3 -c 'import json,sys; x=json.load(sys.stdin); assert x.get("status")=="ok" and x.get("scope")=="curator"'
 
-# Exercise the shipped KB clients, not just hand-written curl requests.
-echo "managed-kb-llm: checking embed, batch, rerank, and synth clients"
-"${compose[@]}" exec -T aimee-kb sh -ec '
-  printf "managed identity embedding" | python3 /opt/aimee/scripts/embed-remote.py |
-    python3 -c "import json,sys; assert len(json.load(sys.stdin)) == 1024"
-  printf "[\"one\",\"two\"]" | python3 /opt/aimee/scripts/embed-remote.py |
-    python3 -c "import json,sys; x=json.load(sys.stdin); assert len(x)==2 and all(len(v)==1024 for v in x)"
-  printf "[[\"q\",\"a\"],[\"q\",\"b\"]]" | python3 /opt/aimee/scripts/rerank-remote.py |
-    python3 -c "import json,sys; assert len(json.load(sys.stdin)) == 2"
-  curl -fsS -X POST -H "Authorization: Bearer $AIMEE_LLM_AUTH_TOKEN" \
-    -H "Content-Type: application/json" \
-    -d "{\"model\":\"$AIMEE_LLM_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}" \
-    "$AIMEE_LLM_URL/v1/chat/completions" |
-    python3 -c "import json,sys; assert json.load(sys.stdin).get(\"choices\")"
-'
+# Exercise every authenticated gateway role with the same stdin-only identity.
+echo "managed-kb-llm: checking embed, batch, rerank, and synth endpoints"
+vault_curl -fsS -H 'Content-Type: application/json' -d '["managed identity embedding"]' \
+  http://aimee-llm:8742/embed_batch |
+  python3 -c 'import json,sys; x=json.load(sys.stdin); assert len(x)==1 and len(x[0])==1024'
+vault_curl -fsS -H 'Content-Type: application/json' -d '[["q","a"],["q","b"]]' \
+  http://aimee-llm:8742/rerank |
+  python3 -c 'import json,sys; assert len(json.load(sys.stdin))==2'
+vault_curl -fsS -H 'Content-Type: application/json' \
+  -d '{"model":"validation-synth","messages":[{"role":"user","content":"ping"}]}' \
+  http://aimee-llm:8742/v1/chat/completions |
+  python3 -c 'import json,sys; assert json.load(sys.stdin).get("choices")'
 
 # The same image must refuse an unauthenticated wildcard bind.
 echo "managed-kb-llm: checking fail-closed empty-token bind"

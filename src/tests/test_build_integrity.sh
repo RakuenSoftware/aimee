@@ -9,6 +9,12 @@ FAIL=0
 pass() { echo "  PASS: $1"; }
 fail() { echo "  FAIL: $1"; FAIL=1; }
 
+if python3 ../scripts/check-vault-only-container-env.py >/dev/null; then
+    pass "server and KB container definitions keep credentials out of long-lived environments"
+else
+    fail "server or KB container definitions persist credentials outside Vault"
+fi
+
 # The server image entrypoint must honor Docker's explicit command override, but
 # even an override must first consume credential env into Vault and scrub it.
 # Stub only the short-lived bootstrap transport so this can run outside the
@@ -43,6 +49,7 @@ cat >"$kb_entrypoint_test_dir/aimee-kb" <<'SH'
 #!/bin/sh
 case "${1:-}" in
     --bootstrap-vault-env) exit 0 ;;
+    --vault-db2-external) exit 0 ;;
     --list-credential-env-names)
         [ -n "${AIMEE_DB2_URL:-}" ] && printf '%s\n' AIMEE_DB2_URL
         [ -n "${ENTRYPOINT_TEST_API_KEY:-}" ] && printf '%s\n' ENTRYPOINT_TEST_API_KEY
@@ -639,8 +646,8 @@ if [ -f ../compose.yaml ]; then
     if grep -Eq '^[[:space:]]+postgres:' ../compose.yaml; then
         split_failures="$split_failures compose-retains-sibling-postgres-service"
     fi
-    if ! grep -Eq 'AIMEE_DB2_URL[=:]' ../compose.yaml; then
-        split_failures="$split_failures compose-missing-db2-url"
+    if grep -Eq 'AIMEE_DB2_URL[=:]' ../compose.yaml; then
+        split_failures="$split_failures compose-persists-db2-url-outside-vault"
     fi
 else
     split_failures="$split_failures missing-compose-yaml"

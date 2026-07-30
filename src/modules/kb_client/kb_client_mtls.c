@@ -1,7 +1,8 @@
 /* kb_client_mtls.c: aimee-server's distributed-mode mTLS transport to a remote
  * aimee-kb. (distributed-mode-auth proposal, client integration.)
  *
- * When AIMEE_KB_CONN holds an `aimee://` connection string, the server enrolls
+ * When the server Vault holds an `AIMEE_KB_CONN` `aimee://` connection string,
+ * the server enrolls
  * once (kb_tls_enroll: TOFU-pin the CA by fingerprint, generate a keypair + CSR,
  * redeem the token for a client cert), persists that identity atomically under
  * AIMEE_HOME, and then routes its /v1 kb calls over mutual TLS. Persistence is
@@ -15,6 +16,7 @@
 #include "kb_tls.h" /* kb_tls_enroll / kb_tls_client_request */
 #include "config.h"
 #include "cJSON.h"
+#include "runtime_secret.h"
 
 #include <pthread.h>
 #include <errno.h>
@@ -489,8 +491,10 @@ static void pool_return(kb_pool_entry_t *entry, int reusable)
 
 int kb_client_mtls_configured(void)
 {
-   const char *c = getenv("AIMEE_KB_CONN");
-   if (c && c[0])
+   char connection[4096];
+   int have_connection = runtime_secret_get("AIMEE_KB_CONN", connection, sizeof(connection));
+   OPENSSL_cleanse(connection, sizeof(connection));
+   if (have_connection)
       return 1;
    char ca[sizeof(g_ca)], cert[sizeof(g_cert)], key[sizeof(g_key)];
    identity_metadata_t metadata;
@@ -535,7 +539,9 @@ static int ensure_enrolled(void)
       pthread_mutex_unlock(&g_lock);
       return 0;
    }
-   const char *conn = getenv("AIMEE_KB_CONN");
+   char connection[4096];
+   int have_connection = runtime_secret_get("AIMEE_KB_CONN", connection, sizeof(connection));
+   const char *conn = have_connection ? connection : NULL;
    kb_enroll_conn_t pc;
    if (conn && conn[0] && kb_enroll_conn_string_parse(conn, &pc) == 0)
    {
@@ -570,6 +576,7 @@ static int ensure_enrolled(void)
       g_ca[0] = '\0';
       g_cert[0] = '\0';
    }
+   OPENSSL_cleanse(connection, sizeof(connection));
    pthread_mutex_unlock(&g_lock);
    return rc;
 }

@@ -37,15 +37,14 @@ services:
       stack: 67108864
     environment:
       AIMEE_RUNTIME_WEB_ENABLED: ${AIMEE_RUNTIME_WEB_ENABLED:-1}
-      AIMEE_API_BEARER_TOKEN: ${AIMEE_API_BEARER_TOKEN:-}
-      AIMEE_WEBCHAT_USER: ${AIMEE_WEBCHAT_USER:-}
-      AIMEE_WEBCHAT_PASSWORD: ${AIMEE_WEBCHAT_PASSWORD:-}
+      # First-boot credentials are streamed into Vault by the disposable
+      # Compose helper before `up`; Config.Env stays credential-free.
       # Standalone can still use a remote kb identity authority. Empty values
       # keep the server read-only until an operator provisions all prerequisites.
       AIMEE_SERVER_ID: ${AIMEE_SERVER_ID:-}
       AIMEE_SERVER_TEAM_ID: ${AIMEE_SERVER_TEAM_ID:-}
       AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE: ${AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE:-/run/aimee/management/jwks-trust-bundle.json}
-      AIMEE_KB_CONN: ${AIMEE_KB_CONN:-}
+      # AIMEE_KB_CONN is streamed into Vault before this service is created.
     ports:
       # /v1 over native TLS on 8743 (plaintext 8740 is loopback-only, not published).
       - "8743:8743"

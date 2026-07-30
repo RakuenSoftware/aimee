@@ -156,6 +156,14 @@ Do not store secrets in:
 - delegate container environments unless the policy explicitly grants that one credential;
 - client-side key files.
 
+Container environment variables are permitted only as first-boot transport.
+Run `scripts/aimee-compose-vault-bootstrap.sh` before `docker compose up`; it
+streams credential-shaped values into a disposable helper, seals them in the
+owning server or KB Vault, and removes the helper. Long-lived server and KB
+services must not declare credential-shaped environment keys, even when the
+value would be supplied through Compose interpolation. The build-integrity gate
+enforces this metadata boundary.
+
 Local CLI agents may use a login that remains on the thin client when execution runs there. The
 server sends commands over the authorized runner channel; it does not copy the login.
 

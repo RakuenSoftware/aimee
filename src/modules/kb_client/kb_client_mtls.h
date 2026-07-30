@@ -9,7 +9,7 @@
 
 #define KB_CLIENT_ERR_POOL_EXHAUSTED (-2)
 
-/* 1 when AIMEE_KB_CONN holds an aimee:// connection string (a remote kb), else 0.
+/* 1 when Vault holds an AIMEE_KB_CONN aimee:// connection string (a remote kb), else 0.
  * The string supplies the stable endpoint + CA pin after its one-time token has
  * established an owner-only identity under AIMEE_HOME. */
 int kb_client_mtls_configured(void);

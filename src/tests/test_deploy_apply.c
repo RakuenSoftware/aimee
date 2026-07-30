@@ -207,7 +207,8 @@ static void test_managed_llm_service_credential(void)
 
    /* A complete explicit packet wins; a partial packet is never mixed with a
     * wizard-generated identity. */
-   assert(setenv("AIMEE_KB_CONN", "aimee://kb:8745?ca=sha256:x&enroll=x", 1) == 0);
+   assert(runtime_secret_store("AIMEE_KB_CONN",
+                               "aimee://kb:8745?ca=sha256:x&enroll=x") == 0);
    assert(setenv("AIMEE_SERVER_ID", "operator-server", 1) == 0);
    assert(setenv("AIMEE_SERVER_TEAM_ID", "7", 1) == 0);
    envp = build_deploy_envp(NULL, 0, NULL, NULL, &managed_identity);
@@ -215,7 +216,7 @@ static void test_managed_llm_service_credential(void)
    free_envp(envp);
    unsetenv("AIMEE_SERVER_TEAM_ID");
    assert(build_deploy_envp(NULL, 0, NULL, NULL, NULL) == NULL);
-   unsetenv("AIMEE_KB_CONN");
+   runtime_secret_remove("AIMEE_KB_CONN");
    unsetenv("AIMEE_SERVER_ID");
 
    runtime_secret_remove("AIMEE_LLM_AUTH_TOKEN");
@@ -264,6 +265,31 @@ static void test_deploy_argv_is_orderable_and_has_no_remove_orphans(void)
    assert(deploy_up_service_argv(file, "aimee-kb", NULL, 10) == -1);
    assert(deploy_up_service_argv(file, "", argv, 10) == -1);
    printf("  deploy argv supports explicit KB-then-LLM ordering without orphan removal ok\n");
+}
+
+static void test_managed_kb_credential_bootstrap_is_stdin_only(void)
+{
+   const char *argv[16];
+   int n = deploy_kb_vault_bootstrap_argv("/managed.yaml", argv,
+                                          sizeof(argv) / sizeof(argv[0]));
+   assert(n > 0 && argv[n] == NULL);
+   assert(strcmp(argv[0], "docker") == 0 && strcmp(argv[1], "compose") == 0);
+   assert(strcmp(argv[3], "/managed.yaml") == 0 && strcmp(argv[4], "run") == 0);
+   int saw_rm = 0, saw_stdin_bootstrap = 0, saw_kb = 0;
+   for (int i = 0; i < n; i++)
+   {
+      assert(strstr(argv[i], "AIMEE_LLM_AUTH_TOKEN=") == NULL);
+      assert(strstr(argv[i], "Bearer ") == NULL);
+      if (strcmp(argv[i], "--rm") == 0)
+         saw_rm = 1;
+      if (strcmp(argv[i], "--bootstrap-vault-stdin") == 0)
+         saw_stdin_bootstrap = 1;
+      if (strcmp(argv[i], "aimee-kb") == 0)
+         saw_kb = 1;
+   }
+   assert(saw_rm && saw_stdin_bootstrap && saw_kb);
+   assert(deploy_kb_vault_bootstrap_argv("/managed.yaml", argv, (size_t)n) == -1);
+   printf("  managed KB service credential crosses only a disposable stdin bootstrap ok\n");
 }
 
 /* --- wizard-managed server workload identity --- */
@@ -361,6 +387,7 @@ int main(void)
    printf("test_deploy_apply\n");
    test_managed_llm_service_credential();
    test_deploy_argv_is_orderable_and_has_no_remove_orphans();
+   test_managed_kb_credential_bootstrap_is_stdin_only();
    test_managed_identity_bootstrap_runs_inside_kb_without_secret_argv();
    test_managed_authority_bootstrap_is_isolated_and_secret_free();
    test_retire_targets_legacy_cpu_container();

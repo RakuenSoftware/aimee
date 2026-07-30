@@ -206,6 +206,41 @@ static void test_webchat_first_boot_env_source(void)
    printf("  PASS: test_webchat_first_boot_env_source\n");
 }
 
+static void test_streamed_first_boot_source(void)
+{
+   static const unsigned char records[] =
+       "AIMEE_STREAM_API_KEY=stream-only-secret\0"
+       "AIMEE_STREAM_MODE=non-secret-setting\0";
+   FILE *input = tmpfile();
+   assert(input != NULL);
+   assert(fwrite(records, 1, sizeof(records) - 1, input) == sizeof(records) - 1);
+   rewind(input);
+   assert(vault_env_import_stream(input) == 1);
+   fclose(input);
+
+   /* The importer uses the same classifier as ordinary first-boot env. It does
+    * not put unrelated host settings into the helper environment. */
+   assert(getenv("AIMEE_STREAM_API_KEY") != NULL);
+   assert(getenv("AIMEE_STREAM_MODE") == NULL);
+   assert(vault_env_bootstrap_init() == 1);
+   assert(getenv("AIMEE_STREAM_API_KEY") == NULL);
+   char value[128];
+   assert(runtime_secret_get("AIMEE_STREAM_API_KEY", value, sizeof(value)) == 1);
+   assert(strcmp(value, "stream-only-secret") == 0);
+   OPENSSL_cleanse(value, sizeof(value));
+
+   /* A truncated stream is not accepted as a partial bootstrap. */
+   static const char truncated[] = "AIMEE_TRUNCATED_TOKEN=must-not-import";
+   input = tmpfile();
+   assert(input != NULL);
+   assert(fwrite(truncated, 1, sizeof(truncated) - 1, input) == sizeof(truncated) - 1);
+   rewind(input);
+   assert(vault_env_import_stream(input) == -1);
+   fclose(input);
+   assert(getenv("AIMEE_TRUNCATED_TOKEN") == NULL);
+   printf("  PASS: test_streamed_first_boot_source\n");
+}
+
 static void test_oversized_credential_name_fails_closed(void)
 {
    char name[180];
@@ -325,6 +360,7 @@ static void test_no_plaintext_at_rest(void)
    assert(!plaintext_under_home("vault-only-test-key"));
    assert(!plaintext_under_home("management-server-key-pem"));
    assert(!plaintext_under_home("management-status-client-key-pem"));
+   assert(!plaintext_under_home("stream-only-secret"));
    printf("  PASS: test_no_plaintext_at_rest\n");
 }
 
@@ -346,6 +382,7 @@ int main(void)
    test_server_tls_key_first_boot_source();
    test_management_tls_key_first_boot_sources();
    test_webchat_first_boot_env_source();
+   test_streamed_first_boot_source();
    test_oversized_credential_name_fails_closed();
    test_kb_ingests_delegate_shaped_env_generically();
    test_legacy_oauth_migration();
