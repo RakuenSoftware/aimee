@@ -690,3 +690,8 @@ residual proposal instead of declaring the intended effectiveness outcome comple
   assigned to the accepted E5 typed-status slice. Roundtable run:
   `roundtable-a2953bf8d139a351d64af27d` (artifact
   `ce370ec61931cdfb91c1e73417de930af801280d5a486ab2de9cd7adec98ae85`).
+- **E3 final exact-diff review — 2026-07-30 — APPROVED and converged, 2/3 participants used,
+  degraded.** The schema-aligned frozen diff received no findings; the chairman confirmed the
+  earlier ordering, capacity, complete-metadata, exact-resolution, route-gating, and concrete edge
+  identity findings remain closed. Roundtable run: `roundtable-327db1be95dc7e7c3abd2035`
+  (artifact `ebe90912dc8e54a133c45453fd1c8b376c0c5845954acf66fe37134f1e0b17e4`).
