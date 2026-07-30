@@ -768,6 +768,21 @@ residual proposal instead of declaring the intended effectiveness outcome comple
   retrieval-only/null-diagnostics regressions received no findings. Roundtable run:
   `oprun_g6a6b1ed93980fd5d_1785408651_7` (artifact
   `0f0e27dbb596f737174e815004baf9a71b904127185a7af05809c747bdceb8e0`).
+- **E5b deployment and runbook slice:** PR #2177 merged to `testing` as
+  `456444cad5a1f4b8e8595ae91e5c3923f4cef468` after all 23 CI checks passed. Liveness remains
+  restart-safe during recoverable outages; readiness now enforces the retrieval contract with
+  bounded dependency diagnostics and a safe recovery runbook.
+- **E5c resumable-experiment candidate:** a repository-owned runner binds one immutable plan,
+  run ID, and named checkpoint; writes every cell attempt before checkpoint advancement; preserves
+  stdout/stderr/timing/return code; marks failed infrastructure `score_eligible:false`; refuses
+  overwrite and cross-run checkpoint provenance; and resumes only unfinished cells. Its frozen
+  implementation diff receives a separate roundtable gate before PR.
+- **E5c final exact-diff review — 2026-07-30 — APPROVED and converged, 3/3 participants, not
+  degraded.** The final runner provides byte-lossless, digest-bound attempt evidence, durable
+  checkpoint ordering, strict plain-path/provenance/plan validation, infrastructure-invalid score
+  exclusion, and non-splicing named resume. Roundtable run:
+  `oprun_g6a6b1ed93980fd5d_1785414928_21` (artifact
+  `50dd19a6189e0cb0173910380ac9c054d4733da567603dd39db3277a18d1dfce`).
 - **E5a implementation round 1 — 2026-07-30 — changes requested, 3/3 participants, not
   degraded.** The implementation received no bounded-slice technical ruling because the review
   brief exposed the unfinished parent E5/E6 program. The next review explicitly binds the frozen

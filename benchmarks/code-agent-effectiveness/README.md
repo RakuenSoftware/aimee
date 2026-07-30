@@ -34,3 +34,19 @@ Verify the tracked evidence bytes as well as the fixture schema:
 ```bash
 python3 benchmarks/code-agent-effectiveness/validate_fixtures.py --verify-sources
 ```
+
+Fresh experiment matrices use `checkpoint_runner.py`. A new run requires a JSON plan,
+an unused artifact directory, and a stable checkpoint name:
+
+```bash
+python3 benchmarks/code-agent-effectiveness/checkpoint_runner.py \
+  --plan matrix.json --run-dir artifacts/e6-20260730 --checkpoint full-matrix
+```
+
+Resume by omitting `--plan` and naming the same run directory and checkpoint. The
+runner rejects run/plan/checkpoint provenance mismatches, never overwrites a prior
+run or cell attempt, and records command failures/timeouts as `infrastructure-invalid`
+with `score_eligible:false` while preserving stdout, stderr, timing, and return code.
+Invalid cells must not enter quality denominators and must be rerun as new attempts;
+the checkpoint does not advance past an invalid cell, and results from another run
+are never copied into a checkpoint.
