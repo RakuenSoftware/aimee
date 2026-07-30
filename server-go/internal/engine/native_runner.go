@@ -538,7 +538,8 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		if statusErr != nil {
 			return StepResult{}, statusErr
 		}
-		if status == "" && wfe.Hash([]byte(diff)) != req.Feedback.ArtifactHash {
+		if status == "" && strings.TrimSpace(diff) != "" &&
+			wfe.Hash([]byte(diff)) != req.Feedback.ArtifactHash {
 			head, headErr := gitText(ctx, workdir, "rev-parse", "HEAD")
 			if headErr != nil {
 				return StepResult{}, headErr

@@ -317,6 +317,17 @@ func TestDocumentResumeRefreezesHumanRepairWithoutMeaninglessDelegateEdit(t *tes
 	if head := strings.TrimSpace(gitRun(t, workdir, "rev-parse", "HEAD")); result.ContentHash != head {
 		t.Fatalf("content hash=%q, want repaired HEAD %q", result.ContentHash, head)
 	}
+
+	// Removing the entire reviewed diff is not a repair to re-freeze. The normal
+	// delegate path must handle it rather than letting freeze accept an empty root
+	// diff as a no-op without another roundtable review.
+	gitRun(t, workdir, "rm", "runbook.md")
+	gitRun(t, workdir, "commit", "-m", "remove reviewed document")
+	agents.calls = 0
+	if _, err := runner.mutate(ctx, StepRequest{WorkItem: item, Node: wfe.Node{ID: "document"},
+		Feedback: &wfe.ReviewFeedback{ArtifactHash: reviewedHash}}, true); err == nil || agents.calls != 1 {
+		t.Fatalf("empty repair bypassed delegate: calls=%d err=%v", agents.calls, err)
+	}
 }
 
 func TestPartialImplementWithNoCommitDoesNotAdvance(t *testing.T) {
