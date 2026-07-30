@@ -1,6 +1,6 @@
 # Proposal: Agent-facing code intelligence effectiveness
 
-- **State:** PENDING — E2–E6 remain; E0, E1, and E1-memory history is recorded below
+- **State:** PENDING — E3–E6 remain; E0 through E2 history is recorded below
 - **Author:** JBailes
 - **Date:** 2026-07-29
 - **Charter roles:** Recall, Rank-Fuse, Calibrate / Evaluate-Optimize, Enforce, Gate-Promote
@@ -654,3 +654,16 @@ residual proposal instead of declaring the intended effectiveness outcome comple
   release-plus-kind-plus-project regressions prove both positive projects and a mismatched kind.
   Roundtable run: `roundtable-d6b5adead972ca968a7132e5` (artifact
   `068609efd696a07bdd62a7cceaeb02ff97cc8298b4c1f703348f107de936635c`).
+- **E2 final exact-diff review — 2026-07-30 — APPROVED and converged, 3/3 participants, not
+  degraded.** The final operator-health and explicit-scope smoke repairs received no blocking
+  findings. Roundtable run: `roundtable-0b8300caa27872843d839e63` (artifact
+  `96a646d79a1169a6f0d810b879f4db3ea4eaed6af66b9e286319a1f574161da6`).
+- **E2 current-project identity slice:** PR #2161 merged to `testing` as
+  `a70ebc23e1facd0cc199fbfacd2c13e2a38b1dca` after all 23 CI checks passed. Stable identity,
+  active-project-first code/knowledge/memory ordering, generation fencing, explicit all-project
+  scope, and audited detach/purge/GC are now the base for E3–E6.
+- **E3 graph-resolution candidate:** the implementation replaces path-substring blast matching
+  with exact normalized Python module identities, merges unique-symbol call edges without
+  duplicates, admits cross-project tails only through resolved structural routes, resolves legacy
+  projection basenames uniquely, and emits provenance/confidence/project/generation/freshness for
+  every edge. Its frozen implementation diff receives a separate roundtable gate before PR.

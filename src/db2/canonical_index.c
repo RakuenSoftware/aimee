@@ -1604,75 +1604,16 @@ int canonical_index_find(const char *identifier, term_hit_t *out, int max)
 
 int canonical_index_blast_radius(const char *project, const char *file_path, blast_radius_t *out)
 {
-   void *conn = ci_conn();
-   if (!conn)
+   if (!project || !file_path || !out)
       return -1;
-
    memset(out, 0, sizeof(*out));
    snprintf(out->file, sizeof(out->file), "%s", file_path);
-
-   int64_t project_id = ci_resolve_project_id(conn, project);
-   if (project_id < 0)
+   if (db2_code_index_blast_radius(project, file_path, out) != 0)
       return -1;
 
-   int64_t file_id = ci_resolve_file_id(conn, project_id, file_path);
-   char err[CI_ERRBUF] = "";
-
-   /* Dependents: files in the project whose imports match this file's path. */
-   {
-      aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
-                                             "SELECT DISTINCT f.path FROM file_imports fi"
-                                             " JOIN files f ON f.id = fi.file_id"
-                                             " JOIN projects p ON p.id=f.project_id"
-                                             " WHERE f.project_id = ?1 AND fi.name LIKE ?2"
-                                             " AND p.lifecycle_state='current'"
-                                             " AND f.generation=p.current_generation",
-                                             err, sizeof(err));
-      if (st)
-      {
-         char pattern[MAX_PATH_LEN];
-         snprintf(pattern, sizeof(pattern), "%%%s%%", file_path);
-         aimee_pg_bind_int64(st, "?1", project_id);
-         aimee_pg_bind_text(st, "?2", pattern);
-         while (out->dependent_count < CI_MAX_DEPS &&
-                aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-         {
-            const char *p = aimee_pg_column_text(st, 0);
-            if (p && strcmp(p, file_path) != 0)
-            {
-               snprintf(out->dependents[out->dependent_count], MAX_PATH_LEN, "%s", p);
-               out->dependent_count++;
-            }
-         }
-         aimee_pg_finalize(st);
-      }
-   }
-
-   /* Dependencies: imports declared by this file. */
-   if (file_id >= 0)
-   {
-      aimee_pg_stmt_t *st = aimee_pg_prepare(
-          conn, "SELECT DISTINCT name FROM file_imports WHERE file_id = ?1", err, sizeof(err));
-      if (st)
-      {
-         aimee_pg_bind_int64(st, "?1", file_id);
-         while (out->dependency_count < CI_MAX_DEPS &&
-                aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-         {
-            const char *t = aimee_pg_column_text(st, 0);
-            if (t)
-            {
-               snprintf(out->dependencies[out->dependency_count], MAX_PATH_LEN, "%s", t);
-               out->dependency_count++;
-            }
-         }
-         aimee_pg_finalize(st);
-      }
-   }
-
    /* Expand with co_edited graph edges (weight > 3): files that historically
-    * change together but have no structural import edge. Basename-keyed to match
-    * how the backfill and the in-session co-edit path write these edges. */
+    * change together but have no structural import edge. Basename-keyed legacy
+    * projections are admitted only when they resolve to one current file. */
    {
       const char *slash = strrchr(file_path, '/');
       const char *match_name = slash ? slash + 1 : file_path;
@@ -1684,21 +1625,39 @@ int canonical_index_blast_radius(const char *project, const char *file_path, bla
          const char *related = co_buf[b];
          if (!related[0] || strcmp(related, match_name) == 0)
             continue;
-         int dup = 0;
+         char resolved[MAX_PATH_LEN];
+         if (db2_code_index_unique_file_basename(project, related, resolved, sizeof(resolved)) !=
+                 1 ||
+             strcmp(resolved, file_path) == 0)
+            continue;
+         int found = -1;
          for (int d = 0; d < out->dependent_count; d++)
          {
-            if (strstr(out->dependents[d], related))
+            if (strcmp(out->dependents[d], resolved) == 0 &&
+                strcmp(out->dependent_meta[d].project, project) == 0)
             {
-               dup = 1;
+               found = d;
                break;
             }
          }
-         if (!dup)
+         if (found < 0)
          {
-            snprintf(out->dependents[out->dependent_count], MAX_PATH_LEN, "%s (co-edited)",
-                     related);
-            out->dependent_count++;
+            found = out->dependent_count++;
+            snprintf(out->dependents[found], MAX_PATH_LEN, "%s", resolved);
+            snprintf(out->dependent_meta[found].project, sizeof(out->dependent_meta[found].project),
+                     "%s", project);
+            out->dependent_meta[found].generation = out->generation;
+            snprintf(out->dependent_meta[found].freshness,
+                     sizeof(out->dependent_meta[found].freshness), "current");
+            snprintf(out->dependent_meta[found].confidence,
+                     sizeof(out->dependent_meta[found].confidence), "low");
          }
+         char *provenance = out->dependent_meta[found].provenance;
+         if (provenance[0] && !strstr(provenance, "projection"))
+            strncat(provenance, ",projection",
+                    sizeof(out->dependent_meta[found].provenance) - strlen(provenance) - 1);
+         else if (!provenance[0])
+            snprintf(provenance, sizeof(out->dependent_meta[found].provenance), "projection");
       }
    }
 

@@ -757,11 +757,26 @@ int db2_code_index_project_current_generation(const char *project, int64_t *gene
 
 typedef struct
 {
+   char provenance[48];
+   char confidence[16];
+   char project[128];
+   long long generation;
+   char freshness[16];
+} test_blast_meta_t;
+
+typedef struct
+{
    char file[MAX_PATH_LEN];
    char dependents[64][MAX_PATH_LEN];
    int dependent_count;
    char dependencies[64][MAX_PATH_LEN];
    int dependency_count;
+   char project[128];
+   long long generation;
+   char freshness[16];
+   int resolved;
+   test_blast_meta_t dependent_meta[64];
+   test_blast_meta_t dependency_meta[64];
 } test_blast_radius_t;
 
 int canonical_index_blast_radius(const char *project, const char *file_path, void *out)
@@ -777,6 +792,16 @@ int canonical_index_blast_radius(const char *project, const char *file_path, voi
    br->dependent_count = 1;
    snprintf(br->dependencies[0], sizeof(br->dependencies[0]), "src/lib.c");
    br->dependency_count = 1;
+   snprintf(br->project, sizeof(br->project), "proj-alpha");
+   br->generation = 9;
+   snprintf(br->freshness, sizeof(br->freshness), "current");
+   br->resolved = 1;
+   snprintf(br->dependent_meta[0].provenance, sizeof(br->dependent_meta[0].provenance), "import");
+   snprintf(br->dependent_meta[0].confidence, sizeof(br->dependent_meta[0].confidence), "high");
+   snprintf(br->dependent_meta[0].project, sizeof(br->dependent_meta[0].project), "proj-alpha");
+   br->dependent_meta[0].generation = 9;
+   snprintf(br->dependent_meta[0].freshness, sizeof(br->dependent_meta[0].freshness), "current");
+   br->dependency_meta[0] = br->dependent_meta[0];
    return 0;
 }
 
@@ -4368,7 +4393,7 @@ static void test_blast_radius_not_found(void)
 
 static void test_blast_radius_ok(void)
 {
-   char buf[512];
+   char buf[2048];
    int s =
        kb_http_route_ex("GET", "/v1/code/blast-radius", "project=proj-alpha&file_path=src/main.c",
                         NULL, NULL, NULL, 0, buf, sizeof(buf));
@@ -4380,6 +4405,11 @@ static void test_blast_radius_ok(void)
    assert(strstr(buf, "\"dependencies\"") != NULL);
    assert(strstr(buf, "\"src/lib.c\"") != NULL);
    assert(strstr(buf, "\"dependency_count\":1") != NULL);
+   assert(strstr(buf, "\"resolved\":true") != NULL);
+   assert(strstr(buf, "\"generation\":9") != NULL);
+   assert(strstr(buf, "\"dependent_edges\"") != NULL);
+   assert(strstr(buf, "\"provenance\":\"import\"") != NULL);
+   assert(strstr(buf, "\"freshness\":\"current\"") != NULL);
 }
 
 /* §6 live-idempotency stubs: the scan route gates the git re-walk on the default-

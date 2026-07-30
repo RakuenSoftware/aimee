@@ -389,77 +389,244 @@ int db2_code_index_blast_radius(const char *project, const char *file_path, blas
    if (project_id < 0)
       return -1;
    int64_t file_id = code_index_resolve_file(conn, project_id, file_path);
+   if (file_id < 0)
+      return -1;
 
-   /* Stage 1: file's exports (only used to gate dependent search). */
-   int has_exports = 0;
-   if (file_id >= 0)
+   int64_t generation = 0;
+   if (db2_code_index_project_current_generation(project, &generation) != 0)
+      return -1;
+   snprintf(out->project, sizeof(out->project), "%s", project);
+   out->generation = (long long)generation;
+   snprintf(out->freshness, sizeof(out->freshness), "current");
+   out->resolved = 1;
+
+   char err[CIDX_ERRBUF] = "";
+
+   /* Local imports are examined in C because relative Python identities need
+    * the importing path. Exact normalized equality is the authority; SQL LIKE
+    * and unescaped substring matching are deliberately absent. */
    {
-      static const char *exp_sql = "SELECT name FROM file_exports WHERE file_id = ?1 LIMIT 1";
-      char err[CIDX_ERRBUF] = "";
-      aimee_pg_stmt_t *st = aimee_pg_prepare(conn, exp_sql, err, sizeof(err));
-      if (st)
+      static const char *sql = "SELECT f.path, fi.name FROM file_imports fi"
+                               " JOIN files f ON f.id=fi.file_id"
+                               " JOIN projects p ON p.id=f.project_id"
+                               " WHERE f.project_id=?1 AND p.lifecycle_state='current'"
+                               " AND f.generation=p.current_generation ORDER BY f.path,fi.name";
+      aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+      if (!st)
+         return -1;
+      aimee_pg_bind_int64(st, "?1", project_id);
+      while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
       {
-         aimee_pg_bind_int64(st, "?1", file_id);
-         if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-            has_exports = 1;
-         aimee_pg_finalize(st);
+         const char *importer = aimee_pg_column_text(st, 0);
+         const char *raw = aimee_pg_column_text(st, 1);
+         if (!importer || !raw || strcmp(importer, file_path) == 0 ||
+             !code_import_resolves_path(importer, raw, file_path))
+            continue;
+         int found = -1;
+         for (int i = 0; i < out->dependent_count; i++)
+            if (strcmp(out->dependents[i], importer) == 0 &&
+                strcmp(out->dependent_meta[i].project, project) == 0)
+               found = i;
+         if (found < 0 && out->dependent_count < 64)
+         {
+            found = out->dependent_count++;
+            snprintf(out->dependents[found], MAX_PATH_LEN, "%s", importer);
+            snprintf(out->dependent_meta[found].project, sizeof(out->dependent_meta[found].project),
+                     "%s", project);
+            out->dependent_meta[found].generation = (long long)generation;
+            snprintf(out->dependent_meta[found].freshness,
+                     sizeof(out->dependent_meta[found].freshness), "current");
+         }
+         if (found >= 0)
+         {
+            snprintf(out->dependent_meta[found].provenance,
+                     sizeof(out->dependent_meta[found].provenance), "import");
+            snprintf(out->dependent_meta[found].confidence,
+                     sizeof(out->dependent_meta[found].confidence), "high");
+         }
       }
+      aimee_pg_finalize(st);
    }
 
-   /* Stage 2: dependents — other files in this project that import
-    * something matching the file_path. */
-   if (has_exports)
+   /* Direct calls are authoritative only for exports unique in the current
+    * project; ambiguous same-name exports cannot be resolved by code_calls. */
    {
-      static const char *dep_sql = "SELECT DISTINCT f.path FROM file_imports fi"
-                                   " JOIN files f ON f.id = fi.file_id"
-                                   " JOIN projects p ON p.id=f.project_id"
-                                   " WHERE f.project_id = ?1 AND fi.name LIKE ?2"
-                                   " AND p.lifecycle_state='current'"
-                                   " AND f.generation=p.current_generation";
-      char err[CIDX_ERRBUF] = "";
-      aimee_pg_stmt_t *st = aimee_pg_prepare(conn, dep_sql, err, sizeof(err));
-      if (st)
+      static const char *sql =
+          "SELECT DISTINCT f.path FROM code_calls cc"
+          " JOIN files f ON f.id=cc.file_id JOIN projects p ON p.id=f.project_id"
+          " JOIN file_exports target ON target.file_id=?1 AND target.name=cc.callee"
+          " WHERE f.project_id=?2 AND f.id<>?1 AND p.lifecycle_state='current'"
+          " AND f.generation=p.current_generation"
+          " AND (SELECT COUNT(*) FROM file_exports other"
+          " JOIN files ofile ON ofile.id=other.file_id JOIN projects op ON op.id=ofile.project_id"
+          " WHERE ofile.project_id=?2 AND op.lifecycle_state='current'"
+          " AND ofile.generation=op.current_generation AND other.name=cc.callee)=1"
+          " ORDER BY f.path";
+      aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+      if (!st)
+         return -1;
+      aimee_pg_bind_int64(st, "?1", file_id);
+      aimee_pg_bind_int64(st, "?2", project_id);
+      while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
       {
-         char pattern[MAX_PATH_LEN];
-         snprintf(pattern, sizeof(pattern), "%%%s%%", file_path);
-         aimee_pg_bind_int64(st, "?1", project_id);
-         aimee_pg_bind_text(st, "?2", pattern);
-         while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW && out->dependent_count < 64)
+         const char *caller = aimee_pg_column_text(st, 0);
+         if (!caller)
+            continue;
+         int found = -1;
+         for (int i = 0; i < out->dependent_count; i++)
+            if (strcmp(out->dependents[i], caller) == 0 &&
+                strcmp(out->dependent_meta[i].project, project) == 0)
+               found = i;
+         if (found < 0 && out->dependent_count < 64)
          {
-            const char *p = aimee_pg_column_text(st, 0);
-            if (p && strcmp(p, file_path) != 0)
-            {
-               snprintf(out->dependents[out->dependent_count], MAX_PATH_LEN, "%s", p);
-               out->dependent_count++;
-            }
+            found = out->dependent_count++;
+            snprintf(out->dependents[found], MAX_PATH_LEN, "%s", caller);
+            snprintf(out->dependent_meta[found].project, sizeof(out->dependent_meta[found].project),
+                     "%s", project);
+            out->dependent_meta[found].generation = (long long)generation;
+            snprintf(out->dependent_meta[found].freshness,
+                     sizeof(out->dependent_meta[found].freshness), "current");
          }
-         aimee_pg_finalize(st);
+         if (found >= 0)
+         {
+            char *provenance = out->dependent_meta[found].provenance;
+            if (provenance[0] && !strstr(provenance, "call"))
+               strncat(provenance, ",call",
+                       sizeof(out->dependent_meta[found].provenance) - strlen(provenance) - 1);
+            else if (!provenance[0])
+               snprintf(provenance, sizeof(out->dependent_meta[found].provenance), "call");
+            snprintf(out->dependent_meta[found].confidence,
+                     sizeof(out->dependent_meta[found].confidence), "high");
+         }
       }
+      aimee_pg_finalize(st);
    }
 
-   /* Stage 3: dependencies — what this file imports. */
-   if (file_id >= 0)
+   /* Dependencies preserve normalized identities owned by the target file. */
    {
-      static const char *imp_sql = "SELECT DISTINCT name FROM file_imports WHERE file_id = ?1";
-      char err[CIDX_ERRBUF] = "";
-      aimee_pg_stmt_t *st = aimee_pg_prepare(conn, imp_sql, err, sizeof(err));
-      if (st)
+      aimee_pg_stmt_t *st = aimee_pg_prepare(
+          conn, "SELECT DISTINCT name FROM file_imports WHERE file_id=?1 ORDER BY name", err,
+          sizeof(err));
+      if (!st)
+         return -1;
+      aimee_pg_bind_int64(st, "?1", file_id);
+      while (out->dependency_count < 64 && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
       {
-         aimee_pg_bind_int64(st, "?1", file_id);
-         while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW && out->dependency_count < 64)
-         {
-            const char *t = aimee_pg_column_text(st, 0);
-            if (t)
-            {
-               snprintf(out->dependencies[out->dependency_count], MAX_PATH_LEN, "%s", t);
-               out->dependency_count++;
-            }
-         }
-         aimee_pg_finalize(st);
+         const char *raw = aimee_pg_column_text(st, 0);
+         char identity[MAX_PATH_LEN];
+         if (!raw || code_import_identity(file_path, raw, identity, sizeof(identity)) != 0)
+            continue;
+         int found = -1;
+         for (int i = 0; i < out->dependency_count; i++)
+            if (strcmp(out->dependencies[i], identity) == 0)
+               found = i;
+         if (found >= 0)
+            continue;
+         found = out->dependency_count++;
+         snprintf(out->dependencies[found], MAX_PATH_LEN, "%s", identity);
+         snprintf(out->dependency_meta[found].provenance,
+                  sizeof(out->dependency_meta[found].provenance), "import");
+         snprintf(out->dependency_meta[found].confidence,
+                  sizeof(out->dependency_meta[found].confidence), "high");
+         snprintf(out->dependency_meta[found].project, sizeof(out->dependency_meta[found].project),
+                  "%s", project);
+         out->dependency_meta[found].generation = (long long)generation;
+         snprintf(out->dependency_meta[found].freshness,
+                  sizeof(out->dependency_meta[found].freshness), "current");
       }
+      aimee_pg_finalize(st);
+   }
+
+   /* Cross-project tails are admitted only through a previously resolved
+    * structural route, after all local edges, and still require exact import
+    * identity resolution to this target. */
+   {
+      static const char *sql =
+          "SELECT DISTINCT cp.name,cp.current_generation,f.path,fi.name,cr.confidence"
+          " FROM cross_repo_route cr JOIN projects cp ON cp.name=cr.caller_project"
+          " JOIN files f ON f.project_id=cp.id JOIN file_imports fi ON fi.file_id=f.id"
+          " WHERE cr.definer_project=?1 AND cp.lifecycle_state='current'"
+          " AND f.generation=cp.current_generation ORDER BY cp.name,f.path";
+      aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+      if (!st)
+         return -1;
+      aimee_pg_bind_text(st, "?1", project);
+      while (out->dependent_count < 64 && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      {
+         const char *caller_project = aimee_pg_column_text(st, 0);
+         long long caller_generation = (long long)aimee_pg_column_int64(st, 1);
+         const char *caller_path = aimee_pg_column_text(st, 2);
+         const char *raw = aimee_pg_column_text(st, 3);
+         const char *confidence = aimee_pg_column_text(st, 4);
+         if (!caller_project || !caller_path || !raw ||
+             !code_import_resolves_path(caller_path, raw, file_path))
+            continue;
+         int found = -1;
+         for (int i = 0; i < out->dependent_count; i++)
+            if (strcmp(out->dependents[i], caller_path) == 0 &&
+                strcmp(out->dependent_meta[i].project, caller_project) == 0)
+               found = i;
+         if (found < 0)
+         {
+            found = out->dependent_count++;
+            snprintf(out->dependents[found], MAX_PATH_LEN, "%s", caller_path);
+            snprintf(out->dependent_meta[found].project, sizeof(out->dependent_meta[found].project),
+                     "%s", caller_project);
+            out->dependent_meta[found].generation = caller_generation;
+            snprintf(out->dependent_meta[found].freshness,
+                     sizeof(out->dependent_meta[found].freshness), "current");
+         }
+         snprintf(out->dependent_meta[found].provenance,
+                  sizeof(out->dependent_meta[found].provenance), "cross_repo");
+         snprintf(out->dependent_meta[found].confidence,
+                  sizeof(out->dependent_meta[found].confidence), "%s",
+                  confidence && confidence[0] ? confidence : "medium");
+      }
+      aimee_pg_finalize(st);
    }
 
    return 0;
+}
+
+int db2_code_index_unique_file_basename(const char *project, const char *basename, char *out,
+                                        size_t out_cap)
+{
+   if (!project || !basename || !out || out_cap == 0)
+      return -1;
+   out[0] = '\0';
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   int64_t project_id = code_index_resolve_project(conn, project);
+   if (project_id < 0)
+      return -1;
+   char err[CIDX_ERRBUF] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "SELECT f.path FROM files f JOIN projects p ON p.id=f.project_id"
+                        " WHERE f.project_id=?1 AND p.lifecycle_state='current'"
+                        " AND f.generation=p.current_generation ORDER BY f.path",
+                        err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int64(st, "?1", project_id);
+   int matches = 0;
+   while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      const char *path = aimee_pg_column_text(st, 0);
+      const char *base = path ? strrchr(path, '/') : NULL;
+      base = base ? base + 1 : path;
+      if (base && strcmp(base, basename) == 0)
+      {
+         matches++;
+         if (matches == 1)
+            snprintf(out, out_cap, "%s", path);
+      }
+   }
+   aimee_pg_finalize(st);
+   if (matches != 1)
+      out[0] = '\0';
+   return matches == 1 ? 1 : 0;
 }
 
 int64_t db2_code_index_project_upsert(const char *name, const char *root)

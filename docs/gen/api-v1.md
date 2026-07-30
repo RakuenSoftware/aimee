@@ -124,7 +124,7 @@ Blast-radius computation for a file
 
 Responses:
 
-- `200` — Blast radius
+- `200` — Current-generation blast radius with provenance-bearing edges
 - `400` — Missing required parameters
 - `401` — Unauthorized
 - `404` — Project is detached/unknown or the file is not indexed

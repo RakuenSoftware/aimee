@@ -49,6 +49,14 @@ basename is not a project identity and is never used as a fallback.
 Caller and blast-radius results cross repository boundaries after dependencies have been resolved.
 Vendored code, caches, generated trees, and configured excludes stay out of the project graph.
 
+Blast radius resolves the target in the current project generation before returning an empty graph.
+Python imports use dotted module identities (`app/dates.py` → `app.dates`), including explicit
+`from app import dates`, package `__init__`, and imports relative to the importing file. Exact
+normalized equality replaces path-substring matching. Direct call edges are included only when the
+export is unique in the current project; cross-project edges require an existing structural route.
+Each returned edge identifies its `provenance`, `confidence`, `project`, `generation`, and
+`freshness`. Local current-project edges are emitted before any route-gated cross-project tail.
+
 `ast_grep_search` is advertised only when its helper readiness contract passes. An unavailable helper
 returns unsupported; it does not fall back to a different search and label it AST-aware.
 

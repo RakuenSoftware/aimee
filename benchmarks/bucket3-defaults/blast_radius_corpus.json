@@ -1,12 +1,13 @@
 {
   "version": 1,
   "flag": "guardrails_blast_radius_advisory_enabled",
-  "description": "Deterministic validation corpus for the code-graph blast-radius advisory (db2_code_index_blast_radius, src/db2/code_index.c). No LLM in the loop: each fixture is a small code graph (files with their exports + imports), and each case is an edited file with the ground-truth dependent + dependency sets. A harness loads a fixture into an isolated temp schema (INSERT into files / file_exports / file_imports), runs db2_code_index_blast_radius(project, edited_file), and scores precision/recall of the advised dependents against `expected_dependents`.",
+  "description": "Deterministic validation corpus for exact, generation-fenced code-graph blast radius. No LLM is involved: each fixture supplies files, exports, normalized extractor imports, and optional calls; the harness runs the shipping resolver in an isolated Postgres schema and scores dependent/dependency precision, recall, provenance, and freshness.",
   "computation_notes": [
-    "DEPENDENTS = other files whose file_imports.name LIKE '%<edited_file_path>%', but ONLY when the edited file itself has >=1 row in file_exports (the has_exports gate). A file with no exports yields NO dependents even if others import it.",
+    "DEPENDENTS = current-generation files whose language-normalized import identity resolves exactly to the edited file, plus uniquely resolved direct call edges and route-gated cross-repository edges.",
     "The edited file is excluded from its own dependent list.",
-    "DEPENDENCIES = DISTINCT file_imports.name for the edited file (raw import strings, not resolved to files).",
-    "Import names are matched by substring against the edited path, so an import must contain the edited file's path to count as a dependent edge."
+    "DEPENDENCIES = distinct normalized import identities owned by the edited file.",
+    "Every edge records provenance, confidence, project, generation, and freshness; an unknown or retired target is an error rather than a valid empty graph.",
+    "Unescaped substring matching is never authoritative."
   ],
   "pass_bar": "recall(dependents) = 1.0 (never miss a real dependent) AND precision(dependents) >= 0.8, aggregated across all cases.",
   "fixtures": [
@@ -28,14 +29,14 @@
     },
     {
       "project": "br_no_exports_gate",
-      "description": "helper.c has NO exports but IS imported by two files. The has_exports gate must suppress its dependents (advisory only fires for files that export a public surface).",
+      "description": "Import relationships do not disappear merely because a lightweight extractor found no exports in the target.",
       "files": [
         {"path": "src/helper.c", "exports": [], "imports": []},
         {"path": "src/one.c", "exports": ["one"], "imports": ["src/helper.c"]},
         {"path": "src/two.c", "exports": ["two"], "imports": ["src/helper.c"]}
       ],
       "cases": [
-        {"edited": "src/helper.c", "expected_dependents": [], "expected_dependencies": [], "notes": "no exports -> gate suppresses dependents despite two importers"}
+        {"edited": "src/helper.c", "expected_dependents": ["src/one.c", "src/two.c"], "expected_dependencies": [], "expected_provenance": {"src/one.c": "import", "src/two.c": "import"}, "notes": "exact imports remain authoritative without an exports gate"}
       ]
     },
     {
@@ -64,6 +65,22 @@
       ],
       "cases": [
         {"edited": "src/db.c", "expected_dependents": ["src/store.c"], "expected_dependencies": [], "notes": "direct importer only; app.c is transitive and must NOT appear"}
+      ]
+    },
+    {
+      "project": "br_python",
+      "description": "Python module and package-relative imports resolve to app/dates.py; a similarly prefixed module is a negative control, and a unique direct call is merged without duplicating an import edge.",
+      "files": [
+        {"path": "app/dates.py", "exports": ["billing_period_days"], "imports": ["app.calendar"]},
+        {"path": "app/billing.py", "exports": ["bill"], "imports": ["app.dates"]},
+        {"path": "app/invoices.py", "exports": ["invoice"], "imports": [".dates"]},
+        {"path": "app/reports.py", "exports": ["report"], "imports": ["app.dates"], "calls": ["billing_period_days"]},
+        {"path": "app/caller_only.py", "exports": ["preview"], "imports": [], "calls": ["billing_period_days"]},
+        {"path": "app/collision.py", "exports": ["collision"], "imports": ["app.dates_extra"]}
+      ],
+      "cases": [
+        {"edited": "app/dates.py", "expected_dependents": ["app/billing.py", "app/invoices.py", "app/reports.py", "app/caller_only.py"], "expected_dependencies": ["app.calendar"], "expected_provenance": {"app/billing.py": "import", "app/invoices.py": "import", "app/reports.py": "import", "app/caller_only.py": "call"}, "notes": "three exact Python importers, one call-only edge, no dates_extra collision"},
+        {"edited": "app/missing.py", "expected_dependents": [], "expected_dependencies": [], "expected_error": true, "notes": "unknown target is not a valid empty graph"}
       ]
     }
   ]

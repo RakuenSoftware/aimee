@@ -278,9 +278,16 @@ static int index_get_handler(const char *url, const char *extra_headers, char **
       {
          assert(strstr(url, "file_path=src%2Fmain.c") != NULL);
          if (response_buf)
-            *response_buf = strdup("{\"file\":\"src/main.c\",\"dependents\":[\"src/app.c\"],"
-                                   "\"dependent_count\":1,\"dependencies\":[\"src/lib.c\"],"
-                                   "\"dependency_count\":1}");
+            *response_buf = strdup(
+                "{\"file\":\"src/main.c\",\"project\":\"aimee\",\"generation\":7,"
+                "\"freshness\":\"current\",\"resolved\":true,"
+                "\"dependents\":[\"src/app.c\"],\"dependent_count\":1,"
+                "\"dependent_edges\":[{\"path\":\"src/app.c\",\"provenance\":\"import,call\","
+                "\"confidence\":\"high\",\"project\":\"aimee\",\"generation\":7,"
+                "\"freshness\":\"current\"}],\"dependencies\":[\"src/lib.c\"],"
+                "\"dependency_count\":1,\"dependency_edges\":[{\"identity\":\"src/lib.c\","
+                "\"provenance\":\"import\",\"confidence\":\"high\",\"project\":\"aimee\","
+                "\"generation\":7,\"freshness\":\"current\"}]}");
       }
    }
    else if (g_route_case == 18)
@@ -824,6 +831,11 @@ static void test_index_reads_use_v1_api_when_configured(void)
    assert(strcmp(br.dependents[0], "src/app.c") == 0);
    assert(br.dependency_count == 1);
    assert(strcmp(br.dependencies[0], "src/lib.c") == 0);
+   assert(br.resolved == 1);
+   assert(strcmp(br.project, "aimee") == 0);
+   assert(br.generation == 7);
+   assert(strcmp(br.dependent_meta[0].provenance, "import,call") == 0);
+   assert(strcmp(br.dependency_meta[0].freshness, "current") == 0);
 
    g_route_case = 14;
    char *paths[] = {"src/main.c", "src/hot.c"};
