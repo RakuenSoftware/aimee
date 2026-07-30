@@ -12,6 +12,12 @@
 #include "config_sections.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
+#include "runtime_secret.h"
+
+/* One staging buffer shared by the cases that must hand a whole config to
+ * config_snapshot_init. Reused rather than redeclared: config_t is ~750 KB and
+ * every mention of the type is tracked debt (check-config-encapsulation.py). */
+static config_t g_stage;
 
 /* P3 re-applier probe. */
 static _Atomic int g_reapply_calls = 0;
@@ -190,10 +196,9 @@ int main(void)
    /* --- init + get roundtrip --- */
    write_marker(1, 1111);
    {
-      static config_t c0;
-      memset(&c0, 0, sizeof c0);
-      config_load(&c0);
-      config_snapshot_init(&c0);
+      memset(&g_stage, 0, sizeof g_stage);
+      config_load(&g_stage);
+      config_snapshot_init(&g_stage);
       config_t got;
       assert(config_snapshot_get(&got) == 0);
       assert(got.economizer_mode == ECON_MODE_SAFE);
@@ -214,6 +219,45 @@ int main(void)
    }
    /* reloading the same file again is a no-op */
    assert(config_reload() == 0);
+
+   /* --- a reload must not blank Vault-only secrets in the published snapshot ---
+    *
+    * These live only in the runtime secret store, never in aimee.yaml, so they are
+    * reapplied by config_load. config_reload published config_load_file's result
+    * directly, and config_load_file may serve the process cache and skip the parse
+    * that rehydrates them — so a reload republished a snapshot with the secret
+    * blank. On the appliance that emptied the minted API primary bearer one second
+    * after boot and failed first-user bootstrap on every clean install.
+    *
+    * The store is seeded AFTER the snapshot is initialised on purpose: that is the
+    * real ordering (server_main mints the primary after its first config_load). */
+   {
+      /* The file-read cache must be live: it is the thing that skips the parse.
+       * The rest of this test disables it for determinism. */
+      platform_unsetenv("AIMEE_NO_CACHE");
+      write_marker(1, 4444); /* file and cache now agree, with no bearer in either */
+
+      /* Mint exactly as server_main does AFTER that load: into the runtime store
+       * and into the config it seeds the snapshot with, but never into aimee.yaml. */
+      assert(runtime_secret_store("AIMEE_API_BEARER_TOKEN", "vault-only-primary") == 0);
+      assert(config_snapshot_get(&g_stage) == 0);
+      snprintf(g_stage.server_api_bearer_token, sizeof(g_stage.server_api_bearer_token), "%s",
+               "vault-only-primary");
+      config_snapshot_init(&g_stage);
+      assert(strcmp(config_server_api_bearer_token(), "vault-only-primary") == 0);
+
+      /* The 1s tick reloads with the file UNCHANGED, so config_load_file serves the
+       * cached pre-mint copy and never re-parses. Publishing that blanked the bearer. */
+      config_reload();
+      assert(config_snapshot_get(&g_stage) == 0);
+      assert(g_stage.coord_closet_budget_bytes == 4444); /* still the reloaded config */
+      assert(strcmp(g_stage.server_api_bearer_token, "vault-only-primary") == 0);
+      /* first-user bootstrap gates on the accessor, so assert that path too. */
+      assert(strcmp(config_server_api_bearer_token(), "vault-only-primary") == 0);
+
+      runtime_secret_remove("AIMEE_API_BEARER_TOKEN");
+      platform_setenv("AIMEE_NO_CACHE", "1");
+   }
 
    /* --- P3 re-applier registry: a hook fires after a changed reload, with the NEW config --- */
    {
