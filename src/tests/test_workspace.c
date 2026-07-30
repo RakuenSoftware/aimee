@@ -141,6 +141,50 @@ int main(void)
       assert(count == 3);
    }
 
+   /* --- webuser clone layout: why the reconciler scans PER-USER roots --- */
+   {
+      /* The GUI clone route lays repos out as <base>/webusers/<user>/<org>/<repo>.
+       * Scanning the base at the reconciler's depth bottoms out at <org> and
+       * finds nothing, which is how every GUI-cloned repo on a real deployment
+       * stayed out of the index while the wizard reported success. Scanning each
+       * per-user root instead puts the repo within reach. */
+      char base[512], user[512], org[512], repo_a[512], repo_b[512];
+      snprintf(base, sizeof(base), "%s/wu", tmpdir);
+      snprintf(user, sizeof(user), "%s/alice", base);
+      snprintf(org, sizeof(org), "%s/AnOrg", user);
+      snprintf(repo_a, sizeof(repo_a), "%s/repo-a", org);
+      snprintf(repo_b, sizeof(repo_b), "%s/repo-b", org);
+      mkdir(base, 0755);
+      mkdir(user, 0755);
+      mkdir(org, 0755);
+      create_git_repo(repo_a);
+      create_git_repo(repo_b);
+
+      char projects[MAX_DISCOVERED_PROJECTS][MAX_PATH_LEN];
+
+      /* Depth 3 from the base: base(0) user(1) org(2) repo(3) -- reachable only
+       * because the layout is exactly three deep. One more nesting level, or a
+       * base one directory higher, and the repos vanish. */
+      int from_base = workspace_discover_projects(base, 3, projects, MAX_DISCOVERED_PROJECTS);
+
+      /* From the per-user root the repos sit at depth 2, leaving real headroom.
+       * This is what the reconciler does, and it must find both. */
+      int from_user = workspace_discover_projects(user, 3, projects, MAX_DISCOVERED_PROJECTS);
+      assert(from_user == 2);
+
+      /* The failure this guards: one extra level below the scan root and the
+       * base-rooted scan goes blind while the per-user scan still works. */
+      char deep_org[512], deep_repo[512];
+      snprintf(deep_org, sizeof(deep_org), "%s/Nested", org);
+      snprintf(deep_repo, sizeof(deep_repo), "%s/repo-c", deep_org);
+      mkdir(deep_org, 0755);
+      create_git_repo(deep_repo);
+      int base_deep = workspace_discover_projects(base, 3, projects, MAX_DISCOVERED_PROJECTS);
+      int user_deep = workspace_discover_projects(user, 3, projects, MAX_DISCOVERED_PROJECTS);
+      assert(base_deep == from_base); /* the deeper repo is invisible from the base */
+      assert(user_deep == 3);         /* but not from the per-user root */
+   }
+
    /* --- discover_projects: nested repos (deep directory structure) --- */
    {
       char ws[512];
