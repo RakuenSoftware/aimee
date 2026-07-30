@@ -323,8 +323,35 @@ int kb_client_index_scan(const char *name, const char *root, int force,
    return kb_client_index_scan_v1(name, root, force, out);
 }
 
-int kb_client_index_find_project(const char *project, const char *identifier, term_hit_t *out,
-                                 int max)
+char *kb_client_index_project_lifecycle_json(const char *operation, const char *project,
+                                             const char *confirm_hash, const char *reason,
+                                             int retention_days, int *http_status)
+{
+   if (http_status)
+      *http_status = 0;
+   if (!operation || !operation[0] || !project || !project[0] ||
+       (strcmp(operation, "detach") != 0 && strcmp(operation, "purge") != 0 &&
+        strcmp(operation, "gc") != 0))
+      return NULL;
+   char path[96];
+   snprintf(path, sizeof(path), "/v1/code/project/%s", operation);
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return NULL;
+   cJSON_AddStringToObject(req, "project", project);
+   if (confirm_hash && confirm_hash[0])
+      cJSON_AddStringToObject(req, "confirm_hash", confirm_hash);
+   if (reason && reason[0])
+      cJSON_AddStringToObject(req, "reason", reason);
+   if (strcmp(operation, "gc") == 0)
+      cJSON_AddNumberToObject(req, "retention_days", retention_days);
+   char *json = kb_client_v1_post_json(path, req, KB_CLIENT_INDEX_READ_TIMEOUT_MS, http_status);
+   cJSON_Delete(req);
+   return json;
+}
+
+int kb_client_index_find_scoped(const char *project, int all_projects, const char *identifier,
+                                term_hit_t *out, int max)
 {
    if (!identifier || !identifier[0] || !out || max <= 0)
       return 0;
@@ -343,7 +370,7 @@ int kb_client_index_find_project(const char *project, const char *identifier, te
          return 0;
       }
    }
-   size_t path_len = strlen(encoded) + (encoded_project ? strlen(encoded_project) : 0) + 96;
+   size_t path_len = strlen(encoded) + (encoded_project ? strlen(encoded_project) : 0) + 112;
    char *path = malloc(path_len);
    if (!path)
    {
@@ -351,8 +378,9 @@ int kb_client_index_find_project(const char *project, const char *identifier, te
       free(encoded);
       return 0;
    }
-   snprintf(path, path_len, "/v1/code/find?identifier=%s&max_results=%d%s%s", encoded, max,
-            encoded_project ? "&project=" : "", encoded_project ? encoded_project : "");
+   snprintf(path, path_len, "/v1/code/find?identifier=%s&max_results=%d%s%s%s", encoded, max,
+            all_projects ? "&scope=all" : "", encoded_project ? "&project=" : "",
+            encoded_project ? encoded_project : "");
    free(encoded_project);
    free(encoded);
    char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, NULL);
@@ -366,9 +394,15 @@ int kb_client_index_find_project(const char *project, const char *identifier, te
    return count;
 }
 
+int kb_client_index_find_project(const char *project, const char *identifier, term_hit_t *out,
+                                 int max)
+{
+   return kb_client_index_find_scoped(project, 0, identifier, out, max);
+}
+
 int kb_client_index_find(const char *identifier, term_hit_t *out, int max)
 {
-   return kb_client_index_find_project(NULL, identifier, out, max);
+   return kb_client_index_find_scoped(NULL, 1, identifier, out, max);
 }
 
 int kb_client_index_list(project_info_t *out, int max)
@@ -387,6 +421,31 @@ int kb_client_index_list(project_info_t *out, int max)
    int count = kb_index_project_list_parse(resp, out, max);
    cJSON_Delete(resp);
    return count;
+}
+
+static int kb_index_blast_edge_valid(const cJSON *edge, const char *identity_field)
+{
+   if (!cJSON_IsObject(edge))
+      return 0;
+   cJSON *identity = cJSON_GetObjectItemCaseSensitive(edge, identity_field);
+   cJSON *provenance = cJSON_GetObjectItemCaseSensitive(edge, "provenance");
+   cJSON *confidence = cJSON_GetObjectItemCaseSensitive(edge, "confidence");
+   cJSON *project = cJSON_GetObjectItemCaseSensitive(edge, "project");
+   cJSON *generation = cJSON_GetObjectItemCaseSensitive(edge, "generation");
+   cJSON *freshness = cJSON_GetObjectItemCaseSensitive(edge, "freshness");
+   return cJSON_IsString(identity) && identity->valuestring[0] && cJSON_IsString(provenance) &&
+          provenance->valuestring[0] && cJSON_IsString(confidence) && confidence->valuestring[0] &&
+          cJSON_IsString(project) && project->valuestring[0] && cJSON_IsNumber(generation) &&
+          cJSON_IsString(freshness) && freshness->valuestring[0];
+}
+
+static int kb_index_blast_edges_valid(const cJSON *edges, const char *identity_field)
+{
+   if (!cJSON_IsArray(edges))
+      return 0;
+   cJSON *edge;
+   cJSON_ArrayForEach(edge, edges) if (!kb_index_blast_edge_valid(edge, identity_field)) return 0;
+   return 1;
 }
 
 int kb_client_index_blast_radius(const char *project, const char *file_path, blast_radius_t *out)
@@ -408,9 +467,13 @@ int kb_client_index_blast_radius(const char *project, const char *file_path, bla
    snprintf(path, sizeof(path), "/v1/code/blast-radius?project=%s&file_path=%s", project_q, file_q);
    free(project_q);
    free(file_q);
-   char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, NULL);
-   if (!json)
+   int status = 0;
+   char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, &status);
+   if (!json || status < 200 || status >= 300)
+   {
+      free(json);
       return -1;
+   }
    cJSON *resp = cJSON_Parse(json);
    free(json);
    if (!resp)
@@ -420,30 +483,76 @@ int kb_client_index_blast_radius(const char *project, const char *file_path, bla
    if (cJSON_IsString(file))
       snprintf(out->file, sizeof(out->file), "%s", file->valuestring);
 
-   cJSON *deps = cJSON_GetObjectItemCaseSensitive(resp, "dependencies");
-   if (cJSON_IsArray(deps))
+   cJSON *error = cJSON_GetObjectItemCaseSensitive(resp, "error");
+   if (cJSON_IsString(error))
    {
-      cJSON *d;
-      cJSON_ArrayForEach(d, deps)
-      {
-         if (out->dependency_count >= 64)
-            break;
-         if (cJSON_IsString(d))
-            snprintf(out->dependencies[out->dependency_count++], MAX_PATH_LEN, "%s",
-                     d->valuestring);
-      }
+      cJSON_Delete(resp);
+      return -1;
    }
-   cJSON *depts = cJSON_GetObjectItemCaseSensitive(resp, "dependents");
-   if (cJSON_IsArray(depts))
+   cJSON *project_json = cJSON_GetObjectItemCaseSensitive(resp, "project");
+   cJSON *generation = cJSON_GetObjectItemCaseSensitive(resp, "generation");
+   cJSON *freshness = cJSON_GetObjectItemCaseSensitive(resp, "freshness");
+   cJSON *resolved = cJSON_GetObjectItemCaseSensitive(resp, "resolved");
+   cJSON *dependency_edges = cJSON_GetObjectItemCaseSensitive(resp, "dependency_edges");
+   cJSON *dependent_edges = cJSON_GetObjectItemCaseSensitive(resp, "dependent_edges");
+   if (!cJSON_IsString(project_json) || !project_json->valuestring[0] ||
+       !cJSON_IsNumber(generation) || !cJSON_IsString(freshness) || !freshness->valuestring[0] ||
+       !cJSON_IsTrue(resolved) || !kb_index_blast_edges_valid(dependency_edges, "identity") ||
+       !kb_index_blast_edges_valid(dependent_edges, "path"))
    {
-      cJSON *d;
-      cJSON_ArrayForEach(d, depts)
-      {
-         if (out->dependent_count >= 64)
-            break;
-         if (cJSON_IsString(d))
-            snprintf(out->dependents[out->dependent_count++], MAX_PATH_LEN, "%s", d->valuestring);
-      }
+      cJSON_Delete(resp);
+      return -1;
+   }
+   snprintf(out->project, sizeof(out->project), "%s", project_json->valuestring);
+   out->generation = (long long)generation->valuedouble;
+   snprintf(out->freshness, sizeof(out->freshness), "%s", freshness->valuestring);
+   out->resolved = 1;
+
+   cJSON *edge;
+   cJSON_ArrayForEach(edge, dependency_edges)
+   {
+      if (out->dependency_count >= 64)
+         break;
+      cJSON *identity = cJSON_GetObjectItemCaseSensitive(edge, "identity");
+      int i = out->dependency_count++;
+      snprintf(out->dependencies[i], MAX_PATH_LEN, "%s", identity->valuestring);
+      cJSON *v = cJSON_GetObjectItemCaseSensitive(edge, "provenance");
+      snprintf(out->dependency_meta[i].provenance, sizeof(out->dependency_meta[i].provenance), "%s",
+               v->valuestring);
+      v = cJSON_GetObjectItemCaseSensitive(edge, "confidence");
+      snprintf(out->dependency_meta[i].confidence, sizeof(out->dependency_meta[i].confidence), "%s",
+               v->valuestring);
+      v = cJSON_GetObjectItemCaseSensitive(edge, "project");
+      snprintf(out->dependency_meta[i].project, sizeof(out->dependency_meta[i].project), "%s",
+               v->valuestring);
+      v = cJSON_GetObjectItemCaseSensitive(edge, "generation");
+      out->dependency_meta[i].generation = (long long)v->valuedouble;
+      v = cJSON_GetObjectItemCaseSensitive(edge, "freshness");
+      snprintf(out->dependency_meta[i].freshness, sizeof(out->dependency_meta[i].freshness), "%s",
+               v->valuestring);
+   }
+
+   cJSON_ArrayForEach(edge, dependent_edges)
+   {
+      if (out->dependent_count >= 64)
+         break;
+      cJSON *edge_path = cJSON_GetObjectItemCaseSensitive(edge, "path");
+      int i = out->dependent_count++;
+      snprintf(out->dependents[i], MAX_PATH_LEN, "%s", edge_path->valuestring);
+      cJSON *v = cJSON_GetObjectItemCaseSensitive(edge, "provenance");
+      snprintf(out->dependent_meta[i].provenance, sizeof(out->dependent_meta[i].provenance), "%s",
+               v->valuestring);
+      v = cJSON_GetObjectItemCaseSensitive(edge, "confidence");
+      snprintf(out->dependent_meta[i].confidence, sizeof(out->dependent_meta[i].confidence), "%s",
+               v->valuestring);
+      v = cJSON_GetObjectItemCaseSensitive(edge, "project");
+      snprintf(out->dependent_meta[i].project, sizeof(out->dependent_meta[i].project), "%s",
+               v->valuestring);
+      v = cJSON_GetObjectItemCaseSensitive(edge, "generation");
+      out->dependent_meta[i].generation = (long long)v->valuedouble;
+      v = cJSON_GetObjectItemCaseSensitive(edge, "freshness");
+      snprintf(out->dependent_meta[i].freshness, sizeof(out->dependent_meta[i].freshness), "%s",
+               v->valuestring);
    }
    cJSON_Delete(resp);
    return 0;
@@ -497,12 +606,32 @@ static char *kb_client_index_blast_radius_preview_v1(const char *project, char *
       cJSON *file = cJSON_CreateObject();
       cJSON_AddStringToObject(file, "path", path);
       cJSON *deps = cJSON_AddArrayToObject(file, "dependents");
+      cJSON *edges = cJSON_AddArrayToObject(file, "dependent_edges");
       int dependent_count = 0;
       if (rc == 0)
       {
+         cJSON_AddStringToObject(file, "project", br.project);
+         cJSON_AddNumberToObject(file, "generation", (double)br.generation);
+         cJSON_AddStringToObject(file, "freshness", br.freshness);
+         cJSON_AddBoolToObject(file, "resolved", br.resolved);
          dependent_count = br.dependent_count;
          for (int j = 0; j < br.dependent_count; j++)
+         {
             cJSON_AddItemToArray(deps, cJSON_CreateString(br.dependents[j]));
+            cJSON *edge = cJSON_CreateObject();
+            cJSON_AddStringToObject(edge, "path", br.dependents[j]);
+            cJSON_AddStringToObject(edge, "provenance", br.dependent_meta[j].provenance);
+            cJSON_AddStringToObject(edge, "confidence", br.dependent_meta[j].confidence);
+            cJSON_AddStringToObject(edge, "project", br.dependent_meta[j].project);
+            cJSON_AddNumberToObject(edge, "generation", (double)br.dependent_meta[j].generation);
+            cJSON_AddStringToObject(edge, "freshness", br.dependent_meta[j].freshness);
+            cJSON_AddItemToArray(edges, edge);
+         }
+      }
+      else
+      {
+         cJSON_AddStringToObject(file, "status", "unavailable");
+         cJSON_AddBoolToObject(file, "resolved", 0);
       }
       cJSON_AddNumberToObject(file, "dependent_count", dependent_count);
       const char *severity = kb_index_preview_severity(dependent_count);
@@ -706,8 +835,8 @@ int kb_client_index_project_lang(const char *project, char *buf, size_t bufsz)
    }
 }
 
-int kb_client_index_code_search(const char *query, const char *project, code_search_hit_t *out,
-                                int max)
+int kb_client_index_code_search_scoped(const char *query, const char *project, int all_projects,
+                                       code_search_hit_t *out, int max)
 {
    if (!query || !query[0] || !out || max <= 0)
       return 0;
@@ -721,8 +850,8 @@ int kb_client_index_code_search(const char *query, const char *project, code_sea
       free(project_q);
       return 0;
    }
-   size_t path_len = strlen("/v1/code/search?query=&max_results=&project=") + strlen(query_q) +
-                     (project_q ? strlen(project_q) : 0) + 32;
+   size_t path_len = strlen("/v1/code/search?query=&max_results=&scope=all&project=") +
+                     strlen(query_q) + (project_q ? strlen(project_q) : 0) + 32;
    char *path = malloc(path_len);
    if (!path)
    {
@@ -730,8 +859,9 @@ int kb_client_index_code_search(const char *query, const char *project, code_sea
       free(project_q);
       return 0;
    }
-   snprintf(path, path_len, "/v1/code/search?query=%s&max_results=%d%s%s", query_q, max,
-            project_q ? "&project=" : "", project_q ? project_q : "");
+   snprintf(path, path_len, "/v1/code/search?query=%s&max_results=%d%s%s%s", query_q, max,
+            all_projects ? "&scope=all" : "", project_q ? "&project=" : "",
+            project_q ? project_q : "");
    free(query_q);
    free(project_q);
 
@@ -746,8 +876,14 @@ int kb_client_index_code_search(const char *query, const char *project, code_sea
    return count;
 }
 
-int kb_client_index_find_callers(const char *project, const char *symbol, caller_hit_t *out,
-                                 int max)
+int kb_client_index_code_search(const char *query, const char *project, code_search_hit_t *out,
+                                int max)
+{
+   return kb_client_index_code_search_scoped(query, project, !project || !project[0], out, max);
+}
+
+int kb_client_index_find_callers_scoped(const char *project, int all_projects, const char *symbol,
+                                        caller_hit_t *out, int max)
 {
    if (!symbol || !symbol[0] || !out || max <= 0)
       return 0;
@@ -761,8 +897,8 @@ int kb_client_index_find_callers(const char *project, const char *symbol, caller
       free(project_q);
       return 0;
    }
-   size_t path_len = strlen("/v1/code/callers?symbol=&max_results=&project=") + strlen(symbol_q) +
-                     (project_q ? strlen(project_q) : 0) + 32;
+   size_t path_len = strlen("/v1/code/callers?symbol=&max_results=&scope=all&project=") +
+                     strlen(symbol_q) + (project_q ? strlen(project_q) : 0) + 32;
    char *path = malloc(path_len);
    if (!path)
    {
@@ -770,8 +906,9 @@ int kb_client_index_find_callers(const char *project, const char *symbol, caller
       free(project_q);
       return 0;
    }
-   snprintf(path, path_len, "/v1/code/callers?symbol=%s&max_results=%d%s%s", symbol_q, max,
-            project_q ? "&project=" : "", project_q ? project_q : "");
+   snprintf(path, path_len, "/v1/code/callers?symbol=%s&max_results=%d%s%s%s", symbol_q, max,
+            all_projects ? "&scope=all" : "", project_q ? "&project=" : "",
+            project_q ? project_q : "");
    free(symbol_q);
    free(project_q);
 
@@ -784,6 +921,12 @@ int kb_client_index_find_callers(const char *project, const char *symbol, caller
    int count = kb_index_find_callers_parse(resp, out, max);
    cJSON_Delete(resp);
    return count;
+}
+
+int kb_client_index_find_callers(const char *project, const char *symbol, caller_hit_t *out,
+                                 int max)
+{
+   return kb_client_index_find_callers_scoped(project, !project || !project[0], symbol, out, max);
 }
 
 /* S6: cross-repo dependency proxy. The kb response is rich (per-edge evidence +

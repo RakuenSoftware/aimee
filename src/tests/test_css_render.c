@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sqlite3.h>
 
 /* Point config_load at an isolated HOME holding an aimee.yaml with the given
  * css_style_graph_enabled value (AIMEE_NO_CACHE bypasses the mtime cache). */
@@ -85,6 +86,26 @@ int main(void)
    assert(db2_css_render_oracle_evaluate("rend", "Button.tsx", "t5", &v) == 0);
    assert(v.available == 1 && v.equivalent == 0 && v.diff_count == 1);
    assert(db2_css_migration_list("rend", NULL, units, 8) == 1 && units[0].oracle_equivalent == 0);
+
+   /* A re-added checkout cannot read the old generation's rendered evidence;
+    * the next capture creates a generation-2 row while retaining history. */
+   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   assert(sqlite3_exec(db, "UPDATE projects SET current_generation=2 WHERE name='rend'", NULL, NULL,
+                       NULL) == SQLITE_OK);
+   got = NULL;
+   assert(db2_css_render_snapshot_get("rend", "Button.tsx", "before", &got) == 0);
+   assert(got == NULL);
+   assert(db2_css_render_snapshot_store("rend", "Button.tsx", "before", SNAP_B, "t5b") == 1);
+   assert(db2_css_render_snapshot_get("rend", "Button.tsx", "before", &got) == 1);
+   assert(got && strcmp(got, SNAP_B) == 0);
+   free(got);
+   sqlite3_stmt *count = NULL;
+   assert(sqlite3_prepare_v2(db,
+                             "SELECT COUNT(*) FROM css_render_snapshots"
+                             " WHERE project='rend' AND unit_path='Button.tsx' AND phase='before'",
+                             -1, &count, NULL) == SQLITE_OK);
+   assert(sqlite3_step(count) == SQLITE_ROW && sqlite3_column_int(count, 0) == 2);
+   sqlite3_finalize(count);
 
    /* a unit with no snapshots -> conservative unknown (available=0). */
    assert(db2_css_render_oracle_evaluate("rend", "Ghost.tsx", "t6", &v) == 0);

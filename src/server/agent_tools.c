@@ -1253,7 +1253,8 @@ static cJSON *tp_search_docs(void)
    tp_prop(props, "query", "string",
            "What you want to know about the project — a question or topic");
    tp_prop(props, "project", "string",
-           "Indexed project name. Defaults to the current workspace directory name.");
+           "Stable indexed project ID. Defaults to the active project resolved from cwd.");
+   tp_prop(props, "scope", "string", "current (default) or all for explicit cross-project search");
    tp_prop(props, "max_results", "integer", "Maximum passages to return (default 3, max 8)");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();

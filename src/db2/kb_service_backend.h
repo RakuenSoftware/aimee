@@ -351,6 +351,7 @@ extern "C"
                              size_t hash_cap, char *ingested_at_out, size_t ingested_at_cap);
    char *db2_kb_file_index_get_content(const char *project, const char *file_path);
    int db2_kb_file_index_delete_project(const char *project);
+   int db2_kb_file_index_delete_current_project(const char *project);
    cJSON *db2_kb_file_index_snapshot_json(const char *project);
 
    int db2_kb_service_async_queue_status(db2_kb_service_async_queue_stats_t *out);
@@ -366,6 +367,7 @@ extern "C"
    int db2_kb_service_collect_project_status(const char *project,
                                              db2_kb_service_project_status_t *out);
    int db2_kb_service_clear_project(const char *project);
+   int db2_kb_service_clear_current_project(const char *project);
    cJSON *db2_kb_service_learning_list_json(const char *state, const char *sink, int max_rows);
    cJSON *db2_kb_service_learning_get_json(int id);
    cJSON *db2_kb_service_learning_reject_json(int id);

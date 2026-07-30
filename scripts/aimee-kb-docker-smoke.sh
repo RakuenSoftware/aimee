@@ -121,7 +121,7 @@ check "/v1/capabilities"          'capab'      "${KB_URL}/v1/capabilities"
 # empty "hits" array on a fresh DB is still a well-formed pass and proves the
 # schema is applied and the query path executes.
 check "POST /v1/search"           '"hits"'     -X POST -H 'content-type: application/json' \
-                                               -d '{"query":"docker smoke test","max_results":3}' \
+                                               -d '{"query":"docker smoke test","scope":"all","max_results":3}' \
                                                "${KB_URL}/v1/search"
 
 # memory.find_facts with graph-code fusion ON is the deepest-stack worker path

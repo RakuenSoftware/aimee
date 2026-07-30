@@ -56,6 +56,11 @@ static int fetch_edges(const char *relation, const char *project, char **src, ch
       return 0;
    static const char *sql = "SELECT source, target FROM entity_edges"
                             " WHERE relation = ?1 AND (?2 = '' OR target LIKE ?3)"
+                            " AND (COALESCE(edge_origin,'') <> 'code_projection' OR EXISTS ("
+                            " SELECT 1 FROM code_projection_generations g"
+                            " JOIN projects p ON p.name=g.project"
+                            " WHERE g.id=entity_edges.projection_generation_id"
+                            " AND g.state='visible' AND p.lifecycle_state='current'))"
                             " LIMIT ?4";
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -117,9 +122,12 @@ static void add_clones(cJSON *resp, const char *project, int limit)
    cJSON *arr = cJSON_AddArrayToObject(resp, "clones");
    if (!conn || !arr)
       return;
-   static const char *sql = "SELECT body_hash, symbol, file_path, payload_json FROM code_embeddings"
-                            " WHERE body_hash <> '' AND (?1 = '' OR project = ?1)"
-                            " ORDER BY body_hash LIMIT 20000";
+   static const char *sql =
+       "SELECT ce.body_hash, ce.symbol, ce.file_path, ce.payload_json FROM code_embeddings ce"
+       " JOIN projects p ON p.name = ce.project"
+       " WHERE ce.body_hash <> '' AND (?1 = '' OR ce.project = ?1)"
+       "   AND p.lifecycle_state = 'current' AND ce.generation = p.current_generation"
+       " ORDER BY ce.body_hash LIMIT 20000";
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -180,13 +188,15 @@ static void add_near_clones(cJSON *resp, const char *project, int limit)
       return;
    static const char *sql =
        "SELECT a.symbol, a.file_path, b.bsym, b.bfile, (1.0 - (a.embedding <=> b.bemb)) AS sim "
-       "FROM code_embeddings a JOIN LATERAL ("
+       "FROM code_embeddings a JOIN projects ap ON ap.name = a.project JOIN LATERAL ("
        "  SELECT c.point_id AS bpid, c.symbol AS bsym, c.file_path AS bfile, c.embedding AS bemb "
-       "  FROM code_embeddings c "
+       "  FROM code_embeddings c JOIN projects cp ON cp.name = c.project "
        "  WHERE c.point_id <> a.point_id AND c.record_type = 'code_unit' "
+       "    AND cp.lifecycle_state = 'current' AND c.generation = cp.current_generation "
        "    AND (?1 = '' OR c.project = ?1) "
        "  ORDER BY c.embedding <=> a.embedding LIMIT 1) b ON true "
        "WHERE a.record_type = 'code_unit' AND (?2 = '' OR a.project = ?2) "
+       "  AND ap.lifecycle_state = 'current' AND a.generation = ap.current_generation "
        "  AND a.point_id < b.bpid AND (a.embedding <=> b.bemb) BETWEEN 0.0001 AND 0.06 "
        "ORDER BY sim DESC LIMIT ?3";
    char err[256] = "";

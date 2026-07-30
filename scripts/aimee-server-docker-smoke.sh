@@ -155,7 +155,7 @@ bold "==> Cross-container: server -> kb (proves AIMEE_KB_API_URL wiring)"
 check "GET /v1/kb/status -> kb"  '"vector"'  "${SERVER_URL}/v1/kb/status"
 # /v1/kb/search proxies to the kb's ranked search (query -> embed -> pgvector).
 check "POST /v1/kb/search -> kb" '"hits"'   -X POST -H 'content-type: application/json' \
-                                            -d '{"query":"docker smoke test","max_results":3}' \
+                                            -d '{"query":"docker smoke test","scope":"all","max_results":3}' \
                                             "${SERVER_URL}/v1/kb/search"
 
 bold "==> Auth is enforced"

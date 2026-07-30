@@ -26,8 +26,14 @@ int main(void)
    assert(db != NULL);
 
    assert(sqlite3_exec(db,
-                       "INSERT INTO kb_documents (project,file_path,file_hash,chunk_index,content)"
-                       " VALUES ('p','f.md','h',0,'text')",
+                       "INSERT INTO projects "
+                       "(name,root,workspace,scanned_at,lifecycle_state,current_generation)"
+                       " VALUES ('p','/repo/p','/repo','now','current',2)",
+                       NULL, NULL, NULL) == SQLITE_OK);
+   assert(sqlite3_exec(db,
+                       "INSERT INTO kb_documents"
+                       " (project,generation,file_path,file_hash,chunk_index,content)"
+                       " VALUES ('p',2,'f.md','h',0,'text')",
                        NULL, NULL, NULL) == SQLITE_OK);
    int doc_id = scalar(db, "SELECT id FROM kb_documents WHERE project='p' AND file_path='f.md'");
 

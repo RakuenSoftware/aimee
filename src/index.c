@@ -995,7 +995,8 @@ int index_blast_radius(const char *project, const char *file_path, blast_radius_
    if (db2_code_index_blast_radius(project, file_path, out) != 0)
       return -1;
 
-   /* Expand with co_edited graph edges (weight > 3). */
+   /* Expand with co_edited graph edges only when their legacy basename key
+    * resolves to exactly one current-project file. */
    {
       const char *base = strrchr(file_path, '/');
       const char *match_name = base ? base + 1 : file_path;
@@ -1007,23 +1008,45 @@ int index_blast_radius(const char *project, const char *file_path, blast_radius_
          const char *related = co_buf[b];
          if (!related[0] || strcmp(related, match_name) == 0)
             continue;
-         int dup = 0;
+         char resolved[MAX_PATH_LEN];
+         if (db2_code_index_unique_file_basename(project, related, resolved, sizeof(resolved)) !=
+                 1 ||
+             strcmp(resolved, file_path) == 0)
+            continue;
+         int found = -1;
          for (int d = 0; d < out->dependent_count; d++)
          {
-            if (strstr(out->dependents[d], related))
+            if (strcmp(out->dependents[d], resolved) == 0 &&
+                strcmp(out->dependent_meta[d].project, project) == 0)
             {
-               dup = 1;
+               found = d;
                break;
             }
          }
-         if (!dup)
+         if (found < 0)
          {
-            snprintf(out->dependents[out->dependent_count], MAX_PATH_LEN, "%s (co-edited)",
-                     related);
-            out->dependent_count++;
+            if (out->dependent_count >= 64)
+               continue;
+            found = out->dependent_count++;
+            snprintf(out->dependents[found], MAX_PATH_LEN, "%s", resolved);
+            snprintf(out->dependent_meta[found].project, sizeof(out->dependent_meta[found].project),
+                     "%s", project);
+            out->dependent_meta[found].generation = out->generation;
+            snprintf(out->dependent_meta[found].freshness,
+                     sizeof(out->dependent_meta[found].freshness), "current");
+            snprintf(out->dependent_meta[found].confidence,
+                     sizeof(out->dependent_meta[found].confidence), "low");
          }
+         char *provenance = out->dependent_meta[found].provenance;
+         if (provenance[0] && !strstr(provenance, "projection"))
+            strncat(provenance, ",projection",
+                    sizeof(out->dependent_meta[found].provenance) - strlen(provenance) - 1);
+         else if (!provenance[0])
+            snprintf(provenance, sizeof(out->dependent_meta[found].provenance), "projection");
       }
    }
+
+   db2_code_index_blast_radius_local_first(project, out);
 
    return 0;
 #endif

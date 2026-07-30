@@ -124,9 +124,10 @@ char *kb_client_purge_cancel_json(const char *project, const char *generation,
  * resp["result"] and is either the plain-text or JSON search output
  * depending on `format`.  On any failure the returned JSON has
  * {"status":"error","message":"..."}. */
-/* Search KB documents via aimee-kb.  |project| may be NULL or empty
- * to search across all projects (the agent search_docs tool calls
- * it that way).  |format| selects "text" (default) or "json"
+/* Search KB documents via aimee-kb.  |project| may be NULL or empty only for
+ * an intentional all-project internal call; the client sends scope=all
+ * explicitly. Agent-facing surfaces resolve the active project before here.
+ * |format| selects "text" (default) or "json"
  * formatting of the result body.  Returns a heap-allocated JSON
  * envelope (caller frees). */
 char *kb_client_search_json(const char *project, const char *query, const char *embedding_command,
@@ -140,6 +141,12 @@ char *kb_client_curator_contradictions_json(int limit);
 char *kb_client_search_json_ex(const char *project, const char *query,
                                const char *embedding_command, int max_results, const char *format,
                                const char *fusion_mode_override);
+/* Explicit-scope variant. When all_projects is true, preferred_project is the
+ * active-project head bucket and the remaining corpus may extend the tail. */
+char *kb_client_search_json_scoped_ex(const char *preferred_project, int all_projects,
+                                      const char *query, const char *embedding_command,
+                                      int max_results, const char *format,
+                                      const char *fusion_mode_override);
 
 /* Run a KB build via aimee-kb's public /v1/code/build endpoint and returns
  * the heap-allocated JSON response (caller frees).  Long-running for large
@@ -1096,6 +1103,13 @@ typedef struct
 int kb_client_index_scan(const char *name, const char *root, int force,
                          kb_client_index_scan_result_t *out);
 
+/* Stable project lifecycle. operation is detach|purge|gc. Empty confirm_hash
+ * performs a read-only dry-run for purge/gc. Returns the raw JSON body (caller
+ * frees) and writes the HTTP status when requested. */
+char *kb_client_index_project_lifecycle_json(const char *operation, const char *project,
+                                             const char *confirm_hash, const char *reason,
+                                             int retention_days, int *http_status);
+
 /* Push a set of caller-supplied source files to aimee-kb for indexing,
  * bypassing server-side filesystem enumeration. `files_arr_v` is a cJSON array
  * of {"rel_path","content"} objects (typed void * to keep this header
@@ -1126,6 +1140,8 @@ void *kb_client_index_scan_format_response(int kb_rc, const kb_client_index_scan
 int kb_client_index_find(const char *identifier, term_hit_t *out, int max);
 int kb_client_index_find_project(const char *project, const char *identifier, term_hit_t *out,
                                  int max);
+int kb_client_index_find_scoped(const char *preferred_project, int all_projects,
+                                const char *identifier, term_hit_t *out, int max);
 
 /* List indexed projects. Returns count on success (0 = empty index),
  * or -1 if the knowledge service is unreachable. */
@@ -1160,6 +1176,8 @@ int kb_client_index_structure(const char *project, const char *file_path, defini
  * Uses /v1 over remote HTTP or local UDS. Mirrors index_find_callers(). */
 int kb_client_index_find_callers(const char *project, const char *symbol, caller_hit_t *out,
                                  int max);
+int kb_client_index_find_callers_scoped(const char *preferred_project, int all_projects,
+                                        const char *symbol, caller_hit_t *out, int max);
 
 /* S6: cross-repo dependency edges for `project` (required). `direction`
  * (out|in|both), `min_tier` (high|medium|tentative) may be NULL/empty for the kb
@@ -1182,6 +1200,8 @@ char *kb_client_repo_trust_json(const char *project, const char *trust, const ch
  * Mirrors index_code_search(). */
 int kb_client_index_code_search(const char *query, const char *project, code_search_hit_t *out,
                                 int max);
+int kb_client_index_code_search_scoped(const char *query, const char *preferred_project,
+                                       int all_projects, code_search_hit_t *out, int max);
 
 /* Structured-PDF evidence routes (/v1/pdf/...). Each returns the route's verbatim
  * citation JSON as a malloc'd string the caller frees, or NULL on a
@@ -1215,6 +1235,9 @@ char *kb_client_pdf_open_asset(const char *project, long long asset_id, int *sta
  * most-connected symbols (project required). */
 char *kb_client_code_hybrid(const char *query, const char *symbol, const char *project,
                             int max_results, int *status_out);
+char *kb_client_code_hybrid_scoped(const char *query, const char *symbol,
+                                   const char *preferred_project, int all_projects, int max_results,
+                                   int *status_out);
 char *kb_client_code_graph_hubs(const char *project, int max_results, int *status_out);
 char *kb_client_code_graph_audit(const char *project, int max_findings, int *status_out);
 char *kb_client_code_lessons(const char *project, int *status_out);

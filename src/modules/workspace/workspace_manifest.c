@@ -2,8 +2,11 @@
  *
  * Supported manifest shape (block YAML only):
  *
+ *   id: billing-service             # optional stable single-project identity
+ *
  *   repos:
- *     - url: https://github.com/example/repo.git
+ *     - id: billing-api             # optional stable per-repository identity
+ *       url: https://github.com/example/repo.git
  *       path: ./repos/repo        # optional clone destination
  *
  *   dependencies:
@@ -29,6 +32,7 @@
  */
 
 #include <stdio.h>
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -87,6 +91,17 @@ static void append_pkg(char *buf, size_t buflen, const char *pkg)
    {
       memcpy(buf + cur, pkg, plen + 1);
    }
+}
+
+static int manifest_stable_id_ok(const char *id)
+{
+   if (!id || !id[0] || strlen(id) >= 128)
+      return 0;
+   for (const unsigned char *p = (const unsigned char *)id; *p; p++)
+      if (!(isalnum(*p) || *p == '.' || *p == '_' || *p == ':' || *p == '/' || *p == '@' ||
+            *p == '+' || *p == '-'))
+         return 0;
+   return 1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -196,6 +211,18 @@ int workspace_manifest_load(const char *dir_or_path, workspace_manifest_t *out)
    out->index = 1;
    out->generate_rules = 1;
 
+   const cJSON *manifest_id = cJSON_GetObjectItemCaseSensitive(root, "id");
+   if (manifest_id)
+   {
+      if (!cJSON_IsString(manifest_id) || !manifest_id->valuestring[0] ||
+          !manifest_stable_id_ok(manifest_id->valuestring))
+      {
+         cJSON_Delete(root);
+         return -2;
+      }
+      snprintf(out->id, sizeof(out->id), "%s", manifest_id->valuestring);
+   }
+
    /* --- repos --- */
    const cJSON *repos = cJSON_GetObjectItemCaseSensitive(root, "repos");
    if (cJSON_IsArray(repos))
@@ -208,16 +235,63 @@ int workspace_manifest_load(const char *dir_or_path, workspace_manifest_t *out)
          if (!cJSON_IsObject(entry))
             continue;
 
+         const cJSON *id_item = cJSON_GetObjectItemCaseSensitive(entry, "id");
+         if (id_item && (!cJSON_IsString(id_item) || !id_item->valuestring[0] ||
+                         !manifest_stable_id_ok(id_item->valuestring)))
+         {
+            cJSON_Delete(root);
+            return -2;
+         }
          const cJSON *url_item = cJSON_GetObjectItemCaseSensitive(entry, "url");
          if (!cJSON_IsString(url_item) || !url_item->valuestring[0])
+         {
+            /* Once an entry declares an identity, malformed repository
+             * structure is authoritative failure, not a skippable hint. */
+            if (id_item)
+            {
+               cJSON_Delete(root);
+               return -2;
+            }
             continue;
+         }
 
          manifest_repo_t *r = &out->repos[out->repo_count++];
          snprintf(r->url, sizeof(r->url), "%s", url_item->valuestring);
 
+         if (id_item)
+            snprintf(r->id, sizeof(r->id), "%s", id_item->valuestring);
+
          const cJSON *path_item = cJSON_GetObjectItemCaseSensitive(entry, "path");
          if (cJSON_IsString(path_item) && path_item->valuestring[0])
             snprintf(r->path, sizeof(r->path), "%s", path_item->valuestring);
+      }
+   }
+
+   /* An explicit identity is authority, not a hint. Reject invalid or
+    * duplicate declarations rather than silently falling through to a remote
+    * or path-derived identity and merging two repositories later. */
+   if (out->id[0] && !manifest_stable_id_ok(out->id))
+   {
+      cJSON_Delete(root);
+      return -2;
+   }
+   for (int i = 0; i < out->repo_count; i++)
+   {
+      if (out->repos[i].id[0] && !manifest_stable_id_ok(out->repos[i].id))
+      {
+         cJSON_Delete(root);
+         return -2;
+      }
+      for (int j = i + 1; out->repos[i].id[0] && j < out->repo_count; j++)
+         if (strcmp(out->repos[i].id, out->repos[j].id) == 0)
+         {
+            cJSON_Delete(root);
+            return -2;
+         }
+      if (out->id[0] && out->repos[i].id[0] && strcmp(out->id, out->repos[i].id) == 0)
+      {
+         cJSON_Delete(root);
+         return -2;
       }
    }
 

@@ -183,8 +183,10 @@ static int load_descs(void *conn, desc_set_t *out)
       return -1;
    }
 
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn, "SELECT name, trust FROM projects ORDER BY name", err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
+                                          "SELECT name,trust FROM projects"
+                                          " WHERE lifecycle_state='current' ORDER BY name",
+                                          err, sizeof(err));
    if (!st)
    {
       free_descs(out);
@@ -211,6 +213,7 @@ static int load_descs(void *conn, desc_set_t *out)
           conn,
           "SELECT f.path, fc.content FROM file_contents fc JOIN files f ON f.id = fc.file_id "
           "JOIN projects p ON p.id = f.project_id WHERE p.name = ?1 AND "
+          "p.lifecycle_state='current' AND f.generation=p.current_generation AND "
           "(f.path LIKE '%go.mod' OR f.path LIKE '%Cargo.toml' OR f.path LIKE '%package.json' "
           "OR f.path LIKE '%pyproject.toml') ORDER BY length(f.path) LIMIT 8",
           err, sizeof(err));
@@ -240,6 +243,7 @@ static int load_descs(void *conn, desc_set_t *out)
       aimee_pg_stmt_t *h = aimee_pg_prepare(
           conn,
           "SELECT f.path FROM files f JOIN projects p ON p.id = f.project_id WHERE p.name = ?1 AND "
+          "p.lifecycle_state='current' AND f.generation=p.current_generation AND "
           "(f.path LIKE '%.h' OR f.path LIKE '%.hpp' OR f.path LIKE '%.hh' OR f.path LIKE '%.hxx') "
           "ORDER BY f.path",
           err, sizeof(err));
@@ -660,7 +664,8 @@ static int crd_compute_out(const char *project, const xrepo_deps_opts_t *opts,
       aimee_pg_stmt_t *im = aimee_pg_prepare(
           conn,
           "SELECT DISTINCT i.name, f.path FROM file_imports i JOIN files f ON f.id = i.file_id "
-          "JOIN projects p ON p.id = f.project_id WHERE p.name = ?1",
+          "JOIN projects p ON p.id=f.project_id WHERE p.name=?1"
+          " AND p.lifecycle_state='current' AND f.generation=p.current_generation",
           err, sizeof(err));
       if (im)
       {
@@ -688,7 +693,8 @@ static int crd_compute_out(const char *project, const xrepo_deps_opts_t *opts,
    {
       aimee_pg_stmt_t *fc = aimee_pg_prepare(
           conn,
-          "SELECT COUNT(*) FROM files f JOIN projects p ON p.id = f.project_id WHERE p.name = ?1",
+          "SELECT COUNT(*) FROM files f JOIN projects p ON p.id=f.project_id WHERE p.name=?1"
+          " AND p.lifecycle_state='current' AND f.generation=p.current_generation",
           err, sizeof(err));
       if (fc)
       {
@@ -761,26 +767,32 @@ static int crd_compute_out(const char *project, const xrepo_deps_opts_t *opts,
        "  SELECT cc.callee AS sym, COUNT(*) AS sites, COUNT(DISTINCT cc.file_id) AS files, "
        "         MIN(f.path) AS exfile, MIN(cc.line) AS exline "
        "  FROM code_calls cc JOIN files f ON f.id = cc.file_id "
-       "  JOIN projects p ON p.id = f.project_id WHERE p.name = ?1 GROUP BY cc.callee) "
+       "  JOIN projects p ON p.id=f.project_id WHERE p.name=?1"
+       "    AND p.lifecycle_state='current' AND f.generation=p.current_generation"
+       "  GROUP BY cc.callee) "
        "SELECT c.sym, c.sites, c.files, c.exfile, c.exline, dp.name AS definer, "
        "       COUNT(*) AS defcount, dp.trust AS dtrust, "
        "       (SELECT COUNT(*) FROM file_exports e JOIN files fe ON fe.id = e.file_id "
-       "          JOIN projects pe ON pe.id = fe.project_id WHERE pe.name = dp.name "
+       "          JOIN projects pe ON pe.id=fe.project_id WHERE pe.name=dp.name "
+       "          AND pe.lifecycle_state='current' AND fe.generation=pe.current_generation "
        "          AND e.name = c.sym) AS dexp, "
        "       (SELECT COUNT(DISTINCT p2.id) FROM code_calls cc2 JOIN files f2 ON f2.id = "
        "cc2.file_id "
-       "          JOIN projects p2 ON p2.id = f2.project_id WHERE cc2.callee = c.sym "
-       "          AND p2.trust = 'trusted') AS callee_rc, "
+       "          JOIN projects p2 ON p2.id=f2.project_id WHERE cc2.callee=c.sym "
+       "          AND p2.trust='trusted' AND p2.lifecycle_state='current'"
+       "          AND f2.generation=p2.current_generation) AS callee_rc, "
        "       (SELECT COUNT(DISTINCT fa.id) FROM code_calls cca JOIN files fa ON fa.id = "
        "cca.file_id "
-       "          JOIN projects pa ON pa.id = fa.project_id WHERE pa.name = ?1 "
-       "          AND cca.callee = c.sym) AS caller_files, "
+       "          JOIN projects pa ON pa.id=fa.project_id WHERE pa.name=?1 "
+       "          AND pa.lifecycle_state='current' AND fa.generation=pa.current_generation"
+       "          AND cca.callee=c.sym) AS caller_files, "
        "       (SELECT COUNT(*) FROM blocked_symbols b WHERE b.word = c.sym AND b.lang = '') AS "
        "blk, "
        "       MIN(df.vendored) AS dvendored, "
        "       MAX(CASE WHEN dt.def_kind IN ('macro','typedef') THEN 0 ELSE 1 END) AS high_capable "
        "FROM cand c JOIN terms dt ON dt.name = c.sym AND dt.kind = 'definition' "
        "JOIN files df ON df.id = dt.file_id JOIN projects dp ON dp.id = df.project_id "
+       "WHERE dp.lifecycle_state='current' AND df.generation=dp.current_generation "
        "GROUP BY c.sym, c.sites, c.files, c.exfile, c.exline, dp.name, dp.trust "
        "ORDER BY c.sym, defcount DESC",
        err, sizeof(err));

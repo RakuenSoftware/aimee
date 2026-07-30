@@ -299,6 +299,9 @@ components:
     SearchHit:
       type: object
       properties:
+        project:
+          type: string
+          description: Stable owning project identity; empty only for non-project shared artifacts.
         artifact_id:
           type: string
         score:
@@ -326,10 +329,17 @@ components:
           type: string
         project:
           type: string
-        scope_kind:
+          description: >-
+            Stable project identity. Defaults to the authenticated active project. With
+            `scope: all`, this identifies the protected active-project head bucket.
+        scope:
           type: string
-        scope_id:
-          type: string
+          enum: [current, all]
+          default: current
+          description: >-
+            Search the current project by default. Cross-project search requires the explicit
+            value `all` and an unscoped owner credential. When an active `project` is also sent,
+            local candidates are selected before the limit and other projects extend the tail.
         max_results:
           type: integer
           default: 10
@@ -352,6 +362,80 @@ components:
           type: integer
         fusion_mode_used:
           type: string
+
+    ProjectLifecycleRequest:
+      type: object
+      required: [project]
+      properties:
+        project:
+          type: string
+          description: Stable project identity, never a checkout basename.
+        confirm_hash:
+          type: string
+          description: >-
+            SHA-256 manifest hash returned by a dry run. Omit for a read-only dry run; include it
+            to confirm purge or garbage collection against the exact same physical rows.
+        reason:
+          type: string
+          maxLength: 512
+          description: Required for confirmed purge and garbage collection.
+        retention_days:
+          type: integer
+          minimum: 0
+          maximum: 3650
+          default: 30
+          description: Detached-generation retention for garbage collection only.
+
+    ProjectLifecycleManifest:
+      type: object
+      properties:
+        status:
+          type: string
+        operation:
+          type: string
+          enum: [purge, gc]
+        project:
+          type: string
+        generation:
+          type: integer
+          format: int64
+        mode:
+          type: string
+          enum: [dry_run, confirmed]
+        criteria:
+          type: string
+        manifest_hash:
+          type: string
+          description: SHA-256 of the operation, criteria, counts, and per-target fingerprints.
+        total_rows:
+          type: integer
+          format: int64
+        counts:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+        target_fingerprints:
+          type: object
+          additionalProperties:
+            type: string
+
+    ProjectDetachResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        operation:
+          type: string
+          enum: [detach]
+        project:
+          type: string
+        generation:
+          type: integer
+          format: int64
+        state:
+          type: string
+          enum: [detached]
 
     ArtifactResponse:
       type: object
@@ -540,23 +624,90 @@ components:
           type: string
           nullable: true
 
+    BlastRadiusDependentEdge:
+      type: object
+      required: [path, provenance, confidence, project, generation, freshness]
+      properties:
+        path:
+          type: string
+          description: Dependent file path.
+        provenance:
+          type: string
+          description: Comma-separated structural evidence (`import`, `call`, `projection`, or `cross_repo`).
+        confidence:
+          type: string
+          enum: [high, medium, low]
+        project:
+          type: string
+        generation:
+          type: integer
+          format: int64
+          minimum: 1
+        freshness:
+          type: string
+          enum: [current]
+
+    BlastRadiusDependencyEdge:
+      type: object
+      required: [identity, provenance, confidence, project, generation, freshness]
+      properties:
+        identity:
+          type: string
+          description: Normalized import identity.
+        provenance:
+          type: string
+          description: Comma-separated structural evidence (`import`, `call`, `projection`, or `cross_repo`).
+        confidence:
+          type: string
+          enum: [high, medium, low]
+        project:
+          type: string
+        generation:
+          type: integer
+          format: int64
+          minimum: 1
+        freshness:
+          type: string
+          enum: [current]
+
     BlastRadiusResponse:
       type: object
+      required: [file, project, generation, freshness, resolved, dependents, dependent_count,
+                 dependent_edges, dependencies, dependency_count, dependency_edges]
       properties:
         file:
           type: string
+        project:
+          type: string
+        generation:
+          type: integer
+          format: int64
+          minimum: 1
+        freshness:
+          type: string
+          enum: [current]
+        resolved:
+          type: boolean
         dependents:
           type: array
           items:
             type: string
         dependent_count:
           type: integer
+        dependent_edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/BlastRadiusDependentEdge"
         dependencies:
           type: array
           items:
             type: string
         dependency_count:
           type: integer
+        dependency_edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/BlastRadiusDependencyEdge"
 
     CodeScanRequest:
       type: object
@@ -2675,6 +2826,11 @@ paths:
     post:
       operationId: postSearch
       summary: Hybrid knowledge search
+      description: >-
+        Searches the authenticated active project by default. A request without an active project
+        fails with `scope_required`; deliberate cross-project retrieval requires `scope: all`.
+        Send the active `project` together with `scope: all` to reserve the result head for local
+        evidence while allowing labeled cross-project results in the tail.
       requestBody:
         required: true
         content:
@@ -2689,9 +2845,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/SearchResponse"
         "400":
-          description: Bad request (missing query)
+          description: Bad request (missing query or invalid scope)
         "401":
           description: Unauthorized
+        "403":
+          description: Scoped credentials cannot request all projects
+        "409":
+          description: No active project is available (`scope_required`)
 
   /artifacts/{id}:
     get:
@@ -2749,8 +2909,25 @@ paths:
             type: string
         - name: project
           in: query
+          description: Stable project identity. Defaults to the authenticated active project.
           schema:
             type: string
+        - name: scope
+          in: query
+          description: >-
+            Cross-project lookup requires `all`; send `project` too to protect that active
+            project's candidates before the result limit.
+          schema:
+            type: string
+            enum: [current, all]
+            default: current
+        - name: generation
+          in: query
+          description: Optional observed current generation; stale observations fail closed.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
         - name: max_results
           in: query
           schema:
@@ -2767,6 +2944,14 @@ paths:
           description: Missing identifier parameter
         "401":
           description: Unauthorized
+        "403":
+          description: Scoped credentials cannot request all projects
+        "404":
+          description: Project is unknown or detached
+        "409":
+          description: Active project is required or the observed generation is stale
+        "503":
+          description: Canonical index unavailable
 
   /code/search:
     get:
@@ -2780,8 +2965,25 @@ paths:
             type: string
         - name: project
           in: query
+          description: Stable project identity. Defaults to the authenticated active project.
           schema:
             type: string
+        - name: scope
+          in: query
+          description: >-
+            Cross-project search requires `all`; send `project` too to protect that active
+            project's candidates before the result limit.
+          schema:
+            type: string
+            enum: [current, all]
+            default: current
+        - name: generation
+          in: query
+          description: Optional observed current generation; stale observations fail closed.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
         - name: max_results
           in: query
           schema:
@@ -2798,6 +3000,12 @@ paths:
           description: Missing query parameter
         "401":
           description: Unauthorized
+        "403":
+          description: Scoped credentials cannot request all projects
+        "404":
+          description: Project is unknown or detached
+        "409":
+          description: Active project is required or the observed generation is stale
         "503":
           description: Canonical index unavailable
 
@@ -2813,8 +3021,25 @@ paths:
             type: string
         - name: project
           in: query
+          description: Stable project identity. Defaults to the authenticated active project.
           schema:
             type: string
+        - name: scope
+          in: query
+          description: >-
+            Cross-project lookup requires `all`; send `project` too to protect that active
+            project's candidates before the result limit.
+          schema:
+            type: string
+            enum: [current, all]
+            default: current
+        - name: generation
+          in: query
+          description: Optional observed current generation; stale observations fail closed.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
         - name: max_results
           in: query
           schema:
@@ -2831,6 +3056,12 @@ paths:
           description: Missing symbol parameter
         "401":
           description: Unauthorized
+        "403":
+          description: Scoped credentials cannot request all projects
+        "404":
+          description: Project is unknown or detached
+        "409":
+          description: Active project is required or the observed generation is stale
         "503":
           description: Canonical index unavailable
 
@@ -2865,16 +3096,24 @@ paths:
       parameters:
         - name: project
           in: query
-          required: true
+          required: false
+          description: Stable project identity. Defaults to the authenticated active project.
           schema:
             type: string
+        - name: generation
+          in: query
+          description: Optional observed current generation; stale observations fail closed.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
         - name: file_path
           in: query
           schema:
             type: string
       responses:
         "200":
-          description: Blast radius
+          description: Current-generation blast radius with provenance-bearing edges
           content:
             application/json:
               schema:
@@ -2884,7 +3123,11 @@ paths:
         "401":
           description: Unauthorized
         "404":
-          description: File not found in index
+          description: Project is detached/unknown or the file is not indexed
+        "409":
+          description: Active project is required or the observed generation is stale
+        "503":
+          description: Canonical index unavailable
 
   /code/structure:
     get:
@@ -2893,9 +3136,17 @@ paths:
       parameters:
         - name: project
           in: query
-          required: true
+          required: false
+          description: Stable project identity. Defaults to the authenticated active project.
           schema:
             type: string
+        - name: generation
+          in: query
+          description: Optional observed current generation; stale observations fail closed.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
         - name: file_path
           in: query
           required: true
@@ -2917,6 +3168,10 @@ paths:
           description: Missing required parameters
         "401":
           description: Unauthorized
+        "404":
+          description: Project is unknown or detached
+        "409":
+          description: Active project is required or the observed generation is stale
         "503":
           description: Canonical index unavailable
 
@@ -3011,6 +3266,107 @@ paths:
           description: Response too large; narrow the query
         "503":
           description: Canonical index unavailable
+
+  /code/project/detach:
+    post:
+      operationId: postCodeProjectDetach
+      summary: Detach the current generation of a stable project
+      description: >-
+        Marks the project and its current generation detached so default/current queries no longer
+        return it. Data is retained for audit and later re-add or explicit purge. Requires an
+        authenticated unscoped owner credential.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectLifecycleRequest"
+      responses:
+        "200":
+          description: Project generation detached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDetachResponse"
+        "400":
+          description: Invalid request
+        "403":
+          description: Verified unscoped owner principal required
+        "404":
+          description: Project not found
+        "405":
+          description: Method not allowed
+        "503":
+          description: Canonical index unavailable
+
+  /code/project/purge:
+    post:
+      operationId: postCodeProjectPurge
+      summary: Dry-run or confirm exact deletion of one stable project
+      description: >-
+        Omit `confirm_hash` for a read-only manifest. To delete, repeat the request with that exact
+        SHA-256 hash and a reason. Confirmation fails if any target row changed, and audit failure
+        blocks mutation. Requires an authenticated unscoped owner credential.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectLifecycleRequest"
+      responses:
+        "200":
+          description: Dry-run or confirmed purge manifest
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectLifecycleManifest"
+        "400":
+          description: Invalid request or confirmed operation without a reason
+        "403":
+          description: Verified unscoped owner principal required
+        "404":
+          description: Project not found
+        "405":
+          description: Method not allowed
+        "409":
+          description: Target manifest changed; run the dry run again
+        "503":
+          description: Audit or canonical-index operation failed
+
+  /code/project/gc:
+    post:
+      operationId: postCodeProjectGc
+      summary: Dry-run or confirm detached-generation garbage collection
+      description: >-
+        Omit `confirm_hash` for a read-only manifest. To delete expired detached generations and
+        aliases, repeat the request with the exact SHA-256 hash and a reason. The manifest binds the
+        retention policy and UTC cutoff as well as exact physical target fingerprints. Requires an
+        authenticated unscoped owner credential.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectLifecycleRequest"
+      responses:
+        "200":
+          description: Dry-run or confirmed garbage-collection manifest
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectLifecycleManifest"
+        "400":
+          description: Invalid request or confirmed operation without a reason
+        "403":
+          description: Verified unscoped owner principal required
+        "404":
+          description: Project not found
+        "405":
+          description: Method not allowed
+        "409":
+          description: Target manifest changed; run the dry run again
+        "503":
+          description: Audit or canonical-index operation failed
 
   /code/scan:
     post:
