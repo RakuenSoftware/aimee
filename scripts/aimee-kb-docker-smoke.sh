@@ -148,30 +148,58 @@ check "POST memory.find_facts (fusion)" '"facts"' -X POST -H 'content-type: appl
                                                "${KB_URL}/v1/actions/memory.find_facts"
 
 bold "==> Embed backend round-trip (in-container, inside the kb container)"
-# The embedder is a process INSIDE aimee-kb now, not a service beside it: the
-# entrypoint starts it on loopback, exports AIMEE_EMBEDDER_URL, and execs the kb.
+# The embedder is a process INSIDE the kb container, not a service beside it: the
+# entrypoint starts it on loopback, exports AIMEE_EMBEDDER_URL, and then runs the kb.
 #
-# So read PID 1's environment, NOT `compose exec`'s. `compose exec` spawns a fresh
-# process from the container's CONFIGURED environment (image ENV + the compose
-# `environment:` block) and never sees a variable the entrypoint exported at runtime.
-# Once AIMEE_EMBEDDER_URL is declared in compose with an empty default — which it must
-# be, so an operator can point the kb at an external endpoint — `compose exec` reads it
-# as "" no matter what the entrypoint did. That made this check fail against a kb that
-# was embedding correctly. /proc/1/environ is the kb process the entrypoint exec'd into,
-# which is the only place the effective value exists.
+# Getting at that value took three tries, so the reasoning is recorded here:
 #
-# This must not skip. The old version looked for an `aimee-llm` or `embedder` service
-# and skipped when it found neither; with both retired that skip would be
-# unconditional, and a skipped check reads as a pass.
-emb_url="$("${DC[@]}" exec -T aimee-kb sh -c \
-  "tr '\\0' '\\n' </proc/1/environ | sed -n 's/^AIMEE_EMBEDDER_URL=//p' | head -1" 2>/dev/null || true)"
+#  1. `compose exec` does NOT see it. It spawns a fresh process from the container's
+#     CONFIGURED environment (image ENV + the compose `environment:` block), never a
+#     variable exported at runtime. And AIMEE_EMBEDDER_URL must be declared in compose
+#     with an empty default so an operator can point the kb at an external endpoint —
+#     so `compose exec` reads "" no matter what the entrypoint did.
+#  2. /proc/1/environ does NOT see it either, for two reasons. On the embedded-DB path
+#     (compose.yaml, i.e. T1) the entrypoint stays PID 1 and runs the kb as a CHILD, so
+#     PID 1 is the shell. And /proc/PID/environ is a snapshot taken at exec time — a
+#     variable the shell exported afterwards never appears in its own environ.
+#  3. What works: the environ of the AIMEE-KB process. It was exec'd after the export,
+#     so its snapshot contains the effective value. Found by scanning /proc rather than
+#     with pgrep, which the image does not ship. This is correct on both paths — kb as
+#     a child here, kb as PID 1 on the external-DB path.
+#
+# This must not skip. The version before the cutover looked for an `aimee-llm` or
+# `embedder` SERVICE and skipped when it found neither; with both retired that skip
+# would be unconditional, and a skipped check reads as a pass.
+read_kb_env() {
+  # $1 = variable name. Prints its value from the aimee-kb process's environment.
+  "${DC[@]}" exec -T aimee-kb sh -c '
+    for p in /proc/[0-9]*; do
+      [ -r "$p/comm" ] || continue
+      if [ "$(cat "$p/comm" 2>/dev/null)" = "aimee-kb" ]; then
+        tr "\0" "\n" < "$p/environ" 2>/dev/null | sed -n "s/^'"$1"'=//p" | head -1
+        return 0
+      fi
+    done
+  ' 2>/dev/null || true
+}
+
+emb_url="$(read_kb_env AIMEE_EMBEDDER_URL)"
 if [[ -z "$emb_url" ]]; then
-  red   "  FAIL  the kb process has no AIMEE_EMBEDDER_URL despite EMBEDDER_MODEL=${EMBEDDER_MODEL}"
+  red   "  FAIL  the kb process was given no AIMEE_EMBEDDER_URL (EMBEDDER_MODEL=${EMBEDDER_MODEL})"
   printf '        the entrypoint should have started the bundled model and exported it\n'
-  printf '        kb env (embedder-related):\n'
-  "${DC[@]}" exec -T aimee-kb sh -c \
-    "tr '\\0' '\\n' </proc/1/environ | grep -E 'EMBEDDER|EMBEDDING' || echo '        (none)'" 2>/dev/null || true
-  "${DC[@]}" logs aimee-kb 2>&1 | grep -iE "embedder" | tail -5 || true
+  printf '        kb process environment (embedder-related):\n'
+  "${DC[@]}" exec -T aimee-kb sh -c '
+    for p in /proc/[0-9]*; do
+      [ -r "$p/comm" ] || continue
+      if [ "$(cat "$p/comm" 2>/dev/null)" = "aimee-kb" ]; then
+        tr "\0" "\n" < "$p/environ" 2>/dev/null | grep -E "EMBEDDER|EMBEDDING" || echo "          (none)"
+        return 0
+      fi
+    done
+    echo "          (no aimee-kb process found)"
+  ' 2>/dev/null || true
+  printf '        entrypoint embedder log lines:\n'
+  "${DC[@]}" logs aimee-kb 2>&1 | grep -iE "embedder" | tail -5 || printf '          (none)\n'
   FAIL=$((FAIL + 1))
 elif emb="$("${DC[@]}" exec -T aimee-kb sh -c \
       "printf 'aimee docker smoke test' | curl -fsS --max-time 60 -X POST \
@@ -183,6 +211,7 @@ elif emb="$("${DC[@]}" exec -T aimee-kb sh -c \
 else
   red   "  FAIL  /embed round-trip against ${emb_url}"
   printf '        got: %s\n' "${emb:-<no response>}"
+  "${DC[@]}" logs aimee-kb 2>&1 | grep -iE "embedder" | tail -5 || true
   FAIL=$((FAIL + 1))
 fi
 
