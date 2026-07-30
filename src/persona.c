@@ -223,6 +223,16 @@ int persona_is_builtin(const char *name)
    return builtin_find(name) != NULL;
 }
 
+int persona_exists(const char *project_root, const char *name)
+{
+   if (!name || !name[0])
+      return 0;
+   if (persona_is_builtin(name))
+      return 1;
+   char path[PERSONA_PATH_MAX];
+   return persona_path(project_root, name, path, sizeof(path)) == 0;
+}
+
 /* --- helpers ------------------------------------------------------------- */
 
 static char *read_file(const char *path)

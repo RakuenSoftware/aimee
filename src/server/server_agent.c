@@ -406,6 +406,19 @@ static void server_agent_remove_fallback(agent_config_t *cfg, const char *name)
    }
 }
 
+/* Forward decl: the read-only variant below wraps this. */
+static cJSON *server_agent_to_json(const agent_t *ag);
+
+/* The agent record marked as a pure read, so a client can word its output as a
+ * report rather than a confirmation of a write. agent.roles / agent.personas
+ * serve both: with a csv they mutate, without one they only report. */
+static cJSON *server_agent_read_json(const agent_t *ag)
+{
+   cJSON *obj = server_agent_to_json(ag);
+   cJSON_AddBoolToObject(obj, "read_only", 1);
+   return obj;
+}
+
 static cJSON *server_agent_to_json(const agent_t *ag)
 {
    cJSON *obj = cJSON_CreateObject();
@@ -1069,8 +1082,8 @@ int handle_agent_disable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* Surgically update ONLY an agent's roles, preserving endpoint/model/provider/
  * auth/vault key (unlike agent.add, which resets the record). argv[0]=name,
- * optional argv[1]=comma-separated roles; omitting the roles resets to the full
- * default capable set. Fixes existing agents crippled to summarize/format/draft. */
+ * optional argv[1]=comma-separated roles, or `--reset` for the full default
+ * capable set. Omitting argv[1] REPORTS the current roles and writes nothing. */
 int handle_agent_roles(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -1086,11 +1099,19 @@ int handle_agent_roles(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!ag)
       return server_send_error(conn, "agent not found", NULL);
 
-   if (argc >= 2 && argv[1][0])
-      server_agent_set_roles_csv(ag, argv[1]);
-   else
+   /* No csv reports the current roles and writes NOTHING. It used to reset the
+    * agent to the default list, so `agent roles <name>` — which reads as a query,
+    * and was the ONLY way to ask what an agent's roles were — silently dropped
+    * every role outside that list, including the `all` wildcard. A reset is still
+    * available, but it now has to be asked for by name. */
+   if (argc < 2 || !argv[1][0])
+      return server_send_ok(conn, server_agent_read_json(ag));
+
+   if (strcmp(argv[1], "--reset") == 0)
       server_agent_set_roles_csv(
           ag, "code,review,explain,refactor,draft,execute,summarize,format,reason,search");
+   else
+      server_agent_set_roles_csv(ag, argv[1]);
 
    if (agent_save_config(&cfg) != 0)
       return server_send_error(conn, "could not save agents.json", NULL);
@@ -1102,8 +1123,8 @@ int handle_agent_roles(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* Surgically update ONLY an agent's personas (the delegate identities it may be
  * dispatched AS), preserving everything else. argv[0]=name, optional argv[1]=
- * comma-separated personas ("all" = every persona); omitting resets to ["all"].
- * Mirrors handle_agent_roles. */
+ * comma-separated personas ("all" = every persona), or `--reset` for ["all"].
+ * Omitting argv[1] REPORTS and writes nothing. Mirrors handle_agent_roles. */
 int handle_agent_personas(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -1119,10 +1140,14 @@ int handle_agent_personas(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!ag)
       return server_send_error(conn, "agent not found", NULL);
 
-   if (argc >= 2 && argv[1][0])
-      server_agent_set_personas_csv(ag, argv[1]);
-   else
+   /* No csv reports and writes nothing — see handle_agent_roles. */
+   if (argc < 2 || !argv[1][0])
+      return server_send_ok(conn, server_agent_read_json(ag));
+
+   if (strcmp(argv[1], "--reset") == 0)
       server_agent_set_personas_csv(ag, "all");
+   else
+      server_agent_set_personas_csv(ag, argv[1]);
 
    if (agent_save_config(&cfg) != 0)
       return server_send_error(conn, "could not save agents.json", NULL);

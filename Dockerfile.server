@@ -318,6 +318,10 @@ RUN if [ -f /tmp/runtime-web-stage/aimee-runtime-web ]; then \
 # /usr/bin/code-server; the webchat supervisor launches a per-user instance.
 COPY --from=code-server-stage /opt/codeserver/usr/ /usr/
 RUN if command -v code-server >/dev/null 2>&1; then echo "aimee: code-server bundled ($(code-server --version 2>/dev/null | head -1))"; else echo "aimee: code-server not bundled (built with WITH_VSCODE=0)"; fi
+# PAM service for dashboard logins. runtime-web authenticates through
+# smoothgui/auth against /etc/pam.d/<service>; with no file every login fails as
+# "authentication unavailable".
+COPY deploy/container/pam.d-aimee /etc/pam.d/aimee
 COPY deploy/container/runtime-web-lib.sh /usr/local/bin/runtime-web-lib.sh
 COPY deploy/container/plane-supervisor.sh /usr/local/bin/plane-supervisor.sh
 COPY deploy/container/core-storage.sh /usr/local/bin/core-storage.sh

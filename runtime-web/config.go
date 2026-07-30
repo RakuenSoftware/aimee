@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type config struct {
@@ -13,7 +14,16 @@ type config struct {
 	socketPath string
 	dbPath     string
 	spaPath    string
+	// PAM service backing dashboard logins (/etc/pam.d/<name>). Overridable so a
+	// deployment can point at its own stack rather than the shipped default.
+	pamService string
 }
+
+// webchatLoginGroup scopes the accounts the dashboard may see, create or remove,
+// so a container system user is never a dashboard login by accident.
+const webchatLoginGroup = "aimee-webchat"
+
+const defaultWebchatPAMService = "aimee"
 
 func newConfig(port int, certFile, keyFile, socketPath, dbPath, spaPath string) (*config, error) {
 	home, err := os.UserHomeDir()
@@ -36,9 +46,18 @@ func newConfig(port int, certFile, keyFile, socketPath, dbPath, spaPath string) 
 		socketPath: socketPath,
 		dbPath:     dbPath,
 		spaPath:    spaPath,
+		pamService: pamServiceFromEnv(),
 	}, nil
 }
 
 func (c *config) tlsEnabled() bool {
 	return c.port != 8080 && c.port != 80
+}
+
+// pamServiceFromEnv resolves the PAM service backing dashboard logins.
+func pamServiceFromEnv() string {
+	if name := strings.TrimSpace(os.Getenv("AIMEE_WEBCHAT_PAM_SERVICE")); name != "" {
+		return name
+	}
+	return defaultWebchatPAMService
 }

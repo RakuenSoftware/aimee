@@ -68,3 +68,42 @@ int delegate_role_is_write(const char *role)
 {
    return role && (strcmp(role, "code") == 0 || strcmp(role, "refactor") == 0);
 }
+
+/* Dispatch now refuses an unknown role and an unknown persona. The worker under
+ * test only needs the accept/reject decision, so keep the stub's knowledge to the
+ * roles and personas its fixtures actually use, plus explicit rejects for the
+ * culled names. */
+const char *delegate_role_removed_reason(const char *role)
+{
+   if (!role || !role[0])
+      return NULL;
+   if (strcmp(role, "prose") == 0 || strcmp(role, "line-edit") == 0 ||
+       strcmp(role, "lyric") == 0 || strcmp(role, "hook") == 0 ||
+       strcmp(role, "prosody") == 0 || strcmp(role, "songform") == 0)
+      return "removed: use a persona with a general role such as draft, review or validate.";
+   return NULL;
+}
+
+int delegate_role_known(const char *project_root, const char *role)
+{
+   (void)project_root;
+   if (!role || !role[0])
+      return 0;
+   if (delegate_role_removed_reason(role))
+      return 0;
+   role = test_delegate_policy_role(role);
+   static const char *const known[] = {"review",  "validate", "diagnose",   "code",
+                                       "refactor", "explain",  "draft",     "execute",
+                                       "summarize", "format",  "search",    "reason",
+                                       "plan",     "continuity", "beat-check", NULL};
+   for (int i = 0; known[i]; i++)
+      if (strcmp(role, known[i]) == 0)
+         return 1;
+   return 0;
+}
+
+int persona_exists(const char *project_root, const char *name)
+{
+   (void)project_root;
+   return name && name[0] && strcmp(name, "nosuchpersona") != 0;
+}

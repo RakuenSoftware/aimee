@@ -125,6 +125,8 @@ void pt_print_agent_add(const char *method, cJSON *resp);
 void pt_print_agent_disable(const char *method, cJSON *resp);
 void pt_print_agent_enable(const char *method, cJSON *resp);
 void pt_print_agent_list(const char *method, cJSON *resp);
+void pt_print_agent_personas(const char *method, cJSON *resp);
+void pt_print_agent_roles(const char *method, cJSON *resp);
 void pt_print_agent_local(const char *method, cJSON *resp);
 void pt_print_agent_probe(const char *method, cJSON *resp);
 void pt_print_agent_remove(const char *method, cJSON *resp);

@@ -3,6 +3,16 @@
 The browser is a client of `aimee-server`, `aimee-wfe`, and `aimee-kb`. It owns login and UI session
 state; it does not own product data.
 
+Login is a **local PAM account** in the `aimee-webchat` group, checked through the `aimee` PAM
+service — the same stack the KB's `/v1/identity/login/pam` uses. Accounts outside that group are
+never dashboard logins, so the container's own system users cannot sign in. An unavailable PAM stack
+is reported as such rather than as a wrong password.
+
+Which flow applies follows the connected KB's `/v1/identity/auth-mode`. Under `oidc` the identity
+provider owns accounts and local account management is refused; the wizard's account step disappears.
+Dashboard login itself remains PAM in this release, with the OIDC flow arriving in 0.4.0. Any failure
+to reach the KB resolves to PAM, which is the mode with a local answer.
+
 ## Pages
 
 - **Chat:** server-owned conversations and tools.

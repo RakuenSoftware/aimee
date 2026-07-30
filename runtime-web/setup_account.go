@@ -19,8 +19,9 @@ const (
 	setupAccountMinPassword  = 8
 )
 
-// setupAccountSystem isolates Vault account mutations so the onboarding
-// transaction remains unit-testable without a live server Vault.
+// setupAccountSystem isolates account mutations so the onboarding transaction
+// remains unit-testable without provisioning real system accounts. Backed by
+// local PAM accounts (pamAccounts), scoped to the managed login group.
 type setupAccountSystem interface {
 	Exists(username string) bool
 	Create(username, password string) error
@@ -175,7 +176,7 @@ func writePrivateFile(path string, data []byte) error {
 }
 
 // writeReplacementMarker commits only non-secret account state. The password is
-// written to the encrypted server Vault first; this marker makes that account
+// created as a local PAM account first; this marker makes that account
 // authoritative. It returns a rollback closure for failures before the old
 // sessions have been invalidated.
 func writeReplacementMarker(marker, newUsername string) (func(), error) {
@@ -216,6 +217,14 @@ func (s *server) setupAccountStatus() map[string]any {
 func (s *server) handleSetupAccount(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method == http.MethodGet {
+		// Under OIDC there is no local account to replace, so the wizard must not
+		// show the step at all rather than offering an action POST would refuse.
+		if s.authMode.oidc(r.Context()) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"complete": true, "required": false, "managed_by": authModeOIDC,
+			})
+			return
+		}
 		_ = json.NewEncoder(w).Encode(s.setupAccountStatus())
 		return
 	}
@@ -223,7 +232,13 @@ func (s *server) handleSetupAccount(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	// This mutation changes a Vault-held login. SameSite=Strict already
+	// Replacing the bootstrap login creates a LOCAL account. Under OIDC the
+	// identity provider owns accounts, so there is nothing here to create and a
+	// local one would be a way in that bypasses the IdP's policy.
+	if s.requireLocalAccounts(w, r) {
+		return
+	}
+	// This mutation creates a local login. SameSite=Strict already
 	// protects the session cookie in browsers; keep an explicit origin gate here
 	// as defense in depth for the highest-impact onboarding request.
 	if !sameOriginRequest(r) {
@@ -303,7 +318,7 @@ func (s *server) handleSetupAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Invalidate every session authenticated with the bootstrap password. The
-	// marker has already made that Vault record ineligible for new logins.
+	// marker has already made the retired account ineligible for new logins.
 	if err := s.sessions.DeleteSessionsForUser(bootstrapUsername); err != nil {
 		rollback()
 		writeJSONError(w, http.StatusInternalServerError, "could not invalidate bootstrap sessions")
@@ -334,4 +349,44 @@ func (s *server) handleSetupAccount(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"complete": true, "required": false, "username": req.Username,
 	})
+}
+
+// adminUsername resolves the appliance administrator: the account that replaced
+// the generated bootstrap login, or — before that replacement — the bootstrap
+// account itself.
+//
+// The policy gates used to compare against the literal name "admin". That is the
+// one account guaranteed NOT to be the administrator on a set-up appliance: the
+// documented flow is to replace the generated bootstrap login with an operator
+// account, after which "admin" names nothing in particular. An operator who
+// completed setup as, say, `virant` was therefore locked out of every roundtable
+// and workflow policy mutation on their own appliance, with the browser
+// reporting only "administrator access required".
+//
+// Falls back to "admin" when no record exists at all, which preserves the
+// previous behaviour for an appliance that has neither marker.
+func (s *server) adminUsername() string {
+	// The gate this backs runs on every policy mutation, including paths whose
+	// callers hold no config (setupAccountDir dereferences cfg). Never panic a
+	// request on the way to a deny.
+	if s == nil || s.cfg == nil {
+		return "admin"
+	}
+	if username, ok := readReplacementUsername(s.setupAccountMarker()); ok {
+		return username
+	}
+	if username, ok := s.pendingBootstrapUsername(); ok {
+		return username
+	}
+	if _, username, ok := readBootstrapUser(s.setupAccountBootstrapUser()); ok && username != "" {
+		return username
+	}
+	return "admin"
+}
+
+// isAdmin reports whether the authenticated browser identity is the appliance
+// administrator. requireAuth injects the username, so it is already trusted.
+func (s *server) isAdmin(r *http.Request) bool {
+	user := currentUser(r)
+	return user != "" && user == s.adminUsername()
 }
