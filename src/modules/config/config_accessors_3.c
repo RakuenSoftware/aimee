@@ -1044,6 +1044,18 @@ const char *config_charter_tone_boundaries(int index)
    return buf;
 }
 
+const char *config_identity_working_profile_injection_fields(int index)
+{
+   static _Thread_local char buf[CONFIG_WORKING_PROFILE_FIELD_LEN];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_WORKING_PROFILE_ALLOW_MAX))
+      return buf;
+   config_field_read(offsetof(config_t, identity_working_profile_injection_fields) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
 const char *config_compact_per_tool(int index)
 {
    static _Thread_local char buf[128];
@@ -1245,21 +1257,6 @@ int config_set_memory_maintenance_summarize_enabled(int value)
    if (rc == 0)
    {
       cfg->memory_maintenance_summarize_enabled = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_code_cochange_git_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->code_cochange_git_enabled = value;
       rc = config_save(cfg);
    }
    free(cfg);

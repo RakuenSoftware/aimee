@@ -134,14 +134,34 @@ def members():
     # are not config_t fields at all — generating offsetof() for those is a
     # compile error, and a same-named accessor would be a lie about what it
     # reads. Track brace depth: depth 1 is config_t itself.
+    # A declaration is a logical statement, not a physical line. clang-format
+    # wraps a long one across lines, and matching per-line silently skipped
+    # those: identity_working_profile_injection_fields got no indexed accessor
+    # for no reason other than its [CONFIG_...][CONFIG_...] not fitting on one
+    # line, while the charter arrays beside it did. A field losing its accessor
+    # because of formatting is a silent hole in the encapsulation surface, so
+    # accumulate until the ';' and match the joined statement.
     depth = 0
+    pending = ""
     for line in body.splitlines():
         line = line.strip()
         opens, closes = line.count("{"), line.count("}")
         at_top = depth == 1 and opens == 0
         depth += opens - closes
         if not at_top:
+            pending = ""
             continue
+        # Preprocessor lines are not part of any declaration and do not end in
+        # ';'. Accumulating one swallows the field declared after it — that is
+        # how compact_enabled, worktree_stale_secs and aux_enabled (each
+        # preceded by a #define) lost their accessors on the first cut of this.
+        if line.startswith("#"):
+            continue
+        pending = f"{pending} {line}".strip() if pending else line
+        if not pending.endswith(";"):
+            continue
+        line = " ".join(pending.split())
+        pending = ""
         m = re.match(
             r"^(unsigned\s+int|int64_t|uint32_t|size_t|time_t|unsigned|int|long|double|float|char)"
             r"\s+([a-z_][a-z0-9_]*)\s*(\[[^;]*\])?\s*;$",
@@ -151,6 +171,12 @@ def members():
             continue
         base, name, arr = m.groups()
         base = "unsigned int" if base == "unsigned" else base
+        # The 2-D split below is index arithmetic that assumes "][" are adjacent.
+        # A wrapped declaration joins as "] [", which silently produced
+        # "char buf[[CONFIG_..." — strip whitespace so the shape a field is
+        # declared in cannot change the accessor generated for it.
+        if arr:
+            arr = re.sub(r"\s+", "", arr)
         if name in SKIP or f"config_{name}" in taken:
             continue
         if base == "char":

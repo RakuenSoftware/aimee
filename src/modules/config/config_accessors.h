@@ -1007,6 +1007,7 @@ const char *config_charter_safety_axioms(int index);
 const char *config_charter_hard_constraints(int index);
 const char *config_charter_values(int index);
 const char *config_charter_tone_boundaries(int index);
+const char *config_identity_working_profile_injection_fields(int index);
 const char *config_compact_per_tool(int index);
 const char *config_mcp_osv_allow(int index);
 const char *config_computer_use_allowed_domains(int index);

@@ -18,6 +18,21 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
+int config_set_reasoning_time_limit_ms(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->reasoning_time_limit_ms = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
 int config_set_bandit_exploration_fraction(double value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
@@ -1892,21 +1907,6 @@ int config_set_memory_cognify_model(const char *value)
    if (rc == 0)
    {
       snprintf(cfg->memory_cognify_model, sizeof(cfg->memory_cognify_model), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_cognify_command(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->memory_cognify_command, sizeof(cfg->memory_cognify_command), "%s", value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);

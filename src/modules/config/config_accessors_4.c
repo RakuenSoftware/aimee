@@ -18,6 +18,21 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
+int config_set_code_cochange_git_enabled(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->code_cochange_git_enabled = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
 int config_set_wfe_proposals_autoscan_enabled(int value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
@@ -1902,21 +1917,6 @@ int config_set_verify_enabled(int value)
    if (rc == 0)
    {
       cfg->verify_enabled = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_roundtable_replay_verify_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->roundtable_replay_verify_enabled = value;
       rc = config_save(cfg);
    }
    free(cfg);
