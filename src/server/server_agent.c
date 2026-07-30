@@ -484,7 +484,8 @@ static cJSON *server_agent_to_json(const agent_t *ag)
       cJSON_AddBoolToObject(obj, "admission_available", capacity);
 
    agent_admit_capacity_info_t capacity_info;
-   if (agent_admission_probe_info(ag->name, ag->model, ag->max_parallel, &capacity_info) ||
+   if (agent_admission_probe_info(ag->name, ag->model[0] ? ag->model : ag->name,
+                                  ag->max_parallel, &capacity_info) ||
        capacity_info.reason != AGENT_ADMIT_CAPACITY_INVALID)
    {
       cJSON_AddNumberToObject(obj, "admission_capacity", capacity_info.available);

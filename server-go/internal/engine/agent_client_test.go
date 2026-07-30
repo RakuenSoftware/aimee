@@ -1352,6 +1352,40 @@ func TestDelegateRetriesAtomicCapacityRaceOnAnotherRoute(t *testing.T) {
 	}
 }
 
+func TestDelegateFallsBackToBlockingAdmissionAfterCapacityRaces(t *testing.T) {
+	var launches int
+	var finalWait any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			launches++
+			if launches < 3 {
+				http.Error(w, "agent at concurrency limit [aimee_err=concurrency_limit]", http.StatusConflict)
+				return
+			}
+			finalWait = payload["wait_for_admission"]
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 3})
+		case "/v1/delegate/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "ok", "agent_name": "waited"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.Delegate(t.Context(), DelegateRequest{
+		Role: "review", Persona: "qa", Delegate: "raced", routeSelected: true, Prompt: "review",
+	})
+	if err != nil || result.Response != "ok" || finalWait != true {
+		t.Fatalf("Delegate() = %+v, %v; launches=%d wait=%v", result, err, launches, finalWait)
+	}
+}
+
 func TestDelegateAdmissionWaitCancellationIsTyped(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/delegate/run" {

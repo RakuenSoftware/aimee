@@ -750,6 +750,8 @@ void delegate_worker(void *arg)
    int tier_override = cJSON_IsNumber(jtier) ? (int)jtier->valuedouble : -1;
    const char *via_name = cJSON_IsString(jvia) ? jvia->valuestring : NULL;
    const char *participant = cJSON_IsString(jparticipant) ? jparticipant->valuestring : NULL;
+   int wait_for_admission =
+       cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "wait_for_admission"));
    cJSON *jacp_cmd = cJSON_GetObjectItemCaseSensitive(req, "acp_command");
    cJSON *jacp_args = cJSON_GetObjectItemCaseSensitive(req, "acp_args");
    const char *acp_command =
@@ -930,6 +932,7 @@ void delegate_worker(void *arg)
     * matches the previous behaviour for every existing caller. */
    agent_scope_t scope =
        cJSON_IsString(jscope) ? agent_scope_from_string(jscope->valuestring) : AGENT_SCOPE_UNSET;
+   agent_route_set_capacity_wait(wait_for_admission);
    {
       char route_err[256];
       unsigned inferred_caps = 0;
@@ -982,25 +985,37 @@ void delegate_worker(void *arg)
                                              drop_deprecated, route_err, sizeof(route_err)) != 0 ||
           delegate_route_preflight(&acfg, role, route_err, sizeof(route_err)) != 0)
       {
+         agent_route_set_capacity_wait(0);
          delegation_compute_error(cctx, route_err);
          compute_ctx_free(cctx);
          return;
       }
    }
+   if (!wait_for_admission)
+      agent_route_set_capacity_wait(0);
 
    config_t route_cfg;
    config_load(&route_cfg);
    target_agent =
        agent_route_with_caps_scoped(&acfg, role, &route_cfg, required_caps, min_context, scope);
+   agent_route_set_capacity_wait(0);
    if (!target_agent)
    {
-      char caps_buf[128];
-      model_capability_format_flags(required_caps, caps_buf, sizeof(caps_buf));
       char errmsg[256];
-      snprintf(errmsg, sizeof(errmsg),
-               "no configured model supports required capabilities (caps=%s, min_context=%d, "
-               "scope=%s)",
-               caps_buf[0] ? caps_buf : "none", min_context, agent_scope_name(scope));
+      if (agent_route_role_saturated(&acfg, role))
+      {
+         snprintf(errmsg, sizeof(errmsg),
+                  "no free capacity for role '%s' [aimee_err=no_free_capacity]", role);
+      }
+      else
+      {
+         char caps_buf[128];
+         model_capability_format_flags(required_caps, caps_buf, sizeof(caps_buf));
+         snprintf(errmsg, sizeof(errmsg),
+                  "no configured model supports required capabilities (caps=%s, min_context=%d, "
+                  "scope=%s)",
+                  caps_buf[0] ? caps_buf : "none", min_context, agent_scope_name(scope));
+      }
       delegation_compute_error(cctx, errmsg);
       compute_ctx_free(cctx);
       return;

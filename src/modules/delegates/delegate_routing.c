@@ -454,10 +454,15 @@ int delegate_apply_route_overrides(agent_config_t *cfg, const char *role, const 
       }
    }
 
+   int role_saturated = agent_route_role_saturated(cfg, role);
    agent_t *target = agent_route(cfg, role);
    if (!target)
    {
-      route_err(errbuf, errbuf_sz, "no agent available for role '%s'", role, NULL);
+      if (role_saturated)
+         route_err(errbuf, errbuf_sz,
+                   "no free capacity for role '%s' [aimee_err=no_free_capacity]", role, NULL);
+      else
+         route_err(errbuf, errbuf_sz, "no agent available for role '%s'", role, NULL);
       return -1;
    }
    if (target && model_override && model_override[0])
@@ -474,9 +479,14 @@ int delegate_route_preflight(agent_config_t *cfg, const char *role, char *errbuf
       route_err(errbuf, errbuf_sz, "%s", "missing delegate role", NULL);
       return -1;
    }
+   int role_saturated = agent_route_role_saturated(cfg, role);
    if (!agent_route(cfg, role))
    {
-      route_err(errbuf, errbuf_sz, "no agent available for role '%s'", role, NULL);
+      if (role_saturated)
+         route_err(errbuf, errbuf_sz,
+                   "no free capacity for role '%s' [aimee_err=no_free_capacity]", role, NULL);
+      else
+         route_err(errbuf, errbuf_sz, "no agent available for role '%s'", role, NULL);
       return -1;
    }
    return 0;

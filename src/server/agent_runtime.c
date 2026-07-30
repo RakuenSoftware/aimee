@@ -248,7 +248,7 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
    agent_admit_req_t admit_req = {
        .ctx_handle = admission_ctx(ag, admit_ctxbuf, sizeof(admit_ctxbuf)),
        .agent = ag->name,
-       .model = ag->model,
+       .model = ag->model[0] ? ag->model : ag->name,
        .per_agent_max = ag->max_parallel,
        .priority = (admit_deleg && admit_deleg[0]) ? AGENT_ADMIT_PRIORITY_BACKGROUND
                                                    : AGENT_ADMIT_PRIORITY_INTERACTIVE,

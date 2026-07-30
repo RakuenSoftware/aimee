@@ -584,7 +584,7 @@ func TestConfiguredRoundtableReportsEveryPhaseDeadline(t *testing.T) {
 			name:      "analysis",
 			preset:    `{"name":"default","seats":[{"model":"codex","persona":"security"},{"model":"minimax","persona":"qa"}],"min_successful":2,"discussion":true,"deadline_ms":90}`,
 			agents:    deadlineSeatAgents{},
-			wantPause: "panel_admission_deadline",
+			wantPause: "panel_unreachable",
 		},
 		{
 			name:      "discussion",

@@ -366,6 +366,36 @@ static void test_agent_routing_block_reason(void)
    assert(agent_routing_block_reason(&ok, detail, sizeof(detail)) == AGENT_ROUTE_OK);
 }
 
+static int route_capacity_probe(const agent_t *ag)
+{
+   return strcmp(ag->name, "saturated") != 0;
+}
+
+static void test_agent_route_capacity(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.agent_count = 2;
+   strcpy(cfg.agents[0].name, "saturated");
+   strcpy(cfg.agents[0].roles[0], "review");
+   cfg.agents[0].role_count = 1;
+   cfg.agents[0].enabled = 1;
+   strcpy(cfg.agents[1].name, "free");
+   strcpy(cfg.agents[1].roles[0], "review");
+   cfg.agents[1].role_count = 1;
+   cfg.agents[1].enabled = 1;
+
+   agent_set_route_capacity_probe(route_capacity_probe);
+   assert(agent_route(&cfg, "review") == &cfg.agents[1]);
+   cfg.agents[1].enabled = 0;
+   assert(agent_route(&cfg, "review") == NULL);
+   assert(agent_route_role_saturated(&cfg, "review"));
+   agent_route_set_capacity_wait(1);
+   assert(agent_route(&cfg, "review") == &cfg.agents[0]);
+   agent_route_set_capacity_wait(0);
+   agent_set_route_capacity_probe(NULL);
+}
+
 static void test_agent_route(void)
 {
    agent_config_t cfg;
@@ -3276,6 +3306,7 @@ int main(void)
    test_agent_supports_persona();
    test_agent_find();
    test_agent_route();
+   test_agent_route_capacity();
    test_agent_route_policy_filter();
    test_agent_route_primary_turn_marker();
    test_agent_route_client_only_claude_excluded();

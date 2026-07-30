@@ -122,6 +122,12 @@ void agent_set_route_capacity_probe(int (*fn)(const agent_t *agent));
 /* Current authoritative availability for this agent: 1 free, 0 saturated, -1
  * unknown because no probe is registered. Used by /v1/agent/list for Go WFE. */
 int agent_route_agent_capacity(const agent_t *agent);
+/* Selection-to-admission races may deliberately route the already selected
+ * candidate into blocking atomic admission. This override is worker-thread local. */
+void agent_route_set_capacity_wait(int on);
+/* Whether any otherwise routable, enabled role candidate is excluded only by
+ * authoritative admission capacity. */
+int agent_route_role_saturated(const agent_config_t *cfg, const char *role);
 
 /* Primary-turn marker for the delegate-policy filter. The PRIMARY chat turn
  * routes the provider-named agent through the same machinery as delegation

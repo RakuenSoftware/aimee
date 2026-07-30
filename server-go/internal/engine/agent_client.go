@@ -59,6 +59,9 @@ type DelegateRequest struct {
 	// operator pin. A selected seat may be generically rerouted after a terminal
 	// provider failure; an operator pin never may.
 	routeSelected bool
+	// waitForAdmission is set only after alternate routing lost a genuine
+	// selection-to-admission race. It requests bounded blocking admission.
+	waitForAdmission bool
 	// acceptPartial is reserved for native branch-producing blocks whose worktree output
 	// is independently committed and verified by the Go native runner. Structured
 	// and prose blocks must receive a complete resource-plane result.
@@ -273,6 +276,9 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 		request.RetryTag = fmt.Sprintf("route-retry:%d", attempt+1)
 		request.Delegate = ""
 		request.routeSelected = false
+		if capacityRace && attempt+2 == maxRouteAttempts {
+			request.waitForAdmission = true
+		}
 		if originalCostLimit > 0 {
 			request.MaxCostUSD = originalCostLimit - totalCost
 			if request.MaxCostUSD <= 0 {
@@ -297,6 +303,9 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 	// explicit positive pin from the workflow, never an exclusion list.
 	if request.Delegate != "" {
 		payload["via"] = request.Delegate
+	}
+	if request.waitForAdmission {
+		payload["wait_for_admission"] = true
 	}
 	if request.Participant != "" {
 		payload["participant"] = request.Participant
@@ -327,7 +336,10 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 					return DelegateResult{}, ErrDelegateAdmissionWaitExpired
 				}
 				if isCapacityRejection(rejected.detail) {
-					return DelegateResult{}, ErrDelegateAtCapacity
+					if request.routeSelected || request.RetryTag != "" {
+						return DelegateResult{}, ErrDelegateAtCapacity
+					}
+					return DelegateResult{}, ErrNoFreeDelegateCapacity
 				}
 			}
 			return DelegateResult{}, delegateExecutionError(err, !errors.As(err, &rejected), false, 0)
@@ -364,7 +376,10 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 	unassignedSince := time.Now()
 	for {
 		if err := ctx.Err(); err != nil {
-			_ = c.cancelRemoteAndForget(launched.JobID, key, ctx)
+			outcome := c.cancelRemoteOutcome(launched.JobID, key, ctx)
+			if request.waitForAdmission && errors.Is(outcome, ErrDelegateAdmissionWaitExpired) {
+				return DelegateResult{}, outcome
+			}
 			return DelegateResult{}, delegateExecutionError(err, true, false, 0)
 		}
 		var status struct {
@@ -377,7 +392,10 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 		}
 		if err := c.doJSON(ctx, http.MethodPost, "/v1/delegate/status", map[string]any{"job_id": launched.JobID, "full_result": true, "result_limit": -1}, &status); err != nil {
 			if ctx.Err() != nil {
-				_ = c.cancelRemoteAndForget(launched.JobID, key, ctx)
+				outcome := c.cancelRemoteOutcome(launched.JobID, key, ctx)
+				if request.waitForAdmission && errors.Is(outcome, ErrDelegateAdmissionWaitExpired) {
+					return DelegateResult{}, outcome
+				}
 				return DelegateResult{}, delegateExecutionError(ctx.Err(), true, false, 0)
 			}
 			// Once the resource plane has acknowledged that a job is waiting
@@ -388,7 +406,10 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 			if !unassignedSince.IsZero() {
 				select {
 				case <-ctx.Done():
-					_ = c.cancelRemoteAndForget(launched.JobID, key, ctx)
+					outcome := c.cancelRemoteOutcome(launched.JobID, key, ctx)
+					if request.waitForAdmission && errors.Is(outcome, ErrDelegateAdmissionWaitExpired) {
+						return DelegateResult{}, outcome
+					}
 					return DelegateResult{}, ctx.Err()
 				case <-ticker.C:
 					continue
@@ -446,7 +467,10 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 				return DelegateResult{}, ErrDelegateAdmissionWaitExpired
 			}
 			if isCapacityRejection(detail) {
-				return DelegateResult{}, ErrDelegateAtCapacity
+				if request.routeSelected || request.RetryTag != "" {
+					return DelegateResult{}, ErrDelegateAtCapacity
+				}
+				return DelegateResult{}, ErrNoFreeDelegateCapacity
 			}
 			if detail != "" {
 				return DelegateResult{}, delegateExecutionError(fmt.Errorf("%w: job %d %s: %s", ErrDelegateTerminal, launched.JobID, status.JobStatus, detail), true, status.CostKnown, status.CostUSD)
@@ -777,6 +801,39 @@ func (c *HTTPAgentClient) cancelRemoteAndForget(jobID int, key string, parent co
 	defer forgetCancel()
 	_, err := c.store.ForgetDelegateJobIfMatches(forgetCtx, key, jobID)
 	return err
+}
+
+func (c *HTTPAgentClient) cancelRemoteOutcome(jobID int, key string, parent context.Context) error {
+	cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(parent), delegateCancelTimeout)
+	defer cancel()
+	var response struct {
+		Cancelled *bool `json:"cancelled"`
+	}
+	if err := c.doJSON(cancelCtx, http.MethodPost, "/v1/jobs/cancel",
+		map[string]any{"job_id": jobID, "reason": "WFE turn cancelled"}, &response); err != nil ||
+		response.Cancelled == nil || !*response.Cancelled {
+		return ErrDelegateCancelUnacknowledged
+	}
+	statusCtx, statusCancel := context.WithTimeout(context.Background(), delegateForgetTimeout)
+	defer statusCancel()
+	var status struct {
+		Error  string `json:"error"`
+		Result string `json:"result"`
+	}
+	waitExpired := false
+	if err := c.doJSON(statusCtx, http.MethodPost, "/v1/delegate/status",
+		map[string]any{"job_id": jobID, "full_result": true, "result_limit": -1}, &status); err == nil {
+		waitExpired = isAdmissionWaitCancellation(firstNonempty(strings.TrimSpace(status.Error), strings.TrimSpace(status.Result)))
+	}
+	if c.store != nil && key != "" {
+		forgetCtx, forgetCancel := context.WithTimeout(context.Background(), delegateForgetTimeout)
+		_, _ = c.store.ForgetDelegateJobIfMatches(forgetCtx, key, jobID)
+		forgetCancel()
+	}
+	if waitExpired {
+		return ErrDelegateAdmissionWaitExpired
+	}
+	return parent.Err()
 }
 
 func (c *HTTPAgentClient) doJSON(ctx context.Context, method, path string, input, output any) error {

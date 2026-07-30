@@ -168,10 +168,19 @@ int agent_route_agent_capacity(const agent_t *agent)
    return g_route_capacity_probe(agent) ? 1 : 0;
 }
 
+static _Thread_local int g_route_capacity_wait;
+
 static int agent_has_free_slot(const agent_t *ag)
 {
+   if (g_route_capacity_wait)
+      return 1;
    int available = agent_route_agent_capacity(ag);
    return available != 0; /* unknown keeps filter-less CLI/test builds routable */
+}
+
+void agent_route_set_capacity_wait(int on)
+{
+   g_route_capacity_wait = on ? 1 : 0;
 }
 
 /* See agent_config.h: marks the current thread's turn as PRIMARY (not
@@ -486,6 +495,20 @@ static agent_t *agent_primary_turn_default(agent_config_t *cfg, const char *role
       }
    }
    return ag;
+}
+
+int agent_route_role_saturated(const agent_config_t *cfg, const char *role)
+{
+   if (!cfg || !role || !role[0])
+      return 0;
+   for (int i = 0; i < cfg->agent_count; i++)
+   {
+      const agent_t *ag = &cfg->agents[i];
+      if (ag->enabled && agent_supports_role(ag, role) && agent_is_available_for_routing(ag) &&
+          agent_route_agent_capacity(ag) == 0)
+         return 1;
+   }
+   return 0;
 }
 
 agent_t *agent_route(agent_config_t *cfg, const char *role)

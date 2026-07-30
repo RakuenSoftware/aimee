@@ -410,6 +410,16 @@ agent_t *agent_route(agent_config_t *cfg, const char *role)
    (void)role;
    return cfg && cfg->agent_count > 0 ? &cfg->agents[0] : NULL;
 }
+void agent_route_set_capacity_wait(int on)
+{
+   (void)on;
+}
+int agent_route_role_saturated(const agent_config_t *cfg, const char *role)
+{
+   (void)cfg;
+   (void)role;
+   return 0;
+}
 agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const config_t *sys_cfg,
                                unsigned required_caps, int min_context)
 {

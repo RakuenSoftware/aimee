@@ -931,8 +931,7 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 		pauseReason := "panel_unreachable"
 		if strings.Contains(analysis.Unreachable, "no_free_capacity:") {
 			pauseReason = "panel_no_free_capacity"
-		} else if strings.Contains(analysis.Unreachable, "deadline_expired_while_waiting:") ||
-			(deadlineHit && strings.Contains(analysis.Unreachable, "deadline_expired:")) {
+		} else if strings.Contains(analysis.Unreachable, "deadline_expired_while_waiting:") {
 			pauseReason = "panel_admission_deadline"
 		}
 		return StepResult{Status: StepPending, PauseReason: pauseReason, Detail: analysis.Unreachable, CostUSD: analysis.CostUSD, CostUnknown: analysis.CostUnknown, Roundtable: rt}, nil
