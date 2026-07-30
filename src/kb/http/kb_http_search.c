@@ -97,6 +97,8 @@ int kb_http_search_facets(const char *body, const char *project, int all_project
       kbhs_excerpt(rows[i].payload_json, excerpt, sizeof(excerpt));
 
       cJSON *hit = cJSON_CreateObject();
+      cJSON_AddStringToObject(hit, "project",
+                              strcmp(rows[i].scope_kind, "project") == 0 ? rows[i].scope_id : "");
       cJSON_AddStringToObject(hit, "artifact_id", rows[i].id);
       cJSON_AddNumberToObject(hit, "score", 1.0);
       cJSON_AddStringToObject(hit, "kind", rows[i].kind);

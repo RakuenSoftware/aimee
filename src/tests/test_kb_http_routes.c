@@ -5418,6 +5418,7 @@ static void test_search_facet_filter(void)
    assert(s == 200);
    assert(strstr(buf, "\"fusion_mode_used\":\"facet\"") != NULL);
    assert(strstr(buf, "\"artifact_id\":\"art-facet-1\"") != NULL);
+   assert(strstr(buf, "\"project\":\"proj-alpha\"") != NULL);
    assert(strstr(buf, "\"kind\":\"doc_summary\"") != NULL);
    assert(strstr(buf, "\"total_hits\":1") != NULL);
    /* Bound to the active release by default (stub returns 7) and cites it. */
@@ -5449,6 +5450,8 @@ static void test_search_facet_scope_all_keeps_active_project_first(void)
    const char *local = strstr(buf, "\"scope_id\":\"proj-alpha\"");
    const char *other = strstr(buf, "\"scope_id\":\"proj-other\"");
    assert(local && other && local < other);
+   assert(strstr(buf, "\"project\":\"proj-alpha\"") != NULL);
+   assert(strstr(buf, "\"project\":\"proj-other\"") != NULL);
 }
 
 /* POST /v1/search without filters keeps the existing non-facet search path. */
