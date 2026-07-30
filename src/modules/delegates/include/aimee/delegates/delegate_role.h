@@ -56,6 +56,16 @@ const char *delegate_role_canonicalize(const char *role);
  * built-in template no longer exist. */
 const char *delegate_role_removed_reason(const char *role);
 
+/* 1 when `role` (or its canonical alias) names a real delegate role: a built-in
+ * role, or one an operator defined with a project/user role template.
+ * `project_root` may be NULL to skip the project-level template lookup.
+ *
+ * Dispatch must refuse an unknown name rather than route it. An unrecognized
+ * role has no prompt template, no write classification and no agent that can
+ * declare it, so it runs as a read-only delegate with a generic prompt while the
+ * caller believes it asked for something specific. */
+int delegate_role_known(const char *project_root, const char *role);
+
 /* Returns 1 if role is a write-capable role (code or refactor, including
  * aliases).  Write roles are subject to no-op edit detection. */
 int delegate_role_is_write(const char *role);

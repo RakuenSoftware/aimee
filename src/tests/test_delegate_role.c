@@ -220,6 +220,51 @@ static void test_culled_persona_roles_are_rejected(void)
    printf("  PASS: test_culled_persona_roles_are_rejected\n");
 }
 
+/* An unknown role name used to be accepted verbatim and dispatched: no template
+ * (generic prompt), no write classification (silently read-only), no agent role
+ * an operator could grant. That is the same hazard the removed-role blacklist
+ * guards, so the check has to be a positive list, not six special cases. */
+static void test_unknown_roles_are_not_known(void)
+{
+   static const char *const unknown[] = {"bogusrole", "revieww", "delete-everything", "", NULL};
+   for (int i = 0; unknown[i]; i++)
+      assert(delegate_role_known(NULL, unknown[i]) == 0);
+   assert(delegate_role_known(NULL, NULL) == 0);
+
+   /* Culled names are not known either — dispatch must reach the removed-role
+    * reason, never treat them as a live role. */
+   static const char *const culled[] = {"prose", "line-edit", "lyric", "hook", NULL};
+   for (int i = 0; culled[i]; i++)
+      assert(delegate_role_known(NULL, culled[i]) == 0);
+   printf("  PASS: test_unknown_roles_are_not_known\n");
+}
+
+/* Every shipped role, and every alias target, must be known. This is the drift
+ * guard: adding an alias whose canonical name is not a real role would make the
+ * alias dispatch-refused, and the failure would only show up in production. */
+static void test_known_roles_cover_documented_and_aliased(void)
+{
+   static const char *const roles[] = {"review",  "validate", "diagnose",   "code",
+                                       "refactor", "explain",  "draft",     "execute",
+                                       "summarize", "format",  "search",    "reason",
+                                       "plan",     "continuity", "beat-check", NULL};
+   for (int i = 0; roles[i]; i++)
+      assert(delegate_role_known(NULL, roles[i]) == 1);
+
+   static const char *const aliases[] = {"implement", "build",   "reviewer",  "verifier",
+                                         "test",      "check",   "evaluate",  "inspect",
+                                         "research",  "enforce", "recall",    "synthesize",
+                                         "rank-fuse", "classify-score", "planner", "planning",
+                                         "evaluate-optimize", NULL};
+   for (int i = 0; aliases[i]; i++)
+   {
+      assert(delegate_role_known(NULL, aliases[i]) == 1);
+      /* and the alias must resolve INTO the known set, not merely match it */
+      assert(delegate_role_known(NULL, delegate_role_canonicalize(aliases[i])) == 1);
+   }
+   printf("  PASS: test_known_roles_cover_documented_and_aliased\n");
+}
+
 static void test_inspection_turn_policies(void)
 {
    assert(delegate_default_max_turns_for_role("review") == 20);
@@ -335,6 +380,8 @@ int main(void)
    test_is_write_null_empty();
    test_novel_roles();
    test_culled_persona_roles_are_rejected();
+   test_unknown_roles_are_not_known();
+   test_known_roles_cover_documented_and_aliased();
    test_inspection_turn_policies();
    test_apply_max_turns_policy();
    test_apply_max_turns_cap();

@@ -775,6 +775,41 @@ void delegate_worker(void *arg)
       compute_ctx_free(cctx);
       return;
    }
+   /* The role must name a real role, and the persona a real persona. Both used to
+    * be taken on trust here, so `delegate bogusrole` and `--persona nosuchpersona`
+    * ran to completion: the unknown role fell back to a generic prompt with
+    * read-only tool defaults, and the missing persona file left the delegate with
+    * no identity or principles at all — in both cases returning a plausible answer
+    * to a caller who believed its request had been honoured. The CLI guards these
+    * locally, but the /v1 route reaches this worker directly and bypassed it, so
+    * the check belongs here, at the single boundary every builder crosses. */
+   {
+      const char *removed = delegate_role_removed_reason(role);
+      if (removed)
+      {
+         delegation_compute_error(cctx, removed);
+         compute_ctx_free(cctx);
+         return;
+      }
+   }
+   if (!delegate_role_known(cwd && cwd[0] ? cwd : NULL, role))
+   {
+      char rolemsg[192];
+      snprintf(rolemsg, sizeof(rolemsg),
+               "unknown delegate role '%s' (see 'aimee delegate --list-roles')", role);
+      delegation_compute_error(cctx, rolemsg);
+      compute_ctx_free(cctx);
+      return;
+   }
+   if (!persona_exists(cwd && cwd[0] ? cwd : NULL, persona_override))
+   {
+      char personamsg[192];
+      snprintf(personamsg, sizeof(personamsg),
+               "unknown persona '%s' (see 'aimee persona list')", persona_override);
+      delegation_compute_error(cctx, personamsg);
+      compute_ctx_free(cctx);
+      return;
+   }
    int explicit_tools = cJSON_IsTrue(jtools),
        force_tools = delegate_role_auto_tools_for_invocation(role, max_turns, explicit_tools);
    force_tools = force_tools || (toolset_override && toolset_override[0]);
