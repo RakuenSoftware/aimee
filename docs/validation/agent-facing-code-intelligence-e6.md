@@ -6,6 +6,7 @@
 - Prompt: `benchmarks/code-agent-effectiveness/prompts/e6-agent-task-v1.md`
 - Raw record: `benchmarks/code-agent-effectiveness/results/e6-20260730.json`
 - Summary: `benchmarks/code-agent-effectiveness/results/e6-20260730-summary.json`
+- Delivery: PR #2180 merged as `6969b2bca56f7d1d278e0796ce1213f40c3bad51` after 24/24 CI checks passed
 
 ## Result and decision
 
