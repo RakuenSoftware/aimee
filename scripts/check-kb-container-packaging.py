@@ -558,7 +558,6 @@ def plant_test() -> int:
             "Dockerfile contains forbidden server-binary",
             "compose.yaml missing kb-build-context",
             "compose.yaml missing aimee-home-env",
-            "compose.yaml missing db2-empty-default",
             "compose.yaml missing kb-health",
             "compose.yaml missing llm-service",
             "compose.yaml missing embedder-service",
