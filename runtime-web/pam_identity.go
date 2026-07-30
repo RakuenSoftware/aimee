@@ -9,6 +9,11 @@ import (
 	"github.com/RakuenSoftware/smoothgui/auth"
 )
 
+// errInvalidWebchatCredential marks a password check that failed for a real
+// account, as opposed to a broken authenticator. The auth handler maps it to a
+// 401 rather than a 500.
+var errInvalidWebchatCredential = errors.New("invalid webchat credential")
+
 // managedUsers is the slice of auth.UserManager this file needs, named as an
 // interface so the decision logic is testable without provisioning real system
 // accounts. auth.UserManager satisfies it.

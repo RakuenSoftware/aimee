@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# Vault-only webchat migration checks without touching host accounts.
+# Webchat credential-custody checks without touching host accounts.
+#
+# The contract these assert changed with PAM login: a host password is not one of
+# aimee's own secrets, so logins are NOT sealed into the Vault and their shadow
+# verifiers are NOT erased. The plaintext bootstrap file is still removed — after
+# the account is provisioned from it — and the TLS key, which IS aimee's secret,
+# still goes to the Vault.
 set -euo pipefail
 
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -13,14 +19,24 @@ sealed_dir="$test_dir/sealed-vault-fixture"
 mkdir -p "$sealed_dir"
 cleared_users="$test_dir/cleared-users"
 : > "$cleared_users"
+# Violations are recorded as FILES, not `exit`: these stubs run inside pipelines
+# and command substitutions, where an exit only kills the subshell and the check
+# would pass while printing its own failure.
+violations="$test_dir/violations"
+: > "$violations"
 
 runuser() {
   [[ ${1:-} == -u && ${2:-} == aimee && ${3:-} == -- &&
      ${4:-} == aimee-server && ${5:-} == --webchat-vault-seal ]]
   case ${6:-} in
-    legacy_primary | legacy_hashes | tls_key)
+    tls_key)
       # Test-only fake Vault. Production's C helper encrypts this stdin directly.
       tee "$sealed_dir/${6}" >/dev/null
+      ;;
+    legacy_primary | legacy_hashes)
+      # Sealing a login into the Vault is the behaviour this check now forbids.
+      printf 'sealed a host login into the Vault (%s)\n' "$6" >> "$violations"
+      cat >/dev/null
       ;;
     *) return 1 ;;
   esac
@@ -34,9 +50,16 @@ getent() {
   esac
 }
 usermod() {
-  [[ ${1:-} == --password && ${2:-} == '!' && -n ${3:-} ]]
-  printf '%s\n' "$3" >> "$cleared_users"
+  # Erasing a verifier would delete the credential PAM authenticates with.
+  if [[ ${1:-} == --password ]]; then
+    printf 'erased a shadow verifier (%s)\n' "$*" >> "$violations"
+    return 0
+  fi
+  printf '%s\n' "$*" >> "$cleared_users"
 }
+useradd() { printf 'useradd %s\n' "$*" >> "$cleared_users"; }
+groupadd() { :; }
+chpasswd() { cat >/dev/null; printf 'chpasswd\n' >> "$cleared_users"; }
 
 # shellcheck source=../deploy/container/runtime-web-lib.sh
 source "$repo_dir/deploy/container/runtime-web-lib.sh"
@@ -48,19 +71,18 @@ legacy_key='-----BEGIN EC PRIVATE KEY-----
 test-only-key-material
 -----END EC PRIVATE KEY-----'
 printf 'username=%s\npassword=%s\n' "$legacy_user" "$legacy_pass" > "$WEBCHAT_BOOTSTRAP_CREDENTIALS"
-printf '%s:%s\noperator:%s\n' "$legacy_user" "$legacy_hash" '$6$operator$verifier' > "$WEBCHAT_LOGIN_STORE"
 printf '%s\n' "$legacy_key" > "$WEBCHAT_LEGACY_TLS_KEY"
 
 migration_log=$(webchat_migrate_legacy_credentials)
+# The plaintext bootstrap file is removed once its account exists; the TLS key is
+# sealed. No login record reaches the Vault (the fake would have failed above).
 [[ ! -e $WEBCHAT_BOOTSTRAP_CREDENTIALS ]]
-[[ ! -e $WEBCHAT_LOGIN_STORE ]]
 [[ ! -e $WEBCHAT_LEGACY_TLS_KEY ]]
-[[ $(<"$sealed_dir/legacy_primary") == "$legacy_user:$legacy_pass" ]]
-grep -Fq "$legacy_hash" "$sealed_dir/legacy_hashes"
+[[ ! -e $sealed_dir/legacy_primary ]]
+[[ ! -e $sealed_dir/legacy_hashes ]]
 grep -Fq 'BEGIN EC PRIVATE KEY' "$sealed_dir/tls_key"
-for user in "$legacy_user" operator legacy aimee; do
-  grep -Fxq "$user" "$cleared_users"
-done
+# The account was provisioned before its plaintext source was deleted.
+grep -q 'chpasswd' "$cleared_users"
 for secret in "$legacy_pass" "$legacy_hash" test-only-key-material; do
   ! grep -Fq "$secret" <<<"$migration_log"
 done
@@ -83,3 +105,10 @@ disabled_log=$(webchat_prepare)
 grep -Fq 'browser UI disabled' <<<"$disabled_log"
 
 echo "webchat-vault-migration-check: ok"
+
+# Fail on anything the stubs recorded. Last, so every check has run first.
+if [[ -s $violations ]]; then
+  echo "webchat-vault-migration-check: FAILED" >&2
+  cat "$violations" >&2
+  exit 1
+fi
