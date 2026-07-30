@@ -258,7 +258,7 @@ CFG_KEY_DESC = {
     "(memory/code preview envelope on primary ingress turns; default on).",
     "code_context_mode": "Task-conditioned code packet rollout mode: `off` disables packet "
     "retrieval, `observe` retrieves and validates without changing model-visible bytes, and `on` "
-    "injects a bounded current-project packet on first/new-task turns (default `observe`).",
+    "injects a bounded current-project packet on first/new-task turns (default `on`).",
     "ingress_preinject_anthropic_enabled": "Inject the `<aimee-context>` envelope on the "
     "Anthropic-native /v1/messages passthrough too (default off).",
     "ingress_compress_enabled": "Enable ingress envelope compression: span-enrich code hits and "
