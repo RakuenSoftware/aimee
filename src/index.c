@@ -1025,6 +1025,8 @@ int index_blast_radius(const char *project, const char *file_path, blast_radius_
          }
          if (found < 0)
          {
+            if (out->dependent_count >= 64)
+               continue;
             found = out->dependent_count++;
             snprintf(out->dependents[found], MAX_PATH_LEN, "%s", resolved);
             snprintf(out->dependent_meta[found].project, sizeof(out->dependent_meta[found].project),

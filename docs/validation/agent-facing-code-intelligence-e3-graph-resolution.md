@@ -25,6 +25,7 @@ Validation performed:
 - unique co-edit projection coverage with explicit `projection` provenance, including a combined
   local-projection/cross-project fixture that proves every local edge precedes the external tail;
 - KB HTTP and client round-trip coverage for edge metadata;
+- client fail-closed coverage for legacy-only blast responses that cannot prove edge metadata;
 - successful `aimee-kb` and `aimee-blast-radius-eval` builds; and
 - the checked-in deterministic corpus updated to make exact identities, provenance, freshness, and
   zero substring collisions the acceptance contract.

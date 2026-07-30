@@ -1642,6 +1642,8 @@ int canonical_index_blast_radius(const char *project, const char *file_path, bla
          }
          if (found < 0)
          {
+            if (out->dependent_count >= CI_MAX_DEPS)
+               continue;
             found = out->dependent_count++;
             snprintf(out->dependents[found], MAX_PATH_LEN, "%s", resolved);
             snprintf(out->dependent_meta[found].project, sizeof(out->dependent_meta[found].project),

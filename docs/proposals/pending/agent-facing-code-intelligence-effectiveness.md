@@ -674,3 +674,12 @@ residual proposal instead of declaring the intended effectiveness outcome comple
   projection with a route-gated external import and asserts that no local edge follows an external
   edge. Roundtable run: `roundtable-5d582db9c64174793488f921` (artifact
   `a309798e4843249ac313deecef3b9749cc318845c4b95498325216b374f3d4b1`).
+- **E3 implementation round 2 — 2026-07-30 — changes requested, 3/3 participants, not
+  degraded.** The corrected local-first ordering was accepted. The synthesis repeated a projection
+  capacity concern that was already bounded by both loop conditions; E3 nevertheless adds the same
+  guard at each insertion site so the invariant survives future loop refactors. A valid finding
+  showed that the client accepted legacy-only arrays with empty metadata. New E3 clients now require
+  resolved top-level identity plus complete structured edge arrays and fail closed on legacy-only or
+  partial metadata; servers continue emitting legacy arrays additively for older consumers.
+  Roundtable run: `roundtable-15472c66ae1dccd6620b4b97` (artifact
+  `a8e925f87312534a4092416d4dec985621f5e0053be367bbab37d15b5be889fe`).
