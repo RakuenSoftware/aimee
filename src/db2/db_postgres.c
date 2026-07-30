@@ -868,7 +868,20 @@ resource_failure:
 
 /* Not a second opinion on the figure — the pool owns it. */
 #define DB2_DEFAULT_STATEMENT_TIMEOUT_MS DB2_POOL_HOLD_CEILING_MS
-#define DB2_CONNECT_TIMEOUT_S            "10"
+
+/* Same figure as the statement bound, and for the same reason: a lease must not
+ * outlive the pool's hold ceiling. statement_timeout only bounds a statement, so
+ * a unit of work that OPENS a transaction and then stalls before its next
+ * statement — waiting on a lock, an external call, anything not SQL — is
+ * invisible to it and holds its pool member indefinitely. Measured: leases held
+ * ~4.5 hours against a 5-minute ceiling, with statement_timeout correctly set
+ * the whole time, because nothing was executing to time out.
+ *
+ * Postgres ends the backend itself, so the blocked thread's next call fails, it
+ * unwinds, and the lease is RETURNED — the pool recovers without a restart,
+ * which is the outcome the reaper's give-up path cannot produce. */
+#define DB2_DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT_MS DB2_POOL_HOLD_CEILING_MS
+#define DB2_CONNECT_TIMEOUT_S                      "10"
 
 /* Out-of-range is a typo like any other, and the truncating cast makes it the
  * WORST kind: "4294967296" narrows to int 0, which is the sentinel for "no
@@ -914,6 +927,12 @@ static int db2_pg_timeout_ms_env(const char *var, int fallback)
 int db2_pg_statement_timeout_ms(void)
 {
    return db2_pg_timeout_ms_env("AIMEE_DB2_STATEMENT_TIMEOUT_MS", DB2_DEFAULT_STATEMENT_TIMEOUT_MS);
+}
+
+int db2_pg_idle_in_transaction_timeout_ms(void)
+{
+   return db2_pg_timeout_ms_env("AIMEE_DB2_IDLE_IN_TRANSACTION_TIMEOUT_MS",
+                                DB2_DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT_MS);
 }
 
 /* PQconnectdb accepts EITHER a keyword/value string ("host=db user=aimee") OR a
@@ -1401,11 +1420,22 @@ void *aimee_pg_open(const char *conninfo, char *errbuf, size_t errlen)
       return NULL;
    }
 
+   /* Both bounds, applied the same way and refused the same way. The idle bound
+    * is what releases a lease whose holder is stalled OUTSIDE a statement — the
+    * case statement_timeout structurally cannot see. */
    int timeout_ms = db2_pg_statement_timeout_ms();
-   if (timeout_ms > 0)
+   int idle_ms = db2_pg_idle_in_transaction_timeout_ms();
+   if (timeout_ms > 0 || idle_ms > 0)
    {
-      char sql[96];
-      snprintf(sql, sizeof sql, "SET statement_timeout = %d", timeout_ms);
+      char sql[192];
+      if (timeout_ms > 0 && idle_ms > 0)
+         snprintf(sql, sizeof sql,
+                  "SET statement_timeout = %d; SET idle_in_transaction_session_timeout = %d",
+                  timeout_ms, idle_ms);
+      else if (timeout_ms > 0)
+         snprintf(sql, sizeof sql, "SET statement_timeout = %d", timeout_ms);
+      else
+         snprintf(sql, sizeof sql, "SET idle_in_transaction_session_timeout = %d", idle_ms);
       PGresult *r = PQexec(conn, sql);
       int ok = r && PQresultStatus(r) == PGRES_COMMAND_OK;
       if (r)
