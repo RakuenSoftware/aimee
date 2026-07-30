@@ -112,9 +112,30 @@ The two tables are not in conflict — they answer different questions. Capabili
 (can it sort a random list?) is not usefulness (can it beat the embedder?). Only
 the second is the production question, and it had never been run.
 
-*A full-length 20x512 pipeline run is in flight to rule out truncation as the
-cause. Until it lands the claim is "reranking at deployable truncations degrades
-results", not "reranking is useless".*
+**Truncation is ruled out.** The same test at full length still degrades:
+
+| embedder | dense | + rerank 20x512 | + rerank 20x256 |
+|---|---:|---:|---:|
+| a25m | **0.5903** | 0.5381 (-0.052) | 0.5238 (-0.066) |
+| nomic + prefix | **0.6116** | 0.5543 (-0.057) | 0.5340 (-0.078) |
+
+Truncation makes it worse (-0.070 at 128 tokens) but is not the cause.
+**bge-reranker-v2-m3 degrades this pipeline at every configuration tested.**
+
+### The rule this implies, and why it does not condemn all rerankers
+
+A reranker helps only if **its capability exceeds the dense ranking it is
+handed**:
+
+| reranker | capability (unsorted) | dense ranking | can it help? |
+|---|---:|---:|---|
+| bge-reranker-v2-m3 | 0.6174 | 0.6116 | parity — **no** |
+| **gte-multilingual-reranker-base** | **0.7178** | 0.6116 | **+0.106 — possibly** |
+
+bge-v2-m3 is at parity with dense retrieval, so it can only shuffle. GTE scores
+0.106 higher on capability and has **not** been tested in-pipeline, because its
+torch path is broken and the working ONNX path is CPU-only. That test is the
+outstanding item; until it runs, path C is undecided rather than dead.
 
 ### If a reranker is kept: how to configure it
 
