@@ -288,13 +288,20 @@ func TestDocumentResumeRefreezesHumanRepairWithoutMeaninglessDelegateEdit(t *tes
 	if err := os.WriteFile(filepath.Join(workdir, "runbook.md"), []byte("reviewed and human-repaired\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, workdir, "add", "runbook.md")
-	gitRun(t, workdir, "commit", "-m", "human repair")
 	item, _ = store.WorkItem(ctx, "wi_root")
 	item.ContentHash = reviewedHash
 	item.Worktree = workdir
 	agents := &rejectDelegateAgents{}
 	runner := &NativeRunner{agents: agents, worktrees: manager, db: store}
+	request := StepRequest{WorkItem: item, Node: wfe.Node{ID: "document"},
+		Feedback: &wfe.ReviewFeedback{ArtifactHash: reviewedHash}}
+	if _, err := runner.mutate(ctx, request, true); err == nil || agents.calls != 1 {
+		t.Fatalf("dirty repair bypassed delegate: calls=%d err=%v", agents.calls, err)
+	}
+
+	gitRun(t, workdir, "add", "runbook.md")
+	gitRun(t, workdir, "commit", "-m", "human repair")
+	agents.calls = 0
 	result, err := runner.mutate(ctx, StepRequest{WorkItem: item, Node: wfe.Node{ID: "document"},
 		Feedback: &wfe.ReviewFeedback{ArtifactHash: reviewedHash}}, true)
 	if err != nil {

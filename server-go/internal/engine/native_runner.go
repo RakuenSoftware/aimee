@@ -524,7 +524,7 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	}
 	// A documentation gate can be resumed after a human repair commit. The
 	// reviewed hash then remains on both the work item and feedback artifact,
-	// while the exact frozen diff has changed. Send that new diff back through
+	// while the clean exact frozen diff has changed. Send that new diff back through
 	// freeze + roundtable rather than demanding that a delegate invent another
 	// edit solely to satisfy its "owned files changed" contract. This does not
 	// bypass review, and feedback left by an earlier gate cannot trigger it.
@@ -534,7 +534,11 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		if diffErr != nil {
 			return StepResult{}, diffErr
 		}
-		if wfe.Hash([]byte(diff)) != req.Feedback.ArtifactHash {
+		status, statusErr := gitText(ctx, workdir, "status", "--porcelain")
+		if statusErr != nil {
+			return StepResult{}, statusErr
+		}
+		if status == "" && wfe.Hash([]byte(diff)) != req.Feedback.ArtifactHash {
 			head, headErr := gitText(ctx, workdir, "rev-parse", "HEAD")
 			if headErr != nil {
 				return StepResult{}, headErr
