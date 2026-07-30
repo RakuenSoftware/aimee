@@ -5,6 +5,7 @@
  * its own TU holds cli_main.c under the source line limit. */
 #include "cli_client.h"
 #include "cli_session_start.h"
+#include "session_degraded_notice.h"
 #include "cJSON.h"
 #include "cli_attention_guard.h" /* attn_require_session_worktree, attn_session_isolation_blocked */
 #include "cmd_self_update.h"     /* aimee_self_update_notice */
@@ -242,6 +243,7 @@ static void ss_worktree_key(const char *sid, char *out, size_t cap)
  * the thin client links no workspace helpers) and surface a directive telling the
  * agent to enter it before its first mutating tool call. No-op when isolation is
  * off, the session is already inside a worktree, or there is no local git repo. */
+
 static void ss_append_worktree_isolation(struct ss_sbuf *ctx, const char *sid)
 {
    if (!attn_require_session_worktree())
@@ -386,6 +388,28 @@ static int handle_session_start_remote(const char *sid)
       }
       free(b.p);
       cJSON_Delete(resp);
+   }
+
+   /* Dependency health: if the knowledge service is down, the agent needs to know
+    * BEFORE it interprets an empty search as an authoritative "not found". Read
+    * the same /v1/ready snapshot the operator sees, so the two never disagree.
+    * A single GET, not ss_retry_post: this is advisory, and a server too sick to
+    * answer once is exactly the case the notice describes. Must run here, while
+    * endpoint/bearer are still live. */
+   {
+      int rstatus = 0;
+      cJSON *rdy = cli_http_request(endpoint, "GET", "/v1/ready", NULL, bearer,
+                                    SESSION_START_RECALL_TIMEOUT_MS, &rstatus);
+      if (rdy)
+      {
+         const cJSON *deps = cJSON_GetObjectItemCaseSensitive(rdy, "dependencies");
+         char notice[640];
+         if (ss_degraded_notice(cJSON_GetStringValue(cJSON_GetObjectItem(deps, "kb")),
+                                cJSON_GetStringValue(cJSON_GetObjectItem(deps, "retrieval")),
+                                notice, sizeof notice))
+            ss_add(&ctx, notice);
+         cJSON_Delete(rdy);
+      }
    }
 
    free(endpoint);
