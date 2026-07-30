@@ -92,17 +92,31 @@ Do not replace the workspace until a fresh clone has passed all checks on the sa
 
 - [ ] Confirm Git credentials can read the canonical HTTPS repository, then set and validate the repository-specific values.
 
-`WORKSPACE` is the affected repository path on the tier-bound volume; `CANONICAL_URL` is its canonical HTTPS repository URL; and `DEFAULT_BRANCH` is the branch the appliance should track.
+`WORKSPACE` is the affected repository path on the tier-bound volume; `CANONICAL_URL` is its canonical GitHub HTTPS repository URL in `https://github.com/<owner>/<repository>.git` form; and `DEFAULT_BRANCH` is the branch the appliance should track.
 
 ```sh
 export WORKSPACE='/path/on/tier-bound-volume/to/workspace'
-export CANONICAL_URL='https://forge.example/owner/repository.git'
+export CANONICAL_URL='https://github.com/owner/repository.git'
 export DEFAULT_BRANCH='main'
 
 printf 'WORKSPACE=%s\nCANONICAL_URL=%s\nDEFAULT_BRANCH=%s\n' \
   "$WORKSPACE" "$CANONICAL_URL" "$DEFAULT_BRANCH"
 test "${WORKSPACE#/}" != "$WORKSPACE"
-case "$CANONICAL_URL" in https://*) ;; *) false ;; esac
+repository_path=${CANONICAL_URL#https://github.com/}
+owner=${repository_path%%/*}
+repository_with_suffix=${repository_path#*/}
+repository=${repository_with_suffix%.git}
+
+test "$repository_path" != "$CANONICAL_URL" &&
+  test "$repository_with_suffix" != "$repository_path" &&
+  test "$repository_with_suffix" != "$repository" &&
+  test "${repository#*/}" = "$repository" &&
+  test "${#owner}" -le 127 &&
+  test "${#repository}" -le 127 &&
+  case "$owner" in [[:alnum:]]*) true ;; *) false ;; esac &&
+  case "$owner" in *[![:alnum:]._-]*) false ;; *) true ;; esac &&
+  case "$repository" in [[:alnum:]]*) true ;; *) false ;; esac &&
+  case "$repository" in *[![:alnum:]._-]*) false ;; *) true ;; esac
 test -n "$DEFAULT_BRANCH"
 git ls-remote --exit-code "$CANONICAL_URL" "refs/heads/$DEFAULT_BRANCH" >/dev/null
 ```
