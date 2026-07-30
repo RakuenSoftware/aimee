@@ -117,13 +117,19 @@ def load_registry():
 # `or` rather than a get() default: an EMPTY EMBEDDER_MODEL is set-but-blank, which a
 # default argument would not catch — and a caller that exports "" means "I did not
 # choose", not "serve the model called empty string".
-EMBEDDER_ID = model_key(os.environ.get("EMBEDDER_MODEL") or "nomic-embed-text-v2-moe")
 try:
     REGISTRY = load_registry()
     REGISTRY_ERROR = None
 except RegistryError as exc:
     REGISTRY = {}
     REGISTRY_ERROR = str(exc)
+
+# Unset falls back to the SOLE registered model rather than a hardcoded name: with one
+# bundled embedder "unset" has exactly one sensible answer, and naming it here would be a
+# second place to update. Ambiguous (more than one registered, none chosen) is left empty
+# so the refusal names what is available instead of picking for the operator.
+_DEFAULT_ID = next(iter(REGISTRY)) if len(REGISTRY) == 1 else ""
+EMBEDDER_ID = model_key(os.environ.get("EMBEDDER_MODEL") or _DEFAULT_ID)
 
 SPEC = REGISTRY.get(EMBEDDER_ID)
 # The repo id sentence-transformers loads. Refusing an unregistered model is the point:

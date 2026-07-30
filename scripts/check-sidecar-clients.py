@@ -133,7 +133,7 @@ def check_embed_remote_serving_id() -> None:
       - it does not require status=ok, because the identity is registry data and must be
         answerable while the model is still loading.
     """
-    state = {"status": "ok", "serving_id": "nomic-embed-text-v2-moe/d5a4d600fc8c24f0"}
+    state = {"status": "ok", "serving_id": "bekko-a25m/8721341054416418"}
 
     class HealthStub(BaseHTTPRequestHandler):
         def log_message(self, *a):  # quiet
@@ -158,7 +158,7 @@ def check_embed_remote_serving_id() -> None:
         # Still loading: the identity is registry data, so it must answer anyway.
         state["status"] = "loading"
         out = _run_args("embed-remote.py", env, ["--serving-id"])
-        assert out.strip() == "nomic-embed-text-v2-moe/d5a4d600fc8c24f0", repr(out)
+        assert out.strip() == "bekko-a25m/8721341054416418", repr(out)
 
         # An endpoint predating the field: empty output, exit 0 -> guard inactive.
         state["status"] = "ok"

@@ -204,10 +204,12 @@ COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
 COPY scripts/embedders.json /opt/aimee/embedders.json
 COPY scripts/embedder-server.py /opt/aimee/scripts/embedder-server.py
 
-# Bake the weights for EVERY registered embedder, so switching between them in the
-# wizard is a restart rather than a download, and an air-gapped install works. Pinned to
-# the registry's revision — a floating ref would let a rebuild change the vector space
-# silently.
+# Bake the weights for every registered embedder — one ships — so a fresh container
+# embeds with no download and an air-gapped install works. Pinned to the registry's
+# revision: a floating ref would let a rebuild change the vector space silently.
+#
+# A deployment that wants a wider embedder points AIMEE_EMBEDDER_URL at its own endpoint
+# rather than baking a second model in here.
 #
 # FETCH ONLY WHAT THE TORCH PATH LOADS. snapshot_download takes the whole repo by
 # default, and a repo may publish the same weights several times over: bekko ships an
@@ -237,10 +239,13 @@ SKIP = [
 def code_repos(snapshot_dir):
     """Repos holding this model's custom modelling code, from config.json auto_map.
 
-    A trust_remote_code model does not necessarily carry its own code: nomic's auto_map
-    points every class at `nomic-ai/nomic-bert-2048`, a SEPARATE repo. Downloading only
-    the weights leaves the loader reaching for the Hub at first use, which fails closed
-    under HF_HUB_OFFLINE — the whole point of baking. So follow the references.
+    A trust_remote_code model does not necessarily carry its own code — auto_map may point
+    every class at a SEPARATE repo. Downloading only the weights then leaves the loader
+    reaching for the Hub at first use, which fails closed under HF_HUB_OFFLINE, defeating
+    the point of baking. So follow the references.
+
+    The bundled embedder needs none of this (ModernBERT is native to transformers), but a
+    swapped-in model may, and the failure is a container that starts and cannot embed.
     """
     import os
     out = set()

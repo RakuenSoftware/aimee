@@ -38,9 +38,7 @@ export interface EmbedderChoice {
   dim: number;
   context: number;
   pooling: string;
-  source: string;
-  /** Whether this deployment can host the model itself. An entry without weight
-   * coordinates is still selectable — against an external endpoint. */
+  /** Whether the kb can serve this model itself — i.e. whether it is the bundled one. */
   local: boolean;
   prefixed: boolean;
 }
@@ -269,12 +267,17 @@ export interface PlacementOption {
  * adding a GPU embedder means adding an entry here and the guard keeps holding. */
 export function placementOptions(host: HostInfo | undefined, role?: Role): PlacementOption[] {
   if (role && !rolePlaceable(role)) {
+    // Two ways to embed, and neither is a placement of one of our containers: the kb
+    // serves the bundled model itself, or an operator points it at their own endpoint.
+    // The external option is the supported route above the bundled model's width — a
+    // wider or stronger embedder means someone else's GPU, not a tier of ours.
     return [
       {
         id: 'in-container',
-        label: 'In the knowledge base',
+        label: 'In the knowledge base (bundled)',
         placement: { backend: 'local', tier: '' as Tier, host: '', gpu: '' },
       },
+      { id: 'external', label: 'External endpoint', placement: { backend: 'external', endpoint: '' } },
     ];
   }
   const opts: PlacementOption[] = [

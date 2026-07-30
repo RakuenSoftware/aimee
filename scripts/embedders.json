@@ -3,15 +3,17 @@
     "The embedder registry: everything that varies from one embedder to the next, in",
     "one place, keyed by model identity.",
     "",
-    "WHERE THESE RUN. In the aimee-kb container. The kb loads the model itself from",
-    "`repo`@`revision`; there is no GGUF, no llama.cpp and no aimee-llm hop on the embed",
-    "path. That is what lets the aimee-llm container be retired: with the reranker gone",
-    "and the embedder in-container, nothing is left for it to serve on the retrieval side.",
+    "ONE MODEL SHIPS. bekko-a25m runs in the aimee-kb container from weights baked into",
+    "the image: 384-dim, no prefixes, ~6x nomic's CPU throughput, and it needs no",
+    "inference service, no GPU and no network. A deployment that wants a wider or stronger",
+    "embedder points AIMEE_EMBEDDER_URL at its own GPU endpoint instead \u2014 that is the",
+    "supported route above 384 dimensions, and it is why nomic is no longer bundled",
+    "despite winning the selection (0.6075 vs 0.5909 NDCG@10; see",
+    "docs/validation/embedder-selection-frozen-ab-v1.md). Bundling it cost 1.8GB of image",
+    "for a MoE that exists only as safetensors or GGUF.",
     "",
-    "WHY THIS FILE EXISTS. These facts used to be scattered across three files \u2014",
-    "coordinates in aimee-llm-supervisor.sh's embed_coords(), pooling ~110 lines away in",
-    "the same script, prefixes in aimee_llm_gateway.py, the width in src/headers/aimee.h.",
-    "Two of them fail SILENTLY when wrong, and both have already gone wrong:",
+    "WHY THIS FILE STILL EXISTS WITH ONE ENTRY. The per-model facts below are what nobody",
+    "can infer, and two of them fail SILENTLY when wrong \u2014 both have already gone wrong:",
     "",
     "  - pooling defaulted to `last`, correct for Qwen3 and wrong for nomic. Wrong",
     "    pooling yields vectors that are correctly shaped, correctly normalised and",
@@ -19,41 +21,20 @@
     "  - prefixes were absent entirely, so nomic served at 0.5823 NDCG@10 instead of",
     "    the 0.6075 it was selected on \u2014 below the runner-up it was chosen over.",
     "",
-    "Switching or adding an embedder should be one entry here, not a scavenger hunt across",
-    "three languages. Anything that is per-model belongs in this file; anything derived at",
-    "runtime (the deployed dimension: pinned > recorded > probed) does not.",
+    "bekko needs no prefixes, so the prefix machinery has no work to do today. It stays",
+    "because the failure it prevents is undetectable at runtime, and because an operator",
+    "overlay (EMBEDDERS_EXTRA) can declare a prefixed model.",
     "",
     "EVERY FIELD IS REQUIRED, including empty prefixes. A model whose card defines no",
     "prefixes declares that with empty strings \u2014 readers distinguish 'declared none'",
     "from 'not registered', and refuse to serve the latter rather than guess.",
     "",
-    "Derive these from the model card, never by copying the previous entry. `prefixes`",
-    "comes from the card's usage section, `pooling` from its 1_Pooling/config.json, `dim`",
-    "from that file's word_embedding_dimension, and `context` from max_trained_positions",
-    "(NOT the tokenizer's model_max_length, which is often a smaller artifact)."
+    "Derive these from the model card, never by copying another entry. `prefixes` comes",
+    "from the card's usage section, `pooling` from its 1_Pooling/config.json, `dim` from",
+    "that file's word_embedding_dimension, and `context` from max_trained_positions (NOT",
+    "the tokenizer's model_max_length, which is often a smaller artifact)."
   ],
   "embedders": {
-    "nomic-embed-text-v2-moe": {
-      "repo": "nomic-ai/nomic-embed-text-v2-moe",
-      "revision": "main",
-      "pooling": "mean",
-      "dim": 768,
-      "context": 2048,
-      "prefixes": {
-        "query": "search_query: ",
-        "document": "search_document: "
-      },
-      "notes": [
-        "The default and the quality choice: 0.6075 NDCG@10 on frozen-ab-v1 (10,000 cases /",
-        "26,473 documents) WITH these prefixes. Serving it without them measures 0.5823,",
-        "below the runner-up it was chosen over.",
-        "context 2048 is max_trained_positions; the tokenizer's model_max_length of 512 is",
-        "an artifact, not a limit.",
-        "Loaded in-container from repo@revision. The GGUF coordinates that used to live here",
-        "(ggml-org/Nomic-Embed-Text-V2-GGUF, q8_0) are gone with the aimee-llm embed path;",
-        "the -0.0037 NDCG@10 that Q8_0 quantisation cost goes with them."
-      ]
-    },
     "bekko-a25m": {
       "repo": "hotchpotch/bekko-embedding-v1-a25m",
       "revision": "main",
@@ -65,14 +46,16 @@
         "document": ""
       },
       "notes": [
-        "The CPU choice: 0.5909 NDCG@10, ~6x nomic's CPU throughput and half the vector",
-        "storage. Its card defines NO prefixes, so the empty pair above is a declaration,",
-        "not a gap \u2014 and its benchmark number carries into production unchanged.",
+        "The shipped embedder. 0.5909 NDCG@10 on frozen-ab-v1 (10,000 cases / 26,473",
+        "documents), ~6x nomic's CPU throughput and half its vector storage. Its card defines",
+        "NO prefixes, so the empty pair above is a declaration, not a gap \u2014 and its benchmark",
+        "number carries into production unchanged.",
         "384-dim, confirmed against the card's 1_Pooling/config.json and our own table in",
         "docs/validation/embedder-selection-frozen-ab-v1.md. An earlier entry here said 768,",
-        "which was wrong. Choosing between it and nomic is therefore a DIMENSION change",
-        "(768 <-> 384): the pgvector columns are rebuilt as well as the corpus re-embedded.",
-        "arch is ModernBertModel, hidden 384, max_position_embeddings 8192."
+        "which was wrong and would have been refused at serve time by the declared-dim check.",
+        "arch is ModernBertModel, hidden 384, max_position_embeddings 8192, 256k vocab",
+        "(multilingual).",
+        "Loaded in-container by sentence-transformers from repo@revision, baked at build time."
       ]
     }
   }

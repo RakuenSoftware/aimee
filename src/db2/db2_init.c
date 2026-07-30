@@ -55,12 +55,12 @@ static void *g_conn = NULL;
 static char g_pg_url[512] = "";
 static pthread_mutex_t g_init_lock = PTHREAD_MUTEX_INITIALIZER;
 /* Embedding dimension for the DB2 halfvec columns (one embedder per deployment).
- * The default embedder is nomic-embed-text-v2-moe at 768 on EVERY tier, so the
+ * The bundled embedder has one width (EMBED_DEFAULT_DIM), so the
  * dim no longer varies with the GPU/CPU tier the way the old Qwen3 ladder did
  * (1024 for 0.6b, 2560 for 4b). Set from the loaded config by the server /
  * aimee-kb startup via db2_set_embedding_dim() before db2_init(), so this layer
  * needs no config dependency. 0 = unset -> db2_embedding_dim() reports the 768
- * default. A deployment that predates the nomic cutover has its old dim RECORDED
+ * default. A deployment that predates an embedder change has its old dim RECORDED
  * in kb_meta.schema_embedding_dim, and the recorded value outranks this default
  * (§2a precedence: pinned > recorded > probed > default), so an existing corpus
  * keeps working and is migrated deliberately via `aimee kb reembed`. */

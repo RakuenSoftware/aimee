@@ -1658,7 +1658,7 @@ static void test_memory_embed_records_embedder_version(void)
    FILE *fp = fopen(cfgpath, "w");
    assert(fp != NULL);
    fprintf(fp, "embedding_command: builtin\n"
-               "embedding_model: nomic-embed-text-v1.5\n"
+               "embedding_model: some-external-embedder\n"
                "embedding_dim: 768\n");
    fclose(fp);
 

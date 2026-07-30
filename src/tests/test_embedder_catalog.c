@@ -2,12 +2,9 @@
  *
  * Two properties carry real consequences and so are pinned here.
  *
- * `local` decides whether the wizard may offer a model for a LOCAL placement. Offering
- * one whose weights cannot be fetched produces a container that refuses to boot, and
- * hiding one that can be is how bekko sat unusable behind a blank-coordinates check. It
- * is source-aware on purpose: an `hf` entry is a pinned file we can checksum ahead of
- * time, while a `release` entry is a GGUF we convert ourselves whose digest cannot exist
- * until the conversion runs.
+ * `local` decides whether the kb can serve a model itself, which is what tells the wizard
+ * whether it is the bundled option or reachable only as an external endpoint. Getting it
+ * wrong either produces a container that refuses to boot or hides the model that ships.
  *
  * `dim` and `prefixed` are surfaced because they decide the COST of the choice — a width
  * change rebuilds the pgvector columns, and prefixes are part of the vector space. A
@@ -48,10 +45,10 @@ static void test_shapes_every_field_the_picker_needs(void)
 {
    const char *raw =
        "{\"embedders\": {"
-       " \"nomic\": {\"repo\":\"r\",\"file\":\"f\",\"revision\":\"v\",\"sha256\":\"s\","
+       " \"prefixed-model\": {\"repo\":\"r\",\"revision\":\"v\","
        "             \"pooling\":\"mean\",\"dim\":768,\"context\":2048,"
        "             \"prefixes\":{\"query\":\"search_query: \",\"document\":\"search_document: \"}},"
-       " \"bekko\": {\"source\":\"release\",\"release_tag\":\"t\",\"file\":\"f\","
+       " \"plain-model\": {\"repo\":\"r2\",\"revision\":\"v\","
        "             \"pooling\":\"mean\",\"dim\":384,\"context\":8192,"
        "             \"prefixes\":{\"query\":\"\",\"document\":\"\"}}"
        "}}";
@@ -60,57 +57,45 @@ static void test_shapes_every_field_the_picker_needs(void)
    assert(arr && !err);
    assert(cJSON_GetArraySize(arr) == 2);
 
-   cJSON *nomic = entry_by_id(arr, "nomic");
-   assert(nomic);
-   assert(num(nomic, "dim") == 768);
-   assert(num(nomic, "context") == 2048);
-   assert(is_true(nomic, "local"));
-   assert(is_true(nomic, "prefixed"));
-   assert(strcmp(cJSON_GetObjectItemCaseSensitive(nomic, "source")->valuestring, "hf") == 0);
+   cJSON *prefixed = entry_by_id(arr, "prefixed-model");
+   assert(prefixed);
+   assert(num(prefixed, "dim") == 768);
+   assert(num(prefixed, "context") == 2048);
+   assert(is_true(prefixed, "local"));
+   assert(is_true(prefixed, "prefixed"));
 
-   cJSON *bekko = entry_by_id(arr, "bekko");
-   assert(bekko);
+   cJSON *plain = entry_by_id(arr, "plain-model");
+   assert(plain);
    /* 384, not 768: the width is what makes choosing it a schema rebuild. */
-   assert(num(bekko, "dim") == 384);
-   assert(is_true(bekko, "local")); /* release_tag + file is enough to fetch it */
-   assert(!is_true(bekko, "prefixed")); /* its card defines none */
-   assert(strcmp(cJSON_GetObjectItemCaseSensitive(bekko, "source")->valuestring, "release") == 0);
+   assert(num(plain, "dim") == 384);
+   assert(is_true(plain, "local")); /* repo + revision is enough to load it */
+   assert(!is_true(plain, "prefixed")); /* its card defines none */
    cJSON_Delete(arr);
    printf("  shapes_every_field_the_picker_needs: ok\n");
 }
 
-static void test_local_is_source_aware(void)
+static void test_local_needs_somewhere_to_load_from(void)
 {
-   /* An hf entry missing its checksum is NOT hostable: we could fetch bytes but could
-    * not tell whether they are the right ones, and a substituted embedder produces
-    * well-formed wrong vectors. */
-   const char *no_sha =
-       "{\"embedders\": {\"m\": {\"repo\":\"r\",\"file\":\"f\",\"revision\":\"v\",\"sha256\":\"\","
+   /* `local` means the kb can load the model itself, which needs a repo AND a revision.
+    * A floating or absent revision is refused because it would let a rebuild change the
+    * vector space silently — the same reason the bake pins it. */
+   const char *no_revision =
+       "{\"embedders\": {\"m\": {\"repo\":\"r\",\"revision\":\"\","
        " \"pooling\":\"mean\",\"dim\":8,\"context\":8,"
        " \"prefixes\":{\"query\":\"\",\"document\":\"\"}}}}";
-   cJSON *arr = embedder_catalog_build(no_sha, NULL);
+   cJSON *arr = embedder_catalog_build(no_revision, NULL);
    assert(arr && !is_true(entry_by_id(arr, "m"), "local"));
    cJSON_Delete(arr);
 
-   /* A release entry needs no sha256 — the digest travels with the release — but it does
-    * need to say which release and which file. */
-   const char *no_tag =
-       "{\"embedders\": {\"m\": {\"source\":\"release\",\"file\":\"f\","
-       " \"pooling\":\"mean\",\"dim\":8,\"context\":8,"
-       " \"prefixes\":{\"query\":\"\",\"document\":\"\"}}}}";
-   arr = embedder_catalog_build(no_tag, NULL);
-   assert(arr && !is_true(entry_by_id(arr, "m"), "local"));
-   cJSON_Delete(arr);
-
-   /* Declared but unhosted: a complete embedder description with no weight source at
-    * all. Selectable against an external endpoint, never for a local placement. */
+   /* Declared but not loadable here: a complete description with no repo. Reachable only
+    * as an external endpoint, never offered as the bundled model. */
    const char *declared_only =
        "{\"embedders\": {\"m\": {\"pooling\":\"mean\",\"dim\":8,\"context\":8,"
        " \"prefixes\":{\"query\":\"\",\"document\":\"\"}}}}";
    arr = embedder_catalog_build(declared_only, NULL);
    assert(arr && !is_true(entry_by_id(arr, "m"), "local"));
    cJSON_Delete(arr);
-   printf("  local_is_source_aware: ok\n");
+   printf("  local_needs_somewhere_to_load_from: ok\n");
 }
 
 static void test_malformed_registries_are_refused_not_guessed(void)
@@ -163,7 +148,7 @@ int main(void)
 {
    printf("embedder_catalog:\n");
    test_shapes_every_field_the_picker_needs();
-   test_local_is_source_aware();
+   test_local_needs_somewhere_to_load_from();
    test_malformed_registries_are_refused_not_guessed();
    test_reads_the_shipped_registry();
    printf("embedder_catalog: all tests passed\n");

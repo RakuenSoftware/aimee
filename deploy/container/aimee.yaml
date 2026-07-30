@@ -10,10 +10,11 @@
 # LLM-dependent passes fail closed if that is unavailable.
 embedding_command: "http://127.0.0.1:8760"
 
-# Which registered embedder to serve (scripts/embedders.json). The setup wizard writes
-# this; changing it re-embeds the corpus, which the kb enforces via the recorded
-# serving identity.
-embedding_model: "nomic-embed-text-v2-moe"
+# Which registered embedder to serve (scripts/embedders.json). One is bundled, so this
+# is normally left alone; the setup wizard writes it when an operator points the kb at an
+# external embedder instead. Changing it re-embeds the corpus, which the kb enforces via
+# the recorded serving identity.
+embedding_model: "bekko-a25m"
 
 learning:
   synthesize:

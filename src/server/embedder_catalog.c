@@ -74,18 +74,10 @@ static int field_set(cJSON *entry, const char *field)
 
 int embedder_entry_is_local(cJSON *entry)
 {
-   cJSON *source = cJSON_GetObjectItemCaseSensitive(entry, "source");
-   const char *src =
-       (cJSON_IsString(source) && source->valuestring[0]) ? source->valuestring : "hf";
-   if (strcmp(src, "release") == 0)
-   {
-      /* A GGUF we convert and publish: the digest cannot be pinned here because the
-       * artifact postdates the entry, so it travels with the release instead. */
-      return field_set(entry, "release_tag") && field_set(entry, "file");
-   }
-   /* A pinned Hub file: verifiable ahead of time, so demand the checksum. */
-   return field_set(entry, "repo") && field_set(entry, "file") &&
-          field_set(entry, "revision") && field_set(entry, "sha256");
+   /* The kb loads the model itself, so "can we serve this" is "do we know where to load
+    * it from, at a pinned point". The revision is required for the same reason the bake
+    * pins it: a floating ref would let a rebuild change the vector space silently. */
+   return field_set(entry, "repo") && field_set(entry, "revision");
 }
 
 cJSON *embedder_catalog_build(const char *raw, const char **err)
@@ -124,8 +116,6 @@ cJSON *embedder_catalog_build(const char *raw, const char **err)
       cJSON *ctxlen = cJSON_GetObjectItemCaseSensitive(entry, "context");
       cJSON *pooling = cJSON_GetObjectItemCaseSensitive(entry, "pooling");
       cJSON *prefixes = cJSON_GetObjectItemCaseSensitive(entry, "prefixes");
-      cJSON *source = cJSON_GetObjectItemCaseSensitive(entry, "source");
-
       int prefixed = 0;
       if (cJSON_IsObject(prefixes))
       {
@@ -140,9 +130,6 @@ cJSON *embedder_catalog_build(const char *raw, const char **err)
       cJSON_AddNumberToObject(out, "dim", cJSON_IsNumber(dim) ? dim->valuedouble : 0);
       cJSON_AddNumberToObject(out, "context", cJSON_IsNumber(ctxlen) ? ctxlen->valuedouble : 0);
       cJSON_AddStringToObject(out, "pooling", cJSON_IsString(pooling) ? pooling->valuestring : "");
-      cJSON_AddStringToObject(
-          out, "source",
-          (cJSON_IsString(source) && source->valuestring[0]) ? source->valuestring : "hf");
       cJSON_AddBoolToObject(out, "local", embedder_entry_is_local(entry));
       cJSON_AddBoolToObject(out, "prefixed", prefixed);
       cJSON_AddItemToArray(arr, out);

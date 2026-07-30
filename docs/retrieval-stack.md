@@ -25,33 +25,40 @@ The configured dimension must equal the model output. DB2 records the dimension 
 vector columns and refuses startup on drift. Silent empty vector search is worse than a hard start
 failure.
 
-### Choosing an embedder
+### One bundled embedder, or your own
 
-The setup wizard's page-2 embedder picker lists what this deployment can serve, read from
-the same `scripts/embedders.json` the gateway and supervisor read (`GET /v1/embedders`).
-It runs before anything is deployed, so the list comes from the registry rather than from
-a running gateway.
+`bekko-a25m` ships inside the `aimee-kb` container, with its weights baked into the image.
+A fresh install embeds immediately — no inference service, no GPU, no model download, no
+network. It is **384-dimensional**.
 
-| | `nomic-embed-text-v2-moe` | `bekko-a25m` |
-| --- | ---: | ---: |
-| NDCG@10 (frozen-ab-v1) | **0.6075** | 0.5909 |
-| dimension | 768 | **384** |
-| prefixes | `search_query:` / `search_document:` | none |
-| relative CPU throughput | 82.7 | **510.7** |
+| | `bekko-a25m` (bundled) |
+| --- | ---: |
+| NDCG@10 (frozen-ab-v1) | 0.5909 |
+| dimension | 384 |
+| context | 8192 |
+| prefixes | none — its card defines none, so its benchmark number carries into production unchanged |
+| vocab | 256k, multilingual |
 
-nomic is the default and the quality choice. bekko trades −0.0166 NDCG@10 for roughly 6x
-the CPU throughput and half the vector storage, needs no prefixes (so its benchmark number
-carries into production unchanged), and is the reasonable pick for a CPU-only box.
+**Above 384 dimensions, run your own embedder.** Point `AIMEE_EMBEDDER_URL` (or the
+wizard's "External endpoint" option) at a GPU-served endpoint. That is the supported route
+to a wider or stronger embedder, and it is why the measurement winner is not bundled:
+`nomic-embed-text-v2-moe` scored 0.6075 against bekko's 0.5909, but it is 768-dim, ~6x
+slower on CPU, needs its card prefixes to reach that number at all, and cost 1.8GB of
+image. The evidence for both is in
+[the selection report](validation/embedder-selection-frozen-ab-v1.md).
 
-Only embedders this deployment can host are offered for a local placement; an entry
-without weight coordinates is selectable against an external endpoint instead. Operators
-can add their own with `EMBEDDERS_EXTRA`, declaring the pooling, width, context
-and prefixes — nobody can infer those for you, and each one changes the vectors.
+An external embedder needs its **dimension supplied**: the kb sizes its vector columns
+from it and cannot derive the width of an endpoint it does not serve. Nothing applies
+prefixes on that path either, so a prefix-dependent model must apply its own.
+
+Operators can declare additional models with `EMBEDDERS_EXTRA`, giving the pooling, width,
+context and prefixes — nobody can infer those for you, and each one changes the vectors.
+An overlay entry whose weights are not baked is reachable only as an external endpoint.
 
 **Changing the embedder is destructive.** The wizard requires a typed confirmation,
 because:
 
-- a different width (768 → 384) rebuilds the pgvector columns *and* re-embeds everything;
+- a different width rebuilds the pgvector columns *and* re-embeds everything;
 - the same width with different pooling or prefixes still re-embeds everything, since
   those define the vector space.
 

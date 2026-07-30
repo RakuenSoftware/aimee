@@ -25,9 +25,9 @@ vi.mock('@rakuensoftware/smoothgui', () => {
 });
 
 const EMBEDDERS = [
-  { id: 'nomic-embed-text-v2-moe', dim: 768, context: 2048, pooling: 'mean', source: 'hf', local: true, prefixed: true },
-  { id: 'bekko-a25m', dim: 384, context: 8192, pooling: 'mean', source: 'release', local: true, prefixed: false },
-  { id: 'external-only', dim: 1024, context: 512, pooling: 'mean', source: 'hf', local: false, prefixed: false },
+  { id: 'nomic-embed-text-v2-moe', dim: 768, context: 2048, pooling: 'mean', local: true, prefixed: true },
+  { id: 'bekko-a25m', dim: 384, context: 8192, pooling: 'mean', local: true, prefixed: false },
+  { id: 'external-only', dim: 1024, context: 512, pooling: 'mean', local: false, prefixed: false },
 ];
 
 /** A fetch double over the three endpoints the page touches, recording config writes. */

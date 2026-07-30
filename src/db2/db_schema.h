@@ -23,7 +23,7 @@ extern "C"
    /* Apply the consolidated Postgres schema to an already-open libpq
     * connection (PGconn *, passed as void * so this header stays
     * libpq-free). |embed_dim| is the deployment's configured embedding
-    * dimension (768 for the default nomic embedder on every tier; older
+    * dimension (EMBED_DEFAULT_DIM for the bundled embedder; older
     * deployments may record 1024/2560 from the retired Qwen3 ladder); the
     * schema's halfvec embedding columns are created at that dimension. A value
     * <= 0 or > EMBED_MAX_DIM falls back to EMBED_DEFAULT_DIM. Returns 0 on

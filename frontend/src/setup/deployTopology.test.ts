@@ -243,9 +243,9 @@ describe('buildDesiredConfig (the full save map)', () => {
  * so these are the assertions that keep it honest. */
 describe('embedderChangeImpact', () => {
   const catalog = [
-    { id: 'nomic-embed-text-v2-moe', dim: 768, context: 2048, pooling: 'mean', source: 'hf', local: true, prefixed: true },
-    { id: 'bekko-a25m', dim: 384, context: 8192, pooling: 'mean', source: 'release', local: true, prefixed: false },
-    { id: 'same-width-other', dim: 768, context: 512, pooling: 'last', source: 'hf', local: true, prefixed: false },
+    { id: 'nomic-embed-text-v2-moe', dim: 768, context: 2048, pooling: 'mean', local: true, prefixed: true },
+    { id: 'bekko-a25m', dim: 384, context: 8192, pooling: 'mean', local: true, prefixed: false },
+    { id: 'same-width-other', dim: 768, context: 512, pooling: 'last', local: true, prefixed: false },
   ];
 
   it('a first choice costs nothing (no corpus to invalidate)', () => {
@@ -345,12 +345,23 @@ describe('every offered placement is a real placement', () => {
     }
   }
 
-  it('a role with no placement choice still offers exactly one, not zero', () => {
-    // Zero options would render an empty <select> and resolve to undefined.
+  it('every role offers at least one option', () => {
+    // Zero would render an empty <select> and resolve to undefined. The COUNT is not the
+    // invariant — the embedder has no tier to choose but does choose between the bundled
+    // model and an operator endpoint, and a GPU-served bundle would add more. What must
+    // hold is that the list is never empty and every entry round-trips (above).
     for (const role of ROLES.map((r) => r.role)) {
-      if (rolePlaceable(role)) continue;
-      expect(placementOptions(undefined, role)).toHaveLength(1);
+      expect(placementOptions(undefined, role).length).toBeGreaterThan(0);
     }
+  });
+
+  it('the embedder offers the bundled model and an external endpoint', () => {
+    // The supported route above the bundled model's width is someone else's GPU, so the
+    // external option has to exist — and its dimension is operator-supplied, because the
+    // kb cannot derive the width of an endpoint it does not serve.
+    const ids = placementOptions(undefined, 'embed').map((o) => o.id);
+    expect(ids).toContain('in-container');
+    expect(ids).toContain('external');
   });
 
   it('ALL_ROLE_KEYS never names a key the config schema does not have', () => {

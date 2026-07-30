@@ -482,7 +482,7 @@ int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t 
 
    /* The DB2 schema declares its halfvec embedding columns with the
     * __EMBED_DIM__ placeholder so a deployment can run an embedder of any
-    * supported width (the default nomic embedder is 768 on every tier; older
+    * supported width (the bundled embedder has one width; older
     * deployments may still record the Qwen3 ladder's 1024/2560). Substitute the
     * configured dimension here — the one place the schema is applied to
     * Postgres. An out-of-range value falls back to the default embedder's
