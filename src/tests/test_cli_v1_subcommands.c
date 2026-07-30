@@ -157,6 +157,117 @@ static void test_kb_status_reports_backlog_and_degradation(void)
    printf("  kb status surfaces backlog, failures, and degraded verdict\n");
 }
 
+/* Capture one printer's stdout into `out`. */
+static void capture_printer(void (*printer)(const char *, cJSON *), const char *method,
+                            const char *payload, char *out, size_t out_n)
+{
+   cJSON *resp = cJSON_Parse(payload);
+   assert(resp);
+   char path[] = "/tmp/aimee-v1print-XXXXXX";
+   int fd = mkstemp(path);
+   assert(fd >= 0);
+   fflush(stdout);
+   int saved = dup(STDOUT_FILENO);
+   assert(saved >= 0);
+   assert(dup2(fd, STDOUT_FILENO) >= 0);
+
+   printer(method, resp);
+
+   fflush(stdout);
+   assert(dup2(saved, STDOUT_FILENO) >= 0);
+   close(saved);
+   close(fd);
+
+   FILE *f = fopen(path, "r");
+   assert(f);
+   size_t n = fread(out, 1, out_n - 1, f);
+   out[n] = '\0';
+   fclose(f);
+   unlink(path);
+   cJSON_Delete(resp);
+}
+
+/* `aimee agent roles <name>` and `aimee agent personas <name>` MUTATE the agent:
+ * with no csv argument they reset it to the full default set. Both were wired to
+ * the agent.enable printer, so the operator's only feedback was
+ *
+ *   Delegate 'codex' enabled.
+ *
+ * which names the wrong operation and hides the roles that were just written —
+ * a silent reset that drops any role outside the default list (`all`, and any
+ * operator-added role). The write is intentional; reporting it as "enabled" is
+ * not. Print what the server actually stored. */
+static void test_agent_roles_printer_reports_roles(void)
+{
+   static const char *payload =
+       "{\"name\":\"codex\",\"status\":\"ok\","
+       "\"roles\":[\"code\",\"review\",\"validate\",\"all\"],\"personas\":[\"all\"]}";
+   char out[1024] = "";
+   capture_printer(pt_print_agent_roles, "agent.roles", payload, out, sizeof(out));
+
+   assert(strstr(out, "codex") != NULL);
+   /* The roles that were written must be visible... */
+   assert(strstr(out, "code") != NULL);
+   assert(strstr(out, "validate") != NULL);
+   assert(strstr(out, "all") != NULL);
+   /* ...and the operation must not be misreported as an enable. */
+   assert(strstr(out, "enabled") == NULL);
+   /* A csv-bearing call mutated, so "set to" is accurate here. */
+   assert(strstr(out, "set to") != NULL);
+   printf("  agent.roles prints the stored roles, not \"enabled\"\n");
+}
+
+/* A bare `agent roles <name>` only reports. Saying "set to" would claim a write
+ * that did not happen — the same class of mistake as reporting it as "enabled". */
+static void test_agent_roles_printer_read_is_not_reported_as_a_write(void)
+{
+   static const char *payload = "{\"name\":\"codex\",\"read_only\":true,"
+                                "\"roles\":[\"code\",\"diagnose\",\"all\"]}";
+   char out[1024] = "";
+   capture_printer(pt_print_agent_roles, "agent.roles", payload, out, sizeof(out));
+
+   assert(strstr(out, "codex") != NULL);
+   assert(strstr(out, "diagnose") != NULL);
+   assert(strstr(out, "all") != NULL);
+   assert(strstr(out, "set to") == NULL);
+   assert(strstr(out, "enabled") == NULL);
+   printf("  agent.roles read does not claim a write\n");
+}
+
+static void test_agent_personas_printer_reports_personas(void)
+{
+   static const char *payload = "{\"name\":\"codex\",\"status\":\"ok\","
+                                "\"roles\":[\"code\"],\"personas\":[\"engineer\",\"qa\"]}";
+   char out[1024] = "";
+   capture_printer(pt_print_agent_personas, "agent.personas", payload, out, sizeof(out));
+
+   assert(strstr(out, "codex") != NULL);
+   assert(strstr(out, "engineer") != NULL);
+   assert(strstr(out, "qa") != NULL);
+   assert(strstr(out, "enabled") == NULL);
+   printf("  agent.personas prints the stored personas, not \"enabled\"\n");
+}
+
+/* `aimee delegate --list-roles` is routed to agent.list, so the roster printer is
+ * what has to show the roles. It printed only tier/parallel/model/endpoint, which
+ * meant the flag documented as "List available roles" listed no role at all. */
+static void test_agent_list_printer_shows_roles(void)
+{
+   static const char *payload =
+       "{\"agents\":[{\"name\":\"codex\",\"enabled\":true,\"cost_tier\":0,\"max_parallel\":3,"
+       "\"model\":\"gpt-5.5\",\"endpoint\":\"https://example.invalid\",\"tools_enabled\":true,"
+       "\"roles\":[\"code\",\"review\",\"validate\"]}]}";
+   char out[2048] = "";
+   capture_printer(pt_print_agent_list, "agent.list", payload, out, sizeof(out));
+
+   assert(strstr(out, "codex") != NULL);
+   assert(strstr(out, "roles:") != NULL);
+   assert(strstr(out, "code") != NULL);
+   assert(strstr(out, "review") != NULL);
+   assert(strstr(out, "validate") != NULL);
+   printf("  agent.list prints each agent's roles\n");
+}
+
 /* Async dispatch preserves an ordinary handler error under run.result. The CLI
  * must surface that useful cause instead of replacing it with the generic
  * "run failed with no result". */
@@ -182,6 +293,10 @@ int main(void)
    test_small_buffer_does_not_overflow();
    test_bare_and_matchany_rows_excluded();
    test_kb_status_reports_backlog_and_degradation();
+   test_agent_list_printer_shows_roles();
+   test_agent_roles_printer_reports_roles();
+   test_agent_roles_printer_read_is_not_reported_as_a_write();
+   test_agent_personas_printer_reports_personas();
    test_run_failure_reports_dispatch_message();
    printf("test_cli_v1_subcommands: all passed\n");
    return 0;

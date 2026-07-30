@@ -34,6 +34,38 @@ Do not rely on a raw copy of a live SQLite main file. Take a consistent backup w
   user the required remote-write grant. The old global `remote_writes` value authorizes nothing.
 - Review mTLS revocation, org catalogs, budgets, rate limits, and egress policy.
 
+## Browser logins become PAM accounts
+
+The dashboard now authenticates against local PAM rather than credentials held in the server vault.
+A host password is not one of aimee's own secrets; keeping it in the vault built a second identity
+system beside the PAM and OIDC the KB already implements.
+
+On upgrade, the first-boot pair (`AIMEE_WEBCHAT_USER`/`AIMEE_WEBCHAT_PASSWORD`, or the generated
+one) is provisioned as a real system account in the `aimee-webchat` group. Logins are no longer
+sealed into the vault, and the shadow verifiers behind them are no longer erased.
+
+**Check this before upgrading.** An appliance that already ran an image which migrated
+`webchat/logins` into the vault is in a state this upgrade cannot repair by itself: that migration
+sealed the verifiers into the vault's `legacy_hashes` record and then erased them from
+`/etc/shadow`. Those accounts therefore have no PAM credential to restore, and only the first-boot
+pair is provisioned. Any dashboard account created through the wizard on such an appliance — the
+account named in `webchat/bootstrap-replaced` — must be recreated after upgrading.
+
+To tell whether you are affected:
+
+```bash
+docker exec <server> sh -c 'ls /var/lib/aimee/webchat/'
+```
+
+`bootstrap-replaced` present with no `logins` beside it means the vault migration ran. Sign in with
+the first-boot pair after upgrading and recreate the wizard account. If neither credential is
+available, provision one directly:
+
+```bash
+docker exec <server> sh -c 'useradd --system --no-create-home --shell /usr/sbin/nologin \
+  --gid aimee-webchat <name> && passwd <name>'
+```
+
 ## Restore remote writes
 
 The shared bearer is read-only after this upgrade. The first wizard owner receives an explicit

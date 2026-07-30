@@ -1,0 +1,16 @@
+# PAM service backing dashboard logins (/etc/pam.d/aimee).
+#
+# runtime-web authenticates through smoothgui/auth's PAM helper, which is the
+# same stack SmoothNAS uses and the same one the kb means when /v1/identity/
+# auth-mode reports "pam". Without this file PAM has no service to consult and
+# every dashboard login fails as "authentication unavailable" — the reason the
+# appliance previously carried a separate Vault credential store instead.
+#
+# Deliberately the common stack and nothing more. Local accounts in the managed
+# group are the only logins this service ever sees (runtime-web refuses any
+# username outside it before PAM is consulted), so a bespoke policy here would
+# only add a second place for an auth decision to hide.
+@include common-auth
+@include common-account
+@include common-password
+@include common-session-noninteractive

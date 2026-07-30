@@ -24,7 +24,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <sys/wait.h>
 
@@ -1563,12 +1565,74 @@ int main(void)
       assert(server_http_route_caps("PUT", "/v1/roundtables/default") == CAP_SESSION_ADMIN);
       assert(server_http_route_caps("DELETE", "/v1/roundtables/default") == CAP_SESSION_ADMIN);
       assert(server_http_route_caps("POST", "/v1/roundtables/active") == CAP_SESSION_ADMIN);
+      /* With no bootstrap record at all, the gate keeps its historical shape. */
       assert(route_roundtable_mutation_authorized("webuser:admin") == 1);
       assert(route_roundtable_mutation_authorized("webuser:") == 0);
       assert(route_roundtable_mutation_authorized("webuser:alice") == 0);
       assert(route_roundtable_mutation_authorized("uid:1000") == 0);
       assert(route_roundtable_mutation_authorized("cert:operator") == 0);
       assert(route_roundtable_mutation_authorized(NULL) == 0);
+
+      /* Once setup replaces the generated bootstrap login, THAT account is the
+       * appliance administrator. Hardcoding "admin" locked the real operator out
+       * of every roundtable policy mutation on their own appliance — creating a
+       * preset, and "save as default" (POST /v1/roundtables/active) — while the
+       * browser only reported "administrator access required". */
+      {
+         char wc[512];
+         snprintf(wc, sizeof(wc), "%s/webchat", config_default_dir());
+         assert(mkdir(wc, 0700) == 0 || errno == EEXIST);
+         char marker[600];
+         snprintf(marker, sizeof(marker), "%s/bootstrap-replaced", wc);
+         FILE *mf = fopen(marker, "w");
+         assert(mf);
+         fputs("virant\n", mf);
+         fclose(mf);
+
+         assert(route_roundtable_mutation_authorized("webuser:virant") == 1);
+         /* and the pre-replacement name is no longer privileged */
+         assert(route_roundtable_mutation_authorized("webuser:admin") == 0);
+         assert(route_roundtable_mutation_authorized("webuser:alice") == 0);
+         assert(route_roundtable_mutation_authorized("uid:0") == 0);
+         unlink(marker);
+
+         /* Before replacement, the recorded bootstrap account governs. The file
+          * is "<explicit|generated>:<name>". */
+         char bu[600];
+         snprintf(bu, sizeof(bu), "%s/bootstrap-user", wc);
+         FILE *bf = fopen(bu, "w");
+         assert(bf);
+         fputs("generated:aimee-0123456789ab\n", bf);
+         fclose(bf);
+         assert(route_roundtable_mutation_authorized("webuser:aimee-0123456789ab") == 1);
+         assert(route_roundtable_mutation_authorized("webuser:admin") == 0);
+         unlink(bu);
+      }
+      /* An unset roundtable.default does not mean "no active panel": resolution
+       * falls back to the preset literally named "default", which is the one the
+       * image seeds. The list used to report active:"" for every entry, so the
+       * Roundtable tab showed nothing selected while reviews were in fact
+       * resolving through that preset — and "save as default" appeared to do
+       * nothing even when it succeeded. */
+      {
+         char rtdir[512];
+         snprintf(rtdir, sizeof(rtdir), "%s/roundtables", config_default_dir());
+         assert(mkdir(rtdir, 0700) == 0 || errno == EEXIST);
+         char seeded[600];
+         snprintf(seeded, sizeof(seeded), "%s/default.json", rtdir);
+         FILE *sf = fopen(seeded, "w");
+         assert(sf);
+         fputs(
+             "{\"name\":\"default\",\"seats\":[{\"model\":\"$random\",\"persona\":\"reviewer\"}]}",
+             sf);
+         fclose(sf);
+
+         char list_resp[4096];
+         int list_st = route_roundtables_list(list_resp, sizeof(list_resp));
+         assert(list_st == 200);
+         assert(strstr(list_resp, "\"active\":\"default\"") != NULL);
+         unlink(seeded);
+      }
       assert(roundtable_policy_config_key("roundtable.default") == 1);
       assert(roundtable_policy_config_key("roundtable.require_evidence") == 1);
       assert(roundtable_policy_config_key("autonomy.concurrency") == 0);

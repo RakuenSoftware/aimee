@@ -33,6 +33,7 @@ type server struct {
 	rl       *auth.RateLimiter
 	accounts setupAccountSystem
 	identity webchatIdentityStore
+	authMode *authModeResolver
 	spaCSP   string
 	loginCSP string
 }
@@ -56,12 +57,16 @@ func run(cfg *config) error {
 	}
 
 	vault := &commandWebchatVault{}
-	identities := newVaultAccounts(vault, filepath.Join(filepath.Dir(cfg.dbPath), "webchat", "bootstrap-replaced"))
-	if names, err := identities.List(); err != nil || len(names) == 0 {
-		if err == nil {
-			err = errors.New("no webchat login exists in Vault")
-		}
-		return fmt.Errorf("Vault webchat accounts: %w", err)
+	// Dashboard logins are LOCAL PAM. The wizard's first login has to work before
+	// any kb exists to ask about OIDC, so PAM is the baseline rather than a
+	// separate credential store; a kb that advertises OIDC takes over afterwards.
+	//
+	// Startup no longer fails on an empty roster. First boot legitimately has no
+	// managed account until the entrypoint provisions one, and refusing to start
+	// turned that into a crash loop that took the C plane down with it.
+	identities, err := newPAMAccounts(cfg.pamService, webchatLoginGroup)
+	if err != nil {
+		return fmt.Errorf("webchat PAM identity: %w", err)
 	}
 	sessions, err := newSignedSessionStore(db, vault, 24*time.Hour)
 	if err != nil {
@@ -74,6 +79,7 @@ func run(cfg *config) error {
 		db:       db,
 		sessions: sessions,
 		rl:       rl,
+		authMode: newAuthModeResolver(),
 		accounts: identities,
 		identity: identities,
 		spaCSP:   contentSecurityPolicy(spaHTML),
@@ -250,6 +256,7 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/deploy/apply", s.requireAuth(s.handleDeployApply))
 	mux.HandleFunc("/api/deploy/status", s.requireAuth(s.handleDeployStatus))
 	mux.HandleFunc("/api/setup/appliance", s.requireAuth(s.handleSetupAppliance))
+	mux.HandleFunc("/api/auth/mode", s.handleAuthMode)
 	mux.HandleFunc("/api/setup/account", s.requireAuth(s.handleSetupAccount))
 
 	// Live endpoints backed by aimee-server socket
