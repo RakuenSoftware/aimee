@@ -528,12 +528,12 @@ int memory_embed_text_runtime(const char *text, const char *command, float *out,
 
    s_qembed_misses++;
    long long _emb_t0 = util_now_ms();
-   int dim = memory_embed_text(text, effective_cmd, out, max_dim);
+   int dim = memory_embed_text(text, effective_cmd, EMBED_INPUT_QUERY, out, max_dim);
    if (dim <= 0 && strcmp(effective_cmd, "builtin") != 0)
    {
       aimee_log(LOG_WARN, "memory",
                 "query embedding failed for configured command; retrying with builtin embeddings");
-      dim = memory_embed_text(text, "builtin", out, max_dim);
+      dim = memory_embed_text(text, "builtin", EMBED_INPUT_QUERY, out, max_dim);
    }
    s_qembed_ms += util_now_ms() - _emb_t0;
    s_qembed_spawns++;
@@ -731,7 +731,7 @@ static void memory_embed_unit_row(int64_t unit_id, const char *unit_type, const 
 
    float vec[EMBED_MAX_DIM];
    const char *model = (command && command[0]) ? command : "builtin";
-   int dim = memory_embed_text(text, model, vec, EMBED_MAX_DIM);
+   int dim = memory_embed_text(text, model, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
    if (dim <= 0)
       return;
 

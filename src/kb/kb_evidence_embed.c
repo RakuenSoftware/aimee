@@ -131,7 +131,7 @@ int kb_evidence_embed_one(const char *embed_cmd)
     * kb_curator_extract_code / kb_service_code_embed). No-op in a lease scope. */
    db2_lease_release_idle();
    float vec[EVIDENCE_EMBED_DIM];
-   int dim = memory_embed_text(content, model, vec, EVIDENCE_EMBED_DIM);
+   int dim = memory_embed_text(content, model, EMBED_INPUT_DOCUMENT, vec, EVIDENCE_EMBED_DIM);
    if (dim != EVIDENCE_EMBED_DIM)
    {
       char err[128];

@@ -931,7 +931,7 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
    {
       const char *embed_cmd = config_embedding_command(&hcfg, NULL);
       float qvec[EMBED_MAX_DIM];
-      int qdim = memory_embed_text(query, embed_cmd, qvec, EMBED_MAX_DIM);
+      int qdim = memory_embed_text(query, embed_cmd, EMBED_INPUT_QUERY, qvec, EMBED_MAX_DIM);
       if (qdim > 0 && qdim == db2_embedding_dim())
       {
          nv = pgvec_code_search_paths(proj, qvec, qdim, HYBRID_PER_SIGNAL, (char *)vpaths,

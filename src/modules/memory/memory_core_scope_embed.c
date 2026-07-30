@@ -372,12 +372,21 @@ static int memory_embed_text_builtin(const char *text, float *out, int max_dim)
    return dim;
 }
 
+/* Names the polarity for the gateway's per-model prefix lookup. The gateway owns the
+ * prefixes themselves; we only say which side this text is. */
+const char *memory_embed_input_type_name(embed_input_type_t input_type)
+{
+   return input_type == EMBED_INPUT_QUERY ? "query" : "document";
+}
+
 /* Run embedding command: pipes text on stdin, reads JSON float array from stdout. */
-int memory_embed_text(const char *text, const char *command, float *out, int max_dim)
+int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
+                      float *out, int max_dim)
 {
    if (!text || !out || max_dim <= 0)
       return 0;
 
+   /* The builtin embedder is lexical feature hashing — it has no prefixes to apply. */
    if (!command || !command[0] || strcmp(command, "builtin") == 0)
       return memory_embed_text_builtin(text, out, max_dim);
 
@@ -385,8 +394,12 @@ int memory_embed_text(const char *text, const char *command, float *out, int max
    size_t buf_len = 0;
    if (memory_embed_command_is_http(command))
    {
-      /* In-process HTTP embed: POST raw text to {base}/embed, no fork. */
-      if (memory_embed_http_post(command, "/embed", text, &buf) != 0 || !buf)
+      /* In-process HTTP embed: POST raw text to {base}/embed, no fork. The polarity
+       * rides in the query string because the body is the raw text itself. */
+      char path[64];
+      snprintf(path, sizeof(path), "/embed?input_type=%s",
+               memory_embed_input_type_name(input_type));
+      if (memory_embed_http_post(command, path, text, &buf) != 0 || !buf)
       {
          aimee_log(LOG_WARN, "memory", "embedding HTTP request failed");
          free(buf);
@@ -460,7 +473,7 @@ int memory_embed(int64_t memory_id, const char *command)
 
    float vec[EMBED_MAX_DIM];
    const char *model = (command && command[0]) ? command : "builtin";
-   int dim = memory_embed_text(text, model, vec, EMBED_MAX_DIM);
+   int dim = memory_embed_text(text, model, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
    if (dim <= 0)
       return -1;
 

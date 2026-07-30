@@ -1038,7 +1038,7 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
                                   sizeof(embed_text));
 
          float vec[EMBED_MAX_DIM];
-         int dim = memory_embed_text(embed_text, c->effective_cmd, vec, EMBED_MAX_DIM);
+         int dim = memory_embed_text(embed_text, c->effective_cmd, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
          if (dim > 0)
          {
             accept_generated_embedding(doc_id, vec, dim);
@@ -1765,7 +1765,7 @@ static char *kb_search_gather(const char *project, const char *query, const char
 
    /* Dense search is mandatory; the lexical vector leg complements it. */
    float qvec[EMBED_MAX_DIM];
-   int qdim = memory_embed_text(query, effective_cmd, qvec, EMBED_MAX_DIM);
+   int qdim = memory_embed_text(query, effective_cmd, EMBED_INPUT_QUERY, qvec, EMBED_MAX_DIM);
    if (qdim <= 0)
    {
       free(lex_res);

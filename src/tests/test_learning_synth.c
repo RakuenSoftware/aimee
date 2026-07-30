@@ -20,6 +20,7 @@
 #include "artifacts.h"
 #include "evidence_vectors.h"
 #include "learning_synth_ops.h"
+#include "embed_input_type.h"   /* the memory_embed_text stub's polarity argument */
 #include "db2_test_shim.h"
 #include "../kb/kb_learning_synth.h"
 
@@ -27,10 +28,12 @@
 #define STUB_CMD  "cat " RESP_PATH
 
 /* Deterministic embedder: query vector is e0 so the bundle ranks/spans fine. */
-int memory_embed_text(const char *text, const char *command, float *out, int max_dim)
+int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
+                      float *out, int max_dim)
 {
    (void)text;
    (void)command;
+   (void)input_type;
    int dim = 384 < max_dim ? 384 : max_dim;
    for (int i = 0; i < dim; i++)
       out[i] = 0.0f;

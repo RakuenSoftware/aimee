@@ -955,7 +955,12 @@ int memory_graph_prune(void);
 int memory_graph_normalize(void);
 
 int memory_embed(int64_t memory_id, const char *command);
-int memory_embed_text(const char *text, const char *command, float *out, int max_dim);
+/* `input_type` declares which side of the embedder this text is (see
+ * embed_input_type_t). It is required rather than defaulted so the compiler forces
+ * every call site to state it — a query silently embedded as a document costs
+ * retrieval quality and raises no error. */
+int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
+                      float *out, int max_dim);
 double cosine_similarity(const float *a, const float *b, int dim);
 
 /* Test hooks for the per-recall query-embedding memo (memory_core_helpers.inc).

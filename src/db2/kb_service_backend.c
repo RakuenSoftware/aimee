@@ -454,7 +454,7 @@ static int db2_kb_service_async_process_embed_raw(int64_t document_id, const cha
       snprintf(embed_text, sizeof(embed_text), "%s", content_buf);
 
    float vec[EMBED_MAX_DIM];
-   int dim = memory_embed_text(embed_text, embedding_cmd, vec, EMBED_MAX_DIM);
+   int dim = memory_embed_text(embed_text, embedding_cmd, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
    if (dim <= 0)
    {
       snprintf(errbuf, errbuf_size, "embedding generation failed");
@@ -543,7 +543,7 @@ static int db2_kb_service_async_process_embed_pdf(int64_t document_id, const cha
       snprintf(embed_text, sizeof(embed_text), "%s", content_buf);
 
    float vec[EMBED_MAX_DIM];
-   int dim = memory_embed_text(embed_text, embedding_cmd, vec, EMBED_MAX_DIM);
+   int dim = memory_embed_text(embed_text, embedding_cmd, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
    if (dim <= 0)
    {
       snprintf(errbuf, errbuf_size, "embedding generation failed");

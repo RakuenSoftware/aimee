@@ -15,6 +15,7 @@
 #include "db2/lifecycle.h"          /* §2c: db2_reembed_* / db2_dim_change_reset stub types */
 #include "rel_types.h"              /* REL_TYPE_NAME_MAX for the db2_ontology_* stubs below */
 #include "config_fields.h"          /* config_field_t for the pipeline-console stubs below */
+#include "embed_input_type.h"       /* the memory_embed_text stub's polarity argument */
 #include "kb_service.h"
 #include "kb/kb_service_code_embed.h"
 #include "kb_bandit.h"
@@ -3380,10 +3381,12 @@ int db2_cross_repo_recompute_blocked_symbols(int k, int m, int len_min)
  * (g_vec_enabled=0 -> memory_embed_text returns 0 -> the leg is skipped), so the
  * existing hybrid tests are unaffected; test_code_hybrid_vector_ok flips it on. */
 static int g_vec_enabled = 0;
-int memory_embed_text(const char *text, const char *command, float *out, int max_dim)
+int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
+                      float *out, int max_dim)
 {
    (void)text;
    (void)command;
+   (void)input_type;
    if (!g_vec_enabled || !out || max_dim <= 0)
       return 0;
    int d = 2560; /* the stub embedder's FIXED output dim (independent of the corpus

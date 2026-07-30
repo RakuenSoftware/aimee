@@ -1643,6 +1643,13 @@ typedef struct config
     *                          (0 → default 8) — the thin-log overfit guardrail.
     * kb_ranker_fit_benchmark: path to the recall-track fixture used as the
     *                          promotion gate (empty → benchmarks/rank/kb_hybrid/queries.json).
+    *                          THE DEFAULT IS A PLUMBING SMOKE FIXTURE, NOT A GATE: it
+    *                          holds 5 queries of 2-4 candidates, which is below the
+    *                          fitter's minimum (RANK_FIT_MIN_BENCH_QUERIES) and so
+    *                          refuses every promotion with reason
+    *                          "benchmark_underpowered". That refusal is deliberate —
+    *                          set this to a real held-out fixture before expecting
+    *                          any model to promote.
     * kb_ranker_fit_bench_k:   NDCG cutoff for the gate (0 → default 5).
     * kb_ranker_fit_objective: "pointwise" (default) or "pairwise" — the fitter
     *                          objective. Pairwise learns within-query ordering

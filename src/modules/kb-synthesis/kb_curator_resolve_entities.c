@@ -210,7 +210,7 @@ int kb_curator_resolve_entities_one(const kb_curator_extract_opts_t *opts)
    config_load(&cfg);
    const char *embed_cmd = config_embedding_command(&cfg, NULL);
    float vec[CURATOR_ENTITY_DIM];
-   int dim = memory_embed_text(embed_text, embed_cmd, vec, CURATOR_ENTITY_DIM);
+   int dim = memory_embed_text(embed_text, embed_cmd, EMBED_INPUT_DOCUMENT, vec, CURATOR_ENTITY_DIM);
    if (dim > 0)
    {
       /* Resolve to an existing canonical entity in this scope, or — per the

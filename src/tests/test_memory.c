@@ -2524,10 +2524,10 @@ int main(void)
    /* --- deterministic builtin embedding fallback --- */
    {
       float vec[4];
-      int dim = memory_embed_text("test", "", vec, 4);
+      int dim = memory_embed_text("test", "", EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 4);
 
-      dim = memory_embed_text("test", NULL, vec, 4);
+      dim = memory_embed_text("test", NULL, EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 4);
    }
 
@@ -2542,7 +2542,7 @@ int main(void)
        * proving the float32 contract end-to-end through platform_exec_pipe. */
       for (int i = 0; i < 4; i++)
          vec[i] = -99.0f;
-      int dim = memory_embed_text("ignored", "printf '[0.5, 0.25, 0.125, 0.0625]'", vec, 4);
+      int dim = memory_embed_text("ignored", "printf '[0.5, 0.25, 0.125, 0.0625]'", EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 4);
       assert(fabs(vec[0] - 0.5) < 1e-6 && fabs(vec[1] - 0.25) < 1e-6);
       assert(fabs(vec[2] - 0.125) < 1e-6 && fabs(vec[3] - 0.0625) < 1e-6);
@@ -2551,21 +2551,21 @@ int main(void)
        * corruption): dim is 0 and the sentinel survives. */
       for (int i = 0; i < 4; i++)
          vec[i] = -99.0f;
-      dim = memory_embed_text("ignored", "sh -c 'exit 1'", vec, 4);
+      dim = memory_embed_text("ignored", "sh -c 'exit 1'", EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 0);
       assert(vec[0] == -99.0f);
 
       /* A missing sidecar binary (sh exit 127) is a failure, not a corruption. */
       for (int i = 0; i < 4; i++)
          vec[i] = -99.0f;
-      dim = memory_embed_text("ignored", "/nonexistent/embedder-xyz", vec, 4);
+      dim = memory_embed_text("ignored", "/nonexistent/embedder-xyz", EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 0);
       assert(vec[0] == -99.0f);
 
       /* Non-JSON stdout is rejected, again without touching the vector. */
       for (int i = 0; i < 4; i++)
          vec[i] = -99.0f;
-      dim = memory_embed_text("ignored", "printf 'not json at all'", vec, 4);
+      dim = memory_embed_text("ignored", "printf 'not json at all'", EMBED_INPUT_DOCUMENT, vec, 4);
       assert(dim == 0);
       assert(vec[0] == -99.0f);
    }

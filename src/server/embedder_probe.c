@@ -41,7 +41,7 @@ static int probe_once(void)
    if (memory_embed_command_is_http(g_embed_cmd))
    {
       static float vec[EMBED_MAX_DIM];
-      int d = memory_embed_text("dim probe", g_embed_cmd, vec, EMBED_MAX_DIM);
+      int d = memory_embed_text("dim probe", g_embed_cmd, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
       return d > 0 ? d : -1;
    }
    char cmd[1100];

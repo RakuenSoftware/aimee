@@ -628,10 +628,12 @@ int memory_embed(int64_t memory_id, const char *command)
    return -1;
 }
 
-int memory_embed_text(const char *text, const char *command, float *out, int max_dim)
+int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
+                      float *out, int max_dim)
 {
    (void)text;
    (void)command;
+   (void)input_type;
    if (!out || max_dim <= 0)
       return -1;
    memset(out, 0, (size_t)max_dim * sizeof(*out));
