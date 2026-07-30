@@ -215,7 +215,13 @@ COPY scripts/embedder-server.py /opt/aimee/scripts/embedder-server.py
 # of which sentence-transformers touches. Baking them cost 3.4GB of image for nothing.
 # Excluding the alternate runtimes and the legacy .bin duplicates keeps this to the
 # safetensors + tokenizer the loader actually reads.
+# The baked cache is READ-ONLY at runtime (built as root, served as `aimee`), but
+# trust_remote_code compiles the fetched modelling code into a writable module cache. It
+# defaults inside HF_HOME, which the non-root user cannot write — nomic then failed with
+# "Permission denied: /opt/aimee/models/modules". Point that one writable path at the
+# home volume and leave the weights immutable.
 ENV HF_HOME=/opt/aimee/models \
+    HF_MODULES_CACHE=/var/lib/aimee/.cache/huggingface/modules \
     HF_HUB_OFFLINE=1
 RUN --mount=type=cache,target=/root/.cache/huggingface \
     HF_HUB_OFFLINE=0 "$EMBEDDER_VENV/bin/python" - <<'PYBAKE'
