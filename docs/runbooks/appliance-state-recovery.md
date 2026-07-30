@@ -122,21 +122,37 @@ git -C "$TEST_CLONE/repository" fsck --no-dangling
 git -C "$TEST_CLONE/repository" ls-tree HEAD >/dev/null
 ```
 
-- [ ] Only after every test above succeeds, remove the temporary clone, move the damaged repository aside without deleting it, and clone into the original path. If this final clone fails, remove its incomplete destination and immediately restore the retained repository to the configured workspace path.
+- [ ] Only after every test above succeeds, remove the temporary clone. The guarded sequence below must confirm that the damaged repository was moved and the original path is absent before cloning. If this final clone fails, it removes the destination only when the clone created it, then immediately restores the retained repository to the configured workspace path.
 
 ```sh
 rm -rf "$TEST_CLONE"
 DAMAGED_WORKSPACE="${WORKSPACE}.damaged-$(date +%Y%m%d-%H%M%S)"
 export DAMAGED_WORKSPACE
-test -e "$WORKSPACE"
-mv "$WORKSPACE" "$DAMAGED_WORKSPACE"
-if git clone --single-branch --branch "$DEFAULT_BRANCH" "$CANONICAL_URL" "$WORKSPACE"
+if test -e "$WORKSPACE" &&
+   test ! -e "$DAMAGED_WORKSPACE" &&
+   mv "$WORKSPACE" "$DAMAGED_WORKSPACE" &&
+   test -e "$DAMAGED_WORKSPACE" &&
+   test ! -e "$WORKSPACE"
 then
-  printf 'damaged repository retained at %s\n' "$DAMAGED_WORKSPACE"
+  if git clone --single-branch --branch "$DEFAULT_BRANCH" "$CANONICAL_URL" "$WORKSPACE"
+  then
+    printf 'damaged repository retained at %s\n' "$DAMAGED_WORKSPACE"
+  else
+    # The workspace was confirmed absent immediately before git clone. Therefore,
+    # delete it only when the failed clone created a destination to remove.
+    if { test ! -e "$WORKSPACE" || { test -d "$WORKSPACE/.git" && rm -rf "$WORKSPACE"; }; } &&
+       test -e "$DAMAGED_WORKSPACE" &&
+       mv "$DAMAGED_WORKSPACE" "$WORKSPACE"
+    then
+      printf '%s\n' 'clone failed; retained repository restored to workspace path' >&2
+    else
+      printf 'clone failed; automatic rollback failed; retained repository remains at %s\n' \
+        "$DAMAGED_WORKSPACE" >&2
+    fi
+    false
+  fi
 else
-  rm -rf "$WORKSPACE"
-  mv "$DAMAGED_WORKSPACE" "$WORKSPACE"
-  printf '%s\n' 'clone failed; retained repository restored to workspace path' >&2
+  printf '%s\n' 'repository retention failed; clone was not attempted' >&2
   false
 fi
 ```
