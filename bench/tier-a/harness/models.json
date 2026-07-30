@@ -1,0 +1,16 @@
+{
+  "_comment": "Candidate set for Tier-A memory_facts extraction. 'actionable' models are MIT/Apache-2.0 and could ship in the redistributed AGPL image; 'reference' models are benchmarked only to show what the licence constraint costs. Licences recorded from the HF model card at benchmark time and re-verified by verify_licenses.py.",
+  "models": [
+    {"id": "ibm-granite/granite-4.0-350m",            "params": "350M", "licence": "apache-2.0", "class": "actionable", "note": "IBM Granite 4.0 Nano; tuned for tool-calling and structured JSON"},
+    {"id": "ibm-granite/granite-4.0-h-350m",          "params": "350M", "licence": "apache-2.0", "class": "actionable", "note": "hybrid-mamba variant of the above"},
+    {"id": "Qwen/Qwen3-0.6B",                         "params": "600M", "licence": "apache-2.0", "class": "actionable", "note": "thinking mode disabled to match Tier-A disable_thinking"},
+    {"id": "HuggingFaceTB/SmolLM2-360M-Instruct",     "params": "360M", "licence": "apache-2.0", "class": "actionable", "note": "smallest credible general instruct model"},
+    {"id": "Qwen/Qwen3-1.7B",                         "params": "1.7B", "licence": "apache-2.0", "class": "actionable", "note": "upper bound: what a permissive licence buys at 5x the size"},
+
+    {"id": "LiquidAI/LFM2-350M-Extract",              "params": "350M", "licence": "LFM Open v1.0", "class": "reference", "note": "purpose-built extraction model; $10M revenue ceiling"},
+    {"id": "LiquidAI/LFM2.5-230M",                    "params": "230M", "licence": "LFM Open v1.0", "class": "reference", "note": "smallest candidate benchmarked"},
+    {"id": "google/gemma-3-270m-it",                  "params": "270M", "licence": "gemma",        "class": "reference", "note": "fine-tuning substrate, evaluated zero-shot here"},
+
+    {"id": "google/gemma-3n-E4B-it",                  "params": "E4B",  "licence": "gemma",        "class": "incumbent", "note": "the model Tier-A runs today; accuracy baseline, GPU only"}
+  ]
+}
