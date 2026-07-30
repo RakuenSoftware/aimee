@@ -46,9 +46,13 @@ if [ -n "${AIMEE_SERVER_MGMT_TLS_KEY:-}" ] || [ -n "${AIMEE_SERVER_MGMT_STATUS_C
 fi
 runuser -u aimee -- aimee-server --bootstrap-vault-env
 _secret_names=$(runuser -u aimee -- aimee-server --list-credential-env-names)
+had_credential_env=0
 for _secret_name in $_secret_names; do
+    eval "_secret_was_set=\${${_secret_name}+x}"
+    [ "$_secret_was_set" = x ] && had_credential_env=1
     unset "$_secret_name"
 done
+unset _secret_was_set
 
 # Legacy credential files are a migration source, never runtime storage. Seal
 # and erase them even for a Docker command override; an internal restart marker
@@ -70,10 +74,12 @@ webchat_migrate_legacy_credentials
 if [ "$#" -gt 0 ]; then
     exec "$@"
 fi
-if [ "$vault_bootstrapped" -eq 0 ]; then
+if [ "$vault_bootstrapped" -eq 0 ] || [ "$had_credential_env" -eq 1 ]; then
     # Migrate any legacy browser credential files only after first-boot env
     # values have been sealed and scrubbed. The new web service authenticates
-    # against fixed Vault records and never materializes a PAM verifier.
+    # against fixed Vault records and never materializes a PAM verifier. Force
+    # a clean process image whenever this invocation inherited credentials,
+    # even if an external caller supplied the internal marker.
     webchat_prepare
     exec /usr/bin/tini -- aimee-server-entrypoint --aimee-internal-vault-bootstrapped
 fi

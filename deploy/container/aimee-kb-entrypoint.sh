@@ -47,10 +47,14 @@ export AIMEE_HOME
 [ -n "${AIMEE_DB2_URL:-}" ] && external_db=1
 aimee-kb --bootstrap-vault-env
 _secret_names=$(aimee-kb --list-credential-env-names)
+had_credential_env=0
 for _secret_name in $_secret_names; do
+    eval "_secret_was_set=\${${_secret_name}+x}"
+    [ "$_secret_was_set" = x ] && had_credential_env=1
     unset "$_secret_name"
 done
-if [ "$vault_bootstrapped" -eq 0 ]; then
+unset _secret_was_set
+if [ "$vault_bootstrapped" -eq 0 ] || [ "$had_credential_env" -eq 1 ]; then
     if [ "$external_db" -eq 1 ]; then
         exec /bin/sh "$0" --aimee-internal-vault-bootstrapped-external-db "$@"
     fi
