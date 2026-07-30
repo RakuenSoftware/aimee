@@ -127,8 +127,13 @@ cleanup() {
 trap cleanup EXIT
 
 if [[ "$DO_UP" == 1 ]]; then
-  bold "==> Building + starting the full stack ($COMPOSE_FILE)"
-  "${DC[@]}" up -d --build
+  bold "==> Building + Vault-bootstrapping + starting the full stack ($COMPOSE_FILE)"
+  "${DC[@]}" build
+  # Port-remap overrides do not affect the persistent Vault volumes. Bootstrap
+  # both owners against the base file before creating either long-lived service.
+  bootstrap_compose="${COMPOSE_FILE%% *}"
+  scripts/aimee-compose-vault-bootstrap.sh -f "$bootstrap_compose" all
+  "${DC[@]}" up -d --no-build
 
   bold "==> Waiting up to ${WAIT_SECONDS}s for aimee-server to report healthy"
   deadline=$((SECONDS + WAIT_SECONDS))

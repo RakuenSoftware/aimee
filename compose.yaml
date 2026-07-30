@@ -53,9 +53,8 @@ services:
       stack: 67108864
     environment:
       AIMEE_HOME: /var/lib/aimee
-      # Empty by default: the KB image owns PostgreSQL + pgvector for a new
-      # install. Set AIMEE_DB2_URL explicitly only to keep/use an external DB2.
-      AIMEE_DB2_URL: ${AIMEE_DB2_URL:-}
+      # External DB2 credentials are streamed into the KB Vault by the
+      # disposable Compose helper; never persist them in Config.Env.
       # One knob: embed (/embed) + rerank (/rerank) + synth (curator Tier-A & B,
       # at {url}/v1) all via the unified aimee-llm container. The kb runs no model.
       # Override AIMEE_EMBEDDER_URL / AIMEE_RERANKER_URL to pin a service elsewhere.

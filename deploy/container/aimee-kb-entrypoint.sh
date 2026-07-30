@@ -54,6 +54,15 @@ for _secret_name in $_secret_names; do
     unset "$_secret_name"
 done
 unset _secret_was_set
+# Container metadata is deliberately credential-free after the disposable
+# bootstrap. Resolve the DB topology from Vault without printing the URL. The
+# fixed probe distinguishes the entrypoint's own embedded socket DSN from an
+# operator-supplied external connection string.
+if aimee-kb --vault-db2-external; then
+    external_db=1
+else
+    external_db=0
+fi
 if [ "$vault_bootstrapped" -eq 0 ] || [ "$had_credential_env" -eq 1 ]; then
     if [ "$external_db" -eq 1 ]; then
         exec /bin/sh "$0" --aimee-internal-vault-bootstrapped-external-db "$@"

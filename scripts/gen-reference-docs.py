@@ -613,6 +613,7 @@ ENV_RE = re.compile(r'(?:getenv|copy_env)\(\s*"(AIMEE_[A-Z0-9_]+)"')
 ENV_DYNAMIC = {
     "AIMEE_FORGE_APP_PRIVATE_KEY",
     "AIMEE_FORGE_TOKEN",
+    "AIMEE_KB_CONN",
     "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE",
     "AIMEE_SERVER_TLS_PRIVATE_KEY",
     "AIMEE_SERVER_MGMT_TLS_PRIVATE_KEY",
@@ -712,7 +713,10 @@ ENV_DESC = {
     "AIMEE_KB_API_BEARER_TOKEN": ("Knowledge base (aimee-kb)", "First-boot transport for the aimee-kb API bearer token. Server and KB bootstrap paths seal it into Vault and remove it from the environment before long-lived service startup."),
     "AIMEE_KB_API_CA_BUNDLE": ("Knowledge base (aimee-kb)", "CA bundle path for verifying the aimee-kb TLS certificate."),
     "AIMEE_KB_CACHE_TTL_S": ("Knowledge base (aimee-kb)", "KB client cache TTL (seconds)."),
-    "AIMEE_KB_CONN": ("Knowledge base (aimee-kb)", "KB connection string (mTLS transport)."),
+    "AIMEE_KB_CONN": (
+        "Knowledge base (aimee-kb)",
+        "First-boot KB connection string; sealed into the server Vault before long-lived startup.",
+    ),
     "AIMEE_TRANSPORT_KB_POOL_ENABLED": ("Knowledge base (aimee-kb)", "Override server-to-KB mTLS connection pooling. The config default is on; set to 0 for one-shot connections."),
     "AIMEE_SERVER_ID": ("Knowledge base (aimee-kb)", "Registry identity used by the server mTLS heartbeat."),
     "AIMEE_SERVER_TEAM_ID": (

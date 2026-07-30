@@ -26,6 +26,7 @@
 #include "kb_pki.h"
 #include "kb_tls.h"
 #include "kb_client_mtls.h"
+#include "runtime_secret.h"
 
 extern int g_test_registry_heartbeat_allow;
 extern char g_test_registry_server_id[128], g_test_registry_issuer[601],
@@ -3243,7 +3244,7 @@ static void test_mtls_listener(void)
                (long)getpid());
       unlink(identity_file);
       kb_client_mtls_set_identity_path_for_test(identity_file);
-      setenv("AIMEE_KB_CONN", conn2, 1);
+      assert(runtime_secret_store("AIMEE_KB_CONN", conn2) == 0);
       setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "0", 1);
       assert(kb_client_mtls_configured() == 1);
       int st2 = -1;
@@ -3333,7 +3334,7 @@ static void test_mtls_listener(void)
                                 &pool_exhausted);
       assert(pool_total == 0 && pool_idle == 0);
       unsetenv("AIMEE_TRANSPORT_KB_POOL_ENABLED");
-      unsetenv("AIMEE_KB_CONN");
+      runtime_secret_remove("AIMEE_KB_CONN");
 
       /* A wizard-managed v2 identity owns its endpoint and stable registry
        * binding, so it remains configured with no one-time connection string

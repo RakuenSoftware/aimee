@@ -92,8 +92,13 @@ cleanup() { [[ "$DO_DOWN" == 1 ]] && { bold "==> Tearing down (--down)"; "${DC[@
 trap cleanup EXIT
 
 if [[ "$DO_UP" == 1 ]]; then
-  bold "==> Building + starting standalone server ($COMPOSE_FILE)"
-  "${DC[@]}" up -d --build
+  bold "==> Building + Vault-bootstrapping + starting standalone server ($COMPOSE_FILE)"
+  "${DC[@]}" build
+  # Port-remap overrides do not affect the persistent Vault volume. Bootstrap
+  # against the base file before creating the long-lived server container.
+  bootstrap_compose="${COMPOSE_FILE%% *}"
+  scripts/aimee-compose-vault-bootstrap.sh -f "$bootstrap_compose" server
+  "${DC[@]}" up -d --no-build
   bold "==> Waiting up to ${WAIT_SECONDS}s for aimee-server to report healthy"
   deadline=$((SECONDS + WAIT_SECONDS))
   while true; do

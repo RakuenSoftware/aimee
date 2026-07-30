@@ -448,6 +448,23 @@ int main(int argc, char **argv)
       return 0;
    }
 
+   /* Docker Compose bootstrap helper: credentials arrive on a pipe as
+    * NUL-delimited environment records, so no value is retained in container
+    * Config.Env. This process is one-shot and exits immediately after sealing. */
+   if (argc == 2 && strcmp(argv[1], "--bootstrap-vault-stdin") == 0)
+   {
+      if (vault_env_bootstrap_init() < 0 || server_vault_bootstrap_prepare() < 0 ||
+          vault_env_import_stream(stdin) < 0 || vault_env_bootstrap_init() < 0 ||
+          server_vault_bootstrap_prepare() < 0 || vault_config_bootstrap_init() < 0 ||
+          vault_env_has_credential_environment() != 0)
+      {
+         runtime_secret_clear();
+         return 1;
+      }
+      runtime_secret_clear();
+      return 0;
+   }
+
    /* unsetenv() removes a credential from future lookups but cannot guarantee
     * that Linux /proc/<pid>/environ stops exposing the original inherited
     * bytes. A normal server invocation that inherited first-boot credentials

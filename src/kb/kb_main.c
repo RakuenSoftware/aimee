@@ -1,4 +1,5 @@
 #include "aimee.h"
+#include "aimee_home.h"
 #include "agent_exec.h"
 #include "config.h"
 #include "config_database.h"
@@ -1558,7 +1559,8 @@ int main(int argc, char **argv)
     * in /proc/<pid>/environ, so a credential-bearing process may seal into
     * Vault but may not become the long-lived KB. The bootstrap helper itself is
     * already short-lived and therefore does not need to re-exec. */
-   if (!(argc > 1 && strcmp(argv[1], "--bootstrap-vault-env") == 0))
+   if (!(argc > 1 && (strcmp(argv[1], "--bootstrap-vault-env") == 0 ||
+                      strcmp(argv[1], "--bootstrap-vault-stdin") == 0)))
    {
       int credential_env = vault_env_has_credential_environment();
       if (credential_env < 0)
@@ -1589,6 +1591,14 @@ int main(int argc, char **argv)
       fputs("aimee-kb: credential Vault bootstrap failed\n", stderr);
       return 1;
    }
+   if (argc == 2 && strcmp(argv[1], "--bootstrap-vault-stdin") == 0 &&
+       (vault_env_import_stream(stdin) < 0 || vault_env_bootstrap_init_all() < 0 ||
+        vault_env_has_credential_environment() != 0))
+   {
+      runtime_secret_clear();
+      fputs("aimee-kb: streamed credential Vault bootstrap failed\n", stderr);
+      return 1;
+   }
    if (vault_config_bootstrap_init() < 0)
    {
       fputs("aimee-kb: credential config Vault migration failed\n", stderr);
@@ -1607,8 +1617,35 @@ int main(int argc, char **argv)
    }
    (void)atexit(runtime_secret_clear);
 
-   if (argc > 1 && strcmp(argv[1], "--bootstrap-vault-env") == 0)
+   if (argc > 1 && (strcmp(argv[1], "--bootstrap-vault-env") == 0 ||
+                    strcmp(argv[1], "--bootstrap-vault-stdin") == 0))
       return 0;
+
+   /* Entrypoint decision probe: presence only, never the DB credential. A KB
+    * restarted without first-boot environment metadata must still select the
+    * external database whose URL is held exclusively in Vault. */
+   if (argc == 2 && strcmp(argv[1], "--vault-db2-external") == 0)
+   {
+      char db2_url[4096];
+      int present = runtime_secret_get("AIMEE_DB2_URL", db2_url, sizeof(db2_url));
+      char embedded[4096];
+      const char *home = aimee_home();
+      int n = home ? snprintf(embedded, sizeof(embedded), "postgresql:///aimee_shared?host=%s/run",
+                              home)
+                   : -1;
+      int external =
+          present && (n <= 0 || (size_t)n >= sizeof(embedded) || strcmp(db2_url, embedded) != 0);
+      runtime_secret_wipe(db2_url, sizeof(db2_url));
+      runtime_secret_wipe(embedded, sizeof(embedded));
+      return external ? 0 : 1;
+   }
+   if (argc == 2 && strcmp(argv[1], "--vault-llm-auth-configured") == 0)
+   {
+      char token[513];
+      int present = runtime_secret_get("AIMEE_LLM_AUTH_TOKEN", token, sizeof(token));
+      runtime_secret_wipe(token, sizeof(token));
+      return present ? 0 : 1;
+   }
 
    /* Subcommands (must precede the daemon flag loop). */
    if (argc > 1 && strcmp(argv[1], "enroll") == 0)

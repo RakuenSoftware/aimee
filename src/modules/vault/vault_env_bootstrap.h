@@ -1,12 +1,21 @@
 #ifndef AIMEE_VAULT_ENV_BOOTSTRAP_H
 #define AIMEE_VAULT_ENV_BOOTSTRAP_H 1
 
+#include <stdio.h>
+
 /* Seal every credential-shaped environment variable into the local
  * server-principal Vault, populate runtime_secret from Vault, and unset the
  * environment values. Safe and idempotent on both aimee-server and aimee-kb.
  * Returns the number newly sealed, or -1 on any fail-closed error. */
 int vault_env_bootstrap_init(void);
 int vault_env_bootstrap_init_all(void);
+
+/* Import NUL-delimited NAME=VALUE records (the `env -0` format) from a
+ * disposable first-boot stream into this short-lived process. Only names
+ * classified as credentials are imported; values are never printed. The
+ * caller must immediately run the normal Vault bootstrap and exit. Returns
+ * the number imported, or -1 on malformed/oversized/duplicate input. */
+int vault_env_import_stream(FILE *input);
 
 /* Pure classifier shared with tests and the source guard. */
 int vault_env_name_is_credential(const char *name);

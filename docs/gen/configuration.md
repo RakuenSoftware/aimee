@@ -409,7 +409,7 @@ The binaries read 223 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_KB_API_CA_BUNDLE` | CA bundle path for verifying the aimee-kb TLS certificate. |
 | `AIMEE_KB_API_URL` | aimee-kb HTTP API base URL. |
 | `AIMEE_KB_CACHE_TTL_S` | KB client cache TTL (seconds). |
-| `AIMEE_KB_CONN` | KB connection string (mTLS transport). |
+| `AIMEE_KB_CONN` | First-boot KB connection string; sealed into the server Vault before long-lived startup. |
 | `AIMEE_KB_EMIT_ENROLL` | Emit a client enrollment token on KB start. |
 | `AIMEE_KB_EMIT_SCOPE` | Scope for the emitted enrollment token. |
 | `AIMEE_KB_HARDENED` | Require the hardened KB custody and transport posture at startup. |

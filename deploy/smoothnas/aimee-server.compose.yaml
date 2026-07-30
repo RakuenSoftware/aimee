@@ -16,9 +16,8 @@ services:
       AIMEE_KB_API_URL: ${AIMEE_KB_API_URL:-http://127.0.0.1:8741}
       AIMEE_SERVER_HTTP_BIND: "1"
       AIMEE_RUNTIME_WEB_ENABLED: ${AIMEE_RUNTIME_WEB_ENABLED:-1}
-      AIMEE_API_BEARER_TOKEN: ${AIMEE_API_BEARER_TOKEN:-}
-      AIMEE_WEBCHAT_USER: ${AIMEE_WEBCHAT_USER:-}
-      AIMEE_WEBCHAT_PASSWORD: ${AIMEE_WEBCHAT_PASSWORD:-}
+      # First-boot credentials are streamed into Vault by the disposable
+      # Compose helper and never retained in this service's Config.Env.
     ports:
       - "8743:8743"
       - "8443:8443"

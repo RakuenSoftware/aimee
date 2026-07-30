@@ -17,6 +17,7 @@
 #define ENV_BOOTSTRAP_MAX     1024
 #define ENV_VAULT_ENTRY_MAX   1024
 #define ENV_SECRET_VALUE_MAX  4096
+#define ENV_STREAM_RECORD_MAX (WEBCHAT_SECRET_MAX + ENV_NAME_MAX + 2)
 #define ENV_OVERWRITE_CONTROL "AIMEE_VAULT_ENV_OVERWRITE"
 #define WEBCHAT_SECRET_MAX    (64 * 1024)
 #define WEBCHAT_AGENT         "webchat-login"
@@ -50,6 +51,7 @@ static int name_span_is_credential(const char *name, size_t len, int include_del
         memcmp(name, "AIMEE_VAULT_PKCS11_PIN", len) == 0) ||
        (len == strlen("AIMEE_WEBCHAT_USER") && memcmp(name, "AIMEE_WEBCHAT_USER", len) == 0) ||
        (len == strlen("AIMEE_WEBCHAT_USERS") && memcmp(name, "AIMEE_WEBCHAT_USERS", len) == 0) ||
+       (len == strlen("AIMEE_KB_CONN") && memcmp(name, "AIMEE_KB_CONN", len) == 0) ||
        (len == strlen("DATABASE_URL") && memcmp(name, "DATABASE_URL", len) == 0) ||
        (len == strlen("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE") &&
         memcmp(name, "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE", len) == 0))
@@ -109,6 +111,110 @@ int vault_env_print_credential_names(void)
          return -1;
    }
    return fflush(stdout) == 0 ? 0 : -1;
+}
+
+static int env_name_is_identifier(const char *name, size_t len)
+{
+   if (!name || !len ||
+       !(name[0] == '_' || (name[0] >= 'A' && name[0] <= 'Z') ||
+         (name[0] >= 'a' && name[0] <= 'z')))
+      return 0;
+   for (size_t i = 1; i < len; i++)
+      if (!(name[i] == '_' || (name[i] >= 'A' && name[i] <= 'Z') ||
+            (name[i] >= 'a' && name[i] <= 'z') || (name[i] >= '0' && name[i] <= '9')))
+         return 0;
+   return 1;
+}
+
+int vault_env_import_stream(FILE *input)
+{
+   if (!input)
+      return -1;
+
+   char *record = calloc(1, ENV_STREAM_RECORD_MAX);
+   char(*imported)[ENV_NAME_MAX] = calloc(ENV_BOOTSTRAP_MAX, sizeof(*imported));
+   if (!record || !imported)
+   {
+      free(record);
+      free(imported);
+      return -1;
+   }
+
+   size_t used = 0;
+   int imported_count = 0;
+   int failed = 0;
+   for (;;)
+   {
+      int ch = fgetc(input);
+      if (ch == EOF)
+      {
+         if (ferror(input) || used != 0)
+            failed = 1; /* every record must be NUL terminated */
+         break;
+      }
+      if (ch != '\0')
+      {
+         if (used + 1 >= ENV_STREAM_RECORD_MAX)
+         {
+            failed = 1;
+            break;
+         }
+         record[used++] = (char)ch;
+         continue;
+      }
+      if (used == 0)
+         continue;
+
+      char *eq = memchr(record, '=', used);
+      size_t name_len = eq ? (size_t)(eq - record) : used;
+      if (!eq)
+      {
+         failed = 1;
+         break;
+      }
+      if (eq && name_span_is_credential(record, name_len, 1))
+      {
+         if (name_len == 0 || name_len >= ENV_NAME_MAX ||
+             !env_name_is_identifier(record, name_len) || imported_count >= ENV_BOOTSTRAP_MAX)
+         {
+            failed = 1;
+            break;
+         }
+         record[name_len] = '\0';
+         /* Do not overwrite a credential inherited by the helper. The caller
+          * must ingest its own environment first; accepting a duplicate here
+          * would make the stream's precedence ambiguous. */
+         if (getenv(record) != NULL)
+         {
+            failed = 1;
+            break;
+         }
+         size_t value_len = used - name_len - 1;
+         record[used] = '\0';
+         if (setenv(record, eq + 1, 1) != 0)
+         {
+            failed = 1;
+            break;
+         }
+         memcpy(imported[imported_count], record, name_len + 1);
+         imported_count++;
+         OPENSSL_cleanse(eq + 1, value_len);
+      }
+      OPENSSL_cleanse(record, used + 1);
+      used = 0;
+   }
+
+   if (failed)
+   {
+      for (int i = 0; i < imported_count; i++)
+         unsetenv(imported[i]);
+      imported_count = -1;
+   }
+   OPENSSL_cleanse(record, ENV_STREAM_RECORD_MAX);
+   OPENSSL_cleanse(imported, ENV_BOOTSTRAP_MAX * sizeof(*imported));
+   free(record);
+   free(imported);
+   return imported_count;
 }
 
 typedef struct
