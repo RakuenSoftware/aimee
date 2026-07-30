@@ -768,12 +768,13 @@ def build_server():
             elif path == "/slots":
                 self._send(200, slot_catalog())
             elif path == "/health":
-                if STUB:
-                    # Report the dim so the kb's embedder-autodim sizes the schema
-                    # (the embed-remote.py --dim probe reads payload["dim"]).
-                    self._send(200, {"status": "ok", "model": "aimee-llm-stub", "dim": STUB_DIM})
-                    return
-                st = health_state(child_health())
+                # STUB reports the SAME identity fields as the real path, differing only
+                # in where the dim comes from. It applies the registry's real prefixes to
+                # every input, so the space it serves is the registry's — claiming
+                # otherwise made e2e exercise a laxer contract than production, which is
+                # the one thing STUB must never do. Only the dim is synthetic (STUB_DIM),
+                # and the kb's embedder-autodim reads it from payload["dim"].
+                st = "ok" if STUB else health_state(child_health())
                 payload = {"status": st, "model": EMBED_MODEL}
                 # The vector-space identity the kb records against its corpus.
                 # Reported regardless of readiness: it is registry data, not a
@@ -781,6 +782,10 @@ def build_server():
                 sid = serving_id()
                 if sid:
                     payload["serving_id"] = sid
+                if STUB:
+                    payload["dim"] = STUB_DIM
+                    self._send(200, payload)
+                    return
                 if st == "ok":
                     dim = embed_dim()
                     if dim:

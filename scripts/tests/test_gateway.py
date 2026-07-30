@@ -689,6 +689,74 @@ class EmbedderRegistry(unittest.TestCase):
         self.assertIn("cannot read embedder registry", err.getvalue())
 
 
+class ServingIdentity(unittest.TestCase):
+    """/health's serving_id is what the kb records against its corpus.
+
+    A dim and a model name both survive a pooling or prefix change, so neither can
+    gate a re-embed. serving_id folds those in. The properties that matter: it changes
+    when the space changes, it does NOT change on cosmetic decoration, and STUB reports
+    it exactly as the real path does — an e2e that skipped it would let a corpus be
+    built with no recorded identity.
+    """
+
+    def _gw(self, model="nomic-embed-text-v2-moe", **env):
+        env["AIMEE_LLM_EMBED_MODEL"] = model
+        with mock.patch.dict(os.environ, env, clear=False):
+            return _gw()
+
+    def test_encodes_model_pooling_and_prefixes(self):
+        gw = self._gw()
+        first = gw.serving_id()
+        self.assertTrue(first.startswith("nomic-embed-text-v2-moe/"), first)
+        # Same model, prefixes changed -> different space -> different id.
+        gw.EMBEDDERS["nomic-embed-text-v2-moe"]["prefixes"]["query"] = "other: "
+        self.assertNotEqual(gw.serving_id(), first)
+
+    def test_pooling_change_alone_changes_the_identity(self):
+        # The exact failure the guard exists for: nomic served with Qwen3's `last`
+        # pooling is well-formed, right width, right name, wrong space.
+        gw = self._gw()
+        before = gw.serving_id()
+        gw.EMBEDDERS["nomic-embed-text-v2-moe"]["pooling"] = "last"
+        self.assertNotEqual(gw.serving_id(), before)
+
+    def test_decoration_does_not_change_the_identity(self):
+        # db2 model records carry @revision; casing varies. Neither changes the space,
+        # so neither may trigger a spurious re-embed.
+        base = self._gw().serving_id()
+        for model in ("nomic-embed-text-v2-moe@v1", "Nomic-Embed-Text-V2-MoE"):
+            self.assertEqual(self._gw(model).serving_id(), base, f"for {model!r}")
+
+    def test_unregistered_model_reports_no_identity(self):
+        # Empty is "no identity", which the kb guard treats as a no-op. It must not
+        # raise out of the /health handler.
+        self.assertEqual(self._gw("some-unknown-embedder").serving_id(), "")
+
+    def test_health_reports_it_in_stub_and_real_mode_alike(self):
+        stub = self._gw(AIMEE_LLM_STUB="1")
+        real = self._gw()
+        self.assertEqual(stub.serving_id(), real.serving_id())
+        self.assertNotEqual(stub.serving_id(), "")
+
+    def test_stub_health_payload_carries_identity_and_dim(self):
+        # STUB is what e2e runs. If its /health omits serving_id, a stub-backed kb
+        # records no identity and the guard never engages in e2e.
+        gw = self._gw(AIMEE_LLM_STUB="1", AIMEE_LLM_STUB_DIM="768", AIMEE_LLM_PORT="0")
+        srv = gw.build_server()
+        port = srv.server_address[1]
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=10) as resp:
+                payload = json.loads(resp.read())
+        finally:
+            srv.shutdown()
+            srv.server_close()
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["dim"], 768)
+        self.assertEqual(payload["model"], "nomic-embed-text-v2-moe")
+        self.assertEqual(payload["serving_id"], gw.serving_id())
+
+
 class EmbedPrefixRouting(unittest.TestCase):
     """input_type travels over real HTTP in the query string.
 
