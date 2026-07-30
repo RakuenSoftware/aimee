@@ -876,11 +876,11 @@ resource_failure:
  * strange bound, it silently removes the bound entirely — the exact outcome this
  * function exists to make impossible. errno must be inspected because strtol
  * saturates at LONG_MAX/LONG_MIN rather than reporting failure in its return. */
-int db2_pg_statement_timeout_ms(void)
+static int db2_pg_timeout_ms_env(const char *var, int fallback)
 {
-   const char *raw = getenv("AIMEE_DB2_STATEMENT_TIMEOUT_MS");
+   const char *raw = getenv(var);
    if (!raw || !raw[0])
-      return DB2_DEFAULT_STATEMENT_TIMEOUT_MS;
+      return fallback;
 
    /* Canonical decimal only, checked before strtol rather than after: digits, and
     * no redundant leading zero.
@@ -899,16 +899,21 @@ int db2_pg_statement_timeout_ms(void)
     * enumeration of bad spellings. */
    for (const char *c = raw; *c; c++)
       if (*c < '0' || *c > '9')
-         return DB2_DEFAULT_STATEMENT_TIMEOUT_MS;
+         return fallback;
    if (raw[0] == '0' && raw[1])
-      return DB2_DEFAULT_STATEMENT_TIMEOUT_MS;
+      return fallback;
 
    char *end = NULL;
    errno = 0;
    long v = strtol(raw, &end, 10);
    if (!end || *end || errno == ERANGE || v < 0 || v > INT_MAX)
-      return DB2_DEFAULT_STATEMENT_TIMEOUT_MS; /* a typo must not remove the bound */
+      return fallback; /* a typo must not remove the bound */
    return (int)v;
+}
+
+int db2_pg_statement_timeout_ms(void)
+{
+   return db2_pg_timeout_ms_env("AIMEE_DB2_STATEMENT_TIMEOUT_MS", DB2_DEFAULT_STATEMENT_TIMEOUT_MS);
 }
 
 /* PQconnectdb accepts EITHER a keyword/value string ("host=db user=aimee") OR a
