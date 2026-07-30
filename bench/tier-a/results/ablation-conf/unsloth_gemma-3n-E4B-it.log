@@ -1,0 +1,43 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Traceback (most recent call last):
+  File "/opt/tierA/bench/tier-a/harness/run_hf.py", line 176, in <module>
+    main()
+    ~~~~^^
+  File "/opt/tierA/bench/tier-a/harness/run_hf.py", line 118, in main
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model,
+        dtype=getattr(torch, args.dtype),
+        device_map=args.device if args.device != "cpu" else None,
+    )
+  File "/opt/bench/lib/python3.13/site-packages/transformers/models/auto/auto_factory.py", line 402, in from_pretrained
+    return model_class.from_pretrained(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        pretrained_model_name_or_path, *model_args, config=config, **hub_kwargs, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/bench/lib/python3.13/site-packages/transformers/modeling_utils.py", line 4412, in from_pretrained
+    model = cls(config, *model_args, **model_kwargs)
+  File "/opt/bench/lib/python3.13/site-packages/transformers/models/gemma3n/modeling_gemma3n.py", line 2224, in __init__
+    self.model = Gemma3nModel(config)
+                 ~~~~~~~~~~~~^^^^^^^^
+  File "/opt/bench/lib/python3.13/site-packages/transformers/models/gemma3n/modeling_gemma3n.py", line 1969, in __init__
+    self.vision_tower = AutoModel.from_config(config=config.vision_config)
+                        ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/bench/lib/python3.13/site-packages/transformers/models/auto/auto_factory.py", line 248, in from_config
+    return model_class._from_config(config, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "/opt/bench/lib/python3.13/site-packages/transformers/modeling_utils.py", line 1664, in _from_config
+    model = cls(config, **kwargs)
+  File "/opt/bench/lib/python3.13/site-packages/transformers/models/timm_wrapper/modeling_timm_wrapper.py", line 157, in __init__
+    requires_backends(self, ["vision", "timm"])
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/bench/lib/python3.13/site-packages/transformers/utils/import_utils.py", line 2156, in requires_backends
+    raise ImportError("".join(failed))
+ImportError: 
+TimmWrapperModel requires the PIL library but it was not found in your environment. You can install it with pip:
+`pip install pillow`. Please note that you may need to restart your runtime after installation.
+
+TimmWrapperModel requires the timm library but it was not found in your environment. You can install it with pip:
+`pip install timm`. Please note that you may need to restart your runtime after installation.
+

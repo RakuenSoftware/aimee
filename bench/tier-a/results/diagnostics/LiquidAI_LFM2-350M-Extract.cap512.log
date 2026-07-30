@@ -1,0 +1,3 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/148 [00:00<?, ?it/s]Loading weights:  26%|██▋       | 39/148 [00:00<00:00, 386.41it/s]Loading weights:  83%|████████▎ | 123/148 [00:00<00:00, 633.43it/s]Loading weights: 100%|██████████| 148/148 [00:00<00:00, 643.81it/s]
+{"peak_vram_gib": 0.68}
