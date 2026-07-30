@@ -178,70 +178,16 @@ git -C "$WORKSPACE" fsck --no-dangling
 git -C "$WORKSPACE" ls-tree HEAD >/dev/null
 ```
 
-- [ ] Select a pending recovery canary proposal whose normal pipeline reaches
-  `pr.open`. The command below must return a `work_item_id`; that response is the
-  affirmative marker that a post-recovery proposal poll ran `git ls-tree` and
-  filed the proposal. The canary pipeline opens a real PR, so use a proposal
-  approved for that purpose.
+- [ ] Confirm the direct checks above completed without either reported Git error:
+  `git ls-tree HEAD` must not report `ls-tree failed ... rc=128`, and
+  `git remote get-url origin` must return the canonical HTTPS URL rather than
+  `resolve https origin: no origin remote`. Do not trigger a proposal or forge
+  workflow as a recovery test; those workflows can create external changes such
+  as branches and pull requests.
 
-```sh
-export RECOVERY_PROPOSAL='recovery-canary.md'
-export RECOVERY_PIPELINE='build'
-test -n "$RECOVERY_PROPOSAL"
-test -n "$RECOVERY_PIPELINE"
+- [ ] Preserve `$DAMAGED_WORKSPACE` for later manual disposition after recording
+  its path. Do not delete it as part of this recovery procedure. If any direct
+  check fails or either Git error recurs during normal operation, retain both
+  repositories and escalate.
 
-CURSOR_OUTPUT=$(journalctl --show-cursor -n 0 --no-pager) || {
-  printf '%s\n' 'failed to capture recovery journal cursor' >&2
-  false
-}
-RECOVERY_CURSOR=$(printf '%s\n' "$CURSOR_OUTPUT" | sed -n 's/^-- cursor: //p')
-test -n "$RECOVERY_CURSOR"
-
-POLL_OUTPUT=$(aimee --json trigger fire \
-  --source proposals \
-  --proposal "$RECOVERY_PROPOSAL" \
-  --workspace "$WORKSPACE" \
-  --pipeline "$RECOVERY_PIPELINE") || {
-  printf '%s\n' 'recovery proposal poll failed' >&2
-  false
-}
-printf '%s\n' "$POLL_OUTPUT"
-printf '%s\n' "$POLL_OUTPUT" | grep -Eq '"work_item_id"[[:space:]]*:[[:space:]]*"[^"]+"'
-```
-
-- [ ] Wait for the canary to open its PR. The bounded follow below must capture
-  the post-cursor `wfe-forge` success marker; a timeout or an empty marker is a
-  failed check, not permission to delete the retained repository.
-
-```sh
-FORGE_SUCCESS=$(timeout 30m journalctl \
-  --after-cursor "$RECOVERY_CURSOR" --follow --no-pager | \
-  grep -m 1 -E 'wfe-forge.*opened PR #[0-9]+') || {
-  printf '%s\n' 'no post-recovery forge success marker observed within 30 minutes' >&2
-  false
-}
-test -n "$FORGE_SUCCESS"
-printf '%s\n' "$FORGE_SUCCESS"
-```
-
-- [ ] Only after both affirmative markers exist, inspect the complete
-  post-cursor journal and confirm neither workspace Git error recurred before
-  deleting the retained damaged repository.
-
-```sh
-if JOURNAL_OUTPUT=$(journalctl --after-cursor "$RECOVERY_CURSOR" --no-pager)
-then
-  test -n "$JOURNAL_OUTPUT"
-  if printf '%s\n' "$JOURNAL_OUTPUT" | \
-    grep -E 'ls-tree failed.*rc=128|resolve https origin: no origin remote'
-  then
-    printf '%s\n' 'workspace Git errors are still recurring' >&2
-    false
-  fi
-else
-  printf '%s\n' 'failed to read the post-recovery journal' >&2
-  false
-fi
-```
-
-If either error recurs, retain both repositories and escalate. Do not attempt storage repair, migration, or automated recovery as part of this procedure.
+Do not attempt storage repair, migration, or automated recovery as part of this procedure.
