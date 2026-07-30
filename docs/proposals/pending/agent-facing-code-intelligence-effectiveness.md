@@ -1,6 +1,6 @@
 # Proposal: Agent-facing code intelligence effectiveness
 
-- **State:** PENDING — E2–E6 remain; E0, E1, and E1-memory history is recorded below
+- **State:** PENDING — E3–E6 remain; E0 through E2 history is recorded below
 - **Author:** JBailes
 - **Date:** 2026-07-29
 - **Charter roles:** Recall, Rank-Fuse, Calibrate / Evaluate-Optimize, Enforce, Gate-Promote
@@ -654,3 +654,44 @@ residual proposal instead of declaring the intended effectiveness outcome comple
   release-plus-kind-plus-project regressions prove both positive projects and a mismatched kind.
   Roundtable run: `roundtable-d6b5adead972ca968a7132e5` (artifact
   `068609efd696a07bdd62a7cceaeb02ff97cc8298b4c1f703348f107de936635c`).
+- **E2 final exact-diff review — 2026-07-30 — APPROVED and converged, 3/3 participants, not
+  degraded.** The final operator-health and explicit-scope smoke repairs received no blocking
+  findings. Roundtable run: `roundtable-0b8300caa27872843d839e63` (artifact
+  `96a646d79a1169a6f0d810b879f4db3ea4eaed6af66b9e286319a1f574161da6`).
+- **E2 current-project identity slice:** PR #2161 merged to `testing` as
+  `a70ebc23e1facd0cc199fbfacd2c13e2a38b1dca` after all 23 CI checks passed. Stable identity,
+  active-project-first code/knowledge/memory ordering, generation fencing, explicit all-project
+  scope, and audited detach/purge/GC are now the base for E3–E6.
+- **E3 graph-resolution candidate:** the implementation replaces path-substring blast matching
+  with exact normalized Python module identities, merges unique-symbol call edges without
+  duplicates, admits cross-project tails only through resolved structural routes, resolves legacy
+  projection basenames uniquely, and emits provenance/confidence/project/generation/freshness for
+  every edge. Its frozen implementation diff receives a separate roundtable gate before PR.
+- **E3 implementation round 1 — 2026-07-30 — changes requested, 3/3 participants, not
+  degraded.** All three seats found that local co-edit projection edges were appended after the
+  resolver's cross-project tail. A shared stable local-first partition now runs after additive
+  projections in both public blast-radius paths, and an adversarial fixture combines a local-only
+  projection with a route-gated external import and asserts that no local edge follows an external
+  edge. Roundtable run: `roundtable-5d582db9c64174793488f921` (artifact
+  `a309798e4843249ac313deecef3b9749cc318845c4b95498325216b374f3d4b1`).
+- **E3 implementation round 2 — 2026-07-30 — changes requested, 3/3 participants, not
+  degraded.** The corrected local-first ordering was accepted. The synthesis repeated a projection
+  capacity concern that was already bounded by both loop conditions; E3 nevertheless adds the same
+  guard at each insertion site so the invariant survives future loop refactors. A valid finding
+  showed that the client accepted legacy-only arrays with empty metadata. New E3 clients now require
+  resolved top-level identity plus complete structured edge arrays and fail closed on legacy-only or
+  partial metadata; servers continue emitting legacy arrays additively for older consumers.
+  Roundtable run: `roundtable-15472c66ae1dccd6620b4b97` (artifact
+  `a8e925f87312534a4092416d4dec985621f5e0053be367bbab37d15b5be889fe`).
+- **E3 implementation round 3 — 2026-07-30 — APPROVED and converged, 2/3 participants used,
+  degraded.** The panel reported no blocking findings. E3 immediately adopts its schema-accuracy
+  suggestion by splitting dependent/path and dependency/identity OpenAPI edge types so the required
+  identity field matches the client validation contract. Its distinct CLI error-class suggestion is
+  assigned to the accepted E5 typed-status slice. Roundtable run:
+  `roundtable-a2953bf8d139a351d64af27d` (artifact
+  `ce370ec61931cdfb91c1e73417de930af801280d5a486ab2de9cd7adec98ae85`).
+- **E3 final exact-diff review — 2026-07-30 — APPROVED and converged, 2/3 participants used,
+  degraded.** The schema-aligned frozen diff received no findings; the chairman confirmed the
+  earlier ordering, capacity, complete-metadata, exact-resolution, route-gating, and concrete edge
+  identity findings remain closed. Roundtable run: `roundtable-327db1be95dc7e7c3abd2035`
+  (artifact `ebe90912dc8e54a133c45453fd1c8b376c0c5845954acf66fe37134f1e0b17e4`).

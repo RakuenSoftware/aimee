@@ -1,6 +1,8 @@
 #ifndef DEC_KB_HTTP_CODE_H
 #define DEC_KB_HTTP_CODE_H 1
 
+#include "cJSON.h"
+#include "index.h"
 #include <stddef.h>
 
 /* Shared route helpers (defined in kb_http_code.c), used by the graph-feedback
@@ -8,8 +10,9 @@
 int code_scan_write_error(char *out_buf, int out_cap, const char *message);
 int code_method_not_allowed(char *out_buf, int out_cap);
 int code_qparam(const char *qs, const char *key, char *out, int outsz);
-int code_request_project(const char *query_string, char *project, size_t project_cap,
-                         int allow_all, int *all_projects, char *out_buf, int out_cap);
+int code_request_project(const char *query_string, char *project, size_t project_cap, int allow_all,
+                         int *all_projects, char *out_buf, int out_cap);
+void code_blast_radius_json_fields(cJSON *response, const blast_radius_t *blast);
 
 int handle_post_code_scan(const char *body, char *out_buf, int out_cap);
 int handle_post_code_scan_route(const char *method, const char *body, char *out_buf, int out_cap);

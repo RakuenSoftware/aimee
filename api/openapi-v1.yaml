@@ -622,23 +622,90 @@ components:
           type: string
           nullable: true
 
+    BlastRadiusDependentEdge:
+      type: object
+      required: [path, provenance, confidence, project, generation, freshness]
+      properties:
+        path:
+          type: string
+          description: Dependent file path.
+        provenance:
+          type: string
+          description: Comma-separated structural evidence (`import`, `call`, `projection`, or `cross_repo`).
+        confidence:
+          type: string
+          enum: [high, medium, low]
+        project:
+          type: string
+        generation:
+          type: integer
+          format: int64
+          minimum: 1
+        freshness:
+          type: string
+          enum: [current]
+
+    BlastRadiusDependencyEdge:
+      type: object
+      required: [identity, provenance, confidence, project, generation, freshness]
+      properties:
+        identity:
+          type: string
+          description: Normalized import identity.
+        provenance:
+          type: string
+          description: Comma-separated structural evidence (`import`, `call`, `projection`, or `cross_repo`).
+        confidence:
+          type: string
+          enum: [high, medium, low]
+        project:
+          type: string
+        generation:
+          type: integer
+          format: int64
+          minimum: 1
+        freshness:
+          type: string
+          enum: [current]
+
     BlastRadiusResponse:
       type: object
+      required: [file, project, generation, freshness, resolved, dependents, dependent_count,
+                 dependent_edges, dependencies, dependency_count, dependency_edges]
       properties:
         file:
           type: string
+        project:
+          type: string
+        generation:
+          type: integer
+          format: int64
+          minimum: 1
+        freshness:
+          type: string
+          enum: [current]
+        resolved:
+          type: boolean
         dependents:
           type: array
           items:
             type: string
         dependent_count:
           type: integer
+        dependent_edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/BlastRadiusDependentEdge"
         dependencies:
           type: array
           items:
             type: string
         dependency_count:
           type: integer
+        dependency_edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/BlastRadiusDependencyEdge"
 
     CodeScanRequest:
       type: object
@@ -3044,7 +3111,7 @@ paths:
             type: string
       responses:
         "200":
-          description: Blast radius
+          description: Current-generation blast radius with provenance-bearing edges
           content:
             application/json:
               schema:

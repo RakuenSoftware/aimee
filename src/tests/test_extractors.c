@@ -67,6 +67,47 @@ static void test_c_imports(void)
       free(imports[i]);
 }
 
+static int has_import(char **imports, int count, const char *expected)
+{
+   for (int i = 0; i < count; i++)
+      if (strcmp(imports[i], expected) == 0)
+         return 1;
+   return 0;
+}
+
+static void test_python_import_identities(void)
+{
+   const char *source = "import app.dates as dates, app.money\n"
+                        "from app import dates, invoices\n"
+                        "from app.dates import billing_period_days\n"
+                        "from . import reports\n"
+                        "from ..shared import clock\n";
+   char *imports[32] = {0};
+   int count = extract_imports(".py", source, imports, 32);
+   assert(has_import(imports, count, "app.dates"));
+   assert(has_import(imports, count, "app.money"));
+   assert(has_import(imports, count, "app.invoices"));
+   assert(has_import(imports, count, ".reports"));
+   assert(has_import(imports, count, "..shared"));
+   for (int i = 0; i < count; i++)
+      free(imports[i]);
+
+   char identity[MAX_PATH_LEN];
+   assert(code_path_import_identity("app/dates.py", identity, sizeof(identity)) == 0);
+   assert(strcmp(identity, "app.dates") == 0);
+   assert(code_path_import_identity("app/dates/__init__.py", identity, sizeof(identity)) == 0);
+   assert(strcmp(identity, "app.dates") == 0);
+   assert(code_import_identity("app/billing.py", ".dates", identity, sizeof(identity)) == 0);
+   assert(strcmp(identity, "app.dates") == 0);
+   assert(code_import_identity("app/reports/monthly.py", "..dates", identity, sizeof(identity)) ==
+          0);
+   assert(strcmp(identity, "app.dates") == 0);
+   assert(code_import_resolves_path("app/billing.py", "app.dates", "app/dates.py"));
+   assert(code_import_resolves_path("app/invoices.py", ".dates", "app/dates.py"));
+   assert(!code_import_resolves_path("app/billing.py", "app.dates_extra", "app/dates.py"));
+   printf("python import identities OK\n");
+}
+
 static void test_c_exports(void)
 {
    char *exports[16];
@@ -359,6 +400,7 @@ int main(void)
 {
    test_def_end_line();
    test_c_imports();
+   test_python_import_identities();
    test_c_exports();
    test_c_definitions();
    test_c_env_var_extraction();

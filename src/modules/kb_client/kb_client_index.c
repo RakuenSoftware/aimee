@@ -423,6 +423,31 @@ int kb_client_index_list(project_info_t *out, int max)
    return count;
 }
 
+static int kb_index_blast_edge_valid(const cJSON *edge, const char *identity_field)
+{
+   if (!cJSON_IsObject(edge))
+      return 0;
+   cJSON *identity = cJSON_GetObjectItemCaseSensitive(edge, identity_field);
+   cJSON *provenance = cJSON_GetObjectItemCaseSensitive(edge, "provenance");
+   cJSON *confidence = cJSON_GetObjectItemCaseSensitive(edge, "confidence");
+   cJSON *project = cJSON_GetObjectItemCaseSensitive(edge, "project");
+   cJSON *generation = cJSON_GetObjectItemCaseSensitive(edge, "generation");
+   cJSON *freshness = cJSON_GetObjectItemCaseSensitive(edge, "freshness");
+   return cJSON_IsString(identity) && identity->valuestring[0] && cJSON_IsString(provenance) &&
+          provenance->valuestring[0] && cJSON_IsString(confidence) && confidence->valuestring[0] &&
+          cJSON_IsString(project) && project->valuestring[0] && cJSON_IsNumber(generation) &&
+          cJSON_IsString(freshness) && freshness->valuestring[0];
+}
+
+static int kb_index_blast_edges_valid(const cJSON *edges, const char *identity_field)
+{
+   if (!cJSON_IsArray(edges))
+      return 0;
+   cJSON *edge;
+   cJSON_ArrayForEach(edge, edges) if (!kb_index_blast_edge_valid(edge, identity_field)) return 0;
+   return 1;
+}
+
 int kb_client_index_blast_radius(const char *project, const char *file_path, blast_radius_t *out)
 {
    if (!project || !file_path || !out)
@@ -442,9 +467,13 @@ int kb_client_index_blast_radius(const char *project, const char *file_path, bla
    snprintf(path, sizeof(path), "/v1/code/blast-radius?project=%s&file_path=%s", project_q, file_q);
    free(project_q);
    free(file_q);
-   char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, NULL);
-   if (!json)
+   int status = 0;
+   char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, &status);
+   if (!json || status < 200 || status >= 300)
+   {
+      free(json);
       return -1;
+   }
    cJSON *resp = cJSON_Parse(json);
    free(json);
    if (!resp)
@@ -454,30 +483,76 @@ int kb_client_index_blast_radius(const char *project, const char *file_path, bla
    if (cJSON_IsString(file))
       snprintf(out->file, sizeof(out->file), "%s", file->valuestring);
 
-   cJSON *deps = cJSON_GetObjectItemCaseSensitive(resp, "dependencies");
-   if (cJSON_IsArray(deps))
+   cJSON *error = cJSON_GetObjectItemCaseSensitive(resp, "error");
+   if (cJSON_IsString(error))
    {
-      cJSON *d;
-      cJSON_ArrayForEach(d, deps)
-      {
-         if (out->dependency_count >= 64)
-            break;
-         if (cJSON_IsString(d))
-            snprintf(out->dependencies[out->dependency_count++], MAX_PATH_LEN, "%s",
-                     d->valuestring);
-      }
+      cJSON_Delete(resp);
+      return -1;
    }
-   cJSON *depts = cJSON_GetObjectItemCaseSensitive(resp, "dependents");
-   if (cJSON_IsArray(depts))
+   cJSON *project_json = cJSON_GetObjectItemCaseSensitive(resp, "project");
+   cJSON *generation = cJSON_GetObjectItemCaseSensitive(resp, "generation");
+   cJSON *freshness = cJSON_GetObjectItemCaseSensitive(resp, "freshness");
+   cJSON *resolved = cJSON_GetObjectItemCaseSensitive(resp, "resolved");
+   cJSON *dependency_edges = cJSON_GetObjectItemCaseSensitive(resp, "dependency_edges");
+   cJSON *dependent_edges = cJSON_GetObjectItemCaseSensitive(resp, "dependent_edges");
+   if (!cJSON_IsString(project_json) || !project_json->valuestring[0] ||
+       !cJSON_IsNumber(generation) || !cJSON_IsString(freshness) || !freshness->valuestring[0] ||
+       !cJSON_IsTrue(resolved) || !kb_index_blast_edges_valid(dependency_edges, "identity") ||
+       !kb_index_blast_edges_valid(dependent_edges, "path"))
    {
-      cJSON *d;
-      cJSON_ArrayForEach(d, depts)
-      {
-         if (out->dependent_count >= 64)
-            break;
-         if (cJSON_IsString(d))
-            snprintf(out->dependents[out->dependent_count++], MAX_PATH_LEN, "%s", d->valuestring);
-      }
+      cJSON_Delete(resp);
+      return -1;
+   }
+   snprintf(out->project, sizeof(out->project), "%s", project_json->valuestring);
+   out->generation = (long long)generation->valuedouble;
+   snprintf(out->freshness, sizeof(out->freshness), "%s", freshness->valuestring);
+   out->resolved = 1;
+
+   cJSON *edge;
+   cJSON_ArrayForEach(edge, dependency_edges)
+   {
+      if (out->dependency_count >= 64)
+         break;
+      cJSON *identity = cJSON_GetObjectItemCaseSensitive(edge, "identity");
+      int i = out->dependency_count++;
+      snprintf(out->dependencies[i], MAX_PATH_LEN, "%s", identity->valuestring);
+      cJSON *v = cJSON_GetObjectItemCaseSensitive(edge, "provenance");
+      snprintf(out->dependency_meta[i].provenance, sizeof(out->dependency_meta[i].provenance), "%s",
+               v->valuestring);
+      v = cJSON_GetObjectItemCaseSensitive(edge, "confidence");
+      snprintf(out->dependency_meta[i].confidence, sizeof(out->dependency_meta[i].confidence), "%s",
+               v->valuestring);
+      v = cJSON_GetObjectItemCaseSensitive(edge, "project");
+      snprintf(out->dependency_meta[i].project, sizeof(out->dependency_meta[i].project), "%s",
+               v->valuestring);
+      v = cJSON_GetObjectItemCaseSensitive(edge, "generation");
+      out->dependency_meta[i].generation = (long long)v->valuedouble;
+      v = cJSON_GetObjectItemCaseSensitive(edge, "freshness");
+      snprintf(out->dependency_meta[i].freshness, sizeof(out->dependency_meta[i].freshness), "%s",
+               v->valuestring);
+   }
+
+   cJSON_ArrayForEach(edge, dependent_edges)
+   {
+      if (out->dependent_count >= 64)
+         break;
+      cJSON *edge_path = cJSON_GetObjectItemCaseSensitive(edge, "path");
+      int i = out->dependent_count++;
+      snprintf(out->dependents[i], MAX_PATH_LEN, "%s", edge_path->valuestring);
+      cJSON *v = cJSON_GetObjectItemCaseSensitive(edge, "provenance");
+      snprintf(out->dependent_meta[i].provenance, sizeof(out->dependent_meta[i].provenance), "%s",
+               v->valuestring);
+      v = cJSON_GetObjectItemCaseSensitive(edge, "confidence");
+      snprintf(out->dependent_meta[i].confidence, sizeof(out->dependent_meta[i].confidence), "%s",
+               v->valuestring);
+      v = cJSON_GetObjectItemCaseSensitive(edge, "project");
+      snprintf(out->dependent_meta[i].project, sizeof(out->dependent_meta[i].project), "%s",
+               v->valuestring);
+      v = cJSON_GetObjectItemCaseSensitive(edge, "generation");
+      out->dependent_meta[i].generation = (long long)v->valuedouble;
+      v = cJSON_GetObjectItemCaseSensitive(edge, "freshness");
+      snprintf(out->dependent_meta[i].freshness, sizeof(out->dependent_meta[i].freshness), "%s",
+               v->valuestring);
    }
    cJSON_Delete(resp);
    return 0;
@@ -531,12 +606,32 @@ static char *kb_client_index_blast_radius_preview_v1(const char *project, char *
       cJSON *file = cJSON_CreateObject();
       cJSON_AddStringToObject(file, "path", path);
       cJSON *deps = cJSON_AddArrayToObject(file, "dependents");
+      cJSON *edges = cJSON_AddArrayToObject(file, "dependent_edges");
       int dependent_count = 0;
       if (rc == 0)
       {
+         cJSON_AddStringToObject(file, "project", br.project);
+         cJSON_AddNumberToObject(file, "generation", (double)br.generation);
+         cJSON_AddStringToObject(file, "freshness", br.freshness);
+         cJSON_AddBoolToObject(file, "resolved", br.resolved);
          dependent_count = br.dependent_count;
          for (int j = 0; j < br.dependent_count; j++)
+         {
             cJSON_AddItemToArray(deps, cJSON_CreateString(br.dependents[j]));
+            cJSON *edge = cJSON_CreateObject();
+            cJSON_AddStringToObject(edge, "path", br.dependents[j]);
+            cJSON_AddStringToObject(edge, "provenance", br.dependent_meta[j].provenance);
+            cJSON_AddStringToObject(edge, "confidence", br.dependent_meta[j].confidence);
+            cJSON_AddStringToObject(edge, "project", br.dependent_meta[j].project);
+            cJSON_AddNumberToObject(edge, "generation", (double)br.dependent_meta[j].generation);
+            cJSON_AddStringToObject(edge, "freshness", br.dependent_meta[j].freshness);
+            cJSON_AddItemToArray(edges, edge);
+         }
+      }
+      else
+      {
+         cJSON_AddStringToObject(file, "status", "unavailable");
+         cJSON_AddBoolToObject(file, "resolved", 0);
       }
       cJSON_AddNumberToObject(file, "dependent_count", dependent_count);
       const char *severity = kb_index_preview_severity(dependent_count);

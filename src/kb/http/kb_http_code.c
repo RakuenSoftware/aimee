@@ -413,15 +413,7 @@ int handle_get_code_blast_radius(const char *query_string, char *out_buf, int ou
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"oom\"}");
       return 500;
    }
-   cJSON_AddStringToObject(resp, "file", br->file);
-   cJSON *dependents = cJSON_AddArrayToObject(resp, "dependents");
-   for (int i = 0; dependents && i < br->dependent_count; i++)
-      cJSON_AddItemToArray(dependents, cJSON_CreateString(br->dependents[i]));
-   cJSON_AddNumberToObject(resp, "dependent_count", br->dependent_count);
-   cJSON *dependencies = cJSON_AddArrayToObject(resp, "dependencies");
-   for (int i = 0; dependencies && i < br->dependency_count; i++)
-      cJSON_AddItemToArray(dependencies, cJSON_CreateString(br->dependencies[i]));
-   cJSON_AddNumberToObject(resp, "dependency_count", br->dependency_count);
+   code_blast_radius_json_fields(resp, br);
    char *json = cJSON_PrintUnformatted(resp);
    snprintf(out_buf, (size_t)out_cap, "%s", json ? json : "{\"file\":\"\"}");
    free(json);

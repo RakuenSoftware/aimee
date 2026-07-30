@@ -8,6 +8,7 @@
 #include "db.h"
 #include "db2.h"
 #include "canonical_index.h"
+#include "entity_edges.h"
 #include "db2_test_shim.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
@@ -675,6 +676,109 @@ int main(void)
       free(invalid_dir);
    }
 
+   /* E3 exact Python module graph: normal, explicit from-pair, and relative
+    * imports converge on app/dates.py; a prefix collision is excluded and a
+    * call-only user is merged with provenance. */
+   {
+      canonical_index_file_input_t inputs[] = {
+          {"app/dates.py", "import app.calendar\n\ndef billing_period_days():\n    return 30\n"},
+          {"app/billing.py",
+           "from app import dates\n\ndef bill():\n    return dates.billing_period_days()\n"},
+          {"app/invoices.py",
+           "from . import dates\n\ndef invoice():\n    return dates.billing_period_days()\n"},
+          {"app/reports.py",
+           "import app.dates\n\ndef report():\n    return billing_period_days()\n"},
+          {"app/caller_only.py", "def preview():\n    return billing_period_days()\n"},
+          {"app/forecast.py", "def forecast():\n    return 30\n"},
+          {"app/collision.py", "import app.dates_extra\n"},
+      };
+      int inspected = 0;
+      assert(canonical_index_scan_files("python-blast", "/fixture", inputs,
+                                        (int)(sizeof(inputs) / sizeof(inputs[0])), 1,
+                                        &inspected) >= 0);
+      blast_radius_t br;
+      assert(canonical_index_blast_radius("python-blast", "app/dates.py", &br) == 0);
+      const char *expected[] = {"app/billing.py", "app/invoices.py", "app/reports.py",
+                                "app/caller_only.py"};
+      for (size_t e = 0; e < sizeof(expected) / sizeof(expected[0]); e++)
+      {
+         int found = 0;
+         for (int i = 0; i < br.dependent_count; i++)
+            if (strcmp(br.dependents[i], expected[e]) == 0)
+            {
+               found = 1;
+               assert(br.dependent_meta[i].provenance[0]);
+               assert(strcmp(br.dependent_meta[i].freshness, "current") == 0);
+               assert(br.dependent_meta[i].generation >= 1);
+            }
+         assert(found);
+      }
+      for (int i = 0; i < br.dependent_count; i++)
+         assert(strcmp(br.dependents[i], "app/collision.py") != 0);
+      assert(br.resolved == 1);
+      assert(strcmp(br.project, "python-blast") == 0);
+      assert(br.dependency_count == 1);
+      assert(strcmp(br.dependencies[0], "app.calendar") == 0);
+
+      /* Projection-only local edges must still sort before the route-gated
+       * cross-project tail. Four bumps clear the projection weight gate. */
+      for (int bump = 0; bump < 4; bump++)
+      {
+         int added = 0;
+         assert(db2_entity_edge_upsert("dates.py", "co_edited", "forecast.py", 0, 0, 0, 0,
+                                       &added) == 0);
+      }
+
+      canonical_index_file_input_t routed[] = {
+          {"client/report.py", "import app.dates\n\ndef remote_report():\n    return 1\n"}};
+      assert(canonical_index_scan_files("python-consumer", "/consumer", routed, 1, 1, &inspected) >=
+             0);
+      canonical_index_file_input_t unrouted[] = {
+          {"client/noise.py", "import app.dates\n\ndef noise():\n    return 1\n"}};
+      assert(canonical_index_scan_files("python-distractor", "/distractor", unrouted, 1, 1,
+                                        &inspected) >= 0);
+      char sql_err[256] = "";
+      assert(aimee_pg_exec(
+                 db2_conn(),
+                 "INSERT INTO cross_repo_route(caller_project,definer_project,kind,confidence,"
+                 "evidence) VALUES('python-consumer','python-blast','import_module','high',"
+                 "'app.dates')",
+                 sql_err, sizeof(sql_err)) == 0);
+      assert(canonical_index_blast_radius("python-blast", "app/dates.py", &br) == 0);
+      int found_cross = 0;
+      int found_projection = 0;
+      int seen_external = 0;
+      for (int i = 0; i < br.dependent_count; i++)
+      {
+         assert(strcmp(br.dependents[i], "client/noise.py") != 0);
+         if (strcmp(br.dependent_meta[i].project, "python-blast") == 0)
+         {
+            assert(!seen_external);
+            if (strcmp(br.dependents[i], "app/forecast.py") == 0)
+            {
+               found_projection = 1;
+               assert(strstr(br.dependent_meta[i].provenance, "projection"));
+            }
+         }
+         else
+         {
+            seen_external = 1;
+         }
+         if (strcmp(br.dependents[i], "client/report.py") == 0)
+         {
+            found_cross = 1;
+            assert(strcmp(br.dependent_meta[i].project, "python-consumer") == 0);
+            assert(strcmp(br.dependent_meta[i].provenance, "cross_repo") == 0);
+            assert(strcmp(br.dependent_meta[i].confidence, "high") == 0);
+         }
+      }
+      assert(found_projection);
+      assert(found_cross);
+      memset(&br, 0, sizeof(br));
+      assert(canonical_index_blast_radius("python-blast", "app/missing.py", &br) != 0);
+      assert(br.resolved == 0);
+   }
+
    /* --- production co-change path: canonical scan populates co_edited edges from
     * git history, the bulk gate holds, re-scan is idempotent, and blast radius
     * surfaces a co-edited file with no structural import link. This guards the
@@ -697,12 +801,15 @@ int main(void)
       assert(scanned2 >= 0);
       assert(cochange_pair_weight("a.c", "b.c") == wab);
 
-      /* Blast radius surfaces b.c as co-edited with a.c (they share no import). */
+      /* Blast radius surfaces the uniquely resolved b.c projection with explicit
+       * provenance (they share no import). */
       blast_radius_t br;
       assert(canonical_index_blast_radius("cochangeproj", "a.c", &br) == 0);
       int found_coedited = 0;
       for (int i = 0; i < br.dependent_count; i++)
-         if (strstr(br.dependents[i], "b.c") && strstr(br.dependents[i], "co-edited"))
+         if (strcmp(br.dependents[i], "b.c") == 0 &&
+             strstr(br.dependent_meta[i].provenance, "projection") &&
+             strcmp(br.dependent_meta[i].freshness, "current") == 0)
             found_coedited = 1;
       assert(found_coedited);
 

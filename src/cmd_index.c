@@ -524,23 +524,43 @@ static void idx_blast_radius(app_ctx_t *ctx, int argc, char **argv)
       fatal("index blast-radius requires an active or explicit project");
    blast_radius_t br;
    if (kb_client_index_blast_radius(project, file_path, &br) != 0)
-   {
-      if (!ctx->json_output)
-         fprintf(stderr,
-                 "aimee: knowledge service unavailable — cannot compute canonical blast radius\n");
-      memset(&br, 0, sizeof(br));
-      snprintf(br.file, sizeof(br.file), "%s", file_path);
-   }
+      fatal("knowledge service could not resolve the current-generation blast radius");
    if (ctx->json_output)
    {
       cJSON *j = cJSON_CreateObject();
       cJSON_AddStringToObject(j, "file", br.file);
+      cJSON_AddStringToObject(j, "project", br.project);
+      cJSON_AddNumberToObject(j, "generation", (double)br.generation);
+      cJSON_AddStringToObject(j, "freshness", br.freshness);
+      cJSON_AddBoolToObject(j, "resolved", br.resolved);
       cJSON *deps = cJSON_AddArrayToObject(j, "dependents");
+      cJSON *dependent_edges = cJSON_AddArrayToObject(j, "dependent_edges");
       for (int i = 0; i < br.dependent_count; i++)
+      {
          cJSON_AddItemToArray(deps, cJSON_CreateString(br.dependents[i]));
+         cJSON *edge = cJSON_CreateObject();
+         cJSON_AddStringToObject(edge, "path", br.dependents[i]);
+         cJSON_AddStringToObject(edge, "provenance", br.dependent_meta[i].provenance);
+         cJSON_AddStringToObject(edge, "confidence", br.dependent_meta[i].confidence);
+         cJSON_AddStringToObject(edge, "project", br.dependent_meta[i].project);
+         cJSON_AddNumberToObject(edge, "generation", (double)br.dependent_meta[i].generation);
+         cJSON_AddStringToObject(edge, "freshness", br.dependent_meta[i].freshness);
+         cJSON_AddItemToArray(dependent_edges, edge);
+      }
       cJSON *ddeps = cJSON_AddArrayToObject(j, "dependencies");
+      cJSON *dependency_edges = cJSON_AddArrayToObject(j, "dependency_edges");
       for (int i = 0; i < br.dependency_count; i++)
+      {
          cJSON_AddItemToArray(ddeps, cJSON_CreateString(br.dependencies[i]));
+         cJSON *edge = cJSON_CreateObject();
+         cJSON_AddStringToObject(edge, "identity", br.dependencies[i]);
+         cJSON_AddStringToObject(edge, "provenance", br.dependency_meta[i].provenance);
+         cJSON_AddStringToObject(edge, "confidence", br.dependency_meta[i].confidence);
+         cJSON_AddStringToObject(edge, "project", br.dependency_meta[i].project);
+         cJSON_AddNumberToObject(edge, "generation", (double)br.dependency_meta[i].generation);
+         cJSON_AddStringToObject(edge, "freshness", br.dependency_meta[i].freshness);
+         cJSON_AddItemToArray(dependency_edges, edge);
+      }
       emit_json_ctx(j, ctx->json_fields, ctx->response_profile);
       return;
    }
@@ -550,13 +570,18 @@ static void idx_blast_radius(app_ctx_t *ctx, int argc, char **argv)
    {
       printf("  Dependents (%d):\n", br.dependent_count);
       for (int i = 0; i < br.dependent_count; i++)
-         printf("    %s\n", br.dependents[i]);
+         printf("    %s [%s, %s, %s@%lld, %s]\n", br.dependents[i], br.dependent_meta[i].provenance,
+                br.dependent_meta[i].confidence, br.dependent_meta[i].project,
+                br.dependent_meta[i].generation, br.dependent_meta[i].freshness);
    }
    if (br.dependency_count > 0)
    {
       printf("  Dependencies (%d):\n", br.dependency_count);
       for (int i = 0; i < br.dependency_count; i++)
-         printf("    %s\n", br.dependencies[i]);
+         printf("    %s [%s, %s, %s@%lld, %s]\n", br.dependencies[i],
+                br.dependency_meta[i].provenance, br.dependency_meta[i].confidence,
+                br.dependency_meta[i].project, br.dependency_meta[i].generation,
+                br.dependency_meta[i].freshness);
    }
    if (br.dependent_count == 0 && br.dependency_count == 0)
       printf("  No dependents or dependencies found.\n");
