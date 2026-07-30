@@ -1900,12 +1900,20 @@ static void config_snapshot_test_event(int event, unsigned slot)
 #define CONFIG_MAX_REAPPLIERS 16
 static config_reapplier_fn g_reappliers[CONFIG_MAX_REAPPLIERS];
 static int g_reapplier_count = 0;
+static void (*g_server_api_remote_writes_reapplier)(int value);
 
 void config_reload_register_reapplier(config_reapplier_fn fn)
 {
    pthread_mutex_lock(&g_snap_wlock);
    if (fn && g_reapplier_count < CONFIG_MAX_REAPPLIERS)
       g_reappliers[g_reapplier_count++] = fn;
+   pthread_mutex_unlock(&g_snap_wlock);
+}
+
+void config_server_api_remote_writes_on_reload(void (*fn)(int value))
+{
+   pthread_mutex_lock(&g_snap_wlock);
+   g_server_api_remote_writes_reapplier = fn;
    pthread_mutex_unlock(&g_snap_wlock);
 }
 
@@ -2172,6 +2180,8 @@ int config_reload(void)
    config_snapshot_publish(&fresh);
    for (int i = 0; i < g_reapplier_count; i++)
       g_reappliers[i](have_old ? &old : &fresh, &fresh);
+   if (g_server_api_remote_writes_reapplier)
+      g_server_api_remote_writes_reapplier(fresh.server_api_remote_writes);
    pthread_mutex_unlock(&g_snap_wlock);
    return 1; /* a new snapshot was published */
 }

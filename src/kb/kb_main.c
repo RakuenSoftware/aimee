@@ -1551,10 +1551,13 @@ static int kb_cmd_tenancy(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
+   if (argc > 1 && strcmp(argv[1], "--list-credential-env-names") == 0)
+      return vault_env_print_credential_names() == 0 ? 0 : 1;
+
    /* The local file Vault is still bound here (before KB switches ordinary
     * tenant Vault operations to Postgres), so it can break the DB credential
     * bootstrap cycle and hydrate process memory without retaining env secrets. */
-   if (vault_env_bootstrap_init() < 0)
+   if (vault_env_bootstrap_init_all() < 0)
    {
       fputs("aimee-kb: credential Vault bootstrap failed\n", stderr);
       return 1;

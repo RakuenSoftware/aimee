@@ -10,10 +10,43 @@
 # POSIX sh (the image has no bash). Endpoints/DB come from the environment.
 set -eu
 
+vault_bootstrapped=0
+if [ "$#" -eq 1 ] && [ "$1" = "--aimee-internal-vault-bootstrapped" ]; then
+    vault_bootstrapped=1
+    shift
+fi
+
 AIMEE_HOME="${AIMEE_HOME:-/var/lib/aimee}"
 SERVER_SOCK="${AIMEE_SERVER_SOCK:-/var/lib/aimee/aimee-server.sock}"
 server_pid=""
 wfe_pid=""
+
+# Consume deployment credentials before invoking any unrelated child process.
+# Kubernetes/Docker environment injection is accepted only as first-boot
+# transport: the short-lived server seals it into Vault, then this PID removes
+# every credential-shaped variable before it starts tini, an explicit command,
+# bootstrap helpers, webchat, the C server, or the Go WFE. The internal second
+# pass is intentionally idempotent so an externally supplied sentinel cannot
+# bypass ingestion.
+if [ -n "${AIMEE_DELEGATE_SECRETS_FILE:-}" ]; then
+    printf '[server-entrypoint] fatal: AIMEE_DELEGATE_SECRETS_FILE is unsupported; use first-boot AIMEE_DELEGATE_KEY_<AGENT> variables\n' >&2
+    exit 2
+fi
+runuser -u aimee -- aimee-server --bootstrap-vault-env
+_secret_names=$(runuser -u aimee -- aimee-server --list-credential-env-names)
+for _secret_name in $_secret_names; do
+    unset "$_secret_name"
+done
+
+# An explicit Docker command is unrelated to normal server startup. It still
+# follows Vault ingestion above and receives a credential-free environment.
+if [ "$#" -gt 0 ]; then
+    exec "$@"
+fi
+if [ "$vault_bootstrapped" -eq 0 ]; then
+    exec /usr/bin/tini -- aimee-server-entrypoint --aimee-internal-vault-bootstrapped
+fi
+
 export AIMEE_WFE_ENGINE="${AIMEE_WFE_ENGINE:-go}"
 case "$AIMEE_WFE_ENGINE" in
     go) ;;
@@ -35,20 +68,6 @@ ulimit -s 65536 2>/dev/null || true
 # Credential plaintext necessarily exists in process memory while a request is
 # authenticated. Never persist that memory in a core image.
 ulimit -c 0 2>/dev/null || true
-
-# An explicit Docker command is not an aimee first boot, so it must run before
-# image-only helpers are sourced. Never forward ambient credentials into that
-# unrelated process; normal server startup below seals them into Vault first.
-if [ "$#" -gt 0 ]; then
-    for _secret_name in $(env | sed -n 's/=.*//p'); do
-        case "$_secret_name" in
-            AIMEE_DELEGATE_KEY_*|AIMEE_DB2_URL|AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE|*_TOKEN|*_SECRET|*_PASSWORD|*_PRIVATE_KEY|*_API_KEY|*_DSN)
-                unset "$_secret_name"
-                ;;
-        esac
-    done
-    exec "$@"
-fi
 
 # Seed the baked default config into AIMEE_HOME if absent. The server reads its
 # /v1 listener settings (port + bearer) from $AIMEE_HOME/aimee.yaml; a
@@ -158,22 +177,6 @@ done
 . /usr/local/bin/runtime-web-lib.sh
 . /usr/local/bin/plane-supervisor.sh
 
-# Consume deployment credentials exactly once. Kubernetes/Docker may supply a
-# Secret as environment at first boot; the helper seals it into Vault, and this
-# parent removes it before any unrelated bootstrap helper, webchat, the C server,
-# or the Go WFE is launched.
-if [ -n "${AIMEE_DELEGATE_SECRETS_FILE:-}" ]; then
-    printf '[server-entrypoint] fatal: AIMEE_DELEGATE_SECRETS_FILE is unsupported; use first-boot AIMEE_DELEGATE_KEY_<AGENT> variables\n' >&2
-    exit 2
-fi
-runuser -u aimee -- aimee-server --bootstrap-vault-env
-for _secret_name in $(env | sed -n 's/=.*//p'); do
-    case "$_secret_name" in
-        AIMEE_DELEGATE_KEY_*|AIMEE_DB2_URL|AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE|*_TOKEN|*_SECRET|*_PASSWORD|*_PRIVATE_KEY|*_API_KEY|*_DSN)
-            unset "$_secret_name"
-            ;;
-    esac
-done
 webchat_prepare
 
 log() { printf '[server-entrypoint] %s\n' "$*"; }

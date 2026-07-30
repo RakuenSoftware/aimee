@@ -9,24 +9,73 @@ FAIL=0
 pass() { echo "  PASS: $1"; }
 fail() { echo "  FAIL: $1"; FAIL=1; }
 
-# The server image entrypoint must honor Docker's explicit command override.
-# Run it outside the image: dispatch must happen before any image-only bootstrap.
-entrypoint_output=$(sh ../deploy/container/server-entrypoint.sh \
-    printf '%s\n' entrypoint-command-override 2>/dev/null)
-if [ "$entrypoint_output" = "entrypoint-command-override" ]; then
-    pass "server entrypoint honors explicit command override"
+# The server image entrypoint must honor Docker's explicit command override, but
+# even an override must first consume credential env into Vault and scrub it.
+# Stub only the short-lived bootstrap transport so this can run outside the
+# image; the explicit child proves it received no credential value.
+entrypoint_test_dir=$(mktemp -d /tmp/aimee-entrypoint.XXXXXX)
+cat >"$entrypoint_test_dir/runuser" <<'SH'
+#!/bin/sh
+[ -n "${ENTRYPOINT_TEST_API_KEY:-}" ] || exit 3
+case "$*" in
+    *--list-credential-env-names*) printf '%s\n' ENTRYPOINT_TEST_API_KEY ;;
+esac
+exit 0
+SH
+chmod +x "$entrypoint_test_dir/runuser"
+entrypoint_output=$(env -i PATH="$entrypoint_test_dir:/usr/bin:/bin" \
+    AIMEE_HOME="$entrypoint_test_dir/home" ENTRYPOINT_TEST_API_KEY=first-boot-only \
+    sh ../deploy/container/server-entrypoint.sh sh -c \
+    'printf "%s\n" "${ENTRYPOINT_TEST_API_KEY-unset}"' 2>/dev/null)
+rm -rf "$entrypoint_test_dir"
+if [ "$entrypoint_output" = "unset" ]; then
+    pass "server entrypoint Vault-ingests and scrubs before an explicit command override"
 else
-    fail "server entrypoint ignored explicit command override"
+    fail "server entrypoint bypassed Vault ingestion or leaked a credential to an override"
 fi
 
-# The server image intentionally supervises multiple long-lived planes. Its
-# entrypoint shell therefore cannot be PID 1: orphaned git/agent grandchildren
-# would accumulate as zombies until the appliance could no longer fork.
+# The server image intentionally supervises multiple long-lived planes, so it
+# still needs a PID-1 subreaper. It must not start tini until after first-boot
+# credentials have been sealed and unset: an earlier tini permanently retains
+# the original container environment even when every child scrubs its copy.
+vault_bootstrap_line=$(grep -nF 'runuser -u aimee -- aimee-server --bootstrap-vault-env' \
+    ../deploy/container/server-entrypoint.sh | cut -d: -f1)
+credential_unset_line=$(grep -nF 'unset "$_secret_name"' \
+    ../deploy/container/server-entrypoint.sh | cut -d: -f1)
+tini_exec_line=$(grep -nF 'exec /usr/bin/tini -- aimee-server-entrypoint --aimee-internal-vault-bootstrapped' \
+    ../deploy/container/server-entrypoint.sh | cut -d: -f1)
+first_unrelated_child_line=$(grep -nF 'mkdir -p "$AIMEE_HOME"' \
+    ../deploy/container/server-entrypoint.sh | head -1 | cut -d: -f1)
 if grep -qE '^[[:space:]]+tini \\' ../Dockerfile.server &&
-   grep -qF 'ENTRYPOINT ["/usr/bin/tini", "--", "aimee-server-entrypoint"]' ../Dockerfile.server; then
-    pass "server image uses a PID 1 subreaper"
+   grep -qF 'ENTRYPOINT ["aimee-server-entrypoint"]' ../Dockerfile.server &&
+   [ -n "$vault_bootstrap_line" ] && [ -n "$credential_unset_line" ] &&
+   [ -n "$tini_exec_line" ] && [ -n "$first_unrelated_child_line" ] &&
+   [ "$vault_bootstrap_line" -lt "$credential_unset_line" ] &&
+   [ "$credential_unset_line" -lt "$tini_exec_line" ] &&
+   [ "$credential_unset_line" -lt "$first_unrelated_child_line" ] &&
+   ! grep -qF 'env | sed' ../deploy/container/server-entrypoint.sh; then
+    pass "server image Vault-ingests and scrubs before any unrelated child or PID 1 subreaper"
 else
-   fail "server image must install and enter through tini"
+   fail "server image must seal and scrub credentials before spawning unrelated children"
+fi
+
+# The KB entrypoint has the same invariant. In particular, it must not seed a
+# config, initialize PostgreSQL, or pipe environment values through text tools
+# before the Vault bootstrap and parent-environment scrub have completed.
+kb_vault_bootstrap_line=$(grep -nF 'aimee-kb --bootstrap-vault-env' \
+    ../deploy/container/aimee-kb-entrypoint.sh | cut -d: -f1)
+kb_credential_unset_line=$(grep -nF 'unset "$_secret_name"' \
+    ../deploy/container/aimee-kb-entrypoint.sh | cut -d: -f1)
+kb_first_unrelated_child_line=$(grep -nF 'mkdir -p "$AIMEE_HOME"' \
+    ../deploy/container/aimee-kb-entrypoint.sh | head -1 | cut -d: -f1)
+if [ -n "$kb_vault_bootstrap_line" ] && [ -n "$kb_credential_unset_line" ] &&
+   [ -n "$kb_first_unrelated_child_line" ] &&
+   [ "$kb_vault_bootstrap_line" -lt "$kb_credential_unset_line" ] &&
+   [ "$kb_credential_unset_line" -lt "$kb_first_unrelated_child_line" ] &&
+   ! grep -qF 'env | sed' ../deploy/container/aimee-kb-entrypoint.sh; then
+    pass "KB image Vault-ingests and scrubs before any unrelated child"
+else
+    fail "KB image must seal and scrub credentials before spawning unrelated children"
 fi
 
 # Core images can contain request credentials. Disable them in the supervising

@@ -287,6 +287,10 @@ extern "C"
     * server_http_start. */
    void server_http_set_max_event_streams(int n);
 
+   /* Keep diagnostics for the retired global write knob synchronized with live
+    * config reloads. The value never grants authority. */
+   void server_http_set_retired_remote_writes(int value);
+
    /* Stop the listener and close the socket. Safe if not started. */
    void server_http_stop(void);
 

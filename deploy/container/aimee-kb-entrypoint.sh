@@ -26,6 +26,18 @@
 #    AIMEE_DB2_URL selects an external server and nothing is started here.
 set -e
 
+# Kubernetes/Docker credential environment is first-boot transport only. Record
+# the non-secret external-DB decision, seal every credential-shaped value into
+# Vault, and scrub this PID's inherited copy before any unrelated child process.
+: "${AIMEE_HOME:=/var/lib/aimee}"
+external_db=0
+[ -n "${AIMEE_DB2_URL:-}" ] && external_db=1
+aimee-kb --bootstrap-vault-env
+_secret_names=$(aimee-kb --list-credential-env-names)
+for _secret_name in $_secret_names; do
+    unset "$_secret_name"
+done
+
 # 1. Stack rlimit (64 MB == 65536 KiB == 67108864 bytes). Best-effort: some
 #    runtimes forbid raising it, in which case the compose ulimit / a host
 #    profile is still required.
@@ -34,26 +46,12 @@ ulimit -c 0 2>/dev/null || true
 
 # 2. Seed the baked default config if it is missing (fresh / bind-mounted
 #    volume). Never clobber an operator-provided config.
-: "${AIMEE_HOME:=/var/lib/aimee}"
 cfg="$AIMEE_HOME/aimee.yaml"
 default="/opt/aimee/defaults/aimee.yaml"
 if [ ! -f "$cfg" ] && [ -f "$default" ]; then
     mkdir -p "$AIMEE_HOME"
     cp "$default" "$cfg"
 fi
-
-# Remember only whether an external database was requested. The URL itself is
-# sealed by the one-shot helper, then removed before any long-lived process.
-external_db=0
-[ -n "${AIMEE_DB2_URL:-}" ] && external_db=1
-aimee-kb --bootstrap-vault-env
-for _secret_name in $(env | sed -n 's/=.*//p'); do
-    case "$_secret_name" in
-        AIMEE_DB2_URL|AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE|*_TOKEN|*_SECRET|*_PASSWORD|*_PRIVATE_KEY|*_API_KEY|*_DSN)
-            unset "$_secret_name"
-            ;;
-    esac
-done
 
 # 3. Embedded DB2, only when the operator configured no external server.
 if [ "$external_db" -eq 0 ]; then

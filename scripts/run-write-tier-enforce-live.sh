@@ -265,6 +265,22 @@ else fail "replayed   -> $second (expected a refusal; the jti was already spent)
 step "The retired global authorizer changes no outcome"
 sed -i 's/    remote_writes: off/    remote_writes: full/' "$AIMEE_HOME/aimee.yaml"
 live_env_restart_server full
+# A healthy listener can precede the server's first one-second out-of-band
+# config reconciliation tick. Wait for the live process to report the retired
+# setting before sending the refusals; otherwise this test races the reload and
+# measures the old `off` snapshot instead of the edit it claims to exercise.
+sock=$(ls "$AIMEE_HOME"/*.sock 2>/dev/null | head -1)
+for _ in $(seq 1 40); do
+  [ -n "$sock" ] && [ -S "$sock" ] &&
+    curl -s --unix-socket "$sock" "http://localhost/v1/api/status" \
+      -o "$work/pre-refusal-status" 2>/dev/null &&
+    grep -q 'aimee.api.remote_writes NO LONGER AUTHORIZES' "$work/pre-refusal-status" && break
+  sleep 0.1
+done
+if ! grep -q 'aimee.api.remote_writes NO LONGER AUTHORIZES' \
+      "$work/pre-refusal-status" 2>/dev/null; then
+  fail "running server did not apply remote_writes=full before the refusal probes"
+fi
 code=$(call POST "$STORE" "$(mint off)" "$store_body")
 if [ "$code" = "403" ]; then pass "remote_writes=full + tier=off  -> 403 (the global does not widen)"
 else fail "remote_writes=full + tier=off  -> $code (expected 403; the global is retired)"; fi
@@ -282,7 +298,6 @@ else fail "remote_writes=full + tier=data  -> $code (expected 2xx)"; fi
 # retired global WOULD have allowed -- so the counter must now be non-zero.
 # Read over UDS: /v1/api/status is a read, and this asserts the operator-visible
 # surface rather than a counter reachable only from inside the process.
-sock=$(ls "$AIMEE_HOME"/*.sock 2>/dev/null | head -1)
 if [ -n "$sock" ] && [ -S "$sock" ]; then
   curl -s --unix-socket "$sock" "http://localhost/v1/api/status" -o "$work/apistatus" 2>/dev/null
   if grep -q 'global_ignored' "$work/apistatus" 2>/dev/null; then

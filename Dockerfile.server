@@ -360,4 +360,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -s -o /dev/null -w '%{http_code}' \
         http://127.0.0.1:8740/v1/health | grep -qE '^(200|401)$'
 
-ENTRYPOINT ["/usr/bin/tini", "--", "aimee-server-entrypoint"]
+# The entrypoint must consume and unset first-boot credentials before tini
+# becomes the long-lived PID-1 subreaper; it execs tini itself after that scrub.
+ENTRYPOINT ["aimee-server-entrypoint"]

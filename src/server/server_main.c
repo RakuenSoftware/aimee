@@ -237,6 +237,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * the server returns this snapshot, and config_reload (on config.set / SIGHUP) republishes
     * it so changes take effect immediately instead of on the next mtime-cache miss. */
    config_snapshot_init(&cfg);
+   config_server_api_remote_writes_on_reload(server_http_set_retired_remote_writes);
    kb_client_mtls_pool_register_reload();
    /* NOTE: the autonomy.* env bridge (autonomy_config_to_env) is intentionally NOT called —
     * wfe now reads autonomy.* LIVE from the config snapshot via config_autonomy_lookup (an
@@ -379,6 +380,14 @@ static int run_server(const char *socket_path, log_level_t log_level)
 
 int main(int argc, char **argv)
 {
+   /* The container entrypoint must scrub its own inherited environment after
+    * the short-lived Vault bootstrap returns. Emit names only, never values, so
+    * it does not need to pipe credential plaintext through env/sed. Reject a
+    * non-shell identifier rather than leave a credential the parent cannot
+    * safely unset. */
+   if (argc >= 2 && strcmp(argv[1], "--list-credential-env-names") == 0)
+      return vault_env_print_credential_names() == 0 ? 0 : 1;
+
    /* Container/POD entrypoints use this short-lived process to consume
     * first-boot credential inputs before launching any long-lived process. */
    if (argc >= 2 && strcmp(argv[1], "--bootstrap-vault-env") == 0)

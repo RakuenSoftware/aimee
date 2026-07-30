@@ -119,6 +119,33 @@ static void test_generic_env_source(void)
    printf("  PASS: test_generic_env_source\n");
 }
 
+static void test_oversized_credential_name_fails_closed(void)
+{
+   char name[180];
+   memset(name, 'A', sizeof(name));
+   memcpy(name + sizeof(name) - 10, "_API_KEY", 9);
+   name[sizeof(name) - 1] = '\0';
+   assert(setenv(name, "must-not-be-ignored", 1) == 0);
+   assert(vault_env_bootstrap_init() == -1);
+   assert(getenv(name) != NULL); /* failed input remains available for diagnosis/retry */
+   unsetenv(name);
+   printf("  PASS: test_oversized_credential_name_fails_closed\n");
+}
+
+static void test_kb_ingests_delegate_shaped_env_generically(void)
+{
+   const char *name = "AIMEE_DELEGATE_KEY_KB_ONLY";
+   setenv(name, "must-live-only-in-kb-vault", 1);
+   assert(vault_env_bootstrap_init_all() == 1);
+   assert(getenv(name) == NULL);
+   char value[128];
+   assert(vault_service_get_server_principal("environment", name, value, sizeof(value)) ==
+          VAULT_OK);
+   assert(strcmp(value, "must-live-only-in-kb-vault") == 0);
+   OPENSSL_cleanse(value, sizeof(value));
+   printf("  PASS: test_kb_ingests_delegate_shaped_env_generically\n");
+}
+
 static void test_legacy_oauth_migration(void)
 {
    char codex_dir[400], claude_dir[400], codex_path[480], claude_path[480];
@@ -170,6 +197,7 @@ static void test_no_plaintext_at_rest(void)
    assert(!plaintext_under_home("db-password"));
    assert(!plaintext_under_home("legacy-codex-token"));
    assert(!plaintext_under_home("legacy-claude-token"));
+   assert(!plaintext_under_home("must-live-only-in-kb-vault"));
    printf("  PASS: test_no_plaintext_at_rest\n");
 }
 
@@ -188,6 +216,8 @@ int main(void)
    test_env_source();
    test_forge_env_source();
    test_generic_env_source();
+   test_oversized_credential_name_fails_closed();
+   test_kb_ingests_delegate_shaped_env_generically();
    test_legacy_oauth_migration();
    test_no_source_noop();
    test_no_plaintext_at_rest();
