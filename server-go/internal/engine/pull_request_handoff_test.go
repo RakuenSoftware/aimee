@@ -81,6 +81,36 @@ func TestPullRequestTitlePrefersConcreteGoalOverProposalLabel(t *testing.T) {
 	}
 }
 
+func TestPullRequestHandoffRedactsCredentialMaterial(t *testing.T) {
+	secret := "sk-live-0123456789abcdefghijklmnop"
+	input := strings.Join([]string{
+		"Keep this reviewer-facing context.",
+		"OPENAI_API_KEY=" + secret,
+		"Authorization: Bearer " + secret,
+		"-----BEGIN PRIVATE KEY-----",
+		"base64-private-key-material",
+		"-----END PRIVATE KEY-----",
+		"Keep this conclusion too.",
+	}, "\n")
+	redacted := redactPullRequestMarkdown(input)
+	for _, leaked := range []string{secret, "base64-private-key-material", "BEGIN PRIVATE KEY"} {
+		if strings.Contains(redacted, leaked) {
+			t.Fatalf("generated PR markdown leaked %q:\n%s", leaked, redacted)
+		}
+	}
+	for _, kept := range []string{"Keep this reviewer-facing context.", "Keep this conclusion too.",
+		"[REDACTED CREDENTIAL", "[REDACTED PRIVATE KEY"} {
+		if !strings.Contains(redacted, kept) {
+			t.Fatalf("generated PR markdown missing %q:\n%s", kept, redacted)
+		}
+	}
+
+	diff := "diff --git a/config b/config\n+++ b/config\n@@ -1 +1 @@\n-API_TOKEN=old-secret-token-value\n+API_TOKEN=" + secret + "\n"
+	if highlights := parseDiffHighlights(diff); len(highlights) != 0 {
+		t.Fatalf("credential diff became a representative edit: %#v", highlights)
+	}
+}
+
 func TestFinalPullRequestHandoffExplainsProposalAndActualDiff(t *testing.T) {
 	root := t.TempDir()
 	repo := filepath.Join(root, "repo")
