@@ -645,21 +645,16 @@ const config_field_t *config_field_lookup(const char *key)
       return &g_stub_field;
    return NULL;
 }
-cJSON *config_field_value_json(const config_t *cfg, const config_field_t *f)
-{
-   (void)cfg;
-   (void)f;
-   return cJSON_CreateBool(0);
-}
 const char *config_field_secret_name(const config_field_t *f)
 {
    return f ? f->secret_name : NULL;
 }
 cJSON *config_field_public_value_json(const config_t *cfg, const config_field_t *f)
 {
+   (void)cfg;
    if (config_field_secret_name(f))
       return cJSON_CreateBool(g_stub_secret_configured);
-   return config_field_value_json(cfg, f);
+   return cJSON_CreateBool(0);
 }
 int config_secret_store(const char *name, const char *value)
 {

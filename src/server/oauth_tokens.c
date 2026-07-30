@@ -2,7 +2,7 @@
  *
  * Implements the token-layer of the PKCE flow:
  *   - JSON parsing of RFC 6749 §5.1 token responses
- *   - secret_store persistence keyed by MCP client name
+ *   - Vault persistence keyed by MCP client name
  *   - Token exchange (authorization_code grant)
  *   - Token refresh (refresh_token grant)
  *   - High-level oauth_token_get() with auto-refresh
