@@ -133,7 +133,8 @@ static void test_generic_env_source(void)
 static void test_server_tls_key_first_boot_source(void)
 {
    const char *name = "AIMEE_SERVER_TLS_PRIVATE_KEY";
-   const char *pem = "-----BEGIN PRIVATE KEY-----\nvault-only-test-key\n-----END PRIVATE KEY-----\n";
+   const char *pem =
+       "-----BEGIN PRIVATE KEY-----\nvault-only-test-key\n-----END PRIVATE KEY-----\n";
    assert(vault_env_name_is_credential(name) == 1);
    setenv(name, pem, 1);
    assert(vault_env_bootstrap_init() == 1);
@@ -283,12 +284,12 @@ static void test_legacy_db1_oauth_migration(void)
 
    assert(server_vault_bootstrap() == 2);
    char value[128];
-   assert(vault_service_get_server_principal(client, "oauth_access_token", value,
-                                             sizeof(value)) == VAULT_OK);
+   assert(vault_service_get_server_principal(client, "oauth_access_token", value, sizeof(value)) ==
+          VAULT_OK);
    assert(strcmp(value, "legacy-db1-access-token") == 0);
    OPENSSL_cleanse(value, sizeof(value));
-   assert(vault_service_get_server_principal(client, "oauth_refresh_token", value,
-                                             sizeof(value)) == VAULT_OK);
+   assert(vault_service_get_server_principal(client, "oauth_refresh_token", value, sizeof(value)) ==
+          VAULT_OK);
    assert(strcmp(value, "legacy-db1-refresh-token") == 0);
    OPENSSL_cleanse(value, sizeof(value));
    assert(access(access_path, F_OK) != 0);

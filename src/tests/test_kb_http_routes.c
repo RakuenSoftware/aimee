@@ -618,10 +618,10 @@ cJSON *kb_curator_presets_json(void)
 {
    return cJSON_CreateArray();
 }
-static const config_field_t g_stub_field = {
-    "stub", 0, 0, 0, CFG_BOOL, RELOAD_HOT, FGROUP_RUNTIME, NULL};
+static const config_field_t g_stub_field = {"stub",         0,   0, 0, CFG_BOOL, RELOAD_HOT,
+                                            FGROUP_RUNTIME, NULL};
 static const config_field_t g_stub_secret_field = {
-    "kb_api_bearer_token", 0, 1, 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME,
+    "kb_api_bearer_token",      0, 1, 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME,
     "AIMEE_KB_API_BEARER_TOKEN"};
 static int g_stub_secret_configured;
 static int g_stub_secret_store_calls;
@@ -2402,10 +2402,10 @@ static void test_console_settings(void)
                            (int)strlen(ok_body), b2, sizeof(b2)) == 200);
    const char *secret_literal = "do-not-echo-kb-secret";
    char secret_body[256];
-   snprintf(secret_body, sizeof(secret_body),
-            "{\"key\":\"kb_api_bearer_token\",\"value\":\"%s\"}", secret_literal);
-   assert(kb_http_route_ex("POST", "/v1/console/settings/config", NULL, NULL, NULL,
-                           secret_body, (int)strlen(secret_body), b2, sizeof(b2)) == 200);
+   snprintf(secret_body, sizeof(secret_body), "{\"key\":\"kb_api_bearer_token\",\"value\":\"%s\"}",
+            secret_literal);
+   assert(kb_http_route_ex("POST", "/v1/console/settings/config", NULL, NULL, NULL, secret_body,
+                           (int)strlen(secret_body), b2, sizeof(b2)) == 200);
    assert(g_stub_secret_store_calls == 1 && g_stub_secret_configured == 1);
    assert(strstr(b2, secret_literal) == NULL);
    assert(strstr(b2, "\"value\":true") != NULL);

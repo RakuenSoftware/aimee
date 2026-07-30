@@ -168,8 +168,7 @@ int provider_cli_adapter_prepare_native_agent(const provider_cli_adapter_t *adap
       if (!native_agent->api_key[0])
       {
          if (errbuf && errbuf_len > 0)
-            snprintf(errbuf, errbuf_len,
-                     "%s is not present in Vault for native %s adapter",
+            snprintf(errbuf, errbuf_len, "%s is not present in Vault for native %s adapter",
                      adapter->native_api_key_env, adapter->cli_kind);
          return -1;
       }

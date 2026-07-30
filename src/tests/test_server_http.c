@@ -1067,12 +1067,10 @@ int main(void)
       const char *enrolled[] = {"wizard-user-token"};
       server_http_set_bearer_extra(enrolled, 1);
       int bootstrap_only = -1;
-      assert(server_http_authorize_enrolled_request(1, PRIMARY,
-                                                    "Bearer unit-test-random-primary", NULL, 0,
-                                                    &bootstrap_only) == 0);
+      assert(server_http_authorize_enrolled_request(1, PRIMARY, "Bearer unit-test-random-primary",
+                                                    NULL, 0, &bootstrap_only) == 0);
       assert(bootstrap_only == 0);
-      assert(server_http_authorize_enrolled_request(1, PRIMARY, "Bearer wizard-user-token", NULL,
-                                                    0,
+      assert(server_http_authorize_enrolled_request(1, PRIMARY, "Bearer wizard-user-token", NULL, 0,
                                                     &bootstrap_only) == 0);
       assert(bootstrap_only == 0);
       server_http_set_bearer_extra(NULL, 0);

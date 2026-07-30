@@ -300,19 +300,20 @@ static int script_rpc_write_stubs(script_rpc_server_t *srv)
    if (script_rpc_write_file(py, py_body, 0600) != 0)
       return -1;
 
-   const char *sh_body = "#!/usr/bin/env bash\n"
-                         "if [ \"$1\" != \"tool\" ] || [ -z \"$2\" ]; then\n"
-                         "  echo 'usage: aimee tool <name> [json-args]' >&2; exit 2\n"
-                         "fi\n"
-                         "tool=\"$2\"; shift 2; args=\"${*:-{}}\"\n"
-                         "printf '%s\\0%s' \"$tool\" \"$args\" | python3 -c '\n"
-                         "import json, sys\n"
-                         "import aimee_tools\n"
-                         "tool_raw, args_raw = sys.stdin.buffer.read().split(b\"\\0\", 1)\n"
-                         "tool = tool_raw.decode()\n"
-                         "args = json.JSONDecoder().raw_decode(args_raw.decode().strip())[0]\n"
-                         "print(json.dumps(aimee_tools.call(tool, args), separators=(\",\", \":\")))\n"
-                         "'\n";
+   const char *sh_body =
+       "#!/usr/bin/env bash\n"
+       "if [ \"$1\" != \"tool\" ] || [ -z \"$2\" ]; then\n"
+       "  echo 'usage: aimee tool <name> [json-args]' >&2; exit 2\n"
+       "fi\n"
+       "tool=\"$2\"; shift 2; args=\"${*:-{}}\"\n"
+       "printf '%s\\0%s' \"$tool\" \"$args\" | python3 -c '\n"
+       "import json, sys\n"
+       "import aimee_tools\n"
+       "tool_raw, args_raw = sys.stdin.buffer.read().split(b\"\\0\", 1)\n"
+       "tool = tool_raw.decode()\n"
+       "args = json.JSONDecoder().raw_decode(args_raw.decode().strip())[0]\n"
+       "print(json.dumps(aimee_tools.call(tool, args), separators=(\",\", \":\")))\n"
+       "'\n";
    return script_rpc_write_file(sh, sh_body, 0700);
 }
 

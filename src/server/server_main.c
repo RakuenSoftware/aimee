@@ -455,8 +455,7 @@ int main(int argc, char **argv)
       if (credential_env > 0)
       {
          if (vault_env_bootstrap_init() < 0 || server_vault_bootstrap_prepare() < 0 ||
-             vault_config_bootstrap_init() < 0 ||
-             vault_env_has_credential_environment() != 0)
+             vault_config_bootstrap_init() < 0 || vault_env_has_credential_environment() != 0)
          {
             runtime_secret_clear();
             fprintf(stderr, "aimee-server: first-boot credential Vault bootstrap failed\n");

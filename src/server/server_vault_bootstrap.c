@@ -248,8 +248,7 @@ static void migrate_legacy_oauth_path(const char *agent, const char *cred, const
       if (used == 0)
          c->failed++;
    }
-   if (c->failed == failed_before &&
-       !vault_store_has_entry(VAULT_SERVER_PRINCIPAL, agent, cred))
+   if (c->failed == failed_before && !vault_store_has_entry(VAULT_SERVER_PRINCIPAL, agent, cred))
       provision_server_credential(agent, cred, secret, 0, c);
    else if (c->failed == failed_before)
       c->skipped++;

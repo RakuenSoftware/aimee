@@ -415,9 +415,8 @@ static int remote_enroll(const char *url, const char *current_token, char *out, 
    if (!body || st != 200)
    {
       if (st == 401 && !json_output)
-         fprintf(stderr,
-                 "  enroll: the current client credential was rejected. Re-pair it with\n"
-                 "          `aimee remote set <url> <token>` before enrolling again.\n");
+         fprintf(stderr, "  enroll: the current client credential was rejected. Re-pair it with\n"
+                         "          `aimee remote set <url> <token>` before enrolling again.\n");
       free(body);
       return -1;
    }

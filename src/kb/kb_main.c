@@ -694,8 +694,7 @@ static int kb_cmd_enroll(int argc, char **argv)
    char conn[1024];
    if (kb_enroll_mint(kb_default_config_dir(), host, port, scope, conn, sizeof(conn)) != 0)
    {
-      fprintf(stderr,
-              "aimee-kb enroll: failed to mint enrollment (check CA and Vault custody)\n");
+      fprintf(stderr, "aimee-kb enroll: failed to mint enrollment (check CA and Vault custody)\n");
       return 1;
    }
    puts(conn);
@@ -1569,8 +1568,7 @@ int main(int argc, char **argv)
       }
       if (credential_env > 0)
       {
-         if (vault_env_bootstrap_init_all() < 0 ||
-             vault_env_has_credential_environment() != 0)
+         if (vault_env_bootstrap_init_all() < 0 || vault_env_has_credential_environment() != 0)
          {
             runtime_secret_clear();
             fputs("aimee-kb: first-boot credential Vault bootstrap failed\n", stderr);

@@ -17,8 +17,7 @@
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 const config_field_t config_fields[] = {
     {"db2_url", offsetof(config_t, db2_url), sizeof(((config_t *)0)->db2_url), 0, CFG_STRING,
-     RELOAD_RESTART, FGROUP_RUNTIME,
-     "AIMEE_DB2_URL"}, /* the postgres pool is opened at startup */
+     RELOAD_RESTART, FGROUP_RUNTIME, "AIMEE_DB2_URL"}, /* the postgres pool is opened at startup */
     {"provider", offsetof(config_t, provider), sizeof(((config_t *)0)->provider), 0, CFG_STRING},
     {"default_persona", offsetof(config_t, default_persona),
      sizeof(((config_t *)0)->default_persona), 0, CFG_STRING},
@@ -48,8 +47,8 @@ const config_field_t config_fields[] = {
     {"kb_client_url", offsetof(config_t, kb_client_url), sizeof(((config_t *)0)->kb_client_url), 0,
      CFG_STRING, RELOAD_RESTART},
     {"kb_client_bearer_token", offsetof(config_t, kb_client_bearer_token),
-     sizeof(((config_t *)0)->kb_client_bearer_token), 0, CFG_STRING, RELOAD_RESTART,
-     FGROUP_RUNTIME, "AIMEE_KB_API_BEARER_TOKEN"},
+     sizeof(((config_t *)0)->kb_client_bearer_token), 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME,
+     "AIMEE_KB_API_BEARER_TOKEN"},
     {"llm_embed_backend", offsetof(config_t, llm_embed_backend),
      sizeof(((config_t *)0)->llm_embed_backend), 0, CFG_STRING, RELOAD_RESTART, FGROUP_DEPLOY},
     {"llm_embed_host", offsetof(config_t, llm_embed_host), sizeof(((config_t *)0)->llm_embed_host),
@@ -349,8 +348,8 @@ const config_field_t config_fields[] = {
     {"kb_api_http_port", offsetof(config_t, kb_api_http_port), sizeof(int), 0, CFG_INT,
      RELOAD_RESTART},
     {"kb_api_bearer_token", offsetof(config_t, kb_api_bearer_token),
-     sizeof(((config_t *)0)->kb_api_bearer_token), 0, CFG_STRING, RELOAD_RESTART,
-     FGROUP_RUNTIME, "AIMEE_KB_API_BEARER_TOKEN"},
+     sizeof(((config_t *)0)->kb_api_bearer_token), 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME,
+     "AIMEE_KB_API_BEARER_TOKEN"},
     {"telemetry.metrics_token", offsetof(config_t, telemetry_metrics_token),
      sizeof(((config_t *)0)->telemetry_metrics_token), 0, CFG_STRING, RELOAD_RESTART,
      FGROUP_RUNTIME, "AIMEE_TELEMETRY_METRICS_TOKEN"},

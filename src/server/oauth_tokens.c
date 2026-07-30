@@ -72,8 +72,7 @@ static int oauth_secret_load(const char *client_name, const char *vcred, const c
       /* Re-read through the only supported authority. This also proves the
        * durable Vault record is usable before the caller receives plaintext. */
       OPENSSL_cleanse(buf, len);
-      return vault_service_get_server_principal(client_name, vcred, buf, len) == VAULT_OK &&
-                     buf[0]
+      return vault_service_get_server_principal(client_name, vcred, buf, len) == VAULT_OK && buf[0]
                  ? 0
                  : -1;
    }

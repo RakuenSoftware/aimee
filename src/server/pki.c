@@ -26,7 +26,7 @@
 #include <unistd.h>    /* gethostname, close */
 #include <arpa/inet.h> /* inet_pton — classify AIMEE_TLS_EXTRA_SAN entries */
 
-#define PKI_CA_AGENT     "__pki_ca__" /* vault agent name under which the CA key is sealed */
+#define PKI_CA_AGENT     "__pki_ca__"     /* vault agent name under which the CA key is sealed */
 #define PKI_SERVER_AGENT "__pki_server__" /* Vault-only native TLS identity key */
 #define PKI_CA_CN        "aimee-client-CA"
 #define PKI_CA_DAYS      3650 /* CA validity (10y) */
@@ -69,8 +69,7 @@ int pki_server_tls_key_load(char *out, size_t cap)
    if (!out || cap < PKI_KEY_PEM_MAX)
       return -1;
    out[0] = '\0';
-   vault_status_t st =
-       vault_service_inject_api_key("", PKI_SERVER_AGENT, out, cap, time(NULL));
+   vault_status_t st = vault_service_inject_api_key("", PKI_SERVER_AGENT, out, cap, time(NULL));
    if (st != VAULT_OK || !out[0])
    {
       OPENSSL_cleanse(out, cap);
@@ -519,8 +518,7 @@ static int read_legacy_server_key(const char *path, char *out, size_t cap)
    if (fd < 0)
       return -1;
    struct stat st;
-   if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0 ||
-       (size_t)st.st_size >= cap)
+   if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0 || (size_t)st.st_size >= cap)
    {
       close(fd);
       return -1;
@@ -634,8 +632,7 @@ int pki_ensure_self_signed_server_cert(const char *cert_path, const char *key_pa
          aimee_log(LOG_ERROR, "pki", "Vault-held server TLS key does not match %s", cert_path);
       else if (have_vault && have_legacy && !private_keys_equal(vault_key, legacy_key))
          aimee_log(LOG_ERROR, "pki", "legacy server TLS key conflicts with the Vault identity");
-      else if (!have_vault &&
-               (!have_legacy || server_cert_matches_key(cert_path, legacy_key) != 0))
+      else if (!have_vault && (!have_legacy || server_cert_matches_key(cert_path, legacy_key) != 0))
          aimee_log(LOG_ERROR, "pki", "server TLS certificate has no matching Vault key");
       else
       {

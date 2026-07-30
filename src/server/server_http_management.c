@@ -207,12 +207,13 @@ int server_http_management_config_from_env(server_http_management_config_t *out)
        "AIMEE_SERVER_MGMT_CLIENT_CA",
    };
    static const char *const checkpoint_names[] = {
-       "AIMEE_SERVER_MGMT_STATUS_ENDPOINT",   "AIMEE_SERVER_MGMT_STATUS_CA_FILE",
-       "AIMEE_SERVER_MGMT_STATUS_LEAF_PIN",   "AIMEE_SERVER_MGMT_STATUS_CLIENT_CERT",
+       "AIMEE_SERVER_MGMT_STATUS_ENDPOINT",
+       "AIMEE_SERVER_MGMT_STATUS_CA_FILE",
+       "AIMEE_SERVER_MGMT_STATUS_LEAF_PIN",
+       "AIMEE_SERVER_MGMT_STATUS_CLIENT_CERT",
    };
    static const char mgmt_key_name[] = "AIMEE_SERVER_MGMT_TLS_PRIVATE_KEY";
-   static const char checkpoint_key_name[] =
-       "AIMEE_SERVER_MGMT_STATUS_CLIENT_PRIVATE_KEY";
+   static const char checkpoint_key_name[] = "AIMEE_SERVER_MGMT_STATUS_CLIENT_PRIVATE_KEY";
    g_management_start_error = NULL;
    if (!out)
    {

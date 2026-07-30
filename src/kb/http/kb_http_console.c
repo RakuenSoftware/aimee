@@ -13,7 +13,7 @@
 #include "db2/kb_service_backend.h" /* async queue status */
 #include "db2/ontology_evolution.h" /* db2_ontology_* (§8 observe + act) */
 #include "rel_types.h"              /* REL_TYPE_NAME_MAX */
-#include <openssl/crypto.h>          /* wipe transient credential request copies */
+#include <openssl/crypto.h>         /* wipe transient credential request copies */
 
 #include <stdio.h>
 #include <stdlib.h>

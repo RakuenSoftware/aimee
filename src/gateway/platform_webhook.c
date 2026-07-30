@@ -162,8 +162,7 @@ static void *accept_loop(void *arg)
    char secret[4096] = "";
    const char *deliver_only_env = getenv("AIMEE_GATEWAY_WEBHOOK_DELIVER_ONLY");
    int is_insecure = insecure && strcmp(insecure, "true") == 0;
-   if (!is_insecure && !runtime_secret_get("AIMEE_GATEWAY_WEBHOOK_SECRET", secret,
-                                           sizeof(secret)))
+   if (!is_insecure && !runtime_secret_get("AIMEE_GATEWAY_WEBHOOK_SECRET", secret, sizeof(secret)))
    {
       aimee_log(LOG_ERROR, "webhook", "Vault HMAC secret unavailable");
       return NULL;

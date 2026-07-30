@@ -49,8 +49,7 @@ static int name_span_is_credential(const char *name, size_t len, int include_del
        (len == strlen("AIMEE_VAULT_PKCS11_PIN") &&
         memcmp(name, "AIMEE_VAULT_PKCS11_PIN", len) == 0) ||
        (len == strlen("AIMEE_WEBCHAT_USER") && memcmp(name, "AIMEE_WEBCHAT_USER", len) == 0) ||
-       (len == strlen("AIMEE_WEBCHAT_USERS") &&
-        memcmp(name, "AIMEE_WEBCHAT_USERS", len) == 0) ||
+       (len == strlen("AIMEE_WEBCHAT_USERS") && memcmp(name, "AIMEE_WEBCHAT_USERS", len) == 0) ||
        (len == strlen("DATABASE_URL") && memcmp(name, "DATABASE_URL", len) == 0) ||
        (len == strlen("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE") &&
         memcmp(name, "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE", len) == 0))
@@ -59,8 +58,8 @@ static int name_span_is_credential(const char *name, size_t len, int include_del
           span_has_suffix(name, len, "_PASSWORD") || span_has_suffix(name, len, "_PRIVATE_KEY") ||
           span_has_suffix(name, len, "_API_KEY") || span_has_suffix(name, len, "_DSN") ||
           span_has_suffix(name, len, "_BEARER") || span_has_suffix(name, len, "_PASS") ||
-          span_has_suffix(name, len, "_CREDENTIAL") ||
-          span_has_suffix(name, len, "_CREDENTIALS") || span_contains(name, len, "_SECRET_");
+          span_has_suffix(name, len, "_CREDENTIAL") || span_has_suffix(name, len, "_CREDENTIALS") ||
+          span_contains(name, len, "_SECRET_");
 }
 
 int vault_env_name_is_credential(const char *name)
@@ -124,8 +123,8 @@ static int print_vault_record_base64(const webchat_export_t *record)
    char *value = calloc(1, WEBCHAT_SECRET_MAX + 1);
    if (!value)
       return -1;
-   vault_status_t st =
-       vault_service_get_server_principal(record->agent, record->cred, value, WEBCHAT_SECRET_MAX + 1);
+   vault_status_t st = vault_service_get_server_principal(record->agent, record->cred, value,
+                                                          WEBCHAT_SECRET_MAX + 1);
    if (st == VAULT_NO_ENTRY)
    {
       free(value);
@@ -147,7 +146,8 @@ static int print_vault_record_base64(const webchat_export_t *record)
       return -1;
    }
    int encoded_len = EVP_EncodeBlock(encoded, (const unsigned char *)value, (int)len);
-   int rc = encoded_len > 0 && printf("%s\t%.*s\n", record->label, encoded_len, encoded) > 0 ? 0 : -1;
+   int rc =
+       encoded_len > 0 && printf("%s\t%.*s\n", record->label, encoded_len, encoded) > 0 ? 0 : -1;
    OPENSSL_cleanse(encoded, encoded_cap);
    OPENSSL_cleanse(value, WEBCHAT_SECRET_MAX + 1);
    free(encoded);
@@ -205,9 +205,9 @@ int vault_env_check_webchat_bootstrap(void)
 int vault_env_seal_webchat_record(const char *record_name)
 {
    if (!record_name ||
-       (strcmp(record_name, "legacy_primary") != 0 &&
-        strcmp(record_name, "legacy_hashes") != 0 && strcmp(record_name, "accounts") != 0 &&
-        strcmp(record_name, "session_hmac") != 0 && strcmp(record_name, "tls_key") != 0))
+       (strcmp(record_name, "legacy_primary") != 0 && strcmp(record_name, "legacy_hashes") != 0 &&
+        strcmp(record_name, "accounts") != 0 && strcmp(record_name, "session_hmac") != 0 &&
+        strcmp(record_name, "tls_key") != 0))
       return -1;
 
    char *value = calloc(1, WEBCHAT_SECRET_MAX + 1);
@@ -268,9 +268,9 @@ static int cache_slot(const char *name, const char *agent, const char *cred)
 
 static int env_name_is_webchat_bootstrap(const char *name)
 {
-   return name && (strcmp(name, "AIMEE_WEBCHAT_USER") == 0 ||
-                   strcmp(name, "AIMEE_WEBCHAT_PASSWORD") == 0 ||
-                   strcmp(name, "AIMEE_WEBCHAT_USERS") == 0);
+   return name &&
+          (strcmp(name, "AIMEE_WEBCHAT_USER") == 0 || strcmp(name, "AIMEE_WEBCHAT_PASSWORD") == 0 ||
+           strcmp(name, "AIMEE_WEBCHAT_USERS") == 0);
 }
 
 static int preload_vault(int include_delegate)

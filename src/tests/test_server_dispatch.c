@@ -1970,8 +1970,8 @@ static void test_config_secret_redaction_and_vault_write(void)
 
    memset(&g_config_snapshot, 0, sizeof(g_config_snapshot));
    memset(&g_config_disk, 0, sizeof(g_config_disk));
-   snprintf(g_config_snapshot.kb_api_bearer_token,
-            sizeof(g_config_snapshot.kb_api_bearer_token), "%s", "never-echo-config-secret");
+   snprintf(g_config_snapshot.kb_api_bearer_token, sizeof(g_config_snapshot.kb_api_bearer_token),
+            "%s", "never-echo-config-secret");
    g_config_stateful = 1;
    g_config_reload_calls = 0;
    g_config_secret_store_calls = 0;
@@ -1988,9 +1988,8 @@ static void test_config_secret_redaction_and_vault_write(void)
    free(serialized);
    cJSON_Delete(got);
 
-   const char *set_req =
-       "{\"method\":\"config.set\",\"key\":\"kb_api_bearer_token\","
-       "\"value\":\"never-echo-new-secret\"}";
+   const char *set_req = "{\"method\":\"config.set\",\"key\":\"kb_api_bearer_token\","
+                         "\"value\":\"never-echo-new-secret\"}";
    cJSON *set = dispatch_json(ctx, conn, set_req, strlen(set_req));
    assert(g_config_secret_store_calls == 1 && g_config_secret_store_configured == 1);
    value = cJSON_GetObjectItemCaseSensitive(set, "value");

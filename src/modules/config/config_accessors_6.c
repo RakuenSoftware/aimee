@@ -1696,7 +1696,8 @@ int config_set_model_reasoning_effort(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->model_reasoning_effort, sizeof(cfg->model_reasoning_effort), "%s", value ? value : "");
+      snprintf(cfg->model_reasoning_effort, sizeof(cfg->model_reasoning_effort), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1786,7 +1787,8 @@ int config_set_memory_weight_profile(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->memory_weight_profile, sizeof(cfg->memory_weight_profile), "%s", value ? value : "");
+      snprintf(cfg->memory_weight_profile, sizeof(cfg->memory_weight_profile), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1846,7 +1848,8 @@ int config_set_vault_tpm2_blob_path(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->vault_tpm2_blob_path, sizeof(cfg->vault_tpm2_blob_path), "%s", value ? value : "");
+      snprintf(cfg->vault_tpm2_blob_path, sizeof(cfg->vault_tpm2_blob_path), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1876,7 +1879,8 @@ int config_set_vault_tpm2_nv_index(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->vault_tpm2_nv_index, sizeof(cfg->vault_tpm2_nv_index), "%s", value ? value : "");
+      snprintf(cfg->vault_tpm2_nv_index, sizeof(cfg->vault_tpm2_nv_index), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1906,7 +1910,8 @@ int config_set_memory_cognify_model(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->memory_cognify_model, sizeof(cfg->memory_cognify_model), "%s", value ? value : "");
+      snprintf(cfg->memory_cognify_model, sizeof(cfg->memory_cognify_model), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1921,7 +1926,8 @@ int config_set_memory_cognify_command(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->memory_cognify_command, sizeof(cfg->memory_cognify_command), "%s", value ? value : "");
+      snprintf(cfg->memory_cognify_command, sizeof(cfg->memory_cognify_command), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1936,7 +1942,8 @@ int config_set_delegate_sandbox_image(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->delegate_sandbox_image, sizeof(cfg->delegate_sandbox_image), "%s", value ? value : "");
+      snprintf(cfg->delegate_sandbox_image, sizeof(cfg->delegate_sandbox_image), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);

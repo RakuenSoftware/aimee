@@ -85,7 +85,12 @@ int handle_cert_issue(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return vault_stub(conn);
 }
 int handle_cert_sign(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{ (void)ctx; (void)conn; (void)req; return 0; }
+{
+   (void)ctx;
+   (void)conn;
+   (void)req;
+   return 0;
+}
 int handle_cert_revoke(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;

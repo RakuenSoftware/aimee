@@ -274,7 +274,7 @@ void kb_enroll_registry_reset(void)
  * truncated before the operation succeeds. A token verifier is credential
  * material, so even its one-way hash must never persist outside Vault. */
 
-#define KB_ENROLL_VAULT_AGENT "kb-enrollment"
+#define KB_ENROLL_VAULT_AGENT        "kb-enrollment"
 #define KB_ENROLL_VAULT_REGISTRY_MAX (1024 * 1024)
 
 static int enroll_vault_cred(const char *path, char out[80])
@@ -311,8 +311,8 @@ static int load_enroll_registry(int fd, const char *cred, char **out, size_t *le
    *out = calloc(1, KB_ENROLL_VAULT_REGISTRY_MAX + 1);
    if (!*out)
       return -1;
-   vault_status_t st = vault_service_get_server_principal(
-       KB_ENROLL_VAULT_AGENT, cred, *out, KB_ENROLL_VAULT_REGISTRY_MAX + 1);
+   vault_status_t st = vault_service_get_server_principal(KB_ENROLL_VAULT_AGENT, cred, *out,
+                                                          KB_ENROLL_VAULT_REGISTRY_MAX + 1);
    if (st == VAULT_OK)
    {
       *len = strlen(*out);

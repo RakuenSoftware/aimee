@@ -150,13 +150,11 @@ static void test_config_fields_helpers(void)
    const config_field_t *kb_secret = config_field_lookup("kb_api_bearer_token");
    assert(kb_secret);
    assert(strcmp(config_field_secret_name(kb_secret), "AIMEE_KB_API_BEARER_TOKEN") == 0);
-   snprintf(cfg.kb_api_bearer_token, sizeof(cfg.kb_api_bearer_token), "%s",
-            "never-return-this");
+   snprintf(cfg.kb_api_bearer_token, sizeof(cfg.kb_api_bearer_token), "%s", "never-return-this");
    v = config_field_public_value_json(&cfg, kb_secret);
    assert(cJSON_IsBool(v) && cJSON_IsTrue(v));
    cJSON_Delete(v);
-   assert(strcmp(config_field_secret_name(config_field_lookup("db2_url")), "AIMEE_DB2_URL") ==
-          0);
+   assert(strcmp(config_field_secret_name(config_field_lookup("db2_url")), "AIMEE_DB2_URL") == 0);
    assert(strcmp(config_field_secret_name(config_field_lookup("kb_client_bearer_token")),
                  "AIMEE_KB_API_BEARER_TOKEN") == 0);
    assert(strcmp(config_field_secret_name(config_field_lookup("ingress_trusted_proxy_secret")),
