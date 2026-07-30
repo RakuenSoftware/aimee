@@ -47,7 +47,9 @@ void *db2_conn(void)
 {
    return NULL;
 }
-void db2_lease_begin(void)
+/* The real symbol is db2_lease_begin_at; db2_lease_begin is a macro in db2.h
+ * that records the caller's file:line for stuck-lease attribution. */
+void db2_lease_begin_at(const char *site)
 {
 }
 void db2_lease_end(void)
