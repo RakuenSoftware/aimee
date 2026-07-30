@@ -2,7 +2,7 @@
 # $AIMEE_HOME/aimee.yaml).
 #
 # The entrypoint resolves the unified AIMEE_LLM_URL endpoint for embedding,
-# reranking, and synthesis. This file selects the bundled sidecar commands.
+# and synthesis. This file selects the bundled sidecar commands.
 #
 # Embedding works out of the box through the `aimee-llm` gateway. LLM-dependent
 # passes fail closed (their operations are marked failed) if that endpoint is

@@ -77,12 +77,6 @@ extern "C"
    int db2_embedding_model_record_or_check(void *conn, const char *model_id, const char *compat_csv,
                                            char *errbuf, size_t errlen);
 
-   /* unified-llm-container §2: record the RERANKER identity + scoring contract in
-    * kb_meta. Record-only (no corpus vectors, no persisted score cache to
-    * invalidate) — never refuses. model_id NULL/empty -> no-op. Returns 0 / -1. */
-   int db2_reranker_model_record(void *conn, const char *model_id, const char *contract,
-                                 char *errbuf, size_t errlen);
-
    /* Apply the consolidated SQLite schema for DB2's libpq shim/test
     * compatibility path. Production DB2 remains Postgres-only. */
    int db2_apply_schema_sqlite_shim(struct sqlite3 *db, char *errbuf, size_t errlen);

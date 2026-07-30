@@ -781,18 +781,8 @@ typedef struct config
     *   negation lexical matching for negative facts. */
    int memory_negation_enabled;
 
-   /* Cross-encoder reranker: second-pass (query, candidate) scoring.
-    * memory_rerank_enabled: 0 = disabled (default), 1 = enabled.
-    * memory_rerank_command: external command for cross-encoder scores (stdin: JSON pairs,
-    *   stdout: JSON float array). Empty = disabled.
-    * memory_rerank_top_k: candidate pool size fed to cross-encoder (default 50).
-    * memory_rerank_mix: blend weight for cross-encoder vs hybrid (0.0–1.0, default 0.7).
-    * memory_query_expansion_mode: "lexical" (default) or "semantic" (embedding-based).
+   /* memory_query_expansion_mode: "lexical" (default) or "semantic" (embedding-based).
     * memory_query_expansion_k: number of near-neighbour terms to inject (default 5). */
-   int memory_rerank_enabled;
-   char memory_rerank_command[512];
-   int memory_rerank_top_k;
-   double memory_rerank_mix;
    char memory_query_expansion_mode[16];
    int memory_query_expansion_k;
 
@@ -1484,11 +1474,6 @@ typedef struct config
    char llm_embed_gpu[64];
    char llm_embed_tier[16]; /* cpu | small | mid | large */
 
-   char llm_rerank_backend[16]; /* "" | "external" | "local" | "off" */
-   char llm_rerank_host[128];
-   char llm_rerank_gpu[64];
-   char llm_rerank_tier[16];
-   char llm_rerank_endpoint[512];
 
    char llm_synth_backend[16]; /* "" | "external" | "local" | "off" */
    char llm_synth_host[128];

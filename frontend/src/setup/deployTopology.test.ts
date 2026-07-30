@@ -21,7 +21,6 @@ import {
 const ALLOWLISTED = new Set<string>([
   'kb_mode', 'kb_client_url', 'kb_client_bearer_token',
   'llm_embed_backend', 'llm_embed_host', 'llm_embed_gpu', 'llm_embed_tier',
-  'llm_rerank_backend', 'llm_rerank_host', 'llm_rerank_gpu', 'llm_rerank_tier', 'llm_rerank_endpoint',
   'llm_synth_backend', 'llm_synth_host', 'llm_synth_gpu', 'llm_synth_tier', 'llm_synth_endpoint',
   'llm_synth_model',
   'embedding_endpoint', 'embedding_model', 'embedding_dim',
@@ -37,9 +36,8 @@ describe('vramToTier', () => {
 });
 
 describe('roleKeys', () => {
-  it('embed reuses embedding_endpoint; rerank/synth have their own', () => {
+  it('embed reuses embedding_endpoint; synth has its own', () => {
     expect(roleKeys('embed').endpoint).toBe('embedding_endpoint');
-    expect(roleKeys('rerank').endpoint).toBe('llm_rerank_endpoint');
     expect(roleKeys('synth').endpoint).toBe('llm_synth_endpoint');
     expect(roleKeys('synth').backend).toBe('llm_synth_backend');
   });
@@ -65,9 +63,9 @@ describe('placementToConfig only emits allowlisted keys', () => {
 
 describe('placementToConfig clears stale sibling fields', () => {
   it('external clears tier/host/gpu; local clears endpoint; off clears all', () => {
-    expect(placementToConfig('rerank', { backend: 'external', endpoint: 'https://r' })).toEqual({
-      llm_rerank_backend: 'external', llm_rerank_endpoint: 'https://r',
-      llm_rerank_tier: '', llm_rerank_host: '', llm_rerank_gpu: '',
+    expect(placementToConfig('synth', { backend: 'external', endpoint: 'https://r' })).toEqual({
+      llm_synth_backend: 'external', llm_synth_endpoint: 'https://r',
+      llm_synth_tier: '', llm_synth_host: '', llm_synth_gpu: '',
     });
     expect(placementToConfig('embed', { backend: 'local', tier: 'large', host: 'h', gpu: '1' })).toEqual({
       llm_embed_backend: 'local', llm_embed_tier: 'large', llm_embed_host: 'h', llm_embed_gpu: '1',
@@ -82,7 +80,7 @@ describe('placementToConfig clears stale sibling fields', () => {
 describe('configToPlacement round-trips placementToConfig', () => {
   const cases: { role: Parameters<typeof roleKeys>[0]; p: Placement }[] = [
     { role: 'embed', p: { backend: 'local', tier: 'large', host: 'box', gpu: '0' } },
-    { role: 'rerank', p: { backend: 'local', tier: 'cpu', host: 'box', gpu: '' } },
+    { role: 'synth', p: { backend: 'local', tier: 'cpu', host: 'box', gpu: '' } },
     { role: 'synth', p: { backend: 'external', endpoint: 'https://s' } },
     { role: 'synth', p: { backend: 'off' } },
   ];
@@ -133,35 +131,29 @@ describe('placementOptions / placementOptionId', () => {
   });
 });
 
-/* The three example topologies the operator described — assert the exact keys
+/* The example topologies the operator described — assert the exact keys
  * that would be persisted match the shipped deploy-env contract. */
 describe('traced example topologies', () => {
-  it('large embedder + cpu reranker + external synth', () => {
+  it('large embedder + external synth', () => {
     const written = {
       ...placementToConfig('embed', { backend: 'local', tier: 'large', host: 'box', gpu: '0' }),
-      ...placementToConfig('rerank', { backend: 'local', tier: 'cpu', host: 'box', gpu: '' }),
       ...placementToConfig('synth', { backend: 'external', endpoint: 'https://synth' }),
     };
     expect(written.llm_embed_backend).toBe('local');
     expect(written.llm_embed_tier).toBe('large');
-    expect(written.llm_rerank_backend).toBe('local');
-    expect(written.llm_rerank_tier).toBe('cpu');
     expect(written.llm_synth_backend).toBe('external');
     expect(written.llm_synth_endpoint).toBe('https://synth');
   });
 
-  it('cpu embedder + mid reranker + small synth (one shared local container)', () => {
+  it('cpu embedder + small synth (one shared local container)', () => {
     const written = {
       ...placementToConfig('embed', { backend: 'local', tier: 'cpu', host: 'box', gpu: '' }),
-      ...placementToConfig('rerank', { backend: 'local', tier: 'mid', host: 'box', gpu: '0' }),
       ...placementToConfig('synth', { backend: 'local', tier: 'small', host: 'box', gpu: '0' }),
     };
     expect(written.llm_embed_tier).toBe('cpu');
-    expect(written.llm_rerank_tier).toBe('mid');
     expect(written.llm_synth_tier).toBe('small');
     // all local → same host (single aimee-llm container)
     expect(written.llm_embed_host).toBe('box');
-    expect(written.llm_rerank_host).toBe('box');
     expect(written.llm_synth_host).toBe('box');
   });
 });
@@ -173,7 +165,6 @@ describe('buildDesiredConfig (the full save map)', () => {
     kbBearer: '',
     placements: {
       embed: { backend: 'local', tier: 'large', host: 'box', gpu: '0' },
-      rerank: { backend: 'local', tier: 'cpu', host: 'box', gpu: '' },
       synth: { backend: 'external', endpoint: 'https://synth' },
     },
     embedModel: '',
@@ -186,7 +177,6 @@ describe('buildDesiredConfig (the full save map)', () => {
     expect(m.kb_mode).toBe('local');
     expect(m.llm_embed_backend).toBe('local');
     expect(m.llm_embed_tier).toBe('large');
-    expect(m.llm_rerank_tier).toBe('cpu');
     expect(m.llm_synth_backend).toBe('external');
     expect(m.llm_synth_endpoint).toBe('https://synth');
     // the synth model is fixed by tier, never written from the wizard
@@ -200,7 +190,6 @@ describe('buildDesiredConfig (the full save map)', () => {
       localSel({
         placements: {
           embed: { backend: 'external', endpoint: 'https://emb' },
-          rerank: { backend: 'off' },
           synth: { backend: 'off' },
         },
         embedModel: 'pplx-embed',
@@ -217,7 +206,6 @@ describe('buildDesiredConfig (the full save map)', () => {
       localSel({
         placements: {
           embed: { backend: 'external', endpoint: 'https://emb' },
-          rerank: { backend: 'off' },
           synth: { backend: 'off' },
         },
         embedModel: 'e',

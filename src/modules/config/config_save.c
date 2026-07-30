@@ -395,11 +395,6 @@ int config_save(const config_t *cfg)
           {"llm_embed_host", offsetof(config_t, llm_embed_host)},
           {"llm_embed_gpu", offsetof(config_t, llm_embed_gpu)},
           {"llm_embed_tier", offsetof(config_t, llm_embed_tier)},
-          {"llm_rerank_backend", offsetof(config_t, llm_rerank_backend)},
-          {"llm_rerank_host", offsetof(config_t, llm_rerank_host)},
-          {"llm_rerank_gpu", offsetof(config_t, llm_rerank_gpu)},
-          {"llm_rerank_tier", offsetof(config_t, llm_rerank_tier)},
-          {"llm_rerank_endpoint", offsetof(config_t, llm_rerank_endpoint)},
           {"llm_synth_backend", offsetof(config_t, llm_synth_backend)},
           {"llm_synth_host", offsetof(config_t, llm_synth_host)},
           {"llm_synth_gpu", offsetof(config_t, llm_synth_gpu)},
@@ -486,18 +481,6 @@ int config_save(const config_t *cfg)
       cJSON_AddStringToObject(root, "memory_weight_profile", cfg->memory_weight_profile);
    if (cfg->memory_rerank_mode[0])
       cJSON_AddStringToObject(root, "memory_rerank_mode", cfg->memory_rerank_mode);
-   if (cfg->memory_rerank_enabled || cfg->memory_rerank_command[0] ||
-       cfg->memory_rerank_top_k > 0 || cfg->memory_rerank_mix != 0.0)
-   {
-      cJSON *mr = cJSON_AddObjectToObject(root, "memory_rerank");
-      cJSON_AddBoolToObject(mr, "enabled", cfg->memory_rerank_enabled);
-      if (cfg->memory_rerank_command[0])
-         cJSON_AddStringToObject(mr, "command", cfg->memory_rerank_command);
-      if (cfg->memory_rerank_top_k > 0)
-         cJSON_AddNumberToObject(mr, "top_k", cfg->memory_rerank_top_k);
-      if (cfg->memory_rerank_mix != 0.0)
-         cJSON_AddNumberToObject(mr, "mix", cfg->memory_rerank_mix);
-   }
    if (cfg->memory_query_expansion_mode[0] || cfg->memory_query_expansion_k > 0)
    {
       cJSON *qe = cJSON_AddObjectToObject(root, "memory_query_expansion");

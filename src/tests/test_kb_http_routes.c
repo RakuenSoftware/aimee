@@ -2151,7 +2151,7 @@ static void test_console_settings(void)
    assert(status == 200);
    assert(strstr(buf, "\"fields\"") != NULL);
    assert(strstr(buf, "\"embedding_model\"") != NULL);
-   assert(strstr(buf, "\"llm_rerank_backend\"") != NULL);
+   assert(strstr(buf, "\"llm_synth_backend\"") != NULL);
    assert(strstr(buf, "\"Embedder\"") != NULL);
    /* Owned by the Typed Facts page, so it must not appear on this surface. */
    assert(strstr(buf, "\"typed_facts_enabled\"") == NULL);

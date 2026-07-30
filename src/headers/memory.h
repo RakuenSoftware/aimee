@@ -91,10 +91,8 @@ typedef struct
    double salience;
    double surprise;
    double pagerank;
-   double cross_encoder;  /* raw cross-encoder rerank score (0.0 when disabled/unavailable) */
-   double hybrid_total;   /* hybrid score BEFORE cross-encoder blend, for explain surface */
-   double blended_total;  /* final score AFTER cross-encoder blend (== total when rerank ran) */
-   double rerank_mix;     /* blend weight used (0.0 when rerank did not run) */
+   double hybrid_total;   /* lexical+dense hybrid score, for the explain surface */
+   double blended_total;  /* final score after the post-hybrid passes */
    double graph_score;    /* utility-weighted graph boost contribution */
    double code_proximity; /* code-projection edge proximity score */
    double utility;        /* decayed utility signal from feedback */

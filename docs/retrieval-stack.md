@@ -1,11 +1,11 @@
 # Retrieval stack
 
 Retrieval is hybrid. Lexical, dense, graph, code, scope, recency, and confidence signals produce a
-candidate set; optional reranking and synthesis refine it.
+candidate set; optional synthesis refines it.
 
 ```text
 query -> normalize/rewrite -> parallel candidate sources -> fuse
-      -> evidence build -> rerank -> confidence/abstain -> optional synthesis
+      -> evidence build -> confidence/abstain -> optional synthesis
 ```
 
 No stage may claim it ran when its dependency was unavailable. Degraded results state which signals
@@ -18,10 +18,8 @@ One embedder identity and dimension applies to a deployment. The KB stores deriv
 
 The standard tiers use:
 
-| Tier | Embedding width | Reranker |
-| --- | ---: | --- |
-| CPU | 1024 | small cross-encoder |
-| GPU tiers | 2560 | larger cross-encoder |
+Every tier serves the same 768-dim embedder, so the tier is a GPU-offload choice and an
+index built under one tier is readable under another.
 
 Check [Inference tiers](AIMEE_KB_SYNTH_TIERS.md) for the current model names and hardware estimates.
 
@@ -60,11 +58,13 @@ pretending their raw scores share one scale.
 Scope and authorization apply before candidates reach the result. A later filter is not sufficient
 because ranking and timing can leak excluded data.
 
-## Reranking
+## No cross-encoder rerank stage
 
-The cross-encoder scores `(query, candidate)` text pairs and does not depend on embedding dimension.
-It runs on a bounded top-k after fusion. If unavailable, the response returns the fused order and an
-explicit degradation signal.
+There is no reranker. Measured across 20 configurations and two embedders, the best cross-encoder
+result was +0.0032 NDCG@10 and most were negative — a reranker's ceiling sits below a strong dense
+ranking, so the effect shrank as the embedder improved. Hybrid BM25+RRF fusion measured +0.1168
+Recall@10 over dense alone, roughly 35x the best rerank result, which is where the remaining quality
+lives. See [the retrieval-stack report](validation/retrieval-stack-report-2026-07-30.md).
 
 ## Evidence and abstention
 
@@ -77,7 +77,7 @@ and must cite it.
 ## Configuration and checks
 
 Use the [generated configuration](gen/configuration.md) for embedder URL, dimension, fusion,
-reranking, top-k, and evidence gates.
+top-k, and evidence gates.
 
 After a retrieval change, run lexical-only, dense-only, fused, degraded, scope-negative, dimension
 drift, and benchmark cases. Record corpus hash, model identity, config, and latency with the result.

@@ -18,13 +18,6 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
-int config_learning_synthesize_max_tokens(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, learning_synthesize_max_tokens), sizeof(v), &v);
-   return v;
-}
-
 int config_learning_synthesize_k(void)
 {
    int v = 0;
@@ -914,9 +907,3 @@ int config_demotion_enabled(void)
    return v;
 }
 
-int config_demotion_window(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, demotion_window), sizeof(v), &v);
-   return v;
-}

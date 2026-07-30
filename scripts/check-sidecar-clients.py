@@ -105,45 +105,6 @@ def check_embed_remote() -> None:
     print("  embed-remote.py: ok")
 
 
-def check_rerank_remote() -> None:
-    token = "kb-to-llm-test-token"
-
-    class RerankStub(BaseHTTPRequestHandler):
-        def log_message(self, *a):
-            pass
-
-        def do_POST(self):
-            assert self.path.rstrip("/") == "/rerank", self.path
-            assert self.headers.get("authorization") == f"Bearer {token}"
-            length = int(self.headers.get("content-length", "0") or "0")
-            pairs = json.loads(self.rfile.read(length))
-            body = json.dumps([0.75 for _ in pairs]).encode()
-            self.send_response(200)
-            self.send_header("content-type", "application/json")
-            self.send_header("content-length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-    server, url = _serve(RerankStub)
-    try:
-        out = _run(
-            "rerank-remote.py",
-            {
-                "AIMEE_RERANKER_URL": url,
-                "AIMEE_LLM_AUTH_TOKEN": token,
-                "AIMEE_LLM_AUTH_REQUIRED": "1",
-            },
-            '[["query", "candidate"]]',
-        )
-        assert json.loads(out) == [0.75]
-        _run_missing_managed_auth(
-            "rerank-remote.py", "AIMEE_RERANKER_URL", url, '[["query", "candidate"]]'
-        )
-    finally:
-        server.shutdown()
-    print("  rerank-remote.py: ok")
-
-
 def check_llm_chat() -> None:
     class ChatStub(BaseHTTPRequestHandler):
         def log_message(self, *a):  # quiet
@@ -285,7 +246,6 @@ def check_no_baked_endpoint_defaults() -> None:
 def main() -> int:
     print("sidecar-clients:")
     check_embed_remote()
-    check_rerank_remote()
     check_llm_chat()
     check_llm_chat_reasoning_split()
     check_no_baked_endpoint_defaults()

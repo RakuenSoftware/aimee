@@ -68,7 +68,6 @@ export default function KnowledgeBase({ onSaved, fetchImpl }: KnowledgeBaseProps
             kbBearer,
             placements: {
               embed: { backend: 'off' },
-              rerank: { backend: 'off' },
               synth: { backend: 'off' },
             },
             embedModel: '',
@@ -140,7 +139,7 @@ export default function KnowledgeBase({ onSaved, fetchImpl }: KnowledgeBaseProps
           </div>
         ) : (
           <div style={{ fontSize: 11.5, color: '#778', paddingLeft: 24 }}>
-            The next steps place the embedder + reranker + synthesizer and set the shared store.
+            The next steps place the embedder + synthesizer and set the shared store.
           </div>
         )}
       </section>

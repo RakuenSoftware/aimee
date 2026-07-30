@@ -2716,60 +2716,23 @@ int main(void)
       }
    }
 
-   /* --- cross_encoder: score_parts initialises cross_encoder to 0 --- */
-   {
-      memory_score_parts_t parts;
-      memset(&parts, 0, sizeof(parts));
-      assert(parts.cross_encoder == 0.0);
-   }
-
-   /* --- cross_encoder: score_parts survives memset --- */
-   {
-      memory_score_parts_t parts;
-      memset(&parts, 0, sizeof(parts));
-      parts.lexical = 1.5;
-      parts.semantic = 0.8;
-      parts.cross_encoder = 0.92;
-      parts.total = 3.22;
-      assert(parts.cross_encoder >= 0.91 && parts.cross_encoder <= 0.93);
-   }
-
-   /* --- memory_score_parts_t: new explain fields (hybrid_total,
-    *     blended_total, rerank_mix) exist and round-trip --- *
+   /* --- memory_score_parts_t: the explain fields round-trip --- *
     *
-    * The proposal's acceptance criterion calls for `aimee memory search
-    * --explain` to surface hybrid vs rerank vs blended scores so operators
-    * can see the rerank contribution per candidate.  These fields land
-    * on the score_parts struct; the JSON serializer (in cmd_memory_embed.c)
-    * is conditional so non-reranked pipelines stay byte-identical to the
-    * pre-change JSON. */
+    * `aimee memory search --explain` surfaces the hybrid score alongside the final
+    * total per candidate. The JSON serializer (cmd_memory_embed.c) emits them only
+    * when non-zero, so an unscored pipeline stays byte-identical. */
    {
       memory_score_parts_t parts;
       memset(&parts, 0, sizeof(parts));
-      /* Baseline: all three default to 0.0. */
       assert(parts.hybrid_total == 0.0);
       assert(parts.blended_total == 0.0);
-      assert(parts.rerank_mix == 0.0);
 
-      /* Simulated rerank: fields round-trip. */
-      parts.cross_encoder = 0.92;
       parts.hybrid_total = 4.1;
       parts.blended_total = 5.3;
-      parts.rerank_mix = 0.7;
       parts.total = parts.blended_total;
       assert(parts.hybrid_total == 4.1);
       assert(parts.blended_total == 5.3);
-      assert(parts.rerank_mix == 0.7);
       assert(parts.total == parts.blended_total);
-   }
-
-   /* --- memory_rerank_enabled: defaults to 0 (disabled) --- */
-   {
-      config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      assert(cfg.memory_rerank_enabled == 0);
-      assert(cfg.memory_rerank_command[0] == '\0');
-      assert(cfg.memory_rerank_top_k == 0);
    }
 
    /* --- memory_query_expansion_mode: empty means lexical (default) --- */
@@ -2780,7 +2743,7 @@ int main(void)
       assert(strcmp(cfg.memory_query_expansion_mode, "semantic") != 0);
    }
 
-   /* --- memory_find_facts_scoped: returns results (smoke test for reranker path) --- */
+   /* --- memory_find_facts_scoped: returns results --- */
    {
       setup();
       memory_t m1, m2, m3;

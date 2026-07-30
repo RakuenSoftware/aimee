@@ -249,10 +249,8 @@ static cJSON *kbs_memory_diagnostic_to_json(const memory_diagnostic_t *d)
    cJSON_AddNumberToObject(parts, "salience", d->parts.salience);
    cJSON_AddNumberToObject(parts, "surprise", d->parts.surprise);
    cJSON_AddNumberToObject(parts, "pagerank", d->parts.pagerank);
-   cJSON_AddNumberToObject(parts, "cross_encoder", d->parts.cross_encoder);
    cJSON_AddNumberToObject(parts, "hybrid_total", d->parts.hybrid_total);
    cJSON_AddNumberToObject(parts, "blended_total", d->parts.blended_total);
-   cJSON_AddNumberToObject(parts, "rerank_mix", d->parts.rerank_mix);
    cJSON_AddNumberToObject(parts, "total", d->parts.total);
    return j;
 }

@@ -267,15 +267,11 @@ cJSON *memory_score_parts_to_json(const memory_score_parts_t *parts)
    jo_add_num(j, "surprise", parts->surprise);
    jo_add_num(j, "pagerank", parts->pagerank);
    jo_add_num(j, "confidence", parts->confidence);
-   if (parts->cross_encoder != 0.0)
-      jo_add_num(j, "cross_encoder", parts->cross_encoder);
    if (parts->hybrid_total != 0.0 || parts->blended_total != 0.0)
    {
       jo_add_num(j, "hybrid_total", parts->hybrid_total);
       jo_add_num(j, "blended_total", parts->blended_total);
    }
-   if (parts->rerank_mix > 0.0)
-      jo_add_num(j, "rerank_mix", parts->rerank_mix);
    /* Phase 6 fusion score parts (provisional; only emitted when non-zero). */
    if (parts->graph_score != 0.0)
       jo_add_num(j, "graph_score", parts->graph_score);
@@ -380,17 +376,7 @@ void mem_diagnose(app_ctx_t *ctx, int argc, char **argv)
    for (int i = 0; i < count; i++)
    {
       printf("[%d] #%lld %s\n", i + 1, (long long)rows[i].memory.id, rows[i].memory.key);
-      if (rows[i].parts.cross_encoder != 0.0)
-         printf("    total=%.3f hybrid=%.3f cross_encoder=%.3f lexical=%.3f coverage=%.3f "
-                "entity=%.3f temporal=%.3f evidence=%.3f semantic=%.3f state=%.3f intent=%.3f "
-                "salience=%.3f surprise=%.3f pagerank=%.3f\n",
-                rows[i].parts.total, rows[i].parts.total - rows[i].parts.cross_encoder,
-                rows[i].parts.cross_encoder, rows[i].parts.lexical, rows[i].parts.coverage,
-                rows[i].parts.entity, rows[i].parts.temporal, rows[i].parts.evidence,
-                rows[i].parts.semantic, rows[i].parts.state, rows[i].parts.intent,
-                rows[i].parts.salience, rows[i].parts.surprise, rows[i].parts.pagerank);
-      else
-         printf("    total=%.3f lexical=%.3f coverage=%.3f entity=%.3f temporal=%.3f evidence=%.3f "
+      printf("    total=%.3f lexical=%.3f coverage=%.3f entity=%.3f temporal=%.3f evidence=%.3f "
                 "semantic=%.3f state=%.3f intent=%.3f salience=%.3f surprise=%.3f pagerank=%.3f\n",
                 rows[i].parts.total, rows[i].parts.lexical, rows[i].parts.coverage,
                 rows[i].parts.entity, rows[i].parts.temporal, rows[i].parts.evidence,
@@ -1614,7 +1600,6 @@ void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
       const char *corpus_path = opt_get(&opts, "corpus");
       const char *baseline_path = opt_get(&opts, "baseline");
       int update_baseline = opt_get_flag(&opts, "update-baseline");
-      int compare_rerank = opt_get_flag(&opts, "compare-rerank");
       if (!corpus_path)
          corpus_path = "tests/eval/memory_retrieval_corpus.json";
       if (!baseline_path)
@@ -1628,22 +1613,6 @@ void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
       mem_eval_scores_t scores;
       mem_eval_latency_t latency;
       mem_eval_run_with_latency(corpus_cases, n_corpus, &scores, &latency);
-
-      /* Per-stage delta: re-run with the cross-encoder force-disabled so
-       * operators can see the quality / latency contribution of rerank
-       * in isolation.  Other stages (hybrid retrieval, lexical + semantic
-       * expansion) remain enabled for both runs — rerank is the only
-       * toggle. */
-      mem_eval_scores_t scores_no_rerank;
-      mem_eval_latency_t latency_no_rerank;
-      int have_no_rerank = 0;
-      if (compare_rerank)
-      {
-         platform_setenv("AIMEE_MEMORY_RERANK_FORCE_OFF", "1");
-         mem_eval_run_with_latency(corpus_cases, n_corpus, &scores_no_rerank, &latency_no_rerank);
-         platform_setenv("AIMEE_MEMORY_RERANK_FORCE_OFF", "");
-         have_no_rerank = 1;
-      }
 
       mem_eval_close_temp_db();
 
@@ -1664,36 +1633,6 @@ void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
       snprintf(title, sizeof(title), "Memory Benchmark — corpus: %s", corpus_path);
       mem_print_eval_report(title, &scores, &latency);
       mem_benchmark_print_weight_profile(benchmark_weight_profile);
-      if (have_no_rerank)
-      {
-         char no_rerank_title[1024];
-         snprintf(no_rerank_title, sizeof(no_rerank_title),
-                  "Memory Benchmark — corpus (rerank OFF): %s", corpus_path);
-         mem_print_eval_report(no_rerank_title, &scores_no_rerank, &latency_no_rerank);
-         printf("\n# Per-stage delta (rerank on vs off)\n");
-         printf("  MRR       : %+0.4f  (on %.4f, off %.4f)\n", scores.mrr - scores_no_rerank.mrr,
-                scores.mrr, scores_no_rerank.mrr);
-         printf("  recall@5  : %+0.4f  (on %.4f, off %.4f)\n",
-                scores.recall_5 - scores_no_rerank.recall_5, scores.recall_5,
-                scores_no_rerank.recall_5);
-         printf("  recall@10 : %+0.4f  (on %.4f, off %.4f)\n",
-                scores.recall_10 - scores_no_rerank.recall_10, scores.recall_10,
-                scores_no_rerank.recall_10);
-         printf("  ndcg@5    : %+0.4f  (on %.4f, off %.4f)\n",
-                scores.ndcg_5 - scores_no_rerank.ndcg_5, scores.ndcg_5, scores_no_rerank.ndcg_5);
-         printf("  ndcg@10   : %+0.4f  (on %.4f, off %.4f)\n",
-                scores.ndcg_10 - scores_no_rerank.ndcg_10, scores.ndcg_10,
-                scores_no_rerank.ndcg_10);
-         printf("  p50_ms    : %+0.2f  (on %.2f, off %.2f)\n",
-                latency.p50_ms - latency_no_rerank.p50_ms, latency.p50_ms,
-                latency_no_rerank.p50_ms);
-         printf("  p95_ms    : %+0.2f  (on %.2f, off %.2f)\n",
-                latency.p95_ms - latency_no_rerank.p95_ms, latency.p95_ms,
-                latency_no_rerank.p95_ms);
-         printf("  p99_ms    : %+0.2f  (on %.2f, off %.2f)\n",
-                latency.p99_ms - latency_no_rerank.p99_ms, latency.p99_ms,
-                latency_no_rerank.p99_ms);
-      }
       if (update_baseline)
          printf("Baseline updated: %s\n", baseline_path);
       else

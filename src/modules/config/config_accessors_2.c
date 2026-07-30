@@ -18,6 +18,13 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
+int config_demotion_window(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, demotion_window), sizeof(v), &v);
+   return v;
+}
+
 double config_demotion_half_life_days(void)
 {
    double v = 0;
@@ -924,29 +931,3 @@ const char *config_embedding_endpoint(void)
    return buf;
 }
 
-const char *config_memory_weight_profile(void)
-{
-   static _Thread_local char buf[512];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, memory_weight_profile), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_memory_rerank_mode(void)
-{
-   static _Thread_local char buf[16];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, memory_rerank_mode), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_css_render_command(void)
-{
-   static _Thread_local char buf[512];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, css_render_command), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}

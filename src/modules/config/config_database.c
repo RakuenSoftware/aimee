@@ -120,10 +120,8 @@ void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
    } while (0)
 
    const int remote_kb = strcmp(cfg->kb_mode, "remote") == 0;
-   const char *eb = cfg->llm_embed_backend, *rb = cfg->llm_rerank_backend,
-              *sb = cfg->llm_synth_backend;
-   const int any_local =
-       strcmp(eb, "local") == 0 || strcmp(rb, "local") == 0 || strcmp(sb, "local") == 0;
+   const char *eb = cfg->llm_embed_backend, *sb = cfg->llm_synth_backend;
+   const int any_local = strcmp(eb, "local") == 0 || strcmp(sb, "local") == 0;
 
    /* COMPOSE_PROFILES: a remote kb deploys nothing; a local kb runs the "kb"
     * service, plus the "llm" profile whenever any role is served locally here.
@@ -157,13 +155,6 @@ void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
       EMITF("AIMEE_LLM_EMBED_TIER=%s\n", cfg->llm_embed_tier);
    if (strcmp(eb, "external") == 0 && cfg->embedding_endpoint[0])
       EMITF("AIMEE_LLM_EMBED_URL=%s\n", cfg->embedding_endpoint);
-
-   if (deploy_role_mode(rb)[0])
-      EMITF("AIMEE_LLM_RERANK_MODE=%s\n", deploy_role_mode(rb));
-   if (strcmp(rb, "local") == 0 && cfg->llm_rerank_tier[0])
-      EMITF("AIMEE_LLM_RERANK_TIER=%s\n", cfg->llm_rerank_tier);
-   if (strcmp(rb, "external") == 0 && cfg->llm_rerank_endpoint[0])
-      EMITF("AIMEE_LLM_RERANK_URL=%s\n", cfg->llm_rerank_endpoint);
 
    if (deploy_role_mode(sb)[0])
       EMITF("AIMEE_LLM_SYNTH_MODE=%s\n", deploy_role_mode(sb));

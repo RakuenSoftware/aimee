@@ -109,15 +109,11 @@ extern "C"
     * before db2_init, beside db2_set_embedding_dim, so this layer stays
     * config-free. ALL default empty -> the guard is a no-op (a deployment whose
     * embedder reports no identity, e.g. the legacy torch embedder, is
-    * unaffected). The embedder model_id is repo@sha; the reranker carries its
-    * scoring contract (e.g. "/v1/rerank,fa=on"); compat_csv is a comma-separated
-    * list of admitted "old_id->new_id" transitions (see
+    * unaffected). The embedder model_id is repo@sha; compat_csv is a
+    * comma-separated list of admitted "old_id->new_id" transitions (see
     * db2_embedding_model_record_or_check). Reset by db2_shutdown. */
    void db2_set_embedder_model_id(const char *model_id);
    const char *db2_embedder_model_id(void);
-   void db2_set_reranker_identity(const char *model_id, const char *contract);
-   const char *db2_reranker_model_id(void);
-   const char *db2_reranker_contract(void);
    void db2_set_embedding_compat(const char *compat_csv);
    const char *db2_embedding_compat(void);
 

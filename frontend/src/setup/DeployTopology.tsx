@@ -15,7 +15,7 @@ import {
 } from './deployTopology';
 
 /* Wizard — Deploy topology (local knowledge base only). Places the three LLM
- * roles (embedder / reranker / synthesizer) onto the page-2 config record (per-role
+ * roles (embedder / synthesizer) onto the page-2 config record (per-role
  * llm_* keys), which `aimee config deploy-env` translates to the compose stack.
  * Every write goes through the existing /api/config/set allowlist (no new backend).
  * All local roles share ONE aimee-llm container on the chosen host.
@@ -71,7 +71,6 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
   const [hostName, setHostName] = useState('');
   const [roleUi, setRoleUi] = useState<Record<Role, RoleUi>>({
     embed: { optionId: 'cpu', endpoint: '' },
-    rerank: { optionId: 'cpu', endpoint: '' },
     synth: { optionId: 'cpu', endpoint: '' },
   });
   const [embedModel, setEmbedModel] = useState('');
@@ -95,7 +94,6 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
       const localOrFirst = h.find((x) => x.kind === 'local')?.name || h[0]?.name || '';
       const recorded =
         String(c.llm_embed_host ?? '') ||
-        String(c.llm_rerank_host ?? '') ||
         String(c.llm_synth_host ?? '');
       const seededHost = recorded && h.some((x) => x.name === recorded) ? recorded : localOrFirst;
       setHostName(seededHost);
@@ -161,7 +159,7 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
       kbMode: 'local',
       kbUrl: '',
       kbBearer: '',
-      placements: { embed: resolvePlacement('embed'), rerank: resolvePlacement('rerank'), synth: resolvePlacement('synth') },
+      placements: { embed: resolvePlacement('embed'), synth: resolvePlacement('synth') },
       embedModel,
       embedDim,
     });

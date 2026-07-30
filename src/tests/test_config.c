@@ -229,7 +229,6 @@ int main(void)
       snprintf(cfg.llm_embed_backend, sizeof(cfg.llm_embed_backend), "local");
       snprintf(cfg.llm_embed_tier, sizeof(cfg.llm_embed_tier), "mid");
       snprintf(cfg.llm_embed_gpu, sizeof(cfg.llm_embed_gpu), "0");
-      snprintf(cfg.llm_rerank_backend, sizeof(cfg.llm_rerank_backend), "off");
       snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "external");
       snprintf(cfg.llm_synth_endpoint, sizeof(cfg.llm_synth_endpoint), "https://api.example/v1");
       snprintf(cfg.llm_synth_model, sizeof(cfg.llm_synth_model), "gpt-5.5");
@@ -493,7 +492,6 @@ int main(void)
       assert(strcmp(cfg2.llm_embed_backend, "local") == 0);
       assert(strcmp(cfg2.llm_embed_tier, "mid") == 0);
       assert(strcmp(cfg2.llm_embed_gpu, "0") == 0);
-      assert(strcmp(cfg2.llm_rerank_backend, "off") == 0);
       assert(strcmp(cfg2.llm_synth_backend, "external") == 0);
       assert(strcmp(cfg2.llm_synth_endpoint, "https://api.example/v1") == 0);
       assert(strcmp(cfg2.llm_synth_model, "gpt-5.5") == 0);
@@ -1720,7 +1718,7 @@ int main(void)
       assert(strcmp(cfg2.memory_pagerank_relations, "depends_on,fixes") == 0);
    }
 
-   /* --- memory_rerank: defaults --- */
+   /* --- memory_query_expansion: defaults, parse, and save/load round-trip --- */
    {
       char cpath[512];
       snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
@@ -1731,68 +1729,27 @@ int main(void)
 
       static config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
-      int rc2 = config_load(&cfg);
-      assert(rc2 == 0);
-      /* Reranking (pipeline stage 3) is default-ON with the rerank-remote.py
-       * command; it degrades to plain hybrid ordering if the service is absent. */
-      assert(cfg.memory_rerank_enabled == 1);
-      assert(strcmp(cfg.memory_rerank_command, "python3 /opt/aimee/scripts/rerank-remote.py") == 0);
-      assert(cfg.memory_rerank_top_k == 0);
-      assert(cfg.memory_rerank_mix == 0.0);
+      assert(config_load(&cfg) == 0);
       assert(cfg.memory_query_expansion_mode[0] == '\0');
       assert(cfg.memory_query_expansion_k == 0);
-   }
 
-   /* --- memory_rerank: parsed from config --- */
-   {
-      char cpath[512];
-      snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
-      FILE *f = fopen(cpath, "w");
+      f = fopen(cpath, "w");
       assert(f);
       fprintf(f, "provider: claude\n"
-                 "memory_rerank:\n"
-                 "  enabled: true\n"
-                 "  command: /usr/local/bin/cross-encoder\n"
-                 "  top_k: 50\n"
-                 "  mix: 0.7\n"
                  "memory_query_expansion:\n"
                  "  mode: semantic\n"
                  "  k: 5\n");
       fclose(f);
-
-      static config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
-      int rc2 = config_load(&cfg);
-      assert(rc2 == 0);
-      assert(cfg.memory_rerank_enabled == 1);
-      assert(strcmp(cfg.memory_rerank_command, "/usr/local/bin/cross-encoder") == 0);
-      assert(cfg.memory_rerank_top_k == 50);
-      assert(cfg.memory_rerank_mix >= 0.69 && cfg.memory_rerank_mix <= 0.71);
+      assert(config_load(&cfg) == 0);
       assert(strcmp(cfg.memory_query_expansion_mode, "semantic") == 0);
       assert(cfg.memory_query_expansion_k == 5);
-   }
 
-   /* --- memory_rerank: round-trip save/load --- */
-   {
-      static config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      config_load(&cfg);
-      cfg.memory_rerank_enabled = 1;
-      snprintf(cfg.memory_rerank_command, sizeof(cfg.memory_rerank_command), "/opt/ce/score.py");
-      cfg.memory_rerank_top_k = 30;
-      cfg.memory_rerank_mix = 0.6;
-      snprintf(cfg.memory_query_expansion_mode, sizeof(cfg.memory_query_expansion_mode),
-               "semantic");
       cfg.memory_query_expansion_k = 8;
       config_save(&cfg);
-
       static config_t cfg2;
       memset(&cfg2, 0, sizeof(cfg2));
       config_load(&cfg2);
-      assert(cfg2.memory_rerank_enabled == 1);
-      assert(strcmp(cfg2.memory_rerank_command, "/opt/ce/score.py") == 0);
-      assert(cfg2.memory_rerank_top_k == 30);
-      assert(cfg2.memory_rerank_mix >= 0.59 && cfg2.memory_rerank_mix <= 0.61);
       assert(strcmp(cfg2.memory_query_expansion_mode, "semantic") == 0);
       assert(cfg2.memory_query_expansion_k == 8);
    }
@@ -2521,20 +2478,18 @@ int main(void)
    {
       char env[2048];
 
-      /* Local kb; embed local(mid), rerank off, synth external. */
+      /* Local kb; embed local(mid), synth external. */
       static config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
       snprintf(cfg.llm_embed_backend, sizeof(cfg.llm_embed_backend), "local");
       snprintf(cfg.llm_embed_tier, sizeof(cfg.llm_embed_tier), "mid");
-      snprintf(cfg.llm_rerank_backend, sizeof(cfg.llm_rerank_backend), "off");
       snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "external");
       snprintf(cfg.llm_synth_endpoint, sizeof(cfg.llm_synth_endpoint), "https://api.x/v1");
       config_emit_deploy_env(&cfg, env, sizeof(env));
       assert(strstr(env, "COMPOSE_PROFILES=kb,llm\n") != NULL);
       assert(strstr(env, "AIMEE_LLM_EMBED_MODE=local\n") != NULL);
       assert(strstr(env, "AIMEE_LLM_EMBED_TIER=mid\n") != NULL);
-      assert(strstr(env, "AIMEE_LLM_RERANK_MODE=off\n") != NULL);
       assert(strstr(env, "AIMEE_LLM_SYNTH_MODE=external\n") != NULL);
       assert(strstr(env, "AIMEE_LLM_SYNTH_URL=https://api.x/v1\n") != NULL);
       assert(strstr(env, "AIMEE_LLM_URL=http://aimee-llm:8742\n") != NULL);

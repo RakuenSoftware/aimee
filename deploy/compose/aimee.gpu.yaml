@@ -9,7 +9,7 @@
 # nomic-embed-text-v2-moe at 768-dim, so the GPU tier no longer re-points the kb's
 # embedding dim and switching a POPULATED kb between the CPU and GPU tier is NOT a
 # re-embed — the vectors stay valid because the dimension and the model are the
-# same. Only synth (and the reranker) change with the tier. This override
+# same. Only synth changes with the tier. This override
 # deliberately sets no AIMEE_EMBEDDING_DIM: leaving it unset lets the kb derive the
 # dim (pinned > recorded > probed), and pinning it would suppress that derivation.
 services:
@@ -23,11 +23,11 @@ services:
       # GPU tier: pick the synth by AIMEE_LLM_TIER (small=12B / mid=26B-A4B SLOTS=2 /
       # large=26B-A4B SLOTS=4). small is the 16GB-safe default; the models download
       # to /models on first boot. EVERY tier — including cpu — shares the same
-      # 768-dim nomic embedder, so the tier only selects synth/rerank.
+      # 768-dim nomic embedder, so the tier only selects synth.
       AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-small}
       # gemma-4-12b trains to 256K; the supervisor's default cap is a 16GB-safe 32K.
       # 128K is safe on the .254 card (RADV GFX1100 / 7900 XTX, 24560 MiB confirmed):
-      # ~6.6GB Q4_K_M model + ~1.5GB embed/rerank + KV cache. gemma-4 uses
+      # ~6.6GB Q4_K_M model + ~1.5GB embed + KV cache. gemma-4 uses
       # sliding-window attention (5 local layers windowed to 1024 : 1 global), so the
       # 128K KV is dominated by the few global layers (~2-3GB), not all-layers-x-128K —
       # well under 24GB. 256K would still fit with KV-cache quantization if ever needed.

@@ -799,7 +799,6 @@ static cJSON *mcph_memory_explain_match(struct mcp_call *c)
    cJSON_AddNumberToObject(p, "evidence", diag.parts.evidence);
    cJSON_AddNumberToObject(p, "confidence", diag.parts.confidence);
    cJSON_AddNumberToObject(p, "salience", diag.parts.salience);
-   cJSON_AddNumberToObject(p, "cross_encoder", diag.parts.cross_encoder);
    cJSON_AddNumberToObject(p, "graph_score", diag.parts.graph_score);
    cJSON_AddNumberToObject(p, "hybrid_total", diag.parts.hybrid_total);
    cJSON_AddNumberToObject(p, "blended_total", diag.parts.blended_total);

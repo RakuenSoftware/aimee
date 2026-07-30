@@ -25,7 +25,7 @@ means the contract or branch exists but is not part of the integrated path yet.
 | Persistent typed memory | Done | Facts, rules, decisions, episodes, provenance, contradiction, and staleness. |
 | DB1/DB2 ownership | Done | Server owns SQLite; KB owns PostgreSQL and pgvector; thin clients own neither. |
 | Embedded KB PostgreSQL | Done | Default container path; external PostgreSQL remains supported. |
-| Hybrid retrieval | Done | Lexical, dense, graph, evidence, rerank, synthesis, and abstention stages. |
+| Hybrid retrieval | Done | Lexical, dense, graph, evidence, synthesis, and abstention stages. |
 | Cross-repo code graph | Done | Symbols, calls, imports, dependencies, co-change, callers, and blast radius. |
 | Client-side content push | Done | Remote clients upload bytes; server paths never name client files. |
 | Structured PDF evidence | Gated | Coordinates are the base; vectors, tables, assets, and OCR have separate gates. |
@@ -53,7 +53,7 @@ means the contract or branch exists but is not part of the integrated path yet.
 | OpenAI, Anthropic, Gemini, Mistral, Bedrock, local endpoints | Done | Availability still depends on credentials and provider capability. |
 | Provider catalogs and model registry | Done | Context, output, price, capability, quota, and deprecation metadata. |
 | Context economizer | Done | Folding, cache alignment, and tool-output condensation are independently configurable. |
-| Local inference service | Done | CPU/GPU tiers serve embedding, rerank, and synthesis outside the KB process. |
+| Local inference service | Done | CPU/GPU tiers serve embedding and synthesis outside the KB process. |
 
 ## Security and operations
 

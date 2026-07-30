@@ -1,7 +1,7 @@
 /* Deploy-topology (wizard page 2) — pure model + config mapping. No DOM, no
  * network: the whole key-translation contract is unit-tested (deployTopology.test.ts).
  *
- * The page places three LLM roles (embedder / reranker / synthesizer) and picks
+ * The page places two LLM roles (embedder / synthesizer) and picks
  * the knowledge-base mode. Every value it persists goes through the SAME page-2
  * config record the backend shipped in p1–p2b (kb_mode + per-role llm_* keys),
  * which `aimee config deploy-env` already translates to compose env. All local
@@ -9,11 +9,10 @@
  * exactly the valid AIMEE_LLM_TIER values, and backend local|external|off maps
  * to AIMEE_LLM_<ROLE>_MODE. See deploy/compose + src/config_database.c. */
 
-export type Role = 'embed' | 'rerank' | 'synth';
+export type Role = 'embed' | 'synth';
 
 export const ROLES: { role: Role; label: string; blurb: string }[] = [
   { role: 'embed', label: 'Embedder', blurb: 'Turns text into vectors for search + memory.' },
-  { role: 'rerank', label: 'Reranker', blurb: 'Re-scores retrieved candidates for relevance.' },
   { role: 'synth', label: 'Synthesizer', blurb: 'Writes the knowledge-base curation + summaries.' },
 ];
 
@@ -49,7 +48,7 @@ export interface RoleKeys {
   gpu: string;
   tier: string;
   /** External endpoint key. The embed role reuses `embedding_endpoint` (there is
-   * no `llm_embed_endpoint`); rerank/synth have their own. */
+   * no `llm_embed_endpoint`); synth has its own. */
   endpoint: string;
 }
 

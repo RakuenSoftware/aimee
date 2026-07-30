@@ -5,15 +5,15 @@
 #   docker compose -f deploy/compose/aimee.yaml -f deploy/compose/aimee.gpu.yaml up -d   # GPU LLM
 #
 # The kb runs NO model — it calls the aimee-llm container for embedding,
-# reranking and synthesis via AIMEE_LLM_URL (the one knob; see
+# and synthesis via AIMEE_LLM_URL (the one knob; see
 # docs/KB_LLM_BACKENDS.md). aimee-llm is the unified Vulkan llama.cpp container;
 # this base uses the CPU tier. Layer aimee.gpu.yaml for the GPU tier (/dev/dri
 # passthrough); both serve the same 768-dim embedder, so switching tiers needs no
 # re-embed. Server /v1 on :8740, kb /v1 on :8741, webchat on :8443.
 name: aimee
 services:
-  # Unified llama.cpp/Vulkan container: embed (/embed,/embed_batch), rerank
-  # (/rerank) and synth (/v1/chat/completions). One model-less image; the tier is
+  # Unified llama.cpp/Vulkan container: embed (/embed,/embed_batch) and synth
+  # (/v1/chat/completions). One model-less image; the tier is
   # chosen at runtime via AIMEE_LLM_TIER (unset ≡ cpu here) and the models are
   # downloaded to the /models volume on first boot. The kb sends no bearer, so it
   # runs auth-off (AIMEE_LLM_AUTH_TOKEN empty) on the internal net.
@@ -50,7 +50,7 @@ services:
       # Empty by default: the KB image owns PostgreSQL + pgvector for a new
       # install. Set AIMEE_DB2_URL explicitly only to keep/use an external DB2.
       AIMEE_DB2_URL: ${AIMEE_DB2_URL:-}
-      # One knob: embed + rerank + synth all via the aimee-llm container.
+      # One knob: embed + synth all via the aimee-llm container.
       AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8742}
       # Embedding dim — deliberately UNSET. Every tier serves the same 768-dim
       # nomic embedder, so there is nothing tier-specific to pin, and leaving it

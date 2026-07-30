@@ -416,36 +416,6 @@ int db2_embedding_model_record_or_check(void *conn, const char *model_id, const 
    return -1;
 }
 
-/* unified-llm-container §2: record the RERANKER identity + scoring contract. The
- * reranker writes no corpus vectors and there is no persisted score cache, so a
- * swap is safe — this is record-only (drift observability), never a refusal. On a
- * change it refreshes the recorded value (a future score cache would key its
- * invalidation off this). model_id NULL/empty -> no-op. Returns 0 / -1 (DB err). */
-int db2_reranker_model_record(void *conn, const char *model_id, const char *contract, char *errbuf,
-                              size_t errlen)
-{
-   if (!conn)
-      return -1;
-   if (!model_id || !*model_id)
-      return 0;
-   const char *want_contract = contract ? contract : "";
-   /* Skip the writes when the recorded identity already matches, so a steady-state
-    * restart incurs no redundant kb_meta writes (mirrors the embedder short-circuit). */
-   char rec_id[160] = "", rec_contract[96] = "";
-   if (kb_meta_get(conn, "schema_reranker_model_id", rec_id, sizeof(rec_id)) == 0 &&
-       kb_meta_get(conn, "schema_reranker_contract", rec_contract, sizeof(rec_contract)) == 0 &&
-       strcmp(rec_id, model_id) == 0 && strcmp(rec_contract, want_contract) == 0)
-      return 0;
-   if (kb_meta_set(conn, "schema_reranker_model_id", model_id) != 0 ||
-       kb_meta_set(conn, "schema_reranker_contract", want_contract) != 0)
-   {
-      if (errbuf && errlen)
-         snprintf(errbuf, errlen, "kb_meta write failed for reranker identity");
-      return -1;
-   }
-   return 0;
-}
-
 int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t errlen)
 {
    if (!pg_conn)
@@ -475,7 +445,7 @@ int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t 
    if (rc != 0)
       return rc;
    /* §2: record the dim on first apply / refuse a mismatch (kb_meta now exists).
-    * The unified-llm-container §2 model-identity guards (embedder + reranker) run
+    * The unified-llm-container §2 model-identity guard (the embedder) runs
     * in db2_init right after this, where the configured identity globals live —
     * keeping this lower schema layer free of an upward dependency on them. */
    /* schema_version + schema_embedding_dim are recorded by schema.sql itself (so any

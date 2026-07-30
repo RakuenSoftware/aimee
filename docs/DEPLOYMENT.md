@@ -35,11 +35,11 @@ Only `aimee-kb` receives DB2 credentials.
 
 ## Inference
 
-`aimee-llm` serves embedding, reranking, and synthesis. Select a CPU or GPU tier with the deployment
+`aimee-llm` serves embedding and synthesis. Select a CPU or GPU tier with the deployment
 settings. GPU models live in a persistent model volume; the CPU offline image may bake its model.
 
 The KB must report explicit degradation when a configured inference stage is unavailable. It cannot
-claim a dense, reranked, or synthesized result after silently skipping that stage.
+claim a dense or synthesized result after silently skipping that stage.
 
 ## Network ports
 

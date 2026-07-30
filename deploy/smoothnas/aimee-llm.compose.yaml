@@ -1,5 +1,5 @@
 # aimee-llm — SmoothNAS compose-native plugin (split topology): the unified
-# Vulkan llama.cpp backend (embed + rerank + synth), standalone. GPU tier via
+# Vulkan llama.cpp backend (embed + synth), standalone. GPU tier via
 # /dev/dri (LXC2Docker adds the cgroup allow). No cross-plugin deps — the kb
 # plugin points AIMEE_LLM_URL at this host's published :8742. One model-less
 # image; the tier is chosen at runtime via AIMEE_LLM_TIER (mid on the .254 24GB

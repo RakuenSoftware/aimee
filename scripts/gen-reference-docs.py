@@ -122,11 +122,6 @@ CFG_KEY_DESC = {
     "llm_embed_gpu": "Deploy-time GPU selector for the local embedding backend.",
     "llm_embed_host": "Deploy-time host selector for the local embedding backend.",
     "llm_embed_tier": "Deploy-time local embedding tier: cpu, small, mid, or large.",
-    "llm_rerank_backend": "Deploy-time reranking backend: local, external, or off.",
-    "llm_rerank_endpoint": "External reranking endpoint used when the rerank backend is external.",
-    "llm_rerank_gpu": "Deploy-time GPU selector for the local reranking backend.",
-    "llm_rerank_host": "Deploy-time host selector for the local reranking backend.",
-    "llm_rerank_tier": "Deploy-time local reranking tier.",
     "llm_synth_backend": "Deploy-time synthesis backend: local, external, or off.",
     "llm_synth_endpoint": "External synthesis endpoint used when the synth backend is external.",
     "llm_synth_gpu": "Deploy-time GPU selector for the local synthesis backend.",
@@ -334,10 +329,7 @@ CFG_KEY_DESC = {
     "memory_profile_cards_stale_secs": "Profile-card staleness (seconds).",
     "memory_query_expansion_k": "Number of expanded queries for recall.",
     "memory_query_expansion_mode": "Query-expansion mode.",
-    "memory_rerank_command": "External reranker command.",
-    "memory_rerank_enabled": "Enable cross-encoder reranking of recall.",
     "memory_rerank_mode": "Reranker mode.",
-    "memory_rerank_top_k": "Top-K candidates to rerank.",
     "memory_rewrite_command": "External query-rewrite command.",
     "memory_rewrite_decompose": "Decompose queries during rewrite.",
     "memory_rewrite_enabled": "Enable query rewriting for recall.",
@@ -393,12 +385,11 @@ SECTION_DESC = {
     "lsp_servers": "LSP server definitions (array of objects).",
     "mcp": "MCP integration (e.g. OSV).",
     "mcp_clients": "MCP client connections (array of objects).",
-    "memory": "Memory subsystem; most children (recall, rerank, lifecycle, …) are nested objects with their own keys.",
+    "memory": "Memory subsystem; most children (recall, lifecycle, …) are nested objects with their own keys.",
     "memory_maintenance": "Memory maintenance scheduling.",
     "memory_negation": "Negation handling in memory.",
     "memory_query_expansion": "Recall query expansion.",
     "memory_recall_lanes": "Per-lane recall floors / caps.",
-    "memory_rerank": "Recall reranking.",
     "memory_rewrite": "Recall query rewriting.",
     "memory_window": "Memory-window neighbour expansion.",
     "model_meta": "Model metadata + capability routing.",
@@ -678,9 +669,9 @@ ENV_DESC = {
     "AIMEE_WORKTREE_GC_DAYS": ("Server runtime", "Age threshold (days) for worktree GC."),
     "AIMEE_SOCK": ("Server runtime", "Sandbox helper socket path."),
     # Knowledge base
-    "AIMEE_LLM_URL": ("Knowledge base (aimee-kb)", "One knob: base URL of the aimee-llm container the kb calls for embedding (/embed), reranking (/rerank) AND synthesis (curator Tier-A + Tier-B at {url}/v1). The kb runs no model itself. AIMEE_EMBEDDER_URL/AIMEE_RERANKER_URL override per service. See docs/KB_LLM_BACKENDS.md."),
-    "AIMEE_LLM_AUTH_TOKEN": ("Managed KB and inference", "Bearer service identity shared by aimee-kb and its aimee-llm gateway for embed, rerank, and synthesis requests. Wizard-managed deploys generate and persist a 256-bit value automatically. This is separate from user/server bearers."),
-    "AIMEE_LLM_AUTH_REQUIRED": ("Managed KB and inference", "Set to 1 on wizard-managed KBs so embed, rerank, and synthesis clients refuse to contact the unified LLM when its bearer service identity is missing."),
+    "AIMEE_LLM_URL": ("Knowledge base (aimee-kb)", "One knob: base URL of the aimee-llm container the kb calls for embedding (/embed) AND synthesis (curator Tier-A + Tier-B at {url}/v1). The kb runs no model itself. AIMEE_EMBEDDER_URL overrides the embedder. See docs/KB_LLM_BACKENDS.md."),
+    "AIMEE_LLM_AUTH_TOKEN": ("Managed KB and inference", "Bearer service identity shared by aimee-kb and its aimee-llm gateway for embed and synthesis requests. Wizard-managed deploys generate and persist a 256-bit value automatically. This is separate from user/server bearers."),
+    "AIMEE_LLM_AUTH_REQUIRED": ("Managed KB and inference", "Set to 1 on wizard-managed KBs so embed and synthesis clients refuse to contact the unified LLM when its bearer service identity is missing."),
     "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE": ("Managed KB and inference", "Explicit migration/adoption override for an existing wizard-managed LLM credential. Ordinary inherited AIMEE_LLM_AUTH_TOKEN is ignored by managed credential creation so stale child-service state cannot win. Must be a 32..512 character RFC 6750 b64token."),
     "AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK": (
         "Managed KB and inference",
@@ -763,7 +754,6 @@ ENV_DESC = {
     "AIMEE_MEMORY_MAINTENANCE_TRIGGER_INSERTS": ("Memory", "Inserts before a maintenance cycle triggers."),
     "AIMEE_MEMORY_MAINTENANCE_TRIGGER_SECS": ("Memory", "Seconds before a maintenance cycle triggers."),
     "AIMEE_MEMORY_PAGERANK_RELATIONS": ("Memory", "Relation types included in memory PageRank."),
-    "AIMEE_MEMORY_RERANK_FORCE_OFF": ("Memory", "Force the cross-encoder reranker off."),
     "AIMEE_MEMORY_RERANK_MODE": ("Memory", "Reranker mode."),
     "AIMEE_MEMORY_WEIGHT_PROFILE": ("Memory", "Recall scoring weight profile."),
     "AIMEE_NO_CACHE": ("Memory", "Disable the memory-assembly cache."),
@@ -818,7 +808,7 @@ ENV_DESC = {
     "AIMEE_VERIFY_PARALLEL": ("Git verify / MCP", "Run `aimee git verify` steps in parallel."),
     "AIMEE_EXEC_PIPE_TIMEOUT_MS": (
         "Agents & delegates",
-        "How long a sidecar subprocess (embed, rerank, cognify, rewrite, css render, "
+        "How long a sidecar subprocess (embed, cognify, rewrite, css render, "
         "oauth token, guardrails) may run before it is killed, in ms. Default 120000. "
         "Bounds the pathological case, not normal latency: an unbounded wait here parks "
         "the calling request thread permanently when a sidecar hangs instead of exiting, "

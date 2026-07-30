@@ -30,14 +30,11 @@ services:
       dockerfile: Dockerfile.embedder
       args:
         EMBEDDER_MODEL: ${EMBEDDER_MODEL:-perplexity-ai/pplx-embed-v1-0.6b}
-        RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ettin-reranker-400m-v1}
-    # Tier is a RUNTIME choice now: models are fetched at startup into the volume
-    # (not baked), so EMBEDDER_MODEL / RERANKER_MODEL select the tier with no
-    # rebuild. Light tier: EMBEDDER_MODEL=...-0.6b, RERANKER_MODEL=...-400m-v1,
-    # AIMEE_EMBEDDING_DIM=1024 on the kb (the 4b is 2560).
+    # Tier is a RUNTIME choice now: the model is fetched at startup into the volume
+    # (not baked), so EMBEDDER_MODEL selects the tier with no rebuild. Light tier:
+    # EMBEDDER_MODEL=...-0.6b, AIMEE_EMBEDDING_DIM=1024 on the kb (the 4b is 2560).
     environment:
       EMBEDDER_MODEL: ${EMBEDDER_MODEL:-perplexity-ai/pplx-embed-v1-0.6b}
-      RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ettin-reranker-400m-v1}
       # CI stub embedder (off in prod): e2e sets these to serve fixed-dim
       # vectors with no model download. EMBEDDER_STUB_DIM matches the schema dim.
       EMBEDDER_STUB: ${EMBEDDER_STUB:-}
@@ -71,9 +68,9 @@ services:
       # Empty by default: the KB image owns PostgreSQL + pgvector for a new
       # install. Set AIMEE_DB2_URL explicitly only to keep/use an external DB2.
       AIMEE_DB2_URL: ${AIMEE_DB2_URL:-}
-      # One knob: embed + rerank + synth (curator Tier-A & B at {url}/v1) via the
-      # unified aimee-llm container. The kb runs no model. Override
-      # AIMEE_EMBEDDER_URL / AIMEE_RERANKER_URL to pin a service elsewhere.
+      # One knob: embed + synth (curator Tier-A & B at {url}/v1) via the unified
+      # aimee-llm container. The kb runs no model. Override AIMEE_EMBEDDER_URL to
+      # pin the embedder elsewhere.
       AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8080}
       # Embedding dim — empty = config default 1024 (CPU tier); set 2560 for GPU.
       AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
@@ -181,7 +178,7 @@ services:
       - ${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}:/run/aimee/management:ro
 
   # Legacy synth-only llama.cpp service retained as an explicit compatibility
-  # profile. The default stack uses `aimee-llm` below for embed + rerank + synth.
+  # profile. The default stack uses `aimee-llm` below for embed + synth.
   # Enable only with `--profile curator-llm` while testing a rollback.
   llm:
     restart: unless-stopped
@@ -203,7 +200,7 @@ services:
       start_period: 1200s
 
   # Unified llama.cpp+Vulkan container — the kb's single LLM backend (embed +
-  # rerank + synth on :8080). DEFAULT (the unified-llm cutover; the legacy
+  # synth on :8080). DEFAULT (the unified-llm cutover; the legacy
   # embedder/llm services moved behind profiles). One model-less image; the tier is
   # chosen at runtime via AIMEE_LLM_TIER (unset ≡ cpu) and models download to the
   # /models volume on first boot. GPU = AIMEE_LLM_TIER=small|mid|large +

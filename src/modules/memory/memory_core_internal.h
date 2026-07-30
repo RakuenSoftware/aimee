@@ -190,8 +190,6 @@ int memory_vector_ready(void);
 
 extern __thread long long s_qembed_ms;
 extern __thread int s_qembed_spawns;
-extern __thread int s_rerank_calls;
-extern __thread long long s_rerank_ms;
 /* promoted cross-TU (former .inc statics) */
 void memory_alias_insert(int64_t memory_id, const char *alias, double weight);
 int memory_alias_is_useful_token(const char *token);

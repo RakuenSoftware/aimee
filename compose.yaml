@@ -1,6 +1,6 @@
 services:
   # LEGACY torch embedder. Retired from the default topology by the unified-llm
-  # cutover — the kb now embeds/reranks/synthesizes against the `aimee-llm`
+  # cutover — the kb now embeds/synthesizes against the `aimee-llm`
   # container (below) via AIMEE_LLM_URL. Kept behind a profile for rollback /
   # comparison: `docker compose --profile legacy-embedder up` (and point the kb
   # back with AIMEE_EMBEDDER_URL=http://embedder:8080).
@@ -15,14 +15,12 @@ services:
       dockerfile: Dockerfile.embedder
       args:
         EMBEDDER_MODEL: ${EMBEDDER_MODEL:-perplexity-ai/pplx-embed-v1-0.6b}
-        RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ettin-reranker-400m-v1}
-    # Tier is a RUNTIME choice now: the models are fetched at startup into the
-    # volume (not baked), so EMBEDDER_MODEL / RERANKER_MODEL select the tier with
-    # no rebuild. Light tier: EMBEDDER_MODEL=...-0.6b, RERANKER_MODEL=...-400m-v1,
-    # AIMEE_EMBEDDING_DIM=1024 on the kb (the 4b is 2560).
+    # Tier is a RUNTIME choice now: the model is fetched at startup into the
+    # volume (not baked), so EMBEDDER_MODEL selects the tier with no rebuild.
+    # Light tier: EMBEDDER_MODEL=...-0.6b, AIMEE_EMBEDDING_DIM=1024 on the kb
+    # (the 4b is 2560).
     environment:
       EMBEDDER_MODEL: ${EMBEDDER_MODEL:-perplexity-ai/pplx-embed-v1-0.6b}
-      RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ettin-reranker-400m-v1}
       # CI stub embedder (off in prod): e2e sets these to serve fixed-dim
       # vectors with no model download. EMBEDDER_STUB_DIM matches the schema dim.
       EMBEDDER_STUB: ${EMBEDDER_STUB:-}
@@ -56,9 +54,9 @@ services:
       # Empty by default: the KB image owns PostgreSQL + pgvector for a new
       # install. Set AIMEE_DB2_URL explicitly only to keep/use an external DB2.
       AIMEE_DB2_URL: ${AIMEE_DB2_URL:-}
-      # One knob: embed (/embed) + rerank (/rerank) + synth (curator Tier-A & B,
-      # at {url}/v1) all via the unified aimee-llm container. The kb runs no model.
-      # Override AIMEE_EMBEDDER_URL / AIMEE_RERANKER_URL to pin a service elsewhere.
+      # One knob: embed (/embed) + synth (curator Tier-A & B, at {url}/v1) all via
+      # the unified aimee-llm container. The kb runs no model. Override
+      # AIMEE_EMBEDDER_URL to pin the embedder elsewhere.
       AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8080}
       # Embedding dim — empty = config default 1024 (CPU tier); set 2560 for the
       # GPU 4B tier (changing it against a populated kb forces a re-embed).
@@ -150,9 +148,8 @@ services:
       # Long: the cold first boot downloads the multi-GB GGUF before /health is OK.
       start_period: 1200s
 
-  # Unified llama.cpp+Vulkan container: one model-less image serving embed + rerank
-  # + synth behind the gateway (the /embed,/embed_batch,/rerank,/v1/chat/completions
-  # contract). The kb's single LLM backend (DEFAULT now — the unified-llm cutover;
+  # Unified llama.cpp+Vulkan container: one model-less image serving embed + synth
+  # behind the gateway (the /embed,/embed_batch,/v1/chat/completions contract). The kb's single LLM backend (DEFAULT now — the unified-llm cutover;
   # the legacy embedder/llm services moved behind profiles). The tier is chosen at
   # runtime via AIMEE_LLM_TIER (unset ≡ cpu) and the models download to the /models
   # volume on first boot; GPU = AIMEE_LLM_TIER=small|mid|large + AIMEE_LLM_NGL=99 +
@@ -176,7 +173,7 @@ services:
       AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}
       AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-cpu}
       AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
-      # CI/dev stub (off in prod): deterministic embed/rerank/synth, no models.
+      # CI/dev stub (off in prod): deterministic embed/synth, no models.
       AIMEE_LLM_STUB: ${AIMEE_LLM_STUB:-}
       AIMEE_LLM_STUB_DIM: ${AIMEE_LLM_STUB_DIM:-}
     volumes:

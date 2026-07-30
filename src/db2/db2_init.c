@@ -140,8 +140,8 @@ int db2_probe_embedder_dim(int budget_ms, int *out)
  * insufficient: two different models can share a dim (pplx-embed and the default
  * Qwen3-Embedding-0.6B are BOTH 1024-d), so a same-dim swap would silently mix
  * incompatible vector spaces. These globals carry the configured embedder model
- * identity (repo@sha), the reranker identity + scoring contract, and the
- * compat-list of admitted transitions, set from config before db2_init like the
+ * identity (repo@sha) and the compat-list of admitted transitions, set from
+ * config before db2_init like the
  * dim above. INVARIANT: set at exactly the sites that call db2_set_embedding_dim()
  * — the serving config-load paths (cmd_core bootstrap_db2, kb_main, cmd_doctor);
  * the connectivity-probe path (bootstrap_db2_try_url) and tests deliberately set
@@ -150,8 +150,6 @@ int db2_probe_embedder_dim(int budget_ms, int *out)
  * has not yet adopted the unified container (the live torch embedder reports no
  * identity) is unaffected. */
 static char g_embedder_model_id[160] = "";
-static char g_reranker_model_id[160] = "";
-static char g_reranker_contract[96] = "";
 static char g_embedding_compat[1024] = ""; /* CSV of "old_id->new_id" transitions */
 
 void db2_set_embedder_model_id(const char *model_id)
@@ -162,22 +160,6 @@ void db2_set_embedder_model_id(const char *model_id)
 const char *db2_embedder_model_id(void)
 {
    return g_embedder_model_id;
-}
-
-void db2_set_reranker_identity(const char *model_id, const char *contract)
-{
-   snprintf(g_reranker_model_id, sizeof(g_reranker_model_id), "%s", model_id ? model_id : "");
-   snprintf(g_reranker_contract, sizeof(g_reranker_contract), "%s", contract ? contract : "");
-}
-
-const char *db2_reranker_model_id(void)
-{
-   return g_reranker_model_id;
-}
-
-const char *db2_reranker_contract(void)
-{
-   return g_reranker_contract;
 }
 
 void db2_set_embedding_compat(const char *compat_csv)
@@ -904,14 +886,12 @@ int db2_init(const char *libpq_url)
    /* unified-llm-container §2: model-identity drift guard, applied here (where the
     * configured identity globals live) rather than in the lower db_schema layer.
     * Record/check the EMBEDDER model identity alongside the dim — closing the
-    * same-dim different-model footgun (two models can share a dim) — and record
-    * the reranker identity. Both no-op when the identity is unset (the legacy
-    * torch embedder reports none), so existing deployments are unaffected; they
-    * activate when the unified container supplies the identity via the setters. */
+    * same-dim different-model footgun (two models can share a dim). A no-op when
+    * the identity is unset (the legacy torch embedder reports none), so existing
+    * deployments are unaffected; it activates when the unified container supplies
+    * the identity via the setter. */
    if (db2_embedding_model_record_or_check(conn, g_embedder_model_id, g_embedding_compat, errbuf,
-                                           sizeof(errbuf)) != 0 ||
-       db2_reranker_model_record(conn, g_reranker_model_id, g_reranker_contract, errbuf,
-                                 sizeof(errbuf)) != 0)
+                                           sizeof(errbuf)) != 0)
    {
       fprintf(stderr, "aimee: db2_init: model-identity guard failed: %s\n", errbuf);
       aimee_pg_close(conn);
@@ -1167,8 +1147,6 @@ void db2_shutdown(void)
    g_embedder_probe = NULL;
    g_dim_probe_budget_ms = 120000;
    g_embedder_model_id[0] = '\0';
-   g_reranker_model_id[0] = '\0';
-   g_reranker_contract[0] = '\0';
    g_embedding_compat[0] = '\0';
    pthread_mutex_unlock(&g_init_lock);
 }
