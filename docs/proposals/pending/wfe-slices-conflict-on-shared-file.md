@@ -261,8 +261,11 @@ is the guaranteed steady state.
 For option 3c, the remedy proposed here:
 
 - When two sibling slices in a run have frozen diffs that both **create** the
-  same path with **divergent** content, the run fails at that point, naming the
-  path and the slices involved — before either reaches `merge`.
+  same path with **divergent** content, the later freeze is rejected and the
+  root run fails at that point, naming the path and the slices involved — before
+  that later slice reaches `merge`. A sibling that already merged before the
+  later freeze is not rolled back; avoiding that would require the cohort-wide
+  freeze/CI barrier this proposal deliberately does not adopt.
 - Two sibling slices creating the same path with *identical* content are not
   failed by this rule (git merges them cleanly).
 - Slices editing *distinct regions of an existing* shared file are not failed by
