@@ -123,13 +123,13 @@ test "$(stat -c %d "$WORKSPACE_PARENT")" = "$(stat -c %d "$TEST_CLONE")"
 - [ ] Clone only the default branch and verify the working tree, canonical `origin`, and upstream tracking branch.
 
 ```sh
-git clone --single-branch --branch "$DEFAULT_BRANCH" "$CANONICAL_URL" "$TEST_CLONE/repository"
-git -C "$TEST_CLONE/repository" status --short --branch
-test "$(git -C "$TEST_CLONE/repository" remote get-url origin)" = "$CANONICAL_URL"
-test "$(git -C "$TEST_CLONE/repository" branch --show-current)" = "$DEFAULT_BRANCH"
-test "$(git -C "$TEST_CLONE/repository" rev-parse --abbrev-ref '@{upstream}')" = "origin/$DEFAULT_BRANCH"
-git -C "$TEST_CLONE/repository" fsck --no-dangling
-git -C "$TEST_CLONE/repository" ls-tree HEAD >/dev/null
+git clone --single-branch --branch "$DEFAULT_BRANCH" "$CANONICAL_URL" "$TEST_CLONE/repository" &&
+  git -C "$TEST_CLONE/repository" status --short --branch &&
+  test "$(git -C "$TEST_CLONE/repository" remote get-url origin)" = "$CANONICAL_URL" &&
+  test "$(git -C "$TEST_CLONE/repository" branch --show-current)" = "$DEFAULT_BRANCH" &&
+  test "$(git -C "$TEST_CLONE/repository" rev-parse --abbrev-ref '@{upstream}')" = "origin/$DEFAULT_BRANCH" &&
+  git -C "$TEST_CLONE/repository" fsck --no-dangling &&
+  git -C "$TEST_CLONE/repository" ls-tree HEAD >/dev/null
 ```
 
 - [ ] Only after every test above succeeds, remove the temporary clone. The guarded sequence below must confirm that the damaged repository was moved and the original path is absent before cloning. If this final clone fails, it removes the destination only when the clone created it, then immediately restores the retained repository to the configured workspace path.
@@ -170,12 +170,12 @@ fi
 - [ ] Verify the replacement repository.
 
 ```sh
-test "$(git -C "$WORKSPACE" remote get-url origin)" = "$CANONICAL_URL"
-test "$(git -C "$WORKSPACE" branch --show-current)" = "$DEFAULT_BRANCH"
-test "$(git -C "$WORKSPACE" rev-parse --abbrev-ref '@{upstream}')" = "origin/$DEFAULT_BRANCH"
-git -C "$WORKSPACE" status --short --branch
-git -C "$WORKSPACE" fsck --no-dangling
-git -C "$WORKSPACE" ls-tree HEAD >/dev/null
+test "$(git -C "$WORKSPACE" remote get-url origin)" = "$CANONICAL_URL" &&
+  test "$(git -C "$WORKSPACE" branch --show-current)" = "$DEFAULT_BRANCH" &&
+  test "$(git -C "$WORKSPACE" rev-parse --abbrev-ref '@{upstream}')" = "origin/$DEFAULT_BRANCH" &&
+  git -C "$WORKSPACE" status --short --branch &&
+  git -C "$WORKSPACE" fsck --no-dangling &&
+  git -C "$WORKSPACE" ls-tree HEAD >/dev/null
 ```
 
 - [ ] Confirm the direct checks above completed without either reported Git error:
