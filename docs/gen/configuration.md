@@ -42,7 +42,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `cross_verify` | bool | Enable cross-model verification of outputs. |
 | `css_render_command` | string | Render backend for the #4-full computed-style oracle: a command reading {html,css} JSON on stdin and writing a computed-style snapshot JSON on stdout (run an isolated headless-browser sidecar). |
 | `css_style_graph_enabled` | bool | Enable the CSS migration assistant's style-graph write path during indexing. |
-| `db2_url` | string | DB2 connection URL (aimee's vector / knowledge-base store). |
+| `db2_url` | string | Vault-backed DB2 connection URL; reads are redacted and writes bypass YAML. |
 | `dedup_enabled` | bool | Deduplicate near-identical responses. |
 | `dedup_window_seconds` | int | Window (seconds) for response dedup. |
 | `default_persona` | string | Persona a fresh primary session starts as, and the persona draft roundtable panelists author with when none is set (default 'engineer'). |
@@ -67,12 +67,12 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `ingress_max_raw_scans` | int | Max raw-content scans per ingress request. |
 | `ingress_preinject_assembly_budget` | int | Token budget for ingress context pre-injection. |
 | `ingress_preinject_enabled` | bool | Enable `<aimee-context>` pre-injection on ingress (memory/code preview envelope on primary ingress turns; default on). |
-| `ingress_trusted_proxy_secret` | string | Shared secret authenticating a trusted ingress proxy. |
+| `ingress_trusted_proxy_secret` | string | Vault-backed shared secret for a trusted ingress proxy; reads are redacted. |
 | `integrity_dry_run` | bool | Run integrity checks without enforcing. |
 | `integrity_enabled` | bool | Enable the integrity gate. |
-| `kb_api_bearer_token` | string | Bearer token for the aimee-kb API. |
+| `kb_api_bearer_token` | string | Vault-backed bearer for the aimee-kb API; reads expose configured state only. |
 | `kb_api_http_port` | int | HTTP port the aimee-kb API listens on. |
-| `kb_client_bearer_token` | string | Server-to-KB bearer token; secret, restart required. |
+| `kb_client_bearer_token` | string | Vault-backed server-to-KB bearer; reads are redacted; restart required. |
 | `kb_client_url` | string | Remote aimee-kb API base URL used by aimee-server; restart required. |
 | `kb_curator_extract_code_workers` | int | Parallel curator code-extraction workers, bounded to the synthesis service slot count. |
 | `kb_curator_extract_docs_workers` | int | Parallel curator document-extraction workers, bounded to the synthesis service slot count. |
@@ -303,7 +303,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 213 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. Secrets and tokens should be supplied through the environment or credential vault, never committed.
+The binaries read 220 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -315,6 +315,7 @@ The binaries read 213 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_HARNESS_MEMORY_SCOPES` | Path to the agent memory-surface registry config (default `<AIMEE_HOME>/harness_memory_scopes.conf`). Each `client:projects_root:memory_seg` line adds a new agent or overrides a built-in's paths for memory-write interception (writes are redirected into aimee's db1). |
 | `AIMEE_HOME` | Root of the per-user state/config store (config, DB1, `workflows/`, keys). Overrides the platform default. |
 | `AIMEE_MODELS_DEV_SNAPSHOT` | Path to an offline models.dev catalog snapshot. |
+| `AIMEE_OAUTH_RUNTIME_DIR` | Private directory for transient OAuth callback/session state; it must not be used for durable credentials. |
 | `AIMEE_PACK_DIR` | Directory of memory profile packs. |
 | `AIMEE_RUNTIME_DIR` | Private runtime directory for sockets, temporary credentials, and process state. |
 | `AIMEE_TOOLSETS_CONFIG` | Path to a toolsets config file (overrides the default tool allowlists). |
@@ -364,12 +365,18 @@ The binaries read 213 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_SERVER_MGMT_BIND` | Bind address that enables the server management listener when its full TLS configuration is present. |
 | `AIMEE_SERVER_MGMT_ISSUER` | Expected issuer for management-plane bearer identities. |
 | `AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE` | Root-owned trust bundle used to verify signed management JWKS publications. |
+| `AIMEE_SERVER_MGMT_STATUS_CLIENT_KEY` | Forbidden legacy private-key file setting. Startup rejects it; use AIMEE_SERVER_MGMT_STATUS_CLIENT_PRIVATE_KEY as first-boot Vault input. |
+| `AIMEE_SERVER_MGMT_STATUS_CLIENT_PRIVATE_KEY` | PEM private-key content for the management-status client, accepted only as first-boot transport and synchronously sealed into Vault before the server starts. |
 | `AIMEE_SERVER_MGMT_STATUS_SECONDARY_LEAF_PIN` | Secondary management-status TLS leaf pin accepted during certificate rotation. |
+| `AIMEE_SERVER_MGMT_TLS_KEY` | Forbidden legacy private-key file setting. Startup rejects it; use AIMEE_SERVER_MGMT_TLS_PRIVATE_KEY as first-boot Vault input. |
+| `AIMEE_SERVER_MGMT_TLS_PRIVATE_KEY` | PEM private-key content for the management listener, accepted only as first-boot transport and synchronously sealed into Vault before the server starts. |
 | `AIMEE_SERVER_STARTUP_FD` | Inherited fd for startup-readiness signalling (service launch). |
+| `AIMEE_SERVER_TLS_PRIVATE_KEY` | Optional PEM private-key content for first boot. The key is synchronously sealed into Vault and the environment is scrubbed; only the public server certificate may remain on disk. |
 | `AIMEE_SESSION_THREADS` | Per-session worker thread count. |
 | `AIMEE_SOCK` | Sandbox helper socket path. |
 | `AIMEE_STAGE_GOVERNANCE` | Enable the governance stage in the canonical request pipeline. |
 | `AIMEE_STAGE_MEMORY` | Enable the memory stage in the canonical request pipeline. |
+| `AIMEE_VAULT_ENV_OVERWRITE` | First-boot control flag allowing supplied credential values to replace existing Vault records. It is not itself a credential. |
 | `AIMEE_VAULT_KMS_HELPER` | Executable implementing the configured external KMS wrap/unwrap contract. |
 | `AIMEE_VAULT_KMS_HWM_DOMAIN` | Domain separator for KMS high-water-mark signatures. |
 | `AIMEE_VAULT_KMS_HWM_PUBKEY` | Public key used to verify KMS high-water-mark records. |
@@ -386,6 +393,9 @@ The binaries read 213 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_WEBCHAT_EDITOR_IDLE_SECS` | Idle timeout in seconds before a per-webuser code-server editor is reaped. Default 1800 (30 min); positive values are clamped to [60, 604800]; 0 disables idle reaping; malformed/negative/overflow values fall back to the default. An actively-open editor is kept alive by the proxy keepalive, so it is not reaped mid-session. |
 | `AIMEE_WEBCHAT_EDITOR_UID` | Dedicated service user the per-webuser code-server drops to (defence in depth; only honoured when aimee-server runs as root). |
 | `AIMEE_WEBCHAT_GIT` | Per-webuser webchat git surface — repo connect/clone, git ops (pull/commit/push/branch), per-host token + SSH-key credential intake, the workspace forge-token broker, project listing + session-dir resolution, and "Sign in with GitHub" (on by default; set to the literal value 0 to disable the entire surface — all of those routes then return 503, e.g. for a chat/editor-only deployment; any other value leaves it on). Independent of AIMEE_WEBCHAT_EDITOR. |
+| `AIMEE_WEBCHAT_PASSWORD` | Optional first-boot webchat password paired with AIMEE_WEBCHAT_USER. The bootstrap record is sealed into Vault and removed from the environment before runtime-web starts. |
+| `AIMEE_WEBCHAT_USER` | Optional first-boot webchat username paired with AIMEE_WEBCHAT_PASSWORD. The bootstrap record is sealed into Vault and removed from the environment before runtime-web starts. |
+| `AIMEE_WEBCHAT_USERS` | Optional first-boot webchat account registry. It is sealed into Vault and removed from the environment before runtime-web starts. |
 | `AIMEE_WORKTREE_GC` | Enable/disable delegate-worktree garbage collection. |
 | `AIMEE_WORKTREE_GC_DAYS` | Age threshold (days) for worktree GC. |
 
@@ -503,7 +513,6 @@ The binaries read 213 `AIMEE_*` environment variables (scanned from `getenv()` i
 | Variable | Description |
 |----------|-------------|
 | `AIMEE_GATEWAY_NTFY_BASE_URL` | ntfy push base URL. |
-| `AIMEE_GATEWAY_NTFY_TOKEN` | ntfy push token. |
 | `AIMEE_GATEWAY_STT_MODEL` | Speech-to-text model. |
 | `AIMEE_GATEWAY_STT_PROVIDER` | Speech-to-text provider. |
 | `AIMEE_GATEWAY_TTS_BASE_URL` | Text-to-speech base URL. |
@@ -513,7 +522,6 @@ The binaries read 213 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_GATEWAY_WEBHOOK_DELIVER_ONLY` | Webhook deliver-only mode (no reply path). |
 | `AIMEE_GATEWAY_WEBHOOK_INSECURE` | Allow the webhook listener without TLS (dev). |
 | `AIMEE_GATEWAY_WEBHOOK_PORT` | Inbound webhook listener port. |
-| `AIMEE_GATEWAY_WEBHOOK_SECRET` | Inbound webhook HMAC secret. |
 
 ### Workflow engine
 
@@ -597,15 +605,9 @@ The binaries read 213 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_LLM_AUTH_REQUIRED` | Set to 1 on wizard-managed KBs so embed, rerank, and synthesis clients refuse to contact the unified LLM when its bearer service identity is missing. |
 | `AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK` | Internal managed-authority switch: still attempts mlockall first, but when an unprivileged container cannot raise RLIMIT_MEMLOCK, permits the offline one-shot to continue only if the kernel reports no active swap. Operator-run custody tools leave this unset and retain mandatory mlockall. |
 
-### Undocumented (add to `ENV_DESC` in gen-reference-docs.py)
-
-> These are read by the code but have no description yet — the generator surfaces them so the reference can't silently fall behind.
-
-`AIMEE_OAUTH_RUNTIME_DIR`
-
 ## External & provider environment
 
-Standard and third-party environment variables aimee honors (scanned non-`AIMEE_*` `getenv()` reads, plus provider keys resolved via `api_key_env`). Provider API keys are credentials — prefer the credential vault; the env var is the per-provider fallback and its name is overridable per agent via `api_key_env`. Standard OS variables (`HOME`, `PATH`, `TMPDIR`, `XDG_*`, …) are used for their usual purposes and are not aimee configuration.
+Standard and third-party environment variables aimee honors (scanned non-`AIMEE_*` `getenv()` reads, plus provider keys resolved via `api_key_env`). Provider API keys are credentials: their environment variable names are overridable per agent, but values are accepted only as first-boot transport, sealed into Vault, and scrubbed before services start. Standard OS variables (`HOME`, `PATH`, `TMPDIR`, `XDG_*`, …) are used for their usual purposes and are not aimee configuration.
 
 ### Provider credentials
 

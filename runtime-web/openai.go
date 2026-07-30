@@ -55,7 +55,7 @@ func (s *server) handleOpenAIModels(w http.ResponseWriter, r *http.Request) {
 // flush incrementally (ReverseProxy disables buffering for text/event-stream).
 // The webchat bearer is stripped before forwarding; the UDS is a trusted local
 // channel that does not itself require the bearer.
-// sessionUsername resolves the TRUSTED webchat identity (the PAM username from a
+// sessionUsername resolves the TRUSTED webchat identity (the Vault username from a
 // server-validated session cookie), or "" when there is no valid session. This is
 // the identity webchat already authenticated — not anything the client supplies.
 func (s *server) sessionUsername(r *http.Request) string {
@@ -75,7 +75,7 @@ func (s *server) sessionUsername(r *http.Request) string {
 
 func (s *server) proxyV1(w http.ResponseWriter, r *http.Request, upstreamPath string) {
 	sock := s.aimeeHTTPSockPath()
-	// All stamped identity is server-derived (never client-supplied): the PAM
+	// All stamped identity is server-derived (never client-supplied): the Vault
 	// username from a server-validated webchat session gives a TRUSTED per-user
 	// principal/session so distinct webchat users do not collapse; an external
 	// client with only the shared bearer (no session) attributes to the single
@@ -99,7 +99,7 @@ func (s *server) proxyV1(w http.ResponseWriter, r *http.Request, upstreamPath st
 			// stamping our own — otherwise an external OpenAI client could send
 			// X-Aimee-Principal: victim and, because we add the trusted proxy
 			// secret, aimee-server would attribute the request to victim. All stamped
-			// identity is server-derived: a validated webchat (PAM) session, or the
+			// identity is server-derived: a validated webchat Vault session, or the
 			// constant "webchat" account. The Idempotency-Key (not an identity header)
 			// is forwarded unchanged.
 			req.Header.Del("Authorization")

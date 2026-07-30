@@ -117,24 +117,6 @@ int server_http_authorize_enrolled_request(int is_tcp, const char *bearer_cfg,
       extra[i] = g_bearer_extra[i];
    int result = server_http_authorize_multi(is_tcp, bearer_cfg, extra, g_bearer_extra_count,
                                             auth_header, api_key_header, has_session_key);
-   if (bootstrap_only && result == 0 && is_tcp && bearer_cfg &&
-       strcmp(bearer_cfg, AIMEE_BOOTSTRAP_BEARER) == 0)
-   {
-      int primary_match =
-          (auth_header && strncmp(auth_header, "Bearer ", 7) == 0 && auth_header[7] &&
-           server_ct_equal(auth_header + 7, bearer_cfg)) ||
-          (api_key_header && api_key_header[0] && server_ct_equal(api_key_header, bearer_cfg));
-      int extra_match = 0;
-      for (int i = 0; i < g_bearer_extra_count; i++)
-      {
-         if (auth_header && strncmp(auth_header, "Bearer ", 7) == 0 && auth_header[7])
-            extra_match |= server_ct_equal(auth_header + 7, g_bearer_extra[i]);
-         if (api_key_header && api_key_header[0])
-            extra_match |= server_ct_equal(api_key_header, g_bearer_extra[i]);
-      }
-      *bootstrap_only =
-          primary_match && !extra_match && !runtime_secret_has("AIMEE_API_BEARER_TOKEN");
-   }
    pthread_mutex_unlock(&g_bearer_lock);
    return result;
 }
@@ -320,16 +302,17 @@ int server_http_first_user_apply_cert_grant(int mtls_authenticated, const char *
  * coverage.
  *
  * A previously-enrolled client can fail after an explicit revoke-all rotation;
- * the bare "missing or invalid bearer token" gave no recovery path. Name that
- * path here, where every client sees it. Ordinary additive enrollment does not
- * revoke any existing client. */
+ * the bare "missing or invalid bearer token" gave no recovery path. Name the
+ * local, kernel-attested recovery path here, where every client sees it. The
+ * bearer itself is Vault-only and must never be recovered from config. */
 const char *server_http_auth_error_body(int az)
 {
    if (az == 401)
       return "{\"error\":{\"message\":\"missing or invalid bearer token. If this client was "
-             "working before, it may have been explicitly revoked by a bearer rotation. Read "
-             "aimee.api.bearer_token from "
-             "<AIMEE_HOME>/aimee.yaml on the server, then `aimee remote set <url> <token>`\","
+             "working before, it may have been explicitly revoked by a bearer rotation. On the "
+             "server, use the kernel-attested local socket to run `aimee api enable`; then use "
+             "the transiently returned token with `aimee remote set <url> <token>`. Bearers are "
+             "Vault-only and are never stored in aimee.yaml\","
              "\"type\":\"authentication_error\"}}";
    return "{\"error\":{\"message\":\"this endpoint requires a configured bearer token\","
           "\"type\":\"server_error\"}}";

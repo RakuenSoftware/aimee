@@ -19,6 +19,7 @@
 #include "git_verify.h"
 #include "config_fields.h"
 #include "config_database.h" /* config_emit_deploy_env — page-2 compose env */
+#include "runtime_secret.h"
 #include <unistd.h>
 #include <sys/stat.h>
 #include <ctype.h>
@@ -390,18 +391,23 @@ static void cmd_config_show(app_ctx_t *ctx, int argc, char **argv)
    if (access(config_default_path(), F_OK) != 0)
       config_save(&cfg); /* ensure file exists only when missing */
 
-   /* Read and print the file directly for faithful JSON output */
-   FILE *fp = fopen(config_default_path(), "r");
-   if (!fp)
-   {
-      fprintf(stderr, "Cannot read %s\n", config_default_path());
+   /* Render the shared public field surface instead of echoing the YAML file.
+    * Besides producing the JSON this command promises, this makes the local
+    * fallback obey the same Vault redaction contract as config.show RPC: an
+    * unmigrated legacy credential can never be printed from disk. */
+   cJSON *out = cJSON_CreateObject();
+   if (!out)
       return;
-   }
-   char buf[4096];
-   size_t n;
-   while ((n = fread(buf, 1, sizeof(buf), fp)) > 0)
-      fwrite(buf, 1, n, stdout);
-   fclose(fp);
+   for (int i = 0; config_fields[i].key; i++)
+      cJSON_AddItemToObject(out, config_fields[i].key,
+                            config_field_public_value_json(&cfg, &config_fields[i]));
+   runtime_secret_wipe(&cfg, sizeof(cfg));
+   char *json = cJSON_Print(out);
+   cJSON_Delete(out);
+   if (!json)
+      return;
+   printf("%s\n", json);
+   free(json);
    (void)ctx;
    return;
 }
@@ -474,6 +480,15 @@ static void cmd_config_get(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
 
+   if (config_field_secret_name(f))
+   {
+      const char *val = (const char *)&cfg + f->offset;
+      printf("%s\n", val[0] ? "configured" : "not configured");
+      runtime_secret_wipe(&cfg, sizeof(cfg));
+      (void)ctx;
+      return;
+   }
+
    if (f->is_bool || f->type == CFG_BOOL)
    {
       int val = *(int *)((char *)&cfg + f->offset);
@@ -494,6 +509,7 @@ static void cmd_config_get(app_ctx_t *ctx, int argc, char **argv)
       const char *val = (const char *)&cfg + f->offset;
       printf("%s\n", val[0] ? val : "(unset)");
    }
+   runtime_secret_wipe(&cfg, sizeof(cfg));
    (void)ctx;
    return;
 }
@@ -527,7 +543,10 @@ static void cmd_config_set(app_ctx_t *ctx, int argc, char **argv)
          fprintf(stderr, "Failed to set config\n");
       return;
    }
-   fprintf(stderr, "%s = %s\n", key, value);
+   if (config_field_secret_name(f))
+      fprintf(stderr, "%s = [stored in Vault]\n", key);
+   else
+      fprintf(stderr, "%s = %s\n", key, value);
 
    /* Provider is now config-only, no manifest to update */
    (void)ctx;

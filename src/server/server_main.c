@@ -30,6 +30,7 @@
 #include <aimee/audit/audit_action.h>
 #include "platform_path.h"
 #include "platform_process.h"
+#include "platform_random.h"
 #include "shutdown_forensics.h"
 #include "headers/context_engine.h"
 #include "headers/server_cli_oauth.h"
@@ -233,6 +234,28 @@ static int run_server(const char *socket_path, log_level_t log_level)
       audit_log_close();
       return 1;
    }
+   /* An API bearer is a credential and therefore cannot live in the image or
+    * config. When an API listener is configured without an
+    * operator-supplied first-boot bearer, mint an unexposed random primary and
+    * seal it directly into Vault. The trusted local UI/socket can then issue an
+    * individual enrollment bearer; `aimee api enable` can reveal the primary to
+    * a local operator when a headless deployment explicitly needs it. */
+   if ((cfg.server_api_http_port > 0 || cfg.server_api_tls_port > 0) &&
+       !cfg.server_api_bearer_token[0])
+   {
+      char primary[65] = "";
+      if (platform_random_hex(primary, 64) != 0 ||
+          vault_runtime_secret_set("AIMEE_API_BEARER_TOKEN", primary) != 0)
+      {
+         runtime_secret_wipe(primary, sizeof(primary));
+         startup_notify(notify_fd, "error: API primary bearer Vault bootstrap failed\n");
+         audit_log_close();
+         return 1;
+      }
+      snprintf(cfg.server_api_bearer_token, sizeof(cfg.server_api_bearer_token), "%s", primary);
+      runtime_secret_wipe(primary, sizeof(primary));
+      aimee_log(LOG_INFO, "vault.env", "minted Vault-only API primary for configured listener");
+   }
    /* Seed the live config snapshot (live-config-reload P1b): from here, every config_load in
     * the server returns this snapshot, and config_reload (on config.set / SIGHUP) republishes
     * it so changes take effect immediately instead of on the next mtime-cache miss. */
@@ -387,6 +410,22 @@ int main(int argc, char **argv)
    if (argc >= 2 && strcmp(argv[1], "--list-credential-env-names") == 0)
       return vault_env_print_credential_names() == 0 ? 0 : 1;
 
+   /* The co-located root-UDS-attested web service consumes these labelled base64
+    * records through a pipe for authentication, signed sessions, and in-memory
+    * TLS setup. The helper is intentionally webchat-specific: there is no
+    * general CLI for printing server-principal Vault secrets. */
+   if (argc == 2 && strcmp(argv[1], "--webchat-vault-export") == 0)
+      return vault_env_print_webchat_bootstrap() == 0 ? 0 : 1;
+
+   if (argc == 2 && strcmp(argv[1], "--webchat-vault-check") == 0)
+      return vault_env_check_webchat_bootstrap() == 0 ? 0 : 1;
+
+   /* One-time migration/onboarding bridge. The credential travels on stdin,
+    * never argv or env, and the closed record-name allowlist is enforced by the
+    * Vault module. */
+   if (argc == 3 && strcmp(argv[1], "--webchat-vault-seal") == 0)
+      return vault_env_seal_webchat_record(argv[2]) == 0 ? 0 : 1;
+
    /* Container/POD entrypoints use this short-lived process to consume
     * first-boot credential inputs before launching any long-lived process. */
    if (argc >= 2 && strcmp(argv[1], "--bootstrap-vault-env") == 0)
@@ -396,6 +435,38 @@ int main(int argc, char **argv)
          return 1;
       runtime_secret_clear();
       return 0;
+   }
+
+   /* unsetenv() removes a credential from future lookups but cannot guarantee
+    * that Linux /proc/<pid>/environ stops exposing the original inherited
+    * bytes. A normal server invocation that inherited first-boot credentials
+    * is therefore a disposable bootstrap process: seal everything, verify the
+    * environment is clean, then replace this process image. The re-executed
+    * long-lived server inherits no credential variables and loads values back
+    * only through Vault's locked runtime cache. Container/Kubernetes startup
+    * uses the same process boundary in server-entrypoint.sh. */
+   {
+      int credential_env = vault_env_has_credential_environment();
+      if (credential_env < 0)
+      {
+         fprintf(stderr, "aimee-server: malformed credential environment name\n");
+         return 1;
+      }
+      if (credential_env > 0)
+      {
+         if (vault_env_bootstrap_init() < 0 || server_vault_bootstrap_prepare() < 0 ||
+             vault_config_bootstrap_init() < 0 ||
+             vault_env_has_credential_environment() != 0)
+         {
+            runtime_secret_clear();
+            fprintf(stderr, "aimee-server: first-boot credential Vault bootstrap failed\n");
+            return 1;
+         }
+         runtime_secret_clear();
+         execvp(argv[0], argv);
+         fprintf(stderr, "aimee-server: clean-environment re-exec failed: %s\n", strerror(errno));
+         return 1;
+      }
    }
 
    /* Backwards compat: --run-command was the old server command-dispatch path.

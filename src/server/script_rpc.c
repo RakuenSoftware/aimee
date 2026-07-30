@@ -11,15 +11,12 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <openssl/hmac.h>
-#include <openssl/sha.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/un.h>
 #include <unistd.h>
 
 #define SCRIPT_RPC_MAX_FRAME  (64 * 1024)
@@ -72,47 +69,6 @@ static int script_rpc_send_json(int fd, cJSON *json)
    return rc;
 }
 
-static void script_rpc_hex(const unsigned char *bytes, unsigned int len, char *out, size_t out_len)
-{
-   size_t need = (size_t)len * 2 + 1;
-   if (out_len < need)
-   {
-      if (out_len > 0)
-         out[0] = '\0';
-      return;
-   }
-   for (unsigned int i = 0; i < len; i++)
-      snprintf(out + (size_t)i * 2, 3, "%02x", bytes[i]);
-   out[need - 1] = '\0';
-}
-
-static int script_rpc_hmac(script_rpc_server_t *srv, int id, const char *tool,
-                           const char *args_json, char *out, size_t out_len)
-{
-   char msg_prefix[256];
-   int n = snprintf(msg_prefix, sizeof(msg_prefix), "%d\n%s\n", id, tool ? tool : "");
-   if (n < 0 || n >= (int)sizeof(msg_prefix))
-      return -1;
-
-   size_t args_len = strlen(args_json ? args_json : "{}");
-   size_t prefix_len = (size_t)n;
-   char *msg = malloc(prefix_len + args_len);
-   if (!msg)
-      return -1;
-   memcpy(msg, msg_prefix, prefix_len);
-   memcpy(msg + prefix_len, args_json ? args_json : "{}", args_len);
-   unsigned char digest[EVP_MAX_MD_SIZE];
-   unsigned int digest_len = 0;
-   unsigned char *mac =
-       HMAC(EVP_sha256(), srv->token, (int)strlen(srv->token), (const unsigned char *)msg,
-            prefix_len + args_len, digest, &digest_len);
-   free(msg);
-   if (!mac)
-      return -1;
-   script_rpc_hex(digest, digest_len, out, out_len);
-   return 0;
-}
-
 static int script_rpc_allowed_tool(const char *name)
 {
    if (!name || !name[0])
@@ -155,26 +111,13 @@ static cJSON *script_rpc_dispatch(script_rpc_server_t *srv, cJSON *req)
    cJSON *jid = cJSON_GetObjectItemCaseSensitive(req, "id");
    cJSON *jtool = cJSON_GetObjectItemCaseSensitive(req, "tool");
    cJSON *jargs = cJSON_GetObjectItemCaseSensitive(req, "args");
-   cJSON *jhmac = cJSON_GetObjectItemCaseSensitive(req, "hmac");
    int id = cJSON_IsNumber(jid) ? jid->valueint : 0;
-   if (!cJSON_IsString(jtool) || !cJSON_IsObject(jargs) || !cJSON_IsString(jhmac))
-      return script_rpc_error(id, "bad_frame", "missing id, tool, args, or hmac");
+   if (!cJSON_IsNumber(jid) || !cJSON_IsString(jtool) || !cJSON_IsObject(jargs))
+      return script_rpc_error(id, "bad_frame", "missing id, tool, or args");
 
    char *args_json = cJSON_PrintUnformatted(jargs);
    if (!args_json)
       return script_rpc_error(id, "bad_frame", "failed to serialize args");
-
-   char expected[SHA256_DIGEST_LENGTH * 2 + 1];
-   int hmac_ok =
-       script_rpc_hmac(srv, id, jtool->valuestring, args_json, expected, sizeof(expected)) == 0 &&
-       strcmp(expected, jhmac->valuestring) == 0;
-   if (!hmac_ok)
-   {
-      srv->hmac_failures++;
-      fprintf(stderr, "aimee: script RPC HMAC mismatch for tool '%s'\n", jtool->valuestring);
-      free(args_json);
-      return script_rpc_error(id, "auth_failed", "script RPC HMAC mismatch");
-   }
 
    if (!script_rpc_allowed_tool(jtool->valuestring))
    {
@@ -329,52 +272,31 @@ static int script_rpc_write_stubs(script_rpc_server_t *srv)
    snprintf(sh, sizeof(sh), "%s/aimee", srv->stub_dir);
 
    const char *py_body =
-       "import hashlib, hmac, json, os, socket, struct\n"
+       "import json, os, struct\n"
        "_seq = 0\n"
        "def call(tool, args=None):\n"
        "    global _seq\n"
        "    _seq += 1\n"
        "    args = args or {}\n"
        "    args_json = json.dumps(args, separators=(',', ':'), sort_keys=False)\n"
-       "    token = os.environ['AIMEE_RPC_TOKEN']\n"
-       "    msg = (str(_seq) + '\\n' + tool + '\\n').encode() + args_json.encode()\n"
-       "    mac = hmac.new(token.encode(), msg, hashlib.sha256).hexdigest()\n"
-       "    frame = json.dumps({'id': _seq, 'tool': tool, 'args': args, 'hmac': mac}, "
+       "    frame = json.dumps({'id': _seq, 'tool': tool, 'args': args}, "
        "separators=(',', ':')).encode()\n"
-       "    rpc_fd = os.environ.get('AIMEE_RPC_FD')\n"
-       "    if rpc_fd:\n"
-       "        fd = os.dup(int(rpc_fd))\n"
-       "        os.write(fd, struct.pack('!I', len(frame)) + frame)\n"
-       "        hdr = os.read(fd, 4)\n"
-       "        if len(hdr) != 4:\n"
-       "            os.close(fd)\n"
-       "            raise RuntimeError('short RPC response')\n"
-       "        size = struct.unpack('!I', hdr)[0]\n"
-       "        data = b''\n"
-       "        while len(data) < size:\n"
-       "            chunk = os.read(fd, size - len(data))\n"
-       "            if not chunk:\n"
-       "                os.close(fd)\n"
-       "                raise RuntimeError('short RPC body')\n"
-       "            data += chunk\n"
+       "    fd = os.dup(int(os.environ['AIMEE_RPC_FD']))\n"
+       "    os.write(fd, struct.pack('!I', len(frame)) + frame)\n"
+       "    hdr = os.read(fd, 4)\n"
+       "    if len(hdr) != 4:\n"
        "        os.close(fd)\n"
-       "        return json.loads(data.decode())\n"
-       "    else:\n"
-       "        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
-       "        sock.connect(os.environ['AIMEE_RPC_SOCKET'])\n"
-       "        sock.sendall(struct.pack('!I', len(frame)) + frame)\n"
-       "        hdr = sock.recv(4)\n"
-       "        if len(hdr) != 4:\n"
-       "            raise RuntimeError('short RPC response')\n"
-       "        size = struct.unpack('!I', hdr)[0]\n"
-       "        data = b''\n"
-       "        while len(data) < size:\n"
-       "            chunk = sock.recv(size - len(data))\n"
-       "            if not chunk:\n"
-       "                raise RuntimeError('short RPC body')\n"
-       "            data += chunk\n"
-       "        sock.close()\n"
-       "        return json.loads(data.decode())\n";
+       "        raise RuntimeError('short RPC response')\n"
+       "    size = struct.unpack('!I', hdr)[0]\n"
+       "    data = b''\n"
+       "    while len(data) < size:\n"
+       "        chunk = os.read(fd, size - len(data))\n"
+       "        if not chunk:\n"
+       "            os.close(fd)\n"
+       "            raise RuntimeError('short RPC body')\n"
+       "        data += chunk\n"
+       "    os.close(fd)\n"
+       "    return json.loads(data.decode())\n";
    if (script_rpc_write_file(py, py_body, 0600) != 0)
       return -1;
 
@@ -404,44 +326,26 @@ int script_rpc_prepare(script_rpc_server_t *srv)
    char suffix[17];
    if (platform_random_hex(suffix, 16) != 0)
       return -1;
-   snprintf(srv->socket_path, sizeof(srv->socket_path), "/tmp/aimee-rpc-%ld-%s.sock",
-            (long)getpid(), suffix);
    snprintf(srv->stub_dir, sizeof(srv->stub_dir), "/tmp/aimee-rpc-%ld-%s", (long)getpid(), suffix);
-   if (platform_random_hex(srv->token, 64) != 0)
-      return -1;
    if (mkdir(srv->stub_dir, 0700) != 0)
       return -1;
    if (script_rpc_write_stubs(srv) != 0)
       return -1;
-
-   srv->listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-   if (srv->listen_fd < 0)
+   /* The inherited socketpair descriptor is the capability. It replaces the
+    * old pathname socket + HMAC token, so scripts receive no credential through
+    * argv, env, or a file and unrelated local processes have nothing to guess. */
+   int sv[2];
+   if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0)
       return -1;
-   struct sockaddr_un addr;
-   memset(&addr, 0, sizeof(addr));
-   addr.sun_family = AF_UNIX;
-   snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", srv->socket_path);
-   unlink(srv->socket_path);
-   if (bind(srv->listen_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
-       listen(srv->listen_fd, 16) != 0)
-   {
-      close(srv->listen_fd);
-      srv->listen_fd = -1;
-      unlink(srv->socket_path);
-      int sv[2];
-      if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0)
-         return -1;
-      srv->listen_fd = sv[0];
-      srv->client_fd = sv[1];
-      srv->use_fd_pair = 1;
-      srv->socket_path[0] = '\0';
-      int flags = fcntl(srv->listen_fd, F_GETFD);
-      if (flags >= 0)
-         fcntl(srv->listen_fd, F_SETFD, flags | FD_CLOEXEC);
-      flags = fcntl(srv->client_fd, F_GETFD);
-      if (flags >= 0)
-         fcntl(srv->client_fd, F_SETFD, flags & ~FD_CLOEXEC);
-   }
+   srv->listen_fd = sv[0];
+   srv->client_fd = sv[1];
+   srv->use_fd_pair = 1;
+   int flags = fcntl(srv->listen_fd, F_GETFD);
+   if (flags >= 0)
+      fcntl(srv->listen_fd, F_SETFD, flags | FD_CLOEXEC);
+   flags = fcntl(srv->client_fd, F_GETFD);
+   if (flags >= 0)
+      fcntl(srv->client_fd, F_SETFD, flags & ~FD_CLOEXEC);
    return 0;
 }
 
@@ -479,8 +383,6 @@ void script_rpc_cleanup(script_rpc_server_t *srv)
       close(srv->client_fd);
       srv->client_fd = -1;
    }
-   if (srv->socket_path[0])
-      unlink(srv->socket_path);
    if (srv->stub_dir[0])
    {
       char py[MAX_PATH_LEN];

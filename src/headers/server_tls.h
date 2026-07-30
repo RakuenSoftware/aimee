@@ -29,8 +29,10 @@ extern "C"
 {
 #endif
 
-   /* Build the process-wide server SSL_CTX from the cert + key PEM files. Returns
-    * 0 on success, -1 on failure (logged). Idempotent (no-op once initialized).
+   /* Build the process-wide server SSL_CTX from the public cert PEM file and a
+    * private key. A NULL/empty key_path loads the key directly from Vault; a
+    * path remains available only to narrow test/management callers. Returns 0
+    * on success, -1 on failure (logged). Idempotent once initialized.
     *
     * mtls_mode: 0 = off (plain server TLS), 1 = optional, 2 = required by the
     * HTTP authorization layer. Modes 1 and 2 both request a client certificate
@@ -47,6 +49,11 @@ extern "C"
     * when all three captured PEM byte strings are identical to the originals. */
    int server_tls_management_init(const char *cert_path, const char *key_path,
                                   const char *client_ca_path);
+
+   /* Production management listener variant: public cert/CA remain files while
+    * the private-key PEM is supplied from the process-local Vault cache. */
+   int server_tls_management_init_vault(const char *cert_path, const char *key_pem,
+                                        const char *client_ca_path);
 
    /* Extract the verified mTLS client identity from a handshaked SSL: writes the
     * peer leaf cert's CN into cn_out (and hex serial into serial_out) and returns
@@ -66,11 +73,11 @@ extern "C"
     * SSL_shutdown + SSL_free) on success, or NULL on handshake failure. */
    SSL *server_tls_accept(int fd);
 
-   /* server_tls_init from the default location (<config>/tls/server.crt + .key). */
+   /* Initialize from <config>/tls/server.crt plus the Vault-held private key. */
    int server_tls_init_default(void);
 
-   /* Live cert reload (live-config-reload): re-read the SAME cert/key files server_tls_init
-    * was given and atomically swap the listener's SSL_CTX (new handshakes use the new cert;
+   /* Live cert reload (live-config-reload): re-read the same public cert and
+    * Vault key (or explicit test key path) and atomically swap the SSL_CTX;
     * in-flight connections keep the old until they drain). Validate-or-keep: a cert that fails
     * to load keeps the current one. Returns 1 = reloaded, 0 = TLS not enabled, -1 = kept. */
    int server_tls_reload(void);

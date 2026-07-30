@@ -1592,6 +1592,14 @@ int config_set(const char *key, const char *value)
    const config_field_t *f = config_field_lookup(key);
    if (!f)
       return -1; /* unknown key */
+   const char *secret_name = config_field_secret_name(f);
+   if (secret_name)
+   {
+      /* Credential compatibility fields are process-memory views of Vault
+       * records, never YAML settings. The injected writer updates Vault and the
+       * locked runtime cache atomically; absent initialization fails closed. */
+      return config_secret_store(secret_name, value);
+   }
    cJSON *node = config_set_value_node(f, value);
    if (!node)
       return -1; /* invalid value for the field's type */

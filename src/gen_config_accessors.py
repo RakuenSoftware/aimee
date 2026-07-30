@@ -48,6 +48,7 @@ SCALARS = {
 # their generated setters must write exclusively to Vault. The environment-form
 # name is the canonical Vault/runtime-cache key.
 SECRET_FIELDS = {
+    "db2_url": "AIMEE_DB2_URL",
     "search_tavily_api_key": "AIMEE_SEARCH_TAVILY_API_KEY",
     "proxy_token": "AIMEE_PROXY_TOKEN",
     "ingress_trusted_proxy_secret": "AIMEE_INGRESS_PROXY_SECRET",

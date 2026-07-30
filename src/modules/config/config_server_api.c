@@ -132,11 +132,10 @@ void config_parse_server_api(config_t *cfg, const cJSON *root)
          cfg->server_api_mtls = 0;
    }
 
-   /* AIMEE_API_BEARER_TOKEN pins the /v1 bearer from its first-boot Vault slot,
-    * overriding the config-file value even when it is absent / read-only.
-    * Providing an explicit token also opts OUT of trust-on-first-use enrollment:
-    * the operator is managing the bearer, so the client's bootstrap rotation is
-    * moot (the seeded `aimee-local-dev` bootstrap is never in effect). */
+   /* AIMEE_API_BEARER_TOKEN is read only from its hydrated first-boot Vault
+    * slot, overriding any legacy config-file value after migration. Providing
+    * an explicit token opts out of trust-on-first-use rotation because the
+    * operator is managing that primary credential. */
    char bearer_env[sizeof(cfg->server_api_bearer_token)];
    if (runtime_secret_get("AIMEE_API_BEARER_TOKEN", bearer_env, sizeof(bearer_env)))
    {

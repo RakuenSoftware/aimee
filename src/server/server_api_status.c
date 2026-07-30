@@ -274,14 +274,10 @@ int handle_api_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return rc;
 }
 
-/* api.rotate_bearer: mint a FRESH /v1 bearer unconditionally (replacing any
- * existing one — e.g. the image-seeded `aimee-local-dev` bootstrap), persist it,
- * and HOT-SWAP the live listener so the new token authorizes immediately and the
- * old one stops working at once — no restart, no dual-validity window. This is
- * the server side of trust-on-first-use enrollment: a thin client connects once
- * with the bootstrap bearer and calls this to obtain its strong per-deployment
- * token, which it then uses exclusively. CAP_SESSION_ADMIN-gated (same as
- * api.enable); reveals the new token once to the authorized caller. */
+/* api.rotate_bearer: mint a fresh /v1 primary, persist it in Vault, and HOT-SWAP
+ * the live listener so the old primary and all additive enrollments stop working
+ * at once. CAP_SESSION_ADMIN-gated (same as api.enable); reveals the replacement
+ * once to the authorized caller. */
 int handle_api_rotate_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;

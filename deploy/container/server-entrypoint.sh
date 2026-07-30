@@ -1,9 +1,10 @@
 #!/bin/sh
 # Entrypoint for the aimee-server image with the co-located webchat browser UI.
 #
-# Runs as root so it can bootstrap the PAM login user and run aimee-runtime-web
-# (which needs /etc/shadow access for pam_unix). aimee-server itself is dropped
-# to the unprivileged "aimee" user. Lifecycle follows the SERVER: when it exits,
+# Runs as root only for one-time legacy credential erasure and child supervision.
+# Webchat retains root solely as the kernel-attested UDS identity trusted by the
+# server; aimee-server runs as the unprivileged "aimee" user. Lifecycle follows
+# the SERVER: when it exits,
 # webchat is torn down and the container exits with the server's status;
 # SIGTERM/SIGINT are forwarded to both so `docker stop` is clean.
 #
@@ -11,12 +12,17 @@
 set -eu
 
 vault_bootstrapped=0
-if [ "$#" -eq 1 ] && [ "$1" = "--aimee-internal-vault-bootstrapped" ]; then
-    vault_bootstrapped=1
-    shift
-fi
+webchat_prepared=0
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --aimee-internal-vault-bootstrapped) vault_bootstrapped=1; shift ;;
+        --aimee-internal-webchat-prepared) webchat_prepared=1; shift ;;
+        *) break ;;
+    esac
+done
 
 AIMEE_HOME="${AIMEE_HOME:-/var/lib/aimee}"
+export AIMEE_HOME
 SERVER_SOCK="${AIMEE_SERVER_SOCK:-/var/lib/aimee/aimee-server.sock}"
 server_pid=""
 wfe_pid=""
@@ -32,6 +38,14 @@ if [ -n "${AIMEE_DELEGATE_SECRETS_FILE:-}" ]; then
     printf '[server-entrypoint] fatal: AIMEE_DELEGATE_SECRETS_FILE is unsupported; use first-boot AIMEE_DELEGATE_KEY_<AGENT> variables\n' >&2
     exit 2
 fi
+if [ -n "${AIMEE_WEBCHAT_TLS_KEY:-}" ]; then
+    printf '[server-entrypoint] fatal: AIMEE_WEBCHAT_TLS_KEY files are forbidden; TLS private keys must be imported into Vault\n' >&2
+    exit 2
+fi
+if [ -n "${AIMEE_SERVER_MGMT_TLS_KEY:-}" ] || [ -n "${AIMEE_SERVER_MGMT_STATUS_CLIENT_KEY:-}" ]; then
+    printf '[server-entrypoint] fatal: management private-key files are forbidden; inject AIMEE_SERVER_MGMT_TLS_PRIVATE_KEY and AIMEE_SERVER_MGMT_STATUS_CLIENT_PRIVATE_KEY as first-boot Vault inputs\n' >&2
+    exit 2
+fi
 runuser -u aimee -- aimee-server --bootstrap-vault-env
 _secret_names=$(runuser -u aimee -- aimee-server --list-credential-env-names)
 for _secret_name in $_secret_names; do
@@ -44,7 +58,13 @@ if [ "$#" -gt 0 ]; then
     exec "$@"
 fi
 if [ "$vault_bootstrapped" -eq 0 ]; then
-    exec /usr/bin/tini -- aimee-server-entrypoint --aimee-internal-vault-bootstrapped
+    # Migrate any legacy browser credential files only after first-boot env
+    # values have been sealed and scrubbed. The new web service authenticates
+    # against fixed Vault records and never materializes a PAM verifier.
+    . /usr/local/bin/runtime-web-lib.sh
+    webchat_prepare
+    exec /usr/bin/tini -- aimee-server-entrypoint \
+        --aimee-internal-vault-bootstrapped --aimee-internal-webchat-prepared
 fi
 
 export AIMEE_WFE_ENGINE="${AIMEE_WFE_ENGINE:-go}"
@@ -69,8 +89,8 @@ ulimit -s 65536 2>/dev/null || true
 # authenticated. Never persist that memory in a core image.
 ulimit -c 0 2>/dev/null || true
 
-# Seed the baked default config into AIMEE_HOME if absent. The server reads its
-# /v1 listener settings (port + bearer) from $AIMEE_HOME/aimee.yaml; a
+# Seed the baked default config into AIMEE_HOME if absent. It contains only the
+# public /v1 listener policy; API and TLS private credentials live in Vault. A
 # bind-mounted (empty) volume would otherwise leave the listener unconfigured.
 # Never clobber an operator's config. Done as root, then owned by aimee so it
 # can read/rewrite it. On smoothfs tiers ownership is forced to 1000 regardless.
@@ -177,7 +197,11 @@ done
 . /usr/local/bin/runtime-web-lib.sh
 . /usr/local/bin/plane-supervisor.sh
 
-webchat_prepare
+if [ "$webchat_prepared" -eq 1 ]; then
+    WEBCHAT_PREPARED=1
+else
+    webchat_prepare
+fi
 
 log() { printf '[server-entrypoint] %s\n' "$*"; }
 
@@ -232,8 +256,9 @@ on_signal() {
 }
 trap 'on_signal' TERM INT
 
-# Browser UI (root, PAM). Its login provisioning already ran before the
-# credential scrub; launch now with a clean environment.
+# Browser UI is the kernel-attested root UDS peer and obtains only fixed Vault
+# records through short-lived helpers dropped to the Vault owner. Its inherited
+# environment is credential-free.
 webchat_start
 
 # Pre-warm the server-hosted OAuth CLIs (claude/codex) in the BACKGROUND so the

@@ -89,6 +89,8 @@ static session_state_t g_pre_tool_state;
 static int g_pre_tool_seen_state = 0;
 static int g_config_stateful = 0;
 static int g_config_reload_calls = 0;
+static int g_config_secret_store_calls = 0;
+static int g_config_secret_store_configured = 0;
 static config_t g_config_disk;
 static config_t g_config_snapshot;
 
@@ -1270,6 +1272,14 @@ int config_save(const config_t *cfg)
    return 0;
 }
 
+int config_secret_store(const char *name, const char *value)
+{
+   assert(name && strcmp(name, "AIMEE_KB_API_BEARER_TOKEN") == 0);
+   g_config_secret_store_calls++;
+   g_config_secret_store_configured = value && value[0] ? 1 : 0;
+   return 0;
+}
+
 /* config_fields.o resolves the economizer mode through these pure helpers; this
  * test does not link the real config.o. */
 const char *econ_mode_name(int mode)
@@ -1949,6 +1959,57 @@ static void test_conn_update_events_null_evloop(void)
    printf("test_conn_update_events_null_evloop: PASS\n");
 }
 
+/* Generic config RPCs may report whether a Vault record is configured, but
+ * must never return the credential or route its mutation through aimee.yaml. */
+static void test_config_secret_redaction_and_vault_write(void)
+{
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+   conn->capabilities = CAP_SESSION_ADMIN;
+
+   memset(&g_config_snapshot, 0, sizeof(g_config_snapshot));
+   memset(&g_config_disk, 0, sizeof(g_config_disk));
+   snprintf(g_config_snapshot.kb_api_bearer_token,
+            sizeof(g_config_snapshot.kb_api_bearer_token), "%s", "never-echo-config-secret");
+   g_config_stateful = 1;
+   g_config_reload_calls = 0;
+   g_config_secret_store_calls = 0;
+   g_config_secret_store_configured = 0;
+
+   const char *get_req = "{\"method\":\"config.get\",\"key\":\"kb_api_bearer_token\"}";
+   cJSON *got = dispatch_json(ctx, conn, get_req, strlen(get_req));
+   cJSON *value = cJSON_GetObjectItemCaseSensitive(got, "value");
+   cJSON *secret = cJSON_GetObjectItemCaseSensitive(got, "secret");
+   assert(cJSON_IsBool(value) && cJSON_IsTrue(value));
+   assert(cJSON_IsBool(secret) && cJSON_IsTrue(secret));
+   char *serialized = cJSON_PrintUnformatted(got);
+   assert(serialized && strstr(serialized, "never-echo-config-secret") == NULL);
+   free(serialized);
+   cJSON_Delete(got);
+
+   const char *set_req =
+       "{\"method\":\"config.set\",\"key\":\"kb_api_bearer_token\","
+       "\"value\":\"never-echo-new-secret\"}";
+   cJSON *set = dispatch_json(ctx, conn, set_req, strlen(set_req));
+   assert(g_config_secret_store_calls == 1 && g_config_secret_store_configured == 1);
+   value = cJSON_GetObjectItemCaseSensitive(set, "value");
+   secret = cJSON_GetObjectItemCaseSensitive(set, "secret");
+   assert(cJSON_IsBool(value) && cJSON_IsTrue(value));
+   assert(cJSON_IsBool(secret) && cJSON_IsTrue(secret));
+   serialized = cJSON_PrintUnformatted(set);
+   assert(serialized && strstr(serialized, "never-echo-new-secret") == NULL);
+   free(serialized);
+   cJSON_Delete(set);
+   assert(g_config_reload_calls == 0);
+   assert(g_config_disk.kb_api_bearer_token[0] == '\0');
+
+   g_config_stateful = 0;
+   free(conn);
+   free(ctx);
+   printf("test_config_secret_redaction_and_vault_write: PASS\n");
+}
+
 /* Regression: the server's config_load() is an immutable live snapshot. API
  * credential mutations must instead start from the latest disk image and
  * republish it, or a second sequential enrollment starts from zero extras and
@@ -2036,6 +2097,7 @@ int main(void)
    test_invalid_json();
    test_session_brief_assemble();
    test_conn_update_events_null_evloop();
+   test_config_secret_redaction_and_vault_write();
    test_api_enroll_preserves_sequential_bearers();
    test_missing_method();
    test_oversized_payload();

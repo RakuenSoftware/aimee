@@ -1029,6 +1029,7 @@ const char *config_server_api_bearer_extra(int index);
 const char *config_ensemble_reference_models(int index);
 const char *config_ensemble_reference_personas(int index);
 
+
 /* Struct-array elements: one member of one element per call. Bounds-checked
  * like the char[][] accessors — an out-of-range index yields 0 or "".
  * These exist so a caller reading an MCP client or a cron job does not have

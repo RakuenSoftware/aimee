@@ -55,13 +55,13 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf)
    }
 
    char webuser[128] = "";
-   int webuser_token_ok = 0;
+   int webuser_attested = 0;
    if (buf && http_header(buf, "X-Aimee-Webuser", webuser, sizeof(webuser)) && webuser[0])
    {
       /* Webchat runs as root and reaches the server only over its Unix socket.
        * SO_PEERCRED is an unforgeable local attestation, so no shared plaintext
-       * server.token is needed. TCP can never assert a webuser this way. */
-      webuser_token_ok = !is_tcp && peer_uid == 0;
+       * no shared bearer file is needed. TCP can never assert a webuser this way. */
+      webuser_attested = !is_tcp && peer_uid == 0;
    }
 
    tl_peer_uid = peer_uid;
@@ -85,7 +85,7 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf)
          snprintf(tl_local_fingerprint, sizeof(tl_local_fingerprint), "%s",
                   tl_local_cert.fingerprint);
    }
-   tl_transport = vault_principal_resolve(is_tcp, is_tls, peer_uid, webuser, webuser_token_ok,
+   tl_transport = vault_principal_resolve(is_tcp, is_tls, peer_uid, webuser, webuser_attested,
                                           cert_cn, tl_principal, sizeof(tl_principal));
 
    /* Capture the economizer session-key inputs (aimee-session-id + bearer) for

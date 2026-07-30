@@ -80,7 +80,9 @@ static void test_idempotent_and_overwrite(void)
 static void test_env_source(void)
 {
    setenv("AIMEE_DELEGATE_KEY_CLAUDE", "sk-claude-GAMMA", 1);
+   assert(vault_env_has_credential_environment() == 1);
    assert(server_vault_bootstrap() == 1);
+   assert(vault_env_has_credential_environment() == 0);
 
    char key[64];
    assert(vault_service_inject_api_key("", "claude", key, sizeof(key), T0) == VAULT_OK);
@@ -110,13 +112,89 @@ static void test_forge_env_source(void)
 static void test_generic_env_source(void)
 {
    setenv("AIMEE_DB2_URL", "postgresql://user:db-password@db/aimee", 1);
+   assert(vault_env_has_credential_environment() == 1);
    assert(vault_env_bootstrap_init() == 1);
+   assert(vault_env_has_credential_environment() == 0);
    assert(getenv("AIMEE_DB2_URL") == NULL);
    char value[128];
    assert(runtime_secret_get("AIMEE_DB2_URL", value, sizeof(value)) == 1);
    assert(strcmp(value, "postgresql://user:db-password@db/aimee") == 0);
    runtime_secret_wipe(value, sizeof(value));
    printf("  PASS: test_generic_env_source\n");
+}
+
+static void test_server_tls_key_first_boot_source(void)
+{
+   const char *name = "AIMEE_SERVER_TLS_PRIVATE_KEY";
+   const char *pem = "-----BEGIN PRIVATE KEY-----\nvault-only-test-key\n-----END PRIVATE KEY-----\n";
+   assert(vault_env_name_is_credential(name) == 1);
+   setenv(name, pem, 1);
+   assert(vault_env_bootstrap_init() == 1);
+   assert(getenv(name) == NULL);
+   char value[256];
+   assert(vault_service_get_server_principal("__pki_server__", VAULT_API_KEY_CRED, value,
+                                             sizeof(value)) == VAULT_OK);
+   assert(strcmp(value, pem) == 0);
+   OPENSSL_cleanse(value, sizeof(value));
+   printf("  PASS: test_server_tls_key_first_boot_source\n");
+}
+
+static void test_management_tls_key_first_boot_sources(void)
+{
+   const char *server_name = "AIMEE_SERVER_MGMT_TLS_PRIVATE_KEY";
+   const char *client_name = "AIMEE_SERVER_MGMT_STATUS_CLIENT_PRIVATE_KEY";
+   assert(vault_env_name_is_credential(server_name) == 1);
+   assert(vault_env_name_is_credential(client_name) == 1);
+   setenv(server_name, "management-server-key-pem", 1);
+   setenv(client_name, "management-status-client-key-pem", 1);
+   assert(vault_env_bootstrap_init() == 2);
+   assert(getenv(server_name) == NULL && getenv(client_name) == NULL);
+   char value[128];
+   assert(runtime_secret_get(server_name, value, sizeof(value)) == 1);
+   assert(strcmp(value, "management-server-key-pem") == 0);
+   OPENSSL_cleanse(value, sizeof(value));
+   assert(runtime_secret_get(client_name, value, sizeof(value)) == 1);
+   assert(strcmp(value, "management-status-client-key-pem") == 0);
+   OPENSSL_cleanse(value, sizeof(value));
+   printf("  PASS: test_management_tls_key_first_boot_sources\n");
+}
+
+static void test_webchat_first_boot_env_source(void)
+{
+   assert(vault_env_name_is_credential("AIMEE_WEBCHAT_USER") == 1);
+   assert(vault_env_name_is_credential("AIMEE_WEBCHAT_USERS") == 1);
+   assert(vault_env_name_is_credential("AIMEE_AGENT_SERVICE_BEARER") == 1);
+   assert(vault_env_name_is_credential("AIMEE_TLS_CLIENT_P12_PASS") == 1);
+   assert(vault_env_name_is_credential("AWS_SECRET_ACCESS_KEY") == 1);
+   assert(vault_env_name_is_credential("GOOGLE_APPLICATION_CREDENTIALS") == 1);
+   assert(vault_env_name_is_credential("DATABASE_URL") == 1);
+
+   assert(vault_env_check_webchat_bootstrap() == -1);
+   setenv("AIMEE_WEBCHAT_USER", "vault-admin", 1);
+   assert(vault_env_bootstrap_init() == 1);
+   assert(vault_env_check_webchat_bootstrap() == -1);
+   setenv("AIMEE_WEBCHAT_PASSWORD", "vault-only-browser-password", 1);
+   setenv("AIMEE_WEBCHAT_USERS", "alice:extra-password", 1);
+   assert(vault_env_bootstrap_init() == 2);
+   assert(vault_env_check_webchat_bootstrap() == 0);
+   assert(getenv("AIMEE_WEBCHAT_USER") == NULL);
+   assert(getenv("AIMEE_WEBCHAT_PASSWORD") == NULL);
+   assert(getenv("AIMEE_WEBCHAT_USERS") == NULL);
+
+   char value[128];
+   assert(vault_service_get_server_principal("environment", "AIMEE_WEBCHAT_USER", value,
+                                             sizeof(value)) == VAULT_OK);
+   assert(strcmp(value, "vault-admin") == 0);
+   OPENSSL_cleanse(value, sizeof(value));
+   assert(vault_service_get_server_principal("environment", "AIMEE_WEBCHAT_PASSWORD", value,
+                                             sizeof(value)) == VAULT_OK);
+   assert(strcmp(value, "vault-only-browser-password") == 0);
+   OPENSSL_cleanse(value, sizeof(value));
+   assert(vault_service_get_server_principal("environment", "AIMEE_WEBCHAT_USERS", value,
+                                             sizeof(value)) == VAULT_OK);
+   assert(strcmp(value, "alice:extra-password") == 0);
+   OPENSSL_cleanse(value, sizeof(value));
+   printf("  PASS: test_webchat_first_boot_env_source\n");
 }
 
 static void test_oversized_credential_name_fails_closed(void)
@@ -126,6 +204,7 @@ static void test_oversized_credential_name_fails_closed(void)
    memcpy(name + sizeof(name) - 10, "_API_KEY", 9);
    name[sizeof(name) - 1] = '\0';
    assert(setenv(name, "must-not-be-ignored", 1) == 0);
+   assert(vault_env_has_credential_environment() == -1);
    assert(vault_env_bootstrap_init() == -1);
    assert(getenv(name) != NULL); /* failed input remains available for diagnosis/retry */
    unsetenv(name);
@@ -198,6 +277,11 @@ static void test_no_plaintext_at_rest(void)
    assert(!plaintext_under_home("legacy-codex-token"));
    assert(!plaintext_under_home("legacy-claude-token"));
    assert(!plaintext_under_home("must-live-only-in-kb-vault"));
+   assert(!plaintext_under_home("vault-only-browser-password"));
+   assert(!plaintext_under_home("extra-password"));
+   assert(!plaintext_under_home("vault-only-test-key"));
+   assert(!plaintext_under_home("management-server-key-pem"));
+   assert(!plaintext_under_home("management-status-client-key-pem"));
    printf("  PASS: test_no_plaintext_at_rest\n");
 }
 
@@ -216,6 +300,9 @@ int main(void)
    test_env_source();
    test_forge_env_source();
    test_generic_env_source();
+   test_server_tls_key_first_boot_source();
+   test_management_tls_key_first_boot_sources();
+   test_webchat_first_boot_env_source();
    test_oversized_credential_name_fails_closed();
    test_kb_ingests_delegate_shaped_env_generically();
    test_legacy_oauth_migration();

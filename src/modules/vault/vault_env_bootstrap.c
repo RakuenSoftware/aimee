@@ -6,6 +6,7 @@
 #include "log.h"
 
 #include <openssl/crypto.h>
+#include <openssl/evp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,11 +18,24 @@
 #define ENV_VAULT_ENTRY_MAX   1024
 #define ENV_SECRET_VALUE_MAX  4096
 #define ENV_OVERWRITE_CONTROL "AIMEE_VAULT_ENV_OVERWRITE"
+#define WEBCHAT_SECRET_MAX    (64 * 1024)
+#define WEBCHAT_AGENT         "webchat-login"
 
 static int span_has_suffix(const char *name, size_t name_len, const char *suffix)
 {
    size_t sl = suffix ? strlen(suffix) : 0;
    return name && name_len >= sl && memcmp(name + name_len - sl, suffix, sl) == 0;
+}
+
+static int span_contains(const char *name, size_t name_len, const char *needle)
+{
+   size_t nl = needle ? strlen(needle) : 0;
+   if (!name || !nl || name_len < nl)
+      return 0;
+   for (size_t i = 0; i + nl <= name_len; i++)
+      if (memcmp(name + i, needle, nl) == 0)
+         return 1;
+   return 0;
 }
 
 static int name_span_is_credential(const char *name, size_t len, int include_delegate)
@@ -32,12 +46,19 @@ static int name_span_is_credential(const char *name, size_t len, int include_del
    if (len >= 19 && memcmp(name, "AIMEE_DELEGATE_KEY_", 19) == 0)
       return include_delegate;
    if ((len == strlen("AIMEE_DB2_URL") && memcmp(name, "AIMEE_DB2_URL", len) == 0) ||
+       (len == strlen("AIMEE_WEBCHAT_USER") && memcmp(name, "AIMEE_WEBCHAT_USER", len) == 0) ||
+       (len == strlen("AIMEE_WEBCHAT_USERS") &&
+        memcmp(name, "AIMEE_WEBCHAT_USERS", len) == 0) ||
+       (len == strlen("DATABASE_URL") && memcmp(name, "DATABASE_URL", len) == 0) ||
        (len == strlen("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE") &&
         memcmp(name, "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE", len) == 0))
       return 1;
    return span_has_suffix(name, len, "_TOKEN") || span_has_suffix(name, len, "_SECRET") ||
           span_has_suffix(name, len, "_PASSWORD") || span_has_suffix(name, len, "_PRIVATE_KEY") ||
-          span_has_suffix(name, len, "_API_KEY") || span_has_suffix(name, len, "_DSN");
+          span_has_suffix(name, len, "_API_KEY") || span_has_suffix(name, len, "_DSN") ||
+          span_has_suffix(name, len, "_BEARER") || span_has_suffix(name, len, "_PASS") ||
+          span_has_suffix(name, len, "_CREDENTIAL") ||
+          span_has_suffix(name, len, "_CREDENTIALS") || span_contains(name, len, "_SECRET_");
 }
 
 int vault_env_name_is_credential(const char *name)
@@ -48,6 +69,22 @@ int vault_env_name_is_credential(const char *name)
 int vault_env_name_is_any_credential(const char *name)
 {
    return name_span_is_credential(name, name ? strlen(name) : 0, 1);
+}
+
+int vault_env_has_credential_environment(void)
+{
+   extern char **environ;
+   for (char **entry = environ; *entry; entry++)
+   {
+      const char *eq = strchr(*entry, '=');
+      if (!eq || eq == *entry)
+         continue;
+      size_t len = (size_t)(eq - *entry);
+      if (!name_span_is_credential(*entry, len, 1))
+         continue;
+      return len < ENV_NAME_MAX ? 1 : -1;
+   }
+   return 0;
 }
 
 int vault_env_print_credential_names(void)
@@ -73,6 +110,119 @@ int vault_env_print_credential_names(void)
    return fflush(stdout) == 0 ? 0 : -1;
 }
 
+typedef struct
+{
+   const char *label;
+   const char *agent;
+   const char *cred;
+} webchat_export_t;
+
+static int print_vault_record_base64(const webchat_export_t *record)
+{
+   char *value = calloc(1, WEBCHAT_SECRET_MAX + 1);
+   if (!value)
+      return -1;
+   vault_status_t st =
+       vault_service_get_server_principal(record->agent, record->cred, value, WEBCHAT_SECRET_MAX + 1);
+   if (st == VAULT_NO_ENTRY)
+   {
+      free(value);
+      return 0;
+   }
+   size_t len = strlen(value);
+   if (st != VAULT_OK || len == 0 || len > WEBCHAT_SECRET_MAX)
+   {
+      OPENSSL_cleanse(value, WEBCHAT_SECRET_MAX + 1);
+      free(value);
+      return -1;
+   }
+   size_t encoded_cap = 4 * ((len + 2) / 3) + 1;
+   unsigned char *encoded = malloc(encoded_cap);
+   if (!encoded)
+   {
+      OPENSSL_cleanse(value, WEBCHAT_SECRET_MAX + 1);
+      free(value);
+      return -1;
+   }
+   int encoded_len = EVP_EncodeBlock(encoded, (const unsigned char *)value, (int)len);
+   int rc = encoded_len > 0 && printf("%s\t%.*s\n", record->label, encoded_len, encoded) > 0 ? 0 : -1;
+   OPENSSL_cleanse(encoded, encoded_cap);
+   OPENSSL_cleanse(value, WEBCHAT_SECRET_MAX + 1);
+   free(encoded);
+   free(value);
+   return rc;
+}
+
+int vault_env_print_webchat_bootstrap(void)
+{
+   static const webchat_export_t records[] = {
+       {"user", ENV_AGENT, "AIMEE_WEBCHAT_USER"},
+       {"password", ENV_AGENT, "AIMEE_WEBCHAT_PASSWORD"},
+       {"users", ENV_AGENT, "AIMEE_WEBCHAT_USERS"},
+       {"legacy_primary", WEBCHAT_AGENT, "legacy_primary"},
+       {"legacy_hashes", WEBCHAT_AGENT, "legacy_hashes"},
+       {"accounts", WEBCHAT_AGENT, "accounts"},
+       {"session_hmac", WEBCHAT_AGENT, "session_hmac"},
+       {"tls_key", WEBCHAT_AGENT, "tls_key"},
+   };
+   for (size_t i = 0; i < sizeof(records) / sizeof(records[0]); i++)
+      if (print_vault_record_base64(&records[i]) != 0)
+         return -1;
+   return fflush(stdout) == 0 ? 0 : -1;
+}
+
+static int vault_record_nonempty(const char *agent, const char *cred)
+{
+   char *value = calloc(1, WEBCHAT_SECRET_MAX + 1);
+   if (!value)
+      return -1;
+   vault_status_t st =
+       vault_service_get_server_principal(agent, cred, value, WEBCHAT_SECRET_MAX + 1);
+   int present = st == VAULT_OK && value[0] != '\0';
+   if (st != VAULT_OK && st != VAULT_NO_ENTRY)
+      present = -1;
+   OPENSSL_cleanse(value, WEBCHAT_SECRET_MAX + 1);
+   free(value);
+   return present;
+}
+
+int vault_env_check_webchat_bootstrap(void)
+{
+   int user = vault_record_nonempty(ENV_AGENT, "AIMEE_WEBCHAT_USER");
+   int password = vault_record_nonempty(ENV_AGENT, "AIMEE_WEBCHAT_PASSWORD");
+   int legacy_primary = vault_record_nonempty(WEBCHAT_AGENT, "legacy_primary");
+   int legacy_hashes = vault_record_nonempty(WEBCHAT_AGENT, "legacy_hashes");
+   int accounts = vault_record_nonempty(WEBCHAT_AGENT, "accounts");
+   if (user < 0 || password < 0 || legacy_primary < 0 || legacy_hashes < 0 || accounts < 0)
+      return -1;
+   if (user != password)
+      return -1;
+   return (user && password) || legacy_primary || legacy_hashes || accounts ? 0 : -1;
+}
+
+int vault_env_seal_webchat_record(const char *record_name)
+{
+   if (!record_name ||
+       (strcmp(record_name, "legacy_primary") != 0 &&
+        strcmp(record_name, "legacy_hashes") != 0 && strcmp(record_name, "accounts") != 0 &&
+        strcmp(record_name, "session_hmac") != 0 && strcmp(record_name, "tls_key") != 0))
+      return -1;
+
+   char *value = calloc(1, WEBCHAT_SECRET_MAX + 1);
+   if (!value)
+      return -1;
+   size_t len = fread(value, 1, WEBCHAT_SECRET_MAX + 1, stdin);
+   int rc = -1;
+   if (len > 0 && len <= WEBCHAT_SECRET_MAX && feof(stdin))
+   {
+      value[len] = '\0';
+      rc = vault_service_set_server(WEBCHAT_AGENT, record_name, value) == VAULT_OK ? 0 : -1;
+   }
+   OPENSSL_cleanse(value, WEBCHAT_SECRET_MAX + 1);
+   free(value);
+   return rc;
+}
+
 static int env_flag(const char *name)
 {
    const char *value = getenv(name);
@@ -82,6 +232,12 @@ static int env_flag(const char *name)
 
 static void slot_for_env(const char *name, const char **agent, const char **cred)
 {
+   if (strcmp(name, "AIMEE_SERVER_TLS_PRIVATE_KEY") == 0)
+   {
+      *agent = "__pki_server__";
+      *cred = VAULT_API_KEY_CRED;
+      return;
+   }
    if (strcmp(name, "AIMEE_FORGE_TOKEN") == 0)
    {
       *agent = "git";
@@ -108,6 +264,13 @@ static int cache_slot(const char *name, const char *agent, const char *cred)
    return rc == 0 ? 1 : -1;
 }
 
+static int env_name_is_webchat_bootstrap(const char *name)
+{
+   return name && (strcmp(name, "AIMEE_WEBCHAT_USER") == 0 ||
+                   strcmp(name, "AIMEE_WEBCHAT_PASSWORD") == 0 ||
+                   strcmp(name, "AIMEE_WEBCHAT_USERS") == 0);
+}
+
 static int preload_vault(int include_delegate)
 {
    vault_store_entry_t entries[ENV_VAULT_ENTRY_MAX];
@@ -119,6 +282,7 @@ static int preload_vault(int include_delegate)
       if (strcmp(entries[i].agent, ENV_AGENT) == 0)
       {
          if (name_span_is_credential(entries[i].cred, strlen(entries[i].cred), include_delegate) &&
+             !env_name_is_webchat_bootstrap(entries[i].cred) &&
              cache_slot(entries[i].cred, entries[i].agent, entries[i].cred) < 0)
             return -1;
       }

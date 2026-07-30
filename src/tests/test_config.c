@@ -2533,7 +2533,8 @@ int main(void)
       assert(c.server_api_bearer_extra[0][0] == '\0');
 
       /* Env overrides a pre-existing (e.g. seeded bootstrap) value too. */
-      snprintf(c.server_api_bearer_token, sizeof c.server_api_bearer_token, "aimee-local-dev");
+      snprintf(c.server_api_bearer_token, sizeof c.server_api_bearer_token,
+               "unit-test-legacy-primary");
       config_parse_server_api(&c, root);
       assert(strcmp(c.server_api_bearer_token, "env-strong-abc123") == 0);
 

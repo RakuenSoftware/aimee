@@ -14,6 +14,7 @@
 #include "aimee.h"
 #include "agent_exec.h"
 #include "log.h"
+#include "runtime_secret.h"
 #include <cJSON.h>
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
@@ -158,9 +159,15 @@ static void *accept_loop(void *arg)
 {
    webhook_state_t *ws = (webhook_state_t *)arg;
    const char *insecure = getenv("AIMEE_GATEWAY_WEBHOOK_INSECURE");
-   const char *secret = getenv("AIMEE_GATEWAY_WEBHOOK_SECRET");
+   char secret[4096] = "";
    const char *deliver_only_env = getenv("AIMEE_GATEWAY_WEBHOOK_DELIVER_ONLY");
    int is_insecure = insecure && strcmp(insecure, "true") == 0;
+   if (!is_insecure && !runtime_secret_get("AIMEE_GATEWAY_WEBHOOK_SECRET", secret,
+                                           sizeof(secret)))
+   {
+      aimee_log(LOG_ERROR, "webhook", "Vault HMAC secret unavailable");
+      return NULL;
+   }
    /* deliver_only=true: accept inbound webhooks, validate HMAC, but route
     * to outbound delivery only — do not dispatch to the agent. */
    int deliver_only = deliver_only_env && strcmp(deliver_only_env, "true") == 0;
@@ -200,7 +207,7 @@ static void *accept_loop(void *arg)
       const char *body = buf + body_start;
 
       /* Verify HMAC if required. */
-      if (!is_insecure && secret && secret[0])
+      if (!is_insecure && secret[0])
       {
          if (sig_hex[0] == '\0' || hmac_verify(secret, body, body_len, sig_hex) != 0)
          {
@@ -255,6 +262,7 @@ static void *accept_loop(void *arg)
       free(buf);
       close(client_fd);
    }
+   runtime_secret_wipe(secret, sizeof(secret));
    return NULL;
 }
 
@@ -263,9 +271,9 @@ static void *accept_loop(void *arg)
 static int webhook_check_config(platform_adapter_t *self, char *err_out, size_t err_len)
 {
    (void)self;
-   const char *secret = getenv("AIMEE_GATEWAY_WEBHOOK_SECRET");
    const char *insecure = getenv("AIMEE_GATEWAY_WEBHOOK_INSECURE");
-   if ((!secret || !secret[0]) && !(insecure && strcmp(insecure, "true") == 0))
+   if (!runtime_secret_has("AIMEE_GATEWAY_WEBHOOK_SECRET") &&
+       !(insecure && strcmp(insecure, "true") == 0))
    {
       if (err_out && err_len > 0)
          snprintf(err_out, err_len,

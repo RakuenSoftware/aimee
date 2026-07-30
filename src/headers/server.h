@@ -36,8 +36,6 @@ typedef struct cJSON cJSON;
 #define SERVER_READ_BUF_SIZE   65536              /* initial per-connection read buffer */
 #define SERVER_WRITE_BUF_SIZE  262144             /* 256KB */
 #define SERVER_DEFAULT_SOCKET  "aimee.sock"
-#define SERVER_TOKEN_FILE      "server.token"
-#define SERVER_TOKEN_LEN       64 /* 64 hex bytes = 32 raw bytes */
 /* Listen backlog: number of connections the kernel will queue between
  * accept() calls. When the queue is full, new connect() calls fail with
  * ECONNREFUSED — observable as "aimee: server unavailable" from CLI
@@ -184,7 +182,7 @@ typedef struct
     * is live and propagated across the loopback_rpc fake-conn boundary. The
     * vault principal ("uid:<n>" / "webuser:<name>" / "" when un-attested) is the
     * single security key for the vault file + KEK cache — derived from the
-    * kernel-attested peer_uid or the server.token-gated webuser assertion, NEVER
+    * kernel-attested peer_uid or root-UDS-gated webuser assertion, NEVER
     * a client-supplied session_id. Empty principal => no vault (fail-closed). */
    attested_transport_t attested_transport;
    char vault_principal[VAULT_PRINCIPAL_MAX];
@@ -206,7 +204,6 @@ typedef struct
    int listen_fd;
    platform_evloop_t evloop;
    char socket_path[4096];
-   char token[SERVER_TOKEN_LEN * 2 + 1]; /* hex string */
    server_conn_t conns[SERVER_MAX_CONNECTIONS];
    int conn_count;
    pthread_mutex_t conns_mutex; /* serialises slot allocation/free and conn_count */

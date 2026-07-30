@@ -89,7 +89,7 @@ static void rh_clone_kb_scan(const char *pname, const char *dest, cJSON *out)
 
 /* POST /v1/workspace/clone {url, name?} — clone a repo as a project under the
  * calling webchat user's scoped workspace (webchat-git WP-D). The caller
- * principal comes from the attested identity (server.token-gated X-Aimee-Webuser),
+ * principal comes from the attested identity (root-UDS-gated X-Aimee-Webuser),
  * NOT the body — a user can only clone into their own tree. Credentials are
  * injected from the user's sealed vault (WP-C); never accepted in the body. */
 int rh_workspace_clone(const route_req_t *rq, char *resp, int cap)

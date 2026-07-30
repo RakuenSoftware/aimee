@@ -145,6 +145,26 @@ static void test_config_fields_helpers(void)
    assert(cJSON_IsString(v) && strcmp(v->valuestring, "claude") == 0);
    cJSON_Delete(v);
 
+   /* Credential compatibility fields carry their canonical Vault name and
+    * their public representation is configured state, never the value. */
+   const config_field_t *kb_secret = config_field_lookup("kb_api_bearer_token");
+   assert(kb_secret);
+   assert(strcmp(config_field_secret_name(kb_secret), "AIMEE_KB_API_BEARER_TOKEN") == 0);
+   snprintf(cfg.kb_api_bearer_token, sizeof(cfg.kb_api_bearer_token), "%s",
+            "never-return-this");
+   v = config_field_public_value_json(&cfg, kb_secret);
+   assert(cJSON_IsBool(v) && cJSON_IsTrue(v));
+   cJSON_Delete(v);
+   assert(strcmp(config_field_secret_name(config_field_lookup("db2_url")), "AIMEE_DB2_URL") ==
+          0);
+   assert(strcmp(config_field_secret_name(config_field_lookup("kb_client_bearer_token")),
+                 "AIMEE_KB_API_BEARER_TOKEN") == 0);
+   assert(strcmp(config_field_secret_name(config_field_lookup("ingress_trusted_proxy_secret")),
+                 "AIMEE_INGRESS_PROXY_SECRET") == 0);
+   assert(strcmp(config_field_secret_name(config_field_lookup("telemetry.metrics_token")),
+                 "AIMEE_TELEMETRY_METRICS_TOKEN") == 0);
+   assert(config_field_secret_name(provider) == NULL);
+
    /* bool: accepts true/1/false/0, rejects anything else */
    const config_field_t *auton = config_field_lookup("autonomous");
    assert(config_field_set_value(&cfg, auton, "true") == 0);

@@ -998,19 +998,21 @@ int main(void)
     *
     * A bearer rotation invalidates every already-paired client at once, and the
     * old body said only "missing or invalid bearer token" — indistinguishable
-    * from a typo, with no recovery path. Recovering meant knowing to read
-    * aimee.yaml inside the container. Clients echo this text verbatim, so if the
-    * remediation is not here, the operator never sees it anywhere. */
+    * from a typo, with no recovery path. Recovery must use the trusted local
+    * socket; the message must never direct an operator to a plaintext config
+    * credential because API bearers are Vault-only. */
    {
       const char *b401 = server_http_auth_error_body(401);
       assert(b401 != NULL);
       /* still identifies the failure */
       assert(strstr(b401, "missing or invalid bearer token") != NULL);
       assert(strstr(b401, "\"type\":\"authentication_error\"") != NULL);
-      /* ...and now says how to recover: where the live token is, and the command */
+      /* ...and now says how to recover through the kernel-attested local path. */
       assert(strstr(b401, "rotation") != NULL);
-      assert(strstr(b401, "aimee.api.bearer_token") != NULL);
+      assert(strstr(b401, "aimee api enable") != NULL);
       assert(strstr(b401, "aimee remote set") != NULL);
+      assert(strstr(b401, "Vault-only") != NULL);
+      assert(strstr(b401, "aimee.api.bearer_token") == NULL);
 
       /* The 503 case is a server misconfiguration, not a client credential
        * problem — it must NOT tell the caller to go re-pair. */
@@ -1058,44 +1060,27 @@ int main(void)
       assert(server_http_authorize(0, "secret", NULL, NULL, 1) == 0);
    }
 
-   /* --- server_http_bootstrap_gate: the one-time bootstrap bearer may ONLY
-    *     rotate itself; every other TCP route is refused until it is rotated. --- */
+   /* --- API primaries are operator/random Vault credentials, never a published
+    *     value with hidden special capabilities. Enrollment remains additive. --- */
    {
-      runtime_secret_remove("AIMEE_API_BEARER_TOKEN"); /* TOFU active */
-      const char *BOOT = "aimee-local-dev";
+      const char *PRIMARY = "unit-test-random-primary";
       const char *enrolled[] = {"wizard-user-token"};
       server_http_set_bearer_extra(enrolled, 1);
       int bootstrap_only = -1;
-      assert(server_http_authorize_enrolled_request(1, BOOT, "Bearer aimee-local-dev", NULL, 0,
-                                                    &bootstrap_only) == 0);
-      assert(bootstrap_only == 1);
-      assert(server_http_authorize_enrolled_request(1, BOOT, "Bearer wizard-user-token", NULL, 0,
-                                                    &bootstrap_only) == 0);
-      assert(bootstrap_only == 0); /* additive enrollment bypasses the recovery gate */
-      /* Bootstrap still live: real routes refused (1), rotate_bearer allowed (0). */
-      assert(server_http_bootstrap_gate(1, 1, "GET", "/v1/config") == 1);
-      assert(server_http_bootstrap_gate(1, 1, "POST", "/v1/config/set") == 1);
-      assert(server_http_bootstrap_gate(1, 1, "POST", "/v1/api/rotate_bearer") == 0);
-      /* GET on the rotate path is not the rotate op -> still refused. */
-      assert(server_http_bootstrap_gate(1, 1, "GET", "/v1/api/rotate_bearer") == 1);
-      /* UDS is exempt (local trust). */
-      assert(server_http_bootstrap_gate(0, 1, "GET", "/v1/config") == 0);
-      /* Once rotated to a strong bearer, the gate is off for every route. */
-      assert(server_http_bootstrap_gate(1, 0, "GET", "/v1/config") == 0);
-      /* Operator-pinned bearer opts out of TOFU even if it equals the bootstrap. */
-      assert(runtime_secret_store("AIMEE_API_BEARER_TOKEN", BOOT) == 0);
-      assert(server_http_authorize_enrolled_request(1, BOOT, "Bearer aimee-local-dev", NULL, 0,
+      assert(server_http_authorize_enrolled_request(1, PRIMARY,
+                                                    "Bearer unit-test-random-primary", NULL, 0,
                                                     &bootstrap_only) == 0);
       assert(bootstrap_only == 0);
-      runtime_secret_remove("AIMEE_API_BEARER_TOKEN");
+      assert(server_http_authorize_enrolled_request(1, PRIMARY, "Bearer wizard-user-token", NULL,
+                                                    0,
+                                                    &bootstrap_only) == 0);
+      assert(bootstrap_only == 0);
       server_http_set_bearer_extra(NULL, 0);
 
-      uint32_t bootstrap_caps =
-          server_http_effective_conn_caps(1, BOOT, SERVER_REMOTE_WRITES_OFF, 1, 0);
-      assert((bootstrap_caps & CAP_SESSION_ADMIN) != 0);
-      assert((bootstrap_caps & CAP_DELEGATE) == 0);
-      assert(server_http_route_allowed_caps(1, bootstrap_caps, "POST", "/v1/api/rotate_bearer",
-                                            SERVER_REMOTE_WRITES_OFF) == 1);
+      uint32_t primary_caps =
+          server_http_effective_conn_caps(1, PRIMARY, SERVER_REMOTE_WRITES_OFF, 1, 0);
+      assert((primary_caps & CAP_SESSION_ADMIN) == 0);
+      assert((primary_caps & CAP_DELEGATE) == 0);
       assert(server_http_route_allowed_caps(1, CAPS_AUTHENTICATED, "POST", "/v1/api/enroll_bearer",
                                             SERVER_REMOTE_WRITES_OFF) == 1);
       assert(server_http_route_allowed_caps(1, CAPS_READ_ONLY | CAP_DELEGATE, "POST",
@@ -1110,9 +1095,6 @@ int main(void)
       assert((server_http_enrollment_caps(CAPS_READ_ONLY, 1, 0, 1, "deployment-token", "POST",
                                           "/v1/api/enroll_bearer") &
               CAP_SESSION_ADMIN) != 0);
-      /* The public bootstrap may rotate only; the outer bootstrap gate refuses
-       * additive enrollment even though the route is otherwise TCP-reachable. */
-      assert(server_http_bootstrap_gate(1, 1, "POST", "/v1/api/enroll_bearer") == 1);
    }
 
    /* --- P5-B3b dedicated management transport classification. The two
@@ -1163,7 +1145,7 @@ int main(void)
           "AIMEE_SERVER_MGMT_BIND",
           "AIMEE_SERVER_MGMT_PORT",
           "AIMEE_SERVER_MGMT_TLS_CERT",
-          "AIMEE_SERVER_MGMT_TLS_KEY",
+          "AIMEE_SERVER_MGMT_TLS_KEY", /* forbidden legacy path input */
           "AIMEE_SERVER_MGMT_CLIENT_CA",
           "AIMEE_SERVER_ID",
           "AIMEE_MGMT_STATUS_KEY_ID",
@@ -1173,12 +1155,14 @@ int main(void)
           "AIMEE_SERVER_MGMT_STATUS_LEAF_PIN",
           "AIMEE_SERVER_MGMT_STATUS_SECONDARY_LEAF_PIN",
           "AIMEE_SERVER_MGMT_STATUS_CLIENT_CERT",
-          "AIMEE_SERVER_MGMT_STATUS_CLIENT_KEY",
+          "AIMEE_SERVER_MGMT_STATUS_CLIENT_KEY", /* forbidden legacy path input */
           "AIMEE_SERVER_MGMT_ISSUER",
           "AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE",
       };
       for (size_t i = 0; i < sizeof(vars) / sizeof(vars[0]); i++)
          unsetenv(vars[i]);
+      runtime_secret_remove("AIMEE_SERVER_MGMT_TLS_PRIVATE_KEY");
+      runtime_secret_remove("AIMEE_SERVER_MGMT_STATUS_CLIENT_PRIVATE_KEY");
       server_http_management_config_t mc;
       assert(server_http_management_config_from_env(&mc) == 0 && !mc.enabled);
       uint32_t bind_addr = 0;
@@ -1198,8 +1182,8 @@ int main(void)
       assert(server_http_management_config_from_env(&mc) == -1); /* partial */
       setenv("AIMEE_SERVER_MGMT_PORT", "9443", 1);
       setenv("AIMEE_SERVER_MGMT_TLS_CERT", "/etc/aimee/management/server.pem", 1);
-      setenv("AIMEE_SERVER_MGMT_TLS_KEY", "/etc/aimee/management/server.key", 1);
       setenv("AIMEE_SERVER_MGMT_CLIENT_CA", "/etc/aimee/management/client-ca.pem", 1);
+      assert(runtime_secret_store("AIMEE_SERVER_MGMT_TLS_PRIVATE_KEY", "server-key-pem") == 0);
       setenv("AIMEE_SERVER_ID", "p5b3c-server", 1);
       setenv("AIMEE_MGMT_STATUS_KEY_ID", "status-v1", 1);
       setenv("AIMEE_MGMT_STATUS_PUBLIC_KEY",
@@ -1209,7 +1193,8 @@ int main(void)
       setenv("AIMEE_SERVER_MGMT_STATUS_LEAF_PIN",
              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", 1);
       setenv("AIMEE_SERVER_MGMT_STATUS_CLIENT_CERT", "/etc/aimee/management/client.pem", 1);
-      setenv("AIMEE_SERVER_MGMT_STATUS_CLIENT_KEY", "/etc/aimee/management/client.key", 1);
+      assert(runtime_secret_store("AIMEE_SERVER_MGMT_STATUS_CLIENT_PRIVATE_KEY",
+                                  "status-client-key-pem") == 0);
       setenv("AIMEE_SERVER_MGMT_ISSUER", "https://kb.test", 1);
       setenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE", "/etc/aimee/management/jwks-roots.pem", 1);
       assert(server_http_management_config_from_env(&mc) == 0 && mc.enabled && mc.port == 9443);
@@ -1228,11 +1213,12 @@ int main(void)
          assert(server_http_management_config_from_env(&mc) == -1);
       }
       setenv("AIMEE_SERVER_MGMT_PORT", "9443", 1);
-      setenv("AIMEE_SERVER_MGMT_TLS_KEY", "relative.key", 1);
-      assert(server_http_management_config_from_env(&mc) == -1);
-      setenv("AIMEE_SERVER_MGMT_TLS_KEY", "/etc/aimee/../server.key", 1);
-      assert(server_http_management_config_from_env(&mc) == -1);
       setenv("AIMEE_SERVER_MGMT_TLS_KEY", "/etc/aimee/management/server.key", 1);
+      assert(server_http_management_config_from_env(&mc) == -1);
+      unsetenv("AIMEE_SERVER_MGMT_TLS_KEY");
+      setenv("AIMEE_SERVER_MGMT_STATUS_CLIENT_KEY", "/etc/aimee/management/client.key", 1);
+      assert(server_http_management_config_from_env(&mc) == -1);
+      unsetenv("AIMEE_SERVER_MGMT_STATUS_CLIENT_KEY");
       setenv("AIMEE_SERVER_MGMT_STATUS_ENDPOINT", "https://kb.test/v1/management/status", 1);
       assert(server_http_management_config_from_env(&mc) == -1);
       setenv("AIMEE_SERVER_MGMT_STATUS_ENDPOINT", "https://kb.test", 1);
@@ -1244,6 +1230,8 @@ int main(void)
       assert(server_http_management_config_from_env(&mc) == -1);
       for (size_t i = 0; i < sizeof(vars) / sizeof(vars[0]); i++)
          unsetenv(vars[i]);
+      runtime_secret_remove("AIMEE_SERVER_MGMT_TLS_PRIVATE_KEY");
+      runtime_secret_remove("AIMEE_SERVER_MGMT_STATUS_CLIENT_PRIVATE_KEY");
    }
 
    /* --- Management requests use one exact, bodyless HTTP/1.1 frame. --- */
@@ -1996,7 +1984,9 @@ int main(void)
       /* Disabled listener: explains how to turn it on, no provider snippets. */
       server_http_api_status_report(0, 0, 0, report, sizeof(report));
       assert(strstr(report, "disabled"));
-      assert(strstr(report, "http_port: 8910"));
+      assert(strstr(report, "aimee api enable"));
+      assert(strstr(report, "directly into Vault"));
+      assert(!strstr(report, "bearer_token:"));
       assert(!strstr(report, "http://127.0.0.1"));
 
       /* Never overflows a tiny buffer. */

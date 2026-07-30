@@ -595,8 +595,7 @@ int config_identity_working_profile_injection_enabled(void)
 int config_identity_working_profile_injection_fields_count(void)
 {
    int v = 0;
-   config_field_read(offsetof(config_t, identity_working_profile_injection_fields_count), sizeof(v),
-                     &v);
+   config_field_read(offsetof(config_t, identity_working_profile_injection_fields_count), sizeof(v), &v);
    return v;
 }
 

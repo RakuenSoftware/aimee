@@ -32,8 +32,8 @@
 #
 # ON THE SERVICE NAME, which is a real portability finding. pam_check_credentials
 # calls pam_start("aimee", ...), and NOTHING in this repo installs /etc/pam.d/aimee
-# — the only shipped service file is pam-aimee-runtime-web, for a different service
-# name. On Debian a missing service file falls through to /etc/pam.d/other, which
+# and no PAM service file is shipped by the runtime-web image. On Debian a missing
+# service file falls through to /etc/pam.d/other, which
 # @includes common-auth and therefore works; on a distribution whose `other` is
 # pam_deny.so it would fail closed for every user. The rig asserts BOTH shapes: the
 # host's own fallback, and an explicitly installed service file. Neither result is

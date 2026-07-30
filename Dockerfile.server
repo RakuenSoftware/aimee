@@ -54,11 +54,12 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-# --- webchat service: the standalone Go browser server (cgo: PAM + sqlite) ---
+# --- webchat service: standalone Go browser server (cgo: legacy crypt migration + sqlite) ---
 FROM golang:1.25-bookworm AS runtime-web-build
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
+        libcrypt-dev \
         libpam0g-dev \
         pkg-config \
     && rm -rf /var/lib/apt/lists/*
@@ -139,8 +140,9 @@ RUN apt-get update \
 # Runtime shared libs the server links: libsqlite3 (DB1), libssl/libcrypto
 # (crypto), libzstd + zlib (compression). The server reaches Postgres-backed DB2
 # only through aimee-kb, so it does not link libpq itself. curl is for the
-# container HEALTHCHECK. libpam0g + libpam-modules (pam_unix.so) back the
-# co-located aimee-runtime-web browser login.
+# container HEALTHCHECK. libcrypt is retained only to verify a one-time migrated
+# PAM hash; libpam0g remains in the Go binary's existing cgo link closure but no
+# PAM login path is used. All current browser credentials live in Vault.
 #
 # The Go workflow engine runs repository verification after implementation.
 # Keep the CI-equivalent native, Go, lint, and Python toolchain in the runtime
@@ -159,8 +161,8 @@ RUN apt-get update \
         clang-format-19 \
         curl \
         git \
+        libcrypt1 \
         libcurl4-openssl-dev \
-        libpam-modules \
         libpam0g \
         libpam0g-dev \
         libp11-kit-dev \
@@ -280,7 +282,8 @@ ENV AIMEE_WORKSPACES_DIR=/var/lib/aimee-workspaces
 
 # aimee runs as uid 1000 so it can own its data on storage backends that present
 # a uniform owner (e.g. SmoothNAS smoothfs tiers force uid 1000). The entrypoint
-# stays root (for webchat PAM) and drops the server to this user.
+# stays root for legacy credential erasure, supervision, and the webchat's
+# kernel-attested UDS identity; the server runs as this unprivileged user.
 RUN useradd --uid 1000 --user-group --home-dir /var/lib/aimee --create-home --shell /usr/sbin/nologin aimee \
     && mkdir -p /var/lib/aimee-workspaces /mnt/media/cores \
     && chmod 1777 /mnt/media/cores \
@@ -297,8 +300,8 @@ COPY --from=build /src/aimee-forwarder /usr/local/bin/aimee-forwarder
 # as their MCP server, `aimee hooks pre` as their PreToolUse guard).
 COPY --from=build /src/aimee /usr/local/bin/aimee
 
-# Co-located webchat browser UI: the Go service, the single-file React SPA, the
-# PAM stack for browser login, and the bootstrap/launch helpers. webchat shares
+# Co-located webchat browser UI: the Go service, the single-file React SPA, and
+# Vault-only bootstrap/launch helpers. webchat shares
 # AIMEE_HOME so its Unix-socket transports line up with the server.
 # Optional webchat: /runtime-web is empty unless built with WITH_RUNTIME_WEB=1. Install
 # the binary + SPA when present; the entrypoint skips the browser UI when absent.
@@ -315,7 +318,6 @@ RUN if [ -f /tmp/runtime-web-stage/aimee-runtime-web ]; then \
 # /usr/bin/code-server; the webchat supervisor launches a per-user instance.
 COPY --from=code-server-stage /opt/codeserver/usr/ /usr/
 RUN if command -v code-server >/dev/null 2>&1; then echo "aimee: code-server bundled ($(code-server --version 2>/dev/null | head -1))"; else echo "aimee: code-server not bundled (built with WITH_VSCODE=0)"; fi
-COPY deploy/container/pam-aimee-runtime-web /etc/pam.d/aimee-runtime-web
 COPY deploy/container/runtime-web-lib.sh /usr/local/bin/runtime-web-lib.sh
 COPY deploy/container/plane-supervisor.sh /usr/local/bin/plane-supervisor.sh
 COPY deploy/container/core-storage.sh /usr/local/bin/core-storage.sh
@@ -335,8 +337,8 @@ COPY config/workflows/ /opt/aimee/defaults/workflows/
 # entrypoint seeds them into $AIMEE_HOME/roundtables on first start.
 COPY config/roundtables/ /opt/aimee/defaults/roundtables/
 
-# Runs as root: the entrypoint bootstraps the webchat PAM user and runs webchat
-# (pam_unix needs /etc/shadow), then drops aimee-server to the "aimee" user.
+# Runs as root for legacy erasure, supervision, and webchat's kernel-attested UDS
+# identity; aimee-server itself is dropped to the "aimee" user.
 WORKDIR /var/lib/aimee
 # 8740 = server /v1 (plaintext, loopback-only); 8743 = server /v1 over native TLS
 # (the remote thin-client port); 8443 = aimee-runtime-web browser UI (HTTPS).
@@ -353,9 +355,7 @@ EXPOSE 8740 8743 8443
 # so an unauthenticated probe gets 401 — which still proves the listener is up
 # and serving. Treat 200 (e.g. when the baked bearer happens to match) or 401 as
 # healthy; only a connection failure ("000") is unhealthy. This keeps the probe
-# correct even when a deployment overrides the baked bearer token (the previous
-# probe hardcoded "aimee-local-dev" and reported false-unhealthy for any custom
-# token, which the config explicitly tells operators to set).
+# independent of the random or operator-supplied Vault-held bearer.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -s -o /dev/null -w '%{http_code}' \
         http://127.0.0.1:8740/v1/health | grep -qE '^(200|401)$'

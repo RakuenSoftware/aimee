@@ -21,7 +21,6 @@ func TestGitOauthDeviceStartProxy(t *testing.T) {
 		w.Write([]byte(`{"ok":true,"user_code":"ABCD-1234","verification_uri":"https://gitlab.com/-/device","interval":5}`))
 	})
 	cfg := startFakeV1(t, mux)
-	writeServerToken(t, cfg)
 	s := &server{cfg: cfg}
 
 	req := withUser(httptest.NewRequest(http.MethodPost, "/api/git/oauth/device/start",
@@ -49,7 +48,6 @@ func TestGitOauthDeviceStartRejectsMissingProvider(t *testing.T) {
 		w.Write([]byte(`{}`))
 	})
 	cfg := startFakeV1(t, mux)
-	writeServerToken(t, cfg)
 	s := &server{cfg: cfg}
 
 	req := withUser(httptest.NewRequest(http.MethodPost, "/api/git/oauth/device/start",
@@ -81,7 +79,6 @@ func TestGitOauthDeviceConfigProxy(t *testing.T) {
 		w.Write([]byte(`{"ok":true}`))
 	})
 	cfg := startFakeV1(t, mux)
-	writeServerToken(t, cfg)
 	s := &server{cfg: cfg}
 
 	// GET

@@ -79,8 +79,6 @@ uint32_t server_http_effective_conn_caps(int is_tcp, const char *bearer, int rem
 {
    if (!is_tcp || mtls_mode <= 0)
       return server_http_conn_caps(is_tcp, bearer, remote_writes);
-   if (!mtls_authenticated && bearer && strcmp(bearer, AIMEE_BOOTSTRAP_BEARER) == 0)
-      return (CAPS_READ_ONLY & ~(uint32_t)CAP_CHAT) | CAP_SESSION_ADMIN;
    if (mtls_authenticated)
       /* `remote_writes` is the caller's verified per-user tier by this point,
        * not the retired process-global switch. Preserve the ordinary mTLS

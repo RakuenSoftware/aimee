@@ -3,7 +3,7 @@
 
 #include "deploy_apply.h"
 
-#include "aimee_home.h"      /* persistent managed service credential */
+#include "aimee_home.h"      /* one-shot legacy credential migration path */
 #include "config.h"          /* config_t, config_load */
 #include "config_database.h" /* config_emit_deploy_env */
 #include "platform_random.h" /* 256-bit managed kb -> llm bearer */
@@ -272,8 +272,8 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
    {
       if (err && err_cap)
          snprintf(err, err_cap,
-                  "could not create/read the managed KB-to-LLM credential under AIMEE_HOME "
-                  "(the file must be regular, private, and readable by aimee-server)");
+                  "could not load or create the managed KB-to-LLM credential in Vault "
+                  "(a legacy private file is accepted only for one-shot migration)");
       return NULL; /* fail closed: never launch a keyless managed LLM */
    }
 

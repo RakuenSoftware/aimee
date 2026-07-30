@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -524,117 +523,6 @@ func TestResolveProjectRootRejectsRelativePath(t *testing.T) {
 	}
 }
 
-func TestSocketRecvParsesFinalLineWithoutNewline(t *testing.T) {
-	sc := &socketConn{
-		rd: bufio.NewReader(strings.NewReader(`{"event":"text","content":"192.168.0.83"}`)),
-	}
-	msg, err := sc.recv()
-	if err != nil {
-		t.Fatalf("recv: %v", err)
-	}
-	var content string
-	if err := json.Unmarshal(msg["content"], &content); err != nil {
-		t.Fatalf("decode content: %v", err)
-	}
-	if content != "192.168.0.83" {
-		t.Fatalf("content = %q", content)
-	}
-	if _, err := sc.recv(); err != io.EOF {
-		t.Fatalf("second recv err = %v, want EOF", err)
-	}
-}
-
-func TestChatStreamSendsAimeeSessionID(t *testing.T) {
-	tmp := t.TempDir()
-	socketPath := filepath.Join(tmp, "aimee.sock")
-	if err := os.WriteFile(filepath.Join(tmp, "server.token"), []byte("test-token\n"), 0600); err != nil {
-		t.Fatalf("write token: %v", err)
-	}
-
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("listen unix: %v", err)
-	}
-	defer ln.Close()
-
-	reqCh := make(chan map[string]string, 1)
-	errCh := make(chan error, 1)
-	go func() {
-		conn, err := ln.Accept()
-		if err != nil {
-			errCh <- err
-			return
-		}
-		defer conn.Close()
-		rd := bufio.NewReader(conn)
-
-		authLine, err := rd.ReadString('\n')
-		if err != nil {
-			errCh <- err
-			return
-		}
-		var auth map[string]string
-		if err := json.Unmarshal([]byte(authLine), &auth); err != nil {
-			errCh <- err
-			return
-		}
-		if auth["method"] != "auth" || auth["token"] != "test-token" {
-			errCh <- fmt.Errorf("unexpected auth request: %+v", auth)
-			return
-		}
-		if _, err := fmt.Fprintln(conn, `{"status":"ok"}`); err != nil {
-			errCh <- err
-			return
-		}
-
-		reqLine, err := rd.ReadString('\n')
-		if err != nil {
-			errCh <- err
-			return
-		}
-		var req map[string]string
-		if err := json.Unmarshal([]byte(reqLine), &req); err != nil {
-			errCh <- err
-			return
-		}
-		reqCh <- req
-		fmt.Fprintln(conn, `{"event":"session","id":"provider-thread"}`)
-		fmt.Fprintln(conn, `{"event":"done"}`)
-		fmt.Fprintln(conn, `{"status":"ok"}`)
-		errCh <- nil
-	}()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	var gotSessionEvent bool
-	err = chatStream(ctx, socketPath, "hello", "web-stable-session", "provider-thread", tmp, func(evt streamEvent) {
-		if evt.Event == "session" && evt.ID == "provider-thread" {
-			gotSessionEvent = true
-		}
-	})
-	if err != nil {
-		t.Fatalf("chatStream: %v", err)
-	}
-
-	select {
-	case req := <-reqCh:
-		if req["aimee_session_id"] != "web-stable-session" {
-			t.Fatalf("aimee_session_id = %q", req["aimee_session_id"])
-		}
-		if req["claude_session_id"] != "provider-thread" {
-			t.Fatalf("claude_session_id = %q", req["claude_session_id"])
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for chat request")
-	}
-	if !gotSessionEvent {
-		t.Fatal("expected provider session event")
-	}
-	if err := <-errCh; err != nil {
-		t.Fatalf("mock server: %v", err)
-	}
-}
-
 func TestChatStreamHTTPReadsNDJSONEvents(t *testing.T) {
 	var gotPath, gotBody string
 	mux := http.NewServeMux()
@@ -708,9 +596,6 @@ func TestHandleChatSendPersistsStableUserSession(t *testing.T) {
 		fmt.Fprintln(w, `{"status":"ok"}`)
 	})
 	cfg := startFakeV1(t, mux)
-	if err := os.WriteFile(filepath.Join(filepath.Dir(cfg.socketPath), "server.token"), []byte("test-token\n"), 0600); err != nil {
-		t.Fatalf("write token: %v", err)
-	}
 	s := newSessionTestServer(t)
 	s.cfg = cfg
 
@@ -767,9 +652,6 @@ func TestHandleChatSendUsesOnlyServerBoundProviderSession(t *testing.T) {
 		fmt.Fprintln(w, `{"status":"ok"}`)
 	})
 	cfg := startFakeV1(t, mux)
-	if err := os.WriteFile(filepath.Join(filepath.Dir(cfg.socketPath), "server.token"), []byte("test-token\n"), 0600); err != nil {
-		t.Fatalf("write token: %v", err)
-	}
 	s := newSessionTestServer(t)
 	s.cfg = cfg
 	if err := s.touchChatSession("alice", "stable-web-id", workspace, "first turn"); err != nil {

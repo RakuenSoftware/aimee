@@ -694,8 +694,8 @@ static int kb_cmd_enroll(int argc, char **argv)
    char conn[1024];
    if (kb_enroll_mint(kb_default_config_dir(), host, port, scope, conn, sizeof(conn)) != 0)
    {
-      fprintf(stderr, "aimee-kb enroll: failed to mint enrollment (check CA / token store under "
-                      "the kb config dir)\n");
+      fprintf(stderr,
+              "aimee-kb enroll: failed to mint enrollment (check CA and Vault custody)\n");
       return 1;
    }
    puts(conn);
@@ -1554,6 +1554,35 @@ int main(int argc, char **argv)
    if (argc > 1 && strcmp(argv[1], "--list-credential-env-names") == 0)
       return vault_env_print_credential_names() == 0 ? 0 : 1;
 
+   /* A native launch follows the same disposable first-boot boundary as the
+    * container entrypoint. unsetenv() alone can leave inherited bytes visible
+    * in /proc/<pid>/environ, so a credential-bearing process may seal into
+    * Vault but may not become the long-lived KB. The bootstrap helper itself is
+    * already short-lived and therefore does not need to re-exec. */
+   if (!(argc > 1 && strcmp(argv[1], "--bootstrap-vault-env") == 0))
+   {
+      int credential_env = vault_env_has_credential_environment();
+      if (credential_env < 0)
+      {
+         fputs("aimee-kb: malformed credential environment name\n", stderr);
+         return 1;
+      }
+      if (credential_env > 0)
+      {
+         if (vault_env_bootstrap_init_all() < 0 ||
+             vault_env_has_credential_environment() != 0)
+         {
+            runtime_secret_clear();
+            fputs("aimee-kb: first-boot credential Vault bootstrap failed\n", stderr);
+            return 1;
+         }
+         runtime_secret_clear();
+         execvp(argv[0], argv);
+         fprintf(stderr, "aimee-kb: clean-environment re-exec failed: %s\n", strerror(errno));
+         return 1;
+      }
+   }
+
    /* The local file Vault is still bound here (before KB switches ordinary
     * tenant Vault operations to Postgres), so it can break the DB credential
     * bootstrap cycle and hydrate process memory without retaining env secrets. */
@@ -1566,6 +1595,17 @@ int main(int argc, char **argv)
    {
       fputs("aimee-kb: credential config Vault migration failed\n", stderr);
       return 1;
+   }
+   {
+      char legacy_enroll[1024];
+      int n = snprintf(legacy_enroll, sizeof(legacy_enroll), "%s/kb-enroll-tokens",
+                       kb_default_config_dir());
+      if (n <= 0 || (size_t)n >= sizeof(legacy_enroll) ||
+          kb_enroll_store_migrate(legacy_enroll) != 0)
+      {
+         fputs("aimee-kb: enrollment credential Vault migration failed\n", stderr);
+         return 1;
+      }
    }
    (void)atexit(runtime_secret_clear);
 

@@ -1,129 +1,85 @@
 #!/usr/bin/env bash
-# Container-entrypoint credential generation without mutating host accounts.
+# Vault-only webchat migration checks without touching host accounts.
 set -euo pipefail
 
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-test_dir=$(mktemp -d -p /tmp aimee-webchat-bootstrap.XXXXXX)
-trap 'rm -rf -- "$test_dir"' EXIT
+test_dir=$(mktemp -d -p /tmp aimee-webchat-vault.XXXXXX)
+trap 'find "$test_dir" -depth -delete 2>/dev/null || true' EXIT
 
-export AIMEE_HOME="$test_dir/generated"
-mock_users="$test_dir/users"
-: > "$mock_users"
+export AIMEE_HOME="$test_dir/home"
+mkdir -p "$AIMEE_HOME/webchat"
+
+sealed_dir="$test_dir/sealed-vault-fixture"
+mkdir -p "$sealed_dir"
+cleared_users="$test_dir/cleared-users"
+: > "$cleared_users"
+
+runuser() {
+  [[ ${1:-} == -u && ${2:-} == aimee && ${3:-} == -- &&
+     ${4:-} == aimee-server && ${5:-} == --webchat-vault-seal ]]
+  case ${6:-} in
+    legacy_primary | legacy_hashes | tls_key)
+      # Test-only fake Vault. Production's C helper encrypts this stdin directly.
+      tee "$sealed_dir/${6}" >/dev/null
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+id() { return 0; }
+getent() {
+  case ${1:-}:${2:-} in
+    group:aimee) printf 'aimee:x:999:operator,legacy\n' ;;
+    *) return 1 ;;
+  esac
+}
+usermod() {
+  [[ ${1:-} == --password && ${2:-} == '!' && -n ${3:-} ]]
+  printf '%s\n' "$3" >> "$cleared_users"
+}
 
 # shellcheck source=../deploy/container/runtime-web-lib.sh
-. "$repo_dir/deploy/container/runtime-web-lib.sh"
+source "$repo_dir/deploy/container/runtime-web-lib.sh"
 
-id() {
-  [[ ${1:-} == aimee ]] && return 0
-  grep -Fxq -- "${1:-}" "$mock_users"
-}
-getent() {
-  if [[ ${1:-} == group ]]; then return 0; fi
-  if [[ ${1:-} == shadow ]]; then printf '%s:$6$test$hash:0:0:0:0:0:0:\n' "$2"; return 0; fi
-  return 1
-}
-groupadd() { return 0; }
-usermod() { return 0; }
-useradd() {
-  local last=""
-  for last in "$@"; do :; done
-  printf '%s\n' "$last" >> "$mock_users"
-}
-chpasswd() {
-  local line user
-  IFS= read -r line
-  user=${line%%:*}
-  grep -Fxq -- "$user" "$mock_users" || printf '%s\n' "$user" >> "$mock_users"
-}
+legacy_user=aimee-012345abcdef
+legacy_pass=$(printf 'a%.0s' {1..64})
+legacy_hash='$6$legacy$verifier'
+legacy_key='-----BEGIN EC PRIVATE KEY-----
+test-only-key-material
+-----END EC PRIVATE KEY-----'
+printf 'username=%s\npassword=%s\n' "$legacy_user" "$legacy_pass" > "$WEBCHAT_BOOTSTRAP_CREDENTIALS"
+printf '%s:%s\noperator:%s\n' "$legacy_user" "$legacy_hash" '$6$operator$verifier' > "$WEBCHAT_LOGIN_STORE"
+printf '%s\n' "$legacy_key" > "$WEBCHAT_LEGACY_TLS_KEY"
 
-unset AIMEE_WEBCHAT_USER AIMEE_WEBCHAT_PASSWORD AIMEE_WEBCHAT_USERS
-first_log=$(webchat_bootstrap_user)
+migration_log=$(webchat_migrate_legacy_credentials)
 [[ ! -e $WEBCHAT_BOOTSTRAP_CREDENTIALS ]]
-generated_user=$(sed -n 's/^\[webchat\]   username: //p' <<<"$first_log")
-generated_pass=$(sed -n 's/^\[webchat\]   password: //p' <<<"$first_log")
-[[ $generated_user =~ ^aimee-[0-9a-f]{12}$ ]]
-[[ $generated_pass =~ ^[0-9a-f]{64}$ ]]
-grep -Fq "username: $generated_user" <<<"$first_log"
-grep -Fq "password: $generated_pass" <<<"$first_log"
+[[ ! -e $WEBCHAT_LOGIN_STORE ]]
+[[ ! -e $WEBCHAT_LEGACY_TLS_KEY ]]
+[[ $(<"$sealed_dir/legacy_primary") == "$legacy_user:$legacy_pass" ]]
+grep -Fq "$legacy_hash" "$sealed_dir/legacy_hashes"
+grep -Fq 'BEGIN EC PRIVATE KEY' "$sealed_dir/tls_key"
+for user in "$legacy_user" operator legacy aimee; do
+  grep -Fxq "$user" "$cleared_users"
+done
+for secret in "$legacy_pass" "$legacy_hash" test-only-key-material; do
+  ! grep -Fq "$secret" <<<"$migration_log"
+done
 
-# A recreate restores the PAM verifier but never persisted or reprints the
-# generated plaintext password.
-second_log=$(webchat_bootstrap_user)
-grep -Fq 'restored the existing temporary browser login' <<<"$second_log"
-! grep -Fq "$generated_pass" <<<"$second_log"
-[[ ! -e $WEBCHAT_BOOTSTRAP_CREDENTIALS ]]
-
-# Onboarding retirement keeps the plaintext absent and no longer logs it.
-mkdir -p "$(dirname "$WEBCHAT_BOOTSTRAP_REPLACED")"
-printf 'operator\n' > "$WEBCHAT_BOOTSTRAP_REPLACED"
-retired_log=$(webchat_bootstrap_user)
-[[ ! -e $WEBCHAT_BOOTSTRAP_CREDENTIALS ]]
-! grep -Fq "$generated_pass" <<<"$retired_log"
-
-# The retirement marker blocks only the old published bootstrap. A later custom
-# env pair is an operator-managed account and must still be provisioned.
-export AIMEE_WEBCHAT_USER=siteadmin
-export AIMEE_WEBCHAT_PASSWORD=post-onboarding-secret
-post_onboarding_log=$(webchat_bootstrap_user)
-grep -Fxq siteadmin "$mock_users"
-grep -Fq "login user 'siteadmin' ready" <<<"$post_onboarding_log"
-! grep -Fq "$AIMEE_WEBCHAT_PASSWORD" <<<"$post_onboarding_log"
-
-# Rolling upgrades may still inject the retired image default; never resurrect it.
-export AIMEE_WEBCHAT_USER=aimee
-export AIMEE_WEBCHAT_PASSWORD=aimee-local-dev
-legacy_log=$(webchat_bootstrap_user)
-grep -Fq 'retired legacy bootstrap login remains disabled' <<<"$legacy_log"
-
-# Pair validation applies even after onboarding.
-unset AIMEE_WEBCHAT_PASSWORD
+# A corrupt legacy plaintext record fails closed and remains available for an
+# operator-assisted recovery; it is never silently deleted.
+printf 'not-a-valid-record\n' > "$WEBCHAT_BOOTSTRAP_CREDENTIALS"
 set +e
-marker_partial_log=$(webchat_bootstrap_user)
-marker_partial_rc=$?
-set -e
-[[ $marker_partial_rc -ne 0 ]]
-grep -Fq 'must be set together' <<<"$marker_partial_log"
-
-# A corrupt plaintext file must not be deleted while an unknown PAM login could
-# still be active, even if the onboarding marker already exists.
-export AIMEE_HOME="$test_dir/corrupt-marker"
-WEBCHAT_HOME="$AIMEE_HOME"
-WEBCHAT_LOGIN_STORE="$WEBCHAT_HOME/webchat/logins"
-WEBCHAT_BOOTSTRAP_REPLACED="$WEBCHAT_HOME/webchat/bootstrap-replaced"
-WEBCHAT_BOOTSTRAP_CREDENTIALS="$WEBCHAT_HOME/webchat/bootstrap-credentials"
-mkdir -p "$WEBCHAT_HOME/webchat"
-printf 'operator\n' > "$WEBCHAT_BOOTSTRAP_REPLACED"
-printf 'not-a-credential\n' > "$WEBCHAT_BOOTSTRAP_CREDENTIALS"
-unset AIMEE_WEBCHAT_USER AIMEE_WEBCHAT_PASSWORD
-set +e
-corrupt_log=$(webchat_bootstrap_user)
+corrupt_log=$(webchat_migrate_legacy_credentials)
 corrupt_rc=$?
 set -e
 [[ $corrupt_rc -ne 0 ]]
 [[ -f $WEBCHAT_BOOTSTRAP_CREDENTIALS ]]
-grep -Fq 'refusing to leave an unknown login active' <<<"$corrupt_log"
+grep -Fq 'invalid' <<<"$corrupt_log"
 
-# An explicit pair wins, is never copied to the plaintext generated store, and
-# does not print the supplied password.
-export AIMEE_HOME="$test_dir/explicit"
-WEBCHAT_HOME="$AIMEE_HOME"
-WEBCHAT_LOGIN_STORE="$WEBCHAT_HOME/webchat/logins"
-WEBCHAT_BOOTSTRAP_REPLACED="$WEBCHAT_HOME/webchat/bootstrap-replaced"
-WEBCHAT_BOOTSTRAP_CREDENTIALS="$WEBCHAT_HOME/webchat/bootstrap-credentials"
-export AIMEE_WEBCHAT_USER=operator
-export AIMEE_WEBCHAT_PASSWORD=operator-secret
-explicit_log=$(webchat_bootstrap_user)
-[[ ! -e $WEBCHAT_BOOTSTRAP_CREDENTIALS ]]
-! grep -Fq "$AIMEE_WEBCHAT_PASSWORD" <<<"$explicit_log"
-grep -Fq "login user 'operator' ready" <<<"$explicit_log"
+# Headless mode still performs custody migration before it disables the UI.
+find "$AIMEE_HOME/webchat" -type f -delete
+export AIMEE_RUNTIME_WEB_ENABLED=0
+disabled_log=$(webchat_prepare)
+grep -Fq 'browser UI disabled' <<<"$disabled_log"
 
-# A partial override is rejected rather than inventing an unknown half.
-unset AIMEE_WEBCHAT_PASSWORD
-set +e
-partial_log=$(webchat_bootstrap_user)
-partial_rc=$?
-set -e
-[[ $partial_rc -ne 0 ]]
-grep -Fq 'must be set together' <<<"$partial_log"
-
-echo "webchat-bootstrap-login-check: ok"
+echo "webchat-vault-migration-check: ok"
