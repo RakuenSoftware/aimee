@@ -11,7 +11,8 @@ Contract (platform_exec_pipe in src/memory_core_scope_embed.inc):
   stdout: JSON float array  [0.123, -0.456, ...]  (L2-normalised). The dimension
           is whatever the pinned embedder emits — 1024 for the default CPU tier
           (Qwen3-Embedding-0.6B), 2560 for the 4B GPU tier — NOT a fixed size;
-          probe it with `--dim`.
+          probe it with `--dim`. `--serving-id` prints the endpoint's vector-space
+          identity (empty when it reports none).
   exit 0 on success; non-zero on error (C caller logs a warning and skips)
 
 Config (env), in precedence order:
@@ -111,9 +112,54 @@ def probe_dim() -> int:
     return 0
 
 
+def probe_serving_id() -> int:
+    """Print the endpoint's `serving_id` from /health — the identity of the vector space
+    it serves (model + pooling + prefixes), which the kb records against its corpus.
+
+    Exists because the shipped container reaches the gateway THROUGH this script, not
+    over an in-process http:// transport, so the kb cannot GET /health itself. Mirrors
+    --dim: exit non-zero when the endpoint is unreachable (the caller retries), exit 0
+    with EMPTY output when it is reachable but reports no identity — an endpoint that
+    predates the field, which must leave the guard inactive rather than refuse.
+
+    Unlike --dim this does NOT require status=ok: the identity is registry data, not a
+    measurement, so it is answerable while the model is still loading."""
+    if not _auth_ready():
+        return 1
+    if not ENDPOINT:
+        sys.stderr.write(NO_ENDPOINT_MESSAGE)
+        return 1
+    try:
+        req = urllib.request.Request(f"{ENDPOINT}/health", headers=_headers("application/json"))
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        # 503 while warming up still carries the payload.
+        try:
+            payload = json.loads(exc.read().decode("utf-8"))
+        except Exception:  # noqa: BLE001
+            sys.stderr.write(f"embed-remote --serving-id: /health at {ENDPOINT}: {exc}\n")
+            return 1
+    except (urllib.error.URLError, OSError) as exc:
+        sys.stderr.write(f"embed-remote --serving-id: /health at {ENDPOINT} unreachable: {exc}\n")
+        return 1
+    except (json.JSONDecodeError, ValueError) as exc:
+        sys.stderr.write(f"embed-remote --serving-id: bad /health payload: {exc}\n")
+        return 1
+    if not isinstance(payload, dict):
+        sys.stderr.write("embed-remote --serving-id: /health payload is not an object\n")
+        return 1
+    serving = payload.get("serving_id")
+    if isinstance(serving, str) and serving:
+        print(serving)
+    return 0
+
+
 def main() -> None:
     if "--dim" in sys.argv[1:]:
         sys.exit(probe_dim())
+    if "--serving-id" in sys.argv[1:]:
+        sys.exit(probe_serving_id())
     if not _auth_ready():
         sys.exit(1)
     if not ENDPOINT:

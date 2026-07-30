@@ -489,8 +489,34 @@ int memory_embed_serving_id(const char *command, char *out, size_t out_len)
    if (!out || out_len == 0)
       return -1;
    out[0] = '\0';
-   if (!command || !command[0] || !memory_embed_command_is_http(command))
-      return 0; /* builtin / sidecar-command transports have no /health to ask */
+   if (!command || !command[0])
+      return 0;
+   if (strcmp(command, "builtin") == 0)
+      return 0; /* the lexical embedder has no endpoint and no prefixes */
+   if (!memory_embed_command_is_http(command))
+   {
+      /* A SIDECAR command (the shipped container's embed-remote.py) owns endpoint
+       * resolution — AIMEE_EMBEDDER_URL over AIMEE_LLM_URL, plus the bearer — so ask it
+       * rather than re-deriving that precedence here and getting it subtly different.
+       * This is the default deployment shape: without it the guard would be inactive in
+       * exactly the configuration everything ships with. Mirrors the `--dim` probe. */
+      char cmd[1200];
+      snprintf(cmd, sizeof(cmd), "%s --serving-id", command);
+      FILE *pipe = popen(cmd, "r");
+      if (!pipe)
+         return -1;
+      char buf[192] = "";
+      size_t n = fread(buf, 1, sizeof(buf) - 1, pipe);
+      buf[n] = '\0';
+      if (pclose(pipe) != 0)
+         return -1; /* unreachable / not ready -> caller retries */
+      /* Trim the trailing newline; an empty line means "reports no identity". */
+      size_t len = strlen(buf);
+      while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r' || buf[len - 1] == ' '))
+         buf[--len] = '\0';
+      snprintf(out, out_len, "%s", buf);
+      return 0;
+   }
 
    char url[1024];
    memory_embed_http_url(command, "/health", url, sizeof(url));
