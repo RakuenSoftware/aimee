@@ -62,8 +62,8 @@
       "loads": 2
     },
     "src/cmd_session_lifecycle.c": {
-      "decls": 16,
-      "loads": 6
+      "decls": 15,
+      "loads": 5
     },
     "src/conversation_context.c": {
       "decls": 5,
@@ -119,10 +119,6 @@
     },
     "src/headers/memory.h": {
       "decls": 1,
-      "loads": 0
-    },
-    "src/headers/prompts.h": {
-      "decls": 4,
       "loads": 0
     },
     "src/index.c": {
@@ -493,10 +489,6 @@
       "decls": 9,
       "loads": 1
     },
-    "src/prompts.c": {
-      "decls": 5,
-      "loads": 0
-    },
     "src/server/agent_policy.c": {
       "decls": 2,
       "loads": 2
@@ -865,10 +857,6 @@
       "decls": 2,
       "loads": 0
     },
-    "src/tests/test_prompts.c": {
-      "decls": 8,
-      "loads": 0
-    },
     "src/tests/test_ranker_fit.c": {
       "decls": 7,
       "loads": 0
@@ -939,8 +927,8 @@
     }
   },
   "totals": {
-    "decls": 854,
-    "files": 234,
-    "loads": 454
+    "decls": 836,
+    "files": 231,
+    "loads": 453
   }
 }

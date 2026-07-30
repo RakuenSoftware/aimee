@@ -808,7 +808,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       memset(&cfg, 0, sizeof(cfg));
       if (config_load(&cfg) == 0)
       {
-         char *with_dispositions = prompt_apply_dispositions(template_sys_prompt, &cfg);
+         char *with_dispositions = prompt_apply_dispositions(template_sys_prompt);
          if (with_dispositions)
          {
             free(template_sys_prompt);

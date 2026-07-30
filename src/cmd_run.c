@@ -172,7 +172,7 @@ void cmd_run(app_ctx_t *ctx, int argc, char **argv)
       memset(&cfg, 0, sizeof(cfg));
       if (config_load(&cfg) == 0)
       {
-         char *with_dispositions = prompt_apply_dispositions(built_sys_prompt, &cfg);
+         char *with_dispositions = prompt_apply_dispositions(built_sys_prompt);
          if (with_dispositions)
          {
             free(built_sys_prompt);

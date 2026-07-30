@@ -355,14 +355,10 @@ static char *build_session_context(const char *client_cwd)
     * switch is off or nothing has been learned yet. The observer that fills it is
     * memory_recall_handler (per user turn). */
    {
-      config_t wp_cfg;
-      if (config_load(&wp_cfg) == 0)
-      {
-         char *wp = prompt_apply_working_profile("", &wp_cfg);
-         if (wp && wp[0])
-            ctx_appendf(buf, cap, &pos, "%s", wp);
-         free(wp);
-      }
+      char *wp = prompt_apply_working_profile("");
+      if (wp && wp[0])
+         ctx_appendf(buf, cap, &pos, "%s", wp);
+      free(wp);
    }
 
    /* Hierarchical local context: walk cwd up to project root and inject nearby

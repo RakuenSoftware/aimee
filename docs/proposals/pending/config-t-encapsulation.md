@@ -180,6 +180,35 @@ precondition to a config file and the code reading it back through accessors, th
 `config_t` at all. That is the shape the whole proposal is aiming at: the workaround disappears
 rather than being managed.
 
+### Round 6 — prompts.c, and a generator hole it exposed
+
+`prompt_apply_dispositions`, `prompt_apply_charter` and `prompt_apply_working_profile` (plus the
+statics `charter_total_entries` and `working_profile_field_allowed`) no longer take a `config_t`.
+**`headers/prompts.h` no longer mentions `config_t` at all** — its forward `typedef` is gone too.
+One more dead `config_t` local in `cmd_session_lifecycle.c`.
+
+**Ratchet:** 854 -> 836 mentions, 454 -> 453 `config_load()`, 234 -> 231 files.
+
+`charter_append_section` took `const char entries[][CONFIG_CHARTER_ENTRY_LEN]` — a block of memory
+the caller no longer possesses. It now takes the section's **indexed accessor** as a
+`const char *(*)(int)`. Each entry is consumed inside its own `dstr_appendf`, so the accessor's
+thread-local buffer is used before the next index overwrites it.
+
+**This tranche was blocked by a bug in the generator**, fixed first in its own commit:
+`gen_config_accessors.py` matched one PHYSICAL LINE at a time, so a field whose declaration
+clang-format wrapped got no accessor at all.
+`identity_working_profile_injection_fields` was missing its indexed accessor purely because its two
+`[CONFIG_...]` dimensions did not fit on one line, while the charter arrays beside it generated
+fine. Worth internalising: **the accessor surface was not as complete as it looked**, and the gap
+was invisible until a conversion needed the missing accessor. Anything else that looks
+"unconvertible for no reason" is worth checking against the generator before assuming the field is
+special.
+
+Test note: `test_prompts.c`'s allow-list cases needed BLOCK sequences in the written yaml —
+`fields:\n  - "verbosity"`. Inline flow (`fields: ["verbosity"]`) parsed as nothing, which silently
+emptied the allow list and turned it into "allow all", and the case still *looked* like it ran.
+It is caught here only because the case asserts a field is FILTERED OUT.
+
 ### The curator-provider chain needs a design decision first (attempted, reverted)
 
 `kb_curator_provider_for_stage` looks like an easy six-field conversion. It is not, and the reason
