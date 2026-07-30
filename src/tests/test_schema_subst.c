@@ -1,6 +1,7 @@
 /* test_schema_subst.c: the DB2 schema is shipped with a __EMBED_DIM__
  * placeholder in its halfvec embedding columns so a deployment can run a single
- * embedder at its own dimension (1024 for pplx-0.6b, 2560 for pplx-4b).
+ * embedder at its own dimension (768 for the default nomic embedder; older
+ * deployments may still record the Qwen3 ladder's 1024 or 2560).
  * db_apply_schema_postgres() substitutes the configured dimension before
  * handing the DDL to Postgres. These tests capture the SQL the apply path would
  * execute and assert the substitution is complete and correct. */
@@ -10,8 +11,19 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "aimee.h" /* EMBED_DEFAULT_DIM — the fallback the unset/clamp paths use */
 #include "db2/db_schema.h"
 #include "db2/db_postgres.h"
+
+/* The fallback dim is a build-time constant, so assert against it rather than a
+ * literal: a future embedder swap moves the default and these tests must follow it
+ * automatically instead of failing (as they did when it went 1024 -> 768). */
+static const char *default_halfvec(void)
+{
+   static char buf[32];
+   snprintf(buf, sizeof(buf), "halfvec(%d)", EMBED_DEFAULT_DIM);
+   return buf;
+}
 
 /* Capture the SQL db_apply_schema_postgres() hands to Postgres. */
 static char *g_captured_sql = NULL;
@@ -108,16 +120,16 @@ static void test_default_dim(void)
    assert_fully_substituted(sql);
 }
 
-/* dim <= 0 means "unset" — fall back to the 1024 default rather than emit
- * invalid DDL like halfvec(0). */
+/* dim <= 0 means "unset" — fall back to the EMBED_DEFAULT_DIM default rather than
+ * emit invalid DDL like halfvec(0). */
 static void test_unset_falls_back_to_default(void)
 {
    const char *sql = apply_with_dim(0);
-   assert(strstr(sql, "halfvec(1024)") != NULL);
+   assert(strstr(sql, default_halfvec()) != NULL);
    assert_fully_substituted(sql);
 
    sql = apply_with_dim(-5);
-   assert(strstr(sql, "halfvec(1024)") != NULL);
+   assert(strstr(sql, default_halfvec()) != NULL);
    assert_fully_substituted(sql);
 }
 
@@ -127,7 +139,7 @@ static void test_unset_falls_back_to_default(void)
 static void test_out_of_range_falls_back_to_default(void)
 {
    const char *sql = apply_with_dim(1000000);
-   assert(strstr(sql, "halfvec(1024)") != NULL);
+   assert(strstr(sql, default_halfvec()) != NULL);
    assert(strstr(sql, "halfvec(1000000)") == NULL);
    assert_fully_substituted(sql);
 }
