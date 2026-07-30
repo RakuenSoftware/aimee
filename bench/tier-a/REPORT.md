@@ -132,6 +132,38 @@ disagrees with `models.json`, so this table is checked rather than remembered.
 
 <!--RECOMMENDATION-->
 
+## The path I did not benchmark, and think is the real M-scale answer
+
+Every model here is a **decoder** asked to emit JSON. That framing is what the
+prompt assumes, and it is where all the failures live: unterminated objects,
+repetition loops, absent wrappers, meaningless confidence values. None of those
+are extraction failures. They are failures of *serialising* an extraction.
+
+The encoder route sidesteps the entire class. **GLiNER2** (`fastino/gliner2-base-v1`)
+is 205M parameters, **Apache-2.0 for both code and weights**, CPU-native, and
+scores all candidate labels in a single forward pass against a declared schema.
+Our `rel_types` seed set is a fixed 17-label vocabulary — precisely the regime it
+is built for. There is no JSON to malform, no confidence literal to copy, and no
+repetition loop to fall into; it returns spans and scores directly, and the score
+is a real model probability rather than a token the model guessed.
+
+I did not benchmark it because it needs a different runtime than the transformers
+harness the rest of this run used, and I judged a comparable-quality integration
+to be more than a night's work to do honestly.
+
+Two things make it worth a follow-up rather than a footnote. It is the only
+option in this whole exercise that is genuinely M-scale, permissively licensed,
+*and* architecturally suited to the task. And it fits where the stack is going
+rather than where it has been: with `aimee-llm` being purged and Bekko already
+served through ONNX, a 205M ONNX encoder is a smaller step than standing up a
+GGUF decoder endpoint. GLiNER2 ships ONNX weights.
+
+The honest caveat is that it changes the Tier-A contract. It does not produce
+`{"facts":[...]}`, so `kb_curator_provider.c` would need a non-OpenAI call path
+and `mf_commit_facts` an alternative input shape. That is real work, and it
+should be costed before anyone commits to it — but it is the only route in this
+report that could plausibly deliver Tier-A extraction at 205M parameters on CPU.
+
 ## Reproducing
 
 ```bash
