@@ -205,9 +205,16 @@ COPY scripts/embedders.json /opt/aimee/embedders.json
 COPY scripts/embedder-server.py /opt/aimee/scripts/embedder-server.py
 
 # Bake the weights for EVERY registered embedder, so switching between them in the
-# wizard is a restart rather than a download, and an air-gapped install works. Each is
-# small enough to justify that: nomic ~1.9GB fp32, bekko ~0.5GB. Pinned to the registry's
-# revision — a floating ref would let a rebuild change the vector space silently.
+# wizard is a restart rather than a download, and an air-gapped install works. Pinned to
+# the registry's revision — a floating ref would let a rebuild change the vector space
+# silently.
+#
+# FETCH ONLY WHAT THE TORCH PATH LOADS. snapshot_download takes the whole repo by
+# default, and a repo may publish the same weights several times over: bekko ships an
+# onnx/ tree (nine variants, ~2.2GB) and an openvino/ tree next to its safetensors, none
+# of which sentence-transformers touches. Baking them cost 3.4GB of image for nothing.
+# Excluding the alternate runtimes and the legacy .bin duplicates keeps this to the
+# safetensors + tokenizer the loader actually reads.
 ENV HF_HOME=/opt/aimee/models \
     HF_HUB_OFFLINE=1
 RUN --mount=type=cache,target=/root/.cache/huggingface \
@@ -216,10 +223,15 @@ import json
 from huggingface_hub import snapshot_download
 with open("/opt/aimee/embedders.json", encoding="utf-8") as handle:
     table = json.load(handle)["embedders"]
+SKIP = [
+    "onnx/*", "openvino/*", "*.onnx", "*.onnx_data",   # alternate runtimes
+    "*.bin", "*.h5", "*.msgpack", "*.tflite", "*.ckpt",  # duplicate/legacy formats
+    "*.gguf",                                          # not this runtime either
+]
 for name, spec in table.items():
     repo, revision = spec["repo"], spec.get("revision") or "main"
     print(f"baking {name}: {repo}@{revision}", flush=True)
-    snapshot_download(repo, revision=revision)
+    snapshot_download(repo, revision=revision, ignore_patterns=SKIP)
 PYBAKE
 
 # Sidecar clients (the LLM access code the kb invokes via popen).
