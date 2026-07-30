@@ -718,6 +718,7 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
     * usable seat — but its cost_tier is irrelevant to that decision. */
    agent_t *primary_default = agent_primary_turn_default(cfg, role);
    if (primary_default && agent_scope_admits(primary_default, scope) &&
+       agent_has_free_slot(primary_default) &&
        (!(required_caps || min_context > 0) ||
         agent_satisfies_required_caps(primary_default, required_caps, min_context, scope)))
       return primary_default;
