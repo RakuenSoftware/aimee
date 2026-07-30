@@ -227,7 +227,10 @@ webchat_generate_bootstrap_login() {
         _gen_user="" _gen_pass=""
         return 1
     }
-    chmod 600 "$WEBCHAT_BOOTSTRAP_USER" 2>/dev/null || true
+    # 0644, not 0600: the C server runs as `aimee` and resolves the appliance
+    # administrator from this marker. Unreadable, its gate falls back to "admin"
+    # and refuses the very operator this file names. The content is a username.
+    chmod 644 "$WEBCHAT_BOOTSTRAP_USER" 2>/dev/null || true
 
     webchat_log "======================================================================"
     webchat_log "FIRST-BOOT DASHBOARD LOGIN (shown once — copy it now)"

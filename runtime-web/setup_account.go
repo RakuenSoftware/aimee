@@ -147,8 +147,18 @@ func readReplacementUsername(marker string) (string, bool) {
 	return username, username != ""
 }
 
-func writePrivateFile(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+// writeMarkerFile persists non-secret onboarding state: which account replaced
+// the bootstrap login, and which login the image generated. Both are USERNAMES,
+// not credentials.
+//
+// Readable by the whole container on purpose. runtime-web runs as root and the C
+// server runs as `aimee`, and the server's roundtable-admin gate resolves the
+// administrator from these very files. Written 0600 they were unreadable to it,
+// so the gate fell through to its "admin" fallback and 403'd the operator whose
+// name was sitting in the file — the exact lockout this marker exists to prevent.
+// 0644 leaks nothing: the account name is already visible in every audit line.
+func writeMarkerFile(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".setup-account-*")
@@ -157,7 +167,7 @@ func writePrivateFile(path string, data []byte) error {
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
-	if err := tmp.Chmod(0o600); err != nil {
+	if err := tmp.Chmod(0o644); err != nil {
 		tmp.Close()
 		return err
 	}
@@ -187,13 +197,13 @@ func writeReplacementMarker(marker, newUsername string) (func(), error) {
 	}
 	rollback := func() {
 		if markerExisted {
-			_ = writePrivateFile(marker, originalMarker)
+			_ = writeMarkerFile(marker, originalMarker)
 		} else {
 			_ = os.Remove(marker)
 		}
 	}
 
-	if err := writePrivateFile(marker, []byte(newUsername+"\n")); err != nil {
+	if err := writeMarkerFile(marker, []byte(newUsername+"\n")); err != nil {
 		return nil, err
 	}
 	return rollback, nil
