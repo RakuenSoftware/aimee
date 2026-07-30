@@ -42,11 +42,26 @@ start_embedder() {
         echo "aimee-kb: no in-container embedder in this image; relying on a configured endpoint" >&2
         return 0
     fi
-    # The model to serve comes from config (the wizard writes embedding_model); the env
-    # override exists for a one-off without editing config.
+    # Which model to serve. Precedence: an explicit env (what the wizard-driven deploy
+    # passes as EMBEDDER_MODEL), then the operator's own config, then the baked default.
+    # Read from the YAML directly: this runs before the entrypoint seeds config, and the
+    # kb has no `config get` subcommand to ask.
+    #
+    # Only exported when non-empty. Exporting an EMPTY value is not the same as leaving it
+    # unset — it overrode the server's own default and the embedder refused to start as
+    # "(unset)", which took the kb down with it (no embedder -> no dim -> db2 refuses).
     if [ -z "${EMBEDDER_MODEL:-}" ]; then
-        EMBEDDER_MODEL="$(aimee-kb config get embedding_model 2>/dev/null | tr -d '"'"'\r\n'"'"')"
-        export EMBEDDER_MODEL
+        for _cfg in "${AIMEE_HOME:-/var/lib/aimee}/.config/aimee/aimee.yaml" \
+                    /opt/aimee/defaults/aimee.yaml; do
+            [ -f "$_cfg" ] || continue
+            _m=$(sed -n 's/^embedding_model:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' \
+                 "$_cfg" | head -1)
+            if [ -n "$_m" ]; then
+                EMBEDDER_MODEL="$_m"
+                export EMBEDDER_MODEL
+                break
+            fi
+        done
     fi
     : "${EMBEDDER_PORT:=8760}"
     export EMBEDDER_PORT
