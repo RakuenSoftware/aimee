@@ -116,6 +116,13 @@ agent_t *agent_route(agent_config_t *cfg, const char *role)
    return NULL;
 }
 
+int agent_route_role_saturated(const agent_config_t *cfg, const char *role)
+{
+   (void)cfg;
+   (void)role;
+   return 0;
+}
+
 agent_t *agent_route_at_tier(agent_config_t *cfg, const char *role, int tier)
 {
    if (!cfg || !role)

@@ -1441,3 +1441,41 @@ func TestDelegateAdmissionWaitCancellationIsTyped(t *testing.T) {
 		t.Fatalf("error = %v, want admission-wait expiry", err)
 	}
 }
+
+func TestDelegateCancellationObservesQueuedAdmissionWaitOutcome(t *testing.T) {
+	var cancelled atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 41})
+		case "/v1/delegate/status":
+			if cancelled.Load() {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"job_status": "cancelled",
+					"error":      "agent admission wait cancelled [aimee_err=admission_wait_cancelled]",
+				})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "pending"})
+		case "/v1/jobs/cancel":
+			cancelled.Store(true)
+			_ = json.NewEncoder(w).Encode(map[string]any{"cancelled": true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	_, err = client.Delegate(ctx, DelegateRequest{Role: "review", Persona: "qa", Prompt: "review"})
+	if !errors.Is(err, ErrDelegateAdmissionWaitExpired) {
+		t.Fatalf("error = %v, want queued admission-wait expiry", err)
+	}
+	if !cancelled.Load() {
+		t.Fatal("remote queued job was not cancelled")
+	}
+}

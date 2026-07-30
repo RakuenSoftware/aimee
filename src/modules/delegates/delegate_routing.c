@@ -460,7 +460,9 @@ int delegate_apply_route_overrides(agent_config_t *cfg, const char *role, const 
    {
       if (role_saturated)
          route_err(errbuf, errbuf_sz,
-                   "no free capacity for role '%s' [aimee_err=no_free_capacity]", role, NULL);
+                   "no free capacity for role '%s' "
+                   "[aimee_err=no_free_capacity]",
+                   role, NULL);
       else
          route_err(errbuf, errbuf_sz, "no agent available for role '%s'", role, NULL);
       return -1;
@@ -484,7 +486,9 @@ int delegate_route_preflight(agent_config_t *cfg, const char *role, char *errbuf
    {
       if (role_saturated)
          route_err(errbuf, errbuf_sz,
-                   "no free capacity for role '%s' [aimee_err=no_free_capacity]", role, NULL);
+                   "no free capacity for role '%s' "
+                   "[aimee_err=no_free_capacity]",
+                   role, NULL);
       else
          route_err(errbuf, errbuf_sz, "no agent available for role '%s'", role, NULL);
       return -1;

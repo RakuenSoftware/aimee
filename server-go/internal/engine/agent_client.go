@@ -379,7 +379,7 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 	for {
 		if err := ctx.Err(); err != nil {
 			outcome := c.cancelRemoteOutcome(launched.JobID, key, ctx)
-			if request.waitForAdmission && errors.Is(outcome, ErrDelegateAdmissionWaitExpired) {
+			if errors.Is(outcome, ErrDelegateAdmissionWaitExpired) {
 				return DelegateResult{}, outcome
 			}
 			return DelegateResult{}, delegateExecutionError(err, true, false, 0)
@@ -395,7 +395,7 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 		if err := c.doJSON(ctx, http.MethodPost, "/v1/delegate/status", map[string]any{"job_id": launched.JobID, "full_result": true, "result_limit": -1}, &status); err != nil {
 			if ctx.Err() != nil {
 				outcome := c.cancelRemoteOutcome(launched.JobID, key, ctx)
-				if request.waitForAdmission && errors.Is(outcome, ErrDelegateAdmissionWaitExpired) {
+				if errors.Is(outcome, ErrDelegateAdmissionWaitExpired) {
 					return DelegateResult{}, outcome
 				}
 				return DelegateResult{}, delegateExecutionError(ctx.Err(), true, false, 0)
@@ -409,7 +409,7 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 				select {
 				case <-ctx.Done():
 					outcome := c.cancelRemoteOutcome(launched.JobID, key, ctx)
-					if request.waitForAdmission && errors.Is(outcome, ErrDelegateAdmissionWaitExpired) {
+					if errors.Is(outcome, ErrDelegateAdmissionWaitExpired) {
 						return DelegateResult{}, outcome
 					}
 					return DelegateResult{}, ctx.Err()
@@ -485,7 +485,7 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 			// Read the acknowledged terminal status before returning so that an
 			// admission deadline remains distinct from an execution deadline.
 			outcome := c.cancelRemoteOutcome(launched.JobID, key, ctx)
-			if request.waitForAdmission && errors.Is(outcome, ErrDelegateAdmissionWaitExpired) {
+			if errors.Is(outcome, ErrDelegateAdmissionWaitExpired) {
 				return DelegateResult{}, outcome
 			}
 			return DelegateResult{}, delegateExecutionError(ctx.Err(), true, false, 0)
