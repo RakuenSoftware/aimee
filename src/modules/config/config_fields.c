@@ -610,7 +610,7 @@ static const struct
     {"kb_client_bearer_token", ""},
     {"memory_rerank_mode", ""},
     {"ingress_preinject_enabled", "true"},
-    {"code_context_mode", "observe"},
+    {"code_context_mode", "on"},
     {"ingress_preinject_anthropic_enabled", "false"},
     {"ingress_compress_enabled", "true"},
     {"gateway_prevent_subagents", "false"},

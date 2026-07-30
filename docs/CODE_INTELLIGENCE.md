@@ -89,9 +89,10 @@ when they independently answer the query.
 Ingress rollout is controlled by `code_context_mode`:
 
 - `off` uses only the existing project-local preview path;
-- `observe` (the shipping default) retrieves and validates the packet, records its decision, and
+- `observe` retrieves and validates the packet, records its decision, and
   preserves existing model-visible bytes; and
-- `on` injects a packet only on the first turn of a session task or a low-overlap task change.
+- `on` (the shipping default after the E6 paired promotion gate) injects a packet only on the first
+  turn of a session task or a low-overlap task change.
 
 `on` does not repeat context for an ordinary follow-up and does not broaden after `no_answer` or an
 unavailable KB. An unavailable first/new-task lookup rearms only its exact session/project marker,

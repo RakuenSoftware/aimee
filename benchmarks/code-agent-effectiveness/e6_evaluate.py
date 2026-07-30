@@ -42,6 +42,12 @@ def percentile(values: list[float], percentile_value: float) -> float | None:
 
 def score(path: Path) -> dict:
     document = json.loads(path.read_text())
+    pinned_commit = document.get("pinned_commit")
+    retrieval_pinned_commit = document.get("retrieval_pinned_commit", pinned_commit)
+    if retrieval_pinned_commit != pinned_commit:
+        reuse = document.get("retrieval_reuse")
+        if not isinstance(reuse, dict) or reuse.get("allowed") is not True or not reuse.get("rationale"):
+            raise ValueError("commit-mismatched retrieval evidence requires explicit reuse rationale")
     corpus = json.loads(CORPUS_PATH.read_text())
     retrieval = document.get("retrieval_cells", [])
     coding = document.get("coding_cells", [])
@@ -138,7 +144,8 @@ def score(path: Path) -> dict:
                         (on["median_total_wall_s"] <= standard["median_total_wall_s"] * .90)))
     return {
         "schema_version": 1,
-        "pinned_commit": document.get("pinned_commit"),
+        "pinned_commit": pinned_commit,
+        "retrieval_pinned_commit": retrieval_pinned_commit,
         "prompt_fixture": document.get("prompt_fixture"),
         "retrieval": retrieval_metrics,
         "coding": coding_metrics,
