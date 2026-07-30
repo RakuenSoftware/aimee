@@ -17,7 +17,9 @@ Contract (platform_exec_pipe in src/memory_core_scope_embed.inc):
 
 Config (env), in precedence order:
   AIMEE_EMBEDDER_URL  base URL of the embedder service (pins the embedder)
-  AIMEE_LLM_URL       base URL of the unified aimee-llm container (one knob for
+  AIMEE_LLM_URL       DEPRECATED for embedding: synthesis-only since the aimee-llm
+                      container was retired. Still read as a last resort so an older
+                      deployment keeps working, but AIMEE_EMBEDDER_URL is the knob (
                       embed + synth); used when AIMEE_EMBEDDER_URL is unset
   AIMEE_LLM_AUTH_TOKEN bearer service identity for authenticated gateways
   AIMEE_LLM_AUTH_REQUIRED=1 refuse requests when that identity is missing

@@ -1399,24 +1399,29 @@ const char *config_embedding_command(const config_t *cfg, const char *requested)
 {
    if (requested && requested[0])
       return requested;
-   if (cfg && cfg->embedding_command[0])
-      return cfg->embedding_command;
-   /* No explicit command: if the deployment points us at an embedder service,
-    * embed against it in-process (memory_embed_text speaks http:// directly, no
-    * fork, no python). This makes a configured embedder the default with zero
-    * config and survives a config reseed -- the deploy stack exports
-    * AIMEE_EMBEDDER_URL / AIMEE_LLM_URL for the aimee-llm container. Only when
-    * nothing is configured do we fall back to the 384-dim builtin (correct for an
-    * unconfigured shim/test setup). */
+   /* AIMEE_EMBEDDER_URL OUTRANKS the stored command.
+    *
+    * It has to, now that the shipped config names the in-container embedder
+    * (http://127.0.0.1:8760) rather than a sidecar script. When the config value was a
+    * script, the env var was read INSIDE that script, so an operator pointing at an
+    * external embedder worked; with a URL in config, checking config first made the
+    * variable dead — the kb kept embedding locally while its schema was sized for the
+    * external endpoint. Env before config also matches how the deploy layer expresses
+    * the wizard's choice: `aimee config deploy-env` emits AIMEE_EMBEDDER_URL for an
+    * external embedder.
+    *
+    * memory_embed_text speaks http:// directly, so this costs no fork and no python.
+    *
+    * Deliberately NOT falling back to AIMEE_LLM_URL: that knob is synthesis-only since
+    * the aimee-llm container was retired, and letting it select an embedder would point
+    * retrieval at a chat endpoint. */
    const char *env = getenv("AIMEE_EMBEDDER_URL");
    if (env && env[0])
       return env;
-   /* AIMEE_LLM_URL: the single unified-container knob also drives embedding (the
-    * same aimee-llm container serves /embed). AIMEE_EMBEDDER_URL takes precedence
-    * when an operator pins the embedder somewhere else. */
-   env = getenv("AIMEE_LLM_URL");
-   if (env && env[0])
-      return env;
+   if (cfg && cfg->embedding_command[0])
+      return cfg->embedding_command;
+   /* Nothing configured at all: the 384-dim lexical builtin, correct for an
+    * unconfigured shim/test setup. */
    return "builtin";
 }
 

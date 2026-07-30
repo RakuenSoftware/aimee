@@ -36,6 +36,12 @@
 # An operator who points embedding_command at an external endpoint gets that instead;
 # this only serves the loopback default.
 start_embedder() {
+    # An operator pointing at an external embedder gets that one; loading the bundled
+    # model beside it would burn ~0.5GB of RAM and a CPU core on vectors nobody reads.
+    if [ -n "${AIMEE_EMBEDDER_URL:-}" ]; then
+        echo "aimee-kb: external embedder configured ($AIMEE_EMBEDDER_URL); not starting the bundled one" >&2
+        return 0
+    fi
     venv="${EMBEDDER_VENV:-/opt/aimee/embedder-venv}"
     server=/opt/aimee/scripts/embedder-server.py
     if [ ! -x "$venv/bin/python" ] || [ ! -f "$server" ]; then
