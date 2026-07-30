@@ -256,15 +256,18 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
        .cancel_fn = admission_cancel_poll,
        .cancel_ctx = (admit_deleg && admit_deleg[0]) ? admit_deleg : NULL,
    };
-   agent_slot_t *admit_slot = agent_admission_acquire(&admit_req, NULL);
+   agent_admit_status_t admit_status = AGENT_ADMIT_INVALID;
+   agent_slot_t *admit_slot = agent_admission_acquire(&admit_req, &admit_status);
    if (!admit_slot)
    {
       snprintf(out->agent_name, MAX_AGENT_NAME, "%s", ag->name);
-      /* Aimee-internal back-pressure, not a provider fault: tag it with the aimee
-       * error SLUG (not the numeric code) so it's identifiable wherever out->error
-       * surfaces. The slug carries no digits, so it can't collide with
-       * agent_error_is_retryable's "502"/"503"/... substring scan the way a numeric
-       * code could; the "at concurrency limit" substring stays intact too. */
+      if (admit_status == AGENT_ADMIT_CANCELLED)
+      {
+         snprintf(out->error, sizeof(out->error),
+                  "agent '%s' admission wait cancelled [aimee_err=admission_wait_cancelled]",
+                  ag->name);
+         return AGENT_RC_ADMISSION_CANCELLED;
+      }
       snprintf(out->error, sizeof(out->error),
                "agent '%s' at concurrency limit (max_parallel=%d) [aimee_err=%s]", ag->name,
                ag->max_parallel, aimee_err_slug(AIMEE_ERR_CONCURRENCY_LIMIT));

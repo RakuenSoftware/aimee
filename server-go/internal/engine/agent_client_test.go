@@ -1276,3 +1276,97 @@ func TestGroupRoutingTreatsUnreportedOccupancyAsRoutable(t *testing.T) {
 		t.Fatalf("unreported occupancy must stay routable, got %v", vias)
 	}
 }
+
+func TestGroupRoutingRejectsSaturatedPinnedSeatWithoutDispatch(t *testing.T) {
+	var dispatches int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/agent/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]any{
+				{"name": "pinned", "provider": "p", "model": "m", "enabled": true, "max_parallel": 2,
+					"admission_capacity": 0, "roles": []string{"review"}, "personas": []string{"all"}},
+			}})
+		case "/v1/delegate/run":
+			dispatches++
+			http.Error(w, "unexpected dispatch", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := client.DelegateGroup(t.Context(), []DelegateRequest{{
+		Role: "review", Persona: "architect", Delegate: "pinned", Prompt: "review",
+	}})
+	if len(results) != 1 || !errors.Is(results[0].Err, ErrNoFreeDelegateCapacity) {
+		t.Fatalf("result = %+v, want typed no-free-capacity", results)
+	}
+	if dispatches != 0 {
+		t.Fatalf("saturated pinned seat dispatched %d jobs", dispatches)
+	}
+}
+
+func TestDelegateRetriesAtomicCapacityRaceOnAnotherRoute(t *testing.T) {
+	var mu sync.Mutex
+	var vias []string
+	var launches int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			mu.Lock()
+			vias = append(vias, fmt.Sprint(payload["via"]))
+			launches++
+			launch := launches
+			mu.Unlock()
+			if launch == 1 {
+				http.Error(w, "agent at concurrency limit [aimee_err=concurrency_limit]", http.StatusConflict)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 2, "participant": "p"})
+		case "/v1/delegate/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "ok", "agent_name": "alternate"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.Delegate(t.Context(), DelegateRequest{
+		Role: "review", Persona: "qa", Delegate: "raced", routeSelected: true, Prompt: "review",
+	})
+	if err != nil || result.Response != "ok" {
+		t.Fatalf("Delegate() = %+v, %v", result, err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(vias) != 2 || vias[0] != "raced" || vias[1] != "<nil>" {
+		t.Fatalf("route attempts = %v, want raced then unpinned alternate", vias)
+	}
+}
+
+func TestDelegateAdmissionWaitCancellationIsTyped(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/delegate/run" {
+			http.Error(w, "admission wait cancelled [aimee_err=admission_wait_cancelled]", http.StatusRequestTimeout)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Delegate: "pinned", Prompt: "review"})
+	if !errors.Is(err, ErrDelegateAdmissionWaitExpired) {
+		t.Fatalf("error = %v, want admission-wait expiry", err)
+	}
+}

@@ -130,13 +130,13 @@ int main(void)
    g_cap_full = 0;
    g_cap_free = 0;
    assert(rt_resolve_seat_model(&ccfg, "$random", "review", NULL, 0, &idx) ==
-          RT_SEAT_RANDOM_EXHAUSTED);
+          RT_SEAT_NO_FREE_CAPACITY);
 
-   /* Pinned seats also honor the authoritative admission boundary. */
+   /* Pinned seats report saturation separately from non-capacity unavailability. */
    g_cap_full = 0;
    g_cap_free = 1;
    assert(rt_resolve_seat_model(&ccfg, "full", "review", NULL, 0, &idx) ==
-          RT_SEAT_PINNED_UNAVAILABLE);
+          RT_SEAT_NO_FREE_CAPACITY);
 
    agent_set_route_capacity_probe(NULL); /* leave the global clean for other tests */
 

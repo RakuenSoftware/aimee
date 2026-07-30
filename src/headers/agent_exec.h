@@ -116,6 +116,8 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
  * a fan-out/retry caller tries a different agent and it is never recorded as a
  * provider-health fault. */
 #define AGENT_RC_AT_LIMIT (-2)
+/* A queued admission wait ended because its cancellation/deadline callback fired. */
+#define AGENT_RC_ADMISSION_CANCELLED (-3)
 
 /* THE single per-agent turn executor: the one place that enforces the per-agent
  * max_parallel concurrency cap and records provider-health for a model turn.

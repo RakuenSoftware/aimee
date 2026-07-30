@@ -20,6 +20,8 @@ rt_seat_resolve_t rt_resolve_seat_model(agent_config_t *cfg, const char *model, 
    if (rt_seat_is_random(model))
    {
       int idx = delegate_pick_for_role(cfg, role, used, nused);
+      if (idx == -2)
+         return RT_SEAT_NO_FREE_CAPACITY;
       if (idx < 0)
          return RT_SEAT_RANDOM_EXHAUSTED;
       *out_idx = idx;
@@ -28,6 +30,8 @@ rt_seat_resolve_t rt_resolve_seat_model(agent_config_t *cfg, const char *model, 
 
    /* Pinned: the EXACT model, or nothing — no substitution. */
    int idx = agent_pick_named_for_role(cfg, model, role);
+   if (idx == -2)
+      return RT_SEAT_NO_FREE_CAPACITY;
    if (idx < 0)
       return RT_SEAT_PINNED_UNAVAILABLE;
    *out_idx = idx;

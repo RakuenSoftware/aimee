@@ -405,7 +405,7 @@ int delegate_pick_for_role(agent_config_t *cfg, const char *role, const char *co
       if (agent_has_free_slot(&cfg->agents[elig[i]]))
          freeel[nfree++] = elig[i];
    if (nfree == 0)
-      return -1;
+      return -2;
    return freeel[delegate_role_rand() % (unsigned)nfree];
 }
 
@@ -418,12 +418,12 @@ int agent_pick_named_for_role(agent_config_t *cfg, const char *name, const char 
       agent_t *ag = &cfg->agents[i];
       if (strcmp(ag->name, name) != 0)
          continue;
-      /* Same eligibility triple delegate_pick_for_role applies — a pinned seat
-       * resolves with NO substitution, so an agent that exists but is disabled,
-       * lacks the role, or is unroutable reports -1 (caller fails the run). */
-      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag) ||
-          !agent_has_free_slot(ag))
+      /* Pinned resolution preserves eligibility failure (-1) separately from
+       * authoritative admission saturation (-2). */
+      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
          return -1;
+      if (!agent_has_free_slot(ag))
+         return -2;
       return i;
    }
    return -1;

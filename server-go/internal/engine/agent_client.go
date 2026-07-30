@@ -125,6 +125,8 @@ var ErrDelegateCancelUnacknowledged = errors.New("delegate cancellation was not 
 var ErrDelegateNoJobID = errors.New("agent service returned no job id")
 var ErrDelegateTerminal = errors.New("delegate job reached a failed terminal state")
 var ErrNoFreeDelegateCapacity = errors.New("no free delegate capacity")
+var ErrDelegateAtCapacity = errors.New("delegate lost admission capacity")
+var ErrDelegateAdmissionWaitExpired = errors.New("delegate admission wait expired")
 
 // ErrDelegateReplayUnavailable is returned when a replay-only invocation cannot
 // find the durable delegate result it is required to reuse (e.g. the in-flight
@@ -253,8 +255,9 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 			result.CostUnknown = result.CostUnknown || costUnknown
 			return result, nil
 		}
+		capacityRace := errors.Is(err, ErrDelegateAtCapacity)
 		if (request.Delegate != "" && !request.routeSelected) || request.Participant != "" ||
-			!errors.Is(err, ErrDelegateTerminal) ||
+			(!capacityRace && !errors.Is(err, ErrDelegateTerminal)) ||
 			attempt+1 >= maxRouteAttempts || ctx.Err() != nil {
 			if execution != nil && execution.Dispatched && !execution.CostKnown {
 				return result, &DelegateExecutionError{Err: err, Dispatched: true, CostKnown: false, CostUSD: totalCost}
@@ -319,6 +322,14 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 			// transport/decode failure after sending the idempotent request is
 			// ambiguous and must retain the reservation for durable replay.
 			var rejected *agentHTTPStatusError
+			if errors.As(err, &rejected) {
+				if isAdmissionWaitCancellation(rejected.detail) {
+					return DelegateResult{}, ErrDelegateAdmissionWaitExpired
+				}
+				if isCapacityRejection(rejected.detail) {
+					return DelegateResult{}, ErrDelegateAtCapacity
+				}
+			}
 			return DelegateResult{}, delegateExecutionError(err, !errors.As(err, &rejected), false, 0)
 		}
 		// Validate before SaveDelegateJob: a phantom mapping would make every
@@ -431,6 +442,12 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 				_ = c.store.ForgetDelegateJob(context.WithoutCancel(ctx), key)
 			}
 			detail := firstNonempty(strings.TrimSpace(status.Error), strings.TrimSpace(status.Result))
+			if isAdmissionWaitCancellation(detail) {
+				return DelegateResult{}, ErrDelegateAdmissionWaitExpired
+			}
+			if isCapacityRejection(detail) {
+				return DelegateResult{}, ErrDelegateAtCapacity
+			}
 			if detail != "" {
 				return DelegateResult{}, delegateExecutionError(fmt.Errorf("%w: job %d %s: %s", ErrDelegateTerminal, launched.JobID, status.JobStatus, detail), true, status.CostKnown, status.CostUSD)
 			}
@@ -446,6 +463,16 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 		case <-ticker.C:
 		}
 	}
+}
+
+func isCapacityRejection(detail string) bool {
+	return strings.Contains(detail, "aimee_err=concurrency_limit") ||
+		strings.Contains(detail, "no_free_capacity")
+}
+
+func isAdmissionWaitCancellation(detail string) bool {
+	return strings.Contains(detail, "aimee_err=admission_wait_cancelled") ||
+		strings.Contains(detail, "deadline_expired_while_waiting")
 }
 
 // CancelTerminalJobs closes the durable commit-to-cancel crash window. A
@@ -528,14 +555,14 @@ func valueOr(value *int, fallback int) int {
 
 func (c *HTTPAgentClient) planDelegateGroup(ctx context.Context, requests []DelegateRequest) ([]DelegateRequest, error) {
 	planned := append([]DelegateRequest(nil), requests...)
-	needsRoute := false
+	needsCapacityCheck := false
 	for _, request := range planned {
-		if delegateSelectorUnbound(request.Delegate) && request.Participant == "" {
-			needsRoute = true
+		if request.Participant == "" {
+			needsCapacityCheck = true
 			break
 		}
 	}
-	if !needsRoute {
+	if !needsCapacityCheck {
 		return planned, nil
 	}
 	candidates, err := c.delegateCandidates(ctx)
@@ -544,18 +571,27 @@ func (c *HTTPAgentClient) planDelegateGroup(ctx context.Context, requests []Dele
 	}
 	providerUses, modelUses, agentUses := map[string]int{}, map[string]int{}, map[string]int{}
 	globalUses := 0
-	for _, request := range planned {
+	for i, request := range planned {
 		if delegateSelectorUnbound(request.Delegate) || request.Participant != "" {
 			continue
 		}
+		found := false
 		for _, candidate := range candidates {
-			if candidate.Name == request.Delegate {
-				providerUses[candidate.Provider]++
-				modelUses[candidate.Model]++
-				agentUses[candidate.Name]++
-				globalUses++
-				break
+			if candidate.Name != request.Delegate || !matchesSelector(candidate.Roles, request.Role) || !matchesSelector(candidate.Personas, request.Persona) {
+				continue
 			}
+			found = true
+			if !candidate.hasCapacity(globalUses, modelUses[candidate.Model], agentUses[candidate.Name]) {
+				return nil, fmt.Errorf("%w: pinned seat %d (%s)", ErrNoFreeDelegateCapacity, i+1, request.Delegate)
+			}
+			providerUses[candidate.Provider]++
+			modelUses[candidate.Model]++
+			agentUses[candidate.Name]++
+			globalUses++
+			break
+		}
+		if !found {
+			return nil, fmt.Errorf("delegate service cannot fill pinned seat %d (%s)", i+1, request.Delegate)
 		}
 	}
 	for i := range planned {

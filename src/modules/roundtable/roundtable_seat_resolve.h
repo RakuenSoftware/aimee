@@ -29,6 +29,7 @@ typedef enum
 {
    RT_SEAT_OK = 0,             /* *out_idx holds a viable agent index in cfg */
    RT_SEAT_RANDOM_EXHAUSTED,   /* "$random": no eligible role agent remains (excl. `used`) */
+   RT_SEAT_NO_FREE_CAPACITY,    /* otherwise eligible candidates are admission-saturated */
    RT_SEAT_PINNED_UNAVAILABLE, /* pinned model absent/disabled/unroutable for the role */
    RT_SEAT_INVALID             /* bad args */
 } rt_seat_resolve_t;
