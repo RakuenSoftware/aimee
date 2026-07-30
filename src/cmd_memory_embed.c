@@ -377,11 +377,11 @@ void mem_diagnose(app_ctx_t *ctx, int argc, char **argv)
    {
       printf("[%d] #%lld %s\n", i + 1, (long long)rows[i].memory.id, rows[i].memory.key);
       printf("    total=%.3f lexical=%.3f coverage=%.3f entity=%.3f temporal=%.3f evidence=%.3f "
-                "semantic=%.3f state=%.3f intent=%.3f salience=%.3f surprise=%.3f pagerank=%.3f\n",
-                rows[i].parts.total, rows[i].parts.lexical, rows[i].parts.coverage,
-                rows[i].parts.entity, rows[i].parts.temporal, rows[i].parts.evidence,
-                rows[i].parts.semantic, rows[i].parts.state, rows[i].parts.intent,
-                rows[i].parts.salience, rows[i].parts.surprise, rows[i].parts.pagerank);
+             "semantic=%.3f state=%.3f intent=%.3f salience=%.3f surprise=%.3f pagerank=%.3f\n",
+             rows[i].parts.total, rows[i].parts.lexical, rows[i].parts.coverage,
+             rows[i].parts.entity, rows[i].parts.temporal, rows[i].parts.evidence,
+             rows[i].parts.semantic, rows[i].parts.state, rows[i].parts.intent,
+             rows[i].parts.salience, rows[i].parts.surprise, rows[i].parts.pagerank);
       if (trace_graph)
          cmd_memory_print_graph_trace(rows[i].memory.key);
    }

@@ -43,15 +43,15 @@ static double num(cJSON *obj, const char *field)
 
 static void test_shapes_every_field_the_picker_needs(void)
 {
-   const char *raw =
-       "{\"embedders\": {"
-       " \"prefixed-model\": {\"repo\":\"r\",\"revision\":\"v\","
-       "             \"pooling\":\"mean\",\"dim\":768,\"context\":2048,"
-       "             \"prefixes\":{\"query\":\"search_query: \",\"document\":\"search_document: \"}},"
-       " \"plain-model\": {\"repo\":\"r2\",\"revision\":\"v\","
-       "             \"pooling\":\"mean\",\"dim\":384,\"context\":8192,"
-       "             \"prefixes\":{\"query\":\"\",\"document\":\"\"}}"
-       "}}";
+   const char *raw = "{\"embedders\": {"
+                     " \"prefixed-model\": {\"repo\":\"r\",\"revision\":\"v\","
+                     "             \"pooling\":\"mean\",\"dim\":768,\"context\":2048,"
+                     "             \"prefixes\":{\"query\":\"search_query: "
+                     "\",\"document\":\"search_document: \"}},"
+                     " \"plain-model\": {\"repo\":\"r2\",\"revision\":\"v\","
+                     "             \"pooling\":\"mean\",\"dim\":384,\"context\":8192,"
+                     "             \"prefixes\":{\"query\":\"\",\"document\":\"\"}}"
+                     "}}";
    const char *err = "unset";
    cJSON *arr = embedder_catalog_build(raw, &err);
    assert(arr && !err);
@@ -68,7 +68,7 @@ static void test_shapes_every_field_the_picker_needs(void)
    assert(plain);
    /* 384, not 768: the width is what makes choosing it a schema rebuild. */
    assert(num(plain, "dim") == 384);
-   assert(is_true(plain, "local")); /* repo + revision is enough to load it */
+   assert(is_true(plain, "local"));     /* repo + revision is enough to load it */
    assert(!is_true(plain, "prefixed")); /* its card defines none */
    cJSON_Delete(arr);
    printf("  shapes_every_field_the_picker_needs: ok\n");
@@ -79,10 +79,9 @@ static void test_local_needs_somewhere_to_load_from(void)
    /* `local` means the kb can load the model itself, which needs a repo AND a revision.
     * A floating or absent revision is refused because it would let a rebuild change the
     * vector space silently — the same reason the bake pins it. */
-   const char *no_revision =
-       "{\"embedders\": {\"m\": {\"repo\":\"r\",\"revision\":\"\","
-       " \"pooling\":\"mean\",\"dim\":8,\"context\":8,"
-       " \"prefixes\":{\"query\":\"\",\"document\":\"\"}}}}";
+   const char *no_revision = "{\"embedders\": {\"m\": {\"repo\":\"r\",\"revision\":\"\","
+                             " \"pooling\":\"mean\",\"dim\":8,\"context\":8,"
+                             " \"prefixes\":{\"query\":\"\",\"document\":\"\"}}}}";
    cJSON *arr = embedder_catalog_build(no_revision, NULL);
    assert(arr && !is_true(entry_by_id(arr, "m"), "local"));
    cJSON_Delete(arr);

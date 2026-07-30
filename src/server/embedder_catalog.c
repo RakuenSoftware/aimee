@@ -121,8 +121,8 @@ cJSON *embedder_catalog_build(const char *raw, const char **err)
       {
          cJSON *q = cJSON_GetObjectItemCaseSensitive(prefixes, "query");
          cJSON *d = cJSON_GetObjectItemCaseSensitive(prefixes, "document");
-         prefixed = (cJSON_IsString(q) && q->valuestring[0]) ||
-                    (cJSON_IsString(d) && d->valuestring[0]);
+         prefixed =
+             (cJSON_IsString(q) && q->valuestring[0]) || (cJSON_IsString(d) && d->valuestring[0]);
       }
 
       cJSON *out = cJSON_CreateObject();

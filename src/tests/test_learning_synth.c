@@ -20,7 +20,7 @@
 #include "artifacts.h"
 #include "evidence_vectors.h"
 #include "learning_synth_ops.h"
-#include "embed_input_type.h"   /* the memory_embed_text stub's polarity argument */
+#include "embed_input_type.h" /* the memory_embed_text stub's polarity argument */
 #include "db2_test_shim.h"
 #include "../kb/kb_learning_synth.h"
 

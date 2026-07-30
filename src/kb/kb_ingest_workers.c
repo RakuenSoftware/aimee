@@ -625,7 +625,8 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
        * re-acquire lazily. See kb_curator_extract_code / kb_service_code_embed. */
       db2_lease_release_idle();
       float vec[EMBED_MAX_DIM];
-      int dim = memory_embed_text(embed_text, effective_cmd, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
+      int dim =
+          memory_embed_text(embed_text, effective_cmd, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
       if (dim > 0)
       {
          accept_generated_embedding(doc_id, vec, dim);
@@ -789,7 +790,8 @@ int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int ma
        * so holding the lease across it trips the stuck-lease ceiling. */
       db2_lease_release_idle();
       float vec[EMBED_MAX_DIM];
-      int dim = memory_embed_text(embed_text, effective_cmd, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
+      int dim =
+          memory_embed_text(embed_text, effective_cmd, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
       if (dim > 0 && sync_vector_embedding(rows[i].id, vec, dim) == 0)
          embedded++;
       free(rows[i].content);

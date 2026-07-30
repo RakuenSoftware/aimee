@@ -1475,7 +1475,6 @@ int config_load_file(config_t *cfg)
 
    config_parse_memory_negation_section(cfg, root);
 
-
    config_parse_memory_query_expansion_section(cfg, root);
 
    config_parse_memory_recall_lanes_section(cfg, root);

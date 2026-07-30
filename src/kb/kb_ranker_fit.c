@@ -475,7 +475,7 @@ static double query_ndcg(const cJSON *cands, int k, const double *weights)
  *
  * Returns 0 on success, -1 if the fixture cannot be read or parsed. */
 static int benchmark_compare(const char *fixture_path, int k, const double *cand_w,
-                            const double *incumbent_w, rank_gate_eval_t *out)
+                             const double *incumbent_w, rank_gate_eval_t *out)
 {
    memset(out, 0, sizeof(*out));
    char *raw = read_file(fixture_path);

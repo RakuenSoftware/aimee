@@ -1756,7 +1756,8 @@ int config_set_model_reasoning_effort(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->model_reasoning_effort, sizeof(cfg->model_reasoning_effort), "%s", value ? value : "");
+      snprintf(cfg->model_reasoning_effort, sizeof(cfg->model_reasoning_effort), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
@@ -1846,7 +1847,8 @@ int config_set_memory_weight_profile(const char *value)
    int rc = config_load(cfg);
    if (rc == 0)
    {
-      snprintf(cfg->memory_weight_profile, sizeof(cfg->memory_weight_profile), "%s", value ? value : "");
+      snprintf(cfg->memory_weight_profile, sizeof(cfg->memory_weight_profile), "%s",
+               value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);

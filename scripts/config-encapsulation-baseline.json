@@ -482,8 +482,8 @@
       "loads": 1
     },
     "src/modules/memory/memory_core_search_b.c": {
-      "decls": 5,
-      "loads": 3
+      "decls": 3,
+      "loads": 2
     },
     "src/modules/memory/memory_core_search_c.c": {
       "decls": 6,
@@ -806,8 +806,8 @@
       "loads": 1
     },
     "src/tests/test_config.c": {
-      "decls": 103,
-      "loads": 86
+      "decls": 101,
+      "loads": 85
     },
     "src/tests/test_config_accessors.c": {
       "decls": 1,
@@ -950,7 +950,7 @@
       "loads": 0
     },
     "src/tests/test_memory.c": {
-      "decls": 6,
+      "decls": 5,
       "loads": 0
     },
     "src/tests/test_memory_advanced.c": {
@@ -982,7 +982,7 @@
       "loads": 0
     },
     "src/tests/test_ranker_fit.c": {
-      "decls": 5,
+      "decls": 7,
       "loads": 0
     },
     "src/tests/test_reasoning.c": {
@@ -1051,8 +1051,8 @@
     }
   },
   "totals": {
-    "decls": 925,
+    "decls": 922,
     "files": 262,
-    "loads": 472
+    "loads": 470
   }
 }

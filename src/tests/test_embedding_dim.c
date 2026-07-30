@@ -201,8 +201,8 @@ int main(void)
     * so this is the only guard that can see them. Unlike the model guard there is no
     * compat list — a different prefix pair is definitionally a different space. */
    err[0] = '\0';
-   assert(db2_embedder_serving_record_or_check(conn, NULL, err, sizeof err) == 0);  /* no-op */
-   assert(db2_embedder_serving_record_or_check(conn, "", err, sizeof err) == 0);    /* no-op */
+   assert(db2_embedder_serving_record_or_check(conn, NULL, err, sizeof err) == 0); /* no-op */
+   assert(db2_embedder_serving_record_or_check(conn, "", err, sizeof err) == 0);   /* no-op */
    assert(db2_embedder_serving_record_or_check(conn, "nomic/aaaa", err, sizeof err) == 0); /* rec */
    assert(db2_embedder_serving_record_or_check(conn, "nomic/aaaa", err, sizeof err) == 0); /* == */
    assert(err[0] == '\0');

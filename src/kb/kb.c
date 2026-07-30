@@ -1045,7 +1045,8 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
                                   sizeof(embed_text));
 
          float vec[EMBED_MAX_DIM];
-         int dim = memory_embed_text(embed_text, c->effective_cmd, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
+         int dim = memory_embed_text(embed_text, c->effective_cmd, EMBED_INPUT_DOCUMENT, vec,
+                                     EMBED_MAX_DIM);
          if (dim > 0)
          {
             accept_generated_embedding(doc_id, vec, dim);
@@ -1789,8 +1790,8 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
    int qdim = query_dim;
    if (!qvec || qdim <= 0)
    {
-      qdim = memory_embed_text(query, effective_cmd, EMBED_INPUT_QUERY, embedded_qvec,
-                               EMBED_MAX_DIM);
+      qdim =
+          memory_embed_text(query, effective_cmd, EMBED_INPUT_QUERY, embedded_qvec, EMBED_MAX_DIM);
       qvec = embedded_qvec;
    }
    if (qdim <= 0)
@@ -2197,8 +2198,8 @@ char *kb_search_json_scoped_ex(const char *preferred_project, int all_projects, 
    }
 
    float qvec[EMBED_MAX_DIM];
-   int qdim = memory_embed_text(query, kb_effective_embedding_cmd(embedding_cmd),
-                                EMBED_INPUT_QUERY, qvec, EMBED_MAX_DIM);
+   int qdim = memory_embed_text(query, kb_effective_embedding_cmd(embedding_cmd), EMBED_INPUT_QUERY,
+                                qvec, EMBED_MAX_DIM);
    if (qdim <= 0)
    {
       free(local);

@@ -921,8 +921,9 @@ int db2_init(const char *libpq_url)
       if (g_embedder_serving_probe(sid, sizeof(sid), perr, sizeof(perr)) == 0)
          db2_set_embedder_serving_id(sid);
       else
-         fprintf(stderr, "aimee: embedder serving-identity probe failed (%s); vector-space "
-                         "guard inactive for this start\n",
+         fprintf(stderr,
+                 "aimee: embedder serving-identity probe failed (%s); vector-space "
+                 "guard inactive for this start\n",
                  perr[0] ? perr : "unreachable");
    }
    if (db2_embedding_model_record_or_check(conn, g_embedder_model_id, g_embedding_compat, errbuf,
