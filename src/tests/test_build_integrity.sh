@@ -15,6 +15,34 @@ else
     fail "server or KB container definitions persist credentials outside Vault"
 fi
 
+# Docker E2E must exercise the same operator contract as production: build the
+# image, seal first-boot credentials through the disposable helper, and only
+# then create the long-lived service without rebuilding it.
+container_smoke_bootstrap_ok=1
+for smoke_spec in \
+    "../scripts/aimee-kb-docker-smoke.sh:kb" \
+    "../scripts/aimee-server-docker-smoke.sh:all" \
+    "../scripts/aimee-server-standalone-docker-smoke.sh:server"; do
+    smoke_script=${smoke_spec%:*}
+    bootstrap_target=${smoke_spec##*:}
+    smoke_build_line=$(grep -nF '"${DC[@]}" build' "$smoke_script" | cut -d: -f1)
+    smoke_bootstrap_line=$(grep -nF \
+        "scripts/aimee-compose-vault-bootstrap.sh -f \"\$bootstrap_compose\" $bootstrap_target" \
+        "$smoke_script" | cut -d: -f1)
+    smoke_up_line=$(grep -nF '"${DC[@]}" up -d --no-build' "$smoke_script" | cut -d: -f1)
+    if [ -z "$smoke_build_line" ] || [ -z "$smoke_bootstrap_line" ] || [ -z "$smoke_up_line" ] ||
+       [ "$smoke_build_line" -ge "$smoke_bootstrap_line" ] ||
+       [ "$smoke_bootstrap_line" -ge "$smoke_up_line" ] ||
+       grep -qF '"${DC[@]}" up -d --build' "$smoke_script"; then
+        container_smoke_bootstrap_ok=0
+    fi
+done
+if [ "$container_smoke_bootstrap_ok" -eq 1 ]; then
+    pass "Docker smokes Vault-bootstrap before creating long-lived containers"
+else
+    fail "Docker smoke bypasses the disposable Vault bootstrap contract"
+fi
+
 # The server image entrypoint must honor Docker's explicit command override, but
 # even an override must first consume credential env into Vault and scrub it.
 # Stub only the short-lived bootstrap transport so this can run outside the
