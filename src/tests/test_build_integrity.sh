@@ -110,6 +110,11 @@ case "${1:-}" in
         exit 0
         ;;
     --vault-db2-external) exit 0 ;;
+    # The entrypoint asks the binary which embedder is selected instead of parsing
+    # aimee.yaml. Exit 1 = nothing selected, so this stub starts no embedder; without
+    # the case the stub would fall through and print "clean", which the entrypoint
+    # would take as a MODEL NAME.
+    --print-embedding-model) exit 1 ;;
     --list-credential-env-names)
         [ -n "${AIMEE_DB2_URL:-}" ] && printf '%s\n' AIMEE_DB2_URL
         [ -n "${ENTRYPOINT_TEST_API_KEY:-}" ] && printf '%s\n' ENTRYPOINT_TEST_API_KEY
@@ -125,34 +130,46 @@ else
 fi
 SH
 chmod +x "$kb_entrypoint_test_dir/aimee-kb"
+# stderr is captured separately, not folded in: the entrypoint legitimately logs
+# operator diagnostics there (which embedder it started, or why it started none),
+# and folding them into stdout would turn this into an assertion that the
+# entrypoint is silent. What must hold is that no credential VALUE reaches either
+# stream, and that the final process image is credential-free.
+kb_entrypoint_stderr="$kb_entrypoint_test_dir/stderr.log"
 kb_entrypoint_output=$(env -i PATH="$kb_entrypoint_test_dir:/usr/bin:/bin" \
     AIMEE_HOME="$kb_entrypoint_test_dir/home" \
     AIMEE_DB2_URL=postgresql://external.invalid/aimee \
     ENTRYPOINT_TEST_API_KEY=first-boot-only \
-    sh ../deploy/container/aimee-kb-entrypoint.sh 2>&1)
-if [ "$kb_entrypoint_output" = "clean" ]; then
+    sh ../deploy/container/aimee-kb-entrypoint.sh 2>"$kb_entrypoint_stderr")
+if [ "$kb_entrypoint_output" = "clean" ] &&
+    ! grep -qE 'first-boot-only|external\.invalid' "$kb_entrypoint_stderr"; then
     pass "KB entrypoint clean-reexec removes inherited first-boot credentials"
 else
-    fail "KB entrypoint left first-boot credentials in its long-lived process image ($kb_entrypoint_output)"
+    fail "KB entrypoint left first-boot credentials in its long-lived process image ($kb_entrypoint_output, stderr=$(tr '\n' ' ' <"$kb_entrypoint_stderr"))"
 fi
 
 # Treat the internal bootstrap marker as untrusted input. A container runtime
 # can supply entrypoint arguments, so inheriting any credential must force one
 # more credential-free exec even when that marker was present at first boot.
 kb_bootstrap_log="$kb_entrypoint_test_dir/bootstrap.log"
+kb_marked_stderr="$kb_entrypoint_test_dir/stderr-marked.log"
 kb_marked_output=$(env -i PATH="$kb_entrypoint_test_dir:/usr/bin:/bin" \
     AIMEE_HOME="$kb_entrypoint_test_dir/home-marked" \
     AIMEE_DB2_URL=postgresql://external.invalid/aimee \
     ENTRYPOINT_TEST_API_KEY=first-boot-only \
     ENTRYPOINT_BOOTSTRAP_LOG="$kb_bootstrap_log" \
     sh ../deploy/container/aimee-kb-entrypoint.sh \
-    --aimee-internal-vault-bootstrapped-external-db 2>&1)
+    --aimee-internal-vault-bootstrapped-external-db 2>"$kb_marked_stderr")
 kb_bootstrap_count=$(wc -c <"$kb_bootstrap_log")
+kb_marked_stderr_text=$(tr '\n' ' ' <"$kb_marked_stderr")
+kb_marked_stderr_dirty=0
+grep -qE 'first-boot-only|external\.invalid' "$kb_marked_stderr" && kb_marked_stderr_dirty=1
 rm -rf "$kb_entrypoint_test_dir"
-if [ "$kb_marked_output" = "clean" ] && [ "$kb_bootstrap_count" -eq 2 ]; then
+if [ "$kb_marked_output" = "clean" ] && [ "$kb_bootstrap_count" -eq 2 ] &&
+    [ "$kb_marked_stderr_dirty" -eq 0 ]; then
     pass "KB entrypoint ignores a spoofed bootstrap marker when credentials are inherited"
 else
-    fail "KB entrypoint trusted a bootstrap marker before a clean re-exec ($kb_marked_output, bootstraps=$kb_bootstrap_count)"
+    fail "KB entrypoint trusted a bootstrap marker before a clean re-exec ($kb_marked_output, bootstraps=$kb_bootstrap_count, stderr=$kb_marked_stderr_text)"
 fi
 
 # The server image intentionally supervises multiple long-lived planes, so it

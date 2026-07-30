@@ -800,18 +800,8 @@ typedef struct config
     *   negation lexical matching for negative facts. */
    int memory_negation_enabled;
 
-   /* Cross-encoder reranker: second-pass (query, candidate) scoring.
-    * memory_rerank_enabled: 0 = disabled (default), 1 = enabled.
-    * memory_rerank_command: external command for cross-encoder scores (stdin: JSON pairs,
-    *   stdout: JSON float array). Empty = disabled.
-    * memory_rerank_top_k: candidate pool size fed to cross-encoder (default 50).
-    * memory_rerank_mix: blend weight for cross-encoder vs hybrid (0.0–1.0, default 0.7).
-    * memory_query_expansion_mode: "lexical" (default) or "semantic" (embedding-based).
+   /* memory_query_expansion_mode: "lexical" (default) or "semantic" (embedding-based).
     * memory_query_expansion_k: number of near-neighbour terms to inject (default 5). */
-   int memory_rerank_enabled;
-   char memory_rerank_command[512];
-   int memory_rerank_top_k;
-   double memory_rerank_mix;
    char memory_query_expansion_mode[16];
    int memory_query_expansion_k;
 
@@ -1494,23 +1484,18 @@ typedef struct config
     *              NOTHING is deployed locally (no kb, no llm).
     *   "local"  — run a local aimee-kb and deploy the per-role LLM backends below.
     *
-    * Each LLM role is external (forward to llm_<role>_endpoint), local (a baked
-    * llama-server at llm_<role>_tier on llm_<role>_host / _gpu — mapped to the
-    * plugin's AIMEE_LLM_<ROLE>_MODE/TIER env), or off (rerank/synth only). The
-    * embedder's external endpoint/model/dim reuse embedding_endpoint/model/dim;
-    * an unset embedding_dim (0) is derived from the embedder /health probe. */
+    * The EMBEDDER is served by the kb itself; llm_embed_backend only chooses between
+    * in-container ("local") and an operator endpoint ("external",
+    * embedding_endpoint). An unset embedding_dim (0) is derived from the selected
+    * model. SYNTH is external (llm_synth_endpoint), local at llm_synth_tier on
+    * llm_synth_host / _gpu, or off. */
    char kb_mode[16]; /* "" | "local" | "remote" */
 
-   char llm_embed_backend[16]; /* "" | "external" | "local" */
-   char llm_embed_host[128];
-   char llm_embed_gpu[64];
-   char llm_embed_tier[16]; /* cpu | small | mid | large */
+   /* "" | "local" (in-container, the default) | "external" (embedding_endpoint).
+    * There is no host/gpu/tier here any more: those placed the retired aimee-llm
+    * container, and the kb now serves the selected embedder itself. */
+   char llm_embed_backend[16];
 
-   char llm_rerank_backend[16]; /* "" | "external" | "local" | "off" */
-   char llm_rerank_host[128];
-   char llm_rerank_gpu[64];
-   char llm_rerank_tier[16];
-   char llm_rerank_endpoint[512];
 
    char llm_synth_backend[16]; /* "" | "external" | "local" | "off" */
    char llm_synth_host[128];
@@ -1665,6 +1650,13 @@ typedef struct config
     *                          (0 → default 8) — the thin-log overfit guardrail.
     * kb_ranker_fit_benchmark: path to the recall-track fixture used as the
     *                          promotion gate (empty → benchmarks/rank/kb_hybrid/queries.json).
+    *                          THE DEFAULT IS A PLUMBING SMOKE FIXTURE, NOT A GATE: it
+    *                          holds 5 queries of 2-4 candidates, which is below the
+    *                          fitter's minimum (RANK_FIT_MIN_BENCH_QUERIES) and so
+    *                          refuses every promotion with reason
+    *                          "benchmark_underpowered". That refusal is deliberate —
+    *                          set this to a real held-out fixture before expecting
+    *                          any model to promote.
     * kb_ranker_fit_bench_k:   NDCG cutoff for the gate (0 → default 5).
     * kb_ranker_fit_objective: "pointwise" (default) or "pairwise" — the fitter
     *                          objective. Pairwise learns within-query ordering

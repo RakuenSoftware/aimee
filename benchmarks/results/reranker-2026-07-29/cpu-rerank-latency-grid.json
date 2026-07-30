@@ -1,0 +1,182 @@
+[
+  {
+    "model": "gte-ml-base-int8",
+    "params_M": 306,
+    "candidates": 5,
+    "doc_tokens": 128,
+    "total_tokens": 640,
+    "min_s": 0.1178651099326089,
+    "median_s": 0.11870646895840764,
+    "within_1s": true
+  },
+  {
+    "model": "gte-ml-base-int8",
+    "params_M": 306,
+    "candidates": 5,
+    "doc_tokens": 256,
+    "total_tokens": 1280,
+    "min_s": 0.33000015700235963,
+    "median_s": 0.33067147992551327,
+    "within_1s": true
+  },
+  {
+    "model": "gte-ml-base-int8",
+    "params_M": 306,
+    "candidates": 5,
+    "doc_tokens": 512,
+    "total_tokens": 2560,
+    "min_s": 0.8906599140027538,
+    "median_s": 0.8913491599960253,
+    "within_1s": true
+  },
+  {
+    "model": "gte-ml-base-int8",
+    "params_M": 306,
+    "candidates": 10,
+    "doc_tokens": 128,
+    "total_tokens": 1280,
+    "min_s": 0.3045878360280767,
+    "median_s": 0.3050761300837621,
+    "within_1s": true
+  },
+  {
+    "model": "gte-ml-base-int8",
+    "params_M": 306,
+    "candidates": 10,
+    "doc_tokens": 256,
+    "total_tokens": 2560,
+    "min_s": 0.7803064760519192,
+    "median_s": 0.7872480439255014,
+    "within_1s": true
+  },
+  {
+    "model": "gte-ml-base-int8",
+    "params_M": 306,
+    "candidates": 10,
+    "doc_tokens": 512,
+    "total_tokens": 5120,
+    "min_s": 1.8988810339942575,
+    "median_s": 1.9058485999703407,
+    "within_1s": false
+  },
+  {
+    "model": "gte-ml-base-int8",
+    "params_M": 306,
+    "candidates": 20,
+    "doc_tokens": 128,
+    "total_tokens": 2560,
+    "min_s": 0.7080122859915718,
+    "median_s": 0.7086518310243264,
+    "within_1s": true
+  },
+  {
+    "model": "gte-ml-base-int8",
+    "params_M": 306,
+    "candidates": 20,
+    "doc_tokens": 256,
+    "total_tokens": 5120,
+    "min_s": 1.6703306310810149,
+    "median_s": 1.6735988460713997,
+    "within_1s": false
+  },
+  {
+    "model": "gte-ml-base-int8",
+    "params_M": 306,
+    "candidates": 20,
+    "doc_tokens": 512,
+    "total_tokens": 10240,
+    "min_s": 4.127489038044587,
+    "median_s": 4.17221490398515,
+    "within_1s": false
+  },
+  {
+    "model": "bge-v2-m3-int8",
+    "params_M": 568,
+    "candidates": 5,
+    "doc_tokens": 128,
+    "total_tokens": 640,
+    "min_s": 0.206894377944991,
+    "median_s": 0.23379464691970497,
+    "within_1s": true
+  },
+  {
+    "model": "bge-v2-m3-int8",
+    "params_M": 568,
+    "candidates": 5,
+    "doc_tokens": 256,
+    "total_tokens": 1280,
+    "min_s": 0.5547026119893417,
+    "median_s": 0.5650105850072578,
+    "within_1s": true
+  },
+  {
+    "model": "bge-v2-m3-int8",
+    "params_M": 568,
+    "candidates": 5,
+    "doc_tokens": 512,
+    "total_tokens": 2560,
+    "min_s": 1.6170975180575624,
+    "median_s": 1.620810336084105,
+    "within_1s": false
+  },
+  {
+    "model": "bge-v2-m3-int8",
+    "params_M": 568,
+    "candidates": 10,
+    "doc_tokens": 128,
+    "total_tokens": 1280,
+    "min_s": 0.47294097498524934,
+    "median_s": 0.47439241397660226,
+    "within_1s": true
+  },
+  {
+    "model": "bge-v2-m3-int8",
+    "params_M": 568,
+    "candidates": 10,
+    "doc_tokens": 256,
+    "total_tokens": 2560,
+    "min_s": 1.313108921982348,
+    "median_s": 1.3152652559801936,
+    "within_1s": false
+  },
+  {
+    "model": "bge-v2-m3-int8",
+    "params_M": 568,
+    "candidates": 10,
+    "doc_tokens": 512,
+    "total_tokens": 5120,
+    "min_s": 3.520524231949821,
+    "median_s": 3.53514895203989,
+    "within_1s": false
+  },
+  {
+    "model": "bge-v2-m3-int8",
+    "params_M": 568,
+    "candidates": 20,
+    "doc_tokens": 128,
+    "total_tokens": 2560,
+    "min_s": 1.1453532500891015,
+    "median_s": 1.148741486016661,
+    "within_1s": false
+  },
+  {
+    "model": "bge-v2-m3-int8",
+    "params_M": 568,
+    "candidates": 20,
+    "doc_tokens": 256,
+    "total_tokens": 5120,
+    "min_s": 2.918048599967733,
+    "median_s": 2.9313279080670327,
+    "within_1s": false
+  },
+  {
+    "model": "bge-v2-m3-int8",
+    "params_M": 568,
+    "candidates": 20,
+    "doc_tokens": 512,
+    "total_tokens": 10240,
+    "min_s": 8.44259420700837,
+    "median_s": 8.458861298044212,
+    "within_1s": false
+  }
+]

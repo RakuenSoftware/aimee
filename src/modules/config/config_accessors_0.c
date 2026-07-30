@@ -670,27 +670,6 @@ int config_memory_negation_enabled(void)
    return v;
 }
 
-int config_memory_rerank_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, memory_rerank_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_memory_rerank_top_k(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, memory_rerank_top_k), sizeof(v), &v);
-   return v;
-}
-
-double config_memory_rerank_mix(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, memory_rerank_mix), sizeof(v), &v);
-   return v;
-}
-
 int config_memory_query_expansion_k(void)
 {
    int v = 0;

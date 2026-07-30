@@ -775,7 +775,8 @@ static int kb_cmd_tenancy_init_db2(void)
       fprintf(stderr, "aimee-kb: db2_url not configured (set AIMEE_DB2_URL or run `aimee init`)\n");
       return -1;
    }
-   db2_set_embedding_dim(cfg.embedding_dim > 0 ? cfg.embedding_dim : 1024);
+   db2_set_embedding_dim_default(config_embedding_dim_default());
+   db2_set_embedding_dim(config_embedding_dim_effective(&cfg));
    if (db2_init(cfg.db2_url) != 0)
    {
       fprintf(stderr, "aimee-kb: DB2 not reachable at %s\n", cfg.db2_url);
@@ -1639,6 +1640,20 @@ int main(int argc, char **argv)
       runtime_secret_wipe(embedded, sizeof(embedded));
       return external ? 0 : 1;
    }
+   /* The entrypoint's selection query. It used to parse aimee.yaml with a sed regex —
+    * a second reader of a setting, hardcoding the file paths and assuming the key sits
+    * at the top level. It worked only because config_save happens to write it there,
+    * and its failure was silent: an unparsed key reads as "no embedder selected", the
+    * builtin serves forever, and nothing says so. Ask config instead, which is the
+    * only thing that knows where the value lives and how it is spelled. */
+   if (argc == 2 && strcmp(argv[1], "--print-embedding-model") == 0)
+   {
+      const char *model = config_embedding_model();
+      if (!model || !model[0])
+         return 1; /* nothing selected — the caller starts no embedder */
+      printf("%s\n", model);
+      return 0;
+   }
    if (argc == 2 && strcmp(argv[1], "--vault-llm-auth-configured") == 0)
    {
       char token[513];
@@ -1782,6 +1797,7 @@ int main(int argc, char **argv)
     * halfvec embedding columns are created at the right size. AIMEE_EMBEDDING_DIM
     * overrides the configured value (containerized deploys without a writable
     * aimee.yaml). */
+   db2_set_embedding_dim_default(config_embedding_dim_default());
    db2_set_embedding_dim(config_resolve_embedding_dim(&kb_cfg));
    db2_set_embedding_dim_pinned(config_embedding_dim_is_pinned(&kb_cfg));
    /* unified-llm-container §2: activate the model-identity drift guard (the kb applies

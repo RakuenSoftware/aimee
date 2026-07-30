@@ -110,7 +110,7 @@ int kb_curator_index_narrative_one(const kb_curator_extract_opts_t *opts)
    config_load(&cfg);
    const char *embed_cmd = config_embedding_command(&cfg, NULL);
    float vec[CURATOR_NARRATIVE_DIM];
-   int dim = memory_embed_text(text, embed_cmd, vec, CURATOR_NARRATIVE_DIM);
+   int dim = memory_embed_text(text, embed_cmd, EMBED_INPUT_DOCUMENT, vec, CURATOR_NARRATIVE_DIM);
    if (dim > 0)
    {
       int64_t pid = narrative_point_id(id);

@@ -51,7 +51,6 @@ Recall can combine:
 - entity and relationship graph;
 - code graph;
 - scope, recency, confidence, and lifecycle state;
-- cross-encoder reranking;
 - optional synthesis.
 
 The result keeps the evidence needed to explain why it ranked. A query with weak support can abstain.

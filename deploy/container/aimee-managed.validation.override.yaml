@@ -20,8 +20,3 @@ services:
     volumes:
       - ${AIMEE_VALIDATION_ROOT:?set by validation script}/aimee-kb:/usr/local/bin/aimee-kb:ro
       - ${AIMEE_VALIDATION_ROOT:?set by validation script}/scripts/embed-remote.py:/opt/aimee/scripts/embed-remote.py:ro
-      - ${AIMEE_VALIDATION_ROOT:?set by validation script}/scripts/rerank-remote.py:/opt/aimee/scripts/rerank-remote.py:ro
-  aimee-llm:
-    environment:
-      AIMEE_LLM_STUB: "1"
-      AIMEE_LLM_STUB_DIM: "1024"

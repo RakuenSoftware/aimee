@@ -16,10 +16,12 @@
  * 384-dim vector so the resolve match/upsert path is exercised (the builtin
  * embedder is not linked here). Keeps the link off memory_core.o /
  * pgvec_transport.o. */
-int memory_embed_text(const char *text, const char *command, float *out, int max_dim)
+int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
+                      float *out, int max_dim)
 {
    (void)text;
    (void)command;
+   (void)input_type;
    int dim = max_dim < 384 ? max_dim : 384;
    for (int i = 0; i < dim; i++)
       out[i] = 0.01f * (float)(i + 1);

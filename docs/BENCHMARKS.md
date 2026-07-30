@@ -9,12 +9,12 @@ claims.
 | Area | Measures |
 | --- | --- |
 | memory | recall quality, contradiction, temporal and long-context behavior |
-| retrieval | lexical/dense/graph fusion, reranking, abstention, citation |
+| retrieval | lexical/dense/graph fusion, abstention, citation |
 | curator | extraction, typed artifacts, contradiction and queue throughput |
 | code graph | symbol/caller/blast-radius precision across repositories |
 | delegates | task success, tool use, cost, latency, and failure class |
 | guardrails | allow/deny quality and false positives |
-| inference | embed/rerank/synthesis quality, slots, memory, latency |
+| inference | embed/synthesis quality, slots, memory, latency |
 | event bus | dispatch overhead, flow control, capture, durability, shutdown |
 | provisioning | clean install, readiness, recovery, and upgrade |
 

@@ -223,7 +223,7 @@ Nothing phones home by default. Network calls happen for configured providers, g
 sources, vulnerability checks, telemetry exporters, or other explicit integrations.
 
 Memory and document ingestion can retain sensitive source text. Scope the KB, configure retention,
-and avoid sending restricted evidence to an external reranker or synthesis provider. Memory audit
+and avoid sending restricted evidence to an external synthesis provider. Memory audit
 uses fingerprints for keys that can contain personal data.
 
 ## Non-goals

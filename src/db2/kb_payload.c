@@ -1090,7 +1090,7 @@ int db2_kb_pdf_search_chunks(const char *project, const char *query, int max,
       if (embed_cmd && embed_cmd[0])
       {
          float qvec[EMBED_MAX_DIM];
-         int dim = memory_embed_text(query, embed_cmd, qvec, EMBED_MAX_DIM);
+         int dim = memory_embed_text(query, embed_cmd, EMBED_INPUT_QUERY, qvec, EMBED_MAX_DIM);
          if (dim > 0)
          {
             /* Request enough candidates to fill the remaining result budget even after

@@ -1870,6 +1870,7 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/skills", NULL, RM_EXACT, "skill.list", 0, rh_dispatch_op},
     {"POST", "/v1/skills/show", NULL, RM_EXACT, "skill.show", 0, rh_dispatch_op},
     {"GET", "/v1/hosts", NULL, RM_EXACT, "hosts.list", 0, rh_dispatch_op},
+    {"GET", "/v1/embedders", NULL, RM_EXACT, "embedders.list", 0, rh_dispatch_op},
 
     /* HUD status + trajectory export read families (hub-migration P1),
      * dispatch-backed; caps derived from the op (both CAP_SESSION_READ). */

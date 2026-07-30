@@ -1,0 +1,32 @@
+[
+  {
+    "model": "gte-multilingual-reranker-base (ONNX int8)",
+    "config": "20x128",
+    "candidates": 20,
+    "max_tokens": 128,
+    "ndcg_at_10": 0.6115696161682971,
+    "cases": 1000,
+    "cpu_s_per_query": 0.730842382850009,
+    "degenerate_score_cases": 0
+  },
+  {
+    "model": "gte-multilingual-reranker-base (ONNX int8)",
+    "config": "10x256",
+    "candidates": 10,
+    "max_tokens": 256,
+    "ndcg_at_10": 0.39199292331678554,
+    "cases": 1000,
+    "cpu_s_per_query": 0.7868403043339495,
+    "degenerate_score_cases": 0
+  },
+  {
+    "model": "gte-multilingual-reranker-base (ONNX int8)",
+    "config": "20x512",
+    "candidates": 20,
+    "max_tokens": 512,
+    "ndcg_at_10": 0.717832064444945,
+    "cases": 1000,
+    "cpu_s_per_query": 4.096644411953981,
+    "degenerate_score_cases": 0
+  }
+]

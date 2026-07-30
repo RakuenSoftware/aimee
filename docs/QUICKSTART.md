@@ -59,7 +59,7 @@ Deploy also claims the signed-in browser account as the first remote owner. It d
 
 When the wizard creates a local `aimee-llm`, it also creates a separate, persistent 256-bit service
 identity for `aimee-kb`. The managed stack supplies the endpoint, role/tier configuration, and bearer
-to both containers, then the KB uses that credential for embedding, reranking, and synthesis. This is
+to both containers, then the KB uses that credential for embedding and synthesis. This is
 automatic; do not copy the user's enrollment bearer into the LLM configuration. The managed LLM
 refuses to start if its service credential is missing.
 

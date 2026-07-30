@@ -369,14 +369,6 @@ static const config_schema_entry_t config_schema[] = {
     {"db2_pool_size", SCHEMA_INT, 0},
     {"kb_mode", SCHEMA_STRING, 0},
     {"llm_embed_backend", SCHEMA_STRING, 0},
-    {"llm_embed_host", SCHEMA_STRING, 0},
-    {"llm_embed_gpu", SCHEMA_STRING, 0},
-    {"llm_embed_tier", SCHEMA_STRING, 0},
-    {"llm_rerank_backend", SCHEMA_STRING, 0},
-    {"llm_rerank_host", SCHEMA_STRING, 0},
-    {"llm_rerank_gpu", SCHEMA_STRING, 0},
-    {"llm_rerank_tier", SCHEMA_STRING, 0},
-    {"llm_rerank_endpoint", SCHEMA_STRING, 0},
     {"llm_synth_backend", SCHEMA_STRING, 0},
     {"llm_synth_host", SCHEMA_STRING, 0},
     {"llm_synth_gpu", SCHEMA_STRING, 0},
@@ -399,7 +391,6 @@ static const config_schema_entry_t config_schema[] = {
     {"model_reasoning_effort", SCHEMA_STRING, 0},
     {"embedding_dim", SCHEMA_INT, 0},
     {"memory_weight_profile", SCHEMA_STRING, 0},
-    {"memory_rerank", SCHEMA_OBJECT, 0},
     {"memory_query_expansion", SCHEMA_OBJECT, 0},
     {"memory_recall_lanes", SCHEMA_OBJECT, 0},
     {"memory_maintenance", SCHEMA_OBJECT, 0},
@@ -748,16 +739,6 @@ static void config_set_defaults(config_t *cfg)
     * is authoritative and refuses a mismatch. (Was defaulted to 1024, which made
     * every deployment look "pinned" and silently disabled §2a/§2b.) */
    cfg->embedding_dim = 0;
-   /* The cross-encoder rerank stage (Ettin reranker sized to the embedder tier:
-    * 1b with the 4b embedder, 400m with the 0.6b; served by the
-    * embedder service /rerank, client scripts/rerank-remote.py) is the third
-    * pipeline stage after the embedder, and is default-ON: every retrieval
-    * runs a top-K cross-encoder pass over the dense/lexical candidates. It
-    * degrades safely to plain hybrid ordering if the reranker service is absent
-    * or errors, so default-on is safe even without the embedder container. */
-   cfg->memory_rerank_enabled = 1;
-   snprintf(cfg->memory_rerank_command, sizeof(cfg->memory_rerank_command), "%s",
-            "python3 /opt/aimee/scripts/rerank-remote.py");
    cfg->memory_routing_enabled = 1;
    /* Negation-aware retrieval defaults ON: for negatively-polarised queries it
     * promotes memories carrying the same negated concept (overlapping "not_<token>"
@@ -1463,22 +1444,6 @@ int config_load_file(config_t *cfg)
           {"kb_mode", offsetof(config_t, kb_mode), sizeof(((config_t *)0)->kb_mode)},
           {"llm_embed_backend", offsetof(config_t, llm_embed_backend),
            sizeof(((config_t *)0)->llm_embed_backend)},
-          {"llm_embed_host", offsetof(config_t, llm_embed_host),
-           sizeof(((config_t *)0)->llm_embed_host)},
-          {"llm_embed_gpu", offsetof(config_t, llm_embed_gpu),
-           sizeof(((config_t *)0)->llm_embed_gpu)},
-          {"llm_embed_tier", offsetof(config_t, llm_embed_tier),
-           sizeof(((config_t *)0)->llm_embed_tier)},
-          {"llm_rerank_backend", offsetof(config_t, llm_rerank_backend),
-           sizeof(((config_t *)0)->llm_rerank_backend)},
-          {"llm_rerank_host", offsetof(config_t, llm_rerank_host),
-           sizeof(((config_t *)0)->llm_rerank_host)},
-          {"llm_rerank_gpu", offsetof(config_t, llm_rerank_gpu),
-           sizeof(((config_t *)0)->llm_rerank_gpu)},
-          {"llm_rerank_tier", offsetof(config_t, llm_rerank_tier),
-           sizeof(((config_t *)0)->llm_rerank_tier)},
-          {"llm_rerank_endpoint", offsetof(config_t, llm_rerank_endpoint),
-           sizeof(((config_t *)0)->llm_rerank_endpoint)},
           {"llm_synth_backend", offsetof(config_t, llm_synth_backend),
            sizeof(((config_t *)0)->llm_synth_backend)},
           {"llm_synth_host", offsetof(config_t, llm_synth_host),
@@ -1510,8 +1475,6 @@ int config_load_file(config_t *cfg)
    config_apply_inference_backend_defaults(cfg, root);
 
    config_parse_memory_negation_section(cfg, root);
-
-   config_parse_memory_rerank_section(cfg, root);
 
    config_parse_memory_query_expansion_section(cfg, root);
 

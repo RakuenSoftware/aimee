@@ -12,34 +12,6 @@
 # webchat on :8443.
 name: aimee
 services:
-  # Unified llama.cpp/Vulkan container: embed (/embed,/embed_batch), rerank
-  # (/rerank) and synth (/v1/chat/completions). One model-less image; the tier is
-  # chosen at runtime via AIMEE_LLM_TIER (unset ≡ cpu here) and the models are
-  # downloaded to the /models volume on first boot. The kb sends no bearer, so it
-  # runs auth-off (AIMEE_LLM_AUTH_TOKEN empty) on the internal net.
-  aimee-llm:
-    restart: unless-stopped
-    # Profile-gated: brought up only when the page-2 config puts a role local
-    # (COMPOSE_PROFILES=...,llm, emitted by `aimee config deploy-env`).
-    profiles: ["llm"]
-    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
-    environment:
-      AIMEE_LLM_PORT: "8742"
-      AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}
-      # cpu tier by default (unset ≡ cpu); the GPU override sets small/mid/large.
-      AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-cpu}
-      AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
-    volumes:
-      # Persist the downloaded per-tier GGUFs so restarts don't re-fetch.
-      - aimee-llm-models:/models
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8742/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      # Cold first boot downloads the tier's models before /health is OK.
-      start_period: 1200s
-
   aimee-kb:
     restart: unless-stopped
     image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:latest}
@@ -55,7 +27,13 @@ services:
       # External DB2 credentials are streamed into the KB Vault by the
       # disposable Compose helper; never persist them in Config.Env.
       # One knob: embed + rerank + synth all via the aimee-llm container.
-      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8742}
+      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
+      # The wizard's embedder choice, and the endpoint for an external one. The kb
+      # MUST receive both: `aimee config deploy-env` emits them, and without them
+      # reaching the container the entrypoint sees no selection, starts nothing, and
+      # the builtin serves forever — the wizard's embedder silently never runs.
+      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
+      AIMEE_EMBEDDER_URL: ${AIMEE_EMBEDDER_URL:-}
       # Embedding dim — CPU tier default 1024; the GPU override sets 2560.
       AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-1024}
       AIMEE_KB_HTTP_BIND: "1"
@@ -67,12 +45,6 @@ services:
     command: ["--http-port=8741"]
     ports:
       - "8741:8741"
-    depends_on:
-      # required:false so the kb starts (fail-open on embedding) when the aimee-llm
-      # profile is off; it still waits for aimee-llm to be healthy when on.
-      aimee-llm:
-        condition: service_healthy
-        required: false
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
       interval: 10s

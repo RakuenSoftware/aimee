@@ -197,29 +197,46 @@ int main(void)
               "junk->junk\nQwen/Qwen3-Embedding-0.6B@def->Qwen/Qwen3-Embedding-0.6B@xyz", err,
               sizeof err) == 0); /* newline-separated entry admits */
 
-   /* Reranker identity is record-only (no corpus vectors / no score cache): a
-    * swap never refuses, and the recorded value tracks the latest. */
+   /* The vector-space guard: pooling/prefix changes keep the dim AND the model name,
+    * so this is the only guard that can see them. Unlike the model guard there is no
+    * compat list — a different prefix pair is definitionally a different space. */
    err[0] = '\0';
-   assert(db2_reranker_model_record(conn, NULL, NULL, err, sizeof err) == 0); /* no-op */
-   assert(db2_reranker_model_record(conn, "ettin-reranker-400m@v1", "/v1/rerank,fa=on", err,
-                                    sizeof err) == 0);
-   assert(db2_reranker_model_record(conn, "ettin-reranker-68m@v1", "/v1/rerank,fa=on", err,
-                                    sizeof err) == 0); /* swap is fine */
-   {
-      char rr[160];
-      assert(aimee_pg_exec(conn, "SELECT 1", err, sizeof err) == 0); /* conn ok */
-      aimee_pg_stmt_t *st =
-          aimee_pg_prepare(conn, "SELECT value FROM kb_meta WHERE key = 'schema_reranker_model_id'",
-                           err, sizeof err);
-      assert(st && aimee_pg_step(st, err, sizeof err) == AIMEE_PG_ROW);
-      snprintf(rr, sizeof rr, "%s", aimee_pg_column_text(st, 0));
-      aimee_pg_finalize(st);
-      assert(strcmp(rr, "ettin-reranker-68m@v1") == 0);
-   }
+   assert(db2_embedder_serving_record_or_check(conn, NULL, err, sizeof err) == 0); /* no-op */
+   assert(db2_embedder_serving_record_or_check(conn, "", err, sizeof err) == 0);   /* no-op */
+   assert(db2_embedder_serving_record_or_check(conn, "nomic/aaaa", err, sizeof err) == 0); /* rec */
+   assert(db2_embedder_serving_record_or_check(conn, "nomic/aaaa", err, sizeof err) == 0); /* == */
+   assert(err[0] == '\0');
+   /* Same model, different digest = the prefix/pooling flip this guard exists for. */
+   assert(db2_embedder_serving_record_or_check(conn, "nomic/bbbb", err, sizeof err) == -1);
+   assert(strstr(err, "Re-embed") != NULL);
+   /* The identity is a digest, so the message must not claim which field moved. */
+   assert(strstr(err, "same dim") == NULL);
+   assert(strstr(err, "nomic/aaaa") != NULL && strstr(err, "nomic/bbbb") != NULL);
+   /* A refusal must not overwrite the recorded identity: the corpus is still the old
+    * space until it is actually re-embedded. */
+   err[0] = '\0';
+   assert(db2_embedder_serving_record_or_check(conn, "nomic/aaaa", err, sizeof err) == 0);
+   /* An endpoint that stops reporting an identity must not wipe the record either —
+    * it degrades to a no-op, so the next endpoint that does report is still checked. */
+   assert(db2_embedder_serving_record_or_check(conn, "", err, sizeof err) == 0);
+   assert(db2_embedder_serving_record_or_check(conn, "nomic/bbbb", err, sizeof err) == -1);
+   assert(db2_embedder_serving_record_or_check(NULL, "nomic/aaaa", err, sizeof err) == -1);
 
-   /* NULL conn -> -1 for both guards. */
+   /* The builtin lexical embedder declares an identity too, and switching off it must be
+    * caught. This was the one transition nothing could see: the builtin is 384-dim and so
+    * is the bundled model, so the dim guard is silent, and while the builtin reported NO
+    * identity the guard simply recorded the model's fresh over a lexically-embedded
+    * corpus. */
+   err[0] = '\0';
+   assert(aimee_pg_exec(conn, "DELETE FROM kb_meta WHERE key = 'schema_embedder_serving_id'", err,
+                        sizeof err) == 0);
+   assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);
+   assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);
+   assert(db2_embedder_serving_record_or_check(conn, "bekko-a25m/abcd", err, sizeof err) == -1);
+   assert(strstr(err, "builtin/lexical-v1") != NULL && strstr(err, "bekko-a25m/abcd") != NULL);
+
+   /* NULL conn -> -1. */
    assert(db2_embedding_model_record_or_check(NULL, "x", NULL, err, sizeof err) == -1);
-   assert(db2_reranker_model_record(NULL, "x", "y", err, sizeof err) == -1);
 
    db2_test_shim_close();
    printf("ok\n");

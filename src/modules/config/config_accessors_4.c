@@ -1263,51 +1263,6 @@ int config_set_memory_negation_enabled(int value)
    return rc;
 }
 
-int config_set_memory_rerank_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_rerank_enabled = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_rerank_top_k(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_rerank_top_k = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_rerank_mix(double value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_rerank_mix = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
 int config_set_memory_query_expansion_k(int value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));

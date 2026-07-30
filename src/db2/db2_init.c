@@ -54,12 +54,28 @@ static void db2_maybe_clear_sqlite_cache(sqlite3 *db)
 static void *g_conn = NULL;
 static char g_pg_url[512] = "";
 static pthread_mutex_t g_init_lock = PTHREAD_MUTEX_INITIALIZER;
-/* Embedding dimension for the DB2 halfvec columns (one embedder per deployment:
- * 1024 for pplx-0.6b, 2560 for pplx-4b). Set from the loaded config by the
- * server / aimee-kb startup via db2_set_embedding_dim() before db2_init(), so
- * this layer needs no config dependency. 0 = unset -> db2_embedding_dim()
- * reports the 1024 default (the default embedder is pplx-0.6b). */
+/* Embedding dimension for the DB2 halfvec columns (one embedder per deployment).
+ * Set from the loaded config by the server / aimee-kb startup via
+ * db2_set_embedding_dim() before db2_init(), so this layer needs no config
+ * dependency. 0 = unset, which lets the §2a precedence (pinned > recorded >
+ * probed > default) fall through to the injected default below. A deployment that
+ * predates an embedder change has its old dim RECORDED in
+ * kb_meta.schema_embedding_dim, and the recorded value outranks the default, so an
+ * existing corpus keeps working and is migrated deliberately via `aimee kb reembed`. */
 static int g_embed_dim = 0;
+
+/* The default width, INJECTED from config (config_embedding_dim_default) at the
+ * same startup site that sets g_embed_dim. This layer deliberately holds no
+ * literal of its own: the width is declared once, in config, and a copy here
+ * could disagree with the embedder that is actually running. 0 = never injected,
+ * which db2_embedding_dim() reports as 0 so callers fail loudly instead of
+ * sizing columns from a guess. */
+static int g_embed_dim_default = 0;
+
+void db2_set_embedding_dim_default(int dim)
+{
+   g_embed_dim_default = dim > 0 ? dim : 0;
+}
 
 /* §2a: whether the operator pinned the dim. When 0 (default) and nothing was
  * pinned, db2_init prefers a recorded kb_meta.schema_embedding_dim over the
@@ -87,7 +103,7 @@ void db2_init_unlock(void)
 
 int db2_embedding_dim(void)
 {
-   return g_embed_dim > 0 ? g_embed_dim : 1024;
+   return g_embed_dim > 0 ? g_embed_dim : g_embed_dim_default;
 }
 
 void db2_set_embedding_dim_pinned(int pinned)
@@ -135,8 +151,8 @@ int db2_probe_embedder_dim(int budget_ms, int *out)
  * insufficient: two different models can share a dim (pplx-embed and the default
  * Qwen3-Embedding-0.6B are BOTH 1024-d), so a same-dim swap would silently mix
  * incompatible vector spaces. These globals carry the configured embedder model
- * identity (repo@sha), the reranker identity + scoring contract, and the
- * compat-list of admitted transitions, set from config before db2_init like the
+ * identity (repo@sha) and the compat-list of admitted transitions, set from
+ * config before db2_init like the
  * dim above. INVARIANT: set at exactly the sites that call db2_set_embedding_dim()
  * — the serving config-load paths (cmd_core bootstrap_db2, kb_main, cmd_doctor);
  * the connectivity-probe path (bootstrap_db2_try_url) and tests deliberately set
@@ -145,8 +161,15 @@ int db2_probe_embedder_dim(int budget_ms, int *out)
  * has not yet adopted the unified container (the live torch embedder reports no
  * identity) is unaffected. */
 static char g_embedder_model_id[160] = "";
-static char g_reranker_model_id[160] = "";
-static char g_reranker_contract[96] = "";
+/* The serving endpoint's vector-space identity, probed (not configured) — see
+ * db2_set_embedder_serving_id. Empty leaves the guard a no-op. */
+static char g_embedder_serving_id[160] = "";
+static db2_embedder_serving_probe_fn g_embedder_serving_probe = NULL;
+
+void db2_set_embedder_serving_probe(db2_embedder_serving_probe_fn fn)
+{
+   g_embedder_serving_probe = fn;
+}
 static char g_embedding_compat[1024] = ""; /* CSV of "old_id->new_id" transitions */
 
 void db2_set_embedder_model_id(const char *model_id)
@@ -159,20 +182,15 @@ const char *db2_embedder_model_id(void)
    return g_embedder_model_id;
 }
 
-void db2_set_reranker_identity(const char *model_id, const char *contract)
+void db2_set_embedder_serving_id(const char *serving_id)
 {
-   snprintf(g_reranker_model_id, sizeof(g_reranker_model_id), "%s", model_id ? model_id : "");
-   snprintf(g_reranker_contract, sizeof(g_reranker_contract), "%s", contract ? contract : "");
+   snprintf(g_embedder_serving_id, sizeof(g_embedder_serving_id), "%s",
+            serving_id ? serving_id : "");
 }
 
-const char *db2_reranker_model_id(void)
+const char *db2_embedder_serving_id(void)
 {
-   return g_reranker_model_id;
-}
-
-const char *db2_reranker_contract(void)
-{
-   return g_reranker_contract;
+   return g_embedder_serving_id;
 }
 
 void db2_set_embedding_compat(const char *compat_csv)
@@ -909,14 +927,29 @@ int db2_init(const char *libpq_url)
    /* unified-llm-container §2: model-identity drift guard, applied here (where the
     * configured identity globals live) rather than in the lower db_schema layer.
     * Record/check the EMBEDDER model identity alongside the dim — closing the
-    * same-dim different-model footgun (two models can share a dim) — and record
-    * the reranker identity. Both no-op when the identity is unset (the legacy
-    * torch embedder reports none), so existing deployments are unaffected; they
-    * activate when the unified container supplies the identity via the setters. */
+    * same-dim different-model footgun (two models can share a dim). A no-op when
+    * the identity is unset (the legacy torch embedder reports none), so existing
+    * deployments are unaffected; it activates when the unified container supplies
+    * the identity via the setter. */
+   /* Ask for the serving identity here, not at startup: the embedder runs beside the kb
+    * and is not up yet when the kb boots. An unreachable probe leaves the identity empty,
+    * which makes the guard a no-op for this start rather than blocking the boot. */
+   if (!g_embedder_serving_id[0] && g_embedder_serving_probe)
+   {
+      char sid[160] = "";
+      char perr[192] = "";
+      if (g_embedder_serving_probe(sid, sizeof(sid), perr, sizeof(perr)) == 0)
+         db2_set_embedder_serving_id(sid);
+      else
+         fprintf(stderr,
+                 "aimee: embedder serving-identity probe failed (%s); vector-space "
+                 "guard inactive for this start\n",
+                 perr[0] ? perr : "unreachable");
+   }
    if (db2_embedding_model_record_or_check(conn, g_embedder_model_id, g_embedding_compat, errbuf,
                                            sizeof(errbuf)) != 0 ||
-       db2_reranker_model_record(conn, g_reranker_model_id, g_reranker_contract, errbuf,
-                                 sizeof(errbuf)) != 0)
+       db2_embedder_serving_record_or_check(conn, g_embedder_serving_id, errbuf, sizeof(errbuf)) !=
+           0)
    {
       fprintf(stderr, "aimee: db2_init: model-identity guard failed: %s\n", errbuf);
       aimee_pg_close(conn);
@@ -1182,8 +1215,8 @@ void db2_shutdown(void)
    g_embedder_probe = NULL;
    g_dim_probe_budget_ms = 120000;
    g_embedder_model_id[0] = '\0';
-   g_reranker_model_id[0] = '\0';
-   g_reranker_contract[0] = '\0';
+   g_embedder_serving_id[0] = '\0';
+   g_embedder_serving_probe = NULL;
    g_embedding_compat[0] = '\0';
    pthread_mutex_unlock(&g_init_lock);
 }

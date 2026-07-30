@@ -427,18 +427,15 @@ void memory_query_rewrite(const char *query, const config_t *cfg, memory_query_r
 
 int memory_find_facts(const char *query, int limit, memory_t *out, int max)
 {
-   /* Stage timing: separate the embed-spawn and rerank-spawn costs (the suspected
-    * dominant terms in live find_facts latency) from the rest, one line per call.
-    * Counters live in memory_core_helpers.inc (same TU). */
+   /* Stage timing: separate the embed-spawn cost (the suspected dominant term in
+    * live find_facts latency) from the rest, one line per call. Counters live in
+    * memory_core_helpers.inc (same TU). */
    long long _ff_t0 = util_now_ms();
    s_qembed_ms = 0;
    s_qembed_spawns = 0;
-   s_rerank_ms = 0;
-   s_rerank_calls = 0;
    int n = memory_find_facts_scoped(query, NULL, NULL, limit, out, max);
-   aimee_log(LOG_INFO, "memory.find_facts.timing",
-             "total=%lldms embed=%lldms/%d rerank=%lldms/%d results=%d", util_now_ms() - _ff_t0,
-             s_qembed_ms, s_qembed_spawns, s_rerank_ms, s_rerank_calls, n);
+   aimee_log(LOG_INFO, "memory.find_facts.timing", "total=%lldms embed=%lldms/%d results=%d",
+             util_now_ms() - _ff_t0, s_qembed_ms, s_qembed_spawns, n);
    /* Dogfood record at the non-scoped entry point so MCP/agent callers land
     * here; scoped callers (CLI cmd_memory_find_facts) log themselves. */
    if (n > 0 && out)

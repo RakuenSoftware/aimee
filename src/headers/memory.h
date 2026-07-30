@@ -91,10 +91,8 @@ typedef struct
    double salience;
    double surprise;
    double pagerank;
-   double cross_encoder;  /* raw cross-encoder rerank score (0.0 when disabled/unavailable) */
-   double hybrid_total;   /* hybrid score BEFORE cross-encoder blend, for explain surface */
-   double blended_total;  /* final score AFTER cross-encoder blend (== total when rerank ran) */
-   double rerank_mix;     /* blend weight used (0.0 when rerank did not run) */
+   double hybrid_total;   /* lexical+dense hybrid score, for the explain surface */
+   double blended_total;  /* final score after the post-hybrid passes */
    double graph_score;    /* utility-weighted graph boost contribution */
    double code_proximity; /* code-projection edge proximity score */
    double utility;        /* decayed utility signal from feedback */
@@ -957,7 +955,12 @@ int memory_graph_prune(void);
 int memory_graph_normalize(void);
 
 int memory_embed(int64_t memory_id, const char *command);
-int memory_embed_text(const char *text, const char *command, float *out, int max_dim);
+/* `input_type` declares which side of the embedder this text is (see
+ * embed_input_type_t). It is required rather than defaulted so the compiler forces
+ * every call site to state it — a query silently embedded as a document costs
+ * retrieval quality and raises no error. */
+int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
+                      float *out, int max_dim);
 
 typedef struct
 {

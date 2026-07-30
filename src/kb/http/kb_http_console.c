@@ -583,7 +583,7 @@ static int console_pipeline_config(const char *body, char *out_buf, int out_cap)
 /* ── KB-owned settings ────────────────────────────────────────────────────────
  * The config the KB OWNS, edited here rather than on aimee-server's Settings
  * page. The split is by which binary the option actually governs, not by key
- * prefix: the kb runs the embedder, the reranker, and the synth tier, so their
+ * prefix: the kb runs the embedder and the synth tier, so their
  * model/endpoint/topology keys belong to the kb console. Deliberately NOT here:
  * kb_mode / kb_client_url / kb_client_bearer_token (they configure how
  * AIMEE-SERVER reaches a kb — server-side client config, read in
@@ -607,15 +607,7 @@ static const kb_setting_t KB_SETTINGS[] = {
     {"embedding_dim", "Embedder", 0},
     {"embedding_endpoint", "Embedder", 0},
     {"llm_embed_backend", "Embedder", 1},
-    {"llm_embed_host", "Embedder", 1},
-    {"llm_embed_gpu", "Embedder", 1},
-    {"llm_embed_tier", "Embedder", 1},
     /* Reranker. */
-    {"llm_rerank_backend", "Reranker", 1},
-    {"llm_rerank_host", "Reranker", 1},
-    {"llm_rerank_gpu", "Reranker", 1},
-    {"llm_rerank_tier", "Reranker", 1},
-    {"llm_rerank_endpoint", "Reranker", 1},
     /* Synth tier. */
     {"llm_synth_backend", "Synth", 1},
     {"llm_synth_host", "Synth", 1},

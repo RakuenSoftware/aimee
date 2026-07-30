@@ -25,30 +25,6 @@
 # compose plugins an install-time tier map is a tracked follow-up.
 name: aimee
 services:
-  aimee-llm:
-    restart: unless-stopped
-    # Profile-gated: brought up only when the page-2 config puts a role local
-    # (COMPOSE_PROFILES=...,llm, emitted by `aimee config deploy-env`).
-    profiles: ["llm"]
-    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
-    environment:
-      AIMEE_LLM_PORT: "8742"
-      AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-99}
-      # Synth tier chosen at runtime (small/mid/large); mid fits the 24GB card.
-      AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-mid}
-      AIMEE_LLM_SYNTH_CTX: ${AIMEE_LLM_SYNTH_CTX:-131072}
-      AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
-    devices:
-      - "/dev/dri:/dev/dri" # AMD render path; LXC2Docker adds the cgroup allow
-    volumes:
-      - aimee-llm-models:/models # persist the downloaded per-tier GGUFs
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8742/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 1200s # cold first boot downloads the tier's models
-
   aimee-kb:
     restart: unless-stopped
     image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:latest}
@@ -62,15 +38,18 @@ services:
       # find GUI-cloned repos.
       AIMEE_WORKSPACES_DIR: /var/lib/aimee-workspaces
       # External DB2 credentials are streamed into Vault before `up`.
-      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8742}
+      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
+      # The wizard's embedder choice, and the endpoint for an external one. The kb
+      # MUST receive both: `aimee config deploy-env` emits them, and without them
+      # reaching the container the entrypoint sees no selection, starts nothing, and
+      # the builtin serves forever — the wizard's embedder silently never runs.
+      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
+      AIMEE_EMBEDDER_URL: ${AIMEE_EMBEDDER_URL:-}
       AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-2560}
       AIMEE_KB_HTTP_BIND: "1"
     command: ["--http-port=8741"]
     ports:
       - "8741:8741"
-    depends_on:
-      # required:false: kb fail-opens on embedding when the llm profile is off.
-      aimee-llm: { condition: service_healthy, required: false }
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
       interval: 10s

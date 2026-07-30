@@ -1,5 +1,6 @@
 #include "aimee.h"
 #include "config_database.h"
+#include "config_embedding_dim.h" /* CONFIG_EMBEDDING_DIM_DEFAULT — the one declaration */
 #include "runtime_secret.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -60,11 +61,18 @@ int config_apply_db2_url_env_override(config_t *cfg)
    return 0;
 }
 
+int config_embedding_dim_default(void)
+{
+   return CONFIG_EMBEDDING_DIM_DEFAULT;
+}
+
 /* Effective embedding dimension: the AIMEE_EMBEDDING_DIM env override when set
  * and valid (1..EMBED_MAX_DIM), else cfg->embedding_dim. The env lets a
  * containerized deploy set the dim without a writable aimee.yaml — it must match
- * the running embedder model (1024 for pplx-embed-v1-0.6b, 2560 for the default
- * pplx-embed-v1-4b). Non-mutating so const callers can use it. */
+ * the running embedder model. Normally it should be left UNSET so the dim is
+ * derived (pinned > recorded > probed > default); setting it is an operator pin.
+ * Returns 0 for "nothing pinned" — see config_embedding_dim_effective() for a
+ * width you can use. Non-mutating so const callers can use it. */
 int config_resolve_embedding_dim(const config_t *cfg)
 {
    int dim = cfg ? cfg->embedding_dim : 0;
@@ -79,6 +87,63 @@ int config_resolve_embedding_dim(const config_t *cfg)
               EMBED_MAX_DIM, env);
    }
    return dim;
+}
+
+/* The width to embed and size columns with: the pin when there is one, else the
+ * declared default. Every caller that used to keep its own fallback literal calls
+ * this instead. */
+int config_embedding_dim_effective(const config_t *cfg)
+{
+   int dim = config_resolve_embedding_dim(cfg);
+   return dim > 0 ? dim : CONFIG_EMBEDDING_DIM_DEFAULT;
+}
+
+/* No-arg form, for callers that want the deployment's width and hold no config_t
+ * (the CLI doctor, reporting what it expects the embedder to return). Same answer
+ * as config_embedding_dim_effective against the loaded config. */
+int config_embedding_dim_current(void)
+{
+   int pinned = config_embedding_dim();
+   const char *env = getenv("AIMEE_EMBEDDING_DIM");
+   if (env && env[0])
+   {
+      char *end = NULL;
+      long v = strtol(env, &end, 10);
+      if (end && *end == '\0' && v >= 1 && v <= EMBED_MAX_DIM)
+         return (int)v;
+   }
+   return pinned > 0 ? pinned : CONFIG_EMBEDDING_DIM_DEFAULT;
+}
+
+/* The synthesis endpoint — see config_database.h. AIMEE_LLM_URL outranks the stored
+ * field for the same reason it does for the embedder: a containerized deploy sets the
+ * environment, not a writable aimee.yaml. Trailing slashes are trimmed before the /v1
+ * suffix is judged, so "http://h:8742/" and "http://h:8742/v1/" both normalize. */
+int config_synth_chat_endpoint(const config_t *cfg, char *out, size_t out_len)
+{
+   if (!out || out_len == 0)
+      return 0;
+   out[0] = '\0';
+
+   const char *endpoint = getenv("AIMEE_LLM_URL");
+   if (!endpoint || !endpoint[0])
+      endpoint = cfg ? cfg->llm_synth_endpoint : NULL;
+   if (!endpoint || !endpoint[0])
+      return 0;
+
+   size_t n = strlen(endpoint);
+   while (n > 0 && endpoint[n - 1] == '/')
+      n--;
+   if (n == 0)
+      return 0; /* "/" or "///" names nothing */
+   int has_v1 = (n >= 3 && strncmp(endpoint + n - 3, "/v1", 3) == 0);
+   int wrote = snprintf(out, out_len, "%.*s%s", (int)n, endpoint, has_v1 ? "" : "/v1");
+   if (wrote < 0 || (size_t)wrote >= out_len)
+   {
+      out[0] = '\0'; /* never hand back a truncated URL */
+      return 0;
+   }
+   return 1;
 }
 
 /* §2a: pinned iff the resolved operator dim is positive. Keeping this defined in
@@ -119,25 +184,16 @@ void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
    } while (0)
 
    const int remote_kb = strcmp(cfg->kb_mode, "remote") == 0;
-   const char *eb = cfg->llm_embed_backend, *rb = cfg->llm_rerank_backend,
-              *sb = cfg->llm_synth_backend;
-   const int any_local =
-       strcmp(eb, "local") == 0 || strcmp(rb, "local") == 0 || strcmp(sb, "local") == 0;
+   const char *eb = cfg->llm_embed_backend, *sb = cfg->llm_synth_backend;
 
-   /* COMPOSE_PROFILES: a remote kb deploys nothing; a local kb runs the "kb"
-    * service, plus the "llm" profile whenever any role is served locally here.
-    *
-    * ONE LLM service for every tier. There used to be a second, pre-baked
-    * aimee-llm-cpu image on a mutually exclusive "llm-cpu" profile, picked when
-    * no role asked for a GPU tier. It is gone: aimee-llm is model-less and
-    * downloads whichever tier the roles select (AIMEE_LLM_*_TIER) on first boot,
-    * so one image serves cpu and GPU alike and there is no second image to keep
-    * in step. Keeping it meant every gateway change had to be republished twice —
-    * and when it was not, the stale cpu image served a /health with no `dim`,
-    * which the kb gates on, so the kb never became healthy on a fresh install. */
+   /* COMPOSE_PROFILES: a remote kb deploys nothing; a local kb runs the "kb" service
+    * and that is all. There is no longer an inference service to gate a profile on —
+    * the kb embeds in-container from baked weights and the reranker is gone, so the
+    * "llm" profile has nothing behind it. Synthesis resolves an external endpoint,
+    * which is configuration rather than a deployed service. */
    char profiles[64] = "";
    if (!remote_kb)
-      snprintf(profiles, sizeof(profiles), "kb%s", any_local ? ",llm" : "");
+      snprintf(profiles, sizeof(profiles), "kb");
    EMITF("COMPOSE_PROFILES=%s\n", profiles);
 
    if (remote_kb)
@@ -147,35 +203,30 @@ void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
       return; /* connect to the existing kb; nothing else is deployed */
    }
 
-   /* Per-role plugin env (Phase-0 AIMEE_LLM_<ROLE>_MODE/TIER/URL). */
-   if (deploy_role_mode(eb)[0])
-      EMITF("AIMEE_LLM_EMBED_MODE=%s\n", deploy_role_mode(eb));
-   if (strcmp(eb, "local") == 0 && cfg->llm_embed_tier[0])
-      EMITF("AIMEE_LLM_EMBED_TIER=%s\n", cfg->llm_embed_tier);
+   /* The embedder. There is no per-role container to size or place any more: the kb
+    * serves the selected model itself, so all the deploy layer passes on is WHICH model
+    * (the wizard's choice, which the kb resolves from its registry) and, for an external
+    * embedder, the endpoint to use instead. */
+   if (cfg->embedding_model[0])
+      EMITF("EMBEDDER_MODEL=%s\n", cfg->embedding_model);
    if (strcmp(eb, "external") == 0 && cfg->embedding_endpoint[0])
-      EMITF("AIMEE_LLM_EMBED_URL=%s\n", cfg->embedding_endpoint);
-
-   if (deploy_role_mode(rb)[0])
-      EMITF("AIMEE_LLM_RERANK_MODE=%s\n", deploy_role_mode(rb));
-   if (strcmp(rb, "local") == 0 && cfg->llm_rerank_tier[0])
-      EMITF("AIMEE_LLM_RERANK_TIER=%s\n", cfg->llm_rerank_tier);
-   if (strcmp(rb, "external") == 0 && cfg->llm_rerank_endpoint[0])
-      EMITF("AIMEE_LLM_RERANK_URL=%s\n", cfg->llm_rerank_endpoint);
+      EMITF("AIMEE_EMBEDDER_URL=%s\n", cfg->embedding_endpoint);
 
    if (deploy_role_mode(sb)[0])
       EMITF("AIMEE_LLM_SYNTH_MODE=%s\n", deploy_role_mode(sb));
    if (strcmp(sb, "local") == 0 && cfg->llm_synth_tier[0])
       EMITF("AIMEE_LLM_SYNTH_TIER=%s\n", cfg->llm_synth_tier);
+   /* AIMEE_LLM_URL, not AIMEE_LLM_SYNTH_URL. The latter was the retired gateway's
+    * own variable — it told aimee-llm where to proxy synth — and with the gateway
+    * gone NOTHING read it, so a wizard-configured external synth endpoint was dead
+    * end to end: written to config, emitted into the environment, consumed by no
+    * one. AIMEE_LLM_URL is the variable config_synth_chat_endpoint() honours, which
+    * is what a containerized kb needs when it has no writable aimee.yaml. */
    if (strcmp(sb, "external") == 0 && cfg->llm_synth_endpoint[0])
-      EMITF("AIMEE_LLM_SYNTH_URL=%s\n", cfg->llm_synth_endpoint);
+      EMITF("AIMEE_LLM_URL=%s\n", cfg->llm_synth_endpoint);
 
-   /* When any role is local, aimee-server reaches the co-deployed aimee-llm
-    * compose service by name; an all-external stack keeps its per-role URLs. */
-   if (any_local)
-      EMITF("AIMEE_LLM_URL=http://aimee-llm:8742\n");
-
-   /* Only a pinned dim (external embedder) is emitted; a local/unset dim is
-    * derived from the embedder /health probe at runtime. */
+   /* Only a pinned dim (external embedder) is emitted; an in-container embedder's
+    * width is derived from the selected model at runtime. */
    if (config_embedding_dim_is_pinned(cfg) && cfg->embedding_dim > 0)
       EMITF("AIMEE_EMBEDDING_DIM=%d\n", cfg->embedding_dim);
 #undef EMITF

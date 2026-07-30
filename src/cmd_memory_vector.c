@@ -6,6 +6,7 @@
 #include "commands.h"
 #include "entity_edges.h"
 #include "platform_process.h"
+#include "config_database.h" /* config_embedding_dim_current — the one width declaration */
 #include "db2/vector_verify.h"
 #include "kb.h"
 #include "kb_client.h"
@@ -430,7 +431,7 @@ static void mem_verify_emit_json(const mem_verify_report_t *r, app_ctx_t *ctx, i
       cJSON_AddStringToObject(j, "r->server_version", r->server_version);
    cJSON *emb = cJSON_AddObjectToObject(j, "embedder");
    cJSON_AddNumberToObject(emb, "dim", r->embedder_dim);
-   cJSON_AddNumberToObject(emb, "expected_dim", 384);
+   cJSON_AddNumberToObject(emb, "expected_dim", config_embedding_dim_current());
    cJSON_AddBoolToObject(emb, "ok", r->embedder_dim_matches);
    cJSON *mem = cJSON_AddObjectToObject(j, "memory");
    cJSON_AddStringToObject(mem, "collection", r->mem_coll);
@@ -515,7 +516,7 @@ static void mem_verify_emit_text(const mem_verify_report_t *r, app_ctx_t *ctx, i
           r->stored_ver[0] ? r->stored_ver : "(none)", r->schema_match ? "match" : "MISMATCH");
    printf("  rebuild lock: %s\n", r->lock_held ? "HELD" : "free");
    printf("  payload indexes: memory_missing=%d r->kb_missing=%d\n", r->mem_missing, r->kb_missing);
-   printf("  embedder: dim=%d expected=384 (%s)\n", r->embedder_dim,
+   printf("  embedder: dim=%d expected=%d (%s)\n", r->embedder_dim, config_embedding_dim_current(),
           r->embedder_dim_matches ? "ok" : "MISMATCH");
 
    if (do_detail && r->ops_summary.failed_ops > 0)
@@ -610,7 +611,7 @@ void mem_verify(app_ctx_t *ctx, int argc, char **argv)
       if (cJSON_IsNumber(d))
          embedder_dim = (int)d->valuedouble;
    }
-   int embedder_dim_matches = (embedder_dim == 384);
+   int embedder_dim_matches = (embedder_dim == config_embedding_dim_current());
 
    cJSON *mem_obj = cJSON_GetObjectItemCaseSensitive(resp, "memory");
    cJSON *kb_obj = cJSON_GetObjectItemCaseSensitive(resp, "kb");

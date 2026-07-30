@@ -4,6 +4,7 @@
 #include "aimee_features.h"
 #include "platform.h"
 #include "aimee_version.h"
+#include "embed_input_type.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -97,6 +98,13 @@
  * (inclusive) — native 4096 would be unindexable, so the 8b tier truncates to
  * 4000 in the embedding proxy (see unified-llm-container §"The 8B truncation"). */
 #define EMBED_MAX_DIM              4000
+
+/* The embedding WIDTH is not declared here. It is a setting, so it lives in exactly
+ * one place — config (config_embedding_dim_default / config_embedding_dim_effective,
+ * src/modules/config/config_database.h). Layers that must not depend on config, like
+ * db2, have it injected at startup rather than keeping a copy. A #define here would be
+ * a second declaration that can disagree with the embedder actually running. */
+
 #define EMBED_SIMILARITY_THRESHOLD 0.7
 #define EMBED_ALPHA                0.5 /* hybrid blend: alpha*lexical + (1-alpha)*embed */
 #define EMBED_MAX_OUTPUT           (EMBED_MAX_DIM * 16)

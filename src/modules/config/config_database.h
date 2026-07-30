@@ -21,10 +21,47 @@ void config_parse_database(config_t *cfg, cJSON *root);
  * other config consumers are unaffected. */
 int config_apply_db2_url_env_override(config_t *cfg);
 
+/* THE embedding width. This is the only place in the tree the number is written:
+ * selecting an embedder records its width in config (bekko-a25m -> 384), the env
+ * and the wizard change it through the accessors above, and everything else —
+ * schema sizing, the DB2 columns, the builtin lexical embedder, the doctor's
+ * expected-dim report — reads it from here.
+ *
+ * It is a config concern because config is what a deployment can change. Any
+ * caller keeping its own fallback recreates the bug this replaced: kb_main used
+ * to default to 1024 while the bundled model returned 384, so an unpinned kb
+ * sized its columns for one embedder and then inserted vectors from another. */
+int config_embedding_dim_default(void);
+
 /* Effective embedding dim: AIMEE_EMBEDDING_DIM env override (1..EMBED_MAX_DIM)
- * when set, else cfg->embedding_dim. Pass the result to db2_set_embedding_dim()
- * so the schema columns match the running embedder. Non-mutating. */
+ * when set, else cfg->embedding_dim. 0 means "nothing pinned" — that is load-
+ * bearing for the §2a precedence below, so this deliberately does NOT apply the
+ * default. Callers that need a usable width (not a pin signal) want
+ * config_embedding_dim_effective(). Non-mutating. */
 int config_resolve_embedding_dim(const config_t *cfg);
+
+/* The width to actually embed and size columns with: the pin when there is one,
+ * else config_embedding_dim_default(). Pass this to db2_set_embedding_dim() —
+ * that layer holds no default of its own. Non-mutating. */
+int config_embedding_dim_effective(const config_t *cfg);
+
+/* No-arg form for callers holding no config_t (the CLI doctor). Same value as
+ * config_embedding_dim_effective against the loaded config. */
+int config_embedding_dim_current(void);
+
+/* THE synthesis endpoint. One config field (llm_synth_endpoint), one resolver, and
+ * the AIMEE_LLM_URL env override applied in one place — the same shape as the
+ * embedder address (config_embedding_command) and the embedding width
+ * (config_embedding_dim_*).
+ *
+ * Writes the OpenAI chat base into out ("{endpoint}/v1"), appending /v1 only when the
+ * configured value did not already include it, so an operator may supply either form.
+ * Returns 1 when an endpoint is configured, 0 when none is (the caller's stage then
+ * stays idle). Never partially fills out.
+ *
+ * Synthesis is external-only: the aimee-llm container this used to name is retired, so
+ * there is no local default to fall back to. Non-mutating. */
+int config_synth_chat_endpoint(const config_t *cfg, char *out, size_t out_len);
 
 /* embedder-runtime-fetch-autodim §2a: 1 iff the operator pinned a positive
  * embedding dim — defined as config_resolve_embedding_dim(cfg) > 0, so "pinned"
