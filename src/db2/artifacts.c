@@ -925,7 +925,7 @@ int db2_artifact_filter_facets_scoped(int64_t release_id, const char *project,
    }
    if (release_id > 0)
       /* release_id is a trusted int64 (never user text); inline it so the
-       * optional kind ?1 binding keeps a stable parameter index. */
+       * remaining optional text filters can use monotonic parameter indexes. */
       p += snprintf(sql + p, sizeof(sql) - (size_t)p,
                     " AND id IN (SELECT c.artifact_id FROM artifact_citations c"
                     " JOIN release_docs rd ON CAST(rd.doc_id AS TEXT) = c.source_id"

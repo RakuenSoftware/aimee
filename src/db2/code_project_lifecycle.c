@@ -266,6 +266,10 @@ static int cpl_measure(void *conn, const cpl_target_spec_t *spec, const char *pr
    {
       if (aimee_pg_is_shim())
       {
+         /* These typed accessors are part of the shared adapter contract:
+          * db_postgres.c implements both native backends and the unit-test
+          * SQLite shim implements the same API.  Hash raw bytes so embedded
+          * NULs and type differences cannot collapse distinct target rows. */
          int columns = aimee_pg_column_count(st);
          for (int col = 0; col < columns; col++)
          {
