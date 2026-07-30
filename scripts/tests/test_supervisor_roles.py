@@ -14,6 +14,7 @@ Invariants under test:
   - each local role is sized by its OWN tier (one instance can mix e.g. a cpu
     embedder and a gpu-large synth), with GPU offload forced off on a cpu tier.
 """
+import json
 import os
 import pathlib
 import re
@@ -275,13 +276,46 @@ class SupervisorRoleTest(unittest.TestCase):
         self.assertEqual(llama, [], llama)
 
     def test_registered_but_unprovisioned_embedder_aborts_the_boot(self):
-        # An entry may exist for a model that was measured but never deployed; its
-        # coordinates are blank. Serving it must fail here, not in the middle of a fetch.
-        proc, urls, _llama, _gw = self.run_supervisor(
-            extra_env={"AIMEE_LLM_EMBED_MODEL": "bekko-a25m"})
+        # An entry may declare an embedder without saying where its weights come from —
+        # a model measured but never packaged, or one only ever reached externally.
+        # Asking to serve it LOCALLY must fail here, not midway through a fetch.
+        overlay = os.path.join(tempfile.mkdtemp(), "extra.json")
+        with open(overlay, "w", encoding="utf-8") as handle:
+            json.dump({"embedders": {"declared-only": {
+                "pooling": "mean", "dim": 384, "context": 512,
+                "prefixes": {"query": "", "document": ""}}}}, handle)
+        proc, urls, _llama, _gw = self.run_supervisor(extra_env={
+            "AIMEE_LLM_EMBED_MODEL": "declared-only",
+            "AIMEE_LLM_EMBEDDERS_EXTRA": overlay,
+        })
         self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("cannot be served", proc.stderr)
+        self.assertIn("cannot be served locally", proc.stderr)
         self.assertEqual(urls, [], urls)
+
+    def test_release_sourced_embedder_fetches_the_asset_and_verifies_it(self):
+        # bekko has no GGUF on the Hub, so it is converted and published by us. The
+        # digest cannot be pinned in the registry (the artifact postdates it), so the
+        # release's SHA256SUMS is fetched and checked — and a missing SHA256SUMS must
+        # refuse rather than serve an unverified embedder.
+        proc, urls, llama, gw = self.run_supervisor(
+            extra_env={"AIMEE_LLM_EMBED_MODEL": "bekko-a25m"})
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(any(u.endswith("embed-bekko-a25m-f16.gguf") for u in urls), urls)
+        self.assertTrue(any(u.endswith("/SHA256SUMS") for u in urls), urls)
+        self.assertTrue(any("embedder-artifacts-v1" in u for u in urls), urls)
+        # It is served at ITS declared width and context, not nomic's.
+        embed = self._launched(llama)["8081"]
+        self.assertIn("--ctx-size 8192", embed)
+        self.assertEqual(gw.get("AIMEE_LLM_EMBED_MODEL"), "bekko-a25m")
+
+    def test_release_asset_base_is_overridable_for_a_mirror(self):
+        proc, urls, _llama, _gw = self.run_supervisor(extra_env={
+            "AIMEE_LLM_EMBED_MODEL": "bekko-a25m",
+            "AIMEE_LLM_EMBEDDER_ASSET_BASE": "http://mirror.internal/embedders",
+        })
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(all(u.startswith("http://mirror.internal/embedders")
+                            for u in urls if "bekko" in u or u.endswith("SHA256SUMS")), urls)
 
     def test_invalid_tier_rejected(self):
         proc, *_ = self.run_supervisor(modes={"AIMEE_LLM_SYNTH_TIER": "bogus"})

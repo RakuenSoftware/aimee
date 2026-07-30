@@ -73,10 +73,19 @@ INPUT_TYPES = ("query", "document")
 # Fields every entry must declare. Absent means the operator has not thought about it,
 # which for pooling or prefixes is indistinguishable at runtime from thinking wrongly.
 EMBEDDER_REQUIRED_FIELDS = ("pooling", "dim", "context", "prefixes")
-# Additionally required to SERVE a model — the supervisor has to fetch a specific,
-# verifiable file. An entry may carry these blank (a measured model nobody deploys);
-# --embedder-descriptor refuses such an entry rather than let the fetch fail obscurely.
-EMBEDDER_PROVISION_FIELDS = ("repo", "file", "revision", "sha256")
+# How the supervisor obtains the weights, and what each way needs to be verifiable:
+#   hf      — a pinned file in a Hub repo at a pinned revision, checked against a sha256
+#             we can know ahead of time because the file already exists.
+#   release — a GGUF we convert ourselves and publish as a release asset, verified
+#             against the release's SHA256SUMS. Needed for a model the Hub has no GGUF
+#             for: its digest cannot be pinned here because it does not exist until the
+#             conversion runs, so the checksum travels with the artifact instead.
+# Anything else is an operator typo, refused rather than guessed at.
+EMBEDDER_SOURCES = ("hf", "release")
+EMBEDDER_PROVISION_FIELDS = {
+    "hf": ("repo", "file", "revision", "sha256"),
+    "release": ("release_tag", "file"),
+}
 
 
 class EmbedderRegistryError(RuntimeError):
@@ -128,20 +137,36 @@ def _load_embedders_file(path):
             )
         if not all(isinstance(prefixes[side], str) for side in INPUT_TYPES):
             raise EmbedderRegistryError(f"{path}: entry {model_id!r} has a non-string prefix")
+        source = str(spec.get("source", "hf")).strip() or "hf"
+        if source not in EMBEDDER_SOURCES:
+            raise EmbedderRegistryError(
+                f"{path}: entry {model_id!r} has source {source!r}; expected one of "
+                f"{', '.join(EMBEDDER_SOURCES)}"
+            )
         registry[embed_model_key(model_id)] = spec
     return registry
+
+
+def embedder_source(spec):
+    """The entry's weight source, defaulting to `hf` so existing entries are unchanged."""
+    return str(spec.get("source", "hf")).strip() or "hf"
+
+
+def embedder_missing_provisioning(spec):
+    """Which fields this entry still needs before the supervisor could fetch it."""
+    required = EMBEDDER_PROVISION_FIELDS.get(embedder_source(spec), ())
+    return [f for f in required if not str(spec.get(f, "")).strip()]
 
 
 def embedder_is_locally_servable(spec):
     """Whether the supervisor can FETCH and serve this model itself.
 
-    Provisioning coordinates are only needed to pull a GGUF. An entry without them is
-    still a complete embedder declaration — it is simply one this deployment does not
-    host, which is exactly the shape of an external endpoint (AIMEE_LLM_EMBED_MODE=
-    external) or of a model we measured but never deployed. Its pooling and prefixes
-    still matter, because the gateway applies them to text on the way to whatever serves
-    it."""
-    return all(str(spec.get(field, "")).strip() for field in EMBEDDER_PROVISION_FIELDS)
+    Coordinates are only needed to pull weights. An entry without them is still a
+    complete embedder declaration — it is simply one this deployment does not host, which
+    is exactly the shape of an external endpoint (AIMEE_LLM_EMBED_MODE=external). Its
+    pooling and prefixes still matter, because the gateway applies them to text on the way
+    to whatever serves it."""
+    return not embedder_missing_provisioning(spec)
 # Ingest is the overwhelming majority of embed traffic and every ingest path is a
 # document, so an omitted input_type means `document` and only the query paths opt in.
 # It must NOT mean "no prefix": defaulting to bare text is exactly the regression this
@@ -990,7 +1015,7 @@ def embedder_descriptor_shell(model_id, mode="local"):
             f"{', '.join(sorted(registry)) or '(none)'}"
         )
     if mode == "local" and not embedder_is_locally_servable(spec):
-        blank = [f for f in EMBEDDER_PROVISION_FIELDS if not str(spec.get(f, "")).strip()]
+        blank = embedder_missing_provisioning(spec)
         raise EmbedderRegistryError(
             f"embedder {key} cannot be served locally: {', '.join(blank)} "
             f"{'is' if len(blank) == 1 else 'are'} blank. Fill in the coordinates to host "
@@ -999,6 +1024,8 @@ def embedder_descriptor_shell(model_id, mode="local"):
         )
     fields = {
         "EMBED_MODEL_KEY": key,
+        "EMBED_SOURCE": embedder_source(spec),
+        "EMBED_RELEASE_TAG": spec.get("release_tag", ""),
         "EMBED_REPO": spec.get("repo", ""),
         "EMBED_FILE": spec.get("file", ""),
         "EMBED_REVISION": spec.get("revision", ""),

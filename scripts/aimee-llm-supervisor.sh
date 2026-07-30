@@ -249,12 +249,33 @@ download_models() {
   [ -f "$EMBED_D/.ready" ]  && touch "$EMBED_D/.embed.ready"
   [ -f "$SYNTH_D/.ready" ]  && touch "$SYNTH_D/.synth.ready"
 
-  # Embedder GGUF (repo default branch) — local embed only.
+  # Embedder weights — local embed only. Two sources, because not every embedder we
+  # want to serve has a GGUF on the Hub:
+  #   hf      — a pinned file at a pinned revision, checked against the registry sha256.
+  #   release — a GGUF we converted and published ourselves, verified against the
+  #             release's SHA256SUMS (the digest cannot be pinned in the registry: the
+  #             artifact does not exist until the conversion runs).
+  # Both refuse to serve on a checksum mismatch rather than embedding against whatever
+  # arrived, since a corrupt or substituted embedder produces well-formed wrong vectors.
   if [ "$EMBED_MODE" = "local" ] && [ ! -f "$EMBED_D/.embed.ready" ]; then
-    echo "aimee-llm: fetching embed tier '$EMBED_TIER' into $EMBED_D" >&2
+    echo "aimee-llm: fetching embed model '$EMBED_MODEL_KEY' ($EMBED_SOURCE) into $EMBED_D" >&2
     mkdir -p "$EMBED_D" || return 1
-    fetch "https://huggingface.co/${EMBED_REPO}/resolve/${EMBED_REVISION}/${EMBED_FILE}" \
-      "$EMBED_D/embed.gguf" "$EMBED_SHA256" || return 1
+    if [ "$EMBED_SOURCE" = "release" ]; then
+      base="${AIMEE_LLM_EMBEDDER_ASSET_BASE:-https://github.com/RakuenSoftware/aimee/releases/download/${EMBED_RELEASE_TAG}}"
+      fetch "${base}/${EMBED_FILE}" "$EMBED_D/embed.gguf" || return 1
+      if fetch "${base}/SHA256SUMS" "$EMBED_D/EMBED_SHA256SUMS"; then
+        ( cd "$EMBED_D" \
+          && grep -E "  ${EMBED_FILE}\$" EMBED_SHA256SUMS \
+             | sed "s#${EMBED_FILE}#embed.gguf#" | sha256sum -c - ) >&2 || {
+          echo "aimee-llm: embedder artifact sha256 MISMATCH — refusing to serve" >&2; return 1; }
+      else
+        echo "aimee-llm: no SHA256SUMS for ${EMBED_FILE} — refusing to serve an unverified embedder" >&2
+        return 1
+      fi
+    else
+      fetch "https://huggingface.co/${EMBED_REPO}/resolve/${EMBED_REVISION}/${EMBED_FILE}" \
+        "$EMBED_D/embed.gguf" "$EMBED_SHA256" || return 1
+    fi
     touch "$EMBED_D/.embed.ready"
   fi
 
