@@ -1,0 +1,213 @@
+{
+  "strict": {
+    "precision": 0.1594,
+    "recall": 0.1719,
+    "f1": 0.1654,
+    "tp": 11,
+    "fp": 58,
+    "fn": 53,
+    "by_category": {
+      "ambiguous": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 4,
+        "fn": 2
+      },
+      "first_person": {
+        "precision": 0.25,
+        "recall": 0.25,
+        "f1": 0.25,
+        "tp": 2,
+        "fp": 6,
+        "fn": 6
+      },
+      "governance": {
+        "precision": 0.2,
+        "recall": 0.25,
+        "f1": 0.2222,
+        "tp": 1,
+        "fp": 4,
+        "fn": 3
+      },
+      "implicit": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 6,
+        "fn": 6
+      },
+      "infra": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 4,
+        "fn": 5
+      },
+      "multi_fact": {
+        "precision": 0.1667,
+        "recall": 0.0909,
+        "f1": 0.1176,
+        "tp": 2,
+        "fp": 10,
+        "fn": 20
+      },
+      "negation": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 6,
+        "fn": 2
+      },
+      "novel_pred": {
+        "precision": 0.5,
+        "recall": 0.5,
+        "f1": 0.5,
+        "tp": 3,
+        "fp": 3,
+        "fn": 3
+      },
+      "third_person": {
+        "precision": 0.5,
+        "recall": 0.3333,
+        "f1": 0.4,
+        "tp": 3,
+        "fp": 3,
+        "fn": 6
+      },
+      "transient": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 12,
+        "fn": 0
+      }
+    }
+  },
+  "lenient": {
+    "precision": 0.1739,
+    "recall": 0.1875,
+    "f1": 0.1805,
+    "tp": 12,
+    "fp": 57,
+    "fn": 52,
+    "by_category": {
+      "ambiguous": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 4,
+        "fn": 2
+      },
+      "first_person": {
+        "precision": 0.25,
+        "recall": 0.25,
+        "f1": 0.25,
+        "tp": 2,
+        "fp": 6,
+        "fn": 6
+      },
+      "governance": {
+        "precision": 0.2,
+        "recall": 0.25,
+        "f1": 0.2222,
+        "tp": 1,
+        "fp": 4,
+        "fn": 3
+      },
+      "implicit": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 6,
+        "fn": 6
+      },
+      "infra": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 4,
+        "fn": 5
+      },
+      "multi_fact": {
+        "precision": 0.25,
+        "recall": 0.1364,
+        "f1": 0.1765,
+        "tp": 3,
+        "fp": 9,
+        "fn": 19
+      },
+      "negation": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 6,
+        "fn": 2
+      },
+      "novel_pred": {
+        "precision": 0.5,
+        "recall": 0.5,
+        "f1": 0.5,
+        "tp": 3,
+        "fp": 3,
+        "fn": 3
+      },
+      "third_person": {
+        "precision": 0.5,
+        "recall": 0.3333,
+        "f1": 0.4,
+        "tp": 3,
+        "fp": 3,
+        "fn": 6
+      },
+      "transient": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 12,
+        "fn": 0
+      }
+    }
+  },
+  "over_extraction": {
+    "empty_gold_notes": 23,
+    "on_schema_empty_gold_notes": 23,
+    "notes_correctly_empty": 1,
+    "abstention_rate_on_schema": 0.0435,
+    "spurious_triples": 22
+  },
+  "output_health": {
+    "notes": 70,
+    "json_parse_ok": 66,
+    "json_parse_rate": 0.9429,
+    "schema_ok": 66,
+    "schema_rate": 0.9429,
+    "malformed_facts": 2,
+    "dropped_by_conf_floor": 56,
+    "predicted_triples": 69,
+    "in_seed_ontology": 0.2609,
+    "catch_all_relations": 0
+  },
+  "latency_ms": {
+    "median": 252.9,
+    "p90": 402.9,
+    "mean": 294.7
+  },
+  "completion_tokens": {
+    "median": 23,
+    "mean": 26.5,
+    "max": 94
+  },
+  "model": "ibm-granite/granite-4.0-350m",
+  "scored_key": "pred_nofloor"
+}

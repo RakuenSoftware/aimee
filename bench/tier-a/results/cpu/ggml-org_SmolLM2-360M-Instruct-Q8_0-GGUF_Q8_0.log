@@ -1,0 +1,3 @@
+get_repo_commit: error: GET failed (401): Invalid username or password.
+get_repo_files: failed to resolve commit for ggml-org/SmolLM2-360M-Instruct-Q8_0-GGUF
+error: failed to download model from HuggingFace

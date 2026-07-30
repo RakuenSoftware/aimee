@@ -1,0 +1,213 @@
+{
+  "strict": {
+    "precision": 0.2603,
+    "recall": 0.2969,
+    "f1": 0.2774,
+    "tp": 19,
+    "fp": 54,
+    "fn": 45,
+    "by_category": {
+      "ambiguous": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 5,
+        "fn": 2
+      },
+      "first_person": {
+        "precision": 0.5,
+        "recall": 0.5,
+        "f1": 0.5,
+        "tp": 4,
+        "fp": 4,
+        "fn": 4
+      },
+      "governance": {
+        "precision": 0.2,
+        "recall": 0.25,
+        "f1": 0.2222,
+        "tp": 1,
+        "fp": 4,
+        "fn": 3
+      },
+      "implicit": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 7,
+        "fn": 6
+      },
+      "infra": {
+        "precision": 0.1429,
+        "recall": 0.2,
+        "f1": 0.1667,
+        "tp": 1,
+        "fp": 6,
+        "fn": 4
+      },
+      "multi_fact": {
+        "precision": 0.4545,
+        "recall": 0.2273,
+        "f1": 0.303,
+        "tp": 5,
+        "fp": 6,
+        "fn": 17
+      },
+      "negation": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 6,
+        "fn": 2
+      },
+      "novel_pred": {
+        "precision": 0.4,
+        "recall": 0.3333,
+        "f1": 0.3636,
+        "tp": 2,
+        "fp": 3,
+        "fn": 4
+      },
+      "third_person": {
+        "precision": 0.8571,
+        "recall": 0.6667,
+        "f1": 0.75,
+        "tp": 6,
+        "fp": 1,
+        "fn": 3
+      },
+      "transient": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 12,
+        "fn": 0
+      }
+    }
+  },
+  "lenient": {
+    "precision": 0.2603,
+    "recall": 0.2969,
+    "f1": 0.2774,
+    "tp": 19,
+    "fp": 54,
+    "fn": 45,
+    "by_category": {
+      "ambiguous": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 5,
+        "fn": 2
+      },
+      "first_person": {
+        "precision": 0.5,
+        "recall": 0.5,
+        "f1": 0.5,
+        "tp": 4,
+        "fp": 4,
+        "fn": 4
+      },
+      "governance": {
+        "precision": 0.2,
+        "recall": 0.25,
+        "f1": 0.2222,
+        "tp": 1,
+        "fp": 4,
+        "fn": 3
+      },
+      "implicit": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 7,
+        "fn": 6
+      },
+      "infra": {
+        "precision": 0.1429,
+        "recall": 0.2,
+        "f1": 0.1667,
+        "tp": 1,
+        "fp": 6,
+        "fn": 4
+      },
+      "multi_fact": {
+        "precision": 0.4545,
+        "recall": 0.2273,
+        "f1": 0.303,
+        "tp": 5,
+        "fp": 6,
+        "fn": 17
+      },
+      "negation": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 6,
+        "fn": 2
+      },
+      "novel_pred": {
+        "precision": 0.4,
+        "recall": 0.3333,
+        "f1": 0.3636,
+        "tp": 2,
+        "fp": 3,
+        "fn": 4
+      },
+      "third_person": {
+        "precision": 0.8571,
+        "recall": 0.6667,
+        "f1": 0.75,
+        "tp": 6,
+        "fp": 1,
+        "fn": 3
+      },
+      "transient": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 12,
+        "fn": 0
+      }
+    }
+  },
+  "over_extraction": {
+    "empty_gold_notes": 23,
+    "on_schema_empty_gold_notes": 23,
+    "notes_correctly_empty": 0,
+    "abstention_rate_on_schema": 0.0,
+    "spurious_triples": 23
+  },
+  "output_health": {
+    "notes": 70,
+    "json_parse_ok": 69,
+    "json_parse_rate": 0.9857,
+    "schema_ok": 68,
+    "schema_rate": 0.9714,
+    "malformed_facts": 0,
+    "dropped_by_conf_floor": 73,
+    "predicted_triples": 73,
+    "in_seed_ontology": 0.4795,
+    "catch_all_relations": 0
+  },
+  "latency_ms": {
+    "median": 359.2,
+    "p90": 542.0,
+    "mean": 399.7
+  },
+  "completion_tokens": {
+    "median": 30,
+    "mean": 31.5,
+    "max": 72
+  },
+  "model": "Qwen/Qwen3-0.6B",
+  "scored_key": "pred_nofloor"
+}

@@ -72,7 +72,13 @@ def cpu_table():
         pp = tg = None
         name = quant = "?"
         for r in runs:
-            name = r.get("model_filename") or r.get("model_type") or f.stem
+            # model_filename is the full HF cache path; the repo id is the
+            # readable part and matches the accuracy tables.
+            raw = r.get("model_filename") or f.stem
+            if "models--" in raw:
+                name = raw.split("models--")[1].split("/")[0].replace("--", "/")
+            else:
+                name = pathlib.Path(raw).stem
             quant = r.get("model_type", "?")
             if r.get("n_prompt"):
                 pp = r["avg_ts"]
