@@ -110,6 +110,8 @@ const config_field_t config_fields[] = {
      RELOAD_HOT, FGROUP_ADVANCED},
     {"require_session_worktree", offsetof(config_t, require_session_worktree), sizeof(int), 0,
      CFG_BOOL},
+    {"session_worktree_base", offsetof(config_t, session_worktree_base),
+     sizeof(((config_t *)0)->session_worktree_base), 0, CFG_STRING, RELOAD_HOT, FGROUP_ADVANCED},
     {"require_aimee_memory", offsetof(config_t, require_aimee_memory), sizeof(int), 0, CFG_BOOL},
     {"require_aimee_git", offsetof(config_t, require_aimee_git), sizeof(int), 0, CFG_BOOL},
     {"subagent_ban_enabled", offsetof(config_t, subagent_ban_enabled), sizeof(int), 0, CFG_BOOL},

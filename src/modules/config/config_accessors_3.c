@@ -18,33 +18,6 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
-const char *config_vault_custody(void)
-{
-   static _Thread_local char buf[16];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, vault_custody), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_vault_tpm2_blob_path(void)
-{
-   static _Thread_local char buf[512];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, vault_tpm2_blob_path), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_vault_tpm2_tcti(void)
-{
-   static _Thread_local char buf[128];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, vault_tpm2_tcti), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
 const char *config_vault_tpm2_nv_index(void)
 {
    static _Thread_local char buf[32];
@@ -86,6 +59,15 @@ const char *config_code_context_mode(void)
    static _Thread_local char buf[16];
    buf[0] = 0;
    config_field_read(offsetof(config_t, code_context_mode), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_session_worktree_base(void)
+{
+   static _Thread_local char buf[64];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, session_worktree_base), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }
@@ -987,8 +969,8 @@ const char *config_workspaces(int index)
    buf[0] = 0;
    if (index < 0 || index >= (64))
       return buf;
-   config_field_read(offsetof(config_t, workspaces) + (size_t)index * sizeof(buf), sizeof(buf),
-                     buf);
+   config_field_read(offsetof(config_t, workspaces) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }
@@ -1071,8 +1053,8 @@ const char *config_charter_values(int index)
    buf[0] = 0;
    if (index < 0 || index >= (CONFIG_CHARTER_MAX_ENTRIES))
       return buf;
-   config_field_read(offsetof(config_t, charter_values) + (size_t)index * sizeof(buf), sizeof(buf),
-                     buf);
+   config_field_read(offsetof(config_t, charter_values) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }
@@ -1107,8 +1089,8 @@ const char *config_mcp_osv_allow(int index)
    buf[0] = 0;
    if (index < 0 || index >= (CONFIG_MCP_OSV_MAX_ALLOW))
       return buf;
-   config_field_read(offsetof(config_t, mcp_osv_allow) + (size_t)index * sizeof(buf), sizeof(buf),
-                     buf);
+   config_field_read(offsetof(config_t, mcp_osv_allow) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }
@@ -1260,6 +1242,51 @@ int config_set_memory_maintenance_enabled(int value)
    if (rc == 0)
    {
       cfg->memory_maintenance_enabled = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_memory_maintenance_interval_seconds(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->memory_maintenance_interval_seconds = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_memory_maintenance_summarize_enabled(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->memory_maintenance_summarize_enabled = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_code_cochange_git_enabled(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->code_cochange_git_enabled = value;
       rc = config_save(cfg);
    }
    free(cfg);

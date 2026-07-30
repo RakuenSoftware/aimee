@@ -494,6 +494,27 @@ typedef struct config
     * worktree (.aimee/worktrees/...), forcing every mutating session into an
     * isolated worktree+branch off the default branch. Default 0 (off). */
    int require_session_worktree;
+   /* session_worktree_base: what a NEW primary session's branch+worktree is cut from.
+    * Resolution order: CONFIGURED -> remote DEFAULT -> main -> master.
+    *   "remote_default" (DEFAULT) — the remote's advertised default (origin/HEAD),
+    *                     fetched fresh; then main, then master.
+    *   "local_default"  — the local copy of the default branch; then main, then master.
+    *   "current"        — whatever the source checkout has checked out. Reachable ONLY
+    *                     by explicit opt-in, never as a fallback.
+    *   "<ref>"          — an explicit ref (e.g. "origin/main", a tag, a SHA); verified
+    *                     to exist, and an error if it does not.
+    * Each fallback prefers origin/<name> and accepts the local branch only when no
+    * remote-tracking ref exists, so a repo WITH a remote never starts from a stale local.
+    *
+    * The current branch is deliberately NOT in the chain. It used to be the last resort,
+    * which meant a new session was cut from whatever the shared checkout happened to be
+    * sitting on -- silently inheriting another session's unmerged work. main and master
+    * are dumb fallbacks, but they are stable.
+    *
+    * Env override: AIMEE_SESSION_WORKTREE_BASE. The attention guard independently
+    * refuses a worktree whose recorded base is neither the default branch nor a
+    * registered parent, so loosening this does not disable that check. */
+   char session_worktree_base[64];
    /* External-memory guard (default on): the PreToolUse attention-guard blocks
     * agent writes to external file-based agent-memory stores
     * (~/.claude/projects/<slug>/memory/...), redirecting durable memories into

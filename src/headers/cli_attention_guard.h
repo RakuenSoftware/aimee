@@ -80,6 +80,13 @@ void attn_session_isolation_target(const char *file_path, const char *cwd, char 
 int attn_session_branch_blocked(const char *base_branch, const char *default_branch,
                                 int base_is_registered);
 
+/* 1 = BLOCK: a WRITING Bash command reaches outside every managed worktree -- `cd <abs>`
+ * to an unmanaged directory, or a redirect to an absolute path outside one. The
+ * isolation check judges the cwd for Bash, so without this a command starting in a good
+ * worktree can write anywhere. Pattern-based, not a sandbox; see the implementation's
+ * LIMITS note. */
+int attn_bash_escapes_worktree(const char *bash_cmd, const char *cwd);
+
 /* External-memory decision (pure, testable). Returns 1 to BLOCK a tool call
  * that would WRITE an external file-based agent-memory store
  * (~/.claude/projects/<slug>/memory/...): a mutating file tool whose target

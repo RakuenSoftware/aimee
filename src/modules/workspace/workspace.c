@@ -2,6 +2,7 @@
 #include "aimee.h"
 #include "log.h"
 #include "workspace.h"
+#include "config_accessors.h"
 #include "index.h"
 #include "kb_client.h"
 #include "headers/branch_ownership.h"
@@ -1151,17 +1152,107 @@ int worktree_find_branch_registered(const char *branch, char *out_dir, size_t ou
  * Callers that want a specific base (delegates inheriting a parent, or the
  * session-checkout path that bases on origin/<primary>) pass base_ref instead
  * and never reach here. */
-void worktree_detect_base_branch(const char *git_root, char *buf, size_t buf_len)
-{
-   if (!git_root || !buf || buf_len == 0)
-      return;
-   snprintf(buf, buf_len, "HEAD"); /* safe default */
+/* Resolve the base ref for a NEW session worktree.
+ *
+ * Order, in full:
+ *   1. CONFIGURED  session_worktree_base / AIMEE_SESSION_WORKTREE_BASE, when it names an
+ *                  explicit ref. Verified to exist rather than handed to git blind.
+ *   2. DEFAULT     the remote's advertised default branch (origin/HEAD), fetched fresh.
+ *   3. main
+ *   4. master
+ * Each of 2-4 prefers the remote-tracking ref (origin/<x>) and accepts the local branch
+ * only when no remote-tracking ref exists, so a repo WITH a remote never silently starts
+ * from a stale local copy.
+ *
+ * What is deliberately NOT in the chain: the currently checked-out branch. The old code
+ * ended at `rev-parse --abbrev-ref HEAD`, so when the shared checkout happened to sit on
+ * some session or feature branch, every new session was cut from it and silently
+ * inherited unmerged work it did not author and could not separate from its own. main and
+ * master are dumb fallbacks but they are STABLE; "whatever is checked out" is not.
+ *
+ * Returns 0 and fills `buf`, or -1 with `buf` emptied when nothing resolves. */
 
-   char cmd[MAX_PATH_LEN + 128];
+/* Resolve one candidate branch NAME to a usable ref, preferring origin/<name>.
+ * Returns 1 and fills out on success. */
+static int wt_resolve_candidate(const char *git_root, const char *name, char *out, size_t outlen)
+{
+   if (!name || !name[0])
+      return 0;
+   char cmd[MAX_PATH_LEN + 160];
    int rc;
 
-   /* Resolve the default branch NAME (short, e.g. "main"). Prefer origin/HEAD;
-    * symbolic-ref --short yields "origin/main", so strip the remote prefix. */
+   char remote_ref[160];
+   snprintf(remote_ref, sizeof(remote_ref), "origin/%s", name);
+   snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --verify --quiet '%s' >/dev/null 2>&1",
+            git_root, remote_ref);
+   free(run_cmd(cmd, &rc));
+   if (rc == 0)
+   {
+      snprintf(out, outlen, "%s", remote_ref);
+      return 1;
+   }
+
+   snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --verify --quiet '%s' >/dev/null 2>&1",
+            git_root, name);
+   free(run_cmd(cmd, &rc));
+   if (rc == 0)
+   {
+      snprintf(out, outlen, "%s", name);
+      return 1;
+   }
+   return 0;
+}
+
+int worktree_detect_base_branch(const char *git_root, char *buf, size_t buf_len)
+{
+   if (!git_root || !buf || buf_len == 0)
+      return -1;
+   buf[0] = '\0';
+
+   char cmd[MAX_PATH_LEN + 160];
+   int rc;
+
+   /* ---- 1. configured ---- */
+   char mode[64] = "";
+   const char *env_mode = getenv("AIMEE_SESSION_WORKTREE_BASE");
+   if (env_mode && env_mode[0])
+      snprintf(mode, sizeof(mode), "%s", env_mode);
+   else
+   {
+      const char *cfg_mode = config_session_worktree_base();
+      snprintf(mode, sizeof(mode), "%s", (cfg_mode && cfg_mode[0]) ? cfg_mode : "remote_default");
+   }
+
+   if (strcmp(mode, "current") == 0)
+   {
+      /* Only reachable by explicit opt-in, for offline/detached workflows that accept
+       * inheriting the source checkout's branch. Never a fallback. */
+      snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --abbrev-ref HEAD 2>/dev/null", git_root);
+      char *cur = run_cmd(cmd, &rc);
+      if (rc == 0 && cur && cur[0])
+      {
+         size_t l = strlen(cur);
+         while (l && (cur[l - 1] == '\n' || cur[l - 1] == '\r'))
+            cur[--l] = '\0';
+         if (cur[0])
+            snprintf(buf, buf_len, "%s", cur);
+      }
+      free(cur);
+      return buf[0] ? 0 : -1;
+   }
+   if (strcmp(mode, "remote_default") != 0 && strcmp(mode, "local_default") != 0)
+   {
+      snprintf(cmd, sizeof(cmd),
+               "git -C '%s' rev-parse --verify --quiet '%s^{commit}' >/dev/null 2>&1", git_root,
+               mode);
+      free(run_cmd(cmd, &rc));
+      if (rc != 0)
+         return -1; /* an explicit ref that does not exist is an operator error */
+      snprintf(buf, buf_len, "%s", mode);
+      return 0;
+   }
+
+   /* ---- 2. the remote's advertised default ---- */
    char def[96] = {0};
    snprintf(cmd, sizeof(cmd),
             "git -C '%s' symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null", git_root);
@@ -1169,7 +1260,7 @@ void worktree_detect_base_branch(const char *git_root, char *buf, size_t buf_len
    if (rc == 0 && out && out[0])
    {
       size_t len = strlen(out);
-      while (len > 0 && (out[len - 1] == '\n' || out[len - 1] == '\r' || out[len - 1] == ' '))
+      while (len && (out[len - 1] == '\n' || out[len - 1] == '\r' || out[len - 1] == ' '))
          out[--len] = '\0';
       const char *name = out;
       if (strncmp(name, "origin/", 7) == 0)
@@ -1179,68 +1270,58 @@ void worktree_detect_base_branch(const char *git_root, char *buf, size_t buf_len
    }
    free(out);
 
-   /* Fall back to a common local default branch when origin/HEAD is unset. */
+   /* origin/HEAD is unset on repos whose remote was added after clone -- repair once. */
    if (!def[0])
    {
-      const char *candidates[] = {"main", "master", "trunk"};
-      for (int b = 0; b < 3; b++)
+      const char *setargv[] = {"remote", "set-head", "origin", "-a", NULL};
+      git_net_exec(git_root, setargv, NULL, 0);
+      snprintf(cmd, sizeof(cmd),
+               "git -C '%s' symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null", git_root);
+      out = run_cmd(cmd, &rc);
+      if (rc == 0 && out && out[0])
       {
-         snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --verify --quiet '%s' >/dev/null 2>&1",
-                  git_root, candidates[b]);
-         char *cand_out = run_cmd(cmd, &rc);
-         free(cand_out);
-         if (rc == 0)
-         {
-            snprintf(def, sizeof(def), "%s", candidates[b]);
-            break;
-         }
+         size_t len = strlen(out);
+         while (len && (out[len - 1] == '\n' || out[len - 1] == '\r' || out[len - 1] == ' '))
+            out[--len] = '\0';
+         const char *name = out;
+         if (strncmp(name, "origin/", 7) == 0)
+            name += 7;
+         if (name[0])
+            snprintf(def, sizeof(def), "%s", name);
       }
+      free(out);
    }
 
    if (def[0])
    {
-      /* Refresh the default branch from origin so the worktree starts from the
-       * latest upstream, not a stale local copy. Best-effort and hang-proof
-       * (git_net_exec bounds the wall clock): a remote-less or offline repo just
-       * leaves the existing refs untouched. */
+      /* Start from the latest upstream. Best-effort and hang-proof; offline leaves the
+       * existing remote-tracking ref in place. */
       const char *fetch_argv[] = {"fetch", "--quiet", "origin", def, NULL};
       git_net_exec(git_root, fetch_argv, NULL, 0);
 
-      /* Prefer the freshly fetched remote-tracking ref; fall back to the local
-       * branch when there is no upstream (purely local repo). */
-      char remote_ref[128];
-      snprintf(remote_ref, sizeof(remote_ref), "origin/%s", def);
-      snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --verify --quiet '%s' >/dev/null 2>&1",
-               git_root, remote_ref);
-      free(run_cmd(cmd, &rc));
-      if (rc == 0)
+      if (strcmp(mode, "local_default") == 0)
       {
-         snprintf(buf, buf_len, "%s", remote_ref);
-         return;
+         snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --verify --quiet '%s' >/dev/null 2>&1",
+                  git_root, def);
+         free(run_cmd(cmd, &rc));
+         if (rc == 0)
+         {
+            snprintf(buf, buf_len, "%s", def);
+            return 0;
+         }
       }
-
-      snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --verify --quiet '%s' >/dev/null 2>&1",
-               git_root, def);
-      free(run_cmd(cmd, &rc));
-      if (rc == 0)
-      {
-         snprintf(buf, buf_len, "%s", def);
-         return;
-      }
+      else if (wt_resolve_candidate(git_root, def, buf, buf_len))
+         return 0;
    }
 
-   /* Last resort: the current branch (may be detached -> stays "HEAD"). */
-   snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --abbrev-ref HEAD 2>/dev/null", git_root);
-   out = run_cmd(cmd, &rc);
-   if (rc == 0 && out && out[0])
-   {
-      size_t len = strlen(out);
-      while (len > 0 && (out[len - 1] == '\n' || out[len - 1] == '\r'))
-         out[--len] = '\0';
-      if (len > 0 && strcmp(out, "HEAD") != 0)
-         snprintf(buf, buf_len, "%s", out);
-   }
-   free(out);
+   /* ---- 3. main, then 4. master ---- */
+   if (wt_resolve_candidate(git_root, "main", buf, buf_len))
+      return 0;
+   if (wt_resolve_candidate(git_root, "master", buf, buf_len))
+      return 0;
+
+   buf[0] = '\0';
+   return -1;
 }
 
 static int worktree_create_sibling_at_ref(const char *git_root, const char *sid,
@@ -1271,7 +1352,7 @@ static int worktree_create_sibling_at_ref(const char *git_root, const char *sid,
       struct stat git_st;
       if (stat(git_file, &git_st) == 0)
       {
-         worktree_registry_record(git_root, wt_path, branch_name, sid, work_name, base_branch);
+         worktree_registry_record(git_root, wt_path, branch_name, sid, work_name, base_ref);
          return 0; /* already exists and valid */
       }
 
@@ -1290,7 +1371,18 @@ static int worktree_create_sibling_at_ref(const char *git_root, const char *sid,
        * branch so a fresh session always starts from there rather than from
        * whatever branch the source checkout happens to have checked out.
        * Falls back to main / master / trunk / HEAD when no default is known. */
-      worktree_detect_base_branch(git_root, base_branch, sizeof(base_branch));
+      /* Remote default by policy. A hard failure here is deliberate: guessing a base
+       * is what let sessions inherit another session's branch. */
+      if (worktree_detect_base_branch(git_root, base_branch, sizeof(base_branch)) != 0)
+      {
+         fprintf(stderr,
+                 "aimee: cannot resolve the session worktree base for '%s'. The default is the "
+                 "REMOTE default branch (origin/HEAD); it is unset or unreachable here. Fix the "
+                 "remote (git remote set-head origin -a) or set session_worktree_base / "
+                 "AIMEE_SESSION_WORKTREE_BASE to an explicit ref.\n",
+                 git_root);
+         return -1;
+      }
    }
 
    char wt_parent[MAX_PATH_LEN];
@@ -1510,7 +1602,7 @@ int worktree_create_sibling_on_branch(const char *git_root, const char *sid, con
       struct stat git_st;
       if (stat(git_file, &git_st) == 0)
       {
-         worktree_registry_record(git_root, wt_path, branch, sid, work_name);
+         worktree_registry_record(git_root, wt_path, branch, sid, work_name, branch);
          return 0;
       }
       rmdir(wt_path);
@@ -1535,7 +1627,8 @@ int worktree_create_sibling_on_branch(const char *git_root, const char *sid, con
    {
       fprintf(stderr, "aimee: created worktree at %s on branch %s\n", wt_path, branch);
       free(out);
-      worktree_registry_record(git_root, wt_path, branch, sid, work_name);
+      /* Attaching an EXISTING branch: the worktree is rooted on that branch itself. */
+      worktree_registry_record(git_root, wt_path, branch, sid, work_name, branch);
 #ifndef AIMEE_DB1_DISABLED
       mcp_git_branch_own_register(git_root, branch);
 #endif
