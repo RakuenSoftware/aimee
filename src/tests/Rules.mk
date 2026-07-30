@@ -428,6 +428,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-git-ops \
                $(TESTPREFIX)/unit-test-webuser-editor \
                $(TESTPREFIX)/unit-test-vault-bootstrap \
+               $(TESTPREFIX)/unit-test-vault-bootstrap-privilege \
                $(TESTPREFIX)/unit-test-pki $(TESTPREFIX)/unit-test-remote-client-grant \
                $(TESTPREFIX)/unit-test-aimee-tls-clientcert \
                $(TESTPREFIX)/unit-test-aimee-tls-pin \
@@ -5021,6 +5022,11 @@ $(TESTPREFIX)/unit-test-vault-bootstrap: $(OBJDIR)/tests/test_vault_bootstrap.o 
                               $(OBJDIR)/modules/vault/vault_server_key.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-vault-bootstrap-privilege: \
+                              $(OBJDIR)/tests/test_vault_bootstrap_privilege.o \
+                              $(OBJDIR)/server/vault_bootstrap_privilege.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-pki: $(OBJDIR)/tests/test_pki.o $(OBJDIR)/server/pki.o \
                               $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \

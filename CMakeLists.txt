@@ -884,6 +884,7 @@ set(CLI_SRCS
 
 set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_main.c
+    ${AIMEE_SRC_DIR}/server/vault_bootstrap_privilege.c
     ${AIMEE_SRC_DIR}/server/server.c
     ${AIMEE_SRC_DIR}/server/s2_native_gate_hook.c
     ${AIMEE_SRC_DIR}/server_provider.c
