@@ -1528,6 +1528,8 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       return handle_get_code_search_route(method, query_string, out_buf, out_cap);
    if (strcmp(path, "/v1/code/hybrid") == 0)
       return handle_get_code_hybrid_route(method, query_string, out_buf, out_cap);
+   if (strcmp(path, "/v1/code/context") == 0)
+      return handle_get_code_context_route(method, query_string, out_buf, out_cap);
    if (strcmp(path, "/v1/code/graph/hubs") == 0)
       return handle_get_code_graph_hubs_route(method, query_string, out_buf, out_cap);
    if (strcmp(path, "/v1/code/graph/surprising") == 0)

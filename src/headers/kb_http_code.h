@@ -49,6 +49,9 @@ int handle_get_code_cross_repo_deps_route(const char *method, const char *query_
 int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap);
 int handle_get_code_hybrid_route(const char *method, const char *query_string, char *out_buf,
                                  int out_cap);
+int handle_get_code_context(const char *query_string, char *out_buf, int out_cap);
+int handle_get_code_context_route(const char *method, const char *query_string, char *out_buf,
+                                  int out_cap);
 int handle_get_code_graph_hubs(const char *query_string, char *out_buf, int out_cap);
 int handle_get_code_graph_hubs_route(const char *method, const char *query_string, char *out_buf,
                                      int out_cap);

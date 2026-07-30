@@ -459,6 +459,11 @@ typedef struct config
     * system prompt so the external agent stops re-exploring the repo. Default
     * off; a per-request `x-aimee-preinject: 0` header also disables it. */
    int ingress_preinject_enabled;
+   /* Task-conditioned code packet rollout: off preserves the legacy preview,
+    * observe retrieves/audits without changing model-visible bytes, and on
+    * replaces the legacy preview with the bounded answerable packet. E4 ships
+    * observe; E6 owns any promotion to on. */
+   char code_context_mode[16];
    /* ingress-compression P5 (§2.3), default off: inject the <aimee-context>
     * envelope on the Anthropic-native /v1/messages passthrough (otherwise
     * parity-skipped to preserve the client's cached prefix). Separate from the

@@ -138,13 +138,14 @@ Consumed once by `config_emit_deploy_env` to stand up the aimee-llm container (`
 | `llm_synth_model` | string | Model label sent to the configured synthesis endpoint. |
 | `llm_synth_tier` | string | Deploy-time local synthesis tier: cpu, small, mid, or large. |
 
-### Advanced tuning keys (77)
+### Advanced tuning keys (78)
 
 Expert scalars with sensible defaults; settable in the config file but off the everyday surface.
 
 | Key | Type | Description |
 |-----|------|-------------|
 | `cache_min_chars` | int | Minimum prompt size (chars) before cache-shaping applies. |
+| `code_context_mode` | string | Task-conditioned code packet rollout mode: `off` disables packet retrieval, `observe` retrieves and validates without changing model-visible bytes, and `on` injects a bounded current-project packet on first/new-task turns (default `observe`). |
 | `code_hybrid_rrf_k` | float | Reciprocal Rank Fusion rank constant k for /v1/code/hybrid (default 60). |
 | `code_hybrid_weight_code` | float | RRF weight for the lexical-code signal in /v1/code/hybrid (default 1.0; <=0 disables it). |
 | `code_hybrid_weight_graph` | float | RRF weight for the structural call-graph signal in /v1/code/hybrid (default 1.0; <=0 disables it). |

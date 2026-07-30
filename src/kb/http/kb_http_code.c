@@ -1292,7 +1292,9 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
       nf = max_r;
 
    /* Memory "why" context (recorded reasoning, capped). */
-   int nm = db2_memory_find_facts_like(query, HYBRID_WHY_MAX, mems, HYBRID_PER_SIGNAL);
+   int nm = project[0] ? memory_find_facts_visible_ex(query, NULL, project, all_projects,
+                                                      HYBRID_WHY_MAX, mems, HYBRID_PER_SIGNAL)
+                       : db2_memory_find_facts_like(query, HYBRID_WHY_MAX, mems, HYBRID_PER_SIGNAL);
    if (nm < 0)
       nm = 0;
    if (nm > HYBRID_WHY_MAX)

@@ -377,6 +377,15 @@ static int index_get_handler(const char *url, const char *extra_headers, char **
       if (response_buf)
          *response_buf = strdup("{\"hits\":[]}");
    }
+   else if (g_route_case == 39)
+   {
+      assert(strcmp(url, "http://127.0.0.1:4010/v1/code/context?query=split%20kb%2Findex%3F&"
+                         "max_results=4&project=aimee%20core%2Fkb%3F&symbol=target%2Ffn%3F") == 0);
+      if (response_buf)
+         *response_buf = strdup("{\"status\":\"ok\",\"project\":\"aimee core/kb?\","
+                                "\"generation\":7,\"freshness\":\"current\","
+                                "\"resolved\":true,\"results\":[]}");
+   }
    else
    {
       assert(!"unexpected index route case");
@@ -929,7 +938,15 @@ static void test_index_reads_use_v1_api_when_configured(void)
    assert(kb_client_index_find_callers_scoped("aimee core/kb?", 1, "target/fn?", caller_hits, 2) ==
           0);
 
-   assert(g_get_seen == 15);
+   g_route_case = 39;
+   int context_status = 0;
+   char *context =
+       kb_client_code_context("split kb/index?", "target/fn?", "aimee core/kb?", &context_status);
+   assert(context && context_status == 200);
+   assert(strstr(context, "\"project\":\"aimee core/kb?\"") != NULL);
+   free(context);
+
+   assert(g_get_seen == 16);
    unsetenv("AIMEE_KB_API_URL");
    mock_agent_http_reset();
    g_route_case = 0;

@@ -697,6 +697,7 @@ typedef struct
 static char g_code_find_project[128];
 static int g_code_local_first_fixture;
 static int g_code_hybrid_path_collision_fixture;
+static int g_code_context_memory_scope_rank = 3;
 
 int canonical_index_find(const char *identifier, void *out, int max)
 {
@@ -859,12 +860,12 @@ typedef struct
    char snippet[512];
    double rank;
    char content_hash[80];
+   int line;
 } test_code_search_hit_t;
 
 int canonical_index_code_search(const char *query, const char *project, void *out, int max,
                                 int enrich)
 {
-   (void)enrich;
    assert(query);
    assert(out);
    if (strcmp(query, "needle") != 0)
@@ -897,6 +898,7 @@ int canonical_index_code_search(const char *query, const char *project, void *ou
    snprintf(hits[0].snippet, sizeof(hits[0].snippet), "int needle(void) { return 1; }");
    hits[0].rank = 0.75;
    snprintf(hits[0].content_hash, sizeof(hits[0].content_hash), "deadbeefcafe");
+   hits[0].line = enrich ? 17 : 0;
    return 1;
 }
 
@@ -3465,6 +3467,26 @@ int db2_memory_find_facts_like(const char *query, int limit, void *out, int max)
    return 1;
 }
 
+int memory_find_facts_visible_ex(const char *query, const char *workspace, const char *project,
+                                 int include_all, int limit, void *out, int max)
+{
+   (void)workspace;
+   assert(project == NULL || strcmp(project, "proj-alpha") == 0);
+   assert(include_all == 0 || include_all == 1);
+   int n = db2_memory_find_facts_like(query, limit, out, max);
+   if (n > 0)
+      ((test_full_memory_t *)out)[0].confidence = 0.91;
+   return n;
+}
+
+int memory_scope_visibility_rank(int64_t memory_id, const char *workspace, const char *project)
+{
+   (void)workspace;
+   return memory_id == 7 && project && strcmp(project, "proj-alpha") == 0
+              ? g_code_context_memory_scope_rank
+              : 0;
+}
+
 /* canonical_index_find_callers stub (used by the callers + hybrid route tests
  * below) — moved here from test_kb_http_routes.c to keep that file under the
  * 2000-line build-integrity limit; cast a void* like the other canonical stubs. */
@@ -4028,6 +4050,52 @@ static void test_code_hybrid_vector_dim_mismatch_skips(void)
    assert(s == 200);
    assert(strstr(buf, "\"file_path\":\"src/search.c\"") != NULL);   /* lexical still works */
    assert(strstr(buf, "\"file_path\":\"src/semantic.c\"") == NULL); /* vector leg skipped */
+}
+
+static void test_code_context_bounded_current_project(void)
+{
+   char buf[8192];
+   int s = kb_http_route_ex("GET", "/v1/code/context",
+                            "query=needle&symbol=target_fn&project=proj-alpha&max_results=99", NULL,
+                            NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"status\":\"ok\"") != NULL);
+   assert(strstr(buf, "\"project\":\"proj-alpha\"") != NULL);
+   assert(strstr(buf, "\"generation\":2") != NULL);
+   assert(strstr(buf, "\"freshness\":\"current\"") != NULL);
+   assert(strstr(buf, "\"max_results\":4") != NULL);
+   assert(strstr(buf, "\"max_tokens\":1200") != NULL);
+   assert(strstr(buf, "\"accepted\":true") != NULL);
+   assert(strstr(buf, "\"provenance\":[\"code\"]") != NULL);
+   assert(strstr(buf, "\"line_start\":17") != NULL);
+   assert(strstr(buf, "\"scope\":\"project\"") != NULL);
+   assert(strstr(buf, "other/high.c") == NULL);
+}
+
+static void test_code_context_no_answer_is_explicit(void)
+{
+   char buf[2048];
+   int s =
+       kb_http_route_ex("GET", "/v1/code/context", "query=definitely-unrelated&project=proj-alpha",
+                        NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"status\":\"no_answer\"") != NULL);
+   assert(strstr(buf, "\"decision\":\"no_answer\"") != NULL);
+   assert(strstr(buf, "\"results\":[]") != NULL);
+   assert(strstr(buf, "\"why\":[]") != NULL);
+}
+
+static void test_code_context_does_not_substitute_global_memory(void)
+{
+   char buf[8192];
+   g_code_context_memory_scope_rank = 1;
+   int s = kb_http_route_ex("GET", "/v1/code/context", "query=needle&project=proj-alpha", NULL,
+                            NULL, NULL, 0, buf, sizeof(buf));
+   g_code_context_memory_scope_rank = 3;
+   assert(s == 200);
+   assert(strstr(buf, "\"status\":\"ok\"") != NULL); /* code still answers */
+   assert(strstr(buf, "why needle exists") == NULL);
+   assert(strstr(buf, "\"why\":[]") != NULL);
 }
 
 static void test_code_project_stats_missing_project(void)
@@ -5998,6 +6066,9 @@ int main(void)
    test_code_hybrid_no_symbol();
    test_code_hybrid_vector_ok();
    test_code_hybrid_vector_dim_mismatch_skips();
+   test_code_context_bounded_current_project();
+   test_code_context_no_answer_is_explicit();
+   test_code_context_does_not_substitute_global_memory();
    test_code_graph_hubs_ok();
    test_code_graph_hubs_missing_project();
    test_code_lessons_empty();

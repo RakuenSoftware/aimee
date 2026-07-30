@@ -1,6 +1,6 @@
 # Proposal: Agent-facing code intelligence effectiveness
 
-- **State:** PENDING — E3–E6 remain; E0 through E2 history is recorded below
+- **State:** PENDING — E4–E6 remain; E0 through E3 history is recorded below
 - **Author:** JBailes
 - **Date:** 2026-07-29
 - **Charter roles:** Recall, Rank-Fuse, Calibrate / Evaluate-Optimize, Enforce, Gate-Promote
@@ -695,3 +695,14 @@ residual proposal instead of declaring the intended effectiveness outcome comple
   earlier ordering, capacity, complete-metadata, exact-resolution, route-gating, and concrete edge
   identity findings remain closed. Roundtable run: `roundtable-327db1be95dc7e7c3abd2035`
   (artifact `ebe90912dc8e54a133c45453fd1c8b376c0c5845954acf66fe37134f1e0b17e4`).
+- **E3 graph-resolution slice:** PR #2162 merged to `testing` as
+  `fdc64b4abf3db262ea33efd0812b4208c654f57d` after all 25 CI checks passed. Exact normalized Python
+  module resolution, deduplicated call/import/projection edges, current-generation provenance, and
+  stable local-first graph ordering are now the base for E4–E6.
+- **E4 task-conditioned retrieval candidate:** the implementation adds a strict
+  `/v1/code/context` contract over hybrid RRF, exact active-project memory gating, explicit
+  `no_answer`, a four-item/1,200-token packet, complete current-generation provenance, and
+  `off|observe|on` first/new-task ingress behavior. `observe` remains the shipping default;
+  unavailable, slow, stale, or incomplete evidence automatically suppresses model-visible packet
+  injection and never widens to global memory. Its frozen implementation diff receives a separate
+  roundtable gate before PR.

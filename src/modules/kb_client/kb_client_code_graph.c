@@ -17,6 +17,48 @@
 #include <string.h>
 
 #define KB_CLIENT_CODE_GRAPH_READ_TIMEOUT_MS (8 * 1000)
+#define KB_CLIENT_CODE_CONTEXT_TIMEOUT_MS    (2 * 1000)
+
+char *kb_client_code_context(const char *query, const char *symbol, const char *project,
+                             int *status_out)
+{
+   if (status_out)
+      *status_out = -1;
+   if (!query || !query[0] || !project || !project[0])
+      return NULL;
+
+   char *query_q = kb_client_query_escape(query);
+   char *symbol_q = (symbol && symbol[0]) ? kb_client_query_escape(symbol) : NULL;
+   char *project_q = kb_client_query_escape(project);
+   if (!query_q || !project_q || ((symbol && symbol[0]) && !symbol_q))
+   {
+      free(query_q);
+      free(symbol_q);
+      free(project_q);
+      return NULL;
+   }
+   size_t cap = strlen("/v1/code/context?query=&max_results=4&project=&symbol=") + strlen(query_q) +
+                strlen(project_q) + (symbol_q ? strlen(symbol_q) : 0) + 8;
+   char *path = malloc(cap);
+   if (!path)
+   {
+      free(query_q);
+      free(symbol_q);
+      free(project_q);
+      return NULL;
+   }
+   int off = snprintf(path, cap, "/v1/code/context?query=%s&max_results=4&project=%s", query_q,
+                      project_q);
+   if (symbol_q)
+      snprintf(path + off, cap - (size_t)off, "&symbol=%s", symbol_q);
+   free(query_q);
+   free(symbol_q);
+   free(project_q);
+
+   char *json = kb_client_v1_get_json(path, KB_CLIENT_CODE_CONTEXT_TIMEOUT_MS, status_out);
+   free(path);
+   return json;
+}
 
 char *kb_client_code_hybrid_scoped(const char *query, const char *symbol, const char *project,
                                    int all_projects, int max_results, int *status_out)
@@ -69,8 +111,8 @@ char *kb_client_code_hybrid_scoped(const char *query, const char *symbol, const 
 char *kb_client_code_hybrid(const char *query, const char *symbol, const char *project,
                             int max_results, int *status_out)
 {
-   return kb_client_code_hybrid_scoped(query, symbol, project, !project || !project[0],
-                                       max_results, status_out);
+   return kb_client_code_hybrid_scoped(query, symbol, project, !project || !project[0], max_results,
+                                       status_out);
 }
 
 char *kb_client_code_graph_hubs(const char *project, int max_results, int *status_out)
