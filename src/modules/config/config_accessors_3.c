@@ -18,6 +18,33 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
+const char *config_openai_key_cmd(void)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, openai_key_cmd), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_embedding_model(void)
+{
+   static _Thread_local char buf[128];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, embedding_model), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_embedding_endpoint(void)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, embedding_endpoint), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
 const char *config_memory_weight_profile(void)
 {
    static _Thread_local char buf[512];
@@ -491,33 +518,6 @@ const char *config_llm_embed_backend(void)
    static _Thread_local char buf[16];
    buf[0] = 0;
    config_field_read(offsetof(config_t, llm_embed_backend), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_llm_embed_host(void)
-{
-   static _Thread_local char buf[128];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, llm_embed_host), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_llm_embed_gpu(void)
-{
-   static _Thread_local char buf[64];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, llm_embed_gpu), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_llm_embed_tier(void)
-{
-   static _Thread_local char buf[16];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, llm_embed_tier), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }
@@ -1239,21 +1239,6 @@ int config_set_memory_maintenance_interval_seconds(int value)
    if (rc == 0)
    {
       cfg->memory_maintenance_interval_seconds = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_maintenance_summarize_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_maintenance_summarize_enabled = value;
       rc = config_save(cfg);
    }
    free(cfg);

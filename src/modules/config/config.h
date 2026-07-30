@@ -1462,17 +1462,17 @@ typedef struct config
     *              NOTHING is deployed locally (no kb, no llm).
     *   "local"  — run a local aimee-kb and deploy the per-role LLM backends below.
     *
-    * Each LLM role is external (forward to llm_<role>_endpoint), local (a baked
-    * llama-server at llm_<role>_tier on llm_<role>_host / _gpu — mapped to the
-    * plugin's AIMEE_LLM_<ROLE>_MODE/TIER env), or off (rerank/synth only). The
-    * embedder's external endpoint/model/dim reuse embedding_endpoint/model/dim;
-    * an unset embedding_dim (0) is derived from the embedder /health probe. */
+    * The EMBEDDER is served by the kb itself; llm_embed_backend only chooses between
+    * in-container ("local") and an operator endpoint ("external",
+    * embedding_endpoint). An unset embedding_dim (0) is derived from the selected
+    * model. SYNTH is external (llm_synth_endpoint), local at llm_synth_tier on
+    * llm_synth_host / _gpu, or off. */
    char kb_mode[16]; /* "" | "local" | "remote" */
 
-   char llm_embed_backend[16]; /* "" | "external" | "local" */
-   char llm_embed_host[128];
-   char llm_embed_gpu[64];
-   char llm_embed_tier[16]; /* cpu | small | mid | large */
+   /* "" | "local" (in-container, the default) | "external" (embedding_endpoint).
+    * There is no host/gpu/tier here any more: those placed the retired aimee-llm
+    * container, and the kb now serves the selected embedder itself. */
+   char llm_embed_backend[16];
 
 
    char llm_synth_backend[16]; /* "" | "external" | "local" | "off" */

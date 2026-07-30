@@ -53,12 +53,12 @@ REQUIRED_COMPOSE_PATTERNS = {
     # external DB2 through its environment without editing the manifest.
     "db2-empty-default": r"(?m)^\s*AIMEE_DB2_URL:\s*\$\{AIMEE_DB2_URL:-\}\s*$",
     "kb-health": r"(?s)aimee-kb:.*healthcheck:.*http://127\.0\.0\.1:8741/v1/health",
-    # The unified aimee-llm container backs real embeddings/synthesis;
-    # the kb is pointed at it by AIMEE_LLM_URL (no model runs in the kb). The
-    # legacy torch embedder is retained behind a profile for rollback.
-    "llm-service": r"(?m)^\s{2}aimee-llm:",
+    # The legacy torch embedder is retained behind a profile for rollback. There is no
+    # inference service in the default topology: the kb embeds in-container.
     "embedder-service": r"(?m)^\s{2}embedder:",
-    "llm-url-env": r"(?m)^\s*AIMEE_LLM_URL:\s*\$\{AIMEE_LLM_URL:-http://aimee-llm:8080\}\s*$",
+    # AIMEE_LLM_URL is SYNTH ONLY now and must carry no default — the container it used
+    # to name is gone, so a default would point every deploy at a dead host.
+    "llm-url-no-default": r"(?m)^\s*AIMEE_LLM_URL:\s*\$\{AIMEE_LLM_URL:-\}\s*$",
 }
 
 FORBIDDEN_COMPOSE_PATTERNS = {
@@ -211,10 +211,14 @@ def kb_publication_failures(text: str) -> list[str]:
     if not isinstance(service, dict):
         return ["missing aimee-kb service"]
     failures: list[str] = []
-    required_services = {"aimee-kb", "aimee-llm", "embedder"}
+    required_services = {"aimee-kb", "embedder"}
     missing_services = required_services - set(services)
     if missing_services:
         failures.append("missing required services: " + ", ".join(sorted(missing_services)))
+    # The retired container must not come back by accident: the kb embeds itself, and a
+    # resurrected service would race it for the embedding role.
+    if "aimee-llm" in services:
+        failures.append("aimee-llm is retired; the kb embeds in-container")
     build = service.get("build")
     if not isinstance(build, dict) or build.get("context") != ".":
         failures.append("aimee-kb build context must be exactly '.'")
@@ -228,8 +232,11 @@ def kb_publication_failures(text: str) -> list[str]:
             failures.append("aimee-kb AIMEE_HOME must be exactly /var/lib/aimee")
         if environment.get("AIMEE_DB2_URL") != "${AIMEE_DB2_URL:-}":
             failures.append("aimee-kb AIMEE_DB2_URL must have an exact empty new-install default")
-        if environment.get("AIMEE_LLM_URL") != "${AIMEE_LLM_URL:-http://aimee-llm:8080}":
-            failures.append("aimee-kb AIMEE_LLM_URL must use the exact aimee-llm:8080 default")
+        if environment.get("AIMEE_LLM_URL") != "${AIMEE_LLM_URL:-}":
+            failures.append(
+                "aimee-kb AIMEE_LLM_URL must have an empty default (synth only; the "
+                "aimee-llm container is retired)"
+            )
     depends_on = service.get("depends_on")
     if isinstance(depends_on, dict) and "postgres" in depends_on:
         failures.append("aimee-kb new-install topology must not depend on postgres")
@@ -394,52 +401,42 @@ def managed_kb_llm_contract_failures(text: str) -> list[str]:
         return [f"invalid managed Compose YAML: {exc.__class__.__name__}"]
     services = model.get("services") if isinstance(model, dict) else None
     kb = services.get("aimee-kb") if isinstance(services, dict) else None
-    llm = services.get("aimee-llm") if isinstance(services, dict) else None
-    if not isinstance(kb, dict) or not isinstance(llm, dict):
-        return ["managed Compose must contain aimee-kb and aimee-llm services"]
+    if not isinstance(kb, dict):
+        return ["managed Compose must contain the aimee-kb service"]
+    if isinstance(services, dict) and "aimee-llm" in services:
+        return ["aimee-llm is retired; managed Compose must not deploy it"]
 
     failures: list[str] = []
     kb_env = kb.get("environment")
-    llm_env = llm.get("environment")
-    if not isinstance(kb_env, dict) or not isinstance(llm_env, dict):
-        return ["managed KB and LLM environment must use mapping form"]
+    if not isinstance(kb_env, dict):
+        return ["managed KB environment must use mapping form"]
 
+    # The service identity survives the container retirement: it still authenticates the
+    # kb to whatever endpoint does synthesis.
     token_expr = "${AIMEE_LLM_AUTH_TOKEN:-}"
     if kb_env.get("AIMEE_LLM_AUTH_TOKEN") != token_expr:
         failures.append("managed KB must receive AIMEE_LLM_AUTH_TOKEN")
     if kb_env.get("AIMEE_LLM_AUTH_REQUIRED") != "${AIMEE_LLM_AUTH_REQUIRED:-0}":
         failures.append(
-            "managed KB auth-required mode must follow the local-LLM deployment transaction"
+            "managed KB auth-required mode must follow the deployment transaction"
         )
     if kb_env.get("LLM_API_KEY") != token_expr:
         failures.append("managed KB legacy curator token must alias AIMEE_LLM_AUTH_TOKEN")
-    if llm_env.get("AIMEE_LLM_AUTH_TOKEN") != token_expr:
-        failures.append("managed LLM must receive the same AIMEE_LLM_AUTH_TOKEN")
-    if llm_env.get("AIMEE_LLM_STRICT_BIND") != "1":
-        failures.append("managed LLM must fail closed with AIMEE_LLM_STRICT_BIND=1")
-    if kb_env.get("AIMEE_LLM_URL") != "${AIMEE_LLM_URL:-http://aimee-llm:8742}":
-        failures.append("managed KB must use the unified aimee-llm:8742 endpoint")
+    # Synth only, and no default: the container that used to answer here is gone.
+    if kb_env.get("AIMEE_LLM_URL") != "${AIMEE_LLM_URL:-}":
+        failures.append("managed KB AIMEE_LLM_URL must have an empty default (synth only)")
     if kb_env.get("AIMEE_LLM_MODEL") != "${AIMEE_LLM_MODEL:-aimee-synth}":
-        failures.append("managed KB must receive the unified model label")
-    if llm_env.get("AIMEE_LLM_SYNTH_MODEL") != "${AIMEE_LLM_MODEL:-aimee-synth}":
-        failures.append("managed LLM synth model must match the KB model label")
-    if llm_env.get("AIMEE_EMBEDDING_DIM") != "${AIMEE_EMBEDDING_DIM:-}":
-        failures.append("managed LLM must receive the KB embedding-dimension pin")
-
-    for role in ("EMBED", "SYNTH"):
-        for setting, default in (("MODE", "local"), ("TIER", "cpu"), ("URL", "")):
-            key = f"AIMEE_LLM_{role}_{setting}"
-            expected = f"${{{key}:-{default}}}"
-            if llm_env.get(key) != expected:
-                failures.append(f"managed LLM must receive {key}")
+        failures.append("managed KB must receive the synth model label")
+    # Nothing may hand the kb a per-role embedder container knob any more.
+    for key in kb_env:
+        if str(key).startswith("AIMEE_LLM_EMBED_"):
+            failures.append(f"managed KB must not receive {key}; the embedder is in-container")
 
     depends_on = kb.get("depends_on")
     if (isinstance(depends_on, dict) and "aimee-llm" in depends_on) or (
         isinstance(depends_on, list) and "aimee-llm" in depends_on
     ):
-        failures.append(
-            "managed KB must start independently of LLM model readiness"
-        )
+        failures.append("managed KB must not depend on the retired aimee-llm service")
     return failures
 
 

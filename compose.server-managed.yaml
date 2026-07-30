@@ -2,7 +2,7 @@
 #
 # You deploy ONE container — aimee-server — and drive the rest from the browser.
 # It runs with the host Docker socket mounted, so when the setup wizard finishes it
-# brings up the managed sibling services (aimee-kb + aimee-llm) itself,
+# brings up the managed sibling service (aimee-kb) itself,
 # via `docker compose up -d` on deploy/container/aimee-managed.compose.yaml (baked
 # into the image). No second compose command, no combined image.
 #
@@ -25,7 +25,7 @@
 name: aimee
 
 # Shared network the server + every managed service join, so they resolve each
-# other by name (aimee-kb:8741, aimee-llm:8742). The managed compose
+# other by name (aimee-kb:8741). The managed compose
 # references this as `external` — it must exist, so define it here with a fixed name.
 networks:
   aimee:
@@ -79,13 +79,10 @@ services:
       # Passed through to the managed services when a role is placed local (tier,
       # images). ONE LLM image serves every tier — it is model-less and downloads
       # what the wizard selected — so there is no separate CPU image to override.
-      AIMEE_LLM_IMAGE: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:${AIMEE_IMAGE_TAG:-latest}}
       AIMEE_KB_IMAGE: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:${AIMEE_IMAGE_TAG:-latest}}
       # Separate one-shot image containing the offline root provisioner and JWKS
       # publisher. These binaries never enter the ordinary KB/server images.
       AIMEE_AUTHORITY_BOOTSTRAP_IMAGE: ${AIMEE_AUTHORITY_BOOTSTRAP_IMAGE:-ghcr.io/rakuensoftware/aimee-authority-bootstrap:${AIMEE_IMAGE_TAG:-latest}}
-      AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-cpu}
-      AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}
       # Optional operator-supplied KB -> LLM service bearer. When omitted, the
       # wizard generates a stable 256-bit credential in the server volume and
       # supplies it only to the managed KB and LLM containers.

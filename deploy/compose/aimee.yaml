@@ -1,45 +1,17 @@
-# aimee split stack via docker-compose (aimee-llm + self-contained aimee-kb +
+# aimee stack via docker-compose (self-contained aimee-kb +
 # aimee-server). Runs on Docker or any Docker-API daemon (e.g. LXC2Docker).
 #
 #   docker compose -f deploy/compose/aimee.yaml up -d                 # CPU LLM
 #   docker compose -f deploy/compose/aimee.yaml -f deploy/compose/aimee.gpu.yaml up -d   # GPU LLM
 #
-# The kb runs NO model — it calls the aimee-llm container for embedding,
-# and synthesis via AIMEE_LLM_URL (the one knob; see
-# docs/KB_LLM_BACKENDS.md). aimee-llm is the unified Vulkan llama.cpp container;
+# The kb embeds IN-CONTAINER from baked weights, so no embedding service is
+# deployed. Synthesis still resolves an external endpoint via AIMEE_LLM_URL (see
+# docs/KB_LLM_BACKENDS.md);
 # this base uses the CPU tier. Layer aimee.gpu.yaml for the GPU tier (/dev/dri
 # passthrough); both serve the same 768-dim embedder, so switching tiers needs no
 # re-embed. Server /v1 on :8740, kb /v1 on :8741, webchat on :8443.
 name: aimee
 services:
-  # Unified llama.cpp/Vulkan container: embed (/embed,/embed_batch) and synth
-  # (/v1/chat/completions). One model-less image; the tier is
-  # chosen at runtime via AIMEE_LLM_TIER (unset ≡ cpu here) and the models are
-  # downloaded to the /models volume on first boot. The kb sends no bearer, so it
-  # runs auth-off (AIMEE_LLM_AUTH_TOKEN empty) on the internal net.
-  aimee-llm:
-    restart: unless-stopped
-    # Profile-gated: brought up only when the page-2 config puts a role local
-    # (COMPOSE_PROFILES=...,llm, emitted by `aimee config deploy-env`).
-    profiles: ["llm"]
-    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
-    environment:
-      AIMEE_LLM_PORT: "8742"
-      AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}
-      # cpu tier by default (unset ≡ cpu); the GPU override sets small/mid/large.
-      AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-cpu}
-      AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
-    volumes:
-      # Persist the downloaded per-tier GGUFs so restarts don't re-fetch.
-      - aimee-llm-models:/models
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8742/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      # Cold first boot downloads the tier's models before /health is OK.
-      start_period: 1200s
-
   aimee-kb:
     restart: unless-stopped
     image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:latest}
@@ -50,8 +22,9 @@ services:
       # Empty by default: the KB image owns PostgreSQL + pgvector for a new
       # install. Set AIMEE_DB2_URL explicitly only to keep/use an external DB2.
       AIMEE_DB2_URL: ${AIMEE_DB2_URL:-}
-      # One knob: embed + synth all via the aimee-llm container.
-      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8742}
+      # Synth only — the kb embeds in-container. No default: point this at an
+      # OpenAI-compatible endpoint to enable the LLM-dependent passes.
+      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
       # Embedding dim — deliberately UNSET. Every tier serves the same 768-dim
       # nomic embedder, so there is nothing tier-specific to pin, and leaving it
       # empty lets the kb derive the dim (pinned > recorded > probed). Setting it
@@ -61,18 +34,13 @@ services:
       AIMEE_KB_HTTP_BIND: "1"
       # The curator synth sidecar (curator-extract.py) reads LLM_ENDPOINT, NOT
       # AIMEE_LLM_URL — without it the sidecar exits 256 and code-unit synthesis
-      # never drains. Point it at the same aimee-llm gateway (/v1).
-      LLM_ENDPOINT: ${LLM_ENDPOINT:-http://aimee-llm:8742/v1}
+      # never drains. Point it at the same synth endpoint's /v1.
+      LLM_ENDPOINT: ${LLM_ENDPOINT:-}
       LLM_MODEL: ${LLM_MODEL:-aimee-synth}
     command: ["--http-port=8741"]
     ports:
       - "8741:8741"
     depends_on:
-      # required:false so the kb starts (fail-open on embedding) when the aimee-llm
-      # profile is off; it still waits for aimee-llm to be healthy when on.
-      aimee-llm:
-        condition: service_healthy
-        required: false
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
       interval: 10s

@@ -6,7 +6,6 @@
 #   aimee-kb         (Dockerfile)             ghcr.io/<owner>/aimee-kb
 #   aimee-authority-bootstrap (Dockerfile.authority-bootstrap) ghcr.io/<owner>/aimee-authority-bootstrap
 #   aimee-embedder   (Dockerfile.embedder)    ghcr.io/<owner>/aimee-embedder (+ -4b)
-#   aimee-llm        (Dockerfile.aimee-llm)   ghcr.io/<owner>/aimee-llm (model-less)
 #   aimee-css-render (deploy/css-render/Dockerfile) ghcr.io/<owner>/aimee-css-render
 #
 # Multi-arch (linux/amd64 + linux/arm64) via the canonical build-by-digest then
@@ -79,13 +78,6 @@ jobs:
           # baked in. Pair with embedding_dim: 2560 (see docs). Default (above) is
           # the 0.6b embedder.
           - { name: aimee-embedder-4b, dockerfile: Dockerfile.embedder, embedder_arg: "EMBEDDER_MODEL=perplexity-ai/pplx-embed-v1-4b" }
-          # The unified aimee-llm container (one Vulkan llama.cpp + the gateway serving
-          # embed+synth). MODEL-LESS: one image for every tier — the tier
-          # (cpu/small/mid/large) is chosen at RUNTIME via AIMEE_LLM_TIER and the models
-          # are downloaded on first boot, so there are no baked GGUFs and no build-args.
-          # Multi-arch: upstream llama.cpp ships x64 + arm64 Vulkan tarballs, mapped
-          # from TARGETARCH in the Dockerfile. NGL is set at deploy.
-          - { name: aimee-llm, dockerfile: Dockerfile.aimee-llm }
           # #4-full render backend (headless-Chromium sidecar). Self-contained
           # under deploy/css-render (its own build context); independent of the C
           # build, so a failure here never blocks the aimee images (fail-fast off).
@@ -128,15 +120,11 @@ jobs:
           # high-reuse) C-image caches, defeating the purpose. The embedder's real
           # win is the runtime model fetch (embedder-runtime-fetch-autodim proposal),
           # not the layer cache.
-          # aimee-llm is model-less (no baked GGUFs) so it is small and cached like
-          # the C images.
           cache-from: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-css-render') && format('type=gha,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
           cache-to: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-css-render') && format('type=gha,mode=max,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
           # Images bundle the browser UI (WITH_RUNTIME_WEB=1, the default). webchat's
           # frontend dependency (@rakuensoftware/smoothgui) is vendored in-repo, so
           # the build needs no npm token. The aimee-kb image ignores WITH_RUNTIME_WEB.
-          # The deploy stack brings up a separate, profile-gated aimee-llm container
-          # only when the setup wizard's page-2 config puts a role local.
           build-args: |
             AIMEE_VERSION=${{ needs.prep.outputs.version }}
             WITH_RUNTIME_WEB=1
@@ -164,7 +152,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [aimee-server, aimee-kb, aimee-authority-bootstrap, aimee-embedder, aimee-embedder-4b, aimee-llm, aimee-css-render]
+        image: [aimee-server, aimee-kb, aimee-authority-bootstrap, aimee-embedder, aimee-embedder-4b, aimee-css-render]
     steps:
       - name: Normalize owner to lowercase
         run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"

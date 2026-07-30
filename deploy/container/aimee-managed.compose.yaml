@@ -6,19 +6,16 @@
 # operator directly; the server picks the services with COMPOSE_PROFILES, which
 # `aimee config deploy-env` derives from the wizard's page-2 config:
 #
-#   local kb, LLM external/off  -> COMPOSE_PROFILES=kb      -> aimee-kb
-#   local kb, any local tier    -> COMPOSE_PROFILES=kb,llm  -> + aimee-llm (downloads)
-#   remote kb                   -> COMPOSE_PROFILES=         -> nothing (server connects out)
+#   local kb   -> COMPOSE_PROFILES=kb   -> aimee-kb
+#   remote kb  -> COMPOSE_PROFILES=      -> nothing (server connects out)
 #
-# ONE LLM service for every tier. aimee-llm is model-less and downloads whichever
-# tier the wizard selected (AIMEE_LLM_*_TIER) on first boot, cpu included. There
-# used to be a second, pre-baked aimee-llm-cpu image on a mutually exclusive
-# "llm-cpu" profile; it is gone. Two images meant every gateway change had to be
-# republished twice, and when the cpu one lagged it served a /health with no
-# `dim` — which the kb gates on — so the kb never went healthy on a fresh install.
+# There is no inference service here any more. The kb embeds IN-CONTAINER from
+# weights baked into its image, and the reranker is gone (it measured negative), so
+# nothing is left for a separate LLM container to serve on the retrieval path.
+# Synthesis resolves an external endpoint via AIMEE_LLM_URL.
 #
 # Every service joins the EXTERNAL `aimee` network that aimee-server is also on, so
-# the server reaches them by name (aimee-kb:8741, aimee-llm:8742).
+# the server reaches it by name (aimee-kb:8741).
 # That network is created by compose.server-managed.yaml.
 
 networks:
@@ -41,10 +38,10 @@ services:
       # Empty by default: the KB image owns PostgreSQL + pgvector for a new
       # install. Set AIMEE_DB2_URL explicitly only to keep/use an external DB2.
       AIMEE_DB2_URL: ${AIMEE_DB2_URL:-}
-      # embed + synth via the unified aimee-llm container (the kb runs no
+      # synth via an external endpoint (the kb embeds in-container and runs no
       # model). When no role is local (llm profile off) the operator points this at
       # an external endpoint; the kb fail-opens on embedding if it is unreachable.
-      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8742}
+      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
       # Managed setup creates one persistent 256-bit service bearer and gives it
       # to BOTH sides. This is not the wizard user's bearer: it is the KB's own
       # identity for every embed and synth request to its LLM.
@@ -127,55 +124,6 @@ services:
       # a second fixed mount, never a host bind.
       - aimee-managed-authority-home:/tmp/.config/aimee
       - aimee-managed-jwks-trust:/run/aimee-trust
-
-  # The one LLM service, for every tier: a model-less image that pulls the tier
-  # the wizard selected on first boot and persists it in the /models volume.
-  # Selected by COMPOSE_PROFILES=...,llm whenever any role is served locally.
-  aimee-llm:
-    profiles: ["llm"]
-    restart: unless-stopped
-    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:${AIMEE_IMAGE_TAG:-latest}}
-    networks: [aimee]
-    environment:
-      AIMEE_LLM_PORT: "8742"
-      # GPU = AIMEE_LLM_TIER=small|mid|large + AIMEE_LLM_NGL=99 + /dev/dri
-      # (deploy/compose/aimee.gpu.yaml). Models download on first boot.
-      AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}
-      # cpu, not a GPU tier: this service now covers pure-CPU deploys too, and the
-      # per-role AIMEE_LLM_*_TIER the wizard emits overrides this anyway. Guessing
-      # a GPU tier here would download multi-GB weights a CPU box cannot serve.
-      AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-cpu}
-      # The wizard emits the complete role contract. Modes decide whether this
-      # gateway starts a local role, proxies an external role URL, or gates it
-      # off; tiers select the local artifact/profile. Do not let the supervisor's
-      # all-local defaults silently replace the saved wizard choices.
-      AIMEE_LLM_EMBED_MODE: ${AIMEE_LLM_EMBED_MODE:-local}
-      AIMEE_LLM_EMBED_TIER: ${AIMEE_LLM_EMBED_TIER:-cpu}
-      AIMEE_LLM_EMBED_URL: ${AIMEE_LLM_EMBED_URL:-}
-      AIMEE_LLM_SYNTH_MODE: ${AIMEE_LLM_SYNTH_MODE:-local}
-      AIMEE_LLM_SYNTH_TIER: ${AIMEE_LLM_SYNTH_TIER:-cpu}
-      AIMEE_LLM_SYNTH_URL: ${AIMEE_LLM_SYNTH_URL:-}
-      AIMEE_LLM_SYNTH_MODEL: ${AIMEE_LLM_MODEL:-aimee-synth}
-      # Empty means derive the model's native dimension at runtime. A wizard or
-      # operator pin reaches both sides and the gateway rejects model drift.
-      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
-      # A local managed LLM is never allowed to start keyless. deploy_apply.c
-      # generates/persists this before Compose sees the service.
-      # Keep interpolation profile-safe: Compose expands inactive profiles too.
-      # An empty value still fails at gateway startup because STRICT_BIND is on.
-      AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
-      AIMEE_LLM_STRICT_BIND: "1"
-    volumes:
-      - aimee-managed-llm-models:/models
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8742/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      # Cold first boot downloads the tier's GGUFs before /health is OK. The
-      # wizard waits only for this container to start; readiness is asynchronous
-      # so KB initialization and CPU indexing proceed during the download.
-      start_period: 1200s
 
 volumes:
   aimee-managed-kb-home:

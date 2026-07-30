@@ -900,10 +900,3 @@ int config_learning_synthesize_enabled(void)
    return v;
 }
 
-int config_learning_synthesize_max_tokens(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, learning_synthesize_max_tokens), sizeof(v), &v);
-   return v;
-}
-

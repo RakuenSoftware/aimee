@@ -66,9 +66,11 @@ describe('placementToConfig clears stale sibling fields', () => {
       llm_synth_backend: 'external', llm_synth_endpoint: 'https://r',
       llm_synth_tier: '', llm_synth_host: '', llm_synth_gpu: '',
     });
+    // The embedder has nothing to place: it runs inside the kb, so a local placement
+    // writes the backend alone. Emitting llm_embed_tier/host/gpu would write keys that
+    // no longer exist in config.
     expect(placementToConfig('embed', { backend: 'local', tier: 'large', host: 'h', gpu: '1' })).toEqual({
-      llm_embed_backend: 'local', llm_embed_tier: 'large', llm_embed_host: 'h', llm_embed_gpu: '1',
-      embedding_endpoint: '',
+      llm_embed_backend: 'local', embedding_endpoint: '',
     });
     expect(placementToConfig('synth', { backend: 'off' })).toEqual({
       llm_synth_backend: 'off', llm_synth_tier: '', llm_synth_host: '', llm_synth_gpu: '', llm_synth_endpoint: '',
@@ -78,7 +80,8 @@ describe('placementToConfig clears stale sibling fields', () => {
 
 describe('configToPlacement round-trips placementToConfig', () => {
   const cases: { role: Parameters<typeof roleKeys>[0]; p: Placement }[] = [
-    { role: 'embed', p: { backend: 'local', tier: 'large', host: 'box', gpu: '0' } },
+    // in-container: local carries no tier/host/gpu to round-trip
+    { role: 'embed', p: { backend: 'local', tier: '', host: '', gpu: '' } },
     { role: 'synth', p: { backend: 'local', tier: 'cpu', host: 'box', gpu: '' } },
     { role: 'synth', p: { backend: 'external', endpoint: 'https://s' } },
     { role: 'synth', p: { backend: 'off' } },
@@ -89,8 +92,11 @@ describe('configToPlacement round-trips placementToConfig', () => {
     });
   }
 
-  it('an unset backend defaults to local cpu (simplest working choice)', () => {
-    expect(configToPlacement({}, 'embed')).toEqual({ backend: 'local', tier: 'cpu', host: '', gpu: '' });
+  it('an unset backend defaults to local (simplest working choice)', () => {
+    // For the embedder that means in-container, with no tier to default: the kb serves
+    // it, so a fresh install needs no placement decision at all.
+    expect(configToPlacement({}, 'embed')).toEqual({ backend: 'local', tier: '', host: '', gpu: '' });
+    expect(configToPlacement({}, 'synth')).toEqual({ backend: 'local', tier: 'cpu', host: '', gpu: '' });
   });
 });
 
@@ -133,27 +139,26 @@ describe('placementOptions / placementOptionId', () => {
 /* The example topologies the operator described — assert the exact keys
  * that would be persisted match the shipped deploy-env contract. */
 describe('traced example topologies', () => {
-  it('large embedder + external synth', () => {
+  it('in-container embedder + external synth', () => {
     const written = {
-      ...placementToConfig('embed', { backend: 'local', tier: 'large', host: 'box', gpu: '0' }),
+      ...placementToConfig('embed', { backend: 'local', tier: '', host: '', gpu: '' }),
       ...placementToConfig('synth', { backend: 'external', endpoint: 'https://synth' }),
     };
     expect(written.llm_embed_backend).toBe('local');
-    expect(written.llm_embed_tier).toBe('large');
+    expect('llm_embed_tier' in written).toBe(false);
     expect(written.llm_synth_backend).toBe('external');
     expect(written.llm_synth_endpoint).toBe('https://synth');
   });
 
-  it('cpu embedder + small synth (one shared local container)', () => {
+  it('in-container embedder + local synth', () => {
     const written = {
-      ...placementToConfig('embed', { backend: 'local', tier: 'cpu', host: 'box', gpu: '' }),
+      ...placementToConfig('embed', { backend: 'local', tier: '', host: '', gpu: '' }),
       ...placementToConfig('synth', { backend: 'local', tier: 'small', host: 'box', gpu: '0' }),
     };
-    expect(written.llm_embed_tier).toBe('cpu');
     expect(written.llm_synth_tier).toBe('small');
-    // all local → same host (single aimee-llm container)
-    expect(written.llm_embed_host).toBe('box');
     expect(written.llm_synth_host).toBe('box');
+    // only synth names a host; the embedder is wherever the kb is
+    expect('llm_embed_host' in written).toBe(false);
   });
 });
 
@@ -163,7 +168,7 @@ describe('buildDesiredConfig (the full save map)', () => {
     kbUrl: '',
     kbBearer: '',
     placements: {
-      embed: { backend: 'local', tier: 'large', host: 'box', gpu: '0' },
+      embed: { backend: 'local', tier: '', host: '', gpu: '' },
       synth: { backend: 'external', endpoint: 'https://synth' },
     },
     embedModel: '',
@@ -175,7 +180,7 @@ describe('buildDesiredConfig (the full save map)', () => {
     const m = buildDesiredConfig(localSel());
     expect(m.kb_mode).toBe('local');
     expect(m.llm_embed_backend).toBe('local');
-    expect(m.llm_embed_tier).toBe('large');
+    expect('llm_embed_tier' in m).toBe(false);
     expect(m.llm_synth_backend).toBe('external');
     expect(m.llm_synth_endpoint).toBe('https://synth');
     // the synth model is fixed by tier, never written from the wizard

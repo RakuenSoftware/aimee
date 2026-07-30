@@ -18,6 +18,20 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
+double config_calibration_tau_working_profile_flag(void)
+{
+   double v = 0;
+   config_field_read(offsetof(config_t, calibration_tau_working_profile_flag), sizeof(v), &v);
+   return v;
+}
+
+int config_demotion_enabled(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, demotion_enabled), sizeof(v), &v);
+   return v;
+}
+
 int config_demotion_window(void)
 {
    int v = 0;
@@ -900,33 +914,6 @@ const char *config_openai_model(void)
    static _Thread_local char buf[128];
    buf[0] = 0;
    config_field_read(offsetof(config_t, openai_model), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_openai_key_cmd(void)
-{
-   static _Thread_local char buf[512];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, openai_key_cmd), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_embedding_model(void)
-{
-   static _Thread_local char buf[128];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, embedding_model), sizeof(buf), buf);
-   buf[sizeof(buf) - 1] = 0;
-   return buf;
-}
-
-const char *config_embedding_endpoint(void)
-{
-   static _Thread_local char buf[512];
-   buf[0] = 0;
-   config_field_read(offsetof(config_t, embedding_endpoint), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }

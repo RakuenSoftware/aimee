@@ -2,7 +2,7 @@
 #
 # This is the kb half of the split deployment: the aimee-server plugin reaches
 # it over the runtime bridge at AIMEE_KB_API_URL=http://10.100.0.1:8741, and it
-# in turn embeds against the unified **aimee-llm** (llama.cpp / Vulkan)
+# in turn embeds IN-CONTAINER from weights baked into its image
 # container — NOT a bundled torch embedder. The kb image already defaults to
 # `--http-port=8741` (Dockerfile CMD) + EXPOSE 8741, so no command override is
 # needed; AIMEE_KB_HTTP_BIND=1 makes it bind 0.0.0.0 so the published port is
@@ -31,7 +31,7 @@ metadata:
   description: >-
     aimee knowledge base — DB2 + pgvector shared/vector memory, served on /v1
     (:8741). Bundles its own pgvector Postgres; embeds against the
-    external aimee-llm (llama.cpp / Vulkan GPU) container via AIMEE_EMBEDDER_URL,
+    embedder baked into its own image,
     not a torch embedder. The aimee-server plugin points AIMEE_KB_API_URL here.
   vendor: RakuenSoftware
   homepage: https://github.com/RakuenSoftware/aimee
@@ -49,7 +49,7 @@ services:
     container:
       restartPolicy: unless-stopped
     env:
-      # ONE knob: point the kb at a unified aimee-llm container and it drives
+      # Synth endpoint (the kb embeds in-container). Point it at a container that
       # embedding (/embed) AND synthesis (curator Tier-A + Tier-B, at {url}/v1).
       # The kb runs NO model itself — this is just the URL it calls. 10.100.0.1:8742
       # is the GPU aimee-llm on the runtime bridge here.
@@ -58,7 +58,7 @@ services:
       #   - The gateway runs auth-off (empty AIMEE_LLM_AUTH_TOKEN) — the kb embed
       #     path sends no bearer.
       AIMEE_LLM_URL: http://10.100.0.1:8742
-      # Embedding dim is deliberately UNSET: every aimee-llm tier serves the same
+      # Embedding dim is deliberately UNSET: the kb derives it from the selected
       # 768-dim nomic embedder, so there is nothing tier-specific to pin, and an
       # empty value lets the kb derive the dim (pinned > recorded > probed). A kb
       # populated before the nomic cutover keeps its RECORDED dim and is migrated
@@ -69,7 +69,7 @@ services:
       AIMEE_KB_HTTP_BIND: "1"
       # The curator synth sidecar (curator-extract.py) reads LLM_ENDPOINT, NOT
       # AIMEE_LLM_URL — without it the sidecar exits 256 and code-unit synthesis
-      # never drains. Point it at the same aimee-llm gateway (/v1) on the bridge.
+      # never drains. Point it at the same synth endpoint's /v1.
       LLM_ENDPOINT: http://10.100.0.1:8742/v1
       LLM_MODEL: aimee-synth
     volumes:
@@ -97,7 +97,7 @@ services:
         label: LLM container URL (embed + synth)
         default: http://10.100.0.1:8742
         description: >-
-          One knob. The unified aimee-llm container the kb calls for embedding
+          The endpoint the kb calls for synthesis
           and synthesis (Tier-A + Tier-B). CPU tier = Tier-A synth;
           GPU tier = Tier-A+B synth. Both serve the SAME 768-dim embedder, so the
           tier does not change the embedding dimension. Must run auth-off (the kb

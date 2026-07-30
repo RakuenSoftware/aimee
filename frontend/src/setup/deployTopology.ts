@@ -12,7 +12,7 @@
 export type Role = 'embed' | 'synth';
 
 export const ROLES: { role: Role; label: string; blurb: string }[] = [
-  { role: 'embed', label: 'Embedder', blurb: 'Turns text into vectors for search + memory.' },
+  { role: 'embed', label: 'Embedder', blurb: 'Runs inside the knowledge base; turns text into vectors.' },
   { role: 'synth', label: 'Synthesizer', blurb: 'Writes the knowledge-base curation + summaries.' },
 ];
 
@@ -91,6 +91,9 @@ export function vramToTier(vram_mb: number): Tier {
 
 export interface RoleKeys {
   backend: string;
+  /** Placement keys, EMPTY for a role with nothing to place. The embedder is served by
+   * the kb itself, so there is no host, GPU or tier for it — those keys described the
+   * retired aimee-llm container and no longer exist in config. */
   host: string;
   gpu: string;
   tier: string;
@@ -99,12 +102,19 @@ export interface RoleKeys {
   endpoint: string;
 }
 
+/** Whether this role names a container the operator has to place. Only synth does:
+ * "local" for the embedder means in-container, which needs no host and no tier. */
+export function rolePlaceable(role: Role): boolean {
+  return role !== 'embed';
+}
+
 export function roleKeys(role: Role): RoleKeys {
+  const placeable = rolePlaceable(role);
   return {
     backend: `llm_${role}_backend`,
-    host: `llm_${role}_host`,
-    gpu: `llm_${role}_gpu`,
-    tier: `llm_${role}_tier`,
+    host: placeable ? `llm_${role}_host` : '',
+    gpu: placeable ? `llm_${role}_gpu` : '',
+    tier: placeable ? `llm_${role}_tier` : '',
     endpoint: role === 'embed' ? 'embedding_endpoint' : `llm_${role}_endpoint`,
   };
 }
@@ -120,7 +130,7 @@ export function synthIsTierAOnly(role: Role, p: Placement): boolean {
  * mapping never emits an off-allowlist key. */
 export const ALL_ROLE_KEYS: string[] = ROLES.flatMap(({ role }) => {
   const k = roleKeys(role);
-  return [k.backend, k.host, k.gpu, k.tier, k.endpoint];
+  return [k.backend, k.host, k.gpu, k.tier, k.endpoint].filter(Boolean);
 });
 
 /** Translate a role's placement selection into the {key: value} config map to
@@ -128,9 +138,16 @@ export const ALL_ROLE_KEYS: string[] = ROLES.flatMap(({ role }) => {
  * switch (e.g. local→external) never leaves a stale host/tier/endpoint behind. */
 export function placementToConfig(role: Role, p: Placement): Record<string, string> {
   const k = roleKeys(role);
-  const base = { [k.backend]: '', [k.host]: '', [k.gpu]: '', [k.tier]: '', [k.endpoint]: '' };
+  // Only emit keys this role actually has. A blank key name would otherwise write an
+  // empty-string entry that the config allowlist rejects.
+  const base: Record<string, string> = { [k.backend]: '', [k.endpoint]: '' };
+  for (const key of [k.host, k.gpu, k.tier]) if (key) base[key] = '';
   if (p.backend === 'local') {
-    return { ...base, [k.backend]: 'local', [k.tier]: p.tier, [k.host]: p.host, [k.gpu]: p.gpu };
+    const out = { ...base, [k.backend]: 'local' };
+    if (k.tier) out[k.tier] = p.tier;
+    if (k.host) out[k.host] = p.host;
+    if (k.gpu) out[k.gpu] = p.gpu;
+    return out;
   }
   if (p.backend === 'external') {
     return { ...base, [k.backend]: 'external', [k.endpoint]: p.endpoint };
@@ -196,6 +213,11 @@ export function configToPlacement(cfg: Record<string, unknown>, role: Role): Pla
   const backend = str(cfg, k.backend);
   if (backend === 'external') return { backend: 'external', endpoint: str(cfg, k.endpoint) };
   if (backend === 'off') return { backend: 'off' };
+  if (!rolePlaceable(role)) {
+    // In-container: there is no tier to default and no host to name. Reporting 'cpu'
+    // here would be inventing a placement for something that has none.
+    return { backend: 'local', tier: '' as Tier, host: '', gpu: '' };
+  }
   const tier = str(cfg, k.tier) as Tier;
   return {
     backend: 'local',

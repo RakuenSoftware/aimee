@@ -227,8 +227,6 @@ int main(void)
       /* Setup-wizard page-2 backend record (kb_mode + per-role llm_* fields). */
       snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
       snprintf(cfg.llm_embed_backend, sizeof(cfg.llm_embed_backend), "local");
-      snprintf(cfg.llm_embed_tier, sizeof(cfg.llm_embed_tier), "mid");
-      snprintf(cfg.llm_embed_gpu, sizeof(cfg.llm_embed_gpu), "0");
       snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "external");
       snprintf(cfg.llm_synth_endpoint, sizeof(cfg.llm_synth_endpoint), "https://api.example/v1");
       snprintf(cfg.llm_synth_model, sizeof(cfg.llm_synth_model), "gpt-5.5");
@@ -490,8 +488,6 @@ int main(void)
       /* Setup-wizard page-2 backend record survives save/load. */
       assert(strcmp(cfg2.kb_mode, "local") == 0);
       assert(strcmp(cfg2.llm_embed_backend, "local") == 0);
-      assert(strcmp(cfg2.llm_embed_tier, "mid") == 0);
-      assert(strcmp(cfg2.llm_embed_gpu, "0") == 0);
       assert(strcmp(cfg2.llm_synth_backend, "external") == 0);
       assert(strcmp(cfg2.llm_synth_endpoint, "https://api.example/v1") == 0);
       assert(strcmp(cfg2.llm_synth_model, "gpt-5.5") == 0);
@@ -2480,49 +2476,37 @@ int main(void)
 
       /* Local kb; embed local(mid), synth external. */
       static config_t cfg;
+
+      /* Local kb, in-container embedder, external synth. There is no inference
+       * service to deploy any more, so the kb profile is the whole story and the
+       * embedder rides along as a MODEL CHOICE rather than a container placement. */
       memset(&cfg, 0, sizeof(cfg));
       snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
       snprintf(cfg.llm_embed_backend, sizeof(cfg.llm_embed_backend), "local");
-      snprintf(cfg.llm_embed_tier, sizeof(cfg.llm_embed_tier), "mid");
+      snprintf(cfg.embedding_model, sizeof(cfg.embedding_model), "bekko-a25m");
       snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "external");
       snprintf(cfg.llm_synth_endpoint, sizeof(cfg.llm_synth_endpoint), "https://api.x/v1");
       config_emit_deploy_env(&cfg, env, sizeof(env));
-      assert(strstr(env, "COMPOSE_PROFILES=kb,llm\n") != NULL);
-      assert(strstr(env, "AIMEE_LLM_EMBED_MODE=local\n") != NULL);
-      assert(strstr(env, "AIMEE_LLM_EMBED_TIER=mid\n") != NULL);
+      assert(strstr(env, "COMPOSE_PROFILES=kb\n") != NULL);
+      assert(strstr(env, ",llm") == NULL); /* the retired container takes its profile */
+      assert(strstr(env, "EMBEDDER_MODEL=bekko-a25m\n") != NULL);
       assert(strstr(env, "AIMEE_LLM_SYNTH_MODE=external\n") != NULL);
       assert(strstr(env, "AIMEE_LLM_SYNTH_URL=https://api.x/v1\n") != NULL);
-      assert(strstr(env, "AIMEE_LLM_URL=http://aimee-llm:8742\n") != NULL);
-      assert(strstr(env, "AIMEE_EMBEDDING_DIM") == NULL); /* local embed => unpinned/derived */
+      /* No embedder container to size, place or point at. */
+      assert(strstr(env, "AIMEE_LLM_EMBED_") == NULL);
+      assert(strstr(env, "AIMEE_EMBEDDING_DIM") == NULL); /* in-container => derived */
 
-      /* Local kb; all roles local at the CPU tier => the SAME "llm" profile as a
-       * GPU tier. There is one LLM service now: aimee-llm is model-less and
-       * downloads whichever tier the roles ask for, so the tier no longer picks a
-       * different image (there used to be a pre-baked aimee-llm-cpu on its own
-       * mutually exclusive "llm-cpu" profile). The per-role tier still rides
-       * along in the env. */
+      /* A local synth still names its tier: that role has not moved. */
       memset(&cfg, 0, sizeof(cfg));
       snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
       snprintf(cfg.llm_embed_backend, sizeof(cfg.llm_embed_backend), "local");
-      snprintf(cfg.llm_embed_tier, sizeof(cfg.llm_embed_tier), "cpu");
       snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "local");
       snprintf(cfg.llm_synth_tier, sizeof(cfg.llm_synth_tier), "cpu");
       config_emit_deploy_env(&cfg, env, sizeof(env));
-      assert(strstr(env, "COMPOSE_PROFILES=kb,llm\n") != NULL);
-      assert(strstr(env, "llm-cpu") == NULL); /* the second image is gone */
-      assert(strstr(env, "AIMEE_LLM_EMBED_TIER=cpu\n") != NULL);
+      assert(strstr(env, "COMPOSE_PROFILES=kb\n") != NULL);
       assert(strstr(env, "AIMEE_LLM_SYNTH_TIER=cpu\n") != NULL);
-      assert(strstr(env, "AIMEE_LLM_URL=http://aimee-llm:8742\n") != NULL);
 
-      /* A local role with an unset tier takes the same profile. */
-      memset(&cfg, 0, sizeof(cfg));
-      snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
-      snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "local");
-      config_emit_deploy_env(&cfg, env, sizeof(env));
-      assert(strstr(env, "COMPOSE_PROFILES=kb,llm\n") != NULL);
-      assert(strstr(env, "llm-cpu") == NULL);
-
-      /* Remote kb: connect out, deploy nothing (no profiles, no llm env). */
+      /* Remote kb: connect out, deploy nothing. */
       memset(&cfg, 0, sizeof(cfg));
       snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "remote");
       snprintf(cfg.kb_client_url, sizeof(cfg.kb_client_url), "https://kb.remote:4010");
@@ -2532,9 +2516,11 @@ int main(void)
       assert(strstr(env, "AIMEE_KB_API_URL=https://kb.remote:4010\n") != NULL);
       assert(strstr(env, "AIMEE_KB_API_BEARER_TOKEN=tok-x\n") != NULL);
       assert(strstr(env, "AIMEE_LLM_") == NULL);
+      assert(strstr(env, "EMBEDDER_MODEL") == NULL);
 
-      /* All external (local kb): kb profile only, no llm container, external embed
-       * with a pinned dim is emitted. */
+      /* An EXTERNAL embedder: the endpoint is passed as the embedder URL the kb's
+       * client reads, and a pinned dim comes along because nothing local can derive
+       * it from a model we do not serve. */
       memset(&cfg, 0, sizeof(cfg));
       snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
       snprintf(cfg.llm_embed_backend, sizeof(cfg.llm_embed_backend), "external");
@@ -2543,9 +2529,8 @@ int main(void)
       snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "external");
       snprintf(cfg.llm_synth_endpoint, sizeof(cfg.llm_synth_endpoint), "https://synth.x/v1");
       config_emit_deploy_env(&cfg, env, sizeof(env));
-      assert(strstr(env, "COMPOSE_PROFILES=kb\n") != NULL); /* no ,llm */
-      assert(strstr(env, "AIMEE_LLM_URL=") == NULL);
-      assert(strstr(env, "AIMEE_LLM_EMBED_URL=https://emb.x/v1\n") != NULL);
+      assert(strstr(env, "COMPOSE_PROFILES=kb\n") != NULL);
+      assert(strstr(env, "AIMEE_EMBEDDER_URL=https://emb.x/v1\n") != NULL);
       assert(strstr(env, "AIMEE_EMBEDDING_DIM=2560\n") != NULL);
    }
 

@@ -114,16 +114,13 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `wfe_live_forge_enabled` | bool | Gate for the autonomous live forge (default-ON). When off, the forge provider is not registered and every forge op fails closed, so an autonomous run can never open or merge a real PR. Even on, each op re-checks this flag and the merge-target rail. |
 | `wfe_proposals_autoscan_enabled` | bool | Automatically scan watched proposal directories; off requires explicit trigger.fire. |
 
-### Deploy-time keys (10)
+### Deploy-time keys (7)
 
 Consumed once by `config_emit_deploy_env` to stand up the aimee-llm container (`aimee config deploy-env`); not read at runtime. Set at deploy, not tuned day-to-day.
 
 | Key | Type | Description |
 |-----|------|-------------|
 | `llm_embed_backend` | string | Deploy-time embedding backend: local or external. |
-| `llm_embed_gpu` | string | Deploy-time GPU selector for the local embedding backend. |
-| `llm_embed_host` | string | Deploy-time host selector for the local embedding backend. |
-| `llm_embed_tier` | string | Deploy-time local embedding tier: cpu, small, mid, or large. |
 | `llm_synth_backend` | string | Deploy-time synthesis backend: local, external, or off. |
 | `llm_synth_endpoint` | string | External synthesis endpoint used when the synth backend is external. |
 | `llm_synth_gpu` | string | Deploy-time GPU selector for the local synthesis backend. |

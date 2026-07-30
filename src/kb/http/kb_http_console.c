@@ -578,9 +578,6 @@ static const kb_setting_t KB_SETTINGS[] = {
     {"embedding_dim", "Embedder", 0},
     {"embedding_endpoint", "Embedder", 0},
     {"llm_embed_backend", "Embedder", 1},
-    {"llm_embed_host", "Embedder", 1},
-    {"llm_embed_gpu", "Embedder", 1},
-    {"llm_embed_tier", "Embedder", 1},
     /* Reranker. */
     /* Synth tier. */
     {"llm_synth_backend", "Synth", 1},

@@ -121,22 +121,15 @@ void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
 
    const int remote_kb = strcmp(cfg->kb_mode, "remote") == 0;
    const char *eb = cfg->llm_embed_backend, *sb = cfg->llm_synth_backend;
-   const int any_local = strcmp(eb, "local") == 0 || strcmp(sb, "local") == 0;
 
-   /* COMPOSE_PROFILES: a remote kb deploys nothing; a local kb runs the "kb"
-    * service, plus the "llm" profile whenever any role is served locally here.
-    *
-    * ONE LLM service for every tier. There used to be a second, pre-baked
-    * aimee-llm-cpu image on a mutually exclusive "llm-cpu" profile, picked when
-    * no role asked for a GPU tier. It is gone: aimee-llm is model-less and
-    * downloads whichever tier the roles select (AIMEE_LLM_*_TIER) on first boot,
-    * so one image serves cpu and GPU alike and there is no second image to keep
-    * in step. Keeping it meant every gateway change had to be republished twice —
-    * and when it was not, the stale cpu image served a /health with no `dim`,
-    * which the kb gates on, so the kb never became healthy on a fresh install. */
+   /* COMPOSE_PROFILES: a remote kb deploys nothing; a local kb runs the "kb" service
+    * and that is all. There is no longer an inference service to gate a profile on —
+    * the kb embeds in-container from baked weights and the reranker is gone, so the
+    * "llm" profile has nothing behind it. Synthesis resolves an external endpoint,
+    * which is configuration rather than a deployed service. */
    char profiles[64] = "";
    if (!remote_kb)
-      snprintf(profiles, sizeof(profiles), "kb%s", any_local ? ",llm" : "");
+      snprintf(profiles, sizeof(profiles), "kb");
    EMITF("COMPOSE_PROFILES=%s\n", profiles);
 
    if (remote_kb)
@@ -148,18 +141,14 @@ void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
       return; /* connect to the existing kb; nothing else is deployed */
    }
 
-   /* Per-role plugin env (Phase-0 AIMEE_LLM_<ROLE>_MODE/TIER/URL). */
-   if (deploy_role_mode(eb)[0])
-      EMITF("AIMEE_LLM_EMBED_MODE=%s\n", deploy_role_mode(eb));
-   if (strcmp(eb, "local") == 0 && cfg->llm_embed_tier[0])
-      EMITF("AIMEE_LLM_EMBED_TIER=%s\n", cfg->llm_embed_tier);
-   /* The chosen embedder identity. Emitted for local AND external, because the gateway
-    * applies that model's pooling and prefixes either way — an external endpoint is a
-    * URL, not a different contract. Empty leaves the container on its own default. */
+   /* The embedder. There is no per-role container to size or place any more: the kb
+    * serves the selected model itself, so all the deploy layer passes on is WHICH model
+    * (the wizard's choice, which the kb resolves from its registry) and, for an external
+    * embedder, the endpoint to use instead. */
    if (cfg->embedding_model[0])
-      EMITF("AIMEE_LLM_EMBED_MODEL=%s\n", cfg->embedding_model);
+      EMITF("EMBEDDER_MODEL=%s\n", cfg->embedding_model);
    if (strcmp(eb, "external") == 0 && cfg->embedding_endpoint[0])
-      EMITF("AIMEE_LLM_EMBED_URL=%s\n", cfg->embedding_endpoint);
+      EMITF("AIMEE_EMBEDDER_URL=%s\n", cfg->embedding_endpoint);
 
    if (deploy_role_mode(sb)[0])
       EMITF("AIMEE_LLM_SYNTH_MODE=%s\n", deploy_role_mode(sb));
@@ -168,13 +157,12 @@ void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
    if (strcmp(sb, "external") == 0 && cfg->llm_synth_endpoint[0])
       EMITF("AIMEE_LLM_SYNTH_URL=%s\n", cfg->llm_synth_endpoint);
 
-   /* When any role is local, aimee-server reaches the co-deployed aimee-llm
-    * compose service by name; an all-external stack keeps its per-role URLs. */
-   if (any_local)
-      EMITF("AIMEE_LLM_URL=http://aimee-llm:8742\n");
-
-   /* Only a pinned dim (external embedder) is emitted; a local/unset dim is
-    * derived from the embedder /health probe at runtime. */
+   /* No AIMEE_LLM_URL is synthesised any more: it used to name the co-deployed
+    * aimee-llm service, and that service is gone. Synthesis now takes whatever
+    * endpoint the operator configures, which is llm_synth_endpoint above.
+    *
+    * Only a pinned dim (external embedder) is emitted; an in-container embedder's
+    * width is derived from the selected model at runtime. */
    if (config_embedding_dim_is_pinned(cfg) && cfg->embedding_dim > 0)
       EMITF("AIMEE_EMBEDDING_DIM=%d\n", cfg->embedding_dim);
 #undef EMITF

@@ -392,9 +392,6 @@ int config_save(const config_t *cfg)
       } page2[] = {
           {"kb_mode", offsetof(config_t, kb_mode)},
           {"llm_embed_backend", offsetof(config_t, llm_embed_backend)},
-          {"llm_embed_host", offsetof(config_t, llm_embed_host)},
-          {"llm_embed_gpu", offsetof(config_t, llm_embed_gpu)},
-          {"llm_embed_tier", offsetof(config_t, llm_embed_tier)},
           {"llm_synth_backend", offsetof(config_t, llm_synth_backend)},
           {"llm_synth_host", offsetof(config_t, llm_synth_host)},
           {"llm_synth_gpu", offsetof(config_t, llm_synth_gpu)},

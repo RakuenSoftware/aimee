@@ -18,6 +18,66 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
+int config_set_vault_tpm2_tcti(const char *value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      snprintf(cfg->vault_tpm2_tcti, sizeof(cfg->vault_tpm2_tcti), "%s", value ? value : "");
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_vault_tpm2_nv_index(const char *value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      snprintf(cfg->vault_tpm2_nv_index, sizeof(cfg->vault_tpm2_nv_index), "%s", value ? value : "");
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_memory_coref_mode(const char *value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      snprintf(cfg->memory_coref_mode, sizeof(cfg->memory_coref_mode), "%s", value ? value : "");
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_memory_cognify_model(const char *value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      snprintf(cfg->memory_cognify_model, sizeof(cfg->memory_cognify_model), "%s", value ? value : "");
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
 int config_set_memory_cognify_command(const char *value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
@@ -672,51 +732,6 @@ int config_set_llm_embed_backend(const char *value)
    if (rc == 0)
    {
       snprintf(cfg->llm_embed_backend, sizeof(cfg->llm_embed_backend), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_llm_embed_host(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->llm_embed_host, sizeof(cfg->llm_embed_host), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_llm_embed_gpu(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->llm_embed_gpu, sizeof(cfg->llm_embed_gpu), "%s", value ? value : "");
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_llm_embed_tier(const char *value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      snprintf(cfg->llm_embed_tier, sizeof(cfg->llm_embed_tier), "%s", value ? value : "");
       rc = config_save(cfg);
    }
    free(cfg);
