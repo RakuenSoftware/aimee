@@ -209,6 +209,8 @@ int main(void)
    /* Same model, different digest = the prefix/pooling flip this guard exists for. */
    assert(db2_embedder_serving_record_or_check(conn, "nomic/bbbb", err, sizeof err) == -1);
    assert(strstr(err, "Re-embed") != NULL);
+   /* The identity is a digest, so the message must not claim which field moved. */
+   assert(strstr(err, "same dim") == NULL);
    assert(strstr(err, "nomic/aaaa") != NULL && strstr(err, "nomic/bbbb") != NULL);
    /* A refusal must not overwrite the recorded identity: the corpus is still the old
     * space until it is actually re-embedded. */

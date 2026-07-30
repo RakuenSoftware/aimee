@@ -462,11 +462,15 @@ int db2_embedder_serving_record_or_check(void *conn, const char *serving_id, cha
       return 0;
    }
 
+   /* Deliberately does not claim WHICH of model, pooling, prefixes or width changed: the
+    * identity is a digest, so the only honest statement is that the spaces differ. Saying
+    * "even at the same dim" was wrong the first time a width change hit it. */
    if (errbuf && errlen)
       snprintf(errbuf, errlen,
-               "embedder serving identity changed: corpus '%s' vs serving '%s'. Pooling or "
-               "query/document prefixes differ, so the vectors do not share a space even at "
-               "the same dim. Re-embed: aimee kb reembed (docs/retrieval-stack.md).",
+               "embedder serving identity changed: corpus '%s' vs serving '%s'. The model, "
+               "its pooling, its query/document prefixes or its width differ, so the stored "
+               "vectors and new queries are not in the same space. Re-embed: aimee kb "
+               "reembed (docs/retrieval-stack.md).",
                recorded, serving_id);
    return -1;
 }
