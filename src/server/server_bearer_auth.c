@@ -17,6 +17,7 @@
 
 #include "config.h"
 #include "db1/remote_client_grant.h"
+#include "log.h"
 #include "platform_random.h"
 #include "runtime_secret.h"
 #include "vault_config_bootstrap.h"
@@ -185,13 +186,24 @@ static int first_user_bootstrap_locked(const char *principal, char *bearer, size
       bearer[0] = '\0';
    if (!principal || strncmp(principal, "webuser:", 8) != 0 || !principal[8] || !bearer ||
        bearer_cap < 65)
+   {
+      aimee_log(LOG_ERROR, "first_user", "bootstrap rejected: caller is not a webchat user");
       return -1;
+   }
 
    char configured[AIMEE_API_BEARER_EXTRA_MAX][256];
    int configured_count = configured_bearer_snapshot(configured);
    if (configured_count < 0 || !config_server_api_bearer_token()[0] ||
        config_server_api_mtls() <= 0)
+   {
+      /* Name the specific precondition: all three used to fail identically and
+       * silently, which is what made a clean-install failure undiagnosable. */
+      aimee_log(LOG_ERROR, "first_user",
+                "bootstrap rejected: extras_snapshot=%d primary_bearer=%s mtls=%d",
+                configured_count, config_server_api_bearer_token()[0] ? "present" : "MISSING",
+                config_server_api_mtls());
       return -1;
+   }
 
    /* A proposed value is required by the atomic DB1 claim even when this call
     * discovers an earlier pending/bound record. It is never published unless
@@ -199,7 +211,12 @@ static int first_user_bootstrap_locked(const char *principal, char *bearer, size
    char proposed[65] = "";
    char proposed_hash[65] = "";
    if (platform_random_hex(proposed, 64) != 0 || bearer_sha256(proposed, proposed_hash) != 0)
+   {
+      aimee_log(LOG_ERROR, "first_user",
+                "bootstrap failed: could not generate the enrollment "
+                "bearer (RNG or digest failure)");
       goto done;
+   }
 
    db1_remote_client_grant_t grant;
    db1_remote_client_claim_result_t claimed =
@@ -226,13 +243,21 @@ static int first_user_bootstrap_locked(const char *principal, char *bearer, size
        * never authenticated and is safe to abandon; retry once with the newly
        * generated value rather than leaving setup permanently wedged. */
       if (db1_remote_client_abandon(grant.bearer_sha256) != 0)
+      {
+         aimee_log(LOG_ERROR, "first_user",
+                   "bootstrap failed: could not abandon the stale unbound grant in DB1");
          goto done;
+      }
       claimed = db1_remote_client_claim(principal, proposed_hash, (int64_t)time(NULL), &grant);
    }
    if (claimed != DB1_REMOTE_CLIENT_CLAIM_NEW || configured_count >= AIMEE_API_BEARER_EXTRA_MAX)
    {
       if (claimed == DB1_REMOTE_CLIENT_CLAIM_NEW)
          (void)db1_remote_client_abandon(proposed_hash);
+      aimee_log(LOG_ERROR, "first_user",
+                "bootstrap failed: DB1 claim=%d (expected NEW=%d), configured_extras=%d/%d",
+                (int)claimed, (int)DB1_REMOTE_CLIENT_CLAIM_NEW, configured_count,
+                AIMEE_API_BEARER_EXTRA_MAX);
       goto done;
    }
 
@@ -241,6 +266,8 @@ static int first_user_bootstrap_locked(const char *principal, char *bearer, size
    if (vault_runtime_secret_set(vault_name, proposed) != 0)
    {
       (void)db1_remote_client_abandon(proposed_hash);
+      aimee_log(LOG_ERROR, "first_user",
+                "bootstrap failed: Vault refused to seal the enrollment bearer as %s", vault_name);
       goto done;
    }
    publish_configured_bearers();
