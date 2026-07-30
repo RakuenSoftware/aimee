@@ -480,8 +480,17 @@ extern "C"
     * roll-up and staleness behavior can be tested by passing a clock instead of
     * sleeping past a real interval. db1_ok/kb_ok: 1 ok, 0 fail, -1 unknown.
     * Writes the JSON body and returns the HTTP status (200 ready / 503 not). */
-   int server_ready_render(int db1_ok, int kb_ok, long sampled_at, long now, int stale_secs,
-                           char *resp, int cap);
+   typedef struct
+   {
+      int retrieval_ok; /* 1 usable, 0 failed, -1 unknown */
+      const char *failed_boundary;
+      const char *breaker_state;
+      long long retry_after_ms;
+      long long last_success_query_ms;
+      const char *last_ingest_at;
+   } server_ready_diagnostics_t;
+   int server_ready_render(int db1_ok, int kb_ok, const server_ready_diagnostics_t *diagnostics,
+                           long sampled_at, long now, int stale_secs, char *resp, int cap);
 
    void server_native_register(void);
 
