@@ -66,10 +66,10 @@ const char *delegate_role_removed_reason(const char *role)
  * classification (so silently read-only), and no role eligibility an agent could
  * actually declare. An operator's custom role is still honoured: those are
  * template files, and delegate_role_known() accepts anything with one. */
-static const char *const g_known_roles[] = {
-    "review",   "validate", "diagnose",   "code",       "refactor", "explain", "draft",
-    "execute",  "summarize", "format",    "search",     "reason",   "plan",    "continuity",
-    "beat-check", NULL};
+static const char *const g_known_roles[] = {"review",    "validate",   "diagnose",   "code",
+                                            "refactor",  "explain",    "draft",      "execute",
+                                            "summarize", "format",     "search",     "reason",
+                                            "plan",      "continuity", "beat-check", NULL};
 
 int delegate_role_known(const char *project_root, const char *role)
 {

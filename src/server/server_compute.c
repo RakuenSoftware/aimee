@@ -804,8 +804,8 @@ void delegate_worker(void *arg)
    if (!persona_exists(cwd && cwd[0] ? cwd : NULL, persona_override))
    {
       char personamsg[192];
-      snprintf(personamsg, sizeof(personamsg),
-               "unknown persona '%s' (see 'aimee persona list')", persona_override);
+      snprintf(personamsg, sizeof(personamsg), "unknown persona '%s' (see 'aimee persona list')",
+               persona_override);
       delegation_compute_error(cctx, personamsg);
       compute_ctx_free(cctx);
       return;

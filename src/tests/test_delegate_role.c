@@ -244,18 +244,31 @@ static void test_unknown_roles_are_not_known(void)
  * alias dispatch-refused, and the failure would only show up in production. */
 static void test_known_roles_cover_documented_and_aliased(void)
 {
-   static const char *const roles[] = {"review",  "validate", "diagnose",   "code",
-                                       "refactor", "explain",  "draft",     "execute",
-                                       "summarize", "format",  "search",    "reason",
-                                       "plan",     "continuity", "beat-check", NULL};
+   static const char *const roles[] = {"review",    "validate",   "diagnose",   "code",
+                                       "refactor",  "explain",    "draft",      "execute",
+                                       "summarize", "format",     "search",     "reason",
+                                       "plan",      "continuity", "beat-check", NULL};
    for (int i = 0; roles[i]; i++)
       assert(delegate_role_known(NULL, roles[i]) == 1);
 
-   static const char *const aliases[] = {"implement", "build",   "reviewer",  "verifier",
-                                         "test",      "check",   "evaluate",  "inspect",
-                                         "research",  "enforce", "recall",    "synthesize",
-                                         "rank-fuse", "classify-score", "planner", "planning",
-                                         "evaluate-optimize", NULL};
+   static const char *const aliases[] = {"implement",
+                                         "build",
+                                         "reviewer",
+                                         "verifier",
+                                         "test",
+                                         "check",
+                                         "evaluate",
+                                         "inspect",
+                                         "research",
+                                         "enforce",
+                                         "recall",
+                                         "synthesize",
+                                         "rank-fuse",
+                                         "classify-score",
+                                         "planner",
+                                         "planning",
+                                         "evaluate-optimize",
+                                         NULL};
    for (int i = 0; aliases[i]; i++)
    {
       assert(delegate_role_known(NULL, aliases[i]) == 1);
