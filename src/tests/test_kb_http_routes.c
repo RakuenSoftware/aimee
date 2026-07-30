@@ -698,6 +698,7 @@ static char g_code_find_project[128];
 static int g_code_local_first_fixture;
 static int g_code_hybrid_path_collision_fixture;
 static int g_code_context_memory_scope_rank = 3;
+static int g_code_context_memory_anchored = 1;
 
 int canonical_index_find(const char *identifier, void *out, int max)
 {
@@ -3463,7 +3464,8 @@ int db2_memory_find_facts_like(const char *query, int limit, void *out, int max)
    m[0].id = 7;
    snprintf(m[0].kind, sizeof(m[0].kind), "decision");
    snprintf(m[0].headline, sizeof(m[0].headline), "why needle exists");
-   snprintf(m[0].content, sizeof(m[0].content), "chose needle over haystack for O(1) lookup");
+   snprintf(m[0].content, sizeof(m[0].content), "%schose needle over haystack for O(1) lookup",
+            g_code_context_memory_anchored ? "src/search.c: " : "");
    return 1;
 }
 
@@ -4069,7 +4071,20 @@ static void test_code_context_bounded_current_project(void)
    assert(strstr(buf, "\"provenance\":[\"code\"]") != NULL);
    assert(strstr(buf, "\"line_start\":17") != NULL);
    assert(strstr(buf, "\"scope\":\"project\"") != NULL);
+   assert(strstr(buf, "\"anchor\":{\"project\":\"proj-alpha\",\"file_path\":\"src/search.c\"") !=
+          NULL);
+   assert(strstr(buf, "\"file_path\":\"src/design_notes.c\"") == NULL);
    assert(strstr(buf, "other/high.c") == NULL);
+
+   s = kb_http_route_ex("GET", "/v1/code/context", "query=needle&project=proj-alpha&generation=1",
+                        NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 409);
+   assert(strstr(buf, "stale_generation") != NULL);
+   assert(strstr(buf, "\"current_generation\":2") != NULL);
+
+   s = kb_http_route_ex("GET", "/v1/code/context", "query=needle&project=proj-alpha&generation=2",
+                        NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 200);
 }
 
 static void test_code_context_no_answer_is_explicit(void)
@@ -4094,6 +4109,19 @@ static void test_code_context_does_not_substitute_global_memory(void)
    g_code_context_memory_scope_rank = 3;
    assert(s == 200);
    assert(strstr(buf, "\"status\":\"ok\"") != NULL); /* code still answers */
+   assert(strstr(buf, "why needle exists") == NULL);
+   assert(strstr(buf, "\"why\":[]") != NULL);
+}
+
+static void test_code_context_requires_verified_memory_anchor(void)
+{
+   char buf[8192];
+   g_code_context_memory_anchored = 0;
+   int s = kb_http_route_ex("GET", "/v1/code/context", "query=needle&project=proj-alpha", NULL,
+                            NULL, NULL, 0, buf, sizeof(buf));
+   g_code_context_memory_anchored = 1;
+   assert(s == 200);
+   assert(strstr(buf, "\"status\":\"ok\"") != NULL);
    assert(strstr(buf, "why needle exists") == NULL);
    assert(strstr(buf, "\"why\":[]") != NULL);
 }
@@ -6069,6 +6097,7 @@ int main(void)
    test_code_context_bounded_current_project();
    test_code_context_no_answer_is_explicit();
    test_code_context_does_not_substitute_global_memory();
+   test_code_context_requires_verified_memory_anchor();
    test_code_graph_hubs_ok();
    test_code_graph_hubs_missing_project();
    test_code_lessons_empty();

@@ -706,3 +706,13 @@ residual proposal instead of declaring the intended effectiveness outcome comple
   unavailable, slow, stale, or incomplete evidence automatically suppresses model-visible packet
   injection and never widens to global memory. Its frozen implementation diff receives a separate
   roundtable gate before PR.
+- **E4 implementation round 1 — 2026-07-30 — changes requested, 3/3 participants, not
+  degraded.** Two concrete findings closed real grounding gaps: memory-only hybrid rows no longer
+  count as answerable code, and explanatory project memory now requires an explicit path or symbol
+  relationship to one accepted code result. The reported missing generation fence was already
+  enforced by the shared `code_request_project` boundary; E4 adds stale/current route regressions so
+  that inherited contract is visible in this slice. Three whole-program findings assessed E4 as if
+  it claimed E5/E6 completion; the accepted delivery table requires one reviewed PR per slice, so
+  the reconvened review binds this artifact to E4 without weakening the parent completion request.
+  Roundtable run: `oprun_g6a69bd8011459d99_1785389737_122` (artifact
+  `11776ad9f6708568dcc1dce374884b4cd164b2b3483438b06261beb39180462a`).

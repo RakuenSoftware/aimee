@@ -10,6 +10,7 @@
 #include "code_index.h"
 #include "memory.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,11 +31,10 @@ static int context_signal(const cJSON *row, const char *wanted)
 }
 
 /* Lower class sorts first. -1 is not answerable code evidence. */
-static int context_row_class(const cJSON *row, int symbol_anchored, double *confidence)
+static int context_row_class(const cJSON *row, double *confidence)
 {
    int code = context_signal(row, "code");
    int graph = context_signal(row, "graph");
-   int memory = context_signal(row, "memory");
    const cJSON *vector_score = cJSON_GetObjectItemCaseSensitive(row, "vector_score");
    if (code || graph)
    {
@@ -42,18 +42,12 @@ static int context_row_class(const cJSON *row, int symbol_anchored, double *conf
          *confidence = code && graph ? 0.95 : (code ? 0.90 : 0.85);
       return 0;
    }
-   if (memory && symbol_anchored)
-   {
-      if (confidence)
-         *confidence = 0.72;
-      return 1;
-   }
    if (context_signal(row, "vector") && cJSON_IsNumber(vector_score) &&
        vector_score->valuedouble >= CODE_CONTEXT_VECTOR_MIN)
    {
       if (confidence)
          *confidence = vector_score->valuedouble > 1.0 ? 1.0 : vector_score->valuedouble;
-      return 2;
+      return 1;
    }
    return -1;
 }
@@ -128,6 +122,60 @@ static int context_memory_duplicates_code(const memory_t *memory, const char *sn
    return n >= 24 && (strstr(snippet, text) != NULL || strstr(text, snippet) != NULL);
 }
 
+static int context_identifier_char(unsigned char c)
+{
+   return isalnum(c) || c == '_';
+}
+
+static int context_text_has_anchor(const char *text, const char *path, const char *symbol)
+{
+   if (!text)
+      return 0;
+   if (path && path[0] && strstr(text, path))
+      return 1;
+   if (!symbol || strlen(symbol) < 3)
+      return 0;
+   size_t symbol_n = strlen(symbol);
+   const char *match = text;
+   while ((match = strstr(match, symbol)) != NULL)
+   {
+      unsigned char before = match == text ? 0 : (unsigned char)match[-1];
+      unsigned char after = (unsigned char)match[symbol_n];
+      if ((!before || !context_identifier_char(before)) &&
+          (!after || !context_identifier_char(after)))
+         return 1;
+      match += symbol_n;
+   }
+   return 0;
+}
+
+/* A scoped memory is still only explanatory context. Require an explicit file
+ * path or symbol mention before attaching it to accepted code; query similarity
+ * and project scope alone do not prove that relationship. */
+static int context_memory_anchors_code(const memory_t *memory, const char *path, const char *symbol)
+{
+   return memory && (context_text_has_anchor(memory->key, path, symbol) ||
+                     context_text_has_anchor(memory->headline, path, symbol) ||
+                     context_text_has_anchor(memory->content, path, symbol) ||
+                     context_text_has_anchor(memory->use_cases, path, symbol));
+}
+
+static const cJSON *context_memory_code_anchor(const memory_t *memory, const cJSON *results)
+{
+   const cJSON *row = NULL;
+   cJSON_ArrayForEach(row, results)
+   {
+      const cJSON *path = cJSON_GetObjectItemCaseSensitive(row, "file_path");
+      const cJSON *span = cJSON_GetObjectItemCaseSensitive(row, "span");
+      const cJSON *symbol = cJSON_GetObjectItemCaseSensitive(span, "symbol");
+      if (cJSON_IsString(path) &&
+          context_memory_anchors_code(memory, path->valuestring,
+                                      cJSON_IsString(symbol) ? symbol->valuestring : NULL))
+         return row;
+   }
+   return NULL;
+}
+
 int handle_get_code_context(const char *query_string, char *out_buf, int out_cap)
 {
    char query[512] = "";
@@ -195,9 +243,7 @@ int handle_get_code_context(const char *query_string, char *out_buf, int out_cap
    int candidate_count = cJSON_IsArray(source_results) ? cJSON_GetArraySize(source_results) : 0;
    int accepted = 0;
    double top_confidence = 0.0;
-   char anchor_path[MAX_PATH_LEN] = "";
-   char anchor_snippet[512] = "";
-   for (int cls = 0; cls <= 2 && accepted < CODE_CONTEXT_MAX_ITEMS; cls++)
+   for (int cls = 0; cls <= 1 && accepted < CODE_CONTEXT_MAX_ITEMS; cls++)
    {
       const cJSON *row = NULL;
       cJSON_ArrayForEach(row, source_results)
@@ -208,7 +254,7 @@ int handle_get_code_context(const char *query_string, char *out_buf, int out_cap
          if (!cJSON_IsString(row_project) || strcmp(row_project->valuestring, project) != 0)
             continue;
          double confidence = 0.0;
-         if (context_row_class(row, symbol[0] != '\0', &confidence) != cls)
+         if (context_row_class(row, &confidence) != cls)
             continue;
          cJSON *copy =
              context_result_copy(row, project, generation, enriched, enriched_count, confidence);
@@ -217,14 +263,6 @@ int handle_get_code_context(const char *query_string, char *out_buf, int out_cap
          cJSON_AddItemToArray(results, copy);
          if (confidence > top_confidence)
             top_confidence = confidence;
-         if (!anchor_path[0])
-         {
-            const cJSON *path = cJSON_GetObjectItemCaseSensitive(row, "file_path");
-            const cJSON *snippet = cJSON_GetObjectItemCaseSensitive(row, "snippet");
-            snprintf(anchor_path, sizeof(anchor_path), "%s", path->valuestring);
-            if (cJSON_IsString(snippet))
-               snprintf(anchor_snippet, sizeof(anchor_snippet), "%s", snippet->valuestring);
-         }
          accepted++;
       }
    }
@@ -240,8 +278,14 @@ int handle_get_code_context(const char *query_string, char *out_buf, int out_cap
          memory_count = 0;
       for (int i = 0; i < memory_count && accepted < CODE_CONTEXT_MAX_ITEMS; i++)
       {
-         if (!context_memory_kind(memories[i].kind) ||
-             context_memory_duplicates_code(&memories[i], anchor_snippet))
+         const cJSON *code_anchor = context_memory_code_anchor(&memories[i], results);
+         const cJSON *anchor_path =
+             code_anchor ? cJSON_GetObjectItemCaseSensitive(code_anchor, "file_path") : NULL;
+         const cJSON *anchor_snippet =
+             code_anchor ? cJSON_GetObjectItemCaseSensitive(code_anchor, "snippet") : NULL;
+         if (!context_memory_kind(memories[i].kind) || !cJSON_IsString(anchor_path) ||
+             (cJSON_IsString(anchor_snippet) &&
+              context_memory_duplicates_code(&memories[i], anchor_snippet->valuestring)))
             continue;
          int scope_rank = memory_scope_visibility_rank(memories[i].id, NULL, project);
          /* The task packet is stricter than ordinary local-first recall: only
@@ -263,7 +307,7 @@ int handle_get_code_context(const char *query_string, char *out_buf, int out_cap
          cJSON_AddNumberToObject(item, "confidence", memories[i].confidence);
          cJSON *anchor = cJSON_AddObjectToObject(item, "anchor");
          cJSON_AddStringToObject(anchor, "project", project);
-         cJSON_AddStringToObject(anchor, "file_path", anchor_path);
+         cJSON_AddStringToObject(anchor, "file_path", anchor_path->valuestring);
          cJSON_AddNumberToObject(anchor, "generation", (double)generation);
          cJSON_AddStringToObject(anchor, "freshness", "current");
          cJSON_AddItemToArray(why, item);

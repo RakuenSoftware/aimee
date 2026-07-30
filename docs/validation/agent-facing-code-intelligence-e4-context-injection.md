@@ -15,8 +15,9 @@ The checked-in fixtures cover the full agent-facing path:
    code-plus-memory items are accepted.
 3. Every code item carries project, path, current generation, freshness, confidence, provenance,
    and a line-or-file span.
-4. Only exact active-project decision/constraint memory may be appended, and only after accepted
-   code. A shared/global-only memory fixture is excluded.
+4. Only exact active-project decision/constraint memory with an explicit path or symbol relationship
+   to one accepted code result may be appended, and only after accepted code. Memory-only hybrid
+   rows cannot make a task answerable; unanchored and shared/global memory fixtures are excluded.
 5. An unrelated query returns `status=no_answer`, empty `results`, and empty `why` with HTTP 200.
 6. The ingress formatter rejects wrong-project, stale, incomplete, oversized, or malformed packets,
    escapes resident text, and caps the rendered packet at 4,800 bytes (the initial 1,200-token
@@ -54,11 +55,12 @@ src/build/obj/tests/unit-test-kb-http-routes
 ```
 
 All eight binaries passed. The route fixture includes answerable, explicit no-answer, and
-global-memory exclusion cases. The ingress fixture includes strict metadata validation,
-observe/noninterference, first-task injection, related-follow-up suppression, and task-change
-reinjection. The memory-client fixture verifies active identity on all twenty ordered readers used
-by ingress/context surfaces; the adversarial workspace fixture proves a low-confidence local
-diagnostic result cannot be crowded out by more relevant global and other-project rows.
+global/unanchored/memory-only exclusion cases plus stale/current generation fencing. The ingress
+fixture includes strict metadata validation, observe/noninterference, first-task injection,
+related-follow-up suppression, and task-change reinjection. The memory-client fixture verifies
+active identity on all twenty ordered readers used by ingress/context surfaces; the adversarial
+workspace fixture proves a low-confidence local diagnostic result cannot be crowded out by more
+relevant global and other-project rows.
 
 ```text
 make -C src kb server -j2
