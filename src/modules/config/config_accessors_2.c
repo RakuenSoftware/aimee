@@ -18,41 +18,6 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
-double config_calibration_tau_working_profile_flag(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, calibration_tau_working_profile_flag), sizeof(v), &v);
-   return v;
-}
-
-int config_demotion_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, demotion_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_demotion_window(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, demotion_window), sizeof(v), &v);
-   return v;
-}
-
-double config_demotion_half_life_days(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, demotion_half_life_days), sizeof(v), &v);
-   return v;
-}
-
-int config_demotion_n_min(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, demotion_n_min), sizeof(v), &v);
-   return v;
-}
-
 double config_kb_fusion_static_alpha(void)
 {
    double v = 0;
@@ -914,6 +879,87 @@ const char *config_openai_model(void)
    static _Thread_local char buf[128];
    buf[0] = 0;
    config_field_read(offsetof(config_t, openai_model), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_openai_key_cmd(void)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, openai_key_cmd), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_embedding_model(void)
+{
+   static _Thread_local char buf[128];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, embedding_model), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_embedding_endpoint(void)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, embedding_endpoint), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_memory_weight_profile(void)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, memory_weight_profile), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_memory_rerank_mode(void)
+{
+   static _Thread_local char buf[16];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, memory_rerank_mode), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_css_render_command(void)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, css_render_command), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_vault_custody(void)
+{
+   static _Thread_local char buf[16];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, vault_custody), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_vault_tpm2_blob_path(void)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, vault_tpm2_blob_path), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_vault_tpm2_tcti(void)
+{
+   static _Thread_local char buf[128];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, vault_tpm2_tcti), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }

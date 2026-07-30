@@ -250,7 +250,7 @@ CFG_KEY_DESC = {
     "(memory/code preview envelope on primary ingress turns; default on).",
     "code_context_mode": "Task-conditioned code packet rollout mode: `off` disables packet "
     "retrieval, `observe` retrieves and validates without changing model-visible bytes, and `on` "
-    "injects a bounded current-project packet on first/new-task turns (default `observe`).",
+    "injects a bounded current-project packet on first/new-task turns (default `on`).",
     "ingress_preinject_anthropic_enabled": "Inject the `<aimee-context>` envelope on the "
     "Anthropic-native /v1/messages passthrough too (default off).",
     "ingress_compress_enabled": "Enable ingress envelope compression: span-enrich code hits and "
@@ -270,6 +270,10 @@ CFG_KEY_DESC = {
     "kb_api_http_port": "HTTP port the aimee-kb API listens on.",
     "kb_evidence_emit_enabled": "Emit evidence records from KB ingest.",
     "kb_fusion_mode": "KB retrieval fusion mode: rrf (default), static_alpha, or dynamic_alpha.",
+    "session_worktree_base": "What a new primary session's branch+worktree is cut from. Order: configured -> "
+                              "remote default -> main -> master. Values: remote_default (default), "
+                              "local_default, current (opt-in only, never a fallback), or an explicit "
+                              "ref. Env: AIMEE_SESSION_WORKTREE_BASE.",
     "kb_fusion_static_alpha": "Lexical/dense blend weight (0-1) for the static_alpha fusion mode.",
     "kb_pdf_ingest_enabled": "Route PDF uploads through the structured geometry extractor "
     "(kb_doc_pdf) instead of plain pdftotext (default off).",

@@ -128,14 +128,14 @@ Consumed once by `config_emit_deploy_env` to stand up the aimee-llm container (`
 | `llm_synth_model` | string | Model label sent to the configured synthesis endpoint. |
 | `llm_synth_tier` | string | Deploy-time local synthesis tier: cpu, small, mid, or large. |
 
-### Advanced tuning keys (77)
+### Advanced tuning keys (78)
 
 Expert scalars with sensible defaults; settable in the config file but off the everyday surface.
 
 | Key | Type | Description |
 |-----|------|-------------|
 | `cache_min_chars` | int | Minimum prompt size (chars) before cache-shaping applies. |
-| `code_context_mode` | string | Task-conditioned code packet rollout mode: `off` disables packet retrieval, `observe` retrieves and validates without changing model-visible bytes, and `on` injects a bounded current-project packet on first/new-task turns (default `observe`). |
+| `code_context_mode` | string | Task-conditioned code packet rollout mode: `off` disables packet retrieval, `observe` retrieves and validates without changing model-visible bytes, and `on` injects a bounded current-project packet on first/new-task turns (default `on`). |
 | `code_hybrid_rrf_k` | float | Reciprocal Rank Fusion rank constant k for /v1/code/hybrid (default 60). |
 | `code_hybrid_weight_code` | float | RRF weight for the lexical-code signal in /v1/code/hybrid (default 1.0; <=0 disables it). |
 | `code_hybrid_weight_graph` | float | RRF weight for the structural call-graph signal in /v1/code/hybrid (default 1.0; <=0 disables it). |
@@ -210,6 +210,7 @@ Expert scalars with sensible defaults; settable in the config file but off the e
 | `memory_semantic_floor_scale` | float | Multiplier on the semantic-recall cosine floors (0 = auto-scale by the active embedder dimension; >0 pins it). |
 | `memory_semantic_weight` | float | Semantic (vector) weight in hybrid recall. |
 | `memory_window_radius` | int | Neighbour radius for memory-window expansion. |
+| `session_worktree_base` | string | What a new primary session's branch+worktree is cut from. Order: configured -> remote default -> main -> master. Values: remote_default (default), local_default, current (opt-in only, never a fallback), or an explicit ref. Env: AIMEE_SESSION_WORKTREE_BASE. |
 | `tool_output_max_bytes` | int | Per-result cap (bytes) on the model-visible tool output (read_file/bash/grep/glob/git_* results). 0 = built-in default (32768); any positive value is clamped to (0, 32768]. Set it lower to bound the bytes a single tool result adds to the prompt + history; the context-economizer (aggressive tier) compresses older results to keep history bounded. |
 
 ### Dev-only keys (7)
@@ -292,7 +293,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 224 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 225 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -597,6 +598,12 @@ The binaries read 224 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_LLM_AUTH_TOKEN` | First-boot transport for the bearer service identity shared by aimee-kb and its aimee-llm gateway. aimee-kb synchronously seals it into Vault, scrubs the environment, and cleanly re-execs before serving; wizard-managed deploys generate the 256-bit value in Vault. This is separate from user/server bearers. |
 | `AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE` | Explicit first-boot migration/adoption transport for an existing wizard-managed LLM credential. aimee-server seals it into Vault and scrubs the environment before normal startup. Ordinary inherited AIMEE_LLM_AUTH_TOKEN is ignored by managed credential creation so stale child-service state cannot win. Must be a 32..512 character RFC 6750 b64token. |
 | `AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK` | Internal managed-authority switch: still attempts mlockall first, but when an unprivileged container cannot raise RLIMIT_MEMLOCK, permits the offline one-shot to continue only if the kernel reports no active swap. Operator-run custody tools leave this unset and retain mandatory mlockall. |
+
+### Undocumented (add to `ENV_DESC` in gen-reference-docs.py)
+
+> These are read by the code but have no description yet — the generator surfaces them so the reference can't silently fall behind.
+
+`AIMEE_SESSION_WORKTREE_BASE`
 
 ## External & provider environment
 

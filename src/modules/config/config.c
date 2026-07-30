@@ -803,6 +803,7 @@ static void config_set_defaults(config_t *cfg)
    cfg->learning_implicit_repeat_question = 0;
    cfg->learning_implicit_repeated_correction = 0;
    cfg->learning_implicit_workflow_repetition = 0;
+   snprintf(cfg->session_worktree_base, sizeof(cfg->session_worktree_base), "remote_default");
    cfg->integrity_enabled = 0;
    cfg->integrity_dry_run = 1;
    /* Ingress envelope DEFAULT-ON (operator decision 2026-06-28): inject the

@@ -18,51 +18,6 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
-int config_set_memory_maintenance_interval_seconds(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_maintenance_interval_seconds = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_maintenance_summarize_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_maintenance_summarize_enabled = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_code_cochange_git_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->code_cochange_git_enabled = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
 int config_set_wfe_proposals_autoscan_enabled(int value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
@@ -1902,6 +1857,66 @@ int config_set_learning_implicit_workflow_repetition(int value)
    if (rc == 0)
    {
       cfg->learning_implicit_workflow_repetition = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_learning_implicit_retrieval_outcome(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->learning_implicit_retrieval_outcome = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_autonomous(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->autonomous = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_verify_enabled(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->verify_enabled = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_roundtable_replay_verify_enabled(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->roundtable_replay_verify_enabled = value;
       rc = config_save(cfg);
    }
    free(cfg);

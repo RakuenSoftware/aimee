@@ -18,7 +18,8 @@ class E6EvaluateTest(unittest.TestCase):
             retrieval = [{"id": row["id"], "score_eligible": True, "expected": row["expected"],
                           "observed": row["expected"], "duplicate": False, "scope_leak": False,
                           "retrieval_latency_s": .1, "packet_tokens": 100} for row in corpus["retrieval_cases"]]
-            path.write_text(json.dumps({"retrieval_cells": retrieval, "coding_cells": coding,
+            path.write_text(json.dumps({"pinned_commit": "same", "retrieval_pinned_commit": "same",
+                                        "retrieval_cells": retrieval, "coding_cells": coding,
                                         "python_edge_precision": 1, "python_edge_recall": 1}))
             return e6.score(path)
 
@@ -63,6 +64,38 @@ class E6EvaluateTest(unittest.TestCase):
             path.write_text(json.dumps({"retrieval_cells":[{"id":"unknown"}], "coding_cells":[]}))
             with self.assertRaises(ValueError):
                 e6.score(path)
+
+    def test_commit_mismatched_retrieval_requires_explicit_reuse(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "results.json"
+            path.write_text(json.dumps({"pinned_commit": "new", "retrieval_pinned_commit": "old",
+                                        "retrieval_cells": [], "coding_cells": [],
+                                        "python_edge_precision": 1, "python_edge_recall": 1}))
+            with self.assertRaisesRegex(ValueError, "reuse rationale"):
+                e6.score(path)
+
+    def test_commit_mismatched_retrieval_accepts_operator_attestation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "results.json"
+            path.write_text(json.dumps({"pinned_commit": "new", "retrieval_pinned_commit": "old",
+                                        "retrieval_reuse": {"allowed": True,
+                                                            "rationale": "old..new product diff empty"},
+                                        "retrieval_cells": [], "coding_cells": [],
+                                        "python_edge_precision": 1, "python_edge_recall": 1}))
+            self.assertEqual(e6.score(path)["retrieval_pinned_commit"], "old")
+
+    def test_commit_mismatched_retrieval_rejects_malformed_attestation(self):
+        malformed = (None, "yes", {}, {"allowed": False, "rationale": "checked"},
+                     {"allowed": True, "rationale": ""})
+        for reuse in malformed:
+            with self.subTest(reuse=reuse), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "results.json"
+                path.write_text(json.dumps({"pinned_commit": "new", "retrieval_pinned_commit": "old",
+                                            "retrieval_reuse": reuse, "retrieval_cells": [],
+                                            "coding_cells": [], "python_edge_precision": 1,
+                                            "python_edge_recall": 1}))
+                with self.assertRaisesRegex(ValueError, "reuse rationale"):
+                    e6.score(path)
 
     def test_malformed_eligible_coding_metrics_are_rejected(self):
         rows = []

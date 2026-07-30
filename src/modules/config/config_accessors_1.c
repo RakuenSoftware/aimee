@@ -18,13 +18,6 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
-int config_learning_synthesize_max_tokens(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, learning_synthesize_max_tokens), sizeof(v), &v);
-   return v;
-}
-
 int config_learning_synthesize_k(void)
 {
    int v = 0;
@@ -897,5 +890,40 @@ double config_calibration_tau_working_profile_auto(void)
 {
    double v = 0;
    config_field_read(offsetof(config_t, calibration_tau_working_profile_auto), sizeof(v), &v);
+   return v;
+}
+
+double config_calibration_tau_working_profile_flag(void)
+{
+   double v = 0;
+   config_field_read(offsetof(config_t, calibration_tau_working_profile_flag), sizeof(v), &v);
+   return v;
+}
+
+int config_demotion_enabled(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, demotion_enabled), sizeof(v), &v);
+   return v;
+}
+
+int config_demotion_window(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, demotion_window), sizeof(v), &v);
+   return v;
+}
+
+double config_demotion_half_life_days(void)
+{
+   double v = 0;
+   config_field_read(offsetof(config_t, demotion_half_life_days), sizeof(v), &v);
+   return v;
+}
+
+int config_demotion_n_min(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, demotion_n_min), sizeof(v), &v);
    return v;
 }

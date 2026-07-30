@@ -1,6 +1,6 @@
 # Agent-facing code-intelligence paired evaluation
 
-Status: pending
+Status: done — the complete provider-backed matrix passed and promoted `on`
 
 ## Goal
 
@@ -17,5 +17,7 @@ corpus, but no eligible fresh standard/observe/on/ceiling agent cells exist at t
   actuation-before-edit, retrieval latency, packet tokens, indexing cost, and isolated rebuild cost;
 - promote only if every gate in the completed parent proposal remains satisfied.
 
-Until this work merges with a passing result, `code_context_mode=observe` remains the shipping
-default. Contract-test success is not authority to promote.
+The fresh matrix at pinned merge `aa8c40e9d75449774c9b0b630bb8f1037efb8097` completed all 32
+cells with no infrastructure exclusions. `on` passed the success-confidence, wall-efficiency, and
+actuation gates, so this proposal promotes `code_context_mode=on`. The validation report records
+the exact checkpoint, artifacts, denominators, and review trail.
