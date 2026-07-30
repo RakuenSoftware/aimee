@@ -7,8 +7,8 @@
     {"id": "HuggingFaceTB/SmolLM2-360M-Instruct",     "params": "360M", "licence": "apache-2.0", "class": "actionable", "note": "smallest credible general instruct model"},
     {"id": "Qwen/Qwen3-1.7B",                         "params": "1.7B", "licence": "apache-2.0", "class": "actionable", "note": "upper bound: what a permissive licence buys at 5x the size"},
 
-    {"id": "LiquidAI/LFM2-350M-Extract",              "params": "350M", "licence": "LFM Open v1.0", "class": "reference", "note": "purpose-built extraction model; $10M revenue ceiling"},
-    {"id": "LiquidAI/LFM2.5-230M",                    "params": "230M", "licence": "LFM Open v1.0", "class": "reference", "note": "smallest candidate benchmarked"},
+    {"id": "LiquidAI/LFM2-350M-Extract",              "params": "350M", "licence": "lfm1.0", "class": "reference", "note": "purpose-built extraction model; $10M revenue ceiling"},
+    {"id": "LiquidAI/LFM2.5-230M",                    "params": "230M", "licence": "lfm1.0", "class": "reference", "note": "smallest candidate benchmarked"},
     {"id": "google/gemma-3-270m-it",                  "params": "270M", "licence": "gemma",        "class": "reference", "note": "fine-tuning substrate, evaluated zero-shot here"},
 
     {"id": "google/gemma-3n-E4B-it",                  "params": "E4B",  "licence": "gemma",        "class": "incumbent", "note": "the model Tier-A runs today; accuracy baseline, GPU only"}

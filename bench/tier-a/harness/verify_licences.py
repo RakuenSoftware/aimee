@@ -25,11 +25,16 @@ def main():
     for m in reg["models"]:
         try:
             info = api.model_info(m["id"])
-            hub = (info.card_data.get("license") if info.card_data else None) or "?"
+            cd = info.card_data or {}
+            hub = cd.get("license") or "?"
+            # A custom licence is declared as license: other plus a license_name.
+            # Comparing against the bare "other" would flag every such model.
+            if hub == "other" and cd.get("license_name"):
+                hub = cd["license_name"]
         except Exception as e:  # gated repo, network, renamed model
             hub = f"ERR:{type(e).__name__}"
         declared = m["licence"]
-        ok = hub.lower() == declared.lower()
+        ok = hub.lower().replace(" ", "") == declared.lower().replace(" ", "")
         if not ok and not hub.startswith("ERR"):
             mismatches.append((m["id"], declared, hub))
         print(f"{m['id']:42s} {declared:16s} {hub:16s} "
