@@ -42,6 +42,25 @@ def system_prompt():
     return TEMPLATE % ", ".join(seed_relations())
 
 
+def system_prompt_conf_fixed():
+    """Ablation: the production prompt with one literal changed.
+
+    The schema example in MF_SYSTEM_PROMPT_TMPL contains "confidence":0.0. Small
+    models copy that literal into every fact they emit, and MF_CONF_FLOOR (0.6)
+    then discards the lot — so the drain commits nothing even when extraction was
+    correct. This variant changes only that example value to 0.9 and is otherwise
+    byte-identical, to test whether the failure is the model or the prompt.
+
+    This is NOT what production sends. Results using it are labelled as an
+    ablation.
+    """
+    base = system_prompt()
+    fixed = base.replace('"confidence":0.0}', '"confidence":0.9}')
+    if fixed == base:
+        raise SystemExit("ablation no-op: the confidence literal moved; re-check the template")
+    return fixed
+
+
 def user_message(note: str) -> str:
     """Production sends the note as a JSON object: cJSON_AddStringToObject(req,"content",...)."""
     return json.dumps({"content": note}, ensure_ascii=False)

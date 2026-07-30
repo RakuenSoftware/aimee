@@ -70,9 +70,9 @@ def extract_json(text):
     return kept, True, True, malformed
 
 
-def build_inputs(tok, note, model_id):
+def build_inputs(tok, note, model_id, sys_prompt):
     msgs = [
-        {"role": "system", "content": prompt.system_prompt()},
+        {"role": "system", "content": sys_prompt},
         {"role": "user", "content": prompt.user_message(note)},
     ]
     kwargs = {}
@@ -100,9 +100,15 @@ def main():
                     help="disable the KV cache. Needed for granite-4.0-350m, where "
                          "transformers selects a hybrid Mamba cache the non-hybrid "
                          "checkpoint cannot satisfy. Slower, identical outputs.")
+    ap.add_argument("--conf-fixed-prompt", action="store_true",
+                    help="ABLATION: send the production prompt with the schema "
+                         "example's confidence literal raised from 0.0 to 0.9. "
+                         "Not what production sends.")
     args = ap.parse_args()
 
     prompt.verify_against_source()
+    sys_prompt = (prompt.system_prompt_conf_fixed() if args.conf_fixed_prompt
+                  else prompt.system_prompt())
     rows = [json.loads(l) for l in open(args.gold) if l.strip()]
 
     tok = AutoTokenizer.from_pretrained(args.model)
@@ -119,7 +125,7 @@ def main():
 
     with open(args.out, "w") as fh:
         for r in rows:
-            text = build_inputs(tok, r["note"], args.model)
+            text = build_inputs(tok, r["note"], args.model, sys_prompt)
             enc = tok(text, return_tensors="pt").to(model.device)
             t0 = time.perf_counter()
             with torch.no_grad():
