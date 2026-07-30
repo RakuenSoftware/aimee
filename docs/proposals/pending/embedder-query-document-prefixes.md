@@ -46,8 +46,15 @@ varying only the prefix:
 
 | model | with card prefix | prefix-free (what aimee serves) | delta |
 |---|---:|---:|---:|
-| nomic-embed-text-v2-moe | 0.6058 | **0.5823** | **−0.0235** |
-| bekko-a25m (card defines none) | 0.5892 | 0.5909 | ±0 (nothing to strip) |
+| nomic-embed-text-v2-moe | 0.6072 | **0.5823** | **−0.0249** |
+| bekko-a25m (card defines none) | 0.5909 | 0.5909 | ±0 (nothing to strip) |
+
+The prefixed column carries the **re-measured** values from
+[embedder-selection-frozen-ab-v1](../../validation/embedder-selection-frozen-ab-v1.md);
+the original sweep recorded 0.6058 and 0.5892, and the reproduction check landed
+at 0.6072 and 0.5909 — within the suite's GPU noise. An earlier revision of this
+proposal quoted the original pair against the re-measured prefix-free figure,
+which mixed runs and understated the delta as −0.0235.
 
 **The consequence is decision-changing.** nomic's margin over a25m exists only
 *with* prefixes. Strip them — which is what the current code does — and the
@@ -77,7 +84,7 @@ one is taken:
    ones production will deliver.
 
 What is *not* coherent is selecting on prefixed scores and serving prefix-free.
-That is the current state, and it is how a 0.6058-vs-0.5892 win became a
+That is the current state, and it is how a 0.6072-vs-0.5909 win became a
 0.5823-vs-0.5909 loss without anything appearing to go wrong.
 
 ## Migration cost, which is the real constraint

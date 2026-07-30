@@ -325,7 +325,10 @@ configurations produced at best +0.0032. Reranking reorders a fixed pool;
 lexical fusion changes what is in the pool.
 
 A prediction was recorded before measuring: if the recall-ceiling explanation is
-right, Recall@10 should move more than NDCG@10. It did (+0.103 vs +0.026).
+right, Recall@10 should move more than NDCG@10. It did — in the same
+configuration (nomic, `k=60`), **+0.0662 vs +0.0262**, a factor of 2.5. The
++0.1028 recall figure quoted elsewhere is the `k=10` variant, for which NDCG@10
+was not measured; it must not be paired against a `k=60` NDCG delta.
 
 ## The top-1 tradeoff, and a variant with none
 
@@ -369,8 +372,18 @@ where BM25's top hit was correct.
 
 ## Consequence for the roadmap
 
-Hybrid fusion delivered roughly **35x the best reranker result** using
-infrastructure that already exists (the FTS leg) and a constant nobody tuned.
+Hybrid fusion on the selected embedder (nomic, RRF `k=60` — one configuration,
+both metrics from `hybrid-nomic.json`) delivered **+0.0262 NDCG@10 and +0.0662
+Recall@10** over dense alone. That is **8.2x the best reranker result** on
+NDCG@10, the metric the two share, plus a recall gain reranking cannot produce at
+all — using infrastructure that already exists (the FTS leg) and a constant
+nobody tuned. Tuning the constant to `k=10` takes Recall@10 to **+0.1028**;
+NDCG@10 was not measured for that variant.
+
+An earlier revision of this section stated "roughly 35x". That divided a
+Recall@10 gain by an NDCG@10 gain, and drew the two from different embedders and
+different fusion variants (a25m at `k=10` against nomic at `k=60`). Quote deltas
+from one embedder and one variant, as above.
 Combined with [learning-to-rank](../proposals/pending/learning-to-rank-from-interactions.md),
 which would learn that combination from real interactions instead of guessing it,
 this is where the remaining retrieval quality lives.

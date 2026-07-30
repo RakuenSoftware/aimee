@@ -32,8 +32,10 @@ Three findings from 10,000-query evaluations bound what is worth building:
    the labelled document entirely for **12.6%** of queries. Adding a lexical leg
    raised pool recall from 0.8735 to **0.9735**. Nothing that merely reorders a
    fixed candidate set can recover those.
-3. **Fusion is where the leverage is.** RRF gave **+0.1168 R@10** over dense —
-   roughly 35x the best reranker result — using a rule nobody tuned.
+3. **Fusion is where the leverage is.** RRF on nomic at `k=60` gave **+0.0262
+   NDCG@10** and **+0.0662 R@10** over dense — 8.2x the best reranker result on
+   NDCG@10, and a recall gain reranking cannot produce — using a rule nobody
+   tuned. Tuning `k` to 10 takes R@10 to +0.1028.
 
 **The conclusion this proposal rests on:** the win is not a better model scoring
 `(query, document)` text. It is learning how to **weight signals already

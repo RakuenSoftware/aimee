@@ -19,17 +19,28 @@
 
 ## ⚠️ The blocker that governs sequencing
 
-Measured on 10,000 queries against the full 26,473-document corpus:
+Measured on 10,000 queries against the full 26,473-document corpus, all three
+rows from the same prefix ablation on the frozen-ab-v1 suite
+([embedder-selection-frozen-ab-v1](../../validation/embedder-selection-frozen-ab-v1.md)):
 
 | configuration | NDCG@10 |
 | --- | ---: |
-| nomic **with** its card prefixes | **0.6075** |
+| nomic **with** its card prefixes | **0.6072** |
 | bekko-a25m (needs no prefix) | 0.5909 |
 | nomic **prefix-free — what the code does today** | **0.5823** |
 
 **Shipping nomic without prefix support is a regression**, both against the
 alternative embedder and against the number the decision was made on. The
 prefix work and the embedder swap must land together, or not at all.
+
+Quote the delta as **−0.0249**, and only against the 0.6072 above. Elsewhere in
+this campaign nomic's prefixed dense score appears as **0.6058** (the original
+sweep), **0.6075** (the dense leg of the hybrid run, `hybrid-nomic.json`) and
+**0.6116** (the 600-case dense-ordered reranking view). The first three are
+independent runs of the same suite and agree within the ±0.0017 reproduction
+noise it documents; the fourth is a different view and is not comparable. Any
+delta must be taken between two figures from the *same* run — pairing 0.6075
+with 0.5823 spans two runs and is what this table previously did.
 
 ---
 
@@ -152,8 +163,10 @@ eliminates the only component requiring a pre-converted GGUF release artifact.
 
 ## The bigger opportunity, deliberately out of scope here
 
-Hybrid retrieval (BM25 + RRF) measured **+0.1168 Recall@10** over dense alone —
-roughly **35x** the best reranker result — using aimee's existing FTS leg and an
-untuned fusion constant. And RRF `k=10` beat the textbook `k=60` on every metric.
+Hybrid retrieval (BM25 + RRF) on nomic at `k=60` measured **+0.0262 NDCG@10** and
+**+0.0662 Recall@10** over dense alone — **8.2x** the best reranker result on
+NDCG@10, plus a recall gain reranking cannot produce at all — using aimee's
+existing FTS leg and an untuned fusion constant. At `k=10` Recall@10 reaches
+**+0.1028**. And RRF `k=10` beat the textbook `k=60` on every metric.
 That, plus [learning-to-rank](learning-to-rank-from-interactions.md), is where
 the remaining quality lives. This handoff covers the cutover only.
