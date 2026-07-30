@@ -20,8 +20,10 @@
 #include "roundtable_preset.h"
 #include "roundtable_chair.h"
 #include "roundtable_verify.h"
+#include "runtime_secret.h"
 #include "token_tracker.h"
 
+#include <openssl/crypto.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -307,9 +309,10 @@ static int delegate_run_inline(agent_config_t *acfg, const char *agent_name, con
                                        leased_cred, sizeof(leased_cred), leased_env,
                                        sizeof(leased_env)) == 0)
       {
-         const char *v = getenv(leased_env);
-         if (v && v[0])
+         char v[MAX_API_KEY_LEN] = "";
+         if (runtime_secret_get(leased_env, v, sizeof(v)) && v[0])
             snprintf(ag->api_key, MAX_API_KEY_LEN, "%s", v);
+         OPENSSL_cleanse(v, sizeof(v));
          leased = 1;
       }
    }

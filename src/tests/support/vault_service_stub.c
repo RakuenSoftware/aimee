@@ -8,7 +8,11 @@
  * link the real object / their own file-local stubs instead and must NOT also
  * link this TU. */
 #include "vault_service.h"
+#include "runtime_secret.h"
+#include <stdio.h>
 #include <string.h>
+
+char test_vault_server_codex_oauth[4096];
 
 vault_status_t vault_service_inject_api_key(const char *principal, const char *agent, char *api_key,
                                             size_t api_key_len, long now_epoch)
@@ -36,8 +40,12 @@ vault_status_t vault_service_get(const char *principal, const char *agent, const
 vault_status_t vault_service_get_server_principal(const char *agent, const char *cred, char *out,
                                                   size_t out_len)
 {
-   (void)agent;
-   (void)cred;
+   if (agent && cred && strcmp(agent, "codex") == 0 && strcmp(cred, "oauth") == 0 &&
+       test_vault_server_codex_oauth[0])
+   {
+      snprintf(out, out_len, "%s", test_vault_server_codex_oauth);
+      return VAULT_OK;
+   }
    if (out && out_len)
       out[0] = '\0';
    return VAULT_NO_ENTRY;
@@ -74,4 +82,18 @@ vault_status_t vault_service_delete(const char *principal, const char *agent, co
    (void)agent;
    (void)cred;
    return VAULT_OK;
+}
+
+/* Tests using this keyless Vault double still exercise the production facade's
+ * process-cache contract. Persistence is intentionally represented by the
+ * in-memory cache; encrypted-store behavior has its own Vault unit tests. */
+int vault_runtime_secret_set(const char *name, const char *value)
+{
+   return runtime_secret_store(name, value);
+}
+
+int vault_runtime_secret_delete(const char *name)
+{
+   runtime_secret_remove(name);
+   return 0;
 }

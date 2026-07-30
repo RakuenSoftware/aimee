@@ -13,6 +13,7 @@
 #include "db2/kb_service_backend.h" /* async queue status */
 #include "db2/ontology_evolution.h" /* db2_ontology_* (§8 observe + act) */
 #include "rel_types.h"              /* REL_TYPE_NAME_MAX */
+#include <openssl/crypto.h>         /* wipe transient credential request copies */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -419,7 +420,8 @@ static cJSON *pipeline_config_json(const config_t *cfg)
    {
       const config_field_t *f = config_field_lookup(PIPELINE_CONFIG_KEYS[i]);
       if (f)
-         cJSON_AddItemToObject(out, PIPELINE_CONFIG_KEYS[i], config_field_value_json(cfg, f));
+         cJSON_AddItemToObject(out, PIPELINE_CONFIG_KEYS[i],
+                               config_field_public_value_json(cfg, f));
    }
    cJSON *stages = kb_curator_stages_json();
    const cJSON *st = NULL;
@@ -430,7 +432,7 @@ static cJSON *pipeline_config_json(const config_t *cfg)
          continue; /* embedder-gated, or a key two stages share */
       const config_field_t *f = config_field_lookup(ck);
       if (f)
-         cJSON_AddItemToObject(out, ck, config_field_value_json(cfg, f));
+         cJSON_AddItemToObject(out, ck, config_field_public_value_json(cfg, f));
    }
    cJSON_Delete(stages);
    return out;
@@ -465,6 +467,7 @@ static int console_pipeline(char *out_buf, int out_cap)
    cJSON_AddItemToObject(resp, "stages", kb_curator_stages_json());
    cJSON_AddItemToObject(resp, "presets", kb_curator_presets_json());
    cJSON_AddItemToObject(resp, "config", pipeline_config_json(&cfg));
+   OPENSSL_cleanse(&cfg, sizeof(cfg));
    return console_send(resp, 200, "{\"error\":\"pipeline too large\"}", out_buf, out_cap);
 }
 
@@ -522,32 +525,58 @@ static int console_pipeline_config(const char *body, char *out_buf, int out_cap)
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"unknown config key\"}");
       return 400;
    }
+   char key_copy[128];
+   snprintf(key_copy, sizeof(key_copy), "%s", key);
+   const char *secret_name = config_field_secret_name(f);
    /* Sized for the largest pipeline value: the custom-stages / user-presets JSON
     * blobs, which config_field_set_value truncates to the field width anyway. */
    char text[8192];
    int vrc = pipeline_value_text(val, text, sizeof(text));
+   if (secret_name && cJSON_IsString(val) && val->valuestring)
+      OPENSSL_cleanse(val->valuestring, strlen(val->valuestring));
    cJSON_Delete(req);
    if (vrc != 0)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"unsupported value type or too long\"}");
       return 400;
    }
+   if (secret_name)
+   {
+      int configured = text[0] ? 1 : 0;
+      int src = config_secret_store(secret_name, text);
+      OPENSSL_cleanse(text, sizeof(text));
+      if (src != 0)
+      {
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"credential Vault write failed\"}");
+         return 500;
+      }
+      cJSON *resp = cJSON_CreateObject();
+      cJSON_AddBoolToObject(resp, "ok", 1);
+      cJSON_AddStringToObject(resp, "key", key_copy);
+      cJSON_AddBoolToObject(resp, "value", configured);
+      cJSON_AddBoolToObject(resp, "secret", 1);
+      return console_send(resp, 200, "{\"ok\":true}", out_buf, out_cap);
+   }
    config_t cfg;
    config_load(&cfg);
    if (config_field_set_value(&cfg, f, text) != 0)
    {
+      OPENSSL_cleanse(&cfg, sizeof(cfg));
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"invalid value for this key\"}");
       return 400;
    }
    if (config_save(&cfg) != 0)
    {
+      OPENSSL_cleanse(&cfg, sizeof(cfg));
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"config save failed\"}");
       return 500;
    }
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddBoolToObject(resp, "ok", 1);
-   cJSON_AddStringToObject(resp, "key", key);
-   cJSON_AddItemToObject(resp, "value", config_field_value_json(&cfg, f));
+   cJSON_AddStringToObject(resp, "key", key_copy);
+   cJSON_AddItemToObject(resp, "value", config_field_public_value_json(&cfg, f));
+   cJSON_AddBoolToObject(resp, "secret", 0);
+   OPENSSL_cleanse(&cfg, sizeof(cfg));
    return console_send(resp, 200, "{\"ok\":true}", out_buf, out_cap);
 }
 
@@ -642,9 +671,11 @@ static int console_settings(char *out_buf, int out_cap)
       cJSON_AddStringToObject(o, "key", KB_SETTINGS[i].key);
       cJSON_AddStringToObject(o, "section", KB_SETTINGS[i].section);
       cJSON_AddBoolToObject(o, "restart", KB_SETTINGS[i].restart);
-      cJSON_AddItemToObject(o, "value", config_field_value_json(&cfg, f));
+      cJSON_AddItemToObject(o, "value", config_field_public_value_json(&cfg, f));
+      cJSON_AddBoolToObject(o, "secret", config_field_secret_name(f) ? 1 : 0);
       cJSON_AddItemToArray(arr, o);
    }
+   OPENSSL_cleanse(&cfg, sizeof(cfg));
    return console_send(resp, 200, "{\"error\":\"settings too large\"}", out_buf, out_cap);
 }
 
@@ -679,31 +710,58 @@ static int console_settings_config(const char *body, char *out_buf, int out_cap)
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"unknown config key\"}");
       return 400;
    }
+   char key_copy[128];
+   snprintf(key_copy, sizeof(key_copy), "%s", key);
+   const char *secret_name = config_field_secret_name(f);
    char text[8192];
    int vrc = pipeline_value_text(val, text, sizeof(text));
+   if (secret_name && cJSON_IsString(val) && val->valuestring)
+      OPENSSL_cleanse(val->valuestring, strlen(val->valuestring));
    cJSON_Delete(req);
    if (vrc != 0)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"unsupported value type or too long\"}");
       return 400;
    }
+   if (secret_name)
+   {
+      int configured = text[0] ? 1 : 0;
+      int src = config_secret_store(secret_name, text);
+      OPENSSL_cleanse(text, sizeof(text));
+      if (src != 0)
+      {
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"credential Vault write failed\"}");
+         return 500;
+      }
+      cJSON *resp = cJSON_CreateObject();
+      cJSON_AddBoolToObject(resp, "ok", 1);
+      cJSON_AddStringToObject(resp, "key", key_copy);
+      cJSON_AddBoolToObject(resp, "value", configured);
+      cJSON_AddBoolToObject(resp, "secret", 1);
+      cJSON_AddBoolToObject(resp, "restart", ks->restart);
+      return console_send(resp, 200, "{\"ok\":true}", out_buf, out_cap);
+   }
    config_t cfg;
    config_load(&cfg);
    if (config_field_set_value(&cfg, f, text) != 0)
    {
+      OPENSSL_cleanse(&cfg, sizeof(cfg));
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"invalid value for this key\"}");
       return 400;
    }
    if (config_save(&cfg) != 0)
    {
+      OPENSSL_cleanse(&cfg, sizeof(cfg));
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"config save failed\"}");
       return 500;
    }
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddBoolToObject(resp, "ok", 1);
-   cJSON_AddStringToObject(resp, "key", key);
-   cJSON_AddItemToObject(resp, "value", config_field_value_json(&cfg, f));
+   cJSON_AddStringToObject(resp, "key", key_copy);
+   cJSON_AddItemToObject(resp, "value", config_field_public_value_json(&cfg, f));
+   cJSON_AddBoolToObject(resp, "secret", 0);
    cJSON_AddBoolToObject(resp, "restart", ks->restart);
+   OPENSSL_cleanse(&cfg, sizeof(cfg));
    return console_send(resp, 200, "{\"ok\":true}", out_buf, out_cap);
 }
 

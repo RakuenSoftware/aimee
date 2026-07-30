@@ -26,6 +26,8 @@
 
 #include "config.h"
 #include "config_database.h"
+#include "runtime_secret.h"
+#include "vault_config_bootstrap.h"
 
 /* --- stubs for the config surface deploy_apply.c pulls in --- */
 
@@ -58,6 +60,19 @@ void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
       snprintf(buf, n, "COMPOSE_PROFILES=%s\n", g_stub_profiles);
 }
 
+/* Keyless Vault double: persistence semantics are exercised through the same
+ * bounded runtime cache while encrypted-store behavior stays in Vault tests. */
+int vault_runtime_secret_set(const char *name, const char *value)
+{
+   return runtime_secret_store(name, value);
+}
+
+int vault_runtime_secret_delete(const char *name)
+{
+   runtime_secret_remove(name);
+   return 0;
+}
+
 #include "../server/deploy_apply.c"
 
 static const char *envp_value(char **envp, const char *key)
@@ -84,6 +99,8 @@ static void test_managed_llm_service_credential(void)
    char tmp[] = "/tmp/aimee-deploy-llm-token-XXXXXX";
    assert(mkdtemp(tmp) != NULL);
    assert(setenv("AIMEE_HOME", tmp, 1) == 0);
+   runtime_secret_remove("AIMEE_LLM_AUTH_TOKEN");
+   runtime_secret_remove("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
    unsetenv("AIMEE_LLM_AUTH_TOKEN");
    unsetenv("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
    snprintf(g_stub_profiles, sizeof(g_stub_profiles), "kb,llm");
@@ -114,10 +131,9 @@ static void test_managed_llm_service_credential(void)
    char path[PATH_MAX];
    snprintf(path, sizeof(path), "%s/%s", tmp, DEPLOY_LLM_TOKEN_FILE);
    struct stat st;
-   assert(stat(path, &st) == 0 && S_ISREG(st.st_mode));
-   assert((st.st_mode & 0777) == 0600);
+   assert(stat(path, &st) != 0 && errno == ENOENT);
 
-   /* Re-apply reads the persisted identity instead of silently rotating it. */
+   /* Re-apply reads the vaulted identity instead of silently rotating it. */
    g_stub_random_hex = 'b';
    envp = build_deploy_envp(NULL, 0, NULL, NULL, NULL);
    token = envp_value(envp, "AIMEE_LLM_AUTH_TOKEN");
@@ -135,19 +151,30 @@ static void test_managed_llm_service_credential(void)
    assert(envp_key_count(envp, "AIMEE_LLM_AUTH_REQUIRED") == 1);
    free_envp(envp);
 
-   /* A distinctly named, deliberate operator override wins exactly once. */
-   assert(setenv("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE", "operator-managed-service-token-1234",
-                 1) == 0);
+   /* First-boot override input is already in the cache by the time deploy runs;
+    * applying it seals the child credential and makes it authoritative. */
+   assert(runtime_secret_store("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE",
+                               "operator-managed-service-token-1234") == 0);
    envp = build_deploy_envp(NULL, 0, NULL, NULL, NULL);
    assert(strcmp(envp_value(envp, "AIMEE_LLM_AUTH_TOKEN"), "operator-managed-service-token-1234") ==
           0);
    assert(envp_key_count(envp, "AIMEE_LLM_AUTH_TOKEN") == 1);
    free_envp(envp);
-   assert(setenv("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE", "invalid token with spaces", 1) == 0);
+   runtime_secret_remove("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
+   assert(runtime_secret_store("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE",
+                               "invalid token with spaces") == 0);
    assert(build_deploy_envp(NULL, 0, NULL, NULL, NULL) == NULL);
-   unsetenv("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
+   runtime_secret_remove("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
 
-   /* The persisted authority must remain private and cannot be a symlink. */
+   /* A historical pre-Vault file is accepted only as one-shot migration input:
+    * insecure modes and symlinks fail closed; a private regular file is sealed
+    * and then erased. */
+   runtime_secret_remove("AIMEE_LLM_AUTH_TOKEN");
+   int legacy_fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+   assert(legacy_fd >= 0);
+   const char *legacy = "legacy-managed-service-token-1234";
+   assert(write(legacy_fd, legacy, strlen(legacy)) == (ssize_t)strlen(legacy));
+   assert(close(legacy_fd) == 0);
    assert(chmod(path, 0644) == 0);
    assert(build_deploy_envp(NULL, 0, NULL, NULL, NULL) == NULL);
    assert(chmod(path, 0600) == 0);
@@ -158,6 +185,11 @@ static void test_managed_llm_service_credential(void)
    assert(build_deploy_envp(NULL, 0, NULL, NULL, NULL) == NULL);
    assert(unlink(path) == 0);
    assert(rename(real_path, path) == 0);
+   envp = build_deploy_envp(NULL, 0, NULL, NULL, NULL);
+   assert(envp != NULL);
+   assert(strcmp(envp_value(envp, "AIMEE_LLM_AUTH_TOKEN"), legacy) == 0);
+   free_envp(envp);
+   assert(stat(path, &st) != 0 && errno == ENOENT);
 
    /* No local LLM means no credential is invented or passed. */
    unsetenv("AIMEE_LLM_AUTH_TOKEN");
@@ -186,7 +218,8 @@ static void test_managed_llm_service_credential(void)
    unsetenv("AIMEE_KB_CONN");
    unsetenv("AIMEE_SERVER_ID");
 
-   assert(unlink(path) == 0);
+   runtime_secret_remove("AIMEE_LLM_AUTH_TOKEN");
+   runtime_secret_remove("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
    assert(rmdir(tmp) == 0);
    unsetenv("AIMEE_HOME");
    unsetenv("COMPOSE_PROFILES");

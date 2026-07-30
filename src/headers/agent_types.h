@@ -71,8 +71,7 @@ struct cJSON;
 
 /* Request-layer evidence gate: require provider tool selection until one tool
  * has returned usable evidence, but never force tools on a text-only final turn. */
-static inline int agent_require_initial_tool_choice(int policy_enabled,
-                                                    int successful_tool_calls,
+static inline int agent_require_initial_tool_choice(int policy_enabled, int successful_tool_calls,
                                                     int tools_active)
 {
    return policy_enabled && successful_tool_calls == 0 && tools_active;
@@ -251,12 +250,13 @@ typedef struct
    char endpoint[MAX_ENDPOINT_LEN];
    char model[MAX_MODEL_LEN];
    char api_key[MAX_API_KEY_LEN];
-   /* The verbatim on-disk api_key — a "$VAR" reference (or, legacy, a literal).
+   /* The verbatim on-disk api_key — a "$VAR" reference (or, during boot-time
+    * migration only, a legacy literal).
     * `api_key` above holds the RESOLVED value for runtime use (agent_expand_env
     * at load); this preserves the reference so agent_save_config never
     * re-serializes a resolved $VAR secret back into agents.json as plaintext.
-    * Empty for agents created in-memory (e.g. `agent add $VAR`), where save falls
-    * back to api_key (still the unexpanded reference at that point). */
+    * Empty for agents created in-memory (e.g. `agent add $VAR`), where save may
+    * retain the reference from api_key. Literal values are never serialized. */
    char api_key_disk[MAX_API_KEY_LEN];
    char auth_cmd[MAX_AUTH_CMD_LEN];
    char auth_type[16];

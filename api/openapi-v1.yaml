@@ -5,7 +5,9 @@ info:
   description: |
     Public HTTP API for the aimee knowledge-base sidecar (aimee-kb).
     Enabled by setting kb.api.http_port in aimee config.
-    Optional bearer-token auth via kb.api.bearer_token.
+    Optional bearer-token auth uses a Vault-backed credential. A Kubernetes or
+    first-boot environment value is synchronously sealed and scrubbed before the
+    long-lived service starts; configuration reads expose only configured state.
 
 servers:
   - url: "http://127.0.0.1:{port}/v1"

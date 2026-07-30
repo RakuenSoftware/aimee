@@ -26,13 +26,6 @@
 /* Server execution pool defaults */
 #define CONFIG_DEFAULT_BACKGROUND_THREADS 2
 #define CONFIG_DEFAULT_SESSION_THREADS    4
-/* The well-known /v1 bearer baked into the aimee-server image — a ONE-TIME
- * bootstrap, never a standing credential. While the live listener bearer still
- * equals this value the server refuses every TCP /v1 route except
- * POST /v1/api/rotate_bearer, so the pre-set token can only mint the strong
- * per-deployment bearer and never perform a real operation. Shared by the server
- * (enforcement) and the thin client (auto-enroll). */
-#define AIMEE_BOOTSTRAP_BEARER "aimee-local-dev"
 /* Raised from 2 -> 4 now that DB2 connections are bounded by the connection pool
  * (db2_connection_pool_size), not 1:1 with worker threads. */
 #define CONFIG_DEFAULT_KB_WORKER_THREADS 4
@@ -1439,7 +1432,10 @@ typedef struct config
 
    /* aimee-kb public HTTP API (kb.api.*).
     * kb_api_http_port: TCP port for the /v1/... REST API (0 = disabled, default).
-    * kb_api_bearer_token: static bearer token for API auth (empty = no auth).
+    * kb_api_bearer_token: transient process-memory view of the Vault-backed API
+    * bearer (empty = no auth). It is never serialized to aimee.yaml. A
+    * first-boot/Kubernetes environment value is sealed before the listener starts
+    * and removed by a clean re-exec.
     *   May be self-describing for scoped access:
     *     scope:<kind>:<id>:<secret>   — only authorizes requests in that scope
     *                                     (e.g. scope:project:foo:s3cr3t); cross-
@@ -1448,22 +1444,22 @@ typedef struct config
    int kb_api_http_port;
    char kb_api_bearer_token[256];
 
-   /* telemetry.metrics_token (P9a): the scrape/ingest token for GET /v1/metrics +
-    * POST /v1/telemetry/metrics, stored as its SHA-256 HEX (64 lowercase hex
-    * chars) — never the plaintext token. The operator computes
-    * `printf %s <token> | sha256sum` and sets the hash here; kb compares the
-    * presented bearer's SHA-256 constant-time against it. Empty = no token (those
-    * routes are then org-admin only). A wrong/missing token is a 401 with no echo.
-    * One token covers both scrape (read) and ingest (write). */
+   /* telemetry.metrics_token (P9a): transient process-memory view of the
+    * Vault-backed SHA-256 verifier for GET /v1/metrics + POST
+    * /v1/telemetry/metrics. The digest is credential material and is never
+    * serialized outside Vault. Empty = no token (those routes are then
+    * org-admin only). One token covers both scrape (read) and ingest (write). */
    char telemetry_metrics_token[128];
 
    /* Remote aimee-kb client pointer (used when this host does NOT run a local
     * aimee-kb sidecar). When set, aimee-server exports these into its own
-    * environment at startup so the env-based kb_client transport
-    * (kb_client_v1_base_url / kb_client_v1_auth_header) reaches the remote kb.
+    * runtime cache so kb_client reaches the remote kb. The bearer is a transient
+    * process-memory view of the same Vault record as kb_api_bearer_token and is
+    * never serialized to aimee.yaml.
     * Distinct from kb_api_bearer_token above, which is the LOCAL kb server's
-    * inbound-auth token. The AIMEE_KB_API_URL / AIMEE_KB_API_BEARER_TOKEN env
-    * vars still take precedence over these when set. */
+    * inbound-auth token. AIMEE_KB_API_BEARER_TOKEN is accepted only as
+    * first-boot transport, then synchronously sealed and scrubbed before the
+    * long-lived process starts. */
    char kb_client_url[CONFIG_DB2_URL_LEN];
    char kb_client_bearer_token[256];
 
@@ -2139,7 +2135,6 @@ int config_load(config_t *cfg);
 /* Bounded enrolled-bearer operations owned by the config module. Callers get a
  * coherent copy or append one token without naming or copying config_t. */
 int config_server_api_bearer_extra_snapshot(char out[][256], int max);
-int config_server_api_bearer_extra_append(const char *bearer);
 
 /* Live config snapshot (live-config-reload P1a) — a double-buffer + seqlock holding the
  * current config for immediate, push-driven reload. config_t is a flat POD, so reads are a
@@ -2177,6 +2172,20 @@ int config_autonomy_lookup(const char *env_name, long *out);
  * reflect the current on-disk file (e.g. config.set) so it never clobbers an external edit,
  * and internally by config_reload. Ordinary readers should use config_load. */
 int config_load_file(config_t *cfg);
+
+/* Credential fields are represented in config_t only for runtime compatibility;
+ * their writer is injected by the server/KB Vault bootstrap. With no writer
+ * installed, credential mutations fail closed instead of reaching aimee.yaml. */
+typedef int (*config_secret_writer_fn)(const char *name, const char *value);
+typedef int (*config_secret_present_fn)(const char *name);
+void config_secret_writer_set(config_secret_writer_fn writer);
+int config_secret_store(const char *name, const char *value);
+/* Seal credential values found in an older aimee.yaml through `writer`, then
+ * remove them from the file. `present` lets the credential store remain
+ * authoritative during an idempotent retry. Returns 1 when the file was
+ * scrubbed, 0 when it contained no credentials, and -1 on any failure. */
+int config_migrate_legacy_credentials(config_secret_writer_fn writer,
+                                      config_secret_present_fn present);
 
 /* Economizer policy. SAFE permits only deterministic, mechanically lossless
  * transforms of fresh local content. AGGRESSIVE additionally permits the

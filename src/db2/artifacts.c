@@ -747,6 +747,33 @@ int db2_artifact_count(const char *kind, const char *state)
    return count;
 }
 
+static int artifact_load_citation_ids(void *conn, db2_artifact_proposed_t *rows, int count)
+{
+   static const char *sql = "SELECT source_id FROM artifact_citations WHERE artifact_id = ?1"
+                            " ORDER BY source_kind, source_id, span_start, span_end";
+   for (int i = 0; i < count; i++)
+   {
+      char err[256] = "";
+      aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+      if (!st)
+         return -1;
+      aimee_pg_bind_text(st, "?1", rows[i].id);
+      while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      {
+         const char *source_id = aimee_pg_column_text(st, 0);
+         if (!source_id || !source_id[0])
+            continue;
+         size_t used = strlen(rows[i].citation_ids);
+         if (used + 1 >= sizeof(rows[i].citation_ids))
+            continue;
+         snprintf(rows[i].citation_ids + used, sizeof(rows[i].citation_ids) - used, "%s%s",
+                  used ? "," : "", source_id);
+      }
+      aimee_pg_finalize(st);
+   }
+   return 0;
+}
+
 int db2_artifact_list_proposed(const char *target_surface, int limit, db2_artifact_proposed_t *out,
                                int max_out)
 {
@@ -755,22 +782,16 @@ int db2_artifact_list_proposed(const char *target_surface, int limit, db2_artifa
       return -1;
 
    const char *sql_surf =
-       "SELECT a.id, a.kind, a.target_surface, a.confidence, a.created_at, a.payload,"
-       "       string_agg(c.source_id, ',') AS citation_ids"
+       "SELECT a.id, a.kind, a.target_surface, a.confidence, a.created_at, a.payload"
        " FROM artifacts a"
-       " LEFT JOIN artifact_citations c ON c.artifact_id = a.id"
        " WHERE a.state = 'proposed' AND a.target_surface = ?1"
-       " GROUP BY a.id, a.kind, a.target_surface, a.confidence, a.created_at, a.payload"
        " ORDER BY a.confidence DESC"
        " LIMIT ?2";
 
    const char *sql_all =
-       "SELECT a.id, a.kind, a.target_surface, a.confidence, a.created_at, a.payload,"
-       "       string_agg(c.source_id, ',') AS citation_ids"
+       "SELECT a.id, a.kind, a.target_surface, a.confidence, a.created_at, a.payload"
        " FROM artifacts a"
-       " LEFT JOIN artifact_citations c ON c.artifact_id = a.id"
        " WHERE a.state = 'proposed'"
-       " GROUP BY a.id, a.kind, a.target_surface, a.confidence, a.created_at, a.payload"
        " ORDER BY a.confidence DESC"
        " LIMIT ?1";
 
@@ -815,11 +836,10 @@ int db2_artifact_list_proposed(const char *target_surface, int limit, db2_artifa
       v = aimee_pg_column_text(st, 5);
       if (v)
          snprintf(row->payload_json, sizeof(row->payload_json), "%s", v);
-      v = aimee_pg_column_text(st, 6);
-      if (v)
-         snprintf(row->citation_ids, sizeof(row->citation_ids), "%s", v);
    }
    aimee_pg_finalize(st);
+   if (artifact_load_citation_ids(conn, out, n) != 0)
+      return -1;
    return n;
 }
 

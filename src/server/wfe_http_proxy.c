@@ -3,6 +3,7 @@
 #endif
 
 #include "wfe_http_proxy.h"
+#include "runtime_secret.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -138,9 +139,8 @@ int wfe_http_proxy_request(const char *method, const char *path, const char *que
       return proxy_error(resp, resp_cap, 502, "Go WFE control plane did not accept the request");
    }
 
-   const char *bearer = getenv("AIMEE_API_BEARER_TOKEN");
-   if (!bearer)
-      bearer = "";
+   char bearer[256] = "";
+   (void)runtime_secret_get("AIMEE_API_BEARER_TOKEN", bearer, sizeof(bearer));
    if (!query)
       query = "";
    if (!principal)
@@ -150,6 +150,7 @@ int wfe_http_proxy_request(const char *method, const char *path, const char *que
    char *head = malloc(head_cap);
    if (!head)
    {
+      runtime_secret_wipe(bearer, sizeof(bearer));
       close(fd);
       return proxy_error(resp, resp_cap, 500, "out of memory building workflow request");
    }
@@ -160,14 +161,17 @@ int wfe_http_proxy_request(const char *method, const char *path, const char *que
                 method, path, query[0] ? "?" : "", query, body_len,
                 bearer[0] ? "Authorization: Bearer " : "", bearer, bearer[0] ? "\r\n" : "",
                 principal[0] ? "X-Aimee-Webuser: " : "", principal, principal[0] ? "\r\n" : "");
+   runtime_secret_wipe(bearer, sizeof(bearer));
    if (head_len <= 0 || (size_t)head_len >= head_cap ||
        write_all(fd, head, (size_t)head_len) != 0 ||
        (body_len > 0 && write_all(fd, body, (size_t)body_len) != 0))
    {
+      runtime_secret_wipe(head, head_cap);
       free(head);
       close(fd);
       return proxy_error(resp, resp_cap, 502, "sending workflow request failed");
    }
+   runtime_secret_wipe(head, head_cap);
    free(head);
 
    size_t cap = 8192, used = 0;

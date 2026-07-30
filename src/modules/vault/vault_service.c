@@ -222,7 +222,7 @@ vault_status_t vault_service_unlock_password(const char *principal, attested_tra
    if (!principal || !principal[0])
       return VAULT_ERR_UNATTESTED;
    /* The password unlock is for the webchat-asserted webuser principal only,
-    * honored under the server.token trust boundary (ATTEST_WEBCHAT_TRUSTED). A
+    * honored under the root-owned UDS trust boundary (ATTEST_WEBCHAT_TRUSTED). A
     * uid:/TCP conn must use the root-key unlock instead. */
    if (transport != ATTEST_WEBCHAT_TRUSTED)
       return vaudit("vault.unlock", principal, "", "", transport, VAULT_ERR_TRANSPORT);

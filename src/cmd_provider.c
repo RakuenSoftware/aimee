@@ -6,6 +6,7 @@
 #include "commands.h"
 #include "config.h"
 #include "db1.h"
+#include "runtime_secret.h"
 #include <aimee/delegates/delegate_credentials.h>
 #include "cJSON.h"
 #include <stdio.h>
@@ -35,8 +36,7 @@ static int provider_has_credentials(const model_provider_t *p)
       return 0;
    for (int i = 0; p->env_vars[i]; i++)
    {
-      const char *val = getenv(p->env_vars[i]);
-      if (val && val[0])
+      if (runtime_secret_has(p->env_vars[i]))
          return 1;
    }
    return 0;
@@ -85,8 +85,7 @@ static int provider_is_configured(const model_provider_t *p, const char *selecte
       return 0;
    for (int i = 0; p->env_vars[i]; i++)
    {
-      const char *val = getenv(p->env_vars[i]);
-      if (val && val[0])
+      if (runtime_secret_has(p->env_vars[i]))
          return 1;
    }
    return 0;
@@ -170,9 +169,8 @@ static void provider_show(app_ctx_t *ctx, int argc, char **argv)
    {
       for (int i = 0; p->env_vars[i]; i++)
       {
-         const char *val = getenv(p->env_vars[i]);
          printf("env[%d]:        %s=%s\n", i, p->env_vars[i],
-                (val && val[0]) ? "[set]" : "[unset]");
+                runtime_secret_has(p->env_vars[i]) ? "[vaulted]" : "[unset]");
       }
    }
 }

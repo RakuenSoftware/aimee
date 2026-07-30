@@ -1,4 +1,5 @@
 #include "wfe_roundtable_proxy.h"
+#include "runtime_secret.h"
 
 #include "cJSON.h"
 #include "config.h"
@@ -175,13 +176,13 @@ static char *post_go_roundtable(const char *body, int receive_timeout_ms, int *s
       close(fd);
       return NULL;
    }
-   const char *bearer = getenv("AIMEE_API_BEARER_TOKEN");
-   if (!bearer)
-      bearer = "";
+   char bearer[256] = "";
+   (void)runtime_secret_get("AIMEE_API_BEARER_TOKEN", bearer, sizeof(bearer));
    size_t head_cap = strlen(bearer) + 512;
    char *head = malloc(head_cap);
    if (!head)
    {
+      runtime_secret_wipe(bearer, sizeof(bearer));
       rt_fail(reason, reason_cap, "out of memory building the request");
       close(fd);
       return NULL;
@@ -192,15 +193,18 @@ static char *post_go_roundtable(const char *body, int receive_timeout_ms, int *s
                          "Connection: close\r\n\r\n",
                          strlen(body), bearer[0] ? "Authorization: Bearer " : "", bearer,
                          bearer[0] ? "\r\n" : "");
+   runtime_secret_wipe(bearer, sizeof(bearer));
    if (head_n <= 0 || (size_t)head_n >= head_cap || write_all(fd, head, (size_t)head_n) != 0 ||
        write_all(fd, body, strlen(body)) != 0)
    {
       rt_fail(reason, reason_cap, "sending the review request failed after %ds: %s",
               GO_ROUNDTABLE_SEND_TIMEOUT_SECS, strerror(errno));
+      runtime_secret_wipe(head, head_cap);
       free(head);
       close(fd);
       return NULL;
    }
+   runtime_secret_wipe(head, head_cap);
    free(head);
    size_t cap = 8192, used = 0;
    char *raw = malloc(cap);

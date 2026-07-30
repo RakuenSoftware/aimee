@@ -618,13 +618,21 @@ cJSON *kb_curator_presets_json(void)
 {
    return cJSON_CreateArray();
 }
-static const config_field_t g_stub_field = {"stub", 0, 0, 0, CFG_BOOL, RELOAD_HOT, FGROUP_RUNTIME};
+static const config_field_t g_stub_field = {"stub",         0,   0, 0, CFG_BOOL, RELOAD_HOT,
+                                            FGROUP_RUNTIME, NULL};
+static const config_field_t g_stub_secret_field = {
+    "kb_api_bearer_token",      0, 1, 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME,
+    "AIMEE_KB_API_BEARER_TOKEN"};
+static int g_stub_secret_configured;
+static int g_stub_secret_store_calls;
 const config_field_t *config_field_lookup(const char *key)
 {
    /* Only the keys the pipeline route may touch resolve; anything else is
     * "unknown" so the route's own allowlist is what is under test. */
    if (!key)
       return NULL;
+   if (strcmp(key, "kb_api_bearer_token") == 0)
+      return &g_stub_secret_field;
    if (strncmp(key, "kb_curator_", 11) == 0 || strcmp(key, "kb_evidence_embed_enabled") == 0)
       return &g_stub_field;
    /* The KB-owned settings surface (KB_SETTINGS) plus the server-owned keys the
@@ -637,11 +645,23 @@ const config_field_t *config_field_lookup(const char *key)
       return &g_stub_field;
    return NULL;
 }
-cJSON *config_field_value_json(const config_t *cfg, const config_field_t *f)
+const char *config_field_secret_name(const config_field_t *f)
+{
+   return f ? f->secret_name : NULL;
+}
+cJSON *config_field_public_value_json(const config_t *cfg, const config_field_t *f)
 {
    (void)cfg;
-   (void)f;
+   if (config_field_secret_name(f))
+      return cJSON_CreateBool(g_stub_secret_configured);
    return cJSON_CreateBool(0);
+}
+int config_secret_store(const char *name, const char *value)
+{
+   assert(name && strcmp(name, "AIMEE_KB_API_BEARER_TOKEN") == 0);
+   g_stub_secret_store_calls++;
+   g_stub_secret_configured = value && value[0] ? 1 : 0;
+   return 0;
 }
 int config_field_set_value(config_t *cfg, const config_field_t *f, const char *value)
 {
@@ -2346,6 +2366,8 @@ static void test_console_pipeline(void)
 
 static void test_console_settings(void)
 {
+   g_stub_secret_configured = 0;
+   g_stub_secret_store_calls = 0;
    /* GET reports the KB-owned fields, each with a section and a restart flag. */
    char buf[65536];
    int status =
@@ -2360,6 +2382,9 @@ static void test_console_settings(void)
    /* aimee-server's own keys must NOT appear on the kb's settings surface. */
    assert(strstr(buf, "\"kb_client_url\"") == NULL);
    assert(strstr(buf, "\"provider\"") == NULL);
+   /* Vault-backed settings expose only configured state, never a credential. */
+   assert(strstr(buf, "\"kb_api_bearer_token\"") != NULL);
+   assert(strstr(buf, "\"secret\":true") != NULL);
 
    char b2[1024];
    assert(kb_http_route_ex("POST", "/v1/console/settings", NULL, NULL, NULL, "{}", 2, b2,
@@ -2378,6 +2403,21 @@ static void test_console_settings(void)
    const char *ok_body = "{\"key\":\"kb_mining_enabled\",\"value\":true}";
    assert(kb_http_route_ex("POST", "/v1/console/settings/config", NULL, NULL, NULL, ok_body,
                            (int)strlen(ok_body), b2, sizeof(b2)) == 200);
+   const char *secret_literal = "do-not-echo-kb-secret";
+   char secret_body[256];
+   snprintf(secret_body, sizeof(secret_body), "{\"key\":\"kb_api_bearer_token\",\"value\":\"%s\"}",
+            secret_literal);
+   assert(kb_http_route_ex("POST", "/v1/console/settings/config", NULL, NULL, NULL, secret_body,
+                           (int)strlen(secret_body), b2, sizeof(b2)) == 200);
+   assert(g_stub_secret_store_calls == 1 && g_stub_secret_configured == 1);
+   assert(strstr(b2, secret_literal) == NULL);
+   assert(strstr(b2, "\"value\":true") != NULL);
+   assert(strstr(b2, "\"secret\":true") != NULL);
+
+   status =
+       kb_http_route_ex("GET", "/v1/console/settings", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(status == 200);
+   assert(strstr(buf, secret_literal) == NULL);
    /* A key the SERVER owns is refused here, even though it is a real config key
     * and starts with kb_ — the split is by which binary reads it. */
    const char *server_key = "{\"key\":\"kb_client_url\",\"value\":\"https://kb.example\"}";

@@ -87,14 +87,16 @@ extern "C"
                            long expires_at, int revoked),
                 void *ctx);
 
-   /* Provision a self-signed EC P-256 server cert at (cert_path, key_path) when
-    * neither exists yet — makes native TLS zero-config when a tls_port is set but
-    * no operator cert is present. An EXISTING cert/key is authoritative: it is used
-    * as-is and NEVER regenerated (a rotation would break every TOFU-pinned client);
-    * to apply a changed hostname/AIMEE_TLS_EXTRA_SAN, delete the cert and restart.
-    * The key is written 0600. Returns 0 if a usable cert is in place, -1 on
-    * failure. */
+   /* Provision a self-signed EC P-256 server cert at cert_path and seal its
+    * private key directly into Vault. key_path is accepted only as a one-way
+    * migration source: it must match an existing cert, is sealed, verified, and
+    * securely erased. Fresh installs never create a key file. An existing public
+    * cert remains authoritative; delete it explicitly to rotate the identity. */
    int pki_ensure_self_signed_server_cert(const char *cert_path, const char *key_path);
+
+   /* Load the native server TLS private key from its fixed Vault record into a
+    * caller-owned transient buffer. The caller must cleanse it. */
+   int pki_server_tls_key_load(char *out, size_t cap);
 
    /* Resolve the STABLE common name for the self-signed server cert, preferring an
     * operator-declared identity (AIMEE_TLS_CN, else the first non-IP token of

@@ -3,9 +3,9 @@ package main
 // vault.go: WP-C.2c — webchat wiring for the per-user (`webuser:`) credential
 // vault. The browser holds nothing: the user re-presents their login password to
 // /api/vault/unlock, which the backend forwards to aimee-server with the
-// server.token bearer + an X-Aimee-Webuser assertion. aimee-server derives the
+// a kernel-attested UDS X-Aimee-Webuser assertion. aimee-server derives the
 // vault KEK (scrypt) and caches it per webuser. All vault calls go over the
-// token-bearing /v1 path (v1RequestWebuser) — NEVER the OpenAI proxy (proxyV1),
+// local /v1 path (v1RequestWebuser) — NEVER the OpenAI proxy (proxyV1),
 // which strips Authorization.
 
 import (
@@ -15,27 +15,11 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
 	"time"
 )
 
-// serverToken reads the shared server.token secret (0600, in the aimee config
-// dir) — the bearer aimee-server trusts for X-Aimee-Webuser assertions. Empty if
-// absent.
-func (s *server) serverToken() string {
-	raw, err := os.ReadFile(filepath.Join(filepath.Dir(s.cfg.socketPath), "server.token"))
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(raw))
-}
-
-// v1RequestWebuser is v1Request plus the webchat trust headers: the server.token
-// bearer and X-Aimee-Webuser, so aimee-server resolves the caller's webuser:
-// vault. Returns an error if the server.token or username is missing (fail-
-// closed: no assertion is sent without the trust secret).
+// v1RequestWebuser is v1Request plus X-Aimee-Webuser. aimee-server accepts that
+// assertion only from the kernel-attested root peer on its Unix socket.
 func (s *server) v1RequestWebuser(ctx context.Context, username, method, path string, body []byte) (int, []byte, error) {
 	return s.v1RequestWebuserT(ctx, username, method, path, body, socketCallTimeout)
 }
@@ -44,8 +28,7 @@ func (s *server) v1RequestWebuser(ctx context.Context, username, method, path st
 // few endpoints that legitimately hold the request open longer than the default
 // socketCallTimeout (e.g. a synchronous one-shot LLM draft).
 func (s *server) v1RequestWebuserT(ctx context.Context, username, method, path string, body []byte, timeout time.Duration) (int, []byte, error) {
-	token := s.serverToken()
-	if token == "" || username == "" {
+	if username == "" {
 		return http.StatusUnauthorized, nil, errNoVaultTrust
 	}
 	sock := s.aimeeHTTPSockPathFor(path)
@@ -68,7 +51,6 @@ func (s *server) v1RequestWebuserT(ctx context.Context, username, method, path s
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("X-Aimee-Webuser", username)
 	resp, err := client.Do(req)
 	if err != nil {
@@ -79,7 +61,7 @@ func (s *server) v1RequestWebuserT(ctx context.Context, username, method, path s
 	return resp.StatusCode, data, err
 }
 
-var errNoVaultTrust = &vaultErr{"vault trust unavailable (server.token or session missing)"}
+var errNoVaultTrust = &vaultErr{"vault trust unavailable (webchat session missing)"}
 
 type vaultErr struct{ msg string }
 
