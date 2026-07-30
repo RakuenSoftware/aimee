@@ -48,7 +48,10 @@ kb_entrypoint_test_dir=$(mktemp -d /tmp/aimee-kb-entrypoint.XXXXXX)
 cat >"$kb_entrypoint_test_dir/aimee-kb" <<'SH'
 #!/bin/sh
 case "${1:-}" in
-    --bootstrap-vault-env) exit 0 ;;
+    --bootstrap-vault-env)
+        [ -z "${ENTRYPOINT_BOOTSTRAP_LOG:-}" ] || printf x >>"$ENTRYPOINT_BOOTSTRAP_LOG"
+        exit 0
+        ;;
     --vault-db2-external) exit 0 ;;
     --list-credential-env-names)
         [ -n "${AIMEE_DB2_URL:-}" ] && printf '%s\n' AIMEE_DB2_URL
@@ -70,11 +73,29 @@ kb_entrypoint_output=$(env -i PATH="$kb_entrypoint_test_dir:/usr/bin:/bin" \
     AIMEE_DB2_URL=postgresql://external.invalid/aimee \
     ENTRYPOINT_TEST_API_KEY=first-boot-only \
     sh ../deploy/container/aimee-kb-entrypoint.sh 2>&1)
-rm -rf "$kb_entrypoint_test_dir"
 if [ "$kb_entrypoint_output" = "clean" ]; then
     pass "KB entrypoint clean-reexec removes inherited first-boot credentials"
 else
     fail "KB entrypoint left first-boot credentials in its long-lived process image ($kb_entrypoint_output)"
+fi
+
+# Treat the internal bootstrap marker as untrusted input. A container runtime
+# can supply entrypoint arguments, so inheriting any credential must force one
+# more credential-free exec even when that marker was present at first boot.
+kb_bootstrap_log="$kb_entrypoint_test_dir/bootstrap.log"
+kb_marked_output=$(env -i PATH="$kb_entrypoint_test_dir:/usr/bin:/bin" \
+    AIMEE_HOME="$kb_entrypoint_test_dir/home-marked" \
+    AIMEE_DB2_URL=postgresql://external.invalid/aimee \
+    ENTRYPOINT_TEST_API_KEY=first-boot-only \
+    ENTRYPOINT_BOOTSTRAP_LOG="$kb_bootstrap_log" \
+    sh ../deploy/container/aimee-kb-entrypoint.sh \
+    --aimee-internal-vault-bootstrapped-external-db 2>&1)
+kb_bootstrap_count=$(wc -c <"$kb_bootstrap_log")
+rm -rf "$kb_entrypoint_test_dir"
+if [ "$kb_marked_output" = "clean" ] && [ "$kb_bootstrap_count" -eq 2 ]; then
+    pass "KB entrypoint ignores a spoofed bootstrap marker when credentials are inherited"
+else
+    fail "KB entrypoint trusted a bootstrap marker before a clean re-exec ($kb_marked_output, bootstraps=$kb_bootstrap_count)"
 fi
 
 # The server image intentionally supervises multiple long-lived planes, so it
@@ -87,12 +108,15 @@ credential_unset_line=$(grep -nF 'unset "$_secret_name"' \
     ../deploy/container/server-entrypoint.sh | cut -d: -f1)
 tini_exec_line=$(grep -nF 'exec /usr/bin/tini -- aimee-server-entrypoint --aimee-internal-vault-bootstrapped' \
     ../deploy/container/server-entrypoint.sh | cut -d: -f1)
+credential_reexec_condition=$(grep -nF 'if [ "$vault_bootstrapped" -eq 0 ] || [ "$had_credential_env" -eq 1 ]; then' \
+    ../deploy/container/server-entrypoint.sh | cut -d: -f1)
 first_unrelated_child_line=$(grep -nF 'mkdir -p "$AIMEE_HOME"' \
     ../deploy/container/server-entrypoint.sh | head -1 | cut -d: -f1)
 if grep -qE '^[[:space:]]+tini \\' ../Dockerfile.server &&
    grep -qF 'ENTRYPOINT ["aimee-server-entrypoint"]' ../Dockerfile.server &&
    [ -n "$vault_bootstrap_line" ] && [ -n "$credential_unset_line" ] &&
-   [ -n "$tini_exec_line" ] && [ -n "$first_unrelated_child_line" ] &&
+   [ -n "$tini_exec_line" ] && [ -n "$credential_reexec_condition" ] &&
+   [ -n "$first_unrelated_child_line" ] &&
    [ "$vault_bootstrap_line" -lt "$credential_unset_line" ] &&
    [ "$credential_unset_line" -lt "$tini_exec_line" ] &&
    [ "$credential_unset_line" -lt "$first_unrelated_child_line" ] &&
@@ -113,10 +137,13 @@ kb_clean_reexec_first=$(grep -nF 'exec /bin/sh "$0" --aimee-internal-vault-boots
     ../deploy/container/aimee-kb-entrypoint.sh | head -1 | cut -d: -f1)
 kb_clean_reexec_last=$(grep -nF 'exec /bin/sh "$0" --aimee-internal-vault-bootstrapped-' \
     ../deploy/container/aimee-kb-entrypoint.sh | tail -1 | cut -d: -f1)
+kb_credential_reexec_condition=$(grep -nF 'if [ "$vault_bootstrapped" -eq 0 ] || [ "$had_credential_env" -eq 1 ]; then' \
+    ../deploy/container/aimee-kb-entrypoint.sh | cut -d: -f1)
 kb_first_unrelated_child_line=$(grep -nF 'mkdir -p "$AIMEE_HOME"' \
     ../deploy/container/aimee-kb-entrypoint.sh | head -1 | cut -d: -f1)
 if [ -n "$kb_vault_bootstrap_line" ] && [ -n "$kb_credential_unset_line" ] &&
    [ -n "$kb_clean_reexec_first" ] && [ -n "$kb_clean_reexec_last" ] &&
+   [ -n "$kb_credential_reexec_condition" ] &&
    [ -n "$kb_first_unrelated_child_line" ] &&
    [ "$kb_vault_bootstrap_line" -lt "$kb_credential_unset_line" ] &&
    [ "$kb_credential_unset_line" -lt "$kb_clean_reexec_first" ] &&
