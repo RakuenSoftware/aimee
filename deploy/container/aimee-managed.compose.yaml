@@ -42,6 +42,12 @@ services:
       # model). When no role is local (llm profile off) the operator points this at
       # an external endpoint; the kb fail-opens on embedding if it is unreachable.
       AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
+      # The wizard's embedder choice, and the endpoint for an external one. The kb
+      # MUST receive both: `aimee config deploy-env` emits them, and without them
+      # reaching the container the entrypoint sees no selection, starts nothing, and
+      # the builtin serves forever — the wizard's embedder silently never runs.
+      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
+      AIMEE_EMBEDDER_URL: ${AIMEE_EMBEDDER_URL:-}
       # Managed setup streams the LLM bearer into the KB Vault through a
       # disposable --rm helper before this long-lived container is created.
       # Managed clients must never downgrade to keyless requests if credential

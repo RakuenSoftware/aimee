@@ -49,6 +49,20 @@ int config_embedding_dim_effective(const config_t *cfg);
  * config_embedding_dim_effective against the loaded config. */
 int config_embedding_dim_current(void);
 
+/* THE synthesis endpoint. One config field (llm_synth_endpoint), one resolver, and
+ * the AIMEE_LLM_URL env override applied in one place — the same shape as the
+ * embedder address (config_embedding_command) and the embedding width
+ * (config_embedding_dim_*).
+ *
+ * Writes the OpenAI chat base into out ("{endpoint}/v1"), appending /v1 only when the
+ * configured value did not already include it, so an operator may supply either form.
+ * Returns 1 when an endpoint is configured, 0 when none is (the caller's stage then
+ * stays idle). Never partially fills out.
+ *
+ * Synthesis is external-only: the aimee-llm container this used to name is retired, so
+ * there is no local default to fall back to. Non-mutating. */
+int config_synth_chat_endpoint(const config_t *cfg, char *out, size_t out_len);
+
 /* embedder-runtime-fetch-autodim §2a: 1 iff the operator pinned a positive
  * embedding dim — defined as config_resolve_embedding_dim(cfg) > 0, so "pinned"
  * is exactly consistent with the value db2_set_embedding_dim receives. A pinned

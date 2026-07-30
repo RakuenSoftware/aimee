@@ -74,6 +74,12 @@ services:
       # unified aimee-llm container. The kb runs no model. Override
       # AIMEE_EMBEDDER_URL / AIMEE_RERANKER_URL to pin a service elsewhere.
       AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
+      # The wizard's embedder choice, and the endpoint for an external one. The kb
+      # MUST receive both: `aimee config deploy-env` emits them, and without them
+      # reaching the container the entrypoint sees no selection, starts nothing, and
+      # the builtin serves forever — the wizard's embedder silently never runs.
+      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
+      AIMEE_EMBEDDER_URL: ${AIMEE_EMBEDDER_URL:-}
       # Embedding dim — empty = config default 1024 (CPU tier); set 2560 for GPU.
       AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
       # Internal-only enrollment/JWKS lane; never published on the host. The

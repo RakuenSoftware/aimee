@@ -61,6 +61,12 @@ services:
       # AIMEE_EMBEDDER_URL to embed against an external endpoint instead of
       # the bundled in-container model.
       AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
+      # The wizard's embedder choice, and the endpoint for an external one. The kb
+      # MUST receive both: `aimee config deploy-env` emits them, and without them
+      # reaching the container the entrypoint sees no selection, starts nothing, and
+      # the builtin serves forever — the wizard's embedder silently never runs.
+      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
+      AIMEE_EMBEDDER_URL: ${AIMEE_EMBEDDER_URL:-}
       # Embedding dim — empty = config default 384 (bundled bekko-a25m). Only set
       # it for an external embedder of a different width; changing it against a
       # populated kb forces a re-embed, and the dim guard will refuse until you do.

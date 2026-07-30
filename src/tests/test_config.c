@@ -2532,7 +2532,11 @@ int main(void)
       assert(strstr(env, ",llm") == NULL); /* the retired container takes its profile */
       assert(strstr(env, "EMBEDDER_MODEL=bekko-a25m\n") != NULL);
       assert(strstr(env, "AIMEE_LLM_SYNTH_MODE=external\n") != NULL);
-      assert(strstr(env, "AIMEE_LLM_SYNTH_URL=https://api.x/v1\n") != NULL);
+      /* AIMEE_LLM_URL, the variable config_synth_chat_endpoint() honours — not
+       * AIMEE_LLM_SYNTH_URL, which was the retired gateway's own knob and which
+       * nothing reads, so emitting it left external synth configured but dead. */
+      assert(strstr(env, "AIMEE_LLM_URL=https://api.x/v1\n") != NULL);
+      assert(strstr(env, "AIMEE_LLM_SYNTH_URL") == NULL);
       /* No embedder container to size, place or point at. */
       assert(strstr(env, "AIMEE_LLM_EMBED_") == NULL);
       assert(strstr(env, "AIMEE_EMBEDDING_DIM") == NULL); /* in-container => derived */

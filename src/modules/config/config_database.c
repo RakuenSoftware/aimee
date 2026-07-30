@@ -115,6 +115,37 @@ int config_embedding_dim_current(void)
    return pinned > 0 ? pinned : CONFIG_EMBEDDING_DIM_DEFAULT;
 }
 
+/* The synthesis endpoint — see config_database.h. AIMEE_LLM_URL outranks the stored
+ * field for the same reason it does for the embedder: a containerized deploy sets the
+ * environment, not a writable aimee.yaml. Trailing slashes are trimmed before the /v1
+ * suffix is judged, so "http://h:8742/" and "http://h:8742/v1/" both normalize. */
+int config_synth_chat_endpoint(const config_t *cfg, char *out, size_t out_len)
+{
+   if (!out || out_len == 0)
+      return 0;
+   out[0] = '\0';
+
+   const char *endpoint = getenv("AIMEE_LLM_URL");
+   if (!endpoint || !endpoint[0])
+      endpoint = cfg ? cfg->llm_synth_endpoint : NULL;
+   if (!endpoint || !endpoint[0])
+      return 0;
+
+   size_t n = strlen(endpoint);
+   while (n > 0 && endpoint[n - 1] == '/')
+      n--;
+   if (n == 0)
+      return 0; /* "/" or "///" names nothing */
+   int has_v1 = (n >= 3 && strncmp(endpoint + n - 3, "/v1", 3) == 0);
+   int wrote = snprintf(out, out_len, "%.*s%s", (int)n, endpoint, has_v1 ? "" : "/v1");
+   if (wrote < 0 || (size_t)wrote >= out_len)
+   {
+      out[0] = '\0'; /* never hand back a truncated URL */
+      return 0;
+   }
+   return 1;
+}
+
 /* §2a: pinned iff the resolved operator dim is positive. Keeping this defined in
  * terms of config_resolve_embedding_dim guarantees the pin flag agrees with the
  * dim that was actually set (env "0"/non-numeric/empty and an unset cfg both
@@ -185,14 +216,16 @@ void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
       EMITF("AIMEE_LLM_SYNTH_MODE=%s\n", deploy_role_mode(sb));
    if (strcmp(sb, "local") == 0 && cfg->llm_synth_tier[0])
       EMITF("AIMEE_LLM_SYNTH_TIER=%s\n", cfg->llm_synth_tier);
+   /* AIMEE_LLM_URL, not AIMEE_LLM_SYNTH_URL. The latter was the retired gateway's
+    * own variable — it told aimee-llm where to proxy synth — and with the gateway
+    * gone NOTHING read it, so a wizard-configured external synth endpoint was dead
+    * end to end: written to config, emitted into the environment, consumed by no
+    * one. AIMEE_LLM_URL is the variable config_synth_chat_endpoint() honours, which
+    * is what a containerized kb needs when it has no writable aimee.yaml. */
    if (strcmp(sb, "external") == 0 && cfg->llm_synth_endpoint[0])
-      EMITF("AIMEE_LLM_SYNTH_URL=%s\n", cfg->llm_synth_endpoint);
+      EMITF("AIMEE_LLM_URL=%s\n", cfg->llm_synth_endpoint);
 
-   /* No AIMEE_LLM_URL is synthesised any more: it used to name the co-deployed
-    * aimee-llm service, and that service is gone. Synthesis now takes whatever
-    * endpoint the operator configures, which is llm_synth_endpoint above.
-    *
-    * Only a pinned dim (external embedder) is emitted; an in-container embedder's
+   /* Only a pinned dim (external embedder) is emitted; an in-container embedder's
     * width is derived from the selected model at runtime. */
    if (config_embedding_dim_is_pinned(cfg) && cfg->embedding_dim > 0)
       EMITF("AIMEE_EMBEDDING_DIM=%d\n", cfg->embedding_dim);
