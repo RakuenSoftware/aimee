@@ -16,8 +16,6 @@ were used.
 One embedder identity and dimension applies to a deployment. The KB stores derived vectors in DB2;
 `aimee-llm` serves the model.
 
-The standard tiers use:
-
 Every tier serves the same 768-dim embedder, so the tier is a GPU-offload choice and an
 index built under one tier is readable under another.
 
@@ -26,6 +24,33 @@ Check [Inference tiers](AIMEE_KB_SYNTH_TIERS.md) for the current model names and
 The configured dimension must equal the model output. DB2 records the dimension used to create its
 vector columns and refuses startup on drift. Silent empty vector search is worse than a hard start
 failure.
+
+### What defines the vector space
+
+Width is not identity. Pooling and the query/document prefixes change every vector while leaving
+both the dimension and the model name untouched — well-formed vectors, right width, right name,
+different space, collapsed recall and no error anywhere. Both have happened: nomic served with
+`last` pooling (correct for the previous Qwen3 embedder), and nomic served prefix-free, which
+measured 0.5823 NDCG@10 against 0.6075 with its card prefixes.
+
+So the gateway publishes a `serving_id` on `/health` — the model key plus a digest over pooling and
+the prefix pair — and the KB records it in `kb_meta.schema_embedder_serving_id` on first start
+against a corpus. A later start whose endpoint reports a different `serving_id` **refuses**, naming
+both values, and the remediation is a full re-embed:
+
+```bash
+aimee kb reembed
+```
+
+There is deliberately no compat list here, unlike the model-identity guard: two models can be shown
+to agree by measuring cosine, but a changed prefix pair is definitionally a different space. Two
+limits worth knowing:
+
+- An endpoint that reports no `serving_id` (a legacy embedder, or a gateway predating the field)
+  leaves the guard inactive rather than refusing, so upgrades do not strand existing deployments.
+- A corpus embedded before the guard existed adopts the current identity on its first start, because
+  it is indistinguishable from a fresh one. If such a corpus was built while prefixes were disabled,
+  re-embed it once by hand — the guard cannot detect drift it never recorded a baseline for.
 
 ## Changing dimension
 

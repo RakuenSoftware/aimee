@@ -77,6 +77,16 @@ extern "C"
    int db2_embedding_model_record_or_check(void *conn, const char *model_id, const char *compat_csv,
                                            char *errbuf, size_t errlen);
 
+   /* Record/check the embedder's vector-space identity (the gateway's /health
+    * serving_id: model + pooling + prefix pair) in kb_meta.schema_embedder_serving_id.
+    * Catches what the dim and model-id guards cannot: a pooling or prefix change keeps
+    * both the width and the name while producing a different vector space. Empty
+    * serving_id -> no-op (an endpoint that reports no identity). No compat list — a
+    * pooling/prefix change is definitionally a different space. Returns 0
+    * (recorded/match), -1 (mismatch / DB error, errbuf set). */
+   int db2_embedder_serving_record_or_check(void *conn, const char *serving_id, char *errbuf,
+                                           size_t errlen);
+
    /* Apply the consolidated SQLite schema for DB2's libpq shim/test
     * compatibility path. Production DB2 remains Postgres-only. */
    int db2_apply_schema_sqlite_shim(struct sqlite3 *db, char *errbuf, size_t errlen);

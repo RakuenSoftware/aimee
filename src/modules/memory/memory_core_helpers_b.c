@@ -471,6 +471,64 @@ int memory_embed_http_post(const char *base, const char *path, const char *body,
    return 0;
 }
 
+/* Read the embedder's vector-space identity from its /health `serving_id`.
+ *
+ * The dim guard cannot see a pooling or prefix change — same width, same model name,
+ * different vector space — so the gateway folds all three into one opaque id and the
+ * kb records it against the corpus. This is the kb's side of that: ask the serving
+ * endpoint what space it is serving, rather than inferring it from local config, so
+ * the answer reflects what will actually be applied to the text.
+ *
+ * Returns 0 with a NUL-terminated id in `out`. An empty `out` is SUCCESS and means
+ * "this endpoint reports no identity" (a legacy embedder, or a gateway predating the
+ * field): the guard treats that as a no-op rather than a mismatch. Non-zero means the
+ * endpoint could not be reached at all, which the caller retries.
+ */
+int memory_embed_serving_id(const char *command, char *out, size_t out_len)
+{
+   if (!out || out_len == 0)
+      return -1;
+   out[0] = '\0';
+   if (!command || !command[0] || !memory_embed_command_is_http(command))
+      return 0; /* builtin / sidecar-command transports have no /health to ask */
+
+   char url[1024];
+   memory_embed_http_url(command, "/health", url, sizeof(url));
+   char auth[640];
+   const char *auth_header = NULL;
+   const char *token = getenv("AIMEE_LLM_AUTH_TOKEN");
+   const char *auth_required = getenv("AIMEE_LLM_AUTH_REQUIRED");
+   if (auth_required && strcmp(auth_required, "1") == 0 && (!token || !token[0]))
+      return -1;
+   if (token && token[0])
+   {
+      int n = snprintf(auth, sizeof(auth), "Authorization: Bearer %s", token);
+      if (n < 0 || (size_t)n >= sizeof(auth))
+         return -1;
+      auth_header = auth;
+   }
+
+   char *body = NULL;
+   int status = agent_http_get(url, auth_header, &body, MEMORY_EMBED_HTTP_TIMEOUT_MS);
+   /* 503 is expected while the embedder warms up and still carries the payload —
+    * serving_id is registry data, not a measurement, so it is readable before the
+    * child can embed. Anything else with no body is a transport failure. */
+   if (!body || (status != 200 && status != 503))
+   {
+      free(body);
+      return -1;
+   }
+   cJSON *root = cJSON_Parse(body);
+   free(body);
+   if (!root)
+      return -1;
+   cJSON *sid = cJSON_GetObjectItemCaseSensitive(root, "serving_id");
+   if (cJSON_IsString(sid) && sid->valuestring && sid->valuestring[0])
+      snprintf(out, out_len, "%s", sid->valuestring);
+   cJSON_Delete(root);
+   return 0;
+}
+
 typedef struct
 {
    char command[MEMORY_QEMBED_CMD_MAX];

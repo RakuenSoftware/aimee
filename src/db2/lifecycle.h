@@ -114,6 +114,11 @@ extern "C"
     * db2_embedding_model_record_or_check). Reset by db2_shutdown. */
    void db2_set_embedder_model_id(const char *model_id);
    const char *db2_embedder_model_id(void);
+   /* The serving endpoint's vector-space identity, PROBED from its /health rather than
+    * read from config: pooling and prefixes are properties of what the gateway applies,
+    * not of what the kb was told. Empty -> the guard is a no-op. */
+   void db2_set_embedder_serving_id(const char *serving_id);
+   const char *db2_embedder_serving_id(void);
    void db2_set_embedding_compat(const char *compat_csv);
    const char *db2_embedding_compat(void);
 

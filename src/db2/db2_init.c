@@ -150,6 +150,9 @@ int db2_probe_embedder_dim(int budget_ms, int *out)
  * has not yet adopted the unified container (the live torch embedder reports no
  * identity) is unaffected. */
 static char g_embedder_model_id[160] = "";
+/* The serving endpoint's vector-space identity, probed (not configured) — see
+ * db2_set_embedder_serving_id. Empty leaves the guard a no-op. */
+static char g_embedder_serving_id[160] = "";
 static char g_embedding_compat[1024] = ""; /* CSV of "old_id->new_id" transitions */
 
 void db2_set_embedder_model_id(const char *model_id)
@@ -160,6 +163,17 @@ void db2_set_embedder_model_id(const char *model_id)
 const char *db2_embedder_model_id(void)
 {
    return g_embedder_model_id;
+}
+
+void db2_set_embedder_serving_id(const char *serving_id)
+{
+   snprintf(g_embedder_serving_id, sizeof(g_embedder_serving_id), "%s",
+            serving_id ? serving_id : "");
+}
+
+const char *db2_embedder_serving_id(void)
+{
+   return g_embedder_serving_id;
 }
 
 void db2_set_embedding_compat(const char *compat_csv)
@@ -891,7 +905,9 @@ int db2_init(const char *libpq_url)
     * deployments are unaffected; it activates when the unified container supplies
     * the identity via the setter. */
    if (db2_embedding_model_record_or_check(conn, g_embedder_model_id, g_embedding_compat, errbuf,
-                                           sizeof(errbuf)) != 0)
+                                           sizeof(errbuf)) != 0 ||
+       db2_embedder_serving_record_or_check(conn, g_embedder_serving_id, errbuf, sizeof(errbuf)) !=
+           0)
    {
       fprintf(stderr, "aimee: db2_init: model-identity guard failed: %s\n", errbuf);
       aimee_pg_close(conn);
@@ -1147,6 +1163,7 @@ void db2_shutdown(void)
    g_embedder_probe = NULL;
    g_dim_probe_budget_ms = 120000;
    g_embedder_model_id[0] = '\0';
+   g_embedder_serving_id[0] = '\0';
    g_embedding_compat[0] = '\0';
    pthread_mutex_unlock(&g_init_lock);
 }

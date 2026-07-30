@@ -1,7 +1,9 @@
 # Cut over to `aimee-llm`
 
 This maintenance operation moves embedding and synthesis to the unified inference
-service. A model or embedding-width change requires controlled corpus re-embedding.
+service. A model, pooling, prefix, or embedding-width change requires controlled corpus
+re-embedding; the KB enforces the first three through the `/health` `serving_id` guard and the
+last through the recorded dimension (docs/retrieval-stack.md).
 
 ## Gate in staging
 

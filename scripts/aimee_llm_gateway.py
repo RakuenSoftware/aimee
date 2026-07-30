@@ -7,7 +7,8 @@ AIMEE_EMBEDDER_URL are untouched):
   POST /embed        body = raw UTF-8 text                 -> JSON float array (dim)
   POST /embed_batch  body = JSON [text, ...]               -> JSON [[float,...], ...]
   POST /auth/verify  authenticated service-identity check (no model work)
-  GET  /health       -> {"status": ok|loading|down, "model":..., "dim":N}
+  GET  /health       -> {"status": ok|loading|down, "model":..., "dim":N,
+                         "serving_id":...}  (see serving_id())
 
 /embed and /embed_batch take an optional `?input_type=query|document` selecting which of
 the embedder's asymmetric prefixes to apply (see scripts/embedders.json). It rides in the
@@ -175,6 +176,42 @@ def embedder_spec(model_id=None):
 def embed_prefix(input_type, model_id=None):
     """Return the prefix for `input_type` under the configured embedder."""
     return embedder_spec(model_id)["prefixes"][input_type]
+
+
+def serving_id(model_id=None):
+    """An opaque identity for the VECTOR SPACE this gateway serves, for /health.
+
+    A dim is not enough and a model id is not enough. Pooling and prefixes change
+    every vector while leaving both untouched: nomic served with `last` pooling, or
+    without its prefixes, produces well-formed vectors of the right width under the
+    right model name that simply do not share a space with the corpus. Both have
+    already happened here.
+
+    So this folds everything that determines the space — model, pooling, and the
+    prefix pair — into one string the kb records against its corpus and refuses to
+    mix (db2_embedder_serving_record_or_check). The digest is truncated because it is
+    compared, never inverted; the model key is kept in front so an operator reading
+    a mismatch can see what changed without decoding anything.
+
+    Returns "" when the registry cannot answer, so an unconfigured or legacy
+    deployment reports no identity and the kb's guard stays a no-op rather than
+    refusing on a value it never had.
+    """
+    import hashlib
+
+    try:
+        spec = embedder_spec(model_id)
+    except GatewayError:
+        return ""
+    key = embed_model_key(EMBED_MODEL if model_id is None else model_id)
+    material = "\x00".join((
+        key,
+        str(spec["pooling"]),
+        spec["prefixes"]["query"],
+        spec["prefixes"]["document"],
+    ))
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
+    return f"{key}/{digest}"
 
 # CI/dev STUB mode: serve deterministic embed/synth with NO upstream
 # llama-servers. The supervisor skips launching the per-role servers and the
@@ -738,6 +775,12 @@ def build_server():
                     return
                 st = health_state(child_health())
                 payload = {"status": st, "model": EMBED_MODEL}
+                # The vector-space identity the kb records against its corpus.
+                # Reported regardless of readiness: it is registry data, not a
+                # measurement, so it is answerable before the child can embed.
+                sid = serving_id()
+                if sid:
+                    payload["serving_id"] = sid
                 if st == "ok":
                     dim = embed_dim()
                     if dim:

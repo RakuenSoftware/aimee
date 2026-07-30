@@ -101,6 +101,31 @@ static int embedder_probe_run(int *out_dim, int budget_ms, char *err, size_t err
    }
 }
 
+/* Ask the endpoint which VECTOR SPACE it serves and hand it to the db2 guard.
+ *
+ * Best-effort by design. A gateway that is down, old, or not reporting the field
+ * leaves the identity empty, which makes the guard a no-op — the same posture the dim
+ * probe takes, and the reason a cold start against an unreachable embedder still
+ * boots. The cost of missing the guard once is a delayed mismatch; the cost of
+ * refusing to boot on an unanswered probe is an appliance that will not start. */
+static void embedder_probe_publish_serving_id(const char *embed_command)
+{
+   char serving_id[160] = "";
+   if (memory_embed_serving_id(embed_command, serving_id, sizeof(serving_id)) != 0)
+   {
+      LOG_WARN("db2", "embedder serving-identity probe unreachable; vector-space guard inactive "
+                      "for this start");
+      return;
+   }
+   if (!serving_id[0])
+   {
+      LOG_INFO("db2", "embedder reports no serving identity; vector-space guard inactive");
+      return;
+   }
+   db2_set_embedder_serving_id(serving_id);
+   LOG_INFO("db2", "embedder serving identity: %s", serving_id);
+}
+
 void embedder_probe_register(const char *embed_command)
 {
    if (!embed_command || !embed_command[0])
@@ -109,6 +134,7 @@ void embedder_probe_register(const char *embed_command)
       return;
    }
    snprintf(g_embed_cmd, sizeof(g_embed_cmd), "%s", embed_command);
+   embedder_probe_publish_serving_id(embed_command);
    const char *env = getenv("AIMEE_DIM_PROBE_BUDGET_MS");
    if (env && env[0])
    {

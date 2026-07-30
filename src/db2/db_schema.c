@@ -416,6 +416,61 @@ int db2_embedding_model_record_or_check(void *conn, const char *model_id, const 
    return -1;
 }
 
+/* Record/check the embedder's VECTOR-SPACE identity (the gateway's /health
+ * serving_id: model + pooling + prefix pair, digested).
+ *
+ * The dim guard and the model-id guard both miss the two failures that actually
+ * happened here. Flipping pooling from `last` to `mean`, and adopting the card's
+ * query/document prefixes, each change every vector while the dim and the model name
+ * stay put: no error, right width, right name, different space, collapsed recall. This
+ * is the guard for that class.
+ *
+ *   - serving_id NULL/empty -> no-op (0): an endpoint that reports no identity (a
+ *     legacy embedder, or a gateway predating the field) must keep working.
+ *   - nothing recorded -> record and accept. A corpus embedded before this guard
+ *     existed cannot be distinguished from a fresh one, so it adopts the current id;
+ *     the drift it could not have detected is the operator's to resolve (the cutover
+ *     runbook says re-embed).
+ *   - recorded == serving_id -> match.
+ *   - recorded != serving_id -> REFUSE. There is no compat list: unlike a model swap,
+ *     where cosine agreement can be measured and admitted, a pooling or prefix change
+ *     is definitionally a different space.
+ */
+int db2_embedder_serving_record_or_check(void *conn, const char *serving_id, char *errbuf,
+                                         size_t errlen)
+{
+   if (!conn)
+      return -1;
+   if (!serving_id || !*serving_id)
+      return 0; /* identity unknown -> no-op (back-compat) */
+
+   char recorded[160] = "";
+   if (kb_meta_get(conn, "schema_embedder_serving_id", recorded, sizeof(recorded)) != 0)
+   {
+      if (errbuf && errlen)
+         snprintf(errbuf, errlen, "kb_meta read failed for schema_embedder_serving_id");
+      return -1;
+   }
+   if (!recorded[0] || strcmp(recorded, serving_id) == 0)
+   {
+      if (!recorded[0] && kb_meta_set(conn, "schema_embedder_serving_id", serving_id) != 0)
+      {
+         if (errbuf && errlen)
+            snprintf(errbuf, errlen, "kb_meta write failed for schema_embedder_serving_id");
+         return -1;
+      }
+      return 0;
+   }
+
+   if (errbuf && errlen)
+      snprintf(errbuf, errlen,
+               "embedder serving identity changed: corpus '%s' vs serving '%s'. Pooling or "
+               "query/document prefixes differ, so the vectors do not share a space even at "
+               "the same dim. Re-embed: aimee kb reembed (docs/retrieval-stack.md).",
+               recorded, serving_id);
+   return -1;
+}
+
 int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t errlen)
 {
    if (!pg_conn)

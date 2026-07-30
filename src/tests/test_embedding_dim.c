@@ -197,6 +197,29 @@ int main(void)
               "junk->junk\nQwen/Qwen3-Embedding-0.6B@def->Qwen/Qwen3-Embedding-0.6B@xyz", err,
               sizeof err) == 0); /* newline-separated entry admits */
 
+   /* The vector-space guard: pooling/prefix changes keep the dim AND the model name,
+    * so this is the only guard that can see them. Unlike the model guard there is no
+    * compat list — a different prefix pair is definitionally a different space. */
+   err[0] = '\0';
+   assert(db2_embedder_serving_record_or_check(conn, NULL, err, sizeof err) == 0);  /* no-op */
+   assert(db2_embedder_serving_record_or_check(conn, "", err, sizeof err) == 0);    /* no-op */
+   assert(db2_embedder_serving_record_or_check(conn, "nomic/aaaa", err, sizeof err) == 0); /* rec */
+   assert(db2_embedder_serving_record_or_check(conn, "nomic/aaaa", err, sizeof err) == 0); /* == */
+   assert(err[0] == '\0');
+   /* Same model, different digest = the prefix/pooling flip this guard exists for. */
+   assert(db2_embedder_serving_record_or_check(conn, "nomic/bbbb", err, sizeof err) == -1);
+   assert(strstr(err, "Re-embed") != NULL);
+   assert(strstr(err, "nomic/aaaa") != NULL && strstr(err, "nomic/bbbb") != NULL);
+   /* A refusal must not overwrite the recorded identity: the corpus is still the old
+    * space until it is actually re-embedded. */
+   err[0] = '\0';
+   assert(db2_embedder_serving_record_or_check(conn, "nomic/aaaa", err, sizeof err) == 0);
+   /* An endpoint that stops reporting an identity must not wipe the record either —
+    * it degrades to a no-op, so the next endpoint that does report is still checked. */
+   assert(db2_embedder_serving_record_or_check(conn, "", err, sizeof err) == 0);
+   assert(db2_embedder_serving_record_or_check(conn, "nomic/bbbb", err, sizeof err) == -1);
+   assert(db2_embedder_serving_record_or_check(NULL, "nomic/aaaa", err, sizeof err) == -1);
+
    /* NULL conn -> -1. */
    assert(db2_embedding_model_record_or_check(NULL, "x", NULL, err, sizeof err) == -1);
 
