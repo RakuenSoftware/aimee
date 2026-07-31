@@ -463,7 +463,7 @@ void mem_scan(app_ctx_t *ctx, int argc, char **argv)
    (void)argc;
    (void)argv;
    char dirs[8][MAX_PATH_LEN];
-   int dir_count = config_conversation_dirs(&s_mem_cfg, dirs, 8);
+   int dir_count = config_conversation_dirs(dirs, 8);
    kb_client_memory_scan_conversations(dirs, dir_count);
    if (ctx->json_output)
       emit_ok_ctx(ctx->json_fields, ctx->response_profile);

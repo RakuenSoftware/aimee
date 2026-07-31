@@ -86,9 +86,9 @@ void platform_hooks_background_cleanup(const config_t *cfg)
    /* prune_stale_sessions only needs DB1 directly; all DB2 work goes
     * through kb_client which auto-spawns aimee-kb.  DB1 connections
     * are not fork-safe so reopen here. */
-   if (db1_init(cfg->db1_path) == 0)
+   if (db1_init(config_db1_path()) == 0)
    {
-      prune_stale_sessions(cfg);
+      prune_stale_sessions();
       db1_shutdown();
    }
    _exit(0);

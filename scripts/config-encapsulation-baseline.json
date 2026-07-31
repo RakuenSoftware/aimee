@@ -50,8 +50,8 @@
       "loads": 1
     },
     "src/cmd_session_lifecycle.c": {
-      "decls": 13,
-      "loads": 4
+      "decls": 5,
+      "loads": 3
     },
     "src/db2/canonical_index.c": {
       "decls": 2,
@@ -74,7 +74,7 @@
       "loads": 0
     },
     "src/headers/cmd_hooks_platform.h": {
-      "decls": 2,
+      "decls": 1,
       "loads": 0
     },
     "src/headers/fidelity_check.h": {
@@ -783,8 +783,8 @@
     }
   },
   "totals": {
-    "decls": 698,
+    "decls": 689,
     "files": 195,
-    "loads": 338
+    "loads": 337
   }
 }

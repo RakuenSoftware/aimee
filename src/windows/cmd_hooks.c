@@ -48,9 +48,9 @@ void platform_hooks_background_cleanup(const config_t *cfg)
    /* No fork on Windows: run synchronously.  prune_stale_sessions is
     * pure DB1 + kb_client, so we only need DB1 here. */
    int db1_was_up = db1_is_initialized();
-   int db1_up = db1_was_up || (db1_init(cfg->db1_path) == 0);
+   int db1_up = db1_was_up || (db1_init(config_db1_path()) == 0);
    if (db1_up)
-      prune_stale_sessions(cfg);
+      prune_stale_sessions();
    if (db1_up && !db1_was_up)
       db1_shutdown();
 }

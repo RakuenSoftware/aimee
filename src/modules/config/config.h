@@ -2388,7 +2388,7 @@ int config_ingress_audit_async(void);
 const char *config_disposition_source_name(config_disposition_source_t source);
 
 /* Conversation directories for the configured provider. */
-int config_conversation_dirs(const config_t *cfg, char dirs[][MAX_PATH_LEN], int max_dirs);
+int config_conversation_dirs(char dirs[][MAX_PATH_LEN], int max_dirs);
 
 /* Session ID for the current process. Reads CLAUDE_SESSION_ID from env,
  * falls back to a random UUID generated once per process. */

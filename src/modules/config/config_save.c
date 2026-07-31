@@ -1420,13 +1420,13 @@ const char *config_embedding_command(const config_t *cfg, const char *requested)
 
 /* --- Conversation directories --- */
 
-int config_conversation_dirs(const config_t *cfg, char dirs[][MAX_PATH_LEN], int max_dirs)
+int config_conversation_dirs(char dirs[][MAX_PATH_LEN], int max_dirs)
 {
    const char *home = platform_home_dir();
    if (!home)
       home = "/tmp";
 
-   const char *provider = cfg->provider[0] ? cfg->provider : "claude";
+   const char *provider = config_provider()[0] ? config_provider() : "claude";
    int count = 0;
 
    if (strcmp(provider, "claude") == 0)
