@@ -4,7 +4,7 @@ A running record of the defects found in this benchmark's **own instrumentation*
 kept because it is the most transferable thing here. The models behaved roughly
 as expected throughout. The grader did not.
 
-Twelve defects. Most inflated the apparent failure rate, one deflated it, two
+Thirteen defects. Most inflated the apparent failure rate, one deflated it, two
 distorted the ranking rather than the level, several inverted a conclusion, one
 overturned the central result of the entire exercise, and none were in the
 models.
@@ -256,6 +256,37 @@ Both numbers are now reported: **capability** (floor lifted — can the model do
 the task) and **committed** (floor applied — what the drain writes today). The
 gap between them is a config decision, and for the small models it is the whole
 story.
+
+## 13. Correctness pass: bad gold found by consensus, and the scorer finally tested
+
+Two angles not tried before.
+
+**Gold triples no model produces.** If 23 models all miss the same labelled fact,
+the label is the likelier error. Exactly one triple qualified:
+`am05 ingrid|has_role|manager` from "My manager's manager is Ingrid." The models
+produced ten different readings, none more than twice, none matching the label —
+Ingrid is not "a manager" in the has_role sense, she is two levels up a reporting
+chain whose intermediate entity is unresolved, and the ontology has no reporting
+relation. Now empty, alongside the other ambiguous items.
+
+That every other gold triple was produced by at least three models is the
+reassuring half of this check.
+
+**Unit tests for the scorer.** Every check until now audited its output on real
+predictions, which finds bugs only where a model happened to trip one. Sixteen
+constructed cases with arithmetic answers now cover: exact match, empty
+prediction, one spurious, one missed, symmetric swap, inverse direction, an
+asymmetric swap that must NOT be credited, endpoint renaming that must not be
+credited, surface variation that must be free, equivalent and unrelated
+predicates, duplicates, factless notes, a terse `{}` counting as abstention, both
+confidence views, and refusal of an incomplete file.
+
+All pass. The single failure was in a test assertion, not the scorer — comparing
+at 1e-6 against figures the scorer rounds to 4dp.
+
+That these pass does not retroactively validate the twelve defects above; most
+were wrong *labels* or wrong *rules*, which arithmetic tests cannot catch. What
+the tests do is stop the rules regressing now that they are right.
 
 ## What this cost, and what it is worth
 

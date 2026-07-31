@@ -1,11 +1,11 @@
 {
   "strict": {
     "precision": 0.1875,
-    "recall": 0.0441,
-    "f1": 0.0714,
+    "recall": 0.0448,
+    "f1": 0.0723,
     "tp": 3,
     "fp": 13,
-    "fn": 65,
+    "fn": 64,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -13,7 +13,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 2
+        "fn": 1
       },
       "first_person": {
         "precision": 0.0,
@@ -91,11 +91,11 @@
   },
   "lenient": {
     "precision": 0.1875,
-    "recall": 0.0441,
-    "f1": 0.0714,
+    "recall": 0.0448,
+    "f1": 0.0723,
     "tp": 3,
     "fp": 13,
-    "fn": 65,
+    "fn": 64,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -103,7 +103,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 2
+        "fn": 1
       },
       "first_person": {
         "precision": 0.0,
@@ -189,14 +189,14 @@
   "relation_agnostic": {
     "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
     "precision": 0.3125,
-    "recall": 0.0735,
-    "f1": 0.119,
+    "recall": 0.0746,
+    "f1": 0.1205,
     "tp": 5,
     "fp": 11,
-    "fn": 63
+    "fn": 62
   },
   "over_extraction": {
-    "empty_gold_notes": 22,
+    "empty_gold_notes": 23,
     "on_schema_empty_gold_notes": 4,
     "notes_correctly_empty": 3,
     "abstention_rate_on_schema": 0.75,

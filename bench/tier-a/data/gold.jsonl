@@ -50,7 +50,7 @@
 {"id": "am02", "category": "ambiguous", "note": "She moved there for the job.", "gold": []}
 {"id": "am03", "category": "ambiguous", "note": "The new hire starts Monday on the platform team.", "gold": []}
 {"id": "am04", "category": "ambiguous", "note": "Bailes is in Auckland.", "gold": [{"subject": "Bailes", "relation": "lives_in", "object": "Auckland", "alt": [{"subject": "Bailes", "relation": "located_in", "object": "Auckland"}]}]}
-{"id": "am05", "category": "ambiguous", "note": "My manager's manager is Ingrid.", "gold": [{"subject": "Ingrid", "relation": "has_role", "object": "manager"}]}
+{"id": "am05", "category": "ambiguous", "note": "My manager's manager is Ingrid.", "gold": []}
 {"id": "nv01", "category": "novel_pred", "note": "Klaus drives a 1987 Land Cruiser.", "gold": [{"subject": "Klaus", "relation": "drives", "object": "1987 Land Cruiser"}]}
 {"id": "nv02", "category": "novel_pred", "note": "Marta founded Corvo Labs back in 2016.", "gold": [{"subject": "Marta", "relation": "founded", "object": "Corvo Labs"}]}
 {"id": "nv03", "category": "novel_pred", "note": "Ingrid mentors two of the junior engineers.", "gold": [{"subject": "Ingrid", "relation": "mentors", "object": "junior engineers"}]}
