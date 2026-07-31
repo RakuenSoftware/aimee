@@ -109,7 +109,11 @@ for entry in "${MODELS[@]}"; do
   # Device provenance, recorded rather than implied by the directory name. This
   # is the check that would have caught Qwen3.6-27B serving from CPU inside
   # results/gpu/. A speed number without this file is device-unknown.
-  cpu_layers=$(grep -c 'assigned to device CPU' "$LOG" 2>/dev/null || echo 0)
+  # grep -c prints 0 AND exits 1 when it matches nothing, so a `|| echo 0`
+  # fallback emits the count twice and produces invalid JSON. Take grep's own
+  # output and swallow the exit status.
+  cpu_layers=$(grep -c 'assigned to device CPU' "$LOG" 2>/dev/null) || true
+  cpu_layers=${cpu_layers:-0}
   printf '{"model":"%s","mode":"%s","place":"%s","extra":"%s","cpu_layer_warnings":%s,"resident_on_gpu":%s}\n' \
     "$LABEL" "$MODE" "$PLACE" "$EXTRA" "$cpu_layers" \
     "$([ "$MODE" = gpu ] && [ "$cpu_layers" -eq 0 ] && echo true || echo false)" \

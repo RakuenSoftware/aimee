@@ -31,7 +31,8 @@ could do, so a deployment could run the volume stages locally and pay for a
 frontier model only on judgement. The curator still routes stages internally.
 They now resolve to one model.
 
-On a 69-note extraction set, gemma-4-E2B scores 0.646 strict F1 and E4B 0.828.
+On a 69-note extraction set, gemma-4-E2B scores 0.691 strict F1 and E4B 0.828,
+both measured with thinking on.
 The larger models are being re-measured, so I am not quoting their numbers here
 yet. What the two I have show is a curve still climbing at E4B, on the task that
 was supposed to be the flat one. A model good enough for extraction is good

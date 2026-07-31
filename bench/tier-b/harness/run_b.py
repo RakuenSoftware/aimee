@@ -66,16 +66,24 @@ def main():
                                 user, args.max_tokens, args.timeout)
                 msg = resp["choices"][0]["message"]
                 raw = msg.get("content") or ""
+                # Keep the reasoning channel. Qwen3.5-0.8B returned an empty
+                # content with completion_tokens pinned at the cap on all six
+                # topics, and without this field there is no way to tell a model
+                # that never stopped thinking from a harness that read the wrong
+                # key. Tier-A's runner already records this; Tier-B's did not.
+                reasoning = msg.get("reasoning_content") or ""
                 usage = resp.get("usage") or {}
                 err = None
             except (urllib.error.URLError, KeyError, TimeoutError, OSError) as e:
-                raw, usage, err = "", {}, f"{type(e).__name__}: {e}"
+                raw, reasoning, usage, err = "", "", {}, f"{type(e).__name__}: {e}"
             dt = (time.perf_counter() - t0) * 1000
 
             fh.write(json.dumps({
                 "id": r["id"],
                 "model": args.model,
                 "raw": raw[:8000],
+                "reasoning_chars": len(reasoning),
+                "reasoning": reasoning[:2000],
                 "error": err,
                 "latency_ms": round(dt, 1),
                 "prompt_tokens": usage.get("prompt_tokens"),
