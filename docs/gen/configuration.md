@@ -128,7 +128,7 @@ Consumed once by `config_emit_deploy_env` to stand up the managed sibling servic
 | `llm_synth_model` | string | Model label sent to the configured synthesis endpoint. |
 | `llm_synth_tier` | string | Deploy-time local synthesis tier: cpu, small, mid, or large. |
 
-### Advanced tuning keys (79)
+### Advanced tuning keys (78)
 
 Expert scalars with sensible defaults; settable in the config file but off the everyday surface.
 
@@ -177,7 +177,6 @@ Expert scalars with sensible defaults; settable in the config file but off the e
 | `kb_pdf_ocr_enabled` | bool | OCR a scanned / no-text-layer PDF via the OCR sidecar at ingest so its text + geometry feed the normal citation path (default off; without it a scanned PDF is ingested asset-only). |
 | `kb_pdf_tsr_enabled` | bool | Run the table-structure-recognition (TSR) sidecar at PDF ingest to turn table regions into structured kb_table_cells, surfaced via lookup_table (default off; degrades to text-only when the sidecar is absent). |
 | `kb_pdf_vector_enabled` | bool | Embed structured-PDF chunks into the isolated kb_pdf_embeddings relation and add the vector candidate leg to search_chunks (default off; degrades to lexical-only when the embedder is absent). |
-| `kb_reembed_on_dim_change` | bool | — |
 | `kb_search_max_results` | int | Default max results for KB search. |
 | `learning_implicit_citation_continuation` | bool | Implicit-learning signal: citation on continuation. |
 | `learning_implicit_citation_repair` | bool | Implicit-learning signal: citation on repair. |

@@ -108,12 +108,6 @@ const config_field_t config_fields[] = {
     {"typed_facts_enabled", offsetof(config_t, typed_facts_enabled), sizeof(int), 0, CFG_BOOL},
     {"kb_pdf_tier", offsetof(config_t, kb_pdf_tier), sizeof(((config_t *)0)->kb_pdf_tier), 0,
      CFG_STRING, RELOAD_RESTART},
-    /* The gate aimee kb reembed requires. Parsed from YAML since it existed, but
-     * absent here, so `aimee config set kb.reembed_on_dim_change true` answered
-     * "unknown key" and the documented embedder-migration procedure could not be
-     * followed without hand-editing the kb's aimee.yaml. */
-    {"kb_reembed_on_dim_change", offsetof(config_t, kb_reembed_on_dim_change), sizeof(int), 0,
-     CFG_BOOL, RELOAD_HOT, FGROUP_ADVANCED},
     {"kb_pdf_ingest_enabled", offsetof(config_t, kb_pdf_ingest_enabled), sizeof(int), 0, CFG_BOOL,
      RELOAD_HOT, FGROUP_ADVANCED},
     {"kb_pdf_vector_enabled", offsetof(config_t, kb_pdf_vector_enabled), sizeof(int), 0, CFG_BOOL,
