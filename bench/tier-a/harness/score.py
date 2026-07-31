@@ -468,9 +468,19 @@ def main():
         report[mode] = {
             "precision": round(P, 4), "recall": round(R, 4), "f1": round(F, 4),
             "tp": TP, "fp": FP, "fn": FN,
-            "by_category": {k: dict(zip(("precision", "recall", "f1"),
-                                        [round(x, 4) for x in prf(*v)]),
-                                    tp=v[0], fp=v[1], fn=v[2])
+            # A category whose notes carry no gold triples (transient, most of
+            # ambiguous and negation) has undefined P/R/F1. Reporting 0.0 there
+            # inverts the meaning: fp=0 on a factless note is perfect restraint,
+            # not failure, and a chart would show it as the worst category.
+            # Emit null and read abstention_rate_on_schema for those instead.
+            "by_category": {k: (dict(zip(("precision", "recall", "f1"),
+                                         [round(x, 4) for x in prf(*v)]),
+                                     tp=v[0], fp=v[1], fn=v[2])
+                                if (v[0] + v[2]) > 0 else
+                                {"precision": None, "recall": None, "f1": None,
+                                 "tp": v[0], "fp": v[1], "fn": v[2],
+                                 "_note": "no gold triples in this category; "
+                                          "see abstention_rate_on_schema"})
                             for k, v in sorted(by_cat.items())},
         }
 

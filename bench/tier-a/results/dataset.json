@@ -99,12 +99,13 @@
           "fn": 8
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 0,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     }
@@ -209,12 +210,13 @@
           "fn": 7
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 4,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     },
@@ -424,12 +426,13 @@
           "fn": 8
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 0,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     }
@@ -534,12 +537,13 @@
           "fn": 8
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 0,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     },
@@ -749,12 +753,13 @@
           "fn": 4
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 0,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     },
@@ -964,12 +969,13 @@
           "fn": 4
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 2,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     },
@@ -1176,12 +1182,13 @@
           "fn": 6
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 8,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     },
@@ -1391,12 +1398,13 @@
           "fn": 2
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 2,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     },
@@ -1606,12 +1614,13 @@
           "fn": 2
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 0,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     },
@@ -1821,12 +1830,13 @@
           "fn": 1
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 5,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     },
@@ -2036,12 +2046,13 @@
           "fn": 8
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 2,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     },
@@ -2251,12 +2262,13 @@
           "fn": 2
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 12,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     },
@@ -2463,12 +2475,13 @@
           "fn": 8
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 0,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     }
@@ -2573,12 +2586,13 @@
           "fn": 2
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 2,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     },
@@ -2785,12 +2799,13 @@
           "fn": 8
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 0,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     },
@@ -2997,12 +3012,13 @@
           "fn": 1
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 7,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     },

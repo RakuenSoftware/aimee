@@ -324,6 +324,53 @@ scorer must be *true of*, rather than by looking at what it produced. Output
 audits find the bugs your data happens to trip. Property checks find the ones it
 does not — yet.
 
+## Known gotchas that are NOT fixed
+
+Things a reader or a rerun will hit. None are bugs; all are limits.
+
+**The scoring rules were fitted to this data.** This is the biggest one and it
+has no clean fix here. Predicate equivalences, aliases and containment were added
+*because models produced them* — I read the disagreements and decided which were
+unfair. Measured against exact-match-only, those rules account for **6-13% of
+every top model's F1**:
+
+| model | exact only | with rules | attributable to rules |
+|---|---:|---:|---:|
+| gemma-4-26B-A4B | 0.809 | 0.926 | 13% |
+| gemma-4-12B | 0.769 | 0.862 | 11% |
+| gemma-4-E4B | 0.656 | 0.738 | 11% |
+| Qwen3.6-27B | 0.820 | 0.906 | 10% |
+| Qwen3.6-35B-A3B | 0.746 | 0.791 | 6% |
+
+Each rule is individually defensible — `met` really does mean `knows`. But they
+were chosen with the answers visible, which is the definition of fitting the
+grader to the test set. The proper control is a held-out set of notes the rules
+were never tuned against; it does not exist here. Anyone reproducing this should
+treat the absolute numbers as generous by roughly a tenth, and note that the
+effect is uneven (6% to 13%), so it distorts gaps as well as levels.
+
+**One author, no independent review.** Every gold label was written by one model
+(Claude Opus 5) and audited by the same one. The consensus check in defect 13
+helps — 23 models agreeing against a label is real evidence — but it cannot catch
+a mistake the models share.
+
+**n=69.** Differences under about 0.05 F1 are not meaningful. Several adjacent
+pairs in the table are inside that.
+
+**Categories with no gold triples report null, not 0.** transient, and most of
+ambiguous and negation, have no gold triples, so P/R/F1 are undefined there.
+Reporting 0.0 inverted the meaning — fp=0 on a factless note is perfect
+restraint, and a chart would have shown it as the worst category. Read
+`abstention_rate_on_schema` for those instead.
+
+**Latency is not comparable across runs.** Offloaded GPU figures (12B, the MoEs
+under transformers) are an artefact of paging, not model speed. CPU figures share
+a host with other containers. Only the llama.cpp resident runs are worth quoting.
+
+**Weights were pruned after scoring.** Model repos are mutable; `PROVENANCE.json`
+pins the revision SHAs, and a rerun that resolves a different revision is not
+running the same experiment.
+
 ## What this cost, and what it is worth
 
 Five of the nine were found only after a number had been reported. Three
