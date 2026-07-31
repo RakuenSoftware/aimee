@@ -5,7 +5,7 @@
     "f1": 0.0,
     "tp": 0,
     "fp": 0,
-    "fn": 72,
+    "fn": 71,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -77,7 +77,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 9
+        "fn": 8
       },
       "transient": {
         "precision": 0.0,
@@ -95,7 +95,7 @@
     "f1": 0.0,
     "tp": 0,
     "fp": 0,
-    "fn": 72,
+    "fn": 71,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -167,7 +167,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 9
+        "fn": 8
       },
       "transient": {
         "precision": 0.0,
@@ -193,7 +193,7 @@
     "f1": 0.0,
     "tp": 0,
     "fp": 0,
-    "fn": 72
+    "fn": 71
   },
   "over_extraction": {
     "empty_gold_notes": 22,

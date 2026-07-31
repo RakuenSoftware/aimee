@@ -1,11 +1,11 @@
 {
   "strict": {
     "precision": 0.527,
-    "recall": 0.5417,
-    "f1": 0.5342,
+    "recall": 0.5493,
+    "f1": 0.5379,
     "tp": 39,
     "fp": 35,
-    "fn": 33,
+    "fn": 32,
     "by_category": {
       "ambiguous": {
         "precision": 0.2,
@@ -73,11 +73,11 @@
       },
       "third_person": {
         "precision": 1.0,
-        "recall": 0.7778,
-        "f1": 0.875,
+        "recall": 0.875,
+        "f1": 0.9333,
         "tp": 7,
         "fp": 0,
-        "fn": 2
+        "fn": 1
       },
       "transient": {
         "precision": 0.0,
@@ -91,11 +91,11 @@
   },
   "lenient": {
     "precision": 0.5405,
-    "recall": 0.5556,
-    "f1": 0.5479,
+    "recall": 0.5634,
+    "f1": 0.5517,
     "tp": 40,
     "fp": 34,
-    "fn": 32,
+    "fn": 31,
     "by_category": {
       "ambiguous": {
         "precision": 0.2,
@@ -163,11 +163,11 @@
       },
       "third_person": {
         "precision": 1.0,
-        "recall": 0.7778,
-        "f1": 0.875,
+        "recall": 0.875,
+        "f1": 0.9333,
         "tp": 7,
         "fp": 0,
-        "fn": 2
+        "fn": 1
       },
       "transient": {
         "precision": 0.0,
@@ -188,12 +188,12 @@
   },
   "relation_agnostic": {
     "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
-    "precision": 0.6486,
-    "recall": 0.6667,
-    "f1": 0.6575,
-    "tp": 48,
-    "fp": 26,
-    "fn": 24
+    "precision": 0.6622,
+    "recall": 0.6901,
+    "f1": 0.6759,
+    "tp": 49,
+    "fp": 25,
+    "fn": 22
   },
   "over_extraction": {
     "empty_gold_notes": 22,

@@ -73,3 +73,28 @@ proposal (shadow on live traffic) is where that belongs.
 
 Gold labels were authored by Claude Opus 5. None of the models under test
 authored any label.
+
+## Entity naming, and one genuinely ambiguous note
+
+A triple is correct only if **both endpoints name the labelled entity**; only the
+predicate may vary (`works_for` vs `member_of`, `born_in` vs `grew_up_in`).
+Surface variation — `Dr.` vs `Dr`, case, underscores, hyphens — is absorbed by
+normalisation and is not a difference.
+
+This means coreference is NOT forgiven. If a note calls one device both "the
+build host" and "forge", gold has to pick one, and a model choosing the other is
+marked wrong. That is a real limitation and it lands on `mf04`:
+
+> "The build host is called forge, sits at 192.168.1.42, and lives in the
+> Auckland rack."
+
+Gold uses **build host** as the subject throughout, with `forge` as the hostname
+value. The justification is consistency with the two sibling notes — `in03`
+("The KB server has hostname aimee-kb") and `in04` ("forge is the hostname we use
+for the build machine") both use the descriptive entity as subject and the
+hostname as the value — and with the sentence's own grammatical subject.
+
+It is not a typing rule. `device_has_ip` is `{NODE_DEVICE} -> {NODE_IP}` and
+`forge` is a device, so `forge | device_has_ip | ...` is well-formed. Models that
+read it that way are penalised by a labelling choice, not by an error of theirs.
+Anyone reproducing this should know `mf04` is the weakest note in the set.

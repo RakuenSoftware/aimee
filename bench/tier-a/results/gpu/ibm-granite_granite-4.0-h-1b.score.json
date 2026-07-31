@@ -1,10 +1,10 @@
 {
   "strict": {
-    "precision": 0.4493,
-    "recall": 0.4306,
-    "f1": 0.4397,
-    "tp": 31,
-    "fp": 38,
+    "precision": 0.4348,
+    "recall": 0.4225,
+    "f1": 0.4286,
+    "tp": 30,
+    "fp": 39,
     "fn": 41,
     "by_category": {
       "ambiguous": {
@@ -48,12 +48,12 @@
         "fn": 5
       },
       "multi_fact": {
-        "precision": 0.5,
-        "recall": 0.2,
-        "f1": 0.2857,
-        "tp": 5,
-        "fp": 5,
-        "fn": 20
+        "precision": 0.4,
+        "recall": 0.16,
+        "f1": 0.2286,
+        "tp": 4,
+        "fp": 6,
+        "fn": 21
       },
       "negation": {
         "precision": 0.25,
@@ -73,11 +73,11 @@
       },
       "third_person": {
         "precision": 0.8571,
-        "recall": 0.6667,
-        "f1": 0.75,
+        "recall": 0.75,
+        "f1": 0.8,
         "tp": 6,
         "fp": 1,
-        "fn": 3
+        "fn": 2
       },
       "transient": {
         "precision": 0.0,
@@ -90,11 +90,11 @@
     }
   },
   "lenient": {
-    "precision": 0.4783,
-    "recall": 0.4583,
-    "f1": 0.4681,
-    "tp": 33,
-    "fp": 36,
+    "precision": 0.4638,
+    "recall": 0.4507,
+    "f1": 0.4571,
+    "tp": 32,
+    "fp": 37,
     "fn": 39,
     "by_category": {
       "ambiguous": {
@@ -138,12 +138,12 @@
         "fn": 4
       },
       "multi_fact": {
-        "precision": 0.5,
-        "recall": 0.2,
-        "f1": 0.2857,
-        "tp": 5,
-        "fp": 5,
-        "fn": 20
+        "precision": 0.4,
+        "recall": 0.16,
+        "f1": 0.2286,
+        "tp": 4,
+        "fp": 6,
+        "fn": 21
       },
       "negation": {
         "precision": 0.25,
@@ -163,11 +163,11 @@
       },
       "third_person": {
         "precision": 0.8571,
-        "recall": 0.6667,
-        "f1": 0.75,
+        "recall": 0.75,
+        "f1": 0.8,
         "tp": 6,
         "fp": 1,
-        "fn": 3
+        "fn": 2
       },
       "transient": {
         "precision": 0.0,
@@ -222,11 +222,11 @@
   },
   "relation_agnostic": {
     "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
-    "precision": 0.6812,
-    "recall": 0.6528,
-    "f1": 0.6667,
-    "tp": 47,
-    "fp": 22,
+    "precision": 0.6667,
+    "recall": 0.6479,
+    "f1": 0.6571,
+    "tp": 46,
+    "fp": 23,
     "fn": 25
   },
   "over_extraction": {
