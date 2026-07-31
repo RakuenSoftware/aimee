@@ -35,8 +35,22 @@
 /* Reclaim runs at most this often (throttled; the drain calls it per batch). */
 #define MF_RECLAIM_EVERY_S 60
 /* Auto-injected into every turn (ingress_preinject), so precision matters more
- * than recall: only commit facts the model is confident are durable. */
-#define MF_CONF_FLOOR 0.6
+ * than recall: only commit facts the model is confident are durable.
+ *
+ * DEFAULT ONLY — the effective floor is config typed_facts_conf_floor, because a
+ * single global constant assumes every provider emits a calibrated confidence
+ * and they do not. Measured across 18 extraction models: several emit exactly
+ * 0.0 for every fact including ones they get right (Qwen3-0.6B: 72 of 73 facts
+ * at 0.0, 40% of them correct, all discarded), one is anti-correlated
+ * (granite-4.1-3b's sub-floor facts are MORE accurate than its confident ones,
+ * 0.75 vs 0.61), and only some carry real signal (gemma-4-E2B's sub-floor facts
+ * are 0% correct, so there the floor works exactly as intended).
+ *
+ * Intermediate values barely exist — the field is effectively binary — so this
+ * is not a threshold to tune globally but one to calibrate per provider, or to
+ * disable (0) for a provider whose confidences carry no information. */
+/* The effective value is config_typed_facts_conf_floor(); the fallback constant
+ * lives with the accessor in config.h. */
 
 /* The model must return ONLY durable, generalizable subject-relation-object
  * facts -- not transient state, opinions, or one-off events. relation is a short
@@ -264,6 +278,9 @@ static int mf_commit_facts(const char *llm_json)
    }
 
    int committed = 0;
+   int below_floor = 0;
+   int malformed = 0;
+   double conf_floor = config_typed_facts_conf_floor();
    cJSON *f = NULL;
    cJSON_ArrayForEach(f, facts)
    {
@@ -278,8 +295,19 @@ static int mf_commit_facts(const char *llm_json)
       const char *object = cJSON_IsString(obj_j) ? obj_j->valuestring : "";
       double conf = cJSON_IsNumber(conf_j) ? conf_j->valuedouble : 0.0;
 
-      if (!subject[0] || !raw_relation[0] || !object[0] || conf < MF_CONF_FLOOR)
+      if (!subject[0] || !raw_relation[0] || !object[0])
+      {
+         malformed++;
          continue;
+      }
+      if (conf < conf_floor)
+      {
+         /* Counted, not silent. A provider that emits 0.0 for everything makes
+          * this drop every fact it extracts, and before this counter existed the
+          * job simply reported success with an empty commit. */
+         below_floor++;
+         continue;
+      }
 
       /* Fold a known synonym onto its canonical seed relation before anything
        * downstream sees it: the gate would otherwise return NOVEL for "has_ip"
@@ -313,6 +341,18 @@ static int mf_commit_facts(const char *llm_json)
       if (v == FACT_GATE_ACCEPT || v == FACT_GATE_NOVEL)
          committed++;
    }
+   /* A provider whose confidences are uninformative drops every fact here, and
+    * the job still reports success — that combination once looked exactly like
+    * "the model cannot extract". Say so instead of committing silently. */
+   if (below_floor > 0)
+      aimee_log(committed == 0 ? LOG_WARN : LOG_INFO, "kb.memory.facts",
+                "%d fact(s) below confidence floor %.2f%s (committed %d, malformed %d)",
+                below_floor, conf_floor,
+                committed == 0 ? " - NOTHING committed; if this persists the provider's"
+                                 " confidences may carry no signal, see"
+                                 " typed_facts_conf_floor"
+                               : "",
+                committed, malformed);
    cJSON_Delete(root);
    return committed;
 }
