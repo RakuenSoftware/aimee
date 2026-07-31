@@ -85,7 +85,8 @@ describe('configToPlacement round-trips placementToConfig', () => {
   const cases: { role: Parameters<typeof roleKeys>[0]; p: Placement }[] = [
     // in-container: local carries no tier/host/gpu to round-trip
     { role: 'embed', p: { backend: 'local', tier: '', host: '', gpu: '' } },
-    { role: 'synth', p: { backend: 'local', tier: 'cpu', host: 'box', gpu: '' } },
+    // No synth local case: aimee-llm is retired, so a local placement cannot be
+    // served and configToPlacement reports it as off. See the collapse test below.
     { role: 'synth', p: { backend: 'external', endpoint: 'https://s' } },
     { role: 'synth', p: { backend: 'off' } },
   ];
@@ -95,11 +96,27 @@ describe('configToPlacement round-trips placementToConfig', () => {
     });
   }
 
-  it('an unset backend defaults to local (simplest working choice)', () => {
-    // For the embedder that means in-container, with no tier to default: the kb serves
-    // it, so a fresh install needs no placement decision at all.
+  it('an unset embedder defaults to in-container', () => {
+    // The kb serves it, so a fresh install needs no placement decision at all.
     expect(configToPlacement({}, 'embed')).toEqual({ backend: 'local', tier: '', host: '', gpu: '' });
-    expect(configToPlacement({}, 'synth')).toEqual({ backend: 'local', tier: 'cpu', host: '', gpu: '' });
+  });
+
+  it('a synth placement that names the retired container collapses to off', () => {
+    // aimee-llm is gone, so nothing can serve a local synth. Reporting it as local
+    // would select a backend that never starts and show a picker option that is not
+    // offered; an operator who wants synthesis supplies an endpoint.
+    expect(configToPlacement({}, 'synth')).toEqual({ backend: 'off' });
+    expect(
+      configToPlacement(
+        { llm_synth_backend: 'local', llm_synth_tier: 'cpu', llm_synth_host: 'box' },
+        'synth',
+      ),
+    ).toEqual({ backend: 'off' });
+  });
+
+  it('offers synth no local placement', () => {
+    const ids = placementOptions({ name: 'box', kind: 'local', gpus: [], error: '' }, 'synth').map((o) => o.id);
+    expect(ids).toEqual(['external', 'off']);
   });
 });
 
