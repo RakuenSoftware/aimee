@@ -423,13 +423,20 @@ CMD_SRCS = prompts.c persona.c hardware_probe.c curator_profile.c modules/delega
            cmd_provider.c cmd_aux.c cmd_audit.c
 CMD_OBJS = $(CMD_SRCS:%.c=$(OBJDIR)/%.o)
 
+# Sources no binary and no test links, so nothing would otherwise compile them.
+# panel_roster.c has had no build rule since it landed in #1845; panel_provider.c
+# is reached only by unit-test-panel-provider. Compiled here so they cannot rot
+# unnoticed the way four CMD_SRCS files did.
+ORPHAN_SRCS = modules/delegates/panel_roster.c
+ORPHAN_OBJS = $(ORPHAN_SRCS:%.c=$(OBJDIR)/%.o)
+
 # CMD_SRCS is linked into NO shipping binary and no test target, so nothing ever
 # compiled it. Five files had rotted on the mainline -- an uninitialised config_t,
 # a stale db1_coord_job_add_task arity, a `/*` inside a block comment, a `scope`
 # declared in a block that does not reach its use, and a config_t field read with
 # no config_t in scope. This target compiles them so that cannot recur silently.
-cmd-srcs-compile-check: $(CMD_OBJS)
-	@echo "cmd-srcs-compile-check: ok ($(words $(CMD_SRCS)) files)"
+cmd-srcs-compile-check: $(CMD_OBJS) $(ORPHAN_OBJS)
+	@echo "cmd-srcs-compile-check: ok ($(words $(CMD_SRCS)) cmd + $(words $(ORPHAN_SRCS)) orphan file(s))"
 
 # --- Pure client (aimee) ---
 CLI_SRCS = cli_v1_routes.c cli_v1_routes_d.c cli_v1_routes_c.c cli_v1_routes_b.c cli_main.c cli_agent_setup.c cli_session_start.c session_degraded_notice.c cmd_self_update.c self_update_util.c harness_memory_common.c harness_memory_scope.c harness_memory_audit.c harness_memory_spill.c cli_attention_guard.c cli_code_audit.c cli_css.c cli_chat_stream.c cli_client.c cli_launch.c cli_mcp_serve.c cli_profile.c client_integrations.c modules/delegates/delegate_plan.c cmd_profile.c cmd_manuscript.c cmd_optimize.c cli_persona.c cli_roles.c manuscript.c http_uds_client.c aimee_client.c cli_remote.c modules/protocols/acp/acp_server.c modules/workspace/cli_workspace_serve.c cli_agent_keys.c cmd_workflow.c

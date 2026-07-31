@@ -129,22 +129,6 @@
       "decls": 1,
       "loads": 1
     },
-    "src/modules/delegates/include/aimee/delegates/panel_provider.h": {
-      "decls": 4,
-      "loads": 0
-    },
-    "src/modules/delegates/include/aimee/delegates/panel_roster.h": {
-      "decls": 5,
-      "loads": 0
-    },
-    "src/modules/delegates/panel_provider.c": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/modules/delegates/panel_roster.c": {
-      "decls": 5,
-      "loads": 0
-    },
     "src/modules/guardrails/guardrails_action_audit.c": {
       "decls": 2,
       "loads": 0
@@ -481,10 +465,6 @@
       "decls": 1,
       "loads": 1
     },
-    "src/tests/test_panel_provider.c": {
-      "decls": 4,
-      "loads": 0
-    },
     "src/tests/test_payload_rewrite.c": {
       "decls": 3,
       "loads": 3
@@ -547,8 +527,8 @@
     }
   },
   "totals": {
-    "decls": 453,
-    "files": 136,
+    "decls": 433,
+    "files": 131,
     "loads": 242
   }
 }
