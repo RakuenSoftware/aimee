@@ -619,32 +619,6 @@ static int kb_relay_send(server_conn_t *conn, char *json, const char *fallback)
    return send_and_free(conn, resp);
 }
 
-/* As kb_relay_send, but a kb-reported {"error": ...} is returned to the caller AS
- * an error instead of a successful response that happens to contain one.
- *
- * kb_relay_send hands any parseable body straight through, so a refusal reaches
- * the CLI as success: `aimee memory embed --all` printed nothing and exited 0
- * while the kb was answering "memory.embed all=true requires version". A command
- * that fails silently is worse than one that is missing. Only the two handlers
- * added here use this; changing kb_relay_send itself would alter the contract for
- * every existing relay route at once. */
-static int kb_relay_send_checked(server_conn_t *conn, char *json, const char *fallback)
-{
-   cJSON *resp = json ? cJSON_Parse(json) : NULL;
-   free(json);
-   if (!resp)
-      return server_send_error(conn, fallback, NULL);
-   const cJSON *err = cJSON_GetObjectItemCaseSensitive(resp, "error");
-   if (cJSON_IsString(err) && err->valuestring && err->valuestring[0])
-   {
-      char msg[512];
-      snprintf(msg, sizeof(msg), "%s", err->valuestring);
-      cJSON_Delete(resp);
-      return server_send_error(conn, msg, NULL);
-   }
-   return send_and_free(conn, resp);
-}
-
 int handle_kb_build(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -758,7 +732,7 @@ int handle_kb_reembed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    int status = 0;
    char *json = kb_client_reembed(confirm, force, dry_run, target_dim, clear_maintenance, &status);
-   return kb_relay_send_checked(conn, json, "knowledge service reembed failed");
+   return kb_relay_send(conn, json, "knowledge service reembed failed");
 }
 
 /* memory.embed — (re)generate memory embeddings.
@@ -783,8 +757,8 @@ int handle_memory_embed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!all && memory_id <= 0)
       return server_send_error(conn, "memory.embed requires all=true or memory_id", NULL);
 
-   return kb_relay_send_checked(conn, kb_client_memory_embed_json(all, memory_id, version, NULL),
-                                "knowledge service memory embed failed");
+   return kb_relay_send(conn, kb_client_memory_embed_json(all, memory_id, version, NULL),
+                        "knowledge service memory embed failed");
 }
 
 int handle_kb_ingest_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

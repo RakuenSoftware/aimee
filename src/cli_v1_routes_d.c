@@ -697,7 +697,6 @@ static const struct
     {"mcp.call", "POST", "/v1/mcp/call"},
     {"mcp.recheck", "POST", "/v1/mcp/recheck"},
     {"mcp.tools_list", "GET", "/v1/mcp/tools_list"},
-    {"memory.embed", "POST", "/v1/memory/embed"},
     {"memory.delete", "POST", "/v1/memory/delete"},
     {"memory.get", "POST", "/v1/memory/get"},
     {"memory.list", "POST", "/v1/memory/list"},
@@ -794,6 +793,7 @@ static const struct
     {"kb.reembed", "POST", "/v1/kb/reembed"},
     {"kb.update", "POST", "/v1/kb/update"},
     {"memory.benchmark", "POST", "/v1/memory/benchmark"},
+    {"memory.embed", "POST", "/v1/memory/embed"},
     {"roundtable.review", "POST", "/v1/roundtable/review"},
     {"rules.generate", "POST", "/v1/rules/generate"},
 };

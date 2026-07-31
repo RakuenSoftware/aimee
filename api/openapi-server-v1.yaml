@@ -3212,6 +3212,25 @@ paths:
       summary: Update the knowledge base (async; poll GET /runs/{id})
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
+  /kb/reembed:
+    post:
+      summary: Reset and re-embed the vector store after a dimension change (async; poll GET /runs/{id})
+      description: >-
+        Drops and recreates every derived vector table at the configured
+        embedding dimension, then requeues the corpus. Gated by
+        kb.reembed_on_dim_change in aimee-kb's own config; without confirm it
+        returns a dry-run plan naming each table and row count.
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
+  /memory/embed:
+    post:
+      summary: (Re)generate memory embeddings (async; poll GET /runs/{id})
+      description: >-
+        Embeds a single memory (memory_id) or the whole corpus (all=true, which
+        requires a rollover version). Needed after a dimension change, which
+        drops memory vectors without requeueing them.
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
   /kb/docs/push:
     post:
       summary: Push document contents into the knowledge base (async; poll GET /runs/{id})
