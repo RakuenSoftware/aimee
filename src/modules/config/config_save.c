@@ -1907,10 +1907,12 @@ void config_sandbox(sandbox_config_t *out)
    if (!out)
       return;
    memset(out, 0, sizeof(*out));
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return;
-   if (config_load(cfg) == 0)
-      *out = cfg->sandbox;
-   free(cfg);
+   /* Read the LIVE config, like every generated accessor: config_field_read
+    * prefers the pinned snapshot and heap-loads only when none is live. Loading a
+    * whole config_t here instead made this the one read accessor that bypassed the
+    * snapshot -- so a delegated shell could be gated on file state the live
+    * snapshot had not adopted, and every such call paid a full config load on a
+    * hot path. Leaves *out zeroed when the config cannot be read, which is the
+    * all-defaults-off shape callers already relied on. */
+   config_field_read(offsetof(config_t, sandbox), sizeof(*out), out);
 }
