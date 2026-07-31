@@ -3,7 +3,7 @@
   "files": {
     "src/cmd_agent.c": {
       "decls": 2,
-      "loads": 2
+      "loads": 0
     },
     "src/cmd_agent_delegate.c": {
       "decls": 3,
@@ -25,10 +25,6 @@
       "decls": 1,
       "loads": 1
     },
-    "src/cmd_hooks.c": {
-      "decls": 2,
-      "loads": 2
-    },
     "src/cmd_identity.c": {
       "decls": 3,
       "loads": 2
@@ -36,10 +32,6 @@
     "src/cmd_infra.c": {
       "decls": 7,
       "loads": 5
-    },
-    "src/cmd_kb.c": {
-      "decls": 4,
-      "loads": 4
     },
     "src/cmd_memory_embed.c": {
       "decls": 4,
@@ -61,10 +53,6 @@
       "decls": 14,
       "loads": 4
     },
-    "src/conversation_context.c": {
-      "decls": 5,
-      "loads": 5
-    },
     "src/dashboard.c": {
       "decls": 2,
       "loads": 2
@@ -75,7 +63,7 @@
     },
     "src/dogfood.c": {
       "decls": 8,
-      "loads": 6
+      "loads": 3
     },
     "src/headers/agent_config.h": {
       "decls": 2,
@@ -265,10 +253,6 @@
       "decls": 5,
       "loads": 0
     },
-    "src/modules/economizer/gateway_mutate_wire.c": {
-      "decls": 2,
-      "loads": 2
-    },
     "src/modules/economizer/tool_condense.c": {
       "decls": 2,
       "loads": 0
@@ -345,10 +329,6 @@
       "decls": 1,
       "loads": 0
     },
-    "src/modules/memory/memory_core_crud.c": {
-      "decls": 3,
-      "loads": 3
-    },
     "src/modules/memory/memory_core_internal.h": {
       "decls": 2,
       "loads": 1
@@ -417,10 +397,6 @@
       "decls": 4,
       "loads": 4
     },
-    "src/payload_rewrite.c": {
-      "decls": 3,
-      "loads": 3
-    },
     "src/posix/agent_runtime.c": {
       "decls": 3,
       "loads": 3
@@ -450,8 +426,8 @@
       "loads": 1
     },
     "src/server/anthropic_http.c": {
-      "decls": 4,
-      "loads": 4
+      "decls": 2,
+      "loads": 2
     },
     "src/server/aux_router.c": {
       "decls": 2,
@@ -470,14 +446,10 @@
       "loads": 0
     },
     "src/server/openai_chat.c": {
-      "decls": 4,
-      "loads": 4
+      "decls": 3,
+      "loads": 3
     },
     "src/server/provider_cli_adapter.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/s2_native_gate_hook.c": {
       "decls": 1,
       "loads": 1
     },
@@ -487,11 +459,7 @@
     },
     "src/server/server_agent.c": {
       "decls": 2,
-      "loads": 2
-    },
-    "src/server/server_api.c": {
-      "decls": 1,
-      "loads": 1
+      "loads": 0
     },
     "src/server/server_api_status.c": {
       "decls": 6,
@@ -843,12 +811,12 @@
     },
     "src/workflow_learn.c": {
       "decls": 1,
-      "loads": 1
+      "loads": 0
     }
   },
   "totals": {
-    "decls": 748,
-    "files": 211,
-    "loads": 381
+    "decls": 724,
+    "files": 203,
+    "loads": 349
   }
 }

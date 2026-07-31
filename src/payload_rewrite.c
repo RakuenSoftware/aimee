@@ -21,10 +21,7 @@
 
 static int cache_aware_rewrite_on(void)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return 0;
-   return cfg.cache_aware_rewrite_enabled;
+   return config_cache_aware_rewrite_enabled();
 }
 
 static int payload_rewrite_pending_bytes_for_tokens(int tokens)
@@ -81,8 +78,7 @@ int payload_rewrite_should_defer(const char *sid, const char *new_prefix_hash, i
       return -1;
    decision_set(out, 0, "invalid");
 
-   config_t cfg;
-   if (config_load(&cfg) != 0 || !cfg.cache_aware_rewrite_enabled)
+   if (!config_cache_aware_rewrite_enabled())
    {
       decision_set(out, 0, "disabled");
       return 0;
@@ -108,7 +104,7 @@ int payload_rewrite_should_defer(const char *sid, const char *new_prefix_hash, i
    }
 
    int limit = model_context_limit > 0 ? model_context_limit : PAYLOAD_REWRITE_DEFAULT_CONTEXT;
-   double hard_frac = cfg.cache_aware_rewrite_hard_context_threshold;
+   double hard_frac = config_cache_aware_rewrite_hard_context_threshold();
    if (hard_frac <= 0.0 || hard_frac > 1.0)
       hard_frac = PAYLOAD_REWRITE_DEFAULT_HARD_FRAC;
    if (current_tokens > 0 && limit > 0 && (double)current_tokens > (double)limit * hard_frac)
@@ -117,7 +113,7 @@ int payload_rewrite_should_defer(const char *sid, const char *new_prefix_hash, i
       return 0;
    }
 
-   int max_defer = cfg.cache_aware_rewrite_max_defer_turns;
+   int max_defer = config_cache_aware_rewrite_max_defer_turns();
    if (max_defer < 0)
       max_defer = PAYLOAD_REWRITE_DEFAULT_MAX_DEFER_TURNS;
    if (max_defer > 0 && state.consecutive_deferred_count >= max_defer)
@@ -126,7 +122,7 @@ int payload_rewrite_should_defer(const char *sid, const char *new_prefix_hash, i
       return 0;
    }
 
-   int seg_check = cfg.cache_aware_rewrite_segment_check_turns;
+   int seg_check = config_cache_aware_rewrite_segment_check_turns();
    if (seg_check < 0)
       seg_check = PAYLOAD_REWRITE_DEFAULT_SEGMENT_CHECK;
    if (seg_check > 0 && state.consecutive_deferred_count > 0 &&
@@ -136,7 +132,7 @@ int payload_rewrite_should_defer(const char *sid, const char *new_prefix_hash, i
       return 0;
    }
 
-   int min_tokens = cfg.cache_aware_rewrite_min_savings_tokens;
+   int min_tokens = config_cache_aware_rewrite_min_savings_tokens();
    if (min_tokens < 0)
       min_tokens = PAYLOAD_REWRITE_DEFAULT_MIN_SAVINGS;
    int min_bytes = payload_rewrite_pending_bytes_for_tokens(min_tokens);
@@ -210,13 +206,11 @@ cJSON *tool_payload_rewrite_status(cJSON *args)
 {
    (void)args;
 
-   config_t cfg;
-   config_load(&cfg);
 
    cJSON *r = cJSON_CreateObject();
-   cJSON_AddBoolToObject(r, "enabled", cfg.cache_aware_rewrite_enabled ? 1 : 0);
+   cJSON_AddBoolToObject(r, "enabled", config_cache_aware_rewrite_enabled() ? 1 : 0);
 
-   if (!cfg.cache_aware_rewrite_enabled)
+   if (!config_cache_aware_rewrite_enabled())
    {
       cJSON_AddStringToObject(r, "note",
                               "Set transport.cache_aware_rewrite.enabled=true to activate");

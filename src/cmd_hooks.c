@@ -143,9 +143,6 @@ static void emit_pretool_rewrite_unsupported_json(int rewrite_rc, const char *re
  * a guard that fails open is not a guard. */
 static int require_aimee_git_on(void)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return 1;
    return config_require_aimee_git();
 }
 
@@ -278,8 +275,6 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
    argc--;
    argv++;
 
-   config_t cfg;
-   config_load(&cfg);
    audit_log_open();
    audit_ensure_key(); /* provision the per-action audit key (best-effort) */
 

@@ -93,8 +93,6 @@ void dogfood_log_moment_live(const char *tool, const char *query, const int64_t 
                              int retrieved_count, const char *notes)
 {
    config_t cfg;
-   if (config_load(&cfg) != 0)
-      return;
    dogfood_config_t dcfg;
    dogfood_config_from(&cfg, &dcfg);
    dogfood_log_moment(&dcfg, tool, query, retrieved_ids, retrieved_count, notes);
@@ -309,8 +307,6 @@ void dogfood_log_moment_tagged(const char *tool, const char *query, const int64_
                                int retrieved_count, const dogfood_label_t *label)
 {
    config_t cfg;
-   if (config_load(&cfg) != 0)
-      return;
    dogfood_config_t dcfg;
    dogfood_config_from(&cfg, &dcfg);
    dogfood_log_moment_impl(&dcfg, tool, query, retrieved_ids, retrieved_count, NULL, label, NULL,
@@ -978,8 +974,6 @@ void dogfood_autolabel_next_turn_live(const char *text)
    if (!g_last_record_id[0])
       return;
    config_t full;
-   if (config_load(&full) != 0)
-      return;
    dogfood_config_t cfg;
    dogfood_config_from(&full, &cfg);
    if (!cfg.enabled)

@@ -31,10 +31,7 @@ int hook_send_blocked(server_conn_t *conn, const char *msg, const char *request_
  * a guard that fails open is not a guard. */
 static int require_aimee_git_on(void)
 {
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return 1;
-   return cfg.require_aimee_git;
+   return config_require_aimee_git();
 }
 
 /* The decision: 2 = deny (fills msg), 0 = allow. */

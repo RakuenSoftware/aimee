@@ -267,7 +267,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * restart and without an unsafe cross-thread setenv. */
 
    /* Surface the active fail-closed economizer mode at startup. */
-   aimee_log(LOG_INFO, "economizer", "mode=%s", econ_mode_name(econ_mode(&cfg)));
+   aimee_log(LOG_INFO, "economizer", "mode=%s", econ_mode_name(econ_mode_current()));
 
    /* Remote aimee-kb: when a kb_client_url is configured (this host uses a
     * remote kb rather than a local sidecar), export it into our own env so the

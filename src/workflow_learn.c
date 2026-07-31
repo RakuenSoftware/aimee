@@ -223,8 +223,6 @@ static int wl_workspace_for_cwd(const char *cwd, char *out, size_t outlen)
    out[0] = '\0';
 
    config_t cfg;
-   if (config_load(&cfg) != 0)
-      return 0;
 
    for (int i = 0; i < cfg.workspace_count; i++)
    {

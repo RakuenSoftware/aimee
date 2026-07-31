@@ -33,9 +33,13 @@ def accessor_for(field):
     f = re.escape(field)
     if re.search(rf"\bconfig_{f}\s*\(\s*(void)?\s*\)", acc):
         return f"config_{field}()"
-    m = re.search(rf"\bconfig_{f}_(field|current)\s*\(", acc)
-    if m:
-        return f"config_{field}_{m.group(1)}()" if m.group(1) == "field" else None
+    # `X.field` is a RAW field read, so the _field variant is the faithful
+    # translation. Prefer it explicitly: a key can have both (embedding_command
+    # has _field and _current, where _current also applies env/request
+    # precedence), and picking whichever the header mentions first silently
+    # returned None for embedding_command and skipped the file.
+    if re.search(rf"\bconfig_{f}_field\s*\(", acc):
+        return f"config_{field}_field()"
     return None
 
 apply = "--apply" in sys.argv

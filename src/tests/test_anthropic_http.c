@@ -324,6 +324,14 @@ char *ingress_preinject_apply(const char *instructions, const char *envelope)
    (void)instructions;
    return envelope ? strdup(envelope) : NULL;
 }
+/* The economizer seam moved from config_load to econ_mode_current(). Mirror
+ * exactly what the config_load stub below produces (module_economizer = 1, so
+ * mode is authoritative) so these assertions are unchanged. */
+int econ_mode_current(void)
+{
+   return g_proof_gated ? ECON_MODE_SAFE : ECON_MODE_OFF;
+}
+
 /* messages_run_request_pipeline reads config for the P5 anthropic-inject opt-in;
  * these whitebox tests run with it off (zeroed). */
 int config_load(config_t *cfg)

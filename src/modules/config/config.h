@@ -2242,6 +2242,11 @@ typedef enum
 } econ_mode_t;
 
 int econ_mode(const config_t *cfg);
+
+/* Live-config forms for callers outside the config module: same policy, read
+ * through accessors instead of a caller-held config_t. Prefer these. */
+int econ_mode_current(void);
+int econ_gateway_mutate_on_current(void);
 const char *econ_mode_name(int mode); /* "off"/"safe"/"aggressive" */
 int econ_mode_parse(const char *s);   /* mode, or -1 for unknown */
 
@@ -2285,6 +2290,8 @@ typedef struct
 } econ_preset_t;
 
 void econ_preset(const config_t *cfg, econ_preset_t *out);
+/* Live-config form; prefer this outside the config module. */
+void econ_preset_current(econ_preset_t *out);
 
 /* Resolve the effective operating mode (engineer/novel) for the running
  * process. Precedence: the AIMEE_MODE environment variable (the propagation

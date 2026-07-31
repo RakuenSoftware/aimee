@@ -325,8 +325,6 @@ static int server_agent_set_model_concurrency(const char *model, int limit)
       return 0;
 
    config_t cfg;
-   if (config_load(&cfg) != 0)
-      return -1;
    for (int i = 0; i < cfg.concurrency_per_model_count; i++)
    {
       if (strcmp(cfg.concurrency_per_model[i].key, model) == 0)
@@ -361,8 +359,6 @@ static int server_agent_clear_model_concurrency_if_unused(const agent_config_t *
       return 0;
 
    config_t cfg;
-   if (config_load(&cfg) != 0)
-      return -1;
    for (int i = 0; i < cfg.concurrency_per_model_count; i++)
    {
       if (strcmp(cfg.concurrency_per_model[i].key, model) != 0)

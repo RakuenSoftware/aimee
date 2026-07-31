@@ -1011,8 +1011,7 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
       return -1;
    }
 
-   config_t econ_cfg;
-   int economizer_active = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) != ECON_MODE_OFF;
+   int economizer_active = econ_mode_current() != ECON_MODE_OFF;
    int wire_anthropic = driver && driver->name && strcmp(driver->name, "anthropic") == 0;
    econ_wire_route_t wire_route = wire_anthropic              ? ECON_WIRE_ANTHROPIC_MESSAGES
                                   : strstr(url, "/responses") ? ECON_WIRE_OPENAI_RESPONSES

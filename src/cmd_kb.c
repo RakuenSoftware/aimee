@@ -119,13 +119,11 @@ static void kb_cmd_update(app_ctx_t *ctx, int argc, char **argv)
    else if (!getcwd(root, sizeof(root)))
       root[0] = '\0';
 
-   config_t cfg;
-   config_load(&cfg);
    /* Pass NULL when no local embedder is configured (the thin client has none)
     * so the kb embeds with its OWN embedder; defaulting to "builtin" (384-dim
     * hash) would mismatch a real-embedder corpus (1024/2560-dim) and return
     * nothing. */
-   const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : NULL;
+   const char *embed_cmd = config_embedding_command_field()[0] ? config_embedding_command_field() : NULL;
 
    char proj[256];
    kb_cmd_resolve_project(project, root, proj, sizeof(proj));
@@ -202,13 +200,11 @@ static void kb_cmd_search(app_ctx_t *ctx, int argc, char **argv)
    int max_results = opt_get_int(&opts, "max", KB_DEFAULT_MAX_RESULTS);
    const char *fusion_mode_override = opt_get(&opts, "fusion-mode");
 
-   config_t cfg;
-   config_load(&cfg);
    /* Pass NULL when no local embedder is configured (the thin client has none)
     * so the kb embeds with its OWN embedder; defaulting to "builtin" (384-dim
     * hash) would mismatch a real-embedder corpus (1024/2560-dim) and return
     * nothing. */
-   const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : NULL;
+   const char *embed_cmd = config_embedding_command_field()[0] ? config_embedding_command_field() : NULL;
 
    char proj[256];
    kb_cmd_resolve_project(project, NULL, proj, sizeof(proj));
@@ -446,13 +442,11 @@ static void kb_cmd_repair(app_ctx_t *ctx, int argc, char **argv)
 
    if (reindex_corpus)
    {
-      config_t cfg;
-      config_load(&cfg);
 
       const char *configured =
-          cfg.db2_vector_corpus_index[0] ? cfg.db2_vector_corpus_index : "auto";
-      int64_t threshold = cfg.db2_vector_corpus_diskann_threshold > 0
-                              ? cfg.db2_vector_corpus_diskann_threshold
+          config_db2_vector_corpus_index()[0] ? config_db2_vector_corpus_index() : "auto";
+      int64_t threshold = config_db2_vector_corpus_diskann_threshold() > 0
+                              ? config_db2_vector_corpus_diskann_threshold()
                               : 1000000;
 
       /* Resolve which index type the config selects (no DB needed for the policy). */
@@ -490,13 +484,11 @@ static void kb_cmd_repair(app_ctx_t *ctx, int argc, char **argv)
    else if (!getcwd(root, sizeof(root)))
       root[0] = '\0';
 
-   config_t cfg;
-   config_load(&cfg);
    /* Pass NULL when no local embedder is configured (the thin client has none)
     * so the kb embeds with its OWN embedder; defaulting to "builtin" (384-dim
     * hash) would mismatch a real-embedder corpus (1024/2560-dim) and return
     * nothing. */
-   const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : NULL;
+   const char *embed_cmd = config_embedding_command_field()[0] ? config_embedding_command_field() : NULL;
 
    char proj[256];
    kb_cmd_resolve_project(project, root, proj, sizeof(proj));

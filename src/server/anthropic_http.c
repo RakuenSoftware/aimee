@@ -552,8 +552,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
    prov_body = anthropic_build_prov_body(req, driver, ag, parity, messages, tools, system_text,
                                          responses_wire);
    const char *pristine_body = prov_body ? prov_body : "{}";
-   config_t econ_cfg;
-   int economizer_active = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) != ECON_MODE_OFF;
+   int economizer_active = econ_mode_current() != ECON_MODE_OFF;
    econ_wire_route_t wire_route = parity           ? ECON_WIRE_ANTHROPIC_MESSAGES
                                   : responses_wire ? ECON_WIRE_OPENAI_RESPONSES
                                                    : ECON_WIRE_OPENAI_CHAT;
@@ -1229,8 +1228,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    }
 
    const char *pristine_body = prov_body ? prov_body : "{}";
-   config_t econ_cfg;
-   int economizer_active = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) != ECON_MODE_OFF;
+   int economizer_active = econ_mode_current() != ECON_MODE_OFF;
    econ_wire_route_t wire_route = parity           ? ECON_WIRE_ANTHROPIC_MESSAGES
                                   : responses_wire ? ECON_WIRE_OPENAI_RESPONSES
                                                    : ECON_WIRE_OPENAI_CHAT;

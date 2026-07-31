@@ -1129,6 +1129,44 @@ int econ_reduction_master_on(const config_t *cfg)
    return econ_mode(cfg) != ECON_MODE_OFF;
 }
 
+/* Live-config forms, for callers outside this module. Same policy as the
+ * config_t forms above, read through accessors so a caller never materialises
+ * the struct to ask a two-field question. The config_t forms stay: they are
+ * inside the config module, and econ_mode is a PURE function of two fields --
+ * test_config_economizer exercises the whole resolution table with no I/O,
+ * which is worth keeping. Mirrors config_embedding_command / _current. */
+int econ_mode_current(void)
+{
+   if (config_module_economizer() == 0)
+      return ECON_MODE_OFF; /* modules.economizer:false is a hard kill */
+   return config_economizer_mode();
+}
+
+int econ_gateway_mutate_on_current(void)
+{
+   return econ_mode_current() == ECON_MODE_AGGRESSIVE;
+}
+
+void econ_preset_current(econ_preset_t *out)
+{
+   if (!out)
+      return;
+   memset(out, 0, sizeof *out);
+   int mode = econ_mode_current();
+   if (mode == ECON_MODE_OFF)
+      return;
+   out->json_compact = 1;
+   if (mode == ECON_MODE_AGGRESSIVE)
+   {
+      out->history_fold = 1;
+      out->compress = 1;
+      out->command_filter = 1;
+      out->freeze_guard_horizon = 1;
+      out->gateway_seam = 1;
+      out->gateway_session_disable_ttl_ms = 3600000;
+   }
+}
+
 int config_module_enabled(int config_tristate, int env_default)
 {
    /* (Future tier 1: admin/governance FORCE would short-circuit here.) Tier 2: an explicit
