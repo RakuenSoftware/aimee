@@ -103,6 +103,11 @@ def main():
     ap.add_argument("--repetition-penalty", type=float, default=None,
                     help="DIAGNOSTIC: production sets none. Used only to test "
                          "whether a model's repetition loop is rescuable.")
+    ap.add_argument("--load-4bit", action="store_true",
+                    help="NF4 via bitsandbytes, so a model too large for 15.5GB of "
+                         "VRAM runs resident instead of offloading to CPU at ~75s a "
+                         "note. Quantisation is a confound: only compare a 4-bit run "
+                         "against another 4-bit run.")
     ap.add_argument("--signature-prompt", action="store_true",
                     help="REJECTED EXPERIMENT: send type signatures alongside "
                          "predicate names. Regressed 4/5 models; kept reproducible.")
@@ -119,11 +124,19 @@ def main():
     rows = [json.loads(l) for l in open(args.gold) if l.strip()]
 
     tok = AutoTokenizer.from_pretrained(args.model)
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model,
+    load_kwargs = dict(
         dtype=getattr(torch, args.dtype),
         device_map=args.device if args.device != "cpu" else None,
     )
+    if args.load_4bit:
+        from transformers import BitsAndBytesConfig
+        load_kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=getattr(torch, args.dtype),
+            bnb_4bit_use_double_quant=True,
+        )
+    model = AutoModelForCausalLM.from_pretrained(args.model, **load_kwargs)
     model.eval()
     if args.device == "cpu":
         model.to("cpu")
@@ -181,6 +194,7 @@ def main():
                 "completion_tokens": int(gen.shape[0]),
                 "truncated": int(gen.shape[0]) >= args.max_new_tokens,
                 "prompt_tokens": int(enc["input_ids"].shape[1]),
+                "quantization": "nf4" if args.load_4bit else args.dtype,
             }, ensure_ascii=False) + "\n")
             fh.flush()
 
