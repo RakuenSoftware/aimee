@@ -10,8 +10,8 @@
       "loads": 5
     },
     "src/cmd_memory_embed.c": {
-      "decls": 4,
-      "loads": 3
+      "decls": 1,
+      "loads": 0
     },
     "src/cmd_memory_internal.h": {
       "decls": 1,
@@ -24,10 +24,6 @@
     "src/dogfood.c": {
       "decls": 1,
       "loads": 1
-    },
-    "src/headers/agent_config.h": {
-      "decls": 2,
-      "loads": 0
     },
     "src/headers/aimee.h": {
       "decls": 2,
@@ -149,17 +145,9 @@
       "decls": 2,
       "loads": 0
     },
-    "src/modules/routing/routing.c": {
-      "decls": 2,
-      "loads": 0
-    },
     "src/modules/vault/vault_custody_tpm2.c": {
       "decls": 1,
       "loads": 1
-    },
-    "src/modules/workspace/workspace_turn.c": {
-      "decls": 4,
-      "loads": 4
     },
     "src/posix/agent_runtime.c": {
       "decls": 3,
@@ -171,10 +159,6 @@
     },
     "src/server/agent_policy.c": {
       "decls": 1,
-      "loads": 0
-    },
-    "src/server/agent_route.c": {
-      "decls": 3,
       "loads": 0
     },
     "src/server/agent_runtime.c": {
@@ -190,10 +174,6 @@
       "loads": 0
     },
     "src/server/server_api_status.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/server_compute.c": {
       "decls": 1,
       "loads": 1
     },
@@ -219,10 +199,6 @@
     },
     "src/tests/support/ir_ingress_stubs.c": {
       "decls": 2,
-      "loads": 0
-    },
-    "src/tests/test_agent_caps.c": {
-      "decls": 13,
       "loads": 0
     },
     "src/tests/test_agent_max_turns.c": {
@@ -413,10 +389,6 @@
       "decls": 1,
       "loads": 1
     },
-    "src/tests/test_server_compute.c": {
-      "decls": 2,
-      "loads": 0
-    },
     "src/tests/test_server_dispatch.c": {
       "decls": 6,
       "loads": 2
@@ -451,8 +423,8 @@
     }
   },
   "totals": {
-    "decls": 361,
-    "files": 112,
-    "loads": 201
+    "decls": 331,
+    "files": 105,
+    "loads": 193
   }
 }

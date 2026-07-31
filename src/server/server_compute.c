@@ -1021,10 +1021,10 @@ void delegate_worker(void *arg)
       }
    }
 
-   config_t route_cfg;
-   config_load(&route_cfg);
+   agent_route_policy_t policy;
+   agent_route_policy_current(&policy);
    target_agent =
-       agent_route_with_caps_scoped(&acfg, role, &route_cfg, required_caps, min_context, scope);
+       agent_route_with_caps_scoped(&acfg, role, &policy, required_caps, min_context, scope);
    if (!target_agent)
    {
       char caps_buf[128];

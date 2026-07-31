@@ -17,7 +17,21 @@ int agent_name_valid(const char *name);
 const char *agent_config_path(void);
 agent_t *agent_route(agent_config_t *cfg, const char *role);
 agent_t *agent_route_at_tier(agent_config_t *cfg, const char *role, int tier);
-agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const config_t *sys_cfg,
+/* The two system settings routing actually consults. This used to be a whole
+ * config_t threaded through for exactly these two booleans -- callers had to hold
+ * the 750 KB struct, and a reader could not tell which of its ~600 fields
+ * mattered. Populate with agent_route_policy_current(). */
+typedef struct
+{
+   int capability_routing; /* model_meta.capability_routing */
+   int prefer_local;       /* prefer_local_agents */
+} agent_route_policy_t;
+
+/* Fill from the live config. */
+void agent_route_policy_current(agent_route_policy_t *out);
+
+agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role,
+                               const agent_route_policy_t *sys_cfg,
                                unsigned required_caps, int min_context);
 
 /* Same, but for a packet of a declared SCOPE. An agent whose max_scope ceiling is
@@ -36,7 +50,7 @@ agent_t *agent_route_escalation_target(agent_config_t *cfg, const char *role, in
                                        unsigned required_caps, agent_scope_t scope);
 
 agent_t *agent_route_with_caps_scoped(agent_config_t *cfg, const char *role,
-                                      const config_t *sys_cfg, unsigned required_caps,
+                                      const agent_route_policy_t *policy, unsigned required_caps,
                                       int min_context, agent_scope_t scope);
 agent_t *agent_find(agent_config_t *cfg, const char *name);
 /* Select the default "primary" agent for ingress paths that don't name a model:

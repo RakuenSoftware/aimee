@@ -523,14 +523,17 @@ typedef struct
  * call it, and parse the synthesis response.  Returns 0 on success. */
 static int reflect_call_synthesis_agent(const char *query, const memory_t *facts, int count,
                                         int conflict_a, int conflict_b, int nconflicts,
-                                        const config_t *cfg, reflect_synthesis_result_t *out)
+                                        reflect_synthesis_result_t *out)
 {
    (void)conflict_a;
    (void)conflict_b;
    memset(out, 0, sizeof(*out));
    out->confidence = 0.0;
 
-   if (!cfg || !cfg->memory_cognify_enabled || !cfg->memory_cognify_command[0])
+   /* Copied out: handed to platform_exec_pipe well below, past other reads. */
+   char cognify_command[sizeof(((config_t *)0)->memory_cognify_command)];
+   snprintf(cognify_command, sizeof(cognify_command), "%s", config_memory_cognify_command());
+   if (!config_memory_cognify_enabled() || !cognify_command[0])
       return -1;
 
    /* Build memories array */
@@ -576,7 +579,7 @@ static int reflect_call_synthesis_agent(const char *query, const memory_t *facts
 
    char *resp = NULL;
    size_t resp_len = 0;
-   int rc = platform_exec_pipe(cfg->memory_cognify_command, input_str, strlen(input_str), &resp,
+   int rc = platform_exec_pipe(cognify_command, input_str, strlen(input_str), &resp,
                                &resp_len);
    free(input_str);
    if (rc != 0 || !resp || resp_len == 0)
@@ -704,13 +707,11 @@ void mem_reflect(app_ctx_t *ctx, int argc, char **argv)
    int have_synthesis = 0;
    if (want_synthesize)
    {
-      config_t syn_cfg;
-      if (config_load(&syn_cfg) == 0)
+      if (config_present())
       {
          int ca = nconflicts > 0 ? conflicts[0].a : -1;
          int cb = nconflicts > 0 ? conflicts[0].b : -1;
-         if (reflect_call_synthesis_agent(query, facts, count, ca, cb, nconflicts, &syn_cfg,
-                                          &synthesis) == 0)
+         if (reflect_call_synthesis_agent(query, facts, count, ca, cb, nconflicts, &synthesis) == 0)
          {
             have_synthesis = 1;
             /* If synthesis produced a rule proposal and --draft-rule was set but
@@ -1229,11 +1230,7 @@ void mem_calibrate(app_ctx_t *ctx, int argc, char **argv)
       memory_write_profile_file(write_path, &best);
       if (apply_config)
       {
-         config_t cfg;
-         if (config_load(&cfg) != 0)
-            fatal("failed to load config for apply-config");
-         snprintf(cfg.memory_weight_profile, sizeof(cfg.memory_weight_profile), "%s", write_path);
-         if (config_save(&cfg) != 0)
+         if (config_set_memory_weight_profile(write_path) != 0)
             fatal("failed to save config for apply-config");
       }
    }
@@ -1427,10 +1424,8 @@ static void mem_benchmark_resolve_weight_profile(int argc, char **argv, char *ac
          snprintf(active, active_len, "%s", env_profile);
       return;
    }
-
-   config_t cfg;
-   if (config_load(&cfg) == 0 && cfg.memory_weight_profile[0] && active && active_len > 0)
-      snprintf(active, active_len, "%s", cfg.memory_weight_profile);
+   if (config_present() && config_memory_weight_profile()[0] && active && active_len > 0)
+      snprintf(active, active_len, "%s", config_memory_weight_profile());
 }
 
 static void mem_benchmark_restore_weight_profile(const char *previous)

@@ -405,13 +405,23 @@ void agent_set_durable_job(int job_id)
 {
    (void)job_id;
 }
+/* server_compute resolves the two routing settings through this now instead of
+ * loading a config_t. Both off, matching the zeroed config_t the compute path
+ * used to build here. */
+void agent_route_policy_current(agent_route_policy_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+}
+
 agent_t *agent_route(agent_config_t *cfg, const char *role)
 {
    (void)role;
    return cfg && cfg->agent_count > 0 ? &cfg->agents[0] : NULL;
 }
-agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const config_t *sys_cfg,
-                               unsigned required_caps, int min_context)
+agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role,
+                               const agent_route_policy_t *sys_cfg, unsigned required_caps,
+                               int min_context)
 {
    (void)sys_cfg;
    (void)required_caps;
@@ -424,7 +434,7 @@ agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const conf
  * exactly the bug this replaced, and a stub that drops the parameter could not
  * catch a regression to it. */
 agent_t *agent_route_with_caps_scoped(agent_config_t *cfg, const char *role,
-                                      const config_t *sys_cfg, unsigned required_caps,
+                                      const agent_route_policy_t *sys_cfg, unsigned required_caps,
                                       int min_context, agent_scope_t scope)
 {
    agent_t *ag = agent_route_with_caps(cfg, role, sys_cfg, required_caps, min_context);

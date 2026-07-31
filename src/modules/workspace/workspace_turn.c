@@ -225,21 +225,24 @@ int workspace_turn_resolve_mirror_cwd(const char *cwd, char *out, size_t out_cap
       out[0] = '\0';
    if (!cwd || !cwd[0] || !out || out_cap == 0)
       return 0;
-
-   config_t cfg;
-   config_load(&cfg);
    for (int i = 0; i < config_workspace_count(); i++)
    {
       if (!cwd_in_workspace(cwd, config_workspaces(i)))
          continue;
-      ws_provider_kind_t kind = cfg.workspace_providers[i][0]
-                                    ? ws_provider_kind_from_string(cfg.workspace_providers[i])
+      ws_provider_kind_t kind = config_workspace_providers(i)[0]
+                                    ? ws_provider_kind_from_string(config_workspace_providers(i))
                                     : WS_PROVIDER_SHARED;
       if (kind == WS_PROVIDER_MIRROR)
       {
          ws_mirror_drift_t v;
-         return mirror_reconstruct_cwd(cwd, config_workspaces(i), cfg.workspace_vcs_remote[i],
-                                       cfg.workspace_vcs_head[i], out, out_cap, NULL, 0, &v);
+         /* Copied out of the accessor buffers: mirror_reconstruct_cwd stores root
+          * and remote in a ws_mirror_runner_ctx_t and drives a git-runner callback
+          * chain with it, so a config read anywhere under there would move them. */
+         char root[MAX_PATH_LEN], remote[512], head[64];
+         snprintf(root, sizeof(root), "%s", config_workspaces(i));
+         snprintf(remote, sizeof(remote), "%s", config_workspace_vcs_remote(i));
+         snprintf(head, sizeof(head), "%s", config_workspace_vcs_head(i));
+         return mirror_reconstruct_cwd(cwd, root, remote, head, out, out_cap, NULL, 0, &v);
       }
       return 0; /* matched, but not a mirror workspace */
    }
@@ -253,10 +256,6 @@ int workspace_turn_bind_active(const char *cwd)
    t_turn_drift[0] = '\0';
    if (!cwd || !cwd[0])
       return 0;
-
-   config_t cfg;
-   config_load(&cfg);
-
    for (int i = 0; i < config_workspace_count(); i++)
    {
       if (!cwd_in_workspace(cwd, config_workspaces(i)))
@@ -264,8 +263,8 @@ int workspace_turn_bind_active(const char *cwd)
 
       /* Matched the workspace containing this turn's cwd. Only a non-shared
        * provider changes anything; shared stays on the direct-fs path. */
-      ws_provider_kind_t kind = cfg.workspace_providers[i][0]
-                                    ? ws_provider_kind_from_string(cfg.workspace_providers[i])
+      ws_provider_kind_t kind = config_workspace_providers(i)[0]
+                                    ? ws_provider_kind_from_string(config_workspace_providers(i))
                                     : WS_PROVIDER_SHARED;
       if (kind == WS_PROVIDER_DETACHED)
       {
@@ -288,8 +287,12 @@ int workspace_turn_bind_active(const char *cwd)
       {
          /* Drive the server-side mirror lifecycle from the registry's vcs
           * coordinates, then act on the reconstructed local tree (shared fs). */
-         return bind_mirror(cwd, config_workspaces(i), cfg.workspace_vcs_remote[i],
-                            cfg.workspace_vcs_head[i]);
+         /* Same copy-out as the resolver above: these reach the git runner. */
+         char root[MAX_PATH_LEN], remote[512], head[64];
+         snprintf(root, sizeof(root), "%s", config_workspaces(i));
+         snprintf(remote, sizeof(remote), "%s", config_workspace_vcs_remote(i));
+         snprintf(head, sizeof(head), "%s", config_workspace_vcs_head(i));
+         return bind_mirror(cwd, root, remote, head);
       }
       return 0; /* matched, but shared (or no queue) — stay on shared */
    }
@@ -347,8 +350,6 @@ int workspace_turn_workspace_authorized(const char *workspace, char *out, size_t
          }
       }
    }
-   config_t cfg;
-   config_load(&cfg);
    for (int i = 0; i < config_workspace_count(); i++)
    {
       char root_real[MAX_PATH_LEN];
@@ -382,17 +383,14 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
 {
    if (!task_id || !task_id[0])
       return 0;
-
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.delegate_sandbox)
+   if (!config_delegate_sandbox())
       return 0; /* default off: the delegate keeps running in-process, as today */
 
    /* When set, sandboxing is MANDATORY: any path below that would otherwise fall back
     * to un-isolated in-process host execution instead returns -1 (hard refuse), so the
     * delegate does not run rather than run un-sandboxed. Only meaningful once we are
     * past the dial check (sandboxing was actually requested). */
-   int require_iso = cfg.delegate_sandbox_require_isolation;
+   int require_iso = config_delegate_sandbox_require_isolation();
    int fallback = require_iso ? -1 : 0;
 
    char ws_real[MAX_PATH_LEN] = "";
@@ -422,8 +420,8 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
        .hibernate_on_exit = 0,
        .workspace = ws_real[0] ? ws_real : NULL,
        .workspace_read_only = workspace_read_only,
-       .pkg_proxy = (strcmp(cfg.delegate_sandbox_package_access, "proxy") == 0),
-       .require_isolation = cfg.delegate_sandbox_require_isolation};
+       .pkg_proxy = (strcmp(config_delegate_sandbox_package_access(), "proxy") == 0),
+       .require_isolation = config_delegate_sandbox_require_isolation()};
    void *state = NULL;
    int arc = b->acquire(b, task_id, &bcfg, &state);
    if (arc == DELEGATE_ACQUIRE_REFUSED_ISOLATION)
