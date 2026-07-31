@@ -32,7 +32,7 @@ LOG="$OUT/$SLUG.server.log"
 
 if [ -s "$PRED" ]; then echo "SKIP $LABEL"; else
   echo "=== SERVE $LABEL ($REPO) dense, layer split ==="
-  $SERVER -hf "$REPO" --port "$PORT" -ngl 99 -c 4096 --no-webui >"$LOG" 2>&1 &
+  $SERVER -hf "$REPO" --port "$PORT" -c 4096 --no-webui >"$LOG" 2>&1 &
   SRV=$!
   ready=0
   for _ in $(seq 1 240); do
