@@ -5,7 +5,7 @@
     "f1": 0.0,
     "tp": 0,
     "fp": 0,
-    "fn": 71,
+    "fn": 68,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -53,7 +53,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 25
+        "fn": 22
       },
       "negation": {
         "precision": 0.0,
@@ -95,7 +95,7 @@
     "f1": 0.0,
     "tp": 0,
     "fp": 0,
-    "fn": 71,
+    "fn": 68,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -143,7 +143,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 25
+        "fn": 22
       },
       "negation": {
         "precision": 0.0,
@@ -193,7 +193,7 @@
     "f1": 0.0,
     "tp": 0,
     "fp": 0,
-    "fn": 71
+    "fn": 68
   },
   "over_extraction": {
     "empty_gold_notes": 22,
@@ -203,21 +203,21 @@
     "spurious_triples": 0
   },
   "output_health": {
-    "notes": 70,
-    "json_parse_ok": 69,
-    "json_parse_rate": 0.9857,
-    "schema_ok": 68,
-    "schema_rate": 0.9714,
+    "notes": 69,
+    "json_parse_ok": 68,
+    "json_parse_rate": 0.9855,
+    "schema_ok": 67,
+    "schema_rate": 0.971,
     "malformed_facts": 0,
-    "dropped_by_conf_floor": 73,
+    "dropped_by_conf_floor": 72,
     "predicted_triples": 0,
     "in_seed_ontology": null,
     "catch_all_relations": 0
   },
   "latency_ms": {
-    "median": 359.2,
+    "median": 359.0,
     "p90": 542.0,
-    "mean": 399.7
+    "mean": 400.0
   },
   "completion_tokens": {
     "median": 30,

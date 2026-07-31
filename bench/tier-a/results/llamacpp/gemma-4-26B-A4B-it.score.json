@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.8472,
-    "recall": 0.8592,
-    "f1": 0.8531,
-    "tp": 61,
-    "fp": 11,
-    "fn": 10,
+    "precision": 0.8986,
+    "recall": 0.9118,
+    "f1": 0.9051,
+    "tp": 62,
+    "fp": 7,
+    "fn": 6,
     "by_category": {
       "ambiguous": {
         "precision": 0.3333,
@@ -40,20 +40,20 @@
         "fn": 1
       },
       "infra": {
-        "precision": 0.8571,
-        "recall": 0.8571,
-        "f1": 0.8571,
-        "tp": 6,
-        "fp": 1,
-        "fn": 1
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "tp": 7,
+        "fp": 0,
+        "fn": 0
       },
       "multi_fact": {
-        "precision": 0.8,
-        "recall": 0.8,
-        "f1": 0.8,
+        "precision": 0.9091,
+        "recall": 0.9091,
+        "f1": 0.9091,
         "tp": 20,
-        "fp": 5,
-        "fn": 5
+        "fp": 2,
+        "fn": 2
       },
       "negation": {
         "precision": 0.6667,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.8611,
-    "recall": 0.8732,
-    "f1": 0.8671,
-    "tp": 62,
-    "fp": 10,
-    "fn": 9,
+    "precision": 0.9275,
+    "recall": 0.9412,
+    "f1": 0.9343,
+    "tp": 64,
+    "fp": 5,
+    "fn": 4,
     "by_category": {
       "ambiguous": {
         "precision": 0.3333,
@@ -114,12 +114,12 @@
         "fn": 0
       },
       "governance": {
-        "precision": 0.75,
-        "recall": 0.75,
-        "f1": 0.75,
-        "tp": 3,
-        "fp": 1,
-        "fn": 1
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "tp": 4,
+        "fp": 0,
+        "fn": 0
       },
       "implicit": {
         "precision": 0.8571,
@@ -130,20 +130,20 @@
         "fn": 1
       },
       "infra": {
-        "precision": 0.8571,
-        "recall": 0.8571,
-        "f1": 0.8571,
-        "tp": 6,
-        "fp": 1,
-        "fn": 1
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "tp": 7,
+        "fp": 0,
+        "fn": 0
       },
       "multi_fact": {
-        "precision": 0.84,
-        "recall": 0.84,
-        "f1": 0.84,
+        "precision": 0.9545,
+        "recall": 0.9545,
+        "f1": 0.9545,
         "tp": 21,
-        "fp": 4,
-        "fn": 4
+        "fp": 1,
+        "fn": 1
       },
       "negation": {
         "precision": 0.6667,
@@ -181,19 +181,19 @@
   },
   "fabrication": {
     "_note": "a triple is counted here when a subject or object cannot be traced to the source note. Gold-independent: it measures invented entities, not disagreement with my labels. The write gate cannot catch these \u2014 a well-formed triple about someone never mentioned looks valid.",
-    "predicted_triples": 72,
+    "predicted_triples": 69,
     "ungrounded_triples": 0,
     "fabrication_rate": 0.0,
     "examples": []
   },
   "relation_agnostic": {
     "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
-    "precision": 0.9028,
-    "recall": 0.9155,
-    "f1": 0.9091,
-    "tp": 65,
-    "fp": 7,
-    "fn": 6
+    "precision": 0.9275,
+    "recall": 0.9412,
+    "f1": 0.9343,
+    "tp": 64,
+    "fp": 5,
+    "fn": 4
   },
   "over_extraction": {
     "empty_gold_notes": 22,
@@ -203,25 +203,25 @@
     "spurious_triples": 3
   },
   "output_health": {
-    "notes": 70,
-    "json_parse_ok": 59,
-    "json_parse_rate": 0.8429,
-    "schema_ok": 70,
+    "notes": 69,
+    "json_parse_ok": 58,
+    "json_parse_rate": 0.8406,
+    "schema_ok": 69,
     "schema_rate": 1.0,
     "malformed_facts": 0,
     "dropped_by_conf_floor": 1,
-    "predicted_triples": 72,
-    "in_seed_ontology": 0.8611,
+    "predicted_triples": 69,
+    "in_seed_ontology": 0.8551,
     "catch_all_relations": 0
   },
   "latency_ms": {
-    "median": 3992.8,
-    "p90": 9648.6,
-    "mean": 4440.7
+    "median": 3967.8,
+    "p90": 9352.4,
+    "mean": 4324.2
   },
   "completion_tokens": {
-    "median": 26,
-    "mean": 27.5,
+    "median": 25,
+    "mean": 26.7,
     "max": 89
   },
   "model": "gemma-4-26B-A4B-it",

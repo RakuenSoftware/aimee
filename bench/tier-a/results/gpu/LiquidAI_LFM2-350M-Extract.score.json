@@ -1,11 +1,11 @@
 {
   "strict": {
     "precision": 0.0625,
-    "recall": 0.0141,
-    "f1": 0.023,
+    "recall": 0.0147,
+    "f1": 0.0238,
     "tp": 1,
     "fp": 15,
-    "fn": 70,
+    "fn": 67,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -53,7 +53,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 4,
-        "fn": 25
+        "fn": 22
       },
       "negation": {
         "precision": 0.0,
@@ -91,11 +91,11 @@
   },
   "lenient": {
     "precision": 0.0625,
-    "recall": 0.0141,
-    "f1": 0.023,
+    "recall": 0.0147,
+    "f1": 0.0238,
     "tp": 1,
     "fp": 15,
-    "fn": 70,
+    "fn": 67,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -143,7 +143,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 4,
-        "fn": 25
+        "fn": 22
       },
       "negation": {
         "precision": 0.0,
@@ -189,11 +189,11 @@
   "relation_agnostic": {
     "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
     "precision": 0.3125,
-    "recall": 0.0704,
-    "f1": 0.1149,
+    "recall": 0.0735,
+    "f1": 0.119,
     "tp": 5,
     "fp": 11,
-    "fn": 66
+    "fn": 63
   },
   "over_extraction": {
     "empty_gold_notes": 22,
@@ -203,11 +203,11 @@
     "spurious_triples": 4
   },
   "output_health": {
-    "notes": 70,
+    "notes": 69,
     "json_parse_ok": 10,
-    "json_parse_rate": 0.1429,
+    "json_parse_rate": 0.1449,
     "schema_ok": 10,
-    "schema_rate": 0.1429,
+    "schema_rate": 0.1449,
     "malformed_facts": 32,
     "dropped_by_conf_floor": 3,
     "predicted_triples": 16,
@@ -217,11 +217,11 @@
   "latency_ms": {
     "median": 3384.3,
     "p90": 4263.2,
-    "mean": 3321.5
+    "mean": 3324.9
   },
   "completion_tokens": {
     "median": 512,
-    "mean": 470.1,
+    "mean": 469.5,
     "max": 512
   },
   "model": "LiquidAI/LFM2-350M-Extract",

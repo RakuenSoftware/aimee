@@ -5,7 +5,7 @@
     "f1": 0.0,
     "tp": 0,
     "fp": 6,
-    "fn": 71,
+    "fn": 68,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -53,7 +53,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 1,
-        "fn": 25
+        "fn": 22
       },
       "negation": {
         "precision": 0.0,
@@ -95,7 +95,7 @@
     "f1": 0.0,
     "tp": 0,
     "fp": 6,
-    "fn": 71,
+    "fn": 68,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -143,7 +143,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 1,
-        "fn": 25
+        "fn": 22
       },
       "negation": {
         "precision": 0.0,
@@ -189,11 +189,11 @@
   "relation_agnostic": {
     "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
     "precision": 0.1667,
-    "recall": 0.0141,
-    "f1": 0.026,
+    "recall": 0.0147,
+    "f1": 0.027,
     "tp": 1,
     "fp": 5,
-    "fn": 70
+    "fn": 67
   },
   "over_extraction": {
     "empty_gold_notes": 22,
@@ -203,11 +203,11 @@
     "spurious_triples": 2
   },
   "output_health": {
-    "notes": 70,
+    "notes": 69,
     "json_parse_ok": 58,
-    "json_parse_rate": 0.8286,
+    "json_parse_rate": 0.8406,
     "schema_ok": 58,
-    "schema_rate": 0.8286,
+    "schema_rate": 0.8406,
     "malformed_facts": 2,
     "dropped_by_conf_floor": 53,
     "predicted_triples": 6,
@@ -217,11 +217,11 @@
   "latency_ms": {
     "median": 301.5,
     "p90": 623.1,
-    "mean": 379.7
+    "mean": 381.4
   },
   "completion_tokens": {
     "median": 22,
-    "mean": 24.2,
+    "mean": 24.3,
     "max": 57
   },
   "model": "ibm-granite/granite-4.0-350m",

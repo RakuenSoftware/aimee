@@ -5,7 +5,7 @@
     "f1": 0.0,
     "tp": 0,
     "fp": 0,
-    "fn": 71,
+    "fn": 68,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -53,7 +53,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 25
+        "fn": 22
       },
       "negation": {
         "precision": 0.0,
@@ -95,7 +95,7 @@
     "f1": 0.0,
     "tp": 0,
     "fp": 0,
-    "fn": 71,
+    "fn": 68,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -143,7 +143,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 25
+        "fn": 22
       },
       "negation": {
         "precision": 0.0,
@@ -193,7 +193,7 @@
     "f1": 0.0,
     "tp": 0,
     "fp": 0,
-    "fn": 71
+    "fn": 68
   },
   "over_extraction": {
     "empty_gold_notes": 22,
@@ -203,8 +203,8 @@
     "spurious_triples": 0
   },
   "output_health": {
-    "notes": 70,
-    "json_parse_ok": 70,
+    "notes": 69,
+    "json_parse_ok": 69,
     "json_parse_rate": 1.0,
     "schema_ok": 0,
     "schema_rate": 0.0,
@@ -215,14 +215,14 @@
     "catch_all_relations": 0
   },
   "latency_ms": {
-    "median": 273.1,
-    "p90": 369.9,
-    "mean": 291.3
+    "median": 270.8,
+    "p90": 356.0,
+    "mean": 289.1
   },
   "completion_tokens": {
     "median": 22,
-    "mean": 23.2,
-    "max": 41
+    "mean": 23.0,
+    "max": 39
   },
   "model": "unsloth/gemma-3-270m-it",
   "scored_key": "pred",

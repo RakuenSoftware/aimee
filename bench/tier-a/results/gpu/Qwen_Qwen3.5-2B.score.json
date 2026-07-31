@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.3175,
-    "recall": 0.2817,
-    "f1": 0.2985,
+    "precision": 0.3226,
+    "recall": 0.2941,
+    "f1": 0.3077,
     "tp": 20,
-    "fp": 43,
-    "fn": 51,
+    "fp": 42,
+    "fn": 48,
     "by_category": {
       "ambiguous": {
         "precision": 0.2,
@@ -48,12 +48,12 @@
         "fn": 6
       },
       "multi_fact": {
-        "precision": 0.25,
-        "recall": 0.08,
-        "f1": 0.1212,
+        "precision": 0.2857,
+        "recall": 0.0909,
+        "f1": 0.1379,
         "tp": 2,
-        "fp": 6,
-        "fn": 23
+        "fp": 5,
+        "fn": 20
       },
       "negation": {
         "precision": 0.25,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.3492,
-    "recall": 0.3099,
-    "f1": 0.3284,
+    "precision": 0.3548,
+    "recall": 0.3235,
+    "f1": 0.3385,
     "tp": 22,
-    "fp": 41,
-    "fn": 49,
+    "fp": 40,
+    "fn": 46,
     "by_category": {
       "ambiguous": {
         "precision": 0.2,
@@ -138,12 +138,12 @@
         "fn": 5
       },
       "multi_fact": {
-        "precision": 0.375,
-        "recall": 0.12,
-        "f1": 0.1818,
+        "precision": 0.4286,
+        "recall": 0.1364,
+        "f1": 0.2069,
         "tp": 3,
-        "fp": 5,
-        "fn": 22
+        "fp": 4,
+        "fn": 19
       },
       "negation": {
         "precision": 0.25,
@@ -181,19 +181,19 @@
   },
   "fabrication": {
     "_note": "a triple is counted here when a subject or object cannot be traced to the source note. Gold-independent: it measures invented entities, not disagreement with my labels. The write gate cannot catch these \u2014 a well-formed triple about someone never mentioned looks valid.",
-    "predicted_triples": 63,
+    "predicted_triples": 62,
     "ungrounded_triples": 0,
     "fabrication_rate": 0.0,
     "examples": []
   },
   "relation_agnostic": {
     "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
-    "precision": 0.4444,
-    "recall": 0.3944,
-    "f1": 0.4179,
+    "precision": 0.4516,
+    "recall": 0.4118,
+    "f1": 0.4308,
     "tp": 28,
-    "fp": 35,
-    "fn": 43
+    "fp": 34,
+    "fn": 40
   },
   "over_extraction": {
     "empty_gold_notes": 22,
@@ -203,21 +203,21 @@
     "spurious_triples": 15
   },
   "output_health": {
-    "notes": 70,
-    "json_parse_ok": 70,
+    "notes": 69,
+    "json_parse_ok": 69,
     "json_parse_rate": 1.0,
-    "schema_ok": 70,
+    "schema_ok": 69,
     "schema_rate": 1.0,
     "malformed_facts": 0,
     "dropped_by_conf_floor": 7,
-    "predicted_triples": 63,
-    "in_seed_ontology": 0.8571,
+    "predicted_triples": 62,
+    "in_seed_ontology": 0.8548,
     "catch_all_relations": 0
   },
   "latency_ms": {
     "median": 557.8,
     "p90": 840.1,
-    "mean": 621.9
+    "mean": 623.4
   },
   "completion_tokens": {
     "median": 28,

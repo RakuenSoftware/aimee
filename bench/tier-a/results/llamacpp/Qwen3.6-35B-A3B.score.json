@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.7429,
-    "recall": 0.7324,
-    "f1": 0.7376,
+    "precision": 0.7761,
+    "recall": 0.7647,
+    "f1": 0.7704,
     "tp": 52,
-    "fp": 18,
-    "fn": 19,
+    "fp": 15,
+    "fn": 16,
     "by_category": {
       "ambiguous": {
         "precision": 0.3333,
@@ -48,12 +48,12 @@
         "fn": 1
       },
       "multi_fact": {
-        "precision": 0.68,
-        "recall": 0.68,
-        "f1": 0.68,
+        "precision": 0.7727,
+        "recall": 0.7727,
+        "f1": 0.7727,
         "tp": 17,
-        "fp": 8,
-        "fn": 8
+        "fp": 5,
+        "fn": 5
       },
       "negation": {
         "precision": 1.0,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.7714,
-    "recall": 0.7606,
-    "f1": 0.766,
+    "precision": 0.806,
+    "recall": 0.7941,
+    "f1": 0.8,
     "tp": 54,
-    "fp": 16,
-    "fn": 17,
+    "fp": 13,
+    "fn": 14,
     "by_category": {
       "ambiguous": {
         "precision": 0.3333,
@@ -138,12 +138,12 @@
         "fn": 1
       },
       "multi_fact": {
-        "precision": 0.72,
-        "recall": 0.72,
-        "f1": 0.72,
+        "precision": 0.8182,
+        "recall": 0.8182,
+        "f1": 0.8182,
         "tp": 18,
-        "fp": 7,
-        "fn": 7
+        "fp": 4,
+        "fn": 4
       },
       "negation": {
         "precision": 1.0,
@@ -181,9 +181,9 @@
   },
   "fabrication": {
     "_note": "a triple is counted here when a subject or object cannot be traced to the source note. Gold-independent: it measures invented entities, not disagreement with my labels. The write gate cannot catch these \u2014 a well-formed triple about someone never mentioned looks valid.",
-    "predicted_triples": 70,
+    "predicted_triples": 67,
     "ungrounded_triples": 2,
-    "fabrication_rate": 0.0286,
+    "fabrication_rate": 0.0299,
     "examples": [
       {
         "id": "im02",
@@ -211,12 +211,12 @@
   },
   "relation_agnostic": {
     "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
-    "precision": 0.8429,
-    "recall": 0.831,
-    "f1": 0.8369,
+    "precision": 0.8806,
+    "recall": 0.8676,
+    "f1": 0.8741,
     "tp": 59,
-    "fp": 11,
-    "fn": 12
+    "fp": 8,
+    "fn": 9
   },
   "over_extraction": {
     "empty_gold_notes": 22,
@@ -226,25 +226,25 @@
     "spurious_triples": 2
   },
   "output_health": {
-    "notes": 70,
-    "json_parse_ok": 70,
+    "notes": 69,
+    "json_parse_ok": 69,
     "json_parse_rate": 1.0,
-    "schema_ok": 70,
+    "schema_ok": 69,
     "schema_rate": 1.0,
     "malformed_facts": 3,
     "dropped_by_conf_floor": 2,
-    "predicted_triples": 70,
-    "in_seed_ontology": 0.9286,
+    "predicted_triples": 67,
+    "in_seed_ontology": 0.9254,
     "catch_all_relations": 0
   },
   "latency_ms": {
-    "median": 3139.4,
-    "p90": 7701.2,
-    "mean": 3577.4
+    "median": 3138.9,
+    "p90": 7534.4,
+    "mean": 3492.8
   },
   "completion_tokens": {
     "median": 27,
-    "mean": 29.8,
+    "mean": 29.1,
     "max": 115
   },
   "model": "Qwen3.6-35B-A3B",

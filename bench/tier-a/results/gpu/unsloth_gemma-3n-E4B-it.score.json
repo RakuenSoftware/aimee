@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.5844,
-    "recall": 0.6338,
-    "f1": 0.6081,
-    "tp": 45,
-    "fp": 32,
-    "fn": 26,
+    "precision": 0.6053,
+    "recall": 0.6765,
+    "f1": 0.6389,
+    "tp": 46,
+    "fp": 30,
+    "fn": 22,
     "by_category": {
       "ambiguous": {
         "precision": 0.2,
@@ -48,12 +48,12 @@
         "fn": 2
       },
       "multi_fact": {
-        "precision": 0.6316,
-        "recall": 0.48,
-        "f1": 0.5455,
+        "precision": 0.6667,
+        "recall": 0.5455,
+        "f1": 0.6,
         "tp": 12,
-        "fp": 7,
-        "fn": 13
+        "fp": 6,
+        "fn": 10
       },
       "negation": {
         "precision": 0.3333,
@@ -72,12 +72,12 @@
         "fn": 3
       },
       "third_person": {
-        "precision": 0.8571,
-        "recall": 0.75,
-        "f1": 0.8,
-        "tp": 6,
-        "fp": 1,
-        "fn": 2
+        "precision": 1.0,
+        "recall": 0.875,
+        "f1": 0.9333,
+        "tp": 7,
+        "fp": 0,
+        "fn": 1
       },
       "transient": {
         "precision": 0.0,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.5844,
-    "recall": 0.6338,
-    "f1": 0.6081,
-    "tp": 45,
-    "fp": 32,
-    "fn": 26,
+    "precision": 0.6053,
+    "recall": 0.6765,
+    "f1": 0.6389,
+    "tp": 46,
+    "fp": 30,
+    "fn": 22,
     "by_category": {
       "ambiguous": {
         "precision": 0.2,
@@ -138,12 +138,12 @@
         "fn": 2
       },
       "multi_fact": {
-        "precision": 0.6316,
-        "recall": 0.48,
-        "f1": 0.5455,
+        "precision": 0.6667,
+        "recall": 0.5455,
+        "f1": 0.6,
         "tp": 12,
-        "fp": 7,
-        "fn": 13
+        "fp": 6,
+        "fn": 10
       },
       "negation": {
         "precision": 0.3333,
@@ -162,12 +162,12 @@
         "fn": 3
       },
       "third_person": {
-        "precision": 0.8571,
-        "recall": 0.75,
-        "f1": 0.8,
-        "tp": 6,
-        "fp": 1,
-        "fn": 2
+        "precision": 1.0,
+        "recall": 0.875,
+        "f1": 0.9333,
+        "tp": 7,
+        "fp": 0,
+        "fn": 1
       },
       "transient": {
         "precision": 0.0,
@@ -181,9 +181,9 @@
   },
   "fabrication": {
     "_note": "a triple is counted here when a subject or object cannot be traced to the source note. Gold-independent: it measures invented entities, not disagreement with my labels. The write gate cannot catch these \u2014 a well-formed triple about someone never mentioned looks valid.",
-    "predicted_triples": 77,
+    "predicted_triples": 76,
     "ungrounded_triples": 2,
-    "fabrication_rate": 0.026,
+    "fabrication_rate": 0.0263,
     "examples": [
       {
         "id": "tr11",
@@ -211,12 +211,12 @@
   },
   "relation_agnostic": {
     "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
-    "precision": 0.7143,
-    "recall": 0.7746,
-    "f1": 0.7432,
-    "tp": 55,
-    "fp": 22,
-    "fn": 16
+    "precision": 0.7368,
+    "recall": 0.8235,
+    "f1": 0.7778,
+    "tp": 56,
+    "fp": 20,
+    "fn": 12
   },
   "over_extraction": {
     "empty_gold_notes": 22,
@@ -226,25 +226,25 @@
     "spurious_triples": 17
   },
   "output_health": {
-    "notes": 70,
-    "json_parse_ok": 70,
+    "notes": 69,
+    "json_parse_ok": 69,
     "json_parse_rate": 1.0,
-    "schema_ok": 70,
+    "schema_ok": 69,
     "schema_rate": 1.0,
     "malformed_facts": 0,
     "dropped_by_conf_floor": 1,
-    "predicted_triples": 77,
-    "in_seed_ontology": 0.9091,
+    "predicted_triples": 76,
+    "in_seed_ontology": 0.9079,
     "catch_all_relations": 0
   },
   "latency_ms": {
-    "median": 1760.4,
+    "median": 1753.5,
     "p90": 3729.9,
-    "mean": 2092.3
+    "mean": 2093.4
   },
   "completion_tokens": {
     "median": 37,
-    "mean": 40.4,
+    "mean": 40.5,
     "max": 125
   },
   "model": "unsloth/gemma-3n-E4B-it",

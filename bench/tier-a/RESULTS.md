@@ -2,22 +2,22 @@
 
 | model | params | licence | F1 strict | F1 lenient | precision | recall | schema | abstain | med ms |
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|
-| google/gemma-4-E4B-it | E4B (4.5B eff) | apache-2.0 | 0.729 | 0.760 | 0.810 | 0.662 | 1.00 | 0.82 | 847.8 |
-| unsloth/gemma-3n-E4B-it | E4B | gemma | 0.608 | 0.608 | 0.584 | 0.634 | 1.00 | 0.23 | 1760.4 |
-| google/gemma-4-E2B-it | E2B (2.3B eff) | apache-2.0 | 0.599 | 0.642 | 0.621 | 0.578 | 0.99 | 0.67 | 629.8 |
-| ibm-granite/granite-4.0-1b | 1B | apache-2.0 | 0.538 | 0.552 | 0.527 | 0.549 | 0.91 | 0.18 | 530.3 |
-| ibm-granite/granite-4.1-3b | 3B | apache-2.0 | 0.515 | 0.530 | 0.557 | 0.479 | 1.00 | 0.55 | 465.5 |
-| ibm-granite/granite-4.0-h-1b | 1B | apache-2.0 | 0.429 | 0.457 | 0.435 | 0.422 | 0.97 | 0.09 | 1180.7 |
-| Qwen/Qwen3.5-0.8B | 800M | apache-2.0 | 0.377 | 0.377 | 0.571 | 0.282 | 1.00 | 0.77 | 552.3 |
-| Qwen/Qwen3-1.7B | 1.7B | apache-2.0 | 0.319 | 0.362 | 0.652 | 0.211 | 0.99 | 0.95 | 433.0 |
-| Qwen/Qwen3.5-2B | 2B | apache-2.0 | 0.298 | 0.328 | 0.318 | 0.282 | 1.00 | 0.32 | 557.8 |
-| LiquidAI/LFM2-350M-Extract | 350M | lfm1.0 | 0.023 | 0.023 | 0.062 | 0.014 | 0.14 | 0.75 | 3384.3 |
+| google/gemma-4-E4B-it | E4B (4.5B eff) | apache-2.0 | 0.715 | 0.748 | 0.800 | 0.647 | 1.00 | 0.82 | 838.7 |
+| unsloth/gemma-3n-E4B-it | E4B | gemma | 0.639 | 0.639 | 0.605 | 0.676 | 1.00 | 0.23 | 1753.5 |
+| google/gemma-4-E2B-it | E2B (2.3B eff) | apache-2.0 | 0.595 | 0.641 | 0.619 | 0.574 | 0.99 | 0.67 | 622.1 |
+| ibm-granite/granite-4.0-1b | 1B | apache-2.0 | 0.553 | 0.567 | 0.534 | 0.574 | 0.91 | 0.18 | 529.9 |
+| ibm-granite/granite-4.1-3b | 3B | apache-2.0 | 0.535 | 0.551 | 0.576 | 0.500 | 1.00 | 0.55 | 459.4 |
+| ibm-granite/granite-4.0-h-1b | 1B | apache-2.0 | 0.441 | 0.471 | 0.441 | 0.441 | 0.97 | 0.09 | 1170.7 |
+| Qwen/Qwen3.5-0.8B | 800M | apache-2.0 | 0.392 | 0.392 | 0.588 | 0.294 | 1.00 | 0.77 | 545.2 |
+| Qwen/Qwen3-1.7B | 1.7B | apache-2.0 | 0.330 | 0.374 | 0.652 | 0.221 | 0.99 | 0.95 | 428.8 |
+| Qwen/Qwen3.5-2B | 2B | apache-2.0 | 0.308 | 0.339 | 0.323 | 0.294 | 1.00 | 0.32 | 557.8 |
+| LiquidAI/LFM2-350M-Extract | 350M | lfm1.0 | 0.024 | 0.024 | 0.062 | 0.015 | 0.14 | 0.75 | 3384.3 |
 | HuggingFaceTB/SmolLM2-360M-Instruct | 360M | apache-2.0 | 0.000 | 0.000 | 0.000 | 0.000 | 0.00 | None | 259.6 |
-| LiquidAI/LFM2.5-230M | 230M | lfm1.0 | 0.000 | 0.000 | 0.000 | 0.000 | 0.66 | 1.00 | 298.1 |
-| Qwen/Qwen3-0.6B | 600M | apache-2.0 | 0.000 | 0.000 | 0.000 | 0.000 | 0.97 | 1.00 | 359.2 |
-| ibm-granite/granite-4.0-350m | 350M | apache-2.0 | 0.000 | 0.000 | 0.000 | 0.000 | 0.83 | 0.89 | 301.5 |
-| ibm-granite/granite-4.0-h-350m | 350M | apache-2.0 | 0.000 | 0.000 | 0.000 | 0.000 | 0.31 | 1.00 | 740.2 |
-| unsloth/gemma-3-270m-it | 270M | gemma | 0.000 | 0.000 | 0.000 | 0.000 | 0.00 | None | 273.1 |
+| LiquidAI/LFM2.5-230M | 230M | lfm1.0 | 0.000 | 0.000 | 0.000 | 0.000 | 0.65 | 1.00 | 274.1 |
+| Qwen/Qwen3-0.6B | 600M | apache-2.0 | 0.000 | 0.000 | 0.000 | 0.000 | 0.97 | 1.00 | 359.0 |
+| ibm-granite/granite-4.0-350m | 350M | apache-2.0 | 0.000 | 0.000 | 0.000 | 0.000 | 0.84 | 0.89 | 301.5 |
+| ibm-granite/granite-4.0-h-350m | 350M | apache-2.0 | 0.000 | 0.000 | 0.000 | 0.000 | 0.32 | 1.00 | 722.7 |
+| unsloth/gemma-3-270m-it | 270M | gemma | 0.000 | 0.000 | 0.000 | 0.000 | 0.00 | None | 270.8 |
 
 
 ## GPU accuracy — confidence-literal ablation (NOT production)

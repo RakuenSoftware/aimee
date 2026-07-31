@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.6935,
-    "recall": 0.6056,
-    "f1": 0.6466,
+    "precision": 0.7288,
+    "recall": 0.6324,
+    "f1": 0.6772,
     "tp": 43,
-    "fp": 19,
-    "fn": 28,
+    "fp": 16,
+    "fn": 25,
     "by_category": {
       "ambiguous": {
         "precision": 0.25,
@@ -48,12 +48,12 @@
         "fn": 2
       },
       "multi_fact": {
-        "precision": 0.7,
-        "recall": 0.56,
-        "f1": 0.6222,
+        "precision": 0.8235,
+        "recall": 0.6364,
+        "f1": 0.7179,
         "tp": 14,
-        "fp": 6,
-        "fn": 11
+        "fp": 3,
+        "fn": 8
       },
       "negation": {
         "precision": 0.0,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.7419,
-    "recall": 0.6479,
-    "f1": 0.6917,
+    "precision": 0.7797,
+    "recall": 0.6765,
+    "f1": 0.7244,
     "tp": 46,
-    "fp": 16,
-    "fn": 25,
+    "fp": 13,
+    "fn": 22,
     "by_category": {
       "ambiguous": {
         "precision": 0.25,
@@ -138,12 +138,12 @@
         "fn": 2
       },
       "multi_fact": {
-        "precision": 0.75,
-        "recall": 0.6,
-        "f1": 0.6667,
+        "precision": 0.8824,
+        "recall": 0.6818,
+        "f1": 0.7692,
         "tp": 15,
-        "fp": 5,
-        "fn": 10
+        "fp": 2,
+        "fn": 7
       },
       "negation": {
         "precision": 0.0,
@@ -181,19 +181,19 @@
   },
   "fabrication": {
     "_note": "a triple is counted here when a subject or object cannot be traced to the source note. Gold-independent: it measures invented entities, not disagreement with my labels. The write gate cannot catch these \u2014 a well-formed triple about someone never mentioned looks valid.",
-    "predicted_triples": 62,
+    "predicted_triples": 59,
     "ungrounded_triples": 0,
     "fabrication_rate": 0.0,
     "examples": []
   },
   "relation_agnostic": {
     "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
-    "precision": 0.8871,
-    "recall": 0.7746,
-    "f1": 0.8271,
+    "precision": 0.9322,
+    "recall": 0.8088,
+    "f1": 0.8661,
     "tp": 55,
-    "fp": 7,
-    "fn": 16
+    "fp": 4,
+    "fn": 13
   },
   "over_extraction": {
     "empty_gold_notes": 22,
@@ -203,25 +203,25 @@
     "spurious_triples": 3
   },
   "output_health": {
-    "notes": 70,
-    "json_parse_ok": 70,
+    "notes": 69,
+    "json_parse_ok": 69,
     "json_parse_rate": 1.0,
-    "schema_ok": 70,
+    "schema_ok": 69,
     "schema_rate": 1.0,
     "malformed_facts": 2,
     "dropped_by_conf_floor": 2,
-    "predicted_triples": 62,
-    "in_seed_ontology": 0.9355,
+    "predicted_triples": 59,
+    "in_seed_ontology": 0.9322,
     "catch_all_relations": 0
   },
   "latency_ms": {
-    "median": 1222.0,
-    "p90": 2487.2,
-    "mean": 1294.2
+    "median": 1215.9,
+    "p90": 2105.3,
+    "mean": 1258.7
   },
   "completion_tokens": {
-    "median": 27,
-    "mean": 26.5,
+    "median": 26,
+    "mean": 25.7,
     "max": 89
   },
   "model": "google/gemma-4-E4B-it",

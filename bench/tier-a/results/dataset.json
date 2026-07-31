@@ -20,7 +20,7 @@
         "dropped_by_conf_floor": 0,
         "median_latency_ms_gpu": 259.6,
         "median_completion_tokens": 20,
-        "notes_scored": 70,
+        "notes_scored": 69,
         "cpu_prompt_tok_s": 196.6,
         "cpu_gen_tok_s": 21.2,
         "cpu_est_ms_per_note": 4304
@@ -72,7 +72,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 25
+          "fn": 22
         },
         "negation": {
           "precision": 0.0,
@@ -117,20 +117,20 @@
         "params": "350M",
         "licence": "lfm1.0",
         "class": "reference",
-        "f1_production": 0.023,
+        "f1_production": 0.0238,
         "f1_no_floor": 0.0,
         "precision": 0.0625,
-        "recall": 0.0141,
-        "f1_strict": 0.023,
-        "schema_rate": 0.1429,
-        "json_parse_rate": 0.1429,
+        "recall": 0.0147,
+        "f1_strict": 0.0238,
+        "schema_rate": 0.1449,
+        "json_parse_rate": 0.1449,
         "in_seed_ontology": 0.375,
         "abstention_on_factless": 0.75,
         "spurious_triples": 4,
         "dropped_by_conf_floor": 3,
         "median_latency_ms_gpu": 3384.3,
         "median_completion_tokens": 512,
-        "notes_scored": 70,
+        "notes_scored": 69,
         "cpu_prompt_tok_s": 269.9,
         "cpu_gen_tok_s": 36.2,
         "cpu_est_ms_per_note": 2806
@@ -182,7 +182,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 4,
-          "fn": 25
+          "fn": 22
         },
         "negation": {
           "precision": 0.0,
@@ -337,15 +337,15 @@
         "precision": 0.0,
         "recall": 0.0,
         "f1_strict": 0.0,
-        "schema_rate": 0.6571,
-        "json_parse_rate": 0.6571,
+        "schema_rate": 0.6522,
+        "json_parse_rate": 0.6522,
         "in_seed_ontology": null,
         "abstention_on_factless": 1.0,
         "spurious_triples": 0,
-        "dropped_by_conf_floor": 12,
-        "median_latency_ms_gpu": 298.1,
-        "median_completion_tokens": 43,
-        "notes_scored": 70,
+        "dropped_by_conf_floor": 9,
+        "median_latency_ms_gpu": 274.1,
+        "median_completion_tokens": 42,
+        "notes_scored": 69,
         "cpu_prompt_tok_s": 402.0,
         "cpu_gen_tok_s": 38.8,
         "cpu_est_ms_per_note": 2233
@@ -397,7 +397,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 25
+          "fn": 22
         },
         "negation": {
           "precision": 0.0,
@@ -447,15 +447,15 @@
         "precision": 0.0,
         "recall": 0.0,
         "f1_strict": 0.0,
-        "schema_rate": 0.9714,
-        "json_parse_rate": 0.9857,
+        "schema_rate": 0.971,
+        "json_parse_rate": 0.9855,
         "in_seed_ontology": null,
         "abstention_on_factless": 1.0,
         "spurious_triples": 0,
-        "dropped_by_conf_floor": 73,
-        "median_latency_ms_gpu": 359.2,
+        "dropped_by_conf_floor": 72,
+        "median_latency_ms_gpu": 359.0,
         "median_completion_tokens": 30,
-        "notes_scored": 70,
+        "notes_scored": 69,
         "cpu_prompt_tok_s": 136.1,
         "cpu_gen_tok_s": 15.2,
         "cpu_est_ms_per_note": 6095
@@ -507,7 +507,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 25
+          "fn": 22
         },
         "negation": {
           "precision": 0.0,
@@ -657,20 +657,20 @@
         "params": "1.7B",
         "licence": "apache-2.0",
         "class": "superseded",
-        "f1_production": 0.3617,
+        "f1_production": 0.3736,
         "f1_no_floor": 0.4962,
         "precision": 0.7391,
-        "recall": 0.2394,
-        "f1_strict": 0.3191,
-        "schema_rate": 0.9857,
-        "json_parse_rate": 0.9857,
+        "recall": 0.25,
+        "f1_strict": 0.3297,
+        "schema_rate": 0.9855,
+        "json_parse_rate": 0.9855,
         "in_seed_ontology": 0.8261,
         "abstention_on_factless": 0.9524,
         "spurious_triples": 1,
-        "dropped_by_conf_floor": 46,
-        "median_latency_ms_gpu": 433.0,
+        "dropped_by_conf_floor": 44,
+        "median_latency_ms_gpu": 428.8,
         "median_completion_tokens": 33,
-        "notes_scored": 70,
+        "notes_scored": 69,
         "cpu_prompt_tok_s": 53.5,
         "cpu_gen_tok_s": 10.4,
         "cpu_est_ms_per_note": 12088
@@ -718,11 +718,11 @@
         },
         "multi_fact": {
           "precision": 1.0,
-          "recall": 0.08,
-          "f1": 0.1481,
+          "recall": 0.0909,
+          "f1": 0.1667,
           "tp": 2,
           "fp": 0,
-          "fn": 23
+          "fn": 20
         },
         "negation": {
           "precision": 0.5,
@@ -872,20 +872,20 @@
         "params": "800M",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.3774,
+        "f1_production": 0.3922,
         "f1_no_floor": 0.3556,
-        "precision": 0.5714,
-        "recall": 0.2817,
-        "f1_strict": 0.3774,
+        "precision": 0.5882,
+        "recall": 0.2941,
+        "f1_strict": 0.3922,
         "schema_rate": 1.0,
         "json_parse_rate": 1.0,
-        "in_seed_ontology": 0.8,
+        "in_seed_ontology": 0.7941,
         "abstention_on_factless": 0.7727,
         "spurious_triples": 5,
         "dropped_by_conf_floor": 36,
-        "median_latency_ms_gpu": 552.3,
+        "median_latency_ms_gpu": 545.2,
         "median_completion_tokens": 26,
-        "notes_scored": 70,
+        "notes_scored": 69,
         "cpu_prompt_tok_s": 115.2,
         "cpu_gen_tok_s": 14.7,
         "cpu_est_ms_per_note": 6747
@@ -932,12 +932,12 @@
           "fn": 4
         },
         "multi_fact": {
-          "precision": 0.8333,
-          "recall": 0.2,
-          "f1": 0.3226,
+          "precision": 1.0,
+          "recall": 0.2273,
+          "f1": 0.3704,
           "tp": 5,
-          "fp": 1,
-          "fn": 20
+          "fp": 0,
+          "fn": 17
         },
         "negation": {
           "precision": 0.0,
@@ -1087,20 +1087,20 @@
         "params": "2B",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.3284,
+        "f1_production": 0.3385,
         "f1_no_floor": 0.3284,
-        "precision": 0.3492,
-        "recall": 0.3099,
-        "f1_strict": 0.2985,
+        "precision": 0.3548,
+        "recall": 0.3235,
+        "f1_strict": 0.3077,
         "schema_rate": 1.0,
         "json_parse_rate": 1.0,
-        "in_seed_ontology": 0.8571,
+        "in_seed_ontology": 0.8548,
         "abstention_on_factless": 0.3182,
         "spurious_triples": 15,
         "dropped_by_conf_floor": 7,
         "median_latency_ms_gpu": 557.8,
         "median_completion_tokens": 28,
-        "notes_scored": 70
+        "notes_scored": 69
       },
       "by_category": {
         "ambiguous": {
@@ -1144,12 +1144,12 @@
           "fn": 5
         },
         "multi_fact": {
-          "precision": 0.375,
-          "recall": 0.12,
-          "f1": 0.1818,
+          "precision": 0.4286,
+          "recall": 0.1364,
+          "f1": 0.2069,
           "tp": 3,
-          "fp": 5,
-          "fn": 22
+          "fp": 4,
+          "fn": 19
         },
         "negation": {
           "precision": 0.25,
@@ -1299,20 +1299,20 @@
         "params": "E2B (2.3B eff)",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.6423,
+        "f1_production": 0.6412,
         "f1_no_floor": 0.5103,
         "precision": 0.6667,
-        "recall": 0.6197,
-        "f1_strict": 0.5985,
-        "schema_rate": 0.9857,
-        "json_parse_rate": 0.9714,
-        "in_seed_ontology": 0.8939,
+        "recall": 0.6176,
+        "f1_strict": 0.5954,
+        "schema_rate": 0.9855,
+        "json_parse_rate": 0.971,
+        "in_seed_ontology": 0.8889,
         "abstention_on_factless": 0.6667,
         "spurious_triples": 7,
         "dropped_by_conf_floor": 15,
-        "median_latency_ms_gpu": 629.8,
+        "median_latency_ms_gpu": 622.1,
         "median_completion_tokens": 26,
-        "notes_scored": 70,
+        "notes_scored": 69,
         "cpu_prompt_tok_s": 38.6,
         "cpu_gen_tok_s": 6.3,
         "cpu_est_ms_per_note": 17985
@@ -1359,12 +1359,12 @@
           "fn": 4
         },
         "multi_fact": {
-          "precision": 0.7619,
-          "recall": 0.64,
-          "f1": 0.6957,
-          "tp": 16,
-          "fp": 5,
-          "fn": 9
+          "precision": 0.7778,
+          "recall": 0.6364,
+          "f1": 0.7,
+          "tp": 14,
+          "fp": 4,
+          "fn": 8
         },
         "negation": {
           "precision": 0.0,
@@ -1514,20 +1514,20 @@
         "params": "E4B (4.5B eff)",
         "licence": "apache-2.0",
         "class": "incumbent",
-        "f1_production": 0.7597,
+        "f1_production": 0.748,
         "f1_no_floor": 0.6992,
-        "precision": 0.8448,
-        "recall": 0.6901,
-        "f1_strict": 0.7287,
+        "precision": 0.8364,
+        "recall": 0.6765,
+        "f1_strict": 0.7154,
         "schema_rate": 1.0,
         "json_parse_rate": 1.0,
-        "in_seed_ontology": 0.8966,
+        "in_seed_ontology": 0.8909,
         "abstention_on_factless": 0.8182,
         "spurious_triples": 4,
         "dropped_by_conf_floor": 1,
-        "median_latency_ms_gpu": 847.8,
+        "median_latency_ms_gpu": 838.7,
         "median_completion_tokens": 26,
-        "notes_scored": 70,
+        "notes_scored": 69,
         "cpu_prompt_tok_s": 19.4,
         "cpu_gen_tok_s": 3.3,
         "cpu_est_ms_per_note": 35230
@@ -1575,9 +1575,9 @@
         },
         "multi_fact": {
           "precision": 1.0,
-          "recall": 0.84,
-          "f1": 0.913,
-          "tp": 21,
+          "recall": 0.8182,
+          "f1": 0.9,
+          "tp": 18,
           "fp": 0,
           "fn": 4
         },
@@ -1729,20 +1729,20 @@
         "params": "1B",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.5517,
+        "f1_production": 0.5674,
         "f1_no_floor": 0.5429,
-        "precision": 0.5405,
-        "recall": 0.5634,
-        "f1_strict": 0.5379,
-        "schema_rate": 0.9143,
-        "json_parse_rate": 0.8857,
-        "in_seed_ontology": 0.7703,
+        "precision": 0.5479,
+        "recall": 0.5882,
+        "f1_strict": 0.5532,
+        "schema_rate": 0.913,
+        "json_parse_rate": 0.8841,
+        "in_seed_ontology": 0.7671,
         "abstention_on_factless": 0.1765,
         "spurious_triples": 14,
         "dropped_by_conf_floor": 2,
-        "median_latency_ms_gpu": 530.3,
+        "median_latency_ms_gpu": 529.9,
         "median_completion_tokens": 28,
-        "notes_scored": 70,
+        "notes_scored": 69,
         "cpu_prompt_tok_s": 50.7,
         "cpu_gen_tok_s": 8.5,
         "cpu_est_ms_per_note": 13568
@@ -1789,12 +1789,12 @@
           "fn": 3
         },
         "multi_fact": {
-          "precision": 0.6842,
-          "recall": 0.52,
-          "f1": 0.5909,
+          "precision": 0.7222,
+          "recall": 0.5909,
+          "f1": 0.65,
           "tp": 13,
-          "fp": 6,
-          "fn": 12
+          "fp": 5,
+          "fn": 9
         },
         "negation": {
           "precision": 0.1667,
@@ -1949,15 +1949,15 @@
         "precision": 0.0,
         "recall": 0.0,
         "f1_strict": 0.0,
-        "schema_rate": 0.8286,
-        "json_parse_rate": 0.8286,
+        "schema_rate": 0.8406,
+        "json_parse_rate": 0.8406,
         "in_seed_ontology": 0.0,
         "abstention_on_factless": 0.8947,
         "spurious_triples": 2,
         "dropped_by_conf_floor": 53,
         "median_latency_ms_gpu": 301.5,
         "median_completion_tokens": 22,
-        "notes_scored": 70,
+        "notes_scored": 69,
         "cpu_prompt_tok_s": 246.3,
         "cpu_gen_tok_s": 29.4,
         "cpu_est_ms_per_note": 3257
@@ -2009,7 +2009,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 1,
-          "fn": 25
+          "fn": 22
         },
         "negation": {
           "precision": 0.0,
@@ -2159,20 +2159,20 @@
         "params": "1B",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.4571,
+        "f1_production": 0.4706,
         "f1_no_floor": 0.4118,
-        "precision": 0.4638,
-        "recall": 0.4507,
-        "f1_strict": 0.4286,
-        "schema_rate": 0.9714,
-        "json_parse_rate": 0.9714,
-        "in_seed_ontology": 0.6377,
+        "precision": 0.4706,
+        "recall": 0.4706,
+        "f1_strict": 0.4412,
+        "schema_rate": 0.971,
+        "json_parse_rate": 0.971,
+        "in_seed_ontology": 0.6324,
         "abstention_on_factless": 0.0909,
         "spurious_triples": 20,
         "dropped_by_conf_floor": 3,
-        "median_latency_ms_gpu": 1180.7,
+        "median_latency_ms_gpu": 1170.7,
         "median_completion_tokens": 28,
-        "notes_scored": 70,
+        "notes_scored": 69,
         "cpu_prompt_tok_s": 56.8,
         "cpu_gen_tok_s": 8.9,
         "cpu_est_ms_per_note": 12428
@@ -2219,12 +2219,12 @@
           "fn": 4
         },
         "multi_fact": {
-          "precision": 0.4,
-          "recall": 0.16,
-          "f1": 0.2286,
+          "precision": 0.4444,
+          "recall": 0.1818,
+          "f1": 0.2581,
           "tp": 4,
-          "fp": 6,
-          "fn": 21
+          "fp": 5,
+          "fn": 18
         },
         "negation": {
           "precision": 0.25,
@@ -2379,15 +2379,15 @@
         "precision": 0.0,
         "recall": 0.0,
         "f1_strict": 0.0,
-        "schema_rate": 0.3143,
-        "json_parse_rate": 0.3143,
+        "schema_rate": 0.3188,
+        "json_parse_rate": 0.3188,
         "in_seed_ontology": 1.0,
         "abstention_on_factless": 1.0,
         "spurious_triples": 0,
         "dropped_by_conf_floor": 20,
-        "median_latency_ms_gpu": 740.2,
+        "median_latency_ms_gpu": 722.7,
         "median_completion_tokens": 26,
-        "notes_scored": 70
+        "notes_scored": 69
       },
       "by_category": {
         "ambiguous": {
@@ -2436,7 +2436,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 25
+          "fn": 22
         },
         "negation": {
           "precision": 0.0,
@@ -2481,20 +2481,20 @@
         "params": "3B",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.5303,
+        "f1_production": 0.5512,
         "f1_no_floor": 0.5797,
-        "precision": 0.5738,
-        "recall": 0.493,
-        "f1_strict": 0.5152,
+        "precision": 0.5932,
+        "recall": 0.5147,
+        "f1_strict": 0.5354,
         "schema_rate": 1.0,
         "json_parse_rate": 1.0,
-        "in_seed_ontology": 0.8525,
+        "in_seed_ontology": 0.8475,
         "abstention_on_factless": 0.5455,
         "spurious_triples": 10,
         "dropped_by_conf_floor": 13,
-        "median_latency_ms_gpu": 465.5,
+        "median_latency_ms_gpu": 459.4,
         "median_completion_tokens": 27,
-        "notes_scored": 70,
+        "notes_scored": 69,
         "cpu_prompt_tok_s": 25.1,
         "cpu_gen_tok_s": 4.2,
         "cpu_est_ms_per_note": 27346
@@ -2541,12 +2541,12 @@
           "fn": 4
         },
         "multi_fact": {
-          "precision": 0.5455,
-          "recall": 0.24,
-          "f1": 0.3333,
+          "precision": 0.6667,
+          "recall": 0.2727,
+          "f1": 0.3871,
           "tp": 6,
-          "fp": 5,
-          "fn": 19
+          "fp": 3,
+          "fn": 16
         },
         "negation": {
           "precision": 0.1667,
@@ -2707,9 +2707,9 @@
         "abstention_on_factless": null,
         "spurious_triples": 0,
         "dropped_by_conf_floor": 0,
-        "median_latency_ms_gpu": 273.1,
+        "median_latency_ms_gpu": 270.8,
         "median_completion_tokens": 22,
-        "notes_scored": 70
+        "notes_scored": 69
       },
       "by_category": {
         "ambiguous": {
@@ -2758,7 +2758,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 25
+          "fn": 22
         },
         "negation": {
           "precision": 0.0,
@@ -2908,20 +2908,20 @@
         "params": "E4B",
         "licence": "gemma",
         "class": "superseded",
-        "f1_production": 0.6081,
+        "f1_production": 0.6389,
         "f1_no_floor": 0.6197,
-        "precision": 0.5844,
-        "recall": 0.6338,
-        "f1_strict": 0.6081,
+        "precision": 0.6053,
+        "recall": 0.6765,
+        "f1_strict": 0.6389,
         "schema_rate": 1.0,
         "json_parse_rate": 1.0,
-        "in_seed_ontology": 0.9091,
+        "in_seed_ontology": 0.9079,
         "abstention_on_factless": 0.2273,
         "spurious_triples": 17,
         "dropped_by_conf_floor": 1,
-        "median_latency_ms_gpu": 1760.4,
+        "median_latency_ms_gpu": 1753.5,
         "median_completion_tokens": 37,
-        "notes_scored": 70
+        "notes_scored": 69
       },
       "by_category": {
         "ambiguous": {
@@ -2965,12 +2965,12 @@
           "fn": 2
         },
         "multi_fact": {
-          "precision": 0.6316,
-          "recall": 0.48,
-          "f1": 0.5455,
+          "precision": 0.6667,
+          "recall": 0.5455,
+          "f1": 0.6,
           "tp": 12,
-          "fp": 7,
-          "fn": 13
+          "fp": 6,
+          "fn": 10
         },
         "negation": {
           "precision": 0.3333,
@@ -2989,12 +2989,12 @@
           "fn": 3
         },
         "third_person": {
-          "precision": 0.8571,
-          "recall": 0.75,
-          "f1": 0.8,
-          "tp": 6,
-          "fp": 1,
-          "fn": 2
+          "precision": 1.0,
+          "recall": 0.875,
+          "f1": 0.9333,
+          "tp": 7,
+          "fp": 0,
+          "fn": 1
         },
         "transient": {
           "precision": 0.0,

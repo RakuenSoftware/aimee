@@ -19,6 +19,11 @@ import prompt
 
 ARTICLES = {"the", "a", "an"}
 
+# Honorifics are surface, not identity: "Dr. Okafor" and "Okafor" are one person.
+# Models drop them routinely and were charged a false positive and a false
+# negative each time.
+HONORIFICS = {"dr", "mr", "mrs", "ms", "miss", "prof", "professor", "sir", "rev"}
+
 # Models emit ages and counts as words as readily as digits ("Nina is seven").
 # The ontology stores a scalar either way, so treating them as different answers
 # measures spelling, not extraction.
@@ -69,7 +74,7 @@ def norm_entity(s):
         t = NUMBER_WORDS.get(t, t)
         if t:
             toks.append(t)
-    while toks and toks[0] in ARTICLES:
+    while toks and (toks[0] in ARTICLES or toks[0] in HONORIFICS):
         toks.pop(0)
     return " ".join(toks)
 
@@ -124,7 +129,23 @@ EQUIV_PREDICATES = [
     {"owns", "owner_of"},
     {"drives", "driver_of"},
     {"grew_up_in", "raised_in"},
+    {"located_in", "located_on", "located_at", "housed_in"},
+    {"has_hostname", "hostname_is"},
 ]
+
+# Converse predicates: same fact, endpoints swapped. The seed ontology declares
+# inverses for kinship (parent_of/child_of) but not for predicates a model
+# invents, and "X decided Y" is the converse of "Y decided_by X" whether or not
+# the ontology says so. Six models produced the converse form of gv05 and all six
+# were marked wrong for it.
+SCORING_CONVERSES = {
+    "decided": "decided_by",
+    "decided_by": "decided",
+    "supersedes": "superseded_by",
+    "superseded_by": "supersedes",
+    "employs": "works_for",
+    "works_for": "employs",
+}
 _EQUIV = {}
 for _grp in EQUIV_PREDICATES:
     for _r in _grp:
@@ -164,6 +185,8 @@ def _triple_eq_one(p, g, lenient):
     # commits (b child_of a) too, so the two forms are one fact and scoring them
     # as different answers measures direction of phrasing, not correctness.
     if (INVERSES or {}).get(g["relation"]) == p["relation"]:
+        return p["subject"] == g["object"] and obj_match(p["object"], g["subject"], lenient)
+    if SCORING_CONVERSES.get(g["relation"]) == p["relation"]:
         return p["subject"] == g["object"] and obj_match(p["object"], g["subject"], lenient)
     return False
 
@@ -332,6 +355,12 @@ def main():
 
     gold_rows = [json.loads(l) for l in open(args.gold) if l.strip()]
     pred_rows = [json.loads(l) for l in open(args.pred) if l.strip()]
+    # Items flagged excluded are defective as benchmark questions, not merely
+    # hard. Predictions for them are dropped from both numerator and denominator.
+    excluded = {r["id"] for r in gold_rows if r.get("excluded")}
+    if excluded:
+        gold_rows = [r for r in gold_rows if r["id"] not in excluded]
+        pred_rows = [r for r in pred_rows if r["id"] not in excluded]
     # An abandoned run leaves a short prediction file behind, and a partial file
     # scores as catastrophically bad rather than as missing — a 1-note remnant of
     # a killed run once surfaced as F1 0.031 for a model that actually scores

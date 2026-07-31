@@ -5,7 +5,7 @@
     "f1": 0.0,
     "tp": 0,
     "fp": 1,
-    "fn": 71,
+    "fn": 68,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -53,7 +53,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 25
+        "fn": 22
       },
       "negation": {
         "precision": 0.0,
@@ -95,7 +95,7 @@
     "f1": 0.0,
     "tp": 0,
     "fp": 1,
-    "fn": 71,
+    "fn": 68,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -143,7 +143,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 25
+        "fn": 22
       },
       "negation": {
         "precision": 0.0,
@@ -193,7 +193,7 @@
     "f1": 0.0,
     "tp": 0,
     "fp": 1,
-    "fn": 71
+    "fn": 68
   },
   "over_extraction": {
     "empty_gold_notes": 22,
@@ -203,11 +203,11 @@
     "spurious_triples": 0
   },
   "output_health": {
-    "notes": 70,
+    "notes": 69,
     "json_parse_ok": 22,
-    "json_parse_rate": 0.3143,
+    "json_parse_rate": 0.3188,
     "schema_ok": 22,
-    "schema_rate": 0.3143,
+    "schema_rate": 0.3188,
     "malformed_facts": 2,
     "dropped_by_conf_floor": 20,
     "predicted_triples": 1,
@@ -215,13 +215,13 @@
     "catch_all_relations": 0
   },
   "latency_ms": {
-    "median": 740.2,
+    "median": 722.7,
     "p90": 1118.9,
-    "mean": 786.7
+    "mean": 783.7
   },
   "completion_tokens": {
     "median": 26,
-    "mean": 27.0,
+    "mean": 27.1,
     "max": 78
   },
   "model": "ibm-granite/granite-4.0-h-350m",
