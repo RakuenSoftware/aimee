@@ -312,7 +312,7 @@ function SettingRow({
   const needsRestart = RESTART_KEYS.has(fieldKey);
   // Off-surface classification badge (deploy/advanced/dev); runtime keys carry none.
   const groupTitle: Record<string, string> = {
-    deploy: "Deploy-time: set once when standing up the aimee-llm container; not tuned day-to-day.",
+    deploy: "Deploy-time: set once when standing up the stack; not tuned day-to-day.",
     advanced: "Advanced tuning: has a sensible default; rarely changed.",
     dev: "Dev-only: internal QA/dogfood knob.",
   };
