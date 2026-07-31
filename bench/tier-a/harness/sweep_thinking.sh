@@ -7,9 +7,18 @@
 # none of which look mechanical. This runs the same models with reasoning
 # enabled, everything else identical.
 #
-# Token cap raised to 2048: the proposal's §1 records a real incident where the
-# thinking pass consumed the completion budget before the JSON, committing zero
-# facts. If that recurs here it should show as truncation, not as a mystery.
+# Token cap 8192, matching MF_LLM_OUT_CAP in src/kb/kb_memory_facts.c.
+#
+# It was 2048, on the reasoning that the proposal's §1 records an incident where
+# a thinking pass consumed the completion budget before the JSON. That was the
+# right worry and the wrong number: 2048 is a quarter of what production allows,
+# so the harness reproduced the incident instead of testing for it.
+# gemma-4-26B-A4B lost 11 of 70 notes to it and gemma-4-12B lost 8, every one
+# of them emitting nothing, while E4B and E2B lost none. That reads as
+# "thinking hurts big models" and is entirely an artefact of this constant.
+#
+# score.py now refuses to score any run containing a truncated row, so setting
+# this too low fails loudly instead of producing a plausible wrong ladder.
 set -u
 cd "$(dirname "$0")/.."
 PY=${PY:-/opt/bench/bin/python}
@@ -56,7 +65,7 @@ for entry in "${MODELS[@]}"; do
   if [ "$ready" = 1 ]; then
     if $PY harness/run_llamacpp.py --model "$LABEL" --gold data/gold.jsonl \
          --out "$PRED" --base-url "http://127.0.0.1:$PORT" \
-         --thinking --max-tokens 2048 >>"$LOG" 2>&1; then
+         --thinking --max-tokens 8192 >>"$LOG" 2>&1; then
       $PY harness/score.py --gold data/gold.jsonl --pred "$PRED" \
           --json-out "$OUT/$LABEL.score.json" >/dev/null 2>>"$LOG"
       echo "OK   $LABEL"

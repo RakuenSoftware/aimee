@@ -431,6 +431,33 @@ def main():
         raise SystemExit(
             f"incomplete predictions: {args.pred} has {len(pred_rows)} rows, "
             f"gold has {len(gold_rows)}. Re-run the model or delete the partial file.")
+    # Refuse any row the harness stopped from producing a response.
+    #
+    # This is the third place the same defect has appeared. score_b.py learned it
+    # twice: once for --max-tokens (gemma-4-12B lost 0.17 coverage to one
+    # truncated row) and once for --timeout (Qwen3.6-27B scored 0.50/0.40 on
+    # three timeouts). Tier-A never got the check, and it cost the largest wrong
+    # claim in this whole effort.
+    #
+    # sweep_thinking.sh caps completions at 2048 where production allows
+    # MF_LLM_OUT_CAP (8192). Models that reason at length blow through it and
+    # emit NOTHING: 11 of 70 notes for gemma-4-26B-A4B, 8 for gemma-4-12B, 0 for
+    # E4B and E2B. Those empty rows scored as abstentions AND as missed facts, so
+    # abstention rose 0.78 -> 0.96 and recall fell 0.94 -> 0.84, and I reported
+    # that as "thinking hurts the bigger model". It was the cap, and the cap was
+    # mine.
+    #
+    # The header of sweep_thinking.sh anticipated exactly this: "If that recurs
+    # here it should show as truncation, not as a mystery." It recorded the
+    # field. Nothing read it.
+    cut = [r["id"] for r in pred_rows if r.get("truncated")]
+    if cut:
+        raise SystemExit(
+            f"harness-blocked predictions: {args.pred} rows {cut} hit the runner's "
+            f"--max-tokens. Production allows MF_LLM_OUT_CAP (8192); re-run those "
+            f"with a cap at least that high. Scoring them charges the model for a "
+            f"bound I chose, and an empty response is indistinguishable from "
+            f"abstention once it reaches the scorer.")
     # The default scoring view is the gate the product actually applies.
     #
     # It used to be 'pred', the MF_CONF_FLOOR view, and that stayed the default

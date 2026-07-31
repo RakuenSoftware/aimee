@@ -640,3 +640,50 @@ Consequences worth holding onto:
    shown to differ from it at all.
 3. The 0.002 gap between gemma-4-12B and gemma-4-E4B, reported earlier as
    "within noise", is now quantified: it is a seventh of the noise floor.
+
+## Defect 23: the Tier-A token cap manufactured the whole shape of the ladder
+
+`sweep_thinking.sh` capped completions at 2048. Production allows
+`MF_LLM_OUT_CAP`, which is 8192. Models that reason at length blew the cap and
+emitted **nothing**:
+
+| model | truncated | empty output |
+| --- | ---: | ---: |
+| gemma-4-E2B | 0 | 0 |
+| gemma-4-E4B | 0 | 0 |
+| gemma-4-12B | 8 | 8 |
+| gemma-4-26B-A4B | 11 | 11 |
+| gemma-4-31B | 0 | 0 |
+
+The cap bites exactly the models that think longest, which on this ladder means
+the larger ones. The empty rows were then counted **twice**: as abstentions,
+inflating the abstention rate, and as missed facts, deflating recall. For
+26B-A4B that read as abstention 0.78 -> 0.96 and recall 0.94 -> 0.84, and I
+reported it as "thinking hurts the bigger model" with a mechanism invented to
+fit it.
+
+The 11 truncated notes for 26B-A4B were `ng01`-`ng05` (every negation note),
+`im04`, `im07`, `am01`, `am05`, `gv05`, `mf03`. Negation is one of the categories
+that actually separates models, so the cap removed the evidence from the place
+it mattered most.
+
+Two reported findings are retracted:
+
+1. **"12B buys 0.002 over E4B, so the curve is flat from 4.5B to 12B."** 12B was
+   scored on 62 usable notes against E4B's 70. The comparison was never valid.
+2. **"Thinking hurts gemma-4-26B-A4B."** No evidence for it. The thinking-on run
+   never produced output on 11 notes.
+
+This is the same defect as 16 and 18, in its third and fourth location.
+`score_b.py` learned it for `--max-tokens` and again for `--timeout`; `score.py`
+had no such check at all. It now refuses any run containing a truncated row.
+
+The bitter part: `sweep_thinking.sh`'s own header said "the thinking pass
+consumed the completion budget before the JSON, committing zero facts. If that
+recurs here it should show as truncation, not as a mystery." I predicted the
+failure, instrumented for it, set the constant that causes it, and then read the
+resulting numbers as model behaviour.
+
+Note for anyone re-reading the ladder: gemma-4-31B truncated 0 times even at
+2048, so it was not contaminated by this. It was discarded and re-run anyway,
+because half a ladder under one cap and half under another is not a ladder.
