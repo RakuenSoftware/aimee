@@ -373,10 +373,9 @@ void kb_reasoning_seed_ruleset(void)
 
 /* ---- kb_reasoning_case_recall ---- */
 
-int kb_reasoning_case_recall(const config_t *cfg, const char *trigger_json, const char *scope_kind,
+int kb_reasoning_case_recall(const char *trigger_json, const char *scope_kind,
                              const char *scope_id, kb_reasoning_case_result_t *out, int max_out)
 {
-   (void)cfg;
    (void)trigger_json;
    if (!out || max_out <= 0)
       return -1;

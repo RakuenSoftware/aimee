@@ -1548,9 +1548,8 @@ void cmd_launch(app_ctx_t *ctx, int argc, char **argv)
 /* --- cmd_wrapup --- */
 
 /* Clean up worktrees for a session. Warns if unpushed commits exist. */
-static void cleanup_worktrees(const session_state_t *state, const config_t *cfg, const char *sid)
+static void cleanup_worktrees(const session_state_t *state, const char *sid)
 {
-   (void)cfg;
    if (state->worktree_count == 0)
       return;
 
@@ -1573,7 +1572,7 @@ void cmd_wrapup(app_ctx_t *ctx, int argc, char **argv)
    session_state_load(&state, sid);
 
    /* Clean up worktrees */
-   cleanup_worktrees(&state, &cfg, sid);
+   cleanup_worktrees(&state, sid);
 
    /* Run eval-to-behavior feedback loop — every helper below routes
     * through aimee-kb (kb_client_*), which auto-spawns the daemon if

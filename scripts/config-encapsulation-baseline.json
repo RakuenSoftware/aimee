@@ -50,7 +50,7 @@
       "loads": 1
     },
     "src/cmd_session_lifecycle.c": {
-      "decls": 14,
+      "decls": 13,
       "loads": 4
     },
     "src/dashboard.c": {
@@ -126,7 +126,7 @@
       "loads": 1
     },
     "src/kb/kb_calibrate.c": {
-      "decls": 3,
+      "decls": 2,
       "loads": 0
     },
     "src/kb/kb_doc_pdf.c": {
@@ -149,12 +149,8 @@
       "decls": 1,
       "loads": 0
     },
-    "src/kb/kb_mining.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/kb/kb_reasoning.c": {
-      "decls": 3,
+      "decls": 2,
       "loads": 0
     },
     "src/kb/kb_reflection.c": {
@@ -190,7 +186,7 @@
       "loads": 0
     },
     "src/kb_calibrate.h": {
-      "decls": 2,
+      "decls": 1,
       "loads": 0
     },
     "src/kb_curator_provider.c": {
@@ -198,7 +194,7 @@
       "loads": 0
     },
     "src/kb_reasoning.h": {
-      "decls": 3,
+      "decls": 2,
       "loads": 0
     },
     "src/modules/benchmarks/agent_eval.c": {
@@ -799,8 +795,8 @@
     }
   },
   "totals": {
-    "decls": 710,
-    "files": 199,
-    "loads": 343
+    "decls": 704,
+    "files": 198,
+    "loads": 342
   }
 }

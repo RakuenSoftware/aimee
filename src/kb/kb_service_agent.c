@@ -505,7 +505,7 @@ int kb_handle_maintenance_calibrate_promotions(int fd, cJSON *req)
    config_t cfg;
    config_load(&cfg);
 
-   int signals = kb_calibrate_consume_drift_signals(&cfg);
+   int signals = kb_calibrate_consume_drift_signals();
    int n = kb_calibrate_run(&cfg);
 
    cJSON *resp = cJSON_CreateObject();

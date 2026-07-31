@@ -240,9 +240,8 @@ int kb_calibrate_run(const config_t *cfg)
    return written;
 }
 
-int kb_calibrate_consume_drift_signals(const config_t *cfg)
+int kb_calibrate_consume_drift_signals(void)
 {
-   (void)cfg;
    db2_artifact_proposed_t rows[32];
    int n = db2_artifact_list_proposed(NULL, 64, rows, 32);
    if (n <= 0)

@@ -23,7 +23,7 @@ extern "C"
    /* Sweep proposed drift_signal artifacts emitted by kb_detect and stamp
     * them reflected so the calibration loop knows they were acted on.
     * Returns the number of signals consumed (>= 0). */
-   int kb_calibrate_consume_drift_signals(const config_t *cfg);
+   int kb_calibrate_consume_drift_signals(void);
 
 #ifdef __cplusplus
 }

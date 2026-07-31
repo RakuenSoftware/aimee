@@ -91,7 +91,7 @@ static void test_reasoning_case_recall_disabled(void)
    config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    kb_reasoning_case_result_t results[4];
-   int rc = kb_reasoning_case_recall(&cfg, "{}", NULL, NULL, results, 4);
+   int rc = kb_reasoning_case_recall("{}", NULL, NULL, results, 4);
    /* disabled (no sidecar) or empty DB — both return >= 0 or -1 */
    assert(rc >= -1);
    close_db();
