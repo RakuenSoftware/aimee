@@ -1,0 +1,113 @@
+{
+  "model": "gemma-4-12B-it",
+  "topics": 6,
+  "format_rate": 0.8333,
+  "coverage": 0.75,
+  "faithfulness": 1.0,
+  "invented_claims": 0,
+  "checked_claims": 36,
+  "median_words": 42,
+  "median_latency_ms": 9915.2,
+  "by_category": {
+    "conflicting": {
+      "n": 1,
+      "coverage": 0.75,
+      "invented": 0
+    },
+    "distractor": {
+      "n": 1,
+      "coverage": 1.0,
+      "invented": 0
+    },
+    "factual": {
+      "n": 2,
+      "coverage": 0.5,
+      "invented": 0
+    },
+    "numeric": {
+      "n": 1,
+      "coverage": 1.0,
+      "invented": 0
+    },
+    "thin": {
+      "n": 1,
+      "coverage": 1.0,
+      "invented": 0
+    }
+  },
+  "per_topic": [
+    {
+      "id": "t01",
+      "category": "factual",
+      "format_ok": true,
+      "words": 76,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 12,
+      "invented": [],
+      "latency_ms": 9915.2
+    },
+    {
+      "id": "t02",
+      "category": "numeric",
+      "format_ok": true,
+      "words": 57,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 17,
+      "invented": [],
+      "latency_ms": 10725.7
+    },
+    {
+      "id": "t03",
+      "category": "conflicting",
+      "format_ok": true,
+      "words": 41,
+      "coverage": 0.75,
+      "missed": [
+        "location is disputed between Berlin and Munich"
+      ],
+      "checked_claims": 6,
+      "invented": [],
+      "latency_ms": 8869.9
+    },
+    {
+      "id": "t04",
+      "category": "thin",
+      "format_ok": true,
+      "words": 19,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 1,
+      "invented": [],
+      "latency_ms": 4338.3
+    },
+    {
+      "id": "t05",
+      "category": "distractor",
+      "format_ok": true,
+      "words": 42,
+      "coverage": 1.0,
+      "missed": [],
+      "checked_claims": 0,
+      "invented": [],
+      "latency_ms": 6656.7
+    },
+    {
+      "id": "t06",
+      "category": "factual",
+      "format_ok": false,
+      "words": 0,
+      "coverage": 0.0,
+      "missed": [
+        "mechanical extract/index stages",
+        "17 seed relations",
+        "one call per note",
+        "gated before commit"
+      ],
+      "checked_claims": 0,
+      "invented": [],
+      "latency_ms": 18054.7
+    }
+  ]
+}
