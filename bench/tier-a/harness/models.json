@@ -1,16 +1,21 @@
 {
-  "_comment": "Candidate set for Tier-A memory_facts extraction. 'actionable' models are MIT/Apache-2.0 and could ship in the redistributed AGPL image; 'reference' models are benchmarked only to show what the licence constraint costs. Licences recorded from the HF model card at benchmark time and re-verified by verify_licenses.py.",
+  "_comment": "Candidate set for Tier-A memory_facts extraction, refreshed 2026-07-31 against the live Hub after the first pass was built from a stale mental model. Two corrections drove the rebuild: the incumbent is Gemma 4 E4B (April 2026), not Gemma 3n E4B; and Gemma 4 shipped under Apache-2.0, so the MIT/Apache constraint no longer excludes the incumbent family. Verified by verify_licences.py.",
   "models": [
-    {"id": "ibm-granite/granite-4.0-350m",            "params": "350M", "licence": "apache-2.0", "class": "actionable", "note": "IBM Granite 4.0 Nano; tuned for tool-calling and structured JSON"},
-    {"id": "ibm-granite/granite-4.0-h-350m",          "params": "350M", "licence": "apache-2.0", "class": "actionable", "note": "hybrid-mamba variant of the above"},
-    {"id": "Qwen/Qwen3-0.6B",                         "params": "600M", "licence": "apache-2.0", "class": "actionable", "note": "thinking mode disabled to match Tier-A disable_thinking"},
-    {"id": "HuggingFaceTB/SmolLM2-360M-Instruct",     "params": "360M", "licence": "apache-2.0", "class": "actionable", "note": "smallest credible general instruct model"},
-    {"id": "Qwen/Qwen3-1.7B",                         "params": "1.7B", "licence": "apache-2.0", "class": "actionable", "note": "upper bound: what a permissive licence buys at 5x the size"},
+    {"id": "google/gemma-4-E4B-it",                   "params": "E4B (4.5B eff)", "licence": "apache-2.0", "class": "incumbent",  "note": "the model Tier-A runs today; accuracy baseline"},
 
-    {"id": "LiquidAI/LFM2-350M-Extract",              "params": "350M", "licence": "lfm1.0", "class": "reference", "note": "purpose-built extraction model; $10M revenue ceiling"},
-    {"id": "LiquidAI/LFM2.5-230M",                    "params": "230M", "licence": "lfm1.0", "class": "reference", "note": "smallest candidate benchmarked"},
-    {"id": "google/gemma-3-270m-it",                  "params": "270M", "licence": "gemma",        "class": "reference", "note": "fine-tuning substrate, evaluated zero-shot here"},
+    {"id": "google/gemma-4-E2B-it",                   "params": "E2B (2.3B eff)", "licence": "apache-2.0", "class": "actionable", "note": "smallest official Gemma 4; same family as the incumbent"},
+    {"id": "Qwen/Qwen3.5-0.8B",                       "params": "800M",           "licence": "apache-2.0", "class": "actionable", "note": "current sub-1B Qwen; Qwen3.6 ships no small variant"},
+    {"id": "Qwen/Qwen3.5-2B",                         "params": "2B",             "licence": "apache-2.0", "class": "actionable", "note": "what the next size up buys"},
+    {"id": "ibm-granite/granite-4.0-350m",            "params": "350M",           "licence": "apache-2.0", "class": "actionable", "note": "current Granite; no Granite 5 exists"},
+    {"id": "ibm-granite/granite-4.0-h-350m",          "params": "350M",           "licence": "apache-2.0", "class": "actionable", "note": "hybrid-mamba variant"},
 
-    {"id": "google/gemma-3n-E4B-it",                  "params": "E4B",  "licence": "gemma",        "class": "incumbent", "note": "the model Tier-A runs today; accuracy baseline, GPU only"}
+    {"id": "LiquidAI/LFM2.5-230M",                    "params": "230M",           "licence": "lfm1.0",     "class": "reference",  "note": "smallest candidate; $10M revenue ceiling"},
+    {"id": "LiquidAI/LFM2-350M-Extract",              "params": "350M",           "licence": "lfm1.0",     "class": "reference",  "note": "purpose-built extraction model"},
+
+    {"id": "Qwen/Qwen3-0.6B",                         "params": "600M",           "licence": "apache-2.0", "class": "superseded", "note": "prior generation; kept to measure generational delta vs Qwen3.5-0.8B"},
+    {"id": "Qwen/Qwen3-1.7B",                         "params": "1.7B",           "licence": "apache-2.0", "class": "superseded", "note": "prior generation"},
+    {"id": "unsloth/gemma-3n-E4B-it",                 "params": "E4B",            "licence": "gemma",      "class": "superseded", "note": "WRONG baseline from the first pass; kept for the record"},
+    {"id": "HuggingFaceTB/SmolLM2-360M-Instruct",     "params": "360M",           "licence": "apache-2.0", "class": "superseded", "note": "no sub-1B SmolLM3 exists; scored zero regardless"},
+    {"id": "unsloth/gemma-3-270m-it",                 "params": "270M",           "licence": "gemma",      "class": "superseded", "note": "prior generation; scored zero"}
   ]
 }
