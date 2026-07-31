@@ -1691,6 +1691,48 @@ int config_workspace_add(const char *path, const char *provider, const char *rem
    return rc;
 }
 
+/* Remove a workspace by path, closing the gap in the parallel arrays. Returns 0,
+ * -1 on save failure, -2 when the path is not registered. Counterpart to
+ * config_workspace_add: the array shuffle is config's business. */
+int config_workspace_remove(const char *path)
+{
+   if (!path || !path[0])
+      return -1;
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = -1;
+   if (config_load(cfg) == 0)
+   {
+      int found = -1;
+      for (int i = 0; i < cfg->workspace_count; i++)
+         if (strcmp(cfg->workspaces[i], path) == 0)
+         {
+            found = i;
+            break;
+         }
+      if (found < 0)
+         rc = -2;
+      else
+      {
+         for (int i = found; i < cfg->workspace_count - 1; i++)
+         {
+            snprintf(cfg->workspaces[i], sizeof(cfg->workspaces[i]), "%s", cfg->workspaces[i + 1]);
+            snprintf(cfg->workspace_providers[i], sizeof(cfg->workspace_providers[i]), "%s",
+                     cfg->workspace_providers[i + 1]);
+            snprintf(cfg->workspace_vcs_remote[i], sizeof(cfg->workspace_vcs_remote[i]), "%s",
+                     cfg->workspace_vcs_remote[i + 1]);
+            snprintf(cfg->workspace_vcs_head[i], sizeof(cfg->workspace_vcs_head[i]), "%s",
+                     cfg->workspace_vcs_head[i + 1]);
+         }
+         cfg->workspace_count--;
+         rc = config_save(cfg);
+      }
+   }
+   free(cfg);
+   return rc;
+}
+
 int config_set_concurrency(const config_t *cfg)
 {
    return config_set_section("concurrency", config_save_concurrency, cfg);

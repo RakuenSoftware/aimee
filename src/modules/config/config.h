@@ -2333,6 +2333,9 @@ int config_set_typed_facts(int enabled, int auto_promote, int promote_threshold)
  * -3 = table full. provider/remote/head may be NULL for the defaults. */
 int config_workspace_add(const char *path, const char *provider, const char *remote,
                          const char *head);
+/* Remove by path, closing the gap. 0 = removed, -1 = save failed,
+ * -2 = not registered. */
+int config_workspace_remove(const char *path);
 
 /* config_set_concurrency: surgically rewrite the `concurrency:` section of the config
  * YAML from cfg (preserving all other keys) and republish. The structured-write partner

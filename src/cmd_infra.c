@@ -1162,26 +1162,22 @@ static void repo_name_from_url(const char *url, char *out, size_t outlen)
  * Shared by both the plain-path and --repo flows. Returns project count or -1. */
 static int register_and_index(app_ctx_t *ctx, const char *abs_path)
 {
-   config_t cfg;
-   config_load(&cfg);
-
-   for (int i = 0; i < cfg.workspace_count; i++)
+   int add_rc = config_workspace_add(abs_path, NULL, NULL, NULL);
+   if (add_rc == -2)
    {
-      if (strcmp(cfg.workspaces[i], abs_path) == 0)
-      {
-         fprintf(stderr, "workspace: already registered: %s\n", abs_path);
-         return -1;
-      }
+      fprintf(stderr, "workspace: already registered: %s\n", abs_path);
+      return -1;
    }
-
-   if (cfg.workspace_count >= 64)
+   if (add_rc == -3)
    {
       fprintf(stderr, "workspace: maximum workspace count reached (64)\n");
       return -1;
    }
-
-   snprintf(cfg.workspaces[cfg.workspace_count++], MAX_PATH_LEN, "%s", abs_path);
-   config_save(&cfg);
+   if (add_rc != 0)
+   {
+      fprintf(stderr, "workspace: failed to save config\n");
+      return -1;
+   }
 
    char projects[MAX_DISCOVERED_PROJECTS][MAX_PATH_LEN];
    int count = workspace_discover_projects(abs_path, MAX_WORKSPACE_DEPTH, projects,
@@ -1402,27 +1398,17 @@ static void workspace_cmd_remove(app_ctx_t *ctx, int argc, char **argv)
    if (realpath(argv[0], abs))
       target = abs;
 
-   int found = -1;
-   for (int i = 0; i < cfg.workspace_count; i++)
-   {
-      if (strcmp(cfg.workspaces[i], target) == 0)
-      {
-         found = i;
-         break;
-      }
-   }
-
-   if (found < 0)
+   int rm_rc = config_workspace_remove(target);
+   if (rm_rc == -2)
    {
       fprintf(stderr, "workspace: not found: %s\n", argv[0]);
       return;
    }
-
-   /* Shift remaining entries down */
-   for (int i = found; i < cfg.workspace_count - 1; i++)
-      snprintf(cfg.workspaces[i], MAX_PATH_LEN, "%s", cfg.workspaces[i + 1]);
-   cfg.workspace_count--;
-   config_save(&cfg);
+   if (rm_rc != 0)
+   {
+      fprintf(stderr, "workspace: failed to save config\n");
+      return;
+   }
 
    if (ctx->json_output)
       emit_ok_ctx(ctx->json_fields, ctx->response_profile);

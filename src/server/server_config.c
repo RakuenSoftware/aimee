@@ -135,23 +135,12 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_ok(conn, resp);
    }
 
-   /* Read from DISK (not the live snapshot) for the read-modify-save so a config.set never
-    * clobbers an external edit made to the file since the last reload (live-config-reload P1b). */
-   config_t cfg;
-   if (config_load_file(&cfg) != 0)
-      return server_send_error(conn, "config: could not load configuration", NULL);
-
-   if (config_field_set_value(&cfg, f, value) != 0)
-   {
-      runtime_secret_wipe(&cfg, sizeof(cfg));
+   /* config_set patches the key in the DOCUMENT on disk (not the live snapshot),
+    * so a config.set never clobbers an external edit made to the file since the
+    * last reload (live-config-reload P1b), validates against the field
+    * descriptor, and republishes -- the three steps this did by hand. */
+   if (config_set(key, value) != 0)
       return server_send_error(conn, "config: invalid value for key", NULL);
-   }
-
-   if (config_save(&cfg) != 0)
-   {
-      runtime_secret_wipe(&cfg, sizeof(cfg));
-      return server_send_error(conn, "config: could not save configuration", NULL);
-   }
 
    /* Push the change into the live snapshot NOW so it takes effect immediately for every
     * config_load reader, instead of waiting for an mtime-cache miss (live-config-reload P1b). */
@@ -159,12 +148,11 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "key", key);
-   cJSON_AddItemToObject(resp, "value", config_field_public_value_json(&cfg, f));
+   cJSON_AddItemToObject(resp, "value", config_field_public_value_json_current(f));
    cJSON_AddBoolToObject(resp, "secret", 0);
    /* Live/Restart verdict (live-config-reload P2): tell the caller whether the change is in
     * effect now or needs a restart, instead of leaving them to guess. */
    cJSON_AddStringToObject(resp, "reload", config_field_reload_verdict(f));
    cJSON_AddBoolToObject(resp, "applied_live", f->reload_class != RELOAD_RESTART);
-   runtime_secret_wipe(&cfg, sizeof(cfg));
    return server_send_ok(conn, resp);
 }

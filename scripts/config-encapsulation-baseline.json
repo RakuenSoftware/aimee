@@ -26,8 +26,8 @@
       "loads": 2
     },
     "src/cmd_infra.c": {
-      "decls": 7,
-      "loads": 5
+      "decls": 6,
+      "loads": 4
     },
     "src/cmd_memory_embed.c": {
       "decls": 4,
@@ -410,8 +410,8 @@
       "loads": 4
     },
     "src/server/server_config.c": {
-      "decls": 3,
-      "loads": 3
+      "decls": 2,
+      "loads": 2
     },
     "src/server/server_coord_dispatcher.c": {
       "decls": 1,
@@ -743,8 +743,8 @@
     }
   },
   "totals": {
-    "decls": 658,
+    "decls": 656,
     "files": 185,
-    "loads": 322
+    "loads": 320
   }
 }
