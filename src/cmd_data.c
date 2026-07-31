@@ -389,7 +389,7 @@ static void cmd_config_show(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
    if (access(config_default_path(), F_OK) != 0)
-      config_save(&cfg); /* ensure file exists only when missing */
+      (void)config_persist_defaults(); /* ensure file exists only when missing */
 
    /* Render the shared public field surface instead of echoing the YAML file.
     * Besides producing the JSON this command promises, this makes the local

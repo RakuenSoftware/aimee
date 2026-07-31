@@ -1733,6 +1733,21 @@ int config_workspace_remove(const char *path)
    return rc;
 }
 
+/* Materialise the config file: load (defaults when absent) and write it back.
+ * Idempotent, and the one thing `aimee init` / `aimee setup` actually wanted
+ * from their load-then-save round trip. */
+int config_persist_defaults(void)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+      rc = config_save(cfg);
+   free(cfg);
+   return rc;
+}
+
 int config_set_concurrency(const config_t *cfg)
 {
    return config_set_section("concurrency", config_save_concurrency, cfg);

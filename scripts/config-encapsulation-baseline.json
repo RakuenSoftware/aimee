@@ -10,8 +10,8 @@
       "loads": 3
     },
     "src/cmd_core.c": {
-      "decls": 9,
-      "loads": 7
+      "decls": 5,
+      "loads": 5
     },
     "src/cmd_data.c": {
       "decls": 10,
@@ -743,8 +743,8 @@
     }
   },
   "totals": {
-    "decls": 656,
+    "decls": 652,
     "files": 185,
-    "loads": 320
+    "loads": 318
   }
 }

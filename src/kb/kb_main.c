@@ -494,8 +494,7 @@ static int bootstrap_db2_try_url(config_t *cfg, const char *url, int save_config
 
    if (save_config)
    {
-      snprintf(cfg->db2_url, sizeof(cfg->db2_url), "%s", url);
-      if (config_save(cfg) != 0)
+      if (config_set("db2_url", url) != 0)
       {
          /* DB2 is already proven healthy (db2_init + health probe above). The
           * config persist is only a fast-path cache for later starts — the URL

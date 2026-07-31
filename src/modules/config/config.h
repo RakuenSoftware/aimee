@@ -2337,6 +2337,10 @@ int config_workspace_add(const char *path, const char *provider, const char *rem
  * -2 = not registered. */
 int config_workspace_remove(const char *path);
 
+/* Write the config file out, materialising declared defaults when it does not
+ * exist yet. Idempotent. */
+int config_persist_defaults(void);
+
 /* config_set_concurrency: surgically rewrite the `concurrency:` section of the config
  * YAML from cfg (preserving all other keys) and republish. The structured-write partner
  * to config_set, for the concurrency limits (nested object + per-model/provider arrays). */
