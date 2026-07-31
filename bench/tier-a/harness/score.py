@@ -236,6 +236,14 @@ def main():
 
     gold_rows = [json.loads(l) for l in open(args.gold) if l.strip()]
     pred_rows = [json.loads(l) for l in open(args.pred) if l.strip()]
+    # An abandoned run leaves a short prediction file behind, and a partial file
+    # scores as catastrophically bad rather than as missing — a 1-note remnant of
+    # a killed run once surfaced as F1 0.031 for a model that actually scores
+    # 0.853. Refuse rather than report a number that looks real.
+    if len(pred_rows) != len(gold_rows):
+        raise SystemExit(
+            f"incomplete predictions: {args.pred} has {len(pred_rows)} rows, "
+            f"gold has {len(gold_rows)}. Re-run the model or delete the partial file.")
     gold = load_triples(gold_rows, "gold")
     pred = load_triples(pred_rows, args.pred_key, canonicalize=not args.no_alias)
     cat = {r["id"]: r["category"] for r in gold_rows}
