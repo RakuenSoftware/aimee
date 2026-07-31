@@ -53,6 +53,22 @@ def symmetric_relations():
     return out
 
 
+def inverse_relations():
+    """Map rel_type -> inverse_rel_type from the seed ontology (field 7).
+
+    The header calls these "auto-enforced": asserting one direction commits the
+    other, so both spellings are the same fact."""
+    src = (REPO / "src" / "rel_types.c").read_text()
+    body = src[src.index("SEED_ONTOLOGY[] = {"):]
+    out = {}
+    for m in re.finditer(
+        r'\{"([a-z_]+)",\s*\{[^}]*\},\s*\d+,\s*\{[^}]*\},\s*\d+,\s*\d+,\s*(NULL|"([a-z_]+)")',
+        body):
+        if m.group(3):
+            out[m.group(1)] = m.group(3)
+    return out
+
+
 def system_prompt():
     return TEMPLATE % ", ".join(seed_relations())
 

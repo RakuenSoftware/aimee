@@ -63,17 +63,22 @@ def obj_match(pred, gold, lenient):
 
 
 SYMMETRIC = None  # populated from the ontology in main()
+INVERSES = None
 
 
 def triple_eq(p, g, lenient):
-    if p["relation"] != g["relation"]:
+    if p["relation"] == g["relation"]:
+        if p["subject"] == g["subject"] and obj_match(p["object"], g["object"], lenient):
+            return True
+        # The ontology declares some relations symmetric ("one assertion implies
+        # both directions"), so argument order carries no information for them.
+        if g["relation"] in (SYMMETRIC or ()):
+            return p["subject"] == g["object"] and obj_match(p["object"], g["subject"], lenient)
         return False
-    if p["subject"] == g["subject"] and obj_match(p["object"], g["object"], lenient):
-        return True
-    # The ontology declares some relations symmetric ("one assertion implies both
-    # directions"), so the argument order carries no information for them and
-    # penalising a swap would measure nothing real.
-    if g["relation"] in (SYMMETRIC or ()):
+    # inverse_rel_type is documented as "auto-enforced": asserting (a parent_of b)
+    # commits (b child_of a) too, so the two forms are one fact and scoring them
+    # as different answers measures direction of phrasing, not correctness.
+    if (INVERSES or {}).get(g["relation"]) == p["relation"]:
         return p["subject"] == g["object"] and obj_match(p["object"], g["subject"], lenient)
     return False
 
@@ -146,8 +151,9 @@ def main():
     pmeta = {r["id"]: r for r in pred_rows}
 
     seed = set(prompt.seed_relations())
-    global SYMMETRIC
+    global SYMMETRIC, INVERSES
     SYMMETRIC = prompt.symmetric_relations()
+    INVERSES = prompt.inverse_relations()
 
     # Diagnostic: how much of the error is edge-labelling rather than a missed
     # fact? Scored on the lenient object rule, relation ignored.
