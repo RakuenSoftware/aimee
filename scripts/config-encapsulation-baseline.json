@@ -37,10 +37,6 @@
       "decls": 2,
       "loads": 0
     },
-    "src/headers/aux_router.h": {
-      "decls": 2,
-      "loads": 0
-    },
     "src/headers/fidelity_check.h": {
       "decls": 1,
       "loads": 0
@@ -201,10 +197,6 @@
       "decls": 1,
       "loads": 1
     },
-    "src/server/aux_router.c": {
-      "decls": 2,
-      "loads": 0
-    },
     "src/server/fidelity_check.c": {
       "decls": 1,
       "loads": 0
@@ -220,14 +212,6 @@
     "src/server/server_compute.c": {
       "decls": 1,
       "loads": 1
-    },
-    "src/server/server_cron.c": {
-      "decls": 5,
-      "loads": 3
-    },
-    "src/server/server_jobs_aux.c": {
-      "decls": 3,
-      "loads": 2
     },
     "src/server/server_mcp.c": {
       "decls": 2,
@@ -458,8 +442,8 @@
       "loads": 2
     },
     "src/tests/test_server_jobs_aux.c": {
-      "decls": 3,
-      "loads": 1
+      "decls": 1,
+      "loads": 0
     },
     "src/tests/test_token_audit_load.c": {
       "decls": 1,
@@ -487,8 +471,8 @@
     }
   },
   "totals": {
-    "decls": 412,
-    "files": 121,
-    "loads": 228
+    "decls": 398,
+    "files": 117,
+    "loads": 222
   }
 }

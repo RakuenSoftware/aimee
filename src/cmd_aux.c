@@ -21,7 +21,7 @@ static void aux_subcmd_test(app_ctx_t *ctx, int argc, char **argv)
    const char *task = argv[0];
    const char *prompt = argv[1];
    int max_tokens = (argc >= 3) ? atoi(argv[2]) : 0;
-   char *result = aux_call(ctx->cfg, task, prompt, max_tokens);
+   char *result = aux_call(task, prompt, max_tokens);
    if (!result)
    {
       fprintf(stderr, "aux_call failed for task '%s'\n", task);
@@ -38,7 +38,7 @@ static void aux_subcmd_config(app_ctx_t *ctx, int argc, char **argv)
       fprintf(stderr, "usage: aimee aux config [show]\n");
       return;
    }
-   aux_config_show(ctx->cfg);
+   aux_config_show();
 }
 
 static const subcmd_t aux_subcmds[] = {
@@ -51,7 +51,7 @@ void cmd_aux(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
    {
-      aux_config_show(ctx->cfg);
+      aux_config_show();
       return;
    }
    subcmd_dispatch(aux_subcmds, argv[0], ctx, argc - 1, argv + 1);

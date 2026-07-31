@@ -2538,6 +2538,17 @@ const char *config_embedding_command_field(void)
  * Returns 0 and fills |out| on success; -1 for a bad index or unreadable
  * config, leaving |out| untouched so a caller that ignores the return value
  * gets its own zeroed struct rather than stale data. */
+/* One aux-task route, copied out. Same rationale as config_cron_job_at: the
+ * per-member accessors suit a caller wanting one field, not one rendering the
+ * whole element. */
+int config_aux_task_at(int index, config_aux_task_t *out)
+{
+   if (!out || index < 0 || index >= CONFIG_AUX_MAX_TASKS)
+      return -1;
+   return config_field_read(offsetof(config_t, aux_tasks) + (size_t)index * sizeof(*out),
+                            sizeof(*out), out);
+}
+
 int config_cron_job_at(int index, cron_job_t *out)
 {
    if (!out || index < 0 || index >= CRON_JOBS_MAX)

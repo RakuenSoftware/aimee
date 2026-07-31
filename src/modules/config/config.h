@@ -213,6 +213,18 @@ typedef struct
    config_disposition_source_t source;
 } config_disposition_t;
 
+/* One auxiliary-model task route. Named (it was an anonymous inline struct) so a
+ * caller can be handed one element without holding a config_t -- see
+ * config_aux_task_at. */
+#define CONFIG_AUX_TASK_NAME_LEN 64
+typedef struct
+{
+   char task[CONFIG_AUX_TASK_NAME_LEN];
+   char provider[64];
+   char model[128];
+   int max_tokens;
+} config_aux_task_t;
+
 /* Trigger rule (from trigger_rules YAML list) */
 #define TRIGGER_RULE_MAX_SOURCE   64
 #define TRIGGER_RULE_MAX_EVENT    256
@@ -2005,18 +2017,11 @@ typedef struct config
     * aux_default_max_tokens: token cap for aux calls; 0 = use agent default.
     * aux_tasks: per-task provider/model/token overrides. */
 #define CONFIG_AUX_MAX_TASKS     16
-#define CONFIG_AUX_TASK_NAME_LEN 64
    int aux_enabled;
    char aux_default_provider[64];
    char aux_default_model[128];
    int aux_default_max_tokens;
-   struct
-   {
-      char task[CONFIG_AUX_TASK_NAME_LEN];
-      char provider[64];
-      char model[128];
-      int max_tokens;
-   } aux_tasks[CONFIG_AUX_MAX_TASKS];
+   config_aux_task_t aux_tasks[CONFIG_AUX_MAX_TASKS];
    int aux_task_count;
 
    /* Model metadata refresh (model_meta.*).
@@ -2445,6 +2450,9 @@ const char *config_embedding_command_field(void);
  * single member. The element types are shared domain types; config_t is not.
  * Returns 0 on success, -1 on a bad index or unreadable config. */
 int config_cron_job_at(int index, cron_job_t *out);
+
+/* One aux-task route, copied out. See config_cron_job_at. */
+int config_aux_task_at(int index, config_aux_task_t *out);
 int config_trigger_rule_at(int index, trigger_rule_t *out);
 int config_mcp_client_at(int index, config_mcp_client_t *out);
 

@@ -52,24 +52,52 @@ int server_send_error(server_conn_t *conn, const char *message, const char *requ
    return 0;
 }
 
-int config_load(config_t *cfg)
+/* The aux handlers read config through accessors now. Same values the config_load
+ * stub these replace put in the struct, so the JSON assertions are unchanged. */
+int config_present(void)
 {
-   memset(cfg, 0, sizeof(*cfg));
-   cfg->aux_enabled = 1;
-   snprintf(cfg->aux_default_provider, sizeof(cfg->aux_default_provider), "local");
-   snprintf(cfg->aux_default_model, sizeof(cfg->aux_default_model), "small");
-   cfg->aux_default_max_tokens = 128;
-   cfg->aux_task_count = 1;
-   snprintf(cfg->aux_tasks[0].task, sizeof(cfg->aux_tasks[0].task), "title");
-   snprintf(cfg->aux_tasks[0].provider, sizeof(cfg->aux_tasks[0].provider), "ollama");
-   snprintf(cfg->aux_tasks[0].model, sizeof(cfg->aux_tasks[0].model), "qwen");
-   cfg->aux_tasks[0].max_tokens = 64;
+   return 1;
+}
+
+int config_aux_enabled(void)
+{
+   return 1;
+}
+
+const char *config_aux_default_provider(void)
+{
+   return "local";
+}
+
+const char *config_aux_default_model(void)
+{
+   return "small";
+}
+
+int config_aux_default_max_tokens(void)
+{
+   return 128;
+}
+
+int config_aux_task_count(void)
+{
+   return 1;
+}
+
+int config_aux_task_at(int index, config_aux_task_t *out)
+{
+   if (!out || index != 0)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   snprintf(out->task, sizeof(out->task), "title");
+   snprintf(out->provider, sizeof(out->provider), "ollama");
+   snprintf(out->model, sizeof(out->model), "qwen");
+   out->max_tokens = 64;
    return 0;
 }
 
-char *aux_call(const config_t *cfg, const char *task_name, const char *prompt, int max_tokens)
+char *aux_call(const char *task_name, const char *prompt, int max_tokens)
 {
-   (void)cfg;
    assert(strcmp(task_name, "title") == 0);
    assert(strcmp(prompt, "summarize this") == 0);
    assert(max_tokens == 32);

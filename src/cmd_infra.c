@@ -127,7 +127,7 @@ static cJSON *git_sub_commit(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
 
       /* Try aux router first (cheap local model when configured) */
       if (ctx->cfg)
-         msg = aux_call(ctx->cfg, "commit_message", prompt, 128);
+         msg = aux_call("commit_message", prompt, 128);
 
       /* Fall back to cheapest configured agent */
       if (!msg)
