@@ -790,8 +790,10 @@ static const struct
     {"kb.build", "POST", "/v1/kb/build"},
     {"kb.docs.push", "POST", "/v1/kb/docs/push"},
     {"kb.ingest", "POST", "/v1/kb/ingest"},
+    {"kb.reembed", "POST", "/v1/kb/reembed"},
     {"kb.update", "POST", "/v1/kb/update"},
     {"memory.benchmark", "POST", "/v1/memory/benchmark"},
+    {"memory.embed", "POST", "/v1/memory/embed"},
     {"roundtable.review", "POST", "/v1/roundtable/review"},
     {"rules.generate", "POST", "/v1/rules/generate"},
 };
