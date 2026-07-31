@@ -1651,6 +1651,46 @@ int config_set_typed_facts(int enabled, int auto_promote, int promote_threshold)
    return rc;
 }
 
+/* Register a workspace. The caller supplies the data; the 64-entry cap, the
+ * duplicate check and the four parallel arrays are config's business, not a
+ * caller's. Returns 0 on success, -1 on save failure, -2 when `path` is already
+ * registered, -3 when the table is full. `provider`/`remote`/`head` may be NULL
+ * or "" for the defaults. */
+int config_workspace_add(const char *path, const char *provider, const char *remote,
+                         const char *head)
+{
+   if (!path || !path[0])
+      return -1;
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = -1;
+   if (config_load(cfg) == 0)
+   {
+      rc = 0;
+      for (int i = 0; i < cfg->workspace_count; i++)
+         if (strcmp(cfg->workspaces[i], path) == 0)
+            rc = -2;
+      int cap = (int)(sizeof(cfg->workspaces) / sizeof(cfg->workspaces[0]));
+      if (rc == 0 && cfg->workspace_count >= cap)
+         rc = -3;
+      if (rc == 0)
+      {
+         int idx = cfg->workspace_count++;
+         snprintf(cfg->workspaces[idx], sizeof(cfg->workspaces[idx]), "%s", path);
+         snprintf(cfg->workspace_providers[idx], sizeof(cfg->workspace_providers[idx]), "%s",
+                  (provider && strcmp(provider, "shared") != 0) ? provider : "");
+         snprintf(cfg->workspace_vcs_remote[idx], sizeof(cfg->workspace_vcs_remote[idx]), "%s",
+                  remote ? remote : "");
+         snprintf(cfg->workspace_vcs_head[idx], sizeof(cfg->workspace_vcs_head[idx]), "%s",
+                  head ? head : "");
+         rc = config_save(cfg);
+      }
+   }
+   free(cfg);
+   return rc;
+}
+
 int config_set_concurrency(const config_t *cfg)
 {
    return config_set_section("concurrency", config_save_concurrency, cfg);

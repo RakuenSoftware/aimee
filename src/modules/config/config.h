@@ -2323,6 +2323,12 @@ int config_set(const char *key, const char *value);
  * unchanged (promote_threshold ignores <= 0). */
 int config_set_typed_facts(int enabled, int auto_promote, int promote_threshold);
 
+/* Register a workspace. The cap, the duplicate check and the parallel arrays are
+ * config's business. 0 = added, -1 = save failed, -2 = already registered,
+ * -3 = table full. provider/remote/head may be NULL for the defaults. */
+int config_workspace_add(const char *path, const char *provider, const char *remote,
+                         const char *head);
+
 /* config_set_concurrency: surgically rewrite the `concurrency:` section of the config
  * YAML from cfg (preserving all other keys) and republish. The structured-write partner
  * to config_set, for the concurrency limits (nested object + per-model/provider arrays). */

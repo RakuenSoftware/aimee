@@ -10,6 +10,7 @@
 #include "../db1/server_sessions.h"
 #include "kb_client.h" /* kb_health_t for the stub below */
 #include "agent_config.h"
+#include "config_fields.h" /* config_field_lookup / _set_value for the config_set stub */
 #include "agent_eval.h"
 #include "hud.h"
 #include "log.h"
@@ -1272,6 +1273,24 @@ int config_reload(void)
    {
       g_config_snapshot = g_config_disk;
       g_config_reload_calls++;
+   }
+   return 0;
+}
+
+/* The provider endpoint writes through config_set now instead of mutating a
+ * config_t and calling config_save. Mirror what the real one does against this
+ * file's simulated state: patch the field on "disk" AND republish it to the
+ * snapshot, so a following config_load observes the write. */
+int config_set(const char *key, const char *value)
+{
+   const config_field_t *f = config_field_lookup(key);
+   if (!f || !value)
+      return -1;
+   if (g_config_stateful)
+   {
+      if (config_field_set_value(&g_config_disk, f, value) != 0)
+         return -1;
+      (void)config_field_set_value(&g_config_snapshot, f, value);
    }
    return 0;
 }

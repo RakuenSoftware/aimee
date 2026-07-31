@@ -441,10 +441,6 @@
       "decls": 1,
       "loads": 1
     },
-    "src/server/server_runner_endpoints.c": {
-      "decls": 3,
-      "loads": 3
-    },
     "src/server/server_skill_jobs.c": {
       "decls": 1,
       "loads": 1
@@ -468,10 +464,6 @@
     "src/server/wfe_roundtable_proxy.c": {
       "decls": 1,
       "loads": 1
-    },
-    "src/server_provider.c": {
-      "decls": 3,
-      "loads": 3
     },
     "src/tests/fuzz_corpus/seed.c": {
       "decls": 4,
@@ -751,8 +743,8 @@
     }
   },
   "totals": {
-    "decls": 664,
-    "files": 187,
-    "loads": 328
+    "decls": 658,
+    "files": 185,
+    "loads": 322
   }
 }
