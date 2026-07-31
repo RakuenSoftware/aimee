@@ -349,7 +349,7 @@ static cJSON *kb_service_health_object(void)
     * (nothing configured) still reports false, as before. */
    config_t cfg;
    config_load(&cfg);
-   const char *embed_cmd = config_embedding_command(&cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
    int embed_ok = (embed_cmd[0] && strcmp(embed_cmd, "builtin") != 0) ? 1 : 0;
    cJSON_AddBoolToObject(resp, "embed_ok", embed_ok);
    cJSON_AddStringToObject(resp, "embed_command", embed_cmd);

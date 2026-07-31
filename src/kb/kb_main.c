@@ -1808,7 +1808,7 @@ int main(int argc, char **argv)
     * command is configured (the lexical "builtin" has no /health and a fixed dim,
     * so probing it would never succeed and would stall the retry loop). */
    {
-      const char *embed_cmd = config_embedding_command(&kb_cfg, NULL);
+      const char *embed_cmd = config_embedding_command_current(NULL);
       if (embed_cmd && strcmp(embed_cmd, "builtin") != 0)
          embedder_probe_register(embed_cmd);
    }

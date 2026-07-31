@@ -210,9 +210,6 @@ int handle_pipeline_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!idea || !idea[0])
       return server_send_error(conn, "usage: aimee pipeline start <idea>", NULL);
 
-   if (!config_is_loadable())
-      return server_send_error(conn, "pipeline: could not load configuration", NULL);
-
    /* v1 admission control: at most one active pipeline (section 1). Parked gates
     * may release the slot per roundtable.pipeline_parked_releases_slot. */
    int active = rtp_run_count_active();
@@ -1530,9 +1527,6 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
              NULL);
       rtp_run_get(id, &run);
    }
-
-   if (!config_is_loadable())
-      return server_send_error(conn, "pipeline: could not load configuration", NULL);
 
    const char *phase = phase_for_state(run.state);
    const char *artifact = jo_str(req, "artifact", NULL);

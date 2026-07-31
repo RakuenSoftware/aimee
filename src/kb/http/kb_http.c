@@ -1200,7 +1200,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       {
          config_t scfg;
          if (config_load(&scfg) == 0)
-            snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command(&scfg, NULL));
+            snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command_current(NULL));
       }
       char *raw =
           kb_search_json_scoped_ex(project, all_projects, query, embed_cmd[0] ? embed_cmd : NULL,
@@ -1552,9 +1552,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       (void)kb_http_json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
       {
-         config_t embed_cfg;
-         config_load(&embed_cfg);
-         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command(&embed_cfg, NULL));
+         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command_current(NULL));
       }
       int force = kb_http_json_bool(body, "force", 0);
 
@@ -1643,9 +1641,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       (void)kb_http_json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
       {
-         config_t embed_cfg;
-         config_load(&embed_cfg);
-         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command(&embed_cfg, NULL));
+         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command_current(NULL));
       }
 
       if (!db2_is_initialized())
@@ -1892,9 +1888,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       (void)kb_http_json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
       {
-         config_t embed_cfg;
-         config_load(&embed_cfg);
-         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command(&embed_cfg, NULL));
+         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command_current(NULL));
       }
       int timeout = kb_http_json_int(body, "timeout", 0);
       if (timeout < 0)
@@ -1940,9 +1934,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       (void)kb_http_json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
       {
-         config_t embed_cfg;
-         config_load(&embed_cfg);
-         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command(&embed_cfg, NULL));
+         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command_current(NULL));
       }
       int kb_embed_dim = db2_embedding_dim();
       if (kb_embed_dim <= 0 || kb_embed_dim > EMBED_MAX_DIM)

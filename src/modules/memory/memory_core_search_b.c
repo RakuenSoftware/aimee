@@ -1178,9 +1178,7 @@ static int memory_collect_code_matches(const char *query, int fetch_limit, memor
    if (!scratch)
       return count;
    int cap = 64;
-   config_t code_cfg;
-   config_load(&code_cfg);
-   const char *embed_cmd = config_embedding_command(&code_cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
    int got = memory_collect_memory_matches_via_vector(query, embed_cmd, fetch_limit, scratch, cap);
    for (int i = 0; i < got && count < max; i++)
       count = memory_append_unique(out, count, max, &scratch[i]);

@@ -1164,9 +1164,7 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
    if (count > max)
       count = max;
 
-   config_t embed_cfg;
-   config_load(&embed_cfg);
-   const char *embed_cmd = config_embedding_command(&embed_cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
    int64_t semantic_ids[128];
    double semantic_scores[128];
    int semantic_hit_count = 0;
@@ -1229,9 +1227,7 @@ int memory_explain_match(const char *query, int64_t memory_id, memory_diagnostic
    if (memory_get(memory_id, &mem) != 0)
       return -1;
 
-   config_t embed_cfg;
-   config_load(&embed_cfg);
-   const char *embed_cmd = config_embedding_command(&embed_cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
    int64_t semantic_ids[128];
    double semantic_scores[128];
    int semantic_hit_count = 0;

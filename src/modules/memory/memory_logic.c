@@ -68,8 +68,6 @@ int memory_promote(void)
    int nkinds = db2_memory_promotion_list_kinds_in_tier("L1", kinds,
                                                         (int)(sizeof(kinds) / sizeof(kinds[0])));
 
-   config_t cfg;
-   config_load(&cfg);
 
    int total = 0;
    for (int i = 0; i < nkinds; i++)
@@ -81,20 +79,20 @@ int memory_promote(void)
       double calibrated_threshold = lc.promote_confidence;
       int has_calibration = 0;
 
-      if (cfg.calibration_enabled >= 2)
+      if (config_calibration_enabled() >= 2)
       {
          char cal_buf[4096];
          if (db2_calibration_profile_read("memory", kinds[i].kind, "global", "", cal_buf,
                                           sizeof(cal_buf)) == 0)
          {
-            double target = cfg.calibration_tau_memory_auto > 0.0 ? cfg.calibration_tau_memory_auto
+            double target = config_calibration_tau_memory_auto() > 0.0 ? config_calibration_tau_memory_auto()
                                                                   : lc.promote_confidence;
             has_calibration = db2_calibration_threshold_from_profile_json(
                                   cal_buf, target, &calibrated_threshold) == 0;
          }
       }
 
-      if (has_calibration && cfg.calibration_enabled == 2)
+      if (has_calibration && config_calibration_enabled() == 2)
       {
          int calibrated_changed = db2_memory_promotion_promote_kind_slot(
              ts, kinds[i].kind, lc.promote_use_count, calibrated_threshold, 5, 0, 1);
@@ -108,7 +106,7 @@ int memory_promote(void)
          continue;
       }
 
-      if (has_calibration && cfg.calibration_enabled >= 3)
+      if (has_calibration && config_calibration_enabled() >= 3)
       {
          promote_threshold = calibrated_threshold;
          aimee_log(LOG_INFO, "memory_promote",
@@ -416,10 +414,8 @@ void embed_unembedded_l2(void)
 #if defined(AIMEE_DB2_DISABLED)
    return;
 #else
-   config_t cfg;
-   config_load(&cfg);
-   const char *embed_command = config_embedding_command(&cfg, NULL);
-   const char *embed_ver = cfg.embedding_model[0] ? cfg.embedding_model : embed_command;
+   const char *embed_command = config_embedding_command_current(NULL);
+   const char *embed_ver = config_embedding_model()[0] ? config_embedding_model() : embed_command;
 
    int64_t ids[50];
    int count =

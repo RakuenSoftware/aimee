@@ -458,7 +458,7 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
          {
             config_t embed_cfg;
             config_load(&embed_cfg);
-            platform_memory_background_embed(dup_id, config_embedding_command(&embed_cfg, NULL));
+            platform_memory_background_embed(dup_id, config_embedding_command_current(NULL));
          }
 
          if (out)
@@ -494,7 +494,7 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
       {
          config_t embed_cfg;
          config_load(&embed_cfg);
-         platform_memory_background_embed(new_id, config_embedding_command(&embed_cfg, NULL));
+         platform_memory_background_embed(new_id, config_embedding_command_current(NULL));
       }
 
       if (out)

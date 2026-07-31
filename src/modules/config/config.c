@@ -358,7 +358,26 @@ static int config_has_explicit_database_override(const cJSON *root)
    return 0;
 }
 
-/* Strict mode: errors instead of warnings, exit non-zero on validation failure */
+/* Strict mode: errors instead of warnings, exit non-zero on validation failure.
+ *
+ * OPT-IN, and deliberately so. Nothing in the shipping binaries sets it, which
+ * means config_load never returns non-zero in production: config_load_file only
+ * fails when `issues > 0 && g_config_strict`. Every `if (config_load(&cfg) != 0)`
+ * in the tree is therefore unreachable today, including server_main's own
+ * "server startup rejected invalid configuration".
+ *
+ * Turning it on by default was tried and reverted -- it is not a free tightening.
+ * Strict treats an UNKNOWN key as an error, but aimee deliberately tolerates and
+ * PRESERVES keys it does not recognise: config_set patches the YAML in place so
+ * an operator's own annotations survive a write (test_config_set.c pins
+ * "custom_note: keep-me"). Defaulting strict on makes aimee refuse to load a
+ * config it just preserved, and test_config.c:963 pins the opposite contract --
+ * that strict DOES reject unknown keys. Both hold only while strict is opt-in.
+ *
+ * Making runtime validation fatal is a product decision, not a refactor: it needs
+ * a split between "unknown key" (tolerate, for forward-compat and annotations)
+ * and "known key, wrong shape" (refuse to start). See the config-t-encapsulation
+ * proposal for the write-up. */
 int g_config_strict;
 
 static const config_schema_entry_t config_schema[] = {
@@ -435,6 +454,22 @@ static const config_schema_entry_t config_schema[] = {
     {"learning", SCHEMA_OBJECT, 0},
     {"intelligence", SCHEMA_OBJECT, 0},
     {"kb", SCHEMA_OBJECT, 0},
+    /* Both of these are REAL, parsed keys that were missing from this allowlist,
+     * so an operator config containing either drew "unknown key". That was a
+     * warning while strict mode was off; with strict on it is fatal, and
+     * worktree_gc is the worse of the two -- config_save WRITES it
+     * (config_save.c:610), so aimee emitted a config it would then refuse to
+     * load. Parsed at config_sections.c:147 and :808 respectively. */
+    {"worktree_gc", SCHEMA_OBJECT, 0},
+    {"autonomy", SCHEMA_OBJECT, 0},
+    {"context", SCHEMA_OBJECT, 0},
+    {"routing", SCHEMA_OBJECT, 0},
+    {"telemetry", SCHEMA_OBJECT, 0},
+    {"memory_window", SCHEMA_OBJECT, 0},
+    {"memory_rewrite", SCHEMA_OBJECT, 0},
+    {"memory_negation", SCHEMA_OBJECT, 0},
+    {"delegate_max_inflight", SCHEMA_INT, 0},
+    {"cross_verify", SCHEMA_BOOL_OR_OBJECT, 0},
     {"charter", SCHEMA_OBJECT, 0},
     {"identity", SCHEMA_OBJECT, 0},
     {"skills", SCHEMA_OBJECT, 0},
@@ -489,6 +524,8 @@ static const char *schema_type_name(schema_type_t t)
       return "array";
    case SCHEMA_OBJECT:
       return "object";
+   case SCHEMA_BOOL_OR_OBJECT:
+      return "boolean or object";
    }
    return "unknown";
 }
@@ -507,6 +544,8 @@ static int schema_type_matches(schema_type_t expected, const cJSON *item)
       return cJSON_IsArray(item);
    case SCHEMA_OBJECT:
       return cJSON_IsObject(item);
+   case SCHEMA_BOOL_OR_OBJECT:
+      return cJSON_IsBool(item) || cJSON_IsObject(item);
    }
    return 0;
 }
@@ -2036,22 +2075,6 @@ static int config_snapshot_read_field(size_t offset, size_t size, void *dst)
  * heap-loaded config so accessors work everywhere config_load worked. Heap, not
  * stack — a 750 KB frame is what overflowed the stack in the memory-search
  * path. Fails closed by leaving |dst| as the caller zeroed it. */
-/* Does the on-disk config load and validate? Reported WITHOUT handing the caller
- * a config_t, for the callers that must fail fast on a broken config before a
- * mutating operation rather than silently proceeding on defaults. Accessors
- * deliberately return declared defaults on a failed load — that is the honest
- * answer for one field, but it is the wrong answer for "should I start at all".
- * Heap, not stack: config_t is ~750 KB. */
-int config_is_loadable(void)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return 0;
-   int rc = config_load(cfg);
-   free(cfg);
-   return rc == 0;
-}
-
 int config_field_read(size_t offset, size_t size, void *dst)
 {
    if (config_snapshot_read_field(offset, size, dst) == 0)

@@ -2113,7 +2113,13 @@ typedef enum
    SCHEMA_INT,
    SCHEMA_BOOL,
    SCHEMA_ARRAY,
-   SCHEMA_OBJECT
+   SCHEMA_OBJECT,
+   /* A key kept in two shapes for backward compatibility: the current scalar
+    * form and a legacy object form the parser still honours. `cross_verify` is
+    * one — flat bool now, `{enabled, verify_cmd, role, prompt}` before — and
+    * test_config_cross_verify pins that the old form must keep working. A single
+    * declared type would make one of the two shapes a validation error. */
+   SCHEMA_BOOL_OR_OBJECT
 } schema_type_t;
 
 typedef struct
@@ -2162,10 +2168,6 @@ int config_server_api_bearer_extra_snapshot(char out[][256], int max);
 void config_snapshot_init(const config_t *cfg);
 int config_snapshot_get(config_t *out);
 
-/* Does the on-disk config load and validate? For callers that must fail fast on a
- * broken config before a mutating operation. Accessors return declared defaults on
- * a failed load, which is right for a single field and wrong for "start at all". */
-int config_is_loadable(void);
 int config_reload(void);
 
 /* config_reload_if_changed — reload iff the config file changed on disk since the last call

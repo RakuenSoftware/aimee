@@ -860,9 +860,7 @@ void memory_refresh_unit_embeddings(int64_t memory_id)
 {
    if (memory_id <= 0)
       return;
-   config_t cfg;
-   config_load(&cfg);
-   const char *embed_command = config_embedding_command(&cfg, NULL);
+   const char *embed_command = config_embedding_command_current(NULL);
 
    db2_memory_unit_row_t units[64];
    int unit_max = (int)(sizeof(units) / sizeof(units[0]));

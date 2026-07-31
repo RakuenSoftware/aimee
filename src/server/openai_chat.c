@@ -471,7 +471,7 @@ static int embeddings_handler(const char *body, char *resp, int cap)
    config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    config_load(&cfg);
-   const char *cmd = config_embedding_command(&cfg, NULL);
+   const char *cmd = config_embedding_command_current(NULL);
 
    float **vecs = calloc((size_t)n, sizeof(float *));
    int *dims = calloc((size_t)n, sizeof(int));

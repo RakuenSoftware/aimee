@@ -114,8 +114,8 @@
       "loads": 1
     },
     "src/kb/http/kb_http.c": {
-      "decls": 6,
-      "loads": 6
+      "decls": 2,
+      "loads": 2
     },
     "src/kb/http/kb_http_code.c": {
       "decls": 4,
@@ -193,10 +193,6 @@
       "decls": 1,
       "loads": 1
     },
-    "src/kb/kb_service_code_embed.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/kb/kb_service_kb.c": {
       "decls": 5,
       "loads": 3
@@ -242,8 +238,8 @@
       "loads": 1
     },
     "src/modules/benchmarks/agent_eval_memory_support.c": {
-      "decls": 2,
-      "loads": 2
+      "decls": 1,
+      "loads": 1
     },
     "src/modules/css/css_render_cmd.c": {
       "decls": 2,
@@ -301,18 +297,6 @@
       "decls": 1,
       "loads": 1
     },
-    "src/modules/kb-synthesis/kb_curator_index_claims.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/kb-synthesis/kb_curator_index_code_unit.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/modules/kb-synthesis/kb_curator_index_narrative.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/modules/kb-synthesis/kb_curator_judge.c": {
       "decls": 1,
       "loads": 0
@@ -320,10 +304,6 @@
     "src/modules/kb-synthesis/kb_curator_judge.h": {
       "decls": 1,
       "loads": 0
-    },
-    "src/modules/kb-synthesis/kb_curator_link_artifacts.c": {
-      "decls": 1,
-      "loads": 1
     },
     "src/modules/kb-synthesis/kb_curator_llm.c": {
       "decls": 1,
@@ -369,25 +349,17 @@
       "decls": 3,
       "loads": 3
     },
-    "src/modules/memory/memory_core_helpers_b.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/modules/memory/memory_core_internal.h": {
       "decls": 2,
       "loads": 1
     },
     "src/modules/memory/memory_core_search_b.c": {
-      "decls": 2,
-      "loads": 1
+      "decls": 1,
+      "loads": 0
     },
     "src/modules/memory/memory_core_search_c.c": {
-      "decls": 6,
-      "loads": 2
-    },
-    "src/modules/memory/memory_logic.c": {
-      "decls": 2,
-      "loads": 2
+      "decls": 4,
+      "loads": 0
     },
     "src/modules/memory/memory_rewrite_llm.h": {
       "decls": 1,
@@ -875,8 +847,8 @@
     }
   },
   "totals": {
-    "decls": 764,
-    "files": 218,
-    "loads": 397
+    "decls": 748,
+    "files": 211,
+    "loads": 381
   }
 }

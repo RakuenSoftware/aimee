@@ -1335,6 +1335,13 @@ const char *config_embedding_command(const config_t *cfg, const char *requested)
    return "builtin";
 }
 
+/* The config_t-free form callers use now. Same resolution order, minus the
+ * struct the caller no longer holds: request > env > builtin. */
+const char *config_embedding_command_current(const char *requested)
+{
+   return config_embedding_command(NULL, requested);
+}
+
 int db2_calibration_surfaces_with_data(int min_rows)
 {
    assert(min_rows == 200);

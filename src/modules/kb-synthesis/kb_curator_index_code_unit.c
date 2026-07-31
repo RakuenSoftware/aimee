@@ -113,9 +113,7 @@ int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
       return 1;
    }
 
-   config_t cfg;
-   config_load(&cfg);
-   const char *embed_cmd = config_embedding_command(&cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
    float intent_vec[CURATOR_CODE_UNIT_DIM];
    float sig_vec[CURATOR_CODE_UNIT_DIM];
    float body_vec[CURATOR_CODE_UNIT_DIM];

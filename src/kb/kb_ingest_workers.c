@@ -185,7 +185,7 @@ static void kbiw_process_job(const db2_kb_ingest_job_t *job)
 
    config_t cfg;
    config_load(&cfg);
-   const char *embed_cmd = config_embedding_command(&cfg, NULL);
+   const char *embed_cmd = config_embedding_command_current(NULL);
 
    kb_stats_t stats;
    memset(&stats, 0, sizeof(stats));
