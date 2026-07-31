@@ -357,6 +357,7 @@ int handle_kb_update(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_ingest(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_docs_push(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_reembed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_memory_embed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_ingest_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_optimize_export(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

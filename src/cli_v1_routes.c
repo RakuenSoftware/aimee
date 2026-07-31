@@ -152,6 +152,7 @@ static const struct
     {"memory", "supersede", "memory.supersede", NULL, NULL, 60000},
     {"memory", "show", "memory.get", NULL, NULL, 60000},
     {"memory", "read", "memory.read", NULL, NULL, 60000},
+    {"memory", "embed", "memory.embed", NULL, NULL, 900000},
     {"memory", "stats", "memory.stats", NULL, NULL, 60000},
     {"economizer", "stats", "economizer.stats", NULL, NULL, 60000},
     {"memory", "benchmark", "memory.benchmark", NULL, NULL, 600000},
