@@ -19,10 +19,24 @@ mkdir -p "$OUT"
 export HF_HOME=${HF_HOME:-/opt/hf}
 PORT=${PORT:-8087}
 
+# The whole ladder. The flag applied to every Tier-A provider, so removing it has
+# to be validated on every provider. Qwen especially: those models have explicit
+# thinking modes that emit long reasoning, so if the original .254 failure — a
+# reasoning pass eating the completion budget — reproduces anywhere it reproduces
+# there. Truncation is recorded per note, so that shows up as data rather than as
+# an unexplained quality drop.
 MODELS=(
   "gemma-4-E4B-it|unsloth/gemma-4-E4B-it-GGUF:Q8_0|"
+  "gemma-4-E2B-it|ggml-org/gemma-4-E2B-it-GGUF:Q8_0|"
+  "gemma-4-12B-it|unsloth/gemma-4-12B-it-GGUF:Q8_0|"
   "gemma-4-26B-A4B-it|unsloth/gemma-4-26B-A4B-it-GGUF:Q8_0|-ot .ffn_.*_exps.=CPU"
+  "gemma-4-31B-it|unsloth/gemma-4-31B-it-GGUF:Q8_0|"
+  "Qwen3.6-27B|unsloth/Qwen3.6-27B-GGUF:Q8_0|"
+  "Qwen3.6-35B-A3B|unsloth/Qwen3.6-35B-A3B-GGUF:Q8_0|-ot .ffn_.*_exps.=CPU"
   "Qwen3.5-2B|unsloth/Qwen3.5-2B-GGUF:Q8_0|"
+  "Qwen3.5-0.8B|ggml-org/Qwen3.5-0.8B-GGUF:Q8_0|"
+  "granite-4.1-3b|ibm-granite/granite-4.1-3b-GGUF:Q8_0|"
+  "granite-4.0-1b|ibm-granite/granite-4.0-1b-GGUF:Q8_0|"
 )
 
 for entry in "${MODELS[@]}"; do
