@@ -2048,8 +2048,8 @@ void cmd_verify(app_ctx_t *ctx, int argc, char **argv)
    /* Step 1: run verify_cmd if set (compilation/tests) */
    /* Copied out: cmd_argv borrows it across safe_exec_capture, which is a whole
     * subprocess round trip. */
-   char verify_cmd[sizeof(((config_t *)0)->verify_cmd)];
-   snprintf(verify_cmd, sizeof(verify_cmd), "%s", config_verify_cmd());
+   char verify_cmd[CONFIG_COPY_MAX];
+   config_verify_cmd_copy(verify_cmd, sizeof(verify_cmd));
    if (verify_cmd[0])
    {
       fprintf(stderr, "aimee: running verify command: %s\n", verify_cmd);
@@ -2070,8 +2070,8 @@ void cmd_verify(app_ctx_t *ctx, int argc, char **argv)
 
    /* Step 2: delegate a review to an agent */
    /* Same: both survive the git-diff subprocess below. */
-   char verify_role[sizeof(((config_t *)0)->verify_role)];
-   snprintf(verify_role, sizeof(verify_role), "%s", config_verify_role());
+   char verify_role[CONFIG_COPY_MAX];
+   config_verify_role_copy(verify_role, sizeof(verify_role));
    const char *role = verify_role[0] ? verify_role : "review";
 
    /* Build the review prompt: get the current staged + unstaged diff as context. */
@@ -2080,8 +2080,8 @@ void cmd_verify(app_ctx_t *ctx, int argc, char **argv)
    safe_exec_capture(diff_argv, &diff_out, AGENT_TOOL_OUTPUT_MAX);
 
    char *review_prompt = NULL;
-   char verify_prompt[sizeof(((config_t *)0)->verify_prompt)];
-   snprintf(verify_prompt, sizeof(verify_prompt), "%s", config_verify_prompt());
+   char verify_prompt[CONFIG_COPY_MAX];
+   config_verify_prompt_copy(verify_prompt, sizeof(verify_prompt));
    const char *base_prompt =
        verify_prompt[0]
            ? verify_prompt

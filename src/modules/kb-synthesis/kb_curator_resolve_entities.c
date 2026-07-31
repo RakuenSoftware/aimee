@@ -103,8 +103,8 @@ static int resolve_try_match(const char *scope_kind, const char *scope_id, const
     * first so the provider lookup runs only for an actual ambiguous-band match. */
    /* Copied out: passed to kb_curator_judge_same_entity, which runs the sidecar
     * or a provider round trip. */
-   char judge_command[sizeof(((config_t *)0)->kb_curator_judge_command)];
-   snprintf(judge_command, sizeof(judge_command), "%s", config_kb_curator_judge_command());
+   char judge_command[CONFIG_COPY_MAX];
+   config_kb_curator_judge_command_copy(judge_command, sizeof(judge_command));
    provider_def_owned_t judge_provider;
    if (match_scores[0] >= CURATOR_ENTITY_JUDGE_LOW &&
        (judge_command[0] ||

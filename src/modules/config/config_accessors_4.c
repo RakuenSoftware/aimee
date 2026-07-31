@@ -18,6 +18,696 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
+size_t config_kb_ranker_fit_command_copy(char *out, size_t n)
+{
+   char buf[512];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, kb_ranker_fit_command), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_kb_ranker_fit_benchmark_copy(char *out, size_t n)
+{
+   char buf[512];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, kb_ranker_fit_benchmark), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_kb_ranker_fit_objective_copy(char *out, size_t n)
+{
+   char buf[16];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, kb_ranker_fit_objective), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_reasoning_datalog_command_copy(char *out, size_t n)
+{
+   char buf[512];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, reasoning_datalog_command), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_bandit_optimize_command_copy(char *out, size_t n)
+{
+   char buf[512];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, bandit_optimize_command), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_planner_search_command_copy(char *out, size_t n)
+{
+   char buf[512];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, planner_search_command), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_constraint_solver_command_copy(char *out, size_t n)
+{
+   char buf[512];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, constraint_solver_command), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_kb_synthesize_command_copy(char *out, size_t n)
+{
+   char buf[512];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, kb_synthesize_command), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_trigger_auth_token_copy(char *out, size_t n)
+{
+   char buf[256];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, trigger_auth_token), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_kb_curator_tier_copy(char *out, size_t n)
+{
+   char buf[16];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, kb_curator_tier), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_kb_curator_extract_prompt_version_copy(char *out, size_t n)
+{
+   char buf[64];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, kb_curator_extract_prompt_version), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_kb_curator_embed_model_version_copy(char *out, size_t n)
+{
+   char buf[64];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, kb_curator_embed_model_version), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_kb_curator_invalidation_notify_socket_copy(char *out, size_t n)
+{
+   char buf[512];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, kb_curator_invalidation_notify_socket), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_kb_curator_extract_command_copy(char *out, size_t n)
+{
+   char buf[512];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, kb_curator_extract_command), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_kb_curator_stage_order_copy(char *out, size_t n)
+{
+   char buf[512];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, kb_curator_stage_order), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_kb_curator_user_presets_copy(char *out, size_t n)
+{
+   char buf[4096];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, kb_curator_user_presets), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_kb_curator_custom_stages_copy(char *out, size_t n)
+{
+   char buf[4096];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, kb_curator_custom_stages), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_kb_curator_provider_base_url_copy(char *out, size_t n)
+{
+   char buf[256];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, kb_curator_provider_base_url), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_kb_curator_provider_model_copy(char *out, size_t n)
+{
+   char buf[128];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, kb_curator_provider_model), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_kb_curator_provider_api_key_copy(char *out, size_t n)
+{
+   char buf[256];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, kb_curator_provider_api_key), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_kb_curator_tier_b_base_url_copy(char *out, size_t n)
+{
+   char buf[256];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, kb_curator_tier_b_base_url), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_kb_curator_tier_b_model_copy(char *out, size_t n)
+{
+   char buf[128];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, kb_curator_tier_b_model), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_kb_curator_tier_b_api_key_copy(char *out, size_t n)
+{
+   char buf[256];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, kb_curator_tier_b_api_key), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_kb_curator_judge_command_copy(char *out, size_t n)
+{
+   char buf[512];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, kb_curator_judge_command), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_kb_curator_synthesize_command_copy(char *out, size_t n)
+{
+   char buf[512];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, kb_curator_synthesize_command), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_aux_default_provider_copy(char *out, size_t n)
+{
+   char buf[64];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, aux_default_provider), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_aux_default_model_copy(char *out, size_t n)
+{
+   char buf[128];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, aux_default_model), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_db2_vector_corpus_index_copy(char *out, size_t n)
+{
+   char buf[16];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, db2_vector_corpus_index), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_ensemble_aggregator_copy(char *out, size_t n)
+{
+   char buf[128];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, ensemble_aggregator), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_roundtable_turns_copy(char *out, size_t n)
+{
+   char buf[16];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, roundtable_turns), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_roundtable_default_copy(char *out, size_t n)
+{
+   char buf[64];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, roundtable_default), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_roundtable_pipeline_done_bar_copy(char *out, size_t n)
+{
+   char buf[40];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, roundtable_pipeline_done_bar), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+size_t config_context_engine_copy(char *out, size_t n)
+{
+   char buf[64];
+   if (!out || n == 0)
+      return 0;
+   config_field_read(offsetof(config_t, context_engine), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   snprintf(out, n, "%s", buf);
+   return sizeof(buf);
+}
+
+const char *config_workspaces(int index)
+{
+   static _Thread_local char buf[MAX_PATH_LEN];
+   buf[0] = 0;
+   if (index < 0 || index >= (64))
+      return buf;
+   config_field_read(offsetof(config_t, workspaces) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_workspace_providers(int index)
+{
+   static _Thread_local char buf[16];
+   buf[0] = 0;
+   if (index < 0 || index >= (64))
+      return buf;
+   config_field_read(offsetof(config_t, workspace_providers) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_workspace_vcs_remote(int index)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   if (index < 0 || index >= (64))
+      return buf;
+   config_field_read(offsetof(config_t, workspace_vcs_remote) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_workspace_vcs_head(int index)
+{
+   static _Thread_local char buf[64];
+   buf[0] = 0;
+   if (index < 0 || index >= (64))
+      return buf;
+   config_field_read(offsetof(config_t, workspace_vcs_head) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_workspace_sandbox_image(int index)
+{
+   static _Thread_local char buf[256];
+   buf[0] = 0;
+   if (index < 0 || index >= (64))
+      return buf;
+   config_field_read(offsetof(config_t, workspace_sandbox_image) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_charter_safety_axioms(int index)
+{
+   static _Thread_local char buf[CONFIG_CHARTER_ENTRY_LEN];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_CHARTER_MAX_ENTRIES))
+      return buf;
+   config_field_read(offsetof(config_t, charter_safety_axioms) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_charter_hard_constraints(int index)
+{
+   static _Thread_local char buf[CONFIG_CHARTER_ENTRY_LEN];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_CHARTER_MAX_ENTRIES))
+      return buf;
+   config_field_read(offsetof(config_t, charter_hard_constraints) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_charter_values(int index)
+{
+   static _Thread_local char buf[CONFIG_CHARTER_ENTRY_LEN];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_CHARTER_MAX_ENTRIES))
+      return buf;
+   config_field_read(offsetof(config_t, charter_values) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_charter_tone_boundaries(int index)
+{
+   static _Thread_local char buf[CONFIG_CHARTER_ENTRY_LEN];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_CHARTER_MAX_ENTRIES))
+      return buf;
+   config_field_read(offsetof(config_t, charter_tone_boundaries) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_identity_working_profile_injection_fields(int index)
+{
+   static _Thread_local char buf[CONFIG_WORKING_PROFILE_FIELD_LEN];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_WORKING_PROFILE_ALLOW_MAX))
+      return buf;
+   config_field_read(offsetof(config_t, identity_working_profile_injection_fields) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_compact_per_tool(int index)
+{
+   static _Thread_local char buf[128];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_COMPACT_MAX_PER_TOOL))
+      return buf;
+   config_field_read(offsetof(config_t, compact_per_tool) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_mcp_osv_allow(int index)
+{
+   static _Thread_local char buf[256];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_MCP_OSV_MAX_ALLOW))
+      return buf;
+   config_field_read(offsetof(config_t, mcp_osv_allow) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_computer_use_allowed_domains(int index)
+{
+   static _Thread_local char buf[128];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_COMPUTER_USE_MAX_DOMAINS))
+      return buf;
+   config_field_read(offsetof(config_t, computer_use_allowed_domains) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_server_api_bearer_extra(int index)
+{
+   static _Thread_local char buf[256];
+   buf[0] = 0;
+   if (index < 0 || index >= (AIMEE_API_BEARER_EXTRA_MAX))
+      return buf;
+   config_field_read(offsetof(config_t, server_api_bearer_extra) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_ensemble_reference_models(int index)
+{
+   static _Thread_local char buf[128];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_ENSEMBLE_MAX_REFS))
+      return buf;
+   config_field_read(offsetof(config_t, ensemble_reference_models) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_ensemble_reference_personas(int index)
+{
+   static _Thread_local char buf[64];
+   buf[0] = 0;
+   if (index < 0 || index >= (CONFIG_ENSEMBLE_MAX_REFS))
+      return buf;
+   config_field_read(offsetof(config_t, ensemble_reference_personas) + (size_t)index * sizeof(buf),
+                     sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+int config_set_db2_pool_size(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->db2_pool_size = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_workspace_count(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->workspace_count = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_subagent_ban_enabled(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->subagent_ban_enabled = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_embedding_dim(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->embedding_dim = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_memory_maintenance_trigger_inserts(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->memory_maintenance_trigger_inserts = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_memory_maintenance_trigger_secs(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->memory_maintenance_trigger_secs = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_memory_maintenance_enabled(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->memory_maintenance_enabled = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_memory_maintenance_interval_seconds(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->memory_maintenance_interval_seconds = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+int config_set_memory_maintenance_summarize_enabled(int value)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+   {
+      cfg->memory_maintenance_summarize_enabled = value;
+      rc = config_save(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
 int config_set_code_cochange_git_enabled(int value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));
@@ -1257,666 +1947,6 @@ int config_set_kb_search_max_results(int value)
    if (rc == 0)
    {
       cfg->kb_search_max_results = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_negation_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_negation_enabled = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_query_expansion_k(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_query_expansion_k = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_recall_lanes_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_recall_lanes_enabled = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_recall_lanes_k_summary(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_recall_lanes_k_summary = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_recall_lanes_k_fact(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_recall_lanes_k_fact = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_recall_lanes_floor_summary(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_recall_lanes_floor_summary = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_recall_lanes_floor_fact(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_recall_lanes_floor_fact = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_improve_dedupe_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_improve_dedupe_enabled = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_improve_summarise_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_improve_summarise_enabled = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_improve_min_cluster(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_improve_min_cluster = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_improve_max_confidence(double value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_improve_max_confidence = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_episode_summaries_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_episode_summaries_enabled = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_scenes_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_scenes_enabled = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_scenes_global_escape_ratio(double value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_scenes_global_escape_ratio = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_failure_detection_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_failure_detection_enabled = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_failure_detection_threshold(double value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_failure_detection_threshold = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_abstain_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_abstain_enabled = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_abstain_gate(double value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_abstain_gate = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_chunk_min_confidence(double value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_chunk_min_confidence = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_bm25_weight(double value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_bm25_weight = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_semantic_weight(double value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_semantic_weight = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_fetch_budget_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_fetch_budget_enabled = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_fetch_budget_base(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_fetch_budget_base = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_memory_fetch_budget_shape_aware(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->memory_fetch_budget_shape_aware = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_dogfood_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->dogfood_enabled = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_dogfood_commit_raw(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->dogfood_commit_raw = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_dogfood_inline_tagging(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->dogfood_inline_tagging = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_dogfood_autolabel_repair(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->dogfood_autolabel_repair = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_dogfood_autolabel_continuation(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->dogfood_autolabel_continuation = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_dogfood_autolabel_repeat_question(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->dogfood_autolabel_repeat_question = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_learning_router_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->learning_router_enabled = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_learning_proposal_ttl_days(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->learning_proposal_ttl_days = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_learning_max_commits_per_week(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->learning_max_commits_per_week = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_learning_synthesize_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->learning_synthesize_enabled = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_learning_synthesize_max_tokens(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->learning_synthesize_max_tokens = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_learning_synthesize_k(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->learning_synthesize_k = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_learning_implicit_citation_repair(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->learning_implicit_citation_repair = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_learning_implicit_citation_continuation(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->learning_implicit_citation_continuation = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_learning_implicit_repeat_question(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->learning_implicit_repeat_question = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_learning_implicit_repeated_correction(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->learning_implicit_repeated_correction = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_learning_implicit_workflow_repetition(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->learning_implicit_workflow_repetition = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_learning_implicit_retrieval_outcome(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->learning_implicit_retrieval_outcome = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_autonomous(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->autonomous = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
-int config_set_verify_enabled(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->verify_enabled = value;
       rc = config_save(cfg);
    }
    free(cfg);

@@ -531,8 +531,8 @@ static int reflect_call_synthesis_agent(const char *query, const memory_t *facts
    out->confidence = 0.0;
 
    /* Copied out: handed to platform_exec_pipe well below, past other reads. */
-   char cognify_command[sizeof(((config_t *)0)->memory_cognify_command)];
-   snprintf(cognify_command, sizeof(cognify_command), "%s", config_memory_cognify_command());
+   char cognify_command[CONFIG_COPY_MAX];
+   config_memory_cognify_command_copy(cognify_command, sizeof(cognify_command));
    if (!config_memory_cognify_enabled() || !cognify_command[0])
       return -1;
 

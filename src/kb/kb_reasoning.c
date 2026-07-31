@@ -152,8 +152,8 @@ int kb_reasoning_query(const char *query, const char *bindings_json, const char 
       return -1;
    /* Copied out: the command is passed to platform_exec_pipe further down, past
     * other accessor calls that would reclaim the thread-local buffer. */
-   char datalog_command[sizeof(((config_t *)0)->reasoning_datalog_command)];
-   snprintf(datalog_command, sizeof(datalog_command), "%s", config_reasoning_datalog_command());
+   char datalog_command[CONFIG_COPY_MAX];
+   config_reasoning_datalog_command_copy(datalog_command, sizeof(datalog_command));
    if (!datalog_command[0])
       return -1;
 

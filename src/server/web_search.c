@@ -724,8 +724,8 @@ static char *run_engine(const char *engine, const char *query, int max_results,
    if (strcmp(engine, "tavily") == 0)
    {
       /* Copied out: handed to backend_tavily, which makes an HTTP round trip. */
-      char key[sizeof(((config_t *)0)->search_tavily_api_key)];
-      snprintf(key, sizeof(key), "%s", config_search_tavily_api_key());
+      char key[CONFIG_COPY_MAX];
+      config_search_tavily_api_key_copy(key, sizeof(key));
       if (!key[0])
          return safe_strdup("error: web_search: tavily backend requires search.tavily_api_key in "
                             "config");
@@ -733,8 +733,8 @@ static char *run_engine(const char *engine, const char *query, int max_results,
    }
    else if (strcmp(engine, "searxng") == 0)
    {
-      char url[sizeof(((config_t *)0)->search_searxng_url)];
-      snprintf(url, sizeof(url), "%s", config_search_searxng_url());
+      char url[CONFIG_COPY_MAX];
+      config_search_searxng_url_copy(url, sizeof(url));
       if (!url[0])
          return safe_strdup("error: web_search: searxng backend requires search.searxng_url in "
                             "config");

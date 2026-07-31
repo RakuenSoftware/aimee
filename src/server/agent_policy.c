@@ -958,8 +958,8 @@ char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *to
        * is a borrowed pointer read after coord_closet_render() runs, and any other
        * config_coord_closet_denylist() call in between would move the ground under
        * it. */
-      char denylist[sizeof(((config_t *)0)->coord_closet_denylist)];
-      snprintf(denylist, sizeof(denylist), "%s", config_coord_closet_denylist());
+      char denylist[CONFIG_COPY_MAX];
+      config_coord_closet_denylist_copy(denylist, sizeof(denylist));
       coord_closet_config_t ccfg = {
           .enabled = 1,
           .budget_bytes = cb,

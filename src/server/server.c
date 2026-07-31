@@ -691,8 +691,8 @@ static int handle_launch_run(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    }
 
    /* Copied out: held across the worktree/session work below. */
-   char provider_buf[sizeof(((config_t *)0)->provider)];
-   snprintf(provider_buf, sizeof(provider_buf), "%s", config_provider());
+   char provider_buf[CONFIG_COPY_MAX];
+   config_provider_copy(provider_buf, sizeof(provider_buf));
    const char *provider = provider_buf[0] ? provider_buf : "claude";
    int builtin = 1;
 

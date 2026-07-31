@@ -1,17 +1,9 @@
 {
   "_note": "Ratchet baseline for check-config-encapsulation.py. config_t is a secret of the config module; these are the sites that still materialise it. Counts may only DECREASE. Migrate a file to config accessors, then rerun with --update-baseline.",
   "files": {
-    "src/cmd_agent_delegate.c": {
-      "decls": 3,
-      "loads": 0
-    },
     "src/cmd_core.c": {
       "decls": 5,
       "loads": 5
-    },
-    "src/cmd_memory_embed.c": {
-      "decls": 1,
-      "loads": 0
     },
     "src/cmd_memory_internal.h": {
       "decls": 1,
@@ -41,21 +33,9 @@
       "decls": 2,
       "loads": 0
     },
-    "src/kb/kb_calibrate.c": {
-      "decls": 5,
-      "loads": 0
-    },
     "src/kb/kb_ingest_workers.c": {
       "decls": 5,
       "loads": 7
-    },
-    "src/kb/kb_main.c": {
-      "decls": 3,
-      "loads": 0
-    },
-    "src/kb/kb_reasoning.c": {
-      "decls": 1,
-      "loads": 0
     },
     "src/kb/kb_surprising_judge.c": {
       "decls": 1,
@@ -74,7 +54,7 @@
       "loads": 1
     },
     "src/modules/kb-synthesis/kb_curator_resolve_entities.c": {
-      "decls": 2,
+      "decls": 1,
       "loads": 1
     },
     "src/modules/kb-synthesis/kb_curator_synthesize.c": {
@@ -106,22 +86,10 @@
       "loads": 1
     },
     "src/posix/agent_runtime.c": {
-      "decls": 2,
+      "decls": 1,
       "loads": 1
     },
-    "src/posix/server_compute.c": {
-      "decls": 3,
-      "loads": 0
-    },
-    "src/server/agent_policy.c": {
-      "decls": 1,
-      "loads": 0
-    },
     "src/server/fidelity_check.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/server/server.c": {
       "decls": 1,
       "loads": 0
     },
@@ -138,7 +106,7 @@
       "loads": 1
     },
     "src/server/web_search.c": {
-      "decls": 3,
+      "decls": 1,
       "loads": 1
     },
     "src/tests/fuzz_corpus/seed.c": {
@@ -367,8 +335,8 @@
     }
   },
   "totals": {
-    "decls": 315,
-    "files": 91,
+    "decls": 293,
+    "files": 83,
     "loads": 177
   }
 }

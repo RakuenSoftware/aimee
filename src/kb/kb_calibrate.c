@@ -29,10 +29,10 @@ static int build_sidecar_request(const db2_calibration_surface_t *surface,
    cJSON *req = cJSON_CreateObject();
    /* Copied out: both are added to the JSON request and read again below, across
     * other accessor calls. */
-   char mv[sizeof(((config_t *)0)->calibration_model_version)];
-   char pv[sizeof(((config_t *)0)->calibration_prompt_version)];
-   snprintf(mv, sizeof(mv), "%s", config_calibration_model_version());
-   snprintf(pv, sizeof(pv), "%s", config_calibration_prompt_version());
+   char mv[CONFIG_COPY_MAX];
+   char pv[CONFIG_COPY_MAX];
+   config_calibration_model_version_copy(mv, sizeof(mv));
+   config_calibration_prompt_version_copy(pv, sizeof(pv));
    const char *model_version = mv[0] ? mv : "beta-binomial-v1";
    const char *prompt_version = pv[0] ? pv : "v1";
    char feature_set_version[160];
@@ -161,8 +161,8 @@ int kb_calibrate_run(void)
 
       char payload_buf[16384] = "{}";
 
-      char calibration_command[sizeof(((config_t *)0)->calibration_command)];
-      snprintf(calibration_command, sizeof(calibration_command), "%s", config_calibration_command());
+      char calibration_command[CONFIG_COPY_MAX];
+      config_calibration_command_copy(calibration_command, sizeof(calibration_command));
       if (calibration_command[0])
       {
          /* Call sidecar */
@@ -221,10 +221,10 @@ int kb_calibrate_run(void)
       /* Write calibration_profile artifact */
       char art_id[64];
       /* Copied out for the same reason as in the request builder above. */
-      char pv2[sizeof(((config_t *)0)->calibration_prompt_version)];
-      char mv2[sizeof(((config_t *)0)->calibration_model_version)];
-      snprintf(pv2, sizeof(pv2), "%s", config_calibration_prompt_version());
-      snprintf(mv2, sizeof(mv2), "%s", config_calibration_model_version());
+      char pv2[CONFIG_COPY_MAX];
+      char mv2[CONFIG_COPY_MAX];
+      config_calibration_prompt_version_copy(pv2, sizeof(pv2));
+      config_calibration_model_version_copy(mv2, sizeof(mv2));
       const char *prompt_version = pv2[0] ? pv2 : "v1";
       const char *model_version = mv2[0] ? mv2 : "beta-binomial-v1";
       char feature_set_version[160];

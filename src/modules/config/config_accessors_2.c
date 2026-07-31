@@ -18,202 +18,6 @@
  * back to a heap-loaded config when no snapshot is live. */
 int config_field_read(size_t offset, size_t size, void *dst);
 
-int config_demotion_window(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, demotion_window), sizeof(v), &v);
-   return v;
-}
-
-double config_demotion_half_life_days(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, demotion_half_life_days), sizeof(v), &v);
-   return v;
-}
-
-int config_demotion_n_min(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, demotion_n_min), sizeof(v), &v);
-   return v;
-}
-
-double config_kb_fusion_static_alpha(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, kb_fusion_static_alpha), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_ranker_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_ranker_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_ranker_fit_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_ranker_fit_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_ranker_fit_min_groups(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_ranker_fit_min_groups), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_ranker_fit_bench_k(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_ranker_fit_bench_k), sizeof(v), &v);
-   return v;
-}
-
-int config_reasoning_row_budget(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, reasoning_row_budget), sizeof(v), &v);
-   return v;
-}
-
-int config_reasoning_time_limit_ms(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, reasoning_time_limit_ms), sizeof(v), &v);
-   return v;
-}
-
-double config_bandit_exploration_fraction(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, bandit_exploration_fraction), sizeof(v), &v);
-   return v;
-}
-
-double config_bandit_ipw_weight_cap(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, bandit_ipw_weight_cap), sizeof(v), &v);
-   return v;
-}
-
-int config_bandit_exploration_window_seconds(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, bandit_exploration_window_seconds), sizeof(v), &v);
-   return v;
-}
-
-int config_planner_budget_default(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, planner_budget_default), sizeof(v), &v);
-   return v;
-}
-
-double config_planner_exploration_constant(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, planner_exploration_constant), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_mdl_tiebreak_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_mdl_tiebreak_enabled), sizeof(v), &v);
-   return v;
-}
-
-double config_kb_mdl_bump_drift_alert(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, kb_mdl_bump_drift_alert), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_synthesize_n_attempts(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_synthesize_n_attempts), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_reflection_synthesis_shadow(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_reflection_synthesis_shadow), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_worker_count(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_worker_count), sizeof(v), &v);
-   return v;
-}
-
-int config_db2_connection_pool_size(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, db2_connection_pool_size), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_connection_workers(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_connection_workers), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_bg_ingest_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_bg_ingest_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_bg_ingest_interval_hours(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_bg_ingest_interval_hours), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_bg_watch_enabled(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_bg_watch_enabled), sizeof(v), &v);
-   return v;
-}
-
-int config_kb_bg_watch_debounce_secs(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, kb_bg_watch_debounce_secs), sizeof(v), &v);
-   return v;
-}
-
-double config_code_hybrid_weight_code(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, code_hybrid_weight_code), sizeof(v), &v);
-   return v;
-}
-
-double config_code_hybrid_weight_graph(void)
-{
-   double v = 0;
-   config_field_read(offsetof(config_t, code_hybrid_weight_graph), sizeof(v), &v);
-   return v;
-}
-
 double config_code_hybrid_weight_vector(void)
 {
    double v = 0;
@@ -927,6 +731,384 @@ const char *config_embedding_endpoint(void)
    static _Thread_local char buf[512];
    buf[0] = 0;
    config_field_read(offsetof(config_t, embedding_endpoint), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_memory_weight_profile(void)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, memory_weight_profile), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_memory_rerank_mode(void)
+{
+   static _Thread_local char buf[16];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, memory_rerank_mode), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_css_render_command(void)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, css_render_command), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_vault_custody(void)
+{
+   static _Thread_local char buf[16];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, vault_custody), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_vault_tpm2_blob_path(void)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, vault_tpm2_blob_path), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_vault_tpm2_tcti(void)
+{
+   static _Thread_local char buf[128];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, vault_tpm2_tcti), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_vault_tpm2_nv_index(void)
+{
+   static _Thread_local char buf[32];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, vault_tpm2_nv_index), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_memory_coref_mode(void)
+{
+   static _Thread_local char buf[16];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, memory_coref_mode), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_memory_cognify_model(void)
+{
+   static _Thread_local char buf[64];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, memory_cognify_model), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_memory_cognify_command(void)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, memory_cognify_command), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_code_context_mode(void)
+{
+   static _Thread_local char buf[16];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, code_context_mode), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_session_worktree_base(void)
+{
+   static _Thread_local char buf[64];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, session_worktree_base), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_delegate_sandbox_image(void)
+{
+   static _Thread_local char buf[256];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, delegate_sandbox_image), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_delegate_sandbox_package_access(void)
+{
+   static _Thread_local char buf[32];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, delegate_sandbox_package_access), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_kb_pdf_tier(void)
+{
+   static _Thread_local char buf[16];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, kb_pdf_tier), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_tsr_command(void)
+{
+   static _Thread_local char buf[1024];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, tsr_command), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_kb_pdf_blob_dir(void)
+{
+   static _Thread_local char buf[1024];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, kb_pdf_blob_dir), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_ocr_command(void)
+{
+   static _Thread_local char buf[1024];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, ocr_command), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_memory_pagerank_relations(void)
+{
+   static _Thread_local char buf[256];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, memory_pagerank_relations), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_memory_citations_mode(void)
+{
+   static _Thread_local char buf[16];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, memory_citations_mode), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_memory_rewrite_command(void)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, memory_rewrite_command), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_memory_query_expansion_mode(void)
+{
+   static _Thread_local char buf[16];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, memory_query_expansion_mode), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_memory_recall_lanes_summary_kinds(void)
+{
+   static _Thread_local char buf[256];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, memory_recall_lanes_summary_kinds), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_memory_recall_lanes_fact_kinds(void)
+{
+   static _Thread_local char buf[256];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, memory_recall_lanes_fact_kinds), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_memory_hard_negative_log(void)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, memory_hard_negative_log), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_dogfood_log_dir(void)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, dogfood_log_dir), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_learning_synthesize_command(void)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, learning_synthesize_command), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_learning_embed_model_version(void)
+{
+   static _Thread_local char buf[64];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, learning_embed_model_version), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_learning_synthesize_prompt_version(void)
+{
+   static _Thread_local char buf[64];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, learning_synthesize_prompt_version), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_verify_cmd(void)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, verify_cmd), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_verify_role(void)
+{
+   static _Thread_local char buf[32];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, verify_role), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_verify_prompt(void)
+{
+   static _Thread_local char buf[2048];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, verify_prompt), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_search_backend(void)
+{
+   static _Thread_local char buf[32];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, search_backend), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_search_searxng_url(void)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, search_searxng_url), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_search_tavily_api_key(void)
+{
+   static _Thread_local char buf[256];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, search_tavily_api_key), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_search_backends(void)
+{
+   static _Thread_local char buf[256];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, search_backends), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_coord_closet_denylist(void)
+{
+   static _Thread_local char buf[256];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, coord_closet_denylist), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_prompt_tier(void)
+{
+   static _Thread_local char buf[16];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, prompt_tier), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_prompt_file(void)
+{
+   static _Thread_local char buf[MAX_PATH_LEN];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, prompt_file), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_delegate_prompt_tier(void)
+{
+   static _Thread_local char buf[16];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, delegate_prompt_tier), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_otel_endpoint(void)
+{
+   static _Thread_local char buf[512];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, otel_endpoint), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf;
+}
+
+const char *config_otel_service_name(void)
+{
+   static _Thread_local char buf[64];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, otel_service_name), sizeof(buf), buf);
    buf[sizeof(buf) - 1] = 0;
    return buf;
 }

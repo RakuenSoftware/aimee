@@ -1747,12 +1747,12 @@ int main(int argc, char **argv)
 
    /* Copied out because kb_vault_tpm_runtime_identity hands BACK one of these
     * pointers (whichever wins over the env) and main holds it to the end. */
-   char vault_tpm2_tcti[sizeof(((config_t *)0)->vault_tpm2_tcti)];
-   char vault_tpm2_nv_index[sizeof(((config_t *)0)->vault_tpm2_nv_index)];
-   char vault_custody[sizeof(((config_t *)0)->vault_custody)];
-   snprintf(vault_tpm2_tcti, sizeof(vault_tpm2_tcti), "%s", config_vault_tpm2_tcti());
-   snprintf(vault_tpm2_nv_index, sizeof(vault_tpm2_nv_index), "%s", config_vault_tpm2_nv_index());
-   snprintf(vault_custody, sizeof(vault_custody), "%s", config_vault_custody());
+   char vault_tpm2_tcti[CONFIG_COPY_MAX];
+   char vault_tpm2_nv_index[CONFIG_COPY_MAX];
+   char vault_custody[CONFIG_COPY_MAX];
+   config_vault_tpm2_tcti_copy(vault_tpm2_tcti, sizeof(vault_tpm2_tcti));
+   config_vault_tpm2_nv_index_copy(vault_tpm2_nv_index, sizeof(vault_tpm2_nv_index));
+   config_vault_custody_copy(vault_custody, sizeof(vault_custody));
 
    /* aimee-kb records the AUTHORITATIVE memory-mutation events on its own
     * observability bus at the store (every caller). Open the KB audit ledger so

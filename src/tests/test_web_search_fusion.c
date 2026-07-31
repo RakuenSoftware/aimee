@@ -129,13 +129,19 @@ int config_load(config_t *c)
 /* run_engine reads these two directly now. Empty is what the zeroed struct gave
  * it, and both engines are skipped as unconfigured -- the duckduckgo path this
  * suite drives is unaffected. */
-const char *config_search_tavily_api_key(void)
+/* run_engine takes the _copy form (the value crosses an HTTP round trip). Empty
+ * is what the zeroed struct gave it: both engines skipped as unconfigured. */
+size_t config_search_tavily_api_key_copy(char *out, size_t n)
 {
-   return "";
+   if (out && n)
+      out[0] = '\0';
+   return n;
 }
-const char *config_search_searxng_url(void)
+size_t config_search_searxng_url_copy(char *out, size_t n)
 {
-   return "";
+   if (out && n)
+      out[0] = '\0';
+   return n;
 }
 int config_retry_max_attempts(void)
 {

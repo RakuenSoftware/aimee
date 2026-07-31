@@ -190,6 +190,24 @@ def members():
     return out
 
 
+def _widest_string(strings):
+    """Widest declared char[] among the string fields, resolved through config.h
+    defines. A caller-side buffer of this size can never truncate."""
+    text = HDR.read_text()
+    widest = 0
+    for _, name, arr in strings:
+        tok = arr.strip()[1:-1].strip()
+        if tok.isdigit():
+            w = int(tok)
+        else:
+            m = re.search(rf"#define\s+{re.escape(tok)}\s+(\d+)", text)
+            if not m:
+                continue
+            w = int(m.group(1))
+        widest = max(widest, w)
+    return widest
+
+
 def main():
     ms = members()
     strings = [m for m in ms if m[0] == "string"]
@@ -211,7 +229,15 @@ def main():
     # Self-contained: int64_t appears in these signatures, and a caller that includes
     # only this header (the point of the accessor surface) must not have to include
     # config.h first to get it.
+    h.append("#include <stddef.h> /* size_t, for the _copy forms */")
     h.append("#include <stdint.h>")
+    h.append("")
+    h.append(
+        "/* A buffer of this size holds ANY string field whole, so a caller using it\n"
+        " * with a _copy accessor never truncates and never has to name config_t to\n"
+        " * spell the field's width. Generated as the widest string field. */"
+    )
+    h.append(f"#define CONFIG_COPY_MAX {_widest_string(strings)}")
     h.append("")
     h.append(
         "/* Scalars. When config cannot be read, an accessor returns the field's DECLARED\n"
@@ -243,6 +269,23 @@ def main():
         h.append(f"int config_set_{name}({ctype} value);")
     for _, name, _arr in strings:
         h.append(f"int config_set_{name}(const char *value);")
+    h.append("")
+    h.append(
+        "/* Copy-out form for every string field.\n"
+        " *\n"
+        " * Prefer this over the pointer form whenever the value OUTLIVES the next\n"
+        " * call to the same accessor -- stored in a struct, passed to something that\n"
+        " * runs a subprocess or an HTTP round trip, or read again after other config\n"
+        " * reads. The pointer form hands back a per-accessor thread-local buffer, so\n"
+        " * in those cases it is a dangling read waiting to happen, and the caller has\n"
+        " * to hand-size a buffer (which meant naming config_t just to spell\n"
+        " * sizeof(((config_t *)0)->field), putting the type right back in the caller).\n"
+        " *\n"
+        " * Truncates to n and always NUL-terminates. Returns the field's full width so\n"
+        " * a caller can detect truncation; 0 when out is NULL or n is 0. */"
+    )
+    for _, name, _arr in strings:
+        h.append(f"size_t config_{name}_copy(char *out, size_t n);")
     h.append("")
     h.append(
         "/* char[][] fields: one row per call. Returns \"\" for an out-of-range\n"
@@ -288,6 +331,20 @@ def main():
             f"   config_field_read(offsetof(config_t, {name}), sizeof(buf), buf);",
             "   buf[sizeof(buf) - 1] = 0;",
             "   return buf;",
+            "}",
+            "",
+        ])
+    for _, name, arr in strings:
+        blocks.append([
+            f"size_t config_{name}_copy(char *out, size_t n)",
+            "{",
+            f"   char buf{arr};",
+            "   if (!out || n == 0)",
+            "      return 0;",
+            f"   config_field_read(offsetof(config_t, {name}), sizeof(buf), buf);",
+            "   buf[sizeof(buf) - 1] = 0;",
+            "   snprintf(out, n, \"%s\", buf);",
+            "   return sizeof(buf);",
             "}",
             "",
         ])

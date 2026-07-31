@@ -489,19 +489,19 @@ static void chat_stream_worker_codex(compute_ctx_t *cctx, const char *message,
    creq.user_prompt = message;
    /* Both are copied out: creq holds them across the blocking Codex stream
     * below, far past the point an accessor's thread-local buffer is reclaimed. */
-   char codex_model_buf[sizeof(((config_t *)0)->codex_model)] = "";
-   char codex_effort_buf[sizeof(((config_t *)0)->model_reasoning_effort)] = "";
+   char codex_model_buf[CONFIG_COPY_MAX] = "";
+   char codex_effort_buf[CONFIG_COPY_MAX] = "";
    if (chat_model_passthrough_allowed(model))
       snprintf(codex_model_buf, sizeof(codex_model_buf), "%s", model);
    else
-      snprintf(codex_model_buf, sizeof(codex_model_buf), "%s", config_codex_model());
+      config_codex_model_copy(codex_model_buf, sizeof(codex_model_buf));
    creq.model = codex_model_buf[0] ? codex_model_buf : NULL;
 
    int codex_effort_explicit = chat_codex_effort_allowed(effort);
    if (codex_effort_explicit)
       snprintf(codex_effort_buf, sizeof(codex_effort_buf), "%s", effort);
    else
-      snprintf(codex_effort_buf, sizeof(codex_effort_buf), "%s", config_model_reasoning_effort());
+      config_model_reasoning_effort_copy(codex_effort_buf, sizeof(codex_effort_buf));
    const char *codex_effort = codex_effort_buf;
    /* §5: cap (only lower) the config-derived effort by turn complexity. An
     * explicit per-request override is left untouched. */
@@ -1257,8 +1257,8 @@ void chat_stream_worker(void *arg)
     * which reaches the gateway, never this worker. See router_advise.c. */
 
    /* Copied out: `provider` is read repeatedly below and handed to workers. */
-   char provider_buf[sizeof(((config_t *)0)->provider)];
-   snprintf(provider_buf, sizeof(provider_buf), "%s", config_provider());
+   char provider_buf[CONFIG_COPY_MAX];
+   config_provider_copy(provider_buf, sizeof(provider_buf));
    const char *provider = provider_buf[0] ? provider_buf : "claude";
    /* A session-pinned primary agent (set via POST /v1/sessions/<id>/primary)
     * overrides the global default provider for this session, so the active

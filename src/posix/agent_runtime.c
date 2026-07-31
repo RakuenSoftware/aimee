@@ -759,8 +759,8 @@ native_provider_http:
          econ_preset_current(&preset);
          /* The closet denylist is a borrowed pointer stored in rcfg and read
           * after the reduce runs, so it is copied out of the accessor buffer. */
-         char closet_denylist[sizeof(((config_t *)0)->coord_closet_denylist)];
-         snprintf(closet_denylist, sizeof(closet_denylist), "%s", config_coord_closet_denylist());
+         char closet_denylist[CONFIG_COPY_MAX];
+         config_coord_closet_denylist_copy(closet_denylist, sizeof(closet_denylist));
          if (!anthropic && (preset.history_fold || preset.compress))
          {
             reduce_config_t rcfg;
