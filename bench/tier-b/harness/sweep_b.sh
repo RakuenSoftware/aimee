@@ -48,6 +48,29 @@ case "$MODE" in
     PLACE="-ngl 0 -t $THREADS"
     MODELS=("gemma-4-E4B-it|unsloth/gemma-4-E4B-it-GGUF:Q8_0|")
     ;;
+  sub1b)
+    # Tier-B has never been run below 1B. The Tier-A ladder was read as ruling
+    # this range out, and that reading was an artefact of scoring against a
+    # retired confidence floor (MEASUREMENT_LOG.md defect 17), so the range was
+    # excluded here on a conclusion that did not hold. Qwen3.5-0.8B is included
+    # because its first attempt returned 4096 tokens of reasoning and empty
+    # content on every topic, which run_b.py could not distinguish from a harness
+    # bug until it started recording reasoning_content.
+    PORT=${PORT:-8089}
+    SERVER=${SERVER:-/opt/llama.cpp/build-cuda/bin/llama-server}
+    PLACE=""
+    MODELS=(
+      "Qwen3.5-0.8B|ggml-org/Qwen3.5-0.8B-GGUF:Q8_0|"
+      "Qwen3-0.6B|Qwen/Qwen3-0.6B-GGUF:Q8_0|"
+      "granite-4.0-350m|ibm-granite/granite-4.0-350m-GGUF:Q8_0|"
+      "granite-4.0-h-350m|ibm-granite/granite-4.0-h-350m-GGUF:Q8_0|"
+      "granite-4.0-h-1b|ibm-granite/granite-4.0-h-1b-GGUF:Q8_0|"
+      "LFM2.5-230M|unsloth/LFM2.5-230M-GGUF:Q8_0|"
+      "LFM2-350M-Extract|LiquidAI/LFM2-350M-Extract-GGUF:Q8_0|"
+      "SmolLM2-360M-Instruct|ggml-org/SmolLM2-360M-Instruct-Q8_0-GGUF:Q8_0|"
+      "gemma-3-270m-it|ggml-org/gemma-3-270m-GGUF:Q8_0|"
+    )
+    ;;
   cpufit)
     # Own port, so it can share the box with the gpu lane. 8 of 20 threads
     # leaves the gpu lane the cores its expert offload needs, and an empty
