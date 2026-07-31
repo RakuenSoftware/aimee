@@ -469,6 +469,12 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)ctx;
 
+   /* Function-scoped: parsed from --scope below, and read again by the
+    * escalation-target lookup much later. It was declared inside the parse block,
+    * which does not reach that use -- an incomplete refactor that never surfaced
+    * because nothing compiles this file. */
+   agent_scope_t scope = AGENT_SCOPE_WHOLE_TASK; /* the documented default */
+
    if (argc < 1)
    {
       delegate_print_help();
@@ -523,8 +529,10 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
          fprintf(stderr, "error: could not load agent config\n");
          return;
       }
+      ensemble_panel_t panel;
+      ensemble_panel_from_config(&panel);
       delegate_ensemble_result_t result;
-      if (delegate_ensemble_run(&acfg, &cfg, argv[1], &result) != 0)
+      if (delegate_ensemble_run(&acfg, &panel, argv[1], &result) != 0)
       {
          fprintf(stderr, "error: ensemble failed\n");
          return;
@@ -733,7 +741,6 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
        * whole_task: boundedness is opt-in, because under uncertainty we
        * over-select toward capability rather than risk a misplacement. */
       const char *scope_opt = opt_get(&opts, "scope");
-      agent_scope_t scope = AGENT_SCOPE_WHOLE_TASK; /* the documented default */
       if (scope_opt && scope_opt[0])
       {
          scope = agent_scope_from_string(scope_opt);

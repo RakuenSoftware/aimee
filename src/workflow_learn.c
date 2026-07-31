@@ -222,17 +222,16 @@ static int wl_workspace_for_cwd(const char *cwd, char *out, size_t outlen)
       return 0;
    out[0] = '\0';
 
-   config_t cfg;
 
-   for (int i = 0; i < cfg.workspace_count; i++)
+   for (int i = 0; i < config_workspace_count(); i++)
    {
-      size_t wlen = strlen(cfg.workspaces[i]);
+      size_t wlen = strlen(config_workspaces(i));
       if (wlen == 0)
          continue;
-      if (strncmp(cwd, cfg.workspaces[i], wlen) == 0 && (cwd[wlen] == '/' || cwd[wlen] == '\0'))
+      if (strncmp(cwd, config_workspaces(i), wlen) == 0 && (cwd[wlen] == '/' || cwd[wlen] == '\0'))
       {
-         const char *slash = strrchr(cfg.workspaces[i], '/');
-         const char *name = slash ? slash + 1 : cfg.workspaces[i];
+         const char *slash = strrchr(config_workspaces(i), '/');
+         const char *name = slash ? slash + 1 : config_workspaces(i);
          snprintf(out, outlen, "%s", name);
          return 1;
       }

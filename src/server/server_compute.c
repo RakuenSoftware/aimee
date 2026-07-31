@@ -228,10 +228,8 @@ static void compute_update_coord_task(compute_ctx_t *cctx, cJSON *resp)
    }
    else if (strcmp(status_text, "preempted") == 0)
    {
-      config_t cfg;
-      config_load(&cfg);
       if (db1_coord_job_release_task_bounded_owned(cctx->coord_task_id, cctx->coord_claim_owner,
-                                                   cfg.concurrency_preempt_requeue_max) == 0)
+                                                   config_concurrency_preempt_requeue_max()) == 0)
       {
          server_coord_dispatcher_notify();
          return;
@@ -1107,9 +1105,7 @@ void delegate_worker(void *arg)
     * AIMEE_DELEGATE_DEPTH/AIMEE_PARENT_DELEGATION_ID as request fields. Stale
     * completed parents are ignored so a primary shell with leaked env does not
     * get misclassified as a live delegate. */
-   config_t cfg;
-   config_load(&cfg);
-   int max_depth = cfg.max_delegation_depth > 0 ? cfg.max_delegation_depth
+   int max_depth = config_max_delegation_depth() > 0 ? config_max_delegation_depth()
                                                 : CONFIG_DEFAULT_MAX_DELEGATION_DEPTH;
    cJSON *jreq_depth = cJSON_GetObjectItemCaseSensitive(req, "delegation_depth");
    int req_parent_depth = 0;
@@ -1139,7 +1135,7 @@ void delegate_worker(void *arg)
     * delegate. Counting all first-level delegates for the whole operator
     * session exhausts long, deliberate delegate-heavy workflows; runaway risk
     * comes from sub-delegation fan-out below a root delegate. */
-   int max_spawns = cfg.max_delegation_spawns > 0 ? cfg.max_delegation_spawns
+   int max_spawns = config_max_delegation_spawns() > 0 ? config_max_delegation_spawns()
                                                   : CONFIG_DEFAULT_MAX_DELEGATION_SPAWNS;
    const char *effective_sid = sid ? sid : session_id();
    int total_spawns = 0;

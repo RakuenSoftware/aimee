@@ -1,10 +1,6 @@
 {
   "_note": "Ratchet baseline for check-config-encapsulation.py. config_t is a secret of the config module; these are the sites that still materialise it. Counts may only DECREASE. Migrate a file to config accessors, then rerun with --update-baseline.",
   "files": {
-    "src/cmd_agent.c": {
-      "decls": 2,
-      "loads": 0
-    },
     "src/cmd_agent_delegate.c": {
       "decls": 3,
       "loads": 3
@@ -16,10 +12,6 @@
     "src/cmd_data.c": {
       "decls": 10,
       "loads": 8
-    },
-    "src/cmd_dogfood.c": {
-      "decls": 1,
-      "loads": 1
     },
     "src/cmd_identity.c": {
       "decls": 2,
@@ -390,8 +382,8 @@
       "loads": 1
     },
     "src/server/server_compute.c": {
-      "decls": 3,
-      "loads": 3
+      "decls": 1,
+      "loads": 1
     },
     "src/server/server_config.c": {
       "decls": 2,
@@ -704,15 +696,11 @@
     "src/tests/test_workspace_turn.c": {
       "decls": 4,
       "loads": 5
-    },
-    "src/workflow_learn.c": {
-      "decls": 1,
-      "loads": 0
     }
   },
   "totals": {
-    "decls": 564,
-    "files": 177,
-    "loads": 309
+    "decls": 558,
+    "files": 174,
+    "loads": 306
   }
 }

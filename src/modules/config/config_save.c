@@ -1798,6 +1798,76 @@ int config_apply_roundtable_preset(const config_roundtable_preset_t *p)
    return rc;
 }
 
+/* Upsert a per-model concurrency limit and persist the concurrency section.
+ * Returns 0, -1 on failure, -2 when the table is full. The table layout and its
+ * cap are config's business, not a caller's. */
+int config_set_model_concurrency(const char *model, int limit)
+{
+   if (!model || !model[0] || limit <= 0)
+      return -1;
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = -1;
+   if (config_load(cfg) == 0)
+   {
+      int found = -1;
+      for (int i = 0; i < cfg->concurrency_per_model_count; i++)
+         if (strcmp(cfg->concurrency_per_model[i].key, model) == 0)
+         {
+            found = i;
+            break;
+         }
+      if (found >= 0)
+         cfg->concurrency_per_model[found].limit = limit;
+      else if (cfg->concurrency_per_model_count >= CONFIG_CONCURRENCY_MAX_ENTRIES)
+         rc = -2;
+      else
+      {
+         config_concurrency_entry_t *e =
+             &cfg->concurrency_per_model[cfg->concurrency_per_model_count++];
+         snprintf(e->key, sizeof(e->key), "%s", model);
+         e->limit = limit;
+      }
+      if (rc != -2)
+         rc = config_set_concurrency(cfg);
+   }
+   free(cfg);
+   return rc;
+}
+
+/* Drop a per-model concurrency entry, closing the gap. 0 = removed or absent. */
+int config_remove_model_concurrency(const char *model)
+{
+   if (!model || !model[0])
+      return -1;
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = -1;
+   if (config_load(cfg) == 0)
+   {
+      int found = -1;
+      for (int i = 0; i < cfg->concurrency_per_model_count; i++)
+         if (strcmp(cfg->concurrency_per_model[i].key, model) == 0)
+         {
+            found = i;
+            break;
+         }
+      if (found < 0)
+         rc = 0;
+      else
+      {
+         for (int i = found; i < cfg->concurrency_per_model_count - 1; i++)
+            cfg->concurrency_per_model[i] = cfg->concurrency_per_model[i + 1];
+         cfg->concurrency_per_model_count--;
+         rc = config_set_concurrency(cfg);
+      }
+   }
+   free(cfg);
+   return rc;
+}
+
 int config_set_concurrency(const config_t *cfg)
 {
    return config_set_section("concurrency", config_save_concurrency, cfg);

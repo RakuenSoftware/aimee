@@ -2377,6 +2377,11 @@ int config_apply_roundtable_preset(const config_roundtable_preset_t *p);
  * to config_set, for the concurrency limits (nested object + per-model/provider arrays). */
 int config_set_concurrency(const config_t *cfg);
 
+/* Per-model concurrency, by name. The table layout and cap stay inside config.
+ * set: 0 / -1 failed / -2 table full. remove: 0 (absent is success). */
+int config_set_model_concurrency(const char *model, int limit);
+int config_remove_model_concurrency(const char *model);
+
 /* Default config directory: ~/.config/aimee/ */
 const char *config_default_dir(void);
 
