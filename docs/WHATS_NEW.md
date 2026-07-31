@@ -1,8 +1,16 @@
-# What's new
+# What's new in 0.3.0
 
-This is the current testing tree compared with **v0.2.192**, the last public release.
+0.3.0 is a one-way upgrade. It removes the combined image, the work queue, the inference container,
+the interactive TUI, and the generic RPC transport, and it will not read a 0.2 deployment back.
+Read [Upgrading](UPGRADING.md) before you start, not after.
 
-## Event bus
+Everything below is measured against **v0.2.192**, the last 0.2-line release. Two later tags exist
+and neither is the release this describes: `v0.2.196` and `v0.3.0` were cut on 2026-07-27 and
+2026-07-28, the second by promoting `testing` to `main` part-way through this cycle. Work continued
+after that promotion, so an installation taken from the `v0.3.0` tag is missing the changes listed
+under [What landed after the first 0.3.0 tag](#what-landed-after-the-first-030-tag).
+
+## The event bus is the change everything else rests on
 
 Every daemon now has a bounded shared-memory event bus. It is the largest architectural change in
 this cycle.
@@ -28,7 +36,7 @@ the bus does not pretend they are all complete today.
 
 See [Event bus](EVENT_BUS.md).
 
-## Runtime and module boundaries
+## The C core is splitting into modules, and the control plane moved to Go
 
 - The C core is being split into owned source modules with narrow public headers, dependency
   checks, descriptors, and generated module documentation.
@@ -41,7 +49,7 @@ See [Event bus](EVENT_BUS.md).
 - Configuration fields, `/v1` operations, and provider messages are moving to table-driven,
   versioned contracts instead of duplicate switch statements.
 
-## Audit, identity, and policy
+## Audit is hash-chained, and remote writes are refused until identity is configured
 
 - The action audit store is hash-chained and checkpointed. Verification, sealing, snapshots,
   provenance, retrieval traces, and fidelity checks use the same WORM surface.
@@ -58,7 +66,7 @@ See [Event bus](EVENT_BUS.md).
 - TPM 2, PKCS#11, KMS, reseal recovery, and external WORM witnesses are available for hardened
   deployments.
 
-## Workflows and autonomous development
+## Workflows are typed and validated before a run starts
 
 - The Go workflow engine schedules parallel slices, retries, review loops, live forge work, and
   merge recovery.
@@ -73,7 +81,7 @@ See [Event bus](EVENT_BUS.md).
 - A merge conflict, missing commit, lost replay, or exhausted gate returns a named terminal or
   parked state instead of silently advancing.
 
-## Delegates and roundtables
+## Delegates run sandboxed, and a roundtable's findings feed the next pass
 
 - New installs create their first agent in the wizard and ship one canonical default roundtable.
 - Delegates route by role and persona, then retry another viable agent unless a seat is pinned.
@@ -92,7 +100,7 @@ See [Event bus](EVENT_BUS.md).
   budget, worktree, and audit path.
 - Roundtable cost caps are optional. When set, they include every seat and chair call.
 
-## Models, routing, and context
+## Routing is table-driven, and context is budgeted rather than truncated
 
 - All provider traffic passes through one canonical request and response IR.
 - OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, Gemini, Mistral, Bedrock, and local
@@ -104,7 +112,7 @@ See [Event bus](EVENT_BUS.md).
 - Model metadata, provider catalogs, quota, cost, cache, and fallback decisions are visible through
   the CLI and dashboard.
 
-## Knowledge and code
+## Retrieval answers with evidence, and abstains when it has none
 
 - The KB container can own a private PostgreSQL 18 cluster with pgvector and pgvectorscale. An
   export helper moves that data to an external PostgreSQL server.
@@ -120,15 +128,20 @@ See [Event bus](EVENT_BUS.md).
 - Retrieval gained typed facts, contradiction tracking, abstention, evidence audits, progressive
   disclosure, and configurable fusion.
 
-## Deployment and clients
+## One managed stack replaces the combined image
 
 - The all-in-one `aimee-combined` image is retired. Use the managed server or the split server and
   KB stack.
 - New KB containers run PostgreSQL privately when `AIMEE_DB2_URL` is not set. Existing external
   databases remain supported.
 - The server generates a dashboard login on first boot when the deployment supplies none, and prints
-  it once to the container log. Supply `AIMEE_WEBCHAT_USER` and `AIMEE_WEBCHAT_PASSWORD` to choose
-  your own; supply both or neither.
+  it once to the container log. That login is a real local PAM account, not a separate credential
+  store, so replacing it later is an ordinary account change.
+- To choose the login yourself, seal `AIMEE_WEBCHAT_USER` and `AIMEE_WEBCHAT_PASSWORD` with
+  `scripts/aimee-compose-vault-bootstrap.sh` before the first `up`. Exporting the two variables and
+  running `docker compose up` does not work on the managed compose file: it keeps them out of the
+  server's `environment:` block on purpose, because anything listed there stays in `Config.Env` for
+  the life of the deployment. Supply both or neither.
 - Linux, macOS, and Windows use the same DB-free thin client and native TLS backend.
 - Server-to-KB mTLS pooling and resident thin-client HTTPS keep-alive now default on. The measured
   compression flags remain off because they saved bytes but missed the latency gate.
@@ -145,7 +158,7 @@ See [Event bus](EVENT_BUS.md).
 - The attention guard is inert unless enabled. Remote writes are fail-closed until identity trust
   and per-user grants are configured.
 
-## Removed
+## What is gone, and what to use instead
 
 - Interactive `aimee chat` and the bare-command TUI. Use the browser, MCP, ACP, or a compatible API
   front end.
@@ -159,7 +172,40 @@ See [Event bus](EVENT_BUS.md).
 - Client-held plaintext agent credentials and the session credential-push endpoint.
 - The generic `/v1/rpc` transport. Named `/v1` routes are authoritative.
 
-## Upgrade notes
+## What landed after the first 0.3.0 tag
+
+The `v0.3.0` tag was cut on 2026-07-28 by promoting `testing` to `main`, and the cycle continued
+after it. If you installed from that tag rather than from `:testing` or a later release, you do not
+have the following. Each one was a deployment that looked healthy while doing nothing useful, which
+is why they are listed rather than folded into the sections above.
+
+- **The `aimee-llm` container is retired and the embedder is baked into the KB image.** A fresh
+  install embeds with no download and no second container. Set the embedder before you ingest:
+  changing it later re-embeds everything, and changing its dimension rebuilds the vector schema.
+- **A clean install could enrol no identity and store zero vectors.** The published config snapshot
+  did not match what `config_load` returned on the cached path, so first-user enrolment failed
+  silently and env-var deployments indexed nothing. Both are fixed, and the re-embed route that
+  repairs an affected deployment is now reachable.
+- **An operator-supplied dashboard login was ignored.** The entrypoint sealed
+  `AIMEE_WEBCHAT_USER`/`AIMEE_WEBCHAT_PASSWORD` into Vault and scrubbed them from the environment
+  before the PAM account was provisioned, so every install generated a random account instead. The
+  supplied pair is now recovered from Vault and provisioned as the account you asked for.
+- **Tool-using delegates could not read their own worktree on a compose deploy.** `aimee-server`
+  drives a sibling Docker daemon, so a workspace bind source expressed in the server's own container
+  path does not exist on the daemon's host and Docker mounts an empty directory in its place. The
+  entrypoint now derives the translation from its own mounts.
+- **A model that accepts exactly one temperature was sent another.** Provider profiles could only
+  supply a default, which any caller overrode, so an agent with no wire provider named had no way to
+  pin the value its endpoint requires and every delegated call returned HTTP 400.
+- **A delegated shell was gated on config read from disk rather than the live snapshot.** The
+  sandbox accessor loaded a whole config on each call, so a containment decision could be made on
+  state the published snapshot had not adopted.
+
+Fixes for the KB connection pool, KB error surfacing, ingest durability, shared-cluster entrypoint
+reuse, agent removal, session branch enforcement and workflow branch aliasing also landed in this
+window.
+
+## Do these seven things, in this order
 
 1. Back up DB1, the KB database, `aimee.yaml`, `agents.json`, vault material, and TLS state.
 2. Dump the old sibling PostgreSQL volume before moving to the embedded KB database. The compose

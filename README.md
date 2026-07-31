@@ -39,7 +39,7 @@ The `aimee` CLI is a thin client. Linux, macOS, and Windows builds talk to the s
 - **Any model, any provider.** OpenAI Chat Completions, OpenAI Responses, Anthropic Messages,
   Gemini, Mistral, local OpenAI-compatible servers, and AWS Bedrock all pass through one internal
   request format. Switch the primary model without switching tools.
-- **In-container embedding.** The KB embeds from weights baked into its own image — no inference
+- **In-container embedding.** The KB embeds from weights baked into its own image. No inference
   container, no first-boot model download. Point it at an external endpoint for a wider model, or
   for synthesis. See [Inference](docs/KB_LLM_BACKENDS.md).
 - **Document ingestion.** Push source trees, Markdown, text, and PDFs. Structured PDF mode keeps

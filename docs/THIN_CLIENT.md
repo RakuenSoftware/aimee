@@ -1,6 +1,6 @@
 # Thin client
 
-`aimee` is a DB-free client for Linux, macOS, and Windows. It owns client-local work—hooks, stdio
+`aimee` is a DB-free client for Linux, macOS, and Windows. It owns client-local work: hooks, stdio
 protocols, source reads, uploads, and local CLI-agent execution. The server owns state, policy,
 credentials, and model calls.
 
