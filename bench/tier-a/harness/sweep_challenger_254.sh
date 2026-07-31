@@ -13,19 +13,22 @@
 # thinking ON is worth +0.09 F1 to gemma-4-E4B. A model trained for that is the
 # obvious next thing to try.
 #
-# QUANTISATION IS NOT Q8 HERE, AND THAT IS A REAL CONFOUND.
+# THIS HOST IS TRIAGE, NOT MEASUREMENT.
 #
-# .254 has 24GB of VRAM and 3GB of free system RAM, so a model must fit the card
-# whole; there is no RAM to offload experts into. At Q8_0 a 32B dense model is
-# ~34GB and does not fit. Q6_K and Q5_K_M do. Every .253 number was Q8_0, which
-# was validated byte-identical to transformers bf16 on this task. Q6/Q5 were
-# not.
+# .254 answers "is this model viable at all" — does it load, does it hold the
+# output contract, does it produce anything worth spending .253 GPU time on. It
+# does NOT produce numbers to quote. Quantisation differs from .253 (Q6_K/Q5_K_M
+# against Q8_0, because 24GB of VRAM with 3GB of system RAM means a model must
+# fit the card whole), the backend differs (RADV Vulkan against CUDA), and the
+# box does other work.
 #
-# So this sweep carries a CONTROL: gemma-4-12B, already measured at Q8_0 on
-# .253 (0.8235 strict F1, thinking on), re-run here at Q6_K on the same gold
-# set. The control's delta IS the quant-plus-device correction. Without it a
-# challenger beating Gemma by 0.02 would be indistinguishable from quantisation
-# noise, and I would have no way to tell which.
+# So: no cross-host control, and no comparing a figure from this lane against
+# the .253 ladder. Anything that looks promising here gets re-run on .253 for a
+# number. Anything that fails here has failed cheaply, which is the point.
+#
+# An earlier version of this file ran gemma-4-12B twice, at Q6 and Q8, to
+# calibrate the two hosts against each other. That calibration is dropped: it
+# was buying comparability this lane does not need and does not claim.
 #
 # llama.cpp is build 10210, commit 0005475 — the same commit .253 runs, so the
 # runtime is not a variable.
@@ -64,23 +67,11 @@ PORT=${PORT:-8091}
 # silently take layers and wreck both throughput and fit if left visible.
 export GGML_VK_VISIBLE_DEVICES=1
 
-# Controls first, both of them, before any challenger. The first run of this
-# sweep showed gemma-4-12B at 0.8235 (Q8_0, 5080, CUDA) against 0.8550 (Q6_K,
-# 7900 XTX, Vulkan): +0.0315, which is larger than the entire measured gap
-# between 12B and E4B. That delta bundles quantisation with backend, and the two
-# cannot be told apart from one number.
-#
-# So 12B runs twice here, at Q6_K and Q8_0, on the same card and backend. Q8_0
-# is ~13GB and fits the 24GB whole.
-#
-#   q8-here vs q6-here   = the quantisation effect, hardware held constant
-#   q8-here vs q8-on-253 = the CUDA-vs-Vulkan effect, quantisation held constant
-#
-# Until both land, nothing measured on this host can be compared to the .253
-# ladder, and a challenger "beating Gemma 4" here means nothing.
+# gemma-4-12B stays as a smoke test, not a control: it is a model known to work
+# on this task, so if IT comes out broken here the host is broken, not the
+# challenger. One run, cheapest quant.
 MODELS=(
   "gemma-4-12B-it.q6|unsloth/gemma-4-12B-it-GGUF:Q6_K|"
-  "gemma-4-12B-it.q8|unsloth/gemma-4-12B-it-GGUF:Q8_0|"
   "GLM-4.7-Flash.q6|unsloth/GLM-4.7-Flash-GGUF:Q6_K|"
   "Magistral-Small-2509.q6|unsloth/Magistral-Small-2509-GGUF:Q6_K|"
   "Olmo-3.1-32B-Think.q5|bartowski/allenai_Olmo-3.1-32B-Think-GGUF:Q5_K_M|"

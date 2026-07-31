@@ -781,3 +781,51 @@ The general form: a benchmark's defaults should be the product's defaults.
 Where they differ, every difference has to be stated at each call site, and
 nothing enforces that. Where they cannot match, the parameter should have no
 default at all.
+
+## Defect 26: score.py refused truncation but not transport errors
+
+The fourth appearance of one defect, and the second time only half a lesson was
+carried across. `score_b.py` refuses both truncated and errored rows, learned in
+two separate incidents. `score.py` was given the truncation check and not the
+error check.
+
+`Magistral-Small-2509` then recorded `RemoteDisconnected` on the first note and
+`Connection refused` on the next 68, because a process kill of mine took its
+llama-server down mid-run. Without the check that scores as a model emitting
+nothing on every note.
+
+Fixed: `score.py` refuses any run containing an errored row, naming the first
+three.
+
+## Defect 27: pgrep -f matches the command doing the pgrep
+
+Three times now, a cleanup command of the form
+`pgrep -f <pattern> | xargs kill` has killed its own SSH session, because the
+pattern appears in the command line of the shell running it. Once it also failed
+to stop the target: `pgrep -f sweep_challenger_254 | head -1` returned my own
+wrapper first, killed that, and left the real sweep running — which is how two
+sweeps ended up serving the same port a second time.
+
+Cost: one wasted .254 sweep, two interrupted sessions, and the invalid Magistral
+run above.
+
+The fix is not another kill loop. It is that a sweep should be stoppable by its
+own lockfile rather than by pattern-matching a process table.
+
+## What .254 is for
+
+Recorded because it was not clear at the start and the confusion cost real work.
+
+`.254` is a **triage** host: does a candidate load, hold the output contract, and
+produce anything worth spending `.253` GPU time on. It is deliberately the place
+to try a model nobody expects to work, without queueing it behind the real
+ladder.
+
+It is **not** a measurement host. Different quantisation (Q6_K/Q5_K_M, forced by
+24GB VRAM against 3GB of system RAM), different backend (RADV Vulkan against
+CUDA), and it runs other workloads.
+
+The consequence, which cost an evening: no cross-host control is needed, because
+no cross-host comparison should be made. Anything promising on .254 is re-run on
+.253 for a number. The Q6/Q8 calibration study built to enable that comparison
+was work in service of a comparison that should never have been attempted.

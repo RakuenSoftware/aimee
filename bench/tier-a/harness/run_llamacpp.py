@@ -120,6 +120,13 @@ def main():
                 "truncated": usage.get("completion_tokens") == args.max_tokens,
                 "thinking": bool(args.thinking),
                 "reasoning_chars": len(reasoning),
+                # A sample of the reasoning text, not just its length. Without
+                # it, "7943 reasoning tokens and no answer" cannot be told apart
+                # from "7943 tokens of '?' and no answer" — which is exactly the
+                # open question about GLM-4.7-Flash, whose raw /completion output
+                # is literal '?' characters. A length is not evidence about what
+                # a model produced.
+                "reasoning": reasoning[:2000],
             }, ensure_ascii=False) + "\n")
             fh.flush()
             if err:

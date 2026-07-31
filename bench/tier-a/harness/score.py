@@ -450,6 +450,19 @@ def main():
     # The header of sweep_thinking.sh anticipated exactly this: "If that recurs
     # here it should show as truncation, not as a mystery." It recorded the
     # field. Nothing read it.
+    # Errors block too, not just truncation. score_b.py learned this when
+    # Qwen3.6-27B timed out on three topics and scored 0.50/0.40; score.py was
+    # given the truncation half of that lesson and not the other half, and then
+    # Magistral-Small-2509 recorded RemoteDisconnected on all 70 notes because I
+    # killed its server mid-run. Without this the run scores as a model that
+    # emits nothing.
+    errs = {r["id"]: r["error"] for r in pred_rows if r.get("error")}
+    if errs:
+        sample = ", ".join(f"{k} ({v})" for k, v in list(errs.items())[:3])
+        raise SystemExit(
+            f"harness-blocked predictions: {args.pred} has {len(errs)} errored "
+            f"rows: {sample}{' ...' if len(errs) > 3 else ''}. The transport "
+            f"failed, so these say nothing about the model. Re-run them.")
     cut = [r["id"] for r in pred_rows if r.get("truncated")]
     if cut:
         raise SystemExit(
