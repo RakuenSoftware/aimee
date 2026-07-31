@@ -310,6 +310,44 @@ for _dsock in /var/run/docker.sock /run/docker.sock; do
     break
 done
 
+# Delegate sandbox host-path translation.
+#
+# aimee-server drives a SIBLING docker daemon through the socket above, so a bind
+# SOURCE like /var/lib/aimee/<workspace> — which exists in THIS container — does
+# not exist on the daemon's host. Docker then creates it empty rather than
+# failing, and the delegate gets a sandbox whose workspace mount is an empty
+# directory: its worktree is simply not there, so every file tool answers
+# "cannot open" for files that plainly exist.
+#
+# docker_translate_host_source() already handles this, but only when
+# AIMEE_SANDBOX_HOST_MOUNTS names the mapping. The plugin deploys set it from
+# their own bind mounts; the COMPOSE deploys never did, which is why the managed
+# topology could not run a tool-using delegate at all.
+#
+# Derive it from this container's own mounts instead of hardcoding a path: the
+# volume host paths depend on docker's data-root and the compose project name,
+# neither of which belongs in an image. Skip entries whose source equals its
+# destination (a plain host bind such as the docker socket needs no translation).
+# Any failure leaves the variable unset, which is exactly the previous behaviour.
+if [ -z "${AIMEE_SANDBOX_HOST_MOUNTS:-}" ] && [ -S "${_dsock:-/var/run/docker.sock}" ]; then
+    _self=$(hostname 2>/dev/null || true)
+    if [ -n "$_self" ]; then
+        _map=$(docker inspect "$_self" \
+                   --format '{{range .Mounts}}{{.Destination}}={{.Source}}{{println}}{{end}}' \
+                   2>/dev/null |
+               awk -F= 'NF == 2 && $1 != $2 && $1 ~ /^\// && $2 ~ /^\// {
+                            printf "%s%s=%s", sep, $1, $2; sep = ","
+                        }')
+        if [ -n "$_map" ]; then
+            export AIMEE_SANDBOX_HOST_MOUNTS="$_map"
+            log "delegate sandbox: derived host-path map from own mounts ($_map)"
+        else
+            log "delegate sandbox: could not derive a host-path map; delegate workspace mounts may be empty if this daemon is a sibling"
+        fi
+    fi
+    unset _self _map 2>/dev/null || true
+fi
+
 log "starting aimee-server (socket=$SERVER_SOCK) as user aimee"
 rm -f "$AIMEE_HOME/aimee-http.sock" "$AIMEE_WFE_HTTP_SOCKET"
 runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; exec aimee-server --socket="$1"' sh "$SERVER_SOCK" &
