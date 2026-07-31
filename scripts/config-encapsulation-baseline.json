@@ -42,7 +42,7 @@
       "loads": 0
     },
     "src/kb/kb_calibrate.c": {
-      "decls": 2,
+      "decls": 5,
       "loads": 0
     },
     "src/kb/kb_ingest_workers.c": {
@@ -57,19 +57,11 @@
       "decls": 1,
       "loads": 0
     },
-    "src/kb/kb_service_agent.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/kb/kb_surprising_judge.c": {
       "decls": 1,
       "loads": 0
     },
     "src/kb/kb_surprising_judge.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/kb_calibrate.h": {
       "decls": 1,
       "loads": 0
     },
@@ -92,10 +84,6 @@
     "src/modules/kb_client/kb_client_mtls.c": {
       "decls": 2,
       "loads": 0
-    },
-    "src/modules/lsp/lsp_manager.c": {
-      "decls": 1,
-      "loads": 1
     },
     "src/modules/memory/memory_core_internal.h": {
       "decls": 2,
@@ -186,7 +174,7 @@
       "loads": 0
     },
     "src/tests/test_calibration.c": {
-      "decls": 4,
+      "decls": 2,
       "loads": 0
     },
     "src/tests/test_cmd_config.c": {
@@ -379,8 +367,8 @@
     }
   },
   "totals": {
-    "decls": 317,
-    "files": 94,
-    "loads": 179
+    "decls": 315,
+    "files": 91,
+    "loads": 177
   }
 }

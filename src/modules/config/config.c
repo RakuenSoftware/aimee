@@ -2560,6 +2560,17 @@ int config_concurrency_per_model_at(int index, config_concurrency_entry_t *out)
                             sizeof(*out), out);
 }
 
+/* One LSP server entry, copied out. The element type is declared INSIDE config_t
+ * (struct config_lsp_server) but has a name, so this works -- unlike aux_tasks,
+ * which had to be named first. */
+int config_lsp_server_at(int index, config_lsp_server_t *out)
+{
+   if (!out || index < 0 || index >= 8)
+      return -1;
+   return config_field_read(offsetof(config_t, lsp_servers) + (size_t)index * sizeof(*out),
+                            sizeof(*out), out);
+}
+
 int config_cron_job_at(int index, cron_job_t *out)
 {
    if (!out || index < 0 || index >= CRON_JOBS_MAX)
