@@ -4,9 +4,10 @@ A running record of the defects found in this benchmark's **own instrumentation*
 kept because it is the most transferable thing here. The models behaved roughly
 as expected throughout. The grader did not.
 
-Eleven defects. Most inflated the apparent failure rate, one deflated it, two
-distorted the ranking rather than the level, several inverted a conclusion, and
-none were in the models.
+Twelve defects. Most inflated the apparent failure rate, one deflated it, two
+distorted the ranking rather than the level, several inverted a conclusion, one
+overturned the central result of the entire exercise, and none were in the
+models.
 
 ---
 
@@ -214,6 +215,47 @@ the other way.
 
 Every credit granted by the new rules was audited individually. All legitimate;
 no over-crediting.
+
+## 12. The confidence floor was doing the measuring — and it overturned the headline
+
+**Found by** checking two harness parameters that had never been validated: the
+token cap and the confidence floor. The cap was fine (only LFM2's repetition loop
+reaches it; every other model peaks at 254 tokens against a 512 limit). The floor
+was not.
+
+`MF_CONF_FLOOR` (0.6) discards any fact below the threshold. Scoring with it
+applied conflates two different things — whether a model can extract the fact,
+and whether it emits a usable confidence — and the conflation falls almost
+entirely on small models:
+
+| model | capability | committed | dropped |
+|---|---:|---:|---:|
+| Qwen3-0.6B | **0.400** | **0.000** | 72 of 73 |
+| granite-4.0-350m | 0.205 | 0.000 | 53 |
+| granite-4.0-h-350m | 0.135 | 0.000 | 20 |
+| Qwen3-1.7B | 0.563 | 0.396 | 44 |
+| granite-4.1-3b | 0.643 | 0.567 | 13 |
+| gemma-4-26B-A4B | 0.913 | 0.920 | 1 |
+| gemma-4-12B | 0.855 | 0.855 | 0 |
+
+**What it cost: the central conclusion.** "Nothing at or below 600M produces a
+usable fact" was reported repeatedly across this whole exercise. It is false.
+Qwen3-0.6B extracts at 0.400 F1 and every one of those facts is correct — the
+floor throws all 72 away because the model writes `confidence: 0.0`.
+
+The floor is a config value we choose, not a property of any model. The top four
+models are unaffected by it (±0.011), so it was invisible in exactly the place I
+was looking hardest.
+
+**The subtlety worth keeping:** it is not a uniform penalty. gemma-4-E2B scores
+*lower* without the floor (0.641 -> 0.575), so for that model the floor works as
+designed, filtering low-confidence noise. It is a precision filter that some
+models benefit from and others are destroyed by.
+
+Both numbers are now reported: **capability** (floor lifted — can the model do
+the task) and **committed** (floor applied — what the drain writes today). The
+gap between them is a config decision, and for the small models it is the whole
+story.
 
 ## What this cost, and what it is worth
 

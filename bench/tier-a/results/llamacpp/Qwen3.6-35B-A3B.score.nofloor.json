@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.7083,
-    "recall": 0.7969,
-    "f1": 0.75,
-    "tp": 51,
-    "fp": 21,
-    "fn": 13,
+    "precision": 0.7681,
+    "recall": 0.7794,
+    "f1": 0.7737,
+    "tp": 53,
+    "fp": 16,
+    "fn": 15,
     "by_category": {
       "ambiguous": {
         "precision": 0.3333,
@@ -17,11 +17,11 @@
       },
       "first_person": {
         "precision": 1.0,
-        "recall": 0.875,
-        "f1": 0.9333,
+        "recall": 0.7778,
+        "f1": 0.875,
         "tp": 7,
         "fp": 0,
-        "fn": 1
+        "fn": 2
       },
       "governance": {
         "precision": 1.0,
@@ -32,28 +32,28 @@
         "fn": 0
       },
       "implicit": {
-        "precision": 0.4444,
-        "recall": 0.6667,
-        "f1": 0.5333,
-        "tp": 4,
-        "fp": 5,
+        "precision": 0.5556,
+        "recall": 0.7143,
+        "f1": 0.625,
+        "tp": 5,
+        "fp": 4,
         "fn": 2
       },
       "infra": {
-        "precision": 0.5714,
-        "recall": 0.8,
-        "f1": 0.6667,
-        "tp": 4,
-        "fp": 3,
+        "precision": 0.8571,
+        "recall": 0.8571,
+        "f1": 0.8571,
+        "tp": 6,
+        "fp": 1,
         "fn": 1
       },
       "multi_fact": {
-        "precision": 0.76,
-        "recall": 0.8636,
-        "f1": 0.8085,
-        "tp": 19,
-        "fp": 6,
-        "fn": 3
+        "precision": 0.7727,
+        "recall": 0.7727,
+        "f1": 0.7727,
+        "tp": 17,
+        "fp": 5,
+        "fn": 5
       },
       "negation": {
         "precision": 0.6667,
@@ -64,20 +64,20 @@
         "fn": 0
       },
       "novel_pred": {
-        "precision": 0.4286,
-        "recall": 0.5,
-        "f1": 0.4615,
-        "tp": 3,
-        "fp": 4,
+        "precision": 0.5714,
+        "recall": 0.5714,
+        "f1": 0.5714,
+        "tp": 4,
+        "fp": 3,
         "fn": 3
       },
       "third_person": {
         "precision": 1.0,
-        "recall": 0.7778,
-        "f1": 0.875,
+        "recall": 0.875,
+        "f1": 0.9333,
         "tp": 7,
         "fp": 0,
-        "fn": 2
+        "fn": 1
       },
       "transient": {
         "precision": 0.0,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.7083,
-    "recall": 0.7969,
-    "f1": 0.75,
-    "tp": 51,
-    "fp": 21,
-    "fn": 13,
+    "precision": 0.7826,
+    "recall": 0.7941,
+    "f1": 0.7883,
+    "tp": 54,
+    "fp": 15,
+    "fn": 14,
     "by_category": {
       "ambiguous": {
         "precision": 0.3333,
@@ -107,11 +107,11 @@
       },
       "first_person": {
         "precision": 1.0,
-        "recall": 0.875,
-        "f1": 0.9333,
+        "recall": 0.7778,
+        "f1": 0.875,
         "tp": 7,
         "fp": 0,
-        "fn": 1
+        "fn": 2
       },
       "governance": {
         "precision": 1.0,
@@ -122,28 +122,28 @@
         "fn": 0
       },
       "implicit": {
-        "precision": 0.4444,
-        "recall": 0.6667,
-        "f1": 0.5333,
-        "tp": 4,
-        "fp": 5,
+        "precision": 0.5556,
+        "recall": 0.7143,
+        "f1": 0.625,
+        "tp": 5,
+        "fp": 4,
         "fn": 2
       },
       "infra": {
-        "precision": 0.5714,
-        "recall": 0.8,
-        "f1": 0.6667,
-        "tp": 4,
-        "fp": 3,
+        "precision": 0.8571,
+        "recall": 0.8571,
+        "f1": 0.8571,
+        "tp": 6,
+        "fp": 1,
         "fn": 1
       },
       "multi_fact": {
-        "precision": 0.76,
-        "recall": 0.8636,
-        "f1": 0.8085,
-        "tp": 19,
-        "fp": 6,
-        "fn": 3
+        "precision": 0.8182,
+        "recall": 0.8182,
+        "f1": 0.8182,
+        "tp": 18,
+        "fp": 4,
+        "fn": 4
       },
       "negation": {
         "precision": 0.6667,
@@ -154,20 +154,20 @@
         "fn": 0
       },
       "novel_pred": {
-        "precision": 0.4286,
-        "recall": 0.5,
-        "f1": 0.4615,
-        "tp": 3,
-        "fp": 4,
+        "precision": 0.5714,
+        "recall": 0.5714,
+        "f1": 0.5714,
+        "tp": 4,
+        "fp": 3,
         "fn": 3
       },
       "third_person": {
         "precision": 1.0,
-        "recall": 0.7778,
-        "f1": 0.875,
+        "recall": 0.875,
+        "f1": 0.9333,
         "tp": 7,
         "fp": 0,
-        "fn": 2
+        "fn": 1
       },
       "transient": {
         "precision": 0.0,
@@ -181,9 +181,9 @@
   },
   "fabrication": {
     "_note": "a triple is counted here when a subject or object cannot be traced to the source note. Gold-independent: it measures invented entities, not disagreement with my labels. The write gate cannot catch these \u2014 a well-formed triple about someone never mentioned looks valid.",
-    "predicted_triples": 72,
+    "predicted_triples": 69,
     "ungrounded_triples": 2,
-    "fabrication_rate": 0.0278,
+    "fabrication_rate": 0.029,
     "examples": [
       {
         "id": "im02",
@@ -211,40 +211,40 @@
   },
   "relation_agnostic": {
     "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
-    "precision": 0.7778,
-    "recall": 0.875,
-    "f1": 0.8235,
-    "tp": 56,
-    "fp": 16,
+    "precision": 0.8696,
+    "recall": 0.8824,
+    "f1": 0.8759,
+    "tp": 60,
+    "fp": 9,
     "fn": 8
   },
   "over_extraction": {
-    "empty_gold_notes": 23,
-    "on_schema_empty_gold_notes": 7,
-    "notes_correctly_empty": 3,
-    "abstention_rate_on_schema": 0.4286,
-    "spurious_triples": 4
+    "empty_gold_notes": 22,
+    "on_schema_empty_gold_notes": 22,
+    "notes_correctly_empty": 19,
+    "abstention_rate_on_schema": 0.8636,
+    "spurious_triples": 3
   },
   "output_health": {
-    "notes": 70,
-    "json_parse_ok": 70,
+    "notes": 69,
+    "json_parse_ok": 69,
     "json_parse_rate": 1.0,
-    "schema_ok": 54,
-    "schema_rate": 0.7714,
+    "schema_ok": 69,
+    "schema_rate": 1.0,
     "malformed_facts": 3,
     "dropped_by_conf_floor": 2,
-    "predicted_triples": 72,
-    "in_seed_ontology": 0.9306,
+    "predicted_triples": 69,
+    "in_seed_ontology": 0.9275,
     "catch_all_relations": 0
   },
   "latency_ms": {
-    "median": 3139.4,
-    "p90": 7701.2,
-    "mean": 3577.4
+    "median": 3138.9,
+    "p90": 7534.4,
+    "mean": 3492.8
   },
   "completion_tokens": {
     "median": 27,
-    "mean": 29.8,
+    "mean": 29.1,
     "max": 115
   },
   "model": "Qwen3.6-35B-A3B",

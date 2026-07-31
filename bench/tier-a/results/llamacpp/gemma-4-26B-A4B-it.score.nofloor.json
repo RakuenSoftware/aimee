@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.7808,
-    "recall": 0.8906,
-    "f1": 0.8321,
-    "tp": 57,
-    "fp": 16,
-    "fn": 7,
+    "precision": 0.9,
+    "recall": 0.9265,
+    "f1": 0.913,
+    "tp": 63,
+    "fp": 7,
+    "fn": 5,
     "by_category": {
       "ambiguous": {
         "precision": 0.3333,
@@ -16,43 +16,43 @@
         "fn": 1
       },
       "first_person": {
-        "precision": 0.8889,
+        "precision": 1.0,
         "recall": 1.0,
-        "f1": 0.9412,
-        "tp": 8,
-        "fp": 1,
+        "f1": 1.0,
+        "tp": 9,
+        "fp": 0,
         "fn": 0
       },
       "governance": {
-        "precision": 0.75,
-        "recall": 0.75,
-        "f1": 0.75,
-        "tp": 3,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "tp": 4,
+        "fp": 0,
+        "fn": 0
+      },
+      "implicit": {
+        "precision": 0.8571,
+        "recall": 0.8571,
+        "f1": 0.8571,
+        "tp": 6,
         "fp": 1,
         "fn": 1
       },
-      "implicit": {
-        "precision": 0.7143,
-        "recall": 0.8333,
-        "f1": 0.7692,
-        "tp": 5,
-        "fp": 2,
-        "fn": 1
-      },
       "infra": {
-        "precision": 0.7143,
+        "precision": 1.0,
         "recall": 1.0,
-        "f1": 0.8333,
-        "tp": 5,
-        "fp": 2,
+        "f1": 1.0,
+        "tp": 7,
+        "fp": 0,
         "fn": 0
       },
       "multi_fact": {
-        "precision": 0.8,
+        "precision": 0.9091,
         "recall": 0.9091,
-        "f1": 0.8511,
+        "f1": 0.9091,
         "tp": 20,
-        "fp": 5,
+        "fp": 2,
         "fn": 2
       },
       "negation": {
@@ -64,20 +64,20 @@
         "fn": 0
       },
       "novel_pred": {
-        "precision": 0.8333,
-        "recall": 0.8333,
-        "f1": 0.8333,
-        "tp": 5,
-        "fp": 1,
+        "precision": 1.0,
+        "recall": 0.8571,
+        "f1": 0.9231,
+        "tp": 6,
+        "fp": 0,
         "fn": 1
       },
       "third_person": {
         "precision": 1.0,
-        "recall": 0.8889,
-        "f1": 0.9412,
+        "recall": 1.0,
+        "f1": 1.0,
         "tp": 8,
         "fp": 0,
-        "fn": 1
+        "fn": 0
       },
       "transient": {
         "precision": 0.0,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.7945,
-    "recall": 0.9062,
-    "f1": 0.8467,
-    "tp": 58,
-    "fp": 15,
-    "fn": 6,
+    "precision": 0.9143,
+    "recall": 0.9412,
+    "f1": 0.9275,
+    "tp": 64,
+    "fp": 6,
+    "fn": 4,
     "by_category": {
       "ambiguous": {
         "precision": 0.3333,
@@ -106,43 +106,43 @@
         "fn": 1
       },
       "first_person": {
-        "precision": 0.8889,
+        "precision": 1.0,
         "recall": 1.0,
-        "f1": 0.9412,
-        "tp": 8,
-        "fp": 1,
+        "f1": 1.0,
+        "tp": 9,
+        "fp": 0,
         "fn": 0
       },
       "governance": {
-        "precision": 0.75,
-        "recall": 0.75,
-        "f1": 0.75,
-        "tp": 3,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "tp": 4,
+        "fp": 0,
+        "fn": 0
+      },
+      "implicit": {
+        "precision": 0.8571,
+        "recall": 0.8571,
+        "f1": 0.8571,
+        "tp": 6,
         "fp": 1,
         "fn": 1
       },
-      "implicit": {
-        "precision": 0.7143,
-        "recall": 0.8333,
-        "f1": 0.7692,
-        "tp": 5,
-        "fp": 2,
-        "fn": 1
-      },
       "infra": {
-        "precision": 0.7143,
+        "precision": 1.0,
         "recall": 1.0,
-        "f1": 0.8333,
-        "tp": 5,
-        "fp": 2,
+        "f1": 1.0,
+        "tp": 7,
+        "fp": 0,
         "fn": 0
       },
       "multi_fact": {
-        "precision": 0.84,
+        "precision": 0.9545,
         "recall": 0.9545,
-        "f1": 0.8936,
+        "f1": 0.9545,
         "tp": 21,
-        "fp": 4,
+        "fp": 1,
         "fn": 1
       },
       "negation": {
@@ -154,20 +154,20 @@
         "fn": 0
       },
       "novel_pred": {
-        "precision": 0.8333,
-        "recall": 0.8333,
-        "f1": 0.8333,
-        "tp": 5,
-        "fp": 1,
+        "precision": 1.0,
+        "recall": 0.8571,
+        "f1": 0.9231,
+        "tp": 6,
+        "fp": 0,
         "fn": 1
       },
       "third_person": {
         "precision": 1.0,
-        "recall": 0.8889,
-        "f1": 0.9412,
+        "recall": 1.0,
+        "f1": 1.0,
         "tp": 8,
         "fp": 0,
-        "fn": 1
+        "fn": 0
       },
       "transient": {
         "precision": 0.0,
@@ -181,47 +181,47 @@
   },
   "fabrication": {
     "_note": "a triple is counted here when a subject or object cannot be traced to the source note. Gold-independent: it measures invented entities, not disagreement with my labels. The write gate cannot catch these \u2014 a well-formed triple about someone never mentioned looks valid.",
-    "predicted_triples": 73,
+    "predicted_triples": 70,
     "ungrounded_triples": 0,
     "fabrication_rate": 0.0,
     "examples": []
   },
   "relation_agnostic": {
     "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
-    "precision": 0.8082,
-    "recall": 0.9219,
-    "f1": 0.8613,
-    "tp": 59,
-    "fp": 14,
-    "fn": 5
+    "precision": 0.9143,
+    "recall": 0.9412,
+    "f1": 0.9275,
+    "tp": 64,
+    "fp": 6,
+    "fn": 4
   },
   "over_extraction": {
-    "empty_gold_notes": 23,
-    "on_schema_empty_gold_notes": 12,
-    "notes_correctly_empty": 7,
-    "abstention_rate_on_schema": 0.5833,
-    "spurious_triples": 5
+    "empty_gold_notes": 22,
+    "on_schema_empty_gold_notes": 22,
+    "notes_correctly_empty": 18,
+    "abstention_rate_on_schema": 0.8182,
+    "spurious_triples": 4
   },
   "output_health": {
-    "notes": 70,
-    "json_parse_ok": 59,
-    "json_parse_rate": 0.8429,
-    "schema_ok": 59,
-    "schema_rate": 0.8429,
+    "notes": 69,
+    "json_parse_ok": 58,
+    "json_parse_rate": 0.8406,
+    "schema_ok": 69,
+    "schema_rate": 1.0,
     "malformed_facts": 0,
     "dropped_by_conf_floor": 1,
-    "predicted_triples": 73,
-    "in_seed_ontology": 0.863,
+    "predicted_triples": 70,
+    "in_seed_ontology": 0.8571,
     "catch_all_relations": 0
   },
   "latency_ms": {
-    "median": 3992.8,
-    "p90": 9648.6,
-    "mean": 4440.7
+    "median": 3967.8,
+    "p90": 9352.4,
+    "mean": 4324.2
   },
   "completion_tokens": {
-    "median": 26,
-    "mean": 27.5,
+    "median": 25,
+    "mean": 26.7,
     "max": 89
   },
   "model": "gemma-4-26B-A4B-it",

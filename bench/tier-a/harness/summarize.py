@@ -38,10 +38,15 @@ def accuracy_table(rows, reg):
     # Strict leads: both endpoints must name the labelled entity, only the
     # predicate may vary. This measures extraction, not what a downstream entity
     # resolver might later reconcile.
-    out = ["| model | params | licence | F1 strict | F1 lenient | precision | recall | schema | abstain | med ms |",
+    # Two headline columns, because they answer different questions:
+    #   capability = can this model extract the fact at all (MF_CONF_FLOOR lifted)
+    #   committed  = what the drain would actually write today (floor applied)
+    # The gap is a config artefact, not a model property, and it falls almost
+    # entirely on small models: Qwen3-0.6B is 0.400 capable and 0.000 committed.
+    out = ["| model | params | licence | F1 capability | F1 committed | precision | recall | schema | abstain | med ms |",
            "|---|---|---|---:|---:|---:|---:|---:|---:|---:|"]
     ranked = sorted(rows.items(),
-                    key=lambda kv: -kv[1]["floored"]["strict"]["f1"])
+                    key=lambda kv: -((kv[1]["nofloor"] or kv[1]["floored"])["strict"]["f1"]))
     for _, r in ranked:
         fl, nf = r["floored"], r["nofloor"]
         mid = fl.get("model") or "?"
@@ -52,9 +57,10 @@ def accuracy_table(rows, reg):
         oe = fl["over_extraction"]
         ab = oe.get("abstention_rate_on_schema")
         lat = fl.get("latency_ms", {}).get("median")
+        cap = nf['strict']['f1'] if nf else fl['strict']['f1']
         out.append(
-            f"| {mid} | {params} | {lic} | {fl['strict']['f1']:.3f} | "
-            f"{fl['lenient']['f1']:.3f} | {fl['strict']['precision']:.3f} | "
+            f"| {mid} | {params} | {lic} | {cap:.3f} | "
+            f"{fl['strict']['f1']:.3f} | {fl['strict']['precision']:.3f} | "
             f"{fl['strict']['recall']:.3f} | {h['schema_rate']:.2f} | "
             f"{ab if ab is None else f'{ab:.2f}'} | {lat} |"
         )
