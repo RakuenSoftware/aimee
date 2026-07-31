@@ -328,7 +328,18 @@ if [ "$AIMEE_WFE_ENGINE" = go ]; then
         sleep 0.1
     done
     if ! kill -0 "$server_pid" 2>/dev/null || [ ! -S "$AIMEE_HOME/aimee-http.sock" ]; then
-        log "fatal: C agent resource plane did not become ready"
+        # Say which of the two it was and how long we waited. These fail for very
+        # different reasons -- a dead process means the server exited (its own log
+        # says why), while a live process with no socket means startup is blocked
+        # before it listens, typically on a dependency such as an unresponsive kb.
+        # The bare message sent me looking at the wrong one for some time.
+        if kill -0 "$server_pid" 2>/dev/null; then
+            log "fatal: aimee-server is running but never created $AIMEE_HOME/aimee-http.sock after $((_wait / 10))s"
+            log "  startup is blocked before the listener; check $AIMEE_HOME/server.log for the last"
+            log "  step reached, and whether a dependency (e.g. aimee-kb) is reachable"
+        else
+            log "fatal: aimee-server exited during startup after $((_wait / 10))s; see $AIMEE_HOME/server.log"
+        fi
         shutdown
         exit 1
     fi
