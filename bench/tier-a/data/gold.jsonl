@@ -27,7 +27,7 @@
 {"id": "im04", "category": "implicit", "note": "Klaus and I have worked together on and off for a decade.", "gold": [{"subject": "user", "relation": "knows", "object": "Klaus"}]}
 {"id": "im05", "category": "implicit", "note": "Grew up in Christchurch, but I haven't been back since the quake.", "gold": [{"subject": "user", "relation": "born_in", "object": "Christchurch"}]}
 {"id": "im06", "category": "implicit", "note": "The Wellington office is where Marta clocks in every day.", "gold": [{"subject": "Marta", "relation": "works_for", "object": "Wellington office"}]}
-{"id": "im07", "category": "implicit", "note": "Anand's kids call me uncle, though we're not actually related.", "gold": [{"subject": "user", "relation": "knows", "object": "Anand"}]}
+{"id": "im07", "category": "implicit", "note": "Anand's kids call me uncle, though we're not actually related.", "gold": [{"subject": "user", "relation": "knows", "object": "Anand", "alt": [{"subject": "user", "relation": "knows", "object": "Anand's kids"}]}]}
 {"id": "ng01", "category": "negation", "note": "Correction: I do not work for Rakuen Software, I never did.", "gold": []}
 {"id": "ng02", "category": "negation", "note": "Marta doesn't live in Lisbon anymore.", "gold": []}
 {"id": "ng03", "category": "negation", "note": "To be clear, Tom is not Anand's son.", "gold": []}
