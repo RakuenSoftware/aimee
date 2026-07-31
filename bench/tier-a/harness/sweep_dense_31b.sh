@@ -42,6 +42,7 @@ if [ -s "$PRED" ]; then echo "SKIP $LABEL"; else
     echo "FAIL $LABEL -> server never healthy: $(tail -3 "$LOG" | tr '\n' ' ' | cut -c1-200)"
   else
     if $PY harness/run_llamacpp.py --model "$LABEL" --gold data/gold.jsonl \
+         --no-thinking \
          --out "$PRED" --base-url "http://127.0.0.1:$PORT" >>"$LOG" 2>&1; then
       $PY harness/score.py --gold data/gold.jsonl --pred "$PRED" \
           --json-out "$OUT/$LABEL.score.json" >/dev/null 2>>"$LOG"

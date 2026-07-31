@@ -60,6 +60,7 @@ for entry in "${MODELS[@]}"; do
   echo "     healthy; $(grep -iE 'offloaded|CUDA0 model buffer|CPU model buffer' "$LOG" | tail -2 | tr '\n' ' ')"
 
   if $PY harness/run_llamacpp.py --model "$LABEL" --gold data/gold.jsonl \
+         --no-thinking \
        --out "$PRED" --base-url "http://127.0.0.1:$PORT" >>"$LOG" 2>&1; then
     $PY harness/score.py --gold data/gold.jsonl --pred "$PRED" \
         --json-out "$OUT/$SLUG.score.json" >/dev/null 2>>"$LOG"

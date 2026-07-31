@@ -38,6 +38,7 @@ for entry in "${MODELS[@]}"; do
   done
   if [ "$ready" = 1 ]; then
     if $PY harness/run_llamacpp.py --model "$LABEL" --gold data/gold.jsonl \
+         --no-thinking \
          --out "$PRED" --base-url "http://127.0.0.1:$PORT" >>"$LOG" 2>&1; then
       $PY harness/score.py --gold data/gold.jsonl --pred "$PRED" \
           --json-out "$OUT/$LABEL.score.json" >/dev/null 2>>"$LOG"

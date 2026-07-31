@@ -740,3 +740,44 @@ comment saying they are not optional. All .254 results deleted and re-running.
 The deeper problem is that `run_llamacpp.py`'s defaults (512, thinking off) are
 not production's, so any caller that forgets a flag silently measures a
 different system. Two sweeps have now done exactly that.
+
+## Defect 25: the runner's defaults were not production's, so omission was silent
+
+`run_llamacpp.py` defaulted `--max-tokens` to 512 (production allows 8192) and
+treated thinking as a bare `store_true`, so "off" was indistinguishable from
+"not considered". Any sweep that forgot a flag quietly measured a different
+system than the one that ships, and two did.
+
+An audit of every sweep that calls the runner, after the fact:
+
+| sweep | thinking | cap |
+| --- | --- | --- |
+| sweep_thinking.sh | `--thinking` | 8192 |
+| sweep_challenger_254.sh | MISSING, now fixed | 512, now fixed |
+| **sweep_sub1b.sh** | **MISSING** | **512 default** |
+| sweep_llamacpp.sh | MISSING | 512 default |
+| sweep_dense_31b.sh | MISSING | 512 default |
+| sweep_dense_vs_moe.sh | MISSING | 512 default |
+| sweep_noconf.sh | MISSING | 512 default |
+| sweep_q4_accuracy.sh | MISSING | 512 default |
+
+`sweep_sub1b.sh` had not run yet. It was queued to re-measure exactly the models
+whose earlier numbers were an artefact, and it would have reproduced the artefact
+in a new form.
+
+Fixed three ways:
+
+1. `--max-tokens` defaults to **8192**, matching `MF_LLM_OUT_CAP`. A caller who
+   forgets it now measures the shipped system.
+2. Thinking is a **required mutually-exclusive group**: `--thinking` or
+   `--no-thinking`, no default. It is worth +0.09 F1 to gemma-4-E4B, the largest
+   effect measured here, so a run that does not record which side it took is not
+   interpretable. Omitting it is now an argparse error rather than a silent
+   choice.
+3. Every historical sweep marked `--no-thinking` explicitly, so the lanes in
+   `results/` stay reproducible now that the default has changed meaning.
+
+The general form: a benchmark's defaults should be the product's defaults.
+Where they differ, every difference has to be stated at each call site, and
+nothing enforces that. Where they cannot match, the parameter should have no
+default at all.

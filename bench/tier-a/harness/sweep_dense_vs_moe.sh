@@ -46,6 +46,7 @@ if [ -s "$PRED" ]; then echo "SKIP $LABEL"; else
     KEEP='' HF_HOME="$HF_HOME" bash harness/prune_models.sh 2>/dev/null | tail -2
   else
     if $PY harness/run_llamacpp.py --model "$LABEL" --gold data/gold.jsonl \
+         --no-thinking \
          --out "$PRED" --base-url "http://127.0.0.1:$PORT" >>"$LOG" 2>&1; then
       $PY harness/score.py --gold data/gold.jsonl --pred "$PRED" \
           --json-out "$OUT/$SLUG.score.json" >/dev/null 2>>"$LOG"

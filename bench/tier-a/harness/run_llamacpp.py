@@ -55,16 +55,29 @@ def main():
     ap.add_argument("--model", required=True, help="label recorded in the results")
     ap.add_argument("--gold", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--max-tokens", type=int, default=512)
+    # Defaults are PRODUCTION's, so a caller that forgets a flag measures the
+    # shipped system rather than a quieter one. This used to default to 512, a
+    # sixteenth of MF_LLM_OUT_CAP, and two separate sweeps silently inherited it:
+    # sweep_challenger_254.sh truncated Olmo-3.1-32B-Think on 59 of 70 notes and
+    # nothing said so until the scorer learned to refuse truncated rows.
+    ap.add_argument("--max-tokens", type=int, default=8192,
+                    help="matches MF_LLM_OUT_CAP in src/kb/kb_memory_facts.c")
     ap.add_argument("--timeout", type=float, default=600)
     ap.add_argument("--no-confidence", action="store_true",
                     help="ABLATION: drop the confidence field from the schema.")
-    ap.add_argument("--thinking", action="store_true",
-                    help="ABLATION: enable_thinking=true. Production Tier-A sets "
-                         "disable_thinking, on the theory that extraction is "
-                         "mechanical. The failure modes that separate models here "
-                         "are negation and implicit inference, which is not "
-                         "obviously mechanical, so this tests the assumption.")
+    # Thinking has no default at all: it must be stated. It is worth +0.09 F1 to
+    # gemma-4-E4B and it is the single largest effect measured on this benchmark,
+    # so a run that does not record which side of it was taken is not
+    # interpretable. It was previously a bare store_true, which meant "off"
+    # looked identical to "not considered".
+    think = ap.add_mutually_exclusive_group(required=True)
+    think.add_argument("--thinking", dest="thinking", action="store_true",
+                       help="enable_thinking=true, which is what production does "
+                            "now: kb_curator_provider.c stopped setting "
+                            "disable_thinking after it measured 0.738 -> 0.828 on "
+                            "gemma-4-E4B.")
+    think.add_argument("--no-thinking", dest="thinking", action="store_false",
+                       help="ABLATION: the retired disable_thinking behaviour.")
     args = ap.parse_args()
 
     prompt.verify_against_source()

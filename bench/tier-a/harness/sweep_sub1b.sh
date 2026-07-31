@@ -61,7 +61,12 @@ for entry in "${MODELS[@]}"; do
     sleep 10
   done
   if [ "$ready" = 1 ]; then
+    # Explicit, because the point of this sweep is to re-measure these models
+    # under the CURRENT configuration. It previously inherited thinking-off and a
+    # 512-token cap by omission, which is the exact pair that invalidated the
+    # .254 challenger sweep.
     if $PY harness/run_llamacpp.py --model "$LABEL" --gold data/gold.jsonl \
+         --thinking --max-tokens 8192 \
          --out "$PRED" --base-url "http://127.0.0.1:$PORT" >>"$LOG" 2>&1; then
       # Scored under all three gates. The default is the shipping one; the other
       # two are what the historical table used, and keeping them side by side is
