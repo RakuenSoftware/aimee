@@ -49,26 +49,23 @@ visible it takes layers and wrecks both fit and throughput without saying so.
 
 ## What is comparable to what
 
-`.253` and `.254` numbers are **not** directly comparable. `gemma-4-12B` was run
-in three configurations to measure the gap:
+`.253` and `.254` numbers are **not** directly comparable, and the first attempt
+to measure the gap was itself invalid.
 
-| config | strict F1 | recall | abstention |
-| --- | ---: | ---: | ---: |
-| Q8_0 / 5080 / CUDA | 0.8235* | 0.8358 | 0.8261 |
-| Q8_0 / 7900 XTX / Vulkan | 0.8438 | 0.8060 | 0.9130 |
-| Q6_K / 7900 XTX / Vulkan | 0.8550 | 0.8358 | 0.9130 |
+`gemma-4-12B` was run in three configurations to quantify it, producing
+quantisation +0.0112 and backend +0.0203 for a combined ~0.03. **Those figures
+are withdrawn.** The `.254` sweep passed neither `--thinking` nor
+`--max-tokens`, so it ran with reasoning suppressed against the runner's default
+512-token cap, while the `.253` side ran with reasoning on at 2048. The
+comparison changed four variables, not two. See MEASUREMENT_LOG.md defect 24.
 
-quantisation effect, hardware held constant: **+0.0112**
-backend effect, quantisation held constant: **+0.0203**
+The control study is being redone with both sides at `--thinking
+--max-tokens 8192`. Until it lands, the honest statement is that the
+cross-host correction is **unknown**, not that it is 0.03.
 
-So roughly **0.03 F1 is the floor** below which a cross-host comparison says
-nothing at all. Neither component is a capability change: recall is not even
-monotonic across the three, and the abstention column tracks F1 almost exactly,
-so what moves is how readily the model declines on the empty-gold notes.
-
-\* This figure is from the run later invalidated by the token cap (defect 23) and
-is superseded; the control study still stands, because all three configurations
-shared the same cap and the comparison is between them.
+What remains true and is worth keeping: a control was necessary, and it caught
+this. A challenger "beating Gemma 4" on a different host, quantisation and
+backend means nothing without one.
 
 ## Timings are contended and should not be quoted
 

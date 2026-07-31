@@ -102,7 +102,17 @@ for entry in "${MODELS[@]}"; do
     sleep 10
   done
   if [ "$ready" = 1 ]; then
+    # --thinking and --max-tokens 8192 are NOT optional and NOT defaults.
+    #
+    # The first run of this sweep passed neither, so every model ran with
+    # thinking suppressed against run_llamacpp.py's default 512-token cap, a
+    # sixteenth of production's MF_LLM_OUT_CAP. That is not the configuration
+    # the .253 ladder uses, so nothing was comparable to it, and it hit the
+    # reasoning models hardest: Olmo-3.1-32B-THINK truncated on 59 of 70 notes.
+    # A sweep whose entire purpose is testing reasoning-tuned models ran them
+    # with reasoning off.
     if $PY harness/run_llamacpp.py --model "$LABEL" --gold data/gold.jsonl \
+         --thinking --max-tokens 8192 \
          --out "$PRED" --base-url "http://127.0.0.1:$PORT" >>"$LOG" 2>&1; then
       for KEY in pred_grounded pred pred_nofloor; do
         $PY harness/score.py --gold data/gold.jsonl --pred "$PRED" \

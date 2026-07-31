@@ -687,3 +687,56 @@ resulting numbers as model behaviour.
 Note for anyone re-reading the ladder: gemma-4-31B truncated 0 times even at
 2048, so it was not contaminated by this. It was discarded and re-run anyway,
 because half a ladder under one cap and half under another is not a ladder.
+
+## Defect 24: the challenger sweep ran reasoning models with reasoning off
+
+`sweep_challenger_254.sh` invoked `run_llamacpp.py` without `--thinking` and
+without `--max-tokens`, so every model on .254 ran with reasoning suppressed
+against the runner's **default 512-token cap** — a sixteenth of production's
+`MF_LLM_OUT_CAP`. The .253 ladder it was meant to be compared against runs
+`--thinking --max-tokens 8192`.
+
+| model | truncated | median completion tokens |
+| --- | ---: | ---: |
+| gemma-4-12B Q6 (control) | 0/70 | 34 |
+| gemma-4-12B Q8 (control) | 0/70 | 33 |
+| Magistral-Small-2509 | 0/70 | 30 |
+| **Olmo-3.1-32B-Think** | **59/70** | 512 |
+| GLM-4.7-Flash | 70/70 | 512 |
+
+The sweep existed to test reasoning-tuned models, and it ran them with reasoning
+off. Olmo-3.1-32B-**Think** truncated on 59 of 70 notes. Magistral scored 0.7376
+and I reported it as "works, clearly worse" — with its reasoning suppressed.
+
+The controls did not truncate, because 12B without thinking emits ~34 tokens, so
+nothing in the control's own numbers hinted at the problem. That is what made it
+survive: the check I had just added fires on truncation, and the two runs I was
+using to validate the host were the two that could not truncate.
+
+Withdrawn as a result:
+
+- **Magistral-Small-2509 at 0.7376.** Measured in the wrong configuration.
+- **The quantisation/backend split (+0.0112 / +0.0203).** The .254 side was
+  thinking-off at 512, the .253 side thinking-on at 2048. Four variables, not
+  two, and the .253 half has since been discarded under defect 23 anyway.
+- **The ~0.03 cross-host noise floor.** Rested on the above.
+
+Not withdrawn: **GLM-4.7-Flash emits garbage.** Probed outside the harness
+entirely, on the raw `/completion` endpoint with no chat template:
+
+```
+prompt:  "The capital of France is"
+output:  '????????????'
+```
+
+That is not a cap, a prompt or a flag. Q6_K GGUF under RADV Vulkan on the 7900
+XTX produces non-language. Whether the cause is the quantisation, the GGUF
+publisher or the Vulkan backend is untested; the discriminating run is
+GLM-4.7-Flash on .253 under CUDA with expert offload.
+
+Fixed: the sweep now passes `--thinking --max-tokens 8192` explicitly, with a
+comment saying they are not optional. All .254 results deleted and re-running.
+
+The deeper problem is that `run_llamacpp.py`'s defaults (512, thinking off) are
+not production's, so any caller that forgets a flag silently measures a
+different system. Two sweeps have now done exactly that.
