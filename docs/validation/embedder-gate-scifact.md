@@ -27,7 +27,7 @@ Every number below is **baseline-gated**: each model's score is trusted only aft
 it reproduces its *published* result on the same harness. Harness:
 [`benchmarks/beir_cli.py`](../../benchmarks/beir_cli.py) driving llama.cpp
 `llama-embedding` on an AMD RX 7900 XTX (RADV/Vulkan). Artifacts in
-[`benchmarks/results/embedder-gate/`](../../benchmarks/results/embedder-gate/)
+[`embedder-gate/`](https://github.com/RakuenSoftware/rakuen-blog/tree/main/articles/we-measured-our-reranker-and-deleted-it/benchmarks/embedder-gate/)
 (`scifact-full/`, `multi-beir/`, `aimee-code/`).
 
 ## Why this matters: aimee embeds code
@@ -97,7 +97,7 @@ CodeSearchNet-CC +3.4, CodeTransOcean +4.9); **4B→8B is ≤+0.5** everywhere.
 function signature+body is the relevant doc (1:1) — i.e. NL-intent → code-body
 retrieval, exactly the `intent_vec`→`body_vec` match aimee performs. Docs capped
 to 2000 chars (one clean sequence per doc). Artifacts in
-[`benchmarks/results/embedder-gate/aimee-code/`](../../benchmarks/results/embedder-gate/aimee-code/).
+[`embedder-gate/aimee-code/`](https://github.com/RakuenSoftware/rakuen-blog/tree/main/articles/we-measured-our-reranker-and-deleted-it/benchmarks/embedder-gate/aimee-code/).
 
 | model | nDCG@10 | Recall@10 | embed time | dim | VRAM |
 |---|---|---|---|---|---|

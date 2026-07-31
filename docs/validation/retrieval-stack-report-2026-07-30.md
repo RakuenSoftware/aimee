@@ -4,7 +4,7 @@
 rerankers, and the query-latency budget. Supporting detail in
 [embedder-selection-frozen-ab-v1](embedder-selection-frozen-ab-v1.md) and
 [reranker-and-pipeline](reranker-and-pipeline-2026-07-29.md); raw artifacts in
-[`benchmarks/results/reranker-2026-07-29/`](../../benchmarks/results/reranker-2026-07-29/).
+[`reranker-2026-07-29/`](https://github.com/RakuenSoftware/rakuen-blog/tree/main/articles/we-measured-our-reranker-and-deleted-it/benchmarks/reranker-2026-07-29/) (moved to the blog repo).
 
 ---
 
@@ -291,7 +291,7 @@ without provenance is not trustworthy.
 # Addendum: hybrid retrieval (BM25 + RRF) — the largest effect measured
 
 Added 2026-07-30 after the reranker work concluded. Raw artifacts:
-`benchmarks/results/reranker-2026-07-29/hybrid-*.json`, `fusion-frontier-*.json`.
+[`reranker-2026-07-29/`](https://github.com/RakuenSoftware/rakuen-blog/tree/main/articles/we-measured-our-reranker-and-deleted-it/benchmarks/reranker-2026-07-29/) — `hybrid-*.json`, `fusion-frontier-*.json`.
 
 ## Result
 
@@ -374,3 +374,16 @@ infrastructure that already exists (the FTS leg) and a constant nobody tuned.
 Combined with [learning-to-rank](../proposals/pending/learning-to-rank-from-interactions.md),
 which would learn that combination from real interactions instead of guessing it,
 this is where the remaining retrieval quality lives.
+
+---
+
+## Where the artifacts live
+
+The raw result artifacts and frozen fixtures this report computes from were
+moved to the blog repository on 2026-07-31, so that the article built on them
+and the evidence for it sit together:
+
+<https://github.com/RakuenSoftware/rakuen-blog/tree/main/articles/we-measured-our-reranker-and-deleted-it>
+
+This document stays here as aimee's validation record. Reproducing its figures
+now requires that repository.

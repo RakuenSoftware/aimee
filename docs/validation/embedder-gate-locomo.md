@@ -60,7 +60,7 @@ python3 benchmarks/embedder_gate.py --dataset locomo10.json \
 ## Results
 
 Run 2026-06-22 on the 7900XTX. LoCoMo, 10 conversations, **1982** answerable
-questions. Artifacts: [`benchmarks/results/embedder-gate/`](../../benchmarks/results/embedder-gate/).
+questions. Artifacts: [`embedder-gate/`](https://github.com/RakuenSoftware/rakuen-blog/tree/main/articles/we-measured-our-reranker-and-deleted-it/benchmarks/embedder-gate/) (moved to the blog repo).
 
 | model | dim | Recall@5 | Recall@10 | MRR |
 |---|---|---|---|---|

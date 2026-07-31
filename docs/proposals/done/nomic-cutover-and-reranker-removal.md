@@ -7,7 +7,7 @@
   the durable part.
 - **Evidence:** [retrieval-stack-report](../../validation/retrieval-stack-report-2026-07-30.md),
   [reranker-and-pipeline](../../validation/reranker-and-pipeline-2026-07-29.md),
-  raw artifacts in `benchmarks/results/reranker-2026-07-29/`.
+  raw artifacts in the blog repo: [`reranker-2026-07-29/`](https://github.com/RakuenSoftware/rakuen-blog/tree/main/articles/we-measured-our-reranker-and-deleted-it/benchmarks/reranker-2026-07-29/).
 - **Related:** [learning-to-rank-from-interactions](learning-to-rank-from-interactions.md),
   [embedder-query-document-prefixes](embedder-query-document-prefixes.md).
 
@@ -155,7 +155,7 @@ eliminates the only component requiring a pre-converted GGUF release artifact.
 ## What NOT to do
 
 - **Do not re-run the embedder or reranker benchmarks.** Results are cached in
-  `/opt/rr/` on CT 106 (`.253`) and committed under `benchmarks/results/`.
+  `/opt/rr/` on CT 106 (`.253`) and committed in the blog repo (see the evidence index for that article).
   Re-run only to validate correctness or to answer a genuinely new question.
 - **Do not adopt Qwen3.** 0.6B was the weakest model measured on this corpus
   (0.5810); 4B ties nomic at 3.3x the vector storage and 3.1x slower embedding.
