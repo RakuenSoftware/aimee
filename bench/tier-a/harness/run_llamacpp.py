@@ -1,0 +1,103 @@
+"""Run the Tier-A extraction task against a llama.cpp server.
+
+Two reasons this exists alongside run_hf.py:
+
+1. MoE offload. A 26B/3.8B-active or 35B/3B-active model does not fit 15.5GB of
+   VRAM, and transformers' offload handles that badly — three quantised attempts
+   failed outright and bf16 offload ran at 74s a note. llama.cpp can pin
+   attention and shared weights to the GPU and route only the expert FFN tensors
+   to CPU, which is the split MoE was designed for.
+
+2. It is closer to production. The KB calls an OpenAI-compatible endpoint, so
+   this path exercises the same request shape kb_curator_llm_run does, rather
+   than an in-process generate().
+
+Changing runtime is a confound, so the sweep runs E4B through here as a control
+against its transformers result — the same discipline the NF4 control used.
+"""
+
+import argparse
+import json
+import time
+import urllib.error
+import urllib.request
+
+import prompt
+from run_hf import CONF_FLOOR, extract_json
+
+
+def complete(base_url, model, sys_prompt, note, max_tokens, timeout):
+    """One chat completion. Greedy, matching the transformers runner."""
+    body = json.dumps({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": sys_prompt},
+            {"role": "user", "content": prompt.user_message(note)},
+        ],
+        "temperature": 0,
+        "top_p": 1,
+        "max_tokens": max_tokens,
+        "stream": False,
+        # Tier-A sets disable_thinking; llama.cpp forwards this to the template.
+        "chat_template_kwargs": {"enable_thinking": False},
+    }).encode()
+    req = urllib.request.Request(
+        f"{base_url.rstrip('/')}/v1/chat/completions", data=body,
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read())
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--base-url", default="http://127.0.0.1:8080")
+    ap.add_argument("--model", required=True, help="label recorded in the results")
+    ap.add_argument("--gold", required=True)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--max-tokens", type=int, default=512)
+    ap.add_argument("--timeout", type=float, default=600)
+    args = ap.parse_args()
+
+    prompt.verify_against_source()
+    sys_prompt = prompt.system_prompt()
+    rows = [json.loads(l) for l in open(args.gold) if l.strip()]
+
+    with open(args.out, "w") as fh:
+        for r in rows:
+            t0 = time.perf_counter()
+            try:
+                resp = complete(args.base_url, args.model, sys_prompt, r["note"],
+                                args.max_tokens, args.timeout)
+                raw = resp["choices"][0]["message"]["content"] or ""
+                usage = resp.get("usage") or {}
+                err = None
+            except (urllib.error.URLError, KeyError, TimeoutError, OSError) as e:
+                raw, usage, err = "", {}, f"{type(e).__name__}: {e}"
+            dt = (time.perf_counter() - t0) * 1000
+
+            facts, ok, schema_ok, malformed = extract_json(raw)
+            floored = [f for f in facts if f["confidence"] >= CONF_FLOOR]
+            fh.write(json.dumps({
+                "id": r["id"],
+                "model": args.model,
+                "runtime": "llama.cpp",
+                "pred": floored,
+                "pred_nofloor": facts,
+                "parse_ok": ok,
+                "schema_ok": schema_ok,
+                "malformed_facts": malformed,
+                "dropped_by_conf_floor": len(facts) - len(floored),
+                "raw": raw[:4000],
+                "error": err,
+                "latency_ms": round(dt, 1),
+                "completion_tokens": usage.get("completion_tokens"),
+                "prompt_tokens": usage.get("prompt_tokens"),
+                "truncated": usage.get("completion_tokens") == args.max_tokens,
+            }, ensure_ascii=False) + "\n")
+            fh.flush()
+            if err:
+                print(f"{r['id']}: {err}", flush=True)
+
+
+if __name__ == "__main__":
+    main()

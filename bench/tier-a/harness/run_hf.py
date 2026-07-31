@@ -108,6 +108,9 @@ def main():
                          "VRAM runs resident instead of offloading to CPU at ~75s a "
                          "note. Quantisation is a confound: only compare a 4-bit run "
                          "against another 4-bit run.")
+    ap.add_argument("--gpu-budget", default=None,
+                    help="cap GPU allocation (e.g. 13GiB) so accelerate leaves room "
+                         "for activations instead of filling VRAM with weights.")
     ap.add_argument("--signature-prompt", action="store_true",
                     help="REJECTED EXPERIMENT: send type signatures alongside "
                          "predicate names. Regressed 4/5 models; kept reproducible.")
@@ -135,7 +138,12 @@ def main():
             bnb_4bit_quant_type="nf4",
             bnb_4bit_compute_dtype=getattr(torch, args.dtype),
             bnb_4bit_use_double_quant=True,
+            # bitsandbytes refuses any CPU/disk dispatch unless this is set, and a
+            # 26B/35B at NF4 does not fit 15.5GB, so the spill is unavoidable.
+            llm_int8_enable_fp32_cpu_offload=True,
         )
+        if args.gpu_budget:
+            load_kwargs["max_memory"] = {0: args.gpu_budget, "cpu": "80GiB"}
     model = AutoModelForCausalLM.from_pretrained(args.model, **load_kwargs)
     model.eval()
     if args.device == "cpu":
