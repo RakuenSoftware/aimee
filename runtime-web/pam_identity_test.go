@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/RakuenSoftware/smoothgui/auth"
@@ -174,5 +175,50 @@ func TestPAMListReportsOnlyManagedLogins(t *testing.T) {
 	}
 	if len(names) != 2 || names[0] != "admin" || names[1] != "virant" {
 		t.Fatalf("List() = %v; want sorted [admin virant]", names)
+	}
+}
+
+// A username that already names a host group must be refused with a sentence an
+// operator can act on, instead of useradd's "group X exists ... exit status 9"
+// reaching the browser. The image ships operator, backup, staff, users and aimee
+// as groups, and the wizard's first field is where someone meets them.
+func TestCreateRefusesUsernameThatIsAlreadyAGroup(t *testing.T) {
+	origGroup, origUser := groupLookup, userLookup
+	defer func() { groupLookup, userLookup = origGroup, origUser }()
+
+	users := &fakeUsers{members: map[string]bool{}, created: map[string]string{}}
+	p := &pamAccounts{users: users}
+
+	// "operator" is a group and not an account.
+	groupLookup = func(name string) error {
+		if name == "operator" {
+			return nil
+		}
+		return errors.New("no such group")
+	}
+	userLookup = func(string) error { return errors.New("no such user") }
+
+	err := p.Create("operator", "irrelevant")
+	if err == nil {
+		t.Fatal("expected a refusal for a username that is already a group")
+	}
+	if !strings.Contains(err.Error(), "already a group") {
+		t.Fatalf("error should name the collision, got: %v", err)
+	}
+	if len(users.created) != 0 {
+		t.Fatalf("must not reach the user manager, created=%v", users.created)
+	}
+
+	// A free name still goes through.
+	if err := p.Create("admin", "irrelevant"); err != nil {
+		t.Fatalf("a name that is not a group should be created: %v", err)
+	}
+
+	// An EXISTING account owns a like-named private group. That must not be
+	// reported as a collision, or the caller's real "user exists" path is masked.
+	groupLookup = func(string) error { return nil }
+	userLookup = func(string) error { return nil }
+	if err := p.Create("existing", "irrelevant"); err != nil {
+		t.Fatalf("an existing account must not be refused as a group clash: %v", err)
 	}
 }

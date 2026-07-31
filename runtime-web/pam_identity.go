@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"os/user"
 	"sort"
 
 	"github.com/RakuenSoftware/smoothgui/auth"
@@ -122,9 +123,42 @@ func (p *pamAccounts) Exists(username string) bool {
 	return p.managed(username)
 }
 
+// groupLookup is os/user's group lookup, indirected so the collision check can
+// be tested without depending on which groups the test host happens to ship.
+var groupLookup = func(name string) error {
+	_, err := user.LookupGroup(name)
+	return err
+}
+
+// userLookup reports whether an account of this name already exists.
+var userLookup = func(name string) error {
+	_, err := user.Lookup(name)
+	return err
+}
+
+// errUsernameIsGroup explains a collision the operator can actually act on.
+//
+// useradd allocates a user-private group and fails with "group <name> exists"
+// and exit status 9 when one is already there. The server image ships the usual
+// Unix groups, so operator, backup, staff, users, news, mail, proxy, adm and
+// aimee itself are all taken. That list is not obscure: the wizard's first field
+// asks an operator to name their account, and "operator" is the obvious answer.
+//
+// Without this the shell error reaches the browser verbatim, doubled prefix and
+// exit status included, naming neither the real problem nor a way out.
+func errUsernameIsGroup(username string) error {
+	return fmt.Errorf("%q is already a group on this host, so it cannot also be an account name; choose another", username)
+}
+
 func (p *pamAccounts) Create(username, password string) error {
 	if err := auth.ValidateUsername(username); err != nil {
 		return err
+	}
+	// Only a collision for a name that is NOT already an account: an existing
+	// account owns a like-named private group, and reporting that as a clash
+	// would mask the real "user exists" condition the caller handles.
+	if userLookup(username) != nil && groupLookup(username) == nil {
+		return errUsernameIsGroup(username)
 	}
 	return p.users.Create(username, password)
 }
