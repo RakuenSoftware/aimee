@@ -5,7 +5,7 @@
     "f1": 0.0,
     "tp": 0,
     "fp": 0,
-    "fn": 64,
+    "fn": 68,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -21,7 +21,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 8
+        "fn": 9
       },
       "governance": {
         "precision": 0.0,
@@ -37,7 +37,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 6
+        "fn": 7
       },
       "infra": {
         "precision": 0.0,
@@ -45,7 +45,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 5
+        "fn": 7
       },
       "multi_fact": {
         "precision": 0.0,
@@ -69,7 +69,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 6
+        "fn": 7
       },
       "third_person": {
         "precision": 0.0,
@@ -77,7 +77,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 9
+        "fn": 8
       },
       "transient": {
         "precision": 0.0,
@@ -95,7 +95,7 @@
     "f1": 0.0,
     "tp": 0,
     "fp": 0,
-    "fn": 64,
+    "fn": 68,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -111,7 +111,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 8
+        "fn": 9
       },
       "governance": {
         "precision": 0.0,
@@ -127,7 +127,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 6
+        "fn": 7
       },
       "infra": {
         "precision": 0.0,
@@ -135,7 +135,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 5
+        "fn": 7
       },
       "multi_fact": {
         "precision": 0.0,
@@ -159,7 +159,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 6
+        "fn": 7
       },
       "third_person": {
         "precision": 0.0,
@@ -167,7 +167,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 9
+        "fn": 8
       },
       "transient": {
         "precision": 0.0,
@@ -193,18 +193,18 @@
     "f1": 0.0,
     "tp": 0,
     "fp": 0,
-    "fn": 64
+    "fn": 68
   },
   "over_extraction": {
-    "empty_gold_notes": 23,
+    "empty_gold_notes": 22,
     "on_schema_empty_gold_notes": 0,
     "notes_correctly_empty": 0,
     "abstention_rate_on_schema": null,
     "spurious_triples": 0
   },
   "output_health": {
-    "notes": 70,
-    "json_parse_ok": 70,
+    "notes": 69,
+    "json_parse_ok": 69,
     "json_parse_rate": 1.0,
     "schema_ok": 0,
     "schema_rate": 0.0,
@@ -215,14 +215,14 @@
     "catch_all_relations": 0
   },
   "latency_ms": {
-    "median": 263.7,
-    "p90": 368.8,
-    "mean": 272.5
+    "median": 257.9,
+    "p90": 362.6,
+    "mean": 270.0
   },
   "completion_tokens": {
     "median": 22,
-    "mean": 23.2,
-    "max": 41
+    "mean": 23.0,
+    "max": 39
   },
   "model": "unsloth/gemma-3-270m-it",
   "scored_key": "pred",

@@ -140,6 +140,23 @@ def system_prompt_with_signatures():
     return TEMPLATE % ", ".join(seed_descriptors())
 
 
+def system_prompt_no_confidence():
+    """ABLATION: drop the confidence field from the contract entirely.
+
+    The field is requested, copied as the literal 0.0 by most models, and then
+    used to discard their work. If it is not trustworthy enough to gate on, it
+    may not be worth asking for — removing it shortens the prompt, removes the
+    literal models imitate, and saves output tokens on every call in the highest
+    volume LLM path in the KB."""
+    base = system_prompt()
+    out = base.replace('{"subject":"","relation":"","object":"","confidence":0.0}',
+                       '{"subject":"","relation":"","object":""}')
+    out = out.replace(" confidence is 0..1.", "")
+    if out == base:
+        raise SystemExit("ablation no-op: the confidence literal moved")
+    return out
+
+
 def system_prompt_conf_fixed():
     """Ablation: the production prompt with one literal changed.
 

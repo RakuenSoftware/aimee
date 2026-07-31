@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.4583,
-    "recall": 0.3438,
-    "f1": 0.3929,
-    "tp": 22,
-    "fp": 26,
-    "fn": 42,
+    "precision": 0.5625,
+    "recall": 0.3971,
+    "f1": 0.4655,
+    "tp": 27,
+    "fp": 21,
+    "fn": 41,
     "by_category": {
       "ambiguous": {
         "precision": 0.25,
@@ -17,11 +17,11 @@
       },
       "first_person": {
         "precision": 1.0,
-        "recall": 0.5,
-        "f1": 0.6667,
+        "recall": 0.4444,
+        "f1": 0.6154,
         "tp": 4,
         "fp": 0,
-        "fn": 4
+        "fn": 5
       },
       "governance": {
         "precision": 0.6667,
@@ -33,51 +33,51 @@
       },
       "implicit": {
         "precision": 0.5,
-        "recall": 0.5,
-        "f1": 0.5,
+        "recall": 0.4286,
+        "f1": 0.4615,
         "tp": 3,
         "fp": 3,
-        "fn": 3
+        "fn": 4
       },
       "infra": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "tp": 0,
-        "fp": 6,
-        "fn": 5
+        "precision": 0.1667,
+        "recall": 0.1429,
+        "f1": 0.1538,
+        "tp": 1,
+        "fp": 5,
+        "fn": 6
       },
       "multi_fact": {
-        "precision": 0.3571,
-        "recall": 0.2273,
-        "f1": 0.2778,
-        "tp": 5,
-        "fp": 9,
-        "fn": 17
+        "precision": 0.4286,
+        "recall": 0.2727,
+        "f1": 0.3333,
+        "tp": 6,
+        "fp": 8,
+        "fn": 16
       },
       "negation": {
-        "precision": 0.3333,
-        "recall": 0.5,
-        "f1": 0.4,
-        "tp": 1,
-        "fp": 2,
-        "fn": 1
+        "precision": 0.6667,
+        "recall": 1.0,
+        "f1": 0.8,
+        "tp": 2,
+        "fp": 1,
+        "fn": 0
       },
       "novel_pred": {
-        "precision": 0.3333,
-        "recall": 0.1667,
-        "f1": 0.2222,
-        "tp": 1,
-        "fp": 2,
-        "fn": 5
+        "precision": 1.0,
+        "recall": 0.4286,
+        "f1": 0.6,
+        "tp": 3,
+        "fp": 0,
+        "fn": 4
       },
       "third_person": {
         "precision": 1.0,
-        "recall": 0.5556,
-        "f1": 0.7143,
+        "recall": 0.625,
+        "f1": 0.7692,
         "tp": 5,
         "fp": 0,
-        "fn": 4
+        "fn": 3
       },
       "transient": {
         "precision": 0.0,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.4583,
-    "recall": 0.3438,
-    "f1": 0.3929,
-    "tp": 22,
-    "fp": 26,
-    "fn": 42,
+    "precision": 0.5625,
+    "recall": 0.3971,
+    "f1": 0.4655,
+    "tp": 27,
+    "fp": 21,
+    "fn": 41,
     "by_category": {
       "ambiguous": {
         "precision": 0.25,
@@ -107,11 +107,11 @@
       },
       "first_person": {
         "precision": 1.0,
-        "recall": 0.5,
-        "f1": 0.6667,
+        "recall": 0.4444,
+        "f1": 0.6154,
         "tp": 4,
         "fp": 0,
-        "fn": 4
+        "fn": 5
       },
       "governance": {
         "precision": 0.6667,
@@ -123,51 +123,51 @@
       },
       "implicit": {
         "precision": 0.5,
-        "recall": 0.5,
-        "f1": 0.5,
+        "recall": 0.4286,
+        "f1": 0.4615,
         "tp": 3,
         "fp": 3,
-        "fn": 3
+        "fn": 4
       },
       "infra": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "tp": 0,
-        "fp": 6,
-        "fn": 5
+        "precision": 0.1667,
+        "recall": 0.1429,
+        "f1": 0.1538,
+        "tp": 1,
+        "fp": 5,
+        "fn": 6
       },
       "multi_fact": {
-        "precision": 0.3571,
-        "recall": 0.2273,
-        "f1": 0.2778,
-        "tp": 5,
-        "fp": 9,
-        "fn": 17
+        "precision": 0.4286,
+        "recall": 0.2727,
+        "f1": 0.3333,
+        "tp": 6,
+        "fp": 8,
+        "fn": 16
       },
       "negation": {
-        "precision": 0.3333,
-        "recall": 0.5,
-        "f1": 0.4,
-        "tp": 1,
-        "fp": 2,
-        "fn": 1
+        "precision": 0.6667,
+        "recall": 1.0,
+        "f1": 0.8,
+        "tp": 2,
+        "fp": 1,
+        "fn": 0
       },
       "novel_pred": {
-        "precision": 0.3333,
-        "recall": 0.1667,
-        "f1": 0.2222,
-        "tp": 1,
-        "fp": 2,
-        "fn": 5
+        "precision": 1.0,
+        "recall": 0.4286,
+        "f1": 0.6,
+        "tp": 3,
+        "fp": 0,
+        "fn": 4
       },
       "third_person": {
         "precision": 1.0,
-        "recall": 0.5556,
-        "f1": 0.7143,
+        "recall": 0.625,
+        "f1": 0.7692,
         "tp": 5,
         "fp": 0,
-        "fn": 4
+        "fn": 3
       },
       "transient": {
         "precision": 0.0,
@@ -200,40 +200,40 @@
   },
   "relation_agnostic": {
     "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
-    "precision": 0.6042,
-    "recall": 0.4531,
-    "f1": 0.5179,
-    "tp": 29,
-    "fp": 19,
-    "fn": 35
+    "precision": 0.7083,
+    "recall": 0.5,
+    "f1": 0.5862,
+    "tp": 34,
+    "fp": 14,
+    "fn": 34
   },
   "over_extraction": {
-    "empty_gold_notes": 23,
-    "on_schema_empty_gold_notes": 23,
+    "empty_gold_notes": 22,
+    "on_schema_empty_gold_notes": 22,
     "notes_correctly_empty": 19,
-    "abstention_rate_on_schema": 0.8261,
-    "spurious_triples": 5
+    "abstention_rate_on_schema": 0.8636,
+    "spurious_triples": 4
   },
   "output_health": {
-    "notes": 70,
-    "json_parse_ok": 70,
+    "notes": 69,
+    "json_parse_ok": 69,
     "json_parse_rate": 1.0,
-    "schema_ok": 70,
+    "schema_ok": 69,
     "schema_rate": 1.0,
     "malformed_facts": 2,
-    "dropped_by_conf_floor": 31,
+    "dropped_by_conf_floor": 29,
     "predicted_triples": 48,
     "in_seed_ontology": 0.8125,
     "catch_all_relations": 0
   },
   "latency_ms": {
-    "median": 437.7,
+    "median": 434.4,
     "p90": 768.3,
-    "mean": 467.2
+    "mean": 464.5
   },
   "completion_tokens": {
-    "median": 35,
-    "mean": 35.6,
+    "median": 34,
+    "mean": 35.3,
     "max": 146
   },
   "model": "Qwen/Qwen3-1.7B",

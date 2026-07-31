@@ -1,27 +1,27 @@
 {
   "strict": {
-    "precision": 0.5,
-    "recall": 0.6094,
-    "f1": 0.5493,
-    "tp": 39,
-    "fp": 39,
-    "fn": 25,
+    "precision": 0.5921,
+    "recall": 0.6618,
+    "f1": 0.625,
+    "tp": 45,
+    "fp": 31,
+    "fn": 23,
     "by_category": {
       "ambiguous": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "tp": 0,
-        "fp": 5,
-        "fn": 2
+        "precision": 0.2,
+        "recall": 0.5,
+        "f1": 0.2857,
+        "tp": 1,
+        "fp": 4,
+        "fn": 1
       },
       "first_person": {
         "precision": 1.0,
-        "recall": 1.0,
-        "f1": 1.0,
+        "recall": 0.8889,
+        "f1": 0.9412,
         "tp": 8,
         "fp": 0,
-        "fn": 0
+        "fn": 1
       },
       "governance": {
         "precision": 0.6667,
@@ -33,51 +33,51 @@
       },
       "implicit": {
         "precision": 0.2727,
-        "recall": 0.5,
-        "f1": 0.3529,
+        "recall": 0.4286,
+        "f1": 0.3333,
         "tp": 3,
         "fp": 8,
-        "fn": 3
+        "fn": 4
       },
       "infra": {
-        "precision": 0.375,
-        "recall": 0.6,
-        "f1": 0.4615,
-        "tp": 3,
-        "fp": 5,
+        "precision": 0.625,
+        "recall": 0.7143,
+        "f1": 0.6667,
+        "tp": 5,
+        "fp": 3,
         "fn": 2
       },
       "multi_fact": {
-        "precision": 0.619,
+        "precision": 0.6842,
         "recall": 0.5909,
-        "f1": 0.6047,
+        "f1": 0.6341,
         "tp": 13,
-        "fp": 8,
+        "fp": 6,
         "fn": 9
       },
       "negation": {
-        "precision": 0.1667,
-        "recall": 0.5,
-        "f1": 0.25,
-        "tp": 1,
-        "fp": 5,
-        "fn": 1
+        "precision": 0.3333,
+        "recall": 1.0,
+        "f1": 0.5,
+        "tp": 2,
+        "fp": 4,
+        "fn": 0
       },
       "novel_pred": {
-        "precision": 0.5,
-        "recall": 0.5,
-        "f1": 0.5,
-        "tp": 3,
-        "fp": 3,
-        "fn": 3
+        "precision": 0.8333,
+        "recall": 0.7143,
+        "f1": 0.7692,
+        "tp": 5,
+        "fp": 1,
+        "fn": 2
       },
       "third_person": {
         "precision": 0.8571,
-        "recall": 0.6667,
-        "f1": 0.75,
+        "recall": 0.75,
+        "f1": 0.8,
         "tp": 6,
         "fp": 1,
-        "fn": 3
+        "fn": 2
       },
       "transient": {
         "precision": 0.0,
@@ -90,28 +90,28 @@
     }
   },
   "lenient": {
-    "precision": 0.5128,
-    "recall": 0.625,
-    "f1": 0.5634,
-    "tp": 40,
-    "fp": 38,
-    "fn": 24,
+    "precision": 0.6053,
+    "recall": 0.6765,
+    "f1": 0.6389,
+    "tp": 46,
+    "fp": 30,
+    "fn": 22,
     "by_category": {
       "ambiguous": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "tp": 0,
-        "fp": 5,
-        "fn": 2
+        "precision": 0.2,
+        "recall": 0.5,
+        "f1": 0.2857,
+        "tp": 1,
+        "fp": 4,
+        "fn": 1
       },
       "first_person": {
         "precision": 1.0,
-        "recall": 1.0,
-        "f1": 1.0,
+        "recall": 0.8889,
+        "f1": 0.9412,
         "tp": 8,
         "fp": 0,
-        "fn": 0
+        "fn": 1
       },
       "governance": {
         "precision": 0.6667,
@@ -123,51 +123,51 @@
       },
       "implicit": {
         "precision": 0.2727,
-        "recall": 0.5,
-        "f1": 0.3529,
+        "recall": 0.4286,
+        "f1": 0.3333,
         "tp": 3,
         "fp": 8,
-        "fn": 3
+        "fn": 4
       },
       "infra": {
-        "precision": 0.375,
-        "recall": 0.6,
-        "f1": 0.4615,
-        "tp": 3,
-        "fp": 5,
+        "precision": 0.625,
+        "recall": 0.7143,
+        "f1": 0.6667,
+        "tp": 5,
+        "fp": 3,
         "fn": 2
       },
       "multi_fact": {
-        "precision": 0.6667,
+        "precision": 0.7368,
         "recall": 0.6364,
-        "f1": 0.6512,
+        "f1": 0.6829,
         "tp": 14,
-        "fp": 7,
+        "fp": 5,
         "fn": 8
       },
       "negation": {
-        "precision": 0.1667,
-        "recall": 0.5,
-        "f1": 0.25,
-        "tp": 1,
-        "fp": 5,
-        "fn": 1
+        "precision": 0.3333,
+        "recall": 1.0,
+        "f1": 0.5,
+        "tp": 2,
+        "fp": 4,
+        "fn": 0
       },
       "novel_pred": {
-        "precision": 0.5,
-        "recall": 0.5,
-        "f1": 0.5,
-        "tp": 3,
-        "fp": 3,
-        "fn": 3
+        "precision": 0.8333,
+        "recall": 0.7143,
+        "f1": 0.7692,
+        "tp": 5,
+        "fp": 1,
+        "fn": 2
       },
       "third_person": {
         "precision": 0.8571,
-        "recall": 0.6667,
-        "f1": 0.75,
+        "recall": 0.75,
+        "f1": 0.8,
         "tp": 6,
         "fp": 1,
-        "fn": 3
+        "fn": 2
       },
       "transient": {
         "precision": 0.0,
@@ -181,9 +181,9 @@
   },
   "fabrication": {
     "_note": "a triple is counted here when a subject or object cannot be traced to the source note. Gold-independent: it measures invented entities, not disagreement with my labels. The write gate cannot catch these \u2014 a well-formed triple about someone never mentioned looks valid.",
-    "predicted_triples": 78,
+    "predicted_triples": 76,
     "ungrounded_triples": 4,
-    "fabrication_rate": 0.0513,
+    "fabrication_rate": 0.0526,
     "examples": [
       {
         "id": "mf06",
@@ -201,7 +201,7 @@
         "triple": [
           "user",
           "lives_in",
-          "unknown (not specified"
+          "unknown not specified"
         ],
         "ungrounded_args": [
           "object"
@@ -212,7 +212,7 @@
         "triple": [
           "user",
           "works_for",
-          "organization (implied"
+          "organization implied"
         ],
         "ungrounded_args": [
           "object"
@@ -233,40 +233,40 @@
   },
   "relation_agnostic": {
     "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
-    "precision": 0.6282,
-    "recall": 0.7656,
-    "f1": 0.6901,
-    "tp": 49,
-    "fp": 29,
+    "precision": 0.6974,
+    "recall": 0.7794,
+    "f1": 0.7361,
+    "tp": 53,
+    "fp": 23,
     "fn": 15
   },
   "over_extraction": {
-    "empty_gold_notes": 23,
-    "on_schema_empty_gold_notes": 23,
+    "empty_gold_notes": 22,
+    "on_schema_empty_gold_notes": 22,
     "notes_correctly_empty": 12,
-    "abstention_rate_on_schema": 0.5217,
-    "spurious_triples": 12
+    "abstention_rate_on_schema": 0.5455,
+    "spurious_triples": 11
   },
   "output_health": {
-    "notes": 70,
-    "json_parse_ok": 69,
-    "json_parse_rate": 0.9857,
-    "schema_ok": 69,
-    "schema_rate": 0.9857,
+    "notes": 69,
+    "json_parse_ok": 68,
+    "json_parse_rate": 0.9855,
+    "schema_ok": 68,
+    "schema_rate": 0.9855,
     "malformed_facts": 0,
     "dropped_by_conf_floor": 17,
-    "predicted_triples": 78,
-    "in_seed_ontology": 0.859,
+    "predicted_triples": 76,
+    "in_seed_ontology": 0.8553,
     "catch_all_relations": 0
   },
   "latency_ms": {
-    "median": 451.7,
+    "median": 443.7,
     "p90": 1048.2,
-    "mean": 571.2
+    "mean": 565.6
   },
   "completion_tokens": {
     "median": 27,
-    "mean": 32.2,
+    "mean": 32.0,
     "max": 108
   },
   "model": "ibm-granite/granite-4.1-3b",

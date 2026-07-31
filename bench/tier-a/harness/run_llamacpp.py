@@ -56,10 +56,13 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--max-tokens", type=int, default=512)
     ap.add_argument("--timeout", type=float, default=600)
+    ap.add_argument("--no-confidence", action="store_true",
+                    help="ABLATION: drop the confidence field from the schema.")
     args = ap.parse_args()
 
     prompt.verify_against_source()
-    sys_prompt = prompt.system_prompt()
+    sys_prompt = (prompt.system_prompt_no_confidence() if args.no_confidence
+                  else prompt.system_prompt())
     rows = [json.loads(l) for l in open(args.gold) if l.strip()]
 
     with open(args.out, "w") as fh:

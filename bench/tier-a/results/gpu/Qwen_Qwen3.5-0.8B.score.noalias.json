@@ -1,27 +1,27 @@
 {
   "strict": {
-    "precision": 0.4571,
+    "precision": 0.5,
     "recall": 0.25,
-    "f1": 0.3232,
-    "tp": 16,
-    "fp": 19,
-    "fn": 48,
+    "f1": 0.3333,
+    "tp": 17,
+    "fp": 17,
+    "fn": 51,
     "by_category": {
       "ambiguous": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "tp": 0,
-        "fp": 3,
-        "fn": 2
+        "precision": 0.3333,
+        "recall": 0.5,
+        "f1": 0.4,
+        "tp": 1,
+        "fp": 2,
+        "fn": 1
       },
       "first_person": {
         "precision": 0.7143,
-        "recall": 0.625,
-        "f1": 0.6667,
+        "recall": 0.5556,
+        "f1": 0.625,
         "tp": 5,
         "fp": 2,
-        "fn": 3
+        "fn": 4
       },
       "governance": {
         "precision": 1.0,
@@ -37,7 +37,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 4,
-        "fn": 6
+        "fn": 7
       },
       "infra": {
         "precision": 0.0,
@@ -45,39 +45,39 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 4,
-        "fn": 5
+        "fn": 7
       },
       "multi_fact": {
         "precision": 1.0,
-        "recall": 0.2727,
-        "f1": 0.4286,
-        "tp": 6,
+        "recall": 0.2273,
+        "f1": 0.3704,
+        "tp": 5,
         "fp": 0,
-        "fn": 16
+        "fn": 17
       },
       "negation": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "tp": 0,
-        "fp": 3,
-        "fn": 2
+        "precision": 0.3333,
+        "recall": 0.5,
+        "f1": 0.4,
+        "tp": 1,
+        "fp": 2,
+        "fn": 1
       },
       "novel_pred": {
         "precision": 1.0,
-        "recall": 0.1667,
-        "f1": 0.2857,
+        "recall": 0.1429,
+        "f1": 0.25,
         "tp": 1,
         "fp": 0,
-        "fn": 5
+        "fn": 6
       },
       "third_person": {
         "precision": 0.75,
-        "recall": 0.3333,
-        "f1": 0.4615,
+        "recall": 0.375,
+        "f1": 0.5,
         "tp": 3,
         "fp": 1,
-        "fn": 6
+        "fn": 5
       },
       "transient": {
         "precision": 0.0,
@@ -90,28 +90,28 @@
     }
   },
   "lenient": {
-    "precision": 0.4571,
+    "precision": 0.5,
     "recall": 0.25,
-    "f1": 0.3232,
-    "tp": 16,
-    "fp": 19,
-    "fn": 48,
+    "f1": 0.3333,
+    "tp": 17,
+    "fp": 17,
+    "fn": 51,
     "by_category": {
       "ambiguous": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "tp": 0,
-        "fp": 3,
-        "fn": 2
+        "precision": 0.3333,
+        "recall": 0.5,
+        "f1": 0.4,
+        "tp": 1,
+        "fp": 2,
+        "fn": 1
       },
       "first_person": {
         "precision": 0.7143,
-        "recall": 0.625,
-        "f1": 0.6667,
+        "recall": 0.5556,
+        "f1": 0.625,
         "tp": 5,
         "fp": 2,
-        "fn": 3
+        "fn": 4
       },
       "governance": {
         "precision": 1.0,
@@ -127,7 +127,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 4,
-        "fn": 6
+        "fn": 7
       },
       "infra": {
         "precision": 0.0,
@@ -135,39 +135,39 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 4,
-        "fn": 5
+        "fn": 7
       },
       "multi_fact": {
         "precision": 1.0,
-        "recall": 0.2727,
-        "f1": 0.4286,
-        "tp": 6,
+        "recall": 0.2273,
+        "f1": 0.3704,
+        "tp": 5,
         "fp": 0,
-        "fn": 16
+        "fn": 17
       },
       "negation": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "tp": 0,
-        "fp": 3,
-        "fn": 2
+        "precision": 0.3333,
+        "recall": 0.5,
+        "f1": 0.4,
+        "tp": 1,
+        "fp": 2,
+        "fn": 1
       },
       "novel_pred": {
         "precision": 1.0,
-        "recall": 0.1667,
-        "f1": 0.2857,
+        "recall": 0.1429,
+        "f1": 0.25,
         "tp": 1,
         "fp": 0,
-        "fn": 5
+        "fn": 6
       },
       "third_person": {
         "precision": 0.75,
-        "recall": 0.3333,
-        "f1": 0.4615,
+        "recall": 0.375,
+        "f1": 0.5,
         "tp": 3,
         "fp": 1,
-        "fn": 6
+        "fn": 5
       },
       "transient": {
         "precision": 0.0,
@@ -181,43 +181,43 @@
   },
   "fabrication": {
     "_note": "a triple is counted here when a subject or object cannot be traced to the source note. Gold-independent: it measures invented entities, not disagreement with my labels. The write gate cannot catch these \u2014 a well-formed triple about someone never mentioned looks valid.",
-    "predicted_triples": 35,
+    "predicted_triples": 34,
     "ungrounded_triples": 0,
     "fabrication_rate": 0.0,
     "examples": []
   },
   "relation_agnostic": {
     "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
-    "precision": 0.6286,
-    "recall": 0.3438,
-    "f1": 0.4444,
-    "tp": 22,
-    "fp": 13,
-    "fn": 42
+    "precision": 0.7353,
+    "recall": 0.3676,
+    "f1": 0.4902,
+    "tp": 25,
+    "fp": 9,
+    "fn": 43
   },
   "over_extraction": {
-    "empty_gold_notes": 23,
-    "on_schema_empty_gold_notes": 23,
+    "empty_gold_notes": 22,
+    "on_schema_empty_gold_notes": 22,
     "notes_correctly_empty": 17,
-    "abstention_rate_on_schema": 0.7391,
-    "spurious_triples": 6
+    "abstention_rate_on_schema": 0.7727,
+    "spurious_triples": 5
   },
   "output_health": {
-    "notes": 70,
-    "json_parse_ok": 70,
+    "notes": 69,
+    "json_parse_ok": 69,
     "json_parse_rate": 1.0,
-    "schema_ok": 70,
+    "schema_ok": 69,
     "schema_rate": 1.0,
     "malformed_facts": 1,
     "dropped_by_conf_floor": 36,
-    "predicted_triples": 35,
-    "in_seed_ontology": 0.6571,
+    "predicted_triples": 34,
+    "in_seed_ontology": 0.6471,
     "catch_all_relations": 0
   },
   "latency_ms": {
-    "median": 552.3,
-    "p90": 815.1,
-    "mean": 596.9
+    "median": 545.2,
+    "p90": 779.4,
+    "mean": 593.8
   },
   "completion_tokens": {
     "median": 26,

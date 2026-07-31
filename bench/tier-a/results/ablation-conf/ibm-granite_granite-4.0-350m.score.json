@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.0,
-    "recall": 0.0,
-    "f1": 0.0,
-    "tp": 0,
-    "fp": 13,
-    "fn": 64,
+    "precision": 0.0909,
+    "recall": 0.0147,
+    "f1": 0.0253,
+    "tp": 1,
+    "fp": 10,
+    "fn": 67,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -21,7 +21,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 1,
-        "fn": 8
+        "fn": 9
       },
       "governance": {
         "precision": 0.0,
@@ -37,7 +37,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 1,
-        "fn": 6
+        "fn": 7
       },
       "infra": {
         "precision": 0.0,
@@ -45,15 +45,15 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 1,
-        "fn": 5
+        "fn": 7
       },
       "multi_fact": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "tp": 0,
-        "fp": 4,
-        "fn": 22
+        "precision": 0.5,
+        "recall": 0.0455,
+        "f1": 0.0833,
+        "tp": 1,
+        "fp": 1,
+        "fn": 21
       },
       "negation": {
         "precision": 0.0,
@@ -69,7 +69,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 6
+        "fn": 7
       },
       "third_person": {
         "precision": 0.0,
@@ -77,7 +77,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 9
+        "fn": 8
       },
       "transient": {
         "precision": 0.0,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.0,
-    "recall": 0.0,
-    "f1": 0.0,
-    "tp": 0,
-    "fp": 13,
-    "fn": 64,
+    "precision": 0.0909,
+    "recall": 0.0147,
+    "f1": 0.0253,
+    "tp": 1,
+    "fp": 10,
+    "fn": 67,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -111,7 +111,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 1,
-        "fn": 8
+        "fn": 9
       },
       "governance": {
         "precision": 0.0,
@@ -127,7 +127,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 1,
-        "fn": 6
+        "fn": 7
       },
       "infra": {
         "precision": 0.0,
@@ -135,15 +135,15 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 1,
-        "fn": 5
+        "fn": 7
       },
       "multi_fact": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "tp": 0,
-        "fp": 4,
-        "fn": 22
+        "precision": 0.5,
+        "recall": 0.0455,
+        "f1": 0.0833,
+        "tp": 1,
+        "fp": 1,
+        "fn": 21
       },
       "negation": {
         "precision": 0.0,
@@ -159,7 +159,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 6
+        "fn": 7
       },
       "third_person": {
         "precision": 0.0,
@@ -167,7 +167,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 9
+        "fn": 8
       },
       "transient": {
         "precision": 0.0,
@@ -181,47 +181,47 @@
   },
   "fabrication": {
     "_note": "a triple is counted here when a subject or object cannot be traced to the source note. Gold-independent: it measures invented entities, not disagreement with my labels. The write gate cannot catch these \u2014 a well-formed triple about someone never mentioned looks valid.",
-    "predicted_triples": 13,
+    "predicted_triples": 11,
     "ungrounded_triples": 0,
     "fabrication_rate": 0.0,
     "examples": []
   },
   "relation_agnostic": {
     "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
-    "precision": 0.2308,
-    "recall": 0.0469,
-    "f1": 0.0779,
-    "tp": 3,
-    "fp": 10,
-    "fn": 61
+    "precision": 0.1818,
+    "recall": 0.0294,
+    "f1": 0.0506,
+    "tp": 2,
+    "fp": 9,
+    "fn": 66
   },
   "over_extraction": {
-    "empty_gold_notes": 23,
-    "on_schema_empty_gold_notes": 23,
+    "empty_gold_notes": 22,
+    "on_schema_empty_gold_notes": 22,
     "notes_correctly_empty": 17,
-    "abstention_rate_on_schema": 0.7391,
-    "spurious_triples": 6
+    "abstention_rate_on_schema": 0.7727,
+    "spurious_triples": 5
   },
   "output_health": {
-    "notes": 70,
-    "json_parse_ok": 66,
-    "json_parse_rate": 0.9429,
-    "schema_ok": 66,
-    "schema_rate": 0.9429,
+    "notes": 69,
+    "json_parse_ok": 65,
+    "json_parse_rate": 0.942,
+    "schema_ok": 65,
+    "schema_rate": 0.942,
     "malformed_facts": 2,
     "dropped_by_conf_floor": 56,
-    "predicted_triples": 13,
-    "in_seed_ontology": 0.0769,
+    "predicted_triples": 11,
+    "in_seed_ontology": 0.0,
     "catch_all_relations": 0
   },
   "latency_ms": {
-    "median": 252.9,
-    "p90": 402.9,
-    "mean": 294.7
+    "median": 252.7,
+    "p90": 392.7,
+    "mean": 282.9
   },
   "completion_tokens": {
     "median": 23,
-    "mean": 26.5,
+    "mean": 26.0,
     "max": 94
   },
   "model": "ibm-granite/granite-4.0-350m",

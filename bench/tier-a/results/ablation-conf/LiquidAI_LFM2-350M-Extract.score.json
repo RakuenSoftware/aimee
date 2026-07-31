@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.0,
-    "recall": 0.0,
-    "f1": 0.0,
-    "tp": 0,
-    "fp": 7,
-    "fn": 64,
+    "precision": 0.4286,
+    "recall": 0.0441,
+    "f1": 0.08,
+    "tp": 3,
+    "fp": 4,
+    "fn": 65,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -21,7 +21,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 8
+        "fn": 9
       },
       "governance": {
         "precision": 0.0,
@@ -37,7 +37,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 6
+        "fn": 7
       },
       "infra": {
         "precision": 0.0,
@@ -45,15 +45,15 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 1,
-        "fn": 5
+        "fn": 7
       },
       "multi_fact": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "tp": 0,
-        "fp": 4,
-        "fn": 22
+        "precision": 0.5,
+        "recall": 0.0909,
+        "f1": 0.1538,
+        "tp": 2,
+        "fp": 2,
+        "fn": 20
       },
       "negation": {
         "precision": 0.0,
@@ -69,15 +69,15 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 6
+        "fn": 7
       },
       "third_person": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "tp": 0,
-        "fp": 1,
-        "fn": 9
+        "precision": 1.0,
+        "recall": 0.125,
+        "f1": 0.2222,
+        "tp": 1,
+        "fp": 0,
+        "fn": 7
       },
       "transient": {
         "precision": 0.0,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.0,
-    "recall": 0.0,
-    "f1": 0.0,
-    "tp": 0,
-    "fp": 7,
-    "fn": 64,
+    "precision": 0.4286,
+    "recall": 0.0441,
+    "f1": 0.08,
+    "tp": 3,
+    "fp": 4,
+    "fn": 65,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -111,7 +111,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 8
+        "fn": 9
       },
       "governance": {
         "precision": 0.0,
@@ -127,7 +127,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 6
+        "fn": 7
       },
       "infra": {
         "precision": 0.0,
@@ -135,15 +135,15 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 1,
-        "fn": 5
+        "fn": 7
       },
       "multi_fact": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "tp": 0,
-        "fp": 4,
-        "fn": 22
+        "precision": 0.5,
+        "recall": 0.0909,
+        "f1": 0.1538,
+        "tp": 2,
+        "fp": 2,
+        "fn": 20
       },
       "negation": {
         "precision": 0.0,
@@ -159,15 +159,15 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 6
+        "fn": 7
       },
       "third_person": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "tp": 0,
-        "fp": 1,
-        "fn": 9
+        "precision": 1.0,
+        "recall": 0.125,
+        "f1": 0.2222,
+        "tp": 1,
+        "fp": 0,
+        "fn": 7
       },
       "transient": {
         "precision": 0.0,
@@ -189,39 +189,39 @@
   "relation_agnostic": {
     "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
     "precision": 0.5714,
-    "recall": 0.0625,
-    "f1": 0.1127,
+    "recall": 0.0588,
+    "f1": 0.1067,
     "tp": 4,
     "fp": 3,
-    "fn": 60
+    "fn": 64
   },
   "over_extraction": {
-    "empty_gold_notes": 23,
+    "empty_gold_notes": 22,
     "on_schema_empty_gold_notes": 3,
     "notes_correctly_empty": 1,
     "abstention_rate_on_schema": 0.3333,
     "spurious_triples": 2
   },
   "output_health": {
-    "notes": 70,
+    "notes": 69,
     "json_parse_ok": 9,
-    "json_parse_rate": 0.1286,
+    "json_parse_rate": 0.1304,
     "schema_ok": 9,
-    "schema_rate": 0.1286,
+    "schema_rate": 0.1304,
     "malformed_facts": 21,
     "dropped_by_conf_floor": 0,
     "predicted_triples": 7,
-    "in_seed_ontology": 0.0,
+    "in_seed_ontology": 0.4286,
     "catch_all_relations": 0
   },
   "latency_ms": {
-    "median": 3351.9,
+    "median": 3316.6,
     "p90": 4539.7,
-    "mean": 3297.0
+    "mean": 3285.4
   },
   "completion_tokens": {
     "median": 512,
-    "mean": 467.3,
+    "mean": 466.7,
     "max": 512
   },
   "model": "LiquidAI/LFM2-350M-Extract",
