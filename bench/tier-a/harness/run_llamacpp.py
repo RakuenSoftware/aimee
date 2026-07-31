@@ -26,7 +26,7 @@ import prompt
 from run_hf import CONF_FLOOR, extract_json
 
 
-def complete(base_url, model, sys_prompt, note, max_tokens, timeout):
+def complete(base_url, model, sys_prompt, note, max_tokens, timeout, thinking=False):
     """One chat completion. Greedy, matching the transformers runner."""
     body = json.dumps({
         "model": model,
@@ -38,8 +38,9 @@ def complete(base_url, model, sys_prompt, note, max_tokens, timeout):
         "top_p": 1,
         "max_tokens": max_tokens,
         "stream": False,
-        # Tier-A sets disable_thinking; llama.cpp forwards this to the template.
-        "chat_template_kwargs": {"enable_thinking": False},
+        # Tier-A sets disable_thinking in production; the flag lets us test
+        # whether suppressing reasoning is costing it.
+        "chat_template_kwargs": {"enable_thinking": bool(thinking)},
     }).encode()
     req = urllib.request.Request(
         f"{base_url.rstrip('/')}/v1/chat/completions", data=body,
@@ -58,6 +59,12 @@ def main():
     ap.add_argument("--timeout", type=float, default=600)
     ap.add_argument("--no-confidence", action="store_true",
                     help="ABLATION: drop the confidence field from the schema.")
+    ap.add_argument("--thinking", action="store_true",
+                    help="ABLATION: enable_thinking=true. Production Tier-A sets "
+                         "disable_thinking, on the theory that extraction is "
+                         "mechanical. The failure modes that separate models here "
+                         "are negation and implicit inference, which is not "
+                         "obviously mechanical, so this tests the assumption.")
     args = ap.parse_args()
 
     prompt.verify_against_source()
@@ -70,12 +77,14 @@ def main():
             t0 = time.perf_counter()
             try:
                 resp = complete(args.base_url, args.model, sys_prompt, r["note"],
-                                args.max_tokens, args.timeout)
-                raw = resp["choices"][0]["message"]["content"] or ""
+                                args.max_tokens, args.timeout, args.thinking)
+                msg = resp["choices"][0]["message"]
+                raw = msg.get("content") or ""
+                reasoning = msg.get("reasoning_content") or ""
                 usage = resp.get("usage") or {}
                 err = None
             except (urllib.error.URLError, KeyError, TimeoutError, OSError) as e:
-                raw, usage, err = "", {}, f"{type(e).__name__}: {e}"
+                raw, usage, err, reasoning = "", {}, f"{type(e).__name__}: {e}", ""
             dt = (time.perf_counter() - t0) * 1000
 
             facts, ok, schema_ok, malformed = extract_json(raw)
@@ -96,6 +105,8 @@ def main():
                 "completion_tokens": usage.get("completion_tokens"),
                 "prompt_tokens": usage.get("prompt_tokens"),
                 "truncated": usage.get("completion_tokens") == args.max_tokens,
+                "thinking": bool(args.thinking),
+                "reasoning_chars": len(reasoning),
             }, ensure_ascii=False) + "\n")
             fh.flush()
             if err:
