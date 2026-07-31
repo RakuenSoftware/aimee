@@ -393,3 +393,38 @@ model quality — and a benchmark cannot detect that about itself. Every defect
 here was found by reading raw outputs or by an outside observation that a number
 looked strange. None were found by the aggregate metrics, which looked entirely
 plausible throughout.
+
+## Defect 15: results/gpu/ contained CPU runs
+
+`sweep_b.sh gpu` and `sweep.sh`'s llamacpp arm write to a directory named `gpu`
+and pass no `-ngl`, so llama.cpp auto-fits. That is correct for a model that fits
+and silently wrong for one that does not. On the 16 GB card, dense
+`Qwen3.6-27B` and `gemma-4-31B` at Q8_0 do not fit; llama.cpp placed them on CPU
+and served at 1.72 and 1.25 tok/s, in a directory asserting otherwise. The only
+record is one log line, `layer 0 is assigned to device CPU`.
+
+Cost: no accuracy cost. The same GGUF produces the same output wherever its
+tensors sit, which the E4B llama.cpp/transformers control established. Every
+latency and throughput comparison across that ladder is confounded, and one
+conclusion was drawn from it: "MoE's gain is throughput" compared a
+partly-resident MoE against a non-resident dense model. Corrected in
+docs/LOCAL_INFERENCE.md to a fitting claim, which is what the numbers support.
+
+Not fixed: the sweeps still do not record which device served each model. A
+directory name is not provenance. Until they do, treat any speed number from
+these ladders as device-unknown unless its server log has been read.
+
+## Defect 16: the harness token cap scored as a model failure
+
+See the Tier-B commit for the full case. `run_b.py --max-tokens` defaulted to
+1024 while production allows `CURATOR_SYNTH_OUTBUF` (16384). With thinking left
+on, models spend 400-1000 tokens reasoning before a short answer, so
+`gemma-4-12B` truncated on one topic and scored zero on it. That single row moved
+its format rate 1.0 -> 0.833 and coverage 1.0 -> 0.75, and I reported the result
+as a model finding because it fit a pattern I already believed.
+
+Cost: one wrong reported finding. `truncated: true` was in the prediction file
+the whole time; nothing read it.
+
+Fixed: cap is 4096, and `score_b.py` refuses to score a file containing a
+truncated row rather than zeroing it.

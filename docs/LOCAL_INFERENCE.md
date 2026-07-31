@@ -119,7 +119,17 @@ A mixture-of-experts model fits a smaller card than its parameter count
 suggests: route the expert tensors to CPU with `-ot ".ffn_.*_exps.=CPU"` and keep
 attention resident. That is a memory strategy rather than a quality one. On the
 extraction set, dense and MoE models of comparable size scored within noise of
-each other, and MoE's gain was throughput.
+each other.
+
+What the MoE buys is that it fits at all. On a 16 GB card, `gemma-4-26B-A4B`
+serves at 8.98 tok/s with its experts on CPU, while dense `gemma-4-31B` and
+`Qwen3.6-27B` at the same quantisation do not fit and llama.cpp's auto-fit puts
+them on CPU wholesale, at 1.25 and 1.72 tok/s. Read that as a fitting result, not
+an architecture one: it compares a partly-resident model against two
+non-resident ones, which is the comparison an operator with one card actually
+faces, but it is not evidence that MoE is faster than dense at equal residency.
+Accuracy is unaffected either way, because the same GGUF produces the same
+answers wherever its tensors sit.
 
 ## Consumers share the endpoint, with separate limits
 
