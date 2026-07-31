@@ -111,6 +111,53 @@ def match_note(preds, golds, lenient, ignore_relation=False):
     return tp, used
 
 
+FIRST_PERSON = {"user", "i", "me", "my", "myself", "we", "us"}
+
+
+def ground_text(s):
+    """Normalise for grounding comparisons.
+
+    Models write kb_server for "KB server" and 7 for "seven"; both are the same
+    entity written differently, and counting them as fabrication would measure
+    spelling. Underscores and hyphens become spaces, and number words are mapped
+    to digits on BOTH sides so the two forms meet.
+    """
+    s = re.sub(r"[_\-/]+", " ", str(s).casefold())
+    s = re.sub(r"[^\w\s.:]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    # Dots are kept so IPs and hostnames survive, but a sentence-final "seven."
+    # must still meet the digit form, so strip trailing dots per token.
+    return " ".join(NUMBER_WORDS.get(t.rstrip("."), t.rstrip("."))
+                    for t in s.split())
+
+
+def grounded(value, note_norm):
+    """Can this argument be traced to the source note?
+
+    Deliberately independent of the gold labels: it asks whether the model
+    invented an entity, not whether it picked the entity I happened to label.
+    A fabricated endpoint is the failure that matters most for a drain writing
+    into memory_facts, because the write gate cannot catch it — a well-formed
+    triple about a person who was never mentioned looks exactly like a good one.
+
+    "user" is grounded by convention: the prompt instructs the model to use it as
+    the subject for first-person notes.
+    """
+    v = ground_text(value)
+    if not v or v in FIRST_PERSON:
+        return True
+    if v in note_norm:
+        return True
+    note_toks = set(note_norm.split())
+    toks = [t for t in v.split() if t not in ARTICLES and len(t) > 2]
+    if not toks:
+        return v in note_toks
+    hit = sum(1 for t in toks if t in note_toks or t in note_norm)
+    # Majority of content tokens present: tolerates "Rakuen Software Ltd" for
+    # "Rakuen Software" without tolerating an invented name.
+    return hit * 2 >= len(toks)
+
+
 def prf(tp, fp, fn):
     p = tp / (tp + fp) if tp + fp else 0.0
     r = tp / (tp + fn) if tp + fn else 0.0
@@ -185,6 +232,33 @@ def main():
                                     tp=v[0], fp=v[1], fn=v[2])
                             for k, v in sorted(by_cat.items())},
         }
+
+    # Fabrication: triples with an endpoint that cannot be traced to the note.
+    # Reported separately from precision because the two failures differ in kind
+    # — a mislabelled edge is recoverable downstream, an invented entity is not.
+    notes = {r["id"]: ground_text(r["note"]) for r in gold_rows}
+    ungrounded, ungrounded_examples, total_pred = 0, [], 0
+    for nid, ts in pred.items():
+        nn = notes.get(nid, "")
+        for t in ts:
+            total_pred += 1
+            bad = [k for k in ("subject", "object") if not grounded(t[k], nn)]
+            if bad:
+                ungrounded += 1
+                if len(ungrounded_examples) < 12:
+                    ungrounded_examples.append(
+                        {"id": nid, "triple": [t["subject"], t["relation"], t["object"]],
+                         "ungrounded_args": bad})
+    report["fabrication"] = {
+        "_note": "a triple is counted here when a subject or object cannot be traced "
+                 "to the source note. Gold-independent: it measures invented entities, "
+                 "not disagreement with my labels. The write gate cannot catch these — "
+                 "a well-formed triple about someone never mentioned looks valid.",
+        "predicted_triples": total_pred,
+        "ungrounded_triples": ungrounded,
+        "fabrication_rate": round(ungrounded / total_pred, 4) if total_pred else None,
+        "examples": ungrounded_examples,
+    }
 
     report["relation_agnostic"] = {
         "_note": "diagnostic, not a quality score: subject+object matched, relation "
