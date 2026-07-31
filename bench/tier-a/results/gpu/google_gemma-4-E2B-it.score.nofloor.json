@@ -1,19 +1,19 @@
 {
   "strict": {
     "precision": 0.5385,
-    "recall": 0.6176,
-    "f1": 0.5753,
+    "recall": 0.6269,
+    "f1": 0.5793,
     "tp": 42,
     "fp": 36,
-    "fn": 26,
+    "fn": 25,
     "by_category": {
       "ambiguous": {
         "precision": 0.2,
-        "recall": 0.5,
-        "f1": 0.2857,
+        "recall": 1.0,
+        "f1": 0.3333,
         "tp": 1,
         "fp": 4,
-        "fn": 1
+        "fn": 0
       },
       "first_person": {
         "precision": 1.0,
@@ -80,30 +80,31 @@
         "fn": 2
       },
       "transient": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
+        "precision": null,
+        "recall": null,
+        "f1": null,
         "tp": 0,
         "fp": 10,
-        "fn": 0
+        "fn": 0,
+        "_note": "no gold triples in this category; see abstention_rate_on_schema"
       }
     }
   },
   "lenient": {
     "precision": 0.5513,
-    "recall": 0.6324,
-    "f1": 0.589,
+    "recall": 0.6418,
+    "f1": 0.5931,
     "tp": 43,
     "fp": 35,
-    "fn": 25,
+    "fn": 24,
     "by_category": {
       "ambiguous": {
         "precision": 0.2,
-        "recall": 0.5,
-        "f1": 0.2857,
+        "recall": 1.0,
+        "f1": 0.3333,
         "tp": 1,
         "fp": 4,
-        "fn": 1
+        "fn": 0
       },
       "first_person": {
         "precision": 1.0,
@@ -170,12 +171,13 @@
         "fn": 2
       },
       "transient": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
+        "precision": null,
+        "recall": null,
+        "f1": null,
         "tp": 0,
         "fp": 10,
-        "fn": 0
+        "fn": 0,
+        "_note": "no gold triples in this category; see abstention_rate_on_schema"
       }
     }
   },
@@ -189,18 +191,18 @@
   "relation_agnostic": {
     "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
     "precision": 0.6667,
-    "recall": 0.7647,
-    "f1": 0.7123,
+    "recall": 0.7761,
+    "f1": 0.7172,
     "tp": 52,
     "fp": 26,
-    "fn": 16
+    "fn": 15
   },
   "over_extraction": {
-    "empty_gold_notes": 22,
-    "on_schema_empty_gold_notes": 21,
+    "empty_gold_notes": 23,
+    "on_schema_empty_gold_notes": 22,
     "notes_correctly_empty": 1,
-    "abstention_rate_on_schema": 0.0476,
-    "spurious_triples": 20
+    "abstention_rate_on_schema": 0.0455,
+    "spurious_triples": 21
   },
   "output_health": {
     "notes": 69,

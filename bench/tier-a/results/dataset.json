@@ -119,7 +119,7 @@
         "licence": "lfm1.0",
         "class": "reference",
         "f1_production": 0.0723,
-        "f1_no_floor": 0.069,
+        "f1_no_floor": 0.0698,
         "precision": 0.1875,
         "recall": 0.0448,
         "f1_strict": 0.0723,
@@ -227,11 +227,11 @@
         "params": "350M",
         "licence": "lfm1.0",
         "class": "reference",
-        "f1_production": 0.08,
-        "f1_no_floor": 0.08,
+        "f1_production": 0.0811,
+        "f1_no_floor": 0.0811,
         "precision": 0.4286,
-        "recall": 0.0441,
-        "f1_strict": 0.08,
+        "recall": 0.0448,
+        "f1_strict": 0.0811,
         "schema_rate": 0.1304,
         "json_parse_rate": 0.1304,
         "in_seed_ontology": 0.4286,
@@ -249,7 +249,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 2
+          "fn": 1
         },
         "first_person": {
           "precision": 0.0,
@@ -316,12 +316,13 @@
           "fn": 7
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 1,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     }
@@ -335,7 +336,7 @@
         "licence": "lfm1.0",
         "class": "reference",
         "f1_production": 0.0,
-        "f1_no_floor": 0.026,
+        "f1_no_floor": 0.0263,
         "precision": 0.0,
         "recall": 0.0,
         "f1_strict": 0.0,
@@ -446,7 +447,7 @@
         "licence": "apache-2.0",
         "class": "superseded",
         "f1_production": 0.0,
-        "f1_no_floor": 0.4,
+        "f1_no_floor": 0.4029,
         "precision": 0.0,
         "recall": 0.0,
         "f1_strict": 0.0,
@@ -554,16 +555,16 @@
         "params": "600M",
         "licence": "apache-2.0",
         "class": "superseded",
-        "f1_production": 0.4317,
-        "f1_no_floor": 0.4336,
+        "f1_production": 0.4348,
+        "f1_no_floor": 0.4366,
         "precision": 0.4225,
-        "recall": 0.4412,
-        "f1_strict": 0.4317,
+        "recall": 0.4478,
+        "f1_strict": 0.4348,
         "schema_rate": 0.9855,
         "json_parse_rate": 0.9855,
         "in_seed_ontology": 0.5493,
-        "abstention_on_factless": 0.0909,
-        "spurious_triples": 20,
+        "abstention_on_factless": 0.087,
+        "spurious_triples": 21,
         "dropped_by_conf_floor": 4,
         "median_latency_ms_gpu": 468.1,
         "median_completion_tokens": 30,
@@ -572,11 +573,11 @@
       "by_category": {
         "ambiguous": {
           "precision": 0.2,
-          "recall": 0.5,
-          "f1": 0.2857,
+          "recall": 1.0,
+          "f1": 0.3333,
           "tp": 1,
           "fp": 4,
-          "fn": 1
+          "fn": 0
         },
         "first_person": {
           "precision": 0.625,
@@ -643,12 +644,13 @@
           "fn": 2
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 11,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     }
@@ -662,7 +664,7 @@
         "licence": "apache-2.0",
         "class": "superseded",
         "f1_production": 0.4,
-        "f1_no_floor": 0.563,
+        "f1_no_floor": 0.5672,
         "precision": 0.7826,
         "recall": 0.2687,
         "f1_strict": 0.4,
@@ -770,15 +772,15 @@
         "params": "1.7B",
         "licence": "apache-2.0",
         "class": "superseded",
-        "f1_production": 0.5,
-        "f1_no_floor": 0.5103,
+        "f1_production": 0.5043,
+        "f1_no_floor": 0.5139,
         "precision": 0.6042,
-        "recall": 0.4265,
-        "f1_strict": 0.5,
+        "recall": 0.4328,
+        "f1_strict": 0.5043,
         "schema_rate": 1.0,
         "json_parse_rate": 1.0,
         "in_seed_ontology": 0.8542,
-        "abstention_on_factless": 0.8636,
+        "abstention_on_factless": 0.8696,
         "spurious_triples": 4,
         "dropped_by_conf_floor": 29,
         "median_latency_ms_gpu": 434.4,
@@ -788,11 +790,11 @@
       "by_category": {
         "ambiguous": {
           "precision": 0.25,
-          "recall": 0.5,
-          "f1": 0.3333,
+          "recall": 1.0,
+          "f1": 0.4,
           "tp": 1,
           "fp": 3,
-          "fn": 1
+          "fn": 0
         },
         "first_person": {
           "precision": 1.0,
@@ -859,12 +861,13 @@
           "fn": 3
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 0,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     }
@@ -878,7 +881,7 @@
         "licence": "apache-2.0",
         "class": "actionable",
         "f1_production": 0.4158,
-        "f1_no_floor": 0.4348,
+        "f1_no_floor": 0.438,
         "precision": 0.6176,
         "recall": 0.3134,
         "f1_strict": 0.4158,
@@ -986,15 +989,15 @@
         "params": "800M",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.434,
-        "f1_no_floor": 0.446,
+        "f1_production": 0.4381,
+        "f1_no_floor": 0.4493,
         "precision": 0.6053,
-        "recall": 0.3382,
-        "f1_strict": 0.434,
+        "recall": 0.3433,
+        "f1_strict": 0.4381,
         "schema_rate": 1.0,
         "json_parse_rate": 1.0,
         "in_seed_ontology": 0.7632,
-        "abstention_on_factless": 0.6364,
+        "abstention_on_factless": 0.6522,
         "spurious_triples": 8,
         "dropped_by_conf_floor": 33,
         "median_latency_ms_gpu": 485.0,
@@ -1004,11 +1007,11 @@
       "by_category": {
         "ambiguous": {
           "precision": 0.5,
-          "recall": 0.5,
-          "f1": 0.5,
+          "recall": 1.0,
+          "f1": 0.6667,
           "tp": 1,
           "fp": 1,
-          "fn": 1
+          "fn": 0
         },
         "first_person": {
           "precision": 0.8571,
@@ -1075,12 +1078,13 @@
           "fn": 3
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 5,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     }
@@ -1094,7 +1098,7 @@
         "licence": "apache-2.0",
         "class": "actionable",
         "f1_production": 0.3411,
-        "f1_no_floor": 0.3212,
+        "f1_no_floor": 0.3235,
         "precision": 0.3548,
         "recall": 0.3284,
         "f1_strict": 0.3411,
@@ -1199,16 +1203,16 @@
         "params": "2B",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.3206,
-        "f1_no_floor": 0.3134,
+        "f1_production": 0.3231,
+        "f1_no_floor": 0.3158,
         "precision": 0.3333,
-        "recall": 0.3088,
-        "f1_strict": 0.3206,
+        "recall": 0.3134,
+        "f1_strict": 0.3231,
         "schema_rate": 1.0,
         "json_parse_rate": 1.0,
         "in_seed_ontology": 0.873,
-        "abstention_on_factless": 0.2273,
-        "spurious_triples": 17,
+        "abstention_on_factless": 0.2174,
+        "spurious_triples": 18,
         "dropped_by_conf_floor": 3,
         "median_latency_ms_gpu": 559.2,
         "median_completion_tokens": 28,
@@ -1217,11 +1221,11 @@
       "by_category": {
         "ambiguous": {
           "precision": 0.2,
-          "recall": 0.5,
-          "f1": 0.2857,
+          "recall": 1.0,
+          "f1": 0.3333,
           "tp": 1,
           "fp": 4,
-          "fn": 1
+          "fn": 0
         },
         "first_person": {
           "precision": 0.8571,
@@ -1288,12 +1292,13 @@
           "fn": 6
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 9,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     }
@@ -1307,7 +1312,7 @@
         "licence": "apache-2.0",
         "class": "actionable",
         "f1_production": 0.6615,
-        "f1_no_floor": 0.589,
+        "f1_no_floor": 0.5931,
         "precision": 0.6825,
         "recall": 0.6418,
         "f1_strict": 0.6462,
@@ -1415,16 +1420,16 @@
         "params": "E2B (2.3B eff)",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.6471,
-        "f1_no_floor": 0.6154,
+        "f1_production": 0.6519,
+        "f1_no_floor": 0.6197,
         "precision": 0.6471,
-        "recall": 0.6471,
-        "f1_strict": 0.6324,
+        "recall": 0.6567,
+        "f1_strict": 0.637,
         "schema_rate": 0.971,
         "json_parse_rate": 0.9275,
         "in_seed_ontology": 0.9118,
-        "abstention_on_factless": 0.4,
-        "spurious_triples": 12,
+        "abstention_on_factless": 0.381,
+        "spurious_triples": 13,
         "dropped_by_conf_floor": 7,
         "median_latency_ms_gpu": 737.1,
         "median_completion_tokens": 26,
@@ -1433,11 +1438,11 @@
       "by_category": {
         "ambiguous": {
           "precision": 0.2,
-          "recall": 0.5,
-          "f1": 0.2857,
+          "recall": 1.0,
+          "f1": 0.3333,
           "tp": 1,
           "fp": 4,
-          "fn": 1
+          "fn": 0
         },
         "first_person": {
           "precision": 1.0,
@@ -1504,12 +1509,13 @@
           "fn": 2
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 4,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     }
@@ -1523,7 +1529,7 @@
         "licence": "apache-2.0",
         "class": "incumbent",
         "f1_production": 0.7541,
-        "f1_no_floor": 0.7419,
+        "f1_no_floor": 0.748,
         "precision": 0.8364,
         "recall": 0.6866,
         "f1_strict": 0.7377,
@@ -1631,16 +1637,16 @@
         "params": "E4B (4.5B eff)",
         "licence": "apache-2.0",
         "class": "incumbent",
-        "f1_production": 0.7541,
-        "f1_no_floor": 0.748,
+        "f1_production": 0.7603,
+        "f1_no_floor": 0.7541,
         "precision": 0.8519,
-        "recall": 0.6765,
-        "f1_strict": 0.7377,
+        "recall": 0.6866,
+        "f1_strict": 0.7438,
         "schema_rate": 1.0,
         "json_parse_rate": 1.0,
         "in_seed_ontology": 0.8889,
-        "abstention_on_factless": 0.8182,
-        "spurious_triples": 4,
+        "abstention_on_factless": 0.7826,
+        "spurious_triples": 5,
         "dropped_by_conf_floor": 1,
         "median_latency_ms_gpu": 853.8,
         "median_completion_tokens": 25,
@@ -1649,11 +1655,11 @@
       "by_category": {
         "ambiguous": {
           "precision": 0.25,
-          "recall": 0.5,
-          "f1": 0.3333,
+          "recall": 1.0,
+          "f1": 0.4,
           "tp": 1,
           "fp": 3,
-          "fn": 1
+          "fn": 0
         },
         "first_person": {
           "precision": 1.0,
@@ -1720,12 +1726,13 @@
           "fn": 2
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 0,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     }
@@ -1739,7 +1746,7 @@
         "licence": "apache-2.0",
         "class": "actionable",
         "f1_production": 0.6,
-        "f1_no_floor": 0.5874,
+        "f1_no_floor": 0.5915,
         "precision": 0.5753,
         "recall": 0.6269,
         "f1_strict": 0.6,
@@ -1847,16 +1854,16 @@
         "params": "1B",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.5972,
-        "f1_no_floor": 0.5931,
+        "f1_production": 0.6014,
+        "f1_no_floor": 0.5972,
         "precision": 0.5658,
-        "recall": 0.6324,
-        "f1_strict": 0.5972,
+        "recall": 0.6418,
+        "f1_strict": 0.6014,
         "schema_rate": 0.9565,
         "json_parse_rate": 0.9275,
         "in_seed_ontology": 0.7368,
-        "abstention_on_factless": 0.1053,
-        "spurious_triples": 17,
+        "abstention_on_factless": 0.1,
+        "spurious_triples": 18,
         "dropped_by_conf_floor": 1,
         "median_latency_ms_gpu": 466.7,
         "median_completion_tokens": 27,
@@ -1865,11 +1872,11 @@
       "by_category": {
         "ambiguous": {
           "precision": 0.2,
-          "recall": 0.5,
-          "f1": 0.2857,
+          "recall": 1.0,
+          "f1": 0.3333,
           "tp": 1,
           "fp": 4,
-          "fn": 1
+          "fn": 0
         },
         "first_person": {
           "precision": 0.7143,
@@ -1936,12 +1943,13 @@
           "fn": 1
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 7,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     }
@@ -1955,7 +1963,7 @@
         "licence": "apache-2.0",
         "class": "actionable",
         "f1_production": 0.0,
-        "f1_no_floor": 0.2047,
+        "f1_no_floor": 0.2063,
         "precision": 0.0,
         "recall": 0.0,
         "f1_strict": 0.0,
@@ -2063,16 +2071,16 @@
         "params": "350M",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.0253,
-        "f1_no_floor": 0.2074,
+        "f1_production": 0.0256,
+        "f1_no_floor": 0.209,
         "precision": 0.0909,
-        "recall": 0.0147,
-        "f1_strict": 0.0253,
+        "recall": 0.0149,
+        "f1_strict": 0.0256,
         "schema_rate": 0.942,
         "json_parse_rate": 0.942,
         "in_seed_ontology": 0.0,
-        "abstention_on_factless": 0.7727,
-        "spurious_triples": 5,
+        "abstention_on_factless": 0.7391,
+        "spurious_triples": 6,
         "dropped_by_conf_floor": 56,
         "median_latency_ms_gpu": 252.7,
         "median_completion_tokens": 23,
@@ -2085,7 +2093,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 2,
-          "fn": 2
+          "fn": 1
         },
         "first_person": {
           "precision": 0.0,
@@ -2152,12 +2160,13 @@
           "fn": 8
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 4,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     }
@@ -2171,7 +2180,7 @@
         "licence": "apache-2.0",
         "class": "actionable",
         "f1_production": 0.5185,
-        "f1_no_floor": 0.5036,
+        "f1_no_floor": 0.5072,
         "precision": 0.5147,
         "recall": 0.5224,
         "f1_strict": 0.5185,
@@ -2279,15 +2288,15 @@
         "params": "1B",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.4965,
-        "f1_no_floor": 0.493,
+        "f1_production": 0.5,
+        "f1_no_floor": 0.4965,
         "precision": 0.4795,
-        "recall": 0.5147,
-        "f1_strict": 0.4965,
+        "recall": 0.5224,
+        "f1_strict": 0.5,
         "schema_rate": 0.9855,
         "json_parse_rate": 0.9855,
         "in_seed_ontology": 0.6575,
-        "abstention_on_factless": 0.0,
+        "abstention_on_factless": 0.0435,
         "spurious_triples": 22,
         "dropped_by_conf_floor": 1,
         "median_latency_ms_gpu": 1071.4,
@@ -2297,11 +2306,11 @@
       "by_category": {
         "ambiguous": {
           "precision": 0.25,
-          "recall": 0.5,
-          "f1": 0.3333,
+          "recall": 1.0,
+          "f1": 0.4,
           "tp": 1,
           "fp": 3,
-          "fn": 1
+          "fn": 0
         },
         "first_person": {
           "precision": 0.75,
@@ -2368,12 +2377,13 @@
           "fn": 2
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 12,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     }
@@ -2387,7 +2397,7 @@
         "licence": "apache-2.0",
         "class": "actionable",
         "f1_production": 0.0,
-        "f1_no_floor": 0.1348,
+        "f1_no_floor": 0.1364,
         "precision": 0.0,
         "recall": 0.0,
         "f1_strict": 0.0,
@@ -2495,7 +2505,7 @@
         "licence": "apache-2.0",
         "class": "actionable",
         "f1_production": 0.5714,
-        "f1_no_floor": 0.6429,
+        "f1_no_floor": 0.6475,
         "precision": 0.6102,
         "recall": 0.5373,
         "f1_strict": 0.5714,
@@ -2603,15 +2613,15 @@
         "params": "3B",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.5714,
-        "f1_no_floor": 0.6571,
+        "f1_production": 0.576,
+        "f1_no_floor": 0.6619,
         "precision": 0.6207,
-        "recall": 0.5294,
-        "f1_strict": 0.5714,
+        "recall": 0.5373,
+        "f1_strict": 0.576,
         "schema_rate": 1.0,
         "json_parse_rate": 1.0,
         "in_seed_ontology": 0.8448,
-        "abstention_on_factless": 0.5455,
+        "abstention_on_factless": 0.5652,
         "spurious_triples": 10,
         "dropped_by_conf_floor": 14,
         "median_latency_ms_gpu": 474.5,
@@ -2621,11 +2631,11 @@
       "by_category": {
         "ambiguous": {
           "precision": 0.25,
-          "recall": 0.5,
-          "f1": 0.3333,
+          "recall": 1.0,
+          "f1": 0.4,
           "tp": 1,
           "fp": 3,
-          "fn": 1
+          "fn": 0
         },
         "first_person": {
           "precision": 1.0,
@@ -2692,12 +2702,13 @@
           "fn": 2
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 2,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     }
@@ -2838,7 +2849,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 2
+          "fn": 1
         },
         "first_person": {
           "precision": 0.0,
@@ -2905,12 +2916,13 @@
           "fn": 8
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 0,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     }
@@ -2924,7 +2936,7 @@
         "licence": "gemma",
         "class": "superseded",
         "f1_production": 0.6434,
-        "f1_no_floor": 0.6345,
+        "f1_no_floor": 0.6389,
         "precision": 0.6053,
         "recall": 0.6866,
         "f1_strict": 0.6434,
@@ -3029,16 +3041,16 @@
         "params": "E4B",
         "licence": "gemma",
         "class": "superseded",
-        "f1_production": 0.6429,
-        "f1_no_floor": 0.6429,
+        "f1_production": 0.6475,
+        "f1_no_floor": 0.6475,
         "precision": 0.625,
-        "recall": 0.6618,
-        "f1_strict": 0.6429,
+        "recall": 0.6716,
+        "f1_strict": 0.6475,
         "schema_rate": 1.0,
         "json_parse_rate": 1.0,
         "in_seed_ontology": 0.9028,
-        "abstention_on_factless": 0.3182,
-        "spurious_triples": 15,
+        "abstention_on_factless": 0.3043,
+        "spurious_triples": 16,
         "dropped_by_conf_floor": 0,
         "median_latency_ms_gpu": 1663.4,
         "median_completion_tokens": 36,
@@ -3047,11 +3059,11 @@
       "by_category": {
         "ambiguous": {
           "precision": 0.2,
-          "recall": 0.5,
-          "f1": 0.2857,
+          "recall": 1.0,
+          "f1": 0.3333,
           "tp": 1,
           "fp": 4,
-          "fn": 1
+          "fn": 0
         },
         "first_person": {
           "precision": 0.875,
@@ -3118,12 +3130,13 @@
           "fn": 1
         },
         "transient": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
           "tp": 0,
           "fp": 6,
-          "fn": 0
+          "fn": 0,
+          "_note": "no gold triples in this category; see abstention_rate_on_schema"
         }
       }
     }
