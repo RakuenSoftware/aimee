@@ -18,6 +18,7 @@ Start here:
 | diagnose a failure | [Troubleshooting](TROUBLESHOOTING.md) |
 | upgrade from the last release | [What's new](WHATS_NEW.md) and [upgrading](UPGRADING.md) |
 | cut a release | [Releasing](RELEASING.md) |
+| set budgets, rate limits, or a model catalog | [Teams, budgets, and rate limits](ORG_GOVERNANCE.md) |
 | work on aimee itself | [Technical reference](../src/README.md) and [owners](../OWNERS.md) |
 
 ## Product guides
