@@ -1,46 +1,6 @@
 {
   "_note": "Ratchet baseline for check-config-encapsulation.py. config_t is a secret of the config module; these are the sites that still materialise it. Counts may only DECREASE. Migrate a file to config accessors, then rerun with --update-baseline.",
   "files": {
-    "src/cmd_core.c": {
-      "decls": 4,
-      "loads": 4
-    },
-    "src/cmd_memory_internal.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/headers/aimee.h": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/kb/http/kb_tls_serve.c": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/modules/guardrails/guardrails_action_audit.c": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/modules/kb_client/kb_client_mtls.c": {
-      "decls": 2,
-      "loads": 0
-    },
-    "src/modules/vault/vault_custody_tpm2.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/server_mcp.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/server_state.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/server_workflow_api.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/tests/fuzz_corpus/seed.c": {
       "decls": 4,
       "loads": 0
@@ -118,7 +78,7 @@
       "loads": 2
     },
     "src/tests/test_config_snapshot.c": {
-      "decls": 18,
+      "decls": 16,
       "loads": 4
     },
     "src/tests/test_config_snapshot_race.c": {
@@ -166,7 +126,7 @@
       "loads": 1
     },
     "src/tests/test_guardrails.c": {
-      "decls": 2,
+      "decls": 1,
       "loads": 1
     },
     "src/tests/test_gw_stage_memory.c": {
@@ -263,8 +223,8 @@
     }
   },
   "totals": {
-    "decls": 262,
-    "files": 65,
-    "loads": 157
+    "decls": 242,
+    "files": 55,
+    "loads": 149
   }
 }

@@ -13,7 +13,7 @@ static void aux_subcmd_test(app_ctx_t *ctx, int argc, char **argv)
       fprintf(stderr, "usage: aimee aux test <task> \"<prompt>\" [max_tokens]\n");
       return;
    }
-   if (!ctx->cfg || !ctx->cfg->aux_enabled)
+   if (!config_aux_enabled())
    {
       fprintf(stderr, "aux routing is disabled (set auxiliary.enabled: true in aimee.yaml)\n");
       return;

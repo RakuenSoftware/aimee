@@ -51,10 +51,8 @@ static int audit_worm_is_enabled(void)
 /* Clear both cached gates so the next audit call re-reads config. Runs after a
  * reload publishes the new snapshot (registered via config_reload_register_
  * reapplier), so a config.set / SIGHUP applies live instead of needing a restart. */
-static void audit_gate_reload_reapplier(const config_t *old_cfg, const config_t *new_cfg)
+static void audit_gate_reload_reapplier(void)
 {
-   (void)old_cfg;
-   (void)new_cfg;
    g_audit_action_enabled = -1;
    g_audit_worm_enabled = -1;
 }

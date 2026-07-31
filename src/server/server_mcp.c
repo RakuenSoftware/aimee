@@ -1230,8 +1230,7 @@ cJSON *tool_store_workflow(cJSON *args)
       char cwd[MAX_PATH_LEN];
       if (getcwd(cwd, sizeof(cwd)))
       {
-         config_t cfg;
-         if (config_load(&cfg) == 0)
+         if (config_present())
          {
             for (int i = 0; i < config_workspace_count(); i++)
             {

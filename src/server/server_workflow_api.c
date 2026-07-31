@@ -221,20 +221,16 @@ int wf_api_blocks(char *resp, int cap)
  * defaults the scheduler applies, so the UI need not re-derive them. */
 int wf_api_triggers(char *resp, int cap)
 {
-   config_t *cfg = calloc(1, sizeof *cfg);
-   if (!cfg)
-   {
-      snprintf(resp, cap, "{\"error\":\"out of memory\"}");
-      return 500;
-   }
-   config_load(cfg);
-
    cJSON *o = cJSON_CreateObject();
-   cJSON_AddNumberToObject(o, "max_concurrent", cfg->trigger_max_concurrent);
+   cJSON_AddNumberToObject(o, "max_concurrent", config_trigger_max_concurrent());
    cJSON *arr = cJSON_AddArrayToObject(o, "triggers");
-   for (int i = 0; i < cfg->trigger_rule_count && i < TRIGGER_RULES_MAX; i++)
+   int rule_count = config_trigger_rule_count();
+   for (int i = 0; i < rule_count && i < TRIGGER_RULES_MAX; i++)
    {
-      const trigger_rule_t *r = &cfg->trigger_rules[i];
+      trigger_rule_t rule;
+      if (config_trigger_rule_at(i, &rule) != 0)
+         continue;
+      const trigger_rule_t *r = &rule;
       /* A watch-dir/proposals rule watches a repo-relative directory (its
        * `event`), defaulting to docs/proposals/pending when unset. */
       int is_watch = strcmp(r->source, "watch-dir") == 0 || strcmp(r->source, "proposals") == 0;
@@ -251,7 +247,6 @@ int wf_api_triggers(char *resp, int cap)
          cJSON_AddNumberToObject(t, "max_spend_usd", r->max_spend_usd);
       cJSON_AddItemToArray(arr, t);
    }
-   free(cfg);
    return emit(o, resp, cap);
 }
 

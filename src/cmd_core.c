@@ -492,8 +492,6 @@ void cmd_hud(app_ctx_t *ctx, int argc, char **argv)
       }
    }
 
-   config_t cfg;
-   config_load(&cfg);
    if (db1_init(config_db1_path()) != 0)
    {
       fprintf(stderr, "aimee: cannot initialize DB1\n");
@@ -550,8 +548,6 @@ void cmd_hud(app_ctx_t *ctx, int argc, char **argv)
 
 void cmd_usage(app_ctx_t *ctx, int argc, char **argv)
 {
-   config_t cfg;
-   config_load(&cfg);
    if (db1_init(config_db1_path()) != 0)
    {
       fprintf(stderr, "aimee: cannot initialize DB1\n");
@@ -700,8 +696,6 @@ void cmd_usage(app_ctx_t *ctx, int argc, char **argv)
 void cmd_mode(app_ctx_t *ctx, int argc, char **argv)
 {
    {
-      config_t cfg;
-      config_load(&cfg);
       db1_init(config_db1_path());
    }
    const char *sid = session_id();
@@ -824,8 +818,6 @@ void cmd_implement(app_ctx_t *ctx, int argc, char **argv)
 void cmd_tdd(app_ctx_t *ctx, int argc, char **argv)
 {
    {
-      config_t cfg;
-      config_load(&cfg);
       db1_init(config_db1_path());
    }
    const char *sid = session_id();

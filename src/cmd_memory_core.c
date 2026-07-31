@@ -576,7 +576,7 @@ void mem_drain(app_ctx_t *ctx, int argc, char **argv)
     * of running this from a DB-owning client or auxiliary process. */
    memory_cognify_queue_stats_t cog_stats;
    memset(&cog_stats, 0, sizeof(cog_stats));
-   if (s_mem_cfg.memory_cognify_enabled && s_mem_cfg.memory_cognify_command[0])
+   if (config_memory_cognify_enabled() && config_memory_cognify_command()[0])
       (void)memory_cognify_drain(timeout, &cog_stats);
 
    if (ctx->json_output)
@@ -602,7 +602,7 @@ void mem_drain(app_ctx_t *ctx, int argc, char **argv)
 
    printf("Async memory queue drained: processed=%d pending=%d running=%d failed=%d\n",
           stats.processed, stats.pending, stats.running, stats.failed);
-   if (s_mem_cfg.memory_cognify_enabled)
+   if (config_memory_cognify_enabled())
       printf("Cognify queue: processed=%d pending=%d failed=%d retried=%d\n", cog_stats.processed,
              cog_stats.pending, cog_stats.failed, cog_stats.retried);
 }

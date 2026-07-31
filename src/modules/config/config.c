@@ -2325,13 +2325,11 @@ int config_reload(void)
       pthread_mutex_unlock(&g_snap_wlock);
       return 0; /* self-reload no-op guard: nothing logically changed */
    }
-   /* capture the OLD snapshot (if any) so re-appliers can diff their section, then publish. */
-   config_t old;
-   int have_old =
-       atomic_load_explicit(&g_snap_inited, memory_order_acquire) && config_snapshot_get(&old) == 0;
+   /* Publish BEFORE running the re-appliers: they read config through accessors,
+    * which must already see the new snapshot. */
    config_snapshot_publish(&fresh);
    for (int i = 0; i < g_reapplier_count; i++)
-      g_reappliers[i](have_old ? &old : &fresh, &fresh);
+      g_reappliers[i]();
    pthread_mutex_unlock(&g_snap_wlock);
    return 1; /* a new snapshot was published */
 }

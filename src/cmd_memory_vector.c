@@ -851,13 +851,13 @@ void mem_profile(app_ctx_t *ctx, int argc, char **argv)
    opt_parsed_t opts;
    opt_parse(argc, argv, NULL, &opts);
    int do_refresh = opt_get_flag(&opts, "refresh");
-   int min_obs = opt_get_int(&opts, "min-obs", s_mem_cfg.memory_profile_cards_min_obs);
+   int min_obs = opt_get_int(&opts, "min-obs", config_memory_profile_cards_min_obs());
    if (min_obs <= 0)
       min_obs = 10;
 
    if (do_refresh)
    {
-      int stale_secs = s_mem_cfg.memory_profile_cards_stale_secs;
+      int stale_secs = config_memory_profile_cards_stale_secs();
       if (stale_secs <= 0)
          stale_secs = 86400;
       int refreshed = memory_profile_card_refresh(min_obs, stale_secs);

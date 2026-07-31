@@ -65,7 +65,10 @@ void mem_embed(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
 
-   const char *embed_ver = s_mem_cfg.embedding_model[0] ? s_mem_cfg.embedding_model : embed_cmd;
+   /* Copied out: held alongside embed_cmd through the work below. */
+   char embed_model[CONFIG_COPY_MAX];
+   config_embedding_model_copy(embed_model, sizeof(embed_model));
+   const char *embed_ver = embed_model[0] ? embed_model : embed_cmd;
    cJSON *resp = mem_rpc_unwrap(kb_client_memory_embed_json(1, 0, embed_ver, embed_cmd),
                                 "memory embed failed");
    int success = 0, fail = 0;

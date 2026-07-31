@@ -2211,10 +2211,19 @@ void config_sandbox(sandbox_config_t *out);
 int config_reload_if_changed(void);
 
 /* Re-applier registry (live-config-reload P3): a hook invoked after config_reload publishes a
- * new snapshot, receiving the OLD and NEW config so it can push bound state (env bridge, log
- * level, TLS, …) live when the section it owns changed. Register once at startup. Re-appliers
- * run under the reload writer lock: they must be quick and must NOT call config_reload. */
-typedef void (*config_reapplier_fn)(const config_t *old_cfg, const config_t *new_cfg);
+ * new snapshot, so it can push bound state (env bridge, log level, TLS, …) live.
+ *
+ * It used to receive the OLD and NEW config_t so a hook could diff its own section. No
+ * registered hook ever did -- both just re-read or invalidate -- and handing out two whole
+ * structs to be ignored is the leak this refactor exists to close. The hook now takes
+ * nothing: the snapshot is PUBLISHED BEFORE the re-appliers run (see config_reload), so an
+ * accessor called inside one already returns the new value. A future hook that genuinely
+ * needs the previous value should cache what it cares about on the way past rather than ask
+ * for the whole prior config.
+ *
+ * Register once at startup. Re-appliers run under the reload writer lock: they must be quick
+ * and must NOT call config_reload. */
+typedef void (*config_reapplier_fn)(void);
 void config_reload_register_reapplier(config_reapplier_fn fn);
 
 /* Live autonomy.* accessor (thread-safe) for wfe: for an AIMEE_AUTONOMY_* env NAME that maps

@@ -1844,8 +1844,7 @@ int handle_identity_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
-   config_t cfg;
-   if (config_load(&cfg) != 0)
+   if (!config_present())
       return server_send_error(conn, "identity show: could not load config", NULL);
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddItemToObject(resp, "charter", identity_charter_json());
