@@ -35,10 +35,13 @@ def licence_of(model_id, reg):
 
 
 def accuracy_table(rows, reg):
-    out = ["| model | params | licence | F1 prod | F1 no-floor | precision | recall | schema | abstain | med ms |",
+    # Strict leads: both endpoints must name the labelled entity, only the
+    # predicate may vary. This measures extraction, not what a downstream entity
+    # resolver might later reconcile.
+    out = ["| model | params | licence | F1 strict | F1 lenient | precision | recall | schema | abstain | med ms |",
            "|---|---|---|---:|---:|---:|---:|---:|---:|---:|"]
     ranked = sorted(rows.items(),
-                    key=lambda kv: -(kv[1]["nofloor"]["lenient"]["f1"] if kv[1]["nofloor"] else 0))
+                    key=lambda kv: -kv[1]["floored"]["strict"]["f1"])
     for _, r in ranked:
         fl, nf = r["floored"], r["nofloor"]
         mid = fl.get("model") or "?"
@@ -50,9 +53,9 @@ def accuracy_table(rows, reg):
         ab = oe.get("abstention_rate_on_schema")
         lat = fl.get("latency_ms", {}).get("median")
         out.append(
-            f"| {mid} | {params} | {lic} | {fl['lenient']['f1']:.3f} | "
-            f"{nf['lenient']['f1']:.3f} | {nf['lenient']['precision']:.3f} | "
-            f"{nf['lenient']['recall']:.3f} | {h['schema_rate']:.2f} | "
+            f"| {mid} | {params} | {lic} | {fl['strict']['f1']:.3f} | "
+            f"{fl['lenient']['f1']:.3f} | {fl['strict']['precision']:.3f} | "
+            f"{fl['strict']['recall']:.3f} | {h['schema_rate']:.2f} | "
             f"{ab if ab is None else f'{ab:.2f}'} | {lat} |"
         )
     return "\n".join(out)

@@ -61,6 +61,7 @@ python3 harness/capture_provenance.py   # provenance (needs network)
 
 | field | meaning |
 |---|---|
+| `f1_strict` | **the headline.** Both endpoints must name the labelled entity (surface variation absorbed by normalisation); only the predicate may vary. Measures extraction, full stop — it assumes no downstream entity resolution, because none is being measured |
 | `f1_production` | what the drain would actually commit — floor applied |
 | `f1_no_floor` | same extraction, `MF_CONF_FLOOR` lifted |
 | `schema_rate` | fraction of notes where the model emitted `{"facts":[...]}` |

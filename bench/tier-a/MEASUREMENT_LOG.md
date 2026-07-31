@@ -4,8 +4,8 @@ A running record of the defects found in this benchmark's **own instrumentation*
 kept because it is the most transferable thing here. The models behaved roughly
 as expected throughout. The grader did not.
 
-Nine defects. Every one inflated the apparent failure rate, several inverted a
-conclusion, and none were in the models.
+Ten defects. Nine inflated the apparent failure rate, one deflated it, several
+inverted a conclusion, and none were in the models.
 
 ---
 
@@ -158,16 +158,48 @@ careful:
 | `sync_results.sh` rescoring | the CT's stale scores silently reverting local fixes — this happened **three times** |
 | `audit_errors.py`, `predicate_drift.py` | reclassifying every disagreement on demand |
 
+## 10. Over-crediting, found by noticing all fixes moved one way
+
+**Found by** an outside observation that something still felt wrong, after nine
+fixes that had every one moved scores *up*.
+
+Auditing the credits granted by each relaxation found two that substituted a
+different entity and called it the labelled fact: `optane pool | located_in |
+proxmox host` credited for a gold triple about the Auckland rack, and `user |
+knows | anand's kids` credited for one about Anand.
+
+**The rule that came out of it, which is now enforced:** an alternative may
+differ ONLY in the predicate. Both endpoints must name the same entity. Surface
+variation is normalisation's job; predicate variation is expected and fine —
+`works_for` vs `member_of`, `born_in` vs `grew_up_in`. Renaming an endpoint is a
+different node and a different claim.
+
+**Impact** the first corrections in the exercise that moved DOWN. E4B 0.723 ->
+0.692.
+
+**A related error of framing.** I had defended endpoint leniency by noting that
+aimee has entity aliasing, so `build host` and `forge` would resolve to one node
+downstream. That is not a reason the extraction was correct. This benchmark
+measures extraction, not aimee's pipeline — and that aliasing code exists to
+compensate for an imperfect embedder, not to license loose scoring. **Strict is
+the headline metric**: both endpoints exact, predicate flexible, no assumption of
+a resolution step that is not being measured.
+
 ## What this cost, and what it is worth
 
 Five of the nine were found only after a number had been reported. Three
 conclusions were retracted: the MoE discipline gap, "over-extraction is inherent
 to this prompt", and an 11.4% fabrication rate.
 
-The uncomfortable part is that **every single correction moved in the same
-direction** — the models were better than measured, every time. A grader with
-unbiased noise would have erred both ways. That it never did is the signature of
-systematic error, and it is visible in hindsight in a way it was not in advance.
+The uncomfortable part is that for the first nine, **every single correction
+moved in the same direction** — the models were better than measured, every
+time. A grader with unbiased noise would have erred both ways.
+
+That one-sidedness was itself the clue, and it is what prompted the tenth: if
+every fix helps the models, the fixes are probably overshooting somewhere. They
+were. Looking specifically for over-crediting found it immediately. The lesson is
+not "audit your grader" but something narrower and more useful: **audit it in the
+direction your corrections have not been going.**
 
 The practical lesson for anyone building an eval: the failure mode is not models
 behaving unexpectedly. It is the grader being wrong in ways that correlate with
