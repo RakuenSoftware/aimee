@@ -588,7 +588,21 @@ int memory_embed(int64_t memory_id, const char *command)
    if (dim <= 0)
       return -1;
 
-   return memory_sync_vec_row(memory_id, vec, dim);
+   int rc = memory_sync_vec_row(memory_id, vec, dim);
+   if (rc != 0)
+      return rc;
+
+   /* A memory owns more than its own vector: writing one also embeds its units,
+    * which outnumber it (measured: one store produced 1 'memory' row and 12
+    * 'unit' rows in memory_embeddings). Re-embedding only the memory row left
+    * unit search dead after a dimension change dropped the table -- restored to
+    * 4 rows where 25 belonged, with nothing reporting the shortfall.
+    *
+    * memory_refresh_derived_metadata calls this on the write path; the repair
+    * path has to as well, or "re-embed this memory" silently means "re-embed a
+    * twentieth of it". */
+   memory_refresh_unit_embeddings(memory_id);
+   return 0;
 }
 
 /* memory_episode_row and memory_relation_row used to live here; the row
