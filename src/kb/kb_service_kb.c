@@ -354,6 +354,18 @@ static cJSON *kb_service_health_object(void)
    cJSON_AddBoolToObject(resp, "embed_ok", embed_ok);
    cJSON_AddStringToObject(resp, "embed_command", embed_cmd);
 
+   /* embed_ok reports only that an embedder is CONFIGURED. An embedder that runs
+    * and produces the wrong width stores nothing, so publish the refusal count
+    * too: non-zero means every vector since startup was dropped and dense
+    * retrieval is dead, however healthy the rest of this response looks. */
+   long long dim_refused = db2_embedding_dim_refused_count();
+   cJSON_AddNumberToObject(resp, "embedding_dim_refused", (double)dim_refused);
+   if (dim_refused > 0)
+   {
+      cJSON_AddNumberToObject(resp, "embedding_dim_expected", db2_embedding_dim());
+      cJSON_AddNumberToObject(resp, "embedding_dim_offered", db2_embedding_dim_last_offered());
+   }
+
    /* Curator (§4 observability): per-tier provider config + queue depth. The
     * live four-state reachability probe (ready/loading/gated/down) is deferred to
     * a follow-up — it needs a bounded async probe so the health path never blocks,

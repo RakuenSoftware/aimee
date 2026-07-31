@@ -45,7 +45,11 @@ services:
       # the builtin serves forever — the wizard's embedder silently never runs.
       EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
       AIMEE_EMBEDDER_URL: ${AIMEE_EMBEDDER_URL:-}
-      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-2560}
+      # Empty so the kb uses the width of the embedder it serves (bundled
+      # bekko-a25m is 384). This carried the retired aimee-llm GPU tier's 2560,
+      # which made the kb refuse every vector upsert while reporting healthy.
+      # Set it ONLY for an external AIMEE_EMBEDDER_URL.
+      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
       AIMEE_KB_HTTP_BIND: "1"
     command: ["--http-port=8741"]
     ports:

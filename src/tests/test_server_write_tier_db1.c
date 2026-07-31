@@ -9,6 +9,8 @@
 #include "db1_internal.h"
 #include "server_write_tier_db1.h"
 
+#include "platform_test_util.h" /* platform_tmpdir */
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,7 +56,21 @@ int main(void)
    assert(server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_NO_SERVER_ID);
    setenv("AIMEE_SERVER_ID", "managed-server", 1);
    assert(server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_NO_TRUST_BUNDLE);
+
+   /* A path that does not exist is NOT a supplied input. The shipped standalone
+    * compose defaults this variable to a conventional location nothing mounts, so
+    * treating "set" as READY made a deployment with no authority report ready
+    * while every KB-issued token was denied. Only a readable bundle is READY. */
    setenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE", "/run/aimee/management/jwks-trust-bundle.json", 1);
+   assert(server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_NO_TRUST_BUNDLE);
+
+   char bundle[512];
+   snprintf(bundle, sizeof(bundle), "%s/aimee-trust-XXXXXX", platform_tmpdir());
+   int bundle_fd = mkstemp(bundle);
+   assert(bundle_fd >= 0);
+   assert(write(bundle_fd, "{}", 2) == 2);
+   close(bundle_fd);
+   setenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE", bundle, 1);
    assert(server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_READY);
    printf("ok: startup preflight identifies each missing Compose input\n");
 

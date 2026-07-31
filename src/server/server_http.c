@@ -1657,7 +1657,20 @@ void handle_conn(int fd, int is_tcp, int is_management)
       {
          const char *msg = server_http_auth_error_body(az);
          send_response(fd, az, msg, request_id);
-         LOG_INFO("server.http", "%s %s -> %d req_id=%s", method, path, az, request_id);
+         /* The container healthcheck GETs /v1/health with no credential every 10s
+          * and treats 401 as healthy (it has no bearer to present, and having one
+          * in container metadata would be worse). Logging that designed probe at
+          * INFO produced a 401 line every 10 seconds for the life of the server —
+          * noise that buries the auth failures worth reading. Demote just that
+          * shape; every other rejection still logs. */
+         int health_probe = az == 401 && strcmp(method, "GET") == 0 &&
+                            strcmp(path, "/v1/health") == 0 && !has_auth && !has_api_key &&
+                            !has_skey;
+         if (health_probe)
+            LOG_DEBUG("server.http", "%s %s -> %d req_id=%s (unauthenticated health probe)", method,
+                      path, az, request_id);
+         else
+            LOG_INFO("server.http", "%s %s -> %d req_id=%s", method, path, az, request_id);
          return;
       }
    }
@@ -2335,10 +2348,23 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
                 "a verified certificate-bound first owner is unaffected");
       break;
    case SERVER_WRITE_TIER_CONFIG_NO_TRUST_BUNDLE:
-      LOG_ERROR("server.http",
-                "AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE is unset: KB-issued write tokens are denied "
-                "with invalid; a verified certificate-bound first owner is unaffected");
+   {
+      /* Name the path when one was supplied: the shipped standalone compose
+       * defaults it to a conventional location nothing mounts, so "is unset" was
+       * the one thing this could not be. */
+      const char *bundle = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
+      if (bundle && bundle[0])
+         LOG_ERROR("server.http",
+                   "AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE is set to '%s' but that file is not "
+                   "readable: KB-issued write tokens are denied with invalid; a verified "
+                   "certificate-bound first owner is unaffected",
+                   bundle);
+      else
+         LOG_ERROR("server.http",
+                   "AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE is unset: KB-issued write tokens are "
+                   "denied with invalid; a verified certificate-bound first owner is unaffected");
       break;
+   }
    case SERVER_WRITE_TIER_CONFIG_READY:
       break;
    }

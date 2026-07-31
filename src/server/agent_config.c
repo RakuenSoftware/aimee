@@ -1663,7 +1663,7 @@ static int agent_config_existing_agent_count(void)
    return n;
 }
 
-int agent_save_config(const agent_config_t *cfg)
+static int agent_save_config_impl(const agent_config_t *cfg, int emptied_by_removal)
 {
    cJSON *root = cJSON_CreateObject();
 
@@ -1887,8 +1887,13 @@ int agent_save_config(const agent_config_t *cfg)
     * file that already has none) — never as a silent wipe of configured agents.
     * This is the agents.json-deletion guard: whatever the trigger (a load that
     * came back empty, a caller with a zeroed cfg), the destruction stops here, and
-    * it stops LOUDLY so the next occurrence is diagnosable rather than invisible. */
-   if (cfg->agent_count == 0)
+    * it stops LOUDLY so the next occurrence is diagnosable rather than invisible.
+    *
+    * Removing the LAST delegate reaches zero legitimately, and looks identical
+    * from here — so that one caller declares itself instead. Without the
+    * exemption the guard refused the removal and the delegate could never be
+    * deleted. */
+   if (cfg->agent_count == 0 && !emptied_by_removal)
    {
       int existing = agent_config_existing_agent_count();
       if (existing > 0)
@@ -1958,6 +1963,16 @@ int agent_save_config(const agent_config_t *cfg)
    }
    free(json);
    return 0;
+}
+
+int agent_save_config(const agent_config_t *cfg)
+{
+   return agent_save_config_impl(cfg, 0);
+}
+
+int agent_save_config_after_removal(const agent_config_t *cfg)
+{
+   return agent_save_config_impl(cfg, 1);
 }
 
 /* --- Auth resolution --- */

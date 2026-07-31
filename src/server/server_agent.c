@@ -1014,7 +1014,9 @@ int handle_agent_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       snprintf(cfg.default_agent, sizeof(cfg.default_agent), "%s",
                cfg.agent_count > 0 ? cfg.agents[0].name : "");
 
-   if (agent_save_config(&cfg) != 0)
+   /* Removing the last delegate legitimately empties the registry, which the
+    * deletion guard would otherwise refuse. */
+   if (agent_save_config_after_removal(&cfg) != 0)
       return server_send_error(conn, "could not save agents.json", NULL);
    (void)server_agent_clear_model_concurrency_if_unused(&cfg, removed_model);
 

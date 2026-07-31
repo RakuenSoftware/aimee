@@ -276,6 +276,13 @@ for name, spec in table.items():
         snapshot_download(code_repo, allow_patterns=["*.py", "*.json", "*.txt"])
 PYBAKE
 
+# The bake runs as root and huggingface_hub writes its tree-cache metadata 0600, so
+# the `aimee` runtime user cannot read it. The weights themselves land world-readable,
+# so the model still loads — it just logs "Ignoring corrupted tree cache file …
+# Permission denied" on every start and re-walks what the cache existed to avoid.
+# a+rX: readable everywhere, traversable on directories, and no file gains +x.
+RUN chmod -R a+rX /opt/aimee/models
+
 # Sidecar clients (the LLM access code the kb invokes via popen).
 COPY scripts/embed-remote.py scripts/llm-chat.py \
      scripts/learning-synthesize.py scripts/curator-extract.py scripts/llm-rewrite.py \

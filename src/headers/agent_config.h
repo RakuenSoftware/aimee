@@ -9,6 +9,14 @@
 int agent_load_config(agent_config_t *cfg);
 int agent_save_config(const agent_config_t *cfg);
 
+/* As agent_save_config, but the caller has just removed an agent and an empty
+ * registry is therefore the intended result. The deletion guard in
+ * agent_save_config cannot tell a deliberate removal of the LAST delegate from a
+ * zeroed or failed-to-load cfg, so it refuses both; removing the only configured
+ * delegate failed with "could not save agents.json" until this existed. Only the
+ * remove handler may use it — it is the one caller that knows. */
+int agent_save_config_after_removal(const agent_config_t *cfg);
+
 /* A valid agent/model slug: 1–48 chars, starting alphanumeric, then alphanumeric
  * or . _ - . Agent names surface as model ids in /v1/models, so this keeps junk
  * (over-long or non-identifier) names out of agents.json and the model list.
