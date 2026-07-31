@@ -1505,8 +1505,7 @@ char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *n
    if (cwd && cwd[0])
    {
       char root[MAX_PATH_LEN] = "";
-      config_t ws_cfg;
-      if (config_load(&ws_cfg) != 0 || workspace_active_root(&ws_cfg, cwd, root, sizeof(root)) != 0)
+      if (workspace_active_root(cwd, root, sizeof(root)) != 0)
          snprintf(root, sizeof(root), "%s", cwd);
       ctx_appendf(buf, cap, &pos,
                   "Workspace root: %s\n"

@@ -62,8 +62,8 @@
       "loads": 2
     },
     "src/cmd_session_lifecycle.c": {
-      "decls": 15,
-      "loads": 5
+      "decls": 14,
+      "loads": 4
     },
     "src/conversation_context.c": {
       "decls": 5,
@@ -461,14 +461,6 @@
       "decls": 1,
       "loads": 1
     },
-    "src/modules/workspace/workspace.c": {
-      "decls": 3,
-      "loads": 1
-    },
-    "src/modules/workspace/workspace.h": {
-      "decls": 2,
-      "loads": 0
-    },
     "src/modules/workspace/workspace_turn.c": {
       "decls": 4,
       "loads": 4
@@ -498,8 +490,8 @@
       "loads": 0
     },
     "src/server/agent_runtime.c": {
-      "decls": 8,
-      "loads": 8
+      "decls": 7,
+      "loads": 7
     },
     "src/server/agent_tools.c": {
       "decls": 1,
@@ -610,8 +602,8 @@
       "loads": 1
     },
     "src/server/server_state.c": {
-      "decls": 5,
-      "loads": 5
+      "decls": 4,
+      "loads": 4
     },
     "src/server/server_sweep.c": {
       "decls": 1,
@@ -789,10 +781,6 @@
       "decls": 2,
       "loads": 1
     },
-    "src/tests/test_guardrails_computer_use.c": {
-      "decls": 1,
-      "loads": 0
-    },
     "src/tests/test_gw_stage_memory.c": {
       "decls": 1,
       "loads": 1
@@ -814,7 +802,7 @@
       "loads": 1
     },
     "src/tests/test_kb_http_routes.c": {
-      "decls": 10,
+      "decls": 9,
       "loads": 1
     },
     "src/tests/test_kb_maintenance.c": {
@@ -909,10 +897,6 @@
       "decls": 1,
       "loads": 1
     },
-    "src/tests/test_workspace.c": {
-      "decls": 2,
-      "loads": 0
-    },
     "src/tests/test_workspace_turn.c": {
       "decls": 4,
       "loads": 5
@@ -927,8 +911,8 @@
     }
   },
   "totals": {
-    "decls": 836,
-    "files": 231,
-    "loads": 453
+    "decls": 824,
+    "files": 227,
+    "loads": 449
   }
 }

@@ -224,7 +224,7 @@ static void memory_scope_labels_for_cwd(const char *workspace_hint, char *worksp
    project_source_buf[0] = '\0';
    const char *project_source = NULL;
    if (cwd[0] &&
-       workspace_active_root(NULL, cwd, project_source_buf, sizeof(project_source_buf)) == 0 &&
+       workspace_active_root_from_cwd(cwd, project_source_buf, sizeof(project_source_buf)) == 0 &&
        project_source_buf[0])
    {
       project_source = project_source_buf;

@@ -612,9 +612,7 @@ static char *build_session_context(const char *client_cwd)
    /* Workspace project descriptions and style guides */
    if (verbose)
    {
-      config_t ws_cfg;
-      config_load(&ws_cfg);
-      char *ws_ctx = workspace_build_context_from_config(&ws_cfg);
+      char *ws_ctx = workspace_build_context_from_config();
       if (ws_ctx && ws_ctx[0])
       {
          size_t ws_len = strlen(ws_ctx);

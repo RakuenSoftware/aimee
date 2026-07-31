@@ -209,6 +209,46 @@ Test note: `test_prompts.c`'s allow-list cases needed BLOCK sequences in the wri
 emptied the allow list and turned it into "allow all", and the case still *looked* like it ran.
 It is caught here only because the case asserts a field is FILTERED OUT.
 
+### Round 7 — workspace.c, where the parameter turned out to be policy
+
+`workspace_active_root`, `workspace_build_context_from_config` and
+`workspace_resolve_proposal_path` no longer take or load a `config_t`;
+`modules/workspace/workspace.c` and its header name it nowhere. Three more dead
+`config_t` locals deleted (`agent_runtime.c`, `cmd_session_lifecycle.c`,
+`server_state.c`) — two of which the compiler never warned about, because their own
+`config_load(&cfg)` counted as a use.
+
+**Ratchet:** 836 -> 824 mentions, 453 -> 449 `config_load()`, 231 -> 227 files.
+
+**The `cfg` parameter here was not data access, it was a POLICY SWITCH.** Four callers
+passed NULL deliberately. `cmd_hooks_scope.c:148` says why: resolve the project from cwd
+alone so *"nested repositories and non-repository working directories cannot inherit the
+configured workspace directory's name as their project label."* Dropping the parameter and
+always reading config would have silently relabelled every non-repo directory sitting
+inside a configured workspace. Split by intent instead of adding a boolean flag:
+`workspace_active_root()` consults the configured workspaces, `workspace_active_root_from_cwd()`
+never does. Five callers took the first, four the second.
+
+Generalise: before deleting a `config_t` parameter, check whether NULL is *meaningful* at
+any call site. If it is, the parameter encodes a decision and the conversion owes you two
+named functions, not one.
+
+**Latent bug fixed on the way.** In `workspace_resolve_proposal_path`, `cfg` was loaded
+inside `if (config_load(&cfg) == 0)` but read again *outside* that block, so a failed load
+left the second loop iterating an uninitialised `config_t`. Reading through accessors
+deletes the failure mode rather than patching it.
+
+### `make -j8` DOES NOT BUILD EVERYTHING — this bit twice
+
+Several sources compile more than once under different defines. `workspace.c` also builds
+as `build/obj/kb/modules/workspace/workspace.o` with `-DAIMEE_DB1_DISABLED`. A `(void)cfg;`
+left inside an `#ifdef AIMEE_DB1_DISABLED` branch passes the default build and breaks the KB
+variant — which is the EXACT defect `05abb25cb` shipped in `test_kb_http_routes.c`'s
+`kb_bandit_sample` stub, reproduced here hours after fixing it.
+
+Per-tranche check: `make all kb server`, then a full `make unit-tests`. After removing a
+parameter, grep the file for `(void)<param>;` in every `#ifdef` branch.
+
 ### The curator-provider chain needs a design decision first (attempted, reverted)
 
 `kb_curator_provider_for_stage` looks like an easy six-field conversion. It is not, and the reason

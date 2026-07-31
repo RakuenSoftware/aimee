@@ -933,7 +933,7 @@ static char *td_write_file(cJSON *args, const char *name, const char *dispatch_c
             config_t lsp_cfg;
             config_load(&lsp_cfg);
             char ws[MAX_PATH_LEN] = "";
-            if (workspace_active_root(&lsp_cfg, dispatch_cwd, ws, sizeof(ws)) != 0)
+            if (workspace_active_root(dispatch_cwd, ws, sizeof(ws)) != 0)
                snprintf(ws, sizeof(ws), "%s", dispatch_cwd);
             lsp_diag_t lsp_diags[6];
             int nlsp = lsp_manager_diagnostics(ws, p->valuestring, lsp_diags, 6);

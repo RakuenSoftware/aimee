@@ -1509,9 +1509,7 @@ int handle_workspace_context(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
    (void)req;
 
-   config_t cfg;
-   config_load(&cfg);
-   char *context = workspace_build_context_from_config(&cfg);
+   char *context = workspace_build_context_from_config();
 
    cJSON *resp = jo_ok_kv("context", context ? context : "");
    free(context);

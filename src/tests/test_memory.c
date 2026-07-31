@@ -1089,7 +1089,7 @@ static void test_context_budget_prefers_project_scope_over_global_l5(void)
       if (workspace_repo_identity(cwd, project, sizeof(project), NULL, 0) != 0 || !project[0])
       {
          char project_root[MAX_PATH_LEN];
-         if (workspace_active_root(NULL, cwd, project_root, sizeof(project_root)) == 0 &&
+         if (workspace_active_root_from_cwd(cwd, project_root, sizeof(project_root)) == 0 &&
              project_root[0])
          {
             const char *slash = strrchr(project_root, '/');

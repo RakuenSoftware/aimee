@@ -865,7 +865,7 @@ char *tool_bash(const char *command, int timeout_ms)
          cwd[0] = '\0';
       if (cwd[0] && guard_rw && bash_path_under_root(cwd, guard_rw))
          workspace_ptr = cwd;
-      else if (cwd[0] && workspace_active_root(&cfg, cwd, workspace, sizeof(workspace)) == 0)
+      else if (cwd[0] && workspace_active_root(cwd, workspace, sizeof(workspace)) == 0)
          workspace_ptr = workspace;
       else if (cwd[0])
          workspace_ptr = cwd;
@@ -908,7 +908,7 @@ char *tool_bash(const char *command, int timeout_ms)
          snprintf(cwd, sizeof(cwd), "%s", src);
       else if (!getcwd(cwd, sizeof(cwd)))
          cwd[0] = '\0';
-      if (cwd[0] && workspace_active_root(&cfg, cwd, workspace, sizeof(workspace)) == 0)
+      if (cwd[0] && workspace_active_root(cwd, workspace, sizeof(workspace)) == 0)
          workspace_ptr = workspace;
       pid = sandbox_exec(&sbox_cfg, command, stdout_pipe[1], stderr_pipe[1], workspace_ptr);
       close(stdout_pipe[1]);
