@@ -32,6 +32,26 @@
 set -u
 cd "$(dirname "$0")/.."
 ROOT=${ROOT:-/mnt/media/tierbench}
+
+# Single-instance lock. Two copies of this sweep once ran at the same time, both
+# serving GLM-4.7-Flash on port 8091, because a pkill was issued and its effect
+# never checked before relaunching. The second instance also ran `rm -f
+# *.pred.jsonl` over the first one's output. Nothing detected it; I found it by
+# eye in a process listing. A benchmark that can silently run twice against one
+# port produces numbers from an unknown server.
+LOCK=$ROOT/challenger-254.lock
+exec 9>"$LOCK"
+if ! flock -n 9; then
+  echo "REFUSING: another challenger sweep holds $LOCK (pid $(cat "$LOCK" 2>/dev/null))" >&2
+  exit 1
+fi
+echo $$ >&9
+
+# Refuse to start if anything already holds the port, whoever owns it.
+if curl -sf "http://127.0.0.1:${PORT:-8091}/health" >/dev/null 2>&1; then
+  echo "REFUSING: port ${PORT:-8091} already serving. Stop it first." >&2
+  exit 1
+fi
 PY=${PY:-$ROOT/venv/bin/python}
 BIN=$ROOT/bin/llama-b10210
 OUT=results/challenger-254
@@ -44,11 +64,23 @@ PORT=${PORT:-8091}
 # silently take layers and wreck both throughput and fit if left visible.
 export GGML_VK_VISIBLE_DEVICES=1
 
-# Control first. If the control does not reproduce close to its .253 number the
-# rest of this sweep is uninterpretable, and I want to know that before spending
-# hours on the challengers rather than after.
+# Controls first, both of them, before any challenger. The first run of this
+# sweep showed gemma-4-12B at 0.8235 (Q8_0, 5080, CUDA) against 0.8550 (Q6_K,
+# 7900 XTX, Vulkan): +0.0315, which is larger than the entire measured gap
+# between 12B and E4B. That delta bundles quantisation with backend, and the two
+# cannot be told apart from one number.
+#
+# So 12B runs twice here, at Q6_K and Q8_0, on the same card and backend. Q8_0
+# is ~13GB and fits the 24GB whole.
+#
+#   q8-here vs q6-here   = the quantisation effect, hardware held constant
+#   q8-here vs q8-on-253 = the CUDA-vs-Vulkan effect, quantisation held constant
+#
+# Until both land, nothing measured on this host can be compared to the .253
+# ladder, and a challenger "beating Gemma 4" here means nothing.
 MODELS=(
   "gemma-4-12B-it.q6|unsloth/gemma-4-12B-it-GGUF:Q6_K|"
+  "gemma-4-12B-it.q8|unsloth/gemma-4-12B-it-GGUF:Q8_0|"
   "GLM-4.7-Flash.q6|unsloth/GLM-4.7-Flash-GGUF:Q6_K|"
   "Magistral-Small-2509.q6|unsloth/Magistral-Small-2509-GGUF:Q6_K|"
   "Olmo-3.1-32B-Think.q5|bartowski/allenai_Olmo-3.1-32B-Think-GGUF:Q5_K_M|"

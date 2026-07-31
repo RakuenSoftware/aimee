@@ -584,3 +584,27 @@ Note also the latency column, which is not comparable at all: 781ms median here
 against 11650ms on .253. The .253 thinking-ladder timings were taken while the
 cpufit lane was saturating the box (defect 19), so every latency figure from
 that ladder is contended and should not be quoted.
+
+## Defect 22: two sweeps ran at once against one port, and nothing noticed
+
+The .254 challenger sweep was launched, killed with `pkill`, and relaunched.
+The `pkill` did not take, so two copies ran concurrently, both serving
+GLM-4.7-Flash on port 8091. The second instance's startup also ran
+`rm -f results/challenger-254/*.pred.jsonl` across the first one's output.
+
+Nothing in the harness detected any of it. It was found by eye in a process
+listing, while looking at something else.
+
+Cost: none, as it turned out. The Q6 control was re-run under the lock and
+scored bit-identical to the first run — 0.8550 / 0.8750 / 0.8358, 64 triples,
+`strict` dict equal. That is luck. The control had completed before the second
+instance started, and a request landing on the wrong server would not have been
+visible in any output.
+
+Fixed: `flock` on a single-instance lock, plus a pre-flight refusal if anything
+is already answering on the port, whoever owns it. Both fail closed with a
+message rather than proceeding.
+
+The general lesson is the one already written down for container deploys and
+ignored here: issue a stop, then ASSERT the stop took, in the script, before
+acting on the assumption. `pkill` followed by a relaunch is not a stop.

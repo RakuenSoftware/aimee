@@ -217,9 +217,9 @@
     "catch_all_relations": 0
   },
   "latency_ms": {
-    "median": 780.9,
-    "p90": 1349.0,
-    "mean": 779.3
+    "median": 784.9,
+    "p90": 1347.5,
+    "mean": 772.7
   },
   "completion_tokens": {
     "median": 34,
