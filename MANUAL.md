@@ -18,9 +18,10 @@ operations. Exact command and config tables are generated from source:
 - `aimee-server` owns sessions, DB1, agents, tools, policy, credentials, provider calls, and the
   public resource API.
 - `aimee-wfe` owns workflow definitions and lifecycle state.
-- `aimee-kb` owns durable memory, documents, the code graph, retrieval, curation, PostgreSQL, and
-  pgvector.
-- `aimee-llm` serves embedding and synthesis on CPU or GPU.
+- `aimee-kb` owns durable memory, documents, the code graph, retrieval, curation, PostgreSQL,
+  pgvector, and the bundled embedder.
+- Synthesis is an OpenAI-compatible endpoint the KB calls (`AIMEE_LLM_URL`). It runs wherever you
+  put it. There is no longer an `aimee-llm` container.
 - `aimee-runtime-web` serves the browser workspace.
 
 The server and KB each run a bounded shared-memory event bus. Governed actions, memory mutations,

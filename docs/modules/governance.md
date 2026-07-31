@@ -19,11 +19,11 @@ accepted algorithms, and namespaced claim mappings. GitHub may be configured if 
 The descriptor's ownership fields describe what lives under `src/modules/governance/` today, which is
 the response-governance stage alone: `gw_stage_governance.c` and its private header
 `gw_stage_governance.h`, tested by `src/tests/test_response_governance_stage.c`. That is narrower than
-the governance plane this document describes — the OIDC, identity, policy-distribution, and console
+the governance plane this document describes: the OIDC, identity, policy-distribution, and console
 surfaces remain distributed across the KB, DB2, management, and console layers and are not yet
 module-local. The descriptor declares its sources, private header, test, and this document and sets
 `ownership_complete: true`. The latch asserts that those declarations exhaustively cover the module
-root as it stands — one source and one private header — not that the broader governance plane has been
+root as it stands (one source and one private header), not that the broader governance plane has been
 migrated. `docs/validation/core-modularization-slice-40.md` records the declaration audit and
 `docs/validation/core-modularization-slice-41.md` the completeness audit; the two were split so the
 latch reviews declarations that were merged on their own first. Because the module owns exactly what it

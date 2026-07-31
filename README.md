@@ -39,8 +39,10 @@ The `aimee` CLI is a thin client. Linux, macOS, and Windows builds talk to the s
 - **Any model, any provider.** OpenAI Chat Completions, OpenAI Responses, Anthropic Messages,
   Gemini, Mistral, local OpenAI-compatible servers, and AWS Bedrock all pass through one internal
   request format. Switch the primary model without switching tools.
-- **Local inference.** One `aimee-llm` container serves embeddings and synthesis on CPU
-  or GPU. The KB runs no model itself. See [Inference](docs/KB_LLM_BACKENDS.md).
+- **Local inference.** The KB embeds in-container from weights baked into its image
+  (`bekko-a25m`, 384-dim), so a fresh install searches semantically with no GPU, no model
+  download and no network. Synthesis is a URL you point at whatever you like. See
+  [Inference](docs/KB_LLM_BACKENDS.md).
 - **Document ingestion.** Push source trees, Markdown, text, and PDFs. Structured PDF mode keeps
   coordinates, tables, page crops, OCR text, and citations. See [Structured PDF](docs/STRUCTURED_PDF.md).
 - **A browser workspace.** Chat, projects, agents, workflows, the code graph, logs, settings, and
@@ -66,18 +68,22 @@ docker compose -f compose.server-managed.yaml logs aimee-server
 Unless both browser credential env vars were supplied, the logs print a random temporary username
 and password under `[webchat]`. Open <https://localhost:8443> and sign in with that pair. The wizard
 first replaces it with your persistent operator username and password, then creates the initial
-agent and picks the inference tier, git hosts, and workspaces. Its last step starts:
+agent and picks the embedder, synthesis endpoint, git hosts, and workspaces. Its last step starts:
 
-- `aimee-kb`, with private PostgreSQL 18, pgvector, and pgvectorscale inside the container;
-- `aimee-llm`, on CPU or GPU.
+- `aimee-kb`, with private PostgreSQL 18, pgvector, and pgvectorscale inside the container.
 
-The managed deploy creates and starts KB before LLM. It does not wait for first-boot model downloads:
-KB database initialization and CPU indexing begin immediately while LLM readiness continues in the
-background. A failed LLM download remains visible in that container's status and logs.
+That is the only sibling it starts. Embedding lives inside `aimee-kb`, so there is no inference
+container to wait on and indexing begins immediately.
+
+Synthesis is external-only on this path today: give the wizard an OpenAI-compatible endpoint, or
+leave it empty and the curator's synthesis stages stay idle while everything else works. A local
+synthesis option is the next piece of work, and the reason it is not here yet is that the smallest
+model that holds the output contract is `gemma-4-E4B`, which is a real CPU and memory cost to put in
+front of a first-time user without warning them.
 
 It also displays the one client-enrollment command for the signed-in first user.
-For a local inference tier, setup separately provisions an authenticated KB-to-LLM service identity;
-no inference credential needs to be copied from the browser.
+If you point synthesis at an endpoint that needs a bearer, setup provisions the KB-to-endpoint
+service identity itself; no inference credential needs to be copied from the browser.
 
 Finish the wizard's account step before putting it on a network. The managed compose file mounts the
 Docker socket; that gives aimee-server control of the host Docker daemon. Use the regular split stack

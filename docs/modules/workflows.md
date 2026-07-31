@@ -22,8 +22,8 @@ private; every one pairs with a like-named source, and six sources carry no pair
 (`wfe_canonical.c`, `wfe_custom.c`, `wfe_live_forge.c`, `wfe_router_catalog.c`, `wfe_scheduler.c`,
 `wfe_validate.c`), declaring instead through the paired headers. Make compiles all thirty sources;
 CMake compiles twenty-four, omitting `gw_orch_workflows.c`, `wfe_live_foreach.c`, `wfe_live_forge.c`,
-`wfe_live_panel.c`, `wfe_panel_roundtable.c`, and `wfe_replay_worktree.c` — the live, panel, forge,
-replay, and gateway-orchestration units that are server-side — the same intentional thin-client
+`wfe_live_panel.c`, `wfe_panel_roundtable.c`, and `wfe_replay_worktree.c` (the live, panel, forge,
+replay, and gateway-orchestration units that are server-side), the same intentional thin-client
 boundary recorded for the earlier modules. `docs/validation/core-modularization-slice-54.md` records
 the declaration audit and `docs/validation/core-modularization-slice-55.md` the completeness audit; the
 two were split so the latch reviews declarations merged on their own first. Adding a new module-local

@@ -54,4 +54,4 @@ Rollback needs the old service image/model and a reverse re-embed from source or
 It is another maintenance operation, not an environment toggle. Keep the old image and snapshot for
 the same declared window and rehearse the reverse path before production cutover.
 
-See [Inference tiers](../AIMEE_KB_SYNTH_TIERS.md) and [Retrieval](../retrieval-stack.md).
+See [Local inference](../LOCAL_INFERENCE.md) and [Retrieval](../retrieval-stack.md).

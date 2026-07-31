@@ -47,8 +47,13 @@ them synchronously, and exits before the service is created.
 
 ## Inference
 
-`aimee-llm` serves embedding and synthesis. Select a CPU or GPU tier with the deployment
-settings. GPU models live in a persistent model volume; the CPU offline image may bake its model.
+Embedding is in-container: `aimee-kb` ships `bekko-a25m` (384-dim) with its weights baked into the
+image. Point `AIMEE_EMBEDDER_URL` at an external endpoint to use something else, and supply its
+`EMBEDDER_MODEL` and `AIMEE_EMBEDDING_DIM` with it.
+
+Synthesis is a single OpenAI-compatible endpoint at `AIMEE_LLM_URL`, defaulted empty. Run it
+yourself with the `curator-llm` compose profile, or point at an external one. See
+[Local inference](LOCAL_INFERENCE.md).
 
 The KB must report explicit degradation when a configured inference stage is unavailable. It cannot
 claim a dense or synthesized result after silently skipping that stage.

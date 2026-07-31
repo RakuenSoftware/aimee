@@ -48,8 +48,8 @@ sealed into the vault, and the shadow verifiers behind them are no longer erased
 `webchat/logins` into the vault is in a state this upgrade cannot repair by itself: that migration
 sealed the verifiers into the vault's `legacy_hashes` record and then erased them from
 `/etc/shadow`. Those accounts therefore have no PAM credential to restore, and only the first-boot
-pair is provisioned. Any dashboard account created through the wizard on such an appliance — the
-account named in `webchat/bootstrap-replaced` — must be recreated after upgrading.
+pair is provisioned. Any dashboard account created through the wizard on such an appliance (the
+account named in `webchat/bootstrap-replaced`) must be recreated after upgrading.
 
 To tell whether you are affected:
 

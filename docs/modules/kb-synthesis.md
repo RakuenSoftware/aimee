@@ -5,11 +5,13 @@
 `kb-synthesis` is an optional, default-off, heavyweight knowledge-curation module. It uses a capable LLM or
 substantial GPU to reason across already-ingested evidence, resolve higher-order relationships, and write
 cited narrative artifacts such as topic synthesis. It is not normal response-composition, required
-embedding/reranking, code indexing, basic memory recall, or the deterministic Tier-A ingest/index lane.
+embedding, code indexing, basic memory recall, or the deterministic Tier-A ingest/index lane. There is
+no reranking role: the cross-encoder was measured out of the stack and `kb_ranker` (linear, in-process)
+took its place. See [Local inference](../LOCAL_INFERENCE.md).
 
 ## Public contracts
 
-`src/modules/kb-synthesis/` owns the KB curator family — 21 sources and 16 headers relocated from
+`src/modules/kb-synthesis/` owns the KB curator family, 21 sources and 16 headers relocated from
 `src/kb/`: the curator pipeline and queue, extraction (evidence/code), grounding, entity resolution,
 contradiction reconciliation, judging, promotion, the index writers (narrative/claims/code-unit),
 artifact linking, LLM and sidecar drivers, notify/version, and `kb_curator_synthesize.{c,h}`. These are
@@ -36,10 +38,15 @@ consumer even when no synthesized artifact exists.
 
 ## Providers and readiness
 
-Tier-B stages require an explicitly configured capable provider through `tier_b.*` or a synthesis sidecar;
-`kb_curator_provider_for_stage` deliberately provides no Tier-A environment fallback. Readiness is idle,
-not degraded core, when disabled or unconfigured. It is ready only when storage, source evidence, provider,
-prompt/version policy, and bounded worker lane are all operational.
+Tier-B stages resolve a provider from `tier_b.*` config, or failing that from the deployment's single
+synthesis endpoint (`config_synth_chat_endpoint`, i.e. `AIMEE_LLM_URL`). They never fall back to
+`LLM_ENDPOINT`, which `kb_curator_provider_for_stage` reserves for Tier-A: that variable is the
+small-model interface, and letting a weak model serve the reasoning stages is the graph-poisoning case
+the stage split exists to prevent. Both tiers now resolve to one model in practice, because measurement
+did not support running a cheaper one on the mechanical stages.
+
+Readiness is idle, not degraded core, when disabled or unconfigured. It is ready only when storage,
+source evidence, provider, prompt/version policy, and bounded worker lane are all operational.
 
 ## Configuration and activation
 
@@ -76,7 +83,7 @@ bounded, linked, and accepted under artifact policy.
 When currently enabled, the curator selects an eligible high-centrality topic, gathers top-K linked evidence, sends
 a grounded `synthesize_topic` request to the capable Tier-B provider, validates the response, writes a
 `synthesis` artifact, and links it about the topic and to its cited sources. Acceptance for the future
-optional profile requires ingest, embedding, reranking, code intelligence, memory search, and normal
+optional profile requires ingest, embedding, ranking, code intelligence, memory search, and normal
 answers to remain operational when this module is omitted.
 
 ## Tests and failure behavior
