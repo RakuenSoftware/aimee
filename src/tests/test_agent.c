@@ -3249,9 +3249,9 @@ static void test_agent_config_deletion_guard(void)
 
       agent_config_t last;
       assert(agent_load_config(&last) == 0 && last.agent_count == 1);
-      last.agent_count = 0; /* now drop the last one */
-      assert(agent_save_config(&last) != 0);                /* plain save still refuses */
-      assert(agent_save_config_after_removal(&last) == 0);  /* the removal path may */
+      last.agent_count = 0;                                /* now drop the last one */
+      assert(agent_save_config(&last) != 0);               /* plain save still refuses */
+      assert(agent_save_config_after_removal(&last) == 0); /* the removal path may */
 
       agent_config_t gone;
       assert(agent_load_config(&gone) == 0 && gone.agent_count == 0);
