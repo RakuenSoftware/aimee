@@ -22,7 +22,8 @@ import {
  * roles (embedder / synthesizer) onto the page-2 config record (per-role
  * llm_* keys), which `aimee config deploy-env` translates to the compose stack.
  * Every write goes through the existing /api/config/set allowlist (no new backend).
- * All local roles share ONE aimee-llm container on the chosen host.
+ * Nothing is placed on a container of ours: aimee-llm is retired, the embedder is
+ * bundled into the knowledge base, and synthesis is external or off.
  *
  * The knowledge-base local/remote choice lives in the preceding KnowledgeBase step;
  * this step is only shown for kb_mode='local', so it no longer renders the KB fork.
@@ -258,21 +259,10 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
   return (
     <div style={{ display: 'grid', gap: 16, marginBottom: 8 }}>
       <section style={{ display: 'grid', gap: 10 }}>
-        <div style={sectionTitle}>LLM placement</div>
-        <Field label="Host for the local LLM container">
-          <select style={input} value={hostName} onChange={(e) => setHostName(e.target.value)}>
-            {hosts.map((h) => (
-              <option key={h.name} value={h.name}>
-                {h.name} ({h.kind}){h.gpus.length ? ` · ${h.gpus.length} GPU${h.gpus.length > 1 ? 's' : ''}` : ' · CPU only'}
-              </option>
-            ))}
-          </select>
-        </Field>
-        {host?.error && (
-          <div style={{ fontSize: 11.5, color: '#a33' }}>Probe error on {host.name}: {host.error} — CPU still available.</div>
-        )}
+        <div style={sectionTitle}>Model roles</div>
         <div style={{ fontSize: 11.5, color: '#778', marginTop: -2 }}>
-          All GPU/CPU-placed roles run on one aimee-llm container on this host.
+          Nothing is placed on a host here. The embedder runs inside the knowledge base from weights
+          in its image, and synthesis is an endpoint you run, or off.
         </div>
 
         {ROLES.map(({ role, label, blurb }) => {
@@ -372,11 +362,3 @@ const input: React.CSSProperties = {
   width: '100%', boxSizing: 'border-box', padding: '7px 9px', borderRadius: 6,
   border: '1px solid #ccd', fontSize: 13, fontFamily: 'ui-monospace, monospace',
 };
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label style={{ display: 'block' }}>
-      <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 3 }}>{label}</div>
-      {children}
-    </label>
-  );
-}

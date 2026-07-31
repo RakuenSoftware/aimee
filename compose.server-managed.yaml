@@ -2,7 +2,7 @@
 #
 # You deploy ONE container — aimee-server — and drive the rest from the browser.
 # It runs with the host Docker socket mounted, so when the setup wizard finishes it
-# brings up the managed sibling services (aimee-kb + aimee-llm) itself,
+# brings up the managed sibling service (aimee-kb) itself,
 # via `docker compose up -d` on deploy/container/aimee-managed.compose.yaml (baked
 # into the image). No second compose command, no combined image.
 #
@@ -25,7 +25,7 @@
 name: aimee
 
 # Shared network the server + every managed service join, so they resolve each
-# other by name (aimee-kb:8741, aimee-llm:8742). The managed compose
+# other by name (aimee-kb:8741). The managed compose
 # references this as `external` — it must exist, so define it here with a fixed name.
 networks:
   aimee:

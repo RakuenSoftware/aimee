@@ -38,9 +38,10 @@ services:
     environment:
       AIMEE_HOME: /var/lib/aimee
       # DB credentials, if any, are held only in the KB Vault.
-      # embed + rerank + synth via the unified aimee-llm container (the kb runs no
-      # model). When no role is local (llm profile off) the operator points this at
-      # an external endpoint; the kb fail-opens on embedding if it is unreachable.
+      # Synthesis endpoint. The kb runs no model of its own and there is no
+      # inference container to fall back on, so this is empty unless an operator
+      # points it at an endpoint they run. Embedding does not use it: the kb embeds
+      # in-process from weights baked into its image.
       AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
       # The wizard's embedder choice, and the endpoint for an external one. The kb
       # MUST receive both: `aimee config deploy-env` emits them, and without them
