@@ -115,22 +115,11 @@ int config_embedding_dim_current(void)
    return pinned > 0 ? pinned : CONFIG_EMBEDDING_DIM_DEFAULT;
 }
 
-/* The synthesis endpoint — see config_database.h. AIMEE_LLM_URL outranks the stored
- * field for the same reason it does for the embedder: a containerized deploy sets the
- * environment, not a writable aimee.yaml. Trailing slashes are trimmed before the /v1
- * suffix is judged, so "http://h:8742/" and "http://h:8742/v1/" both normalize. */
-int config_synth_chat_endpoint(const config_t *cfg, char *out, size_t out_len)
+/* Trailing-slash trim + /v1 suffix, shared by both resolvers below so they cannot
+ * disagree about what an operator's value means: "http://h:8742/" and
+ * "http://h:8742/v1/" both normalize to the same address. */
+static int config_synth_chat_endpoint_normalize(const char *endpoint, char *out, size_t out_len)
 {
-   if (!out || out_len == 0)
-      return 0;
-   out[0] = '\0';
-
-   const char *endpoint = getenv("AIMEE_LLM_URL");
-   if (!endpoint || !endpoint[0])
-      endpoint = cfg ? cfg->llm_synth_endpoint : NULL;
-   if (!endpoint || !endpoint[0])
-      return 0;
-
    size_t n = strlen(endpoint);
    while (n > 0 && endpoint[n - 1] == '/')
       n--;
@@ -144,6 +133,41 @@ int config_synth_chat_endpoint(const config_t *cfg, char *out, size_t out_len)
       return 0;
    }
    return 1;
+}
+
+/* The synthesis endpoint — see config_database.h. AIMEE_LLM_URL outranks the stored
+ * field for the same reason it does for the embedder: a containerized deploy sets
+ * the environment, not a writable aimee.yaml. */
+int config_synth_chat_endpoint(const config_t *cfg, char *out, size_t out_len)
+{
+   if (!out || out_len == 0)
+      return 0;
+   out[0] = '\0';
+
+   const char *endpoint = getenv("AIMEE_LLM_URL");
+   if (!endpoint || !endpoint[0])
+      endpoint = cfg ? cfg->llm_synth_endpoint : NULL;
+   if (!endpoint || !endpoint[0])
+      return 0;
+   return config_synth_chat_endpoint_normalize(endpoint, out, out_len);
+}
+
+/* Same resolver, without the caller holding a config_t: reads llm_synth_endpoint
+ * through its accessor. AIMEE_LLM_URL still outranks it, and the normalization is
+ * the shared one above, so no caller can disagree about what an operator's value
+ * means. */
+int config_synth_chat_endpoint_current(char *out, size_t out_len)
+{
+   if (!out || out_len == 0)
+      return 0;
+   out[0] = '\0';
+
+   const char *endpoint = getenv("AIMEE_LLM_URL");
+   if (!endpoint || !endpoint[0])
+      endpoint = config_llm_synth_endpoint();
+   if (!endpoint || !endpoint[0])
+      return 0;
+   return config_synth_chat_endpoint_normalize(endpoint, out, out_len);
 }
 
 /* §2a: pinned iff the resolved operator dim is positive. Keeping this defined in

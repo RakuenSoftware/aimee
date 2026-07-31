@@ -675,7 +675,7 @@ typedef struct
 /* Call the external rewrite command (memory.rewrite.command) and parse results
  * into out. Silently no-ops if rewriting is disabled or the command fails.
  * cfg must be loaded by the caller. */
-void memory_query_rewrite(const char *query, const config_t *cfg, memory_query_rewrite_t *out);
+void memory_query_rewrite(const char *query, memory_query_rewrite_t *out);
 
 /* --- Negation and Absence Memory --- */
 

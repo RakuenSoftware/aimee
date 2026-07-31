@@ -55,6 +55,34 @@ extern "C"
                              * the jinja chat-template kwarg. */
    } provider_def_t;
 
+/* Sizes for provider_def_owned_t's buffers, matched to the widest config field
+ * that feeds them (kb_curator_*_base_url / _model / _api_key) plus room for the
+ * env-fallback URLs, which are not length-bounded by config. */
+#define PROVIDER_URL_LEN 512
+#define PROVIDER_KEY_LEN 512
+
+   /* A provider_def_t that OWNS its strings.
+    *
+    * provider_def_t is a borrowed view: its three char pointers alias storage the
+    * caller has to keep alive. That worked when the storage was a config_t the
+    * caller was already holding. It does not work against accessors, which return
+    * a per-accessor thread-local buffer that the next call to the same accessor
+    * overwrites -- a resolver reading six fields would hand back three pointers
+    * into buffers it had already clobbered.
+    *
+    * So resolvers fill one of these instead. `def` points into the buffers that
+    * follow it, so it stays valid for as long as the owner does and needs nothing
+    * else kept alive. Pass &owned.def wherever a provider_def_t is wanted. Copying
+    * the struct by value does NOT copy correctly -- def would still point at the
+    * original's buffers -- so pass it by pointer, or re-resolve. */
+   typedef struct
+   {
+      provider_def_t def;
+      char base_url[PROVIDER_URL_LEN];
+      char model[PROVIDER_MODEL_LEN];
+      char api_key[PROVIDER_KEY_LEN];
+   } provider_def_owned_t;
+
    typedef struct
    {
       char *content;                  /* malloc'd completion text; NULL if none. Caller frees. */

@@ -1176,7 +1176,7 @@ $(TESTPREFIX)/unit-test-cmd-hooks-scope: $(OBJDIR)/tests/test_cmd_hooks_scope.o 
                              $(OBJDIR)/cmd_hooks_scope.o $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-memory: $(OBJDIR)/tests/test_memory.o $(OBJDIR)/kb/kb_bandit.o $(OBJDIR)/kb/kb_bandit_registry.o $(OBJDIR)/db2/bandit.o $(OBJDIR)/db2/demotion.o $(OBJDIR)/modules/memory/memory_core.o $(OBJDIR)/modules/memory/memory_core_crud.o $(OBJDIR)/modules/memory/memory_core_helpers.o $(OBJDIR)/modules/memory/memory_core_helpers_b.o $(OBJDIR)/modules/memory/memory_core_search.o $(OBJDIR)/modules/memory/memory_core_search_b.o $(OBJDIR)/modules/memory/memory_core_search_c.o $(OBJDIR)/modules/memory/memory_core_scope_embed.o $(OBJDIR)/modules/memory/memory_core_tiers.o \
+$(TESTPREFIX)/unit-test-memory: $(CONFIG_ACCESSOR_OBJS) $(OBJDIR)/tests/test_memory.o $(OBJDIR)/kb/kb_bandit.o $(OBJDIR)/kb/kb_bandit_registry.o $(OBJDIR)/db2/bandit.o $(OBJDIR)/db2/demotion.o $(OBJDIR)/modules/memory/memory_core.o $(OBJDIR)/modules/memory/memory_core_crud.o $(OBJDIR)/modules/memory/memory_core_helpers.o $(OBJDIR)/modules/memory/memory_core_helpers_b.o $(OBJDIR)/modules/memory/memory_core_search.o $(OBJDIR)/modules/memory/memory_core_search_b.o $(OBJDIR)/modules/memory/memory_core_search_c.o $(OBJDIR)/modules/memory/memory_core_scope_embed.o $(OBJDIR)/modules/memory/memory_core_tiers.o \
                         $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/kb_payload.o $(OBJDIR)/db2/kb_service_backend.o $(OBJDIR)/db2/kb_service_backend_ingest.o $(OBJDIR)/db2/memory_lifecycle.o $(OBJDIR)/db2/memory_payload.o $(OBJDIR)/db2/memory_promotion.o $(OBJDIR)/db2/memory_query.o $(OBJDIR)/db2/memory_query_bookkeeping.o $(OBJDIR)/db2/memory_entity_graph.o $(OBJDIR)/db2/memory_score_fields.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_scenes.o $(OBJDIR)/db2/memory_briefing.o $(OBJDIR)/db2/memory_health.o $(OBJDIR)/db2/memory_row_mapper_pg.o $(OBJDIR)/db2/memory_relations.o $(OBJDIR)/db2/memory_conflicts.o $(OBJDIR)/db2/vector_index_ops.o $(OBJDIR)/db2/code_index_ops.o $(OBJDIR)/db2/rules.o $(OBJDIR)/db2/stopwords.o $(OBJDIR)/db2/tool_registry.o $(OBJDIR)/db2/feedback.o $(OBJDIR)/db2/notes.o $(OBJDIR)/db2/anti_patterns.o $(OBJDIR)/db2/curiosity.o $(OBJDIR)/db2/entity_edges.o $(OBJDIR)/db2/entity_profiles.o $(OBJDIR)/db2/epistemic_directives.o $(OBJDIR)/db2/failed_queries.o $(OBJDIR)/db2/kind_lifecycle.o $(OBJDIR)/db2/calibration.o $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o \
                         $(OBJDIR)/tests/support/mock_agent_http.o \
                         $(OBJDIR)/tests/support/memory_embed_stub.o $(OBJDIR)/tests/support/kb_client_test_stub.o \
@@ -4231,7 +4231,8 @@ $(TESTPREFIX)/unit-test-curator-link-artifacts: \
 
 # LLM judge sidecar — request build / invoke / parse round-trip via tiny shell
 # "sidecars". Only depends on cJSON; no DB link.
-$(TESTPREFIX)/unit-test-curator-judge: \
+$(TESTPREFIX)/unit-test-curator-judge: $(OBJDIR)/text.o $(OBJDIR)/tests/support/curator_config_stub.o \
+                                       \
                                        $(OBJDIR)/tests/test_curator_judge.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_judge.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
@@ -4245,7 +4246,8 @@ $(TESTPREFIX)/unit-test-curator-judge: \
 
 # §4 surprising-links judge: real request-build + verdict-parse; DB accessors stubbed
 # in the test, the LLM faked via the curator sidecar seam (cfg=NULL + printf judge_cmd).
-$(TESTPREFIX)/unit-test-kb-surprising-judge: \
+$(TESTPREFIX)/unit-test-kb-surprising-judge: $(OBJDIR)/text.o $(OBJDIR)/tests/support/curator_config_stub.o \
+                                       \
                                        $(OBJDIR)/tests/test_kb_surprising_judge.o \
                                        $(OBJDIR)/kb/kb_surprising_judge.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
@@ -5334,12 +5336,14 @@ $(TESTPREFIX)/unit-test-provider-client: $(OBJDIR)/tests/test_provider_client.o 
 # config_database.o: the synth address is resolved there (config_synth_chat_endpoint),
 # so this test links the real resolver rather than a stub — the normalization it
 # applies to an operator's URL is part of what these cases assert.
-$(TESTPREFIX)/unit-test-kb-curator-provider: $(OBJDIR)/tests/test_kb_curator_provider.o \
+$(TESTPREFIX)/unit-test-kb-curator-provider: $(OBJDIR)/tests/support/curator_config_stub.o \
+                                       $(OBJDIR)/tests/test_kb_curator_provider.o \
                                   $(OBJDIR)/kb_curator_provider.o $(OBJDIR)/modules/config/config_database.o \
                                   $(OBJDIR)/modules/config/config_database.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-kb-curator-llm: $(OBJDIR)/tests/test_kb_curator_llm.o \
+$(TESTPREFIX)/unit-test-kb-curator-llm: $(OBJDIR)/tests/support/curator_config_stub.o \
+                                       $(OBJDIR)/tests/test_kb_curator_llm.o \
                                   $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
                                   $(OBJDIR)/kb_curator_provider.o $(OBJDIR)/provider_client.o $(OBJDIR)/modules/config/config_database.o \
                                   $(OBJDIR)/text.o \

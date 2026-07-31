@@ -342,7 +342,7 @@ static int mf_process_one(const config_t *cfg, const mf_job_t *job)
    db2_lease_release_idle();
 
    char err[MF_ERRBUF] = "";
-   char *resp = kb_curator_llm_run(cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, sys_prompt, request_json,
+   char *resp = kb_curator_llm_run(KB_CURATOR_STAGE_EXTRACT_DOCS, sys_prompt, request_json,
                                    NULL, "", MF_LLM_OUT_CAP, err, sizeof(err));
    free(request_json);
    if (!resp)

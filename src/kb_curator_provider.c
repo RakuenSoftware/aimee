@@ -113,38 +113,37 @@ kb_curator_tier_t kb_curator_stage_tier(kb_curator_stage_t stage)
    return KB_CURATOR_TIER_B;
 }
 
-int kb_curator_provider_for_stage(const config_t *cfg, kb_curator_stage_t stage,
-                                  provider_def_t *out)
+int kb_curator_provider_for_stage(kb_curator_stage_t stage, provider_def_owned_t *out)
 {
-   if (out)
-      memset(out, 0, sizeof(*out));
-   if (!cfg || !out)
+   if (!out)
       return 0;
+   memset(out, 0, sizeof(*out));
 
-   const char *base_url;
-   const char *model;
-   const char *api_key;
+   /* Each accessor hands back its own thread-local buffer, so the six reads below
+    * are copied into *out's storage immediately rather than aliased -- that is the
+    * whole reason this returns an owned def. */
    if (kb_curator_stage_tier(stage) == KB_CURATOR_TIER_B)
    {
-      base_url = cfg->kb_curator_tier_b_base_url;
-      model = cfg->kb_curator_tier_b_model;
-      api_key = cfg->kb_curator_tier_b_api_key;
+      snprintf(out->base_url, sizeof(out->base_url), "%s", config_kb_curator_tier_b_base_url());
+      snprintf(out->model, sizeof(out->model), "%s", config_kb_curator_tier_b_model());
+      snprintf(out->api_key, sizeof(out->api_key), "%s", config_kb_curator_tier_b_api_key());
    }
    else
    {
-      base_url = cfg->kb_curator_provider_base_url;
-      model = cfg->kb_curator_provider_model;
-      api_key = cfg->kb_curator_provider_api_key;
+      snprintf(out->base_url, sizeof(out->base_url), "%s", config_kb_curator_provider_base_url());
+      snprintf(out->model, sizeof(out->model), "%s", config_kb_curator_provider_model());
+      snprintf(out->api_key, sizeof(out->api_key), "%s", config_kb_curator_provider_api_key());
    }
 
    /* Env fallback when a tier has no config provider, in precedence order:
     *
     *  1. The configured SYNTHESIS endpoint, resolved by config — one field
     *     (llm_synth_endpoint) with the AIMEE_LLM_URL override applied inside
-    *     config_synth_chat_endpoint(), never here. It no longer names a co-deployed
-    *     container: aimee-llm is retired and the kb embeds in-container, so this is
-    *     synthesis-only and external-only, and it drives BOTH tiers via that
-    *     endpoint's OpenAI chat API. It is the only fallback Tier-B accepts — see (2).
+    *     config_synth_chat_endpoint_current(), never here. It no longer names a
+    *     co-deployed container: aimee-llm is retired and the kb embeds in-container,
+    *     so this is synthesis-only and external-only, and it drives BOTH tiers via
+    *     that endpoint's OpenAI chat API. It is the only fallback Tier-B accepts —
+    *     see (2).
     *
     *     The URL is normalized (trailing slashes, /v1 suffix) in that one resolver,
     *     so this file cannot disagree with any other caller about what an operator's
@@ -156,50 +155,60 @@ int kb_curator_provider_for_stage(const config_t *cfg, kb_curator_stage_t stage,
     *
     * A config provider for the tier (checked above) still wins. Whole-provider
     * fallback: base+model+key move as a unit. */
-   static __thread char synth_url[512];
-   static __thread char runtime_key[512];
-   runtime_secret_wipe(runtime_key, sizeof(runtime_key));
-   if (!base_url[0])
+   if (!out->base_url[0])
    {
-      if (config_synth_chat_endpoint(cfg, synth_url, sizeof(synth_url)))
+      if (config_synth_chat_endpoint_current(out->base_url, sizeof(out->base_url)))
       {
          const char *env_model = getenv("AIMEE_LLM_MODEL");
-         base_url = synth_url;
-         model = (env_model && env_model[0]) ? env_model : AIMEE_LLM_DEFAULT_MODEL;
+         snprintf(out->model, sizeof(out->model), "%s",
+                  (env_model && env_model[0]) ? env_model : AIMEE_LLM_DEFAULT_MODEL);
          int have_service_token =
-             runtime_secret_get("AIMEE_LLM_AUTH_TOKEN", runtime_key, sizeof(runtime_key));
+             runtime_secret_get("AIMEE_LLM_AUTH_TOKEN", out->api_key, sizeof(out->api_key));
          const char *auth_required = getenv("AIMEE_LLM_AUTH_REQUIRED");
          if (auth_required && strcmp(auth_required, "1") == 0 && !have_service_token)
-            return 0; /* managed unified gateway must never receive a keyless request */
-         api_key = have_service_token ? runtime_key : "";
+         {
+            /* Managed unified gateway must never receive a keyless request. Wipe
+             * rather than just returning: out->api_key may hold a partial secret. */
+            runtime_secret_wipe(out->api_key, sizeof(out->api_key));
+            memset(out, 0, sizeof(*out));
+            return 0;
+         }
+         if (!have_service_token)
+            out->api_key[0] = '\0';
       }
       else if (kb_curator_stage_tier(stage) == KB_CURATOR_TIER_A)
       {
          const char *env_ep = getenv("LLM_ENDPOINT");
          if (!env_ep || !env_ep[0])
+         {
+            memset(out, 0, sizeof(*out));
             return 0; /* neither config nor env — the stage stays idle */
+         }
          const char *env_model = getenv("LLM_MODEL");
-         (void)runtime_secret_get("LLM_API_KEY", runtime_key, sizeof(runtime_key));
-         base_url = env_ep;
-         model = (env_model && env_model[0]) ? env_model : "";
-         api_key = runtime_key;
+         snprintf(out->base_url, sizeof(out->base_url), "%s", env_ep);
+         snprintf(out->model, sizeof(out->model), "%s",
+                  (env_model && env_model[0]) ? env_model : "");
+         if (!runtime_secret_get("LLM_API_KEY", out->api_key, sizeof(out->api_key)))
+            out->api_key[0] = '\0';
       }
       else
       {
+         memset(out, 0, sizeof(*out));
          return 0; /* Tier-B with no config and no AIMEE_LLM_URL — stays idle */
       }
    }
 
-   out->base_url = base_url;
-   out->model = model;
-   out->api_key = api_key[0] ? api_key : NULL; /* keyless local endpoint => no bearer */
-   out->wire = PROVIDER_WIRE_OPENAI_CHAT;
-   out->temperature = -1.0; /* let the provider default */
+   out->def.base_url = out->base_url;
+   out->def.model = out->model;
+   /* keyless local endpoint => no bearer */
+   out->def.api_key = out->api_key[0] ? out->api_key : NULL;
+   out->def.wire = PROVIDER_WIRE_OPENAI_CHAT;
+   out->def.temperature = -1.0; /* let the provider default */
    /* Tier-A is mechanical, grammar-constrained extraction/indexing — it does not
     * need (and is hurt by) a reasoning model's chain-of-thought: the reasoning pass
     * adds latency at drain volume and, worse, can consume the output budget so the
     * JSON answer comes back truncated/empty (observed: memory-fact extraction landed
     * 0 facts). Skip thinking for Tier-A; Tier-B (judge/synthesize) keeps it. */
-   out->disable_thinking = (kb_curator_stage_tier(stage) == KB_CURATOR_TIER_A);
+   out->def.disable_thinking = (kb_curator_stage_tier(stage) == KB_CURATOR_TIER_A);
    return 1;
 }

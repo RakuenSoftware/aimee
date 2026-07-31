@@ -63,6 +63,10 @@ int config_embedding_dim_current(void);
  * there is no local default to fall back to. Non-mutating. */
 int config_synth_chat_endpoint(const config_t *cfg, char *out, size_t out_len);
 
+/* Same resolver without a config_t: reads llm_synth_endpoint through its accessor.
+ * AIMEE_LLM_URL still outranks the stored field, and normalization is shared. */
+int config_synth_chat_endpoint_current(char *out, size_t out_len);
+
 /* embedder-runtime-fetch-autodim §2a: 1 iff the operator pinned a positive
  * embedding dim — defined as config_resolve_embedding_dim(cfg) > 0, so "pinned"
  * is exactly consistent with the value db2_set_embedding_dim receives. A pinned

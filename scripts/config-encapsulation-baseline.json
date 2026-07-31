@@ -49,14 +49,6 @@
       "decls": 1,
       "loads": 0
     },
-    "src/headers/kb_curator_provider.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/headers/memory.h": {
-      "decls": 1,
-      "loads": 0
-    },
     "src/kb/http/kb_http.c": {
       "decls": 1,
       "loads": 1
@@ -125,15 +117,7 @@
       "decls": 1,
       "loads": 0
     },
-    "src/kb/memory_rewrite_llm.c": {
-      "decls": 1,
-      "loads": 0
-    },
     "src/kb_calibrate.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/kb_curator_provider.c": {
       "decls": 1,
       "loads": 0
     },
@@ -189,14 +173,6 @@
       "decls": 1,
       "loads": 0
     },
-    "src/modules/kb-synthesis/kb_curator_llm.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/modules/kb-synthesis/kb_curator_llm.h": {
-      "decls": 1,
-      "loads": 0
-    },
     "src/modules/kb-synthesis/kb_curator_resolve_entities.c": {
       "decls": 2,
       "loads": 1
@@ -221,10 +197,6 @@
       "decls": 2,
       "loads": 2
     },
-    "src/modules/memory/memory_core.c": {
-      "decls": 1,
-      "loads": 0
-    },
     "src/modules/memory/memory_core_internal.h": {
       "decls": 2,
       "loads": 1
@@ -234,11 +206,7 @@
       "loads": 0
     },
     "src/modules/memory/memory_core_search_c.c": {
-      "decls": 4,
-      "loads": 0
-    },
-    "src/modules/memory/memory_rewrite_llm.h": {
-      "decls": 1,
+      "decls": 3,
       "loads": 0
     },
     "src/modules/protocols/include/aimee/protocols/mcp/mcp_client_registry.h": {
@@ -501,14 +469,6 @@
       "decls": 2,
       "loads": 1
     },
-    "src/tests/test_kb_curator_llm.c": {
-      "decls": 4,
-      "loads": 0
-    },
-    "src/tests/test_kb_curator_provider.c": {
-      "decls": 5,
-      "loads": 0
-    },
     "src/tests/test_kb_http_ingest.c": {
       "decls": 2,
       "loads": 1
@@ -534,7 +494,7 @@
       "loads": 0
     },
     "src/tests/test_memory.c": {
-      "decls": 5,
+      "decls": 1,
       "loads": 0
     },
     "src/tests/test_memory_lanes.c": {
@@ -611,8 +571,8 @@
     }
   },
   "totals": {
-    "decls": 507,
-    "files": 152,
+    "decls": 485,
+    "files": 142,
     "loads": 254
   }
 }

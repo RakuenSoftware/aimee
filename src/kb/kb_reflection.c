@@ -124,9 +124,10 @@ static int run_synthesis_pass(const config_t *cfg, const db2_artifact_proposed_t
        * sidecar. A NULL return is a fail — skip this attempt (fail-closed: no
        * durable write happens on a failed/empty response). */
       char serr[256];
-      char *out = kb_curator_llm_run(
-          cfg, KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION, REFLECTION_SYNTH_SYSTEM_PROMPT, req_str,
-          NULL, cfg->kb_synthesize_command, REFLECTION_SYNTH_OUTBUF, serr, sizeof(serr));
+      char *out = kb_curator_llm_run(KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION,
+                                     REFLECTION_SYNTH_SYSTEM_PROMPT, req_str, NULL,
+                                     cfg->kb_synthesize_command, REFLECTION_SYNTH_OUTBUF, serr,
+                                     sizeof(serr));
       free(req_str);
 
       if (!out)
@@ -286,9 +287,9 @@ static void run_reflection_pass(const config_t *cfg)
 
       /* Run when MDL tie-break is on AND we have somewhere to send the work: a
        * configured Tier-B provider (provider_client) or the legacy sidecar. */
-      provider_def_t rprov;
+      provider_def_owned_t rprov;
       int have_provider =
-          kb_curator_provider_for_stage(cfg, KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION, &rprov);
+          kb_curator_provider_for_stage(KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION, &rprov);
       if ((cfg->kb_synthesize_command[0] != '\0' || have_provider) && cfg->kb_mdl_tiebreak_enabled)
       {
          run_synthesis_pass(cfg, &rows[i]);

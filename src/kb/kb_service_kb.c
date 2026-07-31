@@ -264,11 +264,11 @@ static void kb_health_add_curator_tier(cJSON *curator, const char *key, const co
    cJSON *t = cJSON_AddObjectToObject(curator, key);
    if (!t)
       return;
-   provider_def_t def;
-   int configured = kb_curator_provider_for_stage(cfg, stage, &def);
+   provider_def_owned_t def;
+   int configured = kb_curator_provider_for_stage(stage, &def);
    cJSON_AddBoolToObject(t, "configured", configured);
-   cJSON_AddStringToObject(t, "base_url", configured && def.base_url ? def.base_url : "");
-   cJSON_AddStringToObject(t, "model", configured && def.model ? def.model : "");
+   cJSON_AddStringToObject(t, "base_url", configured && def.def.base_url ? def.def.base_url : "");
+   cJSON_AddStringToObject(t, "model", configured && def.def.model ? def.def.model : "");
 }
 
 /* Curator observability block for /v1/health (§4): which tiers have a provider

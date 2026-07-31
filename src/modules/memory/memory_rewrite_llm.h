@@ -17,7 +17,7 @@
 /* Run `system_prompt` (the rewrite instructions) plus `query` (the user turn)
  * through the curator LLM. Returns the model's response text (malloc'd, caller
  * frees) or NULL on error / when no provider is configured. */
-char *memory_rewrite_llm_inproc(const config_t *cfg, const char *system_prompt, const char *query);
+char *memory_rewrite_llm_inproc(const char *system_prompt, const char *query);
 
 #if defined(__GNUC__) || defined(__clang__)
 #pragma weak memory_rewrite_llm_inproc

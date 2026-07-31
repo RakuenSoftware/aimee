@@ -281,17 +281,17 @@ int memory_generate_candidates(const char *query, const char *norm_query,
  * Both fields are optional; missing / null means "not generated".
  */
 
-void memory_query_rewrite(const char *query, const config_t *cfg, memory_query_rewrite_t *out)
+void memory_query_rewrite(const char *query, memory_query_rewrite_t *out)
 {
    memset(out, 0, sizeof(*out));
-   if (!query || !query[0] || !cfg || !cfg->memory_rewrite_enabled)
+   if (!query || !query[0] || !config_memory_rewrite_enabled())
       return;
    /* Need either the in-process curator-LLM seam (KB build) or a subprocess
     * command; nothing to do if neither is available. */
    int have_inproc = (memory_rewrite_llm_inproc != NULL);
-   if (!have_inproc && !cfg->memory_rewrite_command[0])
+   if (!have_inproc && !config_memory_rewrite_command()[0])
       return;
-   if (!cfg->memory_rewrite_hyde && !cfg->memory_rewrite_decompose)
+   if (!config_memory_rewrite_hyde() && !config_memory_rewrite_decompose())
       return;
 
    /* Only rewrite for SEMANTIC and HYBRID routes (not LEXICAL / GRAPH) */
@@ -304,7 +304,8 @@ void memory_query_rewrite(const char *query, const config_t *cfg, memory_query_r
       }
    }
 
-   int max_sub = cfg->memory_rewrite_max_subqueries > 0 ? cfg->memory_rewrite_max_subqueries : 4;
+   int max_sub =
+       config_memory_rewrite_max_subqueries() > 0 ? config_memory_rewrite_max_subqueries() : 4;
    char *resp = NULL;
 
    if (have_inproc)
@@ -313,12 +314,12 @@ void memory_query_rewrite(const char *query, const config_t *cfg, memory_query_r
        * through the curator LLM (small/fast tier). No subprocess, no sidecar
        * script — this is the production path (rewrite runs KB-side). */
       const char *hyde_line =
-          cfg->memory_rewrite_hyde
+          config_memory_rewrite_hyde()
               ? "- hyde_answer: a single short hypothetical answer to the query, as if you knew "
                 "the fact. 1-3 sentences, declarative prose, no caveats.\n"
               : "";
       char decomp_line[192] = "";
-      if (cfg->memory_rewrite_decompose)
+      if (config_memory_rewrite_decompose())
          snprintf(decomp_line, sizeof(decomp_line),
                   "- sub_questions: up to %d simpler sub-queries that together cover the original "
                   "(array of strings, may be empty if already atomic).\n",
@@ -330,7 +331,7 @@ void memory_query_rewrite(const char *query, const config_t *cfg, memory_query_r
                "fences. Schema: {\"hyde_answer\": \"...\" (or \"\"), \"sub_questions\": [...] (or "
                "[])}",
                hyde_line, decomp_line);
-      resp = memory_rewrite_llm_inproc(cfg, sys_prompt, query);
+      resp = memory_rewrite_llm_inproc(sys_prompt, query);
    }
    else
    {
@@ -339,15 +340,15 @@ void memory_query_rewrite(const char *query, const config_t *cfg, memory_query_r
       if (!input)
          return;
       cJSON_AddStringToObject(input, "query", query);
-      cJSON_AddBoolToObject(input, "hyde", cfg->memory_rewrite_hyde);
-      cJSON_AddBoolToObject(input, "decompose", cfg->memory_rewrite_decompose);
+      cJSON_AddBoolToObject(input, "hyde", config_memory_rewrite_hyde());
+      cJSON_AddBoolToObject(input, "decompose", config_memory_rewrite_decompose());
       cJSON_AddNumberToObject(input, "max_subqueries", max_sub);
       char *input_str = cJSON_PrintUnformatted(input);
       cJSON_Delete(input);
       if (!input_str)
          return;
       size_t resp_len = 0;
-      int rc = platform_exec_pipe(cfg->memory_rewrite_command, input_str, strlen(input_str), &resp,
+      int rc = platform_exec_pipe(config_memory_rewrite_command(), input_str, strlen(input_str), &resp,
                                   &resp_len);
       free(input_str);
       if (rc != 0)
@@ -389,7 +390,7 @@ void memory_query_rewrite(const char *query, const config_t *cfg, memory_query_r
    }
 
    /* hyde_answer */
-   if (cfg->memory_rewrite_hyde)
+   if (config_memory_rewrite_hyde())
    {
       cJSON *ha = cJSON_GetObjectItemCaseSensitive(j, "hyde_answer");
       if (cJSON_IsString(ha) && ha->valuestring[0])
@@ -400,7 +401,7 @@ void memory_query_rewrite(const char *query, const config_t *cfg, memory_query_r
    }
 
    /* sub_questions */
-   if (cfg->memory_rewrite_decompose)
+   if (config_memory_rewrite_decompose())
    {
       cJSON *sq = cJSON_GetObjectItemCaseSensitive(j, "sub_questions");
       if (cJSON_IsArray(sq))
@@ -602,9 +603,9 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
        * subprocess command, or the in-process curator-LLM seam (KB build). The
        * in-process path needs no command, so requiring one would silently
        * disable HyDE on an accelerated backend that only configures a provider. */
-      if (query_cfg && query_cfg->memory_rewrite_enabled &&
-          (query_cfg->memory_rewrite_command[0] || memory_rewrite_llm_inproc))
-         memory_query_rewrite(query, query_cfg, &rewrite);
+      if (config_memory_rewrite_enabled() &&
+          (config_memory_rewrite_command()[0] || memory_rewrite_llm_inproc))
+         memory_query_rewrite(query, &rewrite);
    }
 
    memory_query_intent_t intent = memory_query_intent(query, norm_query);
