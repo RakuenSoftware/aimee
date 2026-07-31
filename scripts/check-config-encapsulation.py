@@ -134,6 +134,38 @@ def write_baseline(found):
 def enforce(root):
     found = scan(root)
     base = load_baseline()
+
+    # PRODUCTION IS AT ZERO and stays there. The ratchet was scaffolding for the
+    # migration: it let a 900-mention surface shrink without a flag day. That
+    # surface is gone outside src/tests/, so production no longer gets a
+    # per-file allowance -- any mention at all is a failure, whether or not some
+    # baseline entry would have tolerated it.
+    #
+    # Tests keep the ratchet. A test may legitimately build a config_t (the
+    # config module's own tests do, and parser tests must), and the rest are
+    # stubs that will follow production down over time.
+    prod_violations = [
+        f"{path}: {c['decls']} config_t mention(s), {c['loads']} config_load() call(s)"
+        for path, c in sorted(found.items())
+        if not path.startswith("src/tests/") and (c["decls"] or c["loads"])
+    ]
+    if prod_violations:
+        print(
+            "check-config-encapsulation: FAIL — config_t outside the config module",
+            file=sys.stderr,
+        )
+        for v in prod_violations:
+            print(f"  {v}", file=sys.stderr)
+        print(
+            "\n  Production code does not name config_t, config_load or config_save.\n"
+            "  Ask config for the value instead: a config_<thing>() accessor taking no\n"
+            "  config_t, a config_<thing>_copy(buf, n) when the value outlives the next\n"
+            "  accessor call, or a config_set_<thing>() that persists as part of the set.\n"
+            "  Add one to src/modules/config/ if it does not exist yet.",
+            file=sys.stderr,
+        )
+        return 1
+
     regressions = []
     for path, counts in sorted(found.items()):
         allowed = base.get(path, {"decls": 0, "loads": 0})
@@ -188,8 +220,9 @@ def enforce(root):
     total_d = sum(v["decls"] for v in found.values())
     total_l = sum(v["loads"] for v in found.values())
     print(
-        f"check-config-encapsulation: ok ({len(found)} file(s) still name config_t: "
-        f"{total_d} mention(s), {total_l} config_load() call(s); ratchet holding)"
+        f"check-config-encapsulation: ok (production at zero; {len(found)} test file(s) "
+        f"still name config_t: {total_d} mention(s), {total_l} config_load() call(s); "
+        f"ratchet holding)"
     )
     return 0
 
