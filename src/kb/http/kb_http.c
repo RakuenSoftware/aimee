@@ -1081,10 +1081,9 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
           * The path is what makes this message useful. */
          snprintf(out_buf, (size_t)out_cap,
                   "{\"error\":\"kb.reembed_on_dim_change is disabled; set 'kb: "
-                  "reembed_on_dim_change: true' in aimee-kb's own %s and restart it (this gate is "
-                  "read by aimee-kb, not by aimee-server, so `aimee config set` does not reach "
-                  "it)\"}",
-                  config_default_path());
+                  "reembed_on_dim_change: true' in aimee-kb's own $AIMEE_HOME/aimee.yaml and "
+                  "restart it (this gate is read by aimee-kb, not by aimee-server, so `aimee "
+                  "config set` does not reach it)\"}");
          return 403;
       }
       int confirm = kb_http_json_bool(body, "confirm", 0);
