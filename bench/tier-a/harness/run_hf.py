@@ -125,22 +125,35 @@ def main():
         model.to("cpu")
 
     load_mem = (torch.cuda.max_memory_allocated() / 2**30) if args.device == "cuda" else None
+    no_cache = False  # set if the first generate() proves the KV cache unusable
 
     with open(args.out, "w") as fh:
         for r in rows:
             text = build_inputs(tok, r["note"], args.model, sys_prompt)
             enc = tok(text, return_tensors="pt").to(model.device)
+            gen_kwargs = dict(
+                max_new_tokens=args.max_new_tokens,
+                do_sample=False,
+                pad_token_id=tok.pad_token_id or tok.eos_token_id,
+                **({"repetition_penalty": args.repetition_penalty}
+                   if args.repetition_penalty else {}),
+            )
             t0 = time.perf_counter()
             with torch.no_grad():
-                out = model.generate(
-                    **enc,
-                    max_new_tokens=args.max_new_tokens,
-                    do_sample=False,
-                    use_cache=not args.no_kv_cache,
-                    pad_token_id=tok.pad_token_id or tok.eos_token_id,
-                    **({"repetition_penalty": args.repetition_penalty}
-                       if args.repetition_penalty else {}),
-                )
+                try:
+                    out = model.generate(**enc, use_cache=not (args.no_kv_cache or no_cache),
+                                         **gen_kwargs)
+                except ValueError as e:
+                    # Several Granite 4.0 checkpoints are non-hybrid but transformers
+                    # selects a hybrid Mamba cache for them, so generate() raises.
+                    # Retry once without the cache — same outputs, just slower —
+                    # rather than special-casing model ids in every sweep script.
+                    if "LinearAttention" not in str(e):
+                        raise
+                    no_cache = True
+                    print(f"note: KV cache unusable for {args.model}; retrying without it",
+                          flush=True)
+                    out = model.generate(**enc, use_cache=False, **gen_kwargs)
             if args.device == "cuda":
                 torch.cuda.synchronize()
             dt = (time.perf_counter() - t0) * 1000

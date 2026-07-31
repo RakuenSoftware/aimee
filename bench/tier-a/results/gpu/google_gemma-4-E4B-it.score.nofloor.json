@@ -1,0 +1,213 @@
+{
+  "strict": {
+    "precision": 0.6271,
+    "recall": 0.5781,
+    "f1": 0.6016,
+    "tp": 37,
+    "fp": 22,
+    "fn": 27,
+    "by_category": {
+      "ambiguous": {
+        "precision": 0.25,
+        "recall": 0.5,
+        "f1": 0.3333,
+        "tp": 1,
+        "fp": 3,
+        "fn": 1
+      },
+      "first_person": {
+        "precision": 1.0,
+        "recall": 0.75,
+        "f1": 0.8571,
+        "tp": 6,
+        "fp": 0,
+        "fn": 2
+      },
+      "governance": {
+        "precision": 0.75,
+        "recall": 0.75,
+        "f1": 0.75,
+        "tp": 3,
+        "fp": 1,
+        "fn": 1
+      },
+      "implicit": {
+        "precision": 0.4286,
+        "recall": 0.5,
+        "f1": 0.4615,
+        "tp": 3,
+        "fp": 4,
+        "fn": 3
+      },
+      "infra": {
+        "precision": 0.3333,
+        "recall": 0.2,
+        "f1": 0.25,
+        "tp": 1,
+        "fp": 2,
+        "fn": 4
+      },
+      "multi_fact": {
+        "precision": 0.5714,
+        "recall": 0.5455,
+        "f1": 0.5581,
+        "tp": 12,
+        "fp": 9,
+        "fn": 10
+      },
+      "negation": {
+        "precision": 0.5,
+        "recall": 0.5,
+        "f1": 0.5,
+        "tp": 1,
+        "fp": 1,
+        "fn": 1
+      },
+      "novel_pred": {
+        "precision": 0.8333,
+        "recall": 0.8333,
+        "f1": 0.8333,
+        "tp": 5,
+        "fp": 1,
+        "fn": 1
+      },
+      "third_person": {
+        "precision": 0.8333,
+        "recall": 0.5556,
+        "f1": 0.6667,
+        "tp": 5,
+        "fp": 1,
+        "fn": 4
+      },
+      "transient": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 0,
+        "fn": 0
+      }
+    }
+  },
+  "lenient": {
+    "precision": 0.6441,
+    "recall": 0.5938,
+    "f1": 0.6179,
+    "tp": 38,
+    "fp": 21,
+    "fn": 26,
+    "by_category": {
+      "ambiguous": {
+        "precision": 0.25,
+        "recall": 0.5,
+        "f1": 0.3333,
+        "tp": 1,
+        "fp": 3,
+        "fn": 1
+      },
+      "first_person": {
+        "precision": 1.0,
+        "recall": 0.75,
+        "f1": 0.8571,
+        "tp": 6,
+        "fp": 0,
+        "fn": 2
+      },
+      "governance": {
+        "precision": 0.75,
+        "recall": 0.75,
+        "f1": 0.75,
+        "tp": 3,
+        "fp": 1,
+        "fn": 1
+      },
+      "implicit": {
+        "precision": 0.4286,
+        "recall": 0.5,
+        "f1": 0.4615,
+        "tp": 3,
+        "fp": 4,
+        "fn": 3
+      },
+      "infra": {
+        "precision": 0.3333,
+        "recall": 0.2,
+        "f1": 0.25,
+        "tp": 1,
+        "fp": 2,
+        "fn": 4
+      },
+      "multi_fact": {
+        "precision": 0.619,
+        "recall": 0.5909,
+        "f1": 0.6047,
+        "tp": 13,
+        "fp": 8,
+        "fn": 9
+      },
+      "negation": {
+        "precision": 0.5,
+        "recall": 0.5,
+        "f1": 0.5,
+        "tp": 1,
+        "fp": 1,
+        "fn": 1
+      },
+      "novel_pred": {
+        "precision": 0.8333,
+        "recall": 0.8333,
+        "f1": 0.8333,
+        "tp": 5,
+        "fp": 1,
+        "fn": 1
+      },
+      "third_person": {
+        "precision": 0.8333,
+        "recall": 0.5556,
+        "f1": 0.6667,
+        "tp": 5,
+        "fp": 1,
+        "fn": 4
+      },
+      "transient": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "tp": 0,
+        "fp": 0,
+        "fn": 0
+      }
+    }
+  },
+  "over_extraction": {
+    "empty_gold_notes": 23,
+    "on_schema_empty_gold_notes": 23,
+    "notes_correctly_empty": 19,
+    "abstention_rate_on_schema": 0.8261,
+    "spurious_triples": 4
+  },
+  "output_health": {
+    "notes": 70,
+    "json_parse_ok": 70,
+    "json_parse_rate": 1.0,
+    "schema_ok": 70,
+    "schema_rate": 1.0,
+    "malformed_facts": 8,
+    "dropped_by_conf_floor": 1,
+    "predicted_triples": 59,
+    "in_seed_ontology": 0.8475,
+    "catch_all_relations": 0
+  },
+  "latency_ms": {
+    "median": 847.8,
+    "p90": 1557.1,
+    "mean": 868.6
+  },
+  "completion_tokens": {
+    "median": 26,
+    "mean": 26.3,
+    "max": 89
+  },
+  "model": "google/gemma-4-E4B-it",
+  "scored_key": "pred_nofloor"
+}

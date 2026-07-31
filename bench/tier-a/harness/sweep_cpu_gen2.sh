@@ -14,8 +14,8 @@ TG=${TG:-64}
 MODELS="
 ggml-org/gemma-4-E2B-it-GGUF:Q8_0
 ggml-org/gemma-4-E4B-it-GGUF:Q8_0
-Qwen/Qwen3.5-0.8B-GGUF:Q8_0
-Qwen/Qwen3.5-2B-GGUF:Q8_0
+ggml-org/Qwen3.5-0.8B-GGUF:Q8_0
+ggml-org/Qwen3.5-2B-GGUF:Q8_0
 ibm-granite/granite-4.0-1b-GGUF:Q8_0
 ibm-granite/granite-4.0-h-1b-GGUF:Q8_0
 "
