@@ -2171,6 +2171,10 @@ int config_server_api_bearer_extra_snapshot(char out[][256], int max);
  *                           content-hash token changed (self-reload no-op guard).
  *                           Returns 1 = published, 0 = no-op (unchanged), -1 = kept (bad). */
 void config_snapshot_init(const config_t *cfg);
+
+/* Load the config and publish it as the live snapshot in one step, without the
+ * caller ever holding a config_t. What the daemons actually want at startup. */
+int config_snapshot_seed(void);
 int config_snapshot_get(config_t *out);
 
 int config_reload(void);

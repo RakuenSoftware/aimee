@@ -2013,6 +2013,22 @@ static void config_snapshot_publish(const config_t *cfg)
    atomic_store_explicit(&g_snap_inited, 1, memory_order_release);
 }
 
+/* Seed the live snapshot from the config on disk. The daemons' entry point: they
+ * were each doing config_load into a stack config_t purely to hand it straight
+ * back, which is the whole 750 KB struct crossing the module boundary to travel
+ * nowhere. Returns 0 on success. */
+int config_snapshot_seed(void)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = config_load(cfg);
+   if (rc == 0)
+      config_snapshot_init(cfg);
+   free(cfg);
+   return rc;
+}
+
 void config_snapshot_init(const config_t *cfg)
 {
    if (!cfg)

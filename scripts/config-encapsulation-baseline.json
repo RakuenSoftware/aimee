@@ -209,14 +209,6 @@
       "decls": 3,
       "loads": 0
     },
-    "src/modules/protocols/include/aimee/protocols/mcp/mcp_client_registry.h": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/modules/protocols/mcp/mcp_client_registry.c": {
-      "decls": 4,
-      "loads": 0
-    },
     "src/modules/roundtable/roundtable_provider.c": {
       "decls": 2,
       "loads": 0
@@ -292,10 +284,6 @@
     "src/server/server_jobs_aux.c": {
       "decls": 3,
       "loads": 2
-    },
-    "src/server/server_main.c": {
-      "decls": 1,
-      "loads": 1
     },
     "src/server/server_mcp.c": {
       "decls": 2,
@@ -490,7 +478,7 @@
       "loads": 0
     },
     "src/tests/test_mcp_client_registry.c": {
-      "decls": 7,
+      "decls": 1,
       "loads": 0
     },
     "src/tests/test_memory.c": {
@@ -571,8 +559,8 @@
     }
   },
   "totals": {
-    "decls": 485,
-    "files": 142,
-    "loads": 254
+    "decls": 473,
+    "files": 139,
+    "loads": 253
   }
 }

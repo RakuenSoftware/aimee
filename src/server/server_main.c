@@ -225,9 +225,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
       }
    }
 
-   config_t cfg;
-   memset(&cfg, 0, sizeof cfg); /* clean padding so the snapshot token is stable */
-   if (config_load(&cfg) != 0)
+   if (!config_present())
    {
       startup_notify(notify_fd, "error: invalid configuration\n");
       aimee_log(LOG_ERROR, "config", "server startup rejected invalid configuration");
@@ -240,8 +238,8 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * seal it directly into Vault. The trusted local UI/socket can then issue an
     * individual enrollment bearer; `aimee api enable` can reveal the primary to
     * a local operator when a headless deployment explicitly needs it. */
-   if ((cfg.server_api_http_port > 0 || cfg.server_api_tls_port > 0) &&
-       !cfg.server_api_bearer_token[0])
+   if ((config_server_api_http_port() > 0 || config_server_api_tls_port() > 0) &&
+       !config_server_api_bearer_token()[0])
    {
       char primary[65] = "";
       if (platform_random_hex(primary, 64) != 0 ||
@@ -252,14 +250,16 @@ static int run_server(const char *socket_path, log_level_t log_level)
          audit_log_close();
          return 1;
       }
-      snprintf(cfg.server_api_bearer_token, sizeof(cfg.server_api_bearer_token), "%s", primary);
       runtime_secret_wipe(primary, sizeof(primary));
+      /* No need to write it back here: the seed below reloads, and config_load
+       * applies AIMEE_API_BEARER_TOKEN out of Vault, so the snapshot every reader
+       * below sees carries the freshly minted primary. */
       aimee_log(LOG_INFO, "vault.env", "minted Vault-only API primary for configured listener");
    }
-   /* Seed the live config snapshot (live-config-reload P1b): from here, every config_load in
-    * the server returns this snapshot, and config_reload (on config.set / SIGHUP) republishes
+   /* Seed the live config snapshot (live-config-reload P1b): from here, every config read in
+    * the server comes from this snapshot, and config_reload (on config.set / SIGHUP) republishes
     * it so changes take effect immediately instead of on the next mtime-cache miss. */
-   config_snapshot_init(&cfg);
+   (void)config_snapshot_seed();
    kb_client_mtls_pool_register_reload();
    /* NOTE: the autonomy.* env bridge (autonomy_config_to_env) is intentionally NOT called —
     * wfe now reads autonomy.* LIVE from the config snapshot via config_autonomy_lookup (an
@@ -276,8 +276,8 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * fallback. Pre-set env wins, so AIMEE_KB_API_URL still overrides config. */
    if (!(getenv("AIMEE_KB_API_URL") && getenv("AIMEE_KB_API_URL")[0]))
    {
-      if (cfg.kb_client_url[0])
-         platform_setenv("AIMEE_KB_API_URL", cfg.kb_client_url);
+      if (config_kb_client_url()[0])
+         platform_setenv("AIMEE_KB_API_URL", config_kb_client_url());
       else
       {
          /* Co-located default: with no remote kb_client_url and no explicit
@@ -287,7 +287,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
           * Without this a source install's server has no kb URL at all and every
           * DB2-backed feature (memory/kb/rules) silently reports "unavailable". */
          char local_kb[64];
-         int kb_port = cfg.kb_api_http_port > 0 ? cfg.kb_api_http_port : 8741;
+         int kb_port = config_kb_api_http_port() > 0 ? config_kb_api_http_port() : 8741;
          snprintf(local_kb, sizeof(local_kb), "http://127.0.0.1:%d", kb_port);
          platform_setenv("AIMEE_KB_API_URL", local_kb);
       }
@@ -304,8 +304,8 @@ static int run_server(const char *socket_path, log_level_t log_level)
    /* Register the bundled context engine and set the active engine from config
     * (empty = default compactor). */
    context_engine_register_compactor();
-   if (cfg.context_engine[0])
-      context_engine_set_active(cfg.context_engine);
+   if (config_context_engine()[0])
+      context_engine_set_active(config_context_engine());
 
    /* Clear the cached audit_action/audit_worm gates on config reload so a live
     * config.set / SIGHUP toggles the audit + WORM dual-write without a restart. */
@@ -332,7 +332,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
       return 1;
    }
 
-   mcp_client_registry_boot(&cfg, CONFIG_MCP_INSTALL_SERVER); /* server-hosted plugins only */
+   mcp_client_registry_boot(CONFIG_MCP_INSTALL_SERVER); /* server-hosted plugins only */
    agent_http_init();
    presence_init(); /* unified-presence registry (attachments, turn locks, event ring) */
    presence_set_delivery_fn(presence_deliver_via_notify, NULL); /* outbound: ntfy/local */
@@ -347,20 +347,33 @@ static int run_server(const char *socket_path, log_level_t log_level)
    /* Inbound /v1 HTTP API (UDS always; optional localhost TCP + bearer when
     * aimee.api.{http_port,bearer_token} are configured). Best-effort: a bind
     * failure must not block the RPC server. */
-   server_http_set_max_event_streams(cfg.server_api_max_event_streams);
+   server_http_set_max_event_streams(config_server_api_max_event_streams());
    /* Publish the additionally-accepted bearers BEFORE the listener binds, so a
     * client enrolled in a previous run authorizes on its very first request
     * rather than getting a 401 until something else republished them. */
    {
+      /* Copy each bearer out of the accessor's thread-local buffer: extra[] is an
+       * array of borrowed pointers handed to server_http_set_bearer_extra, and the
+       * next config_server_api_bearer_extra() call would overwrite the one buffer
+       * they would all be pointing at. */
+      char slots[AIMEE_API_BEARER_EXTRA_MAX][256];
       const char *extra[AIMEE_API_BEARER_EXTRA_MAX];
-      for (int i = 0; i < cfg.server_api_bearer_extra_count; i++)
-         extra[i] = cfg.server_api_bearer_extra[i];
-      server_http_set_bearer_extra(extra, cfg.server_api_bearer_extra_count);
+      int extra_count = config_server_api_bearer_extra_count();
+      if (extra_count > AIMEE_API_BEARER_EXTRA_MAX)
+         extra_count = AIMEE_API_BEARER_EXTRA_MAX;
+      for (int i = 0; i < extra_count; i++)
+      {
+         snprintf(slots[i], sizeof(slots[i]), "%s", config_server_api_bearer_extra(i));
+         extra[i] = slots[i];
+      }
+      server_http_set_bearer_extra(extra, extra_count);
    }
-   cli_session_pty_set_forwarding(cfg.server_api_cli_session_forwarding);
-   int http_start = server_http_start(
-       NULL, cfg.server_api_http_port, cfg.server_api_tls_port, cfg.server_api_bearer_token,
-       cfg.server_api_rate_limit_per_min, cfg.server_api_remote_writes);
+   cli_session_pty_set_forwarding(config_server_api_cli_session_forwarding());
+   int http_start = server_http_start(NULL, config_server_api_http_port(),
+                                      config_server_api_tls_port(),
+                                      config_server_api_bearer_token(),
+                                      config_server_api_rate_limit_per_min(),
+                                      config_server_api_remote_writes());
    if (http_start == SERVER_HTTP_START_MGMT_FATAL)
    {
       char management_error[256];

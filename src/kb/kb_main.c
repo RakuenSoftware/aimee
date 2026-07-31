@@ -2308,7 +2308,7 @@ int main(int argc, char **argv)
     * tools/list. Boot filters by install target — a no-op when none are
     * configured. Each plugin is OSV-scanned at startup (same gate as the server
     * path; see kb_mcp_osv_stub.c). Torn down after kb_http_stop() below. */
-   (void)mcp_client_registry_boot(&kb_cfg, CONFIG_MCP_INSTALL_KB);
+   (void)mcp_client_registry_boot(CONFIG_MCP_INSTALL_KB);
 
    /* Optional distributed-mode mTLS listener (every request presents a CA-issued
     * client cert; scope comes from the cert). Enabled by AIMEE_KB_MTLS_PORT. */
