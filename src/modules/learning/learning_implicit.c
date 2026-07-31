@@ -70,15 +70,14 @@ void learning_implicit_record_repeat_question(const char *session_id, const char
 {
    if (!session_id || !tool || !query_hash || !query_hash[0])
       return;
-   config_t full;
-   if (config_load(&full) != 0 || !full.learning_implicit_repeat_question)
+   if (!config_present() || !config_learning_implicit_repeat_question())
       return;
 
    struct timespec t0, t1;
    clock_gettime(CLOCK_MONOTONIC, &t0);
 
    dogfood_config_t dcfg;
-   dogfood_config_from(&full, &dcfg);
+   dogfood_config_current(&dcfg);
    if (dogfood_query_is_repeat(&dcfg, session_id, tool, query_hash))
       emit_implicit("repeat_question", "negative", "Implicit repeat_question signal",
                     "Same (session, tool, query_hash) already appeared this month.", tool, 0, NULL,

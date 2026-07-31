@@ -323,23 +323,7 @@ static int server_agent_set_model_concurrency(const char *model, int limit)
 {
    if (!model || !model[0] || limit <= 0)
       return 0;
-
-   config_t cfg;
-   for (int i = 0; i < cfg.concurrency_per_model_count; i++)
-   {
-      if (strcmp(cfg.concurrency_per_model[i].key, model) == 0)
-      {
-         cfg.concurrency_per_model[i].limit = limit;
-         return config_set_concurrency(&cfg);
-      }
-   }
-   if (cfg.concurrency_per_model_count >= CONFIG_CONCURRENCY_MAX_ENTRIES)
-      return -1;
-   config_concurrency_entry_t *entry =
-       &cfg.concurrency_per_model[cfg.concurrency_per_model_count++];
-   snprintf(entry->key, sizeof(entry->key), "%s", model);
-   entry->limit = limit;
-   return config_set_concurrency(&cfg);
+   return config_set_model_concurrency(model, limit);
 }
 
 static int server_agent_model_still_configured(const agent_config_t *cfg, const char *model)
@@ -358,18 +342,7 @@ static int server_agent_clear_model_concurrency_if_unused(const agent_config_t *
    if (!model || !model[0] || server_agent_model_still_configured(agents, model))
       return 0;
 
-   config_t cfg;
-   for (int i = 0; i < cfg.concurrency_per_model_count; i++)
-   {
-      if (strcmp(cfg.concurrency_per_model[i].key, model) != 0)
-         continue;
-      memmove(&cfg.concurrency_per_model[i], &cfg.concurrency_per_model[i + 1],
-              (size_t)(cfg.concurrency_per_model_count - i - 1) *
-                  sizeof(cfg.concurrency_per_model[0]));
-      cfg.concurrency_per_model_count--;
-      return config_set_concurrency(&cfg);
-   }
-   return 0;
+   return config_remove_model_concurrency(model);
 }
 
 static void server_agent_ensure_fallback(agent_config_t *cfg, const char *name)

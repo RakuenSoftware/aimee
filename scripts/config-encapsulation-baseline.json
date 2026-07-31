@@ -30,8 +30,8 @@
       "loads": 1
     },
     "src/dogfood.c": {
-      "decls": 8,
-      "loads": 3
+      "decls": 1,
+      "loads": 1
     },
     "src/headers/agent_config.h": {
       "decls": 2,
@@ -185,10 +185,6 @@
       "decls": 2,
       "loads": 0
     },
-    "src/modules/learning/learning_implicit.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/modules/lsp/lsp_manager.c": {
       "decls": 1,
       "loads": 1
@@ -260,10 +256,6 @@
     "src/server/server.c": {
       "decls": 7,
       "loads": 7
-    },
-    "src/server/server_agent.c": {
-      "decls": 2,
-      "loads": 0
     },
     "src/server/server_api_status.c": {
       "decls": 1,
@@ -559,8 +551,8 @@
     }
   },
   "totals": {
-    "decls": 473,
-    "files": 139,
-    "loads": 253
+    "decls": 463,
+    "files": 137,
+    "loads": 250
   }
 }
