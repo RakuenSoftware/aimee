@@ -164,13 +164,56 @@ kb_bootstrap_count=$(wc -c <"$kb_bootstrap_log")
 kb_marked_stderr_text=$(tr '\n' ' ' <"$kb_marked_stderr")
 kb_marked_stderr_dirty=0
 grep -qE 'first-boot-only|external\.invalid' "$kb_marked_stderr" && kb_marked_stderr_dirty=1
-rm -rf "$kb_entrypoint_test_dir"
 if [ "$kb_marked_output" = "clean" ] && [ "$kb_bootstrap_count" -eq 2 ] &&
     [ "$kb_marked_stderr_dirty" -eq 0 ]; then
     pass "KB entrypoint ignores a spoofed bootstrap marker when credentials are inherited"
 else
     fail "KB entrypoint trusted a bootstrap marker before a clean re-exec ($kb_marked_output, bootstraps=$kb_bootstrap_count, stderr=$kb_marked_stderr_text)"
 fi
+
+# A one-shot sharing the kb's volume (the managed deploy's aimee-server-identity
+# job) finds the cluster already running and must CONNECT to it, not provision a
+# second one over the same data directory. That job runs as root deliberately, and
+# refusing it there -- PostgreSQL forbids running the server as root, not
+# connecting as one -- failed managed server identity enrollment on every clean
+# install. Stub pg_isready as "a cluster is up" and assert the entrypoint reaches
+# the binary instead of exiting.
+kb_shared_dir=$(mktemp -d /tmp/aimee-kb-shared.XXXXXX)
+mkdir -p "$kb_shared_dir/bin" "$kb_shared_dir/pgbin"
+cat >"$kb_shared_dir/bin/aimee-kb" <<'SH'
+#!/bin/sh
+case "${1:-}" in
+    --bootstrap-vault-env|--list-credential-env-names) exit 0 ;;
+    --vault-db2-external) exit 1 ;;   # embedded lane: the path that provisions
+    --print-embedding-model) exit 1 ;;
+esac
+printf 'reached-binary:%s\n' "${1:-none}"
+SH
+cat >"$kb_shared_dir/pgbin/pg_isready" <<'SH'
+#!/bin/sh
+exit 0
+SH
+cat >"$kb_shared_dir/pgbin/initdb" <<'SH'
+#!/bin/sh
+echo "initdb-must-not-run" >&2
+exit 1
+SH
+chmod +x "$kb_shared_dir/bin/aimee-kb" "$kb_shared_dir/pgbin/pg_isready" \
+    "$kb_shared_dir/pgbin/initdb"
+kb_shared_stderr="$kb_shared_dir/stderr.log"
+kb_shared_output=$(env -i PATH="$kb_shared_dir/bin:/usr/bin:/bin" \
+    AIMEE_HOME="$kb_shared_dir/home" \
+    AIMEE_DB2_PG_BIN="$kb_shared_dir/pgbin" \
+    sh ../deploy/container/aimee-kb-entrypoint.sh \
+    managed-server-identity 2>"$kb_shared_stderr" || true)
+rm -rf "$kb_entrypoint_test_dir"
+if [ "$kb_shared_output" = "reached-binary:managed-server-identity" ] &&
+    ! grep -q 'initdb-must-not-run' "$kb_shared_stderr"; then
+    pass "KB entrypoint reuses an already-running cluster instead of provisioning a second"
+else
+    fail "KB entrypoint did not reuse the running cluster ($kb_shared_output, stderr=$(tr '\n' ' ' <"$kb_shared_stderr"))"
+fi
+rm -rf "$kb_shared_dir"
 
 # The server image intentionally supervises multiple long-lived planes, so it
 # still needs a PID-1 subreaper. It must not start tini until after first-boot

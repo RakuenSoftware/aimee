@@ -150,6 +150,31 @@ fi
 
 # 3. Embedded DB2, only when the operator configured no external server.
 if [ "$external_db" -eq 0 ]; then
+    PGMAJOR="${AIMEE_DB2_PG_MAJOR:-18}"
+    # Overridable so the entrypoint's cluster handling is testable without a real
+    # PostgreSQL install; deployments never set it.
+    PGBIN="${AIMEE_DB2_PG_BIN:-/usr/lib/postgresql/$PGMAJOR/bin}"
+    PGDATA="$AIMEE_HOME/postgres"
+    PGSOCK="$AIMEE_HOME/run"
+    DB=aimee_shared
+    mkdir -p "$PGSOCK"
+
+    # A one-shot that SHARES the kb's volume finds the cluster already up, owned
+    # by the long-lived kb container -- the managed deploy's aimee-server-identity
+    # job is exactly this. Connect to that cluster instead of provisioning a
+    # second one over the same data directory.
+    #
+    # This has to precede the root check below: that job runs as root on purpose
+    # (it chowns the server identity it installs), and PostgreSQL forbids running
+    # the SERVER as root, not connecting to one as root. Refusing here failed
+    # managed server identity enrollment on every clean install.
+    if "$PGBIN/pg_isready" --host="$PGSOCK" --quiet 2>/dev/null; then
+        echo "aimee-kb: PostgreSQL already running on $PGSOCK; using it instead of" \
+             "starting a second cluster" >&2
+        start_embedder
+        exec aimee-kb "$@"
+    fi
+
     # PostgreSQL refuses to run as root, unconditionally. The image declares
     # USER aimee, so this only trips when a runtime overrides it (e.g. --user root
     # to work around bind-mount ownership). Say so, rather than letting initdb
@@ -160,12 +185,6 @@ if [ "$external_db" -eq 0 ]; then
         echo "  AIMEE_DB2_URL to an external PostgreSQL server to skip the internal one." >&2
         exit 1
     fi
-    PGMAJOR="${AIMEE_DB2_PG_MAJOR:-18}"
-    PGBIN="/usr/lib/postgresql/$PGMAJOR/bin"
-    PGDATA="$AIMEE_HOME/postgres"
-    PGSOCK="$AIMEE_HOME/run"
-    DB=aimee_shared
-    mkdir -p "$PGSOCK"
 
     if [ ! -f "$PGDATA/PG_VERSION" ]; then
         # initdb as the current (aimee) user, so that user is the cluster
@@ -210,7 +229,24 @@ if [ "$external_db" -eq 0 ]; then
     # libpq reads a directory-valued host as a socket path. Even this local,
     # passwordless DSN follows the credential-shaped config contract: give it
     # to a disposable bootstrap helper, then let the KB load it from Vault.
-    AIMEE_DB2_URL="postgresql:///$DB?host=$PGSOCK" aimee-kb --bootstrap-vault-env
+    #
+    # Name the role explicitly. initdb made THIS user the cluster superuser, and
+    # this DSN is sealed into a Vault on a volume other containers share: a
+    # sharer running as a different OS user (the managed deploy's root
+    # aimee-server-identity job) would otherwise have libpq default the role to
+    # its own user name and fail with "DB2 not reachable". Vault holds this value
+    # for every sharer, and the entrypoint scrubs AIMEE_DB2_URL from the
+    # environment before exec, so their own compose-supplied DSN cannot fix it.
+    # Fall back to the bare DSN if the runtime has no passwd entry for this uid:
+    # an empty user= is worse than none, and libpq's default is right whenever
+    # every reader runs as this same user anyway.
+    cluster_owner=$(id -un 2>/dev/null || true)
+    if [ -n "$cluster_owner" ]; then
+        embedded_dsn="postgresql:///$DB?host=$PGSOCK&user=$cluster_owner"
+    else
+        embedded_dsn="postgresql:///$DB?host=$PGSOCK"
+    fi
+    AIMEE_DB2_URL="$embedded_dsn" aimee-kb --bootstrap-vault-env
 
     start_embedder
 
