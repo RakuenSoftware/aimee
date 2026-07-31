@@ -64,7 +64,14 @@ for entry in "${MODELS[@]}"; do
        --out "$PRED" --base-url "http://127.0.0.1:$PORT" >>"$LOG" 2>&1; then
     $PY harness/score.py --gold data/gold.jsonl --pred "$PRED" \
         --json-out "$OUT/$SLUG.score.json" >/dev/null 2>>"$LOG"
-    echo "OK   $LABEL"
+    # OK is claimed only if a score exists; the runner exits 0 even when every
+    # row carries a transport error.
+    if [ -s "$OUT/$LABEL.score.json" ]; then
+      echo "OK   $LABEL"
+    else
+      echo "FAIL $LABEL -> scorer refused"
+      rm -f "$PRED"
+    fi
   else
     echo "FAIL $LABEL -> $(tail -3 "$LOG" | tr '\n' ' ' | cut -c1-200)"
     rm -f "$PRED"

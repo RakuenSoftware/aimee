@@ -68,7 +68,16 @@ for entry in "${MODELS[@]}"; do
          --thinking --max-tokens 8192 >>"$LOG" 2>&1; then
       $PY harness/score.py --gold data/gold.jsonl --pred "$PRED" \
           --json-out "$OUT/$LABEL.score.json" >/dev/null 2>>"$LOG"
-      echo "OK   $LABEL"
+      # OK is claimed only if a score exists. run_llamacpp.py exits 0 even when
+      # every row carries a transport error, so its exit status is not evidence
+      # the run succeeded. A sweep that reports OK for an empty run is worse
+      # than one that fails.
+      if [ -s "$OUT/$LABEL.score.json" ]; then
+        echo "OK   $LABEL"
+      else
+        echo "FAIL $LABEL -> scorer refused: $(tail -2 "$LOG" | tr '\n' ' ' | cut -c1-200)"
+        rm -f "$PRED"
+      fi
     else
       echo "FAIL $LABEL"; rm -f "$PRED"
     fi

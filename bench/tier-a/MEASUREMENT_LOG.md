@@ -829,3 +829,51 @@ The consequence, which cost an evening: no cross-host control is needed, because
 no cross-host comparison should be made. Anything promising on .254 is re-run on
 .253 for a number. The Q6/Q8 calibration study built to enable that comparison
 was work in service of a comparison that should never have been attempted.
+
+## Defect 28: the sweeps reported OK for runs that produced nothing
+
+`run_llamacpp.py` and `run_b.py` exit 0 even when every row carries a transport
+error, because they record failures per note rather than aborting. The sweeps
+tested only that exit status, so a run whose server had been killed mid-note
+still printed `OK`.
+
+Observed directly: `GLM-4.7-Flash.q6` was killed mid-run, the scorer correctly
+refused it, `cp` failed loudly on stderr for a score file that did not exist, and
+the very next line was:
+
+```
+cp: cannot stat 'results/challenger-254/GLM-4.7-Flash.q6.score.pred_grounded.json': No such file or directory
+OK   GLM-4.7-Flash.q6
+```
+
+Every safeguard fired and the sweep announced success anyway. A sweep whose
+success signal is wrong is worse than one that fails, because the summary line
+is the only thing anyone reads at a glance.
+
+Fixed in every sweep still in use: OK is printed only when the score file exists
+and is non-empty, otherwise FAIL with the scorer's own message, and the
+prediction file is removed so the next pass re-runs it.
+
+Not fixed: roughly a dozen historical sweeps under `harness/sweep_*.sh` have the
+same shape. They have already run and their outputs are indexed in
+`evidence/RUNS.md`, which audits the artefacts rather than trusting the summary
+line, so the index is the reliable record either way.
+
+## GLM-4.7-Flash does not work on this hardware
+
+Triage result, and it is a hard no on .254 rather than a quality judgement:
+
+- Raw `/completion`, no chat template, no harness: `"The capital of France is"`
+  returns `'????????????'`.
+- Through the chat template with thinking on: 7943 completion tokens, all of
+  them `reasoning_content`, zero content, on every note. Not truncated; the cap
+  is 8192.
+- Generation runs at **0.68 tok/s** for a 30B-A3B MoE resident on a 24GB card,
+  roughly a fiftieth of what the hardware should give. At ~8000 tokens per note
+  that is over three hours per note and the run cannot complete.
+
+Together those say the Q6_K GGUF under RADV Vulkan is not executing this
+architecture correctly, not that the model is bad at extraction. The
+discriminating run is GLM-4.7-Flash on .253 under CUDA with expert offload,
+which is queued. Until that lands, nothing at all is known about GLM's quality on
+this task.

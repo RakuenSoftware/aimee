@@ -46,7 +46,16 @@ if [ -s "$PRED" ]; then echo "SKIP $LABEL"; else
          --out "$PRED" --base-url "http://127.0.0.1:$PORT" >>"$LOG" 2>&1; then
       $PY harness/score.py --gold data/gold.jsonl --pred "$PRED" \
           --json-out "$OUT/$LABEL.score.json" >/dev/null 2>>"$LOG"
-      echo "OK   $LABEL"
+      # OK is claimed only if a score exists. run_llamacpp.py exits 0 even when
+      # every row carries a transport error, so its exit status is not evidence
+      # the run succeeded. A sweep that reports OK for an empty run is worse
+      # than one that fails.
+      if [ -s "$OUT/$LABEL.score.json" ]; then
+        echo "OK   $LABEL"
+      else
+        echo "FAIL $LABEL -> scorer refused: $(tail -2 "$LOG" | tr '\n' ' ' | cut -c1-200)"
+        rm -f "$PRED"
+      fi
     else
       echo "FAIL $LABEL -> $(tail -3 "$LOG" | tr '\n' ' ' | cut -c1-200)"
       rm -f "$PRED"

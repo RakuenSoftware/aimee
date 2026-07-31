@@ -77,7 +77,16 @@ for entry in "${MODELS[@]}"; do
             >/dev/null 2>>"$LOG"
       done
       cp "$OUT/$LABEL.score.pred_grounded.json" "$OUT/$LABEL.score.json"
-      echo "OK   $LABEL"
+      # OK is claimed only if a score exists. run_llamacpp.py exits 0 even when
+      # every row carries a transport error, so its exit status is not evidence
+      # the run succeeded. A sweep that reports OK for an empty run is worse
+      # than one that fails.
+      if [ -s "$OUT/$LABEL.score.$KEY.json" ]; then
+        echo "OK   $LABEL"
+      else
+        echo "FAIL $LABEL -> scorer refused: $(tail -2 "$LOG" | tr '\n' ' ' | cut -c1-200)"
+        rm -f "$PRED"
+      fi
     else
       echo "FAIL $LABEL -> $(tail -3 "$LOG" | tr '\n' ' ' | cut -c1-180)"
       rm -f "$PRED"
