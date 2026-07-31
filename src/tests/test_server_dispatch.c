@@ -1295,6 +1295,37 @@ int config_set(const char *key, const char *value)
    return 0;
 }
 
+/* Enrolled-bearer writes go through the config module now instead of mutating
+ * server_api_bearer_extra on a config_t. Mirror the config_save stub's model:
+ * apply to the simulated disk AND the snapshot, so a read-back sees the write.
+ * Note the config_save stub deliberately SCRUBS bearer state on the way to
+ * disk (credentials live in Vault, not the config file), so these do the same. */
+int config_server_api_bearer_extra_append(const char *token)
+{
+   if (!token || !token[0])
+      return -1;
+   if (!g_config_stateful)
+      return 0;
+   int slot = g_config_snapshot.server_api_bearer_extra_count;
+   if (slot < 0 || slot >= AIMEE_API_BEARER_EXTRA_MAX)
+      return -2;
+   snprintf(g_config_snapshot.server_api_bearer_extra[slot],
+            sizeof(g_config_snapshot.server_api_bearer_extra[0]), "%s", token);
+   g_config_snapshot.server_api_bearer_extra_count = slot + 1;
+   return slot;
+}
+
+int config_server_api_bearer_extra_clear(void)
+{
+   if (g_config_stateful)
+   {
+      memset(g_config_snapshot.server_api_bearer_extra, 0,
+             sizeof(g_config_snapshot.server_api_bearer_extra));
+      g_config_snapshot.server_api_bearer_extra_count = 0;
+   }
+   return 0;
+}
+
 int config_save(const config_t *cfg)
 {
    if (g_config_stateful)

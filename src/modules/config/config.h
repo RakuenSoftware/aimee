@@ -2155,6 +2155,11 @@ int config_load(config_t *cfg);
 /* Bounded enrolled-bearer operations owned by the config module. Callers get a
  * coherent copy or append one token without naming or copying config_t. */
 int config_server_api_bearer_extra_snapshot(char out[][256], int max);
+/* Write half of the same contract. The slot count needed before minting (the
+ * Vault secret name is keyed on it) is the GENERATED accessor
+ * config_server_api_bearer_extra_count(). */
+int config_server_api_bearer_extra_append(const char *token);
+int config_server_api_bearer_extra_clear(void);
 
 /* Live config snapshot (live-config-reload P1a) — a double-buffer + seqlock holding the
  * current config for immediate, push-driven reload. config_t is a flat POD, so reads are a
