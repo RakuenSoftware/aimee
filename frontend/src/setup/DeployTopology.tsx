@@ -362,11 +362,3 @@ const input: React.CSSProperties = {
   width: '100%', boxSizing: 'border-box', padding: '7px 9px', borderRadius: 6,
   border: '1px solid #ccd', fontSize: 13, fontFamily: 'ui-monospace, monospace',
 };
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label style={{ display: 'block' }}>
-      <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 3 }}>{label}</div>
-      {children}
-    </label>
-  );
-}
