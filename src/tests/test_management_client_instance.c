@@ -26,9 +26,17 @@ int db2_tenant_require_pg(void)
 {
    return mock_guard;
 }
-void *db2_conn(void)
+void *(db2_conn)(void)
 {
    return &mock_stmt;
+}
+
+/* Real code reaches the pool through the db2_conn() macro, which expands to
+ * db2_conn_at(site) so a lazy acquire can be attributed. Route the stub. */
+void *db2_conn_at(const char *site)
+{
+   (void)site;
+   return (db2_conn)();
 }
 aimee_pg_stmt_t *aimee_pg_prepare_ex(void *c, const char *sql, aimee_pg_prepare_error_t *kind,
                                      char *err, size_t len)
