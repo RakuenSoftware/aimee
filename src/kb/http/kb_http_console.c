@@ -234,29 +234,27 @@ static int console_typed_facts_config(const char *body, char *out_buf, int out_c
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"invalid request body\"}");
       return 400;
    }
-   config_t cfg;
-   config_load(&cfg);
-   /* KB-owned master enable/disable for the whole typed-facts layer. */
+   /* KB-owned master enable/disable for the whole typed-facts layer. -1 means
+    * "not in this request", which config_set_typed_facts leaves unchanged. */
    const cJSON *en = cJSON_GetObjectItemCaseSensitive(req, "enabled");
-   if (en && cJSON_IsBool(en))
-      cfg.typed_facts_enabled = cJSON_IsTrue(en) ? 1 : 0;
    const cJSON *ap = cJSON_GetObjectItemCaseSensitive(req, "auto_promote");
-   if (ap && cJSON_IsBool(ap))
-      cfg.kb_typed_facts_auto_promote_enabled = cJSON_IsTrue(ap) ? 1 : 0;
    const cJSON *pt = cJSON_GetObjectItemCaseSensitive(req, "promote_threshold");
-   if (pt && cJSON_IsNumber(pt) && pt->valueint > 0)
-      cfg.kb_typed_facts_promote_threshold = pt->valueint;
+   int want_enabled = (en && cJSON_IsBool(en)) ? (cJSON_IsTrue(en) ? 1 : 0) : -1;
+   int want_auto = (ap && cJSON_IsBool(ap)) ? (cJSON_IsTrue(ap) ? 1 : 0) : -1;
+   int want_threshold = (pt && cJSON_IsNumber(pt) && pt->valueint > 0) ? pt->valueint : -1;
    cJSON_Delete(req);
-   if (config_save(&cfg) != 0)
+   if (config_set_typed_facts(want_enabled, want_auto, want_threshold) != 0)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"config save failed\"}");
       return 500;
    }
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddBoolToObject(resp, "ok", 1);
-   cJSON_AddBoolToObject(resp, "enabled", cfg.typed_facts_enabled ? 1 : 0);
-   cJSON_AddBoolToObject(resp, "auto_promote", cfg.kb_typed_facts_auto_promote_enabled ? 1 : 0);
-   cJSON_AddNumberToObject(resp, "promote_threshold", cfg.kb_typed_facts_promote_threshold);
+   cJSON_AddBoolToObject(resp, "enabled", config_typed_facts_enabled() ? 1 : 0);
+   cJSON_AddBoolToObject(resp, "auto_promote",
+                         config_kb_typed_facts_auto_promote_enabled() ? 1 : 0);
+   cJSON_AddNumberToObject(resp, "promote_threshold",
+                           config_kb_typed_facts_promote_threshold());
    char *s = cJSON_PrintUnformatted(resp);
    cJSON_Delete(resp);
    if (!s || strlen(s) >= (size_t)out_cap)
@@ -557,26 +555,21 @@ static int console_pipeline_config(const char *body, char *out_buf, int out_cap)
       cJSON_AddBoolToObject(resp, "secret", 1);
       return console_send(resp, 200, "{\"ok\":true}", out_buf, out_cap);
    }
-   config_t cfg;
-   config_load(&cfg);
-   if (config_field_set_value(&cfg, f, text) != 0)
+   /* config_set is the surgical single-field write: it validates against the
+    * field descriptor, patches just that key in the document, and republishes
+    * the snapshot -- the same three steps this did by hand through a config_t. */
+   if (config_set(key_copy, text) != 0)
    {
-      OPENSSL_cleanse(&cfg, sizeof(cfg));
+      OPENSSL_cleanse(text, sizeof(text));
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"invalid value for this key\"}");
       return 400;
-   }
-   if (config_save(&cfg) != 0)
-   {
-      OPENSSL_cleanse(&cfg, sizeof(cfg));
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"config save failed\"}");
-      return 500;
    }
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddBoolToObject(resp, "ok", 1);
    cJSON_AddStringToObject(resp, "key", key_copy);
-   cJSON_AddItemToObject(resp, "value", config_field_public_value_json(&cfg, f));
+   cJSON_AddItemToObject(resp, "value", config_field_public_value_json_current(f));
    cJSON_AddBoolToObject(resp, "secret", 0);
-   OPENSSL_cleanse(&cfg, sizeof(cfg));
+   OPENSSL_cleanse(text, sizeof(text));
    return console_send(resp, 200, "{\"ok\":true}", out_buf, out_cap);
 }
 
@@ -663,7 +656,7 @@ static int console_settings(char *out_buf, int out_cap)
       cJSON_AddStringToObject(o, "key", KB_SETTINGS[i].key);
       cJSON_AddStringToObject(o, "section", KB_SETTINGS[i].section);
       cJSON_AddBoolToObject(o, "restart", KB_SETTINGS[i].restart);
-      cJSON_AddItemToObject(o, "value", config_field_public_value_json(&cfg, f));
+      cJSON_AddItemToObject(o, "value", config_field_public_value_json_current(f));
       cJSON_AddBoolToObject(o, "secret", config_field_secret_name(f) ? 1 : 0);
       cJSON_AddItemToArray(arr, o);
    }
@@ -733,27 +726,22 @@ static int console_settings_config(const char *body, char *out_buf, int out_cap)
       cJSON_AddBoolToObject(resp, "restart", ks->restart);
       return console_send(resp, 200, "{\"ok\":true}", out_buf, out_cap);
    }
-   config_t cfg;
-   config_load(&cfg);
-   if (config_field_set_value(&cfg, f, text) != 0)
+   /* config_set is the surgical single-field write: it validates against the
+    * field descriptor, patches just that key in the document, and republishes
+    * the snapshot -- the same three steps this did by hand through a config_t. */
+   if (config_set(key_copy, text) != 0)
    {
-      OPENSSL_cleanse(&cfg, sizeof(cfg));
+      OPENSSL_cleanse(text, sizeof(text));
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"invalid value for this key\"}");
       return 400;
-   }
-   if (config_save(&cfg) != 0)
-   {
-      OPENSSL_cleanse(&cfg, sizeof(cfg));
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"config save failed\"}");
-      return 500;
    }
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddBoolToObject(resp, "ok", 1);
    cJSON_AddStringToObject(resp, "key", key_copy);
-   cJSON_AddItemToObject(resp, "value", config_field_public_value_json(&cfg, f));
+   cJSON_AddItemToObject(resp, "value", config_field_public_value_json_current(f));
    cJSON_AddBoolToObject(resp, "secret", 0);
    cJSON_AddBoolToObject(resp, "restart", ks->restart);
-   OPENSSL_cleanse(&cfg, sizeof(cfg));
+   OPENSSL_cleanse(text, sizeof(text));
    return console_send(resp, 200, "{\"ok\":true}", out_buf, out_cap);
 }
 

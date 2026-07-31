@@ -518,6 +518,22 @@ cJSON *config_field_public_value_json(const config_t *cfg, const config_field_t 
    return cJSON_CreateBool(base[0] ? 1 : 0);
 }
 
+/* Live-config form for callers outside this module, which under the
+ * encapsulation rule may not hold a config_t. Heap, not stack: config_t is
+ * ~750 KB, and this is called per field while rendering a console page. */
+cJSON *config_field_public_value_json_current(const config_field_t *f)
+{
+   if (!f)
+      return cJSON_CreateNull();
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return cJSON_CreateNull();
+   (void)config_load(cfg);
+   cJSON *out = config_field_public_value_json(cfg, f);
+   free(cfg);
+   return out;
+}
+
 int config_field_set_value(config_t *cfg, const config_field_t *f, const char *value)
 {
    if (!cfg || !f || !value)

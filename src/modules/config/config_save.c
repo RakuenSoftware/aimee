@@ -1630,6 +1630,27 @@ static int config_set_section(const char *key, void (*emit)(const config_t *, cJ
    return rc;
 }
 
+/* Apply the KB typed-facts group in ONE document write. Each parameter is
+ * "leave unchanged" when negative, so a caller can patch any subset. Grouped
+ * rather than three config_set calls because the console applies them as one
+ * request: three separate writes would be three reload publishes and could
+ * leave the layer half-configured if one failed. */
+int config_set_typed_facts(int enabled, int auto_promote, int promote_threshold)
+{
+   int rc = 0;
+   if (enabled >= 0)
+      rc = config_set("typed_facts_enabled", enabled ? "true" : "false");
+   if (rc == 0 && auto_promote >= 0)
+      rc = config_set("kb_typed_facts_auto_promote_enabled", auto_promote ? "true" : "false");
+   if (rc == 0 && promote_threshold > 0)
+   {
+      char buf[32];
+      snprintf(buf, sizeof(buf), "%d", promote_threshold);
+      rc = config_set("kb_typed_facts_promote_threshold", buf);
+   }
+   return rc;
+}
+
 int config_set_concurrency(const config_t *cfg)
 {
    return config_set_section("concurrency", config_save_concurrency, cfg);

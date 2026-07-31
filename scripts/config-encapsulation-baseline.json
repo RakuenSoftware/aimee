@@ -86,8 +86,8 @@
       "loads": 4
     },
     "src/kb/http/kb_http_console.c": {
-      "decls": 7,
-      "loads": 6
+      "decls": 4,
+      "loads": 3
     },
     "src/kb/http/kb_tls_serve.c": {
       "decls": 2,
@@ -751,8 +751,8 @@
     }
   },
   "totals": {
-    "decls": 667,
+    "decls": 664,
     "files": 187,
-    "loads": 331
+    "loads": 328
   }
 }

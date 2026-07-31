@@ -628,6 +628,24 @@ int config_save(const config_t *cfg)
    return 0;
 }
 
+/* The console writes through config_set / config_set_typed_facts now instead of
+ * mutating a config_t and calling config_save. Same contract as the stub above:
+ * report success without touching a real config file. */
+int config_set(const char *key, const char *value)
+{
+   (void)key;
+   (void)value;
+   return 0;
+}
+
+int config_set_typed_facts(int enabled, int auto_promote, int promote_threshold)
+{
+   (void)enabled;
+   (void)auto_promote;
+   (void)promote_threshold;
+   return 0;
+}
+
 /* Pipeline-console stubs: the console's /v1/console/pipeline routes pull in the
  * curator registry and the typed config-field accessors. The real defs drag in
  * the whole curator + config stack, so stub them here — this test exercises
@@ -687,6 +705,27 @@ cJSON *config_field_public_value_json(const config_t *cfg, const config_field_t 
    if (config_field_secret_name(f))
       return cJSON_CreateBool(g_stub_secret_configured);
    return cJSON_CreateBool(0);
+}
+
+/* The console renders values through the live-config form now; same answer. */
+cJSON *config_field_public_value_json_current(const config_field_t *f)
+{
+   return config_field_public_value_json(NULL, f);
+}
+
+/* Typed-facts knobs the console echoes back, read through accessors now.
+ * Mirror the values this file's config_load stub sets (all zero/off). */
+int config_typed_facts_enabled(void)
+{
+   return 0;
+}
+int config_kb_typed_facts_auto_promote_enabled(void)
+{
+   return 0;
+}
+int config_kb_typed_facts_promote_threshold(void)
+{
+   return 0;
 }
 int config_secret_store(const char *name, const char *value)
 {

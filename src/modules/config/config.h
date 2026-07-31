@@ -2319,6 +2319,10 @@ int config_save(const config_t *cfg);
  * Never serialises config_t — no whole-file rebuild, no parse/save drift. */
 int config_set(const char *key, const char *value);
 
+/* KB typed-facts group applied together; a negative argument leaves that field
+ * unchanged (promote_threshold ignores <= 0). */
+int config_set_typed_facts(int enabled, int auto_promote, int promote_threshold);
+
 /* config_set_concurrency: surgically rewrite the `concurrency:` section of the config
  * YAML from cfg (preserving all other keys) and republish. The structured-write partner
  * to config_set, for the concurrency limits (nested object + per-model/provider arrays). */

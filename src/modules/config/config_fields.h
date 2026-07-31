@@ -88,6 +88,9 @@ cJSON *config_field_value_json(const config_t *cfg, const config_field_t *f);
 const char *config_field_secret_name(const config_field_t *f);
 cJSON *config_field_public_value_json(const config_t *cfg, const config_field_t *f);
 
+/* Live-config form; prefer this outside the config module. */
+cJSON *config_field_public_value_json_current(const config_field_t *f);
+
 /* Parse `value` and assign it into the field. Returns 0 on success, -1 on an
  * invalid value (e.g. non-boolean text for a bool field). */
 int config_field_set_value(config_t *cfg, const config_field_t *f, const char *value);
