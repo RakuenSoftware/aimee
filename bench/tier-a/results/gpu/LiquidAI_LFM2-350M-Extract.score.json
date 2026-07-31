@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.0,
-    "recall": 0.0,
-    "f1": 0.0,
-    "tp": 0,
-    "fp": 16,
-    "fn": 64,
+    "precision": 0.125,
+    "recall": 0.0278,
+    "f1": 0.0455,
+    "tp": 2,
+    "fp": 14,
+    "fn": 70,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -21,7 +21,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 8
+        "fn": 9
       },
       "governance": {
         "precision": 0.0,
@@ -37,7 +37,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 6
+        "fn": 8
       },
       "infra": {
         "precision": 0.0,
@@ -45,7 +45,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 5
+        "fn": 6
       },
       "multi_fact": {
         "precision": 0.0,
@@ -53,7 +53,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 4,
-        "fn": 22
+        "fn": 25
       },
       "negation": {
         "precision": 0.0,
@@ -69,15 +69,15 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 6
+        "fn": 7
       },
       "third_person": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "tp": 0,
-        "fp": 4,
-        "fn": 9
+        "precision": 0.5,
+        "recall": 0.2222,
+        "f1": 0.3077,
+        "tp": 2,
+        "fp": 2,
+        "fn": 7
       },
       "transient": {
         "precision": 0.0,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.0,
-    "recall": 0.0,
-    "f1": 0.0,
-    "tp": 0,
-    "fp": 16,
-    "fn": 64,
+    "precision": 0.125,
+    "recall": 0.0278,
+    "f1": 0.0455,
+    "tp": 2,
+    "fp": 14,
+    "fn": 70,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -111,7 +111,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 8
+        "fn": 9
       },
       "governance": {
         "precision": 0.0,
@@ -127,7 +127,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 6
+        "fn": 8
       },
       "infra": {
         "precision": 0.0,
@@ -135,7 +135,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 5
+        "fn": 6
       },
       "multi_fact": {
         "precision": 0.0,
@@ -143,7 +143,7 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 4,
-        "fn": 22
+        "fn": 25
       },
       "negation": {
         "precision": 0.0,
@@ -159,15 +159,15 @@
         "f1": 0.0,
         "tp": 0,
         "fp": 0,
-        "fn": 6
+        "fn": 7
       },
       "third_person": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "tp": 0,
-        "fp": 4,
-        "fn": 9
+        "precision": 0.5,
+        "recall": 0.2222,
+        "f1": 0.3077,
+        "tp": 2,
+        "fp": 2,
+        "fn": 7
       },
       "transient": {
         "precision": 0.0,
@@ -189,14 +189,14 @@
   "relation_agnostic": {
     "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
     "precision": 0.375,
-    "recall": 0.0938,
-    "f1": 0.15,
+    "recall": 0.0833,
+    "f1": 0.1364,
     "tp": 6,
     "fp": 10,
-    "fn": 58
+    "fn": 66
   },
   "over_extraction": {
-    "empty_gold_notes": 23,
+    "empty_gold_notes": 21,
     "on_schema_empty_gold_notes": 4,
     "notes_correctly_empty": 3,
     "abstention_rate_on_schema": 0.75,
@@ -211,7 +211,7 @@
     "malformed_facts": 32,
     "dropped_by_conf_floor": 3,
     "predicted_triples": 16,
-    "in_seed_ontology": 0.0,
+    "in_seed_ontology": 0.375,
     "catch_all_relations": 0
   },
   "latency_ms": {

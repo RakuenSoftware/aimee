@@ -1,11 +1,11 @@
 {
   "strict": {
     "precision": 0.3333,
-    "recall": 0.3281,
-    "f1": 0.3307,
+    "recall": 0.2917,
+    "f1": 0.3111,
     "tp": 21,
     "fp": 42,
-    "fn": 43,
+    "fn": 51,
     "by_category": {
       "ambiguous": {
         "precision": 0.2,
@@ -17,11 +17,11 @@
       },
       "first_person": {
         "precision": 0.875,
-        "recall": 0.875,
-        "f1": 0.875,
+        "recall": 0.7778,
+        "f1": 0.8235,
         "tp": 7,
         "fp": 1,
-        "fn": 1
+        "fn": 2
       },
       "governance": {
         "precision": 0.5,
@@ -33,27 +33,27 @@
       },
       "implicit": {
         "precision": 0.2857,
-        "recall": 0.3333,
-        "f1": 0.3077,
+        "recall": 0.25,
+        "f1": 0.2667,
         "tp": 2,
         "fp": 5,
-        "fn": 4
+        "fn": 6
       },
       "infra": {
         "precision": 0.1667,
-        "recall": 0.2,
-        "f1": 0.1818,
+        "recall": 0.1667,
+        "f1": 0.1667,
         "tp": 1,
         "fp": 5,
-        "fn": 4
+        "fn": 5
       },
       "multi_fact": {
         "precision": 0.375,
-        "recall": 0.1364,
-        "f1": 0.2,
+        "recall": 0.12,
+        "f1": 0.1818,
         "tp": 3,
         "fp": 5,
-        "fn": 19
+        "fn": 22
       },
       "negation": {
         "precision": 0.25,
@@ -65,11 +65,11 @@
       },
       "novel_pred": {
         "precision": 0.3333,
-        "recall": 0.3333,
-        "f1": 0.3333,
+        "recall": 0.2857,
+        "f1": 0.3077,
         "tp": 2,
         "fp": 4,
-        "fn": 4
+        "fn": 5
       },
       "third_person": {
         "precision": 0.2857,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.3492,
-    "recall": 0.3438,
-    "f1": 0.3465,
-    "tp": 22,
-    "fp": 41,
-    "fn": 42,
+    "precision": 0.3651,
+    "recall": 0.3194,
+    "f1": 0.3407,
+    "tp": 23,
+    "fp": 40,
+    "fn": 49,
     "by_category": {
       "ambiguous": {
         "precision": 0.2,
@@ -107,11 +107,11 @@
       },
       "first_person": {
         "precision": 0.875,
-        "recall": 0.875,
-        "f1": 0.875,
+        "recall": 0.7778,
+        "f1": 0.8235,
         "tp": 7,
         "fp": 1,
-        "fn": 1
+        "fn": 2
       },
       "governance": {
         "precision": 0.5,
@@ -123,27 +123,27 @@
       },
       "implicit": {
         "precision": 0.2857,
-        "recall": 0.3333,
-        "f1": 0.3077,
+        "recall": 0.25,
+        "f1": 0.2667,
         "tp": 2,
         "fp": 5,
-        "fn": 4
+        "fn": 6
       },
       "infra": {
-        "precision": 0.1667,
-        "recall": 0.2,
-        "f1": 0.1818,
-        "tp": 1,
-        "fp": 5,
+        "precision": 0.3333,
+        "recall": 0.3333,
+        "f1": 0.3333,
+        "tp": 2,
+        "fp": 4,
         "fn": 4
       },
       "multi_fact": {
         "precision": 0.5,
-        "recall": 0.1818,
-        "f1": 0.2667,
+        "recall": 0.16,
+        "f1": 0.2424,
         "tp": 4,
         "fp": 4,
-        "fn": 18
+        "fn": 21
       },
       "negation": {
         "precision": 0.25,
@@ -155,11 +155,11 @@
       },
       "novel_pred": {
         "precision": 0.3333,
-        "recall": 0.3333,
-        "f1": 0.3333,
+        "recall": 0.2857,
+        "f1": 0.3077,
         "tp": 2,
         "fp": 4,
-        "fn": 4
+        "fn": 5
       },
       "third_person": {
         "precision": 0.2857,
@@ -188,19 +188,19 @@
   },
   "relation_agnostic": {
     "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
-    "precision": 0.4286,
-    "recall": 0.4219,
-    "f1": 0.4252,
-    "tp": 27,
-    "fp": 36,
-    "fn": 37
+    "precision": 0.4762,
+    "recall": 0.4167,
+    "f1": 0.4444,
+    "tp": 30,
+    "fp": 33,
+    "fn": 42
   },
   "over_extraction": {
-    "empty_gold_notes": 23,
-    "on_schema_empty_gold_notes": 23,
+    "empty_gold_notes": 21,
+    "on_schema_empty_gold_notes": 21,
     "notes_correctly_empty": 7,
-    "abstention_rate_on_schema": 0.3043,
-    "spurious_triples": 16
+    "abstention_rate_on_schema": 0.3333,
+    "spurious_triples": 14
   },
   "output_health": {
     "notes": 70,

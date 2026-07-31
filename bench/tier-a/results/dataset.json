@@ -40,7 +40,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 8
+          "fn": 9
         },
         "governance": {
           "precision": 0.0,
@@ -56,7 +56,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 6
+          "fn": 8
         },
         "infra": {
           "precision": 0.0,
@@ -64,7 +64,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 5
+          "fn": 6
         },
         "multi_fact": {
           "precision": 0.0,
@@ -72,7 +72,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 22
+          "fn": 25
         },
         "negation": {
           "precision": 0.0,
@@ -88,7 +88,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 6
+          "fn": 7
         },
         "third_person": {
           "precision": 0.0,
@@ -117,14 +117,14 @@
         "params": "350M",
         "licence": "lfm1.0",
         "class": "reference",
-        "f1_production": 0.0,
+        "f1_production": 0.0455,
         "f1_no_floor": 0.0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1_strict": 0.0,
+        "precision": 0.125,
+        "recall": 0.0278,
+        "f1_strict": 0.0455,
         "schema_rate": 0.1429,
         "json_parse_rate": 0.1429,
-        "in_seed_ontology": 0.0,
+        "in_seed_ontology": 0.375,
         "abstention_on_factless": 0.75,
         "spurious_triples": 4,
         "dropped_by_conf_floor": 3,
@@ -150,7 +150,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 8
+          "fn": 9
         },
         "governance": {
           "precision": 0.0,
@@ -166,7 +166,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 6
+          "fn": 8
         },
         "infra": {
           "precision": 0.0,
@@ -174,7 +174,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 5
+          "fn": 6
         },
         "multi_fact": {
           "precision": 0.0,
@@ -182,7 +182,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 4,
-          "fn": 22
+          "fn": 25
         },
         "negation": {
           "precision": 0.0,
@@ -198,15 +198,15 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 6
+          "fn": 7
         },
         "third_person": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
-          "tp": 0,
-          "fp": 4,
-          "fn": 9
+          "precision": 0.5,
+          "recall": 0.2222,
+          "f1": 0.3077,
+          "tp": 2,
+          "fp": 2,
+          "fn": 7
         },
         "transient": {
           "precision": 0.0,
@@ -365,7 +365,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 8
+          "fn": 9
         },
         "governance": {
           "precision": 0.0,
@@ -381,7 +381,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 6
+          "fn": 8
         },
         "infra": {
           "precision": 0.0,
@@ -389,7 +389,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 5
+          "fn": 6
         },
         "multi_fact": {
           "precision": 0.0,
@@ -397,7 +397,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 22
+          "fn": 25
         },
         "negation": {
           "precision": 0.0,
@@ -413,7 +413,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 6
+          "fn": 7
         },
         "third_person": {
           "precision": 0.0,
@@ -475,7 +475,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 8
+          "fn": 9
         },
         "governance": {
           "precision": 0.0,
@@ -491,7 +491,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 6
+          "fn": 8
         },
         "infra": {
           "precision": 0.0,
@@ -499,7 +499,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 5
+          "fn": 6
         },
         "multi_fact": {
           "precision": 0.0,
@@ -507,7 +507,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 22
+          "fn": 25
         },
         "negation": {
           "precision": 0.0,
@@ -523,7 +523,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 6
+          "fn": 7
         },
         "third_person": {
           "precision": 0.0,
@@ -657,15 +657,15 @@
         "params": "1.7B",
         "licence": "apache-2.0",
         "class": "superseded",
-        "f1_production": 0.3218,
+        "f1_production": 0.3579,
         "f1_no_floor": 0.4962,
-        "precision": 0.6087,
-        "recall": 0.2188,
-        "f1_strict": 0.3218,
+        "precision": 0.7391,
+        "recall": 0.2361,
+        "f1_strict": 0.3158,
         "schema_rate": 0.9857,
         "json_parse_rate": 0.9857,
         "in_seed_ontology": 0.8261,
-        "abstention_on_factless": 0.9545,
+        "abstention_on_factless": 0.95,
         "spurious_triples": 1,
         "dropped_by_conf_floor": 46,
         "median_latency_ms_gpu": 433.0,
@@ -686,11 +686,11 @@
         },
         "first_person": {
           "precision": 0.6667,
-          "recall": 0.25,
-          "f1": 0.3636,
+          "recall": 0.2222,
+          "f1": 0.3333,
           "tp": 2,
           "fp": 1,
-          "fn": 6
+          "fn": 7
         },
         "governance": {
           "precision": 0.6667,
@@ -702,27 +702,27 @@
         },
         "implicit": {
           "precision": 1.0,
-          "recall": 0.1667,
-          "f1": 0.2857,
+          "recall": 0.125,
+          "f1": 0.2222,
           "tp": 1,
           "fp": 0,
-          "fn": 5
+          "fn": 7
         },
         "infra": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
-          "tp": 0,
-          "fp": 3,
+          "precision": 0.3333,
+          "recall": 0.1667,
+          "f1": 0.2222,
+          "tp": 1,
+          "fp": 2,
           "fn": 5
         },
         "multi_fact": {
           "precision": 1.0,
-          "recall": 0.0909,
-          "f1": 0.1667,
+          "recall": 0.08,
+          "f1": 0.1481,
           "tp": 2,
           "fp": 0,
-          "fn": 20
+          "fn": 23
         },
         "negation": {
           "precision": 0.5,
@@ -733,12 +733,12 @@
           "fn": 1
         },
         "novel_pred": {
-          "precision": 0.3333,
-          "recall": 0.1667,
-          "f1": 0.2222,
-          "tp": 1,
-          "fp": 2,
-          "fn": 5
+          "precision": 1.0,
+          "recall": 0.4286,
+          "f1": 0.6,
+          "tp": 3,
+          "fp": 0,
+          "fn": 4
         },
         "third_person": {
           "precision": 1.0,
@@ -872,16 +872,16 @@
         "params": "800M",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.3434,
+        "f1_production": 0.3925,
         "f1_no_floor": 0.3556,
-        "precision": 0.4857,
-        "recall": 0.2656,
-        "f1_strict": 0.3434,
+        "precision": 0.6,
+        "recall": 0.2917,
+        "f1_strict": 0.3925,
         "schema_rate": 1.0,
         "json_parse_rate": 1.0,
         "in_seed_ontology": 0.8,
-        "abstention_on_factless": 0.7391,
-        "spurious_triples": 6,
+        "abstention_on_factless": 0.7619,
+        "spurious_triples": 5,
         "dropped_by_conf_floor": 36,
         "median_latency_ms_gpu": 552.3,
         "median_completion_tokens": 26,
@@ -892,20 +892,20 @@
       },
       "by_category": {
         "ambiguous": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
-          "tp": 0,
-          "fp": 3,
-          "fn": 2
+          "precision": 0.3333,
+          "recall": 0.5,
+          "f1": 0.4,
+          "tp": 1,
+          "fp": 2,
+          "fn": 1
         },
         "first_person": {
           "precision": 0.7143,
-          "recall": 0.625,
-          "f1": 0.6667,
+          "recall": 0.5556,
+          "f1": 0.625,
           "tp": 5,
           "fp": 2,
-          "fn": 3
+          "fn": 4
         },
         "governance": {
           "precision": 1.0,
@@ -921,23 +921,23 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 4,
-          "fn": 6
+          "fn": 8
         },
         "infra": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
-          "tp": 0,
-          "fp": 4,
-          "fn": 5
+          "precision": 0.75,
+          "recall": 0.5,
+          "f1": 0.6,
+          "tp": 3,
+          "fp": 1,
+          "fn": 3
         },
         "multi_fact": {
           "precision": 1.0,
-          "recall": 0.2727,
-          "f1": 0.4286,
+          "recall": 0.24,
+          "f1": 0.3871,
           "tp": 6,
           "fp": 0,
-          "fn": 16
+          "fn": 19
         },
         "negation": {
           "precision": 0.0,
@@ -949,11 +949,11 @@
         },
         "novel_pred": {
           "precision": 1.0,
-          "recall": 0.1667,
-          "f1": 0.2857,
+          "recall": 0.1429,
+          "f1": 0.25,
           "tp": 1,
           "fp": 0,
-          "fn": 5
+          "fn": 6
         },
         "third_person": {
           "precision": 1.0,
@@ -1087,16 +1087,16 @@
         "params": "2B",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.3465,
+        "f1_production": 0.3407,
         "f1_no_floor": 0.3284,
-        "precision": 0.3492,
-        "recall": 0.3438,
-        "f1_strict": 0.3307,
+        "precision": 0.3651,
+        "recall": 0.3194,
+        "f1_strict": 0.3111,
         "schema_rate": 1.0,
         "json_parse_rate": 1.0,
         "in_seed_ontology": 0.8571,
-        "abstention_on_factless": 0.3043,
-        "spurious_triples": 16,
+        "abstention_on_factless": 0.3333,
+        "spurious_triples": 14,
         "dropped_by_conf_floor": 7,
         "median_latency_ms_gpu": 557.8,
         "median_completion_tokens": 28,
@@ -1113,11 +1113,11 @@
         },
         "first_person": {
           "precision": 0.875,
-          "recall": 0.875,
-          "f1": 0.875,
+          "recall": 0.7778,
+          "f1": 0.8235,
           "tp": 7,
           "fp": 1,
-          "fn": 1
+          "fn": 2
         },
         "governance": {
           "precision": 0.5,
@@ -1129,27 +1129,27 @@
         },
         "implicit": {
           "precision": 0.2857,
-          "recall": 0.3333,
-          "f1": 0.3077,
+          "recall": 0.25,
+          "f1": 0.2667,
           "tp": 2,
           "fp": 5,
-          "fn": 4
+          "fn": 6
         },
         "infra": {
-          "precision": 0.1667,
-          "recall": 0.2,
-          "f1": 0.1818,
-          "tp": 1,
-          "fp": 5,
+          "precision": 0.3333,
+          "recall": 0.3333,
+          "f1": 0.3333,
+          "tp": 2,
+          "fp": 4,
           "fn": 4
         },
         "multi_fact": {
           "precision": 0.5,
-          "recall": 0.1818,
-          "f1": 0.2667,
+          "recall": 0.16,
+          "f1": 0.2424,
           "tp": 4,
           "fp": 4,
-          "fn": 18
+          "fn": 21
         },
         "negation": {
           "precision": 0.25,
@@ -1161,11 +1161,11 @@
         },
         "novel_pred": {
           "precision": 0.3333,
-          "recall": 0.3333,
-          "f1": 0.3333,
+          "recall": 0.2857,
+          "f1": 0.3077,
           "tp": 2,
           "fp": 4,
-          "fn": 4
+          "fn": 5
         },
         "third_person": {
           "precision": 0.2857,
@@ -1299,16 +1299,16 @@
         "params": "E2B (2.3B eff)",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.5692,
+        "f1_production": 0.6377,
         "f1_no_floor": 0.5103,
-        "precision": 0.5606,
-        "recall": 0.5781,
-        "f1_strict": 0.5538,
+        "precision": 0.6667,
+        "recall": 0.6111,
+        "f1_strict": 0.5942,
         "schema_rate": 0.9857,
         "json_parse_rate": 0.9714,
         "in_seed_ontology": 0.8939,
-        "abstention_on_factless": 0.6364,
-        "spurious_triples": 8,
+        "abstention_on_factless": 0.65,
+        "spurious_triples": 7,
         "dropped_by_conf_floor": 15,
         "median_latency_ms_gpu": 629.8,
         "median_completion_tokens": 26,
@@ -1327,11 +1327,11 @@
           "fn": 1
         },
         "first_person": {
-          "precision": 0.875,
-          "recall": 0.875,
-          "f1": 0.875,
-          "tp": 7,
-          "fp": 1,
+          "precision": 1.0,
+          "recall": 0.8889,
+          "f1": 0.9412,
+          "tp": 8,
+          "fp": 0,
           "fn": 1
         },
         "governance": {
@@ -1343,27 +1343,27 @@
           "fn": 1
         },
         "implicit": {
-          "precision": 0.2857,
-          "recall": 0.3333,
-          "f1": 0.3077,
-          "tp": 2,
-          "fp": 5,
-          "fn": 4
+          "precision": 0.4286,
+          "recall": 0.375,
+          "f1": 0.4,
+          "tp": 3,
+          "fp": 4,
+          "fn": 5
         },
         "infra": {
-          "precision": 0.3333,
-          "recall": 0.4,
-          "f1": 0.3636,
-          "tp": 2,
-          "fp": 4,
+          "precision": 0.5,
+          "recall": 0.5,
+          "f1": 0.5,
+          "tp": 3,
+          "fp": 3,
           "fn": 3
         },
         "multi_fact": {
-          "precision": 0.619,
-          "recall": 0.5909,
-          "f1": 0.6047,
-          "tp": 13,
-          "fp": 8,
+          "precision": 0.7619,
+          "recall": 0.64,
+          "f1": 0.6957,
+          "tp": 16,
+          "fp": 5,
           "fn": 9
         },
         "negation": {
@@ -1375,11 +1375,11 @@
           "fn": 2
         },
         "novel_pred": {
-          "precision": 0.6,
-          "recall": 0.5,
-          "f1": 0.5455,
-          "tp": 3,
-          "fp": 2,
+          "precision": 0.8,
+          "recall": 0.5714,
+          "f1": 0.6667,
+          "tp": 4,
+          "fp": 1,
           "fn": 3
         },
         "third_person": {
@@ -1514,16 +1514,16 @@
         "params": "E4B (4.5B eff)",
         "licence": "apache-2.0",
         "class": "incumbent",
-        "f1_production": 0.7049,
+        "f1_production": 0.7538,
         "f1_no_floor": 0.6992,
-        "precision": 0.7414,
-        "recall": 0.6719,
-        "f1_strict": 0.6885,
+        "precision": 0.8448,
+        "recall": 0.6806,
+        "f1_strict": 0.7231,
         "schema_rate": 1.0,
         "json_parse_rate": 1.0,
         "in_seed_ontology": 0.8966,
-        "abstention_on_factless": 0.8261,
-        "spurious_triples": 4,
+        "abstention_on_factless": 0.8571,
+        "spurious_triples": 3,
         "dropped_by_conf_floor": 1,
         "median_latency_ms_gpu": 847.8,
         "median_completion_tokens": 26,
@@ -1543,11 +1543,11 @@
         },
         "first_person": {
           "precision": 1.0,
-          "recall": 0.75,
-          "f1": 0.8571,
+          "recall": 0.6667,
+          "f1": 0.8,
           "tp": 6,
           "fp": 0,
-          "fn": 2
+          "fn": 3
         },
         "governance": {
           "precision": 0.75,
@@ -1558,28 +1558,28 @@
           "fn": 1
         },
         "implicit": {
-          "precision": 0.4286,
+          "precision": 0.5714,
           "recall": 0.5,
-          "f1": 0.4615,
-          "tp": 3,
-          "fp": 4,
-          "fn": 3
+          "f1": 0.5333,
+          "tp": 4,
+          "fp": 3,
+          "fn": 4
         },
         "infra": {
           "precision": 0.6667,
-          "recall": 0.4,
-          "f1": 0.5,
+          "recall": 0.3333,
+          "f1": 0.4444,
           "tp": 2,
           "fp": 1,
-          "fn": 3
+          "fn": 4
         },
         "multi_fact": {
-          "precision": 0.8095,
-          "recall": 0.7727,
-          "f1": 0.7907,
-          "tp": 17,
-          "fp": 4,
-          "fn": 5
+          "precision": 1.0,
+          "recall": 0.84,
+          "f1": 0.913,
+          "tp": 21,
+          "fp": 0,
+          "fn": 4
         },
         "negation": {
           "precision": 0.5,
@@ -1591,19 +1591,19 @@
         },
         "novel_pred": {
           "precision": 1.0,
-          "recall": 0.8333,
-          "f1": 0.9091,
+          "recall": 0.7143,
+          "f1": 0.8333,
           "tp": 5,
           "fp": 0,
-          "fn": 1
+          "fn": 2
         },
         "third_person": {
-          "precision": 0.8333,
-          "recall": 0.5556,
-          "f1": 0.6667,
-          "tp": 5,
-          "fp": 1,
-          "fn": 4
+          "precision": 1.0,
+          "recall": 0.6667,
+          "f1": 0.8,
+          "tp": 6,
+          "fp": 0,
+          "fn": 3
         },
         "transient": {
           "precision": 0.0,
@@ -1729,16 +1729,16 @@
         "params": "1B",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.5507,
+        "f1_production": 0.5479,
         "f1_no_floor": 0.5429,
-        "precision": 0.5135,
-        "recall": 0.5938,
-        "f1_strict": 0.5507,
+        "precision": 0.5405,
+        "recall": 0.5556,
+        "f1_strict": 0.5342,
         "schema_rate": 0.9143,
         "json_parse_rate": 0.8857,
         "in_seed_ontology": 0.7703,
-        "abstention_on_factless": 0.1667,
-        "spurious_triples": 15,
+        "abstention_on_factless": 0.1875,
+        "spurious_triples": 13,
         "dropped_by_conf_floor": 2,
         "median_latency_ms_gpu": 530.3,
         "median_completion_tokens": 28,
@@ -1758,11 +1758,11 @@
         },
         "first_person": {
           "precision": 0.7143,
-          "recall": 0.625,
-          "f1": 0.6667,
+          "recall": 0.5556,
+          "f1": 0.625,
           "tp": 5,
           "fp": 2,
-          "fn": 3
+          "fn": 4
         },
         "governance": {
           "precision": 0.75,
@@ -1774,27 +1774,27 @@
         },
         "implicit": {
           "precision": 0.2222,
-          "recall": 0.3333,
-          "f1": 0.2667,
+          "recall": 0.25,
+          "f1": 0.2353,
           "tp": 2,
           "fp": 7,
-          "fn": 4
+          "fn": 6
         },
         "infra": {
-          "precision": 0.2857,
-          "recall": 0.4,
-          "f1": 0.3333,
-          "tp": 2,
-          "fp": 5,
-          "fn": 3
+          "precision": 0.5714,
+          "recall": 0.6667,
+          "f1": 0.6154,
+          "tp": 4,
+          "fp": 3,
+          "fn": 2
         },
         "multi_fact": {
           "precision": 0.6842,
-          "recall": 0.5909,
-          "f1": 0.6341,
+          "recall": 0.52,
+          "f1": 0.5909,
           "tp": 13,
           "fp": 6,
-          "fn": 9
+          "fn": 12
         },
         "negation": {
           "precision": 0.1667,
@@ -1806,11 +1806,11 @@
         },
         "novel_pred": {
           "precision": 0.8,
-          "recall": 0.6667,
-          "f1": 0.7273,
+          "recall": 0.5714,
+          "f1": 0.6667,
           "tp": 4,
           "fp": 1,
-          "fn": 2
+          "fn": 3
         },
         "third_person": {
           "precision": 1.0,
@@ -1952,8 +1952,8 @@
         "schema_rate": 0.8286,
         "json_parse_rate": 0.8286,
         "in_seed_ontology": 0.0,
-        "abstention_on_factless": 0.85,
-        "spurious_triples": 3,
+        "abstention_on_factless": 0.8889,
+        "spurious_triples": 2,
         "dropped_by_conf_floor": 53,
         "median_latency_ms_gpu": 301.5,
         "median_completion_tokens": 22,
@@ -1977,7 +1977,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 1,
-          "fn": 8
+          "fn": 9
         },
         "governance": {
           "precision": 0.0,
@@ -1993,7 +1993,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 1,
-          "fn": 6
+          "fn": 8
         },
         "infra": {
           "precision": 0.0,
@@ -2001,7 +2001,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 1,
-          "fn": 5
+          "fn": 6
         },
         "multi_fact": {
           "precision": 0.0,
@@ -2009,7 +2009,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 1,
-          "fn": 22
+          "fn": 25
         },
         "negation": {
           "precision": 0.0,
@@ -2025,7 +2025,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 6
+          "fn": 7
         },
         "third_person": {
           "precision": 0.0,
@@ -2159,16 +2159,16 @@
         "params": "1B",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.4211,
+        "f1_production": 0.4681,
         "f1_no_floor": 0.4118,
-        "precision": 0.4058,
-        "recall": 0.4375,
-        "f1_strict": 0.4211,
+        "precision": 0.4783,
+        "recall": 0.4583,
+        "f1_strict": 0.4397,
         "schema_rate": 0.9714,
         "json_parse_rate": 0.9714,
         "in_seed_ontology": 0.6377,
-        "abstention_on_factless": 0.087,
-        "spurious_triples": 21,
+        "abstention_on_factless": 0.0952,
+        "spurious_triples": 19,
         "dropped_by_conf_floor": 3,
         "median_latency_ms_gpu": 1180.7,
         "median_completion_tokens": 28,
@@ -2179,20 +2179,20 @@
       },
       "by_category": {
         "ambiguous": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
-          "tp": 0,
-          "fp": 4,
-          "fn": 2
+          "precision": 0.25,
+          "recall": 0.5,
+          "f1": 0.3333,
+          "tp": 1,
+          "fp": 3,
+          "fn": 1
         },
         "first_person": {
           "precision": 0.75,
-          "recall": 0.75,
-          "f1": 0.75,
+          "recall": 0.6667,
+          "f1": 0.7059,
           "tp": 6,
           "fp": 2,
-          "fn": 2
+          "fn": 3
         },
         "governance": {
           "precision": 0.6,
@@ -2204,27 +2204,27 @@
         },
         "implicit": {
           "precision": 0.3333,
-          "recall": 0.3333,
-          "f1": 0.3333,
+          "recall": 0.25,
+          "f1": 0.2857,
           "tp": 2,
           "fp": 4,
-          "fn": 4
+          "fn": 6
         },
         "infra": {
-          "precision": 0.1429,
-          "recall": 0.2,
-          "f1": 0.1667,
-          "tp": 1,
-          "fp": 6,
-          "fn": 4
+          "precision": 0.4286,
+          "recall": 0.5,
+          "f1": 0.4615,
+          "tp": 3,
+          "fp": 4,
+          "fn": 3
         },
         "multi_fact": {
           "precision": 0.5,
-          "recall": 0.2273,
-          "f1": 0.3125,
+          "recall": 0.2,
+          "f1": 0.2857,
           "tp": 5,
           "fp": 5,
-          "fn": 17
+          "fn": 20
         },
         "negation": {
           "precision": 0.25,
@@ -2235,12 +2235,12 @@
           "fn": 1
         },
         "novel_pred": {
-          "precision": 0.6667,
-          "recall": 0.6667,
-          "f1": 0.6667,
-          "tp": 4,
-          "fp": 2,
-          "fn": 2
+          "precision": 1.0,
+          "recall": 0.8571,
+          "f1": 0.9231,
+          "tp": 6,
+          "fp": 0,
+          "fn": 1
         },
         "third_person": {
           "precision": 0.8571,
@@ -2404,7 +2404,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 1,
-          "fn": 8
+          "fn": 9
         },
         "governance": {
           "precision": 0.0,
@@ -2420,7 +2420,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 6
+          "fn": 8
         },
         "infra": {
           "precision": 0.0,
@@ -2428,7 +2428,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 5
+          "fn": 6
         },
         "multi_fact": {
           "precision": 0.0,
@@ -2436,7 +2436,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 22
+          "fn": 25
         },
         "negation": {
           "precision": 0.0,
@@ -2452,7 +2452,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 6
+          "fn": 7
         },
         "third_person": {
           "precision": 0.0,
@@ -2481,16 +2481,16 @@
         "params": "3B",
         "licence": "apache-2.0",
         "class": "actionable",
-        "f1_production": 0.512,
+        "f1_production": 0.5564,
         "f1_no_floor": 0.5797,
-        "precision": 0.5246,
-        "recall": 0.5,
-        "f1_strict": 0.512,
+        "precision": 0.6066,
+        "recall": 0.5139,
+        "f1_strict": 0.5414,
         "schema_rate": 1.0,
         "json_parse_rate": 1.0,
         "in_seed_ontology": 0.8525,
-        "abstention_on_factless": 0.5217,
-        "spurious_triples": 11,
+        "abstention_on_factless": 0.5714,
+        "spurious_triples": 9,
         "dropped_by_conf_floor": 13,
         "median_latency_ms_gpu": 465.5,
         "median_completion_tokens": 27,
@@ -2501,20 +2501,20 @@
       },
       "by_category": {
         "ambiguous": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "f1": 0.0,
-          "tp": 0,
-          "fp": 4,
-          "fn": 2
+          "precision": 0.25,
+          "recall": 0.5,
+          "f1": 0.3333,
+          "tp": 1,
+          "fp": 3,
+          "fn": 1
         },
         "first_person": {
           "precision": 1.0,
-          "recall": 1.0,
-          "f1": 1.0,
+          "recall": 0.8889,
+          "f1": 0.9412,
           "tp": 8,
           "fp": 0,
-          "fn": 0
+          "fn": 1
         },
         "governance": {
           "precision": 0.25,
@@ -2526,27 +2526,27 @@
         },
         "implicit": {
           "precision": 0.3333,
-          "recall": 0.5,
-          "f1": 0.4,
+          "recall": 0.375,
+          "f1": 0.3529,
           "tp": 3,
           "fp": 6,
-          "fn": 3
+          "fn": 5
         },
         "infra": {
-          "precision": 0.5,
-          "recall": 0.4,
-          "f1": 0.4444,
-          "tp": 2,
-          "fp": 2,
+          "precision": 0.75,
+          "recall": 0.5,
+          "f1": 0.6,
+          "tp": 3,
+          "fp": 1,
           "fn": 3
         },
         "multi_fact": {
           "precision": 0.7273,
-          "recall": 0.3636,
-          "f1": 0.4848,
+          "recall": 0.32,
+          "f1": 0.4444,
           "tp": 8,
           "fp": 3,
-          "fn": 14
+          "fn": 17
         },
         "negation": {
           "precision": 0.1667,
@@ -2557,12 +2557,12 @@
           "fn": 1
         },
         "novel_pred": {
-          "precision": 0.5,
-          "recall": 0.5,
-          "f1": 0.5,
-          "tp": 3,
-          "fp": 3,
-          "fn": 3
+          "precision": 1.0,
+          "recall": 0.8571,
+          "f1": 0.9231,
+          "tp": 6,
+          "fp": 0,
+          "fn": 1
         },
         "third_person": {
           "precision": 0.8571,
@@ -2726,7 +2726,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 8
+          "fn": 9
         },
         "governance": {
           "precision": 0.0,
@@ -2742,7 +2742,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 6
+          "fn": 8
         },
         "infra": {
           "precision": 0.0,
@@ -2750,7 +2750,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 5
+          "fn": 6
         },
         "multi_fact": {
           "precision": 0.0,
@@ -2758,7 +2758,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 22
+          "fn": 25
         },
         "negation": {
           "precision": 0.0,
@@ -2774,7 +2774,7 @@
           "f1": 0.0,
           "tp": 0,
           "fp": 0,
-          "fn": 6
+          "fn": 7
         },
         "third_person": {
           "precision": 0.0,
@@ -2908,16 +2908,16 @@
         "params": "E4B",
         "licence": "gemma",
         "class": "superseded",
-        "f1_production": 0.6241,
+        "f1_production": 0.6309,
         "f1_no_floor": 0.6197,
-        "precision": 0.5714,
-        "recall": 0.6875,
-        "f1_strict": 0.6241,
+        "precision": 0.6104,
+        "recall": 0.6528,
+        "f1_strict": 0.6309,
         "schema_rate": 1.0,
         "json_parse_rate": 1.0,
         "in_seed_ontology": 0.9091,
-        "abstention_on_factless": 0.2174,
-        "spurious_triples": 18,
+        "abstention_on_factless": 0.2381,
+        "spurious_triples": 16,
         "dropped_by_conf_floor": 1,
         "median_latency_ms_gpu": 1760.4,
         "median_completion_tokens": 37,
@@ -2934,11 +2934,11 @@
         },
         "first_person": {
           "precision": 0.875,
-          "recall": 0.875,
-          "f1": 0.875,
+          "recall": 0.7778,
+          "f1": 0.8235,
           "tp": 7,
           "fp": 1,
-          "fn": 1
+          "fn": 2
         },
         "governance": {
           "precision": 0.8,
@@ -2949,28 +2949,28 @@
           "fn": 0
         },
         "implicit": {
-          "precision": 0.5714,
-          "recall": 0.6667,
-          "f1": 0.6154,
-          "tp": 4,
-          "fp": 3,
-          "fn": 2
+          "precision": 0.7143,
+          "recall": 0.625,
+          "f1": 0.6667,
+          "tp": 5,
+          "fp": 2,
+          "fn": 3
         },
         "infra": {
-          "precision": 0.4286,
-          "recall": 0.6,
-          "f1": 0.5,
-          "tp": 3,
-          "fp": 4,
-          "fn": 2
+          "precision": 0.7143,
+          "recall": 0.8333,
+          "f1": 0.7692,
+          "tp": 5,
+          "fp": 2,
+          "fn": 1
         },
         "multi_fact": {
           "precision": 0.6842,
-          "recall": 0.5909,
-          "f1": 0.6341,
+          "recall": 0.52,
+          "f1": 0.5909,
           "tp": 13,
           "fp": 6,
-          "fn": 9
+          "fn": 12
         },
         "negation": {
           "precision": 0.3333,
@@ -2982,11 +2982,11 @@
         },
         "novel_pred": {
           "precision": 0.6667,
-          "recall": 0.6667,
-          "f1": 0.6667,
+          "recall": 0.5714,
+          "f1": 0.6154,
           "tp": 4,
           "fp": 2,
-          "fn": 2
+          "fn": 3
         },
         "third_person": {
           "precision": 0.8571,

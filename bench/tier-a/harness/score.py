@@ -45,6 +45,35 @@ def norm(s):
     return " ".join(toks)
 
 
+def norm_entity(s):
+    """Normalise a subject or object for comparison.
+
+    norm() preserves underscores, hyphens and internal punctuation, so kb_server
+    did not match "KB server", aimee-kb did not match "aimee kb", and
+    "Dr. Okafor" did not match "Dr Okafor". Models write snake_case endpoints
+    constantly, and each of those counted as both a false positive and a false
+    negative — the same failure mode as the symmetry and inverse bugs.
+
+    Internal dots survive so 192.168.1.253 stays intact; trailing punctuation is
+    stripped per token so a sentence-final "Wellington." meets "Wellington".
+
+    Applied to endpoints only. Relations keep norm() plus rel_type_canonicalize,
+    because snake_case IS the canonical form for a predicate.
+    """
+    s = re.sub(r"[_\-/]+", " ", str(s or "").casefold())
+    s = re.sub(r"\s+", " ", s).strip()
+    toks = []
+    for t in s.split():
+        t = t.strip(",;:!?()[]{}\"'")
+        t = re.sub(r"\.+$", "", t)  # trailing dots only; keep 192.168.1.1
+        t = NUMBER_WORDS.get(t, t)
+        if t:
+            toks.append(t)
+    while toks and toks[0] in ARTICLES:
+        toks.pop(0)
+    return " ".join(toks)
+
+
 def tok_f1(a, b):
     ta, tb = set(a.split()), set(b.split())
     if not ta or not tb:
@@ -59,15 +88,67 @@ def tok_f1(a, b):
 def obj_match(pred, gold, lenient):
     if pred == gold:
         return True
-    return lenient and tok_f1(pred, gold) >= 0.6
+    if not lenient:
+        return False
+    if tok_f1(pred, gold) >= 0.6:
+        return True
+    # A prediction that CONTAINS the gold object is right but wordier:
+    # "2 of the junior engineers" for "junior engineers", "proxmox host in the
+    # auckland rack" for "auckland rack". Token-F1 punishes the extra words and
+    # dipped just under threshold on several of these. Require the gold side to
+    # be fully covered and non-trivial, so this does not license a match on a
+    # single shared word.
+    gt, pt = set(gold.split()), set(pred.split())
+    return len(gt) >= 2 and gt <= pt
 
 
 SYMMETRIC = None  # populated from the ontology in main()
 INVERSES = None
 
+# Predicate equivalences for SCORING only.
+#
+# rel_type_canonicalize() folds synonyms onto seed relations, which is the
+# production concern. This table covers the rest: pairs that are equally correct
+# answers where neither side is a seed relation, or where the gold itself used a
+# novel predicate. "speaks_language" is not a better or worse answer than
+# "speaks" — scoring them as different costs a model both a false positive and a
+# false negative for a naming choice that carries no information.
+#
+# Deliberately narrow: only genuine synonyms. studied_at is NOT equivalent to
+# studied — "studied medicine" and "studied at Otago" are different facts.
+EQUIV_PREDICATES = [
+    {"speaks", "speaks_language", "speaks_fluently"},
+    {"attends", "member_of", "enrolled_at", "studies_at"},
+    {"mentors", "mentor_of", "is_mentor_of"},
+    {"founded", "founder_of", "co_founded"},
+    {"owns", "owner_of"},
+    {"drives", "driver_of"},
+    {"grew_up_in", "raised_in"},
+]
+_EQUIV = {}
+for _grp in EQUIV_PREDICATES:
+    for _r in _grp:
+        _EQUIV[_r] = _grp
+
+
+def rel_equal(a, b):
+    return a == b or (a in _EQUIV and b in _EQUIV.get(a, ()))
+
 
 def triple_eq(p, g, lenient):
-    if p["relation"] == g["relation"]:
+    # A gold triple may list alternative renderings of the same fact — naming a
+    # device by description rather than hostname, located_in for a person where
+    # lives_in was labelled. Matching an alternative satisfies the gold triple
+    # and scores as a true positive; it is an equally correct answer, not one to
+    # be excused from the denominator.
+    for a in g.get("alt") or ():
+        if _triple_eq_one(p, a, lenient):
+            return True
+    return _triple_eq_one(p, g, lenient)
+
+
+def _triple_eq_one(p, g, lenient):
+    if rel_equal(p["relation"], g["relation"]):
         if p["subject"] == g["subject"] and obj_match(p["object"], g["object"], lenient):
             return True
         # The ontology declares some relations symmetric ("one assertion implies
@@ -211,11 +292,18 @@ def load_triples(rows, key, canonicalize=False):
             rel = t.get("relation")
             if canonicalize:
                 rel = prompt.canonicalize_relation(rel)
-            ts.append({
-                "subject": norm(t.get("subject")),
+            entry = {
+                "subject": norm_entity(t.get("subject")),
                 "relation": norm(rel),
-                "object": norm(t.get("object")),
-            })
+                "object": norm_entity(t.get("object")),
+            }
+            if t.get("alt"):
+                entry["alt"] = [{
+                    "subject": norm_entity(a.get("subject")),
+                    "relation": norm(a.get("relation")),
+                    "object": norm_entity(a.get("object")),
+                } for a in t["alt"]]
+            ts.append(entry)
         out[r["id"]] = ts
     return out
 
