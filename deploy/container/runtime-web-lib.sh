@@ -174,8 +174,36 @@ webchat_provision_login() {
 # Never fatal, for the reason spelled out in webchat_generate_bootstrap_login:
 # the entrypoint calls this unguarded under `set -eu`, so a failure here would
 # take the container down instead of leaving it up without a browser login.
+# The operator-supplied first-boot pair, from wherever it survived to here.
+#
+# PAM owns user control; env vars only PRE-SEED it on first boot. Reading the
+# environment alone found nothing on either supported path: the entrypoint
+# scrubs the credential env names into Vault before provisioning runs, and the
+# managed compose deliberately never places them in the long-lived container's
+# environment at all. Both paths leave the values in the Vault records the
+# bootstrap seals, so recover them from there when the environment is empty.
+#
+# That is TRANSPORT, not a second identity store: the PAM account created from
+# these is the source of truth from the first login onward, which is the whole
+# point of webchat_provision_login above.
+webchat_read_seeded_credentials() {
+    wc_seed_user="${AIMEE_WEBCHAT_USER:-}"
+    wc_seed_pass="${AIMEE_WEBCHAT_PASSWORD:-}"
+    [ -n "$wc_seed_user" ] && [ -n "$wc_seed_pass" ] && return 0
+    _ws_export=$(runuser -u aimee -- aimee-server --webchat-vault-export 2>/dev/null) || return 1
+    wc_seed_user=$(printf '%s\n' "$_ws_export" | awk -F'\t' '$1=="user"{print $2}' |
+        base64 -d 2>/dev/null) || wc_seed_user=""
+    wc_seed_pass=$(printf '%s\n' "$_ws_export" | awk -F'\t' '$1=="password"{print $2}' |
+        base64 -d 2>/dev/null) || wc_seed_pass=""
+    _ws_export=""
+    [ -n "$wc_seed_user" ] && [ -n "$wc_seed_pass" ]
+}
+
 webchat_provision_bootstrap_account() {
-    webchat_provision_login "${AIMEE_WEBCHAT_USER:-}" "${AIMEE_WEBCHAT_PASSWORD:-}" || true
+    if webchat_read_seeded_credentials; then
+        webchat_provision_login "$wc_seed_user" "$wc_seed_pass" || true
+    fi
+    wc_seed_user="" wc_seed_pass=""
     if webchat_read_generated_credentials; then
         webchat_provision_login "$wc_generated_user" "$wc_generated_pass" || true
     fi
@@ -191,7 +219,15 @@ webchat_provision_bootstrap_account() {
 # password out from under the operator on every restart and spam the log with
 # credentials that are not the working one.
 webchat_bootstrap_login_needed() {
-    [ -n "${AIMEE_WEBCHAT_USER:-}" ] && [ -n "${AIMEE_WEBCHAT_PASSWORD:-}" ] && return 1
+    # Same source as provisioning: an operator-supplied pair that reached us via
+    # the Vault transport must suppress generation just as an environment one
+    # does, or the appliance prints a random credential the operator never asked
+    # for beside the account they did.
+    if webchat_read_seeded_credentials; then
+        wc_seed_user="" wc_seed_pass=""
+        return 1
+    fi
+    wc_seed_user="" wc_seed_pass=""
     [ -f "$WEBCHAT_BOOTSTRAP_USER" ] && return 1
     [ -f "$WEBCHAT_BOOTSTRAP_REPLACED" ] && return 1
     [ -n "$(getent group "$WEBCHAT_LOGIN_GROUP" 2>/dev/null | cut -d: -f4)" ] && return 1

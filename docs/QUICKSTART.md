@@ -24,21 +24,29 @@ The server generates a dashboard login on first boot and prints it once, in that
 
 Copy it before the log rotates. Only the username is kept on disk afterwards, so the password cannot
 be read back; if you lose it, reset that account's password inside the container or start again from
-an empty volume. To choose the credential yourself instead, set both variables before `up` — then
+an empty volume. To choose the credential yourself instead, seal it before the first `up` — then
 nothing is generated and nothing is printed:
 
 ```bash
 export AIMEE_WEBCHAT_USER=operator
 read -rsp 'Initial webchat password: ' AIMEE_WEBCHAT_PASSWORD && echo
 export AIMEE_WEBCHAT_PASSWORD
-docker compose -f compose.server-managed.yaml up -d
+scripts/aimee-compose-vault-bootstrap.sh -f compose.server-managed.yaml server
 unset AIMEE_WEBCHAT_PASSWORD
+docker compose -f compose.server-managed.yaml up -d
 ```
 
-Those variables are first-boot transport, not runtime configuration: the entrypoint encrypts them
-into the server Vault, removes them from its inherited environment, and only then starts long-lived
-services. Authentication reads only fixed Vault records through one-shot pipes; no password,
-verifier, session bearer, or TLS private key is written to the data volume or container logs.
+Run the bootstrap script; do not simply export the variables and `up`. `compose.server-managed.yaml`
+deliberately keeps these two out of the server's `environment:` block, because anything listed there
+persists in the container's `Config.Env` for the life of the deployment and is readable from
+`docker inspect`. The script streams them into Vault through a one-shot container instead, so
+`docker compose up` on its own never sees them and would leave you with a generated login.
+
+Those variables are first-boot transport, not runtime configuration. On first boot the entrypoint
+reads that sealed pair and provisions it as a real local PAM account, then the appliance
+authenticates against PAM from the first login onward — there is no parallel credential store, and
+no password, verifier, session bearer, or TLS private key is written to the data volume or
+container logs.
 
 Open <https://localhost:8443> and sign in. If you signed in with the generated login, the wizard's
 account step replaces it with a permanent one; a deployment that supplied its own pair skips that
@@ -71,8 +79,9 @@ Deploy also claims the signed-in browser account as the first remote owner. It d
 `aimee remote set ...` command that provisions that user's bearer, mTLS certificate, and explicit
 `full` write grant. Keep that page open until you run the command in step 3.
 
-Complete the account step before exposing the host. A deployment that injects both
-`AIMEE_WEBCHAT_USER` and `AIMEE_WEBCHAT_PASSWORD` uses that pair and skips account replacement.
+Complete the account step before exposing the host. A deployment that seals both
+`AIMEE_WEBCHAT_USER` and `AIMEE_WEBCHAT_PASSWORD` before the first `up` uses that pair and skips
+account replacement.
 Supply both or neither: a partial pair is treated as absent, and the server generates and logs a
 credential instead.
 

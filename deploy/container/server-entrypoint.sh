@@ -85,10 +85,12 @@ if [ "$#" -gt 0 ]; then
 fi
 if [ "$vault_bootstrapped" -eq 0 ] || [ "$had_credential_env" -eq 1 ]; then
     # Migrate any legacy browser credential files only after first-boot env
-    # values have been sealed and scrubbed. The new web service authenticates
-    # against fixed Vault records and never materializes a PAM verifier. Force
-    # a clean process image whenever this invocation inherited credentials,
-    # even if an external caller supplied the internal marker.
+    # values have been sealed and scrubbed. The sealed pair is first-boot
+    # transport: webchat_provision_bootstrap_account reads it back out and
+    # provisions a real PAM account, which is the only thing authentication
+    # consults thereafter. Force a clean process image whenever this invocation
+    # inherited credentials, even if an external caller supplied the internal
+    # marker.
     webchat_prepare
     exec /usr/bin/tini -- aimee-server-entrypoint --aimee-internal-vault-bootstrapped
 fi
