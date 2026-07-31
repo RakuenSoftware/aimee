@@ -33,10 +33,6 @@
       "decls": 1,
       "loads": 0
     },
-    "src/kb/http/kb_http.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/kb/http/kb_http_code.c": {
       "decls": 2,
       "loads": 2
@@ -54,8 +50,8 @@
       "loads": 7
     },
     "src/kb/kb_main.c": {
-      "decls": 6,
-      "loads": 3
+      "decls": 3,
+      "loads": 0
     },
     "src/kb/kb_memory_facts.c": {
       "decls": 2,
@@ -142,8 +138,8 @@
       "loads": 1
     },
     "src/posix/agent_runtime.c": {
-      "decls": 3,
-      "loads": 3
+      "decls": 2,
+      "loads": 1
     },
     "src/posix/server_compute.c": {
       "decls": 3,
@@ -411,8 +407,8 @@
     }
   },
   "totals": {
-    "decls": 329,
-    "files": 102,
-    "loads": 187
+    "decls": 324,
+    "files": 101,
+    "loads": 181
   }
 }

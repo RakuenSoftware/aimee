@@ -1071,9 +1071,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          /* -1 = dim mismatch needs force (409); -2 = error (500). */
          return rc == 0 ? 200 : rc == -1 ? 409 : 500;
       }
-      config_t rcfg;
-      config_load(&rcfg);
-      if (!rcfg.kb_reembed_on_dim_change)
+      if (!config_kb_reembed_on_dim_change())
       {
          snprintf(out_buf, (size_t)out_cap,
                   "{\"error\":\"kb.reembed_on_dim_change is disabled; set it true to enable the "
@@ -1090,7 +1088,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       if (target <= 0)
       {
          if (config_embedding_dim_pinned_current())
-            target = config_resolve_embedding_dim(&rcfg);
+            target = config_resolve_embedding_dim_current();
          else if (db2_probe_embedder_dim(8000, &target) != 0 || target <= 0)
          {
             snprintf(out_buf, (size_t)out_cap,

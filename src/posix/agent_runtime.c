@@ -97,11 +97,8 @@ static char *agent_economize_fresh_tool_result(char *result)
 {
    if (!result)
       return NULL;
-   config_t cfg;
    econ_preset_t preset;
-   if (config_load(&cfg) != 0)
-      return result;
-   econ_preset(&cfg, &preset);
+   econ_preset_current(&preset);
    if (!preset.json_compact)
       return result;
 
@@ -758,12 +755,12 @@ native_provider_http:
       memset(&agent_reduce_result, 0, sizeof(agent_reduce_result));
       int reduce_active = 0;
       {
-         config_t ecfg;
          econ_preset_t preset;
-         if (config_load(&ecfg) == 0)
-            econ_preset(&ecfg, &preset);
-         else
-            memset(&preset, 0, sizeof preset);
+         econ_preset_current(&preset);
+         /* The closet denylist is a borrowed pointer stored in rcfg and read
+          * after the reduce runs, so it is copied out of the accessor buffer. */
+         char closet_denylist[sizeof(((config_t *)0)->coord_closet_denylist)];
+         snprintf(closet_denylist, sizeof(closet_denylist), "%s", config_coord_closet_denylist());
          if (!anthropic && (preset.history_fold || preset.compress))
          {
             reduce_config_t rcfg;
@@ -773,17 +770,16 @@ native_provider_http:
             rcfg.compress = preset.compress;
             rcfg.freeze_guard_enabled = 1;
             rcfg.freeze_guard_horizon = preset.freeze_guard_horizon;
-            rcfg.fold.retained_msgs = ecfg.fold_retained_msgs;
-            rcfg.fold.min_fold_msgs = ecfg.fold_min_fold_msgs;
-            rcfg.fold.reasoning_excerpt_bytes = ecfg.fold_excerpt_bytes;
-            rcfg.fold.compact_head_bytes = ecfg.compact_head_bytes;
-            rcfg.fold.compact_tail_bytes = ecfg.compact_tail_bytes;
-            rcfg.fold.register_enabled = ecfg.fold_register_enabled;
-            rcfg.fold.closet.enabled = ecfg.coord_closet_enabled;
-            rcfg.fold.closet.budget_bytes = ecfg.coord_closet_budget_bytes;
-            rcfg.fold.closet.max_ratio_pct = ecfg.coord_closet_max_ratio_pct;
-            rcfg.fold.closet.denylist =
-                ecfg.coord_closet_denylist[0] ? ecfg.coord_closet_denylist : NULL;
+            rcfg.fold.retained_msgs = config_fold_retained_msgs();
+            rcfg.fold.min_fold_msgs = config_fold_min_fold_msgs();
+            rcfg.fold.reasoning_excerpt_bytes = config_fold_excerpt_bytes();
+            rcfg.fold.compact_head_bytes = config_compact_head_bytes();
+            rcfg.fold.compact_tail_bytes = config_compact_tail_bytes();
+            rcfg.fold.register_enabled = config_fold_register_enabled();
+            rcfg.fold.closet.enabled = config_coord_closet_enabled();
+            rcfg.fold.closet.budget_bytes = config_coord_closet_budget_bytes();
+            rcfg.fold.closet.max_ratio_pct = config_coord_closet_max_ratio_pct();
+            rcfg.fold.closet.denylist = closet_denylist[0] ? closet_denylist : NULL;
             agent_reduce_state.reduced = 0;
             agent_reduce_state.turn = turn;
             if (context_reduce(messages, sys, fb_agent.model, NULL, REDUCE_SEAM_DELEGATE, &rcfg,

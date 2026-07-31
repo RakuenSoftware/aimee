@@ -579,10 +579,11 @@ static int bootstrap_db2_with_local_tools(cJSON *steps)
    return rc == 0 ? 0 : -1;
 }
 
-/* Resolve and bootstrap DB2 for `cfg`. Mutates cfg.db2_url to the URL that
- * succeeded and persists it via config_save. `resp` collects step-level
- * details (used by the init RPC; pass a throwaway object when calling from
- * startup). Returns 0 on success, 1 on failure. */
+/* Resolve and bootstrap DB2, persisting the URL that succeeded via config_set
+ * (which republishes the live snapshot, so a caller re-reading afterwards sees
+ * it). `resp` collects step-level details (used by the init RPC; pass a
+ * throwaway object when calling from startup). Returns 0 on success, 1 on
+ * failure. */
 static int kb_bootstrap_db2_resolve(cJSON *resp)
 {
    cJSON *steps = cJSON_AddArrayToObject(resp, "steps");
@@ -633,8 +634,6 @@ static int kb_bootstrap_db2_resolve(cJSON *resp)
 
 static int kb_bootstrap_db2(int json_output)
 {
-   config_t cfg;
-   config_load(&cfg);
    cJSON *resp = cJSON_CreateObject();
 
    (void)kb_bootstrap_db2_resolve(resp);
@@ -707,14 +706,11 @@ static int kb_cmd_enroll(int argc, char **argv)
  * db2_init and exits; does not start the service. */
 static int kb_run_fusion_probe(const char *query)
 {
-   config_t cfg;
-   config_load(&cfg);
-
    /* memory_find_facts takes the lexical-fallback path (which skips the fusion
     * block) unless the pgvector memory collection exists, so ensure it. */
    if (pgvec_memory_vector_collection_exists() <= 0)
    {
-      int dim = cfg.embedding_dim > 0 ? cfg.embedding_dim : 1024;
+      int dim = config_embedding_dim() > 0 ? config_embedding_dim() : 1024;
       (void)pgvec_memory_vector_collection_recreate(dim);
    }
 
@@ -763,19 +759,17 @@ static int kb_run_fusion_probe(const char *query)
  * remote thin-client `aimee team` needs human-actor forwarding to kb — P5.) */
 static int kb_cmd_tenancy_init_db2(void)
 {
-   config_t cfg;
-   config_load(&cfg);
-   config_apply_db2_url_env_override(&cfg);
-   if (!cfg.db2_url[0])
+   char db2_url[CONFIG_DB2_URL_LEN];
+   if (!config_db2_url_effective(db2_url, sizeof(db2_url)))
    {
       fprintf(stderr, "aimee-kb: db2_url not configured (set AIMEE_DB2_URL or run `aimee init`)\n");
       return -1;
    }
    db2_set_embedding_dim_default(config_embedding_dim_default());
-   db2_set_embedding_dim(config_embedding_dim_effective(&cfg));
-   if (db2_init(cfg.db2_url) != 0)
+   db2_set_embedding_dim(config_embedding_dim_current());
+   if (db2_init(db2_url) != 0)
    {
-      fprintf(stderr, "aimee-kb: DB2 not reachable at %s\n", cfg.db2_url);
+      fprintf(stderr, "aimee-kb: DB2 not reachable at %s\n", db2_url);
       return -1;
    }
    return 0;

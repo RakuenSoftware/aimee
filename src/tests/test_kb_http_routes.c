@@ -1356,6 +1356,13 @@ int config_present(void)
    return 1; /* the config_load stub above always succeeds */
 }
 
+/* §2c reembed-on-dim-change gate: mirrors the struct the stub above fills, so a
+ * case that flips g_test_reembed_enabled moves both seams together. */
+int config_kb_reembed_on_dim_change(void)
+{
+   return g_test_reembed_enabled;
+}
+
 /* §5 hybrid RRF weights + rank constant, mirroring the struct above. */
 double config_code_hybrid_weight_code(void)
 {
