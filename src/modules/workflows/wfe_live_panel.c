@@ -171,8 +171,10 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
          continue;
       }
 
+      ensemble_panel_t panel;
+      ensemble_panel_from_config(&panel);
       char panel_err[256];
-      if (ensemble_prepare_runtime_panel(pkt->roundtable, &cfg, &acfg, panel_err,
+      if (ensemble_prepare_runtime_panel(pkt->roundtable, &panel, &acfg, panel_err,
                                          sizeof panel_err) != 0)
       {
          if (final)
@@ -218,7 +220,7 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
       char previous_cwd_copy[MAX_PATH_LEN];
       snprintf(previous_cwd_copy, sizeof previous_cwd_copy, "%s", previous_cwd ? previous_cwd : "");
       run_cmd_set_cwd(pkt->workdir);
-      int roundtable_rc = delegate_roundtable_run(&acfg, &cfg, task, &opts, &rt);
+      int roundtable_rc = delegate_roundtable_run(&acfg, &panel, task, &opts, &rt);
       run_cmd_set_cwd(previous_cwd_copy[0] ? previous_cwd_copy : NULL);
       if (roundtable_rc != 0)
       {

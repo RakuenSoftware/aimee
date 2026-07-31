@@ -301,22 +301,6 @@
       "decls": 4,
       "loads": 0
     },
-    "src/modules/roundtable/delegate_ensemble.c": {
-      "decls": 14,
-      "loads": 0
-    },
-    "src/modules/roundtable/delegate_ensemble.h": {
-      "decls": 8,
-      "loads": 0
-    },
-    "src/modules/roundtable/roundtable_preset.c": {
-      "decls": 4,
-      "loads": 2
-    },
-    "src/modules/roundtable/roundtable_preset.h": {
-      "decls": 1,
-      "loads": 0
-    },
     "src/modules/roundtable/roundtable_provider.c": {
       "decls": 2,
       "loads": 0
@@ -406,8 +390,8 @@
       "loads": 3
     },
     "src/server/server_compute.c": {
-      "decls": 5,
-      "loads": 4
+      "decls": 3,
+      "loads": 3
     },
     "src/server/server_config.c": {
       "decls": 2,
@@ -449,20 +433,12 @@
       "decls": 3,
       "loads": 3
     },
-    "src/server/server_sweep.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/server/server_workflow_api.c": {
       "decls": 1,
       "loads": 1
     },
     "src/server/web_search.c": {
       "decls": 2,
-      "loads": 1
-    },
-    "src/server/wfe_roundtable_proxy.c": {
-      "decls": 1,
       "loads": 1
     },
     "src/tests/fuzz_corpus/seed.c": {
@@ -581,10 +557,6 @@
       "decls": 1,
       "loads": 0
     },
-    "src/tests/test_delegate_ensemble.c": {
-      "decls": 49,
-      "loads": 0
-    },
     "src/tests/test_delegate_sandbox_image.c": {
       "decls": 3,
       "loads": 3
@@ -693,10 +665,6 @@
       "decls": 1,
       "loads": 1
     },
-    "src/tests/test_roundtable_preset.c": {
-      "decls": 3,
-      "loads": 2
-    },
     "src/tests/test_server_compute.c": {
       "decls": 2,
       "loads": 0
@@ -743,8 +711,8 @@
     }
   },
   "totals": {
-    "decls": 652,
-    "files": 185,
-    "loads": 318
+    "decls": 569,
+    "files": 177,
+    "loads": 311
   }
 }

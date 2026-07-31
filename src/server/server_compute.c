@@ -2111,7 +2111,7 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 /* Resolve the one runtime panel contract shared by aggregate and roundtable.
  * A saved preset contributes its exact seats. Only the no-preset fallback is
  * synthesized, and that helper has a structural two-seat maximum. */
-static int prepare_roundtable_panel(cJSON *req, config_t *cfg, agent_config_t *acfg, char *err,
+static int prepare_roundtable_panel(cJSON *req, ensemble_panel_t *panel, agent_config_t *acfg, char *err,
                                     size_t err_n)
 {
    cJSON *jrt = cJSON_GetObjectItemCaseSensitive(req, "roundtable");
@@ -2121,7 +2121,7 @@ static int prepare_roundtable_panel(cJSON *req, config_t *cfg, agent_config_t *a
       return -1;
    }
    const char *requested = cJSON_IsString(jrt) ? jrt->valuestring : NULL;
-   return ensemble_prepare_runtime_panel(requested, cfg, acfg, err, err_n);
+   return ensemble_prepare_runtime_panel(requested, panel, acfg, err, err_n);
 }
 
 /* Convene the ensemble panel from enabled registry agents when no explicit
@@ -2148,19 +2148,19 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
       return server_send_error(conn, errmsg, NULL);
    }
 
-   config_t cfg;
-   config_load(&cfg);
+   ensemble_panel_t panel;
+   ensemble_panel_from_config(&panel);
    agent_config_t acfg;
    memset(&acfg, 0, sizeof(acfg));
    if (agent_load_config(&acfg) != 0)
       return server_send_error(conn, "could not load agents.json", NULL);
    char pin_err[256] = "no enabled review agent is currently available";
-   if (prepare_roundtable_panel(req, &cfg, &acfg, pin_err, sizeof pin_err) != 0)
+   if (prepare_roundtable_panel(req, &panel, &acfg, pin_err, sizeof pin_err) != 0)
       return server_send_error(conn, pin_err, NULL);
    bind_request_session_creds(req);
 
    delegate_ensemble_result_t result;
-   int rc = delegate_ensemble_run(&acfg, &cfg, prompt, &result);
+   int rc = delegate_ensemble_run(&acfg, &panel, prompt, &result);
    if (rc != 0)
       return server_send_error(conn, "ensemble run failed (no enabled agents in agents.json?)",
                                NULL);

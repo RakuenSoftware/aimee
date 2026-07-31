@@ -347,90 +347,88 @@ void roundtable_preset_from_current_config(const char *name, roundtable_preset_t
 {
    memset(out, 0, sizeof(*out));
    snprintf(out->name, sizeof(out->name), "%s", name ? name : "current");
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return;
-   int n = cfg.ensemble_reference_count;
+
+   int n = config_ensemble_reference_count();
    if (n > RT_PRESET_MAX_SEATS)
       n = RT_PRESET_MAX_SEATS;
    for (int i = 0; i < n; i++)
    {
       snprintf(out->seats[i].model, sizeof(out->seats[i].model), "%s",
-               cfg.ensemble_reference_models[i]);
-      if (i < cfg.ensemble_reference_persona_count)
+               config_ensemble_reference_models(i));
+      if (i < config_ensemble_reference_persona_count())
          snprintf(out->seats[i].persona, sizeof(out->seats[i].persona), "%s",
-                  cfg.ensemble_reference_personas[i]);
+                  config_ensemble_reference_personas(i));
    }
    out->seat_count = n;
-   out->min_successful = cfg.ensemble_min_successful;
-   out->max_cost_usd = cfg.ensemble_max_cost_usd;
-   out->max_rounds = cfg.roundtable_max_rounds;
-   out->converge_threshold = cfg.roundtable_converge_threshold;
-   out->deadline_ms = cfg.roundtable_deadline_ms;
+   out->min_successful = config_ensemble_min_successful();
+   out->max_cost_usd = config_ensemble_max_cost_usd();
+   out->max_rounds = config_roundtable_max_rounds();
+   out->converge_threshold = config_roundtable_converge_threshold();
+   out->deadline_ms = config_roundtable_deadline_ms();
    snprintf(out->turns, sizeof(out->turns), "%s",
-            cfg.roundtable_turns[0] ? cfg.roundtable_turns : "parallel");
+            config_roundtable_turns()[0] ? config_roundtable_turns() : "parallel");
    snprintf(out->pipeline_done_bar, sizeof(out->pipeline_done_bar), "%s",
-            cfg.roundtable_pipeline_done_bar);
-   out->pipeline_max_passes = cfg.roundtable_pipeline_max_passes;
-   out->pipeline_max_attempts_per_pass = cfg.roundtable_pipeline_max_attempts_per_pass;
-   out->pipeline_max_cost_usd = cfg.roundtable_pipeline_max_cost_usd;
-   out->pipeline_max_total_cost_usd = cfg.roundtable_pipeline_max_total_cost_usd;
-   out->pipeline_gate_ttl_h = cfg.roundtable_pipeline_gate_ttl_h;
-   out->pipeline_parked_releases_slot = cfg.roundtable_pipeline_parked_releases_slot;
-   out->pipeline_unknown_context_tokens = cfg.roundtable_pipeline_unknown_context_tokens;
+            config_roundtable_pipeline_done_bar());
+   out->pipeline_max_passes = config_roundtable_pipeline_max_passes();
+   out->pipeline_max_attempts_per_pass = config_roundtable_pipeline_max_attempts_per_pass();
+   out->pipeline_max_cost_usd = config_roundtable_pipeline_max_cost_usd();
+   out->pipeline_max_total_cost_usd = config_roundtable_pipeline_max_total_cost_usd();
+   out->pipeline_gate_ttl_h = config_roundtable_pipeline_gate_ttl_h();
+   out->pipeline_parked_releases_slot = config_roundtable_pipeline_parked_releases_slot();
+   out->pipeline_unknown_context_tokens = config_roundtable_pipeline_unknown_context_tokens();
 }
 
-/* Overlay a preset's fields onto a config_t (in memory). */
-static void preset_overlay_config(const roundtable_preset_t *p, config_t *cfg)
+/* Translate a preset into the config module's plain apply-struct. config never
+ * learns the preset file format; this module never touches a config_t. */
+static void preset_to_config_apply(const roundtable_preset_t *p, config_roundtable_preset_t *out)
 {
+   memset(out, 0, sizeof(*out));
    int n = p->seat_count;
-   if (n > RT_PRESET_MAX_SEATS)
-      n = RT_PRESET_MAX_SEATS;
+   if (n > CONFIG_RT_PRESET_MAX_SEATS)
+      n = CONFIG_RT_PRESET_MAX_SEATS;
    for (int i = 0; i < n; i++)
    {
-      snprintf(cfg->ensemble_reference_models[i], sizeof(cfg->ensemble_reference_models[i]), "%s",
-               p->seats[i].model);
-      snprintf(cfg->ensemble_reference_personas[i], sizeof(cfg->ensemble_reference_personas[i]),
-               "%s", p->seats[i].persona);
+      snprintf(out->models[i], sizeof(out->models[i]), "%s", p->seats[i].model);
+      snprintf(out->personas[i], sizeof(out->personas[i]), "%s", p->seats[i].persona);
    }
-   cfg->ensemble_reference_count = n;
-   cfg->ensemble_reference_persona_count = n;
+   out->seat_count = n;
    /* A roundtable preset no longer owns the separate C compatibility route's
     * aggregator setting. Do not change that setting while applying this preset. */
-   cfg->ensemble_min_successful = p->min_successful;
-   cfg->ensemble_max_cost_usd = p->max_cost_usd;
-   cfg->roundtable_max_rounds = p->max_rounds;
-   cfg->roundtable_converge_threshold = p->converge_threshold;
-   cfg->roundtable_deadline_ms = p->deadline_ms;
+   out->min_successful = p->min_successful;
+   out->max_cost_usd = p->max_cost_usd;
+   out->max_rounds = p->max_rounds;
+   out->converge_threshold = p->converge_threshold;
+   out->deadline_ms = p->deadline_ms;
    if (p->turns[0])
-      snprintf(cfg->roundtable_turns, sizeof(cfg->roundtable_turns), "%s", p->turns);
+      snprintf(out->turns, sizeof(out->turns), "%s", p->turns);
    if (p->pipeline_done_bar[0])
-      snprintf(cfg->roundtable_pipeline_done_bar, sizeof(cfg->roundtable_pipeline_done_bar), "%s",
+      snprintf(out->pipeline_done_bar, sizeof(out->pipeline_done_bar), "%s",
                p->pipeline_done_bar);
-   cfg->roundtable_pipeline_max_passes = p->pipeline_max_passes;
-   cfg->roundtable_pipeline_max_attempts_per_pass = p->pipeline_max_attempts_per_pass;
-   cfg->roundtable_pipeline_max_cost_usd = p->pipeline_max_cost_usd;
-   cfg->roundtable_pipeline_max_total_cost_usd = p->pipeline_max_total_cost_usd;
-   cfg->roundtable_pipeline_gate_ttl_h = p->pipeline_gate_ttl_h;
-   cfg->roundtable_pipeline_parked_releases_slot = p->pipeline_parked_releases_slot;
-   cfg->roundtable_pipeline_unknown_context_tokens = p->pipeline_unknown_context_tokens;
-   snprintf(cfg->roundtable_default, sizeof(cfg->roundtable_default), "%s", p->name);
+   out->pipeline_max_passes = p->pipeline_max_passes;
+   out->pipeline_max_attempts_per_pass = p->pipeline_max_attempts_per_pass;
+   out->pipeline_max_cost_usd = p->pipeline_max_cost_usd;
+   out->pipeline_max_total_cost_usd = p->pipeline_max_total_cost_usd;
+   out->pipeline_gate_ttl_h = p->pipeline_gate_ttl_h;
+   out->pipeline_parked_releases_slot = p->pipeline_parked_releases_slot;
+   out->pipeline_unknown_context_tokens = p->pipeline_unknown_context_tokens;
+   snprintf(out->name, sizeof(out->name), "%s", p->name);
 }
 
-int roundtable_preset_resolve_runtime(const char *requested, config_t *cfg, char *resolved,
-                                      size_t resolved_n, char *err, size_t err_n)
+int roundtable_preset_resolve_runtime(const char *requested, ensemble_panel_t *panel,
+                                      char *resolved, size_t resolved_n, char *err, size_t err_n)
 {
    if (resolved && resolved_n)
       resolved[0] = '\0';
    if (err && err_n)
       err[0] = '\0';
-   if (!cfg)
+   if (!panel)
       return -1;
 
    const int explicit_request = requested && requested[0];
-   const int configured_default = !explicit_request && cfg->roundtable_default[0];
-   const char *name =
-       explicit_request ? requested : (configured_default ? cfg->roundtable_default : "default");
+   const int configured_default = !explicit_request && config_roundtable_default()[0];
+   const char *name = explicit_request
+                          ? requested
+                          : (configured_default ? config_roundtable_default() : "default");
    roundtable_preset_t p;
    if (roundtable_preset_load(name, &p) != 0)
    {
@@ -443,7 +441,26 @@ int roundtable_preset_resolve_runtime(const char *requested, config_t *cfg, char
       return 0;
    }
 
-   preset_overlay_config(&p, cfg);
+   /* Runtime overlay only -- nothing is persisted here. */
+   int seats = p.seat_count;
+   if (seats > ENSEMBLE_PANEL_MAX_SEATS)
+      seats = ENSEMBLE_PANEL_MAX_SEATS;
+   for (int i = 0; i < seats; i++)
+   {
+      snprintf(panel->reference_models[i], sizeof(panel->reference_models[i]), "%s",
+               p.seats[i].model);
+      snprintf(panel->reference_personas[i], sizeof(panel->reference_personas[i]), "%s",
+               p.seats[i].persona);
+   }
+   panel->reference_count = seats;
+   panel->reference_persona_count = seats;
+   panel->min_successful = p.min_successful;
+   panel->max_cost_usd = p.max_cost_usd;
+   panel->max_rounds = p.max_rounds;
+   panel->converge_threshold = p.converge_threshold;
+   panel->deadline_ms = p.deadline_ms;
+   if (p.turns[0])
+      snprintf(panel->turns, sizeof(panel->turns), "%s", p.turns);
    if (resolved && resolved_n)
       snprintf(resolved, resolved_n, "%s", p.name);
    return 1;
@@ -458,22 +475,13 @@ int roundtable_preset_apply_to_config(const char *name, char *err, size_t errn)
          snprintf(err, errn, "no such roundtable preset");
       return -1;
    }
-   /* Read from DISK for the read-modify-save so we never clobber an external edit
-    * made since the last reload (matches handle_config_set). */
-   config_t cfg;
-   if (config_load_file(&cfg) != 0)
-   {
-      if (err && errn)
-         snprintf(err, errn, "could not load configuration");
-      return -1;
-   }
-   preset_overlay_config(&p, &cfg);
-   if (config_save(&cfg) != 0)
+   config_roundtable_preset_t apply;
+   preset_to_config_apply(&p, &apply);
+   if (config_apply_roundtable_preset(&apply) != 0)
    {
       if (err && errn)
          snprintf(err, errn, "could not save configuration");
       return -1;
    }
-   (void)config_reload();
    return 0;
 }

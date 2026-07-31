@@ -1748,6 +1748,56 @@ int config_persist_defaults(void)
    return rc;
 }
 
+int config_apply_roundtable_preset(const config_roundtable_preset_t *p)
+{
+   if (!p)
+      return -1;
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return -1;
+   int rc = -1;
+   /* From DISK, not the snapshot, so applying a preset never clobbers an
+    * external edit made since the last reload (matches config_set). */
+   if (config_load_file(cfg) == 0)
+   {
+      int n = p->seat_count;
+      if (n > CONFIG_RT_PRESET_MAX_SEATS)
+         n = CONFIG_RT_PRESET_MAX_SEATS;
+      for (int i = 0; i < n; i++)
+      {
+         snprintf(cfg->ensemble_reference_models[i], sizeof(cfg->ensemble_reference_models[i]), "%s",
+                  p->models[i]);
+         snprintf(cfg->ensemble_reference_personas[i], sizeof(cfg->ensemble_reference_personas[i]),
+                  "%s", p->personas[i]);
+      }
+      cfg->ensemble_reference_count = n;
+      cfg->ensemble_reference_persona_count = n;
+      cfg->ensemble_min_successful = p->min_successful;
+      cfg->ensemble_max_cost_usd = p->max_cost_usd;
+      cfg->roundtable_max_rounds = p->max_rounds;
+      cfg->roundtable_converge_threshold = p->converge_threshold;
+      cfg->roundtable_deadline_ms = p->deadline_ms;
+      if (p->turns[0])
+         snprintf(cfg->roundtable_turns, sizeof(cfg->roundtable_turns), "%s", p->turns);
+      if (p->pipeline_done_bar[0])
+         snprintf(cfg->roundtable_pipeline_done_bar, sizeof(cfg->roundtable_pipeline_done_bar), "%s",
+                  p->pipeline_done_bar);
+      cfg->roundtable_pipeline_max_passes = p->pipeline_max_passes;
+      cfg->roundtable_pipeline_max_attempts_per_pass = p->pipeline_max_attempts_per_pass;
+      cfg->roundtable_pipeline_max_cost_usd = p->pipeline_max_cost_usd;
+      cfg->roundtable_pipeline_max_total_cost_usd = p->pipeline_max_total_cost_usd;
+      cfg->roundtable_pipeline_gate_ttl_h = p->pipeline_gate_ttl_h;
+      cfg->roundtable_pipeline_parked_releases_slot = p->pipeline_parked_releases_slot;
+      cfg->roundtable_pipeline_unknown_context_tokens = p->pipeline_unknown_context_tokens;
+      snprintf(cfg->roundtable_default, sizeof(cfg->roundtable_default), "%s", p->name);
+      rc = config_save(cfg);
+      if (rc == 0)
+         (void)config_reload();
+   }
+   free(cfg);
+   return rc;
+}
+
 int config_set_concurrency(const config_t *cfg)
 {
    return config_set_section("concurrency", config_save_concurrency, cfg);

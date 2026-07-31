@@ -515,13 +515,13 @@ static double estimated_agent_call_cost(const agent_config_t *acfg, const char *
    return agent_token_cost(acfg, agent_name, prompt_tokens, completion_tokens);
 }
 
-static double estimated_round_cost(const agent_config_t *acfg, const config_t *cfg, int ref_count,
+static double estimated_round_cost(const agent_config_t *acfg, const ensemble_panel_t *panel, int ref_count,
                                    int tokens_per_call)
 {
    double total = 0.0;
    for (int i = 0; i < ref_count; i++)
-      total += estimated_agent_call_cost(acfg, cfg->ensemble_reference_models[i], tokens_per_call);
-   total += estimated_agent_call_cost(acfg, cfg->ensemble_aggregator, tokens_per_call);
+      total += estimated_agent_call_cost(acfg, panel->reference_models[i], tokens_per_call);
+   total += estimated_agent_call_cost(acfg, panel->aggregator, tokens_per_call);
    total += estimated_agent_call_cost(acfg, "reason", tokens_per_call);
    return total;
 }
@@ -561,7 +561,7 @@ static int build_synthesis_prompt(char *buf, size_t cap, const char *original_pr
    return 0;
 }
 
-static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char *synthesis_prompt,
+static int run_aggregator(agent_config_t *acfg, const ensemble_panel_t *panel, const char *synthesis_prompt,
                           long deadline_abs_ms, agent_result_t *out)
 {
    memset(out, 0, sizeof(*out));
@@ -595,9 +595,9 @@ static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char 
     * the aggregator model's own output ceiling, so a reasoning aggregator isn't
     * truncated mid-synthesis (was a hard 4096). */
    const char *primary_name = NULL; /* bare-name aggregator we tried, to not retry it */
-   if (cfg->ensemble_aggregator[0])
+   if (panel->aggregator[0])
    {
-      const char *agg = cfg->ensemble_aggregator;
+      const char *agg = panel->aggregator;
       const char *at = strchr(agg, '@');
       if (!at)
       {
@@ -623,17 +623,17 @@ static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char 
    /* Fallback: try one alternate panelist. Synthesis/repair is bounded overhead,
     * never authority to retry across an arbitrarily large configured roster. */
    int fallbacks_tried = 0;
-   for (int i = 0; i < cfg->ensemble_reference_count; i++)
+   for (int i = 0; i < panel->reference_count; i++)
    {
       if (deadline_abs_ms > 0 && monotonic_ms() >= deadline_abs_ms)
       {
          aimee_log(LOG_WARN, "delegate_roundtable",
                    "aggregator: deadline reached at fallback candidate %d/%d; abandoning the "
                    "remaining %d (a flaky synthesis model must not wedge the roundtable)",
-                   i, cfg->ensemble_reference_count, cfg->ensemble_reference_count - i);
+                   i, panel->reference_count, panel->reference_count - i);
          break;
       }
-      const char *cand = cfg->ensemble_reference_models[i];
+      const char *cand = panel->reference_models[i];
       if (!cand[0] || (primary_name && strcmp(cand, primary_name) == 0))
          continue;
       if (fallbacks_tried++ >= 1)
@@ -905,7 +905,7 @@ static int run_convergence_tiebreak(agent_config_t *acfg, const char *task, cons
    return completion >= 90;
 }
 
-static int summarize_forward(agent_config_t *acfg, const config_t *cfg, const char *task,
+static int summarize_forward(agent_config_t *acfg, const ensemble_panel_t *panel, const char *task,
                              char **artifact, char **peer_notes, double *cost_usd)
 {
    /* Nothing to compress if there is no carryover. The `!*x` checks reject a NULL
@@ -929,7 +929,7 @@ static int summarize_forward(agent_config_t *acfg, const config_t *cfg, const ch
       return -1;
    agent_result_t res;
    memset(&res, 0, sizeof(res));
-   int rc = run_aggregator(acfg, cfg, full, 0, &res);
+   int rc = run_aggregator(acfg, panel, full, 0, &res);
    free(full);
    if (rc != 0 || !res.response || !res.response[0])
    {
@@ -937,7 +937,7 @@ static int summarize_forward(agent_config_t *acfg, const config_t *cfg, const ch
       return -1;
    }
    if (cost_usd)
-      *cost_usd += result_token_cost(acfg, &res, cfg->ensemble_aggregator);
+      *cost_usd += result_token_cost(acfg, &res, panel->aggregator);
    free(*peer_notes);
    *peer_notes = xstrdup0(res.response);
    if (strlen(*artifact) > 20000)
@@ -1076,10 +1076,10 @@ static void answer_roundtable_questions(agent_config_t *acfg, const char *task,
    free(prompt);
 }
 
-static int repair_review_json(agent_config_t *acfg, const config_t *cfg, int participant,
+static int repair_review_json(agent_config_t *acfg, const ensemble_panel_t *panel, int participant,
                               const char *bad_text, char **fixed, double *cost_usd)
 {
-   if (!acfg || !cfg || participant < 0 || participant >= cfg->ensemble_reference_count || !fixed)
+   if (!acfg || !panel || participant < 0 || participant >= panel->reference_count || !fixed)
       return -1;
    char *prompt = xasprintf3(
        "Repair this malformed roundtable review into valid JSON only. Preserve every issue. "
@@ -1094,7 +1094,7 @@ static int repair_review_json(agent_config_t *acfg, const config_t *cfg, int par
       return -1;
    agent_result_t res;
    memset(&res, 0, sizeof(res));
-   int rc = agent_run_named(acfg, cfg->ensemble_reference_models[participant], "review", NULL,
+   int rc = agent_run_named(acfg, panel->reference_models[participant], "review", NULL,
                             prompt, 512, 0.2, &res);
    free(prompt);
    if (rc != 0 || !res.response || !res.response[0])
@@ -1103,7 +1103,7 @@ static int repair_review_json(agent_config_t *acfg, const config_t *cfg, int par
       return -1;
    }
    if (cost_usd)
-      *cost_usd += result_token_cost(acfg, &res, cfg->ensemble_reference_models[participant]);
+      *cost_usd += result_token_cost(acfg, &res, panel->reference_models[participant]);
    *fixed = res.response;
    return 0;
 }
@@ -1182,12 +1182,12 @@ static char *panel_persona_prompt(roundtable_mode_t mode, int model_index)
    return sys;
 }
 
-static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const char *task,
+static int run_round_parallel(agent_config_t *acfg, const ensemble_panel_t *panel, const char *task,
                               const char *artifact, const char *peer_notes, roundtable_mode_t mode,
                               int round, const char *brief, const char *context,
                               agent_result_t *results, int deadline_ms)
 {
-   int ref_count = cfg->ensemble_reference_count;
+   int ref_count = panel->reference_count;
    agent_task_t tasks[ENSEMBLE_MAX_REFS];
    char *prompts[ENSEMBLE_MAX_REFS];
    char *personas[ENSEMBLE_MAX_REFS];
@@ -1197,7 +1197,7 @@ static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const c
    for (int i = 0; i < ref_count; i++)
    {
       prompts[i] = build_round_prompt(task, artifact, peer_notes, mode, round, brief, context,
-                                      cfg->roundtable_require_evidence);
+                                      panel->require_evidence);
       if (!prompts[i])
          goto fail;
       /* Per-participant persona is the system prompt (draft: engineer; review:
@@ -1216,8 +1216,8 @@ static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const c
        * still get no write tools. Drafting stays tool-less. */
       tasks[i].use_tools = (mode == ROUNDTABLE_REVIEW);
       tasks[i].require_initial_tool_call =
-          (mode == ROUNDTABLE_REVIEW && cfg->roundtable_require_evidence);
-      tasks[i].agent = cfg->ensemble_reference_models[i];
+          (mode == ROUNDTABLE_REVIEW && panel->require_evidence);
+      tasks[i].agent = panel->reference_models[i];
       tasks[i].system_prompt = personas[i];
       tasks[i].user_prompt = prompts[i];
       tasks[i].temperature = 0.3 + (0.05 * i);
@@ -1228,7 +1228,7 @@ static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const c
    agent_run_parallel(acfg, tasks, ref_count, results, deadline_ms);
    /* Account each participant's run onto the originating session, like a delegate. */
    for (int i = 0; i < ref_count; i++)
-      ensemble_fold_cost(acfg, &results[i], cfg->ensemble_reference_models[i]);
+      ensemble_fold_cost(acfg, &results[i], panel->reference_models[i]);
 
    /* Did the reviewers actually LOOK? A review panel was tool-less for its whole
     * life, and giving it tools is worth nothing if the panelists never call one —
@@ -1272,12 +1272,12 @@ fail:
    return -1;
 }
 
-static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const char *task,
+static int run_round_sequential(agent_config_t *acfg, const ensemble_panel_t *panel, const char *task,
                                 const char *artifact, char **peer_notes, roundtable_mode_t mode,
                                 int round, const char *brief, const char *context,
                                 agent_result_t *results)
 {
-   int ref_count = cfg->ensemble_reference_count;
+   int ref_count = panel->reference_count;
    int order[ENSEMBLE_MAX_REFS];
    for (int i = 0; i < ref_count; i++)
       order[i] = i;
@@ -1287,7 +1287,7 @@ static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const
    {
       int i = order[oi];
       char *prompt = build_round_prompt(task, artifact, *peer_notes, mode, round, brief, context,
-                                        cfg->roundtable_require_evidence);
+                                        panel->require_evidence);
       if (!prompt)
          return -1;
       /* Persona binds to the stable model index `i`, not the shuffled slot. */
@@ -1295,19 +1295,19 @@ static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const
       memset(&results[i], 0, sizeof(results[i]));
       if (mode == ROUNDTABLE_REVIEW)
       {
-         agent_run_require_initial_tool_call(cfg->roundtable_require_evidence);
-         agent_run_named_with_tools(acfg, cfg->ensemble_reference_models[i], "review", persona,
+         agent_run_require_initial_tool_call(panel->require_evidence);
+         agent_run_named_with_tools(acfg, panel->reference_models[i], "review", persona,
                                     prompt, 0, 0.3 + (0.05 * i), &results[i]);
          agent_run_require_initial_tool_call(0);
       }
       else
-         agent_run_named(acfg, cfg->ensemble_reference_models[i], "draft", persona, prompt, 0,
+         agent_run_named(acfg, panel->reference_models[i], "draft", persona, prompt, 0,
                          0.3 + (0.05 * i), &results[i]);
       free(persona);
       if (results[i].response && results[i].response[0])
       {
          char label[256];
-         snprintf(label, sizeof(label), "\n--- %s ---\n", cfg->ensemble_reference_models[i]);
+         snprintf(label, sizeof(label), "\n--- %s ---\n", panel->reference_models[i]);
          char *tmp = xasprintf3(*peer_notes ? *peer_notes : "", label, results[i].response);
          if (tmp)
          {
@@ -1351,18 +1351,18 @@ int ensemble_panelist_eligible(const agent_t *ag)
    return 1;
 }
 
-int ensemble_validate_panel_pins(const config_t *cfg, const agent_config_t *acfg, char *err,
+int ensemble_validate_panel_pins(const ensemble_panel_t *panel, const agent_config_t *acfg, char *err,
                                  size_t err_n)
 {
    if (err && err_n)
       err[0] = '\0';
-   if (!cfg || !acfg)
+   if (!panel || !acfg)
       return -1;
    int pinned[MAX_AGENTS];
    memset(pinned, 0, sizeof pinned);
-   for (int i = 0; i < cfg->ensemble_reference_count; i++)
+   for (int i = 0; i < panel->reference_count; i++)
    {
-      const char *name = cfg->ensemble_reference_models[i];
+      const char *name = panel->reference_models[i];
       if (!name[0] || rt_seat_is_random(name))
          continue;
       const agent_t *ag = agent_find((agent_config_t *)acfg, name);
@@ -1460,23 +1460,23 @@ static int ensemble_pick_balanced_seat(const agent_config_t *acfg,
    return best;
 }
 
-void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *acfg)
+void ensemble_resolve_random_seats(ensemble_panel_t *panel, const agent_config_t *acfg)
 {
    /* Fill every configured seat. Provider diversity comes first, then model
     * diversity, then balanced reuse up to each model's max_parallel capacity.
     * A seat is dropped only when total eligible capacity is genuinely exhausted;
     * the caller compares the result with the preset's exact seat count and fails
     * closed instead of running a partial configured roundtable. */
-   char models[ENSEMBLE_MAX_REFS][sizeof cfg->ensemble_reference_models[0]];
-   char personas[ENSEMBLE_MAX_REFS][sizeof cfg->ensemble_reference_personas[0]];
+   char models[ENSEMBLE_MAX_REFS][sizeof panel->reference_models[0]];
+   char personas[ENSEMBLE_MAX_REFS][sizeof panel->reference_personas[0]];
    int seated[MAX_AGENTS];
    int n = 0;
    memset(seated, 0, sizeof seated);
 
-   for (int i = 0; i < cfg->ensemble_reference_count && i < ENSEMBLE_MAX_REFS; i++)
-      if (!rt_seat_is_random(cfg->ensemble_reference_models[i]))
+   for (int i = 0; i < panel->reference_count && i < ENSEMBLE_MAX_REFS; i++)
+      if (!rt_seat_is_random(panel->reference_models[i]))
       {
-         const agent_t *ag = agent_find((agent_config_t *)acfg, cfg->ensemble_reference_models[i]);
+         const agent_t *ag = agent_find((agent_config_t *)acfg, panel->reference_models[i]);
          if (ag)
          {
             int idx = (int)(ag - acfg->agents);
@@ -1485,13 +1485,13 @@ void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *acfg)
          }
       }
 
-   for (int i = 0; i < cfg->ensemble_reference_count && i < ENSEMBLE_MAX_REFS; i++)
+   for (int i = 0; i < panel->reference_count && i < ENSEMBLE_MAX_REFS; i++)
    {
       const char *persona =
-          (i < cfg->ensemble_reference_persona_count) ? cfg->ensemble_reference_personas[i] : "";
-      if (!rt_seat_is_random(cfg->ensemble_reference_models[i]))
+          (i < panel->reference_persona_count) ? panel->reference_personas[i] : "";
+      if (!rt_seat_is_random(panel->reference_models[i]))
       {
-         snprintf(models[n], sizeof models[n], "%s", cfg->ensemble_reference_models[i]);
+         snprintf(models[n], sizeof models[n], "%s", panel->reference_models[i]);
          snprintf(personas[n], sizeof personas[n], "%s", persona);
          n++;
          continue;
@@ -1511,31 +1511,31 @@ void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *acfg)
 
    for (int i = 0; i < n; i++)
    {
-      snprintf(cfg->ensemble_reference_models[i], sizeof cfg->ensemble_reference_models[i], "%s",
+      snprintf(panel->reference_models[i], sizeof panel->reference_models[i], "%s",
                models[i]);
-      snprintf(cfg->ensemble_reference_personas[i], sizeof cfg->ensemble_reference_personas[i],
+      snprintf(panel->reference_personas[i], sizeof panel->reference_personas[i],
                "%s", personas[i]);
    }
-   cfg->ensemble_reference_count = n;
-   cfg->ensemble_reference_persona_count = n;
+   panel->reference_count = n;
+   panel->reference_persona_count = n;
 
    /* An aggregator explicitly set to "$random" resolves the same way. */
-   if (cfg->ensemble_aggregator[0] && strcmp(cfg->ensemble_aggregator, RT_SEAT_RANDOM) == 0)
+   if (panel->aggregator[0] && strcmp(panel->aggregator, RT_SEAT_RANDOM) == 0)
    {
       int idx = ensemble_pick_balanced_seat(acfg, seated);
       if (idx >= 0)
-         snprintf(cfg->ensemble_aggregator, sizeof cfg->ensemble_aggregator, "%s",
+         snprintf(panel->aggregator, sizeof panel->aggregator, "%s",
                   acfg->agents[idx].name);
       else
-         cfg->ensemble_aggregator[0] = '\0';
+         panel->aggregator[0] = '\0';
    }
 }
 
-void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *acfg)
+void ensemble_filter_panel_authorization(ensemble_panel_t *panel, const agent_config_t *acfg)
 {
    /* Resolve "$random" seats to concrete agents FIRST, so the eligibility check
     * below (and the availability filter after it) see real, filterable agents. */
-   ensemble_resolve_random_seats(cfg, acfg);
+   ensemble_resolve_random_seats(panel, acfg);
    /* Applies the same eligibility rule to an EXPLICITLY configured
     * ensemble.reference_models list: drop any entry that names a configured agent
     * which is not panel-eligible (an unauthorized / disabled / client-only
@@ -1543,9 +1543,9 @@ void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *ac
     * dropped: a positive pin must name a configured, eligible agent. Keeps
     * reference_models and the aggregator consistent. */
    int n = 0;
-   for (int i = 0; i < cfg->ensemble_reference_count; i++)
+   for (int i = 0; i < panel->reference_count; i++)
    {
-      const char *name = cfg->ensemble_reference_models[i];
+      const char *name = panel->reference_models[i];
       const agent_t *ag = agent_find((agent_config_t *)acfg, name);
       if (!ag || !ensemble_panelist_eligible(ag))
       {
@@ -1555,27 +1555,27 @@ void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *ac
       }
       if (n != i)
       {
-         snprintf(cfg->ensemble_reference_models[n], sizeof(cfg->ensemble_reference_models[n]),
+         snprintf(panel->reference_models[n], sizeof(panel->reference_models[n]),
                   "%s", name);
-         snprintf(cfg->ensemble_reference_personas[n], sizeof(cfg->ensemble_reference_personas[n]),
-                  "%s", cfg->ensemble_reference_personas[i]);
+         snprintf(panel->reference_personas[n], sizeof(panel->reference_personas[n]),
+                  "%s", panel->reference_personas[i]);
       }
       n++;
    }
-   cfg->ensemble_reference_count = n;
+   panel->reference_count = n;
    /* If the aggregator named a now-dropped agent, repoint it to the first seat. */
-   if (cfg->ensemble_aggregator[0])
+   if (panel->aggregator[0])
    {
-      const agent_t *agg = agent_find((agent_config_t *)acfg, cfg->ensemble_aggregator);
+      const agent_t *agg = agent_find((agent_config_t *)acfg, panel->aggregator);
       if (!agg || !ensemble_panelist_eligible(agg))
-         cfg->ensemble_aggregator[0] = '\0';
+         panel->aggregator[0] = '\0';
    }
-   if (!cfg->ensemble_aggregator[0] && n > 0)
-      snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s",
-               cfg->ensemble_reference_models[0]);
+   if (!panel->aggregator[0] && n > 0)
+      snprintf(panel->aggregator, sizeof(panel->aggregator), "%s",
+               panel->reference_models[0]);
 }
 
-void ensemble_filter_panel_availability(config_t *cfg, const agent_config_t *acfg)
+void ensemble_filter_panel_availability(ensemble_panel_t *panel, const agent_config_t *acfg)
 {
    /* Runtime gate (distinct from the authorization gate above): drop any
     * configured panelist that is not currently USABLE — an HTTP agent with no
@@ -1587,9 +1587,9 @@ void ensemble_filter_panel_availability(config_t *cfg, const agent_config_t *acf
     * agents outside agents.json. Same predicate single-delegate routing uses:
     * agent_is_available_for_routing. */
    int n = 0;
-   for (int i = 0; i < cfg->ensemble_reference_count; i++)
+   for (int i = 0; i < panel->reference_count; i++)
    {
-      const char *name = cfg->ensemble_reference_models[i];
+      const char *name = panel->reference_models[i];
       const agent_t *ag = agent_find((agent_config_t *)acfg, name);
       if (!ag || !agent_is_available_for_routing(ag))
       {
@@ -1600,42 +1600,42 @@ void ensemble_filter_panel_availability(config_t *cfg, const agent_config_t *acf
       }
       if (n != i)
       {
-         snprintf(cfg->ensemble_reference_models[n], sizeof(cfg->ensemble_reference_models[n]),
+         snprintf(panel->reference_models[n], sizeof(panel->reference_models[n]),
                   "%s", name);
-         snprintf(cfg->ensemble_reference_personas[n], sizeof(cfg->ensemble_reference_personas[n]),
-                  "%s", cfg->ensemble_reference_personas[i]);
+         snprintf(panel->reference_personas[n], sizeof(panel->reference_personas[n]),
+                  "%s", panel->reference_personas[i]);
       }
       n++;
    }
-   cfg->ensemble_reference_count = n;
-   if (cfg->ensemble_aggregator[0])
+   panel->reference_count = n;
+   if (panel->aggregator[0])
    {
-      const agent_t *agg = agent_find((agent_config_t *)acfg, cfg->ensemble_aggregator);
+      const agent_t *agg = agent_find((agent_config_t *)acfg, panel->aggregator);
       if (!agg || !agent_is_available_for_routing(agg))
-         cfg->ensemble_aggregator[0] = '\0';
+         panel->aggregator[0] = '\0';
    }
-   if (!cfg->ensemble_aggregator[0] && n > 0)
-      snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s",
-               cfg->ensemble_reference_models[0]);
+   if (!panel->aggregator[0] && n > 0)
+      snprintf(panel->aggregator, sizeof(panel->aggregator), "%s",
+               panel->reference_models[0]);
 }
 
-void ensemble_fill_implicit_panel(config_t *cfg, const agent_config_t *acfg)
+void ensemble_fill_implicit_panel(ensemble_panel_t *panel, const agent_config_t *acfg)
 {
-   if (!cfg || !acfg)
+   if (!panel || !acfg)
       return;
 
    /* No saved preset means there is no authority for a larger panel. Discard
     * legacy ensemble.reference_models rather than treating them as implicit
     * pins that can bypass the two-seat contract. */
-   cfg->ensemble_reference_count = 0;
-   cfg->ensemble_reference_persona_count = 0;
-   cfg->ensemble_aggregator[0] = '\0';
+   panel->reference_count = 0;
+   panel->reference_persona_count = 0;
+   panel->aggregator[0] = '\0';
    int seated[MAX_AGENTS];
    memset(seated, 0, sizeof seated);
 
    /* Provider diversity first. A missing provider name is scoped to the agent
     * name so unrelated legacy agents are never collapsed together. */
-   for (int i = 0; i < acfg->agent_count && cfg->ensemble_reference_count < 2; i++)
+   for (int i = 0; i < acfg->agent_count && panel->reference_count < 2; i++)
    {
       const agent_t *ag = &acfg->agents[i];
       if (seated[i] > 0 || !ensemble_panelist_eligible(ag) ||
@@ -1657,75 +1657,106 @@ void ensemble_fill_implicit_panel(config_t *cfg, const agent_config_t *acfg)
       }
       if (provider_already_seated)
          continue;
-      int pos = cfg->ensemble_reference_count++;
-      snprintf(cfg->ensemble_reference_models[pos], sizeof(cfg->ensemble_reference_models[pos]),
+      int pos = panel->reference_count++;
+      snprintf(panel->reference_models[pos], sizeof(panel->reference_models[pos]),
                "%s", ag->name);
-      cfg->ensemble_reference_personas[pos][0] = '\0';
+      panel->reference_personas[pos][0] = '\0';
       seated[i] = 1;
    }
 
    /* If only one provider exists, use a second distinct eligible agent. */
-   for (int i = 0; i < acfg->agent_count && cfg->ensemble_reference_count < 2; i++)
+   for (int i = 0; i < acfg->agent_count && panel->reference_count < 2; i++)
    {
       const agent_t *ag = &acfg->agents[i];
       if (seated[i] > 0 || !ensemble_panelist_eligible(ag) ||
           !agent_is_available_for_routing(ag))
          continue;
-      int pos = cfg->ensemble_reference_count++;
-      snprintf(cfg->ensemble_reference_models[pos], sizeof(cfg->ensemble_reference_models[pos]),
+      int pos = panel->reference_count++;
+      snprintf(panel->reference_models[pos], sizeof(panel->reference_models[pos]),
                "%s", ag->name);
-      cfg->ensemble_reference_personas[pos][0] = '\0';
+      panel->reference_personas[pos][0] = '\0';
       seated[i] = 1;
    }
 
-   cfg->ensemble_reference_persona_count = cfg->ensemble_reference_count;
-   if (cfg->ensemble_reference_count > 0)
-      snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s",
-               cfg->ensemble_reference_models[0]);
+   panel->reference_persona_count = panel->reference_count;
+   if (panel->reference_count > 0)
+      snprintf(panel->aggregator, sizeof(panel->aggregator), "%s",
+               panel->reference_models[0]);
 }
 
-int ensemble_prepare_runtime_panel(const char *requested, config_t *cfg, const agent_config_t *acfg,
+int ensemble_prepare_runtime_panel(const char *requested, ensemble_panel_t *panel, const agent_config_t *acfg,
                                    char *err, size_t err_n)
 {
    if (err && err_n)
       err[0] = '\0';
-   int acquired = roundtable_preset_resolve_runtime(requested, cfg, NULL, 0, err, err_n);
+   int acquired = roundtable_preset_resolve_runtime(requested, panel, NULL, 0, err, err_n);
    if (acquired < 0)
       return -1;
    if (!acquired)
    {
-      ensemble_fill_implicit_panel(cfg, acfg);
-      if (cfg->ensemble_reference_count > 0)
+      ensemble_fill_implicit_panel(panel, acfg);
+      if (panel->reference_count > 0)
          return 0;
       if (err && err_n)
          snprintf(err, err_n, "no enabled review agent is currently available");
       return -1;
    }
 
-   const int exact_seats = cfg->ensemble_reference_count;
-   if (ensemble_validate_panel_pins(cfg, acfg, err, err_n) != 0)
+   const int exact_seats = panel->reference_count;
+   if (ensemble_validate_panel_pins(panel, acfg, err, err_n) != 0)
       return -1;
-   ensemble_filter_panel_authorization(cfg, acfg);
-   ensemble_filter_panel_availability(cfg, acfg);
-   if (cfg->ensemble_reference_count != exact_seats)
+   ensemble_filter_panel_authorization(panel, acfg);
+   ensemble_filter_panel_availability(panel, acfg);
+   if (panel->reference_count != exact_seats)
    {
       if (err && err_n)
          snprintf(err, err_n, "roundtable requires %d seats but only %d are currently available",
-                  exact_seats, cfg->ensemble_reference_count);
+                  exact_seats, panel->reference_count);
       return -1;
    }
    return 0;
 }
 
-int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char *prompt,
+void ensemble_panel_from_config(ensemble_panel_t *out)
+{
+   if (!out)
+      return;
+   memset(out, 0, sizeof(*out));
+   int n = config_ensemble_reference_count();
+   if (n > ENSEMBLE_PANEL_MAX_SEATS)
+      n = ENSEMBLE_PANEL_MAX_SEATS;
+   for (int i = 0; i < n; i++)
+      snprintf(out->reference_models[i], sizeof(out->reference_models[i]), "%s",
+               config_ensemble_reference_models(i));
+   int pn = config_ensemble_reference_persona_count();
+   if (pn > ENSEMBLE_PANEL_MAX_SEATS)
+      pn = ENSEMBLE_PANEL_MAX_SEATS;
+   for (int i = 0; i < pn; i++)
+      snprintf(out->reference_personas[i], sizeof(out->reference_personas[i]), "%s",
+               config_ensemble_reference_personas(i));
+   out->reference_count = n;
+   out->reference_persona_count = pn;
+   snprintf(out->aggregator, sizeof(out->aggregator), "%s", config_ensemble_aggregator());
+   out->min_successful = config_ensemble_min_successful();
+   out->max_cost_usd = config_ensemble_max_cost_usd();
+   out->max_rounds = config_roundtable_max_rounds();
+   out->converge_threshold = config_roundtable_converge_threshold();
+   out->deadline_ms = config_roundtable_deadline_ms();
+   out->chair_synthesis = config_roundtable_chair_synthesis();
+   out->require_evidence = config_roundtable_require_evidence();
+   out->replay_verify_enabled = config_roundtable_replay_verify_enabled();
+   snprintf(out->turns, sizeof(out->turns), "%s", config_roundtable_turns());
+}
+
+int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel, const char *prompt,
                           delegate_ensemble_result_t *out)
 {
-   if (!acfg || !cfg || !prompt || !out)
+   if (!acfg || !panel || !prompt || !out)
       return -1;
 
    memset(out, 0, sizeof(*out));
 
-   int ref_count = cfg->ensemble_reference_count;
+   int ref_count = panel->reference_count;
    if (ref_count <= 0 || ref_count > ENSEMBLE_MAX_REFS)
       return -1;
 
@@ -1738,7 +1769,7 @@ int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char 
        * (resolved by name in parallel_worker), not the single default agent.
        * This is what makes the ensemble an ensemble of *diverse* models. */
       tasks[i].role = NULL;
-      tasks[i].agent = cfg->ensemble_reference_models[i];
+      tasks[i].agent = panel->reference_models[i];
       tasks[i].system_prompt = NULL;
       tasks[i].user_prompt = prompt;
       tasks[i].max_tokens = 0;
@@ -1750,7 +1781,7 @@ int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char 
    agent_run_parallel(acfg, tasks, ref_count, results, 0 /* MoA aggregate: no deadline */);
    /* Account each participant's run onto the originating session, like a delegate. */
    for (int i = 0; i < ref_count; i++)
-      ensemble_fold_cost(acfg, &results[i], cfg->ensemble_reference_models[i]);
+      ensemble_fold_cost(acfg, &results[i], panel->reference_models[i]);
 
    /* Partial-failure metadata: how many of the fanned-out participants returned
     * no usable response. Set before any early return so degraded/cost-capped
@@ -1758,14 +1789,14 @@ int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char 
    out->participants_total = ref_count;
    out->participants_failed = ref_count - count_successful(results, ref_count);
 
-   double cost = estimate_cost(acfg, results, cfg->ensemble_reference_models, ref_count);
+   double cost = estimate_cost(acfg, results, panel->reference_models, ref_count);
    out->cost_usd = cost;
 
    /* Check cost cap before doing more work */
-   if (cfg->ensemble_max_cost_usd > 0.0 && cost > cfg->ensemble_max_cost_usd)
+   if (panel->max_cost_usd > 0.0 && cost > panel->max_cost_usd)
    {
       aimee_log(LOG_INFO, "delegate_ensemble", "cost cap exceeded: $%.4f > $%.4f", cost,
-                cfg->ensemble_max_cost_usd);
+                panel->max_cost_usd);
       out->cost_capped = 1;
       int best = best_candidate(results, ref_count);
       if (best >= 0 && results[best].response)
@@ -1779,7 +1810,7 @@ int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char 
    }
 
    int successful = count_successful(results, ref_count);
-   int min_ok = cfg->ensemble_min_successful > 0 ? cfg->ensemble_min_successful : 2;
+   int min_ok = panel->min_successful > 0 ? panel->min_successful : 2;
 
    if (successful < min_ok)
    {
@@ -1812,7 +1843,7 @@ int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char 
          syn_cap += strlen(results[i].response) + 256;
    char *synthesis_buf = malloc(syn_cap);
    if (!synthesis_buf || build_synthesis_prompt(synthesis_buf, syn_cap, prompt, results, order,
-                                                cfg->ensemble_reference_models, ref_count) != 0)
+                                                panel->reference_models, ref_count) != 0)
    {
       aimee_log(LOG_ERROR, "delegate_ensemble", "failed to build synthesis prompt");
       free(synthesis_buf);
@@ -1825,13 +1856,13 @@ int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char 
       free(results[i].response);
 
    agent_result_t agg_result;
-   int agg_rc = run_aggregator(acfg, cfg, synthesis_buf, 0, &agg_result);
+   int agg_rc = run_aggregator(acfg, panel, synthesis_buf, 0, &agg_result);
    free(synthesis_buf);
 
    if (agg_rc == 0 && agg_result.response && agg_result.response[0])
    {
       snprintf(out->response, sizeof(out->response), "%s", agg_result.response);
-      out->cost_usd += result_token_cost(acfg, &agg_result, cfg->ensemble_aggregator);
+      out->cost_usd += result_token_cost(acfg, &agg_result, panel->aggregator);
       out->success = 1;
    }
    else
@@ -1918,14 +1949,14 @@ static char *assemble_review_artifact(const roundtable_result_t *out)
    return dstr_steal(&s);
 }
 
-int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const char *task,
+int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel, const char *task,
                             const roundtable_opts_t *opts, roundtable_result_t *out)
 {
-   if (!acfg || !cfg || !task || !out)
+   if (!acfg || !panel || !task || !out)
       return -1;
    memset(out, 0, sizeof(*out));
 
-   int ref_count = cfg->ensemble_reference_count;
+   int ref_count = panel->reference_count;
    if (ref_count <= 0 || ref_count > ENSEMBLE_MAX_REFS)
       return -1;
 
@@ -1936,11 +1967,11 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
    {
       memset(&local, 0, sizeof(local));
       local.mode = ROUNDTABLE_DRAFT;
-      local.turns = strcmp(cfg->roundtable_turns, "sequential") == 0 ? ROUNDTABLE_SEQUENTIAL
+      local.turns = strcmp(panel->turns, "sequential") == 0 ? ROUNDTABLE_SEQUENTIAL
                                                                      : ROUNDTABLE_PARALLEL;
-      local.max_rounds = cfg->roundtable_max_rounds > 0 ? cfg->roundtable_max_rounds : 1;
-      local.converge_threshold = cfg->roundtable_converge_threshold;
-      local.deadline_ms = cfg->roundtable_deadline_ms;
+      local.max_rounds = panel->max_rounds > 0 ? panel->max_rounds : 1;
+      local.converge_threshold = panel->converge_threshold;
+      local.deadline_ms = panel->deadline_ms;
    }
    if (local.max_rounds <= 0)
       local.max_rounds = 1;
@@ -1967,7 +1998,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
    char *peer_notes = xstrdup0("");
    char *best_artifact = NULL;
    int best_score = -1;
-   int min_ok = cfg->ensemble_min_successful > 0 ? cfg->ensemble_min_successful : 2;
+   int min_ok = panel->min_successful > 0 ? panel->min_successful : 2;
    char prev_review_keys[64][128];
    int prev_review_key_count = 0;
    if (!artifact || !peer_notes)
@@ -1995,14 +2026,14 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
                 "round %d/%d: dispatching %d %s panelists (elapsed %lds)", round, local.max_rounds,
                 ref_count, local.mode == ROUNDTABLE_REVIEW ? "review" : "draft",
                 (long)((monotonic_ms() - start_ms) / 1000));
-      if (cfg->ensemble_max_cost_usd > 0.0)
+      if (panel->max_cost_usd > 0.0)
       {
-         double preflight = estimated_round_cost(acfg, cfg, ref_count, 768);
-         if (out->cost_usd + preflight > cfg->ensemble_max_cost_usd)
+         double preflight = estimated_round_cost(acfg, panel, ref_count, 768);
+         if (out->cost_usd + preflight > panel->max_cost_usd)
             aimee_log(LOG_WARN, "delegate_roundtable",
                       "round cost estimate $%.4f would exceed cap $%.4f; continuing until "
                       "observed cost is available",
-                      out->cost_usd + preflight, cfg->ensemble_max_cost_usd);
+                      out->cost_usd + preflight, panel->max_cost_usd);
       }
       /* Compress only the ACCUMULATED CARRYOVER (artifact + peer_notes), never the
        * task. The task is the fixed, incompressible review target / draft brief;
@@ -2013,7 +2044,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
        * result. Carryover only, so a large task passes through to the panel intact. */
       if (strlen(artifact) + strlen(peer_notes) > 22000)
       {
-         if (summarize_forward(acfg, cfg, task, &artifact, &peer_notes, &out->cost_usd) == 0)
+         if (summarize_forward(acfg, panel, task, &artifact, &peer_notes, &out->cost_usd) == 0)
          {
             out->truncated = 1;
             out->degraded = 1;
@@ -2033,9 +2064,9 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          panel_deadline_ms = remaining > 5000 ? (int)remaining : 5000;
       }
       int rc = local.turns == ROUNDTABLE_SEQUENTIAL
-                   ? run_round_sequential(acfg, cfg, task, artifact, &peer_notes, local.mode, round,
+                   ? run_round_sequential(acfg, panel, task, artifact, &peer_notes, local.mode, round,
                                           local.brief, local.context, results)
-                   : run_round_parallel(acfg, cfg, task, artifact, peer_notes, local.mode, round,
+                   : run_round_parallel(acfg, panel, task, artifact, peer_notes, local.mode, round,
                                         local.brief, local.context, results, panel_deadline_ms);
       /* The parallel runner enforces the wall bound inside an in-flight provider
        * call. Record that terminal fact immediately; a one-round panel otherwise
@@ -2077,7 +2108,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
                   out->cancelled = 1;
                   break;
                }
-               if (repair_review_json(acfg, cfg, i, results[i].response, &fixed, &out->cost_usd) ==
+               if (repair_review_json(acfg, panel, i, results[i].response, &fixed, &out->cost_usd) ==
                        0 &&
                    parse_review_issue_keys(fixed, cur_review_keys, &cur_review_key_count, 64) == 0)
                {
@@ -2117,7 +2148,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
                out->participants_tool_used++;
          }
          out->evidence_coverage_incomplete |=
-             cfg->roundtable_require_evidence && out->participants_tool_used < ref_count;
+             panel->require_evidence && out->participants_tool_used < ref_count;
          if (out->evidence_coverage_incomplete)
             out->degraded = 1;
       }
@@ -2132,17 +2163,17 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          if (!results[i].response || !results[i].response[0])
             aimee_log(LOG_WARN, "roundtable.required",
                       "round %d required seat %d (%s) returned no usable response%s%s", round, i,
-                      cfg->ensemble_reference_models[i], results[i].error[0] ? ": " : "",
+                      panel->reference_models[i], results[i].error[0] ? ": " : "",
                       results[i].error);
       aimee_log(LOG_INFO, "roundtable.progress",
                 "round %d/%d: %d/%d panelists responded (%d/%d required); synthesizing", round,
                 local.max_rounds, ref_count - round_failed, ref_count,
                 required_count - round_required_failed, required_count);
 
-      double round_cost = estimate_cost(acfg, results, cfg->ensemble_reference_models, ref_count);
+      double round_cost = estimate_cost(acfg, results, panel->reference_models, ref_count);
       out->cost_usd += round_cost;
       out->rounds_run = round;
-      if (cfg->ensemble_max_cost_usd > 0.0 && out->cost_usd > cfg->ensemble_max_cost_usd)
+      if (panel->max_cost_usd > 0.0 && out->cost_usd > panel->max_cost_usd)
       {
          out->cost_capped = 1;
          int best = best_candidate(results, ref_count);
@@ -2200,13 +2231,13 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
           * code index and re-derive severity before the artifact is built, so the
           * artifact reflects only kept items; the rejected appendix is appended
           * after. Gated; off => identical to prior behavior. */
-         if (cfg->roundtable_replay_verify_enabled)
-            roundtable_verify_items(out, cfg->roundtable_require_evidence);
+         if (panel->replay_verify_enabled)
+            roundtable_verify_items(out, panel->require_evidence);
          /* Chair reasoning pass (PR-B): an LLM over the verified survivors that may only
           * DEMOTE/DROP an over-flagged finding (never escalate/add), each change shown
           * with its rationale. Best-effort + opt-in; on any failure out is untouched. */
          char *chair_adj = NULL;
-         if (cfg->roundtable_chair_synthesis)
+         if (panel->chair_synthesis)
          {
             char *chair_prompt = roundtable_chair_build_prompt(out);
             if (chair_prompt)
@@ -2214,7 +2245,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
                agent_result_t chair_res;
                memset(&chair_res, 0, sizeof(chair_res));
                long chair_deadline = local.deadline_ms > 0 ? start_ms + local.deadline_ms : 0;
-               if (run_aggregator(acfg, cfg, chair_prompt, chair_deadline, &chair_res) == 0 &&
+               if (run_aggregator(acfg, panel, chair_prompt, chair_deadline, &chair_res) == 0 &&
                    chair_res.response && chair_res.response[0])
                {
                   int chair_changed = 0;
@@ -2236,7 +2267,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
             }
          }
          free(chair_adj);
-         if (cfg->roundtable_replay_verify_enabled)
+         if (panel->replay_verify_enabled)
             roundtable_artifact_append_rejected(&best_artifact, out);
          record_adopted_round(out, round, round_failed, round_required_failed);
          for (int i = 0; i < ref_count; i++)
@@ -2249,7 +2280,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          order[i] = i;
       shuffle_indices(order, ref_count);
       char *synthesis_prompt = build_round_synthesis_prompt(
-          task, artifact, results, order, cfg->ensemble_reference_models, ref_count, local.mode);
+          task, artifact, results, order, panel->reference_models, ref_count, local.mode);
       for (int i = 0; i < ref_count; i++)
          free(results[i].response);
       if (!synthesis_prompt)
@@ -2265,7 +2296,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
       /* Bound synthesis by the roundtable's own deadline so the fallback loop
        * cannot run long past it (the panel already respects this deadline). */
       long agg_deadline_abs = local.deadline_ms > 0 ? start_ms + local.deadline_ms : 0;
-      int agg_rc = run_aggregator(acfg, cfg, synthesis_prompt, agg_deadline_abs, &agg_result);
+      int agg_rc = run_aggregator(acfg, panel, synthesis_prompt, agg_deadline_abs, &agg_result);
       free(synthesis_prompt);
       if (agg_rc != 0 || !agg_result.response || !agg_result.response[0])
       {
@@ -2273,7 +2304,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          free(agg_result.response);
          continue;
       }
-      out->cost_usd += result_token_cost(acfg, &agg_result, cfg->ensemble_aggregator);
+      out->cost_usd += result_token_cost(acfg, &agg_result, panel->aggregator);
 
       char *prev_artifact_for_judge = xstrdup0(artifact);
       int ratio = change_ratio_0_100(artifact, agg_result.response);
@@ -2318,7 +2349,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
       }
       free(agg_result.response);
 
-      if (cfg->ensemble_max_cost_usd > 0.0 && out->cost_usd > cfg->ensemble_max_cost_usd)
+      if (panel->max_cost_usd > 0.0 && out->cost_usd > panel->max_cost_usd)
       {
          out->cost_capped = 1;
          free(prev_artifact_for_judge);

@@ -2341,6 +2341,37 @@ int config_workspace_remove(const char *path);
  * exist yet. Idempotent. */
 int config_persist_defaults(void);
 
+/* The ensemble/roundtable settings a preset applies, as plain data this module
+ * owns. The caller fills it from whatever its own preset format is; config never
+ * learns that format, and this is one persisted write rather than ~16. Widths
+ * match the corresponding config fields exactly so a copy cannot truncate
+ * differently than the parser would. */
+#define CONFIG_RT_PRESET_MAX_SEATS 32
+typedef struct
+{
+   char models[CONFIG_RT_PRESET_MAX_SEATS][128];
+   char personas[CONFIG_RT_PRESET_MAX_SEATS][64];
+   int seat_count;
+   int min_successful;
+   double max_cost_usd;
+   int max_rounds;
+   int converge_threshold;
+   int deadline_ms;
+   char turns[16];             /* "" leaves the current value */
+   char pipeline_done_bar[40]; /* "" leaves the current value */
+   int pipeline_max_passes;
+   int pipeline_max_attempts_per_pass;
+   double pipeline_max_cost_usd;
+   double pipeline_max_total_cost_usd;
+   int pipeline_gate_ttl_h;
+   int pipeline_parked_releases_slot;
+   int pipeline_unknown_context_tokens;
+   char name[64]; /* recorded as roundtable.default */
+} config_roundtable_preset_t;
+
+/* Apply the whole group in one persisted write. Returns 0, -1 on failure. */
+int config_apply_roundtable_preset(const config_roundtable_preset_t *p);
+
 /* config_set_concurrency: surgically rewrite the `concurrency:` section of the config
  * YAML from cfg (preserving all other keys) and republish. The structured-write partner
  * to config_set, for the concurrency limits (nested object + per-model/provider arrays). */

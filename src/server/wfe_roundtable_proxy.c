@@ -4,6 +4,7 @@
 #include "cJSON.h"
 #include "config.h"
 #include "json_fluent.h"
+#include "delegate_ensemble.h" /* ensemble_panel_from_config */
 #include "roundtable_preset.h"
 #include "util.h"
 
@@ -97,12 +98,12 @@ static roundtable_proxy_runtime_t roundtable_proxy_runtime(const cJSON *request)
 {
    roundtable_proxy_runtime_t runtime = {
        .receive_timeout_ms = wfe_roundtable_transport_timeout_ms(0, 0), .resolved = ""};
-   config_t cfg;
-   if (config_load(&cfg) == 0)
    {
+      ensemble_panel_t panel;
+      ensemble_panel_from_config(&panel);
       cJSON *preset = cJSON_GetObjectItemCaseSensitive(request, "roundtable");
       const char *requested = cJSON_IsString(preset) ? preset->valuestring : NULL;
-      if (roundtable_preset_resolve_runtime(requested, &cfg, runtime.resolved,
+      if (roundtable_preset_resolve_runtime(requested, &panel, runtime.resolved,
                                             sizeof(runtime.resolved), NULL, 0) > 0)
       {
          roundtable_preset_t acquired;
@@ -110,7 +111,7 @@ static roundtable_proxy_runtime_t roundtable_proxy_runtime(const cJSON *request)
                                     ? acquired.chairman_enabled
                                     : 0;
          runtime.receive_timeout_ms =
-             wfe_roundtable_transport_timeout_ms(cfg.roundtable_deadline_ms, chairman_enabled);
+             wfe_roundtable_transport_timeout_ms(panel.deadline_ms, chairman_enabled);
       }
    }
    return runtime;

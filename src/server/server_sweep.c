@@ -365,8 +365,8 @@ int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!realpath(sel, root))
       return server_send_error(conn, "indexed project root does not resolve", NULL);
 
-   config_t cfg;
-   config_load(&cfg);
+   ensemble_panel_t panel;
+   ensemble_panel_from_config(&panel);
    agent_config_t acfg;
    memset(&acfg, 0, sizeof(acfg));
    if (agent_load_config(&acfg) != 0)
@@ -375,10 +375,10 @@ int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (jrt && !cJSON_IsString(jrt))
       return server_send_error(conn, "roundtable must name a saved preset", NULL);
    char panel_err[256];
-   if (ensemble_prepare_runtime_panel(cJSON_IsString(jrt) ? jrt->valuestring : NULL, &cfg, &acfg,
+   if (ensemble_prepare_runtime_panel(cJSON_IsString(jrt) ? jrt->valuestring : NULL, &panel, &acfg,
                                       panel_err, sizeof panel_err) != 0)
       return server_send_error(conn, panel_err, NULL);
-   const char *proposer = cfg.ensemble_reference_models[0];
+   const char *proposer = panel.reference_models[0];
 
    sweep_caps_t caps;
    sweep_caps_defaults(&caps);

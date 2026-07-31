@@ -29,7 +29,11 @@ typedef struct
    int participants_failed; /* participants that returned no usable response (partial failure) */
 } delegate_ensemble_result_t;
 
-int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char *prompt,
+
+/* Fill *out from the live config. */
+void ensemble_panel_from_config(ensemble_panel_t *out);
+
+int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel, const char *prompt,
                           delegate_ensemble_result_t *out);
 
 double delegate_ensemble_cost_usd(const delegate_ensemble_result_t *r);
@@ -48,7 +52,7 @@ double delegate_cost_estimate_usd(const char *provider, const char *model, int p
  * chair/verify headers need the result type). The delegate_roundtable_* entry
  * points below still produce and free those types. */
 
-int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const char *task,
+int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel, const char *task,
                             const roundtable_opts_t *opts, roundtable_result_t *out);
 void delegate_roundtable_result_free(roundtable_result_t *r);
 
@@ -59,7 +63,7 @@ int ensemble_panelist_eligible(const agent_t *ag);
 /* Validate explicit positive pins before any filter can remove them. A concrete
  * pin is a hard must-use requirement: missing, unauthorized, or unavailable
  * returns -1 and describes the pin in err. "$random" is not a concrete pin. */
-int ensemble_validate_panel_pins(const config_t *cfg, const agent_config_t *acfg, char *err,
+int ensemble_validate_panel_pins(const ensemble_panel_t *panel, const agent_config_t *acfg, char *err,
                                  size_t err_n);
 
 /* Replace each "$random" seat in ensemble.reference_models with a concretely
@@ -67,30 +71,31 @@ int ensemble_validate_panel_pins(const config_t *cfg, const agent_config_t *acfg
  * drop a $random seat that cannot be filled. Pinned seats pass through. Called
  * first by ensemble_filter_panel_authorization so downstream filters see real
  * agents. Exposed for tests. */
-void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *acfg);
+void ensemble_resolve_random_seats(ensemble_panel_t *panel, const agent_config_t *acfg);
 
 /* Drop unauthorized/ineligible configured agents (e.g. an unauthorized claude)
  * from an acquired roundtable's exact seat list and fix up the aggregator.
  * Resolves "$random" seats first (see above). */
-void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *acfg);
+void ensemble_filter_panel_authorization(ensemble_panel_t *panel, const agent_config_t *acfg);
 
 /* Drop currently-UNAVAILABLE panelists (unkeyed HTTP agent, missing CLI/tmux,
  * health-breaker DOWN) from the panel — runtime gate via
  * agent_is_available_for_routing, distinct from the authorization gate above.
  * Run after the seed + authorization filter so a configured-but-broken or
  * configured-but-unkeyed model never burns a seat and degrades the round. */
-void ensemble_filter_panel_availability(config_t *cfg, const agent_config_t *acfg);
+void ensemble_filter_panel_availability(ensemble_panel_t *panel, const agent_config_t *acfg);
 
 /* Build the panel used only when no saved roundtable can be acquired. Legacy
  * ensemble.reference_models are ignored: an unconfigured/direct ensemble may
  * use at most two currently available review agents. Selection prefers distinct
  * providers, then distinct agents, and never repeats a seat. */
-void ensemble_fill_implicit_panel(config_t *cfg, const agent_config_t *acfg);
+void ensemble_fill_implicit_panel(ensemble_panel_t *panel, const agent_config_t *acfg);
 
 /* Single C compatibility route while orchestration moves to Go. Resolve a
  * named/default saved preset as an exact panel, or construct the bounded
  * two-seat fallback when no preset exists. */
-int ensemble_prepare_runtime_panel(const char *requested, config_t *cfg, const agent_config_t *acfg,
+int ensemble_prepare_runtime_panel(const char *requested, ensemble_panel_t *panel,
+                                   const agent_config_t *acfg,
                                    char *err, size_t err_n);
 
 /* Persona name for panelist `model_index`: a configured
