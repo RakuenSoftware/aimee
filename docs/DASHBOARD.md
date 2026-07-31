@@ -45,7 +45,7 @@ raw YAML editor. See [Settings](SETTINGS.md).
 
 ## Managed deploy
 
-The setup wizard can start KB and inference containers when the server has the Docker socket. That
+The setup wizard can start the KB container when the server has the Docker socket. That
 is Docker-host authority. Use the split stack when the browser must not control deployment.
 
 ## Security

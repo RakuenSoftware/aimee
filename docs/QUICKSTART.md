@@ -90,8 +90,9 @@ change the primary later on the Agents tab.
 Deploy one locally, or point at an existing `aimee-kb`. A local knowledge base is the default and
 needs nothing else installed.
 
-The remaining steps cover embedder and synthesizer placement, optional git host connections, and
-workspaces. Steps 5 and 6 can both be skipped and set later.
+The remaining steps cover the model roles, optional git host connections, and workspaces. Nothing is
+placed on a host: the embedder runs inside the knowledge base, and synthesis is an endpoint you run
+or nothing at all. Steps 5 and 6 can both be skipped and set later.
 
 The final **Deploy** step starts `aimee-kb`, including private PostgreSQL 18, pgvector, and
 pgvectorscale. There is no inference container: the KB embeds in-process from weights baked into its

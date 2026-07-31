@@ -188,8 +188,8 @@ See [Security](SECURITY.md).
 
 | Shape | Use | Tradeoff |
 | --- | --- | --- |
-| Managed server | One server container launches KB and inference from the browser | Needs the host Docker socket |
-| Split stack | Separate server, KB, and inference containers | More explicit; no server Docker control required |
+| Managed server | One server container launches the KB from the browser | Needs the host Docker socket |
+| Split stack | Separate server and KB containers | More explicit; no server Docker control required |
 | External DB2 | KB uses managed PostgreSQL | Operator owns backup, TLS, extensions, and latency |
 | Local source install | Development and debugging | Host owns dependencies and services |
 | Thin client | Normal developer machine | Needs a reachable server; keeps state off the client |

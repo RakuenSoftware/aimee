@@ -53,7 +53,6 @@ means the contract or branch exists but is not part of the integrated path yet.
 | OpenAI, Anthropic, Gemini, Mistral, Bedrock, local endpoints | Done | Availability still depends on credentials and provider capability. |
 | Provider catalogs and model registry | Done | Context, output, price, capability, quota, and deprecation metadata. |
 | Context economizer | Done | Folding, cache alignment, and tool-output condensation are independently configurable. |
-| Local inference service | Done | CPU/GPU tiers serve embedding and synthesis outside the KB process. |
 
 ## Security and operations
 
@@ -67,7 +66,7 @@ means the contract or branch exists but is not part of the integrated path yet.
 | Org budgets and rate limits | Done | Catalog, admission, spend, and quota surfaces. |
 | Browser workspace | Done | Chat, projects, agents, workflows, graph, logs, settings, and VS Code. |
 | Managed container deploy | Done | Browser can launch KB and inference through the mounted Docker socket. |
-| Split deploy | Done | Server, KB, and inference can run without Docker-socket delegation. |
+| Split deploy | Done | Server and KB can run without Docker-socket delegation. |
 | Native thin clients | Done | Linux, macOS, and Windows; no database linkage. |
 
 ## Removed
@@ -80,6 +79,7 @@ means the contract or branch exists but is not part of the integrated path yet.
 | Generic `/v1/rpc` | Named, versioned `/v1` routes. |
 | Combined appliance image | Managed or split container stack. |
 | Client-held agent keys | Server-sealed vault. |
+| `aimee-llm` inference container | Embedding runs inside the knowledge base from weights in its image; synthesis is an external endpoint set through `AIMEE_LLM_URL`. |
 | KB socket autostart | Explicit KB `/v1` service. |
 
 Generated [commands](gen/cli-commands.md), [configuration](gen/configuration.md), and
