@@ -211,7 +211,7 @@
     "malformed_facts": 0,
     "dropped_by_conf_floor": 54,
     "predicted_triples": 13,
-    "in_seed_ontology": 0.8462,
+    "in_seed_ontology": 0.9231,
     "catch_all_relations": 0
   },
   "latency_ms": {
@@ -225,5 +225,6 @@
     "max": 70
   },
   "model": "Qwen/Qwen3.5-0.8B",
-  "scored_key": "pred"
+  "scored_key": "pred",
+  "alias_folding": true
 }

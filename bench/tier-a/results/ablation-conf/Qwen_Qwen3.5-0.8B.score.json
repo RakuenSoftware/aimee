@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.4872,
-    "recall": 0.2969,
-    "f1": 0.3689,
-    "tp": 19,
-    "fp": 20,
-    "fn": 45,
+    "precision": 0.5128,
+    "recall": 0.3125,
+    "f1": 0.3883,
+    "tp": 20,
+    "fp": 19,
+    "fn": 44,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -72,12 +72,12 @@
         "fn": 5
       },
       "third_person": {
-        "precision": 0.8,
-        "recall": 0.4444,
-        "f1": 0.5714,
-        "tp": 4,
-        "fp": 1,
-        "fn": 5
+        "precision": 1.0,
+        "recall": 0.5556,
+        "f1": 0.7143,
+        "tp": 5,
+        "fp": 0,
+        "fn": 4
       },
       "transient": {
         "precision": 0.0,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.4872,
-    "recall": 0.2969,
-    "f1": 0.3689,
-    "tp": 19,
-    "fp": 20,
-    "fn": 45,
+    "precision": 0.5128,
+    "recall": 0.3125,
+    "f1": 0.3883,
+    "tp": 20,
+    "fp": 19,
+    "fn": 44,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -162,12 +162,12 @@
         "fn": 5
       },
       "third_person": {
-        "precision": 0.8,
-        "recall": 0.4444,
-        "f1": 0.5714,
-        "tp": 4,
-        "fp": 1,
-        "fn": 5
+        "precision": 1.0,
+        "recall": 0.5556,
+        "f1": 0.7143,
+        "tp": 5,
+        "fp": 0,
+        "fn": 4
       },
       "transient": {
         "precision": 0.0,
@@ -211,7 +211,7 @@
     "malformed_facts": 1,
     "dropped_by_conf_floor": 33,
     "predicted_triples": 39,
-    "in_seed_ontology": 0.6667,
+    "in_seed_ontology": 0.7692,
     "catch_all_relations": 0
   },
   "latency_ms": {
@@ -225,5 +225,6 @@
     "max": 90
   },
   "model": "Qwen/Qwen3.5-0.8B",
-  "scored_key": "pred"
+  "scored_key": "pred",
+  "alias_folding": true
 }

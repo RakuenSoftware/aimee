@@ -225,5 +225,6 @@
     "max": 33
   },
   "model": "HuggingFaceTB/SmolLM2-360M-Instruct",
-  "scored_key": "pred_nofloor"
+  "scored_key": "pred_nofloor",
+  "alias_folding": true
 }

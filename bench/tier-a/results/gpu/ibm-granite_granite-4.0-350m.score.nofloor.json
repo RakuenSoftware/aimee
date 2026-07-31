@@ -211,7 +211,7 @@
     "malformed_facts": 2,
     "dropped_by_conf_floor": 53,
     "predicted_triples": 59,
-    "in_seed_ontology": 0.2542,
+    "in_seed_ontology": 0.2712,
     "catch_all_relations": 0
   },
   "latency_ms": {
@@ -225,5 +225,6 @@
     "max": 57
   },
   "model": "ibm-granite/granite-4.0-350m",
-  "scored_key": "pred_nofloor"
+  "scored_key": "pred_nofloor",
+  "alias_folding": true
 }

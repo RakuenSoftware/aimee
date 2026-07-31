@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.4615,
-    "recall": 0.5625,
-    "f1": 0.507,
-    "tp": 36,
-    "fp": 42,
-    "fn": 28,
+    "precision": 0.4744,
+    "recall": 0.5781,
+    "f1": 0.5211,
+    "tp": 37,
+    "fp": 41,
+    "fn": 27,
     "by_category": {
       "ambiguous": {
         "precision": 0.2,
@@ -24,12 +24,12 @@
         "fn": 1
       },
       "governance": {
-        "precision": 0.4,
-        "recall": 0.5,
-        "f1": 0.4444,
-        "tp": 2,
-        "fp": 3,
-        "fn": 2
+        "precision": 0.6,
+        "recall": 0.75,
+        "f1": 0.6667,
+        "tp": 3,
+        "fp": 2,
+        "fn": 1
       },
       "implicit": {
         "precision": 0.25,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.4744,
-    "recall": 0.5781,
-    "f1": 0.5211,
-    "tp": 37,
-    "fp": 41,
-    "fn": 27,
+    "precision": 0.4872,
+    "recall": 0.5938,
+    "f1": 0.5352,
+    "tp": 38,
+    "fp": 40,
+    "fn": 26,
     "by_category": {
       "ambiguous": {
         "precision": 0.2,
@@ -114,12 +114,12 @@
         "fn": 1
       },
       "governance": {
-        "precision": 0.4,
-        "recall": 0.5,
-        "f1": 0.4444,
-        "tp": 2,
-        "fp": 3,
-        "fn": 2
+        "precision": 0.6,
+        "recall": 0.75,
+        "f1": 0.6667,
+        "tp": 3,
+        "fp": 2,
+        "fn": 1
       },
       "implicit": {
         "precision": 0.25,
@@ -223,7 +223,7 @@
     "malformed_facts": 2,
     "dropped_by_conf_floor": 7,
     "predicted_triples": 78,
-    "in_seed_ontology": 0.8974,
+    "in_seed_ontology": 0.9231,
     "catch_all_relations": 0
   },
   "latency_ms": {
@@ -237,5 +237,6 @@
     "max": 89
   },
   "model": "google/gemma-4-E2B-it",
-  "scored_key": "pred_nofloor"
+  "scored_key": "pred_nofloor",
+  "alias_folding": true
 }

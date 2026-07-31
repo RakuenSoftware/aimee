@@ -225,5 +225,6 @@
     "max": 41
   },
   "model": "unsloth/gemma-3-270m-it",
-  "scored_key": "pred"
+  "scored_key": "pred",
+  "alias_folding": true
 }

@@ -225,5 +225,6 @@
     "max": 254
   },
   "model": "LiquidAI/LFM2.5-230M",
-  "scored_key": "pred"
+  "scored_key": "pred",
+  "alias_folding": true
 }

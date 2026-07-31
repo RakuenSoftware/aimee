@@ -225,5 +225,6 @@
     "max": 512
   },
   "model": "LiquidAI/LFM2-350M-Extract",
-  "scored_key": "pred_nofloor"
+  "scored_key": "pred_nofloor",
+  "alias_folding": true
 }

@@ -225,5 +225,6 @@
     "max": 89
   },
   "model": "google/gemma-4-E4B-it",
-  "scored_key": "pred"
+  "scored_key": "pred",
+  "alias_folding": true
 }

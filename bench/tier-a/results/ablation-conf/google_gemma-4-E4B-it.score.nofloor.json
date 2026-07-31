@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.6724,
-    "recall": 0.6094,
-    "f1": 0.6393,
-    "tp": 39,
-    "fp": 19,
-    "fn": 25,
+    "precision": 0.7241,
+    "recall": 0.6562,
+    "f1": 0.6885,
+    "tp": 42,
+    "fp": 16,
+    "fn": 22,
     "by_category": {
       "ambiguous": {
         "precision": 0.25,
@@ -40,20 +40,20 @@
         "fn": 3
       },
       "infra": {
-        "precision": 0.5,
-        "recall": 0.2,
-        "f1": 0.2857,
-        "tp": 1,
-        "fp": 1,
-        "fn": 4
+        "precision": 1.0,
+        "recall": 0.4,
+        "f1": 0.5714,
+        "tp": 2,
+        "fp": 0,
+        "fn": 3
       },
       "multi_fact": {
-        "precision": 0.6667,
-        "recall": 0.6364,
-        "f1": 0.6512,
-        "tp": 14,
-        "fp": 7,
-        "fn": 8
+        "precision": 0.7619,
+        "recall": 0.7273,
+        "f1": 0.7442,
+        "tp": 16,
+        "fp": 5,
+        "fn": 6
       },
       "negation": {
         "precision": 0.5,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.6897,
-    "recall": 0.625,
-    "f1": 0.6557,
-    "tp": 40,
-    "fp": 18,
-    "fn": 24,
+    "precision": 0.7414,
+    "recall": 0.6719,
+    "f1": 0.7049,
+    "tp": 43,
+    "fp": 15,
+    "fn": 21,
     "by_category": {
       "ambiguous": {
         "precision": 0.25,
@@ -130,20 +130,20 @@
         "fn": 3
       },
       "infra": {
-        "precision": 0.5,
-        "recall": 0.2,
-        "f1": 0.2857,
-        "tp": 1,
-        "fp": 1,
-        "fn": 4
+        "precision": 1.0,
+        "recall": 0.4,
+        "f1": 0.5714,
+        "tp": 2,
+        "fp": 0,
+        "fn": 3
       },
       "multi_fact": {
-        "precision": 0.7143,
-        "recall": 0.6818,
-        "f1": 0.6977,
-        "tp": 15,
-        "fp": 6,
-        "fn": 7
+        "precision": 0.8095,
+        "recall": 0.7727,
+        "f1": 0.7907,
+        "tp": 17,
+        "fp": 4,
+        "fn": 5
       },
       "negation": {
         "precision": 0.5,
@@ -211,7 +211,7 @@
     "malformed_facts": 8,
     "dropped_by_conf_floor": 1,
     "predicted_triples": 58,
-    "in_seed_ontology": 0.8448,
+    "in_seed_ontology": 0.8966,
     "catch_all_relations": 0
   },
   "latency_ms": {
@@ -225,5 +225,6 @@
     "max": 89
   },
   "model": "google/gemma-4-E4B-it",
-  "scored_key": "pred_nofloor"
+  "scored_key": "pred_nofloor",
+  "alias_folding": true
 }

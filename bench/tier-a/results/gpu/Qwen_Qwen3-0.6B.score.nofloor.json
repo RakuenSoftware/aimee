@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.274,
-    "recall": 0.3125,
-    "f1": 0.292,
-    "tp": 20,
-    "fp": 53,
-    "fn": 44,
+    "precision": 0.3014,
+    "recall": 0.3438,
+    "f1": 0.3212,
+    "tp": 22,
+    "fp": 51,
+    "fn": 42,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -24,12 +24,12 @@
         "fn": 4
       },
       "governance": {
-        "precision": 0.2,
-        "recall": 0.25,
-        "f1": 0.2222,
-        "tp": 1,
-        "fp": 4,
-        "fn": 3
+        "precision": 0.4,
+        "recall": 0.5,
+        "f1": 0.4444,
+        "tp": 2,
+        "fp": 3,
+        "fn": 2
       },
       "implicit": {
         "precision": 0.0,
@@ -40,12 +40,12 @@
         "fn": 6
       },
       "infra": {
-        "precision": 0.1429,
-        "recall": 0.2,
-        "f1": 0.1667,
-        "tp": 1,
-        "fp": 6,
-        "fn": 4
+        "precision": 0.2857,
+        "recall": 0.4,
+        "f1": 0.3333,
+        "tp": 2,
+        "fp": 5,
+        "fn": 3
       },
       "multi_fact": {
         "precision": 0.5455,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.274,
-    "recall": 0.3125,
-    "f1": 0.292,
-    "tp": 20,
-    "fp": 53,
-    "fn": 44,
+    "precision": 0.3014,
+    "recall": 0.3438,
+    "f1": 0.3212,
+    "tp": 22,
+    "fp": 51,
+    "fn": 42,
     "by_category": {
       "ambiguous": {
         "precision": 0.0,
@@ -114,12 +114,12 @@
         "fn": 4
       },
       "governance": {
-        "precision": 0.2,
-        "recall": 0.25,
-        "f1": 0.2222,
-        "tp": 1,
-        "fp": 4,
-        "fn": 3
+        "precision": 0.4,
+        "recall": 0.5,
+        "f1": 0.4444,
+        "tp": 2,
+        "fp": 3,
+        "fn": 2
       },
       "implicit": {
         "precision": 0.0,
@@ -130,12 +130,12 @@
         "fn": 6
       },
       "infra": {
-        "precision": 0.1429,
-        "recall": 0.2,
-        "f1": 0.1667,
-        "tp": 1,
-        "fp": 6,
-        "fn": 4
+        "precision": 0.2857,
+        "recall": 0.4,
+        "f1": 0.3333,
+        "tp": 2,
+        "fp": 5,
+        "fn": 3
       },
       "multi_fact": {
         "precision": 0.5455,
@@ -223,7 +223,7 @@
     "malformed_facts": 0,
     "dropped_by_conf_floor": 73,
     "predicted_triples": 73,
-    "in_seed_ontology": 0.4795,
+    "in_seed_ontology": 0.5068,
     "catch_all_relations": 0
   },
   "latency_ms": {
@@ -237,5 +237,6 @@
     "max": 72
   },
   "model": "Qwen/Qwen3-0.6B",
-  "scored_key": "pred_nofloor"
+  "scored_key": "pred_nofloor",
+  "alias_folding": true
 }

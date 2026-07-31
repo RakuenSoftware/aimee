@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.4348,
-    "recall": 0.4688,
-    "f1": 0.4511,
-    "tp": 30,
-    "fp": 39,
-    "fn": 34,
+    "precision": 0.4783,
+    "recall": 0.5156,
+    "f1": 0.4962,
+    "tp": 33,
+    "fp": 36,
+    "fn": 31,
     "by_category": {
       "ambiguous": {
         "precision": 0.25,
@@ -24,12 +24,12 @@
         "fn": 4
       },
       "governance": {
-        "precision": 0.5,
-        "recall": 0.5,
-        "f1": 0.5,
-        "tp": 2,
-        "fp": 2,
-        "fn": 2
+        "precision": 0.75,
+        "recall": 0.75,
+        "f1": 0.75,
+        "tp": 3,
+        "fp": 1,
+        "fn": 1
       },
       "implicit": {
         "precision": 0.25,
@@ -48,12 +48,12 @@
         "fn": 3
       },
       "multi_fact": {
-        "precision": 0.45,
-        "recall": 0.4091,
-        "f1": 0.4286,
-        "tp": 9,
-        "fp": 11,
-        "fn": 13
+        "precision": 0.55,
+        "recall": 0.5,
+        "f1": 0.5238,
+        "tp": 11,
+        "fp": 9,
+        "fn": 11
       },
       "negation": {
         "precision": 0.5,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.4348,
-    "recall": 0.4688,
-    "f1": 0.4511,
-    "tp": 30,
-    "fp": 39,
-    "fn": 34,
+    "precision": 0.4783,
+    "recall": 0.5156,
+    "f1": 0.4962,
+    "tp": 33,
+    "fp": 36,
+    "fn": 31,
     "by_category": {
       "ambiguous": {
         "precision": 0.25,
@@ -114,12 +114,12 @@
         "fn": 4
       },
       "governance": {
-        "precision": 0.5,
-        "recall": 0.5,
-        "f1": 0.5,
-        "tp": 2,
-        "fp": 2,
-        "fn": 2
+        "precision": 0.75,
+        "recall": 0.75,
+        "f1": 0.75,
+        "tp": 3,
+        "fp": 1,
+        "fn": 1
       },
       "implicit": {
         "precision": 0.25,
@@ -138,12 +138,12 @@
         "fn": 3
       },
       "multi_fact": {
-        "precision": 0.45,
-        "recall": 0.4091,
-        "f1": 0.4286,
-        "tp": 9,
-        "fp": 11,
-        "fn": 13
+        "precision": 0.55,
+        "recall": 0.5,
+        "f1": 0.5238,
+        "tp": 11,
+        "fp": 9,
+        "fn": 11
       },
       "negation": {
         "precision": 0.5,
@@ -278,7 +278,7 @@
     "malformed_facts": 2,
     "dropped_by_conf_floor": 46,
     "predicted_triples": 69,
-    "in_seed_ontology": 0.8116,
+    "in_seed_ontology": 0.8551,
     "catch_all_relations": 0
   },
   "latency_ms": {
@@ -292,5 +292,6 @@
     "max": 106
   },
   "model": "Qwen/Qwen3-1.7B",
-  "scored_key": "pred_nofloor"
+  "scored_key": "pred_nofloor",
+  "alias_folding": true
 }

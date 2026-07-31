@@ -225,5 +225,6 @@
     "max": 72
   },
   "model": "Qwen/Qwen3-0.6B",
-  "scored_key": "pred"
+  "scored_key": "pred",
+  "alias_folding": true
 }

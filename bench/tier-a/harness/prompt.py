@@ -76,6 +76,26 @@ def seed_descriptors():
     return out
 
 
+def seed_aliases():
+    """Mirror SEED_ALIASES in rel_types.c: alias -> canonical seed relation.
+
+    Production folds these in rel_type_canonicalize() before a triple reaches the
+    gate, so the benchmark has to as well or it scores a system we no longer run."""
+    src = (REPO / "src" / "rel_types.c").read_text()
+    start = src.index("SEED_ALIASES[] = {")
+    end = src.index("\n};", start)
+    return dict(re.findall(r'\{"([a-z_]+)",\s*"([a-z_]+)"\}', src[start:end]))
+
+
+def canonicalize_relation(rel):
+    """Python twin of rel_type_canonicalize(): normalize, leave a real seed type
+    alone, otherwise fold a known alias. Unknown labels pass through."""
+    norm = re.sub(r"[^a-z0-9]+", "_", str(rel or "").casefold()).strip("_")
+    if norm in set(seed_relations()):
+        return norm
+    return seed_aliases().get(norm, norm)
+
+
 def symmetric_relations():
     """Relations the ontology declares symmetric (is_symmetric, field 6 of
     rel_type_def_t). For these the ontology states that one assertion implies

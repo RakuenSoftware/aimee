@@ -225,5 +225,6 @@
     "max": 78
   },
   "model": "ibm-granite/granite-4.0-h-350m",
-  "scored_key": "pred"
+  "scored_key": "pred",
+  "alias_folding": true
 }

@@ -165,14 +165,20 @@ def prf(tp, fp, fn):
     return p, r, f
 
 
-def load_triples(rows, key):
+def load_triples(rows, key, canonicalize=False):
+    """canonicalize applies rel_type_canonicalize()'s alias folding, which is what
+    the commit path now does before a triple reaches the gate. Applied to
+    predictions only — gold labels are authored canonical."""
     out = {}
     for r in rows:
         ts = []
         for t in r.get(key) or []:
+            rel = t.get("relation")
+            if canonicalize:
+                rel = prompt.canonicalize_relation(rel)
             ts.append({
                 "subject": norm(t.get("subject")),
-                "relation": norm(t.get("relation")),
+                "relation": norm(rel),
                 "object": norm(t.get("object")),
             })
         out[r["id"]] = ts
@@ -187,13 +193,16 @@ def main():
                     help="'pred' scores what production would commit (confidence "
                          "floor applied); 'pred_nofloor' scores the same extraction "
                          "with MF_CONF_FLOOR lifted.")
+    ap.add_argument("--no-alias", action="store_true",
+                    help="skip rel_type_canonicalize() alias folding. Production "
+                         "folds, so this only exists to measure what aliasing buys.")
     ap.add_argument("--json-out")
     args = ap.parse_args()
 
     gold_rows = [json.loads(l) for l in open(args.gold) if l.strip()]
     pred_rows = [json.loads(l) for l in open(args.pred) if l.strip()]
     gold = load_triples(gold_rows, "gold")
-    pred = load_triples(pred_rows, args.pred_key)
+    pred = load_triples(pred_rows, args.pred_key, canonicalize=not args.no_alias)
     cat = {r["id"]: r["category"] for r in gold_rows}
     pmeta = {r["id"]: r for r in pred_rows}
 
@@ -321,6 +330,7 @@ def main():
         }
     report["model"] = pmeta[pred_rows[0]["id"]].get("model") if pred_rows else None
     report["scored_key"] = args.pred_key
+    report["alias_folding"] = not args.no_alias
 
     out = json.dumps(report, indent=2)
     print(out)

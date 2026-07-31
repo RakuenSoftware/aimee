@@ -1,11 +1,11 @@
 {
   "strict": {
-    "precision": 0.3882,
-    "recall": 0.5156,
-    "f1": 0.443,
-    "tp": 33,
-    "fp": 52,
-    "fn": 31,
+    "precision": 0.4235,
+    "recall": 0.5625,
+    "f1": 0.4832,
+    "tp": 36,
+    "fp": 49,
+    "fn": 28,
     "by_category": {
       "ambiguous": {
         "precision": 0.2,
@@ -40,20 +40,20 @@
         "fn": 3
       },
       "infra": {
-        "precision": 0.1429,
-        "recall": 0.2,
-        "f1": 0.1667,
-        "tp": 1,
-        "fp": 6,
-        "fn": 4
+        "precision": 0.2857,
+        "recall": 0.4,
+        "f1": 0.3333,
+        "tp": 2,
+        "fp": 5,
+        "fn": 3
       },
       "multi_fact": {
-        "precision": 0.5263,
-        "recall": 0.4545,
-        "f1": 0.4878,
-        "tp": 10,
-        "fp": 9,
-        "fn": 12
+        "precision": 0.6316,
+        "recall": 0.5455,
+        "f1": 0.5854,
+        "tp": 12,
+        "fp": 7,
+        "fn": 10
       },
       "negation": {
         "precision": 0.1667,
@@ -90,12 +90,12 @@
     }
   },
   "lenient": {
-    "precision": 0.3882,
-    "recall": 0.5156,
-    "f1": 0.443,
-    "tp": 33,
-    "fp": 52,
-    "fn": 31,
+    "precision": 0.4235,
+    "recall": 0.5625,
+    "f1": 0.4832,
+    "tp": 36,
+    "fp": 49,
+    "fn": 28,
     "by_category": {
       "ambiguous": {
         "precision": 0.2,
@@ -130,20 +130,20 @@
         "fn": 3
       },
       "infra": {
-        "precision": 0.1429,
-        "recall": 0.2,
-        "f1": 0.1667,
-        "tp": 1,
-        "fp": 6,
-        "fn": 4
+        "precision": 0.2857,
+        "recall": 0.4,
+        "f1": 0.3333,
+        "tp": 2,
+        "fp": 5,
+        "fn": 3
       },
       "multi_fact": {
-        "precision": 0.5263,
-        "recall": 0.4545,
-        "f1": 0.4878,
-        "tp": 10,
-        "fp": 9,
-        "fn": 12
+        "precision": 0.6316,
+        "recall": 0.5455,
+        "f1": 0.5854,
+        "tp": 12,
+        "fp": 7,
+        "fn": 10
       },
       "negation": {
         "precision": 0.1667,
@@ -211,7 +211,7 @@
     "malformed_facts": 0,
     "dropped_by_conf_floor": 2,
     "predicted_triples": 85,
-    "in_seed_ontology": 0.6588,
+    "in_seed_ontology": 0.7059,
     "catch_all_relations": 0
   },
   "latency_ms": {
@@ -225,5 +225,6 @@
     "max": 87
   },
   "model": "ibm-granite/granite-4.0-1b",
-  "scored_key": "pred"
+  "scored_key": "pred",
+  "alias_folding": true
 }
