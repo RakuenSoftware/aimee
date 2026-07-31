@@ -1394,6 +1394,49 @@ cJSON *marshal_kb_ingest(int argc, char **argv)
    return req;
 }
 
+/* kb reembed [--confirm] [--force] [--dry-run] [--target-dim N] [--clear-maintenance]
+ * The kb keeps the gating; this only carries the operator's intent across. */
+cJSON *marshal_kb_reembed(int argc, char **argv)
+{
+   static const char *bool_flags[] = {"confirm", "force", "dry-run", "clear-maintenance", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bool_flags, &opts);
+
+   cJSON *req = marshal_no_args("kb.reembed");
+   if (rpc_get(&opts, "confirm"))
+      cJSON_AddTrueToObject(req, "confirm");
+   if (rpc_get(&opts, "force"))
+      cJSON_AddTrueToObject(req, "force");
+   if (rpc_get(&opts, "dry-run"))
+      cJSON_AddTrueToObject(req, "dry_run");
+   if (rpc_get(&opts, "clear-maintenance"))
+      cJSON_AddTrueToObject(req, "clear_maintenance");
+   const char *v;
+   if ((v = rpc_get(&opts, "target-dim")))
+      cJSON_AddNumberToObject(req, "target_dim", atoi(v));
+   return req;
+}
+
+/* memory embed --all | <id> — rebuild memory vectors, e.g. after a dim change
+ * drops them. Defaults to nothing so a bare invocation is rejected server-side
+ * rather than silently re-embedding an entire corpus. */
+cJSON *marshal_memory_embed(int argc, char **argv)
+{
+   static const char *bool_flags[] = {"all", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bool_flags, &opts);
+
+   cJSON *req = marshal_no_args("memory.embed");
+   if (rpc_get(&opts, "all"))
+      cJSON_AddTrueToObject(req, "all");
+   if (opts.pos_count >= 1)
+      cJSON_AddNumberToObject(req, "memory_id", atof(opts.positional[0]));
+   const char *v;
+   if ((v = rpc_get(&opts, "version")))
+      cJSON_AddStringToObject(req, "version", v);
+   return req;
+}
+
 #define CLI_KB_DOCS_PUSH_MAX_BYTES (2U * 1024U * 1024U)
 
 static char *marshal_read_kb_doc(const char *path, size_t *len_out)
