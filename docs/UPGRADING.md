@@ -7,10 +7,11 @@ command. Take the backup before step one, not after the first thing goes wrong.
 Read [What's new](WHATS_NEW.md) first. This cycle changes deployment, storage, credentials, remote
 identity, workflows, and removed commands.
 
-Install from `:testing` or a release later than the `v0.3.0` tag. That tag was cut part-way through
-the cycle, on 2026-07-28, and is missing the fixes listed under
-[What landed after the first 0.3.0 tag](WHATS_NEW.md#what-landed-after-the-first-030-tag). Several
-of those are cases where a fresh install came up healthy and silently did nothing useful.
+Do not install from the `v0.2.196` or `v0.3.0` tags. Both were promoted in error part-way through
+this cycle and are not releases; an installation from either is an untested mid-cycle build missing
+the fixes listed under
+[If you installed from a mid-cycle tag](WHATS_NEW.md#if-you-installed-from-a-mid-cycle-tag).
+Several of those are cases where a fresh install came up healthy and silently did nothing useful.
 
 ## Do all of this before you touch the running deployment
 

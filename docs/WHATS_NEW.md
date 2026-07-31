@@ -4,11 +4,13 @@
 the interactive TUI, and the generic RPC transport, and it will not read a 0.2 deployment back.
 Read [Upgrading](UPGRADING.md) before you start, not after.
 
-Everything below is measured against **v0.2.192**, the last 0.2-line release. Two later tags exist
-and neither is the release this describes: `v0.2.196` and `v0.3.0` were cut on 2026-07-27 and
-2026-07-28, the second by promoting `testing` to `main` part-way through this cycle. Work continued
-after that promotion, so an installation taken from the `v0.3.0` tag is missing the changes listed
-under [What landed after the first 0.3.0 tag](#what-landed-after-the-first-030-tag).
+Everything below is measured against **v0.2.192**, the last public release.
+
+Two tags dated 2026-07-27 and 2026-07-28, `v0.2.196` and `v0.3.0`, appeared on the repository
+part-way through this cycle. Neither is a release. They were promoted mid-cycle in error, they were
+never announced, and the work below continued for another 536 commits after the later one. If you
+installed from either, you have an untested mid-cycle build rather than 0.3.0, and you are missing
+the fixes under [If you installed from a mid-cycle tag](#if-you-installed-from-a-mid-cycle-tag).
 
 ## The event bus is the change everything else rests on
 
@@ -172,12 +174,12 @@ See [Event bus](EVENT_BUS.md).
 - Client-held plaintext agent credentials and the session credential-push endpoint.
 - The generic `/v1/rpc` transport. Named `/v1` routes are authoritative.
 
-## What landed after the first 0.3.0 tag
+## If you installed from a mid-cycle tag
 
-The `v0.3.0` tag was cut on 2026-07-28 by promoting `testing` to `main`, and the cycle continued
-after it. If you installed from that tag rather than from `:testing` or a later release, you do not
-have the following. Each one was a deployment that looked healthy while doing nothing useful, which
-is why they are listed rather than folded into the sections above.
+The `v0.2.196` and `v0.3.0` tags were promoted in error part-way through this cycle and are not
+releases. The cycle continued for another 536 commits after the later one, so an installation taken
+from either is missing the following. Each is a case where the deployment came up healthy and did
+nothing useful, which is why they are listed here rather than folded into the sections above.
 
 - **The `aimee-llm` container is retired and the embedder is baked into the KB image.** A fresh
   install embeds with no download and no second container. Set the embedder before you ingest:
