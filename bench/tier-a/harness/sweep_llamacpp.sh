@@ -71,5 +71,7 @@ for entry in "${MODELS[@]}"; do
 
   kill $SRV 2>/dev/null; wait $SRV 2>/dev/null
   sleep 5
+  # weights are ~30-50GB each and re-downloadable; predictions are what matters
+  KEEP='' HF_HOME="$HF_HOME" bash harness/prune_models.sh 2>/dev/null | tail -2
 done
 echo "SWEEP_LLAMACPP_DONE"

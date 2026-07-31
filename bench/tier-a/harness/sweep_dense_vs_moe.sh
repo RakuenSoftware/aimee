@@ -43,6 +43,7 @@ if [ -s "$PRED" ]; then echo "SKIP $LABEL"; else
   if [ "$ready" != 1 ]; then
     echo "FAIL $LABEL -> server never healthy: $(tail -3 "$LOG" | tr '\n' ' ' | cut -c1-200)"
     kill $SRV 2>/dev/null; wait $SRV 2>/dev/null
+    KEEP='' HF_HOME="$HF_HOME" bash harness/prune_models.sh 2>/dev/null | tail -2
   else
     if $PY harness/run_llamacpp.py --model "$LABEL" --gold data/gold.jsonl \
          --out "$PRED" --base-url "http://127.0.0.1:$PORT" >>"$LOG" 2>&1; then
@@ -55,5 +56,8 @@ if [ -s "$PRED" ]; then echo "SKIP $LABEL"; else
     fi
     kill $SRV 2>/dev/null; wait $SRV 2>/dev/null
   fi
+  # Weights are ~30GB and re-downloadable; the predictions are the artefact.
+  sleep 5
+  KEEP='' HF_HOME="$HF_HOME" bash harness/prune_models.sh 2>/dev/null | tail -2
 fi
 echo "SWEEP_DENSE_DONE"
