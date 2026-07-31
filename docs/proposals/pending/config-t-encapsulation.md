@@ -249,6 +249,68 @@ variant — which is the EXACT defect `05abb25cb` shipped in `test_kb_http_route
 Per-tranche check: `make all kb server`, then a full `make unit-tests`. After removing a
 parameter, grep the file for `(void)<param>;` in every `#ifdef` branch.
 
+### Round 8 — chokepoints, a converter, and what strict mode exposed
+
+Converted by finding the functions whose signature held everything else hostage,
+rather than grinding leaves:
+
+- **`config_guardrail_mode(const config_t *)` -> `(void)`** — one field, but it kept a
+  ~750 KB local alive in 7 files. Two of those locals existed for nothing else.
+- **`config_embedding_command(&cfg, x)` -> `config_embedding_command_current(x)`** — 30
+  call sites across 22 files. The `config_t`-free variant already existed, with a header
+  note saying *"Prefer this: materialising the ~750 KB struct to read one string is what
+  overflowed the stack in the memory-search path."* Converting it unblocked 11 more files
+  on the next pass.
+- `server_pipeline.c` (7 loads -> 0), `memory_core_helpers.c` (9 -> 0), `kb_curator_drain.c`
+  (11 -> 1), `workspace.c`, `prompts.c`, the memory maintenance runner, and a 15-file
+  automated sweep.
+
+`scratchpad/convert_cfg.py` does the safe shape and REFUSES the rest — missing accessor,
+`(void)X;` in an `#ifdef`, `config_load` used as a guard, or the local's address escaping.
+Its first escape rule matched only `func(&X` (first argument position), so
+`agent_route_with_caps_scoped(&acfg, role, &route_cfg, ...)` slipped through and it deleted
+locals that genuinely escape. Rule is now "any address-of other than
+config_load/memset/sizeof escapes", which cut a batch from 20 files to 15.
+
+### Converting a module changes what the LINKER needs
+
+Four narrow test targets broke, all for the same structural reason: an accessor is opaque
+where a stubbed `config_load` was transparent to LTO.
+
+`unit-test-kb-http-ingest` is the clearest. It stubbed `config_load` to zero everything but
+one flag, which let LTO prove `kb_pdf_assets_enabled` was always false, fold the branch, and
+drop the call to `kb_doc_pdf_render_assets` entirely. An accessor cannot be folded, so that
+branch reaches the linker and the symbol must exist.
+
+`CONFIG_ACCESSOR_OBJS` (tests/Rules.mk) is the answer: the shards depend on nothing but
+`config_field_read`, so a narrow target links them and supplies its own stub. Make the stub
+read the SAME state the target's existing `config_load` stub returns — a zero-returning stub
+links fine and silently makes every config value read as unset.
+
+Verification per tranche is `make all kb server` THEN a full `make unit-tests`. Not
+`make -j8`: several sources compile twice under different defines, and a `(void)cfg;` left
+in an `#ifdef AIMEE_DB1_DISABLED` branch passes the default build and breaks the KB variant.
+
+### Strict mode: what it found, and why it stayed opt-in
+
+`g_config_strict` has no production setter, so `config_load` never returns non-zero in a
+shipping binary and every `if (config_load(&cfg) != 0)` guard in the tree is unreachable —
+including `server_main`'s own "server startup rejected invalid configuration".
+
+Turning it on found **nine real keys missing from `config_schema[]`**, three of them WRITTEN
+by `config_save` (aimee emitting configs it would refuse to load). Those are fixed, and
+`check-config-schema-drift.py` now guards the allowlist.
+
+It was then **reverted**, because strict treats an unknown key as an error while aimee
+deliberately PRESERVES unrecognised keys (`config_set` patches the YAML in place so operator
+annotations survive; `test_config_set.c` pins `custom_note: keep-me`), and `test_config.c:963`
+pins that strict DOES reject them. Both contracts hold only while strict is opt-in.
+
+**Open decision.** Making runtime validation fatal — the "config module refuses to come up"
+rule — needs unknown-key (tolerate) split from known-key-wrong-shape (refuse). Until that
+split exists, the 36 `config_load`-as-a-guard sites are unreachable rather than redundant,
+and deleting them is still correct but for a weaker reason.
+
 ### The curator-provider chain needs a design decision first (attempted, reverted)
 
 `kb_curator_provider_for_stage` looks like an easy six-field conversion. It is not, and the reason
