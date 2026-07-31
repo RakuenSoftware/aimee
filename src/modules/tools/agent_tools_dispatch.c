@@ -930,8 +930,6 @@ static char *td_write_file(cJSON *args, const char *name, const char *dispatch_c
           * this file's extension, fetch any new errors/warnings and append
           * them to the result. Capped at 6 entries so the context stays tight. */
          {
-            config_t lsp_cfg;
-            config_load(&lsp_cfg);
             char ws[MAX_PATH_LEN] = "";
             if (workspace_active_root(dispatch_cwd, ws, sizeof(ws)) != 0)
                snprintf(ws, sizeof(ws), "%s", dispatch_cwd);

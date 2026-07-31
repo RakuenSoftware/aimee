@@ -1238,6 +1238,21 @@ int config_load(config_t *cfg)
    return 0;
 }
 
+/* The generated accessors read every field through this. Serve them out of the
+ * SAME in-memory config the config_load stub returns, so an accessor and a
+ * config_load observed in one test can never disagree. Non-stateful mode zeroes,
+ * matching the config_load stub above. */
+int config_field_read(size_t offset, size_t size, void *dst)
+{
+   if (!dst || size == 0)
+      return -1;
+   if (g_config_stateful)
+      memcpy(dst, (const char *)&g_config_snapshot + offset, size);
+   else
+      memset(dst, 0, size);
+   return 0;
+}
+
 int config_load_file(config_t *cfg)
 {
    if (g_config_stateful)

@@ -1030,12 +1030,10 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    }
 
    char *response_body = NULL;
-   config_t retry_cfg;
-   config_load(&retry_cfg);
    int ra =
-       retry_cfg.retry_max_attempts > 0 ? retry_cfg.retry_max_attempts : HTTP_RETRY_MAX_ATTEMPTS;
-   int rb = retry_cfg.retry_base_ms > 0 ? retry_cfg.retry_base_ms : HTTP_RETRY_BASE_MS;
-   int rm = retry_cfg.retry_max_ms > 0 ? retry_cfg.retry_max_ms : HTTP_RETRY_MAX_MS;
+       config_retry_max_attempts() > 0 ? config_retry_max_attempts() : HTTP_RETRY_MAX_ATTEMPTS;
+   int rb = config_retry_base_ms() > 0 ? config_retry_base_ms() : HTTP_RETRY_BASE_MS;
+   int rm = config_retry_max_ms() > 0 ? config_retry_max_ms() : HTTP_RETRY_MAX_MS;
    int http_status = http_retry_post_context_bytes(url, auth_header, wire_body.data, wire_body.len,
                                                    &response_body, agent->timeout_ms, extra_headers,
                                                    ra, rb, rm, agent->provider, agent->model, NULL);

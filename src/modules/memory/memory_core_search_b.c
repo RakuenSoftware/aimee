@@ -546,9 +546,7 @@ static double memory_scene_cluster_bonus(const memory_t *matches, int count, int
    if (!matches || count <= 1 || idx < 0 || idx >= count)
       return 0.0;
 
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.memory_scenes_enabled)
+   if (!config_memory_scenes_enabled())
       return 0.0;
 
    db2_memory_scene_membership_t memberships[16];

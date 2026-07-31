@@ -6,6 +6,19 @@ TEST_L_FLAGS = $(L_FULL)
 # ...) automatically gets an isolated test-binary directory. Prevents parallel
 # verify steps from racing to link the same tests/unit-test-* paths.
 TESTPREFIX ?= $(OBJDIR)/tests
+
+# The generated accessor shards on their own. They depend on nothing but
+# config_field_read, so a narrow test target can link these and supply its own
+# config_field_read stub to drive every config_*() the code under test calls --
+# a controllable config layer without pulling in config.o and its closure.
+CONFIG_ACCESSOR_OBJS = $(OBJDIR)/modules/config/config_accessors_0.o \
+                       $(OBJDIR)/modules/config/config_accessors_1.o \
+                       $(OBJDIR)/modules/config/config_accessors_2.o \
+                       $(OBJDIR)/modules/config/config_accessors_3.o \
+                       $(OBJDIR)/modules/config/config_accessors_4.o \
+                       $(OBJDIR)/modules/config/config_accessors_5.o \
+                       $(OBJDIR)/modules/config/config_accessors_6.o \
+                       $(OBJDIR)/modules/config/config_accessors_7.o
 TESTLINK = @mkdir -p $(dir $@) && $(CC)
 TESTLINK_MIN = @mkdir -p $(dir $@) && $(CC)
 # Test execution parallelism. The unit-tests target used to run binaries in a
@@ -5940,6 +5953,7 @@ $(TESTPREFIX)/unit-test-kb-http-ingest: $(OBJDIR)/tests/test_kb_http_ingest.o \
                      $(OBJDIR)/kb/http/kb_http_ingest.o \
                      $(OBJDIR)/tests/support/kb_ws_stub.o \
                      $(OBJDIR)/kb/kb_doc_hash.o \
+                     $(CONFIG_ACCESSOR_OBJS) \
                      $(OBJDIR)/cJSON.o \
                      $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

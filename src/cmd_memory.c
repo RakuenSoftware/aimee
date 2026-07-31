@@ -23,7 +23,6 @@
 #include <unistd.h>
 
 /* File-scope config, loaded once by cmd_memory before dispatch */
-config_t s_mem_cfg;
 /* memory_score_parts_to_json prototype in cmd_memory_internal.h */
 
 double cmd_memory_env_weight(const char *name, double fallback)
@@ -258,7 +257,6 @@ void cmd_memory(app_ctx_t *ctx, int argc, char **argv)
       cmd_require_db1("cannot initialize DB1");
    }
 
-   config_load(&s_mem_cfg);
 
    /* compact --focus <topic>: generate a structured 11-section summary locally. */
    if (strcmp(sub, "compact") == 0)

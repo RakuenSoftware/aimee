@@ -28,10 +28,7 @@ static int audit_action_is_enabled(void)
 {
    if (g_audit_action_enabled < 0)
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof cfg);
-      config_load(&cfg);
-      g_audit_action_enabled = cfg.audit_action_enabled ? 1 : 0;
+      g_audit_action_enabled = config_audit_action_enabled() ? 1 : 0;
    }
    return g_audit_action_enabled;
 }
@@ -46,10 +43,7 @@ static int audit_worm_is_enabled(void)
 {
    if (g_audit_worm_enabled < 0)
    {
-      config_t cfg;
-      memset(&cfg, 0, sizeof cfg);
-      config_load(&cfg);
-      g_audit_worm_enabled = cfg.audit_worm_enabled ? 1 : 0;
+      g_audit_worm_enabled = config_audit_worm_enabled() ? 1 : 0;
    }
    return g_audit_worm_enabled;
 }

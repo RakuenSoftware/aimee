@@ -203,10 +203,8 @@ void mem_reembed(app_ctx_t *ctx, int argc, char **argv)
       snprintf(ver_buf, sizeof(ver_buf), "%s", target_version);
    else
    {
-      config_t rcfg;
-      config_load(&rcfg);
-      if (rcfg.embedding_model[0])
-         snprintf(ver_buf, sizeof(ver_buf), "%s", rcfg.embedding_model);
+      if (config_embedding_model()[0])
+         snprintf(ver_buf, sizeof(ver_buf), "%s", config_embedding_model());
       else
          snprintf(ver_buf, sizeof(ver_buf), "%s", embed_cmd);
    }

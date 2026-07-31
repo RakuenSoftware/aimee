@@ -200,9 +200,7 @@ int agent_tools_session_isolation_blocks(const char *path, const char *cwd)
     * this file (it is cheap and reads the cached config). Default-off: when the
     * flag is unset — or the config is unreadable, which leaves the default 0 —
     * this is a no-op, matching the feature's opt-in nature. */
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.require_session_worktree)
+   if (!config_require_session_worktree())
       return 0;
    /* normalize_path resolves '.'/'..'/relative against cwd, closing traversal
     * escapes. Match the canonical managed-worktree location plus the workflow

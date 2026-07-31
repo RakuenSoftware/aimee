@@ -154,13 +154,11 @@ void cmd_run(app_ctx_t *ctx, int argc, char **argv)
    }
    if (!sys_prompt)
    {
-      config_t delegate_cfg;
-      config_load(&delegate_cfg);
       char cwd_buf[MAX_PATH_LEN];
       if (!getcwd(cwd_buf, sizeof(cwd_buf)))
          cwd_buf[0] = '\0';
-      prompt_tier_t dtier = delegate_cfg.delegate_prompt_tier[0]
-                                ? prompt_tier_from_string(delegate_cfg.delegate_prompt_tier)
+      prompt_tier_t dtier = config_delegate_prompt_tier()[0]
+                                ? prompt_tier_from_string(config_delegate_prompt_tier())
                                 : PROMPT_MINIMAL;
       built_sys_prompt = prompt_build(dtier, cwd_buf, NULL);
       if (built_sys_prompt)

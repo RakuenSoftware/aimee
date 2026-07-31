@@ -927,9 +927,6 @@ cJSON *db2_kb_service_memory_episode_card_generate_json(const char *source_sessi
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_load(&cfg);
    int64_t uid = memory_episode_card_generate(source_session ? source_session : "");
    cJSON_AddStringToObject(resp, "status", uid > 0 ? "ok" : "error");
    cJSON_AddNumberToObject(resp, "memory_unit_id", (double)uid);

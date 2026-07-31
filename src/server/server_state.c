@@ -2305,10 +2305,7 @@ int handle_dashboard_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    /* When the WORM store is enabled it is the tamper-evident source of truth for
     * the Logs view: read the indexed audit_event rows directly (superseding the
     * flat audit.log reader from #1092). Fall back to the file reader otherwise. */
-   config_t wcfg;
-   memset(&wcfg, 0, sizeof wcfg);
-   config_load(&wcfg);
-   if (wcfg.audit_worm_enabled)
+   if (config_audit_worm_enabled())
    {
       long wtotal = 0;
       cJSON *wpage = audit_worm_read_page(offset, limit, &wtotal);

@@ -6,8 +6,8 @@
       "loads": 2
     },
     "src/cmd_agent_delegate.c": {
-      "decls": 5,
-      "loads": 5
+      "decls": 3,
+      "loads": 3
     },
     "src/cmd_core.c": {
       "decls": 9,
@@ -41,13 +41,9 @@
       "decls": 4,
       "loads": 4
     },
-    "src/cmd_memory.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/cmd_memory_embed.c": {
-      "decls": 5,
-      "loads": 4
+      "decls": 4,
+      "loads": 3
     },
     "src/cmd_memory_internal.h": {
       "decls": 1,
@@ -58,8 +54,8 @@
       "loads": 1
     },
     "src/cmd_run.c": {
-      "decls": 2,
-      "loads": 2
+      "decls": 1,
+      "loads": 1
     },
     "src/cmd_session_lifecycle.c": {
       "decls": 14,
@@ -76,14 +72,6 @@
     "src/db2/canonical_index.c": {
       "decls": 2,
       "loads": 2
-    },
-    "src/db2/kb_audit_worm.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/db2/kb_service_backend_memory.c": {
-      "decls": 1,
-      "loads": 1
     },
     "src/dogfood.c": {
       "decls": 8,
@@ -136,10 +124,6 @@
     "src/kb/http/kb_http_console.c": {
       "decls": 7,
       "loads": 6
-    },
-    "src/kb/http/kb_http_ingest.c": {
-      "decls": 1,
-      "loads": 1
     },
     "src/kb/http/kb_tls_serve.c": {
       "decls": 2,
@@ -302,8 +286,8 @@
       "loads": 2
     },
     "src/modules/guardrails/guardrails_action_audit.c": {
-      "decls": 4,
-      "loads": 2
+      "decls": 2,
+      "loads": 0
     },
     "src/modules/guardrails/guardrails_orchestrator.c": {
       "decls": 1,
@@ -394,8 +378,8 @@
       "loads": 1
     },
     "src/modules/memory/memory_core_search_b.c": {
-      "decls": 3,
-      "loads": 2
+      "decls": 2,
+      "loads": 1
     },
     "src/modules/memory/memory_core_search_c.c": {
       "decls": 6,
@@ -446,8 +430,8 @@
       "loads": 3
     },
     "src/modules/tools/agent_tools_dispatch.c": {
-      "decls": 9,
-      "loads": 9
+      "decls": 8,
+      "loads": 8
     },
     "src/modules/vault/vault_custody_tpm2.c": {
       "decls": 1,
@@ -478,18 +462,14 @@
       "loads": 1
     },
     "src/server/agent_policy.c": {
-      "decls": 2,
-      "loads": 2
+      "decls": 1,
+      "loads": 1
     },
     "src/server/agent_route.c": {
       "decls": 3,
       "loads": 0
     },
     "src/server/agent_runtime.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/agent_tools.c": {
       "decls": 1,
       "loads": 1
     },
@@ -518,8 +498,8 @@
       "loads": 0
     },
     "src/server/openai_chat.c": {
-      "decls": 5,
-      "loads": 5
+      "decls": 4,
+      "loads": 4
     },
     "src/server/provider_cli_adapter.c": {
       "decls": 1,
@@ -590,14 +570,10 @@
       "loads": 1
     },
     "src/server/server_state.c": {
-      "decls": 4,
-      "loads": 4
+      "decls": 3,
+      "loads": 3
     },
     "src/server/server_sweep.c": {
-      "decls": 1,
-      "loads": 1
-    },
-    "src/server/server_trigger.c": {
       "decls": 1,
       "loads": 1
     },
@@ -786,7 +762,7 @@
       "loads": 0
     },
     "src/tests/test_kb_http_ingest.c": {
-      "decls": 1,
+      "decls": 2,
       "loads": 1
     },
     "src/tests/test_kb_http_routes.c": {
@@ -899,8 +875,8 @@
     }
   },
   "totals": {
-    "decls": 780,
-    "files": 224,
-    "loads": 414
+    "decls": 764,
+    "files": 218,
+    "loads": 397
   }
 }

@@ -793,10 +793,8 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
    /* Fall back to tier-based prompt when no explicit prompt or role template */
    if (!sys_prompt)
    {
-      config_t delegate_cfg;
-      config_load(&delegate_cfg);
-      prompt_tier_t dtier = delegate_cfg.delegate_prompt_tier[0]
-                                ? prompt_tier_from_string(delegate_cfg.delegate_prompt_tier)
+      prompt_tier_t dtier = config_delegate_prompt_tier()[0]
+                                ? prompt_tier_from_string(config_delegate_prompt_tier())
                                 : PROMPT_MINIMAL;
       template_sys_prompt = prompt_build(dtier, cwd_for_template, NULL);
       if (template_sys_prompt)
@@ -1823,12 +1821,10 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
    else if (rc == 0)
    {
       /* Auto-verify from app config: tool verifies delegate's changes */
-      config_t app_cfg;
-      config_load(&app_cfg);
-      if (app_cfg.cross_verify && app_cfg.verify_cmd[0])
+      if (config_cross_verify() && config_verify_cmd()[0])
       {
-         fprintf(stderr, "aimee: cross-verify: running %s\n", app_cfg.verify_cmd);
-         const char *cv_argv[] = {"/bin/sh", "-c", app_cfg.verify_cmd, NULL};
+         fprintf(stderr, "aimee: cross-verify: running %s\n", config_verify_cmd());
+         const char *cv_argv[] = {"/bin/sh", "-c", config_verify_cmd(), NULL};
          char *cv_out = NULL;
          int cv_rc = safe_exec_capture(cv_argv, &cv_out, AGENT_TOOL_OUTPUT_MAX);
          free(cv_out);

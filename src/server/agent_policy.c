@@ -408,11 +408,9 @@ void agent_trace_log(int plan_id, int turn, const char *direction, const char *c
       if (!otel_initialized)
       {
          otel_initialized = 1;
-         config_t ocfg;
-         config_load(&ocfg);
-         if (ocfg.otel_endpoint[0])
-            otel_init(ocfg.otel_endpoint,
-                      ocfg.otel_service_name[0] ? ocfg.otel_service_name : "aimee", session_id());
+         if (config_otel_endpoint()[0])
+            otel_init(config_otel_endpoint(),
+                      config_otel_service_name()[0] ? config_otel_service_name() : "aimee", session_id());
       }
    }
 
