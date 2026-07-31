@@ -223,6 +223,7 @@ static const struct
     {"kb", "grant show", "kb.grant.show", NULL, "grants", 30000},
     {"kb", "ingest", "kb.ingest", NULL, NULL, 30000},
     {"kb", "ingest status", "kb.ingest.status", NULL, NULL, 0},
+    {"kb", "reembed", "kb.reembed", NULL, NULL, 900000},
     {"kb", "health", "kb.health", NULL, NULL, 0},
     {"kb", "status", "kb.status", NULL, NULL, 0},
     {"kb", "curator status", "kb.curator", NULL, NULL, 0},

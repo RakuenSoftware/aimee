@@ -1492,6 +1492,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"kb.docs.push", handle_kb_docs_push},
     {"kb.ingest", handle_kb_ingest},
     {"kb.ingest.status", handle_kb_ingest_status},
+    {"kb.reembed", handle_kb_reembed},
     {"kb.status", handle_kb_status},
     {"optimize.export", handle_optimize_export},
     {"optimize.promote", handle_optimize_promote},
