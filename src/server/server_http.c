@@ -2348,10 +2348,23 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
                 "a verified certificate-bound first owner is unaffected");
       break;
    case SERVER_WRITE_TIER_CONFIG_NO_TRUST_BUNDLE:
-      LOG_ERROR("server.http",
-                "AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE is unset: KB-issued write tokens are denied "
-                "with invalid; a verified certificate-bound first owner is unaffected");
+   {
+      /* Name the path when one was supplied: the shipped standalone compose
+       * defaults it to a conventional location nothing mounts, so "is unset" was
+       * the one thing this could not be. */
+      const char *bundle = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
+      if (bundle && bundle[0])
+         LOG_ERROR("server.http",
+                   "AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE is set to '%s' but that file is not "
+                   "readable: KB-issued write tokens are denied with invalid; a verified "
+                   "certificate-bound first owner is unaffected",
+                   bundle);
+      else
+         LOG_ERROR("server.http",
+                   "AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE is unset: KB-issued write tokens are "
+                   "denied with invalid; a verified certificate-bound first owner is unaffected");
       break;
+   }
    case SERVER_WRITE_TIER_CONFIG_READY:
       break;
    }
