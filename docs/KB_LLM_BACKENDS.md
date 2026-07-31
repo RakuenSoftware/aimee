@@ -6,7 +6,7 @@ out for synthesis.
 **Embedding is in-container.** The weights ship inside the KB image, so there is no inference
 container and no first-boot download. Select the model in the wizard's Deploy topology step, or set
 `embedding_model`. Until one is selected the KB serves a builtin lexical embedder and logs that it is
-doing so — retrieval works, but it is not dense.
+doing so. Retrieval works, but it is not dense.
 
 To embed against something else, set `AIMEE_EMBEDDER_URL`. That takes precedence, and the bundled
 model stays unloaded.

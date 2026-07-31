@@ -105,8 +105,8 @@ The DB1/DB2 boundary is compile-enforced:
 - thin clients link neither;
 - calls across the boundary use public typed APIs.
 
-The WORM hash primitive is the narrow exception shared by both stores. It contains hashing only—no
-database handles or queries—so both stores produce the same chain format.
+The WORM hash primitive is the narrow exception shared by both stores. It contains hashing only, with no
+database handles or queries, so both stores produce the same chain format.
 
 New KB containers run a private PostgreSQL 18 cluster when no external `AIMEE_DB2_URL` is set. It is
 still DB2, still owned by the KB, and still independently exportable.

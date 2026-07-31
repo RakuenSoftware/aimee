@@ -17,15 +17,15 @@ docker compose -f compose.server-managed.yaml logs aimee-server
 The server generates a dashboard login on first boot and prints it once, in that log:
 
 ```text
-[webchat] FIRST-BOOT DASHBOARD LOGIN (shown once — copy it now)
+[webchat] FIRST-BOOT DASHBOARD LOGIN (shown once, copy it now)
 [webchat]     username: aimee-0a901de6e2c3
 [webchat]     password: <64 hex characters>
 ```
 
 Copy it before the log rotates. Only the username is kept on disk afterwards, so the password cannot
 be read back; if you lose it, reset that account's password inside the container or start again from
-an empty volume. To choose the credential yourself instead, seal it before the first `up` — then
-nothing is generated and nothing is printed:
+an empty volume. To choose the credential yourself instead, seal it before the first `up`. Nothing
+is then generated and nothing is printed:
 
 ```bash
 export AIMEE_WEBCHAT_USER=operator
@@ -44,7 +44,7 @@ persists in the container's `Config.Env` for the life of the deployment and is r
 
 Those variables are first-boot transport, not runtime configuration. On first boot the entrypoint
 reads that sealed pair and provisions it as a real local PAM account, then the appliance
-authenticates against PAM from the first login onward — there is no parallel credential store, and
+authenticates against PAM from the first login onward. There is no parallel credential store, and
 no password, verifier, session bearer, or TLS private key is written to the data volume or
 container logs.
 
@@ -92,12 +92,12 @@ it through the `aimee` PAM service, the same stack SmoothNAS uses and the same o
 exists. Only accounts in that group are dashboard logins: the container's own system users are never
 accepted, and the dashboard cannot see or modify them.
 
-The Vault holds aimee's own secrets — the session key, TLS material, provider credentials. A host
+The Vault holds aimee's own secrets: the session key, TLS material, provider credentials. A host
 password is not one of those and is never sealed into it.
 
 When the appliance is connected to a KB that reports `oidc`, the identity provider owns accounts and
 the wizard's account step disappears; local account creation is refused. Dashboard login itself
-remains PAM in this release — the OIDC login flow arrives in 0.4.0.
+remains PAM in this release. The OIDC login flow arrives in 0.4.0.
 
 ### Choosing an embedder
 
@@ -105,7 +105,7 @@ The wizard's **Deploy topology** step records which embedder the KB uses. Choose
 The bundled `bekko-a25m` (384-dimension) ships inside the KB image, so it needs no download and no
 second container. Point the KB at your own endpoint instead if you need a wider model.
 
-Nothing is selected on a fresh install, and an unselected KB is not broken — it falls back to a
+Nothing is selected on a fresh install, and an unselected KB is not broken. It falls back to a
 builtin lexical embedder and says so once, in the KB log:
 
 ```text
@@ -141,7 +141,7 @@ of the two a given switch costs.
 ### Choosing an image channel
 
 The stack runs the released `:latest` images by default. To run a tested-but-unreleased build, set
-`AIMEE_IMAGE_TAG` once — it moves the server and the KB together:
+`AIMEE_IMAGE_TAG` once. It moves the server and the KB together:
 
 ```bash
 AIMEE_IMAGE_TAG=testing docker compose -f compose.server-managed.yaml up -d
@@ -150,7 +150,7 @@ AIMEE_IMAGE_TAG=testing docker compose -f compose.server-managed.yaml up -d
 Set it for the wizard's **Deploy** step too, not just the server: the server re-runs Compose for the
 managed services, so the tag has to be in its environment or the KB falls back to `:latest` while the
 server runs `:testing`. The line above already does this. Mixing versions this way is a real failure
-mode, not a theoretical one — a KB and a server from different builds can disagree about the
+mode, not a theoretical one. A KB and a server from different builds can disagree about the
 contract between them and leave the KB permanently unhealthy.
 
 A single service can still be pinned individually (`AIMEE_KB_IMAGE=…`), and an explicit pin always

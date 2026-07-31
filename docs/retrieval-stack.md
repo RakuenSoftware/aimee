@@ -18,7 +18,7 @@ and serves the model itself, from weights baked into its image. The bundled `bek
 384-dimension; an external endpoint (`AIMEE_EMBEDDER_URL`) can serve a wider one.
 
 The embedder is selected in the wizard's Deploy topology step. Until one is selected the KB serves a
-builtin lexical embedder — retrieval works, but it is keyword matching rather than vector search.
+builtin lexical embedder. Retrieval works, but it is keyword matching rather than vector search.
 
 Check [Inference tiers](AIMEE_KB_SYNTH_TIERS.md) for sizing the synthesis endpoint.
 
@@ -29,7 +29,7 @@ failure.
 ### One bundled embedder, or your own
 
 `bekko-a25m` ships inside the `aimee-kb` container, with its weights baked into the image.
-A fresh install embeds immediately — no inference service, no GPU, no model download, no
+A fresh install embeds immediately: no inference service, no GPU, no model download, no
 network. It is **384-dimensional**.
 
 | | `bekko-a25m` (bundled) |
@@ -37,7 +37,7 @@ network. It is **384-dimensional**.
 | NDCG@10 (frozen-ab-v1) | 0.5909 |
 | dimension | 384 |
 | context | 8192 |
-| prefixes | none — its card defines none, so its benchmark number carries into production unchanged |
+| prefixes | none. Its card defines none, so its benchmark number carries into production unchanged |
 | vocab | 256k, multilingual |
 
 **Above 384 dimensions, run your own embedder.** Point `AIMEE_EMBEDDER_URL` (or the
@@ -53,7 +53,7 @@ from it and cannot derive the width of an endpoint it does not serve. Nothing ap
 prefixes on that path either, so a prefix-dependent model must apply its own.
 
 Operators can declare additional models with `EMBEDDERS_EXTRA`, giving the pooling, width,
-context and prefixes — nobody can infer those for you, and each one changes the vectors.
+context and prefixes. Nobody can infer those for you, and each one changes the vectors.
 An overlay entry whose weights are not baked is reachable only as an external endpoint.
 
 **Changing the embedder is destructive.** The wizard requires a typed confirmation,
@@ -69,13 +69,13 @@ is gated up front rather than discovered at the next boot.
 ### What defines the vector space
 
 Width is not identity. Pooling and the query/document prefixes change every vector while leaving
-both the dimension and the model name untouched — well-formed vectors, right width, right name,
+both the dimension and the model name untouched: well-formed vectors, right width, right name,
 different space, collapsed recall and no error anywhere. Both have happened: nomic served with
 `last` pooling (correct for the previous Qwen3 embedder), and nomic served prefix-free, which
 measured 0.5823 NDCG@10 against 0.6075 with its card prefixes.
 
-So the gateway publishes a `serving_id` on `/health` — the model key plus a digest over pooling and
-the prefix pair — and the KB records it in `kb_meta.schema_embedder_serving_id` on first start
+So the gateway publishes a `serving_id` on `/health` (the model key plus a digest over pooling and
+the prefix pair), and the KB records it in `kb_meta.schema_embedder_serving_id` on first start
 against a corpus. A later start whose endpoint reports a different `serving_id` **refuses**, naming
 both values, and the remediation is a full re-embed:
 
@@ -90,10 +90,10 @@ limits worth knowing:
 - An endpoint that reports no `serving_id` (a legacy or third-party embedder) leaves the guard
   inactive rather than refusing, so upgrades do not strand existing deployments. The **builtin**
   lexical embedder does declare one (`builtin/lexical-v1`) because it shares the bundled model's
-  384 width — without an identity, switching between the two would be invisible to both guards.
+  384 width. Without an identity, switching between the two would be invisible to both guards.
 - A corpus embedded before the guard existed adopts the current identity on its first start, because
   it is indistinguishable from a fresh one. If such a corpus was built while prefixes were disabled,
-  re-embed it once by hand — the guard cannot detect drift it never recorded a baseline for.
+  re-embed it once by hand: the guard cannot detect drift it never recorded a baseline for.
 
 ## Changing dimension
 
@@ -129,7 +129,7 @@ because ranking and timing can leak excluded data.
 ## No cross-encoder rerank stage
 
 There is no reranker. Measured across 20 configurations and two embedders, the best cross-encoder
-result was +0.0032 NDCG@10 and most were negative — a reranker's ceiling sits below a strong dense
+result was +0.0032 NDCG@10 and most were negative. A reranker's ceiling sits below a strong dense
 ranking, so the effect shrank as the embedder improved. Hybrid BM25+RRF fusion measured +0.1168
 Recall@10 over dense alone, roughly 35x the best rerank result, which is where the remaining quality
 lives. See [the retrieval-stack report](validation/retrieval-stack-report-2026-07-30.md).
