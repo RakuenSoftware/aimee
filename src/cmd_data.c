@@ -152,7 +152,7 @@ void cmd_export(app_ctx_t *ctx, int argc, char **argv)
          char path[4096];
          snprintf(path, sizeof(path), "%s/config.json", output);
          cJSON *c = cJSON_CreateObject();
-         cJSON_AddStringToObject(c, "guardrail_mode", config_guardrail_mode(&cfg));
+         cJSON_AddStringToObject(c, "guardrail_mode", config_guardrail_mode());
          /* Redact sensitive fields */
          cJSON_AddStringToObject(c, "note", "Sensitive fields redacted. Re-configure on target.");
 

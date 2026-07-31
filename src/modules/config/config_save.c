@@ -1371,11 +1371,21 @@ int config_save(const config_t *cfg)
 
 /* --- Guardrail mode --- */
 
-const char *config_guardrail_mode(const config_t *cfg)
+/* Defined in config.c; declared here the same way the generated accessor shards
+ * declare it, since it has no public header (it is a config-module internal). */
+int config_field_read(size_t offset, size_t size, void *dst);
+
+/* Reads the field directly rather than through a generated accessor: the
+ * generator skips a field whose accessor name is already taken, and this
+ * function occupies config_guardrail_mode. That is fine here — this IS the
+ * config module, which is the one place allowed to know config_t's shape. */
+const char *config_guardrail_mode(void)
 {
-   if (cfg->guardrail_mode[0])
-      return cfg->guardrail_mode;
-   return MODE_APPROVE;
+   static _Thread_local char buf[sizeof(((config_t *)0)->guardrail_mode)];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, guardrail_mode), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf[0] ? buf : MODE_APPROVE;
 }
 
 const char *config_embedding_command(const config_t *cfg, const char *requested)

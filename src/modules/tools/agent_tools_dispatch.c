@@ -2194,7 +2194,7 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       char *gr_input = guardrail_input_json(name, arguments_json);
 
       char msg[1024] = "";
-      int rc = pre_tool_check(name, gr_input, &state, config_guardrail_mode(&cfg), dispatch_cwd,
+      int rc = pre_tool_check(name, gr_input, &state, config_guardrail_mode(), dispatch_cwd,
                               msg, sizeof(msg));
 
       session_state_save(&state, dispatch_sid);

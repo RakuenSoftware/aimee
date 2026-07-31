@@ -1307,9 +1307,8 @@ const char *config_output_dir(void)
    return "/tmp";
 }
 
-const char *config_guardrail_mode(const config_t *cfg)
+const char *config_guardrail_mode(void)
 {
-   (void)cfg;
    return "off";
 }
 

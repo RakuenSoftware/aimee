@@ -2161,6 +2161,11 @@ int config_server_api_bearer_extra_snapshot(char out[][256], int max);
  *                           Returns 1 = published, 0 = no-op (unchanged), -1 = kept (bad). */
 void config_snapshot_init(const config_t *cfg);
 int config_snapshot_get(config_t *out);
+
+/* Does the on-disk config load and validate? For callers that must fail fast on a
+ * broken config before a mutating operation. Accessors return declared defaults on
+ * a failed load, which is right for a single field and wrong for "start at all". */
+int config_is_loadable(void);
 int config_reload(void);
 
 /* config_reload_if_changed — reload iff the config file changed on disk since the last call
@@ -2320,7 +2325,7 @@ const char *config_default_path(void);
 const char *config_output_dir(void);
 
 /* Effective guardrail mode (defaults to "approve"). */
-const char *config_guardrail_mode(const config_t *cfg);
+const char *config_guardrail_mode(void);
 
 /* 1 if `s` is a valid delegate_sandbox_package_access mode (proxy/off/gated/governance). */
 int config_sandbox_package_access_valid(const char *s);

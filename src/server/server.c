@@ -1025,7 +1025,7 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    /* Run guardrail check */
    char msg[1024] = "";
-   int rc = pre_tool_check(tool_name, tool_input, &state, config_guardrail_mode(&cfg), cwd, msg,
+   int rc = pre_tool_check(tool_name, tool_input, &state, config_guardrail_mode(), cwd, msg,
                            sizeof(msg));
 
    session_state_save(&state, sid);

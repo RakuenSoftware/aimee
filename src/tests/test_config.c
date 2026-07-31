@@ -855,10 +855,7 @@ int main(void)
 
    /* --- config_guardrail_mode --- */
    {
-      static config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      config_load(&cfg);
-      const char *mode = config_guardrail_mode(&cfg);
+      const char *mode = config_guardrail_mode();
       assert(mode != NULL);
       assert(strcmp(mode, "approve") == 0 || strcmp(mode, "prompt") == 0 ||
              strcmp(mode, "deny") == 0);

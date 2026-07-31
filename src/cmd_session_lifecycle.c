@@ -1302,7 +1302,7 @@ void session_start_emit(app_ctx_t *ctx, const char *hook_input, FILE *out)
    state.hook_call_count = 0;
    state.orch_direct_edits = 0;
    state.orch_nudge_sent = 0;
-   snprintf(state.guardrail_mode, sizeof(state.guardrail_mode), "%s", config_guardrail_mode(&cfg));
+   snprintf(state.guardrail_mode, sizeof(state.guardrail_mode), "%s", config_guardrail_mode());
 
    /* Register sibling worktrees for configured workspaces and CWD's git repo. */
    session_register_worktrees(client_cwd, sid, &state);

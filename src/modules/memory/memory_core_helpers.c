@@ -170,17 +170,15 @@ void memory_load_pagerank_config(memory_pagerank_config_t *cfg)
    cfg->weight = 0.35;
    snprintf(cfg->relations, sizeof(cfg->relations), "%s", "depends_on,related_to,co_edited,fixes");
 
-   config_t app_cfg;
-   if (config_load(&app_cfg) == 0)
    {
-      if (app_cfg.memory_pagerank_enabled)
+      if (config_memory_pagerank_enabled())
          cfg->enabled = 1;
-      if (app_cfg.memory_pagerank_iterations > 0)
-         cfg->iterations = app_cfg.memory_pagerank_iterations;
-      if (app_cfg.memory_pagerank_weight > 0.0)
-         cfg->weight = app_cfg.memory_pagerank_weight;
-      if (app_cfg.memory_pagerank_relations[0])
-         snprintf(cfg->relations, sizeof(cfg->relations), "%s", app_cfg.memory_pagerank_relations);
+      if (config_memory_pagerank_iterations() > 0)
+         cfg->iterations = config_memory_pagerank_iterations();
+      if (config_memory_pagerank_weight() > 0.0)
+         cfg->weight = config_memory_pagerank_weight();
+      if (config_memory_pagerank_relations()[0])
+         snprintf(cfg->relations, sizeof(cfg->relations), "%s", config_memory_pagerank_relations());
    }
 
    cfg->enabled = memory_env_int("AIMEE_MEMORY_PAGERANK_ENABLED", cfg->enabled, 0, 1);
@@ -398,24 +396,18 @@ double memory_content_salience(const char *content)
 
 int memory_surprise_enabled(void)
 {
-   config_t cfg;
-   config_load(&cfg);
-   return memory_env_int("AIMEE_MEMORY_SURPRISE_ENABLED", cfg.memory_surprise_enabled, 0, 1);
+   return memory_env_int("AIMEE_MEMORY_SURPRISE_ENABLED", config_memory_surprise_enabled(), 0, 1);
 }
 
 double memory_surprise_weight(void)
 {
-   config_t cfg;
-   config_load(&cfg);
-   double fallback = cfg.memory_surprise_weight > 0.0 ? cfg.memory_surprise_weight : 0.8;
+   double fallback = config_memory_surprise_weight() > 0.0 ? config_memory_surprise_weight() : 0.8;
    return memory_env_weight("AIMEE_MEMORY_SURPRISE_WEIGHT", fallback);
 }
 
 static int memory_surprise_window_size(void)
 {
-   config_t cfg;
-   config_load(&cfg);
-   int fallback = cfg.memory_salience_window_size > 0 ? cfg.memory_salience_window_size : 8;
+   int fallback = config_memory_salience_window_size() > 0 ? config_memory_salience_window_size() : 8;
    return memory_env_int("AIMEE_MEMORY_SALIENCE_WINDOW_SIZE", fallback, 1, 64);
 }
 
@@ -722,10 +714,8 @@ memory_rank_weights_t memory_rank_weights(void)
 {
    memory_rank_weights_t w = {2.0, 1.0, 0.5, 2.6,  1.15, 1.35, 1.0, 1.0,
                               1.2, 1.2, 0.5, 0.75, 1.0,  1.0,  1.1};
-   config_t cfg;
-   config_load(&cfg);
-   if (cfg.memory_weight_profile[0])
-      memory_apply_weight_profile(&w, cfg.memory_weight_profile);
+   if (config_memory_weight_profile()[0])
+      memory_apply_weight_profile(&w, config_memory_weight_profile());
    memory_apply_weight_profile(&w, getenv("AIMEE_MEMORY_WEIGHT_PROFILE"));
    w.lexical_key = memory_env_weight("AIMEE_MEMORY_WEIGHT_LEXICAL_KEY", w.lexical_key);
    w.lexical_content = memory_env_weight("AIMEE_MEMORY_WEIGHT_LEXICAL_CONTENT", w.lexical_content);
@@ -745,48 +735,43 @@ memory_rank_weights_t memory_rank_weights(void)
    w.speaker = memory_env_weight("AIMEE_MEMORY_WEIGHT_SPEAKER", w.speaker);
    /* Inline YAML overrides: bm25_weight scales all lexical components;
     * semantic_weight scales the semantic component directly. */
-   if (cfg.memory_bm25_weight > 0.0)
+   if (config_memory_bm25_weight() > 0.0)
    {
-      double bm25_scale = cfg.memory_bm25_weight;
+      double bm25_scale = config_memory_bm25_weight();
       w.lexical_key *= bm25_scale;
       w.lexical_content *= bm25_scale;
       w.lexical_long_token_bonus *= bm25_scale;
    }
-   if (cfg.memory_semantic_weight > 0.0)
-      w.semantic = cfg.memory_semantic_weight;
+   if (config_memory_semantic_weight() > 0.0)
+      w.semantic = config_memory_semantic_weight();
    return w;
 }
 
 int memory_salience_enabled(void)
 {
-   config_t cfg;
-   config_load(&cfg);
-   return memory_env_int("AIMEE_MEMORY_SALIENCE_ENABLED", cfg.memory_salience_enabled, 0, 1);
+   return memory_env_int("AIMEE_MEMORY_SALIENCE_ENABLED", config_memory_salience_enabled(), 0, 1);
 }
 
 double memory_salience_weight(void)
 {
-   config_t cfg;
-   config_load(&cfg);
-   double fallback = cfg.memory_salience_weight > 0.0 ? cfg.memory_salience_weight : 0.6;
+   double fallback = config_memory_salience_weight() > 0.0 ? config_memory_salience_weight() : 0.6;
    return memory_env_weight("AIMEE_MEMORY_SALIENCE_WEIGHT", fallback);
 }
 
-static const char *memory_rerank_mode_effective(const config_t *cfg)
+static const char *memory_rerank_mode_effective(void)
 {
    const char *env = getenv("AIMEE_MEMORY_RERANK_MODE");
    if (env && env[0])
       return env;
-   if (cfg && cfg->memory_rerank_mode[0])
-      return cfg->memory_rerank_mode;
+   const char *mode = config_memory_rerank_mode();
+   if (mode && mode[0])
+      return mode;
    return "fast";
 }
 
 int memory_rerank_is_slow(void)
 {
-   config_t cfg;
-   config_load(&cfg);
-   return strcmp(memory_rerank_mode_effective(&cfg), "slow") == 0;
+   return strcmp(memory_rerank_mode_effective(), "slow") == 0;
 }
 
 void memory_runtime_state_increment(const char *key, int delta)
@@ -802,12 +787,10 @@ void memory_maybe_run_maintenance(void)
    if (maintenance_running)
       return;
 
-   config_t cfg;
-   config_load(&cfg);
    int trigger_inserts =
-       cfg.memory_maintenance_trigger_inserts > 0 ? cfg.memory_maintenance_trigger_inserts : 20;
+       config_memory_maintenance_trigger_inserts() > 0 ? config_memory_maintenance_trigger_inserts() : 20;
    int trigger_secs =
-       cfg.memory_maintenance_trigger_secs > 0 ? cfg.memory_maintenance_trigger_secs : 600;
+       config_memory_maintenance_trigger_secs() > 0 ? config_memory_maintenance_trigger_secs() : 600;
    const char *env_inserts = getenv("AIMEE_MEMORY_MAINTENANCE_TRIGGER_INSERTS");
    if (env_inserts && env_inserts[0])
    {
@@ -867,11 +850,11 @@ void memory_maybe_run_maintenance(void)
     * Idempotent — memory_lifecycle_sweep_expired() only touches rows
     * whose ttl_at has actually crossed now(), so interrupting mid-batch
     * and resuming cannot double-archive. */
-   if (cfg.memory_lifecycle_enabled)
+   if (config_memory_lifecycle_enabled())
       memory_lifecycle_sweep_expired();
 
    /* Scene clustering: run when pending >= 10x normal threshold and scenes enabled */
-   if (cfg.memory_scenes_enabled && pending >= trigger_inserts * 10)
+   if (config_memory_scenes_enabled() && pending >= trigger_inserts * 10)
       memory_cluster_scenes("");
 
    maintenance_running = 0;
@@ -1178,19 +1161,20 @@ int memory_is_coref_pronoun_token(const char *tok)
    return 0;
 }
 
-const char *memory_coref_mode_effective(const config_t *cfg)
+const char *memory_coref_mode_effective(void)
 {
    const char *env = getenv("AIMEE_MEMORY_COREF_MODE");
    if (env && env[0])
       return env;
-   if (cfg && cfg->memory_coref_mode[0])
-      return cfg->memory_coref_mode;
+   const char *mode = config_memory_coref_mode();
+   if (mode && mode[0])
+      return mode;
    return "off";
 }
 
-int memory_coref_window_effective(const config_t *cfg)
+int memory_coref_window_effective(void)
 {
-   int fallback = (cfg && cfg->memory_coref_window > 0) ? cfg->memory_coref_window : 5;
+   int fallback = config_memory_coref_window() > 0 ? config_memory_coref_window() : 5;
    return memory_env_int("AIMEE_MEMORY_COREF_WINDOW", fallback, 1, 12);
 }
 
@@ -1280,17 +1264,16 @@ int memory_extract_named_entities(const char *text, char names[][128], int max_n
 /* LLM-assisted coreference: send context window to the cognifier and use its
  * coref_bindings output.  This is the "llm" mode path for coref resolution.
  * Returns 1 if a binding was inserted, 0 otherwise. */
-int memory_coref_llm_resolve(int64_t memory_id, const char *content, const char *session_buf,
-                             const config_t *cfg)
+int memory_coref_llm_resolve(int64_t memory_id, const char *content, const char *session_buf)
 {
-   if (!cfg->memory_cognify_command[0])
+   if (!config_memory_cognify_command()[0])
       return 0;
 
    /* Collect prior context window */
    db2_memory_prior_row_t prior[64];
    int prior_max = (int)(sizeof(prior) / sizeof(prior[0]));
    int prior_n = db2_memory_list_prior_in_session(
-       session_buf, memory_id, memory_coref_window_effective(cfg), prior, prior_max);
+       session_buf, memory_id, memory_coref_window_effective(), prior, prior_max);
 
    cJSON *context_arr = cJSON_CreateArray();
    for (int i = 0; i < prior_n; i++)
@@ -1317,7 +1300,7 @@ int memory_coref_llm_resolve(int64_t memory_id, const char *content, const char 
 
    char *resp = NULL;
    size_t resp_len = 0;
-   int rc = platform_exec_pipe(cfg->memory_cognify_command, input_str, strlen(input_str), &resp,
+   int rc = platform_exec_pipe(config_memory_cognify_command(), input_str, strlen(input_str), &resp,
                                &resp_len);
    free(input_str);
    if (rc != 0 || !resp || resp_len == 0)

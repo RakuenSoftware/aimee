@@ -385,16 +385,12 @@
       "decls": 3,
       "loads": 3
     },
-    "src/modules/memory/memory_core_helpers.c": {
-      "decls": 13,
-      "loads": 9
-    },
     "src/modules/memory/memory_core_helpers_b.c": {
-      "decls": 2,
-      "loads": 2
+      "decls": 1,
+      "loads": 1
     },
     "src/modules/memory/memory_core_internal.h": {
-      "decls": 5,
+      "decls": 2,
       "loads": 1
     },
     "src/modules/memory/memory_core_search_b.c": {
@@ -490,8 +486,8 @@
       "loads": 0
     },
     "src/server/agent_runtime.c": {
-      "decls": 7,
-      "loads": 7
+      "decls": 1,
+      "loads": 1
     },
     "src/server/agent_tools.c": {
       "decls": 1,
@@ -553,10 +549,6 @@
       "decls": 5,
       "loads": 4
     },
-    "src/server/server_compute_async.c": {
-      "decls": 1,
-      "loads": 1
-    },
     "src/server/server_config.c": {
       "decls": 3,
       "loads": 3
@@ -588,10 +580,6 @@
     "src/server/server_mgmt_read_source.c": {
       "decls": 1,
       "loads": 1
-    },
-    "src/server/server_pipeline.c": {
-      "decls": 7,
-      "loads": 7
     },
     "src/server/server_runner_endpoints.c": {
       "decls": 3,
@@ -686,8 +674,8 @@
       "loads": 1
     },
     "src/tests/test_config.c": {
-      "decls": 101,
-      "loads": 85
+      "decls": 100,
+      "loads": 84
     },
     "src/tests/test_config_accessors.c": {
       "decls": 1,
@@ -866,7 +854,7 @@
       "loads": 0
     },
     "src/tests/test_server_dispatch.c": {
-      "decls": 7,
+      "decls": 6,
       "loads": 2
     },
     "src/tests/test_server_jobs_aux.c": {
@@ -911,8 +899,8 @@
     }
   },
   "totals": {
-    "decls": 813,
-    "files": 227,
-    "loads": 439
+    "decls": 780,
+    "files": 224,
+    "loads": 414
   }
 }

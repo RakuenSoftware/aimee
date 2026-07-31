@@ -146,7 +146,7 @@ static int require_aimee_git_on(void)
    config_t cfg;
    if (config_load(&cfg) != 0)
       return 1;
-   return cfg.require_aimee_git;
+   return config_require_aimee_git();
 }
 
 static void s2_native_gate_pretool(const char *sid, const char *tool_name, const char *tool_input)
@@ -322,7 +322,7 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
    }
 
    /* DB1 owns its own connection; session_state_load/save delegate to DB1. */
-   if (db1_init(cfg.db1_path) != 0)
+   if (db1_init(config_db1_path()) != 0)
       fatal("cannot open database");
 
    if (strcmp(phase, "pre") == 0)
@@ -442,7 +442,7 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
       s2_native_gate_pretool(sid, tool_name, tool_input);
 
       char msg[1024] = "";
-      int rc = pre_tool_check(tool_name, tool_input, &state, config_guardrail_mode(&cfg), cwd, msg,
+      int rc = pre_tool_check(tool_name, tool_input, &state, config_guardrail_mode(), cwd, msg,
                               sizeof(msg));
 
       session_state_save(&state, sid);

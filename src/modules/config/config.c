@@ -2036,6 +2036,22 @@ static int config_snapshot_read_field(size_t offset, size_t size, void *dst)
  * heap-loaded config so accessors work everywhere config_load worked. Heap, not
  * stack — a 750 KB frame is what overflowed the stack in the memory-search
  * path. Fails closed by leaving |dst| as the caller zeroed it. */
+/* Does the on-disk config load and validate? Reported WITHOUT handing the caller
+ * a config_t, for the callers that must fail fast on a broken config before a
+ * mutating operation rather than silently proceeding on defaults. Accessors
+ * deliberately return declared defaults on a failed load — that is the honest
+ * answer for one field, but it is the wrong answer for "should I start at all".
+ * Heap, not stack: config_t is ~750 KB. */
+int config_is_loadable(void)
+{
+   config_t *cfg = calloc(1, sizeof(*cfg));
+   if (!cfg)
+      return 0;
+   int rc = config_load(cfg);
+   free(cfg);
+   return rc == 0;
+}
+
 int config_field_read(size_t offset, size_t size, void *dst)
 {
    if (config_snapshot_read_field(offset, size, dst) == 0)

@@ -75,9 +75,7 @@ static void agent_apply_runtime_config(agent_t *agent)
 {
    if (!agent)
       return;
-   config_t runtime_cfg;
-   if (config_load(&runtime_cfg) == 0)
-      agent->autonomous = runtime_cfg.autonomous;
+   agent->autonomous = config_autonomous();
 }
 
 static void classify_outcome(const agent_result_t *result, int max_turns, agent_outcome_t *outcome)
@@ -1174,12 +1172,9 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
 
    /* HTTP POST with retry */
    char *response_body = NULL;
-   config_t retry_cfg;
-   config_load(&retry_cfg);
-   int ra =
-       retry_cfg.retry_max_attempts > 0 ? retry_cfg.retry_max_attempts : HTTP_RETRY_MAX_ATTEMPTS;
-   int rb = retry_cfg.retry_base_ms > 0 ? retry_cfg.retry_base_ms : HTTP_RETRY_BASE_MS;
-   int rm = retry_cfg.retry_max_ms > 0 ? retry_cfg.retry_max_ms : HTTP_RETRY_MAX_MS;
+   int ra = config_retry_max_attempts() > 0 ? config_retry_max_attempts() : HTTP_RETRY_MAX_ATTEMPTS;
+   int rb = config_retry_base_ms() > 0 ? config_retry_base_ms() : HTTP_RETRY_BASE_MS;
+   int rm = config_retry_max_ms() > 0 ? config_retry_max_ms() : HTTP_RETRY_MAX_MS;
    int http_status = http_retry_post_context(url, auth_header, body, &response_body,
                                              agent->timeout_ms, extra_headers, ra, rb, rm,
                                              agent->provider, agent->model, session_id());
@@ -1613,10 +1608,8 @@ char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *n
 
    /* Scheduled maintenance + skill ticks. Non-blocking; never delay the reply. */
    {
-      config_t maint_cfg;
-      if (!skip_kb_client && config_load(&maint_cfg) == 0)
       {
-         if (maint_cfg.memory_maintenance_enabled)
+         if (!skip_kb_client && config_memory_maintenance_enabled())
          {
             char *resp = kb_client_memory_maintenance_run_json(0, 0, 0);
             free(resp);
@@ -1625,13 +1618,12 @@ char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *n
    }
    int recall_injected = 0;
    {
-      config_t recall_cfg;
-      if (!skip_kb_client && config_load(&recall_cfg) == 0 && recall_cfg.memory_recall_enabled)
+      if (!skip_kb_client && config_memory_recall_enabled())
       {
          /* Session-start mode = no task text yet; else the turn prompt is the hint. */
          int session_start = !(custom_prompt && custom_prompt[0]);
-         int limit_tokens = session_start ? recall_cfg.memory_recall_limit_tokens_session
-                                          : recall_cfg.memory_recall_limit_tokens_turn;
+         int limit_tokens = session_start ? config_memory_recall_limit_tokens_session()
+                                          : config_memory_recall_limit_tokens_turn();
          /* Graph-code fusion is always on for recall. */
          char *recall_envelope =
              kb_client_memory_recall_json_ex(custom_prompt, limit_tokens, session_start, "on");
@@ -1706,12 +1698,11 @@ char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *n
     * already surfaced reminders to avoid duplicating them. */
    if (!recall_injected)
    {
-      config_t prosp_cfg;
-      if (!skip_kb_client && config_load(&prosp_cfg) == 0 && prosp_cfg.memory_prospective_enabled)
+      if (!skip_kb_client && config_memory_prospective_enabled())
       {
-         int cap_matches = prosp_cfg.memory_prospective_max_matches > 0
-                               ? prosp_cfg.memory_prospective_max_matches
-                               : 3;
+         int cap_matches =
+             config_memory_prospective_max_matches() > 0 ? config_memory_prospective_max_matches()
+                                                         : 3;
          if (cap_matches > MEMORY_PROSPECTIVE_MAX_MATCHES)
             cap_matches = MEMORY_PROSPECTIVE_MAX_MATCHES;
          memory_prospective_t triggered[MEMORY_PROSPECTIVE_MAX_MATCHES];
@@ -1991,10 +1982,7 @@ char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *n
 
    /* Guardrail warnings */
    {
-      const char *mode = MODE_APPROVE;
-      config_t gcfg;
-      if (config_load(&gcfg) == 0)
-         mode = config_guardrail_mode(&gcfg);
+      const char *mode = config_guardrail_mode();
       if (strcmp(mode, MODE_DENY) == 0)
       {
          ctx_appendf(buf, cap, &pos,
