@@ -54,7 +54,7 @@ void delegate_roundtable_result_free(roundtable_result_t *r);
 
 /* 1 if `ag` may sit on a panel: enabled + named, NOT primary-only (agents.json
  * `primary_only`), and a claude-CLI only when server-hosted (is_server_hosted). */
-int ensemble_panelist_eligible(const config_t *cfg, const agent_t *ag);
+int ensemble_panelist_eligible(const agent_t *ag);
 
 /* Validate explicit positive pins before any filter can remove them. A concrete
  * pin is a hard must-use requirement: missing, unauthorized, or unavailable

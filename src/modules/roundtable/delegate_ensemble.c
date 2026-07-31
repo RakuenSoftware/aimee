@@ -1335,9 +1335,8 @@ static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const
  * implicit "primary provider" exclusion: if an enabled agent has the review role
  * and is not marked primary_only, it is a valid unpinned panelist.  Operators
  * exclude it by removing the role, disabling it, or setting primary_only. */
-int ensemble_panelist_eligible(const config_t *cfg, const agent_t *ag)
+int ensemble_panelist_eligible(const agent_t *ag)
 {
-   (void)cfg;
    if (!ag || !ag->enabled || !ag->name[0])
       return 0;
    /* A review seat requires the agent to DECLARE the review role (or `all`); an
@@ -1368,7 +1367,7 @@ int ensemble_validate_panel_pins(const config_t *cfg, const agent_config_t *acfg
          continue;
       const agent_t *ag = agent_find((agent_config_t *)acfg, name);
       const char *reason = NULL;
-      if (!ag || !ensemble_panelist_eligible(cfg, ag))
+      if (!ag || !ensemble_panelist_eligible(ag))
          reason = "is not enabled and eligible for review";
       else if (!agent_is_available_for_routing(ag))
          reason = "is not currently available";
@@ -1415,7 +1414,7 @@ static int ensemble_pick_balanced_seat(const config_t *cfg, const agent_config_t
    {
       const agent_t *ag = &acfg->agents[i];
       int capacity = ag->max_parallel > 0 ? ag->max_parallel : AGENT_DEFAULT_MAX_PARALLEL;
-      if (!ensemble_panelist_eligible(cfg, ag) || !agent_is_available_for_routing(ag) ||
+      if (!ensemble_panelist_eligible(ag) || !agent_is_available_for_routing(ag) ||
           seated[i] >= capacity)
          continue;
       if (panel_provider_seats(acfg, seated, panel_agent_provider(ag)) == 0)
@@ -1427,7 +1426,7 @@ static int ensemble_pick_balanced_seat(const config_t *cfg, const agent_config_t
    {
       const agent_t *ag = &acfg->agents[i];
       int capacity = ag->max_parallel > 0 ? ag->max_parallel : AGENT_DEFAULT_MAX_PARALLEL;
-      if (seated[i] != 0 || !ensemble_panelist_eligible(cfg, ag) ||
+      if (seated[i] != 0 || !ensemble_panelist_eligible(ag) ||
           !agent_is_available_for_routing(ag) || seated[i] >= capacity)
          continue;
       int provider_seats = panel_provider_seats(acfg, seated, panel_agent_provider(ag));
@@ -1446,7 +1445,7 @@ static int ensemble_pick_balanced_seat(const config_t *cfg, const agent_config_t
    {
       const agent_t *ag = &acfg->agents[i];
       int capacity = ag->max_parallel > 0 ? ag->max_parallel : AGENT_DEFAULT_MAX_PARALLEL;
-      if (!ensemble_panelist_eligible(cfg, ag) || !agent_is_available_for_routing(ag) ||
+      if (!ensemble_panelist_eligible(ag) || !agent_is_available_for_routing(ag) ||
           seated[i] >= capacity)
          continue;
       int provider_seats = panel_provider_seats(acfg, seated, panel_agent_provider(ag));
@@ -1548,7 +1547,7 @@ void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *ac
    {
       const char *name = cfg->ensemble_reference_models[i];
       const agent_t *ag = agent_find((agent_config_t *)acfg, name);
-      if (!ag || !ensemble_panelist_eligible(cfg, ag))
+      if (!ag || !ensemble_panelist_eligible(ag))
       {
          aimee_log(LOG_WARN, "delegate.panel",
                    "dropping unauthorized panelist '%s' from the roundtable panel", name);
@@ -1568,7 +1567,7 @@ void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *ac
    if (cfg->ensemble_aggregator[0])
    {
       const agent_t *agg = agent_find((agent_config_t *)acfg, cfg->ensemble_aggregator);
-      if (!agg || !ensemble_panelist_eligible(cfg, agg))
+      if (!agg || !ensemble_panelist_eligible(agg))
          cfg->ensemble_aggregator[0] = '\0';
    }
    if (!cfg->ensemble_aggregator[0] && n > 0)
@@ -1639,7 +1638,7 @@ void ensemble_fill_implicit_panel(config_t *cfg, const agent_config_t *acfg)
    for (int i = 0; i < acfg->agent_count && cfg->ensemble_reference_count < 2; i++)
    {
       const agent_t *ag = &acfg->agents[i];
-      if (seated[i] > 0 || !ensemble_panelist_eligible(cfg, ag) ||
+      if (seated[i] > 0 || !ensemble_panelist_eligible(ag) ||
           !agent_is_available_for_routing(ag))
          continue;
       const char *provider = ag->provider[0] ? ag->provider : ag->name;
@@ -1669,7 +1668,7 @@ void ensemble_fill_implicit_panel(config_t *cfg, const agent_config_t *acfg)
    for (int i = 0; i < acfg->agent_count && cfg->ensemble_reference_count < 2; i++)
    {
       const agent_t *ag = &acfg->agents[i];
-      if (seated[i] > 0 || !ensemble_panelist_eligible(cfg, ag) ||
+      if (seated[i] > 0 || !ensemble_panelist_eligible(ag) ||
           !agent_is_available_for_routing(ag))
          continue;
       int pos = cfg->ensemble_reference_count++;

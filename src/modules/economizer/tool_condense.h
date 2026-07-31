@@ -17,7 +17,7 @@
 #define TOOL_CONDENSE_CEILING (2 * 1024 * 1024)
 
 /* Retained compatibility gate. Always false; live condensation is disconnected. */
-int tool_condense_enabled(const config_t *cfg);
+int tool_condense_enabled(void);
 
 /* ---- command recognition (Slice 2) ---- */
 

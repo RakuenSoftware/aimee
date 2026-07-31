@@ -137,10 +137,6 @@
       "decls": 5,
       "loads": 7
     },
-    "src/kb/kb_intel_payload.c": {
-      "decls": 2,
-      "loads": 2
-    },
     "src/kb/kb_main.c": {
       "decls": 5,
       "loads": 3
@@ -156,10 +152,6 @@
     "src/kb/kb_mining.c": {
       "decls": 1,
       "loads": 1
-    },
-    "src/kb/kb_ranker_fit.c": {
-      "decls": 1,
-      "loads": 0
     },
     "src/kb/kb_reasoning.c": {
       "decls": 3,
@@ -185,10 +177,6 @@
       "decls": 5,
       "loads": 3
     },
-    "src/kb/kb_service_workers.c": {
-      "decls": 3,
-      "loads": 4
-    },
     "src/kb/kb_surprising_judge.c": {
       "decls": 1,
       "loads": 0
@@ -206,10 +194,6 @@
       "loads": 0
     },
     "src/kb_curator_provider.c": {
-      "decls": 1,
-      "loads": 0
-    },
-    "src/kb_ranker_fit.h": {
       "decls": 1,
       "loads": 0
     },
@@ -254,11 +238,11 @@
       "loads": 0
     },
     "src/modules/economizer/tool_condense.c": {
-      "decls": 2,
+      "decls": 1,
       "loads": 0
     },
     "src/modules/economizer/tool_condense.h": {
-      "decls": 2,
+      "decls": 1,
       "loads": 0
     },
     "src/modules/git/git_verify_ops.c": {
@@ -354,11 +338,11 @@
       "loads": 0
     },
     "src/modules/roundtable/delegate_ensemble.c": {
-      "decls": 17,
+      "decls": 16,
       "loads": 0
     },
     "src/modules/roundtable/delegate_ensemble.h": {
-      "decls": 9,
+      "decls": 8,
       "loads": 0
     },
     "src/modules/roundtable/roundtable_preset.c": {
@@ -815,8 +799,8 @@
     }
   },
   "totals": {
-    "decls": 721,
-    "files": 203,
-    "loads": 349
+    "decls": 710,
+    "files": 199,
+    "loads": 343
   }
 }

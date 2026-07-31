@@ -37,8 +37,6 @@ cJSON *kb_intel_calibrate_readiness_response(void)
 
 cJSON *kb_intel_demote_check_response(void)
 {
-   config_t cfg;
-   config_load(&cfg);
 
    db2_demotion_candidate_t *candidates =
        calloc(KB_INTEL_DEMOTE_DRY_MAX, sizeof(db2_demotion_candidate_t));
@@ -46,7 +44,7 @@ cJSON *kb_intel_demote_check_response(void)
       return NULL;
 
    int n_candidates =
-       db2_demotion_candidates(cfg.demotion_n_min, candidates, KB_INTEL_DEMOTE_DRY_MAX);
+       db2_demotion_candidates(config_demotion_n_min(), candidates, KB_INTEL_DEMOTE_DRY_MAX);
    if (n_candidates < 0)
       n_candidates = 0;
 
@@ -66,8 +64,8 @@ cJSON *kb_intel_demote_check_response(void)
    int n_scored = 0;
    for (int i = 0; i < n_candidates; i++)
    {
-      double score = db2_demotion_score(candidates[i].row_id, cfg.demotion_window,
-                                        cfg.demotion_half_life_days, cfg.demotion_n_min);
+      double score = db2_demotion_score(candidates[i].row_id, config_demotion_window(),
+                                        config_demotion_half_life_days(), config_demotion_n_min());
       if (isnan(score))
          continue;
       memory_t mem;
@@ -138,7 +136,7 @@ cJSON *kb_intel_demote_check_response(void)
    cJSON_AddNumberToObject(resp, "candidates", n_candidates);
    cJSON_AddNumberToObject(resp, "scored", n_scored);
    cJSON_AddNumberToObject(resp, "would_demote", would_demote);
-   cJSON_AddNumberToObject(resp, "demotion_enabled", cfg.demotion_enabled);
+   cJSON_AddNumberToObject(resp, "demotion_enabled", config_demotion_enabled());
    cJSON_AddItemToObject(resp, "by_kind", by_kind);
    return resp;
 }
@@ -561,13 +559,11 @@ int kb_intel_ranker_fit_http(const char *body, int body_len, char *out_buf, int 
    (void)body_len;
    if (!out_buf || out_cap <= 0)
       return 500;
-   config_t cfg;
-   config_load(&cfg);
    char *report = NULL;
    /* rc distinguishes committed(0)/refused(1)/error(-1); the report carries the
     * detail. HTTP 200 for any well-formed report (the fit ran, even if it
     * refused/held) — a fit that declines to promote is a success, not a 5xx. */
-   int rc = kb_ranker_fit_run(&cfg, NULL, 0, &report);
+   int rc = kb_ranker_fit_run(NULL, 0, &report);
    if (!report)
    {
       snprintf(out_buf, (size_t)out_cap,

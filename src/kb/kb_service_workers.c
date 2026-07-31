@@ -66,9 +66,7 @@ static void *kb_maintenance_timer_thread(void *arg)
 {
    (void)arg;
 
-   config_t cfg;
-   config_load(&cfg);
-   int interval_secs = cfg.kb_maintenance_interval_hours * 3600;
+   int interval_secs = config_kb_maintenance_interval_hours() * 3600;
    if (interval_secs <= 0)
       interval_secs = 86400;
 
@@ -84,16 +82,15 @@ static void *kb_maintenance_timer_thread(void *arg)
          continue;
       elapsed = 0;
 
-      config_load(&cfg);
-      if (!cfg.kb_maintenance_enabled)
+      if (!config_kb_maintenance_enabled())
          continue;
 
       kb_maintenance_config_t mcfg;
       kb_maintenance_config_defaults(&mcfg);
-      mcfg.lambda = cfg.kb_maintenance_lambda;
-      mcfg.confidence_floor = cfg.kb_maintenance_floor;
-      mcfg.min_age_days = cfg.kb_maintenance_min_age_days;
-      mcfg.orphan_prune_days = cfg.kb_maintenance_orphan_days;
+      mcfg.lambda = config_kb_maintenance_lambda();
+      mcfg.confidence_floor = config_kb_maintenance_floor();
+      mcfg.min_age_days = config_kb_maintenance_min_age_days();
+      mcfg.orphan_prune_days = config_kb_maintenance_orphan_days();
       mcfg.dry_run = 0;
 
       kb_background_set("maintenance", "lambda=%.2f floor=%.2f min_age=%dd", mcfg.lambda,
@@ -123,11 +120,11 @@ static void *kb_maintenance_timer_thread(void *arg)
        * trains only on that version's rows and stamps it on the model, so a
        * v1→v2 feature-set bump naturally re-fits against v2 the next cycle. The
        * §2 floor/refusal + benchmark gate keep it from ever shipping a bad model. */
-      if (cfg.kb_ranker_fit_enabled)
+      if (config_kb_ranker_fit_enabled())
       {
          kb_background_set("ranker_fit", "%s", KB_FEATURE_SET_VERSION);
          char *fit_report = NULL;
-         int frc = kb_ranker_fit_run(&cfg, NULL, 0, &fit_report);
+         int frc = kb_ranker_fit_run(NULL, 0, &fit_report);
          aimee_log(frc == 0 ? LOG_INFO : LOG_DEBUG, "kb.ranker_fit",
                    "scheduled refit rc=%d report=%s", frc, fit_report ? fit_report : "(none)");
          free(fit_report);
@@ -149,16 +146,14 @@ static int g_blob_recon_active = 0;
 static void *kb_blob_recon_timer_thread(void *arg)
 {
    (void)arg;
-   config_t cfg;
    long elapsed = 0;
    while (!g_blob_recon_stop)
    {
       db2_lease_release_idle();
       sleep(1);
       elapsed++;
-      config_load(&cfg);
-      int interval = cfg.kb_pdf_blob_recon_secs;
-      if (!cfg.kb_pdf_assets_enabled || interval <= 0)
+      int interval = config_kb_pdf_blob_recon_secs();
+      if (!config_kb_pdf_assets_enabled() || interval <= 0)
       {
          elapsed = 0;
          continue;
@@ -167,7 +162,7 @@ static void *kb_blob_recon_timer_thread(void *arg)
          continue;
       elapsed = 0;
       kb_blob_recon_stats_t st;
-      if (kb_blob_reconcile_run(cfg.kb_pdf_blob_orphan_alarm_mb, KB_BLOB_RECON_GRACE_SECS, &st) ==
+      if (kb_blob_reconcile_run(config_kb_pdf_blob_orphan_alarm_mb(), KB_BLOB_RECON_GRACE_SECS, &st) ==
           0)
       {
          db2_kb_runtime_state_set_now("last_blob_recon_at");
@@ -299,19 +294,17 @@ int kb_service_init(kb_service_ctx_t *ctx)
    kb_curator_drain_init(&g_curator_drain_ctx);
    kb_reasoning_seed_ruleset();
 
-   config_t cfg;
-   config_load(&cfg);
-   if (cfg.kb_mining_enabled && kb_mining_start(cfg.kb_mining_min_poll_s) != 0)
+   if (config_kb_mining_enabled() && kb_mining_start(config_kb_mining_min_poll_s()) != 0)
       aimee_log(LOG_WARN, "kb.mining", "failed to start mining scheduler");
 
    /* Version-bump replay: if the embedding model or synthesis prompt version
     * changed since last boot, re-enqueue the affected work for the drains. */
-   (void)learning_version_replay(cfg.learning_embed_model_version,
-                                 cfg.learning_synthesize_prompt_version, NULL);
+   (void)learning_version_replay(config_learning_embed_model_version(),
+                                 config_learning_synthesize_prompt_version(), NULL);
    {
       kb_curator_version_replay_t cvr;
-      (void)kb_curator_version_replay(cfg.kb_curator_extract_prompt_version,
-                                      cfg.kb_curator_embed_model_version, &cvr);
+      (void)kb_curator_version_replay(config_kb_curator_extract_prompt_version(),
+                                      config_kb_curator_embed_model_version(), &cvr);
    }
 
    return 0;

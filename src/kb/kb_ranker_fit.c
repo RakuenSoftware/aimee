@@ -608,20 +608,18 @@ static int finish_refused(cJSON *report, const char *reason, char **report_out, 
    return 1;
 }
 
-int kb_ranker_fit_run(const config_t *cfg, char *id_out, int id_out_len, char **report_out)
+int kb_ranker_fit_run(char *id_out, int id_out_len, char **report_out)
 {
    if (report_out)
       *report_out = NULL;
    if (id_out && id_out_len > 0)
       id_out[0] = '\0';
-   if (!cfg)
-      return -1;
 
    cJSON *report = cJSON_CreateObject();
    cJSON_AddStringToObject(report, "surface", "kb_hybrid");
    cJSON_AddStringToObject(report, "feature_set_version", KB_FEATURE_SET_VERSION);
 
-   if (!cfg->kb_ranker_fit_enabled)
+   if (!config_kb_ranker_fit_enabled())
    {
       cJSON_AddStringToObject(report, "status", "disabled");
       if (report_out)
@@ -630,7 +628,7 @@ int kb_ranker_fit_run(const config_t *cfg, char *id_out, int id_out_len, char **
       return 1;
    }
 
-   int min_groups = cfg->kb_ranker_fit_min_groups > 0 ? cfg->kb_ranker_fit_min_groups
+   int min_groups = config_kb_ranker_fit_min_groups() > 0 ? config_kb_ranker_fit_min_groups()
                                                       : RANK_FIT_DEFAULT_MIN_GROUPS;
 
    cJSON *rows = NULL;
@@ -659,7 +657,7 @@ int kb_ranker_fit_run(const config_t *cfg, char *id_out, int id_out_len, char **
       return finish_refused(report, "below_floor", report_out, rows);
    }
 
-   if (!cfg->kb_ranker_fit_command[0])
+   if (!config_kb_ranker_fit_command()[0])
       return finish_refused(report, "no_fitter_command", report_out, rows);
 
    /* Build the sidecar request: {feature_set_version, objective, min_groups, rows}.
@@ -667,7 +665,7 @@ int kb_ranker_fit_run(const config_t *cfg, char *id_out, int id_out_len, char **
     * already carry per-candidate `weight`, so an IPW/confidence weight flows to
     * the sidecar unchanged. */
    const char *objective =
-       cfg->kb_ranker_fit_objective[0] ? cfg->kb_ranker_fit_objective : "pointwise";
+       config_kb_ranker_fit_objective()[0] ? config_kb_ranker_fit_objective() : "pointwise";
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "feature_set_version", KB_FEATURE_SET_VERSION);
    cJSON_AddStringToObject(req, "objective", objective);
@@ -685,7 +683,7 @@ int kb_ranker_fit_run(const config_t *cfg, char *id_out, int id_out_len, char **
    char *out = NULL;
    size_t out_len = 0;
    int rc =
-       platform_exec_pipe(cfg->kb_ranker_fit_command, req_str, strlen(req_str), &out, &out_len);
+       platform_exec_pipe(config_kb_ranker_fit_command(), req_str, strlen(req_str), &out, &out_len);
    free(req_str);
    if (rc != 0 || !out)
    {
@@ -725,8 +723,8 @@ int kb_ranker_fit_run(const config_t *cfg, char *id_out, int id_out_len, char **
    load_incumbent_weights(incumbent_w);
 
    const char *bench_path =
-       cfg->kb_ranker_fit_benchmark[0] ? cfg->kb_ranker_fit_benchmark : RANK_FIT_DEFAULT_BENCHMARK;
-   int k = cfg->kb_ranker_fit_bench_k > 0 ? cfg->kb_ranker_fit_bench_k : RANK_FIT_DEFAULT_BENCH_K;
+       config_kb_ranker_fit_benchmark()[0] ? config_kb_ranker_fit_benchmark() : RANK_FIT_DEFAULT_BENCHMARK;
+   int k = config_kb_ranker_fit_bench_k() > 0 ? config_kb_ranker_fit_bench_k() : RANK_FIT_DEFAULT_BENCH_K;
    rank_gate_eval_t eval;
    int eval_rc = benchmark_compare(bench_path, k, cand_w, incumbent_w, &eval);
 

@@ -196,10 +196,11 @@ static void test_closed_loop_capture(void)
 static void test_fit_disabled(void)
 {
    open_db();
-   config_t cfg;
+   static config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
+   config_snapshot_init(&cfg);
    char *rep = NULL;
-   int rc = kb_ranker_fit_run(&cfg, NULL, 0, &rep);
+   int rc = kb_ranker_fit_run(NULL, 0, &rep);
    assert(rc == 1);
    assert(rep);
    cJSON *o = cJSON_Parse(rep);
@@ -219,14 +220,15 @@ static void test_fit_below_floor(void)
    insert_attr("e1", 100, "accepted");
    insert_attr("e1", 101, "contradicted");
 
-   config_t cfg;
+   static config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.kb_ranker_fit_enabled = 1;
    cfg.kb_ranker_fit_min_groups = 8;
    snprintf(cfg.kb_ranker_fit_command, sizeof(cfg.kb_ranker_fit_command), "/bin/true");
 
+   config_snapshot_init(&cfg);
    char *rep = NULL;
-   int rc = kb_ranker_fit_run(&cfg, NULL, 0, &rep);
+   int rc = kb_ranker_fit_run(NULL, 0, &rep);
    assert(rc == 1);
    cJSON *o = cJSON_Parse(rep);
    free(rep);
@@ -348,7 +350,7 @@ static void test_gate_commit_on_lift(void)
    write_file("/tmp/rf_fix.json", fix);
    free(fix);
 
-   config_t cfg;
+   static config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.kb_ranker_fit_enabled = 1;
    cfg.kb_ranker_fit_min_groups = 2;
@@ -356,9 +358,10 @@ static void test_gate_commit_on_lift(void)
    snprintf(cfg.kb_ranker_fit_command, sizeof(cfg.kb_ranker_fit_command), "/tmp/rf_stub_win.sh");
    snprintf(cfg.kb_ranker_fit_benchmark, sizeof(cfg.kb_ranker_fit_benchmark), "/tmp/rf_fix.json");
 
+   config_snapshot_init(&cfg);
    char id[64] = "";
    char *rep = NULL;
-   int rc = kb_ranker_fit_run(&cfg, id, sizeof(id), &rep);
+   int rc = kb_ranker_fit_run(id, sizeof(id), &rep);
    assert(rep);
    cJSON *o = cJSON_Parse(rep);
    free(rep);
@@ -395,15 +398,16 @@ static void test_gate_hold_on_no_lift(void)
    write_file("/tmp/rf_fix.json", fix);
    free(fix);
 
-   config_t cfg;
+   static config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.kb_ranker_fit_enabled = 1;
    cfg.kb_ranker_fit_min_groups = 2;
    snprintf(cfg.kb_ranker_fit_command, sizeof(cfg.kb_ranker_fit_command), "/tmp/rf_stub_lose.sh");
    snprintf(cfg.kb_ranker_fit_benchmark, sizeof(cfg.kb_ranker_fit_benchmark), "/tmp/rf_fix.json");
 
+   config_snapshot_init(&cfg);
    char *rep = NULL;
-   int rc = kb_ranker_fit_run(&cfg, NULL, 0, &rep);
+   int rc = kb_ranker_fit_run(NULL, 0, &rep);
    cJSON *o = cJSON_Parse(rep);
    free(rep);
    assert(rc == 1);
@@ -430,7 +434,7 @@ static void test_gate_refuses_underpowered_benchmark(void)
                     "\"sketch.frequency_kind_scope\":0.0,\"sketch.distinct_sources_hll\":0.0}"));
    write_file("/tmp/rf_fix.json", FIXTURE_UNDERPOWERED);
 
-   config_t cfg;
+   static config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.kb_ranker_fit_enabled = 1;
    cfg.kb_ranker_fit_min_groups = 2;
@@ -438,8 +442,9 @@ static void test_gate_refuses_underpowered_benchmark(void)
    snprintf(cfg.kb_ranker_fit_command, sizeof(cfg.kb_ranker_fit_command), "/tmp/rf_stub_win.sh");
    snprintf(cfg.kb_ranker_fit_benchmark, sizeof(cfg.kb_ranker_fit_benchmark), "/tmp/rf_fix.json");
 
+   config_snapshot_init(&cfg);
    char *rep = NULL;
-   int rc = kb_ranker_fit_run(&cfg, NULL, 0, &rep);
+   int rc = kb_ranker_fit_run(NULL, 0, &rep);
    cJSON *o = cJSON_Parse(rep);
    free(rep);
    assert(rc == 1);
@@ -472,7 +477,7 @@ static void test_gate_refuses_minority_gain(void)
    write_file("/tmp/rf_fix.json", fix);
    free(fix);
 
-   config_t cfg;
+   static config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.kb_ranker_fit_enabled = 1;
    cfg.kb_ranker_fit_min_groups = 2;
@@ -480,8 +485,9 @@ static void test_gate_refuses_minority_gain(void)
    snprintf(cfg.kb_ranker_fit_command, sizeof(cfg.kb_ranker_fit_command), "/tmp/rf_stub_win.sh");
    snprintf(cfg.kb_ranker_fit_benchmark, sizeof(cfg.kb_ranker_fit_benchmark), "/tmp/rf_fix.json");
 
+   config_snapshot_init(&cfg);
    char *rep = NULL;
-   int rc = kb_ranker_fit_run(&cfg, NULL, 0, &rep);
+   int rc = kb_ranker_fit_run(NULL, 0, &rep);
    cJSON *o = cJSON_Parse(rep);
    free(rep);
    assert(rc == 1);
@@ -508,14 +514,15 @@ static void test_sidecar_refusal(void)
               "#!/bin/sh\ncat >/dev/null\nprintf '%s' "
               "'{\"status\":\"refused\",\"reason\":\"version_mismatch\"}'\n");
 
-   config_t cfg;
+   static config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.kb_ranker_fit_enabled = 1;
    cfg.kb_ranker_fit_min_groups = 2;
    snprintf(cfg.kb_ranker_fit_command, sizeof(cfg.kb_ranker_fit_command), "/tmp/rf_stub_refuse.sh");
 
+   config_snapshot_init(&cfg);
    char *rep = NULL;
-   int rc = kb_ranker_fit_run(&cfg, NULL, 0, &rep);
+   int rc = kb_ranker_fit_run(NULL, 0, &rep);
    cJSON *o = cJSON_Parse(rep);
    free(rep);
    assert(rc == 1);

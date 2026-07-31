@@ -1342,6 +1342,25 @@ const char *config_embedding_command_current(const char *requested)
    return config_embedding_command(NULL, requested);
 }
 
+/* kb_intel_payload reads the demotion knobs through accessors now. Mirror the
+ * values the config_load stub above sets, so both seams agree. */
+int config_demotion_enabled(void)
+{
+   return 1;
+}
+int config_demotion_n_min(void)
+{
+   return 2;
+}
+int config_demotion_window(void)
+{
+   return 64;
+}
+double config_demotion_half_life_days(void)
+{
+   return 30.0;
+}
+
 int db2_calibration_surfaces_with_data(int min_rows)
 {
    assert(min_rows == 200);

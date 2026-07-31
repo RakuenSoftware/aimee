@@ -49,13 +49,13 @@ void tool_condense_stats_reset(void)
    atomic_store_explicit(&g_tc_family_diag, 0, memory_order_relaxed);
 }
 
-int tool_condense_enabled(const config_t *cfg)
+int tool_condense_enabled(void)
 {
    /* Deterministic tool-output condensation is a SAFE+AGGRESSIVE lever (econ_preset
     * command_filter): on whenever the economizer is not off. econ_reduction_master_on
     * also honors the modules.economizer hard kill. */
    econ_preset_t ep;
-   econ_preset(cfg, &ep);
+   econ_preset_current(&ep);
    return ep.command_filter;
 }
 
@@ -1086,7 +1086,7 @@ char *tool_condense_apply(const config_t *cfg, const char *cmdline, int exit_cod
       stats->raw_bytes = raw ? (long)strlen(raw) : 0;
       stats->final_bytes = stats->raw_bytes;
    }
-   if (!tool_condense_enabled(cfg) || !raw || !raw[0])
+   if (!tool_condense_enabled() || !raw || !raw[0])
       return NULL;
    long rawlen = (long)strlen(raw);
    if (rawlen > TOOL_CONDENSE_CEILING)

@@ -1060,10 +1060,10 @@ static void test_panel_eligibility_excludes_client_claude(void)
 
    config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[0]) == 1);
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[1]) == 0);
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[2]) == 1);
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[3]) == 0);
+   assert(ensemble_panelist_eligible(&acfg.agents[0]) == 1);
+   assert(ensemble_panelist_eligible(&acfg.agents[1]) == 0);
+   assert(ensemble_panelist_eligible(&acfg.agents[2]) == 1);
+   assert(ensemble_panelist_eligible(&acfg.agents[3]) == 0);
 
    /* claude needs BOTH authorization (NOT primary_only) AND server-hosting to be
     * seated; neither alone is enough. Authorization is now the per-agent
@@ -1073,22 +1073,22 @@ static void test_panel_eligibility_excludes_client_claude(void)
    /* (a) authorized (primary_only=0) but client-only (not server-hosted) -> still
     * excluded */
    acfg.agents[1].primary_only = 0;
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[1]) == 0);
+   assert(ensemble_panelist_eligible(&acfg.agents[1]) == 0);
 
    /* (b) server-hosted but NOT authorized (primary_only=1) -> still excluded (the
     * key invariant: a server-side OAuth setup is not authorization to act as a
     * panelist) */
    acfg.agents[1].is_server_hosted = 1;
    acfg.agents[1].primary_only = 1;
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[1]) == 0);
+   assert(ensemble_panelist_eligible(&acfg.agents[1]) == 0);
 
    /* (c) authorized (primary_only=0) AND server-hosted -> seated */
    acfg.agents[1].primary_only = 0;
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[1]) == 1);
+   assert(ensemble_panelist_eligible(&acfg.agents[1]) == 1);
 
    /* (d) disabled claude is never seated, even authorized + server-hosted */
    acfg.agents[1].enabled = 0;
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[1]) == 0);
+   assert(ensemble_panelist_eligible(&acfg.agents[1]) == 0);
    printf("  test_panel_eligibility_excludes_client_claude: ok\n");
 }
 
@@ -1164,9 +1164,9 @@ static void test_panel_does_not_implicitly_exclude_primary(void)
    snprintf(cfg.provider, sizeof(cfg.provider), "claude"); /* PRIMARY = claude */
 
    /* per-agent predicate */
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[0]) == 1); /* codex/openai — seated */
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[1]) == 1);
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[2]) == 1);
+   assert(ensemble_panelist_eligible(&acfg.agents[0]) == 1); /* codex/openai — seated */
+   assert(ensemble_panelist_eligible(&acfg.agents[1]) == 1);
+   assert(ensemble_panelist_eligible(&acfg.agents[2]) == 1);
 
    /* Explicit positive pins remain intact. */
    cfg.ensemble_reference_count = 3;

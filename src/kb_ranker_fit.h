@@ -72,7 +72,7 @@ extern "C"
     *  -1  hard error (bad config, DB failure).
     * id_out (may be NULL) receives the written artifact id (committed or proposed).
     * report_out (may be NULL) receives a malloc'd JSON report (caller frees). */
-   int kb_ranker_fit_run(const config_t *cfg, char *id_out, int id_out_len, char **report_out);
+   int kb_ranker_fit_run(char *id_out, int id_out_len, char **report_out);
 
 #ifdef __cplusplus
 }
