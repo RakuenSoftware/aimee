@@ -31,11 +31,40 @@ TEMPLATE = (
 MAX_NEW_TOKENS = 8192
 
 
+KIND_WORD = {
+    "NODE_PERSON": "person", "NODE_ORG": "org", "NODE_DEVICE": "device",
+    "NODE_IP": "ip", "NODE_PLACE": "place", "NODE_SCALAR": "value",
+    "NODE_CONCEPT": "concept", "NODE_EVENT": "event", "NODE_TIME_EXPR": "time",
+    "NODE_OTHER": "any",
+}
+
+
 def seed_relations():
     """Parse the seed ontology order out of rel_types.c — same order the C builder emits."""
     src = (REPO / "src" / "rel_types.c").read_text()
     body = src[src.index("SEED_ONTOLOGY[] = {"):]
     return re.findall(r'^\s*\{"([a-z_]+)"', body, re.M)
+
+
+def _kinds_text(raw):
+    kinds = re.findall(r"NODE_[A-Z_]+", raw)
+    if not kinds or "NODE_OTHER" in kinds:
+        return "any"
+    return "|".join(KIND_WORD.get(k, "any") for k in kinds)
+
+
+def seed_descriptors():
+    """Mirror rel_types_describe(): "name (head->tail)" per seed relation.
+
+    The prompt used to send bare names, which made the model guess our naming
+    convention; the type signature was in the ontology all along."""
+    src = (REPO / "src" / "rel_types.c").read_text()
+    body = src[src.index("SEED_ONTOLOGY[] = {"):]
+    out = []
+    for m in re.finditer(
+        r'\{"([a-z_]+)",\s*(\{[^}]*\}),\s*\d+,\s*(\{[^}]*\}),\s*\d+,', body):
+        out.append(f"{m.group(1)} ({_kinds_text(m.group(2))}->{_kinds_text(m.group(3))})")
+    return out
 
 
 def symmetric_relations():
@@ -70,6 +99,12 @@ def inverse_relations():
 
 
 def system_prompt():
+    return TEMPLATE % ", ".join(seed_descriptors())
+
+
+def system_prompt_bare_names():
+    """The pre-fix prompt: predicate names with no type signature. Kept so the
+    two can be benchmarked head to head."""
     return TEMPLATE % ", ".join(seed_relations())
 
 

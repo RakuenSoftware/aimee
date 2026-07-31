@@ -343,6 +343,59 @@ int rel_type_kind_allowed(const rel_type_def_t *def, int is_head, memory_node_ki
    return 0;
 }
 
+const char *rel_types_kind_word(memory_node_kind_t kind)
+{
+   switch (kind)
+   {
+   case NODE_PERSON:
+      return "person";
+   case NODE_ORG:
+      return "org";
+   case NODE_DEVICE:
+      return "device";
+   case NODE_IP:
+      return "ip";
+   case NODE_PLACE:
+      return "place";
+   case NODE_SCALAR:
+      return "value";
+   case NODE_CONCEPT:
+      return "concept";
+   case NODE_EVENT:
+      return "event";
+   case NODE_TIME_EXPR:
+      return "time";
+   default:
+      return "any";
+   }
+}
+
+/* Join a kind list as "a|b", collapsing an ANY wildcard to "any". */
+static int kinds_to_text(const memory_node_kind_t *list, int n, char *out, size_t out_len)
+{
+   size_t p = 0;
+   for (int i = 0; i < n && p + 1 < out_len; i++)
+   {
+      if (list[i] == NODE_OTHER)
+         return snprintf(out, out_len, "any");
+      p += (size_t)snprintf(out + p, out_len - p, "%s%s", p ? "|" : "",
+                            rel_types_kind_word(list[i]));
+   }
+   if (!p)
+      p = (size_t)snprintf(out, out_len, "any");
+   return (int)p;
+}
+
+int rel_types_describe(const rel_type_def_t *def, char *out, size_t out_len)
+{
+   if (!def || !out || !out_len)
+      return 0;
+   char head[64], tail[64];
+   kinds_to_text(def->head_kinds, def->head_kind_count, head, sizeof(head));
+   kinds_to_text(def->tail_kinds, def->tail_kind_count, tail, sizeof(tail));
+   return snprintf(out, out_len, "%s (%s->%s)", def->rel_type, head, tail);
+}
+
 /* Set equality over the small kind lists (order-independent, dup-tolerant). */
 static int kind_sets_equal(const memory_node_kind_t *a, int an, const memory_node_kind_t *b, int bn)
 {

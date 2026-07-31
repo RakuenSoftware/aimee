@@ -68,6 +68,46 @@ static void test_kind_allowed(void)
    printf("  PASS: test_kind_allowed\n");
 }
 
+static void test_describe(void)
+{
+   char buf[128];
+
+   /* The type signature is what extraction prompts need: a bare "device_has_ip"
+    * leaves a model guessing, and its reasonable guesses (has_ip) are staged as
+    * provisional Class-C edges rather than committed as validated Class-B ones. */
+   const rel_type_def_t *ip = rel_types_seed_lookup("device_has_ip");
+   assert(rel_types_describe(ip, buf, sizeof(buf)) > 0);
+   assert(strcmp(buf, "device_has_ip (device->ip)") == 0);
+
+   const rel_type_def_t *wf = rel_types_seed_lookup("works_for");
+   rel_types_describe(wf, buf, sizeof(buf));
+   assert(strcmp(buf, "works_for (person->org)") == 0);
+
+   /* NODE_SCALAR reads as "value"; a NODE_OTHER wildcard collapses to "any". */
+   const rel_type_def_t *hr = rel_types_seed_lookup("has_role");
+   rel_types_describe(hr, buf, sizeof(buf));
+   assert(strcmp(buf, "has_role (person->value)") == 0);
+
+   const rel_type_def_t *li = rel_types_seed_lookup("located_in");
+   rel_types_describe(li, buf, sizeof(buf));
+   assert(strcmp(buf, "located_in (any->place)") == 0);
+
+   assert(rel_types_describe(NULL, buf, sizeof(buf)) == 0);
+   assert(rel_types_describe(wf, NULL, 0) == 0);
+
+   /* Every seed row must render, and fit the 128-byte budget the prompt uses. */
+   for (int i = 0; i < rel_types_seed_count(); i++)
+   {
+      int n = rel_types_describe(rel_types_seed_at(i), buf, sizeof(buf));
+      assert(n > 0 && n < (int)sizeof(buf));
+   }
+
+   assert(strcmp(rel_types_kind_word(NODE_IP), "ip") == 0);
+   assert(strcmp(rel_types_kind_word(NODE_SCALAR), "value") == 0);
+   assert(strcmp(rel_types_kind_word(NODE_OTHER), "any") == 0);
+   printf("  PASS: test_describe\n");
+}
+
 static void test_functional_classification(void)
 {
    /* Single-valued: a new object supersedes the prior (commit-time §4 correction). */
@@ -113,6 +153,7 @@ int main(void)
    test_normalize();
    test_seed_lookup_case_insensitive();
    test_kind_allowed();
+   test_describe();
    test_functional_classification();
    test_enum_text();
    test_governance_rel_types();

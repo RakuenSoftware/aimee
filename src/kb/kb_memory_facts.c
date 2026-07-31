@@ -68,7 +68,12 @@
  * in lockstep with the write gate — no second copy of the relation list. */
 static void mf_build_system_prompt(char *buf, size_t cap)
 {
-   char rels[768];
+   /* Each entry is "name (head->tail)" rather than a bare name. The seed
+    * ontology already carries the type signature; withholding it made the model
+    * guess our naming convention, and a reasonable guess like has_ip for
+    * device_has_ip is staged as a provisional rel_type on a Class-C edge rather
+    * than committing the validated Class-B edge. Sized for the descriptors. */
+   char rels[1536];
    size_t p = 0;
    int n = rel_types_seed_count();
    for (int i = 0; i < n && p < sizeof(rels) - 1; i++)
@@ -76,10 +81,14 @@ static void mf_build_system_prompt(char *buf, size_t cap)
       const rel_type_def_t *d = rel_types_seed_at(i);
       if (!d || !d->rel_type || !d->rel_type[0])
          continue;
-      p += (size_t)snprintf(rels + p, sizeof(rels) - p, "%s%s", p ? ", " : "", d->rel_type);
+      char desc[128];
+      rel_types_describe(d, desc, sizeof(desc));
+      p += (size_t)snprintf(rels + p, sizeof(rels) - p, "%s%s", p ? ", " : "", desc);
    }
    if (!p) /* defensive: an empty seed would leave the model unconstrained */
-      snprintf(rels, sizeof(rels), "works_for, has_role, lives_in, born_in");
+      snprintf(rels, sizeof(rels),
+               "works_for (person->org), has_role (person->value), "
+               "lives_in (person->place), born_in (person->place)");
    snprintf(buf, cap, MF_SYSTEM_PROMPT_TMPL, rels);
 }
 
@@ -333,7 +342,8 @@ static int mf_process_one(const config_t *cfg, const mf_job_t *job)
    if (!request_json)
       return -1;
 
-   char sys_prompt[2560];
+   /* Grown with the relation list: the descriptors carry type signatures now. */
+   char sys_prompt[4096];
    mf_build_system_prompt(sys_prompt, sizeof(sys_prompt));
 
    /* The job row and source memory are already copied locally. Release the

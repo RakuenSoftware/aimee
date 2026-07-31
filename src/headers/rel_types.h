@@ -92,6 +92,20 @@ extern "C"
     * `def`? NODE_OTHER in the def's list is the ANY wildcard. */
    int rel_type_kind_allowed(const rel_type_def_t *def, int is_head, memory_node_kind_t kind);
 
+   /* Short lowercase word for an entity kind, for prompts and operator output
+    * ("person", "org", "device", "ip", "value", "any"). Never NULL. */
+   const char *rel_types_kind_word(memory_node_kind_t kind);
+
+   /* Render one seed relation as "name (head->tail)", e.g.
+    * "device_has_ip (device->ip)". Extraction prompts previously sent only the
+    * bare name, so a model had to guess our naming convention from the word
+    * alone and reasonably produced synonyms like has_ip — which the gate then
+    * staged as a provisional rel_type on a Class-C edge instead of committing
+    * the validated Class-B edge device_has_ip would have produced. The type
+    * signature is already in the ontology; showing it costs a few tokens and
+    * removes the guess. Returns the number of bytes written (excluding NUL). */
+   int rel_types_describe(const rel_type_def_t *def, char *out, size_t out_len);
+
    /* Is `rel_type` single-valued (functional)? A functional relation's new object
     * contradicts any prior object for the same subject, so the commit path applies
     * the relation's correction_behavior (supersede/hard-delete/reject-if-immutable).
